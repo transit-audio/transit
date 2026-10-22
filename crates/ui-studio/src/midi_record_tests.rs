@@ -509,3 +509,30 @@ fn record_pressed_while_cycling_from_the_loop_start_loop_records_in_passes() {
     app.begin_pass(Vec::new());
     assert_eq!(app.take_plan.as_ref().and_then(|p| p.pass), None, "mid-lap the wrapped path cuts the laps from the latch");
 }
+
+#[test]
+fn record_with_cycle_on_keeps_recording_across_the_loop_end_with_loop_record_off() {
+    let engine = Engine::default();
+    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let mut app = StudioApp::new(engine, Some(player), Services::default());
+    let t = TrackId(app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
+    app.run("mix.record_arm", json!({"tracks": [t.0], "value": true})).unwrap();
+    let edit = &mut app.engine.session_mut().edit;
+    edit.loop_playback = true;
+    edit.loop_record = false;
+    edit.loop_range = soundcraft_time::Range::new(4 * BEAT, 6 * BEAT);
+    app.start_recording();
+    let plan = app.take_plan.as_ref().expect("a pass is planned");
+    assert_eq!((plan.pass, plan.punch), (Some(2 * BEAT), None), "the cycle is the pass, not a punch that ends at the loop end");
+    assert_eq!(app.record_start, 4 * BEAT);
+    // The playhead reaches the loop end, wraps, and a lap later is inside the second lap.
+    for at in [5 * BEAT, 6 * BEAT - 1, 4 * BEAT + 100, 5 * BEAT] {
+        app.engine.transport.position = at;
+        app.update_midi_live();
+        app.handle_transport(0.016);
+        assert!(app.recording_active(), "still recording at {at}");
+        assert!(app.take_plan.is_some());
+    }
+    app.stop_play();
+    assert!(!app.recording_active());
+}

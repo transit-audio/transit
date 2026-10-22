@@ -83,8 +83,8 @@ impl StudioApp {
 
     /// Adapted from `SoundApp::start_recording`: without Cycle, recording starts at the cursor
     /// (with pre-roll when it is on) and runs until Stop; it does not punch into the selection,
-    /// which in this UI is usually a clicked clip. With Cycle and Loop Record, it loop-records
-    /// the selection as SoundCraft does.
+    /// which in this UI is usually a clicked clip. With Cycle on, it loop-records
+    /// the cycle range, one take per lap, until Stop.
     pub(crate) fn start_recording(&mut self) {
         let armed = self.engine.session().tracks.iter().any(|t| t.mixer.record_arm);
         if !armed {
@@ -133,19 +133,14 @@ impl StudioApp {
         let e = self.engine.session().edit.clone();
         let sel = e.cycle_range();
         let cycle = e.loop_playback && !sel.is_empty();
-        if cycle && e.loop_record {
+        if cycle {
+            // Cycle on: Record loops the cycle range and keeps recording lap after lap until Stop,
+            // each lap its own take (Cubase, Live). Punching out at the loop end, which Cycle without
+            // Loop Record used to do, stopped the recording at the first wrap.
             self.record_start = sel.start;
             self.punch = None;
             let count_in = self.count_in_for(sel.start);
             self.plan_recording(takes, Some(sel.len()), Some((sel.start, None, Some(sel))), count_in);
-        } else if cycle {
-            // Slice 6: punch. With Cycle on (and Loop Record off), record just the cycle range:
-            // play from the pre-roll before it and stop at its end; a count-in clicks first.
-            let lead = self.lead_in(sel.start);
-            self.record_start = (sel.start - lead).max(0);
-            self.punch = Some(sel);
-            let count_in = self.count_in_for(self.record_start);
-            self.plan_recording(takes, None, Some((self.record_start, Some(sel.end), None)), count_in);
         } else {
             let at = self.cursor();
             let from = (at - self.lead_in(at)).max(0);
