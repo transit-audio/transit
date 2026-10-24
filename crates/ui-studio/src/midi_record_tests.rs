@@ -511,27 +511,62 @@ fn record_pressed_while_cycling_from_the_loop_start_loop_records_in_passes() {
 }
 
 #[test]
-fn record_with_cycle_on_keeps_recording_across_the_loop_end_with_loop_record_off() {
+fn record_with_cycle_on_loops_and_stacks_a_take_per_lap_until_stop() {
+    let (mut app, t) = app();
+    let edit = &mut app.engine.session_mut().edit;
+    edit.loop_playback = true;
+    edit.loop_range = soundcraft_time::Range::new(4 * BEAT, 6 * BEAT);
+    app.engine.transport.position = 4 * BEAT;
+    app.begin_pass(Vec::new());
+    app.engine.transport.playing = true;
+    let plan = app.take_plan.as_ref().expect("a pass is planned");
+    assert_eq!((plan.pass, plan.punch), (Some(2 * BEAT), None), "the cycle is the pass, not a punch that ends at the loop end");
+    assert_eq!(app.record_start, 4 * BEAT);
+    // The playhead reaches the loop end, wraps twice, and is a beat into the third lap.
+    for at in [5 * BEAT, 6 * BEAT - 1, 4 * BEAT + 100, 5 * BEAT, 6 * BEAT - 1, 4 * BEAT + 100, 5 * BEAT] {
+        app.engine.transport.position = at;
+        app.update_midi_live();
+        app.handle_transport(0.016);
+        assert!(app.recording_active(), "still recording at {at}");
+        assert!(app.take_plan.is_some());
+    }
+    // One note in each of the three laps.
+    let lap = 2 * BEAT as u64;
+    let mut events = Vec::new();
+    for n in 0..3u64 {
+        events.push(on(LATCH + n * lap + 1_000, t, 60 + n as u8));
+        events.push(off(LATCH + n * lap + 2_000, t, 60 + n as u8));
+    }
+    app.finished_test_midi = Some(pass(t, Some(4 * BEAT), events));
+    app.stop_play();
+    assert!(!app.recording_active(), "Stop ends the pass");
+    let tr = app.engine.session().track(t).unwrap().clone();
+    assert_eq!(tr.playlists.len(), 3, "three laps, three takes");
+    for p in &tr.playlists {
+        assert_eq!(p.clips.len(), 1);
+        assert_eq!((p.clips[0].start, p.clips[0].length), (4 * BEAT, 2 * BEAT), "each take spans one lap");
+    }
+    assert_eq!(app.status, "Recorded 3 takes (3 notes) on MIDI 1", "{}", app.status);
+}
+
+#[test]
+fn record_with_cycle_off_is_one_open_ended_pass_until_stop() {
     let engine = Engine::default();
     let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
     let mut app = StudioApp::new(engine, Some(player), Services::default());
     let t = TrackId(app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
     app.run("mix.record_arm", json!({"tracks": [t.0], "value": true})).unwrap();
     let edit = &mut app.engine.session_mut().edit;
-    edit.loop_playback = true;
-    edit.loop_record = false;
+    edit.loop_playback = false;
     edit.loop_range = soundcraft_time::Range::new(4 * BEAT, 6 * BEAT);
     app.start_recording();
     let plan = app.take_plan.as_ref().expect("a pass is planned");
-    assert_eq!((plan.pass, plan.punch), (Some(2 * BEAT), None), "the cycle is the pass, not a punch that ends at the loop end");
-    assert_eq!(app.record_start, 4 * BEAT);
-    // The playhead reaches the loop end, wraps, and a lap later is inside the second lap.
-    for at in [5 * BEAT, 6 * BEAT - 1, 4 * BEAT + 100, 5 * BEAT] {
+    assert_eq!((plan.pass, plan.punch), (None, None), "no cycle: a single pass with no end of its own");
+    for at in [5 * BEAT, 6 * BEAT, 9 * BEAT] {
         app.engine.transport.position = at;
         app.update_midi_live();
         app.handle_transport(0.016);
         assert!(app.recording_active(), "still recording at {at}");
-        assert!(app.take_plan.is_some());
     }
     app.stop_play();
     assert!(!app.recording_active());

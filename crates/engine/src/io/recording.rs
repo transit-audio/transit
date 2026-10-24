@@ -276,6 +276,21 @@ mod record_tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    #[test]
+    fn three_laps_of_cycle_recording_are_three_audio_takes_each_one_lap_long() {
+        let dir = std::env::temp_dir().join(format!("soundcraft-cycle-take-{}", std::process::id()));
+        let path = dir.join("Audio Files/Gtr_01.wav");
+        write_take(&path, 1_200);
+        let mut e = Engine::default();
+        let gtr = armed(&mut e, "Gtr", "mono", "In 1");
+        assert_eq!(add_recording(&mut e, 1_000, vec![(gtr, path)], Some(400)).len(), 3);
+        let t = e.session().track(gtr).unwrap();
+        assert_eq!(t.playlists.len(), 3, "a take per lap, stacked");
+        let laps: Vec<_> = t.playlists.iter().flat_map(|p| p.clips.iter().map(|c| (c.source_offset(), c.start, c.length))).collect();
+        assert_eq!(laps, vec![(0, 1_000, 400), (400, 1_000, 400), (800, 1_000, 400)]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     fn over_a_clip(tag: &str) -> (Engine, TrackId, PathBuf, PathBuf) {
         let dir = std::env::temp_dir().join(format!("soundcraft-newtake-{tag}-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
