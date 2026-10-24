@@ -286,6 +286,17 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         .on_hover_text(crate::update::PRIVACY)
                         .on_disabled_hover_text(why.unwrap_or_default());
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Check for New Versions on Launch".into(), String::new(), b.rect));
+                    let logging = app.services.log.is_some();
+                    let mut on = app.services.log.as_ref().is_some_and(|l| l.debug());
+                    let b = ui
+                        .add_enabled(logging, egui::Checkbox::new(&mut on, "Debug Logging"))
+                        .on_hover_text("Log more detail to the log file for the rest of this session.")
+                        .on_disabled_hover_text("This build has no log control.");
+                    app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Debug Logging".into(), String::new(), b.rect));
+                    if b.changed() {
+                        let _ = app.run("help.debug_logging", json!({"on": on}));
+                        ui.close();
+                    }
                     ui.separator();
                     let b = ui.button("About transit…");
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "About transit…".into(), String::new(), b.rect));

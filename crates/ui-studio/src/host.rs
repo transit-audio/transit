@@ -1434,6 +1434,7 @@ impl StudioApp {
             }
             self.engine.transport.playing = playing;
             self.engine.transport.position = p.position();
+            crate::debug_log::track_run_counts(&mut self.run_counts, p, playing);
             let now = self.last_frame.unwrap_or_default();
             if now - self.last_meter_poll >= 1.0 / 20.0 {
                 self.player_requests.result(&mut self.status, p.copy_meters(&mut self.meter_snapshot));

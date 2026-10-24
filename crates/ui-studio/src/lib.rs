@@ -17,6 +17,7 @@ mod automation_picker;
 pub mod browser;
 pub mod builtin_editor;
 pub mod control;
+pub mod debug_log;
 pub mod devices;
 mod external_instrument;
 pub mod fades;
@@ -214,6 +215,8 @@ pub struct Services {
     pub update_check: Option<update::UpdateCheck>,
     /// The check is off because `TRANSIT_NO_UPDATE_CHECK` is set (says why in the Help menu).
     pub update_off_by_env: bool,
+    /// The app's logger, for Help > Debug Logging (`help.debug_logging`); `None`: no such control.
+    pub log: Option<Box<dyn debug_log::LogControl>>,
 }
 
 /// Ballistic meter display state (copied from `soundcraft-ui-egui`, see [`host::feed_meter`]).
@@ -377,6 +380,8 @@ pub struct StudioApp {
     pub about: about::AboutState,
     /// The new-version notice and the check behind it.
     pub update: update::UpdateState,
+    /// The overload counters when the transport last started (see [`debug_log::stop_line`]).
+    run_counts: Option<debug_log::RunCounts>,
     /// The launch splash (shown while plug-ins scan or the first device opens).
     pub splash: splash::SplashState,
     /// The output-callback telemetry readout and its window (polled a few times a second).
@@ -471,6 +476,7 @@ impl StudioApp {
             shortcuts_window: menus::ShortcutsLayout::default(),
             about: about::AboutState::default(),
             update: update::UpdateState::default(),
+            run_counts: None,
             splash: splash::SplashState::default(),
             telemetry: telemetry::TelemetryState::default(),
             finish: finish::FinishState::default(),
@@ -555,6 +561,9 @@ impl StudioApp {
         if id == "help.check_updates" {
             self.check_for_updates_now()?;
             return Ok(json!({"checking": true}));
+        }
+        if id == "help.debug_logging" {
+            return self.set_debug_logging(params.get("on").and_then(Value::as_bool));
         }
         if id == "io.measure_hardware_latency" {
             return self.measure_hardware_latency(&params);
