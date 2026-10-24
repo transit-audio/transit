@@ -41,8 +41,13 @@ For each block about to render, the audio thread takes the block's first render 
 through the converter phase to an output-device frame (`Phase::lead`), and maps that frame to host
 time H through the device clock map (`ClockMap::frame_to_host`, ADR 0017). While no map is valid,
 it falls back to the host time at callback entry plus the frames between, which is early by the
-device's output latency. Each event gets `H(block) + offset_in_block × ns_per_session_sample` at
-the current speed. The output thread sends it at `H + destination offset`.
+device's output latency. The mix holds every software path back by its delay compensation A
+(the plan's device latency: Main's arrival plus the master inserts, `MixEngine::latency`), so
+`H(block)` also adds `A × ns_per_session_sample`: external MIDI for a sample goes out when the mix
+plays that sample, and a synth heard outside the plan stays with the delayed mix (ADR 0020
+decision 2; before, a MIDI-out track was early by A whenever a plug-in added latency). Each event
+gets `H(block) + offset_in_block × ns_per_session_sample` at the current speed. The output thread
+sends it at `H + destination offset`.
 
 - The audio is rendered ahead of presentation, so events usually arrive at the output thread
   before their instant. A negative offset larger than that lead cannot be honored: the event is
@@ -86,6 +91,39 @@ the current speed. The output thread sends it at `H + destination offset`.
 - **Exit**: dropping the Player stops the thread, which releases everything on every open port; the
   drop waits up to 500 ms for that and never joins a stuck driver.
 
+## External Instrument (ADR 0020)
+
+An instrument track's instrument slot can hold an External Instrument (`external.instrument`,
+`Insert::external`): a hardware synth played over MIDI, its audio returned on an input path. The
+MIDI side is this page's destination, unchanged: `Track::midi_output` holds the port and channel,
+and every safety rule above applies. The device holds the return path, a gain on the return and
+the latency `manual_ms` (slice 1: set by hand on the card; Measure and a per-machine table come in
+slice 2).
+
+- **One timing knob.** While the device is on the track, the destination offset is held at 0:
+  `instrument.external` writes 0, `midi.output` refuses a nonzero offset there, and playback reads
+  `Track::midi_out_offset_ms` (0 on such a track) even from a hand-edited file. The Out button's
+  offset row reads "Latency is set on the External Instrument".
+- **Compensation, not early sends.** Notes go out at the stamp above. The strip reads the return
+  from the live input and reports C = round(manual_ms × r / 1000) frames at its head, where a
+  latent instrument's latency counts, so delay compensation aligns the return at Main like a
+  hardware insert's round trip (`crates/mix/src/external.rs`). C is part of A, so the rest of the
+  mix (and every bare MIDI-out track) waits for the synth.
+- **Missing states.** No audio device, no live input (not duplex), a return path this interface
+  does not have, no port chosen, or a port the output thread reports missing or failed: the strip
+  is silent and reports 0, so compensation does not move. The Player follows the port's state
+  (`Player::service`, `follow_external_ports`) and prepares a new plan when it changes. The card
+  says which: "No audio device", "MODEL D missing: notes are not sent", "Return In 1 is not on
+  this interface", "Needs a duplex device", "Not measured: notes sound late by the round trip",
+  else "Manual: 19.5 ms".
+- **Renders.** The synth only sounds in real time. An offline bounce, stems or bounce by path
+  with an unfrozen External Instrument is refused unless the caller passes `without_external`
+  (the studio's Bounce dialog asks: "Render without it" or Cancel; the status names the tracks
+  left out). Freeze, flatten and bounce in place of the device track itself are refused until
+  real-time render lands (slice 3).
+- **Live playing.** Echo goes out at once; the return is monitored through the strip with no
+  added delay, transport running or not.
+
 ## Persistence
 
 Saved by port name and id. A session opened where the port is absent shows "device missing" on
@@ -103,3 +141,8 @@ identity, Stop, wrap, destination change, loss and reconnect, missing at load, e
 `crates/playback/src/player/device/external_tests.rs` (through the Player: a looped clip to the
 port, no allocation in the callback, live echo without an instrument), `crates/mix/src/external_midi.rs`,
 `crates/engine/tests/midi_output.rs`, `crates/model/src/midi_output.rs`, `crates/ui-studio/src/midi_output.rs`.
+External Instrument: `crates/mix/tests/external_instrument.rs` (alignment at Main, bit exact; the
+missing states), `crates/mix/src/external.rs`, `crates/playback/src/player/audio/tests.rs`
+(`external_midi_stamps_move_with_the_mixs_delay_compensation`, fake clock), the missing-port test
+in `crates/playback/src/player/device/external_tests.rs`, `crates/engine/src/cmd/external_instrument.rs`,
+`crates/ui-studio/src/external_instrument.rs`.
