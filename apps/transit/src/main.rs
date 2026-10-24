@@ -344,6 +344,20 @@ fn app_icon() -> egui::IconData {
     })
 }
 
+/// Windows: winit sets only the small icon from `with_icon` and its window class has none, so the
+/// taskbar's big icon depended on a shell lookup that sometimes came up empty (#50). Set both
+/// slots from the icon resource embedded in the exe (`build.rs`). Nothing elsewhere.
+#[cfg(windows)]
+fn apply_exe_icons(cc: &eframe::CreationContext<'_>) {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    if let Ok(handle) = cc.window_handle()
+        && let RawWindowHandle::Win32(h) = handle.as_raw()
+        && !transit_rt::set_window_icons_from_exe(h.hwnd.get())
+    {
+        log::warn!("window icon: the exe has no icon resource; the PNG icon applies to the title bar only");
+    }
+}
+
 fn main() -> eframe::Result {
     // A plugin scan's child process: load one file, answer, exit. First, before anything else
     // (E1/E2: otherwise every scan child starts a whole app).
@@ -451,6 +465,9 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             // The device opens on the frame after the splash first says so (`splash::advance_open`).
+            // The window exists: give it (and, by class, the Mix window) the exe's icon in both slots.
+            #[cfg(windows)]
+            apply_exe_icons(cc);
             let mut app = StudioApp::new(engine, None, services(logger));
             if !no_audio {
                 app.splash.defer_open(prefs.audio.clone());
@@ -482,6 +499,18 @@ fn main() -> eframe::Result {
 #[cfg(test)]
 mod tests {
     use super::{APP_USER_MODEL_ID, app_icon, sane_window_size};
+
+    #[test]
+    fn embedded_ico_holds_the_expected_sizes() {
+        let ico: &[u8] = include_bytes!("../../../assets/app-icon/transit.ico");
+        let count = usize::from(u16::from_le_bytes([ico[4], ico[5]]));
+        assert_eq!(&ico[..4], &[0, 0, 1, 0], "not an icon file");
+        let sizes: Vec<u8> = (0..count).map(|i| ico[6 + 16 * i]).collect();
+        // 0 means 256. The shell needs 16/32/48 and a large one for the taskbar at high DPI.
+        for want in [16u8, 32, 48, 0] {
+            assert!(sizes.contains(&want), "missing {want} in {sizes:?}");
+        }
+    }
 
     #[test]
     fn app_icon_decodes_to_a_square_rgba_image() {

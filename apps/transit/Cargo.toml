@@ -41,6 +41,10 @@ rfd.workspace = true
 ureq = { workspace = true, optional = true }
 semver = { workspace = true, optional = true }
 
+# The window handle eframe hands the creation closure, to set the taskbar icon (#50). Already in the tree.
+[target.'cfg(windows)'.dependencies]
+raw-window-handle = "0.6"
+
 [build-dependencies]
 # Icon + VERSIONINFO for transit.exe; build.rs only uses it when the target is Windows.
 winresource = "0.1"

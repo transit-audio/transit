@@ -39,7 +39,7 @@ pub mod gui_thread;
 pub mod editor_window;
 
 mod shell;
-pub use shell::set_app_user_model_id;
+pub use shell::{set_app_user_model_id, set_window_icons_from_exe};
 
 /// Test support: counts OS promotion attempts and heap allocations ([`testing::CountingAlloc`]).
 /// Not in release builds (feature `testing`).

@@ -4606,6 +4606,7 @@ dependencies = [
  "eframe",
  "egui",
  "log",
+ "raw-window-handle",
  "rfd",
  "semver",
  "serde_json",
