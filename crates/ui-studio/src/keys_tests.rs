@@ -126,6 +126,70 @@ fn mid(r: [f32; 4]) -> (f32, f32) {
 }
 
 #[test]
+fn quantize_preview_cancel_apply_and_undo_preserve_unselected_notes() {
+    let mut t = T::open();
+    t.add(60, 100, 220);
+    t.add(64, 600, 190);
+    t.app.keys.selection = vec![t.notes()[0]];
+    t.app.ui.keys.quantize.strength = 50;
+    t.app.ui.keys.quantize.ends = true;
+    let before = t.notes();
+    let undo = t.undo_len();
+    t.click(mid(t.app.keys.layout.quantize));
+    assert!(t.app.keys.quantize_open);
+    assert_eq!(t.notes(), before, "opening preview never edits the document");
+    assert_eq!(t.undo_len(), undo);
+    let expected = Note { start: 50, length: 230, ..before[0] };
+    assert_eq!(t.app.keys.layout.quantize_preview, vec![expected]);
+    t.click(mid(t.app.keys.layout.quantize_cancel));
+    assert!(!t.app.keys.quantize_open);
+    assert_eq!(t.notes(), before);
+    assert_eq!(t.undo_len(), undo);
+    t.click(mid(t.app.keys.layout.quantize));
+    t.click(mid(t.app.keys.layout.quantize_apply));
+    assert_eq!(t.notes(), vec![expected, before[1]]);
+    assert_eq!(t.app.keys.selection, vec![expected]);
+    assert_eq!(t.undo_len(), undo + 1);
+    t.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(t.notes(), before);
+}
+
+#[test]
+fn quantize_preview_swing_and_zero_strength_match_apply_and_saved_preferences() {
+    let mut t = T::open();
+    t.add(60, 480, 120);
+    t.add(64, 960, 120);
+    t.app.keys.selection = vec![t.notes()[0]];
+    t.app.ui.keys.quantize.swing = 100;
+    t.click(mid(t.app.keys.layout.quantize));
+    t.app.ui.keys.quantize.grid_ticks = 480;
+    t.frames(2);
+    let before = t.notes();
+    assert_eq!(t.app.keys.layout.quantize_preview, vec![Note { start: 640, ..before[0] }]);
+    t.app.ui.keys.quantize.strength = 0;
+    t.frames(2);
+    assert_eq!(t.app.keys.layout.quantize_preview, vec![before[0]]);
+    let undo = t.undo_len();
+    t.click(mid(t.app.keys.layout.quantize_apply));
+    assert_eq!(t.notes(), before);
+    assert_eq!(t.undo_len(), undo);
+    t.app.ui.keys.quantize.strength = 100;
+    t.click(mid(t.app.keys.layout.quantize));
+    t.app.ui.keys.quantize.grid_ticks = 480;
+    t.frames(2);
+    t.click(mid(t.app.keys.layout.quantize_apply));
+    assert_eq!(t.notes(), vec![Note { start: 640, ..before[0] }, before[1]]);
+    let saved = serde_json::to_value(&t.app.ui.keys).unwrap();
+    let restored: crate::keys::KeysPrefs = serde_json::from_value(saved).unwrap();
+    assert_eq!(restored.quantize.swing, 100);
+    assert_eq!(restored.quantize.grid_ticks, 480);
+    let legacy: crate::keys::KeysPrefs = serde_json::from_value(json!({})).unwrap();
+    assert_eq!(legacy.quantize.strength, 100);
+    assert_eq!(legacy.quantize.swing, 0);
+    assert!(!legacy.quantize.ends);
+}
+
+#[test]
 fn pitch_menu_transposes_only_selected_notes_and_undoes_once() {
     let mut t = T::open();
     t.add(60, 0, 240);
@@ -478,6 +542,7 @@ fn ctrl_d_arrows_ctrl_up_and_ctrl_u_edit_the_selection() {
     t.frames(2);
     t.key("A", json!({"cmd": true}));
     t.click(mid(t.app.keys.layout.quantize));
+    t.click(mid(t.app.keys.layout.quantize_apply));
     assert_eq!(t.app.engine.undo_history().last().map(String::as_str), Some("Quantize..."));
     assert!(t.notes().iter().all(|n| n.start % 240 == 0), "{:?}", t.notes());
 }

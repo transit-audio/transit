@@ -12,6 +12,8 @@
 //! [`crate::UiState`] and [`KeysState`] here, never the document.
 
 mod pitch;
+mod quantize;
+pub use quantize::QuantizePrefs;
 mod step;
 pub use step::StepState;
 
@@ -142,6 +144,7 @@ pub struct KeysPrefs {
     pub step_bindings: soundcraft_engine::step_input::StepBindings,
     /// Key/scale used by the explicit constrain operation, never a live-input filter.
     pub key_scale: soundcraft_midi::scale::KeyScale,
+    pub quantize: QuantizePrefs,
     /// Explicit velocity for new notes and audition; note edits never change it.
     #[serde(deserialize_with = "read_velocity")]
     pub velocity: u8,
@@ -166,6 +169,7 @@ impl Default for KeysPrefs {
             step_hold: soundcraft_engine::step_input::HoldPrefs::default(),
             step_bindings: soundcraft_engine::step_input::StepBindings::default(),
             key_scale: soundcraft_midi::scale::KeyScale::default(),
+            quantize: QuantizePrefs::default(),
             velocity: 100,
         }
     }
@@ -247,6 +251,9 @@ pub struct KeysLayout {
     pub snap: R4,
     pub snap_menu: Vec<MenuItem>,
     pub quantize: R4,
+    pub quantize_apply: R4,
+    pub quantize_cancel: R4,
+    pub quantize_preview: Vec<Note>,
     pub pitch: R4,
     pub pitch_menu: Vec<MenuItem>,
     pub audition: R4,
@@ -293,6 +300,7 @@ pub struct KeysLayout {
 
 #[derive(Debug)]
 pub struct KeysState {
+    pub quantize_open: bool,
     /// The clip being edited.
     pub clip: Option<ClipId>,
     /// Selected notes, by value (indices shift after every edit).
@@ -328,6 +336,7 @@ pub struct KeysState {
 impl Default for KeysState {
     fn default() -> Self {
         KeysState {
+            quantize_open: false,
             clip: None,
             selection: Vec::new(),
             gesture: None,
@@ -458,6 +467,7 @@ impl StudioApp {
             return false;
         }
         if self.keys.clip != Some(clip) {
+            self.keys.quantize_open = false;
             self.keys.selection.clear();
             self.keys.fit = true;
             self.keys.step = StepState::default();
@@ -630,29 +640,9 @@ impl StudioApp {
         Ok(())
     }
 
-    /// Quantize the selection to the grid (all notes when none or all are selected:
-    /// `event.quantize`; otherwise the same operation note by note, see leak L23).
+    /// Quick apply with saved strength/swing to the current piano-roll grid.
     pub fn keys_quantize(&mut self) -> Result<(), String> {
-        let Some(clip) = self.keys.clip else { return Err("no clip".into()) };
-        let notes = self.keys_notes();
-        let g = self.keys_step();
-        let opts = soundcraft_midi::ops::QuantizeOptions { grid_ticks: g, ..Default::default() };
-        let sel = self.keys.selection.clone();
-        let whole = sel.is_empty() || resolve(&notes, &sel).len() == notes.len();
-        if whole {
-            let key = self.keys_merge_key();
-            self.ensure_clip_selected(clip);
-            self.keys_exec("event.quantize", json!({"clips": [clip.0], "grid": g}), &key)?;
-            if !sel.is_empty() {
-                self.keys.selection = self.keys_notes();
-            }
-            return Ok(());
-        }
-        let mut q = sel.clone();
-        soundcraft_midi::ops::quantize(&mut q, &opts);
-        let pairs: Vec<(Note, Note)> = sel.into_iter().zip(q).collect();
-        self.keys.selection = self.keys_edit(&pairs)?;
-        Ok(())
+        self.keys_apply_quantize(self.keys_step())
     }
 
     /// Ctrl+Up/Down: transpose the selection (all notes when none or all are selected:
@@ -813,6 +803,7 @@ pub fn pane(app: &mut StudioApp, ui: &mut Ui) -> bool {
     let blurred = ui.input(|i| i.viewport().focused == Some(false));
     app.release_auditions(if blurred { f64::INFINITY } else { now }, down && !blurred);
     if !app.keys_shown() {
+        app.keys.quantize_open = false;
         // Hidden by a tab switch or a closed pane: let go of everything.
         app.release_auditions(f64::INFINITY, false);
         app.keys.layout = KeysLayout { auditions: app.keys.auditions, last_audition: app.keys.last_audition, ..KeysLayout::default() };
@@ -823,6 +814,7 @@ pub fn pane(app: &mut StudioApp, ui: &mut Ui) -> bool {
     let max_h = (ui.ctx().content_rect().height() - 200.0).max(MIN_H);
     let h = app.ui.keys.height.clamp(MIN_H, max_h);
     egui::Panel::bottom("keys").exact_size(h).frame(egui::Frame::NONE.fill(TOKENS.panel)).show(ui, |ui| editor(app, ui));
+    quantize::window(app, ui.ctx());
     // A pending note-off needs a frame to happen on, even with the mouse still; held MIDI keys repaint at ~60 Hz.
     if !app.keys.held.is_empty() {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
@@ -897,6 +889,13 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     paint_grid(ui, &s, &map, grid, ruler, &cv);
     let preview = preview(app, ui, &map, vel, &cv.notes);
     paint_notes(app, ui, &map, grid, vel, &cv.notes, cv.len, preview.as_ref(), &mut layout);
+    if app.keys.quantize_open {
+        layout.quantize_preview = app.keys_quantize_preview();
+        let painter = ui.painter().with_clip_rect(grid);
+        for note in &layout.quantize_preview {
+            painter.rect_stroke(map.note_rect(note), crate::theme::RADIUS_SM, Stroke::new(2.0, TOKENS.accent), StrokeKind::Inside);
+        }
+    }
     if let Some(chord) = app.step_preview() {
         let length = app.step_len().saturating_mul(i64::from(chord.units));
         let painter = ui.painter().with_clip_rect(grid);
@@ -1201,10 +1200,11 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
     p.text(b.center(), Align2::CENTER_CENTER, "Quantize", small.clone(), TOKENS.text);
     layout.quantize = r4(b);
     if resp
-        .on_hover_text(format!("Quantize the selection to the grid ({})", crate::shortcuts::label(crate::shortcuts::Action::NotesQuantize)))
+        .on_hover_text(format!("Preview strength and swing; quick apply: {}", crate::shortcuts::label(crate::shortcuts::Action::NotesQuantize)))
         .clicked()
     {
-        let _ = app.keys_quantize();
+        app.ui.keys.quantize.grid_ticks = app.keys_step();
+        app.keys.quantize_open = true;
     }
     let (b, resp) = button(ui, 54.0, "pitch");
     let p = ui.painter();
