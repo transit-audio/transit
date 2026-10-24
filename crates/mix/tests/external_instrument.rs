@@ -74,9 +74,17 @@ struct Rendered {
     latency: usize,
 }
 
+/// How many frames after P(R(S)) an External Instrument track's note for S is sent: 0 (ADR 0020
+/// decision 2: no delay compensation on the device's own send). This crate cannot see the
+/// playback stamp, so the stamp itself is chained to a plan like this one in
+/// `soundcraft-playback` (`audio::external::tests::the_stamped_send_plus_the_round_trip_lands_on_the_click_at_main`),
+/// which feeds the return from the frame the real stamp names.
+const SEND: usize = 0;
+
 /// Renders `s` from frame 0. With `duplex`, input 1 carries the synth's onset (0.5) at render frame
-/// `AT + C`: the note at session sample `AT` is rendered at frame `AT` and comes back `C` later.
-/// `no_port` names tracks whose MIDI port the playback layer reports missing.
+/// `AT + SEND + C`: the note at session sample `AT` is rendered at frame `AT`, sent `SEND` later, and
+/// comes back `C` after the send. `no_port` names tracks whose MIDI port the playback layer reports
+/// missing.
 fn render(s: &Session, duplex: bool, no_port: &[TrackId]) -> Rendered {
     let io = io();
     MixEngine::force_serial(true);
@@ -96,7 +104,7 @@ fn render(s: &Session, duplex: bool, no_port: &[TrackId]) -> Rendered {
     let (mut main, mut pos, mut latency) = (Vec::new(), 0usize, 0usize);
     while main.len() < LEN + 2 * C {
         mix.input = if duplex {
-            (0..usize::from(io.inputs)).map(|c| (0..BLOCK).map(|i| if c == 0 && pos + i == AT + C { 0.5 } else { 0.0 }).collect()).collect()
+            (0..usize::from(io.inputs)).map(|c| (0..BLOCK).map(|i| if c == 0 && pos + i == AT + SEND + C { 0.5 } else { 0.0 }).collect()).collect()
         } else {
             Vec::new()
         };

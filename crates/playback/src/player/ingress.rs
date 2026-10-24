@@ -458,6 +458,7 @@ impl Pump {
                         at_ns: raw.host_arrival_ns,
                         bytes: raw.bytes,
                         len: raw.len,
+                        delay_ns: 0,
                     });
                 }
                 let release = raw.is_release();

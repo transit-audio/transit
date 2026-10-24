@@ -989,33 +989,30 @@ impl Player {
         }
         let report = owner.service();
         #[cfg(not(target_arch = "wasm32"))]
-        if let Some(midi) = &mut *self.midi.try_borrow_mut().map_err(|_| PlayerError::Busy)? {
-            midi.service(&mut owner, self.epoch);
-            self.follow_external_ports(&mut owner, midi);
+        {
+            let mut midi = self.midi.try_borrow_mut().map_err(|_| PlayerError::Busy)?;
+            let status = midi.as_mut().map(|midi| {
+                midi.service(&mut owner, self.epoch);
+                midi.output_status()
+            });
+            drop(midi);
+            self.follow_external_ports(&mut owner, status.as_ref());
         }
         Ok(report)
     }
 
-    /// An External Instrument whose MIDI port is missing (unplugged, or held by another program)
+    /// An External Instrument whose MIDI port is missing (unplugged), will not open (held by
+    /// another program), or cannot be reached because MIDI itself is unavailable (`status` None)
     /// plays silent with no latency, so delay compensation does not wait for a synth that cannot
     /// play (ADR 0020 decision 6). When the set of such tracks changes, the plan is prepared again.
-    /// A port the output thread has not looked at yet counts as present.
     #[cfg(not(target_arch = "wasm32"))]
-    fn follow_external_ports(&self, owner: &mut Owner, midi: &super::native::Native) {
-        use super::midi_out::DestinationState;
+    fn follow_external_ports(&self, owner: &mut Owner, status: Option<&super::midi_out::OutputStatus>) {
         let session = Arc::clone(owner.requested_session());
         let Ok(mut held) = self.external_off.try_borrow_mut() else { return };
         if held.is_empty() && !session.tracks.iter().any(|t| t.external_instrument().is_some()) {
             return;
         }
-        let status = midi.output_status();
-        let off: Vec<TrackId> = session
-            .tracks
-            .iter()
-            .filter(|t| t.external_instrument().is_some())
-            .filter(|t| matches!(status.track(t.id), Some(DestinationState::Missing | DestinationState::Failed(_))))
-            .map(|t| t.id)
-            .collect();
+        let off = external_unavailable(&session, status);
         if off != *held && owner.set_external_unavailable(Arc::from(off.clone())).is_ok() {
             *held = off;
         }
@@ -1637,6 +1634,22 @@ mod rate_tests {
     }
 }
 mod calibrate;
+
+/// The External Instrument tracks of `session` that cannot play: their MIDI port is Missing or
+/// Failed, or MIDI is unavailable (`status` None). A port the output thread has not looked at yet
+/// counts as present.
+#[cfg(not(target_arch = "wasm32"))]
+fn external_unavailable(session: &Session, status: Option<&super::midi_out::OutputStatus>) -> Vec<TrackId> {
+    use super::midi_out::DestinationState;
+    session
+        .tracks
+        .iter()
+        .filter(|t| t.external_instrument().is_some())
+        .filter(|t| status.is_none_or(|status| matches!(status.track(t.id), Some(DestinationState::Missing | DestinationState::Failed(_)))))
+        .map(|t| t.id)
+        .collect()
+}
+
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod external_tests;
 #[cfg(test)]

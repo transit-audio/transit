@@ -42,12 +42,23 @@ through the converter phase to an output-device frame (`Phase::lead`), and maps 
 time H through the device clock map (`ClockMap::frame_to_host`, ADR 0017). While no map is valid,
 it falls back to the host time at callback entry plus the frames between, which is early by the
 device's output latency. The mix holds every software path back by its delay compensation A
-(the plan's device latency: Main's arrival plus the master inserts, `MixEngine::latency`), so
-`H(block)` also adds `A × ns_per_session_sample`: external MIDI for a sample goes out when the mix
-plays that sample, and a synth heard outside the plan stays with the delayed mix (ADR 0020
-decision 2; before, a MIDI-out track was early by A whenever a plug-in added latency). Each event
-gets `H(block) + offset_in_block × ns_per_session_sample` at the current speed. The output thread
+(the plan's device latency: Main's arrival plus the master inserts, `MixEngine::latency`), so a
+bare MIDI-out track's `H(block)` also adds `A × ns_per_session_sample`: its MIDI for a sample goes
+out when the mix plays that sample, and a synth heard outside the plan stays with the delayed mix
+(ADR 0020 decision 2; before, a MIDI-out track was early by A whenever a plug-in added latency). A
+track that holds an External Instrument does not add A (`external::Block::host_for`): its return
+comes back through the plan, which compensates it. Each event gets
+`H(block) + offset_in_block × ns_per_session_sample` at the current speed. The output thread
 sends it at `H + destination offset`.
+
+- **Deadlines never go backwards per track.** A is read on every block, so it can drop while a
+  note sounds (a latent insert removed or bypassed, a manual latency lowered, another External
+  Instrument's port lost). A note-off stamped with the new A could then fall due before its
+  note-on stamped with the old one, and the synth would hold the note. The output thread clamps
+  each playback event's deadline to the latest one already queued for that track
+  (`Track::last`; equal deadlines keep arrival order), so for at most the drop in A events bunch
+  at the old instant instead. Stop, the panic and a destination change reset it; a wrap or locate
+  release sets it to the release instant.
 
 - The audio is rendered ahead of presentation, so events usually arrive at the output thread
   before their instant. A negative offset larger than that lead cannot be honored: the event is
@@ -71,8 +82,8 @@ sends it at `H + destination offset`.
 - **Stop** (the audio thread's transition, plus a direct panic from `Player::stop`): scheduled
   playback is dropped; every held note gets a note-off, held pedals go up, then Sustain off
   (CC 64 = 0) and All Notes Off (CC 123) on every channel the port was used on.
-- **Loop wrap and locate** (#47's rule): at the jump instant (plus each destination's offset) the
-  notes playback holds end; events scheduled at or after it are dropped (a locate discards its
+- **Loop wrap and locate** (#47's rule): at the jump instant (plus A on a bare MIDI-out
+  destination, as its notes carry it, plus each destination's offset) the notes playback holds end; events scheduled at or after it are dropped (a locate discards its
   rendered-ahead block); the new lap or position starts again every note that sounds across it
   (`chase`). The same chase runs at play start.
 - **Destination change** (port or channel, or back to internal): the track's held notes end on the
@@ -104,15 +115,19 @@ slice 2).
   `instrument.external` writes 0, `midi.output` refuses a nonzero offset there, and playback reads
   `Track::midi_out_offset_ms` (0 on such a track) even from a hand-edited file. The Out button's
   offset row reads "Latency is set on the External Instrument".
-- **Compensation, not early sends.** Notes go out at the stamp above. The strip reads the return
-  from the live input and reports C = round(manual_ms × r / 1000) frames at its head, where a
-  latent instrument's latency counts, so delay compensation aligns the return at Main like a
+- **Compensation, not early sends.** The device track's notes go out at P(R(S)), the stamp
+  above without A (ADR 0020 decision 2: offset 0, not early, not delayed). The strip reads the
+  return from the live input and reports C = round(manual_ms × r / 1000) frames at its head, where
+  a latent instrument's latency counts, so delay compensation aligns the return at Main like a
   hardware insert's round trip (`crates/mix/src/external.rs`). C is part of A, so the rest of the
-  mix (and every bare MIDI-out track) waits for the synth.
+  mix (and every bare MIDI-out track) waits for the synth. Were the device's notes delayed by A
+  too, the synth would land late by A and raising `manual_ms` would only delay the rest of the
+  mix.
 - **Missing states.** No audio device, no live input (not duplex), a return path this interface
-  does not have, no port chosen, or a port the output thread reports missing or failed: the strip
-  is silent and reports 0, so compensation does not move. The Player follows the port's state
-  (`Player::service`, `follow_external_ports`) and prepares a new plan when it changes. The card
+  does not have, no port chosen, a port the output thread reports missing or failed, or no MIDI
+  runtime at all: the strip is silent and reports 0, so compensation does not move. The Player
+  follows the port's state (`Player::service`, `follow_external_ports`) and prepares a new plan
+  when it changes. The card
   says which: "No audio device", "MODEL D missing: notes are not sent", "Return In 1 is not on
   this interface", "Needs a duplex device", "Not measured: notes sound late by the round trip",
   else "Manual: 19.5 ms".
@@ -142,7 +157,11 @@ identity, Stop, wrap, destination change, loss and reconnect, missing at load, e
 port, no allocation in the callback, live echo without an instrument), `crates/mix/src/external_midi.rs`,
 `crates/engine/tests/midi_output.rs`, `crates/model/src/midi_output.rs`, `crates/ui-studio/src/midi_output.rs`.
 External Instrument: `crates/mix/tests/external_instrument.rs` (alignment at Main, bit exact; the
-missing states), `crates/mix/src/external.rs`, `crates/playback/src/player/audio/tests.rs`
-(`external_midi_stamps_move_with_the_mixs_delay_compensation`, fake clock), the missing-port test
-in `crates/playback/src/player/device/external_tests.rs`, `crates/engine/src/cmd/external_instrument.rs`,
+missing states), `crates/mix/src/external.rs`, `crates/playback/src/player/audio/external.rs`
+(the send chained to the plan: the stamp External pushes, read back as a frame, feeds the fake
+return, so the onset lands on the click; a bare track behind a latent master insert),
+`crates/playback/src/player/audio/tests.rs` (`external_midi_stamps_move_with_the_mixs_delay_compensation`,
+`an_external_instruments_notes_are_not_stamped_with_the_mixs_delay`, fake clock), the
+deadline-order and per-kind release tests in `crates/playback/src/player/midi_out/tests.rs`, the
+missing-port, failed-port and no-MIDI tests in `crates/playback/src/player/device/external_tests.rs`, `crates/engine/src/cmd/external_instrument.rs`,
 `crates/ui-studio/src/external_instrument.rs`.

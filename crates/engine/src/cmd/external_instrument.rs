@@ -255,7 +255,11 @@ mod tests {
         ] {
             let err = e.execute(id, &p).unwrap_err().to_string();
             assert!(err.contains("External Instrument (Model D)") && err.contains("real time"), "{id}: {err}");
+            // Only an explicit true leaves the device out: false is the same refusal as absent.
             let mut p = p;
+            p["without_external"] = json!(false);
+            let err = e.execute(id, &p).unwrap_err().to_string();
+            assert!(err.contains("External Instrument (Model D)"), "{id} with without_external false: {err}");
             p["without_external"] = json!(true);
             let done = e.execute(id, &p).unwrap();
             assert_eq!(done["left_out"], json!(["Model D"]), "{id}: the result names the tracks left out");

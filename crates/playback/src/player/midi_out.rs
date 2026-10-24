@@ -56,10 +56,15 @@ pub struct OutEvent {
     /// `TrackId.0` (unused for markers).
     pub track: u64,
     /// Host time H (the runtime's [`HostOrigin`]) the event belongs to, before the destination
-    /// offset; 0 means "now". Echo events carry their arrival time and are sent at once.
+    /// offset; 0 means "now". Echo events carry their arrival time and are sent at once. A
+    /// `Release` carries P(R) of the wrap, before the mix's delay compensation.
     pub at_ns: u64,
     pub bytes: [u8; 3],
     pub len: u8,
+    /// `Release` only: the mix's delay compensation A / r. A bare MIDI-out destination releases
+    /// at `at_ns + delay_ns`, with its notes; one holding an External Instrument at `at_ns`
+    /// (ADR 0020 decision 2).
+    pub delay_ns: u64,
 }
 
 impl OutEvent {
@@ -128,6 +133,9 @@ pub struct Destination {
     /// Live input is echoed (the track is armed or monitored). Going false ends what the echo
     /// holds; while false, echoed note-ons and pedal-downs are not sent.
     pub echo: bool,
+    /// The track holds an External Instrument: its playback is stamped without the mix's delay
+    /// compensation, and so are its releases (ADR 0020 decision 2).
+    pub device: bool,
 }
 
 impl Destination {
@@ -146,6 +154,7 @@ impl Destination {
                     // Held at 0 on an External Instrument track (ADR 0020 decision 1).
                     offset_ns: (f64::from(t.midi_out_offset_ms()) * 1e6) as i64,
                     echo: t.mixer.record_arm || t.mixer.input_monitor,
+                    device: t.external_instrument().is_some(),
                 }),
                 soundcraft_model::MidiOutput::Internal => None,
             })
@@ -408,6 +417,13 @@ struct Track {
     /// Channels this track sent on: a destination change ends notes only on these, so another
     /// track sharing the port keeps playing.
     used: u16,
+    /// The latest deadline of playback queued for this track. A playback event is never
+    /// scheduled before it: when the mix's delay compensation A drops during playback (a latent
+    /// insert removed, a manual latency lowered, another device's port lost), a note-off stamped
+    /// with the new A would otherwise fall due before its note-on stamped with the old one, and
+    /// the synth would hold the note. Events bunch at the old instant instead, for at most the
+    /// drop in A. Reset by Stop, Panic and a destination change; set by a wrap or locate release.
+    last: u64,
 }
 
 struct Worker {
@@ -526,6 +542,7 @@ impl Worker {
                 Ok(Control::Panic) => {
                     self.pending.retain(|p| p.origin == Origin::Echo);
                     self.release_all(true);
+                    self.tracks.iter_mut().for_each(|t| t.last = 0);
                 }
                 Ok(Control::ReleaseEcho(track)) => {
                     // Echo the route already pushed goes out first, so its note-on cannot follow
@@ -566,6 +583,7 @@ impl Worker {
                 _ => {
                     self.release_track(&mut track, None, true);
                     self.pending.retain(|p| p.event.track != track.destination.track.0 || p.event.kind != Kind::Message);
+                    track.last = 0;
                 }
             }
         }
@@ -574,7 +592,7 @@ impl Worker {
                 continue;
             }
             let port = self.port_index(&d.port);
-            kept.push(Track { destination: d, port, held: Held::default(), used: 0 });
+            kept.push(Track { destination: d, port, held: Held::default(), used: 0, last: 0 });
         }
         self.tracks = kept;
         // Close ports no destination uses any more.
@@ -707,27 +725,36 @@ impl Worker {
                     // Scheduled playback is audio that will not be heard: drop it, then release.
                     self.pending.retain(|p| p.origin == Origin::Echo);
                     self.release_playback_and_reset();
+                    self.tracks.iter_mut().for_each(|t| t.last = 0);
                 }
                 Kind::Release => {
                     // One release per destination at the wrap instant plus that destination's
                     // offset, so a delayed destination ends its lap where its notes do.
                     // Playback scheduled at or after the jump belongs to a block the transport
                     // discarded (a locate drops its rendered-ahead block): it never sounds.
-                    let at = if event.at_ns == 0 { now } else { event.at_ns };
+                    // A bare destination's notes carry the mix's delay compensation; an External
+                    // Instrument's do not, so each releases on its own clock.
                     for i in 0..self.tracks.len() {
-                        let Some(track) = self.tracks.get(i) else { continue };
+                        let Some(track) = self.tracks.get_mut(i) else { continue };
                         let id = track.destination.track.0;
+                        let delay = if track.destination.device { 0 } else { event.delay_ns };
+                        let at = if event.at_ns == 0 { now } else { event.at_ns.saturating_add(delay) };
                         let deadline = at.saturating_add_signed(track.destination.offset_ns);
+                        // The next lap is queued after the release, never before it.
+                        track.last = deadline;
                         self.pending.retain(|p| !(p.origin == Origin::Playback && p.event.track == id && p.deadline >= deadline));
                         let release = OutEvent { kind: Kind::Release, track: id, ..event };
                         self.schedule(deadline, Origin::Playback, release);
                     }
                 }
                 Kind::Message => {
-                    let offset = self.tracks.iter().find(|t| t.destination.track.0 == event.track).map(|t| t.destination.offset_ns);
-                    let Some(offset) = offset else { continue };
+                    let Some(track) = self.tracks.iter_mut().find(|t| t.destination.track.0 == event.track) else { continue };
                     let at = if event.at_ns == 0 { now } else { event.at_ns };
-                    self.schedule(at.saturating_add_signed(offset), Origin::Playback, event);
+                    // Per track, deadlines never go backwards (see `Track::last`); with equal
+                    // deadlines the arrival order holds, so a note-off never overtakes its note-on.
+                    let deadline = at.saturating_add_signed(track.destination.offset_ns).max(track.last);
+                    track.last = deadline;
+                    self.schedule(deadline, Origin::Playback, event);
                 }
             }
         }
@@ -953,6 +980,14 @@ impl Worker {
         let mut status = self.shared.status.lock().unwrap_or_else(PoisonError::into_inner);
         *status = (ports, tracks, self.error.clone());
     }
+}
+
+/// A playback ring with no thread behind it, for tests of what the audio thread pushes. Note-ons
+/// need more than the release reserve free.
+#[cfg(test)]
+pub(super) fn test_ring(capacity: usize) -> (Producer, rtrb::Consumer<OutEvent>) {
+    let (tx, rx) = rtrb::RingBuffer::new(capacity);
+    (Producer { tx, counters: Arc::default() }, rx)
 }
 
 #[cfg(test)]

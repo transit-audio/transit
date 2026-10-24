@@ -216,3 +216,55 @@ fn an_external_instruments_missing_port_takes_it_out_of_the_plan_until_the_port_
         player.external_off.borrow().is_empty()
     });
 }
+
+/// M1 of the slice review: a port that is present but will not open (Failed, another program
+/// holds it) takes the device out of the plan just as a missing one does; MIDI unavailable as a
+/// whole does too, since no note can reach the synth. A port not looked at yet, or open, keeps it;
+/// a bare MIDI-out track is never listed.
+#[test]
+fn a_failed_or_missing_port_or_no_midi_at_all_takes_an_external_instrument_out_of_the_plan() {
+    use crate::player::midi_out::{DestinationState, OutputStatus, TrackOutput};
+    let mut s = Session::default();
+    let bare = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
+    let device = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
+    s.track_mut(device).unwrap().instrument = Some(soundcraft_model::Insert::external("In 1"));
+    for t in [bare, device] {
+        s.track_mut(t).unwrap().midi_output =
+            MidiOutput::External { port: MidiOutPort::default(), channel: MidiOutChannel::Channel(0), offset_ms: 0.0 };
+    }
+    let status = |state: Option<DestinationState>| OutputStatus {
+        tracks: state
+            .map(|state| [bare, device].map(|track| TrackOutput { track, port: "MODEL D".into(), state: state.clone() }).to_vec())
+            .unwrap_or_default(),
+        ..OutputStatus::default()
+    };
+    assert_eq!(external_unavailable(&s, Some(&status(None))), [], "not looked at yet: present");
+    assert_eq!(external_unavailable(&s, Some(&status(Some(DestinationState::Pending)))), []);
+    assert_eq!(external_unavailable(&s, Some(&status(Some(DestinationState::Connected)))), []);
+    assert_eq!(external_unavailable(&s, Some(&status(Some(DestinationState::Missing)))), [device]);
+    assert_eq!(external_unavailable(&s, Some(&status(Some(DestinationState::Failed("held by another program".into()))))), [device]);
+    assert_eq!(external_unavailable(&s, None), [device], "MIDI unavailable: the device cannot play");
+}
+
+/// The MIDI-unavailable edge of the slice review: with no MIDI runtime the Player still follows
+/// the External Instrument and prepares a plan that leaves it out, so its C is not held in delay
+/// compensation while no note can be sent.
+#[test]
+fn without_midi_an_external_instrument_is_left_out_of_the_plan() {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
+    let track = s.track_mut(t).unwrap();
+    let mut ins = soundcraft_model::Insert::external("In 1");
+    ins.external.as_mut().unwrap().manual_ms = Some(19.5);
+    track.instrument = Some(ins);
+    track.midi_output = MidiOutput::External { port: MidiOutPort::default(), channel: MidiOutChannel::Channel(0), offset_ms: 0.0 };
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    // As when the MIDI runtime failed to start.
+    drop(player.midi.get_mut().take());
+    let mut callback = DeviceOutput::new(access, &player, 2);
+    until("the plan leaves the device out", || {
+        player.service().unwrap();
+        callback.fill_f32(&mut [0.0f32; 256]);
+        *player.external_off.borrow() == [t]
+    });
+}

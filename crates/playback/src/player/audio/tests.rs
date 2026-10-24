@@ -1562,7 +1562,48 @@ fn external_midi_stamps_move_with_the_mixs_delay_compensation() {
     assert!(maximizer > 0);
     assert_eq!(a, maximizer, "A is the plan's delay compensation");
     assert_eq!(plain.ns_per_frame, delayed.ns_per_frame);
-    let (p, d) = (plain.host_ns.unwrap(), delayed.host_ns.unwrap());
+    assert_eq!(plain.host_ns, delayed.host_ns, "P(R) itself does not move");
+    let (p, d) = (plain.host_for(false).unwrap(), delayed.host_for(false).unwrap());
     let want = (a as f64 * delayed.ns_per_frame) as i64;
     assert!(((d as i64 - p as i64) - want).abs() <= 1, "stamp moved {} ns, want A / r = {want} ns", d as i64 - p as i64);
+}
+
+/// ADR 0020 decision 2, Send: an External Instrument track's note for S is sent at P(R(S)),
+/// offset 0. Its return comes back through the plan, which compensates it like any other path,
+/// so adding A to its stamp would put the synth late by its own round trip. With a latent insert
+/// on another track A > 0, and the device track's stamp does not move (B1 of the slice review).
+#[test]
+fn an_external_instruments_notes_are_not_stamped_with_the_mixs_delay() {
+    use soundcraft_model::{ChannelFormat, Insert, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
+    let stamp = |latent: bool| {
+        let mut s = Session::default();
+        s.edit.delay_compensation = true;
+        let a = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+        if latent {
+            s.track_mut(a).unwrap().mixer.inserts[0] = Some(Insert::new("maximizer"));
+        }
+        let x = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
+        let tr = s.track_mut(x).unwrap();
+        let mut ins = Insert::external("In 1");
+        ins.external.as_mut().unwrap().manual_ms = Some(20.0);
+        tr.instrument = Some(ins);
+        tr.midi_output = MidiOutput::External { port: MidiOutPort::default(), channel: MidiOutChannel::Channel(0), offset_ms: 0.0 };
+        let (mut control, mut audio, _) = fixture_session(48_000, Arc::new(s));
+        fill(&mut audio, &mut [0.0; 8]);
+        control.service(&mut make);
+        for _ in 0..3 {
+            fill(&mut audio, &mut [0.0; 8]);
+        }
+        recording_clock(&mut audio, 48_000);
+        let a = audio.plans.engine().latency;
+        let block = audio.external_block(64);
+        control.retire(audio.plans, audio.actions);
+        (a, block)
+    };
+    let (_, plain) = stamp(false);
+    let (a, delayed) = stamp(true);
+    assert!(a > 0);
+    let moved = |device: bool| delayed.host_for(device).unwrap() as i64 - plain.host_for(device).unwrap() as i64;
+    assert_eq!(moved(true), 0, "an External Instrument's note is sent at P(R(S)), offset 0; it moved by A / r");
+    assert!(moved(false) > 0, "a bare MIDI-out track still moves with the delayed mix");
 }

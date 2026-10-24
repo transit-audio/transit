@@ -17,11 +17,11 @@ fn port_of(key: &PortKey) -> MidiOutPort {
 }
 
 fn destination(track: u64, key: &PortKey, channel: MidiOutChannel, offset_ms: i64) -> Destination {
-    Destination { track: TrackId(track), port: port_of(key), channel, offset_ns: offset_ms * 1_000_000, echo: true }
+    Destination { track: TrackId(track), port: port_of(key), channel, offset_ns: offset_ms * 1_000_000, echo: true, device: false }
 }
 
 fn message(track: u64, at_ns: u64, bytes: [u8; 3]) -> OutEvent {
-    OutEvent { kind: Kind::Message, track, at_ns, bytes, len: 3 }
+    OutEvent { kind: Kind::Message, track, at_ns, bytes, len: 3, delay_ns: 0 }
 }
 
 struct Rig {
@@ -180,8 +180,8 @@ fn a_port_absent_at_load_is_missing_and_sends_nothing_until_it_appears() {
     let absent = MidiOutPort { backend: "fake".into(), name: "Synth OUT".into(), ordinal: 0, id: "usb-synth".into() };
     let foreign = MidiOutPort { backend: "coremidi".into(), name: "Synth OUT".into(), ordinal: 0, id: String::new() };
     out.configure(vec![
-        Destination { track: TrackId(1), port: absent, channel: MidiOutChannel::AsRecorded, offset_ns: 0, echo: true },
-        Destination { track: TrackId(2), port: foreign, channel: MidiOutChannel::AsRecorded, offset_ns: 0, echo: true },
+        Destination { track: TrackId(1), port: absent, channel: MidiOutChannel::AsRecorded, offset_ns: 0, echo: true, device: false },
+        Destination { track: TrackId(2), port: foreign, channel: MidiOutChannel::AsRecorded, offset_ns: 0, echo: true, device: false },
     ]);
     until("both are missing", || {
         let s = out.status();
@@ -292,4 +292,55 @@ fn an_external_instrument_tracks_destination_has_no_offset() {
     assert_eq!(Destination::of_session(&s)[0].offset_ns, 12_000_000);
     s.track_mut(t).unwrap().instrument = Some(Insert::external("In 1"));
     assert_eq!(Destination::of_session(&s)[0].offset_ns, 0, "ADR 0020: the offset is held at 0");
+}
+
+/// B2 of the ADR 0020 slice 1 review: the plan latency A drops mid-note (a latent insert
+/// removed, a manual latency lowered, another External Instrument's port lost). The note-on was
+/// stamped P(R) + A_old, the note-off P(R + len) + A_new; for len < A_old - A_new the off would
+/// fall due first and the synth would hold the note. A track's deadlines never go backwards, so
+/// the off waits for its on and follows it.
+#[test]
+fn a_note_off_stamped_before_its_note_on_after_a_drops_still_follows_it() {
+    let mut rig = Rig::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 0)]);
+    let base = rig.now() + 20_000_000;
+    let a_old = 22_000_000u64; // C = 1061 frames at 48 kHz, about 22 ms
+    let len = 5_000_000u64;
+    assert!(rig.playback.push(message(1, base + a_old, [0x90, 60, 100])));
+    assert!(rig.playback.push(message(1, base + len, [0x80, 60, 64]))); // A_new = 0
+    let sends = rig.wait_sent(2);
+    let order: Vec<Vec<u8>> = sends.iter().map(|s| s.message.clone()).collect();
+    assert_eq!(order, [vec![0x90, 60, 100], vec![0x80, 60, 64]], "the off overtook its on: the note would hang");
+    let due = rig.origin.instant() + Duration::from_nanos(base + a_old);
+    assert!(sends[1].at >= due, "the off went out before its on's instant");
+    std::thread::sleep(Duration::from_millis(30));
+    assert_eq!(rig.sent().len(), 2);
+}
+
+/// ADR 0020 decision 2: a bare MIDI-out destination's notes carry the mix's delay A, an External
+/// Instrument's do not, so a wrap releases each on its own clock. The device's next lap, which
+/// starts before the bare track's release instant, keeps its note.
+#[test]
+fn a_wrap_releases_a_device_track_without_the_mixs_delay_and_a_bare_track_with_it() {
+    let mut rig = Rig::new(|key| {
+        vec![destination(1, key, MidiOutChannel::AsRecorded, 0), Destination { device: true, ..destination(2, key, MidiOutChannel::AsRecorded, 0) }]
+    });
+    let wrap = rig.now() + 20_000_000;
+    let delay = 30_000_000u64;
+    assert!(rig.playback.push(message(1, 0, [0x90, 60, 100])));
+    assert!(rig.playback.push(message(2, 0, [0x91, 62, 100])));
+    rig.wait_sent(2);
+    assert!(rig.playback.push(OutEvent { kind: Kind::Release, at_ns: wrap, delay_ns: delay, ..OutEvent::default() }));
+    // The device's next lap restarts its note at the wrap; the bare track's at the wrap plus A.
+    assert!(rig.playback.push(message(2, wrap, [0x91, 62, 100])));
+    assert!(rig.playback.push(message(1, wrap + delay, [0x90, 60, 100])));
+    let sends = rig.wait_sent(6);
+    assert_eq!(
+        sends.iter().map(|s| s.message.clone()).collect::<Vec<_>>(),
+        [vec![0x90, 60, 100], vec![0x91, 62, 100], vec![0x81, 62, 64], vec![0x91, 62, 100], vec![0x80, 60, 64], vec![0x90, 60, 100]]
+    );
+    let origin = rig.origin.instant();
+    assert!(sends[2].at >= origin + Duration::from_nanos(wrap));
+    assert!(sends[4].at >= origin + Duration::from_nanos(wrap + delay), "the bare track ended before its notes do");
+    std::thread::sleep(Duration::from_millis(40));
+    assert_eq!(rig.sent().len(), 6, "the device's restarted note was released with the bare track");
 }

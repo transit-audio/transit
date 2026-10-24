@@ -895,15 +895,17 @@ impl Audio {
         }
         .or_else(|| self.external.as_ref().and_then(|e| e.fallback_host(output, ns_per_output)));
         let ns_per_frame = self.read.ratio(step) * ns_per_output;
+        let lead = self.read.lead(step) * ns_per_output;
+        let host_ns = base.map(|base| if lead < 0.0 { base.saturating_sub((-lead) as u64) } else { base.saturating_add(lead as u64) });
         // The mix holds every software path back by its delay compensation A (the device latency
         // of the plan: Main's arrival plus the master inserts) before it plays: a sample rendered
-        // at frame R is heard at P(R) + A / r. External MIDI for that sample goes out then too, so
-        // a synth heard outside the plan stays with the delayed mix (ADR 0020 decision 2). An
-        // External Instrument's own C is part of A; its notes are not sent early.
+        // at frame R is heard at P(R) + A / r. A bare MIDI-out track's notes for that sample go out
+        // then too, so a synth heard outside the plan stays with the delayed mix. An External
+        // Instrument's notes go out at P(R) with no delay: its return comes back through the plan,
+        // which compensates it like any other path (ADR 0020 decision 2). `Block::host_for` picks.
         let delay = self.plans.engine().latency as f64 * ns_per_frame;
-        let lead = self.read.lead(step) * ns_per_output + if delay.is_finite() { delay } else { 0.0 };
-        let host_ns = base.map(|base| if lead < 0.0 { base.saturating_sub((-lead) as u64) } else { base.saturating_add(lead as u64) });
-        external::Block { playing: state.playing, position: state.render_position, frames, host_ns, ns_per_frame }
+        let delay_ns = if delay.is_finite() && delay > 0.0 { delay as u64 } else { 0 };
+        external::Block { playing: state.playing, position: state.render_position, frames, host_ns, delay_ns, ns_per_frame }
     }
 
     /// One device callback shares these budgets across all scratch chunks and mix blocks.
