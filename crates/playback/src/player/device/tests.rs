@@ -1427,3 +1427,41 @@ fn an_asio_calibration_is_keyed_and_applied_by_the_buffer_the_driver_runs() {
     assert_eq!(fake.live_calibrations().len(), before, "nothing handed to the streams");
     assert_eq!(moved.calibration_key.as_ref().map(|k| k.period), Some(512));
 }
+
+/// #81: Cycle and region edits are document edits, so the snapshot that was latest when the UI
+/// sent the new loop is superseded by the edit's own before it compiles. The loop must still reach
+/// the running transport, at the next block, without a restart.
+#[test]
+fn a_live_loop_survives_the_document_edit_that_superseded_its_snapshot() {
+    let (player, mut callback) = prepared();
+    let mut block = [0.0f32; 1024];
+    callback.fill_f32(&mut block);
+    player.service().unwrap();
+    player.play(0, None, None).unwrap();
+    callback.fill_f32(&mut block);
+    assert_eq!((player.is_playing(), player.position()), (true, 512));
+    // The edit's snapshot is requested, then Cycle's loop, then the next edit supersedes the first.
+    player.update_session(Arc::new(Session::default())).unwrap();
+    let looped = player.set_loop(Some(Range::new(0, 4_096))).unwrap();
+    player.update_session(Arc::new(Session::default())).unwrap();
+    let mut seen = Vec::new();
+    let mut notices = [None; 64];
+    let mut receipt = None;
+    for _ in 0..24 {
+        player.service().unwrap();
+        callback.fill_f32(&mut block);
+        seen.push(player.position());
+        let count = player.poll_notices(&mut notices).unwrap();
+        receipt = receipt.or_else(|| {
+            notices[..count].iter().flatten().find_map(|n| match n {
+                Notice::Action(r) if r.sequence == looped => Some(*r),
+                _ => None,
+            })
+        });
+    }
+    assert_eq!(seen[0], 1_024, "the playhead was not moved: {seen:?}");
+    assert!(seen.iter().all(|p| *p < 4_096), "wrapped at the new loop end: {seen:?}");
+    assert!(seen.windows(2).any(|w| w[1] < w[0]), "{seen:?}");
+    let receipt = receipt.expect("the loop's receipt");
+    assert_eq!((receipt.outcome, receipt.handler_result), (action_lane::Outcome::Applied, Some(ActionResult::Applied)));
+}

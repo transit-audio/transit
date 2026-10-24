@@ -774,9 +774,14 @@ impl Player {
     pub fn play(&self, from: Samples, end: Option<Samples>, looped: Option<Range>) -> Result<action_lane::Sequence, PlayerError> {
         self.owner()?.send_action(Command::Play { from, end, looped }, true)
     }
-    /// Retarget (or clear) the loop of a running transport without moving the playhead.
+    /// Retarget (or clear) the loop of a running transport without moving the playhead (#81). The
+    /// callback adopts it at its next block boundary: a playhead before the new end wraps there,
+    /// one past it plays on, and `None` plays through. It is transport state, not tied to a
+    /// document: Cycle and region edits are document edits, so the snapshot that was latest when
+    /// this was sent is routinely superseded by the edit's own, which must not cancel it. It still
+    /// lands after any Play or Locate sent before it.
     pub fn set_loop(&self, looped: Option<Range>) -> Result<action_lane::Sequence, PlayerError> {
-        self.owner()?.send_action(Command::SetLoop(looped), true)
+        self.owner()?.send_action(Command::SetLoop(looped), false)
     }
     pub fn locate(&self, at: Samples) -> Result<action_lane::Sequence, PlayerError> {
         self.cancel_record_start()?;

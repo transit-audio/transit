@@ -268,3 +268,61 @@ fn without_midi_an_external_instrument_is_left_out_of_the_plan() {
         *player.external_off.borrow() == [t]
     });
 }
+
+/// #81: Cycle turned on while E already sounds (no loop at Play). The wrap the new loop brings ends
+/// E at the loop end and lap 2 starts C again, as a loop set before Play does: no stuck note.
+#[test]
+fn a_loop_set_mid_note_while_playing_ends_the_held_note_at_its_wrap() {
+    let fake = Fake::default();
+    let (s, track, key) = session(&fake);
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    player.midi.get_mut().as_mut().unwrap().enable(fake.io());
+    let mut callback = DeviceOutput::new(access, &player, 2);
+    until("the destination opens", || {
+        player.service().unwrap();
+        player.midi_status().unwrap().output.track(track) == Some(&crate::player::midi_out::DestinationState::Connected)
+    });
+    crate::mark_audio_thread();
+    let mut block = [0.0f32; 1024];
+    callback.fill_f32(&mut block);
+    player.play(0, None, None).unwrap();
+    let mut wrapped = false;
+    for k in 0..80 {
+        let started = Instant::now();
+        callback.fill_f32(&mut block);
+        // E sounds from 12 000; the loop goes on at about 15 000, ahead of its 24 000 end.
+        if k == 29 {
+            let at = player.position();
+            assert!((QUARTER / 2..QUARTER).contains(&at), "{at}");
+            player.set_loop(Some(soundcraft_time::Range { start: 0, end: QUARTER })).unwrap();
+        }
+        wrapped |= k > 29 && player.position() < QUARTER / 2;
+        std::thread::sleep(Duration::from_micros(10_700).saturating_sub(started.elapsed()));
+    }
+    assert!(wrapped, "the transport never wrapped");
+    player.stop().unwrap();
+    for _ in 0..4 {
+        callback.fill_f32(&mut block);
+        std::thread::sleep(Duration::from_millis(11));
+    }
+    soundcraft_mix::unmark_audio_thread();
+    until("Stop's All Notes Off", || fake.sent(&key).contains(&vec![0xB4, 123, 0]));
+    let messages: Vec<Vec<u8>> = fake.sends(&key).iter().map(|s| s.message.clone()).collect();
+    // Lap 1: C, C off, E. The wrap ends E; lap 2 starts C again.
+    let expected_start: Vec<Vec<u8>> = vec![
+        vec![0x94, 60, 100],
+        vec![0x84, 60, 64],
+        vec![0x94, 64, 90],
+        vec![0x84, 64, 64],
+        vec![0x94, 60, 100],
+        vec![0x84, 60, 64],
+        vec![0x94, 64, 90],
+    ];
+    assert_eq!(messages.get(..expected_start.len()), Some(&expected_start[..]), "{messages:x?}");
+    // Every note-on is ended by Stop at the latest.
+    for pitch in [60u8, 64] {
+        let ons = messages.iter().filter(|m| m[..2] == [0x94, pitch]).count();
+        let offs = messages.iter().filter(|m| m[..2] == [0x84, pitch]).count();
+        assert_eq!(ons, offs, "pitch {pitch} left sounding: {messages:x?}");
+    }
+}
