@@ -440,6 +440,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     crate::loopbar::strip(app, ui, &s, map, strip);
     layout.loop_strip = r4(strip);
     ruler_input(app, ui, map, Rect::from_min_max(pos2(ruler.min.x, strip.max.y), ruler.max));
+    crate::loopbar::block(app, ui, &s, map, ruler);
     overlays(app, ui, &s, map, ruler, tl, &rows, &geo, &mut layout);
     scroll_and_zoom(app, ui, map, full, tl, content_h);
     follow_playhead(app, map, tl);
@@ -1698,16 +1699,10 @@ fn ruler_input(app: &mut StudioApp, ui: &mut Ui, map: Map, ruler: Rect) {
     }
 }
 
-/// Cycle range, recording takes, cursor and playhead.
+/// Recording takes, cursor and playhead (the loop block is `loopbar::block`).
 #[allow(clippy::too_many_arguments)]
 fn overlays(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, tl: Rect, rows: &[&Track], geo: &RowGeo, layout: &mut Layout) {
     let p = ui.painter();
-    let sel = s.edit.cycle_range();
-    if s.edit.loop_playback && !sel.is_empty() {
-        let r = Rect::from_min_max(pos2(map.x(sel.start), ruler.min.y + crate::loopbar::STRIP_H + 14.0), pos2(map.x(sel.end), ruler.max.y - 1.0))
-            .intersect(ruler);
-        p.rect_filled(r, crate::theme::RADIUS_SM, TOKENS.loop_region.gamma_multiply(0.55));
-    }
     // The take being recorded grows on each armed track where it will land (slice 6: inside the
     // punch range, after a count-in), with a "Recording" name strip.
     let span = app.engine.transport.recording.then(|| {

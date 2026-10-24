@@ -3762,3 +3762,110 @@ fn a_loop_drag_stops_at_the_next_clip_and_ctrl_overwrites_it_in_one_undo_step() 
     r.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(spans(&r.app, r.t), vec![(0, bar), (2 * bar, 5 * bar)]);
 }
+
+// ---- Cycle makes a real loop region; the ruler block is a live control ----
+
+/// A point in the ruler's loop block (under the strip) at sample `at`, plus `dx` points.
+fn block_at(app: &StudioApp, at: i64, dx: f32) -> (f32, f32) {
+    let (x, y) = strip_at(app, at, dx);
+    (x, y + 20.0)
+}
+
+fn one_bar(app: &StudioApp) -> i64 {
+    4 * beat(app)
+}
+
+fn cycle_on(app: &mut StudioApp, on: bool) {
+    app.run("options.loop_playback", json!({"value": on})).unwrap();
+}
+
+#[test]
+fn cycle_on_promotes_the_time_selection_to_the_loop_region() {
+    let (mut app, _ctx, _time) = loop_app();
+    let b = beat(&app);
+    app.engine.session_mut().edit.selection = soundcraft_time::Range::new(3 * b, 7 * b);
+    cycle_on(&mut app, true);
+    assert_eq!(loop_range(&app), (3 * b, 7 * b));
+    assert!(app.engine.session().edit.loop_playback);
+}
+
+#[test]
+fn cycle_on_without_a_selection_makes_four_bars_from_the_playheads_bar() {
+    let (mut app, _ctx, _time) = loop_app();
+    let bar = one_bar(&app);
+    app.set_cursor(2 * bar + bar / 2, None);
+    cycle_on(&mut app, true);
+    assert_eq!(loop_range(&app), (2 * bar, 6 * bar), "bar 3 through bar 6, from the bar holding the playhead");
+}
+
+#[test]
+fn cycle_off_keeps_the_region_and_on_again_reuses_it() {
+    let (mut app, _ctx, _time) = loop_app();
+    let bar = one_bar(&app);
+    app.set_cursor(bar, None);
+    cycle_on(&mut app, true);
+    let made = loop_range(&app);
+    cycle_on(&mut app, false);
+    assert_eq!(loop_range(&app), made, "off leaves the region");
+    app.set_cursor(20 * bar, None);
+    cycle_on(&mut app, true);
+    assert_eq!(loop_range(&app), made, "on again restores it rather than making another");
+}
+
+#[test]
+fn undoing_cycle_on_reverts_the_switch_and_the_region_together() {
+    let (mut app, _ctx, _time) = loop_app();
+    let steps = undo_len(&mut app);
+    cycle_on(&mut app, true);
+    assert_eq!(undo_len(&mut app), steps + 1, "one step for the toggle and the region");
+    assert_ne!(loop_range(&app), (0, 0));
+    app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(loop_range(&app), (0, 0));
+    assert!(!app.engine.session().edit.loop_playback);
+}
+
+#[test]
+fn dragging_the_ruler_blocks_right_edge_and_body_issue_transport_loop() {
+    let (mut app, ctx, mut time) = loop_app();
+    let b = beat(&app);
+    app.run("transport.loop", json!({"start": 4 * b, "end": 8 * b, "enabled": true})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let steps = undo_len(&mut app);
+    let (a, z) = (block_at(&app, 8 * b, -2.0), block_at(&app, 12 * b, 0.0));
+    drag(&mut app, a, z, json!({}));
+    frames(&mut app, &ctx, 20, &mut time);
+    assert_eq!(loop_range(&app), (4 * b, 12 * b), "the right edge moved");
+    assert_eq!(undo_len(&mut app), steps + 1);
+    let (a, z) = (block_at(&app, 8 * b, 0.0), block_at(&app, 6 * b, 0.0));
+    drag(&mut app, a, z, json!({}));
+    frames(&mut app, &ctx, 20, &mut time);
+    assert_eq!(loop_range(&app), (2 * b, 10 * b), "the body moved, same length");
+    assert_eq!(undo_len(&mut app), steps + 2);
+}
+
+#[test]
+fn clicking_the_ruler_outside_the_block_still_locates() {
+    let (mut app, ctx, mut time) = loop_app();
+    let b = beat(&app);
+    app.run("transport.loop", json!({"start": 4 * b, "end": 8 * b, "enabled": true})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let at = block_at(&app, 14 * b, 0.0);
+    click(&mut app, at);
+    frames(&mut app, &ctx, 6, &mut time);
+    assert!((app.cursor() - 14 * b).abs() < b / 2, "cursor {} near {}", app.cursor(), 14 * b);
+    assert_eq!(loop_range(&app), (4 * b, 8 * b), "the region is untouched");
+}
+
+#[test]
+fn the_ruler_block_ignores_the_selection_when_there_is_no_region() {
+    let (mut app, ctx, mut time) = loop_app();
+    let b = beat(&app);
+    app.engine.session_mut().edit.selection = soundcraft_time::Range::new(2 * b, 6 * b);
+    app.engine.session_mut().edit.loop_playback = true;
+    frames(&mut app, &ctx, 3, &mut time);
+    // No region: a drag where the selection is must not move anything (nothing is there to grab).
+    let (a, z) = (block_at(&app, 4 * b, 0.0), block_at(&app, 6 * b, 0.0));
+    drag(&mut app, a, z, json!({}));
+    frames(&mut app, &ctx, 10, &mut time);
+    assert_eq!(loop_range(&app), (0, 0));
+}

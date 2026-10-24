@@ -29,3 +29,17 @@ UI code follows the same no-panic rule (`#![deny(clippy::unwrap_used, ...)]` in 
 
 `crates/ui-studio/src/*_tests.rs` and `crates/ui-studio/tests/`. A UI feature needs a test through
 the real handler, not only a unit test of a helper.
+
+## Cycle and the loop region
+
+Turning Cycle on (`options.loop_playback`, from the transport button, the menu or the shortcut) with
+no loop region makes one, in the same undo step as the switch: the time selection when it is
+non-empty, else four bars from the bar containing the playhead (the UI passes `at`), cut at the end
+of the content when that lies ahead. Turning Cycle off leaves `loop_range`, so the next toggle
+reuses it. `EditState::cycle_range()` still falls back to the selection for a session that arrives
+with Cycle on and no region; playback reads it unchanged.
+
+The ruler shows the stored `loop_range` (never the selection): an amber block while Cycle is on, a
+faint outline while off, nothing without a region. The block is live (`loopbar::block`, sharing
+`loopbar::gesture` with the 8 px strip): edges resize, the body moves, double-click toggles Cycle,
+all as one `transport.loop`. A plain click on the block, or anywhere else on the ruler, locates.

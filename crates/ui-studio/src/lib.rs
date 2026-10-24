@@ -530,6 +530,13 @@ impl StudioApp {
             self.status = crate::hardware_measure::REFUSED_TRANSPORT.into();
             return Err(self.status.clone());
         }
+        // Cycle on makes a region where the playhead is, so the engine is told where that is.
+        let mut params = params;
+        if id == "options.loop_playback"
+            && let Some(o) = params.as_object_mut()
+        {
+            o.entry("at").or_insert_with(|| self.position().into());
+        }
         if id == "ui.set" {
             return self.set_ui(&params);
         }

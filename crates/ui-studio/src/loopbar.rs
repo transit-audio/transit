@@ -80,9 +80,10 @@ pub(crate) fn clear(app: &mut StudioApp) {
     let _ = app.run("transport.loop", json!({"start": 0, "end": 0}));
 }
 
-/// Draw the strip and take its input.
-pub(crate) fn strip(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, strip: Rect) {
-    let resp = ui.interact(strip, ui.id().with("loop_strip"), Sense::click_and_drag());
+/// Take a press-drag-release on `resp` over the region: grab a part of it (empty strip makes a new
+/// region when `create`), follow the pointer within `bounds`, land one `transport.loop` on release.
+/// A double-click turns looping on or off. Shared by the strip and the ruler's loop block.
+fn gesture(app: &mut StudioApp, ui: &Ui, resp: &egui::Response, s: &Session, map: Map, bounds: Rect, create: bool) {
     let region = s.edit.loop_range;
     let enabled = s.edit.loop_playback;
     // Edges land on the nearest grid line (the one automation uses); Shift drags freely.
@@ -96,17 +97,17 @@ pub(crate) fn strip(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, str
     {
         let at = map.at(press.x);
         let grab = match part_at(press.x) {
-            Part::Left => Grab::Left { end: region.end },
-            Part::Right => Grab::Right { start: region.start },
-            Part::Body => Grab::Body { start: region.start, end: region.end, press: at },
-            Part::Outside => Grab::Create { anchor: at },
+            Part::Left => Some(Grab::Left { end: region.end }),
+            Part::Right => Some(Grab::Right { start: region.start }),
+            Part::Body => Some(Grab::Body { start: region.start, end: region.end, press: at }),
+            Part::Outside => create.then_some(Grab::Create { anchor: at }),
         };
-        app.arrange.loop_drag = Some(LoopDrag { grab, range: region });
+        app.arrange.loop_drag = grab.map(|grab| LoopDrag { grab, range: region });
     }
     if let (Some(d), Some(pos)) = (app.arrange.loop_drag.as_mut(), resp.interact_pointer_pos())
         && resp.dragged()
     {
-        d.range = drag_range(d.grab, map.at(pos.x.clamp(strip.min.x, strip.max.x)), snap);
+        d.range = drag_range(d.grab, map.at(pos.x.clamp(bounds.min.x, bounds.max.x)), snap);
     }
     if resp.drag_stopped()
         && let Some(d) = app.arrange.loop_drag.take()
@@ -122,6 +123,21 @@ pub(crate) fn strip(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, str
     if resp.double_clicked() {
         let _ = app.run("options.loop_playback", json!({"value": !enabled}));
     }
+    if let Some(pos) = resp.hover_pos().filter(|_| app.arrange.loop_drag.is_none()) {
+        match part_at(pos.x) {
+            Part::Left | Part::Right => ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal),
+            Part::Body => ui.ctx().set_cursor_icon(CursorIcon::Grab),
+            Part::Outside => {}
+        }
+    }
+}
+
+/// Draw the strip and take its input.
+pub(crate) fn strip(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, strip: Rect) {
+    let resp = ui.interact(strip, ui.id().with("loop_strip"), Sense::click_and_drag());
+    let region = s.edit.loop_range;
+    let enabled = s.edit.loop_playback;
+    gesture(app, ui, &resp, s, map, strip, true);
     resp.context_menu(|ui| {
         let item = ui.add_enabled(!region.is_empty(), egui::Button::new("Clear loop"));
         app.arrange.menu.push(crate::mixer::MenuItem::at(ui, "Clear loop".into(), String::new(), item.rect));
@@ -130,13 +146,6 @@ pub(crate) fn strip(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, str
             ui.close();
         }
     });
-    if let Some(pos) = resp.hover_pos().filter(|_| app.arrange.loop_drag.is_none()) {
-        match part_at(pos.x) {
-            Part::Left | Part::Right => ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal),
-            Part::Body => ui.ctx().set_cursor_icon(CursorIcon::Grab),
-            Part::Outside => {}
-        }
-    }
 
     // Paint from the session, except while a gesture runs: then its region.
     let shown = app.arrange.loop_drag.map_or(region, |d| d.range);
@@ -151,6 +160,39 @@ pub(crate) fn strip(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, str
         for x in [r.min.x, r.max.x] {
             p.line_segment([pos2(x, r.min.y), pos2(x, r.max.y)], Stroke::new(2.0, edge));
         }
+    }
+}
+
+/// The ruler's loop block, under the strip: the stored loop region, drawn amber while Cycle is on
+/// (and then live: edges resize, the body moves, double-click turns Cycle off) and as a faint
+/// outline while it is off, so the user sees what Cycle will use. Nothing when there is no region.
+/// Outside the block the ruler keeps click-to-locate.
+pub(crate) fn block(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, ruler: Rect) {
+    let region = s.edit.loop_range;
+    let enabled = s.edit.loop_playback;
+    let (top, bottom) = (ruler.min.y + STRIP_H + 14.0, ruler.max.y - 1.0);
+    if enabled && !region.is_empty() {
+        let hit_rect = Rect::from_min_max(pos2(map.x(region.start) - HANDLE, top), pos2(map.x(region.end) + HANDLE, bottom)).intersect(ruler);
+        if hit_rect.is_positive() {
+            let resp = ui.interact(hit_rect, ui.id().with("loop_block"), Sense::click_and_drag());
+            gesture(app, ui, &resp, s, map, ruler, false);
+            if resp.clicked()
+                && let Some(pos) = resp.interact_pointer_pos()
+            {
+                app.click_ruler(map.at(pos.x.clamp(ruler.min.x, ruler.max.x)));
+            }
+        }
+    }
+    let shown = app.arrange.loop_drag.map_or(region, |d| d.range);
+    if shown.is_empty() {
+        return;
+    }
+    let r = Rect::from_min_max(pos2(map.x(shown.start), top), pos2(map.x(shown.end), bottom)).intersect(ruler);
+    let p = ui.painter();
+    if enabled {
+        p.rect_filled(r, crate::theme::RADIUS_SM, TOKENS.loop_region.gamma_multiply(0.55));
+    } else {
+        p.rect_stroke(r, crate::theme::RADIUS_SM, Stroke::new(1.0, TOKENS.loop_region.gamma_multiply(0.45)), StrokeKind::Inside);
     }
 }
 
