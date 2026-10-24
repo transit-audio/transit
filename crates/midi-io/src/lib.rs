@@ -277,7 +277,7 @@ impl std::fmt::Debug for InputHandle {
 }
 
 /// An open output port for immediate sends. Dropping it closes the port (silently: the output
-/// thread owns these handles, so its closes are logged by the control side, see the studio's
+/// thread owns these handles, so its opens and closes are logged by the control side, see the studio's
 /// `debug_log`). Control side only;
 /// scheduled output (ADR 0012, decision 5) is not part of this crate yet.
 pub struct OutputHandle {
@@ -394,6 +394,6 @@ mod port_line_tests {
     fn the_port_line_names_the_port_and_backend() {
         let key = PortKey { backend: BackendId::WinMm, name: "Arturia KeyLab".into(), ordinal: 1, id: String::new() };
         assert_eq!(port_line("input opened", &key), "MIDI input opened: port=\"Arturia KeyLab #2\" backend=winmm");
-        assert_eq!(port_line("output opened", &key), "MIDI output opened: port=\"Arturia KeyLab #2\" backend=winmm");
+        assert_eq!(port_line("input closed", &key), "MIDI input closed: port=\"Arturia KeyLab #2\" backend=winmm");
     }
 }
