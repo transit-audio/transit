@@ -30,3 +30,11 @@ builds. Fixed (#87): that max is now a 250 ms stall bound (the median bound stay
 timer-poll regression); the echo bound in `midi_out/tests.rs` is 200 ms (below the 250 ms offset
 it must ignore); the next-lap bound is 100 ms (a lap held to the old deadline is ~200 ms late).
 `runtime/tests.rs` worst block is an `#[ignore]` hardware-timing test and is left as is.
+
+Recurrence 2026-10-24 (macOS CI run 40137883187): `a_creation_that_never_returns_is_stuck_after_the_timeout_and_never_blocks_a_frame`
+(`crates/plugin-host/tests/host_thread.rs`) asserted at least 10 frames in the 300 ms creation
+timeout window and saw 9. That is a throughput floor, not the property. Fixed (#87): the test now
+requires more than one frame (a blocked loop sees a single poll) and a 250 ms bound on the longest
+frame, plus the Stuck status; the 1 s slow-creation test has the same floor relaxed to `n >= 2`
+beside its existing worst-frame bound. Other `Duration::from_millis` values in the plug-in host
+tests are sleeps, timeouts or deadlines, not measurements.
