@@ -29,6 +29,8 @@ transit keeps `ui.json`, `Autosave/` and `logs/` in its own settings folder:
 Set `TRANSIT_CONFIG_DIR` to use a different folder, for example to keep a test build away from your
 real settings. The plug-in scan cache is shared with the inherited soundcraft apps (`SOUNDCRAFT_CONFIG_DIR` overrides).
 
+The log is `logs/transit.log` in that folder. `--verbose`, `--log <directives>` and `RUST_LOG` raise its detail; see [Troubleshooting](troubleshooting.md).
+
 ## The update check
 
 transit checks once a day, after the splash, whether a newer release exists (Help > Check for Updates… runs it on demand). The check is a single anonymous request to GitHub's public API (`api.github.com/repos/transit-audio/transit/releases`); nothing else is sent, and nothing is downloaded or installed. Turn it off with Help > Check for New Versions on Launch, or set `TRANSIT_NO_UPDATE_CHECK=1` (CI, tests, packagers; this also disables the Help entry).

@@ -100,6 +100,8 @@ Most development happens on Windows. If you run Linux or macOS, the issues below
 - macOS: [help wanted, platform:macos](https://github.com/transit-audio/transit/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22+label%3Aplatform%3Amacos)
 - Everything marked help wanted: [all help wanted issues](https://github.com/transit-audio/transit/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22)
 
+Found a problem? [Troubleshooting](docs/troubleshooting.md) says where the log file is, how to turn on more detail (Help > Debug Logging, `--verbose`) and what to include in a report.
+
 Issues labeled good first issue are scoped and documented enough to start with. Hardware reports (interface, driver, buffer, measured round trip) are welcome on any platform: open an issue with the numbers.
 
 ### Other ways to help

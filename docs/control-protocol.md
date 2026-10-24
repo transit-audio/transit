@@ -62,6 +62,7 @@ Errors: `{"id": 1, "ok": false, "error": "bad parameters for `mix.volume`: no tr
 | `ui.inspect` | `{}` | UI state (`window`, panels, dialogs), window size, playing/position, audio device, and `edit_layout` (timeline rect and every track row's rect, for clicking). |
 | `ui.set` | any `UiState` fields | e.g. `{"window": "Mix", "narrow_mix": true}`. |
 | `help.check_updates` | none | Help > Check for Updates…: checks GitHub for a newer release now and reports in `status` (`ui.inspect` also shows `update_notice`). Refused when `TRANSIT_NO_UPDATE_CHECK` is set. |
+| `help.debug_logging` | `on?` (boolean) | Help > Debug Logging: raises transit's own log messages to debug for the rest of the session (`on: false` puts them back; without `on` the setting flips). `status` names the log file; the result has `debug_logging` and `log_file`. Not saved. |
 | `ui.menu.list` | `{}` | Every catalog menu path and the command that implements it (or null). |
 | `ui.menu.invoke` | `{path}` or `{id}` | Like clicking the menu item: may open its dialog (e.g. `"Track > New..."`). |
 | `ui.click` | `{x, y, button?, count?, cmd?, shift?, alt?, ctrl?}` | Synthetic click (window points). |
