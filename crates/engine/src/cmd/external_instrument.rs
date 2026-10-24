@@ -11,16 +11,67 @@ use soundcraft_model::{EXTERNAL_GAIN_DB, Insert, MAX_EXTERNAL_LATENCY_MS, MidiOu
 
 const ID: &str = "instrument.external";
 
+const MEASURE: &str = "instrument.measure_external";
+
 pub fn specs() -> Vec<CommandSpec> {
-    vec![cmd!(
-        "instrument.external",
-        "External Instrument",
-        [],
-        None,
-        "{track?, port?: {backend,name,ordinal?,id?}, channel?: as_recorded|1..16, return?: input path, gain_db?: -60..24, manual_ms?: 0..500|null} — puts an External Instrument in an instrument track's instrument slot, or changes it; the port and channel are the track's MIDI output, whose offset is held at 0 (the latency is set here); omitted fields keep their values",
-        has_selection,
-        set_external
-    )]
+    vec![
+        cmd!(
+            "instrument.external",
+            "External Instrument",
+            [],
+            None,
+            "{track?, port?: {backend,name,ordinal?,id?}, channel?: as_recorded|1..16, return?: input path, gain_db?: -60..24, manual_ms?: 0..500|null} — puts an External Instrument in an instrument track's instrument slot, or changes it; the port and channel are the track's MIDI output, whose offset is held at 0 (the latency is set here); omitted fields keep their values",
+            has_selection,
+            set_external
+        ),
+        cmd!(
+            noundo "instrument.measure_external",
+            "Measure External Instrument",
+            [],
+            None,
+            "{track?, action?: start|cancel|keep|status} -> {running, note, of, result?}: measures an External Instrument's latency on the live audio device (ADR 0020 decision 3): a warm-up note, then 8 notes 1.5 s apart (note 60, velocity 100) to its MIDI port, their onsets timed on its return in plan frames; the median is kept per machine under the port, return, rate and buffer. `start` returns at once; `cancel` stops it; `keep` stores a result whose spread was above 1 ms. The transport must be stopped and the track disarmed",
+            has_selection,
+            measure_external
+        ),
+    ]
+}
+
+/// The refusal of a Measure the engine can see without the live device, in the card's words
+/// (ADR 0020 decisions 3 and 7): the track holds an External Instrument with a port and a return
+/// on this machine, the transport is stopped and the track is not armed.
+pub fn measure_blocker(e: &Engine, t: soundcraft_model::TrackId) -> std::result::Result<(), String> {
+    let track = e.session().track(t).ok_or_else(|| format!("no track {}", t.0))?;
+    let device = track.external_instrument().ok_or("This track has no External Instrument.")?;
+    if e.transport.playing || e.transport.recording {
+        return Err("Stop the transport to measure.".into());
+    }
+    if track.mixer.record_arm {
+        return Err("Disarm the track to measure: live input would play the synth.".into());
+    }
+    if !track.midi_output.is_external() {
+        return Err("No MIDI port: choose one on the Out button".into());
+    }
+    if device.ret.is_empty() {
+        return Err("Choose the return input".into());
+    }
+    if !e.io_map().path(&device.ret).is_some_and(|p| p.direction == soundcraft_model::IoDirection::Input) {
+        return Err(format!("Return {} is not on this interface", device.ret));
+    }
+    Ok(())
+}
+
+/// `instrument.measure_external`: the engine checks the request; the notes and the recording are
+/// the app's (the live audio device and MIDI), which runs this command itself (`StudioApp::run`).
+fn measure_external(e: &mut Engine, p: &Value) -> Result<Value> {
+    let action = p.get("action").and_then(Value::as_str).unwrap_or("start");
+    if !["start", "cancel", "keep", "status"].contains(&action) {
+        return Err(bad(MEASURE, "`action` is start, cancel, keep or status"));
+    }
+    let t = tracks_required(e, MEASURE, p)?.first().copied().ok_or_else(|| bad(MEASURE, "no track"))?;
+    if action == "start" {
+        measure_blocker(e, t).map_err(|why| bad(MEASURE, why))?;
+    }
+    Err(bad(MEASURE, "measuring needs the live audio device and MIDI: run it from the app"))
 }
 
 /// Fields `instrument.external` reads; anything else is refused, so a misspelled field is not
@@ -213,6 +264,50 @@ mod tests {
         e.execute("midi.output", &json!({"track": t.0, "channel": 3})).unwrap();
         assert_eq!(e.session().track(t).unwrap().midi_output.offset_ms(), 0.0);
         e.execute("midi.output", &json!({"track": t.0, "offset_ms": 0.0})).unwrap();
+    }
+
+    /// ADR 0020 decisions 3 and 7: Measure is refused in the card's words before the app touches
+    /// the device, and a result is kept per machine, not in the session.
+    #[test]
+    fn measure_is_refused_in_the_cards_words_and_a_result_is_kept_per_machine() {
+        let mut e = Engine::default();
+        e.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "Scarlett", 2, 2));
+        let t = instrument_track(&mut e);
+        let why = |e: &mut Engine| e.execute("instrument.measure_external", &json!({"track": t.0})).unwrap_err().to_string();
+        assert!(why(&mut e).contains("This track has no External Instrument."), "{}", why(&mut e));
+        e.execute("instrument.external", &json!({"track": t.0, "return": "In 1"})).unwrap();
+        assert!(why(&mut e).contains("No MIDI port: choose one on the Out button"));
+        e.execute("instrument.external", &json!({"track": t.0, "port": port(), "return": ""})).unwrap();
+        assert!(why(&mut e).contains("Choose the return input"));
+        e.execute("instrument.external", &json!({"track": t.0, "return": "In 7"})).unwrap();
+        assert!(why(&mut e).contains("Return In 7 is not on this interface"));
+        e.execute("instrument.external", &json!({"track": t.0, "return": "In 1"})).unwrap();
+        e.session_mut().track_mut(t).unwrap().mixer.record_arm = true;
+        assert!(why(&mut e).contains("Disarm the track to measure: live input would play the synth."));
+        e.session_mut().track_mut(t).unwrap().mixer.record_arm = false;
+        e.transport.playing = true;
+        assert!(why(&mut e).contains("Stop the transport to measure."));
+        e.transport.playing = false;
+        assert!(why(&mut e).contains("run it from the app"), "the request is good; only the live device is missing");
+        assert!(e.execute("instrument.measure_external", &json!({"track": t.0, "action": "go"})).is_err());
+        let revision = e.io_revision();
+        let dirty = e.is_dirty();
+        let m = soundcraft_model::ExternalLatency {
+            port_id: String::new(),
+            port_name: "MODEL D".into(),
+            ret: "In 1".into(),
+            rate: 48_000,
+            buffer: 64,
+            frames: 955,
+            spread_frames: 19,
+            notes: 8,
+            measured_at: 1,
+        };
+        e.store_external_latency(m.clone());
+        e.store_external_latency(m.clone());
+        assert_eq!(e.io_map().external_latency, vec![m], "one per key");
+        assert_ne!(e.io_revision(), revision, "the host passes the table on");
+        assert_eq!(e.is_dirty(), dirty, "the session is untouched");
     }
 
     #[test]

@@ -301,6 +301,15 @@ impl Engine {
         self.set_io_map(io);
     }
 
+    /// Keep an External Instrument measurement (per machine: no undo step, the session stays
+    /// clean), replacing the one with the same port, return, rate and buffer (ADR 0020 decision
+    /// 5). The host passes the table on to the audio thread.
+    pub fn store_external_latency(&mut self, m: soundcraft_model::ExternalLatency) {
+        let mut io = self.io.clone();
+        io.set_external_latency(m);
+        self.set_io_map(io);
+    }
+
     pub fn session(&self) -> &Session {
         &self.doc
     }

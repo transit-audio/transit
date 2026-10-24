@@ -47,7 +47,7 @@ mod view_more;
 mod vst3;
 mod zoom_toggle;
 
-pub use external_instrument::external_in_render;
+pub use external_instrument::{external_in_render, measure_blocker as external_measure_blocker};
 pub use file::{bounce_job, bounce_paths_job};
 
 pub(crate) use edit::remember_selection;
