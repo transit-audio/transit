@@ -158,8 +158,19 @@ pub struct Note {
     pub fit: SendFit,
 }
 
-/// Whether the fit's newest block sat further from the line than `limit_ns`: a change in the
-/// driver's dispatch delay the 2 s line has not followed yet. A warning only.
+/// The leave-last-out limit of the fit drift warning, in ns: `max(max_fit_error_ns, one block
+/// period)`. The driver delivers blocks in whole-block steps, so the newest block sits up to half
+/// a block off the line with no change in the dispatch delay; a fixed 0.5 ms fired on most notes at
+/// 64 and 128 frames (48 kHz) while placement held. One block period is twice that quantization,
+/// so a real step of more than a block still trips it. Without a known buffer the fixed limit stays.
+pub(crate) fn fit_drift_limit_ns(max_fit_error_ns: u64, buffer: Option<u32>, rate: u32) -> u64 {
+    let block_ns = buffer.map_or(0, |b| (u64::from(b) * 1_000_000_000).div_ceil(u64::from(rate.max(1))));
+    max_fit_error_ns.max(block_ns)
+}
+
+/// Whether the fit's newest block sat further from the line than `limit_ns` (see
+/// [`fit_drift_limit_ns`]): a change in the driver's dispatch delay the 2 s line has not followed
+/// yet. A warning only.
 pub(crate) fn fit_drift(fit: &SendFit, limit_ns: u64) -> bool {
     fit.leave_last_out_ns.abs() > limit_ns as f64
 }
@@ -342,6 +353,7 @@ impl Report {
         }
         lines.extend(rt::detector_lines(self.rate, self.envelope_window, &notes.iter().map(|n| n.uncertainty()).collect::<Vec<_>>()));
         lines.extend(rt::fit_lines(self.rate, &notes.iter().map(|n| n.fit).collect::<Vec<_>>(), b.max_fit_error_ns));
+        let drift_limit = fit_drift_limit_ns(b.max_fit_error_ns, self.buffer, self.rate);
         for run in &self.runs {
             for (i, n) in run.notes.iter().enumerate() {
                 let what = format!("{} note {}", self.run_label(run), i + 1);
@@ -351,11 +363,11 @@ impl Report {
                         self.ms(n.uncertainty() as f64)
                     ));
                 }
-                if fit_drift(&n.fit, b.max_fit_error_ns) {
+                if fit_drift(&n.fit, drift_limit) {
                     lines.push(format!(
-                        "warning: {what}: the clock fit's leave-last-out error is {:+.2} ms, above {:.2} ms: the driver's dispatch delay may have changed; E may carry the change",
+                        "warning: {what}: the clock fit's leave-last-out error is {:+.2} ms, above {:.2} ms (the larger of the fit error limit and one block period): the driver's dispatch delay may have changed; E may carry the change",
                         n.fit.leave_last_out_ns / 1e6,
-                        b.max_fit_error_ns as f64 / 1e6
+                        drift_limit as f64 / 1e6
                     ));
                 }
                 lines.extend(
@@ -396,7 +408,7 @@ impl Report {
                             "threshold": n.threshold, "attack_peak": n.peak, "send_call_ns": n.send_call_ns,
                         });
                         rt::merge(&mut note, rt::fit_json(&n.fit));
-                        note["fit_drift_warning"] = serde_json::json!(fit_drift(&n.fit, self.settings.base.max_fit_error_ns));
+                        note["fit_drift_warning"] = serde_json::json!(fit_drift(&n.fit, fit_drift_limit_ns(self.settings.base.max_fit_error_ns, self.buffer, self.rate)));
                         note
                     })
                     .collect();
@@ -677,6 +689,26 @@ mod tests {
         };
         assert!(fit_drift(&send_fit(2_000_000), 500_000), "{:?}", send_fit(2_000_000));
         assert!(!fit_drift(&send_fit(0), 500_000), "{:?}", send_fit(0));
+    }
+
+    #[test]
+    fn the_fit_drift_limit_scales_with_the_block_period() {
+        let fit = |loo_ns: f64| SendFit { scatter_ns: 0.0, sigma_ns: 0.0, error_ns: 0.0, leave_last_out_ns: loo_ns, points: 100, app_offset: None };
+        let warns = |buffer: u32, loo_ns: f64| fit_drift(&fit(loo_ns), fit_drift_limit_ns(500_000, Some(buffer), 48_000));
+        // Jitter at the benchmark's level (std dev ~0.4 ms): up to half a block, and the recorded
+        // 0.65 to 1.03 ms warnings at 64 and 128, never warn.
+        for (buffer, worst_ns) in [(64u32, 680_000.0), (128, 1_030_000.0), (512, 1_030_000.0), (512, 5_000_000.0)] {
+            assert!(!warns(buffer, worst_ns), "buffer {buffer}, {worst_ns} ns");
+            assert!(!warns(buffer, -worst_ns), "buffer {buffer}, {worst_ns} ns");
+        }
+        // A real step of more than a block period warns.
+        for buffer in [64u32, 128, 512] {
+            let block_ns = f64::from(buffer) * 1e9 / 48_000.0;
+            assert!(warns(buffer, block_ns * 1.2), "buffer {buffer}");
+            assert!(warns(buffer, -block_ns * 1.2), "buffer {buffer}");
+        }
+        assert_eq!(fit_drift_limit_ns(500_000, None, 48_000), 500_000);
+        assert_eq!(fit_drift_limit_ns(500_000, Some(16), 48_000), 500_000);
     }
 
     #[test]

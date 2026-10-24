@@ -128,6 +128,8 @@ the compensation.
   threshold is below the arrival quantization of the driver, so for this device the warning is noise.
   It should scale with the block period (a fraction of it), so a real step in the dispatch delay still
   trips it.
+  Addressed: the warning limit is now `max(max_fit_error_ns, one block period)` (1.33 ms at 64, 2.67 ms
+  at 128, 48 kHz), so only a leave-last-out error above a full block warns.
 - **One synth, one interface.** The numbers are for the Model D with the fastest attack on a Scarlett
   2i2 over ASIO at 48 kHz, with the gain set so attack peaks sat near -13.5 dBFS. The compensation is
   specific to the chain, rate and buffer.
