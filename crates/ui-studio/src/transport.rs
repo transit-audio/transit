@@ -167,6 +167,8 @@ pub fn bar(app: &mut StudioApp, ui: &mut Ui) {
                     ui.add_space(crate::theme::SPACE);
                     ui.label(egui::RichText::new(hint).color(TOKENS.record));
                 }
+                // Input activity LED (#91), at the right edge; a click opens the MIDI Monitor.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| crate::midi_monitor::led(app, ui));
             });
         });
 }

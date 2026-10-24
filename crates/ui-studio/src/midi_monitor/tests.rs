@@ -379,3 +379,24 @@ fn the_window_menu_and_command_open_and_close_it_without_audio() {
     assert_eq!(app.inspect(&ctx)["midi_monitor"]["window"][2].as_f64().unwrap(), 0.0);
     assert_eq!(app.run("window.midi_monitor", json!({})).unwrap()["open"], true, "without value it flips");
 }
+
+#[test]
+fn the_header_led_is_drawn_with_audio_and_a_click_opens_the_window() {
+    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    app.player = Some(soundcraft_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap());
+    let ctx = egui::Context::default();
+    for i in 0..3 {
+        frame(&ctx, &mut app, 1.0 + f64::from(i) / 60.0);
+    }
+    let led = app.inspect(&ctx)["midi_monitor"]["led"].clone();
+    let n = |i: usize| led[i].as_f64().unwrap();
+    assert!(n(2) - n(0) > 20.0 && n(3) - n(1) > 10.0, "the LED has a place in the transport bar: {led}");
+    assert!(n(0) > 1000.0, "at the right of the bar: {led}");
+    assert!(n(1) < f64::from(crate::theme::TRANSPORT_H) + 30.0, "in the top bar area: {led}");
+    let (req, _rx) = crate::ControlRequest::new("ui.click", json!({"x": (n(0) + n(2)) / 2.0, "y": (n(1) + n(3)) / 2.0}));
+    let _ = crate::control::handle_for_test(&mut app, &egui::Context::default(), &req);
+    for i in 0..30 {
+        frame(&ctx, &mut app, 2.0 + f64::from(i) / 60.0);
+    }
+    assert!(app.ui.midi_monitor.open, "a click on the LED opens the MIDI Monitor");
+}
