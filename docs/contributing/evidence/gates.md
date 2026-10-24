@@ -38,3 +38,6 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
 - No wall-clock latency bound under about 100 ms in a unit test. Assert a deterministic signal
   (a counter, a state, an ordering) or a stall bound with its rationale in a comment; a shared CI
   runner will exceed a tight bound sooner or later (E49, `../../escapes/E49-echo-latency-test-wall-clock-bound.md`).
+- Tests create unique temp dirs: process id plus a per-process counter (or `TemporaryAutosave`),
+  never a fixed name or a clock-only suffix; concurrent tests share a process and a clock tick
+  (E51, `../../escapes/E51-test-temp-dirs-collided-in-one-process.md`).

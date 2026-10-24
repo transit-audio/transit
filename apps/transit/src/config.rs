@@ -253,8 +253,11 @@ pub struct TemporaryAutosave(PathBuf);
 
 impl TemporaryAutosave {
     pub fn new() -> std::io::Result<Self> {
+        // The clock alone is not unique: threads of one process can read the same tick (coarse on Windows).
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_err(std::io::Error::other)?.as_nanos();
-        let path = std::env::temp_dir().join(format!("transit-test-{}-{nonce}", std::process::id()));
+        let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!("transit-test-{}-{nonce}-{serial}", std::process::id()));
         std::fs::create_dir(&path)?;
         Ok(Self(path))
     }
@@ -505,5 +508,25 @@ mod array_preservation_tests {
         assert_eq!(saved["io_maps"][0]["paths"][0]["future"], 19);
         assert_eq!(saved["io_maps"][0]["outputs"], 4);
         assert_eq!(saved["io_maps"][0]["paths"][0]["channels"], serde_json::json!([1]));
+    }
+
+    #[test]
+    fn temporary_autosaves_made_at_the_same_instant_get_distinct_folders() {
+        let barrier = std::sync::Barrier::new(16);
+        let made: Vec<Vec<TemporaryAutosave>> = std::thread::scope(|scope| {
+            let workers: Vec<_> = (0..16)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        (0..50).map(|_| TemporaryAutosave::new().expect("every caller gets its own folder")).collect()
+                    })
+                })
+                .collect();
+            workers.into_iter().map(|worker| worker.join().unwrap()).collect()
+        });
+        let mut paths: Vec<_> = made.iter().flatten().map(|dir| dir.path().to_path_buf()).collect();
+        paths.sort();
+        paths.dedup();
+        assert_eq!(paths.len(), 16 * 50);
     }
 }
