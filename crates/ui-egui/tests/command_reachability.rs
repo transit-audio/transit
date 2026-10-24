@@ -43,6 +43,8 @@ const KNOWN_UNREACHED: &[&str] = &[
     "options.post_roll",
     "plugin.preset_delete", // studio UI only (#68: the hosted plug-in window's header strip); the old UI has no hosted-editor header
     "plugin.preset_load",   // same
+    "plugin.retry",         // studio UI only (#82: Retry on a "Not responding" slot); the old UI has no host-thread slot states
+    "plugin.retry_all",     // same (the status line's "Retry all")
     "options.pre_roll",
     "setup.hardware",        // menu opens the Playback Engine window, which doesn't run it
     "setup.io_map",          // studio UI only (Audio Devices I/O path table); the old UI has no named I/O paths

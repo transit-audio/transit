@@ -18,6 +18,7 @@ use crate::theme::{self, TOKENS};
 use egui::{Align2, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::Value;
 use soundcraft_model::{Insert, KeyFrom, Tap, TrackId, TrackKind};
+use soundcraft_playback::SlotLoad;
 
 /// Height of the device pane.
 pub const PANE_H: f32 = 132.0;
@@ -337,6 +338,26 @@ fn card_body(
     let mut c =
         DeviceCard { slot, plugin: plugin.clone(), name: name.clone(), bypass: ins.is_some_and(|i| i.bypass), rect: r4(r), ..DeviceCard::default() };
     let salt = slot.map_or(u64::MAX, |s| s as u64);
+    let key_slot = slot.unwrap_or(soundcraft_mix::INSTRUMENT_SLOT);
+    // The plug-in is still being made (a heavy library can take seconds): say so until it is
+    // bound, slow past the display budget, and "Not responding" once the plug-in host gives up
+    // waiting (ADR 0018, issue #82).
+    let load = if ins.is_some() { app.player.as_ref().and_then(|pl| pl.slot_load(t, key_slot)) } else { None };
+    let stuck = matches!(load, Some(SlotLoad::NotResponding { .. }));
+    let loading = load.is_some() && !stuck;
+    if stuck {
+        // Right-click anywhere on the card: Retry. Made first, so the card's own controls keep
+        // their clicks.
+        let body = ui.interact(r.intersect(lane), ui.id().with(("card_retry_menu", t.0, salt)), Sense::click());
+        egui::Popup::context_menu(&body).id(body.id.with("ctx")).show(|ui| {
+            let b = ui.button("Retry").on_hover_text(format!("Retry loading {name}"));
+            menu.push(MenuItem::at(ui, "Retry".into(), "retry".into(), b.rect));
+            if b.clicked() {
+                let _ = app.retry_plugin(t, key_slot);
+                ui.close();
+            }
+        });
+    }
     // Power button (bypass) on inserts; the instrument has none (no instrument bypass command).
     let mut name_x = r.min.x + 8.0;
     if let Some(slot) = slot {
@@ -399,18 +420,18 @@ fn card_body(
         (_, Some("au")) => "Audio Unit".into(),
         _ => app.builtin_plugins().iter().find(|p| p.id == plugin).map_or("Built-in".into(), |p| format!("Built-in · {}", p.category)),
     };
-    // The plug-in is still being made (a heavy library can take seconds): say so until it is bound.
-    let loading = app.player.as_ref().is_some_and(|pl| pl.loading(t, slot.unwrap_or(soundcraft_mix::INSTRUMENT_SLOT)));
-    // It did not load within the plug-in host's timeout (ADR 0018): the slot is empty.
-    let stuck = app.player.as_ref().is_some_and(|pl| pl.stuck(t, slot.unwrap_or(soundcraft_mix::INSTRUMENT_SLOT)));
-    let kind = if stuck {
-        NOT_RESPONDING.to_string()
-    } else if loading {
-        LOADING.to_string()
-    } else {
-        kind
-    };
-    pc.text(pos2(r.min.x + 8.0, title.max.y + 12.0), Align2::LEFT_CENTER, kind, FontId::proportional(10.0), TOKENS.text_dim);
+    let kind = load.map_or(kind, load_text);
+    let kind_r = pc.text(pos2(r.min.x + 8.0, title.max.y + 12.0), Align2::LEFT_CENTER, &kind, FontId::proportional(10.0), TOKENS.text_dim);
+    if let Some(load) = load {
+        // How long so far (#67), on the status text itself.
+        ui.interact(kind_r.intersect(lane), ui.id().with(("load_status", t.0, salt)), Sense::hover()).on_hover_text(load_tip(load, &name));
+    }
+    if stuck {
+        let rb = Rect::from_center_size(pos2(kind_r.max.x + 10.0, kind_r.center().y), vec2(14.0, 14.0));
+        retry_button(app, ui, &pc, lane, rb, ui.id().with(("card_retry", t.0, salt)), t, key_slot, &name);
+        c.retry_button = r4(rb);
+    }
+    c.status = kind;
     if c.bypass {
         pc.text(pos2(r.min.x + 8.0, title.max.y + 28.0), Align2::LEFT_CENTER, "Bypassed", FontId::proportional(10.0), TOKENS.mute);
     }
@@ -480,7 +501,6 @@ fn card_body(
         key_control(app, ui, p, lane, t, slot, &plugin, r, menu, &mut c);
     }
     // Open editor: the plug-in's own window, through the same path as `ui.set {plugin_windows}`.
-    let key_slot = slot.unwrap_or(soundcraft_mix::INSTRUMENT_SLOT);
     // A built-in's editor is our own window, so it needs no player and no loaded instance.
     let builtin = app.builtin_at((t, key_slot)).is_some();
     let enabled = builtin || (!loading && !stuck && app.player.as_ref().is_some_and(|pl| hosted(&plugin) || pl.has_editor(t, key_slot)));
@@ -503,7 +523,7 @@ fn card_body(
     crate::icons::paint(&pc, pos2(x0 + 6.0, eb.center().y), Icon::OpenEditor, 12.0, ink);
     pc.text(pos2(x0 + 16.0, eb.center().y), Align2::LEFT_CENTER, label, font, ink);
     let tip = if stuck && !builtin {
-        "The plug-in did not finish loading within 10 s and was left out; remove it and add it again to retry".to_string()
+        "The plug-in is not responding; Retry (the circular arrow beside \"Not responding\") loads it again".to_string()
     } else if loading && !builtin {
         "The plug-in is still loading; its editor opens when it is ready".to_string()
     } else if !enabled {
@@ -564,9 +584,86 @@ fn hardware_state(
 /// What a device card and an insert slot say while the plug-in is being made.
 pub(crate) const LOADING: &str = "Loading…";
 
-/// What a device card and an insert slot say when the plug-in did not load within the plug-in
-/// host's timeout (ADR 0018): the slot is empty until the plug-in is added again.
+/// What they say once it has been loading for longer than the display budget (10 s), followed by
+/// the seconds so far (issue #82). The session plays on without it; it joins when it is ready.
+pub(crate) const SLOW: &str = "Loading… (slow)";
+
+/// What a device card and an insert slot say when the plug-in's creation ran past the plug-in
+/// host's creation budget (ADR 0018): the slot is empty, with Retry; if the creation still
+/// returns, the plug-in is taken after all.
 pub(crate) const NOT_RESPONDING: &str = "Not responding";
+
+/// The slot's text while its plug-in is on its way: "Loading…", "Loading… (slow) 12 s",
+/// "Not responding".
+pub(crate) fn load_text(load: SlotLoad) -> String {
+    match load {
+        SlotLoad::Loading { .. } => LOADING.to_string(),
+        SlotLoad::Slow { elapsed } => format!("{SLOW} {} s", elapsed.as_secs()),
+        SlotLoad::NotResponding { .. } => NOT_RESPONDING.to_string(),
+    }
+}
+
+/// The tooltip of that text: how long so far and what happens next (#67).
+pub(crate) fn load_tip(load: SlotLoad, name: &str) -> String {
+    match load {
+        SlotLoad::Loading { elapsed } => format!("Loading {name}… {:.1} s", elapsed.as_secs_f32()),
+        SlotLoad::Slow { elapsed } => {
+            format!("{name} is slow to load ({} s so far). The session plays on without it; it joins as soon as it is ready", elapsed.as_secs())
+        }
+        SlotLoad::NotResponding { elapsed } => format!(
+            "{name} has not finished loading after {} s and its plug-in host thread is not responding. Retry loads it again with its stored state",
+            elapsed.as_secs()
+        ),
+    }
+}
+
+/// The retry glyph: a circular arrow (a 300 degree arc, open at the top, its open arrowhead at
+/// the upper left pointing clockwise), stroked in `color`, in `r`. Drawn with the painter like
+/// the arranger's loop glyph, so it takes the theme's tokens.
+pub(crate) fn retry_glyph(r: Rect, color: egui::Color32) -> Vec<egui::Shape> {
+    let size = r.width().min(r.height());
+    let c = r.center();
+    let rad = size * 0.34;
+    let at = |a: f32| pos2(c.x + rad * a.cos(), c.y + rad * a.sin());
+    // Screen angles run clockwise (y down): start just right of 12 o'clock, sweep 300 degrees.
+    let a0 = -std::f32::consts::FRAC_PI_2 + 0.45;
+    let a1 = a0 + std::f32::consts::PI * 5.0 / 3.0;
+    let n = RETRY_ARC_POINTS - 1;
+    let pts: Vec<egui::Pos2> = (0..=n).map(|i| at(a0 + (a1 - a0) * i as f32 / n as f32)).collect();
+    let end = at(a1);
+    // Unit tangent (direction of travel) and outward normal at the end of the arc.
+    let (tx, ty) = (-a1.sin(), a1.cos());
+    let (nx, ny) = (a1.cos(), a1.sin());
+    let h = size * 0.27;
+    let tip = pos2(end.x + tx * h * 0.7, end.y + ty * h * 0.7);
+    let barb = |s: f32| pos2(tip.x - tx * h + nx * h * s, tip.y - ty * h + ny * h * s);
+    let stroke = Stroke::new(size * 1.4 / 14.0, color);
+    vec![egui::Shape::line(pts, stroke), egui::Shape::line(vec![barb(-1.0), tip, barb(1.0)], stroke)]
+}
+
+/// Points in the retry glyph's arc (the shape signature the render tests look for).
+pub(crate) const RETRY_ARC_POINTS: usize = 15;
+
+/// The Retry button beside "Not responding" (issue #82): the retry glyph in `r`, its tooltip,
+/// and on a click `plugin.retry` for the slot.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn retry_button(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    p: &egui::Painter,
+    clip: Rect,
+    r: Rect,
+    id: egui::Id,
+    t: TrackId,
+    slot: usize,
+    name: &str,
+) {
+    let resp = ui.interact(r.intersect(clip), id, Sense::click());
+    p.with_clip_rect(clip).extend(retry_glyph(r, if resp.hovered() { TOKENS.text } else { TOKENS.text_dim }));
+    if resp.on_hover_text(format!("Retry loading {name}")).clicked() {
+        let _ = app.retry_plugin(t, slot);
+    }
+}
 
 /// What an insert's key dropdown reads: "Key: None", or "Key: Kick (post)" naming the source
 /// track or bus and the tap (a bus key is always post-fader).

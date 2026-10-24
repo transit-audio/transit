@@ -315,6 +315,23 @@ pub fn status_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                     ui.add_space(crate::theme::SPACE);
                     crate::update::notice_line(ui, &n);
                 }
+                // Issue #82: more than one slot reads "Not responding": one click retries them all.
+                let stuck = app.player.as_ref().map_or(0, |p| p.stuck_slots().len());
+                app.retry_all_rect = None;
+                if stuck > 1 {
+                    ui.add_space(crate::theme::SPACE);
+                    let (r, glyph) = ui.allocate_exact_size(egui::vec2(crate::icons::ICON, crate::icons::ICON), egui::Sense::click());
+                    let text = egui::RichText::new("Retry all").color(TOKENS.text).size(11.5);
+                    let label = ui.add(egui::Label::new(text).sense(egui::Sense::click()));
+                    let hot = glyph.hovered() || label.hovered();
+                    ui.painter().extend(crate::devices::retry_glyph(r, if hot { TOKENS.text } else { TOKENS.text_dim }));
+                    let tip = format!("Retry loading the {stuck} plug-ins that are not responding");
+                    app.retry_all_rect = Some(r.union(label.rect));
+                    let clicked = glyph.on_hover_text(tip.clone()).clicked() | label.on_hover_text(tip).clicked();
+                    if clicked {
+                        let _ = app.run("plugin.retry_all", json!({}));
+                    }
+                }
                 if let Some(w) = app.io_warning() {
                     ui.add_space(crate::theme::SPACE);
                     let (r, _) = ui.allocate_exact_size(egui::vec2(crate::icons::ICON, crate::icons::ICON), egui::Sense::hover());

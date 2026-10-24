@@ -165,6 +165,11 @@ pub struct InsertRow {
     pub name: String,
     pub bypass: bool,
     pub rect: R4,
+    /// What the row reads after the name while the plug-in is on its way ("Loading…",
+    /// "Loading… (slow) 12 s", "Not responding"); empty once it is live.
+    pub status: String,
+    /// The Retry button of a "Not responding" row (zero otherwise, issue #82).
+    pub retry: R4,
 }
 
 /// Last frame's mixer geometry.
@@ -228,6 +233,11 @@ pub struct DeviceCard {
     pub external_latency: R4,
     /// An External Instrument's state line as the card shows it ("Manual: 19.5 ms", ...).
     pub external_state: String,
+    /// The line under the name: the plug-in's kind, or while it is on its way "Loading…",
+    /// "Loading… (slow) 12 s" or "Not responding" (issue #82).
+    pub status: String,
+    /// The Retry button beside "Not responding" (zero otherwise).
+    pub retry_button: R4,
 }
 
 /// Last frame's device chain geometry.
@@ -1619,16 +1629,20 @@ fn inserts_block(
         let name = app.plugin_name(&ins.plugin, false);
         let resp = ui.interact(rr.intersect(clip), ui.id().with(("insert", id.0, *slot)), Sense::click());
         p.rect_filled(rr, crate::theme::RADIUS_SM, if resp.hovered() { TOKENS.button_hover } else { TOKENS.bg });
-        let text_r = rr.shrink2(vec2(4.0, 0.0));
-        let loading = app.player.as_ref().is_some_and(|pl| pl.loading(id, *slot));
-        let stuck = app.player.as_ref().is_some_and(|pl| pl.stuck(id, *slot));
-        let shown = if stuck {
-            format!("{name} ({})", crate::devices::NOT_RESPONDING)
-        } else if loading {
-            format!("{name} ({})", crate::devices::LOADING)
-        } else {
-            name.clone()
-        };
+        let mut text_r = rr.shrink2(vec2(4.0, 0.0));
+        // While the plug-in is on its way: "Loading…", "Loading… (slow) 12 s", "Not responding"
+        // with a Retry button at the row's end (issue #82).
+        let load = app.player.as_ref().and_then(|pl| pl.slot_load(id, *slot));
+        let stuck = matches!(load, Some(soundcraft_playback::SlotLoad::NotResponding { .. }));
+        let status = load.map(crate::devices::load_text).unwrap_or_default();
+        let shown = if status.is_empty() { name.clone() } else { format!("{name} ({status})") };
+        let mut retry = R4::default();
+        if stuck {
+            let rb = Rect::from_center_size(pos2(rr.max.x - 9.0, rr.center().y), vec2(14.0, 14.0));
+            text_r.max.x = rb.min.x - 2.0;
+            crate::devices::retry_button(app, ui, &p, clip, rb, ui.id().with(("insert_retry", id.0, *slot)), id, *slot, &name);
+            retry = r4(rb);
+        }
         p.with_clip_rect(text_r.intersect(clip)).text(
             text_r.left_center(),
             Align2::LEFT_CENTER,
@@ -1647,6 +1661,7 @@ fn inserts_block(
         let slot = *slot;
         let bypass = ins.bypass;
         let editor_open = app.ui.plugin_windows.contains(&(id, slot));
+        let retry_name = name.clone();
         egui::Popup::context_menu(&resp).id(resp.id.with("insert_ctx")).show(|ui| {
             let label = if editor_open { "Close editor" } else { "Open editor" };
             let b = ui.add_enabled(enabled, egui::Button::new(label));
@@ -1654,6 +1669,14 @@ fn inserts_block(
             if b.clicked() {
                 app.toggle_editor((id, slot));
                 ui.close();
+            }
+            if stuck {
+                let b = ui.button("Retry").on_hover_text(format!("Retry loading {retry_name}"));
+                menu.push(MenuItem::at(ui, "Retry".into(), "retry".into(), b.rect));
+                if b.clicked() {
+                    let _ = app.retry_plugin(id, slot);
+                    ui.close();
+                }
             }
             let label = if bypass { "Turn On" } else { "Bypass" };
             let b = ui.button(label);
@@ -1669,7 +1692,7 @@ fn inserts_block(
                 ui.close();
             }
         });
-        sl.inserts.push(InsertRow { slot, name, bypass, rect: r4(rr) });
+        sl.inserts.push(InsertRow { slot, name, bypass, rect: r4(rr), status, retry });
     }
     if rows == 0 {
         return;

@@ -351,6 +351,11 @@ pub struct StudioApp {
     editors: Vec<EditorWanted>,
     /// Plug-in host threads not responding, as last reported in the status line (ADR 0018).
     host_wedged_shown: usize,
+    /// Slots reading "Not responding", as last reported in the status line (issue #82).
+    stuck_shown: usize,
+    /// The status line's "Retry all" (glyph and label) as last drawn: shown while more than one
+    /// slot reads "Not responding" (issue #82).
+    pub retry_all_rect: Option<egui::Rect>,
     /// The hosted editor windows' header strips: preset operations under way (issue #68).
     pub plugin_header: plugin_header::HeaderState,
     /// The arrangement: gesture in progress, scroll, and last frame's layout (for `ui.inspect`).
@@ -453,6 +458,8 @@ impl StudioApp {
             tracks_selected_by_header: false,
             editors: Vec::new(),
             host_wedged_shown: 0,
+            stuck_shown: 0,
+            retry_all_rect: None,
             plugin_header: plugin_header::HeaderState::default(),
             arrange: arrange::ArrangeState::default(),
             copied: Vec::new(),
@@ -555,6 +562,9 @@ impl StudioApp {
         if id == "track.clear_clip_indicators" {
             self.clear_clip_latches();
             return Ok(json!({"cleared": true}));
+        }
+        if matches!(id, "plugin.retry" | "plugin.retry_all") {
+            return self.retry_plugins(id, &params);
         }
         if finish::refuses(self, id) {
             return Err(self.status.clone());
@@ -772,17 +782,62 @@ impl StudioApp {
             self.status = format!("Plug-in editor: {e}");
         }
         let wedged = p.plugin_host_wedged();
-        let stuck = p.any_stuck();
-        if wedged > self.host_wedged_shown {
-            self.status = if stuck {
-                "A plug-in did not finish loading within 10 s and was left out (Not responding); remove it and add it again to retry".into()
-            } else {
-                "A plug-in is not responding; the live state of the plug-ins on its thread is not saved until it responds again".into()
+        let stuck = p.stuck_slots();
+        if stuck.len() > self.stuck_shown {
+            // Issue #82: name the plug-in and the way back.
+            self.status = match stuck.as_slice() {
+                [(_, slot, id)] => format!(
+                    "{} is not responding (it has not finished loading); Retry on its slot loads it again",
+                    self.plugin_name(id, *slot == soundcraft_mix::INSTRUMENT_SLOT)
+                ),
+                many => format!("{} plug-ins are not responding (they have not finished loading); Retry all loads them again", many.len()),
             };
+        } else if wedged > self.host_wedged_shown && stuck.is_empty() {
+            self.status = "A plug-in is not responding; the live state of the plug-ins on its thread is not saved until it responds again".into();
         } else if wedged == 0 && self.host_wedged_shown > 0 {
             self.status = "The plug-in that was not responding has returned; its state is saved again".into();
         }
         self.host_wedged_shown = wedged;
+        self.stuck_shown = stuck.len();
+    }
+
+    /// Makes a "Not responding" slot's plug-in again (issue #82): `plugin.retry`, as the slot's
+    /// Retry button and context menu run it.
+    pub fn retry_plugin(&mut self, t: TrackId, slot: usize) -> Result<Value, String> {
+        let slot = if slot == soundcraft_mix::INSTRUMENT_SLOT { json!("instrument") } else { json!(slot) };
+        self.run("plugin.retry", json!({"track": t.0, "slot": slot}))
+    }
+
+    /// `plugin.retry` and `plugin.retry_all`: checked by the engine (the slot exists; not a
+    /// document change), then the player makes the plug-ins again.
+    fn retry_plugins(&mut self, id: &str, params: &Value) -> Result<Value, String> {
+        let checked = self.engine.execute(id, params).map_err(|e| {
+            self.status = e.to_string();
+            e.to_string()
+        })?;
+        let Some(p) = &self.player else {
+            self.status = "Retry: no audio engine is running".into();
+            return Err(self.status.clone());
+        };
+        if id == "plugin.retry_all" {
+            let n = p.retry_all_plugins();
+            self.status = match n {
+                0 => "No plug-in is waiting for a retry".into(),
+                1 => "Retrying 1 plug-in".into(),
+                n => format!("Retrying {n} plug-ins"),
+            };
+            return Ok(json!({"retried": n}));
+        }
+        let track = TrackId(checked["track"].as_u64().unwrap_or_default());
+        let slot = checked["slot"].as_u64().and_then(|s| usize::try_from(s).ok()).unwrap_or(soundcraft_mix::INSTRUMENT_SLOT);
+        let plugin = checked["plugin"].as_str().unwrap_or_default().to_owned();
+        let name = self.plugin_name(&plugin, slot == soundcraft_mix::INSTRUMENT_SLOT);
+        if !self.player.as_ref().is_some_and(|p| p.retry_plugin(track, slot)) {
+            self.status = format!("{name} is not waiting for a retry (only a slot that reads Not responding is)");
+            return Err(self.status.clone());
+        }
+        self.status = format!("Retrying {name}");
+        Ok(json!({"retried": 1}))
     }
 
     pub fn is_playing(&self) -> bool {
@@ -1102,6 +1157,8 @@ mod plugin_header_tests;
 mod plugin_host_tests;
 #[cfg(test)]
 mod plugin_requests_tests;
+#[cfg(test)]
+mod plugin_retry_tests;
 #[cfg(test)]
 mod tests;
 

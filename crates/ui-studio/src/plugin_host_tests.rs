@@ -139,3 +139,61 @@ fn frames_advance_while_a_slow_plug_in_loads_and_the_slot_shows_loading_then_rea
     app.player = None;
     soundcraft_engine::shutdown_plugin_hosts();
 }
+
+/// The heavy-instrument fixture's creation time for the late-adoption test (issue #82, E48).
+const HEAVY: Duration = Duration::from_millis(1500);
+/// The display budget that test sets: the creation outlives it (and the request stops waiting).
+const HEAVY_SLOW_AFTER: Duration = Duration::from_millis(300);
+
+/// Issue #82 (escape E48), with the real VST3 fixture through the real Player and plug-in host:
+/// a creation that outlives the display budget reads "Loading… (slow)", is never "Not
+/// responding", and when it lands it is adopted (bound, with its editor handle), not discarded.
+#[test]
+fn a_heavy_instrument_slower_than_the_display_budget_is_adopted() {
+    if transit_plugin_host::INLINE_BY_DEFAULT {
+        return;
+    }
+    if std::env::var_os("TRANSIT_PLUGIN_HOST_FIXTURE_CHILD").is_none() {
+        let name = "plugin_host_tests::a_heavy_instrument_slower_than_the_display_budget_is_adopted";
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", name, "--nocapture"])
+            .env("TRANSIT_PLUGIN_HOST_FIXTURE_CHILD", "1")
+            .env("VST3_FIXTURE_CREATE_MS", HEAVY.as_millis().to_string())
+            .output()
+            .unwrap();
+        let (out, err) = (String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(output.status.success(), "{out}{err}");
+        assert!(out.contains("1 passed"), "the child ran no test: {out}");
+        return;
+    }
+    let synth = slow_synth();
+    let mut engine = soundcraft_engine::Engine::default();
+    let track = engine.session_mut().add_track(soundcraft_model::TrackKind::Instrument, soundcraft_model::ChannelFormat::Stereo, Some("Heavy"));
+    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    player.set_slow_after(HEAVY_SLOW_AFTER);
+    let mut app = StudioApp::new(engine, Some(player), Services::default());
+    let ctx = egui::Context::default();
+    for _ in 0..3 {
+        app.player.as_ref().unwrap().step_device_free();
+        frame(&mut app, &ctx);
+    }
+    let slot = soundcraft_mix::INSTRUMENT_SLOT;
+    app.set_instrument(track, &synth).unwrap();
+    let started = Instant::now();
+    let (mut seen_slow, mut seen_stuck) = (false, false);
+    while !app.player.as_ref().unwrap().has_editor(track, slot) {
+        assert!(started.elapsed() < Duration::from_secs(30), "the heavy instrument was never adopted: status {:?}", app.status);
+        app.player.as_ref().unwrap().step_device_free();
+        frame(&mut app, &ctx);
+        let p = app.player.as_ref().unwrap();
+        seen_slow |= matches!(p.slot_load(track, slot), Some(soundcraft_playback::SlotLoad::Slow { .. }));
+        seen_stuck |= p.stuck(track, slot);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(started.elapsed() >= HEAVY, "the fixture's synth is slow to make ({:?})", started.elapsed());
+    assert!(seen_slow, "it read Loading… (slow) past the display budget");
+    assert!(!seen_stuck, "it never read Not responding");
+    assert!(!app.player.as_ref().unwrap().any_loading());
+    app.player = None;
+    soundcraft_engine::shutdown_plugin_hosts();
+}
