@@ -124,6 +124,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Transport load readout (for example "30%  128 @ 48 kHz  ASIO") with an overload warning.
 - The Play button dims and pulses while Play is pending or plug-ins are still loading; hover it for the reason.
 - Piano roll with a velocity lane, and step entry: play notes on your keyboard to enter them at the cursor. Keys you play live are accented on the piano roll's keyboard. It shares the adaptive grid (Ctrl+1-4), with step-cursor keys and a fixed-velocity setting.
+- Quantize in the piano roll: a Quantize button opens grid, strength and swing controls plus a note-end option, with an outlined preview before you apply. Apply is one undo step, and Ctrl+U reuses the saved settings.
 - Freeze, Unfreeze and Flatten a track (the snowflake on the track header); a frozen track plays its rendered audio, with its key sources running.
 - Group tracks: Track > New Group Track or the "+ Group" quick-add; Ctrl+G folds the selected tracks into a group, Ctrl+Shift+G ungroups, and you can drag track headers into a folder. Edit Group… is the separate edit-group feature.
 - Fade and crossfade handles on audio clips: hover a top corner and drag for length (Shift: no snap), Alt-drag to bend, click for the shape menu, double-click to reset; right-click overlapping clips for Crossfade.
