@@ -177,6 +177,34 @@ mod tests {
         assert_eq!((release.at_ns, release.delay_ns), (host, delay));
     }
 
+    /// ADR 0020 decision 2 for the Measure (N1 of the slice review): a probe note is stamped
+    /// P(R0), the presentation time of the block it goes out on, exactly as an External Instrument
+    /// track's clip note is (offset 0, no A / r, no other shift), because C is defined against it.
+    #[test]
+    fn a_measure_note_is_stamped_p_of_its_block_start_like_a_clip_note() {
+        let (out, mut rx) = crate::player::midi_out::test_ring(1024);
+        let mut external = External::new(out);
+        let probe = crate::external_probe::ExtProbe::new(48_000);
+        assert!(probe.arm(7, 2, 60, 100, &[0]));
+        let (host, delay, ns) = (1_000_000_000u64, 22_000_000u64, 1e9 / 48_000.0);
+        let input = vec![vec![0.0f32; 64]];
+        let mut ons = Vec::new();
+        for i in 0..120u64 {
+            let block = Block { playing: false, position: 0, frames: 64, host_ns: Some(host + (i as f64 * 64.0 * ns) as u64), delay_ns: delay, ns_per_frame: ns };
+            external.measure(&probe, &block, &input, 64);
+            while let Ok(e) = rx.pop() {
+                if e.kind == Kind::Message && e.bytes[0] & 0xF0 == 0x90 {
+                    ons.push((e.track, e.at_ns, block.host_for(true).unwrap()));
+                }
+            }
+        }
+        assert!(!ons.is_empty(), "the warm-up note went out");
+        for (track, at_ns, p) in ons {
+            assert_eq!(track, 7);
+            assert_eq!(at_ns, p, "P(R0) of the block, without the mix's delay");
+        }
+    }
+
     // The send chained to the plan: the stamps External pushes, read back as render frames, feed
     // a fake duplex device's input, so the fake return can never disagree with the real stamp.
     const SR: u32 = 48_000;
