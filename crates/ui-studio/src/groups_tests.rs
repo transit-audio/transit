@@ -763,3 +763,18 @@ fn quick_add_audio_chevron_slot_does_not_add_a_track() {
     assert_eq!(t.app.engine.session().tracks.len(), n, "the chevron opens the format menu, it does not add");
     assert!(egui::Popup::is_any_open(&t.ctx), "the Audio dropdown opens");
 }
+
+#[test]
+fn narrow_quick_add_labels_use_the_empty_slot_but_audio_keeps_its_chevron_clear() {
+    let mut t = T::new();
+    t.app.ui.show_mixer = false;
+    t.app.ui.show_devices = false;
+    t.app.ui.header_width = 160.0;
+    t.frames(4);
+    let l = t.app.arrange.layout.clone();
+    let [full, vis] = l.add_label_w[1];
+    assert!(vis >= full * 0.7, "Instrument shows at least \"Instrum\": {vis} of {full}");
+    let [_, audio_vis] = l.add_label_w[0];
+    assert!(l.add_label_x[0] + audio_vis <= l.add_slot[0][0] + 0.5, "Audio ends before its chevron");
+    assert!((l.add_label_x[1] - l.add_label_x[0] + l.add_audio[0] - l.add_instrument[0]).abs() < 0.5, "alignment kept");
+}
