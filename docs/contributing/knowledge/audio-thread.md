@@ -21,6 +21,12 @@ not permission.
   goes back through the same channel for disposal off-thread.
 - **Actions** (transport, MIDI, record start) go through the action lane
   (`crates/playback/src/action_lane.rs`), a bounded preallocated queue.
+- **Live Cycle** (#81): the host sends `Player::set_loop` whenever the range Play would loop
+  (`StudioApp::wanted_loop`) changes while playing or a Play is pending, and the callback adopts it
+  at the next block without moving the playhead: before the new end it wraps there, past it it plays
+  on, `None` plays through. The wrap is the same one a loop set at Play renders (new transport epoch,
+  external MIDI release and chase). It is not tied to a session snapshot, since the Cycle edit's own
+  snapshot supersedes the one in force when it was sent.
 - **Plug-ins** are created, scanned and destroyed off the audio thread; only `process` runs on it.
   Hosted ones are created and destroyed on the plug-in host thread (see below).
 - Logging from the audio thread uses `on_audio_thread()` and defers the write to the UI thread.

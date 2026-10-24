@@ -30,6 +30,10 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   there and resumes at offset zero in the next lap with the same pitch and velocity, repeating
   at each wrap until the real release. Each loop lap stays exactly loop-length; a release exactly
   at the loop end produces no remainder. Journal recovery uses the same rule.
+- **Cycle changed during a take** (#81): a pass keeps the loop it started with until Stop
+  (`StudioApp::take_cycle`); laps and MIDI clips are cut by it, and the player is not retargeted
+  meanwhile. Cycle turned on mid-take plays straight through with no lap cuts; turned off, the
+  take keeps looping. The change reaches the transport when the take ends, if it is still running.
 - **MIDI take journal:** `crates/engine/src/midi_journal.rs`. The control thread appends each drained event (newline JSON, header with the latch and plan first, flushed every 250 ms and at Stop) to `<Audio Files>/<session>_<stamp>.midijournal`, never the audio thread; a clean Stop deletes it.
   A crash leaves it named in the autosave's `recording.json`; the next launch's recovery prompt rebuilds `<Track>_recovered` through `midi_take::build`, and Discard deletes it.
 
