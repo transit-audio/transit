@@ -272,6 +272,9 @@ pub struct StudioApp {
     /// Where the pass under way has got to, counting laps of the cycle: the transport position
     /// wraps, the capture's device time does not.
     record_clock: Option<host::RecordClock>,
+    /// The loop the pass under way records under (None: straight through), fixed at its start:
+    /// the player keeps it until Stop, and its laps and MIDI clips are cut by it (#81).
+    pub(crate) take_cycle: Option<Range>,
     /// The MIDI pass under way as drawn: provisional notes, rebuilt each frame (or every other).
     pub(crate) midi_live: Option<host::MidiLive>,
     midi_live_tick: u32,
@@ -398,6 +401,7 @@ impl StudioApp {
             finished_test_midi: None,
             record_start: 0,
             record_clock: None,
+            take_cycle: None,
             midi_live: None,
             midi_live_tick: 0,
             midi_journal: None,

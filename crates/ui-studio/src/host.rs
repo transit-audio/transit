@@ -176,6 +176,8 @@ impl StudioApp {
     ) {
         let rate = self.recorder.as_ref().map_or(0, |r| r.sample_rate);
         self.record_clock = None;
+        // The loop this pass records under; Cycle edits made while it runs wait for its end (#81).
+        self.take_cycle = self.wanted_loop();
         self.take_plan = Some(soundcraft_engine::io::Recording {
             start: self.record_start,
             pass,
@@ -738,8 +740,8 @@ impl StudioApp {
         let now = start + self.recording_elapsed(start);
         let cut = soundcraft_engine::midi_take::Cut { start, pass: plan.pass, punch: plan.punch, stop: now - start };
         let s = self.engine.session();
-        let cycle = s.edit.cycle_range();
-        let wrap = (s.edit.loop_playback && plan.pass.is_none() && !cycle.is_empty()).then_some(cycle);
+        let cycle = self.take_cycle.unwrap_or_default();
+        let wrap = self.take_cycle.filter(|_| plan.pass.is_none());
         let mut built = soundcraft_engine::midi_take::build_wrapping(&s.tempo, s.sample_rate, &events, &cut, wrap);
         // After a wrap only the lap under way is drawn, from the loop start to the playhead.
         let (start, end) = match self.record_clock.filter(|c| c.laps > 0 && wrap.is_some()) {
@@ -1007,17 +1009,18 @@ impl StudioApp {
         Ok(captured)
     }
 
-    /// Follow the transport while a pass runs, counting each wrap of the cycle as a lap.
+    /// Follow the transport while a pass runs, counting each wrap of the cycle it records under
+    /// (`take_cycle`) as a lap.
     pub(crate) fn observe_recording(&mut self) {
         if self.take_plan.is_none() || !self.is_playing() {
             return;
         }
         let at = self.position();
-        let edit = &self.engine.session().edit;
-        let cycle = edit.cycle_range();
-        let looping = edit.loop_playback && !cycle.is_empty();
+        let cycle = self.take_cycle;
         let clock = self.record_clock.get_or_insert(RecordClock { last: at, laps: 0 });
-        if looping && at < clock.last {
+        if let Some(cycle) = cycle
+            && at < clock.last
+        {
             clock.laps += cycle.len();
         }
         clock.last = at;
@@ -1130,7 +1133,7 @@ impl StudioApp {
     /// into a clip already under the take. Nothing played, nothing placed.
     fn place_midi_take(&mut self, plan: &soundcraft_engine::io::Recording, midi: &soundcraft_playback::MidiTake, end: Samples) {
         let events: Vec<_> = midi.timed(self.engine.session().sample_rate.hz()).iter().filter_map(|(offset, e)| rec_event(*offset, e)).collect();
-        let ids = soundcraft_engine::midi_take::place_midi_recording(&mut self.engine, plan, &events, end - plan.start);
+        let ids = soundcraft_engine::midi_take::place_midi_recording_wrapping(&mut self.engine, plan, &events, end - plan.start, self.take_cycle);
         if midi.dropped > 0 {
             self.status = format!("{} MIDI events were lost: the capture queue was full", midi.dropped);
         }
@@ -1234,11 +1237,10 @@ impl StudioApp {
     /// Adapted from `SoundApp::play_from_selection`: play from the cursor; with Cycle on and a
     /// selection, loop the selection (the engine's loop range is the selection, plan 06 L6).
     pub fn play_from_cursor(&mut self) {
-        let s = self.engine.session();
-        let sel = s.edit.cycle_range();
-        if s.edit.loop_playback && !sel.is_empty() {
+        if let Some(sel) = self.wanted_loop() {
             self.start_play(sel.start, None, Some(sel));
         } else {
+            let s = self.engine.session();
             let preroll = if s.edit.pre_post_roll { s.edit.pre_roll } else { 0 };
             let at = self.cursor();
             self.start_play((at - preroll).max(0), None, None);
@@ -1263,16 +1265,28 @@ impl StudioApp {
         }
     }
 
-    /// The loop region reaches a running player the moment it changes (or Cycle goes off), like
-    /// Ableton: the playhead is not moved. Not while recording, where the loop shapes the take passes.
-    fn retarget_loop(&mut self) {
+    /// The range Cycle loops, as Play starts it: the cycle range while Cycle is on.
+    pub(crate) fn wanted_loop(&self) -> Option<Range> {
         let edit = &self.engine.session().edit;
-        let want = (edit.loop_playback && !edit.loop_range.is_empty()).then_some(edit.loop_range);
-        if want == self.loop_seen {
+        let cycle = edit.cycle_range();
+        (edit.loop_playback && !cycle.is_empty()).then_some(cycle)
+    }
+
+    /// #81: Cycle going on or off, or the cycle range changing, reaches a running (or starting)
+    /// player at once, like Ableton: the playhead is not moved. Inside the new range it wraps at
+    /// the range end; before it, it plays on and wraps on reaching the end; off, it plays through.
+    /// The same range Play loops (`play_from_cursor`), so Stop and Play changes nothing.
+    ///
+    /// Not while a take records: its laps are cut by the loop it started with (`take_cycle`), so
+    /// the player keeps that loop until Stop, and a change made meanwhile lands when the take ends
+    /// if the transport is still running.
+    fn retarget_loop(&mut self) {
+        let want = self.wanted_loop();
+        if want == self.loop_seen || self.recording_active() {
             return;
         }
         self.loop_seen = want;
-        if self.recording_active() || !self.is_playing() {
+        if !self.is_playing() && self.player_requests.play.is_none() {
             return;
         }
         if let Some(p) = &self.player {
@@ -1701,6 +1715,10 @@ impl PlayerRequests {
 #[cfg(test)]
 #[path = "player_tests.rs"]
 mod player_tests;
+
+#[cfg(test)]
+#[path = "live_cycle_tests.rs"]
+mod live_cycle_tests;
 
 /// How far a recording pass has run on the transport: the last position seen and the cycle laps
 /// it has wrapped over since, so `last + laps` only ever grows.

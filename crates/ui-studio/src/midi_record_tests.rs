@@ -439,6 +439,8 @@ fn cycling(app: &mut StudioApp, at: i64) {
     let edit = &mut app.engine.session_mut().edit;
     edit.loop_playback = true;
     edit.loop_range = soundcraft_time::Range::new(4 * BEAT, 6 * BEAT);
+    // As `plan_recording` fixes it at the start of the pass.
+    app.take_cycle = app.wanted_loop();
     app.record_start = at;
     app.take_plan = Some(soundcraft_engine::io::Recording {
         start: at,
