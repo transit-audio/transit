@@ -222,6 +222,12 @@ pub struct DeviceCard {
     pub hardware_state: String,
     /// The state area of a hardware insert (a button to enable it again when it is disabled).
     pub hardware_button: R4,
+    /// An External Instrument's return dropdown, gain and manual latency fields (ADR 0020).
+    pub external_return: R4,
+    pub external_gain: R4,
+    pub external_latency: R4,
+    /// An External Instrument's state line as the card shows it ("Manual: 19.5 ms", ...).
+    pub external_state: String,
 }
 
 /// Last frame's device chain geometry.
@@ -2005,7 +2011,7 @@ fn midi_output_button(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip:
     }
     let label = view.header_badge(t.id, &t.midi_output).unwrap_or_else(|| view.label(t.id, &t.midi_output));
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "MIDI output"));
-    if let Some(params) = view.popup(&resp, t.id, &t.midi_output) {
+    if let Some(params) = view.popup(&resp, t.id, &t.midi_output, t.external_instrument().is_some()) {
         let _ = app.run("midi.output", params);
     }
     sl.midi_output = r4(r);

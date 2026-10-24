@@ -96,6 +96,9 @@ impl StudioApp {
     /// hosted plug-in the cache does not know, "Scanning…" while a scan runs or a generic label
     /// ([`hosted_label`]). Reads the caches only; never scans or loads anything.
     pub fn plugin_name(&mut self, id: &str, instrument: bool) -> String {
+        if id == soundcraft_model::EXTERNAL_INSTRUMENT_PLUGIN {
+            return crate::external_instrument::MENU_LABEL.to_string();
+        }
         if self.mixer.builtin.is_none() {
             self.builtin_plugins();
         }
@@ -322,6 +325,8 @@ fn card_body(
     pc.rect_filled(title, crate::theme::top_corners(), if on { TOKENS.button } else { TOKENS.bg });
     let plugin = ins.map(|i| i.plugin.clone()).unwrap_or_default();
     let hw = ins.and_then(|i| i.hardware.clone());
+    // An External Instrument (ADR 0020) only in the instrument slot.
+    let ext = ins.filter(|_| slot.is_none()).and_then(Insert::external_instrument).cloned();
     let name = if hw.is_some() {
         "Hardware Insert".to_string()
     } else if plugin.is_empty() {
@@ -384,6 +389,8 @@ fn card_body(
     );
     let kind = match (slot, plugin.split(':').next()) {
         _ if hw.is_some() => hw.as_ref().map_or_else(String::new, |h| crate::hardware_ui::card_line(&h.send, &h.ret)),
+        // The card's own rows say what it does.
+        _ if ext.is_some() => String::new(),
         (None, Some("vst3")) => "VST3 instrument".to_string(),
         (None, Some("clap")) => "CLAP instrument".into(),
         (None, _) => "Instrument".into(),
@@ -433,17 +440,35 @@ fn card_body(
         let mut filter = std::mem::take(&mut app.mixer.instrument_filter);
         let mut filter_rect = app.mixer.filter_rect;
         let mut picked = None;
+        let mut external = false;
         egui::Popup::menu(&resp).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
+            // A hardware synth (ADR 0020): MIDI out to its port, its audio back on an input path.
+            let label = crate::external_instrument::MENU_LABEL;
+            let b = crate::menus::check_button(ui, ext.is_some(), label)
+                .on_hover_text("Play a hardware synth: the track's MIDI goes to its port and its audio comes back on an input");
+            menu.push(MenuItem::at(ui, label.to_string(), soundcraft_model::EXTERNAL_INSTRUMENT_PLUGIN.to_string(), b.rect));
+            if b.clicked() {
+                external = true;
+                ui.close();
+            }
+            ui.separator();
             let lists = app.instrument_lists();
             picked = instrument_menu(ui, &lists, ins.map(|i| i.plugin.as_str()), &mut filter, &mut filter_rect, menu);
         });
         app.mixer.instrument_filter = filter;
         app.mixer.filter_rect = filter_rect;
+        if external {
+            let _ = app.set_external_instrument(t);
+        }
         if let Some(id) = picked {
             app.mixer.instrument_filter.clear();
             let _ = app.set_instrument(t, &id);
         }
         if ins.is_none() {
+            return c;
+        }
+        if let Some(e) = &ext {
+            crate::external_instrument::card(app, ui, &pc, lane, t, e, r, title.max.y, eb, menu, &mut c);
             return c;
         }
     }

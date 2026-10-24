@@ -68,6 +68,9 @@ pub struct BounceForm {
     pub joint: bool,
     /// The folder the stems go to.
     pub dir: String,
+    /// The user chose "Render without it": the External Instruments are left out (ADR 0020
+    /// decision 9). Never set without that choice.
+    pub without_external: bool,
 }
 
 /// One output path in the by-path mode.
@@ -169,6 +172,11 @@ pub struct FinishState {
     pub replace: Replace,
     /// The "Replace existing file?" question's buttons as last drawn: replace, cancel.
     pub replace_buttons: (R4, R4),
+    /// The External Instrument tracks the bounce would leave out, while the question about them
+    /// is open (ADR 0020 decision 9).
+    pub external_question: Option<Vec<String>>,
+    /// That question's buttons as last drawn: "Render without it", cancel.
+    pub external_buttons: (R4, R4),
 }
 
 /// Where the "Replace existing file?" question stands.
@@ -412,6 +420,7 @@ impl StudioApp {
             paths: self.path_choices(),
             joint: true,
             dir: dir.join("Stems").to_string_lossy().into_owned(),
+            without_external: false,
         });
         self.dialog = Some(Dialog::Bounce);
     }
@@ -439,6 +448,14 @@ impl StudioApp {
             }
             BounceRange::Whole => (0, s.content_end().max(1)),
         };
+        // An External Instrument plays only in real time: the bounce leaves it out only when the
+        // user chooses that (ADR 0020 decision 9), never silently.
+        let left_out = soundcraft_engine::cmd::external_in_render(s);
+        if !left_out.is_empty() && !f.without_external {
+            self.status = format!("{}: render without it, or cancel", external_notice(&left_out));
+            self.finish.external_question = Some(left_out);
+            return Err(self.status.clone());
+        }
         if f.by_path {
             return self.start_bounce_paths(&f, start, end);
         }
@@ -465,12 +482,16 @@ impl StudioApp {
         if f.source != "main" {
             p["source"] = json!(f.source);
         }
+        if f.without_external {
+            p["without_external"] = json!(true);
+        }
         self.capture_plugin_states()?;
         match soundcraft_engine::cmd::bounce_job(&self.engine, &p) {
             Ok(job) => {
                 self.finish.job = Some(job);
                 self.finish.bounce_form = None;
-                self.status = self.with_state_notice(format!("Bouncing to {}…", path.display()));
+                let status = format!("Bouncing to {}…{}", path.display(), left_out_note(&self.engine));
+                self.status = self.with_state_notice(status);
                 Ok(())
             }
             Err(e) => {
@@ -498,8 +519,11 @@ impl StudioApp {
             (true, true) => json!("joint"),
             (true, false) => json!("each"),
         };
-        let p =
+        let mut p =
             json!({"dir": dir, "paths": picked, "format": f.format, "bit_depth": f.bit_depth, "normalize": normalize, "start": start, "end": end});
+        if f.without_external {
+            p["without_external"] = json!(true);
+        }
         self.capture_plugin_states()?;
         match soundcraft_engine::cmd::bounce_paths_job(&self.engine, &p) {
             Ok(job) if job.files().iter().any(|x| x.exists()) && self.finish.replace != Replace::Yes => {
@@ -509,7 +533,8 @@ impl StudioApp {
             }
             Ok(job) => {
                 self.finish.replace = Replace::No;
-                self.status = self.with_state_notice(format!("Bouncing {} stems to {dir}...", job.files().len()));
+                let status = format!("Bouncing {} stems to {dir}...{}", job.files().len(), left_out_note(&self.engine));
+                self.status = self.with_state_notice(status);
                 self.finish.path_job = Some(job);
                 self.finish.paths_request = Some(p);
                 self.finish.bounce_form = None;
@@ -522,6 +547,15 @@ impl StudioApp {
         }
     }
 
+    /// "Render without it": the bounce leaves the External Instruments out, as the user chose.
+    pub fn bounce_without_external(&mut self) -> Result<(), String> {
+        self.finish.external_question = None;
+        if let Some(f) = self.finish.bounce_form.as_mut() {
+            f.without_external = true;
+        }
+        self.start_bounce()
+    }
+
     /// Cancel the bounce form or the bounce being rendered (its part file is removed).
     pub fn cancel_bounce(&mut self) {
         if self.finish.job.take().is_some() || self.finish.path_job.take().is_some() {
@@ -529,6 +563,7 @@ impl StudioApp {
         }
         self.finish.bounce_form = None;
         self.finish.replace = Replace::No;
+        self.finish.external_question = None;
         if matches!(self.dialog, Some(Dialog::Bounce)) {
             self.dialog = None;
         }
@@ -766,6 +801,10 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         app.finish.layout.bounce = None;
         return;
     };
+    if let Some(names) = app.finish.external_question.clone() {
+        external_question(app, ctx, &names);
+        return;
+    }
     if app.finish.replace != Replace::No {
         replace_question(app, ctx, &f);
         return;
@@ -889,6 +928,47 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
         app.cancel_bounce();
     } else if go && app.start_bounce().is_err() {
         // The form stays open; the status line says why.
+    }
+}
+
+/// "This range has an External Instrument (Model D), which can only render in real time." with the
+/// tracks named.
+fn external_notice(names: &[String]) -> String {
+    let noun = if names.len() == 1 { "an External Instrument" } else { "External Instruments" };
+    format!("This range has {noun} ({}), which can only render in real time", names.join(", "))
+}
+
+/// What a bounce started without the External Instruments adds to the status line: the tracks
+/// left out.
+fn left_out_note(engine: &soundcraft_engine::Engine) -> String {
+    let names = soundcraft_engine::cmd::external_in_render(engine.session());
+    if names.is_empty() { String::new() } else { format!(" Left out: {} (External Instrument).", names.join(", ")) }
+}
+
+/// The External Instrument question in place of the form (ADR 0020 decision 9): "Render without
+/// it" leaves the named tracks out explicitly; Cancel (or Escape) goes back to the form with
+/// nothing written. Leaving them out is never the default: Enter does not choose it.
+fn external_question(app: &mut StudioApp, ctx: &egui::Context, names: &[String]) {
+    let (mut without, mut no) = (false, false);
+    egui::Modal::new(egui::Id::new("bounce_external")).show(ctx, |ui| {
+        ui.set_width(400.0);
+        ui.label(egui::RichText::new("External Instrument").strong());
+        ui.label(egui::RichText::new(format!("{}.", external_notice(names))).color(TOKENS.text_dim));
+        ui.add_space(crate::theme::SPACE);
+        ui.horizontal(|ui| {
+            let w = ui.button("Render without it");
+            let c = ui.button("Cancel");
+            app.finish.external_buttons = (crate::arrange::r4(w.rect), crate::arrange::r4(c.rect));
+            without = w.clicked();
+            no = c.clicked();
+        });
+    });
+    no |= ctx.input(|i| hit(i, A::DialogCancel));
+    if without {
+        let _ = app.bounce_without_external();
+    } else if no {
+        app.finish.external_question = None;
+        app.status = "Bounce not started".into();
     }
 }
 

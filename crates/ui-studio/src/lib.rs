@@ -18,6 +18,7 @@ pub mod browser;
 pub mod builtin_editor;
 pub mod control;
 pub mod devices;
+mod external_instrument;
 pub mod fades;
 pub mod fine;
 pub mod finish;

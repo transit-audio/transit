@@ -3869,3 +3869,101 @@ fn the_ruler_block_ignores_the_selection_when_there_is_no_region() {
     frames(&mut app, &ctx, 10, &mut time);
     assert_eq!(loop_range(&app), (0, 0));
 }
+
+// ---- External Instrument (ADR 0020 slice 1) ----
+
+#[test]
+fn the_instrument_menu_puts_an_external_instrument_on_the_track_and_its_card_edits_it() {
+    let mut app = app();
+    app.engine.set_io_map(soundcraft_model::IoMap::for_device("test", "test", 2, 2));
+    let t = new_track(&mut app, json!({"kind": "instrument", "name": "Model D"}));
+    app.ui.show_devices = true;
+    app.focus(t);
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    frames(&mut app, &ctx, 3, &mut time);
+    let before = undo_len(&mut app);
+    let pick = app.mixer.devices.cards[0].pick_button;
+    click(&mut app, mid(pick));
+    frames(&mut app, &ctx, 6, &mut time);
+    let item = app.mixer.devices.menu.iter().find(|m| m.value == soundcraft_model::EXTERNAL_INSTRUMENT_PLUGIN).cloned();
+    let item = item.expect("the instrument menu offers the External Instrument");
+    assert_eq!(item.label, "External Instrument");
+    click(&mut app, mid(item.rect));
+    frames(&mut app, &ctx, 6, &mut time);
+    let ins = instrument_of(&app, t).unwrap();
+    assert_eq!(ins.plugin, soundcraft_model::EXTERNAL_INSTRUMENT_PLUGIN);
+    assert_eq!(ins.external.as_ref().unwrap().ret, "In 1", "the first input path is the return to start with");
+    assert_eq!(undo_len(&mut app), before + 1, "one undo step");
+    let card = app.mixer.devices.cards[0].clone();
+    assert_eq!(card.name, "External Instrument");
+    assert_eq!(card.external_state, "No audio device", "no player in a test");
+    assert_ne!(card.external_return, [0.0; 4]);
+    assert_ne!(card.external_gain, [0.0; 4]);
+    assert_ne!(card.external_latency, [0.0; 4]);
+    // The return dropdown lists the input paths; a pick is one instrument.external.
+    click(&mut app, mid(card.external_return));
+    frames(&mut app, &ctx, 6, &mut time);
+    let item = app.mixer.devices.menu.iter().find(|m| m.value == "return:In 2").cloned().expect("In 2 is offered");
+    click(&mut app, mid(item.rect));
+    frames(&mut app, &ctx, 6, &mut time);
+    assert_eq!(instrument_of(&app, t).unwrap().external.unwrap().ret, "In 2");
+    // The latency field: typed ms, committed when it loses focus.
+    let field = app.mixer.devices.cards[0].external_latency;
+    click(&mut app, mid(field));
+    frames(&mut app, &ctx, 2, &mut time);
+    send_control(&mut app, "ui.text", json!({"text": "19.5"}));
+    frames(&mut app, &ctx, 2, &mut time);
+    send_control(&mut app, "ui.key", json!({"key": "Enter"}));
+    frames(&mut app, &ctx, 4, &mut time);
+    assert_eq!(instrument_of(&app, t).unwrap().external.unwrap().manual_ms, Some(19.5), "{}", app.status);
+}
+
+#[test]
+fn a_bounce_with_an_external_instrument_asks_and_leaves_it_out_only_when_chosen() {
+    let mut app = app();
+    let t = new_track(&mut app, json!({"kind": "instrument", "name": "Model D"}));
+    app.run("instrument.external", json!({"track": t.0, "return": "In 1"})).unwrap();
+    app.run("midi.new_clip", json!({"tracks": [t.0], "start": 0, "end": 4_800})).unwrap();
+    let dir = std::env::temp_dir().join(format!("transit-ext-bounce-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let out = dir.join("mix.wav");
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    let open = |app: &mut StudioApp| {
+        app.open_bounce();
+        if let Some(f) = &mut app.finish.bounce_form {
+            f.path = out.to_string_lossy().into_owned();
+            f.range = crate::finish::BounceRange::Whole;
+        }
+    };
+    open(&mut app);
+    assert!(app.start_bounce().is_err(), "never a silent skip");
+    assert_eq!(app.finish.external_question.as_deref(), Some(&["Model D".to_string()][..]));
+    assert!(app.status.contains("External Instrument (Model D)"), "{}", app.status);
+    assert!(app.finish.job.is_none());
+    // Cancel: nothing is written, the form is back.
+    frames(&mut app, &ctx, 3, &mut time);
+    let cancel = app.finish.external_buttons.1;
+    click(&mut app, mid(cancel));
+    frames(&mut app, &ctx, 3, &mut time);
+    assert!(app.finish.external_question.is_none() && app.finish.job.is_none());
+    assert_eq!(app.status, "Bounce not started");
+    // Render without it: the bounce runs and the status names the track left out.
+    assert!(app.start_bounce().is_err());
+    frames(&mut app, &ctx, 3, &mut time);
+    let without = app.finish.external_buttons.0;
+    click(&mut app, mid(without));
+    frames(&mut app, &ctx, 3, &mut time);
+    assert!(app.finish.external_question.is_none());
+    assert!(app.status.contains("Left out: Model D"), "{}", app.status);
+    for _ in 0..200 {
+        if app.finish.job.is_none() {
+            break;
+        }
+        frames(&mut app, &ctx, 1, &mut time);
+    }
+    assert!(out.exists(), "{}", app.status);
+    let _ = std::fs::remove_dir_all(&dir);
+}

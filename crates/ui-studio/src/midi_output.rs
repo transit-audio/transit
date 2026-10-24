@@ -120,7 +120,7 @@ impl OutputView {
         Some(HeaderChip { text: format!("{name} · {channel}"), missing: self.missing(track, output) })
     }
 
-    fn port_label(&self, output: &MidiOutput) -> String {
+    pub(crate) fn port_label(&self, output: &MidiOutput) -> String {
         match output {
             MidiOutput::Internal => "Instrument".into(),
             MidiOutput::External { port, .. } => {
@@ -152,8 +152,10 @@ impl OutputView {
         }
     }
 
-    /// Returns only the changed field, so choosing a port keeps the channel and offset.
-    pub(crate) fn popup(&self, response: &egui::Response, track: TrackId, output: &MidiOutput) -> Option<Value> {
+    /// Returns only the changed field, so choosing a port keeps the channel and offset. On a track
+    /// with an External Instrument (`external`) the offset is held at 0: its latency is set on the
+    /// device (ADR 0020 decision 1), and the offset row says so.
+    pub(crate) fn popup(&self, response: &egui::Response, track: TrackId, output: &MidiOutput, external: bool) -> Option<Value> {
         response.clone().on_hover_text(format!("{}\n{}", self.label(track, output), self.status));
         let mut change = None;
         egui::Popup::menu(response).width(260.0).show(|ui| {
@@ -196,29 +198,36 @@ impl OutputView {
                         }
                     }
                 });
-                ui.horizontal(|ui| {
-                    ui.label("Offset");
-                    // Edited locally; one command (one undo step) when the drag or typing ends.
-                    let id = ui.id().with(("midi-out-offset", track.0));
-                    let mut value = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or_else(|| output.offset_ms());
-                    let response = ui.add(
-                        egui::DragValue::new(&mut value)
-                            .range(-MAX_MIDI_OUT_OFFSET_MS..=MAX_MIDI_OUT_OFFSET_MS)
-                            .speed(0.1)
-                            .fixed_decimals(1)
-                            .suffix(" ms"),
-                    );
-                    if response.changed() {
-                        ui.data_mut(|d| d.insert_temp(id, value));
-                    }
-                    if (response.drag_stopped() || response.lost_focus()) && ui.data(|d| d.get_temp::<f32>(id)).is_some() {
-                        ui.data_mut(|d| d.remove::<f32>(id));
-                        if (value - output.offset_ms()).abs() > f32::EPSILON {
-                            change = Some(json!({"track": track.0, "offset_ms": value}));
+                if external {
+                    ui.horizontal(|ui| {
+                        ui.label("Offset");
+                        ui.weak(EXTERNAL_OFFSET);
+                    });
+                } else {
+                    ui.horizontal(|ui| {
+                        ui.label("Offset");
+                        // Edited locally; one command (one undo step) when the drag or typing ends.
+                        let id = ui.id().with(("midi-out-offset", track.0));
+                        let mut value = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or_else(|| output.offset_ms());
+                        let response = ui.add(
+                            egui::DragValue::new(&mut value)
+                                .range(-MAX_MIDI_OUT_OFFSET_MS..=MAX_MIDI_OUT_OFFSET_MS)
+                                .speed(0.1)
+                                .fixed_decimals(1)
+                                .suffix(" ms"),
+                        );
+                        if response.changed() {
+                            ui.data_mut(|d| d.insert_temp(id, value));
                         }
-                    }
-                });
-                ui.weak("Positive sends later, negative earlier, than the audio.");
+                        if (response.drag_stopped() || response.lost_focus()) && ui.data(|d| d.get_temp::<f32>(id)).is_some() {
+                            ui.data_mut(|d| d.remove::<f32>(id));
+                            if (value - output.offset_ms()).abs() > f32::EPSILON {
+                                change = Some(json!({"track": track.0, "offset_ms": value}));
+                            }
+                        }
+                    });
+                    ui.weak("Positive sends later, negative earlier, than the audio.");
+                }
             }
             ui.separator();
             ui.add(egui::Label::new(egui::RichText::new(&self.status).weak()).wrap());
@@ -226,6 +235,9 @@ impl OutputView {
         change
     }
 }
+
+/// What the Out button's offset row reads on an External Instrument track.
+pub(crate) const EXTERNAL_OFFSET: &str = "Latency is set on the External Instrument";
 
 /// The same identity rule as MIDI inputs: a nonempty id decides; otherwise name and ordinal,
 /// where an anonymous port of that name takes precedence over identified namesakes.
@@ -301,7 +313,7 @@ mod tests {
                 |ui| {
                     let response = ui.button("Out");
                     button = response.rect;
-                    changed = view.popup(&response, TrackId(1), &output);
+                    changed = view.popup(&response, TrackId(1), &output, false);
                 },
             );
             out.textures_delta.clear();
@@ -348,5 +360,55 @@ mod tests {
             engine.session().track(track).unwrap().midi_output,
             MidiOutput::External { port, channel: MidiOutChannel::Channel(1), offset_ms: 2.5 }
         );
+    }
+    #[test]
+    fn on_an_external_instrument_track_the_offset_row_says_where_the_latency_is_set() {
+        let view = OutputView { ports: Vec::new(), states: Vec::new(), status: String::new() };
+        let output = external("one");
+        let texts = |external: bool| {
+            let ctx = egui::Context::default();
+            let mut button = egui::Rect::NOTHING;
+            let mut texts = Vec::new();
+            for frame in 0..4u32 {
+                let pos = button.center();
+                let events = if frame == 1 {
+                    vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+                        egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+                    ]
+                } else {
+                    Vec::new()
+                };
+                let mut out = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 700.0))),
+                        time: Some(f64::from(frame) / 4.0),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let response = ui.button("Out");
+                        button = response.rect;
+                        let _ = view.popup(&response, TrackId(1), &output, external);
+                    },
+                );
+                out.textures_delta.clear();
+                texts = out
+                    .shapes
+                    .iter()
+                    .filter_map(|s| match &s.shape {
+                        egui::Shape::Text(t) => Some(t.galley.text().to_string()),
+                        _ => None,
+                    })
+                    .collect::<Vec<_>>();
+            }
+            texts
+        };
+        let held = texts(true);
+        assert!(held.iter().any(|t| t == EXTERNAL_OFFSET), "{held:?}");
+        assert!(!held.iter().any(|t| t.starts_with("Positive sends later")), "{held:?}");
+        let free = texts(false);
+        assert!(free.iter().any(|t| t.starts_with("Positive sends later")) && !free.iter().any(|t| t == EXTERNAL_OFFSET), "{free:?}");
     }
 }
