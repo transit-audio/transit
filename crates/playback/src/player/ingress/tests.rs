@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::*;
 use crate::plan_bridge;
+use crate::player::monitor;
 use soundcraft_mix::{DeviceGeneration, PlanLimits, RenderTarget, SlotGen};
 use soundcraft_model::TrackId;
 use transit_midi_io::{InputConfig, fake::Fake};
@@ -501,6 +502,72 @@ fn pending_initial_route_preserves_post_boundary_input_until_acknowledged() {
     });
     assert_eq!(observed, [(1, 2_000)]);
     assert_eq!(worker.shared.cancelled.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn monitor_on_a_route_attached_later_keeps_its_backlog_and_the_monitor_sees_each_message_once() {
+    let (control, mut plans) = bridge();
+    let (mut registry, _sources) = sources::pair(&control).unwrap();
+    let token = registry.register(0).unwrap();
+    let (lane, mut audio) = action_lane::pair_with_result(&control);
+    let (send, mut worker) = pump(lane);
+    let (hub, tap_in, _tap_out) = monitor::Hub::new();
+    hub.set_enabled(true);
+    send.send(Update::Monitor(tap_in)).ok().unwrap();
+    let fake = Fake::default();
+    let key = fake.add_input("Monitored, route pending");
+    let (handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
+    send.send(Update::Input(Input { id: 1, mon: Mon::default(), consumer, routes: Vec::new() })).ok().unwrap();
+    worker.step();
+    let port = fake.input_port(&key).unwrap();
+    port.deliver(1_000, &[0x90, 60, 100]);
+    registry.cancel_before(token, handle.boundary().cutoff()).unwrap();
+    port.deliver(2_000, &[0x90, 64, 100]);
+    worker.step(); // no admitting route: the monitor peeks, nothing is popped
+    worker.step();
+    let seen = |hub: &monitor::Hub| {
+        let mut events = Vec::new();
+        hub.drain(&mut events, 100);
+        events.iter().map(|e| e.data1).collect::<Vec<_>>()
+    };
+    assert_eq!(seen(&hub), [60, 64], "each message once, though two steps peeked at it");
+    assert_eq!(worker.shared.offered.load(Ordering::Relaxed), 0);
+    let applied = Arc::new(AtomicBool::new(false));
+    send.send(Update::Routes { id: 1, routes: vec![(registry.permit(token).unwrap(), route())], applied: Arc::clone(&applied) }).ok().unwrap();
+    worker.step();
+    assert!(applied.load(Ordering::Acquire));
+    let mut observed = Vec::new();
+    audio.service(&mut action_lane::callback_scope(), &mut plans, &mut |event, _| {
+        let action_lane::Event::Action { payload, .. } = event else { panic!("unexpected recovery") };
+        observed.push((payload.raw.seq, payload.raw.backend_time_us));
+        ActionResult::MidiBuffered
+    });
+    assert_eq!(observed, [(1, 2_000)], "the post-boundary message is delivered to the late route");
+    assert!(seen(&hub).is_empty(), "popping it did not show it again");
+}
+
+#[test]
+fn monitor_on_a_port_without_an_admitting_route_is_trimmed_past_512_pending() {
+    let (control, _plans) = bridge();
+    let (lane, _audio) = action_lane::pair_with_result(&control);
+    let (send, mut worker) = pump(lane);
+    let (hub, tap_in, _tap_out) = monitor::Hub::new();
+    hub.set_enabled(true);
+    send.send(Update::Monitor(tap_in)).ok().unwrap();
+    let fake = Fake::default();
+    let key = fake.add_input("Unrouted flood");
+    let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
+    send.send(Update::Input(Input { id: 1, mon: Mon::default(), consumer, routes: Vec::new() })).ok().unwrap();
+    worker.step();
+    let port = fake.input_port(&key).unwrap();
+    for n in 0..600u64 {
+        port.deliver(n, &[0xB0, 1, (n % 100) as u8]);
+    }
+    worker.step();
+    assert_eq!(worker.inputs[0].consumer.len(), MONITOR_TRIM / 2);
+    let mut events = Vec::new();
+    hub.drain(&mut events, 1000);
+    assert_eq!(events.len(), 600, "everything trimmed had already been shown");
 }
 
 #[test]

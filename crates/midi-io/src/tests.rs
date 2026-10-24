@@ -584,3 +584,30 @@ fn an_undefined_status_clears_running_status() {
     assert_eq!(msgs, [vec![0x90, 60, 1]]);
     assert_eq!(c.malformed_bytes, 3);
 }
+
+#[test]
+fn for_each_pending_leaves_every_event_in_place() {
+    let fake = Fake::default();
+    let (_io, _handle, mut consumer) = open(&fake, "Peeked", config(16, 4));
+    let port = fake.input_port(&Fake::key("Peeked", 0)).unwrap();
+    for n in 0..5u8 {
+        assert!(port.deliver(u64::from(n), &[0x90, 60 + n, 100]));
+    }
+    let peek = |c: &mut InputConsumer| {
+        let mut seen = Vec::new();
+        c.for_each_pending(|e| seen.push((e.seq, e.bytes[1])));
+        seen
+    };
+    let first = peek(&mut consumer);
+    assert_eq!(first.len(), 5);
+    assert_eq!(peek(&mut consumer), first, "peeking twice yields the same events");
+    assert_eq!(consumer.len(), 5, "nothing was removed");
+    let popped: Vec<_> = drain(&mut consumer).iter().map(|e| (e.seq, e.bytes[1])).collect();
+    assert_eq!(popped, first, "a later consume gets them all, in order");
+    for n in 0..5u8 {
+        port.deliver(10, &[0x90, n, 1]);
+    }
+    assert_eq!(consumer.discard(2), 2);
+    assert_eq!(consumer.len(), 3);
+    assert_eq!(consumer.discard(99), 3);
+}
