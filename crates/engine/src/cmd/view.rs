@@ -8,6 +8,8 @@ use soundcraft_time::{GridValue, NoteValue, TimeFormat};
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         // Help > Check for Updates...: the studio app answers it (it owns the network service); listed here for agents.
+        // Window > MIDI Monitor (#91): the studio app owns the window; listed here for agents and the palette.
+        cmd!(view "window.midi_monitor", "MIDI Monitor", [], None, "{value?: bool; without it the window flips}", always, |_, _| Err(bad("window.midi_monitor", "runs in the transit app only"))),
         cmd!(view "help.check_updates", "Check for Updates...", [], None, "{}", always, |_, _| Err(bad("help.check_updates", "runs in the transit app only"))),
         // Help > Debug Logging: the studio app owns the logger; listed here for agents.
         cmd!(view "help.debug_logging", "Debug Logging", [], None, "{on?: bool; without it the setting flips}", always, |_, _| Err(bad("help.debug_logging", "runs in the transit app only"))),

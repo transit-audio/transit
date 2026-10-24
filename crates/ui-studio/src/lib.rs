@@ -38,6 +38,7 @@ mod loopbar;
 pub mod menus;
 pub mod metronome;
 mod midi_input;
+pub mod midi_monitor;
 mod midi_output;
 pub mod mixer;
 pub mod panel;
@@ -98,6 +99,8 @@ pub struct UiState {
     pub show_mixer: bool,
     /// The device chain of the focused track under the arrangement (Ableton's detail view, Ctrl+Alt+L).
     pub show_devices: bool,
+    /// Window > MIDI Monitor: open, filters, size (#91).
+    pub midi_monitor: midi_monitor::Prefs,
     /// The mixer fills the window instead of the arrangement (Cubase's F3).
     pub mixer_full: bool,
     /// Height of the mixer pane in points.
@@ -175,6 +178,7 @@ impl Default for UiState {
             window_maximized: false,
             show_mixer: false,
             show_devices: true,
+            midi_monitor: midi_monitor::Prefs::default(),
             mixer_full: false,
             mixer_height: 420.0,
             cursor: 0,
@@ -395,6 +399,8 @@ pub struct StudioApp {
     pub auto: automation::AutoState,
     /// Audio › Audio Devices: the window, its draft choices and the device listing.
     pub audio_devices: audio_devices::AudioDevicesState,
+    /// Window > MIDI Monitor: the rows and readouts behind the window (#91).
+    pub midi_monitor: midi_monitor::State,
     /// The External Instrument card's Measure (ADR 0020 decision 3).
     pub external_measure: external_measure::MeasureState,
     /// The Open Recent entries as last drawn (empty while the submenu is closed).
@@ -488,6 +494,7 @@ impl StudioApp {
             finish: finish::FinishState::default(),
             auto: automation::AutoState::default(),
             audio_devices: audio_devices::AudioDevicesState::default(),
+            midi_monitor: midi_monitor::State::default(),
             external_measure: external_measure::MeasureState::default(),
             recent_menu: Vec::new(),
             builtin_editor: builtin_editor::EditorState::default(),
@@ -573,6 +580,9 @@ impl StudioApp {
         if id == "help.check_updates" {
             self.check_for_updates_now()?;
             return Ok(json!({"checking": true}));
+        }
+        if id == "window.midi_monitor" {
+            return Ok(self.toggle_midi_monitor(params.get("value").and_then(Value::as_bool)));
         }
         if id == "help.debug_logging" {
             return self.set_debug_logging(params.get("on").and_then(Value::as_bool));
@@ -1070,6 +1080,7 @@ impl StudioApp {
         about::window(self, &ctx);
         telemetry::window(self, &ctx);
         audio_devices::window(self, &ctx);
+        midi_monitor::window(self, &ctx);
         builtin_editor::windows(self, &ctx);
         if self.is_playing() || self.engine.transport.recording {
             ctx.request_repaint_after(std::time::Duration::from_millis(1000 / 30));
@@ -1133,6 +1144,7 @@ impl StudioApp {
             "finish": self.finish.inspect(),
             "automation": self.auto.layout,
             "audio_devices": self.audio_devices.layout,
+            "midi_monitor": midi_monitor::inspect(self),
             "recent_menu": self.recent_menu,
             "theme": if theme::current() == egui::Theme::Light { "light" } else { "dark" },
         })

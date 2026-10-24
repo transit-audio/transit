@@ -208,6 +208,18 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 // Where the View menu and its entries sit, for `ui.inspect` and tests (slice 4).
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "View".into(), String::new(), view_menu.response.rect));
                 app.arrange.bar_menu.extend(view_items);
+                let mut window_items = Vec::new();
+                let window_menu = ui.menu_button("Window", |ui| {
+                    let on = app.ui.midi_monitor.open;
+                    let b = check_button(ui, on, "MIDI Monitor");
+                    window_items.push(crate::mixer::MenuItem::at(ui, "MIDI Monitor".into(), String::new(), b.rect));
+                    if b.clicked() {
+                        let _ = app.run("window.midi_monitor", json!({"value": !on}));
+                        ui.close();
+                    }
+                });
+                app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Window".into(), String::new(), window_menu.response.rect));
+                app.arrange.bar_menu.extend(window_items);
                 let transport_menu = ui.menu_button("Transport", |ui| {
                     let cycle = app.engine.session().edit.loop_playback;
                     let items: [(&str, A, &str, Value); 4] = [
