@@ -61,3 +61,14 @@ One code path for JACK 2 and for PipeWire's JACK library. Slice 1 of 4 is in: th
 Slice 2: the duplex engine (conversion, stamps from `jack_get_cycle_times`, the user callbacks),
 `audio-bench --backend jack` with loopback. Slice 3: `ServerStopped` reopen, quantum changes with
 `Stream::period`, port latencies, Measure with mode `jack`. Slice 4: release, `Auto` on Linux.
+
+## Slice 1 state and known gaps
+
+- Slice 1 plays no audio: the app labels the backend "Native JACK (no audio until slice 2)", and
+  testers should only run `audio-bench --backend jack --list-devices`. On the JACK system `Auto` and
+  cpal open the cpal ALSA host (cpal has no JACK host in a native-jack build).
+- Known gap: a partly failed port registration leaves the names registered until the session
+  closes (`jack_client_close` frees them). A retry then fails on the duplicate `out_1`/`in_1`, and
+  orphan out ports receive silence. Not a soundness issue.
+- Known gap (slice 3): the watcher compares the rate to the open rate, so a rate change A to B to A
+  reports a reset once and never again.

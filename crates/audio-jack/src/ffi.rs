@@ -38,8 +38,11 @@ impl JackApi for LibJack {
             // JackNoStartServer alone (types.h: "Do not automatically start the JACK server when it
             // is not already running"), so per "depending on corresponding [@a options bits]
             // additional parameters may follow @a status" no variadic argument follows; jack-sys
-            // declares the function without its `...`, which on the x86_64 and aarch64 Linux ABIs
-            // passes the named arguments exactly as a variadic call with none would.
+            // declares the function without its `...`. On the x86_64 and aarch64 Linux ABIs the
+            // named arguments are passed in the same registers either way; the one difference on
+            // x86_64 is that `%al` (the vector-register count a variadic caller sets) is left
+            // unset, which a callee's `va_start` prologue only tests for zero, so the worst case
+            // is a redundant register save, and no variadic argument is read here.
             unsafe { j::jack_client_open(c_name.as_ptr(), j::JackNoStartServer, &mut status) }
         }));
         let Ok(client) = opened else {
@@ -81,11 +84,16 @@ struct LibClient {
 unsafe impl Send for LibClient {}
 
 /// A C string from libjack as an owned `String` (empty for null).
-fn owned(text: *const c_char) -> String {
+///
+/// # Safety
+///
+/// A non-null `text` must point to a NUL-terminated C string that stays valid for the whole call,
+/// such as a name or port-array entry libjack returned for a live client, not yet released.
+unsafe fn owned(text: *const c_char) -> String {
     if text.is_null() {
         return String::new();
     }
-    // SAFETY: every caller passes a string libjack returned for a live client or port: jack.h
+    // SAFETY: the caller's contract above; every call site passes a string libjack returned for a live client or port: jack.h
     // documents each as a NUL-terminated C string ("@return pointer to actual client name", "@return
     // the full name of the jack_port_t", the entries of jack_get_ports' "NULL-terminated array of
     // ports"), valid until the client, port or array is released, which happens after this copy.
@@ -113,7 +121,10 @@ impl LibClient {
             if entry.is_null() {
                 break;
             }
-            found.push(PhysicalPort { name: owned(entry), capture });
+            // SAFETY: `entry` is a non-NULL entry of the array above, a NUL-terminated port name
+            // that stays valid until `jack_free` below, after this copy.
+            let name = unsafe { owned(entry) };
+            found.push(PhysicalPort { name, capture });
         }
         // SAFETY: jack.h, jack_free: "The free function to be used on memory returned by
         // jack_port_get_connections, jack_port_get_all_connections, jack_get_ports and
@@ -153,7 +164,7 @@ impl JackClient for LibClient {
     fn name(&self) -> String {
         // SAFETY: jack.h, jack_get_client_name: "@return pointer to actual client name." The
         // client is open; the string is copied before any other call.
-        owned(unsafe { j::jack_get_client_name(self.client) })
+        unsafe { owned(j::jack_get_client_name(self.client)) }
     }
 
     fn sample_rate(&self) -> u32 {
@@ -197,7 +208,7 @@ impl JackClient for LibClient {
         }
         // SAFETY: jack.h, jack_port_name: "@return the full name of the jack_port_t (including the
         // @a "client_name:" prefix)." `port` was just registered on this open client.
-        Ok(owned(unsafe { j::jack_port_name(port) }))
+        Ok(unsafe { owned(j::jack_port_name(port)) })
     }
 
     fn activate(&mut self, shared: Arc<Shared>) -> Result<(), String> {

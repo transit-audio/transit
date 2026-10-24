@@ -10,6 +10,10 @@ use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
 /// What every callback of one client reads: the `arg` libjack passes back.
+///
+/// It holds raw port pointers, so it is not `Sync` by itself. It is shared across threads (the
+/// process thread and the notification thread) strictly read-only: nothing mutates it while it is
+/// shared, and its mutable parts are atomics, so there is no data race.
 pub(crate) struct CallbackState {
     shared: Arc<Shared>,
     /// The client's output ports, `out_1` first, registered before activation.

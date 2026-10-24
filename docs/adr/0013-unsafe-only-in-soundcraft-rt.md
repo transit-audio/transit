@@ -77,3 +77,10 @@ Accepted with ADR 0016.
 - Any failure falls back to the cpal backend.
 - The crate compiles to empty on other platforms (wholly under `#![cfg(windows)]`).
 - It is registered in xtask `LAYERS`, and the `unsafe` allowlist check lists exactly `crates/rt`, `crates/audio-wasapi`, `crates/clap-host`, `crates/vst3-host` (SDK-interface code) and the two older isolated FFI helpers `crates/au-host` and `crates/asio-panel`. The check reads every package manifest, exempt ones included, and flags any `unsafe_code` setting other than `forbid` (any spacing or quoting) outside that list.
+
+## Amended 2026-10-24 (ADR 0021): transit-audio-jack
+
+Accepted with ADR 0021 (approved by the project owner on 2026-10-24).
+
+- The Linux-only crate `crates/audio-jack` (`transit-audio-jack`) may contain `unsafe` for the JACK client API, in `ffi.rs` and `callback.rs` only; every other module keeps `unsafe` denied.
+- Every `unsafe` block carries a `// SAFETY:` comment quoting `jack.h` (or `types.h`) for the rule it relies on, and the crate gets a quoted-unsafe refutation review before merge (ADR 0009).

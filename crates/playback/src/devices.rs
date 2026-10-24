@@ -51,7 +51,7 @@ impl Backend {
             Backend::Cpal => "cpal (legacy)",
             Backend::NativeWasapi => "Native WASAPI",
             Backend::NativeAsio => "Native ASIO",
-            Backend::NativeJack => "Native JACK",
+            Backend::NativeJack => "Native JACK (no audio until slice 2)",
         }
     }
 
@@ -549,8 +549,20 @@ fn shared_host(id: cpal::HostId) -> Option<&'static cpal::Host> {
     Some(host)
 }
 
+/// The cpal host name that serves `system`. The JACK system belongs to the native JACK backend; in a
+/// build with it, cpal has no JACK host (its `jack` feature is off), so `Auto` and cpal on that
+/// system open the same ALSA host they use without the feature. Slice 1 of the native backend
+/// plays no audio yet (ADR 0021), so the JACK system must not strand a user on silence.
+pub(crate) fn cpal_system_for(system: Option<&str>) -> Option<&str> {
+    if NATIVE_JACK_COMPILED && is_jack_system(system) && !cpal::available_hosts().iter().any(|id| id.name().eq_ignore_ascii_case(JACK_SYSTEM)) {
+        return Some("ALSA");
+    }
+    system
+}
+
 /// The named audio system, else the default one.
 pub(crate) fn host_named(system: Option<&str>) -> Option<&'static cpal::Host> {
+    let system = cpal_system_for(system);
     let chosen = system.and_then(|want| cpal::available_hosts().into_iter().find(|id| id.name().eq_ignore_ascii_case(want))).and_then(shared_host);
     let host = chosen.or_else(|| {
         if let Some(s) = system {
@@ -625,6 +637,23 @@ pub(crate) fn buffer_size(want: Option<u32>, supported: &cpal::SupportedBufferSi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_native_jack_label_says_it_plays_no_audio_yet() {
+        assert_eq!(Backend::NativeJack.label(), "Native JACK (no audio until slice 2)");
+    }
+
+    #[test]
+    fn auto_and_cpal_on_the_jack_system_use_alsa_in_a_native_jack_build() {
+        if NATIVE_JACK_COMPILED && !cpal::available_hosts().iter().any(|id| id.name() == JACK_SYSTEM) {
+            assert_eq!(cpal_system_for(Some("JACK")), Some("ALSA"));
+            assert_eq!(cpal_system_for(Some("jack")), Some("ALSA"));
+        } else {
+            assert_eq!(cpal_system_for(Some("JACK")), Some("JACK"));
+        }
+        assert_eq!(cpal_system_for(Some("ALSA")), Some("ALSA"));
+        assert_eq!(cpal_system_for(None), None);
+    }
 
     #[test]
     fn asio_cache_releases_before_loading_another_driver_and_leaving_asio() {
