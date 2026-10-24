@@ -625,7 +625,7 @@ fn quick_add_buttons_create_the_right_kinds() {
     }
     let first = t.app.arrange.layout.add_audio;
     let more = t.app.arrange.layout.add_more;
-    assert!(more[1] > first[3], "the small button wraps into a row of its own");
+    assert!(more[1] > first[3], "\"+ ...\" sits on a row of its own");
     let w = t.app.ui.header_width;
     assert!(more[2] <= t.app.arrange.layout.track_list[0] + w, "inside the header column");
 }
@@ -709,4 +709,57 @@ fn a_collapsed_group_draws_no_member_bars_and_ungrouped_tracks_draw_none() {
     assert_eq!(t.rows(), ["Group 1", "C"]);
     assert!(bars_of(&t, g).is_empty() && bars_of(&t, t.c).is_empty());
     assert!(t.app.arrange.layout.tracks.iter().all(|r| r.group_bars.is_empty()));
+}
+
+#[test]
+fn quick_add_buttons_form_an_aligned_grid_at_every_header_width() {
+    for hw in [160.0_f32, 240.0, 400.0] {
+        let mut t = T::new();
+        t.app.ui.show_mixer = false;
+        t.app.ui.show_devices = false;
+        t.app.ui.header_width = hw;
+        t.frames(4);
+        let l = t.app.arrange.layout.clone();
+        let rects = [l.add_audio, l.add_instrument, l.add_midi, l.add_group, l.add_more];
+        let w = |r: [f32; 4]| r[2] - r[0];
+        let h = |r: [f32; 4]| r[3] - r[1];
+        // Two equal columns with fixed gaps; same height everywhere.
+        for r in &rects[..4] {
+            assert!((w(*r) - w(rects[0])).abs() < 0.5, "{hw}: equal widths {rects:?}");
+        }
+        for r in rects {
+            assert!((h(r) - h(rects[0])).abs() < 0.5, "{hw}: equal heights");
+        }
+        assert!((rects[1][0] - rects[0][2] - 8.0).abs() < 0.5, "{hw}: column gap");
+        assert!((rects[2][1] - rects[0][3] - 8.0).abs() < 0.5, "{hw}: row gap");
+        assert!((rects[4][1] - rects[2][3] - 8.0).abs() < 0.5, "{hw}: row gap to the last row");
+        assert!((rects[0][0] - rects[2][0]).abs() < 0.5 && (rects[1][0] - rects[3][0]).abs() < 0.5);
+        // "+ ..." spans both columns.
+        assert!((rects[4][0] - rects[0][0]).abs() < 0.5 && (rects[4][2] - rects[1][2]).abs() < 0.5, "{hw}: spans");
+        // Every label starts at the same offset inside its button.
+        let off0 = l.add_label_x[0] - rects[0][0];
+        for (i, r) in rects.iter().enumerate() {
+            let off = l.add_label_x[i] - r[0];
+            assert!((off - off0).abs() < 0.5, "{hw}: label {i} offset {off} vs {off0}");
+            // The right-hand slot is reserved on all five, at the button's right edge.
+            let s = l.add_slot[i];
+            assert!((s[2] - r[2]).abs() < 0.5 && (w(s) - 18.0).abs() < 0.5, "{hw}: slot {i}");
+            // The label starts after the plus glyph and before the slot.
+            assert!(l.add_label_x[i] > r[0] + 8.0 + 12.0 && l.add_label_x[i] < s[0], "{hw}: label {i} fits before the slot");
+        }
+    }
+}
+
+#[test]
+fn quick_add_audio_chevron_slot_does_not_add_a_track() {
+    let mut t = T::new();
+    t.app.ui.show_mixer = false;
+    t.app.ui.show_devices = false;
+    t.frames(4);
+    let n = t.app.engine.session().tracks.len();
+    let slot = t.app.arrange.layout.add_slot[0];
+    t.click(mid(slot), json!({}));
+    t.frames(3);
+    assert_eq!(t.app.engine.session().tracks.len(), n, "the chevron opens the format menu, it does not add");
+    assert!(egui::Popup::is_any_open(&t.ctx), "the Audio dropdown opens");
 }

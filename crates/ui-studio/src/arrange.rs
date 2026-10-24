@@ -23,6 +23,32 @@ pub const FADE_ZONE_W: f32 = 18.0;
 pub const FADE_ZONE_H: f32 = 14.0;
 /// Room under the rows for the Add Track buttons: the gap, three rows of buttons, a margin.
 const ADD_STACK_H: f32 = 8.0 + 60.0 + 22.0 + 8.0;
+/// Quick-add buttons: height, the gap between them, and the reserved right-hand slot.
+const ADD_BTN_H: f32 = 22.0;
+const ADD_GAP: f32 = 8.0;
+pub const ADD_SLOT_W: f32 = 18.0;
+/// Quick-add buttons: left padding before the plus glyph, its size, and the gap to the label.
+const ADD_PAD: f32 = 8.0;
+const ADD_PLUS: f32 = 12.0;
+const ADD_LABEL_GAP: f32 = 4.0;
+
+/// The x where every quick-add label starts inside button `r`: same offset on all of them.
+fn quick_add_label_x(r: Rect) -> f32 {
+    r.min.x + ADD_PAD + ADD_PLUS + ADD_LABEL_GAP
+}
+
+/// Paint one quick-add button as `[plus][label]` left-aligned with a reserved right slot; the
+/// label is clipped before it can reach the slot, and the plus is never clipped. Returns the
+/// label origin x.
+fn paint_quick_add(p: &egui::Painter, r: Rect, label: &str) -> f32 {
+    let color = TOKENS.text;
+    crate::icons::paint(p, pos2(r.min.x + ADD_PAD + ADD_PLUS / 2.0, r.center().y), crate::icons::Icon::Plus, ADD_PLUS, color);
+    let x = quick_add_label_x(r);
+    let galley = p.layout_no_wrap(label.to_string(), FontId::proportional(12.0), color);
+    let clip = Rect::from_min_max(pos2(x, r.min.y), pos2((r.max.x - ADD_SLOT_W).max(x), r.max.y));
+    p.with_clip_rect(clip).galley(pos2(x, r.center().y - galley.size().y / 2.0), galley, color);
+    x
+}
 
 /// Most repeats one loop drag shows or lays down (the engine caps `clip.loop_to` at the same).
 const MAX_LOOP_REPEATS: usize = 1000;
@@ -178,6 +204,10 @@ pub struct Layout {
     pub add_midi: R4,
     pub add_group: R4,
     pub add_more: R4,
+    /// Where each quick-add label starts (x), in the order Audio, Instrument, MIDI, Group, "+ ...".
+    pub add_label_x: [f32; 5],
+    /// The reserved right-hand slot of each quick-add button (only Audio draws its chevron there).
+    pub add_slot: [R4; 5],
     /// Transport bar buttons (`play`, `stop`, `record`, `rtz`, `cycle`).
     pub transport: std::collections::BTreeMap<String, R4>,
     /// The icon each transport button shows (its Lucide name, e.g. `play`).
@@ -357,24 +387,27 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         }
         layout.tracks.push(row);
     }
-    // Add Track buttons below the rows.
-    let below = tl.min.y + geo.total() - app.arrange.vscroll + 8.0;
-    let add_a = Rect::from_min_size(pos2(list.min.x + 8.0, below), vec2((hw - 24.0) / 2.0, 22.0));
-    let add_i = Rect::from_min_size(pos2(add_a.max.x + 8.0, below), add_a.size());
-    let add_m = Rect::from_min_size(pos2(add_a.min.x, below + 30.0), add_a.size());
-    let add_g = Rect::from_min_size(pos2(add_i.min.x, below + 30.0), add_a.size());
-    let add_more = Rect::from_min_size(pos2(add_a.min.x, below + 60.0), add_a.size());
+    // Add Track buttons below the rows: two equal columns, then "+ ..." across both.
+    let below = tl.min.y + geo.total() - app.arrange.vscroll + ADD_GAP;
+    let col_w = ((hw - 3.0 * ADD_GAP) / 2.0).max(1.0);
+    let add_a = Rect::from_min_size(pos2(list.min.x + ADD_GAP, below), vec2(col_w, ADD_BTN_H));
+    let add_i = Rect::from_min_size(pos2(add_a.max.x + ADD_GAP, below), add_a.size());
+    let step = ADD_BTN_H + ADD_GAP;
+    let add_m = Rect::from_min_size(pos2(add_a.min.x, below + step), add_a.size());
+    let add_g = Rect::from_min_size(pos2(add_i.min.x, below + step), add_a.size());
+    let add_more = Rect::from_min_max(pos2(add_a.min.x, below + 2.0 * step), pos2(add_i.max.x, below + 2.0 * step + ADD_BTN_H));
+    let slot_of = |r: Rect| Rect::from_min_max(pos2(r.max.x - ADD_SLOT_W, r.min.y), r.max);
+    let mut label_x = [0.0f32; 5];
     if add_a.min.y < list.max.y {
         let clip = ui.painter().with_clip_rect(list);
         // Audio adds a mono track (the common case: one guitar or mic); its chevron picks mono or stereo.
-        let chev_w = 18.0;
-        let main = Rect::from_min_max(add_a.min, pos2(add_a.max.x - chev_w, add_a.max.y));
-        let chev = Rect::from_min_max(pos2(add_a.max.x - chev_w, add_a.min.y), add_a.max);
+        let chev = slot_of(add_a);
+        let main = Rect::from_min_max(add_a.min, pos2(chev.min.x, add_a.max.y));
         let main_resp = ui.interact(main.intersect(list), ui.id().with("add_audio"), Sense::click());
         let chev_resp = ui.interact(chev.intersect(list), ui.id().with("add_audio_format"), Sense::click());
         let hot = main_resp.hovered() || chev_resp.hovered();
         clip.rect_filled(add_a, crate::theme::RADIUS, if hot { TOKENS.button_hover } else { TOKENS.button });
-        crate::icons::paint_labeled(&clip, main, false, crate::icons::Icon::Plus, 12.0, "Audio", FontId::proportional(12.0), TOKENS.text);
+        label_x[0] = paint_quick_add(&clip, add_a, "Audio");
         crate::icons::paint(&clip, chev.center(), crate::icons::Icon::ChevronDown, 10.0, TOKENS.text_dim);
         if main_resp.clicked() {
             let _ = app.add_audio_track("mono");
@@ -391,26 +424,26 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         });
         let resp = ui.interact(add_i.intersect(list), ui.id().with("add_instrument"), Sense::click());
         clip.rect_filled(add_i, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
-        crate::icons::paint_labeled(&clip, add_i, false, crate::icons::Icon::Plus, 12.0, "Instrument", FontId::proportional(12.0), TOKENS.text);
+        label_x[1] = paint_quick_add(&clip, add_i, "Instrument");
         if resp.clicked() {
             let _ = app.add_track("instrument");
         }
         let resp = ui.interact(add_m.intersect(list), ui.id().with("add_midi"), Sense::click());
         clip.rect_filled(add_m, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
-        crate::icons::paint_labeled(&clip, add_m, false, crate::icons::Icon::Plus, 12.0, "MIDI", FontId::proportional(12.0), TOKENS.text);
+        label_x[2] = paint_quick_add(&clip, add_m, "MIDI");
         if resp.clicked() {
             let _ = app.add_track("midi");
         }
         let resp = ui.interact(add_g.intersect(list), ui.id().with("add_group"), Sense::click());
         clip.rect_filled(add_g, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
-        crate::icons::paint_labeled(&clip, add_g, false, crate::icons::Icon::Plus, 12.0, "Group", FontId::proportional(12.0), TOKENS.text);
+        label_x[3] = paint_quick_add(&clip, add_g, "Group");
         if resp.clicked() {
             let _ = app.new_group_track();
         }
         // "+ ..." lists the kinds the quick buttons leave out (the studio has no New Track dialog).
         let resp = ui.interact(add_more.intersect(list), ui.id().with("add_more"), Sense::click());
         clip.rect_filled(add_more, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
-        crate::icons::paint_labeled(&clip, add_more, false, crate::icons::Icon::Plus, 12.0, "…", FontId::proportional(12.0), TOKENS.text);
+        label_x[4] = paint_quick_add(&clip, add_more, "…");
         egui::Popup::menu(&resp).width(130.0).show(|ui| {
             if ui.button("Stereo Audio Track").clicked() {
                 let _ = app.add_audio_track("stereo");
@@ -422,6 +455,8 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
             }
         });
     }
+    layout.add_label_x = label_x;
+    layout.add_slot = [add_a, add_i, add_m, add_g, add_more].map(|r| r4(slot_of(r)));
     layout.add_audio = r4(add_a);
     layout.add_instrument = r4(add_i);
     layout.add_midi = r4(add_m);
