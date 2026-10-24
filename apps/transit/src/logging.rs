@@ -16,6 +16,15 @@
 //! `warn,soundcraft_mix=trace`, `wgpu_core=info`. A directive ending in `*` matches every target
 //! that starts with it (`soundcraft*=debug`).
 //!
+//! Choosing the filter (issue #84), strongest first: `--log <directives>` (the same syntax), then
+//! `--verbose` (the default filter with debug for every soundcraft and transit target), then
+//! `RUST_LOG`, then the default ([`resolve`]). Help > Debug Logging raises our targets to debug for
+//! the rest of the session without a restart and puts them back ([`AppLogger::set_debug`]); the
+//! filter the logger reads is the startup one plus that one atomic switch.
+//!
+//! Standard error gets a copy of every line when it is a terminal or `--log-stderr` is passed
+//! ([`stderr_mirror`]); the file always gets them.
+//!
 //! Records logged before the settings directory is known are kept (up to [`MAX_PENDING`]) and
 //! written once the file is attached. Writing never panics: a file that can't be created or
 //! written leaves standard error as the only sink.
@@ -34,7 +43,7 @@ use std::fmt::Write as _;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, OnceLock, PoisonError};
 use std::time::SystemTime;
 
@@ -52,6 +61,8 @@ pub const MAX_FILE_BYTES: u64 = 16 * 1024 * 1024;
 pub const MAX_PENDING: usize = 512;
 /// The built-in filter when `RUST_LOG` is unset or empty.
 pub const DEFAULT_FILTER: &str = "warn,soundcraft*=info,transit*=info";
+/// The targets `--verbose` and Help > Debug Logging raise to debug: every crate of ours.
+const OWN_TARGET_PREFIXES: [&str; 2] = ["soundcraft", "transit"];
 /// The longest message kept from the audio thread (longer ones are cut, marked with `…`).
 pub const REALTIME_MESSAGE_BYTES: usize = 480;
 /// The longest target kept from the audio thread.
@@ -98,6 +109,98 @@ impl Filter {
     pub fn max(&self) -> LevelFilter {
         self.directives.iter().map(|(_, level)| *level).fold(self.default, Ord::max)
     }
+}
+
+/// Where the filter came from, for the line the log starts with.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Source {
+    LogFlag,
+    VerboseFlag,
+    Env,
+    Default,
+}
+
+impl Source {
+    pub fn describe(self) -> &'static str {
+        match self {
+            Source::LogFlag => "--log",
+            Source::VerboseFlag => "--verbose",
+            Source::Env => "RUST_LOG",
+            Source::Default => "the default",
+        }
+    }
+}
+
+/// The logging flags of the command line.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct LogArgs {
+    /// `--verbose`: debug for every soundcraft and transit target.
+    pub verbose: bool,
+    /// `--log <directives>` (or `--log=<directives>`).
+    pub log: Option<String>,
+    /// `--log-stderr`: copy log lines to standard error even when it is not a terminal.
+    pub stderr: bool,
+}
+
+impl LogArgs {
+    /// Read the logging flags out of `args`; other arguments are left to the caller.
+    pub fn parse(args: &[String]) -> Result<LogArgs, String> {
+        let mut out = LogArgs::default();
+        let mut it = args.iter();
+        while let Some(arg) = it.next() {
+            match arg.as_str() {
+                "--verbose" => out.verbose = true,
+                "--log-stderr" => out.stderr = true,
+                "--log" => match it.next() {
+                    Some(value) if !value.starts_with("--") => out.log = Some(value.clone()),
+                    _ => return Err("--log requires directives such as debug or warn,soundcraft_mix=trace".to_owned()),
+                },
+                other => {
+                    if let Some(value) = other.strip_prefix("--log=") {
+                        out.log = Some(value.to_owned());
+                    }
+                }
+            }
+        }
+        Ok(out)
+    }
+
+    /// Whether `args[i]` is the value of a `--log` flag, not a file to open.
+    pub fn is_value(args: &[String], i: usize) -> bool {
+        i > 0 && args.get(i - 1).is_some_and(|p| p == "--log")
+    }
+}
+
+/// The filter this run starts with: the directives, where they came from, and whether our own
+/// targets start at debug.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Resolved {
+    pub spec: String,
+    pub source: Source,
+    pub debug: bool,
+}
+
+/// Flag over environment over default. `--log` names the directives; `--verbose` keeps the default
+/// ones and starts with debug on (so Help > Debug Logging can turn it off again); `env` is the
+/// value of `RUST_LOG`, blank counting as unset.
+pub fn resolve(args: &LogArgs, env: Option<&str>) -> Resolved {
+    let env = env.map(str::trim).filter(|s| !s.is_empty());
+    let (spec, source) = match (&args.log, args.verbose, env) {
+        (Some(log), _, _) => (log.clone(), Source::LogFlag),
+        (None, true, _) => (DEFAULT_FILTER.to_owned(), Source::VerboseFlag),
+        (None, false, Some(env)) => (env.to_owned(), Source::Env),
+        (None, false, None) => (DEFAULT_FILTER.to_owned(), Source::Default),
+    };
+    Resolved { spec, source, debug: args.verbose }
+}
+
+/// Lines go to standard error when it is a terminal, or when `--log-stderr` asks.
+pub fn stderr_mirror(flag: bool, is_terminal: bool) -> bool {
+    flag || is_terminal
+}
+
+fn is_own_target(target: &str) -> bool {
+    OWN_TARGET_PREFIXES.iter().any(|p| target.starts_with(p))
 }
 
 fn parse_level(s: &str) -> Option<LevelFilter> {
@@ -335,13 +438,57 @@ impl Realtime {
 pub struct AppLogger {
     filter: Filter,
     stderr: bool,
+    /// Our own targets log at debug at least (`--verbose`, Help > Debug Logging); read on every record.
+    debug: AtomicBool,
+    /// The log file of this run once attached.
+    file: Mutex<Option<PathBuf>>,
     sink: Mutex<Sink>,
     realtime: Realtime,
 }
 
 impl AppLogger {
     pub fn new(filter: Filter, stderr: bool) -> AppLogger {
-        AppLogger { filter, stderr, sink: Mutex::new(Sink::new(MAX_FILE_BYTES)), realtime: Realtime::default() }
+        AppLogger {
+            filter,
+            stderr,
+            debug: AtomicBool::new(false),
+            file: Mutex::new(None),
+            sink: Mutex::new(Sink::new(MAX_FILE_BYTES)),
+            realtime: Realtime::default(),
+        }
+    }
+
+    /// Whether our own targets are raised to debug (the flag, or Help > Debug Logging).
+    pub fn debug(&self) -> bool {
+        self.debug.load(Ordering::Relaxed)
+    }
+
+    /// Raise our own targets to debug, or put the startup filter back; takes effect on the next record.
+    pub fn set_debug(&self, on: bool) {
+        self.debug.store(on, Ordering::Relaxed);
+        log::set_max_level(self.max_level());
+    }
+
+    /// The most verbose level any target reaches now (for `log::set_max_level`).
+    pub fn max_level(&self) -> LevelFilter {
+        let max = self.filter.max();
+        if self.debug() { max.max(LevelFilter::Debug) } else { max }
+    }
+
+    /// The level that applies to `target` now.
+    pub fn level_for(&self, target: &str) -> LevelFilter {
+        let level = self.filter.level_for(target);
+        if self.debug() && is_own_target(target) { level.max(LevelFilter::Debug) } else { level }
+    }
+
+    /// The log file of this run, once attached.
+    pub fn file(&self) -> Option<PathBuf> {
+        self.file.lock().unwrap_or_else(PoisonError::into_inner).clone()
+    }
+
+    /// Whether lines are copied to standard error.
+    pub fn mirrors_stderr(&self) -> bool {
+        self.stderr
     }
 
     /// Rotate the logs in `dir` and send records to the fresh file; returns its path.
@@ -350,6 +497,7 @@ impl AppLogger {
         match rotate(dir) {
             Ok((path, file)) => {
                 self.sink.lock().unwrap_or_else(PoisonError::into_inner).attach(file);
+                *self.file.lock().unwrap_or_else(PoisonError::into_inner) = Some(path.clone());
                 Ok(path)
             }
             Err(e) => {
@@ -385,7 +533,7 @@ impl AppLogger {
 
 impl log::Log for AppLogger {
     fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
-        metadata.level() <= self.filter.level_for(metadata.target())
+        metadata.level() <= self.level_for(metadata.target())
     }
 
     fn log(&self, record: &log::Record<'_>) {
@@ -407,18 +555,22 @@ impl log::Log for AppLogger {
     fn flush(&self) {}
 }
 
-/// Install the logger (filter from `RUST_LOG`, else [`DEFAULT_FILTER`]); `None` when another
-/// logger was installed first. Call [`AppLogger::attach_dir`] or [`AppLogger::no_file`] once the
-/// settings directory is known.
-pub fn install() -> Option<&'static AppLogger> {
+/// Install the logger (filter by [`resolve`]: `--log`, `--verbose`, `RUST_LOG`, else
+/// [`DEFAULT_FILTER`]); `None` when another logger was installed first. Call
+/// [`AppLogger::attach_dir`] or [`AppLogger::no_file`] once the settings directory is known.
+pub fn install(args: &LogArgs) -> Option<(&'static AppLogger, Resolved)> {
+    use std::io::IsTerminal as _;
     static LOGGER: OnceLock<AppLogger> = OnceLock::new();
-    let spec = std::env::var("RUST_LOG").ok().filter(|s| !s.trim().is_empty());
-    let filter = Filter::parse(spec.as_deref().unwrap_or(DEFAULT_FILTER));
-    let max = filter.max();
-    let logger = LOGGER.get_or_init(|| AppLogger::new(filter, true));
+    let resolved = resolve(args, std::env::var("RUST_LOG").ok().as_deref());
+    let mirror = stderr_mirror(args.stderr, std::io::stderr().is_terminal());
+    let logger = LOGGER.get_or_init(|| {
+        let logger = AppLogger::new(Filter::parse(&resolved.spec), mirror);
+        logger.debug.store(resolved.debug, Ordering::Relaxed);
+        logger
+    });
     log::set_logger(logger).ok()?;
-    log::set_max_level(max);
-    Some(logger)
+    log::set_max_level(logger.max_level());
+    Some((logger, resolved))
 }
 
 #[cfg(test)]
@@ -520,6 +672,76 @@ mod tests {
         assert_eq!(Filter::parse("=debug").max(), LevelFilter::Error, "a directive without a name is skipped");
         assert_eq!(Filter::parse("*=debug").level_for("anything"), LevelFilter::Debug, "a lone `*` matches every target");
         assert_eq!(Filter::parse("é*=trace").level_for("éa"), LevelFilter::Trace);
+    }
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn the_flag_beats_the_environment_which_beats_the_default() {
+        let none = LogArgs::default();
+        let log = LogArgs::parse(&args(&["--log", "warn,soundcraft_mix=trace"])).expect("--log");
+        let verbose = LogArgs::parse(&args(&["--verbose"])).expect("--verbose");
+        assert_eq!(resolve(&none, None), Resolved { spec: DEFAULT_FILTER.into(), source: Source::Default, debug: false });
+        assert_eq!(resolve(&none, Some("  ")).source, Source::Default, "a blank RUST_LOG is unset");
+        assert_eq!(resolve(&none, Some("trace")), Resolved { spec: "trace".into(), source: Source::Env, debug: false });
+        assert_eq!(resolve(&log, Some("trace")), Resolved { spec: "warn,soundcraft_mix=trace".into(), source: Source::LogFlag, debug: false });
+        assert_eq!(resolve(&verbose, Some("error")), Resolved { spec: DEFAULT_FILTER.into(), source: Source::VerboseFlag, debug: true });
+        // Both flags: the directives of --log, and our targets at debug at least.
+        let both = LogArgs::parse(&args(&["--verbose", "--log=warn"])).expect("both");
+        assert_eq!(resolve(&both, Some("trace")), Resolved { spec: "warn".into(), source: Source::LogFlag, debug: true });
+    }
+
+    #[test]
+    fn the_command_line_flags_parse_and_a_log_flag_needs_directives() {
+        assert_eq!(LogArgs::parse(&args(&["--demo", "song.transit"])), Ok(LogArgs::default()));
+        let a = LogArgs::parse(&args(&["--log-stderr", "--log", "debug", "song.transit"])).expect("flags");
+        assert_eq!(a, LogArgs { verbose: false, log: Some("debug".into()), stderr: true });
+        assert!(LogArgs::parse(&args(&["--log"])).is_err());
+        assert!(LogArgs::parse(&args(&["--log", "--verbose"])).is_err(), "a flag is not directives");
+        let list = args(&["--log", "debug", "a.transit"]);
+        assert!(LogArgs::is_value(&list, 1) && !LogArgs::is_value(&list, 0) && !LogArgs::is_value(&list, 2));
+    }
+
+    #[test]
+    fn standard_error_is_mirrored_for_a_terminal_or_the_flag() {
+        assert!(stderr_mirror(true, false));
+        assert!(stderr_mirror(false, true));
+        assert!(!stderr_mirror(false, false), "a launch from a menu has no terminal to write to");
+        let logger = AppLogger::new(Filter::parse(DEFAULT_FILTER), stderr_mirror(true, false));
+        assert!(logger.mirrors_stderr());
+        assert!(!AppLogger::new(Filter::parse(DEFAULT_FILTER), stderr_mirror(false, false)).mirrors_stderr());
+    }
+
+    #[test]
+    fn the_help_toggle_raises_our_targets_to_debug_and_puts_them_back() {
+        let dir = temp_dir("toggle");
+        let logger = AppLogger::new(Filter::parse(DEFAULT_FILTER), false);
+        let path = logger.attach_dir(&dir).expect("attach");
+        assert_eq!(logger.file(), Some(path.clone()));
+        let debug_meta = |target| log::Metadata::builder().level(log::Level::Debug).target(target).build();
+        assert!(!logger.debug());
+        assert!(!logger.enabled(&debug_meta("soundcraft_playback")));
+        assert_eq!(logger.max_level(), LevelFilter::Info);
+        logger.set_debug(true);
+        assert!(logger.debug() && logger.enabled(&debug_meta("soundcraft_playback")) && logger.enabled(&debug_meta("transit")));
+        assert!(!logger.enabled(&debug_meta("wgpu_core::device")), "other crates stay as they were");
+        assert_eq!(logger.level_for("soundcraft_mix"), LevelFilter::Debug);
+        assert_eq!(logger.max_level(), LevelFilter::Debug);
+        record(&logger, log::Level::Debug, "soundcraft_playback", "a debug line");
+        logger.set_debug(false);
+        assert!(!logger.enabled(&debug_meta("soundcraft_playback")));
+        assert_eq!(logger.max_level(), LevelFilter::Info);
+        record(&logger, log::Level::Debug, "soundcraft_playback", "dropped again");
+        let text = read(&path);
+        assert!(text.contains("a debug line") && !text.contains("dropped again"), "{text}");
+        // A filter that already asks for more is not lowered by the toggle.
+        let louder = AppLogger::new(Filter::parse("soundcraft_mix=trace"), false);
+        louder.set_debug(true);
+        assert_eq!(louder.level_for("soundcraft_mix"), LevelFilter::Trace);
+        louder.set_debug(false);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

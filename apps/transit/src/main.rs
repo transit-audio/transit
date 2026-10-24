@@ -1,6 +1,10 @@
 //! transit desktop app: the studio UI over the transit engine.
 //!
-//! Usage: `transit [--demo] [--control <port>] [--no-audio] [session.transit]`
+//! Usage: `transit [--demo] [--control <port>] [--no-audio] [--verbose] [--log <directives>] [--log-stderr] [session.transit]`
+//!
+//! `--verbose` logs debug detail for every transit target; `--log <directives>` takes `RUST_LOG` syntax
+//! (`warn,soundcraft_mix=trace`); `--log-stderr` copies the log to standard error when it is not a
+//! terminal. A flag beats `RUST_LOG`, which beats the default (`logging`, `docs/troubleshooting.md`).
 //!
 //! `--control <port>` (or `TRANSIT_CONTROL_PORT`) starts a localhost JSON-lines control server
 //! (`0` picks a free port and prints it). Connections must start with `auth <token>`, the token in the
@@ -26,6 +30,21 @@ mod audio_review_tests;
 use soundcraft_engine::Engine;
 use std::sync::Arc;
 use transit_ui_studio::{Services, StudioApp, UiState};
+
+/// Help > Debug Logging: the studio's handle on the logger.
+struct LoggerControl(&'static logging::AppLogger);
+
+impl transit_ui_studio::debug_log::LogControl for LoggerControl {
+    fn debug(&self) -> bool {
+        self.0.debug()
+    }
+    fn set_debug(&self, on: bool) {
+        self.0.set_debug(on);
+    }
+    fn file(&self) -> Option<std::path::PathBuf> {
+        self.0.file()
+    }
+}
 
 struct App(StudioApp, Option<&'static logging::AppLogger>, PrefsCheckpoint);
 
@@ -239,8 +258,9 @@ fn parse_control_port(args: &[String], environment: Option<&str>) -> Result<Opti
     port.map(|value| value.parse().map_err(|_| format!("Invalid control port {value:?}: expected 0 to 65535"))).transpose()
 }
 
-fn services() -> Services {
+fn services(logger: Option<&'static logging::AppLogger>) -> Services {
     Services {
+        log: logger.map(|l| Box::new(LoggerControl(l)) as Box<dyn transit_ui_studio::debug_log::LogControl>),
         pick_open: Some(Box::new(|purpose: &str| {
             let d = rfd::FileDialog::new();
             if purpose == "folder" {
@@ -337,7 +357,13 @@ fn main() -> eframe::Result {
         soundcraft_engine::shutdown_plugin_hosts();
         return Ok(());
     }
-    let logger = logging::install();
+    let parsed_log_args = logging::LogArgs::parse(&args);
+    let log_args = parsed_log_args.clone().unwrap_or_default();
+    let (logger, resolved) = match logging::install(&log_args) {
+        Some((logger, resolved)) => (Some(logger), Some(resolved)),
+        None => (None, None),
+    };
+    parsed_log_args.map_err(|error| eframe::Error::AppCreation(error.into()))?;
     if args.iter().any(|a| a == "--version" || a == "-V") {
         println!("transit {}", env!("CARGO_PKG_VERSION"));
         return Ok(());
@@ -349,7 +375,9 @@ fn main() -> eframe::Result {
     let files: Vec<String> = args
         .iter()
         .enumerate()
-        .filter(|(i, a)| !(a.starts_with("--") || (i > &0 && args.get(i - 1).is_some_and(|p| p == "--control"))))
+        .filter(|(i, a)| {
+            !(a.starts_with("--") || (i > &0 && args.get(i - 1).is_some_and(|p| p == "--control")) || logging::LogArgs::is_value(&args, *i))
+        })
         .map(|(_, a)| a.clone())
         .collect();
     log::info!("transit {} ({} {})", env!("CARGO_PKG_VERSION"), std::env::consts::OS, std::env::consts::ARCH);
@@ -370,6 +398,15 @@ fn main() -> eframe::Result {
         }
     }
 
+    if let (Some(logger), Some(resolved)) = (logger, &resolved) {
+        log::info!(
+            "logging: filter \"{}\" from {}, debug for transit targets {}, copy to standard error {}",
+            resolved.spec,
+            resolved.source.describe(),
+            if logger.debug() { "on" } else { "off (Help > Debug Logging turns it on)" },
+            if logger.mirrors_stderr() { "on" } else { "off (--log-stderr turns it on)" },
+        );
+    }
     let engine = if demo { soundcraft_engine::demo::demo_engine() } else { Engine::default() };
     let loaded = load_prefs();
     // First launch (no preferences yet) opens maximized.
@@ -414,7 +451,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             // The device opens on the frame after the splash first says so (`splash::advance_open`).
-            let mut app = StudioApp::new(engine, None, services());
+            let mut app = StudioApp::new(engine, None, services(logger));
             if !no_audio {
                 app.splash.defer_open(prefs.audio.clone());
             }
