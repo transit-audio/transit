@@ -84,6 +84,34 @@ pub(crate) fn track_run_counts(counts: &mut Option<RunCounts>, p: &soundcraft_pl
     }
 }
 
+/// The connected external MIDI output ports named by `tracks`, once each, in order.
+pub fn connected_ports(tracks: &[soundcraft_playback::player::midi_out::TrackOutput]) -> Vec<String> {
+    use soundcraft_playback::player::midi_out::DestinationState;
+    let mut out: Vec<String> = Vec::new();
+    for t in tracks.iter().filter(|t| t.state == DestinationState::Connected) {
+        if !out.contains(&t.port) {
+            out.push(t.port.clone());
+        }
+    }
+    out
+}
+
+/// The INFO lines for ports that were connected and no longer are (device lost, or no track uses
+/// the port any more). Written here, on the control side: the MIDI output thread never logs.
+pub fn closed_lines(before: &[String], now: &[String]) -> Vec<String> {
+    before.iter().filter(|p| !now.contains(p)).map(|p| format!("MIDI output closed: port=\"{p}\"")).collect()
+}
+
+/// Once a frame, from the player read-back: log the output ports that closed since the last frame.
+pub(crate) fn track_midi_outputs(seen: &mut Vec<String>, p: &soundcraft_playback::Player) {
+    let Ok(status) = p.midi_status() else { return };
+    let now = connected_ports(&status.output.tracks);
+    for line in closed_lines(seen, &now) {
+        log::info!("{line}");
+    }
+    *seen = now;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,6 +161,13 @@ mod tests {
         app.run("help.debug_logging", json!({"on": true})).expect("explicit on");
         app.run("help.debug_logging", json!({"on": true})).expect("explicit on again stays on");
         assert!(fake.on.get());
+    }
+
+    #[test]
+    fn a_port_that_stops_being_connected_gets_one_closed_line() {
+        let v = |l: &[&str]| l.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        assert!(closed_lines(&v(&["A"]), &v(&["A", "B"])).is_empty());
+        assert_eq!(closed_lines(&v(&["A", "B"]), &v(&["B"])), vec!["MIDI output closed: port=\"A\"".to_owned()]);
     }
 
     #[test]

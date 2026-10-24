@@ -1010,7 +1010,14 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
 pub fn session_open_line(path: &str, s: &Session, missing_media: usize, took: std::time::Duration) -> String {
     let clips: usize = s.tracks.iter().filter_map(|t| t.playlist()).map(|p| p.clips.len()).sum();
     let seconds = s.content_end().max(0) as f64 / f64::from(s.sample_rate.hz().max(1));
-    let mut needs: Vec<String> = soundcraft_mix::instance_specs(s).into_iter().map(|x| x.id).collect();
+    // Ids only: `instance_specs` would decode every plug-in's stored state to build its specs.
+    let mut needs: Vec<String> = s
+        .tracks
+        .iter()
+        .flat_map(|t| t.mixer.inserts.iter().flatten().chain(t.instrument.iter()))
+        .filter(|i| i.hardware.is_none() && soundcraft_mix::is_third_party(&i.plugin))
+        .map(|i| i.plugin.clone())
+        .collect();
     needs.sort();
     needs.dedup();
     let needs = if needs.is_empty() { "none".to_owned() } else { format!("[{}]", needs.join(", ")) };
@@ -1741,5 +1748,18 @@ mod open_line_tests {
         assert!(line.contains(&format!("tracks={tracks} ")), "{line}");
         assert!(!line.contains("clips=0 "), "{line}");
         assert!(!line.contains("duration=0.0 s"), "{line}");
+    }
+
+    #[test]
+    fn needs_lists_third_party_ids_once_without_reading_their_state() {
+        let mut s = crate::demo::demo_engine().session().clone();
+        let prefix = soundcraft_clap_host::ID_PREFIX;
+        let mut ins = soundcraft_model::Insert::new(format!("{prefix}one"));
+        ins.state = Some("!!! not base64 !!!".into());
+        let track = s.tracks.first_mut().expect("a track");
+        track.mixer.inserts.push(Some(ins.clone()));
+        track.mixer.inserts.push(Some(ins));
+        let line = session_open_line("a.transit", &s, 0, std::time::Duration::ZERO);
+        assert!(line.contains(&format!("needs=[{prefix}one]")), "{line}");
     }
 }

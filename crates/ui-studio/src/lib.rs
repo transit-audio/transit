@@ -382,6 +382,8 @@ pub struct StudioApp {
     pub update: update::UpdateState,
     /// The overload counters when the transport last started (see [`debug_log::stop_line`]).
     run_counts: Option<debug_log::RunCounts>,
+    /// External MIDI output ports connected at the last frame (for the closed line).
+    midi_out_connected: Vec<String>,
     /// The launch splash (shown while plug-ins scan or the first device opens).
     pub splash: splash::SplashState,
     /// The output-callback telemetry readout and its window (polled a few times a second).
@@ -477,6 +479,7 @@ impl StudioApp {
             about: about::AboutState::default(),
             update: update::UpdateState::default(),
             run_counts: None,
+            midi_out_connected: Vec::new(),
             splash: splash::SplashState::default(),
             telemetry: telemetry::TelemetryState::default(),
             finish: finish::FinishState::default(),
