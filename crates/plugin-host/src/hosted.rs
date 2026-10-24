@@ -319,7 +319,7 @@ impl RemoteState {
     /// Reads the state on the host thread. `Err` at once when the thread is wedged or gone, or has
     /// been inside one window message (a modal dialog) for longer than the request timeout; after
     /// `busy` while the thread is inside a window message longer than [`crate::MODAL_AFTER`]; and
-    /// after the request timeout otherwise (a job that runs that long wedges the thread anyway).
+    /// after the request timeout otherwise (the thread is held that long by a slow creation or a hang).
     fn read(&mut self, busy: Duration) -> Result<Option<Vec<u8>>, StateBusy> {
         let worker = &self.token.worker;
         let timeout = self.token.timeout;

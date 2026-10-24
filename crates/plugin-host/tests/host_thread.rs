@@ -17,8 +17,86 @@ const FRAME_BUDGET: Duration = Duration::from_millis(400);
 /// A fake plug-in's slow creation or destruction: well past the frame budget.
 const SLOW: Duration = Duration::from_millis(1000);
 
+/// A host whose requests and creations both wedge their thread after `timeout` (the wedge
+/// mechanics; [`slow_host`] gives creations their own, longer budget, as the app's host does).
 fn host(timeout: Duration) -> Host {
-    Host::new(Config { timeout, inline: false, ..Config::default() })
+    Host::new(Config { timeout, creation_timeout: timeout, inline: false, ..Config::default() })
+}
+
+/// The app's shape (issue #82): a short request timeout and a longer creation budget.
+fn slow_host(timeout: Duration, creation_timeout: Duration) -> Host {
+    Host::new(Config { timeout, creation_timeout, inline: false, ..Config::default() })
+}
+
+/// Issue #82 (E48): a creation that runs past the request timeout is slow, not stuck. It never
+/// reads stuck within its own budget, the thread is not marked wedged, the creation queued behind
+/// it moves to a fresh thread, and the slow instance is delivered when it returns.
+#[test]
+fn a_creation_slower_than_the_request_timeout_is_delivered_and_hands_the_queue_over() {
+    let host = slow_host(Duration::from_millis(200), Duration::from_secs(30));
+    let (release, gate) = mpsc::channel::<()>();
+    let log = Arc::new(Log::default());
+    let l = Arc::clone(&log);
+    let slow = host.submit(move |ctx| {
+        let _ = gate.recv(); // the heavy instrument, until the test lets it finish
+        ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))
+    });
+    while !matches!(slow.poll(), Status::Waiting { running: true }) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let behind_log = Arc::new(Log::default());
+    let b = Arc::clone(&behind_log);
+    let behind = host.submit(move |ctx| ctx.adopt(Fake::make(&b, Duration::ZERO, Duration::ZERO)));
+    // Well past the request timeout: still loading, never stuck, nothing wedged.
+    let until = Instant::now() + Duration::from_millis(800);
+    while Instant::now() < until {
+        assert!(matches!(slow.poll(), Status::Waiting { running: true }), "a slow creation is not stuck");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!((host.wedged(), host.wedges()), (0, 0), "a slow creation does not wedge its thread");
+    let (status, _, _) = frames(&behind, Duration::from_secs(5));
+    assert!(matches!(status, Status::Ready(_)), "the creation queued behind it ran on a fresh thread");
+    // It finishes late: the instance is delivered, made on the slow thread.
+    drop(release);
+    let (status, _, _) = frames(&slow, Duration::from_secs(5));
+    let Status::Ready(plugin) = status else { panic!("the late instance is delivered") };
+    assert_ne!(log.thread_of("create"), behind_log.thread_of("create"), "two threads");
+    drop(plugin);
+    assert!(host.shutdown(Duration::from_secs(5)));
+}
+
+/// Issue #82: a creation past its own budget reads stuck (its thread is wedged), and if it returns
+/// after all, the next poll delivers its instance: nothing is discarded by the host.
+#[test]
+fn a_creation_that_returns_after_reading_stuck_is_still_delivered() {
+    let host = slow_host(Duration::from_millis(100), Duration::from_millis(300));
+    let (release, gate) = mpsc::channel::<()>();
+    let log = Arc::new(Log::default());
+    let l = Arc::clone(&log);
+    let late = host.submit(move |ctx| {
+        let _ = gate.recv();
+        ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))
+    });
+    let started = Instant::now();
+    let (status, _, _) = frames(&late, Duration::from_secs(5));
+    assert!(matches!(status, Status::Stuck), "past the creation budget it reads stuck");
+    assert!(started.elapsed() >= Duration::from_millis(250), "not before the creation budget ({:?})", started.elapsed());
+    assert_eq!(host.wedged(), 1);
+    drop(release);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let plugin = loop {
+        match late.poll() {
+            Status::Ready(p) => break p,
+            Status::Stuck | Status::Waiting { .. } if Instant::now() < deadline => std::thread::sleep(Duration::from_millis(5)),
+            _ => panic!("the late instance is delivered"),
+        }
+    };
+    while host.wedged() > 0 && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(host.wedged(), 0, "its thread returned");
+    drop(plugin);
+    assert!(host.shutdown(Duration::from_secs(5)));
 }
 
 /// Polls `pending` once per 5 ms frame until it is not waiting; returns the status, the frames

@@ -11,10 +11,17 @@
 //! and whose drop sends the instance back to its host thread to be destroyed there. Its editor
 //! and state reader stay on the host thread; the wrapper hands out proxies that send requests.
 //!
-//! **Stuck plug-ins.** A job or tick that runs longer than [`Config::timeout`], or a window
-//! message (a plug-in's modal dialog runs inside one) that runs longer than
-//! [`Config::dispatch_timeout`], wedges its thread: [`Host::check`] marks it, starts a fresh host
-//! thread for new creations, and moves the creations that had not started to it. A wedged
+//! **Stuck plug-ins.** A job or tick that runs longer than [`Config::timeout`], a creation that
+//! runs longer than [`Config::creation_timeout`], or a window message (a plug-in's modal dialog
+//! runs inside one) that runs longer than [`Config::dispatch_timeout`], wedges its thread:
+//! [`Host::check`] marks it, starts a fresh host thread for new creations, and moves the
+//! creations that had not started to it.
+//!
+//! **Slow creations are not stuck** (issue #82). A heavy instrument on a loaded machine can take
+//! longer than the request timeout to make; that is work, not a hang, so a creation has the long
+//! budget. Once it has run past the request timeout, the creations queued behind it move to a
+//! fresh thread (it is not marked wedged), and its result is delivered whenever it returns, even
+//! after it was reported stuck. A wedged
 //! thread is never joined. **When the call returns, the thread is responsive again** and goes on
 //! serving its own instances (state reads, editors, destruction); only new creations stay on the
 //! fresh thread. A thread that never returns keeps its instances, leaked rather than destroyed
@@ -45,6 +52,11 @@ pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 /// How long one window-message dispatch (a modal dialog) may run before its thread counts as
 /// wedged.
 pub const DEFAULT_DISPATCH_TIMEOUT: Duration = Duration::from_secs(120);
+/// How long a creation (a [`Host::submit`] job: module entry, instance creation, state restore)
+/// may run before its thread counts as wedged: the dispatch budget. A heavy instrument on a
+/// loaded machine can take longer than [`DEFAULT_TIMEOUT`]; only a creation past this reads as
+/// not responding (issue #82).
+pub const DEFAULT_CREATION_TIMEOUT: Duration = DEFAULT_DISPATCH_TIMEOUT;
 /// A window-message dispatch that has run this long holds a modal dialog (a plug-in's file
 /// dialog or message box): a save stops waiting for the plug-ins on that thread after its short
 /// deadline instead of the request timeout (issue #56).
@@ -88,8 +100,12 @@ pub const INLINE_BY_DEFAULT: bool = cfg!(any(target_os = "macos", target_arch = 
 /// How a [`Host`] runs.
 #[derive(Clone)]
 pub struct Config {
-    /// Longest a job or tick may run before the thread counts as wedged.
+    /// Longest a job or tick may run before the thread counts as wedged. A creation that runs
+    /// longer is slow: the creations queued behind it move to a fresh thread.
     pub timeout: Duration,
+    /// Longest a creation ([`Host::submit`]) may run before its thread counts as wedged and the
+    /// creation reads [`Status::Stuck`].
+    pub creation_timeout: Duration,
     /// Longest one window-message dispatch may run before the thread counts as wedged. Longer
     /// than `timeout`: a plug-in's modal file dialog or message box runs inside a dispatch for as
     /// long as the user leaves it open.
@@ -105,6 +121,7 @@ impl Default for Config {
     fn default() -> Self {
         Config {
             timeout: DEFAULT_TIMEOUT,
+            creation_timeout: DEFAULT_CREATION_TIMEOUT,
             dispatch_timeout: DEFAULT_DISPATCH_TIMEOUT,
             tick: DEFAULT_TICK,
             hooks: Hooks::default(),
@@ -118,6 +135,8 @@ type Job = Box<dyn FnOnce(&mut Ctx) + Send>;
 /// One queued job. Taking it claims it, so a job that was moved to a fresh thread runs once.
 struct JobCell {
     job: Mutex<Option<Job>>,
+    /// A creation ([`Host::submit`]): it runs on the creation budget.
+    creation: bool,
 }
 
 impl JobCell {
@@ -147,6 +166,8 @@ pub(crate) struct Worker {
     section: AtomicU64,
     /// The current busy section is a window-message dispatch (its own, longer budget).
     dispatching: AtomicBool,
+    /// The current busy section is a creation (the creation budget).
+    creating: AtomicBool,
     /// The section (a `section` value) found busy past its budget; 0 none. The thread is wedged
     /// only while that section still runs ([`Worker::is_wedged`]), so a mark that lands just
     /// after the call returned never reads as wedged.
@@ -183,21 +204,22 @@ impl Worker {
     }
 
     fn busy<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.busy_as(false, f)
+        self.busy_as(Section::Job, f)
     }
 
-    /// Runs `f` on the clock (`dispatch`: the window-message budget). A thread marked wedged
-    /// meanwhile is responsive again once `f` returns: it was slow, not stuck.
-    fn busy_as<R>(&self, dispatch: bool, f: impl FnOnce() -> R) -> R {
-        let section = self.enter(dispatch);
+    /// Runs `f` on the clock, on the budget of `kind`. A thread marked wedged meanwhile is
+    /// responsive again once `f` returns: it was slow, not stuck.
+    fn busy_as<R>(&self, kind: Section, f: impl FnOnce() -> R) -> R {
+        let section = self.enter(kind);
         let r = f();
         self.leave(section);
         r
     }
 
     /// Starts a busy section; returns its name (odd).
-    fn enter(&self, dispatch: bool) -> u64 {
-        self.dispatching.store(dispatch, Ordering::Release);
+    fn enter(&self, kind: Section) -> u64 {
+        self.dispatching.store(kind == Section::Dispatch, Ordering::Release);
+        self.creating.store(kind == Section::Creation, Ordering::Release);
         self.busy_since.store(self.now_ms() + 1, Ordering::Release);
         self.section.fetch_add(1, Ordering::SeqCst) + 1
     }
@@ -236,7 +258,18 @@ impl Worker {
 
     /// The budget of the current busy section.
     fn budget(&self, config: &Config) -> Duration {
-        if self.dispatching.load(Ordering::Acquire) { config.dispatch_timeout } else { config.timeout }
+        if self.dispatching.load(Ordering::Acquire) {
+            config.dispatch_timeout
+        } else if self.creating.load(Ordering::Acquire) {
+            config.creation_timeout
+        } else {
+            config.timeout
+        }
+    }
+
+    /// Inside a creation that has run at least `limit` (slow, not necessarily stuck).
+    fn in_creation_longer_than(&self, limit: Duration) -> bool {
+        self.creating.load(Ordering::Acquire) && self.busy_for().is_some_and(|d| d >= limit)
     }
 
     /// Queues a job; `Err` gives it back when the thread is gone.
@@ -252,7 +285,7 @@ impl Worker {
     /// Queues `job`, or leaks it (and whatever it owns) when the thread is gone: plug-in objects
     /// are never destroyed on another thread than their own.
     pub(crate) fn send_or_leak(&self, job: impl FnOnce(&mut Ctx) + Send + 'static) {
-        let cell = Arc::new(JobCell { job: Mutex::new(Some(Box::new(job))) });
+        let cell = Arc::new(JobCell { job: Mutex::new(Some(Box::new(job))), creation: false });
         if let Err(cell) = self.send(cell) {
             log::debug!("plug-in host: the thread of an instance is gone; leaking what it owned");
             std::mem::forget(cell);
@@ -272,6 +305,17 @@ impl Worker {
     pub(crate) fn responsive(&self) -> bool {
         self.running.load(Ordering::Acquire) && !self.is_wedged()
     }
+}
+
+/// What a busy section runs, which sets its budget ([`Worker::budget`]).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Section {
+    /// A request for an existing instance, a tick, the start hook: [`Config::timeout`].
+    Job,
+    /// A creation: [`Config::creation_timeout`].
+    Creation,
+    /// A window-message dispatch: [`Config::dispatch_timeout`].
+    Dispatch,
 }
 
 /// What a job's slot holds.
@@ -306,7 +350,9 @@ pub enum Status<T> {
         running: bool,
     },
     Ready(T),
-    /// It has run longer than the timeout: its thread is wedged and abandoned (see the crate docs).
+    /// It has run longer than its budget (the request timeout; for a creation, the creation
+    /// timeout): its thread is wedged (see the crate docs). Not final: a job that returns later
+    /// reads [`Status::Ready`] on a later poll, so a late creation is never lost (issue #82).
     Stuck,
     /// It panicked, was cancelled, or its thread is gone.
     Failed,
@@ -318,6 +364,8 @@ pub struct Pending<T> {
     slot: Arc<Slot<T>>,
     cell: Option<Arc<JobCell>>,
     host: Host,
+    /// How long the job may run before it reads [`Status::Stuck`].
+    budget: Duration,
 }
 
 impl<T> Pending<T> {
@@ -328,12 +376,9 @@ impl<T> Pending<T> {
             FAILED => Status::Failed,
             RUNNING => {
                 let ran = lock(&self.slot.started).map_or(Duration::ZERO, |t| t.elapsed());
-                if ran >= self.host.inner.config.timeout {
-                    self.host.check();
-                    Status::Stuck
-                } else {
-                    Status::Waiting { running: true }
-                }
+                // Every frame: a slow creation hands the ones queued behind it to a fresh thread.
+                self.host.check();
+                if ran >= self.budget { Status::Stuck } else { Status::Waiting { running: true } }
             }
             _ => {
                 self.host.check();
@@ -381,6 +426,7 @@ impl<T> Drop for Pending<T> {
 #[doc(hidden)]
 pub fn act_as_modal_dialog(ctx: &Ctx) {
     if let Some(worker) = &ctx.worker {
+        worker.creating.store(false, Ordering::Release);
         worker.dispatching.store(true, Ordering::Release);
     }
 }
@@ -532,6 +578,7 @@ impl Host {
             busy_since: AtomicU64::new(0),
             section: AtomicU64::new(0),
             dispatching: AtomicBool::new(false),
+            creating: AtomicBool::new(false),
             wedged: AtomicU64::new(0),
             running: AtomicBool::new(true),
             movable: Mutex::new(Vec::new()),
@@ -544,8 +591,9 @@ impl Host {
     }
 
     /// Runs `job` on the host thread (at once, in inline mode) and returns its result to poll.
-    /// Creation jobs (`movable`) move to a fresh thread if theirs wedges before starting them;
-    /// jobs for an existing instance stay on the instance's thread ([`Host::submit_to`]).
+    /// Creation jobs (`movable`) run on the creation budget and move to a fresh thread if theirs
+    /// wedges, or is held by a slow creation, before starting them; jobs for an existing
+    /// instance stay on the instance's thread ([`Host::submit_to`]).
     pub fn submit<T: Send + 'static>(&self, job: impl FnOnce(&mut Ctx) -> T + Send + 'static) -> Pending<T> {
         self.check();
         let worker = lock(&self.inner.current).clone();
@@ -563,6 +611,7 @@ impl Host {
         job: impl FnOnce(&mut Ctx) -> T + Send + 'static,
     ) -> Pending<T> {
         let slot = Arc::new(Slot { state: AtomicU8::new(QUEUED), started: Mutex::new(None), value: Mutex::new(None), done: Condvar::new() });
+        let budget = if movable { self.inner.config.creation_timeout } else { self.inner.config.timeout };
         let theirs = Arc::clone(&slot);
         // Marks the job failed if it is dropped without running (cancelled, or its thread gone).
         let unrun = Unrun(Arc::clone(&slot));
@@ -591,17 +640,17 @@ impl Host {
         let failed = |slot: &Arc<Slot<T>>| slot.state.store(FAILED, Ordering::Release);
         if self.inner.closed.load(Ordering::Acquire) {
             failed(&slot);
-            return Pending { slot, cell: None, host: self.clone() };
+            return Pending { slot, cell: None, host: self.clone(), budget };
         }
         if let Some(ctx) = lock(&self.inner.inline).as_mut() {
             wrapped(ctx);
-            return Pending { slot, cell: None, host: self.clone() };
+            return Pending { slot, cell: None, host: self.clone(), budget };
         }
         let Some(worker) = worker else {
             failed(&slot);
-            return Pending { slot, cell: None, host: self.clone() };
+            return Pending { slot, cell: None, host: self.clone(), budget };
         };
-        let cell = Arc::new(JobCell { job: Mutex::new(Some(Box::new(wrapped))) });
+        let cell = Arc::new(JobCell { job: Mutex::new(Some(Box::new(wrapped))), creation: movable });
         if movable {
             let mut list = lock(&worker.movable);
             list.retain(|c| !c.claimed());
@@ -611,12 +660,15 @@ impl Host {
             drop(cell.take());
             failed(&slot);
         }
-        Pending { slot, cell: Some(cell), host: self.clone() }
+        Pending { slot, cell: Some(cell), host: self.clone(), budget }
     }
 
-    /// Notices a wedged host thread: if the current one has been busy for longer than the
-    /// timeout, it is marked, a fresh thread takes over, and the creation jobs it had not started
-    /// move there. Cheap; the UI calls it every frame (polling a [`Pending`] does too).
+    /// Notices a wedged host thread: if the current one has been busy for longer than its
+    /// section's budget, it is marked, a fresh thread takes over, and the creation jobs it had not
+    /// started move there. A creation past the request timeout but within its own budget is slow,
+    /// not wedged: the creations queued behind it move to a fresh thread, which becomes current,
+    /// and the slow one finishes where it is (issue #82). Cheap; the UI calls it every frame
+    /// (polling a [`Pending`] does too).
     pub fn check(&self) {
         let current = lock(&self.inner.current).clone();
         // A thread that is no longer current (it wedged once and came back) is only marked: its
@@ -633,6 +685,14 @@ impl Host {
         let Some(current) = current else { return };
         let budget = current.budget(&self.inner.config);
         if !current.overdue(budget).is_some_and(|section| current.mark_wedged(section)) {
+            let timeout = self.inner.config.timeout;
+            let queued = || lock(&current.movable).iter().any(|c| !c.claimed());
+            if current.in_creation_longer_than(timeout) && queued() && !self.inner.closed.load(Ordering::Acquire) {
+                log::warn!(
+                    "plug-in host: a plug-in has been loading for more than {timeout:?}; the plug-ins queued behind it load on a new host thread"
+                );
+                self.take_over(&current);
+            }
             return;
         }
         self.inner.wedged.fetch_add(1, Ordering::AcqRel);
@@ -642,6 +702,12 @@ impl Host {
         if self.inner.closed.load(Ordering::Acquire) {
             return;
         }
+        self.take_over(&current);
+    }
+
+    /// Starts a fresh host thread for new creations and moves the creations `current` had not
+    /// started to it.
+    fn take_over(&self, current: &Arc<Worker>) {
         let Some(fresh) = self.start_worker() else {
             *lock(&self.inner.current) = None;
             return;
@@ -705,7 +771,7 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
     while !ctx.exit {
         while let Ok(cell) = rx.try_recv() {
             if let Some(job) = cell.take() {
-                worker.busy(|| job(&mut ctx));
+                worker.busy_as(if cell.creation { Section::Creation } else { Section::Job }, || job(&mut ctx));
             }
             if ctx.exit {
                 break;
@@ -714,7 +780,7 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
         if ctx.exit {
             break;
         }
-        worker.busy_as(true, || catch_unwind(AssertUnwindSafe(|| queue.dispatch(256))).is_ok());
+        worker.busy_as(Section::Dispatch, || catch_unwind(AssertUnwindSafe(|| queue.dispatch(256))).is_ok());
         if last_tick.elapsed() >= config.tick {
             last_tick = Instant::now();
             worker.busy(|| {
@@ -771,6 +837,7 @@ mod tests {
             busy_since: AtomicU64::new(0),
             section: AtomicU64::new(0),
             dispatching: AtomicBool::new(false),
+            creating: AtomicBool::new(false),
             wedged: AtomicU64::new(0),
             running: AtomicBool::new(true),
             movable: Mutex::new(Vec::new()),
@@ -785,7 +852,7 @@ mod tests {
     fn a_check_that_marks_a_section_after_it_returned_does_not_wedge_the_thread() {
         let queue = MessageQueue::attach();
         let w = worker(&queue);
-        let section = w.enter(false);
+        let section = w.enter(Section::Job);
         let seen = w.overdue(Duration::ZERO);
         assert_eq!(seen, Some(section), "the check sees the section past its budget");
         w.leave(section);
@@ -793,7 +860,7 @@ mod tests {
         assert!(!w.is_wedged() && w.responsive(), "an idle thread is not wedged");
         assert_eq!(w.wedged.load(Ordering::SeqCst), 0);
         // The next section is not wedged by the stale observation either.
-        let next = w.enter(false);
+        let next = w.enter(Section::Job);
         assert!(!w.is_wedged());
         w.leave(next);
     }
@@ -804,7 +871,7 @@ mod tests {
     fn a_mark_holds_while_its_section_runs_and_ends_with_it() {
         let queue = MessageQueue::attach();
         let w = worker(&queue);
-        let section = w.enter(true);
+        let section = w.enter(Section::Dispatch);
         let seen = w.overdue(Duration::ZERO).unwrap();
         assert!(w.mark_wedged(seen));
         assert!(w.is_wedged() && !w.responsive());
