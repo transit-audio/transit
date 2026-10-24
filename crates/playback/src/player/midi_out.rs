@@ -268,9 +268,9 @@ struct Shared {
     stall: AtomicBool,
     #[cfg(test)]
     stalled: AtomicBool,
-    status: Mutex<(Vec<PortInfo>, Vec<TrackOutput>, Option<String>)>,
-    /// The MIDI Monitor's output port names, indexed by the port id its events carry (#91).
-    labels: Mutex<Vec<String>>,
+    /// Ports, tracks, error, and the MIDI Monitor's output port names indexed by the port id its
+    /// events carry (#91): one lock for the whole snapshot.
+    status: Mutex<(Vec<PortInfo>, Vec<TrackOutput>, Option<String>, Vec<String>)>,
 }
 
 /// Control's handle (Main). Dropping it stops the thread, which first releases every held note
@@ -332,7 +332,7 @@ impl Out {
     /// The names of the ports the thread has used, indexed by the monitor's port id.
     #[must_use]
     pub fn port_labels(&self) -> Vec<String> {
-        self.shared.labels.lock().map(|l| l.clone()).unwrap_or_else(|p| p.into_inner().clone())
+        self.shared.status.lock().map(|s| s.3.clone()).unwrap_or_else(|p| p.into_inner().3.clone())
     }
 
     /// Starts the output thread on `io`, timing against `origin` (the runtime's host clock).
@@ -441,7 +441,7 @@ impl Out {
 
     #[must_use]
     pub fn status(&self) -> OutputStatus {
-        let (ports, tracks, error) = self.shared.status.lock().map(|s| s.clone()).unwrap_or_else(|p| p.into_inner().clone());
+        let (ports, tracks, error, _) = self.shared.status.lock().map(|s| s.clone()).unwrap_or_else(|p| p.into_inner().clone());
         let c = &self.counters;
         OutputStatus {
             ports,
@@ -1163,11 +1163,8 @@ impl Worker {
             })
             .collect();
         let mut status = self.shared.status.lock().unwrap_or_else(PoisonError::into_inner);
-        *status = (ports, tracks, self.error.clone());
-        drop(status);
-        let mut labels = self.shared.labels.lock().unwrap_or_else(PoisonError::into_inner);
-        labels.clear();
-        labels.extend(self.ports.iter().map(|p| p.label.clone()));
+        let labels = self.ports.iter().map(|p| p.label.clone()).collect();
+        *status = (ports, tracks, self.error.clone(), labels);
     }
 }
 
