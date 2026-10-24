@@ -23,6 +23,12 @@ UI code follows the same no-panic rule (`#![deny(clippy::unwrap_used, ...)]` in 
 - **Transport wait:** Play draws muted and pulses, with the reason as its tooltip, while a Play request is pending or a plug-in is still loading (`transport_wait()` in `transport.rs`, derived from `player_requests.play` and `Player::any_loading`). Clicks while pending are ignored; Stop cancels.
 - Known issue: `audio_devices_io.rs` reads Enter directly (`key_pressed`) in the rename field; it predates the shortcut gate's scan list and should move to a table row.
 - **Loop handle** (`arrange.rs`, ADR 0019): drag the header's upper right. Modifiers: Shift no snap, Alt independent copies (Repeat), Ctrl/Cmd overwrite. Without Ctrl/Cmd a longer loop and its ghosts stop at the next clip; with it the clips under the new span are trimmed or removed (shaded while dragging; an edit-locked clip still stops it) in the same `clip.loop_to` undo step (`overwrite: true`). Shift is already no snap, so overwrite is on Ctrl/Cmd.
+- **Confirmations:** an action that destroys something the user cannot undo (deleting a plug-in
+  preset) asks through `Services::confirm`, a `Fn(&str) -> bool` in the `Services` struct that the
+  app injects (`crates/ui-studio/src/lib.rs`; the app's is a yes/no `rfd::MessageDialog` in
+  `apps/transit/src/main.rs`). With `confirm` unset the action is refused with a status line, so
+  nothing runs unasked. Tests supply a stub that records the question and answers
+  (`plugin_header_tests.rs`); a test never opens a real dialog.
 - Strings are American English.
 
 ## Clip fades and crossfades

@@ -31,3 +31,7 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
 - A gate that is not run is not a gate. If one cannot run on your machine, say so in the pull request.
 - Do not weaken or delete a gate to make a change pass. Fix the cause (see `escape-record.md`).
 - Tests must not load third-party plug-ins. Use the fixtures.
+- A test failure blocks a merge. A suspected flake needs a tracked issue and a green re-run on the
+  failing platform before the change merges; "passes locally" or "passes on re-run elsewhere" is not
+  enough. The CI conclusion after a push is itself a gate: check it, and a red run is a failure until
+  it is explained and fixed (E47, `../../escapes/E47-header-state-jobs-raced-the-rendered-document.md`).

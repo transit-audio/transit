@@ -23,6 +23,13 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
    - Linux x86_64.
 4. Check the pre-release page and publish it when the archives look right. The workflow body is generic:
    paste or replace it after publication with `gh release edit <tag> --notes-file <file>`.
+5. `release.yml` then announces the release on Discord (the "Announce on Discord" step). It reads the
+   published release body back, posts the top-level bullets of its `## Highlights` section (up to
+   1800 characters; the first paragraph when there is no Highlights section) with a link to the
+   release, and stops at the checksums section. Put the Highlights first when you write the notes.
+   The step uses the `DISCORD_WEBHOOK_URL` repository secret; with the secret missing it logs and
+   skips, and a Discord failure never fails the release (`continue-on-error`). To test the webhook
+   without a release, run the workflow by hand with `discord_test` set; only the test post runs.
 
 ## Released
 
