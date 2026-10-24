@@ -25,6 +25,26 @@ UI code follows the same no-panic rule (`#![deny(clippy::unwrap_used, ...)]` in 
 - **Loop handle** (`arrange.rs`, ADR 0019): drag the header's upper right. Modifiers: Shift no snap, Alt independent copies (Repeat), Ctrl/Cmd overwrite. Without Ctrl/Cmd a longer loop and its ghosts stop at the next clip; with it the clips under the new span are trimmed or removed (shaded while dragging; an edit-locked clip still stops it) in the same `clip.loop_to` undo step (`overwrite: true`). Shift is already no snap, so overwrite is on Ctrl/Cmd.
 - Strings are American English.
 
+## Clip fades and crossfades
+
+Issue #63; code in `crates/ui-studio/src/fades.rs` (gestures) and `crates/model/src/clip.rs` (data).
+
+- **Data:** an audio `Clip` has `fade_in` and `fade_out`, each a `Fade { len, shape, curvature }`.
+  `len` is samples, clamped to the clip's length; `shape` is Linear, Equal Power (the default), S-Curve,
+  Exponential or Logarithmic; `curvature` is a bend from -1 to 1, and zero keeps the shape exact.
+  A fade of length 0 is no fade.
+- **Gain:** `Fade::gain` is the one envelope the engine renders and the arranger draws; a fade-out
+  uses `gain(1 - t)`. There is no separate crossfade object.
+- **Crossfade:** a range across an abutting boundary (`ops::create_fades`, `edit.fades_create`) sets
+  the earlier clip's fade-out and the later clip's fade-in over the overlap, extending each clip
+  into the other's side by its unused source handle. Removing the fades trims overlapping
+  neighbors back to the midpoint.
+- **Gestures** (one undo step each): drag a top-corner handle inward for the length (Shift: no snap),
+  Alt-drag to bend the curve, click for the shape menu, double-click to reset, drag to zero to
+  remove. Dragging a fade across an abutting neighbor creates a crossfade; crossfade edges adjust
+  both sides. The automatic crossfade preference is #72.
+- Looped clips: fades follow the arrangement bounds, not each cycle ([ADR 0019](../../adr/0019-clip-internal-loops.md)).
+
 ## Tests
 
 `crates/ui-studio/src/*_tests.rs` and `crates/ui-studio/tests/`. A UI feature needs a test through

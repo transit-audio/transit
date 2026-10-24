@@ -77,6 +77,28 @@ Hosted plug-ins (CLAP, VST3) live on the plug-in host thread ([ADR 0018](../../a
 Offline renders (bounce, stems, freeze) make, process and destroy their instances on the thread
 that builds the render, not on the host thread; ADR 0018 says why.
 
+## Parameter tables read on the UI thread
+
+The automation picker and the plug-in parameter lists name a hosted plug-in's parameters from the
+host registry's cache, not from an instance (#58, #65).
+
+- **`cached_info(id)`** (`soundcraft_clap_host`, `soundcraft_vst3_host`; used by `device_info` in
+  `crates/ui-studio/src/automation.rs`) returns the description of a type already loaded, without
+  instantiating anything and without loading a binary, so it is safe on the UI thread. It returns
+  `None` for a type not loaded yet; the picker then shows the stored parameters as `param <id>`
+  until a first instance has loaded. A project's plug-ins load on open, so the table is normally
+  there. The table is built once per type, outside the registry lock, and the first insert wins.
+- **A never-loaded type** is read on the plug-in host thread by commands that need it
+  (`hosted_info` in `crates/engine/src/cmd/clap.rs`), which waits at most `INFO_WAIT` (500 ms) and
+  then refuses as still loading while the read carries on; the UI never waits on it (#56).
+- **`ParamInfo.group`** (`crates/dsp/src/lib.rs`) is the module (CLAP) or unit (VST3) path the
+  parameter sits under, parts joined by `/`; empty for built-in devices and plug-ins without
+  groups. The picker groups by it (#65). Parameter ids keep their case.
+- **The picker's model cache** (`PickerState::model`, `crates/ui-studio/src/automation_picker.rs`)
+  builds the grouped model once per cached table and keys it by the table's address. The host
+  caches a table once per plug-in type, so a new table is the only invalidation.
+- Not covered: AU plug-ins on macOS.
+
 ## First use allocates on macOS
 
 On macOS, `std::sync::Mutex` is a lazily boxed `pthread_mutex_t`: the first `lock` or `try_lock`
