@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::*;
+use crate::player::monitor;
 use crate::{action_lane, plan_bridge, player::AudioPorts};
 use soundcraft_mix::{DeviceGeneration, PlanLimits, RenderTarget};
 use soundcraft_model::{ChannelFormat, Insert, Session, TrackId, TrackKind};
@@ -255,6 +256,93 @@ fn idle_worker_taps_step_pedal_and_learnable_actions_without_delaying_routes() {
     // sides, and a median ignores the scheduler outliers that a max does not.
     let bound = if cfg!(windows) { Duration::from_millis(2) } else { Duration::from_millis(5) };
     assert!(median < bound, "idle input must wake promptly with the tap active: {median:?}");
+    f.finish();
+}
+
+/// Drains the monitor until `ready` holds for what was collected.
+fn monitored(f: &mut Fixture, mut ready: impl FnMut(&[monitor::MonitorEvent], &monitor::Report) -> bool) -> (Vec<monitor::MonitorEvent>, monitor::Report) {
+    let mut events = Vec::new();
+    let mut last = monitor::Report::default();
+    until(|| {
+        f.tick();
+        last = f.native.take_monitor(&mut events, 1000);
+        ready(&events, &last)
+    });
+    (events, last)
+}
+
+fn port_id(report: &monitor::Report, name: &str) -> u16 {
+    report.ports.iter().find(|p| p.dir == monitor::Dir::In && p.name == name).unwrap().id
+}
+
+#[test]
+fn monitor_shows_an_unrouted_port_and_leaves_routing_alone() {
+    let fake = Fake::default();
+    let routed = fake.add_input("Routed keys");
+    let unrouted = fake.add_input("Unrouted pads");
+    let mut session = Session::default();
+    track(&mut session, selected(&routed, Some(0)));
+    let mut f = Fixture::new(session, fake.io());
+    f.native.set_monitor(true, false);
+    // Monitoring opens every present input; only the selected one has a route.
+    f.ready(2, 1);
+    assert!(fake.input_port(&unrouted).unwrap().deliver(1_000, &[0x99, 36, 90]));
+    assert!(fake.input_port(&routed).unwrap().deliver(2_000, &[0x92, 40, 80]));
+    assert!(fake.input_port(&routed).unwrap().deliver(3_000, &[0x90, 61, 70]));
+    let (events, report) = monitored(&mut f, |events, _| events.len() >= 3);
+    let (unrouted_id, routed_id) = (port_id(&report, "Unrouted pads"), port_id(&report, "Routed keys"));
+    let has = |port: u16, status: u8, data1: u8| events.iter().any(|e| e.dir == monitor::Dir::In && e.port == port && e.status == status && e.data1 == data1);
+    assert!(has(unrouted_id, 0x99, 36), "{events:?}");
+    assert!(has(routed_id, 0x92, 40), "a message the route filters out is shown: {events:?}");
+    assert!(has(routed_id, 0x90, 61), "{events:?}");
+    assert_eq!(f.native.monitor_activity().0.count, 3, "every message of every open port is activity");
+    assert_eq!(report.ports.iter().find(|p| p.name == "Routed keys").unwrap().tracks.len(), 1);
+    assert!(report.ports.iter().find(|p| p.name == "Unrouted pads").unwrap().tracks.is_empty());
+    // Only the channel-1 note reached the lane: routing is as without the monitor.
+    assert_eq!(f.packets(1)[0].raw.bytes, [0x90, 61, 70]);
+    assert_eq!(f.native.status().counts.admitted, 1);
+    // With the monitor off the extra port closes again.
+    f.native.set_monitor(false, false);
+    f.ready(1, 1);
+    f.finish();
+}
+
+#[test]
+fn monitor_counts_clock_instead_of_listing_it_and_notes_realtime_and_sysex() {
+    let fake = Fake::default();
+    let key = fake.add_input("Transport keys");
+    let mut session = Session::default();
+    track(&mut session, MidiInput::default());
+    let mut f = Fixture::new(session, fake.io());
+    f.native.set_monitor(true, false);
+    f.ready(1, 1);
+    let backend = fake.input_port(&key).unwrap();
+    // Eleven pulses 20 ms apart (about 125 BPM), Start, Active Sensing, a SysEx and Stop.
+    assert!(backend.deliver(0, &[0xFA]));
+    for n in 0..11 {
+        assert!(backend.deliver(n, &[0xF8]));
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(backend.deliver(0, &[0xFE]));
+    assert!(backend.deliver(0, &[0xF0, 1, 2, 3, 0xF7]));
+    assert!(backend.deliver(0, &[0xFC]));
+    let (events, report) = monitored(&mut f, |events, _| events.iter().any(|e| e.status == 0xFC));
+    let status: Vec<u8> = events.iter().map(|e| e.status).collect();
+    assert!(!status.contains(&0xF8) && !status.contains(&0xFE), "{status:x?}");
+    assert!(status.contains(&0xFA));
+    let sysex = events.iter().find(|e| e.status == 0xF0).unwrap();
+    assert_eq!(sysex.sysex_len, 5);
+    let port = report.ports.iter().find(|p| p.name == "Transport keys").unwrap();
+    let bpm = port.clock_bpm.expect("a rate from eleven pulses");
+    assert!((30.0..200.0).contains(&bpm), "{bpm}");
+    assert!(port.sensing, "{report:?}");
+    // The header LED counts Start and Stop, not the eleven Clock pulses or Active Sensing.
+    let (activity, name) = f.native.monitor_activity();
+    assert_eq!((activity.count, activity.bytes[0], name.as_str()), (2, 0xFC, "Transport keys"));
+    // The toggle lists the pulses.
+    f.native.set_monitor(true, true);
+    assert!(backend.deliver(0, &[0xF8]));
+    monitored(&mut f, |events, _| events.iter().any(|e| e.status == 0xF8));
     f.finish();
 }
 

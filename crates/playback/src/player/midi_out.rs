@@ -13,6 +13,7 @@
 //! The audio thread never calls into `transit-midi-io`; only this thread does. Control (Main)
 //! sends the destination table and panics through a bounded channel and reads a status
 //! snapshot. Timing model, safety rules and reconnects: `docs/contributing/knowledge/midi-output.md`.
+use super::monitor::{Dir, MonitorEvent, Tap};
 use crate::device_clock::HostOrigin;
 use soundcraft_model::{MidiOutChannel, MidiOutPort, Session, TrackId};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -268,6 +269,8 @@ struct Shared {
     #[cfg(test)]
     stalled: AtomicBool,
     status: Mutex<(Vec<PortInfo>, Vec<TrackOutput>, Option<String>)>,
+    /// The MIDI Monitor's output port names, indexed by the port id its events carry (#91).
+    labels: Mutex<Vec<String>>,
 }
 
 /// Control's handle (Main). Dropping it stops the thread, which first releases every held note
@@ -281,6 +284,7 @@ pub struct Out {
     thread: Option<std::thread::JoinHandle<()>>,
     last: Option<Vec<Destination>>,
     error: Option<String>,
+    monitor: Option<Tap>,
 }
 
 impl std::fmt::Debug for Out {
@@ -313,10 +317,22 @@ impl Out {
                 thread: None,
                 last: None,
                 error: None,
+                monitor: None,
             },
             Producer { tx: playback_tx, counters: Arc::clone(&counters) },
             Producer { tx: echo_tx, counters },
         )
+    }
+
+    /// Gives the thread the MIDI Monitor's output tap (#91). Before [`Out::start`].
+    pub fn set_monitor(&mut self, tap: Tap) {
+        self.monitor = Some(tap);
+    }
+
+    /// The names of the ports the thread has used, indexed by the monitor's port id.
+    #[must_use]
+    pub fn port_labels(&self) -> Vec<String> {
+        self.shared.labels.lock().map(|l| l.clone()).unwrap_or_else(|p| p.into_inner().clone())
     }
 
     /// Starts the output thread on `io`, timing against `origin` (the runtime's host clock).
@@ -326,8 +342,10 @@ impl Out {
         };
         let counters = Arc::clone(&self.counters);
         let shared = Arc::clone(&self.shared);
+        let monitor = self.monitor.take();
         let thread = std::thread::Builder::new().name("transit-midi-out".into()).spawn(move || {
             let mut worker = Worker::new(io, origin, receive, playback, echo, counters, Arc::clone(&shared));
+            worker.monitor = monitor;
             worker.run();
             drop(worker);
             shared.finished.store(true, Ordering::Release);
@@ -538,6 +556,8 @@ struct Worker {
     releases: Vec<(u64, u64)>,
     /// The same for `Shared::track_releases`.
     track_releases: Vec<u64>,
+    /// The MIDI Monitor's output ring (#91): every successful send is copied here.
+    monitor: Option<Tap>,
 }
 
 fn origin_index(origin: Origin) -> usize {
@@ -579,6 +599,7 @@ impl Worker {
             dirty: true,
             releases: Vec::with_capacity(MAX_DESTINATIONS),
             track_releases: Vec::with_capacity(MAX_DESTINATIONS),
+            monitor: None,
         }
     }
 
@@ -1049,6 +1070,10 @@ impl Worker {
                     p.used |= 1 << (status & 0x0F);
                 }
                 self.counters.sent.fetch_add(1, Ordering::Relaxed);
+                if let Some(tap) = self.monitor.as_mut().filter(|tap| tap.enabled()) {
+                    let now = self.origin.now_ns().unwrap_or(0);
+                    tap.push(MonitorEvent::message(Dir::Out, port as u16, now, message));
+                }
                 true
             }
             Err(error) => {
@@ -1139,6 +1164,10 @@ impl Worker {
             .collect();
         let mut status = self.shared.status.lock().unwrap_or_else(PoisonError::into_inner);
         *status = (ports, tracks, self.error.clone());
+        drop(status);
+        let mut labels = self.shared.labels.lock().unwrap_or_else(PoisonError::into_inner);
+        labels.clear();
+        labels.extend(self.ports.iter().map(|p| p.label.clone()));
     }
 }
 

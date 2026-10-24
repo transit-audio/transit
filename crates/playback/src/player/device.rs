@@ -1070,6 +1070,39 @@ impl Player {
         }
         Vec::new()
     }
+    /// Switches the MIDI Monitor taps (#91). Off by default: the ingress and output threads copy
+    /// nothing while it is off.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn set_midi_monitor(&self, enabled: bool, show_clock: bool) {
+        if let Ok(midi) = self.midi.try_borrow()
+            && let Some(m) = midi.as_ref()
+        {
+            m.set_monitor(enabled, show_clock);
+        }
+    }
+    /// Input activity for the header LED (Clock and Active Sensing excluded): the counter, and
+    /// the port name and bytes of the last message. Works with the monitor window closed, for
+    /// the ports open for routing.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn midi_activity(&self) -> (super::monitor::Activity, String) {
+        if let Ok(midi) = self.midi.try_borrow()
+            && let Some(m) = midi.as_ref()
+        {
+            return m.monitor_activity();
+        }
+        Default::default()
+    }
+    /// Appends the MIDI Monitor's pending events (inputs and outputs, ordered by time, at most
+    /// `max` per direction) to `events`; the report lists the ports and the dropped counts.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn take_midi_monitor(&self, events: &mut Vec<super::monitor::MonitorEvent>, max: usize) -> super::monitor::Report {
+        if let Ok(midi) = self.midi.try_borrow()
+            && let Some(m) = midi.as_ref()
+        {
+            return m.take_monitor(events, max);
+        }
+        super::monitor::Report::default()
+    }
     #[cfg(not(target_arch = "wasm32"))]
     pub fn midi_status(&self) -> Result<super::MidiStatus, PlayerError> {
         let midi = self.midi.try_borrow().map_err(|_| PlayerError::Busy)?;

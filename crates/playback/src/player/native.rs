@@ -1,5 +1,6 @@
 //! Native MIDI device ownership. Enumeration/open/close run off Main; the
 //! independent ingress worker handles timestamped input even while UI is busy.
+use super::monitor::{self, Dir, MonitorEvent};
 use super::{ActionResult, RuntimeControl, ingress, midi_out, sources};
 use crate::{device_clock::HostOrigin, player::audio::Command};
 use soundcraft_mix::{EngineEpoch, INSTRUMENT_SLOT, SlotGen};
@@ -189,13 +190,18 @@ pub(super) struct Native {
     next_id: u64,
     status: Status,
     origin: HostOrigin,
+    /// The MIDI Monitor's control side (#91).
+    monitor: monitor::Hub,
 }
 
 impl Native {
     pub(super) fn new(lane: crate::action_lane::Control<ingress::Packet, ActionResult>, origin: HostOrigin) -> std::io::Result<Self> {
         let mut worker = ingress::Worker::start(lane)?;
-        let (out, playback, echo) = midi_out::Out::new();
+        let (mut out, playback, echo) = midi_out::Out::new();
         worker.set_echo(echo).map_err(std::io::Error::other)?;
+        let (monitor, tap_in, tap_out) = monitor::Hub::new();
+        worker.set_monitor(tap_in).map_err(std::io::Error::other)?;
+        out.set_monitor(tap_out);
         Ok(Self {
             worker,
             out,
@@ -206,6 +212,7 @@ impl Native {
             next_id: 0,
             status: Status::default(),
             origin,
+            monitor,
         })
     }
 
@@ -236,6 +243,46 @@ impl Native {
 
     pub(super) fn take_notes(&self) -> Vec<super::PlayedNote> {
         self.worker.take_notes()
+    }
+
+    /// Turns the MIDI Monitor taps on or off and sets whether Clock pulses show as events (#91).
+    /// While on, every present input port is opened (with no routes) so the monitor sees
+    /// controllers no track listens to.
+    pub(super) fn set_monitor(&self, enabled: bool, show_clock: bool) {
+        self.monitor.set_enabled(enabled);
+        self.monitor.set_show_clock(show_clock);
+    }
+
+    /// The header LED's counter and the port name behind the last message.
+    pub(super) fn monitor_activity(&self) -> (monitor::Activity, String) {
+        let a = self.monitor.activity();
+        let name = self.inputs.iter().find(|i| i.attached.as_ref().is_some_and(|(id, _)| *id as u16 == a.port)).map(|i| i.key.to_string());
+        (a, name.unwrap_or_default())
+    }
+
+    /// The monitor's pending events of both directions, and its counters and port list.
+    pub(super) fn take_monitor(&self, events: &mut Vec<MonitorEvent>, max: usize) -> monitor::Report {
+        self.monitor.drain(events, max);
+        let (dropped_in, dropped_out) = self.monitor.dropped();
+        let now = self.origin.now_ns().unwrap_or(0);
+        let mut ports = Vec::new();
+        for (i, input) in self.inputs.iter().enumerate() {
+            let tracks = input.routes.iter().map(|b| b.route.target.0.0).collect();
+            if let Some((id, _)) = &input.attached {
+                let (clock_bpm, sensing) = self.monitor.input_rate(*id, now);
+                let state = if input.lost { monitor::PortState::Missing } else { monitor::PortState::Open };
+                ports.push(monitor::PortReport { state, tracks, dir: Dir::In, id: *id as u16, name: input.key.to_string(), clock_bpm, sensing });
+            } else if input.failed || input.lost {
+                let state = if input.lost { monitor::PortState::Missing } else { monitor::PortState::Failed };
+                let id = 0xF000 + i as u16;
+                ports.push(monitor::PortReport { state, tracks, dir: Dir::In, id, name: input.key.to_string(), clock_bpm: None, sensing: false });
+            }
+        }
+        for (i, name) in self.out.port_labels().into_iter().enumerate() {
+            let ports_state = monitor::PortState::Open;
+            ports.push(monitor::PortReport { state: ports_state, tracks: Vec::new(), dir: Dir::Out, id: i as u16, name, clock_bpm: None, sensing: false });
+        }
+        monitor::Report { dropped_in, dropped_out, ports }
     }
 
     pub(super) fn take_midi(&self) -> Vec<super::PlayedMidi> {
@@ -367,7 +414,7 @@ impl Native {
                 input.dirty = true;
                 false
             });
-            if (!present || input.failed || input.lost || routes.is_empty()) && !input.closed && io.request(Request::Close(input.id)).is_ok() {
+            if (!present || input.failed || input.lost || (routes.is_empty() && !self.monitor.enabled())) && !input.closed && io.request(Request::Close(input.id)).is_ok() {
                 input.closed = true;
                 input.attached = None;
             }
@@ -379,10 +426,11 @@ impl Native {
         // do not spin native opens at UI repaint frequency.
         self.inputs
             .retain(|input| !input.closed || (input.failed && !input.lost && self.status.inputs.iter().any(|port| same_port(&port.key, &input.key))));
-        if !routes.is_empty() {
+        let monitoring = self.monitor.enabled();
+        if !routes.is_empty() || monitoring {
             for port in &self.status.inputs {
                 if self.inputs.len() == sources::PORTS
-                    || !routes.iter().any(|(selection, _)| accepts_port(selection, &port.key, &self.status.inputs))
+                    || !(monitoring || routes.iter().any(|(selection, _)| accepts_port(selection, &port.key, &self.status.inputs)))
                     || self.inputs.iter().any(|input| same_port(&input.key, &port.key))
                 {
                     continue;

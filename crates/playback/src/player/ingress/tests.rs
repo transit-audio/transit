@@ -35,12 +35,13 @@ fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSender<Update>
             shared: Arc::default(),
             echo: None,
             tap,
+            monitor: None,
             between_check_and_push: None,
         },
     )
 }
 fn input(consumer: InputConsumer, permit: sources::Permit) -> Update {
-    Update::Input(Input { id: 1, consumer, routes: vec![(permit, route())] })
+    Update::Input(Input { id: 1, mon: Mon::default(), consumer, routes: vec![(permit, route())] })
 }
 
 #[test]
@@ -381,7 +382,7 @@ fn one_raw_consumer_fans_out_with_independent_channels_and_identical_timestamps(
     let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
     let a = route();
     let b = Route { target: (TrackId(8), soundcraft_mix::INSTRUMENT_SLOT, SlotGen::VACANT), channels: 1 << 1, ..a };
-    send.send(Update::Input(Input { id: 1, consumer, routes: vec![(registry.permit(first).unwrap(), a), (registry.permit(second).unwrap(), b)] }))
+    send.send(Update::Input(Input { id: 1, mon: Mon::default(), consumer, routes: vec![(registry.permit(first).unwrap(), a), (registry.permit(second).unwrap(), b)] }))
         .ok()
         .unwrap();
     fake.input_port(&key).unwrap().deliver(77_000, &[0x90, 60, 100, 0x91, 61, 100, 0x92, 62, 100]);
@@ -425,6 +426,7 @@ fn reconfiguration_retires_only_removed_routes_and_new_routes_skip_old_raw_offer
     let target = route();
     send.send(Update::Input(Input {
         id: 1,
+        mon: Mon::default(),
         consumer,
         routes: vec![(registry.permit(removed).unwrap(), target), (registry.permit(retained).unwrap(), target)],
     }))
@@ -473,7 +475,7 @@ fn pending_initial_route_preserves_post_boundary_input_until_acknowledged() {
     let fake = Fake::default();
     let key = fake.add_input("Initial route pending");
     let (handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
-    send.send(Update::Input(Input { id: 1, consumer, routes: Vec::new() })).ok().unwrap();
+    send.send(Update::Input(Input { id: 1, mon: Mon::default(), consumer, routes: Vec::new() })).ok().unwrap();
     worker.step();
     let port = fake.input_port(&key).unwrap();
     port.deliver(1_000, &[0x90, 60, 100]);
@@ -558,7 +560,7 @@ fn a_preempted_echo_push_after_a_revocation_is_dropped_by_route_generation() {
     let key = fake.add_input("Keys");
     let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
     let echoing = Route { echo: true, ..route() };
-    send.send(Update::Input(Input { id: 1, consumer, routes: vec![(registry.permit(token).unwrap(), echoing)] })).ok().unwrap();
+    send.send(Update::Input(Input { id: 1, mon: Mon::default(), consumer, routes: vec![(registry.permit(token).unwrap(), echoing)] })).ok().unwrap();
     fake.input_port(&key).unwrap().deliver(1_000, &[0x90, 60, 100]);
     worker.step();
 

@@ -40,6 +40,8 @@ pub mod ingress;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod midi_out;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod monitor;
+#[cfg(not(target_arch = "wasm32"))]
 mod native;
 #[cfg(not(target_arch = "wasm32"))]
 pub use native::Status as MidiStatus;

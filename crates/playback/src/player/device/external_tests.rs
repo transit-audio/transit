@@ -137,6 +137,53 @@ fn live_input_on_an_armed_external_track_is_echoed_without_an_instrument() {
 
 /// Refutation B1, through the Player: a key and the sustain pedal held through the echo when the
 /// track stops echoing (`disarm`) or its controller is unplugged (`unplug`).
+#[test]
+fn the_midi_monitor_sees_input_routed_or_not_and_every_message_sent() {
+    use crate::player::monitor::{Dir, MonitorEvent};
+    let fake = Fake::default();
+    let (mut s, track, key) = session(&fake);
+    let keys = fake.add_input("Keys");
+    let other = fake.add_input("Unused pads");
+    s.track_mut(track).unwrap().mixer.record_arm = true;
+    s.track_mut(track).unwrap().midi_input = soundcraft_model::MidiInput {
+        port: soundcraft_model::MidiPort::Device { backend: keys.backend.as_str().into(), name: keys.name.clone(), ordinal: keys.ordinal, id: keys.id.clone() },
+        channel: None,
+    };
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    player.midi.get_mut().as_mut().unwrap().enable(fake.io());
+    player.set_midi_monitor(true, false);
+    let mut callback = DeviceOutput::new(access, &player, 2);
+    until("both inputs open and the destination connects", || {
+        player.service().unwrap();
+        callback.fill_f32(&mut [0.0f32; 256]);
+        let status = player.midi_status().unwrap();
+        status.open_inputs == 2 && status.routes == 1 && status.output.track(track) == Some(&crate::player::midi_out::DestinationState::Connected)
+    });
+    assert!(fake.input_port(&keys).unwrap().deliver(0, &[0x90, 60, 100]));
+    assert!(fake.input_port(&other).unwrap().deliver(0, &[0x99, 36, 90]));
+    let mut events: Vec<MonitorEvent> = Vec::new();
+    let mut report = Default::default();
+    until("the monitor holds both inputs and the echo", || {
+        player.service().unwrap();
+        report = player.take_midi_monitor(&mut events, 1000);
+        events.len() >= 3
+    });
+    let name = |e: &MonitorEvent| report.ports.iter().find(|p| p.dir == e.dir && p.id == e.port).map(|p| p.name.clone()).unwrap_or_default();
+    let seen = |dir, status, data1, port: &str| events.iter().any(|e| e.dir == dir && e.status == status && e.data1 == data1 && name(e) == port);
+    assert!(seen(Dir::In, 0x90, 60, "Keys"), "{events:?} {report:?}");
+    assert!(seen(Dir::In, 0x99, 36, "Unused pads"), "the unrouted port is shown too: {events:?}");
+    assert!(seen(Dir::Out, 0x90, 60, "Synth OUT"), "the echo is shown as sent: {events:?} {report:?}");
+    assert_eq!(player.midi_status().unwrap().output.dropped, 0);
+    assert_eq!((report.dropped_in, report.dropped_out), (0, 0));
+    // Off: nothing is copied.
+    player.set_midi_monitor(false, false);
+    let before = events.len();
+    assert!(fake.input_port(&keys).unwrap().deliver(0, &[0x90, 61, 100]));
+    until("the echo of the second note", || fake.sent(&key).iter().any(|m| m.get(1) == Some(&61)));
+    player.take_midi_monitor(&mut events, 1000);
+    assert_eq!(events.len(), before);
+}
+
 fn held_echo_is_released(unplug: bool) {
     let fake = Fake::default();
     let (mut s, track, key) = session(&fake);

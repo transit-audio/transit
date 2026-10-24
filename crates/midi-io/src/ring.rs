@@ -388,6 +388,13 @@ impl InputConsumer {
         let _ = self.shared.wake.set(thread);
     }
 
+    /// Host time now, in nanoseconds on this port's origin (the scale of
+    /// [`InputEvent::host_arrival_ns`]).
+    #[must_use]
+    pub fn now_ns(&self) -> u64 {
+        host_ns_since(self.origin)
+    }
+
     /// Nanoseconds from `event`'s callback arrival to now: how long it waited for its consumer.
     #[must_use]
     pub fn age_ns(&self, event: &InputEvent) -> u64 {
@@ -403,6 +410,27 @@ impl InputConsumer {
     #[must_use]
     pub fn peek(&self) -> Option<&InputEvent> {
         self.consumer.peek().ok()
+    }
+
+    /// Calls `f` on every pending event, oldest first, without removing any. Wait-free and
+    /// allocation-free: a monitor reads what a router has not yet taken (or never will).
+    pub fn for_each_pending(&mut self, mut f: impl FnMut(&InputEvent)) {
+        let pending = self.consumer.slots();
+        let Ok(chunk) = self.consumer.read_chunk(pending) else { return };
+        let (first, second) = chunk.as_slices();
+        first.iter().chain(second).for_each(&mut f);
+    }
+
+    /// Removes up to `n` pending events, oldest first, and returns how many went.
+    pub fn discard(&mut self, n: usize) -> usize {
+        let n = n.min(self.consumer.slots());
+        match self.consumer.read_chunk(n) {
+            Ok(chunk) => {
+                chunk.commit_all();
+                n
+            }
+            Err(_) => 0,
+        }
     }
 
     /// Events pending. This is not an offer boundary: use [`InputBoundary::cutoff`] for that.

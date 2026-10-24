@@ -1,6 +1,7 @@
 //! Native MIDI ingestion, independent of the UI pump. The worker owns only raw
 //! consumers and a bounded action producer, never devices, plug-ins or editors.
 //! Main retains the input handles; closing one invalidates its source first.
+use super::monitor::{self, ClockRate, Dir, MonitorEvent, Tap};
 use super::{ActionResult, PlayedMidi, PlayedNote, RuntimeControl, sources};
 use crate::action_lane::{self, NoteKind, Outcome};
 use soundcraft_mix::{EngineEpoch, EventOutcome, Message, NoteId, SlotBinding, Source};
@@ -12,6 +13,9 @@ use std::time::Duration;
 use transit_midi_io::{InputBoundary, InputConsumer, InputEvent};
 
 const BATCH: usize = 256;
+/// A port with no admitting route that holds more than this many events (all already shown by the
+/// MIDI Monitor) is trimmed to half of it.
+const MONITOR_TRIM: usize = 512;
 const RELEASE_RESERVE: usize = 32;
 /// After work, the worker keeps stepping at this interval for `LINGER` rounds so the audio
 /// thread's receipts (credits, release bookkeeping) are reclaimed promptly. `thread::sleep` uses a
@@ -131,6 +135,80 @@ struct Input {
     id: u64,
     consumer: InputConsumer,
     routes: Vec<(sources::Permit, Route)>,
+    /// MIDI Monitor bookkeeping (#91); untouched while the monitor is off.
+    mon: Mon,
+}
+
+/// Per-input state of the MIDI Monitor tap. Only the ingress worker touches it.
+#[derive(Default)]
+struct Mon {
+    /// The next input sequence number not yet tapped, so a message seen while its port had no
+    /// admitting route and again after it was popped appears once.
+    tap_next: u64,
+    clock: ClockRate,
+    /// The rate slot this input publishes into.
+    slot: Option<(Arc<monitor::Shared>, usize)>,
+    filtered: u64,
+    sysex_bytes: u64,
+}
+impl Drop for Mon {
+    fn drop(&mut self) {
+        if let Some((shared, slot)) = self.slot.take() {
+            shared.release(slot);
+        }
+    }
+}
+impl Mon {
+    /// One message of the input's ring. Real-Time Clock feeds the rate estimator and is an event
+    /// only on request; Active Sensing is only noted.
+    fn tap(&mut self, tap: &mut Tap, id: u64, raw: &InputEvent) {
+        if raw.seq < self.tap_next {
+            return;
+        }
+        self.tap_next = raw.seq.saturating_add(1);
+        if !matches!(raw.bytes[0], 0xF8 | 0xFE) {
+            tap.shared().note_activity(id as u16, raw.bytes);
+        }
+        if !tap.enabled() {
+            return;
+        }
+        match raw.bytes[0] {
+            0xF8 => {
+                self.clock.pulse(raw.host_arrival_ns);
+                if let Some((shared, slot)) = &self.slot {
+                    shared.publish_rate(*slot, self.clock.raw());
+                }
+                if !tap.show_clock() {
+                    return;
+                }
+            }
+            0xFE => {
+                if let Some((shared, slot)) = &self.slot {
+                    shared.publish_sensing(*slot, raw.host_arrival_ns);
+                }
+                return;
+            }
+            _ => {}
+        }
+        tap.push(MonitorEvent::message(Dir::In, id as u16, raw.host_arrival_ns, raw.message()));
+    }
+
+    /// What the backend filtered or never carried: Active Sensing (counted, not passed) and SysEx
+    /// (length only).
+    fn watch(&mut self, tap: &mut Tap, id: u64, consumer: &InputConsumer) {
+        let counters = consumer.counters();
+        if counters.filtered > self.filtered {
+            self.filtered = counters.filtered;
+            if let Some((shared, slot)) = &self.slot {
+                shared.publish_sensing(*slot, consumer.now_ns());
+            }
+        }
+        if counters.sysex_bytes_dropped > self.sysex_bytes {
+            let len = counters.sysex_bytes_dropped - self.sysex_bytes;
+            self.sysex_bytes = counters.sysex_bytes_dropped;
+            tap.push(MonitorEvent::sysex(Dir::In, id as u16, consumer.now_ns(), u32::try_from(len).unwrap_or(u32::MAX)));
+        }
+    }
 }
 impl Input {
     fn healthy(&self) -> bool {
@@ -151,6 +229,7 @@ impl Drop for Input {
 enum Update {
     Input(Input),
     Echo(super::midi_out::Producer),
+    Monitor(Tap),
     Routes { id: u64, routes: Vec<(sources::Permit, Route)>, applied: Arc<AtomicBool> },
 }
 
@@ -177,6 +256,7 @@ impl Worker {
             shared: Arc::clone(&shared),
             echo: None,
             tap,
+            monitor: None,
             #[cfg(test)]
             between_check_and_push: None,
         };
@@ -218,7 +298,7 @@ impl Worker {
         let id = self.next_input.checked_add(1).ok_or("MIDI input identities exhausted")?;
         self.next_input = id;
         self.attach
-            .try_send(Update::Input(Input { id, consumer, routes: vec![(permit.clone(), route)] }))
+            .try_send(Update::Input(Input { id, consumer, routes: vec![(permit.clone(), route)], mon: Mon::default() }))
             .map_err(|_| "MIDI worker attachment queue unavailable")?;
         self.permits.push(permit);
         self.thread.thread().unpark();
@@ -233,7 +313,7 @@ impl Worker {
         let id = self.next_input.checked_add(1).ok_or("MIDI input identities exhausted")?;
         self.next_input = id;
         consumer.wake_on(self.thread.thread().clone());
-        self.attach.try_send(Update::Input(Input { id, consumer, routes: Vec::new() })).map_err(|_| "MIDI attachment queue unavailable")?;
+        self.attach.try_send(Update::Input(Input { id, consumer, routes: Vec::new(), mon: Mon::default() })).map_err(|_| "MIDI attachment queue unavailable")?;
         self.thread.thread().unpark();
         Ok(id)
     }
@@ -263,6 +343,13 @@ impl Worker {
     /// Hands the worker the output thread's echo producer (#61).
     pub(super) fn set_echo(&mut self, echo: super::midi_out::Producer) -> Result<(), &'static str> {
         self.attach.try_send(Update::Echo(echo)).map_err(|_| "MIDI echo queue unavailable")?;
+        self.thread.thread().unpark();
+        Ok(())
+    }
+
+    /// Hands the worker the MIDI Monitor's input tap (#91).
+    pub(super) fn set_monitor(&mut self, tap: Tap) -> Result<(), &'static str> {
+        self.attach.try_send(Update::Monitor(tap)).map_err(|_| "MIDI monitor queue unavailable")?;
         self.thread.thread().unpark();
         Ok(())
     }
@@ -331,6 +418,8 @@ struct Pump {
     shared: Arc<Shared>,
     echo: Option<super::midi_out::Producer>,
     tap: rtrb::Producer<PlayedMidi>,
+    /// The MIDI Monitor's input ring (#91).
+    monitor: Option<Tap>,
     /// Tests: runs after the route check and before the echo push, where a preemption can land.
     #[cfg(test)]
     between_check_and_push: Option<Box<dyn FnMut() + Send>>,
@@ -365,10 +454,17 @@ impl Pump {
             match self.receive.try_recv() {
                 Ok(Update::Input(input)) => {
                     if self.inputs.len() < sources::PORTS && input.healthy() {
+                        let mut input = input;
+                        if let Some(monitor) = &self.monitor {
+                            input.mon.slot = monitor.shared().claim(input.id).map(|slot| (Arc::clone(monitor.shared()), slot));
+                            let counters = input.consumer.counters();
+                            (input.mon.filtered, input.mon.sysex_bytes) = (counters.filtered, counters.sysex_bytes_dropped);
+                        }
                         self.inputs.push(input);
                     }
                 }
                 Ok(Update::Echo(echo)) => self.echo = Some(echo),
+                Ok(Update::Monitor(tap)) => self.monitor = Some(tap),
                 Ok(Update::Routes { id, routes, applied }) => {
                     if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id) {
                         for (old, _) in &input.routes {
@@ -421,6 +517,11 @@ impl Pump {
                 }
             }
         }
+        if let Some(tap) = self.monitor.as_mut().filter(|tap| tap.enabled()) {
+            for input in &mut self.inputs {
+                input.mon.watch(tap, input.id, &input.consumer);
+            }
+        }
         // A fixed amount of work even under continuous MIDI traffic. Round-robin
         // across ports prevents one input backlog from starving another release.
         for _ in 0..BATCH {
@@ -440,10 +541,23 @@ impl Pump {
             // Preserve that backlog; each new route's raw cutoff rejects older
             // offers once the worker applies it. Admission is not application.
             if !input.routes.iter().any(|(permit, _)| permit.admits()) {
+                // The MIDI Monitor still sees what this port receives, without taking it from the
+                // ring (a route attached later keeps its backlog); a ring more than half full of
+                // events already shown is trimmed so the port keeps accepting.
+                if let Some(tap) = self.monitor.as_mut().filter(|tap| tap.enabled()) {
+                    let Input { id, consumer, mon, .. } = input;
+                    consumer.for_each_pending(|raw| mon.tap(tap, *id, raw));
+                    if consumer.len() > MONITOR_TRIM {
+                        consumer.discard(consumer.len() - MONITOR_TRIM / 2);
+                    }
+                }
                 continue;
             }
             let Some(raw) = input.consumer.pop() else { continue };
             worked = true;
+            if let Some(tap) = &mut self.monitor {
+                input.mon.tap(tap, input.id, &raw);
+            }
             let age = input.consumer.age_ns(&raw);
             self.shared.latency_last_ns.store(age, Ordering::Relaxed);
             self.shared.latency_max_ns.fetch_max(age, Ordering::Relaxed);
@@ -526,6 +640,7 @@ impl Drop for Pump {
             match self.receive.try_recv() {
                 Ok(Update::Input(input)) => drop(input),
                 Ok(Update::Echo(echo)) => drop(echo),
+                Ok(Update::Monitor(tap)) => drop(tap),
                 Ok(Update::Routes { routes, .. }) => {
                     for (permit, _) in routes {
                         permit.invalidate();
