@@ -14,6 +14,9 @@
 mod pitch;
 mod quantize;
 pub use quantize::QuantizePrefs;
+mod scale;
+#[cfg(test)]
+mod scale_tests;
 mod step;
 pub use step::StepState;
 
@@ -142,7 +145,7 @@ pub struct KeysPrefs {
     /// Hold threshold and repeat floor for step entry.
     pub step_hold: soundcraft_engine::step_input::HoldPrefs,
     pub step_bindings: soundcraft_engine::step_input::StepBindings,
-    /// Key/scale used by the explicit constrain operation, never a live-input filter.
+    /// Legacy UI preference retained for settings compatibility. Editing uses the clip's key.
     pub key_scale: soundcraft_midi::scale::KeyScale,
     pub quantize: QuantizePrefs,
     /// Explicit velocity for new notes and audition; note edits never change it.
@@ -266,10 +269,12 @@ pub struct KeysLayout {
     pub use_selected_velocity: R4,
     pub ruler: R4,
     pub keyboard: R4,
+    /// Visible pitches and keyboard row rectangles, including folded accidental rows.
+    pub pitch_rows: Vec<(u8, R4)>,
     pub grid: R4,
     pub velocity: R4,
     /// Mapping: x = grid[0] + (tick - scroll_ticks) * px_per_tick, ticks relative to the clip;
-    /// the key `p` spans y = grid[1] + (top_pitch - p) * key_h downwards for key_h points.
+    /// in chromatic view y = grid[1] + (top_pitch - p) * key_h; folded views use pitch_rows.
     pub px_per_tick: f64,
     pub scroll_ticks: f64,
     pub top_pitch: f32,
@@ -411,6 +416,8 @@ struct Map {
     grid: Option<i64>,
     /// The grid step in force whether or not it snaps: the lines, new-note and nudge length.
     step: i64,
+    rows: scale::Rows,
+    scale: soundcraft_midi::scale::ScaleMode,
 }
 
 impl Map {
@@ -421,10 +428,10 @@ impl Map {
         self.scroll + f64::from(x - self.gx0) / self.ppt
     }
     fn y(&self, p: u8) -> f32 {
-        self.gy0 + (self.top - f32::from(p)) * self.kh
+        self.gy0 + (self.rows.rank(self.top) - self.rows.rank(f32::from(p))) * self.kh
     }
     fn pitch(&self, y: f32) -> i32 {
-        (self.top - (y - self.gy0) / self.kh).ceil() as i32
+        self.rows.pitch((self.rows.rank(self.top) - (y - self.gy0) / self.kh).ceil()) as i32
     }
     /// The grid line at or before `rel` (ticks from the clip start; the grid is the session's).
     fn floor(&self, rel: f64) -> i64 {
@@ -606,6 +613,12 @@ impl StudioApp {
     pub fn keys_move(&mut self, ticks: i64, semitones: i64) -> Result<(), String> {
         let Some(clip) = self.keys.clip else { return Err("no clip".into()) };
         let sel = self.keys.selection.clone();
+        if self.keys_scale().enabled {
+            let degrees = if matches!(semitones, -12 | 12) { semitones.signum() * 7 } else { semitones };
+            let pairs = self.scale_move(&sel, ticks, degrees);
+            self.keys.selection = self.scale_apply_move(&pairs)?;
+            return Ok(());
+        }
         let (dt, ds) = clamp_move(&sel, ticks, semitones);
         let idx = resolve(&self.keys_notes(), &sel);
         if idx.is_empty() || (dt == 0 && ds == 0) {
@@ -652,6 +665,15 @@ impl StudioApp {
         let notes = self.keys_notes();
         let sel = self.keys.selection.clone();
         let whole = sel.is_empty() || resolve(&notes, &sel).len() == notes.len();
+        if self.keys_scale().enabled {
+            let degrees = if matches!(semitones, -12 | 12) { semitones.signum() * 7 } else { semitones };
+            let pairs = self.scale_move(if whole { &notes } else { &sel }, 0, degrees);
+            let edited = self.scale_apply_move(&pairs)?;
+            if !sel.is_empty() {
+                self.keys.selection = edited;
+            }
+            return Ok(());
+        }
         if !whole {
             return self.keys_pitch_edit("midi.notes_transpose", json!({"semitones": semitones}));
         }
@@ -854,6 +876,7 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     // The corner has room for little: "Auto 1/16", "Grid: 1/8T", "Snap off".
     let grid_text = grid::label_at(ppt, grid::bar_ticks(&s), &prefs.grid).replace("Adaptive", "Auto");
     let rows = grid.height() / kh;
+    let row_map = scale::Rows::new(app.keys_scale(), &cv.notes, &app.keys.live, ui.input(|i| i.modifiers.shift));
     if app.keys.fit {
         app.keys.fit = false;
         let (lo, hi) = (cv.notes.iter().map(|n| n.pitch).min(), cv.notes.iter().map(|n| n.pitch).max());
@@ -861,10 +884,11 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
             (Some(a), Some(b)) => (f32::from(a) + f32::from(b)) / 2.0,
             _ => 60.0,
         };
-        app.keys.top = (center + rows / 2.0).round();
+        app.keys.top = row_map.pitch((row_map.rank(center) + rows / 2.0).round());
         app.keys.scroll = 0.0;
     }
-    app.keys.top = app.keys.top.clamp((rows - 1.0).min(127.0), 127.0);
+    let last_row = row_map.last_rank();
+    app.keys.top = row_map.pitch(row_map.rank(app.keys.top).clamp((rows - 1.0).min(last_row), last_row));
     app.keys.scroll = app.keys.scroll.max(-(cv.c0 as f64));
     let step_cur = app.step_cursor(ppt, grid.width());
     let map = Map {
@@ -877,7 +901,16 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
         c0: cv.c0,
         grid: prefs.grid.snap_enabled.then_some(step),
         step,
+        rows: row_map,
+        scale: app.keys_scale(),
     };
+    layout.pitch_rows = (0..=127)
+        .filter(|&p| map.rows.contains(p))
+        .filter_map(|p| {
+            let row = Rect::from_min_size(pos2(keyboard.min.x, map.y(p)), vec2(keyboard.width(), kh));
+            row.intersects(keyboard).then_some((p, r4(row)))
+        })
+        .collect();
     // Drop selected notes that no longer exist (undo, another view).
     let present = resolve(&cv.notes, &app.keys.selection);
     if present.len() != app.keys.selection.len() {
@@ -1315,9 +1348,24 @@ fn paint_grid(ui: &Ui, s: &Session, map: &Map, grid: Rect, ruler: Rect, cv: &Cli
     let hi = map.pitch(grid.min.y).clamp(0, 127);
     for pitch in lo..=hi {
         let pitch = pitch as u8;
+        if !map.rows.contains(pitch) {
+            continue;
+        }
         let y = map.y(pitch);
         let row = Rect::from_min_max(pos2(grid.min.x, y), pos2(grid.max.x, y + map.kh));
-        let fill = if is_black(pitch) { TOKENS.lane } else { TOKENS.lane_alt };
+        let fill = if map.scale.enabled {
+            if pitch % 12 == map.scale.key.root % 12 {
+                TOKENS.accent.gamma_multiply(0.25)
+            } else if map.scale.key.contains(pitch) {
+                TOKENS.lane_alt
+            } else {
+                TOKENS.loop_region.gamma_multiply(0.18)
+            }
+        } else if is_black(pitch) {
+            TOKENS.lane
+        } else {
+            TOKENS.lane_alt
+        };
         if inside.width() > 0.0 {
             p.rect_filled(row.intersect(inside), 0.0, fill);
         }
@@ -1389,7 +1437,11 @@ fn preview(app: &StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note]) -> Op
             let dt = map.round(anchor.start as f64 + raw) - anchor.start;
             let ds = ((press.y - pos.y) / map.kh).round() as i64;
             let (dt, ds) = clamp_move(&sel, dt, ds);
-            sel.iter().map(|n| (*n, shifted(n, dt, ds))).collect()
+            if map.scale.enabled && !ui.input(|i| i.modifiers.shift) {
+                app.scale_move(&sel, dt, ds)
+            } else {
+                sel.iter().map(|n| (*n, shifted(n, dt, ds))).collect()
+            }
         }
         NoteDrag::Resize => {
             let min = map.grid.unwrap_or(1).max(1);
@@ -1529,7 +1581,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
                     app.status = "Outside the clip: drag the clip end to extend".into();
                 } else if (0..=127).contains(&pitch) && start >= 0 {
                     let n = Note {
-                        pitch: pitch as u8,
+                        pitch: app.scale_entry(pitch as u8, mods.shift),
                         velocity: app.ui.keys.velocity.clamp(1, 127),
                         release_velocity: 64,
                         channel: 0,
@@ -1610,6 +1662,7 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
     let mods = ui.input(|i| i.modifiers);
     let pos = ui.input(|i| i.pointer.latest_pos());
     let mut play = None;
+    let scale = app.keys_scale();
     if let Some(KeysGesture::Notes { kind, anchor, press, copy, sounding }) = &mut app.keys.gesture
         && *kind == NoteDrag::Move
     {
@@ -1617,7 +1670,11 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
         ui.ctx().set_cursor_icon(if *copy { CursorIcon::Copy } else { CursorIcon::Grabbing });
         if let Some(pos) = pos {
             let ds = ((press.y - pos.y) / map.kh).round() as i64;
-            let pitch = (i64::from(anchor.pitch) + ds).clamp(0, 127) as u8;
+            let pitch = if scale.enabled && !mods.shift && ds != 0 {
+                scale.key.transpose(anchor.pitch, ds)
+            } else {
+                (i64::from(anchor.pitch) + ds).clamp(0, 127) as u8
+            };
             if pitch != *sounding {
                 play = Some((*sounding, pitch));
                 *sounding = pitch;
@@ -1642,8 +1699,7 @@ fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note], la
             let Some((pairs, copy)) = preview else { return };
             match kind {
                 NoteDrag::Move => {
-                    let (dt, ds) = pairs.first().map_or((0, 0), |(a, b)| (b.start - a.start, i64::from(b.pitch) - i64::from(a.pitch)));
-                    if dt == 0 && ds == 0 {
+                    if pairs.iter().all(|(a, b)| a == b) {
                         return;
                     }
                     if copy {
@@ -1651,9 +1707,8 @@ fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note], la
                         if let Ok(sel) = app.keys_add(&new) {
                             app.keys.selection = sel;
                         }
-                    } else {
-                        app.keys.selection = pairs.iter().map(|(a, _)| *a).collect();
-                        let _ = app.keys_move(dt, ds);
+                    } else if let Ok(sel) = app.scale_apply_move(&pairs) {
+                        app.keys.selection = sel;
                     }
                 }
                 NoteDrag::Resize | NoteDrag::Velocity | NoteDrag::Lane => {
@@ -1732,27 +1787,39 @@ fn paint_keyboard(app: &StudioApp, ui: &Ui, map: &Map, kb: Rect) {
     let sounding: Vec<u8> = app.keys.held.iter().map(|h| h.1).collect();
     for pitch in lo..=hi {
         let pitch = pitch as u8;
+        if !map.rows.contains(pitch) {
+            continue;
+        }
         let y = map.y(pitch);
         let row = Rect::from_min_max(pos2(kb.min.x, y), pos2(kb.max.x, y + map.kh));
+        let live_color = if map.scale.enabled && !map.scale.key.contains(pitch) { TOKENS.loop_region } else { TOKENS.accent };
         let fill = if sounding.contains(&pitch) {
-            TOKENS.accent
+            live_color
+        } else if map.scale.enabled {
+            if pitch % 12 == map.scale.key.root % 12 {
+                TOKENS.accent.gamma_multiply(0.5)
+            } else if map.scale.key.contains(pitch) {
+                TOKENS.panel_raised
+            } else {
+                TOKENS.loop_region.gamma_multiply(0.35)
+            }
         } else if is_black(pitch) {
             TOKENS.bg
         } else {
             TOKENS.panel_raised
         };
         p.rect_filled(row, 0.0, fill);
-        // A key held on the MIDI keyboard: the accent, a little stronger the harder it is played.
+        // Held accidentals keep their distinct color; intensity follows played velocity.
         let v = app.keys.live[usize::from(pitch)];
         if v > 0 {
-            p.rect_filled(row, 0.0, TOKENS.accent.gamma_multiply(0.6 + 0.4 * f32::from(v) / 127.0));
+            p.rect_filled(row, 0.0, live_color.gamma_multiply(0.6 + 0.4 * f32::from(v) / 127.0));
         }
         p.line_segment(
             [pos2(kb.min.x, row.max.y), pos2(kb.max.x, row.max.y)],
             Stroke::new(1.0, TOKENS.line.gamma_multiply(if pitch.is_multiple_of(12) { 1.0 } else { 0.5 })),
         );
-        let c = pitch.is_multiple_of(12);
-        if c || (map.kh >= 14.0 && !is_black(pitch)) {
+        let c = if map.scale.enabled { pitch % 12 == map.scale.key.root % 12 } else { pitch.is_multiple_of(12) };
+        if c || (map.kh >= 14.0 && (map.scale.enabled || !is_black(pitch))) {
             let color = if c { TOKENS.text } else { TOKENS.text_dim };
             p.text(
                 pos2(kb.max.x - 6.0, row.center().y),
@@ -1785,7 +1852,7 @@ fn keyboard_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, kb: Rect, now: f6
     if resp.drag_started()
         && let Some(press) = ui.input(|i| i.pointer.press_origin())
     {
-        let anchor = map.top - (press.y - map.gy0) / map.kh;
+        let anchor = map.rows.rank(map.top) - (press.y - map.gy0) / map.kh;
         app.keys.gesture = Some(KeysGesture::Keyboard { key_h: app.ui.keys.key_h, anchor, press });
     }
     if resp.dragged()
@@ -1795,7 +1862,7 @@ fn keyboard_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, kb: Rect, now: f6
         let kh = (key_h * ((pos.x - press.x) * 0.01).exp()).clamp(6.0, 40.0);
         app.ui.keys.key_h = kh;
         // The pitch grabbed stays under the pointer.
-        app.keys.top = anchor + (pos.y - map.gy0) / kh;
+        app.keys.top = map.rows.pitch(anchor + (pos.y - map.gy0) / kh);
     }
     if resp.drag_stopped() {
         app.keys.gesture = None;
@@ -1896,10 +1963,10 @@ fn wheel(app: &mut StudioApp, ui: &Ui, map: &Map, body: Rect) {
     };
     let (delta, zoom, mods) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta(), wheel_mods(i)));
     let zoom_keys = |app: &mut StudioApp, f: f32| {
-        let anchor = map.top - (pos.y - map.gy0) / map.kh;
+        let anchor = map.rows.rank(map.top) - (pos.y - map.gy0) / map.kh;
         let kh = (app.ui.keys.key_h * f).clamp(6.0, 40.0);
         app.ui.keys.key_h = kh;
-        app.keys.top = anchor + (pos.y - map.gy0) / kh;
+        app.keys.top = map.rows.pitch(anchor + (pos.y - map.gy0) / kh);
     };
     if (zoom - 1.0).abs() > 1e-4 {
         if mods.shift {
@@ -1924,7 +1991,7 @@ fn wheel(app: &mut StudioApp, ui: &Ui, map: &Map, body: Rect) {
         app.keys.scroll -= crate::arrange::wheel_pan(ui, delta.x) * f64::from(body.max.x - map.gx0) / map.ppt;
     }
     if delta.y.abs() > 0.1 {
-        app.keys.top += delta.y / map.kh;
+        app.keys.top = map.rows.pitch(map.rows.rank(app.keys.top) + delta.y / map.kh);
     }
 }
 

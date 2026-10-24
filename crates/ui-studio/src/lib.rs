@@ -929,6 +929,7 @@ impl StudioApp {
             ctx.request_repaint();
         }
         self.update_midi_live();
+        self.keys.step.chromatic = ctx.input(|i| i.modifiers.shift);
         self.step_poll();
         self.drive_editors();
         self.drive_plugin_headers();

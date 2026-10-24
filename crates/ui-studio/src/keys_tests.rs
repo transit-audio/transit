@@ -219,6 +219,7 @@ fn pitch_menu_constrains_selection_and_key_preferences_round_trip() {
     let original = t.notes();
     t.app.keys.selection = original[..2].to_vec();
     t.app.ui.keys.key_scale = KeyScale { root: 0, scale: Scale::Minor };
+    t.app.run("midi.scale_mode", json!({"clip": t.clip.0, "root": 0, "scale": "minor"})).unwrap();
     let saved = serde_json::to_vec(&t.app.ui).unwrap();
     let restored: crate::UiState = serde_json::from_slice(&saved).unwrap();
     assert_eq!(restored.keys.key_scale, t.app.ui.keys.key_scale);
