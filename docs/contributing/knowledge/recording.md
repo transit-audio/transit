@@ -25,7 +25,8 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   session, so a MIDI take lines up with an audio take. `crates/engine/src/midi_take.rs` assembles
   takes at Stop: pairs note-ons with note-offs, converts to ticks, merges an overdub into the one
   clip under the pass, duplicates the playlist when several clips are in the way, and makes one
-  playlist per loop pass. A recording that started before the loop end and ran past it while
+  playlist per loop pass. With Cycle on, Record always loops and stacks takes (one per lap until Stop; no
+  separate Loop Record option, ADR 0026). A recording that started before the loop end and ran past it while
   Cycle was on is cut at each wrap into one clip per lap; a note held across the loop end is cut
   there and resumes at offset zero in the next lap with the same pitch and velocity, repeating
   at each wrap until the real release. Each loop lap stays exactly loop-length; a release exactly
