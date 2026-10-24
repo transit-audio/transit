@@ -5,6 +5,7 @@
 - Rust 1.90 or newer (`rust-version` in `Cargo.toml`), from <https://rustup.rs>.
 - Windows: the Visual Studio 2019+ Build Tools with the "Desktop development with C++" workload. The app runs on Windows 10 version 1607 or later (the plug-in editor window uses the per-monitor DPI functions that version added).
 - Linux: `libasound2-dev` and `pkg-config` (for example `sudo apt install libasound2-dev pkg-config`).
+- Linux, the native JACK backend (`--features native-jack`, below): also `libjack-jackd2-dev`, for the build only.
 - Linux, headless test runs (CI, containers, WSL2): the egui tests render with wgpu and need a Vulkan adapter. Install `mesa-vulkan-drivers libvulkan1` (Mesa's CPU driver, lavapipe) and run with `WGPU_BACKEND=vulkan VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json` (`VK_DRIVER_FILES` is the newer name for the same setting). CI sets both. On WSL2 the default GL path can segfault, so set these there too.
 - macOS: the Xcode Command Line Tools (`xcode-select --install`).
 
@@ -42,6 +43,34 @@ the `dev.derekmwright.transit*.yml` manifests for Flatpak), `macos/package.sh` (
 named `transit`; the icon is `assets/app-icon/transit.icns`), `windows/package.ps1` (MSI and portable zip),
 and `freebsd/package.sh`. Outputs land in `dist/release/` as `transit-<version>-<platform>-<arch>.*`.
 The tagged GitHub release (`.github/workflows/release.yml`) is separate: it ships plain archives, plus on Windows an MSI built from `packaging/windows/transit.wxs` with the same WiX v5 (`dotnet tool install --global wix --version 5.0.2`) and optional signing (`docs/releasing.md`).
+
+## Native JACK backend (Linux)
+
+`crates/audio-jack` (`transit-audio-jack`, [ADR 0021](adr/0021-native-linux-audio-over-the-jack-client-api.md))
+talks to JACK 2, or to PipeWire through its JACK library, over the JACK client API. It is behind the
+`native-jack` feature and compiled only on Linux (the crate is empty elsewhere):
+
+```sh
+sudo apt install libjack-jackd2-dev   # jack.pc for jack-sys's build script; nothing links against libjack
+cargo build --release -p transit --features native-jack
+cargo build --release -p audio-bench --features audio-bench/native-jack
+target/release/audio-bench --backend jack --list-devices
+```
+
+- **libjack is loaded at run time** (`libjack.so.0`, through `jack-sys`'s `dynamic_loading`), so the
+  binary starts on a system without JACK; the JACK system then says "JACK library not found". On
+  Debian and Ubuntu, PipeWire's `pipewire-jack` keeps its `libjack` off the loader path: start transit
+  with `pw-jack transit`, or install the distribution's `ld.so.conf.d` example file. Fedora and Arch
+  replace `libjack` outright.
+- **The server must be running.** transit never starts one (`JackNoStartServer`); with none it says
+  "JACK/PipeWire server not running". The server sets the rate and the quantum; under PipeWire pin
+  the quantum (`pw-metadata -n settings 0 clock.force-quantum 128`) or start transit with
+  `PIPEWIRE_QUANTUM=128/48000`.
+- In the app: Audio system JACK, Backend "Native JACK". `Auto` stays cpal (ALSA) on Linux.
+- Tests use a fake server and need no JACK: `cargo test -p transit-audio-jack` (any platform), and on
+  Linux `cargo test -p transit-audio-jack --features libjack` also builds the libjack calls.
+
+Design notes: [contributing/knowledge/jack-backend.md](contributing/knowledge/jack-backend.md).
 
 ## Building with ASIO (Windows)
 

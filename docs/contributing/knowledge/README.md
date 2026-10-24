@@ -10,6 +10,7 @@ the ADRs. A new topic gets a new file and a row here.
 | [`clocks.md`](clocks.md) | Device timing, timestamps, MIDI timing, latency. |
 | [`wasapi-modes.md`](wasapi-modes.md) | The native WASAPI backend's shared and exclusive opens. |
 | [`asio-backend.md`](asio-backend.md) | The native ASIO backend: host thread, bindings, driver listing, streaming, stamps, the open-order rule. |
+| [`jack-backend.md`](jack-backend.md) | The native JACK backend (Linux): runtime-loaded libjack, port groups, the client lifecycle, the watcher. |
 | [`plan-renderer.md`](plan-renderer.md) | `crates/mix`: compile, render, PDC, sinks. |
 | [`routing.md`](routing.md) | Outputs, inputs, device channel maps, the route graph. |
 | [`sidechain.md`](sidechain.md) | Insert keys and key taps. |
