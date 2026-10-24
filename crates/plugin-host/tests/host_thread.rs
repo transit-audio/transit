@@ -562,3 +562,47 @@ fn preset_state_jobs_run_on_the_host_thread_and_never_block_a_frame() {
     drop((reader, plugin));
     assert!(host.shutdown(Duration::from_secs(5)));
 }
+
+/// Review B1 of #82: a save during a slow load. Five instances already live on the host thread,
+/// then a heavy instrument's creation holds it (past the request timeout, within its creation
+/// budget). The save's reads share one deadline (#56): the save gives up within about one
+/// request timeout in all, not one per instance, and each plug-in keeps its stored state.
+#[test]
+fn a_save_during_a_slow_creation_waits_about_one_timeout_not_one_per_instance() {
+    let timeout = Duration::from_millis(300);
+    let host = slow_host(timeout, Duration::from_secs(30));
+    let log = Arc::new(Log::default());
+    let mut plugins: Vec<_> = (0..5)
+        .map(|_| {
+            let l = Arc::clone(&log);
+            host.submit(move |ctx| {
+                let mut p = Fake::make(&l, Duration::ZERO, Duration::ZERO);
+                assert!(p.load_state(b"stored"));
+                ctx.adopt(p)
+            })
+            .wait(Duration::from_secs(5))
+            .unwrap()
+        })
+        .collect();
+    let (release, gate) = mpsc::channel::<()>();
+    let l = Arc::clone(&log);
+    let slow = host.submit(move |ctx| {
+        let _ = gate.recv();
+        ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))
+    });
+    while !matches!(slow.poll(), Status::Waiting { running: true }) {
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    // A save: each live instance read with what is left of the shared 500 ms deadline.
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let t = Instant::now();
+    let results: Vec<_> =
+        plugins.iter_mut().map(|p| p.state_reader().unwrap().save_state_within(deadline.saturating_duration_since(Instant::now()))).collect();
+    let took = t.elapsed();
+    assert!(results.iter().all(|r| *r == Err(soundcraft_dsp::StateBusy)), "the held thread cannot answer: {results:?}");
+    assert!(took < timeout * 3, "the save waited {took:?}: one request timeout per instance would be {:?}", timeout * 5);
+    drop(release);
+    assert!(slow.wait(Duration::from_secs(5)).is_some(), "the slow creation is still delivered");
+    drop(plugins);
+    assert!(host.shutdown(Duration::from_secs(5)));
+}

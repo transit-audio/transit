@@ -50,6 +50,8 @@ impl ManualClock {
 #[derive(Default)]
 struct Gate {
     calls: AtomicUsize,
+    /// Instances the factory made that were destroyed.
+    drops: Arc<AtomicUsize>,
     states: Mutex<Vec<Option<Vec<u8>>>>,
     open: Mutex<bool>,
     opened: Condvar,
@@ -82,7 +84,13 @@ impl Drop for OpenOnDrop {
 /// The synth, reporting the state it was made with (so a capture shows what was restored).
 struct Echo {
     inner: Box<dyn Plugin>,
-    state: Vec<u8>,
+    state: Option<Vec<u8>>,
+    drops: Arc<AtomicUsize>,
+}
+impl Drop for Echo {
+    fn drop(&mut self) {
+        self.drops.fetch_add(1, Ordering::SeqCst);
+    }
 }
 impl Plugin for Echo {
     fn info(&self) -> &'static PluginInfo {
@@ -117,7 +125,7 @@ impl Plugin for Echo {
     }
     fn state_reader(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginStateReader>> {
         let state = self.state.clone();
-        Some(Box::new(move || Some(state.clone())))
+        Some(Box::new(move || state.clone()))
     }
 }
 
@@ -131,7 +139,10 @@ fn gated(gate: &Arc<Gate>, hold: usize) -> Factory {
             gate.wait();
         }
         let made = soundcraft_mix::create_instance(SYNTH, None, 48_000.0, 512, spec.ch)?;
-        Some(NewInstance { plugin: Box::new(Echo { inner: made.plugin, state: spec.state.clone().unwrap_or_default() }), refused_state: false })
+        Some(NewInstance {
+            plugin: Box::new(Echo { inner: made.plugin, state: spec.state.clone(), drops: Arc::clone(&gate.drops) }),
+            refused_state: false,
+        })
     })
 }
 
@@ -342,5 +353,72 @@ fn retry_all_makes_every_not_responding_plug_in_again() {
         assert!(rig.bound(*t));
     }
     assert_eq!(rig.runtime.retry_all_plugins(), 0);
+    rig.retire();
+}
+
+/// Review of #82: Retry, then the abandoned creation returns after all. The late instance is
+/// destroyed once on its own thread, never bound; the retried instance (with the stored state)
+/// keeps its binding and is what a save reads.
+#[test]
+fn an_abandoned_creation_returning_after_retry_is_destroyed_not_bound() {
+    let stored = [0x11, 0x22];
+    let mut rig =
+        rig(1, Some(&stored), config(Duration::from_millis(100), Duration::from_millis(400)), Arc::new(Instant::now), Duration::from_millis(100), 1);
+    let t = rig.tracks[0];
+    assert!(rig.frames_until(Duration::from_secs(10), |r| r.stuck(t, SLOT)));
+    assert!(rig.runtime.retry_plugin(t, SLOT));
+    assert!(rig.frames_until(Duration::from_secs(10), |r| r.binding(t, SLOT).is_some() && !r.any_loading()));
+    let drops_before = rig.gate.drops.load(Ordering::SeqCst);
+    let binding = rig.runtime.binding(t, SLOT);
+    rig.gate.open();
+    let drops = Arc::clone(&rig.gate.drops);
+    assert!(rig.frames_until(Duration::from_secs(5), |_| drops.load(Ordering::SeqCst) > drops_before), "the late instance was destroyed");
+    for _ in 0..20 {
+        rig.frame();
+    }
+    assert_eq!(rig.gate.calls(), 2);
+    assert_eq!(rig.gate.drops.load(Ordering::SeqCst), drops_before + 1, "destroyed once");
+    assert_eq!(rig.runtime.binding(t, SLOT), binding, "the binding is unchanged by the late return");
+    assert!(!rig.runtime.any_loading() && !rig.runtime.any_stuck());
+    rig.runtime.service();
+    let session = Arc::clone(rig.runtime.requested_session());
+    assert_eq!(rig.runtime.capture_states(&session).unwrap(), vec![(t, SLOT, stored.to_vec())]);
+    assert!(rig.play(t) > 0.0);
+    rig.retire();
+}
+
+/// Review B2 of #82: the same hosted instrument picked again on a "Loading… (slow)" slot (the
+/// engine writes it without a state). The slot keeps its identity, so the compile keeps it vacant
+/// and stages nothing; the pending creation must start again with the new spec, and the slot
+/// ends bound. The late instance for the old state is destroyed, not bound.
+#[test]
+fn picking_the_same_plug_in_again_on_a_slow_slot_makes_it_again_and_binds_it() {
+    let mut rig =
+        rig(1, Some(&[1]), config(Duration::from_millis(100), Duration::from_secs(20)), Arc::new(Instant::now), Duration::from_millis(100), 1);
+    let t = rig.tracks[0];
+    assert!(rig.frames_until(Duration::from_secs(10), |r| matches!(r.slot_load(t, SLOT), Some(SlotLoad::Slow { .. }))));
+    for _ in 0..20 {
+        rig.frame();
+    }
+    assert!(rig.runtime.any_loading() && rig.runtime.binding(t, SLOT).is_none(), "vacant, slow");
+    let mut edited = (**rig.runtime.requested_session()).clone();
+    // mix.instrument with the same hosted id writes `Insert::new`: no state.
+    edited.track_mut(t).unwrap().instrument = Some(Insert::new(HOSTED));
+    rig.runtime.update_session(Arc::new(edited)).unwrap();
+    assert!(rig.frames_until(Duration::from_secs(10), |r| r.binding(t, SLOT).is_some() && !r.any_loading()), "the slot was made again and bound");
+    assert_eq!(rig.gate.calls(), 2);
+    assert_eq!(rig.gate.states.lock().unwrap()[1], None, "made again with the new (empty) state");
+    rig.gate.open();
+    let drops = Arc::clone(&rig.gate.drops);
+    assert!(rig.frames_until(Duration::from_secs(5), |_| drops.load(Ordering::SeqCst) == 1), "the late instance for the old state was destroyed");
+    for _ in 0..20 {
+        rig.frame();
+    }
+    assert_eq!(rig.gate.drops.load(Ordering::SeqCst), 1);
+    assert!(rig.runtime.binding(t, SLOT).is_some());
+    rig.runtime.service();
+    let session = Arc::clone(rig.runtime.requested_session());
+    assert_eq!(rig.runtime.capture_states(&session).unwrap(), vec![], "the live instance is the new one (no state)");
+    assert!(rig.play(t) > 0.0);
     rig.retire();
 }

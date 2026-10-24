@@ -80,6 +80,12 @@ pub struct PluginTestHooks {
     pub slow_after: Duration,
 }
 
+/// Whether two specs are the same instance in the compiler's eyes: the slot and the plug-in (id,
+/// uid and channels), whatever state they restore.
+fn same_instance(a: &InstanceSpec, b: &InstanceSpec) -> bool {
+    a.track == b.track && a.slot == b.slot && a.id == b.id && a.uid == b.uid && a.ch == b.ch
+}
+
 /// What a creation job on the host thread returns: `Err` when the factory unwound.
 type Made = Result<Option<NewInstance>, ()>;
 
@@ -406,10 +412,23 @@ impl Handles {
             Some(request) if !sessions.faulted() && sessions.bridge.can_prepare() => {
                 let all = sessions.restore.is_some();
                 let specs = soundcraft_mix::realtime_instance_specs(&request.session);
-                // An instance on its way to a vacant slot is kept while the request has it; one
-                // the request no longer has (removed, replaced) is dropped, and destroyed on its
-                // host thread if it is made after all.
-                self.retrying.retain(|st| specs.contains(&st.spec));
+                // An instance on its way to a vacant slot is kept while the request has its slot
+                // with the same plug-in (identity: id, uid, channels, as the compiler reuses the
+                // vacant slot); one the request no longer has (removed, replaced) is dropped, and
+                // destroyed on its host thread if it is made after all. The same plug-in with
+                // another state (the instrument picked again: no state) starts again with the new
+                // spec, since the compile keeps the vacant slot and stages nothing for it (review
+                // B2 of #82).
+                self.retrying.retain_mut(|st| match specs.iter().find(|spec| same_instance(spec, &st.spec)) {
+                    None => false,
+                    Some(spec) if *spec == st.spec => true,
+                    Some(spec) => {
+                        log::info!("{}: its slot changed while it loads; it is made again for the new state", spec.id);
+                        st.spec = spec.clone();
+                        st.retry = true;
+                        true
+                    }
+                });
                 let vacant = &self.retrying;
                 specs
                     .into_iter()

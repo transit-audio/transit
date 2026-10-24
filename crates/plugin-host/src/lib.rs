@@ -268,7 +268,7 @@ impl Worker {
     }
 
     /// Inside a creation that has run at least `limit` (slow, not necessarily stuck).
-    fn in_creation_longer_than(&self, limit: Duration) -> bool {
+    pub(crate) fn in_creation_longer_than(&self, limit: Duration) -> bool {
         self.creating.load(Ordering::Acquire) && self.busy_for().is_some_and(|d| d >= limit)
     }
 

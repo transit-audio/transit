@@ -27,6 +27,12 @@
    `a_heavy_instrument_slower_than_the_display_budget_is_adopted` (the real slow-create VST3
    fixture, 1.5 s, against a 300 ms display budget). Mutations: putting the discard back fails
    the adoption tests; dropping the stored state from Retry fails the Retry tests.
+   The refutation review added two more: a save during a slow creation gives up within about one
+   request timeout for all the plug-ins on that thread, not one each
+   (`a_save_during_a_slow_creation_waits_about_one_timeout_not_one_per_instance`), and picking
+   the same plug-in again on a slow slot makes it again and binds it
+   (`picking_the_same_plug_in_again_on_a_slow_slot_makes_it_again_and_binds_it`); with
+   `an_abandoned_creation_returning_after_retry_is_destroyed_not_bound` beside them.
 5. **Gate class.** A wait that only affects what is displayed must never discard work. A
    deadline that abandons a result needs its own name, its own budget and a test of a result
    that lands just after it.
@@ -37,4 +43,4 @@
    adaptive budget is not designed); creations queued behind a slow one move to a fresh thread
    after 10 s, which spends a thread per slow load as before; the Play button still pulses
    "Waiting for plug-ins to load" while a slow plug-in loads (the session itself no longer waits
-   for it).
+   for it); a hung VST3 module entry makes a Retry of the same binary hang again (K42).

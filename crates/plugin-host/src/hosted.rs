@@ -317,13 +317,15 @@ struct RemoteState {
 
 impl RemoteState {
     /// Reads the state on the host thread. `Err` at once when the thread is wedged or gone, or has
-    /// been inside one window message (a modal dialog) for longer than the request timeout; after
-    /// `busy` while the thread is inside a window message longer than [`crate::MODAL_AFTER`]; and
-    /// after the request timeout otherwise (the thread is held that long by a slow creation or a hang).
+    /// been inside one window message (a modal dialog) or one creation (a slow plug-in load, issue
+    /// #82) for longer than the request timeout; after `busy` while the thread is inside a window
+    /// message or a creation longer than [`crate::MODAL_AFTER`]; and after the request timeout
+    /// otherwise. A save's reads of the plug-ins on a thread held by a slow load so share one
+    /// deadline instead of waiting a request timeout each.
     fn read(&mut self, busy: Duration) -> Result<Option<Vec<u8>>, StateBusy> {
         let worker = &self.token.worker;
         let timeout = self.token.timeout;
-        if !worker.responsive() || worker.in_dispatch_longer_than(timeout) {
+        if !worker.responsive() || worker.in_dispatch_longer_than(timeout) || worker.in_creation_longer_than(timeout) {
             return Err(StateBusy);
         }
         if worker.is_current_thread() {
@@ -341,7 +343,8 @@ impl RemoteState {
                 Status::Waiting { .. } => {}
             }
             let waited = start.elapsed();
-            if !worker.responsive() || waited >= timeout || (waited >= busy && worker.in_dispatch_longer_than(crate::MODAL_AFTER)) {
+            let held = worker.in_dispatch_longer_than(crate::MODAL_AFTER) || worker.in_creation_longer_than(crate::MODAL_AFTER);
+            if !worker.responsive() || waited >= timeout || (waited >= busy && held) {
                 return Err(StateBusy);
             }
             std::thread::sleep(Duration::from_millis(1));
