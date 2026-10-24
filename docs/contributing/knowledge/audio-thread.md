@@ -31,6 +31,38 @@ not permission.
   Hosted ones are created and destroyed on the plug-in host thread (see below).
 - Logging from the audio thread uses `on_audio_thread()` and defers the write to the UI thread.
 
+## Live-input ring alignment (K22, #88)
+
+The live input reaches the plan through `InputRing` (`crates/playback/src/record.rs`). The input
+callback pushes, and the plan pops in `plan_bridge::Audio::render`. The ring is a FIFO, so
+anything that queues while nothing reads would stay in front of the reader as a fixed delay. That
+happens between `open_input` and the plan's adoption, and during a stall. The contract:
+
+- **When it aligns.** On the first read after a plan adopts a ring that the displaced plan did not
+  read (`Audio::service` calls `InputRing::align_on_next_read`), and on the first read after any
+  `clear_monitor`. The aligning read must find input. A read before the device's input runs
+  leaves the request pending. A new plan with the same ring does not realign it, so an edit never
+  moves the input.
+- **What it keeps.** The read's own input frames plus a fixed slack. After that the reader runs in
+  lockstep, and the backlog B after the read equals the slack:
+  - `ALIGNED_BACKLOG_BLOCKS_PAIRED` (0) when one device callback delivers the capture and then
+    asks for the render (`Backend::capture_precedes_render`: native ASIO and the duplex fake);
+  - `ALIGNED_BACKLOG_BLOCKS_UNPAIRED` (one read block) when capture and render run on separate
+    callbacks (WASAPI's two loops, cpal), whose order can swap within a period.
+- **Real-time rules.** The discard is one queue commit (a pointer move), made under the reader's
+  `try_lock` that the read already holds, and it is counted in `discarded_frames`. The request is
+  one atomic store, which is safe from the audio thread at adoption.
+- **What it does not do.** Outside alignment the reader never trims the FIFO. A stall after
+  alignment leaves its backlog until the next clear, and an External Instrument Measure refuses a
+  run whose B changed. Recording does not read this ring (it captures by device frame), and the
+  loopback calibration counts device positions.
+- **Proof.** The tests pre-fill the ring before the plan reads it:
+  - `record::ring_tests`: `the_aligning_read_drops_*`, `a_clear_mid_session_*` and
+    `alignment_waits_*`;
+  - `plan_bridge::tests::an_adopted_input_reads_the_newest_capture_*`;
+  - the fake-device Player tests `input_monitoring_latency_excludes_*` and
+    `a_hardware_insert_round_trip_excludes_*` (`player/device/tests.rs`).
+
 ## Plug-in host thread
 
 Hosted plug-ins (CLAP, VST3) live on the plug-in host thread ([ADR 0018](../../adr/0018-plugin-host-thread.md),
@@ -111,7 +143,7 @@ On macOS, `std::sync::Mutex` is a lazily boxed `pthread_mutex_t`: the first `loc
 allocates 64 bytes. A `thread_local!` whose type has a destructor allocates on first access per
 thread (Apple registers it through `_tlv_atexit`), and Apple's libunwind allocates on the first
 unwind. Windows and Linux do none of these, so a test can pass there and fail on macOS. Take each
-lock once at construction on the control thread (see `InputRing::new`), use `const`-initialized
+lock once at construction on the control thread (see `InputRing::with_pairing`), use `const`-initialized
 thread-locals of types without `Drop`, and keep destructor thread-locals off the audio path.
 
 The VST3 host pre-locks both of its process-path mutexes this way: `EventList::new` and
