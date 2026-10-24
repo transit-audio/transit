@@ -717,7 +717,7 @@ fn midi_output_chip(
         p.text(pos2(b.min.x + dot + 4.0, cy), Align2::LEFT_CENTER, &chip.text, font, if chip.missing { TOKENS.record } else { TOKENS.text_dim });
     }
     resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "MIDI output"));
-    if let Some(params) = view.popup(&resp, t.id, &t.midi_output) {
+    if let Some(params) = view.popup(&resp, t.id, &t.midi_output, t.external_instrument().is_some()) {
         let _ = app.run("midi.output", params);
     }
     Some(resp)

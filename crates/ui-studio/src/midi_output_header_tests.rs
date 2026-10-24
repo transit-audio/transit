@@ -175,3 +175,26 @@ fn only_the_external_track_in_a_mixed_session_draws_a_chip() {
     let (_, dots) = shapes(&mut app, &ctx, 300.0);
     assert_eq!(dots.len(), 1, "the Internal header draws no dot");
 }
+
+#[test]
+fn on_an_external_instrument_track_the_chip_popup_says_where_the_latency_is_set() {
+    let (mut app, ctx) = instrument_rig();
+    let t = app.engine.session().tracks.iter().find(|t| t.name == "Keys").unwrap().id;
+    app.run(
+        "instrument.external",
+        json!({"track": t.0, "port": {"backend": "fake", "name": "Synth OUT", "ordinal": 0, "id": ""}, "channel": 2, "return": "In 1", "gain_db": 0.0}),
+    )
+    .unwrap();
+    assert!(app.engine.session().track(t).unwrap().external_instrument().is_some());
+    app.ui.header_width = 300.0;
+    let shown = run(&mut app, &ctx, 0, 3, Vec::new());
+    let chip = shown.iter().find(|(t, _)| t.contains("Synth OUT")).expect("the chip").1 - vec2(20.0, 0.0);
+    let click = vec![
+        egui::Event::PointerMoved(chip),
+        egui::Event::PointerButton { pos: chip, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+        egui::Event::PointerButton { pos: chip, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+    ];
+    let shown: Vec<String> = run(&mut app, &ctx, 3, 3, click).into_iter().map(|(t, _)| t).collect();
+    assert!(shown.iter().any(|t| t == crate::midi_output::EXTERNAL_OFFSET), "{shown:?}");
+    assert!(!shown.iter().any(|t| t.starts_with("Positive sends later")), "{shown:?}");
+}
