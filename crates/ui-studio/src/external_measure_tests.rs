@@ -78,7 +78,7 @@ fn rig() -> T {
 }
 
 fn measured(frames: u32, spread: f64) -> Result<Measured, MeasureError> {
-    Ok(Measured { frames, spread, found: 8, sent: 8, latencies: vec![u64::from(frames); 8] })
+    Ok(Measured { frames, spread, found: 8, sent: 8, latencies: vec![u64::from(frames); 8], backlog: None })
 }
 
 #[test]
@@ -161,6 +161,7 @@ fn measure_is_refused_in_the_adr_words_and_a_failed_run_stores_nothing() {
         (MeasureError::NotQuiet { peak: 0.3 }, "The return is not quiet before the note: stop the synth's sound (held note, arpeggiator, drone)."),
         (MeasureError::Clipped { peak: 1.0 }, "The return clipped: lower the synth or the input gain and measure again."),
         (MeasureError::DeviceLost, "Measurement stopped: the audio device went away. Nothing was stored."),
+        (MeasureError::InputAlignmentChanged { first: 256, last: 448 }, "Input alignment changed during the measurement: measure again."),
     ];
     for (error, said) in cases {
         t.click(t.card().external_measure);

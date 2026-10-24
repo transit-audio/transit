@@ -76,7 +76,13 @@ struct Pumped {
 /// Pump capture and render in lockstep. The probe arms after [`ARM_AT`] blocks; the synth
 /// answers each note-on, which goes out at plan frame `on_at(k)` after arming (a block boundary
 /// at this block size), `C` frames later on input 1. `stop(block, player)` may end the pumping.
-fn pump(rig: &Rig, blocks: usize, mut stop: impl FnMut(usize, &Player) -> bool) -> Pumped {
+fn pump(rig: &Rig, blocks: usize, stop: impl FnMut(usize, &Player) -> bool) -> Pumped {
+    pump_with(rig, blocks, None, stop)
+}
+
+/// [`pump`], with one extra capture block delivered ahead of block `extra_capture_at`'s render:
+/// the live input ring then holds one more device block than it did (a changed backlog B).
+fn pump_with(rig: &Rig, blocks: usize, extra_capture_at: Option<usize>, mut stop: impl FnMut(usize, &Player) -> bool) -> Pumped {
     let format = ab::Format::new(48_000, 2, ab::SampleFormat::F32);
     let (mut output, mut input) = (vec![0.0f32; BLOCK * 2], vec![0.0f32; BLOCK * 2]);
     let on_at = |k: u64| 48 * (100 + 1500 * k);
@@ -99,6 +105,10 @@ fn pump(rig: &Rig, blocks: usize, mut stop: impl FnMut(usize, &Player) -> bool) 
             input[f * 2 + 1] = 0.0;
         }
         assert!(rig.audio.pump_capture(BLOCK, ab::Stamp::INVALID, format, &mut SliceSource { data: &input, channels: 2 }));
+        if extra_capture_at == Some(i) {
+            let quiet = vec![0.0f32; BLOCK * 2];
+            assert!(rig.audio.pump_capture(BLOCK, ab::Stamp::INVALID, format, &mut SliceSource { data: &quiet, channels: 2 }));
+        }
         if !rig.audio.pump_render(BLOCK, ab::Stamp::INVALID, &mut SliceSink { data: &mut output, channels: 2 }) {
             break;
         }
@@ -145,6 +155,7 @@ fn measure_finds_the_round_trip_in_plan_frames_and_releases_on_the_port() {
     assert_eq!(m.frames, C as u32, "the median is C: {m:?}");
     assert_eq!((m.found, m.sent), (8, 8));
     assert_eq!(m.spread, 0.0);
+    assert!(m.backlog.is_some(), "the run recorded the input ring's backlog B: {m:?}");
     assert!(progress.windows(2).all(|w| w[0] <= w[1]) && progress.contains(&3), "{progress:?}");
     assert!(!rig.player.external_measure_running());
     // Nine notes on (the warm-up and eight) and off on channel 3, then All Notes Off, all sent by
@@ -156,6 +167,24 @@ fn measure_finds_the_round_trip_in_plan_frames_and_releases_on_the_port() {
     assert_eq!(sent.last(), Some(&vec![0xB2, 123, 0]));
     let status = rig.player.midi_status().unwrap().output;
     assert_eq!((status.audio_thread_sends, status.dropped), (0, 0));
+}
+
+#[test]
+fn a_backlog_that_changes_mid_run_refuses_and_the_note_is_released() {
+    // C moves frame for frame with the input ring's backlog B (ADR 0020 decision 2): a run whose
+    // B changed has no single C. One more device block queues ahead of the plan reader mid-run.
+    let rig = rig(false);
+    let blocks = (rig.player.external_measure_duration().as_secs_f64() * 48_000.0 / BLOCK as f64) as usize + ARM_AT + 50;
+    let run = pump_with(&rig, blocks, Some(ARM_AT + 2_000), |_, _| false);
+    let Some(Err(MeasureError::InputAlignmentChanged { first, last })) = run.result else {
+        panic!("expected the alignment refusal: {:?}", run.result)
+    };
+    assert_eq!(last - first, BLOCK as u32, "B moved by the queued block");
+    assert_eq!(MeasureError::InputAlignmentChanged { first, last }.to_string(), "input alignment changed during the measurement: measure again");
+    assert!(!rig.player.external_measure_running());
+    assert!(rig.player.external_measure_result().is_none(), "the result is taken once");
+    // The run still ended through its normal exit: the note is released.
+    until("All Notes Off", || released(&messages(&rig)));
 }
 
 #[test]

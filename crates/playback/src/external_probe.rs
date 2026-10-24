@@ -58,6 +58,9 @@ const DONE: u8 = 2;
 /// Control asked to stop; the audio thread releases the note and goes idle.
 const CANCEL: u8 = 3;
 const NONE: u64 = u64::MAX;
+/// The most B may move during a run before the run is refused: the ring counts pending
+/// interpolation history, which can differ by a frame or two between blocks.
+pub const BACKLOG_SLACK: u64 = 2;
 /// Events of a run: an on and an off per note, the warm-up included.
 const EVENTS: usize = 2 * (NOTES + 1);
 
@@ -111,6 +114,9 @@ pub struct Measured {
     pub sent: u32,
     /// Each found note's latency, in frames, in the order played.
     pub latencies: Vec<u64>,
+    /// The live input ring's backlog B the run held, in frames (`None` when the plan reported
+    /// none). C moves frame for frame with it (ADR 0020 decision 2).
+    pub backlog: Option<u32>,
 }
 
 impl Measured {
@@ -139,6 +145,9 @@ pub enum MeasureError {
     Clipped { peak: f32 },
     /// The audio device stopped or went away during the run.
     DeviceLost,
+    /// The input ring's backlog B changed during the run (a different input alignment): C would
+    /// be off by the change. Measure again.
+    InputAlignmentChanged { first: u32, last: u32 },
 }
 
 impl std::fmt::Display for MeasureError {
@@ -148,6 +157,7 @@ impl std::fmt::Display for MeasureError {
             Self::NotQuiet { peak } => write!(f, "the return is not quiet before the notes ({})", onset::dbfs(*peak)),
             Self::Clipped { peak } => write!(f, "the return clipped ({})", onset::dbfs(*peak)),
             Self::DeviceLost => write!(f, "the audio device went away while measuring"),
+            Self::InputAlignmentChanged { .. } => write!(f, "input alignment changed during the measurement: measure again"),
         }
     }
 }
@@ -170,6 +180,11 @@ pub struct ExtProbe {
     velocity: AtomicU8,
     ret_n: AtomicU8,
     ret: [AtomicU16; MAX_RETURN_CHANNELS],
+    /// The input ring's backlog B at the first block of the run, and its extremes since
+    /// ([`NONE`] / 0 before any was reported). Audio thread writes; control reads at the end.
+    backlog_first: AtomicU64,
+    backlog_min: AtomicU64,
+    backlog_max: AtomicU64,
 }
 
 impl std::fmt::Debug for ExtProbe {
@@ -197,6 +212,9 @@ impl ExtProbe {
             velocity: AtomicU8::new(VELOCITY),
             ret_n: AtomicU8::new(0),
             ret: std::array::from_fn(|_| AtomicU16::new(0)),
+            backlog_first: AtomicU64::new(NONE),
+            backlog_min: AtomicU64::new(NONE),
+            backlog_max: AtomicU64::new(0),
         }
     }
 
@@ -238,6 +256,9 @@ impl ExtProbe {
         }
         self.next.store(0, Ordering::Relaxed);
         self.frame.store(0, Ordering::Relaxed);
+        self.backlog_first.store(NONE, Ordering::Relaxed);
+        self.backlog_min.store(NONE, Ordering::Relaxed);
+        self.backlog_max.store(0, Ordering::Relaxed);
         self.state.store(ARMED, Ordering::Release);
         true
     }
@@ -293,7 +314,28 @@ impl ExtProbe {
         }
         let recorded: Vec<f32> = self.capture.iter().map(|s| f32::from_bits(s.load(Ordering::Relaxed))).collect();
         let sent: Vec<u64> = self.sent.iter().map(|s| s.load(Ordering::Relaxed)).collect();
-        Some(analyze(&recorded, &sent, self.rate))
+        let (first, min, max) =
+            (self.backlog_first.load(Ordering::Relaxed), self.backlog_min.load(Ordering::Relaxed), self.backlog_max.load(Ordering::Relaxed));
+        if min != NONE && max - min > BACKLOG_SLACK {
+            // B moved (the input was re-attached or its ring was cleared): the first sample and
+            // the farthest from it say how.
+            let last = if max - first >= first - min { max } else { min };
+            return Some(Err(MeasureError::InputAlignmentChanged { first: first as u32, last: last as u32 }));
+        }
+        let backlog = (min != NONE).then_some(max as u32);
+        Some(analyze(&recorded, &sent, self.rate).map(|m| Measured { backlog, ..m }))
+    }
+
+    /// Audio thread: the live input ring's backlog B after the plan popped this block (`None`
+    /// without a ring). Loads and stores atomics only. Call before [`Self::block`].
+    pub fn note_backlog(&self, frames: Option<usize>) {
+        let Some(b) = frames.map(|b| b as u64) else { return };
+        if self.state.load(Ordering::Acquire) != ARMED {
+            return;
+        }
+        let _ = self.backlog_first.compare_exchange(NONE, b, Ordering::Relaxed, Ordering::Relaxed);
+        self.backlog_min.fetch_min(b, Ordering::Relaxed);
+        self.backlog_max.fetch_max(b, Ordering::Relaxed);
     }
 
     fn message(&self, status: u8, data: u8, value: u8) -> Emit {
@@ -406,7 +448,7 @@ pub fn analyze(recorded: &[f32], sent: &[u64], rate: u32) -> Result<Measured, Me
         return Err(MeasureError::NoSound { found: found as u32, sent: sent_n });
     }
     let summary = onset::summarize(&latencies).ok_or(MeasureError::NoSound { found: 0, sent: sent_n })?;
-    Ok(Measured { frames: summary.median.round() as u32, spread: summary.std_dev, found: found as u32, sent: sent_n, latencies })
+    Ok(Measured { frames: summary.median.round() as u32, spread: summary.std_dev, found: found as u32, sent: sent_n, latencies, backlog: None })
 }
 
 #[cfg(test)]

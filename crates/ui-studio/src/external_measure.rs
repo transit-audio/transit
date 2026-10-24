@@ -174,6 +174,7 @@ pub fn error_text(e: &MeasureError, ret: &str) -> String {
         MeasureError::NotQuiet { .. } => "The return is not quiet before the note: stop the synth's sound (held note, arpeggiator, drone).".into(),
         MeasureError::Clipped { .. } => "The return clipped: lower the synth or the input gain and measure again.".into(),
         MeasureError::DeviceLost => "Measurement stopped: the audio device went away. Nothing was stored.".into(),
+        MeasureError::InputAlignmentChanged { .. } => "Input alignment changed during the measurement: measure again.".into(),
     }
 }
 
@@ -456,7 +457,7 @@ mod tests {
         assert_eq!((rate_text(48_000), rate_text(44_100), rate_text(96_000)), ("48 kHz".into(), "44.1 kHz".into(), "96 kHz".into()));
         assert_eq!(measured_text(&record(48_000, 64, 955)), "Measured 19.9 ms on 2026-10-24 at 48 kHz/64");
         assert_eq!(stale_text(&record(48_000, 64, 955), 44_100, Some(128)), "Measured at 48 kHz / 64, now 44.1 kHz / 128: measure again");
-        let m = Measured { frames: 1061, spread: 19.2, found: 8, sent: 8, latencies: Vec::new() };
+        let m = Measured { frames: 1061, spread: 19.2, found: 8, sent: 8, latencies: Vec::new(), backlog: None };
         assert_eq!(result_text(&m, 48_000), "22.1 ms (1061 frames), spread 0.4 ms, 8 of 8 notes");
         assert_eq!(spread_text(1.3), "Spread 1.3 ms is high (expected under 1 ms): the synth's attack or the driver is unsteady.");
         assert_eq!(

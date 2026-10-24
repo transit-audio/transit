@@ -65,7 +65,15 @@ impl External {
     /// An External Instrument Measure (ADR 0020 decision 3): the probe records the return of the
     /// block just rendered and hands over the messages due at its first frame, which go out
     /// stamped P(R) like the track's own notes (an External Instrument's are not delayed by A).
-    pub(in crate::player) fn measure(&mut self, probe: &crate::external_probe::ExtProbe, block: &Block, input: &[Vec<f32>], frames: usize) {
+    pub(in crate::player) fn measure(
+        &mut self,
+        probe: &crate::external_probe::ExtProbe,
+        block: &Block,
+        input: &[Vec<f32>],
+        frames: usize,
+        backlog: Option<usize>,
+    ) {
+        probe.note_backlog(backlog);
         let at_ns = block.host_for(true).unwrap_or(0);
         let out = &mut self.out;
         probe.block(input, frames, |e| {
@@ -198,7 +206,7 @@ mod tests {
                 delay_ns: delay,
                 ns_per_frame: ns,
             };
-            external.measure(&probe, &block, &input, 64);
+            external.measure(&probe, &block, &input, 64, None);
             while let Ok(e) = rx.pop() {
                 if e.kind == Kind::Message && e.bytes[0] & 0xF0 == 0x90 {
                     ons.push((e.track, e.at_ns, block.host_for(true).unwrap()));

@@ -880,7 +880,7 @@ impl Audio {
         // sends the notes due at its first frame, stamped with that frame's presentation time.
         #[cfg(not(target_arch = "wasm32"))]
         if let (Some(probe), Some(external), Some(block)) = (&self.ext_probe, &mut self.external, external_block) {
-            external.measure(probe, &block, self.plans.input(), frames);
+            external.measure(probe, &block, self.plans.input(), frames, self.plans.input_backlog());
         }
         // The hardware probe records the return of this block; the click for it is added as the
         // block plays (`fill_inner`).

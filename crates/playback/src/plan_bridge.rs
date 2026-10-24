@@ -692,6 +692,10 @@ impl Audio {
     pub fn input(&self) -> &[Vec<f32>] {
         &self.mix.input
     }
+    /// The live input ring's backlog after the last pop, in frames (`None` without a ring). Atomic loads only.
+    pub fn input_backlog(&self) -> Option<usize> {
+        self.buffers.input.as_ref().map(|ring| ring.buffered_input_frames())
+    }
     /// The device channel of each main channel; the callback leaves every other channel at zero.
     pub fn main_dest(&self) -> &[u16] {
         &self.buffers.main_dest
