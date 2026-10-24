@@ -442,6 +442,25 @@ fn a_release_survives_a_full_control_queue_and_runs_when_the_thread_drains() {
 }
 
 #[test]
+fn a_track_release_survives_a_full_control_queue_and_runs_when_the_thread_drains() {
+    // N2 of the slice review: a Measure's release after a device loss is never skipped.
+    let mut rig = Rig::new(|key| vec![destination(5, key, MidiOutChannel::Channel(3), 0)]);
+    assert!(rig.echo.push(message(5, 0, [0x90, 60, 100])));
+    rig.wait_sent(1);
+    stall(&rig);
+    fill_control_queue(&rig);
+    rig.out.release_track(TrackId(5)); // queue full: pending, not skipped
+    rig.out.release_track(TrackId(5)); // one entry per track
+    assert_eq!(rig.out.shared.track_releases.lock().unwrap().len(), 1);
+    assert_eq!(rig.sent().len(), 1, "the stuck thread has sent nothing");
+    unstall(&rig);
+    let sends = rig.wait_sent(3);
+    let sent: Vec<_> = sends.iter().map(|s| s.message.clone()).collect();
+    assert!(sent.contains(&vec![0x83, 60, 64]), "{sent:?}");
+    assert!(sent.contains(&vec![0xB3, 123, 0]), "{sent:?}");
+}
+
+#[test]
 fn a_panic_survives_a_full_control_queue_and_runs_when_the_thread_drains() {
     let mut rig = Rig::new(|key| vec![destination(5, key, MidiOutChannel::Channel(3), 0)]);
     assert!(rig.echo.push(message(5, 0, [0x90, 60, 100])));
