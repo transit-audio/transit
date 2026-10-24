@@ -1,4 +1,4 @@
-# E45: MIDI position format compatibility (#45)
+# E45b: MIDI position format compatibility (#45)
 
 1. **Failure.** Review of the musical aliases found that `midi.new_clip` and retrospective
    note starts rejected existing clock positions (`0:12`, `00:00:10:00`) and silently
