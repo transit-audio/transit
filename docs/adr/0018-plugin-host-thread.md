@@ -1,6 +1,6 @@
 # ADR 0018: A plug-in host thread owns hosted instances; the UI only sends requests
 
-- **Status:** proposed 2026-10-23 (issue #36, known issue K10; implemented on `feat/plugin-host-thread`, awaiting review)
+- **Status:** accepted 2026-10-24 (shipped 2026-10-23, #36 #56 #66)
 - **Date:** 2026-10-23
 - **Reopen when:** a reference plug-in misbehaves because its main thread is not the process main thread on Windows; macOS needs the same guarantee (that needs editors out of process, or a run-loop design); or out-of-process hosting (G-13) is taken up, which replaces the stuck-thread handling below.
 
