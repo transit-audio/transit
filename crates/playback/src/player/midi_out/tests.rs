@@ -379,3 +379,92 @@ fn the_deadline_clamp_is_capped_so_a_far_future_stamp_cannot_stall_a_track() {
     let late = sends[0].at.saturating_duration_since(rig.origin.instant() + Duration::from_nanos(now + 5_000_000));
     assert!(late <= Duration::from_nanos(CLAMP_CAP_NS) + Duration::from_millis(100), "held past the cap: {late:?}");
 }
+
+fn stall(rig: &Rig) {
+    rig.out.shared.stall.store(true, Ordering::Release);
+    until("the thread is held", || rig.out.shared.stalled.load(Ordering::Acquire));
+}
+
+fn unstall(rig: &Rig) {
+    rig.out.shared.stall.store(false, Ordering::Release);
+}
+
+/// Fills the 64-slot control queue with harmless releases of a track nobody has.
+fn fill_control_queue(rig: &Rig) {
+    while rig.out.control.try_send(Control::ReleaseEcho { track: TrackId(99), generation: 1 }).is_ok() {}
+}
+
+#[test]
+fn a_stale_echo_note_on_after_the_release_is_dropped_and_no_note_hangs() {
+    // #69 item 2: the ingress worker checks the route, is preempted, Main revokes it (disarm) and
+    // the release goes out, then the push lands. The key-up never comes: without the generation
+    // the note would hang.
+    let mut rig = Rig::new(|key| vec![destination(6, key, MidiOutChannel::AsRecorded, 0)]);
+    assert!(rig.echo.push(message(6, 0, [0x90, 60, 100])));
+    rig.wait_sent(1);
+    let checked = rig.echo.echo_generation(); // the route check of the late note-on
+    rig.out.release_echo(TrackId(6)); // Main revokes the route
+    let sends = rig.wait_sent(2);
+    assert_eq!(sends[1].message, vec![0x80, 60, 64]);
+    // The preempted push lands after the release.
+    assert!(rig.echo.push(OutEvent { delay_ns: checked, ..message(6, 0, [0x90, 62, 100]) }));
+    until("the stale event is dropped", || rig.out.status().stale_echo == 1);
+    // An event whose route check came after the revocation still goes out.
+    let fresh = rig.echo.echo_generation();
+    assert!(fresh > checked);
+    assert!(rig.echo.push(OutEvent { delay_ns: fresh, ..message(6, 0, [0x90, 64, 100]) }));
+    rig.wait_sent(3);
+    // Nothing of the stale note: the later panic ends only the fresh one.
+    rig.out.panic();
+    let sent = rig.wait_sent(5);
+    assert!(!sent.iter().any(|s| s.message == vec![0x90, 62, 100] || s.message == vec![0x80, 62, 64]));
+    assert!(sent.iter().any(|s| s.message == vec![0x80, 64, 64]));
+}
+
+#[test]
+fn a_release_survives_a_full_control_queue_and_runs_when_the_thread_drains() {
+    // #69 item 3: the thread is stuck in a driver; the release must not be skipped.
+    let mut rig = Rig::new(|key| vec![destination(5, key, MidiOutChannel::AsRecorded, 0)]);
+    assert!(rig.echo.push(message(5, 0, [0x90, 60, 100])));
+    assert!(rig.echo.push(message(5, 0, [0xB0, 64, 127])));
+    rig.wait_sent(2);
+    stall(&rig);
+    fill_control_queue(&rig);
+    rig.out.release_echo(TrackId(5)); // queue full: pending, not skipped
+    assert_eq!(rig.sent().len(), 2, "the stuck thread has sent nothing");
+    unstall(&rig);
+    let sends = rig.wait_sent(4);
+    assert_eq!(sends[2].message, vec![0x80, 60, 64]);
+    assert_eq!(sends[3].message, vec![0xB0, 64, 0]);
+}
+
+#[test]
+fn a_panic_survives_a_full_control_queue_and_runs_when_the_thread_drains() {
+    let mut rig = Rig::new(|key| vec![destination(5, key, MidiOutChannel::Channel(3), 0)]);
+    assert!(rig.echo.push(message(5, 0, [0x90, 60, 100])));
+    rig.wait_sent(1);
+    stall(&rig);
+    fill_control_queue(&rig);
+    rig.out.panic();
+    unstall(&rig);
+    let sends = rig.wait_sent(4);
+    let sent: Vec<_> = sends.iter().map(|s| s.message.clone()).collect();
+    assert!(sent.contains(&vec![0x83, 60, 64]), "{sent:?}");
+    assert!(sent.contains(&vec![0xB3, 123, 0]), "{sent:?}");
+}
+
+#[test]
+fn pending_releases_keep_the_newest_generation_per_track_without_growing() {
+    let rig = Rig::new(|key| vec![destination(5, key, MidiOutChannel::AsRecorded, 0)]);
+    stall(&rig);
+    fill_control_queue(&rig);
+    let capacity = rig.out.shared.releases.lock().unwrap().capacity();
+    for _ in 0..1000 {
+        rig.out.release_echo(TrackId(5));
+        rig.out.panic();
+    }
+    let pending = rig.out.shared.releases.lock().unwrap().clone();
+    assert_eq!(pending.len(), 1, "{pending:?}");
+    assert_eq!(rig.out.shared.releases.lock().unwrap().capacity(), capacity);
+    unstall(&rig);
+}

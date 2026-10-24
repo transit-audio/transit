@@ -169,7 +169,17 @@ impl Worker {
         let (attach, receive) = mpsc::sync_channel(sources::PORTS);
         let shared = Arc::new(Shared::default());
         let (tap, tap_receive) = rtrb::RingBuffer::new(TAP_CAPACITY);
-        let mut pump = Pump { lane, receive, inputs: Vec::with_capacity(sources::PORTS), cursor: 0, shared: Arc::clone(&shared), echo: None, tap };
+        let mut pump = Pump {
+            lane,
+            receive,
+            inputs: Vec::with_capacity(sources::PORTS),
+            cursor: 0,
+            shared: Arc::clone(&shared),
+            echo: None,
+            tap,
+            #[cfg(test)]
+            between_check_and_push: None,
+        };
         let thread = std::thread::Builder::new().name("soundcraft-midi-ingress".into()).spawn(move || {
             let mut linger = 0u32;
             while !pump.shared.stop.load(Ordering::Acquire) {
@@ -321,6 +331,9 @@ struct Pump {
     shared: Arc<Shared>,
     echo: Option<super::midi_out::Producer>,
     tap: rtrb::Producer<PlayedMidi>,
+    /// Tests: runs after the route check and before the echo push, where a preemption can land.
+    #[cfg(test)]
+    between_check_and_push: Option<Box<dyn FnMut() + Send>>,
 }
 impl Pump {
     fn tap(&mut self, message: Message) {
@@ -441,6 +454,9 @@ impl Pump {
             };
             let mut tapped = false;
             for (permit, route) in &input.routes {
+                // The echo route generation is read before the route check: a revocation after
+                // it leaves this event older than the release, so the output thread drops it.
+                let generation = self.echo.as_ref().map_or(0, super::midi_out::Producer::echo_generation);
                 if !permit.admits_sequence(raw.seq) {
                     self.shared.cancelled.fetch_add(1, Ordering::Relaxed);
                     continue;
@@ -448,6 +464,10 @@ impl Pump {
                 if route.channels & (1 << channel) == 0 {
                     self.shared.filtered.fetch_add(1, Ordering::Relaxed);
                     continue;
+                }
+                #[cfg(test)]
+                if let Some(hook) = &mut self.between_check_and_push {
+                    hook();
                 }
                 if route.echo
                     && let Some(echo) = &mut self.echo
@@ -458,7 +478,7 @@ impl Pump {
                         at_ns: raw.host_arrival_ns,
                         bytes: raw.bytes,
                         len: raw.len,
-                        delay_ns: 0,
+                        delay_ns: generation,
                     });
                 }
                 let release = raw.is_release();

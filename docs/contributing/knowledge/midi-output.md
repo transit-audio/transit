@@ -97,6 +97,20 @@ sends it at `H + destination offset`.
   an instrument. `Native::service` sends `release_echo` for each revoked echo route; the
   destination's `echo` flag (armed or monitored) also releases when it goes false, and while it is
   false a late echo may only end notes, never start them.
+- **Route generation** (#69): a revoked route's release cannot catch a note-on whose route check
+  came before the revocation but whose push came after (the ingress worker preempted between
+  the two). Every echo event carries the echo route generation, read before its route check
+  (`Producer::echo_generation`, stored in the event's `delay_ns` word, which echo does not
+  otherwise use; 0 means untagged); `Out::release_echo` raises the generation before it queues the
+  release. The output thread keeps the release's generation as the track's floor and drops an echo
+  event stamped below it (`stale_echo` in the status). Events whose check came after the
+  revocation carry the new generation and pass.
+- **Releases survive a full control queue** (#69): the control queue to the output thread holds 64
+  entries. If the thread is stuck in a driver and the queue is full, `release_echo` and `panic`
+  (Stop, All Notes Off, disarm) are not skipped: each leaves a sticky pending request (a panic flag;
+  one newest-generation entry per track) that the thread honors as soon as it drains, after the
+  queue. The warning stays in the diagnostic log (Main writes it, never an RT thread). Honoring it
+  swaps preallocated vectors, so the thread does not allocate.
 - **Device loss**: any `PortWatcher` poll (the output thread polls every 250 ms) flags the handle;
   the port is closed and marked missing, held state is forgotten and sends are counted as unsent.
   When the port appears again it reopens and first gets Sustain off and All Notes Off on its used

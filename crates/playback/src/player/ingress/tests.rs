@@ -25,7 +25,19 @@ fn bridge() -> (plan_bridge::Control, plan_bridge::Audio) {
 fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSender<Update>, Pump) {
     let (send, receive) = mpsc::sync_channel(sources::PORTS);
     let (tap, _) = rtrb::RingBuffer::new(TAP_CAPACITY);
-    (send, Pump { lane, receive, inputs: Vec::with_capacity(sources::PORTS), cursor: 0, shared: Arc::default(), echo: None, tap })
+    (
+        send,
+        Pump {
+            lane,
+            receive,
+            inputs: Vec::with_capacity(sources::PORTS),
+            cursor: 0,
+            shared: Arc::default(),
+            echo: None,
+            tap,
+            between_check_and_push: None,
+        },
+    )
 }
 fn input(consumer: InputConsumer, permit: sources::Permit) -> Update {
     Update::Input(Input { id: 1, consumer, routes: vec![(permit, route())] })
@@ -482,4 +494,79 @@ fn pending_initial_route_preserves_post_boundary_input_until_acknowledged() {
     });
     assert_eq!(observed, [(1, 2_000)]);
     assert_eq!(worker.shared.cancelled.load(Ordering::Relaxed), 1);
+}
+
+#[test]
+fn a_preempted_echo_push_after_a_revocation_is_dropped_by_route_generation() {
+    // #69 item 2 through the real ingress worker: the hook runs between the route check and the
+    // echo push, where the revocation and its release land.
+    use crate::device_clock::HostOrigin;
+    use soundcraft_model::{MidiOutChannel, MidiOutPort};
+    use std::sync::Mutex;
+    let (control, _plans) = bridge();
+    let (mut registry, _sources) = sources::pair(&control).unwrap();
+    let token = registry.register(2).unwrap();
+    let (lane, _audio) = action_lane::pair_with_result(&control);
+    let (send, mut worker) = pump(lane);
+    let out_fake = Fake::default();
+    let out_key = out_fake.add_output("Synth OUT");
+    let (mut out, _playback, echo) = super::super::midi_out::Out::new();
+    out.start(out_fake.io(), HostOrigin::default()).unwrap();
+    out.configure(vec![super::super::midi_out::Destination {
+        track: TrackId(7),
+        port: MidiOutPort { backend: out_key.backend.as_str().into(), name: out_key.name.clone(), ordinal: out_key.ordinal, id: out_key.id.clone() },
+        channel: MidiOutChannel::AsRecorded,
+        offset_ns: 0,
+        echo: true,
+        device: false,
+    }]);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while !out.status().tracks.iter().all(|t| t.state == super::super::midi_out::DestinationState::Connected) || out.status().tracks.is_empty() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    worker.echo = Some(echo);
+    // A note held by the live route before the revocation (untagged).
+    assert!(worker.echo.as_mut().unwrap().push(super::super::midi_out::OutEvent {
+        kind: super::super::midi_out::Kind::Message,
+        track: 7,
+        at_ns: 0,
+        bytes: [0x90, 61, 100],
+        len: 3,
+        delay_ns: 0,
+    }));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while out_fake.sent(&out_key).is_empty() {
+        assert!(std::time::Instant::now() < deadline);
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    let out = Arc::new(Mutex::new(out));
+    let revoker = Arc::clone(&out);
+    let observer = out_fake.clone();
+    let observed = out_key.clone();
+    worker.between_check_and_push = Some(Box::new(move || {
+        revoker.lock().unwrap().release_echo(TrackId(7));
+        // The preemption lasts until the output thread has ended the held note.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while observer.sent(&observed).len() < 2 {
+            assert!(std::time::Instant::now() < deadline, "the release was not processed");
+            std::thread::sleep(std::time::Duration::from_millis(1));
+        }
+    }));
+
+    let fake = Fake::default();
+    let key = fake.add_input("Keys");
+    let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
+    let echoing = Route { echo: true, ..route() };
+    send.send(Update::Input(Input { id: 1, consumer, routes: vec![(registry.permit(token).unwrap(), echoing)] })).ok().unwrap();
+    fake.input_port(&key).unwrap().deliver(1_000, &[0x90, 60, 100]);
+    worker.step();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while out.lock().unwrap().status().stale_echo == 0 {
+        assert!(std::time::Instant::now() < deadline, "the stale note-on was not dropped");
+        std::thread::sleep(std::time::Duration::from_millis(1));
+    }
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    assert_eq!(out_fake.sent(&out_key), [vec![0x90, 61, 100], vec![0x80, 61, 64]], "no note-on after the release");
 }

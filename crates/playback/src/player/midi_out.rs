@@ -38,6 +38,8 @@ const LATE_NS: u64 = 2_000_000;
 const CLAMP_CAP_NS: u64 = 2_000_000_000;
 /// Destinations in one table; tracks beyond it get no external output.
 pub const MAX_DESTINATIONS: usize = 256;
+/// Slots in the control queue to the output thread.
+const CONTROL: usize = 64;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Kind {
@@ -66,7 +68,9 @@ pub struct OutEvent {
     pub len: u8,
     /// `Release` only: the mix's delay compensation A / r. A bare MIDI-out destination releases
     /// at `at_ns + delay_ns`, with its notes; one holding an External Instrument at `at_ns`
-    /// (ADR 0020 decision 2).
+    /// (ADR 0020 decision 2). On an echo `Message` the same word is its route generation
+    /// ([`Producer::echo_generation`], read before the route check): nonzero, and the output
+    /// thread drops it when that track's echo was released since. 0 means untagged, always sent.
     pub delay_ns: u64,
 }
 
@@ -95,6 +99,10 @@ struct Counters {
     unsent: AtomicU64,
     /// Sends from this thread while marked as an audio thread. Must stay 0.
     audio_thread_sends: AtomicU64,
+    /// Echo events dropped because their route was revoked and released after the route check.
+    stale_echo: AtomicU64,
+    /// Echo route revocations so far; the echo route generation is this plus 1 (never 0).
+    echo_revocations: AtomicU64,
 }
 
 /// The producing end of a ring: the audio thread's, or the ingress worker's for echo.
@@ -116,6 +124,14 @@ impl Producer {
             self.counters.dropped_releases.fetch_add(1, Ordering::Relaxed);
         }
         false
+    }
+
+    /// The current echo route generation, nonzero. The ingress worker reads it before it checks
+    /// a route and stamps the echo event with it (`OutEvent::delay_ns`): a revocation between that
+    /// check and the push makes the event older than the release, and the output thread drops it.
+    #[must_use]
+    pub fn echo_generation(&self) -> u64 {
+        self.counters.echo_revocations.load(Ordering::Acquire) + 1
     }
 }
 
@@ -201,6 +217,8 @@ pub struct OutputStatus {
     pub max_late_ns: u64,
     pub unsent: u64,
     pub audio_thread_sends: u64,
+    /// Echo events dropped by route generation (a note-on that lost the race with a release).
+    pub stale_echo: u64,
     pub error: Option<String>,
 }
 
@@ -218,13 +236,31 @@ enum Control {
     /// All notes off now on every open destination (Stop and the panic button, from Main).
     Panic,
     /// An echo route of this track was revoked: end every note and pedal its echo holds.
-    ReleaseEcho(TrackId),
+    /// `generation` is the route generation after the revocation: echo events of this track
+    /// stamped with an older one are dropped.
+    ReleaseEcho {
+        track: TrackId,
+        generation: u64,
+    },
 }
 
 #[derive(Default)]
 struct Shared {
     stop: AtomicBool,
     finished: AtomicBool,
+    /// A panic Main could not queue (control queue full): the thread honors it as soon as it
+    /// drains, so Stop and All Notes Off always release.
+    panic_pending: AtomicBool,
+    /// `releases` holds echo releases Main could not queue.
+    releases_pending: AtomicBool,
+    /// (track, generation) pairs, one per track (the newest generation). Main writes, the
+    /// output thread swaps the vector out with its own preallocated one.
+    releases: Mutex<Vec<(u64, u64)>>,
+    /// Tests: holds the thread away from its queues, as a driver call that does not return would.
+    #[cfg(test)]
+    stall: AtomicBool,
+    #[cfg(test)]
+    stalled: AtomicBool,
     status: Mutex<(Vec<PortInfo>, Vec<TrackOutput>, Option<String>)>,
 }
 
@@ -255,14 +291,15 @@ impl Out {
         let counters = Arc::new(Counters::default());
         let (playback_tx, playback_rx) = rtrb::RingBuffer::new(QUEUE);
         let (echo_tx, echo_rx) = rtrb::RingBuffer::new(QUEUE);
-        let (control, receive) = mpsc::sync_channel(64);
+        let (control, receive) = mpsc::sync_channel(CONTROL);
+        let shared = Shared { releases: Mutex::new(Vec::with_capacity(MAX_DESTINATIONS)), ..Shared::default() };
         (
             Self {
                 control,
                 receive: Some(receive),
                 rings: Some((playback_rx, echo_rx)),
                 counters: Arc::clone(&counters),
-                shared: Arc::new(Shared::default()),
+                shared: Arc::new(shared),
                 thread: None,
                 last: None,
                 error: None,
@@ -315,19 +352,36 @@ impl Out {
     /// Ends every note and pedal live input holds on `track`'s destination. Main calls it when
     /// it revokes an echo route, since the key-up can no longer arrive.
     pub fn release_echo(&self, track: TrackId) {
-        if self.control.try_send(Control::ReleaseEcho(track)).is_ok() {
+        // The new generation first: echo events checked against the old route and pushed after
+        // the release are older than it and get dropped.
+        let generation = self.counters.echo_revocations.fetch_add(1, Ordering::AcqRel) + 2;
+        if self.control.try_send(Control::ReleaseEcho { track, generation }).is_ok() {
             self.wake();
-        } else {
-            // The queue is full of unprocessed updates; Stop or the panic still releases.
-            log::warn!("MIDI output control queue is full; echo release for track {} skipped", track.0);
+            return;
         }
+        // The queue is full of unprocessed updates (the thread is stuck in a driver). The release
+        // is not skipped: it stays pending per track and the thread honors it as soon as it
+        // drains. The warning is for the diagnostic log; this is Main, not an RT thread.
+        log::warn!("MIDI output control queue is full; echo release for track {} is pending until the thread drains", track.0);
+        {
+            let mut releases = self.shared.releases.lock().unwrap_or_else(PoisonError::into_inner);
+            match releases.iter_mut().find(|(t, _)| *t == track.0) {
+                Some(entry) => entry.1 = entry.1.max(generation),
+                None => releases.push((track.0, generation)),
+            }
+            self.shared.releases_pending.store(true, Ordering::Release);
+        }
+        self.wake();
     }
 
-    /// All notes off on every open destination, now.
+    /// All notes off on every open destination, now. Never skipped: with the control queue full
+    /// it stays pending and the thread honors it as soon as it drains.
     pub fn panic(&self) {
-        if self.control.try_send(Control::Panic).is_ok() {
-            self.wake();
+        if self.control.try_send(Control::Panic).is_err() {
+            log::warn!("MIDI output control queue is full; all notes off is pending until the thread drains");
+            self.shared.panic_pending.store(true, Ordering::Release);
         }
+        self.wake();
     }
 
     fn wake(&self) {
@@ -350,6 +404,7 @@ impl Out {
             max_late_ns: c.max_late_ns.load(Ordering::Relaxed),
             unsent: c.unsent.load(Ordering::Relaxed),
             audio_thread_sends: c.audio_thread_sends.load(Ordering::Relaxed),
+            stale_echo: c.stale_echo.load(Ordering::Relaxed),
             error: error.or_else(|| self.error.clone()),
         }
     }
@@ -427,6 +482,8 @@ struct Track {
     /// the synth would hold the note. Events bunch at the old instant instead, for at most the
     /// drop in A. Reset by Stop, Panic and a destination change; set by a wrap or locate release.
     last: u64,
+    /// The oldest echo route generation still accepted: raised by an echo release.
+    echo_floor: u64,
 }
 
 struct Worker {
@@ -445,6 +502,9 @@ struct Worker {
     seq: u64,
     error: Option<String>,
     dirty: bool,
+    /// Preallocated stand-in for `Shared::releases`, swapped with it so honoring a pending
+    /// release never allocates.
+    releases: Vec<(u64, u64)>,
 }
 
 fn origin_index(origin: Origin) -> usize {
@@ -484,6 +544,7 @@ impl Worker {
             seq: 0,
             error: None,
             dirty: true,
+            releases: Vec::with_capacity(MAX_DESTINATIONS),
         }
     }
 
@@ -493,6 +554,14 @@ impl Worker {
 
     fn run(&mut self) {
         while !self.shared.stop.load(Ordering::Acquire) {
+            #[cfg(test)]
+            if self.shared.stall.load(Ordering::Acquire) {
+                self.shared.stalled.store(true, Ordering::Release);
+                while self.shared.stall.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                self.shared.stalled.store(false, Ordering::Release);
+            }
             self.control();
             self.drain();
             if self.last_poll.is_none_or(|last| last.elapsed() >= PORT_POLL) {
@@ -542,29 +611,52 @@ impl Worker {
         loop {
             match self.receive.try_recv() {
                 Ok(Control::Destinations(destinations)) => self.set_destinations(destinations),
-                Ok(Control::Panic) => {
-                    self.pending.retain(|p| p.origin == Origin::Echo);
-                    self.release_all(true);
-                    self.tracks.iter_mut().for_each(|t| t.last = 0);
-                }
-                Ok(Control::ReleaseEcho(track)) => {
-                    // Echo the route already pushed goes out first, so its note-on cannot follow
-                    // the release.
-                    self.drain();
-                    self.send_due();
-                    if let Some(i) = self.tracks.iter().position(|t| t.destination.track == track)
-                        && let Some(mut t) = self.take_track(i)
-                    {
-                        self.release_track(&mut t, Some(Origin::Echo), false);
-                        self.put_track(i, t);
-                    }
-                }
+                Ok(Control::Panic) => self.panic_now(),
+                Ok(Control::ReleaseEcho { track, generation }) => self.release_echo(track.0, generation),
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.shared.stop.store(true, Ordering::Release);
                     break;
                 }
             }
+        }
+        // What Main could not queue while this thread was away.
+        if self.shared.panic_pending.swap(false, Ordering::AcqRel) {
+            self.panic_now();
+        }
+        if self.shared.releases_pending.swap(false, Ordering::AcqRel) {
+            {
+                let mut shared = self.shared.releases.lock().unwrap_or_else(PoisonError::into_inner);
+                std::mem::swap(&mut *shared, &mut self.releases);
+            }
+            let mut releases = std::mem::take(&mut self.releases);
+            for &(track, generation) in &releases {
+                self.release_echo(track, generation);
+            }
+            releases.clear();
+            self.releases = releases;
+        }
+    }
+
+    fn panic_now(&mut self) {
+        self.pending.retain(|p| p.origin == Origin::Echo);
+        self.release_all(true);
+        self.tracks.iter_mut().for_each(|t| t.last = 0);
+    }
+
+    /// An echo route of `track` was revoked: what it already pushed goes out first, so its
+    /// note-on cannot follow the release; then its notes and pedals end, and echo events stamped
+    /// with an older generation (checked against the route before the revocation, pushed after
+    /// it) are dropped from now on.
+    fn release_echo(&mut self, track: u64, generation: u64) {
+        self.drain();
+        self.send_due();
+        if let Some(i) = self.tracks.iter().position(|t| t.destination.track.0 == track)
+            && let Some(mut t) = self.take_track(i)
+        {
+            t.echo_floor = t.echo_floor.max(generation);
+            self.release_track(&mut t, Some(Origin::Echo), false);
+            self.put_track(i, t);
         }
     }
 
@@ -595,7 +687,7 @@ impl Worker {
                 continue;
             }
             let port = self.port_index(&d.port);
-            kept.push(Track { destination: d, port, held: Held::default(), used: 0, last: 0 });
+            kept.push(Track { destination: d, port, held: Held::default(), used: 0, last: 0, echo_floor: 0 });
         }
         self.tracks = kept;
         // Close ports no destination uses any more.
@@ -763,6 +855,10 @@ impl Worker {
         }
         while let Ok(event) = self.echo.pop() {
             if event.kind == Kind::Message {
+                if event.delay_ns != 0 && self.tracks.iter().any(|t| t.destination.track.0 == event.track && event.delay_ns < t.echo_floor) {
+                    self.counters.stale_echo.fetch_add(1, Ordering::Relaxed);
+                    continue;
+                }
                 // Live input goes out now, ahead of anything scheduled later.
                 self.schedule(now, Origin::Echo, event);
             }
