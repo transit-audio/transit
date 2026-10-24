@@ -36,7 +36,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Quantize...",
             ["Event", "MIDI Operations"],
             Some("Alt+0"),
-            "{grid?: 1/16 | ticks, strength?: 100, swing?: 0, clips?}",
+            "{grid?: 1/16 | ticks, strength?: 0..100, swing?: 0..100 (100 delays alternate lines by grid/3), quantize_ends?: false, clips?, indices?: [note index] (one clip only)}",
             has_selection,
             quantize
         ),
@@ -252,8 +252,44 @@ fn quantize(e: &mut Engine, p: &Value) -> Result<Value> {
         grid_ticks: grid_ticks(p),
         strength: (f32_or(p, "strength", 100.0) / 100.0).clamp(0.0, 1.0),
         swing: (f32_or(p, "swing", 0.0) / 100.0).clamp(0.0, 1.0),
+        quantize_ends: match p.get("quantize_ends") {
+            None => false,
+            Some(v) => v.as_bool().ok_or_else(|| bad("event.quantize", "`quantize_ends` must be a boolean"))?,
+        },
         ..QuantizeOptions::default()
     };
+    if let Some(indices) = p.get("indices") {
+        let id = "event.quantize";
+        let clips = clip_ids_param(e, p);
+        if clips.len() != 1 {
+            return Err(bad(id, "note indices require exactly one clip"));
+        }
+        let mut indices = indices
+            .as_array()
+            .ok_or_else(|| bad(id, "`indices` must be an array"))?
+            .iter()
+            .map(|v| v.as_u64().and_then(|i| usize::try_from(i).ok()).ok_or_else(|| bad(id, "invalid note index")))
+            .collect::<Result<Vec<_>>>()?;
+        indices.sort_unstable();
+        indices.dedup();
+        let Some((_, clip)) = e.session().find_clip(clips[0]) else { return Err(bad(id, "clip not found")) };
+        let ClipContent::Midi { sequence } = &clip.content else { return Err(bad(id, "not a MIDI clip")) };
+        if indices.iter().any(|i| *i >= sequence.notes.len()) {
+            return Err(bad(id, "note index out of range"));
+        }
+        let mut notes: Vec<_> = indices.iter().map(|i| sequence.notes[*i]).collect();
+        soundcraft_midi::ops::quantize(&mut notes, &opts);
+        if notes.iter().zip(&indices).any(|(n, i)| *n != sequence.notes[*i])
+            && let Some(clip) = e.session_mut().find_clip_mut(clips[0])
+            && let ClipContent::Midi { sequence } = &mut clip.content
+        {
+            for (index, note) in indices.iter().zip(&notes) {
+                sequence.notes[*index] = *note;
+            }
+            sequence.sort();
+        }
+        return Ok(json!({"notes": notes.len(), "selected_notes": notes}));
+    }
     midi_op(e, p, move |n| soundcraft_midi::ops::quantize(n, &opts))
 }
 
