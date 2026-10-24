@@ -383,7 +383,7 @@ impl Recorder {
         let channels = usize::from(format.channels).max(1);
         let ring = CaptureRing::new((format.rate as usize).saturating_mul(channels * RING_SECONDS).min(1 << 25));
         let shared = Arc::new(Shared::new(ring));
-        let monitor = InputRing::new(usize::from(format.channels), format.rate);
+        let monitor = InputRing::with_pairing(usize::from(format.channels), format.rate, backend.capture_precedes_render(endpoint));
         let (callback_clock, clock) = crate::device_clock::stream_clock(crate::device_clock::Direction::Input, format.rate)
             .map_err(|error| ab::OpenError::Other(error.into()))?;
         let (capture, on_error) = capture_callbacks(&shared, &monitor, callback_clock, progress, loop_probe);
@@ -1436,6 +1436,30 @@ impl MonitorReader {
         self.removed_frames.wrapping_sub(self.history_frames() as u64)
     }
 
+    /// Whole input frames queued now.
+    fn queued_frames(&self) -> usize {
+        self.queue.slots() / self.left.len()
+    }
+
+    /// Discard the oldest queued frames, and the interpolation history in front of them, until at
+    /// most `keep` remain queued. Returns the frames discarded. One queue commit: a pointer move.
+    fn align(&mut self, keep: usize) -> usize {
+        let ch = self.left.len();
+        let excess = self.queued_frames().saturating_sub(keep);
+        if excess == 0 {
+            return 0;
+        }
+        if let Ok(chunk) = self.queue.read_chunk(excess * ch) {
+            chunk.commit_all();
+        }
+        self.removed_frames = self.removed_frames.wrapping_add(excess as u64);
+        let held = self.history_frames();
+        self.left_valid = false;
+        self.right_valid = false;
+        self.phase = 0.0;
+        excess + held
+    }
+
     /// Discard only the frames present at entry, never chase a running producer.
     fn clear(&mut self) -> usize {
         let ch = self.left.len();
@@ -1491,14 +1515,28 @@ impl MonitorReader {
     }
 }
 
+/// Read blocks of input left queued after the read that aligns the ring (see
+/// [`InputRing::align_on_next_read`]) when one device callback delivers the capture block and
+/// then asks for the render block (native ASIO duplex: one `bufferSwitch`). The aligning read
+/// always finds this cycle's capture already queued, so it needs no slack: the backlog B is 0.
+pub const ALIGNED_BACKLOG_BLOCKS_PAIRED: usize = 0;
+/// The same when capture and render run on separate callbacks (WASAPI's capture and render
+/// loops, cpal, an input on another device). An output callback can come before the input
+/// callback of the same period, so one read block of slack keeps that ordering jitter from
+/// underrunning. B is then at most one read block, fixed when the ring aligns.
+pub const ALIGNED_BACKLOG_BLOCKS_UNPAIRED: usize = 1;
+
 /// A bounded interleaved FIFO for input monitoring. The input and output roles have
 /// separate locks, so they never exclude one another. Each callback only tries its own
 /// role lock; contention from a second caller or a control-side clear is counted.
 ///
 /// Normal callback partitioning never discards audio. Full storage rejects whole new
 /// frames and requests a counted flush on the next read. A smaller stall can leave a
-/// persistent backlog, exposed by [`Self::buffered_input_frames`]; there is no automatic
-/// latency-target policy. Rate conversion is currently linear interpolation: it is
+/// persistent backlog, exposed by [`Self::buffered_input_frames`]. The one latency policy is
+/// alignment (K22): the first read after a plan adopts the ring, and after any
+/// [`Self::clear_monitor`], discards the oldest queued frames so that only the read itself plus
+/// [`ALIGNED_BACKLOG_BLOCKS_PAIRED`] (or `_UNPAIRED`) read blocks remain, whatever queued while
+/// nothing was reading. Otherwise the reader never trims the FIFO. Rate conversion is currently linear interpolation: it is
 /// not bandlimited SRC or compensation for independent device-clock drift.
 pub struct InputRing {
     producer: Mutex<rtrb::Producer<f32>>,
@@ -1513,6 +1551,10 @@ pub struct InputRing {
     rate: u32,
     overrun_pending: std::sync::atomic::AtomicBool,
     clear_pending: std::sync::atomic::AtomicBool,
+    /// The next read that finds input discards the backlog down to the target (K22).
+    align_pending: std::sync::atomic::AtomicBool,
+    /// Read blocks kept queued at alignment: [`ALIGNED_BACKLOG_BLOCKS_PAIRED`] or `_UNPAIRED`.
+    aligned_backlog_blocks: usize,
     counters: MonitorCounters,
 }
 
@@ -1520,7 +1562,15 @@ impl InputRing {
     /// Prepare up to half a second of storage, capped at 16 MiB of sample data. Channels
     /// follow CPAL's u16 domain (zero normalizes to one); an extreme format gets a shorter
     /// FIFO, not an unbounded allocation. Interpolation history adds two device frames.
+    /// Capture and render are taken to run on separate callbacks
+    /// ([`ALIGNED_BACKLOG_BLOCKS_UNPAIRED`]); see [`Self::with_pairing`].
     pub fn new(channels: usize, rate: u32) -> Arc<InputRing> {
+        Self::with_pairing(channels, rate, false)
+    }
+
+    /// [`Self::new`], for a device whose one callback delivers the capture block and then asks
+    /// for the render block when `paired` ([`ALIGNED_BACKLOG_BLOCKS_PAIRED`]).
+    pub fn with_pairing(channels: usize, rate: u32, paired: bool) -> Arc<InputRing> {
         let ch = channels.clamp(1, usize::from(u16::MAX));
         let wanted = if rate == 0 { 24_000 } else { (rate as usize / 2).max(1) };
         let frames = wanted.min((1 << 22) / ch);
@@ -1553,6 +1603,8 @@ impl InputRing {
             rate,
             overrun_pending: std::sync::atomic::AtomicBool::new(false),
             clear_pending: std::sync::atomic::AtomicBool::new(false),
+            align_pending: std::sync::atomic::AtomicBool::new(false),
+            aligned_backlog_blocks: if paired { ALIGNED_BACKLOG_BLOCKS_PAIRED } else { ALIGNED_BACKLOG_BLOCKS_UNPAIRED },
             counters: MonitorCounters::default(),
         })
     }
@@ -1589,7 +1641,10 @@ impl InputRing {
     /// Control thread: discard queued/history frames if the reader is idle, otherwise
     /// request a flush at the next output call (including input arriving before that flush).
     /// Never waits for the reader: its callback unlock must not wake a blocked control waiter.
+    /// The next read that finds input then aligns ([`Self::align_on_next_read`]), so whatever
+    /// queued between this clear and that read does not stay in front of the reader.
     pub fn clear_monitor(&self) {
+        self.align_on_next_read();
         if let Ok(mut reader) = self.reader.try_lock() {
             self.clear_pending.swap(false, Ordering::AcqRel);
             let overrun = self.overrun_pending.swap(false, Ordering::AcqRel);
@@ -1599,6 +1654,13 @@ impl InputRing {
         } else {
             self.clear_pending.store(true, Ordering::Release);
         }
+    }
+
+    /// Ask the next read that finds queued input to discard the oldest frames first, leaving
+    /// that read plus the aligned backlog (K22). A plan calls this when it adopts the ring, and
+    /// [`Self::clear_monitor`] calls it. One atomic store: safe on the audio thread.
+    pub fn align_on_next_read(&self) {
+        self.align_pending.store(true, Ordering::Release);
     }
 
     /// Fill `out` (planar, at `session_rate`) with up to `frames` frames, converting from the
@@ -1628,6 +1690,13 @@ impl InputRing {
             self.counters.recoveries.fetch_add(u64::from(overrun), Ordering::Relaxed);
         }
         let step = if self.rate == 0 || session_rate == 0 { 1.0 } else { f64::from(self.rate) / f64::from(session_rate) };
+        // Alignment waits for a read that has room and finds input: a read before the device's
+        // input runs leaves it pending rather than aligning an empty ring.
+        if frames > 0 && reader.queued_frames() > 0 && self.align_pending.swap(false, Ordering::AcqRel) {
+            let read = (frames as f64 * step).ceil() as usize;
+            let keep = read.saturating_mul(1 + self.aligned_backlog_blocks);
+            self.counters.discarded.fetch_add(reader.align(keep) as u64, Ordering::Relaxed);
+        }
         let written = reader.render(out, frames, step);
         self.retired_frames.store(reader.retired_input(), Ordering::Release);
         self.counters.underrun.fetch_add((frames - written) as u64, Ordering::Relaxed);

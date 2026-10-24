@@ -230,6 +230,10 @@ impl Backend for FakeBackend {
     fn capture_with_render(&self, _render: &Endpoint) -> bool {
         self.duplex && self.capture_channels > 0
     }
+    /// A duplex fake is pumped as one driver cycle: the test delivers the capture, then the render.
+    fn capture_precedes_render(&self, endpoint: &Endpoint) -> bool {
+        self.capture_with_render(endpoint)
+    }
     fn channel_names(&self, _endpoint: &Endpoint, direction: Direction) -> Vec<String> {
         match direction {
             Direction::Input => self.names.0.clone(),

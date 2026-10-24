@@ -540,6 +540,14 @@ pub trait Backend {
     /// Whether the input must open together with `render` on its own device, before either runs
     /// (ASIO: one driver, one set of buffers for both directions).
     fn capture_with_render(&self, render: &Endpoint) -> bool;
+    /// Whether one device callback delivers `endpoint`'s capture block and then asks for its
+    /// render block, so a reader in the render callback always finds the same cycle's capture
+    /// already queued (native ASIO: one `bufferSwitch` runs the capture callback, then the render
+    /// callback). The live-input ring then aligns with no slack (K22). Separate capture and render
+    /// callbacks (WASAPI's two loops, cpal) answer false.
+    fn capture_precedes_render(&self, _endpoint: &Endpoint) -> bool {
+        false
+    }
     /// The input format `endpoint` offers at `rate` (else its default), for the I/O map and a
     /// duplex open.
     fn capture_format(&self, endpoint: &Endpoint, rate: Option<u32>) -> Result<Format, String>;

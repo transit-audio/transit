@@ -609,6 +609,11 @@ impl ab::Backend for AsioBackend {
         render.handle::<AsioEndpoint>().is_some()
     }
 
+    /// Each buffer switch runs the capture callback, then the render callback (`engine.rs`).
+    fn capture_precedes_render(&self, endpoint: &ab::Endpoint) -> bool {
+        endpoint.handle::<AsioEndpoint>().is_some()
+    }
+
     fn capture_format(&self, endpoint: &ab::Endpoint, rate: Option<u32>) -> Result<ab::Format, String> {
         let device = endpoint.handle::<AsioEndpoint>().ok_or("the endpoint is not an ASIO driver")?;
         format_of(&device.info, ab::Direction::Input, rate)

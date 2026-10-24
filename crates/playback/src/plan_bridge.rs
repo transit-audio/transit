@@ -601,6 +601,14 @@ impl Audio {
             counters.admitted.store(env.plan.plan().id().generation.get(), Ordering::Release);
             if mix.adopt_plan(&mut env.plan) == Adoption::Adopted {
                 std::mem::swap(buffers, &mut env.buffers);
+                // A live input this plan attaches (not the one the displaced plan already read)
+                // aligns on its first read, so the frames that queued before it are not a
+                // permanent delay in front of the reader (K22). One atomic store.
+                if let Some(input) = &buffers.input
+                    && !env.buffers.input.as_ref().is_some_and(|old| Arc::ptr_eq(old, input))
+                {
+                    input.align_on_next_read();
+                }
                 std::mem::swap(&mut mix.input, &mut buffers.input_storage);
                 // input_storage belongs to the displaced plan and travels back in the envelope.
                 std::mem::swap(&mut buffers.input_storage, &mut env.buffers.input_storage);
