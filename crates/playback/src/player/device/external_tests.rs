@@ -135,8 +135,8 @@ fn live_input_on_an_armed_external_track_is_echoed_without_an_instrument() {
     until("the echoed release", || fake.sent(&key).contains(&vec![0x81, 60, 0]));
 }
 
-/// Refutation B1, through the Player: a key and the sustain pedal held through the echo when the
-/// track stops echoing (`disarm`) or its controller is unplugged (`unplug`).
+/// The MIDI Monitor through the Player (#91): input on a routed and an unrouted port, and the echo
+/// as sent.
 #[test]
 fn the_midi_monitor_sees_input_routed_or_not_and_every_message_sent() {
     use crate::player::monitor::{Dir, MonitorEvent};
@@ -189,6 +189,8 @@ fn the_midi_monitor_sees_input_routed_or_not_and_every_message_sent() {
     assert_eq!(events.len(), before);
 }
 
+/// Refutation B1, through the Player: a key and the sustain pedal held through the echo when the
+/// track stops echoing (`disarm`) or its controller is unplugged (`unplug`).
 fn held_echo_is_released(unplug: bool) {
     let fake = Fake::default();
     let (mut s, track, key) = session(&fake);
