@@ -125,8 +125,7 @@ An instrument track's instrument slot can hold an External Instrument (`external
 `Insert::external`): a hardware synth played over MIDI, its audio returned on an input path. The
 MIDI side is this page's destination, unchanged: `Track::midi_output` holds the port and channel,
 and every safety rule above applies. The device holds the return path, a gain on the return and
-the latency `manual_ms` (slice 1: set by hand on the card; Measure and a per-machine table come in
-slice 2).
+the latency `manual_ms` set by hand; the measured latency is per machine (Measure, below).
 
 - **One timing knob.** While the device is on the track, the destination offset is held at 0:
   `instrument.external` writes 0, `midi.output` refuses a nonzero offset there, and playback reads
@@ -134,7 +133,7 @@ slice 2).
   offset row reads "Latency is set on the External Instrument".
 - **Compensation, not early sends.** The device track's notes go out at P(R(S)), the stamp
   above without A (ADR 0020 decision 2: offset 0, not early, not delayed). The strip reads the
-  return from the live input and reports C = round(manual_ms × r / 1000) frames at its head, where
+  return from the live input and reports C frames at its head (the lookup below), where
   a latent instrument's latency counts, so delay compensation aligns the return at Main like a
   hardware insert's round trip (`crates/mix/src/external.rs`). C is part of A, so the rest of the
   mix (and every bare MIDI-out track) waits for the synth. Were the device's notes delayed by A
@@ -147,7 +146,46 @@ slice 2).
   when it changes. The card
   says which: "No audio device", "MODEL D missing: notes are not sent", "Return In 1 is not on
   this interface", "Needs a duplex device", "Not measured: notes sound late by the round trip",
-  else "Manual: 19.5 ms".
+  else where C comes from: "Manual: 19.5 ms", "Measured 19.9 ms on 2026-10-24 at 48 kHz/64", or
+  in amber "Measured at 48 kHz / 64, now 44.1 kHz / 128: measure again".
+- **Measure (slice 2, decision 3).** The card's Measure button (and `instrument.measure_external
+  {track, action?: start|cancel|keep|status}`) plays one unmeasured warm-up note (200 ms), then 8
+  notes 1500 ms apart (note 60, velocity 100, held 100 ms) on the track's channel (channel 1 when
+  it sends as recorded), and times each one's onset on the return: about 13 s, never blocking; the
+  card shows "Measuring… 3/8" with Cancel. The audio thread does the sending and the recording
+  (`crates/playback/src/external_probe.rs`, `ExtProbe`, armed by `Player::start_external_measure`):
+  at the first block at or after a note's due frame it pushes the note-on onto the playback ring
+  stamped P(R0), as a clip note on the track would be, and remembers R0; it records the return the
+  plan reads for each block at its plan frame, as the hardware insert probe does. Each note's
+  latency is R1 - R0 with R1 the onset; C is the median. That is decision 2's C, in plan frames.
+  The detector and the trial summary are the bench's, moved to `soundcraft_playback::onset`
+  (envelope over 0.25 ms, threshold 12 dB over the lowest floor, refined to 10 percent of the
+  attack peak); `tools/audio-bench` imports them. The stamp needs the output map: with no valid
+  map Measure is refused ("Timing approximate: device clock not settled").
+- **Measure refusals.** Before it starts: "No audio device", "Needs a duplex device", "Stop the
+  transport to measure.", "Disarm the track to measure: live input would play the synth.", the
+  port missing or not chosen, the return not on this interface, the clock not settled, "A
+  measurement is already running." The transport cannot start during it. After it: fewer than
+  half the notes (or fewer than 3) with an onset within 1 s refuses with "No sound came back on
+  In 1 within 1 s. …"; a reference floor or a pre-note window above -20 dBFS, or more than half
+  the notes 6 dB over the floor (the run's schedule is fixed, so this stands in for the bench's
+  retry), refuses with "The return is not quiet before the note: …"; any attack sample at or above
+  -0.5 dBFS refuses with "The return clipped: …". A spread (standard deviation) above 1.0 ms is
+  shown with its warning and stored only on Keep. Nothing is stored for a refusal.
+- **Note safety in Measure.** Every exit sends the note-off and All Notes Off (CC 123) on the
+  channel through the output thread: at the end of the run and on Cancel the audio thread pushes
+  them onto the playback ring; on Cancel and on a device loss control also asks the output thread
+  to release the track (`Out::release_track`: drops its scheduled playback, ends what it holds,
+  Sustain off and All Notes Off), since the audio thread may not run again; a device reopen
+  cancels it, and the old Player's output thread releases everything as it exits.
+- **Storage and lookup (decisions 4 and 5).** `IoMap.external_latency` in `ui.json`, per device,
+  next to and never merged with `hardware_latency`: `{port_id, port_name, ret, rate, buffer,
+  frames, spread_frames, notes, measured_at}`, keyed by (port id, else name; return; rate;
+  buffer). The open device's buffer reaches the plan as `IoMap.buffer` (set by `Player::set_io`,
+  not saved). C is, in order: `manual_ms` at the plan rate (it wins while set; the measured value
+  is kept); the measurement of the exact key; the newest measurement of the same port and return
+  at another rate or buffer (another rate rescaled by time, 1061 at 48 kHz is 975 at 44.1 kHz),
+  labeled "measure again"; else 0 ("Not measured").
 - **Renders.** The synth only sounds in real time. An offline bounce, stems or bounce by path
   with an unfrozen External Instrument is refused unless the caller passes `without_external`
   (the studio's Bounce dialog asks: "Render without it" or Cancel; the status names the tracks
@@ -181,4 +219,13 @@ return, so the onset lands on the click; a bare track behind a latent master ins
 `an_external_instruments_notes_are_not_stamped_with_the_mixs_delay`, fake clock), the
 deadline-order and per-kind release tests in `crates/playback/src/player/midi_out/tests.rs`, the
 missing-port, failed-port and no-MIDI tests in `crates/playback/src/player/device/external_tests.rs`, `crates/engine/src/cmd/external_instrument.rs`,
-`crates/ui-studio/src/external_instrument.rs`.
+`crates/ui-studio/src/external_instrument.rs`. Measure: `crates/playback/src/onset.rs` (the
+detector, moved from the bench with its tests), `crates/playback/src/external_probe.rs` (the run
+block by block with a scripted synth: median, warm-up not counted, spread, no sound, drone,
+clipping, Cancel), `crates/playback/src/player/device/external_measure_tests.rs` (through the
+Player with a fake duplex device and a fake MIDI port: the median is C, the port gets nine notes and
+All Notes Off off the audio thread; Cancel and a device loss release the note; the refusals),
+`crates/model/src/io_map.rs` (the key and the lookup), `crates/mix/src/external.rs` (C in the
+plan), `crates/engine/src/cmd/external_instrument.rs`, `crates/ui-studio/src/external_measure.rs`
+and `external_measure_tests.rs` (the card: progress, Cancel, the stored key, manual wins, a buffer
+change and a rate change, the refusal texts, Keep).
