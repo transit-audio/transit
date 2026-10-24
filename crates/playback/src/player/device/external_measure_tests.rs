@@ -209,8 +209,15 @@ fn cancel_releases_the_held_note_and_measures_nothing() {
     let rig = rig(false, 0);
     // Into the second measured note's hold: 100 ms + 2 × 1500 ms + 40 ms after arming.
     let held = ARM_AT + (48 * 3140) / BLOCK;
+    let ons = |sent: &[Vec<u8>]| sent.iter().filter(|m| **m == vec![0x92, 60, 100]).count();
     let run = pump(&rig, held + 20, |i, p| {
         if i == held {
+            // The pump runs far ahead of real time and the output thread sends on its own
+            // schedule, so what reached the port by this block is the thread's timing, not the
+            // Measure's (E52). Cancel once the warm-up and both measured notes are on the port:
+            // the second is then held at the synth, which is what Cancel must release.
+            until("the warm-up and two measured notes are sent", || ons(&messages(&rig)) == 3);
+            assert!(!released(&messages(&rig)), "{:x?}", messages(&rig));
             p.cancel_external_measure();
         }
         i > held + 10
@@ -218,10 +225,7 @@ fn cancel_releases_the_held_note_and_measures_nothing() {
     assert!(run.result.is_none(), "nothing measured");
     assert!(!rig.player.external_measure_running());
     until("the note-off and All Notes Off after the last note-on", || released(&messages(&rig)));
-    // The warm-up and the first note went out; the second either went out and was released, or
-    // was still waiting for its instant and was dropped with the track's scheduled playback.
-    let ons = messages(&rig).iter().filter(|m| **m == vec![0x92, 60, 100]).count();
-    assert!((2..=3).contains(&ons), "{:x?}", messages(&rig));
+    assert_eq!(ons(&messages(&rig)), 3, "no note after the Cancel: {:x?}", messages(&rig));
     assert!(rig.player.external_measure_result().is_none());
 }
 

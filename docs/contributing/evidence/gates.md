@@ -41,3 +41,6 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
 - Tests create unique temp dirs: process id plus a per-process counter (or `TemporaryAutosave`),
   never a fixed name or a clock-only suffix; concurrent tests share a process and a clock tick
   (E51, `../../escapes/E51-test-temp-dirs-collided-in-one-process.md`).
+- A test that pumps a fake device faster than real time reads another thread's output (the MIDI
+  output thread, a worker) only after waiting for it, never at a fixed block count
+  (E52, `../../escapes/E52-measure-cancel-test-assumed-the-output-threads-progress.md`).
