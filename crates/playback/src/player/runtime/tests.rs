@@ -688,6 +688,7 @@ fn play(plans: &mut plan_bridge::Audio, track: soundcraft_model::TrackId) -> f32
 
 /// A frame may take this long at most while a plug-in loads. Load-tolerant: a starved runner can
 /// stall a frame, but one that waited for the plug-in takes its full 500 ms.
+// FRAME_BUDGET is a stall bound, not a latency measurement (#87, E49): left as is by the sweep.
 const FRAME_BUDGET: std::time::Duration = std::time::Duration::from_millis(250);
 
 /// Runs 5 ms "frames" of `service_with` until nothing is loading; returns the frames and the
@@ -777,7 +778,7 @@ fn a_slow_instance_is_made_on_the_host_thread_while_frames_advance_and_the_plan_
 /// Renders 512-frame blocks on a thread standing in for the audio callback while the plug-in host
 /// thread sits in a 500 ms plug-in factory and the control thread polls. Returns the blocks that
 /// began and ended inside the creation and the worst block time.
-fn render_while_an_instance_is_made() -> (u32, std::time::Duration) {
+fn render_while_an_instance_is_made() -> (u32, std::time::Duration, std::time::Duration) {
     let (mut runtime, ports, _, _) = with_instrument_requested();
     let made = Arc::new(AtomicUsize::new(0));
     let slow = slow_factory(std::time::Duration::from_millis(500), &made);
@@ -802,36 +803,42 @@ fn render_while_an_instance_is_made() -> (u32, std::time::Duration) {
         let in_factory = Arc::clone(&in_factory);
         let mut plans = ports.plans;
         std::thread::spawn(move || {
-            let (mut during, mut worst) = (0u32, std::time::Duration::ZERO);
+            let (mut during, mut worst, mut max_gap) = (0u32, std::time::Duration::ZERO, std::time::Duration::ZERO);
+            let mut last = std::time::Instant::now();
             while !stop.load(Ordering::Acquire) {
                 let creating_before = in_factory.load(Ordering::Acquire);
                 let t = std::time::Instant::now();
+                max_gap = max_gap.max(t.duration_since(last));
+                last = t;
                 plans.service(&mut plan_bridge::callback_scope(), true);
                 plans.render(0, 512);
                 worst = worst.max(t.elapsed());
                 during += u32::from(creating_before && in_factory.load(Ordering::Acquire));
                 std::thread::sleep(std::time::Duration::from_micros(2_000));
             }
-            (during, worst, plans)
+            (during, worst, max_gap, plans)
         })
     };
     frames_until_loaded(&mut runtime, &third_party, &factory);
     std::thread::sleep(std::time::Duration::from_millis(50));
     stop.store(true, Ordering::Release);
-    let (during, worst, plans) = audio.join().unwrap();
+    let (during, worst, max_gap, plans) = audio.join().unwrap();
     ports.plans = plans;
     runtime.retire(ports);
-    (during, worst)
+    (during, worst, max_gap)
 }
 
 /// The claim: the creation path shares no lock with the callback. Evidence that does not depend on
-/// the scheduler: the callback kept completing blocks for the whole 500 ms creation (about 200 at
-/// an ideal 2.5 ms per block; a block waiting on the creation would leave a handful). The strict
-/// timing check is the ignored hardware-timing companion below.
+/// the scheduler: the callback completed blocks during the 500 ms creation, and no gap between
+/// blocks approached it. A callback waiting on the creation completes one block and then sits for
+/// the full 500 ms. Not a throughput floor (#87, E49): a loaded runner can starve the loop to a
+/// few blocks, so the bounds are at least 2 blocks and a 250 ms stall bound on the longest gap.
+/// The strict timing check is the ignored hardware-timing companion below.
 #[test]
 fn the_audio_callback_keeps_rendering_while_an_instance_is_made() {
-    let (during, _) = render_while_an_instance_is_made();
-    assert!(during >= 20, "the callback completed only {during} blocks during the 500 ms creation");
+    let (during, _, max_gap) = render_while_an_instance_is_made();
+    assert!(during >= 2, "the callback completed only {during} blocks during the 500 ms creation");
+    assert!(max_gap < std::time::Duration::from_millis(250), "the callback stalled for {max_gap:?} (the creation takes 500 ms)");
 }
 
 /// Wall-clock companion for quiet hardware (hardware-evidence convention: timing budgets are
@@ -840,7 +847,7 @@ fn the_audio_callback_keeps_rendering_while_an_instance_is_made() {
 #[test]
 #[ignore = "wall-clock timing; run on an idle machine"]
 fn hardware_timing_the_audio_callback_keeps_its_budget_while_an_instance_is_made() {
-    let (during, worst) = render_while_an_instance_is_made();
+    let (during, worst, _) = render_while_an_instance_is_made();
     assert!(during >= 20, "the callback completed only {during} blocks during the 500 ms creation");
     assert!(worst < std::time::Duration::from_millis(10), "worst block {worst:?} against a 10.7 ms budget");
 }
@@ -1094,6 +1101,7 @@ fn a_save_during_a_modal_dialog_returns_within_its_deadline_and_names_the_plug_i
     let took = t.elapsed();
     assert!(states.is_empty(), "the busy plug-ins are left out, so their stored states are kept: {states:?}");
     // Load-tolerant: the deadline plus starved polls, well short of the 1.5 s dialog.
+    // Stall bound (#87, E49): the 400 ms margin over the deadline is far above jitter; left as is.
     assert!(took < deadline + std::time::Duration::from_millis(400), "the save waited {took:?}");
     let named = runtime.take_unrefreshed_states();
     assert_eq!(named.len(), 3, "one name per plug-in: {named:?}");
@@ -1119,6 +1127,7 @@ fn a_never_captured_instance_is_waited_for_even_during_a_modal_dialog() {
     let dialog = modal_dialog(&runtime, std::time::Duration::from_millis(1500));
     let t = std::time::Instant::now();
     assert!(runtime.capture_states(&session).unwrap().is_empty());
+    // Stall bound (#87, E49): see the save deadline check above.
     assert!(t.elapsed() < super::handles::DEFAULT_SAVE_DEADLINE + std::time::Duration::from_millis(400));
     assert_eq!(runtime.take_unrefreshed_states().len(), 1);
     wait_out(&dialog);

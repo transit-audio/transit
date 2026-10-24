@@ -177,6 +177,7 @@ mod tests {
         }
         let t = std::time::Instant::now();
         assert_eq!(super::hosted_info(id, super::INFO_WAIT), Err(super::Loading));
+        // Stall bound (#87, E49): the 300 ms margin over the wait is far above jitter; left as is.
         assert!(t.elapsed() < super::INFO_WAIT + std::time::Duration::from_millis(300), "waited {:?}", t.elapsed());
         assert!(super::loading(id), "the read carries on on the host thread");
         while matches!(stall.poll(), transit_plugin_host::Status::Waiting { .. }) {

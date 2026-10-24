@@ -938,7 +938,9 @@ fn a_stop_from_inside_the_callback_returns_at_once_and_the_host_stops_the_driver
     let stops = stops.lock().unwrap().clone();
     assert_eq!(stops.iter().map(|(d, _, _)| *d).collect::<Vec<_>>(), [ab::Direction::Output, ab::Direction::Input]);
     for (direction, took, driver_stopped) in &stops {
-        assert!(*took < Duration::from_millis(100), "{direction:?}: stop returned at once, not after the host: {took:?}");
+        // A stall bound (#87, E49): the deterministic signal is `driver_stopped` below; a stop that
+        // waited for the host would take the host's timeout, not scheduler jitter.
+        assert!(*took < Duration::from_millis(250), "{direction:?}: stop returned at once, not after the host: {took:?}");
         assert!(!driver_stopped, "{direction:?}: the driver's stop was not called from inside its buffer switch");
     }
     let calls = rig.observed.calls.lock().unwrap().clone();

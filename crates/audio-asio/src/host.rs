@@ -784,6 +784,7 @@ mod tests {
         let started = Instant::now();
         let e = a.clone();
         let err = host.call("load Sender", move |s| s.load(&e)).unwrap_err();
+        // Stall bound (#87, E49): 700 ms against a 200 ms host timeout; left as is.
         assert!(started.elapsed() < Duration::from_millis(700), "the caller did not wait for the driver: {:?}", started.elapsed());
         assert!(matches!(&err, ab::OpenError::Other(t) if t.contains("did not answer")), "{err:?}");
         let deadline = Instant::now() + Duration::from_secs(5);

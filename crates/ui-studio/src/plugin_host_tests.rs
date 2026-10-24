@@ -121,9 +121,10 @@ fn frames_advance_while_a_slow_plug_in_loads_and_the_slot_shows_loading_then_rea
     assert!(seen_loading, "the slot read as loading");
     assert!(!p.stuck(track, slot), "a 1 s creation is not stuck");
     assert!(took >= SLOW, "the fixture's synth is slow to make ({took:?})");
-    // Load-tolerant: a starved runner can stall a frame, but one that waited for the plug-in
-    // takes the fixture's full second.
-    assert!(loading_frames >= 10, "only {loading_frames} frames ran while the synth loaded ({took:?})");
+    // Load-tolerant (#87, E49): not a frame-rate floor. A frame that waited for the plug-in takes
+    // the fixture's full second and sees one poll, so more than one frame plus a stall bound on the
+    // longest frame (400 ms, below the 1 s creation) is the property.
+    assert!(loading_frames >= 2, "only {loading_frames} frames ran while the synth loaded ({took:?})");
     assert!(worst < Duration::from_millis(400), "a frame waited for the plug-in: {worst:?}");
     // Ready: its plan is adopted on the next blocks and it has an editor handle.
     let deadline = Instant::now() + Duration::from_secs(10);

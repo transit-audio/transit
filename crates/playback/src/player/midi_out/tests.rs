@@ -89,14 +89,19 @@ fn events_go_out_in_order_at_their_instant_plus_the_offset_and_never_from_the_au
     for (send, at) in sends.iter().zip([base, base + 5_000_000, base + 10_000_000, base + 10_000_000]) {
         let due = origin + Duration::from_nanos(at + 15_000_000);
         assert!(send.at >= due, "sent {:?} before its instant plus the 15 ms offset", due - send.at);
-        // A loose bound for a loaded CI machine; the jitter itself is documented, not asserted.
-        assert!(send.at - due < Duration::from_millis(50), "sent {:?} late", send.at - due);
+        // A stall bound, not a latency measurement: send jitter on a shared runner is load-dependent
+        // and the exact lateness is not the property (#87, E49). The deterministic checks are the
+        // thread's own counters below; a send that waited 250 ms is a stuck output thread.
+        assert!(send.at - due < Duration::from_millis(250), "sent {:?} late", send.at - due);
         assert_ne!(send.thread, audio, "a send ran on the audio thread");
         assert_ne!(send.thread, std::thread::current().id());
     }
     let status = rig.out.status();
     assert_eq!(status.audio_thread_sends, 0);
     assert_eq!(status.sent, 4);
+    // `late` counts sends over 2 ms past their deadline, which host jitter can trip; it is not
+    // asserted. Nothing may be dropped or left unsent.
+    assert_eq!((status.dropped, status.unsent), (0, 0), "{status:?}");
 }
 
 #[test]
@@ -380,6 +385,7 @@ fn the_deadline_clamp_is_capped_so_a_far_future_stamp_cannot_stall_a_track() {
     let sends = rig.wait_sent(1);
     assert_eq!(sends[0].message, vec![0x90, 62, 100]);
     let late = sends[0].at.saturating_duration_since(rig.origin.instant() + Duration::from_nanos(now + 5_000_000));
+    // Already a stall bound (#87, E49): the margin over the cap is far above host jitter.
     assert!(late <= Duration::from_nanos(CLAMP_CAP_NS) + Duration::from_millis(100), "held past the cap: {late:?}");
 }
 

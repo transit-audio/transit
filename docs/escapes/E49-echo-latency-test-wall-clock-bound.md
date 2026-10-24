@@ -38,3 +38,13 @@ requires more than one frame (a blocked loop sees a single poll) and a 250 ms bo
 frame, plus the Stuck status; the 1 s slow-creation test has the same floor relaxed to `n >= 2`
 beside its existing worst-frame bound. Other `Duration::from_millis` values in the plug-in host
 tests are sleeps, timeouts or deadlines, not measurements.
+
+Sweep 2026-10-24 (#87, complete): every remaining throughput floor and sub-100 ms measurement
+ceiling in a non-ignored test is converted; the rule is that none remain.
+- `crates/playback/src/player/midi_out/tests.rs`: per-send lateness `< 50 ms` is a 250 ms stall bound, plus `dropped` and `unsent` counters at 0 (the `late` counter trips at 2 ms, so it is not asserted); the clamp bound is already a stall bound.
+- `crates/playback/src/player/runtime/tests.rs`: `>= 20` blocks during a 500 ms creation is `>= 2` blocks plus a 250 ms bound on the longest gap between blocks; the frame, save-deadline and `FRAME_BUDGET` bounds are stall bounds and are marked.
+- `crates/ui-studio/src/plugin_host_tests.rs`: `>= 10` frames during a 1 s load is `>= 2`; the existing 400 ms worst-frame bound is the stall bound.
+- `crates/vst3-host/tests/slow_create.rs`: `>= 20` blocks during creation is `>= 2` plus a 250 ms longest-gap bound (the ignored hardware-timing companion keeps its strict numbers).
+- `crates/audio-asio/src/stream_tests.rs`: stop `< 100 ms` is a 250 ms stall bound beside the deterministic `driver_stopped` check; `host.rs` (700 ms against a 200 ms host timeout) is a stall bound and is marked.
+- `crates/engine/src/cmd/clap.rs`: the info wait plus 300 ms is a stall bound and is marked.
+- `crates/playback/src/player/native/tests.rs`: the 2 ms / 5 ms median wake bounds stay by design (a median of 25 against the 15.6 / 20 ms timer tick); the margin is now documented.

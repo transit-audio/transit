@@ -204,6 +204,9 @@ fn an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer() {
     ages.sort_unstable();
     let (median, max) = (Duration::from_nanos(ages[ages.len() / 2]), Duration::from_nanos(ages[ages.len() - 1]));
     eprintln!("ingress wake latency over {} events: median {median:?}, max {max:?}", ages.len());
+    // Kept by design (#87, E49): this median of 25 is the wake-on-data property. A timer poll wakes
+    // at the 15.6 ms (Windows) or ~20 ms (other) tick, so 2 ms / 5 ms leaves a wide margin on both
+    // sides, and a median ignores the scheduler outliers that a max does not.
     let bound = if cfg!(windows) { Duration::from_millis(2) } else { Duration::from_millis(5) };
     assert!(median < bound, "median wake latency {median:?} (max {max:?}); a timer poll would show ~15 ms on Windows");
     // The max is scheduler jitter on a loaded host, not the property (#87, E49): the median above
@@ -247,6 +250,9 @@ fn idle_worker_taps_step_pedal_and_learnable_actions_without_delaying_routes() {
     ages.sort_unstable();
     let median = Duration::from_nanos(ages[ages.len() / 2]);
     eprintln!("step tap idle wake latency median {median:?}");
+    // Kept by design (#87, E49): this median of 25 is the wake-on-data property. A timer poll wakes
+    // at the 15.6 ms (Windows) or ~20 ms (other) tick, so 2 ms / 5 ms leaves a wide margin on both
+    // sides, and a median ignores the scheduler outliers that a max does not.
     let bound = if cfg!(windows) { Duration::from_millis(2) } else { Duration::from_millis(5) };
     assert!(median < bound, "idle input must wake promptly with the tap active: {median:?}");
     f.finish();
