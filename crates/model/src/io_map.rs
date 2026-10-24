@@ -3,7 +3,7 @@
 //! (keyed by audio system plus device name) and hands it to the engine. A session refers to
 //! paths by name (`Route::Hardware`), so the same session opens on another interface.
 
-use crate::ChannelFormat;
+use crate::{ChannelFormat, MidiOutPort, MidiOutput, Track};
 
 /// Most device channels opened in either direction. A path or bus is narrower
 /// (`MAX_PATH_WIDTH`); this is the width of the device.
@@ -72,6 +72,87 @@ pub struct HardwareLatency {
     pub measured_at: u64,
 }
 
+/// A measured External Instrument latency C (ADR 0020 decisions 4 and 5): the plan frames from
+/// the render frame of a note-on sent to the MIDI port to the render frame at which its onset
+/// enters the strip from the `ret` input path, at one `rate` and device `buffer`. Stored per
+/// machine with the path table, next to (never merged with) the hardware insert round trips: it
+/// is a fact about the synth, its port and this interface's settings, and a session names the port
+/// and the return only. The key is (port id, else port name; return; rate; buffer).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ExternalLatency {
+    /// The port's stable backend id, empty when it has none.
+    #[serde(default)]
+    pub port_id: String,
+    pub port_name: String,
+    pub ret: String,
+    pub rate: u32,
+    /// Device buffer in frames when it was measured (C moves with it); 0 when the device did not
+    /// say.
+    pub buffer: u32,
+    /// The median over the notes, in plan frames at `rate`.
+    pub frames: u32,
+    /// The standard deviation of the notes' latencies, in frames (the spread the card shows).
+    #[serde(default)]
+    pub spread_frames: u32,
+    /// Notes with an onset (of the 8 measured).
+    #[serde(default)]
+    pub notes: u32,
+    /// Seconds since the Unix epoch when it was measured (0 when unknown).
+    #[serde(default)]
+    pub measured_at: u64,
+}
+
+impl ExternalLatency {
+    /// Whether this measurement was made through `port`: by id when both have one, else by name.
+    #[must_use]
+    pub fn port_is(&self, port: &MidiOutPort) -> bool {
+        if !self.port_id.is_empty() && !port.id.is_empty() { self.port_id == port.id } else { self.port_name.eq_ignore_ascii_case(&port.name) }
+    }
+
+    /// Same port and return (any rate and buffer).
+    #[must_use]
+    pub fn chain_is(&self, port: &MidiOutPort, ret: &str) -> bool {
+        self.port_is(port) && self.ret.eq_ignore_ascii_case(ret)
+    }
+
+    /// Same key: port, return, rate and buffer.
+    #[must_use]
+    pub fn same_key(&self, other: &ExternalLatency) -> bool {
+        let port = MidiOutPort { name: other.port_name.clone(), id: other.port_id.clone(), ..MidiOutPort::default() };
+        self.chain_is(&port, &other.ret) && self.rate == other.rate && self.buffer == other.buffer
+    }
+
+    /// `frames` at `rate`: rescaled by time when it was measured at another rate (1061 at 48 kHz
+    /// is 975 at 44.1 kHz), as is otherwise.
+    #[must_use]
+    pub fn frames_at(&self, rate: u32) -> u32 {
+        if rate == self.rate || self.rate == 0 {
+            self.frames
+        } else {
+            (f64::from(self.frames) * f64::from(rate) / f64::from(self.rate)).round() as u32
+        }
+    }
+}
+
+/// Where an External Instrument's latency comes from (ADR 0020 decision 4's lookup).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExternalSource {
+    /// `manual_ms`, which wins whenever it is set.
+    Manual,
+    /// A measurement whose key matches exactly.
+    Measured(ExternalLatency),
+    /// The newest measurement of the same port and return at another rate or buffer: used (a
+    /// rate rescaled by time), and labeled "measure again".
+    Stale(ExternalLatency),
+}
+
+/// An External Instrument's latency C in plan frames at the current rate, and where it came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExternalLookup {
+    pub frames: u32,
+    pub source: ExternalSource,
+}
+
 /// One device's channel counts and path table. `inputs` and `outputs` are the counts the stream
 /// opened (stored here, so one device in two USB modes is one entry that adapts).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -86,6 +167,12 @@ pub struct IoMap {
     pub main: String,
     /// Measured hardware-insert round trips (see [`HardwareLatency`]).
     pub hardware_latency: Vec<HardwareLatency>,
+    /// Measured External Instrument latencies (see [`ExternalLatency`]); a separate table.
+    pub external_latency: Vec<ExternalLatency>,
+    /// The buffer, in frames, the open device runs (the Player sets it; not saved): the part of
+    /// an External Instrument measurement's key the table cannot know by itself.
+    #[serde(skip)]
+    pub buffer: Option<u32>,
 }
 
 impl Default for IoMap {
@@ -157,7 +244,17 @@ impl IoMap {
             c += 2;
         }
         let main = paths.iter().find(|p| p.direction == IoDirection::Output).map_or_else(|| "Out 1-2".to_string(), |p| p.name.clone());
-        IoMap { system: system.into(), device: device.into(), inputs, outputs, paths, main, hardware_latency: Vec::new() }
+        IoMap {
+            system: system.into(),
+            device: device.into(),
+            inputs,
+            outputs,
+            paths,
+            main,
+            hardware_latency: Vec::new(),
+            external_latency: Vec::new(),
+            buffer: None,
+        }
     }
 
     /// The key the app stores this table under.
@@ -249,6 +346,7 @@ impl IoMap {
             return Err(IoError::Missing(name.into()));
         }
         self.hardware_latency.retain(|m| !m.send.eq_ignore_ascii_case(name) && !m.ret.eq_ignore_ascii_case(name));
+        self.external_latency.retain(|m| !m.ret.eq_ignore_ascii_case(name));
         Ok(())
     }
 
@@ -273,6 +371,56 @@ impl IoMap {
         let before = self.hardware_latency.len();
         self.hardware_latency.retain(|o| !(o.send.eq_ignore_ascii_case(send) && o.ret.eq_ignore_ascii_case(ret)));
         self.hardware_latency.len() != before
+    }
+
+    /// Store an External Instrument measurement, replacing the one with the same key.
+    pub fn set_external_latency(&mut self, m: ExternalLatency) {
+        self.external_latency.retain(|o| !o.same_key(&m));
+        self.external_latency.push(m);
+    }
+
+    /// Forget the External Instrument measurements of `port` returning on `ret` (every rate and
+    /// buffer). Returns whether there were any.
+    pub fn clear_external_latency(&mut self, port: &MidiOutPort, ret: &str) -> bool {
+        let before = self.external_latency.len();
+        self.external_latency.retain(|o| !o.chain_is(port, ret));
+        self.external_latency.len() != before
+    }
+
+    /// The measurement for `port` returning on `ret` at `rate` with the device running `buffer`
+    /// frames: the exact key's, else the newest of the same port and return (decision 4, cases 2
+    /// and 3). `None` when the chain was never measured on this machine.
+    #[must_use]
+    pub fn external_measurement(&self, port: &MidiOutPort, ret: &str, rate: u32, buffer: Option<u32>) -> Option<ExternalLookup> {
+        let chain = || self.external_latency.iter().filter(|m| m.chain_is(port, ret));
+        // A device that does not say its buffer is keyed 0, as it was when measured.
+        let buffer = buffer.unwrap_or(0);
+        if let Some(m) = chain().rfind(|m| m.rate == rate && m.buffer == buffer) {
+            return Some(ExternalLookup { frames: m.frames, source: ExternalSource::Measured(m.clone()) });
+        }
+        // The newest; on equal times the one stored last.
+        let m = chain().fold(None::<&ExternalLatency>, |best, m| match best {
+            Some(b) if b.measured_at > m.measured_at => Some(b),
+            _ => Some(m),
+        })?;
+        Some(ExternalLookup { frames: m.frames_at(rate), source: ExternalSource::Stale(m.clone()) })
+    }
+
+    /// The latency C of `t`'s External Instrument at `rate`, by decision 4's lookup: `manual_ms`
+    /// when set, else this machine's measurement of the track's port and return (exact key, else
+    /// the newest, rescaled to `rate`), else `None` (not measured). `None` too when `t` holds no
+    /// External Instrument, or (with no manual value) sends to no external port.
+    #[must_use]
+    pub fn external_latency_of(&self, t: &Track, rate: u32) -> Option<ExternalLookup> {
+        let e = t.external_instrument()?;
+        if let Some(frames) = e.manual_frames(rate) {
+            return Some(ExternalLookup { frames, source: ExternalSource::Manual });
+        }
+        let MidiOutput::External { port, .. } = &t.midi_output else { return None };
+        if e.ret.is_empty() {
+            return None;
+        }
+        self.external_measurement(port, &e.ret, rate, self.buffer)
     }
 
     /// Choose the output path Main plays on.
@@ -480,6 +628,90 @@ mod tests {
         gone.remove_path("In 3-4").unwrap();
         assert!(gone.hardware_latency.is_empty());
         assert!(m.clear_hardware_latency("Out 3-4", "In 3-4") && !m.clear_hardware_latency("Out 3-4", "In 3-4"));
+    }
+
+    fn ext(port: &str, ret: &str, rate: u32, buffer: u32, frames: u32, at: u64) -> ExternalLatency {
+        ExternalLatency {
+            port_id: String::new(),
+            port_name: port.into(),
+            ret: ret.into(),
+            rate,
+            buffer,
+            frames,
+            spread_frames: 19,
+            notes: 8,
+            measured_at: at,
+        }
+    }
+
+    fn port(name: &str, id: &str) -> MidiOutPort {
+        MidiOutPort { backend: "winmm".into(), name: name.into(), ordinal: 0, id: id.into() }
+    }
+
+    /// ADR 0020 decisions 4 and 5: the key is port, return, rate and buffer; another buffer is used
+    /// as is and another rate rescaled by time, both labeled; the table is not the hardware one.
+    #[test]
+    fn external_latency_is_keyed_by_port_return_rate_and_buffer() {
+        let mut m = IoMap::for_device("ASIO", "Scarlett", 2, 2);
+        let d = port("MODEL D", "");
+        assert_eq!(m.external_measurement(&d, "In 1", 48_000, Some(64)), None);
+        m.set_external_latency(ext("MODEL D", "In 1", 48_000, 64, 955, 10));
+        m.set_external_latency(ext("MODEL D", "In 1", 48_000, 128, 1039, 20));
+        m.set_external_latency(ext("model d", "in 1", 48_000, 64, 956, 30));
+        assert_eq!(m.external_latency.len(), 2, "the same key replaces");
+        let exact = m.external_measurement(&d, "In 1", 48_000, Some(64)).unwrap();
+        assert_eq!((exact.frames, matches!(exact.source, ExternalSource::Measured(_))), (956, true));
+        let other = m.external_measurement(&d, "In 1", 48_000, Some(128)).unwrap();
+        assert_eq!((other.frames, matches!(other.source, ExternalSource::Measured(_))), (1039, true));
+        // Another buffer: the newest (956 at 64, measured last), as is, labeled.
+        let stale = m.external_measurement(&d, "In 1", 48_000, Some(256)).unwrap();
+        assert_eq!(stale.frames, 956);
+        assert!(matches!(&stale.source, ExternalSource::Stale(r) if r.buffer == 64));
+        // Another rate: rescaled by time (1061 at 48 kHz is 975 at 44.1 kHz).
+        m.set_external_latency(ext("MODEL D", "In 1", 48_000, 64, 1061, 40));
+        let rescaled = m.external_measurement(&d, "In 1", 44_100, Some(64)).unwrap();
+        assert_eq!(rescaled.frames, 975);
+        assert!(matches!(rescaled.source, ExternalSource::Stale(_)));
+        // Another port or return: nothing.
+        assert_eq!(m.external_measurement(&port("Minilogue", ""), "In 1", 48_000, Some(64)), None);
+        assert_eq!(m.external_measurement(&d, "In 2", 48_000, Some(64)), None);
+        assert!(m.hardware_latency.is_empty(), "a separate table");
+        // A port id wins over the name when both have one.
+        let mut byid = IoMap::default();
+        byid.set_external_latency(ExternalLatency { port_id: "usb-1".into(), ..ext("MODEL D", "In 1", 48_000, 64, 900, 1) });
+        assert!(byid.external_measurement(&port("Renamed", "usb-1"), "In 1", 48_000, Some(64)).is_some());
+        assert!(byid.external_measurement(&port("MODEL D", "usb-2"), "In 1", 48_000, Some(64)).is_none());
+        // Saved with the table; the open buffer is not.
+        m.buffer = Some(64);
+        let back: IoMap = serde_json::from_str(&serde_json::to_string(&m).unwrap()).unwrap();
+        assert_eq!((back.external_latency.clone(), back.buffer), (m.external_latency.clone(), None));
+        let mut gone = m.clone();
+        gone.remove_path("In 1").unwrap();
+        assert!(gone.external_latency.is_empty(), "a removed return takes its measurements");
+        assert!(m.clear_external_latency(&d, "In 1") && m.external_latency.is_empty());
+    }
+
+    /// Decision 4's lookup on a track: manual wins, then the table at the open buffer.
+    #[test]
+    fn a_tracks_latency_is_manual_then_measured() {
+        use crate::{Insert, MidiOutChannel, TrackId, TrackKind};
+        let mut t = Track::new(TrackId(1), "Model D", TrackKind::Instrument, ChannelFormat::Stereo, [0; 3]);
+        t.instrument = Some(Insert::external("In 1"));
+        t.midi_output = MidiOutput::External { port: port("MODEL D", ""), channel: MidiOutChannel::Channel(0), offset_ms: 0.0 };
+        let mut m = IoMap::for_device("ASIO", "Scarlett", 2, 2);
+        m.buffer = Some(64);
+        assert_eq!(m.external_latency_of(&t, 48_000), None, "not measured");
+        m.set_external_latency(ext("MODEL D", "In 1", 48_000, 64, 955, 1));
+        assert_eq!(m.external_latency_of(&t, 48_000).unwrap().frames, 955);
+        m.buffer = Some(128);
+        assert!(matches!(m.external_latency_of(&t, 48_000).unwrap().source, ExternalSource::Stale(_)), "the buffer changed");
+        if let Some(e) = t.instrument.as_mut().and_then(|i| i.external.as_mut()) {
+            e.manual_ms = Some(20.0);
+        }
+        assert_eq!(m.external_latency_of(&t, 48_000), Some(ExternalLookup { frames: 960, source: ExternalSource::Manual }), "manual wins");
+        t.midi_output = MidiOutput::Internal;
+        t.instrument = Some(Insert::external("In 1"));
+        assert_eq!(m.external_latency_of(&t, 48_000), None, "no port, no measurement");
     }
 
     #[test]

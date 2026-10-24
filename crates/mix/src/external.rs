@@ -9,14 +9,16 @@
 //! strip, so delay compensation lines the return up with every software path at Main exactly as
 //! it does for a hardware insert's round trip (decision 2). MIDI is not sent early.
 //!
-//! In this slice C comes from the device's manual value only. With no live input (no duplex
+//! C follows decision 4's lookup (`IoMap::external_latency_of`): the manual value when set, else
+//! this machine's measurement of the track's port and return at the plan rate and the open
+//! device's buffer, else the newest of that chain (rescaled to the rate), else none. With no live input (no duplex
 //! device, an offline render), an unresolved or unchosen return, or no usable MIDI port, the strip
 //! is silent and reports 0, so delay compensation does not move while the hardware is absent.
 //! Nothing here allocates on the audio thread: the return is read from the block of live input the
 //! engine holds.
 
 use super::{MAX_LATENCY, Session, Track, TrackId, TrackKind};
-use soundcraft_model::{IoDirection, IoMap};
+use soundcraft_model::{ExternalSource, IoDirection, IoMap};
 
 /// What an External Instrument will do on this machine, as far as the plan knows (the MIDI port's
 /// presence comes from the playback layer's output thread).
@@ -42,8 +44,11 @@ pub struct ExternalReport {
     pub track: TrackId,
     pub ret: String,
     pub state: ExternalState,
-    /// The latency C in plan frames the device reports when it plays (manual in this slice).
+    /// The latency C in plan frames the device reports when it plays.
     pub latency: Option<u32>,
+    /// Where `latency` comes from: the manual value, a measurement of this exact key, or one made
+    /// at another rate or buffer (shown with "measure again").
+    pub source: Option<ExternalSource>,
 }
 
 /// An External Instrument in a plan: the device input channel each strip channel reads, and C.
@@ -55,16 +60,16 @@ pub(crate) struct ExtSpec {
     pub(crate) latency: u32,
 }
 
-/// C for `t` at `rate`, in plan frames: `manual_ms` converted at the rate (decision 4, case 1). The
-/// measured lookup (cases 2 and 3) comes with Measure (slice 2).
-pub(crate) fn device_latency(t: &Track, rate: u32) -> Option<u32> {
-    t.external_instrument().and_then(|e| e.manual_frames(rate)).map(|f| f.min(MAX_LATENCY as u32))
+/// C for `t` at `rate`, in plan frames, by decision 4's lookup through this machine's table `io`
+/// (manual, exact measurement, newest measurement rescaled, none).
+pub(crate) fn device_latency(t: &Track, io: &IoMap, rate: u32) -> Option<u32> {
+    io.external_latency_of(t, rate).map(|l| l.frames.min(MAX_LATENCY as u32))
 }
 
 /// The latency, in frames, `t`'s External Instrument would add: an upper bound for sizing delay
 /// lines (a plan without live input adds none).
-pub(crate) fn latency_of(t: &Track, rate: u32) -> usize {
-    if t.inactive || t.freeze.is_some() { 0 } else { device_latency(t, rate).unwrap_or(0) as usize }
+pub(crate) fn latency_of(t: &Track, io: &IoMap, rate: u32) -> usize {
+    if t.inactive || t.freeze.is_some() { 0 } else { device_latency(t, io, rate).unwrap_or(0) as usize }
 }
 
 /// Whether `t` can send its MIDI: an external port is chosen and the playback layer has not
@@ -85,7 +90,7 @@ fn return_channels(ret: &str, io: &IoMap, in_channels: u16) -> Option<Vec<u16>> 
 pub(crate) fn spec_of(t: &Track, io: &IoMap, in_channels: u16, rate: u32, no_port: &[TrackId]) -> Option<ExtSpec> {
     let e = t.external_instrument()?;
     let src = if has_port(t, no_port) { return_channels(&e.ret, io, in_channels).unwrap_or_default() } else { Vec::new() };
-    let latency = if src.is_empty() { 0 } else { device_latency(t, rate).unwrap_or(0) };
+    let latency = if src.is_empty() { 0 } else { device_latency(t, io, rate).unwrap_or(0) };
     Some(ExtSpec { src, latency })
 }
 
@@ -97,7 +102,8 @@ pub fn external_report(s: &Session, io: &IoMap, in_channels: u16, duplex: bool, 
     let mut out = Vec::new();
     for t in s.tracks.iter().filter(|t| t.kind == TrackKind::Instrument) {
         let Some(e) = t.external_instrument() else { continue };
-        let latency = device_latency(t, rate);
+        let lookup = io.external_latency_of(t, rate);
+        let latency = lookup.as_ref().map(|l| l.frames.min(MAX_LATENCY as u32));
         let state = if !has_port(t, no_port) {
             ExternalState::NoPort
         } else if e.ret.is_empty() {
@@ -111,7 +117,7 @@ pub fn external_report(s: &Session, io: &IoMap, in_channels: u16, duplex: bool, 
         } else {
             ExternalState::Ready
         };
-        out.push(ExternalReport { track: t.id, ret: e.ret.clone(), state, latency });
+        out.push(ExternalReport { track: t.id, ret: e.ret.clone(), state, latency, source: lookup.map(|l| l.source) });
     }
     out
 }
@@ -178,8 +184,8 @@ mod tests {
         let io = IoMap::for_device("test", "duplex", 2, 2);
         let (s, t) = track("In 1", Some(20.0));
         let tr = s.track(t).unwrap();
-        assert_eq!(device_latency(tr, 48_000), Some(960));
-        assert_eq!(device_latency(tr, 44_100), Some(882));
+        assert_eq!(device_latency(tr, &io, 48_000), Some(960));
+        assert_eq!(device_latency(tr, &io, 44_100), Some(882));
         let spec = spec_of(tr, &io, 2, 48_000, &[]).unwrap();
         assert_eq!(spec, ExtSpec { src: vec![0], latency: 960 });
         let slot = ExtSlot::new(spec);
@@ -193,6 +199,39 @@ mod tests {
         let (mut s, t) = track("In 1", Some(20.0));
         s.track_mut(t).unwrap().midi_output = MidiOutput::Internal;
         assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap().latency, 0);
+    }
+
+    /// Decision 4 in the plan: a measurement of the track's port and return is C when no manual
+    /// value is set, the manual value wins when it is, and the report says which.
+    #[test]
+    fn a_measured_latency_is_c_unless_a_manual_value_is_set() {
+        let mut io = IoMap::for_device("test", "duplex", 2, 2);
+        io.buffer = Some(64);
+        let (mut s, t) = track("In 1", None);
+        let measured = soundcraft_model::ExternalLatency {
+            port_id: String::new(),
+            port_name: String::new(),
+            ret: "In 1".into(),
+            rate: 48_000,
+            buffer: 64,
+            frames: 955,
+            spread_frames: 20,
+            notes: 8,
+            measured_at: 1,
+        };
+        assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap().latency, 0, "not measured");
+        io.set_external_latency(measured);
+        assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap().latency, 955);
+        let r = &external_report(&s, &io, 2, true, 48_000, &[])[0];
+        assert_eq!((r.state, r.latency), (ExternalState::Ready, Some(955)));
+        assert!(matches!(r.source, Some(ExternalSource::Measured(_))));
+        io.buffer = Some(128);
+        let r = &external_report(&s, &io, 2, true, 48_000, &[])[0];
+        assert!(matches!(r.source, Some(ExternalSource::Stale(_))), "the buffer changed since");
+        assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 44_100, &[]).unwrap().latency, 877, "rescaled by time at 44.1 kHz");
+        s.track_mut(t).unwrap().instrument.as_mut().unwrap().external.as_mut().unwrap().manual_ms = Some(20.0);
+        assert_eq!(spec_of(s.track(t).unwrap(), &io, 2, 48_000, &[]).unwrap().latency, 960, "manual wins");
+        assert_eq!(external_report(&s, &io, 2, true, 48_000, &[])[0].source, Some(ExternalSource::Manual));
     }
 
     #[test]

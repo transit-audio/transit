@@ -684,8 +684,8 @@ impl PlanCompiler {
         measure(&session, &self.limits, block, &least, &|_, _| 0)?;
         // Path-based (F05): the slowest path into any summing point bounds every edge's delay.
         let need = path_need(&session, &|t: &Track| {
-            let hw = crate::hardware::latency_of(t, &self.io, self.target.sample_rate)
-                .saturating_add(crate::external::latency_of(t, self.target.sample_rate));
+            let rate = self.target.sample_rate;
+            let hw = crate::hardware::latency_of(t, &self.io, rate).saturating_add(crate::external::latency_of(t, &self.io, rate));
             match &t.freeze {
                 Some(f) => f.latency as usize,
                 None if mode == CompileMode::Update => self.active.track_latency(t.id).saturating_add(hw),
@@ -1035,7 +1035,7 @@ impl PlanCompiler {
                     .filter(|p| matches!(p.kind, CellKind::Insert | CellKind::Instrument))
                     .fold(t.freeze.as_ref().map_or(0, |f| f.latency as usize), |a, p| a.saturating_add(latency_of(p, self)));
                 let hw = crate::hardware::latency_of(t, &self.io, self.target.sample_rate);
-                Some((t.id, l.saturating_add(hw).saturating_add(crate::external::latency_of(t, self.target.sample_rate))))
+                Some((t.id, l.saturating_add(hw).saturating_add(crate::external::latency_of(t, &self.io, self.target.sample_rate))))
             })
             .collect();
         let need1 = path_need(s, &|t: &Track| planned.get(&t.id).copied().unwrap_or(0));
