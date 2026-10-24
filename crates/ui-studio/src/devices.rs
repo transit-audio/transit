@@ -359,9 +359,11 @@ fn card_body(
         c.remove_button = r4(xb);
     }
     let name_r = Rect::from_min_max(pos2(name_x, title.min.y), pos2(r.max.x - 22.0, title.max.y));
+    let mut title_double = false;
     if let Some(slot) = slot {
         // Press-and-drag on the title reorders (Alt: copies); the chain handles the drop.
-        let grip = ui.interact(name_r.intersect(lane), ui.id().with(("drag_device", t.0, salt)), Sense::drag());
+        let grip = ui.interact(name_r.intersect(lane), ui.id().with(("drag_device", t.0, salt)), Sense::click_and_drag());
+        title_double = grip.double_clicked();
         c.drag_handle = r4(name_r);
         if grip.drag_started() {
             app.mixer.device_drag = Some(DeviceDrag { track: t, slot });
@@ -371,7 +373,7 @@ fn card_body(
         } else if grip.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
-        grip.on_hover_text("Drag to reorder; Alt-drag to copy");
+        grip.on_hover_text("Drag to reorder; Alt-drag to copy; double-click to edit");
     }
     pc.with_clip_rect(name_r.intersect(lane)).text(
         name_r.left_center(),
@@ -465,9 +467,9 @@ fn card_body(
     } else if loading && !builtin {
         LOADING
     } else if open {
-        "Close editor"
+        "Close"
     } else {
-        "Open editor"
+        "Edit"
     };
     let ink = if enabled { TOKENS.text } else { TOKENS.text_dim.gamma_multiply(0.6) };
     let font = FontId::proportional(10.5);
@@ -476,18 +478,20 @@ fn card_body(
     crate::icons::paint(&pc, pos2(x0 + 6.0, eb.center().y), Icon::OpenEditor, 12.0, ink);
     pc.text(pos2(x0 + 16.0, eb.center().y), Align2::LEFT_CENTER, label, font, ink);
     let tip = if stuck && !builtin {
-        "The plug-in did not finish loading within 10 s and was left out; remove it and add it again to retry"
+        "The plug-in did not finish loading within 10 s and was left out; remove it and add it again to retry".to_string()
     } else if loading && !builtin {
-        "The plug-in is still loading; its editor opens when it is ready"
+        "The plug-in is still loading; its editor opens when it is ready".to_string()
     } else if !enabled {
-        "No editor window (no audio device)"
+        "No editor window (no audio device)".to_string()
     } else if open {
-        "Close the plug-in's window"
+        format!("Close the window of {name}")
     } else {
-        "Open the plug-in's window"
+        format!("Edit {name}: open its window")
     };
     if resp.on_hover_text(tip).clicked() && enabled {
         app.toggle_editor((t, key_slot));
+    } else if title_double && enabled && !open {
+        app.want_editor((t, key_slot));
     }
     c.editor_button = r4(eb);
     c.editor_open = open;

@@ -497,3 +497,49 @@ fn a_panel_without_dynamics_has_a_scope_and_no_gain_reduction() {
     assert!(w.scope[2] > w.scope[0]);
     assert!(w.gr.is_empty() && w.gr_bar == [0.0; 4]);
 }
+
+impl T {
+    fn strip_row(&self, t: TrackId, slot: usize) -> (f32, f32) {
+        let s = self.app.mixer.layout.strips.iter().find(|s| s.track == t.0).expect("the strip is drawn");
+        mid(s.inserts.iter().find(|r| r.slot == slot).expect("the insert row").rect)
+    }
+}
+
+#[test]
+fn double_click_on_a_built_in_mixer_insert_slot_opens_its_editor_without_a_player() {
+    let mut t = T::new();
+    let tr = t.track("audio");
+    t.app.add_device(tr, "gain").unwrap();
+    t.frames(4);
+    assert!(t.app.player.is_none());
+    let at = t.strip_row(tr, 0);
+    t.click(at, 2);
+    assert_eq!(t.app.ui.plugin_windows, vec![(tr, 0)]);
+    assert_eq!(t.app.builtin_editor.windows.len(), 1);
+}
+
+#[test]
+fn the_insert_slot_context_menu_offers_open_and_close_editor() {
+    let mut t = T::new();
+    let tr = t.track("audio");
+    t.app.add_device(tr, "gain").unwrap();
+    t.frames(4);
+    let at = t.strip_row(tr, 0);
+    t.send("ui.click", json!({"x": at.0, "y": at.1, "button": "right"}));
+    let item = t.app.mixer.layout.menu.iter().find(|m| m.value == "editor").cloned().expect("an editor entry");
+    assert_eq!(item.label, "Open editor");
+    t.click(mid(item.rect), 1);
+    assert_eq!(t.app.ui.plugin_windows, vec![(tr, 0)]);
+}
+
+#[test]
+fn double_clicking_a_card_title_opens_the_editor_and_the_button_reads_edit() {
+    let mut t = T::new();
+    let tr = t.track("audio");
+    t.app.add_device(tr, "gain").unwrap();
+    t.frames(4);
+    let card = t.app.mixer.devices.cards.iter().position(|c| c.plugin == "gain").unwrap();
+    t.click(mid(t.app.mixer.devices.cards[card].drag_handle), 2);
+    assert_eq!(t.app.ui.plugin_windows, vec![(tr, 0)]);
+    assert!(t.app.mixer.devices.cards[card].editor_open);
+}

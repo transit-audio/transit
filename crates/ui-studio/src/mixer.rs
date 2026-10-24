@@ -204,7 +204,7 @@ pub struct DeviceCard {
     pub remove_button: R4,
     pub editor_button: R4,
     pub editor_enabled: bool,
-    /// The plug-in's editor window is open or wanted (the button then reads "Close editor").
+    /// The plug-in's editor window is open or wanted (the button then reads "Close").
     pub editor_open: bool,
     /// The title area a press-and-drag on grabs to reorder the device (inserts only).
     pub drag_handle: R4,
@@ -1582,7 +1582,7 @@ fn sends_block(
     }
 }
 
-/// A strip's insert rows at `y`: one per occupied slot (click: the plug-in's editor; right-click:
+/// A strip's insert rows at `y`: one per occupied slot (click or double-click: the plug-in's editor; right-click:
 /// bypass and remove), then a "+" row that adds an effect to this track. `rows` rows in all, so
 /// every strip's faders line up; with more inserts than fit, the last row says how many more.
 #[allow(clippy::too_many_arguments)]
@@ -1630,7 +1630,9 @@ fn inserts_block(
             FontId::proportional(10.5),
             if ins.bypass { TOKENS.text_dim } else { TOKENS.text },
         );
-        let enabled = app.player.as_ref().is_some_and(|pl| crate::devices::hosted(&ins.plugin) || pl.has_editor(id, *slot));
+        // A built-in's editor is our own window: it needs no player (the card does the same).
+        let builtin = app.builtin_at((id, *slot)).is_some();
+        let enabled = builtin || app.player.as_ref().is_some_and(|pl| crate::devices::hosted(&ins.plugin) || pl.has_editor(id, *slot));
         if resp.clicked() && enabled {
             app.want_editor((id, *slot));
         }
@@ -1638,7 +1640,15 @@ fn inserts_block(
         let resp = resp.on_hover_text(format!("{name}{state}. Click for its window, right-click for more"));
         let slot = *slot;
         let bypass = ins.bypass;
+        let editor_open = app.ui.plugin_windows.contains(&(id, slot));
         egui::Popup::context_menu(&resp).id(resp.id.with("insert_ctx")).show(|ui| {
+            let label = if editor_open { "Close editor" } else { "Open editor" };
+            let b = ui.add_enabled(enabled, egui::Button::new(label));
+            menu.push(MenuItem::at(ui, label.into(), "editor".into(), b.rect));
+            if b.clicked() {
+                app.toggle_editor((id, slot));
+                ui.close();
+            }
             let label = if bypass { "Turn On" } else { "Bypass" };
             let b = ui.button(label);
             menu.push(MenuItem::at(ui, label.into(), "bypass".into(), b.rect));
