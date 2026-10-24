@@ -180,6 +180,19 @@ fn cancel_releases_the_held_note_and_measures_nothing() {
 }
 
 #[test]
+fn a_cancel_releases_through_control_even_when_the_audio_thread_never_runs_again() {
+    // N3 of the slice review: after the Cancel no block is pumped, so the audio thread's own
+    // release cannot run; only Main's `release_track` can end the note (the UI timeout path).
+    let rig = rig(false);
+    let held = ARM_AT + (48 * 1640) / BLOCK;
+    pump(&rig, held + 1, |i, _| i >= held);
+    until("the first measured note is sent", || messages(&rig).iter().filter(|m| **m == vec![0x92, 60, 100]).count() == 2);
+    assert!(!released(&messages(&rig)));
+    rig.player.cancel_external_measure();
+    until("control released the track", || released(&messages(&rig)));
+}
+
+#[test]
 fn a_device_lost_mid_measure_releases_the_note_and_refuses() {
     let rig = rig(false);
     let held = ARM_AT + (48 * 1640) / BLOCK;
