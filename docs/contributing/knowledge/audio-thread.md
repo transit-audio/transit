@@ -43,12 +43,18 @@ happens between `open_input` and the plan's adoption, and during a stall. The co
   `clear_monitor`. The aligning read must find input. A read before the device's input runs
   leaves the request pending. A new plan with the same ring does not realign it, so an edit never
   moves the input.
-- **What it keeps.** The read's own input frames plus a fixed slack. After that the reader runs in
-  lockstep, and the backlog B after the read equals the slack:
+- **What it keeps.** The read's own input frames plus a slack. After that the reader runs in
+  lockstep, and the backlog B after the read equals the slack. The slack covers the capture
+  period only while it is at most `read + slack`; the producer records its last pushed block size
+  in one Relaxed atomic, and the unpaired rule uses it:
   - `ALIGNED_BACKLOG_BLOCKS_PAIRED` (0) when one device callback delivers the capture and then
     asks for the render (`Backend::capture_precedes_render`: native ASIO and the duplex fake);
-  - `ALIGNED_BACKLOG_BLOCKS_UNPAIRED` (one read block) when capture and render run on separate
-    callbacks (WASAPI's two loops, cpal), whose order can swap within a period.
+  - `ALIGNED_BACKLOG_BLOCKS_UNPAIRED` (`max(read, last_push)` frames: the larger of one read
+    block and the last block the capture callback pushed) when capture and render run on separate
+    callbacks (WASAPI's two loops, cpal), whose order can swap within a period. A 480-frame
+    capture against a 128-frame render keeps 128 + 480 frames, so the aligned start does not
+    underrun. The no-underrun claim holds while the capture period is at most `read + max(read,
+    last_push)`; a capture period that changes after alignment (a stall, #83) is not covered.
 - **Real-time rules.** The discard is one queue commit (a pointer move), made under the reader's
   `try_lock` that the read already holds, and it is counted in `discarded_frames`. The request is
   one atomic store, which is safe from the audio thread at adoption.

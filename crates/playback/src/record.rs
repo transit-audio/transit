@@ -1522,8 +1522,12 @@ impl MonitorReader {
 pub const ALIGNED_BACKLOG_BLOCKS_PAIRED: usize = 0;
 /// The same when capture and render run on separate callbacks (WASAPI's capture and render
 /// loops, cpal, an input on another device). An output callback can come before the input
-/// callback of the same period, so one read block of slack keeps that ordering jitter from
-/// underrunning. B is then at most one read block, fixed when the ring aligns.
+/// callback of the same period, so the slack is the larger of one read block and the last block
+/// the capture callback pushed, `max(read, last_push)` frames, kept on top of the read itself.
+/// The reader then does not run dry before the next capture arrives while the capture period
+/// P_c is at most `read + max(read, last_push)`, which holds whenever P_c is the push size: a
+/// 10 ms WASAPI capture (480 frames) feeding a 128-frame render keeps 480 + 128, not 256. B is
+/// that slack, fixed when the ring aligns.
 pub const ALIGNED_BACKLOG_BLOCKS_UNPAIRED: usize = 1;
 
 /// A bounded interleaved FIFO for input monitoring. The input and output roles have
@@ -1553,8 +1557,12 @@ pub struct InputRing {
     clear_pending: std::sync::atomic::AtomicBool,
     /// The next read that finds input discards the backlog down to the target (K22).
     align_pending: std::sync::atomic::AtomicBool,
-    /// Read blocks kept queued at alignment: [`ALIGNED_BACKLOG_BLOCKS_PAIRED`] or `_UNPAIRED`.
+    /// Multiplier of the slack `max(read, last_push)` kept at alignment:
+    /// [`ALIGNED_BACKLOG_BLOCKS_PAIRED`] or `_UNPAIRED`.
     aligned_backlog_blocks: usize,
+    /// Frames in the most recent `push`: the capture period the unpaired slack must cover.
+    /// One Relaxed store on the capture callback; read only by the aligning read.
+    last_push_frames: AtomicUsize,
     counters: MonitorCounters,
 }
 
@@ -1604,6 +1612,7 @@ impl InputRing {
             overrun_pending: std::sync::atomic::AtomicBool::new(false),
             clear_pending: std::sync::atomic::AtomicBool::new(false),
             align_pending: std::sync::atomic::AtomicBool::new(false),
+            last_push_frames: AtomicUsize::new(0),
             aligned_backlog_blocks: if paired { ALIGNED_BACKLOG_BLOCKS_PAIRED } else { ALIGNED_BACKLOG_BLOCKS_UNPAIRED },
             counters: MonitorCounters::default(),
         })
@@ -1613,6 +1622,7 @@ impl InputRing {
     /// counted and discarded; the next call begins a new frame, not its continuation.
     pub fn push(&self, samples: &[f32]) {
         let frames = samples.len() / self.ch;
+        self.last_push_frames.store(frames, Ordering::Relaxed);
         self.counters.incomplete.fetch_add((samples.len() % self.ch) as u64, Ordering::Relaxed);
         let mut producer = match self.producer.try_lock() {
             Ok(p) => p,
@@ -1694,7 +1704,8 @@ impl InputRing {
         // input runs leaves it pending rather than aligning an empty ring.
         if frames > 0 && reader.queued_frames() > 0 && self.align_pending.swap(false, Ordering::AcqRel) {
             let read = (frames as f64 * step).ceil() as usize;
-            let keep = read.saturating_mul(1 + self.aligned_backlog_blocks);
+            let slack = self.aligned_backlog_blocks.saturating_mul(read.max(self.last_push_frames.load(Ordering::Relaxed)));
+            let keep = read.saturating_add(slack);
             self.counters.discarded.fetch_add(reader.align(keep) as u64, Ordering::Relaxed);
         }
         let written = reader.render(out, frames, step);
