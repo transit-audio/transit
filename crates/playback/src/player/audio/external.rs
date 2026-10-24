@@ -190,7 +190,14 @@ mod tests {
         let input = vec![vec![0.0f32; 64]];
         let mut ons = Vec::new();
         for i in 0..120u64 {
-            let block = Block { playing: false, position: 0, frames: 64, host_ns: Some(host + (i as f64 * 64.0 * ns) as u64), delay_ns: delay, ns_per_frame: ns };
+            let block = Block {
+                playing: false,
+                position: 0,
+                frames: 64,
+                host_ns: Some(host + (i as f64 * 64.0 * ns) as u64),
+                delay_ns: delay,
+                ns_per_frame: ns,
+            };
             external.measure(&probe, &block, &input, 64);
             while let Ok(e) = rx.pop() {
                 if e.kind == Kind::Message && e.bytes[0] & 0xF0 == 0x90 {
