@@ -408,7 +408,8 @@ impl Report {
                             "threshold": n.threshold, "attack_peak": n.peak, "send_call_ns": n.send_call_ns,
                         });
                         rt::merge(&mut note, rt::fit_json(&n.fit));
-                        note["fit_drift_warning"] = serde_json::json!(fit_drift(&n.fit, fit_drift_limit_ns(self.settings.base.max_fit_error_ns, self.buffer, self.rate)));
+                        note["fit_drift_warning"] =
+                            serde_json::json!(fit_drift(&n.fit, fit_drift_limit_ns(self.settings.base.max_fit_error_ns, self.buffer, self.rate)));
                         note
                     })
                     .collect();
