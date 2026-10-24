@@ -260,6 +260,10 @@ impl Native {
         (a, name.unwrap_or_default())
     }
 
+    pub(super) fn monitor_enabled(&self) -> bool {
+        self.monitor.enabled()
+    }
+
     /// The monitor's pending events of both directions, and its counters and port list.
     pub(super) fn take_monitor(&self, events: &mut Vec<MonitorEvent>, max: usize) -> monitor::Report {
         self.monitor.drain(events, max);

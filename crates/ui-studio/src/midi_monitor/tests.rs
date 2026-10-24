@@ -400,3 +400,22 @@ fn the_header_led_is_drawn_with_audio_and_a_click_opens_the_window() {
     }
     assert!(app.ui.midi_monitor.open, "a click on the LED opens the MIDI Monitor");
 }
+
+#[test]
+fn an_audio_reconnect_keeps_the_monitor_on_for_an_open_window() {
+    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let new_player = |app: &StudioApp| soundcraft_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap();
+    app.player = Some(new_player(&app));
+    app.run("window.midi_monitor", json!({"value": true})).unwrap();
+    let ctx = egui::Context::default();
+    frame(&ctx, &mut app, 1.0);
+    assert!(app.player.as_ref().unwrap().midi_monitor_enabled(), "the window turns the taps on");
+    // What a reconnect does: a new Player, whose monitor starts off.
+    app.player = Some(new_player(&app));
+    assert!(!app.player.as_ref().unwrap().midi_monitor_enabled());
+    frame(&ctx, &mut app, 1.1);
+    assert!(app.player.as_ref().unwrap().midi_monitor_enabled(), "the next frame turns them on again");
+    app.run("window.midi_monitor", json!({"value": false})).unwrap();
+    frame(&ctx, &mut app, 1.2);
+    assert!(!app.player.as_ref().unwrap().midi_monitor_enabled());
+}

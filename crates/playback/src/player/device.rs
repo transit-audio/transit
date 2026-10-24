@@ -1080,6 +1080,12 @@ impl Player {
             m.set_monitor(enabled, show_clock);
         }
     }
+    /// Whether the MIDI Monitor taps are on in this Player (a new Player after an audio
+    /// reconnect starts with them off).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn midi_monitor_enabled(&self) -> bool {
+        self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.monitor_enabled())).unwrap_or(false)
+    }
     /// Input activity for the header LED (Clock and Active Sensing excluded): the counter, and
     /// the port name and bytes of the last message. Works with the monitor window closed, for
     /// the ports open for routing.

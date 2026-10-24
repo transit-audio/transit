@@ -193,8 +193,6 @@ pub struct State {
     hover_key: Option<u8>,
     /// The text of the last copy (tests read it; the clipboard gets it too).
     pub last_copied: String,
-    on: bool,
-    shown_clock: bool,
     scratch: Vec<MonitorEvent>,
     /// Where the window was last drawn, for `ui.inspect`.
     pub window: crate::arrange::R4,
@@ -548,11 +546,8 @@ impl StudioApp {
         let clock = self.ui.midi_monitor.show_clock;
         let Some(player) = &self.player else { return };
         let s = &mut self.midi_monitor;
-        if open != s.on || clock != s.shown_clock {
-            player.set_midi_monitor(open, clock);
-            s.on = open;
-            s.shown_clock = clock;
-        }
+        // Every frame (two relaxed stores): an audio reconnect swaps in a Player whose monitor is off.
+        player.set_midi_monitor(open, clock);
         if !open {
             return;
         }
