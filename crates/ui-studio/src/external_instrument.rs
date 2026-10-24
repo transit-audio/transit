@@ -1,8 +1,9 @@
-//! The External Instrument in the device chain (ADR 0020, slice 1): picked from the instrument
-//! menu, it is the instrument card of a track that plays a hardware synth. The card chooses the
-//! return input path, its gain and the latency set by hand, and its bottom line says what the
-//! device is doing (decision 7). The MIDI port and channel stay on the mixer strip's Out button
-//! (#61). Every change is one `instrument.external` command, one undo step.
+//! The External Instrument in the device chain (ADR 0020): picked from the instrument menu, it is
+//! the instrument card of a track that plays a hardware synth. The card chooses the return input
+//! path, its gain and the latency set by hand, measures the latency (slice 2,
+//! [`crate::external_measure`]), and its bottom line says what the device is doing and where its
+//! latency comes from (decisions 4 and 7). The MIDI port and channel stay on the mixer strip's Out
+//! button (#61). Every change is one `instrument.external` command, one undo step.
 
 use crate::StudioApp;
 use crate::mixer::{DeviceCard, MenuItem};
@@ -17,12 +18,25 @@ pub const MENU_LABEL: &str = "External Instrument";
 
 /// What the device card's state line says for `report` (the plan's view of the device),
 /// `live` (an audio device is open), and `port` (`None`: a port is chosen and present; else its
-/// label when missing, or an empty string when none is chosen). `rate` converts frames to ms.
+/// label when missing, or an empty string when none is chosen), and whether it is amber (a
+/// measurement of another rate or buffer in use). `rate` converts frames to ms and `buffer` is
+/// the open device's, against which a measurement is "measure again".
 #[must_use]
-pub fn state_text(report: Option<&ExternalReport>, live: bool, port: Option<&str>, rate: u32) -> String {
+pub fn state_line(report: Option<&ExternalReport>, live: bool, port: Option<&str>, rate: u32, buffer: Option<u32>) -> (String, bool) {
     if !live {
-        return "No audio device".into();
+        return ("No audio device".into(), false);
     }
+    if let Some(r) = report
+        && r.state == ExternalState::Ready
+        && port.is_none()
+        && let (Some(frames), Some(source)) = (r.latency, r.source.as_ref())
+    {
+        return crate::external_measure::latency_text(frames, source, rate, buffer);
+    }
+    (plain_state(report, port, rate), false)
+}
+
+fn plain_state(report: Option<&ExternalReport>, port: Option<&str>, rate: u32) -> String {
     match port {
         Some("") => return "No MIDI port: choose one on the Out button".into(),
         Some(name) => return format!("{name} missing: notes are not sent"),
@@ -61,12 +75,18 @@ impl StudioApp {
     /// Every External Instrument of the session as this machine and device see it, with the ports
     /// the MIDI output thread reports missing.
     pub fn external_reports(&self) -> Vec<ExternalReport> {
-        let io = self.engine.io_map();
+        // The table as the plan reads it: with the buffer the open device runs, which picks the
+        // measurement of this key (ADR 0020 decision 5).
+        let mut io = self.engine.io_map().clone();
+        io.buffer = self.device_buffer();
+        #[cfg(test)]
+        let duplex = self.external_measure.fake.is_some() || self.player.as_ref().is_some_and(|p| p.duplex());
+        #[cfg(not(test))]
         let duplex = self.player.as_ref().is_some_and(|p| p.duplex());
         let view = crate::midi_output::OutputView::read(self.player.as_ref());
         let s = self.engine.session();
         let missing: Vec<TrackId> = s.tracks.iter().filter(|t| view.missing(t.id, &t.midi_output)).map(|t| t.id).collect();
-        soundcraft_mix::external_report(s, io, io.inputs, duplex, s.sample_rate.hz(), &missing)
+        soundcraft_mix::external_report(s, &io, io.inputs, duplex, s.sample_rate.hz(), &missing)
     }
 
     /// Put an External Instrument in `t`'s instrument slot, returning on the machine's first input
@@ -181,8 +201,11 @@ pub(crate) fn card(
     }
     l.on_hover_text("The synth's latency in ms: from the note to its sound on the return. Notes are not sent early; the rest of the mix waits.");
     c.external_latency = crate::arrange::r4(field);
+    // Measure (slice 2): Measure, or the progress with Cancel while it runs, and Keep for a
+    // result whose spread was high.
+    measure_row(app, ui, pc, lane, t, row(3.0), &font, c);
     // The state line.
-    let live = app.player.as_ref().is_some_and(|p| !p.silent);
+    let live = app.external_live();
     let s = app.engine.session_arc();
     let output = s.track(t).map_or(MidiOutput::Internal, |x| x.midi_output.clone());
     let view = crate::midi_output::OutputView::read(app.player.as_ref());
@@ -192,15 +215,98 @@ pub(crate) fn card(
         _ => None,
     };
     let report = app.external_reports().into_iter().find(|x| x.track == t);
-    let state = state_text(report.as_ref(), live, port.as_deref(), s.sample_rate.hz());
+    let (state, stale) = state_line(report.as_ref(), live, port.as_deref(), s.sample_rate.hz(), app.device_buffer());
     let ok = report.as_ref().is_some_and(|x| x.state == ExternalState::Ready) && port.is_none() && live;
-    let resp = ui.interact(eb.intersect(lane), ui.id().with(("ext_state", t.0)), Sense::hover());
-    pc.rect_filled(eb, crate::theme::RADIUS, TOKENS.button);
-    pc.with_clip_rect(eb.intersect(lane)).text(eb.center(), Align2::CENTER_CENTER, &state, font, if ok { TOKENS.text } else { TOKENS.text_dim });
+    // A refusal or a result waiting for Keep is said where the state is, until the next Measure.
+    let said = app.external_measure.outcome.as_ref().filter(|o| o.track == t && !o.stored).map(|o| o.text.clone());
+    let (line, ink) = match &said {
+        Some(text) => (text.clone(), TOKENS.solo),
+        None if stale => (state.clone(), TOKENS.solo),
+        None => (state.clone(), if ok { TOKENS.text } else { TOKENS.text_dim }),
+    };
+    // The line wraps upward from the bottom of the card when it is long.
+    let galley = pc.layout(line, FontId::proportional(10.0), ink, eb.width() - 10.0);
+    let area = Rect::from_min_max(pos2(eb.min.x, (eb.max.y - galley.size().y - 6.0).min(eb.min.y)), eb.max);
+    let resp = ui.interact(area.intersect(lane), ui.id().with(("ext_state", t.0)), Sense::hover());
+    pc.rect_filled(area, crate::theme::RADIUS, TOKENS.button);
+    pc.with_clip_rect(area.intersect(lane)).galley(
+        pos2(area.center().x - galley.size().x / 2.0, area.center().y - galley.size().y / 2.0),
+        galley,
+        ink,
+    );
     resp.on_hover_text(format!("{}\n{state}", view.label(t, &output)));
-    c.external_state = state;
+    c.external_state = said.unwrap_or(state);
+    c.external_stale = stale;
     if let Some(change) = change {
         let _ = app.edit_external_instrument(t, change);
+    }
+}
+
+impl StudioApp {
+    /// An audio device is open (a test's fake Measure counts as one).
+    pub(crate) fn external_live(&self) -> bool {
+        #[cfg(test)]
+        if self.external_measure.fake.is_some() {
+            return true;
+        }
+        self.player.as_ref().is_some_and(|p| !p.silent)
+    }
+}
+
+/// The card's Measure row: Measure (off with the reason as its tooltip while it cannot run), the
+/// progress with Cancel while it runs, Keep beside Measure for a result with a high spread.
+#[allow(clippy::too_many_arguments)]
+fn measure_row(app: &mut StudioApp, ui: &mut Ui, pc: &egui::Painter, lane: Rect, t: TrackId, rb: Rect, font: &FontId, c: &mut DeviceCard) {
+    let running = app.external_measure.running.as_ref().is_some_and(|r| r.track == t);
+    let keep = app.external_measure.outcome.as_ref().is_some_and(|o| o.track == t && o.keep.is_some());
+    let button = |ui: &mut Ui, r: Rect, salt: &str, label: &str, enabled: bool| {
+        let resp = ui.interact(r.intersect(lane), ui.id().with((salt, t.0)), Sense::click());
+        let fill = if resp.hovered() && enabled { TOKENS.button_hover } else { TOKENS.button };
+        pc.rect_filled(r, crate::theme::RADIUS, fill);
+        let ink = if enabled { TOKENS.text } else { TOKENS.text_dim.gamma_multiply(0.6) };
+        pc.with_clip_rect(r.intersect(lane)).text(r.center(), Align2::CENTER_CENTER, label, font.clone(), ink);
+        resp
+    };
+    if running {
+        let progress = app.external_measure_progress().map(crate::external_measure::progress_text).unwrap_or_default();
+        let cancel = Rect::from_min_max(pos2(rb.max.x - 52.0, rb.min.y), rb.max);
+        pc.with_clip_rect(rb.intersect(lane)).text(pos2(rb.min.x, rb.center().y), Align2::LEFT_CENTER, &progress, font.clone(), TOKENS.text);
+        let resp = button(ui, cancel, "ext_cancel", "Cancel", true).on_hover_text("Stop measuring: the note is released and nothing is stored");
+        c.external_measure = crate::arrange::r4(cancel);
+        c.external_measure_text = progress;
+        if resp.clicked() {
+            app.cancel_external_measure(crate::external_measure::CANCELLED);
+        }
+        return;
+    }
+    let blocked = app.external_measure_blocker(t);
+    let measure = if keep { Rect::from_min_max(rb.min, pos2(rb.max.x - 48.0, rb.max.y)) } else { rb };
+    let label = if app.external_measure.outcome.as_ref().is_some_and(|o| o.track == t) { "Measure again" } else { "Measure" };
+    let resp = button(ui, measure, "ext_measure", label, blocked.is_none());
+    let resp =
+        resp.on_hover_text(blocked.clone().unwrap_or_else(|| {
+            "Play a warm-up note and 8 notes (C4, velocity 100) to the synth and time their sound on the return: about 13 s".into()
+        }));
+    c.external_measure = crate::arrange::r4(measure);
+    c.external_measure_text = label.into();
+    c.external_measure_blocked = blocked.clone().unwrap_or_default();
+    if resp.clicked() {
+        match blocked {
+            Some(why) => app.status = why,
+            None => {
+                if let Err(why) = app.start_external_measure(t) {
+                    app.status = why;
+                }
+            }
+        }
+    }
+    if keep {
+        let kr = Rect::from_min_max(pos2(rb.max.x - 44.0, rb.min.y), rb.max);
+        let resp = button(ui, kr, "ext_keep", "Keep", true).on_hover_text("Store this measurement although its spread is high");
+        c.external_keep = crate::arrange::r4(kr);
+        if resp.clicked() {
+            let _ = app.keep_external_measure(t);
+        }
     }
 }
 
@@ -208,21 +314,29 @@ pub(crate) fn card(
 mod tests {
     use super::*;
 
+    fn state_text(report: Option<&ExternalReport>, live: bool, port: Option<&str>, rate: u32, buffer: Option<u32>) -> String {
+        state_line(report, live, port, rate, buffer).0
+    }
+
     fn report(state: ExternalState, latency: Option<u32>) -> ExternalReport {
-        ExternalReport { track: TrackId(1), ret: "In 1".into(), state, latency }
+        let source = latency.map(|_| soundcraft_model::ExternalSource::Manual);
+        ExternalReport { track: TrackId(1), ret: "In 1".into(), state, latency, source }
     }
 
     #[test]
     fn the_state_line_names_each_missing_part_first_the_device_then_the_port_then_the_return() {
         let ready = report(ExternalState::Ready, Some(936));
-        assert_eq!(state_text(Some(&ready), true, None, 48_000), "Manual: 19.5 ms");
-        assert_eq!(state_text(Some(&ready), false, None, 48_000), "No audio device");
-        assert_eq!(state_text(Some(&ready), true, Some("MODEL D"), 48_000), "MODEL D missing: notes are not sent");
-        assert_eq!(state_text(Some(&ready), true, Some(""), 48_000), "No MIDI port: choose one on the Out button");
-        assert_eq!(state_text(Some(&report(ExternalState::MissingReturn, None)), true, None, 48_000), "Return In 1 is not on this interface");
-        assert_eq!(state_text(Some(&report(ExternalState::NoInput, None)), true, None, 48_000), "Needs a duplex device");
+        assert_eq!(state_text(Some(&ready), true, None, 48_000, Some(64)), "Manual: 19.5 ms");
+        assert_eq!(state_text(Some(&ready), false, None, 48_000, Some(64)), "No audio device");
+        assert_eq!(state_text(Some(&ready), true, Some("MODEL D"), 48_000, Some(64)), "MODEL D missing: notes are not sent");
+        assert_eq!(state_text(Some(&ready), true, Some(""), 48_000, Some(64)), "No MIDI port: choose one on the Out button");
         assert_eq!(
-            state_text(Some(&report(ExternalState::Unmeasured, None)), true, None, 48_000),
+            state_text(Some(&report(ExternalState::MissingReturn, None)), true, None, 48_000, Some(64)),
+            "Return In 1 is not on this interface"
+        );
+        assert_eq!(state_text(Some(&report(ExternalState::NoInput, None)), true, None, 48_000, Some(64)), "Needs a duplex device");
+        assert_eq!(
+            state_text(Some(&report(ExternalState::Unmeasured, None)), true, None, 48_000, Some(64)),
             "Not measured: notes sound late by the round trip"
         );
     }

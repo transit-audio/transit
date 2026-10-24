@@ -978,6 +978,7 @@ impl StudioApp {
         let captured = !preserve || self.preserve_audio_state()?;
         // The one place the Player is replaced: a measurement on the old one can never finish.
         self.cancel_measure(crate::hardware_measure::CANCELLED_REOPEN);
+        self.cancel_external_measure(crate::external_measure::CANCELLED_REOPEN);
         if self.is_playing() {
             self.stop_play();
         }

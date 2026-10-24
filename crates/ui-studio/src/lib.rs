@@ -20,6 +20,7 @@ pub mod control;
 pub mod debug_log;
 pub mod devices;
 mod external_instrument;
+mod external_measure;
 pub mod fades;
 pub mod fine;
 pub mod finish;
@@ -394,6 +395,8 @@ pub struct StudioApp {
     pub auto: automation::AutoState,
     /// Audio › Audio Devices: the window, its draft choices and the device listing.
     pub audio_devices: audio_devices::AudioDevicesState,
+    /// The External Instrument card's Measure (ADR 0020 decision 3).
+    pub external_measure: external_measure::MeasureState,
     /// The Open Recent entries as last drawn (empty while the submenu is closed).
     pub recent_menu: Vec<recent::RecentItemLayout>,
     /// The built-in plug-in editor windows as last drawn.
@@ -485,6 +488,7 @@ impl StudioApp {
             finish: finish::FinishState::default(),
             auto: automation::AutoState::default(),
             audio_devices: audio_devices::AudioDevicesState::default(),
+            external_measure: external_measure::MeasureState::default(),
             recent_menu: Vec::new(),
             builtin_editor: builtin_editor::EditorState::default(),
         }
@@ -536,7 +540,7 @@ impl StudioApp {
             self.status = reason.into();
             return Err(reason.into());
         }
-        if self.audio_devices.measuring.is_some()
+        if (self.audio_devices.measuring.is_some() || self.external_measure.running.is_some())
             && matches!(
                 id,
                 "transport.play"
@@ -548,7 +552,12 @@ impl StudioApp {
             )
         {
             // Playback would bleed into the return the measurement is listening on.
-            self.status = crate::hardware_measure::REFUSED_TRANSPORT.into();
+            self.status = if self.external_measure.running.is_some() {
+                crate::external_measure::REFUSED_TRANSPORT
+            } else {
+                crate::hardware_measure::REFUSED_TRANSPORT
+            }
+            .into();
             return Err(self.status.clone());
         }
         // Cycle on makes a region where the playhead is, so the engine is told where that is.
@@ -570,6 +579,9 @@ impl StudioApp {
         }
         if id == "io.measure_hardware_latency" {
             return self.measure_hardware_latency(&params);
+        }
+        if id == "instrument.measure_external" {
+            return self.measure_external_command(&params);
         }
         if id == "track.clear_clip_indicators" {
             self.clear_clip_latches();
@@ -902,7 +914,8 @@ impl StudioApp {
         self.apply_editor_edits();
         self.poll_player();
         self.step_measure();
-        if self.audio_devices.measuring.is_some() {
+        self.step_external_measure();
+        if self.audio_devices.measuring.is_some() || self.external_measure.running.is_some() {
             ctx.request_repaint();
         }
         self.update_midi_live();
@@ -1136,6 +1149,8 @@ mod automation_tests;
 mod browser_tests;
 #[cfg(test)]
 mod builtin_editor_tests;
+#[cfg(test)]
+mod external_measure_tests;
 #[cfg(test)]
 mod groups_tests;
 #[cfg(test)]

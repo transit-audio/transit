@@ -23,6 +23,7 @@ const KNOWN_UNREACHED: &[&str] = &[
     "file.bounce_stems",
     "file.commit_import",          // studio UI only (async import, L30); the old UI imports synchronously
     "instrument.external",         // studio UI only (ADR 0020: the External Instrument card in the device chain); the old UI has no device chain
+    "instrument.measure_external", // studio UI only (ADR 0020 slice 2: the External Instrument card's Measure); the old UI has no device chain
     "io.clear_hardware_latency",   // studio UI only (Audio Devices I/O, Hardware inserts); the old UI has no named I/O paths
     "io.measure_hardware_latency", // same
     "markers.next",
