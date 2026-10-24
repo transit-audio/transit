@@ -9,6 +9,15 @@ use soundcraft_time::TICKS_PER_QUARTER;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        cmd!(
+            "midi.scale_mode",
+            "Piano Roll Scale Mode",
+            [],
+            None,
+            "{clip, enabled?, fold?, root?: 0..11, scale?: major|minor}; editing aid only",
+            always,
+            scale_mode
+        ),
         cmd!(query "midi.notes", "List MIDI Notes", [], None, "{clip}", always, notes),
         cmd!(
             "midi.new_clip",
@@ -47,7 +56,15 @@ pub fn specs() -> Vec<CommandSpec> {
             always,
             chord_add
         ),
-        cmd!("midi.notes_move", "Move Notes", [], None, "{clip, indices: [n], ticks?: 0, semitones?: 0}", always, notes_move),
+        cmd!(
+            "midi.notes_move",
+            "Move Notes",
+            [],
+            None,
+            "{clip, indices: [n], ticks?: 0, semitones?: 0, pitches?: [0..127]}; pitches pairs with indices and excludes semitones",
+            always,
+            notes_move
+        ),
         cmd!(
             "midi.notes_transpose",
             "Transpose Notes",
@@ -67,6 +84,31 @@ pub fn specs() -> Vec<CommandSpec> {
             notes_constrain
         ),
     ]
+}
+
+fn scale_mode(e: &mut Engine, p: &Value) -> Result<Value> {
+    let cmd = "midi.scale_mode";
+    let id = clip_id(p, cmd)?;
+    let (_, clip) = e.session().find_clip(id).ok_or_else(|| bad(cmd, "no such clip"))?;
+    if !matches!(clip.content, ClipContent::Midi { .. }) {
+        return Err(bad(cmd, "not a MIDI clip"));
+    }
+    let mut mode = clip.scale_mode;
+    for (name, target) in [("enabled", &mut mode.enabled), ("fold", &mut mode.fold)] {
+        if let Some(value) = p.get(name) {
+            *target = value.as_bool().ok_or_else(|| bad(cmd, "enabled and fold must be booleans"))?;
+        }
+    }
+    if let Some(value) = p.get("root") {
+        mode.key.root = value.as_u64().filter(|v| *v < 12).ok_or_else(|| bad(cmd, "root must be 0..11"))? as u8;
+    }
+    if let Some(value) = p.get("scale") {
+        mode.key.scale = serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "scale must be major or minor"))?;
+    }
+    if mode != clip.scale_mode {
+        e.session_mut().find_clip_mut(id).ok_or_else(|| bad(cmd, "no such clip"))?.scale_mode = mode;
+    }
+    Ok(json!(mode))
 }
 
 fn seq_mut<'a>(e: &'a mut Engine, id: ClipId, cmd: &str) -> Result<&'a mut Sequence> {
@@ -181,6 +223,9 @@ fn note_delete(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 fn notes_move(e: &mut Engine, p: &Value) -> Result<Value> {
+    if p.get("pitches").is_some() {
+        return notes_move_to(e, p);
+    }
     let id = clip_id(p, "midi.notes_move")?;
     let idx = indices(p);
     let dt = i64_or(p, "ticks", 0);
@@ -194,6 +239,47 @@ fn notes_move(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     seq.sort();
     Ok(json!({"moved": idx.len()}))
+}
+
+/// Apply a scale move to the original indices in one batch, before sorting. Resolving notes
+/// again between individual edits can pick a note just moved onto another selected pitch.
+fn notes_move_to(e: &mut Engine, p: &Value) -> Result<Value> {
+    let cmd = "midi.notes_move";
+    let id = clip_id(p, cmd)?;
+    if p.get("semitones").is_some() {
+        return Err(bad(cmd, "pitches excludes semitones"));
+    }
+    let raw = p.get("indices").and_then(Value::as_array).ok_or_else(|| bad(cmd, "indices array required"))?;
+    let pitches = p.get("pitches").and_then(Value::as_array).ok_or_else(|| bad(cmd, "pitches array required"))?;
+    if raw.len() != pitches.len() {
+        return Err(bad(cmd, "one pitch per index required"));
+    }
+    let ticks = match p.get("ticks") {
+        Some(v) => v.as_i64().ok_or_else(|| bad(cmd, "integer ticks required"))?,
+        None => 0,
+    };
+    let Some((_, clip)) = e.session().find_clip(id) else { return Err(bad(cmd, "no such clip")) };
+    let ClipContent::Midi { sequence } = &clip.content else { return Err(bad(cmd, "not a MIDI clip")) };
+    let mut edits = Vec::new();
+    for (index, pitch) in raw.iter().zip(pitches) {
+        let index = index.as_u64().and_then(|n| usize::try_from(n).ok()).ok_or_else(|| bad(cmd, "invalid index"))?;
+        let original = sequence.notes.get(index).ok_or_else(|| bad(cmd, "index out of range"))?;
+        if edits.iter().any(|(i, _)| *i == index) {
+            return Err(bad(cmd, "duplicate index"));
+        }
+        let pitch = pitch.as_u64().filter(|n| *n < 128).ok_or_else(|| bad(cmd, "pitch must be 0..127"))? as u8;
+        let start = original.start.checked_add(ticks).filter(|s| *s >= 0).ok_or_else(|| bad(cmd, "start out of range"))?;
+        start.checked_add(original.length).ok_or_else(|| bad(cmd, "end out of range"))?;
+        edits.push((index, Note { pitch, start, ..*original }));
+    }
+    if edits.iter().any(|(i, n)| sequence.notes[*i] != *n) {
+        let sequence = seq_mut(e, id, cmd)?;
+        for (i, n) in &edits {
+            sequence.notes[*i] = *n;
+        }
+        sequence.sort();
+    }
+    Ok(json!({"moved": edits.len(), "notes": edits.iter().map(|(_, n)| n).collect::<Vec<_>>()}))
 }
 
 /// Validate the complete selection before editing; repeated indices edit a note only once.

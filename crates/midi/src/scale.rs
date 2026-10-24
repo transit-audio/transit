@@ -17,7 +17,25 @@ pub struct KeyScale {
     pub scale: Scale,
 }
 
+/// Per-clip editing aid. Never applied to MIDI playback or live input.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct ScaleMode {
+    pub enabled: bool,
+    pub fold: bool,
+    pub key: KeyScale,
+}
+
 impl KeyScale {
+    /// Move by scale degrees, snapping an accidental first; bounded at MIDI limits.
+    pub fn transpose(self, pitch: u8, degrees: i64) -> u8 {
+        let tones: Vec<u8> = (0..=127).filter(|&p| self.contains(p)).collect();
+        let nearest = self.nearest(pitch);
+        let index = tones.iter().position(|&p| p == nearest).unwrap_or(0) as i64;
+        let target = index.saturating_add(degrees).clamp(0, tones.len().saturating_sub(1) as i64);
+        tones.get(target as usize).copied().unwrap_or(nearest)
+    }
+
     /// Whether a MIDI pitch belongs to this key. Tonic values normalize modulo 12.
     pub fn contains(self, pitch: u8) -> bool {
         let degree = (pitch % 12 + 12 - self.root % 12) % 12;

@@ -363,13 +363,17 @@ impl Session {
     pub const FORMAT_VERSION: u32 = 1;
 
     /// Features a file can list under `needs` (see [`Session::to_json`]) that this build understands.
-    pub const KNOWN_NEEDS: [&'static str; 1] = ["clip_loop"];
+    pub const KNOWN_NEEDS: [&'static str; 2] = ["clip_loop", "clip_scale_mode"];
 
     /// The `needs` entries this session's content requires: a reader that does not know one would
     /// silently drop or misplay it. Empty for a session that uses none.
     pub fn needs(&self) -> Vec<&'static str> {
         let looped = self.tracks.iter().any(|t| t.playlists.iter().any(|p| p.clips.iter().any(|c| c.looping.is_some())));
-        if looped { vec!["clip_loop"] } else { Vec::new() }
+        let mut needs = if looped { vec!["clip_loop"] } else { Vec::new() };
+        if self.all_clips().any(|c| c.scale_mode != Default::default()) {
+            needs.push("clip_scale_mode");
+        }
+        needs
     }
 
     pub fn new(name: impl Into<String>, sample_rate: SampleRate) -> Self {

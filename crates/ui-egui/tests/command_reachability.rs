@@ -32,6 +32,7 @@ const KNOWN_UNREACHED: &[&str] = &[
     "midi.output",    // studio UI only (#61: the MIDI strip's Out button); the old UI has no MIDI output picker
     "midi.notes_transpose", // studio UI only (#27: piano-roll Pitch menu)
     "midi.notes_constrain", // studio UI only (#27: piano-roll Pitch menu)
+    "midi.scale_mode", // studio UI only (#77: piano-roll per-clip scale controls)
     "mix.clear_mutes",
     "mix.clear_solos",
     "mix.insert_copy", // studio UI only (Alt-drag in the device chain); the old UI has no device reorder

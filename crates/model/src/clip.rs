@@ -126,6 +126,9 @@ pub struct Clip {
     /// Length (samples, > 0).
     pub length: Samples,
     pub content: ClipContent,
+    /// Piano-roll view/editing aid; does not change the performed MIDI stream.
+    #[serde(default)]
+    pub scale_mode: soundcraft_midi::scale::ScaleMode,
     /// Static clip gain in dB.
     #[serde(default)]
     pub gain_db: f32,
@@ -178,6 +181,7 @@ impl Clip {
             start,
             length: length.max(1),
             content: ClipContent::Audio { source, offset },
+            scale_mode: Default::default(),
             gain_db: 0.0,
             gain_env: Vec::new(),
             fade_in: Fade::default(),
