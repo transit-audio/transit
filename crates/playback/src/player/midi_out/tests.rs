@@ -344,3 +344,38 @@ fn a_wrap_releases_a_device_track_without_the_mixs_delay_and_a_bare_track_with_i
     std::thread::sleep(Duration::from_millis(40));
     assert_eq!(rig.sent().len(), 6, "the device's restarted note was released with the bare track");
 }
+
+/// A locate backwards while A has dropped: the release (at P(R) + A_new) drops the old lap's
+/// pending note and resets the track's deadline clamp to the release instant, so the next lap
+/// goes out on time and is not held to the old lap's deadline.
+#[test]
+fn a_locate_with_a_lower_a_resets_the_deadline_clamp_so_the_next_lap_is_on_time() {
+    let mut rig = Rig::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 0)]);
+    let base = rig.now() + 30_000_000;
+    assert!(rig.playback.push(message(1, 0, [0x90, 50, 100])));
+    rig.wait_sent(1);
+    assert!(rig.playback.push(message(1, base + 200_000_000, [0x90, 60, 100]))); // the old lap, A_old large
+    assert!(rig.playback.push(OutEvent { kind: Kind::Release, at_ns: base, delay_ns: 0, ..OutEvent::default() }));
+    assert!(rig.playback.push(message(1, base + 1_000_000, [0x90, 62, 100])));
+    let sends = rig.wait_sent(3);
+    let order: Vec<Vec<u8>> = sends.iter().map(|s| s.message.clone()).collect();
+    assert_eq!(order, [vec![0x90, 50, 100], vec![0x80, 50, 64], vec![0x90, 62, 100]]);
+    let late = sends[2].at.saturating_duration_since(rig.origin.instant() + Duration::from_nanos(base + 1_000_000));
+    assert!(late < Duration::from_millis(10), "the next lap was held to the old lap's deadline: {late:?}");
+    std::thread::sleep(Duration::from_millis(250));
+    assert!(!rig.sent().contains(&vec![0x90, 60, 100]), "the discarded old-lap note went out");
+}
+
+/// One bogus far-future stamp does not stall the track: the clamp holds an event at most
+/// `CLAMP_CAP_NS` past now.
+#[test]
+fn the_deadline_clamp_is_capped_so_a_far_future_stamp_cannot_stall_a_track() {
+    let mut rig = Rig::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 0)]);
+    let now = rig.now();
+    assert!(rig.playback.push(message(1, now + 60_000_000_000, [0x90, 60, 100])));
+    assert!(rig.playback.push(message(1, now + 5_000_000, [0x90, 62, 100])));
+    let sends = rig.wait_sent(1);
+    assert_eq!(sends[0].message, vec![0x90, 62, 100]);
+    let late = sends[0].at.saturating_duration_since(rig.origin.instant() + Duration::from_nanos(now + 5_000_000));
+    assert!(late <= Duration::from_nanos(CLAMP_CAP_NS) + Duration::from_millis(100), "held past the cap: {late:?}");
+}

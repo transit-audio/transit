@@ -33,6 +33,9 @@ const PORT_POLL: Duration = Duration::from_millis(250);
 const SPIN_NS: u64 = 300_000;
 /// A send this late against its deadline counts as late.
 const LATE_NS: u64 = 2_000_000;
+/// The per-track deadline clamp (`Track::last`) never holds an event more than this past now, so
+/// one bogus far-future stamp cannot hold back the rest of a track's playback.
+const CLAMP_CAP_NS: u64 = 2_000_000_000;
 /// Destinations in one table; tracks beyond it get no external output.
 pub const MAX_DESTINATIONS: usize = 256;
 
@@ -752,7 +755,7 @@ impl Worker {
                     let at = if event.at_ns == 0 { now } else { event.at_ns };
                     // Per track, deadlines never go backwards (see `Track::last`); with equal
                     // deadlines the arrival order holds, so a note-off never overtakes its note-on.
-                    let deadline = at.saturating_add_signed(track.destination.offset_ns).max(track.last);
+                    let deadline = at.saturating_add_signed(track.destination.offset_ns).max(track.last.min(now.saturating_add(CLAMP_CAP_NS)));
                     track.last = deadline;
                     self.schedule(deadline, Origin::Playback, event);
                 }

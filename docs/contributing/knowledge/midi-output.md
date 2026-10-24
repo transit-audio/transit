@@ -57,8 +57,11 @@ sends it at `H + destination offset`.
   note-on stamped with the old one, and the synth would hold the note. The output thread clamps
   each playback event's deadline to the latest one already queued for that track
   (`Track::last`; equal deadlines keep arrival order), so for at most the drop in A events bunch
-  at the old instant instead. Stop, the panic and a destination change reset it; a wrap or locate
-  release sets it to the release instant.
+  at the old instant instead. Notes that fall inside that window right after A drops are held to
+  the previous deadline and may be shortened. Stop, the panic and a destination change reset it; a
+  wrap or locate release sets it to the release instant, so the next lap goes out on time. The
+  clamp never holds an event more than 2 s past now (`CLAMP_CAP_NS`), so one bogus far-future
+  stamp cannot stall a track.
 
 - The audio is rendered ahead of presentation, so events usually arrive at the output thread
   before their instant. A negative offset larger than that lead cannot be honored: the event is
