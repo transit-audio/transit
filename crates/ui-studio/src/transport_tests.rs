@@ -293,7 +293,7 @@ fn play_is_muted_with_a_reason_while_play_is_pending() {
     t.app.player_requests.play = Some(Default::default());
     t.frames(2);
     assert!(t.app.play_pending());
-    assert_eq!(t.app.transport_wait(), Some("Play pending"));
+    assert_eq!(t.app.transport_wait(), Some(("Play pending".to_string(), true)));
     // The button is still laid out (the tooltip and click target), now in the muted state.
     assert!(t.app.arrange.layout.transport.contains_key("play"));
 }

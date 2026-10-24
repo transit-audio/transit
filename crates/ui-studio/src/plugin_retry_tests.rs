@@ -304,3 +304,50 @@ fn retry_all_in_the_status_line_makes_every_not_responding_plug_in_again() {
     let states = t.gate.states.lock().unwrap().clone();
     assert_eq!(states[2..].iter().filter(|s| matches!(s.as_deref(), Some([5] | [6]))).count(), 2, "with their stored states: {states:?}");
 }
+
+/// Issue #75 follow-up: the Play button pulses only while the wait is on the normal path. A
+/// pending request or a load inside the display budget pulses; a slow load turns it steady with
+/// the plug-in named in the tooltip; the pulse is back, and then Play itself, once the load ends.
+#[test]
+fn play_pulses_while_loading_is_normal_and_goes_steady_once_the_load_is_slow() {
+    let clock = ManualClock::new();
+    let mut t = T::new(Duration::from_millis(100), Duration::from_secs(60), clock.clock(), Duration::from_secs(10), 1);
+    let track = t.track("instrument");
+    t.host_plugin(track, None, &[3]);
+    let gate = Arc::clone(&t.gate);
+    assert!(t.frames_until(Duration::from_secs(10), |t| t.card().status == crate::devices::LOADING && gate.calls() == 1));
+    assert_eq!(t.app.transport_wait(), Some(("Waiting for plug-ins to load".to_string(), true)), "normal load: pulse");
+    t.app.player_requests.play = Some(Default::default());
+    assert_eq!(t.app.transport_wait(), Some(("Play pending".to_string(), true)), "normal pending: pulse");
+    t.app.player_requests.play = None;
+    clock.advance(Duration::from_secs(11));
+    t.frames(2);
+    let name = t.app.plugin_name(HOSTED, true);
+    let slow = Some((format!("Waiting for {name} to load (slow)"), false));
+    assert_eq!(t.app.transport_wait(), slow, "slow load: steady with the reason");
+    t.app.player_requests.play = Some(Default::default());
+    assert_eq!(t.app.transport_wait(), slow, "slow load with Play pending: steady too");
+    t.app.player_requests.play = None;
+    t.gate.open();
+    assert!(t.frames_until(Duration::from_secs(10), |t| t.bound(track, SLOT)));
+    t.frames(2);
+    assert_eq!(t.app.transport_wait(), None, "loaded: Play is ready again");
+}
+
+/// Issue #75 follow-up: with Play pending on a plug-in that is not responding, the button is
+/// steady and the tooltip points at Retry; after Retry loads it, the wait is over.
+#[test]
+fn play_is_steady_with_the_retry_hint_while_a_plug_in_is_not_responding() {
+    let mut t = T::new(Duration::from_millis(100), Duration::from_millis(400), Arc::new(Instant::now), Duration::from_millis(150), 1);
+    let track = t.track("instrument");
+    t.host_plugin(track, None, &[1]);
+    assert!(t.frames_until(Duration::from_secs(10), |t| t.stuck(track, SLOT)));
+    t.app.player_requests.play = Some(Default::default());
+    let name = t.app.plugin_name(HOSTED, true);
+    assert_eq!(t.app.transport_wait(), Some((format!("{name} not responding: Retry in the mixer"), false)));
+    t.app.player_requests.play = None;
+    t.app.retry_plugin(track, SLOT).unwrap();
+    assert!(t.frames_until(Duration::from_secs(10), |t| t.bound(track, SLOT)));
+    t.frames(2);
+    assert_eq!(t.app.transport_wait(), None, "retried and loaded: Play is ready");
+}

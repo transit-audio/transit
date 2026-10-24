@@ -41,30 +41,59 @@ impl StudioApp {
         self.player.as_ref().is_some_and(|p| p.any_loading())
     }
 
-    /// Why Play is muted, or `None` when it is ready. A pending request wins over loading.
-    pub fn transport_wait(&self) -> Option<&'static str> {
-        if self.play_pending() {
-            Some("Play pending")
-        } else if self.plugins_loading() && !self.is_playing() {
-            Some("Waiting for plug-ins to load")
-        } else {
-            None
+    /// The plug-in a wait is really on, when its load is off the normal path: a slot that is
+    /// stuck ("Not responding", only while a Play request is pending, since the session otherwise
+    /// plays on without it) or slow past the display budget. Stuck wins over slow.
+    fn load_trouble(&mut self) -> Option<(String, bool)> {
+        let player = self.player.as_ref()?;
+        let stuck = player.stuck_slots().into_iter().next();
+        let mut slow = None;
+        for t in &self.engine.session().tracks {
+            let slots = t.instrument.as_ref().map(|i| (soundcraft_mix::INSTRUMENT_SLOT, i)).into_iter();
+            let slots = slots.chain(t.mixer.inserts.iter().enumerate().filter_map(|(s, i)| Some((s, i.as_ref()?))));
+            for (slot, ins) in slots {
+                if matches!(player.slot_load(t.id, slot), Some(soundcraft_playback::SlotLoad::Slow { .. })) {
+                    slow.get_or_insert((ins.plugin.clone(), slot == soundcraft_mix::INSTRUMENT_SLOT));
+                }
+            }
         }
+        if let Some((_, slot, id)) = stuck.filter(|_| self.play_pending()) {
+            Some((self.plugin_name(&id, slot == soundcraft_mix::INSTRUMENT_SLOT), true))
+        } else {
+            slow.map(|(id, instrument)| (self.plugin_name(&id, instrument), false))
+        }
+    }
+
+    /// Why Play is muted and whether it pulses, or `None` when it is ready. A pending request wins
+    /// over loading. The pulse reads as "about to start", so it stops (a steady muted button) while
+    /// the wait is on a plug-in that is slow to load or not responding; the reason names it.
+    pub fn transport_wait(&mut self) -> Option<(String, bool)> {
+        let waiting = self.play_pending() || (self.plugins_loading() && !self.is_playing());
+        if !waiting {
+            return None;
+        }
+        Some(match self.load_trouble() {
+            Some((name, true)) => (format!("{name} not responding: Retry in the mixer"), false),
+            Some((name, false)) => (format!("Waiting for {name} to load (slow)"), false),
+            None if self.play_pending() => ("Play pending".to_string(), true),
+            None => ("Waiting for plug-ins to load".to_string(), true),
+        })
     }
 }
 
-/// The Play button while waiting: dim icon, a gentle pulse, and the reason as the tooltip.
+/// The Play button while waiting: dim icon, a gentle pulse (steady when the wait is a slow or stuck
+/// plug-in), and the reason as the tooltip.
 fn play_button(app: &mut StudioApp, ui: &mut Ui, on: bool) -> egui::Response {
-    let Some(reason) = app.transport_wait() else {
+    let Some((reason, pulsing)) = app.transport_wait() else {
         return button(app, ui, "play", Icon::Play, on, TOKENS.accent);
     };
     let (r, resp) = ui.allocate_exact_size(vec2(34.0, 28.0), Sense::click());
     let t = ui.input(|i| i.time) as f32;
-    let pulse = 0.5 + 0.5 * (t * std::f32::consts::TAU / 1.6).sin();
+    let pulse = if pulsing { 0.5 + 0.5 * (t * std::f32::consts::TAU / 1.6).sin() } else { 0.0 };
     let p = ui.painter();
     p.rect_filled(r, crate::theme::RADIUS, TOKENS.button);
     icons::paint_in(p, r, Icon::Play, TOKENS.text_dim.gamma_multiply(0.45 + 0.45 * pulse));
-    ui.ctx().request_repaint_after(std::time::Duration::from_millis(50));
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(if pulsing { 50 } else { 250 }));
     app.arrange.layout.transport.insert("play".to_string(), [r.min.x, r.min.y, r.max.x, r.max.y]);
     app.arrange.layout.transport_icons.insert("play".to_string(), Icon::Play.name().to_string());
     resp.on_hover_text(reason)
