@@ -245,12 +245,23 @@ pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut
 }
 
 /// Place a finished MIDI recording as one undo step ("Record") and return the clips it created
-/// or merged into. `stop` is the samples from the latch to Stop.
+/// or merged into. `stop` is the samples from the latch to Stop. The transport is taken to have
+/// cycled over the session's cycle range while Cycle is on (journal recovery has nothing better).
 pub fn place_midi_recording(e: &mut Engine, plan: &Recording, events: &[RecEvent], stop: Samples) -> Vec<ClipId> {
+    let wrap = {
+        let s = e.session();
+        s.edit.loop_playback.then_some(s.edit.cycle_range())
+    };
+    place_midi_recording_wrapping(e, plan, events, stop, wrap)
+}
+
+/// As [`place_midi_recording`], with `wrap` the loop the transport actually cycled over during the
+/// pass (`None`: it played straight through). The host knows it: Cycle toggled or the region moved
+/// while a take records does not change the loop that take was recorded with (#81).
+pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &[RecEvent], stop: Samples, wrap: Option<Range>) -> Vec<ClipId> {
     let cut = Cut { start: plan.start, pass: plan.pass, punch: plan.punch, stop };
     let built = {
         let s = e.session();
-        let wrap = s.edit.loop_playback.then_some(s.edit.cycle_range());
         build_wrapping(&s.tempo, s.sample_rate, events, &cut, wrap)
     };
     if built.is_empty() {
