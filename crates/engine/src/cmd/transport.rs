@@ -99,6 +99,32 @@ mod tests {
     }
 
     #[test]
+    fn cycle_on_makes_a_region_in_the_toggles_undo_step_and_off_keeps_it() {
+        use soundcraft_time::Range;
+        let mut e = Engine::default();
+        let (steps, tempo, sr) = (undo_len(&mut e), e.session().tempo.clone(), e.session().sample_rate);
+        let bar = |n: i64| tempo.tick_to_samples(tempo.bar_start_tick(n), sr);
+        // A selection is promoted.
+        e.session_mut().edit.selection = Range::new(500, 9000);
+        e.execute("options.loop_playback", &json!({"value": true})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(500, 9000));
+        assert_eq!(undo_len(&mut e), steps + 1);
+        e.execute("edit.undo", &json!({})).unwrap();
+        assert!(e.session().edit.loop_range.is_empty() && !e.session().edit.loop_playback);
+        // No selection: four bars from the bar holding `at`.
+        e.session_mut().edit.selection = Range::default();
+        e.execute("options.loop_playback", &json!({"value": true, "at": bar(2) + 10})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(bar(2), bar(6)));
+        // Off keeps it (no undo step), on again reuses it.
+        let n = undo_len(&mut e);
+        e.execute("options.loop_playback", &json!({"value": false})).unwrap();
+        assert_eq!(undo_len(&mut e), n);
+        e.execute("options.loop_playback", &json!({"value": true, "at": bar(9)})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(bar(2), bar(6)));
+        assert_eq!(undo_len(&mut e), n);
+    }
+
+    #[test]
     fn transport_loop_sets_the_region_in_one_undo_step() {
         let mut e = Engine::default();
         let steps = undo_len(&mut e);

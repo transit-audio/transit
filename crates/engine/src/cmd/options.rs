@@ -16,12 +16,59 @@ macro_rules! toggle {
     };
 }
 
+/// Cycle on/off. Turning it on with no loop region makes one (see `EditState::cycle_range`): the
+/// time selection when it is non-empty, else four bars from the bar containing `at` (default: the
+/// playhead), cut at the end of the content when that lies past `at`. The region and the switch
+/// land as one undo step; turning Cycle off leaves the region, so the next toggle restores it.
+fn loop_playback(e: &mut Engine, p: &Value) -> Result<Value> {
+    let on = p.get("value").and_then(Value::as_bool).unwrap_or(!e.session().edit.loop_playback);
+    let at = position_param(e, "options.loop_playback", p, "at")?;
+    let promote = on && e.session().edit.loop_range.is_empty();
+    let before = e.session_arc();
+    let region = promote.then(|| default_region(e, at));
+    let ed = &mut e.session_mut().edit;
+    ed.loop_playback = on;
+    if let Some(r) = region.filter(|r| !r.is_empty()) {
+        ed.loop_range = r;
+    }
+    if promote {
+        e.push_undo("Cycle On", before);
+    }
+    Ok(json!({"value": on}))
+}
+
+fn default_region(e: &Engine, at: Option<i64>) -> soundcraft_time::Range {
+    let s = e.session();
+    if !s.edit.selection.is_empty() {
+        return s.edit.selection;
+    }
+    let at = at.unwrap_or(if e.transport.playing { e.transport.position } else { s.edit.playhead }).max(0);
+    let (tempo, sr) = (&s.tempo, s.sample_rate);
+    let bar = tempo.bar_beat_at(at, sr).bar;
+    let start = tempo.tick_to_samples(tempo.bar_start_tick(bar), sr);
+    let mut end = tempo.tick_to_samples(tempo.bar_start_tick(bar + 4), sr);
+    let content = s.content_end();
+    if content > start && content < end {
+        end = content;
+    }
+    soundcraft_time::Range::new(start, end)
+}
+
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         toggle!("options.loop_record", "Loop Record", ["Options"], Some("Alt+L"), loop_record),
         toggle!("options.quickpunch", "QuickPunch", ["Options"], Some("Cmd+Shift+P"), quickpunch),
         toggle!("options.pre_post_roll", "Pre/Post-Roll", ["Options"], Some("Cmd+K"), pre_post_roll),
-        toggle!("options.loop_playback", "Loop Playback", ["Options"], Some("Cmd+Shift+L"), loop_playback),
+        cmd!(
+            noundo
+            "options.loop_playback",
+            "Loop Playback",
+            ["Options"],
+            Some("Cmd+Shift+L"),
+            "{value?: bool, at?: position (where the default region starts when none exists; the playhead when omitted)}",
+            always,
+            |e, p| loop_playback(e, p)
+        ),
         toggle!("options.link_timeline_edit", "Link Timeline and Edit Selection", ["Options"], Some("Shift+/"), link_timeline_edit),
         toggle!("options.link_track_edit", "Link Track and Edit Selection", ["Options"], None, link_track_edit),
         toggle!("options.insertion_follows_playback", "Insertion Follows Playback", ["Options"], None, insertion_follows_playback),

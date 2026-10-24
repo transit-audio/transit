@@ -227,6 +227,13 @@ pub struct EditState {
 
 impl EditState {
     /// The range Cycle plays and records: the loop region when one is set, else the selection.
+    ///
+    /// Turning Cycle on (`options.loop_playback`) with no loop region makes one, so the fallback
+    /// only serves a session that arrives in that state (an older file, or a cleared region while
+    /// Cycle stays on). The new region is the time selection when it is non-empty, else four bars
+    /// from the bar containing the playhead (cut at the end of the content when that lies ahead of
+    /// the start). It lands in the same undo step as the switch. Turning Cycle off leaves the
+    /// region in place, so the next toggle reuses it.
     pub fn cycle_range(&self) -> Range {
         if self.loop_range.is_empty() { self.selection } else { self.loop_range }
     }
