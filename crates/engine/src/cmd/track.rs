@@ -727,6 +727,12 @@ fn move_track(e: &mut Engine, p: &Value) -> Result<Value> {
 
 fn commit(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "track.commit", p)?;
+    // Refused before anything renders, so a refusal leaves every track as it was.
+    for t in &tracks {
+        if let Some(tr) = e.session().track(*t) {
+            super::external_instrument::refuse_offline_print("track.commit", tr)?;
+        }
+    }
     let mut out = Vec::new();
     for t in tracks {
         if let Some(id) = crate::io::commit_track(e, t)? {

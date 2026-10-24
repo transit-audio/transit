@@ -16,6 +16,7 @@ mod edit;
 mod edit_more;
 mod event;
 mod event_more;
+mod external_instrument;
 mod file;
 mod freeze;
 mod health;
@@ -45,6 +46,7 @@ mod view_more;
 mod vst3;
 mod zoom_toggle;
 
+pub use external_instrument::external_in_render;
 pub use file::{bounce_job, bounce_paths_job};
 
 pub(crate) use edit::remember_selection;
@@ -166,6 +168,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(plugin_state::specs());
         v.extend(plugin_presets::specs());
         v.extend(instrument::specs());
+        v.extend(external_instrument::specs());
         v.extend(sampler::specs());
         v.extend(video::specs());
         v.extend(zoom_toggle::specs());

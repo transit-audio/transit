@@ -58,6 +58,7 @@ fn freeze_track(e: &mut Engine, id: &str, t: TrackId) -> Result<bool> {
     if !matches!(tr.kind, TrackKind::Audio | TrackKind::Instrument) {
         return Err(bad(id, format!("`{}` is not an audio or instrument track", tr.name)));
     }
+    super::external_instrument::refuse_offline_print(id, tr)?;
     let end = tr.clips().iter().map(Clip::end).max().unwrap_or(0);
     if end <= 0 {
         return Err(bad(id, format!("nothing to freeze: `{}` has no clips", tr.name)));

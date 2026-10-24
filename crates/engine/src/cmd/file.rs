@@ -96,9 +96,10 @@ pub fn specs() -> Vec<CommandSpec> {
                 crate::io::import_video_bytes(e, &path, bytes, at)
             }
         ),
-        cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, source?: main|bus name, normalize?: false, dither?: true, fold_down?: stereo}", always, bounce),
-        cmd!(noundo "file.bounce_stems", "Bounce Stems...", [], None, "{dir, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, fold_down?: stereo}", has_tracks, |e, p| {
+        cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, source?: main|bus name, normalize?: false, dither?: true, fold_down?: stereo, without_external?: false}", always, bounce),
+        cmd!(noundo "file.bounce_stems", "Bounce Stems...", [], None, "{dir, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, fold_down?: stereo, without_external?: false}", has_tracks, |e, p| {
             let dir = str_param(p, "dir").ok_or_else(|| bad("file.bounce_stems", "`dir` required"))?.to_string();
+            let left_out = super::external_instrument::render_guard(e, "file.bounce_stems", p)?;
             let r = range_param(e, "file.bounce_stems", p)?;
             let r = if r.is_empty() { soundcraft_time::Range::new(0, e.session().content_end().max(1)) } else { r };
             let format = match str_param(p, "format") {
@@ -113,9 +114,9 @@ pub fn specs() -> Vec<CommandSpec> {
             };
             let fold = fold_down_param(p, "file.bounce_stems")?;
             let files = crate::io::bounce_stems_with(e, &dir, r, &soundcraft_audio_io::EncodeOptions { format, bit_depth, dither: true, bwf: None }, fold)?;
-            Ok(json!({"files": files}))
+            Ok(json!({"files": files, "left_out": left_out}))
         }),
-        cmd!(noundo "file.bounce_paths", "Bounce Stems by Output Path...", [], None, "{dir, paths?: [output path name | main] | all (default: every routed path), format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, normalize?: false|true|joint|each, dither?: true}", has_tracks, bounce_paths),
+        cmd!(noundo "file.bounce_paths", "Bounce Stems by Output Path...", [], None, "{dir, paths?: [output path name | main] | all (default: every routed path), format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, normalize?: false|true|joint|each, dither?: true, without_external?: false}", has_tracks, bounce_paths),
         cmd!(noundo "file.export_midi", "MIDI...", ["File", "Export"], None, "{path, tracks?}", always, |e, p| {
             let path = str_param(p, "path").ok_or_else(|| bad("file.export_midi", "`path` required"))?.to_string();
             let only = if p.get("tracks").is_some() || p.get("track").is_some() { Some(tracks_param(e, "file.export_midi", p)?) } else { None };
@@ -366,6 +367,7 @@ fn fold_down_param(p: &Value, id: &str) -> Result<bool> {
 
 fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
     let job = bounce_job(e, p)?;
+    let left_out = super::external_instrument::external_in_render(e.session());
     let (path, seconds) = (job.path().to_string_lossy().into_owned(), e.session().sample_rate.seconds(job.range().len()));
     let done = job.run()?;
     Ok(json!({
@@ -375,12 +377,14 @@ fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
         "peak_db": done.peak_db,
         "lufs": done.lufs,
         "true_peak_db": done.true_peak_db,
+        "left_out": left_out,
     }))
 }
 
 /// The bounce `file.bounce_mix` runs for `p`, not rendered yet.
 pub fn bounce_job(e: &Engine, p: &Value) -> Result<crate::io::Bounce> {
     let path = str_param(p, "path").ok_or_else(|| bad("file.bounce_mix", "`path` required"))?.to_string();
+    super::external_instrument::render_guard(e, "file.bounce_mix", p)?;
     let r = range_param(e, "file.bounce_mix", p)?;
     let r = if r.is_empty() { soundcraft_time::Range::new(0, e.session().content_end().max(1)) } else { r };
     let ext = std::path::Path::new(&path).extension().and_then(|x| x.to_str()).unwrap_or("wav").to_ascii_lowercase();
@@ -409,6 +413,7 @@ pub fn bounce_job(e: &Engine, p: &Value) -> Result<crate::io::Bounce> {
 /// `file.bounce_paths`: one file per output path, in one pass.
 fn bounce_paths(e: &mut Engine, p: &Value) -> Result<Value> {
     let job = bounce_paths_job(e, p)?;
+    let left_out = super::external_instrument::external_in_render(e.session());
     let seconds = e.session().sample_rate.seconds(job.range().len());
     let dir = job.dir().to_string_lossy().into_owned();
     let done = job.run()?;
@@ -428,7 +433,7 @@ fn bounce_paths(e: &mut Engine, p: &Value) -> Result<Value> {
         })
         .collect();
     let empty: Vec<&str> = done.stems.iter().filter(|s| s.empty).map(|s| s.path.as_str()).collect();
-    Ok(json!({"dir": dir, "seconds": seconds, "files": files, "empty": empty, "joint_gain_db": done.joint_gain_db}))
+    Ok(json!({"dir": dir, "seconds": seconds, "files": files, "empty": empty, "joint_gain_db": done.joint_gain_db, "left_out": left_out}))
 }
 
 /// The bounce `file.bounce_paths` runs for `p`, not rendered yet.
@@ -436,6 +441,7 @@ pub fn bounce_paths_job(e: &Engine, p: &Value) -> Result<crate::io::PathBounce> 
     use crate::io::PathNormalize;
     const ID: &str = "file.bounce_paths";
     let dir = str_param(p, "dir").ok_or_else(|| bad(ID, "`dir` required"))?.to_string();
+    super::external_instrument::render_guard(e, ID, p)?;
     let r = range_param(e, ID, p)?;
     let r = if r.is_empty() { soundcraft_time::Range::new(0, e.session().content_end().max(1)) } else { r };
     let format_name = str_param(p, "format").unwrap_or("wav");

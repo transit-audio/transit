@@ -495,6 +495,56 @@ pub struct HardwareInsert {
     pub disabled: Option<String>,
 }
 
+/// The plug-in id of an External Instrument (ADR 0020): an instrument slot that plays a hardware
+/// synth. It names no plug-in: the track's MIDI goes to the port of `Track::midi_output` and the
+/// synth's audio comes back on an input path. An older build sees an unknown instrument id (the
+/// track is silent there) and still sends the MIDI to the port.
+pub const EXTERNAL_INSTRUMENT_PLUGIN: &str = "external.instrument";
+
+/// The largest latency an External Instrument's manual value takes, in milliseconds.
+pub const MAX_EXTERNAL_LATENCY_MS: f32 = 500.0;
+
+/// The return gain range of an External Instrument, in dB.
+pub const EXTERNAL_GAIN_DB: (f32, f32) = (-60.0, 24.0);
+
+/// An External Instrument (ADR 0020 decision 1): the synth's audio returns on input path `ret`,
+/// gained by `gain_db` before the inserts. Its latency is `manual_ms` when set (the measured value
+/// is stored per machine, not here). The MIDI port and channel are the track's `midi_output`.
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
+pub struct ExternalInstrument {
+    /// The input path the synth comes back on (empty: none chosen yet), resolved against the
+    /// machine's I/O map like a hardware insert's return.
+    #[serde(rename = "return", default)]
+    pub ret: String,
+    /// Gain on the return, before the inserts.
+    #[serde(default)]
+    pub gain_db: f32,
+    /// The latency set by hand, in milliseconds (`None`: not set).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub manual_ms: Option<f32>,
+}
+
+impl ExternalInstrument {
+    /// The return gain in dB, finite and clamped to [`EXTERNAL_GAIN_DB`]. Files are hostile.
+    #[must_use]
+    pub fn gain_db(&self) -> f32 {
+        if self.gain_db.is_finite() { self.gain_db.clamp(EXTERNAL_GAIN_DB.0, EXTERNAL_GAIN_DB.1) } else { 0.0 }
+    }
+
+    /// The manual latency in milliseconds, clamped to 0..[`MAX_EXTERNAL_LATENCY_MS`] when read (a
+    /// non-finite value reads as unset).
+    #[must_use]
+    pub fn manual_ms(&self) -> Option<f32> {
+        self.manual_ms.filter(|ms| ms.is_finite()).map(|ms| ms.clamp(0.0, MAX_EXTERNAL_LATENCY_MS))
+    }
+
+    /// The manual latency in plan frames at `rate`: round(ms × r / 1000) (decision 4, case 1).
+    #[must_use]
+    pub fn manual_frames(&self, rate: u32) -> Option<u32> {
+        self.manual_ms().map(|ms| (f64::from(ms) * f64::from(rate) / 1000.0).round() as u32)
+    }
+}
+
 /// A plugin instance on an insert slot.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Insert {
@@ -527,6 +577,11 @@ pub struct Insert {
     /// plug-in; the signal goes out one path of the audio interface and comes back on another.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hardware: Option<HardwareInsert>,
+    /// Set on an instrument slot holding an External Instrument (`plugin` is then
+    /// [`EXTERNAL_INSTRUMENT_PLUGIN`]): a hardware synth played over MIDI, its audio returned on an
+    /// input path (ADR 0020).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external: Option<ExternalInstrument>,
 }
 
 fn yes() -> bool {
@@ -545,6 +600,7 @@ impl Insert {
             sample: None,
             key: None,
             hardware: None,
+            external: None,
             uid: InsertUid::default(),
         }
     }
@@ -556,6 +612,21 @@ impl Insert {
             preset: String::new(),
             ..Insert::new(HARDWARE_PLUGIN)
         }
+    }
+
+    /// An External Instrument returning on input path `ret` (ADR 0020).
+    pub fn external(ret: impl Into<String>) -> Self {
+        Insert {
+            external: Some(ExternalInstrument { ret: ret.into(), gain_db: 0.0, manual_ms: None }),
+            preset: String::new(),
+            ..Insert::new(EXTERNAL_INSTRUMENT_PLUGIN)
+        }
+    }
+
+    /// The External Instrument this slot holds, when it is one.
+    #[must_use]
+    pub fn external_instrument(&self) -> Option<&ExternalInstrument> {
+        self.external.as_ref().filter(|_| self.plugin == EXTERNAL_INSTRUMENT_PLUGIN)
     }
 
     /// The decoded plugin state (`None` when absent or malformed).
@@ -890,5 +961,78 @@ mod tests {
         // A bus key, and a tap left out of the file, which means post.
         let bus: KeySource = serde_json::from_str(r#"{"from":{"Bus":7}}"#).unwrap();
         assert_eq!(bus, KeySource { from: KeyFrom::Bus(BusId(7)), tap: Tap::Post });
+    }
+    #[test]
+    fn an_external_instrument_round_trips_in_a_session_and_old_sessions_load_unchanged() {
+        use crate::{MidiOutChannel, MidiOutPort, MidiOutput, Session, TrackKind};
+        let mut s = Session::default();
+        let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
+        // A session without the device writes nothing new, so older builds read it as before.
+        let before = s.to_json().unwrap();
+        assert!(!before.contains("external"), "{before}");
+        let mut ins = Insert::external("In 1");
+        ins.external.as_mut().unwrap().gain_db = -3.0;
+        ins.external.as_mut().unwrap().manual_ms = Some(19.5);
+        let tr = s.track_mut(t).unwrap();
+        tr.instrument = Some(ins);
+        tr.midi_output = MidiOutput::External {
+            port: MidiOutPort { backend: "winmm".into(), name: "MODEL D".into(), ordinal: 0, id: String::new() },
+            channel: MidiOutChannel::Channel(0),
+            offset_ms: 0.0,
+        };
+        let json = s.to_json().unwrap();
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        let slot = &v["tracks"][0]["instrument"];
+        assert_eq!(slot["plugin"], EXTERNAL_INSTRUMENT_PLUGIN, "{json}");
+        assert_eq!(slot["external"], serde_json::json!({"return": "In 1", "gain_db": -3.0, "manual_ms": 19.5}), "{json}");
+        let back = Session::from_json(&json).unwrap();
+        let tr = back.track(t).unwrap();
+        assert_eq!(tr.instrument, s.track(t).unwrap().instrument);
+        assert_eq!(tr.external_instrument().and_then(ExternalInstrument::manual_ms), Some(19.5));
+        // An old file (no `external` field) has no device; a file with a minimal object has the defaults.
+        let old: Insert = serde_json::from_str(r#"{"plugin":"synth"}"#).unwrap();
+        assert!(old.external.is_none() && old.external_instrument().is_none());
+        let minimal: Insert = serde_json::from_str(r#"{"plugin":"external.instrument","external":{}}"#).unwrap();
+        assert_eq!(minimal.external_instrument(), Some(&ExternalInstrument::default()));
+        // A build that does not know the device reads the slot as an unknown instrument.
+        #[derive(serde::Deserialize)]
+        struct Previous {
+            plugin: String,
+        }
+        let slot = serde_json::to_string(s.track(t).unwrap().instrument.as_ref().unwrap()).unwrap();
+        assert_eq!(serde_json::from_str::<Previous>(&slot).unwrap().plugin, EXTERNAL_INSTRUMENT_PLUGIN);
+        // The field is only the device's on the device's id.
+        let mut other = Insert::new("synth");
+        other.external = Some(ExternalInstrument::default());
+        assert!(other.external_instrument().is_none());
+    }
+
+    #[test]
+    fn manual_latency_converts_at_the_rate_and_hostile_values_are_clamped() {
+        let ei = |ms: Option<f32>, gain_db: f32| ExternalInstrument { ret: "In 1".into(), gain_db, manual_ms: ms };
+        assert_eq!(ei(Some(20.0), 0.0).manual_frames(48_000), Some(960));
+        assert_eq!(ei(Some(20.0), 0.0).manual_frames(44_100), Some(882));
+        assert_eq!(ei(Some(19.5), 0.0).manual_frames(48_000), Some(936));
+        assert_eq!(ei(Some(1e9), 0.0).manual_ms(), Some(MAX_EXTERNAL_LATENCY_MS));
+        assert_eq!(ei(Some(1e9), 0.0).manual_frames(48_000), Some(24_000));
+        assert_eq!(ei(Some(-5.0), 0.0).manual_frames(48_000), Some(0));
+        assert_eq!(ei(Some(f32::NAN), 0.0).manual_ms(), None);
+        assert_eq!(ei(None, 0.0).manual_frames(48_000), None);
+        assert_eq!(ei(None, f32::INFINITY).gain_db(), 0.0);
+        assert_eq!(ei(None, 1e6).gain_db(), EXTERNAL_GAIN_DB.1);
+        assert_eq!(ei(None, -1e6).gain_db(), EXTERNAL_GAIN_DB.0);
+    }
+
+    #[test]
+    fn the_midi_offset_is_held_at_zero_on_an_external_instrument_track() {
+        use crate::{MidiOutChannel, MidiOutPort, MidiOutput, Track, TrackId, TrackKind};
+        let mut t = Track::new(TrackId(1), "Model D", TrackKind::Instrument, ChannelFormat::Stereo, [0; 3]);
+        t.midi_output = MidiOutput::External { port: MidiOutPort::default(), channel: MidiOutChannel::AsRecorded, offset_ms: 12.0 };
+        assert_eq!(t.midi_out_offset_ms(), 12.0);
+        t.instrument = Some(Insert::external("In 1"));
+        assert_eq!(t.midi_out_offset_ms(), 0.0, "a hand-edited offset is not a second timing knob");
+        // Only an instrument track's instrument slot holds the device.
+        t.kind = TrackKind::Midi;
+        assert!(t.external_instrument().is_none());
     }
 }

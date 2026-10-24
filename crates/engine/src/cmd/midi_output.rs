@@ -29,7 +29,7 @@ fn text(p: &Value, key: &str, max: usize, allow_empty: bool) -> Result<String> {
 }
 
 /// `None` is the internal destination.
-fn port_param(value: &Value) -> Result<Option<MidiOutPort>> {
+pub(super) fn port_param(value: &Value) -> Result<Option<MidiOutPort>> {
     match value.as_str() {
         Some("internal") => Ok(None),
         _ if value.is_object() => {
@@ -48,7 +48,7 @@ fn port_param(value: &Value) -> Result<Option<MidiOutPort>> {
     }
 }
 
-fn channel_param(value: &Value) -> Result<MidiOutChannel> {
+pub(super) fn channel_param(value: &Value) -> Result<MidiOutChannel> {
     if value.as_str() == Some("as_recorded") {
         return Ok(MidiOutChannel::AsRecorded);
     }
@@ -85,6 +85,10 @@ fn set_output(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     if matches!(port, Some(None)) && (channel.is_some() || offset.is_some()) {
         return Err(bad(ID, "`channel` and `offset_ms` apply to an external port, not internal"));
+    }
+    // An External Instrument's latency is the track's one timing knob (ADR 0020 decision 1).
+    if offset.is_some_and(|o| o != 0.0) && tracks.iter().any(|id| e.session().track(*id).is_some_and(|t| t.external_instrument().is_some())) {
+        return Err(bad(ID, "Latency is set on the External Instrument: the MIDI offset of its track is held at 0"));
     }
     // Validate every track before changing any, so a refusal changes nothing.
     let mut next = Vec::with_capacity(tracks.len());

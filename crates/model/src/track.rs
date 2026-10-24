@@ -330,6 +330,21 @@ impl Track {
         self.format.channels()
     }
 
+    /// The External Instrument in the instrument slot of this instrument track (ADR 0020).
+    #[must_use]
+    pub fn external_instrument(&self) -> Option<&crate::ExternalInstrument> {
+        self.instrument.as_ref().filter(|_| self.kind == TrackKind::Instrument).and_then(crate::Insert::external_instrument)
+    }
+
+    /// The offset playback applies to this track's external MIDI sends, in milliseconds: the
+    /// destination's own, except that it is held at 0 while an External Instrument is on the track
+    /// (ADR 0020 decision 1: its latency is the one timing knob). A hand-edited file cannot
+    /// bring a second knob back.
+    #[must_use]
+    pub fn midi_out_offset_ms(&self) -> f32 {
+        if self.external_instrument().is_some() { 0.0 } else { self.midi_output.offset_ms() }
+    }
+
     fn freeze_inputs(&self) -> FreezeInputs<'_> {
         FreezeInputs {
             kind: self.kind,
