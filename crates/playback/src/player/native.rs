@@ -280,7 +280,15 @@ impl Native {
         }
         for (i, name) in self.out.port_labels().into_iter().enumerate() {
             let ports_state = monitor::PortState::Open;
-            ports.push(monitor::PortReport { state: ports_state, tracks: Vec::new(), dir: Dir::Out, id: i as u16, name, clock_bpm: None, sensing: false });
+            ports.push(monitor::PortReport {
+                state: ports_state,
+                tracks: Vec::new(),
+                dir: Dir::Out,
+                id: i as u16,
+                name,
+                clock_bpm: None,
+                sensing: false,
+            });
         }
         monitor::Report { dropped_in, dropped_out, ports }
     }
@@ -414,7 +422,10 @@ impl Native {
                 input.dirty = true;
                 false
             });
-            if (!present || input.failed || input.lost || (routes.is_empty() && !self.monitor.enabled())) && !input.closed && io.request(Request::Close(input.id)).is_ok() {
+            if (!present || input.failed || input.lost || (routes.is_empty() && !self.monitor.enabled()))
+                && !input.closed
+                && io.request(Request::Close(input.id)).is_ok()
+            {
                 input.closed = true;
                 input.attached = None;
             }

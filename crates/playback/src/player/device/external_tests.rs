@@ -146,7 +146,12 @@ fn the_midi_monitor_sees_input_routed_or_not_and_every_message_sent() {
     let other = fake.add_input("Unused pads");
     s.track_mut(track).unwrap().mixer.record_arm = true;
     s.track_mut(track).unwrap().midi_input = soundcraft_model::MidiInput {
-        port: soundcraft_model::MidiPort::Device { backend: keys.backend.as_str().into(), name: keys.name.clone(), ordinal: keys.ordinal, id: keys.id.clone() },
+        port: soundcraft_model::MidiPort::Device {
+            backend: keys.backend.as_str().into(),
+            name: keys.name.clone(),
+            ordinal: keys.ordinal,
+            id: keys.id.clone(),
+        },
         channel: None,
     };
     let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();

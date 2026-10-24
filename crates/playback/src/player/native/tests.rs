@@ -260,7 +260,10 @@ fn idle_worker_taps_step_pedal_and_learnable_actions_without_delaying_routes() {
 }
 
 /// Drains the monitor until `ready` holds for what was collected.
-fn monitored(f: &mut Fixture, mut ready: impl FnMut(&[monitor::MonitorEvent], &monitor::Report) -> bool) -> (Vec<monitor::MonitorEvent>, monitor::Report) {
+fn monitored(
+    f: &mut Fixture,
+    mut ready: impl FnMut(&[monitor::MonitorEvent], &monitor::Report) -> bool,
+) -> (Vec<monitor::MonitorEvent>, monitor::Report) {
     let mut events = Vec::new();
     let mut last = monitor::Report::default();
     until(|| {
@@ -291,7 +294,9 @@ fn monitor_shows_an_unrouted_port_and_leaves_routing_alone() {
     assert!(fake.input_port(&routed).unwrap().deliver(3_000, &[0x90, 61, 70]));
     let (events, report) = monitored(&mut f, |events, _| events.len() >= 3);
     let (unrouted_id, routed_id) = (port_id(&report, "Unrouted pads"), port_id(&report, "Routed keys"));
-    let has = |port: u16, status: u8, data1: u8| events.iter().any(|e| e.dir == monitor::Dir::In && e.port == port && e.status == status && e.data1 == data1);
+    let has = |port: u16, status: u8, data1: u8| {
+        events.iter().any(|e| e.dir == monitor::Dir::In && e.port == port && e.status == status && e.data1 == data1)
+    };
     assert!(has(unrouted_id, 0x99, 36), "{events:?}");
     assert!(has(routed_id, 0x92, 40), "a message the route filters out is shown: {events:?}");
     assert!(has(routed_id, 0x90, 61), "{events:?}");

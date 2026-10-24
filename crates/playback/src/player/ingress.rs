@@ -313,7 +313,9 @@ impl Worker {
         let id = self.next_input.checked_add(1).ok_or("MIDI input identities exhausted")?;
         self.next_input = id;
         consumer.wake_on(self.thread.thread().clone());
-        self.attach.try_send(Update::Input(Input { id, consumer, routes: Vec::new(), mon: Mon::default() })).map_err(|_| "MIDI attachment queue unavailable")?;
+        self.attach
+            .try_send(Update::Input(Input { id, consumer, routes: Vec::new(), mon: Mon::default() }))
+            .map_err(|_| "MIDI attachment queue unavailable")?;
         self.thread.thread().unpark();
         Ok(id)
     }

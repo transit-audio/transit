@@ -382,9 +382,14 @@ fn one_raw_consumer_fans_out_with_independent_channels_and_identical_timestamps(
     let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
     let a = route();
     let b = Route { target: (TrackId(8), soundcraft_mix::INSTRUMENT_SLOT, SlotGen::VACANT), channels: 1 << 1, ..a };
-    send.send(Update::Input(Input { id: 1, mon: Mon::default(), consumer, routes: vec![(registry.permit(first).unwrap(), a), (registry.permit(second).unwrap(), b)] }))
-        .ok()
-        .unwrap();
+    send.send(Update::Input(Input {
+        id: 1,
+        mon: Mon::default(),
+        consumer,
+        routes: vec![(registry.permit(first).unwrap(), a), (registry.permit(second).unwrap(), b)],
+    }))
+    .ok()
+    .unwrap();
     fake.input_port(&key).unwrap().deliver(77_000, &[0x90, 60, 100, 0x91, 61, 100, 0x92, 62, 100]);
     worker.step();
     let mut packets = [None; 4];
