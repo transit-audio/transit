@@ -418,6 +418,9 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         let hot = main_resp.hovered() || chev_resp.hovered();
         clip.rect_filled(add_a, crate::theme::RADIUS, if hot { TOKENS.button_hover } else { TOKENS.button });
         (label_x[0], label_w[0]) = paint_quick_add(&clip, add_a, "Audio", true);
+        // A dim 1 px divider marks where the dropdown's hot area starts, hovered or not.
+        let inset = 4.0;
+        clip.vline(chev.min.x, (chev.min.y + inset)..=(chev.max.y - inset), egui::Stroke::new(1.0, TOKENS.line));
         crate::icons::paint(&clip, chev.center(), crate::icons::Icon::ChevronDown, 10.0, TOKENS.text_dim);
         if main_resp.clicked() {
             let _ = app.add_audio_track("mono");
