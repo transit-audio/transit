@@ -11,7 +11,9 @@ workspace = true
 
 [features]
 # A once-a-day check for a newer release (one anonymous request to the GitHub API). Headless and distro builds can leave it out.
-default = ["update-check"]
+# The native Windows audio backends are on by default and compile to nothing on other targets;
+# `--no-default-features` leaves them out.
+default = ["update-check", "native-wasapi", "native-asio"]
 update-check = ["dep:ureq", "dep:semver"]
 # ASIO audio devices on Windows (see soundcraft-playback's `asio` feature).
 asio = ["soundcraft-playback/asio"]

@@ -33,7 +33,7 @@ real settings. The plug-in scan cache is shared with the inherited soundcraft ap
 
 transit checks once a day, after the splash, whether a newer release exists (Help > Check for Updates… runs it on demand). The check is a single anonymous request to GitHub's public API (`api.github.com/repos/transit-audio/transit/releases`); nothing else is sent, and nothing is downloaded or installed. Turn it off with Help > Check for New Versions on Launch, or set `TRANSIT_NO_UPDATE_CHECK=1` (CI, tests, packagers; this also disables the Help entry).
 
-The code is behind the Cargo feature `update-check` of the `transit` app, on by default (it brings `ureq` on rustls, no OpenSSL). Headless and distro builds can leave it out: `cargo build -p transit --no-default-features --features native-wasapi,native-asio` has no HTTP dependency.
+The code is behind the Cargo feature `update-check` of the `transit` app, on by default (it brings `ureq` on rustls, no OpenSSL). Headless and distro builds can leave it out: `cargo build -p transit --no-default-features` has no HTTP dependency (and no native audio backends; see below).
 
 ## Packaging
 
@@ -77,7 +77,7 @@ Design notes: [contributing/knowledge/jack-backend.md](contributing/knowledge/ja
 ## Building with ASIO (Windows)
 
 ASIO has two implementations in the tree. The native backend needs nothing beyond the Windows
-prerequisites above; the app offers it with the `native-asio` feature. The cpal ASIO feature is the
+prerequisites above; the app offers it with the `native-asio` feature, which is on by default. The cpal ASIO feature is the
 legacy path (the app's ASIO path without `native-asio`, and the fallback when the native backend does
 not open); it needs the Steinberg SDK and libclang, and retires with ASIO slice (e).
 
@@ -86,10 +86,11 @@ not open); it needs the Steinberg SDK and libclang, and retires with ASIO slice 
 `crates/audio-asio` (`transit-audio-asio`) has hand-written bindings, so it needs no Steinberg SDK,
 no C++ compile, no bindgen, no libclang, no `CPAL_ASIO_DIR` and no environment variables. It is
 compiled only on 64-bit Windows (`cfg(all(windows, target_pointer_width = "64"))`; the crate is empty
-elsewhere) and builds with a plain `cargo build`. The app uses it with the `native-asio` feature
-(`cargo build --release -p transit --features native-asio`, usually beside `native-wasapi`): choose
-Audio system ASIO, then Backend "Native ASIO" in Audio Devices. Without the feature the
-app's ASIO path is cpal's (below). The benchmark uses it through the `audio-bench/native-asio`
+elsewhere) and builds with a plain `cargo build`. A plain `cargo build --release -p transit`
+on Windows includes it and Native WASAPI: the `native-asio` and `native-wasapi` features are default
+features (they compile to nothing on Linux and macOS). Choose Audio system ASIO, then Backend "Native
+ASIO" in Audio Devices. To opt out, build with `--no-default-features` (add `--features update-check`
+to keep the update check); then the app's ASIO path is cpal's (below). The benchmark uses it through the `audio-bench/native-asio`
 feature:
 
 ```powershell

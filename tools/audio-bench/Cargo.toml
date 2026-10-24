@@ -9,6 +9,9 @@ repository.workspace = true
 publish = false
 
 [features]
+# The native backends are on by default (Windows only; no-ops elsewhere). `--no-default-features` leaves them out.
+default = ["native-wasapi", "native-asio"]
+
 # Measure the ASIO host on Windows (see `soundcraft-playback`'s `asio` feature for its build needs).
 asio = ["soundcraft-playback/asio", "dep:asio-sys"]
 

@@ -109,6 +109,10 @@ A duplex open keeps both streams in one mode: if the exclusive input fails with 
 
 The project owner reversed the amendment above after measuring both interfaces: when the native backend is selected, shared mode is the default and exclusive is the opt-in. `AudioConfig.share_device` now defaults to true, so a saved `ui.json` without the field loads shared, and the checkbox reads "Take exclusive control of the device" (checked sets `share_device` false). On the Focusrite Scarlett 2i2 at 48 kHz the round trip is 248 ms shared and 223 ms exclusive, stable only at the driver's 10 ms default period (K24, K25); on the TASCAM Model 12 at 44.1 kHz it is 61 to 71 ms shared and about 276 ms exclusive, with silence on about half the opens. Exclusive is therefore only marginally faster on one interface and far slower and unreliable on the other, ASIO is the tracking path on both, and exclusive stays available through the checkbox; the fallback ladder is unchanged and applies only to an exclusive open.
 
+### Amended 2026-10-24: default features
+
+`native-wasapi` and `native-asio` are default features of the `transit` app and of `audio-bench`, so a plain `cargo build --release -p transit` on Windows includes both backends. They compile to nothing on other targets, and `--no-default-features` still builds without them (headless and distro builds). The backend choice stays a per-machine setting; the Windows default is unchanged.
+
 ## Consequences
 
 - One more `unsafe`-bearing crate and a `windows` dependency; the review burden is bounded by the quoted-unsafe pass and by the crate being small and Windows-only.
