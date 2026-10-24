@@ -287,7 +287,11 @@ impl CalibrationKey {
 
 /// Today's date in UTC as `YYYY-MM-DD`, for [`LoopbackCalibration::measured_at`].
 pub fn utc_today() -> String {
-    let secs = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    utc_date(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()))
+}
+
+/// The UTC date of `secs` since the Unix epoch, as `YYYY-MM-DD`.
+pub fn utc_date(secs: u64) -> String {
     let z = i64::try_from(secs / 86_400).unwrap_or(0) + 719_468;
     let (era, doe) = (z.div_euclid(146_097), z.rem_euclid(146_097));
     let yoe = (doe - doe / 1460 + doe / 36_524 - doe / 146_096) / 365;

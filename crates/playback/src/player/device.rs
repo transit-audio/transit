@@ -123,6 +123,8 @@ pub struct Player {
     io: RefCell<Arc<IoMap>>,
     /// The hardware-insert round-trip probe (ADR 0015 section 5); the audio thread plays and records it.
     probe: Option<Arc<crate::hardware_probe::HwProbe>>,
+    /// The External Instrument Measure (ADR 0020 decision 3); see `external_measure`.
+    ext_probe: Option<Arc<crate::external_probe::ExtProbe>>,
     /// The loopback calibration probe (native ASIO, #20): the device callbacks play and record it
     /// by sample position ([`crate::loop_probe`]).
     loop_probe: Option<Arc<crate::loop_probe::LoopProbe>>,
@@ -243,6 +245,7 @@ impl Player {
             device_channels: 0,
             io: RefCell::new(Arc::new(IoMap::default())),
             probe: None,
+            ext_probe: None,
             loop_probe: None,
             calibration_key: None,
             calibration: None,
@@ -315,6 +318,9 @@ impl Player {
         let probe = Arc::new(crate::hardware_probe::HwProbe::new(target.sample_rate));
         audio.set_probe(Arc::clone(&probe));
         player.probe = Some(probe);
+        let ext_probe = Arc::new(crate::external_probe::ExtProbe::new(target.sample_rate));
+        audio.set_ext_probe(Arc::clone(&ext_probe));
+        player.ext_probe = Some(ext_probe);
         player.loop_probe = Some(Arc::new(crate::loop_probe::LoopProbe::new(device_rate)));
         *player.capture.get_mut() = Some(capture);
         let (anchor, access) = Anchor::new(audio);
@@ -583,7 +589,9 @@ impl Player {
             player.calibration_key = if duplex { devices::CalibrationKey::of(&system, &name, key_input, &keyed) } else { None };
             player.calibration = calibration;
             player.silent = false;
-            #[cfg(not(target_arch = "wasm32"))]
+            // A unit test enables a fake MIDI backend itself: no test reaches the system's MIDI
+            // ports (a session naming a real synth's port would otherwise open it and play it).
+            #[cfg(all(not(target_arch = "wasm32"), not(test)))]
             if let Some(midi) = player.midi.get_mut() {
                 midi.enable(transit_midi_io::MidiIo::new("transit"));
             }
@@ -695,6 +703,9 @@ impl Player {
     pub fn set_io(&self, mut io: IoMap) -> Result<SessionRequestId, PlayerError> {
         let opened = if self.silent { io.outputs } else { self.device_channels };
         io.reconcile(io.inputs, opened);
+        // The buffer the device runs: part of an External Instrument measurement's key (ADR 0020
+        // decision 5), so the plan picks the measurement made at this buffer.
+        io.buffer = if self.silent { None } else { self.device_buffer };
         let io = Arc::new(io);
         let id = self.owner()?.set_io(Arc::clone(&io))?;
         if let Ok(mut held) = self.io.try_borrow_mut() {
@@ -755,7 +766,7 @@ impl Player {
         if send.iter().any(|c| *c >= self.device_channels) || ret.iter().any(|c| *c >= io.inputs) {
             return Err("a path names a channel the device did not open".into());
         }
-        if self.loop_calibration_running() {
+        if self.loop_calibration_running() || self.external_measure_running() {
             return Err("a measurement is already running".into());
         }
         if !probe.arm(send, ret) {
@@ -1722,6 +1733,7 @@ mod rate_tests {
     }
 }
 mod calibrate;
+mod external_measure;
 
 /// The External Instrument tracks of `session` that cannot play: their MIDI port is Missing or
 /// Failed, or MIDI is unavailable (`status` None). A port the output thread has not looked at yet
@@ -1738,6 +1750,8 @@ fn external_unavailable(session: &Session, status: Option<&super::midi_out::Outp
         .collect()
 }
 
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod external_measure_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod external_tests;
 #[cfg(test)]

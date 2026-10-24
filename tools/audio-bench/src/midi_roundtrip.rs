@@ -30,8 +30,11 @@
 
 use crate::fit::{self, PositionFit};
 use crate::onset;
+pub(crate) use crate::onset::levels;
 use crate::session::{self, Callbacks, Request};
 use soundcraft_playback::device_clock::{ClockFitter, ClockKey, Observation};
+/// The trial summary is the shared one (`soundcraft_playback::onset`), as the app's Measure uses.
+pub use soundcraft_playback::onset::{OUTLIER_SIGMAS, Summary, summarize};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use transit_audio_backend as ab;
@@ -56,8 +59,6 @@ pub const DEFAULT_VELOCITY: u8 = 100;
 pub const DEFAULT_TRIALS: u32 = 10;
 pub const DEFAULT_GAP_MS: u32 = 1500;
 pub const DEFAULT_MAX_MS: u32 = 1000;
-/// A trial further than this many standard deviations from the mean is listed as an outlier.
-pub const OUTLIER_SIGMAS: f64 = 2.0;
 /// The default limit of the clock fit's standard error at a send (`--max-fit-error-ms`), in ns.
 /// A send above it is skipped. A sanity limit: a driver whose buffers arrive one block apart at
 /// buffer 256 (5.3 ms of scatter) fits to about 0.3 ms over the 2 s history.
@@ -535,38 +536,6 @@ impl Trial {
     }
 }
 
-/// The distribution of the trials' latencies, in samples.
-#[derive(Debug, Clone, PartialEq)]
-pub struct Summary {
-    pub n: usize,
-    pub mean: f64,
-    pub median: f64,
-    pub min: u64,
-    pub max: u64,
-    /// Sample standard deviation (0 for one trial).
-    pub std_dev: f64,
-    /// 1-based trial numbers further than [`OUTLIER_SIGMAS`] standard deviations from the mean.
-    pub outliers: Vec<usize>,
-}
-
-/// Mean, median, min, max, standard deviation and outliers of `latencies` (None when empty).
-pub fn summarize(latencies: &[u64]) -> Option<Summary> {
-    let (&min, &max) = (latencies.iter().min()?, latencies.iter().max()?);
-    let n = latencies.len();
-    let mean = latencies.iter().map(|&l| l as f64).sum::<f64>() / n as f64;
-    let mut sorted = latencies.to_vec();
-    sorted.sort_unstable();
-    let median = if n % 2 == 1 { sorted[n / 2] as f64 } else { (sorted[n / 2 - 1] + sorted[n / 2]) as f64 / 2.0 };
-    let std_dev = if n > 1 { (latencies.iter().map(|&l| (l as f64 - mean).powi(2)).sum::<f64>() / (n - 1) as f64).sqrt() } else { 0.0 };
-    let outliers = latencies
-        .iter()
-        .enumerate()
-        .filter(|(_, l)| std_dev > 0.0 && (**l as f64 - mean).abs() > OUTLIER_SIGMAS * std_dev)
-        .map(|(i, _)| i + 1)
-        .collect();
-    Some(Summary { n, mean, median, min, max, std_dev, outliers })
-}
-
 /// The lines on the clock fit both modes print: its scatter (not a bound), the send position's
 /// standard error, the leave-last-out error and the app's map beside the bench's.
 pub(crate) fn fit_lines(rate: u32, fits: &[SendFit], max_fit_error_ns: u64) -> Vec<String> {
@@ -854,17 +823,6 @@ pub(crate) fn pre_send_warning(what: &str, pre_send: f32, floor: f32, retried: b
         onset::dbfs(pre_send),
         onset::dbfs(floor)
     ))
-}
-
-/// The threshold and the refinement's guard of a send whose pre-send window peaked at `pre`,
-/// over the noise floor `floor`: the floor's threshold, raised over a pre-send window more than
-/// 6 dB above the floor (a release still sounding must not count as the onset).
-pub(crate) fn levels(floor: f32, pre: f32) -> Result<(f32, f32), String> {
-    let base = onset::threshold(onset::Floor { peak: floor, rms: 0.0 })?;
-    let raised = pre > floor * PRE_SEND_WARN_FACTOR;
-    let threshold = if raised { base.max(pre * onset::FLOOR_FACTOR) } else { base };
-    let level = if raised { pre } else { floor };
-    Ok((threshold, (level * onset::QUIET_FACTOR).min(threshold)))
 }
 
 /// Open `request`'s device duplex through `backend`, then play `settings.trials` notes into
@@ -1263,26 +1221,5 @@ mod tests {
     fn the_app_map_beside_the_bench_fit() {
         let lines = fit_lines(48_000, &[fit(1000.0, Some(2)), fit(1000.0, Some(-3)), fit(1000.0, None)], 500_000);
         assert!(lines[2].contains("valid at 2 of 3 sends, at most 3 samples from the bench fit"), "{lines:?}");
-    }
-
-    #[test]
-    fn the_threshold_rises_over_a_ringing_pre_send_window_only() {
-        let (quiet, _) = levels(0.0005, 0.0006).unwrap();
-        assert_eq!(quiet, 0.002, "the floor's threshold");
-        let (ringing, guard) = levels(0.0005, 0.004).unwrap();
-        assert_eq!((ringing, guard), (0.016, 0.008));
-    }
-
-    #[test]
-    fn the_summary_lists_mean_median_spread_and_outliers() {
-        let m = summarize(&[100, 102, 98, 100, 101, 99, 100, 140, 100, 100]).unwrap();
-        assert_eq!((m.n, m.min, m.max, m.median), (10, 98, 140, 100.0));
-        assert!((m.mean - 104.0).abs() < 1e-9);
-        assert!(m.std_dev > 12.0 && m.std_dev < 13.0, "{m:?}");
-        assert_eq!(m.outliers, vec![8]);
-        let one = summarize(&[5]).unwrap();
-        assert_eq!((one.std_dev, one.outliers.len(), one.median), (0.0, 0, 5.0));
-        assert_eq!(summarize(&[1, 2]).unwrap().median, 1.5);
-        assert!(summarize(&[]).is_none());
     }
 }

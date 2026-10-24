@@ -62,6 +62,17 @@ impl External {
         ahead.is_finite().then(|| now.saturating_add(ahead as u64))
     }
 
+    /// An External Instrument Measure (ADR 0020 decision 3): the probe records the return of the
+    /// block just rendered and hands over the messages due at its first frame, which go out
+    /// stamped P(R) like the track's own notes (an External Instrument's are not delayed by A).
+    pub(in crate::player) fn measure(&mut self, probe: &crate::external_probe::ExtProbe, block: &Block, input: &[Vec<f32>], frames: usize) {
+        let at_ns = block.host_for(true).unwrap_or(0);
+        let out = &mut self.out;
+        probe.block(input, frames, |e| {
+            out.push(OutEvent { kind: Kind::Message, track: e.track, at_ns, bytes: e.bytes, len: 3, delay_ns: 0 });
+        });
+    }
+
     pub(in crate::player) fn block(&mut self, session: &Session, block: Block) {
         let at_from = |host_ns: Option<u64>, offset: usize| {
             host_ns.map_or(0, |host| {

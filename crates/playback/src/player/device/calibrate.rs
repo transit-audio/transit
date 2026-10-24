@@ -25,7 +25,7 @@ impl Player {
         if self.is_playing() {
             return Err("stop the transport before measuring".into());
         }
-        if self.hardware_probe_running() {
+        if self.hardware_probe_running() || self.external_measure_running() {
             return Err("a measurement is already running".into());
         }
         let inputs = self.with_held_input(|recorder| recorder.channels).unwrap_or(0);

@@ -488,6 +488,9 @@ pub(super) struct Audio {
     probe: Option<Arc<crate::hardware_probe::HwProbe>>,
     /// The probe's plan frame at the start of the pending block, while it is running.
     probe_block: Option<u64>,
+    /// The External Instrument Measure (control arms it; this thread sends its notes through
+    /// the MIDI output ring and records the return).
+    ext_probe: Option<Arc<crate::external_probe::ExtProbe>>,
     transport: Transport,
     shared: Arc<Shared>,
     pending: usize,
@@ -594,6 +597,7 @@ impl Audio {
                 capture: None,
                 probe: None,
                 probe_block: None,
+                ext_probe: None,
                 shared,
                 pending: 0,
                 read,
@@ -651,6 +655,10 @@ impl Audio {
 
     pub(super) fn set_probe(&mut self, probe: Arc<crate::hardware_probe::HwProbe>) {
         self.probe = Some(probe);
+    }
+
+    pub(super) fn set_ext_probe(&mut self, probe: Arc<crate::external_probe::ExtProbe>) {
+        self.ext_probe = Some(probe);
     }
 
     pub(super) fn set_midi_capture(&mut self, capture: crate::midi_capture::Sink) {
@@ -855,16 +863,25 @@ impl Audio {
         #[cfg(target_arch = "wasm32")]
         let _ = actions;
         #[cfg(not(target_arch = "wasm32"))]
-        if self.external.is_some() {
+        let external_block = if self.external.is_some() {
             let block = self.external_block(frames);
             if let Some(external) = &mut self.external {
                 external.block(self.plans.engine().session(), block);
             }
-        }
+            Some(block)
+        } else {
+            None
+        };
         let state = &mut self.transport;
         // The mixer owns each processor's suspension rules. A completed note
         // release does not prove that its envelope or any downstream tail ended.
         self.plans.render(state.render_position, frames);
+        // An External Instrument Measure records the return the plan read for this block and
+        // sends the notes due at its first frame, stamped with that frame's presentation time.
+        #[cfg(not(target_arch = "wasm32"))]
+        if let (Some(probe), Some(external), Some(block)) = (&self.ext_probe, &mut self.external, external_block) {
+            external.measure(probe, &block, self.plans.input(), frames);
+        }
         // The hardware probe records the return of this block; the click for it is added as the
         // block plays (`fill_inner`).
         self.probe_block = self.probe.as_ref().and_then(|p| p.record_block(self.plans.input(), frames));

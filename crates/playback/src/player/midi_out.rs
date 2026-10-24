@@ -242,6 +242,9 @@ enum Control {
         track: TrackId,
         generation: u64,
     },
+    /// End everything this track holds and drop its scheduled playback, then Sustain off and All
+    /// Notes Off on its used channels (an External Instrument Measure that stopped early).
+    ReleaseTrack(TrackId),
 }
 
 #[derive(Default)]
@@ -253,6 +256,9 @@ struct Shared {
     panic_pending: AtomicBool,
     /// `releases` holds echo releases Main could not queue.
     releases_pending: AtomicBool,
+    /// `track_releases` holds track releases (Measure) Main could not queue, one per track.
+    track_releases_pending: AtomicBool,
+    track_releases: Mutex<Vec<u64>>,
     /// (track, generation) pairs, one per track (the newest generation). Main writes, the
     /// output thread swaps the vector out with its own preallocated one.
     releases: Mutex<Vec<(u64, u64)>>,
@@ -292,7 +298,11 @@ impl Out {
         let (playback_tx, playback_rx) = rtrb::RingBuffer::new(QUEUE);
         let (echo_tx, echo_rx) = rtrb::RingBuffer::new(QUEUE);
         let (control, receive) = mpsc::sync_channel(CONTROL);
-        let shared = Shared { releases: Mutex::new(Vec::with_capacity(MAX_DESTINATIONS)), ..Shared::default() };
+        let shared = Shared {
+            releases: Mutex::new(Vec::with_capacity(MAX_DESTINATIONS)),
+            track_releases: Mutex::new(Vec::with_capacity(MAX_DESTINATIONS)),
+            ..Shared::default()
+        };
         (
             Self {
                 control,
@@ -370,6 +380,27 @@ impl Out {
                 None => releases.push((track.0, generation)),
             }
             self.shared.releases_pending.store(true, Ordering::Release);
+        }
+        self.wake();
+    }
+
+    /// Ends everything `track` holds on its destination (both origins), drops its scheduled
+    /// playback and sends Sustain off and All Notes Off on the channels it used. Main calls it when
+    /// a Measure stops early (Cancel, a device loss), since the audio thread may not run again.
+    /// Never skipped: with the control queue full it stays pending per track and the thread
+    /// honors it as soon as it drains.
+    pub fn release_track(&self, track: TrackId) {
+        if self.control.try_send(Control::ReleaseTrack(track)).is_ok() {
+            self.wake();
+            return;
+        }
+        log::warn!("MIDI output control queue is full; release for track {} is pending until the thread drains", track.0);
+        {
+            let mut pending = self.shared.track_releases.lock().unwrap_or_else(PoisonError::into_inner);
+            if !pending.contains(&track.0) {
+                pending.push(track.0);
+            }
+            self.shared.track_releases_pending.store(true, Ordering::Release);
         }
         self.wake();
     }
@@ -505,6 +536,8 @@ struct Worker {
     /// Preallocated stand-in for `Shared::releases`, swapped with it so honoring a pending
     /// release never allocates.
     releases: Vec<(u64, u64)>,
+    /// The same for `Shared::track_releases`.
+    track_releases: Vec<u64>,
 }
 
 fn origin_index(origin: Origin) -> usize {
@@ -545,6 +578,7 @@ impl Worker {
             error: None,
             dirty: true,
             releases: Vec::with_capacity(MAX_DESTINATIONS),
+            track_releases: Vec::with_capacity(MAX_DESTINATIONS),
         }
     }
 
@@ -613,6 +647,7 @@ impl Worker {
                 Ok(Control::Destinations(destinations)) => self.set_destinations(destinations),
                 Ok(Control::Panic) => self.panic_now(),
                 Ok(Control::ReleaseEcho { track, generation }) => self.release_echo(track.0, generation),
+                Ok(Control::ReleaseTrack(track)) => self.release_track_now(track.0),
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
                     self.shared.stop.store(true, Ordering::Release);
@@ -635,6 +670,32 @@ impl Worker {
             }
             releases.clear();
             self.releases = releases;
+        }
+        if self.shared.track_releases_pending.swap(false, Ordering::AcqRel) {
+            {
+                let mut shared = self.shared.track_releases.lock().unwrap_or_else(PoisonError::into_inner);
+                std::mem::swap(&mut *shared, &mut self.track_releases);
+            }
+            let mut releases = std::mem::take(&mut self.track_releases);
+            for &track in &releases {
+                self.release_track_now(track);
+            }
+            releases.clear();
+            self.track_releases = releases;
+        }
+    }
+
+    /// What the ring already holds is scheduled first, so a note-on pushed before the release
+    /// cannot go out after it; then `track`'s scheduled playback is dropped and its notes end.
+    fn release_track_now(&mut self, track: u64) {
+        self.drain();
+        self.pending.retain(|p| !(p.origin == Origin::Playback && p.event.track == track && p.event.kind == Kind::Message));
+        if let Some(i) = self.tracks.iter().position(|t| t.destination.track.0 == track)
+            && let Some(mut t) = self.take_track(i)
+        {
+            self.release_track(&mut t, None, true);
+            t.last = 0;
+            self.put_track(i, t);
         }
     }
 

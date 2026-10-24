@@ -229,6 +229,11 @@ impl Native {
         self.out.panic();
     }
 
+    /// Release what `track` holds on its MIDI destination, through the output thread.
+    pub(super) fn release_track(&self, track: soundcraft_model::TrackId) {
+        self.out.release_track(track);
+    }
+
     pub(super) fn take_notes(&self) -> Vec<super::PlayedNote> {
         self.worker.take_notes()
     }
