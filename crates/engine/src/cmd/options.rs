@@ -43,12 +43,18 @@ fn default_region(e: &Engine, at: Option<i64>) -> soundcraft_time::Range {
         return s.edit.selection;
     }
     let at = at.unwrap_or(if e.transport.playing { e.transport.position } else { s.edit.playhead }).max(0);
-    let (tempo, sr) = (&s.tempo, s.sample_rate);
+    four_bars(&s.tempo, s.sample_rate, at, s.content_end())
+}
+
+/// Four bars from the bar holding `at`. Cut at `content` (the end of the content) when that lies
+/// ahead of the start, unless the cut would leave less than a beat: then the full four bars.
+fn four_bars(tempo: &soundcraft_time::TempoMap, sr: soundcraft_time::SampleRate, at: i64, content: i64) -> soundcraft_time::Range {
     let bar = tempo.bar_beat_at(at, sr).bar;
-    let start = tempo.tick_to_samples(tempo.bar_start_tick(bar), sr);
+    let start_tick = tempo.bar_start_tick(bar);
+    let start = tempo.tick_to_samples(start_tick, sr);
     let mut end = tempo.tick_to_samples(tempo.bar_start_tick(bar + 4), sr);
-    let content = s.content_end();
-    if content > start && content < end {
+    let beat = tempo.tick_to_samples(start_tick + tempo.meter_at_tick(start_tick).ticks_per_beat(), sr) - start;
+    if content > start && content < end && content - start >= beat {
         end = content;
     }
     soundcraft_time::Range::new(start, end)
@@ -173,4 +179,22 @@ fn session_setup(e: &mut Engine, p: &Value) -> Result<Value> {
         s.name = n.to_string();
     }
     Ok(json!({"frame_rate": s.frame_rate.label(), "bit_depth": s.bit_depth, "sample_rate": s.sample_rate.hz()}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::four_bars;
+    use soundcraft_time::Range;
+
+    #[test]
+    fn a_promoted_region_is_never_shorter_than_a_beat() {
+        let s = soundcraft_model::Session::default();
+        let (t, sr) = (&s.tempo, s.sample_rate);
+        let bar = |n: i64| t.tick_to_samples(t.bar_start_tick(n), sr);
+        let at = bar(2) + 5;
+        assert_eq!(four_bars(t, sr, at, bar(2) + 10), Range::new(bar(2), bar(6)), "content 10 samples past the bar start: full four bars");
+        let two = bar(2) + (bar(3) - bar(2)) * 2;
+        assert_eq!(four_bars(t, sr, at, two), Range::new(bar(2), two), "a longer cut still applies");
+        assert_eq!(four_bars(t, sr, at, 0), Range::new(bar(2), bar(6)), "no content ahead: no cut");
+    }
 }
