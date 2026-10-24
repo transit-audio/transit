@@ -207,6 +207,10 @@ pub struct EditState {
     pub countoff_bars: u32,
     pub midi_merge: bool,
     pub record_mode: String,
+    /// The removed Loop Record option, written as `false` so v0.2.0 (which requires the field) can
+    /// still open our sessions, and never read back. Remove after v0.4.0 (ADR 0026).
+    #[serde(default, skip_deserializing)]
+    pub loop_record: bool,
     pub quickpunch: bool,
     pub scrolling: String,
     pub solo_mode: String,
@@ -291,6 +295,7 @@ impl Default for EditState {
             countoff_bars: 2,
             midi_merge: false,
             record_mode: "normal".into(),
+            loop_record: false,
             quickpunch: false,
             scrolling: "page".into(),
             solo_mode: "sip".into(),
@@ -787,6 +792,16 @@ mod tests {
             let loaded: EditState = serde_json::from_value(v).unwrap();
             assert_eq!(loaded, EditState::default(), "loop_record: {on} is ignored");
         }
+    }
+
+    #[test]
+    fn loop_record_is_written_as_false_for_v0_2_0_and_never_read_back() {
+        let v = serde_json::to_value(EditState::default()).unwrap();
+        assert_eq!(v["loop_record"], serde_json::json!(false), "v0.2.0 requires the field");
+        let mut v = v;
+        v.as_object_mut().unwrap().insert("loop_record".into(), serde_json::json!(true));
+        let loaded: EditState = serde_json::from_value(v).unwrap();
+        assert!(!loaded.loop_record, "a saved true is ignored");
     }
 
     #[test]
