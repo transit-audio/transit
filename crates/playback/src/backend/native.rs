@@ -11,6 +11,7 @@ use transit_audio_backend as ab;
 pub enum NativeKind {
     Wasapi,
     Asio,
+    Jack,
 }
 
 impl NativeKind {
@@ -19,6 +20,7 @@ impl NativeKind {
         match self {
             NativeKind::Wasapi => "Native WASAPI",
             NativeKind::Asio => "Native ASIO",
+            NativeKind::Jack => "Native JACK",
         }
     }
 
@@ -29,7 +31,8 @@ impl NativeKind {
 }
 
 /// The native backend `cfg` selects on its audio system in this build, else `None` (cpal serves
-/// it): native WASAPI on the WASAPI system, native ASIO on the ASIO system.
+/// it): native WASAPI on the WASAPI system, native ASIO on the ASIO system, native JACK on the JACK
+/// system.
 pub fn factory_for(cfg: &AudioConfig) -> Option<(Box<dyn ab::BackendFactory>, NativeKind)> {
     if !cfg.backend.native_on(cfg.system.as_deref()) {
         return None;
@@ -41,6 +44,8 @@ pub fn factory_for(cfg: &AudioConfig) -> Option<(Box<dyn ab::BackendFactory>, Na
         }
         #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
         devices::Backend::NativeAsio => Some((Box::new(transit_audio_asio::AsioFactory), NativeKind::Asio)),
+        #[cfg(all(target_os = "linux", feature = "native-jack"))]
+        devices::Backend::NativeJack => Some((Box::new(transit_audio_jack::JackFactory), NativeKind::Jack)),
         _ => None,
     }
 }
@@ -127,6 +132,24 @@ pub fn asio_system(selected: Option<&str>) -> AudioSystem {
     system_from_endpoints(devices::ASIO_SYSTEM, &outputs, &inputs, &installed, diagnostics)
 }
 
+/// The JACK system as the native backend lists it (ADR 0021, decision 3): one device per port group,
+/// through a short-lived probe client that never starts a server; with no library or no server, no
+/// device and the reason as the system's diagnostic.
+#[cfg(all(target_os = "linux", feature = "native-jack"))]
+pub fn jack_system() -> AudioSystem {
+    let state = transit_audio_jack::JackBackend::shared().probe();
+    match &state {
+        transit_audio_jack::ServerState::Running(server) => system_from_endpoints(
+            devices::JACK_SYSTEM,
+            &server.endpoints(ab::Direction::Output),
+            &server.endpoints(ab::Direction::Input),
+            &[],
+            Vec::new(),
+        ),
+        _ => system_from_endpoints(devices::JACK_SYSTEM, &[], &[], &[], state.diagnostic().into_iter().collect()),
+    }
+}
+
 /// Opens the control panel of the ASIO driver `driver` on the backend's host thread (where every
 /// call to the driver is made), from a thread of its own so a modal panel does not hold the caller.
 /// The receiver gets the panel's result when it closes. The driver of a running stream is shared
@@ -202,9 +225,17 @@ mod tests {
         assert_eq!(factory_for(&asio).map(|(_, kind)| kind), devices::NATIVE_ASIO_COMPILED.then_some(NativeKind::Asio));
         let wasapi = AudioConfig { backend: Backend::NativeWasapi, system: Some("WASAPI".into()), ..Default::default() };
         assert_eq!(factory_for(&wasapi).map(|(_, kind)| kind), devices::NATIVE_WASAPI_COMPILED.then_some(NativeKind::Wasapi));
+        let jack = AudioConfig { backend: Backend::NativeJack, system: Some("JACK".into()), ..Default::default() };
+        assert_eq!(factory_for(&jack).map(|(_, kind)| kind), devices::NATIVE_JACK_COMPILED.then_some(NativeKind::Jack));
+        let auto_jack = AudioConfig { backend: Backend::Auto, system: Some("JACK".into()), ..Default::default() };
+        assert!(factory_for(&auto_jack).is_none(), "Auto stays cpal on Linux (ADR 0021, decision 9)");
         let crossed = AudioConfig { backend: Backend::NativeAsio, system: Some("WASAPI".into()), ..Default::default() };
         assert!(factory_for(&crossed).is_none(), "native ASIO never serves the WASAPI system");
         assert!(factory_for(&AudioConfig { backend: Backend::Cpal, ..asio }).is_none());
         assert_eq!(NativeKind::Asio.fallback_note("no driver"), "Native ASIO failed: no driver; using the cpal backend");
+        assert_eq!(
+            NativeKind::Jack.fallback_note("JACK/PipeWire server not running"),
+            "Native JACK failed: JACK/PipeWire server not running; using the cpal backend"
+        );
     }
 }

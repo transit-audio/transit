@@ -384,7 +384,8 @@ impl Player {
             NativeKind::Wasapi => {
                 OpenStep { mode: Some(if cfg.share_device { ab::Mode::Shared } else { ab::Mode::Exclusive }), default_period: false }
             }
-            NativeKind::Asio => OpenStep::PLANNED,
+            // ASIO and JACK have one mode (the driver's or the server's).
+            NativeKind::Asio | NativeKind::Jack => OpenStep::PLANNED,
         };
         // A device the native backend knows is not installed (an ASIO driver removed since it was
         // saved) is said as such: neither another device nor the cpal backend opens instead.

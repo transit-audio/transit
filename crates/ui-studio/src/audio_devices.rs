@@ -608,7 +608,9 @@ impl StudioApp {
         }
         let lister: Option<AsioLister> = devices::NATIVE_ASIO_COMPILED
             .then(|| std::sync::Arc::new(|selected: Option<String>| devices::native_asio_system(selected.as_deref())) as AsioLister);
-        (devices::cpal_audio_systems(), lister)
+        let mut systems = devices::cpal_audio_systems();
+        systems.extend(devices::native_jack_system());
+        (systems, lister)
     }
 
     /// Lists the ASIO system for [`Self::asio_selection`] on a worker thread (probing a driver can

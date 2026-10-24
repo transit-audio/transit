@@ -19,6 +19,10 @@ native-wasapi = ["dep:transit-audio-wasapi"]
 # Windows only. No ASIO SDK and no LLVM: unlike `asio` (cpal's host), it builds like the rest.
 native-asio = ["dep:transit-audio-asio"]
 
+# `--backend jack --list-devices`: the native JACK backend's listing (ADR 0021 slice 1), Linux only.
+# Measuring through it comes with slice 2.
+native-jack = ["soundcraft-playback/native-jack"]
+
 [dependencies]
 serde_json.workspace = true
 transit-audio-backend.workspace = true

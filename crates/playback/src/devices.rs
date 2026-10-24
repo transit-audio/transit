@@ -35,10 +35,14 @@ pub enum Backend {
     /// The native ASIO backend (`transit-audio-asio`, draft ADR 0016 amendment). Used only on the ASIO system of a
     /// 64-bit Windows build with the `native-asio` feature; otherwise, or if it fails to open, cpal.
     NativeAsio,
+    /// The native JACK backend (`transit-audio-jack`, ADR 0021): JACK 2 or PipeWire through the JACK
+    /// client API. Used only on the JACK system of a Linux build with the `native-jack` feature;
+    /// otherwise, or if it fails to open, cpal. `Auto` stays cpal (ALSA) on Linux.
+    NativeJack,
 }
 
 impl Backend {
-    pub const ALL: [Backend; 4] = [Backend::Auto, Backend::Cpal, Backend::NativeWasapi, Backend::NativeAsio];
+    pub const ALL: [Backend; 5] = [Backend::Auto, Backend::Cpal, Backend::NativeWasapi, Backend::NativeAsio, Backend::NativeJack];
 
     /// The label of the Audio Devices selector.
     pub const fn label(self) -> &'static str {
@@ -47,6 +51,7 @@ impl Backend {
             Backend::Cpal => "cpal (legacy)",
             Backend::NativeWasapi => "Native WASAPI",
             Backend::NativeAsio => "Native ASIO",
+            Backend::NativeJack => "Native JACK",
         }
     }
 
@@ -58,7 +63,7 @@ impl Backend {
 
     /// Whether this is one of the native backends.
     pub const fn is_native(self) -> bool {
-        matches!(self, Backend::NativeWasapi | Backend::NativeAsio)
+        matches!(self, Backend::NativeWasapi | Backend::NativeAsio | Backend::NativeJack)
     }
 
     /// Whether this choice opens a native backend on `system` in this build.
@@ -66,6 +71,7 @@ impl Backend {
         match self {
             Backend::NativeWasapi => native_wasapi_offered(system),
             Backend::NativeAsio => native_asio_offered(system),
+            Backend::NativeJack => native_jack_offered(system),
             Backend::Auto | Backend::Cpal => false,
         }
     }
@@ -75,6 +81,10 @@ impl Backend {
 pub const NATIVE_WASAPI_COMPILED: bool = cfg!(all(windows, feature = "native-wasapi"));
 /// Whether this build can open the native ASIO backend (64-bit Windows with the `native-asio` feature).
 pub const NATIVE_ASIO_COMPILED: bool = cfg!(all(windows, target_pointer_width = "64", feature = "native-asio"));
+/// Whether this build can open the native JACK backend (Linux with the `native-jack` feature).
+pub const NATIVE_JACK_COMPILED: bool = cfg!(all(target_os = "linux", feature = "native-jack"));
+/// The native JACK backend's audio system (JACK 2, or PipeWire through its JACK library).
+pub const JACK_SYSTEM: &str = "JACK";
 
 /// Whether `system` (the choice's audio system; `None` is the platform default) is WASAPI.
 pub fn is_wasapi_system(system: Option<&str>) -> bool {
@@ -84,6 +94,11 @@ pub fn is_wasapi_system(system: Option<&str>) -> bool {
 /// Whether `system` is ASIO (never the default system).
 pub fn is_asio_system(system: Option<&str>) -> bool {
     system.is_some_and(|s| s.eq_ignore_ascii_case(ASIO_SYSTEM))
+}
+
+/// Whether `system` is JACK (never the default system).
+pub fn is_jack_system(system: Option<&str>) -> bool {
+    system.is_some_and(|s| s.eq_ignore_ascii_case(JACK_SYSTEM))
 }
 
 /// Whether the native WASAPI choice applies: the feature is compiled in and the system is WASAPI.
@@ -96,9 +111,14 @@ pub fn native_asio_offered(system: Option<&str>) -> bool {
     NATIVE_ASIO_COMPILED && is_asio_system(system)
 }
 
+/// Whether the native JACK choice applies: the feature is compiled in and the system is JACK.
+pub fn native_jack_offered(system: Option<&str>) -> bool {
+    NATIVE_JACK_COMPILED && is_jack_system(system)
+}
+
 /// Whether the Backend selector is shown for `system`: a native backend can serve it in this build.
 pub fn native_offered(system: Option<&str>) -> bool {
-    native_wasapi_offered(system) || native_asio_offered(system)
+    native_wasapi_offered(system) || native_asio_offered(system) || native_jack_offered(system)
 }
 
 /// The user's audio device choice. Every field is optional: `None` means "the system default".
@@ -439,7 +459,18 @@ pub fn native_asio_control_panel(driver: &str) -> Result<std::sync::mpsc::Receiv
 pub fn audio_systems() -> Vec<AudioSystem> {
     let mut systems = cpal_audio_systems();
     systems.extend(native_asio_system(None));
+    systems.extend(native_jack_system());
     systems
+}
+
+/// The JACK system as the native JACK backend lists it, `None` in a build without it: its port
+/// groups (one per device), or no device and why (the library did not load, or no server answers).
+/// Lists through a short-lived probe client; never starts a server.
+pub fn native_jack_system() -> Option<AudioSystem> {
+    #[cfg(all(target_os = "linux", feature = "native-jack"))]
+    return Some(crate::backend::native::jack_system());
+    #[cfg(not(all(target_os = "linux", feature = "native-jack")))]
+    None
 }
 
 /// The ASIO system as the native ASIO backend lists it, `None` in a build without it: every

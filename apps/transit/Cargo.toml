@@ -19,6 +19,8 @@ asio = ["soundcraft-playback/asio"]
 native-wasapi = ["soundcraft-playback/native-wasapi"]
 # The native ASIO backend (no SDK): the "Native ASIO" choice when Audio system is ASIO.
 native-asio = ["soundcraft-playback/native-asio"]
+# The native JACK backend (ADR 0021, Linux): the "Native JACK" choice when Audio system is JACK.
+native-jack = ["soundcraft-playback/native-jack"]
 
 [dependencies]
 soundcraft-engine.workspace = true

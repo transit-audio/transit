@@ -8,6 +8,8 @@ pub const USAGE: &str = "\
 usage: audio-bench [options]
   --backend cpal|wasapi|asio|fake  backend to measure (default cpal; wasapi and asio are the native backends, built with
                          --features native-wasapi or native-asio)
+  --backend jack         with --list-devices: the native JACK backend's port groups, or why there are none (Linux,
+                         built with --features native-jack; it never starts a server; measuring comes later)
   --system ASIO|WASAPI   audio system of the cpal backend (default: the platform default)
   --device <name>        output device (and input, with --loopback); default device when absent (alias --out-device);
                          with --backend asio the ASIO driver's registry name (Focusrite USB ASIO; a unique part,
@@ -114,6 +116,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
     let (mut seconds, mut out, mut settings) = (20.0f64, None, None);
     let (mut delay, mut jitter, mut gap, mut burst) = (None, None, None::<Option<f64>>, false);
     let mut list = false;
+    let mut jack = false;
     let (mut midi, mut placing, mut no_warmup) = (false, false, false);
     let mut max_error = None::<f64>;
     let (mut compensation, mut pattern, mut count, mut spacing, mut lead) = (None, None::<Vec<u32>>, None::<u32>, None::<u32>, None::<u32>);
@@ -123,12 +126,14 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         let mut value = || args.next();
         match flag.as_str() {
             "--backend" => {
-                kind = match value().as_deref() {
-                    Some("cpal") => Kind::Cpal,
+                let named = value();
+                jack = named.as_deref() == Some("jack");
+                kind = match named.as_deref() {
+                    Some("cpal") | Some("jack") => Kind::Cpal,
                     Some("fake") => Kind::Fake,
                     Some("wasapi") => Kind::Wasapi,
                     Some("asio") => Kind::Asio,
-                    other => return Err(format!("--backend: expected cpal, wasapi, asio or fake, got {other:?}")),
+                    other => return Err(format!("--backend: expected cpal, wasapi, asio, jack or fake, got {other:?}")),
                 }
             }
             "--system" => system = Some(value().ok_or("--system needs a value")?),
@@ -192,7 +197,10 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
     }
     if list {
-        return Ok(Command::List(system));
+        return Ok(Command::List(if jack { Some(soundcraft_playback::devices::JACK_SYSTEM.into()) } else { system }));
+    }
+    if jack {
+        return Err("--backend jack only lists devices so far (--list-devices); measuring through it comes with ADR 0021 slice 2".into());
     }
     let midi_given = port.is_some() || channel.is_some() || inputs.is_some() || json.is_some() || max_error.is_some() || no_warmup;
     if !midi && !placing && (midi_given || note.is_some() || velocity.is_some() || trials.is_some() || gap_ms.is_some() || max.is_some()) {
@@ -339,6 +347,8 @@ mod tests {
         assert!(parse_str("--seconds 0").is_err());
         assert!(parse_str("--fake-delay 5").is_err(), "fake options need the fake backend");
         assert!(matches!(parse_str("--list-devices --system WASAPI"), Ok(Command::List(Some(_)))));
+        assert!(matches!(parse_str("--backend jack --list-devices"), Ok(Command::List(Some(ref s))) if s == "JACK"));
+        assert!(parse_str("--backend jack").unwrap_err().contains("--list-devices"));
         let Ok(Command::Run(c)) = parse_str("--backend fake --fake-gap-at none") else { panic!("did not parse") };
         assert_eq!(c.fake.gap_at_s, None);
         let Ok(Command::Run(c)) = parse_str("--backend fake --fake-burst") else { panic!("did not parse") };

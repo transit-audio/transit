@@ -260,8 +260,12 @@ pub fn asio_backend() -> Result<Box<dyn ab::Backend>, String> {
     Err("--backend asio needs 64-bit Windows and a build with --features native-asio".into())
 }
 
-/// The device names of a cpal system, for `--list-devices` (enumerates; opens no stream).
+/// The device names of a cpal system, for `--list-devices` (enumerates; opens no stream); the JACK
+/// system through the native JACK backend ([`list_jack`]).
 pub fn list_devices(system: Option<&str>) -> Result<String, String> {
+    if soundcraft_playback::devices::is_jack_system(system) {
+        return list_jack();
+    }
     let backend = cpal_backend(system)?;
     let mut text = format!("system: {}\n", backend.system());
     #[cfg(all(windows, feature = "asio"))]
@@ -282,6 +286,27 @@ pub fn list_devices(system: Option<&str>) -> Result<String, String> {
         for line in unlisted_asio_drivers(&listed) {
             text.push_str(&line);
             text.push('\n');
+        }
+    }
+    Ok(text)
+}
+
+/// The JACK system as the native JACK backend lists it (`--backend jack --list-devices`): each port
+/// group with its ports, rate and quantum, or why the system is unavailable. Opens a short-lived
+/// probe client only; never starts a server and opens no stream.
+pub fn list_jack() -> Result<String, String> {
+    let system = soundcraft_playback::devices::native_jack_system()
+        .ok_or("--backend jack needs Linux and a build with --features native-jack (cargo build -p audio-bench --features native-jack)")?;
+    let mut text = format!("system: {} (native)\n", system.name);
+    for diagnostic in &system.diagnostics {
+        text.push_str(&format!("unavailable: {diagnostic}\n"));
+    }
+    for (label, devices) in [("outputs", &system.outputs), ("inputs", &system.inputs)] {
+        text.push_str(&format!("{label}:\n"));
+        for d in devices {
+            let rate = d.sample_rates.first().map_or_else(|| "rate unknown".to_string(), |r| format!("{r} Hz"));
+            let quantum = d.buffer_min.map_or_else(|| "quantum unknown".to_string(), |b| format!("quantum {b}"));
+            text.push_str(&format!("  {} ({} ch, {rate}, {quantum})\n", d.name, d.max_channels));
         }
     }
     Ok(text)

@@ -40,6 +40,10 @@ transit-audio-wasapi = { workspace = true, optional = true }
 # The native ASIO backend (draft ADR 0016 amendment), behind the `native-asio` feature.
 transit-audio-asio = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "linux")'.dependencies]
+# The native JACK backend (ADR 0021), behind the `native-jack` feature.
+transit-audio-jack = { workspace = true, optional = true }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 cpal = { workspace = true, features = ["wasm-bindgen"] }
 
@@ -53,6 +57,11 @@ native-wasapi = ["dep:transit-audio-wasapi"]
 # Audio Devices on the ASIO system. Off by default; without it the choice is not offered and
 # `Backend::NativeAsio` opens cpal.
 native-asio = ["dep:transit-audio-asio"]
+# The native JACK backend (ADR 0021; JACK 2 or PipeWire's libjack, loaded at run time): the
+# "Native JACK" choice in Audio Devices on the JACK system. Linux only; off by default; without it
+# the JACK system is not listed and `Backend::NativeJack` opens cpal. The build needs jack.pc
+# (libjack-jackd2-dev) for jack-sys's build script, not libjack itself.
+native-jack = ["dep:transit-audio-jack", "transit-audio-jack/libjack"]
 # ASIO on Windows (cpal's ASIO host). Off by default: building it downloads Steinberg's ASIO SDK
 # (its own licence) and needs LLVM (libclang) for the bindings. `cargo build -p transit --features asio`.
 asio = ["cpal/asio", "soundcraft-asio-panel/asio"]
