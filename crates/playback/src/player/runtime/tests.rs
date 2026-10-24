@@ -870,13 +870,15 @@ fn a_request_that_no_longer_wants_a_staged_instance_drops_it() {
 }
 
 /// ADR 0018 section 5: a plug-in that never returns from its creation costs its slot, not the
-/// UI: no frame waits for it, the slot reads stuck after the host's timeout, and the session is
-/// compiled without it. Releasing the plug-in later destroys the late instance on its thread.
+/// UI: no frame waits for it, the slot reads stuck after the host's creation budget, and the
+/// session is compiled without it. An edit of the document does not start it again (Retry does,
+/// issue #82; `late_tests`), and if it returns after all it is adopted.
 #[test]
 fn a_creation_that_never_returns_is_stuck_after_the_timeout_and_the_session_compiles_without_it() {
     let (mut runtime, mut ports, track, _) = with_instrument_requested();
     runtime.handles = Handles::with_host(transit_plugin_host::Host::new(transit_plugin_host::Config {
         timeout: std::time::Duration::from_millis(300),
+        creation_timeout: std::time::Duration::from_millis(300),
         inline: false,
         ..transit_plugin_host::Config::default()
     }));
@@ -915,6 +917,7 @@ fn a_save_after_the_host_thread_returns_from_a_stall_carries_the_live_state() {
     let (mut runtime, mut ports, track, _) = with_instrument_requested();
     runtime.handles = Handles::with_host(transit_plugin_host::Host::new(transit_plugin_host::Config {
         timeout: std::time::Duration::from_millis(300),
+        creation_timeout: std::time::Duration::from_millis(300),
         inline: false,
         ..transit_plugin_host::Config::default()
     }));

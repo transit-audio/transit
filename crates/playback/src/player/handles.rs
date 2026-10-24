@@ -5,6 +5,16 @@
 //! once per service call; the compile takes the instance when it is ready. The editor and state
 //! handles captured here are the host's proxies, so opening an editor, idling it and reading a
 //! state go to the host thread too, and a retired instance is destroyed there.
+//!
+//! **Late instances are adopted, never discarded** (issue #82, escape E48). A request waits for a
+//! new instance at most [`DEFAULT_SLOW_AFTER`]; past that it is compiled with the slot vacant,
+//! the slot reads "Loading… (slow)", and when the instance is made it is taken into the next plan
+//! (the vacant slot is made again, `PlanCompiler::retry_vacant`). That wait only decides what the
+//! slot shows and how long the request's other edits wait. Only the plug-in host's wedge
+//! detection (its creation budget, ADR 0018) makes the slot read "Not responding", and even then
+//! a creation that returns is adopted. A "Not responding" slot can be retried
+//! ([`Handles::request_retry`]): a new creation on the host's current thread, restoring the state
+//! the session stores for the slot.
 use super::*;
 use crate::{EditorEdit, PluginStates};
 use soundcraft_dsp::{EditorHeader, HeaderAction, JobPoll, LoadedValues, PluginEditor, PluginStateReader, StateBusy, StateJob};
@@ -20,9 +30,55 @@ use transit_plugin_host::{Ctx, Host, Pending, Status};
 /// however long it takes (up to the host's request timeout).
 pub const DEFAULT_SAVE_DEADLINE: Duration = Duration::from_millis(500);
 
+/// How long a session request waits for a new instance before it is compiled without it (the
+/// slot vacant until the instance is ready), and after which the slot reads "Loading… (slow)"
+/// (issue #82). It never abandons the creation.
+pub const DEFAULT_SLOW_AFTER: Duration = Duration::from_secs(10);
+
 /// Makes one instance for a spec, on whichever thread runs it (the plug-in host thread for hosted
 /// plug-ins).
-pub(crate) type Factory = Arc<dyn Fn(&InstanceSpec) -> Option<NewInstance> + Send + Sync>;
+pub type Factory = Arc<dyn Fn(&InstanceSpec) -> Option<NewInstance> + Send + Sync>;
+
+/// The time the loading display is measured on (a test sets a manual one).
+pub type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
+
+/// What a slot whose plug-in is not in a plan yet shows (issue #82; #67 adds the time).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SlotLoad {
+    /// Being made, for `elapsed` so far ("Loading…").
+    Loading { elapsed: Duration },
+    /// Being made for longer than [`DEFAULT_SLOW_AFTER`] ("Loading… (slow)"): the session plays
+    /// on without it, and it joins the next plan when it is ready.
+    Slow { elapsed: Duration },
+    /// Its creation ran past the plug-in host's creation budget and its thread is wedged (ADR
+    /// 0018): "Not responding", with Retry. If the creation still returns, it is adopted.
+    NotResponding { elapsed: Duration },
+}
+
+impl SlotLoad {
+    /// How long the instance has been on its way.
+    #[must_use]
+    pub fn elapsed(self) -> Duration {
+        match self {
+            SlotLoad::Loading { elapsed } | SlotLoad::Slow { elapsed } | SlotLoad::NotResponding { elapsed } => elapsed,
+        }
+    }
+}
+
+/// Which ids go to the plug-in host thread (the rest are made in the compile).
+pub type Deferred = Arc<dyn Fn(&str) -> bool + Send + Sync>;
+
+/// Test seams for the hosted-instance path of a real Player (the UI tests drive the slot text and
+/// Retry through them): the host, the factory, which ids go to the host, the display clock and
+/// budget.
+#[cfg(any(test, feature = "test-hooks"))]
+pub struct PluginTestHooks {
+    pub host: Host,
+    pub factory: Factory,
+    pub deferred: Deferred,
+    pub clock: Clock,
+    pub slow_after: Duration,
+}
 
 /// What a creation job on the host thread returns: `Err` when the factory unwound.
 type Made = Result<Option<NewInstance>, ()>;
@@ -65,28 +121,54 @@ enum Stage {
     Announced,
     /// Being made on the plug-in host thread.
     Requested(Pending<Made>),
-    /// Made (or refused, failed or stuck: `None`), waiting for the compile to take it.
+    /// Made (or refused or failed: `None`), waiting for the compile to take it.
     Ready(Option<NewInstance>),
 }
 
 struct Staged {
     spec: InstanceSpec,
     stage: Stage,
+    /// When it was first asked for (or retried), on the handles' clock.
+    since: Instant,
+    /// Its creation ran past the host's creation budget: the slot reads "Not responding".
+    stuck: bool,
+    /// The user asked to retry it ([`Handles::request_retry`]); done on the next service.
+    retry: bool,
+}
+
+impl Staged {
+    fn new(spec: InstanceSpec, stage: Stage, since: Instant) -> Staged {
+        Staged { spec, stage, since, stuck: false, retry: false }
+    }
+    fn at(&self, track: TrackId, slot: usize) -> bool {
+        self.spec.track == track && self.spec.slot == slot
+    }
+    fn waiting(&self) -> bool {
+        !matches!(self.stage, Stage::Ready(_))
+    }
 }
 
 pub struct Handles {
     /// Third-party instances made ahead of the compile on the host thread (see [`Handles::stage`]).
     staged: Vec<Staged>,
-    /// Instances a compile asked for that `stage` did not predict: their slots were compiled
-    /// vacant and they are being made on the host thread; when one is ready, the request is
-    /// compiled again with it (see [`Handles::retry`]).
+    /// Instances whose slots were compiled vacant while they are made on the host thread: one a
+    /// compile asked for that `stage` did not predict, and one still being made after the display
+    /// budget (issue #82). When one is ready, the request is compiled again with it (see
+    /// [`Handles::retry`]). One whose creation ran past the host's creation budget is marked
+    /// stuck ("Not responding") and is still taken if it returns.
     retrying: Vec<Staged>,
     /// A retried instance is ready and no request is pending: the owner requests its session
     /// again ([`Handles::take_republish`]).
     republish: bool,
-    /// Specs whose creation did not return within the host's timeout: the slot is empty and the
-    /// UI says "Not responding" until the request no longer has it.
-    stuck: Vec<InstanceSpec>,
+    /// How long a request waits for a new instance before it compiles without it, and after
+    /// which the slot reads "Loading… (slow)" ([`DEFAULT_SLOW_AFTER`]).
+    slow_after: Duration,
+    /// The loading display's time ([`Instant::now`]; a test sets a manual clock).
+    clock: Clock,
+    /// Test seams for a real Player ([`PluginTestHooks`]): the factory and which ids go to the
+    /// host thread.
+    #[cfg(any(test, feature = "test-hooks"))]
+    test_factory: Option<(Factory, Deferred)>,
     /// Why editors that accepted an open request then failed, for the status line.
     editor_errors: Vec<(TrackId, usize, String)>,
     /// How long one [`Self::capture_states`] may wait for plug-ins in all.
@@ -116,7 +198,10 @@ impl Handles {
             staged: Vec::new(),
             retrying: Vec::new(),
             republish: false,
-            stuck: Vec::new(),
+            slow_after: DEFAULT_SLOW_AFTER,
+            clock: Arc::new(Instant::now),
+            #[cfg(any(test, feature = "test-hooks"))]
+            test_factory: None,
             editor_errors: Vec::new(),
             save_deadline: DEFAULT_SAVE_DEADLINE,
             unrefreshed: Vec::new(),
@@ -128,6 +213,26 @@ impl Handles {
         }
     }
 
+    /// Installs the test seams ([`PluginTestHooks`]): later instances are made by its factory on
+    /// its host, and the loading display runs on its clock and budget.
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn set_test_hooks(&mut self, hooks: PluginTestHooks) {
+        self.host = hooks.host;
+        self.test_factory = Some((hooks.factory, hooks.deferred));
+        self.set_load_clock(hooks.clock, hooks.slow_after);
+    }
+
+    /// The loading display's clock and budget (tests).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub(crate) fn set_load_clock(&mut self, clock: Clock, slow_after: Duration) {
+        self.clock = clock;
+        self.slow_after = slow_after;
+    }
+
+    fn now(&self) -> Instant {
+        (self.clock)()
+    }
+
     /// Normal Player preparation: hosted instances are made on the plug-in host thread,
     /// built-ins (cheap) on this, the owner thread, during the compile.
     pub fn service<T: Copy, R: Copy>(&mut self, control: &mut Control<T, R>) {
@@ -135,6 +240,14 @@ impl Handles {
         let factory: Factory = Arc::new(move |spec: &InstanceSpec| {
             soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), target.sample_rate as f32, target.max_block as usize, spec.ch)
         });
+        // The test seam makes only the ids it sends to the host thread; the rest as always.
+        #[cfg(any(test, feature = "test-hooks"))]
+        if let Some((test, deferred)) = self.test_factory.clone() {
+            let which = Arc::clone(&deferred);
+            let both: Factory = Arc::new(move |spec: &InstanceSpec| if which(&spec.id) { test(spec) } else { factory(spec) });
+            self.service_with(control, &*deferred, &both);
+            return;
+        }
         self.service_with(control, &soundcraft_mix::is_third_party, &factory);
     }
 
@@ -143,13 +256,16 @@ impl Handles {
     pub(super) fn service_with<T: Copy, R: Copy>(&mut self, control: &mut Control<T, R>, deferred: &dyn Fn(&str) -> bool, factory: &Factory) {
         self.host.check();
         control.sessions.reclaim(false);
+        self.restart(factory);
         self.retry(&mut control.sessions);
         control.sessions.hold = self.stage(&mut control.sessions, deferred, factory);
         control.service(&mut |spec, generation| {
             let ready = self.staged.iter().position(|st| st.spec == *spec && matches!(st.stage, Stage::Ready(_)));
             let made = match ready.map(|i| self.staged.swap_remove(i).stage) {
                 Some(Stage::Ready(made)) => made,
-                _ if self.stuck.contains(spec) => None,
+                // Still being made past the display budget, or not responding: the slot stays
+                // vacant and the instance joins the plan that follows its arrival (issue #82).
+                _ if self.retrying.iter().any(|st| st.spec == *spec) => None,
                 // Not predicted by `stage` (a slot that moved for layout reasons): submitted to
                 // the host thread; the slot is compiled vacant and loads like an announced one.
                 _ if deferred(&spec.id) => self.make_later(spec, factory),
@@ -173,22 +289,49 @@ impl Handles {
             Status::Failed => None,
             Status::Waiting { .. } | Status::Stuck => {
                 log::info!("{}: not predicted by staging; made on the plug-in host thread, its slot loads meanwhile", spec.id);
-                self.retrying.push(Staged { spec: spec.clone(), stage: Stage::Requested(pending) });
+                let since = self.now();
+                self.retrying.push(Staged::new(spec.clone(), Stage::Requested(pending), since));
                 None
             }
         }
     }
 
-    /// Polls the instances [`Self::make_later`] submitted. One that is ready goes to the staged
-    /// list for the next compile, which is asked to make its vacant slot again; with no request
-    /// pending, the owner is asked to request its session again ([`Self::take_republish`]). A
-    /// failed one leaves its slot empty, as a failed factory does; a stuck one marks it.
+    /// Runs the retries the user asked for ([`Self::request_retry`]): each slot's creation starts
+    /// again on the host's current thread (a fresh one took over from the wedged thread, ADR
+    /// 0018), from the spec the request holds, so the stored state is restored. The abandoned
+    /// creation, if it ever returns, is destroyed on its own thread.
+    fn restart(&mut self, factory: &Factory) {
+        let now = self.now();
+        for st in self.retrying.iter_mut().filter(|st| st.retry) {
+            log::info!("{}: retrying; a new instance is made with the stored state", st.spec.id);
+            st.stage = Stage::Requested(self.host.submit(creation(st.spec.clone(), Arc::clone(factory))));
+            st.since = now;
+            st.stuck = false;
+            st.retry = false;
+        }
+    }
+
+    /// Polls the instances whose slots were compiled vacant ([`Self::make_later`], and the slow
+    /// ones `stage` handed over). One that is ready goes to the staged list for the next compile,
+    /// which is asked to make its vacant slot again; with no request pending, the owner is asked
+    /// to request its session again ([`Self::take_republish`]). A failed one leaves its slot
+    /// empty, as a failed factory does. One past the host's creation budget is marked stuck and
+    /// kept: if it returns, it is adopted like any other (issue #82).
     fn retry(&mut self, sessions: &mut SessionControl) {
+        let now = self.now();
+        let slow_after = self.slow_after;
         for st in &mut self.retrying {
             let Stage::Requested(pending) = &st.stage else { continue };
+            let elapsed = now.saturating_duration_since(st.since);
             match pending.poll() {
                 Status::Waiting { .. } => {}
-                Status::Ready(Ok(made)) => st.stage = Stage::Ready(made),
+                Status::Ready(Ok(made)) => {
+                    if made.is_some() && (st.stuck || elapsed >= slow_after) {
+                        log::info!("{}: loaded after {:.1} s", st.spec.id, elapsed.as_secs_f64());
+                    }
+                    st.stuck = false;
+                    st.stage = Stage::Ready(made);
+                }
                 Status::Ready(Err(())) => {
                     st.stage = Stage::Ready(None);
                     sessions.fault();
@@ -197,11 +340,15 @@ impl Handles {
                     log::error!("{}: the plug-in host could not make it", st.spec.id);
                     st.stage = Stage::Ready(None);
                 }
-                Status::Stuck => {
-                    log::error!("{}: not made within {:?}; the slot stays empty", st.spec.id, self.host.timeout());
-                    self.stuck.push(st.spec.clone());
-                    st.stage = Stage::Ready(None);
+                Status::Stuck if !st.stuck => {
+                    log::error!(
+                        "{}: not responding: not made after {:.0} s; the slot offers Retry, and the instance is still taken if it returns",
+                        st.spec.id,
+                        elapsed.as_secs_f64()
+                    );
+                    st.stuck = true;
                 }
+                Status::Stuck => {}
             }
         }
         self.retrying.retain(|st| !matches!(st.stage, Stage::Ready(None)));
@@ -249,17 +396,25 @@ impl Handles {
     /// the call that finds the last one ready. The active plan keeps playing meanwhile and has no
     /// strip or slot for the new instance, which is silence. True while the request has to wait.
     ///
-    /// A creation that runs past the host's timeout is stuck (ADR 0018 section 5): its slot is
-    /// compiled empty and reads "Not responding" ([`Self::stuck`]) while the request keeps it.
+    /// The request waits at most the display budget ([`DEFAULT_SLOW_AFTER`]): an instance still
+    /// being made then moves to the vacant-slot list (`retrying`), the request compiles without
+    /// it, and it joins a later plan when it is ready (issue #82). The wait never abandons it.
     fn stage(&mut self, sessions: &mut SessionControl, deferred: &dyn Fn(&str) -> bool, factory: &Factory) -> bool {
+        let now = self.now();
         // With a plan in flight the compiler's view is not current; wait for its return.
         let wanted: Vec<InstanceSpec> = match &sessions.latest {
             Some(request) if !sessions.faulted() && sessions.bridge.can_prepare() => {
                 let all = sessions.restore.is_some();
                 let specs = soundcraft_mix::realtime_instance_specs(&request.session);
-                // A stuck mark lasts while the request still has that instance.
-                self.stuck.retain(|spec| specs.contains(spec));
-                specs.into_iter().filter(|spec| deferred(&spec.id) && (all || !sessions.bridge.reuses(spec))).collect()
+                // An instance on its way to a vacant slot is kept while the request has it; one
+                // the request no longer has (removed, replaced) is dropped, and destroyed on its
+                // host thread if it is made after all.
+                self.retrying.retain(|st| specs.contains(&st.spec));
+                let vacant = &self.retrying;
+                specs
+                    .into_iter()
+                    .filter(|spec| deferred(&spec.id) && (all || !sessions.bridge.reuses(spec)) && !vacant.iter().any(|st| st.spec == *spec))
+                    .collect()
             }
             _ => Vec::new(),
         };
@@ -268,9 +423,7 @@ impl Handles {
         self.staged.retain(|st| wanted.contains(&st.spec));
         for spec in wanted {
             if !self.staged.iter().any(|st| st.spec == spec) {
-                // Asked for afresh (a reopen): it gets another try.
-                self.stuck.retain(|s| *s != spec);
-                self.staged.push(Staged { spec, stage: Stage::Queued });
+                self.staged.push(Staged::new(spec, Stage::Queued, now));
             }
         }
         if self.staged.iter().any(|st| matches!(st.stage, Stage::Queued)) {
@@ -303,36 +456,97 @@ impl Handles {
                     log::error!("{}: the plug-in host could not make it", st.spec.id);
                     st.stage = Stage::Ready(None);
                 }
-                Status::Stuck => {
-                    log::error!("{}: not made within {:?}; the slot stays empty", st.spec.id, self.host.timeout());
-                    self.stuck.push(st.spec.clone());
-                    st.stage = Stage::Ready(None);
-                }
+                // Past the host's creation budget (longer than the display budget, so normally
+                // seen in `retry`): marked, and handed over below like a slow one.
+                Status::Stuck => st.stuck = true,
             }
         }
-        self.staged.iter().any(|st| !matches!(st.stage, Stage::Ready(_)))
+        // The display budget: a creation still running no longer holds the request. Its slot is
+        // compiled vacant and reads "Loading… (slow)"; the instance joins when it is made.
+        let mut i = 0;
+        while i < self.staged.len() {
+            let st = &self.staged[i];
+            let elapsed = now.saturating_duration_since(st.since);
+            if matches!(st.stage, Stage::Requested(_)) && (st.stuck || elapsed >= self.slow_after) {
+                log::warn!(
+                    "{}: slow to load, still waiting ({:.1} s); the session goes on without it until it is ready",
+                    st.spec.id,
+                    elapsed.as_secs_f64()
+                );
+                let st = self.staged.swap_remove(i);
+                self.retrying.push(st);
+            } else {
+                i += 1;
+            }
+        }
+        self.staged.iter().any(Staged::waiting)
     }
 
-    /// Whether the instance for this slot is announced or being made, and not yet in a plan.
+    /// Whether the instance for this slot is announced or being made, and not yet in a plan
+    /// (slow included; not one that is not responding).
     pub fn loading(&self, track: TrackId, slot: usize) -> bool {
-        self.staged.iter().any(|st| st.spec.track == track && st.spec.slot == slot && !matches!(st.stage, Stage::Ready(_)))
-            || self.retrying.iter().any(|st| st.spec.track == track && st.spec.slot == slot)
+        self.staged.iter().any(|st| st.at(track, slot) && st.waiting()) || self.retrying.iter().any(|st| st.at(track, slot) && !st.stuck)
     }
 
-    /// Whether any instance is waiting to be made (or, made late, to be compiled in).
+    /// Whether any instance is waiting to be made (or, made late, to be compiled in); one that is
+    /// not responding does not count.
     pub fn any_loading(&self) -> bool {
-        self.staged.iter().any(|st| !matches!(st.stage, Stage::Ready(_))) || !self.retrying.is_empty()
+        self.staged.iter().any(Staged::waiting) || self.retrying.iter().any(|st| !st.stuck)
     }
 
-    /// Whether this slot's plug-in did not finish loading within the host's timeout: the slot is
-    /// empty and the UI says it is not responding.
+    /// What this slot shows while its plug-in is on its way (`None`: nothing pending for it):
+    /// "Loading…", "Loading… (slow)" past the display budget, "Not responding" once the host's
+    /// creation budget ran out (issue #82).
+    pub fn slot_load(&self, track: TrackId, slot: usize) -> Option<SlotLoad> {
+        let now = self.now();
+        let st = self.staged.iter().filter(|st| st.waiting()).chain(&self.retrying).find(|st| st.at(track, slot))?;
+        let elapsed = now.saturating_duration_since(st.since);
+        Some(if st.stuck {
+            SlotLoad::NotResponding { elapsed }
+        } else if elapsed >= self.slow_after {
+            SlotLoad::Slow { elapsed }
+        } else {
+            SlotLoad::Loading { elapsed }
+        })
+    }
+
+    /// Whether this slot's plug-in did not finish loading within the host's creation budget: the
+    /// slot is empty and the UI says it is not responding, with Retry.
     pub fn stuck(&self, track: TrackId, slot: usize) -> bool {
-        self.stuck.iter().any(|spec| spec.track == track && spec.slot == slot)
+        self.retrying.iter().any(|st| st.at(track, slot) && st.stuck)
     }
 
     /// Whether any slot is stuck.
     pub fn any_stuck(&self) -> bool {
-        !self.stuck.is_empty()
+        self.retrying.iter().any(|st| st.stuck)
+    }
+
+    /// The slots that are not responding: (track, slot, plug-in id), for the status line's
+    /// "Retry all".
+    pub fn stuck_slots(&self) -> Vec<(TrackId, usize, String)> {
+        self.retrying.iter().filter(|st| st.stuck).map(|st| (st.spec.track, st.spec.slot, st.spec.id.clone())).collect()
+    }
+
+    /// Asks for a new instance for a slot that is not responding (issue #82): on the next
+    /// service its creation starts again on the host's current thread with the state the session
+    /// stores. Not a document change. False when the slot is not stuck.
+    pub fn request_retry(&mut self, track: TrackId, slot: usize) -> bool {
+        let mut any = false;
+        for st in self.retrying.iter_mut().filter(|st| st.at(track, slot) && st.stuck) {
+            st.retry = true;
+            any = true;
+        }
+        any
+    }
+
+    /// [`Self::request_retry`] for every slot that is not responding; how many.
+    pub fn request_retry_all(&mut self) -> usize {
+        let mut n = 0;
+        for st in self.retrying.iter_mut().filter(|st| st.stuck) {
+            st.retry = true;
+            n += 1;
+        }
+        n
     }
 
     /// How many plug-in host threads are not responding now (the status line says so); it goes

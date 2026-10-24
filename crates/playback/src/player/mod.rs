@@ -14,7 +14,9 @@ use std::sync::Arc;
 mod control;
 pub use control::{Control, Notice, endpoints};
 mod handles;
-pub use handles::Handles;
+#[cfg(any(test, feature = "test-hooks"))]
+pub use handles::PluginTestHooks;
+pub use handles::{Clock, DEFAULT_SLOW_AFTER, Deferred, Factory, Handles, SlotLoad};
 mod runtime;
 pub use runtime::{AudioPorts, Retirement, RuntimeControl, ServiceReport};
 /// A played note as the UI sees it (step entry): note-on with its velocity, or a release.

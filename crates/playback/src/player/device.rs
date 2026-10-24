@@ -1099,14 +1099,47 @@ impl Player {
     pub fn any_loading(&self) -> bool {
         self.owner().is_ok_and(|owner| owner.any_loading())
     }
-    /// Whether this slot's plug-in did not load within the plug-in host's timeout (ADR 0018): the
-    /// slot is empty and the UI says the plug-in is not responding.
+    /// Whether this slot's plug-in did not load within the plug-in host's creation budget (ADR
+    /// 0018): the slot is empty and the UI says the plug-in is not responding, with Retry.
     pub fn stuck(&self, track: TrackId, slot: usize) -> bool {
         self.owner().is_ok_and(|owner| owner.stuck(track, slot))
     }
     /// Whether any slot is stuck (see [`Player::stuck`]).
     pub fn any_stuck(&self) -> bool {
         self.owner().is_ok_and(|owner| owner.any_stuck())
+    }
+    /// What this slot shows while its plug-in is on its way: "Loading…", "Loading… (slow)" with
+    /// the time so far, or "Not responding" (issue #82). `None`: nothing pending for it.
+    pub fn slot_load(&self, track: TrackId, slot: usize) -> Option<crate::SlotLoad> {
+        self.owner().ok().and_then(|owner| owner.slot_load(track, slot))
+    }
+    /// The slots that are not responding: (track, slot, plug-in id).
+    pub fn stuck_slots(&self) -> Vec<(TrackId, usize, String)> {
+        self.owner().map(|owner| owner.stuck_slots()).unwrap_or_default()
+    }
+    /// Makes this not-responding slot's plug-in again, on a responsive host thread, with the state
+    /// the session stores (issue #82). Not a document change. False when the slot is not stuck.
+    pub fn retry_plugin(&self, track: TrackId, slot: usize) -> bool {
+        self.owner().is_ok_and(|mut owner| owner.retry_plugin(track, slot))
+    }
+    /// [`Self::retry_plugin`] for every slot that is not responding; how many.
+    pub fn retry_all_plugins(&self) -> usize {
+        self.owner().map_or(0, |mut owner| owner.retry_all_plugins())
+    }
+    /// The loading display's budget ("Loading… (slow)" after it; the request stops waiting for
+    /// the instance then), with the real plug-in hosts (the heavy-instrument fixture test).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_slow_after(&self, slow_after: std::time::Duration) {
+        if let Ok(mut owner) = self.owner() {
+            owner.set_slow_after(slow_after);
+        }
+    }
+    /// Test seams for the hosted-instance path (the UI tests of the slot text and Retry).
+    #[cfg(feature = "test-hooks")]
+    pub fn set_plugin_test_hooks(&self, hooks: crate::PluginTestHooks) {
+        if let Ok(mut owner) = self.owner() {
+            owner.set_plugin_test_hooks(hooks);
+        }
     }
     /// How many plug-in host threads are not responding now (a plug-in call past its timeout
     /// that has not returned yet); 0 normally, and back to 0 when the call returns.

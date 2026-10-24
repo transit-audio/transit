@@ -365,6 +365,26 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn any_stuck(&self) -> bool {
         self.handles.any_stuck()
     }
+    pub fn slot_load(&self, track: TrackId, slot: usize) -> Option<super::SlotLoad> {
+        self.handles.slot_load(track, slot)
+    }
+    pub fn stuck_slots(&self) -> Vec<(TrackId, usize, String)> {
+        self.handles.stuck_slots()
+    }
+    pub fn retry_plugin(&mut self, track: TrackId, slot: usize) -> bool {
+        self.handles.request_retry(track, slot)
+    }
+    pub fn retry_all_plugins(&mut self) -> usize {
+        self.handles.request_retry_all()
+    }
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn set_slow_after(&mut self, slow_after: std::time::Duration) {
+        self.handles.set_load_clock(std::sync::Arc::new(std::time::Instant::now), slow_after);
+    }
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn set_plugin_test_hooks(&mut self, hooks: super::PluginTestHooks) {
+        self.handles.set_test_hooks(hooks);
+    }
     pub fn plugin_host_wedged(&self) -> usize {
         self.handles.host_wedged()
     }
@@ -488,5 +508,7 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     }
 }
 
+#[cfg(test)]
+mod late_tests;
 #[cfg(test)]
 mod tests;
