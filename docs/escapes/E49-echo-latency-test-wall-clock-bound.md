@@ -23,3 +23,10 @@
    Blind spots: other tests still hold tight wall-clock bounds (`midi_out/tests.rs` echo 30 ms and
    lap deadline 10 ms, `native/tests.rs` max wake 14 ms, `runtime/tests.rs` block time 10 ms);
    they are tracked in #87 for the same treatment.
+
+Recurrence 2026-10-24: `an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer` failed
+its 14 ms max-wake assertion (max 18.39 ms, median 35.9 µs) in a full-workspace run beside other
+builds. Fixed (#87): that max is now a 250 ms stall bound (the median bound stays and fails a
+timer-poll regression); the echo bound in `midi_out/tests.rs` is 200 ms (below the 250 ms offset
+it must ignore); the next-lap bound is 100 ms (a lap held to the old deadline is ~200 ms late).
+`runtime/tests.rs` worst block is an `#[ignore]` hardware-timing test and is left as is.

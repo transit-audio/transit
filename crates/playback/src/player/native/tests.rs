@@ -206,8 +206,9 @@ fn an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer() {
     eprintln!("ingress wake latency over {} events: median {median:?}, max {max:?}", ages.len());
     let bound = if cfg!(windows) { Duration::from_millis(2) } else { Duration::from_millis(5) };
     assert!(median < bound, "median wake latency {median:?} (max {max:?}); a timer poll would show ~15 ms on Windows");
-    // Scheduler noise on a loaded machine; a tick-rounded poll would put most samples near 15 ms.
-    assert!(max < Duration::from_millis(14), "max wake latency {max:?}");
+    // The max is scheduler jitter on a loaded host, not the property (#87, E49): the median above
+    // already fails a timer poll. This only catches a stalled worker.
+    assert!(max < Duration::from_millis(250), "max wake latency {max:?}");
     assert_eq!(f.native.status().counts.latency_max_ns, ages[ages.len() - 1]);
     f.finish();
 }

@@ -207,7 +207,9 @@ fn echo_goes_out_at_once_on_the_destination_channel_with_bounded_latency() {
     let sends = rig.wait_sent(1);
     assert_eq!(sends[0].message, vec![0x99, 60, 100]);
     let latency = sends[0].at - pushed;
-    assert!(latency < Duration::from_millis(30), "echo took {latency:?}");
+    // Protects "echo ignores the 250 ms offset", not a latency figure: a delayed echo cannot pass,
+    // host jitter can (#87, E49).
+    assert!(latency < Duration::from_millis(200), "echo took {latency:?}");
     // Stop ends notes that live input holds too.
     assert!(rig.playback.push(OutEvent { kind: Kind::Stop, ..OutEvent::default() }));
     let sends = rig.wait_sent(4);
@@ -361,7 +363,8 @@ fn a_locate_with_a_lower_a_resets_the_deadline_clamp_so_the_next_lap_is_on_time(
     let order: Vec<Vec<u8>> = sends.iter().map(|s| s.message.clone()).collect();
     assert_eq!(order, [vec![0x90, 50, 100], vec![0x80, 50, 64], vec![0x90, 62, 100]]);
     let late = sends[2].at.saturating_duration_since(rig.origin.instant() + Duration::from_nanos(base + 1_000_000));
-    assert!(late < Duration::from_millis(10), "the next lap was held to the old lap's deadline: {late:?}");
+    // A lap held to the old deadline is ~200 ms late; host jitter is far below this (#87, E49).
+    assert!(late < Duration::from_millis(100), "the next lap was held to the old lap's deadline: {late:?}");
     std::thread::sleep(Duration::from_millis(250));
     assert!(!rig.sent().contains(&vec![0x90, 60, 100]), "the discarded old-lap note went out");
 }
