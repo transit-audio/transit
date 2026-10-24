@@ -237,6 +237,11 @@ impl Native {
         self.worker.take_midi()
     }
 
+    /// The MIDI output thread's status alone (destinations and ports).
+    pub(super) fn output_status(&self) -> midi_out::OutputStatus {
+        self.out.status()
+    }
+
     pub(super) fn status(&self) -> Status {
         let mut status = self.status.clone();
         status.counts = self.worker.counters();

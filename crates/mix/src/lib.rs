@@ -74,6 +74,7 @@ mod active;
 mod clip_loop_tests;
 mod compile;
 mod events;
+mod external;
 mod external_midi;
 mod hardware;
 mod key;
@@ -88,6 +89,7 @@ pub use events::{
     Arrival, Due, EngineEpoch, EventLimits, EventOutcome, EventStatus, InstrumentEvent, MAX_OPEN, MAX_PEDALS, MAX_PORTS, Message, NoteId,
     PluginEvent, QUEUE_CAP, RenderFrame, Shed, ShedCounts, Source, TapRecord, TransportEpoch,
 };
+pub use external::{ExternalReport, ExternalState, external_report};
 pub use external_midi::{ExternalMidi, external_midi_events};
 pub use hardware::{HardwareReport, HardwareState, hardware_report};
 use key::{KeyBank, KeyEnd, KeyIn, KeySpec};
@@ -197,7 +199,8 @@ pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
                 out.push(InstanceSpec { track: t.id, slot: i, id: ins.plugin.clone(), ch, state: state(ins), uid });
             }
         }
-        if let Some(ins) = &t.instrument {
+        // An External Instrument has no plug-in instance (the plan reads its return, `external.rs`).
+        if let Some(ins) = t.instrument.as_ref().filter(|i| i.plugin != soundcraft_model::EXTERNAL_INSTRUMENT_PLUGIN) {
             out.push(InstanceSpec { track: t.id, slot: INSTRUMENT_SLOT, id: ins.plugin.clone(), ch: ch.max(2), state: state(ins), uid: 0 });
         }
         if t.kind == TrackKind::Audio {
@@ -500,6 +503,8 @@ struct Strip {
     meter: StripMeter,
     /// Plan mode: the strip's hardware inserts (ADR 0015 section 5), made by the compiler.
     hw: Vec<hardware::HwSlot>,
+    /// Plan mode: the External Instrument in the instrument slot (ADR 0020), made by the compiler.
+    ext: Option<external::ExtSlot>,
     /// A panic out of this strip's processing in phase 1, caught by [`guarded`] on the thread that
     /// rendered the strip (moving the box allocates nothing). The render re-raises the first one to
     /// its caller; any other stays here until a later render re-raises it, or leaves with the
@@ -749,6 +754,7 @@ impl Strip {
             layout: 0,
             meter: StripMeter::default(),
             hw: Vec::new(),
+            ext: None,
             panic: None,
         }
     }
@@ -1286,6 +1292,12 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
             }
         }
         TrackKind::Instrument | TrackKind::Midi => {
+            // An External Instrument: the synth's return from the live input, monitored with no
+            // added delay whether or not the transport runs (ADR 0020 decision 2).
+            if let Some(x) = &strip.ext {
+                let gain = t.external_instrument().map_or(1.0, |e| db_to_gain(e.gain_db()));
+                x.run(&mut strip.buf, live.input, frames, gain);
+            }
             if let Some(inst) = strip.instrument.as_mut().filter(|i| !i.failed) {
                 // #152: push the instrument's stored parameter values into the live plugin
                 // before processing, the same way inserts do below. Without this, the values
@@ -1352,9 +1364,10 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
         }
     }
     let mut gr = 0.0f32;
-    // A latent instrument delays its track like an insert does (G8).
+    // A latent instrument delays its track like an insert does (G8), and so does an External
+    // Instrument that plays (ADR 0020 decision 6).
     // A frozen track reports the latency of the chain its render replaces.
-    let mut latency = frozen_latency(t).saturating_add(strip.instrument.as_ref().filter(|i| !i.failed).map_or(0, |i| i.plugin.latency()));
+    let mut latency = head_latency(t, strip, !live.input.is_empty());
     strip.key_in.iter_mut().for_each(|k| k.ran = false);
     strip.hw.iter_mut().for_each(hardware::HwSlot::rest);
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
@@ -2648,6 +2661,14 @@ impl SampleSource for PoolSample {
 }
 
 /// Record insert latency without processing audio, so this block can compensate for it.
+/// The latency at the head of a strip, before its inserts: a frozen track's chain, a latent
+/// instrument's, and an External Instrument's when it plays (`duplex`: live input is open).
+pub(crate) fn head_latency(t: &Track, strip: &Strip, duplex: bool) -> usize {
+    frozen_latency(t)
+        .saturating_add(strip.instrument.as_ref().filter(|i| !i.failed).map_or(0, |i| i.plugin.latency()))
+        .saturating_add(strip.ext.as_ref().map_or(0, |x| x.latency(duplex)))
+}
+
 /// The latency in samples a frozen track reports (0 for any other).
 pub(crate) fn frozen_latency(t: &Track) -> usize {
     t.freeze.as_ref().map_or(0, |f| f.latency as usize)

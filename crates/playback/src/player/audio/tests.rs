@@ -1528,3 +1528,41 @@ fn a_non_duplex_audio_pass_without_any_clock_still_fails_with_the_clock_reason()
     assert!(!audio.transport.playing && !audio.transport.recording);
     control.retire(audio.plans, audio.actions);
 }
+
+/// ADR 0020 decision 2 (the #61 gap): external MIDI for a sample is stamped at the instant the
+/// mix plays that sample, so when delay compensation holds the mix back by A frames (here a latent
+/// insert on another track) the stamp moves by A / r with it and a bare MIDI-out track stays on
+/// the grid. Fake clock: a linear output map at 48 kHz.
+#[test]
+fn external_midi_stamps_move_with_the_mixs_delay_compensation() {
+    use soundcraft_model::{ChannelFormat, Insert, TrackKind};
+    let stamp = |latent: bool| {
+        let mut s = Session::default();
+        s.edit.delay_compensation = true;
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+        if latent {
+            s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::new("maximizer"));
+        }
+        let (mut control, mut audio, _) = fixture_session(48_000, Arc::new(s));
+        fill(&mut audio, &mut [0.0; 8]);
+        control.service(&mut make);
+        for _ in 0..3 {
+            fill(&mut audio, &mut [0.0; 8]);
+        }
+        recording_clock(&mut audio, 48_000);
+        let a = audio.plans.engine().latency;
+        let block = audio.external_block(64);
+        control.retire(audio.plans, audio.actions);
+        (a, block)
+    };
+    let (zero, plain) = stamp(false);
+    let (a, delayed) = stamp(true);
+    assert_eq!(zero, 0);
+    let maximizer = soundcraft_dsp::create("maximizer").unwrap().latency();
+    assert!(maximizer > 0);
+    assert_eq!(a, maximizer, "A is the plan's delay compensation");
+    assert_eq!(plain.ns_per_frame, delayed.ns_per_frame);
+    let (p, d) = (plain.host_ns.unwrap(), delayed.host_ns.unwrap());
+    let want = (a as f64 * delayed.ns_per_frame) as i64;
+    assert!(((d as i64 - p as i64) - want).abs() <= 1, "stamp moved {} ns, want A / r = {want} ns", d as i64 - p as i64);
+}

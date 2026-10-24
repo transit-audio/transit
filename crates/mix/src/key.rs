@@ -167,7 +167,7 @@ impl KeyBank {
         }
         // A frozen track reports the latency of the chain its render replaces (`frozen_latency`): the
         // forward pass reads `st.latency`, so dropping it here made a frozen key source arrive early.
-        let mut own = frozen_latency(t).saturating_add(st.instrument.as_ref().filter(|i| !i.failed).map_or(0, |i| i.plugin.latency()));
+        let mut own = crate::head_latency(t, st, duplex);
         let mut short = 0usize;
         for (i, ins) in t.mixer.inserts.iter().enumerate() {
             // A hardware insert has no plug-in: its round trip is the latency before the next slot.

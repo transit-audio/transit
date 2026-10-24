@@ -120,6 +120,8 @@ struct Desc {
     inputs: Vec<IoPath>,
     /// The hardware inserts: their sinks, return channels and measured latency (ADR 0015 section 5).
     hardware: Vec<(TrackId, crate::hardware::HwSpec)>,
+    /// The External Instruments: their return channels and latency (ADR 0020).
+    external: Vec<(TrackId, crate::external::ExtSpec)>,
 }
 
 /// What the compiler knows of one plan's tables.
@@ -213,6 +215,9 @@ pub struct PlanCompiler {
     loops: Vec<RouteCycle>,
     /// This machine's I/O paths: output routes by name become sinks, input names resolve here.
     io: Arc<IoMap>,
+    /// The External Instrument tracks whose MIDI port the playback layer reports missing: they
+    /// are silent and report no latency (ADR 0020 decision 6).
+    no_port: Arc<[TrackId]>,
     /// Where the scope taps of the instances are found (see [`ScopeHub`]).
     scopes: Arc<ScopeHub>,
     /// Vacant active slots the next compile asks the factory for again
@@ -420,6 +425,7 @@ impl PlanCompiler {
             faulted: None,
             loops: Vec::new(),
             io: Arc::new(IoMap::default()),
+            no_port: Arc::from(Vec::new()),
             scopes: Arc::new(ScopeHub::default()),
             retry: Vec::new(),
         }
@@ -444,6 +450,13 @@ impl PlanCompiler {
     /// compiles the session again. Playback's buffers use the same table for the block layout.
     pub fn set_io(&mut self, io: Arc<IoMap>) {
         self.io = io;
+    }
+
+    /// The External Instrument tracks whose MIDI port is missing on this machine now: the next
+    /// plans play them silent with no latency, so delay compensation does not wait for a synth
+    /// that cannot play (ADR 0020 decision 6). The caller compiles the session again.
+    pub fn set_external_unavailable(&mut self, tracks: Arc<[TrackId]>) {
+        self.no_port = tracks;
     }
 
     /// The confirmed active generation.
@@ -671,7 +684,8 @@ impl PlanCompiler {
         measure(&session, &self.limits, block, &least, &|_, _| 0)?;
         // Path-based (F05): the slowest path into any summing point bounds every edge's delay.
         let need = path_need(&session, &|t: &Track| {
-            let hw = crate::hardware::latency_of(t, &self.io, self.target.sample_rate);
+            let hw = crate::hardware::latency_of(t, &self.io, self.target.sample_rate)
+                .saturating_add(crate::external::latency_of(t, self.target.sample_rate));
             match &t.freeze {
                 Some(f) => f.latency as usize,
                 None if mode == CompileMode::Update => self.active.track_latency(t.id).saturating_add(hw),
@@ -828,6 +842,9 @@ impl PlanCompiler {
         for t in rows.iter().filter_map(|&ti| s.tracks.get(ti)).filter(|t| !matches!(t.kind, TrackKind::Master | TrackKind::Vca)) {
             for spec in crate::hardware::specs_of(t, &self.io, &desc.sinks, self.target.in_channels, self.target.sample_rate) {
                 desc.hardware.push((t.id, spec));
+            }
+            if let Some(spec) = crate::external::spec_of(t, &self.io, self.target.in_channels, self.target.sample_rate, &self.no_port) {
+                desc.external.push((t.id, spec));
             }
         }
         Description { desc, order, specs }
@@ -1017,7 +1034,8 @@ impl PlanCompiler {
                     .iter()
                     .filter(|p| matches!(p.kind, CellKind::Insert | CellKind::Instrument))
                     .fold(t.freeze.as_ref().map_or(0, |f| f.latency as usize), |a, p| a.saturating_add(latency_of(p, self)));
-                Some((t.id, l.saturating_add(crate::hardware::latency_of(t, &self.io, self.target.sample_rate))))
+                let hw = crate::hardware::latency_of(t, &self.io, self.target.sample_rate);
+                Some((t.id, l.saturating_add(hw).saturating_add(crate::external::latency_of(t, self.target.sample_rate))))
             })
             .collect();
         let need1 = path_need(s, &|t: &Track| planned.get(&t.id).copied().unwrap_or(0));
@@ -1056,6 +1074,7 @@ impl PlanCompiler {
             st.scratch = vec![0.0; block];
             st.plugins = (0..t.mixer.inserts.len()).map(|_| None).collect();
             st.hw = desc.hardware.iter().filter(|(id, _)| *id == t.id).map(|(_, sp)| crate::hardware::HwSlot::new(sp.clone(), block)).collect();
+            st.ext = desc.external.iter().find(|(id, _)| *id == t.id).map(|(_, sp)| crate::external::ExtSlot::new(sp.clone()));
             st.clipbuf = vec![vec![0.0; block]; ch];
             st.sink_routes = desc.sink_routes.get(si).cloned().unwrap_or_default();
             st.key_pre = desc.keys.iter().any(|k| k.pre && k.from == KeyEnd::Strip(si as u16));

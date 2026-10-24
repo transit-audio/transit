@@ -143,7 +143,8 @@ impl Destination {
                     track: t.id,
                     port: port.clone(),
                     channel: *channel,
-                    offset_ns: (f64::from(t.midi_output.offset_ms()) * 1e6) as i64,
+                    // Held at 0 on an External Instrument track (ADR 0020 decision 1).
+                    offset_ns: (f64::from(t.midi_out_offset_ms()) * 1e6) as i64,
                     echo: t.mixer.record_arm || t.mixer.input_monitor,
                 }),
                 soundcraft_model::MidiOutput::Internal => None,

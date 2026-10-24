@@ -204,6 +204,10 @@ impl SessionControl {
     pub fn set_io(&mut self, io: Arc<soundcraft_model::IoMap>) {
         self.bridge.set_io(io);
     }
+    /// External Instrument tracks whose MIDI port is missing. The caller then requests the session again.
+    pub fn set_external_unavailable(&mut self, tracks: Arc<[soundcraft_model::TrackId]>) {
+        self.bridge.set_external_unavailable(tracks);
+    }
     /// Replace the document even when IDs/topology are unchanged. Ordinary requests
     /// coalesce into this boundary until its successful adoption.
     pub fn replace_session(&mut self, session: Arc<Session>, input: Option<Arc<InputRing>>) -> Result<SessionRequestId, PlayerError> {

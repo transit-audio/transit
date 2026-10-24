@@ -69,6 +69,9 @@ pub struct Player {
     midi: RefCell<Option<super::native::Native>>,
     #[cfg(not(target_arch = "wasm32"))]
     midi_error: Option<String>,
+    /// The External Instrument tracks the last plan was told have no MIDI port (ADR 0020).
+    #[cfg(not(target_arch = "wasm32"))]
+    external_off: RefCell<Vec<TrackId>>,
     record_start: RefCell<Option<record::start::Control>>,
     /// MIDI recording capture (control side) and the pass it is collecting.
     capture: RefCell<Option<crate::midi_capture::Capture>>,
@@ -203,6 +206,8 @@ impl Player {
             midi: RefCell::new(None),
             #[cfg(not(target_arch = "wasm32"))]
             midi_error: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            external_off: RefCell::new(Vec::new()),
             record_start: RefCell::new(None),
             capture: RefCell::new(None),
             midi_pass: RefCell::new(None),
@@ -986,8 +991,34 @@ impl Player {
         #[cfg(not(target_arch = "wasm32"))]
         if let Some(midi) = &mut *self.midi.try_borrow_mut().map_err(|_| PlayerError::Busy)? {
             midi.service(&mut owner, self.epoch);
+            self.follow_external_ports(&mut owner, midi);
         }
         Ok(report)
+    }
+
+    /// An External Instrument whose MIDI port is missing (unplugged, or held by another program)
+    /// plays silent with no latency, so delay compensation does not wait for a synth that cannot
+    /// play (ADR 0020 decision 6). When the set of such tracks changes, the plan is prepared again.
+    /// A port the output thread has not looked at yet counts as present.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn follow_external_ports(&self, owner: &mut Owner, midi: &super::native::Native) {
+        use super::midi_out::DestinationState;
+        let session = Arc::clone(owner.requested_session());
+        let Ok(mut held) = self.external_off.try_borrow_mut() else { return };
+        if held.is_empty() && !session.tracks.iter().any(|t| t.external_instrument().is_some()) {
+            return;
+        }
+        let status = midi.output_status();
+        let off: Vec<TrackId> = session
+            .tracks
+            .iter()
+            .filter(|t| t.external_instrument().is_some())
+            .filter(|t| matches!(status.track(t.id), Some(DestinationState::Missing | DestinationState::Failed(_))))
+            .map(|t| t.id)
+            .collect();
+        if off != *held && owner.set_external_unavailable(Arc::from(off.clone())).is_ok() {
+            *held = off;
+        }
     }
     /// Notes played on armed MIDI inputs since the last call (the UI's step entry); empty without MIDI.
     pub fn take_played_notes(&self) -> Vec<super::PlayedNote> {

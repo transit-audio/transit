@@ -173,3 +173,46 @@ fn disarming_while_a_key_and_the_pedal_are_held_releases_them_on_the_port() {
 fn unplugging_the_controller_while_a_key_and_the_pedal_are_held_releases_them_on_the_port() {
     held_echo_is_released(true);
 }
+
+/// ADR 0020 decision 6: an External Instrument whose MIDI port is missing plays silent with no
+/// latency. The Player follows the output thread's view of the port and prepares a plan that
+/// leaves the device out while the port is gone, and one that has it back when it returns.
+#[test]
+fn an_external_instruments_missing_port_takes_it_out_of_the_plan_until_the_port_returns() {
+    let fake = Fake::default();
+    let key = fake.add_output("MODEL D");
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
+    let track = s.track_mut(t).unwrap();
+    let mut ins = soundcraft_model::Insert::external("In 1");
+    ins.external.as_mut().unwrap().manual_ms = Some(19.5);
+    track.instrument = Some(ins);
+    track.midi_output = MidiOutput::External {
+        port: MidiOutPort { backend: key.backend.as_str().into(), name: key.name.clone(), ordinal: key.ordinal, id: key.id.clone() },
+        channel: MidiOutChannel::Channel(0),
+        offset_ms: 0.0,
+    };
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    player.midi.get_mut().as_mut().unwrap().enable(fake.io());
+    let mut callback = DeviceOutput::new(access, &player, 2);
+    let state = |player: &Player| player.midi_status().unwrap().output.track(t).cloned();
+    until("the destination opens", || {
+        player.service().unwrap();
+        callback.fill_f32(&mut [0.0f32; 256]);
+        state(&player) == Some(crate::player::midi_out::DestinationState::Connected)
+    });
+    assert!(player.external_off.borrow().is_empty(), "a present port keeps the device in the plan");
+    fake.remove_output(&key);
+    until("the plan leaves the device out", || {
+        player.service().unwrap();
+        callback.fill_f32(&mut [0.0f32; 256]);
+        *player.external_off.borrow() == [t]
+    });
+    // The synth is plugged in again on the same interface path.
+    fake.add_output_with_id("MODEL D", &key.id);
+    until("the device is back", || {
+        player.service().unwrap();
+        callback.fill_f32(&mut [0.0f32; 256]);
+        player.external_off.borrow().is_empty()
+    });
+}

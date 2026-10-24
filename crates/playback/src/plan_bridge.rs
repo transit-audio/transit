@@ -275,6 +275,8 @@ pub struct Control {
     limits: PlanLimits,
     /// This machine's path table for the open device; read when a plan is prepared.
     io: Arc<IoMap>,
+    /// External Instrument tracks whose MIDI port is missing (ADR 0020); read when a plan is prepared.
+    no_port: Arc<[soundcraft_model::TrackId]>,
     issued: PlanGeneration,
     meters: Arc<MeterBank>,
     pending_meters: Option<Arc<MeterBank>>,
@@ -325,6 +327,7 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
             target,
             limits,
             io: Arc::new(IoMap::for_device("", "", target.in_channels, if target.out_channels == 0 { 2 } else { target.out_channels })),
+            no_port: Arc::from(Vec::new()),
             issued: PlanGeneration::EMPTY,
             meters,
             pending_meters: None,
@@ -344,6 +347,12 @@ impl Control {
     /// change then travels like any other plan, with no device reopen.
     pub fn set_io(&mut self, io: Arc<IoMap>) {
         self.io = io;
+    }
+
+    /// The External Instrument tracks whose MIDI port is missing: the next prepared plan plays them
+    /// silent with no latency (ADR 0020 decision 6). The caller requests the session again.
+    pub fn set_external_unavailable(&mut self, tracks: Arc<[soundcraft_model::TrackId]>) {
+        self.no_port = tracks;
     }
 
     /// Coalesce before construction. Replaced unsent owners die here, on control.
@@ -400,6 +409,7 @@ impl Control {
         let buffers = Buffers::prepare(&request.session, request.input, self.target, &self.io, self.limits)?;
         // The compiler lays the sinks out from the same table, so the block layout agrees.
         self.compiler.set_io(Arc::clone(&self.io));
+        self.compiler.set_external_unavailable(Arc::clone(&self.no_port));
         let plan = self.compiler.compile_with_mode(request.session, self.compiler.active(), next, request.mode, make)?;
         self.issued = next;
         self.pending_meters = Some(Arc::clone(&buffers.meters));

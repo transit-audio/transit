@@ -127,6 +127,21 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
         Ok(request)
     }
 
+    /// The External Instrument tracks whose MIDI port is missing (ADR 0020 decision 6): a plan for the
+    /// same document is prepared that plays them silent with no latency, and published like any other.
+    pub fn set_external_unavailable(&mut self, tracks: Arc<[soundcraft_model::TrackId]>) -> Result<SessionRequestId, PlayerError> {
+        if self.faulted() {
+            return Err(PlayerError::Faulted);
+        }
+        self.control.sessions.set_external_unavailable(tracks);
+        let request = self.control.request(Arc::clone(&self.requested), self.input.clone())?;
+        self.request = request;
+        self.state = RequestState::Preparing;
+        self.attempted_latency = 0;
+        self.confirmed = None;
+        Ok(request)
+    }
+
     pub fn set_input(&mut self, input: Option<Arc<InputRing>>) -> Result<SessionRequestId, PlayerError> {
         if self.faulted() {
             return Err(PlayerError::Faulted);

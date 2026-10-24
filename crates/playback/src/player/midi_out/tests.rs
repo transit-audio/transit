@@ -280,3 +280,16 @@ fn a_revoked_echo_route_releases_its_notes_and_pedal_even_when_the_destination_i
         [vec![0x92, 60, 100], vec![0xB2, 64, 127], vec![0x82, 60, 64], vec![0xB2, 64, 0]]
     );
 }
+
+#[test]
+fn an_external_instrument_tracks_destination_has_no_offset() {
+    use soundcraft_model::{ChannelFormat, Insert, MidiOutput, Session, TrackKind};
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+    let track = s.track_mut(t).unwrap();
+    // A hand-edited file with an offset beside the device: the device's latency is the one knob.
+    track.midi_output = MidiOutput::External { port: MidiOutPort::default(), channel: MidiOutChannel::AsRecorded, offset_ms: 12.0 };
+    assert_eq!(Destination::of_session(&s)[0].offset_ns, 12_000_000);
+    s.track_mut(t).unwrap().instrument = Some(Insert::external("In 1"));
+    assert_eq!(Destination::of_session(&s)[0].offset_ns, 0, "ADR 0020: the offset is held at 0");
+}
