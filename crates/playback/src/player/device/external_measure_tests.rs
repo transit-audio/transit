@@ -35,7 +35,7 @@ struct Rig {
 
 /// An instrument track holding an External Instrument returning on In 1, sending to `MODEL D` on
 /// MIDI channel 3; a duplex fake device at 48 kHz, its input feeding the plan.
-fn rig(armed: bool) -> Rig {
+fn rig(armed: bool, prefill: usize) -> Rig {
     let midi = Fake::default();
     let key = midi.add_output("MODEL D");
     let mut s = Session::default();
@@ -58,13 +58,16 @@ fn rig(armed: bool) -> Rig {
     let rig = Rig { player, audio, midi, key, track, _recorder: recorder };
     let (mut output, input) = (vec![0.0f32; BLOCK * 2], vec![0.0f32; BLOCK * 2]);
     let format = ab::Format::new(48_000, 2, ab::SampleFormat::F32);
+    // Input queued before the plan reads it: the plan drops it on adoption (K22), so B stays 0.
+    for _ in 0..prefill {
+        assert!(rig.audio.pump_capture(BLOCK, ab::Stamp::INVALID, format, &mut SliceSource { data: &input, channels: 2 }));
+    }
     until("the destination opens", || {
         rig.audio.pump_capture(BLOCK, ab::Stamp::INVALID, format, &mut SliceSource { data: &input, channels: 2 });
         rig.audio.pump_render(BLOCK, ab::Stamp::INVALID, &mut SliceSink { data: &mut output, channels: 2 });
         rig.player.service().unwrap();
         rig.player.midi_status().unwrap().output.track(track) == Some(&crate::player::midi_out::DestinationState::Connected)
     });
-    rig._recorder.monitor.clear_monitor();
     rig
 }
 
@@ -140,7 +143,7 @@ fn released(sent: &[Vec<u8>]) -> bool {
 
 #[test]
 fn measure_finds_the_round_trip_in_plan_frames_and_releases_on_the_port() {
-    let rig = rig(false);
+    let rig = rig(false, 0);
     let duration = rig.player.external_measure_duration();
     assert!((duration.as_secs_f64() - 13.22).abs() < 0.01, "{duration:?}");
     let blocks = (duration.as_secs_f64() * 48_000.0 / BLOCK as f64) as usize + ARM_AT + 50;
@@ -170,10 +173,24 @@ fn measure_finds_the_round_trip_in_plan_frames_and_releases_on_the_port() {
 }
 
 #[test]
+fn measure_excludes_input_queued_before_the_plan_read_it() {
+    // K22 (#88): however many quiet blocks queued ahead of the plan before it read the input, the
+    // plan drops them, so B is 0 and C is the bench round trip alone.
+    for prefill in [0, 3, 7] {
+        let rig = rig(false, prefill);
+        let blocks = (rig.player.external_measure_duration().as_secs_f64() * 48_000.0 / BLOCK as f64) as usize + ARM_AT + 50;
+        let run = pump(&rig, blocks, |_, _| false);
+        let m = run.result.expect("the measurement finished").expect("every note came back");
+        assert_eq!(m.frames, C as u32, "prefill {prefill}: {m:?}");
+        assert_eq!(m.backlog, Some(0), "prefill {prefill}: {m:?}");
+    }
+}
+
+#[test]
 fn a_backlog_that_changes_mid_run_refuses_and_the_note_is_released() {
     // C moves frame for frame with the input ring's backlog B (ADR 0020 decision 2): a run whose
     // B changed has no single C. One more device block queues ahead of the plan reader mid-run.
-    let rig = rig(false);
+    let rig = rig(false, 0);
     let blocks = (rig.player.external_measure_duration().as_secs_f64() * 48_000.0 / BLOCK as f64) as usize + ARM_AT + 50;
     let run = pump_with(&rig, blocks, Some(ARM_AT + 2_000), |_, _| false);
     let Some(Err(MeasureError::InputAlignmentChanged { first, last })) = run.result else {
@@ -189,7 +206,7 @@ fn a_backlog_that_changes_mid_run_refuses_and_the_note_is_released() {
 
 #[test]
 fn cancel_releases_the_held_note_and_measures_nothing() {
-    let rig = rig(false);
+    let rig = rig(false, 0);
     // Into the second measured note's hold: 100 ms + 2 × 1500 ms + 40 ms after arming.
     let held = ARM_AT + (48 * 3140) / BLOCK;
     let run = pump(&rig, held + 20, |i, p| {
@@ -212,7 +229,7 @@ fn cancel_releases_the_held_note_and_measures_nothing() {
 fn a_cancel_releases_through_control_even_when_the_audio_thread_never_runs_again() {
     // N3 of the slice review: after the Cancel no block is pumped, so the audio thread's own
     // release cannot run; only Main's `release_track` can end the note (the UI timeout path).
-    let rig = rig(false);
+    let rig = rig(false, 0);
     let held = ARM_AT + (48 * 1640) / BLOCK;
     pump(&rig, held + 1, |i, _| i >= held);
     until("the first measured note is sent", || messages(&rig).iter().filter(|m| **m == vec![0x92, 60, 100]).count() == 2);
@@ -223,7 +240,7 @@ fn a_cancel_releases_through_control_even_when_the_audio_thread_never_runs_again
 
 #[test]
 fn a_device_lost_mid_measure_releases_the_note_and_refuses() {
-    let rig = rig(false);
+    let rig = rig(false, 0);
     let held = ARM_AT + (48 * 1640) / BLOCK;
     pump(&rig, held + 1, |i, _| i >= held);
     assert!(rig.player.external_measure_running());
@@ -237,7 +254,7 @@ fn a_device_lost_mid_measure_releases_the_note_and_refuses() {
 
 #[test]
 fn measure_is_refused_while_playing_armed_without_a_port_or_input_and_one_at_a_time() {
-    let rig = rig(true);
+    let rig = rig(true, 0);
     assert!(rig.player.start_external_measure(rig.track, &[0]).unwrap_err().contains("disarm"), "an armed track");
     let rig = rig_unarmed();
     assert!(rig.player.start_external_measure(rig.track, &[5]).unwrap_err().contains("channel"));
@@ -271,5 +288,5 @@ fn measure_is_refused_while_playing_armed_without_a_port_or_input_and_one_at_a_t
 }
 
 fn rig_unarmed() -> Rig {
-    rig(false)
+    rig(false, 0)
 }
