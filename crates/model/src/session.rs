@@ -207,7 +207,6 @@ pub struct EditState {
     pub countoff_bars: u32,
     pub midi_merge: bool,
     pub record_mode: String,
-    pub loop_record: bool,
     pub quickpunch: bool,
     pub scrolling: String,
     pub solo_mode: String,
@@ -292,7 +291,6 @@ impl Default for EditState {
             countoff_bars: 2,
             midi_merge: false,
             record_mode: "normal".into(),
-            loop_record: false,
             quickpunch: false,
             scrolling: "page".into(),
             solo_mode: "sip".into(),
@@ -779,6 +777,17 @@ pub fn truncate_chars(s: &mut String, max: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_session_saved_with_the_removed_loop_record_option_still_loads() {
+        // Cycle plus Record always stacks takes now (ADR 0026); older files carry the old switch.
+        for on in [true, false] {
+            let mut v = serde_json::to_value(EditState::default()).unwrap();
+            v.as_object_mut().unwrap().insert("loop_record".into(), serde_json::json!(on));
+            let loaded: EditState = serde_json::from_value(v).unwrap();
+            assert_eq!(loaded, EditState::default(), "loop_record: {on} is ignored");
+        }
+    }
 
     #[test]
     fn cycle_range_prefers_the_loop_region_over_the_selection() {

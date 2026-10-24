@@ -401,7 +401,6 @@ AudioSuite > Other > Reverse
 AudioSuite > Other > Signal Generator
 AudioSuite > Other > Time Compression Expansion
 Options > Destructive Record
-Options > Loop Record
 Options > QuickPunch
 Options > TrackPunch
 Options > DestructivePunch

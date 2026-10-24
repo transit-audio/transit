@@ -599,11 +599,13 @@ impl SoundApp {
             return;
         }
         let e = self.engine.session().edit.clone();
+        let cycle = e.cycle_range();
         let sel = e.selection;
-        if e.loop_record && !sel.is_empty() {
-            self.record_start = sel.start;
+        if e.loop_playback && !cycle.is_empty() {
+            // Cycle on: Record loops the range, each lap a take, until Stop.
+            self.record_start = cycle.start;
             self.punch = None;
-            self.plan_recording(takes, Some(sel.len()), Some((sel.start, None, Some(sel))));
+            self.plan_recording(takes, Some(cycle.len()), Some((cycle.start, None, Some(cycle))));
         } else {
             // Record into the selection when there is one (punch), with pre/post-roll if enabled;
             // the take is trimmed back to the punch range afterwards.

@@ -62,7 +62,6 @@ fn four_bars(tempo: &soundcraft_time::TempoMap, sr: soundcraft_time::SampleRate,
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
-        toggle!("options.loop_record", "Loop Record", ["Options"], Some("Alt+L"), loop_record),
         toggle!("options.quickpunch", "QuickPunch", ["Options"], Some("Cmd+Shift+P"), quickpunch),
         toggle!("options.pre_post_roll", "Pre/Post-Roll", ["Options"], Some("Cmd+K"), pre_post_roll),
         cmd!(

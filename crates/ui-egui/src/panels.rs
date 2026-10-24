@@ -322,16 +322,15 @@ fn transport_window(app: &mut SoundApp, ctx: &egui::Context) {
             });
         }
         if flags.contains("view.transport.midi_controls") || expanded {
-            let (click, countoff, merge, loop_rec, prepost) = {
+            let (click, countoff, merge, prepost) = {
                 let e = &app.engine.session().edit;
-                (e.click, e.countoff, e.midi_merge, e.loop_record, e.pre_post_roll)
+                (e.click, e.countoff, e.midi_merge, e.pre_post_roll)
             };
             ui.horizontal(|ui| {
                 for (label, on, cmd) in [
                     ("Click", click, "options.click"),
                     ("Count Off", countoff, "options.countoff"),
                     ("MIDI Merge", merge, "options.midi_merge"),
-                    ("Loop Rec", loop_rec, "options.loop_record"),
                     ("Pre/Post", prepost, "options.pre_post_roll"),
                 ] {
                     if ui.selectable_label(on, label).clicked() {

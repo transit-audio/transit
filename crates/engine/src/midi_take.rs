@@ -10,8 +10,8 @@
 //! - **Several clips in the way:** the track's playlist is duplicated first, so the old clips stay
 //!   as the previous take, as audio recording does.
 //! - **Loop record:** each pass is its own clip on its own playlist (a take lane), as audio does.
-//! - **Transport wrap:** a recording that started inside the cycle and ran past its end (Cycle on,
-//!   Loop Record off) is cut at each wrap the same way: a clip per pass, never discarded.
+//! - **Transport wrap:** a recording that started inside the cycle and ran past its end (Cycle on)
+//!   is cut at each wrap the same way: a clip per pass, never discarded.
 //!   A note held across the loop end is cut at each wrap and resumes at offset zero in the next
 //!   pass with the same pitch and velocity until its release. Each loop lap stays loop-length.
 //! - **Nothing played:** no clip.

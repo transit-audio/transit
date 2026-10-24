@@ -121,7 +121,7 @@ impl StudioApp {
             let at = self.position();
             self.record_start = at;
             self.punch = None;
-            // Cycling already: the pass is the loop, as with Loop Record, so every lap is a take.
+            // Cycling already: the pass is the loop, so every lap is a take.
             // (The per-pass path cuts from the latch in whole laps, so it needs the latch at the
             // loop start; from inside the loop the wrapped-recording path cuts the laps instead.)
             let e = &self.engine.session().edit;
@@ -135,8 +135,8 @@ impl StudioApp {
         let cycle = e.loop_playback && !sel.is_empty();
         if cycle {
             // Cycle on: Record loops the cycle range and keeps recording lap after lap until Stop,
-            // each lap its own take (Cubase, Live). Punching out at the loop end, which Cycle without
-            // Loop Record used to do, stopped the recording at the first wrap.
+            // each lap its own take (Cubase, Live). Punching out at the loop end, which Cycle used to
+            // do, stopped the recording at the first wrap.
             self.record_start = sel.start;
             self.punch = None;
             let count_in = self.count_in_for(sel.start);
