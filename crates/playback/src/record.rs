@@ -1964,6 +1964,34 @@ mod ring_tests {
         assert_eq!(cycle(&ring, &block)[0], 0.0, "no request, no trim: the FIFO order holds");
     }
 
+    /// N1: an unpaired backend whose capture pushes 480 frames per 10 ms while the render reads
+    /// 128 every 2.667 ms. The aligning read keeps `128 + max(128, 480)` frames, so the reader
+    /// never runs dry in the first 10 s of simulated time. A slack of one read block left a gap
+    /// of about 288 frames right after alignment.
+    #[test]
+    fn unpaired_slack_covers_a_capture_period_above_two_reads() {
+        const RATE: u64 = 48_000;
+        let ring = InputRing::new(1, RATE as u32);
+        // Capture started 3 periods before the plan adopts the ring and reads.
+        for _ in 0..3 {
+            ring.push(&[1.0; 480]);
+        }
+        ring.align_on_next_read();
+        // Time in frames; captures land at multiples of 480 (after the first read at t = 0).
+        let mut next_capture = 480u64;
+        let mut out = vec![vec![0.0f32; 128]];
+        let mut t = 0u64;
+        while t < 10 * RATE {
+            while next_capture <= t {
+                ring.push(&[1.0; 480]);
+                next_capture += 480;
+            }
+            ring.pop_into(&mut out, 128, RATE as u32);
+            assert_eq!(ring.telemetry().underrun_frames, 0, "underrun at frame {t}");
+            t += 128;
+        }
+    }
+
     /// K22: a `clear_monitor` mid-session re-establishes the target, whether the reader was idle
     /// (immediate clear) or reading (deferred clear), and whatever queued between the clear and
     /// the next read.
