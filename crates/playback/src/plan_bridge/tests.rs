@@ -697,3 +697,40 @@ fn direct_render_after_a_control_fault_zeroes_the_requested_output_and_meters() 
     assert!(meters.main.peak.iter().all(|&v| v == 0.0));
     control.retire(audio);
 }
+
+/// K22: the frames a live input queued before the plan adopted it are not a delay in front of
+/// the reader. A paired ring (capture then render in one callback) holding `N` frames at adoption
+/// gives the plan this cycle's capture on the first render, with no backlog left; a later plan
+/// that keeps the same ring does not realign it.
+#[test]
+fn an_adopted_input_reads_the_newest_capture_whatever_queued_before() {
+    const N: usize = 448;
+    const BLOCK: usize = 64;
+    let (mut control, mut audio) = plan_bridge::pair(target(), PlanLimits::default());
+    let s = Arc::new(session(ChannelFormat::Stereo));
+    let ring = InputRing::with_pairing(1, 48_000, true);
+    ring.push(&[0.5; N]);
+    control.request(Arc::clone(&s), Some(Arc::clone(&ring)));
+    control.prepare(&mut make).unwrap();
+    adopt(&mut audio);
+    control.poll();
+    let mut block = [0.0f32; BLOCK];
+    block[5] = 1.0;
+    ring.push(&block);
+    let ((), stats) = measure(|| audio.render(0, BLOCK));
+    assert!(stats.is_zero(), "{stats:?}");
+    assert_eq!(audio.input()[0][..BLOCK], block, "the first render reads this cycle's capture, not the {N} frames before it");
+    assert_eq!(ring.buffered_input_frames(), 0);
+    assert_eq!(ring.telemetry().discarded_frames, N as u64);
+    // A stall queues one more block; a new plan with the same ring keeps the reader where it is.
+    ring.push(&[0.0; BLOCK]);
+    control.request(Arc::clone(&s), Some(Arc::clone(&ring)));
+    control.prepare(&mut make).unwrap();
+    adopt(&mut audio);
+    ring.push(&block);
+    audio.render(BLOCK as i64, BLOCK);
+    assert_eq!(ring.buffered_input_frames(), BLOCK, "only a newly attached ring aligns");
+    assert_eq!(audio.input()[0][..BLOCK], [0.0; BLOCK]);
+    control.poll();
+    control.retire(audio);
+}

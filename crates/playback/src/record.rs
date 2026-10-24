@@ -1913,6 +1913,104 @@ mod ring_tests {
         assert_eq!(ring.telemetry(), super::MonitorTelemetry::default());
     }
 
+    /// One device cycle of a paired device: the capture block, then the plan's read of it.
+    fn cycle(ring: &InputRing, block: &[f32]) -> Vec<f32> {
+        ring.push(block);
+        let mut out = vec![vec![0.0f32; block.len()]];
+        ring.pop_into(&mut out, block.len(), 48_000);
+        out.swap_remove(0)
+    }
+
+    /// K22: a ring that queued `N` frames before its first read (the plan adopted it late) aligns
+    /// on that read. Paired, the read gets this cycle's capture and B is 0; unpaired, one read
+    /// block of slack stays queued. Without a request the FIFO is never trimmed.
+    #[test]
+    fn the_aligning_read_drops_what_queued_before_it_down_to_the_target() {
+        const N: usize = 448;
+        let block: Vec<f32> = (N..N + 64).map(|i| i as f32).collect();
+        let backlog: Vec<f32> = (0..N).map(|i| i as f32).collect();
+        for (paired, kept) in [(true, 0), (false, 64)] {
+            let ring = InputRing::with_pairing(1, 48_000, paired);
+            ring.push(&backlog);
+            ring.align_on_next_read();
+            let mut out = vec![vec![0.0f32; 64]];
+            ring.push(&block);
+            ring.pop_into(&mut out, 64, 48_000);
+            let first = (N - kept) as f32;
+            assert_eq!(out[0], (0..64).map(|i| first + i as f32).collect::<Vec<_>>(), "paired {paired}");
+            assert_eq!(ring.buffered_input_frames(), kept, "paired {paired}: B is the target");
+            assert_eq!(ring.telemetry().discarded_frames, (N - kept) as u64);
+            assert_eq!(ring.telemetry().underrun_frames, 0);
+            // Lockstep afterwards keeps B at the target.
+            for k in 0..10 {
+                let next: Vec<f32> = (0..64).map(|i| (10_000 + 64 * k + i) as f32).collect();
+                cycle(&ring, &next);
+                assert_eq!(ring.buffered_input_frames(), kept);
+            }
+        }
+        let ring = InputRing::with_pairing(1, 48_000, true);
+        ring.push(&backlog);
+        assert_eq!(cycle(&ring, &block)[0], 0.0, "no request, no trim: the FIFO order holds");
+    }
+
+    /// K22: a `clear_monitor` mid-session re-establishes the target, whether the reader was idle
+    /// (immediate clear) or reading (deferred clear), and whatever queued between the clear and
+    /// the next read.
+    #[test]
+    fn a_clear_mid_session_reestablishes_the_target() {
+        for deferred in [false, true] {
+            let ring = InputRing::with_pairing(1, 48_000, true);
+            ring.align_on_next_read();
+            for k in 0..5 {
+                cycle(&ring, &[k as f32; 64]);
+                assert_eq!(ring.buffered_input_frames(), 0);
+            }
+            // A stall: three blocks queue ahead of the reader and stay there.
+            for _ in 0..3 {
+                ring.push(&[-1.0; 64]);
+            }
+            cycle(&ring, &[7.0; 64]);
+            assert_eq!(ring.buffered_input_frames(), 192);
+            if deferred {
+                let guard = ring.reader.lock().unwrap();
+                ring.clear_monitor();
+                drop(guard);
+            } else {
+                ring.clear_monitor();
+            }
+            // Input keeps arriving before the next read (the attach race of K22).
+            for _ in 0..4 {
+                ring.push(&[-2.0; 64]);
+            }
+            let out = cycle(&ring, &[9.0; 64]);
+            if deferred {
+                // The deferred clear also takes this cycle's block; the next cycle aligns.
+                assert_eq!(out, [0.0; 64]);
+                assert_eq!(cycle(&ring, &[11.0; 64]), [11.0; 64]);
+            } else {
+                assert_eq!(out, [9.0; 64], "the read gets this cycle's capture");
+            }
+            assert_eq!(ring.buffered_input_frames(), 0, "deferred {deferred}");
+            assert_eq!(cycle(&ring, &[12.0; 64]), [12.0; 64]);
+            assert_eq!(ring.buffered_input_frames(), 0);
+        }
+    }
+
+    /// A read before the device's input runs finds nothing: the alignment waits for the first
+    /// read that finds input instead of being spent on an empty ring.
+    #[test]
+    fn alignment_waits_for_a_read_that_finds_input() {
+        let ring = InputRing::with_pairing(1, 48_000, true);
+        ring.align_on_next_read();
+        assert_eq!(cycle(&ring, &[]), Vec::<f32>::new());
+        let mut out = vec![vec![1.0f32; 64]];
+        ring.pop_into(&mut out, 64, 48_000);
+        assert_eq!(out[0], [0.0; 64]);
+        ring.push(&[-1.0; 256]);
+        assert_eq!(cycle(&ring, &[3.0; 64]), [3.0; 64]);
+        assert_eq!(ring.buffered_input_frames(), 0);
+    }
+
     /// Nothing buffered: silence, not stale data.
     #[test]
     fn monitor_underrun_is_silence() {

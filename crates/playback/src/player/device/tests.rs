@@ -755,8 +755,18 @@ fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, se
         player.service().expect("service");
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    // The plan adopts the live input a few blocks late; start from an empty ring (K22).
-    recorder.monitor.clear_monitor();
+    // No clear here: the ring aligns itself when the plan adopts it (K22), as in the app. The
+    // backlog B after each plan read must be 0 on native ASIO duplex: sample it between callbacks
+    // (a snapshot can land between a capture push and the plan's read and show one block).
+    let mut backlog = Vec::new();
+    for _ in 0..200 {
+        backlog.push(recorder.monitor.buffered_input_frames());
+        std::thread::sleep(std::time::Duration::from_micros(700));
+    }
+    let b_min = backlog.iter().copied().min().unwrap_or(usize::MAX);
+    let zero = backlog.iter().filter(|&&b| b == 0).count();
+    println!("{driver}: input ring backlog B: min {b_min}, max {:?}, {zero} of 200 samples at 0", backlog.iter().max());
+    assert_eq!(b_min, 0, "the live input is aligned: no backlog in front of the plan reader");
     player.start_hardware_probe(&[send], &[ret]).unwrap_or_else(|e| panic!("{e}"));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let result = loop {
@@ -785,6 +795,14 @@ fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, se
 fn hardware_player_measures_a_hardware_insert_on_the_scarlett_over_native_asio() {
     let frames = hardware_ping_on_native_asio("Focusrite USB ASIO", 48_000, Some(64), 1, 1);
     assert!((250..400).contains(&frames), "{frames} frames: the bench measures about 300 at 64");
+}
+
+#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+#[test]
+#[ignore = "plays a click train out of the Scarlett's output 2 (cabled to input 2) through the Player"]
+fn hardware_player_measures_a_hardware_insert_on_the_scarlett_at_128_over_native_asio() {
+    let frames = hardware_ping_on_native_asio("Focusrite USB ASIO", 48_000, Some(128), 1, 1);
+    assert!((550..750).contains(&frames), "{frames} frames: the position loop is 648 at 128");
 }
 
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
@@ -986,13 +1004,12 @@ fn loopback_player(delay: usize, send: &[u16], ret: &[u16], blocks: usize) -> (P
     let (mut output, mut input) = (vec![0.0f32; BLOCK * 2], vec![0.0f32; BLOCK * 2]);
     let mut sent: Vec<f32> = Vec::new();
     let mut started = false;
-    // The plan adopts its live input on the first blocks after `set_input`; until then the ring
-    // would pile up a backlog the insert would also see. Settle first, then start from empty.
+    // The plan adopts its live input on the first blocks after `set_input`, and the ring aligns
+    // on the plan's first read (K22): no clear is needed.
     for _ in 0..4 {
         assert!(fake.pump_render(BLOCK, ab::Stamp::INVALID, &mut SliceSink { data: &mut output, channels: 2 }));
         player.service().unwrap();
     }
-    recorder.monitor.clear_monitor();
     let mut result = Err("no result".to_string());
     for i in 0..blocks {
         // Let the plan and the input ring settle for a few blocks before arming.
@@ -1173,7 +1190,6 @@ fn a_hardware_insert_is_measured_through_the_model12s_last_channels() {
         assert!(fake.pump_render(BLOCK, ab::Stamp::INVALID, &mut SliceSink { data: &mut output, channels: 10 }));
         player.service().unwrap();
     }
-    recorder.monitor.clear_monitor();
     let (mut sent, mut elsewhere) = (Vec::<f32>::new(), 0.0f32);
     let mut result = Err("no result".to_string());
     for i in 0..700 {
@@ -1200,6 +1216,105 @@ fn a_hardware_insert_is_measured_through_the_model12s_last_channels() {
     assert!(measured.round_trip_frames.abs_diff(DELAY as u32) <= 1, "{measured:?}");
     assert_eq!(elsewhere, 0.0, "the click played on output 9 only");
     assert!(player.start_hardware_probe(&[10], &[0]).unwrap_err().contains("channel"), "output 11 does not exist on a 10-output driver");
+}
+
+/// K22: input that queued in the live-input ring before the plan first read it (the attach race)
+/// is not part of a hardware insert's round trip. `prefill` capture blocks arrive after
+/// `set_input` and before any render; the measured round trip is still the cable's delay, and
+/// the backlog B in front of the plan reader is 0 (paired ASIO-style fake: capture, then render).
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_hardware_insert_round_trip_excludes_input_queued_before_the_plan_read_it() {
+    use ab::fake::{SliceSink, SliceSource};
+    const BLOCK: usize = 64;
+    const DELAY: usize = 326;
+    for prefill in [0, 3, 4, 7] {
+        let fake = model12();
+        let cfg = asio_config();
+        let player = open_asio(&fake, &cfg);
+        let recorder = player.open_input(&cfg).unwrap();
+        player.set_input(Arc::clone(&recorder.monitor)).unwrap();
+        let format = ab::Format::new(48_000, 12, ab::SampleFormat::F32);
+        let (mut output, mut input) = (vec![0.0f32; BLOCK * 10], vec![0.0f32; BLOCK * 12]);
+        for _ in 0..prefill {
+            assert!(fake.pump_capture(BLOCK, ab::Stamp::INVALID, format, &mut SliceSource { data: &input, channels: 12 }));
+        }
+        let mut sent = Vec::<f32>::new();
+        let (mut result, mut backlog) = (Err("no result".to_string()), Vec::new());
+        for i in 0..3_000 {
+            if i == 40 {
+                player.start_hardware_probe(&[8], &[10]).unwrap_or_else(|e| panic!("{e}"));
+            }
+            input.fill(0.0);
+            for f in 0..BLOCK {
+                input[f * 12 + 10] = (i * BLOCK + f).checked_sub(DELAY).and_then(|k| sent.get(k)).copied().unwrap_or(0.0);
+            }
+            assert!(fake.pump_capture(BLOCK, ab::Stamp::INVALID, format, &mut SliceSource { data: &input, channels: 12 }));
+            assert!(fake.pump_render(BLOCK, ab::Stamp::INVALID, &mut SliceSink { data: &mut output, channels: 10 }));
+            sent.extend(output.chunks(10).map(|frame| frame[8]));
+            if i >= 10 {
+                backlog.push(recorder.monitor.buffered_input_frames());
+            }
+            player.service().unwrap();
+            if let Some(r) = player.hardware_probe_result() {
+                result = r.map_err(|e| e.to_string());
+                break;
+            }
+        }
+        let measured = result.unwrap_or_else(|e| panic!("prefill {prefill}: {e}"));
+        assert_eq!(measured.round_trip_frames, DELAY as u32, "prefill {prefill} blocks: {measured:?}");
+        assert!(backlog.iter().all(|&b| b == 0), "prefill {prefill}: B after each plan read {:?}", &backlog[..8]);
+    }
+}
+
+/// K22: input monitoring hears the live input with the same latency whatever queued in the ring
+/// before the plan first read it. A monitored track on a paired ASIO-style fake: an impulse
+/// captured at a known frame reaches the output the same number of frames later with 0 and with
+/// `prefill` blocks queued between `set_input` and the plan's first read.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn input_monitoring_latency_excludes_input_queued_before_the_plan_read_it() {
+    use ab::fake::{SliceSink, SliceSource};
+    use soundcraft_model::{ChannelFormat, TrackKind};
+    const BLOCK: usize = 64;
+    const AT: usize = 60 * BLOCK + 10;
+    let monitored = |prefill: usize| {
+        let fake = model12();
+        let cfg = asio_config();
+        let mut s = Session::default();
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Mic"));
+        s.track_mut(t).unwrap().mixer.input_monitor = true;
+        let player = Player::open_native(Arc::new(s), &cfg, Box::new(fake.clone()), &fake_factory(false), NativeKind::Asio).unwrap();
+        let recorder = player.open_input(&cfg).unwrap();
+        player.set_input(Arc::clone(&recorder.monitor)).unwrap();
+        let format = ab::Format::new(48_000, 12, ab::SampleFormat::F32);
+        let (mut output, mut input) = (vec![0.0f32; BLOCK * 10], vec![0.0f32; BLOCK * 12]);
+        for _ in 0..prefill {
+            assert!(fake.pump_capture(BLOCK, ab::Stamp::INVALID, format, &mut SliceSource { data: &input, channels: 12 }));
+        }
+        let mut heard = None;
+        for i in 0..200 {
+            input.fill(0.0);
+            if (i * BLOCK..(i + 1) * BLOCK).contains(&AT) {
+                input[(AT - i * BLOCK) * 12..][..12].fill(0.5);
+            }
+            assert!(fake.pump_capture(BLOCK, ab::Stamp::INVALID, format, &mut SliceSource { data: &input, channels: 12 }));
+            assert!(fake.pump_render(BLOCK, ab::Stamp::INVALID, &mut SliceSink { data: &mut output, channels: 10 }));
+            if heard.is_none()
+                && let Some(f) = output.chunks(10).position(|frame| frame.iter().any(|x| x.abs() > 0.01))
+            {
+                heard = Some(i * BLOCK + f);
+            }
+            player.service().unwrap();
+        }
+        let heard = heard.unwrap_or_else(|| panic!("prefill {prefill}: the monitored impulse never reached the output"));
+        (heard - AT, recorder.monitor.buffered_input_frames())
+    };
+    let (reference, b) = monitored(0);
+    assert_eq!(b, 0);
+    for prefill in [3, 4, 7] {
+        assert_eq!(monitored(prefill), (reference, 0), "prefill {prefill} blocks: (monitor latency, B)");
+    }
 }
 
 #[test]
