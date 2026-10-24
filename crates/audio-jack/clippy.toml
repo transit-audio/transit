@@ -1,0 +1,15 @@
+# The JACK callbacks must not allocate, lock, log or format (ADR 0021, decision 7). The callback
+# modules (`engine`, `callback`) deny these lints; the control-thread modules allow them.
+disallowed-macros = [
+    { path = "std::format", reason = "allocates; never on the audio thread" },
+    { path = "log::log", reason = "locks and formats; never on the audio thread" },
+    { path = "log::error", reason = "locks and formats; never on the audio thread" },
+    { path = "log::warn", reason = "locks and formats; never on the audio thread" },
+    { path = "log::info", reason = "locks and formats; never on the audio thread" },
+    { path = "log::debug", reason = "locks and formats; never on the audio thread" },
+    { path = "log::trace", reason = "locks and formats; never on the audio thread" },
+]
+disallowed-methods = [
+    { path = "std::string::ToString::to_string", reason = "allocates; never on the audio thread" },
+    { path = "std::string::String::from_utf8_lossy", reason = "allocates; never on the audio thread" },
+]

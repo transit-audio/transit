@@ -1,0 +1,43 @@
+[package]
+name = "transit-audio-jack"
+description = "transit native JACK backend (ADR 0021): the JACK client API, for JACK 2 and PipeWire's libjack alike, with libjack loaded at run time; Linux only, empty elsewhere"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[features]
+# The backend over the real libjack through `jack-sys`, loaded at run time (dlopen of libjack.so.0;
+# nothing links against it). Without this feature the crate is empty (its tests still build the safe
+# core over the fake server, on any platform, with no system package). jack-sys's build script asks pkg-config for `jack` on Linux, so a build with the
+# feature needs jack.pc (Debian and Ubuntu: libjack-jackd2-dev) even though libjack is not linked.
+libjack = ["dep:jack-sys"]
+
+[target.'cfg(target_os = "linux")'.dependencies]
+transit-audio-backend.workspace = true
+log.workspace = true
+# Pinned: every bump is reviewed against the quoted `// SAFETY:` comments. `dynamic_loading` must be
+# named: 0.5.1's manifest spells its default list `default_features`, so it is not on by default.
+jack-sys = { version = "=0.5.1", features = ["dynamic_loading"], optional = true }
+
+[dev-dependencies]
+transit-audio-backend.workspace = true
+log.workspace = true
+transit-rt = { workspace = true, features = ["testing"] }
+
+# ADR 0013 as amended by ADR 0021: this crate may contain `unsafe` for libjack calls (`src/ffi.rs`)
+# and the callbacks libjack makes (`src/callback.rs`) only; every other module denies it (`lib.rs`).
+# Every `unsafe` block carries a `// SAFETY:` comment quoting the jack.h rule it relies on. The rest
+# mirrors `[workspace.lints]` and `crates/audio-asio`.
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "forbid"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"
