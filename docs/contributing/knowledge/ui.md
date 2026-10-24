@@ -29,6 +29,7 @@ UI code follows the same no-panic rule (`#![deny(clippy::unwrap_used, ...)]` in 
   `apps/transit/src/main.rs`). With `confirm` unset the action is refused with a status line, so
   nothing runs unasked. Tests supply a stub that records the question and answers
   (`plugin_header_tests.rs`); a test never opens a real dialog.
+- **MIDI Monitor:** Window > MIDI Monitor (`window.midi_monitor`) and the transport bar's MIDI light; see `midi-monitor.md`.
 - Strings are American English.
 
 ## Clip fades and crossfades
