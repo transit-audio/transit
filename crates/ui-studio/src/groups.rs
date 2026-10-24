@@ -25,6 +25,38 @@ use std::collections::HashMap;
 /// Indent per group level in the track list (points).
 pub const INDENT: f32 = 14.0;
 
+/// Width of a group's color bar and of a track's own stripe (points).
+pub const BAR_W: f32 = 5.0;
+/// How much an ancestor bar is dimmed so the member's own stripe reads as primary.
+pub const BAR_DIM: f32 = 0.6;
+
+/// The groups holding `t`, outermost first.
+pub fn ancestors<'a>(s: &'a Session, t: &Track) -> Vec<&'a Track> {
+    let mut out = Vec::new();
+    let mut cur = parent_of(s, t);
+    while let Some(f) = cur {
+        let Some(g) = s.track(f) else { break };
+        out.push(g);
+        if out.len() >= 16 {
+            break;
+        }
+        cur = parent_of(s, g);
+    }
+    out.reverse();
+    out
+}
+
+/// The bars beside a row `r` for its ancestor groups (outermost first): one per level, at the
+/// x of that group's own stripe (so it continues straight down from the group's header), the
+/// row's full height so consecutive rows join without a gap.
+pub fn group_bars(r: egui::Rect, groups: &[&Track]) -> Vec<(egui::Rect, [u8; 3])> {
+    groups
+        .iter()
+        .enumerate()
+        .map(|(k, g)| (egui::Rect::from_min_size(egui::pos2(r.min.x + k as f32 * INDENT, r.min.y), egui::vec2(BAR_W, r.height())), g.color))
+        .collect()
+}
+
 /// Where a dragged track header would land.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum Drop {

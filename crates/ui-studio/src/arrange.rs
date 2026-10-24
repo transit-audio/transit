@@ -134,6 +134,8 @@ pub struct TrackRow {
     /// The track is frozen: its lane is tinted cold; the snowflake button unfreezes it.
     pub frozen: bool,
     pub freeze_button: R4,
+    /// The ancestor groups' color bars beside this row, outermost first (#60).
+    pub group_bars: Vec<R4>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -468,6 +470,17 @@ fn track_header(
     let tx = r.min.x + indent + tri;
     p.rect_filled(Rect::from_min_size(pos2(r.min.x + indent, r.min.y), vec2(5.0, r.height())), 0.0, theme::rgb(t.color));
     p.line_segment([pos2(r.min.x, r.max.y), pos2(r.max.x, r.max.y)], Stroke::new(1.0, TOKENS.line));
+    // Each ancestor group's bar runs down the left edge, from the group's own header through its
+    // last visible member: full row height, no gap, drawn over the row separator. Dimmed so the
+    // member's own stripe stays primary.
+    {
+        let s = app.engine.session();
+        let bars = crate::groups::group_bars(r, &crate::groups::ancestors(s, t));
+        for (bar, color) in &bars {
+            p.rect_filled(*bar, 0.0, theme::rgb(*color).gamma_multiply(crate::groups::BAR_DIM));
+            row.group_bars.push(r4(*bar));
+        }
+    }
     let name_rect = Rect::from_min_max(pos2(tx + 12.0, r.min.y + 4.0), pos2(r.max.x - 114.0, r.min.y + 20.0));
     row.name_rect = r4(Rect::from_min_max(pos2(name_rect.min.x - 4.0, name_rect.min.y - 2.0), pos2(name_rect.max.x, name_rect.max.y + 2.0)));
     p.with_clip_rect(name_rect.intersect(list)).text(name_rect.left_center(), Align2::LEFT_CENTER, &t.name, FontId::proportional(13.0), TOKENS.text);

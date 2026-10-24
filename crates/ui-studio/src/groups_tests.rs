@@ -649,3 +649,64 @@ fn the_track_menus_offer_new_group_track_and_edit_group() {
     assert_eq!(s.groups[0].members.len(), 2);
     assert_eq!(t.undo_len(), u0 + 1);
 }
+
+fn bars_of(t: &T, id: TrackId) -> Vec<[f32; 4]> {
+    t.row(id).group_bars
+}
+
+#[test]
+fn a_group_bar_runs_unbroken_from_its_header_to_its_last_member() {
+    let mut t = T::new();
+    let g = t.group_ab();
+    t.frames(2);
+    let (a, b) = (t.row(t.a), t.row(t.b));
+    assert!(bars_of(&t, g).is_empty(), "a top-level group has no ancestor bar");
+    let (ba, bb) = (bars_of(&t, t.a), bars_of(&t, t.b));
+    assert_eq!((ba.len(), bb.len()), (1, 1));
+    // The bar is the group's own stripe column, the full row height, joining the next row exactly.
+    assert_eq!(ba[0][3], bb[0][1], "no gap between member rows");
+    assert_eq!(ba[0][1], a.header[1]);
+    assert_eq!(bb[0][3], b.header[3]);
+    let head = t.row(g).header;
+    assert_eq!(ba[0][1], head[3], "starts where the group header ends");
+    assert_eq!(ba[0][0], head[0], "same x as the group's own stripe");
+    // The name origin (header left + 12 + indent) clears the bar and the member's stripe.
+    let name_x = a.name_rect[0];
+    assert!(name_x > a.header[0] + crate::groups::INDENT + crate::groups::BAR_W, "name {name_x} clears bar and stripe");
+    assert!(name_x > ba[0][2]);
+}
+
+#[test]
+fn nested_groups_stack_bars_left_to_right() {
+    let mut t = T::new();
+    let outer = t.group_ab();
+    let mut s = t.app.engine.session().clone();
+    let inner = s.tracks.iter().find(|x| x.name == "C").unwrap().id;
+    // C becomes a group inside the outer group, holding a new member D (built in the model).
+    let mut d = s.track(t.c).unwrap().clone();
+    d.id = TrackId(9_000);
+    d.name = "D".into();
+    s.track_mut(inner).unwrap().kind = TrackKind::Folder;
+    s.track_mut(inner).unwrap().folder = Some(outer);
+    d.folder = Some(inner);
+    s.tracks.push(d);
+    t.app.engine.replace_session(s);
+    t.frames(3);
+    let bars = bars_of(&t, TrackId(9_000));
+    assert_eq!(bars.len(), 2, "two ancestors: {bars:?}");
+    assert!(bars[0][0] < bars[1][0], "outer bar left of inner");
+    assert!(bars[0][2] <= bars[1][0], "bars do not overlap");
+    assert_eq!(bars_of(&t, inner).len(), 1, "the inner group sits under one bar");
+}
+
+#[test]
+fn a_collapsed_group_draws_no_member_bars_and_ungrouped_tracks_draw_none() {
+    let mut t = T::new();
+    let g = t.group_ab();
+    assert!(bars_of(&t, t.c).is_empty(), "ungrouped track after the group has no bar");
+    t.click(mid(t.row(g).disclosure), json!({}));
+    t.frames(2);
+    assert_eq!(t.rows(), ["Group 1", "C"]);
+    assert!(bars_of(&t, g).is_empty() && bars_of(&t, t.c).is_empty());
+    assert!(t.app.arrange.layout.tracks.iter().all(|r| r.group_bars.is_empty()));
+}
