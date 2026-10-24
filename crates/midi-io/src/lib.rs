@@ -185,6 +185,7 @@ impl MidiIo {
         let (sink, consumer, shared) = InputSink::new(&config);
         let (key, connection) = self.inner.backend.open_input(key, sink)?;
         self.register(Direction::Input, &key, &shared);
+        log::info!("{}", port_line("input opened", &key));
         Ok((InputHandle { key, shared, connection: Some(connection) }, consumer))
     }
 
@@ -203,6 +204,12 @@ impl MidiIo {
         watcher.known = watcher.snapshot()?;
         Ok(watcher)
     }
+}
+
+/// The INFO line for a port event: `MIDI input opened: port="Name" backend=winmm`.
+#[must_use]
+pub fn port_line(event: &str, key: &PortKey) -> String {
+    format!("MIDI {event}: port=\"{key}\" backend={}", key.backend.as_str())
 }
 
 /// An open input port. Dropping it (or [`InputHandle::close`]) closes the port.
@@ -255,6 +262,14 @@ impl InputHandle {
     }
 }
 
+impl Drop for InputHandle {
+    fn drop(&mut self) {
+        // Closed from a control thread (see the type's note), where one log line is fine.
+        self.connection.take();
+        log::info!("{}", port_line("input closed", &self.key));
+    }
+}
+
 impl std::fmt::Debug for InputHandle {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InputHandle").field("key", &self.key).field("open", &self.connection.is_some()).finish_non_exhaustive()
@@ -286,6 +301,12 @@ impl OutputHandle {
     #[must_use]
     pub fn is_disconnected(&self) -> bool {
         self.shared.is_disconnected()
+    }
+}
+
+impl Drop for OutputHandle {
+    fn drop(&mut self) {
+        log::info!("{}", port_line("output closed", &self.key));
     }
 }
 
@@ -366,5 +387,17 @@ impl PortWatcher {
     /// The ports present at the last poll (or at creation).
     pub fn ports(&self) -> impl Iterator<Item = &PortInfo> {
         self.known.values()
+    }
+}
+
+#[cfg(test)]
+mod port_line_tests {
+    use super::*;
+
+    #[test]
+    fn the_port_line_names_the_port_and_backend() {
+        let key = PortKey { backend: BackendId::WinMm, name: "Arturia KeyLab".into(), ordinal: 1, id: String::new() };
+        assert_eq!(port_line("input opened", &key), "MIDI input opened: port=\"Arturia KeyLab #2\" backend=winmm");
+        assert_eq!(port_line("output closed", &key), "MIDI output closed: port=\"Arturia KeyLab #2\" backend=winmm");
     }
 }

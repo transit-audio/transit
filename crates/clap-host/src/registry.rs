@@ -111,7 +111,14 @@ fn merge(files: Vec<scan_cache::Entry<ClapDescriptor>>) -> Vec<ClapDescriptor> {
 
 /// Scans the search folders and keeps the result. With `reuse`, files the cache file knows are
 /// not loaded again unless they changed; either way the cache file is rewritten.
+/// The INFO line a finished scan writes: `plug-in scan finished: format=CLAP plug-ins=42 files=40
+/// problems=1 in 3200 ms`.
+pub(crate) fn scan_line(format: &str, plugins: usize, files: usize, problems: usize, took: std::time::Duration) -> String {
+    format!("plug-in scan finished: format={format} plug-ins={plugins} files={files} problems={problems} in {} ms", took.as_millis())
+}
+
 fn scan_now(reuse: bool) -> Vec<ClapDescriptor> {
+    let started = std::time::Instant::now();
     let (dirs, mut taken, cache_file, scanner) = {
         let mut r = lock();
         let mut dirs = paths::default_search_paths();
@@ -153,8 +160,9 @@ fn scan_now(reuse: bool) -> Vec<ClapDescriptor> {
         let mut r = lock();
         let mut late: Vec<PathBuf> = r.extra_dirs.iter().filter(|d| !taken.contains(d) || r.refresh_dirs.contains(*d)).cloned().collect();
         if late.is_empty() || rounds == MAX_LATE_SCAN_ROUNDS {
-            let problems = files.iter().filter_map(|f| Some((f.path.clone(), f.error.clone()?))).collect();
+            let problems: Vec<(PathBuf, String)> = files.iter().filter_map(|f| Some((f.path.clone(), f.error.clone()?))).collect();
             let list = merge(files.clone());
+            log::info!("{}", scan_line("CLAP", list.len(), files.len(), problems.len(), started.elapsed()));
             r.scanned = Some(list.clone());
             r.problems = problems;
             // The check and publication share the registry lock: a later add merges into scanned.
@@ -456,6 +464,12 @@ pub fn plugin_info(id: &str) -> Option<&'static PluginInfo> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_scan_summary_line_has_counts_and_duration() {
+        let took = std::time::Duration::from_millis(3200);
+        assert_eq!(scan_line("CLAP", 42, 40, 1, took), "plug-in scan finished: format=CLAP plug-ins=42 files=40 problems=1 in 3200 ms");
+    }
+
     use super::*;
 
     #[test]

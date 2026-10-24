@@ -974,6 +974,7 @@ pub fn open_session(e: &mut Engine, path: &str) -> Result<Vec<String>> {
 /// [`open_session`], following the media paths in it as if they were stored in the session file
 /// `links` (crash recovery: the session written beside the autosave, its paths from the original).
 pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> Result<Vec<String>> {
+    let started = std::time::Instant::now();
     let text = read_text(path)?;
     let mut s = Session::from_json(&text).map_err(|err| EngineError::Io(err.to_string()))?;
     let dir = Path::new(path).parent().map(Path::to_path_buf).unwrap_or_default();
@@ -990,6 +991,7 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
     missing.extend(relink_videos(&mut s, links));
     s.folder = Some(dir);
     let notes = std::mem::take(&mut s.load_notes);
+    log::info!("{}", session_open_line(path, &s, missing.len(), started.elapsed()));
     e.replace_session(s);
     e.path = Some(path.to_string());
     for n in notes {
@@ -999,6 +1001,25 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
         e.message(format!("missing media: {m}"));
     }
     Ok(missing)
+}
+
+/// The INFO line an opened session writes (issue #84): `session opened: path="/x/song.transit"
+/// format_version=1 tracks=8 clips=23 duration=205.4 s needs=[clap:..., vst3:...] missing_media=0
+/// in 340 ms`. `needs` lists the third-party plug-ins the session loads (`none` when it has no
+/// such plug-in).
+pub fn session_open_line(path: &str, s: &Session, missing_media: usize, took: std::time::Duration) -> String {
+    let clips: usize = s.tracks.iter().filter_map(|t| t.playlist()).map(|p| p.clips.len()).sum();
+    let seconds = s.content_end().max(0) as f64 / f64::from(s.sample_rate.hz().max(1));
+    let mut needs: Vec<String> = soundcraft_mix::instance_specs(s).into_iter().map(|x| x.id).collect();
+    needs.sort();
+    needs.dedup();
+    let needs = if needs.is_empty() { "none".to_owned() } else { format!("[{}]", needs.join(", ")) };
+    format!(
+        "session opened: path=\"{path}\" format_version={} tracks={} clips={clips} duration={seconds:.1} s needs={needs} missing_media={missing_media} in {} ms",
+        s.format_version,
+        s.tracks.len(),
+        took.as_millis()
+    )
 }
 
 /// Decode one source's audio file at the session rate.
@@ -1690,5 +1711,35 @@ mod bundle_tests {
         write_file(&p.to_string_lossy(), b"hello").unwrap();
         assert_eq!(std::fs::read(&p).unwrap(), b"hello");
         let _ = std::fs::remove_file(&p);
+    }
+}
+
+#[cfg(test)]
+mod open_line_tests {
+    use super::*;
+
+    #[test]
+    fn the_session_open_line_names_path_version_counts_length_and_needs() {
+        let mut s = Session::new("Song", soundcraft_time::SampleRate::HZ_48000);
+        let line = session_open_line("C:/x/song.transit", &s, 0, std::time::Duration::from_millis(340));
+        assert_eq!(
+            line,
+            "session opened: path=\"C:/x/song.transit\" format_version=1 tracks=0 clips=0 duration=0.0 s needs=none missing_media=0 in 340 ms"
+        );
+        s.sample_rate = soundcraft_time::SampleRate::HZ_48000;
+        let line = session_open_line("a.transit", &s, 2, std::time::Duration::from_millis(5));
+        assert!(line.contains("missing_media=2") && line.ends_with("in 5 ms"), "{line}");
+    }
+
+    #[test]
+    fn a_session_with_tracks_and_clips_counts_them() {
+        let e = crate::demo::demo_engine();
+        let s = e.session();
+        let line = session_open_line("demo.transit", s, 0, std::time::Duration::ZERO);
+        let tracks = s.tracks.len();
+        assert!(tracks > 0, "the demo has tracks");
+        assert!(line.contains(&format!("tracks={tracks} ")), "{line}");
+        assert!(!line.contains("clips=0 "), "{line}");
+        assert!(!line.contains("duration=0.0 s"), "{line}");
     }
 }

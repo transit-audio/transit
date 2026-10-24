@@ -254,13 +254,26 @@ pub struct NewInstance {
 /// for third-party plugins: in realtime use, call it on the control thread.
 pub fn create_instance(id: &str, state: Option<&[u8]>, sample_rate: f32, max_block: usize, ch: usize) -> Option<NewInstance> {
     let _creating = CreatingGuard::enter();
-    let mut plugin = create_plugin(id)?;
+    let started = std::time::Instant::now();
+    let Some(mut plugin) = create_plugin(id) else {
+        log::warn!("{}", creation_line(id, started.elapsed(), false, state.is_some()));
+        return None;
+    };
     let refused_state = state.is_some_and(|st| !plugin.load_state(st));
     if refused_state {
         log::warn!("{id}: the plugin did not accept its stored state");
     }
     plugin.prepare(sample_rate, max_block, ch);
+    log::info!("{}", creation_line(id, started.elapsed(), true, state.is_some()));
     Some(NewInstance { plugin, refused_state })
+}
+
+/// The INFO line for one plug-in instance: `plug-in instance created: id=<id> in 412 ms (stored
+/// state restored)`; a failed creation says `failed` (issue #67 reads these for load times).
+pub fn creation_line(id: &str, took: std::time::Duration, ok: bool, had_state: bool) -> String {
+    let verb = if ok { "created" } else { "failed" };
+    let state = if had_state { "with stored state" } else { "no stored state" };
+    format!("plug-in instance {verb}: id={id} in {} ms ({state})", took.as_millis())
 }
 
 /// Peak meter values for one strip (linear, per channel, max over the last block).
@@ -3589,6 +3602,13 @@ mod tests {
     //! hands a fake to `PlanRig::fake`.
 
     use super::*;
+
+    #[test]
+    fn the_creation_line_names_the_plugin_and_its_time_for_issue_67() {
+        let took = std::time::Duration::from_millis(412);
+        assert_eq!(creation_line("vst3:abc", took, true, true), "plug-in instance created: id=vst3:abc in 412 ms (with stored state)");
+        assert_eq!(creation_line("clap:x", took, false, false), "plug-in instance failed: id=clap:x in 412 ms (no stored state)");
+    }
     use soundcraft_audio_io::AudioBuffer;
     use soundcraft_model::{Insert, SourceAudio, SourceId};
     use std::sync::Arc;

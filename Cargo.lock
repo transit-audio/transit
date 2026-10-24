@@ -4660,6 +4660,7 @@ dependencies = [
 name = "transit-midi-io"
 version = "0.2.0"
 dependencies = [
+ "log",
  "midir",
  "rtrb",
  "thiserror 2.0.21",

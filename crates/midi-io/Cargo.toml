@@ -8,6 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
+log.workspace = true
 midir.workspace = true
 rtrb.workspace = true
 thiserror.workspace = true

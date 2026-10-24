@@ -382,10 +382,10 @@ impl Player {
         // the ladder (`exclusive_fallback`) reopens the whole device, before any stream has started.
         let mut step = match kind {
             NativeKind::Wasapi => {
-                OpenStep { mode: Some(if cfg.share_device { ab::Mode::Shared } else { ab::Mode::Exclusive }), default_period: false }
+                OpenStep { mode: Some(if cfg.share_device { ab::Mode::Shared } else { ab::Mode::Exclusive }), default_period: false, native: true }
             }
             // ASIO and JACK have one mode (the driver's or the server's).
-            NativeKind::Asio | NativeKind::Jack => OpenStep::PLANNED,
+            NativeKind::Asio | NativeKind::Jack => OpenStep { native: true, ..OpenStep::PLANNED },
         };
         // A device the native backend knows is not installed (an ASIO driver removed since it was
         // saved) is said as such: neither another device nor the cpal backend opens instead.
@@ -551,7 +551,23 @@ impl Player {
                 typed.get_or_insert(failure);
                 continue;
             }
-            log::info!("audio output opened with {} channels (asked for {})", achieved.format.channels, wide);
+            log::info!(
+                "{}",
+                crate::open_log::describe(&crate::open_log::OpenReport {
+                    direction: "output",
+                    backend: if step.native { "native" } else { "cpal" },
+                    host: &system,
+                    device: &name,
+                    asked: request,
+                    got: achieved,
+                })
+            );
+            if wide != achieved.format.channels {
+                log::info!("audio output: asked for {wide} channels, opened with {}", achieved.format.channels);
+            }
+            if let HeldInput::Held(Some(recorder)) = player.input.get_mut() {
+                log_input_open(recorder, step.native, &system, request.period, request.mode);
+            }
             player.device_name = name.clone();
             player.paired_input.clone_from(&paired);
             player.device_system = system.clone();
@@ -1355,6 +1371,14 @@ impl Player {
                     None => record::Recorder::open_with(&config)?,
                 };
                 check_input_rate(recorder.sample_rate, self.device_rate)?;
+                let system = config.system.as_deref().unwrap_or(&self.device_system);
+                log_input_open(
+                    &recorder,
+                    self.native_backend,
+                    system,
+                    config.buffer_size.map_or(ab::Period::Default, ab::Period::Frames),
+                    if self.device_exclusive { ab::Mode::Exclusive } else { ab::Mode::Shared },
+                );
                 Ok(recorder)
             }
             HeldInput::Held(slot) => {
@@ -1397,10 +1421,12 @@ struct OpenStep {
     mode: Option<ab::Mode>,
     /// Open at the device's own period instead of the chosen buffer size.
     default_period: bool,
+    /// The native backend (WASAPI or ASIO) opens, not cpal (the log line says which).
+    native: bool,
 }
 
 impl OpenStep {
-    const PLANNED: Self = Self { mode: None, default_period: false };
+    const PLANNED: Self = Self { mode: None, default_period: false, native: false };
 }
 
 /// Why an open failed: the text, and the backend's error when it gave one.
@@ -1429,7 +1455,7 @@ fn exclusive_fallback(step: OpenStep, cfg: &AudioConfig, error: &ab::OpenError) 
     if step.mode != Some(ab::Mode::Exclusive) {
         return None;
     }
-    let shared = OpenStep { mode: Some(ab::Mode::Shared), default_period: false };
+    let shared = OpenStep { mode: Some(ab::Mode::Shared), default_period: false, ..step };
     match error {
         ab::OpenError::PeriodRefused { .. } => {
             let frames = cfg.buffer_size.filter(|_| !step.default_period)?;
@@ -1441,6 +1467,29 @@ fn exclusive_fallback(step: OpenStep, cfg: &AudioConfig, error: &ab::OpenError) 
         ab::OpenError::ExclusiveDisallowed(_) => Some((shared, "Exclusive mode is turned off for this device in Windows; opened shared".to_owned())),
         _ => None,
     }
+}
+
+/// The INFO line for an input that opened beside the output (same rate, buffer and mode) or alone.
+fn log_input_open(recorder: &record::Recorder, native: bool, system: &str, asked_period: ab::Period, mode: ab::Mode) {
+    let sample = recorder.sample_format.unwrap_or(ab::SampleFormat::F32);
+    let channels = u16::try_from(recorder.channels).unwrap_or(u16::MAX);
+    let format = ab::Format::new(recorder.sample_rate, channels, sample);
+    let asked = ab::OpenRequest { format, period: asked_period, mode, origin: ab::HostOrigin::default(), calibration: None };
+    let got = ab::Achieved {
+        latency: recorder.latency,
+        ..ab::Achieved::requested(format, recorder.buffer_frames.map_or(ab::Period::Default, ab::Period::Frames))
+    };
+    log::info!(
+        "{}",
+        crate::open_log::describe(&crate::open_log::OpenReport {
+            direction: "input",
+            backend: if native { "native" } else { "cpal" },
+            host: system,
+            device: &recorder.device_name,
+            asked,
+            got,
+        })
+    );
 }
 
 impl Drop for Player {
