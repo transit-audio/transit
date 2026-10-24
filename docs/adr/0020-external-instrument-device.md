@@ -128,3 +128,13 @@ What exists:
 ## Related
 
 [ADR 0012](0012-midi-device-layer.md) (MIDI device layer, decision 5), [ADR 0015](0015-io-routing-abstraction.md) section 5 (hardware inserts), [ADR 0017](0017-clock-contract-annex.md) (clocks), `docs/contributing/knowledge/midi-output.md`, `clocks.md`, `plan-renderer.md` (PDC), the two 2026-10-24 Model D benchmark pages, issues #61 and #71.
+
+## Amendments
+
+### 2026-10-24: Measure as built (slice 2, #71)
+
+- Decision 7: a noisy pre-note window raises that note's threshold instead of retrying, because the run schedule is fixed. The run is refused when more than half the windows were noisy, or when any window or the reference floor is above -20 dBFS.
+- Decisions 3 and 7: a result with a spread of 1 ms or less is stored automatically, with no "Save | Measure again". A spread above 1 ms needs Keep.
+- The spread is the standard deviation of the per-note latencies, which is what every figure in this ADR (the 1.0 ms bar included) is.
+- The probe note is fixed at note 60, velocity 100. The dialog does not change them yet.
+- Decision 5: Measure is its own module (`external_probe.rs`, with `device/external_measure.rs` in the Player), not a `MeasureKind::External` variant of the hardware measure.
