@@ -124,9 +124,13 @@ fn live_input_on_an_armed_external_track_is_echoed_without_an_instrument() {
     assert!(fake.input_port(&input).unwrap().deliver(0, &[0x90, 60, 100]));
     until("the echo", || fake.sent(&key).contains(&vec![0x91, 60, 100]));
     let latency = fake.sends(&key).iter().find(|s| s.message == vec![0x91, 60, 100]).unwrap().at - played;
-    // The ingress worker wakes on data (#62); only the output thread's 1 ms poll remains.
-    // Generous for a loaded CI machine.
-    assert!(latency < Duration::from_millis(10), "echo took {latency:?}");
+    // This is a stall bound, not a latency measurement (#87, E49). The wake-on-data property of
+    // the ingress worker (#62) is asserted from the worker's own timestamps by
+    // `an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer`. A 10 ms wall-clock
+    // bound across two threads tripped on a loaded macOS runner (10.96 ms), so this one allows
+    // 250 ms: over 10x the scheduling jitter seen on CI and 12x the worker's 20 ms idle safety
+    // net, and still far below a lost wake-up or a stuck echo ring.
+    assert!(latency < Duration::from_millis(250), "echo took {latency:?}");
     assert!(fake.input_port(&input).unwrap().deliver(1_000, &[0x80, 60, 0]));
     until("the echoed release", || fake.sent(&key).contains(&vec![0x81, 60, 0]));
 }
