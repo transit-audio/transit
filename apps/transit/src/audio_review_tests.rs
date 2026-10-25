@@ -43,7 +43,7 @@ fn review_quit_before_verification_keeps_previous_good_audio() {
     let mut expected = studio.ui.clone();
     expected.audio = previous.clone();
     // Zero callbacks, zero elapsed frames: execute the real desktop exit handler.
-    let mut app = App(studio, None, PrefsCheckpoint::default());
+    let mut app = App::new(studio, None, Arc::default());
     eframe::App::on_exit(&mut app);
     assert_eq!(config::load_ui(&path).unwrap().unwrap().audio, previous, "quit must not bypass callback verification");
     assert_eq!(
@@ -73,7 +73,7 @@ fn desktop_logic_saves_preferences_before_exit_and_keeps_future_audio() {
     let path = prefs_path().unwrap();
     let future_audio = serde_json::json!({"backend": "future-driver", "future_calibration": [1, 2, 3]});
     std::fs::write(&path, serde_json::to_vec(&serde_json::json!({"audio": future_audio})).unwrap()).unwrap();
-    let mut app = App(StudioApp::new(Engine::default(), None, Services::default()), None, PrefsCheckpoint::default());
+    let mut app = App::new(StudioApp::new(Engine::default(), None, Services::default()), None, Arc::default());
     app.0.ui.window_size = [1234.0, 789.0];
     app.0.ui.browser.locations.push("test-location".into());
     let song = path.with_file_name("song.transit");

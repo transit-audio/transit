@@ -21,6 +21,7 @@ mod control_server;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
 mod logging;
+mod shutdown;
 #[cfg(all(feature = "update-check", not(target_arch = "wasm32")))]
 mod update_check;
 
@@ -46,7 +47,56 @@ impl transit_ui_studio::debug_log::LogControl for LoggerControl {
     }
 }
 
-struct App(StudioApp, Option<&'static logging::AppLogger>, PrefsCheckpoint);
+/// The studio, the logger, the preferences checkpoint, the graphics device watch (issue #104)
+/// and, once it has run, whether the quit order shut plug-in hosting down cleanly.
+struct App(StudioApp, Option<&'static logging::AppLogger>, PrefsCheckpoint, Arc<shutdown::DeviceWatch>, Option<bool>);
+
+impl App {
+    fn new(studio: StudioApp, logger: Option<&'static logging::AppLogger>, device_watch: Arc<shutdown::DeviceWatch>) -> App {
+        App(studio, logger, PrefsCheckpoint::default(), device_watch, None)
+    }
+
+    /// The quit order, once, under the shutdown watchdog (issue #104): preferences, then the
+    /// studio's own order (E5: autosave, input, player, plug-in hosting). True when plug-in hosting
+    /// shut down cleanly.
+    fn shut_down(&mut self) -> bool {
+        if let Some(clean) = self.4 {
+            return clean;
+        }
+        let clean = soundcraft_engine::emergency::run_bounded("shutdown", soundcraft_engine::emergency::SHUTDOWN_BOUND, || {
+            save_prefs(&self.0.ui);
+            if let Some(logger) = self.1 {
+                logger.report_audio_thread();
+            }
+            self.0.shut_down()
+        });
+        self.4 = Some(clean);
+        shutdown::record(clean);
+        clean
+    }
+
+    /// The graphics device is gone: shut down, tell the user, end the process (issue #104).
+    fn device_lost(&mut self, reason: &str) -> ! {
+        log::error!("emergency shutdown: {reason}");
+        let clean = self.shut_down();
+        shutdown::tell_user(reason, clean);
+        soundcraft_engine::emergency::end_process(clean)
+    }
+}
+
+/// eframe drops the app without `on_exit` when a panic unwinds out of its event loop (a lost
+/// device first seen inside egui-wgpu's buffer upload, issue #104): the quit order runs here, and
+/// `main` ends the process once the panic reaches it.
+impl Drop for App {
+    fn drop(&mut self) {
+        if self.4.is_none() {
+            if std::thread::panicking() {
+                log::error!("a panic is unwinding out of the UI; shutting down");
+            }
+            self.shut_down();
+        }
+    }
+}
 
 /// Sends the title only when it changes (copied from `apps/soundcraft`).
 fn set_title(ctx: &egui::Context, title: String) {
@@ -108,6 +158,10 @@ fn font_definitions() -> egui::FontDefinitions {
 
 impl eframe::App for App {
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Before egui-wgpu paints this frame: on a lost device its buffer upload would panic.
+        if let Some(reason) = self.3.lost() {
+            self.device_lost(&reason);
+        }
         // What the realtime audio thread logged is written here, off that thread.
         if let Some(logger) = self.1 {
             logger.report_audio_thread();
@@ -152,16 +206,13 @@ impl eframe::App for App {
         self.0.guarded(|app| app.ui(ui));
     }
     fn on_exit(&mut self) {
-        self.0.close_autosave();
-        save_prefs(&self.0.ui);
-        if let Some(logger) = self.1 {
-            logger.report_audio_thread();
+        // E5 quit order (copied from `apps/soundcraft`, now `StudioApp::shut_down`): finish any
+        // take and hand the input back to the player, then release the player's plugin instances,
+        // then shut plugin hosting down. If that was not clean, a normal exit would run the unload
+        // code of plug-in binaries that never had their module exit (issue #104).
+        if !self.shut_down() {
+            soundcraft_engine::emergency::end_process(false);
         }
-        // E5 quit order (copied from `apps/soundcraft`): finish any take and hand the input back
-        // to the player, then release the player's plugin instances, then shut plugin hosting down.
-        self.0.close_input();
-        self.0.player = None;
-        soundcraft_engine::shutdown_plugin_hosts();
     }
 }
 
@@ -460,40 +511,56 @@ fn main() -> eframe::Result {
     } else {
         prefs_path().and_then(|p| p.parent().map(|d| d.join("Autosave")))
     };
-    eframe::run_native(
-        "transit",
-        options,
-        Box::new(move |cc| {
-            // The device opens on the frame after the splash first says so (`splash::advance_open`).
-            // The window exists: give it (and, by class, the Mix window) the exe's icon in both slots.
-            #[cfg(windows)]
-            apply_exe_icons(cc);
-            let mut app = StudioApp::new(engine, None, services(logger));
-            if !no_audio {
-                app.splash.defer_open(prefs.audio.clone());
-            }
-            // Our own autosave folder: the two apps must not recover each other's sessions. Runs
-            // without preferences (agents' tests) autosave into a folder of their own, so they
-            // neither offer the user's leftovers nor leave theirs for the user.
-            app.autosave_dir = autosave_dir;
-            app.leftovers = app.autosave_dir.as_deref().map(soundcraft_engine::autosave::leftovers).unwrap_or_default();
-            app.ui = prefs;
-            // The plug-in scan cache is SoundCraft's, shared; runs without preferences keep none.
-            let cache = config::soundcraft_dir().filter(|_| prefs_enabled());
-            transit_ui_studio::plugin_scan::start(&app.ui.plugin_dirs, cache.as_deref(), std::env::current_exe().ok());
-            app.splash.arm();
-            install_update_check(&mut app.services, &cc.egui_ctx);
-            app.about.app_version = env!("CARGO_PKG_VERSION").to_string();
-            if let Some(port) = control_port {
-                let rx = control_server::start(port, cc.egui_ctx.clone());
-                app = app.with_control(rx);
-            }
-            for f in &files {
-                open_path(&mut app, f);
-            }
-            Ok(Box::new(App(app, logger, PrefsCheckpoint::default())))
-        }),
-    )
+    // A panic on the UI thread unwinds out of the event loop; it ends here, through the bounded
+    // shutdown, not in the C runtime's exit with plug-in binaries still loaded (issue #104).
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        eframe::run_native(
+            "transit",
+            options,
+            Box::new(move |cc| {
+                // The device opens on the frame after the splash first says so (`splash::advance_open`).
+                // The window exists: give it (and, by class, the Mix window) the exe's icon in both slots.
+                #[cfg(windows)]
+                apply_exe_icons(cc);
+                // wgpu reports a lost device only to this callback (issue #104).
+                let device_watch = Arc::new(shutdown::DeviceWatch::default());
+                if let Some(render_state) = &cc.wgpu_render_state {
+                    shutdown::watch_device(&render_state.device, &device_watch, &cc.egui_ctx);
+                }
+                let mut app = StudioApp::new(engine, None, services(logger));
+                if !no_audio {
+                    app.splash.defer_open(prefs.audio.clone());
+                }
+                // Our own autosave folder: the two apps must not recover each other's sessions. Runs
+                // without preferences (agents' tests) autosave into a folder of their own, so they
+                // neither offer the user's leftovers nor leave theirs for the user.
+                app.autosave_dir = autosave_dir;
+                app.leftovers = app.autosave_dir.as_deref().map(soundcraft_engine::autosave::leftovers).unwrap_or_default();
+                app.ui = prefs;
+                // The plug-in scan cache is SoundCraft's, shared; runs without preferences keep none.
+                let cache = config::soundcraft_dir().filter(|_| prefs_enabled());
+                transit_ui_studio::plugin_scan::start(&app.ui.plugin_dirs, cache.as_deref(), std::env::current_exe().ok());
+                app.splash.arm();
+                install_update_check(&mut app.services, &cc.egui_ctx);
+                app.about.app_version = env!("CARGO_PKG_VERSION").to_string();
+                if let Some(port) = control_port {
+                    let rx = control_server::start(port, cc.egui_ctx.clone());
+                    app = app.with_control(rx);
+                }
+                for f in &files {
+                    open_path(&mut app, f);
+                }
+                Ok(Box::new(App::new(app, logger, device_watch)))
+            }),
+        )
+    }));
+    match result {
+        Ok(result) => result,
+        Err(payload) => {
+            drop(temporary_autosave);
+            shutdown::after_panic(payload.as_ref())
+        }
+    }
 }
 
 #[cfg(test)]
