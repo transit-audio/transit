@@ -229,3 +229,90 @@ fn the_command_starts_reports_keeps_and_cancels() {
     let other = r["tracks"][0].as_u64().unwrap();
     assert!(t.app.run("instrument.measure_external", json!({"track": other})).unwrap_err().contains("no External Instrument"));
 }
+
+// ---- The card's rows and the Devices row height (issue #96) ----
+
+use crate::external_instrument::{CARD_H, CARD_W, CHOOSE_FIRST, Rows};
+
+fn overlap(a: egui::Rect, b: egui::Rect) -> bool {
+    let i = a.intersect(b);
+    i.width() > 0.0 && i.height() > 0.0
+}
+
+fn rect(r: [f32; 4]) -> egui::Rect {
+    egui::Rect::from_min_max(egui::pos2(r[0], r[1]), egui::pos2(r[2], r[3]))
+}
+
+#[test]
+fn the_rows_of_the_card_are_inside_it_and_never_overlap_at_the_least_width_or_a_wide_one() {
+    for w in [CARD_W, 400.0] {
+        let r = egui::Rect::from_min_size(egui::pos2(10.0, 20.0), egui::vec2(w, CARD_H));
+        let rows = Rows::of(r, r.min.y + 22.0);
+        let all = rows.all();
+        for (i, a) in all.iter().enumerate() {
+            assert!(r.contains_rect(*a), "row {i} leaves the card at width {w}: {a:?}");
+            assert!(a.width() >= 40.0, "row {i} is too narrow for its text at width {w}");
+            for (j, b) in all.iter().enumerate().skip(i + 1) {
+                assert!(!overlap(*a, *b), "rows {i} and {j} overlap at width {w}: {a:?} {b:?}");
+            }
+        }
+    }
+}
+
+#[test]
+fn the_widgets_drawn_in_the_card_do_not_overlap_and_the_status_row_is_last() {
+    let mut t = rig();
+    t.app.run("midi.output", json!({"track": t.track.0, "port": "internal"})).unwrap();
+    t.frames(3);
+    let c = t.card();
+    assert_eq!(c.external_state, "No MIDI port: choose one on the Out button");
+    let widgets = [c.external_out, c.external_return, c.external_latency, c.external_measure, c.external_result, c.external_gain, c.external_status];
+    for (i, a) in widgets.iter().enumerate() {
+        assert_ne!(*a, [0.0; 4], "widget {i} is not drawn");
+        assert!(rect(c.rect).contains_rect(rect(*a)), "widget {i} leaves the card");
+        for (j, b) in widgets.iter().enumerate().skip(i + 1) {
+            assert!(!overlap(rect(*a), rect(*b)), "widgets {i} and {j} overlap");
+        }
+    }
+    let status = rect(c.external_status);
+    let pane = rect(t.app.mixer.devices.area);
+    assert!(pane.contains_rect(status), "the status row is inside the Devices row, not below it: {status:?} in {pane:?}");
+    assert!(widgets[..6].iter().all(|w| rect(*w).max.y <= status.min.y), "the status row is below every other widget");
+}
+
+#[test]
+fn measure_is_off_with_its_tooltip_until_a_port_and_a_return_are_both_set() {
+    let mut t = rig();
+    let track = t.track.0;
+    let port = json!({"backend": "winmm", "name": "MODEL D"});
+    for (has_port, has_return, enabled) in [(false, false, false), (true, false, false), (false, true, false), (true, true, true)] {
+        t.app.run("midi.output", json!({"track": track, "port": if has_port { port.clone() } else { json!("internal") }})).unwrap();
+        t.app.run("instrument.external", json!({"track": track, "return": if has_return { "In 1" } else { "" }})).unwrap();
+        t.frames(3);
+        let c = t.card();
+        assert_ne!(c.external_measure, [0.0; 4], "Measure is drawn with port {has_port} and return {has_return}");
+        assert_eq!(c.external_measure_text, "Measure");
+        let why = if enabled { "" } else { CHOOSE_FIRST };
+        assert_eq!(c.external_measure_blocked, why, "port {has_port}, return {has_return}");
+        if !enabled {
+            t.click(c.external_measure);
+            assert!(t.app.external_measure.running.is_none(), "a disabled Measure does not start");
+        }
+    }
+}
+
+#[test]
+fn the_devices_row_is_as_tall_as_its_tallest_card_and_shrinks_back_without_the_external_instrument() {
+    let mut t = rig();
+    let height = |t: &T| t.app.mixer.devices.area[3] - t.app.mixer.devices.area[1];
+    let high = height(&t);
+    assert_eq!(t.card().rect[3] - t.card().rect[1], CARD_H);
+    let plugin = t.app.builtin_plugins().into_iter().find(|p| p.instrument).expect("a built-in instrument").id;
+    t.app.set_instrument(t.track, &plugin).unwrap();
+    t.frames(3);
+    let low = height(&t);
+    // The row is its card plus the lane padding: it grows by exactly what the card asks beyond the
+    // stock card, and the stock row is the old one (the panel's own line takes a point).
+    assert_eq!(high - low, CARD_H - (crate::devices::PANE_H - 16.0), "the External Instrument's card sets the row ({high} vs {low})");
+    assert!((crate::devices::PANE_H - 2.0..=crate::devices::PANE_H).contains(&low), "stock cards keep the row of old: {low}");
+}
