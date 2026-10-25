@@ -130,10 +130,12 @@ fn a_latency_change_reactivates_on_main_and_reports_the_new_latency() {
         while !halt.load(Ordering::SeqCst) {
             cc_block(&mut p, 7, 64);
             lat.store(p.latency(), Ordering::SeqCst);
+            // timing: sleep-ok paces a fake audio thread; the assertion is the plug-in's reported latency value
             std::thread::sleep(Duration::from_millis(1));
         }
         p
     });
+    // timing: sleep-ok lets the fake audio thread start; the assertion is the plug-in's reported latency value
     std::thread::sleep(Duration::from_millis(20));
     let main = Report::read(&mut reader).me(); // runs the change: restartComponent(kLatencyChanged)
     let deadline = Instant::now() + Duration::from_secs(20);

@@ -760,7 +760,8 @@ fn a_slow_instance_is_made_on_the_host_thread_while_frames_advance_and_the_plan_
         assert_eq!(*thread.lock().unwrap(), Some(std::thread::current().id()), "made on the calling thread");
     } else {
         // Later frames submit it to the host thread and poll: none of them waits for the 500 ms.
-        assert!(frames >= 10, "only {frames} frames ran during a 500 ms creation");
+        // Progress, not throughput (E49): a loop blocked on the creation sees one frame.
+        assert!(frames >= 2, "only {frames} frames ran during a 500 ms creation");
         assert!(worst < FRAME_BUDGET, "a frame took {worst:?}");
         assert_ne!(*thread.lock().unwrap(), Some(std::thread::current().id()), "made on the plug-in host thread");
     }
@@ -900,7 +901,8 @@ fn a_creation_that_never_returns_is_stuck_after_the_timeout_and_the_session_comp
     runtime.handles.service_with(&mut runtime.control, &third_party, &factory);
     assert!(runtime.loading(track, slot));
     let (frames, worst) = frames_until_loaded(&mut runtime, &third_party, &factory);
-    assert!(frames >= 10, "frames ran meanwhile ({frames})");
+    // Progress, not throughput (E49): a loop blocked on the creation sees one frame.
+    assert!(frames >= 2, "frames ran meanwhile ({frames})");
     assert!(worst < FRAME_BUDGET, "a frame took {worst:?}");
     assert!(runtime.stuck(track, slot) && runtime.any_stuck(), "the slot reads as not responding");
     assert!(!runtime.loading(track, slot));
@@ -1185,8 +1187,8 @@ fn an_instance_the_compile_did_not_predict_loads_without_blocking_a_frame() {
         made.load(Ordering::SeqCst) == 2 && !r.any_loading() && r.binding(track, slot).is_some() && r.handles.retrying() == 0
     });
     assert!(loading_frames > 0, "the slot read as loading while the late instance was made");
-    // Load-tolerant: about 100 at an ideal 5 ms; a frame that waited for the plug-in leaves 1.
-    assert!(loading_frames >= 5, "only {loading_frames} frames ran during the 500 ms creation");
+    // Progress, not throughput (E49): a frame that waited for the plug-in leaves 1.
+    assert!(loading_frames >= 2, "only {loading_frames} frames ran during the 500 ms creation");
     assert!(worst < FRAME_BUDGET, "a frame waited for the plug-in: {worst:?}");
     assert_eq!(made.load(Ordering::SeqCst), 2, "made once more, for the new layout");
     assert!(!runtime.stuck(track, slot));

@@ -305,6 +305,7 @@ fn led_lights_on_a_new_count_then_decays() {
             lit_frames += 1;
         }
     }
+    // timing: floor-ok synthetic time steps (60 of them), no clock; a count of the loop above
     assert!(lit_frames >= 59, "{lit_frames}");
     assert!(led.level(159, 22.0) < 0.001, "counter unchanged: unlit");
 }

@@ -171,8 +171,10 @@ mod tests {
         }
         let id = "vst3:not-a-class-id-issue-56";
         let host = transit_plugin_host::shared();
+        // timing: sleep-ok occupies the host thread for the stall; the bound below is a stall bound
         let stall = host.submit(|_| std::thread::sleep(std::time::Duration::from_millis(1200)));
         while !matches!(stall.poll(), transit_plugin_host::Status::Waiting { running: true }) {
+            // timing: sleep-ok polls until the stall is running; nothing is measured here
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
         let t = std::time::Instant::now();

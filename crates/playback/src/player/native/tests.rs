@@ -194,6 +194,7 @@ fn an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer() {
     let mut ages = Vec::new();
     for n in 0..25u64 {
         // Long enough for the worker to leave its post-work stepping and park idle.
+        // timing: sleep-ok lets the worker park idle; the measured age is the worker's own callback-to-pop timestamps
         std::thread::sleep(Duration::from_millis(30));
         assert!(backend.deliver(n * 1_000, &[0x90, 60, 100]));
         until(|| f.native.status().counts.offered == n + 1);
@@ -208,6 +209,7 @@ fn an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer() {
     // Kept by design (#87, E49): this median of 25 is the wake-on-data property. A timer poll wakes
     // at the 15.6 ms (Windows) or ~20 ms (other) tick, so 2 ms / 5 ms leaves a wide margin on both
     // sides, and a median ignores the scheduler outliers that a max does not.
+    // timing: median of 25 wake latencies against the 15.6 / 20 ms timer tick, a wide margin on both sides
     let bound = if cfg!(windows) { Duration::from_millis(2) } else { Duration::from_millis(5) };
     assert!(median < bound, "median wake latency {median:?} (max {max:?}); a timer poll would show ~15 ms on Windows");
     // The max is scheduler jitter on a loaded host, not the property (#87, E49): the median above

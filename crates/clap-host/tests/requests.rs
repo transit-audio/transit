@@ -149,6 +149,7 @@ fn restart_requested_on_the_audio_thread_runs_on_main_keeps_state_and_reports_th
             p.process(&mut io, BLOCK);
             outs.lock().unwrap().push(io[0][0]);
             lat.store(p.latency(), Ordering::SeqCst);
+            // timing: sleep-ok paces a fake audio thread; the assertion is the plug-in's reported latency value
             std::thread::sleep(Duration::from_millis(1));
         }
         p

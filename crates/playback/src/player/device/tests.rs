@@ -719,6 +719,7 @@ fn player_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>) -> (u16, 
         "{driver}: input {} ch at {} Hz, buffer {:?}, latency {:?}",
         recorder.channels, recorder.sample_rate, recorder.buffer_frames, recorder.latency
     );
+    // timing: sleep-ok hardware helper, reached only from #[ignore] tests (no device on CI)
     std::thread::sleep(std::time::Duration::from_secs(2));
     let telemetry = player.callback_telemetry();
     let input = recorder.backend_stats().expect("input counters");

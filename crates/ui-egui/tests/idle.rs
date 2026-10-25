@@ -22,6 +22,7 @@ fn only_a_shown_window_animates_and_a_hidden_one_wakes_once_a_second() {
     assert_ne!(pass(&ctx, &mut app, true), Duration::ZERO);
     app.run("transport.play", serde_json::json!({})).unwrap();
     // Playing repaints at the meter rate (30 Hz in the Edit window, #207).
+    // timing: value the repaint delay the app requests (a computed interval), not a measured duration
     assert!(pass(&ctx, &mut app, true) <= Duration::from_millis(34));
     pass(&ctx, &mut app, false);
     assert!((pass(&ctx, &mut app, false).as_secs_f64() - 1.0).abs() < 1e-3);

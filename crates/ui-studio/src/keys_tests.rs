@@ -669,6 +669,7 @@ fn an_audition_releases_by_itself_with_the_mouse_still_and_on_focus_loss_or_a_ta
     let mut t = T::open();
     t.app.audition(60, t.time);
     let delay = t.frame_with(None);
+    // timing: value the repaint delay the app requests (a computed interval), not a measured duration
     assert!(delay <= std::time::Duration::from_millis(50), "a repaint is requested while a note is held: {delay:?}");
     assert_eq!(t.app.keys.layout.sounding, vec![60]);
     // No input at all: frames spaced like the repaint requests release it after 150 ms.

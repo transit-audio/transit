@@ -339,6 +339,7 @@ fn shutdown_during_a_creation_returns_within_its_bound() {
         let _ = hang.recv();
     });
     while !matches!(creating.poll(), Status::Waiting { running: true }) {
+        // timing: sleep-ok polls until the creation is running; the 2 s shutdown bound is a stall bound
         std::thread::sleep(Duration::from_millis(1));
     }
     let t = Instant::now();
