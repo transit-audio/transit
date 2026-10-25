@@ -46,7 +46,7 @@ impl MutedPort {
 
     /// What the card and the input menu say about it.
     pub(crate) fn text(&self) -> String {
-        format!("{} muted: feedback storm detected; click to re-enable", self.name)
+        format!("{} muted: feedback storm detected (recording from it stops too); click to re-enable", self.name)
     }
 }
 
@@ -165,7 +165,9 @@ impl OutputView {
             MidiOutChannel::AsRecorded => "as rec".to_string(),
             MidiOutChannel::Channel(c) => format!("Ch {}", c + 1),
         };
-        Some(HeaderChip { text: format!("{name} · {channel}"), missing: self.missing(track, output) })
+        // Feedback protection (#99): the input's own device gets no echo; the tooltip says why.
+        let echo = if self.self_echo(track) == Some(false) { " · echo off" } else { "" };
+        Some(HeaderChip { text: format!("{name} · {channel}{echo}"), missing: self.missing(track, output) })
     }
 
     pub(crate) fn port_label(&self, output: &MidiOutput) -> String {
@@ -482,8 +484,10 @@ mod tests {
         let output = external("one");
         let view = OutputView { self_echo: vec![(TrackId(1), false)], ..OutputView::default() };
         assert_eq!(view.label(TrackId(1), &output), "MIDI to Synth OUT · Ch 2 · +2.5 ms\nEcho back to Synth OUT is off to prevent a feedback loop");
+        assert_eq!(view.header_chip(TrackId(1), &output).unwrap().text, "Synth OUT · Ch 2 · echo off");
         let allowed = OutputView { self_echo: vec![(TrackId(1), true)], ..OutputView::default() };
         assert_eq!(allowed.echo_note(TrackId(1), &output), None);
+        assert_eq!(allowed.header_chip(TrackId(1), &output).unwrap().text, "Synth OUT · Ch 2");
         assert_eq!(OutputView::default().self_echo(TrackId(1)), None);
         let ctx = egui::Context::default();
         let mut frame = 0u32;
@@ -536,7 +540,7 @@ mod tests {
         let counter = std::rc::Rc::clone(&hits);
         let muted =
             MutedPort { name: "KeyStep Pro".into(), tracks: vec![TrackId(4)], reenable: std::rc::Rc::new(move || counter.set(counter.get() + 1)) };
-        assert_eq!(muted.text(), "KeyStep Pro muted: feedback storm detected; click to re-enable");
+        assert_eq!(muted.text(), "KeyStep Pro muted: feedback storm detected (recording from it stops too); click to re-enable");
         let view = OutputView { muted: vec![muted], ..OutputView::default() };
         assert!(view.muted_input(TrackId(3)).is_none());
         view.muted_input(TrackId(4)).unwrap().reenable();
