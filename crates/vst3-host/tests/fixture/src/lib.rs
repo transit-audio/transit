@@ -1637,6 +1637,8 @@ fn start_worker() {
         WORKER_RUNNING.store(false, Ordering::SeqCst);
     });
     if !WORKER_TEARDOWN_REGISTERED.swap(true, Ordering::SeqCst) {
+        // SAFETY: the C library's `atexit` with its declared signature; `worker_teardown` is a plain
+        // function of this binary, which is never unloaded before its exit handlers run.
         unsafe { atexit(worker_teardown) };
     }
 }

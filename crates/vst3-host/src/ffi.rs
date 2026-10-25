@@ -396,8 +396,9 @@ pub(crate) fn exit_modules() {
 }
 
 /// Modules loaded and not exited: those still in the cache (a live instance, leaked objects, or
-/// entered on a plug-in main thread that has not called [`exit_modules`]) plus those whose exit on
-/// the module thread did not finish in time. A module that is busy loading counts as one. After
+/// entered on a plug-in main thread that has not called [`exit_modules`]), those whose module entry
+/// is still running (a load on a wedged host thread, outside the cache lock, K38), plus those whose
+/// exit on the module thread did not finish in time. A lock that is busy counts as one. After
 /// every plug-in main thread has shut down, anything above zero is a module whose static
 /// destructors would run at process exit without its module exit (issue #104).
 pub(crate) fn modules_not_exited() -> usize {
@@ -406,7 +407,12 @@ pub(crate) fn modules_not_exited() -> usize {
         Err(TryLockError::Poisoned(p)) => p.into_inner().len(),
         Err(TryLockError::WouldBlock) => 1,
     };
-    cached + EXITS_UNFINISHED.load(Ordering::Acquire)
+    let entering = match opening().0.try_lock() {
+        Ok(g) => g.len(),
+        Err(TryLockError::Poisoned(p)) => p.into_inner().len(),
+        Err(TryLockError::WouldBlock) => 1,
+    };
+    cached + entering + EXITS_UNFINISHED.load(Ordering::Acquire)
 }
 
 /// Registers [`exit_modules`] to run at process exit. Exit handlers run in reverse order of
