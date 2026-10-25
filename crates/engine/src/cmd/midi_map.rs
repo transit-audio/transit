@@ -7,7 +7,7 @@ use super::*;
 use crate::cmd;
 use crate::{Engine, LearnArm};
 use serde_json::json;
-use soundcraft_model::{Control, ControlTarget, MapMode, Mapping, MappingSet, MidiSource, Scope, SourceKind, Strip};
+use soundcraft_model::{ControlTarget, MapMode, Mapping, MappingSet, MidiSource, Scope, SourceKind, Strip};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -316,6 +316,5 @@ mod tests {
         let r = e.execute("midi.mappings", &json!({})).unwrap();
         assert_eq!(r["session"].as_array().unwrap().len(), 1);
         assert_eq!(r["active"], 0);
-        let _ = Control::Mute;
     }
 }
