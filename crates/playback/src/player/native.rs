@@ -235,6 +235,8 @@ pub(super) struct Native {
     monitor: monitor::Hub,
     /// Input ports muted by the storm detector (#99).
     muted: Vec<Muted>,
+    /// The MIDI Learn mappings Main wants matched (ADR 0028).
+    wanted: super::midi_map::Wanted,
 }
 
 impl Native {
@@ -257,6 +259,7 @@ impl Native {
             origin,
             monitor,
             muted: Vec::new(),
+            wanted: Default::default(),
         })
     }
 
@@ -295,6 +298,52 @@ impl Native {
     pub(super) fn set_monitor(&self, enabled: bool, show_clock: bool) {
         self.monitor.set_enabled(enabled);
         self.monitor.set_show_clock(show_clock);
+    }
+
+    /// Replaces the mappings the ingress worker matches (ADR 0028). Ports they name are opened
+    /// like routed ones; an equal list changes nothing.
+    pub(super) fn set_mappings(&mut self, specs: Vec<super::midi_map::MapSpec>) {
+        self.wanted.set(specs);
+    }
+
+    pub(super) fn map_epoch(&self) -> u32 {
+        self.wanted.epoch()
+    }
+
+    /// MIDI Learn: while armed every present input port is opened and the worker forwards the
+    /// next CC or note-on once.
+    pub(super) fn set_learn(&mut self, armed: bool) {
+        self.wanted.learning = armed;
+        self.worker.arm_learn(armed);
+    }
+
+    /// Main's view of each mapped control's value and how many events it has applied, in the
+    /// order of the mappings.
+    pub(super) fn sync_map_values(&self, values: &[(f32, u32)]) {
+        self.wanted.set_values(values);
+    }
+
+    /// The MIDI Learn events since the last call, with the candidate's port named.
+    pub(super) fn take_map_events(&self) -> Vec<super::MapMsg> {
+        use super::midi_map::MapEvent;
+        self.worker
+            .take_map_events()
+            .into_iter()
+            .filter_map(|event| {
+                Some(match event {
+                    MapEvent::Move { epoch, index, value } => super::MapMsg::Move { epoch, index, value },
+                    MapEvent::Press { epoch, index, set } => super::MapMsg::Press { epoch, index, set },
+                    MapEvent::Candidate { port, channel, kind, number } => {
+                        let input = self.inputs.iter().find(|i| i.attached.as_ref().is_some_and(|(id, _)| *id == port))?;
+                        super::MapMsg::Candidate { port: input.key.to_string(), channel, kind, number }
+                    }
+                })
+            })
+            .collect()
+    }
+
+    pub(super) fn map_dropped(&self) -> u64 {
+        self.worker.map_dropped()
     }
 
     /// The header LED's counter and the port name behind the last message.
@@ -502,7 +551,10 @@ impl Native {
                 input.dirty = true;
                 false
             });
-            if (!present || input.failed || input.lost || (routes.is_empty() && !self.monitor.enabled()))
+            if (!present
+                || input.failed
+                || input.lost
+                || (routes.is_empty() && !self.monitor.enabled() && !self.wanted.wants_port(&input.key.to_string())))
                 && !input.closed
                 && io.request(Request::Close(input.id)).is_ok()
             {
@@ -518,10 +570,12 @@ impl Native {
         self.inputs
             .retain(|input| !input.closed || (input.failed && !input.lost && self.status.inputs.iter().any(|port| same_port(&port.key, &input.key))));
         let monitoring = self.monitor.enabled();
-        if !routes.is_empty() || monitoring {
+        if !routes.is_empty() || monitoring || self.wanted.wants_any() {
             for port in &self.status.inputs {
                 if self.inputs.len() == sources::PORTS
-                    || !(monitoring || !port_routes(&routes, &port.key, &self.status.inputs, &self.muted).is_empty())
+                    || !(monitoring
+                        || self.wanted.wants_port(&port.key.to_string())
+                        || !port_routes(&routes, &port.key, &self.status.inputs, &self.muted).is_empty())
                     || self.inputs.iter().any(|input| same_port(&input.key, &port.key))
                 {
                     continue;
@@ -609,6 +663,19 @@ impl Native {
                     Err(error) => self.status.error = Some(error.into()),
                 }
             }
+        }
+        // MIDI Learn: hand the worker a fresh snapshot when the list or the open ports changed.
+        let ids: Vec<Option<u64>> = (0..self.wanted.len())
+            .map(|spec| {
+                let name = self.wanted.port_of(spec)?;
+                self.inputs.iter().find(|i| !i.closed && !i.lost && i.key.to_string() == name).and_then(|i| i.attached.as_ref().map(|(id, _)| *id))
+            })
+            .collect();
+        if let Some(snapshot) = self.wanted.rebuild(ids)
+            && let Err(error) = self.worker.set_maps(snapshot)
+        {
+            self.wanted.unsent();
+            self.status.error = Some(error.into());
         }
     }
 }

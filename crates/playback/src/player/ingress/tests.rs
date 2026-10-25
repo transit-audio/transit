@@ -144,7 +144,7 @@ fn bridge() -> (plan_bridge::Control, plan_bridge::Audio) {
         PlanLimits::default(),
     )
 }
-fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSender<Update>, Pump) {
+pub(super) fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSender<Update>, Pump) {
     let (send, receive) = mpsc::sync_channel(sources::PORTS);
     let (tap, _) = rtrb::RingBuffer::new(TAP_CAPACITY);
     (
@@ -158,6 +158,9 @@ fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSender<Update>
             echo: None,
             tap,
             monitor: None,
+            maps: None,
+            map_out: rtrb::RingBuffer::new(MAP_CAPACITY).0,
+            map_pass_on: false,
             between_check_and_push: None,
         },
     )

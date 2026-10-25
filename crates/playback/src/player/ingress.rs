@@ -1,6 +1,7 @@
 //! Native MIDI ingestion, independent of the UI pump. The worker owns only raw
 //! consumers and a bounded action producer, never devices, plug-ins or editors.
 //! Main retains the input handles; closing one invalidates its source first.
+use super::midi_map::{self, MapEvent, Snapshot};
 use super::monitor::{self, ClockRate, Dir, MonitorEvent, Tap};
 use super::{ActionResult, PlayedMidi, PlayedNote, RuntimeControl, sources};
 use crate::action_lane::{self, NoteKind, Outcome};
@@ -66,6 +67,8 @@ pub struct Counters {
 
 /// UI tap capacity, preallocated before the ingress thread starts.
 const TAP_CAPACITY: usize = 256;
+/// MIDI Learn event ring capacity, preallocated before the ingress thread starts.
+const MAP_CAPACITY: usize = 256;
 
 #[derive(Default)]
 struct Shared {
@@ -73,6 +76,10 @@ struct Shared {
     tap_lost: AtomicBool,
     stop: AtomicBool,
     finished: AtomicBool,
+    /// MIDI Learn is armed (Main sets it; the worker clears it when it forwards the candidate).
+    learn: AtomicBool,
+    /// Map events the full ring refused.
+    map_dropped: AtomicU64,
     offered: AtomicU64,
     admitted: AtomicU64,
     filtered: AtomicU64,
@@ -165,6 +172,8 @@ struct Mon {
     sysex_truncated: u64,
     /// Whether the callback of this input is told to capture SysEx.
     capturing: bool,
+    /// The next input sequence number the MIDI Learn matcher has not seen.
+    map_next: u64,
 }
 impl Drop for Mon {
     fn drop(&mut self) {
@@ -271,7 +280,13 @@ enum Update {
     Input(Input),
     Echo(super::midi_out::Producer),
     Monitor(Tap),
-    Routes { id: u64, routes: Vec<(sources::Permit, Route)>, applied: Arc<AtomicBool> },
+    Routes {
+        id: u64,
+        routes: Vec<(sources::Permit, Route)>,
+        applied: Arc<AtomicBool>,
+    },
+    /// The MIDI Learn mappings in force (ADR 0028).
+    Maps(Arc<Snapshot>),
 }
 
 /// Control-side handle. Drop closes admission immediately and wakes the worker;
@@ -283,12 +298,15 @@ pub struct Worker {
     shared: Arc<Shared>,
     thread: std::thread::JoinHandle<()>,
     tap: RefCell<rtrb::Consumer<PlayedMidi>>,
+    /// MIDI Learn events for Main (ADR 0028).
+    maps: RefCell<rtrb::Consumer<MapEvent>>,
 }
 impl Worker {
     pub fn start(lane: action_lane::Control<Packet, ActionResult>) -> std::io::Result<Self> {
         let (attach, receive) = mpsc::sync_channel(sources::PORTS);
         let shared = Arc::new(Shared::default());
         let (tap, tap_receive) = rtrb::RingBuffer::new(TAP_CAPACITY);
+        let (map_out, map_receive) = rtrb::RingBuffer::new(MAP_CAPACITY);
         let mut pump = Pump {
             lane,
             receive,
@@ -298,6 +316,9 @@ impl Worker {
             echo: None,
             tap,
             monitor: None,
+            maps: None,
+            map_out,
+            map_pass_on: false,
             #[cfg(test)]
             between_check_and_push: None,
         };
@@ -316,7 +337,15 @@ impl Worker {
                 }
             }
         })?;
-        Ok(Self { attach, permits: Vec::with_capacity(sources::PORTS), next_input: 0, shared, thread, tap: RefCell::new(tap_receive) })
+        Ok(Self {
+            attach,
+            permits: Vec::with_capacity(sources::PORTS),
+            next_input: 0,
+            shared,
+            thread,
+            tap: RefCell::new(tap_receive),
+            maps: RefCell::new(map_receive),
+        })
     }
 
     /// Open the input with this runtime's HostOrigin before attaching. The caller
@@ -405,6 +434,37 @@ impl Worker {
         Ok(())
     }
 
+    /// Swaps in the MIDI Learn mappings (ADR 0028). The worker owns a reference until the next swap.
+    pub(super) fn set_maps(&mut self, maps: Arc<Snapshot>) -> Result<(), &'static str> {
+        self.attach.try_send(Update::Maps(maps)).map_err(|_| "MIDI mapping queue unavailable")?;
+        self.thread.thread().unpark();
+        Ok(())
+    }
+
+    /// Arms or disarms MIDI Learn: while armed, the worker forwards the next CC or note-on once.
+    pub(super) fn arm_learn(&self, armed: bool) {
+        self.shared.learn.store(armed, Ordering::Release);
+        if armed {
+            self.thread.thread().unpark();
+        }
+    }
+
+    /// The MIDI Learn events published since the last call, oldest first.
+    pub(super) fn take_map_events(&self) -> Vec<MapEvent> {
+        let Ok(mut ring) = self.maps.try_borrow_mut() else { return Vec::new() };
+        let mut events = Vec::new();
+        for _ in 0..MAP_CAPACITY {
+            let Ok(event) = ring.pop() else { break };
+            events.push(event);
+        }
+        events
+    }
+
+    /// Map events lost to a full ring.
+    pub(super) fn map_dropped(&self) -> u64 {
+        self.shared.map_dropped.load(Ordering::Relaxed)
+    }
+
     /// The notes played since the last call, oldest first.
     pub fn take_notes(&self) -> Vec<PlayedNote> {
         self.take_midi()
@@ -478,6 +538,11 @@ struct Pump {
     tap: rtrb::Producer<PlayedMidi>,
     /// The MIDI Monitor's input ring (#91).
     monitor: Option<Tap>,
+    /// The MIDI Learn mappings (ADR 0028) and the ring their events go out on.
+    maps: Option<Arc<Snapshot>>,
+    map_out: rtrb::Producer<MapEvent>,
+    /// Whether the matcher ran on the last step, so a start skips the backlog.
+    map_pass_on: bool,
     /// Tests: runs after the route check and before the echo push, where a preemption can land.
     #[cfg(test)]
     between_check_and_push: Option<Box<dyn FnMut() + Send>>,
@@ -525,6 +590,7 @@ impl Pump {
                 }
                 Ok(Update::Echo(echo)) => self.echo = Some(echo),
                 Ok(Update::Monitor(tap)) => self.monitor = Some(tap),
+                Ok(Update::Maps(maps)) => self.maps = Some(maps),
                 Ok(Update::Routes { id, routes, applied }) => {
                     if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id) {
                         for (old, _) in &input.routes {
@@ -599,6 +665,22 @@ impl Pump {
                 input.mon.watch(tap, input.id, &mut input.consumer);
             }
         }
+        // MIDI Learn (ADR 0028): zero cost without mappings or an armed learn (two loads and a
+        // flag). Otherwise every open port is read without popping, so a controller no track
+        // listens to still maps, and each message is seen once (`map_next`).
+        let learning = self.shared.learn.load(Ordering::Acquire);
+        let pass_on = learning || self.maps.as_deref().is_some_and(|maps| !maps.is_empty());
+        if pass_on {
+            let first = !self.map_pass_on;
+            for input in &mut self.inputs {
+                if first {
+                    let Input { consumer, mon, .. } = input;
+                    consumer.for_each_pending(|raw| mon.map_next = mon.map_next.max(raw.seq.saturating_add(1)));
+                }
+                map_pass(input, self.maps.as_deref(), &mut self.map_out, &self.shared);
+            }
+        }
+        self.map_pass_on = pass_on;
         // A fixed amount of work even under continuous MIDI traffic. Round-robin
         // across ports prevents one input backlog from starving another release.
         for _ in 0..BATCH {
@@ -621,12 +703,16 @@ impl Pump {
                 // The MIDI Monitor still sees what this port receives, without taking it from the
                 // ring (a route attached later keeps its backlog); a ring more than half full of
                 // events already shown is trimmed so the port keeps accepting.
+                let mut watched = pass_on;
                 if let Some(tap) = self.monitor.as_mut().filter(|tap| tap.enabled()) {
                     let Input { id, consumer, mon, .. } = input;
                     consumer.for_each_pending(|raw| mon.tap(tap, *id, raw));
-                    if consumer.len() > MONITOR_TRIM {
-                        consumer.discard(consumer.len() - MONITOR_TRIM / 2);
-                    }
+                    watched = true;
+                }
+                // MIDI Learn has seen everything pending too (above), so the trim loses nothing.
+                if watched && input.consumer.len() > MONITOR_TRIM {
+                    let n = input.consumer.len() - MONITOR_TRIM / 2;
+                    input.consumer.discard(n);
                 }
                 continue;
             }
@@ -742,6 +828,7 @@ impl Drop for Pump {
                 Ok(Update::Input(input)) => drop(input),
                 Ok(Update::Echo(echo)) => drop(echo),
                 Ok(Update::Monitor(tap)) => drop(tap),
+                Ok(Update::Maps(maps)) => drop(maps),
                 Ok(Update::Routes { routes, .. }) => {
                     for (permit, _) in routes {
                         permit.invalidate();
@@ -756,6 +843,37 @@ impl Drop for Pump {
 /// CC 120 to 127, the channel-mode messages.
 fn channel_mode(message: Message) -> bool {
     matches!(message, Message::Control { cc: 120..=127, .. })
+}
+
+/// One input's pending messages for the MIDI Learn matcher: the armed learn takes the next
+/// candidate (once), everything else is matched against the snapshot.
+fn map_pass(input: &mut Input, maps: Option<&Snapshot>, out: &mut rtrb::Producer<MapEvent>, shared: &Shared) {
+    let Input { id, consumer, mon, .. } = input;
+    let id = *id;
+    consumer.for_each_pending(|raw| {
+        if raw.seq < mon.map_next {
+            return;
+        }
+        mon.map_next = raw.seq.saturating_add(1);
+        let Some((channel, message)) = decode(*raw) else { return };
+        let mut push = |event: MapEvent| {
+            let sent = out.push(event).is_ok();
+            if !sent {
+                shared.map_dropped.fetch_add(1, Ordering::Relaxed);
+            }
+            sent
+        };
+        if shared.learn.load(Ordering::Acquire)
+            && let Some(candidate) = midi_map::candidate(id, channel, message)
+            && shared.learn.swap(false, Ordering::AcqRel)
+        {
+            push(candidate);
+            return;
+        }
+        if let Some(maps) = maps {
+            midi_map::handle(maps, id, channel, message, &mut push);
+        }
+    });
 }
 
 fn decode(raw: InputEvent) -> Option<(u8, Message)> {
@@ -784,5 +902,7 @@ fn decode(raw: InputEvent) -> Option<(u8, Message)> {
 mod storm;
 pub use storm::{RATE as STORM_RATE, REPEAT as STORM_REPEAT, WINDOW_NS as STORM_WINDOW_NS, WINDOWS as STORM_WINDOWS};
 
+#[cfg(test)]
+mod map_tests;
 #[cfg(test)]
 mod tests;

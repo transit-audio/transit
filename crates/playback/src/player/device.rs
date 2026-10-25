@@ -1799,6 +1799,10 @@ mod rate_tests {
 mod calibrate;
 mod external_measure;
 mod realtime_render;
+#[cfg(not(target_arch = "wasm32"))]
+mod midi_map_api;
+#[cfg(test)]
+mod midi_map_tests;
 
 /// The External Instrument tracks of `session` that cannot play: their MIDI port is Missing or
 /// Failed, or MIDI is unavailable (`status` None). A port the output thread has not looked at yet

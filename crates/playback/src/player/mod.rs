@@ -35,10 +35,38 @@ pub enum PlayedMidi {
     Reset,
 }
 
+/// A MIDI Learn event for the UI (ADR 0028): a mapped control to move, or the candidate an armed
+/// learn caught. `index` counts the mappings of the list given to `Player::set_midi_mappings`
+/// whose `epoch` is `Player::midi_map_epoch`; an event of an older epoch is stale.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MapMsg {
+    Move {
+        epoch: u32,
+        index: u32,
+        value: f32,
+    },
+    /// A button: `Some(on)` sets it, `None` flips it.
+    Press {
+        epoch: u32,
+        index: u32,
+        set: Option<bool>,
+    },
+    Candidate {
+        port: String,
+        channel: u8,
+        kind: soundcraft_model::SourceKind,
+        number: u8,
+    },
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 pub mod ingress;
 #[cfg(not(target_arch = "wasm32"))]
+pub mod midi_map;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod midi_out;
+#[cfg(not(target_arch = "wasm32"))]
+pub use midi_map::MapSpec;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod monitor;
 #[cfg(not(target_arch = "wasm32"))]

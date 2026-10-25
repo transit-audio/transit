@@ -39,7 +39,10 @@ pub mod timeline_map;
 #[cfg(test)]
 pub(crate) use backend::cpal::OutputCallback;
 pub use devices::{AudioConfig, Backend, LoopbackCalibration};
-pub use player::{ActionResult, CountIn, MidiTake, PlayedMidi, PlayedNote, Player, PlayerCommand, PlayerError, PlayerNotice, SlotLoad, StartFailure};
+pub use player::{
+    ActionResult, CountIn, MapMsg, MapSpec, MidiTake, PlayedMidi, PlayedNote, Player, PlayerCommand, PlayerError, PlayerNotice, SlotLoad,
+    StartFailure,
+};
 #[cfg(any(test, feature = "test-hooks"))]
 pub use player::{Clock, Deferred, Factory, PluginTestHooks};
 pub use player::{EditorOpened, LoadedIn};
