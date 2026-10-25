@@ -127,6 +127,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Quantize in the piano roll: a Quantize button opens grid, strength and swing controls plus a note-end option, with an outlined preview before you apply. Apply is one undo step, and Ctrl+U reuses the saved settings.
 - Scale mode in the piano roll: pick a key and scale to highlight it, fold the view to the scale (accidentals stay inline), and edit by scale degree; a chord with an accidental keeps its shape when moved by a degree. Live input is never snapped.
 - Controller lanes in the piano roll: edit CC lanes and sustain-pedal regions; a take that holds only the sustain pedal is kept. Each edit is one undo step.
+- Note length in the piano roll: Alt-drag a note's edge to set a length shorter than the grid, Alt+Shift-drag a body to move it without snap (Alt-drag a body changes velocity), and a numeric Length field in the inspector. Shift snaps; in scale mode it overrides to chromatic.
 - Freeze, Unfreeze and Flatten a track (the snowflake on the track header); a frozen track plays its rendered audio, with its key sources running.
 - Group tracks: Track > New Group Track or the "+ Group" quick-add; Ctrl+G folds the selected tracks into a group, Ctrl+Shift+G ungroups, and you can drag track headers into a folder. Edit Group… is the separate edit-group feature.
 - Fade and crossfade handles on audio clips: hover a top corner and drag for length (Shift: no snap), Alt-drag to bend, click for the shape menu, double-click to reset; right-click overlapping clips for Crossfade.
@@ -146,6 +147,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 
 - Hosts CLAP and VST3 plug-ins, with their own editor windows, saved state, and reported latency.
 - The plug-in window header has a preset dropdown (Save, Save As…, Load…, previous/next), Bypass and a menu (Reset, Copy/Paste state, Delete, Show in chain). User presets are `.vstpreset` files other hosts can read.
+- Plug-in editors scale with the display: VST3 and CLAP editors receive the window's content scale, rescale when dragged between monitors with different scaling, and CLAP editors are sharp embedded and floating.
 - The device card shows Loading while a heavy plug-in instantiates.
 - Plug-ins load on a host thread, so a slow or stuck plug-in no longer freezes the UI: its slot reads "Loading…" while it instantiates and "Not responding" if it stops answering. A slow load shows how long it has taken, the phase it is in and how long it took last time; the status line reports loads and editor opens over 2 s.
 - Plug-in browser with a background scan and your own search folders.
