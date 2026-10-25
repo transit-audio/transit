@@ -155,18 +155,18 @@ fn a_mapped_sweep_moves_the_fader_as_one_undo_step_and_ends_when_the_controller_
     let steps = app.engine.undo_history().len();
     let before = app.engine.session().track(t).unwrap().mixer.volume_db;
     for (i, v) in [0.2f32, 0.4, 0.6, 0.8].into_iter().enumerate() {
-        app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: v }]), 10.0 + i as f64 * 0.05);
+        app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: v, seq: 1 }]), 10.0 + i as f64 * 0.05);
     }
     let after = app.engine.session().track(t).unwrap().mixer.volume_db;
     assert!((after - crate::mixer::k_to_db(0.8)).abs() < 1e-3 && after != before, "{after}");
     // The sweep is one step, and a pause shorter than the gesture window keeps it going.
     app.midi_learn_feed(10.2);
-    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: 0.5 }]), 10.3);
+    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: 0.5, seq: 1 }]), 10.3);
     assert_eq!(app.engine.undo_history().len() - steps, 1, "still the first sweep's step");
     // A still controller ends it, and the next sweep is another step.
     app.midi_learn_feed(10.8);
-    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: 0.3 }]), 11.0);
-    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: 0.2 }]), 11.1);
+    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: 0.3, seq: 1 }]), 11.0);
+    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: 0.2, seq: 1 }]), 11.1);
     assert_eq!(app.engine.undo_history().len() - steps, 2, "two sweeps, two steps");
 }
 
@@ -178,7 +178,7 @@ fn undoing_a_sweep_restores_the_fader_in_one_step() {
     let before = app.engine.session().track(t).unwrap().mixer.volume_db;
     let depth = app.engine.undo_history().len();
     for (i, v) in [0.2f32, 0.4, 0.6, 0.8].into_iter().enumerate() {
-        app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: v }]), 10.0 + i as f64 * 0.05);
+        app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: v, seq: 1 }]), 10.0 + i as f64 * 0.05);
     }
     assert_eq!(app.engine.undo_history().len(), depth + 1, "four moves, one step");
     assert!(app.engine.undo());
@@ -191,8 +191,8 @@ fn a_stale_epoch_and_a_move_with_no_mapping_do_nothing() {
     map(&mut app, t, "volume", 7, json!({"mode": "jump"}));
     frames(&mut app, &ctx, 2, &mut time);
     let before = app.engine.session().track(t).unwrap().mixer.volume_db;
-    app.midi_learn_apply((3, vec![MapMsg::Move { epoch: 2, index: 0, value: 0.1 }]), 1.0);
-    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 9, value: 0.1 }]), 1.0);
+    app.midi_learn_apply((3, vec![MapMsg::Move { epoch: 2, index: 0, value: 0.1, seq: 1 }]), 1.0);
+    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 9, value: 0.1, seq: 1 }]), 1.0);
     assert_eq!(app.engine.session().track(t).unwrap().mixer.volume_db, before);
 }
 
@@ -209,7 +209,7 @@ fn a_note_press_toggles_mute_and_a_cc_pan_maps_the_balance() {
     assert!(app.engine.session().track(t).unwrap().mixer.mute);
     app.midi_learn_apply((0, vec![MapMsg::Press { epoch: 0, index: 0, set: None }]), 1.1);
     assert!(!app.engine.session().track(t).unwrap().mixer.mute, "the second press flips it back");
-    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 1, value: 1.0 }]), 1.2);
+    app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 1, value: 1.0, seq: 1 }]), 1.2);
     assert!(app.engine.session().track(t).unwrap().mixer.pan.iter().all(|p| *p > 0.99), "knob at 127 is hard right");
 }
 
@@ -327,4 +327,131 @@ fn window_mappings_is_in_the_window_menu_and_the_markers_follow_the_strip() {
     assert!(r[1] <= f64::from(fader[1]) + 1.0 && r[3] >= f64::from(fader[3]) - 1.0, "the marker belongs to the fader: {r:?} {fader:?}");
     assert!(markers.as_array().unwrap().iter().any(|m| m["control"] == "Mute" && m["mapped"] == true));
     assert!(!markers.as_array().unwrap().iter().any(|m| m["control"] == "Solo"), "unmapped controls draw nothing");
+}
+
+// ---- review fixes: one gesture, a live UI, stale state ----
+
+fn mv(i: u32, value: f32, seq: u32) -> MapMsg {
+    MapMsg::Move { epoch: 0, index: i, value, seq }
+}
+
+#[test]
+fn two_knobs_moved_together_are_one_undo_step() {
+    let (mut app, ctx, mut time, t) = new_app();
+    map(&mut app, t, "volume", 7, json!({"mode": "jump"}));
+    map(&mut app, t, "pan", 10, json!({"mode": "jump"}));
+    frames(&mut app, &ctx, 2, &mut time);
+    let depth = app.engine.undo_history().len();
+    let before = app.engine.session().track(t).unwrap().clone();
+    for i in 0..10u32 {
+        let now = 20.0 + f64::from(i) * 0.02;
+        // The mappings are in resolve order: session first, in the order they were made.
+        app.midi_learn_apply((0, vec![mv(0, 0.1 * i as f32, i + 1)]), now);
+        app.midi_learn_apply((0, vec![mv(1, 1.0 - 0.1 * i as f32, i + 1)]), now);
+    }
+    assert_eq!(app.engine.undo_history().len(), depth + 1, "an XY move is one step, not one per control");
+    assert!(app.engine.undo());
+    let after = app.engine.session().track(t).unwrap();
+    assert_eq!((after.mixer.volume_db, &after.mixer.pan), (before.mixer.volume_db, &before.mixer.pan), "both controls come back");
+}
+
+#[test]
+fn a_two_second_sweep_applied_at_sixty_hertz_is_one_undo_step_ending_at_the_last_value() {
+    let (mut app, ctx, mut time, t) = new_app();
+    map(&mut app, t, "volume", 7, json!({"mode": "jump"}));
+    frames(&mut app, &ctx, 2, &mut time);
+    let depth = app.engine.undo_history().len();
+    let mut last = 0.0;
+    for frame in 0..120u32 {
+        let now = 30.0 + f64::from(frame) / 60.0;
+        last = frame as f32 / 120.0;
+        app.midi_learn_apply((0, vec![mv(0, last, frame + 1)]), now);
+        app.midi_learn_feed(now);
+    }
+    assert_eq!(app.engine.undo_history().len(), depth + 1, "one sweep, one step");
+    let db = app.engine.session().track(t).unwrap().mixer.volume_db;
+    assert!((db - crate::mixer::k_to_db(last)).abs() < 1e-3, "the fader ends at the knob's last value: {db}");
+}
+
+#[test]
+fn the_ui_repaints_at_its_normal_rate_while_something_is_mapped_or_a_learn_waits() {
+    let (mut app, ctx, mut time, t) = new_app();
+    let delay = |app: &mut StudioApp, ctx: &egui::Context, time: &mut f64| {
+        *time += 1.0 / 60.0;
+        let raw = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))),
+            time: Some(*time),
+            ..Default::default()
+        };
+        let mut out = ctx.run_ui(raw, |ui| {
+            app.logic(ui.ctx());
+            app.ui(ui);
+        });
+        out.textures_delta.clear();
+        out.viewport_output.values().map(|v| v.repaint_delay).min().unwrap()
+    };
+    app.player = Some(soundcraft_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap());
+    delay(&mut app, &ctx, &mut time);
+    assert!(!app.midi_learn_feed(time), "nothing mapped, nothing waiting: the UI may idle");
+    map(&mut app, t, "volume", 7, json!({}));
+    delay(&mut app, &ctx, &mut time);
+    assert!(app.midi_learn_feed(time), "mapped: the UI is asked to keep looking");
+    assert!(delay(&mut app, &ctx, &mut time) <= std::time::Duration::from_millis(50), "mapped: a controller sweep is followed");
+    app.run("midi.unmap", json!({"target": format!("track:{}:volume", t.0)})).unwrap();
+    app.run("midi.learn", json!({"target": format!("track:{}:mute", t.0)})).unwrap();
+    delay(&mut app, &ctx, &mut time);
+    assert!(app.midi_learn_feed(time), "a waiting learn too");
+    assert!(delay(&mut app, &ctx, &mut time) <= std::time::Duration::from_millis(50));
+}
+
+#[test]
+fn a_candidate_after_the_session_was_replaced_maps_nothing() {
+    let (mut app, ctx, mut time, t) = new_app();
+    app.run("midi.learn", json!({"target": format!("track:{}:volume", t.0)})).unwrap();
+    frames(&mut app, &ctx, 2, &mut time);
+    app.engine.replace_session(soundcraft_model::Session::default());
+    frames(&mut app, &ctx, 2, &mut time);
+    candidate(&mut app, "KeyStep", 74);
+    assert!(app.engine.session().midi_mappings.is_empty() && app.engine.midi_profile().is_empty());
+}
+
+#[test]
+fn an_audio_reconnect_rearms_the_new_worker_and_resets_pickup_counters() {
+    let (mut app, ctx, mut time, t) = new_app();
+    let new_player = |app: &StudioApp| soundcraft_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap();
+    app.player = Some(new_player(&app));
+    app.run("midi.learn", json!({"target": format!("track:{}:volume", t.0)})).unwrap();
+    frames(&mut app, &ctx, 2, &mut time);
+    assert!(app.player.as_ref().unwrap().midi_learn_armed(), "the worker is armed");
+    // What a reconnect does: a new Player, whose worker is not armed.
+    app.player = Some(new_player(&app));
+    assert!(!app.player.as_ref().unwrap().midi_learn_armed());
+    frames(&mut app, &ctx, 2, &mut time);
+    assert!(app.player.as_ref().unwrap().midi_learn_armed(), "the next frame arms it again");
+    // The pickup counters start over with the new worker.
+    app.run("midi.map", json!({"source": {"port": "KeyStep", "channel": 1, "kind": "cc", "number": 7}, "target": format!("track:{}:volume", t.0)}))
+        .unwrap();
+    frames(&mut app, &ctx, 2, &mut time);
+    app.midi_learn_apply((app.player.as_ref().unwrap().midi_map_epoch(), vec![mv(0, 0.5, 50)]), time);
+    app.player = Some(new_player(&app));
+    frames(&mut app, &ctx, 2, &mut time);
+    assert!(app.midi_learn.applied_counts().iter().all(|n| *n == 0), "{:?}", app.midi_learn.applied_counts());
+}
+
+#[test]
+fn pass_through_is_a_column_of_the_window_and_the_candidate_keeps_it() {
+    let (mut app, ctx, mut time, t) = new_app();
+    map(&mut app, t, "volume", 7, json!({}));
+    frames(&mut app, &ctx, 2, &mut time);
+    let rows = midi_learn::rows(&app);
+    assert!(!rows[0].pass_through, "consumed by default");
+    app.mapping_row_action(&rows[0], Action::PassThrough(true)).unwrap();
+    assert!(app.engine.session().midi_mappings.iter().next().unwrap().pass_through);
+    app.run("midi.learn", json!({"target": format!("track:{}:volume", t.0)})).unwrap();
+    candidate(&mut app, "KeyStep", 9);
+    let m = app.engine.session().midi_mappings.iter().next().unwrap().clone();
+    assert_eq!((m.source.number, m.pass_through), (9, true), "re-learning keeps the option");
+    app.run("window.midi_mappings", json!({"value": true})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    assert!(app.inspect(&ctx)["midi_learn"]["window"][2].as_f64().unwrap() > 100.0);
 }

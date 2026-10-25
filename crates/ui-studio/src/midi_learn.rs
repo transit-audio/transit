@@ -17,6 +17,9 @@ use soundcraft_playback::{MapMsg, MapSpec};
 /// the UI clock).
 pub const GESTURE_END_S: f64 = 0.4;
 
+/// The merge key of every mapped move (see `learned_move`).
+const GESTURE_KEY: &str = "midi:gesture";
+
 /// Window state saved with the preferences (`ui.json`).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -52,6 +55,10 @@ pub struct State {
     applied: Vec<u32>,
     epoch: u32,
     armed_sent: bool,
+    /// Which Player's MIDI side the worker state belongs to (changes on an audio reconnect).
+    generation: u32,
+    /// Button presses and candidates the worker could not queue, as last read.
+    pub dropped: u64,
     profile_loaded: bool,
     profile_rev: u64,
     /// The UI time of the last mapped move, while a sweep may still be going.
@@ -63,6 +70,11 @@ pub struct State {
 }
 
 impl State {
+    /// The per-mapping applied counters (tests).
+    pub fn applied_counts(&self) -> &[u32] {
+        &self.applied
+    }
+
     /// How many mappings are in force (not overridden).
     pub fn resolved_len(&self) -> usize {
         self.resolved.len()
@@ -246,6 +258,8 @@ pub struct Row {
     pub mode: MapMode,
     pub range: [f32; 2],
     pub toggle: bool,
+    /// The mapped message also reaches the track's routes.
+    pub pass_through: bool,
     /// The track exists in this session (a mapping to a missing one is stored but idle).
     pub live: bool,
     /// This row is being re-learned.
@@ -282,6 +296,7 @@ pub fn rows(app: &StudioApp) -> Vec<Row> {
                 mode: m.mode,
                 range: [m.min, m.max],
                 toggle: m.toggle,
+                pass_through: m.pass_through,
                 live: track.is_some(),
                 learning: learn.is_some_and(|l| l.scope == scope && l.target == m.target),
             });
@@ -297,6 +312,7 @@ pub fn inspect(app: &StudioApp) -> Value {
         "armed": app.engine.learn().map(|l| json!({"target": l.target.to_string(), "scope": l.scope})),
         "active": app.midi_learn.resolved.len(),
         "rows": rows(app),
+        "dropped": app.midi_learn.dropped,
         "markers": app.midi_learn.drawn,
         "menu": app.midi_learn.menu,
         "window": app.midi_learn.window,
@@ -313,7 +329,7 @@ impl StudioApp {
 
     /// Once a frame, before the panes draw: keep the stores, the worker and the preferences in
     /// step, apply what the controller did, and end a finished sweep's undo step.
-    pub(crate) fn midi_learn_feed(&mut self, now: f64) {
+    pub(crate) fn midi_learn_feed(&mut self, now: f64) -> bool {
         self.midi_learn.drawn.clear();
         self.midi_learn.menu.clear();
         // The preferences' profile goes to the engine once; later changes come back out.
@@ -344,6 +360,10 @@ impl StudioApp {
                 self.engine.end_merge();
             }
         }
+        // While anything is mapped (or a learn waits) the UI looks at the controller at its normal
+        // rate, not the idle once a second: the worker keeps only the newest value of a sweep, but
+        // a sweep should still be followed.
+        self.player.is_some() && (!self.midi_learn.resolved.is_empty() || self.engine.learn().is_some())
     }
 
     /// Hand the worker the mappings and the learn flag; take what it published.
@@ -352,8 +372,16 @@ impl StudioApp {
             self.midi_learn.armed_sent = false;
             return (0, Vec::new());
         };
+        // A reconnect swaps in a Player whose worker is not armed and whose counters start over.
+        let generation = player.midi_map_generation();
+        if generation != self.midi_learn.generation {
+            self.midi_learn.generation = generation;
+            self.midi_learn.armed_sent = false;
+            self.midi_learn.applied.clear();
+        }
         let specs: Vec<MapSpec> = self.midi_learn.resolved.iter().map(MapSpec::from_resolved).collect();
         player.set_midi_mappings(specs);
+        self.midi_learn.dropped = player.midi_map_dropped();
         let armed = self.engine.learn().is_some();
         if armed != self.midi_learn.armed_sent {
             player.set_midi_learn(armed);
@@ -370,7 +398,7 @@ impl StudioApp {
         }
         for msg in msgs {
             match msg {
-                MapMsg::Move { epoch: e, index, value } if e == epoch => self.learned_move(index as usize, value, now),
+                MapMsg::Move { epoch: e, index, value, seq } if e == epoch => self.learned_move(index as usize, value, seq, now),
                 MapMsg::Press { epoch: e, index, set } if e == epoch => self.learned_press(index as usize, set),
                 MapMsg::Candidate { port, channel, kind, number } => self.learned_candidate(&port, channel, kind, number),
                 _ => {}
@@ -384,12 +412,13 @@ impl StudioApp {
         }
     }
 
-    fn learned_move(&mut self, index: usize, value: f32, now: f64) {
+    fn learned_move(&mut self, index: usize, value: f32, seq: u32, now: f64) {
         let Some(r) = self.midi_learn.resolved.get(index).cloned() else { return };
         if let Some(n) = self.midi_learn.applied.get_mut(index) {
-            *n = n.wrapping_add(1);
+            *n = seq;
         }
-        let key = format!("midi:{}", r.mapping.target);
+        // One key for the whole gesture, so two knobs moved together are one undo step.
+        let key = GESTURE_KEY;
         let value = value.clamp(0.0, 1.0);
         let target = match r.control {
             Control::Volume => Some((Target::Fader(r.track), k_to_db(value))),
@@ -398,7 +427,7 @@ impl StudioApp {
             _ => None,
         };
         if let Some((target, v)) = target {
-            let _ = self.set_value_merged(target, v, Some(&key));
+            let _ = self.set_value_merged(target, v, Some(key));
             self.midi_learn.last_move = Some(now);
         }
     }
@@ -435,6 +464,7 @@ impl StudioApp {
             o.insert("mode".into(), json!(old.mode));
             o.insert("range".into(), json!([old.min, old.max]));
             o.insert("toggle".into(), json!(old.toggle));
+            o.insert("pass_through".into(), json!(old.pass_through));
         }
         match self.run("midi.map", params) {
             Ok(_) => {
@@ -464,6 +494,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let mut open = true;
     let size = app.ui.midi_mappings.size;
     let rows = rows(app);
+    let dropped = app.midi_learn.dropped;
     let mut actions: Vec<(usize, Action)> = Vec::new();
     let r = egui::Window::new("MIDI Mappings")
         .open(&mut open)
@@ -472,6 +503,9 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         .default_size(size)
         .default_pos(egui::pos2(ctx.content_rect().center().x - size[0] / 2.0, crate::theme::TRANSPORT_H + 80.0))
         .show(ctx, |ui| {
+            if dropped > 0 {
+                ui.label(egui::RichText::new(format!("{dropped} controller button presses or learn messages were dropped (the UI was not draining fast enough).")).color(TOKENS.record));
+            }
             if rows.is_empty() {
                 ui.label(
                     egui::RichText::new("No mappings yet. Right-click a fader, pan, mute, solo, record arm or send level and choose MIDI Learn, then move a knob or press a key on your controller.")
@@ -481,8 +515,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             }
             let mono = crate::theme::mono(ui.ctx(), 12.0);
             egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-                egui::Grid::new("midi_mappings").num_columns(9).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
-                    for h in ["Port", "Ch", "Source", "Target", "Mode", "Range", "Scope", "", ""] {
+                egui::Grid::new("midi_mappings").num_columns(10).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
+                    for h in ["Port", "Ch", "Source", "Target", "Mode", "Range", "Pass through", "Scope", "", ""] {
                         ui.label(egui::RichText::new(h).font(mono.clone()).strong().color(TOKENS.text_dim));
                     }
                     ui.end_row();
@@ -513,6 +547,14 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                 actions.push((i, Action::Range(lo / 100.0, hi / 100.0)));
                             }
                         });
+                        let mut thru = row.pass_through;
+                        if ui
+                            .checkbox(&mut thru, "")
+                            .on_hover_text("Also send the mapped message to the track (its instrument, a recording). Off: only the control hears it.")
+                            .changed()
+                        {
+                            actions.push((i, Action::PassThrough(thru)));
+                        }
                         let scope = match (row.scope, row.overridden) {
                             (Scope::Session, _) => "Session".to_string(),
                             (Scope::Profile, true) => "Controller (overridden)".to_string(),
@@ -551,6 +593,7 @@ pub enum Action {
     Delete,
     Mode(MapMode),
     Range(f32, f32),
+    PassThrough(bool),
 }
 
 impl StudioApp {
@@ -561,17 +604,18 @@ impl StudioApp {
             Action::Learn => self.run("midi.learn", json!({"target": row.target_id, "scope": scope})),
             Action::Cancel => self.run("midi.learn_cancel", json!({})),
             Action::Delete => self.run("midi.unmap", json!({"target": row.target_id, "scope": scope})),
-            Action::Mode(_) | Action::Range(..) => {
+            Action::Mode(_) | Action::Range(..) | Action::PassThrough(_) => {
                 let target: ControlTarget = row.target_id.parse()?;
                 let set: &MappingSet = match scope {
                     Scope::Session => &self.engine.session().midi_mappings,
                     Scope::Profile => self.engine.midi_profile(),
                 };
                 let old = set.for_target(target).cloned().ok_or("that mapping is gone")?;
-                let (mode, lo, hi) = match action {
-                    Action::Mode(m) => (m, old.min, old.max),
-                    Action::Range(lo, hi) => (old.mode, lo, hi),
-                    _ => (old.mode, old.min, old.max),
+                let (mode, lo, hi, pass_through) = match action {
+                    Action::Mode(m) => (m, old.min, old.max, old.pass_through),
+                    Action::Range(lo, hi) => (old.mode, lo, hi, old.pass_through),
+                    Action::PassThrough(p) => (old.mode, old.min, old.max, p),
+                    _ => (old.mode, old.min, old.max, old.pass_through),
                 };
                 let channel = old.source.channel.map_or(json!("any"), |c| json!(c + 1));
                 self.run(
@@ -583,6 +627,7 @@ impl StudioApp {
                         "mode": mode,
                         "range": [lo, hi],
                         "toggle": old.toggle,
+                        "pass_through": pass_through,
                     }),
                 )
             }
