@@ -6,7 +6,7 @@
 //! next frame's `logic` sees the flag before egui-wgpu paints and takes the shutdown path
 //! ([`DeviceWatch::lost`]). A loss first seen inside that upload still panics there; `main`
 //! catches the panic around `eframe::run_native` and finishes the same shutdown ([`after_panic`]).
-//! Re-creating the device is not attempted (known issue K69).
+//! Re-creating the device is not attempted (known issue K84).
 
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
