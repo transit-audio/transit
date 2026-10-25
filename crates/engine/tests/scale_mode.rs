@@ -84,3 +84,24 @@ fn scale_move_batch_validates_before_editing_and_preserves_chord_identity() {
     assert!(e.undo());
     assert_eq!(e.session().to_json().unwrap(), original);
 }
+
+#[test]
+fn scale_group_move_applies_distinct_pitches_as_one_undo_step() {
+    let mut e = Engine::default();
+    let track = e.execute("track.new", &json!({"kind": "instrument"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let clip = e.execute("midi.new_clip", &json!({"track": track, "start": 0, "length": 96000})).unwrap()["clip"].as_u64().unwrap();
+    let key = KeyScale { root: 0, scale: Scale::Minor };
+    let chord = [60u8, 61];
+    for pitch in chord {
+        e.execute("midi.note_add", &json!({"clip":clip,"pitch":pitch,"start_ticks":0})).unwrap();
+    }
+    let original = e.session().to_json().unwrap();
+    let moved = key.transpose_group(&chord, chord[0], 1);
+    assert_eq!(moved, [62, 63]);
+    e.execute("midi.notes_move", &json!({"clip":clip,"indices":[0,1],"pitches":moved})).unwrap();
+    let notes = e.execute("midi.notes", &json!({"clip": clip})).unwrap();
+    assert_eq!((notes["notes"][0]["pitch"].as_u64(), notes["notes"][1]["pitch"].as_u64()), (Some(62), Some(63)));
+    assert!(e.undo());
+    assert_eq!(e.session().to_json().unwrap(), original);
+    assert!(!e.undo() || e.session().to_json().unwrap() != original, "the move was a single step");
+}

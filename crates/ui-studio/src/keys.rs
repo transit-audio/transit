@@ -615,7 +615,7 @@ impl StudioApp {
         let sel = self.keys.selection.clone();
         if self.keys_scale().enabled {
             let degrees = if matches!(semitones, -12 | 12) { semitones.signum() * 7 } else { semitones };
-            let pairs = self.scale_move(&sel, ticks, degrees);
+            let pairs = self.scale_move(&sel, ticks, degrees, None);
             self.keys.selection = self.scale_apply_move(&pairs)?;
             return Ok(());
         }
@@ -667,7 +667,7 @@ impl StudioApp {
         let whole = sel.is_empty() || resolve(&notes, &sel).len() == notes.len();
         if self.keys_scale().enabled {
             let degrees = if matches!(semitones, -12 | 12) { semitones.signum() * 7 } else { semitones };
-            let pairs = self.scale_move(if whole { &notes } else { &sel }, 0, degrees);
+            let pairs = self.scale_move(if whole { &notes } else { &sel }, 0, degrees, None);
             let edited = self.scale_apply_move(&pairs)?;
             if !sel.is_empty() {
                 self.keys.selection = edited;
@@ -1438,7 +1438,7 @@ fn preview(app: &StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note]) -> Op
             let ds = ((press.y - pos.y) / map.kh).round() as i64;
             let (dt, ds) = clamp_move(&sel, dt, ds);
             if map.scale.enabled && !ui.input(|i| i.modifiers.shift) {
-                app.scale_move(&sel, dt, ds)
+                app.scale_move(&sel, dt, ds, Some(anchor.pitch))
             } else {
                 sel.iter().map(|n| (*n, shifted(n, dt, ds))).collect()
             }
@@ -1663,6 +1663,8 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
     let pos = ui.input(|i| i.pointer.latest_pos());
     let mut play = None;
     let scale = app.keys_scale();
+    let notes = app.keys_notes();
+    let app_sel: Vec<Note> = resolve(&notes, &app.keys.selection).into_iter().map(|i| notes[i]).collect();
     if let Some(KeysGesture::Notes { kind, anchor, press, copy, sounding }) = &mut app.keys.gesture
         && *kind == NoteDrag::Move
     {
@@ -1671,7 +1673,10 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
         if let Some(pos) = pos {
             let ds = ((press.y - pos.y) / map.kh).round() as i64;
             let pitch = if scale.enabled && !mods.shift && ds != 0 {
-                scale.key.transpose(anchor.pitch, ds)
+                // Same group rule as the applied move, so the audition matches the result.
+                let sel: Vec<u8> = app_sel.iter().map(|n| n.pitch).collect();
+                let at = sel.iter().position(|&p| p == anchor.pitch).unwrap_or(0);
+                scale.key.transpose_group(&sel, anchor.pitch, ds).get(at).copied().unwrap_or(anchor.pitch)
             } else {
                 (i64::from(anchor.pitch) + ds).clamp(0, 127) as u8
             };

@@ -36,23 +36,18 @@ impl StudioApp {
         if mode.enabled && !chromatic { mode.key.nearest(pitch) } else { pitch }
     }
 
-    pub(super) fn scale_move(&self, notes: &[Note], ticks: i64, degrees: i64) -> Vec<(Note, Note)> {
+    /// Scale-mode move of a selection: one shared degree step for the whole group (see
+    /// `KeyScale::transpose_group`), clamped or refused as a group. `anchor` is the grabbed
+    /// note; keyboard moves pass `None` and the lowest note leads.
+    pub(super) fn scale_move(&self, notes: &[Note], ticks: i64, degrees: i64, anchor: Option<u8>) -> Vec<(Note, Note)> {
         let mode = self.keys_scale();
         let min = notes.iter().map(|n| n.start).min().unwrap_or(0);
         let ticks = ticks.max(-min);
-        notes
-            .iter()
-            .map(|n| {
-                (
-                    *n,
-                    Note {
-                        start: n.start.saturating_add(ticks),
-                        pitch: if degrees == 0 { n.pitch } else { mode.key.transpose(n.pitch, degrees) },
-                        ..*n
-                    },
-                )
-            })
-            .collect()
+        let pitches: Vec<u8> = notes.iter().map(|n| n.pitch).collect();
+        let lowest = pitches.iter().copied().min().unwrap_or(0);
+        let anchor = anchor.filter(|a| pitches.contains(a)).unwrap_or(lowest);
+        let moved = if degrees == 0 { pitches } else { mode.key.transpose_group(&pitches, anchor, degrees) };
+        notes.iter().zip(moved).map(|(n, pitch)| (*n, Note { start: n.start.saturating_add(ticks), pitch, ..*n })).collect()
     }
 }
 

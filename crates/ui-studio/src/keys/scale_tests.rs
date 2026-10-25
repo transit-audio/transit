@@ -109,7 +109,7 @@ fn scale_draw_drag_override_and_transpose_use_real_handlers() {
     h.input("ui.drag", json!({"x": x, "y": y, "to_x": x, "to_y": y-h.app.ui.keys.key_h, "shift": true}));
     assert_eq!(h.app.keys_notes()[0].pitch, 64, "Shift permits the accidental");
     h.app.keys_transpose(1).unwrap();
-    assert_eq!(h.app.keys_notes()[0].pitch, 65);
+    assert_eq!(h.app.keys_notes()[0].pitch, 66, "an accidental keeps its offset above the tone: E to F# in C minor");
 }
 
 #[test]
@@ -203,4 +203,32 @@ fn scale_chord_move_does_not_resolve_a_previously_moved_note_twice() {
     assert_eq!(h.app.keys_notes().iter().map(|n| n.pitch).collect::<Vec<_>>(), [62, 63]);
     h.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(h.app.keys_notes().iter().map(|n| n.pitch).collect::<Vec<_>>(), [60, 62]);
+}
+
+#[test]
+fn scale_group_move_keeps_accidental_chord_distinct_and_is_one_undo() {
+    let mut h = Harness::new();
+    h.minor(false);
+    h.add(60, 0);
+    h.add(61, 0);
+    let before: Vec<_> = h.app.keys_notes().iter().map(|n| n.pitch).collect();
+    h.app.keys.selection = h.app.keys_notes();
+    h.app.keys_move(0, 1).unwrap();
+    assert_eq!(h.app.keys_notes().iter().map(|n| n.pitch).collect::<Vec<_>>(), [62, 63], "C# keeps its offset: D#, not D");
+    h.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(h.app.keys_notes().iter().map(|n| n.pitch).collect::<Vec<_>>(), before, "one undo restores the chord");
+}
+
+#[test]
+fn scale_group_at_top_of_range_is_refused_as_a_group() {
+    let mut h = Harness::new();
+    h.app.keys_scale_set(json!({"enabled": true, "root": 0, "scale": "major"})).unwrap();
+    for p in [124, 125, 127] {
+        h.add(p, 0);
+    }
+    h.app.keys.selection = h.app.keys_notes();
+    h.app.keys_move(0, 1).unwrap();
+    assert_eq!(h.app.keys_notes().iter().map(|n| n.pitch).collect::<Vec<_>>(), [124, 125, 127], "no note folds onto another");
+    h.app.keys_move(0, -1).unwrap();
+    assert_eq!(h.app.keys_notes().iter().map(|n| n.pitch).collect::<Vec<_>>(), [122, 124, 125], "downward the whole group moves one degree");
 }
