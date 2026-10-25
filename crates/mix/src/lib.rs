@@ -2437,9 +2437,10 @@ fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: usize, mut vi
                         // overlapping clip will release itself) already decided the state.
                         let superseded = t.clips().iter().any(|other| {
                             let other_midi = matches!(other.content, ClipContent::Midi { .. });
-                            // A clip that starts at or after this end, or ended before the press, cannot
+                            // A clip whose tick grid starts at or after this end (its events sit on the grid, up to half a
+                            // tick before `start`), or that ended before the press, cannot
                             // have written the pedal after it: not scanned.
-                            !std::ptr::eq(other, clip) && !other.muted && other_midi && other.start < t_end && other.end() > at && {
+                            !std::ptr::eq(other, clip) && !other.muted && other_midi && grid_start(s, other) < t_end && other.end() > at && {
                                 let theirs = pedal_state_before(s, other, rtp, t_end.min(other.end()));
                                 matches!(theirs.get(slot), Some(Some((a, _))) if *a > at)
                             }
@@ -2495,6 +2496,12 @@ fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: usize, mut vi
 #[cfg(test)]
 thread_local! {
     static PEDAL_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
+/// The sample a clip's tick grid starts at: its events sit there, up to half a tick before `start`.
+fn grid_start(s: &Session, clip: &Clip) -> Samples {
+    let sr = s.sample_rate;
+    s.tempo.tick_to_samples(s.tempo.samples_to_ticks(clip.start, sr), sr)
 }
 
 /// Pedal controllers the clip-end release covers: 16 channels times sustain, sostenuto, soft, hold 2.

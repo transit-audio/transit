@@ -1573,3 +1573,23 @@ fn the_release_at_a_clip_end_precedes_the_press_of_a_clip_that_starts_there() {
     add_pedal_clip(&mut rig, 2600, 2400, None, pedal_seq(&[(0, 127), (40, 0)]));
     assert_eq!(pedal_at_session_samples(&mut rig, 24), vec![(100, 127), (2600, 0), (2600, 127), (3600, 0)]);
 }
+
+#[test]
+fn the_release_precedes_the_next_clips_press_whatever_the_clip_order_in_the_track() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 2600, 2400, None, pedal_seq(&[(0, 127), (40, 0)]));
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127)]));
+    assert_eq!(pedal_at_session_samples(&mut rig, 24), vec![(100, 127), (2600, 0), (2600, 127), (3600, 0)]);
+}
+
+#[test]
+fn an_off_tick_clip_starting_at_the_end_of_a_clip_keeps_the_pedal_down() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    // B starts at 2560 (tick 102.4), so its events sit on the grid at 2550, before A's end: B wrote
+    // the pedal last and A's end must not lift it. B's lift is at its tick 40.
+    add_pedal_clip(&mut rig, 0, 2560, None, pedal_seq(&[(4, 127)]));
+    add_pedal_clip(&mut rig, 2560, 2400, None, pedal_seq(&[(0, 127), (40, 0)]));
+    assert_eq!(pedal_at_session_samples(&mut rig, 24), vec![(100, 127), (3550, 0)]);
+}
