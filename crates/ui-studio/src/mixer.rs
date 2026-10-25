@@ -231,6 +231,10 @@ pub struct DeviceCard {
     pub external_return: R4,
     pub external_gain: R4,
     pub external_latency: R4,
+    /// The Out selector (port and channel), the result line under Latency and the status row.
+    pub external_out: R4,
+    pub external_result: R4,
+    pub external_status: R4,
     /// An External Instrument's state line as the card shows it ("Manual: 19.5 ms", ...).
     pub external_state: String,
     /// The line under the name: the plug-in's kind, or while it is on its way "Loading…",
@@ -994,7 +998,7 @@ pub fn panes(app: &mut StudioApp, ui: &mut Ui) {
     app.mixer.devices.visible = app.ui.show_devices;
     if app.ui.show_devices {
         egui::Panel::bottom("devices")
-            .exact_size(crate::devices::PANE_H)
+            .exact_size(crate::devices::pane_height(app))
             .frame(egui::Frame::NONE.fill(TOKENS.panel))
             .show(ui, |ui| crate::devices::chain(app, ui));
     }

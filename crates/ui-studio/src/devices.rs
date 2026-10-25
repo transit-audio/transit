@@ -22,6 +22,10 @@ use soundcraft_playback::SlotLoad;
 
 /// Height of the device pane.
 pub const PANE_H: f32 = 132.0;
+/// The padding above and below the cards in the pane.
+const LANE_PAD: f32 = 8.0;
+/// A stock card's height: the pane of old, less its padding.
+const STOCK_H: f32 = PANE_H - 2.0 * LANE_PAD;
 const CARD_W: f32 = 168.0;
 
 /// A device being dragged by its title: the insert slot it started in.
@@ -176,6 +180,25 @@ pub(crate) fn add_device_menu(app: &mut StudioApp, resp: &egui::Response, tid: T
     }
 }
 
+/// The size a card asks for: the External Instrument's (`external_instrument::CARD_W`/`CARD_H`) has
+/// the rows it needs; every other card keeps the stock size.
+fn card_size(slot: Option<usize>, ins: Option<&Insert>) -> egui::Vec2 {
+    if slot.is_none() && ins.and_then(Insert::external_instrument).is_some() {
+        vec2(crate::external_instrument::CARD_W, crate::external_instrument::CARD_H)
+    } else {
+        vec2(CARD_W, STOCK_H)
+    }
+}
+
+/// The height of the Devices pane for the focused track: its tallest card (the stock height at
+/// least) and the padding. Read before the pane is laid out, so the row follows the cards at once.
+pub(crate) fn pane_height(app: &StudioApp) -> f32 {
+    let Some(t) = app.focus_track().and_then(|id| app.engine.session().track(id)) else { return PANE_H };
+    let instrument = (t.kind == TrackKind::Instrument).then(|| card_size(None, t.instrument.as_ref()).y);
+    let inserts = t.mixer.inserts.iter().flatten().map(|i| card_size(Some(0), Some(i)).y);
+    instrument.into_iter().chain(inserts).fold(STOCK_H, f32::max) + 2.0 * LANE_PAD
+}
+
 pub fn chain(app: &mut StudioApp, ui: &mut Ui) {
     let area = ui.max_rect();
     let p = ui.painter().clone();
@@ -208,7 +231,8 @@ pub fn chain(app: &mut StudioApp, ui: &mut Ui) {
         }
     }
     for (slot, ins) in cards {
-        let r = Rect::from_min_size(pos2(x, lane.min.y), vec2(CARD_W, lane.height()));
+        let size = card_size(slot, ins.as_ref());
+        let r = Rect::from_min_size(pos2(x, lane.min.y), size);
         if r.min.x < lane.max.x {
             let c = card(app, ui, &p, lane, tid, slot, ins.as_ref(), r, &mut layout.menu);
             layout.cards.push(c);
@@ -216,7 +240,7 @@ pub fn chain(app: &mut StudioApp, ui: &mut Ui) {
         // An arrow between devices: the signal flows left to right.
         let ax = r.max.x + 7.0;
         crate::icons::paint(&p.with_clip_rect(lane), pos2(ax, r.center().y), Icon::ChevronRight, 14.0, TOKENS.text_dim);
-        x += CARD_W + 14.0;
+        x += size.x + 14.0;
     }
     drag_devices(app, ui, &p, lane, tid, &mut layout);
     crate::hardware_ui::picker(app, ui.ctx());
@@ -489,7 +513,7 @@ fn card_body(
             return c;
         }
         if let Some(e) = &ext {
-            crate::external_instrument::card(app, ui, &pc, lane, t, e, r, title.max.y, eb, menu, &mut c);
+            crate::external_instrument::card(app, ui, &pc, lane, t, e, r, title.max.y, menu, &mut c);
             return c;
         }
     }

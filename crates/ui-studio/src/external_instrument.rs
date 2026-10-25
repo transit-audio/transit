@@ -112,8 +112,64 @@ impl StudioApp {
     }
 }
 
-/// The body of an External Instrument's card under its title: the return dropdown, the gain, the
-/// manual latency, and the state line in the place of the editor button.
+/// The card's width and height: it asks for the rows below and never less than the width at which
+/// the Latency field and the Measure button sit side by side (the Devices row follows the tallest
+/// card, issue #96).
+pub(crate) const CARD_W: f32 = 272.0;
+pub(crate) const CARD_H: f32 = 171.0;
+/// The tooltip of Measure while the port or the return is not chosen.
+pub(crate) const CHOOSE_FIRST: &str = "Choose a MIDI Out port and a Return first";
+
+/// Where each widget of the card sits: Out, Return, Latency (label, field, Measure), the result
+/// line under it (with Keep at its right end), Gain and the status row last. No two overlap, at
+/// any card width from [`CARD_W`] up.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct Rows {
+    pub out: Rect,
+    pub ret: Rect,
+    pub latency_label: Rect,
+    pub latency: Rect,
+    pub measure: Rect,
+    pub result: Rect,
+    pub keep: Rect,
+    pub gain_label: Rect,
+    pub gain: Rect,
+    pub status: Rect,
+}
+
+impl Rows {
+    /// The rows of the card in `r`, whose title ends at `top`.
+    pub(crate) fn of(r: Rect, top: f32) -> Self {
+        const LABEL: f32 = 48.0;
+        const MEASURE: f32 = 100.0;
+        const KEEP: f32 = 44.0;
+        let (x0, x1) = (r.min.x + 8.0, r.max.x - 8.0);
+        let y = |dy: f32, h: f32| (top + 3.0 + dy, top + 3.0 + dy + h);
+        let band = |(y0, y1): (f32, f32), a: f32, b: f32| Rect::from_min_max(pos2(a, y0), pos2(b, y1));
+        let (lat, res, gain) = (y(40.0, 18.0), y(60.0, 14.0), y(78.0, 18.0));
+        Self {
+            out: band(y(0.0, 18.0), x0, x1),
+            ret: band(y(20.0, 18.0), x0, x1),
+            latency_label: band(lat, x0, x0 + LABEL),
+            latency: band(lat, x0 + LABEL, x1 - MEASURE - 4.0),
+            measure: band(lat, x1 - MEASURE, x1),
+            result: band(res, x0, x1 - KEEP - 4.0),
+            keep: band(res, x1 - KEEP, x1),
+            gain_label: band(gain, x0, x0 + LABEL),
+            gain: band(gain, x0 + LABEL, x1),
+            status: band(y(100.0, 40.0), x0, x1),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn all(&self) -> [Rect; 10] {
+        [self.out, self.ret, self.latency_label, self.latency, self.measure, self.result, self.keep, self.gain_label, self.gain, self.status]
+    }
+}
+
+/// The body of an External Instrument's card under its title (rows in [`Rows`]): the MIDI Out
+/// selector, the return dropdown, the latency field with Measure, the result line, the gain, and
+/// the status row (a refusal or a notice; nothing else is ever drawn there).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn card(
     app: &mut StudioApp,
@@ -124,19 +180,51 @@ pub(crate) fn card(
     e: &ExternalInstrument,
     r: Rect,
     top: f32,
-    eb: Rect,
     menu: &mut Vec<MenuItem>,
     c: &mut DeviceCard,
 ) {
-    let row = |i: f32| Rect::from_min_size(pos2(r.min.x + 8.0, top + 3.0 + i * 20.0), vec2(r.width() - 16.0, 18.0));
+    // Nothing of the card is painted outside it.
+    let clip = r.intersect(lane);
+    let pc = &pc.with_clip_rect(clip);
+    let rows = Rows::of(r, top);
     let font = FontId::proportional(10.5);
     let mut change: Option<Value> = None;
+    let s = app.engine.session_arc();
+    let output = s.track(t).map_or(MidiOutput::Internal, |x| x.midi_output.clone());
+    let view = crate::midi_output::OutputView::read(app.player.as_ref());
+    let say = |text: &str, rect: Rect, color: egui::Color32| {
+        pc.with_clip_rect(rect.intersect(clip)).text(pos2(rect.min.x, rect.center().y), Align2::LEFT_CENTER, text, font.clone(), color);
+    };
+    // Out: the track's MIDI port and channel, the same setting and the same popup as the chip on
+    // its header (`arrange::midi_output_chip`).
+    let rb = rows.out;
+    let resp = ui.interact(rb.intersect(clip), ui.id().with(("ext_out", t.0)), Sense::click());
+    pc.rect_filled(rb, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
+    let chip = view.header_chip(t, &output);
+    let label = match &chip {
+        Some(chip) => format!("Out: {}", chip.text),
+        None => "Out: None".to_string(),
+    };
+    let ink = if chip.as_ref().is_some_and(|c| c.missing) { TOKENS.record } else { TOKENS.text };
+    pc.with_clip_rect(rb.shrink2(vec2(6.0, 0.0)).intersect(clip)).text(
+        pos2(rb.min.x + 6.0, rb.center().y),
+        Align2::LEFT_CENTER,
+        &label,
+        font.clone(),
+        ink,
+    );
+    crate::icons::paint(pc, pos2(rb.max.x - 10.0, rb.center().y), crate::icons::Icon::ChevronDown, 12.0, TOKENS.text_dim);
+    c.external_out = crate::arrange::r4(rb);
+    resp.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::ComboBox, true, "MIDI output"));
+    if let Some(params) = view.popup(&resp, t, &output, true) {
+        let _ = app.run("midi.output", params);
+    }
     // Return: a dropdown of the machine's input paths.
-    let rb = row(0.0);
-    let resp = ui.interact(rb.intersect(lane), ui.id().with(("ext_return", t.0)), Sense::click());
+    let rb = rows.ret;
+    let resp = ui.interact(rb.intersect(clip), ui.id().with(("ext_return", t.0)), Sense::click());
     pc.rect_filled(rb, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
     let label = if e.ret.is_empty() { "Return: None".to_string() } else { format!("Return: {}", e.ret) };
-    pc.with_clip_rect(rb.shrink2(vec2(6.0, 0.0)).intersect(lane)).text(
+    pc.with_clip_rect(rb.shrink2(vec2(6.0, 0.0)).intersect(clip)).text(
         pos2(rb.min.x + 6.0, rb.center().y),
         Align2::LEFT_CENTER,
         &label,
@@ -160,34 +248,12 @@ pub(crate) fn card(
             ui.weak("This device has no input paths (Audio Devices \u{203a} I/O paths)");
         }
     });
-    // Gain on the return: edited locally, one command when the drag or typing ends.
-    let gb = row(1.0);
-    pc.text(pos2(gb.min.x, gb.center().y), Align2::LEFT_CENTER, "Gain", font.clone(), TOKENS.text_dim);
-    let field = Rect::from_min_max(pos2(gb.min.x + 52.0, gb.min.y), gb.max);
-    let id = ui.id().with(("ext_gain", t.0));
-    let mut gain = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or_else(|| e.gain_db());
-    let g = ui.put(
-        field.intersect(lane),
-        egui::DragValue::new(&mut gain).range(EXTERNAL_GAIN_DB.0..=EXTERNAL_GAIN_DB.1).speed(0.1).fixed_decimals(1).suffix(" dB"),
-    );
-    if g.changed() {
-        ui.data_mut(|d| d.insert_temp(id, gain));
-    }
-    if (g.drag_stopped() || g.lost_focus()) && ui.data(|d| d.get_temp::<f32>(id)).is_some() {
-        ui.data_mut(|d| d.remove::<f32>(id));
-        if (gain - e.gain_db()).abs() > f32::EPSILON {
-            change = Some(json!({"gain_db": gain}));
-        }
-    }
-    g.on_hover_text("Gain on the return, before the inserts");
-    c.external_gain = crate::arrange::r4(field);
-    // Latency set by hand, in ms; empty clears it.
-    let lb = row(2.0);
-    pc.text(pos2(lb.min.x, lb.center().y), Align2::LEFT_CENTER, "Latency", font.clone(), TOKENS.text_dim);
-    let field = Rect::from_min_max(pos2(lb.min.x + 52.0, lb.min.y), lb.max);
+    // Latency set by hand, in ms; empty clears it. Measure sits beside it.
+    say("Latency", rows.latency_label, TOKENS.text_dim);
+    let field = rows.latency;
     let id = ui.id().with(("ext_latency", t.0));
     let mut text = ui.data(|d| d.get_temp::<String>(id)).unwrap_or_else(|| manual_text(e));
-    let l = ui.put(field.intersect(lane), egui::TextEdit::singleline(&mut text).hint_text("Set manually… ms").font(font.clone()));
+    let l = ui.put(field.intersect(clip), egui::TextEdit::singleline(&mut text).hint_text("Set manually\u{2026} ms").font(font.clone()));
     if l.changed() {
         ui.data_mut(|d| d.insert_temp(id, text.clone()));
     }
@@ -201,14 +267,30 @@ pub(crate) fn card(
     }
     l.on_hover_text("The synth's latency in ms: from the note to its sound on the return. Notes are not sent early; the rest of the mix waits.");
     c.external_latency = crate::arrange::r4(field);
-    // Measure (slice 2): Measure, or the progress with Cancel while it runs, and Keep for a
-    // result whose spread was high.
-    measure_row(app, ui, pc, lane, t, row(3.0), &font, c);
-    // The state line.
+    let set = matches!(output, MidiOutput::External { .. }) && !e.ret.is_empty();
+    measure_button(app, ui, pc, clip, t, &rows, &font, set, c);
+    // Gain on the return: edited locally, one command when the drag or typing ends.
+    say("Gain", rows.gain_label, TOKENS.text_dim);
+    let field = rows.gain;
+    let id = ui.id().with(("ext_gain", t.0));
+    let mut gain = ui.data(|d| d.get_temp::<f32>(id)).unwrap_or_else(|| e.gain_db());
+    let g = ui.put(
+        field.intersect(clip),
+        egui::DragValue::new(&mut gain).range(EXTERNAL_GAIN_DB.0..=EXTERNAL_GAIN_DB.1).speed(0.1).fixed_decimals(1).suffix(" dB"),
+    );
+    if g.changed() {
+        ui.data_mut(|d| d.insert_temp(id, gain));
+    }
+    if (g.drag_stopped() || g.lost_focus()) && ui.data(|d| d.get_temp::<f32>(id)).is_some() {
+        ui.data_mut(|d| d.remove::<f32>(id));
+        if (gain - e.gain_db()).abs() > f32::EPSILON {
+            change = Some(json!({"gain_db": gain}));
+        }
+    }
+    g.on_hover_text("Gain on the return, before the inserts");
+    c.external_gain = crate::arrange::r4(field);
+    // The state: a result line under Latency, or a refusal or notice in the status row.
     let live = app.external_live();
-    let s = app.engine.session_arc();
-    let output = s.track(t).map_or(MidiOutput::Internal, |x| x.midi_output.clone());
-    let view = crate::midi_output::OutputView::read(app.player.as_ref());
     let port = match &output {
         MidiOutput::Internal => Some(String::new()),
         out if view.missing(t, out) => Some(view.port_label(out)),
@@ -219,21 +301,45 @@ pub(crate) fn card(
     let ok = report.as_ref().is_some_and(|x| x.state == ExternalState::Ready) && port.is_none() && live;
     // A refusal or a result waiting for Keep is said where the state is, until the next Measure.
     let said = app.external_measure.outcome.as_ref().filter(|o| o.track == t && !o.stored).map(|o| o.text.clone());
+    let running = app.external_measure.running.as_ref().is_some_and(|x| x.track == t);
     let (line, ink) = match &said {
         Some(text) => (text.clone(), TOKENS.solo),
         None if stale => (state.clone(), TOKENS.solo),
         None => (state.clone(), if ok { TOKENS.text } else { TOKENS.text_dim }),
     };
-    // The line wraps upward from the bottom of the card when it is long.
-    let galley = pc.layout(line, FontId::proportional(10.0), ink, eb.width() - 10.0);
-    let area = Rect::from_min_max(pos2(eb.min.x, (eb.max.y - galley.size().y - 6.0).min(eb.min.y)), eb.max);
-    let resp = ui.interact(area.intersect(lane), ui.id().with(("ext_state", t.0)), Sense::hover());
+    // Where the latency comes from (manual or measured) is the result; the rest is status.
+    let is_result = said.is_none() && ok;
+    let result = if running {
+        c.external_measure_text.clone()
+    } else if is_result {
+        line.clone()
+    } else {
+        String::new()
+    };
+    c.external_result = crate::arrange::r4(rows.result);
+    say(&result, rows.result, if running { TOKENS.text } else { ink });
+    if !running && app.external_measure.outcome.as_ref().is_some_and(|o| o.track == t && o.keep.is_some()) {
+        let resp = ui.interact(rows.keep.intersect(clip), ui.id().with(("ext_keep", t.0)), Sense::click());
+        pc.rect_filled(rows.keep, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
+        pc.with_clip_rect(rows.keep.intersect(clip)).text(rows.keep.center(), Align2::CENTER_CENTER, "Keep", font.clone(), TOKENS.text);
+        c.external_keep = crate::arrange::r4(rows.keep);
+        if resp.on_hover_text("Store this measurement although its spread is high").clicked() {
+            let _ = app.keep_external_measure(t);
+        }
+    }
+    let status = if is_result { String::new() } else { line };
+    let area = rows.status;
+    c.external_status = crate::arrange::r4(area);
+    let resp = ui.interact(area.intersect(clip), ui.id().with(("ext_state", t.0)), Sense::hover());
     pc.rect_filled(area, crate::theme::RADIUS, TOKENS.button);
-    pc.with_clip_rect(area.intersect(lane)).galley(
-        pos2(area.center().x - galley.size().x / 2.0, area.center().y - galley.size().y / 2.0),
-        galley,
-        ink,
-    );
+    if !status.is_empty() {
+        let galley = pc.layout(status, FontId::proportional(10.0), ink, area.width() - 10.0);
+        pc.with_clip_rect(area.intersect(clip)).galley(
+            pos2(area.center().x - galley.size().x / 2.0, area.center().y - galley.size().y / 2.0),
+            galley,
+            ink,
+        );
+    }
     resp.on_hover_text(format!("{}\n{state}", view.label(t, &output)));
     c.external_state = said.unwrap_or(state);
     c.external_stale = stale;
@@ -253,41 +359,49 @@ impl StudioApp {
     }
 }
 
-/// The card's Measure row: Measure (off with the reason as its tooltip while it cannot run), the
-/// progress with Cancel while it runs, Keep beside Measure for a result with a high spread.
+/// The card's Measure button beside the latency field: Measure (off with the reason as its tooltip
+/// while it cannot run, "Choose a MIDI Out port and a Return first" while either is unset), or
+/// Cancel while it runs (its progress is the result line).
 #[allow(clippy::too_many_arguments)]
-fn measure_row(app: &mut StudioApp, ui: &mut Ui, pc: &egui::Painter, lane: Rect, t: TrackId, rb: Rect, font: &FontId, c: &mut DeviceCard) {
+fn measure_button(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    pc: &egui::Painter,
+    clip: Rect,
+    t: TrackId,
+    rows: &Rows,
+    font: &FontId,
+    set: bool,
+    c: &mut DeviceCard,
+) {
     let running = app.external_measure.running.as_ref().is_some_and(|r| r.track == t);
-    let keep = app.external_measure.outcome.as_ref().is_some_and(|o| o.track == t && o.keep.is_some());
     let button = |ui: &mut Ui, r: Rect, salt: &str, label: &str, enabled: bool| {
-        let resp = ui.interact(r.intersect(lane), ui.id().with((salt, t.0)), Sense::click());
+        let resp = ui.interact(r.intersect(clip), ui.id().with((salt, t.0)), Sense::click());
         let fill = if resp.hovered() && enabled { TOKENS.button_hover } else { TOKENS.button };
         pc.rect_filled(r, crate::theme::RADIUS, fill);
         let ink = if enabled { TOKENS.text } else { TOKENS.text_dim.gamma_multiply(0.6) };
-        pc.with_clip_rect(r.intersect(lane)).text(r.center(), Align2::CENTER_CENTER, label, font.clone(), ink);
+        pc.with_clip_rect(r.intersect(clip)).text(r.center(), Align2::CENTER_CENTER, label, font.clone(), ink);
         resp
     };
+    let rb = rows.measure;
     if running {
         let progress = app.external_measure_progress().map(crate::external_measure::progress_text).unwrap_or_default();
-        let cancel = Rect::from_min_max(pos2(rb.max.x - 52.0, rb.min.y), rb.max);
-        pc.with_clip_rect(rb.intersect(lane)).text(pos2(rb.min.x, rb.center().y), Align2::LEFT_CENTER, &progress, font.clone(), TOKENS.text);
-        let resp = button(ui, cancel, "ext_cancel", "Cancel", true).on_hover_text("Stop measuring: the note is released and nothing is stored");
-        c.external_measure = crate::arrange::r4(cancel);
+        let resp = button(ui, rb, "ext_cancel", "Cancel", true).on_hover_text("Stop measuring: the note is released and nothing is stored");
+        c.external_measure = crate::arrange::r4(rb);
         c.external_measure_text = progress;
         if resp.clicked() {
             app.cancel_external_measure(crate::external_measure::CANCELLED);
         }
         return;
     }
-    let blocked = app.external_measure_blocker(t);
-    let measure = if keep { Rect::from_min_max(rb.min, pos2(rb.max.x - 48.0, rb.max.y)) } else { rb };
+    let blocked = if set { app.external_measure_blocker(t) } else { Some(CHOOSE_FIRST.to_string()) };
     let label = if app.external_measure.outcome.as_ref().is_some_and(|o| o.track == t) { "Measure again" } else { "Measure" };
-    let resp = button(ui, measure, "ext_measure", label, blocked.is_none());
+    let resp = button(ui, rb, "ext_measure", label, blocked.is_none());
     let resp =
         resp.on_hover_text(blocked.clone().unwrap_or_else(|| {
             "Play a warm-up note and 8 notes (C4, velocity 100) to the synth and time their sound on the return: about 13 s".into()
         }));
-    c.external_measure = crate::arrange::r4(measure);
+    c.external_measure = crate::arrange::r4(rb);
     c.external_measure_text = label.into();
     c.external_measure_blocked = blocked.clone().unwrap_or_default();
     if resp.clicked() {
@@ -298,14 +412,6 @@ fn measure_row(app: &mut StudioApp, ui: &mut Ui, pc: &egui::Painter, lane: Rect,
                     app.status = why;
                 }
             }
-        }
-    }
-    if keep {
-        let kr = Rect::from_min_max(pos2(rb.max.x - 44.0, rb.min.y), rb.max);
-        let resp = button(ui, kr, "ext_keep", "Keep", true).on_hover_text("Store this measurement although its spread is high");
-        c.external_keep = crate::arrange::r4(kr);
-        if resp.clicked() {
-            let _ = app.keep_external_measure(t);
         }
     }
 }
