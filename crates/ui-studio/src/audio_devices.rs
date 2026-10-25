@@ -85,6 +85,8 @@ pub struct AudioDevicesLayout {
     pub hardware: crate::audio_devices_io::HardwareLayout,
     /// The pending-change line next to Apply (the window's choices differ from the running ones).
     pub pending: Option<String>,
+    /// The section shown (`section_system`, `section_io`, `section_hardware`).
+    pub section: String,
     /// Apply is drawn highlighted (something is pending).
     pub apply_highlighted: bool,
 }
@@ -1045,6 +1047,55 @@ fn choose_backend(ui: &mut egui::Ui, enabled: bool, value: &mut Backend, options
     (r.inner.response.rect, text)
 }
 
+/// The width of the sidebar listing the window's sections.
+const SIDEBAR_WIDTH: f32 = 130.0;
+
+/// The window's sections, one visible at a time (Ableton's Preferences shape: a category list on
+/// the left). The status lines and the Apply row below stay visible in every one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Section {
+    /// The audio system, backend, devices, rate and buffer size.
+    #[default]
+    System,
+    /// This machine's named paths over the open device's channels.
+    IoPaths,
+    /// Hardware inserts and their measured latency.
+    Hardware,
+}
+
+impl Section {
+    pub const ALL: [Section; 3] = [Section::System, Section::IoPaths, Section::Hardware];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Section::System => "System",
+            Section::IoPaths => "I/O paths",
+            Section::Hardware => "Hardware inserts",
+        }
+    }
+
+    /// The name saved in `ui.json` and the control key in `ui.inspect`.
+    pub const fn key(self) -> &'static str {
+        match self {
+            Section::System => "section_system",
+            Section::IoPaths => "section_io",
+            Section::Hardware => "section_hardware",
+        }
+    }
+
+    /// The section saved under `key` (the default for anything else).
+    pub fn from_key(key: &str) -> Section {
+        Self::ALL.into_iter().find(|s| s.key() == key).unwrap_or_default()
+    }
+
+    /// The section `by` steps along (wrapping): Ctrl+Tab is 1, Ctrl+Shift+Tab is -1.
+    pub fn cycled(self, by: i32) -> Section {
+        let n = Self::ALL.len() as i32;
+        let at = Self::ALL.iter().position(|s| *s == self).unwrap_or(0) as i32;
+        Self::ALL[(at + by).rem_euclid(n) as usize]
+    }
+}
+
 /// Audio › Audio Devices.
 pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     check(app);
@@ -1111,286 +1162,397 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let mut cal_action = None;
     let rate = app.engine.session().sample_rate.hz();
     let mut open = true;
+    // Ctrl+Tab and Ctrl+Shift+Tab (Cmd on macOS) cycle the sections.
+    let mut section = Section::from_key(&app.ui.audio_devices_section);
+    let cycle = ctx.input_mut(|i| {
+        use egui::{Key, KeyboardShortcut, Modifiers};
+        if i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND | Modifiers::SHIFT, Key::Tab)) {
+            -1
+        } else if i.consume_shortcut(&KeyboardShortcut::new(Modifiers::COMMAND, Key::Tab)) {
+            1
+        } else {
+            0
+        }
+    });
+    if cycle != 0 {
+        section = section.cycled(cycle);
+    }
     let r = egui::Window::new("Audio Devices")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .default_pos(ctx.content_rect().center() - egui::vec2(260.0, 320.0))
         .show(ctx, |ui| {
-            ui.set_width(520.0);
             let sys = pick_system(&systems, draft.system.as_deref());
             let asio = sys.is_some_and(|s| s.name == devices::ASIO_SYSTEM);
             let mut controls = Vec::new();
-            egui::Grid::new("audio_devices_grid").num_columns(2).spacing([2.0 * SPACE, SPACE]).show(ui, |ui| {
-                let label = |ui: &mut egui::Ui, t: &str| ui.label(egui::RichText::new(t).color(TOKENS.text_dim));
-                label(ui, "Audio system");
-                let names: Vec<(String, String)> = systems.iter().map(|s| (s.name.clone(), s.name.clone())).collect();
-                let before = draft.system.clone();
-                let (rect, text) = choose(ui, "system", audio_on, &mut draft.system, &names, &mut lay.items);
-                if draft.system != before {
-                    // Devices belong to their system, and so does a native backend.
-                    (draft.output, draft.input, draft.input_pairing) = (None, None, None);
-                    if draft.backend.is_native() && !draft.backend.native_on(draft.system.as_deref()) {
-                        draft.backend = Backend::Auto;
+            let size = egui::vec2((ctx.content_rect().width() - 40.0).clamp(480.0, 780.0), (ctx.content_rect().height() - 110.0).clamp(360.0, 640.0));
+            ui.allocate_ui_with_layout(size, egui::Layout::bottom_up(egui::Align::Min), |ui| {
+                ui.set_width(size.x);
+                let pending = pending_text(&draft, &app.ui.audio);
+                ui.horizontal(|ui| {
+                    let mut apply_button = egui::Button::new("Apply");
+                    if pending.is_some() {
+                        apply_button = apply_button.fill(TOKENS.accent);
                     }
-                }
-                controls.push((text, "system", rect));
-                ui.end_row();
-
-                // Offered only where it can apply: a build with the native backend of this system
-                // (WASAPI or ASIO).
-                if devices::native_offered(draft.system.as_deref()) {
-                    label(ui, "Backend");
-                    let options = Backend::offered(draft.system.as_deref());
-                    let (rect, text) = choose_backend(ui, audio_on, &mut draft.backend, &options, &mut lay.items);
-                    controls.push((text, "backend", rect));
-                    ui.end_row();
-                    if draft.backend == Backend::NativeWasapi && devices::native_wasapi_offered(draft.system.as_deref()) {
-                        ui.label("");
-                        let mut exclusive = !draft.share_device;
-                        let b = ui.add_enabled(audio_on, egui::Checkbox::new(&mut exclusive, SHARE_LABEL));
-                        draft.share_device = !exclusive;
-                        controls.push((SHARE_LABEL.into(), "share_device", b.rect));
-                        ui.end_row();
-                        ui.label("");
-                        ui.label(egui::RichText::new(share_hint(draft.share_device)).color(TOKENS.text_dim).size(11.0));
-                        ui.end_row();
+                    let b = ui.add_enabled(!recording && !panel_open, apply_button);
+                    controls.push(("Apply".into(), "apply", b.rect));
+                    apply = b
+                        .on_hover_text("Reopen the devices with these choices. Playback stops first.")
+                        .on_disabled_hover_text(if panel_open { PANEL_OPEN_FIRST } else { REFUSED_RECORDING })
+                        .clicked();
+                    let b = ui.add_enabled(pending.is_some(), egui::Button::new("Revert"));
+                    controls.push(("Revert".into(), "revert", b.rect));
+                    revert = b.on_hover_text("Discard these changes (Esc).").clicked();
+                    let b = ui.add_enabled(!recording && audio_on && !panel_open, egui::Button::new("Reconnect"));
+                    controls.push(("Reconnect".into(), "reconnect", b.rect));
+                    reconnect = b
+                        .on_hover_text("Reopen the saved devices (after plugging one back in).")
+                        .on_disabled_hover_text(if panel_open { PANEL_OPEN_FIRST } else { REFUSED_RECORDING })
+                        .clicked();
+                    let b = ui.add_enabled(audio_on && !panel_open, egui::Button::new("Rescan Devices"));
+                    controls.push(("Rescan Devices".into(), "rescan", b.rect));
+                    rescan = b.on_disabled_hover_text(PANEL_OPEN_FIRST).clicked();
+                    if let Some(driver) = app.running_native_asio() {
+                        let b = ui.add_enabled(!panel_open, egui::Button::new(DRIVER_SETTINGS));
+                        controls.push((DRIVER_SETTINGS.into(), "panel", b.rect));
+                        if b.on_hover_text("The open ASIO driver's own settings (buffer size, clock). Reconnect afterwards.")
+                            .on_disabled_hover_text(PANEL_OPEN_FIRST)
+                            .clicked()
+                        {
+                            native_panel = Some(driver);
+                        }
                     }
-                }
-
-                label(ui, "Output");
-                let outs: Vec<(String, String)> =
-                    sys.map(|s| s.outputs.iter().map(|d| (d.name.clone(), device_label(d))).collect()).unwrap_or_default();
-                let (rect, text) = choose(ui, "output", audio_on, &mut draft.output, &outs, &mut lay.items);
-                controls.push((text, "output", rect));
-                ui.end_row();
-                // Only the selected driver's own diagnostic is said under the list (a driver that
-                // failed to load or open, with why); the others show nothing.
-                let selected_output =
-                    draft.output.clone().or_else(|| sys.and_then(|s| s.outputs.iter().find(|d| d.is_default)).map(|d| d.name.clone()));
-                let selected_problem = selected_output
-                    .as_deref()
-                    .and_then(|name| sys.and_then(|s| s.diagnostics.iter().find(|p| p.strip_prefix(name).is_some_and(|r| r.starts_with(": ")))));
-                if asio && let Some(text) = &asio_listing {
-                    ui.label("");
-                    let shown = ui.label(egui::RichText::new(text).color(TOKENS.text_dim).size(11.0));
-                    controls.push((text.clone(), "listing", shown.rect));
-                    lay.listing = Some(text.clone());
-                    ui.end_row();
-                }
-                if let Some(problem) = selected_problem {
-                    ui.label("");
-                    let line = short_problem(problem);
-                    let shown = ui.add(egui::Label::new(egui::RichText::new(&line).color(TOKENS.text_dim).size(11.0)).wrap());
-                    let shown = shown.on_hover_text(problem);
-                    controls.push((line.clone(), "diagnostic", shown.rect));
-                    lay.diagnostics.push(line);
-                    ui.end_row();
-                }
-
-                // The chosen output (the system's default output otherwise): its rates and buffers
-                // are offered, and its name keys a calibration.
-                let dev = sys.and_then(|s| {
-                    let named = draft.output.as_deref().and_then(|w| s.outputs.iter().find(|d| d.name == w));
-                    named.or_else(|| s.outputs.iter().find(|d| d.is_default))
                 });
-                let native = devices::native_wasapi_offered(draft.system.as_deref()) && draft.backend == Backend::NativeWasapi;
-                let native_asio = devices::native_asio_offered(draft.system.as_deref()) && draft.backend == Backend::NativeAsio;
-                label(ui, "Input");
-                let ins: Vec<(String, String)> =
-                    sys.map(|s| s.inputs.iter().map(|d| (d.name.clone(), device_label(d))).collect()).unwrap_or_default();
-                let (rect, text) = choose(ui, "input", audio_on && !asio, &mut draft.input, &ins, &mut lay.items);
-                controls.push((text, "input", rect));
-                ui.end_row();
-                if asio {
-                    ui.label("");
-                    ui.label(egui::RichText::new("On ASIO the input is the output's device.").color(TOKENS.text_dim).size(11.0));
-                    ui.end_row();
+                if let Some(text) = &pending {
+                    let shown = ui.label(egui::RichText::new(text).color(TOKENS.text).size(11.5));
+                    controls.push((text.clone(), "pending", shown.rect));
+                    lay.pending = Some(text.clone());
+                    lay.apply_highlighted = true;
                 }
-
-                // The native backend pairs the output with a capture endpoint for recording, and a
-                // loopback calibration belongs to that pair.
-                if native {
-                    label(ui, "Paired input");
-                    let (rect, text) = choose_or(ui, "paired_input", audio_on, &mut draft.input_pairing, &ins, &mut lay.items, PAIRED_AUTOMATIC);
-                    controls.push((text, "paired_input", rect));
-                    ui.end_row();
-                    label(ui, "Calibration");
-                    let rate = draft.sample_rate.or(app.player.as_ref().map(|p| p.device_rate)).unwrap_or(48_000);
-                    let device = dev.map(|d| d.name.as_str()).or(app.player.as_ref().map(|p| p.device_name.as_str())).unwrap_or_default();
-                    let open_pair =
-                        app.player.as_ref().filter(|p| p.device_name.eq_ignore_ascii_case(device)).and_then(|p| p.paired_input.as_deref());
-                    let paired = open_pair.or_else(|| app.recorder.as_ref().map(|r| r.device_name.as_str()));
-                    let line = calibration_line(&draft, device, paired, rate, &settings_path(app));
-                    // The bench command is long: wrap it inside the panel, with a Copy button for it.
-                    ui.vertical(|ui| {
-                        ui.set_max_width(ui.available_width());
-                        let text = egui::RichText::new(&line).color(TOKENS.text_dim).size(11.5);
-                        let shown = ui.add(egui::Label::new(text).wrap());
-                        controls.push((line.clone(), "calibration_text", shown.rect));
-                        if let Some(command) = calibration_command(&line) {
-                            let copy = ui.small_button("Copy").on_hover_text("Copy the command to the clipboard");
-                            if copy.clicked() {
-                                ui.ctx().copy_text(command.to_string());
-                            }
-                            controls.push(("Copy".into(), "calibration_copy", copy.rect));
+                lay.opened = opened_lines(app, ui.input(|i| i.time));
+                // The diagnostics sit in an inset card: the open devices, the backend figures (monospace) and the notes.
+                egui::Frame::NONE
+                    .fill(TOKENS.bg)
+                    .corner_radius(egui::CornerRadius::same(crate::theme::RADIUS as u8))
+                    .inner_margin(egui::Margin::same(8))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        for line in &lay.opened {
+                            let text = egui::RichText::new(line).color(TOKENS.text_dim).size(11.5);
+                            ui.label(if line.starts_with("Backend") { text.monospace() } else { text });
+                        }
+                        if !audio_on {
+                            ui.label(
+                                egui::RichText::new("Audio is off in this run (--no-audio): choices are saved and open at the next start.")
+                                    .color(TOKENS.text_dim)
+                                    .size(11.5),
+                            );
+                        }
+                        for n in &app.audio_devices.notes {
+                            ui.horizontal(|ui| {
+                                let (r, _) = ui.allocate_exact_size(egui::vec2(icons::ICON, icons::ICON), egui::Sense::hover());
+                                icons::paint(ui.painter(), r.center(), Icon::Warning, 14.0, TOKENS.record);
+                                ui.label(egui::RichText::new(n).color(TOKENS.text).size(11.5));
+                            });
                         }
                     });
-                    lay.calibration = Some(line);
-                    ui.end_row();
+                if recording {
+                    ui.label(egui::RichText::new(REFUSED_RECORDING).color(TOKENS.record).size(11.5));
                 }
-                // Native ASIO: the input is the driver's own, so there is no pairing; a calibration
-                // is the driver's (mode `asio`), measured here through a loop cable.
-                if native_asio {
-                    label(ui, "Calibration");
-                    let driver = dev.map(|d| d.name.as_str()).or(app.player.as_ref().map(|p| p.device_name.as_str())).unwrap_or_default();
-                    // The buffer and rate the open driver runs, when the window's choices are the open ones.
-                    let running = app
-                        .player
-                        .as_ref()
-                        .filter(|p| !p.silent && p.device_name.eq_ignore_ascii_case(driver) && app.draft_is_open(&draft))
-                        .and_then(|p| p.calibration_key.as_ref())
-                        .map(|k| (k.period, k.rate));
-                    let line = asio_calibration_line(&draft, driver, running);
-                    ui.vertical(|ui| {
-                        ui.set_max_width(ui.available_width());
-                        let shown = ui.add(egui::Label::new(egui::RichText::new(&line).color(TOKENS.text_dim).size(11.5)).wrap());
-                        controls.push((line.clone(), "calibration_text", shown.rect));
-                        let (measure, drawn) = calibration_measure(
-                            ui,
-                            &io,
-                            (&draft, &mut cal_send, &mut cal_ret),
-                            cal_blocker,
-                            cal_progress,
-                            &cal_result,
-                            (&mut controls, &mut lay.items),
-                        );
-                        cal_action = measure;
-                        lay.calibration_measure = drawn;
-                    });
-                    lay.calibration = Some(line);
-                    ui.end_row();
-                }
-
-                // An ASIO driver is described only while it is open: any other shows the standard
-                // choices, marked, until Apply opens it.
-                let stale = asio && dev.is_some_and(|d| d.max_channels == 0);
-                label(ui, "Sample rate");
-                let rates: Vec<(u32, String)> =
-                    dev.map_or(devices::STANDARD_RATES.to_vec(), |d| d.sample_rates.clone()).into_iter().map(|r| (r, format!("{r} Hz"))).collect();
-                let (rect, text) = choose(ui, "rate", audio_on, &mut draft.sample_rate, &rates, &mut lay.items);
-                controls.push((text, "rate", rect));
-                ui.end_row();
-                if stale {
-                    ui.label("");
-                    let shown = ui.label(egui::RichText::new(STALE_NOTE).color(TOKENS.text_dim).size(11.0));
-                    controls.push((STALE_NOTE.into(), "stale_rate", shown.rect));
-                    ui.end_row();
-                }
-
-                label(ui, "Buffer size");
-                let sizes = dev.map_or(devices::STANDARD_BUFFERS.to_vec(), DeviceInfo::buffer_sizes);
-                // The size the open device runs is marked in its own list.
-                let running_buffer = app
-                    .player
-                    .as_ref()
-                    .filter(|p| !p.silent && dev.is_some_and(|d| d.name.eq_ignore_ascii_case(&p.device_name)))
-                    .and_then(|p| p.device_buffer);
-                let bufs: Vec<(u32, String)> = sizes
-                    .into_iter()
-                    .map(|b| (b, if running_buffer == Some(b) { format!("{b} samples \u{b7} running") } else { format!("{b} samples") }))
-                    .collect();
-                let (rect, text) = choose(ui, "buffer", audio_on, &mut draft.buffer_size, &bufs, &mut lay.items);
-                controls.push((text, "buffer", rect));
-                ui.end_row();
-                if stale {
-                    ui.label("");
-                    let shown = ui.label(egui::RichText::new(STALE_NOTE).color(TOKENS.text_dim).size(11.0));
-                    controls.push((STALE_NOTE.into(), "stale_buffer", shown.rect));
-                    ui.end_row();
-                }
-            });
-            ui.add_space(SPACE);
-            lay.opened = opened_lines(app, ui.input(|i| i.time));
-            // The diagnostics sit in an inset card: the open devices, the backend figures (monospace) and the notes.
-            egui::Frame::NONE
-                .fill(TOKENS.bg)
-                .corner_radius(egui::CornerRadius::same(crate::theme::RADIUS as u8))
-                .inner_margin(egui::Margin::same(8))
-                .show(ui, |ui| {
-                    ui.set_width(ui.available_width());
-                    for line in &lay.opened {
-                        let text = egui::RichText::new(line).color(TOKENS.text_dim).size(11.5);
-                        ui.label(if line.starts_with("Backend") { text.monospace() } else { text });
-                    }
-                    if !audio_on {
-                        ui.label(
-                            egui::RichText::new("Audio is off in this run (--no-audio): choices are saved and open at the next start.")
-                                .color(TOKENS.text_dim)
-                                .size(11.5),
-                        );
-                    }
-                    for n in &app.audio_devices.notes {
-                        ui.horizontal(|ui| {
-                            let (r, _) = ui.allocate_exact_size(egui::vec2(icons::ICON, icons::ICON), egui::Sense::hover());
-                            icons::paint(ui.painter(), r.center(), Icon::Warning, 14.0, TOKENS.record);
-                            ui.label(egui::RichText::new(n).color(TOKENS.text).size(11.5));
+                ui.separator();
+                let body = egui::vec2(size.x, ui.available_height());
+                ui.allocate_ui_with_layout(body, egui::Layout::top_down(egui::Align::Min), |ui| {
+                    ui.horizontal_top(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width(SIDEBAR_WIDTH);
+                            for s in Section::ALL {
+                                let b = ui.selectable_label(section == s, s.label());
+                                controls.push((s.label().into(), s.key(), b.rect));
+                                if b.clicked() {
+                                    section = s;
+                                }
+                            }
                         });
-                    }
+                        ui.separator();
+                        egui::ScrollArea::vertical()
+                            .id_salt(("audio_devices_section", section.key()))
+                            .max_height(body.y)
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                // A scroll area takes its parent's layout (here a row): the section is a column.
+                                ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
+                                    ui.set_width(size.x - SIDEBAR_WIDTH - 32.0);
+                                    match section {
+                                        Section::System => {
+                                            egui::Grid::new("audio_devices_grid").num_columns(2).spacing([2.0 * SPACE, SPACE]).show(ui, |ui| {
+                                                let label = |ui: &mut egui::Ui, t: &str| ui.label(egui::RichText::new(t).color(TOKENS.text_dim));
+                                                label(ui, "Audio system");
+                                                let names: Vec<(String, String)> = systems.iter().map(|s| (s.name.clone(), s.name.clone())).collect();
+                                                let before = draft.system.clone();
+                                                let (rect, text) = choose(ui, "system", audio_on, &mut draft.system, &names, &mut lay.items);
+                                                if draft.system != before {
+                                                    // Devices belong to their system, and so does a native backend.
+                                                    (draft.output, draft.input, draft.input_pairing) = (None, None, None);
+                                                    if draft.backend.is_native() && !draft.backend.native_on(draft.system.as_deref()) {
+                                                        draft.backend = Backend::Auto;
+                                                    }
+                                                }
+                                                controls.push((text, "system", rect));
+                                                ui.end_row();
+
+                                                // Offered only where it can apply: a build with the native backend of this system
+                                                // (WASAPI or ASIO).
+                                                if devices::native_offered(draft.system.as_deref()) {
+                                                    label(ui, "Backend");
+                                                    let options = Backend::offered(draft.system.as_deref());
+                                                    let (rect, text) = choose_backend(ui, audio_on, &mut draft.backend, &options, &mut lay.items);
+                                                    controls.push((text, "backend", rect));
+                                                    ui.end_row();
+                                                    if draft.backend == Backend::NativeWasapi
+                                                        && devices::native_wasapi_offered(draft.system.as_deref())
+                                                    {
+                                                        ui.label("");
+                                                        let mut exclusive = !draft.share_device;
+                                                        let b = ui.add_enabled(audio_on, egui::Checkbox::new(&mut exclusive, SHARE_LABEL));
+                                                        draft.share_device = !exclusive;
+                                                        controls.push((SHARE_LABEL.into(), "share_device", b.rect));
+                                                        ui.end_row();
+                                                        ui.label("");
+                                                        ui.label(
+                                                            egui::RichText::new(share_hint(draft.share_device)).color(TOKENS.text_dim).size(11.0),
+                                                        );
+                                                        ui.end_row();
+                                                    }
+                                                }
+
+                                                label(ui, "Output");
+                                                let outs: Vec<(String, String)> = sys
+                                                    .map(|s| s.outputs.iter().map(|d| (d.name.clone(), device_label(d))).collect())
+                                                    .unwrap_or_default();
+                                                let (rect, text) = choose(ui, "output", audio_on, &mut draft.output, &outs, &mut lay.items);
+                                                controls.push((text, "output", rect));
+                                                ui.end_row();
+                                                // Only the selected driver's own diagnostic is said under the list (a driver that
+                                                // failed to load or open, with why); the others show nothing.
+                                                let selected_output = draft
+                                                    .output
+                                                    .clone()
+                                                    .or_else(|| sys.and_then(|s| s.outputs.iter().find(|d| d.is_default)).map(|d| d.name.clone()));
+                                                let selected_problem = selected_output.as_deref().and_then(|name| {
+                                                    sys.and_then(|s| {
+                                                        s.diagnostics.iter().find(|p| p.strip_prefix(name).is_some_and(|r| r.starts_with(": ")))
+                                                    })
+                                                });
+                                                if asio && let Some(text) = &asio_listing {
+                                                    ui.label("");
+                                                    let shown = ui.label(egui::RichText::new(text).color(TOKENS.text_dim).size(11.0));
+                                                    controls.push((text.clone(), "listing", shown.rect));
+                                                    lay.listing = Some(text.clone());
+                                                    ui.end_row();
+                                                }
+                                                if let Some(problem) = selected_problem {
+                                                    ui.label("");
+                                                    let line = short_problem(problem);
+                                                    let shown =
+                                                        ui.add(egui::Label::new(egui::RichText::new(&line).color(TOKENS.text_dim).size(11.0)).wrap());
+                                                    let shown = shown.on_hover_text(problem);
+                                                    controls.push((line.clone(), "diagnostic", shown.rect));
+                                                    lay.diagnostics.push(line);
+                                                    ui.end_row();
+                                                }
+
+                                                // The chosen output (the system's default output otherwise): its rates and buffers
+                                                // are offered, and its name keys a calibration.
+                                                let dev = sys.and_then(|s| {
+                                                    let named = draft.output.as_deref().and_then(|w| s.outputs.iter().find(|d| d.name == w));
+                                                    named.or_else(|| s.outputs.iter().find(|d| d.is_default))
+                                                });
+                                                let native =
+                                                    devices::native_wasapi_offered(draft.system.as_deref()) && draft.backend == Backend::NativeWasapi;
+                                                let native_asio =
+                                                    devices::native_asio_offered(draft.system.as_deref()) && draft.backend == Backend::NativeAsio;
+                                                label(ui, "Input");
+                                                let ins: Vec<(String, String)> = sys
+                                                    .map(|s| s.inputs.iter().map(|d| (d.name.clone(), device_label(d))).collect())
+                                                    .unwrap_or_default();
+                                                let (rect, text) = choose(ui, "input", audio_on && !asio, &mut draft.input, &ins, &mut lay.items);
+                                                controls.push((text, "input", rect));
+                                                ui.end_row();
+                                                if asio {
+                                                    ui.label("");
+                                                    ui.label(
+                                                        egui::RichText::new("On ASIO the input is the output's device.")
+                                                            .color(TOKENS.text_dim)
+                                                            .size(11.0),
+                                                    );
+                                                    ui.end_row();
+                                                }
+
+                                                // The native backend pairs the output with a capture endpoint for recording, and a
+                                                // loopback calibration belongs to that pair.
+                                                if native {
+                                                    label(ui, "Paired input");
+                                                    let (rect, text) = choose_or(
+                                                        ui,
+                                                        "paired_input",
+                                                        audio_on,
+                                                        &mut draft.input_pairing,
+                                                        &ins,
+                                                        &mut lay.items,
+                                                        PAIRED_AUTOMATIC,
+                                                    );
+                                                    controls.push((text, "paired_input", rect));
+                                                    ui.end_row();
+                                                    label(ui, "Calibration");
+                                                    let rate = draft.sample_rate.or(app.player.as_ref().map(|p| p.device_rate)).unwrap_or(48_000);
+                                                    let device = dev
+                                                        .map(|d| d.name.as_str())
+                                                        .or(app.player.as_ref().map(|p| p.device_name.as_str()))
+                                                        .unwrap_or_default();
+                                                    let open_pair = app
+                                                        .player
+                                                        .as_ref()
+                                                        .filter(|p| p.device_name.eq_ignore_ascii_case(device))
+                                                        .and_then(|p| p.paired_input.as_deref());
+                                                    let paired = open_pair.or_else(|| app.recorder.as_ref().map(|r| r.device_name.as_str()));
+                                                    let line = calibration_line(&draft, device, paired, rate, &settings_path(app));
+                                                    // The bench command is long: wrap it inside the panel, with a Copy button for it.
+                                                    ui.vertical(|ui| {
+                                                        ui.set_max_width(ui.available_width());
+                                                        let text = egui::RichText::new(&line).color(TOKENS.text_dim).size(11.5);
+                                                        let shown = ui.add(egui::Label::new(text).wrap());
+                                                        controls.push((line.clone(), "calibration_text", shown.rect));
+                                                        if let Some(command) = calibration_command(&line) {
+                                                            let copy = ui.small_button("Copy").on_hover_text("Copy the command to the clipboard");
+                                                            if copy.clicked() {
+                                                                ui.ctx().copy_text(command.to_string());
+                                                            }
+                                                            controls.push(("Copy".into(), "calibration_copy", copy.rect));
+                                                        }
+                                                    });
+                                                    lay.calibration = Some(line);
+                                                    ui.end_row();
+                                                }
+                                                // Native ASIO: the input is the driver's own, so there is no pairing; a calibration
+                                                // is the driver's (mode `asio`), measured here through a loop cable.
+                                                if native_asio {
+                                                    label(ui, "Calibration");
+                                                    let driver = dev
+                                                        .map(|d| d.name.as_str())
+                                                        .or(app.player.as_ref().map(|p| p.device_name.as_str()))
+                                                        .unwrap_or_default();
+                                                    // The buffer and rate the open driver runs, when the window's choices are the open ones.
+                                                    let running = app
+                                                        .player
+                                                        .as_ref()
+                                                        .filter(|p| {
+                                                            !p.silent && p.device_name.eq_ignore_ascii_case(driver) && app.draft_is_open(&draft)
+                                                        })
+                                                        .and_then(|p| p.calibration_key.as_ref())
+                                                        .map(|k| (k.period, k.rate));
+                                                    let line = asio_calibration_line(&draft, driver, running);
+                                                    ui.vertical(|ui| {
+                                                        ui.set_max_width(ui.available_width());
+                                                        let shown = ui.add(
+                                                            egui::Label::new(egui::RichText::new(&line).color(TOKENS.text_dim).size(11.5)).wrap(),
+                                                        );
+                                                        controls.push((line.clone(), "calibration_text", shown.rect));
+                                                        let (measure, drawn) = calibration_measure(
+                                                            ui,
+                                                            &io,
+                                                            (&draft, &mut cal_send, &mut cal_ret),
+                                                            cal_blocker,
+                                                            cal_progress,
+                                                            &cal_result,
+                                                            (&mut controls, &mut lay.items),
+                                                        );
+                                                        cal_action = measure;
+                                                        lay.calibration_measure = drawn;
+                                                    });
+                                                    lay.calibration = Some(line);
+                                                    ui.end_row();
+                                                }
+
+                                                // An ASIO driver is described only while it is open: any other shows the standard
+                                                // choices, marked, until Apply opens it.
+                                                let stale = asio && dev.is_some_and(|d| d.max_channels == 0);
+                                                label(ui, "Sample rate");
+                                                let rates: Vec<(u32, String)> = dev
+                                                    .map_or(devices::STANDARD_RATES.to_vec(), |d| d.sample_rates.clone())
+                                                    .into_iter()
+                                                    .map(|r| (r, format!("{r} Hz")))
+                                                    .collect();
+                                                let (rect, text) = choose(ui, "rate", audio_on, &mut draft.sample_rate, &rates, &mut lay.items);
+                                                controls.push((text, "rate", rect));
+                                                ui.end_row();
+                                                if stale {
+                                                    ui.label("");
+                                                    let shown = ui.label(egui::RichText::new(STALE_NOTE).color(TOKENS.text_dim).size(11.0));
+                                                    controls.push((STALE_NOTE.into(), "stale_rate", shown.rect));
+                                                    ui.end_row();
+                                                }
+
+                                                label(ui, "Buffer size");
+                                                let sizes = dev.map_or(devices::STANDARD_BUFFERS.to_vec(), DeviceInfo::buffer_sizes);
+                                                // The size the open device runs is marked in its own list.
+                                                let running_buffer = app
+                                                    .player
+                                                    .as_ref()
+                                                    .filter(|p| !p.silent && dev.is_some_and(|d| d.name.eq_ignore_ascii_case(&p.device_name)))
+                                                    .and_then(|p| p.device_buffer);
+                                                let bufs: Vec<(u32, String)> = sizes
+                                                    .into_iter()
+                                                    .map(|b| {
+                                                        (
+                                                            b,
+                                                            if running_buffer == Some(b) {
+                                                                format!("{b} samples \u{b7} running")
+                                                            } else {
+                                                                format!("{b} samples")
+                                                            },
+                                                        )
+                                                    })
+                                                    .collect();
+                                                let (rect, text) = choose(ui, "buffer", audio_on, &mut draft.buffer_size, &bufs, &mut lay.items);
+                                                controls.push((text, "buffer", rect));
+                                                ui.end_row();
+                                                if stale {
+                                                    ui.label("");
+                                                    let shown = ui.label(egui::RichText::new(STALE_NOTE).color(TOKENS.text_dim).size(11.0));
+                                                    controls.push((STALE_NOTE.into(), "stale_buffer", shown.rect));
+                                                    ui.end_row();
+                                                }
+                                            });
+                                        }
+                                        Section::IoPaths => {
+                                            io_edit = crate::audio_devices_io::section(ui, &io, wasapi, &channel_names, &mut editor, &mut io_items);
+                                        }
+                                        Section::Hardware => {
+                                            (hw_action, hw_layout) = crate::audio_devices_io::hardware_section(
+                                                ui,
+                                                &io,
+                                                rate,
+                                                blocker,
+                                                progress,
+                                                &mut editor,
+                                                &mut io_items,
+                                            );
+                                        }
+                                    }
+                                });
+                            });
+                    });
                 });
-            if recording {
-                ui.label(egui::RichText::new(REFUSED_RECORDING).color(TOKENS.record).size(11.5));
-            }
-            io_edit = crate::audio_devices_io::section(ui, &io, wasapi, &channel_names, &mut editor, &mut io_items);
-            (hw_action, hw_layout) = crate::audio_devices_io::hardware_section(ui, &io, rate, blocker, progress, &mut editor, &mut io_items);
-            ui.add_space(SPACE);
-            let pending = pending_text(&draft, &app.ui.audio);
-            ui.horizontal(|ui| {
-                let mut apply_button = egui::Button::new("Apply");
-                if pending.is_some() {
-                    apply_button = apply_button.fill(TOKENS.accent);
-                }
-                let b = ui.add_enabled(!recording && !panel_open, apply_button);
-                controls.push(("Apply".into(), "apply", b.rect));
-                apply = b
-                    .on_hover_text("Reopen the devices with these choices. Playback stops first.")
-                    .on_disabled_hover_text(if panel_open { PANEL_OPEN_FIRST } else { REFUSED_RECORDING })
-                    .clicked();
-                let b = ui.add_enabled(pending.is_some(), egui::Button::new("Revert"));
-                controls.push(("Revert".into(), "revert", b.rect));
-                revert = b.on_hover_text("Discard these changes (Esc).").clicked();
-                let b = ui.add_enabled(!recording && audio_on && !panel_open, egui::Button::new("Reconnect"));
-                controls.push(("Reconnect".into(), "reconnect", b.rect));
-                reconnect = b
-                    .on_hover_text("Reopen the saved devices (after plugging one back in).")
-                    .on_disabled_hover_text(if panel_open { PANEL_OPEN_FIRST } else { REFUSED_RECORDING })
-                    .clicked();
-                let b = ui.add_enabled(audio_on && !panel_open, egui::Button::new("Rescan Devices"));
-                controls.push(("Rescan Devices".into(), "rescan", b.rect));
-                rescan = b.on_disabled_hover_text(PANEL_OPEN_FIRST).clicked();
-                if let Some(driver) = app.running_native_asio() {
-                    let b = ui.add_enabled(!panel_open, egui::Button::new(DRIVER_SETTINGS));
-                    controls.push((DRIVER_SETTINGS.into(), "panel", b.rect));
-                    if b.on_hover_text("The open ASIO driver's own settings (buffer size, clock). Reconnect afterwards.")
-                        .on_disabled_hover_text(PANEL_OPEN_FIRST)
-                        .clicked()
-                    {
-                        native_panel = Some(driver);
-                    }
-                }
             });
-            if let Some(text) = &pending {
-                let shown = ui.label(egui::RichText::new(text).color(TOKENS.text).size(11.5));
-                controls.push((text.clone(), "pending", shown.rect));
-                lay.pending = Some(text.clone());
-                lay.apply_highlighted = true;
-            }
             lay.controls = controls.into_iter().map(|(text, key, rect)| MenuItem::at(ui, text, key.into(), rect)).collect();
             lay.controls.append(&mut io_items);
         });
     if let Some(r) = r {
         lay.window = r4(r.response.rect);
     }
+    lay.section = section.key().into();
+    app.ui.audio_devices_section = section.key().into();
     lay.io = Some(io);
     lay.hardware = hw_layout;
     lay.draft = draft.clone();

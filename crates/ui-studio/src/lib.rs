@@ -78,6 +78,9 @@ const MAX_IMPORTS_PACE: u32 = 600;
 pub struct UiState {
     /// The audio device choice, kept with the preferences: per machine.
     pub audio: soundcraft_playback::AudioConfig,
+    /// The Audio Devices window's last section (`audio_devices::Section::key`): per machine, in
+    /// `ui.json`, never in the session.
+    pub audio_devices_section: String,
     /// This machine's I/O paths, one table per audio system plus device (ADR 0015).
     pub io_maps: Vec<soundcraft_model::IoMap>,
     /// File > Open Recent: sessions last opened or saved here, most recent first (at most 10).
@@ -178,6 +181,7 @@ impl Default for UiState {
     fn default() -> Self {
         UiState {
             audio: soundcraft_playback::AudioConfig::default(),
+            audio_devices_section: String::new(),
             io_maps: Vec::new(),
             recent_files: Vec::new(),
             plugin_dirs: plugin_scan::PluginDirs::default(),
