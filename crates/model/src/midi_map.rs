@@ -281,9 +281,9 @@ pub fn resolve(tracks: &[TrackId], session: &MappingSet, profile: &MappingSet) -
         for m in set.iter() {
             let Some(track) = track_of(m.target.strip) else { continue };
             let overridden = scope == Scope::Profile
-                && out
-                    .iter()
-                    .any(|s| s.scope == Scope::Session && ((s.track == track && s.control == m.target.control) || s.mapping.source.overlaps(&m.source)));
+                && out.iter().any(|s| {
+                    s.scope == Scope::Session && ((s.track == track && s.control == m.target.control) || s.mapping.source.overlaps(&m.source))
+                });
             out.push(Resolved { scope, mapping: m.clone(), track, control: m.target.control, overridden });
         }
     }

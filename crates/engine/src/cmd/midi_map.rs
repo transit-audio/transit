@@ -34,7 +34,15 @@ pub fn specs() -> Vec<CommandSpec> {
             always,
             map
         ),
-        cmd!("midi.unmap", "Forget MIDI Mapping", [], None, "{target, scope?: session|profile} — without scope the session's mapping goes first, then the profile's", always, unmap),
+        cmd!(
+            "midi.unmap",
+            "Forget MIDI Mapping",
+            [],
+            None,
+            "{target, scope?: session|profile} — without scope the session's mapping goes first, then the profile's",
+            always,
+            unmap
+        ),
         cmd!(query "midi.mappings", "MIDI Mappings", [], None, "{} — session and profile mappings, the one armed to learn, and which are overridden", always, mappings),
     ]
 }
