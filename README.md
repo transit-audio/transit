@@ -198,6 +198,8 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Native ASIO recovers from a driver reset request (the driver changing its buffer size or sample rate) and reopens the device, and its audio thread runs at MMCSS Pro Audio priority.
 - The Calibration Measure button works per driver, sample rate and buffer size, and keeps a result for each combination.
 - Linux: native JACK/PipeWire backend (build with `--features native-jack`; `pw-jack transit` under PipeWire). It plays and records duplex in one server cycle at the server's rate and buffer size, counts the server's xruns, and reopens by itself when the server changes its buffer size or rate or comes back after stopping.
+- Linux packages: from the next release, an `.AppImage`, a `.deb` and an `.rpm` come with the tarball.
+- Audio Devices shows "Requested 128 · running at 256" when the device runs a different buffer size or rate than you asked for.
 
 ### Sessions and rendering
 
