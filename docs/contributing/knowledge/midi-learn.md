@@ -90,6 +90,18 @@ control. Hosted editors draw their own widgets, so the header strip's menu has *
 the plug-in reports to `learn_touched`, the first of this editor's becomes the target and `midi.learn` waits for the CC or note.
 `check_param` refuses a hosted parameter the host registry does not list (hidden, read-only and meter parameters are never listed).
 
+A hosted instrument's parameter goes through `mix.instrument_param` like a hosted insert's through `mix.insert_param` (it took only
+built-in instruments until the fix for K83, so a mapped move of one changed nothing): the session holds the value, the mix hands it to the
+plug-in with `set_param`, and the plug-in host tells the controller (`setParamNormalized`) on its main thread, so the editor's knob follows.
+
+## Diagnosis in the log
+
+At info level, a few lines per change and none per idle frame: a learn armed, learned (`mapped ... to <port> ch <n> CC <n>`) and armed from a
+touched hosted parameter; once the worker has a new list, how many mappings are in force and each one whose port is not open; the first and
+last value of a plug-in parameter sweep, or why its first move was not applied (no table, no such parameter, the command's error); and a
+knob the worker hears while pickup holds it back (`... at 9% waits for pickup at 70% ...`, also in the status line), once until it moves
+its control. The worker counts every message that matches a continuous entry (`Cell::heard`), published or not, for that last line.
+
 ## UI
 
 Right-click a control: unmapped offers *MIDI Learn* (session) and *MIDI Learn for this controller (all

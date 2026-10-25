@@ -32,6 +32,7 @@ soundcraft-clap-host = { workspace = true, features = ["test-hooks"] }
 soundcraft-vst3-host = { workspace = true, features = ["test-hooks"] }
 transit-plugin-host.workspace = true
 transit-audio-backend.workspace = true
+transit-midi-io = { workspace = true, features = ["fake"] }
 
 [lints]
 workspace = true

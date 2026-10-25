@@ -2,7 +2,7 @@
 //! learn, keep the pickup cells current and take the events the worker published.
 
 use super::Player;
-use crate::player::{MapMsg, MapSpec};
+use crate::player::{MapHeard, MapMsg, MapSpec};
 
 impl Player {
     /// Replaces the MIDI Learn mappings the ingress worker matches. The ports they name are
@@ -18,6 +18,18 @@ impl Player {
     /// The epoch of the list last given to [`Player::set_midi_mappings`]; events carry it.
     pub fn midi_map_epoch(&self) -> u32 {
         self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.map_epoch())).unwrap_or(0)
+    }
+
+    /// What the worker heard of each mapping of the list (how many messages matched, the last
+    /// knob value, whether pickup has caught the control), in its order: why a knob moves nothing.
+    pub fn midi_map_heard(&self) -> Vec<MapHeard> {
+        self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.map_heard())).unwrap_or_default()
+    }
+
+    /// Whether each mapping's input port is open for the worker (in the list's order); `None`
+    /// until the worker has the list (or without MIDI).
+    pub fn midi_map_ports_open(&self) -> Option<Vec<bool>> {
+        self.midi.try_borrow().ok().and_then(|m| m.as_ref().and_then(|m| m.map_ports_open()))
     }
 
     /// Arms or disarms MIDI Learn. Armed, every present input port is opened and the worker

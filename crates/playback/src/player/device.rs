@@ -173,6 +173,16 @@ impl Player {
         })
     }
 
+    /// Runs this Player's MIDI side on `io` (a fake backend in caller integration tests) instead of
+    /// the system's MIDI devices.
+    #[cfg(all(feature = "test-hooks", not(target_arch = "wasm32")))]
+    #[doc(hidden)]
+    pub fn enable_midi_for_test(&mut self, io: transit_midi_io::MidiIo) {
+        if let Some(midi) = self.midi.get_mut().as_mut() {
+            midi.enable(io);
+        }
+    }
+
     /// Consume one complete stereo block for device-free caller integration tests.
     #[cfg(feature = "test-hooks")]
     #[doc(hidden)]

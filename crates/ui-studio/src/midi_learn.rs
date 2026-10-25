@@ -70,6 +70,14 @@ pub struct State {
     profile_rev: u64,
     /// The UI time of the last mapped move, while a sweep may still be going.
     last_move: Option<f64>,
+    /// The last plug-in parameter value a sweep applied, logged when the sweep ends.
+    swept: Option<String>,
+    /// Diagnosis (logged on change): each mapping's port open for the worker, as last logged.
+    ports_logged: Option<(u32, Vec<bool>)>,
+    /// How many messages of each mapping the worker had heard at the last frame, and whether a
+    /// knob held back by pickup was reported since it last moved its control.
+    heard: (u32, Vec<u32>),
+    pickup_told: Vec<bool>,
     /// "Learn next touched parameter" waits on this hosted plug-in's editor (track, slot).
     pub(crate) next: Option<(TrackId, usize)>,
     /// The uid of the plug-in `next` was armed for: a swapped plug-in or another session differs.
@@ -454,11 +462,16 @@ impl StudioApp {
         self.midi_learn.all = all;
         self.midi_learn.resolved = active;
         let msgs = self.midi_learn_sync();
+        let moved: Vec<u32> = msgs.1.iter().filter_map(|m| if let MapMsg::Move { index, .. } = m { Some(*index) } else { None }).collect();
         self.midi_learn_apply(msgs, now);
+        self.midi_learn_diagnose(&moved);
         if let Some(t) = self.midi_learn.last_move
             && now - t > GESTURE_END_S
         {
             self.midi_learn.last_move = None;
+            if let Some(what) = self.midi_learn.swept.take() {
+                log::info!("MIDI Learn: sweep ended at {what}");
+            }
             if !crate::automation::passing(self) {
                 self.engine.end_merge();
             }
@@ -471,6 +484,73 @@ impl StudioApp {
         }
         let busy = self.midi_learn.news || self.engine.learn().is_some() || self.midi_learn.last_move.is_some();
         Some(if busy { BUSY_POLL } else { IDLE_POLL })
+    }
+
+    /// Says in the log (and the status line) why a mapped control does not move, a few lines per
+    /// change and never per idle frame: which mappings' ports are open for the worker when that
+    /// changes, and a knob the worker hears but pickup holds back (once until it moves its control).
+    fn midi_learn_diagnose(&mut self, moved: &[u32]) {
+        let Some(player) = &self.player else { return };
+        let heard = player.midi_map_heard();
+        if heard.len() != self.midi_learn.resolved.len() {
+            return;
+        }
+        // Once the worker has this list: a summary line, and each mapping whose port is not open.
+        if let Some(open) = player.midi_map_ports_open().filter(|o| o.len() == heard.len()) {
+            let epoch = player.midi_map_epoch();
+            if self.midi_learn.ports_logged.as_ref() != Some(&(epoch, open.clone())) {
+                let n = open.iter().filter(|o| **o).count();
+                log::info!("MIDI Learn: {} mappings in force, {n} with their port open", open.len());
+                for (r, _) in self.midi_learn.resolved.iter().zip(&open).filter(|(_, o)| !**o) {
+                    log::info!("MIDI Learn: port not open for {} -> track {} {}", r.mapping.source.describe(), r.track.0, r.control.label());
+                }
+                self.midi_learn.ports_logged = Some((epoch, open));
+            }
+        }
+        // A new list starts its counts over.
+        let epoch = player.midi_map_epoch();
+        if self.midi_learn.heard.0 != epoch || self.midi_learn.heard.1.len() != heard.len() {
+            self.midi_learn.heard = (epoch, heard.iter().map(|h| h.count).collect());
+            self.midi_learn.pickup_told = vec![false; heard.len()];
+            return;
+        }
+        let s = self.engine.session();
+        let mut told = None;
+        for (i, h) in heard.iter().enumerate() {
+            let new = self.midi_learn.heard.1.get(i).is_some_and(|c| *c != h.count);
+            if let Some(c) = self.midi_learn.heard.1.get_mut(i) {
+                *c = h.count;
+            }
+            let told_before = self.midi_learn.pickup_told.get(i).copied().unwrap_or(true);
+            if moved.contains(&(i as u32)) {
+                if let Some(t) = self.midi_learn.pickup_told.get_mut(i) {
+                    *t = false;
+                }
+                continue;
+            }
+            if !new || h.engaged || told_before {
+                continue;
+            }
+            let Some(r) = self.midi_learn.resolved.get(i) else { continue };
+            let Some(knob) = h.last else { continue };
+            let at = norm_value(s, r.track, &r.control);
+            let line = format!(
+                "MIDI Learn: {} at {}% waits for pickup at {:.0}% of track {} {} (turn the knob through it, or set the mapping to Jump in Window > MIDI Mappings)",
+                r.mapping.source.describe(),
+                (f32::from(knob) / 1.27).round(),
+                at * 100.0,
+                r.track.0,
+                r.control.label()
+            );
+            log::info!("{line}");
+            if let Some(t) = self.midi_learn.pickup_told.get_mut(i) {
+                *t = true;
+            }
+            told = Some(line);
+        }
+        if let Some(line) = told {
+            self.status = line;
+        }
     }
 
     /// Hand the worker the mappings and the learn flag; take what it published.
@@ -551,10 +631,29 @@ impl StudioApp {
     /// (the taper honored, as a panel knob does), applied through the commands a mouse drag uses
     /// and touched like a drag, so Write, Touch and Latch record it and Read does not. A hosted
     /// editor holds the touch `HOSTED_HOLD_S` after the last value (a controller has no pointer).
+    ///
+    /// A move that cannot be applied says why in the status line and the log, once per sweep (the
+    /// first move of one), as does the first value a sweep applies; its last is logged at its end.
     fn mapped_param_move(&mut self, track: TrackId, slot: u8, param: &str, norm: f32, key: &str) {
-        let Some(ins) = self.plugin_device(track, slot) else { return };
-        let Some(info) = crate::automation::device_info(&ins.plugin) else { return };
-        let Some(p) = info.param(param) else { return };
+        let first = self.midi_learn.last_move.is_none();
+        let control = Control::Plugin { slot, param: param.to_string() };
+        let found = match self.plugin_device(track, slot) {
+            None => Err("the slot has no plug-in".to_string()),
+            Some(ins) => match crate::automation::device_info(&ins.plugin) {
+                None => Err(format!("the parameter list of `{}` is not loaded yet", ins.plugin)),
+                Some(info) => info.param(param).map(|p| (info, p)).ok_or_else(|| format!("`{}` lists no parameter `{param}`", info.id)),
+            },
+        };
+        let (info, p) = match found {
+            Ok(x) => x,
+            Err(why) => {
+                if first {
+                    log::info!("MIDI Learn: track {} {} not applied: {why}", track.0, control.label());
+                    self.status = format!("MIDI Learn: {} not applied: {why}", control.label());
+                }
+                return;
+            }
+        };
         let value = plugin_value(p, norm);
         let slot_key = if slot == AutoParam::INSTRUMENT_SLOT { soundcraft_mix::INSTRUMENT_SLOT } else { usize::from(slot) };
         self.touch_param(track, slot_key, param, true);
@@ -564,8 +663,20 @@ impl StudioApp {
             self.engine.execute_merged("mix.insert_param", &json!({"track": track.0, "slot": slot, "param": param, "value": value}), key)
         };
         crate::automation::note_pass_edit(self);
-        if let Err(e) = r {
-            self.status = e.to_string();
+        let what = format!("track {} {} ({} `{}` id {param}) = {value} (knob {norm:.3})", track.0, control.label(), info.name, p.name);
+        match r {
+            Ok(_) => {
+                if first {
+                    log::info!("MIDI Learn: applied {what}");
+                }
+                self.midi_learn.swept = Some(what);
+            }
+            Err(e) => {
+                if first {
+                    log::info!("MIDI Learn: track {} {} not applied: {e}", track.0, control.label());
+                }
+                self.status = e.to_string();
+            }
         }
     }
 
@@ -582,6 +693,7 @@ impl StudioApp {
         }
         self.midi_learn.next = Some(key);
         self.midi_learn.next_uid = self.plugin_uid(key).unwrap_or(0);
+        log::info!("MIDI Learn: waiting for the next touched parameter of track {} slot {}", key.0.0, key.1);
         self.status = "MIDI Learn: touch a parameter in the plug-in window".into();
     }
 
@@ -602,6 +714,7 @@ impl StudioApp {
             None => Some("That slot has no plug-in".to_string()),
         };
         if let Some(why) = refused {
+            log::info!("MIDI Learn: touched parameter {param} of track {} slot {slot} refused: {why}", track.0);
             self.midi_learn.next = None;
             self.status = why;
             return;
@@ -609,7 +722,10 @@ impl StudioApp {
         self.midi_learn.next = None;
         let Some(target) = target_for(self.engine.session(), track, control.clone(), Scope::Session) else { return };
         match self.run("midi.learn", json!({"target": target.to_string(), "scope": Scope::Session})) {
-            Ok(_) => self.status = format!("MIDI Learn: move a control to map {}", control.label()),
+            Ok(_) => {
+                log::info!("MIDI Learn: armed for {target} (touched in the plug-in window)");
+                self.status = format!("MIDI Learn: move a control to map {}", control.label());
+            }
             Err(e) => self.status = e,
         }
     }
@@ -650,6 +766,13 @@ impl StudioApp {
         }
         match self.run("midi.map", params) {
             Ok(_) => {
+                log::info!(
+                    "MIDI Learn: mapped {} ({:?} scope) to {port} ch {} {} {number}",
+                    arm.target,
+                    arm.scope,
+                    channel + 1,
+                    if kind == SourceKind::Cc { "CC" } else { "note" }
+                );
                 self.status = format!(
                     "Mapped {} to {} ch {} {} {number}",
                     arm.target.control.label(),

@@ -4558,6 +4558,7 @@ dependencies = [
  "soundcraft-time",
  "soundcraft-vst3-host",
  "transit-audio-backend",
+ "transit-midi-io",
  "transit-plugin-host",
 ]
 

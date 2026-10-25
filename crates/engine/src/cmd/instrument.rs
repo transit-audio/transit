@@ -23,7 +23,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Set Instrument Parameter",
             [],
             None,
-            "{track?, param, value, preset?}: one parameter of an instrument track's built-in instrument (clamped into range); `preset` records the recalled preset name",
+            "{track?, param, value, preset?}: one parameter of an instrument track's instrument, built in or hosted (clamped into range); `preset` records the recalled preset name",
             has_selection,
             set_instrument_param
         ),
@@ -80,11 +80,15 @@ fn set_instrument_param(e: &mut Engine, p: &Value) -> Result<Value> {
     let param = str_param(p, "param").ok_or_else(|| bad(id, "`param` required"))?.to_string();
     let value = p.get("value").and_then(Value::as_f64).filter(|v| v.is_finite()).ok_or_else(|| bad(id, "`value` must be a number"))? as f32;
     let t = tracks_required(e, id, p)?.first().copied().ok_or_else(|| bad(id, "no track"))?;
-    let ins = e.session_mut().track_mut(t).and_then(|tr| tr.instrument.as_mut()).ok_or_else(|| bad(id, "the track has no instrument"))?;
-    // Hosted instruments keep their parameters in their own state.
-    let info = soundcraft_dsp::plugin_info(&ins.plugin).ok_or_else(|| bad(id, format!("`{}` is not a built-in instrument", ins.plugin)))?;
+    let plugin =
+        e.session().track(t).and_then(|tr| tr.instrument.as_ref()).map(|i| i.plugin.clone()).ok_or_else(|| bad(id, "the track has no instrument"))?;
+    // A hosted instrument's parameter is stored like a hosted insert's: the mix hands a changed
+    // value to the plug-in (which tells its editor), so an editor, a mapped controller and
+    // automation all reach it. Its own state still holds everything the table does not list.
+    let info = super::clap::require_info(id, &plugin)?;
     let pi = info.param(&param).ok_or_else(|| bad(id, format!("`{}` has no parameter `{param}`", info.id)))?;
     let v = pi.clamp(value);
+    let ins = e.session_mut().track_mut(t).and_then(|tr| tr.instrument.as_mut()).ok_or_else(|| bad(id, "the track has no instrument"))?;
     ins.params.insert(param.clone(), v);
     if let Some(name) = str_param(p, "preset") {
         ins.preset = name.to_string();

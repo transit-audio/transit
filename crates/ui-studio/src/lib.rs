@@ -1214,6 +1214,10 @@ mod groups_tests;
 #[cfg(test)]
 mod keys_tests;
 #[cfg(test)]
+mod midi_learn_hosted_tests;
+#[cfg(test)]
+mod midi_learn_live_tests;
+#[cfg(test)]
 mod midi_learn_plugin_tests;
 #[cfg(test)]
 mod midi_learn_tests;

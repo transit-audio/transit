@@ -937,6 +937,12 @@ struct Synth {
     refuse: AtomicBool,
     /// The events synth (see [`PROBE_PARAM`]).
     events: bool,
+    /// The controller's (editor's) value of [`PROBE_PARAM`], `f64` bits: what the host last told
+    /// it with `setParamNormalized`. In the report as `probe_ctrl` (millionths).
+    probe_ctrl: AtomicU64,
+    /// `probe_ctrl` as the processor last reported it: a change is written into the next block as
+    /// `[5, 0, PROBE_PARAM, value * 1e6]`, after the parameter points.
+    probe_seen: AtomicU64,
     /// (call, OS thread), each pair once.
     threads: std::sync::Mutex<Vec<(&'static str, usize)>>,
     _live: Live,
@@ -954,6 +960,8 @@ impl Synth {
             every: std::sync::Mutex::new(None),
             refuse: AtomicBool::new(false),
             events: false,
+            probe_ctrl: AtomicU64::new(0f64.to_bits()),
+            probe_seen: AtomicU64::new(0f64.to_bits()),
             threads: std::sync::Mutex::new(Vec::new()),
             _live: Live::new(&OBJECTS),
         }
@@ -999,13 +1007,14 @@ impl Synth {
         let threads = self.threads.lock().unwrap();
         let of = |call: &str| threads.iter().filter(|(c, _)| *c == call).map(|(_, t)| t.to_string()).collect::<Vec<_>>().join(",");
         format!(
-            "me={};map={};active={};process={};get_latency={};latency={}",
+            "me={};map={};active={};process={};get_latency={};latency={};probe_ctrl={}",
             os_thread(),
             of("map"),
             of("active"),
             of("process"),
             of("latency"),
-            self.latency.load(Ordering::SeqCst)
+            self.latency.load(Ordering::SeqCst),
+            (f64::from_bits(self.probe_ctrl.load(Ordering::SeqCst)) * 1e6).round() as i64
         )
     }
 }
@@ -1021,7 +1030,9 @@ const VOLUME_PARAM: ParamID = 1;
 /// to parameter `100 + c`, and writes what it receives into its output instead of a level: one
 /// record of four samples per event and per parameter point, in the order it reads them —
 /// `[1 on | 2 off | 3 poly pressure, offset, channel * 1000 + pitch, noteId]` and
-/// `[4, offset, param id, value * 1e6]`. Integers below 2^24 are exact in `f32`.
+/// `[4, offset, param id, value * 1e6]`, then `[5, 0, param id, value * 1e6]` when the host gave
+/// the controller a new value of [`PROBE_PARAM`] (`setParamNormalized`) since the last block.
+/// Integers below 2^24 are exact in `f32`.
 /// The parameter the events mode exposes (normalized 0..1).
 const PROBE_PARAM: ParamID = 5;
 
@@ -1233,6 +1244,11 @@ impl IAudioProcessorTrait for Synth {
                     }
                 }
             }
+            // What the host told the editor's side since the last block.
+            let ctrl = self.probe_ctrl.load(Ordering::SeqCst);
+            if self.probe_seen.swap(ctrl, Ordering::SeqCst) != ctrl {
+                put([5.0, 0.0, PROBE_PARAM as f32, (f64::from_bits(ctrl) * 1e6).round() as f32]);
+            }
             for &p in table.iter().skip(1) {
                 // SAFETY: This SDK channel has frames writable samples distinct from the first channel (no input buses).
                 let o = unsafe { std::slice::from_raw_parts_mut(p, frames) };
@@ -1333,10 +1349,14 @@ impl IEditControllerTrait for Synth {
     unsafe fn plainParamToNormalized(&self, _id: u32, v: f64) -> f64 {
         v
     }
-    unsafe fn getParamNormalized(&self, _id: u32) -> f64 {
-        0.0
+    unsafe fn getParamNormalized(&self, id: u32) -> f64 {
+        if self.events && id == PROBE_PARAM { f64::from_bits(self.probe_ctrl.load(Ordering::SeqCst)) } else { 0.0 }
     }
-    unsafe fn setParamNormalized(&self, _id: u32, _v: f64) -> tresult {
+    unsafe fn setParamNormalized(&self, id: u32, v: f64) -> tresult {
+        // The editor's side of the probe: a host must tell the controller what it sets.
+        if self.events && id == PROBE_PARAM {
+            self.probe_ctrl.store(v.to_bits(), Ordering::SeqCst);
+        }
         kResultOk
     }
     unsafe fn setComponentHandler(&self, handler: *mut IComponentHandler) -> tresult {

@@ -318,6 +318,14 @@ impl Native {
         self.wanted.epoch()
     }
 
+    pub(super) fn map_heard(&self) -> Vec<super::midi_map::Heard> {
+        self.wanted.heard()
+    }
+
+    pub(super) fn map_ports_open(&self) -> Option<Vec<bool>> {
+        self.wanted.ports_open()
+    }
+
     /// MIDI Learn: while armed every present input port is opened and the worker forwards the
     /// next CC or note-on once.
     pub(super) fn set_learn(&mut self, armed: bool) {

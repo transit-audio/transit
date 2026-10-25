@@ -39,14 +39,14 @@ pub mod timeline_map;
 #[cfg(test)]
 pub(crate) use backend::cpal::OutputCallback;
 pub use devices::{AudioConfig, Backend, LoopbackCalibration};
-#[cfg(not(target_arch = "wasm32"))]
-pub use player::MapSpec;
 pub use player::{
     ActionResult, CountIn, MapMsg, MidiTake, PlayedMidi, PlayedNote, Player, PlayerCommand, PlayerError, PlayerNotice, SlotLoad, StartFailure,
 };
 #[cfg(any(test, feature = "test-hooks"))]
 pub use player::{Clock, Deferred, Factory, PluginTestHooks};
 pub use player::{EditorOpened, LoadedIn};
+#[cfg(not(target_arch = "wasm32"))]
+pub use player::{MapHeard, MapSpec};
 pub use transit_plugin_host::{LoadPhase, loading_text, seconds_text};
 
 use soundcraft_mix::{MAX_CHANNELS, StripMeter, itu_stereo_fold};

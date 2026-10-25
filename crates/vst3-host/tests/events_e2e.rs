@@ -43,6 +43,21 @@ fn two_parameter_edges_per_block_reach_the_plug_in_in_order() {
     assert!(points(100).is_empty(), "channel 1's mapping is another parameter");
 }
 
+/// A value the host sets (the mixer applying the session, a mapped controller, automation) reaches
+/// the processor in the next block with the parameter's own id, normalized, and the controller
+/// (what the plug-in's editor shows) is told on the main thread, as VST3 has hosts do.
+#[test]
+fn a_host_set_value_reaches_the_processor_and_then_the_editor() {
+    let mut p = synth(256);
+    assert!(p.set_param("5", 0.8));
+    let r = records(&mut p, 256);
+    assert!(r.contains(&(4, 0, 5, 800_000)), "the processor got ParamID 5 = 0.8: {r:?}");
+    assert!(!r.iter().any(|x| x.0 == 5), "the controller is told on the main thread, not from the audio side: {r:?}");
+    soundcraft_vst3_host::service_requests(); // the frame loop's service, on the instance's main thread
+    let r = records(&mut p, 256);
+    assert_eq!(r.iter().filter(|x| x.0 == 5).copied().collect::<Vec<_>>(), vec![(5, 0, 5, 800_000)], "the controller has 0.8: {r:?}");
+}
+
 #[test]
 fn notes_carry_their_channel_and_voice_id() {
     let mut p = synth(256);

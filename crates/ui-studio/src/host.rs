@@ -462,14 +462,23 @@ impl StudioApp {
                 // "Learn next touched parameter" takes the first changed parameter it sees.
                 self.learn_touched(t, slot, &param);
             }
-            if slot == soundcraft_mix::INSTRUMENT_SLOT {
-                continue;
-            }
             if !unchanged {
                 self.touch_param(t, slot, &param, true);
             }
-            let key = format!("param:{}:{slot}:{param}", t.0);
-            let _ = self.engine.execute_merged("mix.insert_param", &json!({"track": t.0, "slot": slot, "param": param, "value": value}), &key);
+            // A hosted instrument's edits go into the session like an insert's (K83), so a mapped
+            // controller picks up from where the editor left the parameter.
+            let r = if slot == soundcraft_mix::INSTRUMENT_SLOT {
+                let key = format!("instrument_param:{}:{param}", t.0);
+                self.engine.execute_merged("mix.instrument_param", &json!({"track": t.0, "param": param, "value": value}), &key)
+            } else {
+                let key = format!("param:{}:{slot}:{param}", t.0);
+                self.engine.execute_merged("mix.insert_param", &json!({"track": t.0, "slot": slot, "param": param, "value": value}), &key)
+            };
+            if let Err(e) = r
+                && !unchanged
+            {
+                log::debug!("plug-in edit not stored: track {} slot {slot} param {param}: {e}", t.0);
+            }
         }
     }
 

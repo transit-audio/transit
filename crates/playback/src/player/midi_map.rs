@@ -77,6 +77,10 @@ pub struct Cell {
     slot: AtomicU64,
     /// The publish count Main last took.
     taken: AtomicU32,
+    /// How many continuous-control messages matched this entry, published or not (pickup
+    /// holds them back until the knob reaches the control): Main's diagnosis of a knob that moves
+    /// nothing.
+    heard: AtomicU32,
 }
 
 impl Cell {
@@ -90,6 +94,7 @@ impl Cell {
             last: AtomicU8::new(NO_LAST),
             slot: AtomicU64::new(0),
             taken: AtomicU32::new(0),
+            heard: AtomicU32::new(0),
         }
     }
 
@@ -129,6 +134,21 @@ impl Cell {
     pub fn engaged(&self) -> bool {
         self.engaged.load(Ordering::Relaxed)
     }
+
+    /// What the worker heard of this entry: how many messages matched it, the last knob value
+    /// (0..127, `None` before the first), and whether pickup has caught the control.
+    pub fn heard(&self) -> Heard {
+        let last = self.last.load(Ordering::Relaxed);
+        Heard { count: self.heard.load(Ordering::Relaxed), last: (last != NO_LAST).then_some(last), engaged: self.engaged() }
+    }
+}
+
+/// [`Cell::heard`], for Main's diagnosis of a mapped knob that moves nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Heard {
+    pub count: u32,
+    pub last: Option<u8>,
+    pub engaged: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -278,6 +298,7 @@ pub fn handle(snap: &Snapshot, port: u64, channel: u8, message: Message, push: &
             continue;
         }
         let Some(v) = value else { continue };
+        e.cell.heard.fetch_add(1, Ordering::Relaxed);
         let x = f32::from(v) / 127.0;
         let span = e.max - e.min;
         let target = e.min + span * x;
@@ -376,6 +397,20 @@ impl Wanted {
 
     pub fn wants_any(&self) -> bool {
         self.learning || !self.specs.is_empty()
+    }
+
+    /// What the worker heard of each wanted mapping, in order.
+    pub fn heard(&self) -> Vec<Heard> {
+        self.cells.iter().map(|c| c.heard()).collect()
+    }
+
+    /// Whether each wanted mapping's port was open in the snapshot the worker was last handed;
+    /// `None` until it has been handed one of this list.
+    pub fn ports_open(&self) -> Option<Vec<bool>> {
+        match &self.sent {
+            Some((epoch, ids)) if *epoch == self.epoch => Some(ids.iter().map(Option::is_some).collect()),
+            _ => None,
+        }
     }
 
     pub fn port_of(&self, spec: usize) -> Option<&str> {
