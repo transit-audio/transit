@@ -18,11 +18,15 @@ pub(crate) const REFUSED_TRANSPORT: &str = "Rendering in real time: cancel the r
 /// What Cancel leaves on the status line.
 pub(crate) const CANCELLED: &str = "Render cancelled. Nothing was written.";
 
+/// What All MIDI Notes Off during a render leaves: the render is cancelled, not finished with its
+/// notes cut off.
+pub(crate) const CANCELLED_PANIC: &str = "Render cancelled by All MIDI Notes Off. Nothing was written.";
+
 /// Why a render ended when the audio device was re-opened under it.
 pub(crate) const CANCELLED_REOPEN: &str = "Render stopped: the audio device was re-opened. Nothing was written.";
 
 /// The commands a real-time render refuses while it plays: they would move or stop the playhead.
-const TRANSPORT: [&str; 10] = [
+const TRANSPORT: [&str; 15] = [
     "transport.play",
     "transport.toggle",
     "transport.record",
@@ -31,6 +35,11 @@ const TRANSPORT: [&str; 10] = [
     "transport.stop",
     "transport.locate",
     "transport.rtz",
+    "transport.pause",
+    "transport.rewind",
+    "transport.fast_forward",
+    "transport.go_to_end",
+    "transport.loop",
     "edit.play_timeline",
     "instrument.measure_external",
 ];
@@ -62,6 +71,8 @@ pub(crate) struct FakeRender {
 #[derive(Debug, Default)]
 pub struct RealtimeState {
     pub running: Option<Rendering>,
+    /// How the last render ended, when something other than its own outcome ended it.
+    pub ended: Option<String>,
     #[cfg(test)]
     pub(crate) fake: Option<FakeRender>,
 }
@@ -150,6 +161,16 @@ impl StudioApp {
     /// Commands a running real-time render refuses, and `file.bounce_mix {mode: "realtime"}`,
     /// which the app runs itself. `None`: not for this module.
     pub(crate) fn realtime_intercept(&mut self, id: &str, p: &Value) -> Option<Result<Value, String>> {
+        if self.finish.realtime.running.is_some() && id == "event.all_notes_off" {
+            // A panic cancels the render (release, partial files removed), then runs as usual.
+            self.cancel_realtime();
+            self.finish.realtime.ended = Some(CANCELLED_PANIC.into());
+            self.status = CANCELLED_PANIC.into();
+            if matches!(self.dialog, Some(crate::Dialog::Bounce)) {
+                self.dialog = None;
+            }
+            return None;
+        }
         if self.finish.realtime.running.is_some() && TRANSPORT.contains(&id) {
             self.status = REFUSED_TRANSPORT.into();
             return Some(Err(self.status.clone()));
@@ -170,6 +191,7 @@ impl StudioApp {
         if self.finish.realtime.running.is_some() {
             return Err("A real-time render is already running.".into());
         }
+        self.finish.realtime.ended = None;
         let plan = soundcraft_engine::cmd::realtime_plan(&self.engine, p).map_err(|e| said(&e))?;
         if let Some(why) = device_blocker(&self.realtime_conditions()) {
             return Err(why);

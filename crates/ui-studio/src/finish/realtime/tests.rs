@@ -186,3 +186,23 @@ fn each_refusal_is_shown_before_starting() {
     assert!(t.fake().started.is_empty(), "offline: the Player was not asked");
     assert!(t.app.status.contains("Left out: Model D") || t.app.status.starts_with("Bounced to"), "{}", t.app.status);
 }
+
+/// All MIDI Notes Off during a render cancels it (release, no file) instead of letting it finish
+/// with the notes cut off; the other transport commands are refused while it plays.
+#[test]
+fn all_notes_off_cancels_the_render_and_transport_moves_are_refused() {
+    let mut t = rig();
+    t.ask();
+    t.click(t.app.finish.realtime_button);
+    assert!(t.app.finish.realtime.running.is_some());
+    for id in ["transport.pause", "transport.rewind", "transport.fast_forward", "transport.go_to_end", "transport.loop"] {
+        assert_eq!(t.app.run(id, json!({})).unwrap_err(), REFUSED_TRANSPORT, "{id}");
+    }
+    assert!(t.app.finish.realtime.running.is_some(), "a refused command leaves the render running");
+    t.app.run("event.all_notes_off", json!({})).unwrap();
+    assert_eq!(t.fake().cancelled, 1, "the Player's render was cancelled");
+    assert!(t.app.finish.realtime.running.is_none());
+    assert_eq!(t.app.finish.realtime.ended.as_deref(), Some(super::CANCELLED_PANIC));
+    t.frames(3);
+    assert!(t.app.dialog.is_none());
+}
