@@ -184,6 +184,26 @@ fn selections_channels_monitoring_and_disabled_tracks_are_independent() {
 /// callback entry to the worker popping the event.
 #[test]
 fn an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer() {
+    let max = idle_wake_ages().1;
+    // Correctness only (E49, #110): every event arrives and the worker's own max is recorded. The
+    // wake-on-data latency claim is the ignored `idle_wake_latency_median_is_far_below_the_timer_tick`.
+    // timing: stall-bound a stuck worker takes seconds; scheduler jitter on a loaded host reaches tens of ms
+    assert!(max < Duration::from_secs(2), "max wake latency {max:?}");
+}
+
+/// The #62 latency claim, run by hand on a quiet machine (`cargo test -p soundcraft-playback -- --ignored
+/// idle_wake`): a median over 25 wakes stays far below the timer tick. It is a measurement of the
+/// host, so it lives outside the gated unit tests (E49, #110).
+#[test]
+#[ignore = "hardware-timing measurement; run on a quiet machine"]
+fn idle_wake_latency_median_is_far_below_the_timer_tick() {
+    let (median, max) = idle_wake_ages();
+    eprintln!("ingress wake latency: median {median:?}, max {max:?}");
+    let bound = if cfg!(windows) { Duration::from_millis(2) } else { Duration::from_millis(5) };
+    assert!(median < bound, "median wake latency {median:?} (max {max:?}); a timer poll would show ~15 ms on Windows");
+}
+
+fn idle_wake_ages() -> (Duration, Duration) {
     let fake = Fake::default();
     let key = fake.add_input("Wake keys");
     let mut session = Session::default();
@@ -205,22 +225,34 @@ fn an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer() {
     }
     ages.sort_unstable();
     let (median, max) = (Duration::from_nanos(ages[ages.len() / 2]), Duration::from_nanos(ages[ages.len() - 1]));
-    eprintln!("ingress wake latency over {} events: median {median:?}, max {max:?}", ages.len());
-    // Kept by design (#87, E49): this median of 25 is the wake-on-data property. A timer poll wakes
-    // at the 15.6 ms (Windows) or ~20 ms (other) tick, so 2 ms / 5 ms leaves a wide margin on both
-    // sides, and a median ignores the scheduler outliers that a max does not.
-    // timing: median of 25 wake latencies against the 15.6 / 20 ms timer tick, a wide margin on both sides
-    let bound = if cfg!(windows) { Duration::from_millis(2) } else { Duration::from_millis(5) };
-    assert!(median < bound, "median wake latency {median:?} (max {max:?}); a timer poll would show ~15 ms on Windows");
-    // The max is scheduler jitter on a loaded host, not the property (#87, E49): the median above
-    // already fails a timer poll. This only catches a stalled worker.
-    assert!(max < Duration::from_millis(250), "max wake latency {max:?}");
     assert_eq!(f.native.status().counts.latency_max_ns, ages[ages.len() - 1]);
     f.finish();
+    (median, max)
 }
 
 #[test]
 fn idle_worker_taps_step_pedal_and_learnable_actions_without_delaying_routes() {
+    let median = step_tap_rounds();
+    // Correctness (every round delivered the tap in order and left the routed packets alone) is
+    // asserted in the rounds. The wake latency is a host measurement, kept in the ignored test below
+    // (E49, #110); here only a stall is a failure.
+    // timing: stall-bound a worker that never wakes takes seconds; a loaded host adds tens of ms
+    assert!(median < Duration::from_secs(2), "idle input must wake with the tap active: {median:?}");
+}
+
+/// The wake-on-data claim with the step tap active, run by hand on a quiet machine (E49, #110).
+#[test]
+#[ignore = "hardware-timing measurement; run on a quiet machine"]
+fn step_tap_idle_wake_latency_median_is_far_below_the_timer_tick() {
+    let median = step_tap_rounds();
+    eprintln!("step tap idle wake latency median {median:?}");
+    let bound = if cfg!(windows) { Duration::from_millis(2) } else { Duration::from_millis(5) };
+    assert!(median < bound, "idle input must wake promptly with the tap active: {median:?}");
+}
+
+/// Delivers the step-control burst fifteen times to an idle worker, asserting the tap and the routed
+/// packets each round; returns the median of the worker's own callback-to-pop ages.
+fn step_tap_rounds() -> Duration {
     use crate::player::{PlayedMidi, PlayedNote};
     let fake = Fake::default();
     let key = fake.add_input("Step controls");
@@ -252,14 +284,8 @@ fn idle_worker_taps_step_pedal_and_learnable_actions_without_delaying_routes() {
     }
     ages.sort_unstable();
     let median = Duration::from_nanos(ages[ages.len() / 2]);
-    eprintln!("step tap idle wake latency median {median:?}");
-    // Kept by design (#87, E49): this median of 25 is the wake-on-data property. A timer poll wakes
-    // at the 15.6 ms (Windows) or ~20 ms (other) tick, so 2 ms / 5 ms leaves a wide margin on both
-    // sides, and a median ignores the scheduler outliers that a max does not.
-    // timing: median of 25 wake latencies against the 15.6 / 20 ms timer tick, a wide margin on both sides
-    let bound = if cfg!(windows) { Duration::from_millis(2) } else { Duration::from_millis(5) };
-    assert!(median < bound, "idle input must wake promptly with the tap active: {median:?}");
     f.finish();
+    median
 }
 
 /// Drains the monitor until `ready` holds for what was collected.

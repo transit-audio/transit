@@ -8,14 +8,15 @@
 //!     count or a counter incremented in a fn that also reads a clock or sleeps.
 //!
 //! Allow marker, on the offending line or the line above: `// timing: <tag> <reason>` where the tag is
-//! `stall-bound` (a ceiling far above jitter), `median` (a median over many samples), `floor-ok` (a count that is
+//! `stall-bound` (a ceiling far above jitter), `floor-ok` (a count that is
 //! not clock-bound), `sleep-ok` (a sleep that is not pacing a measurement) or `value` (a bound on a computed value,
-//! not a measurement); the reason is mandatory. Functions marked `#[ignore]`
+//! not a measurement); the reason is mandatory. There is no `median` tag (E49, #110): a median is a latency
+//! claim and belongs in an `#[ignore]` measurement test. Functions marked `#[ignore]`
 //! (hardware tests) are skipped.
 
 use std::path::Path;
 
-const TAGS: &[&str] = &["stall-bound", "median", "floor-ok", "sleep-ok", "value"];
+const TAGS: &[&str] = &["stall-bound", "floor-ok", "sleep-ok", "value"];
 const FLOOR_NAMES: &[&str] = &["frames", "blocks", "laps", "iterations", "polls"];
 const MEASURE_WORDS: &[&str] = &["bpm", "latency", "elapsed"];
 
@@ -372,7 +373,7 @@ pub fn run(root: &Path) -> Result<(), String> {
     } else {
         let list: Vec<String> = hits.iter().map(ToString::to_string).collect();
         Err(format!(
-            "machine-dependent timing assertions in tests (gates.md, E49); assert a deterministic signal, or mark a deliberate stall bound, median or floor with `// timing: stall-bound|median|floor-ok|sleep-ok|value <reason>`:\n  {}",
+            "machine-dependent timing assertions in tests (gates.md, E49); assert a deterministic signal, or mark a deliberate stall bound or floor with `// timing: stall-bound|floor-ok|sleep-ok|value <reason>`:\n  {}",
             list.join("\n  ")
         ))
     }

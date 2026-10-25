@@ -38,8 +38,27 @@ fn rule_a_follows_a_name_bound_to_a_short_duration() {
     assert_eq!(rules(long), vec![]);
     assert_eq!(rules(&wrap("    let tick = Duration::from_millis(5);\n    std::thread::sleep(tick);\n    rx.recv_timeout(tick);")), vec![]);
     assert_eq!(rules(&wrap("    let (mut rig, port) = slow(Duration::from_millis(50));\n    assert!(rig.count > 0);")), vec![]);
-    let marked = wrap("    // timing: median of 25 against a 15 ms tick\n    let bound = Duration::from_millis(2);\n    assert!(median < bound);");
+    let marked = wrap(
+        "    // timing: stall-bound a stuck thread, not a latency
+    let bound = Duration::from_millis(2);
+    assert!(took < bound);",
+    );
     assert_eq!(rules(&marked), vec![]);
+    // A median is a latency claim: no marker admits it in a gated test (E49, #110); an ignored test may hold it.
+    let median = wrap(
+        "    // timing: median of 25 against a 15 ms tick
+    let bound = Duration::from_millis(2);
+    assert!(median < bound);",
+    );
+    assert_eq!(rules(&median), vec![(5, 'a')]);
+    let ignored = "#[test]
+#[ignore = \"hardware\"]
+fn t() {
+    let bound = Duration::from_millis(2);
+    assert!(median < bound);
+}
+";
+    assert_eq!(rules(ignored), vec![]);
 }
 
 #[test]
@@ -51,7 +70,7 @@ fn rule_a_ignores_sleeps_and_timeouts_without_a_comparison() {
 fn markers_on_the_line_or_the_line_above_need_a_reason() {
     let ok_above = wrap("    // timing: stall-bound a descheduled thread, not a latency\n    assert!(took < Duration::from_millis(50));");
     assert_eq!(rules(&ok_above), vec![]);
-    let ok_same = wrap("    assert!(took < Duration::from_millis(50)); // timing: median of 25 against a 15 ms tick");
+    let ok_same = wrap("    assert!(took < Duration::from_millis(50)); // timing: stall-bound a descheduled thread, not a latency");
     assert_eq!(rules(&ok_same), vec![]);
     let no_reason = wrap("    // timing: stall-bound\n    assert!(took < Duration::from_millis(50));");
     assert_eq!(rules(&no_reason), vec![(4, 'a')]);

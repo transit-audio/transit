@@ -48,9 +48,11 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
   `elapsed()` or a loop counter, and (c) a throughput floor `assert!(x >= N)` with N >= 3 on a
   frames/blocks/laps/iterations/polls count or a counter in a timed loop. `#[ignore]` fns are skipped. A
   deliberate case carries `// timing: <tag> <reason>` on the line or the line above, tag one of `stall-bound`
-  (a ceiling far above jitter), `median` (over many samples), `floor-ok` (a count not bound to the clock),
+  (a ceiling far above jitter), `floor-ok` (a count not bound to the clock),
   `sleep-ok` (a sleep that does not pace a measurement) or `value` (a bound on a computed value); the reason
   is required. Prefer the deterministic signal, or "at least 2" progress plus a stall bound, over a marker.
+  There is no `median` tag: a median over samples is a latency claim, so it lives in an `#[ignore]`
+  measurement test, never a gated one (E49 amendment 2026-10-25, #110).
 - A test never derives a rate, BPM or latency from `thread::sleep` pacing. It injects the
   timestamps (the fake input's `deliver_at`) and asserts the exact value (E49 recurrence,
   the MIDI Monitor Clock BPM test).

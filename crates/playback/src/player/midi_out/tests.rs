@@ -125,20 +125,27 @@ fn stop_drops_scheduled_playback_and_releases_held_notes_and_pedals() {
 #[test]
 fn a_wrap_ends_held_notes_at_the_wrap_instant_and_drops_discarded_playback() {
     let mut rig = Rig::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 0)]);
-    let wrap = rig.now() + 30_000_000;
+    // The wrap lies far enough ahead that a loaded host cannot reach it before all four events are
+    // queued; a late discard would otherwise let the "discarded" note fall due first (E49, #110).
+    let wrap = rig.now() + 300_000_000;
     assert!(rig.playback.push(message(1, 0, [0x90, 60, 100])));
     // Rendered ahead past the wrap, then discarded by a locate: must never sound.
     assert!(rig.playback.push(message(1, wrap + 5_000_000, [0x90, 61, 100])));
     assert!(rig.playback.push(OutEvent { kind: Kind::Release, at_ns: wrap, ..OutEvent::default() }));
     // The next lap restarts the note (the mix side chases it) at the wrap instant.
     assert!(rig.playback.push(message(1, wrap, [0x90, 60, 100])));
-    let sends = rig.wait_sent(3);
-    assert_eq!(sends.iter().map(|s| s.message.clone()).collect::<Vec<_>>(), [vec![0x90, 60, 100], vec![0x80, 60, 64], vec![0x90, 60, 100]]);
+    // A later sentinel: once it is sent, everything due before it was either sent or dropped, so
+    // the absence check below needs no sleep.
+    assert!(rig.playback.push(message(1, wrap + 50_000_000, [0x90, 62, 100])));
+    let sends = rig.wait_sent(4);
+    assert_eq!(
+        sends.iter().map(|s| s.message.clone()).collect::<Vec<_>>(),
+        [vec![0x90, 60, 100], vec![0x80, 60, 64], vec![0x90, 60, 100], vec![0x90, 62, 100]]
+    );
     let due = rig.origin.instant() + Duration::from_nanos(wrap);
     assert!(sends[1].at >= due, "the release went out before the wrap");
     assert!(sends[1].at <= sends[2].at);
-    std::thread::sleep(Duration::from_millis(40));
-    assert!(!rig.sent().contains(&vec![0x90, 61, 100]));
+    assert!(!rig.sent().contains(&vec![0x90, 61, 100]), "a discarded note sounded");
 }
 
 #[test]

@@ -86,3 +86,14 @@ tell two origins apart.
 Recurrence 2026-10-25 (#76, macOS CI on 8da26d2a): the async-import expiry test stopped polling its kept item before checking the abandoned item, so a scheduler pause could exceed its 100 ms TTL. The test now injects the polling clock, verifies retention at 99 ms and expiry at 100 ms while the polled item stays done, and uses real time only for a marked worker-completion stall bound. Disabling TTL expiry or poll timestamp refresh fails the corresponding state assertion (not a timeout); 20/20 runs passed with the test and two spinning processes pinned to one CPU. Production defaults to Instant::now under the same lock; constants and dependencies are unchanged.
 
 Recurrence follow-up 2026-10-25 (#76 siblings): the remaining async-import tests that slept against a TTL, grace or away window now drive the injected clock by hand: `a_caller_away_longer_than_the_limit_loses_nothing_when_it_returns` (was a 5.3 s sleep against a 100 ms TTL; now checks 99 ms and 100 ms after the return), `a_caller_that_was_away_finds_all_its_items_when_it_comes_back` (was a 500 ms sleep against a 50 ms grace; the clock is advanced once and then frozen) and `cancel_leaves_no_media_and_no_document_change` (was a 200 ms sleep; waits for the worker count to reach zero behind a marked stall bound). `wait` now fails at once if the polled item expires. Mutations (away reset removed, never-polled items counted idle, cancel keeping the job) fail at assertions.
+
+Amendment 2026-10-25 (#110): under a full-workspace load `idle_worker_taps_step_pedal_and_learnable_actions_without_delaying_routes`
+saw a median of 11.5 ms against its 2 ms bound, and `a_wrap_ends_held_notes_at_the_wrap_instant_and_drops_discarded_playback`
+failed on a rerun (its 30 ms wrap lay within reach of a stalled test thread, so the "discarded" note could fall due
+before the release was queued, and its 40 ms sleep stood in for "everything due has been processed"). Both passed
+`cargo xtask timing` because the `// timing: median` tag admitted any median. Fixed: the wrap test puts the wrap 300 ms
+ahead and replaces the sleep with a later sentinel note whose send proves everything due earlier was sent or dropped;
+the two wake-latency medians (this one and `an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer`) moved
+to `#[ignore]` measurement tests, and the gated tests keep their delivery and ordering assertions plus a 2 s stall
+bound. Lint change: the `median` tag is removed from `cargo xtask timing`, so a sub-100 ms median ceiling in a
+non-ignored test is flagged like any other.
