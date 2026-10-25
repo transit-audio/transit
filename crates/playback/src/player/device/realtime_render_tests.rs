@@ -17,6 +17,8 @@ const SR: u32 = 48_000;
 const C: usize = 960;
 /// The session sample of the software impulse and of the synth's note (a whole tick).
 const AT: usize = 9_000;
+/// The External Instrument's input gain: the stem and the mix carry it once.
+const GAIN_DB: f32 = -6.0;
 /// The render range.
 const START: i64 = 4_800;
 const LEN: u64 = 9_600;
@@ -46,11 +48,11 @@ impl Drop for Rig {
     }
 }
 
-fn session(fake: &Fake) -> (Session, TrackId, transit_midi_io::PortKey) {
+fn session(fake: &Fake, click: bool) -> (Session, TrackId, transit_midi_io::PortKey) {
     let key = fake.add_output("MODEL D");
     let mut s = Session::default();
     s.edit.delay_compensation = true;
-    s.edit.click = false;
+    s.edit.click = click;
     // The software track: one impulse at AT.
     let len = 4 * SR as usize;
     let mut sig = vec![0.0f32; len];
@@ -80,13 +82,19 @@ fn session(fake: &Fake) -> (Session, TrackId, transit_midi_io::PortKey) {
     };
     let mut ins = soundcraft_model::Insert::external("In 1");
     ins.external.as_mut().unwrap().manual_ms = Some(C as f32 * 1000.0 / SR as f32);
+    ins.external.as_mut().unwrap().gain_db = GAIN_DB;
     t.instrument = Some(ins);
     (s, synth, key)
 }
 
 fn rig() -> Rig {
+    rig_with(false)
+}
+
+/// [`rig`], with Options > Click on or off.
+fn rig_with(click: bool) -> Rig {
     let midi = Fake::default();
-    let (s, synth, key) = session(&midi);
+    let (s, synth, key) = session(&midi, click);
     let audio = ab::fake::FakeBackend::new(ab::Format::new(SR, 2, ab::SampleFormat::F32)).with_capture(2, true);
     let fallback = ab::fake::FakeBackend::new(ab::Format::new(SR, 2, ab::SampleFormat::F32));
     let cfg = AudioConfig::default();
@@ -115,7 +123,7 @@ fn spec(rig: &Rig, len: u64) -> RealtimeSpec {
         len,
         main_channels: 2,
         preroll: C.max(BLOCK) as i64,
-        stems: vec![StemSpec { track: rig.synth, channels: vec![0], latency: C as u32, gain: 1.0 }],
+        stems: vec![StemSpec { track: rig.synth, channels: vec![0], latency: C as u32, gain: soundcraft_dsp::db_to_gain(GAIN_DB) }],
     }
 }
 
@@ -241,7 +249,15 @@ fn the_bounce_is_the_software_render_plus_the_return_on_the_grid() {
     let stem = read(&stem);
     assert_eq!(stem.len(), 1, "the return's own width");
     assert_eq!(hits(&stem[0]), [grid], "the stem holds the return at plan position - C");
-    assert_eq!(stem[0][grid], 0.5);
+    let ret = 0.5 * soundcraft_dsp::db_to_gain(GAIN_DB);
+    assert!((stem[0][grid] - ret).abs() < 1e-6, "the stem carries the device gain once: {} against {ret}", stem[0][grid]);
+    // Levels: the mix is the software render plus the return, sample for sample.
+    for c in 0..2 {
+        for (i, (b, sw)) in bounce[c].iter().zip(&software[c]).enumerate() {
+            let want = if i == grid { sw + ret } else { *sw };
+            assert!((b - want).abs() < 1e-5, "channel {c} sample {i}: {b} against {want}");
+        }
+    }
     // The note went out on the port, and the stop at the end released it.
     assert!(sent(&rig).contains(&vec![0x92, 60, 100]), "{:x?}", sent(&rig));
     until("the stop at the end releases the note", || released(&sent(&rig)));
@@ -374,4 +390,23 @@ fn a_device_lost_mid_render_releases_and_says_so() {
     assert_eq!(result.unwrap().unwrap_err(), RealtimeError::DeviceLost);
     until("the output thread releases the track", || released(&sent(&rig)));
     assert!(!mix.exists());
+}
+
+/// ADR 0027 decision 1: the bounce leaves the metronome out, as an offline render does, even with
+/// Click on across a beat (the click is not delay-compensated and is never part of a bounce).
+#[test]
+fn the_bounce_leaves_the_metronome_out_with_click_on() {
+    let rig = rig_with(true);
+    // From 0.1 s over 0.6 s: the beat at 0.5 s is inside the range.
+    let len = 28_800;
+    let (sink, mix, _) = file_sink(&rig, len);
+    render(&rig, len, Box::new(sink)).unwrap().unwrap_or_else(|e| panic!("{e}"));
+    let bounce = read(&mix);
+    let software = offline(&rig.session, len);
+    let grid = AT - START as usize;
+    for c in 0..2 {
+        let extra: Vec<usize> =
+            bounce[c].iter().zip(&software[c]).enumerate().filter(|(i, (b, s))| *i != grid && (*b - *s).abs() > 1e-5).map(|(i, _)| i).collect();
+        assert!(extra.is_empty(), "channel {c}: click energy at {} samples, first {:?}", extra.len(), extra.first());
+    }
 }

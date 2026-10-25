@@ -857,6 +857,9 @@ impl Audio {
         }
         self.plans.set_processing(!state.playing, state.recording, self.shared.editors_open.load(Ordering::Relaxed));
         let click = counting.map(|c| soundcraft_mix::CountInClick { elapsed: c.plan.frames - c.left, beat: c.plan.beat, per_bar: c.plan.per_bar });
+        // A real-time render keeps Main as an offline render would: without the metronome, which
+        // is not delay-compensated and is never part of a bounce (ADR 0027 decision 1).
+        let gain = if self.render_tap.as_ref().is_some_and(|t| t.busy()) { 0.0 } else { gain };
         self.plans.set_metronome(gain, click);
         #[cfg(not(target_arch = "wasm32"))]
         self.midi_inbox.dispatch(
