@@ -102,7 +102,7 @@ fn newly_prefixed_crates_do_not_inherit_layer_or_unsafe_permissions() {
 
 #[test]
 fn standalone_and_ui_checks_cover_normal_and_build_dependencies_but_not_dev() {
-    for name in ["transit-audio-backend", "soundcraft-asio-panel"] {
+    for name in ["transit-audio-backend", "soundcraft-dsp"] {
         for kind in [None, Some("build"), Some("dev")] {
             let metadata = Metadata { packages: vec![package(name, &[("soundcraft-time", kind)]), package("soundcraft-time", &[])] };
             let result = check_layers(&metadata, |_| Ok(INHERIT.into()));

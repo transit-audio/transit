@@ -24,7 +24,6 @@ soundcraft-midi = { path = "crates/midi" }
 soundcraft-video = { path = "crates/video" }
 soundcraft-dsp = { path = "crates/dsp" }
 soundcraft-clap-host = { path = "crates/clap-host" }
-soundcraft-asio-panel = { path = "crates/asio-panel" }
 soundcraft-vst3-host = { path = "crates/vst3-host" }
 soundcraft-au-host = { path = "crates/au-host" }
 transit-plugin-host = { path = "crates/plugin-host" }
@@ -63,7 +62,6 @@ craft-docpath = { version = "0.1.0", git = "https://github.com/storytold/craft-l
 
 # Windows SDK versions are shared; each consumer selects only the APIs it uses.
 windows-sys = "0.61"
-asio-sys = "0.2"
 
 # ui
 craft-ui = { version = "0.1.0", git = "https://github.com/storytold/craft-libs", rev = "5c874d51eeb3de70e735c8ce87a59a7dedd47675", features = ["serde"] }

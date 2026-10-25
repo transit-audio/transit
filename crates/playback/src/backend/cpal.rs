@@ -590,8 +590,6 @@ fn observe(stream: &cpal::Stream) -> ab::WorkerPriority {
         use cpal::platform::StreamInner;
         match stream.as_inner() {
             StreamInner::Wasapi(stream) => observed_wasapi(stream.thread_priority_observation().status()),
-            #[cfg(feature = "asio")]
-            StreamInner::Asio(_) => ab::WorkerPriority::Unobserved,
         }
     }
     #[cfg(not(target_os = "windows"))]

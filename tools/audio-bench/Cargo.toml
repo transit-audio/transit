@@ -12,9 +12,6 @@ publish = false
 # The native backends are on by default (Windows only; no-ops elsewhere). `--no-default-features` leaves them out.
 default = ["native-wasapi", "native-asio"]
 
-# Measure the ASIO host on Windows (see `soundcraft-playback`'s `asio` feature for its build needs).
-asio = ["soundcraft-playback/asio", "dep:asio-sys"]
-
 # `--backend wasapi`: the native WASAPI backend (ADR 0016 slice c), Windows only.
 native-wasapi = ["dep:transit-audio-wasapi"]
 
@@ -36,8 +33,6 @@ transit-midi-io.workspace = true
 ctrlc = "=3.5.2"
 
 [target.'cfg(windows)'.dependencies]
-# The same asio-sys cpal uses; `--list-devices` asks it why a registered driver is not listed.
-asio-sys = { version = "0.2", optional = true }
 transit-audio-wasapi = { workspace = true, optional = true }
 transit-audio-asio = { workspace = true, optional = true }
 

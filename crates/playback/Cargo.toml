@@ -18,7 +18,6 @@ transit-rt.workspace = true
 transit-plugin-host.workspace = true
 soundcraft-clap-host.workspace = true
 soundcraft-vst3-host.workspace = true
-soundcraft-asio-panel.workspace = true
 log.workspace = true
 serde.workspace = true
 rtrb.workspace = true
@@ -62,9 +61,6 @@ native-asio = ["dep:transit-audio-asio"]
 # the JACK system is not listed and `Backend::NativeJack` opens cpal. The build needs jack.pc
 # (libjack-jackd2-dev) for jack-sys's build script, not libjack itself.
 native-jack = ["dep:transit-audio-jack", "transit-audio-jack/libjack"]
-# ASIO on Windows (cpal's ASIO host). Off by default: building it downloads Steinberg's ASIO SDK
-# (its own licence) and needs LLVM (libclang) for the bindings. `cargo build -p transit --features asio`.
-asio = ["cpal/asio", "soundcraft-asio-panel/asio"]
 
 [dev-dependencies]
 transit-plugin-host = { workspace = true, features = ["testing"] }

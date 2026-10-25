@@ -58,7 +58,7 @@ pub struct AudioDevicesLayout {
     pub systems: Vec<String>,
     /// The controls: label is the text shown, value the control (`system`, `output`, `input`,
     /// `backend` (only where offered), `paired_input` (native WASAPI only), `rate`, `buffer`, `apply`, `reconnect`, `rescan`,
-    /// `panel` (cpal ASIO's "Driver Control Panel" or native ASIO's "Driver settings")).
+    /// `panel` (native ASIO's "Driver settings")).
     pub controls: Vec<MenuItem>,
     /// The entries of the open list: label is the text shown, value the control it belongs to.
     pub items: Vec<MenuItem>,
@@ -1060,7 +1060,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let recording = app.recording_active();
     let panel_open = app.audio_devices.panel.is_some();
     let audio_on = app.player.is_some() || app.audio_devices.fake.is_some();
-    let (mut apply, mut reconnect, mut rescan, mut panel) = (false, false, false, false);
+    let (mut apply, mut reconnect, mut rescan) = (false, false, false);
     let mut native_panel: Option<String> = None;
     // The path table is the engine's, read again every frame; one edit at most per frame.
     let io = app.engine.io_map().clone();
@@ -1326,10 +1326,6 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                     {
                         native_panel = Some(driver);
                     }
-                } else if app.running_asio() && (devices::ASIO_CONTROL_PANEL || app.audio_devices.fake.is_some()) {
-                    let b = ui.button("Driver Control Panel");
-                    controls.push(("Driver Control Panel".into(), "panel", b.rect));
-                    panel = b.on_hover_text("The open ASIO driver's own settings. Reconnect afterwards.").clicked();
                 }
             });
             lay.controls = controls.into_iter().map(|(text, key, rect)| MenuItem::at(ui, text, key.into(), rect)).collect();
@@ -1394,12 +1390,6 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     }
     if rescan {
         app.audio_devices.forget_listing();
-    }
-    if panel
-        && app.audio_devices.fake.is_none()
-        && let Err(e) = devices::asio_control_panel()
-    {
-        app.status = format!("ASIO control panel: {e}");
     }
     if let Some(driver) = native_panel {
         app.open_native_asio_panel(&driver);

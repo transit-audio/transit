@@ -431,17 +431,8 @@ fn describe(d: &cpal::Device, default_name: Option<&str>, output: bool) -> Optio
     Some(DeviceInfo { is_default: default_name == Some(name.as_str()), name, max_channels, sample_rates, buffer_min, buffer_max })
 }
 
-/// cpal's name for its ASIO host (Windows builds with the `asio` feature).
+/// The name of the ASIO audio system, served by the native ASIO backend (cpal has no ASIO host here).
 pub const ASIO_SYSTEM: &str = "ASIO";
-/// Whether this build can open an ASIO driver's control panel.
-pub const ASIO_CONTROL_PANEL: bool = soundcraft_asio_panel::AVAILABLE;
-
-/// Opens the control panel of the ASIO driver that is open (ASIO4ALL's device choice, an
-/// interface's buffer size and clock...). Drivers do not reliably report what changed there:
-/// reopen the device afterwards.
-pub fn asio_control_panel() -> Result<(), String> {
-    soundcraft_asio_panel::open_control_panel()
-}
 
 /// Opens the control panel ("Driver settings") of the ASIO driver `driver` through the native
 /// backend: the call runs on its host thread, from a thread of its own, and the receiver gets the
@@ -504,15 +495,10 @@ pub fn cpal_audio_systems() -> Vec<AudioSystem> {
             let host = shared_host(id)?;
             let def_out = host.default_output_device().as_ref().and_then(device_name);
             let def_in = host.default_input_device().as_ref().and_then(device_name);
-            let mut outputs: Vec<DeviceInfo> =
+            let outputs: Vec<DeviceInfo> =
                 host.output_devices().map(|ds| ds.filter_map(|d| describe(&d, def_out.as_deref(), true)).collect()).unwrap_or_default();
-            let mut inputs: Vec<DeviceInfo> =
+            let inputs: Vec<DeviceInfo> =
                 host.input_devices().map(|ds| ds.filter_map(|d| describe(&d, def_in.as_deref(), false)).collect()).unwrap_or_default();
-            if id.name() == ASIO_SYSTEM {
-                let installed = soundcraft_asio_panel::driver_names();
-                add_unlisted(&mut outputs, &installed);
-                add_unlisted(&mut inputs, &installed);
-            }
             Some(AudioSystem { name: id.name().to_string(), is_default: id == default_id, outputs, inputs, diagnostics: Vec::new() })
         })
         .collect()

@@ -41,7 +41,6 @@ const LAYERS: &[(&str, u8)] = &[
     ("soundcraft-vst3-host", 1),
     ("soundcraft-au-host", 1),
     ("transit-plugin-host", 1),
-    ("soundcraft-asio-panel", 1),
     ("soundcraft-model", 2),
     ("soundcraft-mix", 3),
     ("soundcraft-engine", 4),
@@ -51,16 +50,8 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-ui-studio", 6),
 ];
 /// Standalone crates have no workspace dependencies (dev-dependencies excepted).
-const STANDALONE: &[&str] = &[
-    "soundcraft-time",
-    "soundcraft-audio-io",
-    "transit-audio-backend",
-    "transit-midi-io",
-    "soundcraft-midi",
-    "soundcraft-video",
-    "soundcraft-dsp",
-    "soundcraft-asio-panel",
-];
+const STANDALONE: &[&str] =
+    &["soundcraft-time", "soundcraft-audio-io", "transit-audio-backend", "transit-midi-io", "soundcraft-midi", "soundcraft-video", "soundcraft-dsp"];
 // The image crate also decodes video frames in L0; it is not a UI-only dependency.
 const UI_CRATES: &[&str] = &["craft-ui", "egui", "eframe", "winit", "egui_kittest", "rfd", "egui-wgpu", "egui_glow", "egui_extras", "resvg", "wgpu"];
 // audio-bench is an app over playback and the native backends, not an engine layer.
@@ -74,7 +65,6 @@ const UNSAFE_ALLOWED: &[&str] = &[
     "soundcraft-clap-host",
     "soundcraft-vst3-host",
     "soundcraft-au-host",
-    "soundcraft-asio-panel",
 ];
 
 /// Parse Cargo's string and table lint forms, including workspace inheritance.
