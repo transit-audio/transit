@@ -1593,3 +1593,61 @@ fn an_off_tick_clip_starting_at_the_end_of_a_clip_keeps_the_pedal_down() {
     add_pedal_clip(&mut rig, 2560, 2400, None, pedal_seq(&[(0, 127), (40, 0)]));
     assert_eq!(pedal_at_session_samples(&mut rig, 24), vec![(100, 127), (3550, 0)]);
 }
+
+// #95: a clip whose tick grid starts before its start sample.
+
+/// A clip with a note-on and a CC64 press at tick 0.
+fn tick0_seq() -> soundcraft_midi::Sequence {
+    let mut seq = pedal_seq(&[(0, 127)]);
+    seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start: 0, length: 40 });
+    seq
+}
+
+/// (session sample, event) of every note-on and CC64 the plug-in heard over `blocks` blocks.
+fn tick0_heard(rig: &mut Rig, blocks: usize) -> Vec<(i64, String)> {
+    rig.heard.lock().unwrap().clear();
+    let (frame0, pos0) = (rig.mix.next_frame().0 as i64, rig.pos);
+    rig.render(blocks);
+    let heard = rig.heard.lock().unwrap();
+    heard
+        .iter()
+        .filter_map(|(_, f, e)| {
+            let at = *f as i64 - frame0 + pos0;
+            match (*e)?.message {
+                Message::NoteOn { key, .. } => Some((at, format!("on {key}"))),
+                Message::Control { cc: 64, value } if value >= 64 => Some((at, format!("cc64 {value}"))),
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+#[test]
+fn tick_zero_events_of_an_off_tick_clip_on_a_block_boundary_are_heard_once() {
+    // 2560 is tick 102.4: the clip's grid starts at 2550, in the block before the clip start.
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 2560, 2400, None, tick0_seq());
+    assert_eq!(tick0_heard(&mut rig, 24), vec![(2550, "on 60".to_string()), (2550, "cc64 127".to_string())]);
+}
+
+#[test]
+fn tick_zero_events_of_an_off_tick_clip_in_the_middle_of_a_block_are_heard_once() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    // 2600 is tick 104 exactly; 2610 is tick 104.4, grid 2600, inside block 10 (2560..2816).
+    add_pedal_clip(&mut rig, 2610, 2400, None, tick0_seq());
+    assert_eq!(tick0_heard(&mut rig, 24), vec![(2600, "on 60".to_string()), (2600, "cc64 127".to_string())]);
+}
+
+#[test]
+fn a_locate_onto_an_off_tick_clip_start_presses_the_pedal_once() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 2560, 2400, None, tick0_seq());
+    rig.mix.reset();
+    rig.pos = 2560;
+    let got = tick0_heard(&mut rig, 12);
+    assert_eq!(got.iter().filter(|(_, e)| e.starts_with("cc64")).count(), 1, "{got:?}");
+    assert!(got.iter().filter(|(_, e)| e.starts_with("on")).count() <= 1, "{got:?}");
+}

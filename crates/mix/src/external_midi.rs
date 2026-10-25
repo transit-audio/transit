@@ -70,7 +70,7 @@ fn sounding_notes(s: &Session, t: &Track, pos: Samples, mut visit: impl FnMut(u8
     let pos = pos.saturating_sub(midi_offset(s, t));
     let rtp = Rtp::of(s, t);
     for clip in t.clips() {
-        if clip.muted || clip.start >= pos || clip.end() <= pos {
+        if clip.muted || clip.start.min(super::grid_start(s, clip)) >= pos || clip.end() <= pos {
             continue;
         }
         let ClipContent::Midi { sequence } = &clip.content else { continue };

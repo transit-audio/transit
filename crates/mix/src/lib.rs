@@ -2404,7 +2404,7 @@ fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: usize, mut vi
             // A note-off is clamped to `clip.end()`, which the half-open range excludes: when that
             // sample is the first of this block (`pos == clip.end()`) the clip still has to be visited
             // or the off is never sent and the note holds forever.
-            if clip.end() < pos || clip.start >= end {
+            if clip.end() < pos || clip.start.min(grid_start(s, clip)) >= end {
                 continue;
             }
             let base = s.tempo.samples_to_ticks(clip.start, sr);
@@ -2700,7 +2700,7 @@ fn chase_controllers(s: &Session, t: &Track, pos: Samples, inst: &mut PluginSlot
     let sr = s.sample_rate;
     for clip in t.clips() {
         let ClipContent::Midi { sequence } = &clip.content else { continue };
-        if clip.muted || clip.start >= pos {
+        if clip.muted || clip.start.min(grid_start(s, clip)) >= pos {
             continue;
         }
         let base = s.tempo.samples_to_ticks(clip.start, sr);
