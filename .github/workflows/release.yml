@@ -3,8 +3,7 @@
 # (docs/releasing.md). macOS ships transit.app on a DMG (packaging/macos/package.sh),
 # ad-hoc signed unless the optional signing secrets are set (docs/releasing.md), plus a tarball with
 # the bare binary and the bench harness. Windows ships one zip and one MSI (packaging/windows/transit.wxs):
-# transit-<ver>-windows-x86_64 (native WASAPI and native ASIO). The cpal ASIO host needs the Steinberg
-# ASIO SDK and is build-only, never released (docs/building.md). Every archive also carries the audio-bench
+# transit-<ver>-windows-x86_64 (native WASAPI and native ASIO). Every archive also carries the audio-bench
 # harness and BENCH-README.txt so testers can measure their interfaces without building.
 name: Release
 

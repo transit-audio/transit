@@ -57,34 +57,6 @@ jobs:
       - run: cargo clippy --locked --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings
       - run: cargo test --locked --workspace --features transit/native-wasapi,transit/native-asio
 
-  # ASIO needs Steinberg's SDK, which asio-sys downloads during the build (or ASIO_SDK_URL supplies).
-  # A failed download must not block a merge, so this job reports without gating.
-  windows-asio:
-    name: windows (asio)
-    runs-on: windows-latest
-    timeout-minutes: 60
-    continue-on-error: true
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Rust
-        run: rustup toolchain install stable --profile minimal --component clippy --no-self-update && rustup default stable
-        shell: bash
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: windows-asio
-      # asio-sys needs libclang for bindgen. windows-latest has LLVM in C:\Program Files\LLVM. Pin the
-      # MSVC ABI as docs/building.md describes (otherwise a MinGW libclang yields E0080 layout errors).
-      - name: ASIO build environment
-        shell: pwsh
-        env:
-          # Optional repository secret: a URL of the ASIO SDK zip the owner hosts. Leave it unset to
-          # let asio-sys download the SDK itself (https://www.steinberg.net/asiosdk).
-          ASIO_SDK_URL: ${{ secrets.ASIO_SDK_URL }}
-        run: |
-          ./tools/build-asio.ps1 -SetupOnly -GitHubEnvironment
-      - run: cargo clippy --locked -p transit -p audio-bench --all-targets --features transit/asio,transit/native-wasapi,audio-bench/asio -- -D warnings
-      - run: cargo test --locked -p soundcraft-playback -p audio-bench --features soundcraft-playback/asio,audio-bench/asio
-
   linux:
     name: linux
     runs-on: ubuntu-22.04
