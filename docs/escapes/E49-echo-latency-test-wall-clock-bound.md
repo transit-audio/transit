@@ -94,6 +94,6 @@ before the release was queued, and its 40 ms sleep stood in for "everything due 
 `cargo xtask timing` because the `// timing: median` tag admitted any median. Fixed: the wrap test puts the wrap 300 ms
 ahead and replaces the sleep with a later sentinel note whose send proves everything due earlier was sent or dropped;
 the two wake-latency medians (this one and `an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer`) moved
-to `#[ignore]` measurement tests, and the gated tests keep their delivery and ordering assertions plus a 2 s stall
-bound. Lint change: the `median` tag is removed from `cargo xtask timing`, so a sub-100 ms median ceiling in a
+to `#[ignore]` measurement tests, and the gated tests keep their delivery and ordering assertions plus a 500 ms
+stall bound (a worker that never wakes on data, the #62 class, still fails in the default run). Lint change: the `median` tag is removed from `cargo xtask timing`, so a sub-100 ms median ceiling in a
 non-ignored test is flagged like any other.

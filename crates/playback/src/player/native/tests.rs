@@ -187,8 +187,8 @@ fn an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer() {
     let max = idle_wake_ages().1;
     // Correctness only (E49, #110): every event arrives and the worker's own max is recorded. The
     // wake-on-data latency claim is the ignored `idle_wake_latency_median_is_far_below_the_timer_tick`.
-    // timing: stall-bound a stuck worker takes seconds; scheduler jitter on a loaded host reaches tens of ms
-    assert!(max < Duration::from_secs(2), "max wake latency {max:?}");
+    // timing: stall-bound a worker that never wakes on data misses 500 ms; scheduler jitter on a loaded host reaches tens of ms
+    assert!(max < Duration::from_millis(500), "max wake latency {max:?}");
 }
 
 /// The #62 latency claim, run by hand on a quiet machine (`cargo test -p soundcraft-playback -- --ignored
@@ -236,8 +236,8 @@ fn idle_worker_taps_step_pedal_and_learnable_actions_without_delaying_routes() {
     // Correctness (every round delivered the tap in order and left the routed packets alone) is
     // asserted in the rounds. The wake latency is a host measurement, kept in the ignored test below
     // (E49, #110); here only a stall is a failure.
-    // timing: stall-bound a worker that never wakes takes seconds; a loaded host adds tens of ms
-    assert!(median < Duration::from_secs(2), "idle input must wake with the tap active: {median:?}");
+    // timing: stall-bound a worker that never wakes on data misses 500 ms; a loaded host adds tens of ms
+    assert!(median < Duration::from_millis(500), "idle input must wake with the tap active: {median:?}");
 }
 
 /// The wake-on-data claim with the step tap active, run by hand on a quiet machine (E49, #110).
