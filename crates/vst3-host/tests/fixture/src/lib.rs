@@ -37,6 +37,11 @@
 //! below) gives the module a worker thread that its static destructor waits for, like a real
 //! instrument whose unload hung the process exit (issue #104).
 //!
+//! Scale mode (`VST3_FIXTURE_SCALE`; see `ScaleMode` below) changes how Gain's editor view takes
+//! the content scale (issue #105): `after-attach` accepts a factor before `attached` but applies it
+//! only when one arrives after, then asks for its scaled size through `resizeView`; `refuse`
+//! returns kResultFalse and stays at 320×240.
+//!
 //! The module checks the host's module lifecycle the way real plugins depend on it (see "module
 //! lifecycle" below) and aborts the process when it is broken.
 //!
@@ -537,11 +542,36 @@ struct GainController {
     _live: Live,
 }
 
+/// How the editor view takes the content scale (`VST3_FIXTURE_SCALE`, issue #105).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ScaleMode {
+    /// Scales on every request (issue #101).
+    Always,
+    /// `after-attach`: accepts a factor before `attached` (kResultTrue) but ignores it; one that
+    /// arrives once attached is applied and the view asks for its scaled size through
+    /// `resizeView`. The suspected behavior of Battery 4 and NI's Solid Mix Series.
+    AfterAttach,
+    /// `refuse`: returns kResultFalse and keeps its size.
+    Refuse,
+}
+
+impl ScaleMode {
+    /// Read when a view is made (each test process sets it once).
+    fn current() -> ScaleMode {
+        match std::env::var("VST3_FIXTURE_SCALE").as_deref() {
+            Ok("after-attach") => ScaleMode::AfterAttach,
+            Ok("refuse") => ScaleMode::Refuse,
+            _ => ScaleMode::Always,
+        }
+    }
+}
+
 struct View {
     attached: std::sync::atomic::AtomicBool,
     /// The content scale the host set (`f32` bits; issue #101), 1.0 until then.
     scale: AtomicU32,
     frame: AtomicPtr<IPlugFrame>,
+    mode: ScaleMode,
     _live: Live,
 }
 
@@ -551,6 +581,7 @@ impl View {
             attached: AtomicBool::new(false),
             scale: AtomicU32::new(1.0f32.to_bits()),
             frame: AtomicPtr::new(std::ptr::null_mut()),
+            mode: ScaleMode::current(),
             _live: Live::new(&OBJECTS),
         }
     }
@@ -566,18 +597,23 @@ impl Class for View {
     type Interfaces = (IPlugView, IPlugViewContentScaleSupport);
 }
 
-/// Issue #101: the view scales on request, like Battery 4: it reports its size at the factor and,
-/// once attached, asks the host for it through `resizeView` (the SDK's contract).
+/// Issue #101: the view scales on request: it reports its size at the factor and, once attached,
+/// asks the host for it through `resizeView` (the SDK's contract). Issue #105, scale modes: see
+/// [`ScaleMode`].
 impl IPlugViewContentScaleSupportTrait for View {
     unsafe fn setContentScaleFactor(&self, factor: f32) -> tresult {
         if !(factor > 0.0) {
             return kInvalidArgument;
         }
+        let attached = self.attached.load(Ordering::Relaxed);
+        match self.mode {
+            ScaleMode::Refuse => return kResultFalse,
+            ScaleMode::AfterAttach if !attached => return kResultTrue,
+            _ => {}
+        }
         self.scale.store(factor.to_bits(), Ordering::Relaxed);
         let frame = self.frame.load(Ordering::Relaxed);
-        if self.attached.load(Ordering::Relaxed)
-            && let Some(f) = unsafe { ComRef::from_raw(frame) }
-        {
+        if attached && let Some(f) = unsafe { ComRef::from_raw(frame) } {
             let mut r = self.rect();
             assert_eq!(unsafe { f.resizeView(std::ptr::null_mut(), &mut r) }, kResultOk, "resizeView");
         }
