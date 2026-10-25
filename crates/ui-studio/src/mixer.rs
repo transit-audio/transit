@@ -31,6 +31,8 @@ use soundcraft_model::{BusId, IoDirection, IoMap, IoPath, KeyFrom, Route, SendSl
 /// Strip width and gap (points).
 pub const STRIP_W: f32 = 88.0;
 const GAP: f32 = 2.0;
+/// Space separating ordinary tracks (including groups) from aux buses and returns.
+const FX_GAP: f32 = 12.0;
 /// The fader's top, in dB.
 pub const FADER_MAX_DB: f32 = 12.0;
 
@@ -182,6 +184,8 @@ pub struct MixerLayout {
     pub master: Option<StripLayout>,
     pub add_master: R4,
     pub add_fx: R4,
+    /// Divider before the aux block, clipped to the scrolling lane; absent without both blocks.
+    pub fx_divider: Option<R4>,
     /// The open dropdown's entries.
     pub menu: Vec<MenuItem>,
     /// The bars above a group's strip and its members' strips (slice 2c).
@@ -1022,12 +1026,17 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
     let s = app.engine.session_arc();
     let focus = app.focus_track();
     let master = s.tracks.iter().find(|t| t.kind == TrackKind::Master && !t.hidden);
-    // Session order, which is the arrangement's; members of a collapsed group are out (slice 2c).
-    let channels: Vec<&Track> = s.tracks.iter().filter(|t| t.kind != TrackKind::Master && !t.hidden && !app.tucked(&s, t)).collect();
+    // Stable partition of the visible strips only: the document/arranger order never changes.
+    // Routing folders are tracks and stay inline with their members, not in the aux block.
+    let (mut channels, aux): (Vec<&Track>, Vec<&Track>) =
+        s.tracks.iter().filter(|t| t.kind != TrackKind::Master && !t.hidden && !app.tucked(&s, t)).partition(|t| t.kind != TrackKind::Aux);
+    let track_count = channels.len();
+    let block_gap = if track_count > 0 && !aux.is_empty() { FX_GAP } else { 0.0 };
+    channels.extend(aux);
     // The master strip is pinned right; the others scroll under it.
     let master_rect = Rect::from_min_max(pos2(area.max.x - STRIP_W - 6.0, area.min.y + 4.0), pos2(area.max.x - 6.0, area.max.y - 4.0));
     let lane = Rect::from_min_max(pos2(area.min.x + 4.0, area.min.y + 4.0), pos2(master_rect.min.x - 10.0, area.max.y - 4.0));
-    let content_w = channels.len() as f32 * (STRIP_W + GAP) + 110.0;
+    let content_w = channels.len() as f32 * (STRIP_W + GAP) + block_gap + 110.0;
     app.mixer.hscroll = app.mixer.hscroll.clamp(0.0, (content_w - lane.width()).max(0.0));
     let mut layout = MixerLayout { visible: true, area: r4(area), menu: std::mem::take(&mut app.mixer.layout.menu), ..MixerLayout::default() };
     // The sends block is as tall on every strip (the most sends plus "+ Send"), so the faders
@@ -1039,7 +1048,7 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
     let room = ((free - ins_rows as f32 * INSERT_ROW_H) / SEND_ROW_H).floor().max(0.0) as usize;
     let rows = wanted.min(room);
     for (i, t) in channels.iter().enumerate() {
-        let x = lane.min.x + i as f32 * (STRIP_W + GAP) - app.mixer.hscroll;
+        let x = lane.min.x + i as f32 * (STRIP_W + GAP) + if i >= track_count { block_gap } else { 0.0 } - app.mixer.hscroll;
         let r = Rect::from_min_size(pos2(x, lane.min.y), vec2(STRIP_W, lane.height()));
         if r.max.x < lane.min.x || r.min.x > lane.max.x {
             continue;
@@ -1047,9 +1056,17 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
         let sl = strip(app, ui, &s, t, r, lane, focus == Some(t.id), (rows, ins_rows), &mut layout.menu);
         layout.strips.push(sl);
     }
-    layout.groups = group_links(ui, &s, &channels, lane, area, app.mixer.hscroll);
+    layout.groups = group_links(ui, &s, &channels[..track_count], lane, area, app.mixer.hscroll);
+    if block_gap > 0.0 {
+        let x = lane.min.x + track_count as f32 * (STRIP_W + GAP) + block_gap / 2.0 - app.mixer.hscroll;
+        let divider = Rect::from_min_max(pos2(x, lane.min.y), pos2(x + 1.0, lane.max.y)).intersect(lane);
+        if divider.is_positive() {
+            ui.painter().with_clip_rect(lane).rect_filled(divider, 0.0, TOKENS.line);
+            layout.fx_divider = Some(r4(divider));
+        }
+    }
     // "Add FX Channel" after the last strip.
-    let ax = lane.min.x + channels.len() as f32 * (STRIP_W + GAP) - app.mixer.hscroll + 6.0;
+    let ax = lane.min.x + channels.len() as f32 * (STRIP_W + GAP) + block_gap - app.mixer.hscroll + 6.0;
     let add = Rect::from_min_size(pos2(ax, lane.min.y + 4.0), vec2(96.0, 24.0));
     if add.min.x < lane.max.x {
         let resp = ui.interact(add.intersect(lane), ui.id().with("add_fx"), Sense::click());

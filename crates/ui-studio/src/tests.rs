@@ -462,6 +462,96 @@ fn strip(app: &StudioApp, t: TrackId) -> crate::mixer::StripLayout {
 }
 
 #[test]
+fn mixer_aux_block_keeps_groups_inline_and_leaves_the_document_and_controls_intact() {
+    let (mut app, ctx, mut time, audio) = mixer_app();
+    let fx = app.new_fx_channel(Some(audio), -12.0).unwrap();
+    let r = app.run("track.new", json!({"kind": "instrument", "name": "Keys"})).unwrap();
+    let keys = TrackId(r["tracks"][0].as_u64().unwrap());
+    let group = app.group_tracks(&[audio, keys]).unwrap();
+    let bus = app.new_fx_channel(None, 0.0).unwrap();
+    let r = app.run("track.new", json!({"kind": "midi", "name": "MIDI"})).unwrap();
+    let midi = TrackId(r["tracks"][0].as_u64().unwrap());
+    app.run("track.new", json!({"kind": "master"})).unwrap();
+    app.focus(audio);
+    let before = serde_json::to_value(app.engine.session()).unwrap();
+    let history = undo_len(&mut app);
+    for full in [false, true] {
+        app.ui.mixer_full = full;
+        frames(&mut app, &ctx, 3, &mut time);
+        let layout = &app.mixer.layout;
+        assert_eq!(layout.strips.iter().map(|s| s.track).collect::<Vec<_>>(), [group.0, audio.0, keys.0, midi.0, fx.0, bus.0]);
+        let divider = layout.fx_divider.expect("two blocks have a divider");
+        assert!(strip(&app, midi).rect[2] < divider[0]);
+        assert!(divider[2] < strip(&app, fx).rect[0]);
+        assert!(strip(&app, bus).rect[2] < layout.master.as_ref().unwrap().rect[0]);
+        assert_eq!(layout.groups.len(), 1);
+        assert_eq!(layout.groups[0].members, [audio.0, keys.0]);
+        assert_eq!(layout.groups[0].rect[2], strip(&app, keys).rect[2] - 2.0);
+        assert_eq!(serde_json::to_value(app.engine.session()).unwrap(), before);
+        assert_eq!(undo_len(&mut app), history);
+    }
+    // The relocated strip still sends a click to its own track, not the old positional neighbor.
+    let mute = strip(&app, fx).mute;
+    click(&mut app, mid(mute));
+    frames(&mut app, &ctx, 30, &mut time);
+    assert!(app.engine.session().track(fx).unwrap().mixer.mute);
+    assert!(!app.engine.session().track(midi).unwrap().mixer.mute);
+    assert!(app.engine.undo());
+    assert_eq!(serde_json::to_value(app.engine.session()).unwrap(), before);
+}
+
+#[test]
+fn mixer_aux_divider_scrolls_with_the_block_while_master_stays_pinned() {
+    let (mut app, ctx, mut time, _) = mixer_app();
+    let fx = app.new_fx_channel(None, 0.0).unwrap();
+    for _ in 0..18 {
+        app.run("track.new", json!({"kind": "audio"})).unwrap();
+    }
+    frames(&mut app, &ctx, 3, &mut time);
+    let master = app.mixer.layout.master.clone().unwrap().rect;
+    assert!(!app.mixer.layout.strips.iter().any(|s| s.track == fx.0));
+    assert!(app.mixer.layout.fx_divider.is_none(), "offscreen divider is clipped");
+    app.mixer.hscroll = f32::MAX;
+    frames(&mut app, &ctx, 3, &mut time);
+    let layout = &app.mixer.layout;
+    let divider = layout.fx_divider.expect("scrolling reaches the aux divider");
+    let fx_rect = strip(&app, fx).rect;
+    assert_eq!(layout.master.as_ref().unwrap().rect, master);
+    assert!(divider[0] > layout.area[0] && divider[2] < fx_rect[0]);
+    assert!(fx_rect[2] < layout.add_fx[0] && layout.add_fx[2] < master[0], "the final strip and Add FX remain reachable");
+    let old_x = divider[0];
+    app.mixer.hscroll -= 20.0;
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(app.mixer.layout.fx_divider.unwrap()[0], old_x + 20.0);
+}
+
+#[test]
+fn mixer_aux_block_respects_collapsed_groups_and_omits_empty_dividers() {
+    let (mut app, ctx, mut time, audio) = mixer_app();
+    assert!(app.mixer.layout.fx_divider.is_none());
+    let fx = app.new_fx_channel(None, 0.0).unwrap();
+    let group = app.group_tracks(&[audio, fx]).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(app.mixer.layout.strips.iter().map(|s| s.track).collect::<Vec<_>>(), [group.0, audio.0, fx.0]);
+    assert!(app.mixer.layout.fx_divider.is_some());
+    assert_eq!(app.mixer.layout.groups[0].members, [audio.0]);
+    app.toggle_group(group);
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(app.mixer.layout.strips.iter().map(|s| s.track).collect::<Vec<_>>(), [group.0]);
+    assert!(app.mixer.layout.fx_divider.is_none());
+    assert!(app.mixer.layout.groups.is_empty());
+    app.run("track.hide", json!({"tracks": [group.0], "hidden": true})).unwrap();
+    let outside = app.new_fx_channel(None, 0.0).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(app.mixer.layout.strips.iter().map(|s| s.track).collect::<Vec<_>>(), [outside.0]);
+    assert!(app.mixer.layout.fx_divider.is_none(), "an aux-only mixer needs no separator");
+    app.run("track.hide", json!({"tracks": [outside.0], "hidden": true})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    assert!(app.mixer.layout.strips.is_empty());
+    assert!(app.mixer.layout.fx_divider.is_none());
+}
+
+#[test]
 fn the_fader_cap_has_a_line_at_the_value() {
     use crate::{fine::Target, mixer::db_to_k};
     let (mut app, ctx, mut time, t) = mixer_app();

@@ -31,6 +31,11 @@ UI code follows the same no-panic rule (`#![deny(clippy::unwrap_used, ...)]` in 
   nothing runs unasked. Tests supply a stub that records the question and answers
   (`plugin_header_tests.rs`); a test never opens a real dialog.
 - **MIDI Monitor:** Window > MIDI Monitor (`window.midi_monitor`) and the transport bar's MIDI light; see `midi-monitor.md`.
+- **Mixer ordering** (`mixer.rs`, #86): visible Aux strips (bus and FX returns) form a separate
+  block after the other tracks, with a divider when both blocks are present. Each block keeps
+  session order; routing folders remain inline with their member tracks. Hidden tracks and
+  collapsed members remain omitted. The divider scrolls with the strips; Master stays pinned
+  right. This changes only mixer presentation, never arranger order, routing or strip controls.
 - Strings are American English.
 
 ## Clip fades and crossfades
