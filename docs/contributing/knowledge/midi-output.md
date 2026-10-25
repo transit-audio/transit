@@ -124,6 +124,53 @@ sends it at `H + destination offset`.
 - **Exit**: dropping the Player stops the thread, which releases everything on every open port; the
   drop waits up to 500 ms for that and never joins a stuck driver.
 
+## Feedback protection (#99)
+
+A controller that merges its MIDI In to its Out (MIDI thru: the Arturia KeyStep Pro in #99) sends
+every echoed message straight back. With a track's input and destination on that one device, a
+single key press, or transit's own Sustain off and All Notes Off, went round at the output poll
+(about 1 ms per pass) until the app was closed. Three guards, each with its own test:
+
+- **No self-echo by default.** `Native::service` gives each input port its own copy of a track's
+  route (`port_routes`): when the port and the destination are one device the route keeps
+  capturing for a recording but its `echo` is off. The rule is
+  `soundcraft_model::same_midi_device` (one function, tested): same backend, and either the
+  backend ids name one device (`device_of_id`: a WinMM interface path up to its `#{class}`
+  suffix) or the port names match once a direction suffix is removed (`device_name`: `MIDI In`,
+  `Out 2`, `Input`, `MIDIIN2 (x)`, a trailing `MIDI`). Names are compared even when both ids are
+  present (the in and out paths of one USB device have not been checked on hardware). Playback to
+  the port is unaffected. The per-track opt-in is `Track::allow_echo_to_device` (saved, off by
+  default, not written while off), set by `midi.output {allow_echo_to_device}`: the Out menu's
+  "Allow echo to this device". `MidiStatus::self_echo` lists the tracks the rule applies to; the
+  Out tooltip and the External Instrument card's status row say "Echo back to <device> is off to
+  prevent a feedback loop".
+- **Channel-mode messages are never echoed.** CC 120 to 127 in reach the track (recording, the
+  instrument's own release where it has one) but the ingress worker never pushes them to the echo
+  ring. An incoming CC 123 therefore sends nothing to the port: the output thread's echo held state
+  keeps its notes, which end with explicit note-offs when the echo route is revoked.
+- **Storm detector** (`player/ingress/storm.rs`). Per input port, on the worker, counters only: in
+  windows of 50 ms of arrival time, a window is hot above 2,000 messages a second (`RATE`; twice a
+  1,000-a-second sequencer and under a DIN link's 3,125) or when one identical message repeats more
+  than 250 times a second (`REPEAT`; a thru loop repeats each message once per round trip, a
+  musical source does not; this catches a round trip up to 4 ms). Clock and Active Sensing never
+  count. Four hot windows in a row (200 ms) mute the port: its permits are invalidated at once,
+  Main sees the routes revoked and releases what they hold through the usual path (the
+  instrument's notes, `release_echo` on the output port), and keeps the port without routes (by
+  key, across a close and reopen) until the user re-enables it. `MidiStatus::muted_inputs` names
+  it and the tracks it feeds; "<port> muted: feedback storm detected; click to re-enable" is a
+  button in the track's MIDI input menu and the External Instrument card's status row
+  (`MutedInput::reenable`). The detector runs with echo allowed too.
+
+Tests: `crates/playback/src/player/native/tests/feedback.rs` (a fake device whose output is looped
+to its own input: the storm forms with echo allowed and the detector off; the default does not
+echo; allowed with the detector on, the port mutes, the held note and pedal are released and the
+flag is set; a 1,000-a-second stream is never muted; channel-mode CCs are not echoed and an
+incoming All Notes Off sends no release), `crates/playback/src/player/ingress/storm.rs` (the
+windows on stamped times: dense streams, a flood, a looping message, Clock, bursts),
+`crates/model/src/midi_output.rs` (the device rule, the opt-in's persistence),
+`crates/engine/tests/midi_output.rs`, `crates/ui-studio/src/midi_output.rs`. Escape record:
+[E55](../../escapes/E55-midi-feedback-loop-ran-until-the-app-was-closed.md).
+
 ## External Instrument (ADR 0020)
 
 An instrument track's instrument slot can hold an External Instrument (`external.instrument`,
