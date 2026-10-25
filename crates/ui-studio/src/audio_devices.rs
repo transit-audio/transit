@@ -586,6 +586,34 @@ impl StudioApp {
         }
     }
 
+    /// The report for the Copy diagnostics buttons, except what a worker thread adds: the machine
+    /// facts and the log lines. The device list is the window's (cached, or the fake's), listed
+    /// again without opening anything when the window has not listed yet.
+    pub(crate) fn diagnostics_report(&mut self, now: f64) -> crate::diagnostics::Report {
+        let systems = match (&self.audio_devices.systems, &self.audio_devices.fake) {
+            (Some(s), _) => s.clone(),
+            (None, Some(f)) => f.systems.clone(),
+            (None, None) => self.machine_listing().0,
+        };
+        // The lines the window shows, as last drawn; computed when the window has not drawn them.
+        let opened = if self.audio_devices.layout.opened.is_empty() { opened_lines(self, now) } else { self.audio_devices.layout.opened.clone() };
+        let telemetry = match (&self.player, self.telemetry.injected) {
+            (Some(p), _) => Some(p.callback_telemetry()),
+            (None, injected) => injected,
+        };
+        let version = if self.about.app_version.is_empty() { env!("CARGO_PKG_VERSION") } else { self.about.app_version.as_str() };
+        crate::diagnostics::Report {
+            version: version.to_owned(),
+            build: self.about.build.clone(),
+            systems,
+            settings: self.ui.audio.clone(),
+            opened,
+            telemetry,
+            log_dir: self.services.config_dir.as_ref().map(|d| d.join("logs")),
+            ..Default::default()
+        }
+    }
+
     /// The devices to offer: the fake's, else the machine's (only with a player). The native ASIO
     /// system names every installed driver and probes only [`Self::asio_selection`], on a worker
     /// thread ([`Self::start_asio_listing`]): until it answers the ASIO system is listed empty and
@@ -1105,6 +1133,7 @@ impl Section {
 /// Audio › Audio Devices.
 pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     check(app);
+    app.poll_diagnostics(ctx);
     app.audio_devices.layout = AudioDevicesLayout::default();
     if let Some((kind, note)) = app.audio_devices.measure_note.take() {
         match kind {
@@ -1138,6 +1167,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let audio_on = app.player.is_some() || app.audio_devices.fake.is_some();
     let (mut apply, mut reconnect, mut rescan, mut revert) = (false, false, false, false);
     let mut native_panel: Option<String> = None;
+    let mut copy_diagnostics = false;
     // The path table is the engine's, read again every frame; one edit at most per frame.
     let io = app.engine.io_map().clone();
     let wasapi = crate::audio_devices_io::is_wasapi(&if io.system.is_empty() {
@@ -1262,6 +1292,9 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                 ui.label(egui::RichText::new(n).color(TOKENS.text).size(11.5));
                             });
                         }
+                        let (rect, clicked) = app.diagnostics_button(ui);
+                        controls.push(("Copy diagnostics".into(), "copy_diagnostics", rect));
+                        copy_diagnostics |= clicked;
                     });
                 if recording {
                     ui.label(egui::RichText::new(REFUSED_RECORDING).color(TOKENS.record).size(11.5));
@@ -1625,6 +1658,9 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     if reconnect {
         app.reconnect_audio_devices();
     }
+    if copy_diagnostics {
+        app.request_diagnostics(ctx.input(|i| i.time));
+    }
     if rescan {
         app.audio_devices.forget_listing();
     }
@@ -1639,7 +1675,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
 }
 
 /// What is open now: the output with its rate, channels and buffer, and the input.
-fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
+pub(crate) fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
     let mut lines = Vec::new();
     // A native backend reports what it opened: the device sample format and its latency figure.
     let native = app.player.as_ref().is_some_and(|p| p.native_backend);

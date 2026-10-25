@@ -42,6 +42,8 @@ pub struct TelemetryLayout {
     pub rows: Vec<String>,
     /// The details window's "Reset peak" button.
     pub reset_peak: crate::arrange::R4,
+    /// The details window's "Copy diagnostics" button.
+    pub copy_diagnostics: crate::arrange::R4,
 }
 
 #[derive(Default)]
@@ -187,6 +189,7 @@ pub fn poll(app: &mut StudioApp, ctx: &egui::Context) -> bool {
 
 /// The details window: the duration histogram as a text table and the raw counts.
 pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
+    app.poll_diagnostics(ctx);
     app.telemetry.layout.window = [0.0; 4];
     app.telemetry.layout.rows.clear();
     if !app.telemetry.open {
@@ -196,6 +199,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let snap = app.telemetry.snap;
     let rows = detail_rows(&snap);
     let mut reset_clicked = false;
+    let mut copy_clicked = false;
+    let mut copy_rect = egui::Rect::NOTHING;
     let mut reset_rect = [0.0; 4];
     let mut open = true;
     let r = egui::Window::new("Callback Telemetry")
@@ -238,6 +243,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                     reset_clicked = true;
                 }
                 ui.label(egui::RichText::new(format!("Now {} (last second)", load_text(snap.current_load_ppm))).color(TOKENS.text_dim));
+                (copy_rect, copy_clicked) = app.diagnostics_button(ui);
             });
             ui.label(egui::RichText::new(EXPLAIN).color(TOKENS.text_dim).size(11.0));
         });
@@ -246,6 +252,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     }
     app.telemetry.layout.rows = rows;
     app.telemetry.layout.reset_peak = reset_rect;
+    app.telemetry.layout.copy_diagnostics = crate::arrange::r4(copy_rect);
+    if copy_clicked {
+        app.request_diagnostics(ctx.input(|i| i.time));
+    }
     if reset_clicked {
         app.reset_peak_load();
     }
