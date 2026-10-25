@@ -2,7 +2,7 @@
 //! backend needs of a JACK server and of one client of it. `crate::ffi` implements it over the real
 //! library, `crate::fake` over a scripted server, so everything above runs in tests anywhere.
 
-use crate::engine::Shared;
+use crate::engine::{Engine, Shared};
 use std::sync::Arc;
 
 /// One physical audio port of the server, by its full name ("system:capture_1").
@@ -46,6 +46,9 @@ impl std::fmt::Display for ClientError {
 pub(crate) trait JackApi: Send + Sync {
     /// `jack_client_open` with `JackNoStartServer`; the server may change `name` to make it unique.
     fn open_client(&self, name: &str) -> Result<Box<dyn JackClient>, ClientError>;
+    /// What the library says it is (`jack_get_version_string`, optional in jack.h): "1.9.20" for
+    /// JACK 2, a text naming PipeWire for PipeWire's libjack. `None` where it is missing.
+    fn version(&self) -> Option<String>;
 }
 
 /// One open client. Control-thread calls only, one thread at a time (the backend keeps it behind a
@@ -62,10 +65,20 @@ pub(crate) trait JackClient: Send {
     /// Registers this client's audio port `short` (`in_1`, `out_1`...): an input of ours (fed from
     /// a capture port) when `input`, else an output. Returns its full name.
     fn register_port(&mut self, short: &str, input: bool) -> Result<String, String>;
-    /// Installs the callbacks over `shared` and activates the client. Once per client.
-    fn activate(&mut self, shared: Arc<Shared>) -> Result<(), String>;
+    /// Installs the callbacks over `shared` with `engine` as the process state (both directions'
+    /// user callbacks), and activates the client. Once per client. The engine is dropped after the
+    /// client closed.
+    fn activate(&mut self, shared: Arc<Shared>, engine: Engine) -> Result<(), String>;
     /// Connects `source` (an output port) to `destination` (an input port); one that exists is fine.
     fn connect(&mut self, source: &str, destination: &str) -> Result<(), String>;
+    /// The full names of the ports `port` is connected to (`jack_port_get_all_connections`).
+    #[cfg(test)]
+    fn connections(&self, port: &str) -> Vec<String>;
+    /// Asks the server for a new quantum (`jack_set_buffer_size`): every client of the server gets
+    /// it. Tests only (the app never changes the server's quantum, ADR 0021 decision 4).
+    #[cfg(test)]
+    #[cfg_attr(not(all(target_os = "linux", feature = "libjack")), allow(dead_code))]
+    fn set_buffer_size(&mut self, frames: u32) -> Result<(), String>;
     /// Removes the client from the process graph and disconnects its ports (`jack_deactivate`).
     fn deactivate(&mut self) -> Result<(), String>;
     /// Closes the client; the callback state is freed after the server has let go of it. Never

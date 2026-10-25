@@ -1,11 +1,12 @@
 //! A scripted JACK server for tests (ADR 0021, "Fake server"): it opens clients, lists physical
 //! ports, records registrations, activations, connections and closes, and drives the callbacks the
 //! real libjack would call (`process`, buffer size, sample rate, xrun, info shutdown) through the
-//! same safe handlers `crate::callback` calls.
+//! same safe engine and handlers `crate::callback` calls.
 
 use crate::api::{ClientError, JackApi, JackClient, PhysicalPort};
-use crate::engine::{self, OutputPlanes, Shared};
+use crate::engine::{Clock, Cycle, Engine, InputPlanes, OutputPlanes, Shared};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::time::Instant;
 
 /// What the fake server knows of one client.
 #[derive(Debug, Default)]
@@ -21,6 +22,17 @@ pub(crate) struct ClientRecord {
     pub(crate) closed_on: Option<String>,
     pub(crate) connections: Vec<(String, String)>,
     pub(crate) shared: Option<Arc<Shared>>,
+    /// The process engine `activate` was given, dropped at close (as `crate::ffi` frees it).
+    pub(crate) engine: Option<EngineSlot>,
+}
+
+/// The engine of an active fake client.
+pub(crate) struct EngineSlot(Arc<Mutex<Engine>>);
+
+impl std::fmt::Debug for EngineSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Engine")
+    }
 }
 
 #[derive(Debug)]
@@ -33,6 +45,10 @@ struct State {
     buffer: u32,
     ports: Vec<PhysicalPort>,
     clients: Vec<ClientRecord>,
+    version: Option<String>,
+    /// The frame counter and JACK's clock, µs, at the next cycle's start.
+    frames: u32,
+    usecs: u64,
 }
 
 /// The scripted server. Clones share it.
@@ -45,7 +61,19 @@ impl FakeServer {
     /// A running server at `rate` and quantum `buffer` with `ports` (full names; `capture` per port).
     pub(crate) fn running(rate: u32, buffer: u32, ports: &[(&str, bool)]) -> Self {
         let ports = ports.iter().map(|(name, capture)| PhysicalPort { name: (*name).to_owned(), capture: *capture }).collect();
-        Self { state: Arc::new(Mutex::new(State { library: true, running: true, refuse: None, rate, buffer, ports, clients: Vec::new() })) }
+        let state = State {
+            library: true,
+            running: true,
+            refuse: None,
+            rate,
+            buffer,
+            ports,
+            clients: Vec::new(),
+            version: None,
+            frames: 0,
+            usecs: 1_000_000,
+        };
+        Self { state: Arc::new(Mutex::new(state)) }
     }
 
     /// JACK 2 with one stereo interface: `system:capture_1..2`, `system:playback_1..2`.
@@ -97,11 +125,41 @@ impl FakeServer {
         self.clients(|c| c.iter().find(|c| c.active && !c.closed).and_then(|c| c.shared.clone()))
     }
 
-    /// One process cycle of `frames` on every active client, over `outputs` as its port buffers.
-    pub(crate) fn cycle(&self, frames: u32, outputs: &mut [Vec<f32>]) {
-        if let Some(shared) = self.active_shared() {
-            engine::process(&shared, frames, &mut VecPlanes(outputs));
-        }
+    /// The library names itself `version` (`jack_get_version_string`).
+    pub(crate) fn set_version(&self, version: &str) {
+        self.lock().version = Some(version.to_owned());
+    }
+
+    /// Sets the frame counter of the next cycle (to script a wrap or a jump).
+    pub(crate) fn set_frame_counter(&self, frames: u32) {
+        self.lock().frames = frames;
+    }
+
+    /// The engine of the active client.
+    fn active_engine(&self) -> Option<Arc<Mutex<Engine>>> {
+        self.clients(|c| c.iter().find(|c| c.active && !c.closed).and_then(|c| c.engine.as_ref().map(|e| Arc::clone(&e.0))))
+    }
+
+    /// One process cycle of `frames` on the active client over `outputs` and `inputs` as its port
+    /// buffers, with the cycle clock advancing at the nominal rate; `late_us` is how long after the
+    /// cycle start the callback reads `jack_get_time`. False when no client is active.
+    pub(crate) fn cycle_at(&self, frames: u32, late_us: u64, outputs: &mut [Vec<f32>], inputs: &[Vec<f32>]) -> bool {
+        let Some(engine) = self.active_engine() else { return false };
+        let clock = {
+            let mut state = self.lock();
+            let clock = Clock { current_frames: state.frames, current_usecs: state.usecs, now_usecs: state.usecs + late_us };
+            state.frames = state.frames.wrapping_add(frames);
+            state.usecs += u64::from(frames) * 1_000_000 / u64::from(state.rate.max(1));
+            clock
+        };
+        let cycle = Cycle { frames, arrival: Instant::now(), clock: Some(clock) };
+        engine.lock().unwrap_or_else(PoisonError::into_inner).process(cycle, &mut VecPlanes(outputs), &InVecPlanes(inputs));
+        true
+    }
+
+    /// [`FakeServer::cycle_at`] with the callback reading the clock 100 µs into the cycle.
+    pub(crate) fn cycle(&self, frames: u32, outputs: &mut [Vec<f32>], inputs: &[Vec<f32>]) -> bool {
+        self.cycle_at(frames, 100, outputs, inputs)
     }
 
     /// The server stops: libjack calls the info shutdown callback of every active client.
@@ -114,6 +172,11 @@ impl FakeServer {
         for s in shared {
             s.on_shutdown();
         }
+    }
+
+    /// The server runs again (after [`FakeServer::shutdown`]): new clients open.
+    pub(crate) fn restart(&self) {
+        self.lock().running = true;
     }
 
     pub(crate) fn xrun(&self) {
@@ -151,7 +214,24 @@ impl OutputPlanes for VecPlanes<'_> {
     }
 }
 
+/// Plain vectors as the input port buffers of one cycle.
+pub(crate) struct InVecPlanes<'a>(pub(crate) &'a [Vec<f32>]);
+
+impl InputPlanes for InVecPlanes<'_> {
+    fn count(&self) -> usize {
+        self.0.len()
+    }
+
+    fn plane(&self, index: usize) -> Option<&[f32]> {
+        self.0.get(index).map(Vec::as_slice)
+    }
+}
+
 impl JackApi for FakeServer {
+    fn version(&self) -> Option<String> {
+        self.lock().version.clone()
+    }
+
     fn open_client(&self, name: &str) -> Result<Box<dyn JackClient>, ClientError> {
         let mut state = self.lock();
         if !state.library {
@@ -213,7 +293,7 @@ impl JackClient for FakeClient {
         })
     }
 
-    fn activate(&mut self, shared: Arc<Shared>) -> Result<(), String> {
+    fn activate(&mut self, shared: Arc<Shared>, engine: Engine) -> Result<(), String> {
         self.record(|c, running| {
             if !*running {
                 return Err("the server is gone".into());
@@ -222,6 +302,7 @@ impl JackClient for FakeClient {
                 return Err("the callbacks are installed once".into());
             }
             c.shared = Some(shared);
+            c.engine = Some(EngineSlot(Arc::new(Mutex::new(engine))));
             c.active = true;
             c.activations += 1;
             Ok(())
@@ -238,6 +319,29 @@ impl JackClient for FakeClient {
         })
     }
 
+    #[cfg(test)]
+    fn connections(&self, port: &str) -> Vec<String> {
+        self.record(|c, _| {
+            c.connections
+                .iter()
+                .filter_map(|(a, b)| {
+                    if a == port {
+                        Some(b.clone())
+                    } else if b == port {
+                        Some(a.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        })
+    }
+
+    fn set_buffer_size(&mut self, frames: u32) -> Result<(), String> {
+        self.server.set_buffer_size(frames);
+        Ok(())
+    }
+
     fn deactivate(&mut self) -> Result<(), String> {
         self.record(|c, _| {
             c.active = false;
@@ -251,6 +355,7 @@ impl JackClient for FakeClient {
         self.record(|c, _| {
             c.active = false;
             c.closed = true;
+            c.engine = None;
             c.closed_on = std::thread::current().name().map(str::to_owned);
             Ok(())
         })

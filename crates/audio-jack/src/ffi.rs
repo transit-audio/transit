@@ -8,7 +8,7 @@
 
 use crate::api::{ClientError, JackApi, JackClient, PhysicalPort};
 use crate::callback::{self, CallbackState};
-use crate::engine::Shared;
+use crate::engine::{Engine, Shared};
 use jack_sys as j;
 use std::ffi::{CStr, CString, c_char, c_ulong, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -59,6 +59,20 @@ impl JackApi for LibJack {
             });
         }
         Ok(Box::new(LibClient { client, inputs: Vec::new(), outputs: Vec::new(), state: std::ptr::null_mut() }))
+    }
+
+    fn version(&self) -> Option<String> {
+        let library = j::library().ok()?;
+        // SAFETY: jack.h declares "const char * jack_get_version_string(void)
+        // JACK_OPTIONAL_WEAK_EXPORT;", so the symbol, when present, has exactly this type;
+        // libloading's `get` returns an error (not a dangling symbol) when it is missing. The
+        // library stays loaded for the life of the process (jack-sys keeps it in a static).
+        let get = unsafe { library.get::<unsafe extern "C" fn() -> *const c_char>(b"jack_get_version_string\0") }.ok()?;
+        // SAFETY: jack.h, jack_get_version_string: "@return Human readable string describing JACK
+        // version being used." A static C string of the library (or NULL, which `owned` maps to
+        // empty), copied at once.
+        let text = unsafe { owned(get()) };
+        (!text.is_empty()).then_some(text)
     }
 }
 
@@ -211,11 +225,12 @@ impl JackClient for LibClient {
         Ok(unsafe { owned(j::jack_port_name(port)) })
     }
 
-    fn activate(&mut self, shared: Arc<Shared>) -> Result<(), String> {
+    fn activate(&mut self, shared: Arc<Shared>, engine: Engine) -> Result<(), String> {
         if !self.state.is_null() {
             return Err("the callbacks are installed once per client".into());
         }
-        self.state = Box::into_raw(Box::new(CallbackState::new(shared, self.outputs.clone().into_boxed_slice())));
+        let ports = (self.outputs.clone().into_boxed_slice(), self.inputs.clone().into_boxed_slice());
+        self.state = Box::into_raw(Box::new(CallbackState::new(shared, self.client, ports.0, ports.1, engine)));
         // Every callback gets `arg`, the leaked state, which stays allocated until `close_now` has
         // returned from jack_client_close.
         let arg = self.state.cast::<c_void>();
@@ -266,6 +281,51 @@ impl JackClient for LibClient {
         // a non-zero error code". The client is open and active; both names are NUL-terminated.
         let code = unsafe { j::jack_connect(self.client, c_source.as_ptr(), c_destination.as_ptr()) };
         if code == 0 || code == EEXIST { Ok(()) } else { Err(format!("jack_connect returned {code}")) }
+    }
+
+    #[cfg(test)]
+    fn connections(&self, port: &str) -> Vec<String> {
+        let Ok(c_port) = CString::new(port) else { return Vec::new() };
+        // SAFETY: jack.h, jack_port_by_name: "@return address of the jack_port_t named @a
+        // port_name." (NULL when there is none). The client is open; the name is NUL-terminated.
+        let handle = unsafe { j::jack_port_by_name(self.client, c_port.as_ptr()) };
+        if handle.is_null() {
+            return Vec::new();
+        }
+        // SAFETY: jack.h, jack_port_get_all_connections: "@return a null-terminated array of full
+        // port names to which the @a port is connected. If none, returns NULL." and "You may not
+        // call this function from code that is executed in response to a JACK event" (a control
+        // thread calls it); "You need not be the owner of the port". `handle` came from
+        // jack_port_by_name on this open client.
+        let array = unsafe { j::jack_port_get_all_connections(self.client, handle) };
+        let mut found = Vec::new();
+        if array.is_null() {
+            return found;
+        }
+        for i in 0.. {
+            // SAFETY: the array is NULL-terminated (above) and `i` stops at that entry.
+            let entry = unsafe { *array.add(i) };
+            if entry.is_null() {
+                break;
+            }
+            // SAFETY: a non-NULL entry of the array, a NUL-terminated port name valid until the
+            // jack_free below, after this copy.
+            found.push(unsafe { owned(entry) });
+        }
+        // SAFETY: jack.h: "The caller is responsible for calling jack_free() on any non-NULL
+        // returned value." Freed once; no entry is used afterwards.
+        unsafe { j::jack_free(array.cast::<c_void>()) };
+        found
+    }
+
+    #[cfg(test)]
+    fn set_buffer_size(&mut self, frames: u32) -> Result<(), String> {
+        // SAFETY: jack.h, jack_set_buffer_size: "Change the buffer size passed to the @a
+        // process_callback." "@param nframes new buffer size. Must be a power of two." (the tests
+        // pass 64, 128 or 256) "@return 0 on success, otherwise a non-zero error code". The client
+        // is open; the call is made on a test's control thread, never from a JACK callback.
+        let code = unsafe { j::jack_set_buffer_size(self.client, frames) };
+        check(code, "jack_set_buffer_size")
     }
 
     fn deactivate(&mut self) -> Result<(), String> {
