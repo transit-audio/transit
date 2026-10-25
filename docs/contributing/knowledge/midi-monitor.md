@@ -31,8 +31,10 @@ mapping across seeks or loop wraps.
 
 The producers do no allocation, locking, logging or blocking for the monitor: a `Copy` struct
 into a preallocated ring, a few relaxed atomics. No monitor rows are produced while the window is closed
-(`Tap::enabled`). The backend still captures bounded SysEx diagnostics; ingress drains and discards
-these while closed so stale captures do not fill the monitor on reopening. The ingress worker reads input in the order it
+(`Tap::enabled`), and the ingress worker runs no monitor work (`Mon::watch`) then. SysEx capture is gated by the
+monitor being on: the ingress worker sets a per-port atomic that the OS callback reads once per `F0`, so with the
+monitor off the callback only counts dropped SysEx bytes, as before the monitor. Switching on discards stale captures
+and rebaselines the drop and truncation counts so the first frame is clean. The ingress worker reads input in the order it
 pops it. A port with no admitting route is read without being popped (`for_each_pending`), so a
 route attached later keeps its backlog; such a port is trimmed only past 512 pending events, all of
 them already shown. While the monitor is on, `Native::service` opens every present input port with
