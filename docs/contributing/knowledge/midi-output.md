@@ -144,6 +144,11 @@ the latency `manual_ms` set by hand; the measured latency is per machine (Measur
   mix (and every bare MIDI-out track) waits for the synth. Were the device's notes delayed by A
   too, the synth would land late by A and raising `manual_ms` would only delay the rest of the
   mix.
+- **The card's rows** (`external_instrument.rs`, `Rows`; #96): Out (the track's MIDI port and
+  channel: the same setting and popup as the header chip), Return, Latency (the field with Measure
+  beside it; Measure is off with the tooltip "Choose a MIDI Out port and a Return first" until both
+  are set), the result line under it (Manual or Measured text, Keep at its end), Gain, and a status
+  row last for refusals and notices. The Devices row takes the card's height.
 - **Missing states.** No audio device, no live input (not duplex), a return path this interface
   does not have, no port chosen, a port the output thread reports missing or failed, or no MIDI
   runtime at all: the strip is silent and reports 0, so compensation does not move. The Player
