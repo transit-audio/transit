@@ -587,13 +587,14 @@ impl StudioApp {
     }
 
     /// The report for the Copy diagnostics buttons, except what a worker thread adds: the machine
-    /// facts and the log lines. The device list is the window's (cached, or the fake's), listed
-    /// again without opening anything when the window has not listed yet.
+    /// facts and the log lines. The device list is the window's (cached, or the fake's); empty when
+    /// the window has not listed yet, in which case the worker lists it (enumeration only, no
+    /// stream), so Callback Telemetry's button does not block the UI thread.
     pub(crate) fn diagnostics_report(&mut self, now: f64) -> crate::diagnostics::Report {
         let systems = match (&self.audio_devices.systems, &self.audio_devices.fake) {
             (Some(s), _) => s.clone(),
             (None, Some(f)) => f.systems.clone(),
-            (None, None) => self.machine_listing().0,
+            (None, None) => Vec::new(), // listed by the worker, see `request_diagnostics`
         };
         // The lines the window shows, as last drawn; computed when the window has not drawn them.
         let opened = if self.audio_devices.layout.opened.is_empty() { opened_lines(self, now) } else { self.audio_devices.layout.opened.clone() };

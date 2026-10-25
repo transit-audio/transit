@@ -124,11 +124,12 @@ fn run(program: &str, args: &[&str]) -> Result<String, String> {
     std::thread::Builder::new()
         .name("transit-diagnostics-probe".into())
         .spawn(move || {
-            let out = std::process::Command::new(&program)
-                .args(&args)
-                .stdin(std::process::Stdio::null())
-                .output()
-                .map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { "not installed".to_owned() } else { e.to_string() });
+            let mut command = std::process::Command::new(&program);
+            command.args(&args).stdin(std::process::Stdio::null());
+            // No console window flashes for the helper (Windows).
+            #[cfg(windows)]
+            std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // CREATE_NO_WINDOW
+            let out = command.output().map_err(|e| if e.kind() == std::io::ErrorKind::NotFound { "not installed".to_owned() } else { e.to_string() });
             let _ = tx.send(out);
         })
         .map_err(|e| e.to_string())?;
@@ -226,6 +227,8 @@ fn replace_ci(text: &str, needle: &str, with: &str) -> String {
 /// Everything the report prints.
 #[derive(Debug, Clone, Default)]
 pub struct Report {
+    /// When the report was made, seconds since the Unix epoch (printed as UTC).
+    pub generated: u64,
     pub version: String,
     /// `<short sha> <date>`, or empty when the build has none.
     pub build: String,
@@ -255,6 +258,7 @@ impl Report {
             o.push_str(" ==\n");
         };
         o.push_str("transit diagnostics report\n");
+        o.push_str(&format!("Generated: {}\n", generated_text(self.generated)));
         section(&mut o, "transit");
         o.push_str(&format!("Version: {}\n", self.version));
         o.push_str(&format!("Build: {}\n", or_unknown(&self.build)));
@@ -342,8 +346,25 @@ impl Report {
     }
 }
 
+/// Seconds since the Unix epoch, now.
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// `YYYY-MM-DD HH:MM UTC`.
+pub fn generated_text(epoch_secs: u64) -> String {
+    let (y, mo, d, h, mi) = civil(epoch_secs);
+    format!("{y:04}-{mo:02}-{d:02} {h:02}:{mi:02} UTC")
+}
+
 /// `transit-report-<YYYYMMDD-HHMM>.txt` for the given seconds since the Unix epoch (UTC).
 pub fn report_file_name(epoch_secs: u64) -> String {
+    let (y, mo, d, h, mi) = civil(epoch_secs);
+    format!("transit-report-{y:04}{mo:02}{d:02}-{h:02}{mi:02}.txt")
+}
+
+/// Year, month, day, hour, minute (UTC) of a Unix time.
+fn civil(epoch_secs: u64) -> (i64, i64, i64, u64, u64) {
     let days = (epoch_secs / 86_400) as i64;
     let rem = epoch_secs % 86_400;
     // Civil date from days since 1970-01-01 (Howard Hinnant's algorithm).
@@ -356,7 +377,7 @@ pub fn report_file_name(epoch_secs: u64) -> String {
     let day = doy - (153 * mp + 2) / 5 + 1;
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + i64::from(month <= 2);
-    format!("transit-report-{year:04}{month:02}{day:02}-{:02}{:02}.txt", rem / 3600, rem % 3600 / 60)
+    (year, month, day, rem / 3600, rem % 3600 / 60)
 }
 
 /// The Copy diagnostics button's state: the collection in flight, and when "Copied" stops showing.
@@ -383,6 +404,10 @@ impl crate::StudioApp {
             return;
         }
         let mut report = self.diagnostics_report(now);
+        report.generated = now_secs();
+        // Not listed yet (the Audio Devices window never opened): the worker lists, so the UI
+        // thread does not wait on the drivers. Nothing is opened either way.
+        let list_here = report.systems.is_empty() && self.audio_devices.systems.is_none() && self.audio_devices.fake.is_none();
         let redaction = Redaction::from_env();
         let log_file = report.log_dir.as_ref().map(|d| d.join(LOG_FILE));
         #[cfg(test)]
@@ -396,6 +421,9 @@ impl crate::StudioApp {
         let (tx, rx) = std::sync::mpsc::channel();
         let spawned = std::thread::Builder::new().name("transit-diagnostics".into()).spawn(move || {
             report.machine = Machine::probe();
+            if list_here {
+                report.systems = machine_systems();
+            }
             report.log_lines = log_file.map(|f| tail_log(&f, LOG_LINES)).unwrap_or_default();
             let _ = tx.send(report.render(&redaction));
         });
@@ -461,6 +489,7 @@ mod tests {
             buffer_max: Some(4096),
         };
         Report {
+            generated: 1_700_000_000,
             version: "9.9.9".into(),
             build: "abc1234 2026-10-25".into(),
             machine: Machine {
@@ -567,5 +596,8 @@ mod tests {
     fn report_file_name_is_the_utc_date_and_minute() {
         assert_eq!(report_file_name(0), "transit-report-19700101-0000.txt");
         assert_eq!(report_file_name(1_700_000_000), "transit-report-20231114-2213.txt");
+        assert_eq!(generated_text(1_700_000_000), "2023-11-14 22:13 UTC");
+        let text = Report { generated: 1_700_000_000, ..Default::default() }.render(&Redaction::default());
+        assert!(text.contains("\nGenerated: 2023-11-14 22:13 UTC\n"), "{text}");
     }
 }

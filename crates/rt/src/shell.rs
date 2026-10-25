@@ -30,6 +30,52 @@ fn imp(_id: &str) -> bool {
     false
 }
 
+/// Windows only: attaches this process to the console of the process that started it, so a
+/// release build (a GUI-subsystem exe, which starts without a console) can print to the terminal it
+/// was launched from (`transit --report`, `--version`). Returns `true` when attached; `false`
+/// when there is no parent console (a double click, a shortcut), when the process already has
+/// one, and on every other platform.
+#[must_use]
+pub fn attach_parent_console() -> bool {
+    attach_imp()
+}
+
+#[cfg(windows)]
+fn attach_imp() -> bool {
+    use windows_sys::Win32::System::Console::{ATTACH_PARENT_PROCESS, AttachConsole};
+    // SAFETY: `AttachConsole` takes a process id constant and no pointers; it only changes this
+    // process's console association, and a failure is a zero return, reported as `false`.
+    unsafe { AttachConsole(ATTACH_PARENT_PROCESS) != 0 }
+}
+
+#[cfg(not(windows))]
+fn attach_imp() -> bool {
+    false
+}
+
+/// Windows only: whether the process has no usable standard output (a GUI-subsystem exe started
+/// without redirection). Then `println!` goes nowhere, and output must be written to the console
+/// (`CONOUT$`) after [`attach_parent_console`]. `false` on every other platform.
+#[must_use]
+pub fn stdout_is_missing() -> bool {
+    missing_imp()
+}
+
+#[cfg(windows)]
+fn missing_imp() -> bool {
+    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::System::Console::{GetStdHandle, STD_OUTPUT_HANDLE};
+    // SAFETY: `GetStdHandle` has no preconditions; it returns this process's handle value or a
+    // null or invalid marker, which is all that is inspected (the handle is not used or closed).
+    let h = unsafe { GetStdHandle(STD_OUTPUT_HANDLE) };
+    h.is_null() || h == INVALID_HANDLE_VALUE
+}
+
+#[cfg(not(windows))]
+fn missing_imp() -> bool {
+    false
+}
+
 /// Gives the window `hwnd` (and, through the shared window class, every other window of the
 /// same class in the process, such as a second viewport) the icon embedded in the executable as
 /// resource 1: both the big (taskbar, Alt-Tab) and the small (title bar) slot. winit only sets

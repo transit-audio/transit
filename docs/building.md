@@ -31,7 +31,7 @@ real settings. The plug-in scan cache is shared with the inherited soundcraft ap
 
 The log is `logs/transit.log` in that folder. `--verbose`, `--log <directives>` and `RUST_LOG` raise its detail; see [Troubleshooting](troubleshooting.md).
 
-`transit --report [path]` writes a diagnostics text file (version and build, OS, CPU, audio stack versions, the device lists, the saved audio settings and the last 200 log lines) to `transit-report-<YYYYMMDD-HHMM>.txt` in the current directory (the time is UTC) or to `path`, prints where, and exits. It needs no display, opens no audio stream and hides the user name and home folder. Audio Devices and Callback Telemetry have a Copy diagnostics button with the same text, plus the open-device lines and counters of the running session.
+`transit --report [path]` writes a diagnostics text file (version and build, OS, CPU, audio stack versions, the device lists, the saved audio settings and the last 200 log lines) to `transit-report-<YYYYMMDD-HHMM>.txt` in the current directory (the time is UTC) or to `path`, prints where, and exits. It needs no display, opens no audio stream and hides the user name and home folder. The report starts with a `Generated:` line (UTC). The Windows release has no console of its own: started from a terminal, `--report` and `--version` print there; started from a shortcut, the path (or the error) shows in a small message box. The file is written either way. Audio Devices and Callback Telemetry have a Copy diagnostics button with the same text, plus the open-device lines and counters of the running session.
 
 ## The update check
 

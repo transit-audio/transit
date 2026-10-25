@@ -415,6 +415,23 @@ fn apply_exe_icons(cc: &eframe::CreationContext<'_>) {
     }
 }
 
+/// Prints one line for a command-line mode (`--report`, `--version`). Normally that is standard
+/// output. A Windows release build started from a terminal has none (`console`: it attached to the
+/// parent's), so the line goes to the console device. Started without a terminal (a shortcut) there
+/// is nowhere to print, so a small message box carries it.
+fn say(console: bool, text: &str) {
+    use std::io::Write as _;
+    if !transit_rt::stdout_is_missing() {
+        let _ = writeln!(std::io::stdout(), "{text}");
+    } else if console {
+        if let Ok(mut out) = std::fs::OpenOptions::new().write(true).open("CONOUT$") {
+            let _ = writeln!(out, "{text}");
+        }
+    } else {
+        rfd::MessageDialog::new().set_title("transit").set_description(text).show();
+    }
+}
+
 fn main() -> eframe::Result {
     // A plugin scan's child process: load one file, answer, exit. First, before anything else
     // (E1/E2: otherwise every scan child starts a whole app).
@@ -430,16 +447,20 @@ fn main() -> eframe::Result {
     }
     // `--report`: write the diagnostics file and exit, before the logger (so the log it reads is not
     // rotated), the window and any audio device.
-    if let Some(target) = report::parse(&args) {
+    // A release build on Windows has no console of its own: attach to the terminal that started it so
+    // `--report` and `--version` can print there (without one, a message box carries the text).
+    let report_target = report::parse(&args);
+    let console = (report_target.is_some() || args.iter().any(|a| a == "--version" || a == "-V")) && transit_rt::attach_parent_console();
+    if let Some(target) = report_target {
         let settings = load_prefs().map(|ui| ui.audio).unwrap_or_default();
         let log_dir = if prefs_enabled() { config::config_dir().map(|d| d.join(logging::LOG_DIR)) } else { None };
         match report::run(target, log_dir, settings) {
             Ok(path) => {
-                println!("{}", path.display());
+                say(console, &path.display().to_string());
                 std::process::exit(0);
             }
             Err(e) => {
-                eprintln!("transit --report: {e}");
+                say(console, &format!("transit --report: {e}"));
                 std::process::exit(1);
             }
         }
@@ -452,7 +473,7 @@ fn main() -> eframe::Result {
     };
     parsed_log_args.map_err(|error| eframe::Error::AppCreation(error.into()))?;
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("transit {}", env!("CARGO_PKG_VERSION"));
+        say(console, &format!("transit {}", env!("CARGO_PKG_VERSION")));
         return Ok(());
     }
     let demo = args.iter().any(|a| a == "--demo" || a == "--sample");

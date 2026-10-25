@@ -17,9 +17,10 @@ pub fn parse(args: &[String]) -> Option<Option<PathBuf>> {
 /// Builds the report, writes it and returns where. `log_dir` is the log folder (`None` when
 /// preferences are off), `settings` the saved audio choices.
 pub fn run(target: Option<PathBuf>, log_dir: Option<PathBuf>, settings: soundcraft_playback::AudioConfig) -> Result<PathBuf, String> {
-    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
+    let now = diagnostics::now_secs();
     let path = target.unwrap_or_else(|| PathBuf::from(diagnostics::report_file_name(now)));
     let report = Report {
+        generated: now,
         version: env!("CARGO_PKG_VERSION").into(),
         build: env!("TRANSIT_BUILD").into(),
         machine: Machine::probe(),
