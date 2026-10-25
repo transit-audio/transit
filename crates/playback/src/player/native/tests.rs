@@ -322,16 +322,18 @@ fn monitor_counts_clock_instead_of_listing_it_and_notes_realtime_and_sysex() {
     f.native.set_monitor(true, false);
     f.ready(1, 1);
     let backend = fake.input_port(&key).unwrap();
-    // Eleven pulses 20 ms apart (about 125 BPM), Start, Active Sensing, a SysEx and Stop.
+    // Eleven pulses stamped 20 ms apart (125 BPM at 24 ppqn), Start, Active Sensing, a SysEx and
+    // Stop. The stamps are injected, never paced with sleeps, so a slow runner cannot skew them.
     assert!(backend.deliver(0, &[0xFA]));
+    let base = transit_midi_io::host_now_ns();
     for n in 0..11 {
-        assert!(backend.deliver(n, &[0xF8]));
-        std::thread::sleep(Duration::from_millis(20));
+        assert!(backend.deliver_at(n, base + n * 20_000_000, &[0xF8]));
     }
     assert!(backend.deliver(0, &[0xFE]));
     assert!(backend.deliver(0, &[0xF0, 1, 2, 3, 0xF7]));
     assert!(backend.deliver(0, &[0xFC]));
-    let (events, report) = monitored(&mut f, |events, _| events.iter().any(|e| e.status == 0xFC));
+    // The SysEx note is raised after the batch's messages, so wait for both ends.
+    let (events, report) = monitored(&mut f, |events, _| events.iter().any(|e| e.status == 0xFC) && events.iter().any(|e| e.status == 0xF0));
     let status: Vec<u8> = events.iter().map(|e| e.status).collect();
     assert!(!status.contains(&0xF8) && !status.contains(&0xFE), "{status:x?}");
     assert!(status.contains(&0xFA));
@@ -339,7 +341,7 @@ fn monitor_counts_clock_instead_of_listing_it_and_notes_realtime_and_sysex() {
     assert_eq!(sysex.sysex_len, 5);
     let port = report.ports.iter().find(|p| p.name == "Transport keys").unwrap();
     let bpm = port.clock_bpm.expect("a rate from eleven pulses");
-    assert!((30.0..200.0).contains(&bpm), "{bpm}");
+    assert!((bpm - 125.0).abs() < 0.5, "{bpm}");
     assert!(port.sensing, "{report:?}");
     // The header LED counts Start and Stop, not the eleven Clock pulses or Active Sensing.
     let (activity, name) = f.native.monitor_activity();

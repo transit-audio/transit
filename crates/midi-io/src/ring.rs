@@ -234,8 +234,15 @@ impl InputSink {
     /// One backend callback: `data` holds one or more messages (or a SysEx chunk) the backend
     /// observed at `backend_time_us`. Running status is honored within one callback only.
     pub(crate) fn push(&mut self, backend_time_us: u64, data: &[u8]) {
+        let host = host_ns_since(self.origin);
+        self.push_stamped(backend_time_us, host, data);
+    }
+
+    /// [`push`](Self::push) with the host arrival time given instead of read from the clock;
+    /// the fake backend uses it so a test can stamp events deterministically.
+    pub(crate) fn push_stamped(&mut self, backend_time_us: u64, host: u64, data: &[u8]) {
         let published = self.shared.counters.delivered.load(Ordering::Relaxed);
-        self.push_bytes(backend_time_us, data);
+        self.push_bytes(backend_time_us, host, data);
         // Wake the consumer's worker after the ring holds the events (`unpark` is lock- and
         // allocation-free; a token left by an early unpark makes the next park return at once).
         if self.shared.counters.delivered.load(Ordering::Relaxed) != published
@@ -245,8 +252,7 @@ impl InputSink {
         }
     }
 
-    fn push_bytes(&mut self, backend_time_us: u64, data: &[u8]) {
-        let host = host_ns_since(self.origin);
+    fn push_bytes(&mut self, backend_time_us: u64, host: u64, data: &[u8]) {
         bump(&self.shared.counters.callbacks, 1);
         let mut running: Option<u8> = None;
         let mut i = 0;

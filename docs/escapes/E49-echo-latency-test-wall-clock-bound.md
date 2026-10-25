@@ -48,3 +48,11 @@ ceiling in a non-ignored test is converted; the rule is that none remain.
 - `crates/audio-asio/src/stream_tests.rs`: stop `< 100 ms` is a 250 ms stall bound beside the deterministic `driver_stopped` check; `host.rs` (700 ms against a 200 ms host timeout) is a stall bound and is marked.
 - `crates/engine/src/cmd/clap.rs`: the info wait plus 300 ms is a stall bound and is marked.
 - `crates/playback/src/player/native/tests.rs`: the 2 ms / 5 ms median wake bounds stay by design (a median of 25 against the 15.6 / 20 ms timer tick); the margin is now documented.
+
+Recurrence 2026-10-24 (#87, #91): CI run 40149862372 (macOS) failed
+`monitor_counts_clock_instead_of_listing_it_and_notes_realtime_and_sysex` with a BPM of 26.0: the
+test paced eleven Clock pulses with `thread::sleep(20ms)` and asserted a wide range, and the
+runner stretched the sleeps. Fixed: the fake input gained `deliver_at`, which stamps the host
+arrival time, the test stamps the pulses 20 ms apart and asserts 125.0 within 0.5. Rule added to
+`gates.md`: no rate, BPM or latency is derived from sleep pacing. The remaining sleeps in the
+native tests wait for the worker to idle or poll for a state; none feeds a derived rate.

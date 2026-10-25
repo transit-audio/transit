@@ -103,6 +103,21 @@ impl FakeInputPort {
     }
 }
 
+impl FakeInputPort {
+    /// Like [`deliver`](Self::deliver), but stamps the events' host arrival time `host_ns`
+    /// (nanoseconds on the port's origin, see [`host_now_ns`](crate::host_now_ns)) instead of
+    /// reading the clock, so a test can space events exactly.
+    pub fn deliver_at(&self, backend_time_us: u64, host_ns: u64, bytes: &[u8]) -> bool {
+        match lock(&self.0).as_mut() {
+            Some(sink) => {
+                sink.push_stamped(backend_time_us, host_ns, bytes);
+                true
+            }
+            None => false,
+        }
+    }
+}
+
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(PoisonError::into_inner)
 }
