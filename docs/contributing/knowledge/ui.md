@@ -110,3 +110,27 @@ The insert overflow label occupies its own row above Add; when only one row fits
 is clipped before a reserved Add cell on the right. The device chain still exposes every insert.
 Real UI paint tests in `tests.rs`
 check the colors against the painted backgrounds and the overflow text bounds against Add.
+
+## Audio Devices sections and pending changes (#107, #108)
+
+The window has a left sidebar (Ableton's Preferences shape) with three sections, one visible at a
+time and each with its own scroll: System (audio system, backend, devices, rate, buffer size,
+calibration), I/O paths, and Hardware inserts (Measure). The status lines (open, backend and
+recovery lines, notes, requested versus running) and the Apply, Revert, Reconnect and Rescan row
+sit below the sections and show in all of them. Ctrl+Tab and Ctrl+Shift+Tab (Cmd on macOS) cycle
+the sections. The last section is kept per machine as `audio_devices_section` in `ui.json`
+(`UiState`), never in the session. The window is sized from the screen (at most 780 by 640 points)
+so it fits 1366 by 768; the test lays it out there and checks every control of every section.
+
+A draft that differs from the running choices is pending, and nothing is opened by drafting it:
+
+- A different audio system or backend shows "Driver change pending: press Apply to switch to
+  <name>."; a different sample rate shows its own line; any other difference a general one.
+  Apply is highlighted while anything is pending. Revert and Escape (with no list open) restore the
+  running choices.
+- The device, rate and buffer lists come from the selected system's enumeration, taken when the
+  window opens or on Rescan: cpal systems and the JACK port groups are listed without opening a
+  stream. A native ASIO driver is described only while open, so the driver that runs is probed (off
+  the UI thread) and any other chosen driver shows the standard rates and buffers marked "updates
+  after Apply". Listing again for the new driver happens after Apply, never on a draft change.
+- The "Requested N, running at M" line follows the running device and is not part of the draft.

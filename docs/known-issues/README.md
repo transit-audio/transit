@@ -107,3 +107,5 @@ A new issue is a new row; give it its own file only if the row cannot hold what 
   fit is unavailable (`../contributing/knowledge/clocks.md`).
 - Sample rate and buffer-size selection depend on the backend and driver; report the device, driver
   and settings with any timing issue (`../contributing/evidence/hardware-and-ci.md`).
+- Audio Devices: an ASIO driver other than the one that runs is not described until Apply opens
+  it, so its rate and buffer lists are the standard choices marked "updates after Apply".
