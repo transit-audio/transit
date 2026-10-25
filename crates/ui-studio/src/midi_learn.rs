@@ -17,6 +17,10 @@ use soundcraft_playback::{MapMsg, MapSpec};
 /// the UI clock).
 pub const GESTURE_END_S: f64 = 0.4;
 
+/// How soon the UI looks again while the controller is active, and while it is quiet.
+pub const BUSY_POLL: std::time::Duration = std::time::Duration::from_millis(16);
+pub const IDLE_POLL: std::time::Duration = std::time::Duration::from_millis(100);
+
 /// The merge key of every mapped move (see `learned_move`).
 const GESTURE_KEY: &str = "midi:gesture";
 
@@ -59,6 +63,9 @@ pub struct State {
     generation: u32,
     /// Button presses and candidates the worker could not queue, as last read.
     pub dropped: u64,
+    /// The worker's activity counter at the last frame, and whether it moved since.
+    activity_seen: u64,
+    news: bool,
     profile_loaded: bool,
     profile_rev: u64,
     /// The UI time of the last mapped move, while a sweep may still be going.
@@ -70,6 +77,12 @@ pub struct State {
 }
 
 impl State {
+    /// Makes the next frame see the worker's counter as changed (tests).
+    #[cfg(test)]
+    pub fn pretend_news(&mut self) {
+        self.activity_seen = u64::MAX;
+    }
+
     /// The per-mapping applied counters (tests).
     pub fn applied_counts(&self) -> &[u32] {
         &self.applied
@@ -329,7 +342,7 @@ impl StudioApp {
 
     /// Once a frame, before the panes draw: keep the stores, the worker and the preferences in
     /// step, apply what the controller did, and end a finished sweep's undo step.
-    pub(crate) fn midi_learn_feed(&mut self, now: f64) -> bool {
+    pub(crate) fn midi_learn_feed(&mut self, now: f64) -> Option<std::time::Duration> {
         self.midi_learn.drawn.clear();
         self.midi_learn.menu.clear();
         // The preferences' profile goes to the engine once; later changes come back out.
@@ -360,10 +373,14 @@ impl StudioApp {
                 self.engine.end_merge();
             }
         }
-        // While anything is mapped (or a learn waits) the UI looks at the controller at its normal
-        // rate, not the idle once a second: the worker keeps only the newest value of a sweep, but
-        // a sweep should still be followed.
-        self.player.is_some() && (!self.midi_learn.resolved.is_empty() || self.engine.learn().is_some())
+        // The worker cannot wake the UI, so while anything is mapped (or a learn waits) the UI looks
+        // in now and then: at the normal rate while the controller is moving, a learn waits or a
+        // sweep's undo step is still open, else at a light poll (a first move waits at most that).
+        if self.player.is_none() || (self.midi_learn.resolved.is_empty() && self.engine.learn().is_none()) {
+            return None;
+        }
+        let busy = self.midi_learn.news || self.engine.learn().is_some() || self.midi_learn.last_move.is_some();
+        Some(if busy { BUSY_POLL } else { IDLE_POLL })
     }
 
     /// Hand the worker the mappings and the learn flag; take what it published.
@@ -382,6 +399,9 @@ impl StudioApp {
         let specs: Vec<MapSpec> = self.midi_learn.resolved.iter().map(MapSpec::from_resolved).collect();
         player.set_midi_mappings(specs);
         self.midi_learn.dropped = player.midi_map_dropped();
+        let activity = player.midi_map_activity();
+        self.midi_learn.news = activity != self.midi_learn.activity_seen;
+        self.midi_learn.activity_seen = activity;
         let armed = self.engine.learn().is_some();
         if armed != self.midi_learn.armed_sent {
             player.set_midi_learn(armed);

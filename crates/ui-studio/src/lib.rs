@@ -1071,8 +1071,8 @@ impl StudioApp {
         theme::follow(&ctx);
         ui.set_style(ctx.global_style());
         midi_learn::keys(self, &ctx); // an armed MIDI Learn takes Escape first
-        if self.midi_learn_feed(ctx.input(|i| i.time)) {
-            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        if let Some(delay) = self.midi_learn_feed(ctx.input(|i| i.time)) {
+            ctx.request_repaint_after(delay);
         }
         finish::rename_keys(self, &ctx); // slice 6: a name being typed owns Escape and Enter
         tempo_edit::keys(self, &ctx); // the tempo and meter fields own Escape and Enter

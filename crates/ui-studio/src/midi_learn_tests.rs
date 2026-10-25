@@ -374,19 +374,24 @@ fn a_two_second_sweep_applied_at_sixty_hertz_is_one_undo_step_ending_at_the_last
 }
 
 #[test]
-fn the_ui_is_asked_to_keep_looking_while_something_is_mapped_or_a_learn_waits() {
-    // `ui()` turns a true from the feed into a repaint at the normal rate (not the idle second).
+fn the_ui_polls_lightly_when_mapped_and_quiet_and_at_full_rate_only_on_news() {
+    // `ui()` turns the feed's answer into a repaint request: none without mappings, a light poll
+    // while mapped and quiet, the normal rate when the worker published something.
     let (mut app, ctx, mut time, t) = new_app();
     app.player = Some(soundcraft_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap());
     frames(&mut app, &ctx, 3, &mut time);
-    assert!(!app.midi_learn_feed(time), "nothing mapped, nothing waiting: the UI may idle");
-    map(&mut app, t, "volume", 7, json!({}));
-    frames(&mut app, &ctx, 2, &mut time);
-    assert!(app.midi_learn_feed(time), "mapped: the UI is asked to keep looking");
-    app.run("midi.unmap", json!({"target": format!("track:{}:volume", t.0)})).unwrap();
-    assert!(!app.midi_learn_feed(time));
+    assert_eq!(app.midi_learn_feed(time), None, "nothing mapped, nothing waiting: the UI may idle");
+    map(&mut app, t, "volume", 7, json!({"mode": "jump"}));
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(app.midi_learn_feed(time), Some(midi_learn::IDLE_POLL), "mapped and quiet: no redraw storm");
+    assert_eq!(app.midi_learn_feed(time), Some(midi_learn::IDLE_POLL));
+    app.midi_learn.pretend_news();
+    assert_eq!(app.midi_learn_feed(time), Some(midi_learn::BUSY_POLL), "the worker published: look again at once");
+    assert_eq!(app.midi_learn_feed(time), Some(midi_learn::IDLE_POLL), "and back to the light poll when nothing more comes");
     app.run("midi.learn", json!({"target": format!("track:{}:mute", t.0)})).unwrap();
-    assert!(app.midi_learn_feed(time), "a waiting learn too");
+    assert_eq!(app.midi_learn_feed(time), Some(midi_learn::BUSY_POLL), "a waiting learn polls at the normal rate");
+    app.run("midi.learn_cancel", json!({})).unwrap();
+    assert_eq!(app.midi_learn_feed(time), Some(midi_learn::IDLE_POLL));
 }
 
 #[test]
