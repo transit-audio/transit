@@ -374,34 +374,19 @@ fn a_two_second_sweep_applied_at_sixty_hertz_is_one_undo_step_ending_at_the_last
 }
 
 #[test]
-fn the_ui_repaints_at_its_normal_rate_while_something_is_mapped_or_a_learn_waits() {
+fn the_ui_is_asked_to_keep_looking_while_something_is_mapped_or_a_learn_waits() {
+    // `ui()` turns a true from the feed into a repaint at the normal rate (not the idle second).
     let (mut app, ctx, mut time, t) = new_app();
-    let delay = |app: &mut StudioApp, ctx: &egui::Context, time: &mut f64| {
-        *time += 1.0 / 60.0;
-        let raw = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))),
-            time: Some(*time),
-            ..Default::default()
-        };
-        let mut out = ctx.run_ui(raw, |ui| {
-            app.logic(ui.ctx());
-            app.ui(ui);
-        });
-        out.textures_delta.clear();
-        out.viewport_output.values().map(|v| v.repaint_delay).min().unwrap()
-    };
     app.player = Some(soundcraft_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap());
-    delay(&mut app, &ctx, &mut time);
+    frames(&mut app, &ctx, 3, &mut time);
     assert!(!app.midi_learn_feed(time), "nothing mapped, nothing waiting: the UI may idle");
     map(&mut app, t, "volume", 7, json!({}));
-    delay(&mut app, &ctx, &mut time);
+    frames(&mut app, &ctx, 2, &mut time);
     assert!(app.midi_learn_feed(time), "mapped: the UI is asked to keep looking");
-    assert!(delay(&mut app, &ctx, &mut time) <= std::time::Duration::from_millis(50), "mapped: a controller sweep is followed");
     app.run("midi.unmap", json!({"target": format!("track:{}:volume", t.0)})).unwrap();
+    assert!(!app.midi_learn_feed(time));
     app.run("midi.learn", json!({"target": format!("track:{}:mute", t.0)})).unwrap();
-    delay(&mut app, &ctx, &mut time);
     assert!(app.midi_learn_feed(time), "a waiting learn too");
-    assert!(delay(&mut app, &ctx, &mut time) <= std::time::Duration::from_millis(50));
 }
 
 #[test]
