@@ -2437,7 +2437,9 @@ fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: usize, mut vi
                         // overlapping clip will release itself) already decided the state.
                         let superseded = t.clips().iter().any(|other| {
                             let other_midi = matches!(other.content, ClipContent::Midi { .. });
-                            !std::ptr::eq(other, clip) && !other.muted && other_midi && {
+                            // A clip that starts at or after this end, or ended before the press, cannot
+                            // have written the pedal after it: not scanned.
+                            !std::ptr::eq(other, clip) && !other.muted && other_midi && other.start < t_end && other.end() > at && {
                                 let theirs = pedal_state_before(s, other, rtp, t_end.min(other.end()));
                                 matches!(theirs.get(slot), Some(Some((a, _))) if *a > at)
                             }
@@ -2489,6 +2491,12 @@ fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: usize, mut vi
     }
 }
 
+// Test hook: how many clips the clip-end release scanned (the cost bound is a count, not a time).
+#[cfg(test)]
+thread_local! {
+    static PEDAL_SCANS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 /// Pedal controllers the clip-end release covers: 16 channels times sustain, sostenuto, soft, hold 2.
 const PEDAL_SLOTS: usize = 64;
 
@@ -2513,6 +2521,8 @@ fn pedal_slot_cc(slot: usize) -> (u8, u8) {
 /// and whether it holds (value >= 64). Looped cycles count, so a loop that ends on a held pedal is
 /// seen at the clip end. Fixed-size and allocation-free: runs on the audio thread.
 fn pedal_state_before(s: &Session, clip: &Clip, rtp: Rtp, until: Samples) -> [Option<(Samples, bool)>; PEDAL_SLOTS] {
+    #[cfg(test)]
+    PEDAL_SCANS.with(|n| n.set(n.get() + 1));
     let mut last = [None; PEDAL_SLOTS];
     let ClipContent::Midi { sequence } = &clip.content else { return last };
     let sr = s.sample_rate;
@@ -2677,7 +2687,9 @@ fn chase_controllers(s: &Session, t: &Track, pos: Samples, inst: &mut PluginSlot
     const BEND: usize = 128;
     const PRESSURE: usize = 129;
     const PROGRAM: usize = 130;
-    let mut last = [(i64::MIN, 0i32); 131];
+    // The last write per controller: time, value, and whether the clip that wrote it ended at or
+    // before `pos`. A pedal such a clip leaves held was released at its end, so it is restored up.
+    let mut last = [(i64::MIN, 0i32, false); 131];
     let sr = s.sample_rate;
     for clip in t.clips() {
         let ClipContent::Midi { sequence } = &clip.content else { continue };
@@ -2718,11 +2730,12 @@ fn chase_controllers(s: &Session, t: &Track, pos: Samples, inst: &mut PluginSlot
                 && let Some(l) = last.get_mut(slot)
                 && at >= l.0
             {
-                *l = (at, c.value);
+                *l = (at, c.value, clip.end() <= pos);
             }
         }
     }
-    for (slot, &(at, value)) in last.iter().enumerate() {
+    for (slot, &(at, value, ended)) in last.iter().enumerate() {
+        let value = if ended && value >= 64 && pedal_slot_of(slot as u8, 0).is_some() { 0 } else { value };
         let kind = match slot {
             BEND => CtrlKind::PitchBend,
             PRESSURE => CtrlKind::ChannelPressure,

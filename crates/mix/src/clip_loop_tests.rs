@@ -161,3 +161,38 @@ fn a_loop_on_a_clip_that_starts_between_ticks_keeps_every_cycle_on_the_grid_offs
     assert_eq!(ons(1 << 20), want);
     assert_eq!(ons(4096), want, "the same in small blocks");
 }
+
+#[test]
+fn the_clip_end_release_scans_only_clips_that_can_overlap_the_press() {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
+    let pedal = |tick: i64| {
+        let mut seq = Sequence::default();
+        seq.ctrls.push(CtrlEvent { tick, channel: 0, kind: CtrlKind::Cc(64), value: 127 });
+        seq
+    };
+    let clips = &mut s.track_mut(t).unwrap().playlist_mut().unwrap().clips;
+    // A holds the pedal from sample 100 to its end at 2600. One clip ended before the press,
+    // 50 start at or after A's end, and none overlaps.
+    clips.push(Clip::midi(ClipId(1), "a", 0, 2600, pedal(4)));
+    clips.push(Clip::midi(ClipId(2), "early", 0, 50, pedal(0)));
+    for i in 0..50i64 {
+        clips.push(Clip::midi(ClipId(10 + i as u64), "later", 2600 + 2600 * i, 2600, pedal(0)));
+    }
+    let scans = |s: &Session| {
+        super::PEDAL_SCANS.with(|n| n.set(0));
+        let mut released = 0;
+        visit_clip_events(s, s.track(t).unwrap(), 2560, 256, |at, e| {
+            if matches!(e, ClipEvent::Control([0xB0, 64, 0], _)) {
+                assert_eq!(at, 40);
+                released += 1;
+            }
+        });
+        (super::PEDAL_SCANS.with(std::cell::Cell::get), released)
+    };
+    // Its own state only; the other 51 clips are not looked at.
+    assert_eq!(scans(&s), (1, 1));
+    // A clip that overlaps the press is scanned (and, with a later write, supersedes).
+    s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(Clip::midi(ClipId(99), "over", 1000, 4000, pedal(4)));
+    assert_eq!(scans(&s), (2, 0));
+}

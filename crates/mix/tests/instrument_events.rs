@@ -1523,3 +1523,53 @@ fn a_pedal_held_by_live_input_is_not_released_by_a_clip_end() {
     rig.render(1);
     assert_eq!(pedal_values(&rig.heard_by(1), 64).last().map(|(_, v)| *v), Some(0));
 }
+
+/// CC64 as the plug-in hears it, as (session sample, value), over `blocks` blocks from `rig.pos`.
+fn pedal_at_session_samples(rig: &mut Rig, blocks: usize) -> Vec<(i64, u8)> {
+    rig.heard.lock().unwrap().clear();
+    let (frame0, pos0) = (rig.mix.next_frame().0 as i64, rig.pos);
+    rig.render(blocks);
+    pedal_values(&rig.heard_by(1), 64).into_iter().map(|(f, v)| (f as i64 - frame0 + pos0, v)).collect()
+}
+
+#[test]
+fn a_locate_past_a_clip_that_left_the_pedal_down_does_not_press_it() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127)]));
+    rig.mix.reset();
+    rig.pos = 5120;
+    let got = pedal_at_session_samples(&mut rig, 8);
+    assert!(got.iter().all(|(_, v)| *v < 64), "the chase pressed a pedal whose clip had ended: {got:?}");
+    // Both orders of last writer: a later clip that ended holding wins over an earlier one.
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127)]));
+    add_pedal_clip(&mut rig, 1000, 1000, None, pedal_seq(&[(4, 0)]));
+    rig.mix.reset();
+    rig.pos = 5120;
+    assert!(pedal_at_session_samples(&mut rig, 8).iter().all(|(_, v)| *v < 64));
+}
+
+#[test]
+fn a_locate_into_a_clip_with_the_pedal_down_presses_it_and_releases_it_once_at_the_clip_end() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127)]));
+    rig.render(2);
+    rig.mix.reset();
+    rig.pos = 1024;
+    let got = pedal_at_session_samples(&mut rig, 10);
+    // The locate's own release, the chase's press, then exactly one release, at the clip end.
+    assert_eq!(got, vec![(1024, 0), (1024, 127), (2600, 0)]);
+}
+
+#[test]
+fn the_release_at_a_clip_end_precedes_the_press_of_a_clip_that_starts_there() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    // B starts on a tick (sample 2600 is tick 104), so its press at its tick 0 is at 2600 too.
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127)]));
+    add_pedal_clip(&mut rig, 2600, 2400, None, pedal_seq(&[(0, 127), (40, 0)]));
+    assert_eq!(pedal_at_session_samples(&mut rig, 24), vec![(100, 127), (2600, 0), (2600, 127), (3600, 0)]);
+}
