@@ -51,6 +51,14 @@ What each SDK requires of the thread that hosts it:
 - **Offline renders stay where they are.** Bounce, stems and freeze build a `RangeRender` synchronously in the command (`engine/src/io/bounce.rs`, `io/paths.rs`, `cmd/freeze.rs`) on the calling thread, which then makes, processes and destroys every instance; no editor is opened for them, so the one-thread-per-instance rule holds. Routing their creation through the host thread with a blocking wait would not free the calling thread (it waits as long), and it would tie the render to the live host thread: a plug-in's modal dialog there (up to the 120 s dispatch budget) or a wedged thread would make the render give up on its instances and write audio without them, where today it renders correctly. Making it asynchronous needs a "preparing" phase, polled per frame, in the bounce, stems and freeze jobs; that is left for when one of those jobs needs it.
 - New `unsafe` (the message pump) is in `transit-rt`, which needs the ADR 0009 quoted-unsafe review before merge.
 
+## Amendment 2026-10-25 (issue #104, escape E56): shutdown on every way out
+
+A GPU power-state change lost the graphics device; egui-wgpu panicked on the UI thread, the panic unwound out of the event loop without the quit order, and the C runtime's exit hung in an instrument's DLL unload, which waited for a worker thread the exit had already killed. Section 6 assumed shutdown runs only at a normal quit. It now runs on every way out of the UI loop:
+
+- **One quit order** (`StudioApp::shut_down`): autosave, close the input, drop the player and its instances, then shut plug-in hosting down (this ADR's 5 s host-thread wait, then the VST3 module exits on the main thread). The quit, a lost graphics device (wgpu's device-lost callback, checked at the start of each frame) and a panic on the UI thread (the app is dropped while the panic unwinds; `main` catches it around `eframe::run_native`) all run it once.
+- **Bounded.** It runs under a watchdog (`soundcraft_engine::emergency::run_bounded`, 15 s); past that the process is terminated.
+- **How the process ends.** `shutdown_plugin_hosts` reports whether the shutdown was clean: the host thread ended in time and no VST3 binary is left without its module exit (`soundcraft_vst3_host::modules_not_exited`). Only then does the process exit normally. Otherwise it is terminated without exit handlers or DLL unload code (`transit_rt::terminate_process`), so plug-in static destructors never run against threads the exit has killed. A lost device or a panic ends the process after the shutdown (exit codes 70 clean, 71 terminated, 72 watchdog) with a message to the user; the device is not re-created (K69).
+
 ## Alternatives rejected
 
 - **Keep creation on the UI thread and only defer by a frame** (the current mitigation): the call still blocks for its full duration.
