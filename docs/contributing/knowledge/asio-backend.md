@@ -226,8 +226,7 @@ asked of `createBuffers` and the usual `--loopback --out-ch --in-ch`. A loopback
 driver-reported latencies in frames and ms, the calibration the app would store (the click loop by
 sample position at that period and rate), their difference, and, with `--settings`, what the file held
 for the key before the run, which `--settings` then replaces (see
-[Loopback calibration](#loopback-calibration-20-k31)). The cpal path (`--backend cpal
---system ASIO`, `--features asio`) stays for comparison. The backend lines of an ASIO run always end
+[Loopback calibration](#loopback-calibration-20-k31)). The backend lines of an ASIO run always end
 with `overloads, busy skips, position jumps, resets`.
 
 `--device` names a driver by its registry name (the Model 12's is "Model Mixer ASIO Driver", not
@@ -294,7 +293,7 @@ listing), `crates/playback/src/player/device.rs` (`open_native`, `open_stepped`)
   `open_capture` on the render endpoint), then opens the output, then starts the input, then the
   output: both opens before either start, which is this crate's open-order rule. The Player already
   ran in that order for cpal ASIO, so nothing was restructured. A native open error falls back to the
-  cpal adapter before `start` only ("Native ASIO failed: ...; using the cpal backend").
+  cpal adapter before `start` only. cpal has no ASIO host, so that opens its default host ("Native ASIO failed: ...; using WASAPI shared").
 - **Multichannel.** The plans open every channel (`format.channels` is the driver's count), so the
   Model 12 opens 12 in / 10 out; `IoMap::for_device` gives every channel a path ("Out 9-10", "In 12",
   "In 11-12"), keyed `("ASIO", <registry name>)` as cpal's ASIO tables were. `Backend::channel_names`

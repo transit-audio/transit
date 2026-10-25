@@ -67,9 +67,7 @@ levels are wrong.
 Close other audio programs first. Run each command from the repository root. The harness builds in
 release; the first run compiles. `--seconds 120` for a baseline, the default 20 for a check.
 `--system` and `--device` take the names the app shows in Audio Devices; `--list-devices --system X`
-prints them without opening a stream. The ASIO runs need a build with `--features asio` on the
-harness (`cargo xtask audio-bench` forwards its arguments only; for ASIO run
-`cargo run --release -p audio-bench --features asio -- ...` with the same arguments).
+prints them without opening a stream. The ASIO runs use `--backend asio` (native ASIO, on by default in the harness).
 
 Focusrite Scarlett 2i2 (2 in, 2 out), once per period 32, 64 and 128 (and a re-run of each with a 70
 percent CPU load running elsewhere, as ADR 0016 section 5 asks):
