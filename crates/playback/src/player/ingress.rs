@@ -25,7 +25,7 @@ const LINGER_PERIOD: Duration = Duration::from_micros(250);
 const LINGER: u32 = 16;
 /// Idle safety net only: input data, attachments, route edits and stop all unpark the worker.
 /// Port health (unplug, close) is also noticed within this period.
-const IDLE: Duration = Duration::from_millis(20);
+pub(super) const IDLE: Duration = Duration::from_millis(20);
 
 /// Original timestamps and raw sequence survive scheduling. Audio maps H into
 /// its consumed-output/converter phase and rechecks the source cutoff there.
@@ -308,6 +308,12 @@ pub struct Worker {
 }
 impl Worker {
     pub fn start(lane: action_lane::Control<Packet, ActionResult>) -> std::io::Result<Self> {
+        Self::start_with_idle(lane, IDLE)
+    }
+
+    /// [`Worker::start`] with the idle park timeout chosen by the caller. Tests set it far above
+    /// any assertion bound so only a wake on data, never the timer, can make the worker pop (E49, #110).
+    pub(super) fn start_with_idle(lane: action_lane::Control<Packet, ActionResult>, idle: Duration) -> std::io::Result<Self> {
         let (attach, receive) = mpsc::sync_channel(sources::PORTS);
         let shared = Arc::new(Shared::default());
         let (tap, tap_receive) = rtrb::RingBuffer::new(TAP_CAPACITY);
@@ -338,7 +344,7 @@ impl Worker {
                     std::thread::sleep(LINGER_PERIOD);
                 } else {
                     // Woken by the input callback (`InputConsumer::wake_on`) or an attach.
-                    std::thread::park_timeout(IDLE);
+                    std::thread::park_timeout(idle);
                 }
             }
         })?;

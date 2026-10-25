@@ -241,7 +241,15 @@ pub(super) struct Native {
 
 impl Native {
     pub(super) fn new(lane: crate::action_lane::Control<ingress::Packet, ActionResult>, origin: HostOrigin) -> std::io::Result<Self> {
-        let mut worker = ingress::Worker::start(lane)?;
+        Self::new_with_idle(lane, origin, ingress::IDLE)
+    }
+
+    pub(super) fn new_with_idle(
+        lane: crate::action_lane::Control<ingress::Packet, ActionResult>,
+        origin: HostOrigin,
+        idle: Duration,
+    ) -> std::io::Result<Self> {
+        let mut worker = ingress::Worker::start_with_idle(lane, idle)?;
         let (mut out, playback, echo) = midi_out::Out::new();
         worker.set_echo(echo).map_err(std::io::Error::other)?;
         let (monitor, tap_in, tap_out) = monitor::Hub::new();

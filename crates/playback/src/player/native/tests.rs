@@ -43,10 +43,16 @@ struct Fixture {
 
 impl Fixture {
     fn new(session: Session, io: MidiIo) -> Self {
+        Self::with_idle(session, io, ingress::IDLE)
+    }
+
+    /// A fixture whose worker parks for `idle` between wakes: far above any bound, only a wake on
+    /// data can make it pop in time.
+    fn with_idle(session: Session, io: MidiIo, idle: Duration) -> Self {
         let target = RenderTarget { device: DeviceGeneration(EPOCH.0), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 };
         let (owner, ports) = Owner::new(Arc::new(session), None, target, PlanLimits::default()).unwrap();
         let (lane, midi) = owner.midi_lane().unwrap();
-        let mut native = Native::new(lane, HostOrigin::default()).unwrap();
+        let mut native = Native::new_with_idle(lane, HostOrigin::default(), idle).unwrap();
         native.enable(io);
         Self { native, owner, ports, midi }
     }
@@ -203,12 +209,16 @@ fn idle_wake_latency_median_is_far_below_the_timer_tick() {
     assert!(median < bound, "median wake latency {median:?} (max {max:?}); a timer poll would show ~15 ms on Windows");
 }
 
+/// The idle park timeout of the wake tests: far above their stall bound, so a worker that waited on
+/// the timer instead of the input callback could not pop in time (E49, #110).
+const WAKE_ONLY_IDLE: Duration = Duration::from_secs(30);
+
 fn idle_wake_ages() -> (Duration, Duration) {
     let fake = Fake::default();
     let key = fake.add_input("Wake keys");
     let mut session = Session::default();
     track(&mut session, MidiInput::default());
-    let mut f = Fixture::new(session, fake.io());
+    let mut f = Fixture::with_idle(session, fake.io(), WAKE_ONLY_IDLE);
     f.ready(1, 1);
     let backend = fake.input_port(&key).unwrap();
     let mut ages = Vec::new();
@@ -258,7 +268,7 @@ fn step_tap_rounds() -> Duration {
     let key = fake.add_input("Step controls");
     let mut session = Session::default();
     track(&mut session, MidiInput::default());
-    let mut f = Fixture::new(session, fake.io());
+    let mut f = Fixture::with_idle(session, fake.io(), WAKE_ONLY_IDLE);
     f.ready(1, 1);
     let backend = fake.input_port(&key).unwrap();
     let expected = vec![

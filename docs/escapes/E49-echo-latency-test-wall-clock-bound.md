@@ -95,5 +95,8 @@ before the release was queued, and its 40 ms sleep stood in for "everything due 
 ahead and replaces the sleep with a later sentinel note whose send proves everything due earlier was sent or dropped;
 the two wake-latency medians (this one and `an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer`) moved
 to `#[ignore]` measurement tests, and the gated tests keep their delivery and ordering assertions plus a 500 ms
-stall bound (a worker that never wakes on data, the #62 class, still fails in the default run). Lint change: the `median` tag is removed from `cargo xtask timing`, so a sub-100 ms median ceiling in a
+stall bound. A bound alone does not guard the #62 class, because the worker's 20 ms idle park timeout pops events
+without any wake; the two gated tests therefore start the worker with a 30 s idle timeout
+(`Worker::start_with_idle`, `Native::new_with_idle`; production keeps 20 ms), so only a wake on data meets the
+500 ms bound. Mutation: `park_timeout` -> `sleep` in the worker fails both.
 non-ignored test is flagged like any other.
