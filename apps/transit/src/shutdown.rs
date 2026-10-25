@@ -178,10 +178,11 @@ mod tests {
                 Poll::Pending => panic!("a native wgpu future was not ready"),
             }
         }
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::DX12,
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
+        // FXC, as the app configures it (`graphics.rs`): without a matching DXIL runtime, the default
+        // compiler search loses the device while it is created (issue #185 upstream).
+        let mut descriptor = wgpu::InstanceDescriptor { backends: wgpu::Backends::DX12, ..wgpu::InstanceDescriptor::new_without_display_handle() };
+        descriptor.backend_options.dx12.shader_compiler = wgpu::Dx12Compiler::Fxc;
+        let instance = wgpu::Instance::new(descriptor);
         let adapter = ready(instance.request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::None,
             force_fallback_adapter: true,
