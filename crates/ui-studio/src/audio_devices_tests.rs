@@ -1477,7 +1477,7 @@ fn the_asio_listing_runs_off_the_ui_thread_probes_the_running_driver_and_never_t
     // stale until Apply.
     t.app.audio_devices.draft.output = Some("Model Mixer ASIO Driver".into());
     t.frames(5);
-    std::thread::sleep(std::time::Duration::from_millis(50));
+    std::thread::sleep(std::time::Duration::from_millis(50)); // timing: sleep-ok gives a wrongly started probe time to reach the lister; the assertion is on its absence
     t.frames(2);
     assert_eq!(asked.lock().unwrap().len(), 1, "a draft change opens nothing: {:?}", asked.lock().unwrap());
     assert!(has_control(&t, "stale_buffer") && has_control(&t, "stale_rate"), "the unprobed driver's lists are marked");
