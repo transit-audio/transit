@@ -80,10 +80,115 @@ impl MidiOutput {
     }
 }
 
+/// Whether the input port (`backend`, `name`, `id`, as the backend reports it) and the output
+/// `port` belong to the same device (#99). Echoing live input there loops when the device merges
+/// its MIDI In to its Out (MIDI thru), so the echo is off unless the track allows it.
+///
+/// The rule: same backend, and either the backend's ids name the same device ([`device_of_id`]:
+/// on Windows the WinMM interface path up to its interface-class suffix), or the port names are
+/// equal once their direction suffix is removed ([`device_name`]). Names are compared even when
+/// both ids are present: the in and out interface paths of one USB device have not been checked
+/// on hardware, and blocking the echo between two distinct devices that share a name costs only
+/// the explicit opt-in.
+#[must_use]
+pub fn same_midi_device(backend: &str, name: &str, id: &str, port: &MidiOutPort) -> bool {
+    if backend != port.backend {
+        return false;
+    }
+    if !id.is_empty() && !port.id.is_empty() && device_of_id(id) == device_of_id(&port.id) {
+        return true;
+    }
+    let device = device_name(name);
+    !device.is_empty() && device == device_name(&port.name)
+}
+
+/// A backend port id reduced to its device: lowercase, and a Windows interface path
+/// (`\\?\usb#vid_1c75&pid_0288&mi_00#7&2a8b1d5&0&0000#{6994ad04-...}\global`) cut before its
+/// interface-class GUID, which may differ between a device's in and out interfaces.
+#[must_use]
+pub fn device_of_id(id: &str) -> String {
+    let id = id.trim().to_lowercase();
+    match id.rfind("#{") {
+        Some(at) => id.get(..at).unwrap_or_default().to_owned(),
+        None => id,
+    }
+}
+
+/// A port name reduced to its device: lowercase, Windows' `MIDIIN2 (x)` / `MIDIOUT2 (x)` wrapper
+/// removed, then a trailing direction word with its number (`In`, `Out 2`, `Input`, `Output`,
+/// `MIDI In`, `MIDI Out`) and a bare trailing `MIDI`. `KeyStep Pro MIDI In` and `KeyStep Pro`
+/// both give `keystep pro`; `Synth 2` keeps its number.
+#[must_use]
+pub fn device_name(name: &str) -> String {
+    let mut name = name.trim().to_lowercase();
+    for prefix in ["midiin", "midiout"] {
+        if let Some(rest) = name.strip_prefix(prefix) {
+            let rest = rest.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start();
+            if let Some(inner) = rest.strip_prefix('(').and_then(|r| r.strip_suffix(')')) {
+                name = inner.trim().to_owned();
+            }
+            break;
+        }
+    }
+    let mut words: Vec<&str> = name.split(|c: char| c.is_whitespace() || c == '-' || c == '_').filter(|w| !w.is_empty()).collect();
+    let direction = |w: &str| matches!(w.trim_end_matches(|c: char| c.is_ascii_digit()), "in" | "out" | "input" | "output" | "midiin" | "midiout");
+    let number = |w: &str| !w.is_empty() && w.chars().all(|c| c.is_ascii_digit());
+    if words.len() > 2 && words.last().is_some_and(|w| number(w)) && words.get(words.len() - 2).is_some_and(|w| direction(w)) {
+        words.pop();
+    }
+    if words.len() > 1 && words.last().is_some_and(|w| direction(w)) {
+        words.pop();
+    }
+    if words.len() > 1 && words.last() == Some(&"midi") {
+        words.pop();
+    }
+    words.join(" ")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::{ChannelFormat, Track, TrackId, TrackKind};
+
+    fn out(name: &str, id: &str) -> MidiOutPort {
+        MidiOutPort { backend: "winmm".into(), name: name.into(), ordinal: 0, id: id.into() }
+    }
+
+    #[test]
+    fn a_devices_in_and_out_ports_are_one_device() {
+        // Names as Windows, ALSA and CoreMIDI give them.
+        for (input, output) in [
+            ("KeyStep Pro", "KeyStep Pro"),
+            ("KeyStep Pro MIDI In", "KeyStep Pro MIDI Out"),
+            ("KeyStep Pro", "KeyStep Pro MIDI OUT"),
+            ("MIDIIN2 (KeyStep Pro)", "MIDIOUT2 (KeyStep Pro)"),
+            ("MIDIIN3 (KeyStep Pro)", "KeyStep Pro"),
+            ("Synth In 2", "Synth Out 2"),
+            ("Synth In1", "Synth Out1"),
+            ("Synth-Input", "Synth-Output"),
+            ("  minilogue xd ", "MINILOGUE XD"),
+        ] {
+            assert!(same_midi_device("winmm", input, "", &out(output, "")), "{input} / {output}");
+        }
+        for (input, output) in [("KeyStep Pro", "MODEL D"), ("Synth 1", "Synth 2"), ("MIDI", "Synth"), ("", "")] {
+            assert!(!same_midi_device("winmm", input, "", &out(output, "")), "{input} / {output}");
+        }
+        assert_eq!(device_name("Synth 2"), "synth 2");
+        assert_eq!(device_name("MIDI In"), "midi");
+        // Another backend is never the same device.
+        assert!(!same_midi_device("alsa", "KeyStep Pro", "", &out("KeyStep Pro", "")));
+    }
+
+    #[test]
+    fn interface_paths_name_the_device_without_their_class_suffix() {
+        let input = r"\\?\USB#VID_1C75&PID_0288&MI_01#7&2a8b1d5&0&0001#{504be32c-ccf6-4d2c-b73f-6f8b3747e22b}\global";
+        let output = r"\\?\usb#vid_1c75&pid_0288&mi_01#7&2a8b1d5&0&0001#{6dc23320-ab33-4ce4-80d4-bbb3ebbf2814}\global";
+        let other = r"\\?\usb#vid_1c75&pid_0289&mi_01#7&11111&0&0001#{6dc23320-ab33-4ce4-80d4-bbb3ebbf2814}\global";
+        // Different names (a renamed port), one device by id.
+        assert!(same_midi_device("winmm", "Arturia In", input, &out("Arturia Out B", output)));
+        assert!(!same_midi_device("winmm", "Arturia In", input, &out("Arturia Out B", other)));
+        assert_eq!(device_of_id("plain-id"), "plain-id");
+    }
 
     #[test]
     fn old_tracks_load_with_the_internal_destination_and_internal_is_not_written() {
@@ -92,6 +197,18 @@ mod tests {
         assert!(value.get("midi_output").is_none(), "the default destination is not written, so older builds read the file unchanged");
         let restored: Track = serde_json::from_value(value).unwrap();
         assert_eq!(restored.midi_output, MidiOutput::Internal);
+    }
+
+    #[test]
+    fn the_echo_opt_in_is_off_for_old_files_unwritten_while_off_and_saved_when_on() {
+        let mut track = Track::new(TrackId(1), "Keys", TrackKind::Midi, ChannelFormat::Mono, [0; 3]);
+        let value = serde_json::to_value(&track).unwrap();
+        assert!(value.get("allow_echo_to_device").is_none());
+        assert!(!serde_json::from_value::<Track>(value).unwrap().allow_echo_to_device);
+        track.allow_echo_to_device = true;
+        let value = serde_json::to_value(&track).unwrap();
+        assert_eq!(value["allow_echo_to_device"], true);
+        assert!(serde_json::from_value::<Track>(value).unwrap().allow_echo_to_device);
     }
 
     #[test]

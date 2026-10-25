@@ -102,3 +102,22 @@ fn hostile_params_and_mixed_track_sets_change_nothing() {
         }
     }
 }
+
+/// #99: the per-track opt-in for echoing live input back to the device it came from. One undo
+/// step, kept with the destination, refused when it is not a boolean.
+#[test]
+fn the_echo_to_device_opt_in_is_one_undo_step_and_keeps_the_destination() {
+    let mut e = Engine::default();
+    let (a, _, _) = tracks(&mut e);
+    e.execute("midi.output", &json!({"track": a.0, "port": {"backend": "winmm", "name": "Synth OUT", "id": "usb-synth"}})).unwrap();
+    let output = e.session().track(a).unwrap().midi_output.clone();
+    assert!(!e.session().track(a).unwrap().allow_echo_to_device);
+    let before = e.undo_pushes();
+    e.execute("midi.output", &json!({"track": a.0, "allow_echo_to_device": true})).unwrap();
+    assert_eq!(e.undo_pushes(), before + 1);
+    assert!(e.session().track(a).unwrap().allow_echo_to_device);
+    assert_eq!(e.session().track(a).unwrap().midi_output, output);
+    assert!(e.execute("midi.output", &json!({"track": a.0, "allow_echo_to_device": "yes"})).is_err());
+    assert!(e.undo());
+    assert!(!e.session().track(a).unwrap().allow_echo_to_device);
+}

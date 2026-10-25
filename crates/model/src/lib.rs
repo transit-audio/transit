@@ -28,7 +28,7 @@ pub use io_map::{
 };
 pub use markers::{Group, MarkerKind, MemoryLocation};
 pub use midi_input::{MidiInput, MidiPort};
-pub use midi_output::{MAX_MIDI_OUT_OFFSET_MS, MidiOutChannel, MidiOutPort, MidiOutput};
+pub use midi_output::{MAX_MIDI_OUT_OFFSET_MS, MidiOutChannel, MidiOutPort, MidiOutput, device_name, device_of_id, same_midi_device};
 pub use mixer::{
     Bus, ChannelFormat, EXTERNAL_GAIN_DB, EXTERNAL_INSTRUMENT_PLUGIN, ExternalInstrument, HARDWARE_PLUGIN, HardwareInsert, INSERT_SLOTS, Insert,
     InsertUid, KeyFrom, KeySource, MAX_EXTERNAL_LATENCY_MS, Mixer, OutputPath, Route, SEND_SLOTS, SendSlot, Speaker, SurroundPan, Tap,

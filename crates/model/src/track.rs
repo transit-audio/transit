@@ -252,6 +252,11 @@ pub struct Track {
     /// Not written while internal, so files without external routing stay as older builds wrote them.
     #[serde(default, skip_serializing_if = "crate::MidiOutput::is_internal")]
     pub midi_output: crate::MidiOutput,
+    /// Live input may be echoed to an output port of the device it came from (#99). Off by
+    /// default: a controller that merges its MIDI In to its Out sends the echo straight back, and
+    /// the loop runs until the app is closed. See [`crate::same_midi_device`]. Not written while off.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub allow_echo_to_device: bool,
     pub automation: Vec<AutomationLane>,
     /// Which lane the track shows: `waveform`/`blocks`/`notes`/`regions` or an automation param id.
     pub view: String,
@@ -288,6 +293,11 @@ fn yes() -> bool {
     true
 }
 
+#[allow(clippy::trivially_copy_pass_by_ref)]
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl Track {
     pub fn new(id: TrackId, name: impl Into<String>, kind: TrackKind, format: ChannelFormat, color: [u8; 3]) -> Self {
         let name = name.into();
@@ -311,6 +321,7 @@ impl Track {
             mixer: Mixer::new(format),
             midi_input: crate::MidiInput::default(),
             midi_output: crate::MidiOutput::Internal,
+            allow_echo_to_device: false,
             automation: Vec::new(),
             view: view.into(),
             hidden: false,

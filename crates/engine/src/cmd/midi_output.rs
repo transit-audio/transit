@@ -14,7 +14,7 @@ pub fn specs() -> Vec<CommandSpec> {
         "MIDI Output",
         [],
         None,
-        "{track?|tracks?, port?: internal|{backend,name,ordinal?,id?}, channel?: as_recorded|1..16, offset_ms?: -500..500} — omitted fields keep their current values; channel and offset need an external port",
+        "{track?|tracks?, port?: internal|{backend,name,ordinal?,id?}, channel?: as_recorded|1..16, offset_ms?: -500..500, allow_echo_to_device?: bool} — omitted fields keep their current values; channel and offset need an external port; allow_echo_to_device lets live input echo to a port of the device it came from (off: feedback protection, #99)",
         has_tracks,
         set_output
     )]
@@ -80,8 +80,10 @@ fn set_output(e: &mut Engine, p: &Value) -> Result<Value> {
     let port = p.get("port").map(port_param).transpose()?;
     let channel = p.get("channel").map(channel_param).transpose()?;
     let offset = p.get("offset_ms").map(offset_param).transpose()?;
-    if port.is_none() && channel.is_none() && offset.is_none() {
-        return Err(bad(ID, "supply `port`, `channel` or `offset_ms`"));
+    let allow =
+        p.get("allow_echo_to_device").map(|v| v.as_bool().ok_or_else(|| bad(ID, "`allow_echo_to_device` must be true or false"))).transpose()?;
+    if port.is_none() && channel.is_none() && offset.is_none() && allow.is_none() {
+        return Err(bad(ID, "supply `port`, `channel`, `offset_ms` or `allow_echo_to_device`"));
     }
     if matches!(port, Some(None)) && (channel.is_some() || offset.is_some()) {
         return Err(bad(ID, "`channel` and `offset_ms` apply to an external port, not internal"));
@@ -94,6 +96,10 @@ fn set_output(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut next = Vec::with_capacity(tracks.len());
     for id in &tracks {
         let current = e.session().track(*id).map(|t| t.midi_output.clone()).unwrap_or_default();
+        if port.is_none() && channel.is_none() && offset.is_none() {
+            next.push((*id, current));
+            continue;
+        }
         let output = match (&port, current) {
             (Some(None), _) => MidiOutput::Internal,
             (Some(Some(port)), MidiOutput::External { channel: c, offset_ms: o, .. }) => {
@@ -112,6 +118,9 @@ fn set_output(e: &mut Engine, p: &Value) -> Result<Value> {
     for (id, output) in next {
         if let Some(track) = e.session_mut().track_mut(id) {
             track.midi_output = output;
+            if let Some(allow) = allow {
+                track.allow_echo_to_device = allow;
+            }
         }
     }
     Ok(json!({"tracks": tracks}))
