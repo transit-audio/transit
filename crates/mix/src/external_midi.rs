@@ -209,4 +209,29 @@ mod tests {
         assert!(events(&s, t, beat / 2, 512, true).is_empty());
         assert!(events(&s, t, 4 * beat + beat / 2, 512, true).is_empty());
     }
+
+    #[test]
+    fn an_off_tick_clips_tick_zero_note_is_chased_and_played_once() {
+        // A clip at 2560 (tick 102.4): its grid starts at 2550, where its tick-0 note (40 ticks: 2550..3550) sounds.
+        let (mut s, t) = session(MidiOutChannel::AsRecorded);
+        let mut seq = Sequence::default();
+        seq.notes.push(Note { pitch: 62, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 40 });
+        let clips = &mut s.track_mut(t).unwrap().playlist_mut().unwrap().clips;
+        clips.clear();
+        clips.push(Clip::midi(ClipId(3), "offtick", 2560, 2400, seq));
+        // Continuous play: the on once (block before the clip start), the off once.
+        let mut all = Vec::new();
+        for k in 0..20i64 {
+            all.extend(events(&s, t, k * 256, 256, false).into_iter().map(|(at, m)| (k * 256 + at as i64, m)));
+        }
+        assert_eq!(all, vec![(2550, vec![0x90, 62, 100]), (3550, vec![0x80, 62, 64])]);
+        // A locate onto the clip start, and between the grid start and the clip start: the note is chased once.
+        for pos in [2555i64, 2560] {
+            assert_eq!(events(&s, t, pos, 256, true), vec![(0, vec![0x90, 62, 100])], "locate {pos}");
+        }
+        // A locate onto the grid start plays the on as a block event, not chased as well.
+        assert_eq!(events(&s, t, 2550, 256, true), vec![(0, vec![0x90, 62, 100])]);
+        // Past the note: nothing chased.
+        assert!(events(&s, t, 3600, 256, true).is_empty());
+    }
 }
