@@ -187,6 +187,22 @@ jobs:
           chmod +x packaging/macos/package.sh
           DIST="$PWD/dist-dmg" packaging/macos/package.sh --arch aarch64
           cp dist-dmg/transit-v*-macos-arm64.dmg .
+      # AppImage, deb and rpm from packaging/linux/package.sh, built from the binary the Build step
+      # already produced (--skip-build). The tar.gz format is left out on purpose: the tarball below
+      # is the Linux archive (it also carries audio-bench). Files are named
+      # transit-<version>-linux-x86_64.{AppImage,AppImage.zsync,deb,rpm}; <version> is the tag
+      # without "v". nfpm builds the deb and rpm; zsync writes the AppImage's delta-update file.
+      - name: Package AppImage, deb and rpm (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then export TRANSIT_VERSION="${GITHUB_REF_NAME#v}"; fi
+          nfpm_version=2.41.1
+          curl -fsSL -o "$RUNNER_TEMP/nfpm.deb" "https://github.com/goreleaser/nfpm/releases/download/v${nfpm_version}/nfpm_${nfpm_version}_amd64.deb"
+          sudo apt-get install -y zsync desktop-file-utils "$RUNNER_TEMP/nfpm.deb"
+          chmod +x packaging/linux/package.sh
+          DIST="$PWD/dist-linux" packaging/linux/package.sh --skip-build --formats "appimage deb rpm"
+          cp dist-linux/transit-*-linux-*.AppImage dist-linux/transit-*-linux-*.AppImage.zsync dist-linux/transit-*-linux-*.deb dist-linux/transit-*-linux-*.rpm .
       - name: Package (macOS, Linux)
         if: runner.os != 'Windows'
         shell: bash
@@ -227,6 +243,10 @@ jobs:
             transit-*.msi
             transit-*.tar.gz
             transit-*.dmg
+            transit-*.AppImage
+            transit-*.AppImage.zsync
+            transit-*.deb
+            transit-*.rpm
 
   publish:
     needs: build
@@ -249,6 +269,8 @@ jobs:
             - windows-x86_64: transit with native WASAPI and native ASIO; `audio-bench.exe` with native WASAPI, native ASIO and cpal WASAPI.
             - macos-arm64: `audio-bench` (cpal, Core Audio), in the tarball only, not in the DMG.
             - linux-x86_64: `audio-bench` (cpal, ALSA).
+
+            Linux: the `.AppImage` runs on most distributions (`chmod +x` it, then run it; no install needed), the `.deb` suits Debian, Ubuntu and Mint, and the `.rpm` suits Fedora and openSUSE. The `.zsync` next to the AppImage is for delta updates. All are unsigned. The `.tar.gz` is the plain binary with `audio-bench`.
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: true
