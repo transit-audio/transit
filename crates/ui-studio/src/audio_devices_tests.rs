@@ -1114,6 +1114,37 @@ fn the_held_native_asio_input_shows_as_open_and_measure_is_enabled_on_it() {
     T::rect(&t.layout()["controls"], Some("Measure"), "hw_measure");
 }
 
+/// A device that runs a buffer other than the one asked for (PipeWire's quantum, a driver whose panel
+/// fixes the size) shows both on the line under "Output open", on any backend; an honored request
+/// shows nothing extra.
+#[test]
+fn the_window_shows_the_requested_buffer_next_to_the_one_the_device_runs() {
+    use crate::audio_devices::requested_note;
+    use transit_audio_backend as ab;
+    assert_eq!(requested_note(Some(128), Some(256), None, 48_000).as_deref(), Some("Requested 128 · running at 256"));
+    assert_eq!(requested_note(Some(128), Some(128), None, 48_000), None);
+    assert_eq!(requested_note(None, Some(256), None, 48_000), None, "nothing was asked for");
+    assert_eq!(
+        requested_note(Some(128), Some(256), Some(44_100), 48_000).as_deref(),
+        Some("Requested 128 · running at 256; Requested 44100 Hz · running at 48000 Hz")
+    );
+    let driver = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32))
+        .named("ASIO", "Focusrite USB ASIO")
+        .with_capture(2, true)
+        .with_fixed_buffer(256);
+    let again = driver.clone();
+    let mut t = asio_rig(&driver, move |session, cfg| soundcraft_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+    t.app.ui.audio.buffer_size = Some(128);
+    t.open_window();
+    let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
+    assert!(lines[0].starts_with("Output open") && lines[0].contains("256-sample buffer"), "{lines:?}");
+    assert_eq!(lines[1], "Requested 128 · running at 256", "{lines:?}");
+    t.app.ui.audio.buffer_size = Some(256);
+    t.frames(2);
+    let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
+    assert!(lines.iter().all(|l| !l.starts_with("Requested")), "an honored request adds nothing: {lines:?}");
+}
+
 /// A native ASIO Player over the scripted duplex `driver` as the running device, with the window's
 /// stand-in devices gone (a reopen goes through the real reopen path) and every automatic reopen
 /// opening `reopen` (no device is listed or opened).

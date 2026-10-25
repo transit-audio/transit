@@ -1430,6 +1430,8 @@ fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
                 String::new()
             };
             lines.push(format!("Output open: {} · {} Hz · {} ch · {buffer}{host}", p.device_name, p.device_rate, p.device_channels));
+            let asked = &app.ui.audio;
+            lines.extend(requested_note(asked.buffer_size, p.device_buffer, asked.sample_rate, p.device_rate));
         }
         None => lines.push("Output open: none".into()),
     }
@@ -1458,6 +1460,26 @@ fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
     // After a driver reset: what the automatic reopen did and does next, with its counts.
     lines.extend(app.reopen.status(app.audio_devices.panel.is_some()));
     lines
+}
+
+/// "Requested 128 · running at 256": the buffer size or rate the window asked for next to the one
+/// the device runs, only where they differ. PipeWire's ALSA plug-in runs a stream at the server's
+/// quantum, and any backend can step down to what a device offers; the open stream's own figures
+/// (the Player's device status) are the achieved ones. `None` where nothing was asked for or the
+/// request was honored.
+pub fn requested_note(asked_buffer: Option<u32>, buffer: Option<u32>, asked_rate: Option<u32>, rate: u32) -> Option<String> {
+    let mut parts = Vec::new();
+    if let (Some(asked), Some(got)) = (asked_buffer, buffer)
+        && asked != got
+    {
+        parts.push(format!("Requested {asked} · running at {got}"));
+    }
+    if let Some(asked) = asked_rate
+        && asked != rate
+    {
+        parts.push(format!("Requested {asked} Hz · running at {rate} Hz"));
+    }
+    (!parts.is_empty()).then(|| parts.join("; "))
 }
 
 /// The "Input open:" line of an input, the recorder's or the player's held one.
