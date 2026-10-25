@@ -66,14 +66,24 @@ the real handler, not only a unit test of a helper.
 ## Piano roll note length (#100)
 
 Drag either note edge to resize; the start edge keeps the end fixed (bounded at tick zero).
-Alt bypasses fixed and adaptive snap for either edge and for moving or Ctrl-copying notes,
-with a one-tick minimum length. Plain edge drags keep the grid minimum when snap is enabled;
-turning snap off also permits one tick. Each gesture is one undo step. The preview paints
-the selected notes' lengths in ticks beside the pointer. The header's selected-note inspector
-accepts an exact positive integer Length in ticks, committed on Enter or focus loss; multiple
-selection disables it. Invalid values leave the notes unchanged. Step entry still uses its
-step length. Velocity is available through the velocity lane or Alt+Shift-drag on a note body
-(Alt alone now means free positioning). Tests in `keys_tests.rs` drive these controls through
+Plain edge drags keep the grid minimum when snap is enabled; turning snap off also permits one
+tick. Each gesture is one undo step. The preview paints the selected notes' lengths in ticks
+beside the pointer. The header's selected-note inspector accepts an exact positive integer Length
+in ticks, committed on Enter or focus loss; multiple selection disables it. Invalid values leave
+the notes unchanged. Step entry still uses its step length.
+
+Modifier precedence (Ableton convention), one table:
+
+| Gesture | Result |
+| --- | --- |
+| Alt + drag on a note edge | resize without snap (one-tick minimum) |
+| Alt + Shift + drag on a note body | move (Ctrl: copy) without snap; free move only |
+| Alt + drag on a note body | velocity (vertical), as before #100 |
+| Shift + drag on a note body | normal snapped move; in scale mode, the chromatic override (#77) |
+| velocity lane drag | velocity |
+
+Alt+Shift never triggers the scale-mode chromatic override: Shift counts as chromatic only when
+Alt is not held. The hover text states the same table. Tests in `keys_tests.rs` drive these controls through
 real UI frames with injected time.
 
 ## Cycle and the loop region

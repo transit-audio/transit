@@ -165,14 +165,14 @@ fn note_length_alt_resizes_both_edges_below_fixed_and_adaptive_grids_and_undoes(
 }
 
 #[test]
-fn note_length_alt_move_and_copy_bypass_snap_without_changing_velocity_or_length() {
+fn note_length_alt_shift_move_and_copy_bypass_snap_without_changing_velocity_or_length() {
     for copy in [false, true] {
         let mut t = T::open();
         t.add(60, 480, 480);
         let undo = t.undo_len();
         let grab = t.at(700.0, 60);
         let to = t.at(700.0 + 137.0, 62);
-        t.drag(grab, to, json!({"alt": true, "cmd": copy}));
+        t.drag(grab, to, json!({"alt": true, "shift": true, "cmd": copy}));
         let notes = t.notes();
         let moved = notes.iter().find(|n| n.pitch == 62).unwrap();
         assert_eq!((moved.start, moved.length, moved.velocity), (617, 480, 100));
@@ -560,14 +560,14 @@ fn dragging_moves_snapped_the_edge_resizes_and_ctrl_drag_copies_a_note_or_the_se
 }
 
 #[test]
-fn alt_shift_drag_and_the_velocity_lane_set_velocity_in_one_step() {
+fn alt_drag_and_the_velocity_lane_set_velocity_in_one_step() {
     let mut t = T::open();
     t.add(60, 0, 480);
     let undo = t.undo_len();
     let grab = t.at(200.0, 60);
-    t.drag(grab, (grab.0, grab.1 - 30.0), json!({"alt": true, "shift": true}));
+    t.drag(grab, (grab.0, grab.1 - 30.0), json!({"alt": true}));
     let n = t.notes();
-    assert_eq!((n[0].velocity, n[0].start, n[0].pitch), (120, 0, 60), "Alt+Shift+drag up 30 points: +20");
+    assert_eq!((n[0].velocity, n[0].start, n[0].pitch), (120, 0, 60), "Alt+drag up 30 points: +20");
     assert_eq!(t.undo_len(), undo + 1);
     assert_eq!(t.app.ui.keys.velocity, 100, "editing a note leaves the new-note velocity alone");
     // The velocity lane: drag the stem to about a quarter height.
@@ -605,9 +605,9 @@ fn new_note_velocity_field_survives_note_edits_and_drives_drawing_and_audition()
     assert_eq!(serde_json::to_value(t.app.engine.session()).unwrap(), before);
 
     let grab = t.at(200.0, 60);
-    t.drag(grab, (grab.0, grab.1 + 148.5), json!({"alt": true, "shift": true}));
+    t.drag(grab, (grab.0, grab.1 + 148.5), json!({"alt": true}));
     assert_eq!(t.notes()[0].velocity, 1, "reproduce the near-silent edited note");
-    assert_eq!(t.app.ui.keys.velocity, 87, "Alt+Shift+drag must not change the field");
+    assert_eq!(t.app.ui.keys.velocity, 87, "Alt+drag must not change the field");
     // Selecting the quiet note auditions at the field's velocity without adopting its velocity.
     t.click(mid(t.note_rect(60, 0)));
     assert_eq!(t.app.keys.last_audition, Some((60, 87)));
@@ -1726,4 +1726,29 @@ fn step_shortcut_selector_clicks_rebind_and_the_table_displays_the_choice() {
     t.app.ui.keys.step_tie_rest_space = true;
     t.frames(2);
     assert_eq!(t.app.shortcuts_window.rows, ["Step entry · Step Tie/Rest · Space"]);
+}
+
+#[test]
+fn modifier_table_alt_body_is_velocity_alt_shift_body_is_free_move_shift_body_snaps() {
+    let mut t = T::open();
+    t.add(60, 480, 480);
+    let grab = t.at(700.0, 60);
+    let to = (grab.0 + 137.0, grab.1 - 20.0);
+    // Alt alone on the body: velocity, never position.
+    t.drag(grab, to, json!({"alt": true}));
+    let n = t.notes();
+    assert_eq!((n[0].start, n[0].pitch, n[0].length), (480, 60, 480), "Alt-body does not move");
+    assert_ne!(n[0].velocity, 100, "Alt-body changes velocity");
+    t.app.run("edit.undo", json!({})).unwrap();
+    // Alt+Shift on the body: free move, velocity untouched.
+    let grab = t.at(700.0, 60);
+    t.drag(grab, t.at(700.0 + 137.0, 60), json!({"alt": true, "shift": true}));
+    let n = t.notes();
+    assert_eq!((n[0].start, n[0].velocity), (617, 100), "Alt+Shift-body moves without snap");
+    t.app.run("edit.undo", json!({})).unwrap();
+    // Shift alone (no scale mode): plain snapped move.
+    let grab = t.at(700.0, 60);
+    t.drag(grab, t.at(700.0 + 137.0, 60), json!({"shift": true}));
+    assert_ne!(t.notes()[0].start, 617, "Shift-body snaps");
+    assert_eq!(t.notes()[0].velocity, 100);
 }

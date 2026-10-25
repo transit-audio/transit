@@ -4,8 +4,8 @@
 //!
 //! No draw tool (Ableton): a double-click on empty grid adds a note, a double-click on a note
 //! deletes it; a click selects, Shift-click adds, a drag on empty grid selects with a rubber band;
-//! dragging notes moves them (Ctrl copies), either edge resizes, Alt+Shift+drag or the velocity
-//! lane sets velocity. Every edit is a `midi.*` / `event.*` command, one undo step per gesture.
+//! dragging notes moves them (Ctrl copies, Alt+Shift moves without snap), either edge resizes (Alt:
+//! without snap), Alt+drag on a body or the velocity lane sets velocity. Every edit is a `midi.*` / `event.*` command, one undo step per gesture.
 //! Notes are addressed by index and indices shift after each edit (plan 06, section 1), so the
 //! selection is kept as note values and resolved to indices again before each command.
 //! Zoom, scroll, snap, pane height, new-note velocity and the audition switch are view state: [`KeysPrefs`] in
@@ -188,7 +188,7 @@ pub enum NoteDrag {
     Move,
     Resize,
     ResizeStart,
-    /// Alt+Shift+drag on a note body: velocity by vertical distance.
+    /// Alt+drag on a note body: velocity by vertical distance.
     Velocity,
     /// A drag in the velocity lane: velocity from the pointer's height.
     Lane,
@@ -714,6 +714,11 @@ impl StudioApp {
     }
 }
 
+/// Shift alone is the scale-mode chromatic override; with Alt it means free move instead.
+fn chromatic(m: egui::Modifiers) -> bool {
+    m.shift && !m.alt
+}
+
 fn shifted(n: &Note, dt: i64, ds: i64) -> Note {
     Note { start: (n.start + dt).max(0), pitch: (i64::from(n.pitch) + ds).clamp(0, 127) as u8, ..*n }
 }
@@ -902,7 +907,7 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     // The corner has room for little: "Auto 1/16", "Grid: 1/8T", "Snap off".
     let grid_text = grid::label_at(ppt, grid::bar_ticks(&s), &prefs.grid).replace("Adaptive", "Auto");
     let rows = grid.height() / kh;
-    let row_map = scale::Rows::new(app.keys_scale(), &cv.notes, &app.keys.live, ui.input(|i| i.modifiers.shift));
+    let row_map = scale::Rows::new(app.keys_scale(), &cv.notes, &app.keys.live, ui.input(|i| chromatic(i.modifiers)));
     if app.keys.fit {
         app.keys.fit = false;
         let (lo, hi) = (cv.notes.iter().map(|n| n.pitch).min(), cv.notes.iter().map(|n| n.pitch).max());
@@ -1506,14 +1511,16 @@ fn preview(app: &StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note]) -> Op
     let pos = ui.input(|i| i.pointer.latest_pos())?;
     let sel: Vec<Note> = resolve(notes, &app.keys.selection).into_iter().map(|i| notes[i]).collect();
     let raw = f64::from(pos.x - press.x) / map.ppt;
-    let free = ui.input(|i| i.modifiers.alt);
+    let mods = ui.input(|i| i.modifiers);
+    // Edges: Alt alone frees the snap. Body moves: Alt+Shift (Alt alone is velocity).
+    let free = if kind == NoteDrag::Move { mods.alt && mods.shift } else { mods.alt };
     let round = |tick: f64| if free { tick.round() as i64 } else { map.round(tick) };
     let pairs = match kind {
         NoteDrag::Move => {
             let dt = round(anchor.start as f64 + raw) - anchor.start;
             let ds = ((press.y - pos.y) / map.kh).round() as i64;
             let (dt, ds) = clamp_move(&sel, dt, ds);
-            if map.scale.enabled && !ui.input(|i| i.modifiers.shift) {
+            if map.scale.enabled && !chromatic(mods) {
                 app.scale_move(&sel, dt, ds, Some(anchor.pitch))
             } else {
                 sel.iter().map(|n| (*n, shifted(n, dt, ds))).collect()
@@ -1659,7 +1666,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
     {
         match hit(layout, pos) {
             Some((_, NoteDrag::Resize | NoteDrag::ResizeStart)) => ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal),
-            Some(_) if mods.alt && mods.shift => ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical),
+            Some(_) if mods.alt && !mods.shift => ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical),
             Some(_) => ui.ctx().set_cursor_icon(CursorIcon::Grab),
             None => {}
         }
@@ -1740,7 +1747,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
                         app.keys.selection = vec![n];
                     }
                 }
-                let kind = if mods.alt && mods.shift && edge == NoteDrag::Move { NoteDrag::Velocity } else { edge };
+                let kind = if mods.alt && !mods.shift && edge == NoteDrag::Move { NoteDrag::Velocity } else { edge };
                 if kind == NoteDrag::Move {
                     app.audition(n.pitch, now);
                 }
@@ -1755,7 +1762,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
     if resp.drag_stopped() {
         finish(app, ui, map, vel, notes, layout);
     }
-    resp.on_hover_text("Drag notes to move, either edge to resize. Alt: bypass snap. Ctrl: copy. Alt+Shift on the body: velocity.");
+    resp.on_hover_text("Drag notes to move (Ctrl: copy), either edge to resize. Alt on an edge: resize without snap. Alt+Shift on the body: move without snap. Shift on the body: off-scale pitch in scale mode. Alt on the body: velocity.");
 }
 
 /// While dragging notes: Ctrl makes a copy; a pitch change auditions the new pitch.
@@ -1773,7 +1780,7 @@ fn drag_update(app: &mut StudioApp, ui: &Ui, map: &Map, now: f64) {
         ui.ctx().set_cursor_icon(if *copy { CursorIcon::Copy } else { CursorIcon::Grabbing });
         if let Some(pos) = pos {
             let ds = ((press.y - pos.y) / map.kh).round() as i64;
-            let pitch = if scale.enabled && !mods.shift && ds != 0 {
+            let pitch = if scale.enabled && !chromatic(mods) && ds != 0 {
                 // Same group rule as the applied move, so the audition matches the result.
                 let sel: Vec<u8> = app_sel.iter().map(|n| n.pitch).collect();
                 let at = sel.iter().position(|&p| p == anchor.pitch).unwrap_or(0);

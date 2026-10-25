@@ -106,6 +106,12 @@ fn scale_draw_drag_override_and_transpose_use_real_handlers() {
     h.frames(2);
     let n = h.app.keys.layout.notes[0].rect;
     let (x, y) = ((n[0] + n[2]) / 2.0, (n[1] + n[3]) / 2.0);
+    h.input("ui.drag", json!({"x": x, "y": y, "to_x": x, "to_y": y-h.app.ui.keys.key_h, "shift": true, "alt": true}));
+    assert_eq!(h.app.keys_notes()[0].pitch, 65, "Alt+Shift is a free move only: it keeps the scale rule, not the chromatic override");
+    h.app.run("edit.undo", json!({})).unwrap();
+    h.frames(2);
+    let n = h.app.keys.layout.notes[0].rect;
+    let (x, y) = ((n[0] + n[2]) / 2.0, (n[1] + n[3]) / 2.0);
     h.input("ui.drag", json!({"x": x, "y": y, "to_x": x, "to_y": y-h.app.ui.keys.key_h, "shift": true}));
     assert_eq!(h.app.keys_notes()[0].pitch, 64, "Shift permits the accidental");
     h.app.keys_transpose(1).unwrap();
