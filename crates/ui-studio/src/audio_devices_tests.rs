@@ -1435,7 +1435,7 @@ fn frames_until(t: &mut T, done: impl Fn(&T) -> bool) {
 }
 
 #[test]
-fn the_asio_listing_runs_off_the_ui_thread_probes_the_selected_driver_and_lists_again_for_another() {
+fn the_asio_listing_runs_off_the_ui_thread_probes_the_running_driver_and_never_the_one_only_chosen() {
     use crate::audio_devices::ASIO_LISTING;
     let driver = scarlett_driver();
     let again = driver.clone();
@@ -1452,17 +1452,18 @@ fn the_asio_listing_runs_off_the_ui_thread_probes_the_selected_driver_and_lists_
     frames_until(&mut t, |t| t.app.audio_devices.asio_listing.is_none());
     t.frames(1);
     assert_eq!(t.app.audio_devices.layout.listing, None);
-    assert_eq!(*asked.lock().unwrap(), [Some("Focusrite USB ASIO".to_string())], "only the selected driver is probed");
+    assert_eq!(*asked.lock().unwrap(), [Some("Focusrite USB ASIO".to_string())], "only the running driver is probed");
     let asio = t.app.audio_devices.systems.as_ref().unwrap().iter().find(|s| s.name == "ASIO").cloned().unwrap();
     let outputs: Vec<(&str, u16)> = asio.outputs.iter().map(|d| (d.name.as_str(), d.max_channels)).collect();
     assert_eq!(outputs, [("Focusrite USB ASIO", 2), ("Model Mixer ASIO Driver", 0)], "the others by name only");
-    // Choosing the other driver lists the ASIO system again, probing that one.
+    // Choosing the other driver does not probe it: that would open it. Its lists are marked
+    // stale until Apply.
     t.app.audio_devices.draft.output = Some("Model Mixer ASIO Driver".into());
-    frames_until(&mut t, |t| t.app.audio_devices.asio_listing.is_none() && asked.lock().unwrap().len() == 2);
-    t.frames(1);
-    assert_eq!(asked.lock().unwrap().last().cloned().flatten().as_deref(), Some("Model Mixer ASIO Driver"));
-    let asio = t.app.audio_devices.systems.as_ref().unwrap().iter().find(|s| s.name == "ASIO").cloned().unwrap();
-    assert_eq!(asio.outputs[1].max_channels, 2, "the newly chosen driver is described");
+    t.frames(5);
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    t.frames(2);
+    assert_eq!(asked.lock().unwrap().len(), 1, "a draft change opens nothing: {:?}", asked.lock().unwrap());
+    assert!(has_control(&t, "stale_buffer") && has_control(&t, "stale_rate"), "the unprobed driver's lists are marked");
 }
 
 #[test]
@@ -1853,4 +1854,77 @@ fn a_cancelled_or_silent_asio_calibration_stores_nothing_and_says_why() {
         "the click came back on 0 of 8 tries: check the cable from Out 1-2 to In 1 and the input gain"
     );
     assert!(t.app.ui.audio.calibrations.is_empty() && driver.live_calibrations().is_empty());
+}
+
+/// Two systems whose buffer lists differ: the pending-change tests pick between them.
+fn two_backends() -> Value {
+    json!({"systems": [
+        {"name": "ALSA", "is_default": true, "outputs": [{"name": "hw:0", "is_default": true, "buffer_min": 64, "buffer_max": 2048}]},
+        {"name": "JACK", "outputs": [{"name": "system", "is_default": true, "buffer_min": 128, "buffer_max": 256}]}
+    ]})
+}
+
+fn buffer_labels(t: &mut T) -> Vec<String> {
+    t.click(mid(t.control_rect("buffer")));
+    let labels =
+        t.layout()["items"].as_array().unwrap().iter().filter(|i| i["value"] == "buffer").map(|i| i["label"].as_str().unwrap().to_string()).collect();
+    t.click((2.0, 2.0));
+    labels
+}
+
+#[test]
+fn picking_another_driver_shows_the_pending_line_highlights_apply_and_lists_the_selected_backends_choices() {
+    let mut t = T::new();
+    t.control("audio.fake_devices", two_backends()).unwrap();
+    t.open_window();
+    assert_eq!(t.layout()["pending"], Value::Null);
+    assert_eq!(t.layout()["apply_highlighted"], json!(false));
+    assert!(buffer_labels(&mut t).contains(&"64 samples".to_string()), "the default system offers 64");
+    t.pick("system", "JACK");
+    assert_eq!(t.layout()["pending"], json!("Driver change pending: press Apply to switch to JACK."));
+    assert_eq!(t.layout()["apply_highlighted"], json!(true));
+    assert_eq!(buffer_labels(&mut t), ["System default", "128 samples", "256 samples"], "the selected backend's sizes, before Apply");
+    assert!(t.reopened().is_empty(), "a draft change opens nothing");
+    t.click(mid(t.control_rect("apply")));
+    assert_eq!(t.reopened().last().and_then(|c| c.system.clone()).as_deref(), Some("JACK"));
+    assert_eq!(t.layout()["pending"], Value::Null, "Apply clears the pending line");
+    assert_eq!(t.layout()["apply_highlighted"], json!(false));
+}
+
+#[test]
+fn revert_clears_the_draft_without_switching() {
+    let mut t = T::new();
+    t.control("audio.fake_devices", two_backends()).unwrap();
+    t.open_window();
+    t.pick("system", "JACK");
+    assert!(t.layout()["pending"].is_string());
+    t.click(mid(t.control_rect("revert")));
+    assert_eq!(t.layout()["pending"], Value::Null);
+    assert_eq!(t.app.audio_devices.draft, t.app.ui.audio);
+    assert!(t.reopened().is_empty(), "Revert reopens nothing");
+}
+
+#[test]
+fn a_sample_rate_change_is_pending_until_apply_reopens() {
+    let mut t = T::new();
+    t.open_window();
+    t.pick("rate", "48000 Hz");
+    assert_eq!(t.layout()["pending"], json!("Sample rate change pending: press Apply to reopen at 48000 Hz."));
+    t.click(mid(t.control_rect("apply")));
+    assert_eq!(t.layout()["pending"], Value::Null);
+}
+
+#[test]
+fn a_driver_that_must_be_open_to_be_described_marks_its_lists_stale() {
+    let mut t = T::new();
+    t.control(
+        "audio.fake_devices",
+        json!({"systems": [{"name": "ASIO", "is_default": true, "outputs": [{"name": "Driver A", "is_default": true, "max_channels": 0}], "inputs": []}]}),
+    )
+    .unwrap();
+    t.open_window();
+    for key in ["stale_rate", "stale_buffer"] {
+        let note = t.layout()["controls"].as_array().unwrap().iter().find(|c| c["value"] == key).cloned().unwrap_or_default();
+        assert_eq!(note["label"], json!("updates after Apply"), "{key}");
+    }
 }
