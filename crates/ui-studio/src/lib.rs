@@ -552,6 +552,10 @@ impl StudioApp {
             self.status = reason.into();
             return Err(reason.into());
         }
+        // A real-time render (ADR 0027) owns the transport while it plays, and runs on the Player.
+        if let Some(r) = self.realtime_intercept(id, &params) {
+            return r;
+        }
         if (self.audio_devices.measuring.is_some() || self.external_measure.running.is_some())
             && matches!(
                 id,

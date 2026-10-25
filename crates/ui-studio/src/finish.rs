@@ -15,6 +15,10 @@ use egui::{FontId, Rect, pos2, vec2};
 use serde_json::{Value, json};
 use soundcraft_model::{ClipId, TrackId};
 
+/// File > Bounce in real time through the live device (ADR 0027).
+mod realtime;
+pub use realtime::{Conditions as RealtimeConditions, RealtimeState, Rendering, device_blocker as realtime_device_blocker};
+
 /// What a name being typed renames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum RenameTarget {
@@ -71,6 +75,12 @@ pub struct BounceForm {
     /// The user chose "Render without it": the External Instruments are left out (ADR 0020
     /// decision 9). Never set without that choice.
     pub without_external: bool,
+    /// The user chose "Render in real time" (ADR 0027): the mix plays through the live device.
+    pub realtime: bool,
+    /// With `realtime`: also write each External Instrument's return as its own stem file.
+    pub realtime_stems: bool,
+    /// With `realtime`: render an External Instrument that has no latency set, uncompensated.
+    pub uncompensated: bool,
 }
 
 /// One output path in the by-path mode.
@@ -175,8 +185,13 @@ pub struct FinishState {
     /// The External Instrument tracks the bounce would leave out, while the question about them
     /// is open (ADR 0020 decision 9).
     pub external_question: Option<Vec<String>>,
-    /// That question's buttons as last drawn: "Render without it", cancel.
+    /// That question's buttons as last drawn: "Render without hardware", cancel.
     pub external_buttons: (R4, R4),
+    /// That question's "Render in real time" button, and why it is off (ADR 0027 decision 2).
+    pub realtime_button: R4,
+    pub realtime_blocker: Option<String>,
+    /// The real-time render under way (ADR 0027).
+    pub realtime: RealtimeState,
 }
 
 /// Where the "Replace existing file?" question stands.
@@ -231,6 +246,8 @@ impl FinishState {
                 self.path_job.as_ref().map(|j| json!({"progress": j.progress(), "dir": j.dir(), "files": j.files(), "cancel": self.cancel}))
             }),
             "paths_request": self.paths_request,
+            "realtime": self.realtime.running.as_ref().map(|r| json!({"path": r.path, "stems": r.stems, "cancel": self.cancel})),
+            "realtime_blocker": self.realtime_blocker,
             "layout": self.layout,
         })
     }
@@ -243,10 +260,11 @@ pub fn rect(r: R4) -> Rect {
 /// A session-replacing command while a bounce holds its own copy of the session is refused (two
 /// large sessions could run out of memory); Quit cancels the bounce.
 pub fn refuses(app: &mut StudioApp, id: &str) -> bool {
-    if app.finish.job.is_none() && app.finish.path_job.is_none() {
+    if app.finish.job.is_none() && app.finish.path_job.is_none() && app.finish.realtime.running.is_none() {
         return false;
     }
     if id == "app.quit" {
+        app.cancel_realtime();
         app.finish.job = None;
         app.finish.path_job = None;
         app.dialog = None;
@@ -421,6 +439,9 @@ impl StudioApp {
             joint: true,
             dir: dir.join("Stems").to_string_lossy().into_owned(),
             without_external: false,
+            realtime: false,
+            realtime_stems: false,
+            uncompensated: false,
         });
         self.dialog = Some(Dialog::Bounce);
     }
@@ -451,7 +472,7 @@ impl StudioApp {
         // An External Instrument plays only in real time: the bounce leaves it out only when the
         // user chooses that (ADR 0020 decision 9), never silently.
         let left_out = soundcraft_engine::cmd::external_in_render(s);
-        if !left_out.is_empty() && !f.without_external {
+        if !left_out.is_empty() && !f.without_external && !f.realtime {
             self.status = format!("{}: render without it, or cancel", external_notice(&left_out));
             self.finish.external_question = Some(left_out);
             return Err(self.status.clone());
@@ -471,6 +492,9 @@ impl StudioApp {
             return Err(self.status.clone());
         }
         self.finish.replace = Replace::No;
+        if f.realtime {
+            return self.start_bounce_realtime(&f, &path, start, end);
+        }
         let mut p = json!({
             "path": path.to_string_lossy(),
             "format": f.format,
@@ -547,7 +571,78 @@ impl StudioApp {
         }
     }
 
-    /// "Render without it": the bounce leaves the External Instruments out, as the user chose.
+    /// The `file.bounce_mix` request of the form in real time, over `start..end` to `path`.
+    fn realtime_params(f: &BounceForm, path: &std::path::Path, start: i64, end: i64) -> Value {
+        json!({
+            "path": path.to_string_lossy(),
+            "format": f.format,
+            "bit_depth": f.bit_depth,
+            "start": start,
+            "end": end,
+            "mode": "realtime",
+            "stems": f.realtime_stems,
+            "uncompensated": f.uncompensated,
+        })
+    }
+
+    /// The form's range, or `None` when it names an empty selection.
+    fn form_range(&self, f: &BounceForm) -> Option<(i64, i64)> {
+        let s = self.engine.session();
+        match f.range {
+            BounceRange::Selection if !bounce_range(&s.edit).is_empty() => Some((bounce_range(&s.edit).start, bounce_range(&s.edit).end)),
+            BounceRange::Selection => None,
+            BounceRange::Whole => Some((0, s.content_end().max(1))),
+        }
+    }
+
+    /// Why the form cannot render in real time now (shown in the question before starting).
+    pub(crate) fn form_realtime_blocker(&self) -> Option<String> {
+        let f = self.finish.bounce_form.as_ref()?;
+        if f.by_path {
+            return Some("Stems by output path render offline: choose Mix to render in real time".into());
+        }
+        if f.source != "main" {
+            return Some("A real-time render writes the main mix: choose Main mix as the source".into());
+        }
+        if f.normalize {
+            return Some("Normalize is not available in a real-time render".into());
+        }
+        let Some((start, end)) = self.form_range(f) else { return Some("Nothing is selected: pick a range, or bounce the whole song.".into()) };
+        let path = fit_extension(std::path::Path::new(f.path.trim()), &f.format);
+        self.realtime_blocker(&Self::realtime_params(f, &path, start, end))
+    }
+
+    /// Start the form's render in real time (`file.bounce_mix {mode: "realtime"}`, run by the app).
+    fn start_bounce_realtime(&mut self, f: &BounceForm, path: &std::path::Path, start: i64, end: i64) -> Result<(), String> {
+        let p = Self::realtime_params(f, path, start, end);
+        self.run("file.bounce_mix", p)?;
+        self.finish.bounce_form = None;
+        self.status = format!("Rendering in real time to {}\u{2026}", path.display());
+        Ok(())
+    }
+
+    /// "Render in real time": the mix plays through the live device with its External Instruments.
+    pub fn bounce_in_realtime(&mut self) -> Result<(), String> {
+        if let Some(why) = self.form_realtime_blocker() {
+            self.status.clone_from(&why);
+            return Err(why);
+        }
+        self.finish.external_question = None;
+        if let Some(f) = self.finish.bounce_form.as_mut() {
+            f.realtime = true;
+        }
+        let r = self.start_bounce();
+        if r.is_err()
+            && self.finish.replace == Replace::No
+            && let Some(f) = self.finish.bounce_form.as_mut()
+        {
+            // The form stays, with the reason on the status line; the next Bounce asks again.
+            f.realtime = false;
+        }
+        r
+    }
+
+    /// "Render without hardware": the bounce leaves the External Instruments out, as the user chose.
     pub fn bounce_without_external(&mut self) -> Result<(), String> {
         self.finish.external_question = None;
         if let Some(f) = self.finish.bounce_form.as_mut() {
@@ -561,6 +656,7 @@ impl StudioApp {
         if self.finish.job.take().is_some() || self.finish.path_job.take().is_some() {
             self.status = "Bounce cancelled".into();
         }
+        self.cancel_realtime();
         self.finish.bounce_form = None;
         self.finish.replace = Replace::No;
         self.finish.external_question = None;
@@ -708,6 +804,11 @@ pub fn rename_field(app: &mut StudioApp, ctx: &egui::Context) {
 
 /// Render the running bounce for a moment (30 ms) each frame.
 pub fn step_bounce(app: &mut StudioApp, ctx: &egui::Context) {
+    if app.finish.realtime.running.is_some() {
+        app.step_realtime();
+        ctx.request_repaint();
+        return;
+    }
     if app.finish.path_job.is_some() {
         return step_path_bounce(app, ctx);
     }
@@ -773,6 +874,26 @@ fn choices(ui: &mut egui::Ui, current: &str, items: &[(String, String)], out: &m
 
 /// File > Bounce: the form, then the progress window with Cancel (or Escape).
 pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
+    if let Some((bar, of, fraction)) = app.realtime_progress() {
+        let mut cancel = ctx.input(|i| hit(i, A::DialogCancel));
+        egui::Modal::new(egui::Id::new("bounce_realtime")).show(ctx, |ui| {
+            ui.set_width(340.0);
+            ui.label(egui::RichText::new(realtime::progress_text(bar, of)).strong());
+            ui.add(egui::ProgressBar::new(fraction));
+            ui.label(egui::RichText::new("Playing through the audio device: the synths play live.").color(TOKENS.text_dim));
+            ui.horizontal(|ui| {
+                let b = ui.button("Cancel");
+                app.finish.cancel = crate::arrange::r4(b.rect);
+                cancel |= b.clicked();
+            });
+        });
+        if cancel {
+            app.cancel_bounce();
+            app.dialog = None;
+        }
+        app.finish.layout.bounce = None;
+        return;
+    }
     let running = match (&app.finish.job, &app.finish.path_job) {
         (Some(j), _) => Some((j.path().file_name().unwrap_or_default().to_string_lossy().into_owned(), j.progress())),
         (None, Some(j)) => Some((format!("{} stems", j.files().len()), j.progress())),
@@ -949,22 +1070,43 @@ fn left_out_note(engine: &soundcraft_engine::Engine) -> String {
 /// it" leaves the named tracks out explicitly; Cancel (or Escape) goes back to the form with
 /// nothing written. Leaving them out is never the default: Enter does not choose it.
 fn external_question(app: &mut StudioApp, ctx: &egui::Context, names: &[String]) {
-    let (mut without, mut no) = (false, false);
+    let (mut realtime, mut without, mut no) = (false, false, false);
+    let blocker = app.form_realtime_blocker();
+    app.finish.realtime_blocker.clone_from(&blocker);
+    let mut form = app.finish.bounce_form.clone();
     egui::Modal::new(egui::Id::new("bounce_external")).show(ctx, |ui| {
-        ui.set_width(400.0);
+        ui.set_width(440.0);
         ui.label(egui::RichText::new("External Instrument").strong());
         ui.label(egui::RichText::new(format!("{}.", external_notice(names))).color(TOKENS.text_dim));
+        if let Some(f) = form.as_mut() {
+            ui.checkbox(&mut f.realtime_stems, "Also write each External Instrument's return as a stem");
+            let unmeasured = blocker.as_deref().is_some_and(|b| b.contains("is not measured")) || f.uncompensated;
+            if unmeasured {
+                ui.checkbox(&mut f.uncompensated, "Render uncompensated (its notes land late by the round trip)");
+            }
+        }
+        if let Some(why) = &blocker {
+            ui.label(egui::RichText::new(why).color(TOKENS.text_dim));
+        }
         ui.add_space(crate::theme::SPACE);
         ui.horizontal(|ui| {
-            let w = ui.button("Render without it");
+            let r = ui.add_enabled(blocker.is_none(), egui::Button::new("Render in real time"));
+            let w = ui.button("Render without hardware (offline, faster)");
             let c = ui.button("Cancel");
+            app.finish.realtime_button = crate::arrange::r4(r.rect);
             app.finish.external_buttons = (crate::arrange::r4(w.rect), crate::arrange::r4(c.rect));
+            realtime = r.clicked();
             without = w.clicked();
             no = c.clicked();
         });
     });
+    if form.is_some() {
+        app.finish.bounce_form = form;
+    }
     no |= ctx.input(|i| hit(i, A::DialogCancel));
-    if without {
+    if realtime {
+        let _ = app.bounce_in_realtime();
+    } else if without {
         let _ = app.bounce_without_external();
     } else if no {
         app.finish.external_question = None;
