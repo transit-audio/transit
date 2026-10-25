@@ -127,7 +127,7 @@ fn monitor_turned_on_mid_stream_starts_from_clean_baselines() {
     assert_eq!(hub.sysex_truncated(), 1);
 }
 
-fn route() -> Route {
+pub(super) fn route() -> Route {
     Route {
         engine: EngineEpoch(1),
         target: (TrackId(7), soundcraft_mix::INSTRUMENT_SLOT, SlotGen::VACANT),

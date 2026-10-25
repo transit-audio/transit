@@ -45,7 +45,17 @@ impl Player {
         self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.take_map_events())).unwrap_or_default()
     }
 
-    /// Map events the worker could not queue (the UI was not draining).
+    /// Tells this Player's MIDI side from the one an audio reconnect replaces (0 without MIDI).
+    pub fn midi_map_generation(&self) -> u32 {
+        self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.map_generation())).unwrap_or(0)
+    }
+
+    /// Whether the worker is armed to forward a learn candidate.
+    pub fn midi_learn_armed(&self) -> bool {
+        self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.learn_armed())).unwrap_or(false)
+    }
+
+    /// Button presses and learn candidates the worker could not queue (the UI was not draining).
     pub fn midi_map_dropped(&self) -> u64 {
         self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.map_dropped())).unwrap_or(0)
     }

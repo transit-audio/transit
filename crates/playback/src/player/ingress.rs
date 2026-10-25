@@ -174,6 +174,9 @@ struct Mon {
     capturing: bool,
     /// The next input sequence number the MIDI Learn matcher has not seen.
     map_next: u64,
+    /// Notes whose note-on a mapping consumed (channel x key), so exactly their note-off is
+    /// consumed too, and a note held while a mapping is added still gets its note-off through.
+    held: [u128; 16],
 }
 impl Drop for Mon {
     fn drop(&mut self) {
@@ -460,7 +463,11 @@ impl Worker {
         events
     }
 
-    /// Map events lost to a full ring.
+    pub(super) fn learn_armed(&self) -> bool {
+        self.shared.learn.load(Ordering::Acquire)
+    }
+
+    /// Press and candidate events lost to a full ring (sweeps are coalesced and never lost).
     pub(super) fn map_dropped(&self) -> u64 {
         self.shared.map_dropped.load(Ordering::Relaxed)
     }
@@ -667,12 +674,17 @@ impl Pump {
         }
         // MIDI Learn (ADR 0028): zero cost without mappings or an armed learn (two loads and a
         // flag). Otherwise every open port is read without popping, so a controller no track
-        // listens to still maps, and each message is seen once (`map_next`).
+        // listens to still maps, and each message is seen once (`map_next`). A port with an
+        // admitting route is matched where it is popped instead, so nothing arriving between this
+        // pass and the pop is missed and a consumed message never reaches the route.
         let learning = self.shared.learn.load(Ordering::Acquire);
         let pass_on = learning || self.maps.as_deref().is_some_and(|maps| !maps.is_empty());
         if pass_on {
             let first = !self.map_pass_on;
             for input in &mut self.inputs {
+                if input.routes.iter().any(|(permit, _)| permit.admits()) {
+                    continue;
+                }
                 if first {
                     let Input { consumer, mon, .. } = input;
                     consumer.for_each_pending(|raw| mon.map_next = mon.map_next.max(raw.seq.saturating_add(1)));
@@ -746,6 +758,21 @@ impl Pump {
                 self.shared.filtered.fetch_add(1, Ordering::Relaxed);
                 continue;
             };
+            // MIDI Learn: match here, so a message is matched exactly once and a mapped one
+            // (without pass-through) never reaches the routes.
+            let mut consumed = false;
+            if pass_on {
+                if raw.seq >= input.mon.map_next {
+                    input.mon.map_next = raw.seq.saturating_add(1);
+                    consumed = match_one(input.id, channel, message, self.maps.as_deref(), &mut self.map_out, &self.shared);
+                } else if let Some(maps) = self.maps.as_deref() {
+                    consumed = midi_map::consumes(maps, input.id, channel, message);
+                }
+            }
+            if consume_notes(&mut input.mon, channel, message, consumed) {
+                self.shared.filtered.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
             let mut tapped = false;
             for (permit, route) in &input.routes {
                 // The echo route generation is read before the route check: a revocation after
@@ -856,24 +883,47 @@ fn map_pass(input: &mut Input, maps: Option<&Snapshot>, out: &mut rtrb::Producer
         }
         mon.map_next = raw.seq.saturating_add(1);
         let Some((channel, message)) = decode(*raw) else { return };
-        let mut push = |event: MapEvent| {
-            let sent = out.push(event).is_ok();
-            if !sent {
-                shared.map_dropped.fetch_add(1, Ordering::Relaxed);
-            }
-            sent
-        };
-        if shared.learn.load(Ordering::Acquire)
-            && let Some(candidate) = midi_map::candidate(id, channel, message)
-            && shared.learn.swap(false, Ordering::AcqRel)
-        {
-            push(candidate);
-            return;
-        }
-        if let Some(maps) = maps {
-            midi_map::handle(maps, id, channel, message, &mut push);
-        }
+        match_one(id, channel, message, maps, out, shared);
     });
+}
+
+/// One message for the MIDI Learn matcher: the armed learn takes it as the candidate, otherwise it
+/// is matched against the snapshot. Returns whether a mapping consumes it (a candidate is not).
+fn match_one(id: u64, channel: u8, message: Message, maps: Option<&Snapshot>, out: &mut rtrb::Producer<MapEvent>, shared: &Shared) -> bool {
+    let mut push = |event: MapEvent| {
+        let sent = out.push(event).is_ok();
+        if !sent {
+            shared.map_dropped.fetch_add(1, Ordering::Relaxed);
+        }
+        sent
+    };
+    if shared.learn.load(Ordering::Acquire)
+        && let Some(candidate) = midi_map::candidate(id, channel, message)
+        && shared.learn.swap(false, Ordering::AcqRel)
+    {
+        push(candidate);
+        return false;
+    }
+    maps.is_some_and(|maps| midi_map::handle(maps, id, channel, message, &mut push))
+}
+
+/// Pairs note-offs with consumed note-ons: a note-on is consumed when `mapped`, and its note-off is
+/// consumed exactly then, whatever the mappings are by then. Returns whether to consume `message`.
+fn consume_notes(mon: &mut Mon, channel: u8, message: Message, mapped: bool) -> bool {
+    let (key, on) = match message {
+        Message::NoteOn { key, .. } => (key, true),
+        Message::NoteOff { key, .. } => (key, false),
+        _ => return mapped,
+    };
+    let word = usize::from(channel & 15);
+    let bit = 1u128 << (key & 127);
+    let was = mon.held[word] & bit != 0;
+    if on && mapped {
+        mon.held[word] |= bit;
+    } else {
+        mon.held[word] &= !bit;
+    }
+    if on { mapped } else { was }
 }
 
 fn decode(raw: InputEvent) -> Option<(u8, Message)> {

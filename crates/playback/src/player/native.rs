@@ -259,7 +259,7 @@ impl Native {
             origin,
             monitor,
             muted: Vec::new(),
-            wanted: Default::default(),
+            wanted: super::midi_map::Wanted::new(),
         })
     }
 
@@ -326,20 +326,28 @@ impl Native {
     /// The MIDI Learn events since the last call, with the candidate's port named.
     pub(super) fn take_map_events(&self) -> Vec<super::MapMsg> {
         use super::midi_map::MapEvent;
-        self.worker
-            .take_map_events()
-            .into_iter()
-            .filter_map(|event| {
+        let epoch = self.wanted.epoch();
+        let moves = self.wanted.take_moves().into_iter().map(|(index, value, seq)| super::MapMsg::Move { epoch, index, value, seq });
+        moves
+            .chain(self.worker.take_map_events().into_iter().filter_map(|event| {
                 Some(match event {
-                    MapEvent::Move { epoch, index, value } => super::MapMsg::Move { epoch, index, value },
                     MapEvent::Press { epoch, index, set } => super::MapMsg::Press { epoch, index, set },
                     MapEvent::Candidate { port, channel, kind, number } => {
                         let input = self.inputs.iter().find(|i| i.attached.as_ref().is_some_and(|(id, _)| *id == port))?;
                         super::MapMsg::Candidate { port: input.key.to_string(), channel, kind, number }
                     }
                 })
-            })
+            }))
             .collect()
+    }
+
+    /// Tells this Native from the one a reconnect replaces.
+    pub(super) fn map_generation(&self) -> u32 {
+        self.wanted.generation()
+    }
+
+    pub(super) fn learn_armed(&self) -> bool {
+        self.worker.learn_armed()
     }
 
     pub(super) fn map_dropped(&self) -> u64 {

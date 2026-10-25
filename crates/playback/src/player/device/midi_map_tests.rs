@@ -28,6 +28,7 @@ fn spec(port: &str, number: u8) -> MapSpec {
         channel: Some(0),
         kind: SourceKind::Cc,
         number,
+        pass_through: false,
         mode: MapMode::Jump,
         min: 0.0,
         max: 1.0,
@@ -58,7 +59,7 @@ fn a_mapped_port_opens_without_any_route_and_its_cc_reaches_main() {
         got.extend(player.take_midi_map_events());
         !got.is_empty()
     });
-    assert_eq!(got[0], MapMsg::Move { epoch, index: 0, value: 1.0 });
+    assert!(matches!(got[0], MapMsg::Move { epoch: e, index: 0, value, .. } if e == epoch && value == 1.0), "{got:?}");
     // Removing the mappings closes the port again (no route, no monitor, nothing wants it).
     player.set_midi_mappings(Vec::new());
     until("the port closes", || {

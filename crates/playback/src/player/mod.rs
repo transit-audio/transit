@@ -40,10 +40,12 @@ pub enum PlayedMidi {
 /// whose `epoch` is `Player::midi_map_epoch`; an event of an older epoch is stale.
 #[derive(Debug, Clone, PartialEq)]
 pub enum MapMsg {
+    /// A continuous control's newest value; `seq` counts the worker's publishes (pickup's lag gate).
     Move {
         epoch: u32,
         index: u32,
         value: f32,
+        seq: u32,
     },
     /// A button: `Some(on)` sets it, `None` flips it.
     Press {

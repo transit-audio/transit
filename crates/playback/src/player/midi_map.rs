@@ -33,6 +33,8 @@ pub struct MapSpec {
     pub toggle: bool,
     /// Mute, solo or arm: an on/off control.
     pub button: bool,
+    /// Also deliver the message to the track's routes (default off: a mapped message is consumed).
+    pub pass_through: bool,
 }
 
 impl MapSpec {
@@ -49,6 +51,7 @@ impl MapSpec {
             max: m.max,
             toggle: m.toggle,
             button: r.control.is_button(),
+            pass_through: m.pass_through,
         }
     }
 }
@@ -68,6 +71,10 @@ pub struct Cell {
     engaged: AtomicBool,
     /// The last knob value (0..127) seen, or `NO_LAST`.
     last: AtomicU8,
+    /// The newest value the worker published and whether Main has not taken it yet. A sweep is
+    /// coalesced here, last value wins, so a UI that is slow to apply loses no final value.
+    pending_value: AtomicU32,
+    pending: AtomicBool,
 }
 
 impl Cell {
@@ -79,7 +86,27 @@ impl Cell {
             published_n: AtomicU32::new(0),
             engaged: AtomicBool::new(false),
             last: AtomicU8::new(NO_LAST),
+            pending_value: AtomicU32::new(0),
+            pending: AtomicBool::new(false),
         }
+    }
+
+    /// The worker: this is the control's newest value.
+    fn publish(&self, value: f32) {
+        self.published.store(value.to_bits(), Ordering::Relaxed);
+        self.current.store(value.to_bits(), Ordering::Relaxed);
+        self.pending_value.store(value.to_bits(), Ordering::Relaxed);
+        self.published_n.fetch_add(1, Ordering::Relaxed);
+        self.pending.store(true, Ordering::Release);
+    }
+
+    /// Main: the newest published value since the last call, with the publish count it belongs to
+    /// (what `set_value` is told as `applied`).
+    pub fn take(&self) -> Option<(f32, u32)> {
+        if !self.pending.swap(false, Ordering::Acquire) {
+            return None;
+        }
+        Some((f32::from_bits(self.pending_value.load(Ordering::Relaxed)), self.published_n.load(Ordering::Relaxed)))
     }
 
     /// Main, once a frame: the control's value now, and how many events of this entry it has applied.
@@ -105,6 +132,7 @@ pub struct Entry {
     max: f32,
     toggle: bool,
     button: bool,
+    pass_through: bool,
     cell: Arc<Cell>,
 }
 
@@ -121,6 +149,7 @@ impl Entry {
             max: spec.max,
             toggle: spec.toggle,
             button: spec.button,
+            pass_through: spec.pass_through,
             cell,
         }
     }
@@ -145,8 +174,6 @@ impl Snapshot {
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MapEvent {
-    /// Set a continuous control to `value` (0..1 of its travel).
-    Move { epoch: u32, index: u32, value: f32 },
     /// A button: `Some(on)` sets it, `None` flips it.
     Press { epoch: u32, index: u32, set: Option<bool> },
     /// Learn: the message that was armed for.
@@ -179,10 +206,28 @@ pub fn candidate(port: u64, channel: u8, message: Message) -> Option<MapEvent> {
     }
 }
 
-/// Match one admitted message against the snapshot and publish what it does. `push` returns
-/// whether the event was queued. No allocation, no lock.
-pub fn handle(snap: &Snapshot, port: u64, channel: u8, message: Message, push: &mut impl FnMut(MapEvent) -> bool) {
-    let Some(msg) = msg_of(message) else { return };
+/// Whether a CC or note-on is mapped by an entry that does not pass it through, so it must not
+/// reach the track's routes. Pure; note-offs are paired with their note-on by the caller.
+pub fn consumes(snap: &Snapshot, port: u64, channel: u8, message: Message) -> bool {
+    let Some(msg) = msg_of(message) else { return false };
+    snap.entries.iter().any(|e| {
+        !e.pass_through
+            && e.port == port
+            && (e.channel == ANY || e.channel == channel)
+            && match (msg, e.kind) {
+                (Msg::Cc(n, _), SourceKind::Cc) | (Msg::NoteOn(n, _), SourceKind::Note) | (Msg::NoteOff(n), SourceKind::Note) => n == e.number,
+                _ => false,
+            }
+    })
+}
+
+/// Match one message against the snapshot and publish what it does: a continuous control's value
+/// goes to its cell, a button press to `push` (which returns whether it was queued). Returns
+/// whether a mapping without pass-through matched, i.e. the message is consumed. No allocation,
+/// no lock.
+pub fn handle(snap: &Snapshot, port: u64, channel: u8, message: Message, push: &mut impl FnMut(MapEvent) -> bool) -> bool {
+    let Some(msg) = msg_of(message) else { return false };
+    let mut consumed = false;
     for (index, e) in snap.entries.iter().enumerate() {
         if e.port != port || (e.channel != ANY && e.channel != channel) {
             continue;
@@ -196,6 +241,7 @@ pub fn handle(snap: &Snapshot, port: u64, channel: u8, message: Message, push: &
         if number != e.number {
             continue;
         }
+        consumed |= !e.pass_through;
         let (epoch, index) = (snap.epoch, index as u32);
         if e.button {
             let pressed = match (msg, value) {
@@ -250,12 +296,11 @@ pub fn handle(snap: &Snapshot, port: u64, channel: u8, message: Message, push: &
             send = c.engaged.load(Ordering::Relaxed);
         }
         c.last.store(v, Ordering::Relaxed);
-        if send && push(MapEvent::Move { epoch, index, value: target }) {
-            c.published.store(target.to_bits(), Ordering::Relaxed);
-            c.current.store(target.to_bits(), Ordering::Relaxed);
-            c.published_n.fetch_add(1, Ordering::Relaxed);
+        if send {
+            c.publish(target);
         }
     }
+    consumed
 }
 
 /// What Main wants matched, and what the worker was last given. Main side only.
@@ -271,9 +316,29 @@ pub(super) struct Wanted {
     retired: Vec<Arc<Snapshot>>,
     current: Option<Arc<Snapshot>>,
     pub learning: bool,
+    /// Tells this Native from the one a reconnect replaces; epochs start from it, so a new
+    /// Native's epochs never equal an old one's.
+    generation: u32,
 }
 
+static GENERATIONS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+
 impl Wanted {
+    pub fn new() -> Self {
+        let generation = GENERATIONS.fetch_add(1, Ordering::Relaxed);
+        Wanted { epoch: generation.wrapping_mul(1 << 16), generation, ..Default::default() }
+    }
+
+    pub fn generation(&self) -> u32 {
+        self.generation
+    }
+
+    /// Each continuous control's newest published value since the last call (last wins), as the UI
+    /// applies it. Never loses the final value of a sweep, however slowly it is called.
+    pub fn take_moves(&self) -> Vec<(u32, f32, u32)> {
+        self.cells.iter().enumerate().filter_map(|(i, c)| c.take().map(|(v, n)| (i as u32, v, n))).collect()
+    }
+
     /// Replace the wanted mappings. Equal lists change nothing (pickup state survives).
     pub fn set(&mut self, specs: Vec<MapSpec>) {
         if specs == self.specs {
@@ -344,7 +409,7 @@ mod tests {
     use soundcraft_mix::NoteId;
 
     fn spec(kind: SourceKind, number: u8, mode: MapMode, button: bool) -> MapSpec {
-        MapSpec { port: "KeyStep".into(), channel: Some(0), kind, number, mode, min: 0.0, max: 1.0, toggle: true, button }
+        MapSpec { port: "KeyStep".into(), channel: Some(0), kind, number, mode, min: 0.0, max: 1.0, toggle: true, button, pass_through: false }
     }
     fn snap(spec: &MapSpec, current: f32) -> (Snapshot, Arc<Cell>) {
         let cell = Arc::new(Cell::new(current));
@@ -358,48 +423,50 @@ mod tests {
         });
         out
     }
-    fn moved(events: &[MapEvent]) -> Vec<f32> {
-        events.iter().filter_map(|e| if let MapEvent::Move { value, .. } = e { Some(*value) } else { None }).collect()
+    /// The continuous values `handle` published for a CC 7 of `value`.
+    fn mv(snap: &Snapshot, value: u8) -> Vec<f32> {
+        let _ = cc(snap, value);
+        snap.entries[0].cell.take().map(|(v, _)| v).into_iter().collect()
     }
 
     #[test]
     fn pickup_waits_for_the_knob_to_cross_the_control() {
         let (s, cell) = snap(&spec(SourceKind::Cc, 7, MapMode::Pickup, false), 0.5);
-        assert!(cc(&s, 0).is_empty(), "knob far below the fader: nothing moves");
-        assert!(cc(&s, 30).is_empty());
+        assert!(mv(&s, 0).is_empty(), "knob far below the fader: nothing moves");
+        assert!(mv(&s, 30).is_empty());
         assert!(!cell.engaged());
-        let crossing = cc(&s, 80);
-        assert_eq!(moved(&crossing).len(), 1, "passing the fader picks it up");
-        assert!((moved(&crossing)[0] - 80.0 / 127.0).abs() < 1e-6);
+        let crossing = mv(&s, 80);
+        assert_eq!(crossing.len(), 1, "passing the fader picks it up");
+        assert!((crossing[0] - 80.0 / 127.0).abs() < 1e-6);
         assert!(cell.engaged());
-        assert_eq!(moved(&cc(&s, 90)).len(), 1, "then it follows");
-        assert_eq!(moved(&cc(&s, 10)).len(), 1, "in both directions");
+        assert_eq!(mv(&s, 90).len(), 1, "then it follows");
+        assert_eq!(mv(&s, 10).len(), 1, "in both directions");
     }
 
     #[test]
     fn pickup_catches_a_knob_that_starts_on_the_value_and_lets_go_after_an_outside_move() {
         let (s, cell) = snap(&spec(SourceKind::Cc, 7, MapMode::Pickup, false), 64.0 / 127.0);
-        assert_eq!(moved(&cc(&s, 64)).len(), 1, "a knob already there engages at once");
+        assert_eq!(mv(&s, 64).len(), 1, "a knob already there engages at once");
         // Main applied the one event and the control sits where the knob put it.
         cell.set_value(64.0 / 127.0, 1);
-        assert_eq!(moved(&cc(&s, 70)).len(), 1);
+        assert_eq!(mv(&s, 70).len(), 1);
         cell.set_value(70.0 / 127.0, 2);
         // The user drags the fader with the mouse to the bottom.
         cell.set_value(0.1, 2);
-        assert!(cc(&s, 75).is_empty(), "the knob no longer matches the fader: pickup again");
+        assert!(mv(&s, 75).is_empty(), "the knob no longer matches the fader: pickup again");
         assert!(!cell.engaged());
-        assert_eq!(moved(&cc(&s, 5)).len(), 1, "crossing the new value picks it up");
+        assert_eq!(mv(&s, 5).len(), 1, "crossing the new value picks it up");
     }
 
     #[test]
     fn lag_behind_main_does_not_release_the_pickup() {
         let (s, cell) = snap(&spec(SourceKind::Cc, 7, MapMode::Pickup, false), 0.0);
-        assert_eq!(moved(&cc(&s, 0)).len(), 1);
-        assert_eq!(moved(&cc(&s, 40)).len(), 1);
-        assert_eq!(moved(&cc(&s, 80)).len(), 1);
+        assert_eq!(mv(&s, 0).len(), 1);
+        assert_eq!(mv(&s, 40).len(), 1);
+        assert_eq!(mv(&s, 80).len(), 1);
         // Main has applied only the first event and still reports the old value.
         cell.set_value(0.0, 1);
-        assert_eq!(moved(&cc(&s, 90)).len(), 1, "still engaged: Main has not caught up");
+        assert_eq!(mv(&s, 90).len(), 1, "still engaged: Main has not caught up");
     }
 
     #[test]
@@ -408,9 +475,9 @@ mod tests {
         sp.min = 0.2;
         sp.max = 0.6;
         let (s, _) = snap(&sp, 0.9);
-        let v = moved(&cc(&s, 127));
+        let v = mv(&s, 127);
         assert!((v[0] - 0.6).abs() < 1e-6);
-        let v = moved(&cc(&s, 0));
+        let v = mv(&s, 0);
         assert!((v[0] - 0.2).abs() < 1e-6);
     }
 
@@ -454,5 +521,36 @@ mod tests {
         assert!(candidate(2, 0, Message::NoteOn { key: 36, velocity: 90, id: NoteId::NONE }).is_some());
         assert!(candidate(2, 0, Message::NoteOff { key: 36, velocity: 0, id: NoteId::NONE }).is_none());
         assert!(candidate(2, 0, Message::PitchBend { value: 8192 }).is_none());
+    }
+
+    #[test]
+    fn a_sweep_is_coalesced_last_value_wins_with_the_publish_count() {
+        let (s, cell) = snap(&spec(SourceKind::Cc, 7, MapMode::Jump, false), 0.0);
+        for v in 0..=100u8 {
+            let _ = cc(&s, v);
+        }
+        let (value, n) = cell.take().unwrap();
+        assert!((value - 100.0 / 127.0).abs() < 1e-6, "the final value survives: {value}");
+        assert_eq!(n, 101);
+        assert!(cell.take().is_none(), "taken once");
+    }
+
+    #[test]
+    fn a_mapped_message_is_consumed_unless_the_mapping_passes_it_through() {
+        let msg = Message::Control { cc: 7, value: 9 };
+        let (s, _) = snap(&spec(SourceKind::Cc, 7, MapMode::Jump, false), 0.0);
+        assert!(consumes(&s, 1, 0, msg));
+        assert!(handle(&s, 1, 0, msg, &mut |_| true));
+        assert!(!consumes(&s, 1, 0, Message::Control { cc: 8, value: 9 }), "another CC is not ours");
+        assert!(!consumes(&s, 2, 0, msg) && !consumes(&s, 1, 3, msg), "another port or channel");
+        let mut sp = spec(SourceKind::Cc, 7, MapMode::Jump, false);
+        sp.pass_through = true;
+        let (s, cell) = snap(&sp, 0.0);
+        assert!(!consumes(&s, 1, 0, msg));
+        assert!(!handle(&s, 1, 0, msg, &mut |_| true), "pass-through still drives the control");
+        assert!(cell.take().is_some());
+        // An engaged-or-not pickup mapping consumes too: the knob is the mapping's, not the track's.
+        let (s, _) = snap(&spec(SourceKind::Cc, 7, MapMode::Pickup, false), 0.9);
+        assert!(handle(&s, 1, 0, msg, &mut |_| true));
     }
 }
