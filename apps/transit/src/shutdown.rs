@@ -11,6 +11,7 @@
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
+use transit_ui_studio::host::ShutDown;
 
 /// Whether the graphics device was lost, and why: set from wgpu's device-lost callback (on
 /// whichever thread wgpu detected it), read by the frame loop.
@@ -53,16 +54,17 @@ pub fn watch_device(device: &eframe::wgpu::Device, watch: &Arc<DeviceWatch>, ctx
     });
 }
 
-/// How far the app's own quit order got before a panic unwound out of the event loop.
-const NOT_RUN: u8 = 0;
-const CLEAN: u8 = 1;
-const UNCLEAN: u8 = 2;
-static SHUT_DOWN: AtomicU8 = AtomicU8::new(NOT_RUN);
+/// The result of the app's own quit order, for `after_panic`: bit flags, 0 while it has not run.
+const RAN: u8 = 1;
+const CLEAN: u8 = 2;
+const AUTOSAVED: u8 = 4;
+static SHUT_DOWN: AtomicU8 = AtomicU8::new(0);
 
 /// Records the result of the app's quit order (run from `on_exit`, the device-lost path, or the
 /// app being dropped while a panic unwinds).
-pub fn record(clean: bool) {
-    SHUT_DOWN.store(if clean { CLEAN } else { UNCLEAN }, Ordering::Release);
+pub fn record(result: ShutDown) {
+    let flags = RAN | if result.clean { CLEAN } else { 0 } | if result.autosaved { AUTOSAVED } else { 0 };
+    SHUT_DOWN.store(flags, Ordering::Release);
 }
 
 /// After a panic unwound out of `eframe::run_native`: the app was normally dropped on the way
@@ -73,34 +75,65 @@ pub fn after_panic(payload: &(dyn std::any::Any + Send)) -> ! {
     let reason =
         if what.is_empty() { "an internal error on the UI thread".to_owned() } else { format!("an internal error on the UI thread ({what})") };
     log::error!("emergency shutdown: {reason}");
-    let clean = match SHUT_DOWN.load(Ordering::Acquire) {
-        CLEAN => true,
-        UNCLEAN => false,
-        _ => soundcraft_engine::emergency::run_bounded(
+    let flags = SHUT_DOWN.load(Ordering::Acquire);
+    let result = if flags & RAN != 0 {
+        ShutDown { clean: flags & CLEAN != 0, autosaved: flags & AUTOSAVED != 0 }
+    } else {
+        let clean = soundcraft_engine::emergency::run_bounded(
             "shutdown after a panic",
             soundcraft_engine::emergency::SHUTDOWN_BOUND,
             soundcraft_engine::shutdown_plugin_hosts,
-        ),
+        );
+        ShutDown { clean, autosaved: false }
     };
-    tell_user(&reason, clean);
-    soundcraft_engine::emergency::end_process(clean)
+    tell_user(&reason, result);
+    soundcraft_engine::emergency::end_process(result.clean)
 }
 
-/// How long the closing message waits for the user before the process ends anyway.
-const MESSAGE_WAIT: Duration = Duration::from_secs(120);
+/// How long the closing message stays up before the process ends anyway. Short: the whole
+/// emergency path stays within the shutdown watchdog's bound plus this.
+// timing: stall-bound a cap on how long a lost device or a panic keeps the process alive
+const MESSAGE_WAIT: Duration = Duration::from_secs(5);
 
-/// Shows why transit closed in a native message box, on a thread of its own, waiting at most
-/// [`MESSAGE_WAIT`]. Not in runs without preferences (agents' test runs): nobody reads it there.
-pub fn tell_user(reason: &str, clean: bool) {
-    if !crate::prefs_enabled() {
-        return;
-    }
-    let mut text =
-        format!("transit had to close: {reason}.\n\nUnsaved changes were kept in the autosave; transit offers them the next time it starts.");
-    if !clean {
+/// The closing message: why, and what became of unsaved changes and plug-ins.
+fn closing_message(reason: &str, result: ShutDown) -> String {
+    let mut text = format!(
+        "transit had to close: {reason}.
+
+"
+    );
+    text.push_str(if result.autosaved {
+        "Unsaved changes were kept in the autosave; transit offers them the next time it starts."
+    } else {
+        "No new autosave was written; the last save (or an earlier autosave) stands."
+    });
+    if !result.clean {
         text.push_str(" A plug-in did not shut down in time, so transit ended without unloading it.");
     }
-    text.push_str("\n\nThe log has the details (Help > Debug Logging shows where it is).");
+    text.push_str(
+        "
+
+The log has the details (Help > Debug Logging shows where it is).",
+    );
+    text
+}
+
+/// Shows why transit closed in a native message box, on a thread of its own, for at most
+/// [`MESSAGE_WAIT`]; the log line is written in any case. Not in runs without preferences
+/// (agents' test runs), and not on macOS, where the box needs the main thread this path holds.
+pub fn tell_user(reason: &str, result: ShutDown) {
+    let text = closing_message(reason, result);
+    log::error!(
+        "{}",
+        text.replace(
+            "
+
+", " "
+        )
+    );
+    if !crate::prefs_enabled() || cfg!(target_os = "macos") {
+        return;
+    }
     let (tx, rx) = std::sync::mpsc::channel();
     let shown = std::thread::Builder::new().name("closing-message".into()).spawn(move || {
         rfd::MessageDialog::new()
@@ -161,6 +194,15 @@ mod tests {
         // A later report keeps the first reason.
         watch.report(DeviceLostReason::Destroyed, "");
         assert_eq!(watch.lost().as_deref(), Some("the graphics device was lost: DXGI_ERROR_DEVICE_REMOVED"));
+    }
+
+    #[test]
+    fn the_closing_message_claims_an_autosave_only_when_one_was_written() {
+        let saved = closing_message("x", ShutDown { clean: true, autosaved: true });
+        assert!(saved.contains("kept in the autosave") && !saved.contains("without unloading"));
+        let not_saved = closing_message("x", ShutDown { clean: false, autosaved: false });
+        assert!(!not_saved.contains("kept in the autosave") && not_saved.contains("the last save"), "{not_saved}");
+        assert!(not_saved.contains("without unloading"));
     }
 
     /// The real callback on a real device: Windows' software adapter (WARP), destroyed. wgpu calls

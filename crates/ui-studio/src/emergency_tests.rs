@@ -112,7 +112,7 @@ fn child(case: &str) -> ! {
     let caught = std::panic::catch_unwind(|| std::panic::panic_any("simulated: the graphics device was lost"));
     assert!(caught.is_err());
     match case {
-        "shutdown" | "leaked" => emergency_shutdown("test: a panic on the UI thread", || app.shut_down()),
+        "shutdown" | "leaked" => emergency_shutdown("test: a panic on the UI thread", || app.shut_down().clean),
         // What happened before the fix: the C runtime's exit with the plug-in still loaded.
         _ => std::process::exit(101),
     }

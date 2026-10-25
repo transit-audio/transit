@@ -49,7 +49,7 @@ impl transit_ui_studio::debug_log::LogControl for LoggerControl {
 
 /// The studio, the logger, the preferences checkpoint, the graphics device watch (issue #104)
 /// and, once it has run, whether the quit order shut plug-in hosting down cleanly.
-struct App(StudioApp, Option<&'static logging::AppLogger>, PrefsCheckpoint, Arc<shutdown::DeviceWatch>, Option<bool>);
+struct App(StudioApp, Option<&'static logging::AppLogger>, PrefsCheckpoint, Arc<shutdown::DeviceWatch>, Option<transit_ui_studio::host::ShutDown>);
 
 impl App {
     fn new(studio: StudioApp, logger: Option<&'static logging::AppLogger>, device_watch: Arc<shutdown::DeviceWatch>) -> App {
@@ -57,30 +57,35 @@ impl App {
     }
 
     /// The quit order, once, under the shutdown watchdog (issue #104): preferences, then the
-    /// studio's own order (E5: autosave, input, player, plug-in hosting). True when plug-in hosting
-    /// shut down cleanly.
-    fn shut_down(&mut self) -> bool {
-        if let Some(clean) = self.4 {
-            return clean;
+    /// studio's own order (E5: autosave, input, player, plug-in hosting). Says whether plug-in
+    /// hosting shut down cleanly and whether an autosave was written. The watchdog may end the process inside it, cutting an autosave short;
+    /// the previous autosave and the last save stand then.
+    fn shut_down(&mut self) -> transit_ui_studio::host::ShutDown {
+        if let Some(result) = self.4 {
+            return result;
         }
+        let mut autosaved = false;
         let clean = soundcraft_engine::emergency::run_bounded("shutdown", soundcraft_engine::emergency::SHUTDOWN_BOUND, || {
             save_prefs(&self.0.ui);
             if let Some(logger) = self.1 {
                 logger.report_audio_thread();
             }
-            self.0.shut_down()
+            let result = self.0.shut_down();
+            autosaved = result.autosaved;
+            result.clean
         });
-        self.4 = Some(clean);
-        shutdown::record(clean);
-        clean
+        let result = transit_ui_studio::host::ShutDown { clean, autosaved };
+        self.4 = Some(result);
+        shutdown::record(result);
+        result
     }
 
     /// The graphics device is gone: shut down, tell the user, end the process (issue #104).
     fn device_lost(&mut self, reason: &str) -> ! {
         log::error!("emergency shutdown: {reason}");
-        let clean = self.shut_down();
-        shutdown::tell_user(reason, clean);
-        soundcraft_engine::emergency::end_process(clean)
+        let result = self.shut_down();
+        shutdown::tell_user(reason, result);
+        soundcraft_engine::emergency::end_process(result.clean)
     }
 }
 
@@ -210,7 +215,7 @@ impl eframe::App for App {
         // take and hand the input back to the player, then release the player's plugin instances,
         // then shut plugin hosting down. If that was not clean, a normal exit would run the unload
         // code of plug-in binaries that never had their module exit (issue #104).
-        if !self.shut_down() {
+        if !self.shut_down().clean {
             soundcraft_engine::emergency::end_process(false);
         }
     }

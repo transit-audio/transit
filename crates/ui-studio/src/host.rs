@@ -24,6 +24,16 @@ use soundcraft_playback::reopen::ReopenCause;
 use soundcraft_playback::{CountIn, OutputTrouble, Player};
 use soundcraft_time::{Range, Samples};
 
+/// What [`StudioApp::shut_down`] achieved (issue #104).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ShutDown {
+    /// Plug-in hosting shut down cleanly ([`soundcraft_engine::shutdown_plugin_hosts`]).
+    pub clean: bool,
+    /// An autosave of unsaved changes was written; otherwise the last save (or an earlier
+    /// autosave) stands.
+    pub autosaved: bool,
+}
+
 impl StudioApp {
     pub(crate) fn start_play(&mut self, from: Samples, end: Option<Samples>, looped: Option<Range>) {
         self.clear_clip_latches();
@@ -584,7 +594,8 @@ impl StudioApp {
 
     /// Done with the open session. Unsaved changes stay in its autosave folder for the next
     /// launch, unless the user quit with Quit; a take still recording is finished and always stays.
-    pub fn close_autosave(&mut self) {
+    /// True when an autosave was written now.
+    pub fn close_autosave(&mut self) -> bool {
         let recording = self.recording_active();
         if recording {
             self.stop_play();
@@ -599,14 +610,13 @@ impl StudioApp {
                 held.journal.discard();
             }
         }
-        if keep && self.capture_plugin_states().is_ok() {
-            self.write_autosave();
-        }
+        let written = keep && self.capture_plugin_states().is_ok() && self.write_autosave();
         self.release_autosave(keep);
         if let Some(w) = &self.autosaver {
             let _ = w.flush();
         }
         self.placed_journal = None;
+        written
     }
 
     /// Run part of a frame. If it panics, the session is autosaved (once per change) and the app
@@ -677,15 +687,14 @@ impl StudioApp {
 
     /// The quit order (E5, issue #104): close the session's autosave (unsaved changes stay in it
     /// unless the user chose Quit), finish any take and hand the input back to the player, release
-    /// the player and its plug-in instances, then shut plug-in hosting down. True when plug-in
-    /// hosting shut down cleanly ([`soundcraft_engine::shutdown_plugin_hosts`]). Used by the quit,
-    /// a lost graphics device and a panic on the UI thread, under a watchdog
+    /// the player and its plug-in instances, then shut plug-in hosting down. Used by the quit, a
+    /// lost graphics device and a panic on the UI thread, under a watchdog
     /// ([`soundcraft_engine::emergency`]).
-    pub fn shut_down(&mut self) -> bool {
-        self.close_autosave();
+    pub fn shut_down(&mut self) -> ShutDown {
+        let autosaved = self.close_autosave();
         self.close_input();
         self.player = None;
-        soundcraft_engine::shutdown_plugin_hosts()
+        ShutDown { clean: soundcraft_engine::shutdown_plugin_hosts(), autosaved }
     }
 
     pub(crate) fn recording_active(&self) -> bool {
