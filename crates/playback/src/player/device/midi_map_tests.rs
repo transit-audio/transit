@@ -52,6 +52,9 @@ fn a_mapped_port_opens_without_any_route_and_its_cc_reaches_main() {
     assert!(!fake.input_port(&other).unwrap().deliver(0, &[0xB0, 74, 99]), "the unmapped port is not opened for mappings");
     // The worker takes the mapping a moment after the port opens, and a message that arrived
     // before it is not matched, so the controller keeps moving until the first move comes through.
+    let quiet = player.midi_map_activity();
+    player.service().unwrap();
+    assert_eq!(player.midi_map_activity(), quiet, "no controller traffic, no news");
     let mut got = Vec::new();
     until("the CC reaches Main as a move", || {
         assert!(fake.input_port(&keys).unwrap().deliver(0, &[0xB0, 74, 127]));
@@ -59,6 +62,7 @@ fn a_mapped_port_opens_without_any_route_and_its_cc_reaches_main() {
         got.extend(player.take_midi_map_events());
         !got.is_empty()
     });
+    assert!(player.midi_map_activity() > quiet, "a published value is news for the UI");
     assert!(matches!(got[0], MapMsg::Move { epoch: e, index: 0, value, .. } if e == epoch && value == 1.0), "{got:?}");
     // Removing the mappings closes the port again (no route, no monitor, nothing wants it).
     player.set_midi_mappings(Vec::new());

@@ -9,7 +9,7 @@
 use soundcraft_mix::Message;
 use soundcraft_model::{MapMode, SourceKind};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
 
 /// An entry whose port is not open matches nothing.
 pub const NO_PORT: u64 = u64::MAX;
@@ -71,10 +71,12 @@ pub struct Cell {
     engaged: AtomicBool,
     /// The last knob value (0..127) seen, or `NO_LAST`.
     last: AtomicU8,
-    /// The newest value the worker published and whether Main has not taken it yet. A sweep is
-    /// coalesced here, last value wins, so a UI that is slow to apply loses no final value.
-    pending_value: AtomicU32,
-    pending: AtomicBool,
+    /// The newest value the worker published, packed with its publish count (count in the high
+    /// word) so a reader never pairs a value with another publish's count. A sweep is coalesced
+    /// here, last value wins, so a UI that is slow to apply loses no final value.
+    slot: AtomicU64,
+    /// The publish count Main last took.
+    taken: AtomicU32,
 }
 
 impl Cell {
@@ -86,8 +88,8 @@ impl Cell {
             published_n: AtomicU32::new(0),
             engaged: AtomicBool::new(false),
             last: AtomicU8::new(NO_LAST),
-            pending_value: AtomicU32::new(0),
-            pending: AtomicBool::new(false),
+            slot: AtomicU64::new(0),
+            taken: AtomicU32::new(0),
         }
     }
 
@@ -95,18 +97,26 @@ impl Cell {
     fn publish(&self, value: f32) {
         self.published.store(value.to_bits(), Ordering::Relaxed);
         self.current.store(value.to_bits(), Ordering::Relaxed);
-        self.pending_value.store(value.to_bits(), Ordering::Relaxed);
-        self.published_n.fetch_add(1, Ordering::Relaxed);
-        self.pending.store(true, Ordering::Release);
+        let n = self.published_n.fetch_add(1, Ordering::Relaxed).wrapping_add(1);
+        self.slot.store((u64::from(n) << 32) | u64::from(value.to_bits()), Ordering::Release);
+    }
+
+    /// How many values and presses this entry has published, ever (the UI compares it between
+    /// frames to see whether the controller did anything).
+    pub fn published(&self) -> u32 {
+        self.published_n.load(Ordering::Relaxed)
     }
 
     /// Main: the newest published value since the last call, with the publish count it belongs to
     /// (what `set_value` is told as `applied`).
     pub fn take(&self) -> Option<(f32, u32)> {
-        if !self.pending.swap(false, Ordering::Acquire) {
+        let packed = self.slot.load(Ordering::Acquire);
+        let n = (packed >> 32) as u32;
+        if n == 0 || n == self.taken.load(Ordering::Relaxed) {
             return None;
         }
-        Some((f32::from_bits(self.pending_value.load(Ordering::Relaxed)), self.published_n.load(Ordering::Relaxed)))
+        self.taken.store(n, Ordering::Relaxed);
+        Some((f32::from_bits(packed as u32), n))
     }
 
     /// Main, once a frame: the control's value now, and how many events of this entry it has applied.
@@ -327,6 +337,12 @@ impl Wanted {
     pub fn new() -> Self {
         let generation = GENERATIONS.fetch_add(1, Ordering::Relaxed);
         Wanted { epoch: generation.wrapping_mul(1 << 16), generation, ..Default::default() }
+    }
+
+    /// Total publishes of every mapping so far; a change since the last look means the controller
+    /// did something.
+    pub fn activity(&self) -> u64 {
+        self.cells.iter().map(|c| u64::from(c.published())).sum()
     }
 
     pub fn generation(&self) -> u32 {
@@ -552,5 +568,33 @@ mod tests {
         // An engaged-or-not pickup mapping consumes too: the knob is the mapping's, not the track's.
         let (s, _) = snap(&spec(SourceKind::Cc, 7, MapMode::Pickup, false), 0.9);
         assert!(handle(&s, 1, 0, msg, &mut |_| true));
+    }
+
+    #[test]
+    fn a_reader_never_pairs_a_value_with_another_publishes_count() {
+        // The writer publishes the value `n` as the n-th publish; any (value, count) a reader gets
+        // must agree. With two atomics a reader paired an old value with a newer count.
+        let cell = Arc::new(Cell::new(0.0));
+        let writer = {
+            let cell = Arc::clone(&cell);
+            std::thread::spawn(move || {
+                for n in 1..=400_000u32 {
+                    cell.publish(n as f32);
+                }
+            })
+        };
+        let mut seen = 0u64;
+        loop {
+            match cell.take() {
+                Some((value, n)) => {
+                    assert_eq!(value, n as f32, "a torn pair");
+                    seen += 1;
+                }
+                None if writer.is_finished() => break,
+                None => {}
+            }
+        }
+        writer.join().unwrap();
+        assert!(seen > 0);
     }
 }

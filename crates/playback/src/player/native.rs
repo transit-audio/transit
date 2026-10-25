@@ -342,6 +342,11 @@ impl Native {
     }
 
     /// Tells this Native from the one a reconnect replaces.
+    /// Grows whenever the controller made the worker publish something.
+    pub(super) fn map_activity(&self) -> u64 {
+        self.wanted.activity().wrapping_add(self.worker.map_pushed())
+    }
+
     pub(super) fn map_generation(&self) -> u32 {
         self.wanted.generation()
     }

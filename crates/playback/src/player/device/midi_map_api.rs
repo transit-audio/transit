@@ -50,6 +50,12 @@ impl Player {
         self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.map_generation())).unwrap_or(0)
     }
 
+    /// A counter that grows whenever the MIDI Learn worker published something (a value, a press,
+    /// a candidate). The UI compares it between frames to repaint only when there is news.
+    pub fn midi_map_activity(&self) -> u64 {
+        self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.map_activity())).unwrap_or(0)
+    }
+
     /// Whether the worker is armed to forward a learn candidate.
     pub fn midi_learn_armed(&self) -> bool {
         self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.learn_armed())).unwrap_or(false)

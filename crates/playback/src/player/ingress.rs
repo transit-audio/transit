@@ -80,6 +80,8 @@ struct Shared {
     learn: AtomicBool,
     /// Map events the full ring refused.
     map_dropped: AtomicU64,
+    /// Button presses and candidates pushed to the ring, ever.
+    map_pushed: AtomicU64,
     offered: AtomicU64,
     admitted: AtomicU64,
     filtered: AtomicU64,
@@ -468,6 +470,10 @@ impl Worker {
     }
 
     /// Press and candidate events lost to a full ring (sweeps are coalesced and never lost).
+    pub(super) fn map_pushed(&self) -> u64 {
+        self.shared.map_pushed.load(Ordering::Relaxed)
+    }
+
     pub(super) fn map_dropped(&self) -> u64 {
         self.shared.map_dropped.load(Ordering::Relaxed)
     }
@@ -892,7 +898,9 @@ fn map_pass(input: &mut Input, maps: Option<&Snapshot>, out: &mut rtrb::Producer
 fn match_one(id: u64, channel: u8, message: Message, maps: Option<&Snapshot>, out: &mut rtrb::Producer<MapEvent>, shared: &Shared) -> bool {
     let mut push = |event: MapEvent| {
         let sent = out.push(event).is_ok();
-        if !sent {
+        if sent {
+            shared.map_pushed.fetch_add(1, Ordering::Relaxed);
+        } else {
             shared.map_dropped.fetch_add(1, Ordering::Relaxed);
         }
         sent
