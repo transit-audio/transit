@@ -25,6 +25,23 @@ fn rule_a_flags_short_millisecond_and_any_microsecond_bounds() {
     );
 }
 
+/// E49 recurrence: `crates/mix/tests/render_pool.rs` held its 50 ms bound in a `const`.
+#[test]
+fn rule_a_follows_a_name_bound_to_a_short_duration() {
+    let src = "const BOUND: Duration = Duration::from_millis(50);\n#[test]\nfn t() {\n    assert!(worst < BOUND);\n}\n";
+    assert_eq!(rules(src), vec![(4, 'a')]);
+    assert_eq!(rules(&wrap("    let limit = Duration::from_micros(800);\n    assert!(took <= limit);")), vec![(4, 'a')]);
+    assert_eq!(rules(&wrap("    let mut cap = Duration::from_millis(20);\n    assert!(cap > took);")), vec![(4, 'a')]);
+    // A long bound, a short name used as a sleep or a timeout, a duration passed to a call, or a
+    // marked binding is not an unmarked measurement ceiling.
+    let long = "const STALL: Duration = Duration::from_millis(250);\n#[test]\nfn t() {\n    assert!(worst < STALL);\n}\n";
+    assert_eq!(rules(long), vec![]);
+    assert_eq!(rules(&wrap("    let tick = Duration::from_millis(5);\n    std::thread::sleep(tick);\n    rx.recv_timeout(tick);")), vec![]);
+    assert_eq!(rules(&wrap("    let (mut rig, port) = slow(Duration::from_millis(50));\n    assert!(rig.count > 0);")), vec![]);
+    let marked = wrap("    // timing: median of 25 against a 15 ms tick\n    let bound = Duration::from_millis(2);\n    assert!(median < bound);");
+    assert_eq!(rules(&marked), vec![]);
+}
+
 #[test]
 fn rule_a_ignores_sleeps_and_timeouts_without_a_comparison() {
     assert_eq!(rules(&wrap("    until(Duration::from_millis(5), || ok());\n    recv_timeout(Duration::from_millis(20));")), vec![]);

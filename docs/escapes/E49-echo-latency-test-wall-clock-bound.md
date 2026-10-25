@@ -56,3 +56,16 @@ runner stretched the sleeps. Fixed: the fake input gained `deliver_at`, which st
 arrival time, the test stamps the pulses 20 ms apart and asserts 125.0 within 0.5. Rule added to
 `gates.md`: no rate, BPM or latency is derived from sleep pacing. The remaining sleeps in the
 native tests wait for the worker to idle or poll for a state; none feeds a derived rate.
+
+Recurrence 2026-10-25 (Realtime run 40160491467, macos-x86_64): `audio_thread_render_does_not_wait_for_a_saturated_global_pool`
+(`crates/mix/tests/render_pool.rs`) failed `worst < BOUND` with "a 512-frame block of 16 strips took
+93.446819ms with the global pool saturated" against 50 ms. The product was right: an audio-thread
+render reaches only the dedicated render pool (`run_strips`, `crates/mix/src/lib.rs`), and the
+global pool's jobs sleep, so the time was CPU contention on the runner, not queueing (locally
+175 µs idle, 15-47 ms with the test and eight spinning processes pinned to four cores). Fixed: the
+test asserts the ordering instead. Every global worker holds a job that ends only on release, and
+no job may have ended when the eight renders return; a render that needed a global worker would
+finish only after one did. Mutation: dispatching audio-thread strips to the global pool fails it
+deterministically (24 jobs ended, 10 s). The sweep missed it because the 50 ms bound sat in a
+`const`; `cargo xtask timing` rule (a) now follows `const`/`static`/`let` names bound to a short
+duration, which also surfaced one unmarked by-design median in `native/tests.rs` (now marked).

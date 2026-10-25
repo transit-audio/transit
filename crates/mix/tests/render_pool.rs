@@ -28,11 +28,11 @@ fn planned_engine(s: &Session) -> MixEngine {
     compiler.reclaim(plan);
     engine
 }
-/// A 512-frame block of sixteen plain strips takes well under a millisecond; this leaves room for
-/// a loaded CI machine and is still far below the time the global pool stays busy.
-const BOUND: Duration = Duration::from_millis(50);
-/// How long the global pool stays busy unless the test releases it earlier.
-const BUSY: Duration = Duration::from_secs(3);
+/// How long each global-pool job stays busy unless the test releases it earlier. Only a
+/// regression waits this long: a render that queued behind the global pool completes only after a
+/// job ends, which the test then sees as a finished job (the failure is deterministic; this only
+/// bounds how long it takes to show).
+const BUSY: Duration = Duration::from_secs(10);
 
 fn sixteen_strips() -> Session {
     let mut s = Session::default();
@@ -49,21 +49,27 @@ fn sixteen_strips() -> Session {
 /// Keeps every global-pool worker occupied until dropped (also when the test fails). They sleep
 /// rather than spin: what is under test is queueing behind the global pool's jobs, not CPU
 /// oversubscription (the render pool runs at the default priority; see `build_render_pool`).
-struct Saturated(Arc<AtomicBool>);
+struct Saturated {
+    release: Arc<AtomicBool>,
+    /// Jobs that have ended; none does before the release unless `BUSY` ran out.
+    finished: Arc<AtomicUsize>,
+}
 
 impl Saturated {
     fn new() -> Self {
         let release = Arc::new(AtomicBool::new(false));
         let running = Arc::new(AtomicUsize::new(0));
+        let finished = Arc::new(AtomicUsize::new(0));
         let n = rayon::current_num_threads();
         for _ in 0..n {
-            let (release, running) = (release.clone(), running.clone());
+            let (release, running, finished) = (release.clone(), running.clone(), finished.clone());
             rayon::spawn(move || {
                 running.fetch_add(1, Ordering::SeqCst);
                 let start = Instant::now();
-                while !release.load(Ordering::Relaxed) && start.elapsed() < BUSY {
+                while !release.load(Ordering::SeqCst) && start.elapsed() < BUSY {
                     std::thread::sleep(Duration::from_millis(1));
                 }
+                finished.fetch_add(1, Ordering::SeqCst);
             });
         }
         let start = Instant::now();
@@ -71,16 +77,26 @@ impl Saturated {
             assert!(start.elapsed() < Duration::from_secs(5), "the global pool never got busy");
             std::thread::yield_now();
         }
-        Saturated(release)
+        Saturated { release, finished }
+    }
+
+    /// Global-pool jobs that have ended so far.
+    fn finished(&self) -> usize {
+        self.finished.load(Ordering::SeqCst)
     }
 }
 
 impl Drop for Saturated {
     fn drop(&mut self) {
-        self.0.store(true, Ordering::Relaxed);
+        self.release.store(true, Ordering::SeqCst);
     }
 }
 
+/// Every global-pool worker is held by a job that ends only on release (or after `BUSY`), so a
+/// render that needed a global worker cannot complete while none of those jobs has ended. The
+/// property is that ordering, not a duration: a wall-clock bound on the block failed on a slow
+/// macOS runner (93 ms against 50 ms, E49) because CPU contention stretches the render pool's work,
+/// which says nothing about waiting for the global pool.
 #[test]
 fn audio_thread_render_does_not_wait_for_a_saturated_global_pool() {
     MixEngine::force_serial(false); // the pool is opt-in; this test is about the pool path
@@ -104,9 +120,10 @@ fn audio_thread_render_does_not_wait_for_a_saturated_global_pool() {
     })
     .join()
     .unwrap();
+    let finished = busy.finished();
     drop(busy);
+    assert_eq!(finished, 0, "the audio-thread render completed only after a global-pool job ended (worst block {worst:?})");
     assert!(peak > 0.01, "the strips should sound: {peak}");
-    assert!(worst < BOUND, "a 512-frame block of 16 strips took {worst:?} with the global pool saturated");
     eprintln!("worst block with the global pool saturated: {worst:?}");
 }
 

@@ -1,7 +1,8 @@
 //! `cargo xtask timing`: flags E49-class timing assertions in test code (docs/contributing/evidence/gates.md).
 //!
 //! Three rules, line-based and deliberately simple:
-//! (a) a comparison against `Duration::from_millis(N)` with N < 100, or any `Duration::from_micros(..)`;
+//! (a) a comparison against `Duration::from_millis(N)` with N < 100, or any `Duration::from_micros(..)`, written
+//!     inline or through a `const`, `static` or `let` name bound to one in the same file;
 //! (b) `thread::sleep(` in a fn that also asserts on a rate, BPM, latency, `elapsed()` or a loop counter;
 //! (c) a throughput floor `assert!(x >= N)` / `assert!(N <= x)`, N >= 3, x a frames/blocks/laps/iterations/polls
 //!     count or a counter incremented in a fn that also reads a clock or sleeps.
@@ -177,13 +178,36 @@ fn has_marker(p: &Parsed, i: usize) -> bool {
 
 /// A measurement ceiling: a short duration on the bound side of `x < D`, `x <= D`, `D > x` or `D >= x`.
 /// Lower bounds (`x >= D`) cannot flake on a slow runner, and a sleep or timeout argument is not a bound.
-fn short_ceiling(code: &str) -> bool {
+/// `short` holds the names bound to a short duration in the file (`short_names`), so a bound kept in a
+/// named constant is caught too.
+fn short_ceiling(code: &str, short: &[String]) -> bool {
     if code.contains("sleep(") {
         return false;
     }
+    let bound = |side: &str| short_duration(side) || tokens(side).any(|t| short.iter().any(|n| n == t));
     [(" <= ", false), (" < ", false), (" >= ", true), (" > ", true)]
         .iter()
-        .any(|(op, left)| code.split_once(op).is_some_and(|(l, r)| short_duration(if *left { l } else { r })))
+        .any(|(op, left)| code.split_once(op).is_some_and(|(l, r)| bound(if *left { l } else { r })))
+}
+
+/// Names a `const`, `static` or `let` binds to a short duration: `const BOUND: Duration = Duration::from_millis(50);`
+/// (or an `if` choosing between them). A duration passed to a call (`let rig = slow(Duration::from_millis(50))`) is
+/// not a bound, and a marker on the binding covers every use of the name.
+fn short_names(p: &Parsed) -> Vec<String> {
+    let mut out = Vec::new();
+    for (i, code) in p.code.iter().enumerate() {
+        let Some((lhs, rhs)) = code.split_once(" = ") else { continue };
+        let rhs = rhs.trim_start();
+        let direct = ["Duration::", "std::time::Duration::", "core::time::Duration::", "if "].iter().any(|s| rhs.starts_with(s));
+        if lhs.contains('(') || !direct || !short_duration(rhs) || has_marker(p, i) {
+            continue;
+        }
+        let mut words = tokens(lhs).skip_while(|t| !matches!(*t, "const" | "static" | "let")).skip(1);
+        if let Some(name) = words.find(|t| *t != "mut") {
+            out.push(name.to_string());
+        }
+    }
+    out
 }
 
 /// A `Duration::from_millis(N)` below 100, or any `Duration::from_micros(`.
@@ -270,6 +294,7 @@ fn floor_parts(code: &str) -> Option<(String, u64)> {
 
 pub fn scan(path: &str, src: &str, test_file: bool) -> Vec<Hit> {
     let p = parse(src, test_file);
+    let short = short_names(&p);
     let lines: Vec<&str> = src.lines().collect();
     let mut hits = Vec::new();
     for i in 0..p.code.len() {
@@ -281,7 +306,7 @@ pub fn scan(path: &str, src: &str, test_file: bool) -> Vec<Hit> {
             continue;
         }
         let code = &p.code[i];
-        let rule = if short_ceiling(code) {
+        let rule = if short_ceiling(code, &short) {
             Some('a')
         } else if let Some(f) = inside.iter().min_by_key(|f| f.end - f.start) {
             let names = counters(&p, f);

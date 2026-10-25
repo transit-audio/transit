@@ -41,7 +41,8 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
   (a counter, a state, an ordering) or a stall bound with its rationale in a comment; a shared CI
   runner will exceed a tight bound sooner or later (E49, `../../escapes/E49-echo-latency-test-wall-clock-bound.md`).
   Enforced by `cargo xtask timing`, which flags in test code (a) a `<`/`<=` bound of `Duration::from_millis(N)`
-  with N < 100 or any `Duration::from_micros`, (b) `thread::sleep` in a fn that asserts a rate, BPM, latency,
+  with N < 100 or any `Duration::from_micros`, inline or through a `const`/`static`/`let` name bound to one,
+  (b) `thread::sleep` in a fn that asserts a rate, BPM, latency,
   `elapsed()` or a loop counter, and (c) a throughput floor `assert!(x >= N)` with N >= 3 on a
   frames/blocks/laps/iterations/polls count or a counter in a timed loop. `#[ignore]` fns are skipped. A
   deliberate case carries `// timing: <tag> <reason>` on the line or the line above, tag one of `stall-bound`

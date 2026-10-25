@@ -256,6 +256,7 @@ fn idle_worker_taps_step_pedal_and_learnable_actions_without_delaying_routes() {
     // Kept by design (#87, E49): this median of 25 is the wake-on-data property. A timer poll wakes
     // at the 15.6 ms (Windows) or ~20 ms (other) tick, so 2 ms / 5 ms leaves a wide margin on both
     // sides, and a median ignores the scheduler outliers that a max does not.
+    // timing: median of 25 wake latencies against the 15.6 / 20 ms timer tick, a wide margin on both sides
     let bound = if cfg!(windows) { Duration::from_millis(2) } else { Duration::from_millis(5) };
     assert!(median < bound, "idle input must wake promptly with the tap active: {median:?}");
     f.finish();
