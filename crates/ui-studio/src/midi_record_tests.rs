@@ -603,3 +603,22 @@ fn controller_only_capture_reaches_the_clip_through_host_stop_and_is_undoable() 
     app.run("edit.redo", json!({})).unwrap();
     assert_eq!(app.engine.session().find_clip(clip.id).unwrap().1.content, clip.content);
 }
+
+#[test]
+fn the_journal_header_keeps_the_loop_the_take_started_with_when_the_region_is_edited_mid_take() {
+    let (mut app, t) = app();
+    cycling(&mut app, 4 * BEAT);
+    let dir = folder("takecycle");
+    let path = midi_journal::journal_path(&dir, "Song");
+    app.midi_journal = Some(midi_journal::Writer::new(path.clone()));
+    // The region is edited and Cycle turned off while the take records, then the next frame drains.
+    let edit = &mut app.engine.session_mut().edit;
+    edit.loop_range = soundcraft_time::Range::new(0, BEAT);
+    edit.loop_playback = false;
+    let events = vec![on(LATCH, t, 60), off(LATCH + BEAT as u64 / 2, t, 60)];
+    app.finished_test_midi = Some(pass(t, Some(4 * BEAT), events));
+    app.update_midi_live();
+    app.midi_journal.as_mut().unwrap().flush().unwrap();
+    let header = midi_journal::read(&path).unwrap().header;
+    assert_eq!(header.loop_range, Some(soundcraft_time::Range::new(4 * BEAT, 6 * BEAT)));
+}

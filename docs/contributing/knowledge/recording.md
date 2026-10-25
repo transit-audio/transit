@@ -37,6 +37,7 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   take keeps looping. The change reaches the transport when the take ends, if it is still running.
 - **MIDI take journal:** `crates/engine/src/midi_journal.rs`. The control thread appends each drained event (newline JSON, header with the latch and plan first, flushed every 250 ms and at Stop) to `<Audio Files>/<session>_<stamp>.midijournal`, never the audio thread; a clean Stop deletes it.
   A crash leaves it named in the autosave's `recording.json`; the next launch's recovery prompt rebuilds `<Track>_recovered` through `midi_take::build`, and Discard deletes it.
+  The header's `loop_range` is the loop the take recorded under (`take_cycle`, #85), `None` if it played straight through. Recovery cuts one clip per lap by that loop (ADR 0026: one take per lap, the partial last lap kept, a held note continued across each wrap) and never reads the session's Cycle state at recovery time, so a Cycle or region edit mid-take before a crash changes nothing. Tests: `recovery_cuts_laps_by_the_loop_the_take_recorded_with_not_the_cycle_state_now` and the controller and straight-through cases beside it in `midi_journal.rs`.
 
 Tests: `crates/engine/tests/recording.rs`, `crates/playback/tests/monitor_contract.rs`,
 `crates/playback/tests/publication_contract.rs`.

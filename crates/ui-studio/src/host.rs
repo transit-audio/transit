@@ -278,7 +278,8 @@ impl StudioApp {
             device_rate: take.device_rate,
             session_rate: s.sample_rate.hz(),
         };
-        let loop_range = plan.pass.map(|_| s.edit.cycle_range());
+        // The loop the take runs under (`take_cycle`), not the live Cycle state: recovery cuts laps by it (#85).
+        let loop_range = self.take_cycle;
         let mut plan = plan.clone();
         plan.start = point.position.sample;
         let header = soundcraft_engine::midi_journal::Header::new(latch, &plan, loop_range, take.tracks.clone());

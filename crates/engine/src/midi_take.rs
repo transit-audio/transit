@@ -246,7 +246,8 @@ pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut
 
 /// Place a finished MIDI recording as one undo step ("Record") and return the clips it created
 /// or merged into. `stop` is the samples from the latch to Stop. The transport is taken to have
-/// cycled over the session's cycle range while Cycle is on (journal recovery has nothing better).
+/// cycled over the session's cycle range while Cycle is on (a caller that doesn't know the take's own
+/// loop; journal recovery does, and uses [`place_midi_recording_wrapping`]).
 pub fn place_midi_recording(e: &mut Engine, plan: &Recording, events: &[RecEvent], stop: Samples) -> Vec<ClipId> {
     let wrap = {
         let s = e.session();

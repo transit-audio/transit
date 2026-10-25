@@ -38,6 +38,9 @@ pub struct Header {
     /// The loop length when loop recording.
     pub pass: Option<Samples>,
     pub punch: Option<Range>,
+    /// The loop the transport cycled over while the take recorded (the host's `take_cycle`), `None`
+    /// when it played straight through. Recovery cuts laps by this, never by the session's Cycle
+    /// state at recovery time, which may have been edited since (#85).
     pub loop_range: Option<Range>,
     /// The armed tracks of the pass.
     pub tracks: Vec<TrackId>,
@@ -217,7 +220,8 @@ impl Journal {
     }
 }
 
-/// Rebuild the clips of the journal at `path` into `e` through the normal take path, as one
+/// Rebuild the clips of the journal at `path` into `e` through the normal take path, cut into laps by the loop the take recorded under (the header's
+/// `loop_range`, #85), as one
 /// "Record" undo step. The new clips are named `<Track>_recovered`; notes merged into a clip that
 /// was already there keep its name. Returns the clips touched; none when nothing was played.
 pub fn recover(e: &mut Engine, path: &Path) -> Result<Vec<ClipId>> {
@@ -228,7 +232,7 @@ pub fn recover(e: &mut Engine, path: &Path) -> Result<Vec<ClipId>> {
     let stop = events.iter().map(|ev| ev.offset).max().unwrap_or(0).saturating_add(i64::from(h.session_rate) / 4);
     let plan = Recording { start: h.plan_start, pass: h.pass, punch: h.punch, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false };
     let before = e.session_arc();
-    let ids = crate::midi_take::place_midi_recording(e, &plan, &events, stop);
+    let ids = crate::midi_take::place_midi_recording_wrapping(e, &plan, &events, stop, h.loop_range);
     let mut named: Vec<(TrackId, usize)> = Vec::new();
     for id in &ids {
         if before.find_clip(*id).is_some() {
@@ -335,5 +339,85 @@ mod tests {
         // 120 bpm at 48 kHz: a beat is 24,000 samples, 960 ticks.
         let notes: Vec<_> = sequence.notes.iter().map(|n| (n.pitch, n.start, n.length, n.velocity)).collect();
         assert_eq!(notes, vec![(60, 960, 960, 90), (64, 2880, 960, 80)]);
+    }
+
+    /// A recovered journal of one note held across the loop end, with the session's Cycle state
+    /// at recovery time set by `edit`: the clips as (range, notes) per lap.
+    fn recovered_laps(name: &str, loop_range: Option<Range>, edit: impl FnOnce(&mut soundcraft_model::Session)) -> Vec<(Range, usize)> {
+        recovered_laps_of(
+            name,
+            loop_range,
+            &[(20_000, Msg::NoteOn { pitch: 60, velocity: 90 }), (70_000, Msg::NoteOff { pitch: 60, velocity: 0 })],
+            edit,
+        )
+    }
+
+    /// As [`recovered_laps`] for the given `(frame, message)` records of the one track.
+    fn recovered_laps_of(
+        name: &str,
+        loop_range: Option<Range>,
+        msgs: &[(u64, Msg)],
+        edit: impl FnOnce(&mut soundcraft_model::Session),
+    ) -> Vec<(Range, usize)> {
+        let d = dir(name);
+        let path = d.join("s.midijournal");
+        let mut e = Engine::default();
+        let t = TrackId(e.execute("track.new", &serde_json::json!({"kind": "midi", "name": "Keys"})).unwrap()["tracks"][0].as_u64().unwrap());
+        let plan = Recording { start: 96_000, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let latch = Latch { output_frame: 10_000, position: 96_000, device_rate: 48_000, session_rate: 48_000 };
+        let header = Header::new(latch, &plan, loop_range, vec![t]);
+        // Lap length 48,000: a note from 10,000 to 60,000 after the latch crosses one wrap, and a
+        // controller lands in the second lap.
+        let records: Vec<Record> = msgs.iter().map(|&(frame, msg)| Record { frame, track: t, channel: 0, approximate: false, msg }).collect();
+        let mut w = Writer::new(path.clone());
+        w.append(&header, &records, records.len()).unwrap();
+        w.flush().unwrap();
+        edit(e.session_mut());
+        let ids = recover(&mut e, &path).unwrap();
+        let s = e.session();
+        ids.iter()
+            .map(|id| {
+                let clip = s.track(t).unwrap().playlists.iter().flat_map(|p| &p.clips).find(|c| c.id == *id).unwrap();
+                let soundcraft_model::ClipContent::Midi { sequence } = &clip.content else { panic!("not MIDI") };
+                (clip.range(), sequence.notes.len() + sequence.ctrls.len())
+            })
+            .collect()
+    }
+
+    #[test]
+    fn recovery_cuts_laps_by_the_loop_the_take_recorded_with_not_the_cycle_state_now() {
+        let own = Range::new(96_000, 144_000);
+        let expected = vec![(own, 1), (own, 1)];
+        // The session's Cycle at recovery time: off, moved elsewhere, and a different length.
+        let off = recovered_laps("off", Some(own), |s| s.edit.loop_playback = false);
+        let moved = recovered_laps("moved", Some(own), |s| {
+            s.edit.loop_playback = true;
+            s.edit.loop_range = Range::new(0, 24_000);
+        });
+        let longer = recovered_laps("longer", Some(own), |s| {
+            s.edit.loop_playback = true;
+            s.edit.loop_range = Range::new(96_000, 480_000);
+        });
+        assert_eq!((off, moved, longer), (expected.clone(), expected.clone(), expected));
+    }
+
+    #[test]
+    fn a_take_that_played_straight_through_recovers_as_one_clip_even_if_cycle_is_on_now() {
+        let laps = recovered_laps("straight", None, |s| {
+            s.edit.loop_playback = true;
+            s.edit.loop_range = Range::new(96_000, 144_000);
+        });
+        assert_eq!(laps.len(), 1, "{laps:?}");
+    }
+
+    #[test]
+    fn controller_only_and_note_plus_controller_laps_recover_by_the_take_loop() {
+        let own = Range::new(96_000, 144_000);
+        let cc = |frame, value| (frame, Msg::Cc { cc: 1, value });
+        let cc_only = recovered_laps_of("cconly", Some(own), &[cc(20_000, 10), cc(70_000, 90)], |s| s.edit.loop_playback = false);
+        assert_eq!(cc_only, vec![(own, 1), (own, 1)], "a controller in each lap");
+        let both = [(20_000, Msg::NoteOn { pitch: 60, velocity: 90 }), cc(30_000, 5), (70_000, Msg::NoteOff { pitch: 60, velocity: 0 })];
+        let mixed = recovered_laps_of("both", Some(own), &both, |s| s.edit.loop_playback = false);
+        assert_eq!(mixed, vec![(own, 2), (own, 1)], "lap 1: note and controller; lap 2: the note's remainder");
     }
 }
