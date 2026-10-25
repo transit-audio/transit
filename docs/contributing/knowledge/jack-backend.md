@@ -31,7 +31,7 @@ and the duplex process engine (audio plays and records).
 
 - The server is the system "JACK"; a device is a port group, the client part of the physical ports'
   names (`system` under JACK 2, one entry per node under PipeWire); its ports are the channels, named
-  by their short names. One format per endpoint: `f32` at the server's rate and quantum.
+  by their short names. One format per endpoint: `f32` at the server's rate; the period range is 64 to 2048 (wider when the server runs outside it).
 - `JackBackend::probe` opens a short-lived client `transit-probe` with `JackNoStartServer`. Three
   states: library missing ("JACK library not found: install pipewire-jack (or JACK), or start transit
   with pw-jack"), no server ("JACK/PipeWire server not running"), or running with its groups. The
@@ -43,8 +43,10 @@ Audio Devices shows "Requested 128 · running at 256" under the Output line when
 `device_buffer` (or `device_rate`) differs from `ui.audio`'s `buffer_size` (`sample_rate`), on every
 backend; the check is `audio_devices::requested_note`, run with the existing refresh, no polling.
 Under the cpal ALSA host PipeWire runs the stream at the server's quantum whatever period was
-asked for; the native JACK backend always reports the server's quantum. Change PipeWire's quantum
-with `pw-metadata -n settings 0 clock.force-quantum 128` or `PIPEWIRE_QUANTUM=128/48000`.
+asked for; the native JACK backend asks the server for the chosen size when it opens its client
+(`jack_set_buffer_size`, ADR 0021 amendment 2026-10-26) and reports the quantum the server then
+runs, so a refusal shows here. To pin a quantum instead use
+`pw-metadata -n settings 0 clock.force-quantum 128`; transit never sets `PIPEWIRE_QUANTUM`.
 The rate half reflects the rate of the open attempt, not a value the device reported.
 
 ## Lifecycle
@@ -58,7 +60,7 @@ The rate half reflects the rate of the open attempt, not a value the device repo
   leaves them to a patchbay. A stop is for good and returns once no cycle is inside that direction;
   when no direction runs the client is deactivated; the last drop closes it and only then frees the
   engine (the user callbacks drop on that control thread).
-- `Achieved` is the server's rate and quantum whatever was requested (the Player resamples).
+- `Achieved` is the server's rate (the Player resamples) and the quantum it runs after the backend asked for the chosen one; a refused request leaves the server's own.
 
 ## The process callback
 
@@ -100,7 +102,15 @@ with no lock held:
 untouched default (no system and no device named); otherwise it is cpal's ALSA host
 (`playback::backend::native::auto_jack_candidate`, ADR 0021 amendment 2026-10-25). The Audio
 Devices note under the chosen port group says "Native JACK (<server>) runs at <rate> Hz with a
-<n>-sample buffer" and where to change it; the buffer list offers only the server's quantum.
+<n>-sample buffer", "Changes the JACK server's buffer size for all clients." and the `pw-metadata` hint
+for pinning; the buffer list offers 64 to 2048 with the running size marked.
+
+## Tester steps (Linux)
+
+1. Start a JACK or PipeWire-JACK server and open transit (`pw-jack transit` where `libjack` is not on the loader path).
+2. Audio > Audio Devices: pick the JACK system and Native JACK. "Driver change pending: press Apply to switch to JACK." shows and Apply is highlighted; the lists already show the server's choices.
+3. Pick a buffer size (the running one is marked) and press Apply. The server's buffer size changes for every client.
+4. Check the "Output open" line for the size the server runs. "Requested N · running at M" means the server did not take it; pin a size with `pw-metadata` instead.
 
 ## Tests
 

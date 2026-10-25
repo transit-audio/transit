@@ -121,6 +121,28 @@ Slice 2 ships the duplex process engine. Where it departs from the decisions abo
   none). The two that kill or reconfigure a server (`owned_server_*`) are `#[ignore]` and start their
   own dummy server, named by `JACK_DEFAULT_SERVER`.
 
+### Amendment 2026-10-26: decision 4, the buffer size is asked of the server
+
+Decision 4 and the 2026-10-25 amendment left the quantum to the server and offered only the one it
+ran at listing time. A Linux tester on PipeWire then saw a list of one entry, 64, which that card
+cannot run, and no way to change it without leaving the app. The decision changes:
+
+- **The list offers the standard sizes 64 to 2048**, plus the running quantum when it lies outside
+  them, with the running size marked in the list.
+- **Apply asks the server.** When the chosen buffer size differs from the server's, the backend calls
+  `jack_set_buffer_size` once, as it opens its client, on the thread that opens the client (the
+  Player's open or reopen path; never a JACK callback). Every client of the server gets the new
+  quantum, so the panel says so in one line: "Changes the JACK server's buffer size for all
+  clients."
+- **The achieved figure follows the server.** `Achieved` reports `jack_get_buffer_size` after the
+  call. A server that applies the change later (PipeWire) reaches the buffer size callback, which
+  already requests a reopen at the new quantum. A refusal is not an open error: the stream opens at
+  the server's quantum and the requested-versus-running line shows the mismatch.
+- **Unchanged.** transit does not set `PIPEWIRE_QUANTUM`, and the panel keeps the `pw-metadata`
+  hint for pinning a quantum.
+- **Precedent.** Bitwig Studio and REAPER both offer a buffer size under JACK and request it from
+  the server; users of a shared server expect the host that opens a session to set its size.
+
 ## Consequences
 
 - Linux gets an audio path with the server's own cycle clock and port latencies, so MIDI timing, the clock fit and Measure work as on native ASIO.
