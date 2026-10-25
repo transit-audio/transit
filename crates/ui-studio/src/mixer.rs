@@ -1647,7 +1647,8 @@ fn inserts_block(
         // with a Retry button at the row's end (issue #82).
         let load = app.player.as_ref().and_then(|pl| pl.slot_load(id, *slot));
         let stuck = matches!(load, Some(soundcraft_playback::SlotLoad::NotResponding { .. }));
-        let status = load.map(crate::devices::load_text).unwrap_or_default();
+        let last = app.last_load_time(&ins.plugin);
+        let status = load.map(|l| crate::devices::load_text(l, last)).unwrap_or_default();
         let shown = if status.is_empty() { name.clone() } else { format!("{name} ({status})") };
         let mut retry = R4::default();
         if stuck {

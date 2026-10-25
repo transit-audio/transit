@@ -591,3 +591,61 @@ impl StudioApp {
         }
     }
 }
+
+/// A plug-in load or an editor open that took longer than this is reported in the status line
+/// (issue #67).
+pub const REPORT_AFTER: Duration = Duration::from_secs(2);
+
+/// `last time 14 s` (whole seconds from 10 s up, one decimal below): how long the plug-in took to
+/// load the last time, for the loading readout.
+#[must_use]
+pub fn last_time_text(took: Duration) -> String {
+    let s = took.as_secs_f64();
+    if s >= 10.0 { format!("last time {} s", s.round()) } else { format!("last time {s:.1} s") }
+}
+
+/// The editor button while its window is on its way: `Opening… 3 s`.
+#[must_use]
+pub fn opening_text(took: Duration) -> String {
+    format!("Opening… {} s", took.as_secs())
+}
+
+/// `Jup-8 V loaded in 14.1 s`, only for a load over [`REPORT_AFTER`].
+#[must_use]
+pub fn loaded_status(name: &str, total: Duration) -> Option<String> {
+    (total > REPORT_AFTER).then(|| format!("{name} loaded in {}", soundcraft_playback::seconds_text(total)))
+}
+
+/// `Jup-8 V editor opened in 3.2 s`, only for an open over [`REPORT_AFTER`].
+#[must_use]
+pub fn editor_opened_status(name: &str, total: Duration) -> Option<String> {
+    (total > REPORT_AFTER).then(|| format!("{name} editor opened in {}", soundcraft_playback::seconds_text(total)))
+}
+
+impl StudioApp {
+    /// How long the plug-in type took to load the last time (a preference), if it ever did.
+    #[must_use]
+    pub fn last_load_time(&self, plugin: &str) -> Option<Duration> {
+        self.ui.plugin_load_ms.get(plugin).map(|ms| Duration::from_millis(*ms))
+    }
+
+    /// Takes what the player timed since the last frame (issue #67): each plug-in taken into a
+    /// plan has its load time remembered per type, and a load or an editor open over
+    /// [`REPORT_AFTER`] goes to the status line, once.
+    pub(crate) fn note_plugin_timings(&mut self) {
+        let Some(player) = &self.player else { return };
+        let loaded = player.take_loaded();
+        let opened = player.take_editor_opened();
+        for l in loaded {
+            self.ui.plugin_load_ms.insert(l.id, u64::try_from(l.total.as_millis()).unwrap_or(u64::MAX));
+            if let Some(line) = loaded_status(l.name, l.total) {
+                self.status = line;
+            }
+        }
+        for o in opened {
+            if let Some(line) = editor_opened_status(o.name, o.report.total()) {
+                self.status = line;
+            }
+        }
+    }
+}

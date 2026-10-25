@@ -88,6 +88,10 @@ pub struct UiState {
     /// `soundcraft_mix::INSTRUMENT_SLOT`. `ui.set` opens and closes editors through this list
     /// (the same field `tools/exp-quit.ps1` sets in SoundCraft).
     pub plugin_windows: Vec<(TrackId, usize)>,
+    /// How long each plug-in type took to load the last time, in milliseconds by plug-in id (issue
+    /// #67): "last time 12 s" beside the loading readout. A per-machine preference, updated on
+    /// every successful load; older files have none.
+    pub plugin_load_ms: std::collections::BTreeMap<String, u64>,
     /// Track row height in points (plan 06, L9: ours, not the model's seven sizes).
     pub track_height: f32,
     /// Width of the track list.
@@ -172,6 +176,7 @@ impl Default for UiState {
             recent_files: Vec::new(),
             plugin_dirs: plugin_scan::PluginDirs::default(),
             plugin_windows: Vec::new(),
+            plugin_load_ms: std::collections::BTreeMap::new(),
             track_height: 46.0,
             header_width: 236.0,
             window_size: [1600.0, 1000.0],
@@ -811,6 +816,7 @@ impl StudioApp {
     /// Puts what the plug-in host thread reports (ADR 0018) in the status line: an editor that
     /// failed after its open was accepted, and a plug-in that stopped responding.
     fn plugin_host_status(&mut self) {
+        self.note_plugin_timings();
         let Some(p) = &self.player else { return };
         for (_, _, e) in p.take_editor_errors() {
             self.status = format!("Plug-in editor: {e}");

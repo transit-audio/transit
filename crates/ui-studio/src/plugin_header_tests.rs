@@ -468,3 +468,29 @@ fn an_undo_right_after_a_parameter_change_restores_the_undone_state() {
     assert!((stored - 0.5).abs() < 1e-3, "the session stores the restored state's gain: {stored}");
     let _ = std::fs::remove_dir_all(&config);
 }
+
+/// Issue #67: the load and open texts, and when the status line speaks.
+#[test]
+fn the_load_time_texts_and_the_two_second_threshold() {
+    use crate::plugin_header::{REPORT_AFTER, editor_opened_status, last_time_text, loaded_status, opening_text};
+    use std::time::Duration;
+    assert_eq!(last_time_text(Duration::from_millis(14_100)), "last time 14 s");
+    assert_eq!(last_time_text(Duration::from_millis(3_400)), "last time 3.4 s");
+    assert_eq!(opening_text(Duration::from_millis(3_900)), "Opening… 3 s");
+    assert_eq!(loaded_status("Jup-8 V", Duration::from_millis(14_100)).as_deref(), Some("Jup-8 V loaded in 14.1 s"));
+    assert_eq!(editor_opened_status("Jup-8 V", Duration::from_millis(3_200)).as_deref(), Some("Jup-8 V editor opened in 3.2 s"));
+    assert_eq!(loaded_status("Jup-8 V", REPORT_AFTER), None, "exactly 2 s is not over");
+    assert_eq!(editor_opened_status("Jup-8 V", Duration::from_millis(1_999)), None);
+    assert!(loaded_status("Jup-8 V", REPORT_AFTER + Duration::from_millis(1)).is_some());
+}
+
+/// Issue #67: preferences saved before the remembered load times existed still load, with none.
+#[test]
+fn an_older_ui_json_has_no_remembered_load_times_and_newer_ones_round_trip() {
+    let old: crate::UiState = serde_json::from_value(serde_json::json!({"track_height": 50.0})).unwrap();
+    assert!(old.plugin_load_ms.is_empty(), "an older ui.json has no load times");
+    let mut ui = crate::UiState::default();
+    ui.plugin_load_ms.insert("vst3:abc".into(), 14_100);
+    let back: crate::UiState = serde_json::from_value(serde_json::to_value(&ui).unwrap()).unwrap();
+    assert_eq!(back.plugin_load_ms.get("vst3:abc"), Some(&14_100));
+}

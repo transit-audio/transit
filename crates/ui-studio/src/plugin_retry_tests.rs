@@ -351,3 +351,60 @@ fn play_is_steady_with_the_retry_hint_while_a_plug_in_is_not_responding() {
     t.frames(2);
     assert_eq!(t.app.transport_wait(), None, "retried and loaded: Play is ready");
 }
+
+/// Issue #67: a load over 2 s is reported once in the status line when the plug-in binds, every
+/// load updates the plug-in type's remembered load time, and a load under 2 s stays quiet.
+#[test]
+fn a_slow_load_is_reported_in_the_status_line_and_every_load_is_remembered() {
+    let clock = ManualClock::new();
+    let mut t = T::new(Duration::from_millis(100), Duration::from_secs(60), clock.clock(), Duration::from_secs(10), 1);
+    let track = t.track("instrument");
+    t.host_plugin(track, None, &[3]);
+    let gate = Arc::clone(&t.gate);
+    assert!(t.frames_until(Duration::from_secs(10), |t| t.card().status == crate::devices::LOADING && gate.calls() == 1));
+    assert_eq!(t.app.last_load_time(HOSTED), None, "never loaded before");
+    clock.advance(Duration::from_secs(3));
+    t.gate.open();
+    assert!(t.frames_until(Duration::from_secs(10), |t| t.bound(track, SLOT)));
+    t.frames(2);
+    let name = t.app.player.as_ref().unwrap().live_name(track, SLOT).unwrap();
+    assert_eq!(t.app.status, format!("{name} loaded in 3.0 s"));
+    assert_eq!(t.app.last_load_time(HOSTED), Some(Duration::from_secs(3)), "remembered for the type");
+
+    // A quick one (the gate is open): no status line, the remembered time is replaced.
+    t.app.status.clear();
+    let second = t.track("instrument");
+    t.host_plugin(second, None, &[4]);
+    assert!(t.frames_until(Duration::from_secs(10), |t| t.gate.calls() == 2 && t.app.player.as_ref().unwrap().slot_load(second, SLOT).is_none()));
+    t.frames(2);
+    assert!(!t.app.status.contains("loaded in"), "{}", t.app.status);
+    assert!(t.app.last_load_time(HOSTED).unwrap() < Duration::from_secs(2), "updated on every successful load");
+}
+
+/// Issue #67: the loading readout carries how long the plug-in type took last time, next to the
+/// "Loading…" and the "Loading… (slow) N s" text, and the tooltip names the phase.
+#[test]
+fn the_loading_readout_shows_the_last_load_time_and_the_tooltip_the_phase() {
+    use soundcraft_playback::LoadPhase;
+    use soundcraft_playback::SlotLoad;
+    let clock = ManualClock::new();
+    let mut t = T::new(Duration::from_millis(100), Duration::from_secs(60), clock.clock(), Duration::from_secs(10), 1);
+    t.app.ui.plugin_load_ms.insert(HOSTED.to_string(), 14_100);
+    let track = t.track("instrument");
+    t.host_plugin(track, None, &[3]);
+    let gate = Arc::clone(&t.gate);
+    assert!(t.frames_until(Duration::from_secs(10), |t| t.card().status.starts_with("Loading…") && gate.calls() == 1));
+    assert_eq!(t.card().status, "Loading… · last time 14 s");
+    assert_eq!(t.app.player.as_ref().unwrap().slot_phase(track, SLOT), Some(LoadPhase::Creating));
+    clock.advance(Duration::from_secs(11));
+    t.frames(2);
+    assert_eq!(t.card().status, "Loading… (slow) 11 s · last time 14 s");
+    // The tooltip: elapsed, phase and the last time.
+    let tip = crate::devices::load_tip(
+        SlotLoad::Loading { elapsed: Duration::from_millis(12_300) },
+        "Jup-8 V",
+        Some(LoadPhase::Creating),
+        Some(Duration::from_secs(14)),
+    );
+    assert_eq!(tip, "Loading Jup-8 V… 12.3 s (creating instance); last time 14 s");
+}

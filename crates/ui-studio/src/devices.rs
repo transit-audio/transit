@@ -18,7 +18,9 @@ use crate::theme::{self, TOKENS};
 use egui::{Align2, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::Value;
 use soundcraft_model::{Insert, KeyFrom, Tap, TrackId, TrackKind};
+use soundcraft_playback::LoadPhase;
 use soundcraft_playback::SlotLoad;
+use std::time::Duration;
 
 /// Height of the device pane.
 pub const PANE_H: f32 = 132.0;
@@ -444,11 +446,14 @@ fn card_body(
         (_, Some("au")) => "Audio Unit".into(),
         _ => app.builtin_plugins().iter().find(|p| p.id == plugin).map_or("Built-in".into(), |p| format!("Built-in · {}", p.category)),
     };
-    let kind = load.map_or(kind, load_text);
+    let last = app.last_load_time(&plugin);
+    let kind = load.map_or(kind, |l| load_text(l, last));
     let kind_r = pc.text(pos2(r.min.x + 8.0, title.max.y + 12.0), Align2::LEFT_CENTER, &kind, FontId::proportional(10.0), TOKENS.text_dim);
     if let Some(load) = load {
-        // How long so far (#67), on the status text itself.
-        ui.interact(kind_r.intersect(lane), ui.id().with(("load_status", t.0, salt)), Sense::hover()).on_hover_text(load_tip(load, &name));
+        // How long so far, the phase and how long it took last time (#67), on the status text itself.
+        let phase = app.player.as_ref().and_then(|pl| pl.slot_phase(t, key_slot));
+        ui.interact(kind_r.intersect(lane), ui.id().with(("load_status", t.0, salt)), Sense::hover())
+            .on_hover_text(load_tip(load, &name, phase, last));
     }
     if stuck {
         let rb = Rect::from_center_size(pos2(kind_r.max.x + 10.0, kind_r.center().y), vec2(14.0, 14.0));
@@ -531,21 +536,25 @@ fn card_body(
     let open = app.ui.plugin_windows.contains(&(t, key_slot));
     let resp = ui.interact(eb.intersect(lane), ui.id().with(("editor", t.0, salt)), Sense::click());
     pc.rect_filled(eb, crate::theme::RADIUS, if resp.hovered() && enabled { TOKENS.button_hover } else { TOKENS.button });
+    // An editor still being opened counts up (issue #67: a heavy instrument takes seconds).
+    let opening = app.player.as_ref().and_then(|pl| pl.editor_opening(t, key_slot));
     let label = if stuck && !builtin {
-        NOT_RESPONDING
+        NOT_RESPONDING.to_string()
     } else if loading && !builtin {
-        LOADING
+        LOADING.to_string()
+    } else if let Some(took) = opening {
+        crate::plugin_header::opening_text(took)
     } else if open {
-        "Close"
+        "Close".to_string()
     } else {
-        "Edit"
+        "Edit".to_string()
     };
     let ink = if enabled { TOKENS.text } else { TOKENS.text_dim.gamma_multiply(0.6) };
     let font = FontId::proportional(10.5);
-    let w = pc.layout_no_wrap(label.into(), font.clone(), ink).size().x + 12.0 + 4.0;
+    let w = pc.layout_no_wrap(label.clone(), font.clone(), ink).size().x + 12.0 + 4.0;
     let x0 = eb.center().x - w / 2.0;
     crate::icons::paint(&pc, pos2(x0 + 6.0, eb.center().y), Icon::OpenEditor, 12.0, ink);
-    pc.text(pos2(x0 + 16.0, eb.center().y), Align2::LEFT_CENTER, label, font, ink);
+    pc.text(pos2(x0 + 16.0, eb.center().y), Align2::LEFT_CENTER, &label, font, ink);
     let tip = if stuck && !builtin {
         "The plug-in is not responding; Retry (the circular arrow beside \"Not responding\") loads it again".to_string()
     } else if loading && !builtin {
@@ -619,20 +628,33 @@ pub(crate) const NOT_RESPONDING: &str = "Not responding";
 
 /// The slot's text while its plug-in is on its way: "Loading…", "Loading… (slow) 12 s",
 /// "Not responding".
-pub(crate) fn load_text(load: SlotLoad) -> String {
+/// With `last`, how long this plug-in took the last time follows ("Loading… · last time 12 s").
+pub(crate) fn load_text(load: SlotLoad, last: Option<Duration>) -> String {
+    let last = last.map_or(String::new(), |d| format!(" · {}", crate::plugin_header::last_time_text(d)));
     match load {
-        SlotLoad::Loading { .. } => LOADING.to_string(),
-        SlotLoad::Slow { elapsed } => format!("{SLOW} {} s", elapsed.as_secs()),
+        SlotLoad::Loading { .. } => format!("{LOADING}{last}"),
+        SlotLoad::Slow { elapsed } => format!("{SLOW} {} s{last}", elapsed.as_secs()),
         SlotLoad::NotResponding { .. } => NOT_RESPONDING.to_string(),
     }
 }
 
 /// The tooltip of that text: how long so far and what happens next (#67).
-pub(crate) fn load_tip(load: SlotLoad, name: &str) -> String {
+pub(crate) fn load_tip(load: SlotLoad, name: &str, phase: Option<LoadPhase>, last: Option<Duration>) -> String {
+    let in_phase = phase.map_or(String::new(), |p| format!(", {}", p.label()));
+    let last = last.map_or(String::new(), |d| format!("; {}", crate::plugin_header::last_time_text(d)));
     match load {
-        SlotLoad::Loading { elapsed } => format!("Loading {name}… {:.1} s", elapsed.as_secs_f32()),
+        SlotLoad::Loading { elapsed } => {
+            let head = match phase {
+                Some(p) => soundcraft_playback::loading_text(name, elapsed, p),
+                None => format!("Loading {name}… {}", soundcraft_playback::seconds_text(elapsed)),
+            };
+            format!("{head}{last}")
+        }
         SlotLoad::Slow { elapsed } => {
-            format!("{name} is slow to load ({} s so far). The session plays on without it; it joins as soon as it is ready", elapsed.as_secs())
+            format!(
+                "{name} is slow to load ({} s so far{in_phase}{last}). The session plays on without it; it joins as soon as it is ready",
+                elapsed.as_secs()
+            )
         }
         SlotLoad::NotResponding { elapsed } => format!(
             "{name} has not finished loading after {} s and its plug-in host thread is not responding. Retry loads it again with its stored state",
