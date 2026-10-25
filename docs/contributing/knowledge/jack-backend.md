@@ -45,6 +45,7 @@ backend; the check is `audio_devices::requested_note`, run with the existing ref
 Under the cpal ALSA host PipeWire runs the stream at the server's quantum whatever period was
 asked for; the native JACK backend always reports the server's quantum. Change PipeWire's quantum
 with `pw-metadata -n settings 0 clock.force-quantum 128` or `PIPEWIRE_QUANTUM=128/48000`.
+The rate half reflects the rate of the open attempt, not a value the device reported.
 
 ## Lifecycle
 

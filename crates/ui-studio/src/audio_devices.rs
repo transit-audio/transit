@@ -1465,7 +1465,8 @@ fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
 /// "Requested 128 · running at 256": the buffer size or rate the window asked for next to the one
 /// the device runs, only where they differ. PipeWire's ALSA plug-in runs a stream at the server's
 /// quantum, and any backend can step down to what a device offers; the open stream's own figures
-/// (the Player's device status) are the achieved ones. `None` where nothing was asked for or the
+/// (the Player's device status) are the achieved ones, except that the rate half reflects the rate
+/// of the open attempt, not a value the device reported. `None` where nothing was asked for or the
 /// request was honored.
 pub fn requested_note(asked_buffer: Option<u32>, buffer: Option<u32>, asked_rate: Option<u32>, rate: u32) -> Option<String> {
     let mut parts = Vec::new();
