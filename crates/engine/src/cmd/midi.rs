@@ -16,7 +16,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Piano Roll Scale Mode",
             [],
             None,
-            "{clip, enabled?, fold?, root?: 0..11, scale?: major|minor}; editing aid only",
+            "{clip, enabled?, fold?, root?: 0..11, scale?: scale id, e.g. major, minor, dorian, minor-pentatonic, whole-tone, half-whole-dim (see docs/contributing/knowledge/ui.md)}; editing aid only",
             always,
             scale_mode
         ),
@@ -84,7 +84,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Constrain Notes to Scale",
             [],
             None,
-            "{clip, indices: [n], root: 0..11 (C=0), scale: major|minor}; nearest tone, ties downward; minor is natural minor",
+            "{clip, indices: [n], root: 0..11 (C=0), scale: scale id such as major, minor-pentatonic, whole-tone}; nearest tone, ties downward; minor is natural minor",
             always,
             notes_constrain
         ),
@@ -108,7 +108,7 @@ fn scale_mode(e: &mut Engine, p: &Value) -> Result<Value> {
         mode.key.root = value.as_u64().filter(|v| *v < 12).ok_or_else(|| bad(cmd, "root must be 0..11"))? as u8;
     }
     if let Some(value) = p.get("scale") {
-        mode.key.scale = serde_json::from_value(value.clone()).map_err(|_| bad(cmd, "scale must be major or minor"))?;
+        mode.key.scale = parse_scale(value).ok_or_else(|| bad(cmd, "unknown scale name"))?;
     }
     if mode != clip.scale_mode {
         e.session_mut().find_clip_mut(id).ok_or_else(|| bad(cmd, "no such clip"))?.scale_mode = mode;
@@ -317,15 +317,16 @@ fn notes_transpose(e: &mut Engine, p: &Value) -> Result<Value> {
     pitch_edit(e, p, command, |pitch| i64::from(pitch).saturating_add(delta).clamp(0, 127) as u8)
 }
 
+/// A scale named by id ("minor-pentatonic") or display name ("Minor Pentatonic").
+fn parse_scale(value: &Value) -> Option<soundcraft_midi::scale::Scale> {
+    soundcraft_midi::scale::Scale::parse(value.as_str()?)
+}
+
 fn notes_constrain(e: &mut Engine, p: &Value) -> Result<Value> {
-    use soundcraft_midi::scale::{KeyScale, Scale};
+    use soundcraft_midi::scale::KeyScale;
     let command = "midi.notes_constrain";
     let root = p.get("root").and_then(Value::as_u64).filter(|&n| n < 12).ok_or_else(|| bad(command, "root must be 0..11"))? as u8;
-    let scale = match p.get("scale").and_then(Value::as_str) {
-        Some("major") => Scale::Major,
-        Some("minor") => Scale::Minor,
-        _ => return Err(bad(command, "scale must be major or minor")),
-    };
+    let scale = p.get("scale").and_then(parse_scale).ok_or_else(|| bad(command, "scale must be a scale id such as major or minor-pentatonic"))?;
     let key = KeyScale { root, scale };
     pitch_edit(e, p, command, |pitch| key.nearest(pitch))
 }

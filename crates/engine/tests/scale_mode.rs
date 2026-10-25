@@ -41,7 +41,7 @@ fn scale_settings_reject_invalid_input_atomically_and_noop_preserves_document() 
     let clip = e.execute("midi.new_clip", &json!({"track": track, "start": 0, "length": 96000})).unwrap()["clip"].as_u64().unwrap();
     e.execute("midi.scale_mode", &json!({"clip": clip, "enabled": true})).unwrap();
     let before = e.session_arc();
-    for invalid in [json!({"root": 12}), json!({"root": -1}), json!({"scale": "dorian"}), json!({"fold": 1}), json!({"enabled": null})] {
+    for invalid in [json!({"root": 12}), json!({"root": -1}), json!({"scale": "dorien"}), json!({"fold": 1}), json!({"enabled": null})] {
         let mut p = invalid;
         p["clip"] = json!(clip);
         if p.get("fold").is_none() {
@@ -104,4 +104,23 @@ fn scale_group_move_applies_distinct_pitches_as_one_undo_step() {
     assert!(e.undo());
     assert_eq!(e.session().to_json().unwrap(), original);
     assert!(!e.undo() || e.session().to_json().unwrap() != original, "the move was a single step");
+}
+
+#[test]
+fn named_scales_set_through_the_command_and_old_session_names_still_load() {
+    let mut e = Engine::default();
+    let track = e.execute("track.new", &json!({"kind": "instrument"})).unwrap()["tracks"][0].as_u64().unwrap();
+    let clip = e.execute("midi.new_clip", &json!({"track": track, "start": 0, "length": 96000})).unwrap()["clip"].as_u64().unwrap();
+    e.execute("midi.scale_mode", &json!({"clip": clip, "root": 9, "scale": "minor-pentatonic"})).unwrap();
+    let key = e.session().find_clip(ClipId(clip)).unwrap().1.scale_mode.key;
+    assert_eq!(key, KeyScale { root: 9, scale: Scale::MinorPentatonic });
+    let saved = e.session().to_json().unwrap();
+    assert!(saved.contains("minor-pentatonic"));
+    assert_eq!(Session::from_json(&saved).unwrap().find_clip(ClipId(clip)).unwrap().1.scale_mode.key, key);
+    // A session written before the scale list existed stores plain `major` / `minor`.
+    for (old, scale) in [("major", Scale::Major), ("minor", Scale::Minor)] {
+        let legacy = saved.replace("minor-pentatonic", old);
+        let loaded = Session::from_json(&legacy).unwrap();
+        assert_eq!(loaded.find_clip(ClipId(clip)).unwrap().1.scale_mode.key.scale, scale);
+    }
 }

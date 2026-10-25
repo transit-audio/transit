@@ -68,3 +68,18 @@ fn pitch_commands_reject_bad_parameters_atomically() {
     assert_eq!(seq_mut(&mut e, ClipId(clip), "test").unwrap().notes, original);
     assert_eq!(e.undo_history().len(), undo);
 }
+
+#[test]
+fn constrain_uses_the_interval_mask_of_pentatonic_six_and_eight_note_scales() {
+    for (root, scale, expected) in [
+        (0, "minor-pentatonic", [0, 60, 63, 125, 127]),
+        (0, "whole-tone", [0, 60, 64, 126, 126]),
+        (2, "half-whole-dim", [0, 60, 63, 126, 126]),
+        (0, "Minor Pentatonic", [0, 60, 63, 125, 127]),
+    ] {
+        let (mut e, clip, _) = fixture();
+        e.execute("midi.notes_constrain", &json!({"clip": clip, "indices": [0, 1, 2, 3, 4], "root": root, "scale": scale})).unwrap();
+        let edited = seq_mut(&mut e, ClipId(clip), "test").unwrap().notes.clone();
+        assert_eq!(edited.iter().map(|n| n.pitch).collect::<Vec<_>>(), expected, "{scale}");
+    }
+}
