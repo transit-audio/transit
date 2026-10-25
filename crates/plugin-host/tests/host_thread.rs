@@ -332,6 +332,64 @@ fn an_open_waiting_behind_a_busy_host_thread_counts_up_on_the_clock() {
     assert!(host.shutdown(Duration::from_secs(5)));
 }
 
+/// A failed open reports no "opened" time; its error is what the status line gets.
+#[test]
+fn a_failed_open_has_no_open_report_and_keeps_its_error() {
+    let host = host(Duration::from_secs(10));
+    let log = Arc::new(Log::default());
+    let l = Arc::clone(&log);
+    let mut plugin = host
+        .submit(move |ctx| ctx.adopt(Box::new(Fake { log: l, destroy: Duration::ZERO, editor_fails: true })))
+        .wait(Duration::from_secs(5))
+        .unwrap();
+    let mut editor = plugin.editor().unwrap();
+    editor.open().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut error = None;
+    while error.is_none() && Instant::now() < deadline {
+        error = editor.take_error();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(error.as_deref(), Some("no window today"));
+    assert_eq!(editor.take_open_report(), None);
+    drop((editor, plugin));
+    assert!(host.shutdown(Duration::from_secs(5)));
+}
+
+/// A host thread that wedges while an open waits behind its job leaves no "Opening… N s" counting.
+#[test]
+fn opening_for_stops_when_the_host_thread_wedges() {
+    let base = Instant::now();
+    let now = Arc::new(Mutex::new(base));
+    let n = Arc::clone(&now);
+    let clock: transit_plugin_host::Clock = Arc::new(move || *n.lock().unwrap());
+    let host = Host::new(Config {
+        timeout: Duration::from_millis(100),
+        creation_timeout: Duration::from_millis(100),
+        clock,
+        inline: false,
+        ..Config::default()
+    });
+    let log = Arc::new(Log::default());
+    let l = Arc::clone(&log);
+    let mut plugin = host.submit(move |ctx| ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))).wait(Duration::from_secs(5)).unwrap();
+    let mut editor = plugin.editor().unwrap();
+    let (release, held) = mpsc::channel::<()>();
+    let blocker = host.submit(move |_| held.recv().is_ok());
+    editor.open().unwrap();
+    assert_eq!(editor.opening_for(), Some(Duration::ZERO));
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while editor.opening_for().is_some() && Instant::now() < deadline {
+        host.check();
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(editor.opening_for(), None, "the wedged thread's open is not counted");
+    release.send(()).unwrap();
+    drop(blocker);
+    drop((editor, plugin));
+    assert!(host.shutdown(Duration::from_secs(5)));
+}
+
 #[test]
 fn an_editor_that_fails_to_open_reports_why_once() {
     let host = host(Duration::from_secs(10));

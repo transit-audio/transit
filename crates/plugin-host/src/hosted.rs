@@ -247,17 +247,27 @@ impl PluginEditor for RemoteEditor {
         let clock = Arc::clone(&self.token.clock);
         self.token.with_editor(move |editor, shared| {
             lock(&shared.timing).started = Some(clock());
-            match editor.map(|e| e.open()) {
-                Some(Ok(())) => shared.open.store(true, Ordering::Release),
+            let opened = match editor.map(|e| e.open()) {
+                Some(Ok(())) => {
+                    shared.open.store(true, Ordering::Release);
+                    true
+                }
                 Some(Err(e)) => {
                     shared.open.store(false, Ordering::Release);
                     *lock(&shared.error) = Some(e);
+                    false
                 }
-                None => *lock(&shared.error) = Some("this plug-in instance is gone".into()),
-            }
+                None => {
+                    *lock(&shared.error) = Some("this plug-in instance is gone".into());
+                    false
+                }
+            };
             let done = clock();
             let mut timing = lock(&shared.timing);
-            if let (Some(requested), Some(started)) = (timing.requested.take(), timing.started.take()) {
+            // Only a successful open is reported: a failed one keeps its error for the status line.
+            if let (Some(requested), Some(started)) = (timing.requested.take(), timing.started.take())
+                && opened
+            {
                 timing.report =
                     Some(EditorOpenReport { queued: started.saturating_duration_since(requested), opening: done.saturating_duration_since(started) });
             }
@@ -329,7 +339,8 @@ impl PluginEditor for RemoteEditor {
 
     fn opening_for(&self) -> Option<Duration> {
         let shared = &self.token.shared;
-        if !shared.opening.load(Ordering::Acquire) {
+        // Like `is_open`: a wedged or gone host thread never finishes the open, so it stops counting.
+        if !shared.opening.load(Ordering::Acquire) || !self.token.worker.responsive() {
             return None;
         }
         let requested = lock(&shared.timing).requested?;
