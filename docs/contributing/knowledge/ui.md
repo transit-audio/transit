@@ -86,6 +86,17 @@ Alt+Shift never triggers the scale-mode chromatic override: Shift counts as chro
 Alt is not held. The hover text states the same table. Tests in `keys_tests.rs` drive these controls through
 real UI frames with injected time.
 
+## Key and scale (#115)
+
+The key is a root plus one flat list of named scales, in Ableton Live 12's names and order
+(`Scale::ALL` in `crates/midi/src/scale.rs`; Logic Pro agrees on the shape). Each scale is a 12-bit
+interval mask, and every consumer (constrain, scale-mode entry and fold, group transpose, the MCP
+`midi` commands) asks `KeyScale::contains`, so a degree is the next set bit of the mask: five tones
+make an octave in Minor Pentatonic, six in Whole Tone, eight in Half-whole Dim. Sessions store the
+kebab-case id (`minor-pentatonic`); `major` and `minor` from older sessions load unchanged. In the
+Pitch menu the Root grid and the scrollable, type-to-filter scale list sit side by side as inline
+widgets, with no drop-down nested in the menu, which closed it. The menu closes only on a click outside it.
+
 ## Cycle and the loop region
 
 Turning Cycle on (`options.loop_playback`, from the transport button, the menu or the shortcut) with
