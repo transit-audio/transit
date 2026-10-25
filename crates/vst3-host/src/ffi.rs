@@ -2281,14 +2281,19 @@ fn split_state(data: &[u8]) -> Option<(&[u8], &[u8])> {
 pub(crate) struct PlugFrame {
     /// The host window (an `NSWindow*` on macOS), not owned; null when there is none.
     window: std::sync::atomic::AtomicPtr<c_void>,
-    /// A `resizeView` is under way: a plug-in that asks again from its `onSize` is refused (the
-    /// SDK's editor host guards the same recursion).
-    resizing: std::sync::atomic::AtomicBool,
+    /// `resizeView` calls under way (see [`PlugFrame::MAX_NESTED`]).
+    depth: AtomicU32,
 }
 
 impl PlugFrame {
+    /// `resizeView` calls that may be under way at once: a plug-in that corrects its size from
+    /// inside `onSize` gets that one more round trip (the SDK's editor host clears its guard
+    /// before `onSize` too), and a plug-in that keeps asking from every `onSize` is refused at the
+    /// next level instead of recursing without end.
+    const MAX_NESTED: u32 = 2;
+
     fn new(window: *mut c_void) -> PlugFrame {
-        PlugFrame { window: std::sync::atomic::AtomicPtr::new(window), resizing: std::sync::atomic::AtomicBool::new(false) }
+        PlugFrame { window: std::sync::atomic::AtomicPtr::new(window), depth: AtomicU32::new(0) }
     }
 }
 
@@ -2303,7 +2308,8 @@ impl IPlugFrameTrait for PlugFrame {
     unsafe fn resizeView(&self, view: *mut sb::IPlugView, new_size: *mut sb::ViewRect) -> sb::tresult {
         // SAFETY: in-pointer from the plugin (or null, handled).
         let Some(r) = (unsafe { new_size.as_mut() }) else { return sb::kInvalidArgument };
-        if self.resizing.swap(true, Ordering::Relaxed) {
+        if self.depth.fetch_add(1, Ordering::Relaxed) >= PlugFrame::MAX_NESTED {
+            self.depth.fetch_sub(1, Ordering::Relaxed);
             return sb::kResultFalse;
         }
         let (w, h) = rect_size(r);
@@ -2313,7 +2319,7 @@ impl IPlugFrameTrait for PlugFrame {
             // SAFETY: valid view; `r` is the plugin's own writable rect.
             unsafe { v.onSize(r) };
         }
-        self.resizing.store(false, Ordering::Relaxed);
+        self.depth.fetch_sub(1, Ordering::Relaxed);
         sb::kResultOk
     }
 }
@@ -3253,6 +3259,30 @@ mod tests {
         assert!(!link.is_open());
     }
 
+    /// N2 of the #101 review: the editor's `idle` (not a direct `follow_scale`) sends the new
+    /// factor after a DPI change. The window must be visible for `idle` to keep it: it is shown
+    /// without activation.
+    #[cfg(windows)]
+    #[test]
+    fn idle_sends_the_new_scale_after_a_dpi_change() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};
+        let inst = gain_instance();
+        let link = inst.editor().unwrap();
+        link.open_with("idle", |w| set_dpi(w, 144)).unwrap();
+        {
+            let g = link.lock();
+            let win = g.window.as_ref().unwrap();
+            // SAFETY: a live window of this thread.
+            unsafe { ShowWindow(win.raw().cast(), SW_SHOWNOACTIVATE) };
+            assert_eq!(win.content_size(), (480, 360));
+            set_dpi(win, 192);
+        }
+        link.idle();
+        assert!(link.is_open(), "idle kept the visible window");
+        assert_eq!(link.lock().window.as_ref().unwrap().content_size(), (640, 480), "idle sent 2.0");
+        link.close();
+    }
+
     /// A view that records what the host calls; with `scales` it implements
     /// `IPlugViewContentScaleSupport` and reports 200×100 times the factor, otherwise it reports
     /// 200×100 always (a plug-in that scales itself, as Arturia's do).
@@ -3260,6 +3290,12 @@ mod tests {
     struct FakeView<const SCALES: bool> {
         calls: Arc<Mutex<Vec<String>>>,
         scale: Mutex<f32>,
+        /// The frame the host set (not counted; the host keeps it alive while set).
+        frame: std::sync::atomic::AtomicPtr<sb::IPlugFrame>,
+        /// This view's own interface pointer (not counted), for `resizeView`.
+        me: std::sync::atomic::AtomicPtr<sb::IPlugView>,
+        /// How many more times `onSize` asks for a size 10 px wider through `resizeView`.
+        nest: AtomicU32,
     }
 
     #[cfg(windows)]
@@ -3297,13 +3333,28 @@ mod tests {
             unsafe { *size = sb::ViewRect { left: 0, top: 0, right: (200.0 * s) as i32, bottom: (100.0 * s) as i32 } };
             sb::kResultOk
         }
-        unsafe fn onSize(&self, _s: *mut sb::ViewRect) -> sb::tresult {
+        unsafe fn onSize(&self, s: *mut sb::ViewRect) -> sb::tresult {
+            // SAFETY: the host's rect for this call.
+            let mut r = unsafe { *s };
+            self.log(format!("onSize {}", r.right - r.left));
+            let frame = self.frame.load(Ordering::Relaxed);
+            if self.nest.load(Ordering::Relaxed) > 0
+                // SAFETY: the frame the host set and keeps alive while set (or null).
+                && let Some(f) = unsafe { vst3::ComRef::from_raw(frame) }
+            {
+                self.nest.fetch_sub(1, Ordering::Relaxed);
+                r.right += 10;
+                // SAFETY: the host's live frame; our own live view and a rect on this frame.
+                let res = unsafe { f.resizeView(self.me.load(Ordering::Relaxed), &mut r) };
+                self.log(format!("resizeView {} -> {res}", r.right - r.left));
+            }
             sb::kResultOk
         }
         unsafe fn onFocus(&self, _s: sb::TBool) -> sb::tresult {
             sb::kResultOk
         }
-        unsafe fn setFrame(&self, _f: *mut sb::IPlugFrame) -> sb::tresult {
+        unsafe fn setFrame(&self, f: *mut sb::IPlugFrame) -> sb::tresult {
+            self.frame.store(f, Ordering::Relaxed);
             sb::kResultOk
         }
         unsafe fn canResize(&self) -> sb::tresult {
@@ -3351,14 +3402,67 @@ mod tests {
 
     #[cfg(windows)]
     fn fake_view(scales: bool) -> (ComPtr<sb::IPlugView>, Arc<Mutex<Vec<String>>>) {
+        fake_view_nesting(scales, 0)
+    }
+
+    /// [`fake_view`] whose `onSize` asks for a 10 px wider size through `resizeView` `nest` times.
+    #[cfg(windows)]
+    fn fake_view_nesting(scales: bool, nest: u32) -> (ComPtr<sb::IPlugView>, Arc<Mutex<Vec<String>>>) {
+        use std::sync::atomic::AtomicPtr;
         let calls = Arc::new(Mutex::new(Vec::new()));
         let (c, scale) = (Arc::clone(&calls), Mutex::new(1.0));
+        let (frame, me, nest) = (AtomicPtr::new(std::ptr::null_mut()), AtomicPtr::new(std::ptr::null_mut()), AtomicU32::new(nest));
         let view = if scales {
-            ComWrapper::new(FakeView::<true> { calls: c, scale }).to_com_ptr::<sb::IPlugView>()
+            let w = ComWrapper::new(FakeView::<true> { calls: c, scale, frame, me, nest });
+            let p = w.to_com_ptr::<sb::IPlugView>().unwrap();
+            w.me.store(p.as_ptr(), Ordering::Relaxed);
+            p
         } else {
-            ComWrapper::new(FakeView::<false> { calls: c, scale }).to_com_ptr::<sb::IPlugView>()
+            let w = ComWrapper::new(FakeView::<false> { calls: c, scale, frame, me, nest });
+            let p = w.to_com_ptr::<sb::IPlugView>().unwrap();
+            w.me.store(p.as_ptr(), Ordering::Relaxed);
+            p
         };
-        (view.unwrap(), calls)
+        (view, calls)
+    }
+
+    /// Asks the host frame of a view opened by [`attach_view`] for `w`×100, as a plug-in would;
+    /// returns the result and the window's content width after it.
+    #[cfg(windows)]
+    fn resize_through_frame(view: &ComPtr<sb::IPlugView>, w: i32) -> (sb::tresult, i32) {
+        let (frame, win) = attach_view(view, window::PLATFORM_TYPE.unwrap(), "nest", None, |_| {}).unwrap();
+        let mut r = sb::ViewRect { left: 0, top: 0, right: w, bottom: 100 };
+        // SAFETY: our live frame; the view is live and attached; `r` lives on this frame.
+        let res = unsafe { frame.as_com_ref::<sb::IPlugFrame>().unwrap().resizeView(view.as_ptr(), &mut r) };
+        let width = win.content_size().0;
+        let mut g = EditorInner { view: Some(view.clone()), frame: Some(frame), window: Some(win), ..EditorInner::default() };
+        EditorLink::teardown(&mut g);
+        (res, width)
+    }
+
+    /// N3 of the #101 review: a plug-in that corrects its size once from inside `onSize` gets that
+    /// round trip (the SDK's editor host clears its guard before `onSize`), and the window ends at
+    /// the corrected size.
+    #[cfg(windows)]
+    #[test]
+    fn a_size_correction_from_on_size_gets_one_more_round_trip() {
+        let (view, calls) = fake_view_nesting(false, 1);
+        assert_eq!(resize_through_frame(&view, 300), (sb::kResultOk, 310));
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls[1..calls.len() - 1], ["onSize 300", "onSize 310", format!("resizeView 310 -> {}", sb::kResultOk).as_str()]);
+    }
+
+    /// N1 of the #101 review: a plug-in that asks again from every `onSize` is refused at the
+    /// second nested `resizeView` instead of recursing without end.
+    #[cfg(windows)]
+    #[test]
+    fn a_plugin_that_keeps_resizing_from_on_size_is_refused_at_the_second_nesting() {
+        let (view, calls) = fake_view_nesting(false, 10);
+        assert_eq!(resize_through_frame(&view, 300), (sb::kResultOk, 310), "the first correction stands");
+        let calls = calls.lock().unwrap();
+        let on_size = calls.iter().filter(|c| c.starts_with("onSize")).count();
+        assert_eq!(on_size, 2, "{calls:?}");
+        assert!(calls.contains(&format!("resizeView 320 -> {}", sb::kResultFalse)), "{calls:?}");
     }
 
     /// The factor is the window's (DPI / 96), it comes before `attached`, and a DPI change sends

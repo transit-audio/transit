@@ -1880,6 +1880,30 @@ mod tests {
         assert_eq!(open_scaled(&inst, 144, 192), ((600, 450), (800, 600)));
     }
 
+    /// N2 of the #101 review: the editor's `idle` (not a direct `follow_scale`) sends the new
+    /// scale after a DPI change. The window must be visible for `idle` to follow it: it is shown
+    /// without activation. (`idle` first applies the fixture's `request_resize` from `show`.)
+    #[cfg(windows)]
+    #[test]
+    fn idle_sends_the_new_scale_after_a_dpi_change() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SW_SHOWNOACTIVATE, ShowWindow};
+        let inst = embedded_gain(&[]);
+        let link = inst.gui().unwrap();
+        link.open_with("idle", |w| set_dpi(w, 144)).unwrap();
+        {
+            let g = link.lock();
+            let win = g.window.as_ref().expect("embedded");
+            // SAFETY: a live window of this thread.
+            unsafe { ShowWindow(win.raw().cast(), SW_SHOWNOACTIVATE) };
+            assert_eq!(hostwin::content_size(win), (600, 450));
+            set_dpi(win, 192);
+        }
+        let _ = link.idle();
+        assert!(link.is_open(), "idle kept the visible window");
+        assert_eq!(hostwin::content_size(link.lock().window.as_ref().unwrap()), (800, 600), "idle sent 2.0");
+        link.close();
+    }
+
     /// A GUI that ignores `set_scale` (it scales itself) keeps the size it reports: no transform
     /// of ours at any DPI.
     #[cfg(windows)]
