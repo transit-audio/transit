@@ -1286,7 +1286,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
     p.rect_filled(b, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
     p.text(b.center(), Align2::CENTER_CENTER, "Pitch", small.clone(), TOKENS.text);
     layout.pitch = r4(b);
-    egui::Popup::menu(&resp).show(|ui| pitch::menu(app, ui, layout));
+    egui::Popup::menu(&resp).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| pitch::menu(app, ui, layout));
     let (b, resp) = button(ui, 104.0, "snap");
     let p = ui.painter();
     p.rect_filled(b, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });

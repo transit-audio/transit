@@ -75,7 +75,7 @@ fn scale_controls_toggle_through_ui_and_undo_without_changing_notes() {
     h.click(toggle);
     assert!(h.app.keys_scale().enabled);
     assert_eq!(h.app.keys_notes(), before);
-    h.click(h.app.keys.layout.pitch);
+    // The menu stays open until a click outside it, so no second click on Pitch is needed.
     let fold = h.app.keys.layout.pitch_menu.iter().find(|m| m.label == "scale_fold").unwrap().rect;
     h.click(fold);
     assert!(h.app.keys_scale().fold);
@@ -87,7 +87,6 @@ fn scale_controls_toggle_through_ui_and_undo_without_changing_notes() {
     assert_eq!(h.app.keys_notes(), before);
     h.app.engine.session_mut().find_clip_mut(h.clip).unwrap().scale_mode.key.root = 255;
     h.frames(2);
-    h.click(h.app.keys.layout.pitch);
     assert_eq!(h.app.keys_scale().key.root, 255, "display normalization must not rewrite saved data merely by opening the menu");
 }
 
@@ -237,4 +236,25 @@ fn scale_group_at_top_of_range_is_refused_as_a_group() {
     assert_eq!(h.app.keys_notes().iter().map(|n| n.pitch).collect::<Vec<_>>(), [124, 125, 127], "no note folds onto another");
     h.app.keys_move(0, -1).unwrap();
     assert_eq!(h.app.keys_notes().iter().map(|n| n.pitch).collect::<Vec<_>>(), [122, 124, 125], "downward the whole group moves one degree");
+}
+
+#[test]
+fn step_editor_pitch_menu_picks_a_root_and_a_scale_without_closing_itself() {
+    let mut h = Harness::new();
+    h.click(h.app.keys.layout.pitch);
+    let item = |h: &Harness, label: &str| {
+        h.app.keys.layout.pitch_menu.iter().find(|m| m.label == label).unwrap_or_else(|| panic!("no menu item {label}")).rect
+    };
+    // Root A: the menu stays open, so the scale can be picked right after (the nested drop-down closed it).
+    h.click(item(&h, "root_9"));
+    assert_eq!(h.app.keys_scale().key.root, 9);
+    h.click(item(&h, "scale_dorian"));
+    assert_eq!((h.app.keys_scale().key.root, h.app.keys_scale().key.scale), (9, Scale::Dorian));
+    // Type to filter, then pick a scale that is not in the first screenful.
+    h.click(item(&h, "scale_filter"));
+    h.input("ui.text", json!({"text": "pentatonic"}));
+    assert!(h.app.keys.layout.pitch_menu.iter().all(|m| m.label != "scale_dorian"), "filter hides non-matches");
+    h.click(item(&h, "scale_minor-pentatonic"));
+    assert_eq!(h.app.keys_scale().key, KeyScale { root: 9, scale: Scale::MinorPentatonic });
+    assert_eq!(h.app.keys_scale().key.label(), "A Minor Pentatonic");
 }

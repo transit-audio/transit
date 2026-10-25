@@ -65,18 +65,47 @@ pub(super) fn controls(app: &mut StudioApp, ui: &mut Ui, layout: &mut KeysLayout
     if response.changed() {
         let _ = app.keys_scale_set(json!({"fold": fold}));
     }
-    const ROOTS: [&str; 12] = ["C", "C# / Db", "D", "D# / Eb", "E", "F", "F# / Gb", "G", "G# / Ab", "A", "A# / Bb", "B"];
     let mut key = mode.key;
     key.root %= 12;
     let before = key;
-    egui::ComboBox::from_id_salt("scale_root").selected_text(ROOTS[usize::from(key.root)]).show_ui(ui, |ui| {
-        for (root, label) in ROOTS.iter().enumerate() {
-            ui.selectable_value(&mut key.root, root as u8, *label);
-        }
-    });
-    ui.horizontal(|ui| {
-        ui.selectable_value(&mut key.scale, Scale::Major, "Major");
-        ui.selectable_value(&mut key.scale, Scale::Minor, "Natural minor");
+    ui.label(egui::RichText::new(format!("Key: {}", key.label())).strong());
+    // Root and scale sit side by side as plain inline widgets: a drop-down inside this menu
+    // would be a popup nested in a popup, and opening it closed the menu (#115).
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.set_width(64.0);
+            ui.small("Root");
+            egui::Grid::new("scale_root").num_columns(2).spacing([2.0, 2.0]).show(ui, |ui| {
+                for (root, label) in soundcraft_midi::scale::ROOT_NAMES.iter().enumerate() {
+                    let response = ui.selectable_label(usize::from(key.root) == root, *label);
+                    layout.pitch_menu.push(MenuItem::at(ui, format!("root_{root}"), (*label).into(), response.rect));
+                    if response.clicked() {
+                        key.root = root as u8;
+                    }
+                    if root % 2 == 1 {
+                        ui.end_row();
+                    }
+                }
+            });
+        });
+        ui.vertical(|ui| {
+            ui.set_width(150.0);
+            let filter_id = egui::Id::new("scale_filter");
+            let mut filter: String = ui.data_mut(|d| d.get_temp(filter_id)).unwrap_or_default();
+            let field = ui.add(egui::TextEdit::singleline(&mut filter).hint_text("Scale (type to filter)").desired_width(150.0));
+            layout.pitch_menu.push(MenuItem::at(ui, "scale_filter".into(), "Scale filter".into(), field.rect));
+            ui.data_mut(|d| d.insert_temp(filter_id, filter.clone()));
+            let needle = filter.trim().to_lowercase();
+            egui::ScrollArea::vertical().id_salt("scale_list").max_height(190.0).auto_shrink([false, true]).show(ui, |ui| {
+                for scale in Scale::ALL.iter().copied().filter(|s| s.name().to_lowercase().contains(&needle)) {
+                    let response = ui.selectable_label(key.scale == scale, scale.name());
+                    layout.pitch_menu.push(MenuItem::at(ui, format!("scale_{}", scale.id()), scale.name().into(), response.rect));
+                    if response.clicked() {
+                        key.scale = scale;
+                    }
+                }
+            });
+        });
     });
     if key != before {
         let _ = app.keys_scale_set(json!({"root": key.root, "scale": key.scale}));
