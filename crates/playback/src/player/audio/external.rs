@@ -73,7 +73,7 @@ impl External {
         frames: usize,
         backlog: Option<usize>,
     ) {
-        probe.note_backlog(backlog);
+        probe.note_backlog(backlog, frames);
         let at_ns = block.host_for(true).unwrap_or(0);
         let out = &mut self.out;
         probe.block(input, frames, |e| {

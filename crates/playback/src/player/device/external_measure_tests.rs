@@ -36,6 +36,13 @@ struct Rig {
 /// An instrument track holding an External Instrument returning on In 1, sending to `MODEL D` on
 /// MIDI channel 3; a duplex fake device at 48 kHz, its input feeding the plan.
 fn rig(armed: bool, prefill: usize) -> Rig {
+    rig_with(armed, prefill, true)
+}
+
+/// [`rig`], on a device whose input opens with the output and is delivered before each render
+/// (`duplex`, a paired ring: native ASIO), or opens on its own and runs on its own callback (an
+/// unpaired ring: WASAPI, cpal).
+fn rig_with(armed: bool, prefill: usize, duplex: bool) -> Rig {
     let midi = Fake::default();
     let key = midi.add_output("MODEL D");
     let mut s = Session::default();
@@ -48,13 +55,17 @@ fn rig(armed: bool, prefill: usize) -> Rig {
         offset_ms: 0.0,
     };
     t.mixer.record_arm = armed;
-    let audio = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32)).with_capture(2, true);
+    let audio = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32)).with_capture(2, duplex);
     let fallback = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32));
     let cfg = AudioConfig::default();
     let mut player = Player::open_native_or_cpal(Arc::new(s), &cfg, &audio, &fallback).unwrap();
     player.midi.get_mut().as_mut().unwrap().enable(midi.io());
     let recorder = player.open_input(&cfg).expect("the duplex input");
     player.set_input(Arc::clone(&recorder.monitor)).unwrap();
+    if !duplex {
+        // A device whose input opened on its own: the app's path table names its inputs.
+        player.set_io(soundcraft_model::IoMap::for_device("test", "fake", 2, 2)).unwrap();
+    }
     let rig = Rig { player, audio, midi, key, track, _recorder: recorder };
     let (mut output, input) = (vec![0.0f32; BLOCK * 2], vec![0.0f32; BLOCK * 2]);
     let format = ab::Format::new(48_000, 2, ab::SampleFormat::F32);
@@ -293,4 +304,122 @@ fn measure_is_refused_while_playing_armed_without_a_port_or_input_and_one_at_a_t
 
 fn rig_unarmed() -> Rig {
     rig(false, 0)
+}
+
+/// Which callback runs first when a capture and a render fall due on the same device frame.
+#[derive(Clone, Copy, Debug)]
+enum Order {
+    CaptureFirst,
+    RenderFirst,
+    /// Either, pseudo-randomly (a fixed seed): two threads woken by the same period.
+    Mixed,
+}
+
+/// #98: pump an unpaired device whose capture callback pushes `capture` frames every `capture`
+/// device frames and whose render callback asks for `render` frames every `render`, as two
+/// threads on one clock (WASAPI's capture and render loops). `order` settles a tie. With
+/// `extra_at`, one more quiet capture block arrives ahead of that render (a capture that got a
+/// block ahead of the plan and stays there: a K22-class shift). The synth answers each note `C`
+/// capture frames after the frame of its R0, so every note reads the same latency whatever the
+/// ring holds, as long as the alignment does not change.
+fn pump_unpaired(
+    rig: &Rig,
+    capture: usize,
+    render: usize,
+    order: Order,
+    extra_at: Option<usize>,
+) -> Option<Result<external_probe::Measured, MeasureError>> {
+    let format = ab::Format::new(48_000, 2, ab::SampleFormat::F32);
+    let mut output = vec![0.0f32; render * 2];
+    let mut input = vec![0.0f32; capture * 2];
+    // R0 of note k: the first plan block at or after its due frame.
+    let r0 = |k: u64| (48 * (100 + 1500 * k)).div_ceil(render as u64) * render as u64;
+    let blocks = (13.3 * 48_000.0 / render as f64) as usize + ARM_AT + 200;
+    let (mut captured, mut answers, mut seed) = (0u64, Vec::<u64>::new(), 0x2545_f491_u32);
+    let (mut next_capture, mut next_render, mut renders) = (0u64, 0u64, 0usize);
+    while renders < blocks {
+        let capture_now = next_capture < next_render
+            || (next_capture == next_render
+                && match order {
+                    Order::CaptureFirst => true,
+                    Order::RenderFirst => false,
+                    Order::Mixed => {
+                        seed ^= seed << 13;
+                        seed ^= seed >> 17;
+                        seed ^= seed << 5;
+                        seed & 1 == 0
+                    }
+                });
+        if capture_now {
+            for f in 0..capture {
+                let n = captured + f as u64;
+                let x = answers.iter().fold(0.0f32, |x, &a| match n.checked_sub(a) {
+                    Some(0) => x + 0.9,
+                    Some(d) if d < 4_800 => x + if d.is_multiple_of(2) { 0.05 } else { -0.05 },
+                    _ => x,
+                });
+                input[f * 2] = x;
+                input[f * 2 + 1] = 0.0;
+            }
+            assert!(rig.audio.pump_capture(capture, ab::Stamp::INVALID, format, &mut SliceSource { data: &input, channels: 2 }));
+            captured += capture as u64;
+            next_capture += capture as u64;
+            continue;
+        }
+        if renders == ARM_AT {
+            rig.player.start_external_measure(rig.track, &[0]).unwrap_or_else(|e| panic!("{e}"));
+            // Plan frame 0 of the run is the next block's first; the plan reads it from a capture
+            // frame a fixed distance behind `captured`, so a fixed offset on every answer.
+            answers = (0..=external_probe::NOTES as u64).map(|k| captured + r0(k) + C as u64).collect();
+        }
+        if extra_at == Some(renders) {
+            let quiet = vec![0.0f32; capture * 2];
+            assert!(rig.audio.pump_capture(capture, ab::Stamp::INVALID, format, &mut SliceSource { data: &quiet, channels: 2 }));
+        }
+        assert!(rig.audio.pump_render(render, ab::Stamp::INVALID, &mut SliceSink { data: &mut output, channels: 2 }));
+        rig.player.service().unwrap();
+        renders += 1;
+        next_render += render as u64;
+        if renders > ARM_AT
+            && let Some(r) = rig.player.external_measure_result()
+        {
+            return Some(r);
+        }
+    }
+    None
+}
+
+/// #98: on an unpaired device the ring's backlog after each plan read is a sawtooth of up to a
+/// capture period (a 10 ms WASAPI capture under a 128-frame render) and depends on which
+/// callback wins a tie. That is not an alignment change: the run measures, in every order.
+#[test]
+fn an_unpaired_device_whose_callbacks_interleave_measures_in_every_order() {
+    for (capture, render) in [(480, 128), (480, 64), (192, 192)] {
+        for order in [Order::CaptureFirst, Order::RenderFirst, Order::Mixed] {
+            let rig = rig_with(false, 0, false);
+            let r = pump_unpaired(&rig, capture, render, order, None).expect("the measurement finished");
+            let m = r.unwrap_or_else(|e| panic!("capture {capture}, render {render}, {order:?}: {e:?}"));
+            assert_eq!((m.found, m.sent), (8, 8), "capture {capture}, render {render}, {order:?}: {m:?}");
+            assert_eq!(m.spread, 0.0, "every note read the same alignment: {m:?}");
+            assert!(m.frames >= C as u32, "{m:?}");
+            assert!(m.backlog.is_some(), "{m:?}");
+        }
+    }
+}
+
+/// #98: the guard still refuses a K22-class shift on the same unpaired device: one capture block
+/// that gets ahead of the plan mid-run and stays.
+#[test]
+fn an_unpaired_device_whose_input_shifts_by_a_block_mid_run_refuses() {
+    for (capture, render) in [(480, 128), (192, 192)] {
+        let rig = rig_with(false, 0, false);
+        // About 8 s into the run (note 5's window).
+        let at = ARM_AT + 8 * 48_000 / render;
+        let r = pump_unpaired(&rig, capture, render, Order::Mixed, Some(at)).expect("the run ended");
+        let Err(MeasureError::InputAlignmentChanged { first, last }) = r else {
+            panic!("capture {capture}, render {render}: expected the alignment refusal: {r:?}")
+        };
+        assert!(last.abs_diff(first).abs_diff(capture as u32) <= 8, "capture {capture}, render {render}: B moved by the block: {first} -> {last}");
+        until("All Notes Off", || released(&messages(&rig)));
+    }
 }

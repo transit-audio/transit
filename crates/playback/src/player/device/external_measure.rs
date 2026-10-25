@@ -113,9 +113,13 @@ impl Player {
         if probe.armed() && (self.fault.gone.load(Ordering::Acquire) || self.fault.failed.load(Ordering::Acquire)) {
             probe.abandon();
             self.release_external(TrackId(probe.track()));
-            return Some(Err(MeasureError::DeviceLost));
+            let lost = Err(MeasureError::DeviceLost);
+            log_result(probe, &lost);
+            return Some(lost);
         }
-        probe.take_result()
+        let result = probe.take_result()?;
+        log_result(probe, &result);
+        Some(result)
     }
 
     /// Stop the Measure (Cancel, the window closing, a device reopen): the audio thread sends the
@@ -128,4 +132,22 @@ impl Player {
             self.release_external(TrackId(p.track()));
         }
     }
+}
+
+/// The Measure's log line (control thread, INFO): the outcome and the input ring's backlog B by
+/// note window, so a refusal on hardware can be read back from transit.log (#98).
+fn log_result(probe: &ExtProbe, result: &Result<Measured, MeasureError>) {
+    let outcome = match result {
+        Ok(m) => format!("C {} frames, spread {:.1}, {} of {} notes, latencies {:?}", m.frames, m.spread, m.found, m.sent, m.latencies),
+        Err(MeasureError::InputAlignmentChanged { first, last }) => format!("refused: input alignment changed (window mean B {first} -> {last})"),
+        Err(e) => format!("refused: {e}"),
+    };
+    let windows: Vec<String> = probe.backlog_windows().iter().map(ToString::to_string).collect();
+    log::info!(
+        "External Instrument Measure at {} Hz: {outcome}; input ring backlog B by note window (warm-up, notes 1-{}), mean/min/max input frames (blocks): {}; tolerance {} frames",
+        probe.rate(),
+        external_probe::NOTES,
+        windows.join(", "),
+        probe.backlog_tolerance()
+    );
 }

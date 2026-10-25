@@ -58,11 +58,38 @@ const DONE: u8 = 2;
 /// Control asked to stop; the audio thread releases the note and goes idle.
 const CANCEL: u8 = 3;
 const NONE: u64 = u64::MAX;
-/// The most B may move during a run before the run is refused: the ring counts pending
+/// The least the guard tolerates between the note windows' mean backlogs: the ring counts pending
 /// interpolation history, which can differ by a frame or two between blocks.
 pub const BACKLOG_SLACK: u64 = 2;
 /// Events of a run: an on and an off per note, the warm-up included.
 const EVENTS: usize = 2 * (NOTES + 1);
+/// Backlog windows: one per note (0: arming to the first measured note, the warm-up's).
+const WINDOWS: usize = NOTES + 1;
+
+/// How far the note windows' mean backlogs may differ before a run is refused, for a plan block
+/// of `read` frames: half a block, and never under [`BACKLOG_SLACK`]. A window's mean holds the
+/// capture period's sawtooth and the callback order to a few frames (#98, E54); a K22-class
+/// shift, a whole block that stays, moves it by the block.
+#[must_use]
+pub fn backlog_tolerance(read: u64) -> u64 {
+    (read / 2).max(BACKLOG_SLACK)
+}
+
+/// The input ring's backlog B after each plan read during one note window, in input frames.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BacklogWindow {
+    /// Plan blocks sampled.
+    pub samples: u64,
+    pub mean: f64,
+    pub min: u64,
+    pub max: u64,
+}
+
+impl std::fmt::Display for BacklogWindow {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.samples == 0 { write!(f, "-") } else { write!(f, "{:.1}/{}/{} ({})", self.mean, self.min, self.max, self.samples) }
+    }
+}
 
 fn frames_of(rate: u32, ms: u64) -> u64 {
     u64::from(rate) * ms / 1000
@@ -114,8 +141,9 @@ pub struct Measured {
     pub sent: u32,
     /// Each found note's latency, in frames, in the order played.
     pub latencies: Vec<u64>,
-    /// The live input ring's backlog B the run held, in frames (`None` when the plan reported
-    /// none). C moves frame for frame with it (ADR 0020 decision 2).
+    /// The live input ring's backlog B the run held: the first measured note window's mean, in
+    /// input frames, rounded (`None` when the plan reported none). C moves frame for frame with
+    /// it (ADR 0020 decision 2).
     pub backlog: Option<u32>,
 }
 
@@ -146,7 +174,8 @@ pub enum MeasureError {
     /// The audio device stopped or went away during the run.
     DeviceLost,
     /// The input ring's backlog B changed during the run (a different input alignment): C would
-    /// be off by the change. Measure again.
+    /// be off by the change. Measure again. `first` is the first measured note window's mean B,
+    /// `last` the window mean farthest from it, in input frames.
     InputAlignmentChanged { first: u32, last: u32 },
 }
 
@@ -180,11 +209,15 @@ pub struct ExtProbe {
     velocity: AtomicU8,
     ret_n: AtomicU8,
     ret: [AtomicU16; MAX_RETURN_CHANNELS],
-    /// The input ring's backlog B at the first block of the run, and its extremes since
-    /// ([`NONE`] / 0 before any was reported). Audio thread writes; control reads at the end.
-    backlog_first: AtomicU64,
-    backlog_min: AtomicU64,
-    backlog_max: AtomicU64,
+    /// The input ring's backlog B after each plan read, by note window: blocks sampled, their
+    /// sum, minimum ([`NONE`] before any) and maximum. Audio thread writes; control reads at the
+    /// end. The guard compares the windows' means (#98).
+    b_count: [AtomicU64; WINDOWS],
+    b_sum: [AtomicU64; WINDOWS],
+    b_min: [AtomicU64; WINDOWS],
+    b_max: [AtomicU64; WINDOWS],
+    /// Frames of the last plan block read: the guard's tolerance is half of it.
+    b_read: AtomicU64,
 }
 
 impl std::fmt::Debug for ExtProbe {
@@ -212,9 +245,11 @@ impl ExtProbe {
             velocity: AtomicU8::new(VELOCITY),
             ret_n: AtomicU8::new(0),
             ret: std::array::from_fn(|_| AtomicU16::new(0)),
-            backlog_first: AtomicU64::new(NONE),
-            backlog_min: AtomicU64::new(NONE),
-            backlog_max: AtomicU64::new(0),
+            b_count: std::array::from_fn(|_| AtomicU64::new(0)),
+            b_sum: std::array::from_fn(|_| AtomicU64::new(0)),
+            b_min: std::array::from_fn(|_| AtomicU64::new(NONE)),
+            b_max: std::array::from_fn(|_| AtomicU64::new(0)),
+            b_read: AtomicU64::new(0),
         }
     }
 
@@ -256,9 +291,13 @@ impl ExtProbe {
         }
         self.next.store(0, Ordering::Relaxed);
         self.frame.store(0, Ordering::Relaxed);
-        self.backlog_first.store(NONE, Ordering::Relaxed);
-        self.backlog_min.store(NONE, Ordering::Relaxed);
-        self.backlog_max.store(0, Ordering::Relaxed);
+        for w in 0..WINDOWS {
+            self.b_count[w].store(0, Ordering::Relaxed);
+            self.b_sum[w].store(0, Ordering::Relaxed);
+            self.b_min[w].store(NONE, Ordering::Relaxed);
+            self.b_max[w].store(0, Ordering::Relaxed);
+        }
+        self.b_read.store(0, Ordering::Relaxed);
         self.state.store(ARMED, Ordering::Release);
         true
     }
@@ -314,28 +353,58 @@ impl ExtProbe {
         }
         let recorded: Vec<f32> = self.capture.iter().map(|s| f32::from_bits(s.load(Ordering::Relaxed))).collect();
         let sent: Vec<u64> = self.sent.iter().map(|s| s.load(Ordering::Relaxed)).collect();
-        let (first, min, max) =
-            (self.backlog_first.load(Ordering::Relaxed), self.backlog_min.load(Ordering::Relaxed), self.backlog_max.load(Ordering::Relaxed));
-        if min != NONE && max - min > BACKLOG_SLACK {
-            // B moved (the input was re-attached or its ring was cleared): the first sample and
-            // the farthest from it say how.
-            let last = if max - first >= first - min { max } else { min };
-            return Some(Err(MeasureError::InputAlignmentChanged { first: first as u32, last: last as u32 }));
+        let means = backlog_levels(&self.backlog_windows());
+        if let Some(&first) = means.first() {
+            // B moved for good (the input was re-attached, its ring was cleared or overran, the
+            // reader ran dry, or the capture got a block ahead of the plan): the first measured
+            // window's mean and the one farthest from it say how.
+            let last = means.iter().copied().fold(first, |far, m| if (m - first).abs() > (far - first).abs() { m } else { far });
+            if (last - first).abs() > self.backlog_tolerance() as f64 {
+                return Some(Err(MeasureError::InputAlignmentChanged { first: first.round() as u32, last: last.round() as u32 }));
+            }
         }
-        let backlog = (min != NONE).then_some(max as u32);
+        let backlog = means.first().map(|m| m.round() as u32);
         Some(analyze(&recorded, &sent, self.rate).map(|m| Measured { backlog, ..m }))
     }
 
-    /// Audio thread: the live input ring's backlog B after the plan popped this block (`None`
-    /// without a ring). Loads and stores atomics only. Call before [`Self::block`].
-    pub fn note_backlog(&self, frames: Option<usize>) {
+    /// The input ring's backlog B by note window, for the run that ended (or is running): window
+    /// 0 from arming to the first measured note, then one per measured note up to the next
+    /// note's on (the last to the end). Control side, for the guard and the log.
+    #[must_use]
+    pub fn backlog_windows(&self) -> [BacklogWindow; WINDOWS] {
+        std::array::from_fn(|w| {
+            let samples = self.b_count[w].load(Ordering::Relaxed);
+            let sum = self.b_sum[w].load(Ordering::Relaxed);
+            let min = self.b_min[w].load(Ordering::Relaxed);
+            let mean = if samples == 0 { 0.0 } else { sum as f64 / samples as f64 };
+            BacklogWindow { samples, mean, min: if min == NONE { 0 } else { min }, max: self.b_max[w].load(Ordering::Relaxed) }
+        })
+    }
+
+    /// The guard's tolerance for the last run, in frames ([`backlog_tolerance`] of its plan block).
+    #[must_use]
+    pub fn backlog_tolerance(&self) -> u64 {
+        backlog_tolerance(self.b_read.load(Ordering::Relaxed))
+    }
+
+    /// Audio thread: the live input ring's backlog B after the plan read this block of `read`
+    /// frames (`None` without a ring), added to the current note's window. The snapshot is not
+    /// stable by itself: on a backend whose capture runs on its own callback it holds whatever
+    /// the capture pushed since the read, a sawtooth of up to a capture period, and the callback
+    /// order (#98). The guard therefore compares the windows' means. Loads, stores and adds on
+    /// atomics only. Call before [`Self::block`].
+    pub fn note_backlog(&self, frames: Option<usize>, read: usize) {
         let Some(b) = frames.map(|b| b as u64) else { return };
         if self.state.load(Ordering::Acquire) != ARMED {
             return;
         }
-        let _ = self.backlog_first.compare_exchange(NONE, b, Ordering::Relaxed, Ordering::Relaxed);
-        self.backlog_min.fetch_min(b, Ordering::Relaxed);
-        self.backlog_max.fetch_max(b, Ordering::Relaxed);
+        // The window of the last note-on pushed (event 2k is note k's on).
+        let w = ((self.next.load(Ordering::Relaxed) as usize).saturating_sub(1) / 2).min(WINDOWS - 1);
+        self.b_count[w].fetch_add(1, Ordering::Relaxed);
+        self.b_sum[w].fetch_add(b, Ordering::Relaxed);
+        self.b_min[w].fetch_min(b, Ordering::Relaxed);
+        self.b_max[w].fetch_max(b, Ordering::Relaxed);
+        self.b_read.store(read as u64, Ordering::Relaxed);
     }
 
     fn message(&self, status: u8, data: u8, value: u8) -> Emit {
@@ -397,6 +466,13 @@ impl ExtProbe {
             self.state.store(DONE, Ordering::Release);
         }
     }
+}
+
+/// The mean backlog of each sampled measured-note window, in order; the warm-up's window only when
+/// no measured one was sampled.
+fn backlog_levels(windows: &[BacklogWindow]) -> Vec<f64> {
+    let measured: Vec<f64> = windows.iter().skip(1).filter(|w| w.samples > 0).map(|w| w.mean).collect();
+    if measured.is_empty() { windows.iter().take(1).filter(|w| w.samples > 0).map(|w| w.mean).collect() } else { measured }
 }
 
 /// Find each measured note's onset in `recorded` (the return by plan frame since arming) against
@@ -593,6 +669,33 @@ mod tests {
         assert_eq!(tail, [[0x82, NOTE, 0], [0xB2, 123, 0]]);
         let ons = r.emitted.iter().filter(|(_, e)| e.bytes[0] == 0x92).count();
         assert_eq!(ons, 3, "the warm-up and two notes");
+    }
+
+    /// #98: B sampled after each read on an unpaired device is a sawtooth of a capture period
+    /// (480 under 128-frame reads); the guard compares the note windows' means, so the sawtooth
+    /// passes and a whole block that stays mid-run refuses, by the block.
+    #[test]
+    fn the_guard_takes_a_capture_sawtooth_and_refuses_a_step_that_stays() {
+        let silence = vec![vec![0.0f32; 128]];
+        let run = |step_at: Option<u64>| {
+            let p = ExtProbe::new(RATE);
+            assert!(p.arm(1, 0, NOTE, VELOCITY, &[0]));
+            let mut t = 0u64;
+            while p.armed() {
+                // 480 frames land every 480; the read takes 128 every 128.
+                let b = 608 - (t % 480) / 128 * 128 + if step_at.is_some_and(|s| t >= s) { 480 } else { 0 };
+                p.note_backlog(Some(b as usize), 128);
+                p.block(&silence, 128, |_| {});
+                t += 128;
+            }
+            (p.take_result().expect("done"), p.backlog_windows())
+        };
+        let (steady, windows) = run(None);
+        assert!(matches!(steady, Err(MeasureError::NoSound { .. })), "the sawtooth is no alignment change: {steady:?}");
+        assert!(windows.iter().all(|w| w.samples > 0 && w.max - w.min == 384), "{windows:?}");
+        let (stepped, _) = run(Some(on_at(RATE, 5) + 960));
+        let Err(MeasureError::InputAlignmentChanged { first, last }) = stepped else { panic!("{stepped:?}") };
+        assert!(last.abs_diff(first).abs_diff(480) <= 4, "{first} -> {last}");
     }
 
     #[test]

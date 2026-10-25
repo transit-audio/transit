@@ -150,5 +150,6 @@ A hardware investigation of the Measure (Model D on the Scarlett, native ASIO, 4
 - Decision 10 (a): three Measures, each after a device reopen, agree within 0.5 ms.
 - Decision 4: "device reopen keeps the record" holds with the K22 fix.
 - Measure refuses a run during which B changed: "Input alignment changed during the measurement: measure again." It reads B from the plan's ring after every block and tolerates 2 frames for interpolation history. After the K22 fix the hardware acceptance asserts B is 0.
+  - Amended 2026-10-25 (#98, E54): the per-block snapshot is exact only on a paired device (native ASIO). With capture on its own callback it swings by up to a capture period and with the callback order, and the guard refused every run on hardware. The guard now compares the mean B of each note's window and refuses a difference above half a plan block (at least 2 frames).
 - Decision 10 (f): the Cancel criterion is on the wire, then on the return (see there); control-side release is tested on its own (N3).
 - The decisive check was in-app: a grid clip on an External Instrument, compensated with the C Measure found in the same session, landed within 0.6 ms of the grid at both buffers. The benchmark is `docs/benchmarks/2026-10-24-external-instrument-measure-c-domain.md`.

@@ -182,6 +182,14 @@ the latency `manual_ms` set by hand; the measured latency is per machine (Measur
   retry), refuses with "The return is not quiet before the note: …"; any attack sample at or above
   -0.5 dBFS refuses with "The return clipped: …". A spread (standard deviation) above 1.0 ms is
   shown with its warning and stored only on Keep. Nothing is stored for a refusal.
+- **The alignment guard (#98, E54).** "Input alignment changed during the measurement: measure
+  again." refuses a run whose live-input alignment moved. The probe adds the ring's backlog B after
+  each plan read to the current note's window and compares the windows' means, refusing a
+  difference above half a plan block (at least 2 frames). A single snapshot is not stable on a
+  device whose capture runs on its own callback (WASAPI, cpal): it is a sawtooth of up to a
+  capture period plus the callback order, which refused every run on hardware. A block that gets
+  ahead of the plan and stays still moves the mean by the block. The log line `External
+  Instrument Measure at … Hz` in transit.log gives the outcome and each window's mean/min/max B.
 - **Note safety in Measure.** Every exit sends the note-off and All Notes Off (CC 123) on the
   channel through the output thread: at the end of the run and on Cancel the audio thread pushes
   them onto the playback ring; on Cancel and on a device loss control also asks the output thread

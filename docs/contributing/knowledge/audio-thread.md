@@ -60,7 +60,9 @@ happens between `open_input` and the plan's adoption, and during a stall. The co
   one atomic store, which is safe from the audio thread at adoption.
 - **What it does not do.** Outside alignment the reader never trims the FIFO. A stall after
   alignment leaves its backlog until the next clear, and an External Instrument Measure refuses a
-  run whose B changed. Recording does not read this ring (it captures by device frame), and the
+  run whose B changed. `buffered_input_frames` read after the plan's pop is exact (the slack)
+  only when paired; unpaired, the capture callback can push between the read and the snapshot, so
+  it swings by up to a capture period. A consumer compares means over many reads (#98, E54). Recording does not read this ring (it captures by device frame), and the
   loopback calibration counts device positions.
 - **Proof.** The tests pre-fill the ring before the plan reads it:
   - `record::ring_tests`: `the_aligning_read_drops_*`, `a_clear_mid_session_*` and

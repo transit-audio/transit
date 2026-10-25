@@ -58,3 +58,8 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
 - A test that pumps a fake device faster than real time reads another thread's output (the MIDI
   output thread, a worker) only after waiting for it, never at a fixed block count
   (E52, `../../escapes/E52-measure-cancel-test-assumed-the-output-threads-progress.md`).
+- A guard that reads a quantity another thread writes (the input ring's backlog, a counter the
+  capture callback bumps) is tested on a fake whose callbacks interleave: capture and render on
+  their own schedules, a capture period that differs from the render block, and both orders on a
+  tie, plus the real change it must still catch on the same fake. A lockstep fake alone does not
+  pass it (E54, `../../escapes/E54-measure-guard-validated-only-on-a-lockstep-fake.md`).
