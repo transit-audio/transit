@@ -144,12 +144,36 @@ fn the_session_mapping_wins_a_conflict_with_the_controller_profile() {
     let resolved = resolve(&tracks, &session, &profile);
     let active: Vec<_> = resolved.iter().filter(|r| !r.overridden).collect();
     assert_eq!(active.len(), 1);
-    assert_eq!((active[0].scope, active[0].track, active[0].control), (Scope::Session, TrackId(11), Control::Pan));
+    assert_eq!((active[0].scope, active[0].track, active[0].control.clone()), (Scope::Session, TrackId(11), Control::Pan));
     let mut rig = rig();
     let mut specs: Vec<MapSpec> = active.iter().map(|r| MapSpec::from_resolved(r)).collect();
     specs[0].mode = MapMode::Jump;
     rig.map(specs);
     assert_eq!(rig.cc(74, 127), vec![1.0], "only the session's mapping answers CC 74");
+}
+
+#[test]
+fn a_plug_in_parameter_target_matches_like_any_continuous_control_and_is_consumed() {
+    use soundcraft_model::AutoParam;
+    let tracks = [TrackId(10)];
+    let mut session = MappingSet::default();
+    let mut profile = MappingSet::default();
+    let gain = Control::Plugin { slot: 0, param: "mid_gain".into() };
+    session.set(Mapping::new(src(74), ControlTarget { strip: Strip::Track(TrackId(10)), control: gain.clone() })).unwrap();
+    // The controller profile addresses the instrument's parameter by strip position.
+    let inst = Control::Plugin { slot: AutoParam::INSTRUMENT_SLOT, param: "cutoff".into() };
+    profile.set(Mapping::new(src(75), ControlTarget { strip: Strip::Position(1), control: inst.clone() })).unwrap();
+    let resolved = resolve(&tracks, &session, &profile);
+    assert_eq!(resolved.iter().map(|r| r.control.clone()).collect::<Vec<_>>(), vec![gain, inst]);
+    let mut specs: Vec<MapSpec> = resolved.iter().map(MapSpec::from_resolved).collect();
+    assert!(specs.iter().all(|s| !s.button), "a plug-in parameter is continuous");
+    specs.iter_mut().for_each(|s| s.mode = MapMode::Jump);
+    let mut rig = build(true);
+    rig.map(specs);
+    // The worker publishes the knob position (0..1); Main maps it onto the parameter's own range.
+    assert_eq!(rig.cc(74, 127), vec![1.0]);
+    assert_eq!(rig.cc(75, 0), vec![0.0]);
+    assert_eq!(rig.admitted(), 0, "mapped parameters are consumed like mapped faders");
 }
 
 #[test]
