@@ -1748,6 +1748,8 @@ fn measure_on_the_asio_calibration_line_times_the_loop_and_stores_it_for_this_bu
     t.app.engine.set_io_map(player.io_map().as_ref().clone());
     t.app.player = Some(player);
     t.app.ui.audio = cfg;
+    // The measurement's give-up wait reads this frozen age, not the clock (E49, #106).
+    t.app.audio_devices.measure_elapsed = Some(std::time::Duration::ZERO);
     t.open_window();
     let line = t.layout()["calibration"].as_str().unwrap().to_string();
     assert!(line.starts_with("not calibrated: "), "{line}");
@@ -1843,6 +1845,8 @@ fn a_cancelled_or_silent_asio_calibration_stores_nothing_and_says_why() {
     t.app.engine.set_io_map(player.io_map().as_ref().clone());
     t.app.player = Some(player);
     t.app.ui.audio = cfg;
+    // The measurement's give-up wait reads this frozen age, not the clock (E49, #106).
+    t.app.audio_devices.measure_elapsed = Some(std::time::Duration::ZERO);
     t.open_window();
     t.click(mid(t.control_rect("cal_measure")));
     assert!(t.app.audio_devices.measuring.is_some());
@@ -1872,6 +1876,43 @@ fn a_cancelled_or_silent_asio_calibration_stores_nothing_and_says_why() {
         t.layout()["calibration_measure"]["result"],
         "the click came back on 0 of 8 tries: check the cable from Out 1-2 to In 1 and the input gain"
     );
+    assert!(t.app.ui.audio.calibrations.is_empty() && driver.live_calibrations().is_empty());
+}
+
+/// #106: a measurement that never completes is given up on when its age passes the wait, and
+/// stores nothing. The age is injected, so the test does not depend on how fast the machine is.
+#[test]
+fn an_asio_calibration_that_outlives_its_wait_is_given_up_and_stores_nothing() {
+    use transit_audio_backend as ab;
+    if !soundcraft_playback::devices::NATIVE_ASIO_COMPILED {
+        return;
+    }
+    let format = ab::Format::new(48_000, 2, ab::SampleFormat::F32);
+    let attempt =
+        ab::OpenRequest { format, period: ab::Period::Frames(256), mode: ab::Mode::Shared, origin: ab::HostOrigin::default(), calibration: None };
+    let driver = ab::fake::FakeBackend::new(format).named("ASIO", "Focusrite USB ASIO").with_capture(2, true).with_attempts(vec![attempt]);
+    let cfg = AudioConfig {
+        backend: Backend::NativeAsio,
+        system: Some("ASIO".into()),
+        output: Some("Focusrite USB ASIO".into()),
+        sample_rate: Some(48_000),
+        buffer_size: Some(256),
+        ..Default::default()
+    };
+    let mut t = T::new();
+    let player = soundcraft_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, &driver).unwrap();
+    t.app.engine.set_io_map(player.io_map().as_ref().clone());
+    t.app.player = Some(player);
+    t.app.ui.audio = cfg;
+    t.app.audio_devices.measure_elapsed = Some(std::time::Duration::ZERO);
+    t.open_window();
+    t.click(mid(t.control_rect("cal_measure")));
+    t.frames(3);
+    assert!(t.app.audio_devices.measuring.is_some(), "no block has come and the wait has not passed: still measuring");
+    t.app.audio_devices.measure_elapsed = Some(std::time::Duration::from_secs(60));
+    t.frames(2);
+    assert!(t.app.audio_devices.measuring.is_none() && !t.app.player.as_ref().unwrap().loop_calibration_running());
+    assert_eq!(t.layout()["calibration_measure"]["result"], "the audio device did not answer: no measurement");
     assert!(t.app.ui.audio.calibrations.is_empty() && driver.live_calibrations().is_empty());
 }
 

@@ -172,6 +172,10 @@ pub struct AudioDevicesState {
     calibration_result: String,
     #[cfg(test)]
     pub(crate) fake_probe: Option<crate::hardware_measure::FakeProbe>,
+    /// How long the window's measurement counts as having run (tests): the waits of
+    /// `poll_measure` read this instead of the wall clock.
+    #[cfg(test)]
+    pub(crate) measure_elapsed: Option<std::time::Duration>,
     /// Scripted device-loop counters (output, input) standing in for the streams, so tests can
     /// render the Backend lines without a native backend.
     #[cfg(test)]

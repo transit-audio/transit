@@ -107,3 +107,14 @@ finished before the reader took one pair, so the test depended on which thread r
 runs until the reader has checked a fixed 20,000 pairs, each against `value == publish count`, so the observation
 count no longer depends on scheduling. Mutation: `take` reading the value and count from two separate atomics
 fails the pairing assertion (3 of 3 runs). 30 of 30 runs pass with a `cargo check` running beside them.
+
+Recurrence 2026-10-25 (#106): `a_cancelled_or_silent_asio_calibration_stores_nothing_and_says_why`
+and `measure_on_the_asio_calibration_line_times_the_loop_and_stores_it_for_this_buffer_size` failed
+under load ("the audio device did not answer: no measurement"; nothing stored). The tests pump 800
+driver blocks with a thread per block, and the window's measurement gave up on the real 8 s wait
+(`Pending::began.elapsed()` in `hardware_measure.rs`), which a starved run exceeds. Fixed: the wait
+reads `measure_age`, which tests freeze through `measure_elapsed`; the pump loops are count-bounded.
+A new test advances the injected age past the wait and asserts the give-up text and that nothing is
+stored. Mutation: not storing the calibration in `ui.audio` fails the measure test. No
+`cargo xtask timing` rule: the clock is read in production code, outside what a scan of test
+lines can see.

@@ -209,16 +209,25 @@ impl StudioApp {
         if let Some(done) = done {
             return Ok(Some(done));
         }
-        if pending.kind == MeasureKind::Loop && player.loop_calibration_lacks_position() && pending.began.elapsed() > POSITION_GRACE {
+        if pending.kind == MeasureKind::Loop && player.loop_calibration_lacks_position() && self.measure_age(pending) > POSITION_GRACE {
             player.cancel_loop_calibration();
             return Err("the driver reports no sample position, so its loop cannot be measured: the driver's own figures stay in use".into());
         }
-        if pending.began.elapsed() > WAIT {
+        if self.measure_age(pending) > WAIT {
             player.cancel_hardware_probe();
             player.cancel_loop_calibration();
             return Err("the audio device did not answer: no measurement".into());
         }
         Ok(None)
+    }
+
+    /// How long `pending` has run. Tests set `measure_elapsed` so no wait depends on the clock.
+    fn measure_age(&self, pending: &Pending) -> Duration {
+        #[cfg(test)]
+        if let Some(age) = self.audio_devices.measure_elapsed {
+            return age;
+        }
+        pending.began.elapsed()
     }
 
     fn cancel_probe(&mut self) {
