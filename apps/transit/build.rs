@@ -5,7 +5,35 @@
 //! cross-compile from macOS or Linux still links, unless `SOUNDCRAFT_REQUIRE_WINRES=1` turns it
 //! into an error (for release builds).
 
+/// `<short sha> <commit date>` of the checkout (`TRANSIT_BUILD` overrides it, for a build from a
+/// source archive); `unknown` when neither is available. Shown by `--report` and Help > About.
+fn build_id() -> String {
+    println!("cargo:rerun-if-env-changed=TRANSIT_BUILD");
+    if let Ok(id) = std::env::var("TRANSIT_BUILD") {
+        return id;
+    }
+    let git = |args: &[&str]| {
+        let out = std::process::Command::new("git").args(args).output().ok().filter(|o| o.status.success())?;
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_owned()).filter(|s| !s.is_empty())
+    };
+    // Rebuild when the checked-out commit moves: HEAD itself, and the branch ref it names.
+    if let Some(head) = git(&["rev-parse", "--git-path", "HEAD"]) {
+        println!("cargo:rerun-if-changed={head}");
+    }
+    if let Some(reference) = git(&["symbolic-ref", "-q", "HEAD"])
+        && let Some(path) = git(&["rev-parse", "--git-path", &reference])
+    {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    match (git(&["rev-parse", "--short=8", "HEAD"]), git(&["log", "-1", "--format=%cs"])) {
+        (Some(sha), Some(date)) => format!("{sha} {date}"),
+        (Some(sha), None) => sha,
+        _ => "unknown".into(),
+    }
+}
+
 fn main() {
+    println!("cargo:rustc-env=TRANSIT_BUILD={}", build_id());
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed=../../assets/app-icon/transit.ico");
     println!("cargo:rerun-if-env-changed=SOUNDCRAFT_REQUIRE_WINRES");

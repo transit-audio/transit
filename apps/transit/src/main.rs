@@ -1,6 +1,6 @@
 //! transit desktop app: the studio UI over the transit engine.
 //!
-//! Usage: `transit [--demo] [--control <port>] [--no-audio] [--verbose] [--log <directives>] [--log-stderr] [session.transit]`
+//! Usage: `transit --report [path]` writes a diagnostics file and exits; otherwise `transit [--demo] [--control <port>] [--no-audio] [--verbose] [--log <directives>] [--log-stderr] [session.transit]`
 //!
 //! `--verbose` logs debug detail for every transit target; `--log <directives>` takes `RUST_LOG` syntax
 //! (`warn,soundcraft_mix=trace`); `--log-stderr` copies the log to standard error when it is not a
@@ -21,6 +21,7 @@ mod control_server;
 #[cfg(any(target_os = "windows", test))]
 mod graphics;
 mod logging;
+mod report;
 mod shutdown;
 #[cfg(all(feature = "update-check", not(target_arch = "wasm32")))]
 mod update_check;
@@ -427,6 +428,22 @@ fn main() -> eframe::Result {
         soundcraft_engine::shutdown_plugin_hosts();
         return Ok(());
     }
+    // `--report`: write the diagnostics file and exit, before the logger (so the log it reads is not
+    // rotated), the window and any audio device.
+    if let Some(target) = report::parse(&args) {
+        let settings = load_prefs().map(|ui| ui.audio).unwrap_or_default();
+        let log_dir = if prefs_enabled() { config::config_dir().map(|d| d.join(logging::LOG_DIR)) } else { None };
+        match report::run(target, log_dir, settings) {
+            Ok(path) => {
+                println!("{}", path.display());
+                std::process::exit(0);
+            }
+            Err(e) => {
+                eprintln!("transit --report: {e}");
+                std::process::exit(1);
+            }
+        }
+    }
     let parsed_log_args = logging::LogArgs::parse(&args);
     let log_args = parsed_log_args.clone().unwrap_or_default();
     let (logger, resolved) = match logging::install(&log_args) {
@@ -548,6 +565,7 @@ fn main() -> eframe::Result {
                 app.splash.arm();
                 install_update_check(&mut app.services, &cc.egui_ctx);
                 app.about.app_version = env!("CARGO_PKG_VERSION").to_string();
+                app.about.build = env!("TRANSIT_BUILD").to_string();
                 if let Some(port) = control_port {
                     let rx = control_server::start(port, cc.egui_ctx.clone());
                     app = app.with_control(rx);
