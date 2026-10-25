@@ -1763,7 +1763,9 @@ fn measure_on_the_asio_calibration_line_times_the_loop_and_stores_it_for_this_bu
     t.click(mid(t.control_rect("cal_measure")));
     assert!(t.app.audio_devices.measuring.is_some(), "it started: {}", t.app.status);
     assert_eq!(t.layout()["calibration_measure"]["progress"], "Measuring\u{2026} 0/8 clicks");
+    t.section("section_hardware");
     assert_eq!(t.layout()["hardware"]["blocked"], "The calibration measurement is running.");
+    t.section("section_system");
     assert_eq!((t.app.ui.audio.calibration_send.as_deref(), t.app.ui.audio.calibration_return.as_deref()), (Some("Out 1-2"), Some("In 2")));
     // The driver: each switch captures (input 2 is output 2, LOOP frames late) then renders.
     let mut sent = std::collections::BTreeMap::new();
