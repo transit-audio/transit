@@ -8,7 +8,9 @@
 //!
 //! The gain plugin also implements `clap.state` (gain and mode as two little-endian f64s) and a
 //! floating-only `clap.gui` without a real window: showing it "edits" the gain to 0.25 in the GUI,
-//! reported as an output parameter event by the next `process`.
+//! reported as an output parameter event by the next `process`. Embedded (`CMD:gui-embedded`), its
+//! GUI takes `set_scale` and reports 400×300 times the scale; with `CMD:gui-self-scaling` it
+//! ignores `set_scale` and reports 400×300 (issue #101).
 //!
 //! - `org.soundcraft.test.requests` (only in the build with the `requests` feature, which lists
 //!   nothing else): a stereo gain effect (params as the gain plugin, latency 5,
@@ -189,6 +191,11 @@ struct Fx {
     gui_embed: u8,
     /// The last GUI made was floating (asked by `CMD:gui-was-floating`).
     gui_floating: bool,
+    /// Issue #101: the scale the host set (1.0 until then); the GUI reports 400×300 times it.
+    gui_scale: f64,
+    /// `CMD:gui-self-scaling`: the GUI ignores `set_scale` (returns false) and always reports
+    /// 400×300, like a plug-in that reads its monitor's scale itself.
+    gui_self_scaling: bool,
 }
 
 unsafe fn fx<'a>(p: *const clap_plugin) -> &'a mut Fx {
@@ -788,6 +795,10 @@ unsafe extern "C" fn state_load(p: *const clap_plugin, stream: *const clap_istre
             return true;
         }
         Some("CMD:gui-was-floating") => return f.gui_floating,
+        Some("CMD:gui-self-scaling") => {
+            f.gui_self_scaling = true;
+            return true;
+        }
         _ => {}
     }
     if got != 16 {
@@ -836,8 +847,24 @@ unsafe extern "C" fn gui_destroy(p: *const clap_plugin) {
     f.gui_visible = false;
 }
 
-unsafe extern "C" fn gui_set_scale(_p: *const clap_plugin, scale: f64) -> bool {
-    scale > 0.0
+unsafe extern "C" fn gui_set_scale(p: *const clap_plugin, scale: f64) -> bool {
+    let f = unsafe { fx(p) };
+    assert!(f.gui_created && !f.gui_floating, "set_scale is for a created embedded GUI");
+    if f.gui_self_scaling || !(scale > 0.0) {
+        return false;
+    }
+    f.gui_scale = scale;
+    true
+}
+
+unsafe extern "C" fn gui_get_size(p: *const clap_plugin, width: *mut u32, height: *mut u32) -> bool {
+    let f = unsafe { fx(p) };
+    assert!(f.gui_created, "get_size before create");
+    unsafe {
+        *width = (400.0 * f.gui_scale).round() as u32;
+        *height = (300.0 * f.gui_scale).round() as u32;
+    }
+    true
 }
 
 unsafe extern "C" fn gui_suggest_title(p: *const clap_plugin, title: *const c_char) {
@@ -869,7 +896,7 @@ static GUI: clap_plugin_gui = clap_plugin_gui {
     create: Some(gui_create),
     destroy: Some(gui_destroy),
     set_scale: Some(gui_set_scale),
-    get_size: None,
+    get_size: Some(gui_get_size),
     can_resize: None,
     get_resize_hints: None,
     adjust_size: None,
@@ -995,6 +1022,8 @@ unsafe extern "C" fn factory_create(_f: *const clap_plugin_factory, host: *const
         gui_edit_pending: false,
         gui_embed: 0,
         gui_floating: false,
+        gui_scale: 1.0,
+        gui_self_scaling: false,
     });
     let raw = Box::into_raw(b);
     unsafe {

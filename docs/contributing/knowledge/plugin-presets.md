@@ -12,6 +12,20 @@ Issue #68. Read with [ADR 0018](../../adr/0018-plugin-host-thread.md) (the plug-
   request (`resize_content`). `EditorWindow::sync`, run from the editor's `idle`, follows the
   plug-in's child window when it settles at another size (`Follow`).
 - The strip never takes focus; activating the window gives focus back to the plug-in.
+- Scaling (issue #101). Sizes are physical pixels and the window applies no transform of its own.
+  The format hosts pass the window's scale (`EditorWindow::scale`, DPI / 96) to plug-ins that
+  scale on request, then size the window from what the plug-in reports. VST3
+  (`vst3-host` `attach_view`): `IPlugViewContentScaleSupport::setContentScaleFactor` after
+  `setFrame` and before `attached`, then `getSize`. CLAP embedded (`clap-host`
+  `GuiLink::open_embedded`): the window is made right after `create`, then `set_scale`,
+  `get_size`, `set_parent`, `show` (gui.h's order). When the window moves to a monitor with other
+  scaling, `WM_DPICHANGED` keeps the plug-in's pixel size and marks the change
+  (`take_scale_change`); the editor's `idle` sends the new factor (`follow_scale`), and the
+  plug-in answers through `resizeView` / `request_resize` (the host also re-reads the size). A
+  VST3 view without the interface gets no call, and a CLAP GUI that returns false from
+  `set_scale` scales itself: both keep the size they report, so a self-scaling plug-in (Arturia's)
+  is never scaled twice. Floating CLAP windows get no `set_scale` (the plug-in owns the window;
+  the old `set_scale(1.0)` forced 100%). macOS gets no call: views work in points there.
 
 ## Presets
 

@@ -16,7 +16,9 @@
 //!
 //! The strip shows a [`HeaderView`] the editor handle puts in a [`HeaderCell`]; clicks go back
 //! through the same cell ([`HeaderCell::take_clicks`]). Sizes are physical pixels, as plug-ins
-//! report them on Windows.
+//! report them on Windows. The window applies no scaling of its own to the plug-in: its
+//! [`EditorWindow::scale`] (DPI / 96) is passed to plug-ins that scale on request, which then
+//! report their scaled size (issue #101).
 //!
 //! Contract: every [`EditorWindow`] method and [`resize_content`] act only on a window of the
 //! calling thread (they do nothing otherwise); [`HeaderCell`] may be used from any thread.
@@ -491,6 +493,21 @@ mod other {
         #[must_use]
         pub fn is_visible(&self) -> bool {
             false
+        }
+        /// 1.0.
+        #[must_use]
+        pub fn scale(&self) -> f64 {
+            1.0
+        }
+        /// `None`.
+        #[must_use]
+        pub fn take_scale_change(&self) -> Option<f64> {
+            None
+        }
+        /// `(0, 0)`.
+        #[must_use]
+        pub fn content_size(&self) -> (i32, i32) {
+            (0, 0)
         }
         /// Nothing.
         pub fn sync(&self) {}

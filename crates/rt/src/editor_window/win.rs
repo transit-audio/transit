@@ -68,6 +68,8 @@ struct Data {
     content: Cell<HWND>,
     cell: Option<Arc<HeaderCell>>,
     dpi: Cell<u32>,
+    /// The DPI changed since the editor host last took the scale ([`EditorWindow::take_scale_change`]).
+    scale_changed: Cell<bool>,
     font: Cell<HFONT>,
     /// The plug-in content's size in pixels (what the plug-in reported or its child measures).
     size: Cell<(i32, i32)>,
@@ -291,13 +293,16 @@ unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
             if let Some(d) = data(hwnd) {
                 let dpi = (wparam & 0xFFFF) as u32;
                 d.dpi.set(if dpi == 0 { 96 } else { dpi });
+                d.scale_changed.set(true);
                 let old = d.font.replace(font_for(d.dpi.get()));
                 if !old.is_null() {
                     // SAFETY: the font this frame created and no DC still has selected (painting
                     // selects it only within one WM_PAINT).
                     unsafe { DeleteObject(old as HGDIOBJ) };
                 }
-                // The plug-in keeps its pixel size; the strip follows the new DPI.
+                // The plug-in keeps its pixel size; the strip follows the new DPI. The editor host
+                // passes the new scale to a plug-in that scales on request (issue #101), which then
+                // asks for its new size itself.
                 let (w, h) = d.size.get();
                 set_content(hwnd, d, w, h);
                 return 0;
@@ -624,6 +629,7 @@ impl EditorWindow {
             content: Cell::new(std::ptr::null_mut()),
             cell: header,
             dpi: Cell::new(dpi),
+            scale_changed: Cell::new(false),
             font: Cell::new(font_for(dpi)),
             size: Cell::new((1, 1)),
             resized: Cell::new(None),
@@ -704,6 +710,28 @@ impl EditorWindow {
                 SetForegroundWindow(self.hwnd);
             }
         }
+    }
+
+    /// The window's content scale: its DPI over 96 (1.0 once the window is gone or on another
+    /// thread). What a plug-in that scales on request is told (issue #101).
+    #[must_use]
+    pub fn scale(&self) -> f64 {
+        self.live().map_or(1.0, |d| f64::from(d.dpi.get()) / 96.0)
+    }
+
+    /// The new [`EditorWindow::scale`] when the window's DPI changed since the last call (it moved
+    /// to a monitor with other scaling, or the scaling changed); `None` otherwise.
+    #[must_use]
+    pub fn take_scale_change(&self) -> Option<f64> {
+        let d = self.live()?;
+        d.scale_changed.replace(false).then(|| f64::from(d.dpi.get()) / 96.0)
+    }
+
+    /// The plug-in content's size in pixels (the strip excluded); `(0, 0)` once the window is gone
+    /// or on another thread.
+    #[must_use]
+    pub fn content_size(&self) -> (i32, i32) {
+        self.live().map_or((0, 0), |d| d.size.get())
     }
 
     /// Whether the window is shown (closing it only hides it).
@@ -896,6 +924,29 @@ mod tests {
         assert_eq!(unsafe { GetFocus() }, win.raw(), "the frame keeps the focus after one redirection");
         let d = data(win.raw()).unwrap();
         assert!(!d.focusing.get(), "the guard is released");
+        win.close();
+    }
+
+    /// Issue #101: the scale is the window's DPI over 96, and a DPI change is reported once with
+    /// its new scale while the plug-in content keeps its pixel size (no transform of ours).
+    #[test]
+    fn a_dpi_change_reports_the_new_scale_once_and_keeps_the_content_size() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::SendMessageW;
+        let win = EditorWindow::new("dpi", 320.0, 240.0, Some(HeaderCell::new())).unwrap();
+        assert!((win.scale() - f64::from(dpi_of(win.raw())) / 96.0).abs() < 1e-9);
+        assert_eq!(win.take_scale_change(), None, "no change yet");
+        let mut suggested = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        // SAFETY: a live window of this thread; WM_DPICHANGED's wparam carries the DPI twice and
+        // its lparam points to a suggested RECT, which outlives the call.
+        unsafe {
+            SendMessageW(win.raw(), WM_DPICHANGED, (0x90 << 16) | 0x90 /* 144 DPI */, (&raw mut suggested) as LPARAM)
+        };
+        assert!((win.scale() - 1.5).abs() < 1e-9);
+        assert_eq!(win.take_scale_change(), Some(1.5));
+        assert_eq!(win.take_scale_change(), None, "reported once");
+        // (The frame's measured client area is not checked: the message changes the DPI the frame
+        // computes with, not the monitor's, so its non-client metrics no longer match.)
+        assert_eq!(win.content_size(), (320, 240), "the plug-in keeps its pixel size until it resizes");
         win.close();
     }
 

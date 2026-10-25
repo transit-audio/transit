@@ -24,7 +24,10 @@ use vst3::Steinberg::Vst::{
     IHostApplicationTrait, IMessageTrait, IMidiMappingTrait, IParamValueQueueTrait, IParameterChangesTrait, IUnitInfoTrait,
 };
 use vst3::Steinberg::{self as sb};
-use vst3::Steinberg::{FUnknown, IBStreamTrait, IPlugFrameTrait, IPlugViewTrait, IPluginBaseTrait, IPluginFactory2Trait, IPluginFactoryTrait};
+use vst3::Steinberg::{
+    FUnknown, IBStreamTrait, IPlugFrameTrait, IPlugViewContentScaleSupportTrait, IPlugViewTrait, IPluginBaseTrait, IPluginFactory2Trait,
+    IPluginFactoryTrait,
+};
 use vst3::com_scrape_types::{Construct, Header, MakeHeader, Wrapper};
 use vst3::{Class, ComPtr, ComWrapper, Interface};
 
@@ -2278,6 +2281,15 @@ fn split_state(data: &[u8]) -> Option<(&[u8], &[u8])> {
 pub(crate) struct PlugFrame {
     /// The host window (an `NSWindow*` on macOS), not owned; null when there is none.
     window: std::sync::atomic::AtomicPtr<c_void>,
+    /// A `resizeView` is under way: a plug-in that asks again from its `onSize` is refused (the
+    /// SDK's editor host guards the same recursion).
+    resizing: std::sync::atomic::AtomicBool,
+}
+
+impl PlugFrame {
+    fn new(window: *mut c_void) -> PlugFrame {
+        PlugFrame { window: std::sync::atomic::AtomicPtr::new(window), resizing: std::sync::atomic::AtomicBool::new(false) }
+    }
 }
 
 impl Class for PlugFrame {
@@ -2285,9 +2297,15 @@ impl Class for PlugFrame {
 }
 
 impl IPlugFrameTrait for PlugFrame {
+    // Steinberg, `IPlugFrame::resizeView`: "Called to inform the host about the resize of a given
+    // view. Afterwards the host has to call IPlugView::onSize()." It is also how a plug-in answers
+    // `setContentScaleFactor` (issue #101, see `set_content_scale`).
     unsafe fn resizeView(&self, view: *mut sb::IPlugView, new_size: *mut sb::ViewRect) -> sb::tresult {
         // SAFETY: in-pointer from the plugin (or null, handled).
         let Some(r) = (unsafe { new_size.as_mut() }) else { return sb::kInvalidArgument };
+        if self.resizing.swap(true, Ordering::Relaxed) {
+            return sb::kResultFalse;
+        }
         let (w, h) = rect_size(r);
         window::resize(self.window.load(Ordering::Relaxed), w, h);
         // SAFETY: the plugin passes its own live view (or null, handled).
@@ -2295,8 +2313,82 @@ impl IPlugFrameTrait for PlugFrame {
             // SAFETY: valid view; `r` is the plugin's own writable rect.
             unsafe { v.onSize(r) };
         }
+        self.resizing.store(false, Ordering::Relaxed);
         sb::kResultOk
     }
+}
+
+/// Issue #101: passes the host window's content scale to a view that scales on request. Returns
+/// whether the view took it. A view without the interface gets no call and keeps the size it
+/// reports: plug-ins that scale themselves (they read the monitor's DPI) are never scaled twice,
+/// and the host applies no transform of its own either way.
+///
+/// Steinberg, `IPlugViewContentScaleSupport`: "This interface communicates the content scale
+/// factor from the host to the plug-in view on systems where plug-ins cannot get this information
+/// directly like Microsoft Windows. The host calls setContentScaleFactor directly before or after
+/// the plug-in view is attached and when the scale factor changes while the view is attached
+/// (system change or window moved to another screen with different scaling settings). [...] When a
+/// plug-in handles this (by returning kResultTrue), it needs to scale the width and height of its
+/// view by the scale factor and inform the host via a IPlugFrame::resizeView(). The host will then
+/// call IPlugView::onSize()." The host picks no size here, so `checkSizeConstraint` (for sizes the
+/// host proposes) does not apply: the window takes the size the view reports.
+fn set_content_scale(view: &ComPtr<sb::IPlugView>, scale: f64) -> bool {
+    if !scale.is_finite() || scale <= 0.0 {
+        return false;
+    }
+    // `cast` is `queryInterface`: `None` when the view does not implement the interface.
+    let Some(support) = view.cast::<sb::IPlugViewContentScaleSupport>() else { return false };
+    // SAFETY: a valid interface of the live view, held (counted) for the call; main thread (the
+    // callers run on the editor's thread). `ScaleFactor` is an `f32` in the SDK.
+    #[allow(clippy::cast_possible_truncation)]
+    let r = unsafe { support.setContentScaleFactor(scale as f32) };
+    log::debug!("vst3: content scale {scale} -> {r}");
+    r == sb::kResultTrue
+}
+
+/// The size `view` reports (`None` when it reports none).
+fn view_size(view: &ComPtr<sb::IPlugView>) -> Option<(f64, f64)> {
+    let mut r = sb::ViewRect { left: 0, top: 0, right: 0, bottom: 0 };
+    // SAFETY: valid view; `r` is writable.
+    ok(unsafe { view.getSize(&mut r) }).then(|| rect_size(&r))
+}
+
+/// Makes the host window for `view` (`prepare` sees it first; tests change its DPI there), sets
+/// our frame, passes the window's content scale (issue #101) and attaches the view. On success the
+/// caller keeps the frame and window and detaches the view before dropping them.
+fn attach_view(
+    view: &ComPtr<sb::IPlugView>,
+    platform: sb::FIDString,
+    title: &str,
+    header: Option<Arc<transit_rt::editor_window::HeaderCell>>,
+    prepare: impl FnOnce(&window::HostWindow),
+) -> Result<(ComWrapper<PlugFrame>, window::HostWindow), String> {
+    // On failure the default size stays.
+    let (w, h) = view_size(view).unwrap_or((400.0, 300.0));
+    let win = window::HostWindow::new(title, w, h, header)?;
+    prepare(&win);
+    let frame = ComWrapper::new(PlugFrame::new(win.raw()));
+    if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
+        // SAFETY: valid view; the frame outlives the view's attachment (the caller keeps it, in
+        // `g.frame`, and detaches it in `teardown`).
+        unsafe { view.setFrame(f.as_ptr()) };
+    }
+    // Issue #101: the window's scale before `attached`, then the size the view reports at
+    // that scale (a view that scaled may also have asked through `resizeView` already).
+    if let Some(scale) = window::content_scale(&win)
+        && set_content_scale(view, scale)
+        && let Some((w, h)) = view_size(view)
+    {
+        window::resize(win.raw(), w, h);
+    }
+    // SAFETY: valid view; the parent is the live content view of `win`, of the type named.
+    if !ok(unsafe { view.attached(win.parent(), platform) }) {
+        // SAFETY: valid view; detach our frame again.
+        unsafe { view.setFrame(std::ptr::null_mut()) };
+        win.close();
+        return Err("the editor could not attach to its window".into());
+    }
+    Ok((frame, win))
 }
 
 /// Width and height of a view rect, clamped to a sane window size.
@@ -2387,6 +2479,16 @@ impl EditorLink {
 
     /// Opens (or raises) the editor in a host window. Main thread only.
     pub fn open(&self, title: &str) -> Result<(), String> {
+        self.open_with(title, |_| {})?;
+        if let Some(w) = &self.lock().window {
+            w.raise();
+        }
+        Ok(())
+    }
+
+    /// [`EditorLink::open`] without showing a new window; `prepare` sees the window before the
+    /// view is scaled and attached (tests change its DPI there).
+    fn open_with(&self, title: &str, prepare: impl FnOnce(&window::HostWindow)) -> Result<(), String> {
         if !self.on_main_thread() {
             return Err("plugin editors must be opened on the main thread".into());
         }
@@ -2405,27 +2507,9 @@ impl EditorLink {
         if unsafe { view.isPlatformTypeSupported(platform) } != sb::kResultTrue {
             return Err("the editor does not support this platform's windows".into());
         }
-        let mut r = sb::ViewRect { left: 0, top: 0, right: 400, bottom: 300 };
-        // SAFETY: valid view; `r` is writable. On failure the default size stays.
-        unsafe { view.getSize(&mut r) };
-        let (w, h) = rect_size(&r);
         let shown = self.header.view().title;
         let title = if shown.is_empty() { title } else { shown.as_str() };
-        let win = window::HostWindow::new(title, w, h, Some(Arc::clone(&self.header)))?;
-        let frame = ComWrapper::new(PlugFrame { window: std::sync::atomic::AtomicPtr::new(win.raw()) });
-        if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
-            // SAFETY: valid view; the frame outlives the view's attachment (kept in `g.frame`
-            // and detached in `teardown`).
-            unsafe { view.setFrame(f.as_ptr()) };
-        }
-        // SAFETY: valid view; the parent is the live content view of `win`, of the type named.
-        if !ok(unsafe { view.attached(win.parent(), platform) }) {
-            // SAFETY: valid view; detach our frame again.
-            unsafe { view.setFrame(std::ptr::null_mut()) };
-            win.close();
-            return Err("the editor could not attach to its window".into());
-        }
-        win.raise();
+        let (frame, win) = attach_view(&view, platform, title, Some(Arc::clone(&self.header)), prepare)?;
         g.view = Some(view);
         g.frame = Some(frame);
         g.window = Some(win);
@@ -2500,9 +2584,26 @@ impl EditorLink {
         let mut g = self.lock();
         match &g.window {
             Some(w) if !w.is_visible() => EditorLink::teardown(&mut g),
-            // The strip's changes and the size follow (issue #68).
-            Some(w) => w.sync(),
+            Some(w) => {
+                EditorLink::follow_scale(&g);
+                // The strip's changes and the size follow (issue #68).
+                w.sync();
+            }
             None => {}
+        }
+    }
+
+    /// Issue #101: the window moved to a monitor with other scaling (or the scaling changed):
+    /// the view gets the new factor, and the window the size it then reports (normally the view
+    /// already asked for it through `resizeView`).
+    fn follow_scale(g: &EditorInner) {
+        let (Some(w), Some(view)) = (&g.window, &g.view) else { return };
+        let Some(scale) = window::scale_change(w) else { return };
+        if set_content_scale(view, scale)
+            && let Some((cw, ch)) = view_size(view)
+            && window::content_size(w) != (cw, ch)
+        {
+            window::resize(w.raw(), cw, ch);
         }
     }
 
@@ -2674,6 +2775,20 @@ mod window {
             win.setContentSize(NSSize::new(w, h));
         }
     }
+
+    /// No call on macOS: views work in points and read the backing scale themselves (the SDK
+    /// sends `setContentScaleFactor` only where they cannot, issue #101).
+    pub fn content_scale(_win: &HostWindow) -> Option<f64> {
+        None
+    }
+
+    pub fn scale_change(_win: &HostWindow) -> Option<f64> {
+        None
+    }
+
+    pub fn content_size(_win: &HostWindow) -> (f64, f64) {
+        (0.0, 0.0)
+    }
 }
 
 /// The Windows host window: `transit_rt`'s editor window (issue #68), a top-level window on the
@@ -2687,6 +2802,22 @@ mod window {
     pub use transit_rt::editor_window::{EditorWindow as HostWindow, resize_content as resize};
 
     pub const PLATFORM_TYPE: Option<*const c_char> = Some(vst3::Steinberg::kPlatformTypeHWND);
+
+    /// The window's DPI scale: a VST3 view cannot read it itself on Windows (issue #101).
+    pub fn content_scale(win: &HostWindow) -> Option<f64> {
+        Some(win.scale())
+    }
+
+    /// The new scale after a DPI change, once.
+    pub fn scale_change(win: &HostWindow) -> Option<f64> {
+        win.take_scale_change()
+    }
+
+    /// The plug-in content's size.
+    pub fn content_size(win: &HostWindow) -> (f64, f64) {
+        let (w, h) = win.content_size();
+        (f64::from(w), f64::from(h))
+    }
 
     /// Windows permits GUI creation on any thread; the editor link checks its creating thread.
     pub fn on_main_thread() -> bool {
@@ -2730,6 +2861,18 @@ mod window {
     }
 
     pub fn resize(_window: *mut c_void, _w: f64, _h: f64) {}
+
+    pub fn content_scale(_win: &HostWindow) -> Option<f64> {
+        None
+    }
+
+    pub fn scale_change(_win: &HostWindow) -> Option<f64> {
+        None
+    }
+
+    pub fn content_size(_win: &HostWindow) -> (f64, f64) {
+        (0.0, 0.0)
+    }
 }
 
 #[cfg(test)]
@@ -3072,6 +3215,174 @@ mod tests {
         assert_eq!(unsafe { h.restartComponent(sv::RestartFlags_::kParamTitlesChanged as i32) }, sb::kResultOk);
         assert!(h.titles_changed.load(Ordering::Relaxed), "titles re-sample the curves");
         assert_eq!(hex(&[0xAB; 16]), "AB".repeat(16));
+    }
+
+    // ---- issue #101: content scale ------------------------------------------------------------
+
+    /// Changes the window's DPI as Windows does when it moves to a monitor with other scaling.
+    #[cfg(windows)]
+    fn set_dpi(win: &window::HostWindow, dpi: usize) {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_DPICHANGED};
+        let mut suggested = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        // SAFETY: a live window of this thread; WM_DPICHANGED's wparam carries the DPI twice and
+        // its lparam points to a suggested RECT, which outlives the call.
+        unsafe { SendMessageW(win.raw().cast(), WM_DPICHANGED, (dpi << 16) | dpi, (&raw mut suggested) as isize) };
+    }
+
+    /// The fixture's view scales on request (as Battery 4 does): opened in a window at 144 DPI it
+    /// gets 1.5 before it is attached and the window takes the size it then reports; moved to 192
+    /// DPI it gets 2.0 again and asks for its new size through `resizeView`.
+    #[cfg(windows)]
+    #[test]
+    fn the_view_gets_the_windows_scale_and_the_window_follows_its_size() {
+        let inst = gain_instance();
+        let link = inst.editor().unwrap();
+        link.open_with("scale", |w| set_dpi(w, 144)).unwrap();
+        {
+            let g = link.lock();
+            let win = g.window.as_ref().unwrap();
+            assert_eq!(win.content_size(), (480, 360), "320×240 at 1.5");
+            set_dpi(win, 192);
+            EditorLink::follow_scale(&g);
+            assert_eq!(win.content_size(), (640, 480), "the DPI change sends 2.0 and the view resizes");
+            EditorLink::follow_scale(&g);
+            assert_eq!(win.content_size(), (640, 480), "no change, no call");
+        }
+        link.close();
+        assert!(!link.is_open());
+    }
+
+    /// A view that records what the host calls; with `scales` it implements
+    /// `IPlugViewContentScaleSupport` and reports 200×100 times the factor, otherwise it reports
+    /// 200×100 always (a plug-in that scales itself, as Arturia's do).
+    #[cfg(windows)]
+    struct FakeView<const SCALES: bool> {
+        calls: Arc<Mutex<Vec<String>>>,
+        scale: Mutex<f32>,
+    }
+
+    #[cfg(windows)]
+    impl<const S: bool> FakeView<S> {
+        fn log(&self, s: String) {
+            self.calls.lock().unwrap().push(s);
+        }
+    }
+
+    #[cfg(windows)]
+    impl<const S: bool> IPlugViewTrait for FakeView<S> {
+        unsafe fn isPlatformTypeSupported(&self, _t: sb::FIDString) -> sb::tresult {
+            sb::kResultTrue
+        }
+        unsafe fn attached(&self, _p: *mut c_void, _t: sb::FIDString) -> sb::tresult {
+            self.log("attached".into());
+            sb::kResultOk
+        }
+        unsafe fn removed(&self) -> sb::tresult {
+            self.log("removed".into());
+            sb::kResultOk
+        }
+        unsafe fn onWheel(&self, _d: f32) -> sb::tresult {
+            sb::kResultFalse
+        }
+        unsafe fn onKeyDown(&self, _k: sb::char16, _c: i16, _m: i16) -> sb::tresult {
+            sb::kResultFalse
+        }
+        unsafe fn onKeyUp(&self, _k: sb::char16, _c: i16, _m: i16) -> sb::tresult {
+            sb::kResultFalse
+        }
+        unsafe fn getSize(&self, size: *mut sb::ViewRect) -> sb::tresult {
+            let s = *self.scale.lock().unwrap();
+            // SAFETY: the host's writable rect.
+            unsafe { *size = sb::ViewRect { left: 0, top: 0, right: (200.0 * s) as i32, bottom: (100.0 * s) as i32 } };
+            sb::kResultOk
+        }
+        unsafe fn onSize(&self, _s: *mut sb::ViewRect) -> sb::tresult {
+            sb::kResultOk
+        }
+        unsafe fn onFocus(&self, _s: sb::TBool) -> sb::tresult {
+            sb::kResultOk
+        }
+        unsafe fn setFrame(&self, _f: *mut sb::IPlugFrame) -> sb::tresult {
+            sb::kResultOk
+        }
+        unsafe fn canResize(&self) -> sb::tresult {
+            sb::kResultFalse
+        }
+        unsafe fn checkSizeConstraint(&self, _r: *mut sb::ViewRect) -> sb::tresult {
+            sb::kResultOk
+        }
+    }
+
+    #[cfg(windows)]
+    impl<const S: bool> IPlugViewContentScaleSupportTrait for FakeView<S> {
+        unsafe fn setContentScaleFactor(&self, factor: f32) -> sb::tresult {
+            self.log(format!("scale {factor}"));
+            *self.scale.lock().unwrap() = factor;
+            sb::kResultTrue
+        }
+    }
+
+    #[cfg(windows)]
+    impl Class for FakeView<true> {
+        type Interfaces = (sb::IPlugView, sb::IPlugViewContentScaleSupport);
+    }
+    #[cfg(windows)]
+    impl Class for FakeView<false> {
+        type Interfaces = (sb::IPlugView,);
+    }
+
+    /// Opens `view` in a window at `dpi`, changes it to `then`, and returns the calls the view saw
+    /// and the content sizes after the open and after the change.
+    #[cfg(windows)]
+    fn open_fake(view: &ComPtr<sb::IPlugView>, dpi: usize, then: usize) -> ((i32, i32), (i32, i32)) {
+        let (frame, win) = attach_view(view, window::PLATFORM_TYPE.unwrap(), "fake", Some(transit_rt::editor_window::HeaderCell::new()), |w| {
+            set_dpi(w, dpi);
+        })
+        .unwrap();
+        let opened = win.content_size();
+        set_dpi(&win, then);
+        let mut g = EditorInner { view: Some(view.clone()), frame: Some(frame), window: Some(win), ..EditorInner::default() };
+        EditorLink::follow_scale(&g);
+        let moved = g.window.as_ref().unwrap().content_size();
+        EditorLink::teardown(&mut g);
+        (opened, moved)
+    }
+
+    #[cfg(windows)]
+    fn fake_view(scales: bool) -> (ComPtr<sb::IPlugView>, Arc<Mutex<Vec<String>>>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let (c, scale) = (Arc::clone(&calls), Mutex::new(1.0));
+        let view = if scales {
+            ComWrapper::new(FakeView::<true> { calls: c, scale }).to_com_ptr::<sb::IPlugView>()
+        } else {
+            ComWrapper::new(FakeView::<false> { calls: c, scale }).to_com_ptr::<sb::IPlugView>()
+        };
+        (view.unwrap(), calls)
+    }
+
+    /// The factor is the window's (DPI / 96), it comes before `attached`, and a DPI change sends
+    /// the new one; the window takes the size the view reports at each.
+    #[cfg(windows)]
+    #[test]
+    fn the_scale_comes_before_attached_and_again_on_a_dpi_change() {
+        let (view, calls) = fake_view(true);
+        let (opened, moved) = open_fake(&view, 120, 144);
+        assert_eq!(*calls.lock().unwrap(), ["scale 1.25", "attached", "scale 1.5", "removed"]);
+        assert_eq!(opened, (250, 125));
+        assert_eq!(moved, (300, 150));
+    }
+
+    /// A view without `IPlugViewContentScaleSupport` (a plug-in that scales itself) gets no call
+    /// and no transform of ours: the window stays at the size it reports, at any DPI.
+    #[cfg(windows)]
+    #[test]
+    fn a_view_that_scales_itself_gets_no_call_and_no_transform() {
+        let (view, calls) = fake_view(false);
+        let (opened, moved) = open_fake(&view, 144, 192);
+        assert_eq!(*calls.lock().unwrap(), ["attached", "removed"]);
+        assert_eq!(opened, (200, 100));
+        assert_eq!(moved, (200, 100));
     }
 }
 

@@ -6,7 +6,8 @@
 //!   9 hidden, 11 bypass. Starts at gain 0.5 (its state) although the declared default is 1.0.
 //!   Reports 3 samples of latency. State: the component stores the gain (one LE f64), the
 //!   controller the Freq value (one LE f64). Its controller has an editor view (`IPlugView`,
-//!   320×240, no real drawing) supporting NSView/HWND/X11.
+//!   320×240, no real drawing) supporting NSView/HWND/X11, which scales on request
+//!   (`IPlugViewContentScaleSupport`: 320×240 times the factor, issue #101).
 //! - "Fixture Synth" (`Instrument|Synth`): a single-component instrument (the component is also
 //!   its edit controller). No audio input, one stereo output, one event input; every output
 //!   sample is the velocity of the held note (sample-accurate), 0 when none. Poly pressure, and
@@ -534,11 +535,50 @@ struct GainController {
 
 struct View {
     attached: std::sync::atomic::AtomicBool,
+    /// The content scale the host set (`f32` bits; issue #101), 1.0 until then.
+    scale: AtomicU32,
+    frame: AtomicPtr<IPlugFrame>,
     _live: Live,
 }
 
+impl View {
+    fn new() -> View {
+        View {
+            attached: AtomicBool::new(false),
+            scale: AtomicU32::new(1.0f32.to_bits()),
+            frame: AtomicPtr::new(std::ptr::null_mut()),
+            _live: Live::new(&OBJECTS),
+        }
+    }
+
+    /// 320×240 at the content scale.
+    fn rect(&self) -> ViewRect {
+        let s = f32::from_bits(self.scale.load(Ordering::Relaxed));
+        ViewRect { left: 0, top: 0, right: (320.0 * s).round() as i32, bottom: (240.0 * s).round() as i32 }
+    }
+}
+
 impl Class for View {
-    type Interfaces = (IPlugView,);
+    type Interfaces = (IPlugView, IPlugViewContentScaleSupport);
+}
+
+/// Issue #101: the view scales on request, like Battery 4: it reports its size at the factor and,
+/// once attached, asks the host for it through `resizeView` (the SDK's contract).
+impl IPlugViewContentScaleSupportTrait for View {
+    unsafe fn setContentScaleFactor(&self, factor: f32) -> tresult {
+        if !(factor > 0.0) {
+            return kInvalidArgument;
+        }
+        self.scale.store(factor.to_bits(), Ordering::Relaxed);
+        let frame = self.frame.load(Ordering::Relaxed);
+        if self.attached.load(Ordering::Relaxed)
+            && let Some(f) = unsafe { ComRef::from_raw(frame) }
+        {
+            let mut r = self.rect();
+            assert_eq!(unsafe { f.resizeView(std::ptr::null_mut(), &mut r) }, kResultOk, "resizeView");
+        }
+        kResultTrue
+    }
 }
 
 impl IPlugViewTrait for View {
@@ -568,7 +608,7 @@ impl IPlugViewTrait for View {
     }
     unsafe fn getSize(&self, size: *mut ViewRect) -> tresult {
         let r = unsafe { &mut *size };
-        *r = ViewRect { left: 0, top: 0, right: 320, bottom: 240 };
+        *r = self.rect();
         kResultOk
     }
     unsafe fn onSize(&self, _s: *mut ViewRect) -> tresult {
@@ -577,7 +617,9 @@ impl IPlugViewTrait for View {
     unsafe fn onFocus(&self, _s: TBool) -> tresult {
         kResultOk
     }
-    unsafe fn setFrame(&self, _f: *mut IPlugFrame) -> tresult {
+    unsafe fn setFrame(&self, f: *mut IPlugFrame) -> tresult {
+        // The host keeps its frame alive while it is set (it clears it before releasing it).
+        self.frame.store(f, Ordering::Relaxed);
         kResultOk
     }
     unsafe fn canResize(&self) -> tresult {
@@ -829,7 +871,7 @@ impl IEditControllerTrait for GainController {
         if name.is_null() || unsafe { std::ffi::CStr::from_ptr(name) }.to_bytes() != b"editor" {
             return std::ptr::null_mut();
         }
-        match ComWrapper::new(View { attached: std::sync::atomic::AtomicBool::new(false), _live: Live::new(&OBJECTS) }).to_com_ptr::<IPlugView>() {
+        match ComWrapper::new(View::new()).to_com_ptr::<IPlugView>() {
             Some(p) => p.into_raw(),
             None => std::ptr::null_mut(),
         }

@@ -878,8 +878,19 @@ impl GuiLink {
         (g.alive).then(|| unsafe { g.gui.as_ref() }.copied()).flatten()
     }
 
-    /// Opens (creates and shows) the plugin's floating editor window.
+    /// Opens (creates and shows) the plugin's editor: embedded in a host window of ours where
+    /// there is one, floating otherwise.
     pub fn open(&self, title: &str) -> Result<(), String> {
+        self.open_with(title, |_| {})?;
+        if let Some(w) = &self.lock().window {
+            w.raise();
+        }
+        Ok(())
+    }
+
+    /// [`GuiLink::open`] without raising a new host window; `prepare` sees an embedded editor's
+    /// window before the plug-in is scaled and parented (tests change its DPI there).
+    fn open_with(&self, title: &str, prepare: impl FnOnce(&hostwin::HostWindow)) -> Result<(), String> {
         if !self.on_main_thread() {
             return Err("plugin editors must be opened on the main thread".into());
         }
@@ -905,7 +916,7 @@ impl GuiLink {
         let floating = unsafe { supported(g.plugin, api.as_ptr(), true) };
         // SAFETY: as above.
         if hostwin::SUPPORTED && unsafe { supported(g.plugin, api.as_ptr(), false) } {
-            match self.open_embedded(&mut g, vt, api, title) {
+            match self.open_embedded(&mut g, vt, api, title, prepare) {
                 Ok(()) => return Ok(()),
                 Err(e) if floating => log::warn!("clap: the embedded editor failed ({e}); opening the floating one"),
                 Err(e) => return Err(e),
@@ -921,12 +932,8 @@ impl GuiLink {
             return Err("the plugin could not create its editor".into());
         }
         g.created = true;
-        if !cfg!(target_os = "macos")
-            && let Some(f) = vt.set_scale
-        {
-            // SAFETY: live plugin with a created GUI. (Cocoa uses logical pixels: not called.)
-            unsafe { f(g.plugin, 1.0) };
-        }
+        // No `set_scale` for a floating window (issue #101): the plug-in owns it and reads its
+        // monitor's scale; the call "overrides any OS info" (clap gui.h), and 1.0 drew it at 100%.
         if let (Some(f), Ok(t)) = (vt.suggest_title, CString::new(title)) {
             // SAFETY: live plugin with a created floating GUI; `t` outlives the call.
             unsafe { f(g.plugin, t.as_ptr()) };
@@ -944,8 +951,24 @@ impl GuiLink {
         Ok(())
     }
 
-    /// Embeds the editor in a host window of ours (plugins that offer no floating editor).
-    fn open_embedded(&self, g: &mut GuiInner, vt: clap_plugin_gui, api: &CStr, title: &str) -> Result<(), String> {
+    /// Embeds the editor in a host window of ours (shown by the caller).
+    ///
+    /// The order is clap gui.h's for an embedded window: `create`, `set_scale`, `get_size`,
+    /// `set_parent`, `show`. The host window is made (hidden) right after `create` so its DPI is
+    /// known for `set_scale` (issue #101). gui.h on `set_scale`: "Set the absolute GUI scaling
+    /// factor, and override any OS info. [...] If the plugin prefers to work out the scaling
+    /// factor itself by querying the OS directly, then ignore the call. [...] Returns false if the
+    /// call was ignored, or the scaling could not be applied." Either way the window takes the
+    /// size `get_size` reports (physical pixels on Win32) and adds no transform of its own, so a
+    /// plug-in that scales itself is not scaled twice.
+    fn open_embedded(
+        &self,
+        g: &mut GuiInner,
+        vt: clap_plugin_gui,
+        api: &CStr,
+        title: &str,
+        prepare: impl FnOnce(&hostwin::HostWindow),
+    ) -> Result<(), String> {
         let (Some(create), Some(set_parent)) = (vt.create, vt.set_parent) else { return Err("incomplete clap.gui extension".into()) };
         self.host.gui_closed.store(false, Ordering::Relaxed);
         self.host.gui_destroyed.store(false, Ordering::Relaxed);
@@ -955,27 +978,21 @@ impl GuiLink {
             return Err("the plugin could not create its editor".into());
         }
         g.created = true;
-        if let Some(f) = vt.set_scale {
-            // SAFETY: live plugin with a created GUI.
-            unsafe { f(g.plugin, 1.0) };
-        }
-        let (mut w, mut h) = (640u32, 480u32);
-        if let Some(f) = vt.get_size {
-            let (mut a, mut b) = (0u32, 0u32);
-            // SAFETY: live plugin with a created GUI; both out-pointers are valid locals.
-            if unsafe { f(g.plugin, &mut a, &mut b) } && a > 0 && b > 0 {
-                (w, h) = (a.min(16_384), b.min(16_384));
-            }
-        }
         let shown = self.header.view().title;
         let title = if shown.is_empty() { title } else { shown.as_str() };
-        let win = match hostwin::HostWindow::new(title, f64::from(w), f64::from(h), Some(Arc::clone(&self.header))) {
+        let win = match hostwin::HostWindow::new(title, 640.0, 480.0, Some(Arc::clone(&self.header))) {
             Ok(win) => win,
             Err(e) => {
                 GuiLink::destroy(g);
                 return Err(e);
             }
         };
+        prepare(&win);
+        if let Some(scale) = hostwin::content_scale(&win) {
+            GuiLink::set_scale(g, vt, scale);
+        }
+        let (w, h) = GuiLink::size(g, vt).unwrap_or((640, 480));
+        hostwin::resize(win.raw(), f64::from(w), f64::from(h));
         let parent = clap_window { api: api.as_ptr(), specific: clap_window_handle { win32: win.parent() } };
         // SAFETY: live plugin with a created embedded GUI; `parent` names our live window and
         // outlives the call.
@@ -994,11 +1011,39 @@ impl GuiLink {
             GuiLink::destroy(g);
             return Err("the plugin could not show its editor".into());
         }
-        if let Some(win) = &g.window {
-            win.raise();
-        }
         g.visible = true;
         Ok(())
+    }
+
+    /// `clap_plugin_gui.set_scale` (an embedded GUI on Win32): whether the plug-in applied it.
+    fn set_scale(g: &GuiInner, vt: clap_plugin_gui, scale: f64) -> bool {
+        let Some(f) = vt.set_scale.filter(|_| scale.is_finite() && scale > 0.0) else { return false };
+        // SAFETY: live plugin (`alive`, under the lock) with a created GUI; main thread.
+        let applied = unsafe { f(g.plugin, scale) };
+        log::debug!("clap: set_scale {scale} -> {applied}");
+        applied
+    }
+
+    /// `clap_plugin_gui.get_size`, clamped to a sane window size (`None` when it reports none).
+    fn size(g: &GuiInner, vt: clap_plugin_gui) -> Option<(u32, u32)> {
+        let f = vt.get_size?;
+        let (mut a, mut b) = (0u32, 0u32);
+        // SAFETY: live plugin with a created GUI; both out-pointers are valid locals.
+        (unsafe { f(g.plugin, &mut a, &mut b) } && a > 0 && b > 0).then(|| (a.min(16_384), b.min(16_384)))
+    }
+
+    /// Issue #101: the embedded editor's window moved to a monitor with other scaling (or the
+    /// scaling changed). A plug-in that applies the new scale gets the size it then reports; one
+    /// that ignores it scales itself and asks through `request_resize` if it needs to.
+    fn follow_scale(g: &GuiInner) {
+        let (Some(win), Some(vt)) = (&g.window, GuiLink::vt(g)) else { return };
+        let Some(scale) = hostwin::scale_change(win) else { return };
+        if GuiLink::set_scale(g, vt, scale)
+            && let Some((w, h)) = GuiLink::size(g, vt)
+            && hostwin::content_size(win) != (w, h)
+        {
+            hostwin::resize(win.raw(), f64::from(w), f64::from(h));
+        }
     }
 
     fn destroy(g: &mut GuiInner) {
@@ -1088,6 +1133,7 @@ impl GuiLink {
                 }
             }
             if let Some(w) = g.window.as_ref().filter(|w| w.is_visible()) {
+                GuiLink::follow_scale(&g);
                 // The strip's changes and the size follow (issue #68).
                 w.sync();
             }
@@ -1600,6 +1646,22 @@ mod hostwin {
     pub use transit_rt::editor_window::{EditorWindow as HostWindow, resize_content as resize};
 
     pub const SUPPORTED: bool = true;
+
+    /// The window's DPI scale, for `set_scale` (issue #101).
+    pub fn content_scale(win: &HostWindow) -> Option<f64> {
+        Some(win.scale())
+    }
+
+    /// The new scale after a DPI change, once.
+    pub fn scale_change(win: &HostWindow) -> Option<f64> {
+        win.take_scale_change()
+    }
+
+    /// The plug-in content's size.
+    pub fn content_size(win: &HostWindow) -> (u32, u32) {
+        let (w, h) = win.content_size();
+        (u32::try_from(w).unwrap_or(0), u32::try_from(h).unwrap_or(0))
+    }
 }
 /// Other platforms: embedded editors are not hosted (floating ones still are).
 #[cfg(not(windows))]
@@ -1634,6 +1696,18 @@ mod hostwin {
     }
 
     pub fn resize(_window: *mut c_void, _w: f64, _h: f64) {}
+
+    pub fn content_scale(_win: &HostWindow) -> Option<f64> {
+        None
+    }
+
+    pub fn scale_change(_win: &HostWindow) -> Option<f64> {
+        None
+    }
+
+    pub fn content_size(_win: &HostWindow) -> (u32, u32) {
+        (0, 0)
+    }
 }
 
 #[cfg(test)]
@@ -1750,6 +1824,69 @@ mod tests {
         b.set_constant(false);
         b.refresh();
         assert!(b.bufs.iter().all(|x| x.constant_mask == 0));
+    }
+
+    // ---- issue #101: content scale ------------------------------------------------------------
+
+    /// Changes the window's DPI as Windows does when it moves to a monitor with other scaling.
+    #[cfg(windows)]
+    fn set_dpi(win: &hostwin::HostWindow, dpi: usize) {
+        use windows_sys::Win32::Foundation::RECT;
+        use windows_sys::Win32::UI::WindowsAndMessaging::{SendMessageW, WM_DPICHANGED};
+        let mut suggested = RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        // SAFETY: a live window of this thread; WM_DPICHANGED's wparam carries the DPI twice and
+        // its lparam points to a suggested RECT, which outlives the call.
+        unsafe { SendMessageW(win.raw().cast(), WM_DPICHANGED, (dpi << 16) | dpi, (&raw mut suggested) as isize) };
+    }
+
+    /// The fixture gain with an embedded GUI, after `commands` (fixture state commands).
+    #[cfg(windows)]
+    fn embedded_gain(commands: &[&[u8]]) -> Instance {
+        crate::set_scan_extra_dirs_only(true);
+        let descriptors = crate::scan_paths(&[fixture::unregistered_fixture_dir().to_path_buf()]);
+        let d = descriptors.iter().find(|d| !d.is_instrument).unwrap();
+        let inst = Bundle::load(&d.path).unwrap().instantiate(&d.plugin_id).unwrap();
+        for c in [b"CMD:gui-embedded".as_slice()].iter().chain(commands) {
+            assert!(inst.load_state(c));
+        }
+        inst
+    }
+
+    /// Opens the embedded editor in a window at `dpi`, then moves it to `then`: the content sizes
+    /// after the open and after the move.
+    #[cfg(windows)]
+    fn open_scaled(inst: &Instance, dpi: usize, then: usize) -> ((u32, u32), (u32, u32)) {
+        let link = inst.gui().unwrap();
+        link.open_with("scale", |w| set_dpi(w, dpi)).unwrap();
+        let sizes = {
+            let g = link.lock();
+            let win = g.window.as_ref().expect("embedded");
+            let opened = hostwin::content_size(win);
+            set_dpi(win, then);
+            GuiLink::follow_scale(&g);
+            (opened, hostwin::content_size(win))
+        };
+        link.close();
+        sizes
+    }
+
+    /// `set_scale` gets the window's factor before `set_parent` (the fixture asserts a created
+    /// embedded GUI), the window takes the size `get_size` then reports, and a DPI change sends
+    /// the new factor and follows the new size.
+    #[cfg(windows)]
+    #[test]
+    fn an_embedded_gui_gets_the_windows_scale_and_the_window_follows_its_size() {
+        let inst = embedded_gain(&[]);
+        assert_eq!(open_scaled(&inst, 144, 192), ((600, 450), (800, 600)));
+    }
+
+    /// A GUI that ignores `set_scale` (it scales itself) keeps the size it reports: no transform
+    /// of ours at any DPI.
+    #[cfg(windows)]
+    #[test]
+    fn a_gui_that_scales_itself_gets_no_transform() {
+        let inst = embedded_gain(&[b"CMD:gui-self-scaling"]);
+        assert_eq!(open_scaled(&inst, 144, 192), ((400, 300), (400, 300)));
     }
 }
 
