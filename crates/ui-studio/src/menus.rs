@@ -704,9 +704,17 @@ pub fn shortcuts_window(app: &mut StudioApp, ctx: &egui::Context) {
                         .spacing([2.0 * crate::theme::SPACE, crate::theme::SPACE / 2.0])
                         .show(ui, |ui| {
                             for s in rows {
-                                let keys = crate::shortcuts::text(s);
+                                let keys = if s.action == A::StepTieRest && app.ui.keys.step_tie_rest_space {
+                                    "Space".into()
+                                } else {
+                                    crate::shortcuts::text(s)
+                                };
                                 ui.label(egui::RichText::new(s.label).color(TOKENS.text));
-                                ui.label(egui::RichText::new(&keys).font(crate::theme::mono(ui.ctx(), 12.0)).color(TOKENS.accent));
+                                if s.action == A::StepTieRest {
+                                    crate::shortcuts::step_tie_rest_selector(ui, &mut app.ui.keys.step_tie_rest_space);
+                                } else {
+                                    ui.label(egui::RichText::new(&keys).font(crate::theme::mono(ui.ctx(), 12.0)).color(TOKENS.accent));
+                                }
                                 ui.label(egui::RichText::new(s.note).color(TOKENS.text_dim).size(11.0));
                                 ui.end_row();
                                 layout.rows.push(format!("{} · {} · {keys}", scope.label(), s.label));

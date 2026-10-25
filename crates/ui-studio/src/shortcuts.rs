@@ -127,6 +127,7 @@ pub enum Action {
     NotesGridSnap,
     StepToggle,
     StepRest,
+    StepTieRest,
     StepBack,
     StepCursorLeft,
     StepCursorRight,
@@ -331,6 +332,14 @@ pub const TABLE: &[Shortcut] = &[
         S::Step,
         "Ours; Space stays Play/Stop, and Tab moves egui's focus (it then blocks every shortcut), so it cannot be the rest key.",
     ),
+    row(
+        A::StepTieRest,
+        "Step Tie/Rest",
+        NONE,
+        Key::Enter,
+        S::Step,
+        "Tie held notes; otherwise rest. Optional Space binding applies only to the piano roll in step mode.",
+    ),
     row(A::StepBack, "Step Back (Delete the Last Step)", NONE, Key::Backspace, S::Step, "Ours; wins over Delete Notes while Step is on."),
     row(
         A::StepCursorLeft,
@@ -370,6 +379,41 @@ pub fn rows(action: Action) -> impl Iterator<Item = &'static Shortcut> {
 /// Consume a press of any of `action`'s keys. The held modifiers must be exactly the row's.
 pub fn pressed(ctx: &egui::Context, action: Action) -> bool {
     ctx.input_mut(|i| rows(action).fold(false, |hit, s| hit | (i.modifiers.matches_exact(s.mods) && i.consume_key(s.mods, s.key))))
+}
+
+/// The only opt-in override: click the key cell to switch between Enter and Space.
+/// Its handler is scoped to the focused piano roll while step entry is on.
+pub fn step_tie_rest_selector(ui: &mut egui::Ui, space: &mut bool) -> egui::Response {
+    let response = ui
+        .button(if *space { "Space" } else { "Enter" })
+        .on_hover_text("Click to choose Enter or Space for Step Tie/Rest. Space stays Play/Stop outside the focused step piano roll.");
+    if response.clicked() {
+        *space = !*space;
+    }
+    response
+}
+
+/// Consume both edges, excluding OS repeat: the step controller owns hold timing.
+/// The optional Space override is only called by the focused step piano roll.
+pub fn step_control_edges(ctx: &egui::Context, action: Action, space: bool) -> Vec<bool> {
+    let key = if space { Key::Space } else { rows(action).next().map_or(Key::Enter, |s| s.key) };
+    ctx.input_mut(|i| {
+        let mut edges = Vec::new();
+        i.events.retain(|event| {
+            if let egui::Event::Key { key: event_key, pressed, repeat, modifiers, .. } = event
+                && *event_key == key
+                && (!pressed || modifiers.matches_exact(NONE))
+            {
+                if !repeat {
+                    edges.push(*pressed);
+                }
+                false
+            } else {
+                true
+            }
+        });
+        edges
+    })
 }
 
 /// Was one of `action`'s keys pressed this frame (not consumed; modifiers ignored, for fields

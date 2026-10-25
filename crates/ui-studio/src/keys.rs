@@ -145,6 +145,8 @@ pub struct KeysPrefs {
     pub step_velocity: u8,
     /// Hold threshold and repeat floor for step entry.
     pub step_hold: soundcraft_engine::step_input::HoldPrefs,
+    /// Opt-in Space binding, scoped to the focused piano roll in step mode.
+    pub step_tie_rest_space: bool,
     pub step_bindings: soundcraft_engine::step_input::StepBindings,
     /// Legacy UI preference retained for settings compatibility. Editing uses the clip's key.
     pub key_scale: soundcraft_midi::scale::KeyScale,
@@ -171,6 +173,7 @@ impl Default for KeysPrefs {
             step_fixed: false,
             step_velocity: 100,
             step_hold: soundcraft_engine::step_input::HoldPrefs::default(),
+            step_tie_rest_space: false,
             step_bindings: soundcraft_engine::step_input::StepBindings::default(),
             key_scale: soundcraft_midi::scale::KeyScale::default(),
             quantize: QuantizePrefs::default(),
@@ -718,6 +721,9 @@ fn clamp_move(sel: &[Note], dt: i64, ds: i64) -> (i64, i64) {
 /// arrows and Escape go to the notes while the pane has the keyboard.
 pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     use crate::shortcuts::{Action as A, pressed};
+    if !app.step_active() || !app.keys.active || ctx.egui_wants_keyboard_input() || app.dialog.is_some() {
+        app.step_keyboard_cancel();
+    }
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() {
         return;
     }
@@ -749,6 +755,9 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
         app.step_toggle();
     }
     if app.step_active() {
+        for down in crate::shortcuts::step_control_edges(ctx, A::StepTieRest, app.ui.keys.step_tie_rest_space) {
+            app.step_keyboard_control(down);
+        }
         if pressed(ctx, A::StepBack) {
             app.step_back();
             return;
@@ -1140,6 +1149,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
     resp.context_menu(|ui| {
         use soundcraft_engine::step_input::StepControl;
         ui.label("Step input settings");
+        ui.checkbox(&mut app.ui.keys.step_hold.enabled, "Hold to lengthen");
         ui.horizontal(|ui| {
             ui.label("Hold threshold (ms)");
             ui.add(egui::DragValue::new(&mut app.ui.keys.step_hold.threshold_ms).range(1..=60_000));
@@ -1150,6 +1160,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
         });
         ui.label("Sustain + the same notes ties the previous chord.");
         for (label, action, binding) in [
+            ("Tie/Rest", StepControl::TieRest, app.ui.keys.step_bindings.tie_rest),
             ("Rest", StepControl::Rest, app.ui.keys.step_bindings.rest),
             ("Step back", StepControl::Back, app.ui.keys.step_bindings.back),
             ("Tie", StepControl::Tie, app.ui.keys.step_bindings.tie),
@@ -1164,6 +1175,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
                 }
                 if ui.button("Clear").clicked() {
                     *match action {
+                        StepControl::TieRest => &mut app.ui.keys.step_bindings.tie_rest,
                         StepControl::Rest => &mut app.ui.keys.step_bindings.rest,
                         StepControl::Back => &mut app.ui.keys.step_bindings.back,
                         StepControl::Tie => &mut app.ui.keys.step_bindings.tie,

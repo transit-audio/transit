@@ -34,6 +34,7 @@ pub struct StepState {
     clock: Option<std::time::Instant>,
     pub(super) learning: Option<StepControl>,
     learned_down: Option<StepBinding>,
+    keyboard_down: bool,
 }
 
 impl StepState {
@@ -191,6 +192,20 @@ impl StudioApp {
         if self.step_active()
             && let Some(action) = self.keys.step.input.poll(now_ms, self.ui.keys.step_hold)
         {
+            self.step_action(action);
+        }
+    }
+
+    pub(crate) fn step_keyboard_cancel(&mut self) {
+        if std::mem::take(&mut self.keys.step.keyboard_down) {
+            self.keys.step.input.cancel();
+        }
+    }
+
+    pub(crate) fn step_keyboard_control(&mut self, down: bool) {
+        self.keys.step.keyboard_down = down;
+        let now = self.step_now_ms();
+        if let Some(action) = self.keys.step.input.control(StepControl::TieRest, down, now, self.ui.keys.step_hold) {
             self.step_action(action);
         }
     }

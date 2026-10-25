@@ -1015,7 +1015,7 @@ fn step_learn_consumes_the_learning_press_and_back_key_and_persists_binding() {
     let back: crate::keys::KeysPrefs = serde_json::from_value(saved).unwrap();
     assert_eq!(back.step_bindings.back, Some(StepBinding::Note(21)));
     let old: crate::keys::KeysPrefs = serde_json::from_value(json!({})).unwrap();
-    assert_eq!(old.step_bindings.rest, Some(StepBinding::Cc(64)));
+    assert_eq!(old.step_bindings.tie_rest, Some(StepBinding::Cc(64)));
 }
 
 #[test]
@@ -1435,4 +1435,117 @@ fn fixed_step_velocity_overrides_the_played_velocity_and_played_follows_the_key(
     assert_eq!((back.keys.step_fixed, back.keys.step_velocity), (true, 64));
     let old: crate::UiState = serde_json::from_value(json!({"keys": {"snap": "1/8"}})).unwrap();
     assert_eq!((old.keys.step_fixed, old.keys.step_velocity, old.keys.grid), (false, 100, crate::grid::GridView::default()));
+}
+
+#[test]
+fn step_combined_pedal_worked_example_writes_exact_grid_positions() {
+    use soundcraft_engine::step_input::StepBinding::{Cc, Note};
+    let mut t = T::open();
+    t.step_on();
+    for (pitch, start) in [(60, 0), (62, 3000)] {
+        t.app.step_message_at(Note(pitch), 90, start);
+        t.app.step_message_at(Cc(64), 127, start + 10);
+        t.app.step_message_at(Cc(64), 0, start + 20);
+        t.app.step_message_at(Note(pitch), 0, start + 2000);
+    }
+    t.app.step_message_at(Cc(64), 127, 6000);
+    t.app.step_message_at(Cc(64), 0, 6100);
+    for (pitch, start) in [(64, 6200), (65, 6400), (67, 6600), (69, 6800)] {
+        t.app.step_message_at(Note(pitch), 90, start);
+        t.app.step_message_at(Note(pitch), 0, start + 100);
+    }
+    let notes: Vec<_> = t.notes().iter().map(|n| (n.pitch, n.start / SIXTEENTH, n.length / SIXTEENTH)).collect();
+    assert_eq!(notes, [(60, 0, 2), (62, 2, 2), (64, 5, 1), (65, 6, 1), (67, 7, 1), (69, 8, 1)]);
+    assert_eq!(t.app.keys.step.cursor, 9 * SIXTEENTH);
+}
+
+#[test]
+fn step_keyboard_combined_enter_and_opt_in_space_are_scoped() {
+    use soundcraft_engine::step_input::StepBinding::Note;
+    let mut t = T::open();
+    t.step_on();
+    t.app.ui.keys.step_hold.enabled = false;
+    t.app.step_message_at(Note(60), 90, 0);
+    t.key("Enter", json!({}));
+    t.app.step_message_at(Note(60), 0, 100);
+    assert_eq!(t.notes()[0].length, 2 * SIXTEENTH);
+    t.key("Enter", json!({}));
+    assert_eq!(t.app.keys.step.cursor, 3 * SIXTEENTH);
+    t.app.ui.keys.step_tie_rest_space = true;
+    t.key("Space", json!({}));
+    assert_eq!(t.app.keys.step.cursor, 4 * SIXTEENTH);
+    t.app.keys.active = false;
+    t.key("Space", json!({}));
+    assert!(t.app.is_playing(), "Space still reaches transport outside the piano roll");
+    assert_eq!(t.app.keys.step.cursor, 4 * SIXTEENTH, "outside piano roll Space cannot enter rest");
+    t.app.keys.active = true;
+    t.app.ui.keys.step_tie_rest_space = false;
+    t.key("Space", json!({}));
+    assert_eq!(t.app.keys.step.cursor, 4 * SIXTEENTH, "Space defaults to transport");
+    assert!(!t.app.is_playing());
+    t.app.step_keyboard_control(true);
+    t.app.keys.active = false;
+    t.frames(1);
+    t.app.step_tick_at(u64::MAX);
+    assert_eq!(t.app.keys.step.cursor, 4 * SIXTEENTH, "focus loss cancels a held keyboard control");
+}
+
+#[test]
+fn step_hold_preference_and_combined_learning_persist() {
+    use soundcraft_engine::step_input::{StepBinding, StepControl};
+    let mut t = T::open();
+    t.step_on();
+    t.app.ui.keys.step_hold.enabled = false;
+    t.app.ui.keys.step_tie_rest_space = true;
+    t.app.keys.step.input_cancel_for_learn(StepControl::TieRest);
+    t.app.step_message_at(StepBinding::Note(21), 100, 0);
+    t.app.step_message_at(StepBinding::Note(21), 0, 50);
+    assert_eq!(t.app.keys.step.cursor, 0);
+    t.app.step_message_at(StepBinding::Note(60), 90, 100);
+    t.app.step_message_at(StepBinding::Note(60), 0, 10_000);
+    assert_eq!(t.notes()[0].length, SIXTEENTH);
+    let saved = serde_json::to_value(&t.app.ui.keys).unwrap();
+    let prefs: crate::keys::KeysPrefs = serde_json::from_value(saved).unwrap();
+    assert!(!prefs.step_hold.enabled);
+    assert!(prefs.step_tie_rest_space);
+    assert_eq!(prefs.step_bindings.tie_rest, Some(StepBinding::Note(21)));
+    let old: crate::keys::KeysPrefs = serde_json::from_value(json!({"step_hold":{"threshold_ms":500,"floor_ms":80}})).unwrap();
+    assert!(old.step_hold.enabled);
+    let old: crate::keys::KeysPrefs = serde_json::from_value(json!({"step_bindings":{"rest":null,"back":{"Cc":64},"tie":null}})).unwrap();
+    assert_eq!(old.step_bindings.back, Some(StepBinding::Cc(64)));
+    assert_eq!(old.step_bindings.tie_rest, None, "new default must not shadow old learned bindings");
+}
+
+#[test]
+fn step_shortcut_selector_clicks_rebind_and_the_table_displays_the_choice() {
+    let ctx = egui::Context::default();
+    let mut space = false;
+    let mut rect = egui::Rect::NOTHING;
+    let mut frame = |events: Vec<egui::Event>| {
+        let mut output = ctx.run_ui(egui::RawInput { events, ..Default::default() }, |ui| {
+            rect = crate::shortcuts::step_tie_rest_selector(ui, &mut space).rect;
+        });
+        output.textures_delta.clear();
+        (space, rect.center())
+    };
+    let (_, at) = frame(Vec::new());
+    let click = |at| {
+        vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+            egui::Event::PointerButton { pos: at, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+        ]
+    };
+    let (space, at) = frame(click(at));
+    assert!(space, "clicking the selector opts in to Space");
+    let (space, _) = frame(click(at));
+    assert!(!space, "a second click restores Enter");
+    let mut t = T::open();
+    t.app.ui.show_shortcuts = true;
+    t.app.ui.shortcuts_filter = "Step Tie/Rest".into();
+    t.frames(2);
+    assert_eq!(t.app.shortcuts_window.rows, ["Step entry · Step Tie/Rest · Enter"]);
+    t.app.ui.keys.step_tie_rest_space = true;
+    t.frames(2);
+    assert_eq!(t.app.shortcuts_window.rows, ["Step entry · Step Tie/Rest · Space"]);
 }
