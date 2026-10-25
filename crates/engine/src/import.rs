@@ -156,11 +156,12 @@ impl Staging {
 pub struct Imports {
     shared: Arc<Mutex<Staging>>,
     next: u64,
+    clock: Arc<dyn Fn() -> Instant + Send + Sync>,
 }
 
 impl Default for Imports {
     fn default() -> Self {
-        Imports { shared: Arc::new(Mutex::new(Staging::default())), next: 1 }
+        Imports { shared: Arc::new(Mutex::new(Staging::default())), next: 1, clock: Arc::new(Instant::now) }
     }
 }
 
@@ -225,7 +226,7 @@ impl Imports {
     /// duration?}`; `None` when there is no such job.
     pub fn progress(&self, id: u64) -> Option<Value> {
         let mut g = lock(&self.shared);
-        let now = Instant::now();
+        let now = (self.clock)();
         g.tick(now);
         let j = g.jobs.get_mut(&id)?;
         j.seen = Some(now);
@@ -235,7 +236,7 @@ impl Imports {
     /// Every job, oldest first.
     pub fn all(&self) -> Vec<Value> {
         let mut g = lock(&self.shared);
-        let now = Instant::now();
+        let now = (self.clock)();
         g.tick(now);
         g.jobs
             .iter_mut()
@@ -284,6 +285,13 @@ impl Imports {
     /// The rate a finished job's audio was prepared at.
     pub fn prepared_rate(&self, id: u64) -> Option<u32> {
         lock(&self.shared).jobs.get(&id).and_then(|j| j.prepared.as_ref()).map(PreparedAudio::rate)
+    }
+
+    /// Inject the polling clock for deterministic expiry tests. Set before the first poll;
+    /// the clock must be monotonic and must not reenter the staging map.
+    #[doc(hidden)]
+    pub fn set_clock_for_testing(&mut self, clock: Arc<dyn Fn() -> Instant + Send + Sync>) {
+        self.clock = clock;
     }
 
     /// Change the limits on finished jobs left uncommitted (tests use short ones): the idle time

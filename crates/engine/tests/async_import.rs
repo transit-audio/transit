@@ -262,18 +262,38 @@ fn a_caller_that_was_away_finds_all_its_items_when_it_comes_back() {
 
 #[test]
 fn an_item_left_uncommitted_while_the_caller_polls_others_goes_to_expired() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
     let d = Dir::new("expired-state");
     let (mut e, _) = engine_with_track();
     let path = d.file("tone.wav", &wav(1, 48_000, 480));
     e.imports.set_limits(Duration::from_millis(100), 32, Duration::from_secs(30));
+    let now = Instant::now();
+    let elapsed = Arc::new(AtomicU64::new(0));
+    let clock_elapsed = Arc::clone(&elapsed);
+    e.imports.set_clock_for_testing(Arc::new(move || now + Duration::from_millis(clock_elapsed.load(Ordering::Relaxed))));
     let (a, b) = (prepare(&mut e, &path), prepare(&mut e, &path));
-    wait(&mut e, a);
-    wait(&mut e, b);
-    let t0 = Instant::now();
-    while t0.elapsed() < Duration::from_millis(400) {
-        e.imports.progress(b);
-        std::thread::sleep(Duration::from_millis(5));
+    for id in [a, b] {
+        let started = Instant::now();
+        loop {
+            let v = e.imports.progress(id).expect("the id is kept");
+            match v["state"].as_str() {
+                Some("done") => break,
+                Some("queued" | "running") => {}
+                _ => panic!("import {id} did not finish successfully: {v}"),
+            }
+            assert!(started.elapsed() < Duration::from_secs(20), "import {id} never finished: {v}"); // timing: stall-bound wait only for worker completion; expiry uses the frozen clock
+            std::thread::yield_now();
+        }
     }
+    // Only polls that happened count toward idle time. Reading at the same injected
+    // instant keeps scheduler delays out of both the TTL and the AWAY reset.
+    elapsed.store(99, Ordering::Relaxed);
+    assert_eq!(e.imports.progress(b).unwrap()["state"], "done");
+    assert!(e.imports.ready(a).is_ok(), "the unpolled item stays before the TTL");
+    elapsed.store(100, Ordering::Relaxed);
+    assert_eq!(e.imports.progress(b).unwrap()["state"], "done");
     let v = e.imports.progress(a).expect("the id is kept");
     assert_eq!(v["state"], "expired", "{v}");
     assert!(v["error"].as_str().unwrap_or("").contains("expired"), "{v}");

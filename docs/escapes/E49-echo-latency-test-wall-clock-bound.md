@@ -82,3 +82,5 @@ player's own origin, and `take_monitor_at(now)` lets it read at the last stamp (
 `take_monitor` passes the real clock, unchanged). Mutation: reading 2 s after the stamps fails it
 deterministically. Rule added to `gates.md`; no `cargo xtask timing` rule, since a line scan cannot
 tell two origins apart.
+
+Recurrence 2026-10-25 (#76, macOS CI on 8da26d2a): the async-import expiry test stopped polling its kept item before checking the abandoned item, so a scheduler pause could exceed its 100 ms TTL. The test now injects the polling clock, verifies retention at 99 ms and expiry at 100 ms while the polled item stays done, and uses real time only for a marked worker-completion stall bound. Disabling TTL expiry or poll timestamp refresh fails the corresponding state assertion (not a timeout); 20/20 runs passed with the test and two spinning processes pinned to one CPU. Production defaults to Instant::now under the same lock; constants and dependencies are unchanged.
