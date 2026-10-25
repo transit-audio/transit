@@ -282,7 +282,7 @@ impl Drop for Input {
 }
 
 enum Update {
-    Input(Input),
+    Input(Box<Input>),
     Echo(super::midi_out::Producer),
     Monitor(Tap),
     Routes {
@@ -373,13 +373,13 @@ impl Worker {
         let id = self.next_input.checked_add(1).ok_or("MIDI input identities exhausted")?;
         self.next_input = id;
         self.attach
-            .try_send(Update::Input(Input {
+            .try_send(Update::Input(Box::new(Input {
                 id,
                 consumer,
                 routes: vec![(permit.clone(), route)],
                 mon: Mon::default(),
                 guard: storm::Guard::default(),
-            }))
+            })))
             .map_err(|_| "MIDI worker attachment queue unavailable")?;
         self.permits.push(permit);
         self.thread.thread().unpark();
@@ -397,7 +397,7 @@ impl Worker {
         self.next_input = id;
         consumer.wake_on(self.thread.thread().clone());
         self.attach
-            .try_send(Update::Input(Input { id, consumer, routes: Vec::new(), mon: Mon::default(), guard: storm::Guard::new(muted) }))
+            .try_send(Update::Input(Box::new(Input { id, consumer, routes: Vec::new(), mon: Mon::default(), guard: storm::Guard::new(muted) })))
             .map_err(|_| "MIDI attachment queue unavailable")?;
         self.thread.thread().unpark();
         Ok(id)
@@ -598,7 +598,7 @@ impl Pump {
                             input.mon.sysex_dropped = counters.sysex_capture_dropped;
                             input.mon.sysex_truncated = counters.sysex_truncated;
                         }
-                        self.inputs.push(input);
+                        self.inputs.push(*input);
                     }
                 }
                 Ok(Update::Echo(echo)) => self.echo = Some(echo),
