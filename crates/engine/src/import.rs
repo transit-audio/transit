@@ -294,6 +294,12 @@ impl Imports {
         self.clock = clock;
     }
 
+    /// How many workers are still running; tests wait for zero after a cancel.
+    #[doc(hidden)]
+    pub fn workers_running_for_testing(&self) -> usize {
+        lock(&self.shared).running
+    }
+
     /// Change the limits on finished jobs left uncommitted (tests use short ones): the idle time
     /// limit, the count limit, and the grace before the count limit may drop a job.
     pub fn set_limits(&mut self, ttl: Duration, max_finished: usize, grace: Duration) {

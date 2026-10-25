@@ -4,6 +4,8 @@
 use serde_json::{Value, json};
 use soundcraft_engine::Engine;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 /// A 16-bit PCM WAV.
@@ -70,12 +72,24 @@ fn wait(e: &mut Engine, id: u64) -> (Value, Vec<u64>) {
     loop {
         let v = e.execute("file.import_progress", &json!({"id": id})).unwrap();
         seen.push(v["progress"].as_u64().unwrap());
+        assert_ne!(v["state"], "expired", "import {id} expired while the caller was polling it: {v}");
         if matches!(v["state"].as_str(), Some("done" | "failed")) {
             return (v, seen);
         }
         assert!(t0.elapsed() < Duration::from_secs(20), "import {id} never finished: {v}");
         std::thread::sleep(Duration::from_millis(2));
     }
+}
+
+/// Drive the staging clock by hand: it reads a fixed origin plus the returned milliseconds, so
+/// idle time, the grace and the away reset depend only on what the test stores, never on the
+/// scheduler.
+fn fake_clock(e: &mut Engine) -> Arc<AtomicU64> {
+    let origin = Instant::now();
+    let elapsed = Arc::new(AtomicU64::new(0));
+    let clock_elapsed = Arc::clone(&elapsed);
+    e.imports.set_clock_for_testing(Arc::new(move || origin + Duration::from_millis(clock_elapsed.load(Ordering::Relaxed))));
+    elapsed
 }
 
 fn clips(e: &Engine, track: u64) -> Vec<(i64, i64, String)> {
@@ -125,8 +139,12 @@ fn cancel_leaves_no_media_and_no_document_change() {
     assert_eq!(e.execute("file.import_cancel", &json!({"id": id})).unwrap()["canceled"], false);
     assert!(e.execute("file.import_progress", &json!({"id": id})).is_err(), "the job is gone");
     assert!(e.execute("file.commit_import", &json!({"id": id, "track": track})).is_err());
-    // The worker stops at its next step and drops what it made.
-    std::thread::sleep(Duration::from_millis(200));
+    // The worker stops at its next step and drops what it made; wait until it has actually gone.
+    let started = Instant::now();
+    while e.imports.workers_running_for_testing() > 0 {
+        assert!(started.elapsed() < Duration::from_secs(20), "the canceled worker never stopped"); // timing: stall-bound wait only for worker completion; the assertions below do not depend on it
+        std::thread::yield_now();
+    }
     assert!(e.imports.is_empty());
     assert_eq!((e.revision, e.undo_history().len(), e.session().sources.len()), (rev, undo, 0));
     assert!(clips(&e, track).is_empty());
@@ -249,9 +267,12 @@ fn a_caller_that_was_away_finds_all_its_items_when_it_comes_back() {
     let (mut e, track) = engine_with_track();
     let path = d.file("tone.wav", &wav(1, 48_000, 480));
     e.imports.set_limits(Duration::from_secs(600), 3, Duration::from_millis(50));
+    let elapsed = fake_clock(&mut e);
     let ids: Vec<u64> = (0..5).map(|_| prepare(&mut e, &path)).collect();
-    // A modal dialog on the UI thread: nobody polls while the workers finish.
-    std::thread::sleep(Duration::from_millis(500));
+    // A modal dialog on the UI thread: nobody polls while the workers finish. The clock runs
+    // past the grace before the first poll; after that it stands still, so the polls below
+    // cannot be spread over the grace by a slow scheduler.
+    elapsed.store(500, Ordering::Relaxed);
     for (i, id) in ids.iter().enumerate() {
         wait(&mut e, *id);
         let r = e.execute("file.commit_import", &json!({"id": id, "track": track, "at": i as i64 * 480}));
@@ -262,17 +283,11 @@ fn a_caller_that_was_away_finds_all_its_items_when_it_comes_back() {
 
 #[test]
 fn an_item_left_uncommitted_while_the_caller_polls_others_goes_to_expired() {
-    use std::sync::Arc;
-    use std::sync::atomic::{AtomicU64, Ordering};
-
     let d = Dir::new("expired-state");
     let (mut e, _) = engine_with_track();
     let path = d.file("tone.wav", &wav(1, 48_000, 480));
     e.imports.set_limits(Duration::from_millis(100), 32, Duration::from_secs(30));
-    let now = Instant::now();
-    let elapsed = Arc::new(AtomicU64::new(0));
-    let clock_elapsed = Arc::clone(&elapsed);
-    e.imports.set_clock_for_testing(Arc::new(move || now + Duration::from_millis(clock_elapsed.load(Ordering::Relaxed))));
+    let elapsed = fake_clock(&mut e);
     let (a, b) = (prepare(&mut e, &path), prepare(&mut e, &path));
     for id in [a, b] {
         let started = Instant::now();
@@ -373,13 +388,21 @@ fn a_caller_away_longer_than_the_limit_loses_nothing_when_it_returns() {
     let (mut e, _) = engine_with_track();
     let path = d.file("tone.wav", &wav(1, 48_000, 480));
     e.imports.set_limits(Duration::from_millis(100), 32, Duration::from_secs(30));
+    let elapsed = fake_clock(&mut e);
     let (a, b) = (prepare(&mut e, &path), prepare(&mut e, &path));
     wait(&mut e, a);
     wait(&mut e, b);
     e.imports.all();
     // Away for longer than the engine's `AWAY` (5 s), then back, polling only the first item.
-    std::thread::sleep(Duration::from_millis(5_300));
+    elapsed.store(5_300, Ordering::Relaxed);
     e.imports.progress(a);
     e.imports.progress(a);
     assert_eq!(e.imports.progress(b).unwrap()["state"], "done", "the idle clocks restarted on return");
+    // The restart is stamped at the return (5.3 s), so the TTL counts from there.
+    elapsed.store(5_399, Ordering::Relaxed);
+    assert_eq!(e.imports.progress(a).unwrap()["state"], "done");
+    assert_eq!(e.imports.ready(b).map_err(|e| e.to_string()), Ok(()), "99 ms after the return is inside the TTL");
+    elapsed.store(5_400, Ordering::Relaxed);
+    assert_eq!(e.imports.progress(a).unwrap()["state"], "done");
+    assert_eq!(e.imports.progress(b).unwrap()["state"], "expired", "100 ms after the return is the TTL");
 }
