@@ -60,6 +60,8 @@ pub struct Counters {
     /// latest event, and the largest seen. Add the audio block period for input-to-sound.
     pub latency_last_ns: u64,
     pub latency_max_ns: u64,
+    /// Input ports muted by the feedback storm detector (#99).
+    pub storms: u64,
 }
 
 /// UI tap capacity, preallocated before the ingress thread starts.
@@ -82,6 +84,11 @@ struct Shared {
     /// Callback-to-worker-pop age of the latest and the largest popped event (#62).
     latency_last_ns: AtomicU64,
     latency_max_ns: AtomicU64,
+    /// Input ports muted by the feedback storm detector (#99).
+    storms: AtomicU64,
+    /// Tests: the storm detector is off, so a feedback loop can be shown to form.
+    #[cfg(test)]
+    storm_off: AtomicBool,
 }
 
 /// Main's per-open cancellation identity. Capture/publish all port cutoffs
@@ -137,6 +144,8 @@ struct Input {
     routes: Vec<(sources::Permit, Route)>,
     /// MIDI Monitor bookkeeping (#91), including discarding closed-window SysEx captures.
     mon: Mon,
+    /// Feedback storm detector and the port's mute flag (#99).
+    guard: storm::Guard,
 }
 
 /// Per-input state of the MIDI Monitor tap. Only the ingress worker touches it.
@@ -327,15 +336,23 @@ impl Worker {
         let id = self.next_input.checked_add(1).ok_or("MIDI input identities exhausted")?;
         self.next_input = id;
         self.attach
-            .try_send(Update::Input(Input { id, consumer, routes: vec![(permit.clone(), route)], mon: Mon::default() }))
+            .try_send(Update::Input(Input {
+                id,
+                consumer,
+                routes: vec![(permit.clone(), route)],
+                mon: Mon::default(),
+                guard: storm::Guard::default(),
+            }))
             .map_err(|_| "MIDI worker attachment queue unavailable")?;
         self.permits.push(permit);
         self.thread.thread().unpark();
         Ok(port)
     }
 
-    /// One consumer per physical open; routing edits never reopen the device.
-    pub(super) fn attach_input(&mut self, consumer: InputConsumer) -> Result<u64, &'static str> {
+    /// One consumer per physical open; routing edits never reopen the device. The worker sets
+    /// `muted` when the port's feedback storm detector trips (#99); while it is set the port
+    /// admits no route, and Main clears it when the user re-enables the port.
+    pub(super) fn attach_input(&mut self, consumer: InputConsumer, muted: Arc<AtomicBool>) -> Result<u64, &'static str> {
         if self.shared.finished.load(Ordering::Acquire) {
             return Err("MIDI worker unavailable");
         }
@@ -343,7 +360,7 @@ impl Worker {
         self.next_input = id;
         consumer.wake_on(self.thread.thread().clone());
         self.attach
-            .try_send(Update::Input(Input { id, consumer, routes: Vec::new(), mon: Mon::default() }))
+            .try_send(Update::Input(Input { id, consumer, routes: Vec::new(), mon: Mon::default(), guard: storm::Guard::new(muted) }))
             .map_err(|_| "MIDI attachment queue unavailable")?;
         self.thread.thread().unpark();
         Ok(id)
@@ -428,7 +445,14 @@ impl Worker {
             approximate: s.approximate.load(Ordering::Relaxed),
             latency_last_ns: s.latency_last_ns.load(Ordering::Relaxed),
             latency_max_ns: s.latency_max_ns.load(Ordering::Relaxed),
+            storms: s.storms.load(Ordering::Relaxed),
         }
+    }
+
+    /// Tests: turns the feedback storm detector off, so a loop can be shown to form.
+    #[cfg(test)]
+    pub(super) fn disable_storm_detector(&self) {
+        self.shared.storm_off.store(true, Ordering::Release);
     }
 }
 impl Drop for Worker {
@@ -504,6 +528,15 @@ impl Pump {
                             if !routes.iter().any(|(new, _)| old.token() == new.token()) {
                                 old.invalidate();
                             }
+                        }
+                        // A muted port (#99) admits nothing until Main clears the flag; routes
+                        // sent after that start a fresh count.
+                        if input.guard.muted() {
+                            for (permit, _) in &routes {
+                                permit.invalidate();
+                            }
+                        } else if input.guard.storm.tripped() {
+                            input.guard.storm.reset();
                         }
                         input.routes = routes;
                         applied.store(true, Ordering::Release);
@@ -599,6 +632,21 @@ impl Pump {
             if let Some(tap) = &mut self.monitor {
                 input.mon.tap(tap, input.id, &raw);
             }
+            #[cfg(test)]
+            let detect = !self.shared.storm_off.load(Ordering::Relaxed);
+            #[cfg(not(test))]
+            let detect = true;
+            if detect && input.guard.storm.note(raw.host_arrival_ns, raw.bytes, raw.len) {
+                // A feedback storm (#99): the port stops admitting now. Main sees its routes
+                // revoked, which releases what they hold (the instrument's notes, and the echo's
+                // on the output port), and keeps them off until the user re-enables the port.
+                input.guard.muted.store(true, Ordering::Release);
+                for (permit, _) in &input.routes {
+                    permit.invalidate();
+                }
+                self.shared.storms.fetch_add(1, Ordering::Relaxed);
+                continue;
+            }
             let age = input.consumer.age_ns(&raw);
             self.shared.latency_last_ns.store(age, Ordering::Relaxed);
             self.shared.latency_max_ns.fetch_max(age, Ordering::Relaxed);
@@ -624,7 +672,11 @@ impl Pump {
                 if let Some(hook) = &mut self.between_check_and_push {
                     hook();
                 }
+                // Channel-mode messages (CC 120 to 127: All Sound Off, Reset All Controllers, Local
+                // Control, All Notes Off, Omni and Mono/Poly) are never echoed (#99): sent back to a
+                // device that merges its In to its Out, they returned and went out again forever.
                 if route.echo
+                    && !channel_mode(message)
                     && let Some(echo) = &mut self.echo
                 {
                     echo.push(super::midi_out::OutEvent {
@@ -693,6 +745,11 @@ impl Drop for Pump {
     }
 }
 
+/// CC 120 to 127, the channel-mode messages.
+fn channel_mode(message: Message) -> bool {
+    matches!(message, Message::Control { cc: 120..=127, .. })
+}
+
 fn decode(raw: InputEvent) -> Option<(u8, Message)> {
     let status = raw.bytes[0];
     if !(0x80..0xf0).contains(&status) || raw.len != if status & 0xe0 == 0xc0 { 2 } else { 3 } {
@@ -715,6 +772,9 @@ fn decode(raw: InputEvent) -> Option<(u8, Message)> {
     };
     Some((status & 0x0f, message))
 }
+
+mod storm;
+pub use storm::{RATE as STORM_RATE, REPEAT as STORM_REPEAT, WINDOW_NS as STORM_WINDOW_NS, WINDOWS as STORM_WINDOWS};
 
 #[cfg(test)]
 mod tests;

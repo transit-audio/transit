@@ -587,3 +587,5 @@ fn the_timing_label_names_the_calibration_bound_only_for_a_measured_clock() {
     assert_eq!(label(Some(Quality::BackendEstimate), None), "estimated device clock");
     assert_eq!(label(None, None), "approximate (callback scheduling)");
 }
+
+mod feedback;

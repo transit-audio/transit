@@ -4,7 +4,7 @@ use super::monitor::{self, Dir, MonitorEvent};
 use super::{ActionResult, RuntimeControl, ingress, midi_out, sources};
 use crate::{device_clock::HostOrigin, player::audio::Command};
 use soundcraft_mix::{EngineEpoch, INSTRUMENT_SLOT, SlotGen};
-use soundcraft_model::{MidiInput, MidiPort};
+use soundcraft_model::{MidiInput, MidiOutPort, MidiPort};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
@@ -27,6 +27,37 @@ pub struct Status {
     pub timing_uncertainty_ns: Option<u64>,
     /// External MIDI destinations (#61): output ports, per-track state, counters.
     pub output: midi_out::OutputStatus,
+    /// Input ports muted by the feedback storm detector (#99), until the user re-enables them.
+    pub muted_inputs: Vec<MutedInput>,
+    /// Tracks with an external destination whose MIDI input takes a port of the destination's own
+    /// device ([`soundcraft_model::same_midi_device`], #99), and whether the track allows the echo
+    /// there. Not allowed: the echo to that port is off, to prevent a feedback loop.
+    pub self_echo: Vec<(soundcraft_model::TrackId, bool)>,
+}
+
+/// An input port muted by the feedback storm detector (#99). It admits no route (no echo, no
+/// instrument, no recording) until [`MutedInput::reenable`].
+#[derive(Clone, Debug)]
+pub struct MutedInput {
+    pub key: PortKey,
+    /// The port as the UI lists it.
+    pub name: String,
+    /// Tracks whose MIDI input takes this port.
+    pub tracks: Vec<soundcraft_model::TrackId>,
+    reenable: Arc<AtomicBool>,
+}
+
+impl MutedInput {
+    /// The UI's re-enable: the next `Player::service` routes the port again, with a fresh count.
+    pub fn reenable(&self) {
+        self.reenable.store(true, Ordering::Release);
+    }
+}
+
+/// What the UI says about a port the detector muted.
+#[must_use]
+pub fn storm_text(name: &str) -> String {
+    format!("{name} muted: feedback storm detected; click to re-enable")
 }
 
 impl Status {
@@ -177,6 +208,16 @@ struct Input {
     failed: bool,
     closed: bool,
     lost: bool,
+    /// Set by the ingress worker when the port's storm detector trips (#99).
+    storm: Arc<AtomicBool>,
+}
+
+/// A port the storm detector muted (#99). Kept by key, so closing and reopening the port (an
+/// unplug, the monitor turned off) does not unmute it.
+struct Muted {
+    key: PortKey,
+    tracks: Vec<soundcraft_model::TrackId>,
+    reenable: Arc<AtomicBool>,
 }
 
 pub(super) struct Native {
@@ -192,6 +233,8 @@ pub(super) struct Native {
     origin: HostOrigin,
     /// The MIDI Monitor's control side (#91).
     monitor: monitor::Hub,
+    /// Input ports muted by the storm detector (#99).
+    muted: Vec<Muted>,
 }
 
 impl Native {
@@ -213,6 +256,7 @@ impl Native {
             status: Status::default(),
             origin,
             monitor,
+            muted: Vec::new(),
         })
     }
 
@@ -297,6 +341,12 @@ impl Native {
         monitor::Report { dropped_in, dropped_out, ports, sysex: self.monitor.take_sysex(), sysex_truncated: self.monitor.sysex_truncated() }
     }
 
+    /// Tests: turns the ingress worker's storm detector off, so a feedback loop can form.
+    #[cfg(test)]
+    pub(super) fn disable_storm_detector(&self) {
+        self.worker.disable_storm_detector();
+    }
+
     pub(super) fn take_midi(&self) -> Vec<super::PlayedMidi> {
         self.worker.take_midi()
     }
@@ -311,6 +361,11 @@ impl Native {
         status.counts = self.worker.counters();
         status.output = self.out.status();
         status.open_inputs = self.inputs.iter().filter(|input| input.attached.is_some()).count();
+        status.muted_inputs = self
+            .muted
+            .iter()
+            .map(|m| MutedInput { key: m.key.clone(), name: self.port_name(&m.key), tracks: m.tracks.clone(), reenable: Arc::clone(&m.reenable) })
+            .collect();
         status.routes = self
             .inputs
             .iter()
@@ -334,6 +389,7 @@ impl Native {
     }
 
     pub(super) fn service(&mut self, owner: &mut Owner, epoch: EngineEpoch) {
+        self.follow_storms();
         let Some(io) = &self.io else { return };
         if io.finished.load(Ordering::Acquire) || owner.faulted() {
             for input in &self.inputs {
@@ -349,7 +405,7 @@ impl Native {
                 Ok(Reply::Ports(ports)) => self.status.inputs = ports,
                 Ok(Reply::Opened { id, consumer, boundary }) => {
                     if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id) {
-                        match self.worker.attach_input(consumer) {
+                        match self.worker.attach_input(consumer, Arc::clone(&input.storm)) {
                             Ok(id) => {
                                 input.attached = Some((id, boundary));
                                 input.dirty = true;
@@ -380,6 +436,7 @@ impl Native {
             if owner.source_status(*request) == Ok(sources::State::Revoked) { owner.release_source(*request).is_err() } else { true }
         });
         self.out.configure(midi_out::Destination::of_session(owner.requested_session()));
+        Self::follow_session(&mut self.muted, &mut self.status, owner.requested_session());
         let mut echo_revoked = Vec::new();
         let routes: Vec<_> = owner
             .requested_session()
@@ -397,18 +454,24 @@ impl Native {
                 // needs no instrument binding.
                 let external = track.midi_output.is_external();
                 let target = if external { Some((track.id, INSTRUMENT_SLOT, SlotGen::VACANT)) } else { owner.binding(track.id, INSTRUMENT_SLOT) };
+                // No self-echo (#99): the echo is held back per input port when it is the same
+                // device as the destination, unless the track allows it.
+                let guard = match &track.midi_output {
+                    soundcraft_model::MidiOutput::External { port, .. } if !track.allow_echo_to_device => Some(port.clone()),
+                    _ => None,
+                };
                 target.map(|target| {
                     (
                         track.midi_input.clone(),
                         ingress::Route { engine: epoch, target, channels, lookahead: LOOKAHEAD, deliver: !external, echo: external },
+                        guard,
                     )
                 })
             })
             .collect();
         for input in &mut self.inputs {
             let present = self.status.inputs.iter().any(|port| same_port(&port.key, &input.key));
-            let routes: Vec<_> =
-                routes.iter().filter(|(selection, _)| accepts_port(selection, &input.key, &self.status.inputs)).map(|(_, route)| *route).collect();
+            let routes = port_routes(&routes, &input.key, &self.status.inputs, &self.muted);
             input.routes.retain(|binding| {
                 if present && !input.failed && !input.lost && binding.port.admitted() && routes.contains(&binding.route) {
                     return true;
@@ -445,7 +508,7 @@ impl Native {
         if !routes.is_empty() || monitoring {
             for port in &self.status.inputs {
                 if self.inputs.len() == sources::PORTS
-                    || !(monitoring || routes.iter().any(|(selection, _)| accepts_port(selection, &port.key, &self.status.inputs)))
+                    || !(monitoring || !port_routes(&routes, &port.key, &self.status.inputs, &self.muted).is_empty())
                     || self.inputs.iter().any(|input| same_port(&input.key, &port.key))
                 {
                     continue;
@@ -466,6 +529,7 @@ impl Native {
                         failed: false,
                         closed: false,
                         lost: false,
+                        storm: Arc::default(),
                     }),
                     Err(error) => {
                         self.status.error = Some(error.into());
@@ -488,7 +552,7 @@ impl Native {
         }
         for input in &mut self.inputs {
             let Some((id, boundary)) = &input.attached else { continue };
-            for (_, route) in routes.iter().filter(|(selection, _)| accepts_port(selection, &input.key, &self.status.inputs)) {
+            for route in &port_routes(&routes, &input.key, &self.status.inputs, &self.muted) {
                 if input.routes.iter().any(|binding| binding.route == *route) {
                     continue;
                 }
@@ -534,6 +598,87 @@ impl Native {
             }
         }
     }
+}
+
+impl Native {
+    fn port_name(&self, key: &PortKey) -> String {
+        self.status.inputs.iter().find(|p| same_port(&p.key, key)).map_or_else(|| key.to_string(), |p| p.display_name.clone())
+    }
+
+    /// What the UI says about the session's routing (#99): the tracks a muted port feeds, and the
+    /// tracks whose input and destination are one device. Armed or not, so the card says it first.
+    fn follow_session(muted: &mut [Muted], status: &mut Status, session: &soundcraft_model::Session) {
+        let ports = &status.inputs;
+        let midi = || session.tracks.iter().filter(|t| t.kind.is_midi() && !t.inactive);
+        for m in muted {
+            m.tracks = midi().filter(|t| accepts_port(&t.midi_input, &m.key, ports)).map(|t| t.id).collect();
+        }
+        status.self_echo = midi()
+            .filter_map(|t| match &t.midi_output {
+                soundcraft_model::MidiOutput::External { port, .. } => ports
+                    .iter()
+                    .any(|p| {
+                        accepts_port(&t.midi_input, &p.key, ports)
+                            && soundcraft_model::same_midi_device(p.key.backend.as_str(), &p.key.name, &p.key.id, port)
+                    })
+                    .then_some((t.id, t.allow_echo_to_device)),
+                soundcraft_model::MidiOutput::Internal => None,
+            })
+            .collect();
+    }
+
+    /// Takes up ports the worker muted and the user's re-enables (#99). A newly muted port's routes
+    /// are revoked by the route pass after this (they no longer appear in [`port_routes`]), which
+    /// releases what they hold through the usual path.
+    fn follow_storms(&mut self) {
+        for i in 0..self.inputs.len() {
+            let Some(input) = self.inputs.get(i) else { continue };
+            if input.storm.load(Ordering::Acquire) && !self.muted.iter().any(|m| same_port(&m.key, &input.key)) {
+                let key = input.key.clone();
+                log::warn!("{}", storm_text(&self.port_name(&key)));
+                self.muted.push(Muted { key, tracks: Vec::new(), reenable: Arc::default() });
+            }
+        }
+        let mut reenabled = Vec::new();
+        self.muted.retain(|m| {
+            let keep = !m.reenable.load(Ordering::Acquire);
+            if !keep {
+                reenabled.push(m.key.clone());
+            }
+            keep
+        });
+        for key in reenabled {
+            for input in self.inputs.iter_mut().filter(|input| same_port(&input.key, &key)) {
+                // Cleared before the new routes go out: the worker resets its count when it applies them.
+                input.storm.store(false, Ordering::Release);
+                input.dirty = true;
+            }
+        }
+    }
+}
+
+/// The routes an input port gets: those whose selection accepts it, none while the port is muted
+/// (#99), and with the echo off where the port and the destination are one device and the track
+/// does not allow it ([`soundcraft_model::same_midi_device`]).
+fn port_routes(
+    routes: &[(MidiInput, ingress::Route, Option<MidiOutPort>)],
+    key: &PortKey,
+    ports: &[PortInfo],
+    muted: &[Muted],
+) -> Vec<ingress::Route> {
+    if muted.iter().any(|m| same_port(&m.key, key)) {
+        return Vec::new();
+    }
+    routes
+        .iter()
+        .filter(|(selection, _, _)| accepts_port(selection, key, ports))
+        .map(|(_, route, guard)| match guard {
+            Some(port) if route.echo && soundcraft_model::same_midi_device(key.backend.as_str(), &key.name, &key.id, port) => {
+                ingress::Route { echo: false, ..*route }
+            }
+            _ => *route,
+        })
+        .collect()
 }
 
 fn accepts_port(selection: &MidiInput, key: &PortKey, ports: &[PortInfo]) -> bool {
