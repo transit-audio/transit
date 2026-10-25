@@ -4057,3 +4057,137 @@ fn a_bounce_with_an_external_instrument_asks_and_leaves_it_out_only_when_chosen(
     assert!(out.exists(), "{}", app.status);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Capture the real UI's paint, with a scripted frame time rather than wall-clock pacing.
+fn mixer_paint(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64) -> Vec<egui::Shape> {
+    *time += 1.0 / 60.0;
+    let raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))),
+        time: Some(*time),
+        ..Default::default()
+    };
+    let mut out = ctx.run_ui(raw, |ui| {
+        app.logic(ui.ctx());
+        app.ui(ui);
+    });
+    out.textures_delta.clear();
+    fn flatten(shape: egui::Shape, result: &mut Vec<egui::Shape>) {
+        if let egui::Shape::Vec(shapes) = shape {
+            for shape in shapes {
+                flatten(shape, result);
+            }
+        } else {
+            result.push(shape);
+        }
+    }
+    let mut result = Vec::new();
+    for shape in out.shapes {
+        flatten(shape.shape, &mut result);
+    }
+    result
+}
+
+#[test]
+fn mixer_knob_paint_keeps_contrast_on_normal_and_selected_audio_and_aux_strips() {
+    for appearance in [crate::theme::Appearance::Dark, crate::theme::Appearance::Light] {
+        let (mut app, ctx, mut time, audio) = mixer_app();
+        let aux = app.new_fx_channel(Some(audio), -12.0).unwrap();
+        app.ui.appearance = appearance;
+        app.ui.show_devices = false;
+        for focus in [audio, aux] {
+            app.focus(focus);
+            frames(&mut app, &ctx, 3, &mut time);
+            let shapes = mixer_paint(&mut app, &ctx, &mut time);
+            for track in [audio, aux] {
+                let sl = strip(&app, track);
+                let rect = |r: [f32; 4]| egui::Rect::from_min_max(egui::pos2(r[0], r[1]), egui::pos2(r[2], r[3]));
+                let knob = rect(sl.knob);
+                let background = shapes
+                    .iter()
+                    .find_map(|s| match s {
+                        egui::Shape::Rect(r) if r.rect == rect(sl.rect) => Some(r.fill),
+                        _ => None,
+                    })
+                    .expect("painted strip background");
+                let pointer = shapes
+                    .iter()
+                    .find_map(|s| match s {
+                        egui::Shape::Circle(c) if knob.contains(c.center) && c.radius == 2.5 => Some(c.fill),
+                        _ => None,
+                    })
+                    .expect("painted knob pointer");
+                let tick = shapes
+                    .iter()
+                    .find_map(|s| match s {
+                        egui::Shape::LineSegment { points, stroke } if stroke.width == 1.0 && points.iter().all(|p| knob.contains(*p)) => {
+                            Some(stroke.color)
+                        }
+                        _ => None,
+                    })
+                    .expect("painted center tick");
+                let ring = shapes
+                    .iter()
+                    .find_map(|s| match s {
+                        egui::Shape::Path(p) if p.points.len() == 25 && p.points.iter().all(|p| knob.contains(*p)) => Some(p.stroke.color.clone()),
+                        _ => None,
+                    })
+                    .expect("painted travel ring");
+                let egui::epaint::ColorMode::Solid(ring) = ring else { panic!("solid ring") };
+                for (name, ink, target) in [("pointer", pointer, 7.0), ("tick", tick, 4.5), ("track", ring, 3.0)] {
+                    let ratio = crate::theme::contrast(ink, background);
+                    assert!(
+                        (target..target + 0.15).contains(&ratio),
+                        "{appearance:?} focused={} {name} contrast={ratio} target={target}",
+                        sl.focused
+                    );
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn mixer_insert_overflow_paint_never_overlaps_the_add_glyph_row() {
+    for height in [260.0, 420.0] {
+        for count in [1, 4, 9, 10] {
+            let (mut app, ctx, mut time, track) = mixer_app();
+            app.ui.mixer_height = height;
+            app.ui.show_devices = false;
+            app.focus(track);
+            for _ in 0..count {
+                app.add_device(track, "gain").unwrap();
+            }
+            frames(&mut app, &ctx, 4, &mut time);
+            let shapes = mixer_paint(&mut app, &ctx, &mut time);
+            let sl = strip(&app, track);
+            let add = egui::Rect::from_min_max(egui::pos2(sl.add_insert[0], sl.add_insert[1]), egui::pos2(sl.add_insert[2], sl.add_insert[3]));
+            let mut labels = 0;
+            let mut overflow_at = None;
+            for shape in &shapes {
+                if let egui::Shape::Text(text) = shape
+                    && text.galley.text().ends_with(" more…")
+                    && (sl.rect[0]..sl.rect[2]).contains(&text.pos.x)
+                {
+                    labels += 1;
+                    overflow_at = Some((text.pos.x + 3.0, text.pos.y + 3.0));
+                    let painted = text.galley.rect.translate(text.pos.to_vec2());
+                    assert!(!painted.intersects(add), "height={height}, count={count}, label={painted:?}, add={add:?}");
+                }
+            }
+            if height == 260.0 || count >= 9 {
+                assert_eq!(labels, 1, "overflow remains visible in compact and separate rows");
+            }
+            if let Some(at) = overflow_at {
+                click(&mut app, at);
+                frames(&mut app, &ctx, 4, &mut time);
+                assert!(app.ui.show_devices, "overflow still opens the device chain");
+            }
+            if count < 10 {
+                let add_at = mid(strip(&app, track).add_insert);
+                click(&mut app, add_at);
+                frames(&mut app, &ctx, 4, &mut time);
+                assert!(app.mixer.layout.menu.iter().any(|m| m.value == "gain"), "add remains usable");
+            }
+        }
+    }
+}

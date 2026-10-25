@@ -1317,7 +1317,7 @@ pub const SEND_ROW_H: f32 = 17.0;
 const BAR_H: f32 = 5.0;
 const STRIP_FIXED_H: f32 = 207.0;
 /// Height of an insert row, and the most rows a strip has for them: three inserts and "+", or
-/// two, "n more…" and "+" in a short pane (one row: only "+").
+/// two, "n more…" and "+" in a short pane (one row: label beside a reserved "+" cell).
 const INSERT_ROW_H: f32 = 15.0;
 const INSERT_ROWS: usize = 4;
 const MIN_FADER: f32 = 80.0;
@@ -1655,7 +1655,7 @@ fn inserts_block(
     let free = list.len() < t.mixer.inserts.len();
     let row_r = |i: usize| Rect::from_min_size(pos2(x0, y + i as f32 * INSERT_ROW_H), vec2(w, INSERT_ROW_H - 2.0));
     // The last row is always "+" (while a slot is free); a list that does not fit above it gives
-    // up its last visible row to "n more…". With a single row, only "+".
+    // up its last visible row to "n more…". A single row shares the label and a reserved + cell.
     let room = rows.saturating_sub(usize::from(free));
     let fits = list.len() <= room;
     let shown = if fits { list.len() } else { room.saturating_sub(1) };
@@ -1736,9 +1736,12 @@ fn inserts_block(
         return;
     }
     if !fits {
-        let rr = row_r(shown);
+        let mut rr = row_r(shown);
+        if room == 0 {
+            rr.max.x -= 20.0;
+        }
         let resp = ui.interact(rr.intersect(clip), ui.id().with(("more_inserts", id.0)), Sense::click());
-        p.text(
+        p.with_clip_rect(rr.intersect(clip)).text(
             pos2(rr.min.x + 4.0, rr.center().y),
             Align2::LEFT_CENTER,
             format!("{} more…", list.len() - shown),
@@ -1751,7 +1754,10 @@ fn inserts_block(
         }
     }
     if free {
-        let rr = row_r(rows - 1);
+        let mut rr = row_r(rows - 1);
+        if !fits && room == 0 {
+            rr.min.x = rr.max.x - 18.0;
+        }
         let resp = ui.interact(rr.intersect(clip), ui.id().with(("add_insert", id.0)), Sense::click());
         if resp.hovered() {
             p.rect_filled(rr, crate::theme::RADIUS_SM, TOKENS.button_hover);
@@ -1786,7 +1792,8 @@ fn strip(
     let vol_db = app.followed(t, &crate::automation::Lane::Volume).unwrap_or(m.volume_db);
     let bal = app.followed(t, &crate::automation::Lane::Pan).unwrap_or_else(|| balance_of(&m.pan));
     let p = ui.painter().with_clip_rect(clip);
-    p.rect_filled(r, crate::theme::RADIUS, if focused { TOKENS.header_selected } else { TOKENS.panel });
+    let background = if focused { TOKENS.header_selected } else { TOKENS.panel };
+    p.rect_filled(r, crate::theme::RADIUS, background);
     let mut sl = StripLayout {
         track: id.0,
         name: t.name.clone(),
@@ -1911,7 +1918,7 @@ fn strip(
     let pan = Target::Pan(id);
     let resp = ui.interact(knob.intersect(clip), ui.id().with(("knob", id.0)), Sense::click_and_drag());
     let hot = resp.hovered() || app.mixer.gesture.is_some_and(|g| g.target == pan);
-    draw_knob(&p, knob, b, hot);
+    draw_knob(&p, knob, b, hot, background);
     if has_pan {
         if resp.hovered() {
             ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
@@ -2113,7 +2120,24 @@ pub fn peak_text(lin: f32) -> (String, bool) {
     )
 }
 
-fn draw_knob(p: &egui::Painter, r: Rect, b: f32, hot: bool) {
+/// Mix the strip background toward its readable theme ink to a fixed contrast. Selected
+/// and normal strips therefore retain the same visual hierarchy in either appearance.
+fn knob_ink(background: Color32, ratio: f32) -> Color32 {
+    let ink = theme::text_on(background);
+    let mix = |k: f32| background.lerp_to_gamma(ink, k);
+    let (mut low, mut high) = (0.0, 1.0);
+    for _ in 0..12 {
+        let mid = (low + high) * 0.5;
+        if theme::contrast(mix(mid), background) < ratio {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    mix(high)
+}
+
+fn draw_knob(p: &egui::Painter, r: Rect, b: f32, hot: bool, background: Color32) {
     // Flat: a thin ring for the travel and the accent from the center to the value.
     let c = r.center();
     let rad = r.width() / 2.0 - 4.0;
@@ -2122,11 +2146,11 @@ fn draw_knob(p: &egui::Painter, r: Rect, b: f32, hot: bool) {
         let n = 24;
         (0..=n).map(|i| from + (to - from) * i as f32 / n as f32).map(|v| c + vec2(ang(v).cos(), ang(v).sin()) * rad).collect()
     };
-    p.add(egui::Shape::line(arc(-1.0, 1.0), Stroke::new(3.0, TOKENS.button)));
+    p.add(egui::Shape::line(arc(-1.0, 1.0), Stroke::new(3.0, knob_ink(background, 3.0))));
     // The center notch: a short line across the ring at the top.
-    p.line_segment([c + vec2(0.0, -(rad - 3.5)), c + vec2(0.0, -(rad + 3.5))], Stroke::new(1.0, TOKENS.text_dim));
+    p.line_segment([c + vec2(0.0, -(rad - 3.5)), c + vec2(0.0, -(rad + 3.5))], Stroke::new(1.0, knob_ink(background, 4.5)));
     p.add(egui::Shape::line(arc(0.0, b), Stroke::new(3.0, if hot { theme::lighten(TOKENS.accent, 0.15) } else { TOKENS.accent })));
-    p.circle_filled(c + vec2(ang(b).cos(), ang(b).sin()) * rad, 2.5, TOKENS.text);
+    p.circle_filled(c + vec2(ang(b).cos(), ang(b).sin()) * rad, 2.5, knob_ink(background, 7.0));
 }
 
 /// A one-point line at `y` as whole physical pixels: the y of its center, the rows it covers

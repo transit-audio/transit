@@ -99,3 +99,14 @@ The ruler shows the stored `loop_range` (never the selection): an amber block wh
 faint outline while off, nothing without a region. The block is live (`loopbar::block`, sharing
 `loopbar::gesture` with the 8 px strip): edges resize, the body moves, double-click toggles Cycle,
 all as one `transport.loop`. A plain click on the block, or anywhere else on the ruler, locates.
+
+## Mixer strip readability (#102)
+
+The pan rotary shared by audio, instrument and Aux strips derives its travel ring, center tick
+and pointer from the painted strip background and the theme's readable ink. Their contrast
+ratios stay at 3:1, 4.5:1 and 7:1 (within color quantization) for selected and normal strips in
+both appearances. Sends currently use linear sliders and text readouts, not another rotary.
+The insert overflow label occupies its own row above Add; when only one row fits, the label
+is clipped before a reserved Add cell on the right. The device chain still exposes every insert.
+Real UI paint tests in `tests.rs`
+check the colors against the painted backgrounds and the overflow text bounds against Add.
