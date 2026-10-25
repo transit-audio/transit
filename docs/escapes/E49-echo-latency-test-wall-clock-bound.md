@@ -118,3 +118,5 @@ A new test advances the injected age past the wait and asserts the give-up text 
 stored. Mutation: not storing the calibration in `ui.audio` fails the measure test. No
 `cargo xtask timing` rule: the clock is read in production code, outside what a scan of test
 lines can see.
+
+Recurrence 2026-10-25 (#106): the playback clamp test now checks its exact queued deadline against an echo stamped in the same scheduler drain and retains port delivery; the two bounce tests keep fake callbacks running until render completion and stop adoption instead of exhausting a fixed block budget, with the existing 10 s stall guards and sample/grid/click assertions retained.

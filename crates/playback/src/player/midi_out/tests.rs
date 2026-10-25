@@ -385,15 +385,35 @@ fn a_locate_with_a_lower_a_resets_the_deadline_clamp_so_the_next_lap_is_on_time(
 /// `CLAMP_CAP_NS` past now.
 #[test]
 fn the_deadline_clamp_is_capped_so_a_far_future_stamp_cannot_stall_a_track() {
+    let fake = Fake::default();
+    let key = fake.add_output("Synth OUT");
+    let (mut playback, receive_playback) = test_ring(QUEUE);
+    let (mut echo, receive_echo) = test_ring(QUEUE);
+    let (_control, receive) = mpsc::sync_channel(1);
+    let mut worker = Worker::new(fake.io(), HostOrigin::default(), receive, receive_playback, receive_echo, Arc::default(), Arc::default());
+    worker.set_destinations(vec![destination(1, &key, MidiOutChannel::AsRecorded, 0)]);
+    // Run the real scheduler synchronously. The echo records the very same `now` that drain
+    // uses for its clamp, so preemption between test statements cannot change the assertion.
+    assert!(playback.push(message(1, u64::MAX, [0x90, 60, 100])));
+    assert!(playback.push(message(1, 1, [0x90, 62, 100])));
+    assert!(echo.push(message(1, 0, [0x90, 64, 100])));
+    worker.drain();
+    assert_eq!(worker.pending.len(), 3);
+    let pending = &worker.pending;
+    assert_eq!(pending[0].event.bytes, [0x90, 64, 100]);
+    assert_eq!(pending[1].event.bytes, [0x90, 62, 100]);
+    assert_eq!(pending[2].event.bytes, [0x90, 60, 100]);
+    assert_eq!(pending[1].deadline, pending[0].deadline.saturating_add(CLAMP_CAP_NS), "the following note is held exactly to the cap");
+    assert_eq!(pending[2].deadline, u64::MAX, "the original future stamp is preserved");
+
+    // Keep the end-to-end delivery proof too. Its ten-second deadlock guard is not a latency
+    // measurement; the exact cap is proved above, independently of output-thread scheduling.
     let mut rig = Rig::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 0)]);
-    let now = rig.now();
-    assert!(rig.playback.push(message(1, now + 60_000_000_000, [0x90, 60, 100])));
-    assert!(rig.playback.push(message(1, now + 5_000_000, [0x90, 62, 100])));
+    assert!(rig.playback.push(message(1, u64::MAX, [0x90, 60, 100])));
+    assert!(rig.playback.push(message(1, 1, [0x90, 62, 100])));
     let sends = rig.wait_sent(1);
+    assert_eq!(sends.len(), 1);
     assert_eq!(sends[0].message, vec![0x90, 62, 100]);
-    let late = sends[0].at.saturating_duration_since(rig.origin.instant() + Duration::from_nanos(now + 5_000_000));
-    // Already a stall bound (#87, E49): the margin over the cap is far above host jitter.
-    assert!(late <= Duration::from_nanos(CLAMP_CAP_NS) + Duration::from_millis(100), "held past the cap: {late:?}");
 }
 
 fn stall(rig: &Rig) {

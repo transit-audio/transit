@@ -24,6 +24,7 @@ const START: i64 = 4_800;
 const LEN: u64 = 9_600;
 
 fn until(what: &str, mut ready: impl FnMut() -> bool) {
+    // timing: stall-bound ten seconds catches a stuck worker; success always requires the named state
     let deadline = Instant::now() + Duration::from_secs(10);
     while !ready() {
         assert!(Instant::now() < deadline, "did not reach: {what}");
@@ -206,9 +207,13 @@ fn released(sent: &[Vec<u8>]) -> bool {
 fn render(rig: &Rig, len: u64, sink: Box<dyn RenderSink>) -> Option<Result<crate::realtime_render::Rendered, RealtimeError>> {
     rig.player.start_realtime_render(&spec(rig, len), sink).unwrap_or_else(|e| panic!("{e}"));
     let mut result = None;
-    let blocks = (len as usize + 4 * C) / BLOCK + 200;
     let mut heard = false;
-    pump(rig, blocks, |_, p| {
+    // Keep the fake device running until the asynchronous writer finishes. A fixed callback
+    // count says nothing about the writer's progress, and a callback-free wait cannot apply
+    // the Stop queued by realtime_render_result after that budget is exhausted (E49, #106).
+    until("the render completes while the device runs", || {
+        pump(rig, 1, |_, _| false);
+        let p = &rig.player;
         if !heard && p.is_playing() && p.position() > AT as i64 {
             // The pump runs ahead of real time and the output thread sends at each note's stamp:
             // let the note-on reach the port before the render can end and stop.
@@ -218,12 +223,10 @@ fn render(rig: &Rig, len: u64, sink: Box<dyn RenderSink>) -> Option<Result<crate
         result = p.realtime_render_result();
         result.is_some()
     });
-    if result.is_none() {
-        until("the writer finishes", || {
-            result = rig.player.realtime_render_result();
-            result.is_some()
-        });
-    }
+    until("the stop is applied by the device", || {
+        pump(rig, 1, |_, _| false);
+        !rig.player.is_playing()
+    });
     result
 }
 
@@ -400,8 +403,12 @@ fn the_bounce_leaves_the_metronome_out_with_click_on() {
     // From 0.1 s over 0.6 s: the beat at 0.5 s is inside the range.
     let len = 28_800;
     let (sink, mix, _) = file_sink(&rig, len);
-    render(&rig, len, Box::new(sink)).unwrap().unwrap_or_else(|e| panic!("{e}"));
+    let done = render(&rig, len, Box::new(sink)).unwrap().unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!(done.frames, len);
     let bounce = read(&mix);
+    assert_eq!(bounce.len(), 2);
+    assert_eq!(bounce[0].len(), len as usize);
+    assert_eq!(bounce[1].len(), len as usize);
     let software = offline(&rig.session, len);
     let grid = AT - START as usize;
     for c in 0..2 {
