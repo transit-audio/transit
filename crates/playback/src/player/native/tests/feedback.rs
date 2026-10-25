@@ -39,27 +39,35 @@ impl Fixture {
     }
 }
 
+/// The round trip of the modeled loop: transit's echo out, the device's thru, back in. #99's
+/// capture showed about 1 ms; 2 ms keeps a returned message well over the detector's repeat bound
+/// (25 a window against 12) and halves the loop passes a test needs.
+const ROUND_TRIP_NS: u64 = 2_000_000;
+
 /// The device's MIDI thru: everything sent to its output comes back on its input, as the
-/// KeyStep Pro in #99 did.
+/// KeyStep Pro in #99 did. What it forwards is stamped, never the real clock: the n-th message
+/// (from 0) arrives at `base + (n + 1) * step_ns`, so the loop's rate is the stamps' and not the
+/// runner's scheduling (the output thread's 1 ms poll, the thru thread's turn). A loop of `k`
+/// messages uses `step_ns = ROUND_TRIP_NS / k`.
 struct Thru {
     stop: Arc<AtomicBool>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
 impl Thru {
-    fn start(fake: &Fake, output: &PortKey, input: &PortKey) -> Self {
+    fn start(fake: &Fake, output: &PortKey, input: &PortKey, base: u64, step_ns: u64) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let (fake, output, input, flag) = (fake.clone(), output.clone(), input.clone(), Arc::clone(&stop));
         let thread = std::thread::spawn(move || {
-            let mut forwarded = 0;
+            let mut forwarded = 0u64;
             while !flag.load(Ordering::Acquire) {
                 let sent = fake.sent(&output);
                 if let Some(port) = fake.input_port(&input) {
-                    for message in sent.iter().skip(forwarded) {
-                        port.deliver(0, message);
+                    for message in sent.iter().skip(forwarded as usize) {
+                        forwarded += 1;
+                        port.deliver_at(0, base + forwarded * step_ns, message);
                     }
                 }
-                forwarded = sent.len();
                 std::thread::yield_now();
             }
         });
@@ -76,8 +84,14 @@ impl Drop for Thru {
     }
 }
 
-fn count(fake: &Fake, key: &PortKey, message: &[u8]) -> usize {
-    fake.sent(key).iter().filter(|m| m.as_slice() == message).count()
+/// Looped note-ons (one per round trip) plainly past the stamped time the detector mutes by: its
+/// four windows and two more.
+fn past_the_mute() -> u64 {
+    (u64::from(ingress::STORM_WINDOWS) + 2) * (ingress::STORM_WINDOW_NS / ROUND_TRIP_NS)
+}
+
+fn count(fake: &Fake, key: &PortKey, message: &[u8]) -> u64 {
+    fake.sent(key).iter().filter(|m| m.as_slice() == message).count() as u64
 }
 
 /// The repro: echo allowed to the controller's own port and the detector off. One key press comes
@@ -91,12 +105,13 @@ fn a_looped_device_with_echo_allowed_and_no_detector_storms() {
     let mut f = Fixture::new(session, fake.io());
     f.native.disable_storm_detector();
     f.connected(t);
-    let thru = Thru::start(&fake, &output, &input);
-    assert!(fake.input_port(&input).unwrap().deliver(0, &[0x90, 60, 100]));
-    // One press, hundreds of sends: the loop formed.
+    let base = HostOrigin::default().now_ns().unwrap();
+    let thru = Thru::start(&fake, &output, &input, base, ROUND_TRIP_NS);
+    assert!(fake.input_port(&input).unwrap().deliver_at(0, base, &[0x90, 60, 100]));
+    // One press, and the loop runs on past the stamped time the detector would have muted it by.
     until(|| {
         f.pump();
-        count(&fake, &output, &[0x90, 60, 100]) >= 300
+        count(&fake, &output, &[0x90, 60, 100]) > past_the_mute()
     });
     assert!(f.native.status().muted_inputs.is_empty());
     drop(thru);
@@ -118,8 +133,9 @@ fn by_default_input_is_not_echoed_to_its_own_device_so_no_loop_forms() {
     let route = f.native.inputs[0].routes[0].route;
     assert!(!route.echo && !route.deliver, "the route captures for a recording and does not echo: {route:?}");
     assert_eq!(f.native.status().self_echo, vec![(t, false)], "the UI is told why");
-    let thru = Thru::start(&fake, &output, &input);
-    assert!(fake.input_port(&input).unwrap().deliver(0, &[0x90, 60, 100]));
+    let base = HostOrigin::default().now_ns().unwrap();
+    let thru = Thru::start(&fake, &output, &input, base, ROUND_TRIP_NS);
+    assert!(fake.input_port(&input).unwrap().deliver_at(0, base, &[0x90, 60, 100]));
     let packets = f.packets(1);
     assert_eq!(packets[0].message, soundcraft_mix::Message::NoteOn { key: 60, velocity: 100, id: soundcraft_mix::NoteId::NONE });
     // timing: sleep-ok negative check, an echo would go out within the output thread's 1 ms poll
@@ -142,13 +158,25 @@ fn with_echo_allowed_the_storm_detector_mutes_the_port_and_releases_its_notes() 
     f.connected(t);
     assert!(f.native.inputs[0].routes[0].route.echo, "allowed: the route echoes");
     assert_eq!(f.native.status().self_echo, vec![(t, true)]);
-    let thru = Thru::start(&fake, &output, &input);
-    assert!(fake.input_port(&input).unwrap().deliver(0, &[0x90, 60, 100, 0xB0, 64, 127]));
+    // A note and the pedal loop, a round trip apart on stamped time. Each window of the detector
+    // holds 25 returns of each, over its repeat bound (12), and 50 messages, under its rate bound
+    // (100): the repeats alone mute the port, in the fourth hot window in a row.
+    let base = HostOrigin::default().now_ns().unwrap();
+    let thru = Thru::start(&fake, &output, &input, base, ROUND_TRIP_NS / 2);
+    assert!(fake.input_port(&input).unwrap().deliver_at(0, base, &[0x90, 60, 100, 0xB0, 64, 127]));
+    let per_window = ingress::STORM_WINDOW_NS / ROUND_TRIP_NS;
+    let hot = u64::from(ingress::STORM_REPEAT) * ingress::STORM_WINDOW_NS / 1_000_000_000 + 1;
+    let windows = u64::from(ingress::STORM_WINDOWS);
+    // The loop runs until the port mutes or plainly past the stamped time it must have muted by,
+    // so a detector that never trips fails the assertion below, not the deadlock guard. About a
+    // hundred loop passes, each one output-thread poll: the guard's 10 s is a stall bound of
+    // 100 ms a pass.
     until(|| {
         f.pump();
-        !f.native.status().muted_inputs.is_empty()
+        !f.native.status().muted_inputs.is_empty() || count(&fake, &output, &[0x90, 60, 100]) > past_the_mute()
     });
     let status = f.native.status();
+    assert!(!status.muted_inputs.is_empty(), "{} looped note-ons and the port is not muted", count(&fake, &output, &[0x90, 60, 100]));
     assert_eq!(status.counts.storms, 1);
     assert_eq!((status.muted_inputs[0].name.as_str(), status.muted_inputs[0].tracks.as_slice()), ("KeyStep Pro", [t].as_slice()));
     // The route is revoked, so the echo's held note and pedal are released on the port.
@@ -159,9 +187,12 @@ fn with_echo_allowed_the_storm_detector_mutes_the_port_and_releases_its_notes() 
     });
     assert_eq!(f.native.status().routes, 0);
     let looped = count(&fake, &output, &[0x90, 60, 100]);
-    // The bound is the detector's 200 ms at the loop's rate (one pass per output poll); this is a
-    // stall bound on that, the windows themselves are proven on stamped times in `storm.rs`.
-    assert!(looped < 2_000, "{looped} looped note-ons before the mute");
+    // Exact on the stamps, whatever the windows' alignment to `base`: the press, then the returns
+    // until the hot-th return of the fourth hot window in a row. At least two full windows and
+    // hot - 1 returns on each side (one echo may still be in flight at the revocation and be
+    // dropped); at most a cold first window (hot - 1), three full windows and hot.
+    let (least, most) = ((windows - 2) * per_window + 2 * hot - 2, (windows - 1) * per_window + 2 * hot);
+    assert!((least..=most).contains(&looped), "{looped} looped note-ons before the mute, expected {least} to {most}");
     // The release came back through the thru: the muted port admits nothing.
     // timing: sleep-ok negative check, the muted port must not echo the returning release
     std::thread::sleep(Duration::from_millis(50));
@@ -192,7 +223,7 @@ fn a_dense_sequencer_stream_is_echoed_and_never_muted() {
     assert!(f.native.inputs[0].routes[0].route.echo);
     assert!(f.native.status().self_echo.is_empty(), "another device");
     let port = fake.input_port(&input).unwrap();
-    let start = transit_midi_io::host_now_ns();
+    let start = HostOrigin::default().now_ns().unwrap();
     let total = 1_500u64;
     // In chunks the audio side's note budget absorbs (the stamps, not the delivery, set the rate).
     const CHUNK: u64 = 20;
