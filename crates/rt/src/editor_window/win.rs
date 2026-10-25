@@ -787,11 +787,12 @@ impl EditorWindow {
 
 /// Resizes the plug-in content of the editor window `window` ([`EditorWindow::raw`]) to `w`×`h`,
 /// the frame growing or shrinking by exactly that (the strip keeps its height). Does nothing for a
-/// window that is not a live editor window of the calling thread.
-pub fn resize_content(window: *mut c_void, w: f64, h: f64) {
-    if let Some(d) = data(window) {
-        set_content(window, d, w as i32, h as i32);
-    }
+/// window that is not a live editor window of the calling thread. Returns whether it resized (a
+/// plug-in's `resizeView` is honored only then, issue #105).
+pub fn resize_content(window: *mut c_void, w: f64, h: f64) -> bool {
+    let Some(d) = data(window) else { return false };
+    set_content(window, d, w as i32, h as i32);
+    true
 }
 
 #[cfg(test)]
@@ -814,7 +815,7 @@ mod tests {
         let hh = super::super::header_height(dpi_of(win.raw()));
         assert_eq!(client(win.raw()), (640, 400 + hh));
         assert_eq!(client(win.parent()), (640, 400), "the plug-in's area is exactly what it reported");
-        resize_content(win.raw(), 333.0, 222.0);
+        assert!(resize_content(win.raw(), 333.0, 222.0), "resized");
         assert_eq!(client(win.raw()), (333, 222 + hh));
         assert_eq!(client(win.parent()), (333, 222));
         // A narrow plug-in gets a narrow window: no system minimum width.
@@ -961,12 +962,7 @@ mod tests {
         let n = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetWindowTextW(win.raw(), buf.as_mut_ptr(), 128) };
         assert_eq!(String::from_utf16_lossy(&buf[..usize::try_from(n).unwrap()]), "Drums · Insert A · Battery 4");
         let raw = win.raw() as usize;
-        let other = std::thread::spawn(move || {
-            resize_content(raw as *mut c_void, 50.0, 50.0);
-            data(raw as HWND).is_none()
-        })
-        .join()
-        .unwrap();
+        let other = std::thread::spawn(move || !resize_content(raw as *mut c_void, 50.0, 50.0) && data(raw as HWND).is_none()).join().unwrap();
         assert!(other, "another thread gets nothing");
         assert_eq!(client(win.parent()), (200, 100), "and changes nothing");
         win.close();

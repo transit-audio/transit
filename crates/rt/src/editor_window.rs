@@ -522,8 +522,10 @@ mod other {
         pub fn close(self) {}
     }
 
-    /// Nothing.
-    pub fn resize_content(_window: *mut c_void, _w: f64, _h: f64) {}
+    /// Nothing to resize on this platform (see the Windows version).
+    pub fn resize_content(_window: *mut c_void, _w: f64, _h: f64) -> bool {
+        false
+    }
 }
 #[cfg(not(windows))]
 pub use other::{EditorWindow, resize_content};
