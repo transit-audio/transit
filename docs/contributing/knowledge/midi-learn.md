@@ -1,8 +1,8 @@
 # MIDI Learn
 
-Issue #97 slice 1; decision in [ADR 0028](../../adr/0028-midi-learn-mappings.md). Map a controller knob, fader or
-button to a mixer or track control: fader, pan, mute, solo, record arm, send level. Plug-in parameters
-(with automation write) are slice 2; transport and MMC are slice 3. Input side: `midi.md`; the Monitor
+Issue #97 slices 1 and 2; decisions in [ADR 0028](../../adr/0028-midi-learn-mappings.md). Map a controller knob, fader or
+button to a mixer or track control (fader, pan, mute, solo, record arm, send level) or to a plug-in parameter, built-in or hosted
+(slice 2, with automation write). Transport and MMC are slice 3. Input side: `midi.md`; the Monitor
 whose Learn spotlight and table style this builds on: `midi-monitor.md`; thread rules: `audio-thread.md`.
 
 ## Shape
@@ -22,7 +22,7 @@ whose Learn spotlight and table style this builds on: `midi-monitor.md`; thread 
 ## Mapping
 
 Source: port name (the Monitor's name, `PortKey` display), channel (0 to 15 inside, shown 1 to 16; `any`),
-CC or note, number. Target: `track:<id>:volume|pan|mute|solo|arm|send:<slot>` in a session; the profile
+CC or note, number. Target: `track:<id>:volume|pan|mute|solo|arm|send:<slot>|plugin:<slot>:<param id>` in a session; the profile
 uses `strip:<n>:...` (n counts from 1 in session order) because track ids belong to one session.
 Mode `pickup` (default) or `jump`; `min` and `max` are the part of the control's travel (0..1) the knob
 spans; `toggle` (default true) flips a button on a note-on or a CC rising through 64, false follows the key
@@ -72,6 +72,24 @@ same setter a mouse drag uses, so a sweep, even of several controls together, is
 `mix.mute`, `mix.solo` or `mix.record_arm`. Session `midi.map` and `midi.unmap` are undoable commands; the
 profile is per machine and makes no undo step.
 
+## Plug-in parameters (slice 2)
+
+Target `track:<id>:plugin:<slot>:<param id>` (profile: `strip:<n>:plugin:...`), the picker's addressing from #65: `<slot>` is an insert
+letter `a` to `j` or `instrument`; `<param id>` is the plug-in's stable id (the rest of the text, so it may hold colons). `Control::Plugin
+{ slot, param }` in `model/src/midi_map.rs` is never a button; the engine refuses a slot with no plug-in and an unknown built-in parameter
+(`check_device`). The playback side is unchanged: a plug-in parameter is a continuous control whose cell holds the knob's 0..1.
+
+Main applies a move in `StudioApp::mapped_param_move`: `plugin_value` (the knob's 0..1 to the parameter's own units, the taper honored: the
+same `knob::value_at` a panel knob uses), then `touch_param` and `mix.insert_param` / `mix.instrument_param` under the gesture's merge key.
+Because it is a touched parameter, Write, Latch and Touch record it while playing and Read does not; the touch is held `HOSTED_HOLD_S` past
+the newest value (no pointer). A mapping whose device is gone is stored, shown, and left out of the snapshot.
+
+Entry points: right-click a built-in editor's control (panel knob, toggle, choice, generic row) for the menu below, with the marker on the
+control. Hosted editors draw their own widgets, so the header strip's menu has *MIDI Learn: next touched parameter* (`HeaderAction::LearnNext`;
+`EditorHeader::learning` checks it): `StudioApp::learn_next_touched` arms (again, or Escape, cancels), `apply_edits` hands each changed edit
+the plug-in reports to `learn_touched`, the first of this editor's becomes the target and `midi.learn` waits for the CC or note.
+`check_param` refuses a hosted parameter the host registry does not list (hidden, read-only and meter parameters are never listed).
+
 ## UI
 
 Right-click a control: unmapped offers *MIDI Learn* (session) and *MIDI Learn for this controller (all
@@ -85,5 +103,6 @@ stored mapping: port, channel, source, target, mode (editable), range (editable)
 
 `model/src/midi_map.rs` (stores, conflict, serde), `engine/src/cmd/midi_map.rs` (commands, undo),
 `playback/src/player/midi_map.rs` and `ingress/map_tests.rs` (matching through the fake backend and the real
-pump), `device/midi_map_tests.rs` (through the Player), `ui-studio/src/midi_learn_tests.rs` (menu, marker,
-sweep undo, profile in the preferences, the window).
+pump, plug-in targets included), `device/midi_map_tests.rs` (through the Player), `ui-studio/src/midi_learn_tests.rs` (menu, marker,
+sweep undo, profile in the preferences, the window), `ui-studio/src/midi_learn_plugin_tests.rs` (normalized range, learn from the built-in
+editor, learn next touched, refusal, automation modes).
