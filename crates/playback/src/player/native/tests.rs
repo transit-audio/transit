@@ -277,6 +277,23 @@ fn monitored(
     (events, last)
 }
 
+/// [`monitored`] reading at the injected host time `now` rather than the real clock, for tests that
+/// stamp their own pulses.
+fn monitored_at(
+    f: &mut Fixture,
+    now: u64,
+    mut ready: impl FnMut(&[monitor::MonitorEvent], &monitor::Report) -> bool,
+) -> (Vec<monitor::MonitorEvent>, monitor::Report) {
+    let mut events = Vec::new();
+    let mut last = monitor::Report::default();
+    until(|| {
+        f.tick();
+        last = f.native.take_monitor_at(&mut events, 1000, now);
+        ready(&events, &last)
+    });
+    (events, last)
+}
+
 fn port_id(report: &monitor::Report, name: &str) -> u16 {
     report.ports.iter().find(|p| p.dir == monitor::Dir::In && p.name == name).unwrap().id
 }
@@ -326,9 +343,13 @@ fn monitor_counts_clock_instead_of_listing_it_and_notes_realtime_and_sysex() {
     f.ready(1, 1);
     let backend = fake.input_port(&key).unwrap();
     // Eleven pulses stamped 20 ms apart (125 BPM at 24 ppqn), Start, Active Sensing, a SysEx and
-    // Stop. The stamps are injected, never paced with sleeps, so a slow runner cannot skew them.
+    // Stop. The stamps are injected, never paced with sleeps, so a slow runner cannot skew them. They
+    // are on the native player's host origin (audio-backend's), not midi-io's own default origin:
+    // the two are fixed at separate first uses and can differ by seconds in a test process. The
+    // readout is taken at the last stamp, so the freshness check never reads the real clock.
     assert!(backend.deliver(0, &[0xFA]));
-    let base = transit_midi_io::host_now_ns();
+    let base = HostOrigin::default().now_ns().unwrap();
+    let read_at = base + 10 * 20_000_000;
     for n in 0..11 {
         assert!(backend.deliver_at(n, base + n * 20_000_000, &[0xF8]));
     }
@@ -336,7 +357,8 @@ fn monitor_counts_clock_instead_of_listing_it_and_notes_realtime_and_sysex() {
     assert!(backend.deliver(0, &[0xF0, 1, 2, 3, 0xF7]));
     assert!(backend.deliver(0, &[0xFC]));
     // The SysEx note is raised after the batch's messages, so wait for both ends.
-    let (events, report) = monitored(&mut f, |events, _| events.iter().any(|e| e.status == 0xFC) && events.iter().any(|e| e.status == 0xF0));
+    let (events, report) =
+        monitored_at(&mut f, read_at, |events, _| events.iter().any(|e| e.status == 0xFC) && events.iter().any(|e| e.status == 0xF0));
     let status: Vec<u8> = events.iter().map(|e| e.status).collect();
     assert!(!status.contains(&0xF8) && !status.contains(&0xFE), "{status:x?}");
     assert!(status.contains(&0xFA));

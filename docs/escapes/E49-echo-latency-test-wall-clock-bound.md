@@ -69,3 +69,16 @@ finish only after one did. Mutation: dispatching audio-thread strips to the glob
 deterministically (24 jobs ended, 10 s). The sweep missed it because the 50 ms bound sat in a
 `const`; `cargo xtask timing` rule (a) now follows `const`/`static`/`let` names bound to a short
 duration, which also surfaced one unmarked by-design median in `native/tests.rs` (now marked).
+
+Recurrence 2026-10-25 (#87, #91; CI run 40205285227, windows asio and macos): the rewritten Clock
+test panicked "a rate from eleven pulses" (`crates/playback/src/player/native/tests.rs`). The
+pulses were stamped with `transit_midi_io::host_now_ns()`, whose origin is fixed at midi-io's first
+use in the process, while the readout (`Native::take_monitor`, `native.rs`) judges the one-second
+Clock timeout against `HostOrigin::default()` (audio-backend), fixed at a different first use. The
+two origins differ by however long the test process ran between them, so on a slow runner the stamps
+looked more than 1 s old and the rate was None. Two hidden dependencies behind the injected
+stamps: a second host origin, and the real clock at read time. Fixed: the test stamps on the
+player's own origin, and `take_monitor_at(now)` lets it read at the last stamp (production's
+`take_monitor` passes the real clock, unchanged). Mutation: reading 2 s after the stamps fails it
+deterministically. Rule added to `gates.md`; no `cargo xtask timing` rule, since a line scan cannot
+tell two origins apart.

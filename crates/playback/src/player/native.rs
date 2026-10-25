@@ -310,9 +310,14 @@ impl Native {
 
     /// The monitor's pending events of both directions, and its counters and port list.
     pub(super) fn take_monitor(&self, events: &mut Vec<MonitorEvent>, max: usize) -> monitor::Report {
+        self.take_monitor_at(events, max, self.origin.now_ns().unwrap_or(0))
+    }
+
+    /// [`Self::take_monitor`] judging Clock and Active Sensing freshness at `now` on this origin's
+    /// host clock, so a caller that injected pulse stamps reads at a time consistent with them.
+    pub(super) fn take_monitor_at(&self, events: &mut Vec<MonitorEvent>, max: usize, now: u64) -> monitor::Report {
         self.monitor.drain(events, max);
         let (dropped_in, dropped_out) = self.monitor.dropped();
-        let now = self.origin.now_ns().unwrap_or(0);
         let mut ports = Vec::new();
         for (i, input) in self.inputs.iter().enumerate() {
             let tracks = input.routes.iter().map(|b| b.route.target.0.0).collect();
