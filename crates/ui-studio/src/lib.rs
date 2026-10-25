@@ -19,6 +19,7 @@ pub mod builtin_editor;
 pub mod control;
 pub mod debug_log;
 pub mod devices;
+pub mod diagnostics;
 mod external_instrument;
 mod external_measure;
 pub mod fades;
@@ -426,6 +427,8 @@ pub struct StudioApp {
     pub recent_menu: Vec<recent::RecentItemLayout>,
     /// The built-in plug-in editor windows as last drawn.
     pub builtin_editor: builtin_editor::EditorState,
+    /// The Copy diagnostics buttons' state (#114).
+    pub diag: diagnostics::DiagState,
 }
 
 impl StudioApp {
@@ -459,6 +462,7 @@ impl StudioApp {
             status: String::new(),
             state_notice: None,
             services,
+            diag: Default::default(),
             autosave_dir: None,
             autosaver: None,
             autosaved_rev: 0,

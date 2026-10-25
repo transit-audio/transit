@@ -22,6 +22,8 @@ pub struct AboutState {
     pub open: bool,
     /// The app's own version (the transit crate's), set at launch; empty falls back to this crate's.
     pub app_version: String,
+    /// `<short sha> <date>` of the build, set at launch; empty when unknown.
+    pub build: String,
     pub window: R4,
     pub wordmark: R4,
     /// The "transit <version>" line.
