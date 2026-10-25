@@ -148,25 +148,34 @@ single key press, or transit's own Sustain off and All Notes Off, went round at 
   instrument's own release where it has one) but the ingress worker never pushes them to the echo
   ring. An incoming CC 123 therefore sends nothing to the port: the output thread's echo held state
   keeps its notes, which end with explicit note-offs when the echo route is revoked.
-- **Storm detector** (`player/ingress/storm.rs`). Per input port, on the worker, counters only: in
-  windows of 50 ms of arrival time, a window is hot above 2,000 messages a second (`RATE`; twice a
-  1,000-a-second sequencer and under a DIN link's 3,125) or when one identical message repeats more
-  than 250 times a second (`REPEAT`; a thru loop repeats each message once per round trip, a
-  musical source does not; this catches a round trip up to 4 ms). Clock and Active Sensing never
-  count. Four hot windows in a row (200 ms) mute the port: its permits are invalidated at once,
-  Main sees the routes revoked and releases what they hold through the usual path (the
-  instrument's notes, `release_echo` on the output port), and keeps the port without routes (by
-  key, across a close and reopen) until the user re-enables it. `MidiStatus::muted_inputs` names
-  it and the tracks it feeds; "<port> muted: feedback storm detected; click to re-enable" is a
-  button in the track's MIDI input menu and the External Instrument card's status row
-  (`MutedInput::reenable`). The detector runs with echo allowed too.
+- **Storm detector** (`player/ingress/storm.rs`). Per input port, on the worker, counters only, and
+  only while the port has an echo route (no loop can form without one; a port that only feeds an
+  instrument or a recording is never watched). In windows of 50 ms of arrival time a window is hot
+  above 2,000 messages a second (`RATE`; twice a 1,000-a-second sequencer and under a DIN link's
+  3,125), Clock and Active Sensing excluded, or when one identical *returned* message repeats more
+  than 250 times a second (`REPEAT`). A message is returned only when the port echoes to its own
+  device (the opt-in, `Route::self_echo`) and it matches one of the last 16 messages echoed there
+  within 20 ms (`RETURN_NS`): a thru loop returns transit's own bytes once per round trip, so this
+  catches a round trip up to 4 ms. NRPN sweeps and relative encoders repeat identical bytes on every
+  update; echoed to another device they never count as returned, and NRPN's CC 6, 38 and 96 to 101
+  never count even on an opted-in self-echo port (bytes cannot tell a performer from a loop there;
+  a loop of those alone is four messages per update and trips `RATE`). Four hot windows in a row
+  (200 ms) mute the port: its permits are invalidated at once, Main sees the routes revoked and
+  releases what they hold through the usual path (the instrument's notes, `release_echo` on the
+  output port), and keeps the port without routes (by key, across a close and reopen) until the
+  user re-enables it. A muted port feeds nothing, so a recording from it stops too; the message
+  says so. `MidiStatus::muted_inputs` names it and the tracks it feeds; "<port> muted: feedback
+  storm detected (recording from it stops too); click to re-enable" is a button in the track's
+  MIDI input menu and the External Instrument card's status row (`MutedInput::reenable`). The
+  arranger header chip of a track whose echo is held back reads "echo off".
 
 Tests: `crates/playback/src/player/native/tests/feedback.rs` (a fake device whose output is looped
 to its own input: the storm forms with echo allowed and the detector off; the default does not
 echo; allowed with the detector on, the port mutes, the held note and pedal are released and the
 flag is set; a 1,000-a-second stream is never muted; channel-mode CCs are not echoed and an
 incoming All Notes Off sends no release), `crates/playback/src/player/ingress/storm.rs` (the
-windows on stamped times: dense streams, a flood, a looping message, Clock, bursts),
+windows on stamped times: dense streams, a flood, a looping message, Clock, bursts, an NRPN sweep at
+500 updates a second and encoder ticks at 300 a second never muted, a returned echo muted),
 `crates/model/src/midi_output.rs` (the device rule, the opt-in's persistence),
 `crates/engine/tests/midi_output.rs`, `crates/ui-studio/src/midi_output.rs`. Escape record:
 [E55](../../escapes/E55-midi-feedback-loop-ran-until-the-app-was-closed.md).
