@@ -153,6 +153,10 @@ impl Drop for Opening<'_> {
 /// Set once the module exits have run: loading another module after that is refused.
 static MODULES_EXITED: AtomicBool = AtomicBool::new(false);
 
+/// Modules taken out of the cache for an exit on the module thread that did not finish in time
+/// (see [`exit_modules`]): their exit may never have run.
+static EXITS_UNFINISHED: AtomicUsize = AtomicUsize::new(0);
+
 /// Where a module's entry ran. Its exit must run on the same thread: Qt-based modules tie their
 /// application object to it (Native Instruments' Massive X crashes in `bundleExit` on another
 /// thread). Modules wanted on a plug-in main thread (the thread named `main`, or one that called
@@ -384,8 +388,25 @@ pub(crate) fn exit_modules() {
     here.into_iter().for_each(Bundle::exit);
     if !there.is_empty() {
         // Bounded: a module thread stuck inside a plugin must not hang the process exit.
-        let _ = on_module_thread(move || there.into_iter().for_each(Bundle::exit), Some(Duration::from_secs(5)));
+        let count = there.len();
+        if on_module_thread(move || there.into_iter().for_each(Bundle::exit), Some(Duration::from_secs(5))).is_none() {
+            EXITS_UNFINISHED.fetch_add(count, Ordering::AcqRel);
+        }
     }
+}
+
+/// Modules loaded and not exited: those still in the cache (a live instance, leaked objects, or
+/// entered on a plug-in main thread that has not called [`exit_modules`]) plus those whose exit on
+/// the module thread did not finish in time. A module that is busy loading counts as one. After
+/// every plug-in main thread has shut down, anything above zero is a module whose static
+/// destructors would run at process exit without its module exit (issue #104).
+pub(crate) fn modules_not_exited() -> usize {
+    let cached = match loaded().try_lock() {
+        Ok(g) => g.len(),
+        Err(TryLockError::Poisoned(p)) => p.into_inner().len(),
+        Err(TryLockError::WouldBlock) => 1,
+    };
+    cached + EXITS_UNFINISHED.load(Ordering::Acquire)
 }
 
 /// Registers [`exit_modules`] to run at process exit. Exit handlers run in reverse order of

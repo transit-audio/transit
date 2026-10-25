@@ -124,6 +124,7 @@ pub enum Vst3Error {
 mod api {
     pub(crate) use super::ffi::adopt_main_thread;
     pub(crate) use super::ffi::exit_modules as shutdown;
+    pub(crate) use super::ffi::modules_not_exited;
     pub(crate) use super::plugin::service_requests;
     pub use super::registry::*;
 }
@@ -181,6 +182,9 @@ mod api {
         None
     }
     pub fn shutdown() {}
+    pub fn modules_not_exited() -> usize {
+        0
+    }
     pub fn adopt_main_thread() {}
     pub fn service_requests() -> Serviced {
         Serviced::default()
@@ -338,6 +342,17 @@ pub fn cached() -> Option<Vec<Vst3Descriptor>> {
 /// (HALion Sonic crashes in its module exit after it has been used).
 pub fn shutdown() {
     api::shutdown()
+}
+
+/// How many loaded plug-in binaries have not had their module exit: a live instance or leaked
+/// objects kept one running, it was entered on a plug-in main thread that has not called
+/// [`shutdown`], or its exit on the module thread did not finish in time. Read it after
+/// [`shutdown`] has run on every plug-in main thread: above zero, ending the process normally
+/// would run those binaries' static destructors without their module exit, which can hang or
+/// crash (issue #104), so the app ends it without exit handlers instead.
+#[must_use]
+pub fn modules_not_exited() -> usize {
+    api::modules_not_exited()
 }
 
 /// Makes the calling thread a plug-in main thread, like the thread named `main`: the modules it

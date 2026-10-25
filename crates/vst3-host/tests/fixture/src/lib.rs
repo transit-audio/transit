@@ -33,6 +33,10 @@
 //! Probe mode (`VST3_FIXTURE_PROBES` set; see "probe mode" below) checks VST3's edit-controller
 //! threading rule and reports the Freq values Gain's processor receives.
 //!
+//! Unload mode (`VST3_FIXTURE_UNLOAD_WAITS_ON_WORKER` set; see "a module whose unload waits"
+//! below) gives the module a worker thread that its static destructor waits for, like a real
+//! instrument whose unload hung the process exit (issue #104).
+//!
 //! The module checks the host's module lifecycle the way real plugins depend on it (see "module
 //! lifecycle" below) and aborts the process when it is broken.
 //!
@@ -1566,6 +1570,9 @@ fn module_entry() -> bool {
     }
     if ENTERED.fetch_add(1, Ordering::SeqCst) == 0 {
         ENTRY_THREAD.store(os_thread(), Ordering::SeqCst);
+        if std::env::var_os("VST3_FIXTURE_UNLOAD_WAITS_ON_WORKER").is_some() {
+            start_worker();
+        }
     }
     if !TEARDOWN_REGISTERED.swap(true, Ordering::SeqCst) {
         unsafe { atexit(static_teardown) };
@@ -1599,7 +1606,51 @@ fn module_exit() -> bool {
     if LATE_STATE_GONE.load(Ordering::SeqCst) {
         violation("module exit after the process exit tore down state the module set up while in use");
     }
+    if left == 0 {
+        stop_worker();
+    }
     true
+}
+
+// A module whose unload waits for its own worker thread (issue #104), on with
+// `VST3_FIXTURE_UNLOAD_WAITS_ON_WORKER`: the outermost module entry starts a worker thread, the
+// module exit stops it, and a static destructor (an `atexit` handler of this binary, which runs
+// when the binary is unloaded or the process exits) stops it too and waits, with no time limit,
+// until the worker says it has stopped. Seen in a real instrument: on Windows the process exit
+// kills every other thread before it unloads the binaries, so when the module exit never ran
+// the worker is gone, nobody clears the flag and the exit hangs forever.
+
+/// True while the worker thread runs; only the worker clears it.
+static WORKER_RUNNING: AtomicBool = AtomicBool::new(false);
+static WORKER_STOP: AtomicBool = AtomicBool::new(false);
+static WORKER_TEARDOWN_REGISTERED: AtomicBool = AtomicBool::new(false);
+
+fn start_worker() {
+    if WORKER_RUNNING.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    WORKER_STOP.store(false, Ordering::SeqCst);
+    std::thread::spawn(|| {
+        while !WORKER_STOP.load(Ordering::SeqCst) {
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        WORKER_RUNNING.store(false, Ordering::SeqCst);
+    });
+    if !WORKER_TEARDOWN_REGISTERED.swap(true, Ordering::SeqCst) {
+        unsafe { atexit(worker_teardown) };
+    }
+}
+
+/// Stops the worker and waits until it has stopped: forever, as the real one does.
+fn stop_worker() {
+    WORKER_STOP.store(true, Ordering::SeqCst);
+    while WORKER_RUNNING.load(Ordering::SeqCst) {
+        std::thread::sleep(std::time::Duration::from_millis(2));
+    }
+}
+
+extern "C" fn worker_teardown() {
+    stop_worker();
 }
 
 /// Stands in for the C++ static destructors a real module registers while it loads.
