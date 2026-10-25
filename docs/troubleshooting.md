@@ -29,6 +29,10 @@ Without any setting the log has one line for each of these:
 
 Warnings and errors from every part of the program are always in the log.
 
+## Reporting a problem
+
+Run `transit --report` and attach the file it writes (or press Copy diagnostics in Audio Devices and paste). It holds your system and audio stack versions, the devices transit sees and the end of the log, and nothing from your sessions.
+
 ## More detail
 
 Three ways, from least to most effort:

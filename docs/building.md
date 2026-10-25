@@ -31,6 +31,8 @@ real settings. The plug-in scan cache is shared with the inherited soundcraft ap
 
 The log is `logs/transit.log` in that folder. `--verbose`, `--log <directives>` and `RUST_LOG` raise its detail; see [Troubleshooting](troubleshooting.md).
 
+`transit --report [path]` writes a diagnostics text file (version and build, OS, CPU, audio stack versions, the device lists, the saved audio settings and the last 200 log lines) to `transit-report-<YYYYMMDD-HHMM>.txt` in the current directory (the time is UTC) or to `path`, prints where, and exits. It needs no display, opens no audio stream and hides the user name and home folder. Audio Devices and Callback Telemetry have a Copy diagnostics button with the same text, plus the open-device lines and counters of the running session.
+
 ## The update check
 
 transit checks once a day, after the splash, whether a newer release exists (Help > Check for Updates… runs it on demand). The check is a single anonymous request to GitHub's public API (`api.github.com/repos/transit-audio/transit/releases`); nothing else is sent, and nothing is downloaded or installed. Turn it off with Help > Check for New Versions on Launch, or set `TRANSIT_NO_UPDATE_CHECK=1` (CI, tests, packagers; this also disables the Help entry).

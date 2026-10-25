@@ -111,6 +111,7 @@ for pinning; the buffer list offers 64 to 2048 with the running size marked.
 2. Audio > Audio Devices: pick the JACK system and Native JACK. "Driver change pending: press Apply to switch to JACK." shows and Apply is highlighted; the lists already show the server's choices.
 3. Pick a buffer size (the running one is marked) and press Apply. The server's buffer size changes for every client.
 4. Check the "Output open" line for the size the server runs. "Requested N · running at M" means the server did not take it; pin a size with `pw-metadata` instead.
+5. Run `transit --report` (works over SSH, opens no device) and attach the file it writes to the issue. The window's Copy diagnostics button puts the same text on the clipboard.
 
 ## Tests
 

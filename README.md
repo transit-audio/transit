@@ -62,7 +62,7 @@ To build, install `libasound2-dev pkg-config`, plus `libjack-jackd2-dev` to buil
 
 **Native JACK/PipeWire backend.** It talks to JACK, or to PipeWire through its JACK library, so the server's quantum is the only figure. It is behind the `native-jack` feature and is not in the release builds yet; in a build that has it, Auto prefers it when a server is running. It is new and untested on most hardware, so testers are wanted ([#55](https://github.com/transit-audio/transit/issues/55)).
 
-Using a Linux interface? Tell us which, with distribution, kernel, server and buffer size, in [#49](https://github.com/transit-audio/transit/issues/49).
+Run `transit --report` and attach the file it writes: it lists your distribution, kernel, PipeWire or JACK versions, the devices transit sees and the end of the log (your user name is hidden, and it opens no audio device). Using a Linux interface? Tell us which, with distribution, kernel, server and buffer size, in [#49](https://github.com/transit-audio/transit/issues/49).
 
 ## How to help
 
