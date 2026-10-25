@@ -31,3 +31,21 @@ OS library (known issue K4); our code on that path may not.
 
 Tests: `crates/midi-io/src/tests.rs`, `crates/playback/src/player/ingress/tests.rs`,
 `crates/playback/src/player/audio/midi/tests.rs`, `crates/engine/tests/midi_input.rs`.
+
+## Step entry controls (#92)
+
+The pending chord lives in `engine::step_input`, driven by monotonic UI milliseconds.
+A Tie press while notes are held adds one grid unit to the current preview and freezes
+its hold timer until the last note releases. A separate Tie with no held notes extends
+the chord ending at the cursor. The combined Tie/Rest resolves on press: held notes
+mean Tie, no notes mean Rest. Fresh preferences bind sustain (CC 64) to the combined
+action; saved MIDI bindings retain their assignments. Separate Tie, Rest and Back
+remain learnable in the Step settings. A pedal pressed
+before replaying a chord retains the earlier matching-pitches tie behavior.
+
+Hold to lengthen defaults on. Turning it off leaves each new note at one unit until
+Tie taps extend it; Rest's hold/repeat schedule is unchanged. Preferences are saved
+in KeysPrefs, not the musical document. Enter is the default computer-key stand-in;
+Space remains Play/Stop unless explicitly rebound to Tie/Rest, effective only in
+the focused piano roll during step entry. Computer-key repeat is ignored so the
+same hold timer drives MIDI and keyboard controls.

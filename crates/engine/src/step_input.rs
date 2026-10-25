@@ -5,13 +5,14 @@
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct HoldPrefs {
+    pub enabled: bool,
     pub threshold_ms: u64,
     pub floor_ms: u64,
 }
 
 impl Default for HoldPrefs {
     fn default() -> Self {
-        Self { threshold_ms: 500, floor_ms: 80 }
+        Self { enabled: true, threshold_ms: 500, floor_ms: 80 }
     }
 }
 
@@ -54,6 +55,7 @@ pub enum StepBinding {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StepControl {
+    TieRest,
     Rest,
     Back,
     Tie,
@@ -62,6 +64,10 @@ pub enum StepControl {
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct StepBindings {
+    // Older saved bindings keep their explicit assignments; do not shadow a
+    // learned CC 64 action when the new field is absent. Fresh prefs use Default.
+    #[serde(default)]
+    pub tie_rest: Option<StepBinding>,
     pub rest: Option<StepBinding>,
     pub back: Option<StepBinding>,
     pub tie: Option<StepBinding>,
@@ -69,19 +75,20 @@ pub struct StepBindings {
 
 impl Default for StepBindings {
     fn default() -> Self {
-        Self { rest: Some(StepBinding::Cc(64)), back: None, tie: None }
+        Self { tie_rest: Some(StepBinding::Cc(64)), rest: None, back: None, tie: None }
     }
 }
 
 impl StepBindings {
     /// One message performs one action. Learning a binding moves it from any old action.
     pub fn learn(&mut self, action: StepControl, binding: StepBinding) {
-        for slot in [&mut self.rest, &mut self.back, &mut self.tie] {
+        for slot in [&mut self.tie_rest, &mut self.rest, &mut self.back, &mut self.tie] {
             if *slot == Some(binding) {
                 *slot = None;
             }
         }
         *match action {
+            StepControl::TieRest => &mut self.tie_rest,
             StepControl::Rest => &mut self.rest,
             StepControl::Back => &mut self.back,
             StepControl::Tie => &mut self.tie,
@@ -135,6 +142,44 @@ impl StepController {
         Some(StepAction::Rest(delta))
     }
 
+    /// Edges from a bound control or the computer keyboard. Resolve the combined
+    /// action on press, so releasing the notes before the control cannot add a rest.
+    pub fn control(&mut self, action: StepControl, down: bool, now_ms: u64, prefs: HoldPrefs) -> Option<StepAction> {
+        match (action, down) {
+            (StepControl::TieRest, true) if !self.input.held.is_empty() => {
+                self.input.tie(now_ms, prefs);
+                None
+            }
+            (StepControl::Rest | StepControl::TieRest, true) => {
+                if self.input.started_ms.is_none() {
+                    self.rest = Some((now_ms, 0));
+                }
+                None
+            }
+            (StepControl::Rest | StepControl::TieRest, false) => {
+                let (started, emitted) = self.rest.take()?;
+                let delta = prefs.units(now_ms.saturating_sub(started)).saturating_sub(emitted);
+                (delta > 0).then_some(StepAction::Rest(delta))
+            }
+            (StepControl::Back, true) => {
+                self.input.cancel();
+                self.rest = None;
+                self.tie_chord = false;
+                Some(StepAction::Back)
+            }
+            (StepControl::Tie, true) => {
+                self.rest = None;
+                if self.input.tie(now_ms, prefs) {
+                    None
+                } else {
+                    self.tie_chord = false;
+                    Some(StepAction::Tie)
+                }
+            }
+            _ => None,
+        }
+    }
+
     /// `value` is note velocity or a CC value; CC >=64 is down. Repeated CC values
     /// do not retrigger an action. Note/pad bindings consume both press and release.
     pub fn message(&mut self, binding: StepBinding, value: u8, now_ms: u64, prefs: HoldPrefs, bindings: StepBindings) -> Option<StepAction> {
@@ -145,7 +190,9 @@ impl StepController {
         if binding == StepBinding::Cc(64) {
             self.pedal = down;
         }
-        let action = if bindings.rest == Some(binding) {
+        let action = if bindings.tie_rest == Some(binding) {
+            Some(StepControl::TieRest)
+        } else if bindings.rest == Some(binding) {
             Some(StepControl::Rest)
         } else if bindings.back == Some(binding) {
             Some(StepControl::Back)
@@ -164,33 +211,7 @@ impl StepController {
             } else {
                 self.pressed.retain(|b| *b != binding);
             }
-            return match (action, down) {
-                (StepControl::Rest, true) => {
-                    // A rest cannot move the insertion point under a pending chord.
-                    if self.input.started_ms.is_none() {
-                        self.rest = Some((now_ms, 0));
-                    }
-                    None
-                }
-                (StepControl::Rest, false) => {
-                    let (started, emitted) = self.rest.take()?;
-                    let delta = prefs.units(now_ms.saturating_sub(started)).saturating_sub(emitted);
-                    (delta > 0).then_some(StepAction::Rest(delta))
-                }
-                (StepControl::Back, true) => {
-                    self.input.cancel();
-                    self.rest = None;
-                    self.tie_chord = false;
-                    Some(StepAction::Back)
-                }
-                (StepControl::Tie, true) => {
-                    self.input.cancel();
-                    self.rest = None;
-                    self.tie_chord = false;
-                    Some(StepAction::Tie)
-                }
-                _ => None,
-            };
+            return self.control(action, down, now_ms, prefs);
         }
         let StepBinding::Note(pitch) = binding else { return None };
         if down {
@@ -211,6 +232,7 @@ pub struct StepInput {
     held: std::collections::BTreeMap<u8, u32>,
     notes: std::collections::BTreeMap<u8, u8>,
     started_ms: Option<u64>,
+    manual_units: Option<u32>,
 }
 
 impl StepInput {
@@ -218,14 +240,22 @@ impl StepInput {
         self.held.clear();
         self.notes.clear();
         self.started_ms = None;
+        self.manual_units = None;
     }
 
     pub fn preview(&self, now_ms: u64, prefs: HoldPrefs) -> Option<StepChord> {
         let start = self.started_ms?;
         Some(StepChord {
             notes: self.notes.iter().map(|(&pitch, &velocity)| (pitch, velocity)).collect(),
-            units: prefs.units(now_ms.saturating_sub(start)),
+            units: self.manual_units.unwrap_or_else(|| if prefs.enabled { prefs.units(now_ms.saturating_sub(start)) } else { 1 }),
         })
+    }
+
+    /// Add one unit to the current preview and freeze its timer until release.
+    fn tie(&mut self, now_ms: u64, prefs: HoldPrefs) -> bool {
+        let Some(chord) = self.preview(now_ms, prefs) else { return false };
+        self.manual_units = Some(chord.units.saturating_add(1));
+        true
     }
 
     /// Note-on velocity zero follows MIDI's note-off convention. Unknown releases
@@ -261,13 +291,83 @@ mod tests {
     use super::*;
 
     #[test]
+    fn held_tie_freezes_chord_length_and_empty_tie_still_extends_previous() {
+        let mut input = StepController::default();
+        let prefs = HoldPrefs::default();
+        let mut bindings = StepBindings::default();
+        bindings.learn(StepControl::Tie, StepBinding::Note(21));
+        input.message(StepBinding::Note(60), 90, 0, prefs, bindings);
+        input.message(StepBinding::Note(64), 80, 10, prefs, bindings);
+        assert_eq!(input.message(StepBinding::Note(21), 100, 50, prefs, bindings), None);
+        input.message(StepBinding::Note(21), 0, 60, prefs, bindings);
+        assert_eq!(input.preview(10_000, prefs).unwrap().units, 2);
+        input.message(StepBinding::Note(21), 100, 10_001, prefs, bindings);
+        input.message(StepBinding::Note(21), 0, 10_002, prefs, bindings);
+        input.message(StepBinding::Note(60), 0, 11_000, prefs, bindings);
+        assert_eq!(
+            input.message(StepBinding::Note(64), 0, 12_000, prefs, bindings),
+            Some(StepAction::Enter(StepChord { notes: vec![(60, 90), (64, 80)], units: 3 }))
+        );
+        assert_eq!(input.message(StepBinding::Note(21), 100, 13_000, prefs, bindings), Some(StepAction::Tie));
+        input.message(StepBinding::Note(62), 90, 14_000, prefs, bindings);
+        assert_eq!(input.preview(14_500, prefs).unwrap().units, 2, "next entry resumes timer");
+    }
+
+    #[test]
+    fn combined_control_worked_example_and_release_order() {
+        let mut input = StepController::default();
+        let prefs = HoldPrefs::default();
+        let bindings = StepBindings::default();
+        let pedal = StepBinding::Cc(64);
+        let mut lengths = Vec::new();
+        for (pitch, start) in [(60, 0), (62, 3000)] {
+            input.message(StepBinding::Note(pitch), 90, start, prefs, bindings);
+            input.message(pedal, 127, start + 10, prefs, bindings);
+            assert_eq!(input.message(pedal, 127, start + 20, prefs, bindings), None);
+            let Some(StepAction::Enter(chord)) = input.message(StepBinding::Note(pitch), 0, start + 2000, prefs, bindings) else {
+                panic!("expected entry")
+            };
+            lengths.push(chord.units);
+            assert_eq!(input.message(pedal, 0, start + 2100, prefs, bindings), None, "release cannot create a rest");
+        }
+        input.message(pedal, 127, 6000, prefs, bindings);
+        assert_eq!(input.message(pedal, 0, 6100, prefs, bindings), Some(StepAction::Rest(1)));
+        for (pitch, start) in [(64, 6200), (65, 6400), (67, 6600), (69, 6800)] {
+            input.message(StepBinding::Note(pitch), 90, start, prefs, bindings);
+            let Some(StepAction::Enter(chord)) = input.message(StepBinding::Note(pitch), 0, start + 100, prefs, bindings) else {
+                panic!("expected entry")
+            };
+            lengths.push(chord.units);
+        }
+        assert_eq!(lengths, [2, 2, 1, 1, 1, 1]);
+    }
+
+    #[test]
+    fn disabled_hold_keeps_note_lengths_manual_but_rest_timer_is_unchanged() {
+        let mut input = StepController::default();
+        let prefs = HoldPrefs { enabled: false, ..HoldPrefs::default() };
+        let bindings = StepBindings::default();
+        input.message(StepBinding::Note(60), 90, 0, prefs, bindings);
+        assert_eq!(input.preview(10_000, prefs).unwrap().units, 1);
+        input.control(StepControl::Tie, true, 10_001, prefs);
+        assert_eq!(input.preview(20_000, prefs).unwrap().units, 2);
+        input.message(StepBinding::Note(60), 0, 20_001, prefs, bindings);
+        input.control(StepControl::Rest, true, 21_000, prefs);
+        assert_eq!(input.poll(21_500, prefs), Some(StepAction::Rest(2)));
+        assert_eq!(input.control(StepControl::Rest, false, 21_800, prefs), Some(StepAction::Rest(1)));
+        input.cancel();
+        input.message(StepBinding::Note(62), 90, 22_000, prefs, bindings);
+        assert_eq!(input.preview(u64::MAX, prefs).unwrap().units, 1);
+    }
+
+    #[test]
     fn hold_threshold_and_accelerating_repeat_schedule() {
         let prefs = HoldPrefs::default();
         for (ms, units) in [(0, 1), (499, 1), (500, 2), (799, 2), (800, 3), (1020, 4), (1180, 5), (1300, 6), (1380, 7)] {
             assert_eq!(prefs.units(ms), units, "at {ms} ms");
         }
-        assert_eq!(HoldPrefs { threshold_ms: 200, floor_ms: 100 }.units(199), 1);
-        assert_eq!(HoldPrefs { threshold_ms: 200, floor_ms: 100 }.units(200), 2);
+        assert_eq!(HoldPrefs { threshold_ms: 200, floor_ms: 100, ..HoldPrefs::default() }.units(199), 1);
+        assert_eq!(HoldPrefs { threshold_ms: 200, floor_ms: 100, ..HoldPrefs::default() }.units(200), 2);
         assert_eq!(prefs.units(u64::MAX), u32::MAX);
     }
 
