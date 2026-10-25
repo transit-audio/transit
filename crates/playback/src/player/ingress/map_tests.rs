@@ -221,7 +221,7 @@ fn learn_forwards_exactly_the_next_candidate_once() {
     assert!(matches!(rig.drain()[..], [MapEvent::Candidate { .. }]));
 }
 
-// ---- consume by default (K69) ----
+// ---- consume by default (ADR 0028) ----
 
 #[test]
 fn a_mapped_cc_moves_the_fader_and_is_not_delivered_to_the_track() {
