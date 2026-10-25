@@ -217,6 +217,13 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         let _ = app.run("window.midi_monitor", json!({"value": !on}));
                         ui.close();
                     }
+                    let on = app.ui.midi_mappings.open;
+                    let b = check_button(ui, on, "MIDI Mappings");
+                    window_items.push(crate::mixer::MenuItem::at(ui, "MIDI Mappings".into(), String::new(), b.rect));
+                    if b.clicked() {
+                        let _ = app.run("window.midi_mappings", json!({"value": !on}));
+                        ui.close();
+                    }
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Window".into(), String::new(), window_menu.response.rect));
                 app.arrange.bar_menu.extend(window_items);

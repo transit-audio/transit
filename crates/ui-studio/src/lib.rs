@@ -38,6 +38,7 @@ mod loopbar;
 pub mod menus;
 pub mod metronome;
 mod midi_input;
+pub mod midi_learn;
 pub mod midi_monitor;
 mod midi_output;
 pub mod mixer;
@@ -105,6 +106,11 @@ pub struct UiState {
     pub show_devices: bool,
     /// Window > MIDI Monitor: open, filters, size (#91).
     pub midi_monitor: midi_monitor::Prefs,
+    /// Window > MIDI Mappings: open, size (#97).
+    pub midi_mappings: midi_learn::Prefs,
+    /// The controller profile: this machine's MIDI Learn mappings, keyed by port name (ADR 0028).
+    /// Per machine; never part of a session.
+    pub midi_profile: soundcraft_model::MappingSet,
     /// The mixer fills the window instead of the arrangement (Cubase's F3).
     pub mixer_full: bool,
     /// Height of the mixer pane in points.
@@ -184,6 +190,8 @@ impl Default for UiState {
             show_mixer: false,
             show_devices: true,
             midi_monitor: midi_monitor::Prefs::default(),
+            midi_mappings: midi_learn::Prefs::default(),
+            midi_profile: Default::default(),
             mixer_full: false,
             mixer_height: 420.0,
             cursor: 0,
@@ -406,6 +414,8 @@ pub struct StudioApp {
     pub audio_devices: audio_devices::AudioDevicesState,
     /// Window > MIDI Monitor: the rows and readouts behind the window (#91).
     pub midi_monitor: midi_monitor::State,
+    /// MIDI Learn: the mappings in force, the learn menu and markers as drawn (#97).
+    pub midi_learn: midi_learn::State,
     /// The External Instrument card's Measure (ADR 0020 decision 3).
     pub external_measure: external_measure::MeasureState,
     /// The Open Recent entries as last drawn (empty while the submenu is closed).
@@ -500,6 +510,7 @@ impl StudioApp {
             auto: automation::AutoState::default(),
             audio_devices: audio_devices::AudioDevicesState::default(),
             midi_monitor: midi_monitor::State::default(),
+            midi_learn: midi_learn::State::default(),
             external_measure: external_measure::MeasureState::default(),
             recent_menu: Vec::new(),
             builtin_editor: builtin_editor::EditorState::default(),
@@ -589,6 +600,9 @@ impl StudioApp {
         if id == "help.check_updates" {
             self.check_for_updates_now()?;
             return Ok(json!({"checking": true}));
+        }
+        if id == "window.midi_mappings" {
+            return Ok(self.toggle_midi_mappings(params.get("value").and_then(Value::as_bool)));
         }
         if id == "window.midi_monitor" {
             return Ok(self.toggle_midi_monitor(params.get("value").and_then(Value::as_bool)));
@@ -1056,6 +1070,8 @@ impl StudioApp {
         let ctx = ui.ctx().clone();
         theme::follow(&ctx);
         ui.set_style(ctx.global_style());
+        midi_learn::keys(self, &ctx); // an armed MIDI Learn takes Escape first
+        self.midi_learn_feed(ctx.input(|i| i.time));
         finish::rename_keys(self, &ctx); // slice 6: a name being typed owns Escape and Enter
         tempo_edit::keys(self, &ctx); // the tempo and meter fields own Escape and Enter
         keys::shortcuts(self, &ctx); // slice 3: before the arrangement's keys
@@ -1092,6 +1108,7 @@ impl StudioApp {
         telemetry::window(self, &ctx);
         audio_devices::window(self, &ctx);
         midi_monitor::window(self, &ctx);
+        midi_learn::window(self, &ctx);
         builtin_editor::windows(self, &ctx);
         if self.is_playing() || self.engine.transport.recording {
             ctx.request_repaint_after(std::time::Duration::from_millis(1000 / 30));
@@ -1107,7 +1124,7 @@ impl StudioApp {
         let size = ctx.content_rect().size();
         let open: Vec<(TrackId, usize)> =
             self.player.as_ref().map(|p| self.ui.plugin_windows.iter().copied().filter(|(t, s)| p.editor_open(*t, *s)).collect()).unwrap_or_default();
-        json!({
+        let mut v = json!({
             "ui": self.ui,
             "window_size": [size.x, size.y],
             "playing": self.is_playing(),
@@ -1158,7 +1175,10 @@ impl StudioApp {
             "midi_monitor": midi_monitor::inspect(self),
             "recent_menu": self.recent_menu,
             "theme": if theme::current() == egui::Theme::Light { "light" } else { "dark" },
-        })
+        });
+        // Added apart from the literal: it is at the macro's recursion limit.
+        v["midi_learn"] = midi_learn::inspect(self);
+        v
     }
 }
 
@@ -1178,6 +1198,8 @@ mod external_measure_tests;
 mod groups_tests;
 #[cfg(test)]
 mod keys_tests;
+#[cfg(test)]
+mod midi_learn_tests;
 #[cfg(test)]
 mod midi_output_header_tests;
 #[cfg(test)]

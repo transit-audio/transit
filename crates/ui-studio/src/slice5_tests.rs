@@ -248,6 +248,7 @@ fn every_handler_takes_its_keys_from_the_table() {
         include_str!("load_readout.rs"),
         include_str!("lib.rs"),
         include_str!("finish.rs"),
+        include_str!("midi_learn.rs"),
         include_str!("automation.rs"),
         include_str!("automation_picker.rs"),
     ];

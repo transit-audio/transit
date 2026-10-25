@@ -1446,7 +1446,14 @@ pub(crate) fn send_row(
             let _ = app.remove_send(id, slot);
             ui.close();
         }
+        if let Ok(n) = u8::try_from(slot) {
+            ui.separator();
+            app.midi_learn_menu(ui, id, soundcraft_model::Control::Send(n));
+        }
     });
+    if let Ok(n) = u8::try_from(slot) {
+        crate::midi_learn::mark(app, &p, r, id, soundcraft_model::Control::Send(n));
+    }
     // Pre/Post (device chain).
     if wide {
         let resp = ui.interact(pr.intersect(clip), ui.id().with(("send_pre", salt)), Sense::click());
@@ -1910,6 +1917,8 @@ fn strip(
             ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
         }
         control(app, ui, &resp, pan, 1.0, true, true);
+        resp.context_menu(|ui| app.midi_learn_menu(ui, id, soundcraft_model::Control::Pan));
+        crate::midi_learn::mark(app, &p, knob, id, soundcraft_model::Control::Pan);
     }
     let pan_r = Rect::from_center_size(pos2(r.center().x, knob.max.y + 7.0), vec2(34.0, 12.0));
     let pan_text = fine::pan_text(b);
@@ -1953,12 +1962,24 @@ fn strip(
         if resp.clicked() {
             let _ = app.run("mix.mute", json!({"tracks": [id.0], "value": !m.mute}));
         }
+        resp.context_menu(|ui| app.midi_learn_menu(ui, id, soundcraft_model::Control::Mute));
+        crate::midi_learn::mark(app, &p, cell(0, y), id, soundcraft_model::Control::Mute);
         sl.mute = r4(cell(0, y));
     } else {
         for (label, on, color, cmd, enabled, br) in buttons {
             let resp = small_button(ui, clip, br, ui.id().with((cmd, id.0, "strip")), label, on, color, enabled);
             if resp.clicked() && enabled {
                 let _ = app.run(cmd, json!({"tracks": [id.0], "value": !on}));
+            }
+            let learnable = match label {
+                "M" => Some(soundcraft_model::Control::Mute),
+                "S" => Some(soundcraft_model::Control::Solo),
+                "R" => Some(soundcraft_model::Control::Arm),
+                _ => None,
+            };
+            if let Some(control) = learnable.filter(|_| enabled) {
+                resp.context_menu(|ui| app.midi_learn_menu(ui, id, control));
+                crate::midi_learn::mark(app, &p, br, id, control);
             }
             match label {
                 "M" => sl.mute = r4(br),
@@ -2148,6 +2169,8 @@ fn fader_widget(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect,
         ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
     }
     control(app, ui, &resp, me, r.height().max(1.0), true, true);
+    resp.context_menu(|ui| app.midi_learn_menu(ui, id, soundcraft_model::Control::Volume));
+    crate::midi_learn::mark(app, p, r.expand2(vec2(4.0, 0.0)), id, soundcraft_model::Control::Volume);
     ((Some(cap_y), Some(cap_rows)), zero)
 }
 

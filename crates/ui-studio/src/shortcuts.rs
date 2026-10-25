@@ -108,6 +108,7 @@ pub enum Action {
     ResetControl,
     ReadoutApply,
     ReadoutCancel,
+    LearnCancel,
     NotesClose,
     NotesSelectAll,
     NotesDuplicate,
@@ -290,6 +291,7 @@ pub const TABLE: &[Shortcut] = &[
     row(A::ResetControl, "Reset Control Under Pointer", NONE, Key::Backspace, S::Mixer, "Same as Delete."),
     row(A::ReadoutApply, "Apply Typed Value", NONE, Key::Enter, S::Mixer, "While a readout is being typed."),
     row(A::ReadoutCancel, "Cancel Typing", NONE, Key::Escape, S::Mixer, "While a readout is being typed."),
+    row(A::LearnCancel, "Cancel MIDI Learn", NONE, Key::Escape, S::Mixer, "While a mixer control waits for a controller (#97); checked first."),
     // Piano roll.
     row(A::NotesClose, "Close Piano Roll", NONE, Key::Escape, S::PianoRoll, "Ours; first cancels a gesture."),
     row(A::NotesSelectAll, "Select All Notes", CMD, Key::A, S::PianoRoll, "All DAWs."),
