@@ -92,8 +92,11 @@ jobs:
           ./packaging/windows/sign.ps1 target/release/transit.exe target/release/audio-bench.exe
           dotnet tool install --global wix --version 5.0.2
           $env:PATH = "$env:USERPROFILE\.dotnet\tools;$env:PATH"
+          wix extension add --global WixToolset.UI.wixext/5.0.2
+          if ($LASTEXITCODE -ne 0) { throw "wix extension add failed with exit code $LASTEXITCODE" }
           $msi = "${{ steps.ver.outputs.name }}.msi"
-          wix build packaging/windows/transit.wxs -arch x64 `
+          wix build packaging/windows/transit.wxs -arch x64 -ext WixToolset.UI.wixext `
+            -d "LicenseRtf=$PWD/packaging/windows/license.rtf" `
             -d "Version=$msiVersion" -d "FullVersion=$full" -d "BinDir=$PWD/target/release" `
             -d "IconPath=$PWD/assets/app-icon/transit.ico" -o $msi
           if ($LASTEXITCODE -ne 0) { throw "wix build failed with exit code $LASTEXITCODE" }

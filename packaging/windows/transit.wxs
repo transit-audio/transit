@@ -3,7 +3,7 @@
   transit MSI (WiX Toolset v5: `dotnet tool install -g wix, version 5.0.2`). Built by package.ps1
   and by .github/workflows/release.yml:
 
-    wix build transit.wxs -arch x64 -d Version=1.2.3 -d FullVersion=1.2.3-alpha.1 -d BinDir=... -d IconPath=... -o out.msi
+    wix build transit.wxs -arch x64 -d Version=1.2.3 -d FullVersion=1.2.3-alpha.1 -d BinDir=... -d IconPath=... -d LicenseRtf=license.rtf -ext WixToolset.UI.wixext -o out.msi
 
   Version is the numeric MSI ProductVersion (major.minor.build: a pre-release suffix cannot go
   there). FullVersion is the complete version or tag, recorded in the ARP comments and in
@@ -14,7 +14,8 @@
   and transit offered under "Open with" for WAV/AIFF/FLAC/MP3 and MIDI files
   (without taking over the user's default player for them).
 -->
-<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
   <Package
       Name="transit"
       Manufacturer="Derek Wright"
@@ -41,6 +42,10 @@
       <Directory Id="INSTALLFOLDER" Name="transit" />
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
+
+    <!-- Stock WiX UI: welcome, license, install folder, progress, finish. `msiexec /qn` skips it. -->
+    <ui:WixUI Id="WixUI_InstallDir" InstallDirectory="INSTALLFOLDER" />
+    <WixVariable Id="WixUILicenseRtf" Value="$(var.LicenseRtf)" />
 
     <Feature Id="Main" Title="transit" Level="1">
       <ComponentGroupRef Id="TransitFiles" />

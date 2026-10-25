@@ -13,6 +13,7 @@
 
   Needs: Rust (MSVC toolchain + the target), the Windows SDK (rc.exe, signtool.exe),
   and WiX v5: dotnet tool install --global wix --version 5.0.2
+  and its UI extension: wix extension add --global WixToolset.UI.wixext/5.0.2
 
 .EXAMPLE
   pwsh packaging/windows/package.ps1 -Arch x64
@@ -93,8 +94,10 @@ Copy-Item (Join-Path $Bin 'transit.exe'), (Join-Path $Bin 'audio-bench.exe') $St
 
 # ---- MSI ---------------------------------------------------------------------------------------
 $Msi = Join-Path $Dist "transit-$Version-windows-$Arch.msi"
+Invoke-Native 'wix extension add' { wix extension add --global WixToolset.UI.wixext/5.0.2 }
 Invoke-Native 'wix build' {
-  wix build (Join-Path $PSScriptRoot 'transit.wxs') -arch $Arch `
+  wix build (Join-Path $PSScriptRoot 'transit.wxs') -arch $Arch -ext WixToolset.UI.wixext `
+    -d "LicenseRtf=$(Join-Path $PSScriptRoot 'license.rtf')" `
     -d "Version=$MsiVersion" -d "FullVersion=$Version" -d "BinDir=$Stage" -d "IconPath=$(Join-Path $Root 'assets\app-icon\transit.ico')" `
     -o $Msi
 }
