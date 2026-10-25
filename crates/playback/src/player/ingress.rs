@@ -151,6 +151,8 @@ struct Mon {
     filtered: u64,
     sysex_dropped: u64,
     sysex_truncated: u64,
+    /// Whether the callback of this input is told to capture SysEx.
+    capturing: bool,
 }
 impl Drop for Mon {
     fn drop(&mut self) {
@@ -160,6 +162,23 @@ impl Drop for Mon {
     }
 }
 impl Mon {
+    /// Switch the input's SysEx capture. Turning it on starts from clean baselines: stale captures
+    /// are discarded (at most one ring) and the drop and truncation counts seen so far are absorbed.
+    fn set_capture(&mut self, on: bool, consumer: &mut InputConsumer) {
+        self.capturing = on;
+        consumer.set_sysex_capture(on);
+        if on {
+            for _ in 0..64 {
+                if consumer.pop_sysex().is_none() {
+                    break;
+                }
+            }
+            let counters = consumer.counters();
+            self.sysex_dropped = counters.sysex_capture_dropped;
+            self.sysex_truncated = counters.sysex_truncated;
+        }
+    }
+
     /// One message of the input's ring. Real-Time Clock feeds the rate estimator and is an event
     /// only on request; Active Sensing is only noted.
     fn tap(&mut self, tap: &mut Tap, id: u64, raw: &InputEvent) {
@@ -531,7 +550,15 @@ impl Pump {
                 }
             }
         }
-        if let Some(tap) = self.monitor.as_mut() {
+        // Zero cost while the monitor is off: the only per-step work is one flag compare per input,
+        // and the callback's SysEx capture is switched off with it.
+        let on = self.monitor.as_ref().is_some_and(Tap::enabled);
+        for input in &mut self.inputs {
+            if input.mon.capturing != on {
+                input.mon.set_capture(on, &mut input.consumer);
+            }
+        }
+        if let Some(tap) = self.monitor.as_mut().filter(|tap| tap.enabled()) {
             for input in &mut self.inputs {
                 input.mon.watch(tap, input.id, &mut input.consumer);
             }

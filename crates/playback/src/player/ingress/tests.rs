@@ -53,6 +53,80 @@ fn monitor_sysex_capture_reaches_unrouted_monitor_with_loss_counts_and_no_ingres
     assert!(events.is_empty(), "closed-window captures are discarded");
 }
 
+fn monitored(enabled: bool) -> (monitor::Hub, Pump, Fake, transit_midi_io::PortKey, impl Sized) {
+    let (control, _plans) = bridge();
+    let (lane, _audio) = action_lane::pair_with_result(&control);
+    let (send, mut worker) = pump(lane);
+    let (hub, tap, _out) = monitor::Hub::new();
+    hub.set_enabled(enabled);
+    send.send(Update::Monitor(tap)).ok().unwrap();
+    let fake = Fake::default();
+    let key = fake.add_input("Zero cost");
+    let (handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
+    send.send(Update::Input(Input { id: 3, mon: Mon::default(), consumer, routes: Vec::new() })).ok().unwrap();
+    worker.step();
+    (hub, worker, fake, key, (handle, send))
+}
+
+#[test]
+fn monitor_off_costs_the_worker_and_the_callback_nothing() {
+    let (hub, mut worker, fake, key, _keep) = monitored(false);
+    let port = fake.input_port(&key).unwrap();
+    let mut bytes = [9; 100];
+    bytes[0] = 0xF0;
+    bytes[99] = 0xF7;
+    for _ in 0..70 {
+        port.deliver(0, &bytes);
+    }
+    port.deliver(0, &[0xFE]);
+    worker.step();
+    let input = &mut worker.inputs[0];
+    assert!(input.consumer.pop_sysex().is_none(), "no capture push while off");
+    let counters = input.consumer.counters();
+    assert_eq!((counters.sysex_capture_dropped, counters.sysex_truncated), (0, 0));
+    assert_eq!(counters.sysex_dropped, 70, "main's per-message counter still runs");
+    assert!(counters.filtered > 0);
+    assert_eq!(input.mon.filtered, 0, "Mon::watch must not run while the monitor is off");
+    assert_eq!(hub.dropped(), (0, 0));
+    // On: the capture appears.
+    hub.set_enabled(true);
+    worker.step();
+    port.deliver(0, &[0xF0, 1, 0xF7]);
+    worker.step();
+    assert_eq!(worker.inputs[0].mon.filtered, counters.filtered, "baseline taken when switched on");
+    let mut events = Vec::new();
+    hub.drain(&mut events, 100);
+    assert_eq!(events.len(), 1);
+    assert_eq!(hub.take_sysex().len(), 1);
+}
+
+#[test]
+fn monitor_turned_on_mid_stream_starts_from_clean_baselines() {
+    let (hub, mut worker, fake, key, _keep) = monitored(true);
+    let port = fake.input_port(&key).unwrap();
+    let mut bytes = [9; 100];
+    bytes[0] = 0xF0;
+    bytes[99] = 0xF7;
+    hub.set_enabled(false);
+    // The callback has not seen the switch yet: it captures and overflows.
+    for _ in 0..70 {
+        port.deliver(0, &bytes);
+    }
+    worker.step();
+    hub.set_enabled(true);
+    worker.step();
+    let mut events = Vec::new();
+    hub.drain(&mut events, 100);
+    assert!(events.is_empty(), "stale captures are discarded");
+    assert!(hub.take_sysex().is_empty());
+    assert_eq!((hub.dropped(), hub.sysex_truncated()), ((0, 0), 0));
+    port.deliver(0, &bytes);
+    worker.step();
+    hub.drain(&mut events, 100);
+    assert_eq!(events.len(), 1);
+    assert_eq!(hub.sysex_truncated(), 1);
+}
+
 fn route() -> Route {
     Route {
         engine: EngineEpoch(1),

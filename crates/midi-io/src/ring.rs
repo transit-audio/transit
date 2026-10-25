@@ -102,6 +102,9 @@ pub(crate) struct PortShared {
     /// The consumer's worker thread, set once by [`InputConsumer::wake_on`]. The callback reads it
     /// lock-free and unparks the thread after publishing, so the worker never polls on a timer.
     wake: OnceLock<Thread>,
+    /// Whether SysEx bytes are captured for the MIDI Monitor (#91). The callback reads it once per
+    /// `F0`; with it clear the callback does only what it did before the monitor existed.
+    capture_sysex: AtomicBool,
 }
 
 impl PortShared {
@@ -208,7 +211,9 @@ pub(crate) struct InputSink {
     sysex_prefix: [u8; 64],
     sysex_total: u32,
     sysex_host: u64,
-    sysex_published: u64,
+    pub(crate) sysex_published: u64,
+    /// The capture flag as read at this message's `F0`, so a message is captured whole or not at all.
+    capturing: bool,
     shared: Arc<PortShared>,
     reserve: usize,
     pass_active_sensing: bool,
@@ -236,6 +241,7 @@ impl InputSink {
             sysex_total: 0,
             sysex_host: 0,
             sysex_published: 0,
+            capturing: false,
             shared: Arc::clone(&shared),
             reserve: config.release_reserve,
             pass_active_sensing: config.pass_active_sensing,
@@ -292,25 +298,32 @@ impl InputSink {
                 // Data bytes and the closing F7 belong to the SysEx; any other status ends it.
                 if b < 0x80 || b == 0xF7 {
                     bump(&self.shared.counters.sysex_bytes_dropped, 1);
-                    self.sysex_byte(b);
+                    if self.capturing {
+                        self.sysex_byte(b);
+                    }
                     self.in_sysex = b != 0xF7;
-                    if !self.in_sysex {
+                    if !self.in_sysex && self.capturing {
                         self.finish_sysex();
                     }
                     i += 1;
                     continue;
                 }
                 self.in_sysex = false;
-                self.finish_sysex();
+                if self.capturing {
+                    self.finish_sysex();
+                }
             }
             if b == 0xF0 {
                 bump(&self.shared.counters.sysex_dropped, 1);
                 bump(&self.shared.counters.sysex_bytes_dropped, 1);
                 self.in_sysex = true;
-                self.sysex_prefix = [0; 64];
-                self.sysex_total = 0;
-                self.sysex_host = host;
-                self.sysex_byte(b);
+                self.capturing = self.shared.capture_sysex.load(Ordering::Relaxed);
+                if self.capturing {
+                    self.sysex_prefix = [0; 64];
+                    self.sysex_total = 0;
+                    self.sysex_host = host;
+                    self.sysex_byte(b);
+                }
                 running = None;
                 i += 1;
                 continue;
@@ -441,6 +454,12 @@ pub struct InputConsumer {
 }
 
 impl InputConsumer {
+    /// Turn SysEx capture on or off. Takes effect at the next `F0`; a message already begun keeps
+    /// the setting it started with.
+    pub fn set_sysex_capture(&self, on: bool) {
+        self.shared.capture_sysex.store(on, Ordering::Relaxed);
+    }
+
     /// Pop a completed (or status-interrupted) diagnostic SysEx capture: first-byte host
     /// timestamp, full byte count, and first 64 bytes. Realtime bytes are excluded.
     /// This separate fixed 64-message ring never competes with playable MIDI or allocates.

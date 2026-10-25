@@ -15,6 +15,7 @@ static ALLOC: transit_rt::testing::CountingAlloc = transit_rt::testing::Counting
 #[test]
 fn sysex_capture_spans_callbacks_excludes_realtime_and_bounds_overflow_without_allocating() {
     let (mut sink, mut consumer, _) = InputSink::new(&config(8, 0));
+    consumer.set_sysex_capture(true);
     let ((), stats) = measure(|| {
         sink.push_bytes_at(0, &[0xF0, 1, 0xF8, 2], 100);
         sink.push_bytes_at(0, &[3, 0xF7, 0xF0, 4, 0x90, 60, 100], 200);
@@ -44,6 +45,58 @@ fn sysex_capture_spans_callbacks_excludes_realtime_and_bounds_overflow_without_a
     assert!(consumer.pop_sysex().is_none());
     sink.push_bytes_at(0, &[0xF0, 0xF7], 900);
     assert_eq!(consumer.pop_sysex().unwrap().0, 900);
+}
+
+fn sysex_of(len: usize) -> Vec<u8> {
+    let mut m = vec![7; len];
+    m[0] = 0xF0;
+    m[len - 1] = 0xF7;
+    m
+}
+
+#[test]
+fn sysex_of_exactly_64_bytes_is_not_truncated_and_65_is() {
+    let (mut sink, mut consumer, _) = InputSink::new(&config(8, 0));
+    consumer.set_sysex_capture(true);
+    sink.push_bytes_at(0, &sysex_of(64), 1);
+    assert_eq!(consumer.counters().sysex_truncated, 0);
+    let (_, total, prefix) = consumer.pop_sysex().unwrap();
+    assert_eq!((total, prefix[63]), (64, 0xF7));
+    sink.push_bytes_at(0, &sysex_of(65), 2);
+    assert_eq!(consumer.counters().sysex_truncated, 1);
+    let (_, total, prefix) = consumer.pop_sysex().unwrap();
+    assert_eq!((total, prefix[63]), (65, 7));
+}
+
+#[test]
+fn sysex_capture_off_costs_the_callback_nothing_beyond_the_dropped_counters() {
+    let (mut sink, mut consumer, _) = InputSink::new(&config(8, 0));
+    let message = sysex_of(100);
+    let ((), stats) = measure(|| sink.push_bytes_at(0, &message, 1));
+    assert!(stats.is_zero(), "{stats:?}");
+    let c = consumer.counters();
+    assert_eq!((c.sysex_dropped, c.sysex_bytes_dropped), (1, 100));
+    assert_eq!((c.sysex_capture_dropped, c.sysex_truncated), (0, 0));
+    // No capture push, so no wake: the wake fires only on a delivered event or a published capture.
+    assert_eq!(sink.sysex_published, 0);
+    assert!(consumer.pop_sysex().is_none());
+    // Capture on: the next message appears.
+    consumer.set_sysex_capture(true);
+    sink.push_bytes_at(0, &sysex_of(10), 2);
+    assert_eq!(sink.sysex_published, 1);
+    assert_eq!(consumer.pop_sysex().unwrap().1, 10);
+}
+
+#[test]
+fn sysex_begun_with_capture_off_stays_uncaptured_when_it_turns_on_mid_message() {
+    let (mut sink, mut consumer, _) = InputSink::new(&config(8, 0));
+    sink.push_bytes_at(0, &[0xF0, 1, 2], 1);
+    consumer.set_sysex_capture(true);
+    sink.push_bytes_at(0, &[3, 0xF7], 1);
+    assert!(consumer.pop_sysex().is_none());
+    assert_eq!(consumer.counters().sysex_truncated, 0);
+    sink.push_bytes_at(0, &[0xF0, 9, 0xF7], 2);
+    assert_eq!(consumer.pop_sysex().unwrap().1, 3);
 }
 
 fn config(capacity: usize, reserve: usize) -> InputConfig {
