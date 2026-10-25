@@ -185,11 +185,15 @@ pub struct Mapping {
     /// Buttons: flip on press (true) or follow the key or CC >= 64 (false).
     #[serde(default = "yes")]
     pub toggle: bool,
+    /// Also deliver the message to the track's routes (the instrument, a recording). Off by
+    /// default: a mapped message drives its control and nothing else, as in Logic and Ableton.
+    #[serde(default)]
+    pub pass_through: bool,
 }
 
 impl Mapping {
     pub fn new(source: MidiSource, target: ControlTarget) -> Self {
-        Mapping { source, target, mode: MapMode::Pickup, min: 0.0, max: 1.0, toggle: true }
+        Mapping { source, target, mode: MapMode::Pickup, min: 0.0, max: 1.0, toggle: true, pass_through: false }
     }
 
     pub fn validate(&self) -> Result<(), String> {
@@ -351,6 +355,7 @@ mod tests {
         assert!(set.is_empty());
         let m: Mapping = serde_json::from_str(r#"{"source":{"port":"KeyStep","kind":"cc","number":74},"target":"track:4:pan"}"#).unwrap();
         assert_eq!((m.mode, m.min, m.max, m.toggle, m.source.channel), (MapMode::Pickup, 0.0, 1.0, true, None));
+        assert!(!m.pass_through, "mappings consume by default");
         assert_eq!(serde_json::from_str::<Mapping>(&serde_json::to_string(&m).unwrap()).unwrap(), m);
     }
 
