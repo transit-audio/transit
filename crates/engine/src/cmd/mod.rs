@@ -24,6 +24,7 @@ mod instrument;
 mod midi;
 mod midi_chord;
 mod midi_input;
+mod midi_map;
 mod midi_output;
 mod midi_time;
 mod mix;
@@ -158,6 +159,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(audio_midi::specs());
         v.extend(midi::specs());
         v.extend(midi_input::specs());
+        v.extend(midi_map::specs());
         v.extend(midi_output::specs());
         v.extend(view_more::specs());
         v.extend(track_more::specs());

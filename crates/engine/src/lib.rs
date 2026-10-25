@@ -132,6 +132,13 @@ struct HistoryEntry {
     states: Vec<(TrackId, usize)>,
 }
 
+/// An armed MIDI Learn: the next controller message becomes a mapping of `target` in `scope`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LearnArm {
+    pub target: soundcraft_model::ControlTarget,
+    pub scope: soundcraft_model::Scope,
+}
+
 /// Engine state: the document, history, clipboard and transport plumbing.
 pub struct Engine {
     doc: Arc<Session>,
@@ -175,6 +182,14 @@ pub struct Engine {
     /// the document: editing it neither dirties the session nor makes an undo step.
     io: soundcraft_model::IoMap,
     io_revision: u64,
+    /// The controller profile: MIDI Learn mappings for this machine (ADR 0028), saved by the host
+    /// in its preferences. Not part of the document: editing it neither dirties the session nor
+    /// makes an undo step.
+    midi_profile: soundcraft_model::MappingSet,
+    midi_profile_revision: u64,
+    /// The control a MIDI Learn is waiting to map (the host arms the ingress worker and answers
+    /// the next candidate with `midi.map`). Not part of the document.
+    learn: Option<LearnArm>,
     command_targets: cmd::CommandTargets,
     transient_cache: cmd::TransientCache,
     plugin_discovery: cmd::PluginDiscovery,
@@ -231,6 +246,9 @@ impl Engine {
             imports: import::Imports::default(),
             io: soundcraft_model::IoMap::default(),
             io_revision: 0,
+            midi_profile: Default::default(),
+            midi_profile_revision: 0,
+            learn: None,
             command_targets: cmd::CommandTargets::default(),
             transient_cache: cmd::TransientCache::default(),
             plugin_discovery: cmd::PluginDiscovery::default(),
@@ -262,6 +280,28 @@ impl Engine {
     pub fn set_io_map(&mut self, io: soundcraft_model::IoMap) {
         self.io = io;
         self.io_revision = self.io_revision.wrapping_add(1);
+    }
+
+    /// The controller profile (per machine MIDI Learn mappings).
+    pub fn midi_profile(&self) -> &soundcraft_model::MappingSet {
+        &self.midi_profile
+    }
+
+    /// Counts every change to the controller profile or the armed learn, so a host can pass the
+    /// resolved mappings on to the MIDI input worker. Session mapping changes bump `revision`.
+    pub fn midi_profile_revision(&self) -> u64 {
+        self.midi_profile_revision
+    }
+
+    /// Replace the controller profile (the host, from its preferences).
+    pub fn set_midi_profile(&mut self, profile: soundcraft_model::MappingSet) {
+        self.midi_profile = profile;
+        self.midi_profile_revision = self.midi_profile_revision.wrapping_add(1);
+    }
+
+    /// The control a MIDI Learn is waiting for, if one is armed.
+    pub fn learn(&self) -> Option<LearnArm> {
+        self.learn
     }
 
     /// Check a request to measure the round trip of a hardware insert on `send` (an output path)
