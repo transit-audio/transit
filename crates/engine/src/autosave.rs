@@ -271,9 +271,27 @@ impl Autosave {
 
     /// Delete the folder: the session closed with nothing left to recover.
     fn discard(mut self) {
-        drop(self.lock.take());
+        if let Some(lock) = self.lock.take() {
+            release(lock);
+        }
         let _ = std::fs::remove_dir_all(&self.dir);
     }
+}
+
+impl Drop for Autosave {
+    /// The folder is let go (kept for the next launch): unlocked now, so a scan finds it at once.
+    fn drop(&mut self) {
+        if let Some(lock) = self.lock.take() {
+            release(lock);
+        }
+    }
+}
+
+/// Unlock a folder's lock file and close it. Closing alone is not enough: a child process spawned
+/// meanwhile holds a copy of the descriptor until its exec closes it, and on Linux and macOS
+/// (`flock`) the lock belongs to the open file the copies share, so it would outlive our close.
+fn release(lock: std::fs::File) {
+    let _ = lock.unlock();
 }
 
 /// Unsaved work left behind in an autosave folder.
@@ -308,7 +326,7 @@ pub fn leftovers(root: &Path) -> Vec<Leftover> {
         let session_file = session_in(&dir);
         let saved = std::fs::metadata(&session_file).and_then(|m| m.modified());
         let recording = dir.join(RECORDING).is_file();
-        drop(lock);
+        release(lock);
         match saved {
             Ok(saved) if recording || origin_saved.is_none_or(|o| saved >= o) => {
                 let text = std::fs::read_to_string(&session_file).unwrap_or_default();
@@ -866,5 +884,23 @@ mod tests {
         drop(a);
         assert_eq!(leftovers(&root).len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A process that spawns another while a folder is locked hands the child a copy of the lock's
+    /// descriptor until the child's exec closes it. On Linux and macOS (`flock`) the lock belongs to
+    /// the open file both copies share, so closing ours did not release it while the child's copy
+    /// was open: a scan right after the session let go skipped the folder. The copy is made here
+    /// with `try_clone`, which shares the open file exactly as a forked child does.
+    #[test]
+    fn a_folder_let_go_is_offered_while_a_spawned_child_still_holds_a_copy_of_its_lock() {
+        let root = folder("autosave-lock-copy");
+        let mut a = Autosave::create(&root, "Song").unwrap();
+        a.write(&Session::default(), None, None).unwrap();
+        let copy = a.lock.as_ref().unwrap().try_clone().unwrap();
+        assert!(leftovers(&root).is_empty(), "an open session's folder is never offered");
+        drop(a);
+        assert_eq!(leftovers(&root).len(), 1, "the lock went with the session, whatever copies of its descriptor remain");
+        drop(copy);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

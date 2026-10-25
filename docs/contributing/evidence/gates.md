@@ -56,6 +56,9 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
 - Injected timestamps need an injected readout: stamp on the origin the code under test reads
   (not another module's default origin) and read at a time consistent with the stamps, never the
   real clock (E49 recurrence 2026-10-25).
+- A file lock is released with an explicit unlock, never by closing the file alone: a child
+  process spawned meanwhile holds a copy of the descriptor until its exec, and on Linux and macOS
+  the lock goes with it (E57, `../../escapes/E57-an-autosave-lock-outlived-its-session-in-a-spawned-child.md`).
 - Tests create unique temp dirs: process id plus a per-process counter (or `TemporaryAutosave`),
   never a fixed name or a clock-only suffix; concurrent tests share a process and a clock tick
   (E51, `../../escapes/E51-test-temp-dirs-collided-in-one-process.md`).
