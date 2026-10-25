@@ -637,3 +637,97 @@ fn libjack_without_a_server_reports_the_library_or_the_server() {
     let error = JackBackend::shared().endpoints(ab::Direction::Output).unwrap_err();
     assert!(matches!(error, ab::OpenError::DeviceNotAvailable(_)), "{error:?}");
 }
+
+/// An engine with a started render callback writing 1.0 and a started capture callback that keeps
+/// what it saw (frames in the block, samples per chunk), over `shared`.
+fn started_engine(shared: &Arc<Shared>) -> (Engine, Arc<Mutex<Vec<f32>>>) {
+    let format = ab::Format::new(48_000, 2, ab::SampleFormat::F32);
+    let mut engine = Engine::new(Arc::clone(shared));
+    let kept = Arc::new(Mutex::new(Vec::new()));
+    let sink = Arc::clone(&kept);
+    engine.render = Some(EngineSide::new(
+        Box::new(|block: &mut ab::RenderBlock<'_>| block.render(&mut |chunk| chunk.fill(1.0))),
+        format,
+        ab::HostOrigin::default(),
+    ));
+    engine.capture = Some(EngineSide::new(
+        Box::new(move |block: &mut ab::CaptureBlock<'_>| block.chunks(&mut |_, chunk| sink.lock().unwrap().extend_from_slice(chunk))),
+        format,
+        ab::HostOrigin::default(),
+    ));
+    shared.render.set_state(engine::STARTED);
+    shared.capture.set_state(engine::STARTED);
+    (engine, kept)
+}
+
+fn cycle(frames: usize) -> engine::Cycle {
+    engine::Cycle { frames: u32::try_from(frames).unwrap(), arrival: Instant::now(), clock: None }
+}
+
+#[test]
+fn ports_shorter_than_the_block_are_never_read_or_written_past_their_end() {
+    // 40 samples for a 64-frame block, and a block of two chunks over ports that end inside the
+    // first chunk (nothing is left for the second): the copy stops at each port's own length.
+    for (frames, len) in [(64, 40), (SCRATCH_FRAMES + 100, SCRATCH_FRAMES - 5), (SCRATCH_FRAMES + 100, SCRATCH_FRAMES + 10)] {
+        let shared = Arc::new(Shared::new(48_000, 64));
+        let (mut engine, kept) = started_engine(&shared);
+        let mut outputs = vec![vec![9.0f32; len]; 2];
+        let inputs = vec![vec![0.5f32; len]; 2];
+        engine.process(cycle(frames), &mut VecPlanes(&mut outputs), &InVecPlanes(&inputs));
+        assert!(!shared.render.panicked() && !shared.capture.panicked(), "an out-of-range copy panics the callback ({frames} frames, {len} samples)");
+        assert!(outputs.iter().all(|p| p.len() == len && p.iter().all(|s| *s == 1.0)), "every sample of the short port rendered, none beyond");
+        let kept = kept.lock().unwrap();
+        assert_eq!(kept.len(), frames * 2, "the capture block is still the full {frames} frames");
+        assert!(
+            kept.chunks(2).enumerate().all(|(i, f)| f.iter().all(|s| *s == if i < len { 0.5 } else { 0.0 })),
+            "the short input is read to its end, zeros after"
+        );
+    }
+}
+
+#[test]
+fn ports_longer_than_the_block_keep_their_tail() {
+    let shared = Arc::new(Shared::new(48_000, 64));
+    let (mut engine, kept) = started_engine(&shared);
+    let mut outputs = vec![vec![9.0f32; 100]; 2];
+    let inputs = vec![vec![0.5f32; 100]; 2];
+    engine.process(cycle(64), &mut VecPlanes(&mut outputs), &InVecPlanes(&inputs));
+    assert!(outputs.iter().all(|p| p[..64].iter().all(|s| *s == 1.0) && p[64..].iter().all(|s| *s == 9.0)), "frames 64.. are not ours");
+    assert_eq!(kept.lock().unwrap().len(), 64 * 2);
+}
+
+#[test]
+fn an_engine_panic_outside_the_user_callbacks_leaves_no_direction_in_flight() {
+    for capture_first in [true, false] {
+        let shared = Arc::new(Shared::new(48_000, 64));
+        let (mut engine, _) = started_engine(&shared);
+        if !capture_first {
+            engine.capture = None;
+        }
+        engine.fault = true;
+        let mut outputs = vec![vec![0.0f32; 64]; 2];
+        let inputs = vec![vec![0.0f32; 64]; 2];
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            engine.process(cycle(64), &mut VecPlanes(&mut outputs), &InVecPlanes(&inputs));
+        }));
+        assert!(result.is_err(), "the fault unwinds out of the engine");
+        // A stuck mark would make each later stop wait out its whole quiesce limit.
+        assert!(shared.capture.quiesce(Duration::ZERO) && shared.render.quiesce(Duration::ZERO), "no direction left in flight");
+    }
+}
+
+#[test]
+fn a_panic_while_the_engine_is_busy_releases_the_busy_flag() {
+    let busy = engine::BusyFlag::default();
+    let first = busy.try_take().expect("free at first");
+    assert!(busy.try_take().is_none(), "taken while held");
+    drop(first);
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let _held = busy.try_take().expect("free again");
+        assert!(busy.is_taken());
+        panic!("a fake engine panic while the flag is held");
+    }));
+    assert!(result.is_err());
+    assert!(!busy.is_taken(), "the unwind released the flag");
+    assert!(busy.try_take().is_some(), "the next cycle takes it: no permanent silence");
+}

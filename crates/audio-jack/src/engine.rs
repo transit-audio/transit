@@ -69,6 +69,12 @@ impl SideShared {
         self.in_cycle.store(false, Ordering::SeqCst);
     }
 
+    /// A guard that calls [`SideShared::leave`] when dropped, also when the process callback
+    /// unwinds, so a panic outside the user callbacks cannot leave the direction "in flight".
+    fn guard(&self) -> Leave<'_> {
+        Leave(self)
+    }
+
     pub(crate) fn state(&self) -> u8 {
         self.state.load(Ordering::SeqCst)
     }
@@ -97,6 +103,43 @@ impl SideShared {
 
     pub(crate) fn wakes(&self) -> u64 {
         self.wakes.load(Ordering::Relaxed)
+    }
+}
+
+/// Clears a direction's in-flight mark on drop (see [`SideShared::guard`]).
+struct Leave<'a>(&'a SideShared);
+
+impl Drop for Leave<'_> {
+    fn drop(&mut self) {
+        self.0.leave();
+    }
+}
+
+/// The flag that serializes the engine between process callbacks (JACK runs one at a time; this
+/// makes the exclusive access to the engine a checked fact rather than an assumption).
+#[derive(Debug, Default)]
+pub(crate) struct BusyFlag(AtomicBool);
+
+/// Holds a [`BusyFlag`]; releases it on drop, also when the process callback unwinds, so a panic
+/// in the engine cannot leave every later cycle skipped as busy.
+#[derive(Debug)]
+pub(crate) struct BusyGuard<'a>(&'a AtomicBool);
+
+impl BusyFlag {
+    /// Takes the flag (acquire), or `None` when a callback holds it.
+    pub(crate) fn try_take(&self) -> Option<BusyGuard<'_>> {
+        self.0.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).ok().map(|_| BusyGuard(&self.0))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn is_taken(&self) -> bool {
+        self.0.load(Ordering::SeqCst)
+    }
+}
+
+impl Drop for BusyGuard<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
     }
 }
 
@@ -436,13 +479,28 @@ pub(crate) struct Engine {
     last_arrival: Option<Instant>,
     xruns_seen: u64,
     rate: u32,
+    /// Tests: panic inside the engine itself (outside the user callbacks) once a direction is in
+    /// flight.
+    #[cfg(test)]
+    pub(crate) fault: bool,
 }
 
 impl Engine {
     pub(crate) fn new(shared: Arc<Shared>) -> Self {
         let rate = shared.sample_rate().max(1);
         let xruns_seen = shared.xruns();
-        Self { shared, render: None, capture: None, position: None, last_frames: 0, last_arrival: None, xruns_seen, rate }
+        Self {
+            shared,
+            render: None,
+            capture: None,
+            position: None,
+            last_frames: 0,
+            last_arrival: None,
+            xruns_seen,
+            rate,
+            #[cfg(test)]
+            fault: false,
+        }
     }
 
     /// Marks the next stamp of each direction invalid.
@@ -490,8 +548,13 @@ impl Engine {
         self.position = position.zip(cycle.clock.map(|c| c.current_frames));
         self.last_frames = cycle.frames;
 
+        #[cfg(test)]
+        let fault = self.fault;
         if let Some(side) = self.capture.as_mut() {
+            let _leave = shared.capture.guard();
             if shared.capture.enter() {
+                #[cfg(test)]
+                assert!(!fault, "a fault in the engine, outside the user callbacks");
                 shared.capture.wakes.fetch_add(1, Ordering::Relaxed);
                 let stamp = side.stamp(&cycle);
                 let channels = usize::from(side.format.channels);
@@ -503,11 +566,13 @@ impl Engine {
                     panicked(&shared.capture, payload);
                 }
             }
-            shared.capture.leave();
         }
         silence(outputs, frames);
         if let Some(side) = self.render.as_mut() {
+            let _leave = shared.render.guard();
             if shared.render.enter() {
+                #[cfg(test)]
+                assert!(!fault, "a fault in the engine, outside the user callbacks");
                 shared.render.wakes.fetch_add(1, Ordering::Relaxed);
                 let stamp = side.stamp(&cycle);
                 let channels = usize::from(side.format.channels);
@@ -520,7 +585,6 @@ impl Engine {
                     silence(outputs, frames);
                 }
             }
-            shared.render.leave();
         }
         let service = Instant::now().saturating_duration_since(cycle.arrival);
         Shared::record(&shared.service_us, &shared.max_service_us, u64::try_from(service.as_micros()).unwrap_or(u64::MAX));

@@ -85,3 +85,7 @@ pub(crate) trait JackClient: Send {
     /// called from a JACK callback.
     fn close(self: Box<Self>) -> Result<(), String>;
 }
+
+/// Tests: the order in which a client closed and its callback state was freed.
+#[cfg(all(test, target_os = "linux", feature = "libjack"))]
+pub(crate) type CloseLog = Arc<std::sync::Mutex<Vec<&'static str>>>;

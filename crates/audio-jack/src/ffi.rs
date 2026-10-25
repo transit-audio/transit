@@ -10,7 +10,7 @@ use crate::api::{ClientError, JackApi, JackClient, PhysicalPort};
 use crate::callback::{self, CallbackState};
 use crate::engine::{Engine, Shared};
 use jack_sys as j;
-use std::ffi::{CStr, CString, c_char, c_ulong, c_void};
+use std::ffi::{CStr, CString, c_char, c_int, c_ulong, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 
@@ -150,15 +150,24 @@ impl LibClient {
 
     /// `jack_client_close` and then the callback state; idempotent.
     fn close_now(&mut self) -> Result<(), String> {
+        self.close_with(|client| {
+            // SAFETY: jack.h, jack_client_close: "Disconnects an external client from a JACK server."
+            // `client` is the open client of `close_with`, which calls this once and nulls the field
+            // after. It is never called from a JACK callback (types.h, JackInfoShutdownCallback:
+            // "jack_client_close() cannot be safely used inside the shutdown callback and has to be
+            // called outside of the callback context"): the backend closes on a control thread or on
+            // its watcher thread.
+            unsafe { j::jack_client_close(client) }
+        })
+    }
+
+    /// [`LibClient::close_now`] with the close call injected, so a test can observe the order: the
+    /// callback state must be alive while `close` runs and is freed only after it returned.
+    fn close_with(&mut self, close: impl FnOnce(*mut j::jack_client_t) -> c_int) -> Result<(), String> {
         if self.client.is_null() {
             return Ok(());
         }
-        // SAFETY: jack.h, jack_client_close: "Disconnects an external client from a JACK server."
-        // `self.client` is open and closed once (nulled below). It is never called from a JACK
-        // callback (types.h, JackInfoShutdownCallback: "jack_client_close() cannot be safely used
-        // inside the shutdown callback and has to be called outside of the callback context"): the
-        // backend closes on a control thread or on its watcher thread.
-        let code = unsafe { j::jack_client_close(self.client) };
+        let code = close(self.client);
         self.client = std::ptr::null_mut();
         self.inputs.clear();
         self.outputs.clear();
@@ -352,4 +361,33 @@ impl Drop for LibClient {
 
 fn check(code: i32, what: &str) -> Result<(), String> {
     if code == 0 { Ok(()) } else { Err(format!("{what} returned {code}")) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::CloseLog;
+    use std::sync::Mutex;
+
+    /// The callback state outlives `jack_client_close` and is freed only after it returned (a
+    /// reordered `close_now` logs "state freed" first). No server is needed: the close call is
+    /// injected and the client pointer is never dereferenced.
+    #[test]
+    fn the_callback_state_is_alive_during_the_close_and_freed_after_it() {
+        let log: CloseLog = Arc::new(Mutex::new(Vec::new()));
+        let shared = Arc::new(Shared::new(48_000, 128));
+        let client = std::ptr::NonNull::<j::jack_client_t>::dangling().as_ptr();
+        let mut state = CallbackState::new(Arc::clone(&shared), client, Box::new([]), Box::new([]), Engine::new(shared));
+        state.drop_log = Some(Arc::clone(&log));
+        let mut lib = LibClient { client, inputs: Vec::new(), outputs: Vec::new(), state: Box::into_raw(Box::new(state)) };
+        let during = Arc::clone(&log);
+        lib.close_with(move |_| {
+            during.lock().unwrap().push("client closed");
+            0
+        })
+        .unwrap();
+        assert_eq!(*log.lock().unwrap(), ["client closed", "state freed"]);
+        assert!(lib.client.is_null() && lib.state.is_null());
+        assert!(lib.close_now().is_ok(), "idempotent: a second close calls nothing");
+    }
 }

@@ -645,7 +645,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_native_jack_label_says_it_plays_no_audio_yet() {
+    fn the_native_jack_backend_is_labeled_native_jack() {
         assert_eq!(Backend::NativeJack.label(), "Native JACK");
     }
 

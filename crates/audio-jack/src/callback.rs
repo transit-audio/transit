@@ -3,13 +3,12 @@
 //! to the safe engine and handlers of `crate::engine`; none allocates, locks, logs or formats.
 #![deny(clippy::disallowed_macros, clippy::disallowed_methods)]
 
-use crate::engine::{Clock, Cycle, Engine, InputPlanes, OutputPlanes, Shared};
+use crate::engine::{BusyFlag, Clock, Cycle, Engine, InputPlanes, OutputPlanes, Shared};
 use jack_sys as j;
 use std::cell::UnsafeCell;
 use std::ffi::{c_char, c_int, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 
 /// What every callback of one client reads: the `arg` libjack passes back.
@@ -26,8 +25,20 @@ pub(crate) struct CallbackState {
     /// The client's input ports, `in_1` first, registered before activation.
     inputs: Box<[*mut j::jack_port_t]>,
     /// Taken (acquire compare-exchange) by the process callback for the engine; released after.
-    busy: AtomicBool,
+    busy: BusyFlag,
     engine: UnsafeCell<Engine>,
+    /// Tests: where `Drop` says the state was freed.
+    #[cfg(test)]
+    pub(crate) drop_log: Option<crate::api::CloseLog>,
+}
+
+#[cfg(test)]
+impl Drop for CallbackState {
+    fn drop(&mut self) {
+        if let Some(log) = &self.drop_log {
+            log.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push("state freed");
+        }
+    }
 }
 
 // SAFETY: the raw pointers are libjack handles of one open client: jack.h ties none of the calls
@@ -47,7 +58,16 @@ impl CallbackState {
         inputs: Box<[*mut j::jack_port_t]>,
         engine: Engine,
     ) -> Self {
-        Self { shared, client, outputs, inputs, busy: AtomicBool::new(false), engine: UnsafeCell::new(engine) }
+        Self {
+            shared,
+            client,
+            outputs,
+            inputs,
+            busy: BusyFlag::default(),
+            engine: UnsafeCell::new(engine),
+            #[cfg(test)]
+            drop_log: None,
+        }
     }
 }
 
@@ -152,18 +172,18 @@ pub(crate) unsafe extern "C" fn process(frames: j::jack_nframes_t, arg: *mut c_v
         // SAFETY: libjack passes the `arg` registered with jack_set_process_callback.
         let state = unsafe { state(arg) };
         let mut outputs = PortPlanes { ports: &state.outputs, frames };
-        if state.busy.compare_exchange(false, true, Ordering::Acquire, Ordering::Relaxed).is_err() {
+        // Released when `_busy` drops, also if the engine panics (it unwinds to the catch below).
+        let Some(_busy) = state.busy.try_take() else {
             state.shared.busy_skip();
             crate::engine::silence(&mut outputs, frames as usize);
             return;
-        }
+        };
         let inputs = InPlanes(PortPlanes { ports: &state.inputs, frames });
         let cycle = Cycle { frames, arrival, clock: clock(state.client) };
-        // SAFETY: `busy` was taken above, so this is the only reference to the engine until it is
-        // released below (see `CallbackState`).
+        // SAFETY: `busy` was taken above and `_busy` holds it to the end of this closure, so this is
+        // the only reference to the engine until then (see `CallbackState`).
         let engine = unsafe { &mut *state.engine.get() };
         engine.process(cycle, &mut outputs, &inputs);
-        state.busy.store(false, Ordering::Release);
     }));
     // types.h: "@return zero on success, non-zero on error"; a non-zero return would make the server
     // drop the client. A user callback's panic is caught inside the engine and reported by the

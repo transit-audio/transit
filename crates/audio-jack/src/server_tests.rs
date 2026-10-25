@@ -176,7 +176,11 @@ fn server_loopback_renders_the_signal_and_captures_it_aligned() {
     let lags: Vec<u64> = lags.into_iter().collect();
     let period = u64::from(period);
     assert_eq!(lags.len(), 1, "one constant lag, the capture aligned frame for frame: {lags:?}");
-    assert!(lags[0] == 0 || lags[0] == period, "the loop through JACK's graph is at most one cycle: {} frames", lags[0]);
+    assert_eq!(
+        lags[0], period,
+        "the loop through JACK's graph lags exactly one period (all four quanta measured so under JACK 2): {} frames",
+        lags[0]
+    );
     eprintln!("loopback lag: {} frames (period {period})", lags[0]);
     assert!(render_errors.lock().unwrap().is_empty());
 }
