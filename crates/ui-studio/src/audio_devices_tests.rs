@@ -14,6 +14,10 @@ struct T {
     app: StudioApp,
     ctx: egui::Context,
     time: f64,
+    /// The screen the frames are laid out on (points).
+    screen: egui::Vec2,
+    /// Key events for the next frame.
+    events: Vec<egui::Event>,
 }
 
 fn mid(r: [f32; 4]) -> (f32, f32) {
@@ -32,7 +36,7 @@ fn devices() -> Value {
 impl T {
     fn new() -> T {
         let app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
-        let mut t = T { app, ctx: egui::Context::default(), time: 0.0 };
+        let mut t = T { app, ctx: egui::Context::default(), time: 0.0, screen: egui::vec2(1400.0, 800.0), events: Vec::new() };
         t.frames(3);
         t.control("audio.fake_devices", devices()).unwrap();
         t
@@ -42,8 +46,9 @@ impl T {
         for _ in 0..n {
             self.time += 1.0 / 60.0;
             let mut raw = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, self.screen)),
                 time: Some(self.time),
+                events: std::mem::take(&mut self.events),
                 ..Default::default()
             };
             self.app.raw_input_hook(&mut raw);
@@ -98,6 +103,12 @@ impl T {
         self.click(mid(self.control_rect(key)));
         let items = self.layout()["items"].clone();
         self.click(mid(Self::rect(&items, Some(label), key)));
+    }
+
+    /// Click the sidebar entry `key` (`section_io`...), as a user does.
+    fn section(&mut self, key: &str) {
+        self.click(mid(self.control_rect(key)));
+        assert_eq!(self.layout()["section"], json!(key));
     }
 
     fn reopened(&self) -> Vec<AudioConfig> {
@@ -665,6 +676,7 @@ mod io_paths {
         let mut t = T::new();
         t.app.engine.set_io_map(IoMap::for_device("ASIO", "TASCAM Model 12", 4, 4));
         t.open_window();
+        t.section("section_io");
         t
     }
 
@@ -721,6 +733,7 @@ mod io_paths {
         let names = |prefix: &str, n: u16| (1..=n).map(|c| format!("{prefix} {c}")).collect();
         t.app.audio_devices.fake_channel_names = Some(ChannelNames { outputs: names("OUT", 10), inputs: names("IN", 12) });
         t.open_window();
+        t.section("section_io");
         assert_eq!((t.layout()["io"]["inputs"].clone(), t.layout()["io"]["outputs"].clone()), (json!(12), json!(10)));
         t.click(mid(item(&t, "io_channels:In 1", "Channels")));
         let picks: Vec<String> = t.layout()["controls"]
@@ -751,6 +764,7 @@ mod io_paths {
         // A table with no system yet (nothing opened) takes the chosen system, WASAPI here.
         let mut t = T::new();
         t.open_window();
+        t.section("section_io");
         item(&t, "io_wasapi_note", crate::audio_devices_io::WASAPI_NOTE);
     }
 }
@@ -904,6 +918,7 @@ mod hardware_inserts {
 
     fn measured() -> T {
         let mut t = with_window();
+        t.section("section_hardware");
         t.app.engine.store_hardware_latency("Out 3-4", "In 3-4", 612);
         t.frames(3);
         t
@@ -956,6 +971,7 @@ mod hardware_inserts {
 
     fn with_fake_probe() -> T {
         let mut t = with_window();
+        t.section("section_hardware");
         t.app.audio_devices.fake_probe = Some(FakeProbe { progress: (0, 8), ..Default::default() });
         t.frames(3);
         t
@@ -1111,6 +1127,7 @@ fn the_held_native_asio_input_shows_as_open_and_measure_is_enabled_on_it() {
     t.app.player = Some(player);
     assert!(t.app.recorder.is_none(), "no track is armed: the recorder has not opened");
     t.open_window();
+    t.section("section_hardware");
     let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
     assert_eq!(lines.len(), 4, "{lines:?}");
     assert_eq!(lines[2], "Input open: Model Mixer ASIO Driver · 48000 Hz · 12 ch · f32 · 6.8 ms in", "{lines:?}");
@@ -1927,4 +1944,84 @@ fn a_driver_that_must_be_open_to_be_described_marks_its_lists_stale() {
         let note = t.layout()["controls"].as_array().unwrap().iter().find(|c| c["value"] == key).cloned().unwrap_or_default();
         assert_eq!(note["label"], json!("updates after Apply"), "{key}");
     }
+}
+
+/// The sidebar sections and what each must show (#107).
+const SECTIONS: [&str; 3] = ["section_system", "section_io", "section_hardware"];
+
+fn inside(outer: [f32; 4], inner: [f32; 4]) -> bool {
+    inner[0] >= outer[0] - 0.5 && inner[1] >= outer[1] - 0.5 && inner[2] <= outer[2] + 0.5 && inner[3] <= outer[3] + 0.5
+}
+
+#[test]
+fn at_1366_by_768_every_control_of_every_section_is_inside_the_window_and_the_window_inside_the_screen() {
+    let mut t = T::new();
+    t.screen = egui::vec2(1366.0, 768.0);
+    t.app.engine.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10));
+    t.open_window();
+    for key in SECTIONS {
+        t.section(key);
+        let layout = t.layout();
+        let window: [f32; 4] = serde_json::from_value(layout["window"].clone()).unwrap();
+        assert!(inside([0.0, 0.0, 1366.0, 768.0], window), "{key}: the window {window:?} exceeds the screen");
+        let controls = layout["controls"].as_array().unwrap();
+        assert!(controls.len() > 7, "{key}: the section and the row show their controls");
+        for c in controls {
+            let rect: [f32; 4] = serde_json::from_value(c["rect"].clone()).unwrap();
+            assert!(inside(window, rect), "{key}: {} {rect:?} is outside the window {window:?}", c["value"]);
+        }
+    }
+}
+
+#[test]
+fn the_status_lines_and_the_apply_row_stay_in_every_section() {
+    let mut t = T::new();
+    t.open_window();
+    for key in SECTIONS {
+        t.section(key);
+        for control in ["apply", "revert", "reconnect", "rescan"] {
+            assert!(has_control(&t, control), "{key}: {control}");
+        }
+        assert!(!t.layout()["opened"].as_array().unwrap().is_empty(), "{key}: the open lines");
+    }
+    t.section("section_system");
+    t.pick("system", "ASIO");
+    t.section("section_io");
+    assert!(t.layout()["pending"].is_string(), "the pending line is in every section");
+}
+
+#[test]
+fn the_last_section_is_remembered_in_the_ui_state_not_the_session() {
+    let mut t = T::new();
+    t.open_window();
+    assert_eq!(t.layout()["section"], json!("section_system"), "the first time: System");
+    t.section("section_hardware");
+    assert_eq!(t.app.ui.audio_devices_section, "section_hardware");
+    let saved = serde_json::to_value(&t.app.ui).unwrap();
+    assert_eq!(saved["audio_devices_section"], json!("section_hardware"), "saved with the preferences in ui.json");
+    // A later run reads it back.
+    let mut later = T::new();
+    later.app.ui = serde_json::from_value(saved).unwrap();
+    later.open_window();
+    assert_eq!(later.layout()["section"], json!("section_hardware"));
+    // The session file does not carry it.
+    assert!(!format!("{:?}", t.app.engine.session()).contains("audio_devices_section"));
+}
+
+#[test]
+fn ctrl_tab_and_ctrl_shift_tab_cycle_the_sections() {
+    let mut t = T::new();
+    t.open_window();
+    let chord = |t: &mut T, shift: bool| {
+        let mut modifiers = egui::Modifiers::COMMAND;
+        modifiers.shift = shift;
+        t.events.push(egui::Event::Key { key: egui::Key::Tab, physical_key: None, pressed: true, repeat: false, modifiers });
+        t.frames(3);
+        t.layout()["section"].as_str().unwrap().to_string()
+    };
+    assert_eq!(chord(&mut t, false), "section_io");
+    assert_eq!(chord(&mut t, false), "section_hardware");
+    assert_eq!(chord(&mut t, false), "section_system", "wraps around");
+    assert_eq!(chord(&mut t, true), "section_hardware", "Shift goes back");
+    assert_eq!(chord(&mut t, true), "section_io");
 }
