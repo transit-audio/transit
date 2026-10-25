@@ -26,10 +26,41 @@ pub(crate) struct HeaderChip {
     pub(crate) missing: bool,
 }
 
+/// An input port the feedback storm detector muted (#99), with its re-enable.
+#[derive(Clone)]
+pub(crate) struct MutedPort {
+    pub(crate) name: String,
+    pub(crate) tracks: Vec<TrackId>,
+    reenable: std::rc::Rc<dyn Fn()>,
+}
+
+impl MutedPort {
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn of(m: soundcraft_playback::player::MutedMidiInput) -> Self {
+        Self { name: m.name.clone(), tracks: m.tracks.clone(), reenable: std::rc::Rc::new(move || m.reenable()) }
+    }
+
+    pub(crate) fn reenable(&self) {
+        (self.reenable)();
+    }
+
+    /// What the card and the input menu say about it.
+    pub(crate) fn text(&self) -> String {
+        format!("{} muted: feedback storm detected; click to re-enable", self.name)
+    }
+}
+
+/// The opt-in on the Out menu for echoing to the input's own device (#99).
+pub(crate) const ALLOW_ECHO: &str = "Allow echo to this device";
+
+#[derive(Default)]
 pub(crate) struct OutputView {
     ports: Vec<(MidiOutPort, String)>,
     states: Vec<(TrackId, State)>,
     status: String,
+    /// Tracks whose input and destination are one device, and whether they allow the echo (#99).
+    self_echo: Vec<(TrackId, bool)>,
+    muted: Vec<MutedPort>,
 }
 
 impl OutputView {
@@ -78,9 +109,10 @@ impl OutputView {
                     if let Some(error) = out.error {
                         detail.push_str(&format!("\nLast MIDI output error: {error}"));
                     }
-                    Self { ports, states, status: detail }
+                    let muted = status.muted_inputs.into_iter().map(MutedPort::of).collect();
+                    Self { ports, states, status: detail, self_echo: status.self_echo, muted }
                 }
-                Err(error) => Self { ports: Vec::new(), states: Vec::new(), status: format!("MIDI status unavailable: {error}") },
+                Err(error) => Self { status: format!("MIDI status unavailable: {error}"), ..Self::default() },
             };
         }
         let _ = player;
@@ -89,7 +121,23 @@ impl OutputView {
         } else {
             "MIDI output is unavailable without an active audio device."
         };
-        Self { ports: Vec::new(), states: Vec::new(), status: status.into() }
+        Self { status: status.into(), ..Self::default() }
+    }
+
+    /// Whether `track`'s input and destination are one device, and if so whether it allows the
+    /// echo there (#99).
+    pub(crate) fn self_echo(&self, track: TrackId) -> Option<bool> {
+        self.self_echo.iter().find(|(t, _)| *t == track).map(|(_, allowed)| *allowed)
+    }
+
+    /// Why live input is not echoed to `track`'s destination, when that is the input's own device.
+    pub(crate) fn echo_note(&self, track: TrackId, output: &MidiOutput) -> Option<String> {
+        (self.self_echo(track) == Some(false)).then(|| format!("Echo back to {} is off to prevent a feedback loop", self.port_label(output)))
+    }
+
+    /// The muted input port `track` listens to, if any (#99).
+    pub(crate) fn muted_input(&self, track: TrackId) -> Option<&MutedPort> {
+        self.muted.iter().find(|m| m.tracks.contains(&track))
     }
 
     pub(crate) fn state(&self, track: TrackId) -> State {
@@ -147,7 +195,8 @@ impl OutputView {
                     State::Failed(why) => format!(" (cannot open: {why})"),
                     State::Connected | State::Unknown => String::new(),
                 };
-                format!("MIDI to {} · {channel}{offset}{state}", self.port_label(output))
+                let echo = self.echo_note(track, output).map_or_else(String::new, |note| format!("\n{note}"));
+                format!("MIDI to {} · {channel}{offset}{state}{echo}", self.port_label(output))
             }
         }
     }
@@ -228,6 +277,21 @@ impl OutputView {
                     });
                     ui.weak("Positive sends later, negative earlier, than the audio.");
                 }
+                // The input is this device too (#99): the echo is off unless allowed here.
+                if let Some(allowed) = self.self_echo(track) {
+                    ui.separator();
+                    if let Some(note) = self.echo_note(track, output) {
+                        ui.add(egui::Label::new(egui::RichText::new(note).weak()).wrap());
+                    }
+                    let mut allow = allowed;
+                    if ui
+                        .checkbox(&mut allow, ALLOW_ECHO)
+                        .on_hover_text("A device that passes its MIDI In to its Out sends the echo straight back. The feedback storm detector still mutes a looping input.")
+                        .changed()
+                    {
+                        change = Some(json!({"track": track.0, "allow_echo_to_device": allow}));
+                    }
+                }
             }
             ui.separator();
             ui.add(egui::Label::new(egui::RichText::new(&self.status).weak()).wrap());
@@ -266,7 +330,7 @@ mod tests {
 
     #[test]
     fn a_missing_device_shows_in_the_label_and_the_header_badge() {
-        let view = OutputView { ports: Vec::new(), states: vec![(TrackId(3), State::Missing)], status: String::new() };
+        let view = OutputView { states: vec![(TrackId(3), State::Missing)], ..OutputView::default() };
         let out = external("usb");
         assert!(view.missing(TrackId(3), &out));
         assert_eq!(view.label(TrackId(3), &out), "MIDI to Synth OUT · Ch 2 · +2.5 ms (device missing)");
@@ -278,8 +342,7 @@ mod tests {
 
     #[test]
     fn the_header_chip_names_external_destinations_only() {
-        let view =
-            OutputView { ports: Vec::new(), states: vec![(TrackId(3), State::Missing), (TrackId(4), State::Connected)], status: String::new() };
+        let view = OutputView { states: vec![(TrackId(3), State::Missing), (TrackId(4), State::Connected)], ..OutputView::default() };
         let out = external("usb");
         assert_eq!(view.header_chip(TrackId(4), &out), Some(HeaderChip { text: "Synth OUT · Ch 2".into(), missing: false }));
         assert_eq!(view.header_chip(TrackId(3), &out), Some(HeaderChip { text: "Synth OUT · Ch 2".into(), missing: true }));
@@ -295,7 +358,7 @@ mod tests {
     #[test]
     fn the_menu_picks_a_port_by_identity_and_the_command_keeps_channel_and_offset() {
         let port = MidiOutPort { backend: "fake".into(), name: "Synth OUT".into(), ordinal: 0, id: "two".into() };
-        let view = OutputView { ports: vec![(port.clone(), "Synth OUT".into())], states: Vec::new(), status: "Test".into() };
+        let view = OutputView { ports: vec![(port.clone(), "Synth OUT".into())], status: "Test".into(), ..OutputView::default() };
         let output = external("one");
         let ctx = egui::Context::default();
         let mut frame = 0u32;
@@ -363,7 +426,7 @@ mod tests {
     }
     #[test]
     fn on_an_external_instrument_track_the_offset_row_says_where_the_latency_is_set() {
-        let view = OutputView { ports: Vec::new(), states: Vec::new(), status: String::new() };
+        let view = OutputView::default();
         let output = external("one");
         let texts = |external: bool| {
             let ctx = egui::Context::default();
@@ -410,5 +473,73 @@ mod tests {
         assert!(!held.iter().any(|t| t.starts_with("Positive sends later")), "{held:?}");
         let free = texts(false);
         assert!(free.iter().any(|t| t.starts_with("Positive sends later")) && !free.iter().any(|t| t == EXTERNAL_OFFSET), "{free:?}");
+    }
+
+    /// #99: a track whose input is the destination's own device says why it does not echo there,
+    /// on the route's tooltip and in the menu, and the menu's opt-in is one `midi.output` change.
+    #[test]
+    fn the_out_menu_says_the_echo_to_the_inputs_own_device_is_off_and_offers_the_opt_in() {
+        let output = external("one");
+        let view = OutputView { self_echo: vec![(TrackId(1), false)], ..OutputView::default() };
+        assert_eq!(view.label(TrackId(1), &output), "MIDI to Synth OUT · Ch 2 · +2.5 ms\nEcho back to Synth OUT is off to prevent a feedback loop");
+        let allowed = OutputView { self_echo: vec![(TrackId(1), true)], ..OutputView::default() };
+        assert_eq!(allowed.echo_note(TrackId(1), &output), None);
+        assert_eq!(OutputView::default().self_echo(TrackId(1)), None);
+        let ctx = egui::Context::default();
+        let mut frame = 0u32;
+        let mut draw = |events| {
+            frame += 1;
+            let mut changed = None;
+            let mut button = egui::Rect::NOTHING;
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 700.0))),
+                    time: Some(f64::from(frame) / 4.0),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let response = ui.button("Out");
+                    button = response.rect;
+                    changed = view.popup(&response, TrackId(1), &output, true);
+                },
+            );
+            out.textures_delta.clear();
+            (button, changed, out)
+        };
+        let click = |pos| {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: true, modifiers: egui::Modifiers::NONE },
+                egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: egui::Modifiers::NONE },
+            ]
+        };
+        let (button, _, _) = draw(Vec::new());
+        draw(Vec::new());
+        draw(click(button.center()));
+        let (_, _, shown) = draw(Vec::new());
+        let text_at = |needle: &str| {
+            shown.shapes.iter().find_map(|s| match &s.shape {
+                egui::Shape::Text(t) if t.galley.text() == needle => Some(t.pos + t.galley.rect.center().to_vec2()),
+                _ => None,
+            })
+        };
+        assert!(text_at("Echo back to Synth OUT is off to prevent a feedback loop").is_some());
+        let pos = text_at(ALLOW_ECHO).expect("the opt-in");
+        let (_, changed, _) = draw(click(pos));
+        assert_eq!(changed, Some(json!({"track": 1, "allow_echo_to_device": true})));
+    }
+
+    #[test]
+    fn a_muted_port_names_itself_and_re_enables_on_click() {
+        let hits = std::rc::Rc::new(std::cell::Cell::new(0));
+        let counter = std::rc::Rc::clone(&hits);
+        let muted =
+            MutedPort { name: "KeyStep Pro".into(), tracks: vec![TrackId(4)], reenable: std::rc::Rc::new(move || counter.set(counter.get() + 1)) };
+        assert_eq!(muted.text(), "KeyStep Pro muted: feedback storm detected; click to re-enable");
+        let view = OutputView { muted: vec![muted], ..OutputView::default() };
+        assert!(view.muted_input(TrackId(3)).is_none());
+        view.muted_input(TrackId(4)).unwrap().reenable();
+        assert_eq!(hits.get(), 1);
     }
 }

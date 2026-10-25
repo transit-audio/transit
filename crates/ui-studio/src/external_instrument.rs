@@ -328,9 +328,23 @@ pub(crate) fn card(
         }
     }
     let status = if is_result { String::new() } else { line };
+    // Feedback protection (#99): a muted input that feeds the track (click to re-enable it), or the
+    // echo held back from the input's own device.
+    let muted = view.muted_input(t).cloned();
+    let (status, ink) = match (&muted, view.echo_note(t, &output)) {
+        (Some(m), _) => (m.text(), TOKENS.record),
+        (None, Some(note)) if status.is_empty() => (note, TOKENS.text_dim),
+        (None, Some(note)) => (format!("{status}\n{note}"), ink),
+        (None, None) => (status, ink),
+    };
     let area = rows.status;
     c.external_status = crate::arrange::r4(area);
-    let resp = ui.interact(area.intersect(clip), ui.id().with(("ext_state", t.0)), Sense::hover());
+    let resp = ui.interact(area.intersect(clip), ui.id().with(("ext_state", t.0)), if muted.is_some() { Sense::click() } else { Sense::hover() });
+    if let Some(m) = &muted
+        && resp.clicked()
+    {
+        m.reenable();
+    }
     pc.rect_filled(area, crate::theme::RADIUS, TOKENS.button);
     if !status.is_empty() {
         let galley = pc.layout(status, FontId::proportional(10.0), ink, area.width() - 10.0);

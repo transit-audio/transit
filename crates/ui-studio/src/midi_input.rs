@@ -8,6 +8,8 @@ pub(crate) struct InputView {
     ports: Vec<(MidiPort, String)>,
     status: String,
     known: bool,
+    /// Ports the feedback storm detector muted (#99), each with its re-enable.
+    muted: Vec<crate::midi_output::MutedPort>,
 }
 
 impl InputView {
@@ -49,9 +51,10 @@ impl InputView {
                     if let Some(error) = status.error {
                         detail.push_str(&format!("\nLast MIDI error: {error}"));
                     }
-                    Self { ports, status: detail, known: true }
+                    let muted = status.muted_inputs.into_iter().map(crate::midi_output::MutedPort::of).collect();
+                    Self { ports, status: detail, known: true, muted }
                 }
-                Err(error) => Self { ports: Vec::new(), status: format!("MIDI status unavailable: {error}"), known: false },
+                Err(error) => Self { ports: Vec::new(), status: format!("MIDI status unavailable: {error}"), known: false, muted: Vec::new() },
             };
         }
         let _ = player;
@@ -60,7 +63,7 @@ impl InputView {
         } else {
             "MIDI input is unavailable without an active audio device."
         };
-        Self { ports: Vec::new(), status: status.into(), known: false }
+        Self { ports: Vec::new(), status: status.into(), known: false, muted: Vec::new() }
     }
 
     fn same_port(&self, selected: &MidiPort, available: &MidiPort) -> bool {
@@ -96,6 +99,11 @@ impl InputView {
         }
     }
 
+    /// The muted port `track` listens to, if any (#99).
+    pub(crate) fn muted(&self, track: TrackId) -> Option<&crate::midi_output::MutedPort> {
+        self.muted.iter().find(|m| m.tracks.contains(&track))
+    }
+
     pub(crate) fn label(&self, input: &MidiInput) -> String {
         let channel = match input.channel {
             None => "All ch".into(),
@@ -107,7 +115,8 @@ impl InputView {
 
     /// Returns only the changed field, so choosing a port preserves the channel and vice versa.
     pub(crate) fn popup(&self, response: &egui::Response, track: TrackId, input: &MidiInput) -> Option<Value> {
-        response.clone().on_hover_text(format!("{}\n{}\nArm this track to receive MIDI input.", self.label(input), self.status));
+        let muted = self.muted(track).map_or_else(String::new, |m| format!("\n{}", m.text()));
+        response.clone().on_hover_text(format!("{}{muted}\n{}\nArm this track to receive MIDI input.", self.label(input), self.status));
         let mut change = None;
         egui::Popup::menu(response).width(240.0).show(|ui| {
             ui.label("MIDI input");
@@ -136,6 +145,13 @@ impl InputView {
             if self.ports.is_empty() {
                 ui.weak("No MIDI inputs available");
             }
+            // Ports the feedback storm detector muted (#99): they stay off until re-enabled here.
+            for m in &self.muted {
+                if ui.button(egui::RichText::new(m.text()).color(crate::theme::TOKENS.record)).clicked() {
+                    m.reenable();
+                    ui.close();
+                }
+            }
             ui.separator();
             ui.menu_button("Channel", |ui| {
                 if ui.selectable_label(input.channel.is_none(), "All channels").clicked() {
@@ -162,7 +178,7 @@ mod tests {
 
     #[test]
     fn disconnected_selection_and_channel_remain_visible() {
-        let view = InputView { ports: Vec::new(), status: String::new(), known: true };
+        let view = InputView { ports: Vec::new(), status: String::new(), known: true, muted: Vec::new() };
         let input = MidiInput {
             port: MidiPort::Device { backend: "winmm".into(), name: "Keyboard".into(), ordinal: 1, id: "usb".into() },
             channel: Some(15),
@@ -179,7 +195,7 @@ mod tests {
     #[test]
     fn menu_picks_an_online_device_by_identity_and_keeps_the_channel() {
         let device = MidiPort::Device { backend: "fake".into(), name: "Keyboard".into(), ordinal: 1, id: "device-two".into() };
-        let view = InputView { ports: vec![(device.clone(), "Keyboard #2".into())], status: "Test input".into(), known: true };
+        let view = InputView { ports: vec![(device.clone(), "Keyboard #2".into())], status: "Test input".into(), known: true, muted: Vec::new() };
         let input = MidiInput { channel: Some(9), ..MidiInput::default() };
         let ctx = egui::Context::default();
         let mut frame = 0u32;
