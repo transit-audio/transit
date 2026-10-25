@@ -188,7 +188,7 @@ impl Drop for Bounce {
 
 const MAX_BOUNCE_SECS: f64 = 4.0 * 3600.0;
 
-pub(super) fn check_bounce_range(s: &Session, range: Range, command: &str) -> Result<()> {
+pub(crate) fn check_bounce_range(s: &Session, range: Range, command: &str) -> Result<()> {
     if range.len() > s.sample_rate.samples(MAX_BOUNCE_SECS) {
         return Err(crate::cmd::bad(command, "bounces are limited to 4 hours"));
     }
@@ -198,7 +198,7 @@ pub(super) fn check_bounce_range(s: &Session, range: Range, command: &str) -> Re
 /// The format, channel count and fold-down source of a bounce of the main mix or `bus`: every
 /// channel (a mono or stereo main mix as stereo), or an ITU stereo fold-down of a surround source
 /// when `fold_stereo`.
-pub(super) fn bounce_layout(s: &Session, bus: Option<BusId>, fold_stereo: bool) -> (ChannelFormat, usize, Option<ChannelFormat>) {
+pub(crate) fn bounce_layout(s: &Session, bus: Option<BusId>, fold_stereo: bool) -> (ChannelFormat, usize, Option<ChannelFormat>) {
     let nch = soundcraft_mix::source_channels(s, bus);
     let fmt = match bus {
         Some(id) => s.bus(id).map_or(ChannelFormat::Stereo, |b| b.format),

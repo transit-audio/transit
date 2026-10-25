@@ -34,6 +34,7 @@ mod plugin_retry;
 mod plugin_scan;
 mod plugin_state;
 mod query;
+mod realtime_render;
 pub(crate) mod sampler;
 mod setup_more;
 mod surround;
@@ -49,6 +50,7 @@ mod zoom_toggle;
 
 pub use external_instrument::{external_in_render, measure_blocker as external_measure_blocker};
 pub use file::{bounce_job, bounce_paths_job};
+pub use realtime_render::{RealtimePlan, RealtimeStem, RenderMode, realtime_plan, realtime_plan_mode};
 
 pub(crate) use edit::remember_selection;
 pub(crate) use plugin_scan::PluginDiscovery;

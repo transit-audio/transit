@@ -96,8 +96,8 @@ pub fn specs() -> Vec<CommandSpec> {
                 crate::io::import_video_bytes(e, &path, bytes, at)
             }
         ),
-        cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, source?: main|bus name, normalize?: false, dither?: true, fold_down?: stereo, without_external?: false}", always, bounce),
-        cmd!(noundo "file.bounce_stems", "Bounce Stems...", [], None, "{dir, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, fold_down?: stereo, without_external?: false}", has_tracks, |e, p| {
+        cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, source?: main|bus name, normalize?: false, dither?: true, fold_down?: stereo, mode?: realtime|offline_without_external, without_external?: false, stems?: false, uncompensated?: false} — with External Instruments, `mode: realtime` plays the range through the live device and keeps the mix (and with `stems`, each return); `offline_without_external` leaves them out", always, bounce),
+        cmd!(noundo "file.bounce_stems", "Bounce Stems...", [], None, "{dir, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, fold_down?: stereo, mode?: offline_without_external, without_external?: false}", has_tracks, |e, p| {
             let dir = str_param(p, "dir").ok_or_else(|| bad("file.bounce_stems", "`dir` required"))?.to_string();
             let left_out = super::external_instrument::render_guard(e, "file.bounce_stems", p)?;
             let r = range_param(e, "file.bounce_stems", p)?;
@@ -116,7 +116,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let files = crate::io::bounce_stems_with(e, &dir, r, &soundcraft_audio_io::EncodeOptions { format, bit_depth, dither: true, bwf: None }, fold)?;
             Ok(json!({"files": files, "left_out": left_out}))
         }),
-        cmd!(noundo "file.bounce_paths", "Bounce Stems by Output Path...", [], None, "{dir, paths?: [output path name | main] | all (default: every routed path), format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, normalize?: false|true|joint|each, dither?: true, without_external?: false}", has_tracks, bounce_paths),
+        cmd!(noundo "file.bounce_paths", "Bounce Stems by Output Path...", [], None, "{dir, paths?: [output path name | main] | all (default: every routed path), format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, normalize?: false|true|joint|each, dither?: true, mode?: offline_without_external, without_external?: false}", has_tracks, bounce_paths),
         cmd!(noundo "file.export_midi", "MIDI...", ["File", "Export"], None, "{path, tracks?}", always, |e, p| {
             let path = str_param(p, "path").ok_or_else(|| bad("file.export_midi", "`path` required"))?.to_string();
             let only = if p.get("tracks").is_some() || p.get("track").is_some() { Some(tracks_param(e, "file.export_midi", p)?) } else { None };
@@ -366,6 +366,9 @@ fn fold_down_param(p: &Value, id: &str) -> Result<bool> {
 }
 
 fn bounce(e: &mut Engine, p: &Value) -> Result<Value> {
+    if super::realtime_render::mode_param("file.bounce_mix", p)? == super::realtime_render::RenderMode::Realtime {
+        return super::realtime_render::realtime(e, p);
+    }
     let job = bounce_job(e, p)?;
     let left_out = super::external_instrument::external_in_render(e.session());
     let (path, seconds) = (job.path().to_string_lossy().into_owned(), e.session().sample_rate.seconds(job.range().len()));
