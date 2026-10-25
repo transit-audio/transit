@@ -12,6 +12,40 @@ use transit_rt::testing::measure;
 #[global_allocator]
 static ALLOC: transit_rt::testing::CountingAlloc = transit_rt::testing::CountingAlloc;
 
+#[test]
+fn sysex_capture_spans_callbacks_excludes_realtime_and_bounds_overflow_without_allocating() {
+    let (mut sink, mut consumer, _) = InputSink::new(&config(8, 0));
+    let ((), stats) = measure(|| {
+        sink.push_bytes_at(0, &[0xF0, 1, 0xF8, 2], 100);
+        sink.push_bytes_at(0, &[3, 0xF7, 0xF0, 4, 0x90, 60, 100], 200);
+    });
+    assert!(stats.is_zero(), "{stats:?}");
+    let (host, total, prefix) = consumer.pop_sysex().unwrap();
+    assert_eq!((host, total, &prefix[..5]), (100, 5, &[0xF0, 1, 2, 3, 0xF7][..]));
+    let (host, total, prefix) = consumer.pop_sysex().unwrap();
+    assert_eq!((host, total, &prefix[..2]), (200, 2, &[0xF0, 4][..]));
+    assert!(consumer.pop_sysex().is_none());
+    assert_eq!(drain(&mut consumer).iter().map(|e| e.bytes[0]).collect::<Vec<_>>(), [0xF8, 0x90]);
+    let mut long = [7; 100];
+    long[0] = 0xF0;
+    long[99] = 0xF7;
+    let ((), stats) = measure(|| {
+        for host in 0..65 {
+            sink.push_bytes_at(0, &long, host);
+        }
+    });
+    assert!(stats.is_zero(), "{stats:?}");
+    assert_eq!(consumer.counters().sysex_capture_dropped, 1);
+    assert_eq!(consumer.counters().sysex_truncated, 65);
+    for host in 0..64 {
+        let (stamp, total, prefix) = consumer.pop_sysex().unwrap();
+        assert_eq!((stamp, total, prefix.as_slice()), (host, 100, &long[..64]));
+    }
+    assert!(consumer.pop_sysex().is_none());
+    sink.push_bytes_at(0, &[0xF0, 0xF7], 900);
+    assert_eq!(consumer.pop_sysex().unwrap().0, 900);
+}
+
 fn config(capacity: usize, reserve: usize) -> InputConfig {
     InputConfig { release_reserve: reserve, ..InputConfig::new(capacity) }
 }

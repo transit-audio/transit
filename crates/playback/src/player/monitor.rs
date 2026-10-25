@@ -36,8 +36,10 @@ pub struct MonitorEvent {
     /// Host time in nanoseconds on the runtime's [`HostOrigin`](crate::device_clock::HostOrigin).
     /// Inputs carry the callback's arrival time, outputs the time of the send.
     pub host_ns: u64,
-    /// SysEx byte count (status 0xF0 only); the bytes themselves are not copied.
+    /// SysEx byte count (status 0xF0 only).
     pub sysex_len: u32,
+    /// Bounded payload identity, unique per direction; zero means no captured bytes.
+    pub sysex_id: u32,
     /// Input: the ingress input id; output: the output thread's port index. Names come from
     /// [`Report::ports`].
     pub port: u16,
@@ -59,6 +61,7 @@ impl MonitorEvent {
         Self {
             host_ns,
             sysex_len: 0,
+            sysex_id: 0,
             port,
             dir,
             channel: if (0x80..0xF0).contains(&status) { status & 0x0F } else { NO_CHANNEL },
@@ -71,8 +74,17 @@ impl MonitorEvent {
     /// A SysEx of `len` bytes (not carried).
     #[must_use]
     pub fn sysex(dir: Dir, port: u16, host_ns: u64, len: u32) -> Self {
-        Self { host_ns, sysex_len: len, port, dir, channel: NO_CHANNEL, status: 0xF0, data1: 0, data2: 0 }
+        Self { host_ns, sysex_len: len, sysex_id: 0, port, dir, channel: NO_CHANNEL, status: 0xF0, data1: 0, data2: 0 }
     }
+}
+
+/// A bounded side-ring payload. Its event remains a 24-byte element in the main ring.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct SysEx {
+    pub dir: Dir,
+    pub id: u32,
+    pub bytes: [u8; 64],
+    pub len: u8,
 }
 
 /// Pulses per quarter note.
@@ -135,6 +147,7 @@ pub struct Shared {
     enabled: AtomicBool,
     show_clock: AtomicBool,
     dropped: [AtomicU64; 2],
+    sysex_truncated: AtomicU64,
     /// Input activity for the header LED: a count of channel and system messages other than
     /// Clock and Active Sensing, and the last one's port and bytes. Updated whether or not the
     /// monitor is on.
@@ -199,6 +212,8 @@ impl Shared {
 /// The producing end of one ring. Owned by the ingress worker or the output thread.
 pub struct Tap {
     tx: rtrb::Producer<MonitorEvent>,
+    sysex_tx: rtrb::Producer<SysEx>,
+    next_sysex: u32,
     shared: Arc<Shared>,
     dir: Dir,
 }
@@ -221,6 +236,33 @@ impl Tap {
         if self.tx.push(event).is_err() {
             self.shared.dropped[Shared::index(self.dir)].fetch_add(1, Ordering::Relaxed);
         }
+    }
+
+    /// Publishes a bounded prefix and its event together, or drops both. No allocation or lock.
+    pub fn push_sysex(&mut self, port: u16, host_ns: u64, total: u32, bytes: &[u8]) {
+        let Some(id) = self.next_sysex.checked_add(1) else {
+            self.shared.dropped[Shared::index(self.dir)].fetch_add(1, Ordering::Relaxed);
+            return;
+        };
+        if self.tx.slots() == 0 || self.sysex_tx.slots() == 0 {
+            self.shared.dropped[Shared::index(self.dir)].fetch_add(1, Ordering::Relaxed);
+            return;
+        }
+        let len = bytes.len().min(64).min(total as usize);
+        let mut payload = SysEx { dir: self.dir, id, bytes: [0; 64], len: len as u8 };
+        payload.bytes[..len].copy_from_slice(&bytes[..len]);
+        let mut event = MonitorEvent::sysex(self.dir, port, host_ns, total);
+        event.sysex_id = id;
+        // Only this producer writes either ring; consumers can only make more space.
+        let _ = self.sysex_tx.push(payload);
+        let _ = self.tx.push(event);
+        self.next_sysex = id;
+    }
+
+    /// Input capture losses before the monitor ring, accumulated once by the ingress worker.
+    pub fn note_sysex_counts(&self, dropped: u64, truncated: u64) {
+        self.shared.dropped[Shared::index(self.dir)].fetch_add(dropped, Ordering::Relaxed);
+        self.shared.sysex_truncated.fetch_add(truncated, Ordering::Relaxed);
     }
 
     /// The shared state (rate slots).
@@ -272,12 +314,16 @@ pub struct Report {
     pub dropped_in: u64,
     pub dropped_out: u64,
     pub ports: Vec<PortReport>,
+    pub sysex: Vec<SysEx>,
+    pub sysex_truncated: u64,
 }
 
 /// The control side: the two consumers and the switches.
 pub struct Hub {
     shared: Arc<Shared>,
     rx: RefCell<(rtrb::Consumer<MonitorEvent>, rtrb::Consumer<MonitorEvent>)>,
+    sysex_rx: RefCell<(rtrb::Consumer<SysEx>, rtrb::Consumer<SysEx>)>,
+    drained_sysex: RefCell<Vec<SysEx>>,
 }
 
 impl Hub {
@@ -288,16 +334,24 @@ impl Hub {
             enabled: AtomicBool::new(false),
             show_clock: AtomicBool::new(false),
             dropped: Default::default(),
+            sysex_truncated: AtomicU64::new(0),
             activity: AtomicU64::new(0),
             activity_msg: AtomicU64::new(0),
             stats: std::array::from_fn(|_| PortStat::default()),
         });
         let (tx_in, rx_in) = rtrb::RingBuffer::new(RING);
         let (tx_out, rx_out) = rtrb::RingBuffer::new(RING);
+        let (sysex_in, payload_in) = rtrb::RingBuffer::new(RING);
+        let (sysex_out, payload_out) = rtrb::RingBuffer::new(RING);
         (
-            Self { shared: Arc::clone(&shared), rx: RefCell::new((rx_in, rx_out)) },
-            Tap { tx: tx_in, shared: Arc::clone(&shared), dir: Dir::In },
-            Tap { tx: tx_out, shared, dir: Dir::Out },
+            Self {
+                shared: Arc::clone(&shared),
+                rx: RefCell::new((rx_in, rx_out)),
+                sysex_rx: RefCell::new((payload_in, payload_out)),
+                drained_sysex: RefCell::new(Vec::new()),
+            },
+            Tap { tx: tx_in, sysex_tx: sysex_in, next_sysex: 0, shared: Arc::clone(&shared), dir: Dir::In },
+            Tap { tx: tx_out, sysex_tx: sysex_out, next_sysex: 0, shared, dir: Dir::Out },
         )
     }
 
@@ -317,13 +371,26 @@ impl Hub {
     /// Appends the pending events of both rings to `out`, merged by time, at most `max` per ring.
     pub fn drain(&self, out: &mut Vec<MonitorEvent>, max: usize) {
         let Ok(mut rx) = self.rx.try_borrow_mut() else { return };
+        let Ok(mut payloads) = self.sysex_rx.try_borrow_mut() else { return };
+        let Ok(mut drained) = self.drained_sysex.try_borrow_mut() else { return };
+        drained.clear();
         let start = out.len();
         for _ in 0..max {
             let Ok(event) = rx.0.pop() else { break };
+            if event.sysex_id != 0
+                && let Ok(payload) = payloads.0.pop()
+            {
+                drained.push(payload);
+            }
             out.push(event);
         }
         for _ in 0..max {
             let Ok(event) = rx.1.pop() else { break };
+            if event.sysex_id != 0
+                && let Ok(payload) = payloads.1.pop()
+            {
+                drained.push(payload);
+            }
             out.push(event);
         }
         if let Some(tail) = out.get_mut(start..) {
@@ -331,10 +398,21 @@ impl Hub {
         }
     }
 
+    /// Payloads corresponding only to the last drain's events; called on control/UI.
+    pub fn take_sysex(&self) -> Vec<SysEx> {
+        self.drained_sysex.try_borrow_mut().map_or_else(|_| Vec::new(), |mut v| std::mem::take(&mut *v))
+    }
+
     /// Events dropped so far on the input and output rings.
     #[must_use]
     pub fn dropped(&self) -> (u64, u64) {
         (self.shared.dropped[0].load(Ordering::Relaxed), self.shared.dropped[1].load(Ordering::Relaxed))
+    }
+
+    /// Input SysEx messages whose captured prefix was truncated, including capture-ring drops.
+    #[must_use]
+    pub fn sysex_truncated(&self) -> u64 {
+        self.shared.sysex_truncated.load(Ordering::Relaxed)
     }
 
     /// The input activity counter and the last message behind it.

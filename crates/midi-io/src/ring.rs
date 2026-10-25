@@ -58,6 +58,10 @@ pub struct InputCounters {
     pub sysex_dropped: u64,
     /// Bytes of those SysEx messages, `F0` and `F7` included.
     pub sysex_bytes_dropped: u64,
+    /// Completed SysEx captures lost because their bounded diagnostic ring was full.
+    pub sysex_capture_dropped: u64,
+    /// Completed SysEx captures longer than the retained 64-byte prefix.
+    pub sysex_truncated: u64,
     /// Bytes that formed no valid message: data bytes with no running status, a message cut
     /// short by a status byte or by the end of the callback's bytes, undefined status bytes.
     pub malformed_bytes: u64,
@@ -76,6 +80,8 @@ pub(crate) struct Counters {
     dropped_releases: AtomicU64,
     sysex_dropped: AtomicU64,
     sysex_bytes_dropped: AtomicU64,
+    sysex_capture_dropped: AtomicU64,
+    sysex_truncated: AtomicU64,
     malformed_bytes: AtomicU64,
     filtered: AtomicU64,
     exhausted_dropped: AtomicU64,
@@ -109,6 +115,8 @@ impl PortShared {
             dropped_releases: get(&c.dropped_releases),
             sysex_dropped: get(&c.sysex_dropped),
             sysex_bytes_dropped: get(&c.sysex_bytes_dropped),
+            sysex_capture_dropped: get(&c.sysex_capture_dropped),
+            sysex_truncated: get(&c.sysex_truncated),
             malformed_bytes: get(&c.malformed_bytes),
             filtered: get(&c.filtered),
             exhausted_dropped: get(&c.exhausted_dropped),
@@ -196,6 +204,11 @@ const fn message_len(status: u8) -> Option<usize> {
 /// messages and pushes each into the preallocated ring. It never allocates, locks, logs or waits.
 pub(crate) struct InputSink {
     producer: rtrb::Producer<InputEvent>,
+    sysex_producer: rtrb::Producer<(u64, u32, [u8; 64])>,
+    sysex_prefix: [u8; 64],
+    sysex_total: u32,
+    sysex_host: u64,
+    sysex_published: u64,
     shared: Arc<PortShared>,
     reserve: usize,
     pass_active_sensing: bool,
@@ -214,9 +227,15 @@ impl InputSink {
     /// The ring and both halves for one open port.
     pub(crate) fn new(config: &InputConfig) -> (Self, InputConsumer, Arc<PortShared>) {
         let (producer, consumer) = rtrb::RingBuffer::new(config.capacity.saturating_add(config.release_reserve));
+        let (sysex_producer, sysex_consumer) = rtrb::RingBuffer::new(64);
         let shared = Arc::new(PortShared::default());
         let sink = Self {
             producer,
+            sysex_producer,
+            sysex_prefix: [0; 64],
+            sysex_total: 0,
+            sysex_host: 0,
+            sysex_published: 0,
             shared: Arc::clone(&shared),
             reserve: config.release_reserve,
             pass_active_sensing: config.pass_active_sensing,
@@ -228,7 +247,7 @@ impl InputSink {
             after_publish: None,
             in_sysex: false,
         };
-        (sink, InputConsumer { consumer, shared: Arc::clone(&shared), origin: config.host_origin }, shared)
+        (sink, InputConsumer { consumer, sysex_consumer, shared: Arc::clone(&shared), origin: config.host_origin }, shared)
     }
 
     /// One backend callback: `data` holds one or more messages (or a SysEx chunk) the backend
@@ -242,14 +261,20 @@ impl InputSink {
     /// the fake backend uses it so a test can stamp events deterministically.
     pub(crate) fn push_stamped(&mut self, backend_time_us: u64, host: u64, data: &[u8]) {
         let published = self.shared.counters.delivered.load(Ordering::Relaxed);
+        let sysex_published = self.sysex_published;
         self.push_bytes(backend_time_us, host, data);
         // Wake the consumer's worker after the ring holds the events (`unpark` is lock- and
         // allocation-free; a token left by an early unpark makes the next park return at once).
-        if self.shared.counters.delivered.load(Ordering::Relaxed) != published
+        if (self.shared.counters.delivered.load(Ordering::Relaxed) != published || self.sysex_published != sysex_published)
             && let Some(thread) = self.shared.wake.get()
         {
             thread.unpark();
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn push_bytes_at(&mut self, backend_time_us: u64, data: &[u8], host: u64) {
+        self.push_bytes(backend_time_us, host, data);
     }
 
     fn push_bytes(&mut self, backend_time_us: u64, host: u64, data: &[u8]) {
@@ -267,16 +292,25 @@ impl InputSink {
                 // Data bytes and the closing F7 belong to the SysEx; any other status ends it.
                 if b < 0x80 || b == 0xF7 {
                     bump(&self.shared.counters.sysex_bytes_dropped, 1);
+                    self.sysex_byte(b);
                     self.in_sysex = b != 0xF7;
+                    if !self.in_sysex {
+                        self.finish_sysex();
+                    }
                     i += 1;
                     continue;
                 }
                 self.in_sysex = false;
+                self.finish_sysex();
             }
             if b == 0xF0 {
                 bump(&self.shared.counters.sysex_dropped, 1);
                 bump(&self.shared.counters.sysex_bytes_dropped, 1);
                 self.in_sysex = true;
+                self.sysex_prefix = [0; 64];
+                self.sysex_total = 0;
+                self.sysex_host = host;
+                self.sysex_byte(b);
                 running = None;
                 i += 1;
                 continue;
@@ -326,6 +360,24 @@ impl InputSink {
                 bump(&self.shared.counters.malformed_bytes, (got - usize::from(start == i)).max(1) as u64);
             }
             i = j.max(i + 1);
+        }
+    }
+
+    fn sysex_byte(&mut self, byte: u8) {
+        if let Some(slot) = self.sysex_prefix.get_mut(self.sysex_total as usize) {
+            *slot = byte;
+        }
+        self.sysex_total = self.sysex_total.saturating_add(1);
+    }
+
+    fn finish_sysex(&mut self) {
+        if self.sysex_total > 64 {
+            bump(&self.shared.counters.sysex_truncated, 1);
+        }
+        if self.sysex_producer.push((self.sysex_host, self.sysex_total, self.sysex_prefix)).is_err() {
+            bump(&self.shared.counters.sysex_capture_dropped, 1);
+        } else {
+            self.sysex_published = self.sysex_published.wrapping_add(1);
         }
     }
 
@@ -383,11 +435,19 @@ impl InputSink {
 /// drop it there: if it is the ring's last owner, dropping frees the ring.
 pub struct InputConsumer {
     consumer: rtrb::Consumer<InputEvent>,
+    sysex_consumer: rtrb::Consumer<(u64, u32, [u8; 64])>,
     shared: Arc<PortShared>,
     origin: Instant,
 }
 
 impl InputConsumer {
+    /// Pop a completed (or status-interrupted) diagnostic SysEx capture: first-byte host
+    /// timestamp, full byte count, and first 64 bytes. Realtime bytes are excluded.
+    /// This separate fixed 64-message ring never competes with playable MIDI or allocates.
+    pub fn pop_sysex(&mut self) -> Option<(u64, u32, [u8; 64])> {
+        self.sysex_consumer.pop().ok()
+    }
+
     /// Ask the callback to unpark `thread` after it publishes events, so a worker can park
     /// without a timeout. Set once per open input; later calls are ignored.
     pub fn wake_on(&self, thread: Thread) {

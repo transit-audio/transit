@@ -294,7 +294,7 @@ impl Native {
                 sensing: false,
             });
         }
-        monitor::Report { dropped_in, dropped_out, ports }
+        monitor::Report { dropped_in, dropped_out, ports, sysex: self.monitor.take_sysex(), sysex_truncated: self.monitor.sysex_truncated() }
     }
 
     pub(super) fn take_midi(&self) -> Vec<super::PlayedMidi> {

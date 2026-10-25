@@ -7,6 +7,52 @@ use soundcraft_model::TrackId;
 use transit_midi_io::{InputConfig, fake::Fake};
 use transit_rt::testing::measure;
 
+#[test]
+fn monitor_sysex_capture_reaches_unrouted_monitor_with_loss_counts_and_no_ingress_allocations() {
+    let (control, _plans) = bridge();
+    let (lane, _audio) = action_lane::pair_with_result(&control);
+    let (send, mut worker) = pump(lane);
+    let (hub, tap, _out) = monitor::Hub::new();
+    hub.set_enabled(true);
+    send.send(Update::Monitor(tap)).ok().unwrap();
+    let fake = Fake::default();
+    let key = fake.add_input("SysEx capture");
+    let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
+    send.send(Update::Input(Input { id: 3, mon: Mon::default(), consumer, routes: Vec::new() })).ok().unwrap();
+    worker.step();
+    let port = fake.input_port(&key).unwrap();
+    let mut bytes = [9; 100];
+    bytes[0] = 0xF0;
+    bytes[99] = 0xF7;
+    for _ in 0..65 {
+        port.deliver(0, &bytes);
+    }
+    let (_, stats) = measure(|| worker.step());
+    assert!(stats.is_zero(), "{stats:?}");
+    let mut events = Vec::new();
+    hub.drain(&mut events, 100);
+    let payloads = hub.take_sysex();
+    assert_eq!(events.len(), 64);
+    assert_eq!(payloads.len(), 64);
+    for (event, payload) in events.iter().zip(&payloads) {
+        assert_eq!((event.port, event.sysex_len, event.sysex_id), (3, 100, payload.id));
+        assert_eq!(payload.bytes, bytes[..64]);
+    }
+    assert_eq!(hub.dropped(), (1, 0));
+    assert_eq!(hub.sysex_truncated(), 65);
+    worker.step();
+    assert_eq!(hub.dropped(), (1, 0), "counts are accumulated once");
+    assert_eq!(hub.sysex_truncated(), 65);
+    hub.set_enabled(false);
+    port.deliver(0, &[0xF0, 1, 0xF7]);
+    worker.step();
+    hub.set_enabled(true);
+    worker.step();
+    events.clear();
+    hub.drain(&mut events, 100);
+    assert!(events.is_empty(), "closed-window captures are discarded");
+}
+
 fn route() -> Route {
     Route {
         engine: EngineEpoch(1),

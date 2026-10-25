@@ -135,7 +135,7 @@ struct Input {
     id: u64,
     consumer: InputConsumer,
     routes: Vec<(sources::Permit, Route)>,
-    /// MIDI Monitor bookkeeping (#91); untouched while the monitor is off.
+    /// MIDI Monitor bookkeeping (#91), including discarding closed-window SysEx captures.
     mon: Mon,
 }
 
@@ -149,7 +149,8 @@ struct Mon {
     /// The rate slot this input publishes into.
     slot: Option<(Arc<monitor::Shared>, usize)>,
     filtered: u64,
-    sysex_bytes: u64,
+    sysex_dropped: u64,
+    sysex_truncated: u64,
 }
 impl Drop for Mon {
     fn drop(&mut self) {
@@ -193,9 +194,8 @@ impl Mon {
         tap.push(MonitorEvent::message(Dir::In, id as u16, raw.host_arrival_ns, raw.message()));
     }
 
-    /// What the backend filtered or never carried: Active Sensing (counted, not passed) and SysEx
-    /// (length only).
-    fn watch(&mut self, tap: &mut Tap, id: u64, consumer: &InputConsumer) {
+    /// Filtered sensing and bounded diagnostic SysEx, independent of playable MIDI routes.
+    fn watch(&mut self, tap: &mut Tap, id: u64, consumer: &mut InputConsumer) {
         let counters = consumer.counters();
         if counters.filtered > self.filtered {
             self.filtered = counters.filtered;
@@ -203,10 +203,20 @@ impl Mon {
                 shared.publish_sensing(*slot, consumer.now_ns());
             }
         }
-        if counters.sysex_bytes_dropped > self.sysex_bytes {
-            let len = counters.sysex_bytes_dropped - self.sysex_bytes;
-            self.sysex_bytes = counters.sysex_bytes_dropped;
-            tap.push(MonitorEvent::sysex(Dir::In, id as u16, consumer.now_ns(), u32::try_from(len).unwrap_or(u32::MAX)));
+        if tap.enabled() {
+            tap.note_sysex_counts(
+                counters.sysex_capture_dropped.saturating_sub(self.sysex_dropped),
+                counters.sysex_truncated.saturating_sub(self.sysex_truncated),
+            );
+        }
+        self.sysex_dropped = counters.sysex_capture_dropped;
+        self.sysex_truncated = counters.sysex_truncated;
+        // At most one ring capacity per step, even if the callback keeps producing.
+        for _ in 0..64 {
+            let Some((host, total, bytes)) = consumer.pop_sysex() else { break };
+            if tap.enabled() {
+                tap.push_sysex(id as u16, host, total, &bytes[..(total as usize).min(64)]);
+            }
         }
     }
 }
@@ -460,7 +470,9 @@ impl Pump {
                         if let Some(monitor) = &self.monitor {
                             input.mon.slot = monitor.shared().claim(input.id).map(|slot| (Arc::clone(monitor.shared()), slot));
                             let counters = input.consumer.counters();
-                            (input.mon.filtered, input.mon.sysex_bytes) = (counters.filtered, counters.sysex_bytes_dropped);
+                            input.mon.filtered = counters.filtered;
+                            input.mon.sysex_dropped = counters.sysex_capture_dropped;
+                            input.mon.sysex_truncated = counters.sysex_truncated;
                         }
                         self.inputs.push(input);
                     }
@@ -519,9 +531,9 @@ impl Pump {
                 }
             }
         }
-        if let Some(tap) = self.monitor.as_mut().filter(|tap| tap.enabled()) {
+        if let Some(tap) = self.monitor.as_mut() {
             for input in &mut self.inputs {
-                input.mon.watch(tap, input.id, &input.consumer);
+                input.mon.watch(tap, input.id, &mut input.consumer);
             }
         }
         // A fixed amount of work even under continuous MIDI traffic. Round-robin
