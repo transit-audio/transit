@@ -24,9 +24,14 @@ impl NativeKind {
         }
     }
 
-    /// What the Player says when this backend did not open and cpal did.
+    /// What the Player says when this backend did not open and cpal did. cpal has no ASIO host,
+    /// so a failed native ASIO open falls to cpal's default host, WASAPI shared.
     pub fn fallback_note(self, reason: &str) -> String {
-        format!("{} failed: {reason}; using the cpal backend", self.label())
+        let opened = match self {
+            NativeKind::Asio => "WASAPI shared",
+            NativeKind::Wasapi | NativeKind::Jack => "the cpal backend",
+        };
+        format!("{} failed: {reason}; using {opened}", self.label())
     }
 }
 
@@ -135,7 +140,7 @@ pub fn asio_system(selected: Option<&str>) -> AudioSystem {
             Vec::new()
         }
     };
-    let Some(selected) = selected.filter(|_| !crate::backend::cpal::asio_device_held()) else {
+    let Some(selected) = selected else {
         return system_from_endpoints(devices::ASIO_SYSTEM, &[], &[], &installed, diagnostics);
     };
     if !installed.iter().any(|n| n == selected) {
@@ -267,7 +272,7 @@ mod tests {
         let crossed = AudioConfig { backend: Backend::NativeAsio, system: Some("WASAPI".into()), ..Default::default() };
         assert!(factory_for(&crossed).is_none(), "native ASIO never serves the WASAPI system");
         assert!(factory_for(&AudioConfig { backend: Backend::Cpal, ..asio }).is_none());
-        assert_eq!(NativeKind::Asio.fallback_note("no driver"), "Native ASIO failed: no driver; using the cpal backend");
+        assert_eq!(NativeKind::Asio.fallback_note("no driver"), "Native ASIO failed: no driver; using WASAPI shared");
         assert_eq!(
             NativeKind::Jack.fallback_note("JACK/PipeWire server not running"),
             "Native JACK failed: JACK/PipeWire server not running; using the cpal backend"

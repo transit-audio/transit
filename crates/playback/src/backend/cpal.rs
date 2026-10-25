@@ -1,7 +1,6 @@
 //! The cpal adapter of the audio backend trait (ADR 0016 slice a). This module and `devices.rs`
 //! are the only users of cpal types: it owns device selection (`choose_output`,
-//! `output_attempts`), the sample-format fan-out and conversion, the ASIO duplex order and the
-//! process-wide ASIO device cache, the mapping of cpal timestamps to stamps, the observation of
+//! `output_attempts`), the sample-format fan-out and conversion, the mapping of cpal timestamps to stamps, the observation of
 //! the device worker's scheduling, and the platform cfgs (FreeBSD has no capture).
 //!
 //! CPAL owns Windows device-worker promotion before the first data callback and releases the
@@ -303,15 +302,10 @@ impl ab::Backend for CpalBackend {
         Err(NO_CAPTURE.into())
     }
 
-    /// An ASIO driver has one set of buffers for both directions, and cpal 0.16 recreates them
-    /// (stopping the driver) whenever a direction is added; doing that while the output's
-    /// callbacks run races cpal's own stream lock and can hang. Opened first, the input is in
-    /// place when the output's build creates both directions' buffers at once, and arming never
-    /// touches the streams. The input is the output's own driver (one ASIO driver per process),
-    /// whatever input the configuration names. Other audio systems open the input on demand, as
-    /// its own device.
-    fn capture_with_render(&self, render: &ab::Endpoint) -> bool {
-        self.system() == devices::ASIO_SYSTEM && device_of(render).is_ok_and(|device| device.default_input_config().is_ok_and(|c| input_usable(&c)))
+    /// cpal opens the input on demand, as its own device (only ASIO needs both directions together,
+    /// and ASIO is served by the native backend).
+    fn capture_with_render(&self, _render: &ab::Endpoint) -> bool {
+        false
     }
 
     #[cfg(not(target_os = "freebsd"))]
@@ -614,34 +608,9 @@ fn observed_wasapi(status: cpal::platform::WasapiThreadPriorityStatus) -> ab::Wo
     }
 }
 
-/// The device's ASIO buffers are shared by both directions: the output's `cpal::Device` is kept
-/// here so the input opens from the same value.
-static ASIO_OUTPUT: Mutex<Option<cpal::Device>> = Mutex::new(None);
-
-/// Release the buffer-sharing device after closing the old input and output, before opening
-/// their replacements. Streams retain their own driver references; this only removes the cache's
-/// ownership. Otherwise the process-wide ASIO loader cannot load a different driver.
-pub fn release_asio_device_cache() {
-    *ASIO_OUTPUT.lock().unwrap_or_else(PoisonError::into_inner) = None;
-}
-
-/// Whether cpal's ASIO host holds a driver for an open device (the native ASIO listing must not
-/// load a second driver beside it).
-#[cfg_attr(not(all(windows, target_pointer_width = "64", feature = "native-asio")), allow(dead_code))]
-pub(crate) fn asio_device_held() -> bool {
-    ASIO_OUTPUT.lock().unwrap_or_else(PoisonError::into_inner).is_some()
-}
-
 /// The named output (or input) device of `host`, else its default device.
-///
-/// On ASIO the input of the open driver is taken from the output's own `cpal::Device`. cpal keeps
-/// the driver's buffers per `Device` value, and the SDK makes one set of buffers for the whole
-/// driver: an input opened from a freshly listed `Device` did not know about the running output,
-/// so it remade the buffers for the input alone and the output went silent (arming a track
-/// silenced the SSL 2+). From the same `Device`, cpal makes the buffers for both.
 pub(crate) fn device_on(host: &cpal::Host, name: Option<&str>, output: bool) -> Option<cpal::Device> {
-    let mut open = ASIO_OUTPUT.lock().unwrap_or_else(PoisonError::into_inner);
-    devices::cached_device(&mut open, host.id().name() == devices::ASIO_SYSTEM, name, output, name_of, || devices::find_device(host, name, output))
+    devices::find_device(host, name, output)
 }
 
 #[cfg(test)]

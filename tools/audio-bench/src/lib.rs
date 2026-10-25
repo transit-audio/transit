@@ -207,7 +207,7 @@ pub fn cpal_backend(system: Option<&str>) -> Result<Box<dyn ab::Backend>, String
     let backend = soundcraft_playback::backend::cpal::CpalFactory.backend(system).ok_or("no audio system is available")?;
     match system {
         Some(want) if !backend.system().eq_ignore_ascii_case(want) => {
-            Err(format!("audio system {want} is not available (got {}); ASIO needs a build with --features asio", backend.system()))
+            Err(format!("audio system {want} is not available (got {}); ASIO is served by --backend asio", backend.system()))
         }
         _ => Ok(backend),
     }

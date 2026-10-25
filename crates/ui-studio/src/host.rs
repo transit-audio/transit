@@ -1018,10 +1018,7 @@ impl StudioApp {
             f.reopened.push(cfg);
         } else {
             let session = self.engine.session_arc();
-            crate::audio_connection::replace(&mut self.player, &mut self.recorder, || {
-                soundcraft_playback::devices::release_asio_device_cache();
-                open(session, &cfg)
-            })?;
+            crate::audio_connection::replace(&mut self.player, &mut self.recorder, || open(session, &cfg))?;
             self.player_requests.reset();
         }
         if self.engine.session().tracks.iter().any(|t| t.mixer.input_monitor || t.mixer.record_arm) {

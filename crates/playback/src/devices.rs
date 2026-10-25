@@ -556,51 +556,18 @@ pub(crate) fn cpal_system_for(system: Option<&str>) -> Option<&str> {
 pub(crate) fn host_named(system: Option<&str>) -> Option<&'static cpal::Host> {
     let system = cpal_system_for(system);
     let chosen = system.and_then(|want| cpal::available_hosts().into_iter().find(|id| id.name().eq_ignore_ascii_case(want))).and_then(shared_host);
-    let host = chosen.or_else(|| {
+    chosen.or_else(|| {
         if let Some(s) = system {
             log::warn!("audio system `{s}` is not available; using the default");
         }
         shared_host(cpal::default_host().id())
-    });
-    if host.is_none_or(|h| h.id().name() != ASIO_SYSTEM) {
-        release_asio_device_cache();
-    }
-    host
+    })
 }
 
 /// The chosen audio system, else the default one.
 #[cfg(test)]
 pub(crate) fn host(cfg: &AudioConfig) -> Option<&'static cpal::Host> {
     host_named(cfg.system.as_deref())
-}
-
-pub use crate::backend::cpal::release_asio_device_cache;
-
-pub(crate) fn cached_device<D: Clone>(
-    open: &mut Option<D>,
-    asio: bool,
-    name: Option<&str>,
-    output: bool,
-    device_name: impl Fn(&D) -> Option<String>,
-    load: impl FnOnce() -> Option<D>,
-) -> Option<D> {
-    let changed_driver = name.is_some_and(|n| open.as_ref().is_some_and(|d| device_name(d).as_deref() != Some(n)));
-    if !asio || output || changed_driver {
-        // Release BEFORE loading: assigning the new value after load keeps the old driver alive.
-        *open = None;
-    }
-    if asio
-        && !output
-        && let Some(d) = open.as_ref()
-        && (name.is_none() || device_name(d).as_deref() == name)
-    {
-        return Some(d.clone());
-    }
-    let d = load();
-    if asio {
-        open.clone_from(&d);
-    }
-    d
 }
 
 pub(crate) fn find_device(host: &cpal::Host, name: Option<&str>, output: bool) -> Option<cpal::Device> {
@@ -645,41 +612,6 @@ mod tests {
         }
         assert_eq!(cpal_system_for(Some("ALSA")), Some("ALSA"));
         assert_eq!(cpal_system_for(None), None);
-    }
-
-    #[test]
-    fn asio_cache_releases_before_loading_another_driver_and_leaving_asio() {
-        use std::sync::{Arc, Weak};
-        // Like asio-sys, the loader refuses B while any strong reference to A survives.
-        let mut loaded = Weak::<String>::new();
-        let mut cache = None;
-        let mut load = |name: &str| {
-            if let Some(d) = loaded.upgrade() {
-                return (d.as_str() == name).then_some(d);
-            }
-            let d = Arc::new(name.to_string());
-            loaded = Arc::downgrade(&d);
-            Some(d)
-        };
-        let name = |d: &Arc<String>| Some(d.as_ref().clone());
-        let a = cached_device(&mut cache, true, Some("A"), true, name, || load("A")).unwrap();
-        let input = cached_device(&mut cache, true, None, false, name, || panic!("input must share the output's buffers")).unwrap();
-        assert!(Arc::ptr_eq(&a, &input));
-        drop(a);
-        assert!(cache.is_some(), "the input still uses A");
-        drop(input);
-        let b = cached_device(&mut cache, true, Some("B"), true, name, || load("B")).expect("A must unload BEFORE loading B");
-        assert_eq!(b.as_str(), "B");
-        drop(b);
-        let _ = cached_device(&mut cache, false, None, true, name, || None);
-        assert!(cache.is_none(), "WASAPI must not retain the ASIO driver");
-        let a = load("A").expect("B must also unload when switching through WASAPI");
-        assert_eq!(a.as_str(), "A");
-        drop(a);
-        let a = cached_device(&mut cache, true, Some("A"), false, name, || load("A")).unwrap();
-        drop(a);
-        let b = cached_device(&mut cache, true, Some("B"), false, name, || load("B")).expect("recorder-only driver changes must unload A too");
-        assert_eq!(b.as_str(), "B");
     }
 
     fn sample_calibration() -> LoopbackCalibration {
