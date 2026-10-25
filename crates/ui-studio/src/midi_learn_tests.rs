@@ -156,6 +156,7 @@ fn a_mapped_sweep_moves_the_fader_as_one_undo_step_and_ends_when_the_controller_
     let before = app.engine.session().track(t).unwrap().mixer.volume_db;
     for (i, v) in [0.2f32, 0.4, 0.6, 0.8].into_iter().enumerate() {
         app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: v, seq: 1 }]), 10.0 + i as f64 * 0.05);
+        frames(&mut app, &ctx, 1, &mut time);
     }
     let after = app.engine.session().track(t).unwrap().mixer.volume_db;
     assert!((after - crate::mixer::k_to_db(0.8)).abs() < 1e-3 && after != before, "{after}");
@@ -179,6 +180,7 @@ fn undoing_a_sweep_restores_the_fader_in_one_step() {
     let depth = app.engine.undo_history().len();
     for (i, v) in [0.2f32, 0.4, 0.6, 0.8].into_iter().enumerate() {
         app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value: v, seq: 1 }]), 10.0 + i as f64 * 0.05);
+        frames(&mut app, &ctx, 1, &mut time);
     }
     assert_eq!(app.engine.undo_history().len(), depth + 1, "four moves, one step");
     assert!(app.engine.undo());
@@ -367,6 +369,8 @@ fn a_two_second_sweep_applied_at_sixty_hertz_is_one_undo_step_ending_at_the_last
         last = frame as f32 / 120.0;
         app.midi_learn_apply((0, vec![mv(0, last, frame + 1)]), now);
         app.midi_learn_feed(now);
+        // A whole frame, as the app runs it: it must not end the sweep's undo step.
+        frames(&mut app, &ctx, 1, &mut time);
     }
     assert_eq!(app.engine.undo_history().len(), depth + 1, "one sweep, one step");
     let db = app.engine.session().track(t).unwrap().mixer.volume_db;

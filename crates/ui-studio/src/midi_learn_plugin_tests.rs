@@ -305,7 +305,7 @@ fn learn_next_touched_toggles_off_and_escape_cancels_it() {
     t.send("ui.key", json!({"key": "Escape"}));
     assert!(t.app.midi_learn.next.is_none(), "Escape cancels");
     t.app.apply_edits(vec![(tr, 0, GAIN.into(), 6.0)]);
-    assert!(t.app.engine.learn().is_none(), "a cancelled wait learns nothing");
+    assert!(t.app.engine.learn().is_none(), "a canceled wait learns nothing");
 }
 
 #[test]
@@ -354,4 +354,26 @@ fn touch_stops_writing_when_the_controller_goes_still() {
     t.frames(40);
     assert_eq!(t.lane(tr, GAIN), n, "released (held 150 ms past the last value): Touch stops writing");
     t.play();
+}
+
+#[test]
+fn learn_next_touched_ends_when_its_editor_closes_or_the_plug_in_changes() {
+    let mut t = T::new();
+    let tr = t.insert("eq_7band", AutomationMode::Off);
+    let key = (tr, 0);
+    t.app.learn_next_touched(key);
+    t.frames(2);
+    assert_eq!(t.app.midi_learn.next, Some(key), "still waiting while the editor is open");
+    t.app.ui.plugin_windows.clear();
+    t.frames(2);
+    assert!(t.app.midi_learn.next.is_none(), "closing the editor ends the wait");
+    t.app.apply_edits(vec![(tr, 0, GAIN.into(), 6.0)]);
+    assert!(t.app.engine.learn().is_none(), "a later edit arms nothing");
+    // A swapped plug-in ends it too.
+    t.app.ui.plugin_windows.push(key);
+    t.app.learn_next_touched(key);
+    t.app.run("mix.insert_remove", json!({"track": tr.0, "slot": 0})).unwrap();
+    t.app.add_device(tr, "eq_7band").unwrap();
+    t.frames(2);
+    assert!(t.app.midi_learn.next.is_none(), "a different plug-in in the slot ends the wait");
 }

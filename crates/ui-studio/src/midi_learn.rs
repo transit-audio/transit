@@ -72,6 +72,8 @@ pub struct State {
     last_move: Option<f64>,
     /// "Learn next touched parameter" waits on this hosted plug-in's editor (track, slot).
     pub(crate) next: Option<(TrackId, usize)>,
+    /// The uid of the plug-in `next` was armed for: a swapped plug-in or another session differs.
+    next_uid: u64,
     pub drawn: Vec<Drawn>,
     /// The learn menu's entries as last drawn (while it is open).
     pub menu: Vec<MenuItem>,
@@ -204,6 +206,20 @@ impl StudioApp {
     fn plugin_device(&self, track: TrackId, slot: u8) -> Option<&soundcraft_model::Insert> {
         let t = self.engine.session().track(track)?;
         if slot == AutoParam::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(usize::from(slot))?.as_ref() }
+    }
+
+    fn plugin_uid(&self, key: (TrackId, usize)) -> Option<u64> {
+        let slot = if key.1 == soundcraft_mix::INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(key.1).ok()? };
+        self.plugin_device(key.0, slot).map(|i| i.uid.get())
+    }
+
+    /// "Next touched" only lives while its editor is open on the plug-in it was armed for: closing
+    /// the editor, swapping the plug-in or loading another session ends the wait.
+    fn drop_stale_next(&mut self) {
+        let Some(key) = self.midi_learn.next else { return };
+        if !self.ui.plugin_windows.contains(&key) || self.plugin_uid(key) != Some(self.midi_learn.next_uid) {
+            self.midi_learn.next = None;
+        }
     }
 
     /// Whether `control` may be learned: a Plugin control needs a parameter the device lists.
@@ -413,6 +429,7 @@ impl StudioApp {
     pub(crate) fn midi_learn_feed(&mut self, now: f64) -> Option<std::time::Duration> {
         self.midi_learn.drawn.clear();
         self.midi_learn.menu.clear();
+        self.drop_stale_next();
         // The preferences' profile goes to the engine once; later changes come back out.
         if !self.midi_learn.profile_loaded {
             self.midi_learn.profile_loaded = true;
@@ -557,13 +574,14 @@ impl StudioApp {
     pub(crate) fn learn_next_touched(&mut self, key: (TrackId, usize)) {
         if self.midi_learn.next == Some(key) {
             self.midi_learn.next = None;
-            self.status = "MIDI Learn cancelled".into();
+            self.status = "MIDI Learn canceled".into();
             return;
         }
         if self.engine.learn().is_some() {
             let _ = self.run("midi.learn_cancel", json!({}));
         }
         self.midi_learn.next = Some(key);
+        self.midi_learn.next_uid = self.plugin_uid(key).unwrap_or(0);
         self.status = "MIDI Learn: touch a parameter in the plug-in window".into();
     }
 
