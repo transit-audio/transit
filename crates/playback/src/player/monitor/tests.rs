@@ -139,6 +139,43 @@ fn sysex_prefixes_follow_bounded_drains_without_allocating_on_producers() {
 }
 
 #[test]
+fn mixed_notes_and_sysex_keep_every_payload_with_its_event_under_a_bounded_drain() {
+    let (hub, mut input, _output) = Hub::new();
+    // Pattern: note, note, sysex, note, sysex, sysex, note ... so a bounded drain splits runs.
+    let mut expected = Vec::new();
+    for i in 0..30u8 {
+        let host = u64::from(i) * 10;
+        if matches!(i % 7, 2 | 4 | 5) {
+            input.push_sysex(1, host, 3, &[0xF0, i, 0xF7]);
+            expected.push(i);
+        } else {
+            input.push(MonitorEvent::message(Dir::In, 1, host, &[0x90, 60, 100]));
+        }
+    }
+    let mut seen = Vec::new();
+    let mut total_events = 0;
+    loop {
+        let mut events = Vec::new();
+        hub.drain(&mut events, 3);
+        if events.is_empty() {
+            break;
+        }
+        total_events += events.len();
+        let payloads = hub.take_sysex();
+        let with_id: Vec<_> = events.iter().filter(|e| e.sysex_id != 0).collect();
+        assert_eq!(with_id.len(), payloads.len(), "no payload lost or taken by a non-SysEx event");
+        for (event, payload) in with_id.iter().zip(&payloads) {
+            assert_eq!(event.sysex_id, payload.id);
+            assert_eq!((payload.bytes[0], payload.len), (0xF0, 3));
+            assert_eq!(u64::from(payload.bytes[1]) * 10, event.host_ns, "payload belongs to its event");
+            seen.push(payload.bytes[1]);
+        }
+    }
+    assert_eq!(total_events, 30);
+    assert_eq!(seen, expected);
+}
+
+#[test]
 fn sysex_full_ring_drops_both_halves_and_recovers_without_payload_mismatch() {
     let (hub, mut input, _output) = Hub::new();
     for _ in 0..RING {
