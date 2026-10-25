@@ -685,3 +685,20 @@ fn clicking_the_load_readout_opens_the_details_window_and_reset_peak_clears_the_
     assert!(rows.contains(&"Peak callback load (since open): 0.0%".to_string()), "{rows:?}");
     assert!(rows.contains(&"Load now (about the last second): 30.0%".to_string()), "the current load is untouched: {rows:?}");
 }
+
+#[test]
+fn the_details_window_copies_diagnostics_with_the_counters() {
+    let mut t = T::new();
+    t.app.diag.machine = Some(crate::diagnostics::Machine { os: "Test OS".into(), ..Default::default() });
+    t.app.telemetry.injected = Some(soundcraft_playback::telemetry::CallbackTelemetry { callbacks: 1234, ..load_snap(300_000) });
+    t.frames(30);
+    let rect: [f32; 4] = serde_json::from_value(t.inspect()["telemetry"]["rect"].clone()).unwrap();
+    t.click(mid(rect));
+    let copy: [f32; 4] = serde_json::from_value(t.inspect()["telemetry"]["copy_diagnostics"].clone()).unwrap();
+    assert!(copy[2] > copy[0], "the Copy diagnostics button is drawn");
+    t.click(mid(copy));
+    let text = t.app.diag.copied.clone();
+    assert!(text.contains("== Callback telemetry =="), "{text}");
+    assert!(text.contains("Callbacks: 1234"), "the counters the window shows: {text}");
+    assert!(t.app.diagnostics_copied(t.time - 1.0), "Copied shows");
+}

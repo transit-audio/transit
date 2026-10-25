@@ -2085,3 +2085,36 @@ fn escape_reverts_the_draft_but_not_while_a_text_field_has_focus() {
     t.frames(2);
     assert_ne!(t.app.audio_devices.draft, t.app.ui.audio, "Escape in a focused field leaves the draft");
 }
+
+/// Copy diagnostics (#114): the button is in the status area of every section, copies the report
+/// built from what the window shows, and says "Copied" for two seconds.
+#[test]
+fn copy_diagnostics_is_in_every_section_and_copies_the_report() {
+    let mut t = T::new();
+    t.app.diag.machine = Some(crate::diagnostics::Machine { os: "Test OS".into(), cores: 4, ..Default::default() });
+    t.open_window();
+    for key in SECTIONS {
+        t.section(key);
+        assert!(has_control(&t, "copy_diagnostics"), "{key}: the Copy diagnostics button");
+    }
+    t.section("section_io");
+    t.click(mid(t.control_rect("copy_diagnostics")));
+    let text = t.app.diag.copied.clone();
+    for want in [
+        "== System ==",
+        "OS: Test OS",
+        "== Audio devices ==",
+        "Speakers (Realtek)",
+        SCARLETT_IN,
+        "== Settings ==",
+        "== Open devices ==",
+        "Output open: none",
+        "== Callback telemetry ==",
+        "== Log ==",
+    ] {
+        assert!(text.contains(want), "missing {want:?}\n{text}");
+    }
+    assert!(t.app.diagnostics_copied(t.time - 1.0), "Copied shows");
+    t.frames(150);
+    assert!(!t.app.diagnostics_copied(t.time), "and goes after two seconds");
+}
