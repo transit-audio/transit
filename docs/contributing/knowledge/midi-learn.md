@@ -46,7 +46,12 @@ overlapping source. Only those not overridden are matched; the window shows the 
   trimmed past 512 pending, as for the Monitor. The first step after the matcher turns on skips what was
   already pending.
 - `handle` matches by port id, channel, kind and number; no allocation or lock (`matching_and_publishing_cost_the_worker_no_heap_work`).
-  It publishes `MapEvent`s (`Copy`) into a 256-slot SPSC ring; a full ring counts `map_dropped`.
+  A continuous control's value goes to the mapping's `Cell` (last value wins, with the publish count); Main takes it once a
+  frame (`Wanted::take_moves`), so a slow UI loses no final value. Button presses and learn candidates go into a 256-slot
+  SPSC ring; a full ring counts `map_dropped`, which the mappings window shows.
+- **Consume.** A CC or note-on that a mapping without `pass_through` matches is not delivered to the track's routes. On a routed
+  port the match runs where the event is popped (`match_one`), on an unrouted one in the scan. A note-off is consumed exactly when
+  its note-on was (`Mon::held`), whatever the mappings are by then. Logic and Ableton both consume; where they agree transit follows.
 - **Pickup** lives in the worker, against a per-entry `Cell` of atomics: Main writes the control's value and how
   many events of that entry it has applied once a frame; the worker keeps the last published value and count. A
   knob engages when it lands within 1/127 of the control or crosses it between two messages; it lets go when
@@ -61,8 +66,8 @@ overlapping source. Only those not overridden are matched; the window shows the 
 
 `StudioApp::midi_learn_feed` runs first in every frame: copy the profile between preferences and engine,
 resolve both stores, hand the worker the specs, take the events, apply them, write the cells. Events carry the
-epoch of the spec list; a stale one is dropped. A move uses `set_value_merged` with the key `midi:<target>`, the
-same setter a mouse drag uses, so a sweep is one undo step; it ends when the controller has been still for
+epoch of the spec list; a stale one is dropped. A move uses `set_value_merged` with one key for the whole gesture (`midi:gesture`), the
+same setter a mouse drag uses, so a sweep, even of several controls together, is one undo step; it ends when the controller has been still for
 `GESTURE_END_S` (0.4 s of UI time, injected in tests) or a write pass holds the merge. A button press runs
 `mix.mute`, `mix.solo` or `mix.record_arm`. Session `midi.map` and `midi.unmap` are undoable commands; the
 profile is per machine and makes no undo step.
