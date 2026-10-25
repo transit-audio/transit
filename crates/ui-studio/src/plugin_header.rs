@@ -220,6 +220,7 @@ impl StudioApp {
             can_bypass: key.1 != soundcraft_mix::INSTRUMENT_SLOT,
             can_paste: self.plugin_header.clipboard.as_ref().is_some_and(|c| c.plugin == ins.plugin),
             disabled,
+            learning: self.midi_learn.next == Some(key),
         })
     }
 
@@ -336,6 +337,7 @@ impl StudioApp {
                     self.plugin_header.lists.remove(&plugin);
                 }
             }
+            HeaderAction::LearnNext => self.learn_next_touched(key),
             HeaderAction::ShowInChain => {
                 self.focus(t);
                 self.ui.show_devices = true;

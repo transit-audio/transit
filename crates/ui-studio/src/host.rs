@@ -443,14 +443,18 @@ impl StudioApp {
     /// and Touch lets go that long after the last value.
     pub(crate) fn apply_edits(&mut self, edits: Vec<(soundcraft_model::TrackId, usize, String, f32)>) {
         for (t, slot, param, value) in edits {
-            if slot == soundcraft_mix::INSTRUMENT_SLOT {
-                continue;
-            }
             // A hosted plug-in re-reports a value it already has (a keep-alive, a rounded echo):
             // only a changed value is a touch, or the held lane would fill with identical points.
             let unchanged = crate::automation::Lane::of_param(t, slot, &param).is_some_and(|(track, lane)| {
                 self.engine.session().track(track).is_some_and(|tr| (lane.static_value(tr) - value).abs() <= 1e-6 * value.abs().max(1.0))
             });
+            if !unchanged {
+                // "Learn next touched parameter" takes the first changed parameter it sees.
+                self.learn_touched(t, slot, &param);
+            }
+            if slot == soundcraft_mix::INSTRUMENT_SLOT {
+                continue;
+            }
             if !unchanged {
                 self.touch_param(t, slot, &param, true);
             }

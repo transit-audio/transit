@@ -10,7 +10,7 @@ use crate::theme::TOKENS;
 use crate::{StudioApp, mixer};
 use egui::{Color32, Rect, Stroke, pos2};
 use serde_json::{Value, json};
-use soundcraft_model::{Control, ControlTarget, MapMode, Mapping, MappingSet, Resolved, Scope, Session, SourceKind, Strip, TrackId};
+use soundcraft_model::{AutoParam, Control, ControlTarget, MapMode, Mapping, MappingSet, Resolved, Scope, Session, SourceKind, Strip, TrackId};
 use soundcraft_playback::{MapMsg, MapSpec};
 
 /// A mapped sweep stays one undo step until the controller has been still this long (seconds,
@@ -70,6 +70,8 @@ pub struct State {
     profile_rev: u64,
     /// The UI time of the last mapped move, while a sweep may still be going.
     last_move: Option<f64>,
+    /// "Learn next touched parameter" waits on this hosted plug-in's editor (track, slot).
+    pub(crate) next: Option<(TrackId, usize)>,
     pub drawn: Vec<Drawn>,
     /// The learn menu's entries as last drawn (while it is open).
     pub menu: Vec<MenuItem>,
@@ -86,6 +88,12 @@ impl State {
     /// The per-mapping applied counters (tests).
     pub fn applied_counts(&self) -> &[u32] {
         &self.applied
+    }
+
+    /// A mapped sweep is going (the controller moved within `GESTURE_END_S`): the frame must not
+    /// end its undo step.
+    pub fn sweeping(&self) -> bool {
+        self.last_move.is_some()
     }
 
     /// How many mappings are in force (not overridden).
@@ -154,21 +162,66 @@ fn source_text(m: &Mapping) -> String {
 }
 
 /// What the control is mapped to: the mapping in force, else one a session mapping overrides.
-pub fn info(app: &StudioApp, track: TrackId, control: Control) -> Option<Info> {
+pub fn info(app: &StudioApp, track: TrackId, control: &Control) -> Option<Info> {
     let st = &app.midi_learn;
-    let r = st.all.iter().filter(|r| r.track == track && r.control == control).min_by_key(|r| r.overridden)?;
+    let r = st.all.iter().filter(|r| r.track == track && r.control == *control).min_by_key(|r| r.overridden)?;
     Some(Info { scope: r.scope, text: source_text(&r.mapping), overridden: r.overridden })
 }
 
 /// Whether `track`'s `control` is the one an armed learn is waiting for.
-pub fn learning(app: &StudioApp, track: TrackId, control: Control) -> bool {
-    app.engine
-        .learn()
-        .is_some_and(|arm| target_for(app.engine.session(), track, control, arm.scope) == Some(arm.target) && arm.target.control == control)
+pub fn learning(app: &StudioApp, track: TrackId, control: &Control) -> bool {
+    app.engine.learn().is_some_and(|arm| {
+        target_for(app.engine.session(), track, control.clone(), arm.scope).as_ref() == Some(&arm.target) && arm.target.control == *control
+    })
+}
+
+/// The control of insert `slot` (or the instrument) and parameter `param`, in the addressing the
+/// automation picker uses.
+pub fn plugin_control(slot: usize, param: &str) -> Option<Control> {
+    let slot = if slot == soundcraft_mix::INSTRUMENT_SLOT {
+        AutoParam::INSTRUMENT_SLOT
+    } else {
+        u8::try_from(slot).ok().filter(|s| usize::from(*s) < soundcraft_model::INSERT_SLOTS)?
+    };
+    Some(Control::Plugin { slot, param: param.to_string() })
+}
+
+/// Whether a hosted plug-in's parameter may be mapped: the host registries list only parameters
+/// that are neither hidden nor read-only (the same table the automation picker offers), so a
+/// parameter missing from a known table is refused. Without a cached table (never loaded this
+/// run) a parameter the plug-in just reported, or the session holds, is accepted.
+pub fn check_param(table: Option<&soundcraft_dsp::PluginInfo>, held: bool, param: &str) -> Result<(), String> {
+    match table {
+        Some(info) if info.param(param).is_some() => Ok(()),
+        Some(_) => Err(format!("`{param}` is read-only or cannot be automated, so it cannot be mapped")),
+        None if held => Ok(()),
+        None => Err(format!("Cannot map `{param}`: the plug-in's parameter list is not loaded yet")),
+    }
+}
+
+impl StudioApp {
+    /// The plug-in a Plugin control addresses.
+    fn plugin_device(&self, track: TrackId, slot: u8) -> Option<&soundcraft_model::Insert> {
+        let t = self.engine.session().track(track)?;
+        if slot == AutoParam::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(usize::from(slot))?.as_ref() }
+    }
+
+    /// Whether `control` may be learned: a Plugin control needs a parameter the device lists.
+    fn control_mappable(&self, track: TrackId, control: &Control) -> Result<(), String> {
+        let Control::Plugin { slot, param } = control else { return Ok(()) };
+        let ins = self.plugin_device(track, *slot).ok_or("That slot has no plug-in")?;
+        check_param(crate::automation::device_info(&ins.plugin), ins.params.contains_key(param), param)
+    }
+}
+
+/// The parameter value the knob position `norm` (0..1) stands for: the parameter's own range, the
+/// taper honored, whole numbers where the parameter is one (the same step a panel knob takes).
+pub fn plugin_value(p: &soundcraft_dsp::ParamInfo, norm: f32) -> f32 {
+    p.clamp(crate::widgets::knob::value_at(p, norm.clamp(0.0, 1.0)))
 }
 
 /// The control's value, 0..1 of its travel, as the session holds it now.
-fn norm_value(s: &Session, track: TrackId, control: Control) -> f32 {
+fn norm_value(s: &Session, track: TrackId, control: &Control) -> f32 {
     let Some(t) = s.track(track) else { return 0.0 };
     match control {
         Control::Volume => db_to_k(t.mixer.volume_db),
@@ -176,15 +229,19 @@ fn norm_value(s: &Session, track: TrackId, control: Control) -> f32 {
         Control::Mute => f32::from(u8::from(t.mixer.mute)),
         Control::Solo => f32::from(u8::from(t.mixer.solo)),
         Control::Arm => f32::from(u8::from(t.mixer.record_arm)),
-        Control::Send(n) => t.mixer.sends.get(usize::from(n)).and_then(Option::as_ref).map_or(0.0, |x| db_to_k(x.level_db)),
+        Control::Send(n) => t.mixer.sends.get(usize::from(*n)).and_then(Option::as_ref).map_or(0.0, |x| db_to_k(x.level_db)),
+        Control::Plugin { slot, param } => {
+            let lane = crate::automation::Lane::Plugin { slot: *slot, param: param.clone() };
+            lane.info(t).map_or(0.0, |p| p.to_normalized(lane.static_value(t)))
+        }
     }
 }
 
 impl StudioApp {
     /// Right-click menu entries of a mixer control (call inside its context menu).
     pub(crate) fn midi_learn_menu(&mut self, ui: &mut egui::Ui, track: TrackId, control: Control) {
-        let mapped = info(self, track, control);
-        let learning = learning(self, track, control);
+        let mapped = info(self, track, &control);
+        let learning = learning(self, track, &control);
         self.learn_entries(ui, track, control, mapped, learning);
     }
 
@@ -194,7 +251,7 @@ impl StudioApp {
             let b = ui.add_enabled(entry != Entry::Mapped, egui::Button::new(text.clone()));
             self.midi_learn.menu.push(MenuItem::at(ui, text, format!("{entry:?}"), b.rect));
             if b.clicked() {
-                let _ = self.learn_choose(entry, track, control, mapped.as_ref());
+                let _ = self.learn_choose(entry, track, control.clone(), mapped.as_ref());
                 ui.close();
             }
         }
@@ -203,6 +260,12 @@ impl StudioApp {
     /// Does what a menu entry says.
     pub(crate) fn learn_choose(&mut self, entry: Entry, track: TrackId, control: Control, mapped: Option<&Info>) -> Result<Value, String> {
         let scope = if entry == Entry::LearnProfile { Scope::Profile } else { mapped.map_or(Scope::Session, |m| m.scope) };
+        if matches!(entry, Entry::Learn | Entry::LearnProfile)
+            && let Err(why) = self.control_mappable(track, &control)
+        {
+            self.status = why.clone();
+            return Err(why);
+        }
         let target = target_for(self.engine.session(), track, control, scope).ok_or("no such track")?;
         match entry {
             Entry::Mapped => Ok(json!({})),
@@ -216,8 +279,8 @@ impl StudioApp {
 /// Draws the marker of a mapped control and the outline of one being learned at `r`, and records
 /// them for `ui.inspect`. Call after drawing the control.
 pub fn mark(app: &mut StudioApp, p: &egui::Painter, r: Rect, track: TrackId, control: Control) {
-    let learning = learning(app, track, control);
-    let mapped = info(app, track, control);
+    let learning = learning(app, track, &control);
+    let mapped = info(app, track, &control);
     if !learning && mapped.is_none() {
         return;
     }
@@ -247,7 +310,11 @@ pub fn mark(app: &mut StudioApp, p: &egui::Painter, r: Rect, track: TrackId, con
 /// Escape cancels an armed learn. Runs before the other Escape handlers and takes the key only
 /// while a learn is armed.
 pub fn keys(app: &mut StudioApp, ctx: &egui::Context) {
-    if app.engine.learn().is_some() && app.mixer.edit.is_none() && crate::shortcuts::pressed(ctx, crate::shortcuts::Action::ReadoutCancel) {
+    if (app.engine.learn().is_some() || app.midi_learn.next.is_some())
+        && app.mixer.edit.is_none()
+        && crate::shortcuts::pressed(ctx, crate::shortcuts::Action::ReadoutCancel)
+    {
+        app.midi_learn.next = None;
         let _ = app.run("midi.learn_cancel", json!({}));
     }
 }
@@ -311,7 +378,7 @@ pub fn rows(app: &StudioApp) -> Vec<Row> {
                 toggle: m.toggle,
                 pass_through: m.pass_through,
                 live: track.is_some(),
-                learning: learn.is_some_and(|l| l.scope == scope && l.target == m.target),
+                learning: learn.as_ref().is_some_and(|l| l.scope == scope && l.target == m.target),
             });
         }
     }
@@ -323,6 +390,7 @@ pub fn inspect(app: &StudioApp) -> Value {
     json!({
         "open": app.ui.midi_mappings.open,
         "armed": app.engine.learn().map(|l| json!({"target": l.target.to_string(), "scope": l.scope})),
+        "next_touched": app.midi_learn.next.map(|(t, slot)| json!({"track": t.0, "slot": slot})),
         "active": app.midi_learn.resolved.len(),
         "rows": rows(app),
         "dropped": app.midi_learn.dropped,
@@ -360,7 +428,12 @@ impl StudioApp {
         } else {
             soundcraft_model::resolve(&ids, &self.engine.session().midi_mappings, self.engine.midi_profile())
         };
-        let active: Vec<Resolved> = all.iter().filter(|r| !r.overridden).cloned().collect();
+        // A plug-in mapping whose device is gone is stored but idle.
+        let live = |r: &Resolved| match &r.control {
+            Control::Plugin { slot, .. } => self.plugin_device(r.track, *slot).is_some(),
+            _ => true,
+        };
+        let active: Vec<Resolved> = all.iter().filter(|r| !r.overridden && live(r)).cloned().collect();
         self.midi_learn.all = all;
         self.midi_learn.resolved = active;
         let msgs = self.midi_learn_sync();
@@ -427,7 +500,7 @@ impl StudioApp {
         if let Some(player) = &self.player {
             let s = self.engine.session();
             let values: Vec<(f32, u32)> =
-                self.midi_learn.resolved.iter().zip(&self.midi_learn.applied).map(|(r, n)| (norm_value(s, r.track, r.control), *n)).collect();
+                self.midi_learn.resolved.iter().zip(&self.midi_learn.applied).map(|(r, n)| (norm_value(s, r.track, &r.control), *n)).collect();
             player.sync_midi_map(&values);
         }
     }
@@ -440,15 +513,86 @@ impl StudioApp {
         // One key for the whole gesture, so two knobs moved together are one undo step.
         let key = GESTURE_KEY;
         let value = value.clamp(0.0, 1.0);
-        let target = match r.control {
+        let target = match &r.control {
             Control::Volume => Some((Target::Fader(r.track), k_to_db(value))),
             Control::Pan => Some((Target::Pan(r.track), value * 2.0 - 1.0)),
-            Control::Send(n) => Some((Target::Send(r.track, usize::from(n)), k_to_db(value))),
+            Control::Send(n) => Some((Target::Send(r.track, usize::from(*n)), k_to_db(value))),
+            Control::Plugin { slot, param } => {
+                self.mapped_param_move(r.track, *slot, param, value, key);
+                self.midi_learn.last_move = Some(now);
+                None
+            }
             _ => None,
         };
         if let Some((target, v)) = target {
             let _ = self.set_value_merged(target, v, Some(key));
             self.midi_learn.last_move = Some(now);
+        }
+    }
+
+    /// A mapped move of a plug-in parameter: the knob's 0..1 is the parameter's normalized travel
+    /// (the taper honored, as a panel knob does), applied through the commands a mouse drag uses
+    /// and touched like a drag, so Write, Touch and Latch record it and Read does not. A hosted
+    /// editor holds the touch `HOSTED_HOLD_S` after the last value (a controller has no pointer).
+    fn mapped_param_move(&mut self, track: TrackId, slot: u8, param: &str, norm: f32, key: &str) {
+        let Some(ins) = self.plugin_device(track, slot) else { return };
+        let Some(info) = crate::automation::device_info(&ins.plugin) else { return };
+        let Some(p) = info.param(param) else { return };
+        let value = plugin_value(p, norm);
+        let slot_key = if slot == AutoParam::INSTRUMENT_SLOT { soundcraft_mix::INSTRUMENT_SLOT } else { usize::from(slot) };
+        self.touch_param(track, slot_key, param, true);
+        let r = if slot == AutoParam::INSTRUMENT_SLOT {
+            self.engine.execute_merged("mix.instrument_param", &json!({"track": track.0, "param": param, "value": value}), key)
+        } else {
+            self.engine.execute_merged("mix.insert_param", &json!({"track": track.0, "slot": slot, "param": param, "value": value}), key)
+        };
+        crate::automation::note_pass_edit(self);
+        if let Err(e) = r {
+            self.status = e.to_string();
+        }
+    }
+
+    /// The header's "MIDI Learn: next touched parameter" on the hosted editor at `key`: arm it, or
+    /// cancel it when it is already armed there.
+    pub(crate) fn learn_next_touched(&mut self, key: (TrackId, usize)) {
+        if self.midi_learn.next == Some(key) {
+            self.midi_learn.next = None;
+            self.status = "MIDI Learn cancelled".into();
+            return;
+        }
+        if self.engine.learn().is_some() {
+            let _ = self.run("midi.learn_cancel", json!({}));
+        }
+        self.midi_learn.next = Some(key);
+        self.status = "MIDI Learn: touch a parameter in the plug-in window".into();
+    }
+
+    /// A hosted editor reported `param` of (`track`, `slot`) as edited. While "next touched" waits
+    /// on that plug-in this edit picks the target and arms the learn for the next CC or note.
+    pub(crate) fn learn_touched(&mut self, track: TrackId, slot: usize, param: &str) {
+        if self.midi_learn.next != Some((track, slot)) {
+            return;
+        }
+        let Some(control) = plugin_control(slot, param) else { return };
+        // The plug-in just reported it, so a table that is not cached yet does not refuse it.
+        let device = |ins: &soundcraft_model::Insert| check_param(crate::automation::device_info(&ins.plugin), true, param);
+        let refused = match self.plugin_device(
+            track,
+            if slot == soundcraft_mix::INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(slot).unwrap_or(u8::MAX) },
+        ) {
+            Some(ins) => device(ins).err(),
+            None => Some("That slot has no plug-in".to_string()),
+        };
+        if let Some(why) = refused {
+            self.midi_learn.next = None;
+            self.status = why;
+            return;
+        }
+        self.midi_learn.next = None;
+        let Some(target) = target_for(self.engine.session(), track, control.clone(), Scope::Session) else { return };
+        match self.run("midi.learn", json!({"target": target.to_string(), "scope": Scope::Session})) {
+            Ok(_) => self.status = format!("MIDI Learn: move a control to map {}", control.label()),
+            Err(e) => self.status = e,
         }
     }
 
@@ -463,7 +607,7 @@ impl StudioApp {
             Control::Arm => "mix.record_arm",
             _ => return,
         };
-        let on = set.unwrap_or_else(|| norm_value(self.engine.session(), r.track, r.control) < 0.5);
+        let on = set.unwrap_or_else(|| norm_value(self.engine.session(), r.track, &r.control) < 0.5);
         let _ = self.run(id, json!({"tracks": [r.track.0], "value": on}));
     }
 
@@ -472,8 +616,8 @@ impl StudioApp {
     fn learned_candidate(&mut self, port: &str, channel: u8, kind: SourceKind, number: u8) {
         let Some(arm) = self.engine.learn() else { return };
         let old = match arm.scope {
-            Scope::Session => self.engine.session().midi_mappings.for_target(arm.target).cloned(),
-            Scope::Profile => self.engine.midi_profile().for_target(arm.target).cloned(),
+            Scope::Session => self.engine.session().midi_mappings.for_target(&arm.target).cloned(),
+            Scope::Profile => self.engine.midi_profile().for_target(&arm.target).cloned(),
         };
         let mut params = json!({
             "source": {"port": port, "channel": channel + 1, "kind": if kind == SourceKind::Cc { "cc" } else { "note" }, "number": number},
@@ -630,7 +774,7 @@ impl StudioApp {
                     Scope::Session => &self.engine.session().midi_mappings,
                     Scope::Profile => self.engine.midi_profile(),
                 };
-                let old = set.for_target(target).cloned().ok_or("that mapping is gone")?;
+                let old = set.for_target(&target).cloned().ok_or("that mapping is gone")?;
                 let (mode, lo, hi, pass_through) = match action {
                     Action::Mode(m) => (m, old.min, old.max, old.pass_through),
                     Action::Range(lo, hi) => (old.mode, lo, hi, old.pass_through),

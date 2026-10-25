@@ -302,6 +302,12 @@ fn param_row(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inse
         let x = p.clamp(x);
         app.set_builtin_param(key, p.id, x);
     }
+    if let Some(control) = crate::midi_learn::plugin_control(key.1, p.id) {
+        // A slider senses drags only; a click-only layer over it takes the right-click.
+        let menu = ui.interact(resp.rect, egui::Id::new(("learn_menu", ins.uid.get(), p.id)), egui::Sense::click());
+        menu.context_menu(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
+        crate::midi_learn::mark(app, ui.painter(), resp.rect, key.0, control);
+    }
     let shown = format_param(&ins.plugin, p, x);
     ui.label(RichText::new(&shown).monospace().color(TOKENS.text_dim));
     lay.rows.push(RowLayout { param: p.id.to_string(), control: rect4(resp.rect), value: shown });

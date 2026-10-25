@@ -960,7 +960,12 @@ impl StudioApp {
         theme::probe_fonts(ctx);
         let wheeling = self.drive_wheel(ctx, now) | self.drive_tempo_wheel(ctx, now);
         // A write pass (slice 7) holds its merge until Stop.
-        if !wheeling && !automation::passing(self) && !ctx.input(|i| i.pointer.any_down()) && !ctx.egui_wants_keyboard_input() {
+        if !wheeling
+            && !automation::passing(self)
+            && !self.midi_learn.sweeping()
+            && !ctx.input(|i| i.pointer.any_down())
+            && !ctx.egui_wants_keyboard_input()
+        {
             self.engine.end_merge();
         }
         self.watch_output();
@@ -1200,6 +1205,8 @@ mod external_measure_tests;
 mod groups_tests;
 #[cfg(test)]
 mod keys_tests;
+#[cfg(test)]
+mod midi_learn_plugin_tests;
 #[cfg(test)]
 mod midi_learn_tests;
 #[cfg(test)]

@@ -1985,7 +1985,7 @@ fn strip(
                 _ => None,
             };
             if let Some(control) = learnable.filter(|_| enabled) {
-                resp.context_menu(|ui| app.midi_learn_menu(ui, id, control));
+                resp.context_menu(|ui| app.midi_learn_menu(ui, id, control.clone()));
                 crate::midi_learn::mark(app, &p, br, id, control);
             }
             match label {

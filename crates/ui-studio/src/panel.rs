@@ -153,24 +153,30 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     };
     let Some(p) = info.param(id) else { return };
     let v = p.clamp(app.followed_param(key, id).or_else(|| ins.params.get(id).copied()).unwrap_or(p.default));
-    let (rect, new, shown) = match item {
+    let (resp, new, shown) = match item {
         Knob(..) => {
             let k = knob::show(ui, egui::Id::new(("knob", ins.uid.get(), id)), label, p, v);
-            (k.rect, k.value, p.format(k.value.unwrap_or(v)))
+            (k.response, k.value, p.format(k.value.unwrap_or(v)))
         }
         Toggle(..) => {
             let r = ui.selectable_label(v >= 0.5, label);
-            (r.rect, r.clicked().then_some(if v >= 0.5 { 0.0 } else { 1.0 }), p.format(v))
+            let clicked = r.clicked().then_some(if v >= 0.5 { 0.0 } else { 1.0 });
+            (r, clicked, p.format(v))
         }
         _ => choice(ui, ins, p, label, v),
     };
+    let rect = resp.rect;
+    if let Some(control) = crate::midi_learn::plugin_control(key.1, id) {
+        resp.context_menu(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
+        crate::midi_learn::mark(app, ui.painter(), rect, key.0, control);
+    }
     if let Some(x) = new.filter(|x| (x - v).abs() > f32::EPSILON) {
         app.set_builtin_param(key, id, p.clamp(x));
     }
     lay.rows.push(RowLayout { param: id.to_string(), control: [rect.min.x, rect.min.y, rect.max.x, rect.max.y], value: shown });
 }
 
-fn choice(ui: &mut Ui, ins: &Insert, p: &ParamInfo, label: &str, v: f32) -> (egui::Rect, Option<f32>, String) {
+fn choice(ui: &mut Ui, ins: &Insert, p: &ParamInfo, label: &str, v: f32) -> (egui::Response, Option<f32>, String) {
     let mut idx = (v.round().max(0.0) as usize).min(p.choices.len().saturating_sub(1));
     let r = ui
         .vertical(|ui| {
@@ -183,7 +189,7 @@ fn choice(ui: &mut Ui, ins: &Insert, p: &ParamInfo, label: &str, v: f32) -> (egu
                     }
                 });
             ui.label(RichText::new(label).size(10.5).color(TOKENS.text_dim));
-            c.response.rect
+            c.response
         })
         .inner;
     (r, (idx as f32 != v).then_some(idx as f32), p.format(idx as f32))

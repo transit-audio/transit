@@ -53,6 +53,8 @@ fn arc(center: Pos2, r: f32, from: f32, to: f32) -> Vec<Pos2> {
 /// What a knob did this frame.
 pub struct KnobOut {
     pub rect: egui::Rect,
+    /// The dial's response (its context menu).
+    pub response: egui::Response,
     /// The new value, when the user turned or reset it.
     pub value: Option<f32>,
     /// The text the label slot shows: the value while hovered or dragged.
@@ -105,7 +107,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, label: &str, p: &ParamInfo, value: f32) -
         FontId::proportional(10.5),
         if active { TOKENS.text } else { TOKENS.text_dim },
     );
-    KnobOut { rect: dial, value: new, text }
+    KnobOut { rect: dial, response: r, value: new, text }
 }
 
 #[cfg(test)]

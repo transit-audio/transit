@@ -122,7 +122,7 @@ impl Lane {
     }
 
     /// The device a plug-in lane addresses.
-    fn device<'a>(&self, t: &'a Track) -> Option<&'a soundcraft_model::Insert> {
+    pub(crate) fn device<'a>(&self, t: &'a Track) -> Option<&'a soundcraft_model::Insert> {
         let Lane::Plugin { slot, .. } = self else { return None };
         if *slot == AutoParam::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(usize::from(*slot))?.as_ref() }
     }
@@ -162,7 +162,7 @@ impl Lane {
         matches!(self, Lane::Mute | Lane::SendMute(_))
     }
 
-    fn info(&self, t: &Track) -> Option<&'static soundcraft_dsp::ParamInfo> {
+    pub(crate) fn info(&self, t: &Track) -> Option<&'static soundcraft_dsp::ParamInfo> {
         let Lane::Plugin { param, .. } = self else { return None };
         device_info(&self.device(t)?.plugin)?.params.iter().find(|p| p.id == param)
     }

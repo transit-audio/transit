@@ -222,11 +222,11 @@ fn the_session_mapping_overrides_the_profile_and_the_menu_says_so() {
     )
     .unwrap();
     frames(&mut app, &ctx, 2, &mut time);
-    assert_eq!(midi_learn::info(&app, t, Control::Volume).unwrap().scope, Scope::Profile);
+    assert_eq!(midi_learn::info(&app, t, &Control::Volume).unwrap().scope, Scope::Profile);
     assert_eq!(app.midi_learn.resolved_len(), 1);
     map(&mut app, t, "pan", 74, json!({}));
     frames(&mut app, &ctx, 2, &mut time);
-    let v = midi_learn::info(&app, t, Control::Volume).unwrap();
+    let v = midi_learn::info(&app, t, &Control::Volume).unwrap();
     assert!(v.overridden, "CC 74 now belongs to the session's pan");
     assert_eq!(app.midi_learn.resolved_len(), 1, "only the session's mapping is in force");
     let rows = midi_learn::rows(&app);
