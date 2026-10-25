@@ -176,7 +176,7 @@ struct Mon {
     map_next: u64,
     /// Notes whose note-on a mapping consumed (channel x key), so exactly their note-off is
     /// consumed too, and a note held while a mapping is added still gets its note-off through.
-    held: [u128; 16],
+    held: Box<[u128; 16]>,
 }
 impl Drop for Mon {
     fn drop(&mut self) {
