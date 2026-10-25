@@ -73,7 +73,7 @@ Right-click a control: unmapped offers *MIDI Learn* (session) and *MIDI Learn fo
 sessions)*; mapped shows *Mapped: KeyStep ch 1 CC 74*, *MIDI Learn* (re-learn in the same store) and *Forget
 MIDI Mapping*; the control being learned offers *Cancel MIDI Learn (Esc)*. A learning control gets a pulsing
 accent outline; a mapped one a small dot at its top right (dimmed when overridden). Escape cancels first
-(shortcut row `LearnCancel`, consumed only while armed). Window > MIDI Mappings (`window.midi_mappings`) lists every
+(the mixer's `ReadoutCancel` row, consumed only while armed and no readout is being typed). Window > MIDI Mappings (`window.midi_mappings`) lists every
 stored mapping: port, channel, source, target, mode (editable), range (editable), scope, Learn and Delete.
 
 ## Tests

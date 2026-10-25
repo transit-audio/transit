@@ -296,7 +296,7 @@ mod tests {
         }
         assert!(e.session().midi_mappings.is_empty() && !e.is_dirty());
         e.execute("midi.map", &json!({"source": src(74), "target": t, "mode": "jump", "range": [0.2, 0.8]})).unwrap();
-        e.execute("midi.map", &json!({"source": src(74), "target": format!("strip:2:pan"), "scope": "profile"})).unwrap();
+        e.execute("midi.map", &json!({"source": src(74), "target": "strip:2:pan", "scope": "profile"})).unwrap();
         e.execute("midi.map", &json!({"source": src(20), "target": format!("track:{b}:send:1"), "scope": "profile"})).unwrap();
         let r = e.execute("midi.mappings", &json!({})).unwrap();
         assert_eq!(r["session"][0]["mode"], "jump");

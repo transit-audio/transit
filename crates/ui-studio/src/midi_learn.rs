@@ -222,7 +222,7 @@ pub fn mark(app: &mut StudioApp, p: &egui::Painter, r: Rect, track: TrackId, con
 /// Escape cancels an armed learn. Runs before the other Escape handlers and takes the key only
 /// while a learn is armed.
 pub fn keys(app: &mut StudioApp, ctx: &egui::Context) {
-    if app.engine.learn().is_some() && crate::shortcuts::pressed(ctx, crate::shortcuts::Action::LearnCancel) {
+    if app.engine.learn().is_some() && app.mixer.edit.is_none() && crate::shortcuts::pressed(ctx, crate::shortcuts::Action::ReadoutCancel) {
         let _ = app.run("midi.learn_cancel", json!({}));
     }
 }

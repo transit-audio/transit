@@ -32,7 +32,9 @@ const KNOWN_UNREACHED: &[&str] = &[
     "midi.cc_edit",         // studio UI only (#29: piano-roll CC lane)
     "midi.cc_delete",       // studio UI only (#29: piano-roll CC lane)
     "midi.chord_add", // assistant/control-first (#45): the chord track is written through the control channel and MCP; no chord editor in the UI yet
+    "midi.map",       // studio UI only (#97: MIDI Learn from a control's right-click menu and Window > MIDI Mappings)
     "midi.output",    // studio UI only (#61: the MIDI strip's Out button); the old UI has no MIDI output picker
+    "midi.unmap",     // studio UI only (#97: Forget in the control menu, Delete in Window > MIDI Mappings)
     "midi.notes_transpose", // studio UI only (#27: piano-roll Pitch menu)
     "midi.notes_constrain", // studio UI only (#27: piano-roll Pitch menu)
     "midi.scale_mode", // studio UI only (#77: piano-roll per-clip scale controls)
