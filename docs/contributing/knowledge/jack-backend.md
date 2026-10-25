@@ -44,7 +44,7 @@ Audio Devices shows "Requested 128 · running at 256" under the Output line when
 backend; the check is `audio_devices::requested_note`, run with the existing refresh, no polling.
 Under the cpal ALSA host PipeWire runs the stream at the server's quantum whatever period was
 asked for; the native JACK backend asks the server for the chosen size when it opens its client
-(`jack_set_buffer_size`, ADR 0021 amendment 2026-10-26) and reports the quantum the server then
+(`jack_set_buffer_size`, ADR 0021 amendment 2026-10-25) and reports the quantum the server then
 runs, so a refusal shows here. To pin a quantum instead use
 `pw-metadata -n settings 0 clock.force-quantum 128`; transit never sets `PIPEWIRE_QUANTUM`.
 The rate half reflects the rate of the open attempt, not a value the device reported.

@@ -121,7 +121,7 @@ Slice 2 ships the duplex process engine. Where it departs from the decisions abo
   none). The two that kill or reconfigure a server (`owned_server_*`) are `#[ignore]` and start their
   own dummy server, named by `JACK_DEFAULT_SERVER`.
 
-### Amendment 2026-10-26: decision 4, the buffer size is asked of the server
+### Amendment 2026-10-25: decision 4, the buffer size is asked of the server
 
 Decision 4 and the 2026-10-25 amendment left the quantum to the server and offered only the one it
 ran at listing time. A Linux tester on PipeWire then saw a list of one entry, 64, which that card

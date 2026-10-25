@@ -5,9 +5,9 @@
 //! The lists come from [`soundcraft_playback::devices::cpal_audio_systems`] and, in a build with
 //! the native ASIO backend, [`soundcraft_playback::devices::native_asio_system`], read when the
 //! window opens and on Rescan, never per frame. The ASIO system is listed on a worker thread (it
-//! probes the selected driver, which can take seconds): the window says "Listing the ASIO
-//! drivers…" until it answers, stops waiting after [`ASIO_LISTING_LIMIT`], and lists it again
-//! when another driver is chosen. Without a player (`--no-audio`, tests) nothing is enumerated:
+//! probes the driver that runs, which can take seconds): the window says "Listing the ASIO
+//! drivers…" until it answers and stops waiting after [`ASIO_LISTING_LIMIT`]. A driver only chosen
+//! in the window is never probed (that opens it): its lists are stale until Apply, then listed again. Without a player (`--no-audio`, tests) nothing is enumerated:
 //! the choices are only saved, for the next start.
 //!
 //! Apply reopens the devices through [`StudioApp::reconnect_audio`] (plug-in editors close first,
@@ -47,6 +47,8 @@ pub(crate) struct AsioListing {
 }
 /// Said under the rate and buffer lists where the device must be open to be described (an ASIO
 /// driver other than the one that runs): the lists are the standard choices until Apply.
+/// Said under the buffer list on the JACK system: Apply asks the server.
+pub const JACK_BUFFER_NOTE: &str = "Changes the JACK server's buffer size for all clients.";
 pub const STALE_NOTE: &str = "updates after Apply";
 const CHOOSE_ANOTHER: &str = "Choose another in Audio › Audio Devices.";
 
@@ -182,7 +184,7 @@ pub struct AudioDevicesState {
     pub(crate) panel_opened: Option<String>,
     /// Channel names standing in for the open device's (tests without a player).
     pub(crate) fake_channel_names: Option<crate::audio_devices_io::ChannelNames>,
-    /// The ASIO driver the listing probed (the selected one, else the running one; `None`: none),
+    /// The ASIO driver the listing probed (the running one; `None`: none),
     /// so choosing another driver lists again for it.
     asio_listed_for: Option<Option<String>>,
     /// The ASIO listing in flight (off the UI thread), if any.
@@ -1118,7 +1120,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         app.audio_devices.systems = Some(app.listing());
     }
     if app.audio_devices.systems.is_some() && app.audio_devices.panel.is_none() && app.asio_selection_changed() {
-        // Another ASIO driver was chosen: list the ASIO system again, probing that one.
+        // The driver that runs changed (after Apply): list the ASIO system again, probing it.
         app.relist_asio();
     }
     app.poll_asio_listing();
@@ -1523,6 +1525,12 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                     controls.push((STALE_NOTE.into(), "stale_buffer", shown.rect));
                                                     ui.end_row();
                                                 }
+                                                if devices::is_jack_system(draft.system.as_deref()) {
+                                                    ui.label("");
+                                                    let shown = ui.label(egui::RichText::new(JACK_BUFFER_NOTE).color(TOKENS.text_dim).size(11.0));
+                                                    controls.push((JACK_BUFFER_NOTE.into(), "jack_buffer_note", shown.rect));
+                                                    ui.end_row();
+                                                }
                                             });
                                         }
                                         Section::IoPaths => {
@@ -1603,7 +1611,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     app.audio_devices.io_editor = editor;
     // Escape discards the pending choices, unless a list is open (it closes that first).
     let popup_open = egui::Popup::is_any_open(ctx);
-    let escape = !popup_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    let escape = !popup_open && !ctx.egui_wants_keyboard_input() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
     if revert || (escape && app.audio_devices.draft != app.ui.audio) {
         app.audio_devices.draft = app.ui.audio.clone();
     }

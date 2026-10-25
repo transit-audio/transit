@@ -1904,6 +1904,8 @@ fn picking_another_driver_shows_the_pending_line_highlights_apply_and_lists_the_
     assert_eq!(t.layout()["apply_highlighted"], json!(true));
     assert_eq!(buffer_labels(&mut t), ["System default", "128 samples", "256 samples"], "the selected backend's sizes, before Apply");
     assert!(t.reopened().is_empty(), "a draft change opens nothing");
+    let note = t.layout()["controls"].as_array().unwrap().iter().find(|c| c["value"] == "jack_buffer_note").cloned().unwrap_or_default();
+    assert_eq!(note["label"], json!("Changes the JACK server's buffer size for all clients."));
     t.click(mid(t.control_rect("apply")));
     assert_eq!(t.reopened().last().and_then(|c| c.system.clone()).as_deref(), Some("JACK"));
     assert_eq!(t.layout()["pending"], Value::Null, "Apply clears the pending line");
@@ -2026,4 +2028,19 @@ fn ctrl_tab_and_ctrl_shift_tab_cycle_the_sections() {
     assert_eq!(chord(&mut t, false), "section_system", "wraps around");
     assert_eq!(chord(&mut t, true), "section_hardware", "Shift goes back");
     assert_eq!(chord(&mut t, true), "section_io");
+}
+
+#[test]
+fn escape_reverts_the_draft_but_not_while_a_text_field_has_focus() {
+    let mut t = T::new();
+    t.control("audio.fake_devices", two_backends()).unwrap();
+    t.open_window();
+    t.pick("system", "JACK");
+    let id = egui::Id::new("a_text_field");
+    t.ctx.memory_mut(|m| m.request_focus(id));
+    t.frames(1);
+    t.ctx.memory_mut(|m| m.set_focus_lock_filter(id, egui::EventFilter { escape: true, ..Default::default() }));
+    t.events.push(egui::Event::Key { key: egui::Key::Escape, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::NONE });
+    t.frames(2);
+    assert_ne!(t.app.audio_devices.draft, t.app.ui.audio, "Escape in a focused field leaves the draft");
 }

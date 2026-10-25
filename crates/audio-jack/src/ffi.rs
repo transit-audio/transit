@@ -329,8 +329,9 @@ impl JackClient for LibClient {
 
     fn set_buffer_size(&mut self, frames: u32) -> Result<(), String> {
         // SAFETY: jack.h, jack_set_buffer_size: "Change the buffer size passed to the @a
-        // process_callback." "@param nframes new buffer size. Must be a power of two." (the tests
-        // pass 64, 128 or 256) "@return 0 on success, otherwise a non-zero error code". The client
+        // process_callback." "@param nframes new buffer size. Must be a power of two." (any size the
+        // server accepts is fine: a non-power-of-two is passed through, and the server's answer or
+        // refusal shows in the achieved quantum) "@return 0 on success, otherwise a non-zero error code". The client
         // is open; the call is made on the thread that opens the client (the Player's open path), never
         // from a JACK callback.
         let code = unsafe { j::jack_set_buffer_size(self.client, frames) };
