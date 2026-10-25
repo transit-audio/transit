@@ -1,5 +1,7 @@
 //! MIDI note editing (MIDI Editor, pencil on MIDI tracks).
 
+mod cc;
+
 use super::*;
 use crate::cmd;
 use serde_json::json;
@@ -18,6 +20,9 @@ pub fn specs() -> Vec<CommandSpec> {
             always,
             scale_mode
         ),
+        cmd!("midi.cc_add", "Add CC Point", [], None, "{clip, tick, controller: 0..127, value: 0..127, channel?: 0..15}", always, cc::add),
+        cmd!("midi.cc_edit", "Edit CC Point", [], None, "{clip, index, tick?, value?: 0..127}", always, cc::edit),
+        cmd!("midi.cc_delete", "Delete CC Point", [], None, "{clip, index}", always, cc::delete),
         cmd!(query "midi.notes", "List MIDI Notes", [], None, "{clip}", always, notes),
         cmd!(
             "midi.new_clip",

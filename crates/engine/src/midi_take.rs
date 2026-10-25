@@ -94,7 +94,7 @@ pub struct Built {
 
 /// Pair and convert `events` into per-track, per-pass sequences. Events outside the cut are
 /// dropped, a note held across a pass end is split and continued into each following pass until
-/// its release, and a note still held at Stop ends there. Passes (or tracks) with no notes produce nothing.
+/// its release, and a note still held at Stop ends there. Passes (or tracks) with no notes or controller events produce nothing.
 pub fn build(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut: &Cut) -> Vec<Built> {
     build_wrapping(tempo, sr, events, cut, None)
 }
@@ -234,7 +234,7 @@ pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut
             for &note in &held {
                 close(&mut sequence, note, range.end, 64);
             }
-            if sequence.notes.is_empty() {
+            if sequence.notes.is_empty() && sequence.ctrls.is_empty() {
                 continue;
             }
             sequence.sort();
@@ -414,7 +414,7 @@ mod tests {
     }
 
     #[test]
-    fn controllers_are_kept_with_notes_and_nothing_played_makes_nothing() {
+    fn controllers_are_kept_with_or_without_notes_and_nothing_played_makes_nothing() {
         let (tempo, sr) = tempo();
         let events = [
             ev(0, Msg::Cc { cc: 64, value: 127 }),
@@ -430,7 +430,10 @@ mod tests {
             kinds,
             vec![(0, CtrlKind::Cc(64), 127), (TICKS_PER_QUARTER * 3 / 4, CtrlKind::PitchBend, 100), (TICKS_PER_QUARTER, CtrlKind::Cc(64), 0)]
         );
-        assert!(build(&tempo, sr, &[ev(0, Msg::Cc { cc: 64, value: 127 })], &cut(0, 48_000)).is_empty(), "no notes, no clip");
+        let pedal = build(&tempo, sr, &[ev(0, Msg::Cc { cc: 64, value: 127 })], &cut(0, 48_000));
+        assert_eq!(pedal.len(), 1);
+        assert!(pedal[0].sequence.notes.is_empty());
+        assert_eq!(pedal[0].sequence.ctrls, vec![CtrlEvent { tick: 0, channel: 0, kind: CtrlKind::Cc(64), value: 127 }]);
         assert!(build(&tempo, sr, &[], &cut(0, 48_000)).is_empty());
     }
 
@@ -586,8 +589,8 @@ mod tests {
         let (mut e, t) = midi_engine();
         let undo = e.undo_history().len();
         assert!(place_midi_recording(&mut e, &plan(0, None), &[], 96_000).is_empty());
-        let pedal_only = [RecEvent { track: t, ..ev(0, Msg::Cc { cc: 64, value: 127 }) }];
-        assert!(place_midi_recording(&mut e, &plan(0, None), &pedal_only, 96_000).is_empty());
+        let ignored_mode = [RecEvent { track: t, ..ev(0, Msg::Cc { cc: 123, value: 0 }) }];
+        assert!(place_midi_recording(&mut e, &plan(0, None), &ignored_mode, 96_000).is_empty());
         assert_eq!(e.undo_history().len(), undo);
         assert!(e.session().track(t).unwrap().clips().is_empty());
     }
