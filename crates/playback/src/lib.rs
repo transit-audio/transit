@@ -29,6 +29,7 @@ mod open_log;
 pub mod plan_bridge;
 pub mod player;
 pub mod publication;
+pub mod realtime_render;
 pub mod record;
 pub mod reopen;
 pub mod scheduling;

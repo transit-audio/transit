@@ -491,6 +491,9 @@ pub(super) struct Audio {
     /// The External Instrument Measure (control arms it; this thread sends its notes through
     /// the MIDI output ring and records the return).
     ext_probe: Option<Arc<crate::external_probe::ExtProbe>>,
+    /// The real-time render's capture (ADR 0027): control arms it; this thread copies the blocks
+    /// the render keeps into its preallocated ring.
+    render_tap: Option<Arc<crate::realtime_render::RenderTap>>,
     transport: Transport,
     shared: Arc<Shared>,
     pending: usize,
@@ -598,6 +601,7 @@ impl Audio {
                 probe: None,
                 probe_block: None,
                 ext_probe: None,
+                render_tap: None,
                 shared,
                 pending: 0,
                 read,
@@ -659,6 +663,10 @@ impl Audio {
 
     pub(super) fn set_ext_probe(&mut self, probe: Arc<crate::external_probe::ExtProbe>) {
         self.ext_probe = Some(probe);
+    }
+
+    pub(super) fn set_render_tap(&mut self, tap: Arc<crate::realtime_render::RenderTap>) {
+        self.render_tap = Some(tap);
     }
 
     pub(super) fn set_midi_capture(&mut self, capture: crate::midi_capture::Sink) {
@@ -876,6 +884,11 @@ impl Audio {
         // The mixer owns each processor's suspension rules. A completed note
         // release does not prove that its envelope or any downstream tail ended.
         self.plans.render(state.render_position, frames);
+        // A real-time render keeps Main and the External Instruments' returns of this block, as
+        // live playback renders and reads them (ADR 0027): a copy into its ring, nothing more.
+        if let Some(tap) = &self.render_tap {
+            tap.block(state.playing, state.render_position, frames, self.plans.engine().latency, self.plans.output(), self.plans.input());
+        }
         // An External Instrument Measure records the return the plan read for this block and
         // sends the notes due at its first frame, stamped with that frame's presentation time.
         #[cfg(not(target_arch = "wasm32"))]

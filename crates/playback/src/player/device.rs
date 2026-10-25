@@ -125,6 +125,10 @@ pub struct Player {
     probe: Option<Arc<crate::hardware_probe::HwProbe>>,
     /// The External Instrument Measure (ADR 0020 decision 3); see `external_measure`.
     ext_probe: Option<Arc<crate::external_probe::ExtProbe>>,
+    /// The real-time render's capture (ADR 0027); see `realtime_render`.
+    render_tap: Option<Arc<crate::realtime_render::RenderTap>>,
+    /// The real-time render running, with its writer thread.
+    render_job: RefCell<Option<realtime_render::Job>>,
     /// The loopback calibration probe (native ASIO, #20): the device callbacks play and record it
     /// by sample position ([`crate::loop_probe`]).
     loop_probe: Option<Arc<crate::loop_probe::LoopProbe>>,
@@ -246,6 +250,8 @@ impl Player {
             io: RefCell::new(Arc::new(IoMap::default())),
             probe: None,
             ext_probe: None,
+            render_tap: None,
+            render_job: RefCell::new(None),
             loop_probe: None,
             calibration_key: None,
             calibration: None,
@@ -321,6 +327,9 @@ impl Player {
         let ext_probe = Arc::new(crate::external_probe::ExtProbe::new(target.sample_rate));
         audio.set_ext_probe(Arc::clone(&ext_probe));
         player.ext_probe = Some(ext_probe);
+        let render_tap = Arc::new(crate::realtime_render::RenderTap::new(target.sample_rate));
+        audio.set_render_tap(Arc::clone(&render_tap));
+        player.render_tap = Some(render_tap);
         player.loop_probe = Some(Arc::new(crate::loop_probe::LoopProbe::new(device_rate)));
         *player.capture.get_mut() = Some(capture);
         let (anchor, access) = Anchor::new(audio);
@@ -1789,6 +1798,7 @@ mod rate_tests {
 }
 mod calibrate;
 mod external_measure;
+mod realtime_render;
 
 /// The External Instrument tracks of `session` that cannot play: their MIDI port is Missing or
 /// Failed, or MIDI is unavailable (`status` None). A port the output thread has not looked at yet
@@ -1809,5 +1819,7 @@ fn external_unavailable(session: &Session, status: Option<&super::midi_out::Outp
 mod external_measure_tests;
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod external_tests;
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod realtime_render_tests;
 #[cfg(test)]
 mod tests;
