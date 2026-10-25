@@ -6,7 +6,7 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 | Layer | Crates |
 |---|---|
 | L0 | `time`, `rt`, `audio-io`, `midi-io`, `midi`, `video` |
-| L1 | `dsp`, `clap-host`, `vst3-host`, `au-host`, `asio-panel` |
+| L1 | `dsp`, `clap-host`, `vst3-host`, `au-host` |
 | L2 | `model` (the session document) |
 | L3 | `mix` (the render engine) |
 | L4 | `engine` (commands, undo, I/O), `playback` (devices, Player) |

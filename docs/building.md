@@ -92,10 +92,9 @@ Design notes: [contributing/knowledge/jack-backend.md](contributing/knowledge/ja
 
 ## Building with ASIO (Windows)
 
-ASIO has two implementations in the tree. The native backend needs nothing beyond the Windows
-prerequisites above; the app offers it with the `native-asio` feature, which is on by default. The cpal ASIO feature is the
-legacy path (the app's ASIO path without `native-asio`, and the fallback when the native backend does
-not open); it needs the Steinberg SDK and libclang, and retires with ASIO slice (e).
+The ASIO backend is native: it needs nothing beyond the Windows prerequisites above. The app offers
+it with the `native-asio` feature, which is on by default. (The earlier cpal ASIO path, which needed
+the Steinberg SDK and libclang, was retired; see ADR 0016.)
 
 ### Native ASIO backend (no SDK)
 
@@ -106,7 +105,7 @@ elsewhere) and builds with a plain `cargo build`. A plain `cargo build --release
 on Windows includes it and Native WASAPI: the `native-asio` and `native-wasapi` features are default
 features (they compile to nothing on Linux and macOS). Choose Audio system ASIO, then Backend "Native
 ASIO" in Audio Devices. To opt out, build with `--no-default-features` (add `--features update-check`
-to keep the update check); then the app's ASIO path is cpal's (below). The benchmark uses it through the `audio-bench/native-asio`
+to keep the update check); then the build has no ASIO. The benchmark uses it through the `audio-bench/native-asio`
 feature:
 
 ```powershell
@@ -133,89 +132,4 @@ Or pick one by name: `hardware_lists_focusrite_and_tascam`, `hardware_open_close
 `hardware_control_panel_opens_and_returns`. Design notes:
 [contributing/knowledge/asio-backend.md](contributing/knowledge/asio-backend.md).
 
-### cpal ASIO feature (legacy; needs the SDK and libclang)
-
-The `transit/asio` feature enables `cpal`'s `asio` feature through `asio-sys`, which compiles
-Steinberg's ASIO SDK and generates bindings with bindgen. Use it until the app moves to the native
-backend. In CI, the `windows-asio` job (allowed to fail) builds this feature, and its first run
-succeeded, which shows the SDK download works unattended on `windows-latest` with its preinstalled
-LLVM. `release.yml` does not build it: the release ships one Windows download (zip and MSI) with the native
-ASIO backend, and the cpal ASIO host is build-only (see Licensing below).
-
-The one-command build used for the owner's test builds (app, bench, native WASAPI and both ASIO
-paths), in a PowerShell session with the environment from the Build step below:
-
-```powershell
-cargo build --release -p transit -p audio-bench --features transit/asio,transit/native-wasapi,audio-bench/asio,audio-bench/native-wasapi,audio-bench/native-asio
-```
-
-#### Prerequisites
-
-- Everything in the Windows list above (MSVC Build Tools with the C++ workload). `asio-sys` runs
-  `vcvarsall` itself when `VCINSTALLDIR` is unset, so a plain PowerShell window is fine.
-- LLVM, for bindgen's libclang: `winget install LLVM.LLVM` (installs to `C:\Program Files\LLVM`).
-- The Steinberg ASIO SDK. `asio-sys` downloads it on the first build into `%TEMP%\asio_sdk`. To use
-  an SDK you already unpacked, set `CPAL_ASIO_DIR` to its folder.
-
-#### Build
-
-The scripted version sets the environment below, purges stale bindings, and builds:
-
-```powershell
-pwsh tools\build-asio.ps1
-```
-
-It takes `-repo` (default: this checkout), `-package` (default `transit`) and `-features` (default
-`transit/asio`). The equivalent by hand, in the same PowerShell session:
-
-```powershell
-$env:LIBCLANG_PATH = 'C:\Program Files\LLVM\bin'
-$env:CLANG_PATH = 'C:\Program Files\LLVM\bin\clang.exe'
-$env:PATH = 'C:\Program Files\LLVM\bin;' + $env:PATH
-$env:BINDGEN_EXTRA_CLANG_ARGS = '--target=x86_64-pc-windows-msvc'
-cargo build -p transit --release --features transit/asio
-```
-
-#### Pitfall: MinGW's libclang and E0080
-
-If `C:\mingw64\bin` (or another MinGW) is on `PATH` and `LIBCLANG_PATH` is unset, `clang-sys` loads
-MinGW's libclang, whose default target is `x86_64-w64-windows-gnu`. bindgen then lays out
-`AsioDrivers` with the Itanium C++ ABI, while rustc and `cl.exe` use the MSVC ABI. The build fails with:
-
-```
-error[E0080]: ... Offset of field: AsioDrivers::connID
-```
-
-The fix is the environment above: `LIBCLANG_PATH`, `CLANG_PATH`, LLVM first on `PATH`, and
-`BINDGEN_EXTRA_CLANG_ARGS=--target=x86_64-pc-windows-msvc`.
-
-`asio-sys` takes `libclang` and the `clang` resource headers from `LIBCLANG_PATH` and `PATH`. If a
-MinGW LLVM (for example `C:\mingw64in`) comes before the MSVC LLVM on `PATH`, the bindings come out in
-the GNU ABI (Itanium mangling, GCC struct offsets) and the crate fails to compile with an E0080 layout
-assertion. Setting `LIBCLANG_PATH` alone then fails with undeclared `__builtin_ia32_*` identifiers,
-because the resource headers still come from MinGW. Put the MSVC LLVM's `bin` first on `PATH` (and in
-`LIBCLANG_PATH`) for the build and run `cargo clean -p asio-sys` once.
-
-#### Stale bindings
-
-`asio-sys`'s build script only generates `asio_bindings.rs` when the file does not exist. Wrong
-bindings from an earlier attempt stay in `target\<profile>\build\asio-sys-*\out` and keep failing
-even after you fix the environment. Delete those `asio-sys-*` build folders (and the matching
-`target\<profile>\.fingerprint\asio-sys-*`) before rebuilding, or run `cargo clean -p asio-sys`.
-`tools\build-asio.ps1` removes bindings that contain Itanium (`_ZN`) names automatically.
-
-#### Verify
-
-Run the new binary, open Audio Devices, and look for your interface listed under the ASIO host.
-If only WASAPI appears, the binary was built without the feature. To measure it, run
-`audio-bench --backend cpal --system ASIO --device "<ASIO device>" --loopback ...` (see
-[docs/benchmarks](benchmarks/README.md)); the cpal path has no hardware test suite of its own.
-
-#### Licensing
-
-Building the ASIO SDK into a binary for your own use is allowed by the SDK license. If you want to
-redistribute an ASIO-enabled binary, you must first sign Steinberg's ASIO SDK Licensing Agreement
-(free; signed and emailed to Steinberg) and show this notice: "ASIO is a trademark of Steinberg
-Media Technologies GmbH, registered in Europe and other countries." The published
-release does not include the cpal ASIO host; its one Windows download (zip and MSI) carries native
-WASAPI and native ASIO, which need no SDK.
+ASIO is a trademark of Steinberg Media Technologies GmbH, registered in Europe and other countries.

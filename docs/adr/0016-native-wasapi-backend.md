@@ -113,6 +113,10 @@ The project owner reversed the amendment above after measuring both interfaces: 
 
 `native-wasapi` and `native-asio` are default features of the `transit` app and of `audio-bench`, so a plain `cargo build --release -p transit` on Windows includes both backends. They compile to nothing on other targets, and `--no-default-features` still builds without them (headless and distro builds). The backend choice stays a per-machine setting; the Windows default is unchanged.
 
+### Amendment 2026-10-25: cpal ASIO path and asio-panel retired in favor of the native backend
+
+Native ASIO (`transit-audio-asio`, default feature `native-asio`) shipped in v0.2.0, so the second path to the same hardware is gone. The `asio` Cargo feature (`transit/asio`, `soundcraft-playback/asio`, `audio-bench/asio`), which enabled cpal's ASIO host through `asio-sys` and needed the Steinberg SDK and libclang, is removed, along with the `asio-sys` workspace dependency, the `crates/asio-panel` crate (installed driver names and the cpal path's "Driver Control Panel") and `tools/build-asio.ps1`. The driver's own panel stays reachable through the native backend: "Driver settings" in Audio Devices calls `Loaded::control_panel` on the backend's host thread. The `windows (asio)` CI job, which existed only for the cpal path, is removed; the `windows` job already builds and tests `native-asio`. Without `native-asio` (`--no-default-features`) the build has no ASIO. Closes slice (e) of the ASIO plan.
+
 ## Consequences
 
 - One more `unsafe`-bearing crate and a `windows` dependency; the review burden is bounded by the quoted-unsafe pass and by the crate being small and Windows-only.

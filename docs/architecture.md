@@ -6,7 +6,7 @@ below the UI knows about egui, so the interface can be replaced. Detail lives in
 
 ```
 L0  time  rt  audio-io  midi-io  midi  video      (standalone or primitives)
-L1  dsp  clap-host  vst3-host  au-host  asio-panel (DSP and plug-in hosts)
+L1  dsp  clap-host  vst3-host  au-host (DSP and plug-in hosts)
 L2  model                                          (the session document)
 L3  mix                                            (the plan renderer)
 L4  engine  playback                               (commands, undo, I/O · devices, Player)

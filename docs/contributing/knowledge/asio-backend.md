@@ -15,8 +15,8 @@ compiled only under `cfg(all(windows, target_pointer_width = "64"))`, so a plain
 default: `cargo test -p transit-audio-asio -- --ignored hardware_ --nocapture --test-threads 1`, or
 one by name (for example `hardware_scarlett_duplex_streams_two_seconds`). The app uses it with the
 `transit/native-asio` feature (`soundcraft-playback/native-asio`), as "Native ASIO"
-under Audio system ASIO; see [In the app](#in-the-app-slice-c). The legacy cpal ASIO feature and its
-SDK build are in [docs/building.md](../../building.md).
+under Audio system ASIO; see [In the app](#in-the-app-slice-c). The legacy cpal ASIO feature was retired
+(ADR 0016, amendment 2026-10-25); build notes are in [docs/building.md](../../building.md).
 
 ## The host thread (`src/host.rs`)
 
@@ -505,7 +505,7 @@ Code: `crates/audio-asio/src/mmcss.rs` (the state, safe), `com.rs` (`avrt.dll` b
   probe looks for each click within 200 ms, so a loop longer than that (buffers of 4096 frames and up)
   is not found.
 - A stream-only reopen inside the Player (known issue K32).
-- Slice (e): retiring cpal's ASIO path and `crates/asio-panel` (the cpal path's "Driver Control Panel").
+- Slice (e), done 2026-10-25: cpal's ASIO path and `crates/asio-panel` are retired; "Driver settings" is the only panel entry point.
 
 Open: the WOW6432Node (32-bit) drivers are not listed; whether a message-only `sysRef` suits every
 driver's control panel is untested; a driver whose `init`, `createBuffers` or `controlPanel` waits for

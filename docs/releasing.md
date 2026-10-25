@@ -13,7 +13,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
 
 3. `release.yml` builds four archives and attaches them to a GitHub pre-release for the tag:
    - Windows x86_64 (one download, a `.msi` installer and a portable `.zip`): `windows-x86_64`
-     (native WASAPI and native ASIO; no cpal ASIO, see below). Unsigned unless the
+     (native WASAPI and native ASIO; see below). Unsigned unless the
      Windows signing secrets below are set. SmartScreen may ask for "More info", then "Run anyway".
    - macOS arm64: `transit-v<version>-macos-arm64.dmg` (`transit.app` with a drag-to-Applications
      window, built by `packaging/macos/package.sh`) and a `macos-arm64` tarball with the bare binary
@@ -87,10 +87,8 @@ Say in the release notes when the build was signed; the notes say unsigned other
 ## ASIO
 
 The release has one Windows download (zip and MSI). It carries the native ASIO backend
-(`transit/native-asio`), which is SDK-free and needs no Steinberg agreement. The cpal ASIO host
-(`--features transit/asio`) compiles against the Steinberg ASIO SDK, so it is build-only: it is not
-released, and `release.yml` does not build it. To build it yourself you need the SDK and LLVM; see
-docs/building.md. Distributing a binary built with it requires Steinberg's ASIO SDK license.
+(`transit/native-asio`), which is SDK-free and needs no Steinberg agreement. The earlier cpal ASIO
+host, which compiled against the Steinberg SDK, has been removed.
 
 Because the zip and MSI ship the native ASIO backend, `README-WINDOWS.txt` in the zip carries the
 required notice: "ASIO is a trademark of Steinberg Media Technologies GmbH, registered in Europe and other countries."

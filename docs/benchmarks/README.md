@@ -2,7 +2,7 @@
 
 The harness behind the gate of [ADR 0016](../adr/0016-native-wasapi-backend.md) (section 5). It lives in
 `tools/audio-bench` and runs through `cargo xtask audio-bench`. It drives a backend through the
-`transit-audio-backend` trait only, so cpal-shared, cpal-ASIO and the future native backend are
+`transit-audio-backend` trait only, so the cpal and native backends are
 measured by identical code, and by host time only.
 
 Hardware numbers are notes, never CI gates. Fake-device results prove the harness logic, not any
@@ -75,14 +75,14 @@ Focusrite Scarlett 2i2 (2 in, 2 out), once per period 32, 64 and 128 (and a re-r
 percent CPU load running elsewhere, as ADR 0016 section 5 asks):
 
 ```
-cargo xtask audio-bench --backend cpal --system ASIO  --device "Focusrite USB ASIO"  --period 64 --seconds 120 --loopback --out-ch 1 --in-ch 1 --out docs/benchmarks/<date>-<machine>.md
+cargo xtask audio-bench --backend asio --device "Focusrite USB ASIO"  --period 64 --seconds 120 --loopback --out-ch 1 --in-ch 1 --out docs/benchmarks/<date>-<machine>.md
 cargo xtask audio-bench --backend cpal --system WASAPI --device "Speakers (Focusrite USB Audio)" --in-device "Line (Focusrite USB Audio)" --period 64 --seconds 120 --loopback --out-ch 1 --in-ch 1 --out docs/benchmarks/<date>-<machine>.md
 ```
 
 TASCAM Model 12 (loopback on one output / input pair, for example output 1 to input 1):
 
 ```
-cargo xtask audio-bench --backend cpal --system ASIO  --device "TASCAM MODEL 12"   --period 64 --seconds 120 --loopback --out-ch 1 --in-ch 1 --out docs/benchmarks/<date>-<machine>.md
+cargo xtask audio-bench --backend asio --device "TASCAM MODEL 12"  --period 64 --seconds 120 --loopback --out-ch 1 --in-ch 1 --out docs/benchmarks/<date>-<machine>.md
 cargo xtask audio-bench --backend cpal --system WASAPI --device "<output endpoint of the Model 12>" --in-device "<input endpoint of the Model 12>" --period 64 --seconds 120 --loopback --out-ch 1 --in-ch 1 --out docs/benchmarks/<date>-<machine>.md
 ```
 

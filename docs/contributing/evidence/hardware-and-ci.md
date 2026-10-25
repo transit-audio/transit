@@ -6,11 +6,7 @@
 `main`, and cancels a superseded run. Jobs:
 
 - `windows`: `cargo xtask layers`, `cargo xtask assets`, `cargo xtask timing`, then clippy (`-D warnings`) and the tests for
-  the whole workspace with `--features transit/native-wasapi`.
-- `windows-asio`: clippy and tests with the ASIO features (`transit/asio`, `audio-bench/asio`,
-  `soundcraft-playback/asio`). It needs LLVM for bindgen (set up from the runner) and Steinberg's SDK,
-  which `asio-sys` downloads or the optional `ASIO_SDK_URL` secret supplies. It is
-  `continue-on-error`: a failed SDK download reports red but does not block a merge.
+  the whole workspace with `--features transit/native-wasapi,transit/native-asio`.
 - `linux`: `cargo fmt --check`, `cargo xtask timing`, clippy and the tests on default features.
 - `macos`: clippy and the tests on default features (`crates/au-host` and the objc2 code compile only
   there).
@@ -27,8 +23,7 @@ advisories (no `deny.toml`), and every hardware test. Hardware tests are `#[igno
 gates: they need a real device and a person (see below).
 
 The Windows release job builds one target, `windows-x86_64` (`transit/native-wasapi` and
-`transit/native-asio`, no SDK). The cpal ASIO host is build-only and is exercised by the
-`windows-asio` job in `ci.yml` (allowed to fail, never published).
+`transit/native-asio`, no SDK); the `windows` job in `ci.yml` builds and tests both.
 
 ## Hardware evidence
 
