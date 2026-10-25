@@ -89,6 +89,11 @@ sends it at `H + destination offset`.
   destination, as its notes carry it, plus each destination's offset) the notes playback holds end; events scheduled at or after it are dropped (a locate discards its
   rendered-ahead block); the new lap or position starts again every note that sounds across it
   (`chase`). The same chase runs at play start.
+- **Clip end** (#94): a pedal (CC 64, 66, 67, 69) that a clip's last event on a channel leaves down gets value 0 at the clip end
+  (`visit_clip_events`, in the off pass with the note-offs, so the next clip's down at the same sample follows it; looped clips
+  count every cycle). Overlap rule: the track's pedal belongs to the clip that wrote it last, so only that clip's end releases it;
+  a later write by an overlapping clip (an up, or a down it releases itself) supersedes. Live input is a separate source and
+  the instrument's OR keeps its pedal. Limit: two clips writing at the same sample are not told apart.
 - **Destination change** (port or channel, or back to internal): the track's held notes end on the
   old port, then Sustain off and All Notes Off on the channels that track used.
 - **Echo route revoked** (disarm, monitor off, a MIDI input or channel filter change, the input

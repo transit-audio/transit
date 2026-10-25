@@ -1422,3 +1422,104 @@ fn refused_restrike_preserves_a_future_on_and_its_release() {
     assert_ne!(heard[0].1.note_id, heard[2].1.note_id);
     assert!(!rig.mix.has_pending_events());
 }
+
+// #94: a pedal a clip leaves held is released at the clip's end.
+
+fn pedal_seq(events: &[(i64, i32)]) -> soundcraft_midi::Sequence {
+    let mut seq = soundcraft_midi::Sequence::default();
+    for &(tick, value) in events {
+        seq.ctrls.push(soundcraft_midi::CtrlEvent { tick, channel: 0, kind: soundcraft_midi::CtrlKind::Cc(64), value });
+    }
+    seq
+}
+
+/// Adds a MIDI clip `length` samples long at `start`; a loop range makes it a looped clip.
+fn add_pedal_clip(rig: &mut Rig, start: i64, length: i64, looping: Option<(i64, i64)>, seq: soundcraft_midi::Sequence) {
+    let mut s = rig.session.clone();
+    let cid = s.new_clip_id();
+    let mut clip = soundcraft_model::Clip::midi(cid, "pedal", start, length, seq);
+    clip.set_loop(looping.map(|(start, end)| soundcraft_model::ClipLoop { start, end }));
+    s.track_mut(rig.track).unwrap().playlist_mut().unwrap().clips.push(clip);
+    rig.publish(&s);
+    rig.session = s;
+}
+
+/// Plays `blocks` blocks from the current position; returns the first frame played and CC64 heard,
+/// as offsets from that frame.
+fn play_pedal(rig: &mut Rig, blocks: usize) -> Vec<(u64, u8)> {
+    rig.heard.lock().unwrap().clear();
+    let now = rig.mix.next_frame().0;
+    rig.render(blocks);
+    pedal_values(&rig.heard_by(1), 64).into_iter().map(|(f, v)| (f - now, v)).collect()
+}
+
+#[test]
+fn a_clip_that_ends_with_the_pedal_down_releases_it_once_at_its_end() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    // Down at tick 4 (sample 100), no up. The clip ends at sample 2600, inside block 10.
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127)]));
+    assert_eq!(play_pedal(&mut rig, 14), vec![(100, 127), (2600, 0)]);
+    assert!(!rig.mix.has_pending_events());
+}
+
+#[test]
+fn a_clip_whose_pedal_comes_up_inside_it_sends_no_extra_release() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127), (8, 0)]));
+    assert_eq!(play_pedal(&mut rig, 14), vec![(100, 127), (200, 0)]);
+    // A clip that never touches the pedal sends nothing either.
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[]));
+    assert_eq!(play_pedal(&mut rig, 14), vec![]);
+}
+
+#[test]
+fn overlapping_clips_release_the_pedal_when_the_clip_that_wrote_it_last_ends() {
+    // A (0..2600) presses at 100; B (1000..5000) presses at 1100 and never lets go: only B's end releases.
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127)]));
+    add_pedal_clip(&mut rig, 1000, 4000, None, pedal_seq(&[(4, 127)]));
+    assert_eq!(play_pedal(&mut rig, 24), vec![(100, 127), (5000, 0)]);
+    // B lifts the pedal at 1500, after A's press: A's end at 2600 must not send a second release.
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127)]));
+    add_pedal_clip(&mut rig, 1000, 4000, None, pedal_seq(&[(20, 0)]));
+    assert_eq!(play_pedal(&mut rig, 24), vec![(100, 127), (1500, 0)]);
+    // Two clips ending at the same sample, both pressed: one release.
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127)]));
+    add_pedal_clip(&mut rig, 500, 2100, None, pedal_seq(&[(4, 127)]));
+    assert_eq!(play_pedal(&mut rig, 14), vec![(100, 127), (2600, 0)]);
+}
+
+#[test]
+fn a_looped_clip_releases_a_pedal_its_last_cycle_leaves_held() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    // Loop 0..2400 (96 ticks): down at tick 4, up at tick 60, every cycle. The clip ends at 10000,
+    // 400 samples into the fifth cycle, after its press and before its lift.
+    add_pedal_clip(&mut rig, 0, 10_000, Some((0, 2400)), pedal_seq(&[(4, 127), (60, 0)]));
+    let want = vec![(100, 127), (1500, 0), (2500, 127), (3900, 0), (4900, 127), (6300, 0), (7300, 127), (8700, 0), (9700, 127), (10_000, 0)];
+    assert_eq!(play_pedal(&mut rig, 42), want);
+}
+
+#[test]
+fn a_pedal_held_by_live_input_is_not_released_by_a_clip_end() {
+    let mut rig = Rig::new();
+    rig.pos = 0;
+    add_pedal_clip(&mut rig, 0, 2600, None, pedal_seq(&[(4, 127)]));
+    let now = rig.mix.next_frame().0;
+    assert_eq!(rig.send(port(1, 0), now + 10, cc(64, 127)), EventOutcome::Queued);
+    // The live press goes out first; the clip's press and its release at 2600 change nothing the
+    // instrument can hear while the live source holds the pedal.
+    assert_eq!(play_pedal(&mut rig, 14), vec![(10, 127)]);
+    rig.mix.revoke_source(1, 1);
+    rig.render(1);
+    assert_eq!(pedal_values(&rig.heard_by(1), 64).last().map(|(_, v)| *v), Some(0));
+}

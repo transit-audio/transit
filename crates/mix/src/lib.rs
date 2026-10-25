@@ -58,6 +58,7 @@
 //! [`Insert::sample`]: soundcraft_model::Insert::sample
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+use soundcraft_dsp::event::{CC_HOLD2, CC_SOFT, CC_SOSTENUTO, CC_SUSTAIN};
 use soundcraft_dsp::pan::{PanLaw, SpeakerPos, SurroundParams, gains};
 use soundcraft_dsp::{Plugin, ProcessStatus, SampleSource, Transport, db_to_gain};
 use soundcraft_midi::CtrlKind;
@@ -2424,6 +2425,29 @@ fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: usize, mut vi
                 });
             }
             if !ons {
+                // A pedal the clip leaves held is released at its end, in the off pass with the
+                // note-offs, so a pedal-down at the same sample (the next clip's) follows it.
+                let t_end = clip.end();
+                if t_end >= pos && t_end < end {
+                    let mine = pedal_state_before(s, clip, rtp, t_end);
+                    for (slot, held) in mine.iter().enumerate() {
+                        let Some((at, true)) = *held else { continue };
+                        // The track's pedal belongs to whichever clip wrote it last: only that
+                        // clip's end releases it. Otherwise a later write (an up, or a down some
+                        // overlapping clip will release itself) already decided the state.
+                        let superseded = t.clips().iter().any(|other| {
+                            let other_midi = matches!(other.content, ClipContent::Midi { .. });
+                            !std::ptr::eq(other, clip) && !other.muted && other_midi && {
+                                let theirs = pedal_state_before(s, other, rtp, t_end.min(other.end()));
+                                matches!(theirs.get(slot), Some(Some((a, _))) if *a > at)
+                            }
+                        });
+                        if !superseded {
+                            let (cc, channel) = pedal_slot_cc(slot);
+                            visit(usize::try_from(t_end - pos).unwrap_or(0), ClipEvent::Control([0xB0, cc, 0], channel));
+                        }
+                    }
+                }
                 continue;
             }
             let near = s.tempo.samples_to_ticks(pos, sr).saturating_sub(base).saturating_sub(1)
@@ -2463,6 +2487,68 @@ fn visit_clip_events(s: &Session, t: &Track, pos: Samples, frames: usize, mut vi
             }
         }
     }
+}
+
+/// Pedal controllers the clip-end release covers: 16 channels times sustain, sostenuto, soft, hold 2.
+const PEDAL_SLOTS: usize = 64;
+
+fn pedal_slot_of(cc: u8, channel: u8) -> Option<usize> {
+    let kind = match cc {
+        CC_SUSTAIN => 0,
+        CC_SOSTENUTO => 1,
+        CC_SOFT => 2,
+        CC_HOLD2 => 3,
+        _ => return None,
+    };
+    (channel < 16).then(|| usize::from(channel) * 4 + kind)
+}
+
+/// The controller number and recorded channel of a pedal slot.
+fn pedal_slot_cc(slot: usize) -> (u8, u8) {
+    let cc = [CC_SUSTAIN, CC_SOSTENUTO, CC_SOFT, CC_HOLD2].get(slot % 4).copied().unwrap_or(CC_SUSTAIN);
+    (cc, (slot / 4) as u8)
+}
+
+/// Per pedal slot, the clip's last pedal event strictly before `until` (a session sample): its time
+/// and whether it holds (value >= 64). Looped cycles count, so a loop that ends on a held pedal is
+/// seen at the clip end. Fixed-size and allocation-free: runs on the audio thread.
+fn pedal_state_before(s: &Session, clip: &Clip, rtp: Rtp, until: Samples) -> [Option<(Samples, bool)>; PEDAL_SLOTS] {
+    let mut last = [None; PEDAL_SLOTS];
+    let ClipContent::Midi { sequence } = &clip.content else { return last };
+    let sr = s.sample_rate;
+    let base = s.tempo.samples_to_ticks(clip.start, sr);
+    let looping = midi_loop_frame(s, clip);
+    for c in sequence.ctrls.iter().filter(|c| c.tick >= 0 || looping.is_some()) {
+        let CtrlKind::Cc(cc) = c.kind else { continue };
+        let Some(slot) = pedal_slot_of(cc & 0x7F, c.channel) else { continue };
+        let tick = c.tick.saturating_add(rtp.delay);
+        let tick = if looping.is_some() { tick } else { tick.max(0) };
+        let first = s.tempo.tick_to_samples(base.saturating_add(tick), sr);
+        // The latest time this event sounds before `until`.
+        let mut latest: Option<Samples> = None;
+        match looping {
+            None => latest = (first < until).then_some(first),
+            Some((origin, l)) => {
+                let rel = first.saturating_sub(origin);
+                if rel < l.end {
+                    if rel >= 0 && first < until {
+                        latest = Some(first);
+                    }
+                    let repeat = cycle_at(origin, l, rel, 1);
+                    if rel >= l.start && repeat < until {
+                        let k = until.saturating_sub(1).saturating_sub(repeat).div_euclid(l.cycle().max(1));
+                        latest = latest.max(Some(repeat.saturating_add(k.saturating_mul(l.cycle().max(1)))));
+                    }
+                }
+            }
+        }
+        if let (Some(at), Some(entry)) = (latest, last.get_mut(slot))
+            && entry.is_none_or(|(prev, _)| at >= prev)
+        {
+            *entry = Some((at, c.value >= 64));
+        }
+    }
+    last
 }
 
 /// The note-ons a track's clips play in `pos..pos + frames`, as (absolute sample, key): what the
