@@ -76,7 +76,7 @@ scales! {
 
 impl Scale {
     /// Number of tones per octave.
-    pub const fn len(self) -> u32 {
+    pub const fn tone_count(self) -> u32 {
         self.mask().count_ones()
     }
 
@@ -302,12 +302,12 @@ mod tests {
             }
             assert_eq!(from_gaps.pop(), Some(12), "{name} gaps close the octave");
             assert_eq!(tones(*scale), from_gaps, "{name}");
-            assert_eq!(scale.len() as usize, from_gaps.len());
+            assert_eq!(scale.tone_count() as usize, from_gaps.len());
             assert_eq!(scale.mask() & !0xFFF, 0);
         }
-        assert_eq!(Scale::MinorPentatonic.len(), 5);
-        assert_eq!(Scale::WholeTone.len(), 6);
-        assert_eq!(Scale::HalfWholeDim.len(), 8);
+        assert_eq!(Scale::MinorPentatonic.tone_count(), 5);
+        assert_eq!(Scale::WholeTone.tone_count(), 6);
+        assert_eq!(Scale::HalfWholeDim.tone_count(), 8);
     }
 
     #[test]
