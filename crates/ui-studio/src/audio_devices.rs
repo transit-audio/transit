@@ -45,6 +45,9 @@ pub(crate) struct AsioListing {
     rx: std::sync::mpsc::Receiver<Option<AudioSystem>>,
     started: std::time::Instant,
 }
+/// Said under the rate and buffer lists where the device must be open to be described (an ASIO
+/// driver other than the one that runs): the lists are the standard choices until Apply.
+pub const STALE_NOTE: &str = "updates after Apply";
 const CHOOSE_ANOTHER: &str = "Choose another in Audio › Audio Devices.";
 
 /// Where the window and its controls were last drawn, for `ui.inspect` and tests.
@@ -80,6 +83,10 @@ pub struct AudioDevicesLayout {
     pub listing: Option<String>,
     /// The Hardware inserts subsection as drawn.
     pub hardware: crate::audio_devices_io::HardwareLayout,
+    /// The pending-change line next to Apply (the window's choices differ from the running ones).
+    pub pending: Option<String>,
+    /// Apply is drawn highlighted (something is pending).
+    pub apply_highlighted: bool,
 }
 
 /// The native ASIO Calibration line's Measure as drawn, for `ui.inspect` and tests.
@@ -670,23 +677,16 @@ impl StudioApp {
         }
     }
 
-    /// The ASIO driver the listing probes: the one chosen in the window when its system is ASIO,
-    /// else the native ASIO driver that runs; `None` probes none (names only).
+    /// The ASIO driver the listing probes: the native ASIO driver that runs; `None` probes none
+    /// (names only). A driver chosen in the window is never probed before Apply: probing opens it.
     pub(crate) fn asio_selection(&self) -> Option<String> {
-        let draft = &self.audio_devices.draft;
-        if draft.system.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(devices::ASIO_SYSTEM))
-            && let Some(output) = &draft.output
-        {
-            return Some(output.clone());
-        }
         self.running_native_asio()
     }
 
-    /// Whether the window shows the ASIO system and its choice moved off the driver the listing
-    /// probed (it lists again, probing the new one).
+    /// Whether the driver that runs moved off the one the listing probed (after Apply: it lists
+    /// again, probing the new one).
     fn asio_selection_changed(&self) -> bool {
-        devices::is_asio_system(self.audio_devices.draft.system.as_deref())
-            && self.audio_devices.asio_listed_for.as_ref().is_some_and(|listed| *listed != self.asio_selection())
+        self.audio_devices.asio_listed_for.as_ref().is_some_and(|listed| *listed != self.asio_selection())
     }
 
     fn running_asio(&self) -> bool {
@@ -869,6 +869,25 @@ pub fn asio_calibration_line(cfg: &AudioConfig, driver: &str, running: Option<(u
             elsewhere.join(", ")
         )
     }
+}
+
+/// The line next to Apply while the window's choices differ from the running ones, `None` when
+/// they are the same. A different audio system or backend is a driver change; a different sample
+/// rate says what reopens. Nothing is opened to say it.
+pub fn pending_text(draft: &AudioConfig, running: &AudioConfig) -> Option<String> {
+    if draft == running {
+        return None;
+    }
+    if draft.system != running.system || draft.backend != running.backend {
+        let system = draft.system.as_deref().unwrap_or(SYSTEM_DEFAULT);
+        let name = if draft.backend.is_native() { format!("{system} ({})", draft.backend.label()) } else { system.to_owned() };
+        return Some(format!("Driver change pending: press Apply to switch to {name}."));
+    }
+    if draft.sample_rate != running.sample_rate {
+        let rate = draft.sample_rate.map_or_else(|| SYSTEM_DEFAULT.to_owned(), |r| format!("{r} Hz"));
+        return Some(format!("Sample rate change pending: press Apply to reopen at {rate}."));
+    }
+    Some("Changes pending: press Apply to reopen the devices.".into())
 }
 
 /// The pick of `pick` if it still names one of `names`, else `remembered` if it does, else
@@ -1060,7 +1079,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let recording = app.recording_active();
     let panel_open = app.audio_devices.panel.is_some();
     let audio_on = app.player.is_some() || app.audio_devices.fake.is_some();
-    let (mut apply, mut reconnect, mut rescan) = (false, false, false);
+    let (mut apply, mut reconnect, mut rescan, mut revert) = (false, false, false, false);
     let mut native_panel: Option<String> = None;
     // The path table is the engine's, read again every frame; one edit at most per frame.
     let io = app.engine.io_map().clone();
@@ -1253,19 +1272,43 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                     ui.end_row();
                 }
 
+                // An ASIO driver is described only while it is open: any other shows the standard
+                // choices, marked, until Apply opens it.
+                let stale = asio && dev.is_some_and(|d| d.max_channels == 0);
                 label(ui, "Sample rate");
                 let rates: Vec<(u32, String)> =
                     dev.map_or(devices::STANDARD_RATES.to_vec(), |d| d.sample_rates.clone()).into_iter().map(|r| (r, format!("{r} Hz"))).collect();
                 let (rect, text) = choose(ui, "rate", audio_on, &mut draft.sample_rate, &rates, &mut lay.items);
                 controls.push((text, "rate", rect));
                 ui.end_row();
+                if stale {
+                    ui.label("");
+                    let shown = ui.label(egui::RichText::new(STALE_NOTE).color(TOKENS.text_dim).size(11.0));
+                    controls.push((STALE_NOTE.into(), "stale_rate", shown.rect));
+                    ui.end_row();
+                }
 
                 label(ui, "Buffer size");
                 let sizes = dev.map_or(devices::STANDARD_BUFFERS.to_vec(), DeviceInfo::buffer_sizes);
-                let bufs: Vec<(u32, String)> = sizes.into_iter().map(|b| (b, format!("{b} samples"))).collect();
+                // The size the open device runs is marked in its own list.
+                let running_buffer = app
+                    .player
+                    .as_ref()
+                    .filter(|p| !p.silent && dev.is_some_and(|d| d.name.eq_ignore_ascii_case(&p.device_name)))
+                    .and_then(|p| p.device_buffer);
+                let bufs: Vec<(u32, String)> = sizes
+                    .into_iter()
+                    .map(|b| (b, if running_buffer == Some(b) { format!("{b} samples \u{b7} running") } else { format!("{b} samples") }))
+                    .collect();
                 let (rect, text) = choose(ui, "buffer", audio_on, &mut draft.buffer_size, &bufs, &mut lay.items);
                 controls.push((text, "buffer", rect));
                 ui.end_row();
+                if stale {
+                    ui.label("");
+                    let shown = ui.label(egui::RichText::new(STALE_NOTE).color(TOKENS.text_dim).size(11.0));
+                    controls.push((STALE_NOTE.into(), "stale_buffer", shown.rect));
+                    ui.end_row();
+                }
             });
             ui.add_space(SPACE);
             lay.opened = opened_lines(app, ui.input(|i| i.time));
@@ -1301,13 +1344,21 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             io_edit = crate::audio_devices_io::section(ui, &io, wasapi, &channel_names, &mut editor, &mut io_items);
             (hw_action, hw_layout) = crate::audio_devices_io::hardware_section(ui, &io, rate, blocker, progress, &mut editor, &mut io_items);
             ui.add_space(SPACE);
+            let pending = pending_text(&draft, &app.ui.audio);
             ui.horizontal(|ui| {
-                let b = ui.add_enabled(!recording && !panel_open, egui::Button::new("Apply"));
+                let mut apply_button = egui::Button::new("Apply");
+                if pending.is_some() {
+                    apply_button = apply_button.fill(TOKENS.accent);
+                }
+                let b = ui.add_enabled(!recording && !panel_open, apply_button);
                 controls.push(("Apply".into(), "apply", b.rect));
                 apply = b
                     .on_hover_text("Reopen the devices with these choices. Playback stops first.")
                     .on_disabled_hover_text(if panel_open { PANEL_OPEN_FIRST } else { REFUSED_RECORDING })
                     .clicked();
+                let b = ui.add_enabled(pending.is_some(), egui::Button::new("Revert"));
+                controls.push(("Revert".into(), "revert", b.rect));
+                revert = b.on_hover_text("Discard these changes (Esc).").clicked();
                 let b = ui.add_enabled(!recording && audio_on && !panel_open, egui::Button::new("Reconnect"));
                 controls.push(("Reconnect".into(), "reconnect", b.rect));
                 reconnect = b
@@ -1328,6 +1379,12 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                     }
                 }
             });
+            if let Some(text) = &pending {
+                let shown = ui.label(egui::RichText::new(text).color(TOKENS.text).size(11.5));
+                controls.push((text.clone(), "pending", shown.rect));
+                lay.pending = Some(text.clone());
+                lay.apply_highlighted = true;
+            }
             lay.controls = controls.into_iter().map(|(text, key, rect)| MenuItem::at(ui, text, key.into(), rect)).collect();
             lay.controls.append(&mut io_items);
         });
@@ -1382,6 +1439,12 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         }
     }
     app.audio_devices.io_editor = editor;
+    // Escape discards the pending choices, unless a list is open (it closes that first).
+    let popup_open = egui::Popup::is_any_open(ctx);
+    let escape = !popup_open && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+    if revert || (escape && app.audio_devices.draft != app.ui.audio) {
+        app.audio_devices.draft = app.ui.audio.clone();
+    }
     if apply {
         let _ = app.apply_audio(draft);
     }
@@ -1531,7 +1594,7 @@ fn short_problem(problem: &str) -> String {
 
 /// `audio.fake_devices {systems: [{name, is_default?, outputs: [...], inputs: [...], diagnostics?: [...]}]}`:
 /// stand-in devices for screenshot runs and tests (each device `{name, is_default?, max_channels?,
-/// sample_rates?}`, each diagnostic a "<driver>: <problem>" text); `{systems: null}` removes them.
+/// sample_rates?, buffer_min?, buffer_max?}`, each diagnostic a "<driver>: <problem>" text); `{systems: null}` removes them.
 pub fn fake_from_json(p: &serde_json::Value) -> Result<Option<FakeDevices>, String> {
     use serde_json::Value;
     let Some(list) = p.get("systems") else { return Err("audio.fake_devices needs systems".into()) };
@@ -1557,8 +1620,8 @@ pub fn fake_from_json(p: &serde_json::Value) -> Result<Option<FakeDevices>, Stri
                         .and_then(Value::as_array)
                         .map(|a| a.iter().filter_map(|r| r.as_u64().and_then(|r| u32::try_from(r).ok())).collect())
                         .unwrap_or_else(|| vec![44_100, 48_000]),
-                    buffer_min: Some(64),
-                    buffer_max: Some(2048),
+                    buffer_min: Some(d.get("buffer_min").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(64)),
+                    buffer_max: Some(d.get("buffer_max").and_then(Value::as_u64).and_then(|n| u32::try_from(n).ok()).unwrap_or(2048)),
                 })
             })
             .collect()
