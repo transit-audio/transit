@@ -48,7 +48,7 @@ happens between `open_input` and the plan's adoption, and during a stall. The co
   period only while it is at most `read + slack`; the producer records its last pushed block size
   in one Relaxed atomic, and the unpaired rule uses it:
   - `ALIGNED_BACKLOG_BLOCKS_PAIRED` (0) when one device callback delivers the capture and then
-    asks for the render (`Backend::capture_precedes_render`: native ASIO and the duplex fake);
+    asks for the render (`Backend::capture_precedes_render`: native ASIO, native JACK and the duplex fake);
   - `ALIGNED_BACKLOG_BLOCKS_UNPAIRED` (`max(read, last_push)` frames: the larger of one read
     block and the last block the capture callback pushed) when capture and render run on separate
     callbacks (WASAPI's two loops, cpal), whose order can swap within a period. A 480-frame

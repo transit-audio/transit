@@ -68,11 +68,17 @@ target/release/audio-bench --backend jack --list-devices
   "JACK/PipeWire server not running". The server sets the rate and the quantum; under PipeWire pin
   the quantum (`pw-metadata -n settings 0 clock.force-quantum 128`) or start transit with
   `PIPEWIRE_QUANTUM=128/48000`.
-- Slice 1 plays no audio yet: the app lists the backend as "Native JACK (no audio until slice 2)" and it opens
-  and produces silence. In slice 1 testers should only run `audio-bench --backend jack --list-devices`. `Auto`
-  stays cpal (ALSA) on Linux, including on the JACK system.
-- Tests use a fake server and need no JACK: `cargo test -p transit-audio-jack` (any platform), and on
-  Linux `cargo test -p transit-audio-jack --features libjack` also builds the libjack calls.
+- **Runtime:** a running JACK 2 or PipeWire server (with PipeWire's JACK library, `pipewire-jack`).
+  On Debian and Ubuntu with PipeWire, start transit as `pw-jack transit`. In Audio Devices choose the
+  JACK system and Backend > Native JACK (or leave Auto: with a server answering, Auto opens Native
+  JACK on the JACK system and on the untouched default; with none it opens cpal's ALSA host). The
+  buffer size and rate are the server's; the panel shows them and where to change them. Set
+  `TRANSIT_JACK_AUTOCONNECT=0` to leave transit's ports unconnected for a patchbay.
+- Tests use a fake server and need no JACK: `cargo test -p transit-audio-jack` (any platform). On
+  Linux `cargo test -p transit-audio-jack --features libjack` also runs the real-server tests, which
+  skip when no server answers; start a dummy server first to run them:
+  `jackd -r -d dummy -r 48000 -p 128 &` (`jackd2` package). The tests that kill or re-quantize a
+  server are ignored and start their own (see the knowledge note).
 
 Design notes: [contributing/knowledge/jack-backend.md](contributing/knowledge/jack-backend.md).
 

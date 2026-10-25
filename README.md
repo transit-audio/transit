@@ -182,6 +182,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Tracks, buses and sends route to any output path, with latency aligned across them.
 - Native ASIO recovers from a driver reset request (the driver changing its buffer size or sample rate) and reopens the device, and its audio thread runs at MMCSS Pro Audio priority.
 - The Calibration Measure button works per driver, sample rate and buffer size, and keeps a result for each combination.
+- Linux: native JACK/PipeWire backend (build with `--features native-jack`; `pw-jack transit` under PipeWire). It plays and records duplex in one server cycle at the server's rate and buffer size, counts the server's xruns, and reopens by itself when the server changes its buffer size or rate or comes back after stopping.
 
 ### Sessions and rendering
 

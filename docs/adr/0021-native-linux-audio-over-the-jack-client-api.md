@@ -1,6 +1,6 @@
 # ADR 0021: Native Linux audio over the JACK client API, for JACK and PipeWire alike
 
-- **Status:** accepted 2026-10-24 (issue #55)
+- **Status:** accepted 2026-10-24 (issue #55); amended 2026-10-25 (slice 2)
 - **Date:** 2026-10-24
 - **Reopen when:** PipeWire's JACK library on the tester's system gives cycle times or port latencies that the loopback Measure cannot reconcile (then the native PipeWire API is the next step); the slice 2 bench shows cpal's ALSA path within the gate margin of this backend at 64 and 128 frames; a contributor needs JACK MIDI ports (decision 6); or the main distributions stop shipping `pipewire-jack`.
 
@@ -75,6 +75,51 @@ Each slice ships alone behind `native-jack`, gets a refutation review, and chang
 2. **Duplex callback and stamps:** the process engine, conversion, stamps and stats, the allocation tests, `audio-bench --backend jack` with loopback. Gate: the quoted-unsafe verdict, and acceptance (a) and (c) on the tester's machine.
 3. **Loss, change and Measure:** shutdown and `ServerStopped` reopen, buffer size and rate changes, latency ranges, `Stream::period`, Measure with mode `jack`. Gate: acceptance (b) and (d).
 4. **Release and docs:** the release built with the feature, `docs/contributing/knowledge/jack-backend.md`, the benchmarks page, known issues, the README Features line. `Auto` picks native JACK on Linux when a server answers, cpal otherwise, after a week of the tester's use without a fallback event.
+
+### Amendment 2026-10-25: slice 2 (audio) and the Linux default
+
+Slice 2 ships the duplex process engine. Where it departs from the decisions above:
+
+- **Scope moved between slices.** Slice 2 also delivers the server-stop path of decision 4 and slice 3's
+  rate and quantum handling, in a simpler form; `audio-bench --backend jack`, port latencies,
+  `Stream::period` and Measure with mode `jack` stay in slice 3.
+- **Process.** One callback per cycle: the capture callback, then the render callback, at one device
+  position (`capture_precedes_render` is true, so the live-input ring aligns with no slack, K22). The
+  engine sits in an `UnsafeCell` in `src/callback.rs`, taken by the process callback under a `busy`
+  flag; nothing else touches it after activation, and it is freed after `jack_client_close`. A
+  stop flags the direction and waits until no cycle is inside it. A user callback's panic is caught,
+  the direction plays silence from then on, and the watcher reports `StreamError::Other` once.
+- **Stamps** follow decision 5 except that the frame times equal the callback time (port latencies
+  are slice 3). A position jump, an xrun and a new quantum each make the next stamp `Invalid`.
+- **Buffer size and rate changes are a reopen.** Decision 4 served a new quantum by chunking, with
+  `Stream::period` for the Player. Slice 2 still serves any block size by chunking (so the cycles
+  before the reopen play), but the watcher then reports `ResetRequested` once per new rate and
+  quantum pair. The Player's reopen path opens again at the server's settings, so the shown buffer,
+  the calibration key and the ADR 0020 compensation key are always the running ones. A quantum
+  change stops the transport (a take is kept). The chunked path without a reopen remains the slice 3
+  option if PipeWire's floating quantum makes reopens too frequent in the tester's use.
+- **Server shutdown and return.** The watcher reports `DeviceNotAvailable` once and closes the dead
+  client. It then opens a probe client every 2 s for 30 s, and when a server answers it reports
+  `ResetRequested`, which the Player's existing reopen path serves. There is no new `ReopenCause`:
+  the status line says "driver reset" until slice 3 adds `ServerStopped` ("JACK server stopped").
+- **Connections.** Ports connect to the chosen group's ports at start, as in decision 4, unless
+  `TRANSIT_JACK_AUTOCONNECT=0` (or `no`, `off`, `false`) leaves them to a patchbay.
+- **Naming.** The selector label is "Native JACK". The Audio Devices note under the chosen port
+  group names the server from `jack_get_version_string` ("Native JACK (PipeWire 1.0.5)", "Native
+  JACK (JACK 1.9.20)"), its rate and buffer, and where to change them (`pw-metadata -n settings 0
+  clock.force-quantum N`, `jackd -p N`). The buffer list offers only the server's quantum.
+- **Default selection on Linux (replaces decision 9's first sentence).** When a JACK or
+  PipeWire-JACK server answers, `Auto` opens Native JACK on the JACK system and on the untouched
+  default (no system and no device named); with no server, or with a saved ALSA device, `Auto` is
+  cpal's ALSA host as before. Reason: under JACK 2 the server holds the hardware, so cpal's ALSA
+  host usually cannot open it, and under PipeWire the JACK client API gives the server's cycle clock
+  and xrun reports that cpal's ALSA path lacks. The probe never starts a server. The fallback of
+  decision 9 still applies when the native open fails. Slice 4's week of tester use still gates
+  the release notes' claim, not the default.
+- **Server tests.** `server_*` tests in `src/server_tests.rs` run against a real server through
+  libjack and skip at run time, with a line on stderr, when none answers (CI and the WSL gate run
+  none). The two that kill or reconfigure a server (`owned_server_*`) are `#[ignore]` and start their
+  own dummy server, named by `JACK_DEFAULT_SERVER`.
 
 ## Consequences
 

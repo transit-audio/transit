@@ -3,7 +3,8 @@
 Code: `crates/audio-jack` (`transit-audio-jack`). Decision:
 [ADR 0021](../../adr/0021-native-linux-audio-over-the-jack-client-api.md); unsafe policy:
 [`unsafe.md`](unsafe.md). Linux only (the crate is empty elsewhere, its tests build everywhere).
-One code path for JACK 2 and for PipeWire's JACK library. Slice 1 of 4 is in: the skeleton.
+One code path for JACK 2 and for PipeWire's JACK library. Slices 1 and 2 of 4 are in: the skeleton
+and the duplex process engine (audio plays and records).
 
 ## Building
 
@@ -38,37 +39,81 @@ One code path for JACK 2 and for PipeWire's JACK library. Slice 1 of 4 is in: th
 
 ## Lifecycle
 
-- One client "transit" per session. The first open registers `in_1..` or `out_1..`; the other
-  direction joins before either starts (the ASIO open-order rule). Slice 1 refuses an open after a
-  start and a second open of one direction.
-- The first `start` installs the callbacks and activates; each direction's start connects its ports
-  (`out_i` to the device's i-th playback port, its i-th capture port to `in_i`). A stop is for good;
-  when no direction runs the client is deactivated; the last drop closes it.
+- One client "transit" per session. The first open registers `in_1..` or `out_1..` and keeps the
+  user callback; the other direction joins before either starts (the ASIO open-order rule). An open
+  after a start and a second open of one direction are refused.
+- The first `start` builds the engine from both directions' callbacks, installs the JACK callbacks
+  and activates; each direction's start connects its ports (`out_i` to the device's i-th playback
+  port, its i-th capture port to `in_i`), unless `TRANSIT_JACK_AUTOCONNECT=0` (`no`, `off`, `false`)
+  leaves them to a patchbay. A stop is for good and returns once no cycle is inside that direction;
+  when no direction runs the client is deactivated; the last drop closes it and only then frees the
+  engine (the user callbacks drop on that control thread).
 - `Achieved` is the server's rate and quantum whatever was requested (the Player resamples).
 
-## Callbacks and the watcher
+## The process callback
 
-- Every callback stores atomics only (`src/engine.rs`, clippy denies `format!`, `to_string` and the
-  log macros there; a `CountingAlloc` test runs 10,000 cycles). Slice 1's process callback writes
-  silence and runs no user callback.
-- The watcher `transit-jack-watch` (20 ms, while active): server shutdown is
-  `StreamError::DeviceNotAvailable` once and the dead client is closed there, never in the handler;
-  a new sample rate is `StreamError::ResetRequested` once; xruns are `StreamStats::overloads`; a
-  quantum change is counted, not an error. Error callbacks run with no lock held.
+- `src/engine.rs`, safe code over the `OutputPlanes`/`InputPlanes` traits. One cycle: counters and
+  the position, the capture callback (input ports interleaved into scratch), silence, the render
+  callback (scratch de-interleaved into the output ports). Blocks over `SCRATCH_FRAMES` are served in
+  chunks. Capture runs first at the same device position, so `capture_precedes_render` is true and
+  the live-input ring needs no slack (K22).
+- `src/callback.rs` holds the engine in an `UnsafeCell`, taken by the process callback under a
+  `busy` flag (a miss counts `busy_skips` and plays silence). Clippy denies `format!`, `to_string`
+  and the log macros in both modules; a `CountingAlloc` test runs 10,000 duplex cycles with block
+  sizes 16 to 16384 and counts no allocation.
+- **Stamps:** host time is `Instant::now()` at entry in the request's `HostOrigin`; backend callback
+  time is that minus `jack_get_time() - current_usecs` (`jack_get_cycle_times`), quality
+  `BackendEstimate`, or the arrival with `Arrival` when the cycle times fail. Device position is
+  `current_frames`, unwrapped from 32 bits. A position jump, an xrun or a new quantum makes the next
+  stamp `Invalid`; stamps never go backward. Frame times equal the callback time until port
+  latencies land (slice 3).
+- A panicking user callback is caught: that direction plays silence from then on and the watcher
+  reports `StreamError::Other` once.
+
+## The watcher
+
+`transit-jack-watch` (20 ms, while active) turns the callbacks' atomics into stream errors, called
+with no lock held:
+
+- Server shutdown: `DeviceNotAvailable` once; the dead client is closed there, never in the handler.
+  Then a probe client every 2 s for 30 s; when a server answers, `ResetRequested`, and the Player's
+  reopen path opens a new client. After 30 s the user reconnects.
+- A rate or quantum other than the open ones: `ResetRequested` once per new pair, so the Player
+  reopens at the server's settings (the transport stops; a take is kept).
+- Xruns: `StreamStats::overloads` (and the next stamp is invalid); not an error.
+- `StreamStats` per direction: wakes, overloads, resets, faults, busy skips, position jumps, service
+  time and lateness histograms.
+
+## Default selection
+
+`Auto` opens Native JACK when a JACK or PipeWire-JACK server answers, on the JACK system and on the
+untouched default (no system and no device named); otherwise it is cpal's ALSA host
+(`playback::backend::native::auto_jack_candidate`, ADR 0021 amendment 2026-10-25). The Audio
+Devices note under the chosen port group says "Native JACK (<server>) runs at <rate> Hz with a
+<n>-sample buffer" and where to change it; the buffer list offers only the server's quantum.
+
+## Tests
+
+- Fake server (`src/tests.rs`, every platform): enumeration, lifecycle, conversion and order,
+  chunking, stamps and the position wrap, invalidation, stop, panic, shutdown, reconnect, rate and
+  quantum resets, allocation.
+- Real server (`src/server_tests.rs`, Linux with `libjack`): `server_*` tests skip at run time when
+  no server answers. Start a dummy one: `jackd -r -d dummy -r 48000 -p 128 &`, then
+  `cargo test -p transit-audio-jack --features libjack`. They check the ports and their connections,
+  a loopback (`out_i` to `in_i`) that carries a per-frame signal back with one constant lag (one
+  quantum through JACK's graph), and an xrun from a stalled cycle. `owned_server_*` (ignored) kill
+  and restart, or re-quantize, a dummy server of their own:
+  `JACK_DEFAULT_SERVER=transit-test cargo test -p transit-audio-jack --features libjack -- --ignored owned_server_ --test-threads=1`.
 
 ## Not yet (later slices)
 
-Slice 2: the duplex engine (conversion, stamps from `jack_get_cycle_times`, the user callbacks),
-`audio-bench --backend jack` with loopback. Slice 3: `ServerStopped` reopen, quantum changes with
-`Stream::period`, port latencies, Measure with mode `jack`. Slice 4: release, `Auto` on Linux.
+Slice 3: `audio-bench --backend jack` with loopback, port latencies in the frame times,
+`ReopenCause::ServerStopped` ("JACK server stopped"), Measure with mode `jack`, `Stream::period`
+if reopening on every quantum change proves too disruptive under PipeWire. Slice 4: release.
 
-## Slice 1 state and known gaps
+## Known gaps
 
-- Slice 1 plays no audio: the app labels the backend "Native JACK (no audio until slice 2)", and
-  testers should only run `audio-bench --backend jack --list-devices`. On the JACK system `Auto` and
-  cpal open the cpal ALSA host (cpal has no JACK host in a native-jack build).
-- Known gap: a partly failed port registration leaves the names registered until the session
-  closes (`jack_client_close` frees them). A retry then fails on the duplicate `out_1`/`in_1`, and
-  orphan out ports receive silence. Not a soundness issue.
-- Known gap (slice 3): the watcher compares the rate to the open rate, so a rate change A to B to A
-  reports a reset once and never again.
+- A partly failed port registration leaves the names registered until the session closes
+  (`jack_client_close` frees them). A retry then fails on the duplicate `out_1`/`in_1`, and orphan
+  out ports receive silence. Not a soundness issue.
+- See the known-issues rows K69 to K72.
