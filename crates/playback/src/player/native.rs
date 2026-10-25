@@ -57,7 +57,7 @@ impl MutedInput {
 /// What the UI says about a port the detector muted.
 #[must_use]
 pub fn storm_text(name: &str) -> String {
-    format!("{name} muted: feedback storm detected; click to re-enable")
+    format!("{name} muted: feedback storm detected (recording from it stops too); click to re-enable")
 }
 
 impl Status {
@@ -457,13 +457,21 @@ impl Native {
                 // No self-echo (#99): the echo is held back per input port when it is the same
                 // device as the destination, unless the track allows it.
                 let guard = match &track.midi_output {
-                    soundcraft_model::MidiOutput::External { port, .. } if !track.allow_echo_to_device => Some(port.clone()),
-                    _ => None,
+                    soundcraft_model::MidiOutput::External { port, .. } => Some((port.clone(), track.allow_echo_to_device)),
+                    soundcraft_model::MidiOutput::Internal => None,
                 };
                 target.map(|target| {
                     (
                         track.midi_input.clone(),
-                        ingress::Route { engine: epoch, target, channels, lookahead: LOOKAHEAD, deliver: !external, echo: external },
+                        ingress::Route {
+                            engine: epoch,
+                            target,
+                            channels,
+                            lookahead: LOOKAHEAD,
+                            deliver: !external,
+                            echo: external,
+                            self_echo: false,
+                        },
                         guard,
                     )
                 })
@@ -658,10 +666,11 @@ impl Native {
 }
 
 /// The routes an input port gets: those whose selection accepts it, none while the port is muted
-/// (#99), and with the echo off where the port and the destination are one device and the track
-/// does not allow it ([`soundcraft_model::same_midi_device`]).
+/// (#99), and where the port and the destination are one device
+/// ([`soundcraft_model::same_midi_device`]) with the echo off, or marked `self_echo` when the
+/// track allows it (the storm detector correlates what comes back).
 fn port_routes(
-    routes: &[(MidiInput, ingress::Route, Option<MidiOutPort>)],
+    routes: &[(MidiInput, ingress::Route, Option<(MidiOutPort, bool)>)],
     key: &PortKey,
     ports: &[PortInfo],
     muted: &[Muted],
@@ -673,8 +682,12 @@ fn port_routes(
         .iter()
         .filter(|(selection, _, _)| accepts_port(selection, key, ports))
         .map(|(_, route, guard)| match guard {
-            Some(port) if route.echo && soundcraft_model::same_midi_device(key.backend.as_str(), &key.name, &key.id, port) => {
-                ingress::Route { echo: false, ..*route }
+            Some((port, allow)) if route.echo && soundcraft_model::same_midi_device(key.backend.as_str(), &key.name, &key.id, port) => {
+                if *allow {
+                    ingress::Route { self_echo: true, ..*route }
+                } else {
+                    ingress::Route { echo: false, ..*route }
+                }
             }
             _ => *route,
         })

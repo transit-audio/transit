@@ -135,6 +135,7 @@ fn route() -> Route {
         lookahead: 128,
         deliver: true,
         echo: false,
+        self_echo: false,
     }
 }
 fn bridge() -> (plan_bridge::Control, plan_bridge::Audio) {

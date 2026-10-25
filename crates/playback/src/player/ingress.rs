@@ -136,6 +136,9 @@ pub struct Route {
     /// Forward the event to the track's external MIDI destination through the output thread's
     /// echo ring, as soon as it is popped here (#61).
     pub echo: bool,
+    /// The echo goes to the input port's own device (the track allows it, #99): what comes back
+    /// from there is correlated by the storm detector.
+    pub self_echo: bool,
 }
 
 struct Input {
@@ -536,7 +539,7 @@ impl Pump {
                                 permit.invalidate();
                             }
                         } else if input.guard.storm.tripped() {
-                            input.guard.storm.reset();
+                            input.guard.reset();
                         }
                         input.routes = routes;
                         applied.store(true, Ordering::Release);
@@ -636,7 +639,9 @@ impl Pump {
             let detect = !self.shared.storm_off.load(Ordering::Relaxed);
             #[cfg(not(test))]
             let detect = true;
-            if detect && input.guard.storm.note(raw.host_arrival_ns, raw.bytes, raw.len) {
+            // Only a port with an echo route can loop, so only those are watched.
+            let echoing = input.routes.iter().any(|(permit, route)| route.echo && permit.admits());
+            if detect && echoing && input.guard.note(raw.host_arrival_ns, raw.bytes, raw.len) {
                 // A feedback storm (#99): the port stops admitting now. Main sees its routes
                 // revoked, which releases what they hold (the instrument's notes, and the echo's
                 // on the output port), and keeps them off until the user re-enables the port.
@@ -679,7 +684,7 @@ impl Pump {
                     && !channel_mode(message)
                     && let Some(echo) = &mut self.echo
                 {
-                    echo.push(super::midi_out::OutEvent {
+                    let pushed = echo.push(super::midi_out::OutEvent {
                         kind: super::midi_out::Kind::Message,
                         track: route.target.0.0,
                         at_ns: raw.host_arrival_ns,
@@ -687,6 +692,9 @@ impl Pump {
                         len: raw.len,
                         delay_ns: generation,
                     });
+                    if pushed && route.self_echo {
+                        input.guard.echoed(raw.host_arrival_ns, raw.bytes, raw.len);
+                    }
                 }
                 let release = raw.is_release();
                 let credits = self.lane.note_credits();
