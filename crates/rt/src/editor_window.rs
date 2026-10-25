@@ -55,6 +55,8 @@ pub struct HeaderView {
     pub can_delete: bool,
     /// Every control is disabled, with this reason shown in the strip.
     pub disabled: Option<String>,
+    /// MIDI Learn waits for a parameter to be touched.
+    pub learning: bool,
 }
 
 /// What the user did in the strip.
@@ -86,6 +88,8 @@ pub enum HeaderClick {
     Delete,
     /// Show the slot in the device chain.
     ShowInChain,
+    /// Arm or cancel MIDI Learn for the next parameter the plug-in reports as edited.
+    LearnNext,
 }
 
 /// The strip's model, shared by the editor handle (any thread) and the window (its thread).
@@ -322,6 +326,7 @@ const ID_COPY: u32 = 6;
 const ID_PASTE: u32 = 7;
 const ID_DELETE: u32 = 8;
 const ID_SHOW: u32 = 9;
+const ID_LEARN: u32 = 10;
 const ID_USER: u32 = 1_000;
 const ID_FACTORY: u32 = 20_000;
 
@@ -369,6 +374,7 @@ pub fn menu_items(view: &HeaderView) -> Vec<MenuItem> {
         out.push(item(ID_DELETE, &format!("Delete \"{}\"", view.preset), false, true));
     }
     out.push(MenuItem::Separator);
+    out.push(item(ID_LEARN, "MIDI Learn: next touched parameter", view.learning, true));
     out.push(item(ID_SHOW, "Show in Device Chain", false, true));
     out
 }
@@ -386,6 +392,7 @@ pub fn click_for(id: u32) -> Option<HeaderClick> {
         ID_PASTE => HeaderClick::Paste,
         ID_DELETE => HeaderClick::Delete,
         ID_SHOW => HeaderClick::ShowInChain,
+        ID_LEARN => HeaderClick::LearnNext,
         i if (ID_USER..ID_FACTORY).contains(&i) => HeaderClick::User((i - ID_USER) as usize),
         i if (ID_FACTORY..ID_FACTORY + 100_000).contains(&i) => HeaderClick::Factory((i - ID_FACTORY) as usize),
         _ => return None,
@@ -592,6 +599,7 @@ mod tests {
             HeaderClick::Copy,
             HeaderClick::Delete,
             HeaderClick::ShowInChain,
+            HeaderClick::LearnNext,
         ] {
             assert!(menu.contains(&c), "{c:?} in the menu");
         }

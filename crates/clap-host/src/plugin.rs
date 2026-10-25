@@ -1064,6 +1064,7 @@ fn header_view(h: &soundcraft_dsp::EditorHeader) -> transit_rt::editor_window::H
         can_paste: h.can_paste,
         can_delete: h.can_delete,
         disabled: h.disabled.clone(),
+        learning: h.learning,
     }
 }
 
@@ -1085,6 +1086,7 @@ fn header_action(c: transit_rt::editor_window::HeaderClick) -> soundcraft_dsp::H
         C::Paste => A::Paste,
         C::Delete => A::Delete,
         C::ShowInChain => A::ShowInChain,
+        C::LearnNext => A::LearnNext,
     }
 }
 

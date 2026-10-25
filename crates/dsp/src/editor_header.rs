@@ -26,6 +26,8 @@ pub struct EditorHeader {
     /// Every control is disabled, with the reason shown in the strip (the plug-in is not
     /// responding, or a preset operation is under way).
     pub disabled: Option<String>,
+    /// MIDI Learn waits for a parameter of this plug-in to be touched (the menu item is checked).
+    pub learning: bool,
 }
 
 /// What the user did in the header strip, reported by [`crate::PluginEditor::take_header_actions`].
@@ -46,6 +48,8 @@ pub enum HeaderAction {
     Paste,
     Delete,
     ShowInChain,
+    /// Arm (or cancel) MIDI Learn for the next parameter the plug-in reports as edited.
+    LearnNext,
 }
 
 /// What [`StateJob::poll`] found.
