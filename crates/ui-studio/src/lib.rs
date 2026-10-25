@@ -1233,6 +1233,8 @@ fn service_plugin_requests() -> bool {
 }
 
 #[cfg(test)]
+mod emergency_tests;
+#[cfg(test)]
 mod plugin_header_tests;
 #[cfg(test)]
 mod plugin_host_tests;

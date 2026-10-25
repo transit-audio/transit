@@ -675,6 +675,19 @@ impl StudioApp {
         }
     }
 
+    /// The quit order (E5, issue #104): close the session's autosave (unsaved changes stay in it
+    /// unless the user chose Quit), finish any take and hand the input back to the player, release
+    /// the player and its plug-in instances, then shut plug-in hosting down. True when plug-in
+    /// hosting shut down cleanly ([`soundcraft_engine::shutdown_plugin_hosts`]). Used by the quit,
+    /// a lost graphics device and a panic on the UI thread, under a watchdog
+    /// ([`soundcraft_engine::emergency`]).
+    pub fn shut_down(&mut self) -> bool {
+        self.close_autosave();
+        self.close_input();
+        self.player = None;
+        soundcraft_engine::shutdown_plugin_hosts()
+    }
+
     pub(crate) fn recording_active(&self) -> bool {
         self.engine.transport.recording
             || self.take_plan.is_some()
