@@ -75,9 +75,8 @@ pub(crate) trait JackClient: Send {
     #[cfg(test)]
     fn connections(&self, port: &str) -> Vec<String>;
     /// Asks the server for a new quantum (`jack_set_buffer_size`): every client of the server gets
-    /// it. Tests only (the app never changes the server's quantum, ADR 0021 decision 4).
-    #[cfg(test)]
-    #[cfg_attr(not(all(target_os = "linux", feature = "libjack")), allow(dead_code))]
+    /// it. Called from the open path (ADR 0021, 2026-10-26 amendment) on the thread that opens the
+    /// client, never from a JACK callback.
     fn set_buffer_size(&mut self, frames: u32) -> Result<(), String>;
     /// Removes the client from the process graph and disconnects its ports (`jack_deactivate`).
     fn deactivate(&mut self) -> Result<(), String>;

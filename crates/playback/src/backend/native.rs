@@ -69,8 +69,9 @@ pub fn auto_jack_candidate(cfg: &AudioConfig) -> bool {
         && (devices::is_jack_system(cfg.system.as_deref()) || (cfg.system.is_none() && cfg.output.is_none() && cfg.input.is_none()))
 }
 
-/// The Audio Devices note of one JACK port group: the server, and that its rate and buffer are the
-/// server's, with where to change them (the panel offers only the server's buffer size).
+/// The Audio Devices note of one JACK port group: the server, its rate (the server's) and the
+/// buffer it runs. Picking another buffer size asks the server to change it, for all its clients;
+/// the server can also be pinned (PipeWire's `pw-metadata`).
 pub fn jack_group_note(group: &str, server: &str, rate: u32, buffer: u32) -> String {
     format!(
         "{group}: Native JACK ({server}) runs at {rate} Hz with a {buffer}-sample buffer, both set by the server; change them there \

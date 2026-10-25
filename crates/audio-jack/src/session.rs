@@ -163,13 +163,14 @@ impl JackBackend {
     }
 
     /// The one request to try: `f32`, every port of the group, at the server's rate and quantum.
-    fn plan(endpoint: ab::Endpoint, direction: ab::Direction) -> Result<ab::Plan, String> {
+    fn plan(endpoint: ab::Endpoint, direction: ab::Direction, period: Option<u32>) -> Result<ab::Plan, String> {
         let device = endpoint.handle::<JackDevice>().ok_or("the endpoint is not a JACK port group")?;
         let format = ab::Format::new(device.rate, clamp(device.ports(direction).len()), ab::SampleFormat::F32);
         let request = ab::OpenRequest {
             format,
-            // The server's quantum: setting it would change every client of the server.
-            period: ab::Period::Default,
+            // A chosen buffer size is asked of the server when the client opens (it changes the
+            // quantum of every client of the server); none keeps the server's.
+            period: period.map_or(ab::Period::Default, ab::Period::Frames),
             mode: ab::Mode::Shared,
             origin: ab::HostOrigin::default(),
             calibration: None,
@@ -193,7 +194,17 @@ impl JackBackend {
         let direction = callback.direction();
         let mut guard = lock(&self.slot);
         if guard.is_none() {
-            let client = self.api.open_client(crate::CLIENT_NAME).map_err(|e| ab::OpenError::DeviceNotAvailable(e.to_string()))?;
+            let mut client = self.api.open_client(crate::CLIENT_NAME).map_err(|e| ab::OpenError::DeviceNotAvailable(e.to_string()))?;
+            // A chosen buffer size is asked of the server once, as the client opens, here on the
+            // opening thread (never a JACK callback). A refusal is not an error: the stream opens
+            // at the server's quantum and the achieved figure says so. A server that applies it
+            // later (PipeWire) reaches the buffer size callback, which requests a reopen.
+            if let Some(frames) = request.period.frames()
+                && frames != client.buffer_size()
+                && let Err(e) = client.set_buffer_size(frames)
+            {
+                log::warn!("JACK: the server did not take a {frames}-frame buffer: {e}");
+            }
             let (rate, buffer) = (client.sample_rate(), client.buffer_size());
             *guard = Some(Session::new(client, rate, buffer, self.next_generation.fetch_add(1, Ordering::Relaxed)));
         }
@@ -287,11 +298,11 @@ impl ab::Backend for JackBackend {
     }
 
     fn plan_render(&self, wish: &ab::OutputWish) -> Result<ab::Plan, String> {
-        Self::plan(self.find(ab::Direction::Output, wish.device.as_deref())?, ab::Direction::Output)
+        Self::plan(self.find(ab::Direction::Output, wish.device.as_deref())?, ab::Direction::Output, wish.period)
     }
 
     fn plan_capture(&self, wish: &ab::InputWish) -> Result<ab::Plan, String> {
-        Self::plan(self.find(ab::Direction::Input, wish.device.as_deref())?, ab::Direction::Input)
+        Self::plan(self.find(ab::Direction::Input, wish.device.as_deref())?, ab::Direction::Input, wish.period)
     }
 
     /// One client, one process callback for both directions.

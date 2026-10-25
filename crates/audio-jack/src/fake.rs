@@ -41,6 +41,10 @@ struct State {
     running: bool,
     /// The server refuses clients with this text (a status other than `JackServerFailed`).
     refuse: Option<String>,
+    /// The server refuses a quantum change with this text (`jack_set_buffer_size` fails).
+    refuse_quantum: Option<String>,
+    /// Quantum requests the server was given, in order.
+    quantum_requests: Vec<u32>,
     rate: u32,
     buffer: u32,
     ports: Vec<PhysicalPort>,
@@ -65,6 +69,8 @@ impl FakeServer {
             library: true,
             running: true,
             refuse: None,
+            refuse_quantum: None,
+            quantum_requests: Vec::new(),
             rate,
             buffer,
             ports,
@@ -104,6 +110,17 @@ impl FakeServer {
         let server = Self::running(48_000, 256, &[]);
         server.lock().refuse = Some(text.to_owned());
         server
+    }
+
+    /// The server refuses every quantum change from now on.
+    pub(crate) fn refusing_quantum(self, text: &str) -> Self {
+        self.lock().refuse_quantum = Some(text.to_owned());
+        self
+    }
+
+    /// The quantums clients asked this server for, in order.
+    pub(crate) fn quantum_requests(&self) -> Vec<u32> {
+        self.lock().quantum_requests.clone()
     }
 
     fn lock(&self) -> MutexGuard<'_, State> {
@@ -338,6 +355,10 @@ impl JackClient for FakeClient {
     }
 
     fn set_buffer_size(&mut self, frames: u32) -> Result<(), String> {
+        self.server.lock().quantum_requests.push(frames);
+        if let Some(text) = self.server.lock().refuse_quantum.clone() {
+            return Err(text);
+        }
         self.server.set_buffer_size(frames);
         Ok(())
     }

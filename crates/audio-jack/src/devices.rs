@@ -6,6 +6,10 @@ use crate::api::{ClientError, PhysicalPort};
 use std::sync::Arc;
 use transit_audio_backend as ab;
 
+/// The smallest and largest quantum the buffer size list offers (the server decides which it takes).
+pub const MIN_QUANTUM: u32 = 64;
+pub const MAX_QUANTUM: u32 = 2048;
+
 /// One port group: the device an endpoint carries as its handle.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JackDevice {
@@ -34,7 +38,7 @@ impl JackDevice {
         self.ports(direction).iter().map(|p| p.split_once(':').map_or(p.as_str(), |(_, short)| short).to_owned()).collect()
     }
 
-    /// The endpoint of this group. One format: `f32` at the server's rate and quantum, every port.
+    /// The endpoint of this group. One format: `f32` at the server's rate, every port; the quantum may be asked for.
     pub fn endpoint(&self, direction: ab::Direction) -> ab::Endpoint {
         let channels = clamp(self.ports(direction).len());
         let format = ab::FormatRange {
@@ -42,7 +46,8 @@ impl JackDevice {
             channels,
             min_rate: self.rate,
             max_rate: self.rate,
-            period: Some((self.buffer, self.buffer)),
+            // The standard sizes the server can be asked for, and the one it runs if outside them.
+            period: Some((MIN_QUANTUM.min(self.buffer), MAX_QUANTUM.max(self.buffer))),
         };
         ab::Endpoint::new(
             self.name.clone(),

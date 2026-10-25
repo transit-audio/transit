@@ -143,7 +143,7 @@ fn jack2_lists_the_system_group_with_its_ports_as_channels() {
     let format = &system.formats[0];
     assert_eq!(
         (format.sample, format.channels, format.min_rate, format.max_rate, format.period),
-        (ab::SampleFormat::F32, 2, 48_000, 48_000, Some((128, 128)))
+        (ab::SampleFormat::F32, 2, 48_000, 48_000, Some((64, 2048)))
     );
     assert_eq!(backend.channel_names(system, ab::Direction::Input), ["capture_1", "capture_2"]);
     assert_eq!(backend.channel_names(system, ab::Direction::Output), ["playback_1", "playback_2"]);
@@ -198,20 +198,61 @@ fn the_server_is_named_from_the_library_version() {
 }
 
 #[test]
-fn achieved_reports_the_servers_rate_and_quantum_not_the_request() {
-    let server = FakeServer::jack2(48_000, 128);
+fn a_requested_buffer_size_is_asked_of_the_server_and_achieved_follows_it() {
+    let server = FakeServer::jack2(48_000, 64);
     let backend = backend(&server);
-    let plan = backend.plan_render(&ab::OutputWish { rates: vec![44_100], channels: 2, period: Some(64), ..Default::default() }).unwrap();
+    let plan = backend.plan_render(&ab::OutputWish { rates: vec![44_100], channels: 2, period: Some(128), ..Default::default() }).unwrap();
     assert_eq!(plan.attempts.len(), 1);
-    let asked = ab::OpenRequest { format: ab::Format::new(44_100, 2, ab::SampleFormat::F32), period: ab::Period::Frames(64), ..plan.attempts[0] };
+    assert_eq!(plan.attempts[0].period, ab::Period::Frames(128));
+    let asked = ab::OpenRequest { format: ab::Format::new(44_100, 2, ab::SampleFormat::F32), ..plan.attempts[0] };
     let (errors, on_error) = recorder();
     let (stream, achieved) = backend.open_render(&plan.endpoint, &asked, render_callback(), on_error).unwrap();
     assert_eq!(achieved.format, ab::Format::new(48_000, 2, ab::SampleFormat::F32), "the server's rate, not 44.1 kHz");
-    assert_eq!(achieved.period, ab::Period::Frames(128), "the server's quantum, not 64");
+    assert_eq!(server.quantum_requests(), [128], "the backend asked the server once");
+    assert_eq!(achieved.period, ab::Period::Frames(128), "the server's new quantum");
     assert_eq!(achieved.buffer_frames, Some(128));
     assert_eq!(stream.thread_priority(), ab::WorkerPriority::Unobserved);
     drop(stream);
     assert!(errors.lock().unwrap().is_empty());
+}
+
+#[test]
+fn a_quantum_the_server_already_runs_or_none_is_not_asked_for() {
+    let server = FakeServer::jack2(48_000, 128);
+    let backend = backend(&server);
+    for period in [Some(128), None] {
+        let plan = backend.plan_render(&ab::OutputWish { channels: 2, period, ..Default::default() }).unwrap();
+        let (_errors, on_error) = recorder();
+        let (stream, achieved) = backend.open_render(&plan.endpoint, &plan.attempts[0], render_callback(), on_error).unwrap();
+        assert_eq!(achieved.period, ab::Period::Frames(128));
+        drop(stream);
+    }
+    assert!(server.quantum_requests().is_empty());
+}
+
+#[test]
+fn a_server_that_refuses_the_quantum_still_opens_and_achieved_shows_the_mismatch() {
+    let server = FakeServer::jack2(48_000, 64).refusing_quantum("the server will not change its buffer size");
+    let backend = backend(&server);
+    let plan = backend.plan_render(&ab::OutputWish { channels: 2, period: Some(128), ..Default::default() }).unwrap();
+    let (errors, on_error) = recorder();
+    let (stream, achieved) = backend.open_render(&plan.endpoint, &plan.attempts[0], render_callback(), on_error).unwrap();
+    assert_eq!(server.quantum_requests(), [128]);
+    assert_eq!(achieved.period, ab::Period::Frames(64), "the server's own quantum");
+    assert_ne!(Some(128), achieved.period.frames(), "the request was not honored");
+    drop(stream);
+    assert!(errors.lock().unwrap().is_empty());
+}
+
+#[test]
+fn the_buffer_list_offers_the_standard_sizes_around_the_running_quantum() {
+    let server = FakeServer::jack2(48_000, 64);
+    let jack = backend(&server);
+    let endpoints = jack.endpoints(ab::Direction::Output).unwrap();
+    assert_eq!(endpoints[0].formats[0].period, Some((64, 2048)));
+    let odd = FakeServer::jack2(48_000, 4096);
+    let endpoints = backend(&odd).endpoints(ab::Direction::Output).unwrap();
+    assert_eq!(endpoints[0].formats[0].period, Some((64, 4096)), "the running size is always offered");
 }
 
 #[test]
