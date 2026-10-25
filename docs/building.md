@@ -46,6 +46,10 @@ named `transit`; the icon is `assets/app-icon/transit.icns`), `windows/package.p
 and `freebsd/package.sh`. Outputs land in `dist/release/` as `transit-<version>-<platform>-<arch>.*`.
 The tagged GitHub release (`.github/workflows/release.yml`) is separate: it ships plain archives, plus on Windows an MSI built from `packaging/windows/transit.wxs` with the same WiX v5 (`dotnet tool install --global wix --version 5.0.2`) and optional signing (`docs/releasing.md`).
 
+### Linux packages
+
+`packaging/linux/package.sh` builds the AppImage, deb, rpm and tar.gz (`--formats "appimage deb rpm"` picks some; `--skip-build` reuses `target/release/transit`). The deb and rpm need [nfpm](https://nfpm.goreleaser.com); the AppImage downloads `appimagetool` on first use, and `zsyncmake` (the `zsync` package) adds the `.zsync` for delta updates. Build on an old distribution (CI uses Ubuntu 22.04) so the binary runs on newer ones. The files are `transit-<version>-linux-<arch>.{AppImage,AppImage.zsync,deb,rpm,tar.gz}` in `dist/release/`. On a tag, the release workflow runs the script for the AppImage, deb and rpm and attaches them, with the `.zsync`, to the GitHub release next to the `transit-<tag>-linux-x86_64.tar.gz` that holds the binary and `audio-bench`.
+
 ## Native JACK backend (Linux)
 
 `crates/audio-jack` (`transit-audio-jack`, [ADR 0021](adr/0021-native-linux-audio-over-the-jack-client-api.md))

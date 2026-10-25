@@ -43,7 +43,7 @@ The current release is [v0.2.0](https://github.com/transit-audio/transit/release
 
 - **Windows (x86_64):** one download, the `.zip` (portable) or the `.msi` (installer; it registers `.transit` and `.transitz`). It has native WASAPI and native ASIO.
 - **macOS (Apple silicon):** the `.dmg`; open it and drag `transit.app` to Applications.
-- **Linux (x86_64):** the tarball; unpack it and run `transit`.
+- **Linux (x86_64):** the tarball; unpack it and run `transit`. From v0.3.0 the release also carries an `.AppImage`, a `.deb` and an `.rpm` (see [Linux](#linux)).
 
 The builds are unsigned. On Windows, SmartScreen shows "More info", then "Run anyway". On macOS, if the app is blocked, run `xattr -dr com.apple.quarantine /Applications/transit.app` or right-click it and choose Open.
 
@@ -51,6 +51,18 @@ The builds are unsigned. On Windows, SmartScreen shows "More info", then "Run an
 
 ![Mixer](docs/images/transit-mixer.png)
 ![Piano roll](docs/images/transit-pianoroll.png)
+
+## Linux
+
+From v0.3.0 each release has an `.AppImage` (any recent distribution: `chmod +x` it and run it), a `.deb` (Debian, Ubuntu, Mint) and an `.rpm` (Fedora, openSUSE), next to the tarball. They are unsigned.
+
+To build, install `libasound2-dev pkg-config`, plus `libjack-jackd2-dev` to build with `--features native-jack` ([docs/building.md](docs/building.md#native-jack-backend-linux)).
+
+**PipeWire.** Through ALSA, PipeWire runs the stream at its own quantum, not at the buffer size chosen in Audio Devices. When the two differ, the window shows both ("Requested 128 · running at 256"); the second figure is the real one. To change it, set PipeWire's quantum, for example `pw-metadata -n settings 0 clock.force-quantum 128` (`0` puts it back), then Reconnect.
+
+**Native JACK/PipeWire backend.** It talks to JACK, or to PipeWire through its JACK library, so the server's quantum is the only figure. It is behind the `native-jack` feature and is not in the release builds yet; in a build that has it, Auto prefers it when a server is running. It is new and untested on most hardware, so testers are wanted ([#55](https://github.com/transit-audio/transit/issues/55)).
+
+Using a Linux interface? Tell us which, with distribution, kernel, server and buffer size, in [#49](https://github.com/transit-audio/transit/issues/49).
 
 ## How to help
 

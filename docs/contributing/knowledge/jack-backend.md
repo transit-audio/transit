@@ -37,6 +37,15 @@ and the duplex process engine (audio plays and records).
   with pw-jack"), no server ("JACK/PipeWire server not running"), or running with its groups. The
   first two are the system's diagnostic in Audio Devices, with no device.
 
+## Requested versus achieved
+
+Audio Devices shows "Requested 128 · running at 256" under the Output line when the Player's
+`device_buffer` (or `device_rate`) differs from `ui.audio`'s `buffer_size` (`sample_rate`), on every
+backend; the check is `audio_devices::requested_note`, run with the existing refresh, no polling.
+Under the cpal ALSA host PipeWire runs the stream at the server's quantum whatever period was
+asked for; the native JACK backend always reports the server's quantum. Change PipeWire's quantum
+with `pw-metadata -n settings 0 clock.force-quantum 128` or `PIPEWIRE_QUANTUM=128/48000`.
+
 ## Lifecycle
 
 - One client "transit" per session. The first open registers `in_1..` or `out_1..` and keeps the
