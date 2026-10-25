@@ -2305,11 +2305,22 @@ fn split_state(data: &[u8]) -> Option<(&[u8], &[u8])> {
 // ---- editor (IPlugView) --------------------------------------------------------------------
 
 /// The `IPlugFrame` handed to a plugin view: `resizeView` resizes our host window.
+///
+/// Issue #105: a `resizeView` is honored whenever it arrives once the view is attached (also
+/// long after `attached`, e.g. when a plug-in applies a content scale late). One that arrives
+/// before `attached` (from `setContentScaleFactor`, say) is kept and applied right after
+/// `attached` returns ([`PlugFrame::attach`]). Every request is logged at info level.
 pub(crate) struct PlugFrame {
     /// The host window (an `NSWindow*` on macOS), not owned; null when there is none.
     window: std::sync::atomic::AtomicPtr<c_void>,
     /// `resizeView` calls under way (see [`PlugFrame::MAX_NESTED`]).
     depth: AtomicU32,
+    /// The plug-in's name, for the log.
+    name: String,
+    /// The view is attached to the window (between `attached` and `removed`).
+    attached: AtomicBool,
+    /// The last size asked for before `attached`, applied once attached.
+    pending: Mutex<Option<sb::ViewRect>>,
 }
 
 impl PlugFrame {
@@ -2319,8 +2330,52 @@ impl PlugFrame {
     /// next level instead of recursing without end.
     const MAX_NESTED: u32 = 2;
 
-    fn new(window: *mut c_void) -> PlugFrame {
-        PlugFrame { window: std::sync::atomic::AtomicPtr::new(window), depth: AtomicU32::new(0) }
+    fn new(window: *mut c_void, name: &str) -> PlugFrame {
+        PlugFrame {
+            window: std::sync::atomic::AtomicPtr::new(window),
+            depth: AtomicU32::new(0),
+            name: name.to_owned(),
+            attached: AtomicBool::new(false),
+            pending: Mutex::new(None),
+        }
+    }
+
+    /// Called right after the view's `attached` returned: from now on `resizeView` resizes the
+    /// window, and a size the view asked for before is applied now (issue #105).
+    fn attach(&self, view: &ComPtr<sb::IPlugView>) {
+        self.attached.store(true, Ordering::Relaxed);
+        let pending = self.pending.lock().unwrap_or_else(PoisonError::into_inner).take();
+        if let Some(mut r) = pending {
+            self.depth.fetch_add(1, Ordering::Relaxed);
+            self.apply(Some(view.as_com_ref()), &mut r, " (asked before attached)");
+            self.depth.fetch_sub(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Called before the view's `removed`: requests from now on are only kept.
+    fn detach(&self) {
+        self.attached.store(false, Ordering::Relaxed);
+        *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    }
+
+    /// Resizes the window's content to `r` and, when that worked, tells `view` through `onSize`
+    /// (the SDK: "Afterwards the host has to call IPlugView::onSize()"). Returns whether the
+    /// window was resized. The size is the one the plug-in asked for: `canResize` and
+    /// `checkSizeConstraint` are the SDK's checks for sizes the host or the user propose (a
+    /// window edge dragged), not for the plug-in's own `resizeView`, and this window has no
+    /// user resizing.
+    fn apply(&self, view: Option<vst3::ComRef<'_, sb::IPlugView>>, r: &mut sb::ViewRect, when: &str) -> bool {
+        let (w, h) = rect_size(r);
+        let honored = window::resize(self.window.load(Ordering::Relaxed), w, h);
+        if honored && let Some(v) = view {
+            // SAFETY: a live view of the plug-in (it passed it, or the editor link holds it) on
+            // its UI thread; `r` is a writable rect that outlives the call. The SDK has the host
+            // call `onSize` after it resized for `resizeView`.
+            unsafe { v.onSize(r) };
+        }
+        let outcome = if honored { "honored, window resized" } else { "not honored (no live window on this thread)" };
+        log::info!("vst3 editor \"{}\": resizeView {w}×{h}{when}: {outcome}", self.name);
+        honored
     }
 }
 
@@ -2334,20 +2389,28 @@ impl IPlugFrameTrait for PlugFrame {
     // `setContentScaleFactor` (issue #101, see `set_content_scale`).
     unsafe fn resizeView(&self, view: *mut sb::IPlugView, new_size: *mut sb::ViewRect) -> sb::tresult {
         // SAFETY: in-pointer from the plugin (or null, handled).
-        let Some(r) = (unsafe { new_size.as_mut() }) else { return sb::kInvalidArgument };
+        let Some(r) = (unsafe { new_size.as_mut() }) else {
+            log::info!("vst3 editor \"{}\": resizeView without a size: refused", self.name);
+            return sb::kInvalidArgument;
+        };
+        let (w, h) = rect_size(r);
+        if !self.attached.load(Ordering::Relaxed) {
+            // Issue #105: not attached yet (a view answering `setContentScaleFactor` before
+            // `attached`): kept and applied once attached (`attach`), not dropped.
+            *self.pending.lock().unwrap_or_else(PoisonError::into_inner) = Some(*r);
+            log::info!("vst3 editor \"{}\": resizeView {w}×{h} before attached: kept, applied once attached", self.name);
+            return sb::kResultTrue;
+        }
         if self.depth.fetch_add(1, Ordering::Relaxed) >= PlugFrame::MAX_NESTED {
             self.depth.fetch_sub(1, Ordering::Relaxed);
+            log::info!("vst3 editor \"{}\": resizeView {w}×{h}: refused (nested in another resize)", self.name);
             return sb::kResultFalse;
         }
-        let (w, h) = rect_size(r);
-        window::resize(self.window.load(Ordering::Relaxed), w, h);
-        // SAFETY: the plugin passes its own live view (or null, handled).
-        if let Some(v) = unsafe { vst3::ComRef::from_raw(view) } {
-            // SAFETY: valid view; `r` is the plugin's own writable rect.
-            unsafe { v.onSize(r) };
-        }
+        // SAFETY: the plugin passes its own live view (or null, handled), valid for this call.
+        let v = unsafe { vst3::ComRef::from_raw(view) };
+        let honored = self.apply(v, r, "");
         self.depth.fetch_sub(1, Ordering::Relaxed);
-        sb::kResultOk
+        if honored { sb::kResultTrue } else { sb::kResultFalse }
     }
 }
 
@@ -2365,18 +2428,62 @@ impl IPlugFrameTrait for PlugFrame {
 /// view by the scale factor and inform the host via a IPlugFrame::resizeView(). The host will then
 /// call IPlugView::onSize()." The host picks no size here, so `checkSizeConstraint` (for sizes the
 /// host proposes) does not apply: the window takes the size the view reports.
-fn set_content_scale(view: &ComPtr<sb::IPlugView>, scale: f64) -> bool {
+///
+/// Issue #105: one info line per call for the plug-in `name`, at `when` ("before attached", "after
+/// attached", "on a DPI change"): whether the interface was obtained, the factor, the `tresult`,
+/// and `getSize` before and after the call.
+fn set_content_scale(view: &ComPtr<sb::IPlugView>, scale: f64, name: &str, when: &str) -> bool {
     if !scale.is_finite() || scale <= 0.0 {
         return false;
     }
+    let before = size_text(view_size(view));
     // `cast` is `queryInterface`: `None` when the view does not implement the interface.
-    let Some(support) = view.cast::<sb::IPlugViewContentScaleSupport>() else { return false };
+    let Some(support) = view.cast::<sb::IPlugViewContentScaleSupport>() else {
+        log::info!("vst3 editor \"{name}\": content scale {when}: no IPlugViewContentScaleSupport, factor {scale} not sent; getSize {before}");
+        return false;
+    };
+    #[allow(clippy::cast_possible_truncation)]
+    let factor = scale as f32;
     // SAFETY: a valid interface of the live view, held (counted) for the call; main thread (the
     // callers run on the editor's thread). `ScaleFactor` is an `f32` in the SDK.
-    #[allow(clippy::cast_possible_truncation)]
-    let r = unsafe { support.setContentScaleFactor(scale as f32) };
-    log::debug!("vst3: content scale {scale} -> {r}");
+    let r = unsafe { support.setContentScaleFactor(factor) };
+    let after = size_text(view_size(view));
+    log::info!(
+        "vst3 editor \"{name}\": content scale {when}: IPlugViewContentScaleSupport obtained, setContentScaleFactor({factor}) -> {} ({r}); getSize {before} before, {after} after",
+        tresult_name(r)
+    );
     r == sb::kResultTrue
+}
+
+/// A view size for the log.
+fn size_text(size: Option<(f64, f64)>) -> String {
+    size.map_or_else(|| "failed".to_owned(), |(w, h)| format!("{w}×{h}"))
+}
+
+/// The SDK's name of a `tresult`, for the log.
+fn tresult_name(r: sb::tresult) -> &'static str {
+    match r {
+        x if x == sb::kResultOk => "kResultTrue",
+        x if x == sb::kResultFalse => "kResultFalse",
+        x if x == sb::kNotImplemented => "kNotImplemented",
+        x if x == sb::kInvalidArgument => "kInvalidArgument",
+        x if x == sb::kNoInterface => "kNoInterface",
+        x if x == sb::kInternalError => "kInternalError",
+        x if x == sb::kNotInitialized => "kNotInitialized",
+        x if x == sb::kOutOfMemory => "kOutOfMemory",
+        _ => "unknown",
+    }
+}
+
+/// The window takes the size `view` reports, when it differs from the content's (after the view
+/// took a content scale without asking through `resizeView`).
+fn follow_view_size(view: &ComPtr<sb::IPlugView>, win: &window::HostWindow, name: &str, when: &str) {
+    if let Some((w, h)) = view_size(view)
+        && window::content_size(win) != (w, h)
+    {
+        let honored = window::resize(win.raw(), w, h);
+        log::info!("vst3 editor \"{name}\": window follows getSize {w}×{h} {when}: {}", if honored { "resized" } else { "not resized" });
+    }
 }
 
 /// The size `view` reports (`None` when it reports none).
@@ -2400,16 +2507,17 @@ fn attach_view(
     let (w, h) = view_size(view).unwrap_or((400.0, 300.0));
     let win = window::HostWindow::new(title, w, h, header)?;
     prepare(&win);
-    let frame = ComWrapper::new(PlugFrame::new(win.raw()));
+    let frame = ComWrapper::new(PlugFrame::new(win.raw(), title));
     if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
         // SAFETY: valid view; the frame outlives the view's attachment (the caller keeps it, in
         // `g.frame`, and detaches it in `teardown`).
         unsafe { view.setFrame(f.as_ptr()) };
     }
     // Issue #101: the window's scale before `attached`, then the size the view reports at
-    // that scale (a view that scaled may also have asked through `resizeView` already).
-    if let Some(scale) = window::content_scale(&win)
-        && set_content_scale(view, scale)
+    // that scale (a `resizeView` it sends now is kept until it is attached, issue #105).
+    let scale = window::content_scale(&win);
+    if let Some(scale) = scale
+        && set_content_scale(view, scale, title, "before attached")
         && let Some((w, h)) = view_size(view)
     {
         window::resize(win.raw(), w, h);
@@ -2420,6 +2528,15 @@ fn attach_view(
         unsafe { view.setFrame(std::ptr::null_mut()) };
         win.close();
         return Err("the editor could not attach to its window".into());
+    }
+    frame.attach(view);
+    // Issue #105: the same factor again once attached (the SDK allows "before or after"; some
+    // plug-ins apply it only to an attached view). A view that scales asks through `resizeView`
+    // (honored now); one that only reports its new size gets the window at that size.
+    if let Some(scale) = scale
+        && set_content_scale(view, scale, title, "after attached")
+    {
+        follow_view_size(view, &win, title, "after attached");
     }
     Ok((frame, win))
 }
@@ -2550,6 +2667,9 @@ impl EditorLink {
     }
 
     fn teardown(g: &mut EditorInner) {
+        if let Some(f) = &g.frame {
+            f.detach();
+        }
         if let Some(view) = g.view.take() {
             // SAFETY: valid, attached view; main thread (callers check). `removed` before the
             // window goes, and the frame is detached before it is released.
@@ -2632,11 +2752,9 @@ impl EditorLink {
     fn follow_scale(g: &EditorInner) {
         let (Some(w), Some(view)) = (&g.window, &g.view) else { return };
         let Some(scale) = window::scale_change(w) else { return };
-        if set_content_scale(view, scale)
-            && let Some((cw, ch)) = view_size(view)
-            && window::content_size(w) != (cw, ch)
-        {
-            window::resize(w.raw(), cw, ch);
+        let name = g.frame.as_ref().map_or("", |f| f.name.as_str());
+        if set_content_scale(view, scale, name, "on a DPI change") {
+            follow_view_size(view, w, name, "on a DPI change");
         }
     }
 
@@ -2799,14 +2917,15 @@ mod window {
     }
 
     /// Resizes a host window's content (`window` from [`HostWindow::raw`]); main thread only.
-    pub fn resize(window: *mut c_void, w: f64, h: f64) {
+    /// Returns whether it resized.
+    pub fn resize(window: *mut c_void, w: f64, h: f64) -> bool {
         if MainThreadMarker::new().is_none() {
-            return;
+            return false;
         }
         // SAFETY: null or a window the editor link keeps retained while the frame is attached.
-        if let Some(win) = unsafe { window.cast::<NSWindow>().as_ref() } {
-            win.setContentSize(NSSize::new(w, h));
-        }
+        let Some(win) = (unsafe { window.cast::<NSWindow>().as_ref() }) else { return false };
+        win.setContentSize(NSSize::new(w, h));
+        true
     }
 
     /// No call on macOS: views work in points and read the backing scale themselves (the SDK
@@ -2893,7 +3012,9 @@ mod window {
         pub fn close(self) {}
     }
 
-    pub fn resize(_window: *mut c_void, _w: f64, _h: f64) {}
+    pub fn resize(_window: *mut c_void, _w: f64, _h: f64) -> bool {
+        false
+    }
 
     pub fn content_scale(_win: &HostWindow) -> Option<f64> {
         None
@@ -3492,14 +3613,15 @@ mod tests {
         assert!(calls.contains(&format!("resizeView 320 -> {}", sb::kResultFalse)), "{calls:?}");
     }
 
-    /// The factor is the window's (DPI / 96), it comes before `attached`, and a DPI change sends
-    /// the new one; the window takes the size the view reports at each.
+    /// The factor is the window's (DPI / 96), it comes before `attached`, again right after it
+    /// (issue #105), and a DPI change sends the new one; the window takes the size the view
+    /// reports at each.
     #[cfg(windows)]
     #[test]
     fn the_scale_comes_before_attached_and_again_on_a_dpi_change() {
         let (view, calls) = fake_view(true);
         let (opened, moved) = open_fake(&view, 120, 144);
-        assert_eq!(*calls.lock().unwrap(), ["scale 1.25", "attached", "scale 1.5", "removed"]);
+        assert_eq!(*calls.lock().unwrap(), ["scale 1.25", "attached", "scale 1.25", "scale 1.5", "removed"]);
         assert_eq!(opened, (250, 125));
         assert_eq!(moved, (300, 150));
     }
@@ -3514,6 +3636,132 @@ mod tests {
         assert_eq!(*calls.lock().unwrap(), ["attached", "removed"]);
         assert_eq!(opened, (200, 100));
         assert_eq!(moved, (200, 100));
+    }
+
+    // ---- issue #105: a scale applied after `attached`, and `resizeView` at any time -------------
+
+    /// A `resizeView` that arrives before `attached` is kept (not dropped, not applied to a view
+    /// that is not attached yet) and applied right after `attached`, with the view's `onSize`.
+    #[cfg(windows)]
+    #[test]
+    fn a_resize_asked_before_attached_is_applied_once_attached() {
+        let (view, calls) = fake_view(false);
+        let win = window::HostWindow::new("early", 200.0, 100.0, None).unwrap();
+        let frame = ComWrapper::new(PlugFrame::new(win.raw(), "early"));
+        let f = frame.as_com_ref::<sb::IPlugFrame>().unwrap();
+        let mut r = sb::ViewRect { left: 0, top: 0, right: 300, bottom: 150 };
+        // SAFETY: our live frame; the view is live; `r` lives on this frame.
+        assert_eq!(unsafe { f.resizeView(view.as_ptr(), &mut r) }, sb::kResultTrue);
+        assert_eq!(win.content_size(), (200, 100), "kept until attached");
+        assert!(calls.lock().unwrap().is_empty(), "no onSize before attached");
+        frame.attach(&view);
+        assert_eq!(win.content_size(), (300, 150), "applied once attached");
+        assert_eq!(*calls.lock().unwrap(), ["onSize 300"]);
+        let mut r = sb::ViewRect { left: 0, top: 0, right: 320, bottom: 160 };
+        // SAFETY: as above.
+        assert_eq!(unsafe { f.resizeView(view.as_ptr(), &mut r) }, sb::kResultTrue);
+        assert_eq!(win.content_size(), (320, 160), "honored at once while attached");
+        frame.detach();
+        win.close();
+    }
+
+    /// Writes info-level log lines to stderr (a child process's log, for its parent test).
+    #[cfg(windows)]
+    struct StderrLog;
+
+    #[cfg(windows)]
+    impl log::Log for StderrLog {
+        fn enabled(&self, m: &log::Metadata<'_>) -> bool {
+            m.level() <= log::Level::Info
+        }
+        fn log(&self, r: &log::Record<'_>) {
+            if self.enabled(r.metadata()) {
+                eprintln!("[{}] {}", r.level(), r.args());
+            }
+        }
+        fn flush(&self) {}
+    }
+
+    #[cfg(windows)]
+    static STDERR_LOG: StderrLog = StderrLog;
+
+    /// The fixture's scale mode (`VST3_FIXTURE_SCALE`) is read per process, so the parent test
+    /// runs the ignored test `child` of this module in a child process with `mode` set and
+    /// returns its output (the child's log included).
+    #[cfg(windows)]
+    fn scale_mode_child(child: &str, mode: &str) -> String {
+        let out = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", &format!("ffi::tests::{child}"), "--ignored", "--nocapture", "--test-threads=1"])
+            .env("VST3_FIXTURE_SCALE", mode)
+            .output()
+            .unwrap();
+        let text = format!("{}{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+        assert!(out.status.success(), "{text}");
+        assert!(text.contains("1 passed"), "the child ran: {text}");
+        text
+    }
+
+    /// Opens Fixture Gain's editor in a window at 144 DPI (scale 1.5) with the log on stderr and
+    /// returns its content size.
+    #[cfg(windows)]
+    fn open_gain_at_144_dpi(mode: &str) -> (i32, i32) {
+        assert_eq!(std::env::var("VST3_FIXTURE_SCALE").as_deref(), Ok(mode), "run by its parent test");
+        if log::set_logger(&STDERR_LOG).is_ok() {
+            log::set_max_level(log::LevelFilter::Info);
+        }
+        let inst = gain_instance();
+        let link = inst.editor().unwrap();
+        link.open_with("Fixture Gain", |w| set_dpi(w, 144)).unwrap();
+        let size = link.lock().window.as_ref().unwrap().content_size();
+        link.close();
+        size
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "run in a child process by the_window_takes_a_scale_the_view_applies_only_after_attached"]
+    fn scale_child_after_attach() {
+        assert_eq!(open_gain_at_144_dpi("after-attach"), (480, 360), "320×240 at 1.5, applied after attached");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    #[ignore = "run in a child process by a_refused_scale_is_logged_and_leaves_the_window_alone"]
+    fn scale_child_refuse() {
+        assert_eq!(open_gain_at_144_dpi("refuse"), (320, 240), "no scale, no resize");
+    }
+
+    /// The suspected Battery 4 behavior: the view accepts the factor before `attached` but applies
+    /// it only to one that arrives after, then asks for its scaled size through `resizeView`. The
+    /// factor sent again after `attached` reaches it and the window ends at the scaled size; the
+    /// log shows each step.
+    #[cfg(windows)]
+    #[test]
+    fn the_window_takes_a_scale_the_view_applies_only_after_attached() {
+        let log = scale_mode_child("scale_child_after_attach", "after-attach");
+        for line in [
+            "vst3 editor \"Fixture Gain\": content scale before attached: IPlugViewContentScaleSupport obtained, setContentScaleFactor(1.5) -> kResultTrue (0); getSize 320×240 before, 320×240 after",
+            "vst3 editor \"Fixture Gain\": resizeView 480×360: honored, window resized",
+            "vst3 editor \"Fixture Gain\": content scale after attached: IPlugViewContentScaleSupport obtained, setContentScaleFactor(1.5) -> kResultTrue (0); getSize 320×240 before, 480×360 after",
+        ] {
+            assert!(log.contains(line), "{line:?} is not in the log:\n{log}");
+        }
+    }
+
+    /// A view that refuses the factor (kResultFalse) is logged as such, before and after
+    /// `attached`, and the window keeps the size it reports.
+    #[cfg(windows)]
+    #[test]
+    fn a_refused_scale_is_logged_and_leaves_the_window_alone() {
+        let log = scale_mode_child("scale_child_refuse", "refuse");
+        for when in ["before attached", "after attached"] {
+            let line = format!(
+                "vst3 editor \"Fixture Gain\": content scale {when}: IPlugViewContentScaleSupport obtained, setContentScaleFactor(1.5) -> kResultFalse (1); getSize 320×240 before, 320×240 after"
+            );
+            assert!(log.contains(&line), "{line:?} is not in the log:\n{log}");
+        }
+        assert!(!log.contains("resizeView"), "{log}");
+        assert!(!log.contains("window follows"), "{log}");
     }
 }
 
