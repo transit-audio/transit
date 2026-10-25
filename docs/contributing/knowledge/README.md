@@ -17,6 +17,7 @@ the ADRs. A new topic gets a new file and a row here.
 | [`midi.md`](midi.md) | Live MIDI input, step entry, note delivery. |
 | [`midi-output.md`](midi-output.md) | External MIDI destinations: the output thread, send timing, note safety. |
 | [`midi-monitor.md`](midi-monitor.md) | Window > MIDI Monitor and the input LED: the two tap rings, their thread contract, filters. |
+| [`midi-learn.md`](midi-learn.md) | MIDI Learn: controller knobs and buttons mapped to mixer controls; the snapshot the ingress worker matches, pickup, the two stores. |
 | [`recording.md`](recording.md) | Record start, takes, input capture. |
 | [`session-format.md`](session-format.md) | Anything saved in a `.transit` file. |
 | [`commands.md`](commands.md) | User actions, undo, the control channel. |
