@@ -12,6 +12,7 @@ pub mod clip_group_file;
 pub mod cmd;
 pub mod demo;
 pub mod edit;
+pub mod emergency;
 pub mod file_access;
 pub mod import;
 pub mod inspect;
@@ -38,11 +39,22 @@ pub use soundcraft_model as model;
 /// plugin that has been used can crash when its module exit only runs from an exit handler.
 /// The plug-in host thread (ADR 0018) shuts down first, running its own module exits there; it
 /// is waited for at most 5 s, so a plug-in stuck in a call does not hold the exit.
-pub fn shutdown_plugin_hosts() {
-    if !transit_plugin_host::shutdown_shared(std::time::Duration::from_secs(5)) {
+///
+/// Returns true when the shutdown was clean: the host thread ended in time and every VST3 binary
+/// had its module exit. Otherwise ending the process normally would run plug-in static
+/// destructors against plug-in threads the exit has already killed (issue #104); end it with
+/// [`emergency::end_process`] instead.
+pub fn shutdown_plugin_hosts() -> bool {
+    let host_thread = transit_plugin_host::shutdown_shared(std::time::Duration::from_secs(5));
+    if !host_thread {
         log::warn!("plug-in host: a host thread did not shut down in time; its plug-ins are left as they are");
     }
     soundcraft_vst3_host::shutdown();
+    let left = soundcraft_vst3_host::modules_not_exited();
+    if left > 0 {
+        log::warn!("plug-in host: {left} VST3 binaries were not exited (an instance is still alive or the exit did not finish)");
+    }
+    host_thread && left == 0
 }
 
 #[derive(Debug, Clone, PartialEq, thiserror::Error)]

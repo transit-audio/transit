@@ -25,6 +25,8 @@ thiserror.workspace = true
 log.workspace = true
 zip.workspace = true
 craft-docpath.workspace = true
+# Ending the process without exit handlers after an unclean shutdown (issue #104).
+transit-rt.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
