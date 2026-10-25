@@ -181,7 +181,7 @@ fn port_header_lines() {
     assert_eq!(port_line(&p, &[], 0.0, 3.0), "Keys (In) · open · no track listens · 0 msg/s");
     assert_eq!(port_line(&p, &[], 0.0, 10.0), "Keys (In) · open · no track listens · 0 msg/s · no data in 10 s");
     p.state = PortState::Missing;
-    assert_eq!(port_line(&p, &[], 0.0, 99.0), "Keys (In) · missing (unplugged?)");
+    assert_eq!(port_line(&p, &[], 0.0, 99.0), "Keys (In) · closed: missing (unplugged?)");
     p.state = PortState::Failed;
     assert!(port_line(&p, &[], 0.0, 0.0).contains("could not be opened"));
     let out = ports().remove(1);
@@ -419,4 +419,111 @@ fn an_audio_reconnect_keeps_the_monitor_on_for_an_open_window() {
     app.run("window.midi_monitor", json!({"value": false})).unwrap();
     frame(&ctx, &mut app, 1.2);
     assert!(!app.player.as_ref().unwrap().midi_monitor_enabled());
+}
+
+#[test]
+fn removed_ports_remain_closed_and_reopening_replaces_the_closed_row() {
+    let mut s = state_with(&[]);
+    s.learn_ports(&[]);
+    s.refresh_ports(3.0, &|_| String::new());
+    assert_eq!(s.ports.len(), 3);
+    assert!(s.port_lines.iter().all(|l| l.contains("closed: missing")));
+    assert!(s.ports.iter().all(|p| p.clock_bpm.is_none() && !p.sensing));
+    s.learn_ports(&ports());
+    s.refresh_ports(4.0, &|_| String::new());
+    assert_eq!(s.ports.len(), 3);
+    assert!(s.ports.iter().all(|p| p.state == PortState::Open));
+    let mut failed = ports();
+    failed[0].state = PortState::Failed;
+    s.learn_ports(&failed);
+    s.refresh_ports(5.0, &|_| String::new());
+    assert!(s.port_lines[0].contains("closed: could not be opened"));
+}
+
+#[test]
+fn learn_scrolls_to_filtered_paused_row_and_flash_expires_without_restarting() {
+    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    app.ui.midi_monitor.open = true;
+    app.ui.midi_monitor.autoscroll = false;
+    app.ui.midi_monitor.filters.text = "never matches".into();
+    for _ in 0..250 {
+        app.midi_monitor.push(&ev(Dir::In, 0x90, 60, 100));
+    }
+    app.midi_monitor.paused_at = Some(0);
+    app.midi_monitor.learn = Learn::Armed;
+    app.midi_monitor.push(&ev(Dir::In, 0xB0, 74, 55));
+    let seq = app.midi_monitor.rows.back().unwrap().seq;
+    for _ in 0..250 {
+        app.midi_monitor.push(&ev(Dir::In, 0x90, 60, 100));
+    }
+    let ctx = egui::Context::default();
+    frame(&ctx, &mut app, 10.0);
+    frame(&ctx, &mut app, 10.01);
+    assert_eq!(app.midi_monitor.drawn_spotlight, Some(seq), "the caught row bypasses pause and filters and is drawn");
+    assert!(app.midi_monitor.spotlight_level(seq, 10.01) > 0.9);
+    let paint_ctx = egui::Context::default();
+    let mut paint = paint_ctx.run_ui(egui::RawInput { time: Some(10.01), ..Default::default() }, |ui| {
+        let mut hover = None;
+        let row = app.midi_monitor.rows.iter().find(|r| r.seq == seq).unwrap();
+        row_ui(ui, row, &app.midi_monitor, &egui::FontId::monospace(12.0), 7.0, &mut hover, 18.0);
+    });
+    paint.textures_delta.clear();
+    let flash = TOKENS.accent.gamma_multiply(0.5 * app.midi_monitor.spotlight_level(seq, 10.01));
+    assert!(paint.shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Rect(r) if r.fill == flash)), "the row renderer paints the flash");
+    assert_eq!(app.midi_monitor.spotlight_scroll, None, "one scroll request consumed");
+    frame(&ctx, &mut app, 12.0);
+    assert_eq!(app.midi_monitor.spotlight_level(seq, 12.0), 0.0);
+    assert_eq!(app.midi_monitor.spotlight_at.unwrap().1, 10.0, "drawing never restarts the flash");
+    app.ui.midi_monitor.filters = Filters::default();
+    app.midi_monitor.paused_at = None;
+    app.midi_monitor.learn = Learn::Armed;
+    frame(&ctx, &mut app, 13.0);
+    app.midi_monitor.push(&ev(Dir::In, 0xB0, 74, 56));
+    let next = app.midi_monitor.rows.back().unwrap().seq;
+    for _ in 0..500 {
+        app.midi_monitor.push(&ev(Dir::In, 0x90, 60, 100));
+    }
+    frame(&ctx, &mut app, 14.0);
+    frame(&ctx, &mut app, 14.01);
+    assert_eq!(app.midi_monitor.drawn_spotlight, Some(next), "scroll reaches the middle of a thousand-row list with Follow off");
+}
+
+#[test]
+fn time_uses_transport_during_playback_and_retains_each_rows_timestamp() {
+    let mut s = State::default();
+    let e = ev(Dir::In, 0x90, 60, 100);
+    s.push_at(&e, Some(61.25));
+    s.push_at(&e, Some(-2.0));
+    s.wall_clock_ms = Some(45_296_789);
+    s.push_at(&e, None);
+    assert_eq!(s.rows[0].time, "1:01.250");
+    assert_eq!(s.rows[1].time, "-0:02.000");
+    assert_eq!(s.rows[2].time, "12:34:56.789Z");
+    assert_eq!(wall_time(86_400_001), "00:00:00.001Z");
+    assert!(line(&s.rows[0]).contains("1:01.250"));
+    assert!(report_text(&[], (0, 0), &s.rows).contains("-0:02.000"));
+    assert!(report_text(&[], (0, 0), &s.rows).contains("host_ns=5000000000"));
+}
+
+#[test]
+fn sysex_rows_and_reports_show_the_bounded_prefix_and_search_it() {
+    use soundcraft_playback::player::monitor::SysEx;
+    let mut event = MonitorEvent::sysex(Dir::In, 1, 1, 100);
+    event.sysex_id = 4;
+    let mut payload = SysEx { dir: Dir::In, id: 4, bytes: [0x31; 64], len: 64 };
+    payload.bytes[0] = 0xF0;
+    payload.bytes[63] = 0x42;
+    let mut s = State::default();
+    s.push_captured(&event, None, Some(&payload));
+    let row = &s.rows[0];
+    assert_eq!(row.raw_len, 64);
+    assert!(row.text.contains("100 bytes (first 64 shown)"));
+    assert!(row.hex().starts_with("F0 31"));
+    assert!(row.hex().ends_with("31 42"));
+    assert_eq!(row.hex().split_whitespace().count(), 64);
+    assert!(passes(&Filters { text: "31 42".into(), ..Filters::default() }, row));
+    assert!(report_text(&[], (0, 0), &s.rows).contains(&format!("[{}]", row.hex())));
+    payload.dir = Dir::Out;
+    s.push_captured(&event, None, Some(&payload));
+    assert_eq!(s.rows[1].raw_len, 1, "an unrelated direction must never attach its payload");
 }

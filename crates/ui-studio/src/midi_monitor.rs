@@ -28,6 +28,7 @@ const PORT_WIDTH: usize = 18;
 pub const SILENT_SECS: f64 = 10.0;
 /// The header LED fades out over this long.
 pub const LED_DECAY_SECS: f64 = 0.12;
+const SPOTLIGHT_SECS: f64 = 1.5;
 
 /// What kind of message a row is, for the type chips.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -116,13 +117,15 @@ pub struct Row {
     /// Counts up for every row ever added, so a paused view can stop at one.
     pub seq: u64,
     pub host_ns: u64,
+    /// Time sampled on ingestion: transport position while playing, UTC wall clock otherwise.
+    pub time: String,
     pub dir: Dir,
     pub port: String,
     /// 0..=15, or [`NO_CHANNEL`].
     pub channel: u8,
     pub class: Class,
     pub text: String,
-    pub raw: [u8; 3],
+    pub raw: [u8; 64],
     pub raw_len: u8,
     /// The note or controller number, for the hover highlight.
     pub key: Option<u8>,
@@ -144,7 +147,7 @@ pub enum Learn {
     Off,
     /// Waiting for the next input message.
     Armed,
-    Caught(Row),
+    Caught(Box<Row>),
 }
 
 /// Messages per second over about a second.
@@ -188,7 +191,13 @@ pub struct State {
     first_seen: HashMap<String, f64>,
     last_seen: HashMap<String, f64>,
     pub dropped: (u64, u64),
+    pub sysex_truncated: u64,
     pub learn: Learn,
+    /// UI-only wall-clock snapshot in milliseconds since the Unix epoch.
+    wall_clock_ms: Option<u64>,
+    spotlight_at: Option<(u64, f64)>,
+    spotlight_scroll: Option<u64>,
+    drawn_spotlight: Option<u64>,
     /// The note or controller number under the pointer last frame.
     hover_key: Option<u8>,
     /// The text of the last copy (tests read it; the clipboard gets it too).
@@ -267,6 +276,10 @@ pub fn time_text(host_ns: u64) -> String {
     format!("{}:{:02}.{:03}", ms / 60_000, ms / 1000 % 60, ms % 1000)
 }
 
+fn wall_time(ms: u64) -> String {
+    format!("{:02}:{:02}:{:02}.{:03}Z", ms / 3_600_000 % 24, ms / 60_000 % 60, ms / 1000 % 60, ms % 1000)
+}
+
 fn dir_text(dir: Dir) -> &'static str {
     match dir {
         Dir::In => "In",
@@ -286,7 +299,7 @@ fn clip(port: &str) -> String {
 /// A row as plain text (the copy buttons use it): time, direction, port, channel and message in
 /// aligned columns.
 pub fn line(r: &Row) -> String {
-    format!("{:>10}  {:<3}  {}  {:>2}  {}", time_text(r.host_ns), dir_text(r.dir), clip(&r.port), channel_text(r.channel), r.text)
+    format!("{:>10}  {:<3}  {}  {:>2}  {}", r.time, dir_text(r.dir), clip(&r.port), channel_text(r.channel), r.text)
 }
 
 /// Whether `r` passes `f`.
@@ -324,8 +337,8 @@ pub fn port_line(p: &PortReport, tracks: &[String], per_sec: f32, silent_secs: f
     parts.push(
         match p.state {
             PortState::Open => "open",
-            PortState::Failed => "could not be opened (another program may hold it)",
-            PortState::Missing => "missing (unplugged?)",
+            PortState::Failed => "closed: could not be opened (another program may hold it)",
+            PortState::Missing => "closed: missing (unplugged?)",
         }
         .into(),
     );
@@ -357,7 +370,7 @@ pub fn report_text(port_lines: &[String], dropped: (u64, u64), rows: &VecDeque<R
     out.push_str(&format!("\nDropped events: {} in, {} out\n\nLast {REPORT_LINES} lines:\n", dropped.0, dropped.1));
     let skip = rows.len().saturating_sub(REPORT_LINES);
     for r in rows.iter().skip(skip) {
-        out.push_str(&format!("{}  [{}]\n", line(r), r.hex()));
+        out.push_str(&format!("{}  [{}]  host_ns={}\n", line(r), r.hex(), r.host_ns));
     }
     out
 }
@@ -374,26 +387,62 @@ impl State {
                 self.order.push(p.name.clone());
             }
         }
+        let missing: Vec<_> = self
+            .ports
+            .iter()
+            .filter(|old| !ports.iter().any(|p| p.dir == old.dir && p.name == old.name))
+            .cloned()
+            .map(|mut p| {
+                p.state = PortState::Missing;
+                p.clock_bpm = None;
+                p.sensing = false;
+                p
+            })
+            .collect();
         self.ports = ports.to_vec();
+        self.ports.extend(missing);
     }
 
     /// Adds one decoded ring element.
     pub fn push(&mut self, e: &MonitorEvent) {
-        let (class, text) = describe(e);
+        self.push_at(e, None);
+    }
+
+    /// `transport` is the frame snapshot in seconds, or `None` while stopped.
+    fn push_at(&mut self, e: &MonitorEvent, transport: Option<f64>) {
+        self.push_captured(e, transport, None);
+    }
+
+    fn push_captured(&mut self, e: &MonitorEvent, transport: Option<f64>, payload: Option<&soundcraft_playback::player::monitor::SysEx>) {
+        let (class, mut text) = describe(e);
         let raw_len = match e.status {
             0x80..=0xBF | 0xE0..=0xEF | 0xF2 => 3,
             0xC0..=0xDF | 0xF1 | 0xF3 => 2,
             _ => 1,
         };
+        let mut raw = [0; 64];
+        raw[..3].copy_from_slice(&[e.status, e.data1, e.data2]);
+        let mut raw_len = raw_len;
+        if let Some(payload) = payload.filter(|p| e.status == 0xF0 && e.sysex_id != 0 && p.id == e.sysex_id && p.dir == e.dir) {
+            raw = payload.bytes;
+            raw_len = payload.len.min(64);
+            if u32::from(raw_len) < e.sysex_len {
+                text.push_str(&format!(" (first {raw_len} shown)"));
+            }
+        }
         let mut row = Row {
             seq: self.next_seq,
             host_ns: e.host_ns,
+            time: transport.filter(|t| t.is_finite()).map_or_else(
+                || self.wall_clock_ms.map_or_else(|| time_text(e.host_ns), wall_time),
+                |t| format!("{}{}", if t < 0.0 { "-" } else { "" }, time_text((t.abs() * 1e9) as u64)),
+            ),
             dir: e.dir,
             port: self.port_name(e.dir, e.port),
             channel: e.channel,
             class,
             text,
-            raw: [e.status, e.data1, e.data2],
+            raw,
             raw_len,
             key: matches!(class, Class::Note | Class::Cc).then_some(e.data1),
             search: String::new(),
@@ -401,13 +450,30 @@ impl State {
         row.search = format!("{} {}", row.text.to_lowercase(), row.hex().to_lowercase());
         self.next_seq += 1;
         if self.learn == Learn::Armed && e.dir == Dir::In {
-            self.learn = Learn::Caught(row.clone());
+            self.learn = Learn::Caught(Box::new(row.clone()));
         }
         self.rates.entry(row.port.clone()).or_default().add(1);
         if self.rows.len() == MAX_ROWS {
             self.rows.pop_front();
         }
         self.rows.push_back(row);
+    }
+
+    /// Starts the spotlight once, using the injected UI frame clock.
+    fn update_spotlight(&mut self, now: f64) {
+        if let Learn::Caught(row) = &self.learn {
+            if self.spotlight_at.is_none_or(|(seq, _)| seq != row.seq) {
+                self.spotlight_at = Some((row.seq, now));
+                self.spotlight_scroll = Some(row.seq);
+            }
+        } else {
+            self.spotlight_at = None;
+            self.spotlight_scroll = None;
+        }
+    }
+
+    fn spotlight_level(&self, seq: u64, now: f64) -> f32 {
+        self.spotlight_at.filter(|(id, _)| *id == seq).map_or(0.0, |(_, start)| (1.0 - (now - start) / SPOTLIGHT_SECS).clamp(0.0, 1.0) as f32)
     }
 
     /// The port names seen so far (both directions), sorted, for the device list.
@@ -544,8 +610,14 @@ impl StudioApp {
     fn midi_monitor_feed(&mut self, now: f64) {
         let open = self.ui.midi_monitor.open;
         let clock = self.ui.midi_monitor.show_clock;
-        let Some(player) = &self.player else { return };
+        let Some(player) = &self.player else {
+            self.midi_monitor.learn_ports(&[]);
+            self.midi_monitor.refresh_ports(now, &|id| format!("track {id}"));
+            return;
+        };
+        let transport = player.is_playing().then(|| player.position() as f64 / f64::from(self.engine.session().sample_rate.hz()));
         let s = &mut self.midi_monitor;
+        s.wall_clock_ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok().and_then(|d| u64::try_from(d.as_millis()).ok());
         // Every frame (two relaxed stores): an audio reconnect swaps in a Player whose monitor is off.
         player.set_midi_monitor(open, clock);
         if !open {
@@ -555,14 +627,17 @@ impl StudioApp {
         let report = player.take_midi_monitor(&mut s.scratch, PER_FRAME);
         s.learn_ports(&report.ports);
         s.dropped = (report.dropped_in, report.dropped_out);
+        s.sysex_truncated = report.sysex_truncated;
         let events = std::mem::take(&mut s.scratch);
         for e in &events {
-            s.push(e);
+            let payload = report.sysex.iter().find(|p| p.id == e.sysex_id && p.dir == e.dir);
+            s.push_captured(e, transport, payload);
         }
         s.scratch = events;
         let session = self.engine.session();
         let name = |id: u64| session.tracks.iter().find(|t| t.id.0 == id).map_or_else(|| format!("track {id}"), |t| t.name.clone());
         self.midi_monitor.refresh_ports(now, &name);
+        self.midi_monitor.port_lines.push(format!("SysEx truncated to 64 bytes: {}", report.sysex_truncated));
     }
 }
 
@@ -640,7 +715,11 @@ fn row_ui(ui: &mut egui::Ui, r: &Row, s: &State, mono: &egui::FontId, cw: f32, h
         *hover = r.key;
     }
     let p = ui.painter();
-    if r.key.is_some() && r.key == s.hover_key {
+    let flash = s.spotlight_level(r.seq, ui.input(|i| i.time));
+    if flash > 0.0 {
+        p.rect_filled(rect, 0.0, TOKENS.accent.gamma_multiply(0.5 * flash));
+        ui.ctx().request_repaint();
+    } else if r.key.is_some() && r.key == s.hover_key {
         p.rect_filled(rect, 0.0, TOKENS.accent.gamma_multiply(0.18));
     } else if resp.hovered() {
         p.rect_filled(rect, 0.0, TOKENS.button_hover);
@@ -648,11 +727,13 @@ fn row_ui(ui: &mut egui::Ui, r: &Row, s: &State, mono: &egui::FontId, cw: f32, h
     let y = rect.center().y;
     let ink = if r.class == Class::RealTime { TOKENS.accent } else { TOKENS.text };
     let mut x = rect.min.x + 4.0;
-    p.text(pos2(x, y), Align2::LEFT_CENTER, format!("{:>9}", time_text(r.host_ns)), mono.clone(), TOKENS.text_dim);
-    x += cw * 11.0;
+    p.text(pos2(x, y), Align2::LEFT_CENTER, format!("{:>13}", r.time), mono.clone(), TOKENS.text_dim);
+    x += cw * 15.0;
     let dir_ink = if r.dir == Dir::Out { TOKENS.record } else { TOKENS.monitor };
-    p.text(pos2(x, y), Align2::LEFT_CENTER, dir_text(r.dir), mono.clone(), dir_ink);
-    x += cw * 4.0;
+    let direction_icon = if r.dir == Dir::In { crate::icons::Icon::ChevronDown } else { crate::icons::Icon::OpenEditor };
+    crate::icons::paint(p, pos2(x + 6.0, y), direction_icon, 12.0, dir_ink);
+    p.text(pos2(x + 15.0, y), Align2::LEFT_CENTER, dir_text(r.dir), mono.clone(), dir_ink);
+    x += cw * 6.0;
     p.circle_filled(pos2(x + 4.0, y), 4.0, s.port_color(&r.port));
     p.text(pos2(x + 14.0, y), Align2::LEFT_CENTER, clip(&r.port), mono.clone(), TOKENS.text);
     x += 14.0 + cw * (PORT_WIDTH as f32 + 1.0);
@@ -681,6 +762,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
     app.midi_monitor_feed(now);
     app.midi_monitor.window = [0.0; 4];
+    app.midi_monitor.update_spotlight(now);
     if !app.ui.midi_monitor.open {
         return;
     }
@@ -692,6 +774,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let mut learn = app.midi_monitor.learn != Learn::Off;
     let has_player = app.player.is_some();
     let mut hover = None;
+    let mut drawn_spotlight = None;
     let r = egui::Window::new("MIDI Monitor")
         .open(&mut open)
         .collapsible(false)
@@ -734,6 +817,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 } else {
                     ui.label(egui::RichText::new("No dropped events").color(TOKENS.text_dim));
                 }
+                if s.sysex_truncated > 0 {
+                    ui.label(format!("SysEx truncated: {}", s.sysex_truncated))
+                        .on_hover_text("Messages longer than 64 bytes retain their total length and first 64 bytes.");
+                }
                 if s.paused_at.is_some() {
                     ui.label(egui::RichText::new(format!("Paused: {} new events behind the view", s.behind())).color(TOKENS.mute));
                 }
@@ -748,15 +835,25 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             ui.separator();
             let mono = crate::theme::mono(ui.ctx(), 12.0);
             let cw = ui.painter().layout_no_wrap("0".into(), mono.clone(), TOKENS.text).size().x;
-            let head = format!("{:>9}  {:<3} {:<w$}  {:>2}  Message", "Time", "Dir", "  Port", "Ch", w = PORT_WIDTH + 2);
-            ui.label(egui::RichText::new(head).font(mono.clone()).strong().color(TOKENS.text_dim));
+            let head = format!("{:>13}  {:<5} {:<w$}  {:>2}  Message", "Time", "Dir", "  Port", "Ch", w = PORT_WIDTH + 2);
+            ui.label(egui::RichText::new(head).font(mono.clone()).strong().color(TOKENS.text_dim))
+                .on_hover_text("Transport position while playing; UTC wall clock (Z) while stopped. Times are sampled as rows arrive.");
             let upto = s.paused_at;
-            let shown: Vec<&Row> = s.rows.iter().filter(|r| upto.is_none_or(|u| r.seq <= u) && passes(&prefs.filters, r)).collect();
+            let caught = match &s.learn { Learn::Caught(row) => Some(row.seq), _ => None };
+            let shown: Vec<&Row> = s.rows.iter().filter(|r| caught == Some(r.seq) || (upto.is_none_or(|u| r.seq <= u) && passes(&prefs.filters, r))).collect();
             let height = ui.text_style_height(&egui::TextStyle::Monospace).max(14.0) + 3.0;
-            egui::ScrollArea::vertical().auto_shrink([false, false]).stick_to_bottom(prefs.autoscroll).show_rows(ui, height, shown.len(), |ui, range| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let mut scroll = egui::ScrollArea::both().auto_shrink([false, false]).stick_to_bottom(prefs.autoscroll && caught.is_none());
+            if let Some(index) = s.spotlight_scroll.and_then(|seq| shown.iter().position(|r| r.seq == seq)) {
+                scroll = scroll.vertical_scroll_offset(index as f32 * height);
+            }
+            let content_width = shown.iter().map(|r| (usize::from(r.raw_len) * 3 + r.text.chars().count() + 53) as f32 * cw).fold(0.0, f32::max);
+            scroll.show_rows(ui, height, shown.len(), |ui, range| {
+                ui.set_min_width(content_width);
                 ui.spacing_mut().item_spacing.y = 0.0;
                 for r in shown.get(range).into_iter().flatten() {
                     row_ui(ui, r, s, &mono, cw, &mut hover, height);
+                    if caught == Some(r.seq) { drawn_spotlight = Some(r.seq); }
                 }
             });
         });
@@ -766,6 +863,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     }
     let s = &mut app.midi_monitor;
     s.hover_key = hover;
+    s.drawn_spotlight = drawn_spotlight;
+    s.spotlight_scroll = None;
     if clear {
         s.rows.clear();
         s.paused_at = s.paused_at.map(|_| s.next_seq.saturating_sub(1));
