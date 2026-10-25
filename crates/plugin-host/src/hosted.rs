@@ -1,11 +1,11 @@
 //! An instance adopted by its host thread ([`crate::Ctx::adopt`]): the forwarder the render graph
 //! holds, and the editor and state proxies the UI holds.
 
-use crate::{Host, Inner, Status, Worker, lock};
+use crate::{Clock, Host, Inner, Status, Worker, lock};
 use soundcraft_dsp::event::PluginEvent;
 use soundcraft_dsp::{
-    EditorHeader, HeaderAction, JobPoll, LoadedValues, Plugin, PluginEditor, PluginInfo, PluginStateReader, ProcessStatus, SampleSource, StateBusy,
-    StateJob, Transport,
+    EditorHeader, EditorOpenReport, HeaderAction, JobPoll, LoadedValues, Plugin, PluginEditor, PluginInfo, PluginStateReader, ProcessStatus,
+    SampleSource, StateBusy, StateJob, Transport,
 };
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -26,6 +26,16 @@ pub(crate) struct EditorShared {
     error: Mutex<Option<String>>,
     /// What the user did in the window's header strip (issue #68), for the UI to take.
     actions: Mutex<Vec<HeaderAction>>,
+    /// The open request on its way and the last one that finished (issue #67).
+    timing: Mutex<OpenTiming>,
+}
+
+/// When an accepted open was requested and started, on the host's clock.
+#[derive(Default)]
+struct OpenTiming {
+    requested: Option<Instant>,
+    started: Option<Instant>,
+    report: Option<EditorOpenReport>,
 }
 
 impl EditorShared {
@@ -55,11 +65,12 @@ pub(crate) struct Token {
     shared: Arc<EditorShared>,
     timeout: Duration,
     host: Weak<Inner>,
+    clock: Clock,
 }
 
 impl Token {
-    pub(crate) fn new(key: u64, worker: Arc<Worker>, shared: Arc<EditorShared>, timeout: Duration, host: Weak<Inner>) -> Arc<Token> {
-        Arc::new(Token { key, worker, shared, timeout, host })
+    pub(crate) fn new(key: u64, worker: Arc<Worker>, shared: Arc<EditorShared>, timeout: Duration, host: Weak<Inner>, clock: Clock) -> Arc<Token> {
+        Arc::new(Token { key, worker, shared, timeout, host, clock })
     }
 
     /// Runs `f` with this instance's editor on its host thread (fire and forget).
@@ -231,8 +242,11 @@ impl PluginEditor for RemoteEditor {
         let shared = &self.token.shared;
         lock(&shared.error).take();
         shared.closing.store(false, Ordering::Release);
+        *lock(&shared.timing) = OpenTiming { requested: Some((self.token.clock)()), started: None, report: None };
         shared.opening.store(true, Ordering::Release);
-        self.token.with_editor(|editor, shared| {
+        let clock = Arc::clone(&self.token.clock);
+        self.token.with_editor(move |editor, shared| {
+            lock(&shared.timing).started = Some(clock());
             match editor.map(|e| e.open()) {
                 Some(Ok(())) => shared.open.store(true, Ordering::Release),
                 Some(Err(e)) => {
@@ -241,6 +255,13 @@ impl PluginEditor for RemoteEditor {
                 }
                 None => *lock(&shared.error) = Some("this plug-in instance is gone".into()),
             }
+            let done = clock();
+            let mut timing = lock(&shared.timing);
+            if let (Some(requested), Some(started)) = (timing.requested.take(), timing.started.take()) {
+                timing.report =
+                    Some(EditorOpenReport { queued: started.saturating_duration_since(requested), opening: done.saturating_duration_since(started) });
+            }
+            drop(timing);
             shared.opening.store(false, Ordering::Release);
         });
         Ok(())
@@ -304,6 +325,19 @@ impl PluginEditor for RemoteEditor {
 
     fn available(&self) -> Result<(), String> {
         if self.token.worker.responsive() { Ok(()) } else { Err(NOT_RESPONDING.into()) }
+    }
+
+    fn opening_for(&self) -> Option<Duration> {
+        let shared = &self.token.shared;
+        if !shared.opening.load(Ordering::Acquire) {
+            return None;
+        }
+        let requested = lock(&shared.timing).requested?;
+        Some((self.token.clock)().saturating_duration_since(requested))
+    }
+
+    fn take_open_report(&mut self) -> Option<EditorOpenReport> {
+        lock(&self.token.shared.timing).report.take()
     }
 }
 

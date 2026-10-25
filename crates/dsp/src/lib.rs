@@ -405,6 +405,33 @@ pub trait PluginEditor: Send {
     fn available(&self) -> Result<(), String> {
         Ok(())
     }
+    /// How long an accepted [`PluginEditor::open`] has been on its way, while it is (issue #67:
+    /// the editor of a heavy instrument takes seconds). `None` for editors that open at once
+    /// (the default) or when no open is pending.
+    fn opening_for(&self) -> Option<std::time::Duration> {
+        None
+    }
+    /// What the last accepted open took, once it finished (the default: nothing to report).
+    fn take_open_report(&mut self) -> Option<EditorOpenReport> {
+        None
+    }
+}
+
+/// What an editor open took, from the request to the window being up (issue #67).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EditorOpenReport {
+    /// The request waited for the editor's thread this long before it ran.
+    pub queued: std::time::Duration,
+    /// The window was created and the plug-in attached (the editor's own `open`) in this long.
+    pub opening: std::time::Duration,
+}
+
+impl EditorOpenReport {
+    /// Request to window.
+    #[must_use]
+    pub fn total(self) -> std::time::Duration {
+        self.queued + self.opening
+    }
 }
 
 /// Reads a plugin's state on the main (UI) thread while the instance processes on the audio

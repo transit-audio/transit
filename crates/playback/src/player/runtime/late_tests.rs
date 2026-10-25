@@ -53,6 +53,8 @@ struct Gate {
     /// Instances the factory made that were destroyed.
     drops: Arc<AtomicUsize>,
     states: Mutex<Vec<Option<Vec<u8>>>>,
+    /// A second gate the factory waits at once it reported the restoring phase (issue #67).
+    mid: Mutex<Option<Arc<Gate>>>,
     open: Mutex<bool>,
     opened: Condvar,
 }
@@ -137,6 +139,12 @@ fn gated(gate: &Arc<Gate>, hold: usize) -> Factory {
         gate.states.lock().unwrap().push(spec.state.clone());
         if n < hold {
             gate.wait();
+        }
+        transit_plugin_host::report_phase(transit_plugin_host::LoadPhase::Restoring);
+        let mid = gate.mid.lock().unwrap().clone();
+        if let Some(mid) = mid {
+            mid.calls.fetch_add(1, Ordering::SeqCst);
+            mid.wait();
         }
         let made = soundcraft_mix::create_instance(SYNTH, None, 48_000.0, 512, spec.ch)?;
         Some(NewInstance {
@@ -420,5 +428,47 @@ fn picking_the_same_plug_in_again_on_a_slow_slot_makes_it_again_and_binds_it() {
     let session = Arc::clone(rig.runtime.requested_session());
     assert_eq!(rig.runtime.capture_states(&session).unwrap(), vec![], "the live instance is the new one (no state)");
     assert!(rig.play(t) > 0.0);
+    rig.retire();
+}
+
+/// Issue #67: a load passes through its phases in order and each is published while it runs (the
+/// slot's tooltip reads it), and the plan taking the instance reports the total and the time in
+/// each phase. The manual clock moves between the phases, so the figures are exact.
+#[test]
+fn a_load_publishes_its_phases_in_order_and_reports_the_time_in_each() {
+    use transit_plugin_host::LoadPhase;
+    let clock = ManualClock::new();
+    let mut rig = rig(1, None, config(Duration::from_millis(200), Duration::from_secs(60)), clock.clock(), Duration::from_secs(10), 1);
+    let t = rig.tracks[0];
+    let mid = Arc::new(Gate::default());
+    *rig.gate.mid.lock().unwrap() = Some(Arc::clone(&mid));
+    assert_eq!(rig.runtime.slot_phase(t, SLOT), None, "nothing pending yet");
+    rig.frame();
+    assert_eq!(rig.runtime.slot_phase(t, SLOT), Some(LoadPhase::Queued), "announced, not yet on the host thread");
+    let gate = Arc::clone(&rig.gate);
+    assert!(rig.frames_until(Duration::from_secs(5), |_| gate.calls() == 1));
+    assert_eq!(rig.runtime.slot_phase(t, SLOT), Some(LoadPhase::Creating), "the factory is running");
+
+    clock.advance(Duration::from_secs(4));
+    rig.gate.open();
+    assert!(rig.frames_until(Duration::from_secs(5), |_| mid.calls.load(Ordering::SeqCst) == 1));
+    assert_eq!(rig.runtime.slot_phase(t, SLOT), Some(LoadPhase::Restoring), "the stored state is being restored");
+    assert!(rig.runtime.take_loaded().is_empty(), "nothing is reported while it loads");
+
+    clock.advance(Duration::from_secs(2));
+    mid.open();
+    assert!(rig.frames_until(Duration::from_secs(10), |r| r.binding(t, SLOT).is_some() && !r.any_loading()));
+    assert_eq!(rig.runtime.slot_phase(t, SLOT), None, "loaded");
+    let loaded = rig.runtime.take_loaded();
+    assert_eq!(loaded.len(), 1, "once per load");
+    assert_eq!(loaded[0].id, HOSTED);
+    let order: Vec<_> = loaded[0].phases.iter().map(|(p, _)| *p).collect();
+    assert_eq!(order, [LoadPhase::Queued, LoadPhase::Creating, LoadPhase::Restoring, LoadPhase::Binding]);
+    let took = |phase| loaded[0].phases.iter().find(|(p, _)| *p == phase).unwrap().1;
+    assert_eq!(took(LoadPhase::Creating), Duration::from_secs(4));
+    assert_eq!(took(LoadPhase::Restoring), Duration::from_secs(2));
+    assert_eq!(loaded[0].total, Duration::from_secs(6));
+    assert_eq!(loaded[0].phases.iter().map(|(_, d)| *d).sum::<Duration>(), loaded[0].total, "the phases add up to the total");
+    assert!(rig.runtime.take_loaded().is_empty(), "taken once");
     rig.retire();
 }

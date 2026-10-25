@@ -35,6 +35,7 @@
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod hosted;
+mod phases;
 
 use soundcraft_dsp::{Plugin, PluginEditor, PluginStateReader};
 use std::collections::HashMap;
@@ -46,6 +47,7 @@ use std::time::{Duration, Instant};
 use transit_rt::gui_thread::{MessageQueue, QueueWaker};
 
 use hosted::EditorShared;
+pub use phases::{Clock, LoadPhase, PhaseLog, loading_text, log_lines, open_log_line, report_phase, scope as phase_scope, seconds_text};
 
 /// How long a request may run before its host thread counts as wedged (ADR 0018).
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -113,6 +115,9 @@ pub struct Config {
     /// Period of the request servicing and editor `idle` calls.
     pub tick: Duration,
     pub hooks: Hooks,
+    /// The time load and editor-open phases are measured on ([`Instant::now`]; a test sets a
+    /// manual one, so it never sleeps).
+    pub clock: Clock,
     /// Run every job on the calling thread (macOS, `wasm32`, or a failed thread start).
     pub inline: bool,
 }
@@ -125,6 +130,7 @@ impl Default for Config {
             dispatch_timeout: DEFAULT_DISPATCH_TIMEOUT,
             tick: DEFAULT_TICK,
             hooks: Hooks::default(),
+            clock: Arc::new(Instant::now),
             inline: INLINE_BY_DEFAULT,
         }
     }
@@ -436,6 +442,7 @@ pub struct Ctx {
     worker: Option<Arc<Worker>>,
     host: Weak<Inner>,
     timeout: Duration,
+    clock: Clock,
     entries: HashMap<u64, Local>,
     next_key: u64,
     exit: bool,
@@ -462,7 +469,7 @@ impl Ctx {
         self.next_key += 1;
         let (has_editor, has_state) = (editor.is_some(), state.is_some());
         self.entries.insert(key, Local { editor, state, shared: Arc::clone(&shared) });
-        let token = hosted::Token::new(key, worker, shared, self.timeout, self.host.clone());
+        let token = hosted::Token::new(key, worker, shared, self.timeout, self.host.clone(), Arc::clone(&self.clock));
         Box::new(hosted::Hosted::new(plugin, token, has_editor, has_state))
     }
 
@@ -529,6 +536,7 @@ impl Host {
                 worker: None,
                 host: Arc::downgrade(&host.inner),
                 timeout: host.inner.config.timeout,
+                clock: Arc::clone(&host.inner.config.clock),
                 entries: HashMap::new(),
                 next_key: 0,
                 exit: false,
@@ -766,7 +774,15 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
     if let Some(start) = &config.hooks.start {
         worker.busy(|| catch_unwind(AssertUnwindSafe(|| start())).is_ok());
     }
-    let mut ctx = Ctx { worker: Some(Arc::clone(worker)), host, timeout: config.timeout, entries: HashMap::new(), next_key: 0, exit: false };
+    let mut ctx = Ctx {
+        worker: Some(Arc::clone(worker)),
+        host,
+        timeout: config.timeout,
+        clock: Arc::clone(&config.clock),
+        entries: HashMap::new(),
+        next_key: 0,
+        exit: false,
+    };
     let mut last_tick = Instant::now();
     while !ctx.exit {
         while let Ok(cell) = rx.try_recv() {

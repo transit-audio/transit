@@ -41,6 +41,8 @@ pub use devices::{AudioConfig, Backend, LoopbackCalibration};
 pub use player::{ActionResult, CountIn, MidiTake, PlayedMidi, PlayedNote, Player, PlayerCommand, PlayerError, PlayerNotice, SlotLoad, StartFailure};
 #[cfg(any(test, feature = "test-hooks"))]
 pub use player::{Clock, Deferred, Factory, PluginTestHooks};
+pub use player::{EditorOpened, LoadedIn};
+pub use transit_plugin_host::{LoadPhase, loading_text, seconds_text};
 
 use soundcraft_mix::{MAX_CHANNELS, StripMeter, itu_stereo_fold};
 use soundcraft_model::{Session, TrackId};

@@ -16,7 +16,7 @@ pub use control::{Control, Notice, endpoints};
 mod handles;
 #[cfg(any(test, feature = "test-hooks"))]
 pub use handles::PluginTestHooks;
-pub use handles::{Clock, DEFAULT_SLOW_AFTER, Deferred, Factory, Handles, SlotLoad};
+pub use handles::{Clock, DEFAULT_SLOW_AFTER, Deferred, EditorOpened, Factory, Handles, LoadedIn, SlotLoad};
 mod runtime;
 pub use runtime::{AudioPorts, Retirement, RuntimeControl, ServiceReport};
 /// A played note as the UI sees it (step entry): note-on with its velocity, or a release.

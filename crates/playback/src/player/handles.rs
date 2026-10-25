@@ -22,7 +22,7 @@ use soundcraft_mix::InstanceSpec;
 use soundcraft_model::TrackId;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
-use transit_plugin_host::{Ctx, Host, Pending, Status};
+use transit_plugin_host::{Ctx, Host, LoadPhase, Pending, PhaseLog, Status};
 
 /// How long one save waits, in all, for plug-ins whose thread is held by a modal dialog (issue
 /// #56). Such a plug-in that has not answered by then keeps its stored state and the status line
@@ -41,6 +41,29 @@ pub type Factory = Arc<dyn Fn(&InstanceSpec) -> Option<NewInstance> + Send + Syn
 
 /// The time the loading display is measured on (a test sets a manual one).
 pub type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;
+
+/// A plug-in that was made on the host thread and taken into a plan (issue #67): how long it took
+/// in all and in each phase, for the status line, the remembered load time and the log.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoadedIn {
+    /// The session's plug-in id (the key of the remembered load time).
+    pub id: String,
+    /// The plug-in's name.
+    pub name: &'static str,
+    /// From the request to the plan taking it.
+    pub total: Duration,
+    /// Each phase it passed through, in order.
+    pub phases: Vec<(LoadPhase, Duration)>,
+}
+
+/// An editor window that opened (issue #67), for the status line when it took long.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EditorOpened {
+    pub track: TrackId,
+    pub slot: usize,
+    pub name: &'static str,
+    pub report: soundcraft_dsp::EditorOpenReport,
+}
 
 /// What a slot whose plug-in is not in a plan yet shows (issue #82; #67 adds the time).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -89,12 +112,16 @@ fn same_instance(a: &InstanceSpec, b: &InstanceSpec) -> bool {
 /// What a creation job on the host thread returns: `Err` when the factory unwound.
 type Made = Result<Option<NewInstance>, ()>;
 
-/// The job that makes `spec` on the host thread and adopts the instance there.
-fn creation(spec: InstanceSpec, factory: Factory) -> impl FnOnce(&mut Ctx) -> Made + Send + 'static {
+/// The job that makes `spec` on the host thread and adopts the instance there. It marks the
+/// load's phases on `phases` at `clock`'s time (issue #67): creating from its start, restoring
+/// when the factory reports it, binding once the instance is made.
+fn creation(spec: InstanceSpec, factory: Factory, phases: Arc<PhaseLog>, clock: Clock) -> impl FnOnce(&mut Ctx) -> Made + Send + 'static {
     move |ctx| {
+        phases.enter(LoadPhase::Creating, clock());
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            factory(&spec).map(|mut made| {
+            transit_plugin_host::phase_scope(&phases, &clock, || factory(&spec)).map(|mut made| {
                 made.plugin = ctx.adopt(made.plugin);
+                phases.enter(LoadPhase::Binding, clock());
                 made
             })
         }))
@@ -136,6 +163,8 @@ struct Staged {
     stage: Stage,
     /// When it was first asked for (or retried), on the handles' clock.
     since: Instant,
+    /// The phases its creation has passed through (issue #67).
+    phases: Arc<PhaseLog>,
     /// Its creation ran past the host's creation budget: the slot reads "Not responding".
     stuck: bool,
     /// The user asked to retry it ([`Handles::request_retry`]); done on the next service.
@@ -144,7 +173,7 @@ struct Staged {
 
 impl Staged {
     fn new(spec: InstanceSpec, stage: Stage, since: Instant) -> Staged {
-        Staged { spec, stage, since, stuck: false, retry: false }
+        Staged { spec, stage, since, phases: PhaseLog::new(since), stuck: false, retry: false }
     }
     fn at(&self, track: TrackId, slot: usize) -> bool {
         self.spec.track == track && self.spec.slot == slot
@@ -177,6 +206,10 @@ pub struct Handles {
     test_factory: Option<(Factory, Deferred)>,
     /// Why editors that accepted an open request then failed, for the status line.
     editor_errors: Vec<(TrackId, usize, String)>,
+    /// Plug-ins taken into a plan since the UI last asked ([`Self::take_loaded`]).
+    loaded: Vec<LoadedIn>,
+    /// Editors that finished opening since the UI last asked ([`Self::take_editor_opened`]).
+    editor_opened: Vec<EditorOpened>,
     /// How long one [`Self::capture_states`] may wait for plug-ins in all.
     save_deadline: Duration,
     /// The plug-ins whose state the last capture could not read in time (their stored state is
@@ -209,6 +242,8 @@ impl Handles {
             #[cfg(any(test, feature = "test-hooks"))]
             test_factory: None,
             editor_errors: Vec::new(),
+            loaded: Vec::new(),
+            editor_opened: Vec::new(),
             save_deadline: DEFAULT_SAVE_DEADLINE,
             unrefreshed: Vec::new(),
             host,
@@ -244,7 +279,15 @@ impl Handles {
     pub fn service<T: Copy, R: Copy>(&mut self, control: &mut Control<T, R>) {
         let target = control.sessions.target;
         let factory: Factory = Arc::new(move |spec: &InstanceSpec| {
-            soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), target.sample_rate as f32, target.max_block as usize, spec.ch)
+            let restoring = || transit_plugin_host::report_phase(LoadPhase::Restoring);
+            soundcraft_mix::create_instance_with(
+                &spec.id,
+                spec.state.as_deref(),
+                target.sample_rate as f32,
+                target.max_block as usize,
+                spec.ch,
+                restoring,
+            )
         });
         // The test seam makes only the ids it sends to the host thread; the rest as always.
         #[cfg(any(test, feature = "test-hooks"))]
@@ -267,8 +310,12 @@ impl Handles {
         control.sessions.hold = self.stage(&mut control.sessions, deferred, factory);
         control.service(&mut |spec, generation| {
             let ready = self.staged.iter().position(|st| st.spec == *spec && matches!(st.stage, Stage::Ready(_)));
-            let made = match ready.map(|i| self.staged.swap_remove(i).stage) {
-                Some(Stage::Ready(made)) => made,
+            let mut timed = None;
+            let made = match ready.map(|i| self.staged.swap_remove(i)) {
+                Some(Staged { stage: Stage::Ready(made), phases, since, .. }) => {
+                    timed = Some((phases, since));
+                    made
+                }
                 // Still being made past the display budget, or not responding: the slot stays
                 // vacant and the instance joins the plan that follows its arrival (issue #82).
                 _ if self.retrying.iter().any(|st| st.spec == *spec) => None,
@@ -277,9 +324,31 @@ impl Handles {
                 _ if deferred(&spec.id) => self.make_later(spec, factory),
                 _ => factory(spec),
             }?;
-            self.capture_stored((spec.track, spec.slot, generation), made, spec.state.is_some())
+            let name = made.plugin.info().name;
+            let bound = self.capture_stored((spec.track, spec.slot, generation), made, spec.state.is_some());
+            if let (Some((phases, since)), true) = (timed, bound.is_some()) {
+                self.record_loaded(&spec.id, name, &phases, since);
+            }
+            bound
         });
         self.refresh(&mut control.sessions);
+    }
+
+    /// An instance the compile took (issue #67): its phases and total are logged at info level and
+    /// kept for the UI ([`Self::take_loaded`]). Runs on the control thread, never the audio thread.
+    fn record_loaded(&mut self, id: &str, name: &'static str, phases: &PhaseLog, since: Instant) {
+        let now = self.now();
+        let phases = phases.finish(now);
+        let total = now.saturating_duration_since(since);
+        for line in transit_plugin_host::log_lines(name, total, &phases) {
+            log::info!("{line}");
+        }
+        self.loaded.push(LoadedIn { id: id.to_owned(), name, total, phases });
+    }
+
+    /// The plug-ins taken into a plan since the last call, each once.
+    pub fn take_loaded(&mut self) -> Vec<LoadedIn> {
+        std::mem::take(&mut self.loaded)
     }
 
     /// A hosted instance the compile asks for that `stage` did not predict (issue #56): it is
@@ -288,15 +357,24 @@ impl Handles {
     /// Where the host runs inline (macOS) it is made here, as before.
     fn make_later(&mut self, spec: &InstanceSpec, factory: &Factory) -> Option<NewInstance> {
         self.retrying.retain(|st| st.spec != *spec);
-        let pending = self.host.submit(creation(spec.clone(), Arc::clone(factory)));
+        let since = self.now();
+        let mut staged = Staged::new(spec.clone(), Stage::Queued, since);
+        let pending = self.host.submit(creation(spec.clone(), Arc::clone(factory), Arc::clone(&staged.phases), Arc::clone(&self.clock)));
         match pending.poll() {
-            Status::Ready(Ok(made)) => made,
+            Status::Ready(Ok(made)) => {
+                // Made before this call returned (a quick plug-in, or the inline host): taken by
+                // the compile that asked, so its time is reported here.
+                if let Some(m) = &made {
+                    self.record_loaded(&spec.id, m.plugin.info().name, &staged.phases, since);
+                }
+                made
+            }
             Status::Ready(Err(())) => std::panic::resume_unwind(Box::new("a plug-in factory panicked on the host thread")),
             Status::Failed => None,
             Status::Waiting { .. } | Status::Stuck => {
                 log::info!("{}: not predicted by staging; made on the plug-in host thread, its slot loads meanwhile", spec.id);
-                let since = self.now();
-                self.retrying.push(Staged::new(spec.clone(), Stage::Requested(pending), since));
+                staged.stage = Stage::Requested(pending);
+                self.retrying.push(staged);
                 None
             }
         }
@@ -310,7 +388,9 @@ impl Handles {
         let now = self.now();
         for st in self.retrying.iter_mut().filter(|st| st.retry) {
             log::info!("{}: retrying; a new instance is made with the stored state", st.spec.id);
-            st.stage = Stage::Requested(self.host.submit(creation(st.spec.clone(), Arc::clone(factory))));
+            st.phases = PhaseLog::new(now);
+            st.stage =
+                Stage::Requested(self.host.submit(creation(st.spec.clone(), Arc::clone(factory), Arc::clone(&st.phases), Arc::clone(&self.clock))));
             st.since = now;
             st.stuck = false;
             st.retry = false;
@@ -456,7 +536,8 @@ impl Handles {
         // Inline (macOS) runs each job where it is submitted: one per call, as before.
         let inline = self.host.is_inline();
         for st in self.staged.iter_mut().filter(|st| matches!(st.stage, Stage::Announced)) {
-            st.stage = Stage::Requested(self.host.submit(creation(st.spec.clone(), Arc::clone(factory))));
+            st.stage =
+                Stage::Requested(self.host.submit(creation(st.spec.clone(), Arc::clone(factory), Arc::clone(&st.phases), Arc::clone(&self.clock))));
             if inline {
                 break;
             }
@@ -527,6 +608,11 @@ impl Handles {
         } else {
             SlotLoad::Loading { elapsed }
         })
+    }
+
+    /// Which phase this slot's plug-in is in while it loads (issue #67; `None`: nothing pending).
+    pub fn slot_phase(&self, track: TrackId, slot: usize) -> Option<LoadPhase> {
+        self.staged.iter().filter(|st| st.waiting()).chain(&self.retrying).find(|st| st.at(track, slot)).map(|st| st.phases.current())
     }
 
     /// Whether this slot's plug-in did not finish loading within the host's creation budget: the
@@ -660,6 +746,16 @@ impl Handles {
         entry.refused = false;
         Ok(())
     }
+    /// How long this slot's editor open has been on its way, while it is (issue #67).
+    pub fn editor_opening(&self, track: TrackId, slot: usize) -> Option<Duration> {
+        self.entry(track, slot).and_then(|entry| entry.editor.as_ref()).and_then(|editor| editor.opening_for())
+    }
+
+    /// The editor opens that finished since the last call, each once.
+    pub fn take_editor_opened(&mut self) -> Vec<EditorOpened> {
+        std::mem::take(&mut self.editor_opened)
+    }
+
     pub fn close_editor(&mut self, track: TrackId, slot: usize) {
         if let Some(entry) = self.entry_mut(track, slot)
             && let Some(editor) = &mut entry.editor
@@ -809,6 +905,10 @@ impl Handles {
                 out.extend(editor.idle().into_iter().map(|(id, value)| (track, slot, id, value)));
                 if let Some(e) = editor.take_error() {
                     self.editor_errors.push((track, slot, e));
+                }
+                if let Some(report) = editor.take_open_report() {
+                    log::info!("{}", transit_plugin_host::open_log_line(entry.name, report));
+                    self.editor_opened.push(EditorOpened { track, slot, name: entry.name, report });
                 }
             }
         }

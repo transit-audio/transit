@@ -1179,6 +1179,22 @@ impl Player {
     pub fn slot_load(&self, track: TrackId, slot: usize) -> Option<crate::SlotLoad> {
         self.owner().ok().and_then(|owner| owner.slot_load(track, slot))
     }
+    /// The phase this slot's plug-in is in while it loads (issue #67).
+    pub fn slot_phase(&self, track: TrackId, slot: usize) -> Option<transit_plugin_host::LoadPhase> {
+        self.owner().ok().and_then(|owner| owner.slot_phase(track, slot))
+    }
+    /// The plug-ins taken into a plan since the last call, with their load times (issue #67).
+    pub fn take_loaded(&self) -> Vec<crate::LoadedIn> {
+        self.owner().map(|mut owner| owner.take_loaded()).unwrap_or_default()
+    }
+    /// How long this slot's editor open has been on its way (issue #67).
+    pub fn editor_opening(&self, track: TrackId, slot: usize) -> Option<std::time::Duration> {
+        self.owner().ok().and_then(|owner| owner.editor_opening(track, slot))
+    }
+    /// The editor opens that finished since the last call, with their times (issue #67).
+    pub fn take_editor_opened(&self) -> Vec<crate::EditorOpened> {
+        self.owner().map(|mut owner| owner.take_editor_opened()).unwrap_or_default()
+    }
     /// The slots that are not responding: (track, slot, plug-in id).
     pub fn stuck_slots(&self) -> Vec<(TrackId, usize, String)> {
         self.owner().map(|owner| owner.stuck_slots()).unwrap_or_default()

@@ -368,6 +368,18 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn slot_load(&self, track: TrackId, slot: usize) -> Option<super::SlotLoad> {
         self.handles.slot_load(track, slot)
     }
+    pub fn slot_phase(&self, track: TrackId, slot: usize) -> Option<transit_plugin_host::LoadPhase> {
+        self.handles.slot_phase(track, slot)
+    }
+    pub fn take_loaded(&mut self) -> Vec<super::LoadedIn> {
+        self.handles.take_loaded()
+    }
+    pub fn editor_opening(&self, track: TrackId, slot: usize) -> Option<std::time::Duration> {
+        self.handles.editor_opening(track, slot)
+    }
+    pub fn take_editor_opened(&mut self) -> Vec<super::EditorOpened> {
+        self.handles.take_editor_opened()
+    }
     pub fn stuck_slots(&self) -> Vec<(TrackId, usize, String)> {
         self.handles.stuck_slots()
     }

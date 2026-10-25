@@ -6,8 +6,8 @@
 mod common;
 
 use common::{Fake, Log};
-use std::sync::Arc;
 use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use transit_plugin_host::{Config, Host, Status};
 
@@ -265,6 +265,69 @@ fn editor_requests_run_on_the_host_thread_and_report_back() {
     }
     assert_eq!(*log.editor_params.lock().unwrap(), vec![("gain".to_string(), 0.5)]);
     assert!(!editor.is_open(), "a tick does not reopen a closed editor");
+    drop((editor, plugin));
+    assert!(host.shutdown(Duration::from_secs(5)));
+}
+
+/// Issue #67: an editor open is timed on the host's clock, request to window. A clock that moves
+/// one second per reading makes the figures exact without a sleep: the request is read once, the
+/// host thread reads the start and the end.
+#[test]
+fn an_editor_open_reports_its_queue_and_window_time_on_the_host_clock() {
+    let base = Instant::now();
+    let ticks = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let t = Arc::clone(&ticks);
+    let clock: transit_plugin_host::Clock = Arc::new(move || base + Duration::from_secs(t.fetch_add(1, std::sync::atomic::Ordering::SeqCst)));
+    let host = Host::new(Config { clock, inline: false, ..Config::default() });
+    let log = Arc::new(Log::default());
+    let l = Arc::clone(&log);
+    let mut plugin = host.submit(move |ctx| ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))).wait(Duration::from_secs(5)).unwrap();
+    let mut editor = plugin.editor().unwrap();
+    assert_eq!(editor.take_open_report(), None, "nothing before an open");
+    editor.open().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut report = None;
+    while report.is_none() && Instant::now() < deadline {
+        report = editor.take_open_report();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    let report = report.expect("the open finished");
+    assert_eq!((report.queued, report.opening), (Duration::from_secs(1), Duration::from_secs(1)));
+    assert_eq!(editor.take_open_report(), None, "reported once");
+    assert_eq!(editor.opening_for(), None, "no open is pending");
+    drop((editor, plugin));
+    assert!(host.shutdown(Duration::from_secs(5)));
+}
+
+/// The Opening state counts up while the open waits behind a busy host thread, and the wait shows
+/// as the queued time.
+#[test]
+fn an_open_waiting_behind_a_busy_host_thread_counts_up_on_the_clock() {
+    let base = Instant::now();
+    let now = Arc::new(Mutex::new(base));
+    let n = Arc::clone(&now);
+    let clock: transit_plugin_host::Clock = Arc::new(move || *n.lock().unwrap());
+    let host = Host::new(Config { clock, inline: false, ..Config::default() });
+    let log = Arc::new(Log::default());
+    let l = Arc::clone(&log);
+    let mut plugin = host.submit(move |ctx| ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))).wait(Duration::from_secs(5)).unwrap();
+    let mut editor = plugin.editor().unwrap();
+    // The thread is held by an earlier job until the test lets it go.
+    let (release, held) = mpsc::channel::<()>();
+    let blocker = host.submit(move |_| held.recv().is_ok());
+    editor.open().unwrap();
+    assert_eq!(editor.opening_for(), Some(Duration::ZERO));
+    *now.lock().unwrap() = base + Duration::from_millis(4_500);
+    assert_eq!(editor.opening_for(), Some(Duration::from_millis(4_500)));
+    release.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut report = None;
+    while report.is_none() && Instant::now() < deadline {
+        report = editor.take_open_report();
+        std::thread::sleep(Duration::from_millis(2));
+    }
+    assert_eq!(report.expect("the open finished").queued, Duration::from_millis(4_500));
+    drop(blocker);
     drop((editor, plugin));
     assert!(host.shutdown(Duration::from_secs(5)));
 }
