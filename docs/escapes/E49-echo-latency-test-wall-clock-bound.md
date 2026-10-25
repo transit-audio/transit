@@ -100,3 +100,10 @@ without any wake; the two gated tests therefore start the worker with a 30 s idl
 (`Worker::start_with_idle`, `Native::new_with_idle`; production keeps 20 ms), so only a wake on data meets the
 500 ms bound. Mutation: `park_timeout` -> `sleep` in the worker fails both.
 non-ignored test is flagged like any other.
+
+Recurrence 2026-10-25 (Windows gate under load, #97): `a_reader_never_pairs_a_value_with_another_publishes_count`
+(`crates/playback/src/player/midi_map.rs`) failed `assert!(seen > 0)`: the writer published 400k times and
+finished before the reader took one pair, so the test depended on which thread ran first. Fixed: the writer
+runs until the reader has checked a fixed 20,000 pairs, each against `value == publish count`, so the observation
+count no longer depends on scheduling. Mutation: `take` reading the value and count from two separate atomics
+fails the pairing assertion (3 of 3 runs). 30 of 30 runs pass with a `cargo check` running beside them.

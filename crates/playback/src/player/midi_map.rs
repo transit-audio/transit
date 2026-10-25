@@ -572,29 +572,33 @@ mod tests {
 
     #[test]
     fn a_reader_never_pairs_a_value_with_another_publishes_count() {
-        // The writer publishes the value `n` as the n-th publish; any (value, count) a reader gets
-        // must agree. With two atomics a reader paired an old value with a newer count.
+        // The writer publishes the value `n` as the n-th publish (n wraps at 2^24 so the f32 stays
+        // exact); any (value, count) a reader gets must agree. With two atomics a reader paired an
+        // old value with a newer count. The writer runs until the reader has checked a fixed number
+        // of pairs, so the test does not depend on which thread the scheduler runs first.
+        const PAIRS: u32 = 20_000;
+        let exact = |n: u32| (n & 0x00ff_ffff) as f32;
         let cell = Arc::new(Cell::new(0.0));
+        let stop = Arc::new(AtomicBool::new(false));
         let writer = {
-            let cell = Arc::clone(&cell);
+            let (cell, stop) = (Arc::clone(&cell), Arc::clone(&stop));
             std::thread::spawn(move || {
-                for n in 1..=400_000u32 {
-                    cell.publish(n as f32);
+                let mut n = 0u32;
+                while !stop.load(Ordering::Relaxed) {
+                    n += 1;
+                    cell.publish(exact(n));
                 }
             })
         };
-        let mut seen = 0u64;
-        loop {
-            match cell.take() {
-                Some((value, n)) => {
-                    assert_eq!(value, n as f32, "a torn pair");
-                    seen += 1;
-                }
-                None if writer.is_finished() => break,
-                None => {}
+        let mut seen = 0u32;
+        while seen < PAIRS {
+            if let Some((value, n)) = cell.take() {
+                assert_eq!(value, exact(n), "a torn pair");
+                seen += 1;
             }
         }
+        stop.store(true, Ordering::Relaxed);
         writer.join().unwrap();
-        assert!(seen > 0);
+        assert_eq!(seen, PAIRS);
     }
 }
