@@ -26,6 +26,15 @@ Issue #68. Read with [ADR 0018](../../adr/0018-plugin-host-thread.md) (the plug-
   `set_scale` scales itself: both keep the size they report, so a self-scaling plug-in (Arturia's)
   is never scaled twice. Floating CLAP windows get no `set_scale` (the plug-in owns the window;
   the old `set_scale(1.0)` forced 100%). macOS gets no call: views work in points there.
+- VST3 scale sequence (issue #105), per editor open: `setFrame`; `setContentScaleFactor` before
+  `attached` (the window takes the `getSize` that follows); `attached`; the same factor again
+  right after `attached` (some plug-ins apply it only to an attached view); on a DPI change, the
+  new factor from `idle`. A `resizeView` is honored at any time after `attached` (the window
+  takes the requested size, then the view's `onSize`); one that arrives before `attached` is
+  kept and applied right after it. `canResize` and `checkSizeConstraint` apply to sizes the host
+  or the user propose, not to the plug-in's own `resizeView`. Each scale call (interface found or
+  not, factor, `tresult`, `getSize` before and after) and each `resizeView` (size, honored or
+  not) is logged at info level with the plug-in's name.
 
 ## Presets
 
