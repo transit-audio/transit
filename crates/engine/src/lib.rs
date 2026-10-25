@@ -133,7 +133,7 @@ struct HistoryEntry {
 }
 
 /// An armed MIDI Learn: the next controller message becomes a mapping of `target` in `scope`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LearnArm {
     pub target: soundcraft_model::ControlTarget,
     pub scope: soundcraft_model::Scope,
@@ -301,7 +301,7 @@ impl Engine {
 
     /// The control a MIDI Learn is waiting for, if one is armed.
     pub fn learn(&self) -> Option<LearnArm> {
-        self.learn
+        self.learn.clone()
     }
 
     /// Check a request to measure the round trip of a hardware insert on `send` (an output path)

@@ -7,7 +7,7 @@ use super::*;
 use crate::cmd;
 use crate::{Engine, LearnArm};
 use serde_json::json;
-use soundcraft_model::{ControlTarget, MapMode, Mapping, MappingSet, MidiSource, Scope, SourceKind, Strip};
+use soundcraft_model::{AutoParam, Control, ControlTarget, MapMode, Mapping, MappingSet, MidiSource, Scope, SourceKind, Strip};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -16,7 +16,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "MIDI Learn",
             [],
             None,
-            "{target: \"track:<id>:volume|pan|mute|solo|arm|send:<slot>\", scope?: session|profile} — the next controller message maps it",
+            "{target: \"track:<id>:volume|pan|mute|solo|arm|send:<slot>|plugin:<slot a..j|instrument>:<param id>\", scope?: session|profile} — the next controller message maps it",
             always,
             learn
         ),
@@ -85,11 +85,33 @@ fn target_param(p: &Value, id: &str) -> Result<ControlTarget> {
     str_param(p, "target").ok_or_else(|| bad(id, "`target` required"))?.parse().map_err(|m: String| bad(id, m))
 }
 
+/// A plug-in target must name a device the track has, and a built-in device's parameter must
+/// exist. (A hosted plug-in's table lives in the host registries, so the UI checks that a
+/// hosted parameter is one the picker offers: not hidden, not read-only.)
+fn check_device(e: &Engine, id: &str, target: &ControlTarget) -> Result<()> {
+    let Control::Plugin { slot, param } = &target.control else { return Ok(()) };
+    let Strip::Track(t) = target.strip else { return Ok(()) };
+    let track = e.session().track(t).ok_or_else(|| bad(id, format!("no track with id {}", t.0)))?;
+    let device = if *slot == AutoParam::INSTRUMENT_SLOT {
+        track.instrument.as_ref()
+    } else {
+        track.mixer.inserts.get(usize::from(*slot)).and_then(Option::as_ref)
+    };
+    let device = device.ok_or_else(|| bad(id, "that slot has no plug-in"))?;
+    if let Some(info) = soundcraft_dsp::plugin_info(&device.plugin)
+        && info.param(param).is_none()
+    {
+        return Err(bad(id, format!("{} has no parameter `{param}`", info.name)));
+    }
+    Ok(())
+}
+
 fn learn(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "midi.learn";
     let scope = scope_of(p, id)?.unwrap_or(Scope::Session);
     let target = normalize(e, id, target_param(p, id)?, scope)?;
-    e.learn = Some(LearnArm { target, scope });
+    check_device(e, id, &target)?;
+    e.learn = Some(LearnArm { target: target.clone(), scope });
     e.midi_profile_revision = e.midi_profile_revision.wrapping_add(1);
     Ok(json!({"armed": target.to_string(), "scope": scope}))
 }
@@ -115,7 +137,8 @@ fn map(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "midi.map";
     let scope = scope_of(p, id)?.unwrap_or(Scope::Session);
     let target = normalize(e, id, target_param(p, id)?, scope)?;
-    let mut m = Mapping::new(source_param(p, id)?, target);
+    check_device(e, id, &target)?;
+    let mut m = Mapping::new(source_param(p, id)?, target.clone());
     m.mode = match str_param(p, "mode") {
         None | Some("pickup") => MapMode::Pickup,
         Some("jump") => MapMode::Jump,
@@ -142,7 +165,7 @@ fn map(e: &mut Engine, p: &Value) -> Result<Value> {
             was
         }
     };
-    if e.learn.is_some_and(|l| l.target == target && l.scope == scope) {
+    if e.learn.as_ref().is_some_and(|l| l.target == target && l.scope == scope) {
         e.learn = None;
         e.midi_profile_revision = e.midi_profile_revision.wrapping_add(1);
     }
@@ -165,17 +188,17 @@ fn unmap(e: &mut Engine, p: &Value) -> Result<Value> {
         None => vec![Scope::Session, Scope::Profile],
     };
     for scope in scopes {
-        let t = normalize(e, id, target, scope)?;
+        let t = normalize(e, id, target.clone(), scope)?;
         let removed = match scope {
             Scope::Session => {
-                if e.session().midi_mappings.for_target(t).is_none() {
+                if e.session().midi_mappings.for_target(&t).is_none() {
                     false
                 } else {
-                    e.session_mut().midi_mappings.remove(t)
+                    e.session_mut().midi_mappings.remove(&t)
                 }
             }
             Scope::Profile => {
-                let removed = e.midi_profile.remove(t);
+                let removed = e.midi_profile.remove(&t);
                 if removed {
                     e.midi_profile_revision = e.midi_profile_revision.wrapping_add(1);
                 }
@@ -216,7 +239,7 @@ fn mappings(e: &mut Engine, _: &Value) -> Result<Value> {
             describe(m, Scope::Profile, over)
         })
         .collect();
-    let learn = e.learn.map(|l| json!({"target": l.target.to_string(), "scope": l.scope}));
+    let learn = e.learn.as_ref().map(|l| json!({"target": l.target.to_string(), "scope": l.scope}));
     Ok(json!({"session": session, "profile": profile, "learn": learn, "active": resolved.iter().filter(|r| !r.overridden).count()}))
 }
 
@@ -309,6 +332,38 @@ mod tests {
         assert_eq!(r["profile"][0]["overridden"], true, "the session owns CC 74 on that port and channel");
         assert_eq!(r["profile"][1]["overridden"], false);
         assert_eq!(r["active"], 2);
+    }
+
+    #[test]
+    fn plug_in_parameters_map_by_stable_id_and_are_checked_against_the_device() {
+        let mut e = demo_engine();
+        let (a, _) = first_two(&e);
+        e.execute("mix.insert", &json!({"track": a, "slot": 0, "plugin": "eq_7band"})).unwrap();
+        let ok = format!("track:{a}:plugin:a:mid_gain");
+        e.execute("midi.map", &json!({"source": src(74), "target": ok})).unwrap();
+        let m = e.session().midi_mappings.iter().next().unwrap().clone();
+        assert_eq!(m.target.to_string(), ok);
+        // Serde: the session file carries the text form and loads back.
+        let text = serde_json::to_string(&m).unwrap();
+        assert!(text.contains(&format!("\"track:{a}:plugin:a:mid_gain\"")), "{text}");
+        assert_eq!(serde_json::from_str::<Mapping>(&text).unwrap(), m);
+        for bad in [
+            format!("track:{a}:plugin:a:no_such_param"),
+            format!("track:{a}:plugin:b:mid_gain"),
+            format!("track:{a}:plugin:instrument:mid_gain"),
+            format!("track:{a}:plugin:a"),
+        ] {
+            assert!(e.execute("midi.map", &json!({"source": src(75), "target": bad})).is_err(), "{bad}");
+            assert!(e.execute("midi.learn", &json!({"target": bad})).is_err(), "{bad}");
+        }
+        assert_eq!(e.session().midi_mappings.len(), 1);
+        // The profile names the strip by position and keeps the parameter id.
+        let r = e.execute("midi.map", &json!({"source": src(76), "target": ok, "scope": "profile"})).unwrap();
+        assert_eq!(r["target"], "strip:1:plugin:a:mid_gain");
+        e.execute("midi.learn", &json!({"target": ok})).unwrap();
+        assert_eq!(e.learn().unwrap().target.to_string(), ok);
+        e.execute("midi.unmap", &json!({"target": ok})).unwrap();
+        assert!(e.session().midi_mappings.is_empty());
     }
 
     #[test]
