@@ -115,9 +115,8 @@ fn stop_during_the_count_in_or_with_nothing_played_records_nothing() {
     // The latch never started: Stop cancelled the count-in.
     record(&mut app, 0, None, 0, pass(t, None, vec![on(LATCH, t, 60), off(LATCH + 100, t, 60)]));
     assert!(app.engine.session().track(t).unwrap().clips().is_empty());
-    // Started, but only a pedal: no notes, no clip.
-    let pedal = CapturedEvent { message: Message::Control { cc: 64, value: 127 }, ..on(LATCH, t, 0) };
-    record(&mut app, 0, None, 4 * BEAT, pass(t, Some(0), vec![pedal]));
+    // Started, but no channel events were captured.
+    record(&mut app, 0, None, 4 * BEAT, pass(t, Some(0), vec![]));
     assert!(app.engine.session().track(t).unwrap().clips().is_empty());
     assert_eq!(app.engine.undo_history().len(), before, "no undo step either");
 }
@@ -570,4 +569,37 @@ fn record_with_cycle_off_is_one_open_ended_pass_until_stop() {
     }
     app.stop_play();
     assert!(!app.recording_active());
+}
+
+#[test]
+fn controller_only_capture_reaches_the_clip_through_host_stop_and_is_undoable() {
+    let (mut app, t) = app();
+    let before = app.engine.undo_history().len();
+    let events = [(BEAT / 2, 101), (3 * BEAT, 12)].map(|(offset, value)| CapturedEvent {
+        frame: LATCH + offset as u64,
+        track: t,
+        channel: 3,
+        message: Message::Control { cc: 64, value },
+        approximate: false,
+    });
+    record(&mut app, 2 * BEAT, None, 6 * BEAT, pass(t, Some(2 * BEAT), events.to_vec()));
+    let clips = app.engine.session().track(t).unwrap().clips();
+    assert_eq!(clips.len(), 1, "Stop must retain a pedal-only pass");
+    let clip = clips[0].clone();
+    assert_eq!((clip.start, clip.length), (2 * BEAT, 4 * BEAT));
+    let ClipContent::Midi { sequence } = &clip.content else { panic!("not MIDI") };
+    assert!(sequence.notes.is_empty());
+    assert_eq!(
+        sequence.ctrls,
+        vec![
+            soundcraft_midi::CtrlEvent { tick: TICKS / 2, channel: 3, kind: soundcraft_midi::CtrlKind::Cc(64), value: 101 },
+            soundcraft_midi::CtrlEvent { tick: TICKS * 3, channel: 3, kind: soundcraft_midi::CtrlKind::Cc(64), value: 12 },
+        ]
+    );
+    assert_eq!(app.engine.undo_history().len(), before + 1);
+    assert!(app.take_plan.is_none() && !app.recording_active());
+    app.run("edit.undo", json!({})).unwrap();
+    assert!(app.engine.session().track(t).unwrap().clips().is_empty());
+    app.run("edit.redo", json!({})).unwrap();
+    assert_eq!(app.engine.session().find_clip(clip.id).unwrap().1.content, clip.content);
 }

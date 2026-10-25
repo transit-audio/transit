@@ -28,6 +28,9 @@ const KNOWN_UNREACHED: &[&str] = &[
     "io.measure_hardware_latency", // same
     "markers.next",
     "markers.previous",
+    "midi.cc_add",          // studio UI only (#29: piano-roll CC lane)
+    "midi.cc_edit",         // studio UI only (#29: piano-roll CC lane)
+    "midi.cc_delete",       // studio UI only (#29: piano-roll CC lane)
     "midi.chord_add", // assistant/control-first (#45): the chord track is written through the control channel and MCP; no chord editor in the UI yet
     "midi.output",    // studio UI only (#61: the MIDI strip's Out button); the old UI has no MIDI output picker
     "midi.notes_transpose", // studio UI only (#27: piano-roll Pitch menu)

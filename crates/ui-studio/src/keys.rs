@@ -11,6 +11,7 @@
 //! Zoom, scroll, snap, pane height, new-note velocity and the audition switch are view state: [`KeysPrefs`] in
 //! [`crate::UiState`] and [`KeysState`] here, never the document.
 
+mod cc;
 mod pitch;
 mod quantize;
 pub use quantize::QuantizePrefs;
@@ -240,6 +241,7 @@ pub struct NoteRect {
 /// Last frame's piano roll geometry and state.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct KeysLayout {
+    pub cc: cc::Layout,
     pub visible: bool,
     pub clip: Option<u64>,
     pub track: Option<u64>,
@@ -305,6 +307,7 @@ pub struct KeysLayout {
 
 #[derive(Debug)]
 pub struct KeysState {
+    pub cc: cc::State,
     pub quantize_open: bool,
     /// The clip being edited.
     pub clip: Option<ClipId>,
@@ -341,6 +344,7 @@ pub struct KeysState {
 impl Default for KeysState {
     fn default() -> Self {
         KeysState {
+            cc: cc::State::default(),
             quantize_open: false,
             clip: None,
             selection: Vec::new(),
@@ -378,6 +382,7 @@ struct ClipView {
     c0: i64,
     len: i64,
     notes: Vec<Note>,
+    ctrls: Vec<soundcraft_midi::CtrlEvent>,
     name: String,
 }
 
@@ -386,7 +391,7 @@ fn clip_view(s: &Session, clip: ClipId) -> Option<ClipView> {
     let ClipContent::Midi { sequence } = &c.content else { return None };
     let c0 = s.tempo.samples_to_ticks(c.start, s.sample_rate);
     let len = s.tempo.samples_to_ticks(c.end(), s.sample_rate) - c0;
-    Some(ClipView { track, c0, len, notes: sequence.notes.clone(), name: c.name.clone() })
+    Some(ClipView { track, c0, len, notes: sequence.notes.clone(), ctrls: sequence.ctrls.clone(), name: c.name.clone() })
 }
 
 /// Indices of `want` in `notes`, each note matched once (identical notes are interchangeable).
@@ -479,6 +484,7 @@ impl StudioApp {
             self.keys.fit = true;
             self.keys.step = StepState::default();
         }
+        self.keys.cc.cancel();
         self.keys.clip = Some(clip);
         self.keys.gesture = None;
         self.keys.active = true;
@@ -505,6 +511,7 @@ impl StudioApp {
 
     /// Hide the piano roll; the panes shown before it come back.
     pub fn close_keys(&mut self) {
+        self.keys.cc.cancel();
         self.live_clear();
         self.ui.keys.show = false;
         self.keys.gesture = None;
@@ -942,7 +949,11 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
     }
     grid_input(app, ui, &map, grid, vel, &cv, now, &mut layout);
-    lane_input(app, ui, &map, vel, &cv, &layout);
+    if app.keys.cc.controller.is_none() {
+        lane_input(app, ui, &map, vel, &cv, &layout);
+    } else {
+        cc::lane(app, ui, &map, vel, &cv, &mut layout.cc);
+    }
     paint_keyboard(app, ui, &map, keyboard);
     keyboard_input(app, ui, &map, keyboard, now);
     ruler_input(app, ui, &map, ruler, &s);
@@ -996,8 +1007,8 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
         None => cp.text(corner.center(), Align2::CENTER_CENTER, &grid_text, FontId::proportional(9.5), TOKENS.text_dim),
     };
     lp.rect_filled(vel_label, 0.0, TOKENS.panel);
-    lp.text(pos2(vel_label.min.x + 8.0, vel_label.min.y + 10.0), Align2::LEFT_CENTER, "Velocity", FontId::proportional(10.5), TOKENS.text_dim);
     lp.line_segment([pos2(area.min.x, vel.min.y - 0.5), pos2(area.max.x, vel.min.y - 0.5)], Stroke::new(1.0, TOKENS.line));
+    cc::selector(app, ui, vel_label, &mut layout.cc);
 
     layout.active = app.keys.active;
     layout.ruler = r4(ruler);
