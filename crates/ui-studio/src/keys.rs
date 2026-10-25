@@ -4,7 +4,7 @@
 //!
 //! No draw tool (Ableton): a double-click on empty grid adds a note, a double-click on a note
 //! deletes it; a click selects, Shift-click adds, a drag on empty grid selects with a rubber band;
-//! dragging notes moves them (Ctrl copies), their right edge resizes, Alt+drag or the velocity
+//! dragging notes moves them (Ctrl copies), either edge resizes, Alt+Shift+drag or the velocity
 //! lane sets velocity. Every edit is a `midi.*` / `event.*` command, one undo step per gesture.
 //! Notes are addressed by index and indices shift after each edit (plan 06, section 1), so the
 //! selection is kept as note values and resolved to indices again before each command.
@@ -38,7 +38,7 @@ const HANDLE_H: f32 = 5.0;
 const HEADER_H: f32 = 28.0;
 const RULER_H: f32 = 20.0;
 const VEL_H: f32 = 52.0;
-/// How close (points) to a note's right edge a press resizes instead of moving.
+/// How close (points) to either note edge a press resizes instead of moving.
 const EDGE: f32 = 6.0;
 /// Pane height limits.
 const MIN_H: f32 = 160.0;
@@ -187,7 +187,8 @@ impl Default for KeysPrefs {
 pub enum NoteDrag {
     Move,
     Resize,
-    /// Alt+drag on a note: velocity by vertical distance.
+    ResizeStart,
+    /// Alt+Shift+drag on a note body: velocity by vertical distance.
     Velocity,
     /// A drag in the velocity lane: velocity from the pointer's height.
     Lane,
@@ -272,6 +273,10 @@ pub struct KeysLayout {
     pub step_ticks: i64,
     pub new_note_velocity: R4,
     pub use_selected_velocity: R4,
+    /// Exact length inspector for a single selected note, in ticks.
+    pub note_length: R4,
+    /// Lengths painted beside the pointer during a note gesture.
+    pub drag_lengths: Vec<i64>,
     pub ruler: R4,
     pub keyboard: R4,
     /// Visible pitches and keyboard row rectangles, including folded accidental rows.
@@ -332,6 +337,7 @@ pub struct KeysState {
     pub step: StepState,
     /// Fractional velocity carried between frames of a drag on the step velocity control.
     step_vel_drag: f32,
+    length_edit: Option<(Note, String)>,
     /// Velocity per pitch of the keys held on an armed MIDI input (0 = up). Session state.
     pub live: [u8; 128],
     /// The tracks' MIDI inputs as last seen: a change lets go of every live key.
@@ -361,6 +367,7 @@ impl Default for KeysState {
             last_audition: None,
             step: StepState::default(),
             step_vel_drag: 0.0,
+            length_edit: None,
             live: [0; 128],
             live_inputs: Vec::new(),
             serial: 0,
@@ -488,6 +495,7 @@ impl StudioApp {
             self.keys.step = StepState::default();
         }
         self.keys.cc.cancel();
+        self.keys.length_edit = None;
         self.keys.clip = Some(clip);
         self.keys.gesture = None;
         self.keys.active = true;
@@ -515,6 +523,7 @@ impl StudioApp {
     /// Hide the piano roll; the panes shown before it come back.
     pub fn close_keys(&mut self) {
         self.keys.cc.cancel();
+        self.keys.length_edit = None;
         self.live_clear();
         self.ui.keys.show = false;
         self.keys.gesture = None;
@@ -877,7 +886,8 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
         KeysLayout { visible: true, clip: Some(clip.0), track: Some(cv.track.0), pane: r4(area), notes: Vec::new(), ..KeysLayout::default() };
     let handle = Rect::from_min_max(area.min, pos2(area.max.x, area.min.y + HANDLE_H));
     let header = Rect::from_min_max(pos2(area.min.x, handle.max.y), pos2(area.max.x, handle.max.y + HEADER_H));
-    let body_top = header.max.y;
+    let narrow = area.width() < 1200.0;
+    let body_top = header.max.y + if narrow { HEADER_H } else { 0.0 };
     let ruler = Rect::from_min_max(pos2(area.min.x + KEY_W, body_top), pos2(area.max.x, body_top + RULER_H));
     let vel = Rect::from_min_max(pos2(area.min.x + KEY_W, area.max.y - VEL_H), area.max);
     let grid = Rect::from_min_max(pos2(area.min.x + KEY_W, ruler.max.y), pos2(area.max.x, vel.min.y - 1.0));
@@ -934,6 +944,10 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     }
 
     header_row(app, ui, header, &cv, &mut layout);
+    if narrow {
+        let rect = Rect::from_min_size(pos2(area.min.x + 8.0, header.max.y + 4.0), vec2(138.0, HEADER_H - 8.0));
+        note_inspector(app, ui, rect, &cv, &mut layout);
+    }
     pane_handle(app, ui, handle, &mut layout);
     paint_grid(ui, &s, &map, grid, ruler, &cv);
     let preview = preview(app, ui, &map, vel, &cv.notes);
@@ -1329,8 +1343,45 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
     });
     rx -= 150.0;
     ui.painter().text(pos2(rx, r.center().y), Align2::LEFT_CENTER, "New note velocity", FontId::proportional(11.5), TOKENS.text);
+    if r.width() >= 1200.0 {
+        rx -= 146.0;
+        note_inspector(app, ui, Rect::from_min_max(pos2(rx, r.min.y + 4.0), pos2(rx + 138.0, r.max.y - 4.0)), cv, layout);
+    }
     let title_rect = Rect::from_min_max(pos2(x + 32.0, r.min.y), pos2((rx - 8.0).max(x + 32.0), r.max.y));
     ui.painter().with_clip_rect(title_rect).text(title_rect.left_center(), Align2::LEFT_CENTER, title, FontId::proportional(11.5), TOKENS.text_dim);
+}
+
+/// Commit exact ticks on Enter or focus loss, as one undoable command.
+fn note_inspector(app: &mut StudioApp, ui: &mut Ui, rect: Rect, cv: &ClipView, layout: &mut KeysLayout) {
+    let selected = match app.keys.selection.as_slice() {
+        [note] if cv.notes.contains(note) => Some(*note),
+        _ => None,
+    };
+    if app.keys.length_edit.as_ref().map(|(note, _)| *note) != selected {
+        app.keys.length_edit = selected.map(|note| (note, note.length.to_string()));
+    }
+    ui.painter().text(rect.left_center(), Align2::LEFT_CENTER, "Length", FontId::proportional(11.5), TOKENS.text);
+    let field = Rect::from_min_max(pos2(rect.min.x + 44.0, rect.min.y), rect.max);
+    let mut empty = String::new();
+    let text = app.keys.length_edit.as_mut().map_or(&mut empty, |(_, text)| text);
+    let resp = ui
+        .add_enabled_ui(selected.is_some(), |ui| {
+            ui.put(field, egui::TextEdit::singleline(text).id_salt("keys_note_length").font(egui::TextStyle::Monospace))
+        })
+        .inner;
+    layout.note_length = r4(resp.rect);
+    let commit = resp.lost_focus();
+    resp.on_hover_text("Selected note length in ticks (minimum 1). Type an exact value, then Enter.");
+    if commit && let Some((note, text)) = app.keys.length_edit.take() {
+        match text.trim().parse::<i64>() {
+            Ok(length) if length >= 1 && note.start.checked_add(length).is_some() => {
+                if let Ok(selection) = app.keys_edit(&[(note, Note { length, ..note })]) {
+                    app.keys.selection = selection;
+                }
+            }
+            _ => app.status = "Note length must be a positive whole number of ticks".into(),
+        }
+    }
 }
 
 /// The pane's top edge: drag to change its height.
@@ -1455,9 +1506,11 @@ fn preview(app: &StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note]) -> Op
     let pos = ui.input(|i| i.pointer.latest_pos())?;
     let sel: Vec<Note> = resolve(notes, &app.keys.selection).into_iter().map(|i| notes[i]).collect();
     let raw = f64::from(pos.x - press.x) / map.ppt;
+    let free = ui.input(|i| i.modifiers.alt);
+    let round = |tick: f64| if free { tick.round() as i64 } else { map.round(tick) };
     let pairs = match kind {
         NoteDrag::Move => {
-            let dt = map.round(anchor.start as f64 + raw) - anchor.start;
+            let dt = round(anchor.start as f64 + raw) - anchor.start;
             let ds = ((press.y - pos.y) / map.kh).round() as i64;
             let (dt, ds) = clamp_move(&sel, dt, ds);
             if map.scale.enabled && !ui.input(|i| i.modifiers.shift) {
@@ -1467,9 +1520,19 @@ fn preview(app: &StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note]) -> Op
             }
         }
         NoteDrag::Resize => {
-            let min = map.grid.unwrap_or(1).max(1);
-            let dl = map.round(anchor.end() as f64 + raw) - anchor.end();
-            sel.iter().map(|n| (*n, Note { length: (n.length + dl).max(min.min(n.length)), ..*n })).collect()
+            let min = if free { 1 } else { map.grid.unwrap_or(1).max(1) };
+            let dl = round(anchor.end() as f64 + raw).saturating_sub(anchor.end());
+            sel.iter().map(|n| (*n, Note { length: n.length.saturating_add(dl).max(min), ..*n })).collect()
+        }
+        NoteDrag::ResizeStart => {
+            let min = if free { 1 } else { map.grid.unwrap_or(1).max(1) };
+            let dt = round(anchor.start as f64 + raw).saturating_sub(anchor.start);
+            sel.iter()
+                .map(|n| {
+                    let start = n.start.saturating_add(dt).clamp(0, n.end().saturating_sub(min).max(0));
+                    (*n, Note { start, length: n.end().saturating_sub(start).max(min), ..*n })
+                })
+                .collect()
         }
         NoteDrag::Velocity | NoteDrag::Lane => {
             let target = if kind == NoteDrag::Lane {
@@ -1556,14 +1619,34 @@ fn paint_notes(
         for (_, n) in pairs {
             draw(n, true, 0.9);
         }
+        layout.drag_lengths = pairs.iter().map(|(_, n)| n.length).collect();
+        if let Some(pos) = ui.input(|i| i.pointer.latest_pos()) {
+            let text = pairs.iter().map(|(_, n)| format!("{} ticks", n.length)).collect::<Vec<_>>().join(", ");
+            let galley = p.layout_no_wrap(text, FontId::monospace(11.0), TOKENS.text);
+            // Keep the readout visible even when the pointer reaches or leaves a grid edge.
+            let at = pos2(
+                (pos.x + 12.0).clamp(grid.min.x + 3.0, (grid.max.x - galley.size().x - 3.0).max(grid.min.x + 3.0)),
+                (pos.y - 22.0).clamp(grid.min.y + 3.0, (grid.max.y - galley.size().y - 3.0).max(grid.min.y + 3.0)),
+            );
+            p.rect_filled(Rect::from_min_size(at, galley.size()).expand(3.0), crate::theme::RADIUS_SM, TOKENS.panel);
+            p.galley(at, galley, TOKENS.text);
+        }
     }
 }
 
-/// The note under `pos`: the topmost, and whether the press is on its right edge.
-fn hit(layout: &KeysLayout, pos: Pos2) -> Option<(usize, bool)> {
+/// The note under `pos`, with separate edge zones and a body even for short notes.
+fn hit(layout: &KeysLayout, pos: Pos2) -> Option<(usize, NoteDrag)> {
     layout.notes.iter().rev().find(|n| pos.x >= n.rect[0] && pos.x <= n.rect[2] && pos.y >= n.rect[1] && pos.y <= n.rect[3]).map(|n| {
         let w = n.rect[2] - n.rect[0];
-        (n.index, w >= 8.0 && n.rect[2] - pos.x <= EDGE.min(w / 3.0))
+        let edge = EDGE.min(w / 3.0);
+        let kind = if n.rect[2] - pos.x <= edge {
+            NoteDrag::Resize
+        } else if pos.x - n.rect[0] <= edge {
+            NoteDrag::ResizeStart
+        } else {
+            NoteDrag::Move
+        };
+        (n.index, kind)
     })
 }
 
@@ -1575,8 +1658,8 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
         && app.keys.gesture.is_none()
     {
         match hit(layout, pos) {
-            Some((_, true)) => ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal),
-            Some(_) if mods.alt => ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical),
+            Some((_, NoteDrag::Resize | NoteDrag::ResizeStart)) => ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal),
+            Some(_) if mods.alt && mods.shift => ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical),
             Some(_) => ui.ctx().set_cursor_icon(CursorIcon::Grab),
             None => {}
         }
@@ -1657,13 +1740,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
                         app.keys.selection = vec![n];
                     }
                 }
-                let kind = if mods.alt {
-                    NoteDrag::Velocity
-                } else if edge {
-                    NoteDrag::Resize
-                } else {
-                    NoteDrag::Move
-                };
+                let kind = if mods.alt && mods.shift && edge == NoteDrag::Move { NoteDrag::Velocity } else { edge };
                 if kind == NoteDrag::Move {
                     app.audition(n.pitch, now);
                 }
@@ -1678,6 +1755,7 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
     if resp.drag_stopped() {
         finish(app, ui, map, vel, notes, layout);
     }
+    resp.on_hover_text("Drag notes to move, either edge to resize. Alt: bypass snap. Ctrl: copy. Alt+Shift on the body: velocity.");
 }
 
 /// While dragging notes: Ctrl makes a copy; a pitch change auditions the new pitch.
@@ -1739,7 +1817,7 @@ fn finish(app: &mut StudioApp, ui: &Ui, map: &Map, vel: Rect, notes: &[Note], la
                         app.keys.selection = sel;
                     }
                 }
-                NoteDrag::Resize | NoteDrag::Velocity | NoteDrag::Lane => {
+                NoteDrag::Resize | NoteDrag::ResizeStart | NoteDrag::Velocity | NoteDrag::Lane => {
                     if let Ok(sel) = app.keys_edit(&pairs) {
                         app.keys.selection = sel;
                     }

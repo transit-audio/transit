@@ -12,6 +12,8 @@ struct T {
     app: StudioApp,
     ctx: egui::Context,
     time: f64,
+    width: f32,
+    painted_text: Vec<String>,
     track: TrackId,
     clip: ClipId,
 }
@@ -26,7 +28,7 @@ impl T {
         let clip = ClipId(c["clip"].as_u64().unwrap());
         app.ui.show_mixer = true;
         app.ui.show_devices = false;
-        let mut t = T { app, ctx: egui::Context::default(), time: 0.0, track, clip };
+        let mut t = T { app, ctx: egui::Context::default(), time: 0.0, width: 1400.0, painted_text: Vec::new(), track, clip };
         t.frames(3);
         t
     }
@@ -44,7 +46,7 @@ impl T {
         for _ in 0..n {
             self.time += 1.0 / 60.0;
             let mut raw = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))),
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(self.width, 800.0))),
                 time: Some(self.time),
                 ..Default::default()
             };
@@ -54,6 +56,16 @@ impl T {
                 app.logic(ui.ctx());
                 app.ui(ui);
             });
+            self.painted_text = out
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if shape.clip_rect.intersects(text.galley.rect.translate(text.pos.to_vec2())) => {
+                        Some(text.galley.text().to_owned())
+                    }
+                    _ => None,
+                })
+                .collect();
             out.textures_delta.clear();
         }
     }
@@ -123,6 +135,172 @@ fn merged(mut a: Value, b: Value) -> Value {
 
 fn mid(r: [f32; 4]) -> (f32, f32) {
     ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0)
+}
+
+#[test]
+fn note_length_alt_resizes_both_edges_below_fixed_and_adaptive_grids_and_undoes() {
+    for adaptive in [false, true] {
+        for start_edge in [false, true] {
+            for (alt, wanted) in [(true, 60), (true, 1), (false, 240)] {
+                let mut t = T::open();
+                (if adaptive { Snap::Adaptive } else { Snap::Sixteenth }).apply(&mut t.app.ui.keys.grid);
+                t.add(60, 480, 960);
+                let before = t.notes();
+                let undo = t.undo_len();
+                let r = t.note_rect(60, 480);
+                let grab = (if start_edge { r[0] + 1.0 } else { r[2] - 1.0 }, mid(r).1);
+                let dx = (960 - wanted) as f32 * t.app.keys.layout.px_per_tick as f32;
+                t.drag(grab, (grab.0 + if start_edge { dx } else { -dx }, grab.1), json!({"alt": alt}));
+                let note = t.notes()[0];
+                let expected = if alt { wanted } else { t.app.keys.layout.grid_step };
+                assert_eq!(note.length, expected, "adaptive={adaptive} start={start_edge} alt={alt}");
+                assert_eq!(note.start, if start_edge { before[0].end() - expected } else { 480 });
+                assert_eq!(note.velocity, before[0].velocity);
+                assert_eq!(t.undo_len(), undo + 1);
+                t.app.run("edit.undo", json!({})).unwrap();
+                assert_eq!(t.notes(), before);
+            }
+        }
+    }
+}
+
+#[test]
+fn note_length_alt_move_and_copy_bypass_snap_without_changing_velocity_or_length() {
+    for copy in [false, true] {
+        let mut t = T::open();
+        t.add(60, 480, 480);
+        let undo = t.undo_len();
+        let grab = t.at(700.0, 60);
+        let to = t.at(700.0 + 137.0, 62);
+        t.drag(grab, to, json!({"alt": true, "cmd": copy}));
+        let notes = t.notes();
+        let moved = notes.iter().find(|n| n.pitch == 62).unwrap();
+        assert_eq!((moved.start, moved.length, moved.velocity), (617, 480, 100));
+        assert_eq!(notes.len(), if copy { 2 } else { 1 });
+        assert_eq!(t.undo_len(), undo + 1);
+        t.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!((t.notes().len(), t.notes()[0].start), (1, 480));
+    }
+}
+
+#[test]
+fn note_length_inspector_wraps_below_the_toolbar_in_a_narrow_window() {
+    let mut t = T::open();
+    t.width = 1024.0;
+    t.add(60, 480, 480);
+    t.click(mid(t.note_rect(60, 480)));
+    let l = &t.app.keys.layout;
+    assert!(l.note_length[1] > l.tab_keys[3]);
+    assert!(l.note_length[3] < l.ruler[1]);
+    t.click(mid(t.app.keys.layout.note_length));
+    t.key("A", json!({"cmd": true}));
+    t.input("ui.text", json!({"text": "37"}));
+    t.key("Enter", json!({}));
+    assert_eq!(t.notes()[0].length, 37);
+}
+
+#[test]
+fn note_length_inspector_accepts_exact_ticks_rejects_invalid_and_undoes_once() {
+    let mut t = T::open();
+    t.add(60, 480, 480);
+    t.add(64, 960, 240);
+    t.click(mid(t.note_rect(60, 480)));
+    for (text, expected, changed) in
+        [("60", 60, true), ("1", 1, true), ("0", 1, false), ("-5", 1, false), ("9223372036854775807", 1, false), ("bad", 1, false)]
+    {
+        t.click(mid(t.note_rect(60, 480)));
+        let before = t.notes();
+        let undo = t.undo_len();
+        t.click(mid(t.app.keys.layout.note_length));
+        t.key("A", json!({"cmd": true}));
+        t.key("Delete", json!({}));
+        assert_eq!(t.notes(), before, "Delete in the inspector must not delete notes");
+        t.input("ui.text", json!({"text": text}));
+        assert_eq!(t.notes(), before, "typing is a draft until committed");
+        assert_eq!(t.selected(), 1, "Ctrl+A in the inspector must not select every note");
+        t.key("Enter", json!({}));
+        assert_eq!(t.notes()[0].length, expected, "input {text}");
+        assert_eq!(t.notes()[1], before[1], "unselected note is untouched");
+        assert_eq!(t.undo_len(), undo + usize::from(changed));
+        if changed {
+            t.app.run("edit.undo", json!({})).unwrap();
+            assert_eq!(t.notes(), before);
+            t.app.run("edit.redo", json!({})).unwrap();
+            t.frames(2);
+        }
+    }
+}
+
+#[test]
+fn note_length_group_resize_and_snap_off_keep_one_tick_minimum_without_touching_step_length() {
+    for start_edge in [false, true] {
+        let mut t = T::open();
+        Snap::Off.apply(&mut t.app.ui.keys.grid);
+        t.add(60, 480, 960);
+        t.add(64, 720, 480);
+        t.app.keys.selection = t.notes();
+        let before = t.notes();
+        let step = t.app.keys_step();
+        let undo = t.undo_len();
+        let r = t.note_rect(60, 480);
+        let grab = (if start_edge { r[0] + 1.0 } else { r[2] - 1.0 }, mid(r).1);
+        let dx = 900.0 * t.app.keys.layout.px_per_tick as f32;
+        t.drag(grab, (grab.0 + if start_edge { dx } else { -dx }, grab.1), json!({}));
+        let after = t.notes();
+        assert_eq!(after.iter().map(|n| n.length).collect::<Vec<_>>(), if start_edge { vec![1, 60] } else { vec![60, 1] });
+        for note in &after {
+            let original = before.iter().find(|n| n.pitch == note.pitch).unwrap();
+            assert_eq!(if start_edge { note.end() } else { note.start }, if start_edge { original.end() } else { original.start });
+        }
+        assert_eq!(t.app.keys_step(), step);
+        assert_eq!(t.undo_len(), undo + 1);
+        t.app.run("edit.undo", json!({})).unwrap();
+        assert_eq!(t.notes(), before);
+    }
+}
+
+#[test]
+fn note_length_one_tick_notes_keep_both_edges_reachable_and_start_resize_stops_at_zero() {
+    for start_edge in [false, true] {
+        let mut t = T::open();
+        t.add(60, 480, 1);
+        let r = t.note_rect(60, 480);
+        let grab = (if start_edge { r[0] + 0.25 } else { r[2] - 0.25 }, mid(r).1);
+        let dx = 300.0 * t.app.keys.layout.px_per_tick as f32;
+        t.drag(grab, (grab.0 + if start_edge { -dx } else { dx }, grab.1), json!({"alt":true}));
+        assert_eq!((t.notes()[0].start, t.notes()[0].length), (if start_edge { 180 } else { 480 }, 301));
+    }
+    let mut t = T::open();
+    t.add(60, 480, 480);
+    let r = t.note_rect(60, 480);
+    let grab = (r[0] + 1.0, mid(r).1);
+    t.drag(grab, (grab.0 - 900.0 * t.app.keys.layout.px_per_tick as f32, grab.1), json!({"alt":true}));
+    assert_eq!((t.notes()[0].start, t.notes()[0].length), (0, 960));
+}
+
+#[test]
+fn note_length_preview_is_visible_before_release_and_matches_committed_ticks() {
+    let mut t = T::open();
+    t.add(60, 480, 960);
+    let before = t.notes();
+    let r = t.note_rect(60, 480);
+    let grab = (r[2] - 1.0, mid(r).1);
+    let to = (grab.0 - 900.0 * t.app.keys.layout.px_per_tick as f32, t.app.keys.layout.grid[1] + 1.0);
+    let (req, _rx) = crate::ControlRequest::new("ui.drag", json!({"x":grab.0,"y":grab.1,"to_x":to.0,"to_y":to.1,"alt":true,"steps":12}));
+    crate::control::handle_for_test(&mut t.app, &t.ctx, &req).unwrap();
+    let mut lengths = Vec::new();
+    let mut painted = false;
+    for _ in 0..30 {
+        t.frames(1);
+        if !t.app.keys.layout.drag_lengths.is_empty() && t.notes() == before {
+            lengths.extend_from_slice(&t.app.keys.layout.drag_lengths);
+            painted |= t.painted_text.iter().any(|text| text == "60 ticks");
+        }
+    }
+    assert!(lengths.contains(&60), "live preview must reach the exact length before commit: {lengths:?}");
+    assert!(painted, "the length must reach the visible paint output before release");
+    assert_eq!(t.notes()[0].length, 60);
+    assert!(t.app.keys.layout.drag_lengths.is_empty(), "readout disappears on release");
 }
 
 #[test]
@@ -382,14 +560,14 @@ fn dragging_moves_snapped_the_edge_resizes_and_ctrl_drag_copies_a_note_or_the_se
 }
 
 #[test]
-fn alt_drag_and_the_velocity_lane_set_velocity_in_one_step() {
+fn alt_shift_drag_and_the_velocity_lane_set_velocity_in_one_step() {
     let mut t = T::open();
     t.add(60, 0, 480);
     let undo = t.undo_len();
     let grab = t.at(200.0, 60);
-    t.drag(grab, (grab.0, grab.1 - 30.0), json!({"alt": true}));
+    t.drag(grab, (grab.0, grab.1 - 30.0), json!({"alt": true, "shift": true}));
     let n = t.notes();
-    assert_eq!((n[0].velocity, n[0].start, n[0].pitch), (120, 0, 60), "Alt+drag up 30 points: +20");
+    assert_eq!((n[0].velocity, n[0].start, n[0].pitch), (120, 0, 60), "Alt+Shift+drag up 30 points: +20");
     assert_eq!(t.undo_len(), undo + 1);
     assert_eq!(t.app.ui.keys.velocity, 100, "editing a note leaves the new-note velocity alone");
     // The velocity lane: drag the stem to about a quarter height.
@@ -427,9 +605,9 @@ fn new_note_velocity_field_survives_note_edits_and_drives_drawing_and_audition()
     assert_eq!(serde_json::to_value(t.app.engine.session()).unwrap(), before);
 
     let grab = t.at(200.0, 60);
-    t.drag(grab, (grab.0, grab.1 + 148.5), json!({"alt": true}));
+    t.drag(grab, (grab.0, grab.1 + 148.5), json!({"alt": true, "shift": true}));
     assert_eq!(t.notes()[0].velocity, 1, "reproduce the near-silent edited note");
-    assert_eq!(t.app.ui.keys.velocity, 87, "Alt+drag must not change the field");
+    assert_eq!(t.app.ui.keys.velocity, 87, "Alt+Shift+drag must not change the field");
     // Selecting the quiet note auditions at the field's velocity without adopting its velocity.
     t.click(mid(t.note_rect(60, 0)));
     assert_eq!(t.app.keys.last_audition, Some((60, 87)));
@@ -724,7 +902,7 @@ fn an_empty_instrument_lane_shows_the_create_clip_hint_until_a_clip_exists() {
     let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
     let r = app.run("track.new", json!({"kind": "instrument"})).unwrap();
     let track = TrackId(r["tracks"][0].as_u64().unwrap());
-    let mut t = T { app, ctx: egui::Context::default(), time: 0.0, track, clip: ClipId(0) };
+    let mut t = T { app, ctx: egui::Context::default(), time: 0.0, width: 1400.0, painted_text: Vec::new(), track, clip: ClipId(0) };
     t.frames(3);
     assert_eq!(t.app.keys.layout.hint_tracks, vec![track.0], "hint on the empty instrument lane");
     let lane = t.app.arrange.layout.tracks[0].lane;
