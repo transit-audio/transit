@@ -546,12 +546,18 @@ fn reconnect_menu_and_direct_call_refuse_recording() {
 
 #[test]
 fn driver_panel_follows_running_system_not_draft() {
+    if !soundcraft_playback::devices::NATIVE_ASIO_COMPILED {
+        return;
+    }
     let mut t = T::new();
+    t.control("audio.fake_devices", asio_devices()).unwrap();
     t.open_window();
     let has_panel = |t: &T| t.layout()["controls"].as_array().unwrap().iter().any(|c| c["value"] == "panel");
     t.pick("system", "ASIO");
     assert!(!has_panel(&t), "WASAPI is still running");
-    t.pick("output", "Focusrite USB ASIO · 2 ch");
+    t.click(mid(t.control_rect("backend")));
+    t.click(mid(T::rect(&t.layout()["items"], Some(Backend::NativeAsio.label()), "backend")));
+    t.pick("output", &format!("{MODEL12} · 10 ch"));
     t.click(mid(t.control_rect("apply")));
     assert!(has_panel(&t), "ASIO is running now");
     t.pick("system", "WASAPI");
