@@ -70,6 +70,9 @@ A new issue is a new row; give it its own file only if the row cannot hold what 
 | K61 | MIDI Monitor (#91): the window matches each event to its SysEx payload with a full scan of the frame's payloads, so a frame with thousands of rows and thousands of payloads costs events x payloads. UI only; the audio and ingress threads are unaffected. | Open | Match payloads by a sorted id cursor. |
 | K62 | MIDI Monitor (#91): the input `Dropped events` count mixes ring drops with SysEx capture-ring drops. | Open | Count them separately if the distinction proves useful. |
 | K63 | MIDI Monitor (#91): SysEx ids are 32-bit per direction; after 2^32 SysEx messages in one direction every later one counts as dropped until the next monitor Hub is built. Unrealistic in practice. | Open | Wrap the id, skipping 0. |
+| K64 | Real-time render (ADR 0027, #71) covers the mix bounce and one stem per External Instrument. Freeze, flatten and bounce in place of an unfrozen External Instrument track are still refused, and Bounce Stems and Stems by Output Path still render offline only (`mode: "offline_without_external"`). | Open | Run freeze and the stem bounces through the same tap and writer (`crates/playback/src/realtime_render.rs`). |
+| K65 | A real-time render cannot normalize, fold down to stereo or bounce a bus: the dialog and `file.bounce_mix {mode: "realtime"}` refuse them. | Open | Normalize from the written file after the pass, and fold or pick the bus in the writer thread. |
+| K66 | A real-time render fails on a ring overrun, a locate or loop, an early stop and a change of A, but a driver xrun or a capture gap the audio thread does not see as a jump (ADR 0020 decision 9's "Dropout at 1:23.4") is not detected yet. | Open | Compare the backend's xrun and discontinuity counters (`Player::backend_stats`) before and after the pass, and fail the render on any change. |
 
 ## Release-note caveats
 

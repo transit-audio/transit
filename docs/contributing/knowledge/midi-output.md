@@ -196,11 +196,30 @@ the latency `manual_ms` set by hand; the measured latency is per machine (Measur
   is kept); the measurement of the exact key; the newest measurement of the same port and return
   at another rate or buffer (another rate rescaled by time, 1061 at 48 kHz is 975 at 44.1 kHz),
   labeled "measure again"; else 0 ("Not measured").
-- **Renders.** The synth only sounds in real time. An offline bounce, stems or bounce by path
-  with an unfrozen External Instrument is refused unless the caller passes `without_external`
-  (the studio's Bounce dialog asks: "Render without it" or Cancel; the status names the tracks
-  left out). Freeze, flatten and bounce in place of the device track itself are refused until
-  real-time render lands (slice 3).
+- **Renders.** The synth only sounds in real time. A bounce, stems or bounce by path with an
+  unfrozen External Instrument and no `mode` is refused, naming both ways out. The Bounce
+  dialog asks: "Render in real time", "Render without hardware (offline, faster)" or Cancel.
+  `mode: "offline_without_external"` (or the older `without_external: true`) leaves the devices
+  out, and the status names the tracks left out. Freeze, flatten and bounce in place of the
+  device track itself are still refused (K64).
+- **Real-time render (slice 3, [ADR 0027](../../adr/0027-external-instrument-real-time-render.md)).**
+  `file.bounce_mix {mode: "realtime", stems?, uncompensated?}`. The engine checks what it can see
+  (`cmd::realtime_plan`: the transport, each device's port, return and C) and names the files.
+  The app runs the command itself (`finish/realtime.rs`): it adds the device checks (open,
+  duplex, no measurement, ports present), then calls `Player::start_realtime_render`, which plays
+  from the range start minus max(C, one block).
+  - The MIDI goes out exactly as in playback.
+  - Each block, after `plans.render`, the audio thread copies Main's channels and each return's
+    input channels into `RenderTap`'s preallocated ring (`crates/playback/src/realtime_render.rs`).
+    It never waits: a full ring, a jump, an early stop or a change of A fails the capture.
+  - The `transit-render-writer` thread places the frames. The mix's sample s is the frame
+    rendered at s + A, and a stem's is the frame read at s + C, times the device gain. It writes
+    `.part` files and renames them when complete.
+  - The Player stops the transport when the capture is complete. Cancel, a failure and a device
+    loss also release each device's track through the output thread (`release_track`), and the
+    part files are removed before `cancel_realtime_render` returns.
+  - The dialog shows "Rendering in real time… bar N of M" with Cancel, and the transport commands
+    are refused while it plays.
 - **Live playing.** Echo goes out at once; the return is monitored through the strip with no
   added delay, transport running or not.
 
@@ -238,4 +257,13 @@ All Notes Off off the audio thread; Cancel and a device loss release the note; t
 `crates/model/src/io_map.rs` (the key and the lookup), `crates/mix/src/external.rs` (C in the
 plan), `crates/engine/src/cmd/external_instrument.rs`, `crates/ui-studio/src/external_measure.rs`
 and `external_measure_tests.rs` (the card: progress, Cancel, the stored key, manual wins, a buffer
-change and a rate change, the refusal texts, Keep).
+change and a rate change, the refusal texts, Keep). Real-time render:
+`crates/playback/src/realtime_render.rs` (the tap: window, reach, overrun, jump, stop, late
+start, a change of A), `crates/playback/src/player/device/realtime_render_tests.rs` (through the
+Player with a fake duplex device and a fake MIDI port, pumped in lockstep: the bounce is the
+offline software render plus the return on the grid within one frame, and the stem is at plan
+position - C; Cancel releases the held note and leaves no file; an overrun fails with its message;
+a device loss; the Player's refusals), `crates/engine/src/cmd/realtime_render.rs` (the engine's
+refusals and the plan; the offline mode under both names), and
+`crates/ui-studio/src/finish/realtime/tests.rs` (the question's three choices, the refusals shown
+before starting, bar N of M, Cancel, the transport refusal, the outcome).
