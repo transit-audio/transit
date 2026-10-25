@@ -342,6 +342,9 @@ pub struct Session {
     /// Performance). Independent of undo so a restore survives later edits.
     #[serde(default)]
     pub midi_originals: std::collections::BTreeMap<u64, soundcraft_midi::Sequence>,
+    /// MIDI Learn mappings saved with this session (ADR 0028). Old files have none.
+    #[serde(default, skip_serializing_if = "crate::MappingSet::is_empty")]
+    pub midi_mappings: crate::MappingSet,
     #[serde(skip)]
     pub pool: SourcePool,
     /// The folder relative source paths point into: where the session was opened or last saved.
@@ -397,6 +400,7 @@ impl Session {
             next_id: 1,
             comments: String::new(),
             midi_originals: std::collections::BTreeMap::new(),
+            midi_mappings: Default::default(),
             pool: SourcePool::default(),
             folder: None,
             load_notes: Vec::new(),
