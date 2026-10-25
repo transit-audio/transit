@@ -1,8 +1,9 @@
-//! `cargo xtask <ci|layers|assets|wasm|rt-targets|audio-bench|ico>` — repository gates.
+//! `cargo xtask <ci|layers|assets|timing|wasm|rt-targets|audio-bench|ico>` — repository gates.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod ico;
+mod timing;
 
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Output};
@@ -269,6 +270,7 @@ fn ci() -> Result<(), String> {
         ("test", Box::new(|| cargo(&["test", "--workspace"]))),
         ("assets", Box::new(assets)),
         ("layers", Box::new(layers)),
+        ("timing", Box::new(|| timing::run(&root()))),
         ("wasm", Box::new(wasm)),
         ("rt-targets", Box::new(rt_targets)),
         ("audio-bench-fake", Box::new(audio_bench_fake)),
@@ -294,11 +296,12 @@ fn main() -> ExitCode {
         Some("ci") => ci(),
         Some("layers") => layers(),
         Some("assets") => assets(),
+        Some("timing") => timing::run(&root()),
         Some("wasm") => wasm(),
         Some("rt-targets") => rt_targets(),
         Some("audio-bench") => audio_bench(args.get(1..).unwrap_or(&[])),
         Some("ico") => ico::run(args.get(1..).unwrap_or(&[])),
-        _ => Err("usage: cargo xtask <ci|layers|assets|wasm|rt-targets|audio-bench|ico>".into()),
+        _ => Err("usage: cargo xtask <ci|layers|assets|timing|wasm|rt-targets|audio-bench|ico>".into()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,
