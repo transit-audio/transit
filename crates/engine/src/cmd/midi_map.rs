@@ -30,7 +30,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Map MIDI Control",
             [],
             None,
-            "{source: {port, channel?: 1..16|any, kind: cc|note, number: 0..127}, target, mode?: pickup|jump, range?: [min, max] (0..1), toggle?: bool, scope?: session|profile}",
+            "{source: {port, channel?: 1..16|any, kind: cc|note, number: 0..127}, target, mode?: pickup|jump, range?: [min, max] (0..1), toggle?: bool, pass_through?: bool (also reach the track's routes; default false), scope?: session|profile}",
             always,
             map
         ),
@@ -130,6 +130,9 @@ fn map(e: &mut Engine, p: &Value) -> Result<Value> {
     if let Some(t) = p.get("toggle") {
         m.toggle = t.as_bool().ok_or_else(|| bad(id, "`toggle` must be a boolean"))?;
     }
+    if let Some(t) = p.get("pass_through") {
+        m.pass_through = t.as_bool().ok_or_else(|| bad(id, "`pass_through` must be a boolean"))?;
+    }
     m.validate().map_err(|why| bad(id, why))?;
     let replaced = match scope {
         Scope::Session => store(&mut e.session_mut().midi_mappings, m.clone()),
@@ -196,6 +199,7 @@ fn describe(m: &Mapping, scope: Scope, overridden: bool) -> Value {
         "mode": m.mode,
         "range": [m.min, m.max],
         "toggle": m.toggle,
+        "pass_through": m.pass_through,
         "overridden": overridden,
     })
 }
@@ -316,5 +320,35 @@ mod tests {
         let r = e.execute("midi.mappings", &json!({})).unwrap();
         assert_eq!(r["session"].as_array().unwrap().len(), 1);
         assert_eq!(r["active"], 0);
+    }
+}
+
+#[cfg(test)]
+mod replace_tests {
+    #![allow(clippy::unwrap_used)]
+    use crate::demo::demo_engine;
+    use serde_json::json;
+
+    #[test]
+    fn an_armed_learn_does_not_survive_a_new_session() {
+        let mut e = demo_engine();
+        let t = e.session().tracks[0].id.0;
+        e.execute("midi.learn", &json!({"target": format!("track:{t}:volume")})).unwrap();
+        let rev = e.midi_profile_revision();
+        e.replace_session(soundcraft_model::Session::default());
+        assert!(e.learn().is_none(), "the armed control belongs to the old session");
+        assert_ne!(e.midi_profile_revision(), rev, "the host is told to disarm the worker");
+    }
+
+    #[test]
+    fn pass_through_is_a_mapping_option_that_defaults_off() {
+        let mut e = demo_engine();
+        let t = e.session().tracks[0].id.0;
+        let src = json!({"port": "K", "channel": 1, "kind": "cc", "number": 1});
+        e.execute("midi.map", &json!({"source": src, "target": format!("track:{t}:volume")})).unwrap();
+        assert!(!e.session().midi_mappings.iter().next().unwrap().pass_through);
+        e.execute("midi.map", &json!({"source": src, "target": format!("track:{t}:volume"), "pass_through": true})).unwrap();
+        assert!(e.session().midi_mappings.iter().next().unwrap().pass_through);
+        assert!(e.execute("midi.map", &json!({"source": src, "target": format!("track:{t}:volume"), "pass_through": 3})).is_err());
     }
 }

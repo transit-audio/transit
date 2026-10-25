@@ -390,6 +390,10 @@ impl Engine {
         self.state_restores.clear();
         self.last_selection = None;
         self.imports.clear();
+        // An armed MIDI Learn names a control of the old session; the host disarms the worker.
+        if self.learn.take().is_some() {
+            self.midi_profile_revision = self.midi_profile_revision.wrapping_add(1);
+        }
         self.revision = self.revision.wrapping_add(1);
         self.dirty = false;
     }
