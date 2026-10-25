@@ -82,6 +82,21 @@ Hosted plug-ins (CLAP, VST3) live on the plug-in host thread ([ADR 0018](../../a
   staging did not predict (a slot whose layout changed) is submitted too: that plan leaves the
   slot vacant ("Loading…"), and when the instance is ready the same document is compiled again
   with it (`PlanCompiler::retry_vacant`, `Handles::retry`).
+- **Load and open timing (issue #67):** a load passes four phases, published while it runs
+  (`LoadPhase`, `PhaseLog` in `crates/plugin-host/src/phases.rs`): waiting for the host thread,
+  creating the instance (module load, parameter table, instance), restoring state (the factory
+  marks it with `report_phase`; `soundcraft_mix::create_instance_with`), binding to the plan
+  (made, waiting for the compile). Marks take their time from an injected clock (`Config::clock`
+  for editors, the handles' clock for loads), so tests drive them with a manual clock and never
+  sleep. The slot tooltip reads "Loading X… 12.3 s (creating instance)"; when the compile takes
+  the instance `Handles::take_loaded` hands the phases and total to the UI, which logs one INFO
+  line per phase plus a total (control thread, never the audio thread), keeps the total per plug-in
+  id in `UiState::plugin_load_ms` (shown as "last time 14 s" beside "Loading…") and says "X loaded
+  in 14.1 s" in the status line when it took over 2 s. An editor open is timed the same way
+  (`PluginEditor::opening_for`, `take_open_report`): the button reads "Opening… 3 s" and the
+  status line "X editor opened in 3.2 s" over 2 s. The format cannot split the parameter-table
+  read from instance creation, so they are one phase, and the editor's window creation and plug-in
+  attach happen inside one `open` call.
 - **The forwarder:** the host thread wraps each instance (`Ctx::adopt`) in a `Hosted` forwarder.
   The audio thread calls `process` and the rest through it (one extra virtual call, no
   allocation: `crates/plugin-host/tests/audio_alloc.rs`).

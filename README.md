@@ -147,7 +147,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Hosts CLAP and VST3 plug-ins, with their own editor windows, saved state, and reported latency.
 - The plug-in window header has a preset dropdown (Save, Save As…, Load…, previous/next), Bypass and a menu (Reset, Copy/Paste state, Delete, Show in chain). User presets are `.vstpreset` files other hosts can read.
 - The device card shows Loading while a heavy plug-in instantiates.
-- Plug-ins load on a host thread, so a slow or stuck plug-in no longer freezes the UI: its slot reads "Loading…" while it instantiates and "Not responding" if it stops answering.
+- Plug-ins load on a host thread, so a slow or stuck plug-in no longer freezes the UI: its slot reads "Loading…" while it instantiates and "Not responding" if it stops answering. A slow load shows how long it has taken, the phase it is in and how long it took last time; the status line reports loads and editor opens over 2 s.
 - Plug-in browser with a background scan and your own search folders.
 - Built-in instruments: Subtractive Synth, Drum Synth, Sampler. All built-ins open an editor window: parameter rows, Sampler load or drop, Drum Synth by pad.
 - Built-in panels with knobs, and bespoke layouts for Compressor, Gate, EQ, Synth and Plate; factory and user presets; a scope and a gain-reduction display on the dynamics panels. Moving a plug-in knob while a lane is armed (Write, Latch, Touch) records into it.
