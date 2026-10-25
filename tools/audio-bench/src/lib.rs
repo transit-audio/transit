@@ -298,8 +298,11 @@ pub fn list_jack() -> Result<String, String> {
     let system = soundcraft_playback::devices::native_jack_system()
         .ok_or("--backend jack needs Linux and a build with --features native-jack (cargo build -p audio-bench --features native-jack)")?;
     let mut text = format!("system: {} (native)\n", system.name);
+    // Without a device the diagnostic says why the system is unavailable; with one, each group's
+    // note names the server and where its rate and buffer are set.
+    let tag = if system.outputs.is_empty() && system.inputs.is_empty() { "unavailable" } else { "note" };
     for diagnostic in &system.diagnostics {
-        text.push_str(&format!("unavailable: {diagnostic}\n"));
+        text.push_str(&format!("{tag}: {diagnostic}\n"));
     }
     for (label, devices) in [("outputs", &system.outputs), ("inputs", &system.inputs)] {
         text.push_str(&format!("{label}:\n"));

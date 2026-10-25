@@ -34,6 +34,10 @@ impl NativeKind {
 /// it): native WASAPI on the WASAPI system, native ASIO on the ASIO system, native JACK on the JACK
 /// system.
 pub fn factory_for(cfg: &AudioConfig) -> Option<(Box<dyn ab::BackendFactory>, NativeKind)> {
+    #[cfg(all(target_os = "linux", feature = "native-jack"))]
+    if auto_jack_candidate(cfg) && matches!(transit_audio_jack::JackBackend::shared().probe(), transit_audio_jack::ServerState::Running(_)) {
+        return Some((Box::new(transit_audio_jack::JackFactory), NativeKind::Jack));
+    }
     if !cfg.backend.native_on(cfg.system.as_deref()) {
         return None;
     }
@@ -48,6 +52,25 @@ pub fn factory_for(cfg: &AudioConfig) -> Option<(Box<dyn ab::BackendFactory>, Na
         devices::Backend::NativeJack => Some((Box::new(transit_audio_jack::JackFactory), NativeKind::Jack)),
         _ => None,
     }
+}
+
+/// Whether `Auto` would open the native JACK backend for `cfg` when a JACK or PipeWire-JACK server
+/// answers (ADR 0021, slice 2 amendment): the JACK system, or the platform default with no device
+/// named (a saved ALSA device name keeps cpal). [`factory_for`] asks this only in a Linux build
+/// with the backend, and then probes for a server (never starting one); with none, cpal's ALSA
+/// host serves as before.
+pub fn auto_jack_candidate(cfg: &AudioConfig) -> bool {
+    cfg.backend == devices::Backend::Auto
+        && (devices::is_jack_system(cfg.system.as_deref()) || (cfg.system.is_none() && cfg.output.is_none() && cfg.input.is_none()))
+}
+
+/// The Audio Devices note of one JACK port group: the server, and that its rate and buffer are the
+/// server's, with where to change them (the panel offers only the server's buffer size).
+pub fn jack_group_note(group: &str, server: &str, rate: u32, buffer: u32) -> String {
+    format!(
+        "{group}: Native JACK ({server}) runs at {rate} Hz with a {buffer}-sample buffer, both set by the server; change them there \
+         (PipeWire: pw-metadata -n settings 0 clock.force-quantum {buffer}; JACK 2: jackd -p {buffer})"
+    )
 }
 
 /// One endpoint as the settings window lists it: its channel count in `direction`, the standard
@@ -137,15 +160,14 @@ pub fn asio_system(selected: Option<&str>) -> AudioSystem {
 /// device and the reason as the system's diagnostic.
 #[cfg(all(target_os = "linux", feature = "native-jack"))]
 pub fn jack_system() -> AudioSystem {
-    let state = transit_audio_jack::JackBackend::shared().probe();
+    let backend = transit_audio_jack::JackBackend::shared();
+    let state = backend.probe();
     match &state {
-        transit_audio_jack::ServerState::Running(server) => system_from_endpoints(
-            devices::JACK_SYSTEM,
-            &server.endpoints(ab::Direction::Output),
-            &server.endpoints(ab::Direction::Input),
-            &[],
-            Vec::new(),
-        ),
+        transit_audio_jack::ServerState::Running(server) => {
+            let name = backend.server_name();
+            let notes = server.devices.iter().map(|d| jack_group_note(&d.name, &name, server.rate, server.buffer)).collect();
+            system_from_endpoints(devices::JACK_SYSTEM, &server.endpoints(ab::Direction::Output), &server.endpoints(ab::Direction::Input), &[], notes)
+        }
         _ => system_from_endpoints(devices::JACK_SYSTEM, &[], &[], &[], state.diagnostic().into_iter().collect()),
     }
 }
@@ -228,7 +250,20 @@ mod tests {
         let jack = AudioConfig { backend: Backend::NativeJack, system: Some("JACK".into()), ..Default::default() };
         assert_eq!(factory_for(&jack).map(|(_, kind)| kind), devices::NATIVE_JACK_COMPILED.then_some(NativeKind::Jack));
         let auto_jack = AudioConfig { backend: Backend::Auto, system: Some("JACK".into()), ..Default::default() };
-        assert!(factory_for(&auto_jack).is_none(), "Auto stays cpal on Linux (ADR 0021, decision 9)");
+        assert!(auto_jack_candidate(&auto_jack), "Auto on the JACK system opens native JACK when a server answers");
+        assert!(auto_jack_candidate(&AudioConfig::default()), "so does the untouched default");
+        let alsa_device = AudioConfig { output: Some("hw:CARD=USB,DEV=0".into()), ..Default::default() };
+        assert!(!auto_jack_candidate(&alsa_device), "a saved ALSA device keeps cpal");
+        assert!(!auto_jack_candidate(&AudioConfig { system: Some("ALSA".into()), ..Default::default() }));
+        assert!(!auto_jack_candidate(&AudioConfig { backend: Backend::Cpal, ..auto_jack.clone() }), "cpal is cpal");
+        if !devices::NATIVE_JACK_COMPILED {
+            assert!(factory_for(&auto_jack).is_none(), "a build without the backend stays cpal");
+        }
+        assert_eq!(
+            jack_group_note("system", "JACK 1.9.20", 48_000, 128),
+            "system: Native JACK (JACK 1.9.20) runs at 48000 Hz with a 128-sample buffer, both set by the server; change them there \
+             (PipeWire: pw-metadata -n settings 0 clock.force-quantum 128; JACK 2: jackd -p 128)"
+        );
         let crossed = AudioConfig { backend: Backend::NativeAsio, system: Some("WASAPI".into()), ..Default::default() };
         assert!(factory_for(&crossed).is_none(), "native ASIO never serves the WASAPI system");
         assert!(factory_for(&AudioConfig { backend: Backend::Cpal, ..asio }).is_none());

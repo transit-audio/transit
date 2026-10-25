@@ -37,7 +37,9 @@ pub enum Backend {
     NativeAsio,
     /// The native JACK backend (`transit-audio-jack`, ADR 0021): JACK 2 or PipeWire through the JACK
     /// client API. Used only on the JACK system of a Linux build with the `native-jack` feature;
-    /// otherwise, or if it fails to open, cpal. `Auto` stays cpal (ALSA) on Linux.
+    /// otherwise, or if it fails to open, cpal. `Auto` opens it too when a JACK or PipeWire-JACK
+    /// server answers, on the JACK system or the untouched default (ADR 0021, slice 2 amendment);
+    /// otherwise `Auto` is cpal (ALSA) on Linux.
     NativeJack,
 }
 
@@ -51,7 +53,7 @@ impl Backend {
             Backend::Cpal => "cpal (legacy)",
             Backend::NativeWasapi => "Native WASAPI",
             Backend::NativeAsio => "Native ASIO",
-            Backend::NativeJack => "Native JACK (no audio until slice 2)",
+            Backend::NativeJack => "Native JACK",
         }
     }
 
@@ -555,8 +557,8 @@ fn shared_host(id: cpal::HostId) -> Option<&'static cpal::Host> {
 
 /// The cpal host name that serves `system`. The JACK system belongs to the native JACK backend; in a
 /// build with it, cpal has no JACK host (its `jack` feature is off), so `Auto` and cpal on that
-/// system open the same ALSA host they use without the feature. Slice 1 of the native backend
-/// plays no audio yet (ADR 0021), so the JACK system must not strand a user on silence.
+/// system open the same ALSA host they use without the feature (`Auto` on that system opens the
+/// native backend instead when a server answers, ADR 0021 slice 2).
 pub(crate) fn cpal_system_for(system: Option<&str>) -> Option<&str> {
     if NATIVE_JACK_COMPILED && is_jack_system(system) && !cpal::available_hosts().iter().any(|id| id.name().eq_ignore_ascii_case(JACK_SYSTEM)) {
         return Some("ALSA");
@@ -644,7 +646,7 @@ mod tests {
 
     #[test]
     fn the_native_jack_label_says_it_plays_no_audio_yet() {
-        assert_eq!(Backend::NativeJack.label(), "Native JACK (no audio until slice 2)");
+        assert_eq!(Backend::NativeJack.label(), "Native JACK");
     }
 
     #[test]

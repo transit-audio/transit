@@ -200,7 +200,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         return Ok(Command::List(if jack { Some(soundcraft_playback::devices::JACK_SYSTEM.into()) } else { system }));
     }
     if jack {
-        return Err("--backend jack only lists devices so far (--list-devices); measuring through it comes with ADR 0021 slice 2".into());
+        return Err("--backend jack only lists devices so far (--list-devices); measuring through it comes with ADR 0021 slice 3".into());
     }
     let midi_given = port.is_some() || channel.is_some() || inputs.is_some() || json.is_some() || max_error.is_some() || no_warmup;
     if !midi && !placing && (midi_given || note.is_some() || velocity.is_some() || trials.is_some() || gap_ms.is_some() || max.is_some()) {
