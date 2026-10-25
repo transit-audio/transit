@@ -70,6 +70,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask layers
 cargo xtask assets
+cargo xtask timing
 ```
 
 and the Linux job in `.github/workflows/ci.yml`, which runs

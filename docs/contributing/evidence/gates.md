@@ -8,6 +8,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask layers      # crate layering and the no-UI-below-L6 rule (xtask/src/main.rs, LAYERS)
 cargo xtask assets      # every bundled asset has a row in ATTRIBUTION.md
+cargo xtask timing      # E49-class timing assertions in tests (xtask/src/timing.rs)
 ```
 
 Other `xtask` commands: `cargo xtask wasm` (web build), `cargo xtask rt-targets` (cross-target check
@@ -39,6 +40,14 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
 - No wall-clock latency bound under about 100 ms in a unit test. Assert a deterministic signal
   (a counter, a state, an ordering) or a stall bound with its rationale in a comment; a shared CI
   runner will exceed a tight bound sooner or later (E49, `../../escapes/E49-echo-latency-test-wall-clock-bound.md`).
+  Enforced by `cargo xtask timing`, which flags in test code (a) a `<`/`<=` bound of `Duration::from_millis(N)`
+  with N < 100 or any `Duration::from_micros`, (b) `thread::sleep` in a fn that asserts a rate, BPM, latency,
+  `elapsed()` or a loop counter, and (c) a throughput floor `assert!(x >= N)` with N >= 3 on a
+  frames/blocks/laps/iterations/polls count or a counter in a timed loop. `#[ignore]` fns are skipped. A
+  deliberate case carries `// timing: <tag> <reason>` on the line or the line above, tag one of `stall-bound`
+  (a ceiling far above jitter), `median` (over many samples), `floor-ok` (a count not bound to the clock),
+  `sleep-ok` (a sleep that does not pace a measurement) or `value` (a bound on a computed value); the reason
+  is required. Prefer the deterministic signal, or "at least 2" progress plus a stall bound, over a marker.
 - A test never derives a rate, BPM or latency from `thread::sleep` pacing. It injects the
   timestamps (the fake input's `deliver_at`) and asserts the exact value (E49 recurrence,
   the MIDI Monitor Clock BPM test).

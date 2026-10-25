@@ -51,6 +51,7 @@ jobs:
         run: ./xtask/tests/tooling.ps1
       - run: cargo xtask layers
       - run: cargo xtask assets
+      - run: cargo xtask timing
       # Check production host code without the integration tests' self-dev feature activation.
       - run: cargo check --locked -p soundcraft-clap-host -p soundcraft-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings
@@ -102,6 +103,7 @@ jobs:
       - name: Packaging version checks
         run: bash xtask/tests/packaging-version.sh
       - run: cargo fmt --all -- --check
+      - run: cargo xtask timing
       # Check production host code without the integration tests' self-dev feature activation.
       - run: cargo check --locked -p soundcraft-clap-host -p soundcraft-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings

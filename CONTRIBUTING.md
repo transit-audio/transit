@@ -18,6 +18,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask layers
 cargo xtask assets
+cargo xtask timing
 ```
 
 Rules:
