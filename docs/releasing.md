@@ -38,6 +38,8 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
 
 ## Released
 
+- `v0.3.0`, 2026-10-26, commit `8d0925a7`: first release with the Linux packages (AppImage, deb, rpm) carrying the
+  native JACK backend, and the Windows MSI with its installer dialogs. Body from `docs/releases/v0.3.0.md`.
 - `v0.2.0-alpha.1`, 2026-10-22, commit `995cf66`. The cpal ASIO zip and MSI were removed from this
   release by hand; the workflow no longer builds them (commits `451bb52`, `f792a0e`, `f751a17`). Its DMG is
   named `transit-0.2.0-alpha.1-macos-aarch64.dmg`; later tags use the `transit-v<version>-macos-arm64.dmg` form.
