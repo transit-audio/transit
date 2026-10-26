@@ -433,6 +433,29 @@ fn reconnect_drops_in_order_restores_monitoring_and_reopens_editors() {
 }
 
 #[test]
+fn an_external_instrument_return_opens_the_input_armed_or_not_and_disarming_keeps_it() {
+    use soundcraft_model::{ChannelFormat, Insert, TrackKind};
+    let mut t = T::new();
+    let id = t.app.engine.session_mut().add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+    t.frames(3);
+    assert!(t.app.audio_devices.fake.as_ref().unwrap().input.is_none(), "no return path, nothing armed: no input");
+    t.app.engine.session_mut().track_mut(id).unwrap().instrument = Some(Insert::external("In 1"));
+    t.frames(3);
+    assert!(!t.app.engine.session().tracks.iter().any(|t| t.mixer.input_monitor || t.mixer.record_arm));
+    assert!(t.app.audio_devices.fake.as_ref().unwrap().input.is_some(), "the return path opens the input with nothing armed");
+    // Arming and disarming change nothing about the return.
+    t.app.engine.session_mut().track_mut(id).unwrap().mixer.record_arm = true;
+    t.frames(3);
+    t.app.engine.session_mut().track_mut(id).unwrap().mixer.record_arm = false;
+    t.frames(3);
+    assert!(t.app.audio_devices.fake.as_ref().unwrap().input.is_some());
+    // A reconnect reopens it too.
+    t.app.apply_audio(AudioConfig { input: Some(SCARLETT_IN.into()), ..Default::default() }).unwrap();
+    t.frames(2);
+    assert!(t.app.audio_devices.fake.as_ref().unwrap().input.is_some());
+}
+
+#[test]
 fn only_open_and_rescan_enumerate_devices() {
     let mut t = T::new();
     t.open_window();

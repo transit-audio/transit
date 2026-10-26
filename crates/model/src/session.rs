@@ -363,6 +363,14 @@ impl Default for Session {
 }
 
 impl Session {
+    /// Whether the capture stream has a reason to be open: a track is monitoring its input or
+    /// armed, or an External Instrument has a return path (ADR 0020 decision 2: the return is the
+    /// track's output and is heard armed or not, with or without the transport).
+    #[must_use]
+    pub fn needs_live_input(&self) -> bool {
+        self.tracks.iter().any(|t| t.mixer.input_monitor || t.mixer.record_arm || t.external_instrument().is_some_and(|e| !e.ret.is_empty()))
+    }
+
     pub const FORMAT_VERSION: u32 = 1;
 
     /// Features a file can list under `needs` (see [`Session::to_json`]) that this build understands.
@@ -790,6 +798,25 @@ pub fn truncate_chars(s: &mut String, max: usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_live_input_is_needed_by_arm_monitor_or_an_external_instrument_return() {
+        let mut s = Session::default();
+        let a = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        let x = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+        assert!(!s.needs_live_input());
+        s.track_mut(x).unwrap().instrument = Some(crate::Insert::external(""));
+        assert!(!s.needs_live_input(), "no return path chosen");
+        s.track_mut(x).unwrap().instrument = Some(crate::Insert::external("In 1"));
+        assert!(s.needs_live_input());
+        s.track_mut(x).unwrap().mixer.record_arm = true;
+        s.track_mut(x).unwrap().mixer.record_arm = false;
+        assert!(s.needs_live_input(), "disarming changes nothing");
+        s.track_mut(x).unwrap().instrument = None;
+        assert!(!s.needs_live_input());
+        s.track_mut(a).unwrap().mixer.input_monitor = true;
+        assert!(s.needs_live_input());
+    }
 
     #[test]
     fn a_session_saved_with_the_removed_loop_record_option_still_loads() {

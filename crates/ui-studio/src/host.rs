@@ -676,8 +676,7 @@ impl StudioApp {
     }
 
     fn meters_live(&self) -> bool {
-        self.engine.transport.playing
-            || (self.recorder.is_some() && self.engine.session().tracks.iter().any(|t| t.mixer.input_monitor || t.mixer.record_arm))
+        self.engine.transport.playing || (self.recorder.is_some() && self.engine.session().needs_live_input())
     }
 
     /// Done with the input, if open: it goes back to the player (`Player::close_input`), which
@@ -1030,7 +1029,7 @@ impl StudioApp {
             crate::audio_connection::replace(&mut self.player, &mut self.recorder, || open(session, &cfg))?;
             self.player_requests.reset();
         }
-        if self.engine.session().tracks.iter().any(|t| t.mixer.input_monitor || t.mixer.record_arm) {
+        if self.engine.session().needs_live_input() {
             self.ensure_input();
         }
         self.audio_devices.begin_verification();

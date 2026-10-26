@@ -996,10 +996,7 @@ impl StudioApp {
         }
         self.autosave_changes();
         self.autosave();
-        if self.recorder.is_none()
-            && !self.recorder_failed
-            && self.engine.session().tracks.iter().any(|t| t.mixer.input_monitor || t.mixer.record_arm)
-        {
+        if self.recorder.is_none() && !self.recorder_failed && self.engine.session().needs_live_input() {
             self.ensure_input();
         }
         // Autosave only runs on frames, and plugin editors are native windows egui never hears from.

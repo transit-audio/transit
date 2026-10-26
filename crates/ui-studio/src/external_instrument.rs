@@ -46,7 +46,8 @@ fn plain_state(report: Option<&ExternalReport>, port: Option<&str>, rate: u32) -
     match r.state {
         ExternalState::NoReturn => "Choose the return input".into(),
         ExternalState::MissingReturn => format!("Return {} is not on this interface", r.ret),
-        ExternalState::NoInput => "Needs a duplex device".into(),
+        // The input opens whenever a return path is set, so this is a device with no input, a failed open or one still in flight.
+        ExternalState::NoInput => "No audio input open: needs a duplex device".into(),
         ExternalState::Unmeasured => "Not measured: notes sound late by the round trip".into(),
         // The port state comes from the output thread, not the plan.
         ExternalState::NoPort => "No MIDI port: choose one on the Out button".into(),
@@ -454,7 +455,10 @@ mod tests {
             state_text(Some(&report(ExternalState::MissingReturn, None)), true, None, 48_000, Some(64)),
             "Return In 1 is not on this interface"
         );
-        assert_eq!(state_text(Some(&report(ExternalState::NoInput, None)), true, None, 48_000, Some(64)), "Needs a duplex device");
+        assert_eq!(
+            state_text(Some(&report(ExternalState::NoInput, None)), true, None, 48_000, Some(64)),
+            "No audio input open: needs a duplex device"
+        );
         assert_eq!(
             state_text(Some(&report(ExternalState::Unmeasured, None)), true, None, 48_000, Some(64)),
             "Not measured: notes sound late by the round trip"

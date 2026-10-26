@@ -414,7 +414,7 @@ Code: `crates/playback/src/reopen.rs` (`Reopener`), `Player::reopen_cause` and `
   new Player opens with the same `AudioConfig` (same driver, rate, channels and requested buffer
   size), the input first and then the output (the open-order rule), and `createBuffers` negotiates
   against the driver's `getBufferSize` as it is now, so a buffer size changed in the driver's panel
-  is picked up. Monitoring and armed tracks take the reopened input again (`ensure_input`). The
+  is picked up. Monitoring and armed tracks, and External Instruments with a return path, take the reopened input again (`ensure_input`). The
   plug-ins keep their live state (`capture_states_for_reopen`), but they are re-created and their
   editors close and reopen, as on Reconnect (known issue K32).
 - **Never a splice.** The input's error callback closes the take's input the moment the reset (or

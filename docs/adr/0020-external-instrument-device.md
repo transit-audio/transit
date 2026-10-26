@@ -132,6 +132,10 @@ What exists:
 
 ## Amendments
 
+### 2026-10-26: the capture stream opens for a return path (#129)
+
+- Decision 2: the capture stream opens whenever an External Instrument has a return path, armed or not (`Session::needs_live_input`, with `input_monitor` and `record_arm`), so the return is heard right after a load and C applies from the start. Disarming never closes it. The state line for a plan with no live input reads "No audio input open: needs a duplex device" (a device with no input, a failed open, or an open in flight).
+
 ### 2026-10-24: Measure as built (slice 2, #71)
 
 - Decision 7: a noisy pre-note window raises that note's threshold instead of retrying, because the run schedule is fixed. The run is refused when more than half the windows were noisy, or when any window or the reference floor is above -20 dBFS.
