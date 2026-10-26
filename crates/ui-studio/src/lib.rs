@@ -115,6 +115,10 @@ pub struct UiState {
     /// The controller profile: this machine's MIDI Learn mappings, keyed by port name (ADR 0028).
     /// Per machine; never part of a session.
     pub midi_profile: soundcraft_model::MappingSet,
+    /// How a mapped knob takes over a control it is not at: scaled, jump or pickup (ADR 0028,
+    /// amendment 2026-10-25). Per machine, with the profile; one setting for every mapping.
+    #[serde(default = "soundcraft_model::MapMode::takeover_default")]
+    pub midi_takeover: soundcraft_model::MapMode,
     /// The mixer fills the window instead of the arrangement (Cubase's F3).
     pub mixer_full: bool,
     /// Height of the mixer pane in points.
@@ -197,6 +201,7 @@ impl Default for UiState {
             midi_monitor: midi_monitor::Prefs::default(),
             midi_mappings: midi_learn::Prefs::default(),
             midi_profile: Default::default(),
+            midi_takeover: soundcraft_model::MapMode::takeover_default(),
             mixer_full: false,
             mixer_height: 420.0,
             cursor: 0,

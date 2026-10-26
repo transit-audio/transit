@@ -129,6 +129,8 @@ pub enum Entry {
     LearnProfile,
     Forget,
     Cancel,
+    /// Set the machine's takeover (a mapped control's menu offers all three).
+    Takeover(MapMode),
 }
 
 /// The menu state machine: which entries a control offers, given what it is mapped to and
@@ -138,12 +140,19 @@ pub fn menu_entries(mapped: Option<&Info>, learning: bool) -> Vec<Entry> {
         return vec![Entry::Cancel];
     }
     match mapped {
-        Some(_) => vec![Entry::Mapped, Entry::Learn, Entry::Forget],
+        Some(_) => vec![
+            Entry::Mapped,
+            Entry::Learn,
+            Entry::Forget,
+            Entry::Takeover(MapMode::Scaled),
+            Entry::Takeover(MapMode::Jump),
+            Entry::Takeover(MapMode::Pickup),
+        ],
         None => vec![Entry::Learn, Entry::LearnProfile],
     }
 }
 
-fn entry_text(entry: Entry, info: Option<&Info>) -> String {
+fn entry_text(entry: Entry, info: Option<&Info>, takeover: MapMode) -> String {
     match entry {
         Entry::Mapped => {
             let info = info.cloned().unwrap_or(Info { scope: Scope::Session, text: String::new(), overridden: false });
@@ -155,6 +164,7 @@ fn entry_text(entry: Entry, info: Option<&Info>) -> String {
         Entry::LearnProfile => "MIDI Learn for this controller (all sessions)".into(),
         Entry::Forget => "Forget MIDI Mapping".into(),
         Entry::Cancel => "Cancel MIDI Learn (Esc)".into(),
+        Entry::Takeover(m) => format!("{} Takeover: {}", if m == takeover { "\u{2713}" } else { "   " }, m.label()),
     }
 }
 
@@ -271,7 +281,7 @@ impl StudioApp {
 
     fn learn_entries(&mut self, ui: &mut egui::Ui, track: TrackId, control: Control, mapped: Option<Info>, learning: bool) {
         for entry in menu_entries(mapped.as_ref(), learning) {
-            let text = entry_text(entry, mapped.as_ref());
+            let text = entry_text(entry, mapped.as_ref(), self.ui.midi_takeover);
             let b = ui.add_enabled(entry != Entry::Mapped, egui::Button::new(text.clone()));
             self.midi_learn.menu.push(MenuItem::at(ui, text, format!("{entry:?}"), b.rect));
             if b.clicked() {
@@ -283,6 +293,10 @@ impl StudioApp {
 
     /// Does what a menu entry says.
     pub(crate) fn learn_choose(&mut self, entry: Entry, track: TrackId, control: Control, mapped: Option<&Info>) -> Result<Value, String> {
+        if let Entry::Takeover(m) = entry {
+            self.ui.midi_takeover = m;
+            return Ok(json!({"takeover": m}));
+        }
         let scope = if entry == Entry::LearnProfile { Scope::Profile } else { mapped.map_or(Scope::Session, |m| m.scope) };
         if matches!(entry, Entry::Learn | Entry::LearnProfile)
             && let Err(why) = self.control_mappable(track, &control)
@@ -292,7 +306,7 @@ impl StudioApp {
         }
         let target = target_for(self.engine.session(), track, control, scope).ok_or("no such track")?;
         match entry {
-            Entry::Mapped => Ok(json!({})),
+            Entry::Mapped | Entry::Takeover(_) => Ok(json!({})),
             Entry::Learn | Entry::LearnProfile => self.run("midi.learn", json!({"target": target.to_string(), "scope": scope})),
             Entry::Forget => self.run("midi.unmap", json!({"target": target.to_string(), "scope": scope})),
             Entry::Cancel => self.run("midi.learn_cancel", json!({})),
@@ -415,6 +429,7 @@ pub fn inspect(app: &StudioApp) -> Value {
         "open": app.ui.midi_mappings.open,
         "armed": app.engine.learn().map(|l| json!({"target": l.target.to_string(), "scope": l.scope})),
         "next_touched": app.midi_learn.next.map(|(t, slot)| json!({"track": t.0, "slot": slot})),
+        "takeover": app.ui.midi_takeover,
         "active": app.midi_learn.resolved.len(),
         "rows": rows(app),
         "dropped": app.midi_learn.dropped,
@@ -535,7 +550,7 @@ impl StudioApp {
             let Some(knob) = h.last else { continue };
             let at = norm_value(s, r.track, &r.control);
             let line = format!(
-                "MIDI Learn: {} at {}% waits for pickup at {:.0}% of track {} {} (turn the knob through it, or set the mapping to Jump in Window > MIDI Mappings)",
+                "MIDI Learn: {} at {}% waits for pickup at {:.0}% of track {} {} (turn the knob through it, or set Takeover to Scaled or Jump in Window > MIDI Mappings)",
                 r.mapping.source.describe(),
                 (f32::from(knob) / 1.27).round(),
                 at * 100.0,
@@ -566,7 +581,9 @@ impl StudioApp {
             self.midi_learn.armed_sent = false;
             self.midi_learn.applied.clear();
         }
-        let specs: Vec<MapSpec> = self.midi_learn.resolved.iter().map(MapSpec::from_resolved).collect();
+        // One takeover setting per machine rules every mapping (a mapping's own mode is ignored).
+        let takeover = self.ui.midi_takeover;
+        let specs: Vec<MapSpec> = self.midi_learn.resolved.iter().map(|r| MapSpec { mode: takeover, ..MapSpec::from_resolved(r) }).collect();
         player.set_midi_mappings(specs);
         self.midi_learn.dropped = player.midi_map_dropped();
         let activity = player.midi_map_activity();
@@ -800,6 +817,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let size = app.ui.midi_mappings.size;
     let rows = rows(app);
     let dropped = app.midi_learn.dropped;
+    let mut takeover = app.ui.midi_takeover;
     let mut actions: Vec<(usize, Action)> = Vec::new();
     let r = egui::Window::new("MIDI Mappings")
         .open(&mut open)
@@ -811,6 +829,22 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             if dropped > 0 {
                 ui.label(egui::RichText::new(format!("{dropped} controller button presses or learn messages were dropped (the UI was not draining fast enough).")).color(TOKENS.record));
             }
+            ui.horizontal(|ui| {
+                ui.label("Takeover");
+                egui::ComboBox::from_id_salt("mm_takeover").selected_text(takeover.label()).width(90.0).show_ui(ui, |ui| {
+                    for m in [MapMode::Scaled, MapMode::Jump, MapMode::Pickup] {
+                        ui.selectable_value(&mut takeover, m, m.label());
+                    }
+                });
+                ui.label(
+                    egui::RichText::new(match takeover {
+                        MapMode::Scaled => "A knob moves a control toward it and they meet at the end of the knob's travel.",
+                        MapMode::Jump => "A control takes the knob's value at once.",
+                        MapMode::Pickup => "A control waits until the knob passes through its value.",
+                    })
+                    .color(TOKENS.text_dim),
+                );
+            });
             if rows.is_empty() {
                 ui.label(
                     egui::RichText::new("No mappings yet. Right-click a fader, pan, mute, solo, record arm or send level and choose MIDI Learn, then move a knob or press a key on your controller.")
@@ -820,8 +854,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             }
             let mono = crate::theme::mono(ui.ctx(), 12.0);
             egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-                egui::Grid::new("midi_mappings").num_columns(10).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
-                    for h in ["Port", "Ch", "Source", "Target", "Mode", "Range", "Pass through", "Scope", "", ""] {
+                egui::Grid::new("midi_mappings").num_columns(9).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
+                    for h in ["Port", "Ch", "Source", "Target", "Range", "Pass through", "Scope", "", ""] {
                         ui.label(egui::RichText::new(h).font(mono.clone()).strong().color(TOKENS.text_dim));
                     }
                     ui.end_row();
@@ -831,17 +865,6 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                         ui.label(egui::RichText::new(&row.channel).font(mono.clone()).color(ink));
                         ui.label(egui::RichText::new(&row.source).font(mono.clone()).color(ink));
                         ui.label(egui::RichText::new(&row.target).font(mono.clone()).color(ink));
-                        let mut mode = row.mode;
-                        egui::ComboBox::from_id_salt(("mm_mode", i))
-                            .selected_text(if mode == MapMode::Pickup { "Pickup" } else { "Jump" })
-                            .width(70.0)
-                            .show_ui(ui, |ui| {
-                                ui.selectable_value(&mut mode, MapMode::Pickup, "Pickup");
-                                ui.selectable_value(&mut mode, MapMode::Jump, "Jump");
-                            });
-                        if mode != row.mode {
-                            actions.push((i, Action::Mode(mode)));
-                        }
                         ui.horizontal(|ui| {
                             let mut lo = row.range[0] * 100.0;
                             let mut hi = row.range[1] * 100.0;
@@ -883,6 +906,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         app.ui.midi_mappings.size = [r.response.rect.width(), r.response.rect.height()];
     }
     app.ui.midi_mappings.open = open;
+    app.ui.midi_takeover = takeover;
     for (i, action) in actions {
         if let Some(row) = rows.get(i) {
             let _ = app.mapping_row_action(row, action);
