@@ -4,7 +4,7 @@
 //! parameter" for a hosted editor, refusal of parameters the host does not list, and the
 //! automation write modes a mapped move shares with a mouse drag. No device, no real plug-in: the
 //! worker's output is fed in as the `MapMsg`s it would publish.
-use crate::midi_learn::{check_param, plugin_value};
+use crate::midi_learn::{check_param, curve_norm, curve_value, device_value, plugin_value};
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
 use soundcraft_dsp::{HeaderAction, plugin_info};
@@ -126,6 +126,33 @@ impl T {
 }
 
 const GAIN: &str = "mid_gain";
+
+/// A hosted VST3 parameter follows the plug-in's own curve, not the taper (issue #123). A real
+/// curve needs a live plug-in, so this feeds the pure conversion the curve a plug-in would give: a
+/// cubic one over a linear-taper parameter, which the taper path cannot reproduce.
+#[test]
+fn a_hosted_parameter_follows_the_plugins_curve_not_the_taper() {
+    let p = plugin_info("eq_7band").unwrap().param(GAIN).unwrap();
+    assert_eq!(p.taper, soundcraft_dsp::Taper::Linear);
+    let span = p.max - p.min;
+    let to_plain = |n: f32| Some(p.min + span * n.powi(3));
+    let to_norm = |v: f32| Some(((v - p.min) / span).cbrt());
+    let mid = curve_value(p, 0.5, to_plain);
+    assert!((mid - (p.min + span * 0.125)).abs() < 1e-4, "{mid}");
+    assert!((mid - plugin_value(p, 0.5)).abs() > 1.0, "the taper would land elsewhere");
+    for k in 0..=20 {
+        let n = k as f32 / 20.0;
+        let back = curve_norm(p, curve_value(p, n, to_plain), to_norm);
+        assert!((back - n).abs() < 1e-3, "{n}: {back}");
+    }
+    assert_eq!((curve_value(p, 0.0, to_plain), curve_value(p, 1.0, to_plain)), (p.min, p.max));
+    // No curve (not sampled, stepped, CLAP or built in): the taper answers, both ways.
+    assert_eq!(curve_value(p, 0.3, |_| None), plugin_value(p, 0.3));
+    assert_eq!(curve_norm(p, 1.5, |_| None), p.to_normalized(1.5));
+    // Only a VST3 device asks the host; a built-in one takes the taper even for a hosted-looking id.
+    assert_eq!(device_value("eq_7band", p, 0.5), plugin_value(p, 0.5));
+    assert_eq!(device_value("vst3:00000000000000000000000000000000", p, 0.5), plugin_value(p, 0.5), "no live instance: the taper");
+}
 
 #[test]
 fn the_knob_range_maps_onto_the_parameters_normalized_travel() {

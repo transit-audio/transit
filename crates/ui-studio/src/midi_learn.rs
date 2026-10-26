@@ -254,6 +254,42 @@ pub fn plugin_value(p: &soundcraft_dsp::ParamInfo, norm: f32) -> f32 {
     p.clamp(crate::widgets::knob::value_at(p, norm.clamp(0.0, 1.0)))
 }
 
+/// [`plugin_value`] for the device `device` (its plug-in id): a hosted VST3 parameter follows the
+/// plug-in's own sampled curve, so the controller feels like the plug-in's panel knob; everything
+/// else, and a curve that is not available, takes the parameter's taper.
+pub fn device_value(device: &str, p: &soundcraft_dsp::ParamInfo, norm: f32) -> f32 {
+    if device.starts_with(soundcraft_vst3_host::ID_PREFIX) {
+        curve_value(p, norm, |n| soundcraft_vst3_host::param_to_plain(device, p.id, n))
+    } else {
+        plugin_value(p, norm)
+    }
+}
+
+/// The inverse of [`device_value`]: where on the knob's travel the plain value `value` sits.
+fn device_norm(device: &str, p: &soundcraft_dsp::ParamInfo, value: f32) -> f32 {
+    if device.starts_with(soundcraft_vst3_host::ID_PREFIX) {
+        curve_norm(p, value, |v| soundcraft_vst3_host::param_to_normalized(device, p.id, v))
+    } else {
+        p.to_normalized(value)
+    }
+}
+
+/// The value at knob position `norm` along a plug-in's curve (`to_plain`, normalized to plain),
+/// rounded where the parameter is in whole semitones or cents; the taper when there is no curve.
+pub fn curve_value(p: &soundcraft_dsp::ParamInfo, norm: f32, to_plain: impl Fn(f32) -> Option<f32>) -> f32 {
+    let norm = norm.clamp(0.0, 1.0);
+    match to_plain(norm).filter(|v| v.is_finite()) {
+        Some(v) if matches!(p.unit, soundcraft_dsp::Unit::Semitones | soundcraft_dsp::Unit::Cents) => p.clamp(v.round()),
+        Some(v) => p.clamp(v),
+        None => plugin_value(p, norm),
+    }
+}
+
+/// The inverse of [`curve_value`] (`to_normalized`, plain to normalized); the taper without a curve.
+pub fn curve_norm(p: &soundcraft_dsp::ParamInfo, value: f32, to_normalized: impl Fn(f32) -> Option<f32>) -> f32 {
+    to_normalized(value).filter(|n| n.is_finite()).map_or_else(|| p.to_normalized(value), |n| n.clamp(0.0, 1.0))
+}
+
 /// The control's value, 0..1 of its travel, as the session holds it now.
 fn norm_value(s: &Session, track: TrackId, control: &Control) -> f32 {
     let Some(t) = s.track(track) else { return 0.0 };
@@ -266,7 +302,8 @@ fn norm_value(s: &Session, track: TrackId, control: &Control) -> f32 {
         Control::Send(n) => t.mixer.sends.get(usize::from(*n)).and_then(Option::as_ref).map_or(0.0, |x| db_to_k(x.level_db)),
         Control::Plugin { slot, param } => {
             let lane = crate::automation::Lane::Plugin { slot: *slot, param: param.clone() };
-            lane.info(t).map_or(0.0, |p| p.to_normalized(lane.static_value(t)))
+            let device = lane.device(t).map(|i| i.plugin.as_str()).unwrap_or_default();
+            lane.info(t).map_or(0.0, |p| device_norm(device, p, lane.static_value(t)))
         }
     }
 }
@@ -672,7 +709,7 @@ impl StudioApp {
                 return;
             }
         };
-        let value = plugin_value(p, norm);
+        let value = device_value(info.id, p, norm);
         let slot_key = if slot == AutoParam::INSTRUMENT_SLOT { soundcraft_mix::INSTRUMENT_SLOT } else { usize::from(slot) };
         self.touch_param(track, slot_key, param, true);
         let r = if slot == AutoParam::INSTRUMENT_SLOT {
