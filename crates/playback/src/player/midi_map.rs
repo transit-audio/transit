@@ -2,8 +2,8 @@
 //!
 //! Main builds an immutable [`Snapshot`] and swaps an `Arc` of it into the worker. For each
 //! message the worker scans the entries, with no allocation and no lock, and publishes a
-//! [`MapEvent`] (a `Copy` value in a preallocated ring) for Main to apply. Pickup and jump are
-//! decided here, against the value cell Main keeps current. Learn is Main-side: the worker only
+//! [`MapEvent`] (a `Copy` value in a preallocated ring) for Main to apply. Pickup, jump and scaled
+//! are decided here, against the value cell Main keeps current. Learn is Main-side: the worker only
 //! forwards the next candidate when its shared flag is armed.
 
 use soundcraft_mix::Message;
@@ -301,10 +301,27 @@ pub fn handle(snap: &Snapshot, port: u64, channel: u8, message: Message, push: &
         e.cell.heard.fetch_add(1, Ordering::Relaxed);
         let x = f32::from(v) / 127.0;
         let span = e.max - e.min;
-        let target = e.min + span * x;
+        let mut target = e.min + span * x;
         let c = &e.cell;
         let mut send = e.mode == MapMode::Jump || matches!(msg, Msg::NoteOn(..));
-        if !send {
+        if !send && e.mode == MapMode::Scaled {
+            // Not pickup: nothing waits for the knob, so nothing is reported as held back.
+            c.engaged.store(true, Ordering::Relaxed);
+            let last = c.last.load(Ordering::Relaxed);
+            if last != NO_LAST {
+                let published = f32::from_bits(c.published.load(Ordering::Relaxed));
+                // The control as the worker last left it while Main is behind, else as Main has it
+                // (so a mouse drag or automation is taken into account).
+                let now = if c.applied.load(Ordering::Relaxed) == c.published_n.load(Ordering::Relaxed) {
+                    f32::from_bits(c.current.load(Ordering::Relaxed))
+                } else {
+                    published
+                };
+                let at = ((now - e.min) / span).clamp(0.0, 1.0);
+                target = e.min + span * scaled_step(at, f32::from(last) / 127.0, x);
+                send = true;
+            }
+        } else if !send {
             let current = f32::from_bits(c.current.load(Ordering::Relaxed));
             let published = f32::from_bits(c.published.load(Ordering::Relaxed));
             // Let go when the control was moved by something else (and Main has caught up with
@@ -332,6 +349,28 @@ pub fn handle(snap: &Snapshot, port: u64, channel: u8, message: Message, push: &
         }
     }
     consumed
+}
+
+/// Value scaling (Logic's rule, Ableton's Value Scaling): the control at `at` and the knob moving
+/// from `from` to `to` (all 0..1 of their travel). The control moves by the same fraction of ITS
+/// remaining distance to the end as the knob moves of ITS remaining distance to that end, so the
+/// two meet exactly when the knob reaches the end of its travel; once they coincide they track
+/// directly. The gap never changes sign, so there is no jump.
+pub fn scaled_step(at: f32, from: f32, to: f32) -> f32 {
+    let (at, from, to) = (at.clamp(0.0, 1.0), from.clamp(0.0, 1.0), to.clamp(0.0, 1.0));
+    let next = if to >= from {
+        let room = 1.0 - from;
+        if room <= f32::EPSILON { 1.0 } else { at + (to - from) / room * (1.0 - at) }
+    } else if from <= f32::EPSILON {
+        0.0
+    } else {
+        at - (from - to) / from * at
+    };
+    // Within one knob step the two have met: from here the control follows the knob exactly.
+    let next = if (next - to).abs() <= 0.5 / 127.0 { to } else { next };
+    // ...but never against the knob's direction.
+    let next = if to >= from { next.max(at) } else { next.min(at) };
+    next.clamp(0.0, 1.0)
 }
 
 /// What Main wants matched, and what the worker was last given. Main side only.
@@ -518,6 +557,76 @@ mod tests {
         // Main has applied only the first event and still reports the old value.
         cell.set_value(0.0, 1);
         assert_eq!(mv(&s, 90).len(), 1, "still engaged: Main has not caught up");
+    }
+
+    /// Plays a knob sweep (0..127 values) at a scaled mapping, Main keeping up after each message;
+    /// returns the control's value after each.
+    fn sweep(start: f32, knob: &[u8]) -> Vec<f32> {
+        let (s, cell) = snap(&spec(SourceKind::Cc, 7, MapMode::Scaled, false), start);
+        let mut value = start;
+        let mut n = 0;
+        let mut out = Vec::new();
+        for k in knob {
+            if let Some(v) = mv(&s, *k).first() {
+                value = *v;
+                n += 1;
+            }
+            cell.set_value(value, n);
+            out.push(value);
+        }
+        out
+    }
+
+    #[test]
+    fn scaled_up_sweep_from_10_to_100_percent_on_a_fader_at_70_does_not_jump_and_ends_at_100() {
+        let knob: Vec<u8> = (13..=127).collect(); // 10 % .. 100 %
+        let v = sweep(0.7, &knob);
+        assert_eq!(v[0], 0.7, "the first message only records where the knob is");
+        assert!(v.windows(2).all(|w| w[1] >= w[0]), "monotonic");
+        assert!(v.windows(2).all(|w| w[1] - w[0] < 0.01), "no jump");
+        assert_eq!(*v.last().unwrap(), 1.0);
+        assert!(v.iter().all(|x| (0.7..=1.0).contains(x)), "the control does not dip below where it was");
+        // Deterministic: the same sweep gives the same values.
+        assert_eq!(v, sweep(0.7, &knob));
+    }
+
+    #[test]
+    fn scaled_reverse_sweep_converges_downward_and_ends_at_zero() {
+        let knob: Vec<u8> = (0..=127).rev().collect(); // 100 % .. 0 %
+        let v = sweep(0.7, &knob);
+        assert_eq!(v[0], 0.7);
+        assert!(v.windows(2).all(|w| w[1] <= w[0]), "monotonic");
+        assert!(v.windows(2).all(|w| w[0] - w[1] < 0.02), "no jump");
+        assert_eq!(*v.last().unwrap(), 0.0);
+        // The fader closes on the knob: the gap (control minus knob) shrinks to nothing.
+        let gap = |i: usize| v[i] - knob[i] as f32 / 127.0;
+        assert!(gap(60).abs() < gap(1).abs(), "closing");
+        assert_eq!(gap(127), 0.0);
+    }
+
+    #[test]
+    fn scaled_tracks_directly_once_the_knob_and_control_coincide() {
+        let (s, cell) = snap(&spec(SourceKind::Cc, 7, MapMode::Scaled, false), 64.0 / 127.0);
+        let _ = mv(&s, 64);
+        for k in [90u8, 70, 20, 100] {
+            assert!((mv(&s, k)[0] - f32::from(k) / 127.0).abs() < 1e-6);
+            cell.set_value(f32::from(k) / 127.0, 1000);
+        }
+    }
+
+    #[test]
+    fn scaled_scaling_formula_meets_at_the_end_of_travel() {
+        assert!((scaled_step(0.7, 0.1, 0.1 + 0.9 * 0.5) - (0.7 + 0.5 * 0.3)).abs() < 1e-6);
+        assert_eq!(scaled_step(0.7, 0.1, 1.0), 1.0);
+        assert_eq!(scaled_step(0.2, 0.9, 0.0), 0.0);
+        assert_eq!(scaled_step(0.3, 0.3, 0.8), 0.8, "no gap: direct");
+    }
+
+    #[test]
+    fn scaled_is_never_reported_as_waiting() {
+        let (s, cell) = snap(&spec(SourceKind::Cc, 7, MapMode::Scaled, false), 0.7);
+        let _ = mv(&s, 10);
+        assert!(cell.engaged());
     }
 
     #[test]
