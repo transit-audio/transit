@@ -798,6 +798,10 @@ impl Pump {
                     self.shared.filtered.fetch_add(1, Ordering::Relaxed);
                     continue;
                 }
+                // Step entry (#74) is control-rate and must see every message a route admits, even
+                // one the lane then sheds: a pedal-up shed after its pedal-down got through would
+                // leave the step editor holding the pedal.
+                tapped = true;
                 #[cfg(test)]
                 if let Some(hook) = &mut self.between_check_and_push {
                     hook();
@@ -842,7 +846,6 @@ impl Pump {
                 };
                 if self.lane.send_note(packet, if release { NoteKind::Off } else { NoteKind::On }).is_ok() {
                     self.shared.admitted.fetch_add(1, Ordering::Relaxed);
-                    tapped = true;
                 } else {
                     self.shared.shed.fetch_add(1, Ordering::Relaxed);
                     permit.invalidate();

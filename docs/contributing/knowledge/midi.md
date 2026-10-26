@@ -21,7 +21,11 @@ hardware port: `midi-output.md`.
 - Tombstones: `crates/playback/src/player/sources.rs` validates a source (port plus generation) again
   just before dispatch. A local tombstone records a revoke so a stale read of the shared admission
   flag cannot resurrect a revoked source; a late event from it is discarded.
-- Step entry taps the same stream from the UI side (`crates/ui-studio/src/keys/step.rs`).
+- Step entry taps the same stream from the UI side (`crates/ui-studio/src/keys/step.rs`). The tap
+  is control-rate: the ingress worker feeds it whenever a route admits the message, before the
+  action lane's credit check, so a message the lane sheds still reaches Step entry (#74). A shed
+  pedal-up therefore cannot leave the pedal held. Only a full tap ring drops messages, and then
+  Step entry gets a Reset.
 
 ## Invariants
 
@@ -49,3 +53,7 @@ in KeysPrefs, not the musical document. Enter is the default computer-key stand-
 Space remains Play/Stop unless explicitly rebound to Tie/Rest, effective only in
 the focused piano roll during step entry. Computer-key repeat is ignored so the
 same hold timer drives MIDI and keyboard controls.
+
+`event.step_input` rejects a `duration` above 64 whole notes (245,760 ticks) with a command error.
+Opening a different clip in the piano roll clears Step state entirely: Step turns off and the
+held keys, pending chord and pedal are discarded, so re-enable Step on the new clip.

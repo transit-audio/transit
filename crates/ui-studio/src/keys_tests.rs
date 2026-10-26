@@ -1212,6 +1212,24 @@ fn played_midi_tap_controls_reach_the_step_editor_and_reset_discards_a_hold() {
 }
 
 #[test]
+fn step_editor_stops_inserting_rests_once_the_tapped_pedal_up_arrives() {
+    use soundcraft_engine::step_input::StepBinding::Cc;
+    let mut t = T::open();
+    t.step_on();
+    t.app.step_message_at(Cc(64), 127, 0);
+    t.app.step_tick_at(2000);
+    let held = t.app.keys.step.cursor;
+    assert!(held > SIXTEENTH, "a held pedal keeps inserting rests");
+    // The lane shed the notes in between; the tap still delivers the pedal-up (#74).
+    t.app.step_message_at(Cc(64), 0, 2010);
+    let released = t.app.keys.step.cursor;
+    t.app.step_tick_at(5000);
+    t.app.step_tick_at(9000);
+    assert_eq!(t.app.keys.step.cursor, released, "no held pedal: no more rests");
+    assert!(t.notes().is_empty());
+}
+
+#[test]
 fn step_toggles_from_the_toolbar_and_the_key_and_shows_a_cursor() {
     let mut t = T::open();
     assert!(!t.app.keys.layout.step_on);

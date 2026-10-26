@@ -394,10 +394,16 @@ fn midi_target(e: &Engine, p: &Value, id: &str) -> Result<TrackId> {
         .ok_or_else(|| bad(id, "select a MIDI or instrument track"))
 }
 
+/// The longest single step `event.step_input` accepts: 64 whole notes (256 quarters, 64 bars of 4/4).
+const MAX_STEP_TICKS: i64 = TICKS_PER_QUARTER * 4 * 64;
+
 fn step_input(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "event.step_input";
     let t = midi_target(e, p, id)?;
     let dur = p.get("duration").and_then(Value::as_i64).map(|v| v.max(1)).unwrap_or_else(|| note_ticks(p.get("duration"), TICKS_PER_QUARTER / 2));
+    if dur > MAX_STEP_TICKS {
+        return Err(bad(id, format!("duration is above the maximum of {MAX_STEP_TICKS} ticks (64 whole notes)")));
+    }
     let vel = i64_or(p, "velocity", 100).clamp(1, 127) as u8;
     let rest = bool_or(p, "rest", false);
     let tie = bool_or(p, "tie", false);
@@ -964,6 +970,17 @@ mod tests {
         let ClipContent::Midi { sequence } = &e.session().find_clip(ClipId(r["clip"].as_u64().unwrap())).unwrap().1.content else { panic!() };
         assert_eq!(sequence.notes.len(), 20);
         assert!(sequence.notes.iter().all(|n| n.length == duration));
+    }
+
+    #[test]
+    fn step_input_duration_is_capped_at_64_whole_notes() {
+        let (mut e, t) = midi_engine();
+        let at_cap = json!({"track": t.0, "at": 0, "pitch": 60, "duration": MAX_STEP_TICKS});
+        e.execute("event.step_input", &at_cap).unwrap();
+        let over = json!({"track": t.0, "at": 0, "pitch": 60, "duration": MAX_STEP_TICKS + 1});
+        assert!(e.execute("event.step_input", &over).is_err());
+        let huge = json!({"track": t.0, "at": 0, "pitch": 60, "duration": i64::MAX});
+        assert!(e.execute("event.step_input", &huge).is_err());
     }
 
     #[test]

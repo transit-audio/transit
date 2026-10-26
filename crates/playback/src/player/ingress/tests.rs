@@ -215,6 +215,44 @@ fn step_tap_overflow_suppresses_writes_until_the_ui_resets() {
 }
 
 #[test]
+fn step_tap_sees_a_pedal_up_the_lane_sheds_under_zero_credits() {
+    let (control, _plans) = bridge();
+    let (mut registry, _sources) = sources::pair(&control).unwrap();
+    let token = registry.register(4).unwrap();
+    let (lane, _audio) = action_lane::pair_with_result(&control);
+    let (send, mut worker) = pump(lane);
+    let (tap, mut received) = rtrb::RingBuffer::new(1024);
+    worker.tap = tap;
+    let fake = Fake::default();
+    let key = fake.add_input("Pedal");
+    let (_handle, consumer) = fake.io().open_input(&key, InputConfig { capacity: 1024, ..Default::default() }).unwrap();
+    send.send(input(consumer, registry.permit(token).unwrap())).ok().unwrap();
+    let port = fake.input_port(&key).unwrap();
+    port.deliver(0, &[0xb0, 64, 127]);
+    worker.step();
+    assert_eq!(received.pop().unwrap(), PlayedMidi::Control { cc: 64, value: 127 }, "pedal-down is admitted");
+    for _ in 0..300 {
+        port.deliver(0, &[0x90, 60, 100]);
+    }
+    worker.step();
+    worker.step();
+    for _ in 0..32 {
+        port.deliver(0, &[0x80, 60, 0]);
+    }
+    worker.step();
+    assert_eq!(worker.lane.note_credits(), 0);
+    let shed = worker.shared.shed.load(Ordering::Relaxed);
+    port.deliver(0, &[0xb0, 64, 0]);
+    worker.step();
+    assert_eq!(worker.shared.shed.load(Ordering::Relaxed), shed + 1, "the lane shed the pedal-up");
+    let mut last = None;
+    while let Ok(message) = received.pop() {
+        last = Some(message);
+    }
+    assert_eq!(last, Some(PlayedMidi::Control { cc: 64, value: 0 }), "the step tap still sees the pedal-up");
+}
+
+#[test]
 fn approximate_audio_receipts_are_counted_without_refusing_or_revoking_releases() {
     let (control, mut plans) = bridge();
     let (mut registry, sources) = sources::pair(&control).unwrap();
