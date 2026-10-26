@@ -71,6 +71,23 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"start": ed.loop_range.start, "end": ed.loop_range.end, "enabled": ed.loop_playback}))
             }
         ),
+        cmd!(
+            "transport.cycle_to_selection",
+            "Set Cycle to Selection",
+            [],
+            None,
+            "{} — the loop region becomes the span of the selected clips, else the time selection; Cycle stays as it is",
+            always,
+            |e, _| {
+                let r = super::options::selection_span(e.session())
+                    .ok_or_else(|| bad("transport.cycle_to_selection", "nothing is selected: select clips or a time range first"))?;
+                // Touch the document only when the region changes, so a no-op leaves no undo step.
+                if e.session().edit.loop_range != r {
+                    e.session_mut().edit.loop_range = r;
+                }
+                Ok(json!({"start": r.start, "end": r.end}))
+            }
+        ),
         cmd!(noundo "transport.status", "Transport Status", [], None, "{}", always, |e, _| Ok(json!(e.transport))),
     ]
 }
@@ -122,6 +139,98 @@ mod tests {
         e.execute("options.loop_playback", &json!({"value": true, "at": bar(9)})).unwrap();
         assert_eq!(e.session().edit.loop_range, Range::new(bar(2), bar(6)));
         assert_eq!(undo_len(&mut e), n);
+    }
+
+    /// Two MIDI clips on one track, (1000..3000) and (5000..9000), both selected by id.
+    fn two_selected_clips(e: &mut Engine) -> (u64, u64) {
+        let r = e.execute("track.new", &json!({"kind": "instrument"})).unwrap();
+        let t = r["tracks"][0].as_u64().unwrap();
+        let a = e.execute("midi.new_clip", &json!({"tracks": [t], "start": 1000, "end": 3000})).unwrap()["clip"].as_u64().unwrap();
+        let b = e.execute("midi.new_clip", &json!({"tracks": [t], "start": 5000, "end": 9000})).unwrap()["clip"].as_u64().unwrap();
+        e.execute("edit.select", &json!({"clips": [a, b]})).unwrap();
+        (a, b)
+    }
+
+    #[test]
+    fn cycle_on_with_clips_selected_takes_their_span_even_when_a_region_exists() {
+        use soundcraft_time::Range;
+        let mut e = Engine::default();
+        two_selected_clips(&mut e);
+        e.execute("transport.loop", &json!({"start": 100, "end": 200})).unwrap();
+        let steps = undo_len(&mut e);
+        e.execute("options.loop_playback", &json!({"value": true})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(1000, 9000), "earliest start to latest end");
+        assert!(e.session().edit.loop_playback);
+        assert_eq!(undo_len(&mut e), steps + 1);
+        // Off keeps the region, with no undo step.
+        e.execute("options.loop_playback", &json!({"value": false})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(1000, 9000));
+        assert_eq!(undo_len(&mut e), steps + 1);
+        // The same selection again changes nothing about the region and adds no step.
+        e.execute("options.loop_playback", &json!({"value": true})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(1000, 9000));
+        assert_eq!(undo_len(&mut e), steps + 1);
+        // Undo restores the earlier region and the switch.
+        e.execute("edit.undo", &json!({})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(100, 200));
+        assert!(!e.session().edit.loop_playback);
+    }
+
+    #[test]
+    fn cycle_on_with_a_time_selection_takes_it_even_when_a_region_exists() {
+        use soundcraft_time::Range;
+        let mut e = Engine::default();
+        e.execute("transport.loop", &json!({"start": 100, "end": 200})).unwrap();
+        e.session_mut().edit.selection = Range::new(500, 9000);
+        let steps = undo_len(&mut e);
+        e.execute("options.loop_playback", &json!({"value": true})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(500, 9000));
+        assert_eq!(undo_len(&mut e), steps + 1);
+    }
+
+    #[test]
+    fn cycle_on_with_nothing_selected_reuses_the_region_or_makes_four_bars() {
+        use soundcraft_time::Range;
+        let mut e = Engine::default();
+        let (tempo, sr) = (e.session().tempo.clone(), e.session().sample_rate);
+        let bar = |n: i64| tempo.tick_to_samples(tempo.bar_start_tick(n), sr);
+        // No region: four bars from the bar holding `at`.
+        e.execute("options.loop_playback", &json!({"value": true, "at": bar(2) + 10})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(bar(2), bar(6)));
+        // A region and nothing selected: reused, no undo step.
+        e.execute("options.loop_playback", &json!({"value": false})).unwrap();
+        e.execute("transport.loop", &json!({"start": 300, "end": 700})).unwrap();
+        let steps = undo_len(&mut e);
+        e.execute("options.loop_playback", &json!({"value": true, "at": bar(9)})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(300, 700));
+        assert_eq!(undo_len(&mut e), steps);
+    }
+
+    #[test]
+    fn cycle_to_selection_sets_the_region_without_toggling_cycle() {
+        use soundcraft_time::Range;
+        let mut e = Engine::default();
+        // Nothing selected: an error, no change, no undo step.
+        let steps = undo_len(&mut e);
+        assert!(e.execute("transport.cycle_to_selection", &json!({})).is_err());
+        assert!(e.session().edit.loop_range.is_empty() && !e.session().edit.loop_playback);
+        assert_eq!(undo_len(&mut e), steps);
+        // Clips: the region is their span; Cycle stays off.
+        two_selected_clips(&mut e);
+        let steps = undo_len(&mut e);
+        e.execute("transport.cycle_to_selection", &json!({})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(1000, 9000));
+        assert!(!e.session().edit.loop_playback);
+        assert_eq!(undo_len(&mut e), steps + 1);
+        // Again with the same selection: no change, no step. With Cycle on it stays on.
+        e.execute("transport.cycle_to_selection", &json!({})).unwrap();
+        assert_eq!(undo_len(&mut e), steps + 1);
+        e.execute("options.loop_playback", &json!({"value": true})).unwrap();
+        e.execute("edit.select", &json!({"clips": []})).unwrap();
+        e.session_mut().edit.selection = Range::new(20, 40);
+        e.execute("transport.cycle_to_selection", &json!({})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(20, 40));
+        assert!(e.session().edit.loop_playback);
     }
 
     #[test]

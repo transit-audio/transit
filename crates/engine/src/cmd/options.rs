@@ -16,32 +16,53 @@ macro_rules! toggle {
     };
 }
 
-/// Cycle on/off. Turning it on with no loop region makes one (see `EditState::cycle_range`): the
-/// time selection when it is non-empty, else four bars from the bar containing `at` (default: the
-/// playhead), cut at the end of the content when that lies past `at`. The region and the switch
-/// land as one undo step; turning Cycle off leaves the region, so the next toggle restores it.
+/// Cycle on/off. Turning it on with something selected makes the region from it, even when a
+/// region exists (see [`selection_span`]): the span of the selected clips, else the time selection.
+/// With nothing selected an existing region is reused, and with none the region is four bars from
+/// the bar containing `at` (default: the playhead), cut at the end of the content when that lies
+/// past `at`. A changed region and the switch land as one undo step; turning Cycle off leaves the
+/// region, so the next toggle restores it.
 fn loop_playback(e: &mut Engine, p: &Value) -> Result<Value> {
     let on = p.get("value").and_then(Value::as_bool).unwrap_or(!e.session().edit.loop_playback);
     let at = position_param(e, "options.loop_playback", p, "at")?;
-    let promote = on && e.session().edit.loop_range.is_empty();
     let before = e.session_arc();
-    let region = promote.then(|| default_region(e, at));
+    let region = if !on {
+        None
+    } else if let Some(span) = selection_span(e.session()) {
+        Some(span)
+    } else if e.session().edit.loop_range.is_empty() {
+        Some(default_region(e, at))
+    } else {
+        None
+    };
+    let region = region.filter(|r| !r.is_empty() && *r != e.session().edit.loop_range);
     let ed = &mut e.session_mut().edit;
     ed.loop_playback = on;
-    if let Some(r) = region.filter(|r| !r.is_empty()) {
+    if let Some(r) = region {
         ed.loop_range = r;
-    }
-    if promote {
         e.push_undo("Cycle On", before);
     }
     Ok(json!({"value": on}))
 }
 
+/// The region a selection asks for: the span of the selected clips (earliest start to latest end),
+/// else the time selection when it is not empty. `None` when nothing is selected.
+pub(super) fn selection_span(s: &soundcraft_model::Session) -> Option<soundcraft_time::Range> {
+    let (mut start, mut end) = (i64::MAX, i64::MIN);
+    for id in &s.edit.selected_clips {
+        if let Some((_, c)) = s.find_clip(*id) {
+            start = start.min(c.start);
+            end = end.max(c.end());
+        }
+    }
+    if start < end {
+        return Some(soundcraft_time::Range::new(start, end));
+    }
+    (!s.edit.selection.is_empty()).then_some(s.edit.selection)
+}
+
 fn default_region(e: &Engine, at: Option<i64>) -> soundcraft_time::Range {
     let s = e.session();
-    if !s.edit.selection.is_empty() {
-        return s.edit.selection;
-    }
     let at = at.unwrap_or(if e.transport.playing { e.transport.position } else { s.edit.playhead }).max(0);
     four_bars(&s.tempo, s.sample_rate, at, s.content_end())
 }

@@ -19,3 +19,12 @@ scale as before. Higher zoom leaves less space for panels; choose a smaller zoom
 Plug-in editor windows follow the display scale, not this zoom.
 
 See the [shortcuts reference](shortcuts.md) and **Help > Keyboard Shortcuts** for key bindings.
+
+## Cycle
+
+Turning Cycle on (C, the transport button or Transport > Cycle On) with clips selected sets the
+cycle region to the span of those clips, from the earliest start to the latest end, and with a
+time range selected it sets the region to that range; either replaces a region that was already
+there, in one undo step. With nothing selected, Cycle reuses the existing region, or makes four
+bars from the bar holding the playhead when there is none. Cycle Off keeps the region, and
+Transport > Set Cycle to Selection (Cmd+L) re-sets it from the selection without toggling Cycle.

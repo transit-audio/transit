@@ -4191,3 +4191,33 @@ fn mixer_insert_overflow_paint_never_overlaps_the_add_glyph_row() {
         }
     }
 }
+
+/// Two MIDI clips at bars 2-3 and 5-6 on one track, both selected; returns (first start, last end).
+fn two_selected_clips(app: &mut StudioApp) -> (i64, i64) {
+    let bar = one_bar(app);
+    let r = app.run("track.new", json!({"kind": "instrument"})).unwrap();
+    let t = r["tracks"][0].as_u64().unwrap();
+    let a = app.run("midi.new_clip", json!({"tracks": [t], "start": bar, "end": 2 * bar})).unwrap()["clip"].as_u64().unwrap();
+    let b = app.run("midi.new_clip", json!({"tracks": [t], "start": 4 * bar, "end": 5 * bar})).unwrap()["clip"].as_u64().unwrap();
+    app.run("edit.select", json!({"clips": [a, b]})).unwrap();
+    (bar, 5 * bar)
+}
+
+#[test]
+fn pressing_c_with_clips_selected_cycles_their_span_and_c_again_turns_it_off_keeping_it() {
+    let (mut app, ctx, mut time) = loop_app();
+    let span = two_selected_clips(&mut app);
+    // An older region exists: the selection still wins.
+    app.run("transport.loop", json!({"start": 0, "end": 10})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let steps = undo_len(&mut app);
+    key(&mut app, "c");
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(loop_range(&app), span, "the region spans both clips");
+    assert!(app.engine.session().edit.loop_playback);
+    assert_eq!(undo_len(&mut app), steps + 1);
+    key(&mut app, "c");
+    frames(&mut app, &ctx, 3, &mut time);
+    assert!(!app.engine.session().edit.loop_playback, "C again is Cycle off");
+    assert_eq!(loop_range(&app), span, "off keeps the region");
+}

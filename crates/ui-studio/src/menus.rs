@@ -245,14 +245,17 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 app.arrange.bar_menu.extend(window_items);
                 let transport_menu = ui.menu_button("Transport", |ui| {
                     let cycle = app.engine.session().edit.loop_playback;
-                    let items: [(&str, A, &str, Value); 4] = [
+                    let items: [(&str, A, &str, Value); 5] = [
                         ("Play / Stop", A::PlayStop, "transport.toggle", json!({})),
                         ("Record", A::Record, "transport.record", json!({})),
                         ("Return to Zero", A::ReturnToZero, "transport.rtz", json!({})),
                         (if cycle { "Cycle Off" } else { "Cycle On" }, A::Cycle, "options.loop_playback", json!({"value": !cycle})),
+                        ("Set Cycle to Selection", A::CycleToSelection, "transport.cycle_to_selection", json!({})),
                     ];
                     for (text, action, id, p) in items {
-                        if ui.add(menu_button(text).shortcut_text(label(action))).clicked() {
+                        let b = ui.add(menu_button(text).shortcut_text(label(action)));
+                        app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, text.into(), String::new(), b.rect));
+                        if b.clicked() {
                             let _ = app.run(id, p);
                             ui.close();
                         }
@@ -484,6 +487,9 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     if pressed(ctx, A::Cycle) {
         let on = app.engine.session().edit.loop_playback;
         let _ = app.run("options.loop_playback", json!({"value": !on}));
+    }
+    if pressed(ctx, A::CycleToSelection) {
+        let _ = app.run("transport.cycle_to_selection", json!({}));
     }
     // Delete over a fader, knob or send level resets it (Ableton); anywhere else it deletes.
     // Backspace does the same. (A readout being edited has the keyboard, so both edit text.)

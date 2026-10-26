@@ -116,12 +116,16 @@ widgets, with no drop-down nested in the menu, which closed it. The menu closes 
 
 ## Cycle and the loop region
 
-Turning Cycle on (`options.loop_playback`, from the transport button, the menu or the shortcut) with
-no loop region makes one, in the same undo step as the switch: the time selection when it is
-non-empty, else four bars from the bar containing the playhead (the UI passes `at`), cut at the end
-of the content when that lies ahead. Turning Cycle off leaves `loop_range`, so the next toggle
-reuses it. `EditState::cycle_range()` still falls back to the selection for a session that arrives
-with Cycle on and no region; playback reads it unchanged.
+Turning Cycle on (`options.loop_playback`, from the transport button, the menu or the shortcut)
+derives the region from the selection (#140), in the same undo step as the switch: the span of
+the selected clips (earliest start to latest end), else a non-empty time selection, in both cases
+even when a region exists (`options::selection_span`). With nothing selected an existing region is
+reused; with none, four bars from the bar containing the playhead (the UI passes `at`), cut at the
+end of the content when that lies ahead. Turning Cycle off leaves `loop_range`, so the next toggle
+reuses it. `transport.cycle_to_selection` (Transport > Set Cycle to Selection, Cmd+L) applies the
+same derivation without toggling Cycle and errors with a status message when nothing is selected.
+`EditState::cycle_range()` still falls back to the selection for a session that arrives with Cycle
+on and no region; playback reads it unchanged.
 
 The ruler shows the stored `loop_range` (never the selection): an amber block while Cycle is on, a
 faint outline while off, nothing without a region. The block is live (`loopbar::block`, sharing

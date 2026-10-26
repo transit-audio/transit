@@ -1092,3 +1092,18 @@ fn stems_by_output_path_start_one_job_with_the_checked_paths() {
     assert_eq!(files, ["Untitled_Out 1-2.wav", "Untitled_Out 5-6.wav"]);
     assert!(t.app.dialog.is_none());
 }
+
+#[test]
+fn the_transport_menu_lists_set_cycle_to_selection_and_it_leaves_cycle_alone() {
+    let mut t = T::new();
+    let tr = t.track(json!({"kind": "instrument"}));
+    let a = t.app.run("midi.new_clip", json!({"tracks": [tr.0], "start": 1000, "end": 2000})).unwrap()["clip"].as_u64().unwrap();
+    let b = t.app.run("midi.new_clip", json!({"tracks": [tr.0], "start": 5000, "end": 8000})).unwrap()["clip"].as_u64().unwrap();
+    t.app.run("edit.select", json!({"clips": [a, b]})).unwrap();
+    t.frames(3);
+    t.menu("Transport");
+    t.menu("Set Cycle to Selection");
+    let r = t.app.engine.session().edit.loop_range;
+    assert_eq!((r.start, r.end), (1000, 8000));
+    assert!(!t.app.engine.session().edit.loop_playback);
+}
