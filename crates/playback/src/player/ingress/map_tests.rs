@@ -48,7 +48,9 @@ fn build(routed: bool) -> Rig {
     } else {
         Vec::new()
     };
-    send.send(Update::Input(Box::new(Input { id: PORT, mon: Mon::default(), guard: storm::Guard::default(), consumer, routes }))).ok().unwrap();
+    send.send(Update::Input(Box::new(Input { id: PORT, mon: Mon::default(), guard: storm::Guard::default(), live: false, consumer, routes })))
+        .ok()
+        .unwrap();
     worker.step();
     let port = fake.input_port(&key).unwrap();
     Rig { worker, send, events, port, wanted: Wanted::new(), fake, key, _handle: handle, _keep: Box::new((registry, sources, control, audio, plans)) }
@@ -334,6 +336,7 @@ fn a_thousand_ccs_a_second_on_two_ports_against_a_sixty_hertz_apply_loop_lose_no
             id: PORT + 1,
             mon: Mon::default(),
             guard: storm::Guard::default(),
+            live: false,
             consumer: consumer2,
             routes: Vec::new(),
         })))

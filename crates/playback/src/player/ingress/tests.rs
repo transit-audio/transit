@@ -18,9 +18,16 @@ fn monitor_sysex_capture_reaches_unrouted_monitor_with_loss_counts_and_no_ingres
     let fake = Fake::default();
     let key = fake.add_input("SysEx capture");
     let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
-    send.send(Update::Input(Box::new(Input { id: 3, mon: Mon::default(), guard: storm::Guard::default(), consumer, routes: Vec::new() })))
-        .ok()
-        .unwrap();
+    send.send(Update::Input(Box::new(Input {
+        id: 3,
+        mon: Mon::default(),
+        guard: storm::Guard::default(),
+        live: false,
+        consumer,
+        routes: Vec::new(),
+    })))
+    .ok()
+    .unwrap();
     worker.step();
     let port = fake.input_port(&key).unwrap();
     let mut bytes = [9; 100];
@@ -65,9 +72,16 @@ fn monitored(enabled: bool) -> (monitor::Hub, Pump, Fake, transit_midi_io::PortK
     let fake = Fake::default();
     let key = fake.add_input("Zero cost");
     let (handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
-    send.send(Update::Input(Box::new(Input { id: 3, mon: Mon::default(), guard: storm::Guard::default(), consumer, routes: Vec::new() })))
-        .ok()
-        .unwrap();
+    send.send(Update::Input(Box::new(Input {
+        id: 3,
+        mon: Mon::default(),
+        guard: storm::Guard::default(),
+        live: false,
+        consumer,
+        routes: Vec::new(),
+    })))
+    .ok()
+    .unwrap();
     worker.step();
     (hub, worker, fake, key, (handle, send))
 }
@@ -170,7 +184,14 @@ pub(super) fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSen
     )
 }
 fn input(consumer: InputConsumer, permit: sources::Permit) -> Update {
-    Update::Input(Box::new(Input { id: 1, mon: Mon::default(), guard: storm::Guard::default(), consumer, routes: vec![(permit, route())] }))
+    Update::Input(Box::new(Input {
+        id: 1,
+        mon: Mon::default(),
+        guard: storm::Guard::default(),
+        live: false,
+        consumer,
+        routes: vec![(permit, route())],
+    }))
 }
 
 #[test]
@@ -610,6 +631,7 @@ fn one_raw_consumer_fans_out_with_independent_channels_and_identical_timestamps(
         id: 1,
         mon: Mon::default(),
         guard: storm::Guard::default(),
+        live: false,
         consumer,
         routes: vec![(registry.permit(first).unwrap(), a), (registry.permit(second).unwrap(), b)],
     })))
@@ -658,6 +680,7 @@ fn reconfiguration_retires_only_removed_routes_and_new_routes_skip_old_raw_offer
         id: 1,
         mon: Mon::default(),
         guard: storm::Guard::default(),
+        live: false,
         consumer,
         routes: vec![(registry.permit(removed).unwrap(), target), (registry.permit(retained).unwrap(), target)],
     })))
@@ -706,9 +729,16 @@ fn pending_initial_route_preserves_post_boundary_input_until_acknowledged() {
     let fake = Fake::default();
     let key = fake.add_input("Initial route pending");
     let (handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
-    send.send(Update::Input(Box::new(Input { id: 1, mon: Mon::default(), guard: storm::Guard::default(), consumer, routes: Vec::new() })))
-        .ok()
-        .unwrap();
+    send.send(Update::Input(Box::new(Input {
+        id: 1,
+        mon: Mon::default(),
+        guard: storm::Guard::default(),
+        live: false,
+        consumer,
+        routes: Vec::new(),
+    })))
+    .ok()
+    .unwrap();
     worker.step();
     let port = fake.input_port(&key).unwrap();
     port.deliver(1_000, &[0x90, 60, 100]);
@@ -744,9 +774,16 @@ fn monitor_on_a_route_attached_later_keeps_its_backlog_and_the_monitor_sees_each
     let fake = Fake::default();
     let key = fake.add_input("Monitored, route pending");
     let (handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
-    send.send(Update::Input(Box::new(Input { id: 1, mon: Mon::default(), guard: storm::Guard::default(), consumer, routes: Vec::new() })))
-        .ok()
-        .unwrap();
+    send.send(Update::Input(Box::new(Input {
+        id: 1,
+        mon: Mon::default(),
+        guard: storm::Guard::default(),
+        live: false,
+        consumer,
+        routes: Vec::new(),
+    })))
+    .ok()
+    .unwrap();
     worker.step();
     let port = fake.input_port(&key).unwrap();
     port.deliver(1_000, &[0x90, 60, 100]);
@@ -786,9 +823,16 @@ fn monitor_on_a_port_without_an_admitting_route_is_trimmed_past_512_pending() {
     let fake = Fake::default();
     let key = fake.add_input("Unrouted flood");
     let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
-    send.send(Update::Input(Box::new(Input { id: 1, mon: Mon::default(), guard: storm::Guard::default(), consumer, routes: Vec::new() })))
-        .ok()
-        .unwrap();
+    send.send(Update::Input(Box::new(Input {
+        id: 1,
+        mon: Mon::default(),
+        guard: storm::Guard::default(),
+        live: false,
+        consumer,
+        routes: Vec::new(),
+    })))
+    .ok()
+    .unwrap();
     worker.step();
     let port = fake.input_port(&key).unwrap();
     for n in 0..600u64 {
@@ -867,6 +911,7 @@ fn a_preempted_echo_push_after_a_revocation_is_dropped_by_route_generation() {
         id: 1,
         mon: Mon::default(),
         guard: storm::Guard::default(),
+        live: false,
         consumer,
         routes: vec![(registry.permit(token).unwrap(), echoing)],
     })))
@@ -882,4 +927,93 @@ fn a_preempted_echo_push_after_a_revocation_is_dropped_by_route_generation() {
     }
     std::thread::sleep(std::time::Duration::from_millis(20));
     assert_eq!(out_fake.sent(&out_key), [vec![0x90, 61, 100], vec![0x80, 61, 64]], "no note-on after the release");
+}
+
+/// A pump with one admitting route and a pedal held down, plus what the tests revoke it with.
+fn pedal_held()
+-> (Pump, SyncSender<Update>, sources::Control, sources::Token, Fake, transit_midi_io::PortKey, (impl Sized, impl Sized, transit_midi_io::MidiIo)) {
+    let (control, _plans) = bridge();
+    let (mut registry, sources) = sources::pair(&control).unwrap();
+    let token = registry.register(4).unwrap();
+    let (lane, _audio) = action_lane::pair_with_result(&control);
+    let (send, mut worker) = pump(lane);
+    let fake = Fake::default();
+    let key = fake.add_input("Pedal");
+    let io = fake.io();
+    let (_handle, consumer) = io.open_input(&key, InputConfig::default()).unwrap();
+    send.send(input(consumer, registry.permit(token).unwrap())).ok().unwrap();
+    fake.input_port(&key).unwrap().deliver(0, &[0xb0, 64, 127]);
+    worker.step();
+    assert!(!worker.shared.tap_lost.load(Ordering::Acquire), "a pedal held is not a loss");
+    (worker, send, registry, token, fake, key, (sources, _handle, io))
+}
+
+fn reset_sent(worker: &Pump) -> bool {
+    worker.shared.tap_lost.load(Ordering::Acquire)
+}
+
+#[test]
+fn a_port_removed_with_the_pedal_held_resets_step_entry() {
+    let (mut worker, _send, _registry, _token, fake, key, keep) = pedal_held();
+    let mut watcher = keep.2.watcher().unwrap();
+    fake.remove_input(&key);
+    watcher.poll().unwrap();
+    worker.step();
+    assert!(worker.inputs.is_empty());
+    assert!(reset_sent(&worker));
+}
+
+#[test]
+fn a_storm_mute_with_the_pedal_held_resets_step_entry() {
+    let (mut worker, _send, _registry, _token, _fake, _key, _keep) = pedal_held();
+    // What the detector does when it trips: mute the port and invalidate its routes.
+    let input = &worker.inputs[0];
+    input.guard.muted.store(true, Ordering::Release);
+    for (permit, _) in &input.routes {
+        permit.invalidate();
+    }
+    worker.step();
+    assert!(reset_sent(&worker));
+}
+
+#[test]
+fn a_disarm_rebuild_with_no_routes_resets_and_a_muted_rebuild_resets() {
+    for muted in [false, true] {
+        let (mut worker, send, registry, token, _fake, _key, _keep) = pedal_held();
+        let routes = if muted {
+            worker.inputs[0].guard.muted.store(true, Ordering::Release);
+            vec![(registry.permit(token).unwrap(), route())]
+        } else {
+            Vec::new() // disarm: the track no longer listens to this port
+        };
+        send.send(Update::Routes { id: 1, routes, applied: Arc::new(AtomicBool::new(false)) }).ok().unwrap();
+        worker.step();
+        assert!(reset_sent(&worker), "muted: {muted}");
+    }
+}
+
+#[test]
+fn a_main_side_permit_invalidation_with_the_pedal_held_resets_step_entry() {
+    let (mut worker, _send, registry, token, _fake, _key, _keep) = pedal_held();
+    registry.permit(token).unwrap().invalidate();
+    worker.step();
+    assert!(reset_sent(&worker));
+}
+
+#[test]
+fn a_channel_filter_change_resets_but_an_identical_rebuild_does_not() {
+    let (mut worker, send, registry, token, _fake, _key, _keep) = pedal_held();
+    for _ in 0..2 {
+        send.send(Update::Routes { id: 1, routes: vec![(registry.permit(token).unwrap(), route())], applied: Arc::new(AtomicBool::new(false)) })
+            .ok()
+            .unwrap();
+        worker.step();
+        assert!(!reset_sent(&worker), "the same routes are not a revocation");
+    }
+    let narrowed = Route { channels: 1, ..route() };
+    send.send(Update::Routes { id: 1, routes: vec![(registry.permit(token).unwrap(), narrowed)], applied: Arc::new(AtomicBool::new(false)) })
+        .ok()
+        .unwrap();
+    worker.step();
+    assert!(reset_sent(&worker));
 }

@@ -72,6 +72,13 @@ Space remains Play/Stop unless explicitly rebound to Tie/Rest, effective only in
 the focused piano roll during step entry. Computer-key repeat is ignored so the
 same hold timer drives MIDI and keyboard controls.
 
+A held pedal cannot be stranded (#134): the ingress worker sets `tap_lost` (the step editor
+then gets a `Reset`) whenever a route stops admitting, whatever the cause: the port goes away,
+the storm detector mutes it, Main drops a permit or rebuilds the routes without it (disarm,
+monitor off), or a channel filter change rewrites a route. One edge check in `Pump::step`
+(admitting, then not) covers every path; the route-update comparison covers a route that is
+replaced while others stay. A rebuild that keeps the same routes sends nothing.
+
 `event.step_input` rejects a `duration` above 64 whole notes (245,760 ticks) with a command error.
 Opening a different clip in the piano roll clears Step state entirely: Step turns off and the
 pending chord, pedal and learn state are discarded (the live keyboard keys are kept), so re-enable Step on the new clip.

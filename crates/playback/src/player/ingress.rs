@@ -158,6 +158,8 @@ struct Input {
     mon: Mon,
     /// Feedback storm detector and the port's mute flag (#99).
     guard: storm::Guard,
+    /// Whether a route admitted at the last pass: the edge to none is a revocation (#134).
+    live: bool,
 }
 
 /// Per-input state of the MIDI Monitor tap. Only the ingress worker touches it.
@@ -385,6 +387,7 @@ impl Worker {
                 routes: vec![(permit.clone(), route)],
                 mon: Mon::default(),
                 guard: storm::Guard::default(),
+                live: false,
             })))
             .map_err(|_| "MIDI worker attachment queue unavailable")?;
         self.permits.push(permit);
@@ -403,7 +406,14 @@ impl Worker {
         self.next_input = id;
         consumer.wake_on(self.thread.thread().clone());
         self.attach
-            .try_send(Update::Input(Box::new(Input { id, consumer, routes: Vec::new(), mon: Mon::default(), guard: storm::Guard::new(muted) })))
+            .try_send(Update::Input(Box::new(Input {
+                id,
+                consumer,
+                routes: Vec::new(),
+                mon: Mon::default(),
+                guard: storm::Guard::new(muted),
+                live: false,
+            })))
             .map_err(|_| "MIDI attachment queue unavailable")?;
         self.thread.thread().unpark();
         Ok(id)
@@ -589,6 +599,10 @@ impl Pump {
             let keep = input.healthy();
             if !keep {
                 self.shared.recovered.fetch_add(1, Ordering::Relaxed);
+                // A port that went away took its routes with it (#134): a held pedal is gone.
+                if input.live || input.routes.iter().any(|(permit, _)| permit.admits()) {
+                    self.shared.tap_lost.store(true, Ordering::Release);
+                }
             }
             keep
         });
@@ -612,15 +626,30 @@ impl Pump {
                 Ok(Update::Maps(maps)) => self.maps = Some(maps),
                 Ok(Update::Routes { id, routes, applied }) => {
                     if let Some(input) = self.inputs.iter_mut().find(|input| input.id == id) {
-                        for (old, _) in &input.routes {
-                            if !routes.iter().any(|(new, _)| old.token() == new.token()) {
-                                old.invalidate();
+                        for (old, old_route) in &input.routes {
+                            match routes.iter().find(|(new, _)| old.token() == new.token()) {
+                                None => {
+                                    // Revoked (removal, disarm, monitor off): whatever it held is
+                                    // gone, so step entry resets (#134).
+                                    if old.admits() {
+                                        self.shared.tap_lost.store(true, Ordering::Release);
+                                    }
+                                    old.invalidate();
+                                }
+                                // A channel filter change can strand a held pedal the same way.
+                                Some((_, new_route)) if new_route.channels != old_route.channels => {
+                                    self.shared.tap_lost.store(true, Ordering::Release);
+                                }
+                                Some(_) => {}
                             }
                         }
                         // A muted port (#99) admits nothing until Main clears the flag; routes
                         // sent after that start a fresh count.
                         if input.guard.muted() {
                             for (permit, _) in &routes {
+                                if permit.admits() {
+                                    self.shared.tap_lost.store(true, Ordering::Release);
+                                }
                                 permit.invalidate();
                             }
                         } else if input.guard.storm.tripped() {
@@ -636,6 +665,16 @@ impl Pump {
                 }
                 Err(_) => break,
             }
+        }
+        // Every other way a route stops admitting (a storm mute, Main closing a port or
+        // invalidating its permits, a disarm) is seen here as the edge from admitting to not, so
+        // one check covers them all (#134). Controls the route held are never released by it.
+        for input in &mut self.inputs {
+            let now = input.routes.iter().any(|(permit, _)| permit.admits());
+            if input.live && !now {
+                self.shared.tap_lost.store(true, Ordering::Release);
+            }
+            input.live = now;
         }
         for _ in 0..action_lane::NOTE_CAPACITY {
             let Some(receipt) = self.lane.reclaim() else { break };
