@@ -14,7 +14,7 @@ use soundcraft_time::{BarBeat, Samples};
 const EDGE: f32 = 6.0;
 
 /// Opacity of a loop-drag ghost cycle and the notes drawn in it.
-const GHOST_ALPHA: f32 = 0.45;
+pub(crate) const GHOST_ALPHA: f32 = 0.45;
 /// Width (points) of the loop handle's hot zone, measured back from a clip's right edge.
 const LOOP_ZONE_W: f32 = 20.0;
 /// Audio clips: the fade handle zones are this wide (from inside the trim edge) and this tall

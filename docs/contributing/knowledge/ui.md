@@ -63,6 +63,23 @@ Issue #63; code in `crates/ui-studio/src/fades.rs` (gestures) and `crates/model/
 `crates/ui-studio/src/*_tests.rs` and `crates/ui-studio/tests/`. A UI feature needs a test through
 the real handler, not only a unit test of a helper.
 
+## Piano roll and looped clips (#137)
+
+Logic and Live agree on the model: the editor shows the clip's own content, the loop cycle, with a
+loop-end marker; edits change every repeat. Logic dims the repeats as ghosts, Live shows none.
+`keys.rs` follows that (ADR 0019). For a clip with a valid `ClipLoop` the roll's span
+(`KeysLayout::clip_ticks`) is `0..loop.end` (the first pass, ticks from `soundcraft_mix::loop_frame`,
+the same frame playback uses), not the arrangement length. A line labeled "Loop end" marks `loop.end`;
+a tint covers the one-shot lead-in before `loop.start`; `loop.end..length` shows the cycle's notes
+(those starting in `loop.start..loop.end`) as dimmed ghosts (`arrange::GHOST_ALPHA`) with thin cycle
+dividers. Ghosts take no input; editing, selection, drag, paste, step entry and the CC lanes work in
+`0..loop.end`, and a note placed past `loop.end` is `outside` as past a clip end. The scroll range is
+unbounded, so the repeats can be scrolled to. The ruler's end handle sits at the arrangement length and
+changes `Clip::length`, not the cycle. The readout is "Clip length 1.00 bars, looped to 4.00"
+(`clip_length_text`). Layout fields for tests: `looped_to_ticks`, `loop_cycle`, `lead_in_ticks`,
+`loop_ghosts`. Notes at negative ticks after a start trim are unchanged: they belong to the intro and
+get no ghost unless inside the cycle.
+
 ## Piano roll note length (#100)
 
 Drag either note edge to resize; the start edge keeps the end fixed (bounded at tick zero).

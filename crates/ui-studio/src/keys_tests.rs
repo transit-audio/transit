@@ -1786,3 +1786,87 @@ fn modifier_table_alt_body_is_velocity_alt_shift_body_is_free_move_shift_body_sn
     assert_ne!(t.notes()[0].start, 617, "Shift-body snaps");
     assert_eq!(t.notes()[0].velocity, 100);
 }
+
+impl T {
+    /// Loop the open one-bar clip over `[start_ticks, bar)` and lengthen it to `bars` bars (ADR 0019).
+    fn loop_to_bars(&mut self, start_ticks: i64, bars: i64) -> i64 {
+        let bar = self.clip_ticks();
+        let (a, b, to) = {
+            let s = self.app.engine.session();
+            let sr = s.sample_rate;
+            (s.tempo.tick_to_samples(start_ticks, sr), s.tempo.tick_to_samples(bar, sr), s.tempo.tick_to_samples(bars * bar, sr))
+        };
+        self.app.run("clip.set_loop", json!({"clip": self.clip.0, "start": a, "end": b})).unwrap();
+        self.app.run("clip.loop_to", json!({"clip": self.clip.0, "to": to})).unwrap();
+        self.frames(5);
+        bar
+    }
+}
+
+#[test]
+fn a_one_bar_clip_looped_to_four_edits_as_one_bar_with_ghost_repeats() {
+    let mut t = T::open();
+    let bar = t.clip_ticks();
+    t.add(60, 0, bar / 4);
+    t.add(64, bar / 2, bar / 4);
+    t.loop_to_bars(0, 4);
+    let l = &t.app.keys.layout;
+    assert_eq!(l.clip_ticks, bar, "the span is the cycle");
+    assert_eq!((l.looped_to_ticks, l.loop_cycle, l.lead_in_ticks), (Some(4 * bar), Some((0, bar)), 0));
+    // Three repeats of the two notes, each at the cycle's position.
+    assert_eq!(l.loop_ghosts.len(), 6);
+    for k in 1..4 {
+        assert!(l.loop_ghosts.iter().any(|g| (g.pitch, g.start) == (60, k * bar)), "repeat {k}");
+        assert!(l.loop_ghosts.iter().any(|g| (g.pitch, g.start) == (64, k * bar + bar / 2)), "repeat {k}");
+    }
+    assert!(l.loop_ghosts.iter().all(|g| g.start >= bar && g.start + g.length <= 4 * bar));
+    // A note placed at bar 3 is past the loop end: outside, not part of the cycle.
+    t.add(67, 2 * bar, bar / 4);
+    let n = &t.app.keys.layout.notes;
+    assert!(n.iter().find(|n| n.pitch == 67).unwrap().outside);
+    assert!(n.iter().filter(|n| n.pitch != 67).all(|n| !n.outside));
+    // The clip's content is one bar plus that note; the ghosts did not become notes.
+    assert_eq!(t.notes().len(), 3);
+}
+
+#[test]
+fn an_unlooped_four_bar_clip_is_unchanged_with_no_ghosts() {
+    let mut t = T::open();
+    let bar = t.clip_ticks();
+    t.add(60, 0, bar / 4);
+    let to = {
+        let s = t.app.engine.session();
+        s.tempo.tick_to_samples(4 * bar, s.sample_rate)
+    };
+    t.app.trim_clip(t.clip, false, to).unwrap();
+    t.frames(5);
+    let l = &t.app.keys.layout;
+    assert_eq!(l.clip_ticks, 4 * bar, "the span is the arrangement length");
+    assert_eq!((l.looped_to_ticks, l.loop_cycle, l.lead_in_ticks), (None, None, 0));
+    assert!(l.loop_ghosts.is_empty());
+}
+
+#[test]
+fn a_loop_with_a_lead_in_spans_zero_to_its_end_and_reports_the_lead_in() {
+    let mut t = T::open();
+    let bar = t.clip_ticks();
+    t.add(60, 0, bar / 8);
+    t.add(62, bar / 2, bar / 8);
+    let q = bar / 4;
+    t.loop_to_bars(q, 3);
+    let l = &t.app.keys.layout;
+    assert_eq!((l.clip_ticks, l.loop_cycle, l.lead_in_ticks, l.looped_to_ticks), (bar, Some((q, bar)), q, Some(3 * bar)));
+    // The note before the cycle start is the intro: no ghost of it; the cycle's note repeats every 3/4 bar.
+    let cycle = bar - q;
+    assert!(l.loop_ghosts.iter().all(|g| g.pitch == 62));
+    assert!(l.loop_ghosts.iter().any(|g| g.start == bar / 2 + cycle));
+    assert!(l.loop_ghosts.iter().all(|g| g.start >= bar && g.start < 3 * bar));
+}
+
+#[test]
+fn the_clip_length_readout_says_looped_to() {
+    let bar = soundcraft_time::TICKS_PER_QUARTER * 4;
+    assert_eq!(crate::keys::clip_length_text(bar, Some(4 * bar)), "Clip length 1.00 bars, looped to 4.00");
+    assert_eq!(crate::keys::clip_length_text(4 * bar, None), "Clip length 4.00 bars");
+    assert_eq!(crate::keys::clip_length_text(bar, Some(bar)), "Clip length 1.00 bars");
+}

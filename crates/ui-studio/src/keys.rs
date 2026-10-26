@@ -242,6 +242,14 @@ pub struct NoteRect {
     pub vel_rect: R4,
 }
 
+/// One repeat of a looped clip's cycle drawn as a dimmed ghost note (not interactive).
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize)]
+pub struct GhostNote {
+    pub pitch: u8,
+    pub start: i64,
+    pub length: i64,
+}
+
 /// Last frame's piano roll geometry and state.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct KeysLayout {
@@ -292,6 +300,13 @@ pub struct KeysLayout {
     /// The clip's start (absolute ticks) and length in ticks.
     pub clip_start_ticks: i64,
     pub clip_ticks: i64,
+    /// A looped clip (ADR 0019): the arrangement length in ticks, the loop cycle `(start, end)` in ticks
+    /// (`clip_ticks` is then `end`, the first pass the roll edits), and the repeats drawn as ghosts.
+    pub looped_to_ticks: Option<i64>,
+    pub loop_cycle: Option<(i64, i64)>,
+    /// The one-shot lead-in before the cycle's start, in ticks (0 when the cycle starts at the clip start).
+    pub lead_in_ticks: i64,
+    pub loop_ghosts: Vec<GhostNote>,
     /// The clip-end handle in the ruler (slice 6): drag to lengthen or shorten the clip.
     pub end_handle: R4,
     pub grid_ticks: Option<i64>,
@@ -390,7 +405,12 @@ fn is_black(p: u8) -> bool {
 struct ClipView {
     track: TrackId,
     c0: i64,
+    /// The span the roll edits: the arrangement length, or the first pass `0..loop.end` of a looped clip.
     len: i64,
+    /// The arrangement length in ticks (equal to `len` unless looped).
+    full: i64,
+    /// The loop cycle `(start, end)` in ticks from the clip start, when the clip has a valid loop.
+    cycle: Option<(i64, i64)>,
     notes: Vec<Note>,
     ctrls: Vec<soundcraft_midi::CtrlEvent>,
     name: String,
@@ -400,8 +420,58 @@ fn clip_view(s: &Session, clip: ClipId) -> Option<ClipView> {
     let (track, c) = s.find_clip(clip)?;
     let ClipContent::Midi { sequence } = &c.content else { return None };
     let c0 = s.tempo.samples_to_ticks(c.start, s.sample_rate);
-    let len = s.tempo.samples_to_ticks(c.end(), s.sample_rate) - c0;
-    Some(ClipView { track, c0, len, notes: sequence.notes.clone(), ctrls: sequence.ctrls.clone(), name: c.name.clone() })
+    let full = s.tempo.samples_to_ticks(c.end(), s.sample_rate) - c0;
+    // A valid loop: the roll edits the first pass and the cycle (the tick frame playback and the arranger use).
+    let cycle = c
+        .looping
+        .filter(|l| l.is_valid())
+        .map(|l| {
+            let (origin, f) = soundcraft_mix::loop_frame(s, c.start, l);
+            let o = s.tempo.samples_to_ticks(origin, s.sample_rate);
+            let tick = |x: i64| s.tempo.samples_to_ticks(origin.saturating_add(x), s.sample_rate) - o;
+            (tick(f.start), tick(f.end))
+        })
+        .filter(|(a, b)| b > a && *b > 0);
+    let len = cycle.map_or(full, |(_, end)| end.min(full));
+    Some(ClipView { track, c0, len, full, cycle, notes: sequence.notes.clone(), ctrls: sequence.ctrls.clone(), name: c.name.clone() })
+}
+
+/// Most ghost notes drawn for a clip's repeats (a degenerate cycle could ask for millions).
+const MAX_GHOSTS: usize = 4096;
+
+impl ClipView {
+    /// The repeats of a looped clip's cycle from `loop.end` to the arrangement length (ADR 0019): the
+    /// notes that start inside the cycle, shifted one cycle per repeat, each cut at its seam and at the end.
+    fn ghosts(&self) -> Vec<GhostNote> {
+        let Some((start, end)) = self.cycle else { return Vec::new() };
+        let cycle = end - start;
+        let mut out = Vec::new();
+        let mut k = 1;
+        while end + (k - 1) * cycle < self.full {
+            for n in self.notes.iter().filter(|n| n.start >= start && n.start < end) {
+                let at = n.start + k * cycle;
+                if at >= self.full {
+                    continue;
+                }
+                let seam = end + k * cycle;
+                out.push(GhostNote { pitch: n.pitch, start: at, length: n.length.min(seam - at).min(self.full - at).max(1) });
+                if out.len() >= MAX_GHOSTS {
+                    return out;
+                }
+            }
+            k += 1;
+        }
+        out
+    }
+}
+
+/// The clip-length readout: "Clip length 1.00 bars", and for a looped clip ", looped to 4.00".
+pub fn clip_length_text(len_ticks: i64, looped_to: Option<i64>) -> String {
+    let bars = |t: i64| t as f64 / (PPQ * 4) as f64;
+    match looped_to {
+        Some(full) if full != len_ticks => format!("Clip length {:.2} bars, looped to {:.2}", bars(len_ticks), bars(full)),
+        _ => format!("Clip length {:.2} bars", bars(len_ticks)),
+    }
 }
 
 /// Indices of `want` in `notes`, each note matched once (identical notes are interchangeable).
@@ -957,6 +1027,7 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     paint_grid(ui, &s, &map, grid, ruler, &cv);
     let preview = preview(app, ui, &map, vel, &cv.notes);
     paint_notes(app, ui, &map, grid, vel, &cv.notes, cv.len, preview.as_ref(), &mut layout);
+    paint_loop_ghosts(ui, &map, grid, &cv, &mut layout);
     if app.keys.quantize_open {
         layout.quantize_preview = app.keys_quantize_preview();
         let painter = ui.painter().with_clip_rect(grid);
@@ -1049,6 +1120,9 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     layout.key_h = kh;
     layout.clip_start_ticks = cv.c0;
     layout.clip_ticks = cv.len;
+    layout.looped_to_ticks = cv.cycle.map(|_| cv.full);
+    layout.loop_cycle = cv.cycle;
+    layout.lead_in_ticks = cv.cycle.map_or(0, |(a, _)| a.max(0));
     layout.grid_ticks = map.grid;
     layout.grid_step = step;
     layout.grid_text = grid_text;
@@ -1502,6 +1576,37 @@ fn paint_grid(ui: &Ui, s: &Session, map: &Map, grid: Rect, ruler: Rect, cv: &Cli
     }
     if map.x(cv.len) < grid.max.x {
         p.rect_filled(Rect::from_min_max(pos2(map.x(cv.len), grid.min.y), grid.max), 0.0, dim);
+    }
+    if let Some((start, end)) = cv.cycle {
+        // The one-shot lead-in before the cycle, the repeats' dividers and the loop end with its label.
+        if start > 0 {
+            let r = Rect::from_min_max(pos2(map.x(0).max(grid.min.x), grid.min.y), pos2(map.x(start).min(grid.max.x), grid.max.y));
+            p.rect_filled(r, 0.0, TOKENS.text_dim.gamma_multiply(0.14));
+        }
+        let cycle = end - start;
+        let mut t = end + cycle;
+        let mut n = 0;
+        while t < cv.full && map.x(t) < grid.max.x && n < MAX_GHOSTS {
+            p.line_segment([pos2(map.x(t), grid.min.y), pos2(map.x(t), grid.max.y)], Stroke::new(1.0, TOKENS.line.gamma_multiply(0.7)));
+            t += cycle;
+            n += 1;
+        }
+        let x = map.x(end);
+        p.line_segment([pos2(x, grid.min.y), pos2(x, grid.max.y)], Stroke::new(2.0, TOKENS.accent));
+        p.text(pos2(x + 4.0, grid.min.y + 8.0), Align2::LEFT_CENTER, "Loop end", FontId::proportional(10.5), TOKENS.accent);
+    }
+}
+
+/// A looped clip's repeats: the cycle's notes as dimmed ghosts, as the arranger draws loop-drag cycles.
+fn paint_loop_ghosts(ui: &Ui, map: &Map, grid: Rect, cv: &ClipView, layout: &mut KeysLayout) {
+    layout.loop_ghosts = cv.ghosts();
+    let p = ui.painter().with_clip_rect(grid);
+    for g in &layout.loop_ghosts {
+        let r = map.note_rect(&Note { pitch: g.pitch, velocity: 100, release_velocity: 64, channel: 0, start: g.start, length: g.length });
+        if r.max.x < grid.min.x || r.min.x > grid.max.x || r.max.y < grid.min.y || r.min.y > grid.max.y {
+            continue;
+        }
+        p.rect_filled(r, crate::theme::RADIUS_SM, TOKENS.accent.gamma_multiply(crate::arrange::GHOST_ALPHA));
     }
 }
 
@@ -2017,7 +2122,8 @@ fn ruler_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, ruler: Rect, s: &Ses
 /// (`edit.trim_clip`, one undo step), so notes placed past the old end now sound.
 #[allow(clippy::too_many_arguments)]
 fn clip_end_handle(app: &mut StudioApp, ui: &mut Ui, map: &Map, ruler: Rect, grid: Rect, cv: &ClipView, clip: ClipId, layout: &mut KeysLayout) {
-    let x = map.x(cv.len);
+    // A looped clip's handle sits at its arrangement end: dragging it changes the length, not the cycle.
+    let x = map.x(cv.full);
     let h = Rect::from_min_max(pos2(x - 5.0, ruler.min.y), pos2(x + 5.0, ruler.max.y));
     layout.end_handle = r4(h);
     if h.max.x < ruler.min.x || h.min.x > ruler.max.x {
@@ -2048,13 +2154,12 @@ fn clip_end_handle(app: &mut StudioApp, ui: &mut Ui, map: &Map, ruler: Rect, gri
     if resp.drag_stopped() && dragging {
         app.keys.gesture = None;
         if let Some(t) = target
-            && t != cv.len
+            && t != cv.full
         {
             let s = app.engine.session();
             let end = s.tempo.tick_to_samples(cv.c0 + t, s.sample_rate);
             if app.trim_clip(clip, false, end).is_ok() {
-                let bars = t as f64 / (PPQ * 4) as f64;
-                app.status = format!("Clip length {bars:.2} bars");
+                app.status = clip_length_text(cv.cycle.map_or(t, |(_, e)| e.min(t)), cv.cycle.map(|_| t));
             }
         }
     }
