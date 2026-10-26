@@ -22,7 +22,8 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
      and `audio-bench`. Ad-hoc signed and not notarized unless the signing secrets below are set.
      If macOS blocks the app, run `xattr -dr com.apple.quarantine /Applications/transit.app` or
      right-click it and choose Open.
-   - Linux x86_64.
+   - Linux x86_64: tarball, AppImage, deb and rpm, built with the native JACK backend (`native-jack`;
+     libjack is loaded at run time, so the binaries start without JACK installed).
 4. The release body comes from the repository: when `docs/releases/<tag>.md` exists at the tag, the
    publish job uses it as the whole body. Without that file the body is the generic download text plus
    GitHub's generated notes. Check the release page when the archives look right. The body can still be

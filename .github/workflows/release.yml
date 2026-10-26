@@ -3,7 +3,7 @@
 # (docs/releasing.md). macOS ships transit.app on a DMG (packaging/macos/package.sh),
 # ad-hoc signed unless the optional signing secrets are set (docs/releasing.md), plus a tarball with
 # the bare binary and the bench harness. Windows ships one zip and one MSI (packaging/windows/transit.wxs):
-# transit-<ver>-windows-x86_64 (native WASAPI and native ASIO). Every archive also carries the audio-bench
+# transit-<ver>-windows-x86_64 (native WASAPI and native ASIO); the Linux archives carry native JACK. Every archive also carries the audio-bench
 # harness and BENCH-README.txt so testers can measure their interfaces without building.
 name: Release
 
@@ -39,7 +39,7 @@ jobs:
         include:
           - { name: windows-x86_64, os: windows-latest, features: "--features transit/native-wasapi,transit/native-asio,audio-bench/native-wasapi,audio-bench/native-asio" }
           - { name: macos-arm64, os: macos-14 }
-          - { name: linux-x86_64, os: ubuntu-22.04 }
+          - { name: linux-x86_64, os: ubuntu-22.04, features: "--features transit/native-jack,audio-bench/native-jack" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install Rust
@@ -47,7 +47,8 @@ jobs:
         shell: bash
       - name: Linux system libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+        # libjack-jackd2-dev gives jack-sys its jack.pc at build time only; libjack is loaded at run time.
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libjack-jackd2-dev pkg-config
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
         with:
           key: ${{ matrix.name }}

@@ -60,7 +60,7 @@ To build, install `libasound2-dev pkg-config`, plus `libjack-jackd2-dev` to buil
 
 **PipeWire.** Through ALSA, PipeWire runs the stream at its own quantum, not at the buffer size chosen in Audio Devices. When the two differ, the window shows both ("Requested 128 · running at 256"); the second figure is the real one. To change it, set PipeWire's quantum, for example `pw-metadata -n settings 0 clock.force-quantum 128` (`0` puts it back), then Reconnect.
 
-**Native JACK/PipeWire backend.** It talks to JACK, or to PipeWire through its JACK library, so the server's quantum is the only figure. It is behind the `native-jack` feature and is not in the release builds yet; in a build that has it, Auto prefers it when a server is running. It is new and untested on most hardware, so testers are wanted ([#55](https://github.com/transit-audio/transit/issues/55)).
+**Native JACK/PipeWire backend.** It talks to JACK, or to PipeWire through its JACK library, so the server's quantum is the only figure. The Linux release builds carry it; Auto prefers it when a JACK or PipeWire server is running. On Debian and Ubuntu with PipeWire, start transit as `pw-jack transit` so PipeWire's JACK library is found. It is new and untested on most hardware, so testers are wanted ([#55](https://github.com/transit-audio/transit/issues/55)).
 
 Run `transit --report` and attach the file it writes: it lists your distribution, kernel, PipeWire or JACK versions, the devices transit sees and the end of the log (your user name is hidden, and it opens no audio device). Using a Linux interface? Tell us which, with distribution, kernel, server and buffer size, in [#49](https://github.com/transit-audio/transit/issues/49).
 

@@ -44,12 +44,14 @@ overrides:
       - mesa-vulkan-drivers
       - xdg-desktop-portal
       - pipewire-alsa | pulseaudio
+      - pipewire-jack | libjack-jackd2-0 | libjack0
   rpm:
     depends:
       - alsa-lib
       - libxkbcommon
       - (vulkan-loader or libglvnd-egl)
     recommends:
+      - (pipewire-jack-audio-connection-kit or jack-audio-connection-kit)
       - libwayland-client
       - libX11
       - libXcursor
