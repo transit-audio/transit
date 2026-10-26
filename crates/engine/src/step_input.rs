@@ -543,6 +543,29 @@ mod tests {
     }
 
     #[test]
+    fn a_pedal_tap_of_any_length_with_no_key_is_one_rest_on_release() {
+        let (mut input, prefs, bindings, pedal) = pedal_setup();
+        assert_eq!(input.message(pedal, 127, 5, prefs, bindings), None, "the press waits: a key may still arrive");
+        assert_eq!(input.message(pedal, 0, 6, prefs, bindings), Some(StepAction::Rest(1)));
+        assert_eq!(input.message(pedal, 127, 7, prefs, bindings), None);
+        assert_eq!(input.message(pedal, 0, 7, prefs, bindings), Some(StepAction::Rest(1)), "same millisecond");
+        assert_eq!(input.message(pedal, 127, 8, prefs, bindings), None);
+        assert_eq!(input.message(pedal, 0, 9, prefs, bindings), Some(StepAction::Rest(1)), "two fast taps, two rests");
+        assert!(!input.is_pending());
+    }
+
+    #[test]
+    fn pedal_down_key_struck_pedal_up_is_a_tie_and_no_rest() {
+        let (mut input, prefs, bindings, pedal) = pedal_setup();
+        let n = StepBinding::Note(60);
+        input.message(pedal, 127, 0, prefs, bindings);
+        input.message(n, 90, 1, prefs, bindings);
+        assert_eq!(input.message(pedal, 0, 2, prefs, bindings), None);
+        assert!(matches!(input.message(n, 0, 3, prefs, bindings), Some(StepAction::TieChord(_))));
+        assert_eq!(input.poll(10_000, prefs), None);
+    }
+
+    #[test]
     fn pedal_chord_ties_without_an_extra_rest_even_if_pedal_releases_first() {
         let mut input = StepController::default();
         let prefs = HoldPrefs::default();

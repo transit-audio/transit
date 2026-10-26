@@ -1128,6 +1128,21 @@ fn step_hold_commits_the_preview_length_as_one_undo_step() {
 }
 
 #[test]
+fn step_pedal_down_and_up_drained_in_one_frame_still_insert_a_rest() {
+    use soundcraft_engine::step_input::StepBinding::Cc;
+    use soundcraft_playback::PlayedMidi;
+    let mut t = T::open();
+    t.step_on();
+    t.app.live_played_midi(PlayedMidi::Control { cc: 64, value: 127 });
+    t.app.live_played_midi(PlayedMidi::Control { cc: 64, value: 0 });
+    t.app.step_tick_at(0);
+    assert_eq!(t.app.keys.step.cursor, SIXTEENTH, "a tap drained with its release in one frame is one rest");
+    t.app.step_message_at(Cc(64), 127, 10);
+    t.app.step_message_at(Cc(64), 0, 10);
+    assert_eq!(t.app.keys.step.cursor, 2 * SIXTEENTH, "same millisecond");
+}
+
+#[test]
 fn clearing_live_input_discards_the_pending_step() {
     let mut t = T::open();
     t.step_on();

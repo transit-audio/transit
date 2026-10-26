@@ -54,7 +54,12 @@ While the pedal is held (tie mode, #138) each strike adds exactly one grid unit 
 advances the step by one, however long the key is held: the hold repeater is suspended
 for that strike. The mode is fixed when the strike begins, so releasing the pedal
 mid-hold neither adds a rest nor re-enables the repeater for that strike; the next
-strike with the pedal up lengthens by the ramp as usual.
+strike with the pedal up lengthens by the ramp as usual. A pedal press with nothing
+held waits for its release, then inserts one rest of the grid value (a held pedal
+repeats rests on the ramp); a key that arrives first turns the press into a tie, so
+the release inserts nothing (#139). The release decides because a press may still
+become a tie, and a tap of any length, even a down and up in one UI frame or the same
+millisecond, yields exactly one rest.
 
 Hold to lengthen defaults on. The timer reaches unit 2 at the threshold (500 ms), then
 each further unit takes a shorter interval: 400 ms easing linearly down to the floor
