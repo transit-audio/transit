@@ -272,6 +272,8 @@ disables saving settings.
 - Approximate record alignment on devices whose clock never validates can differ by up to one input block (K14); Freeze renders a fixed 2 second tail.
 - The Windows release is one download (zip and MSI) with native WASAPI and native ASIO. It is unsigned: SmartScreen shows "More info", then "Run anyway".
 
+What comes next, by milestone: [docs/roadmap.md](docs/roadmap.md).
+
 ## Lineage
 
 transit began in October 2026 as a fork of [SoundCraft](https://github.com/storytold/soundcraft) by
