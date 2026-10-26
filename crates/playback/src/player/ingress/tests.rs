@@ -209,11 +209,11 @@ fn step_tap_delivers_controls_and_notes_in_order_without_worker_heap_work() {
         worker.tap(Message::Control { cc: 64, value: 0 });
     });
     assert!(heap.is_zero(), "tap producer must not allocate or free: {heap:?}");
-    assert_eq!(received.pop().unwrap(), PlayedMidi::Control { cc: 64, value: 127 });
-    assert_eq!(received.pop().unwrap(), PlayedMidi::Note(PlayedNote { pitch: 21, velocity: 100, on: true }));
-    assert_eq!(received.pop().unwrap(), PlayedMidi::Note(PlayedNote { pitch: 21, velocity: 0, on: false }));
-    assert_eq!(received.pop().unwrap(), PlayedMidi::Control { cc: 65, value: 127 });
-    assert_eq!(received.pop().unwrap(), PlayedMidi::Control { cc: 64, value: 0 });
+    assert_eq!(received.pop().unwrap().0, PlayedMidi::Control { cc: 64, value: 127 });
+    assert_eq!(received.pop().unwrap().0, PlayedMidi::Note(PlayedNote { pitch: 21, velocity: 100, on: true }));
+    assert_eq!(received.pop().unwrap().0, PlayedMidi::Note(PlayedNote { pitch: 21, velocity: 0, on: false }));
+    assert_eq!(received.pop().unwrap().0, PlayedMidi::Control { cc: 65, value: 127 });
+    assert_eq!(received.pop().unwrap().0, PlayedMidi::Control { cc: 64, value: 0 });
     assert!(received.pop().is_err());
 }
 
@@ -232,7 +232,7 @@ fn step_tap_overflow_suppresses_writes_until_the_ui_resets() {
     assert!(received.pop().is_err(), "suppress events while the incomplete batch is being discarded");
     worker.shared.tap_lost.store(false, Ordering::Release);
     worker.tap(Message::Control { cc: 65, value: 0 });
-    assert_eq!(received.pop().unwrap(), PlayedMidi::Control { cc: 65, value: 0 });
+    assert_eq!(received.pop().unwrap().0, PlayedMidi::Control { cc: 65, value: 0 });
 }
 
 #[test]
@@ -251,7 +251,7 @@ fn step_tap_sees_a_pedal_up_the_lane_sheds_under_zero_credits() {
     let port = fake.input_port(&key).unwrap();
     port.deliver(0, &[0xb0, 64, 127]);
     worker.step();
-    assert_eq!(received.pop().unwrap(), PlayedMidi::Control { cc: 64, value: 127 }, "pedal-down is admitted");
+    assert_eq!(received.pop().unwrap().0, PlayedMidi::Control { cc: 64, value: 127 }, "pedal-down is admitted");
     for _ in 0..300 {
         port.deliver(0, &[0x90, 60, 100]);
     }
@@ -268,7 +268,7 @@ fn step_tap_sees_a_pedal_up_the_lane_sheds_under_zero_credits() {
     assert_eq!(worker.shared.shed.load(Ordering::Relaxed), shed + 1, "the lane shed the pedal-up");
     let mut last = None;
     while let Ok(message) = received.pop() {
-        last = Some(message);
+        last = Some(message.0);
     }
     assert_eq!(last, Some(PlayedMidi::Control { cc: 64, value: 0 }), "the step tap still sees the pedal-up");
 }
@@ -1016,4 +1016,20 @@ fn a_channel_filter_change_resets_but_an_identical_rebuild_does_not() {
         .unwrap();
     worker.step();
     assert!(reset_sent(&worker));
+}
+
+#[test]
+fn the_step_tap_stamps_each_event_when_the_worker_saw_it_not_when_the_ui_drains() {
+    let (control, _) = bridge();
+    let (lane, _) = action_lane::pair_with_result(&control);
+    let (_, mut worker) = pump(lane);
+    let (tap, mut received) = rtrb::RingBuffer::new(TAP_CAPACITY);
+    worker.tap = tap;
+    let before = std::time::Instant::now();
+    worker.tap(Message::Control { cc: 64, value: 127 });
+    let after = std::time::Instant::now();
+    std::thread::sleep(std::time::Duration::from_millis(50));
+    let (message, at) = received.pop().unwrap();
+    assert_eq!(message, PlayedMidi::Control { cc: 64, value: 127 });
+    assert!(at >= before && at <= after, "stamped at the push, 50 ms before this drain");
 }

@@ -67,6 +67,10 @@ pub struct Counters {
 
 /// UI tap capacity, preallocated before the ingress thread starts.
 const TAP_CAPACITY: usize = 256;
+
+/// A tap entry with the instant the worker popped it: Step entry times holds from this, not from
+/// the UI drain (#139). `Instant` is Copy, so stamping allocates nothing.
+pub type Stamped = (PlayedMidi, std::time::Instant);
 /// MIDI Learn event ring capacity, preallocated before the ingress thread starts.
 const MAP_CAPACITY: usize = 256;
 
@@ -304,7 +308,7 @@ pub struct Worker {
     next_input: u64,
     shared: Arc<Shared>,
     thread: std::thread::JoinHandle<()>,
-    tap: RefCell<rtrb::Consumer<PlayedMidi>>,
+    tap: RefCell<rtrb::Consumer<Stamped>>,
     /// MIDI Learn events for Main (ADR 0028).
     maps: RefCell<rtrb::Consumer<MapEvent>>,
 }
@@ -507,6 +511,11 @@ impl Worker {
 
     /// Ordered notes and controls; only the UI allocates or borrows the consumer.
     pub fn take_midi(&self) -> Vec<PlayedMidi> {
+        self.take_midi_stamped().into_iter().map(|(message, _)| message).collect()
+    }
+
+    /// Like [`Worker::take_midi`], each with the instant the worker saw it (a `Reset` is stamped now).
+    pub fn take_midi_stamped(&self) -> Vec<Stamped> {
         let Ok(mut tap) = self.tap.try_borrow_mut() else { return Vec::new() };
         let mut messages = Vec::new();
         // Bound UI work as well: input may continue arriving while this frame drains.
@@ -517,7 +526,7 @@ impl Worker {
         if self.shared.tap_lost.load(Ordering::Acquire) {
             while tap.pop().is_ok() {}
             messages.clear();
-            messages.push(PlayedMidi::Reset);
+            messages.push((PlayedMidi::Reset, std::time::Instant::now()));
             self.shared.tap_lost.store(false, Ordering::Release);
         }
         messages
@@ -564,7 +573,7 @@ struct Pump {
     cursor: usize,
     shared: Arc<Shared>,
     echo: Option<super::midi_out::Producer>,
-    tap: rtrb::Producer<PlayedMidi>,
+    tap: rtrb::Producer<Stamped>,
     /// The MIDI Monitor's input ring (#91).
     monitor: Option<Tap>,
     /// The MIDI Learn mappings (ADR 0028) and the ring their events go out on.
@@ -585,7 +594,7 @@ impl Pump {
             Message::Control { cc, value } => PlayedMidi::Control { cc, value },
             _ => return,
         };
-        if !self.shared.tap_lost.load(Ordering::Acquire) && self.tap.push(message).is_err() {
+        if !self.shared.tap_lost.load(Ordering::Acquire) && self.tap.push((message, std::time::Instant::now())).is_err() {
             self.shared.tap_lost.store(true, Ordering::Release);
         }
     }

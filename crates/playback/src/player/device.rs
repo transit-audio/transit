@@ -1089,6 +1089,16 @@ impl Player {
         }
         Vec::new()
     }
+    /// The same, each stamped with the instant the ingress worker saw it (#139).
+    pub fn take_played_midi_stamped(&self) -> Vec<(super::PlayedMidi, std::time::Instant)> {
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Ok(midi) = self.midi.try_borrow()
+            && let Some(m) = midi.as_ref()
+        {
+            return m.take_midi_stamped();
+        }
+        Vec::new()
+    }
     /// Switches the MIDI Monitor taps (#91). Off by default: the ingress and output threads copy
     /// nothing while it is off.
     #[cfg(not(target_arch = "wasm32"))]

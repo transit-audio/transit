@@ -1143,6 +1143,22 @@ fn step_pedal_down_and_up_drained_in_one_frame_still_insert_a_rest() {
 }
 
 #[test]
+fn step_events_are_timed_from_their_arrival_stamp_not_from_a_late_drain() {
+    use soundcraft_playback::{PlayedMidi, PlayedNote};
+    let mut t = T::open();
+    t.step_on();
+    let note = |on| PlayedMidi::Note(PlayedNote { pitch: 60, velocity: if on { 90 } else { 0 }, on });
+    // The UI did not look for 800 ms: the events carry when they arrived.
+    t.app.live_played_midi_at(note(true), 0);
+    t.app.live_played_midi_at(note(false), 100);
+    assert_eq!(t.notes()[0].length, SIXTEENTH, "a 100 ms hold is one unit, not the 900 ms of the drain");
+    t.app.live_played_midi_at(PlayedMidi::Control { cc: 64, value: 127 }, 200);
+    t.app.live_played_midi_at(PlayedMidi::Control { cc: 64, value: 0 }, 230);
+    t.app.step_tick_at(1000);
+    assert_eq!(t.app.keys.step.cursor, 2 * SIXTEENTH, "the late tap is one rest, not a ramp's worth");
+}
+
+#[test]
 fn clearing_live_input_discards_the_pending_step() {
     let mut t = T::open();
     t.step_on();

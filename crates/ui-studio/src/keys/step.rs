@@ -108,31 +108,43 @@ impl StudioApp {
             self.keys.live_inputs = inputs;
             self.live_clear();
         }
-        let messages = self.player.as_ref().map(|p| p.take_played_midi()).unwrap_or_default();
-        for message in messages {
-            self.live_played_midi(message);
+        // Holds and taps are timed from when the worker saw each event, not from this drain: with
+        // the transport stopped the UI may not look for a while (#139).
+        let base = *self.keys.step.clock.get_or_insert_with(std::time::Instant::now);
+        let messages = self.player.as_ref().map(|p| p.take_played_midi_stamped()).unwrap_or_default();
+        for (message, at) in messages {
+            let at_ms = at.saturating_duration_since(base).as_millis().min(u128::from(u64::MAX)) as u64;
+            self.live_played_midi_at(message, at_ms);
         }
         let now = self.step_now_ms();
         self.step_tick_at(now);
     }
 
+    #[cfg(test)]
     pub(crate) fn live_played_midi(&mut self, message: PlayedMidi) {
+        let now = self.step_now_ms();
+        self.live_played_midi_at(message, now);
+    }
+
+    pub(crate) fn live_played_midi_at(&mut self, message: PlayedMidi, now_ms: u64) {
         match message {
-            PlayedMidi::Note(n) => self.live_midi(n),
-            PlayedMidi::Control { cc, value } => {
-                let now = self.step_now_ms();
-                self.step_message_at(StepBinding::Cc(cc), value, now);
-            }
+            PlayedMidi::Note(n) => self.live_midi_at(n, now_ms),
+            PlayedMidi::Control { cc, value } => self.step_message_at(StepBinding::Cc(cc), value, now_ms),
             PlayedMidi::Reset => self.live_clear(),
         }
     }
 
     /// One played note: update the held keys, then Step entry.
     pub fn live_midi(&mut self, n: PlayedNote) {
+        let now = self.step_now_ms();
+        self.live_midi_at(n, now);
+    }
+
+    fn live_midi_at(&mut self, n: PlayedNote, now_ms: u64) {
         if let Some(v) = self.keys.live.get_mut(usize::from(n.pitch)) {
             *v = if n.on { n.velocity.min(127) } else { 0 };
         }
-        self.step_midi(n);
+        self.step_midi_at(n, now_ms);
     }
 
     /// Let go of every live key (Stop, all notes off, input change).

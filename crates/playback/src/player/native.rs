@@ -436,6 +436,10 @@ impl Native {
         self.worker.take_midi()
     }
 
+    pub(super) fn take_midi_stamped(&self) -> Vec<(super::PlayedMidi, std::time::Instant)> {
+        self.worker.take_midi_stamped()
+    }
+
     /// The MIDI output thread's status alone (destinations and ports).
     pub(super) fn output_status(&self) -> midi_out::OutputStatus {
         self.out.status()

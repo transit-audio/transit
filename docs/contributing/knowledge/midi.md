@@ -72,6 +72,12 @@ Space remains Play/Stop unless explicitly rebound to Tie/Rest, effective only in
 the focused piano roll during step entry. Computer-key repeat is ignored so the
 same hold timer drives MIDI and keyboard controls.
 
+The ingress worker cannot wake egui, so while Step is on (`step_active()`) the UI requests a repaint
+every 16 ms and drains the tap each frame; with the transport stopped it would otherwise look in
+once a second and a quick pedal tap would land late (#139). Each tap entry also carries the
+`Instant` the worker saw it, and holds, taps and pedal timing are measured from that stamp rather
+than from the drain, so a late frame cannot lengthen a hold or turn a tap into a ramp.
+
 A held pedal cannot be stranded (#134): the ingress worker sets `tap_lost` (the step editor
 then gets a `Reset`) whenever a route stops admitting, whatever the cause: the port goes away,
 the storm detector mutes it, Main drops a permit or rebuilds the routes without it (disarm,
