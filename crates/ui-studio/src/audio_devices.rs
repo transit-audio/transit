@@ -612,6 +612,7 @@ impl StudioApp {
             opened,
             telemetry,
             midi: self.diagnostics_midi(),
+            open_asio_driver: self.running_native_asio(),
             log_dir: self.services.config_dir.as_ref().map(|d| d.join("logs")),
             ..Default::default()
         }
@@ -1518,7 +1519,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
 
                                                 // An ASIO driver is described only while it is open: any other shows the standard
                                                 // choices, marked, until Apply opens it.
-                                                let stale = asio && dev.is_some_and(|d| d.max_channels == 0);
+                                                let stale = sys
+                                                    .zip(dev)
+                                                    .and_then(|(s, d)| devices::asio_description(s, d))
+                                                    .is_some_and(|a| a != devices::AsioDescription::Probed);
                                                 label(ui, "Sample rate");
                                                 let rates: Vec<(u32, String)> = dev
                                                     .map_or(devices::STANDARD_RATES.to_vec(), |d| d.sample_rates.clone())
@@ -1716,24 +1720,45 @@ pub(crate) fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
     let input_rate = input.and_then(|s| in_rate.update(now, s.wakes));
     let keep = |present: bool, rate: WakeRate| if present { rate } else { WakeRate::default() };
     app.audio_devices.wake_rates = (keep(output.is_some(), out_rate), keep(input.is_some(), in_rate));
-    // Each backend's own fields; a duplex ASIO driver's two directions count one driver's switches,
-    // so their line is printed once, under the output (#127).
+    // Each backend's own fields. The two directions of a duplex ASIO driver share its events and
+    // timeouts: one line under the output with each direction's figures as `out / in`, while
+    // both run the same switches ([`same_cadence`]); two lines otherwise (#127).
     let kind = stats_backend(app);
-    let shared = kind == StatsBackend::Asio && output.is_some() && input.is_some();
-    let output_line = |s: StreamStats| {
-        let line = crate::telemetry::backend_line(&s, false, output_rate, kind);
-        if shared { line.replacen("Backend: ", "Backend (output and input share one ASIO driver): ", 1) } else { line }
+    let shared = match (output, input) {
+        (Some(o), Some(i)) if kind == StatsBackend::Asio && same_cadence(&o, &i, output_rate, input_rate) => Some((o, i)),
+        _ => None,
     };
-    lines.extend(output.map(output_line));
+    match shared {
+        Some((o, i)) => {
+            let rate = |r: Option<u64>| r.map_or_else(|| "-".to_owned(), |r| format!("{r}/s"));
+            lines.push(format!(
+                "Backend (output / input, one ASIO driver): {}",
+                StreamStats::asio_duplex_line(&o, &i, &rate(output_rate), &rate(input_rate))
+            ));
+        }
+        None => lines.extend(output.map(|s| crate::telemetry::backend_line(&s, false, output_rate, kind))),
+    }
     lines.push(match (&app.recorder, &held) {
         (Some(r), _) => input_line(r, native),
         (None, Some((line, _))) => line.clone(),
         (None, None) => "Input open: none yet (it opens when a track is armed or monitored)".into(),
     });
-    lines.extend(input.filter(|_| !shared).map(|s| crate::telemetry::backend_line(&s, true, input_rate, kind)));
+    lines.extend(input.filter(|_| shared.is_none()).map(|s| crate::telemetry::backend_line(&s, true, input_rate, kind)));
     // After a driver reset: what the automatic reopen did and does next, with its counts.
     lines.extend(app.reopen.status(app.audio_devices.panel.is_some()));
     lines
+}
+
+/// Whether the two directions of a duplex ASIO driver ran the same buffer switches, so one line can
+/// carry both: their wake rates over the last panel samples within 1% (at least 2 a second) of each
+/// other, or before there is a rate, their wake counts within 1% (at least 2). A direction that
+/// stopped while the other runs (its rate 0, or its count behind) gets its own line.
+pub fn same_cadence(output: &StreamStats, input: &StreamStats, output_rate: Option<u64>, input_rate: Option<u64>) -> bool {
+    let close = |a: u64, b: u64| a.abs_diff(b) <= (a.max(b) / 100).max(2);
+    match (output_rate, input_rate) {
+        (Some(a), Some(b)) => close(a, b),
+        _ => close(output.wakes, input.wakes),
+    }
 }
 
 /// The backend whose counters the Backend lines show: the running native backend's, else (no

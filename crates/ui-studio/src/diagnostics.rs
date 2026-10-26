@@ -9,7 +9,7 @@
 //! user name with `<user>` everywhere in the finished text, the log lines and the log folder path
 //! included.
 
-use soundcraft_playback::devices::{AudioConfig, AudioSystem};
+use soundcraft_playback::devices::{AsioDescription, AudioConfig, AudioSystem};
 use soundcraft_playback::telemetry::CallbackTelemetry;
 use std::path::{Path, PathBuf};
 
@@ -279,7 +279,7 @@ impl Midi {
         match &self.last_heard {
             Some(Some((port, Some(channel)))) => out.push(format!("Last heard: {port}, channel {channel}")),
             Some(Some((port, None))) => out.push(format!("Last heard: {port}, a system message")),
-            Some(None) => out.push("Last heard: nothing on a routed port since MIDI started".into()),
+            Some(None) => out.push("Last heard: nothing yet (it counts routed ports, and every open port while the MIDI Monitor is on)".into()),
             None => {}
         }
         out
@@ -291,11 +291,19 @@ pub fn midi_channel(status: u8) -> Option<u8> {
     (0x80..0xF0).contains(&status).then_some((status & 0x0F) + 1)
 }
 
-/// Why an ASIO driver has no channels or rates in the report: it was not probed. Only the driver
-/// that runs is described (probing opens a driver, and ASIO allows one per process, #108); the
-/// others carry the standard choices, which are not measured.
-fn unprobed_reason(system: &AudioSystem) -> &'static str {
-    if system.outputs.iter().chain(&system.inputs).any(|d| d.max_channels > 0) { "another ASIO driver is open" } else { "no ASIO driver is open" }
+/// An ASIO device's line when its listing has no channels for it
+/// ([`soundcraft_playback::devices::asio_description`]); `None` for one that was probed with
+/// channels (it prints like any device). `open` is the ASIO driver this process runs, if any.
+fn asio_state(description: AsioDescription, open: Option<&str>, input: bool) -> Option<String> {
+    match description {
+        AsioDescription::Probed => None,
+        AsioDescription::NoChannels => Some(format!("0 ch (the driver has no {})", if input { "inputs" } else { "outputs" })),
+        AsioDescription::ProbeFailed => Some("probe failed (see the note below)".into()),
+        AsioDescription::NotProbed => Some(match open {
+            Some(driver) => format!("not probed (ASIO drivers are probed one at a time; the open driver is {driver})"),
+            None => "not probed".into(),
+        }),
+    }
 }
 
 /// Everything the report prints.
@@ -315,6 +323,8 @@ pub struct Report {
     /// Counters of the running output, or `None` when no stream is open.
     pub telemetry: Option<CallbackTelemetry>,
     pub midi: Midi,
+    /// The ASIO driver this process runs (the native backend's), for the not-probed lines.
+    pub open_asio_driver: Option<String>,
     pub log_dir: Option<PathBuf>,
     pub log_lines: Vec<String>,
 }
@@ -353,17 +363,17 @@ impl Report {
         }
         for s in &self.systems {
             o.push_str(&format!("{}{}\n", s.name, if s.is_default { " (default system)" } else { "" }));
-            // An ASIO driver without channels was not probed (the Audio Devices window marks it the
-            // same way): its rate list is the standard choices, not what it offers.
-            let asio = soundcraft_playback::devices::is_asio_system(Some(&s.name));
+            // An ASIO driver without channels in a direction says why (the Audio Devices window
+            // marks the same ones): its rate list is the standard choices, not what it offers.
             for (label, devices) in [("Output", &s.outputs), ("Input", &s.inputs)] {
                 if devices.is_empty() {
                     o.push_str(&format!("  {label}: none\n"));
                 }
                 for d in devices {
-                    if asio && d.max_channels == 0 {
+                    let described = soundcraft_playback::devices::asio_description(s, d);
+                    if let Some(state) = described.and_then(|a| asio_state(a, self.open_asio_driver.as_deref(), label == "Input")) {
                         let default = if d.is_default { " (default)" } else { "" };
-                        o.push_str(&format!("  {label}: {}{default} \u{b7} not probed ({})\n", d.name, unprobed_reason(s)));
+                        o.push_str(&format!("  {label}: {}{default} \u{b7} {state}\n", d.name));
                         continue;
                     }
                     let rates: Vec<String> = d.sample_rates.iter().map(u32::to_string).collect();
@@ -674,6 +684,7 @@ mod tests {
                 in_force: Some(6),
                 last_heard: Some(Some(("Keystation 49".into(), Some(10)))),
             },
+            open_asio_driver: None,
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
             log_lines: vec!["INFO opened /home/alice/Music/song.transit".into(), "WARN something".into()],
         }
@@ -742,15 +753,30 @@ mod tests {
     #[test]
     fn unprobed_asio_drivers_say_so_instead_of_0_ch_and_the_standard_rates() {
         let open = asio(&[asio_device("Focusrite USB ASIO", 2), asio_device("Model Mixer ASIO Driver", 0)]);
-        let text = Report { systems: vec![open], ..Default::default() }.render(&Redaction::default());
+        let report = Report { systems: vec![open], open_asio_driver: Some("Focusrite USB ASIO".into()), ..Default::default() };
+        let text = report.render(&Redaction::default());
         assert!(text.contains("  Output: Focusrite USB ASIO \u{b7} 2 ch \u{b7} rates 48000 \u{b7} buffer 64-1024\n"), "{text}");
-        assert!(text.contains("  Output: Model Mixer ASIO Driver \u{b7} not probed (another ASIO driver is open)\n"), "{text}");
-        assert!(text.contains("  Input: Model Mixer ASIO Driver \u{b7} not probed (another ASIO driver is open)\n"), "{text}");
+        let why = "not probed (ASIO drivers are probed one at a time; the open driver is Focusrite USB ASIO)";
+        assert!(text.contains(&format!("  Output: Model Mixer ASIO Driver \u{b7} {why}\n")), "{text}");
+        assert!(text.contains(&format!("  Input: Model Mixer ASIO Driver \u{b7} {why}\n")), "{text}");
         assert!(!text.contains("0 ch"), "{text}");
         assert!(!text.contains("176400"), "no unmeasured rate list: {text}");
-        let none_open = asio(&[asio_device("Model Mixer ASIO Driver", 0)]);
-        let text = Report { systems: vec![none_open], ..Default::default() }.render(&Redaction::default());
-        assert!(text.contains("  Output: Model Mixer ASIO Driver \u{b7} not probed (no ASIO driver is open)\n"), "{text}");
+        // Probed in report mode's listing but nothing runs in this process: no reason is made up.
+        let text = Report { open_asio_driver: None, ..report }.render(&Redaction::default());
+        assert!(text.contains("  Output: Model Mixer ASIO Driver \u{b7} not probed\n"), "{text}");
+        // A probed output-only driver (its input re-added as unlisted) and a failed probe.
+        let mut system = asio(&[asio_device("Out Only ASIO", 2), asio_device("Broken ASIO", 0)]);
+        system.inputs = vec![asio_device("Out Only ASIO", 0), asio_device("Broken ASIO", 0)];
+        system.diagnostics = vec!["Broken ASIO: ASIOInit failed".into()];
+        let text = Report { systems: vec![system.clone()], open_asio_driver: Some("Out Only ASIO".into()), ..Default::default() }
+            .render(&Redaction::default());
+        assert!(text.contains("  Input: Out Only ASIO \u{b7} 0 ch (the driver has no inputs)\n"), "{text}");
+        assert!(text.contains("  Output: Broken ASIO \u{b7} probe failed (see the note below)\n"), "{text}");
+        assert!(text.contains("  Note: Broken ASIO: ASIOInit failed\n"), "{text}");
+        // The window's "updates after Apply" and the report read the same rule.
+        use soundcraft_playback::devices::asio_description;
+        let states: Vec<_> = system.inputs.iter().map(|d| asio_description(&system, d)).collect();
+        assert_eq!(states, [Some(AsioDescription::NoChannels), Some(AsioDescription::ProbeFailed)]);
         // Another system's device without channels is printed as it is (not an ASIO probe).
         let mut other = asio(&[asio_device("Dummy", 0)]);
         other.name = "ALSA".into();
@@ -787,7 +813,7 @@ mod tests {
             [
                 "No MIDI ports listed.",
                 "MIDI Learn mappings: 0 session, 0 controller profile (0 in force)",
-                "Last heard: nothing on a routed port since MIDI started"
+                "Last heard: nothing yet (it counts routed ports, and every open port while the MIDI Monitor is on)"
             ]
         );
         let clock = Midi { last_heard: Some(Some(("Clock Box".into(), None))), ..Midi::default() };

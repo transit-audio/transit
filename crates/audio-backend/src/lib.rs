@@ -462,6 +462,28 @@ impl StreamStats {
         }
     }
 
+    /// One line for both directions of one ASIO driver (#127): each direction's own figures as
+    /// `out / in` (wakes, gap over period, service, faults), then the counters the two share once
+    /// (the driver's events and the watchdog's timeouts, read from `output`).
+    pub fn asio_duplex_line(output: &StreamStats, input: &StreamStats, wakes_out: &str, wakes_in: &str) -> String {
+        let (o, i) = (output, input);
+        format!(
+            "wakes {wakes_out} / {wakes_in}, gap over period p95 {} / {} µs, max {} / {} µs; service p95 {} / {} µs, max {} / {} µs; faults {} / {}; timeouts {}{}",
+            o.wake_late_p95_us(),
+            i.wake_late_p95_us(),
+            o.max_wake_late_us,
+            i.max_wake_late_us,
+            o.service_p95_us(),
+            i.service_p95_us(),
+            o.max_service_us,
+            i.max_service_us,
+            o.faults,
+            i.faults,
+            o.timeouts,
+            o.events_tail(),
+        )
+    }
+
     /// "; overloads 0, busy skips 0, position jumps 0, resets 0": the driver-event counters, which
     /// [`Self::line`] appends only when one is not zero.
     pub fn events_tail(&self) -> String {
@@ -734,6 +756,19 @@ mod tests {
         assert_eq!(
             jack,
             "wakes 1, late p95 1024 µs, max 1172 µs; service p95 0 µs, max 0 µs; faults 1; overloads 2, busy skips 0, position jumps 0, resets 0"
+        );
+    }
+
+    #[test]
+    fn a_duplex_asio_line_shows_each_side_and_the_shared_counters_once() {
+        let mut hist = [0u64; STATS_BINS];
+        hist[6] = 100;
+        let out = StreamStats { wakes: 9, wake_late_us: hist, max_wake_late_us: 1172, overloads: 1, timeouts: 2, ..Default::default() };
+        let inp = StreamStats { wakes: 9, faults: 3, service_us: hist, max_service_us: 700, overloads: 1, timeouts: 2, ..Default::default() };
+        assert_eq!(
+            StreamStats::asio_duplex_line(&out, &inp, "751/s", "750/s"),
+            "wakes 751/s / 750/s, gap over period p95 1024 / 0 µs, max 1172 / 0 µs; service p95 0 / 700 µs, max 0 / 700 µs; faults 0 / 3; \
+             timeouts 2; overloads 1, busy skips 0, position jumps 0, resets 0"
         );
     }
 

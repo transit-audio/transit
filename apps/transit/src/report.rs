@@ -35,6 +35,7 @@ pub fn run(
         opened: vec!["Output open: none (report mode opens no stream)".into()],
         telemetry: None,
         midi: midi(profile_mappings),
+        open_asio_driver: None,
         log_lines: log_dir.as_ref().map(|d| diagnostics::tail_log(&d.join(diagnostics::LOG_FILE), diagnostics::LOG_LINES)).unwrap_or_default(),
         log_dir,
     };

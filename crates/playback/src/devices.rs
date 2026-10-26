@@ -394,6 +394,43 @@ impl DeviceInfo {
     }
 }
 
+/// What the listing of an ASIO system knows of one driver in one direction ([`asio_description`]).
+/// Only the driver that runs is probed (probing opens a driver, and ASIO allows one per process,
+/// #108); every other installed driver is listed by name with the standard choices.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AsioDescription {
+    /// Probed: the channels, rates and buffer range are the driver's.
+    Probed,
+    /// Probed, and the driver has no channels in this direction (an output-only driver).
+    NoChannels,
+    /// Its probe failed; the system's diagnostics say why.
+    ProbeFailed,
+    /// Never opened: the standard choices stand in for its rates and buffers.
+    NotProbed,
+}
+
+/// How `system`'s listing describes `device` when it is an ASIO system (`None` for any other):
+/// the one rule the Audio Devices window's "updates after Apply" and the diagnostics report share
+/// (#127). A device with channels was probed; one without was probed when the same driver has
+/// channels in the other direction, failed when a diagnostic names it ("<driver>: ..."), and was
+/// never opened otherwise.
+pub fn asio_description(system: &AudioSystem, device: &DeviceInfo) -> Option<AsioDescription> {
+    if !is_asio_system(Some(&system.name)) {
+        return None;
+    }
+    let named = |d: &&DeviceInfo| d.name == device.name && d.max_channels > 0;
+    let failed = system.diagnostics.iter().any(|n| n.strip_prefix(device.name.as_str()).is_some_and(|rest| rest.starts_with(": ")));
+    Some(if device.max_channels > 0 {
+        AsioDescription::Probed
+    } else if system.outputs.iter().chain(&system.inputs).any(|d| named(&d)) {
+        AsioDescription::NoChannels
+    } else if failed {
+        AsioDescription::ProbeFailed
+    } else {
+        AsioDescription::NotProbed
+    })
+}
+
 /// An audio system and its devices.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
 pub struct AudioSystem {
