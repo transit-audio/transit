@@ -28,3 +28,4 @@ time range selected it sets the region to that range; either replaces a region t
 there, in one undo step. With nothing selected, Cycle reuses the existing region, or makes four
 bars from the bar holding the playhead when there is none. Cycle Off keeps the region, and
 Transport > Set Cycle to Selection (Cmd+L) re-sets it from the selection without toggling Cycle.
+While clips are selected, every Cycle On and Set Cycle to Selection takes the selected clips' span, so a region you dragged on the loop bar is replaced on the next Cycle On unless you deselect the clips first (Escape or click empty space); Select All counts as a clip selection.

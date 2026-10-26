@@ -124,6 +124,7 @@ reused; with none, four bars from the bar containing the playhead (the UI passes
 end of the content when that lies ahead. Turning Cycle off leaves `loop_range`, so the next toggle
 reuses it. `transport.cycle_to_selection` (Transport > Set Cycle to Selection, Cmd+L) applies the
 same derivation without toggling Cycle and errors with a status message when nothing is selected.
+While clips are selected, every Cycle On and Set Cycle to Selection takes the clips' span, so a region dragged on the loop bar is replaced on the next Cycle On unless the clips are deselected first (Escape or click empty space); Select All counts as a clip selection. A clip selection is not a point: the clips' union range.
 `EditState::cycle_range()` still falls back to the selection for a session that arrives with Cycle
 on and no region; playback reads it unchanged.
 
