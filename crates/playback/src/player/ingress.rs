@@ -786,6 +786,7 @@ impl Pump {
                 continue;
             }
             let mut tapped = false;
+            let mut reset_step = false;
             for (permit, route) in &input.routes {
                 // The echo route generation is read before the route check: a revocation after
                 // it leaves this event older than the release, so the output thread drops it.
@@ -831,6 +832,7 @@ impl Pump {
                     self.shared.shed.fetch_add(1, Ordering::Relaxed);
                     if release {
                         permit.invalidate();
+                        reset_step = true;
                     }
                     continue;
                 }
@@ -849,10 +851,17 @@ impl Pump {
                 } else {
                     self.shared.shed.fetch_add(1, Ordering::Relaxed);
                     permit.invalidate();
+                    reset_step |= release;
                 }
             }
             if tapped {
                 self.tap(message);
+            }
+            // A shed release revokes the route: Main rebuilds it and cancels what the old one
+            // still held, so a pedal-up behind it may never reach the tap (#74). Step entry gets
+            // a Reset instead (the tap's loss path), after the message above.
+            if reset_step {
+                self.shared.tap_lost.store(true, Ordering::Release);
             }
         }
         worked

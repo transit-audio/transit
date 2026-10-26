@@ -1230,6 +1230,22 @@ fn step_editor_stops_inserting_rests_once_the_tapped_pedal_up_arrives() {
 }
 
 #[test]
+fn a_reset_releases_a_held_pedal_and_stops_the_rests() {
+    use soundcraft_engine::step_input::StepBinding::Cc;
+    use soundcraft_playback::PlayedMidi;
+    let mut t = T::open();
+    t.step_on();
+    t.app.step_message_at(Cc(64), 127, 0);
+    t.app.step_tick_at(2000);
+    let held = t.app.keys.step.cursor;
+    assert!(held > SIXTEENTH);
+    t.app.live_played_midi(PlayedMidi::Reset);
+    t.app.step_tick_at(5000);
+    t.app.step_tick_at(9000);
+    assert_eq!(t.app.keys.step.cursor, held, "a Reset drops the pedal: no more rests");
+}
+
+#[test]
 fn step_toggles_from_the_toolbar_and_the_key_and_shows_a_cursor() {
     let mut t = T::open();
     assert!(!t.app.keys.layout.step_on);

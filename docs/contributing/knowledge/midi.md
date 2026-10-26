@@ -24,8 +24,11 @@ hardware port: `midi-output.md`.
 - Step entry taps the same stream from the UI side (`crates/ui-studio/src/keys/step.rs`). The tap
   is control-rate: the ingress worker feeds it whenever a route admits the message, before the
   action lane's credit check, so a message the lane sheds still reaches Step entry (#74). A shed
-  pedal-up therefore cannot leave the pedal held. Only a full tap ring drops messages, and then
-  Step entry gets a Reset.
+  pedal-up therefore cannot leave the pedal held. Of the messages a route admits, only a full tap
+  ring drops any, and then Step entry gets a Reset. Shedding a release also invalidates the
+  route's permit (Main rebuilds it and cancels what the old route held), so that case sends a
+  Reset too. Messages from revoked or stale permits, muted ports, consumed MIDI Learn input and
+  `consume_notes` never reach the tap.
 
 ## Invariants
 
@@ -56,4 +59,5 @@ same hold timer drives MIDI and keyboard controls.
 
 `event.step_input` rejects a `duration` above 64 whole notes (245,760 ticks) with a command error.
 Opening a different clip in the piano roll clears Step state entirely: Step turns off and the
-held keys, pending chord and pedal are discarded, so re-enable Step on the new clip.
+pending chord, pedal and learn state are discarded (the live keyboard keys are kept), so re-enable Step on the new clip.
+A step longer than the cap, such as a held chord, is refused with a status message rather than clamped.
