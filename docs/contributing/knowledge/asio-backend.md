@@ -211,12 +211,28 @@ crate-private and works on interleaved bytes. MSB and DSD types stay unsupported
 ### Counters
 
 `Stream::stats()` per direction: `wakes` (buffer switches served), `wake_late_us` (arrival minus the
-previous arrival plus one buffer), `service_us` (entry to the end of the work, `outputReady`
+previous arrival plus one buffer, never negative: the gap over period), `service_us` (entry to the end of the work, `outputReady`
 included), `faults` (panicked callbacks), and the driver-wide `overloads`, `busy_skips` (switches
 that found the engine still busy, from the previous switch or an error being delivered, and did
 nothing), `position_jumps`, `resets` and `timeouts` (the watchdog's stalls). `skipped_wakes`,
 `min_padding_frames` and `max_packets_per_wake` stay 0: ASIO has no wait and no padding. The
 driver-event tail reads "; overloads N, busy skips N, position jumps N, resets N".
+
+**Gap over period, not lateness (#127).** The due time of a switch is the previous switch's arrival
+plus one period of the session's buffer and rate (`Engine::gap_over_period`), so it follows the
+driver's cadence and not a clock anchored at the start. The period is fixed per session: a rate
+change goes through `setSampleRate` and a new session (and engine) at the new rate, `attach` refuses
+a second direction at another rate, and a `sampleRateDidChange` under a running stream is a reset
+that reopens. What it measures is how unevenly the driver calls, not whether a callback was late
+for its buffer: the Scarlett at 48 kHz / 64 (1333 us) delivers on 1 ms USB frames, switches 1, 1
+and 2 ms apart (751 a second), so a third of them read 667 us and the p95 bin edge prints 1024 us
+while service p95 is 16 us and nothing overloads, skips or jumps (K26's burst delivery; the
+2026-10-22 hardware run's "late p95 998 us" below is the same figure). The Audio Devices Backend
+line and the diagnostics report therefore name it `gap over period` for ASIO, show the driver-event
+counters always and WASAPI's skipped, padding and packets never, and print one line for a duplex
+driver (both directions count the same switches; `StreamStats::line_for`). A late callback shows
+as overloads, position jumps or over-budget callbacks in Callback Telemetry. Tests:
+`engine::tests` (fixed period reads 0, a rate change gives the new period, the burst pattern).
 
 ### Measuring it
 

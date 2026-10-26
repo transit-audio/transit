@@ -33,6 +33,12 @@ Warnings and errors from every part of the program are always in the log.
 
 Run `transit --report` and attach the file it writes (or press Copy diagnostics in Audio Devices and paste). It holds your system and audio stack versions, the devices transit sees and the end of the log, and nothing from your sessions.
 
+Reading it:
+
+- **ASIO drivers.** Only the driver transit runs is described (opening another one would stop it). Every other installed driver reads `not probed (another ASIO driver is open)`, or `not probed (no ASIO driver is open)`, with no channel count or rates: that is not a broken driver.
+- **Backend lines** (under Open devices) show each backend's own counters. WASAPI: skipped wakes, `min padding` (output) and `max packets` (input). ASIO: overloads, busy skips, position jumps and resets the driver reported, and one line for the output and input of one driver. ASIO's `gap over period` is how much longer than one buffer the time since the previous callback was. A USB interface that delivers on 1 ms USB frames shows up to a period there with nothing late (64 frames at 48 kHz: callbacks 1, 1 and 2 ms apart). Overloads, position jumps and over-budget callbacks (under Callback telemetry) are what a dropout looks like.
+- **MIDI.** The ports transit sees and which are open, the MIDI Learn mappings (the session's and this computer's controller profile), and the port and channel of the last message heard (on a port a track listens to, or on any open port while the MIDI Monitor is on; Clock and Active Sensing do not count). `transit --report` opens no port, so it lists the ports without an open state and no session.
+
 ## More detail
 
 Three ways, from least to most effort:
