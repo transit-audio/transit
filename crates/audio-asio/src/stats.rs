@@ -59,7 +59,8 @@ impl LoopStats {
         self.faults.fetch_add(1, Relaxed);
     }
 
-    /// A callback `late_100ns` after it was due (QPC units of 100 ns).
+    /// A callback `late_100ns` (QPC units of 100 ns) after the previous one plus a period: the gap
+    /// over period ([`crate::engine`]), `wake_late_us` of the snapshot.
     pub(crate) fn wake_late(&self, late_100ns: u64) {
         record(&self.wake_late, &self.max_wake_late_us, late_100ns / 10);
     }

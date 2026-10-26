@@ -426,6 +426,19 @@ impl Engine {
         }
     }
 
+    /// What `wake_late_us` records for a buffer switch entered at `arrival_100ns` (QPC, 100 ns):
+    /// the gap since the previous switch beyond one period of this session's buffer size and rate
+    /// (`None` for the first switch since the driver started), and that switch becomes the previous
+    /// one. The due time is the previous arrival, not an anchor at the start, so it follows the
+    /// driver's cadence; the period is fixed per session (a rate change reopens the session, see
+    /// [`crate::session`]). A driver that delivers in bursts (USB frames of 1 ms carrying 64 frames
+    /// at 48 kHz: switches 1, 1 and 2 ms apart) reads up to a period here while nothing is late.
+    fn gap_over_period(&mut self, arrival_100ns: u64) -> Option<u64> {
+        let gap = self.last_arrival.map(|previous| arrival_100ns.saturating_sub(previous.saturating_add(self.period_100ns)));
+        self.last_arrival = Some(arrival_100ns);
+        gap
+    }
+
     fn ns_of_frames(&self, frames: u64) -> i64 {
         i64::try_from(u128::from(frames) * 1_000_000_000 / u128::from(self.rate)).unwrap_or(i64::MAX)
     }
@@ -442,8 +455,7 @@ impl Engine {
     /// One buffer switch: counters, then the capture callback (its block was just recorded), then
     /// the render callback (or silence). `arrival_100ns` is the QPC read at callback entry.
     pub(crate) fn switch(&mut self, time: Time, arrival_100ns: u64, outputs: &mut dyn OutputPlanes, inputs: &dyn InputPlanes) {
-        let late = self.last_arrival.map(|previous| arrival_100ns.saturating_sub(previous.saturating_add(self.period_100ns)));
-        self.last_arrival = Some(arrival_100ns);
+        let late = self.gap_over_period(arrival_100ns);
         if let (Some(now), Some(before)) = (time.position, self.last_position) {
             if now != before.saturating_add(self.frames as u64) {
                 self.events.position_jumps.fetch_add(1, Ordering::Relaxed);
@@ -579,4 +591,82 @@ fn stamp(
     let frame = frame_of(callback);
     let (callback, frame, host) = held.hold(callback, frame, host, capture);
     Stamp { host_callback_ns: host, backend_callback_ns: callback, backend_frame_ns: frame, quality, offset_uncertainty_ns }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use transit_audio_backend::{STATS_BINS, StreamStats};
+
+    /// QPC readings (100 ns) of switches `gaps_us` apart, starting at an arbitrary time.
+    fn arrivals(gaps_us: &[u64]) -> Vec<u64> {
+        let mut at = 7_000_000_000;
+        let mut out = vec![at];
+        for gap in gaps_us {
+            at += gap * 10;
+            out.push(at);
+        }
+        out
+    }
+
+    fn engine(frames: usize, rate: u32) -> Engine {
+        Engine::new(frames, rate, Arc::default(), Arc::default())
+    }
+
+    /// The gaps over period, in microseconds, of switches at `arrivals`.
+    fn gaps(engine: &mut Engine, arrivals: &[u64]) -> Vec<Option<u64>> {
+        arrivals.iter().map(|a| engine.gap_over_period(*a).map(|g| g / 10)).collect()
+    }
+
+    #[test]
+    fn switches_at_the_driver_period_are_never_over_it() {
+        // 64 frames at 48 kHz: 1333.3 us. The QPC is whole 100 ns steps, so the arrivals alternate
+        // 1333.3 and 1333.4 us apart; the due time is the previous arrival plus the period.
+        let mut e = engine(64, 48_000);
+        assert_eq!(e.period_100ns, 13_333);
+        let at: Vec<u64> = (0..1000u64).map(|i| 7_000_000_000 + i * 640_000_000 / 48_000).collect();
+        let g = gaps(&mut e, &at);
+        assert_eq!(g[0], None, "the first switch has no previous one");
+        assert!(g[1..].iter().all(|g| *g == Some(0)), "{:?}", &g[..8]);
+        // The due time follows the previous switch, not the start: one switch late by 300 us
+        // reads 300 once, and the cadence after it reads 0 again.
+        let mut e = engine(64, 48_000);
+        let g = gaps(&mut e, &arrivals(&[1333, 1633, 1333, 1333]));
+        assert_eq!(g, [None, Some(0), Some(299), Some(0), Some(0)]);
+    }
+
+    #[test]
+    fn a_rate_change_gives_the_new_session_the_new_period() {
+        // 44.1 kHz then 48 kHz in one process: the second open builds a new engine (session.rs,
+        // `Engine::new` with the request's rate, after `setSampleRate` was read back).
+        let mut before = engine(64, 44_100);
+        assert_eq!(before.period_100ns, 14_512);
+        assert!(gaps(&mut before, &arrivals(&[1451; 50]))[1..].iter().all(|g| *g == Some(0)));
+        let mut after = engine(64, 48_000);
+        assert!(gaps(&mut after, &arrivals(&[1333, 1334, 1333, 1333, 1334]))[1..].iter().all(|g| *g == Some(0)));
+        // Even a stale 44.1 kHz period at 48 kHz switches would read 0, not a millisecond: a longer
+        // period only moves the due time later.
+        assert!(gaps(&mut before, &arrivals(&[1333; 20]))[1..].iter().all(|g| *g == Some(0)));
+        // A restart (the driver stopped and started) forgets the previous switch.
+        after.restart();
+        assert_eq!(after.gap_over_period(9_000_000_000), None);
+    }
+
+    #[test]
+    fn burst_delivery_reads_up_to_a_period_with_nothing_late() {
+        // The Scarlett at 48 kHz / 64 (#127): USB delivers in 1 ms frames, so switches come 1, 1 and
+        // 2 ms apart (751 a second, as a 1333 us period should). A third of them read 667 us; the p95
+        // falls in the 512..1023 us bin, which the line prints as 1024.
+        let mut e = engine(64, 48_000);
+        let pattern: Vec<u64> = [1000, 1000, 2000].iter().copied().cycle().take(300).collect();
+        let g: Vec<u64> = gaps(&mut e, &arrivals(&pattern)).into_iter().flatten().collect();
+        assert_eq!(g.iter().filter(|g| **g == 666).count(), 100, "{:?}", &g[..6]);
+        assert_eq!(g.iter().filter(|g| **g == 0).count(), 200);
+        let mut hist = [0u64; STATS_BINS];
+        for g in &g {
+            hist[StreamStats::bin_of_us(*g)] += 1;
+        }
+        assert_eq!(StreamStats::p95_us(&hist, 666), 666, "the bin edge 1024, capped at the maximum");
+        assert_eq!(StreamStats::p95_us(&hist, 1172), 1024, "with one 2.5 ms gap the report's 1024 / 1172");
+    }
 }
