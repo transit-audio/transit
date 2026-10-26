@@ -74,8 +74,8 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!(
             "transport.cycle_to_selection",
             "Set Cycle to Selection",
-            [],
-            None,
+            ["Transport"],
+            Some("Cmd+L"),
             "{} — the loop region becomes the span of the selected clips, else the time selection; Cycle stays as it is",
             always,
             |e, _| {
