@@ -226,10 +226,19 @@ impl StepController {
         }
         let StepBinding::Note(pitch) = binding else { return None };
         if down {
-            if self.input.started_ms.is_none() {
+            let fresh = self.input.started_ms.is_none();
+            if fresh {
                 self.tie_chord = self.pedal;
             }
             self.rest = None;
+            self.input.note(pitch, value, true, now_ms, prefs);
+            if fresh && self.tie_chord {
+                // Tie mode (#138): the strike is one unit however long it is held, so the hold
+                // repeater cannot stack on the tie. The mode is fixed when the strike begins; a
+                // pedal released mid-hold does not turn the repeater back on for this strike.
+                self.input.manual_units = Some(1);
+            }
+            return None;
         }
         let chord = self.input.note(pitch, value, down, now_ms, prefs)?;
         Some(if std::mem::take(&mut self.tie_chord) { StepAction::TieChord(chord) } else { StepAction::Enter(chord) })
@@ -486,6 +495,53 @@ mod tests {
         assert!(!input.is_pending());
     }
 
+    fn pedal_setup() -> (StepController, HoldPrefs, StepBindings, StepBinding) {
+        (StepController::default(), HoldPrefs::default(), StepBindings::default(), StepBinding::Cc(64))
+    }
+
+    #[test]
+    fn pedal_down_strikes_each_tie_one_unit_however_long_they_are_held() {
+        let (mut input, prefs, bindings, pedal) = pedal_setup();
+        input.message(pedal, 127, 0, prefs, bindings);
+        let n = StepBinding::Note(60);
+        let mut total = 0;
+        for i in 0..3u64 {
+            let start = 100 + i * 5000;
+            input.message(n, 90, start, prefs, bindings);
+            assert_eq!(input.poll(start + 4000, prefs), None, "no repeater while the pedal is down");
+            assert_eq!(input.preview(start + 4000, prefs).unwrap().units, 1);
+            let Some(StepAction::TieChord(chord)) = input.message(n, 0, start + 4500, prefs, bindings) else { panic!("expected a tie") };
+            total += chord.units;
+        }
+        assert_eq!(total, 3, "three strikes, three units");
+    }
+
+    #[test]
+    fn pedal_up_strike_follows_the_ramp_and_a_pedal_tap_alone_is_a_rest() {
+        let (mut input, prefs, bindings, pedal) = pedal_setup();
+        let n = StepBinding::Note(60);
+        input.message(n, 90, 0, prefs, bindings);
+        let Some(StepAction::Enter(chord)) = input.message(n, 0, 1000, prefs, bindings) else { panic!("expected entry") };
+        assert_eq!(chord.units, prefs.units(1000));
+        assert!(chord.units > 2);
+        input.message(pedal, 127, 2000, prefs, bindings);
+        assert_eq!(input.message(pedal, 0, 2050, prefs, bindings), Some(StepAction::Rest(1)));
+    }
+
+    #[test]
+    fn pedal_released_mid_hold_keeps_the_strike_at_one_unit() {
+        let (mut input, prefs, bindings, pedal) = pedal_setup();
+        let n = StepBinding::Note(60);
+        input.message(pedal, 127, 0, prefs, bindings);
+        input.message(n, 90, 100, prefs, bindings);
+        assert_eq!(input.message(pedal, 0, 200, prefs, bindings), None, "no rest, no extra unit");
+        let Some(StepAction::TieChord(chord)) = input.message(n, 0, 5000, prefs, bindings) else { panic!("expected a tie") };
+        assert_eq!(chord.units, 1);
+        input.message(n, 90, 6000, prefs, bindings);
+        let Some(StepAction::Enter(next)) = input.message(n, 0, 7000, prefs, bindings) else { panic!("expected entry") };
+        assert_eq!(next.units, prefs.units(1000), "the next strike lengthens normally");
+    }
+
     #[test]
     fn pedal_chord_ties_without_an_extra_rest_even_if_pedal_releases_first() {
         let mut input = StepController::default();
@@ -497,7 +553,7 @@ mod tests {
         assert_eq!(input.message(StepBinding::Cc(64), 0, 650, prefs, bindings), None);
         assert_eq!(
             input.message(StepBinding::Note(60), 0, 700, prefs, bindings),
-            Some(StepAction::TieChord(StepChord { notes: vec![(60, 90)], units: 2 }))
+            Some(StepAction::TieChord(StepChord { notes: vec![(60, 90)], units: 1 }))
         );
     }
 
