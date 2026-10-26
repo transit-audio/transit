@@ -1122,8 +1122,8 @@ fn step_hold_commits_the_preview_length_as_one_undo_step() {
     t.app.step_midi_at(note(64, false), 1050);
     let notes = t.notes();
     assert_eq!(notes.len(), 2);
-    assert!(notes.iter().all(|n| n.length == 4 * SIXTEENTH));
-    assert_eq!(t.app.keys.step.cursor, 4 * SIXTEENTH);
+    assert!(notes.iter().all(|n| n.length == 3 * SIXTEENTH));
+    assert_eq!(t.app.keys.step.cursor, 3 * SIXTEENTH);
     assert_eq!(t.undo_len(), undo + 1);
 }
 
@@ -1149,21 +1149,21 @@ fn step_pedal_rests_repeat_and_sustain_chord_ties_are_undoable() {
     t.app.step_message_at(Cc(64), 127, 200);
     t.app.step_tick_at(700);
     assert_eq!(t.app.keys.step.cursor, 3 * SIXTEENTH);
-    t.app.step_tick_at(1000);
+    t.app.step_tick_at(1100);
     assert_eq!(t.app.keys.step.cursor, 4 * SIXTEENTH);
-    t.app.step_message_at(Cc(64), 0, 1001);
+    t.app.step_message_at(Cc(64), 0, 1101);
     assert!(t.notes().is_empty());
-    t.app.step_message_at(Note(60), 90, 1100);
-    t.app.step_message_at(Note(64), 80, 1110);
-    t.app.step_message_at(Note(60), 0, 1200);
-    t.app.step_message_at(Note(64), 0, 1210);
+    t.app.step_message_at(Note(60), 90, 1200);
+    t.app.step_message_at(Note(64), 80, 1210);
+    t.app.step_message_at(Note(60), 0, 1300);
+    t.app.step_message_at(Note(64), 0, 1310);
     let undo = t.undo_len();
-    t.app.step_message_at(Cc(64), 127, 1300);
-    t.app.step_message_at(Note(60), 90, 1310);
-    t.app.step_message_at(Note(64), 80, 1320);
-    t.app.step_message_at(Note(60), 0, 1400);
-    t.app.step_message_at(Note(64), 0, 1410);
-    t.app.step_message_at(Cc(64), 0, 1450);
+    t.app.step_message_at(Cc(64), 127, 1400);
+    t.app.step_message_at(Note(60), 90, 1410);
+    t.app.step_message_at(Note(64), 80, 1420);
+    t.app.step_message_at(Note(60), 0, 1500);
+    t.app.step_message_at(Note(64), 0, 1510);
+    t.app.step_message_at(Cc(64), 0, 1550);
     assert_eq!(t.notes().len(), 2, "tie extends, never duplicates the chord");
     assert!(t.notes().iter().all(|n| n.length == 2 * SIXTEENTH && n.start == 4 * SIXTEENTH));
     assert_eq!(t.app.keys.step.cursor, 6 * SIXTEENTH);

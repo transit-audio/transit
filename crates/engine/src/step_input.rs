@@ -1,6 +1,11 @@
 //! Deterministic step-entry timing. The caller supplies monotonic milliseconds; no audio
 //! device or wall clock is needed, and pending notes do not mutate the document.
 
+/// First repeat interval after the threshold, before it eases toward the floor.
+const HOLD_RAMP_START_MS: u64 = 400;
+/// Upper bound on the ramp length, so the schedule loop stays small for any prefs file.
+const MAX_RAMP_UNITS: u32 = 64;
+
 /// Hold preferences, persisted by the UI rather than in the musical document.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -8,11 +13,13 @@ pub struct HoldPrefs {
     pub enabled: bool,
     pub threshold_ms: u64,
     pub floor_ms: u64,
+    /// How many units the repeat interval takes to ease from its start to the floor.
+    pub ramp_units: u32,
 }
 
 impl Default for HoldPrefs {
     fn default() -> Self {
-        Self { enabled: true, threshold_ms: 500, floor_ms: 80 }
+        Self { enabled: true, threshold_ms: 500, floor_ms: 200, ramp_units: 6 }
     }
 }
 
@@ -27,8 +34,12 @@ impl HoldPrefs {
         }
         let mut remaining = elapsed_ms - threshold;
         let mut units = 2u64;
-        for interval in [300, 220, 160, 120] {
-            let interval = interval.min(threshold).max(floor);
+        // The repeat interval eases linearly from `start` down to the floor over
+        // `ramp_units` units, then stays at the floor. It never drops below the floor.
+        let start = HOLD_RAMP_START_MS.min(threshold).max(floor);
+        let ramp = u64::from(self.ramp_units.min(MAX_RAMP_UNITS));
+        for i in 0..ramp {
+            let interval = start - (start - floor) * i / ramp;
             if remaining < interval {
                 return units as u32;
             }
@@ -354,7 +365,7 @@ mod tests {
         input.message(StepBinding::Note(60), 0, 20_001, prefs, bindings);
         input.control(StepControl::Rest, true, 21_000, prefs);
         assert_eq!(input.poll(21_500, prefs), Some(StepAction::Rest(2)));
-        assert_eq!(input.control(StepControl::Rest, false, 21_800, prefs), Some(StepAction::Rest(1)));
+        assert_eq!(input.control(StepControl::Rest, false, 21_900, prefs), Some(StepAction::Rest(1)));
         input.cancel();
         input.message(StepBinding::Note(62), 90, 22_000, prefs, bindings);
         assert_eq!(input.preview(u64::MAX, prefs).unwrap().units, 1);
@@ -363,12 +374,72 @@ mod tests {
     #[test]
     fn hold_threshold_and_accelerating_repeat_schedule() {
         let prefs = HoldPrefs::default();
-        for (ms, units) in [(0, 1), (499, 1), (500, 2), (799, 2), (800, 3), (1020, 4), (1180, 5), (1300, 6), (1380, 7)] {
+        // Intervals after unit 2 (500 ms): 400, 367, 334, 300, 267, 234, then 200 each.
+        // Units begin at 500, 900, 1267, 1601, 1901, 2168, 2402, then every 200 ms.
+        for (ms, units) in [
+            (0, 1),
+            (499, 1),
+            (500, 2),
+            (899, 2),
+            (900, 3),
+            (1266, 3),
+            (1267, 4),
+            (1600, 4),
+            (1601, 5),
+            (1900, 5),
+            (1901, 6),
+            (2167, 6),
+            (2168, 7),
+            (2401, 7),
+            (2402, 8),
+            (2601, 8),
+            (2602, 9),
+            (2802, 10),
+            (4402, 18),
+        ] {
             assert_eq!(prefs.units(ms), units, "at {ms} ms");
         }
         assert_eq!(HoldPrefs { threshold_ms: 200, floor_ms: 100, ..HoldPrefs::default() }.units(199), 1);
         assert_eq!(HoldPrefs { threshold_ms: 200, floor_ms: 100, ..HoldPrefs::default() }.units(200), 2);
         assert_eq!(prefs.units(u64::MAX), u32::MAX);
+    }
+
+    #[test]
+    fn ramp_is_monotone_and_never_shorter_than_the_floor() {
+        for threshold_ms in [0, 1, 50, 200, 500, 5000, 100_000] {
+            for floor_ms in [0, 1, 80, 200, 400, 1000, 70_000] {
+                for ramp_units in [0, 1, 2, 6, 20, 64, 1000, u32::MAX] {
+                    let prefs = HoldPrefs { enabled: true, threshold_ms, floor_ms, ramp_units };
+                    let threshold = threshold_ms.clamp(1, 60_000);
+                    let floor = floor_ms.clamp(1, threshold);
+                    let mut last = 1;
+                    let mut last_change = threshold;
+                    for ms in (0..40_000u64).step_by(7) {
+                        let units = prefs.units(ms);
+                        assert!(units >= last, "units fell at {ms} ms for {prefs:?}");
+                        if units != last && ms >= threshold {
+                            // Units advance at most one per `floor` ms, so no interval is shorter.
+                            let gap = ms - last_change;
+                            if units == last + 1 && last > 2 {
+                                assert!(gap + 7 > floor, "interval {gap} under floor {floor} for {prefs:?}");
+                            }
+                            last_change = ms;
+                        }
+                        last = units;
+                    }
+                    assert!(u64::from(prefs.units(threshold + 1000 * floor)) <= 2 + 64 + 1000, "{prefs:?}");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn old_prefs_without_ramp_units_load_with_the_default() {
+        let old: HoldPrefs = serde_json::from_str(r#"{"enabled":true,"threshold_ms":500,"floor_ms":80}"#).unwrap();
+        assert_eq!(old.ramp_units, 6);
+        assert_eq!(old.floor_ms, 80, "a stored floor is the user's choice");
+        let empty: HoldPrefs = serde_json::from_str("{}").unwrap();
+        assert_eq!((empty.threshold_ms, empty.floor_ms, empty.ramp_units), (500, 200, 6));
     }
 
     #[test]
@@ -382,7 +453,7 @@ mod tests {
         assert!(input.note(64, 0, false, 600, prefs).is_none());
         let chord = input.note(67, 0, false, 1050, prefs).unwrap();
         assert_eq!(chord.notes, vec![(60, 90), (64, 90), (67, 90)]);
-        assert_eq!(chord.units, 4);
+        assert_eq!(chord.units, 3);
         assert!(input.preview(1100, prefs).is_none());
     }
 
@@ -410,8 +481,8 @@ mod tests {
         assert_eq!(input.poll(699, prefs), None);
         assert_eq!(input.poll(700, prefs), Some(StepAction::Rest(2)));
         assert_eq!(input.message(pedal, 127, 800, prefs, bindings), None);
-        assert_eq!(input.poll(1000, prefs), Some(StepAction::Rest(1)));
-        assert_eq!(input.message(pedal, 0, 1001, prefs, bindings), None);
+        assert_eq!(input.poll(1100, prefs), Some(StepAction::Rest(1)));
+        assert_eq!(input.message(pedal, 0, 1101, prefs, bindings), None);
         assert!(!input.is_pending());
     }
 

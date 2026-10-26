@@ -1265,6 +1265,11 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
             ui.label("Repeat floor (ms)");
             ui.add(egui::DragValue::new(&mut app.ui.keys.step_hold.floor_ms).range(1..=1000));
         });
+        ui.horizontal(|ui| {
+            ui.label("Speed up over");
+            let r = ui.add(egui::DragValue::new(&mut app.ui.keys.step_hold.ramp_units).range(0..=64).suffix(" units"));
+            r.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::DragValue, true, "Speed up over N units"));
+        });
         ui.label("Sustain + the same notes ties the previous chord.");
         for (label, action, binding) in [
             ("Tie/Rest", StepControl::TieRest, app.ui.keys.step_bindings.tie_rest),
