@@ -13,7 +13,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
    git push origin v0.2.0-alpha.1
    ```
 
-3. `release.yml` builds four archives and attaches them to a GitHub pre-release for the tag:
+3. `release.yml` builds the archives and attaches them to the GitHub release for the tag (a pre-release only when the tag has a suffix):
    - Windows x86_64 (one download, a `.msi` installer and a portable `.zip`): `windows-x86_64`
      (native WASAPI and native ASIO; see below). Unsigned unless the
      Windows signing secrets below are set. SmartScreen may ask for "More info", then "Run anyway".
