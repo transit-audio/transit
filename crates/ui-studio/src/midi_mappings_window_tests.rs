@@ -84,13 +84,96 @@ fn the_target_cell_names_a_plugin_parameter_by_its_table() {
 fn the_target_cell_falls_back_to_the_index_while_the_table_is_not_cached() {
     let screen = (1920.0, 1080.0);
     let (mut app, ctx, t) = new_app(screen.0, screen.1);
-    if app.run("mix.insert", json!({"track": t.0, "slot": 0, "plugin": "vst3:not-cached"})).is_err() {
-        return;
-    }
+    // A plug-in the registries do not know: no parameter table is cached for it (K81).
+    app.engine.session_mut().track_mut(t).unwrap().mixer.inserts[0] = Some(soundcraft_model::Insert::new("vst3:not-cached"));
     map(&mut app, "KeyStep", &format!("track:{}:plugin:a:40", t.0), 74);
     open(&mut app, &ctx, screen);
     let targets: Vec<String> = midi_learn::rows(&app).into_iter().map(|r| r.target).collect();
     assert_eq!(targets, vec!["Gtr: vst3:not-cached > parameter 40".to_string()]);
+}
+
+/// One frame with `events`, returning the text shapes drawn as (text, rect).
+fn frame_with(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64, events: Vec<egui::Event>) -> Vec<(String, egui::Rect)> {
+    *time += 1.0 / 60.0;
+    let mut raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0))),
+        time: Some(*time),
+        events,
+        ..Default::default()
+    };
+    app.raw_input_hook(&mut raw);
+    let mut out = ctx.run_ui(raw, |ui| {
+        app.logic(ui.ctx());
+        app.ui(ui);
+    });
+    out.textures_delta.clear();
+    let mut texts = Vec::new();
+    for c in &out.shapes {
+        collect_text(&c.shape, &mut |t, r| texts.push((t.to_string(), r)));
+    }
+    texts
+}
+
+fn range_app() -> (StudioApp, egui::Context, f64, egui::Pos2) {
+    let screen = (1920.0, 1080.0);
+    let (mut app, ctx, t) = new_app(screen.0, screen.1);
+    map(&mut app, "KeyStep", &format!("track:{}:volume", t.0), 7);
+    open(&mut app, &ctx, screen);
+    let mut time = 10.0;
+    let texts = frame_with(&mut app, &ctx, &mut time, vec![]);
+    let low = texts
+        .iter()
+        .find(|(t, _)| t == "0.0")
+        .unwrap_or_else(|| panic!("the low Range field in {:?}", texts.iter().map(|x| x.0.clone()).collect::<Vec<_>>()))
+        .1;
+    (app, ctx, time, low.center())
+}
+
+fn range_of(app: &StudioApp) -> [f32; 2] {
+    let m = app.engine.session().midi_mappings.iter().next().unwrap().clone();
+    [m.min, m.max]
+}
+
+fn button(pos: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers: egui::Modifiers::NONE }
+}
+
+#[test]
+fn dragging_the_low_range_field_over_several_frames_commits_the_range() {
+    let (mut app, ctx, mut time, at) = range_app();
+    frame_with(&mut app, &ctx, &mut time, vec![egui::Event::PointerMoved(at)]);
+    frame_with(&mut app, &ctx, &mut time, vec![button(at, true)]);
+    for i in 1..=6 {
+        let p = at + egui::vec2(5.0 * i as f32, 0.0);
+        frame_with(&mut app, &ctx, &mut time, vec![egui::Event::PointerMoved(p)]);
+    }
+    assert_eq!(range_of(&app), [0.0, 1.0], "nothing commits mid-drag");
+    let end = at + egui::vec2(30.0, 0.0);
+    frame_with(&mut app, &ctx, &mut time, vec![button(end, false)]);
+    frame_with(&mut app, &ctx, &mut time, vec![]);
+    let [lo, hi] = range_of(&app);
+    assert!(lo > 0.1 && hi == 1.0, "the drag moved the low end: {lo} {hi}");
+}
+
+#[test]
+fn typing_a_range_value_and_pressing_enter_commits_it() {
+    let (mut app, ctx, mut time, at) = range_app();
+    frame_with(&mut app, &ctx, &mut time, vec![egui::Event::PointerMoved(at)]);
+    frame_with(&mut app, &ctx, &mut time, vec![button(at, true)]);
+    frame_with(&mut app, &ctx, &mut time, vec![button(at, false)]);
+    frame_with(&mut app, &ctx, &mut time, vec![]);
+    frame_with(&mut app, &ctx, &mut time, vec![egui::Event::Text("50".into())]);
+    let key = |pressed| egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: Some(egui::Key::Enter),
+        pressed,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    frame_with(&mut app, &ctx, &mut time, vec![key(true)]);
+    frame_with(&mut app, &ctx, &mut time, vec![key(false)]);
+    frame_with(&mut app, &ctx, &mut time, vec![]);
+    assert_eq!(range_of(&app), [0.5, 1.0]);
 }
 
 #[test]
