@@ -8,7 +8,7 @@ const MAX_RAMP_UNITS: u32 = 64;
 
 /// Hold preferences, persisted by the UI rather than in the musical document.
 #[derive(Debug, Clone, Copy, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
+#[serde(default, from = "HoldPrefsFile")]
 pub struct HoldPrefs {
     pub enabled: bool,
     pub threshold_ms: u64,
@@ -16,6 +16,41 @@ pub struct HoldPrefs {
     /// How many units the repeat interval takes to ease from its start to the floor.
     pub ramp_units: u32,
 }
+
+/// What a prefs file holds. Every build before the ramp (#136) saved its default `floor_ms: 80`
+/// whole, so a file with no `ramp_units` and exactly that floor is the old default, not a choice:
+/// it moves to the new default. Any other floor is the user's and is kept.
+#[derive(serde::Deserialize)]
+#[serde(default)]
+struct HoldPrefsFile {
+    enabled: bool,
+    threshold_ms: u64,
+    floor_ms: u64,
+    ramp_units: Option<u32>,
+}
+
+impl Default for HoldPrefsFile {
+    fn default() -> Self {
+        let d = <HoldPrefs as Default>::default();
+        Self { enabled: d.enabled, threshold_ms: d.threshold_ms, floor_ms: d.floor_ms, ramp_units: None }
+    }
+}
+
+impl From<HoldPrefsFile> for HoldPrefs {
+    fn from(f: HoldPrefsFile) -> Self {
+        let d = Self::default();
+        let migrate = f.ramp_units.is_none() && f.floor_ms == OLD_DEFAULT_FLOOR_MS;
+        Self {
+            enabled: f.enabled,
+            threshold_ms: f.threshold_ms,
+            floor_ms: if migrate { d.floor_ms } else { f.floor_ms },
+            ramp_units: f.ramp_units.unwrap_or(d.ramp_units),
+        }
+    }
+}
+
+/// The floor every build before the ramp saved as its default.
+const OLD_DEFAULT_FLOOR_MS: u64 = 80;
 
 impl Default for HoldPrefs {
     fn default() -> Self {
@@ -443,12 +478,18 @@ mod tests {
     }
 
     #[test]
-    fn old_prefs_without_ramp_units_load_with_the_default() {
-        let old: HoldPrefs = serde_json::from_str(r#"{"enabled":true,"threshold_ms":500,"floor_ms":80}"#).unwrap();
-        assert_eq!(old.ramp_units, 6);
-        assert_eq!(old.floor_ms, 80, "a stored floor is the user's choice");
-        let empty: HoldPrefs = serde_json::from_str("{}").unwrap();
+    fn old_prefs_without_ramp_units_load_with_the_default_and_migrate_only_the_old_floor() {
+        let load = |json: &str| serde_json::from_str::<HoldPrefs>(json).unwrap();
+        let old_default = load(r#"{"enabled":true,"threshold_ms":500,"floor_ms":80}"#);
+        assert_eq!((old_default.floor_ms, old_default.ramp_units), (200, 6), "the old default 80 becomes 200");
+        let chosen = load(r#"{"enabled":false,"threshold_ms":400,"floor_ms":120}"#);
+        assert_eq!((chosen.enabled, chosen.threshold_ms, chosen.floor_ms, chosen.ramp_units), (false, 400, 120, 6));
+        let new_file = load(r#"{"enabled":true,"threshold_ms":500,"floor_ms":80,"ramp_units":3}"#);
+        assert_eq!((new_file.floor_ms, new_file.ramp_units), (80, 3), "a file that has ramp_units keeps its floor");
+        let empty = load("{}");
         assert_eq!((empty.threshold_ms, empty.floor_ms, empty.ramp_units), (500, 200, 6));
+        let round = load(&serde_json::to_string(&new_file).unwrap());
+        assert_eq!((round.floor_ms, round.ramp_units), (80, 3));
     }
 
     #[test]
