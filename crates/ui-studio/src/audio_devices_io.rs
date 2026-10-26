@@ -196,7 +196,6 @@ pub fn channel_text(c: u16, names: &[String]) -> String {
 /// (label shown, value the control) for `ui.inspect` and tests. `names` labels the channels.
 pub fn section(ui: &mut egui::Ui, io: &IoMap, wasapi: bool, names: &ChannelNames, ed: &mut IoEditor, items: &mut Vec<MenuItem>) -> Option<IoEdit> {
     let mut edit = None;
-    ui.separator();
     ui.label(egui::RichText::new("I/O paths").strong());
     dim(ui, format!("Channels open on this device: {} in, {} out.", io.inputs, io.outputs));
     if wasapi {
@@ -279,7 +278,6 @@ pub fn hardware_section(
 ) -> (Option<HardwareAction>, HardwareLayout) {
     use crate::hardware_ui::frames_text;
     let mut action = None;
-    ui.separator();
     ui.label(egui::RichText::new("Hardware inserts").strong());
     dim(ui, "Time the round trip through outboard gear: a click plays on the send path and is found again on the return path.");
     let outputs: Vec<&str> = io.paths_of(IoDirection::Output).map(|p| p.name.as_str()).collect();
