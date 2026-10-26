@@ -202,6 +202,22 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                                 ui.close();
                             }
                         }
+                        ui.separator();
+                        let zoom_label = format!("Interface zoom: {:.0}%", app.ui.ui_zoom * 100.0);
+                        let zoom = ui.menu_button(menu_contents(&zoom_label), |ui| {
+                            for percent in [100, 125, 150, 175, 200] {
+                                let factor = percent as f32 / 100.0;
+                                let name = format!("{percent}%");
+                                let b = check_button(ui, (app.ui.ui_zoom - factor).abs() < 0.001, &name);
+                                view_items.push(crate::mixer::MenuItem::at(ui, name, "interface_zoom".into(), b.rect));
+                                if b.clicked() {
+                                    app.set_interface_zoom(ui.ctx(), factor);
+                                    ui.close();
+                                }
+                            }
+                        });
+                        view_items.push(crate::mixer::MenuItem::at(ui, zoom_label, "interface_zoom".into(), zoom.response.rect));
+                        zoom.response.on_hover_text("Plug-in editor windows follow the display scale, not this zoom.");
                     });
                     view_items.push(crate::mixer::MenuItem::at(ui, "Appearance".into(), String::new(), sub.response.rect));
                 });
@@ -501,6 +517,15 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     }
     if pressed(ctx, A::ZoomOut) {
         let _ = app.engine.execute("view.zoom_out", &json!({}));
+    }
+    if pressed(ctx, A::ZoomInterfaceIn) {
+        app.set_interface_zoom(ctx, app.ui.ui_zoom * 1.1);
+    }
+    if pressed(ctx, A::ZoomInterfaceOut) {
+        app.set_interface_zoom(ctx, app.ui.ui_zoom / 1.1);
+    }
+    if pressed(ctx, A::ResetInterfaceZoom) {
+        app.set_interface_zoom(ctx, 1.0);
     }
     // The arrangement grid (view state): Ableton's Ctrl+1 narrow, Ctrl+2 widen, Ctrl+3 triplet, Ctrl+4 snap.
     let (finer, wider) = (pressed(ctx, A::GridNarrow), pressed(ctx, A::GridWiden));

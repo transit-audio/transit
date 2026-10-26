@@ -422,6 +422,23 @@ mod preference_regressions {
     use serde_json::json;
 
     #[test]
+    fn interface_zoom_survives_save_load_clamps_and_defaults_for_old_settings() {
+        let dir = TemporaryAutosave::new().unwrap();
+        let path = dir.path().join("ui.json");
+        let ui = transit_ui_studio::UiState { ui_zoom: 1.75, ..Default::default() };
+        save_ui(&path, &ui).unwrap();
+        assert_eq!(load_ui(&path).unwrap().unwrap().ui_zoom, 1.75);
+        for (value, expected) in [(0.1, 0.75), (8.0, 3.0)] {
+            std::fs::write(&path, serde_json::to_vec(&json!({"ui_zoom": value})).unwrap()).unwrap();
+            assert_eq!(load_ui(&path).unwrap().unwrap().ui_zoom, expected);
+        }
+        std::fs::write(&path, br#"{"appearance":"light"}"#).unwrap();
+        let old = load_ui(&path).unwrap().unwrap();
+        assert_eq!(old.ui_zoom, 1.0);
+        assert_eq!(old.appearance, transit_ui_studio::theme::Appearance::Light);
+    }
+
+    #[test]
     fn one_bad_field_does_not_discard_other_preferences_or_future_data() {
         let dir = TemporaryAutosave::new().unwrap();
         let path = dir.path().join("ui.json");

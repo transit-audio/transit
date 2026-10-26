@@ -133,6 +133,123 @@ fn appearance_round_trips_through_ui_state_json() {
 }
 
 #[test]
+fn interface_zoom_round_trips_defaults_and_clamps_in_ui_json() {
+    let ui = crate::UiState { ui_zoom: 1.75, ..Default::default() };
+    let back: crate::UiState = serde_json::from_slice(&serde_json::to_vec(&ui).unwrap()).unwrap();
+    assert_eq!(back.ui_zoom, 1.75);
+    let old: crate::UiState = serde_json::from_value(json!({"appearance": "light"})).unwrap();
+    assert_eq!(old.ui_zoom, 1.0);
+    for (value, expected) in [(-1.0, 0.75), (0.0, 0.75), (0.75, 0.75), (1.25, 1.25), (3.0, 3.0), (10.0, 3.0)] {
+        let back: crate::UiState = serde_json::from_value(json!({"ui_zoom": value})).unwrap();
+        assert_eq!(back.ui_zoom, expected);
+    }
+}
+
+#[test]
+fn interface_zoom_preference_applies_at_startup_and_composes_with_os_scale() {
+    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    app.ui.ui_zoom = 1.5;
+    let ctx = egui::Context::default();
+    for (native, zoom) in [(1.0, 1.5), (2.0, 1.5), (1.25, 1.0), (1.0, 0.75), (2.0, 3.0)] {
+        app.ui.ui_zoom = zoom;
+        for _ in 0..3 {
+            let mut raw = egui::RawInput::default();
+            raw.viewports.get_mut(&egui::ViewportId::ROOT).unwrap().native_pixels_per_point = Some(native);
+            let mut out = ctx.run_ui(raw, |ui| app.logic(ui.ctx()));
+            out.textures_delta.clear();
+        }
+        assert_eq!(ctx.zoom_factor(), zoom);
+        assert_eq!(ctx.pixels_per_point(), native * zoom);
+        assert!(!ctx.options(|o| o.zoom_with_keyboard));
+    }
+    for value in [f32::NAN, f32::INFINITY, f32::NEG_INFINITY] {
+        app.ui.ui_zoom = value;
+        for _ in 0..2 {
+            let mut out = ctx.run_ui(Default::default(), |ui| app.logic(ui.ctx()));
+            out.textures_delta.clear();
+        }
+        assert_eq!(app.ui.ui_zoom, 1.0);
+        assert_eq!(ctx.zoom_factor(), 1.0);
+    }
+}
+
+#[test]
+fn interface_zoom_keys_change_the_preference_without_arrangement_zoom_or_document_edits() {
+    let mut t = T::new();
+    let before = (t.app.engine.is_dirty(), t.app.engine.revision);
+    let spp = t.app.engine.session().edit.zoom.samples_per_px;
+    for (key, shift) in [("Equals", false), ("Plus", false), ("Plus", true)] {
+        t.input("ui.key", json!({"key": key, "cmd": true, "shift": shift}));
+        assert!((t.app.ui.ui_zoom - 1.1).abs() < 0.0001);
+        assert_eq!(t.ctx.zoom_factor(), t.app.ui.ui_zoom);
+        assert_eq!(t.app.status, "Interface zoom 110%");
+        t.input("ui.key", json!({"key": "Minus", "cmd": true}));
+        assert!((t.app.ui.ui_zoom - 1.0).abs() < 0.0001);
+    }
+    for (start, key, expected) in [(2.99, "Equals", 3.0), (0.76, "Minus", 0.75), (1.75, "0", 1.0)] {
+        t.app.ui.ui_zoom = start;
+        t.frames(3);
+        t.input("ui.key", json!({"key": key, "cmd": true}));
+        assert_eq!(t.app.ui.ui_zoom, expected);
+        assert_eq!(t.ctx.zoom_factor(), expected);
+    }
+    assert_eq!(t.app.engine.session().edit.zoom.samples_per_px, spp);
+    assert_eq!((t.app.engine.is_dirty(), t.app.engine.revision), before);
+    t.input("ui.key", json!({"key": "Plus"}));
+    assert!(t.app.engine.session().edit.zoom.samples_per_px < spp);
+    t.input("ui.key", json!({"key": "Minus"}));
+    assert_eq!(t.app.ui.ui_zoom, 1.0);
+}
+
+#[test]
+fn interface_zoom_changes_in_one_frame_apply_only_the_final_preference() {
+    let mut t = T::new();
+    for key in [egui::Key::Num0, egui::Key::Minus] {
+        let mods = egui::Modifiers { ctrl: true, command: true, ..Default::default() };
+        let mut events = vec![egui::Event::ModifiersChanged(mods)];
+        for key in [egui::Key::Equals, key] {
+            events.push(egui::Event::Key { key, physical_key: None, pressed: true, repeat: false, modifiers: mods });
+            events.push(egui::Event::Key { key, physical_key: None, pressed: false, repeat: false, modifiers: mods });
+        }
+        // Bypass raw_input_hook: its synthetic queue intentionally splits keys across frames.
+        t.time += 1.0 / 60.0;
+        let raw = egui::RawInput { time: Some(t.time), events, ..Default::default() };
+        let mut out = t.ctx.run_ui(raw, |ui| {
+            t.app.logic(ui.ctx());
+            t.app.ui(ui);
+        });
+        out.textures_delta.clear();
+        t.frames(4);
+        assert_eq!(t.app.ui.ui_zoom, 1.0);
+        assert_eq!(t.ctx.zoom_factor(), 1.0);
+        assert_eq!(t.ctx.pixels_per_point(), 1.0);
+    }
+}
+
+#[test]
+fn appearance_menu_lists_interface_zoom_presets_and_shows_the_current_value() {
+    let mut t = T::new();
+    let before = (t.app.engine.is_dirty(), t.app.engine.revision);
+    for percent in [125, 150, 175, 200, 100] {
+        t.click(mid(view_item(&t, "View")));
+        t.click(mid(view_item(&t, "Appearance")));
+        let current = format!("Interface zoom: {:.0}%", t.app.ui.ui_zoom * 100.0);
+        t.click(mid(view_item(&t, &current)));
+        let inspected = t.inspect()["bar_menu"].clone();
+        for preset in [100, 125, 150, 175, 200] {
+            let name = format!("{preset}%");
+            let _ = view_item(&t, &name);
+            assert!(inspected.as_array().unwrap().iter().any(|m| m["label"] == name && m["value"] == "interface_zoom"));
+        }
+        t.click(mid(view_item(&t, &format!("{percent}%"))));
+        assert_eq!(t.app.ui.ui_zoom, percent as f32 / 100.0);
+        assert_eq!(t.ctx.zoom_factor(), t.app.ui.ui_zoom);
+        assert_eq!(t.app.status, format!("Interface zoom {percent}%"));
+    }
+    assert_eq!((t.app.engine.is_dirty(), t.app.engine.revision), before);
+}
+
+#[test]
 fn both_themes_keep_text_meters_and_accent_legible() {
     use crate::theme::{DARK, LIGHT, Tokens, contrast};
     for (name, t) in [("dark", &DARK), ("light", &LIGHT)] {
@@ -234,6 +351,57 @@ fn no_two_shortcuts_share_a_key_in_a_scope() {
 }
 
 #[test]
+fn interface_zoom_shortcuts_reference_matches_the_global_table() {
+    use crate::shortcuts::{Action, Scope, TABLE, text};
+    let reference = include_str!("../../../docs/shortcuts.md");
+    let actions = [Action::ZoomInterfaceIn, Action::ZoomInterfaceOut, Action::ResetInterfaceZoom];
+    let rows: Vec<_> = TABLE.iter().filter(|row| actions.contains(&row.action)).collect();
+    assert_eq!(rows.len(), 5);
+    for row in rows {
+        assert_eq!(row.scope, Scope::Global);
+        assert!(reference.contains(row.label));
+        assert!(reference.contains(&text(row)));
+    }
+}
+
+#[test]
+fn interface_zoom_at_150_percent_keeps_the_mixer_inside_a_1920_by_1080_display() {
+    let mut t = T::new();
+    t.app.run("track.new", json!({"kind": "master"})).unwrap();
+    t.app.ui.ui_zoom = 1.5;
+    t.app.ui.show_mixer = true;
+    t.app.ui.show_devices = false;
+    for full in [false, true] {
+        t.app.ui.mixer_full = full;
+        for _ in 0..6 {
+            t.time += 1.0 / 60.0;
+            let raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0) / 1.5)),
+                time: Some(t.time),
+                ..Default::default()
+            };
+            let mut out = t.ctx.run_ui(raw, |ui| {
+                t.app.logic(ui.ctx());
+                t.app.ui(ui);
+            });
+            out.textures_delta.clear();
+        }
+        assert_eq!(t.ctx.pixels_per_point(), 1.5);
+        let rect = |r: [f32; 4]| egui::Rect::from_min_max(egui::pos2(r[0], r[1]), egui::pos2(r[2], r[3]));
+        let mixer = &t.app.mixer.layout;
+        let area = rect(mixer.area);
+        assert!(t.ctx.content_rect().contains_rect(area), "mixer fits at full={full}");
+        assert!(!mixer.strips.is_empty());
+        for strip in mixer.strips.iter().chain(mixer.master.iter()) {
+            assert!(area.contains_rect(rect(strip.rect)), "strip fits at full={full}");
+            for control in [strip.fader, strip.add_insert] {
+                assert!(rect(strip.rect).contains_rect(rect(control)), "control fits at full={full}");
+            }
+        }
+    }
+}
+
+#[test]
 fn every_handler_takes_its_keys_from_the_table() {
     let sources = [
         include_str!("menus.rs"),
@@ -312,7 +480,20 @@ fn help_keyboard_shortcuts_opens_groups_by_scope_and_filters() {
     t.app.ui.shortcuts_filter = "zoom".into();
     t.frames(2);
     let rows: Vec<String> = serde_json::from_value(t.inspect()["shortcuts"]["rows"].clone()).unwrap();
-    assert_eq!(rows, ["Arrangement · Zoom In · +", "Arrangement · Zoom In · =", "Arrangement · Zoom In · Shift+Plus", "Arrangement · Zoom Out · -"]);
+    assert_eq!(
+        rows,
+        [
+            "Global · Zoom Interface In · Ctrl+=",
+            "Global · Zoom Interface In · Ctrl+Plus",
+            "Global · Zoom Interface In · Ctrl+Shift+Plus",
+            "Global · Zoom Interface Out · Ctrl+-",
+            "Global · Reset Interface Zoom · Ctrl+0",
+            "Arrangement · Zoom In · +",
+            "Arrangement · Zoom In · =",
+            "Arrangement · Zoom In · Shift+Plus",
+            "Arrangement · Zoom Out · -",
+        ]
+    );
     t.app.ui.shortcuts_filter.clear();
     t.click(mid(filter));
     t.input("ui.text", json!({"text": "ctrl+e"}));

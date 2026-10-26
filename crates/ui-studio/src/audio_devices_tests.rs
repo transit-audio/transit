@@ -2023,20 +2023,51 @@ fn inside(outer: [f32; 4], inner: [f32; 4]) -> bool {
 
 #[test]
 fn at_1366_by_768_every_control_of_every_section_is_inside_the_window_and_the_window_inside_the_screen() {
+    assert_sections_fit(egui::vec2(1366.0, 768.0), 1.0);
+}
+
+#[test]
+fn at_1920_by_1080_with_150_percent_interface_zoom_every_audio_devices_section_fits() {
+    assert_sections_fit(egui::vec2(1920.0, 1080.0), 1.5);
+}
+
+fn assert_sections_fit(physical_screen: egui::Vec2, zoom: f32) {
     let mut t = T::new();
-    t.screen = egui::vec2(1366.0, 768.0);
+    t.app.ui.ui_zoom = zoom;
+    t.screen = physical_screen / zoom;
+    t.frames(3);
+    assert_eq!(t.ctx.zoom_factor(), zoom);
+    assert_eq!(t.ctx.pixels_per_point(), zoom);
     t.app.engine.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10));
     t.open_window();
     for key in SECTIONS {
         t.section(key);
         let layout = t.layout();
         let window: [f32; 4] = serde_json::from_value(layout["window"].clone()).unwrap();
-        assert!(inside([0.0, 0.0, 1366.0, 768.0], window), "{key}: the window {window:?} exceeds the screen");
+        assert!(inside([0.0, 0.0, t.screen.x, t.screen.y], window), "{key}: the window {window:?} exceeds the screen");
         let controls = layout["controls"].as_array().unwrap();
         assert!(controls.len() > 7, "{key}: the section and the row show their controls");
-        for c in controls {
+        // Rows outside a scroll area's clip are not painted or clickable.
+        for c in controls.iter().filter(|c| c["visible"] == true) {
             let rect: [f32; 4] = serde_json::from_value(c["rect"].clone()).unwrap();
             assert!(inside(window, rect), "{key}: {} {rect:?} is outside the window {window:?}", c["value"]);
+        }
+        if key == "section_io" {
+            // Scroll the section, then the input paths' nested list, through real wheel input.
+            t.control("ui.scroll", json!({"x": window[2] - 30.0, "y": window[1] + 100.0, "dy": -500.0})).unwrap();
+            let layout = t.layout();
+            let input = layout["controls"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|c| c["visible"] == true && c["value"].as_str().is_some_and(|v| v.starts_with("io_channels:In ")))
+                .expect("scrolling the section exposes the input paths");
+            let at = mid(serde_json::from_value(input["rect"].clone()).unwrap());
+            t.control("ui.scroll", json!({"x": at.0, "y": at.1, "dy": -500.0})).unwrap();
+            let layout = t.layout();
+            let last = layout["controls"].as_array().unwrap().iter().find(|c| c["value"] == "io_channels:In 11-12").unwrap();
+            assert_eq!(last["visible"], true, "the final input path is reachable by scrolling");
+            assert!(inside(window, serde_json::from_value(last["rect"].clone()).unwrap()));
         }
     }
 }

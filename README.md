@@ -123,6 +123,13 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Review an [ADR](docs/adr) draft when one is posted.
 - Working with AI coding agents? Read [Working on transit with AI coding agents](docs/contributing/agents.md).
 
+## Documentation
+
+- [User guide: appearance and interface size](docs/user-guide.md)
+- [Keyboard shortcuts reference](docs/shortcuts.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [Building and running transit](docs/building.md)
+
 ## Features
 
 ### Arrangement

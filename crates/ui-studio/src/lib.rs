@@ -32,6 +32,7 @@ pub mod hardware_ui;
 pub mod host;
 pub mod icons;
 pub mod import;
+mod interface_zoom;
 mod io_settings;
 pub mod keys;
 pub mod load_readout;
@@ -144,6 +145,9 @@ pub struct UiState {
     pub browser: browser::BrowserPrefs,
     /// View > Appearance (slice 5): System follows the OS; Dark and Light pin the theme.
     pub appearance: theme::Appearance,
+    /// Whole-interface zoom, composed with the OS display scale and saved per machine.
+    #[serde(deserialize_with = "interface_zoom::deserialize")]
+    pub ui_zoom: f32,
     /// Help > Keyboard Shortcuts is open, and its filter (view state, not saved).
     #[serde(skip)]
     pub show_shortcuts: bool,
@@ -211,6 +215,7 @@ impl Default for UiState {
             collapsed: Vec::new(),
             browser: browser::BrowserPrefs::default(),
             appearance: theme::Appearance::System,
+            ui_zoom: 1.0,
             show_shortcuts: false,
             shortcuts_filter: String::new(),
             count_in: false,
@@ -374,6 +379,7 @@ pub struct StudioApp {
     synthetic_mods: Option<egui::Modifiers>,
     /// The appearance last given to egui (re-applied when `ui.appearance` changes).
     theme_applied: Option<theme::Appearance>,
+    zoom_applied: Option<f32>,
     pub dialog: Option<Dialog>,
     /// The selected tracks were picked by clicking their headers (arrangement header or mixer
     /// strip): only then does Delete take the tracks (Ableton). Any other selection change, such
@@ -498,6 +504,7 @@ impl StudioApp {
             synthetic_grace: 0,
             synthetic_mods: None,
             theme_applied: None,
+            zoom_applied: None,
             dialog: None,
             tracks_selected_by_header: false,
             editors: Vec::new(),
@@ -952,6 +959,10 @@ impl StudioApp {
             self.theme_applied = Some(self.ui.appearance);
         }
         theme::follow(ctx);
+        if self.zoom_applied != Some(self.ui.ui_zoom) {
+            self.ui.apply_interface_zoom(ctx);
+            self.zoom_applied = Some(self.ui.ui_zoom);
+        }
         let now = ctx.input(|i| i.time);
         let dt = self.last_frame.replace(now).map_or(1.0 / 60.0, |t| (now - t) as f32).clamp(0.0, 0.25);
         self.frame_ms = self.frame_ms * 0.9 + dt * 1000.0 * 0.1;
