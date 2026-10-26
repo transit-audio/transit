@@ -1870,3 +1870,20 @@ fn the_clip_length_readout_says_looped_to() {
     assert_eq!(crate::keys::clip_length_text(4 * bar, None), "Clip length 4.00 bars");
     assert_eq!(crate::keys::clip_length_text(bar, Some(bar)), "Clip length 1.00 bars");
 }
+
+#[test]
+fn step_entry_in_a_looped_clip_wraps_at_the_loop_end() {
+    let mut t = T::open();
+    let q = soundcraft_time::TICKS_PER_QUARTER;
+    t.loop_to_bars(0, 4);
+    t.step_on();
+    t.app.step_set_len(q);
+    for p in [60, 62, 64, 65, 67] {
+        t.tap(p, 100);
+    }
+    let mut starts: Vec<i64> = t.notes().iter().map(|n| n.start).collect();
+    starts.sort_unstable();
+    assert_eq!(starts, vec![0, 0, q, 2 * q, 3 * q], "the fifth step wraps to loop.start");
+    assert!(t.app.keys.layout.notes.iter().all(|n| !n.outside), "no silent note past the loop end");
+    assert_eq!(t.clip_ticks(), 4 * q, "the span is still the cycle");
+}

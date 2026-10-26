@@ -3,8 +3,9 @@
 //! cursor; Backspace takes the last step back. Every step is one `event.step_input` (or
 //! `midi.note_delete`) command, so one undo step each. Session state only: never saved.
 
-use super::{Note, PPQ, StudioApp, clip_view, json, resolve};
+use super::{ClipView, Note, PPQ, StudioApp, clip_view, json, resolve};
 use soundcraft_engine::step_input::{StepAction, StepBinding, StepChord, StepControl, StepController};
+use soundcraft_model::ClipId;
 use soundcraft_playback::{PlayedMidi, PlayedNote};
 
 /// What one entered step left behind, for Backspace.
@@ -235,6 +236,14 @@ impl StudioApp {
         }
     }
 
+    /// A looped clip keeps the step cursor inside its cycle: at or past `loop.end` it wraps to `loop.start`.
+    fn step_wrap(&self, clip: ClipId, cursor: i64) -> i64 {
+        match clip_view(self.engine.session(), clip) {
+            Some(ClipView { cycle: Some((start, _)), len, .. }) if cursor >= len => start.max(0),
+            _ => cursor,
+        }
+    }
+
     fn step_tie(&mut self, notes: &[(u8, u8)], units: u32) {
         let Some(clip) = self.keys.clip else { return };
         let Some(track) = self.keys_track() else { return };
@@ -258,7 +267,7 @@ impl StudioApp {
         }
         let after = before.iter().map(|n| Note { length: n.length + len, ..*n }).collect();
         self.keys.step.steps.push(Entered { start: at, end, notes: after, before });
-        self.keys.step.cursor = end;
+        self.keys.step.cursor = self.step_wrap(clip, end);
         self.keys.step.follow = true;
     }
 
@@ -291,7 +300,7 @@ impl StudioApp {
     fn step_enter_units(&mut self, notes: &[(u8, u8)], units: u32) {
         let Some(clip) = self.keys.clip else { return };
         let Some(len) = self.step_len().checked_mul(i64::from(units)) else { return };
-        let at = self.keys.step.cursor;
+        let at = self.step_wrap(clip, self.keys.step.cursor);
         let Some(end) = at.checked_add(len) else { return };
         let s = self.engine.session();
         let Some((track, c)) = s.find_clip(clip) else { return };
@@ -328,9 +337,10 @@ impl StudioApp {
             start: at,
             length: len,
         });
+        let wrapped = self.step_wrap(clip, end);
         let step = &mut self.keys.step;
         step.steps.push(Entered { start: at, end, notes: entered.collect(), before: Vec::new() });
-        step.cursor = end;
+        step.cursor = wrapped;
         step.follow = true;
     }
 

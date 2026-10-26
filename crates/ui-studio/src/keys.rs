@@ -438,17 +438,32 @@ fn clip_view(s: &Session, clip: ClipId) -> Option<ClipView> {
 
 /// Most ghost notes drawn for a clip's repeats (a degenerate cycle could ask for millions).
 const MAX_GHOSTS: usize = 4096;
+/// Most repeat cycles one frame walks for the ghosts.
+const MAX_GHOST_CYCLES: usize = 4096;
 
 impl ClipView {
     /// The repeats of a looped clip's cycle from `loop.end` to the arrangement length (ADR 0019): the
     /// notes that start inside the cycle, shifted one cycle per repeat, each cut at its seam and at the end.
-    fn ghosts(&self) -> Vec<GhostNote> {
-        let Some((start, end)) = self.cycle else { return Vec::new() };
+    /// Only the repeats that touch the view `view.0..view.1` (ticks) are built, at most `MAX_GHOST_CYCLES`
+    /// cycles and `MAX_GHOSTS` notes; the second value is the number of cycles walked.
+    fn ghosts(&self, view: (i64, i64)) -> (Vec<GhostNote>, usize) {
+        let Some((start, end)) = self.cycle else { return (Vec::new(), 0) };
         let cycle = end - start;
+        let (lo, hi) = (view.0.max(end), view.1.min(self.full));
+        if lo >= hi {
+            return (Vec::new(), 0);
+        }
+        let cycle_notes: Vec<&Note> = self.notes.iter().filter(|n| n.start >= start && n.start < end).collect();
         let mut out = Vec::new();
-        let mut k = 1;
-        while end + (k - 1) * cycle < self.full {
-            for n in self.notes.iter().filter(|n| n.start >= start && n.start < end) {
+        // Repeat k covers `end + (k - 1) * cycle .. end + k * cycle`; start at the first one in view.
+        let first = ((lo - end) / cycle + 1).max(1);
+        let mut walked = 0;
+        for k in first.. {
+            if end + (k - 1) * cycle >= hi || walked >= MAX_GHOST_CYCLES {
+                break;
+            }
+            walked += 1;
+            for n in &cycle_notes {
                 let at = n.start + k * cycle;
                 if at >= self.full {
                     continue;
@@ -456,12 +471,11 @@ impl ClipView {
                 let seam = end + k * cycle;
                 out.push(GhostNote { pitch: n.pitch, start: at, length: n.length.min(seam - at).min(self.full - at).max(1) });
                 if out.len() >= MAX_GHOSTS {
-                    return out;
+                    return (out, walked);
                 }
             }
-            k += 1;
         }
-        out
+        (out, walked)
     }
 }
 
@@ -1599,7 +1613,7 @@ fn paint_grid(ui: &Ui, s: &Session, map: &Map, grid: Rect, ruler: Rect, cv: &Cli
 
 /// A looped clip's repeats: the cycle's notes as dimmed ghosts, as the arranger draws loop-drag cycles.
 fn paint_loop_ghosts(ui: &Ui, map: &Map, grid: Rect, cv: &ClipView, layout: &mut KeysLayout) {
-    layout.loop_ghosts = cv.ghosts();
+    layout.loop_ghosts = cv.ghosts((map.tick(grid.min.x).floor() as i64, map.tick(grid.max.x).ceil() as i64)).0;
     let p = ui.painter().with_clip_rect(grid);
     for g in &layout.loop_ghosts {
         let r = map.note_rect(&Note { pitch: g.pitch, velocity: 100, release_velocity: 64, channel: 0, start: g.start, length: g.length });
@@ -2235,4 +2249,23 @@ pub fn lane_hints(app: &mut StudioApp, ui: &Ui, tl: Rect, tracks: &[crate::arran
         }
     }
     app.keys.layout.hint_tracks = ids;
+}
+
+#[cfg(test)]
+mod ghost_tests {
+    use super::*;
+
+    #[test]
+    fn a_degenerate_cycle_on_a_long_clip_walks_a_bounded_number_of_cycles() {
+        let bar = PPQ * 4;
+        let notes: Vec<Note> =
+            (0..500).map(|i| Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: i % 4, length: 1 }).collect();
+        let cv = ClipView { track: TrackId(1), c0: 0, len: 4, full: 600 * bar, cycle: Some((0, 4)), notes, ctrls: Vec::new(), name: String::new() };
+        let (ghosts, walked) = cv.ghosts((0, 600 * bar));
+        assert!(walked <= MAX_GHOST_CYCLES, "walked {walked} cycles");
+        assert!(ghosts.len() <= MAX_GHOSTS);
+        // Off screen (before the repeats or past the end): nothing is built.
+        assert_eq!(cv.ghosts((0, 4)), (Vec::new(), 0));
+        assert_eq!(cv.ghosts((600 * bar, 601 * bar)), (Vec::new(), 0));
+    }
 }
