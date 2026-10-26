@@ -101,6 +101,10 @@ A hosted instrument's parameter goes through `mix.instrument_param` like a hoste
 built-in instruments until the fix for K83, so a mapped move of one changed nothing): the session holds the value, the mix hands it to the
 plug-in with `set_param`, and the plug-in host tells the controller (`setParamNormalized`) on its main thread, so the editor's knob follows.
 
+## Hosted VST3 parameters
+
+A hosted VST3 parameter follows the plug-in's own curve: the knob's 0..1 goes through the curve the host sampled for a live instance (`soundcraft_vst3_host::param_to_plain` / `param_to_normalized`), not through the registry's Taper approximation (#123). Built-in and CLAP parameters, and a VST3 parameter whose curve is not sampled yet, keep the Taper path.
+
 ## Diagnosis in the log
 
 At info level, a few lines per change and none per idle frame: a learn armed, learned (`mapped ... to <port> ch <n> CC <n>`) and armed from a
