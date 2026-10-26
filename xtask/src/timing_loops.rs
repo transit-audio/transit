@@ -4,7 +4,7 @@
 //! This is a same-file check, not interprocedural analysis of clocks hidden in other functions.
 
 use super::Hit;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use syn::{
     Expr, Item, Pat, Stmt,
     visit::{self, Visit},
@@ -18,6 +18,8 @@ struct Value {
     nanos: Option<u64>,
     instant: bool,
     fine: bool,
+    injected: bool,
+    elapsed_limit: Option<f64>,
 }
 
 impl Value {
@@ -25,6 +27,7 @@ impl Value {
         self.short |= other.short;
         self.wall |= other.wall;
         self.fine |= other.fine;
+        self.injected |= other.injected;
     }
 }
 
@@ -65,6 +68,7 @@ fn value(expr: &Expr, bindings: &Bindings) -> Value {
             if let Expr::Path(p) = e.func.as_ref() {
                 let name = path_name(&p.path);
                 self.out.wall |= name.ends_with("Instant::now");
+                self.out.injected |= lookup(self.bindings, &name).is_some_and(|v| v.injected);
                 if let Some((_, unit)) = name.rsplit_once("Duration::from_") {
                     let n = e.args.first().and_then(|arg| number(arg, self.bindings));
                     self.out.fine |= matches!(unit, "micros" | "nanos");
@@ -76,17 +80,21 @@ fn value(expr: &Expr, bindings: &Bindings) -> Value {
                 }
             }
             // A duration passed to a constructor/helper is not that call's return value.
-            // In particular, host(short_timeout).status() must not taint a separate long
-            // worker-completion deadline. Hidden expiry behavior needs a dedicated test seam.
+            // Function-scope short arguments are checked separately from return values.
         }
         fn visit_expr_method_call(&mut self, e: &'ast syn::ExprMethodCall) {
             // Even an injected Instant's .elapsed() reads the real clock again.
             self.out.wall |= e.method == "elapsed";
+            self.out.injected |= e.method == "now";
             visit::visit_expr_method_call(self, e);
         }
         fn visit_expr_binary(&mut self, e: &'ast syn::ExprBinary) {
             let (l, r) = (value(&e.left, self.bindings), value(&e.right, self.bindings));
             self.out.wall |= l.wall || r.wall;
+            self.out.injected |= l.injected || r.injected;
+            if matches!(e.op, syn::BinOp::Lt(_) | syn::BinOp::Le(_) | syn::BinOp::Gt(_) | syn::BinOp::Ge(_) | syn::BinOp::Eq(_) | syn::BinOp::Ne(_)) {
+                self.out.short |= short_numeric_bound(l.elapsed_limit, &e.right) || short_numeric_bound(r.elapsed_limit, &e.left);
+            }
             // Instant subtraction is an observed age, not a literal zero-length budget.
             if matches!(e.op, syn::BinOp::Sub(_)) && l.instant && r.instant {
                 return;
@@ -108,6 +116,17 @@ fn value(expr: &Expr, bindings: &Bindings) -> Value {
     read.visit_expr(expr);
     read.out.number = number(expr, bindings);
     read.out.nanos = duration(expr, bindings);
+    read.out.elapsed_limit = match expr {
+        Expr::Path(p) => lookup(bindings, &path_name(&p.path)).and_then(|v| v.elapsed_limit),
+        Expr::Paren(e) => value(&e.expr, bindings).elapsed_limit,
+        Expr::MethodCall(e) if value(&e.receiver, bindings).wall => match e.method.to_string().as_str() {
+            "as_millis" => Some(250.0),
+            "as_micros" => Some(250_000.0),
+            "as_secs_f64" => Some(0.25),
+            _ => None,
+        },
+        _ => None,
+    };
     read.out.instant = match expr {
         Expr::Path(p) => lookup(bindings, &path_name(&p.path)).is_some_and(|v| v.instant),
         Expr::Call(e) => matches!(e.func.as_ref(), Expr::Path(p) if path_name(&p.path).ends_with("Instant::now")),
@@ -119,6 +138,19 @@ fn value(expr: &Expr, bindings: &Bindings) -> Value {
         _ => false,
     };
     read.out
+}
+
+fn short_numeric_bound(limit: Option<f64>, expr: &Expr) -> bool {
+    let Some(limit) = limit else { return false };
+    match expr {
+        Expr::Lit(e) => match &e.lit {
+            syn::Lit::Int(n) => n.base10_parse::<f64>().is_ok_and(|n| n < limit),
+            syn::Lit::Float(n) => n.base10_parse::<f64>().is_ok_and(|n| n < limit),
+            _ => false,
+        },
+        Expr::Paren(e) => short_numeric_bound(Some(limit), &e.expr),
+        _ => false,
+    }
 }
 
 fn duration(expr: &Expr, bindings: &Bindings) -> Option<u64> {
@@ -241,25 +273,43 @@ fn bind(pat: &Pat, v: Value, bindings: &mut Bindings) {
 struct PollLoop {
     paced: bool,
     timed: bool,
+    injected: bool,
+    condition_names: HashSet<String>,
 }
 
 /// Exit detection stops at nested loops and closures: their breaks do not end this loop.
-struct Exit(bool);
+struct Exit<'a> {
+    found: bool,
+    condition_names: Option<&'a HashSet<String>>,
+}
 
-impl<'ast> Visit<'ast> for Exit {
+impl<'ast> Visit<'ast> for Exit<'_> {
     fn visit_expr_break(&mut self, _: &'ast syn::ExprBreak) {
-        self.0 = true;
+        self.found = true;
     }
     fn visit_expr_return(&mut self, _: &'ast syn::ExprReturn) {
-        self.0 = true;
+        self.found = true;
     }
     fn visit_macro(&mut self, m: &'ast syn::Macro) {
-        self.0 |= m.path.segments.last().is_some_and(|s| s.ident == "panic" || s.ident == "unreachable");
+        self.found |= m.path.segments.last().is_some_and(|s| s.ident == "panic" || s.ident == "unreachable");
     }
+    fn visit_expr_assign(&mut self, e: &'ast syn::ExprAssign) {
+        if let Expr::Path(p) = e.left.as_ref() {
+            self.found |= self.condition_names.is_some_and(|names| names.contains(&path_name(&p.path)));
+        }
+        visit::visit_expr_assign(self, e);
+    }
+    fn visit_item(&mut self, _: &'ast Item) {}
     fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
     fn visit_expr_loop(&mut self, _: &'ast syn::ExprLoop) {}
     fn visit_expr_while(&mut self, _: &'ast syn::ExprWhile) {}
     fn visit_expr_for_loop(&mut self, _: &'ast syn::ExprForLoop) {}
+}
+
+#[derive(Default)]
+struct Function {
+    short_expiry: bool,
+    loops: Vec<(usize, PollLoop)>,
 }
 
 struct Scanner<'a> {
@@ -268,6 +318,7 @@ struct Scanner<'a> {
     in_test: bool,
     bindings: Bindings,
     loops: Vec<PollLoop>,
+    function: Function,
     hits: Vec<Hit>,
 }
 
@@ -300,9 +351,21 @@ impl Scanner<'_> {
         marker(self.lines[line - 1]) || (line > 1 && self.lines[line - 2].trim_start().starts_with("//") && marker(self.lines[line - 2]))
     }
 
-    fn poll_loop(&mut self, line: usize, cond: Option<&Expr>, body: &syn::Block) {
+    fn poll_loop(&mut self, line: usize, cond: Option<&Expr>, body: &syn::Block, repeats_condition: bool) {
         self.loops.push(PollLoop::default());
         if let Some(cond) = cond {
+            struct Names(HashSet<String>);
+            impl<'ast> Visit<'ast> for Names {
+                fn visit_expr_path(&mut self, p: &'ast syn::ExprPath) {
+                    self.0.insert(path_name(&p.path));
+                }
+                fn visit_expr_closure(&mut self, _: &'ast syn::ExprClosure) {}
+            }
+            let mut names = Names(HashSet::new());
+            names.visit_expr(cond);
+            if repeats_condition && let Some(l) = self.loops.last_mut() {
+                l.condition_names = names.0;
+            }
             self.condition(cond);
             self.visit_expr(cond);
         }
@@ -316,33 +379,63 @@ impl Scanner<'_> {
                 l.timed = true;
             }
         }
-        if let Some(l) = self.loops.pop()
-            && self.in_test
-            && l.paced
-            && l.timed
-            && !self.marked(line)
-        {
-            self.hits.push(Hit {
-                path: self.path.into(),
-                line,
-                rule: 'd',
-                text: "sleep/park/yield loop exits on a short wall-clock duration; inject the clock or use a documented stall budget".into(),
-            });
+        if let Some(l) = self.loops.pop() {
+            self.function.loops.push((line, l));
+        }
+    }
+
+    fn finish_function(&mut self, outer: Function) {
+        let function = std::mem::replace(&mut self.function, outer);
+        for (line, l) in function.loops {
+            if self.in_test && l.paced && (l.timed || (function.short_expiry && !l.injected)) && !self.marked(line) {
+                self.hits.push(Hit {
+                    path: self.path.into(),
+                    line,
+                    rule: 'd',
+                    text: "sleep/park/yield loop may depend on a short wall-clock expiry; inject the clock or use a documented stall budget".into(),
+                });
+            }
+        }
+    }
+
+    fn call_arguments<'a>(&mut self, args: impl Iterator<Item = &'a Expr>) {
+        for arg in args {
+            let v = value(arg, &self.bindings);
+            self.function.short_expiry |= !v.instant && v.nanos.is_some_and(|n| n < 250_000_000);
+            if v.injected && !v.wall {
+                for l in &mut self.loops {
+                    l.injected = true;
+                }
+            }
         }
     }
 
     fn function(&mut self, sig: &syn::Signature, body: &syn::Block) {
         let saved = self.bindings.clone();
         let outer_loops = std::mem::take(&mut self.loops);
+        let outer_function = std::mem::take(&mut self.function);
         for arg in &sig.inputs {
             if let syn::FnArg::Typed(arg) = arg {
-                bind(&arg.pat, Value::default(), &mut self.bindings);
+                bind_parameter(&arg.pat, &mut self.bindings);
             }
         }
         self.visit_block(body);
+        self.finish_function(outer_function);
         self.bindings = saved;
         self.loops = outer_loops;
     }
+}
+
+fn bind_parameter(pat: &Pat, bindings: &mut Bindings) {
+    let injected = match pat {
+        Pat::Ident(p) => p.ident == "now",
+        Pat::Type(p) => {
+            bind_parameter(&p.pat, bindings);
+            return;
+        }
+        _ => false,
+    };
+    bind(pat, Value { injected, ..Value::default() }, bindings);
 }
 
 impl<'ast> Visit<'ast> for Scanner<'_> {
@@ -388,11 +481,17 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
         // Only reads performed during polling pace the exit; .elapsed() still counts.
         if self.loops.is_empty() {
             v.wall = false;
+            v.injected |= v.instant;
         }
         bind(&l.pat, v, &mut self.bindings);
     }
 
     fn visit_expr_assign(&mut self, e: &'ast syn::ExprAssign) {
+        if let Expr::Path(p) = e.left.as_ref()
+            && self.loops.last().is_some_and(|l| l.condition_names.contains(&path_name(&p.path)))
+        {
+            self.condition(&e.right);
+        }
         visit::visit_expr_assign(self, e);
         if let Expr::Path(p) = e.left.as_ref() {
             self.bindings.insert(path_name(&p.path), value(&e.right, &self.bindings));
@@ -400,24 +499,24 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
     }
 
     fn visit_expr_while(&mut self, e: &'ast syn::ExprWhile) {
-        self.poll_loop(e.while_token.span.start().line, Some(&e.cond), &e.body);
+        self.poll_loop(e.while_token.span.start().line, Some(&e.cond), &e.body, true);
     }
     fn visit_expr_for_loop(&mut self, e: &'ast syn::ExprForLoop) {
-        self.poll_loop(e.for_token.span.start().line, Some(&e.expr), &e.body);
+        self.poll_loop(e.for_token.span.start().line, Some(&e.expr), &e.body, false);
     }
     fn visit_expr_loop(&mut self, e: &'ast syn::ExprLoop) {
-        self.poll_loop(e.loop_token.span.start().line, None, &e.body);
+        self.poll_loop(e.loop_token.span.start().line, None, &e.body, false);
     }
 
     fn visit_expr_if(&mut self, e: &'ast syn::ExprIf) {
         // Only exit-controlling branches count. A clock sampled for diagnostics must not
         // turn an unrelated state-driven polling loop into a short timeout.
-        let mut exits = Exit(false);
+        let mut exits = Exit { found: false, condition_names: self.loops.last().map(|l| &l.condition_names) };
         exits.visit_block(&e.then_branch);
         if let Some((_, other)) = &e.else_branch {
             exits.visit_expr(other);
         }
-        if exits.0 {
+        if exits.found {
             self.condition(&e.cond);
         }
         visit::visit_expr_if(self, e);
@@ -438,9 +537,9 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
             .arms
             .iter()
             .map(|arm| {
-                let mut exit = Exit(false);
+                let mut exit = Exit { found: false, condition_names: self.loops.last().map(|l| &l.condition_names) };
                 exit.visit_expr(&arm.body);
-                exit.0
+                exit.found
             })
             .collect();
         if exits.iter().any(|exit| *exit) {
@@ -477,17 +576,36 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
             for l in &mut self.loops {
                 l.paced = true;
             }
+        } else {
+            self.call_arguments(e.args.iter());
+            if matches!(e.func.as_ref(), Expr::Path(p) if lookup(&self.bindings, &path_name(&p.path)).is_some_and(|v| v.injected)) {
+                for l in &mut self.loops {
+                    l.injected = true;
+                }
+            }
         }
         visit::visit_expr_call(self, e);
     }
 
+    fn visit_expr_method_call(&mut self, e: &'ast syn::ExprMethodCall) {
+        self.call_arguments(e.args.iter());
+        if e.method == "now" {
+            for l in &mut self.loops {
+                l.injected = true;
+            }
+        }
+        visit::visit_expr_method_call(self, e);
+    }
+
     fn visit_expr_closure(&mut self, e: &'ast syn::ExprClosure) {
         let outer_loops = std::mem::take(&mut self.loops);
+        let outer_function = std::mem::take(&mut self.function);
         let saved = self.bindings.clone();
         for input in &e.inputs {
-            bind(input, Value::default(), &mut self.bindings);
+            bind_parameter(input, &mut self.bindings);
         }
         visit::visit_expr_closure(self, e);
+        self.finish_function(outer_function);
         self.bindings = saved;
         self.loops = outer_loops;
     }
@@ -498,8 +616,15 @@ pub(super) fn scan(path: &str, src: &str, test_file: bool) -> Vec<Hit> {
         Ok(file) => file,
         Err(e) => return vec![Hit { path: path.into(), line: e.span().start().line, rule: 'd', text: format!("cannot check polling loops: {e}") }],
     };
-    let mut scanner =
-        Scanner { path, lines: src.lines().collect(), in_test: test_file, bindings: Bindings::new(), loops: Vec::new(), hits: Vec::new() };
+    let mut scanner = Scanner {
+        path,
+        lines: src.lines().collect(),
+        in_test: test_file,
+        bindings: Bindings::new(),
+        loops: Vec::new(),
+        function: Function::default(),
+        hits: Vec::new(),
+    };
     constants(file.items.iter(), &mut scanner.bindings, true);
     scanner.visit_file(&file);
     scanner.hits.sort_by_key(|h| h.line);

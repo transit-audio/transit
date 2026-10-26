@@ -41,7 +41,10 @@ fn a_creation_slower_than_the_request_timeout_is_delivered_and_hands_the_queue_o
         let _ = gate.recv(); // the heavy instrument, until the test lets it finish
         ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))
     });
+    let deadline = Instant::now() + Duration::from_secs(5);
+    // timing: stall-bound five seconds for the gated creation to start; its creation timeout is 30 seconds
     while !matches!(slow.poll(), Status::Waiting { running: true }) {
+        assert!(Instant::now() < deadline, "the gated creation never started");
         std::thread::sleep(Duration::from_millis(1));
     }
     let behind_log = Arc::new(Log::default());
@@ -49,6 +52,7 @@ fn a_creation_slower_than_the_request_timeout_is_delivered_and_hands_the_queue_o
     let behind = host.submit(move |ctx| ctx.adopt(Fake::make(&b, Duration::ZERO, Duration::ZERO)));
     // Well past the request timeout: still loading, never stuck, nothing wedged.
     let until = Instant::now() + Duration::from_millis(800);
+    // timing: stall-bound observe past the 200 ms request timeout; the gated creation has a separate 30-second budget
     while Instant::now() < until {
         assert!(matches!(slow.poll(), Status::Waiting { running: true }), "a slow creation is not stuck");
         std::thread::sleep(Duration::from_millis(5));
@@ -84,6 +88,7 @@ fn a_creation_that_returns_after_reading_stuck_is_still_delivered() {
     assert_eq!(host.wedged(), 1);
     drop(release);
     let deadline = Instant::now() + Duration::from_secs(5);
+    // timing: stall-bound five seconds for delivery after releasing the gate; the creation timeout has already fired
     let plugin = loop {
         match late.poll() {
             Status::Ready(p) => break p,
@@ -91,6 +96,7 @@ fn a_creation_that_returns_after_reading_stuck_is_still_delivered() {
             _ => panic!("the late instance is delivered"),
         }
     };
+    // timing: stall-bound five seconds for the released thread to return; no short expiry determines success
     while host.wedged() > 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));
     }

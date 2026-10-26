@@ -57,8 +57,17 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
   `loop` with `sleep`, `park_timeout` or `yield_now` must not exit against a short wall-clock
   duration (`Duration::from_millis(N)` with N < 250, or `from_micros`/`from_nanos`). The check
   follows same-file constants and local bindings into loop conditions, exit-controlling `if`
-  branches, match guards and assertions, including multiline expressions. A short polling interval alone is
-  fine; it is the exit budget that matters. Test code means `#[cfg(test)]` modules, `tests/`
+  branches, match guards and assertions, including multiline expressions. Assigning a variable
+  read by the loop condition (such as `done = true` in `while !done`) counts as an exit path;
+  its guarding expression receives the same duration check as a `break` or `return` branch.
+  Numeric comparisons of `.elapsed().as_millis()`, `.as_micros()` or `.as_secs_f64()` also
+  count when their literal bound represents less than 250 ms.
+  The function-scope heuristic also flags a paced loop when the enclosing function or closure
+  passes a sub-250 ms Duration to another call, directly or through a same-file constant or
+  local binding. This catches a short TTL configured by `set_limits(...)` even when the loop
+  polls only an entry's state under a longer deadline. Calls in other functions or nested
+  closures do not contribute. Sleep/park arguments alone do not count, and a function without
+  a paced loop is unaffected. Test code means `#[cfg(test)]` modules, `tests/`
   directories, `tests.rs` and `*_tests.rs` files. This check also covers ignored tests.
   Prefer an injected clock (`clock.now()` or a `now` parameter) for expiry/window logic, or a
   generous stall budget while waiting for a state. `Instant::now()` and `.elapsed()` read real
@@ -67,6 +76,10 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
   deadline binding or sleep does not. Keep the state, ordering or expiry assertion meaningful;
   shortening sleeps does not fix scheduler dependence. This is syntax and same-file binding
   analysis, not analysis of timing hidden in called functions, other files or macro expansions.
+  The function-scope heuristic accepts an injected read in the loop (`clock.now()` or a `now`
+  parameter), or an injected timestamp passed to a polled call. It cannot see a clock installed
+  inside a helper; document that seam with a reasoned marker on each affected loop. An injected
+  read never exempts a separate short wall-clock exit found by the direct duration check.
 - A test never derives a rate, BPM or latency from `thread::sleep` pacing. It injects the
   timestamps (the fake input's `deliver_at`) and asserts the exact value (E49 recurrence,
   the MIDI Monitor Clock BPM test).

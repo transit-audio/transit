@@ -727,6 +727,7 @@ mod tests {
         // The late thread starts, finds the request channel closed and the event set, and exits,
         // dropping the loader (the only other holder of `observed`).
         let deadline = Instant::now() + Duration::from_secs(5);
+        // timing: stall-bound five seconds for thread teardown after the spawn timeout has already fired
         while Arc::strong_count(&observed) > 1 && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -788,6 +789,7 @@ mod tests {
         assert!(started.elapsed() < Duration::from_millis(700), "the caller did not wait for the driver: {:?}", started.elapsed());
         assert!(matches!(&err, ab::OpenError::Other(t) if t.contains("did not answer")), "{err:?}");
         let deadline = Instant::now() + Duration::from_secs(5);
+        // timing: stall-bound five seconds for message completion and recovery after the request has timed out
         while (host.is_stuck() || !observed.sent.load(Ordering::SeqCst)) && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(10));
         }

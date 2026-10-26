@@ -214,15 +214,15 @@ fn rule_d_requires_a_stall_marker_with_a_reason_on_the_loop() {
 
 #[test]
 fn rule_d_distinguishes_poll_intervals_from_exit_budgets() {
-    assert!(
+    assert_eq!(
         loop_lines(&wrap(
             "let host = host(Duration::from_millis(100));
         let deadline = Instant::now() + Duration::from_secs(5);
         while host.wedged() > 0 && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(5));
         }"
-        ))
-        .is_empty()
+        )),
+        vec![5]
     );
     for limit in ["Duration::from_secs(2)", "Duration::from_millis(250)", "Duration::from_millis(2_000)"] {
         assert!(
@@ -246,6 +246,95 @@ fn rule_d_distinguishes_poll_intervals_from_exit_budgets() {
         ))
         .is_empty()
     );
+}
+
+#[test]
+fn rule_d_catches_the_async_import_short_ttl_hidden_behind_a_call() {
+    for ttl in ["Duration::from_millis(100)", "TTL"] {
+        let setup = format!(
+            "const TTL: Duration = Duration::from_millis(100);\nfn t() {{\n    imports.set_limits(32, {ttl});\n    let deadline = Instant::now() + Duration::from_millis(400);"
+        );
+        let polling = "while imports.contains(id) && Instant::now() < deadline {\n        imports.service();\n        thread::sleep(Duration::from_millis(5));\n    }";
+        assert_eq!(loop_lines(&format!("{setup}\n{polling}\n}}")), vec![5]);
+        let injected = polling.replace("imports.service()", "imports.service_at(clock.now())");
+        assert!(loop_lines(&format!("{setup}\n{injected}\n}}")).is_empty());
+        assert!(loop_lines(&format!("{setup}\n// timing: stall-bound expiry is injected by the test harness\n{polling}\n}}")).is_empty());
+        assert!(loop_lines(&format!("{setup}\n}}")).is_empty());
+    }
+}
+
+#[test]
+fn rule_d_keeps_short_call_arguments_inside_their_function_or_closure() {
+    let short = "set_limits(Duration::from_millis(100));";
+    let polling = "while !ready() { thread::sleep(Duration::from_millis(5)); }";
+    for source in [
+        format!("fn a() {{ {short} }} fn b() {{ {polling} }}"),
+        wrap(&format!("let callback = || {{ {short} }}; {polling}")),
+        wrap(&format!("{short} let callback = || {{ {polling} }};")),
+        wrap(&format!("fn nested() {{ {short} }} {polling}")),
+        wrap(&format!("{short} fn nested() {{ {polling} }}")),
+    ] {
+        assert!(loop_lines(&source).is_empty(), "{source}");
+    }
+    assert_eq!(loop_lines(&wrap(&format!("let callback = || {{ {short} {polling} }};"))), vec![3]);
+    assert_eq!(loop_lines(&wrap(&format!("{polling} {short}"))), vec![3]);
+    assert_eq!(loop_lines(&format!("fn t(clock: &Clock) {{ {short} {polling} }}")), vec![1]);
+    for long in ["Duration::from_millis(250)", "Duration::from_micros(500_000)", "Duration::from_millis(100) * 20"] {
+        assert!(loop_lines(&wrap(&format!("configure({long}); {polling}"))).is_empty());
+    }
+}
+
+#[test]
+fn rule_d_follows_flag_variable_exits() {
+    for guard in ["start.elapsed() > Duration::from_millis(100)", "start.elapsed().as_millis() > 100"] {
+        let source = wrap(&format!(
+            "let mut done = false;\nwhile !done {{\n    if {guard} {{ done = true; }}\n    thread::sleep(Duration::from_millis(5));\n}}"
+        ));
+        assert_eq!(loop_lines(&source), vec![4]);
+    }
+    let injected = "let start = clock.now();\nlet mut done = false;\nwhile !done {\n    if clock.now() - start > Duration::from_millis(100) { done = true; }\n    thread::sleep(Duration::from_millis(5));\n}";
+    assert!(loop_lines(&wrap(injected)).is_empty());
+    let unrelated =
+        "while !done {\n    if start.elapsed() > Duration::from_millis(100) { diagnostic = true; }\n    thread::sleep(Duration::from_millis(5));\n}";
+    assert!(loop_lines(&wrap(unrelated)).is_empty());
+    assert_eq!(loop_lines(&wrap("while !done { done = start.elapsed() > Duration::from_millis(100); thread::yield_now(); }")), vec![3]);
+    assert!(
+        loop_lines(&wrap("for _ in 0..count { if start.elapsed() > Duration::from_millis(100) { count = 0; } thread::yield_now(); }")).is_empty()
+    );
+    assert_eq!(
+        loop_lines(&wrap(
+            "while keep_polling {\nmatch state {\n    Waiting if start.elapsed() > Duration::from_millis(100) => keep_polling = false,\n    _ => {},\n}\nthread::yield_now();\n}"
+        )),
+        vec![3]
+    );
+}
+
+#[test]
+fn rule_d_accepts_passed_timestamps_without_excusing_real_short_exits() {
+    for parameter in ["now: Instant", "now: impl Fn() -> Instant"] {
+        let argument = if parameter.contains("Fn") { "now()" } else { "now" };
+        let source = format!(
+            "fn t({parameter}) {{\n    set_limits(Duration::from_millis(100));\n    while !ready() {{\n        service_at({argument});\n        thread::sleep(Duration::from_millis(5));\n    }}\n}}"
+        );
+        assert!(loop_lines(&source).is_empty());
+        let real_exit = source.replace("while !ready()", "while start.elapsed() < Duration::from_millis(100)");
+        assert_eq!(loop_lines(&real_exit), vec![3]);
+    }
+    let timestamp = "let now = Instant::now();\nset_limits(Duration::from_millis(100));\nwhile !ready() { service_at(now); thread::yield_now(); }";
+    assert!(loop_lines(&wrap(timestamp)).is_empty());
+    let real_read = timestamp.replace("service_at(now)", "service_at(Instant::now())");
+    assert_eq!(loop_lines(&wrap(&real_read)), vec![5]);
+}
+
+#[test]
+fn rule_d_tracks_elapsed_numeric_units_and_thresholds() {
+    for (unit, short, long) in [("as_millis", "100", "250"), ("as_micros", "100_000", "250_000"), ("as_secs_f64", "0.1", "0.25")] {
+        for comparison in [format!("start.elapsed().{unit}() > {short}"), format!("{short} <= start.elapsed().{unit}()")] {
+            assert_eq!(loop_lines(&wrap(&format!("loop {{ if {comparison} {{ break; }} thread::yield_now(); }}"))), vec![3]);
+        }
+        assert!(loop_lines(&wrap(&format!("while start.elapsed().{unit}() < {long} {{ thread::yield_now(); }}"))).is_empty());
+    }
+    assert!(loop_lines(&wrap("while progress.as_millis() < 100 { thread::yield_now(); }")).is_empty());
 }
 
 #[test]
