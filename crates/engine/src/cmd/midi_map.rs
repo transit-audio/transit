@@ -30,7 +30,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Map MIDI Control",
             [],
             None,
-            "{source: {port, channel?: 1..16|any, kind: cc|note, number: 0..127}, target, mode?: pickup|jump, range?: [min, max] (0..1), toggle?: bool, pass_through?: bool (also reach the track's routes; default false), scope?: session|profile}",
+            "{source: {port, channel?: 1..16|any, kind: cc|note, number: 0..127}, target, mode?: pickup|jump|scaled, range?: [min, max] (0..1), toggle?: bool, pass_through?: bool (also reach the track's routes; default false), scope?: session|profile}",
             always,
             map
         ),
@@ -142,7 +142,8 @@ fn map(e: &mut Engine, p: &Value) -> Result<Value> {
     m.mode = match str_param(p, "mode") {
         None | Some("pickup") => MapMode::Pickup,
         Some("jump") => MapMode::Jump,
-        Some(_) => return Err(bad(id, "`mode` must be pickup or jump")),
+        Some("scaled") => MapMode::Scaled,
+        Some(_) => return Err(bad(id, "`mode` must be pickup, jump or scaled")),
     };
     if let Some(r) = p.get("range") {
         let r = r.as_array().filter(|a| a.len() == 2).ok_or_else(|| bad(id, "`range` must be [min, max]"))?;

@@ -187,6 +187,24 @@ pub enum MapMode {
     Pickup,
     /// The control jumps to the knob.
     Jump,
+    /// The control moves toward the knob by a scaled step, so both meet at the end of the knob's
+    /// travel (Logic's default, Ableton's Value Scaling).
+    Scaled,
+}
+
+impl MapMode {
+    /// The per-machine takeover default (ADR 0028, amendment 2026-10-25): scaled.
+    pub fn takeover_default() -> Self {
+        MapMode::Scaled
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            MapMode::Scaled => "Scaled",
+            MapMode::Jump => "Jump",
+            MapMode::Pickup => "Pickup",
+        }
+    }
 }
 
 fn zero() -> f32 {
