@@ -1041,13 +1041,24 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                         tr.col(|ui| cell(ui, &row.source, ink));
                         tr.col(|ui| cell(ui, &row.target, ink));
                         tr.col(|ui| {
-                            let mut lo = row.range[0] * 100.0;
-                            let mut hi = row.range[1] * 100.0;
+                            // An edit lives in the row's edit state until it commits: a drag adds to the
+                            // value it held a frame ago, so the stored range cannot be put back each frame.
+                            let edit_id = egui::Id::new(("mm_range_edit", &row.target_id, matches!(row.scope, Scope::Session)));
+                            let held: Option<[f32; 2]> = ui.data(|d| d.get_temp(edit_id));
+                            let [mut lo, mut hi] = held.unwrap_or(row.range).map(|v| v * 100.0);
                             let a = ui.add(egui::DragValue::new(&mut lo).range(0.0..=100.0).suffix("%").speed(0.5));
                             let b = ui.add(egui::DragValue::new(&mut hi).range(0.0..=100.0).suffix("%").speed(0.5));
-                            let moved = (lo / 100.0 - row.range[0]).abs() > 1e-4 || (hi / 100.0 - row.range[1]).abs() > 1e-4;
-                            if moved && (a.drag_stopped() || a.lost_focus() || b.drag_stopped() || b.lost_focus()) {
-                                actions.push((i, Action::Range(lo / 100.0, hi / 100.0)));
+                            let now = [lo / 100.0, hi / 100.0];
+                            let moved = (now[0] - row.range[0]).abs() > 1e-4 || (now[1] - row.range[1]).abs() > 1e-4;
+                            if a.drag_stopped() || a.lost_focus() || b.drag_stopped() || b.lost_focus() {
+                                ui.data_mut(|d| d.remove_temp::<[f32; 2]>(edit_id));
+                                if moved {
+                                    actions.push((i, Action::Range(now[0], now[1])));
+                                }
+                            } else if moved {
+                                ui.data_mut(|d| d.insert_temp(edit_id, now));
+                            } else {
+                                ui.data_mut(|d| d.remove_temp::<[f32; 2]>(edit_id));
                             }
                         });
                         tr.col(|ui| {
