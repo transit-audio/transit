@@ -111,7 +111,10 @@ fn right_click_learn_waits_for_a_message_then_maps_it_and_the_menu_shows_the_map
     let fader = mid(strip(&app, t).fader);
     click(&mut app, fader, "right");
     frames(&mut app, &ctx, 4, &mut time);
-    assert_eq!(entries(&app), ["Mapped: KeyStep ch 1 CC 74", "MIDI Learn", "Forget MIDI Mapping"]);
+    assert_eq!(
+        entries(&app),
+        ["Mapped: KeyStep ch 1 CC 74", "MIDI Learn", "Forget MIDI Mapping", "Takeover: Scaled", "Takeover: Jump", "Takeover: Pickup"]
+    );
     let forget = app.midi_learn.menu.iter().find(|m| m.label == "Forget MIDI Mapping").unwrap().rect;
     click(&mut app, mid(forget), "left");
     frames(&mut app, &ctx, 4, &mut time);
@@ -296,21 +299,21 @@ fn the_mappings_window_lists_edits_relearns_and_deletes_rows() {
         ("Pads", "10", "Note C1 (36)", "Gtr: Mute")
     );
     assert_eq!(rows[1].scope, Scope::Profile);
-    // Mode and range edits are map commands (one undo step each in the session).
+    // Pass-through and range edits are map commands (one undo step each in the session).
     let steps = app.engine.undo_pushes();
-    app.mapping_row_action(&rows[0], Action::Mode(MapMode::Jump)).unwrap();
+    app.mapping_row_action(&rows[0], Action::PassThrough(true)).unwrap();
     app.mapping_row_action(&rows[0], Action::Range(0.0, 0.5)).unwrap();
     let m = app.engine.session().midi_mappings.iter().next().unwrap().clone();
-    assert_eq!((m.mode, m.min, m.max), (MapMode::Jump, 0.0, 0.5));
+    assert_eq!((m.pass_through, m.min, m.max), (true, 0.0, 0.5));
     assert_eq!(app.engine.undo_pushes(), steps + 2);
-    // Learn re-learns the row: the new source keeps the mode and range.
+    // Learn re-learns the row: the new source keeps the pass-through and range.
     let rows = midi_learn::rows(&app);
     app.mapping_row_action(&rows[0], Action::Learn).unwrap();
     frames(&mut app, &ctx, 2, &mut time);
     assert!(midi_learn::rows(&app)[0].learning);
     candidate(&mut app, "KeyStep", 9);
     let m = app.engine.session().midi_mappings.iter().next().unwrap().clone();
-    assert_eq!((m.source.number, m.mode, m.max), (9, MapMode::Jump, 0.5));
+    assert_eq!((m.source.number, m.pass_through, m.max), (9, true, 0.5));
     // Delete.
     let rows = midi_learn::rows(&app);
     app.mapping_row_action(&rows[1], Action::Delete).unwrap();

@@ -358,6 +358,10 @@ pub fn handle(snap: &Snapshot, port: u64, channel: u8, message: Message, push: &
 /// directly. The gap never changes sign, so there is no jump.
 pub fn scaled_step(at: f32, from: f32, to: f32) -> f32 {
     let (at, from, to) = (at.clamp(0.0, 1.0), from.clamp(0.0, 1.0), to.clamp(0.0, 1.0));
+    // A repeated value (the knob did not move) moves nothing.
+    if to == from {
+        return at;
+    }
     let next = if to >= from {
         let room = 1.0 - from;
         if room <= f32::EPSILON { 1.0 } else { at + (to - from) / room * (1.0 - at) }
@@ -620,6 +624,14 @@ mod tests {
         assert_eq!(scaled_step(0.7, 0.1, 1.0), 1.0);
         assert_eq!(scaled_step(0.2, 0.9, 0.0), 0.0);
         assert_eq!(scaled_step(0.3, 0.3, 0.8), 0.8, "no gap: direct");
+    }
+
+    #[test]
+    fn a_repeated_top_value_does_not_move_the_control() {
+        assert_eq!(scaled_step(0.3, 1.0, 1.0), 0.3);
+        assert_eq!(scaled_step(0.3, 0.0, 0.0), 0.3);
+        let v = sweep(0.3, &[127, 127, 127]);
+        assert_eq!(v, vec![0.3, 0.3, 0.3]);
     }
 
     #[test]

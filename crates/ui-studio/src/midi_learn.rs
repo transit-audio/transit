@@ -152,7 +152,7 @@ pub fn menu_entries(mapped: Option<&Info>, learning: bool) -> Vec<Entry> {
     }
 }
 
-fn entry_text(entry: Entry, info: Option<&Info>, takeover: MapMode) -> String {
+fn entry_text(entry: Entry, info: Option<&Info>) -> String {
     match entry {
         Entry::Mapped => {
             let info = info.cloned().unwrap_or(Info { scope: Scope::Session, text: String::new(), overridden: false });
@@ -164,7 +164,7 @@ fn entry_text(entry: Entry, info: Option<&Info>, takeover: MapMode) -> String {
         Entry::LearnProfile => "MIDI Learn for this controller (all sessions)".into(),
         Entry::Forget => "Forget MIDI Mapping".into(),
         Entry::Cancel => "Cancel MIDI Learn (Esc)".into(),
-        Entry::Takeover(m) => format!("{} Takeover: {}", if m == takeover { "\u{2713}" } else { "   " }, m.label()),
+        Entry::Takeover(m) => format!("Takeover: {}", m.label()),
     }
 }
 
@@ -281,8 +281,9 @@ impl StudioApp {
 
     fn learn_entries(&mut self, ui: &mut egui::Ui, track: TrackId, control: Control, mapped: Option<Info>, learning: bool) {
         for entry in menu_entries(mapped.as_ref(), learning) {
-            let text = entry_text(entry, mapped.as_ref(), self.ui.midi_takeover);
-            let b = ui.add_enabled(entry != Entry::Mapped, egui::Button::new(text.clone()));
+            let text = entry_text(entry, mapped.as_ref());
+            let current = entry == Entry::Takeover(self.ui.midi_takeover);
+            let b = ui.add_enabled(entry != Entry::Mapped, egui::Button::new(text.clone()).selected(current));
             self.midi_learn.menu.push(MenuItem::at(ui, text, format!("{entry:?}"), b.rect));
             if b.clicked() {
                 let _ = self.learn_choose(entry, track, control.clone(), mapped.as_ref());
@@ -920,7 +921,6 @@ pub enum Action {
     Learn,
     Cancel,
     Delete,
-    Mode(MapMode),
     Range(f32, f32),
     PassThrough(bool),
 }
@@ -933,7 +933,7 @@ impl StudioApp {
             Action::Learn => self.run("midi.learn", json!({"target": row.target_id, "scope": scope})),
             Action::Cancel => self.run("midi.learn_cancel", json!({})),
             Action::Delete => self.run("midi.unmap", json!({"target": row.target_id, "scope": scope})),
-            Action::Mode(_) | Action::Range(..) | Action::PassThrough(_) => {
+            Action::Range(..) | Action::PassThrough(_) => {
                 let target: ControlTarget = row.target_id.parse()?;
                 let set: &MappingSet = match scope {
                     Scope::Session => &self.engine.session().midi_mappings,
@@ -941,7 +941,6 @@ impl StudioApp {
                 };
                 let old = set.for_target(&target).cloned().ok_or("that mapping is gone")?;
                 let (mode, lo, hi, pass_through) = match action {
-                    Action::Mode(m) => (m, old.min, old.max, old.pass_through),
                     Action::Range(lo, hi) => (old.mode, lo, hi, old.pass_through),
                     Action::PassThrough(p) => (old.mode, old.min, old.max, p),
                     _ => (old.mode, old.min, old.max, old.pass_through),

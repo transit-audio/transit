@@ -191,7 +191,11 @@ fn right_click_learn_forget_and_markers_work_on_panel_knobs_and_generic_rows() {
                 .any(|m| m["mapped"] == true && m["learning"] == false && m["control"].as_str().unwrap().contains(param))
         );
         t.click(t.control(tr, param), "right");
-        assert_eq!(t.menu(), ["Mapped: KeyStep ch 1 CC 74", "MIDI Learn", "Forget MIDI Mapping"], "{plugin}");
+        assert_eq!(
+            t.menu(),
+            ["Mapped: KeyStep ch 1 CC 74", "MIDI Learn", "Forget MIDI Mapping", "Takeover: Scaled", "Takeover: Jump", "Takeover: Pickup"],
+            "{plugin}"
+        );
         t.choose("Forget MIDI Mapping");
         assert!(t.app.engine.session().midi_mappings.is_empty(), "{plugin}: forgotten");
         assert!(t.app.engine.undo(), "and the forgetting is an undo step");
