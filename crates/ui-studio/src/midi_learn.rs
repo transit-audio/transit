@@ -429,6 +429,22 @@ pub struct Row {
     pub learning: bool,
 }
 
+/// The control's label. A mixer control keeps its plain name. A plug-in parameter reads
+/// "<plug-in> > <unit path> > <name>" from the cached parameter table (the lookup and group path
+/// the automation picker uses; no unit segment when the plug-in reports none), and
+/// "<plug-in> > parameter <id>" while the table is not cached (K81).
+fn control_label(app: &StudioApp, track: Option<&soundcraft_model::Track>, control: &Control) -> String {
+    let (Some(t), Control::Plugin { slot, param }) = (track, control) else { return control.label() };
+    let Some(ins) = app.plugin_device(t.id, *slot) else { return control.label() };
+    let info = crate::automation::device_info(&ins.plugin);
+    let plugin = info.map(|d| d.name.to_string()).or_else(|| app.mixer.names.get(&ins.plugin).cloned()).unwrap_or_else(|| ins.plugin.clone());
+    match info.and_then(|d| d.param(param)) {
+        Some(p) if p.group.is_empty() => format!("{plugin} > {}", p.name),
+        Some(p) => format!("{plugin} > {} > {}", p.group.replace('/', " > "), p.name),
+        None => format!("{plugin} > parameter {param}"),
+    }
+}
+
 /// Every stored mapping, session first, as the window lists it.
 pub fn rows(app: &StudioApp) -> Vec<Row> {
     let s = app.engine.session();
@@ -438,7 +454,7 @@ pub fn rows(app: &StudioApp) -> Vec<Row> {
         for m in set.iter() {
             let resolved = app.midi_learn.all.iter().find(|r| r.scope == scope && r.mapping == *m);
             let track = resolved.and_then(|r| s.track(r.track));
-            let control = m.target.control.label();
+            let control = control_label(app, track, &m.target.control);
             let target = match (track, m.target.strip) {
                 (Some(t), _) => format!("{}: {control}", t.name),
                 (None, Strip::Track(id)) => format!("Missing track {}: {control}", id.0),
@@ -852,6 +868,85 @@ fn kind_color(over: bool) -> Color32 {
     if over { TOKENS.text_dim } else { TOKENS.text }
 }
 
+/// Natural widths of the table's fixed columns, then the least widths of its stretch columns.
+const COL_CH: f32 = 36.0;
+const COL_RANGE: f32 = 140.0;
+const COL_THRU: f32 = 90.0;
+const COL_SCOPE: f32 = 176.0;
+const COL_LEARN: f32 = 90.0;
+const COL_DELETE: f32 = 64.0;
+const MIN_PORT: f32 = 70.0;
+const MIN_SOURCE: f32 = 90.0;
+const MIN_TARGET: f32 = 130.0;
+const COLUMN_GAP: f32 = 8.0;
+const COLUMNS: f32 = 9.0;
+const ROW_H: f32 = 24.0;
+const HEADER_H: f32 = 20.0;
+/// The Takeover row: a combo box and its line of text.
+const TAKEOVER_H: f32 = 28.0;
+/// What the window adds to its size limits (measured): the title bar and frame heights; the width limits are the outer width.
+const CHROME: egui::Vec2 = egui::vec2(0.0, 44.0);
+/// Room the table keeps beside the window's content edge.
+const SIDE_ROOM: f32 = 24.0;
+/// The vertical scrollbar's room at the table's right edge.
+const SCROLLBAR_W: f32 = 14.0;
+
+/// The window's size limits (outer rectangle, in points) on a screen whose content area is
+/// `content`: the table's natural width up to 1.5 times it, and from the Takeover row, the header
+/// and three rows up to the content height under the transport bar.
+pub fn window_bounds(content: egui::Vec2) -> (egui::Vec2, egui::Vec2) {
+    let natural = natural_width();
+    let min = egui::vec2(natural.min(content.x), TAKEOVER_H + HEADER_H + 3.0 * ROW_H + CHROME.y);
+    let max = egui::vec2((natural * 1.5).min(content.x).max(min.x), (content.y - crate::theme::TRANSPORT_H).max(min.y));
+    (min, max)
+}
+
+/// The table at its natural width: every column at its width, the gaps, the scrollbar and the
+/// window's margins.
+fn natural_width() -> f32 {
+    MIN_PORT
+        + COL_CH
+        + MIN_SOURCE
+        + MIN_TARGET
+        + COL_RANGE
+        + COL_THRU
+        + COL_SCOPE
+        + COL_LEARN
+        + COL_DELETE
+        + COLUMN_GAP * COLUMNS
+        + SCROLLBAR_W
+        + SIDE_ROOM
+}
+
+/// The stored size clamped to `bounds`; the default (natural width, ten rows) when it is unusable.
+fn window_size(stored: [f32; 2], bounds: (egui::Vec2, egui::Vec2)) -> egui::Vec2 {
+    let (min, max) = bounds;
+    let size = if stored.iter().all(|v| v.is_finite() && *v > 0.0) { egui::vec2(stored[0], stored[1]) } else { default_window_size() };
+    size.clamp(min, max)
+}
+
+fn default_window_size() -> egui::Vec2 {
+    egui::vec2(natural_width(), TAKEOVER_H + HEADER_H + 10.0 * ROW_H + CHROME.y)
+}
+
+/// `text` with its middle replaced by an ellipsis until it fits `width`.
+fn middle_fit(ui: &egui::Ui, text: &str, font: &egui::FontId, width: f32) -> String {
+    let wide = |t: &str| ui.painter().layout_no_wrap(t.to_string(), font.clone(), Color32::WHITE).size().x;
+    if wide(text) <= width {
+        return text.to_string();
+    }
+    let chars: Vec<char> = text.chars().collect();
+    for keep in (2..chars.len()).rev() {
+        let head: String = chars[..keep.div_ceil(2)].iter().collect();
+        let tail: String = chars[chars.len() - keep / 2..].iter().collect();
+        let t = format!("{head}\u{2026}{tail}");
+        if wide(&t) <= width {
+            return t;
+        }
+    }
+    "\u{2026}".to_string()
+}
+
 /// Window > MIDI Mappings.
 pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     app.midi_learn.window = [0.0; 4];
@@ -859,7 +954,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    let size = app.ui.midi_mappings.size;
+    let bounds = window_bounds(ctx.content_rect().size());
+    let size = window_size(app.ui.midi_mappings.size, bounds);
     let rows = rows(app);
     let dropped = app.midi_learn.dropped;
     let mut takeover = app.ui.midi_takeover;
@@ -868,8 +964,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         .open(&mut open)
         .collapsible(false)
         .resizable(true)
-        .default_size(size)
-        .default_pos(egui::pos2(ctx.content_rect().center().x - size[0] / 2.0, crate::theme::TRANSPORT_H + 80.0))
+        .min_size(bounds.0 - CHROME)
+        .max_size(bounds.1 - CHROME)
+        .default_size(size - CHROME)
+        .default_pos(egui::pos2(ctx.content_rect().center().x - size.x / 2.0, crate::theme::TRANSPORT_H + 80.0))
         .show(ctx, |ui| {
             if dropped > 0 {
                 ui.label(egui::RichText::new(format!("{dropped} controller button presses or learn messages were dropped (the UI was not draining fast enough).")).color(TOKENS.record));
@@ -881,13 +979,16 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                         ui.selectable_value(&mut takeover, m, m.label());
                     }
                 });
-                ui.label(
-                    egui::RichText::new(match takeover {
-                        MapMode::Scaled => "A knob moves a control toward it and they meet at the end of the knob's travel.",
-                        MapMode::Jump => "A control takes the knob's value at once.",
-                        MapMode::Pickup => "A control waits until the knob passes through its value.",
-                    })
-                    .color(TOKENS.text_dim),
+                ui.add(
+                    egui::Label::new(
+                        egui::RichText::new(match takeover {
+                            MapMode::Scaled => "A knob moves a control toward it and they meet at the end of the knob's travel.",
+                            MapMode::Jump => "A control takes the knob's value at once.",
+                            MapMode::Pickup => "A control waits until the knob passes through its value.",
+                        })
+                        .color(TOKENS.text_dim),
+                    )
+                    .truncate(),
                 );
             });
             if rows.is_empty() {
@@ -898,19 +999,48 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 return;
             }
             let mono = crate::theme::mono(ui.ctx(), 12.0);
-            egui::ScrollArea::both().auto_shrink([false, false]).show(ui, |ui| {
-                egui::Grid::new("midi_mappings").num_columns(9).striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
-                    for h in ["Port", "Ch", "Source", "Target", "Range", "Pass through", "Scope", "", ""] {
-                        ui.label(egui::RichText::new(h).font(mono.clone()).strong().color(TOKENS.text_dim));
+            let cell = |ui: &mut egui::Ui, text: &str, ink: Color32| {
+                let shown = middle_fit(ui, text, &mono, ui.available_width());
+                let l = ui.add(egui::Label::new(egui::RichText::new(&shown).font(mono.clone()).color(ink)).truncate());
+                if shown != text {
+                    l.on_hover_text(text);
+                }
+            };
+            let scroll_h = (ui.available_height() - HEADER_H - 4.0).max(3.0 * ROW_H);
+            egui_extras::TableBuilder::new(ui)
+                .id_salt("midi_mappings")
+                .striped(true)
+                .resizable(false)
+                .vscroll(true)
+                .auto_shrink([false, false])
+                .min_scrolled_height(3.0 * ROW_H)
+                .max_scroll_height(scroll_h)
+                .column(egui_extras::Column::remainder().at_least(MIN_PORT).clip(true))
+                .column(egui_extras::Column::exact(COL_CH))
+                .column(egui_extras::Column::remainder().at_least(MIN_SOURCE).clip(true))
+                .column(egui_extras::Column::remainder().at_least(MIN_TARGET).clip(true))
+                .column(egui_extras::Column::exact(COL_RANGE))
+                .column(egui_extras::Column::exact(COL_THRU))
+                .column(egui_extras::Column::exact(COL_SCOPE))
+                .column(egui_extras::Column::exact(COL_LEARN))
+                .column(egui_extras::Column::exact(COL_DELETE))
+                .header(HEADER_H, |mut h| {
+                    for name in ["Port", "Ch", "Source", "Target", "Range", "Pass through", "Scope", "", ""] {
+                        h.col(|ui| {
+                            ui.label(egui::RichText::new(name).font(mono.clone()).strong().color(TOKENS.text_dim));
+                        });
                     }
-                    ui.end_row();
-                    for (i, row) in rows.iter().enumerate() {
+                })
+                .body(|body| {
+                    body.rows(ROW_H, rows.len(), |mut tr| {
+                        let i = tr.index();
+                        let row = &rows[i];
                         let ink = kind_color(row.overridden || !row.live);
-                        ui.label(egui::RichText::new(&row.port).font(mono.clone()).color(ink));
-                        ui.label(egui::RichText::new(&row.channel).font(mono.clone()).color(ink));
-                        ui.label(egui::RichText::new(&row.source).font(mono.clone()).color(ink));
-                        ui.label(egui::RichText::new(&row.target).font(mono.clone()).color(ink));
-                        ui.horizontal(|ui| {
+                        tr.col(|ui| cell(ui, &row.port, ink));
+                        tr.col(|ui| cell(ui, &row.channel, ink));
+                        tr.col(|ui| cell(ui, &row.source, ink));
+                        tr.col(|ui| cell(ui, &row.target, ink));
+                        tr.col(|ui| {
                             let mut lo = row.range[0] * 100.0;
                             let mut hi = row.range[1] * 100.0;
                             let a = ui.add(egui::DragValue::new(&mut lo).range(0.0..=100.0).suffix("%").speed(0.5));
@@ -920,35 +1050,42 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                 actions.push((i, Action::Range(lo / 100.0, hi / 100.0)));
                             }
                         });
-                        let mut thru = row.pass_through;
-                        if ui
-                            .checkbox(&mut thru, "")
-                            .on_hover_text("Also send the mapped message to the track (its instrument, a recording). Off: only the control hears it.")
-                            .changed()
-                        {
-                            actions.push((i, Action::PassThrough(thru)));
-                        }
-                        let scope = match (row.scope, row.overridden) {
-                            (Scope::Session, _) => "Session".to_string(),
-                            (Scope::Profile, true) => "Controller (overridden)".to_string(),
-                            (Scope::Profile, false) => "Controller".to_string(),
-                        };
-                        ui.label(egui::RichText::new(scope).font(mono.clone()).color(ink));
-                        let label = if row.learning { "Listening..." } else { "Learn" };
-                        if ui.button(label).on_hover_text("Press a key or move a knob: it replaces this row's source.").clicked() {
-                            actions.push((i, if row.learning { Action::Cancel } else { Action::Learn }));
-                        }
-                        if ui.button("Delete").clicked() {
-                            actions.push((i, Action::Delete));
-                        }
-                        ui.end_row();
-                    }
+                        tr.col(|ui| {
+                            let mut thru = row.pass_through;
+                            if ui
+                                .checkbox(&mut thru, "")
+                                .on_hover_text("Also send the mapped message to the track (its instrument, a recording). Off: only the control hears it.")
+                                .changed()
+                            {
+                                actions.push((i, Action::PassThrough(thru)));
+                            }
+                        });
+                        tr.col(|ui| {
+                            let scope = match (row.scope, row.overridden) {
+                                (Scope::Session, _) => "Session",
+                                (Scope::Profile, true) => "Controller (overridden)",
+                                (Scope::Profile, false) => "Controller",
+                            };
+                            cell(ui, scope, ink);
+                        });
+                        tr.col(|ui| {
+                            let label = if row.learning { "Listening..." } else { "Learn" };
+                            if ui.button(label).on_hover_text("Press a key or move a knob: it replaces this row's source.").clicked() {
+                                actions.push((i, if row.learning { Action::Cancel } else { Action::Learn }));
+                            }
+                        });
+                        tr.col(|ui| {
+                            if ui.button("Delete").clicked() {
+                                actions.push((i, Action::Delete));
+                            }
+                        });
+                    });
                 });
-            });
         });
     if let Some(r) = r {
-        app.midi_learn.window = mixer::r4(r.response.rect);
-        app.ui.midi_mappings.size = [r.response.rect.width(), r.response.rect.height()];
+        let rect = r.response.rect;
+        app.midi_learn.window = mixer::r4(rect);
+        app.ui.midi_mappings.size = window_size([rect.width(), rect.height()], bounds).into();
     }
     app.ui.midi_mappings.open = open;
     app.ui.midi_takeover = takeover;
