@@ -19,6 +19,8 @@ const LOOKAHEAD: u32 = 128;
 pub struct Status {
     pub inputs: Vec<PortInfo>,
     pub open_inputs: usize,
+    /// The input ports open now (the diagnostics report lists them, #127).
+    pub open_input_ports: Vec<PortKey>,
     pub routes: usize,
     pub counts: ingress::Counters,
     pub error: Option<String>,
@@ -443,7 +445,8 @@ impl Native {
         let mut status = self.status.clone();
         status.counts = self.worker.counters();
         status.output = self.out.status();
-        status.open_inputs = self.inputs.iter().filter(|input| input.attached.is_some()).count();
+        status.open_input_ports = self.inputs.iter().filter(|input| input.attached.is_some()).map(|input| input.key.clone()).collect();
+        status.open_inputs = status.open_input_ports.len();
         status.muted_inputs = self
             .muted
             .iter()

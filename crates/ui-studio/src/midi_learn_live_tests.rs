@@ -130,3 +130,48 @@ fn a_knob_pickup_holds_back_is_reported_once_and_the_fader_stays() {
     }
     assert_eq!(t.app.engine.session().track(tr).unwrap().mixer.volume_db, before, "pickup holds the knob back");
 }
+
+/// The diagnostics report's MIDI section (#127) from the live app: the ports present, which are
+/// open, the mappings loaded and the last source heard.
+#[test]
+fn the_diagnostics_report_lists_the_live_midi_ports_mappings_and_last_source() {
+    let fake = Fake::default();
+    let key = fake.add_input(PORT);
+    fake.add_input("loopMIDI Port");
+    fake.add_output("Model 12");
+    let port = fake.input_port(&key).unwrap();
+    let mut t = T::new(&fake);
+    let r = t.app.run("track.new", json!({"kind": "instrument"})).unwrap();
+    let tr = TrackId(r["tracks"][0].as_u64().unwrap());
+    // The header LED's counter (the last source) counts routed input, and every open input while
+    // the MIDI Monitor is on.
+    t.app.run("window.midi_monitor", json!({"value": true})).unwrap();
+    t.frames(4);
+    t.app.learn_choose(Entry::Learn, tr, Control::Volume, None).unwrap();
+    // The Monitor opens every input: both are open, the output (no track sends to it) is not.
+    t.until("the learn is armed and both inputs open", &port, None, |app| {
+        let p = app.player.as_ref().unwrap();
+        p.midi_learn_armed() && p.midi_status().is_ok_and(|s| s.open_inputs == 2)
+    });
+    t.until("the knob is learned", &port, Some(10), |app| !app.engine.session().midi_mappings.is_empty());
+    t.until("the mapping is in force", &port, None, |app| app.midi_learn.resolved_len() == 1);
+    // A note on channel 3 after the knob on channel 1: the last one counts.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while t.app.player.as_ref().unwrap().midi_activity().0.bytes[0] & 0x0F != 2 {
+        assert!(Instant::now() < deadline, "the note is not heard");
+        port.deliver(0, &[0x92, 60, 100]);
+        port.deliver(0, &[0x82, 60, 0]);
+        t.frames(1);
+    }
+    let lines = t.app.diagnostics_midi().lines();
+    assert_eq!(
+        lines,
+        [
+            format!("Input: {PORT} \u{b7} open"),
+            "Input: loopMIDI Port \u{b7} open".into(),
+            "Output: Model 12 \u{b7} not open".into(),
+            "MIDI Learn mappings: 1 session, 0 controller profile (1 in force)".into(),
+            format!("Last heard: {PORT}, channel 3"),
+        ]
+    );
+}

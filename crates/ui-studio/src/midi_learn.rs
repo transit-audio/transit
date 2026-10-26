@@ -112,6 +112,13 @@ impl State {
     }
 }
 
+/// The MIDI Learn mappings loaded, for the diagnostics report (#127): the session's, the
+/// controller profile's (the preferences' until the engine has taken it) and those in force.
+pub fn mapping_counts(app: &StudioApp) -> (usize, usize, usize) {
+    let profile = if app.midi_learn.profile_loaded { app.engine.midi_profile().len() } else { app.ui.midi_profile.len() };
+    (app.engine.session().midi_mappings.len(), profile, app.midi_learn.resolved_len())
+}
+
 /// What a control is mapped to, for its menu and marker.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Info {

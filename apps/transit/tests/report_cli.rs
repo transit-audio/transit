@@ -24,7 +24,7 @@ fn transit(config: &Path, cwd: &Path, args: &[&str]) -> std::process::Output {
         .expect("run transit")
 }
 
-const HEADERS: [&str; 8] = [
+const HEADERS: [&str; 9] = [
     "== transit ==",
     "== System ==",
     "== Audio stack ==",
@@ -32,6 +32,7 @@ const HEADERS: [&str; 8] = [
     "== Settings ==",
     "== Open devices ==",
     "== Callback telemetry ==",
+    "== MIDI ==",
     "== Log ==",
 ];
 
@@ -52,6 +53,10 @@ fn report_writes_a_file_with_every_section_and_prints_its_path() {
         assert!(text.contains(header), "missing {header}\n{text}");
     }
     assert!(text.contains("Version: "), "{text}");
+    let order: Vec<usize> = HEADERS.iter().map(|h| text.find(h).unwrap_or(usize::MAX)).collect();
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "the sections keep their order: {text}");
+    assert!(text.contains("MIDI Learn mappings: no session, 0 controller profile"), "{text}");
+    assert!(text.contains("report mode opens no MIDI port") || text.contains("the MIDI ports could not be listed"), "{text}");
     assert!(text.contains("last line"), "the log's lines are in: {text}");
     assert!(text.contains("INFO user <user> opened a file"), "and the user name is not: {text}");
     assert!(!text.contains("report_tester"), "{text}");

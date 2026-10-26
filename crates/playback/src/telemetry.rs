@@ -21,7 +21,7 @@ pub const DURATION_LIMITS_NS: [u64; 15] =
 
 /// The device-loop snapshot a native backend keeps (wake lateness, service time, skips), re-exported
 /// so the UI needs no dependency on the backend crate.
-pub use transit_audio_backend::StreamStats;
+pub use transit_audio_backend::{StatsBackend, StreamStats};
 
 /// Approximate, nonblocking view of lifetime output diagnostics.
 ///

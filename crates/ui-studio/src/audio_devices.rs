@@ -22,6 +22,7 @@ use crate::icons::{self, Icon};
 use crate::mixer::MenuItem;
 use crate::theme::{SPACE, TOKENS};
 use soundcraft_playback::devices::{self, AudioSystem, DeviceInfo};
+use soundcraft_playback::telemetry::{StatsBackend, StreamStats};
 use soundcraft_playback::{AudioConfig, Backend};
 
 /// Said when Apply (or `ui.set {audio}`) is asked while recording.
@@ -610,6 +611,7 @@ impl StudioApp {
             settings: self.ui.audio.clone(),
             opened,
             telemetry,
+            midi: self.diagnostics_midi(),
             log_dir: self.services.config_dir.as_ref().map(|d| d.join("logs")),
             ..Default::default()
         }
@@ -1714,16 +1716,37 @@ pub(crate) fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
     let input_rate = input.and_then(|s| in_rate.update(now, s.wakes));
     let keep = |present: bool, rate: WakeRate| if present { rate } else { WakeRate::default() };
     app.audio_devices.wake_rates = (keep(output.is_some(), out_rate), keep(input.is_some(), in_rate));
-    lines.extend(output.map(|s| crate::telemetry::backend_line(&s, false, output_rate)));
+    // Each backend's own fields; a duplex ASIO driver's two directions count one driver's switches,
+    // so their line is printed once, under the output (#127).
+    let kind = stats_backend(app);
+    let shared = kind == StatsBackend::Asio && output.is_some() && input.is_some();
+    let output_line = |s: StreamStats| {
+        let line = crate::telemetry::backend_line(&s, false, output_rate, kind);
+        if shared { line.replacen("Backend: ", "Backend (output and input share one ASIO driver): ", 1) } else { line }
+    };
+    lines.extend(output.map(output_line));
     lines.push(match (&app.recorder, &held) {
         (Some(r), _) => input_line(r, native),
         (None, Some((line, _))) => line.clone(),
         (None, None) => "Input open: none yet (it opens when a track is armed or monitored)".into(),
     });
-    lines.extend(input.map(|s| crate::telemetry::backend_line(&s, true, input_rate)));
+    lines.extend(input.filter(|_| !shared).map(|s| crate::telemetry::backend_line(&s, true, input_rate, kind)));
     // After a driver reset: what the automatic reopen did and does next, with its counts.
     lines.extend(app.reopen.status(app.audio_devices.panel.is_some()));
     lines
+}
+
+/// The backend whose counters the Backend lines show: the running native backend's, else (no
+/// Player, a scripted snapshot) the configured audio system's.
+fn stats_backend(app: &StudioApp) -> StatsBackend {
+    let system = app.player.as_ref().map_or(app.ui.audio.system.as_deref(), |p| Some(p.device_system.as_str()));
+    if devices::is_asio_system(system) {
+        StatsBackend::Asio
+    } else if devices::is_jack_system(system) {
+        StatsBackend::Jack
+    } else {
+        StatsBackend::Wasapi
+    }
 }
 
 /// "Requested 128 · running at 256": the buffer size or rate the window asked for next to the one

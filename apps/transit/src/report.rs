@@ -15,8 +15,14 @@ pub fn parse(args: &[String]) -> Option<Option<PathBuf>> {
 }
 
 /// Builds the report, writes it and returns where. `log_dir` is the log folder (`None` when
-/// preferences are off), `settings` the saved audio choices.
-pub fn run(target: Option<PathBuf>, log_dir: Option<PathBuf>, settings: soundcraft_playback::AudioConfig) -> Result<PathBuf, String> {
+/// preferences are off), `settings` the saved audio choices, `profile_mappings` the saved
+/// controller profile's MIDI Learn mappings.
+pub fn run(
+    target: Option<PathBuf>,
+    log_dir: Option<PathBuf>,
+    settings: soundcraft_playback::AudioConfig,
+    profile_mappings: usize,
+) -> Result<PathBuf, String> {
     let now = diagnostics::now_secs();
     let path = target.unwrap_or_else(|| PathBuf::from(diagnostics::report_file_name(now)));
     let report = Report {
@@ -28,12 +34,23 @@ pub fn run(target: Option<PathBuf>, log_dir: Option<PathBuf>, settings: soundcra
         settings,
         opened: vec!["Output open: none (report mode opens no stream)".into()],
         telemetry: None,
+        midi: midi(profile_mappings),
         log_lines: log_dir.as_ref().map(|d| diagnostics::tail_log(&d.join(diagnostics::LOG_FILE), diagnostics::LOG_LINES)).unwrap_or_default(),
         log_dir,
     };
     let text = report.render(&Redaction::from_env());
     std::fs::write(&path, text).map_err(|e| format!("could not write {}: {e}", path.display()))?;
     Ok(std::path::absolute(&path).unwrap_or(path))
+}
+
+/// The MIDI section of report mode: the ports present (listed, none opened; a running transit is
+/// not asked which it has open) and the saved profile's mappings; no session, nothing heard.
+fn midi(profile_mappings: usize) -> diagnostics::Midi {
+    let (ports, note) = match diagnostics::list_midi_ports(None) {
+        Ok(ports) => (ports, "report mode opens no MIDI port, so none is shown open".to_owned()),
+        Err(e) => (Vec::new(), format!("the MIDI ports could not be listed: {e}")),
+    };
+    diagnostics::Midi { ports, note: Some(note), session_mappings: None, profile_mappings, in_force: None, last_heard: None }
 }
 
 #[cfg(test)]

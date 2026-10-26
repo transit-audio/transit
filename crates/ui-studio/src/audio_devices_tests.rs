@@ -1152,9 +1152,13 @@ fn the_held_native_asio_input_shows_as_open_and_measure_is_enabled_on_it() {
     t.open_window();
     t.section("section_hardware");
     let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
-    assert_eq!(lines.len(), 4, "{lines:?}");
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(
+        lines[1].starts_with("Backend (output and input share one ASIO driver): wakes ") && lines[1].ends_with("position jumps 0, resets 0"),
+        "one driver, one Backend line, with ASIO's fields (#127): {lines:?}"
+    );
+    assert!(lines[1].contains("gap over period p95") && !lines[1].contains("min padding") && !lines[1].contains("skipped"), "{lines:?}");
     assert_eq!(lines[2], "Input open: Model Mixer ASIO Driver · 48000 Hz · 12 ch · f32 · 6.8 ms in", "{lines:?}");
-    assert!(lines[3].starts_with("Backend: ") && lines[3].ends_with("max packets 0"), "the held input has its own Backend line: {lines:?}");
     assert_eq!(t.app.measure_blocker(), None, "a held duplex input is a live input");
     assert_eq!(t.layout()["hardware"]["blocked"], "");
     T::rect(&t.layout()["controls"], Some("Measure"), "hw_measure");
@@ -1639,6 +1643,26 @@ fn the_window_shows_the_backend_loop_lines_under_the_open_lines_from_a_scripted_
     t.frames(3);
     let plain = t.layout()["opened"].as_array().unwrap().len();
     assert_eq!(plain, 2, "no snapshot, no backend lines");
+    // On ASIO: no padding, packets or skipped wakes (WASAPI's), the driver events always, and the
+    // lateness named for what it is; one line for a duplex driver (#127).
+    t.app.ui.audio.system = Some("ASIO".into());
+    t.app.audio_devices.injected_backend = Some((Some(output), Some(input)));
+    t.frames(1);
+    let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(lines[1].starts_with("Backend (output and input share one ASIO driver): wakes "), "{lines:?}");
+    assert!(
+        lines[1].ends_with(
+            "gap over period p95 90 µs, max 90 µs; service p95 100 µs, max 100 µs; timeouts 0; overloads 1, busy skips 2, position jumps 0, resets 0"
+        ),
+        "{lines:?}"
+    );
+    assert!(lines[2].starts_with("Input open"), "{lines:?}");
+    // An ASIO output alone has a plain Backend line.
+    t.app.audio_devices.injected_backend = Some((Some(output), None));
+    t.frames(1);
+    let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
+    assert!(lines[1].starts_with("Backend: wakes ") && lines[1].contains("gap over period"), "{lines:?}");
 }
 
 #[test]
@@ -2164,6 +2188,9 @@ fn copy_diagnostics_is_in_every_section_and_copies_the_report() {
         "== Open devices ==",
         "Output open: none",
         "== Callback telemetry ==",
+        "== MIDI ==",
+        crate::diagnostics::NO_PLAYER_MIDI,
+        "MIDI Learn mappings: 0 session, 0 controller profile (0 in force)",
         "== Log ==",
     ] {
         assert!(text.contains(want), "missing {want:?}\n{text}");

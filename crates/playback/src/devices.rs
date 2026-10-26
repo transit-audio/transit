@@ -460,6 +460,17 @@ pub fn audio_systems() -> Vec<AudioSystem> {
     systems
 }
 
+/// The MIDI ports present now as `(name, input)`, inputs first, named as the MIDI menus name them:
+/// enumeration only, no port is opened (`transit --report`, #127). `Err` says why they could not
+/// be listed.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn midi_ports() -> Result<Vec<(String, bool)>, String> {
+    let io = transit_midi_io::MidiIo::new("transit");
+    let inputs = io.list_inputs().map_err(|e| e.to_string())?;
+    let outputs = io.list_outputs().map_err(|e| e.to_string())?;
+    Ok(inputs.into_iter().map(|p| (p.display_name, true)).chain(outputs.into_iter().map(|p| (p.display_name, false))).collect())
+}
+
 /// The JACK system as the native JACK backend lists it, `None` in a build without it: its port
 /// groups (one per device), or no device and why (the library did not load, or no server answers).
 /// Lists through a short-lived probe client; never starts a server.

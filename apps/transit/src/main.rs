@@ -452,9 +452,11 @@ fn main() -> eframe::Result {
     let report_target = report::parse(&args);
     let console = (report_target.is_some() || args.iter().any(|a| a == "--version" || a == "-V")) && transit_rt::attach_parent_console();
     if let Some(target) = report_target {
-        let settings = load_prefs().map(|ui| ui.audio).unwrap_or_default();
+        let prefs = load_prefs();
+        let profile_mappings = prefs.as_ref().map_or(0, |ui| ui.midi_profile.len());
+        let settings = prefs.map(|ui| ui.audio).unwrap_or_default();
         let log_dir = if prefs_enabled() { config::config_dir().map(|d| d.join(logging::LOG_DIR)) } else { None };
-        match report::run(target, log_dir, settings) {
+        match report::run(target, log_dir, settings, profile_mappings) {
             Ok(path) => {
                 say(console, &path.display().to_string());
                 std::process::exit(0);

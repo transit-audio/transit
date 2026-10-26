@@ -224,6 +224,80 @@ fn replace_ci(text: &str, needle: &str, with: &str) -> String {
     out
 }
 
+/// A MIDI port in the report.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MidiPort {
+    /// The name the MIDI menus show.
+    pub name: String,
+    pub input: bool,
+    /// Open now (`None`: not known, `transit --report` opens none).
+    pub open: Option<bool>,
+}
+
+/// The MIDI side of the report (#127).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Midi {
+    /// The ports present, inputs first.
+    pub ports: Vec<MidiPort>,
+    /// Why the ports are not listed or not complete (MIDI not running, a listing error).
+    pub note: Option<String>,
+    /// MIDI Learn mappings stored in the session (`None`: no session, `transit --report`).
+    pub session_mappings: Option<usize>,
+    /// MIDI Learn mappings in this machine's controller profile.
+    pub profile_mappings: usize,
+    /// Of both, the mappings in force (a session mapping overrides the profile's for one control;
+    /// `None` where not resolved).
+    pub in_force: Option<usize>,
+    /// The port and channel (1 to 16; `None` for a system message) of the last input message heard
+    /// (the header LED's: on a routed port, or on any open port while the MIDI Monitor is on; Clock
+    /// and Active Sensing excluded); `Some(None)`: nothing heard yet; `None`: not tracked
+    /// (`transit --report`).
+    pub last_heard: Option<Option<(String, Option<u8>)>>,
+}
+
+impl Midi {
+    /// The MIDI section's lines.
+    pub fn lines(&self) -> Vec<String> {
+        let mut out = Vec::new();
+        if self.ports.is_empty() {
+            out.push("No MIDI ports listed.".into());
+        }
+        for p in &self.ports {
+            let open = match p.open {
+                Some(true) => " \u{b7} open",
+                Some(false) => " \u{b7} not open",
+                None => "",
+            };
+            out.push(format!("{}: {}{open}", if p.input { "Input" } else { "Output" }, p.name));
+        }
+        if let Some(note) = &self.note {
+            out.push(format!("Note: {note}"));
+        }
+        let session = self.session_mappings.map_or("no session".to_owned(), |n| format!("{n} session"));
+        let in_force = self.in_force.map_or(String::new(), |n| format!(" ({n} in force)"));
+        out.push(format!("MIDI Learn mappings: {session}, {} controller profile{in_force}", self.profile_mappings));
+        match &self.last_heard {
+            Some(Some((port, Some(channel)))) => out.push(format!("Last heard: {port}, channel {channel}")),
+            Some(Some((port, None))) => out.push(format!("Last heard: {port}, a system message")),
+            Some(None) => out.push("Last heard: nothing on a routed port since MIDI started".into()),
+            None => {}
+        }
+        out
+    }
+}
+
+/// The channel (1 to 16) of a channel message's status byte, `None` for a system message.
+pub fn midi_channel(status: u8) -> Option<u8> {
+    (0x80..0xF0).contains(&status).then_some((status & 0x0F) + 1)
+}
+
+/// Why an ASIO driver has no channels or rates in the report: it was not probed. Only the driver
+/// that runs is described (probing opens a driver, and ASIO allows one per process, #108); the
+/// others carry the standard choices, which are not measured.
+fn unprobed_reason(system: &AudioSystem) -> &'static str {
+    if system.outputs.iter().chain(&system.inputs).any(|d| d.max_channels > 0) { "another ASIO driver is open" } else { "no ASIO driver is open" }
+}
+
 /// Everything the report prints.
 #[derive(Debug, Clone, Default)]
 pub struct Report {
@@ -240,6 +314,7 @@ pub struct Report {
     pub opened: Vec<String>,
     /// Counters of the running output, or `None` when no stream is open.
     pub telemetry: Option<CallbackTelemetry>,
+    pub midi: Midi,
     pub log_dir: Option<PathBuf>,
     pub log_lines: Vec<String>,
 }
@@ -278,11 +353,19 @@ impl Report {
         }
         for s in &self.systems {
             o.push_str(&format!("{}{}\n", s.name, if s.is_default { " (default system)" } else { "" }));
+            // An ASIO driver without channels was not probed (the Audio Devices window marks it the
+            // same way): its rate list is the standard choices, not what it offers.
+            let asio = soundcraft_playback::devices::is_asio_system(Some(&s.name));
             for (label, devices) in [("Output", &s.outputs), ("Input", &s.inputs)] {
                 if devices.is_empty() {
                     o.push_str(&format!("  {label}: none\n"));
                 }
                 for d in devices {
+                    if asio && d.max_channels == 0 {
+                        let default = if d.is_default { " (default)" } else { "" };
+                        o.push_str(&format!("  {label}: {}{default} \u{b7} not probed ({})\n", d.name, unprobed_reason(s)));
+                        continue;
+                    }
                     let rates: Vec<String> = d.sample_rates.iter().map(u32::to_string).collect();
                     let buffer = match (d.buffer_min, d.buffer_max) {
                         (Some(a), Some(b)) if b != u32::MAX => format!("{a}-{b}"),
@@ -328,6 +411,11 @@ impl Report {
                 }
             }
             None => o.push_str("No output stream, so no counters.\n"),
+        }
+        section(&mut o, "MIDI");
+        for line in self.midi.lines() {
+            o.push_str(&line);
+            o.push('\n');
         }
         section(&mut o, "Log");
         match &self.log_dir {
@@ -380,6 +468,54 @@ fn civil(epoch_secs: u64) -> (i64, i64, i64, u64, u64) {
     (year, month, day, rem / 3600, rem % 3600 / 60)
 }
 
+impl crate::StudioApp {
+    /// The MIDI section from the running app: the Player's ports, which are open (inputs the
+    /// Player has open, outputs a track's destination has connected), the mapping counts and the
+    /// header LED's last message. Without a Player, MIDI is not running: the worker lists the ports
+    /// ([`Self::request_diagnostics`]).
+    pub(crate) fn diagnostics_midi(&self) -> Midi {
+        let (session, profile, in_force) = crate::midi_learn::mapping_counts(self);
+        #[allow(unused_mut)]
+        let mut midi = Midi { session_mappings: Some(session), profile_mappings: profile, in_force: Some(in_force), ..Midi::default() };
+        #[cfg(not(target_arch = "wasm32"))]
+        match &self.player {
+            Some(player) => match player.midi_status() {
+                Ok(status) => {
+                    for p in &status.inputs {
+                        midi.ports.push(MidiPort { name: p.display_name.clone(), input: true, open: Some(status.open_input_ports.contains(&p.key)) });
+                    }
+                    let connected = crate::debug_log::connected_ports(&status.output.tracks);
+                    for p in &status.output.ports {
+                        midi.ports.push(MidiPort { name: p.display_name.clone(), input: false, open: Some(connected.contains(&p.key.to_string())) });
+                    }
+                    midi.note = status.error.clone().or_else(|| status.output.error.clone()).map(|e| format!("last MIDI error: {e}"));
+                    let (activity, port) = player.midi_activity();
+                    let port = if port.is_empty() { "an input that is closed now".to_owned() } else { port };
+                    midi.last_heard = Some((activity.count > 0).then(|| (port, midi_channel(activity.bytes[0]))));
+                }
+                Err(e) => midi.note = Some(format!("MIDI status unavailable: {e}")),
+            },
+            None => midi.note = Some(NO_PLAYER_MIDI.into()),
+        }
+        midi
+    }
+}
+
+/// The MIDI note of a report made without a Player (no audio device): MIDI runs with the audio.
+pub const NO_PLAYER_MIDI: &str = "MIDI is not running (no audio device is open): the ports are listed, none is open";
+
+/// The ports present as the report lists them, from [`soundcraft_playback::devices::midi_ports`]
+/// (enumeration only); `open` is what the caller knows of them. An error is the note.
+pub fn list_midi_ports(open: Option<bool>) -> Result<Vec<MidiPort>, String> {
+    #[cfg(not(target_arch = "wasm32"))]
+    return soundcraft_playback::devices::midi_ports().map(|ports| ports.into_iter().map(|(name, input)| MidiPort { name, input, open }).collect());
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = open;
+        Err("this build has no hardware MIDI".into())
+    }
+}
+
 /// The Copy diagnostics button's state: the collection in flight, and when "Copied" stops showing.
 #[derive(Default)]
 pub struct DiagState {
@@ -408,6 +544,8 @@ impl crate::StudioApp {
         // Not listed yet (the Audio Devices window never opened): the worker lists, so the UI
         // thread does not wait on the drivers. Nothing is opened either way.
         let list_here = report.systems.is_empty() && self.audio_devices.systems.is_none() && self.audio_devices.fake.is_none();
+        // No Player, no MIDI side to ask: the worker lists the ports (enumeration, nothing opened).
+        let list_midi = self.player.is_none() && self.audio_devices.fake.is_none();
         let redaction = Redaction::from_env();
         let log_file = report.log_dir.as_ref().map(|d| d.join(LOG_FILE));
         #[cfg(test)]
@@ -423,6 +561,12 @@ impl crate::StudioApp {
             report.machine = Machine::probe();
             if list_here {
                 report.systems = machine_systems();
+            }
+            if list_midi {
+                match list_midi_ports(Some(false)) {
+                    Ok(ports) => report.midi.ports = ports,
+                    Err(e) => report.midi.note = Some(format!("{NO_PLAYER_MIDI}; the ports could not be listed: {e}")),
+                }
             }
             report.log_lines = log_file.map(|f| tail_log(&f, LOG_LINES)).unwrap_or_default();
             let _ = tx.send(report.render(&redaction));
@@ -518,6 +662,18 @@ mod tests {
                 "Requested 128 \u{b7} running at 256".into(),
             ],
             telemetry: Some(CallbackTelemetry { callbacks: 42, ..Default::default() }),
+            midi: Midi {
+                ports: vec![
+                    MidiPort { name: "Keystation 49".into(), input: true, open: Some(true) },
+                    MidiPort { name: "loopMIDI Port".into(), input: true, open: Some(false) },
+                    MidiPort { name: "Model 12".into(), input: false, open: Some(true) },
+                ],
+                note: None,
+                session_mappings: Some(2),
+                profile_mappings: 5,
+                in_force: Some(6),
+                last_heard: Some(Some(("Keystation 49".into(), Some(10)))),
+            },
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
             log_lines: vec!["INFO opened /home/alice/Music/song.transit".into(), "WARN something".into()],
         }
@@ -534,10 +690,13 @@ mod tests {
             "== Settings ==",
             "== Open devices ==",
             "== Callback telemetry ==",
+            "== MIDI ==",
             "== Log ==",
         ] {
             assert!(text.contains(header), "missing {header}\n{text}");
         }
+        let at = |h: &str| text.find(h).expect(h);
+        assert!(at("== Callback telemetry ==") < at("== MIDI ==") && at("== MIDI ==") < at("== Log =="), "MIDI comes before the log");
         for want in [
             "Version: 9.9.9",
             "Build: abc1234 2026-10-25",
@@ -557,6 +716,86 @@ mod tests {
         ] {
             assert!(text.contains(want), "missing {want:?}\n{text}");
         }
+    }
+
+    fn asio_device(name: &str, channels: u16) -> DeviceInfo {
+        DeviceInfo {
+            name: name.into(),
+            is_default: false,
+            max_channels: channels,
+            sample_rates: if channels == 0 { soundcraft_playback::devices::STANDARD_RATES.to_vec() } else { vec![48000] },
+            buffer_min: (channels > 0).then_some(64),
+            buffer_max: (channels > 0).then_some(1024),
+        }
+    }
+
+    fn asio(devices: &[DeviceInfo]) -> AudioSystem {
+        AudioSystem {
+            name: soundcraft_playback::devices::ASIO_SYSTEM.into(),
+            is_default: false,
+            outputs: devices.to_vec(),
+            inputs: devices.to_vec(),
+            diagnostics: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn unprobed_asio_drivers_say_so_instead_of_0_ch_and_the_standard_rates() {
+        let open = asio(&[asio_device("Focusrite USB ASIO", 2), asio_device("Model Mixer ASIO Driver", 0)]);
+        let text = Report { systems: vec![open], ..Default::default() }.render(&Redaction::default());
+        assert!(text.contains("  Output: Focusrite USB ASIO \u{b7} 2 ch \u{b7} rates 48000 \u{b7} buffer 64-1024\n"), "{text}");
+        assert!(text.contains("  Output: Model Mixer ASIO Driver \u{b7} not probed (another ASIO driver is open)\n"), "{text}");
+        assert!(text.contains("  Input: Model Mixer ASIO Driver \u{b7} not probed (another ASIO driver is open)\n"), "{text}");
+        assert!(!text.contains("0 ch"), "{text}");
+        assert!(!text.contains("176400"), "no unmeasured rate list: {text}");
+        let none_open = asio(&[asio_device("Model Mixer ASIO Driver", 0)]);
+        let text = Report { systems: vec![none_open], ..Default::default() }.render(&Redaction::default());
+        assert!(text.contains("  Output: Model Mixer ASIO Driver \u{b7} not probed (no ASIO driver is open)\n"), "{text}");
+        // Another system's device without channels is printed as it is (not an ASIO probe).
+        let mut other = asio(&[asio_device("Dummy", 0)]);
+        other.name = "ALSA".into();
+        let text = Report { systems: vec![other], ..Default::default() }.render(&Redaction::default());
+        assert!(text.contains("  Output: Dummy \u{b7} 0 ch"), "{text}");
+    }
+
+    #[test]
+    fn the_midi_section_lists_ports_open_state_mappings_and_the_last_source() {
+        let text = fake().render(&Redaction::default());
+        let midi = &text[text.find("== MIDI ==").expect("section")..text.find("== Log ==").expect("log")];
+        assert_eq!(
+            midi,
+            "== MIDI ==\nInput: Keystation 49 \u{b7} open\nInput: loopMIDI Port \u{b7} not open\nOutput: Model 12 \u{b7} open\n\
+             MIDI Learn mappings: 2 session, 5 controller profile (6 in force)\nLast heard: Keystation 49, channel 10\n\n"
+        );
+        let report_mode = Midi {
+            ports: vec![MidiPort { name: "Keystation 49".into(), input: true, open: None }],
+            note: Some("report mode opens no MIDI port, so none is shown open".into()),
+            profile_mappings: 3,
+            ..Midi::default()
+        };
+        assert_eq!(
+            report_mode.lines(),
+            [
+                "Input: Keystation 49",
+                "Note: report mode opens no MIDI port, so none is shown open",
+                "MIDI Learn mappings: no session, 3 controller profile",
+            ]
+        );
+        let quiet = Midi { session_mappings: Some(0), in_force: Some(0), last_heard: Some(None), ..Midi::default() };
+        assert_eq!(
+            quiet.lines(),
+            [
+                "No MIDI ports listed.",
+                "MIDI Learn mappings: 0 session, 0 controller profile (0 in force)",
+                "Last heard: nothing on a routed port since MIDI started"
+            ]
+        );
+        let clock = Midi { last_heard: Some(Some(("Clock Box".into(), None))), ..Midi::default() };
+        assert_eq!(clock.lines().last().map(String::as_str), Some("Last heard: Clock Box, a system message"));
+        assert_eq!(
+            (midi_channel(0x90), midi_channel(0x8F), midi_channel(0xE0), midi_channel(0xF8), midi_channel(0x40)),
+            (Some(1), Some(16), Some(1), None, None)
+        );
     }
 
     #[test]

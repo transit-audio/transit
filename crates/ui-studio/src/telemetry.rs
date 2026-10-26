@@ -9,7 +9,7 @@
 use crate::StudioApp;
 
 use crate::theme::{SPACE, TOKENS};
-use soundcraft_playback::telemetry::{CallbackTelemetry, DURATION_LIMITS_NS, StreamStats};
+use soundcraft_playback::telemetry::{CallbackTelemetry, DURATION_LIMITS_NS, StatsBackend, StreamStats};
 
 /// Minimum time between two reads of the counters (about four a second).
 pub const POLL_SECS: f64 = 0.25;
@@ -131,11 +131,12 @@ pub fn detail_rows(t: &CallbackTelemetry) -> Vec<String> {
     rows
 }
 
-/// The Audio Devices line for the device loop of a native stream (see [`StreamStats::line`]).
-/// `wakes_per_second` is the rate over the last panel samples; `None` until there are two.
-pub fn backend_line(s: &StreamStats, capture: bool, wakes_per_second: Option<u64>) -> String {
+/// The Audio Devices line for the device loop of a native stream, with the fields `backend` fills
+/// (see [`StreamStats::line_for`]). `wakes_per_second` is the rate over the last panel samples;
+/// `None` until there are two.
+pub fn backend_line(s: &StreamStats, capture: bool, wakes_per_second: Option<u64>, backend: StatsBackend) -> String {
     let wakes = wakes_per_second.map_or_else(|| "-".to_owned(), |rate| format!("{rate}/s"));
-    format!("Backend: {}", s.line_with_wakes(capture, &wakes))
+    format!("Backend: {}", s.line_for(backend, capture, &wakes))
 }
 
 /// The host shown in the load readout: the audio system, starred when a native backend serves it

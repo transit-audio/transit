@@ -329,6 +329,18 @@ pub enum WorkerPriority {
     DriverRegistered,
 }
 
+/// The backend that filled a [`StreamStats`]: which of its fields mean something
+/// ([`StreamStats::line_for`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatsBackend {
+    /// Native WASAPI: skipped wakes, padding and packets; no driver events.
+    Wasapi,
+    /// Native ASIO: driver events and the watchdog's timeouts; no wait, padding or packets.
+    Asio,
+    /// Native JACK: driver events (xruns as overloads); no wait, padding, packets or timeouts.
+    Jack,
+}
+
 /// The number of bins of a [`StreamStats`] histogram.
 pub const STATS_BINS: usize = 16;
 
@@ -351,7 +363,10 @@ pub struct StreamStats {
     /// Faults that ended the stream (device lost, failed calls).
     pub faults: u64,
     /// How late each wake was against when the event was due: the previous wake plus one period
-    /// (render), or the end of the first packet waiting (capture). Never negative.
+    /// (render), or the end of the first packet waiting (capture). Never negative. For ASIO it is
+    /// the gap since the previous buffer switch beyond one period (the driver decides the cadence,
+    /// and a driver that delivers in bursts shows up to a period here with nothing late); its line
+    /// says "gap over period" ([`StreamStats::line_for`]).
     pub wake_late_us: [u64; STATS_BINS],
     pub max_wake_late_us: u64,
     /// Time from the wake to the end of the work (the callback and `ReleaseBuffer`; capture: every
@@ -425,6 +440,26 @@ impl StreamStats {
             self.skipped_wakes,
             self.timeouts,
         )
+    }
+
+    /// [`Self::line_with_wakes`] with only the fields `backend` fills: WASAPI's skipped wakes,
+    /// minimum padding (render) and most packets of a wake (capture); for ASIO and JACK the
+    /// driver-event counters instead, always shown. ASIO's lateness reads "gap over period": the
+    /// gap since the previous buffer switch beyond one period, which the driver's cadence decides
+    /// (`docs/contributing/knowledge/asio-backend.md`, "Counters"). JACK never fills `timeouts`.
+    pub fn line_for(&self, backend: StatsBackend, capture: bool, wakes: &str) -> String {
+        let faults = if self.faults > 0 { format!("; faults {}", self.faults) } else { String::new() };
+        let (late, service) = (
+            format!("p95 {} µs, max {} µs", self.wake_late_p95_us(), self.max_wake_late_us),
+            format!("service p95 {} µs, max {} µs", self.service_p95_us(), self.max_service_us),
+        );
+        match backend {
+            StatsBackend::Wasapi => self.line_with_wakes(capture, wakes),
+            StatsBackend::Asio => {
+                format!("wakes {wakes}, gap over period {late}; {service}; timeouts {}{faults}{}", self.timeouts, self.events_tail())
+            }
+            StatsBackend::Jack => format!("wakes {wakes}, late {late}; {service}{faults}{}", self.events_tail()),
+        }
     }
 
     /// "; overloads 0, busy skips 0, position jumps 0, resets 0": the driver-event counters, which
@@ -666,6 +701,40 @@ mod tests {
         assert!(busy.line(true).ends_with("max packets 0; overloads 2, busy skips 0, position jumps 1, resets 0"), "{}", busy.line(true));
         let skipped = StreamStats { wakes: 5, busy_skips: 3, ..Default::default() };
         assert!(skipped.line(false).ends_with("min padding 0; overloads 0, busy skips 3, position jumps 0, resets 0"), "{}", skipped.line(false));
+    }
+
+    #[test]
+    fn each_backend_line_shows_only_the_fields_that_backend_fills() {
+        let mut hist = [0u64; STATS_BINS];
+        hist[6] = 100; // 512..1023 us
+        let s = StreamStats {
+            wakes: 9,
+            wake_late_us: hist,
+            max_wake_late_us: 1172,
+            min_padding_frames: 7,
+            max_packets_per_wake: 3,
+            skipped_wakes: 1,
+            ..Default::default()
+        };
+        assert_eq!(
+            s.line_for(StatsBackend::Wasapi, false, "751/s"),
+            "wakes 751/s, late p95 1024 µs, max 1172 µs; service p95 0 µs, max 0 µs; skipped 1, timeouts 0; min padding 7"
+        );
+        assert!(s.line_for(StatsBackend::Wasapi, true, "1").ends_with("; max packets 3"));
+        let asio = s.line_for(StatsBackend::Asio, false, "751/s");
+        assert_eq!(
+            asio,
+            "wakes 751/s, gap over period p95 1024 µs, max 1172 µs; service p95 0 µs, max 0 µs; timeouts 0; overloads 0, busy skips 0, position jumps 0, resets 0"
+        );
+        assert_eq!(asio, s.line_for(StatsBackend::Asio, true, "751/s"), "both directions read the same");
+        for field in ["late p95", "skipped", "min padding", "max packets"] {
+            assert!(!asio.contains(field), "{field} is not ASIO's: {asio}");
+        }
+        let jack = StreamStats { faults: 1, overloads: 2, ..s }.line_for(StatsBackend::Jack, true, "1");
+        assert_eq!(
+            jack,
+            "wakes 1, late p95 1024 µs, max 1172 µs; service p95 0 µs, max 0 µs; faults 1; overloads 2, busy skips 0, position jumps 0, resets 0"
+        );
     }
 
     #[test]
