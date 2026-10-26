@@ -85,7 +85,7 @@ fn learn_then_move(routed: bool) {
     assert_eq!((m.source.port.as_str(), m.source.number), (PORT, 74));
     t.frames(4);
     assert_eq!(t.app.player.as_ref().unwrap().midi_status().unwrap().open_inputs, 1, "the mapped port stays open after the learn");
-    // Pickup: the knob sweeps up from the bottom through the fader's position to the top.
+    // Scaled (the default): the knob sweeps up from the bottom and the fader meets it at the top.
     for v in (0..=127u8).step_by(8) {
         port.deliver(0, &[0xB0, 74, v]);
         t.frames(2);
@@ -112,6 +112,7 @@ fn a_knob_pickup_holds_back_is_reported_once_and_the_fader_stays() {
     let key = fake.add_input(PORT);
     let port = fake.input_port(&key).unwrap();
     let mut t = T::new(&fake);
+    t.app.ui.midi_takeover = soundcraft_model::MapMode::Pickup;
     let r = t.app.run("track.new", json!({"kind": "audio"})).unwrap();
     let tr = TrackId(r["tracks"][0].as_u64().unwrap());
     t.frames(4);

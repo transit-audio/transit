@@ -68,7 +68,17 @@ use soundcraft_model::SourceKind;
 fn the_menu_state_machine_offers_learn_forget_and_cancel() {
     let mapped = Info { scope: Scope::Session, text: "KeyStep ch 1 CC 74".into(), overridden: false };
     assert_eq!(midi_learn::menu_entries(None, false), vec![Entry::Learn, Entry::LearnProfile]);
-    assert_eq!(midi_learn::menu_entries(Some(&mapped), false), vec![Entry::Mapped, Entry::Learn, Entry::Forget]);
+    assert_eq!(
+        midi_learn::menu_entries(Some(&mapped), false),
+        vec![
+            Entry::Mapped,
+            Entry::Learn,
+            Entry::Forget,
+            Entry::Takeover(MapMode::Scaled),
+            Entry::Takeover(MapMode::Jump),
+            Entry::Takeover(MapMode::Pickup)
+        ]
+    );
     assert_eq!(midi_learn::menu_entries(Some(&mapped), true), vec![Entry::Cancel]);
     assert_eq!(midi_learn::menu_entries(None, true), vec![Entry::Cancel]);
 }
@@ -448,4 +458,20 @@ fn pass_through_is_a_column_of_the_window_and_the_candidate_keeps_it() {
     app.run("window.midi_mappings", json!({"value": true})).unwrap();
     frames(&mut app, &ctx, 3, &mut time);
     assert!(app.inspect(&ctx)["midi_learn"]["window"][2].as_f64().unwrap() > 100.0);
+}
+
+#[test]
+fn takeover_defaults_to_scaled_is_per_machine_and_the_menu_sets_it() {
+    let (mut app, _ctx, _t, tr) = new_app();
+    assert_eq!(app.ui.midi_takeover, MapMode::Scaled);
+    app.learn_choose(Entry::Takeover(MapMode::Jump), tr, Control::Volume, None).unwrap();
+    assert_eq!(app.ui.midi_takeover, MapMode::Jump);
+    assert_eq!(midi_learn::inspect(&app)["takeover"], "jump");
+    // Saved with the preferences, not the session; an older file without it reads as scaled.
+    let mut saved = serde_json::to_value(&app.ui).unwrap();
+    assert_eq!(saved["midi_takeover"], "jump");
+    saved.as_object_mut().unwrap().remove("midi_takeover");
+    let loaded: UiState = serde_json::from_value(saved).unwrap();
+    assert_eq!(loaded.midi_takeover, MapMode::Scaled);
+    assert!(!serde_json::to_string(app.engine.session()).unwrap().contains("takeover"));
 }
