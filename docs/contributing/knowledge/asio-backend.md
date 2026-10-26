@@ -230,7 +230,13 @@ while service p95 is 16 us and nothing overloads, skips or jumps (K26's burst de
 2026-10-22 hardware run's "late p95 998 us" below is the same figure). The Audio Devices Backend
 line and the diagnostics report therefore name it `gap over period` for ASIO, show the driver-event
 counters always and WASAPI's skipped, padding and packets never, and print one line for a duplex
-driver (both directions count the same switches; `StreamStats::line_for`). A late callback shows
+driver: each direction's wakes, gap, service and faults as `out / in`, the shared events and
+timeouts once (`StreamStats::asio_duplex_line`). Each direction keeps its own `LoopStats`, so a
+direction that stopped while the other runs gets two lines instead: the rule (`same_cadence` in
+ui-studio's audio_devices.rs) is wake rates within 1% (at least 2 a second) of each other, or,
+before a rate exists, wake counts within 1% (at least 2). The not-probed rule the window and the
+report share is `devices::asio_description` (probed, no channels in a direction, probe failed,
+never opened). A late callback shows
 as overloads, position jumps or over-budget callbacks in Callback Telemetry. Tests:
 `engine::tests` (fixed period reads 0, a rate change gives the new period, the burst pattern).
 
