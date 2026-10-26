@@ -65,7 +65,7 @@ Hold to lengthen defaults on. The timer reaches unit 2 at the threshold (500 ms)
 each further unit takes a shorter interval: 400 ms easing linearly down to the floor
 over `ramp_units` units (default 6: 400, 367, 334, 300, 267, 234 ms), then the floor
 (default 200 ms, five units a second) per unit. A prefs file with no `ramp_units` and a floor of exactly 80 (every earlier build saved that default whole) migrates on load to 200; any other floor is kept as the user's choice.
-Pedal rests use the same `HoldPrefs::units` schedule. Turning it off leaves each new note at one unit until
+Pedal rests use the same `HoldPrefs::units` schedule. Turning hold to lengthen off leaves each new note at one unit until
 Tie taps extend it; Rest's hold/repeat schedule is unchanged. Preferences are saved
 in KeysPrefs, not the musical document. Enter is the default computer-key stand-in;
 Space remains Play/Stop unless explicitly rebound to Tie/Rest, effective only in

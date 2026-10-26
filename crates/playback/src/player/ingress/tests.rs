@@ -1001,8 +1001,8 @@ fn a_main_side_permit_invalidation_with_the_pedal_held_resets_step_entry() {
 }
 
 #[test]
-fn a_channel_filter_change_resets_but_an_identical_rebuild_does_not() {
-    let (mut worker, send, registry, token, _fake, _key, _keep) = pedal_held();
+fn a_channel_filter_change_through_main_resets_but_an_identical_rebuild_does_not() {
+    let (mut worker, send, mut registry, token, _fake, _key, _keep) = pedal_held();
     for _ in 0..2 {
         send.send(Update::Routes { id: 1, routes: vec![(registry.permit(token).unwrap(), route())], applied: Arc::new(AtomicBool::new(false)) })
             .ok()
@@ -1010,8 +1010,12 @@ fn a_channel_filter_change_resets_but_an_identical_rebuild_does_not() {
         worker.step();
         assert!(!reset_sent(&worker), "the same routes are not a revocation");
     }
+    // What Main does for a new channel filter: the old permit is invalidated first, then a new token
+    // for the port carries the narrowed route.
+    registry.permit(token).unwrap().invalidate();
+    let fresh = registry.register(5).unwrap();
     let narrowed = Route { channels: 1, ..route() };
-    send.send(Update::Routes { id: 1, routes: vec![(registry.permit(token).unwrap(), narrowed)], applied: Arc::new(AtomicBool::new(false)) })
+    send.send(Update::Routes { id: 1, routes: vec![(registry.permit(fresh).unwrap(), narrowed)], applied: Arc::new(AtomicBool::new(false)) })
         .ok()
         .unwrap();
     worker.step();

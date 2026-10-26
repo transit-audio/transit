@@ -640,7 +640,10 @@ impl Pump {
                                 None => {
                                     // Revoked (removal, disarm, monitor off): whatever it held is
                                     // gone, so step entry resets (#134).
-                                    if old.admits() {
+                                    // Main invalidates the old permit before it sends the update (a new
+                                    // token, then this), so `admits()` is already false here: the
+                                    // edge is whether the port was live at the last pass.
+                                    if input.live || old.admits() {
                                         self.shared.tap_lost.store(true, Ordering::Release);
                                     }
                                     old.invalidate();
@@ -656,7 +659,7 @@ impl Pump {
                         // sent after that start a fresh count.
                         if input.guard.muted() {
                             for (permit, _) in &routes {
-                                if permit.admits() {
+                                if input.live || permit.admits() {
                                     self.shared.tap_lost.store(true, Ordering::Release);
                                 }
                                 permit.invalidate();
