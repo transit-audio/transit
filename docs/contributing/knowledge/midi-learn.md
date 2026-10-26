@@ -24,7 +24,7 @@ whose Learn spotlight and table style this builds on: `midi-monitor.md`; thread 
 Source: port name (the Monitor's name, `PortKey` display), channel (0 to 15 inside, shown 1 to 16; `any`),
 CC or note, number. Target: `track:<id>:volume|pan|mute|solo|arm|send:<slot>|plugin:<slot>:<param id>` in a session; the profile
 uses `strip:<n>:...` (n counts from 1 in session order) because track ids belong to one session.
-Mode `pickup` (default) or `jump`; `min` and `max` are the part of the control's travel (0..1) the knob
+Mode `pickup`, `jump` or `scaled` (stored per mapping but ignored: the per-machine takeover setting rules, default `scaled`); `min` and `max` are the part of the control's travel (0..1) the knob
 spans; `toggle` (default true) flips a button on a note-on or a CC rising through 64, false follows the key
 or CC >= 64. A target has one source and a source one target, per store (`MappingSet::set` replaces).
 Fader and send position is the mixer's own curve (`db_to_k`), pan is `(balance + 1) / 2`.
@@ -57,6 +57,13 @@ overlapping source. Only those not overridden are matched; the window shows the 
   knob engages when it lands within 1/127 of the control or crosses it between two messages; it lets go when
   Main has applied everything published and the control then differs by more than 1 % (the mouse, undo, automation
   moved it). Jump publishes every message. A note on a continuous control sets it from the velocity.
+- **Takeover** (#122, ADR 0028 amendment) is one per-machine setting, `ui.json` field `midi_takeover` (`scaled` default, `jump`,
+  `pickup`), copied into every `MapSpec` in `midi_learn_sync`; the window's selector and a mapped control's menu set it. **Scaled**
+  is `scaled_step(at, from, to)` in `crates/playback/src/player/midi_map.rs`: the control moves by the knob's step times the control's
+  remaining distance over the knob's remaining distance to the same end, so both reach the end together, no jump; within half a knob
+  step it follows exactly, and never against the knob's direction. The first message only records the knob. The control value is
+  the worker's own last publish while Main is behind (`applied != published`), else Main's. Scaled and jump set `engaged` so the
+  "waits for pickup" status appears only under Pickup. Tests: `scaled_*` in the same file.
 - **Learn** is Main-side: `Engine::learn` holds the armed control; the UI sets `Shared::learn`; the worker
   forwards the first CC (below 120) or note-on it sees with `learn.swap(false)`, so exactly one candidate
   leaves, and that message does not also move a mapped control. While a learn is armed every present input

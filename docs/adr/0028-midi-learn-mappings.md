@@ -37,6 +37,19 @@ The only learn features today are the step-input bindings and the MIDI Monitor's
 - Sessions saved with mappings load in older builds with the mappings ignored (no `needs` marker: nothing plays wrong).
 - A mapped plug-in parameter makes the same undo step and the same automation as a mouse move; recording a controller sweep is a matter of putting the track in Write, Latch or Touch.
 
+## Amendment: takeover modes (2026-10-25, #122)
+
+**Context.** Pickup alone leaves a knob dead until it crosses the control, which reads as a broken mapping (#121). Logic Pro's default is value scaling (its "Scaled" mode: the control moves toward the controller and they meet at the end of the controller's travel), with "Jump" and "Pickup" as the alternatives. Ableton Live defaults to "None" (jump) and offers "Pick-up" and "Value Scaling" per mapping. Where they agree, transit follows: scaling is the behavior that never surprises with a jump and never goes dead, and both offer all three.
+
+**Decision.**
+
+1. **One per-machine setting, `takeover`: `scaled` (default), `jump` or `pickup`.** It lives with the controller profile in the per-machine preferences (`ui.json`, field `midi_takeover`), never in the session, and rules every continuous mapping, strip controls and plug-in parameters through the same worker path. Buttons and toggles are unaffected. A mapping's own `mode` field stays in the file for compatibility and is ignored; `midi.map` accepts `scaled` beside `pickup` and `jump`. The setting is chosen in Window > MIDI Mappings and in a mapped control's context menu.
+2. **Scaled.** On each incoming controller value the control moves from its current value by the same fraction of its remaining distance to the end of its travel in the direction of the move as the controller moves of its own remaining distance to that end: moving up by `d`, the control rises by `d / (1 - from) * (1 - at)`; moving down, it falls by `d / from * at`. Both reach the end together, so there is never a jump; the gap between them closes monotonically as the controller moves toward the control's side and widens only when it moves away. Once they coincide (or are within one controller step) the control tracks the controller directly. The first message after a mapping starts only records where the controller is. The control's value is the one the worker last left while Main is behind, else the value Main reports, so a mouse drag or automation is respected. The result is computed in the knob's own travel (the mapping's range applies as before) and is deterministic.
+3. **Jump** publishes every value as is. **Pickup** is slice 1's rule, including the "waits for pickup" status; passing through the control's value hands over. Scaled and jump never report a held-back knob.
+4. A note on a continuous control still sets it from the velocity, whichever takeover is set.
+
+**Consequences.** New mappings behave without setup. Existing profiles and sessions that stored `pickup` or `jump` per mapping now follow the machine setting; the stored field is not rewritten. A per-mapping override is left for a later amendment if it is asked for.
+
 ## Alternatives rejected
 
 - **Match on the UI thread.** Adds a frame of latency and drops fast sweeps at the tap ring's size.
