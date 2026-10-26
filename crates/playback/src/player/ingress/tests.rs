@@ -519,6 +519,31 @@ fn a_refused_release_closes_only_its_source_generation() {
 }
 
 #[test]
+fn a_refused_pedal_up_receipt_invalidating_the_permit_sends_the_step_editor_a_reset() {
+    let (control, mut plans) = bridge();
+    let (mut registry, sources) = sources::pair(&control).unwrap();
+    let token = registry.register(1).unwrap();
+    let (lane, mut audio) = action_lane::pair_with_result(&control);
+    let (send, mut worker) = pump(lane);
+    let (tap, mut received) = rtrb::RingBuffer::new(16);
+    worker.tap = tap;
+    let fake = Fake::default();
+    let key = fake.add_input("Refused pedal");
+    let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
+    send.send(input(consumer, registry.permit(token).unwrap())).ok().unwrap();
+    let port = fake.input_port(&key).unwrap();
+    port.deliver(0, &[0xb0, 64, 127]);
+    port.deliver(0, &[0xb0, 64, 0]);
+    worker.step();
+    assert!(!worker.shared.tap_lost.load(Ordering::Acquire));
+    audio.service(&mut action_lane::callback_scope(), &mut plans, &mut |_, _| ActionResult::Event(EventOutcome::StaleBinding));
+    worker.step();
+    assert!(!sources.permits(1, token.generation()));
+    assert!(worker.shared.tap_lost.load(Ordering::Acquire), "the step editor must be told to reset");
+    while received.pop().is_ok() {}
+}
+
+#[test]
 fn destroying_a_delayed_worker_cannot_close_a_reopened_port() {
     let (control, mut plans) = bridge();
     let (mut registry, mut sources) = sources::pair(&control).unwrap();

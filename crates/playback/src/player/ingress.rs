@@ -666,6 +666,9 @@ impl Pump {
                             && !matches!(receipt.outcome, Outcome::Stopped | Outcome::NotesReleased)
                         {
                             permit.invalidate();
+                            // Main rebuilds the route and may cancel what follows (#74): step
+                            // entry gets a Reset rather than waiting on a pedal-up.
+                            self.shared.tap_lost.store(true, Ordering::Release);
                         }
                     }
                 }
