@@ -204,7 +204,6 @@ impl ParamCurves {
     }
 
     /// Normalized → plain for parameter `i` (`None` without a valid curve).
-    #[cfg(test)]
     pub fn to_plain(&self, i: usize, n: f64) -> Option<f64> {
         let table = self.table(i)?;
         let at = |k: usize| table.get(k).map_or(0.0, |c| f64::from(f32::from_bits(c.load(Ordering::Relaxed))));
@@ -312,6 +311,21 @@ mod tests {
 
     fn exp_curve(_id: u32, n: f64) -> Option<f64> {
         Some(20.0 * 1000f64.powf(n))
+    }
+
+    #[test]
+    fn a_sampled_log_curve_puts_mid_travel_at_the_geometric_mean() {
+        let c = ParamCurves::new(&[40, 41], &[true, true]);
+        assert_eq!(c.to_plain(0, 0.5), None, "unsampled: no curve yet");
+        assert_eq!(c.to_normalized(0, 440.0), None, "unsampled: no curve yet");
+        full(&c, |id, n| (id == 40).then(|| 13.6 * (14_700.0f64 / 13.6).powf(n)));
+        let mid = c.to_plain(0, 0.5).unwrap();
+        let geometric = (13.6f64 * 14_700.0).sqrt();
+        assert!((mid - geometric).abs() < 1e-3 * geometric, "{mid} vs {geometric}");
+        let back = c.to_normalized(0, mid).unwrap();
+        assert!((back - 0.5).abs() < 1e-3, "{back}");
+        assert!(c.to_plain(0, 1.0 / 127.0).unwrap() < 20.0, "the first CC step stays near the bottom");
+        assert_eq!(c.to_plain(1, 0.5), None, "a parameter whose sampling gave nothing has no curve");
     }
 
     #[test]

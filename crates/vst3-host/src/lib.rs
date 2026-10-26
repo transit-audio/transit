@@ -127,6 +127,13 @@ mod api {
     pub(crate) use super::ffi::modules_not_exited;
     pub(crate) use super::plugin::service_requests;
     pub use super::registry::*;
+
+    /// `forward`: normalized to plain; otherwise plain to normalized.
+    pub(crate) fn param_curve(plugin_id: &str, param_id: &str, x: f32, forward: bool) -> Option<f32> {
+        let x = f64::from(x);
+        let v = super::plugin::with_curve(plugin_id, param_id, |c, i| if forward { c.to_plain(i, x) } else { c.to_normalized(i, x) })?;
+        (v.is_finite()).then_some(v as f32)
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -179,6 +186,9 @@ mod api {
         None
     }
     pub fn cached_info(_id: &str) -> Option<&'static PluginInfo> {
+        None
+    }
+    pub fn param_curve(_plugin_id: &str, _param_id: &str, _x: f32, _forward: bool) -> Option<f32> {
         None
     }
     pub fn shutdown() {}
@@ -444,6 +454,20 @@ pub fn plugin_info(id: &str) -> Option<&'static PluginInfo> {
 /// blocks. `None` until some instance of the type has been created.
 pub fn cached_info(id: &str) -> Option<&'static PluginInfo> {
     api::cached_info(id)
+}
+
+/// The plain value a hosted parameter has at normalized position `normalized` (0..1) on the
+/// plug-in's own curve, read from the curve sampled for a live instance of `plugin_id`. `None`
+/// when no instance is alive, the parameter is not plain-mapped (stepped or linear) or its curve
+/// is not sampled yet: the caller then falls back to its own range mapping. Never calls into the
+/// plug-in (the sampled tables are atomics), so it is safe on the UI thread.
+pub fn param_to_plain(plugin_id: &str, param_id: &str, normalized: f32) -> Option<f32> {
+    api::param_curve(plugin_id, param_id, normalized, true)
+}
+
+/// The inverse of [`param_to_plain`]: the normalized position (0..1) of `plain`. Same `None` cases.
+pub fn param_to_normalized(plugin_id: &str, param_id: &str, plain: f32) -> Option<f32> {
+    api::param_curve(plugin_id, param_id, plain, false)
 }
 
 #[cfg(test)]

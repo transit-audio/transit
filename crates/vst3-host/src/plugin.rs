@@ -248,6 +248,25 @@ pub(crate) fn service_requests() -> Serviced {
     out
 }
 
+/// Runs `f` on the sampled curve and table index of parameter `param_id` of a live instance of
+/// `plugin_id`; the first instance whose curve is sampled answers. Reads only the atomic tables,
+/// so it is safe on the UI thread; it never calls into a plug-in.
+pub(crate) fn with_curve(plugin_id: &str, param_id: &str, f: impl Fn(&ParamCurves, usize) -> Option<f64>) -> Option<f64> {
+    let all: Vec<Arc<Shared>> = {
+        let mut l = lock(live());
+        l.retain(|w| w.strong_count() > 0);
+        l.iter().filter_map(Weak::upgrade).filter(|s| s.info.id == plugin_id).collect()
+    };
+    let found = all.iter().find_map(|s| {
+        let i = s.info.params.iter().position(|p| p.id == param_id)?;
+        f(&s.curves, i)
+    });
+    // The list lock is long released; an instance whose owner dropped it meanwhile may be dropped
+    // here, which is the same as dropping it anywhere else.
+    drop(all);
+    found
+}
+
 impl Shared {
     /// (Re)activates on the main thread at the size `prepare` asked for, then publishes what the
     /// audio side reads: latency, tail, event input, the MIDI table and a new activation. False
