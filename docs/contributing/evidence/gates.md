@@ -53,6 +53,20 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
   is required. Prefer the deterministic signal, or "at least 2" progress plus a stall bound, over a marker.
   There is no `median` tag: a median over samples is a latency claim, so it lives in an `#[ignore]`
   measurement test, never a gated one (E49 amendment 2026-10-25, #110).
+- The timing gate also checks sleep/park/yield polling loops (rule d, #120): a `for`, `while` or
+  `loop` with `sleep`, `park_timeout` or `yield_now` must not exit against a short wall-clock
+  duration (`Duration::from_millis(N)` with N < 250, or `from_micros`/`from_nanos`). The check
+  follows same-file constants and local bindings into loop conditions, exit-controlling `if`
+  branches, match guards and assertions, including multiline expressions. A short polling interval alone is
+  fine; it is the exit budget that matters. Test code means `#[cfg(test)]` modules, `tests/`
+  directories, `tests.rs` and `*_tests.rs` files. This check also covers ignored tests.
+  Prefer an injected clock (`clock.now()` or a `now` parameter) for expiry/window logic, or a
+  generous stall budget while waiting for a state. `Instant::now()` and `.elapsed()` read real
+  time; an unused clock parameter does not exempt them. Only `// timing: stall-bound <reason>`
+  on the loop line or immediately above it exempts a deliberate short loop. A marker on a
+  deadline binding or sleep does not. Keep the state, ordering or expiry assertion meaningful;
+  shortening sleeps does not fix scheduler dependence. This is syntax and same-file binding
+  analysis, not analysis of timing hidden in called functions, other files or macro expansions.
 - A test never derives a rate, BPM or latency from `thread::sleep` pacing. It injects the
   timestamps (the fake input's `deliver_at`) and asserts the exact value (E49 recurrence,
   the MIDI Monitor Clock BPM test).

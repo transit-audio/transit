@@ -12,9 +12,15 @@
 //! not clock-bound), `sleep-ok` (a sleep that is not pacing a measurement) or `value` (a bound on a computed value,
 //! not a measurement); the reason is mandatory. There is no `median` tag (E49, #110): a median is a latency
 //! claim and belongs in an `#[ignore]` measurement test. Functions marked `#[ignore]`
-//! (hardware tests) are skipped.
+//! (hardware tests) are skipped by these three rules.
+//!
+//! Rule (d), the syntax-based polling-loop check in `timing_loops.rs`, also checks ignored tests.
+//! Its only marker is `// timing: stall-bound <reason>` on or immediately above the loop.
 
 use std::path::Path;
+
+#[path = "timing_loops.rs"]
+mod loops;
 
 const TAGS: &[&str] = &["stall-bound", "floor-ok", "sleep-ok", "value"];
 const FLOOR_NAMES: &[&str] = &["frames", "blocks", "laps", "iterations", "polls"];
@@ -329,6 +335,7 @@ pub fn scan(path: &str, src: &str, test_file: bool) -> Vec<Hit> {
             hits.push(Hit { path: path.into(), line: i + 1, rule, text: lines.get(i).copied().unwrap_or("").into() });
         }
     }
+    hits.extend(loops::scan(path, src, test_file));
     hits
 }
 

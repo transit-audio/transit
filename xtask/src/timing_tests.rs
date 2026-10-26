@@ -129,3 +129,347 @@ fn test_files_are_recognized_by_path() {
 fn comments_and_strings_do_not_trigger_rules() {
     assert_eq!(rules(&wrap("    // assert!(frames >= 10);\n    let s = \"assert!(frames >= 10)\";")), vec![]);
 }
+
+fn loop_lines(src: &str) -> Vec<usize> {
+    loops::scan("t.rs", src, true).iter().map(|h| h.line).collect()
+}
+
+#[test]
+fn rule_d_flags_each_pacing_call_and_loop_form() {
+    for pace in ["sleep(tick)", "std::thread::sleep(tick)", "thread::park_timeout(tick)", "thread::yield_now()"] {
+        for body in [
+            format!("while start.elapsed() < Duration::from_millis(100) {{ {pace}; }}"),
+            format!("loop {{ if start.elapsed() >= Duration::from_millis(100) {{ break; }} {pace}; }}"),
+            format!("for _ in 0..100 {{ assert!(start.elapsed() < Duration::from_millis(100)); {pace}; }}"),
+        ] {
+            assert_eq!(loop_lines(&wrap(&body)), vec![3], "{body}");
+        }
+    }
+}
+
+#[test]
+fn rule_d_accepts_injected_clocks_but_not_an_unused_clock_parameter() {
+    let src = "fn t(clock: &TestClock) {
+        let deadline = clock.now() + Duration::from_millis(100);
+        while clock.now() < deadline { thread::yield_now(); }
+    }";
+    assert!(loop_lines(src).is_empty());
+    assert!(
+        loop_lines(
+            "fn t(now: impl Fn() -> Instant) {
+        let origin = Instant::now();
+        let deadline = origin + Duration::from_millis(100);
+        while now() < deadline { thread::yield_now(); }
+    }"
+        )
+        .is_empty()
+    );
+    assert!(
+        loop_lines(
+            "fn t(now: impl Fn() -> Instant) {
+        let deadline = now() + Duration::from_millis(100);
+        while now() < deadline { thread::sleep(tick); }
+    }"
+        )
+        .is_empty()
+    );
+    assert_eq!(
+        loop_lines(
+            "fn t(clock: &TestClock) {
+        let deadline = Instant::now() + Duration::from_millis(100);
+        while Instant::now() < deadline { thread::yield_now(); }
+    }"
+        ),
+        vec![3]
+    );
+    assert_eq!(
+        loop_lines(
+            "fn t(clock: &TestClock) {
+        let start = clock.now();
+        while start.elapsed() < Duration::from_millis(100) { thread::yield_now(); }
+    }"
+        ),
+        vec![3]
+    );
+}
+
+#[test]
+fn rule_d_requires_a_stall_marker_with_a_reason_on_the_loop() {
+    let body = "while start.elapsed() < Duration::from_millis(100) { thread::yield_now(); }";
+    assert!(loop_lines(&wrap(&format!("// timing: stall-bound deliberate negative observation window\n{body}"))).is_empty());
+    assert!(loop_lines(&wrap(&format!("{body} // timing: stall-bound deliberate negative observation window"))).is_empty());
+    for marker in ["// timing: stall-bound", "// timing: sleep-ok reason", "// timing: stall-boundish reason"] {
+        assert_eq!(loop_lines(&wrap(&format!("{marker}\n{body}"))), vec![4]);
+    }
+    assert_eq!(loop_lines(&wrap(&format!("// timing: stall-bound reason\nlet unrelated = 1;\n{body}"))), vec![5]);
+    assert_eq!(
+        loop_lines(&wrap(
+            "// timing: stall-bound reason
+        let deadline = Instant::now() + Duration::from_millis(100);
+        while Instant::now() < deadline { thread::yield_now(); }"
+        )),
+        vec![5]
+    );
+}
+
+#[test]
+fn rule_d_distinguishes_poll_intervals_from_exit_budgets() {
+    assert!(
+        loop_lines(&wrap(
+            "let host = host(Duration::from_millis(100));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while host.wedged() > 0 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }"
+        ))
+        .is_empty()
+    );
+    for limit in ["Duration::from_secs(2)", "Duration::from_millis(250)", "Duration::from_millis(2_000)"] {
+        assert!(
+            loop_lines(&wrap(&format!(
+                "let deadline = Instant::now() + {limit};
+            while !ready() {{
+                assert!(Instant::now() < deadline);
+                thread::sleep(Duration::from_millis(5));
+            }}"
+            )))
+            .is_empty()
+        );
+    }
+    assert!(loop_lines(&wrap("for _ in 0..10 { thread::sleep(Duration::from_millis(5)); }")).is_empty());
+    assert!(
+        loop_lines(&wrap(
+            "while !ready() {
+        if start.elapsed() < Duration::from_millis(100) { log(); }
+        thread::sleep(Duration::from_millis(5));
+    }"
+        ))
+        .is_empty()
+    );
+}
+
+#[test]
+fn rule_d_resolves_multiline_deadlines_and_same_file_constants() {
+    let src = "const WINDOW: Duration = SHORT;
+    const SHORT: Duration = Duration::from_millis(MS);
+    const MS: u64 = 100;
+    fn t() {
+        let deadline = Instant::now()
+            + WINDOW;
+        while Instant::now()
+            < deadline
+        {
+            thread::park_timeout(Duration::from_millis(5));
+        }
+    }";
+    assert_eq!(loop_lines(src), vec![7]);
+    for duration in ["Duration::from_millis(249u64)", "Duration::from_micros(500)", "Duration::from_nanos(500)"] {
+        assert_eq!(
+            loop_lines(&wrap(&format!(
+                "let window = {duration};
+            loop {{ if start.elapsed() > window {{ return; }} thread::yield_now(); }}"
+            ))),
+            vec![4]
+        );
+    }
+}
+
+#[test]
+fn rule_d_limits_bindings_and_test_scope() {
+    let src = "fn product() {
+        while start.elapsed() < Duration::from_millis(100) { thread::yield_now(); }
+    }
+    #[cfg(test)]
+    mod tests {
+        fn t() {
+            while start.elapsed() < Duration::from_millis(100) { thread::yield_now(); }
+        }
+    }
+    fn after() {
+        while start.elapsed() < Duration::from_millis(100) { thread::yield_now(); }
+    }";
+    assert_eq!(loops::scan("lib.rs", src, false).iter().map(|h| h.line).collect::<Vec<_>>(), vec![7]);
+    assert!(
+        loop_lines(
+            "const WINDOW: Duration = Duration::from_millis(100);
+        fn t() {
+            let WINDOW = Duration::from_secs(2);
+            while start.elapsed() < WINDOW { thread::yield_now(); }
+        }"
+        )
+        .is_empty()
+    );
+    assert!(
+        loop_lines(
+            "fn a() { let window = Duration::from_millis(100); }
+        fn b() { while start.elapsed() < window { thread::yield_now(); } }"
+        )
+        .is_empty()
+    );
+}
+
+#[test]
+fn rule_d_does_not_read_comments_strings_or_unexecuted_closures_as_loops() {
+    assert!(
+        loop_lines(&wrap(
+            r##"
+        /* while start.elapsed() < Duration::from_millis(100) { thread::yield_now(); } */
+        let text = r#"while start.elapsed() < Duration::from_millis(100) { thread::yield_now(); }"#;
+        while start.elapsed() < Duration::from_millis(100) {
+            let callback = || { thread::sleep(Duration::from_millis(1)); };
+        }
+    "##
+        ))
+        .is_empty()
+    );
+}
+
+#[test]
+fn rule_d_reports_the_inner_deadline_without_tainting_the_outer_loop() {
+    assert_eq!(
+        loop_lines(&wrap(
+            "for _ in 0..5 {
+        while start.elapsed() < Duration::from_millis(100) { thread::yield_now(); }
+    }"
+        )),
+        vec![4]
+    );
+}
+
+#[test]
+fn rule_d_follows_qualified_and_associated_constants() {
+    let src = "const WINDOW: Duration = Duration::from_millis(100);
+        mod limits { pub const WAIT: Duration = super::WINDOW; }
+        #[cfg(test)] mod tests {
+            const WINDOW: Duration = Duration::from_secs(2);
+            struct Limits;
+            impl Limits {
+                const MS: u64 = 100;
+                const WAIT: Duration = Duration::from_millis(Self::MS);
+                fn wait() {
+                    while start.elapsed() < Self::WAIT { thread::yield_now(); }
+                }
+            }
+            fn t() {
+                while start.elapsed() < super::WINDOW { thread::yield_now(); }
+                while start.elapsed() < self::WINDOW { thread::yield_now(); }
+                while start.elapsed() < super::limits::WAIT { thread::yield_now(); }
+                while start.elapsed() < Limits::WAIT { thread::yield_now(); }
+                while start.elapsed() < crate::WINDOW { thread::yield_now(); }
+            }
+        }";
+    assert_eq!(loops::scan("lib.rs", src, false).iter().map(|h| h.line).collect::<Vec<_>>(), vec![10, 14, 16, 17, 18]);
+}
+
+#[test]
+fn rule_d_checks_a_clock_sample_refreshed_in_the_loop() {
+    assert_eq!(
+        loop_lines(&wrap(
+            "let deadline = Instant::now() + Duration::from_millis(100);
+        let mut now = Instant::now();
+        while now < deadline {
+            thread::yield_now();
+            now = Instant::now();
+        }"
+        )),
+        vec![5]
+    );
+    assert_eq!(
+        loop_lines(&wrap(
+            "loop {
+        let now = Instant::now();
+        if now > start + Duration::from_millis(100) { break; }
+        thread::yield_now();
+    }"
+        )),
+        vec![3]
+    );
+}
+
+#[test]
+fn rule_d_uses_the_composed_duration_not_its_short_components() {
+    assert!(
+        loop_lines(&wrap(
+            "let start = Instant::now();
+        while Instant::now() - start < Duration::from_secs(5) { thread::yield_now(); }"
+        ))
+        .is_empty()
+    );
+    for budget in ["Duration::from_secs(5) + Duration::from_millis(100)", "Duration::from_millis(100) * 20"] {
+        assert!(
+            loop_lines(&wrap(&format!(
+                "let budget = {budget};
+            while start.elapsed() < budget {{ thread::yield_now(); }}"
+            )))
+            .is_empty()
+        );
+        assert!(
+            loop_lines(&wrap(&format!(
+                "let deadline = Instant::now() + {budget};
+            while Instant::now() < deadline {{ thread::yield_now(); }}"
+            )))
+            .is_empty()
+        );
+    }
+}
+
+#[test]
+fn rule_d_treats_fine_units_consistently_in_deadlines_and_elapsed_comparisons() {
+    for duration in ["Duration::from_micros(500_000)", "Duration::from_nanos(500_000_000)"] {
+        assert_eq!(loop_lines(&wrap(&format!("while start.elapsed() < {duration} {{ thread::yield_now(); }}"))), vec![3]);
+        assert_eq!(
+            loop_lines(&wrap(&format!(
+                "let deadline = Instant::now() + {duration};
+            while Instant::now() < deadline {{ thread::yield_now(); }}"
+            ))),
+            vec![4]
+        );
+    }
+}
+
+#[test]
+fn rule_d_is_wired_into_the_public_scan_and_diagnostic_format() {
+    let hits = scan("crates/example/tests/poll.rs", &wrap("while start.elapsed() < Duration::from_millis(100) { thread::yield_now(); }"), true);
+    assert_eq!(hits.len(), 1);
+    assert_eq!(hits[0].rule, 'd');
+    assert!(hits[0].to_string().starts_with("crates/example/tests/poll.rs:3: rule (d): sleep/park/yield loop"));
+}
+
+#[test]
+fn rule_d_checks_match_guards_and_panicking_timeout_branches() {
+    assert!(
+        loop_lines(&wrap(
+            "loop {
+        match state {
+            Ready => break,
+            Waiting if start.elapsed() < Duration::from_millis(100) => log(),
+            Waiting => {},
+        }
+        thread::yield_now();
+    }"
+        ))
+        .is_empty()
+    );
+    assert_eq!(
+        loop_lines(&wrap(
+            "loop {
+        if start.elapsed() > Duration::from_millis(100) { panic!(\"timed out\"); }
+        thread::yield_now();
+    }"
+        )),
+        vec![3]
+    );
+    assert_eq!(
+        loop_lines(&wrap(
+            "let deadline = Instant::now() + Duration::from_millis(100);
+        loop {
+            match poll() {
+                Ready => break,
+                Waiting if Instant::now() < deadline => thread::sleep(tick),
+                _ => panic!(\"timed out\"),
+            }
+        }"
+        )),
+        vec![4]
+    );
+}
