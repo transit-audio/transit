@@ -2,8 +2,10 @@
 
 Releases are tag-driven. `.github/workflows/release.yml` does the building.
 
-1. Bump `[workspace.package] version` in the root `Cargo.toml` (for example `0.2.0-alpha.1`; the app and
-   every crate inherit it), refresh `Cargo.lock` with `cargo metadata`, commit, push, and wait for CI to be green.
+1. Bump `[workspace.package] version` in the root `Cargo.toml` (for example `0.3.0`; the app and
+   every crate inherit it) and refresh `Cargo.lock` with `cargo metadata`. Write the release notes in
+   `docs/releases/vX.Y.Z.md` with a `## Highlights` section first (see `docs/releases/README.md`). Commit
+   both, push, and wait for CI to be green.
 2. Tag that commit `vX.Y.Z` or `vX.Y.Z-pre` (for example `v0.2.0-alpha.1`) and push the tag:
 
    ```sh
@@ -21,10 +23,12 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
      If macOS blocks the app, run `xattr -dr com.apple.quarantine /Applications/transit.app` or
      right-click it and choose Open.
    - Linux x86_64.
-4. Check the pre-release page and publish it when the archives look right. The workflow body is generic:
-   paste or replace it after publication with `gh release edit <tag> --notes-file <file>`.
-5. `release.yml` then announces the release on Discord (the "Announce on Discord" step). It reads the
-   published release body back, posts the top-level bullets of its `## Highlights` section (up to
+4. The release body comes from the repository: when `docs/releases/<tag>.md` exists at the tag, the
+   publish job uses it as the whole body. Without that file the body is the generic download text plus
+   GitHub's generated notes. Check the release page when the archives look right. The body can still be
+   replaced after publication with `gh release edit <tag> --notes-file <file>`.
+5. `release.yml` then announces the release on Discord (the "Announce on Discord" step, which runs after
+   the release is published). It reads the published release body back, posts the top-level bullets of its `## Highlights` section (up to
    1800 characters; the first paragraph when there is no Highlights section) with a link to the
    release, and stops at the checksums section. Put the Highlights first when you write the notes.
    The step uses the `DISCORD_WEBHOOK_URL` repository secret; with the secret missing it logs and

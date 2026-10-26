@@ -262,27 +262,51 @@ jobs:
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     steps:
+      # The repository at the tag, for docs/releases/<tag>.md (the release body). It goes into src/
+      # so it cannot clobber the downloaded archives in dist/.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: src
       - uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
+      # The release body: docs/releases/<tag>.md from the repository when it exists, else the generic
+      # text below. Either way it lands in $RUNNER_TEMP/release-body.md and the step after uses it.
+      - name: Release body
+        id: body
+        shell: bash
+        run: |
+          out="$RUNNER_TEMP/release-body.md"
+          notes="src/docs/releases/${GITHUB_REF_NAME}.md"
+          if [ -f "$notes" ]; then
+            echo "using $notes as the release body"
+            cp "$notes" "$out"
+            echo "notes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no $notes, using the generic body and generated notes"
+            cat > "$out" <<'EOF'
+          macOS: the `.dmg` holds `transit.app`; open it and drag transit to Applications. The app is unsigned (ad-hoc signed only) unless these notes say notarized. If macOS blocks it, run `xattr -dr com.apple.quarantine /Applications/transit.app` (or right-click the app and choose Open). The `.tar.gz` holds the bare binary and `audio-bench`; the same command applies to the binary.
+
+          Windows: the `.msi` installs transit and `audio-bench.exe` to Program Files (per-machine, needs administrator approval), with a Start Menu shortcut and the `.transit` and `.transitz` file associations; the `.zip` is the portable form. Both are unsigned unless these notes say signed: SmartScreen will warn, so click "More info", then "Run anyway".
+
+          Each archive also carries `audio-bench` and `BENCH-README.txt`: cable an output to an input and measure your interface without building anything.
+          - windows-x86_64: transit with native WASAPI and native ASIO; `audio-bench.exe` with native WASAPI, native ASIO and cpal WASAPI.
+          - macos-arm64: `audio-bench` (cpal, Core Audio), in the tarball only, not in the DMG.
+          - linux-x86_64: `audio-bench` (cpal, ALSA).
+
+          Linux: the `.AppImage` runs on most distributions (`chmod +x` it, then run it; no install needed), the `.deb` suits Debian, Ubuntu and Mint, and the `.rpm` suits Fedora and openSUSE. The `.zsync` next to the AppImage is for delta updates. All are unsigned. The `.tar.gz` is the plain binary with `audio-bench`.
+          EOF
+            echo "notes=false" >> "$GITHUB_OUTPUT"
+          fi
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          body: |
-            macOS: the `.dmg` holds `transit.app`; open it and drag transit to Applications. The app is unsigned (ad-hoc signed only) unless these notes say notarized. If macOS blocks it, run `xattr -dr com.apple.quarantine /Applications/transit.app` (or right-click the app and choose Open). The `.tar.gz` holds the bare binary and `audio-bench`; the same command applies to the binary.
-
-            Windows: the `.msi` installs transit and `audio-bench.exe` to Program Files (per-machine, needs administrator approval), with a Start Menu shortcut and the `.transit` and `.transitz` file associations; the `.zip` is the portable form. Both are unsigned unless these notes say signed: SmartScreen will warn, so click "More info", then "Run anyway".
-
-            Each archive also carries `audio-bench` and `BENCH-README.txt`: cable an output to an input and measure your interface without building anything.
-            - windows-x86_64: transit with native WASAPI and native ASIO; `audio-bench.exe` with native WASAPI, native ASIO and cpal WASAPI.
-            - macos-arm64: `audio-bench` (cpal, Core Audio), in the tarball only, not in the DMG.
-            - linux-x86_64: `audio-bench` (cpal, ALSA).
-
-            Linux: the `.AppImage` runs on most distributions (`chmod +x` it, then run it; no install needed), the `.deb` suits Debian, Ubuntu and Mint, and the `.rpm` suits Fedora and openSUSE. The `.zsync` next to the AppImage is for delta updates. All are unsigned. The `.tar.gz` is the plain binary with `audio-bench`.
+          body_path: ${{ runner.temp }}/release-body.md
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
-          generate_release_notes: true
+          # Generated notes only with the generic body; a notes file is the whole body.
+          generate_release_notes: ${{ steps.body.outputs.notes != 'true' }}
 
       # Posts the release to Discord through the DISCORD_WEBHOOK_URL repository secret. Never fails the
       # release: a missing secret skips, and a Discord outage is only a warning (continue-on-error).

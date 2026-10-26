@@ -22,7 +22,7 @@ layer and egui UI. transit began in October 2026 as a fork of
 credited in About and in NOTICE.
 
 > [!NOTE]
-> transit is alpha software under active development; the current release is [v0.2.0](https://github.com/transit-audio/transit/releases/tag/v0.2.0) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
+> transit is alpha software under active development; the current release is [v0.3.0](https://github.com/transit-audio/transit/releases/tag/v0.3.0) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
 > correctness, stability and performance, measured on real hardware, ahead of new features.
 > Expect rough edges in the UI and some missing features; the audio engine, recording alignment
 > and device handling get fixed first, following [the engineering principles](docs/principles.md).
@@ -39,11 +39,11 @@ credited in About and in NOTICE.
 
 ## Downloads
 
-The current release is [v0.2.0](https://github.com/transit-audio/transit/releases/tag/v0.2.0). The files are `transit-v0.2.0-windows-x86_64.msi` and `.zip`, `transit-v0.2.0-macos-arm64.dmg` and `.tar.gz`, and `transit-v0.2.0-linux-x86_64.tar.gz`.
+The current release is [v0.3.0](https://github.com/transit-audio/transit/releases/tag/v0.3.0). The files are `transit-v0.3.0-windows-x86_64.msi` and `.zip`, `transit-v0.3.0-macos-arm64.dmg` and `.tar.gz`, `transit-v0.3.0-linux-x86_64.tar.gz`, and `transit-v0.3.0-linux-x86_64.AppImage`, `.deb` and `.rpm`.
 
 - **Windows (x86_64):** one download, the `.zip` (portable) or the `.msi` (installer with the standard install dialogs and license; it registers `.transit` and `.transitz`). It has native WASAPI and native ASIO.
 - **macOS (Apple silicon):** the `.dmg`; open it and drag `transit.app` to Applications.
-- **Linux (x86_64):** the tarball; unpack it and run `transit`. From v0.3.0 the release also carries an `.AppImage`, a `.deb` and an `.rpm` (see [Linux](#linux)).
+- **Linux (x86_64):** the tarball; unpack it and run `transit`. Each release also carries an `.AppImage`, a `.deb` and an `.rpm` (see [Linux](#linux)).
 
 The builds are unsigned. On Windows, SmartScreen shows "More info", then "Run anyway". On macOS, if the app is blocked, run `xattr -dr com.apple.quarantine /Applications/transit.app` or right-click it and choose Open.
 
@@ -54,7 +54,7 @@ The builds are unsigned. On Windows, SmartScreen shows "More info", then "Run an
 
 ## Linux
 
-From v0.3.0 each release has an `.AppImage` (any recent distribution: `chmod +x` it and run it), a `.deb` (Debian, Ubuntu, Mint) and an `.rpm` (Fedora, openSUSE), next to the tarball. They are unsigned.
+Each release has an `.AppImage` (any recent distribution: `chmod +x` it and run it), a `.deb` (Debian, Ubuntu, Mint) and an `.rpm` (Fedora, openSUSE), next to the tarball. They are unsigned.
 
 To build, install `libasound2-dev pkg-config`, plus `libjack-jackd2-dev` to build with `--features native-jack` ([docs/building.md](docs/building.md#native-jack-backend-linux)).
 
@@ -202,7 +202,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Native ASIO recovers from a driver reset request (the driver changing its buffer size or sample rate) and reopens the device, and its audio thread runs at MMCSS Pro Audio priority.
 - The Calibration Measure button works per driver, sample rate and buffer size, and keeps a result for each combination.
 - Linux: native JACK/PipeWire backend (build with `--features native-jack`; `pw-jack transit` under PipeWire). It plays and records duplex in one server cycle at the server's rate and buffer size, counts the server's xruns, and reopens by itself when the server changes its buffer size or rate or comes back after stopping.
-- Linux packages: from the next release, an `.AppImage`, a `.deb` and an `.rpm` come with the tarball.
+- Linux packages: an `.AppImage`, a `.deb` and an `.rpm` come with the tarball.
 - Audio Devices shows "Requested 128 · running at 256" when the device runs a different buffer size or rate than you asked for.
 
 ### Sessions and rendering
