@@ -12,7 +12,6 @@ pub const OVER_BUDGET: &[(&str, usize)] = &[
     ("crates/clap-host/src/ffi.rs", 1928),
     ("crates/video/src/isobmff/codec.rs", 1579),
     ("crates/vst3-host/src/ffi.rs", 3779),
-    ("crates/vst3-host/tests/fixture/src/lib.rs", 1763),
 ];
 
 /// Checks `files` (repo-relative path, line count) against `MAX_LINES` and `table`. Reports every problem.
