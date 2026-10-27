@@ -21,7 +21,6 @@ pub const OVER_BUDGET: &[(&str, usize)] = &[
     ("crates/ui-egui/src/lib.rs", 2037),
     ("crates/ui-studio/src/arrange.rs", 2253),
     ("crates/ui-studio/src/audio_devices.rs", 1918),
-    ("crates/ui-studio/src/audio_devices_tests.rs", 2262),
     ("crates/ui-studio/src/automation.rs", 1581),
     ("crates/ui-studio/src/browser.rs", 1596),
     ("crates/ui-studio/src/host.rs", 1815),
