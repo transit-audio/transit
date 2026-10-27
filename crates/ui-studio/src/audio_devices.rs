@@ -594,6 +594,31 @@ impl StudioApp {
     /// facts and the log lines. The device list is the window's (cached, or the fake's); empty when
     /// the window has not listed yet, in which case the worker lists it (enumeration only, no
     /// stream), so Callback Telemetry's button does not block the UI thread.
+    /// Each track's name and plug-in display names by track index (the strip index of the
+    /// callback's phase marker), read from the session on the UI thread (#162).
+    pub(crate) fn strip_names(&mut self) -> Vec<crate::telemetry::StripName> {
+        let tracks: Vec<(String, Vec<(String, bool)>)> = self
+            .engine
+            .session()
+            .tracks
+            .iter()
+            .map(|t| {
+                let plugins = match &t.instrument {
+                    Some(i) => vec![(i.plugin.clone(), true)],
+                    None => t.mixer.inserts.iter().flatten().filter(|i| i.active && !i.bypass).map(|i| (i.plugin.clone(), false)).collect(),
+                };
+                (t.name.clone(), plugins)
+            })
+            .collect();
+        tracks
+            .into_iter()
+            .map(|(track, plugins)| {
+                let names: Vec<String> = plugins.iter().map(|(id, instrument)| self.plugin_name(id, *instrument)).collect();
+                crate::telemetry::StripName { track, plugin: (!names.is_empty()).then(|| names.join(", ")) }
+            })
+            .collect()
+    }
+
     pub(crate) fn diagnostics_report(&mut self, now: f64) -> crate::diagnostics::Report {
         let systems = match (&self.audio_devices.systems, &self.audio_devices.fake) {
             (Some(s), _) => s.clone(),
@@ -616,6 +641,7 @@ impl StudioApp {
             telemetry,
             midi: self.diagnostics_midi(),
             open_asio_driver: self.running_native_asio(),
+            strips: self.strip_names(),
             log_dir: self.services.config_dir.as_ref().map(|d| d.join("logs")),
             ..Default::default()
         }

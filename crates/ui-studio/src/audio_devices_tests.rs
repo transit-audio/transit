@@ -1414,3 +1414,46 @@ fn a_session_change_reopen_that_succeeds_clears_a_reopen_that_gave_up() {
     assert!(!t.app.reopen.gave_up(), "and the gave-up state is cleared");
     assert!(!t.app.reopen.pending());
 }
+
+#[test]
+fn the_report_names_the_track_plugin_and_phase_of_the_longest_callback() {
+    use crate::diagnostics::Redaction;
+    use transit_playback::telemetry::{CallbackTelemetry, FLAG_CREATING, Phase, WorstCallback};
+    let mut t = T::new();
+    t.app.add_track("audio").unwrap();
+    t.app.add_track("audio").unwrap();
+    let track = t.app.engine.session().tracks[1].id;
+    t.app.engine.session_mut().track_mut(track).unwrap().name = "Bass".into();
+    t.app.engine.session_mut().track_mut(track).unwrap().mixer.inserts[0] = Some(transit_model::Insert::new("eq7"));
+    let plugin = t.app.plugin_name("eq7", false);
+    // 64 frames at 48 kHz: a 1.33 ms budget; 19.4 ms with the marker still for 19 ms of it.
+    let long = WorstCallback {
+        duration_ns: 19_400_000,
+        budget_ns: 1_333_333,
+        callback: 900,
+        phase: Phase::StripRender,
+        strip: 1,
+        longest_gap_ns: 19_000_000,
+        flags: 0,
+    };
+    let second =
+        WorstCallback { duration_ns: 8_100_000, longest_gap_ns: 2_000_000, phase: Phase::Mixdown, strip: u32::MAX, flags: FLAG_CREATING, ..long };
+    let third = WorstCallback { duration_ns: 3_000_000, phase: Phase::Auxes, strip: 7, longest_gap_ns: 2_900_000, ..long };
+    t.app.telemetry.injected = Some(CallbackTelemetry { callbacks: 1000, timed_callbacks: 1000, worst: [long, second, third], ..Default::default() });
+    let text = t.app.diagnostics_report(0.0).render(&Redaction::default());
+    let line = format!("Longest callback 19.4 ms during Bass: {plugin} (strip render); plug-in loading: no; editor open: no (preempted)");
+    assert!(text.contains(&line), "{text}");
+    let top =
+        format!("Longest callbacks: 19.4 ms Bass: {plugin} (strip render, preempted); 8.1 ms mixdown (slow); 3.0 ms strip 7 (aux render, preempted)");
+    assert!(text.contains(&top), "{text}");
+    println!("{line}\n{top}");
+    // The slow variant of the same callback: its time spread over the phases.
+    let spread = WorstCallback { longest_gap_ns: 4_000_000, ..long };
+    t.app.telemetry.injected =
+        Some(CallbackTelemetry { callbacks: 1000, worst: [spread, Default::default(), Default::default()], ..Default::default() });
+    let text = t.app.diagnostics_report(0.0).render(&Redaction::default());
+    assert!(text.contains("editor open: no (slow)\nLongest callbacks: 19.4 ms Bass: "), "{text}");
+    // Nothing timed yet: no attribution lines.
+    t.app.telemetry.injected = Some(CallbackTelemetry::default());
+    assert!(!t.app.diagnostics_report(0.0).render(&Redaction::default()).contains("Longest callbacks:"));
+}

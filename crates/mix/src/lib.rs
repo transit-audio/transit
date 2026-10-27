@@ -745,9 +745,17 @@ pub struct MixEngine {
     plan: Option<Box<plan::ActivePlan>>,
     /// Instrument events (F10): the epoch, the render clock and the counters.
     events: events::EngineEvents,
+    /// The callback's phase marker (#162): written with relaxed stores on the audio thread.
+    marker: Option<std::sync::Arc<transit_rt::phase_marker::PhaseMarker>>,
 }
 
 impl MixEngine {
+    /// Give the engine the phase marker its render writes (#162). Control thread, before the
+    /// engine renders.
+    pub fn set_phase_marker(&mut self, marker: std::sync::Arc<transit_rt::phase_marker::PhaseMarker>) {
+        self.marker = Some(marker);
+    }
+
     /// Force (or stop forcing) every engine in the process to render its audio-thread strips
     /// serially on the audio thread, never on the render pool. Serial is the default (see
     /// [`RENDER_POOL_ENV`]); `force_serial(false)` hands the strips to the pool. Takes effect at
@@ -780,6 +788,7 @@ impl MixEngine {
             metronome_gain: 1.0,
             count_in: None,
             serial: false,
+            marker: None,
             plan: None,
             events: events::EngineEvents::new(None, EventLimits::default()),
         }

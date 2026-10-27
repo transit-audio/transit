@@ -644,6 +644,10 @@ impl Audio {
     pub fn engine(&self) -> &MixEngine {
         &self.mix
     }
+    /// Give the mix the phase marker its render writes (#162).
+    pub fn set_phase_marker(&mut self, marker: Arc<transit_rt::phase_marker::PhaseMarker>) {
+        self.mix.set_phase_marker(marker);
+    }
     #[cfg(test)]
     pub(crate) fn install_event_tap_for_test(&mut self, capacity: usize) {
         self.mix.install_event_tap(capacity);

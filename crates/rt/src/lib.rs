@@ -30,6 +30,9 @@
 
 pub mod handoff;
 
+/// Which phase and strip the audio callback is in, for attributing a long callback (issue #162).
+pub mod phase_marker;
+
 /// Per-strip job slots for the multicore strip render (issue #124, ADR 0029): the claim and
 /// reclaim protocol between the audio callback and the render workers.
 pub mod strip_jobs;

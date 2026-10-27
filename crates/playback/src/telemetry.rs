@@ -12,8 +12,11 @@
 //! is included: cold-start work can cause an audible failure and must not be hidden as warm-up.
 //! Suggested labels: "Peak callback load (since open)" and "Over-budget callbacks (nominal)".
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
+
+pub use transit_rt::phase_marker::{NO_STRIP, Phase, PhaseMarker, Stamp};
 
 /// Inclusive duration histogram limits in nanoseconds; the last bin has no upper limit.
 pub const DURATION_LIMITS_NS: [u64; 15] =
@@ -22,6 +25,131 @@ pub const DURATION_LIMITS_NS: [u64; 15] =
 /// The device-loop snapshot a native backend keeps (wake lateness, service time, skips), re-exported
 /// so the UI needs no dependency on the backend crate.
 pub use transit_audio_backend::{StatsBackend, StreamStats};
+
+/// How many of the longest callbacks are kept with their attribution.
+pub const WORST_KEPT: usize = 3;
+
+/// A callback whose plug-in was being created (module load, `initialize`, state restore).
+pub const FLAG_CREATING: u8 = 1;
+/// A plug-in editor was open during the callback.
+pub const FLAG_EDITOR_OPEN: u8 = 2;
+
+/// What the callback was doing when it was long (#162): one of the longest callbacks since open
+/// with the phase marker's attribution. Plain data; the callback stores it as relaxed atomics.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct WorstCallback {
+    /// Our work time for the callback, in nanoseconds; zero in an empty slot.
+    pub duration_ns: u64,
+    /// The nominal budget (frames / device rate) the callback was measured against; zero if unknown.
+    pub budget_ns: u64,
+    /// Which callback it was (the count at the time, from one).
+    pub callback: u64,
+    /// The phase the longest stretch between two phase changes was spent in.
+    pub phase: Phase,
+    /// The strip of that stretch ([`NO_STRIP`] when the phase has none): a track index.
+    pub strip: u32,
+    /// The longest stretch itself, in nanoseconds.
+    pub longest_gap_ns: u64,
+    /// [`FLAG_CREATING`] and [`FLAG_EDITOR_OPEN`].
+    pub flags: u8,
+}
+
+impl Default for WorstCallback {
+    fn default() -> Self {
+        Self { duration_ns: 0, budget_ns: 0, callback: 0, phase: Phase::Idle, strip: NO_STRIP, longest_gap_ns: 0, flags: 0 }
+    }
+}
+
+/// Whether a long callback was slow or the thread was not running.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Verdict {
+    /// The callback stood still in one phase for more than half of its time: the thread was not
+    /// running (a DPC, an interrupt, another thread at higher priority), or one call blocked.
+    Preempted,
+    /// The time was spread over the phases: the work itself was heavy.
+    Slow,
+}
+
+impl Verdict {
+    /// The word the report prints.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Verdict::Preempted => "preempted",
+            Verdict::Slow => "slow",
+        }
+    }
+}
+
+impl WorstCallback {
+    /// The strip, when the phase belongs to one.
+    #[must_use]
+    pub fn strip_index(&self) -> Option<u32> {
+        (self.strip != NO_STRIP).then_some(self.strip)
+    }
+
+    /// True when the work time exceeded the nominal budget.
+    #[must_use]
+    pub fn over_budget(&self) -> bool {
+        self.budget_ns > 0 && self.duration_ns > self.budget_ns
+    }
+
+    /// `None` for a callback within its budget (nothing to explain), else whether the phase
+    /// marker stood still for more than half of the callback ([`Verdict::Preempted`]) or not.
+    #[must_use]
+    pub fn verdict(&self) -> Option<Verdict> {
+        self.over_budget().then(|| if self.longest_gap_ns.saturating_mul(2) > self.duration_ns { Verdict::Preempted } else { Verdict::Slow })
+    }
+
+    /// A plug-in was being created during the callback.
+    #[must_use]
+    pub fn plugin_loading(&self) -> bool {
+        self.flags & FLAG_CREATING != 0
+    }
+
+    /// A plug-in editor was open during the callback.
+    #[must_use]
+    pub fn editor_open(&self) -> bool {
+        self.flags & FLAG_EDITOR_OPEN != 0
+    }
+}
+
+/// One slot of the longest callbacks, as plain atomics (all written by the callback, relaxed).
+#[derive(Default)]
+struct WorstSlot {
+    duration_ns: AtomicU64,
+    budget_ns: AtomicU64,
+    callback: AtomicU64,
+    gap_ns: AtomicU64,
+    /// Phase in bits 0..8, flags in bits 8..16, strip in bits 32..64.
+    packed: AtomicU64,
+}
+
+impl WorstSlot {
+    fn store(&self, w: &WorstCallback) {
+        self.duration_ns.store(w.duration_ns, Ordering::Relaxed);
+        self.budget_ns.store(w.budget_ns, Ordering::Relaxed);
+        self.callback.store(w.callback, Ordering::Relaxed);
+        self.gap_ns.store(w.longest_gap_ns, Ordering::Relaxed);
+        self.packed.store(u64::from(w.phase as u8) | (u64::from(w.flags) << 8) | (u64::from(w.strip) << 32), Ordering::Relaxed);
+    }
+
+    fn load(&self) -> WorstCallback {
+        if self.duration_ns.load(Ordering::Relaxed) == 0 {
+            return WorstCallback::default();
+        }
+        let packed = self.packed.load(Ordering::Relaxed);
+        WorstCallback {
+            duration_ns: self.duration_ns.load(Ordering::Relaxed),
+            budget_ns: self.budget_ns.load(Ordering::Relaxed),
+            callback: self.callback.load(Ordering::Relaxed),
+            phase: Phase::from_code((packed & 0xff) as u8),
+            strip: (packed >> 32) as u32,
+            longest_gap_ns: self.gap_ns.load(Ordering::Relaxed),
+            flags: ((packed >> 8) & 0xff) as u8,
+        }
+    }
+}
 
 /// Approximate, nonblocking view of lifetime output diagnostics.
 ///
@@ -75,9 +203,21 @@ pub struct CallbackTelemetry {
     pub unavailable_silence_frames: u64,
     /// Render frames silenced because rendering panicked, or an earlier panic latched the fault.
     pub fault_silence_frames: u64,
+    /// The longest callbacks since open (peak resets restart them), longest first, with what the
+    /// callback was doing (#162). Empty slots have a zero duration.
+    pub worst: [WorstCallback; WORST_KEPT],
     /// The output stream's device-loop counters when the native WASAPI backend serves it (`None`
     /// on cpal). Filled by `Player::callback_telemetry` from the stream, not by the callback.
     pub backend: Option<StreamStats>,
+}
+
+impl CallbackTelemetry {
+    /// The longest callback since open with its phase, strip and flags, or `None` before any
+    /// callback was timed. The render-headroom bench reads this per worst block (#124).
+    #[must_use]
+    pub fn worst_callback_snapshot(&self) -> Option<WorstCallback> {
+        self.worst.first().copied().filter(|w| w.duration_ns > 0)
+    }
 }
 
 /// Callbacks kept for the recent window: one second at 48 kHz down to 47-frame buffers. Smaller
@@ -113,6 +253,9 @@ pub(crate) struct Counters {
     last_frames: AtomicU64,
     last_rate: AtomicU64,
     recent: Recent,
+    worst: [WorstSlot; WORST_KEPT],
+    /// The phase marker the render writes and the accumulator reads (#162).
+    marker: Arc<PhaseMarker>,
     duration_histogram: [AtomicU64; 16],
     pub backend_errors: AtomicU64,
     pub device_lost_errors: AtomicU64,
@@ -122,6 +265,11 @@ pub(crate) struct Counters {
 }
 
 impl Counters {
+    /// The marker the callback writes: shared with the mix engine.
+    pub fn marker(&self) -> &Arc<PhaseMarker> {
+        &self.marker
+    }
+
     pub fn snapshot(&self) -> CallbackTelemetry {
         let callbacks = self.callbacks.load(Ordering::Relaxed);
         let frames = self.last_frames.load(Ordering::Relaxed);
@@ -153,6 +301,7 @@ impl Counters {
             contention_silence_frames: self.contention_silence_frames.load(Ordering::Relaxed),
             unavailable_silence_frames: self.unavailable_silence_frames.load(Ordering::Relaxed),
             fault_silence_frames: self.fault_silence_frames.load(Ordering::Relaxed),
+            worst: std::array::from_fn(|i| self.worst[i].load()),
             backend: None,
         }
     }
@@ -175,20 +324,51 @@ impl Counters {
 pub(crate) struct Accumulator(CallbackTelemetry, u64);
 
 impl Accumulator {
+    /// Offers a timed callback to the longest-callbacks table: the marker's attribution is
+    /// copied in when it ranks. Plain stores into fixed storage.
+    fn offer(worst: &mut [WorstCallback; WORST_KEPT], callback: u64, counters: &Counters, ns: u64, budget_ns: u64, flags: u8) {
+        let Some(at) = worst.iter().position(|w| ns > w.duration_ns) else { return };
+        let stamp = counters.marker.read();
+        let entry = WorstCallback {
+            duration_ns: ns,
+            budget_ns,
+            callback,
+            phase: stamp.gap_phase,
+            strip: stamp.gap_strip,
+            longest_gap_ns: stamp.longest_gap_ns,
+            flags,
+        };
+        if let Some(tail) = worst.get_mut(at..) {
+            tail.rotate_right(1);
+        }
+        worst[at] = entry;
+        for (slot, w) in counters.worst.iter().zip(worst.iter()).skip(at) {
+            slot.store(w);
+        }
+    }
+}
+
+impl Accumulator {
     /// Test shorthand for a callback that overlapped no plug-in creation.
     #[cfg(test)]
     pub fn record(&mut self, counters: &Counters, frames: usize, rate: u32, elapsed: Option<Duration>) {
-        self.record_overlap(counters, frames, rate, elapsed, false);
+        self.record_overlap(counters, frames, rate, elapsed, false, false);
     }
 
-    /// Records one callback; `creating` says a plug-in creation was running during it.
-    pub fn record_overlap(&mut self, counters: &Counters, frames: usize, rate: u32, elapsed: Option<Duration>, creating: bool) {
+    /// Records one callback; `creating` says a plug-in creation was running during it and
+    /// `editor_open` that a plug-in editor was open. The phase marker is read here when the
+    /// callback ranks among the longest, so the render must have ended it (`PhaseMarker::end`).
+    pub fn record_overlap(&mut self, counters: &Counters, frames: usize, rate: u32, elapsed: Option<Duration>, creating: bool, editor_open: bool) {
         let seen = counters.peak_resets.load(Ordering::Relaxed);
         if seen != self.1 {
             // The UI asked for a new peak: forget the since-open maxima, once per request.
             self.1 = seen;
             self.0.max_duration_ns = 0;
             self.0.max_load_ppm = 0;
+            self.0.worst = Default::default();
+            for slot in &counters.worst {
+                slot.store(&WorstCallback::default());
+            }
         }
         let s = &mut self.0;
         s.callbacks = s.callbacks.saturating_add(1);
@@ -206,6 +386,10 @@ impl Accumulator {
                     published.store(*count, Ordering::Relaxed);
                 }
             }
+            let budget_ns =
+                if frames > 0 && rate > 0 { (frames as u128 * 1_000_000_000 / u128::from(rate)).min(u128::from(u64::MAX)) as u64 } else { 0 };
+            let flags = (u8::from(creating) * FLAG_CREATING) | (u8::from(editor_open) * FLAG_EDITOR_OPEN);
+            Self::offer(&mut s.worst, s.callbacks, counters, ns, budget_ns, flags);
             if frames > 0 && rate > 0 {
                 let used = u128::from(ns) * u128::from(rate);
                 let budget = frames as u128 * 1_000_000_000;
@@ -389,7 +573,12 @@ mod recent_tests {
         let mut accumulate = Accumulator::default();
         let (_, stats) = measure(|| {
             for i in 0..3000u64 {
-                accumulate.record_overlap(&counters, 128, 48_000, Some(Duration::from_micros(i % 4000)), i % 7 == 0);
+                let marker = counters.marker();
+                marker.begin();
+                marker.enter(Phase::StripRender, Some((i % 8) as u32));
+                marker.enter(Phase::Output, None);
+                marker.end();
+                accumulate.record_overlap(&counters, 128, 48_000, Some(Duration::from_micros(i % 4000)), i % 7 == 0, i % 5 == 0);
             }
         });
         assert!(stats.is_zero());
@@ -413,5 +602,88 @@ mod reset_tests {
         assert_eq!((s.over_budget_callbacks, s.callbacks), (1, 2));
         accumulate.record(&counters, 48, 48_000, Some(Duration::from_micros(50)));
         assert_eq!(counters.snapshot().max_load_ppm, 100_000, "one reset applies once");
+    }
+}
+
+#[cfg(test)]
+mod worst_tests {
+    use super::*;
+
+    /// One callback of `ms` milliseconds at 128 frames and 48 kHz (a 2.67 ms budget), whose marker
+    /// went through `stops`: `(phase, strip, time in ns the phase was entered at)`, then idle at the end.
+    fn run(accumulate: &mut Accumulator, counters: &Counters, ms: f64, stops: &[(Phase, Option<u32>, u64)], creating: bool) {
+        let end = (ms * 1e6) as u64;
+        let marker = counters.marker();
+        marker.begin_at(0);
+        for &(phase, strip, at) in stops {
+            marker.enter_at(phase, strip, at);
+        }
+        marker.enter_at(Phase::Idle, None, end);
+        accumulate.record_overlap(counters, 128, 48_000, Some(Duration::from_nanos(end)), creating, false);
+    }
+
+    #[test]
+    fn the_longest_callback_keeps_the_phase_and_strip_it_stood_in() {
+        let counters = Counters::default();
+        let mut accumulate = Accumulator::default();
+        let mut stops = vec![(Phase::StripRender, Some(0), 10_000), (Phase::StripRender, Some(1), 400_000), (Phase::Output, None, 600_000)];
+        run(&mut accumulate, &counters, 0.7, &stops, false);
+        stops = vec![(Phase::StripRender, Some(0), 10_000), (Phase::StripRender, Some(3), 400_000), (Phase::Output, None, 19_300_000)];
+        run(&mut accumulate, &counters, 19.4, &stops, true);
+        // A shorter one afterwards does not displace it.
+        run(&mut accumulate, &counters, 1.0, &stops[..1], false);
+        let s = counters.snapshot();
+        let w = s.worst_callback_snapshot().expect("a worst callback");
+        assert_eq!((w.duration_ns, w.callback), (19_400_000, 2));
+        assert_eq!((w.phase, w.strip_index()), (Phase::StripRender, Some(3)));
+        assert_eq!(w.longest_gap_ns, 18_900_000);
+        assert!(w.plugin_loading() && !w.editor_open());
+        assert_eq!(w.verdict(), Some(Verdict::Preempted));
+        assert_eq!(s.max_duration_ns, 19_400_000);
+        assert_eq!(CallbackTelemetry::default().worst_callback_snapshot(), None);
+    }
+
+    #[test]
+    fn the_top_three_keep_their_order() {
+        let counters = Counters::default();
+        let mut accumulate = Accumulator::default();
+        for (n, ms) in [5.0, 9.0, 2.0, 7.0, 12.0, 3.0].into_iter().enumerate() {
+            run(&mut accumulate, &counters, ms, &[(Phase::StripRender, Some(n as u32), 1_000)], false);
+        }
+        let s = counters.snapshot();
+        let got: Vec<(u64, Option<u32>)> = s.worst.iter().map(|w| (w.duration_ns / 1_000_000, w.strip_index())).collect();
+        assert_eq!(got, [(12, Some(4)), (9, Some(1)), (7, Some(3))]);
+        assert_eq!(s.worst.iter().map(|w| w.callback).collect::<Vec<_>>(), [5, 2, 4]);
+    }
+
+    #[test]
+    fn a_callback_that_stood_still_is_preempted_and_one_that_kept_moving_is_slow() {
+        let counters = Counters::default();
+        let mut accumulate = Accumulator::default();
+        // 20 ms in one phase of a 2.67 ms budget: the marker did not advance for most of it.
+        run(&mut accumulate, &counters, 20.0, &[(Phase::StripRender, Some(0), 100_000)], false);
+        assert_eq!(counters.snapshot().worst[0].verdict(), Some(Verdict::Preempted));
+        // 20 ms spread over four 5 ms strips: heavy, not stalled.
+        let counters = Counters::default();
+        let mut accumulate = Accumulator::default();
+        let stops: Vec<_> = (0..4).map(|i| (Phase::StripRender, Some(i), u64::from(i) * 5_000_000)).collect();
+        run(&mut accumulate, &counters, 20.0, &stops, false);
+        assert_eq!(counters.snapshot().worst[0].verdict(), Some(Verdict::Slow));
+        // Within the budget there is nothing to explain.
+        let counters = Counters::default();
+        let mut accumulate = Accumulator::default();
+        run(&mut accumulate, &counters, 1.0, &[(Phase::StripRender, Some(0), 10_000)], false);
+        assert_eq!(counters.snapshot().worst[0].verdict(), None);
+    }
+
+    #[test]
+    fn a_peak_reset_clears_the_longest_callbacks() {
+        let counters = Counters::default();
+        let mut accumulate = Accumulator::default();
+        run(&mut accumulate, &counters, 9.0, &[(Phase::Auxes, Some(2), 1_000)], false);
+        counters.reset_peak();
+        run(&mut accumulate, &counters, 1.0, &[(Phase::Masters, Some(5), 1_000)], false);
+        let s = counters.snapshot();
+        assert_eq!((s.worst[0].duration_ns, s.worst[0].phase, s.worst[1].duration_ns), (1_000_000, Phase::Masters, 0));
     }
 }

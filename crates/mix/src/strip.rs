@@ -1,4 +1,5 @@
 use super::*;
+use transit_rt::phase_marker::Phase;
 
 /// Live input routed to monitored tracks.
 pub(crate) struct LiveInput<'a> {
@@ -11,6 +12,8 @@ pub(crate) struct LiveInput<'a> {
     pub(crate) frame: u64,
     /// The machine's I/O paths, which resolve an input route's name (a label's number is the fallback).
     pub(crate) io: Option<&'a transit_model::IoMap>,
+    /// The callback's phase marker (#162), when the engine has one: strips say which they are in.
+    pub(crate) marker: Option<&'a transit_rt::phase_marker::PhaseMarker>,
 }
 
 pub(crate) struct StripRender<'a> {
@@ -26,6 +29,10 @@ pub(crate) struct StripRender<'a> {
 /// Source → trim → inserts → (pre-fader copy) → mute/fader for one strip. Independent of other
 /// strips except that aux inputs read `busses`, so non-aux strips can run in parallel.
 pub(crate) fn process_strip(t: &Track, strip: &mut Strip, block: &StripRender<'_>) {
+    if let Some(marker) = block.live.marker {
+        let phase = if is_aux(t) { Phase::Auxes } else { Phase::StripRender };
+        marker.enter(phase, Some(u32::from(strip.track)));
+    }
     let transport = transport_at(block.s, block.pos, !block.live.monitor_only, block.live.recording);
     process_strip_source(t, strip, block, &transport);
     process_strip_inserts(t, strip, block, &transport);

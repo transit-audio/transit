@@ -36,6 +36,7 @@ pub fn run(
         telemetry: None,
         midi: midi(profile_mappings),
         open_asio_driver: None,
+        strips: Vec::new(),
         log_lines: log_dir.as_ref().map(|d| diagnostics::tail_log(&d.join(diagnostics::LOG_FILE), diagnostics::LOG_LINES)).unwrap_or_default(),
         log_dir,
     };

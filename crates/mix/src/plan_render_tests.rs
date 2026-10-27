@@ -257,3 +257,20 @@ fn changed_sink_edges_refresh_cached_indices_even_when_sink_order_stays_the_same
         }
     }
 }
+
+#[test]
+fn the_render_writes_its_phases_to_the_marker_without_allocating() {
+    use transit_rt::phase_marker::{Phase, PhaseMarker};
+    let (s, _, _) = audio_session();
+    let mut rig = Rig::new();
+    let marker = std::sync::Arc::new(PhaseMarker::new());
+    rig.eng.set_phase_marker(std::sync::Arc::clone(&marker));
+    rig.publish(&s);
+    rig.render(2);
+    marker.begin();
+    let (_, stats) = transit_rt::testing::measure(|| rig.eng.render_active(0, BLOCK, &mut rig.out));
+    assert!(stats.is_zero(), "{stats:?}");
+    let seen = marker.read();
+    assert_eq!(seen.phase, Phase::Output, "the block ends in the output copy");
+    assert!(seen.at_ns > 0 && seen.gap_phase != Phase::Idle, "{seen:?}");
+}

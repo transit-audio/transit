@@ -6,6 +6,7 @@
 use super::compile::SAMPLER;
 use super::plan::{ActivePlan, Attach, CellKind, CellLoc, PlanTables, Shape};
 use super::*;
+use transit_rt::phase_marker::Phase;
 
 /// The Session of an engine without a plan.
 static NO_METER: std::sync::LazyLock<StripMeter> = std::sync::LazyLock::new(StripMeter::default);
@@ -394,6 +395,9 @@ impl MixEngine {
         let frame = self.events.next_frame;
         self.events.next_frame = frame.saturating_add(frames as u64);
         self.last_end = pos.saturating_add(frames as i64);
+        if let Some(m) = self.marker.as_deref() {
+            m.enter(Phase::Mixdown, None);
+        }
         tables.clear_block(frames);
         tables.align_keys(s, pos, !self.input.is_empty(), status);
         let PlanTables { strips, phase1, aux_end, layers, keys, busses, main, main_fmt, main_meter, sinks, io, .. } = tables;
@@ -408,6 +412,12 @@ impl MixEngine {
             no_suspend: self.no_suspend,
             frame,
             io: Some(&**io),
+            marker: self.marker.as_deref(),
+        };
+        let mark = |phase: Phase, strip: Option<u32>| {
+            if let Some(m) = live_in.marker {
+                m.enter(phase, strip);
+            }
         };
         let n_strips = strips.len();
         let (p1, rest) = strips.split_at_mut(phase1.min(n_strips));
@@ -439,6 +449,7 @@ impl MixEngine {
         if let Some(panic) = p1.iter_mut().find_map(|st| st.panic.take()) {
             std::panic::resume_unwind(panic);
         }
+        mark(Phase::Mixdown, None);
         let DeviceLatency { main: main_arrival, device } =
             fold_latency(s, RenderPhases { p1, auxes, others, phase1 }, busses, sinks, pos, !self.input.is_empty());
         self.main_arrival = main_arrival;
@@ -472,16 +483,19 @@ impl MixEngine {
         let transport = transport_at(s, pos, !self.monitor_only, self.recording);
         for st in others.iter_mut() {
             let Some(t) = track(st).filter(|t| t.kind == TrackKind::Master && !t.inactive) else { continue };
+            mark(Phase::Masters, Some(u32::from(st.track)));
             process_master(t, st, main, pos, frames, &transport, self.no_suspend);
             st.meter.measure(main, frames, 0.0);
             st.meter.plugin_failures = st.failures;
         }
+        mark(Phase::Mixdown, None);
         if self.metronome && !self.monitor_only && s.edit.click && (!s.edit.flag("click.only_during_record") || self.recording) {
             click::render(s, pos, frames, main, self.metronome_gain);
         }
         if let Some(c) = self.count_in {
             click::render_count_in(s, c, frames, main, self.metronome_gain);
         }
+        mark(Phase::Output, None);
         for (c, o) in out.iter_mut().enumerate() {
             let src = main.get(c);
             for i in 0..frames {

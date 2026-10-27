@@ -199,6 +199,7 @@ impl Player {
         player.ext_probe = Some(ext_probe);
         let render_tap = Arc::new(crate::realtime_render::RenderTap::new(target.sample_rate));
         audio.set_render_tap(Arc::clone(&render_tap));
+        audio.set_phase_marker(Arc::clone(player.fault.telemetry.marker()));
         player.render_tap = Some(render_tap);
         player.loop_probe = Some(Arc::new(crate::loop_probe::LoopProbe::new(device_rate)));
         *player.capture.get_mut() = Some(capture);

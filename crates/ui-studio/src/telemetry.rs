@@ -9,7 +9,7 @@
 use crate::StudioApp;
 
 use crate::theme::{SPACE, TOKENS};
-use transit_playback::telemetry::{CallbackTelemetry, DURATION_LIMITS_NS, StatsBackend, StreamStats};
+use transit_playback::telemetry::{CallbackTelemetry, DURATION_LIMITS_NS, StatsBackend, StreamStats, WorstCallback};
 
 /// Minimum time between two reads of the counters (about four a second).
 pub const POLL_SECS: f64 = 0.25;
@@ -129,6 +129,65 @@ pub fn detail_rows(t: &CallbackTelemetry) -> Vec<String> {
         format!("Frames silenced by a render fault: {}", t.fault_silence_frames),
     ]);
     rows
+}
+
+/// What a strip index of the callback's phase marker names: a track, and the plug-in (or the
+/// chain of them) it runs. Resolved from the session by the reader (#162); the callback only
+/// stores the index.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct StripName {
+    pub track: String,
+    /// The instrument's display name, else the inserts', comma separated; `None` for a track with no plug-in.
+    pub plugin: Option<String>,
+}
+
+fn ms_text(ns: u64) -> String {
+    format!("{:.1} ms", ns as f64 / 1e6)
+}
+
+/// Where a longest callback was: `<track>: <plug-in> (strip render)` for a strip phase, the
+/// phase's name otherwise. An index the session no longer has reads `strip N`.
+fn where_text(w: &WorstCallback, strips: &[StripName], with_verdict: bool) -> String {
+    let phase = w.phase.label();
+    let verdict = w.verdict().filter(|_| with_verdict).map_or(String::new(), |v| format!(", {}", v.label()));
+    match w.strip_index().filter(|_| w.phase.runs_strip()) {
+        Some(i) => {
+            let name = match strips.get(i as usize) {
+                Some(s) => match &s.plugin {
+                    Some(p) => format!("{}: {p}", s.track),
+                    None => s.track.clone(),
+                },
+                None => format!("strip {i}"),
+            };
+            format!("{name} ({phase}{verdict})")
+        }
+        None if verdict.is_empty() => phase.to_owned(),
+        None => format!("{phase} ({})", verdict.trim_start_matches(", ")),
+    }
+}
+
+fn yes_no(b: bool) -> &'static str {
+    if b { "yes" } else { "no" }
+}
+
+/// The report's attribution lines for the longest callbacks (#162): the longest one with the
+/// track, plug-in and phase it was in, the loading and editor flags and, for one over its
+/// budget, `(preempted)` or `(slow)`; then the longest three. Empty before a timed callback.
+pub fn longest_callback_lines(t: &CallbackTelemetry, strips: &[StripName]) -> Vec<String> {
+    let Some(w) = t.worst_callback_snapshot() else { return Vec::new() };
+    let mut line = format!(
+        "Longest callback {} during {}; plug-in loading: {}; editor open: {}",
+        ms_text(w.duration_ns),
+        where_text(&w, strips, false),
+        yes_no(w.plugin_loading()),
+        yes_no(w.editor_open()),
+    );
+    if let Some(v) = w.verdict() {
+        line.push_str(&format!(" ({})", v.label()));
+    }
+    let top: Vec<String> =
+        t.worst.iter().filter(|w| w.duration_ns > 0).map(|w| format!("{} {}", ms_text(w.duration_ns), where_text(w, strips, true))).collect();
+    vec![line, format!("Longest callbacks: {}", top.join("; "))]
 }
 
 /// The Audio Devices line for the device loop of a native stream, with the fields `backend` fills

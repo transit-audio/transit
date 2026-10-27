@@ -325,6 +325,8 @@ pub struct Report {
     pub midi: Midi,
     /// The ASIO driver this process runs (the native backend's), for the not-probed lines.
     pub open_asio_driver: Option<String>,
+    /// The session's strips by track index, for naming the strip of the longest callback (#162).
+    pub strips: Vec<crate::telemetry::StripName>,
     pub log_dir: Option<PathBuf>,
     pub log_lines: Vec<String>,
 }
@@ -436,7 +438,7 @@ impl Report {
         section(&mut o, "Callback telemetry");
         match &self.telemetry {
             Some(t) => {
-                for row in crate::telemetry::detail_rows(t) {
+                for row in crate::telemetry::detail_rows(t).into_iter().chain(crate::telemetry::longest_callback_lines(t, &self.strips)) {
                     o.push_str(&row);
                     o.push('\n');
                 }
@@ -706,6 +708,7 @@ mod tests {
                 last_heard: Some(Some(("Keystation 49".into(), Some(10)))),
             },
             open_asio_driver: None,
+            strips: Vec::new(),
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
             log_lines: vec!["INFO opened /home/alice/Music/song.transit".into(), "WARN something".into()],
         }

@@ -1100,6 +1100,7 @@ impl DeviceOutput {
         let mut offset = 0u64;
         block.render(&mut |buffer| {
             render_held(access, fault, shared, buffer, channels, &mut plans, &mut actions);
+            fault.telemetry.marker().enter(telemetry::Phase::DeviceIo, None);
             if let Some(probe) = probe {
                 probe.play(buffer, channels, position.map(|p| p + offset));
             }
@@ -1143,13 +1144,16 @@ fn render_callbacks(
     let render = move |block: &mut ab::RenderBlock<'_>| {
         crate::mark_audio_thread();
         let started = telemetry::Timer::start();
+        fault.telemetry.marker().begin();
         let creating_before = transit_mix::creating_instance();
         let frames = block.frames;
         clock.observer.record(frames, block.stamp);
         fault.beats.fetch_add(1, Ordering::Relaxed);
         output.render(block);
         let creating = creating_before || transit_mix::creating_instance();
-        output.timing.record_overlap(&fault.telemetry, frames, rate, started.elapsed(), creating);
+        fault.telemetry.marker().end();
+        let editor_open = output.shared.editors_open.load(Ordering::Relaxed);
+        output.timing.record_overlap(&fault.telemetry, frames, rate, started.elapsed(), creating, editor_open);
     };
     (Box::new(render), Box::new(error))
 }

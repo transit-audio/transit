@@ -494,6 +494,8 @@ pub(super) struct Audio {
     /// The real-time render's capture (ADR 0027): control arms it; this thread copies the blocks
     /// the render keeps into its preallocated ring.
     render_tap: Option<Arc<crate::realtime_render::RenderTap>>,
+    /// The callback's phase marker (#162).
+    marker: Option<Arc<crate::telemetry::PhaseMarker>>,
     transport: Transport,
     shared: Arc<Shared>,
     pending: usize,
@@ -602,6 +604,7 @@ impl Audio {
                 probe_block: None,
                 ext_probe: None,
                 render_tap: None,
+                marker: None,
                 shared,
                 pending: 0,
                 read,
@@ -696,6 +699,18 @@ impl Audio {
             self.shared.playing.store(false, Ordering::Relaxed);
         }
         Ok(())
+    }
+
+    /// The callback enters `phase` (#162): one clock read and relaxed stores.
+    fn mark(&self, phase: crate::telemetry::Phase) {
+        if let Some(marker) = &self.marker {
+            marker.enter(phase, None);
+        }
+    }
+
+    pub(super) fn set_phase_marker(&mut self, marker: Arc<crate::telemetry::PhaseMarker>) {
+        self.plans.set_phase_marker(Arc::clone(&marker));
+        self.marker = Some(marker);
     }
 
     fn service_actions(&mut self, budget: &mut action_lane::Budget) {
@@ -861,6 +876,9 @@ impl Audio {
         // is not delay-compensated and is never part of a bounce (ADR 0027 decision 1).
         let gain = if self.render_tap.as_ref().is_some_and(|t| t.busy()) { 0.0 } else { gain };
         self.plans.set_metronome(gain, click);
+        if let Some(marker) = &self.marker {
+            marker.enter(crate::telemetry::Phase::MidiDispatch, None);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         self.midi_inbox.dispatch(
             self.read,
@@ -1009,6 +1027,7 @@ impl Audio {
             external.callback(now, self.transport.timeline.next_output());
         }
         let channels = channels.max(1);
+        self.mark(crate::telemetry::Phase::Service);
         self.service_actions(actions);
         if self.faulted {
             return Ok(());
