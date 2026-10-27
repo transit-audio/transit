@@ -1260,7 +1260,27 @@ fn service_plugin_requests() -> bool {
 }
 
 #[cfg(test)]
+mod arrange_edit_tests;
+#[cfg(test)]
+mod arrange_loop_tests;
+#[cfg(test)]
+mod devices_chain_tests;
+#[cfg(test)]
+mod devices_sidechain_tests;
+#[cfg(test)]
 mod emergency_tests;
+#[cfg(test)]
+mod fades_gesture_tests;
+#[cfg(test)]
+mod loopbar_gesture_tests;
+#[cfg(test)]
+mod mixer_controls_tests;
+#[cfg(test)]
+mod mixer_layout_tests;
+#[cfg(test)]
+mod mixer_meter_tests;
+#[cfg(test)]
+mod mixer_routing_tests;
 #[cfg(test)]
 mod plugin_header_tests;
 #[cfg(test)]
@@ -1271,6 +1291,8 @@ mod plugin_requests_tests;
 mod plugin_retry_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod track_actions_tests;
 
 #[cfg(test)]
 mod tempo_tests;
