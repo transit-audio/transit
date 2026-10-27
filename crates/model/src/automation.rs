@@ -1,6 +1,6 @@
 //! Automation lanes and modes.
 
-use soundcraft_time::Samples;
+use transit_time::Samples;
 
 /// Automation modes (per track).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]

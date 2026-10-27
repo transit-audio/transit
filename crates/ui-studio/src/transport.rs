@@ -9,7 +9,7 @@ use crate::icons::{self, Icon};
 use crate::theme::{TOKENS, TRANSPORT_H};
 use egui::{Align2, Color32, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
-use soundcraft_time::Samples;
+use transit_time::Samples;
 
 /// A square transport button, including its click count.
 fn button(app: &mut StudioApp, ui: &mut Ui, name: &str, which: Icon, on: bool, on_color: Color32) -> egui::Response {
@@ -49,16 +49,16 @@ impl StudioApp {
         let stuck = player.stuck_slots().into_iter().next();
         let mut slow = None;
         for t in &self.engine.session().tracks {
-            let slots = t.instrument.as_ref().map(|i| (soundcraft_mix::INSTRUMENT_SLOT, i)).into_iter();
+            let slots = t.instrument.as_ref().map(|i| (transit_mix::INSTRUMENT_SLOT, i)).into_iter();
             let slots = slots.chain(t.mixer.inserts.iter().enumerate().filter_map(|(s, i)| Some((s, i.as_ref()?))));
             for (slot, ins) in slots {
-                if matches!(player.slot_load(t.id, slot), Some(soundcraft_playback::SlotLoad::Slow { .. })) {
-                    slow.get_or_insert((ins.plugin.clone(), slot == soundcraft_mix::INSTRUMENT_SLOT));
+                if matches!(player.slot_load(t.id, slot), Some(transit_playback::SlotLoad::Slow { .. })) {
+                    slow.get_or_insert((ins.plugin.clone(), slot == transit_mix::INSTRUMENT_SLOT));
                 }
             }
         }
         if let Some((_, slot, id)) = stuck.filter(|_| self.play_pending()) {
-            Some((self.plugin_name(&id, slot == soundcraft_mix::INSTRUMENT_SLOT), true))
+            Some((self.plugin_name(&id, slot == transit_mix::INSTRUMENT_SLOT), true))
         } else {
             slow.map(|(id, instrument)| (self.plugin_name(&id, instrument), false))
         }
@@ -103,7 +103,7 @@ fn play_button(app: &mut StudioApp, ui: &mut Ui, on: bool) -> egui::Response {
 pub fn bars_beats(app: &StudioApp, at: Samples) -> String {
     let s = app.engine.session();
     let bb = s.tempo.bar_beat_at(at.max(0), s.sample_rate);
-    let sixteenth = soundcraft_time::TICKS_PER_QUARTER / 4;
+    let sixteenth = transit_time::TICKS_PER_QUARTER / 4;
     format!("{:>3}. {}. {}. {:03}", bb.bar, bb.beat, bb.tick / sixteenth + 1, bb.tick % sixteenth)
 }
 

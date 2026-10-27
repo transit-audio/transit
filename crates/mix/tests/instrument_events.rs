@@ -3,15 +3,15 @@
 //! instrument writes down every event it receives with its absolute render frame.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::Plugin;
-use soundcraft_mix::{
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use transit_dsp::Plugin;
+use transit_mix::{
     Adoption, Arrival, DeviceGeneration, Due, EngineEpoch, EventLimits, EventOutcome, INSTRUMENT_SLOT, InstanceSpec, InstrumentEvent, MAX_OPEN,
     MAX_PEDALS, MAX_PORTS, Message, MixEngine, NewInstance, NoteId, PlanCompiler, PlanGeneration, PlanLimits, PluginEvent, RenderFrame, RenderTarget,
     Shed, SlotBinding, SlotGen, Source, TransportEpoch,
 };
-use soundcraft_model::{ChannelFormat, Insert, Session, TrackId, TrackKind};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use transit_model::{ChannelFormat, Insert, Session, TrackId, TrackKind};
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 
 #[global_allocator]
@@ -42,7 +42,7 @@ struct Recorder {
 }
 
 impl Plugin for Recorder {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
         self.inner.info()
     }
     fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -140,15 +140,15 @@ impl Rig {
     }
 
     fn publish(&mut self, s: &Session) {
-        self.publish_with_mode(s, soundcraft_mix::CompileMode::Update);
+        self.publish_with_mode(s, transit_mix::CompileMode::Update);
     }
 
-    fn publish_with_mode(&mut self, s: &Session, mode: soundcraft_mix::CompileMode) {
+    fn publish_with_mode(&mut self, s: &Session, mode: transit_mix::CompileMode) {
         self.generation = self.generation.checked_next().unwrap();
         let (heard, made, fail) = (Arc::clone(&self.heard), Arc::clone(&self.made), Arc::clone(&self.fail));
         let (refuse_releases, refuse_downs) = (Arc::clone(&self.refuse_releases), Arc::clone(&self.refuse_downs));
         let mut make = move |spec: &InstanceSpec, _: SlotGen| -> Option<NewInstance> {
-            let mut inner = soundcraft_dsp::create("gain")?;
+            let mut inner = transit_dsp::create("gain")?;
             inner.prepare(SR as f32, BLOCK, spec.ch);
             let mut n = made.lock().unwrap();
             *n += 1;
@@ -213,7 +213,7 @@ fn a_new_document_refuses_old_slot_events_and_drops_queued_notes() {
     let old = rig.binding();
     let event = rig.event(port(1, 0), Due::Next, on(60));
     assert_eq!(rig.mix.queue_event(&event), EventOutcome::Queued);
-    rig.publish_with_mode(&rig.session.clone(), soundcraft_mix::CompileMode::NewDocument);
+    rig.publish_with_mode(&rig.session.clone(), transit_mix::CompileMode::NewDocument);
     assert_ne!(rig.binding(), old);
     assert_eq!(rig.mix.queue_event(&event), EventOutcome::StaleBinding);
     rig.render(2);
@@ -620,10 +620,10 @@ fn a_revocation_cancels_queued_events_and_releases_sounding_notes() {
 fn a_seek_releases_the_clips_notes_and_keeps_live_ones() {
     let mut rig = Rig::new();
     let mut s = rig.session.clone();
-    let mut seq = soundcraft_midi::Sequence::default();
-    seq.notes.push(soundcraft_midi::Note { pitch: 48, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 9600 });
+    let mut seq = transit_midi::Sequence::default();
+    seq.notes.push(transit_midi::Note { pitch: 48, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 9600 });
     let cid = s.new_clip_id();
-    s.track_mut(rig.track).unwrap().playlist_mut().unwrap().clips.push(soundcraft_model::Clip::midi(cid, "m", 0, 48_000 * 8, seq));
+    s.track_mut(rig.track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::midi(cid, "m", 0, 48_000 * 8, seq));
     rig.publish(&s);
     rig.pos = 0;
     let now = rig.mix.next_frame().0;
@@ -908,17 +908,17 @@ fn reset_controllers_preserves_other_sources_pedals_without_a_glitch() {
 fn synth_energy_after_seek(seek: bool, pedal: u8, clip_pedal: bool) -> f32 {
     let (mut session, track) = instrument_session("subtractive_synth");
     if clip_pedal {
-        let mut seq = soundcraft_midi::Sequence::default();
+        let mut seq = transit_midi::Sequence::default();
         for (tick, value) in [(0, 110), (100, 63)] {
-            seq.ctrls.push(soundcraft_midi::CtrlEvent { tick, channel: 0, kind: soundcraft_midi::CtrlKind::Cc(64), value });
+            seq.ctrls.push(transit_midi::CtrlEvent { tick, channel: 0, kind: transit_midi::CtrlKind::Cc(64), value });
         }
         let cid = session.new_clip_id();
-        session.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(soundcraft_model::Clip::midi(cid, "pedal", 0, 48_000 * 8, seq));
+        session.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::midi(cid, "pedal", 0, 48_000 * 8, seq));
     }
     let mut mix = MixEngine::realtime_with_events(target(), EngineEpoch::FIRST, EventLimits::default());
     let mut comp = PlanCompiler::new(target(), PlanLimits::default());
     let mut make = |spec: &InstanceSpec, _: SlotGen| {
-        let mut p = soundcraft_dsp::create(&spec.id)?;
+        let mut p = transit_dsp::create(&spec.id)?;
         p.prepare(SR as f32, BLOCK, spec.ch);
         p.set_param("amp_release", 1.0);
         Some(NewInstance { plugin: p, refused_state: false })
@@ -1060,13 +1060,13 @@ fn seek_releases_clip_pedals_to_live_values_without_resetting_the_channel() {
     for pedal in [64, 66, 67, 69] {
         let mut rig = Rig::new();
         let mut s = rig.session.clone();
-        let mut seq = soundcraft_midi::Sequence::default();
-        seq.notes.push(soundcraft_midi::Note { pitch: 48, velocity: 100, release_velocity: 0, channel: 0, start: 0, length: 9600 });
+        let mut seq = transit_midi::Sequence::default();
+        seq.notes.push(transit_midi::Note { pitch: 48, velocity: 100, release_velocity: 0, channel: 0, start: 0, length: 9600 });
         for (tick, value) in [(0, 127), (100, 63)] {
-            seq.ctrls.push(soundcraft_midi::CtrlEvent { tick, channel: 0, kind: soundcraft_midi::CtrlKind::Cc(pedal), value });
+            seq.ctrls.push(transit_midi::CtrlEvent { tick, channel: 0, kind: transit_midi::CtrlKind::Cc(pedal), value });
         }
         let cid = s.new_clip_id();
-        s.track_mut(rig.track).unwrap().playlist_mut().unwrap().clips.push(soundcraft_model::Clip::midi(cid, "pedal", 0, 48_000 * 8, seq));
+        s.track_mut(rig.track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::midi(cid, "pedal", 0, 48_000 * 8, seq));
         rig.publish(&s);
         rig.pos = 0;
         let now = rig.mix.next_frame().0;
@@ -1087,10 +1087,10 @@ fn seek_releases_clip_pedals_to_live_values_without_resetting_the_channel() {
     }
 }
 
-fn add_event_clip(rig: &mut Rig, start: i64, seq: soundcraft_midi::Sequence) {
+fn add_event_clip(rig: &mut Rig, start: i64, seq: transit_midi::Sequence) {
     let mut s = rig.session.clone();
     let cid = s.new_clip_id();
-    s.track_mut(rig.track).unwrap().playlist_mut().unwrap().clips.push(soundcraft_model::Clip::midi(cid, "timing", start, 48_000, seq));
+    s.track_mut(rig.track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::midi(cid, "timing", start, 48_000, seq));
     rig.publish(&s);
     rig.session = s;
 }
@@ -1098,10 +1098,10 @@ fn add_event_clip(rig: &mut Rig, start: i64, seq: soundcraft_midi::Sequence) {
 #[test]
 fn clip_pairs_in_time_order_release_within_and_across_blocks() {
     let mut rig = Rig::new();
-    let mut seq = soundcraft_midi::Sequence::default();
+    let mut seq = transit_midi::Sequence::default();
     // Deliberately unordered, all on the same key. The last pair spans a block boundary.
     for (start, length) in [(8, 1), (1, 1), (10, 2), (4, 1)] {
-        seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start, length });
+        seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start, length });
     }
     add_event_clip(&mut rig, 0, seq);
     rig.pos = 0;
@@ -1123,8 +1123,8 @@ fn clip_same_offset_off_precedes_restrike_across_clips() {
     let mut rig = Rig::new();
     // Put the later note in the first clip to catch ordering that only sorts within a clip.
     for (start, length) in [(4, 2), (1, 3)] {
-        let mut seq = soundcraft_midi::Sequence::default();
-        seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start, length });
+        let mut seq = transit_midi::Sequence::default();
+        seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start, length });
         add_event_clip(&mut rig, 0, seq);
     }
     rig.pos = 0;
@@ -1148,9 +1148,9 @@ fn clip_live_pedals_merge_in_both_time_orders() {
             let now = rig.mix.next_frame().0;
             assert_eq!(rig.send(src, now, cc(pedal, 127)), EventOutcome::Queued);
             rig.render(1);
-            let mut seq = soundcraft_midi::Sequence::default();
+            let mut seq = transit_midi::Sequence::default();
             for (tick, value) in [(4, 127), (8, 63)] {
-                seq.ctrls.push(soundcraft_midi::CtrlEvent { tick, channel: 0, kind: soundcraft_midi::CtrlKind::Cc(pedal), value });
+                seq.ctrls.push(transit_midi::CtrlEvent { tick, channel: 0, kind: transit_midi::CtrlKind::Cc(pedal), value });
             }
             let start = rig.pos;
             add_event_clip(&mut rig, start, seq);
@@ -1174,10 +1174,10 @@ fn clip_live_pedal_or_tracks_each_sources_value_through_the_block() {
         assert_eq!(rig.send(a, now, cc(pedal, 100)), EventOutcome::Queued);
         assert_eq!(rig.send(b, now, cc(pedal, 80)), EventOutcome::Queued);
         rig.render(1);
-        let mut seq = soundcraft_midi::Sequence::default();
+        let mut seq = transit_midi::Sequence::default();
         // Reverse storage order: delivery must still be down@88, up@188.
         for (tick, value) in [(8, 1), (4, 90)] {
-            seq.ctrls.push(soundcraft_midi::CtrlEvent { tick, channel: 0, kind: soundcraft_midi::CtrlKind::Cc(pedal), value });
+            seq.ctrls.push(transit_midi::CtrlEvent { tick, channel: 0, kind: transit_midi::CtrlKind::Cc(pedal), value });
         }
         let start = rig.pos;
         add_event_clip(&mut rig, start, seq);
@@ -1195,11 +1195,11 @@ fn clip_live_pedal_or_tracks_each_sources_value_through_the_block() {
 #[test]
 fn dense_clip_events_keep_every_release_and_same_sample_order() {
     let mut rig = Rig::new();
-    let mut seq = soundcraft_midi::Sequence::default();
+    let mut seq = transit_midi::Sequence::default();
     // More events than the scheduler's scratch, including more than a buffer at one sample.
     for start in [8, 1, 4] {
         for _ in 0..300 {
-            seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start, length: 1 });
+            seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start, length: 1 });
         }
     }
     add_event_clip(&mut rig, 0, seq);
@@ -1210,23 +1210,23 @@ fn dense_clip_events_keep_every_release_and_same_sample_order() {
     assert_eq!(rig.mix.event_status().shed.note_on, 0);
 }
 
-fn dense_clip_pedal_trial(transitions: usize) -> (soundcraft_mix::EventStatus, bool, f32) {
+fn dense_clip_pedal_trial(transitions: usize) -> (transit_mix::EventStatus, bool, f32) {
     let (mut session, track) = instrument_session("subtractive_synth");
-    let mut seq = soundcraft_midi::Sequence::default();
+    let mut seq = transit_midi::Sequence::default();
     for i in 0..transitions {
-        seq.ctrls.push(soundcraft_midi::CtrlEvent {
+        seq.ctrls.push(transit_midi::CtrlEvent {
             tick: 22,
             channel: 0,
-            kind: soundcraft_midi::CtrlKind::Cc(64),
+            kind: transit_midi::CtrlKind::Cc(64),
             value: if i % 2 == 0 { 127 } else { 0 },
         });
     }
     let cid = session.new_clip_id();
-    session.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(soundcraft_model::Clip::midi(cid, "dense pedals", 0, 48_000, seq));
+    session.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::midi(cid, "dense pedals", 0, 48_000, seq));
     let mut mix = MixEngine::realtime_with_events(target(), EngineEpoch::FIRST, EventLimits::default());
     let mut comp = PlanCompiler::new(target(), PlanLimits::default());
     let mut make = |spec: &InstanceSpec, _: SlotGen| {
-        let mut p = soundcraft_dsp::create(&spec.id)?;
+        let mut p = transit_dsp::create(&spec.id)?;
         p.prepare(SR as f32, BLOCK, spec.ch);
         p.set_param("amp_release", 1.0);
         Some(NewInstance { plugin: p, refused_state: false })
@@ -1425,20 +1425,20 @@ fn refused_restrike_preserves_a_future_on_and_its_release() {
 
 // #94: a pedal a clip leaves held is released at the clip's end.
 
-fn pedal_seq(events: &[(i64, i32)]) -> soundcraft_midi::Sequence {
-    let mut seq = soundcraft_midi::Sequence::default();
+fn pedal_seq(events: &[(i64, i32)]) -> transit_midi::Sequence {
+    let mut seq = transit_midi::Sequence::default();
     for &(tick, value) in events {
-        seq.ctrls.push(soundcraft_midi::CtrlEvent { tick, channel: 0, kind: soundcraft_midi::CtrlKind::Cc(64), value });
+        seq.ctrls.push(transit_midi::CtrlEvent { tick, channel: 0, kind: transit_midi::CtrlKind::Cc(64), value });
     }
     seq
 }
 
 /// Adds a MIDI clip `length` samples long at `start`; a loop range makes it a looped clip.
-fn add_pedal_clip(rig: &mut Rig, start: i64, length: i64, looping: Option<(i64, i64)>, seq: soundcraft_midi::Sequence) {
+fn add_pedal_clip(rig: &mut Rig, start: i64, length: i64, looping: Option<(i64, i64)>, seq: transit_midi::Sequence) {
     let mut s = rig.session.clone();
     let cid = s.new_clip_id();
-    let mut clip = soundcraft_model::Clip::midi(cid, "pedal", start, length, seq);
-    clip.set_loop(looping.map(|(start, end)| soundcraft_model::ClipLoop { start, end }));
+    let mut clip = transit_model::Clip::midi(cid, "pedal", start, length, seq);
+    clip.set_loop(looping.map(|(start, end)| transit_model::ClipLoop { start, end }));
     s.track_mut(rig.track).unwrap().playlist_mut().unwrap().clips.push(clip);
     rig.publish(&s);
     rig.session = s;
@@ -1597,9 +1597,9 @@ fn an_off_tick_clip_starting_at_the_end_of_a_clip_keeps_the_pedal_down() {
 // #95: a clip whose tick grid starts before its start sample.
 
 /// A clip with a note-on and a CC64 press at tick 0.
-fn tick0_seq() -> soundcraft_midi::Sequence {
+fn tick0_seq() -> transit_midi::Sequence {
     let mut seq = pedal_seq(&[(0, 127)]);
-    seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start: 0, length: 40 });
+    seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start: 0, length: 40 });
     seq
 }
 

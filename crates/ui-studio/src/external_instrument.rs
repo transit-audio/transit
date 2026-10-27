@@ -10,8 +10,8 @@ use crate::mixer::{DeviceCard, MenuItem};
 use crate::theme::TOKENS;
 use egui::{Align2, FontId, Rect, Sense, Ui, pos2, vec2};
 use serde_json::{Value, json};
-use soundcraft_mix::{ExternalReport, ExternalState};
-use soundcraft_model::{EXTERNAL_GAIN_DB, ExternalInstrument, IoDirection, MAX_EXTERNAL_LATENCY_MS, MidiOutput, TrackId};
+use transit_mix::{ExternalReport, ExternalState};
+use transit_model::{EXTERNAL_GAIN_DB, ExternalInstrument, IoDirection, MAX_EXTERNAL_LATENCY_MS, MidiOutput, TrackId};
 
 /// What the instrument menu's entry reads.
 pub const MENU_LABEL: &str = "External Instrument";
@@ -87,7 +87,7 @@ impl StudioApp {
         let view = crate::midi_output::OutputView::read(self.player.as_ref());
         let s = self.engine.session();
         let missing: Vec<TrackId> = s.tracks.iter().filter(|t| view.missing(t.id, &t.midi_output)).map(|t| t.id).collect();
-        soundcraft_mix::external_report(s, &io, io.inputs, duplex, s.sample_rate.hz(), &missing)
+        transit_mix::external_report(s, &io, io.inputs, duplex, s.sample_rate.hz(), &missing)
     }
 
     /// Put an External Instrument in `t`'s instrument slot, returning on the machine's first input
@@ -96,7 +96,7 @@ impl StudioApp {
         if self.engine.session().track(t).is_some_and(|tr| tr.external_instrument().is_some()) {
             return Ok(json!({"unchanged": true}));
         }
-        let key = (t, soundcraft_mix::INSTRUMENT_SLOT);
+        let key = (t, transit_mix::INSTRUMENT_SLOT);
         if let Some(p) = &self.player {
             self.player_requests.result(&mut self.status, p.close_editor(key.0, key.1)).ok_or_else(|| self.status.clone())?;
         }
@@ -440,7 +440,7 @@ mod tests {
     }
 
     fn report(state: ExternalState, latency: Option<u32>) -> ExternalReport {
-        let source = latency.map(|_| soundcraft_model::ExternalSource::Manual);
+        let source = latency.map(|_| transit_model::ExternalSource::Manual);
         ExternalReport { track: TrackId(1), ret: "In 1".into(), state, latency, source }
     }
 

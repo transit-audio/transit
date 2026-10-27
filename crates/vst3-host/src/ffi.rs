@@ -11,13 +11,13 @@
 //! the plugin dangling or mis-sized pointers and never reads plugin strings beyond their bounds.
 
 use crate::{Vst3Error, scan};
-use soundcraft_dsp::Transport;
 use std::ffi::{c_char, c_int, c_void};
 use std::mem::ManuallyDrop;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError, TryLockError, mpsc};
 use std::time::Duration;
+use transit_dsp::Transport;
 use vst3::Steinberg::Vst::{self as sv};
 use vst3::Steinberg::Vst::{
     IAttributeListTrait, IAudioProcessorTrait, IComponentHandlerTrait, IComponentTrait, IConnectionPointTrait, IEditControllerTrait, IEventListTrait,
@@ -1265,7 +1265,7 @@ impl IMessageTrait for HostMessage {
 /// One parameter point the host sends: its time in the block, the parameter, its class
 /// (0: automation and host values, 1: a mapped MIDI controller, which follows automation at the
 /// same offset), the order it was set in, and the normalized value. `release`: a controller
-/// from a release-class message ([`Message::survives_reset`](soundcraft_dsp::event::Message)),
+/// from a release-class message ([`Message::survives_reset`](transit_dsp::event::Message)),
 /// which the host keeps through a plug-in reset.
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub(crate) struct ParamPoint {

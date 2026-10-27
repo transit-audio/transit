@@ -40,7 +40,7 @@ fn mid(r: [f32; 4]) -> (f32, f32) {
 impl T {
     fn new() -> T {
         let mut t = T {
-            app: StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default()),
+            app: StudioApp::new(transit_engine::Engine::default(), None, Services::default()),
             ctx: egui::Context::default(),
             time: 0.0,
             dir: Dir::new(),

@@ -3,7 +3,7 @@
 
 use proptest::prelude::*;
 use serde_json::{Value, json};
-use soundcraft_engine::Engine;
+use transit_engine::Engine;
 
 const CMDS: &[&str] = &[
     "edit.cut",
@@ -122,7 +122,7 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 48, .. ProptestConfig::default() })]
     #[test]
     fn random_edits_keep_the_session_sane(ops in proptest::collection::vec((0usize..CMDS.len(), -100_000i64..3_000_000, -100_000i64..3_000_000, 0usize..5), 1..25)) {
-        let mut e = soundcraft_engine::demo::demo_engine();
+        let mut e = transit_engine::demo::demo_engine();
         let original = serde_json::to_value(e.session()).unwrap();
         let names = ["Kick", "Snare", "Bass", "Pad", "Keys"];
         let mut applied = 0;
@@ -131,7 +131,7 @@ proptest! {
             let id = CMDS[i % CMDS.len()];
             // Make a selection first so range commands have something to act on.
             let _ = e.execute("edit.select", &json!({"tracks": [track], "start": a.min(b).max(0), "end": a.max(b).max(0)}));
-            if let Err(soundcraft_engine::EngineError::Internal(id, msg)) = e.execute(id, &params(i % CMDS.len(), a, b, track)) {
+            if let Err(transit_engine::EngineError::Internal(id, msg)) = e.execute(id, &params(i % CMDS.len(), a, b, track)) {
                 prop_assert!(false, "{id} panicked: {msg}");
             }
             applied += 1;
@@ -155,7 +155,7 @@ proptest! {
 
 /// Replay a fixed op sequence the way the proptest does, checking invariants after each step.
 fn replay(ops: &[(usize, i64, i64, usize)]) {
-    let mut e = soundcraft_engine::demo::demo_engine();
+    let mut e = transit_engine::demo::demo_engine();
     let names = ["Kick", "Snare", "Bass", "Pad", "Keys"];
     for &(i, a, b, t) in ops {
         let track = names[t % names.len()];

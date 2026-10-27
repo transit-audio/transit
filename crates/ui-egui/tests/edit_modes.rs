@@ -1,10 +1,10 @@
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
-use soundcraft_engine::Engine;
-use soundcraft_engine::edit::{RELATIVE_GRID, SHUFFLE_LOCK, SNAP_TO_GRID};
-use soundcraft_model::{Clip, ClipId, EditMode, Source, SourceId, TrackId};
-use soundcraft_ui_egui::{Services, SoundApp, edit_window};
+use transit_engine::Engine;
+use transit_engine::edit::{RELATIVE_GRID, SHUFFLE_LOCK, SNAP_TO_GRID};
+use transit_model::{Clip, ClipId, EditMode, Source, SourceId, TrackId};
+use transit_ui_egui::{Services, SoundApp, edit_window};
 
 const SEC: i64 = 48_000;
 
@@ -51,7 +51,7 @@ fn tracks(mode: &str, tool: &str, lanes: &[&[(i64, i64)]]) -> (SoundApp, egui::C
         channels: 1,
         frames: 20 * SEC as u64,
         sample_rate: 48_000,
-        format: soundcraft_audio_io::FileFormat::Wav,
+        format: transit_audio_io::FileFormat::Wav,
         time_reference: 0,
         unsaved: false,
     });

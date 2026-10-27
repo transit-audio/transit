@@ -1,7 +1,7 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::unwrap_used, clippy::panic)]
 use super::*;
-use soundcraft_mix::{DeviceGeneration, PlanLimits, RenderTarget};
+use transit_mix::{DeviceGeneration, PlanLimits, RenderTarget};
 use transit_rt::testing::measure;
 
 #[cfg(not(target_arch = "wasm32"))]

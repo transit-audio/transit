@@ -4,9 +4,9 @@ use crate::SoundApp;
 use crate::theme::{Tokens, bold};
 use egui::{Align2, vec2};
 use serde_json::{Value, json};
-use soundcraft_engine::Engine;
-use soundcraft_model::{ClipId, Session, SourceId, TrackId};
-use soundcraft_time::Samples;
+use transit_engine::Engine;
+use transit_model::{ClipId, Session, SourceId, TrackId};
+use transit_time::Samples;
 
 #[derive(Debug, Clone)]
 pub enum Dialog {
@@ -15,7 +15,7 @@ pub enum Dialog {
     Bounce { path: String, format: String, bit_depth: String, normalize: bool },
     RenameTrack { id: TrackId, name: String },
     RenameClip { id: ClipId, name: String },
-    RenameMarker { id: soundcraft_model::MarkerId, name: String },
+    RenameMarker { id: transit_model::MarkerId, name: String },
     ClearClips { clips: Vec<ClipId>, sources: Vec<SourceId>, message: String },
     PathPrompt { cmd: String, title: String, path: String, key: String },
     Number { cmd: String, title: String, key: String, value: f64, suffix: String },
@@ -67,7 +67,7 @@ impl Dialogs {
         self.open = Some(Dialog::RenameClip { id, name: name.to_string() });
     }
 
-    pub fn open_rename_marker(&mut self, id: soundcraft_model::MarkerId, name: &str) {
+    pub fn open_rename_marker(&mut self, id: transit_model::MarkerId, name: &str) {
         self.open = Some(Dialog::RenameMarker { id, name: name.to_string() });
     }
 
@@ -110,7 +110,7 @@ impl Dialogs {
                 title: "Save Session As".into(),
                 // The browser has no folders: the name becomes the bundle file's name.
                 path: if home.is_empty() {
-                    format!("{name}.{}", soundcraft_engine::io::BUNDLE_EXTENSION)
+                    format!("{name}.{}", transit_engine::io::BUNDLE_EXTENSION)
                 } else {
                     format!("{home}/{name}/{name}.transit")
                 },
@@ -135,11 +135,11 @@ impl Dialogs {
             }
             "setup.session" => Dialog::Session { frame_rate: e.session().frame_rate.label().into(), bit_depth: "24".into() },
             "file.score_setup" => {
-                let s = soundcraft_engine::score::ScoreSetup::from_session(e.session());
+                let s = transit_engine::score::ScoreSetup::from_session(e.session());
                 Dialog::ScoreSetup { title: s.title, composer: s.composer, bars_per_system: s.bars_per_system, show_track_names: s.show_track_names }
             }
             "clip.rename" => {
-                let target = soundcraft_engine::cmd::clip_ids_param(e, &json!({})).first().and_then(|id| e.session().find_clip(*id));
+                let target = transit_engine::cmd::clip_ids_param(e, &json!({})).first().and_then(|id| e.session().find_clip(*id));
                 let Some((_, clip)) = target else { return false };
                 Dialog::RenameClip { id: clip.id, name: clip.name.clone() }
             }
@@ -156,7 +156,7 @@ impl Dialogs {
 /// open instead. A take in progress is stopped first, so it counts as a change.
 pub fn ask_to_save(app: &mut SoundApp, id: &str, params: &Value) -> bool {
     if !matches!(id, "session.new" | "session.open" | "session.close" | "session.revert" | "app.quit")
-        || soundcraft_engine::find_command(id).is_some_and(|c| (c.enabled)(&app.engine).is_err())
+        || transit_engine::find_command(id).is_some_and(|c| (c.enabled)(&app.engine).is_err())
     {
         return false;
     }
@@ -185,7 +185,7 @@ pub fn takes_path(id: &str) -> bool {
 }
 
 fn path_key(id: &str) -> Option<&'static str> {
-    let spec = soundcraft_engine::command_specs().iter().find(|c| c.id == id)?;
+    let spec = transit_engine::command_specs().iter().find(|c| c.id == id)?;
     if spec.params.starts_with("{path?") && id != "file.print_score" {
         None
     } else if spec.params.starts_with("{path") {
@@ -198,7 +198,7 @@ fn path_key(id: &str) -> Option<&'static str> {
 }
 
 fn path_dialog(id: &str, home: &str, name: &str) -> Option<Dialog> {
-    let spec = soundcraft_engine::command_specs().iter().find(|c| c.id == id)?;
+    let spec = transit_engine::command_specs().iter().find(|c| c.id == id)?;
     let key = path_key(id)?;
     let importing = id.contains("import") || id.contains("open");
     let ext = match id {
@@ -305,14 +305,14 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         ui.add(egui::DragValue::new(count).range(1..=128));
                         ui.label("new");
                         egui::ComboBox::from_id_salt("nt_fmt").selected_text(format.as_str()).show_ui(ui, |ui| {
-                            for f in soundcraft_model::ChannelFormat::ALL {
+                            for f in transit_model::ChannelFormat::ALL {
                                 ui.selectable_value(format, f.label().to_string(), f.label());
                             }
                         });
                         egui::ComboBox::from_id_salt("nt_kind")
-                            .selected_text(soundcraft_model::TrackKind::from_id(kind).map_or("Audio Track", |k| k.label()))
+                            .selected_text(transit_model::TrackKind::from_id(kind).map_or("Audio Track", |k| k.label()))
                             .show_ui(ui, |ui| {
-                                for k in soundcraft_model::TrackKind::ALL {
+                                for k in transit_model::TrackKind::ALL {
                                     if ui.selectable_label(kind == k.id(), k.label()).clicked() {
                                         *kind = k.id().to_string();
                                         *name = k.default_name().to_string();
@@ -341,7 +341,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                         ui.text_edit_singleline(name);
                     });
                     egui::ComboBox::from_label("Sample Rate").selected_text(format!("{sample_rate} Hz")).show_ui(ui, |ui| {
-                        for r in soundcraft_time::SampleRate::COMMON {
+                        for r in transit_time::SampleRate::COMMON {
                             ui.selectable_value(sample_rate, r, format!("{r} Hz"));
                         }
                     });
@@ -447,8 +447,8 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                     {
                         *path = p;
                     }
-                    let file = soundcraft_engine::io::session_file(path);
-                    let replaces = soundcraft_engine::io::replaces(&app.engine, cmd, &file);
+                    let file = transit_engine::io::session_file(path);
+                    let replaces = transit_engine::io::replaces(&app.engine, cmd, &file);
                     if replaces {
                         ui.label(format!("“{}” already exists. Do you want to replace it?", file.file_name().unwrap_or_default().to_string_lossy()));
                     }
@@ -489,7 +489,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                     }
                 }
                 Dialog::Fades { shape } => {
-                    for s in soundcraft_model::FadeShape::ALL {
+                    for s in transit_model::FadeShape::ALL {
                         ui.radio_value(shape, s.label().to_lowercase(), s.label());
                     }
                     if buttons(ui, "OK", enter) {
@@ -530,7 +530,7 @@ pub fn show(app: &mut SoundApp, ctx: &egui::Context) {
                 }
                 Dialog::Session { frame_rate, bit_depth } => {
                     egui::ComboBox::from_label("Timecode Rate").selected_text(frame_rate.as_str()).show_ui(ui, |ui| {
-                        for r in soundcraft_time::FrameRate::ALL {
+                        for r in transit_time::FrameRate::ALL {
                             ui.selectable_value(frame_rate, r.label().to_string(), r.label());
                         }
                     });
@@ -667,11 +667,11 @@ fn tempo_change_action(at: Samples, bpm: f64) -> (String, Value) {
 fn audiosuite_window(app: &mut SoundApp, ctx: &egui::Context) {
     let Some(process) = app.ui.audiosuite.clone() else { return };
     let mut open = true;
-    let title = soundcraft_dsp::plugin_info(&process).map_or_else(|| process.replace('_', " "), |p| p.name.to_string());
+    let title = transit_dsp::plugin_info(&process).map_or_else(|| process.replace('_', " "), |p| p.name.to_string());
     egui::Window::new(format!("AudioSuite · {title}")).open(&mut open).default_width(360.0).show(ctx, |ui| {
         let key = egui::Id::new(("as_params", process.clone()));
         let mut params: std::collections::BTreeMap<String, f32> = ui.ctx().memory(|m| m.data.get_temp(key)).unwrap_or_default();
-        if let Some(info) = soundcraft_dsp::plugin_info(&process) {
+        if let Some(info) = transit_dsp::plugin_info(&process) {
             for p in info.params {
                 let v = params.entry(p.id.to_string()).or_insert(p.default);
                 ui.add(egui::Slider::new(v, p.min..=p.max).text(p.name));
@@ -700,7 +700,7 @@ fn audiosuite_window(app: &mut SoundApp, ctx: &egui::Context) {
             }
         }
         ui.ctx().memory_mut(|m| m.data.insert_temp(key, params.clone()));
-        let hint = if soundcraft_dsp::is_generator(&process) {
+        let hint = if transit_dsp::is_generator(&process) {
             "Fills the selection on the selected tracks with a new clip."
         } else {
             "Processes the selected clips and replaces them with rendered audio."
@@ -722,7 +722,7 @@ mod tests {
 
     #[test]
     fn file_commands_get_path_prompts_with_sensible_names() {
-        let e = soundcraft_engine::demo::demo_engine();
+        let e = transit_engine::demo::demo_engine();
         let mut d = Dialogs::default();
         for (id, ext) in [("file.export_sibelius", ".musicxml"), ("file.print_score", ".svg"), ("file.export_clip_groups", ".scgrp")] {
             assert!(takes_path(id), "{id}");
@@ -745,7 +745,7 @@ mod tests {
 
     #[test]
     fn clip_rename_opens_the_rename_dialog_for_the_selected_clip() {
-        let mut e = soundcraft_engine::demo::demo_engine();
+        let mut e = transit_engine::demo::demo_engine();
         let mut d = Dialogs::default();
         e.execute("edit.select_none", &json!({})).unwrap();
         assert!(!d.open_for_command(&e, "clip.rename"));
@@ -758,14 +758,14 @@ mod tests {
     #[test]
     fn tempo_change_dialog_runs_a_real_command_at_its_position() {
         let (cmd, params) = tempo_change_action(96_000, 133.5);
-        assert!(soundcraft_engine::command_specs().iter().any(|c| c.id == cmd), "{cmd} is not a command");
+        assert!(transit_engine::command_specs().iter().any(|c| c.id == cmd), "{cmd} is not a command");
         assert_eq!(params["at"], 96_000);
         assert_eq!(params["bpm"], 133.5);
     }
 
     #[test]
     fn clear_always_asks_and_names_the_timeline_clips_that_go_too() {
-        let mut e = soundcraft_engine::demo::demo_engine();
+        let mut e = transit_engine::demo::demo_engine();
         let file = |e: &Engine, name: &str| e.session().sources.iter().find(|f| f.name == name).map(|f| f.id).unwrap();
         let (kick, hats) = (file(&e, "Kick"), file(&e, "Hats"));
         let kick_clips: Vec<ClipId> = e.session().clips_using(kick).map(|c| c.id).collect();

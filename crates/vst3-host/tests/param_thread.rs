@@ -10,7 +10,7 @@
 
 mod common;
 
-use soundcraft_dsp::Plugin;
+use transit_dsp::Plugin;
 
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -33,12 +33,12 @@ fn freq_square(plain: f64) -> f64 {
 }
 
 fn gain_id() -> String {
-    let found = soundcraft_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
+    let found = transit_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
     found.into_iter().find(|d| d.name == "Fixture Gain").expect("fixture").id
 }
 
 /// Runs one block of 0.5 in, returns (channel 0, channel 1) at the first frame.
-fn block(p: &mut Box<dyn soundcraft_dsp::Plugin>, io: &mut [Vec<f32>]) -> (f32, f32) {
+fn block(p: &mut Box<dyn transit_dsp::Plugin>, io: &mut [Vec<f32>]) -> (f32, f32) {
     for ch in io.iter_mut() {
         ch.fill(0.5);
     }
@@ -52,7 +52,7 @@ fn block(p: &mut Box<dyn soundcraft_dsp::Plugin>, io: &mut [Vec<f32>]) -> (f32, 
 /// own conversion within 1e-4 (the last of several changes in a block wins).
 fn automation_never_calls_the_controller_on_the_render_thread() {
     let id = gain_id();
-    let mut p = soundcraft_vst3_host::create(&id).expect("instantiate");
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
     p.prepare(48_000.0, BLOCK, 2);
     let mut ed = p.editor().expect("editor handle");
     let _ = ed.idle(); // samples the curves (lazily, on the UI thread) before the render thread runs
@@ -96,7 +96,7 @@ fn automation_never_calls_the_controller_on_the_render_thread() {
 /// re-sent on the new curve without another `set_param`, and new values follow the new curve.
 fn a_restart_re_samples_the_curve_on_the_ui_thread() {
     let id = gain_id();
-    let mut p = soundcraft_vst3_host::create(&id).expect("instantiate");
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
     p.prepare(48_000.0, BLOCK, 2);
     let mut ed = p.editor().expect("editor handle");
     let _ = ed.idle(); // samples the curves (lazily, on the UI thread) before the render thread runs
@@ -138,7 +138,7 @@ fn a_restart_re_samples_the_curve_on_the_ui_thread() {
 /// `set_param` again) the value is re-sent on the real curve.
 fn an_unsampled_curve_is_linear_until_sampled_then_re_sent() {
     let id = gain_id();
-    let mut p = soundcraft_vst3_host::create(&id).expect("instantiate");
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
     p.prepare(48_000.0, BLOCK, 2);
     let mut ed = p.editor().expect("editor handle");
     let mut p = std::thread::spawn(move || {
@@ -171,9 +171,9 @@ fn an_unsampled_curve_is_linear_until_sampled_then_re_sent() {
 /// does the same for an instance made outside the scope.
 fn an_offline_render_converts_through_the_curve_without_idle() {
     let id = gain_id();
-    let render = |p: soundcraft_vst3_host::Vst3Plugin| {
+    let render = |p: transit_vst3_host::Vst3Plugin| {
         std::thread::spawn(move || {
-            let mut p: Box<dyn soundcraft_dsp::Plugin> = Box::new(p);
+            let mut p: Box<dyn transit_dsp::Plugin> = Box::new(p);
             let mut io = vec![vec![0.0f32; BLOCK]; 2];
             block(&mut p, &mut io);
             let mut worst = 0.0f64;
@@ -189,15 +189,15 @@ fn an_offline_render_converts_through_the_curve_without_idle() {
         .expect("render thread")
     };
     // Created in the scope, as the mix engine does for a bounce; no editor, no idle.
-    let scope = soundcraft_vst3_host::offline_scope();
-    let p = soundcraft_vst3_host::instantiate_plugin(&id).expect("instantiate");
+    let scope = transit_vst3_host::offline_scope();
+    let p = transit_vst3_host::instantiate_plugin(&id).expect("instantiate");
     drop(scope);
     assert_eq!(p.curves_sampled(), p.curves_total(), "sampled at creation");
     let (worst, p) = render(p);
     drop(p);
     assert!(worst < 1e-4, "offline render off the controller's curve by {worst}");
     // Outside the scope nothing is sampled until asked.
-    let p = soundcraft_vst3_host::instantiate_plugin(&id).expect("instantiate");
+    let p = transit_vst3_host::instantiate_plugin(&id).expect("instantiate");
     assert_eq!(p.curves_sampled(), 0);
     p.sample_all_curves_now();
     assert_eq!(p.curves_sampled(), p.curves_total());
@@ -216,7 +216,7 @@ const CURVE_POINTS: usize = 257;
 /// reaches the controller as `step / 300` and comes back as the same step.
 fn a_300_step_parameter_round_trips_every_step() {
     let id = gain_id();
-    let mut p = soundcraft_vst3_host::create(&id).expect("instantiate");
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
     let fine = p.info().param("2000").expect("Fine is exposed");
     assert_eq!((fine.min, fine.max), (0.0, 300.0), "the step index is the value");
     assert!(fine.choices.is_empty(), "too many steps for a menu");
@@ -240,7 +240,7 @@ enum Cmd {
 /// all are done; the controller is never called on the render thread meanwhile.
 fn a_large_plugin_is_sampled_lazily_within_the_budget() {
     let id = gain_id();
-    let mut p = soundcraft_vst3_host::instantiate_plugin(&id).expect("instantiate");
+    let mut p = transit_vst3_host::instantiate_plugin(&id).expect("instantiate");
     p.prepare(48_000.0, BLOCK, 2);
     let total = p.curves_total();
     assert!(total >= MANY, "{total} curves");

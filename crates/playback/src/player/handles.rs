@@ -17,11 +17,11 @@
 //! the session stores for the slot.
 use super::*;
 use crate::{EditorEdit, PluginStates};
-use soundcraft_dsp::{EditorHeader, HeaderAction, JobPoll, LoadedValues, PluginEditor, PluginStateReader, StateBusy, StateJob};
-use soundcraft_mix::InstanceSpec;
-use soundcraft_model::TrackId;
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
+use transit_dsp::{EditorHeader, HeaderAction, JobPoll, LoadedValues, PluginEditor, PluginStateReader, StateBusy, StateJob};
+use transit_mix::InstanceSpec;
+use transit_model::TrackId;
 use transit_plugin_host::{Ctx, Host, LoadPhase, Pending, PhaseLog, Status};
 
 /// How long one save waits, in all, for plug-ins whose thread is held by a modal dialog (issue
@@ -62,7 +62,7 @@ pub struct EditorOpened {
     pub track: TrackId,
     pub slot: usize,
     pub name: &'static str,
-    pub report: soundcraft_dsp::EditorOpenReport,
+    pub report: transit_dsp::EditorOpenReport,
 }
 
 /// What a slot whose plug-in is not in a plan yet shows (issue #82; #67 adds the time).
@@ -280,7 +280,7 @@ impl Handles {
         let target = control.sessions.target;
         let factory: Factory = Arc::new(move |spec: &InstanceSpec| {
             let restoring = || transit_plugin_host::report_phase(LoadPhase::Restoring);
-            soundcraft_mix::create_instance_with(
+            transit_mix::create_instance_with(
                 &spec.id,
                 spec.state.as_deref(),
                 target.sample_rate as f32,
@@ -297,7 +297,7 @@ impl Handles {
             self.service_with(control, &*deferred, &both);
             return;
         }
-        self.service_with(control, &soundcraft_mix::is_third_party, &factory);
+        self.service_with(control, &transit_mix::is_third_party, &factory);
     }
 
     /// [`Self::service`] with the factory and the choice of what goes to the host thread
@@ -491,7 +491,7 @@ impl Handles {
         let wanted: Vec<InstanceSpec> = match &sessions.latest {
             Some(request) if !sessions.faulted() && sessions.bridge.can_prepare() => {
                 let all = sessions.restore.is_some();
-                let specs = soundcraft_mix::realtime_instance_specs(&request.session);
+                let specs = transit_mix::realtime_instance_specs(&request.session);
                 // An instance on its way to a vacant slot is kept while the request has its slot
                 // with the same plug-in (identity: id, uid, channels, as the compiler reuses the
                 // vacant slot); one the request no longer has (removed, replaced) is dropped, and
@@ -887,7 +887,7 @@ impl Handles {
         let id = id.to_owned();
         let pending = self
             .host
-            .submit(move |_ctx| soundcraft_mix::create_instance(&id, None, 48_000.0, 512, ch.max(1)).and_then(|mut made| made.plugin.save_state()));
+            .submit(move |_ctx| transit_mix::create_instance(&id, None, 48_000.0, 512, ch.max(1)).and_then(|mut made| made.plugin.save_state()));
         StateJob::remote(move || match pending.poll() {
             Status::Ready(v) => JobPoll::Ready(v),
             Status::Waiting { .. } => JobPoll::Waiting,

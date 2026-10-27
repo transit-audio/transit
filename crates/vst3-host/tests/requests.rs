@@ -10,17 +10,17 @@
 
 mod common;
 
-use soundcraft_dsp::{Plugin, PluginStateReader};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use transit_dsp::{Plugin, PluginStateReader};
 
 const BLOCK: usize = 64;
 
 fn synth() -> (Box<dyn Plugin>, Box<dyn PluginStateReader>) {
-    let found = soundcraft_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
+    let found = transit_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
     let id = found.into_iter().find(|d| d.name == "Fixture Synth").expect("fixture synth").id;
-    let mut p = soundcraft_vst3_host::create(&id).expect("instantiate");
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
     p.prepare(48_000.0, BLOCK, 2);
     let reader = p.state_reader().expect("state reader");
     (p, reader)
@@ -96,7 +96,7 @@ fn a_live_learn_is_re_read_on_main_and_routed_from_the_next_cc() {
     let mut serviced_at = None;
     while serviced_at.is_none() && Instant::now() < deadline {
         let before = levels.lock().unwrap().len();
-        if soundcraft_vst3_host::service_requests().midi_maps > 0 {
+        if transit_vst3_host::service_requests().midi_maps > 0 {
             serviced_at = Some(before);
         }
         std::thread::sleep(Duration::from_millis(1));
@@ -140,7 +140,7 @@ fn a_latency_change_reactivates_on_main_and_reports_the_new_latency() {
     let main = Report::read(&mut reader).me(); // runs the change: restartComponent(kLatencyChanged)
     let deadline = Instant::now() + Duration::from_secs(20);
     while latency.load(Ordering::SeqCst) != 32 && Instant::now() < deadline {
-        soundcraft_vst3_host::service_requests();
+        transit_vst3_host::service_requests();
         std::thread::sleep(Duration::from_millis(1));
     }
     std::thread::sleep(Duration::from_millis(20));
@@ -160,13 +160,13 @@ fn io_changes_reactivate_and_a_reload_request_is_refused_clearly() {
     let (mut p, _reader) = synth();
     // kReloadComponent (1 << 0): the component would have to be destroyed and created again.
     assert!(p.load_state(b"RESTART:1"));
-    let s = soundcraft_vst3_host::service_requests();
+    let s = transit_vst3_host::service_requests();
     assert_eq!((s.restarted, s.unsupported), (0, 1));
     // kIoChanged (1 << 1): deactivate, renegotiate the buses, reactivate.
     assert!(p.load_state(b"RESTART:2"));
-    let off = std::thread::spawn(soundcraft_vst3_host::service_requests).join().unwrap();
+    let off = std::thread::spawn(transit_vst3_host::service_requests).join().unwrap();
     assert_eq!(off.restarted, 0, "not off the main thread");
-    let s = soundcraft_vst3_host::service_requests();
+    let s = transit_vst3_host::service_requests();
     assert_eq!((s.restarted, s.unsupported), (1, 0));
     assert!((cc_block(&mut p, 7, 127) - 1.0).abs() < 1e-6, "it plays after the reactivation");
 }
@@ -189,9 +189,9 @@ fn gain_state_with_preset(preset: f64) -> Vec<u8> {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn values_changed_by_the_plugin_are_re_read_on_main_and_reported_like_edits() {
-    let found = soundcraft_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
+    let found = transit_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
     let id = found.into_iter().find(|d| d.name == "Fixture Gain").expect("fixture gain").id;
-    let mut p = soundcraft_vst3_host::create(&id).expect("instantiate");
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
     p.prepare(48_000.0, BLOCK, 2);
     let mut ed = p.editor().expect("editor handle");
     let mut reader = p.state_reader().expect("state reader");
@@ -201,7 +201,7 @@ fn values_changed_by_the_plugin_are_re_read_on_main_and_reported_like_edits() {
     // The plug-in switches its gain to 0.8 (plain 1.6) on its own and calls
     // restartComponent(kParamValuesChanged).
     let _ = reader.save_state();
-    let off = std::thread::spawn(soundcraft_vst3_host::service_requests).join().unwrap();
+    let off = std::thread::spawn(transit_vst3_host::service_requests).join().unwrap();
     assert_eq!(off.value_rescans, 0, "not off the main thread");
     let edits = ed.idle();
     assert_eq!(edits.len(), 1, "only the value that changed: {edits:?}");
@@ -223,9 +223,9 @@ fn values_changed_by_the_plugin_are_re_read_on_main_and_reported_like_edits() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn values_changed_during_a_host_state_load_are_not_reported() {
-    let found = soundcraft_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
+    let found = transit_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
     let id = found.into_iter().find(|d| d.name == "Fixture Gain").expect("fixture gain").id;
-    let mut p = soundcraft_vst3_host::create(&id).expect("instantiate");
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
     p.prepare(48_000.0, BLOCK, 2);
     let mut ed = p.editor().expect("editor handle");
     let _ = ed.idle();
@@ -248,10 +248,10 @@ fn a_refused_reactivation_fails_once_and_is_not_retried() {
     let (mut p, _reader) = synth();
     assert!(p.load_state(b"REFUSE"));
     assert!(p.load_state(b"RESTART:8")); // kLatencyChanged
-    let s = soundcraft_vst3_host::service_requests();
+    let s = transit_vst3_host::service_requests();
     assert_eq!((s.restarted, s.failed), (0, 1), "{s:?}");
     for _ in 0..5 {
-        let s = soundcraft_vst3_host::service_requests();
+        let s = transit_vst3_host::service_requests();
         assert_eq!((s.restarted, s.failed, s.restarts_waiting), (0, 0, 0), "not retried: {s:?}");
     }
     assert_eq!(p.latency(), 0);
@@ -295,7 +295,7 @@ fn a_block_skipped_during_a_reactivation_is_a_fade_to_silence() {
     let deadline = Instant::now() + Duration::from_secs(20);
     while skipped.load(Ordering::SeqCst) < 5 && Instant::now() < deadline {
         let _ = Report::read(&mut reader); // restartComponent(kLatencyChanged) on this thread
-        soundcraft_vst3_host::service_requests(); // reactivates while holding the instance
+        transit_vst3_host::service_requests(); // reactivates while holding the instance
     }
     stop.store(true, Ordering::SeqCst);
     let (_p, bad) = audio.join().unwrap();
@@ -312,9 +312,9 @@ fn a_block_skipped_during_a_reactivation_is_a_fade_to_silence() {
 #[cfg(not(target_os = "macos"))]
 #[test]
 fn a_values_re_read_does_not_undo_a_host_edit_the_controller_has_not_seen() {
-    let found = soundcraft_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
+    let found = transit_vst3_host::scan_paths(&[common::fixture_dir().to_path_buf()]);
     let id = found.into_iter().find(|d| d.name == "Fixture Gain").expect("fixture gain").id;
-    let mut p = soundcraft_vst3_host::create(&id).expect("instantiate");
+    let mut p = transit_vst3_host::create(&id).expect("instantiate");
     p.prepare(48_000.0, BLOCK, 2);
     let mut ed = p.editor().expect("editor handle");
     let _ = ed.idle();
@@ -348,7 +348,7 @@ fn a_refused_reactivation_is_faded_silence() {
     assert_eq!(io[0][BLOCK - 1], 1.0);
     assert!(p.load_state(b"REFUSE"));
     assert!(p.load_state(b"RESTART:8"));
-    assert_eq!(soundcraft_vst3_host::service_requests().failed, 1);
+    assert_eq!(transit_vst3_host::service_requests().failed, 1);
     assert_eq!(p.latency(), 0);
     let mut out = Vec::new();
     for _ in 0..3 {

@@ -2,7 +2,7 @@
 
 Code: `crates/audio-asio` (`transit-audio-asio`). Decision: the draft native-ASIO amendment to
 [ADR 0016](../../adr/0016-native-wasapi-backend.md) (not yet accepted); unsafe policy:
-[ADR 0013](../../adr/0013-unsafe-only-in-soundcraft-rt.md) and [`unsafe.md`](unsafe.md). 64-bit Windows
+[ADR 0013](../../adr/0013-unsafe-only-in-transit-rt.md) and [`unsafe.md`](unsafe.md). 64-bit Windows
 only; the crate is empty elsewhere. No ASIO SDK, C++, bindgen or LLVM in its build.
 
 ## Building
@@ -14,7 +14,7 @@ compiled only under `cfg(all(windows, target_pointer_width = "64"))`, so a plain
 `audio-bench --backend asio --device "<driver registry name>"`. The hardware tests are ignored by
 default: `cargo test -p transit-audio-asio -- --ignored hardware_ --nocapture --test-threads 1`, or
 one by name (for example `hardware_scarlett_duplex_streams_two_seconds`). The app uses it with the
-`transit/native-asio` feature (`soundcraft-playback/native-asio`), as "Native ASIO"
+`transit/native-asio` feature (`transit-playback/native-asio`), as "Native ASIO"
 under Audio system ASIO; see [In the app](#in-the-app-slice-c). The legacy cpal ASIO feature was retired
 (ADR 0016, amendment 2026-10-25); build notes are in [docs/building.md](../../building.md).
 
@@ -342,7 +342,7 @@ listing), `crates/playback/src/player/device.rs` (`open_native`, `open_stepped`)
   host does not fall back to cpal, which would load the same driver twice. A reset the driver asks
   for while its panel is open is reopened when the panel closes.
 
-Hardware (2026-10-22, `cargo test -p soundcraft-playback --features native-asio --lib -- --ignored
+Hardware (2026-10-22, `cargo test -p transit-playback --features native-asio --lib -- --ignored
 hardware_player_opens_native_asio --nocapture --test-threads 1`): the whole Player path opens the
 Scarlett at 48 kHz, 64 frames (2 in / 2 out, `i32`, 2.9 ms out / 3.9 ms in) and the Model 12 at
 44.1 kHz, 256 frames (12 in / 10 out, `i24`, 15.8 ms out / 6.8 ms in) and runs two seconds with no

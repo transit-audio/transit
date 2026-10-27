@@ -18,7 +18,7 @@ struct Entry {
 }
 
 fn entries() -> Vec<Entry> {
-    let mut v: Vec<Entry> = soundcraft_engine::command_specs()
+    let mut v: Vec<Entry> = transit_engine::command_specs()
         .iter()
         .map(|c| Entry {
             id: c.id.to_string(), label: c.label.to_string(), path: c.menu.join(" › "), shortcut: c.shortcut.unwrap_or("").to_string()

@@ -18,7 +18,7 @@
 //! engine holds.
 
 use super::{MAX_LATENCY, Session, Track, TrackId, TrackKind};
-use soundcraft_model::{ExternalSource, IoDirection, IoMap};
+use transit_model::{ExternalSource, IoDirection, IoMap};
 
 /// What an External Instrument will do on this machine, as far as the plan knows (the MIDI port's
 /// presence comes from the playback layer's output thread).
@@ -166,7 +166,7 @@ impl ExtSlot {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use soundcraft_model::{ChannelFormat, Insert, MidiOutChannel, MidiOutPort, MidiOutput};
+    use transit_model::{ChannelFormat, Insert, MidiOutChannel, MidiOutPort, MidiOutput};
 
     fn track(ret: &str, manual_ms: Option<f32>) -> (Session, TrackId) {
         let mut s = Session::default();
@@ -208,7 +208,7 @@ mod tests {
         let mut io = IoMap::for_device("test", "duplex", 2, 2);
         io.buffer = Some(64);
         let (mut s, t) = track("In 1", None);
-        let measured = soundcraft_model::ExternalLatency {
+        let measured = transit_model::ExternalLatency {
             port_id: String::new(),
             port_name: String::new(),
             ret: "In 1".into(),

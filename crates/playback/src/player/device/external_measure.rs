@@ -4,9 +4,9 @@
 
 use super::Player;
 use crate::external_probe::{self, ExtProbe, MeasureError, Measured, Progress};
-use soundcraft_model::{MidiOutChannel, MidiOutput, TrackId};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+use transit_model::{MidiOutChannel, MidiOutput, TrackId};
 
 impl Player {
     /// Start measuring the External Instrument on `track`: its MIDI port gets one warm-up note and

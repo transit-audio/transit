@@ -3,8 +3,8 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_audio_io::{AudioBuffer, FileFormat};
-use soundcraft_model::{Clip, ClipContent, TrackKind};
+use transit_audio_io::{AudioBuffer, FileFormat};
+use transit_model::{Clip, ClipContent, TrackKind};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![cmd!(
@@ -27,7 +27,7 @@ fn process(e: &mut Engine, p: &Value) -> Result<Value> {
         .map(|o| o.iter().filter_map(|(k, v)| v.as_f64().filter(|x| x.is_finite()).map(|x| (k.clone(), x as f32))).collect())
         .unwrap_or_default();
     let get = |k: &str, d: f32| params.iter().find(|(n, _)| n == k).map_or(d, |(_, v)| *v);
-    let known = soundcraft_dsp::plugin_info(&name).is_some()
+    let known = transit_dsp::plugin_info(&name).is_some()
         || matches!(
             name.as_str(),
             "normalize" | "reverse" | "invert" | "gain" | "duplicate" | "time_stretch" | "pitch_shift" | "varispeed" | "dc_offset_removal"
@@ -35,7 +35,7 @@ fn process(e: &mut Engine, p: &Value) -> Result<Value> {
     if !known {
         return Err(bad("audiosuite.process", format!("unknown process `{name}`")));
     }
-    if soundcraft_dsp::is_generator(&name) && p.get("clips").is_none() && p.get("clip").is_none() {
+    if transit_dsp::is_generator(&name) && p.get("clips").is_none() && p.get("clip").is_none() {
         let r = range_param(e, "audiosuite.process", p)?;
         if !r.is_empty() {
             return generate(e, p, &name, &params, r);
@@ -50,7 +50,7 @@ fn process(e: &mut Engine, p: &Value) -> Result<Value> {
     let semitones = get("semitones", 0.0).clamp(-24.0, 24.0);
     let to = (sr.as_f64() / f64::from(get("speed", 1.0).clamp(0.25, 4.0))).round().max(1.0) as u32;
     // These processes cut their output at MAX_OFFLINE_SAMPLES frames.
-    let longest = |grows: f64| (soundcraft_dsp::offline::MAX_OFFLINE_SAMPLES as f64 / grows) as usize;
+    let longest = |grows: f64| (transit_dsp::offline::MAX_OFFLINE_SAMPLES as f64 / grows) as usize;
     let most = match name.as_str() {
         "time_stretch" => longest(ratio),
         "pitch_shift" => longest(2f64.powf(f64::from(semitones) / 12.0)),
@@ -66,7 +66,7 @@ fn process(e: &mut Engine, p: &Value) -> Result<Value> {
         let channels = e.session().track(track).map_or(1, |t| t.channels());
         crate::io::refuse_longer(e.session(), "audiosuite.process", &clip.name, "process", clip.length, most.min(crate::io::render_limit(channels)))?;
         let _offline = crate::io::offline();
-        let mut audio = soundcraft_mix::render_clips(e.session(), track, clip.range());
+        let mut audio = transit_mix::render_clips(e.session(), track, clip.range());
         // Render without the clip's own fades: re-render a copy without fades so they stay editable.
         let mut tmp = e.session().clone();
         if let Some(c) = tmp.find_clip_mut(id) {
@@ -77,30 +77,30 @@ fn process(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         if let Some(pl) = tmp.track_mut(track).and_then(|t| t.playlist_mut()) {
             pl.clips.retain(|c| c.id == id);
-            audio = soundcraft_mix::render_clips(&tmp, track, clip.range());
+            audio = transit_mix::render_clips(&tmp, track, clip.range());
         }
         let srf = sr.as_f64() as f32;
         let out: Vec<Vec<f32>> = match name.as_str() {
             "normalize" => {
-                soundcraft_dsp::offline::normalize(&mut audio, get("target_db", -0.1), false);
+                transit_dsp::offline::normalize(&mut audio, get("target_db", -0.1), false);
                 audio
             }
             "reverse" => {
-                soundcraft_dsp::offline::reverse(&mut audio);
+                transit_dsp::offline::reverse(&mut audio);
                 audio
             }
             "invert" => {
-                soundcraft_dsp::offline::invert(&mut audio);
+                transit_dsp::offline::invert(&mut audio);
                 audio
             }
-            "gain" if soundcraft_dsp::plugin_info("gain").is_none() || params.iter().any(|(k, _)| k == "db") => {
-                soundcraft_dsp::offline::gain(&mut audio, get("db", 0.0));
+            "gain" if transit_dsp::plugin_info("gain").is_none() || params.iter().any(|(k, _)| k == "db") => {
+                transit_dsp::offline::gain(&mut audio, get("db", 0.0));
                 audio
             }
             "duplicate" => audio,
-            "time_stretch" => soundcraft_dsp::offline::time_stretch(&audio, ratio, srf),
-            "pitch_shift" => soundcraft_dsp::offline::pitch_shift(&audio, semitones, srf),
-            "varispeed" => soundcraft_dsp::offline::resample(&audio, sr.hz(), to),
+            "time_stretch" => transit_dsp::offline::time_stretch(&audio, ratio, srf),
+            "pitch_shift" => transit_dsp::offline::pitch_shift(&audio, semitones, srf),
+            "varispeed" => transit_dsp::offline::resample(&audio, sr.hz(), to),
             plugin => {
                 apply(plugin, &params, &mut audio, srf)?;
                 audio
@@ -167,12 +167,12 @@ fn generate(e: &mut Engine, p: &Value, name: &str, params: &[(String, f32)], r: 
 /// Run plugin `id` with `params` over `audio`, in place.
 fn apply(id: &str, params: &[(String, f32)], audio: &mut [Vec<f32>], srf: f32) -> Result<()> {
     let _offline = crate::io::offline();
-    let Some(mut pl) = soundcraft_dsp::create(id) else { return Err(bad("audiosuite.process", format!("cannot create `{id}`"))) };
+    let Some(mut pl) = transit_dsp::create(id) else { return Err(bad("audiosuite.process", format!("cannot create `{id}`"))) };
     pl.prepare(srf, 1024, audio.len().max(1));
     for (k, v) in params {
         pl.set_param(k, *v);
     }
-    soundcraft_dsp::offline::apply_plugin(audio, pl.as_mut(), srf);
+    transit_dsp::offline::apply_plugin(audio, pl.as_mut(), srf);
     Ok(())
 }
 
@@ -184,10 +184,10 @@ fn short(n: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soundcraft_audio_io::AudioBuffer;
-    use soundcraft_model::{ChannelFormat, Session, TrackKind};
+    use transit_audio_io::AudioBuffer;
+    use transit_model::{ChannelFormat, Session, TrackKind};
 
-    fn gained_clip() -> (crate::Engine, soundcraft_model::ClipId) {
+    fn gained_clip() -> (crate::Engine, transit_model::ClipId) {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Tone"));
         let buf = AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.5; 64]] };

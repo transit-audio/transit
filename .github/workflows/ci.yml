@@ -53,7 +53,7 @@ jobs:
       - run: cargo xtask assets
       - run: cargo xtask timing
       # Check production host code without the integration tests' self-dev feature activation.
-      - run: cargo check --locked -p soundcraft-clap-host -p soundcraft-vst3-host --lib
+      - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings
       - run: cargo test --locked --workspace --features transit/native-wasapi,transit/native-asio
 
@@ -77,12 +77,12 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo xtask timing
       # Check production host code without the integration tests' self-dev feature activation.
-      - run: cargo check --locked -p soundcraft-clap-host -p soundcraft-vst3-host --lib
+      - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       # The native JACK backend (ADR 0021): its libjack calls build only with the feature. Its tests use
       # a fake server; no JACK server runs here.
       - run: cargo clippy --locked --workspace --all-targets --features transit/native-jack,audio-bench/native-jack -- -D warnings
-      - run: cargo test --locked -p transit-audio-jack -p soundcraft-playback -p audio-bench --features transit-audio-jack/libjack,soundcraft-playback/native-jack,audio-bench/native-jack
+      - run: cargo test --locked -p transit-audio-jack -p transit-playback -p audio-bench --features transit-audio-jack/libjack,transit-playback/native-jack,audio-bench/native-jack
       # The egui_kittest tests render with wgpu; the runner has no GPU, so use Mesa's CPU Vulkan
       # driver (lavapipe). Both variables are set because Vulkan loaders honor either name.
       - name: Test
@@ -106,7 +106,7 @@ jobs:
         with:
           key: macos
       # Check production host code without the integration tests' self-dev feature activation.
-      - run: cargo check --locked -p soundcraft-clap-host -p soundcraft-vst3-host --lib
+      - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace
 

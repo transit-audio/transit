@@ -14,8 +14,8 @@ use std::sync::atomic::{AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 
-use soundcraft_model::TrackId;
 use transit_audio_backend as ab;
+use transit_model::TrackId;
 
 /// What [`Recorder::finish`] returns: the takes that hold audio and the first problem met.
 pub type Takes = (Vec<(TrackId, PathBuf)>, Option<String>);
@@ -782,7 +782,7 @@ impl TakeWriter {
     }
 
     fn write_header(&mut self) {
-        let header = match soundcraft_audio_io::wav_float_header(self.inputs.len(), self.rate, self.frames) {
+        let header = match transit_audio_io::wav_float_header(self.inputs.len(), self.rate, self.frames) {
             Ok(h) => h,
             Err(e) => return self.fail(e),
         };
@@ -845,7 +845,7 @@ mod tests {
             shared.capture_at(100, &[0.5; 12]);
         }
         shared.stop_capture();
-        let (mut control, mut publisher) = start::pair(soundcraft_mix::EngineEpoch(5));
+        let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(5));
         let reader = control.prepare().unwrap();
         let (mut mapping, input_start) = start::mapping::pair(reader.clone(), key);
         let point = start::Point {
@@ -876,7 +876,7 @@ mod tests {
             let takes = vec![TakeWriter::create(TrackId(1), vec![0], path.clone(), 48_000).unwrap()];
             let shared = Shared::new(CaptureRing::new(8));
             shared.start_capture();
-            let (mut control, mut publisher) = start::pair(soundcraft_mix::EngineEpoch(5));
+            let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(5));
             let reader = control.prepare().unwrap();
             let (mut mapping, input_start) = start::mapping::pair(reader.clone(), key);
             let gate = WriterStart { reader: reader.clone(), history: start::History::new(1, 24), input_start, placed: false, next: None };
@@ -908,7 +908,7 @@ mod tests {
     }
 
     fn decode(path: &PathBuf) -> Vec<Vec<f32>> {
-        soundcraft_audio_io::decode(&std::fs::read(path).unwrap(), None).unwrap().1.channels
+        transit_audio_io::decode(&std::fs::read(path).unwrap(), None).unwrap().1.channels
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -951,7 +951,7 @@ mod tests {
                 let mut takes = [TakeWriter::create(TrackId(1), vec![1, 0], path.clone(), 48_000).unwrap()];
                 let shared = Shared::new(CaptureRing::new(64));
                 shared.first_frame.store(100, Ordering::Release);
-                let (mut control, mut publisher) = start::pair(soundcraft_mix::EngineEpoch(5));
+                let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(5));
                 let reader = control.prepare().unwrap();
                 let ticket = reader.ticket();
                 let (mut mapping, input_start) = start::mapping::pair(reader.clone(), key);
@@ -1010,7 +1010,7 @@ mod tests {
             }
             shared.stop_capture();
             assert!(shared.quiescent());
-            let (mut control, mut publisher) = start::pair(soundcraft_mix::EngineEpoch(5));
+            let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(5));
             let reader = control.prepare().unwrap();
             let (mut mapping, input_start) = start::mapping::pair(reader.clone(), key);
             let gate = WriterStart { reader: reader.clone(), history: start::History::new(1, 24), input_start, placed: false, next: None };
@@ -1102,7 +1102,7 @@ mod tests {
         for approximate in [false, true] {
             let mut r = recorder(&Arc::new(Shared::new(CaptureRing::new(8))));
             assert!(!r.start_approximate(), "no pass");
-            let (mut control, mut publisher) = pair(soundcraft_mix::EngineEpoch(1));
+            let (mut control, mut publisher) = pair(transit_mix::EngineEpoch(1));
             let reader = control.prepare().unwrap();
             r.record_start = Some(reader.clone());
             assert!(!r.start_approximate(), "not started yet");

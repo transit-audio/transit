@@ -109,7 +109,7 @@ fn handle(app: &mut SoundApp, ctx: &egui::Context, req: &ControlRequest) -> Opti
             Err(e) => err(e),
         },
         "session.inspect" | "document.inspect" => {
-            ok(soundcraft_engine::inspect::session(&app.engine, p.get("detail").and_then(Value::as_str) == Some("full")))
+            ok(transit_engine::inspect::session(&app.engine, p.get("detail").and_then(Value::as_str) == Some("full")))
         }
         "ui.inspect" => ok(app.inspect(ctx)),
         "ui.set" => match app.run("ui.set", p.clone()) {

@@ -6,10 +6,10 @@
 //! The binary installs `transit_rt::testing::CountingAlloc` and counts the test thread only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::Plugin;
-use soundcraft_dsp::event::{Message, NoteId, PluginEvent};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use transit_dsp::Plugin;
+use transit_dsp::event::{Message, NoteId, PluginEvent};
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 
 #[global_allocator]
@@ -58,10 +58,10 @@ fn vst3_events() -> Box<dyn Plugin> {
     std::fs::copy(&built, bin.join(exe)).unwrap();
     // Registered first: an id the registry does not know would make `create` scan every
     // plug-in on the machine.
-    assert_eq!(soundcraft_vst3_host::add_search_dir(&dir), 3);
-    let found = soundcraft_vst3_host::scan_paths(&[dir]);
+    assert_eq!(transit_vst3_host::add_search_dir(&dir), 3);
+    let found = transit_vst3_host::scan_paths(&[dir]);
     let id = found.iter().find(|d| d.name == "Fixture Events").unwrap_or_else(|| panic!("{found:?}")).id.clone();
-    soundcraft_vst3_host::create(&id).unwrap()
+    transit_vst3_host::create(&id).unwrap()
 }
 
 fn clap_events(midi: bool) -> Box<dyn Plugin> {
@@ -83,9 +83,9 @@ fn clap_events(midi: bool) -> Box<dyn Plugin> {
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::copy(&built, dir.join("Events.clap")).unwrap();
         }
-        assert_eq!(soundcraft_clap_host::add_search_dir(&dir), 2);
+        assert_eq!(transit_clap_host::add_search_dir(&dir), 2);
     });
-    soundcraft_clap_host::create(if midi { "clap:org.soundcraft.test.events-midi" } else { "clap:org.soundcraft.test.events" }).unwrap()
+    transit_clap_host::create(if midi { "clap:org.soundcraft.test.events-midi" } else { "clap:org.soundcraft.test.events" }).unwrap()
 }
 
 /// Saturates every queue of `p`, then processes one block; returns what was refused.
@@ -151,7 +151,7 @@ struct OffObserver {
 }
 
 impl Plugin for OffObserver {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
         self.inner.info()
     }
     fn prepare(&mut self, sr: f32, block: usize, channels: usize) {
@@ -184,12 +184,12 @@ impl Plugin for OffObserver {
 
 #[test]
 fn midi_dialect_source_revocation_keeps_the_other_source_sounding_without_allocating() {
-    use soundcraft_mix::*;
-    use soundcraft_model::{ChannelFormat, Insert, Session, TrackKind};
     use std::sync::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     };
+    use transit_mix::*;
+    use transit_model::{ChannelFormat, Insert, Session, TrackKind};
     MixEngine::force_serial(true);
     let offs = Arc::new(AtomicUsize::new(0));
     let mut plugin = clap_events(true);

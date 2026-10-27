@@ -2,10 +2,10 @@
 //! frame it is placed at, into a bounded lock-free queue; the control side drains it into a
 //! take list. The queue is preallocated when the player is prepared, so the callback never
 //! allocates, locks or waits; a full queue drops the event and counts it.
-use soundcraft_mix::Message;
-use soundcraft_model::TrackId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use transit_mix::Message;
+use transit_model::TrackId;
 
 /// The most events one recording pass holds, in the queue and in the control-side take list.
 pub const CAPACITY: usize = 64 * 1024;
@@ -144,7 +144,7 @@ impl Capture {
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
-    use soundcraft_mix::NoteId;
+    use transit_mix::NoteId;
     use transit_rt::testing::measure;
 
     fn on(frame: u64) -> CapturedEvent {

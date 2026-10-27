@@ -1,12 +1,12 @@
 use egui::{Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use serde_json::json;
-use soundcraft_model::{ClipContent, TrackId};
-use soundcraft_ui_egui::{Services, SoundApp};
+use transit_model::{ClipContent, TrackId};
+use transit_ui_egui::{Services, SoundApp};
 
 /// The demo with the Keys track selected and Window › MIDI Keyboard open.
 fn harness() -> (Harness<'static, SoundApp>, TrackId) {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     app.run("edit.select", json!({"tracks": ["Keys"]})).unwrap();
     let keys = app.engine.session().track_by_name("Keys").unwrap().id;
     app.ui.show_midi_keyboard = true;
@@ -116,7 +116,7 @@ fn step_mode_writes_notes_and_chords_at_the_insertion_point() {
     assert_eq!(added.len(), 3, "{added:?}");
     let start = |p: u8| added.iter().find(|n| n.0 == p).unwrap().1;
     assert_eq!(start(60), start(64), "the chord's notes start together");
-    assert_eq!(start(67) - start(60), soundcraft_time::TICKS_PER_QUARTER / 2, "G follows one eighth later");
+    assert_eq!(start(67) - start(60), transit_time::TICKS_PER_QUARTER / 2, "G follows one eighth later");
     assert!(h.state().engine.session().edit.selection.start > at, "the insertion point moved on");
 }
 

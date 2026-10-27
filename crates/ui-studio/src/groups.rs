@@ -18,9 +18,9 @@
 use crate::StudioApp;
 use crate::arrange::{R4, TrackRow};
 use serde_json::{Value, json};
-use soundcraft_engine::EngineError;
-use soundcraft_model::{Route, Session, Track, TrackId, TrackKind};
 use std::collections::HashMap;
+use transit_engine::EngineError;
+use transit_model::{Route, Session, Track, TrackId, TrackKind};
 
 /// Indent per group level in the track list (points).
 pub const INDENT: f32 = 14.0;
@@ -378,7 +378,7 @@ impl StudioApp {
     pub(crate) fn dissolve(&mut self, groups: &[TrackId], key: &str) -> Result<(Value, Vec<String>), EngineError> {
         let s = self.engine.session_arc();
         let members: Vec<TrackId> = s.tracks.iter().filter(|t| parent_of(&s, t).is_some_and(|p| groups.contains(&p))).map(|t| t.id).collect();
-        let busses: Vec<soundcraft_model::BusId> = groups
+        let busses: Vec<transit_model::BusId> = groups
             .iter()
             .filter_map(|g| s.track(*g))
             .filter_map(|g| match g.mixer.input {

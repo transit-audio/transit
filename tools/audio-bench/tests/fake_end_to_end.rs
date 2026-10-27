@@ -177,7 +177,7 @@ fn settings_receive_the_measured_calibration_and_keep_what_was_there() {
     }
     let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     assert_eq!(doc["keep"]["me"], 1);
-    let audio: soundcraft_playback::AudioConfig = serde_json::from_value(doc["audio"].clone()).unwrap();
+    let audio: transit_playback::AudioConfig = serde_json::from_value(doc["audio"].clone()).unwrap();
     assert_eq!(audio.output.as_deref(), Some("Fake device"));
     let [cal] = audio.calibrations.as_slice() else { panic!("one entry after two runs: {:?}", audio.calibrations) };
     assert_eq!((cal.device.as_str(), cal.input.as_deref(), cal.mode.as_str()), ("Fake device", Some("Fake input"), "shared"));
@@ -200,9 +200,9 @@ fn an_exclusive_run_notes_its_mode_and_calibrates_under_the_exclusive_key() {
     c.request.mode = transit_audio_backend::Mode::Shared;
     assert_eq!(run(&c).expect("the shared run").mode, None);
     let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
-    let audio: soundcraft_playback::AudioConfig = serde_json::from_value(doc["audio"].clone()).unwrap();
+    let audio: transit_playback::AudioConfig = serde_json::from_value(doc["audio"].clone()).unwrap();
     let modes: Vec<&str> = audio.calibrations.iter().map(|c| c.mode.as_str()).collect();
-    assert_eq!(modes, [soundcraft_playback::devices::MODE_EXCLUSIVE, soundcraft_playback::devices::MODE_SHARED]);
+    assert_eq!(modes, [transit_playback::devices::MODE_EXCLUSIVE, transit_playback::devices::MODE_SHARED]);
     std::fs::remove_dir_all(&dir).unwrap();
 }
 

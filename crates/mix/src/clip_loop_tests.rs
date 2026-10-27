@@ -5,10 +5,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use super::*;
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_midi::{CtrlEvent, Note, Sequence};
-use soundcraft_model::{ChannelFormat, ClipId, SourceAudio, SourceId, TrackKind};
-use soundcraft_time::TICKS_PER_QUARTER;
+use transit_audio_io::AudioBuffer;
+use transit_midi::{CtrlEvent, Note, Sequence};
+use transit_model::{ChannelFormat, ClipId, SourceAudio, SourceId, TrackKind};
+use transit_time::TICKS_PER_QUARTER;
 
 fn audio_session(start: Samples, length: Samples, offset: Samples, range: Option<(Samples, Samples)>) -> (Session, Clip) {
     let mut s = Session::default();

@@ -3,8 +3,8 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::{BitDepthSetting, EditState};
-use soundcraft_time::FrameRate;
+use transit_model::{BitDepthSetting, EditState};
+use transit_time::FrameRate;
 
 macro_rules! toggle {
     ($id:literal, $label:literal, [$($m:literal),*], $sc:expr, $field:ident) => {
@@ -47,7 +47,7 @@ fn loop_playback(e: &mut Engine, p: &Value) -> Result<Value> {
 
 /// The region a selection asks for: the span of the selected clips (earliest start to latest end),
 /// else the time selection when it is not empty. `None` when nothing is selected.
-pub(super) fn selection_span(s: &soundcraft_model::Session) -> Option<soundcraft_time::Range> {
+pub(super) fn selection_span(s: &transit_model::Session) -> Option<transit_time::Range> {
     let (mut start, mut end) = (i64::MAX, i64::MIN);
     for id in &s.edit.selected_clips {
         if let Some((_, c)) = s.find_clip(*id) {
@@ -56,12 +56,12 @@ pub(super) fn selection_span(s: &soundcraft_model::Session) -> Option<soundcraft
         }
     }
     if start < end {
-        return Some(soundcraft_time::Range::new(start, end));
+        return Some(transit_time::Range::new(start, end));
     }
     (!s.edit.selection.is_empty()).then_some(s.edit.selection)
 }
 
-fn default_region(e: &Engine, at: Option<i64>) -> soundcraft_time::Range {
+fn default_region(e: &Engine, at: Option<i64>) -> transit_time::Range {
     let s = e.session();
     let at = at.unwrap_or(if e.transport.playing { e.transport.position } else { s.edit.playhead }).max(0);
     four_bars(&s.tempo, s.sample_rate, at, s.content_end())
@@ -69,7 +69,7 @@ fn default_region(e: &Engine, at: Option<i64>) -> soundcraft_time::Range {
 
 /// Four bars from the bar holding `at`. Cut at `content` (the end of the content) when that lies
 /// ahead of the start, unless the cut would leave less than a beat: then the full four bars.
-fn four_bars(tempo: &soundcraft_time::TempoMap, sr: soundcraft_time::SampleRate, at: i64, content: i64) -> soundcraft_time::Range {
+fn four_bars(tempo: &transit_time::TempoMap, sr: transit_time::SampleRate, at: i64, content: i64) -> transit_time::Range {
     let bar = tempo.bar_beat_at(at, sr).bar;
     let start_tick = tempo.bar_start_tick(bar);
     let start = tempo.tick_to_samples(start_tick, sr);
@@ -78,7 +78,7 @@ fn four_bars(tempo: &soundcraft_time::TempoMap, sr: soundcraft_time::SampleRate,
     if content > start && content < end && content - start >= beat {
         end = content;
     }
-    soundcraft_time::Range::new(start, end)
+    transit_time::Range::new(start, end)
 }
 
 pub fn specs() -> Vec<CommandSpec> {
@@ -204,11 +204,11 @@ fn session_setup(e: &mut Engine, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::four_bars;
-    use soundcraft_time::Range;
+    use transit_time::Range;
 
     #[test]
     fn a_promoted_region_is_never_shorter_than_a_beat() {
-        let s = soundcraft_model::Session::default();
+        let s = transit_model::Session::default();
         let (t, sr) = (&s.tempo, s.sample_rate);
         let bar = |n: i64| t.tick_to_samples(t.bar_start_tick(n), sr);
         let at = bar(2) + 5;

@@ -15,8 +15,8 @@ use crate::arrange::{DragKind, Gesture, Map, R4};
 use crate::theme::CLIP_NAME_H;
 use egui::{Color32, Pos2, Stroke, Ui, pos2};
 use serde_json::{Value, json};
-use soundcraft_model::{Clip, ClipContent, ClipId, Fade, FadeShape, Session, TrackId};
-use soundcraft_time::Samples;
+use transit_model::{Clip, ClipContent, ClipId, Fade, FadeShape, Session, TrackId};
+use transit_time::Samples;
 
 /// Vertical drag that bends a fade's curvature across its whole range (points).
 pub const CURVE_RANGE_PX: f32 = 120.0;

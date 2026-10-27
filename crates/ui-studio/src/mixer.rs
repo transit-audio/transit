@@ -26,7 +26,7 @@ use crate::fine::{self, Target};
 use crate::theme::{self, TOKENS};
 use egui::{Align2, Color32, CursorIcon, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::{Value, json};
-use soundcraft_model::{BusId, IoDirection, IoMap, IoPath, KeyFrom, Route, SendSlot, Session, Track, TrackId, TrackKind};
+use transit_model::{BusId, IoDirection, IoMap, IoPath, KeyFrom, Route, SendSlot, Session, Track, TrackId, TrackKind};
 
 /// Strip width and gap (points).
 pub const STRIP_W: f32 = 88.0;
@@ -432,12 +432,12 @@ pub fn reaches(s: &Session, from: BusId, to: BusId) -> bool {
 
 /// Whether `t` feeding bus `b` (output or send) would close a loop back to `t`'s own input.
 pub fn feeding_loops(s: &Session, t: &Track, b: BusId) -> bool {
-    route_loops(s, soundcraft_model::RouteChange::Output { track: t.id, route: Route::Bus(b) }) || audio_input_loop(s, t, b)
+    route_loops(s, transit_model::RouteChange::Output { track: t.id, route: Route::Bus(b) }) || audio_input_loop(s, t, b)
 }
 
 /// Whether `t` listening to bus `b` would close a loop: something `t` feeds reaches `b`.
 pub fn listening_loops(s: &Session, t: &Track, b: BusId) -> bool {
-    route_loops(s, soundcraft_model::RouteChange::Input { track: t.id, route: Route::Bus(b) })
+    route_loops(s, transit_model::RouteChange::Input { track: t.id, route: Route::Bus(b) })
         // Audio tracks do not read buses in the model graph. Keep the UI's existing refusal
         // for their input menus as well; changing that policy is separate from graph reuse.
         || (t.kind == TrackKind::Audio && bus_targets(t).any(|o| reaches(s, o, b)))
@@ -448,8 +448,8 @@ fn audio_input_loop(s: &Session, t: &Track, b: BusId) -> bool {
     t.kind == TrackKind::Audio && matches!(t.mixer.input, Route::Bus(input) if reaches(s, b, input))
 }
 
-fn route_loops(s: &Session, change: soundcraft_model::RouteChange) -> bool {
-    soundcraft_model::would_create_cycle_all(s, &[change]).is_some()
+fn route_loops(s: &Session, change: transit_model::RouteChange) -> bool {
+    transit_model::would_create_cycle_all(s, &[change]).is_some()
 }
 
 /// Shared by the arrangement and mixer so one fader gesture has one undo key.
@@ -477,7 +477,7 @@ pub fn send_targets(s: &Session, t: &Track, except: Option<usize>, io: &IoMap) -
         .filter(|b| {
             !taken.contains(&&Route::Bus(b.id))
                 && !audio_input_loop(s, t, b.id)
-                && !route_loops(s, soundcraft_model::RouteChange::Send { track: t.id, slot, route: Route::Bus(b.id) })
+                && !route_loops(s, transit_model::RouteChange::Send { track: t.id, slot, route: Route::Bus(b.id) })
                 && heard(s, b.id)
         })
         .map(|b| RoutingChoice::Entry { label: bus_label(s, b.id), value: b.name.clone() })
@@ -895,7 +895,7 @@ impl StudioApp {
         if self.engine.session().track(t).and_then(|tr| tr.instrument.as_ref()).is_some_and(|i| i.plugin == plugin) {
             return Ok(json!({"unchanged": true}));
         }
-        let key = (t, soundcraft_mix::INSTRUMENT_SLOT);
+        let key = (t, transit_mix::INSTRUMENT_SLOT);
         if let Some(p) = &self.player {
             self.player_requests.result(&mut self.status, p.close_editor(key.0, key.1)).ok_or_else(|| self.status.clone())?;
         }
@@ -943,7 +943,7 @@ impl StudioApp {
                 }
                 e.execute_merged("mix.send", &p, &key)?;
             }
-            Ok::<u64, soundcraft_engine::EngineError>(id)
+            Ok::<u64, transit_engine::EngineError>(id)
         })();
         self.engine.end_merge();
         match r {
@@ -1460,11 +1460,11 @@ pub(crate) fn send_row(
         }
         if let Ok(n) = u8::try_from(slot) {
             ui.separator();
-            app.midi_learn_menu(ui, id, soundcraft_model::Control::Send(n));
+            app.midi_learn_menu(ui, id, transit_model::Control::Send(n));
         }
     });
     if let Ok(n) = u8::try_from(slot) {
-        crate::midi_learn::mark(app, &p, r, id, soundcraft_model::Control::Send(n));
+        crate::midi_learn::mark(app, &p, r, id, transit_model::Control::Send(n));
     }
     // Pre/Post (device chain).
     if wide {
@@ -1663,7 +1663,7 @@ fn inserts_block(
     sl: &mut StripLayout,
     menu: &mut Vec<MenuItem>,
 ) {
-    let list: Vec<(usize, soundcraft_model::Insert)> = t.mixer.inserts.iter().enumerate().filter_map(|(i, x)| x.clone().map(|x| (i, x))).collect();
+    let list: Vec<(usize, transit_model::Insert)> = t.mixer.inserts.iter().enumerate().filter_map(|(i, x)| x.clone().map(|x| (i, x))).collect();
     let free = list.len() < t.mixer.inserts.len();
     let row_r = |i: usize| Rect::from_min_size(pos2(x0, y + i as f32 * INSERT_ROW_H), vec2(w, INSERT_ROW_H - 2.0));
     // The last row is always "+" (while a slot is free); a list that does not fit above it gives
@@ -1682,7 +1682,7 @@ fn inserts_block(
         // While the plug-in is on its way: "Loading…", "Loading… (slow) 12 s", "Not responding"
         // with a Retry button at the row's end (issue #82).
         let load = app.player.as_ref().and_then(|pl| pl.slot_load(id, *slot));
-        let stuck = matches!(load, Some(soundcraft_playback::SlotLoad::NotResponding { .. }));
+        let stuck = matches!(load, Some(transit_playback::SlotLoad::NotResponding { .. }));
         let last = app.last_load_time(&ins.plugin);
         let status = load.map(|l| crate::devices::load_text(l, last)).unwrap_or_default();
         let shown = if status.is_empty() { name.clone() } else { format!("{name} ({status})") };
@@ -1936,8 +1936,8 @@ fn strip(
             ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
         }
         control(app, ui, &resp, pan, 1.0, true, true);
-        resp.context_menu(|ui| app.midi_learn_menu(ui, id, soundcraft_model::Control::Pan));
-        crate::midi_learn::mark(app, &p, knob, id, soundcraft_model::Control::Pan);
+        resp.context_menu(|ui| app.midi_learn_menu(ui, id, transit_model::Control::Pan));
+        crate::midi_learn::mark(app, &p, knob, id, transit_model::Control::Pan);
     }
     let pan_r = Rect::from_center_size(pos2(r.center().x, knob.max.y + 7.0), vec2(34.0, 12.0));
     let pan_text = fine::pan_text(b);
@@ -1981,8 +1981,8 @@ fn strip(
         if resp.clicked() {
             let _ = app.run("mix.mute", json!({"tracks": [id.0], "value": !m.mute}));
         }
-        resp.context_menu(|ui| app.midi_learn_menu(ui, id, soundcraft_model::Control::Mute));
-        crate::midi_learn::mark(app, &p, cell(0, y), id, soundcraft_model::Control::Mute);
+        resp.context_menu(|ui| app.midi_learn_menu(ui, id, transit_model::Control::Mute));
+        crate::midi_learn::mark(app, &p, cell(0, y), id, transit_model::Control::Mute);
         sl.mute = r4(cell(0, y));
     } else {
         for (label, on, color, cmd, enabled, br) in buttons {
@@ -1991,9 +1991,9 @@ fn strip(
                 let _ = app.run(cmd, json!({"tracks": [id.0], "value": !on}));
             }
             let learnable = match label {
-                "M" => Some(soundcraft_model::Control::Mute),
-                "S" => Some(soundcraft_model::Control::Solo),
-                "R" => Some(soundcraft_model::Control::Arm),
+                "M" => Some(transit_model::Control::Mute),
+                "S" => Some(transit_model::Control::Solo),
+                "R" => Some(transit_model::Control::Arm),
                 _ => None,
             };
             if let Some(control) = learnable.filter(|_| enabled) {
@@ -2205,8 +2205,8 @@ fn fader_widget(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, clip: Rect,
         ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
     }
     control(app, ui, &resp, me, r.height().max(1.0), true, true);
-    resp.context_menu(|ui| app.midi_learn_menu(ui, id, soundcraft_model::Control::Volume));
-    crate::midi_learn::mark(app, p, r.expand2(vec2(4.0, 0.0)), id, soundcraft_model::Control::Volume);
+    resp.context_menu(|ui| app.midi_learn_menu(ui, id, transit_model::Control::Volume));
+    crate::midi_learn::mark(app, p, r.expand2(vec2(4.0, 0.0)), id, transit_model::Control::Volume);
     ((Some(cap_y), Some(cap_rows)), zero)
 }
 

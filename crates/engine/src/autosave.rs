@@ -3,8 +3,6 @@
 
 use crate::io::{Recording, open_session_linked, sanitize_name};
 use crate::{Engine, EngineError, Result};
-use soundcraft_audio_io::{BitDepth, EncodeOptions, FileFormat};
-use soundcraft_model::{Session, SourceAudio, SourceId};
 use std::collections::BTreeMap;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -12,6 +10,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError, Weak};
 use std::time::{Duration, Instant, SystemTime};
+use transit_audio_io::{BitDepth, EncodeOptions, FileFormat};
+use transit_model::{Session, SourceAudio, SourceId};
 
 const SESSION: &str = "session.transit";
 const ORIGIN: &str = "origin";
@@ -242,7 +242,7 @@ impl Autosave {
                     let name = format!("{} {}.wav", sanitize_name(&src.name), self.next);
                     self.next += 1;
                     let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None };
-                    let bytes = soundcraft_audio_io::encode(&audio.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
+                    let bytes = transit_audio_io::encode(&audio.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
                     std::fs::create_dir_all(&audio_dir)
                         .and_then(|()| write_synced(&audio_dir.join(&name), &bytes))
                         .map_err(|err| io_error(&audio_dir, err))?;
@@ -380,7 +380,7 @@ pub fn recover(e: &mut Engine, left: &Leftover) -> Result<Vec<String>> {
 /// The takes of the recording `left` holds the plan of, repaired, minus those already in `s`.
 /// A take the plan names that isn't a take file transit recorded, in a folder it records into,
 /// is left untouched and added to `skipped`.
-fn unfinished_takes(left: &Leftover, s: &Session, skipped: &mut Vec<String>) -> Option<(Recording, Vec<(soundcraft_model::TrackId, PathBuf)>)> {
+fn unfinished_takes(left: &Leftover, s: &Session, skipped: &mut Vec<String>) -> Option<(Recording, Vec<(transit_model::TrackId, PathBuf)>)> {
     let plan: Recording = serde_json::from_str(&std::fs::read_to_string(left.dir.join(RECORDING)).ok()?).ok()?;
     let known: Vec<PathBuf> =
         s.sources.iter().filter(|src| s.pool.get(src.id).is_some()).filter_map(|src| std::fs::canonicalize(&src.path).ok()).collect();
@@ -422,7 +422,7 @@ fn repair_take(path: &Path, folders: &[PathBuf], channels: usize, rate: u32) -> 
     if !folder.is_some_and(|d| folders.contains(&d)) {
         return Err(refuse("not in a folder transit records into"));
     }
-    let header = |frames| soundcraft_audio_io::wav_float_header(channels, rate, frames).map_err(std::io::Error::other);
+    let header = |frames| transit_audio_io::wav_float_header(channels, rate, frames).map_err(std::io::Error::other);
     let expected = header(0)?;
     let mut f = std::fs::OpenOptions::new().read(true).write(true).open(path)?;
     let mut head = vec![0u8; expected.len()];
@@ -489,7 +489,7 @@ pub fn midi_journal_usable(left: &Leftover) -> bool {
 /// or the autosave already holds the clips (the journal is then deleted). A journal that cannot
 /// be read is an error and is deleted with it, so recovery doesn't offer it again; one that isn't
 /// a journal in a recording folder is an error and left alone.
-pub fn recover_midi(e: &mut Engine, left: &Leftover) -> Result<Vec<soundcraft_model::ClipId>> {
+pub fn recover_midi(e: &mut Engine, left: &Leftover) -> Result<Vec<transit_model::ClipId>> {
     let Some(journal) = left.midi_journal.as_deref() else { return Ok(Vec::new()) };
     trusted_journal(left, journal).map_err(|err| EngineError::Io(format!("the MIDI journal was not used: {err}")))?;
     if left.midi_placed {
@@ -540,8 +540,8 @@ mod tests {
     use super::*;
     use crate::io::open_session;
     use serde_json::json;
-    use soundcraft_audio_io::AudioBuffer;
-    use soundcraft_model::{ChannelFormat, Clip, TrackKind};
+    use transit_audio_io::AudioBuffer;
+    use transit_model::{ChannelFormat, Clip, TrackKind};
 
     #[test]
     fn folders_made_at_the_same_moment_are_never_shared() {
@@ -649,12 +649,11 @@ mod tests {
         let dir = folder("autosave-take");
         let root = dir.join("Autosave");
         let mut e = Engine::default();
-        let track =
-            soundcraft_model::TrackId(e.execute("track.new", &json!({"name": "Vox", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
+        let track = transit_model::TrackId(e.execute("track.new", &json!({"name": "Vox", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
         let take = root.join(sanitize_name(&e.session().name)).join("Audio Files/Vox_01.wav");
         std::fs::create_dir_all(take.parent().unwrap()).unwrap();
         let audio: Vec<u8> = (0..480).flat_map(|i| (i as f32 / 1000.0).to_le_bytes()).collect();
-        std::fs::write(&take, [soundcraft_audio_io::wav_float_header(1, 48_000, 100).unwrap(), audio].concat()).unwrap();
+        std::fs::write(&take, [transit_audio_io::wav_float_header(1, 48_000, 100).unwrap(), audio].concat()).unwrap();
         let plan = Recording {
             start: 48_000,
             pass: None,
@@ -689,11 +688,10 @@ mod tests {
         let dir = folder("autosave-hostile-take");
         let root = dir.join("Autosave");
         let mut e = Engine::default();
-        let track =
-            soundcraft_model::TrackId(e.execute("track.new", &json!({"name": "Vox", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
+        let track = transit_model::TrackId(e.execute("track.new", &json!({"name": "Vox", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
         let takes = root.join(sanitize_name(&e.session().name)).join("Audio Files");
         std::fs::create_dir_all(&takes).unwrap();
-        let wav = [soundcraft_audio_io::wav_float_header(1, 48_000, 0).unwrap(), vec![0; 4_000]].concat();
+        let wav = [transit_audio_io::wav_float_header(1, 48_000, 0).unwrap(), vec![0; 4_000]].concat();
         let text = b"not audio at all, but long enough to be mistaken for a header if nobody looked at it ......".repeat(4);
         let files =
             [(takes.join("notes.wav"), text.clone()), (dir.join("Elsewhere/Vox_01.wav"), wav.clone()), (takes.join("../Vox_02.wav"), wav.clone())];
@@ -758,7 +756,7 @@ mod tests {
         dir
     }
 
-    fn journal_with_a_note(path: &Path, track: soundcraft_model::TrackId) {
+    fn journal_with_a_note(path: &Path, track: transit_model::TrackId) {
         use crate::midi_journal::{Header, Latch, Record, Writer};
         let plan = Recording { start: 0, pass: None, punch: None, rate: 0, takes: Vec::new(), midi_journal: None, midi_placed: false };
         let latch = Latch { output_frame: 0, position: 0, device_rate: 48_000, session_rate: 48_000 };
@@ -774,7 +772,7 @@ mod tests {
         let dir = folder("autosave-journal-placed");
         let root = dir.join("Autosave");
         let journal = takes_folder(&root).join("Song_1.midijournal");
-        journal_with_a_note(&journal, soundcraft_model::TrackId(1));
+        journal_with_a_note(&journal, transit_model::TrackId(1));
         let left = left_with_journal(&root, &journal, true);
         assert!(left.midi_placed && left.midi_journal.as_deref() == Some(journal.as_path()));
         let mut e = Engine::default();
@@ -791,7 +789,7 @@ mod tests {
         let root = dir.join("Autosave");
         let journal = takes_folder(&root).join("Song_1.midijournal");
         let mut e = Engine::default();
-        let track = soundcraft_model::TrackId(e.execute("track.new", &json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
+        let track = transit_model::TrackId(e.execute("track.new", &json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
         journal_with_a_note(&journal, track);
         let left = left_with_journal(&root, &journal, false);
         assert_eq!(recover_midi(&mut e, &left).unwrap().len(), 1);

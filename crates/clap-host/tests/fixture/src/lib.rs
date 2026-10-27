@@ -1,4 +1,4 @@
-//! Test-only CLAP plugins for soundcraft-clap-host: a gain effect and a "DC synth".
+//! Test-only CLAP plugins for transit-clap-host: a gain effect and a "DC synth".
 //!
 //! - `org.soundcraft.test.gain`: stereo in/out, param 7 "Gain" (0..2, default 1), param 3 "Mode"
 //!   (stepped enum A/B/C), hidden param 9, latency 3 samples.

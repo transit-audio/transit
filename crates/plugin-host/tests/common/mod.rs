@@ -2,10 +2,10 @@
 //! state reader that record the thread they run on.
 #![allow(dead_code, clippy::unwrap_used)]
 
-use soundcraft_dsp::{Category, EditorHeader, HeaderAction, LoadedValues, Plugin, PluginEditor, PluginInfo, PluginStateReader};
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
 use std::time::Duration;
+use transit_dsp::{Category, EditorHeader, HeaderAction, LoadedValues, Plugin, PluginEditor, PluginInfo, PluginStateReader};
 
 pub static INFO: PluginInfo = PluginInfo {
     id: "clap:test.fake",

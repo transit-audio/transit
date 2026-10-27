@@ -1,8 +1,8 @@
 //! Clips: windows onto audio sources or MIDI sequences, placed on a playlist.
 
 use crate::{ClipId, MAX_NAME_CHARS, SourceId, truncate_chars};
-use soundcraft_midi::Sequence;
-use soundcraft_time::{MAX_POSITION, Range, Samples};
+use transit_midi::Sequence;
+use transit_time::{MAX_POSITION, Range, Samples};
 
 /// Fade curve shapes (Pro Tools offers standard, equal-power, S-curve and custom presets).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
@@ -128,7 +128,7 @@ pub struct Clip {
     pub content: ClipContent,
     /// Piano-roll view/editing aid; does not change the performed MIDI stream.
     #[serde(default)]
-    pub scale_mode: soundcraft_midi::scale::ScaleMode,
+    pub scale_mode: transit_midi::scale::ScaleMode,
     /// Static clip gain in dB.
     #[serde(default)]
     pub gain_db: f32,

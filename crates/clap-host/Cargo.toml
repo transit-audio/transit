@@ -1,6 +1,6 @@
 [package]
-name = "soundcraft-clap-host"
-description = "transit CLAP plugin host: scans, loads and runs third-party CLAP plugins behind the safe soundcraft-dsp Plugin trait"
+name = "transit-clap-host"
+description = "transit CLAP plugin host: scans, loads and runs third-party CLAP plugins behind the safe transit-dsp Plugin trait"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,7 +8,7 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-soundcraft-dsp.workspace = true
+transit-dsp.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 log.workspace = true
@@ -48,4 +48,4 @@ test-hooks = []
 
 # Turns the hook on for this crate's own tests.
 [dev-dependencies]
-soundcraft-clap-host = { path = ".", features = ["test-hooks"] }
+transit-clap-host = { path = ".", features = ["test-hooks"] }

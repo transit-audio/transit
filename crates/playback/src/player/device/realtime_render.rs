@@ -6,9 +6,9 @@
 
 use super::Player;
 use crate::realtime_render::{RealtimeError, RealtimeSpec, RenderProgress, RenderSink, Rendered, TapState};
-use soundcraft_model::TrackId;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use transit_model::TrackId;
 
 /// A real-time render under way.
 pub(super) struct Job {

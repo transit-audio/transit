@@ -26,46 +26,39 @@ fn cargo(args: &[&str]) -> Result<(), String> {
 /// Full package names avoid treating a new transit crate as an inherited SoundCraft crate.
 /// Same-layer edges are permitted (docs/contributing/knowledge/layering.md).
 const LAYERS: &[(&str, u8)] = &[
-    ("soundcraft-time", 0),
+    ("transit-time", 0),
     ("transit-rt", 0),
-    ("soundcraft-audio-io", 0),
+    ("transit-audio-io", 0),
     ("transit-audio-backend", 0),
     ("transit-audio-wasapi", 0),
     ("transit-audio-asio", 0),
     ("transit-audio-jack", 0),
     ("transit-midi-io", 0),
-    ("soundcraft-midi", 0),
-    ("soundcraft-video", 0),
-    ("soundcraft-dsp", 1),
-    ("soundcraft-clap-host", 1),
-    ("soundcraft-vst3-host", 1),
-    ("soundcraft-au-host", 1),
+    ("transit-midi", 0),
+    ("transit-video", 0),
+    ("transit-dsp", 1),
+    ("transit-clap-host", 1),
+    ("transit-vst3-host", 1),
+    ("transit-au-host", 1),
     ("transit-plugin-host", 1),
-    ("soundcraft-model", 2),
-    ("soundcraft-mix", 3),
-    ("soundcraft-engine", 4),
-    ("soundcraft-playback", 4),
-    ("soundcraft-automation", 5),
-    ("soundcraft-ui-egui", 6),
+    ("transit-model", 2),
+    ("transit-mix", 3),
+    ("transit-engine", 4),
+    ("transit-playback", 4),
+    ("transit-automation", 5),
+    ("transit-ui-egui", 6),
     ("transit-ui-studio", 6),
 ];
 /// Standalone crates have no workspace dependencies (dev-dependencies excepted).
 const STANDALONE: &[&str] =
-    &["soundcraft-time", "soundcraft-audio-io", "transit-audio-backend", "transit-midi-io", "soundcraft-midi", "soundcraft-video", "soundcraft-dsp"];
+    &["transit-time", "transit-audio-io", "transit-audio-backend", "transit-midi-io", "transit-midi", "transit-video", "transit-dsp"];
 // The image crate also decodes video frames in L0; it is not a UI-only dependency.
 const UI_CRATES: &[&str] = &["craft-ui", "egui", "eframe", "winit", "egui_kittest", "rfd", "egui-wgpu", "egui_glow", "egui_extras", "resvg", "wgpu"];
 // audio-bench is an app over playback and the native backends, not an engine layer.
-const EXEMPT: &[&str] = &["soundcraft", "soundcraft-cli", "soundcraft-web", "transit", "xtask", "audio-bench"];
+const EXEMPT: &[&str] = &["soundcraft", "transit-cli", "transit-web", "transit", "xtask", "audio-bench"];
 /// Manifest exceptions to the workspace unsafe forbid (ADR 0013 and its amendments).
-const UNSAFE_ALLOWED: &[&str] = &[
-    "transit-rt",
-    "transit-audio-wasapi",
-    "transit-audio-asio",
-    "transit-audio-jack",
-    "soundcraft-clap-host",
-    "soundcraft-vst3-host",
-    "soundcraft-au-host",
-];
+const UNSAFE_ALLOWED: &[&str] =
+    &["transit-rt", "transit-audio-wasapi", "transit-audio-asio", "transit-audio-jack", "transit-clap-host", "transit-vst3-host", "transit-au-host"];
 
 /// Parse Cargo's string and table lint forms, including workspace inheritance.
 fn opts_out_of_forbid(manifest: &str) -> Result<bool, String> {
@@ -197,19 +190,19 @@ fn assets() -> Result<(), String> {
 
 /// Crates that must compile for the web.
 const WASM: &[&str] = &[
-    "soundcraft-time",
-    "soundcraft-audio-io",
+    "transit-time",
+    "transit-audio-io",
     "transit-audio-backend",
-    "soundcraft-midi",
-    "soundcraft-video",
-    "soundcraft-dsp",
-    "soundcraft-model",
-    "soundcraft-mix",
-    "soundcraft-engine",
-    "soundcraft-playback",
-    "soundcraft-automation",
-    "soundcraft-ui-egui",
-    "soundcraft-web",
+    "transit-midi",
+    "transit-video",
+    "transit-dsp",
+    "transit-model",
+    "transit-mix",
+    "transit-engine",
+    "transit-playback",
+    "transit-automation",
+    "transit-ui-egui",
+    "transit-web",
 ];
 
 fn wasm() -> Result<(), String> {

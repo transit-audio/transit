@@ -7,9 +7,9 @@
 use super::*;
 use crate::realtime_render::{FileSink, RealtimeError, RealtimeSpec, RenderSink, StemSpec};
 use ab::fake::{SliceSink, SliceSource};
-use soundcraft_model::{ChannelFormat, Clip, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
 use std::time::{Duration, Instant};
 use transit_midi_io::fake::Fake;
+use transit_model::{ChannelFormat, Clip, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
 
 const BLOCK: usize = 192;
 const SR: u32 = 48_000;
@@ -58,15 +58,15 @@ fn session(fake: &Fake, click: bool) -> (Session, TrackId, transit_midi_io::Port
     let len = 4 * SR as usize;
     let mut sig = vec![0.0f32; len];
     sig[AT] = 0.5;
-    let src = soundcraft_model::SourceId(s.next_id + 10_000);
-    let buffer = soundcraft_audio_io::AudioBuffer { sample_rate: SR, channels: vec![sig.clone(), sig] };
-    s.pool.insert(src, Arc::new(soundcraft_model::SourceAudio::new(buffer)));
+    let src = transit_model::SourceId(s.next_id + 10_000);
+    let buffer = transit_audio_io::AudioBuffer { sample_rate: SR, channels: vec![sig.clone(), sig] };
+    s.pool.insert(src, Arc::new(transit_model::SourceAudio::new(buffer)));
     let click = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, Some("Click"));
     let cid = s.new_clip_id();
     s.track_mut(click).unwrap().playlist_mut().unwrap().clips.push(Clip::audio(cid, "imp", src, 0, 0, len as i64));
     // The External Instrument: a note at AT, held long past the range, to MODEL D channel 3.
     let synth = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
-    let ppq = soundcraft_time::TICKS_PER_QUARTER;
+    let ppq = transit_time::TICKS_PER_QUARTER;
     let quarter = 24_000i64;
     assert_eq!(AT as i64 * ppq % quarter, 0, "AT is a whole tick");
     let seq = serde_json::from_value(serde_json::json!({"notes": [
@@ -81,7 +81,7 @@ fn session(fake: &Fake, click: bool) -> (Session, TrackId, transit_midi_io::Port
         channel: MidiOutChannel::Channel(2),
         offset_ms: 0.0,
     };
-    let mut ins = soundcraft_model::Insert::external("In 1");
+    let mut ins = transit_model::Insert::external("In 1");
     ins.external.as_mut().unwrap().manual_ms = Some(C as f32 * 1000.0 / SR as f32);
     ins.external.as_mut().unwrap().gain_db = GAIN_DB;
     t.instrument = Some(ins);
@@ -124,14 +124,14 @@ fn spec(rig: &Rig, len: u64) -> RealtimeSpec {
         len,
         main_channels: 2,
         preroll: C.max(BLOCK) as i64,
-        stems: vec![StemSpec { track: rig.synth, channels: vec![0], latency: C as u32, gain: soundcraft_dsp::db_to_gain(GAIN_DB) }],
+        stems: vec![StemSpec { track: rig.synth, channels: vec![0], latency: C as u32, gain: transit_dsp::db_to_gain(GAIN_DB) }],
     }
 }
 
-fn opts() -> soundcraft_audio_io::EncodeOptions {
-    soundcraft_audio_io::EncodeOptions {
-        format: soundcraft_audio_io::FileFormat::Wav,
-        bit_depth: soundcraft_audio_io::BitDepth::Float32,
+fn opts() -> transit_audio_io::EncodeOptions {
+    transit_audio_io::EncodeOptions {
+        format: transit_audio_io::FileFormat::Wav,
+        bit_depth: transit_audio_io::BitDepth::Float32,
         dither: false,
         bwf: None,
     }
@@ -173,7 +173,7 @@ fn pump(rig: &Rig, blocks: usize, mut stop: impl FnMut(usize, &Player) -> bool) 
 
 fn read(path: &std::path::Path) -> Vec<Vec<f32>> {
     let bytes = std::fs::read(path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    soundcraft_audio_io::decode(&bytes, Some("wav")).unwrap().1.channels
+    transit_audio_io::decode(&bytes, Some("wav")).unwrap().1.channels
 }
 
 fn hits(x: &[f32]) -> Vec<usize> {
@@ -183,7 +183,7 @@ fn hits(x: &[f32]) -> Vec<usize> {
 /// The software track rendered offline over the range (the External Instrument is silent there:
 /// an offline plan has no live input).
 fn offline(s: &Session, len: u64) -> Vec<Vec<f32>> {
-    let mut r = soundcraft_mix::RangeRender::try_new(s, None, soundcraft_time::Range::new(START, START + len as i64), 1024).unwrap();
+    let mut r = transit_mix::RangeRender::try_new(s, None, transit_time::Range::new(START, START + len as i64), 1024).unwrap();
     let mut out = vec![Vec::new(); 2];
     while let Some((chunk, n)) = r.next_block() {
         for (o, c) in out.iter_mut().zip(chunk) {
@@ -252,7 +252,7 @@ fn the_bounce_is_the_software_render_plus_the_return_on_the_grid() {
     let stem = read(&stem);
     assert_eq!(stem.len(), 1, "the return's own width");
     assert_eq!(hits(&stem[0]), [grid], "the stem holds the return at plan position - C");
-    let ret = 0.5 * soundcraft_dsp::db_to_gain(GAIN_DB);
+    let ret = 0.5 * transit_dsp::db_to_gain(GAIN_DB);
     assert!((stem[0][grid] - ret).abs() < 1e-6, "the stem carries the device gain once: {} against {ret}", stem[0][grid]);
     // Levels: the mix is the software render plus the return, sample for sample.
     for c in 0..2 {

@@ -1,12 +1,12 @@
 //! Contract tests for the actual publication primitive and its exactly pinned queue.
 #![forbid(unsafe_code)]
 
-use soundcraft_playback::publication::{Service, channel};
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread::{self, ThreadId};
 use std::time::Duration;
+use transit_playback::publication::{Service, channel};
 use transit_rt::testing::measure;
 
 #[global_allocator]

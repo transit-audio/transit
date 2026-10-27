@@ -164,7 +164,7 @@ fn garbage_and_errors_fail_quietly() {
 
 fn studio(url: &str) -> StudioApp {
     let services = Services { update_check: Some(service(url.to_string(), RUNNING, egui::Context::default())), ..Services::default() };
-    StudioApp::new(soundcraft_engine::Engine::default(), None, services)
+    StudioApp::new(transit_engine::Engine::default(), None, services)
 }
 
 fn settle(app: &mut StudioApp) {
@@ -255,7 +255,7 @@ fn no_request_when_the_preference_is_off_or_it_ran_today_or_the_splash_shows() {
 #[test]
 fn the_environment_switch_leaves_no_service_and_disables_the_command() {
     let services = Services { update_off_by_env: true, ..Services::default() };
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, services);
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, services);
     assert_eq!(app.update_check_unavailable(), Some(update::DISABLED_BY_ENV));
     assert_eq!(app.run("help.check_updates", serde_json::json!({})), Err(update::DISABLED_BY_ENV.to_string()));
     app.update_tick(&egui::Context::default());

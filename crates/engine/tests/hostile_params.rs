@@ -92,14 +92,14 @@ proptest! {
             params.insert(KEYS[k].to_string(), v);
         }
         let params = Value::Object(params);
-        for spec in soundcraft_engine::command_specs() {
+        for spec in transit_engine::command_specs() {
             // Commands that write files take paths; keep the test hermetic.
             if spec.params.contains("path") || spec.params.contains("dir") || spec.id == "app.quit" {
                 continue;
             }
-            let mut e = soundcraft_engine::demo::demo_engine();
+            let mut e = transit_engine::demo::demo_engine();
             let _ = e.execute("edit.select", &json!({"tracks": ["Kick", "Keys"], "start": 100_000, "end": 600_000}));
-            if let Err(soundcraft_engine::EngineError::Internal(id, msg)) = e.execute(spec.id, &params) {
+            if let Err(transit_engine::EngineError::Internal(id, msg)) = e.execute(spec.id, &params) {
                 prop_assert!(false, "{id} panicked with {params}: {msg}");
             }
         }

@@ -6,8 +6,8 @@
 
 mod common;
 
-use soundcraft_dsp::Plugin;
 use std::process::Command;
+use transit_dsp::Plugin;
 
 fn child() {
     // A thread that is not named `main` and outlives the shutdown, like the host thread.
@@ -15,16 +15,16 @@ fn child() {
     let host = std::thread::Builder::new()
         .name("plugin-host".into())
         .spawn(move || {
-            soundcraft_vst3_host::adopt_main_thread();
+            transit_vst3_host::adopt_main_thread();
             // Built and scanned here: the scan's load is this thread's module entry.
             let dir = common::fixture_dir().to_path_buf();
-            let gain = soundcraft_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Gain").expect("fixture").id;
-            let mut p = soundcraft_vst3_host::instantiate_plugin(&gain).expect("instantiate");
+            let gain = transit_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Gain").expect("fixture").id;
+            let mut p = transit_vst3_host::instantiate_plugin(&gain).expect("instantiate");
             p.prepare(48_000.0, 64, 2);
             p.process(&mut vec![vec![0.5f32; 64]; 2], 64);
             drop(p);
-            soundcraft_vst3_host::shutdown();
-            let refused = soundcraft_vst3_host::instantiate_plugin(&gain).is_err();
+            transit_vst3_host::shutdown();
+            let refused = transit_vst3_host::instantiate_plugin(&gain).is_err();
             done_tx.send(refused).expect("report");
             // Stay alive past the main thread's own shutdown, as the host thread does.
             std::thread::park();
@@ -32,7 +32,7 @@ fn child() {
         .expect("spawn");
     assert!(done_rx.recv().expect("host thread"), "loads fail after the host thread's shutdown");
     // The main thread's call finds nothing of its own to exit and must not touch the host's.
-    soundcraft_vst3_host::shutdown();
+    transit_vst3_host::shutdown();
     drop(host);
 }
 

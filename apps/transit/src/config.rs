@@ -369,7 +369,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("transit-io-map-{}", std::process::id()));
         let path = dir.join("ui.json");
         let mut ui = transit_ui_studio::UiState::default();
-        let mut map = soundcraft_engine::model::IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10);
+        let mut map = transit_engine::model::IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10);
         map.rename_path("Out 3-4", "Cue").unwrap();
         ui.io_maps.push(map.clone());
         save_ui(&path, &ui).unwrap();
@@ -406,7 +406,7 @@ mod tests {
         let path = dir.join("ui.json");
         let mut ui = transit_ui_studio::UiState { track_height: 60.0, ..Default::default() };
         ui.keys.velocity = 87;
-        ui.plugin_windows.push((soundcraft_engine::model::TrackId(1), 0));
+        ui.plugin_windows.push((transit_engine::model::TrackId(1), 0));
         save_ui(&path, &ui).unwrap();
         let back = load_ui(&path).unwrap().unwrap();
         assert_eq!(back.track_height, 60.0);
@@ -509,7 +509,7 @@ mod array_preservation_tests {
         let path = dir.path().join("ui.json");
         let mut ui = transit_ui_studio::UiState::default();
         ui.remember_recent(Path::new("old.transit"), 1);
-        ui.io_maps.push(soundcraft_engine::model::IoMap::for_device("Test", "Device", 2, 2));
+        ui.io_maps.push(transit_engine::model::IoMap::for_device("Test", "Device", 2, 2));
         let mut raw = serde_json::to_value(&ui).unwrap();
         raw["recent_files"][0]["future"] = 17.into();
         raw["io_maps"][0]["future"] = 18.into();

@@ -35,7 +35,7 @@ fn review_quit_before_verification_keeps_previous_good_audio() {
         "systems": [{"name": "WASAPI", "is_default": true, "outputs": [{"name": "untested output", "is_default": true}]}]
     }))
     .unwrap();
-    studio.apply_audio(soundcraft_playback::AudioConfig { output: Some("untested output".into()), ..Default::default() }).unwrap();
+    studio.apply_audio(transit_playback::AudioConfig { output: Some("untested output".into()), ..Default::default() }).unwrap();
     assert_eq!(config::load_ui(&path).unwrap().unwrap().audio, previous, "Apply itself preserves the last good choice");
     assert!(studio.player.is_none(), "no real audio device may open in this review");
     studio.ui.window_size = [1234.0, 789.0];

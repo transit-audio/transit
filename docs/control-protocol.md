@@ -7,10 +7,10 @@ input), and every command is reachable from:
 | Surface | How |
 |---|---|
 | Desktop app control channel | `transit --control <port>` (`0` = pick a free port; printed as `SOUNDCRAFT_CONTROL_PORT=…`) |
-| CLI against a running app | `soundcraft-cli app --port <port> <method or command id> [JSON]` |
-| Headless CLI | `soundcraft-cli run --demo --cmd 'mix.volume={"track":"Kick","db":-6}' --bounce out.wav` |
-| MCP (headless) | `soundcraft-cli mcp [--demo]` |
-| MCP (bridged to the app) | `soundcraft-cli mcp --connect <port>` |
+| CLI against a running app | `transit-cli app --port <port> <method or command id> [JSON]` |
+| Headless CLI | `transit-cli run --demo --cmd 'mix.volume={"track":"Kick","db":-6}' --bounce out.wav` |
+| MCP (headless) | `transit-cli mcp [--demo]` |
+| MCP (bridged to the app) | `transit-cli mcp --connect <port>` |
 
 ## Authentication (transit)
 
@@ -24,8 +24,8 @@ folder's per-user permissions on Windows), and a new token replaces it at every 
 Every connection must send `auth <token>` as its first line. A connection whose first line is
 anything else, or whose token is wrong, is closed without a reply, and so is one that sends no
 first line within 10 seconds. After that the line protocol is unchanged, except that a line that
-is not JSON gets one error reply and then the connection is closed. `soundcraft-cli app` and
-`soundcraft-cli mcp --connect` read the token file (same path rule) and send the line themselves.
+is not JSON gets one error reply and then the connection is closed. `transit-cli app` and
+`transit-cli mcp --connect` read the token file (same path rule) and send the line themselves.
 By hand: `printf 'auth %s\n{"id":1,"method":"session.inspect"}\n' "$(cat "$TOKEN_FILE")" | nc 127.0.0.1 $P`.
 
 ## Isolated automation profiles
@@ -89,13 +89,13 @@ Errors: `{"id": 1, "ok": false, "error": "bad parameters for `mix.volume`: no tr
 
 ```sh
 P=$(transit --demo --control 0 | sed -n 's/SOUNDCRAFT_CONTROL_PORT=//p')   # or read stderr
-soundcraft-cli app --port $P mix.solo '{"track":"Bass"}'
-soundcraft-cli app --port $P transport.play
-soundcraft-cli app --port $P ui.screenshot '{"path":"/tmp/shot.png"}'
-soundcraft-cli app --port $P ui.menu.invoke '{"path":"Track > New..."}'
+transit-cli app --port $P mix.solo '{"track":"Bass"}'
+transit-cli app --port $P transport.play
+transit-cli app --port $P ui.screenshot '{"path":"/tmp/shot.png"}'
+transit-cli app --port $P ui.menu.invoke '{"path":"Track > New..."}'
 ```
 
-Offscreen (no window): `cargo run -p soundcraft-ui-egui --example ui_shot -- out.png script.jsonl`,
+Offscreen (no window): `cargo run -p transit-ui-egui --example ui_shot -- out.png script.jsonl`,
 where each script line is a request (`{"method": …, "params": …}`), `{"shot": "path.png"}` or
 `{"steps": n}`. Use `--system-theme light|dark|none` to supply the initial OS appearance, and
 script events such as `{"system_theme": "dark"}` to change it on subsequent frames.

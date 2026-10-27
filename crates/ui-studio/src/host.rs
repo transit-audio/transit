@@ -12,22 +12,22 @@
 //! `Player::close_input`).
 //!
 //! Adapted, and marked where: play and record start at the cursor, not at the edit selection
-//! (plan 06, L6); the stop-time insertion and scroll edits that read `soundcraft-ui-egui`'s view
+//! (plan 06, L6); the stop-time insertion and scroll edits that read `transit-ui-egui`'s view
 //! state are left out. The automation write pass is in [`crate::automation::write_pass`] (slice 7).
 
 use crate::{MeterDisplay, StudioApp};
 use serde_json::json;
-use soundcraft_engine::TransportRequest;
-use soundcraft_model::TrackId;
-use soundcraft_playback::record::Trouble;
-use soundcraft_playback::reopen::ReopenCause;
-use soundcraft_playback::{CountIn, OutputTrouble, Player};
-use soundcraft_time::{Range, Samples};
+use transit_engine::TransportRequest;
+use transit_model::TrackId;
+use transit_playback::record::Trouble;
+use transit_playback::reopen::ReopenCause;
+use transit_playback::{CountIn, OutputTrouble, Player};
+use transit_time::{Range, Samples};
 
 /// What [`StudioApp::shut_down`] achieved (issue #104).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ShutDown {
-    /// Plug-in hosting shut down cleanly ([`soundcraft_engine::shutdown_plugin_hosts`]).
+    /// Plug-in hosting shut down cleanly ([`transit_engine::shutdown_plugin_hosts`]).
     pub clean: bool,
     /// An autosave of unsaved changes was written; otherwise the last save (or an earlier
     /// autosave) stands.
@@ -124,7 +124,7 @@ impl StudioApp {
 
     /// Start the recording pass for `takes`: on the fly at the playhead when already playing, else
     /// from the count-in or pre-roll, or the cycle range.
-    pub(crate) fn begin_pass(&mut self, takes: Vec<soundcraft_engine::io::Take>) {
+    pub(crate) fn begin_pass(&mut self, takes: Vec<transit_engine::io::Take>) {
         let already_playing = self.is_playing();
         if already_playing {
             // Punch in on the fly at the current playhead.
@@ -174,7 +174,7 @@ impl StudioApp {
     /// autosave that plan with the session.
     fn plan_recording(
         &mut self,
-        takes: Vec<soundcraft_engine::io::Take>,
+        takes: Vec<transit_engine::io::Take>,
         pass: Option<Samples>,
         play: Option<(Samples, Option<Samples>, Option<Range>)>,
         count_in: Option<CountIn>,
@@ -183,7 +183,7 @@ impl StudioApp {
         self.record_clock = None;
         // The loop this pass records under; Cycle edits made while it runs wait for its end (#81).
         self.take_cycle = self.wanted_loop();
-        self.take_plan = Some(soundcraft_engine::io::Recording {
+        self.take_plan = Some(transit_engine::io::Recording {
             start: self.record_start,
             pass,
             punch: self.punch,
@@ -236,7 +236,7 @@ impl StudioApp {
 
     /// Is an audio track record-enabled (so the input device must be opened and armed)?
     fn audio_armed(&self) -> bool {
-        self.engine.session().tracks.iter().any(|t| t.mixer.record_arm && t.kind == soundcraft_model::TrackKind::Audio && !t.inactive)
+        self.engine.session().tracks.iter().any(|t| t.mixer.record_arm && t.kind == transit_model::TrackKind::Audio && !t.inactive)
     }
 
     /// The record-enabled MIDI and instrument tracks: their live input is recorded as clips.
@@ -247,7 +247,7 @@ impl StudioApp {
     /// Arm the input for the record-enabled tracks; a session never saved records into its
     /// autosave folder. Returns the audio takes it records; armed MIDI tracks start a capture
     /// pass that shares the audio take's record-start latch.
-    fn arm_recorder(&mut self) -> Result<Vec<soundcraft_engine::io::Take>, String> {
+    fn arm_recorder(&mut self) -> Result<Vec<transit_engine::io::Take>, String> {
         let midi = self.midi_armed();
         let mut takes = Vec::new();
         let audio = self.audio_armed();
@@ -257,9 +257,9 @@ impl StudioApp {
         if !midi.is_empty() {
             match &self.player {
                 Some(player) => {
-                    let latch = if audio { self.recorder.as_ref().and_then(soundcraft_playback::record::Recorder::start_reader) } else { None };
+                    let latch = if audio { self.recorder.as_ref().and_then(transit_playback::record::Recorder::start_reader) } else { None };
                     player.prepare_midi_recording(midi, latch)?;
-                    self.midi_journal = Some(soundcraft_engine::midi_journal::Writer::new(self.midi_journal_path()));
+                    self.midi_journal = Some(transit_engine::midi_journal::Writer::new(self.midi_journal_path()));
                 }
                 None if !audio => return Err("no audio device is open to record MIDI".into()),
                 None => {}
@@ -271,18 +271,18 @@ impl StudioApp {
     /// Where this pass's MIDI journal goes: beside the audio takes (the `Audio Files` of the
     /// session's folder, or its folder under the autosave root until it is saved).
     fn midi_journal_path(&self) -> std::path::PathBuf {
-        let name = soundcraft_engine::io::sanitize_name(&self.engine.session().name);
+        let name = transit_engine::io::sanitize_name(&self.engine.session().name);
         let unsaved = self.autosave_dir.as_ref().map_or_else(std::env::temp_dir, |d| d.join(&name));
         let home = self.engine.path.as_deref().and_then(|p| std::path::Path::new(p).parent()).unwrap_or(&unsaved);
-        soundcraft_engine::midi_journal::journal_path(&home.join("Audio Files"), &self.engine.session().name)
+        transit_engine::midi_journal::journal_path(&home.join("Audio Files"), &self.engine.session().name)
     }
 
     /// Append the events of the pass the journal hasn't taken yet. Control thread; the audio
     /// side only pushes to the ring. A failure is reported once and the pass carries on.
-    fn journal_midi(&mut self, take: &soundcraft_playback::MidiTake, plan: &soundcraft_engine::io::Recording, flush: bool) {
+    fn journal_midi(&mut self, take: &transit_playback::MidiTake, plan: &transit_engine::io::Recording, flush: bool) {
         let (Some(journal), Some(point)) = (self.midi_journal.as_mut(), take.start) else { return };
         let s = self.engine.session();
-        let latch = soundcraft_engine::midi_journal::Latch {
+        let latch = transit_engine::midi_journal::Latch {
             output_frame: point.output_frame,
             position: point.position.sample,
             device_rate: take.device_rate,
@@ -292,7 +292,7 @@ impl StudioApp {
         let loop_range = self.take_cycle;
         let mut plan = plan.clone();
         plan.start = point.position.sample;
-        let header = soundcraft_engine::midi_journal::Header::new(latch, &plan, loop_range, take.tracks.clone());
+        let header = transit_engine::midi_journal::Header::new(latch, &plan, loop_range, take.tracks.clone());
         let from = journal.consumed().min(take.events.len());
         let records: Vec<_> = take.events[from..].iter().filter_map(journal_record).collect();
         let mut written = journal.append(&header, &records, take.events.len());
@@ -305,21 +305,19 @@ impl StudioApp {
         }
     }
 
-    fn arm_audio_takes(&mut self) -> Result<Vec<soundcraft_engine::io::Take>, String> {
+    fn arm_audio_takes(&mut self) -> Result<Vec<transit_engine::io::Take>, String> {
         if self.recorder_failed {
             return Err(self.status.clone());
         }
-        let name = soundcraft_engine::io::sanitize_name(&self.engine.session().name);
+        let name = transit_engine::io::sanitize_name(&self.engine.session().name);
         let unsaved_dir = self.autosave_dir.as_ref().map_or_else(std::env::temp_dir, |d| d.join(name));
         let Some(r) = &mut self.recorder else { return Err("no audio input device".into()) };
-        let plan = soundcraft_engine::io::plan_takes(&self.engine, &unsaved_dir, r.channels);
+        let plan = transit_engine::io::plan_takes(&self.engine, &unsaved_dir, r.channels);
         if plan.is_empty() {
             return Err("no audio track is record-enabled".into());
         }
-        let takes = plan
-            .iter()
-            .map(|(track, inputs, path)| soundcraft_engine::io::Take { track: *track, path: path.clone(), channels: inputs.len() })
-            .collect();
+        let takes =
+            plan.iter().map(|(track, inputs, path)| transit_engine::io::Take { track: *track, path: path.clone(), channels: inputs.len() }).collect();
         if let Some(player) = &self.player {
             player.prepare_recording(r, plan)?;
         } else {
@@ -350,7 +348,7 @@ impl StudioApp {
             return true;
         }
         let result = if self.restore_pending { p.replace_session(session) } else { p.update_session(session) };
-        if matches!(result, Err(soundcraft_playback::PlayerError::NeedsReopen { .. })) {
+        if matches!(result, Err(transit_playback::PlayerError::NeedsReopen { .. })) {
             if let Err(error) = self.reconnect_with_player(false) {
                 self.player_requests.fail(&mut self.status, error);
                 return false;
@@ -421,11 +419,11 @@ impl StudioApp {
         Ok(true)
     }
 
-    fn store_plugin_states(&mut self, states: Result<soundcraft_playback::PluginStates, soundcraft_playback::PlayerError>) -> Result<(), String> {
+    fn store_plugin_states(&mut self, states: Result<transit_playback::PluginStates, transit_playback::PlayerError>) -> Result<(), String> {
         let states = self.player_requests.result(&mut self.status, states).ok_or_else(|| self.status.clone())?;
         for (t, slot, data) in states {
-            let slot = if slot == soundcraft_mix::INSTRUMENT_SLOT { json!("instrument") } else { json!(slot) };
-            let state = soundcraft_model::b64::encode(&data);
+            let slot = if slot == transit_mix::INSTRUMENT_SLOT { json!("instrument") } else { json!(slot) };
+            let state = transit_model::b64::encode(&data);
             if let Err(e) = self.engine.execute("mix.insert_state", &json!({"track": t.0, "slot": slot, "state": state})) {
                 self.status = format!("Cannot store plugin state: {e}");
                 return Err(self.status.clone());
@@ -451,7 +449,7 @@ impl StudioApp {
     /// events arrive without their begin/end-edit gestures), so a run of edits less than
     /// `HOSTED_HOLD_S` apart is one gesture: Write, Touch and Latch record it like a fader move
     /// and Touch lets go that long after the last value.
-    pub(crate) fn apply_edits(&mut self, edits: Vec<(soundcraft_model::TrackId, usize, String, f32)>) {
+    pub(crate) fn apply_edits(&mut self, edits: Vec<(transit_model::TrackId, usize, String, f32)>) {
         for (t, slot, param, value) in edits {
             // A hosted plug-in re-reports a value it already has (a keep-alive, a rounded echo):
             // only a changed value is a touch, or the held lane would fill with identical points.
@@ -467,7 +465,7 @@ impl StudioApp {
             }
             // A hosted instrument's edits go into the session like an insert's (K83), so a mapped
             // controller picks up from where the editor left the parameter.
-            let r = if slot == soundcraft_mix::INSTRUMENT_SLOT {
+            let r = if slot == transit_mix::INSTRUMENT_SLOT {
                 let key = format!("instrument_param:{}:{param}", t.0);
                 self.engine.execute_merged("mix.instrument_param", &json!({"track": t.0, "param": param, "value": value}), &key)
             } else {
@@ -500,7 +498,7 @@ impl StudioApp {
     /// plugins' own state reaches the session every two minutes (`autosave`).
     pub(crate) fn autosave_changes(&mut self) {
         self.poll_journal();
-        if let Some(e) = self.autosaver.as_ref().and_then(soundcraft_engine::autosave::Autosaver::failure) {
+        if let Some(e) = self.autosaver.as_ref().and_then(transit_engine::autosave::Autosaver::failure) {
             self.status = format!("Autosave failed: {e}");
         }
         if self.autosave_dir.is_none() || self.engine.revision == self.autosaved_rev {
@@ -515,7 +513,7 @@ impl StudioApp {
     }
 
     fn queue_autosave(&mut self, root: std::path::PathBuf) {
-        if let Some(point) = self.recorder.as_ref().and_then(soundcraft_playback::record::Recorder::applied_start)
+        if let Some(point) = self.recorder.as_ref().and_then(transit_playback::record::Recorder::applied_start)
             && let Some(plan) = self.take_plan.as_mut().filter(|plan| !plan.takes.is_empty())
         {
             plan.start = point.position.sample;
@@ -525,7 +523,7 @@ impl StudioApp {
         let placed = self.placed_journal.as_ref().filter(|p| !matches!(p.step, JournalStep::Release | JournalStep::Cleared(_)));
         let plan = self.take_plan.clone().or_else(|| placed.map(|p| p.plan.clone()));
         let carries = plan.as_ref().is_some_and(|p| p.midi_placed);
-        let w = self.autosaver.get_or_insert_with(|| soundcraft_engine::autosave::Autosaver::new(root));
+        let w = self.autosaver.get_or_insert_with(|| transit_engine::autosave::Autosaver::new(root));
         let ticket = w.write(self.engine.session_arc(), self.engine.path.clone(), plan);
         if let Some(p) = &mut self.placed_journal {
             p.step = match p.step {
@@ -541,12 +539,12 @@ impl StudioApp {
     /// plan says the clips are placed (a crash then discards the journal on recovery), then one
     /// whose plan no longer carries the recording, and only then is the journal deleted. Without
     /// an autosave folder there is no plan to pair it with, and it goes at once.
-    fn hold_journal(&mut self, journal: soundcraft_engine::midi_journal::Writer, plan: &soundcraft_engine::io::Recording) {
+    fn hold_journal(&mut self, journal: transit_engine::midi_journal::Writer, plan: &transit_engine::io::Recording) {
         if self.autosave_dir.is_none() {
             journal.discard();
             return;
         }
-        let plan = soundcraft_engine::io::Recording { midi_journal: Some(journal.path().to_path_buf()), midi_placed: true, ..plan.clone() };
+        let plan = transit_engine::io::Recording { midi_journal: Some(journal.path().to_path_buf()), midi_placed: true, ..plan.clone() };
         if let Some(old) = self.placed_journal.replace(PlacedJournal { journal, plan, step: JournalStep::Queue }) {
             old.journal.discard();
         }
@@ -644,20 +642,20 @@ impl StudioApp {
     }
 
     /// Replace the open session with unsaved work an earlier run left behind.
-    pub fn recover(&mut self, left: &soundcraft_engine::autosave::Leftover) {
+    pub fn recover(&mut self, left: &transit_engine::autosave::Leftover) {
         if self.recording_active() {
             self.status = "Stop recording before recovering other work.".into();
             return;
         }
         self.close_autosave();
-        match soundcraft_engine::autosave::recover(&mut self.engine, left) {
+        match transit_engine::autosave::recover(&mut self.engine, left) {
             Ok(missing) => {
-                let midi = soundcraft_engine::autosave::recover_midi(&mut self.engine, left);
+                let midi = transit_engine::autosave::recover_midi(&mut self.engine, left);
                 // A journal that can't be used (damaged, not ours) was deleted or is left alone: either
                 // way it would only be offered again. One that may open next time keeps the leftover.
-                let retry = midi.is_err() && soundcraft_engine::autosave::midi_journal_usable(left);
+                let retry = midi.is_err() && transit_engine::autosave::midi_journal_usable(left);
                 if !retry && self.write_autosave() {
-                    soundcraft_engine::autosave::discard(left);
+                    transit_engine::autosave::discard(left);
                 }
                 self.status = match missing.len() {
                     0 => format!("Recovered “{}”. Save it to keep the changes.", left.name),
@@ -697,18 +695,18 @@ impl StudioApp {
     /// unless the user chose Quit), finish any take and hand the input back to the player, release
     /// the player and its plug-in instances, then shut plug-in hosting down. Used by the quit, a
     /// lost graphics device and a panic on the UI thread, under a watchdog
-    /// ([`soundcraft_engine::emergency`]).
+    /// ([`transit_engine::emergency`]).
     pub fn shut_down(&mut self) -> ShutDown {
         let autosaved = self.close_autosave();
         self.close_input();
         self.player = None;
-        ShutDown { clean: soundcraft_engine::shutdown_plugin_hosts(), autosaved }
+        ShutDown { clean: transit_engine::shutdown_plugin_hosts(), autosaved }
     }
 
     pub(crate) fn recording_active(&self) -> bool {
         self.engine.transport.recording
             || self.take_plan.is_some()
-            || self.recorder.as_ref().is_some_and(soundcraft_playback::record::Recorder::has_pending_take)
+            || self.recorder.as_ref().is_some_and(transit_playback::record::Recorder::has_pending_take)
     }
 
     pub(crate) fn poll_player(&mut self) {
@@ -732,7 +730,7 @@ impl StudioApp {
         if collect && self.recording_active() {
             self.finish_recording();
         }
-        if let Some(point) = self.recorder.as_ref().and_then(soundcraft_playback::record::Recorder::applied_start)
+        if let Some(point) = self.recorder.as_ref().and_then(transit_playback::record::Recorder::applied_start)
             && self.take_plan.as_ref().is_some_and(|plan| !plan.takes.is_empty() && plan.start != point.position.sample)
         {
             self.record_start = point.position.sample;
@@ -768,11 +766,11 @@ impl StudioApp {
         let events: Vec<_> = take.timed(self.engine.session().sample_rate.hz()).iter().filter_map(|(offset, e)| rec_event(*offset, e)).collect();
         let start = latch.position.sample;
         let now = start + self.recording_elapsed(start);
-        let cut = soundcraft_engine::midi_take::Cut { start, pass: plan.pass, punch: plan.punch, stop: now - start };
+        let cut = transit_engine::midi_take::Cut { start, pass: plan.pass, punch: plan.punch, stop: now - start };
         let s = self.engine.session();
         let cycle = self.take_cycle.unwrap_or_default();
         let wrap = self.take_cycle.filter(|_| plan.pass.is_none());
-        let mut built = soundcraft_engine::midi_take::build_wrapping(&s.tempo, s.sample_rate, &events, &cut, wrap);
+        let mut built = transit_engine::midi_take::build_wrapping(&s.tempo, s.sample_rate, &events, &cut, wrap);
         // After a wrap only the lap under way is drawn, from the loop start to the playhead.
         let (start, end) = match self.record_clock.filter(|c| c.laps > 0 && wrap.is_some()) {
             Some(c) => {
@@ -823,7 +821,7 @@ impl StudioApp {
             OutputTrouble::Stalled => (format!("“{name}” stopped asking for audio"), "Use Audio › Reconnect Device."),
             // The driver's settings moved under the stream (a buffer size or rate changed in its
             // panel): the output is silent until the device is reopened.
-            OutputTrouble::ResetRequested => (soundcraft_playback::RESET_REQUESTED_TEXT.to_string(), "Use Audio › Reconnect Device."),
+            OutputTrouble::ResetRequested => (transit_playback::RESET_REQUESTED_TEXT.to_string(), "Use Audio › Reconnect Device."),
         };
         let (recording, playing) = (self.recording_active(), self.engine.transport.playing);
         // A driver that asked to be reset is reopened by the app (`step_reopen`); a take in
@@ -929,7 +927,7 @@ impl StudioApp {
         self.player_requests.error = None;
     }
 
-    /// The automatic reopen after a driver reset ([`soundcraft_playback::reopen`]): once the
+    /// The automatic reopen after a driver reset ([`transit_playback::reopen`]): once the
     /// attempt is due, and never while the driver's settings panel holds the driver or a take is
     /// still being finished, the device is reopened with the same choices through the one reopen
     /// path (`reconnect_audio_using`), which also takes the input again for monitoring and arming.
@@ -971,7 +969,7 @@ impl StudioApp {
         } else if self.reopen.gave_up() {
             format!(
                 "The device did not reopen after the {what} ({why}), after {} attempts. Use Audio › Reconnect Device.",
-                soundcraft_playback::reopen::REOPEN_ATTEMPTS
+                transit_playback::reopen::REOPEN_ATTEMPTS
             )
         } else {
             format!("The device did not reopen after the {what} yet ({why}); trying again.")
@@ -997,7 +995,7 @@ impl StudioApp {
     pub(crate) fn reconnect_audio_using(
         &mut self,
         preserve: bool,
-        open: impl FnOnce(std::sync::Arc<soundcraft_model::Session>, &soundcraft_playback::AudioConfig) -> Player,
+        open: impl FnOnce(std::sync::Arc<transit_model::Session>, &transit_playback::AudioConfig) -> Player,
     ) -> Result<bool, String> {
         if self.recording_active() {
             return Err(crate::audio_devices::REFUSED_RECORDING.into());
@@ -1073,7 +1071,7 @@ impl StudioApp {
         }
         let plan = self.take_plan.take();
         let approximate = self.pass_approximate();
-        let finished = self.recorder.as_mut().filter(|r| r.has_pending_take()).map(soundcraft_playback::record::Recorder::finish);
+        let finished = self.recorder.as_mut().filter(|r| r.has_pending_take()).map(transit_playback::record::Recorder::finish);
         // Tests substitute only the device's finished files; placement and stop ordering stay real.
         #[cfg(test)]
         let finished = finished.or_else(|| self.finished_test_takes.take());
@@ -1088,7 +1086,7 @@ impl StudioApp {
             return;
         }
         let audio = finished.is_some();
-        let mut plan = plan.unwrap_or_else(|| soundcraft_engine::io::Recording {
+        let mut plan = plan.unwrap_or_else(|| transit_engine::io::Recording {
             start: self.record_start,
             pass: None,
             punch: self.punch,
@@ -1100,7 +1098,7 @@ impl StudioApp {
         // The audio take and the MIDI pass share one latch; either's applied start is the real one.
         let latch = finished
             .is_some()
-            .then(|| self.recorder.as_ref().and_then(soundcraft_playback::record::Recorder::applied_start))
+            .then(|| self.recorder.as_ref().and_then(transit_playback::record::Recorder::applied_start))
             .flatten()
             .or_else(|| midi.as_ref().and_then(|m| m.start));
         if let Some(point) = latch {
@@ -1154,14 +1152,14 @@ impl StudioApp {
         if self.test_approximate_start {
             return true;
         }
-        self.recorder.as_ref().is_some_and(soundcraft_playback::record::Recorder::start_approximate)
+        self.recorder.as_ref().is_some_and(transit_playback::record::Recorder::start_approximate)
     }
 
     /// Place a finished MIDI pass: one clip per armed track (per pass when loop recording), merged
     /// into a clip already under the take. Nothing played, nothing placed.
-    fn place_midi_take(&mut self, plan: &soundcraft_engine::io::Recording, midi: &soundcraft_playback::MidiTake, end: Samples) {
+    fn place_midi_take(&mut self, plan: &transit_engine::io::Recording, midi: &transit_playback::MidiTake, end: Samples) {
         let events: Vec<_> = midi.timed(self.engine.session().sample_rate.hz()).iter().filter_map(|(offset, e)| rec_event(*offset, e)).collect();
-        let ids = soundcraft_engine::midi_take::place_midi_recording_wrapping(&mut self.engine, plan, &events, end - plan.start, self.take_cycle);
+        let ids = transit_engine::midi_take::place_midi_recording_wrapping(&mut self.engine, plan, &events, end - plan.start, self.take_cycle);
         if midi.dropped > 0 {
             self.status = format!("{} MIDI events were lost: the capture queue was full", midi.dropped);
         }
@@ -1173,7 +1171,7 @@ impl StudioApp {
         }
         let s = self.engine.session_arc();
         // A take of an earlier lap lives on a playlist that is no longer the active one.
-        let placed: Vec<(TrackId, &soundcraft_model::Clip)> = ids
+        let placed: Vec<(TrackId, &transit_model::Clip)> = ids
             .iter()
             .filter_map(|id| s.tracks.iter().find_map(|t| t.playlists.iter().flat_map(|p| p.clips.iter()).find(|c| c.id == *id).map(|c| (t.id, c))))
             .collect();
@@ -1187,10 +1185,8 @@ impl StudioApp {
                 }
             }
         }
-        let notes: usize = placed
-            .iter()
-            .map(|(_, c)| if let soundcraft_model::ClipContent::Midi { sequence } = &c.content { sequence.notes.len() } else { 0 })
-            .sum();
+        let notes: usize =
+            placed.iter().map(|(_, c)| if let transit_model::ClipContent::Midi { sequence } = &c.content { sequence.notes.len() } else { 0 }).sum();
         let passes = ids.len() / lanes.len().max(1);
         let status = if passes > 1 {
             format!("Recorded {passes} takes ({notes} notes) on {}", names.join(", "))
@@ -1211,7 +1207,7 @@ impl StudioApp {
     /// status line says what was recorded where. `end` is where the playhead stopped.
     pub(crate) fn place_takes(
         &mut self,
-        plan: &soundcraft_engine::io::Recording,
+        plan: &transit_engine::io::Recording,
         takes: Vec<(TrackId, std::path::PathBuf)>,
         end: Samples,
         tracks: usize,
@@ -1227,14 +1223,14 @@ impl StudioApp {
                 }
             }
         }
-        let ids = soundcraft_engine::io::place_recording_take(&mut self.engine, plan, takes, true);
+        let ids = transit_engine::io::place_recording_take(&mut self.engine, plan, takes, true);
         if plan.pass.is_some() {
             let passes = ids.len() / tracks.max(1);
             self.status = if passes > 1 { format!("Recorded {passes} takes") } else { format!("Loop-recorded {passes} take(s)") };
             return;
         }
         let s = self.engine.session_arc();
-        let placed: Vec<(TrackId, &soundcraft_model::Clip)> = ids.iter().filter_map(|id| s.find_clip(*id)).collect();
+        let placed: Vec<(TrackId, &transit_model::Clip)> = ids.iter().filter_map(|id| s.find_clip(*id)).collect();
         let Some(longest) = placed.iter().map(|(_, c)| c.length).max() else {
             self.status = "Recorded nothing".into();
             return;
@@ -1515,7 +1511,7 @@ impl StudioApp {
     }
 }
 
-/// Instant attack, ~26 dB/s release, 2 s peak hold. Copied from `soundcraft-ui-egui`.
+/// Instant attack, ~26 dB/s release, 2 s peak hold. Copied from `transit-ui-egui`.
 pub fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32) {
     let fall = 10f32.powf(-26.0 * dt / 20.0);
     for c in 0..2 {
@@ -1544,15 +1540,15 @@ pub fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32) {
 }
 
 /// The status line naming the plugin in `slot` that the engine took out of the signal path.
-fn failed_plugin_status(s: &soundcraft_model::Session, track: TrackId, slot: usize) -> Option<String> {
+fn failed_plugin_status(s: &transit_model::Session, track: TrackId, slot: usize) -> Option<String> {
     let t = s.track(track)?;
-    let ins = if slot == soundcraft_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(slot)?.as_ref() }?;
+    let ins = if slot == transit_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(slot)?.as_ref() }?;
     Some(format!("{} on {} put out invalid audio, so it is bypassed until playback stops or starts again.", ins.plugin, t.name))
 }
 
 /// A refused audio action as a sentence for the status line; the raw variants go to the log only.
-pub(crate) fn refusal_text(outcome: soundcraft_playback::action_lane::Outcome, result: Option<soundcraft_playback::ActionResult>) -> String {
-    use soundcraft_playback::{ActionResult, action_lane::Outcome, device_clock::Unavailable};
+pub(crate) fn refusal_text(outcome: transit_playback::action_lane::Outcome, result: Option<transit_playback::ActionResult>) -> String {
+    use transit_playback::{ActionResult, action_lane::Outcome, device_clock::Unavailable};
     match result {
         Some(ActionResult::RecordingClock(why)) => {
             let reason = match why {
@@ -1588,9 +1584,9 @@ const APPROXIMATE_TAKE: &str = "Recorded with approximate alignment: the audio d
 
 /// A finished pass's MIDI journal, kept until the autosaver has the clips.
 pub(crate) struct PlacedJournal {
-    journal: soundcraft_engine::midi_journal::Writer,
+    journal: transit_engine::midi_journal::Writer,
     /// The recording plan the autosave carries meanwhile: the clips are already placed.
-    plan: soundcraft_engine::io::Recording,
+    plan: transit_engine::io::Recording,
     step: JournalStep,
 }
 
@@ -1600,20 +1596,20 @@ pub(crate) enum JournalStep {
     /// No autosave carrying the placed plan has been handed over yet.
     Queue,
     /// That autosave is handed over (landed once the autosaver says so).
-    Placed(soundcraft_engine::autosave::Ticket),
+    Placed(transit_engine::autosave::Ticket),
     /// It landed: hand over one that no longer carries the recording.
     Release,
     /// That one is handed over; once it lands the journal goes.
-    Cleared(soundcraft_engine::autosave::Ticket),
+    Cleared(transit_engine::autosave::Ticket),
 }
 
 pub(crate) struct PlayerRequests {
-    notices: [Option<soundcraft_playback::PlayerNotice>; 64],
-    pub(crate) play: Option<soundcraft_playback::action_lane::Sequence>,
-    pub(crate) locate: Option<soundcraft_playback::action_lane::Sequence>,
-    stop: Option<soundcraft_playback::action_lane::Sequence>,
-    release: Option<soundcraft_playback::action_lane::Sequence>,
-    pub(crate) recording: Option<soundcraft_playback::action_lane::Sequence>,
+    notices: [Option<transit_playback::PlayerNotice>; 64],
+    pub(crate) play: Option<transit_playback::action_lane::Sequence>,
+    pub(crate) locate: Option<transit_playback::action_lane::Sequence>,
+    stop: Option<transit_playback::action_lane::Sequence>,
+    release: Option<transit_playback::action_lane::Sequence>,
+    pub(crate) recording: Option<transit_playback::action_lane::Sequence>,
     error: Option<String>,
 }
 
@@ -1643,11 +1639,11 @@ impl PlayerRequests {
         status.clone_from(error);
     }
 
-    pub(crate) fn result<T>(&mut self, status: &mut String, result: Result<T, soundcraft_playback::PlayerError>) -> Option<T> {
+    pub(crate) fn result<T>(&mut self, status: &mut String, result: Result<T, transit_playback::PlayerError>) -> Option<T> {
         match result {
             Ok(value) => Some(value),
             Err(error) => {
-                if error == soundcraft_playback::PlayerError::Faulted {
+                if error == transit_playback::PlayerError::Faulted {
                     self.reset();
                 }
                 self.fail(status, error.to_string());
@@ -1657,8 +1653,8 @@ impl PlayerRequests {
     }
 
     /// Returns true when a refused start requires collecting an armed take.
-    pub(crate) fn notice(&mut self, notice: soundcraft_playback::PlayerNotice, status: &mut String, recording: &mut bool) -> bool {
-        use soundcraft_playback::{ActionResult, PlayerCommand, PlayerNotice, action_lane::Outcome, player::SessionOutcome};
+    pub(crate) fn notice(&mut self, notice: transit_playback::PlayerNotice, status: &mut String, recording: &mut bool) -> bool {
+        use transit_playback::{ActionResult, PlayerCommand, PlayerNotice, action_lane::Outcome, player::SessionOutcome};
         match notice {
             PlayerNotice::Session(n) => {
                 if let SessionOutcome::Rejected(reason) = n.outcome {
@@ -1673,10 +1669,10 @@ impl PlayerRequests {
                             ActionResult::Applied
                                 | ActionResult::RecordingStarted(_)
                                 | ActionResult::Event(
-                                    soundcraft_mix::EventOutcome::Queued
-                                        | soundcraft_mix::EventOutcome::QueuedLate { .. }
-                                        | soundcraft_mix::EventOutcome::ReleaseAdvanced { .. }
-                                        | soundcraft_mix::EventOutcome::Coalesced
+                                    transit_mix::EventOutcome::Queued
+                                        | transit_mix::EventOutcome::QueuedLate { .. }
+                                        | transit_mix::EventOutcome::ReleaseAdvanced { .. }
+                                        | transit_mix::EventOutcome::Coalesced
                                 )
                         )
                     );
@@ -1718,7 +1714,7 @@ impl PlayerRequests {
 
     pub(crate) fn recovery(
         &mut self,
-        frontiers: (soundcraft_playback::action_lane::Sequence, soundcraft_playback::action_lane::Sequence),
+        frontiers: (transit_playback::action_lane::Sequence, transit_playback::action_lane::Sequence),
         status: &mut String,
     ) -> bool {
         let stopped = self.stop.is_some_and(|s| frontiers.0 >= s);
@@ -1765,21 +1761,21 @@ pub(crate) struct MidiLive {
     pub tracks: Vec<TrackId>,
     pub start: Samples,
     pub end: Samples,
-    pub built: Vec<soundcraft_engine::midi_take::Built>,
+    pub built: Vec<transit_engine::midi_take::Built>,
 }
 
 /// A captured event as the journal keeps it (device frame, not yet placed); None for what
 /// [`rec_event`] cannot keep.
-fn journal_record(e: &soundcraft_playback::midi_capture::CapturedEvent) -> Option<soundcraft_engine::midi_journal::Record> {
+fn journal_record(e: &transit_playback::midi_capture::CapturedEvent) -> Option<transit_engine::midi_journal::Record> {
     let kept = rec_event(0, e)?;
-    Some(soundcraft_engine::midi_journal::Record { frame: e.frame, track: e.track, channel: e.channel, approximate: e.approximate, msg: kept.msg })
+    Some(transit_engine::midi_journal::Record { frame: e.frame, track: e.track, channel: e.channel, approximate: e.approximate, msg: kept.msg })
 }
 
 /// A captured live message as the engine's recorder takes it; controllers it cannot keep (14-bit
 /// pairs, which ingress does not produce) are left out.
-fn rec_event(offset: Samples, e: &soundcraft_playback::midi_capture::CapturedEvent) -> Option<soundcraft_engine::midi_take::RecEvent> {
-    use soundcraft_engine::midi_take::Msg;
-    use soundcraft_mix::Message;
+fn rec_event(offset: Samples, e: &transit_playback::midi_capture::CapturedEvent) -> Option<transit_engine::midi_take::RecEvent> {
+    use transit_engine::midi_take::Msg;
+    use transit_mix::Message;
     let msg = match e.message {
         Message::NoteOn { key, velocity, .. } => Msg::NoteOn { pitch: key, velocity },
         Message::NoteOff { key, velocity, .. } => Msg::NoteOff { pitch: key, velocity },
@@ -1790,7 +1786,7 @@ fn rec_event(offset: Samples, e: &soundcraft_playback::midi_capture::CapturedEve
         Message::Program { program } => Msg::Program { program },
         Message::Control14 { .. } => return None,
     };
-    Some(soundcraft_engine::midi_take::RecEvent { track: e.track, channel: e.channel, offset, msg })
+    Some(transit_engine::midi_take::RecEvent { track: e.track, channel: e.channel, offset, msg })
 }
 
 /// Said when a reopen could not take the plug-ins' live state and used the document's.
@@ -1798,10 +1794,10 @@ const STATE_FROM_DOCUMENT: &str = "Audio recovered from the document state; live
 
 /// The status line when a driver reset (or a driver that stopped calling back) stops the device
 /// and the app reopens it.
-fn reopen_note(reopen: &soundcraft_playback::reopen::Reopener, recording: bool, playing: bool) -> String {
+fn reopen_note(reopen: &transit_playback::reopen::Reopener, recording: bool, playing: bool) -> String {
     let what = reopen.cause().map_or("driver reset", ReopenCause::text);
     let next = if reopen.gave_up() {
-        format!("The device did not reopen after {} attempts; use Audio › Reconnect Device.", soundcraft_playback::reopen::REOPEN_ATTEMPTS)
+        format!("The device did not reopen after {} attempts; use Audio › Reconnect Device.", transit_playback::reopen::REOPEN_ATTEMPTS)
     } else {
         "Reopening the device.".to_owned()
     };

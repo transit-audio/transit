@@ -1,8 +1,8 @@
 //! Clip waveforms, drawn per physical pixel, or as a line through the samples at the sample level.
 
 use egui::{Color32, Mesh, Painter, Rect, Shape, Stroke, pos2, vec2};
-use soundcraft_model::{Clip, Session, SourceAudio};
-use soundcraft_time::Samples;
+use transit_model::{Clip, Session, SourceAudio};
+use transit_time::Samples;
 
 /// Draw a clip's audio across `body`, one band per channel, `channels` of them at most.
 pub fn draw(painter: &Painter, s: &Session, tl: Rect, clip: &Clip, audio: &SourceAudio, channels: usize, body: Rect, wave: Color32) {

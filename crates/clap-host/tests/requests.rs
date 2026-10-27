@@ -9,10 +9,10 @@
 
 mod common;
 
-use soundcraft_dsp::{Plugin, PluginStateReader, ProcessStatus};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use transit_dsp::{Plugin, PluginStateReader, ProcessStatus};
 
 const REQUESTS: &str = "clap:org.soundcraft.test.requests";
 const BLOCK: usize = 64;
@@ -72,7 +72,7 @@ fn silent() -> Vec<Vec<f32>> {
     vec![vec![0.0f32; BLOCK]; 2]
 }
 
-/// What the mixer does with a hosted effect whose input is silent (`soundcraft_mix::run_insert`):
+/// What the mixer does with a hosted effect whose input is silent (`transit_mix::run_insert`):
 /// it leaves the plug-in unprocessed while its status allows that. True when it processed.
 fn mixer_block(p: &mut Box<dyn Plugin>) -> bool {
     let asleep = matches!(p.process_status(), ProcessStatus::Sleep);
@@ -88,7 +88,7 @@ fn mixer_block(p: &mut Box<dyn Plugin>) -> bool {
 /// entries the set-up wrote (all on this thread: creation and `prepare` are main-thread work).
 fn new_requests() -> (Box<dyn Plugin>, Box<dyn PluginStateReader>, usize) {
     common::requests_fixture_dir();
-    let mut p = soundcraft_clap_host::create(REQUESTS).expect("requests fixture");
+    let mut p = transit_clap_host::create(REQUESTS).expect("requests fixture");
     p.prepare(48_000.0, BLOCK, 2);
     assert!(p.editor().is_none(), "the requests fixture has no editor");
     let mut reader = p.state_reader().expect("the requests fixture reports through clap.state");
@@ -156,7 +156,7 @@ fn restart_requested_on_the_audio_thread_runs_on_main_keeps_state_and_reports_th
     });
     let deadline = Instant::now() + Duration::from_secs(20);
     while latency.load(Ordering::SeqCst) != 64 && Instant::now() < deadline {
-        soundcraft_clap_host::service_requests();
+        transit_clap_host::service_requests();
         std::thread::sleep(Duration::from_millis(1));
     }
     // A few more blocks after the restart.
@@ -204,20 +204,20 @@ fn restart_of_an_idle_plugin_is_serviced_on_main_only() {
     // Asked from the plug-in's IO thread while it is not processing.
     assert!(p.load_state(b"CMD:restart-now:32"));
     let me = std::thread::current().id();
-    std::thread::spawn(soundcraft_clap_host::service_requests).join().unwrap();
+    std::thread::spawn(transit_clap_host::service_requests).join().unwrap();
     assert_eq!(std::thread::current().id(), me);
     let r = Report::read(&mut reader).since(base);
     assert_eq!(r.calls("deactivate").len(), 0, "another thread does not service this instance's requests");
     assert_eq!(p.latency(), 5);
 
-    soundcraft_clap_host::service_requests();
+    transit_clap_host::service_requests();
     let r = Report::read(&mut reader).since(base);
     assert_eq!(r.calls("deactivate"), vec![r.me]);
     assert_eq!(r.calls("activate"), vec![r.me]);
     assert_eq!(r.calls("latency.changed"), vec![r.me]);
     assert_eq!(p.latency(), 32);
     // Done: a second call does nothing more.
-    soundcraft_clap_host::service_requests();
+    transit_clap_host::service_requests();
     assert_eq!(Report::read(&mut reader).since(base).calls("activate").len(), 1);
     // Processing starts on the audio thread as usual.
     p.set_input_silent(false);
@@ -229,12 +229,12 @@ fn restart_of_an_idle_plugin_is_serviced_on_main_only() {
 fn request_callback_of_a_plugin_without_editor_runs_on_main() {
     let (mut p, mut reader, _) = new_requests();
     assert!(p.load_state(b"CMD:callback-now"));
-    std::thread::spawn(soundcraft_clap_host::service_requests).join().unwrap();
+    std::thread::spawn(transit_clap_host::service_requests).join().unwrap();
     assert!(Report::read(&mut reader).calls("on_main_thread").is_empty(), "not off the main thread");
-    soundcraft_clap_host::service_requests();
+    transit_clap_host::service_requests();
     let r = Report::read(&mut reader);
     assert_eq!(r.calls("on_main_thread"), vec![r.me]);
-    soundcraft_clap_host::service_requests();
+    transit_clap_host::service_requests();
     assert_eq!(Report::read(&mut reader).calls("on_main_thread").len(), 1, "once per request");
     drop(p);
 }
@@ -244,7 +244,7 @@ fn request_callback_of_a_plugin_without_editor_runs_on_main() {
 #[test]
 fn a_values_rescan_is_read_on_main_and_reported_like_an_editor_edit() {
     common::fixture_dir();
-    let mut p = soundcraft_clap_host::create("clap:org.soundcraft.test.gain").expect("gain fixture");
+    let mut p = transit_clap_host::create("clap:org.soundcraft.test.gain").expect("gain fixture");
     p.prepare(48_000.0, BLOCK, 2);
     let mut ed = p.editor().expect("the gain fixture has an editor handle");
     assert!(ed.idle().is_empty());
@@ -252,7 +252,7 @@ fn a_values_rescan_is_read_on_main_and_reported_like_an_editor_edit() {
     // refuses the blob as a state, so the host learns the value only through the rescan.
     assert!(!p.load_state(b"CMD:rescan-values:1.25"));
     assert_eq!(p.param("7"), Some(1.0));
-    let off = std::thread::spawn(soundcraft_clap_host::service_requests).join().unwrap();
+    let off = std::thread::spawn(transit_clap_host::service_requests).join().unwrap();
     assert_eq!(off.rescans, 0, "not off the main thread");
     assert_eq!(ed.idle(), vec![("7".to_string(), 1.25)], "the re-read value that differs from the host's, reported for the session");
     assert!(ed.idle().is_empty(), "once");
@@ -288,7 +288,7 @@ fn a_parked_block_is_silent_with_fades_and_keeps_the_latency() {
     let wet = block(&mut p)[0][BLOCK - 1];
     assert!((wet - 0.125).abs() < 1e-6);
     assert!(p.load_state(b"CMD:restart-now:32"));
-    let s = soundcraft_clap_host::service_requests();
+    let s = transit_clap_host::service_requests();
     assert_eq!(s.restarts_waiting, 1, "it is processing: the audio side parks it first");
     let parking = block(&mut p);
     let parked = block(&mut p);
@@ -299,7 +299,7 @@ fn a_parked_block_is_silent_with_fades_and_keeps_the_latency() {
         assert!((x - want).abs() < 1e-6, "sample {i}: {x}, want {want} (a fade out from {wet}, never the 0.5 input)");
     }
     assert_eq!(parking[0], parking[1], "every channel");
-    assert_eq!(soundcraft_clap_host::service_requests().restarted, 1);
+    assert_eq!(transit_clap_host::service_requests().restarted, 1);
     assert_eq!(p.latency(), 32);
     let a = block(&mut p);
     let b = block(&mut p);
@@ -322,13 +322,13 @@ fn a_parked_restart_without_callbacks_completes_on_main_after_a_deadline() {
     p.process(&mut vec![vec![0.5f32; BLOCK]; 2], BLOCK); // in the processing state
     assert!(p.load_state(b"CMD:restart-now:32"));
     // The device stops: no more process calls.
-    let first = soundcraft_clap_host::service_requests();
+    let first = transit_clap_host::service_requests();
     assert_eq!((first.restarted, first.restarts_waiting), (0, 1));
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut done = 0;
     while done == 0 && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
-        done = soundcraft_clap_host::service_requests().restarted;
+        done = transit_clap_host::service_requests().restarted;
     }
     assert_eq!(done, 1, "completed without an audio callback");
     assert_eq!(p.latency(), 32);
@@ -372,9 +372,9 @@ fn a_restart_whose_activation_fails_is_faded_silence() {
     };
     let wet = block(&mut p)[0][BLOCK - 1];
     assert!(p.load_state(b"CMD:restart-fail-now"));
-    assert_eq!(soundcraft_clap_host::service_requests().restarts_waiting, 1);
+    assert_eq!(transit_clap_host::service_requests().restarts_waiting, 1);
     let mut out = block(&mut p)[0].clone(); // parks
-    let s = soundcraft_clap_host::service_requests();
+    let s = transit_clap_host::service_requests();
     assert_eq!((s.restarted, s.failed), (0, 1), "{s:?}");
     assert_eq!(p.latency(), 0);
     for _ in 0..3 {
@@ -393,7 +393,7 @@ fn a_restart_whose_activation_fails_is_faded_silence() {
 #[test]
 fn a_host_value_not_yet_processed_is_not_reverted_by_a_rescan() {
     common::fixture_dir();
-    let mut p = soundcraft_clap_host::create("clap:org.soundcraft.test.gain").expect("gain fixture");
+    let mut p = transit_clap_host::create("clap:org.soundcraft.test.gain").expect("gain fixture");
     p.prepare(48_000.0, BLOCK, 2);
     let mut ed = p.editor().expect("editor");
     let _ = ed.idle();
@@ -440,7 +440,7 @@ fn a_block_skipped_while_main_holds_the_instance_is_a_fade() {
     });
     let deadline = Instant::now() + Duration::from_secs(30);
     while skipped.load(Ordering::SeqCst) < 5 && Instant::now() < deadline {
-        soundcraft_clap_host::service_requests();
+        transit_clap_host::service_requests();
     }
     stop.store(true, Ordering::SeqCst);
     let (_p, bad) = audio.join().unwrap();

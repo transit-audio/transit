@@ -3,9 +3,9 @@
 use crate::ffi::{self, Instance, PARAM_FLAG_DISPLAY_LOG, PARAM_FLAG_METER_READ_ONLY, PARAM_FLAG_WRITABLE, RawParam};
 use crate::plugin::AuPlugin;
 use crate::{AuDescriptor, AuError, SUPPORTED_TYPES, TYPE_EFFECT, TYPE_INSTRUMENT, TYPE_MUSIC_EFFECT, parse_id};
-use soundcraft_dsp::{ParamInfo, Plugin, PluginInfo, Taper, Unit};
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock, PoisonError};
+use transit_dsp::{ParamInfo, Plugin, PluginInfo, Taper, Unit};
 
 /// Most labels for an indexed parameter shown as a choice (more become a plain range).
 const MAX_CHOICES: f32 = 128.0;

@@ -1,5 +1,5 @@
 [package]
-name = "soundcraft-model"
+name = "transit-model"
 description = "transit session document: tracks, playlists, clips, mixer, routing, automation, markers"
 version.workspace = true
 edition.workspace = true
@@ -8,9 +8,9 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-soundcraft-time.workspace = true
-soundcraft-audio-io.workspace = true
-soundcraft-midi.workspace = true
+transit-time.workspace = true
+transit-audio-io.workspace = true
+transit-midi.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

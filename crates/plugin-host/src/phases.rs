@@ -9,10 +9,10 @@
 //! the audio thread.
 
 use crate::lock;
-use soundcraft_dsp::EditorOpenReport;
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use transit_dsp::EditorOpenReport;
 
 /// The time marks are taken on ([`Instant::now`]; a test sets a manual one).
 pub type Clock = Arc<dyn Fn() -> Instant + Send + Sync>;

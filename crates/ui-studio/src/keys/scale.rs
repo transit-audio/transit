@@ -1,7 +1,7 @@
 //! Per-clip scale controls and pitch-row mapping. Live MIDI is never transformed here.
 
 use super::*;
-use soundcraft_midi::scale::{Scale, ScaleMode};
+use transit_midi::scale::{Scale, ScaleMode};
 
 impl StudioApp {
     pub(super) fn scale_apply_move(&mut self, pairs: &[(Note, Note)]) -> Result<Vec<Note>, String> {
@@ -76,7 +76,7 @@ pub(super) fn controls(app: &mut StudioApp, ui: &mut Ui, layout: &mut KeysLayout
             ui.set_width(64.0);
             ui.small("Root");
             egui::Grid::new("scale_root").num_columns(2).spacing([2.0, 2.0]).show(ui, |ui| {
-                for (root, label) in soundcraft_midi::scale::ROOT_NAMES.iter().enumerate() {
+                for (root, label) in transit_midi::scale::ROOT_NAMES.iter().enumerate() {
                     let response = ui.selectable_label(usize::from(key.root) == root, *label);
                     layout.pitch_menu.push(MenuItem::at(ui, format!("root_{root}"), (*label).into(), response.rect));
                     if response.clicked() {

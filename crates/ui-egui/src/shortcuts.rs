@@ -91,7 +91,7 @@ pub fn handle(app: &mut SoundApp, ctx: &egui::Context) {
 }
 
 fn command_for(key: Key, mods: Modifiers, mac: bool) -> Option<&'static str> {
-    soundcraft_engine::command_specs()
+    transit_engine::command_specs()
         .iter()
         .find(|c| c.shortcut.and_then(parse).is_some_and(|(m, k)| k == key && mods_match(m, mods, mac)))
         .map(|c| c.id)
@@ -239,8 +239,7 @@ fn edit_mode_key(app: &mut SoundApp, pressed: Key) {
     let keep_grid = ed.edit_mode.is_grid() && ed.flag("options.edit_tool_mode_keyboard_lock");
     // F4 pressed first in an F4+F1–F3 chord switched the Grid mode on its own; put that back.
     let flipped = egui::Id::new("edit_mode_key_grid_before_f4");
-    let before =
-        (ed.edit_mode.is_grid() && !keep_grid).then(|| if ed.flag(soundcraft_engine::edit::RELATIVE_GRID) { "relative_grid" } else { "grid" });
+    let before = (ed.edit_mode.is_grid() && !keep_grid).then(|| if ed.flag(transit_engine::edit::RELATIVE_GRID) { "relative_grid" } else { "grid" });
     let restore = match &ctx {
         Some(c) if pressed == Key::F4 => {
             c.data_mut(|d| d.insert_temp(flipped, before));
@@ -264,25 +263,25 @@ fn edit_mode_key(app: &mut SoundApp, pressed: Key) {
 
 /// What choosing Grid picks: in Grid the other Grid mode, from another mode the one used last.
 pub(crate) fn grid_mode(app: &SoundApp) -> &'static str {
-    use soundcraft_model::EditMode;
+    use transit_model::EditMode;
     let ed = &app.engine.session().edit;
     match ed.edit_mode {
         EditMode::Grid => "relative_grid",
         EditMode::GridRelative => "grid",
-        _ if ed.flag(soundcraft_engine::edit::RELATIVE_GRID) => "relative_grid",
+        _ if ed.flag(transit_engine::edit::RELATIVE_GRID) => "relative_grid",
         _ => "grid",
     }
 }
 
 /// ` steps through the Edit modes in F-key order, past a locked Shuffle.
 fn cycle_edit_mode(app: &mut SoundApp) {
-    use soundcraft_model::EditMode;
+    use transit_model::EditMode;
     let ed = &app.engine.session().edit;
     let mode = match ed.edit_mode {
         EditMode::Shuffle => "slip",
         EditMode::Slip => "spot",
         EditMode::Spot => grid_mode(app),
-        _ if ed.flag(soundcraft_engine::edit::SHUFFLE_LOCK) => "slip",
+        _ if ed.flag(transit_engine::edit::SHUFFLE_LOCK) => "slip",
         _ => "shuffle",
     };
     let _ = app.run("edit.mode", json!({"mode": mode}));

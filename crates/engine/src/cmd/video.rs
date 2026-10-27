@@ -1,12 +1,12 @@
 //! Video (picture) commands: Video track online/offline, picture offset, the movie list.
 //!
 //! Movies are imported with `file.import_video`; the session only references them
-//! (`Session::videos`). Decoding happens in the UI (`soundcraft-video`), never in the engine.
+//! (`Session::videos`). Decoding happens in the UI (`transit-video`), never in the engine.
 
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::{ClipContent, TrackKind};
+use transit_model::{ClipContent, TrackKind};
 
 /// `edit.flags` key set while the Video track is offline (online is the default).
 pub const OFFLINE_FLAG: &str = "video.offline";
@@ -77,9 +77,9 @@ fn offset(e: &mut Engine, p: &Value) -> Result<Value> {
 mod tests {
     use crate::Engine;
     use serde_json::json;
-    use soundcraft_model::{ChannelFormat, Clip, ClipContent, SourceId, TrackKind, VideoSource};
+    use transit_model::{ChannelFormat, Clip, ClipContent, SourceId, TrackKind, VideoSource};
 
-    fn video_engine() -> (Engine, soundcraft_model::TrackId) {
+    fn video_engine() -> (Engine, transit_model::TrackId) {
         let mut e = Engine::default();
         let s = e.session_mut();
         let t = s.add_track(TrackKind::Video, ChannelFormat::Mono, None);
@@ -134,7 +134,7 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let out = dir.join("mix.wav");
         e.execute("file.bounce_mix", &json!({"path": out.to_string_lossy(), "start": 0, "end": 96_000, "dither": false})).unwrap();
-        let (_, buf) = soundcraft_audio_io::decode(&std::fs::read(&out).unwrap(), Some("wav")).unwrap();
+        let (_, buf) = transit_audio_io::decode(&std::fs::read(&out).unwrap(), Some("wav")).unwrap();
         assert!(buf.channels.iter().flatten().all(|x| *x == 0.0));
         let _ = std::fs::remove_dir_all(dir);
     }
@@ -145,7 +145,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let movie = dir.join("picture.mp4");
-        std::fs::write(&movie, soundcraft_video::synth::h264_mp4(30, 10).unwrap()).unwrap();
+        std::fs::write(&movie, transit_video::synth::h264_mp4(30, 10).unwrap()).unwrap();
         let mut e = Engine::default();
         let r = e.execute("file.import_video", &json!({"path": movie.to_string_lossy(), "at": 4800})).unwrap();
         assert!(r["audio"].is_null() && r["audio_error"].is_string(), "{r}");

@@ -10,8 +10,8 @@ use crate::theme::TOKENS;
 use crate::{StudioApp, mixer};
 use egui::{Color32, Rect, Stroke, pos2};
 use serde_json::{Value, json};
-use soundcraft_model::{AutoParam, Control, ControlTarget, MapMode, Mapping, MappingSet, Resolved, Scope, Session, SourceKind, Strip, TrackId};
-use soundcraft_playback::{MapMsg, MapSpec};
+use transit_model::{AutoParam, Control, ControlTarget, MapMode, Mapping, MappingSet, Resolved, Scope, Session, SourceKind, Strip, TrackId};
+use transit_playback::{MapMsg, MapSpec};
 
 /// A mapped sweep stays one undo step until the controller has been still this long (seconds,
 /// the UI clock).
@@ -51,7 +51,7 @@ pub struct Drawn {
 
 #[derive(Default)]
 pub struct State {
-    /// The mappings in force (the active half of [`soundcraft_model::resolve`]) and the table the
+    /// The mappings in force (the active half of [`transit_model::resolve`]) and the table the
     /// worker's event indexes refer to, rebuilt each frame the stores are not both empty.
     resolved: Vec<Resolved>,
     /// Every stored mapping with its overridden flag, for menus and the window.
@@ -205,10 +205,10 @@ pub fn learning(app: &StudioApp, track: TrackId, control: &Control) -> bool {
 /// The control of insert `slot` (or the instrument) and parameter `param`, in the addressing the
 /// automation picker uses.
 pub fn plugin_control(slot: usize, param: &str) -> Option<Control> {
-    let slot = if slot == soundcraft_mix::INSTRUMENT_SLOT {
+    let slot = if slot == transit_mix::INSTRUMENT_SLOT {
         AutoParam::INSTRUMENT_SLOT
     } else {
-        u8::try_from(slot).ok().filter(|s| usize::from(*s) < soundcraft_model::INSERT_SLOTS)?
+        u8::try_from(slot).ok().filter(|s| usize::from(*s) < transit_model::INSERT_SLOTS)?
     };
     Some(Control::Plugin { slot, param: param.to_string() })
 }
@@ -217,7 +217,7 @@ pub fn plugin_control(slot: usize, param: &str) -> Option<Control> {
 /// that are neither hidden nor read-only (the same table the automation picker offers), so a
 /// parameter missing from a known table is refused. Without a cached table (never loaded this
 /// run) a parameter the plug-in just reported, or the session holds, is accepted.
-pub fn check_param(table: Option<&soundcraft_dsp::PluginInfo>, held: bool, param: &str) -> Result<(), String> {
+pub fn check_param(table: Option<&transit_dsp::PluginInfo>, held: bool, param: &str) -> Result<(), String> {
     match table {
         Some(info) if info.param(param).is_some() => Ok(()),
         Some(_) => Err(format!("`{param}` is read-only or cannot be automated, so it cannot be mapped")),
@@ -228,13 +228,13 @@ pub fn check_param(table: Option<&soundcraft_dsp::PluginInfo>, held: bool, param
 
 impl StudioApp {
     /// The plug-in a Plugin control addresses.
-    fn plugin_device(&self, track: TrackId, slot: u8) -> Option<&soundcraft_model::Insert> {
+    fn plugin_device(&self, track: TrackId, slot: u8) -> Option<&transit_model::Insert> {
         let t = self.engine.session().track(track)?;
         if slot == AutoParam::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(usize::from(slot))?.as_ref() }
     }
 
     fn plugin_uid(&self, key: (TrackId, usize)) -> Option<u64> {
-        let slot = if key.1 == soundcraft_mix::INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(key.1).ok()? };
+        let slot = if key.1 == transit_mix::INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(key.1).ok()? };
         self.plugin_device(key.0, slot).map(|i| i.uid.get())
     }
 
@@ -257,25 +257,25 @@ impl StudioApp {
 
 /// The parameter value the knob position `norm` (0..1) stands for: the parameter's own range, the
 /// taper honored, whole numbers where the parameter is one (the same step a panel knob takes).
-pub fn plugin_value(p: &soundcraft_dsp::ParamInfo, norm: f32) -> f32 {
+pub fn plugin_value(p: &transit_dsp::ParamInfo, norm: f32) -> f32 {
     p.clamp(crate::widgets::knob::value_at(p, norm.clamp(0.0, 1.0)))
 }
 
 /// [`plugin_value`] for the device `device` (its plug-in id): a hosted VST3 parameter follows the
 /// plug-in's own sampled curve, so the controller feels like the plug-in's panel knob; everything
 /// else, and a curve that is not available, takes the parameter's taper.
-pub fn device_value(device: &str, p: &soundcraft_dsp::ParamInfo, norm: f32) -> f32 {
-    if device.starts_with(soundcraft_vst3_host::ID_PREFIX) {
-        curve_value(p, norm, |n| soundcraft_vst3_host::param_to_plain(device, p.id, n))
+pub fn device_value(device: &str, p: &transit_dsp::ParamInfo, norm: f32) -> f32 {
+    if device.starts_with(transit_vst3_host::ID_PREFIX) {
+        curve_value(p, norm, |n| transit_vst3_host::param_to_plain(device, p.id, n))
     } else {
         plugin_value(p, norm)
     }
 }
 
 /// The inverse of [`device_value`]: where on the knob's travel the plain value `value` sits.
-fn device_norm(device: &str, p: &soundcraft_dsp::ParamInfo, value: f32) -> f32 {
-    if device.starts_with(soundcraft_vst3_host::ID_PREFIX) {
-        curve_norm(p, value, |v| soundcraft_vst3_host::param_to_normalized(device, p.id, v))
+fn device_norm(device: &str, p: &transit_dsp::ParamInfo, value: f32) -> f32 {
+    if device.starts_with(transit_vst3_host::ID_PREFIX) {
+        curve_norm(p, value, |v| transit_vst3_host::param_to_normalized(device, p.id, v))
     } else {
         p.to_normalized(value)
     }
@@ -283,17 +283,17 @@ fn device_norm(device: &str, p: &soundcraft_dsp::ParamInfo, value: f32) -> f32 {
 
 /// The value at knob position `norm` along a plug-in's curve (`to_plain`, normalized to plain),
 /// rounded where the parameter is in whole semitones or cents; the taper when there is no curve.
-pub fn curve_value(p: &soundcraft_dsp::ParamInfo, norm: f32, to_plain: impl Fn(f32) -> Option<f32>) -> f32 {
+pub fn curve_value(p: &transit_dsp::ParamInfo, norm: f32, to_plain: impl Fn(f32) -> Option<f32>) -> f32 {
     let norm = norm.clamp(0.0, 1.0);
     match to_plain(norm).filter(|v| v.is_finite()) {
-        Some(v) if matches!(p.unit, soundcraft_dsp::Unit::Semitones | soundcraft_dsp::Unit::Cents) => p.clamp(v.round()),
+        Some(v) if matches!(p.unit, transit_dsp::Unit::Semitones | transit_dsp::Unit::Cents) => p.clamp(v.round()),
         Some(v) => p.clamp(v),
         None => plugin_value(p, norm),
     }
 }
 
 /// The inverse of [`curve_value`] (`to_normalized`, plain to normalized); the taper without a curve.
-pub fn curve_norm(p: &soundcraft_dsp::ParamInfo, value: f32, to_normalized: impl Fn(f32) -> Option<f32>) -> f32 {
+pub fn curve_norm(p: &transit_dsp::ParamInfo, value: f32, to_normalized: impl Fn(f32) -> Option<f32>) -> f32 {
     to_normalized(value).filter(|n| n.is_finite()).map_or_else(|| p.to_normalized(value), |n| n.clamp(0.0, 1.0))
 }
 
@@ -433,7 +433,7 @@ pub struct Row {
 /// "<plug-in> > <unit path> > <name>" from the cached parameter table (the lookup and group path
 /// the automation picker uses; no unit segment when the plug-in reports none), and
 /// "<plug-in> > parameter <id>" while the table is not cached (K81).
-fn control_label(app: &StudioApp, track: Option<&soundcraft_model::Track>, control: &Control) -> String {
+fn control_label(app: &StudioApp, track: Option<&transit_model::Track>, control: &Control) -> String {
     let (Some(t), Control::Plugin { slot, param }) = (track, control) else { return control.label() };
     let Some(ins) = app.plugin_device(t.id, *slot) else { return control.label() };
     let info = crate::automation::device_info(&ins.plugin);
@@ -527,7 +527,7 @@ impl StudioApp {
         let all = if self.engine.session().midi_mappings.is_empty() && self.engine.midi_profile().is_empty() {
             Vec::new()
         } else {
-            soundcraft_model::resolve(&ids, &self.engine.session().midi_mappings, self.engine.midi_profile())
+            transit_model::resolve(&ids, &self.engine.session().midi_mappings, self.engine.midi_profile())
         };
         // A plug-in mapping whose device is gone is stored but idle.
         let live = |r: &Resolved| match &r.control {
@@ -733,7 +733,7 @@ impl StudioApp {
             }
         };
         let value = device_value(info.id, p, norm);
-        let slot_key = if slot == AutoParam::INSTRUMENT_SLOT { soundcraft_mix::INSTRUMENT_SLOT } else { usize::from(slot) };
+        let slot_key = if slot == AutoParam::INSTRUMENT_SLOT { transit_mix::INSTRUMENT_SLOT } else { usize::from(slot) };
         self.touch_param(track, slot_key, param, true);
         let r = if slot == AutoParam::INSTRUMENT_SLOT {
             self.engine.execute_merged("mix.instrument_param", &json!({"track": track.0, "param": param, "value": value}), key)
@@ -783,10 +783,10 @@ impl StudioApp {
         }
         let Some(control) = plugin_control(slot, param) else { return };
         // The plug-in just reported it, so a table that is not cached yet does not refuse it.
-        let device = |ins: &soundcraft_model::Insert| check_param(crate::automation::device_info(&ins.plugin), true, param);
+        let device = |ins: &transit_model::Insert| check_param(crate::automation::device_info(&ins.plugin), true, param);
         let refused = match self.plugin_device(
             track,
-            if slot == soundcraft_mix::INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(slot).unwrap_or(u8::MAX) },
+            if slot == transit_mix::INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(slot).unwrap_or(u8::MAX) },
         ) {
             Some(ins) => device(ins).err(),
             None => Some("That slot has no plug-in".to_string()),

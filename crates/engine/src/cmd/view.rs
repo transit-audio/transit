@@ -3,7 +3,7 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_time::{GridValue, NoteValue, TimeFormat};
+use transit_time::{GridValue, NoteValue, TimeFormat};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -58,7 +58,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let to = position_param(e, "view.scroll", p, "to")?;
             let by = f64_or(p, "by_px", 0.0);
             let z = e.zoom_mut();
-            let by = soundcraft_time::to_samples(by * z.samples_per_px);
+            let by = transit_time::to_samples(by * z.samples_per_px);
             z.scroll = to.unwrap_or(z.scroll.saturating_add(by)).clamp(0, MAX_POSITION);
             Ok(json!({"scroll": z.scroll}))
         }),
@@ -109,7 +109,7 @@ fn zoom(e: &mut Engine, f: f64, x: Option<f64>) -> Result<Value> {
     let (old, scroll) = (z.samples_per_px, z.scroll as f64);
     let new = (old * f).clamp(MIN_SPP, MAX_SPP);
     if let Some(x) = x.or_else(|| Some((insertion - scroll) / old).filter(|x| (0.0..4000.0).contains(x))) {
-        z.scroll = soundcraft_time::to_samples(scroll + x * (old - new)).clamp(0, MAX_POSITION);
+        z.scroll = transit_time::to_samples(scroll + x * (old - new)).clamp(0, MAX_POSITION);
     }
     z.samples_per_px = new;
     Ok(json!({"samples_per_px": new, "scroll": z.scroll}))

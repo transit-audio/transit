@@ -25,14 +25,14 @@ pub mod score;
 pub mod step_input;
 
 use serde_json::{Value, json};
-use soundcraft_model::{Clip, Session, TrackId, ZoomState};
-use soundcraft_time::Samples;
 use std::cell::Cell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use transit_model::{Clip, Session, TrackId, ZoomState};
+use transit_time::Samples;
 
 pub use cmd::{CommandInfo, CommandSpec, command_specs, find_command};
-pub use soundcraft_model as model;
+pub use transit_model as model;
 
 /// Shuts the third-party plugin hosts down, running the module exit of every plugin binary they
 /// loaded. Call it at the end of `main`, once every plugin instance (mixer, player) is gone: a
@@ -49,8 +49,8 @@ pub fn shutdown_plugin_hosts() -> bool {
     if !host_thread {
         log::warn!("plug-in host: a host thread did not shut down in time; its plug-ins are left as they are");
     }
-    soundcraft_vst3_host::shutdown();
-    let left = soundcraft_vst3_host::modules_not_exited();
+    transit_vst3_host::shutdown();
+    let left = transit_vst3_host::modules_not_exited();
     if left > 0 {
         log::warn!("plug-in host: {left} VST3 binaries were not exited (an instance is still alive or the exit did not finish)");
     }
@@ -105,13 +105,13 @@ pub struct TransportStatus {
 pub struct Clipboard {
     pub length: Samples,
     pub tracks: Vec<Vec<Clip>>,
-    pub automation: Vec<Vec<soundcraft_model::AutomationLane>>,
+    pub automation: Vec<Vec<transit_model::AutomationLane>>,
     /// Copy Special › Clip Gain: per track, (offset from the copied range start, dB) breakpoints.
     pub clip_gain: Vec<Vec<(Samples, f32)>>,
     /// Copy Special › Clip Effects: clip-effect settings (`param` → value) of the first copied clip.
     pub clip_effects: Vec<(String, f64)>,
     /// Markers inside the copied range (starts relative to it), for Paste Special › Merge Markers.
-    pub markers: Vec<soundcraft_model::MemoryLocation>,
+    pub markers: Vec<transit_model::MemoryLocation>,
     /// How far the copied range started after a grid line; Relative Grid pastes keep it.
     pub grid_offset: Samples,
     /// Copy Special › Automation: pasting it leaves the clips alone, in Shuffle mode too.
@@ -120,7 +120,7 @@ pub struct Clipboard {
 
 impl Clipboard {
     /// An empty clipboard for material copied from `range`.
-    pub fn of_range(s: &Session, range: soundcraft_time::Range) -> Clipboard {
+    pub fn of_range(s: &Session, range: transit_time::Range) -> Clipboard {
         let line = s.edit.grid.line_at_or_before(range.start, s.sample_rate, &s.tempo, s.frame_rate);
         Clipboard { length: range.len(), grid_offset: range.start.saturating_sub(line), ..Clipboard::default() }
     }
@@ -147,8 +147,8 @@ struct HistoryEntry {
 /// An armed MIDI Learn: the next controller message becomes a mapping of `target` in `scope`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LearnArm {
-    pub target: soundcraft_model::ControlTarget,
-    pub scope: soundcraft_model::Scope,
+    pub target: transit_model::ControlTarget,
+    pub scope: transit_model::Scope,
 }
 
 /// Engine state: the document, history, clipboard and transport plumbing.
@@ -187,17 +187,17 @@ pub struct Engine {
     pub messages: Vec<String>,
     /// The edit selection (range, tracks) before the last change, for Restore Last Selection.
     /// Kept out of the document so selecting never marks the session modified.
-    pub last_selection: Option<(soundcraft_time::Range, Vec<TrackId>)>,
+    pub last_selection: Option<(transit_time::Range, Vec<TrackId>)>,
     /// Audio imports being prepared on worker threads (L30); emptied when the session is replaced.
     pub imports: import::Imports,
     /// This machine's I/O paths for the open audio device (ADR 0015). Per machine, not part of
     /// the document: editing it neither dirties the session nor makes an undo step.
-    io: soundcraft_model::IoMap,
+    io: transit_model::IoMap,
     io_revision: u64,
     /// The controller profile: MIDI Learn mappings for this machine (ADR 0028), saved by the host
     /// in its preferences. Not part of the document: editing it neither dirties the session nor
     /// makes an undo step.
-    midi_profile: soundcraft_model::MappingSet,
+    midi_profile: transit_model::MappingSet,
     midi_profile_revision: u64,
     /// The control a MIDI Learn is waiting to map (the host arms the ingress worker and answers
     /// the next candidate with `midi.map`). Not part of the document.
@@ -256,7 +256,7 @@ impl Engine {
             messages: Vec::new(),
             last_selection: None,
             imports: import::Imports::default(),
-            io: soundcraft_model::IoMap::default(),
+            io: transit_model::IoMap::default(),
             io_revision: 0,
             midi_profile: Default::default(),
             midi_profile_revision: 0,
@@ -271,7 +271,7 @@ impl Engine {
 
     /// The machine's I/O map. Headless and test engines hold the stereo default until the host
     /// hands over the opened device's table (`set_io_map`, `setup.io_map`).
-    pub fn io_map(&self) -> &soundcraft_model::IoMap {
+    pub fn io_map(&self) -> &transit_model::IoMap {
         &self.io
     }
 
@@ -280,7 +280,7 @@ impl Engine {
     /// names, so the machine they came from restores them; renaming a path leaves routes alone, so
     /// they show up here until the route or the path is changed back. For the UI and status.
     pub fn unresolved_routes(&self) -> Vec<String> {
-        soundcraft_mix::unresolved_routes(&self.doc, &self.io, self.io.outputs)
+        transit_mix::unresolved_routes(&self.doc, &self.io, self.io.outputs)
     }
 
     /// Counts every change to the I/O map, so a host can pass it on to the audio device.
@@ -289,13 +289,13 @@ impl Engine {
     }
 
     /// Replace the machine's I/O map (the host, after opening a device).
-    pub fn set_io_map(&mut self, io: soundcraft_model::IoMap) {
+    pub fn set_io_map(&mut self, io: transit_model::IoMap) {
         self.io = io;
         self.io_revision = self.io_revision.wrapping_add(1);
     }
 
     /// The controller profile (per machine MIDI Learn mappings).
-    pub fn midi_profile(&self) -> &soundcraft_model::MappingSet {
+    pub fn midi_profile(&self) -> &transit_model::MappingSet {
         &self.midi_profile
     }
 
@@ -306,7 +306,7 @@ impl Engine {
     }
 
     /// Replace the controller profile (the host, from its preferences).
-    pub fn set_midi_profile(&mut self, profile: soundcraft_model::MappingSet) {
+    pub fn set_midi_profile(&mut self, profile: transit_model::MappingSet) {
         self.midi_profile = profile;
         self.midi_profile_revision = self.midi_profile_revision.wrapping_add(1);
     }
@@ -321,7 +321,7 @@ impl Engine {
     /// an unknown path, a path of the wrong direction and a running transport. The measurement
     /// itself needs the live device (the app's `io.measure_hardware_latency`).
     pub fn hardware_measurement(&self, send: &str, ret: &str) -> Result<(Vec<u16>, Vec<u16>)> {
-        use soundcraft_model::IoDirection;
+        use transit_model::IoDirection;
         let id = "io.measure_hardware_latency";
         let find = |name: &str, direction: IoDirection, what: &str| {
             self.io
@@ -343,7 +343,7 @@ impl Engine {
     pub fn store_hardware_latency(&mut self, send: &str, ret: &str, round_trip_frames: u32) {
         let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
         let mut io = self.io.clone();
-        io.set_hardware_latency(soundcraft_model::HardwareLatency {
+        io.set_hardware_latency(transit_model::HardwareLatency {
             send: send.into(),
             ret: ret.into(),
             round_trip_frames,
@@ -356,7 +356,7 @@ impl Engine {
     /// Keep an External Instrument measurement (per machine: no undo step, the session stays
     /// clean), replacing the one with the same port, return, rate and buffer (ADR 0020 decision
     /// 5). The host passes the table on to the audio thread.
-    pub fn store_external_latency(&mut self, m: soundcraft_model::ExternalLatency) {
+    pub fn store_external_latency(&mut self, m: transit_model::ExternalLatency) {
         let mut io = self.io.clone();
         io.set_external_latency(m);
         self.set_io_map(io);
@@ -393,7 +393,7 @@ impl Engine {
         // A hardware insert that cannot work here (a send path in use, a loop through the device)
         // opens disabled, with a warning (K18).
         let mut s = s;
-        let disabled = soundcraft_model::disable_hardware_conflicts(&mut s);
+        let disabled = transit_model::disable_hardware_conflicts(&mut s);
         self.messages.extend(disabled);
         self.doc = Arc::new(s);
         self.saved = Arc::clone(&self.doc);
@@ -490,7 +490,7 @@ impl Engine {
     /// Undo and Redo never change record-arm or input-monitor, which are runtime state: tracks keep
     /// what they have now, whatever the restored snapshot held.
     fn keep_runtime_state(&mut self, from: &Session) {
-        let differs = |t: &soundcraft_model::Track| {
+        let differs = |t: &transit_model::Track| {
             from.track(t.id).is_some_and(|f| f.mixer.record_arm != t.mixer.record_arm || f.mixer.input_monitor != t.mixer.input_monitor)
         };
         if self.doc.tracks.iter().any(differs) {
@@ -510,7 +510,7 @@ impl Engine {
             let stored = self
                 .doc
                 .track(t)
-                .and_then(|tr| if slot == soundcraft_mix::INSTRUMENT_SLOT { tr.instrument.as_ref() } else { tr.mixer.inserts.get(slot)?.as_ref() });
+                .and_then(|tr| if slot == transit_mix::INSTRUMENT_SLOT { tr.instrument.as_ref() } else { tr.mixer.inserts.get(slot)?.as_ref() });
             if stored.is_some_and(|i| i.state.is_some()) && !self.state_restores.contains(&(t, slot)) {
                 self.state_restores.push((t, slot));
             }
@@ -585,11 +585,11 @@ impl Engine {
     /// Run a command as [`Engine::execute`] does, but with the Edit mode `mode` for this command
     /// alone. The undo snapshot and any rollback keep the document's own mode, and the result
     /// carries it too, unless the command itself changed the mode.
-    pub fn execute_with_mode(&mut self, id: &str, params: &Value, mode: soundcraft_model::EditMode) -> Result<Value> {
+    pub fn execute_with_mode(&mut self, id: &str, params: &Value, mode: transit_model::EditMode) -> Result<Value> {
         self.execute_scoped(id, params, Some(mode))
     }
 
-    fn execute_scoped(&mut self, id: &str, params: &Value, mode: Option<soundcraft_model::EditMode>) -> Result<Value> {
+    fn execute_scoped(&mut self, id: &str, params: &Value, mode: Option<transit_model::EditMode>) -> Result<Value> {
         let spec = find_command(id).ok_or_else(|| EngineError::UnknownCommand(id.to_string()))?;
         self.check_enabled(spec, params)?;
         if spec.view {
@@ -668,10 +668,10 @@ impl Engine {
         if Arc::ptr_eq(before, &self.doc) || !Arc::ptr_eq(saved, &self.saved) {
             return Ok(());
         }
-        if let Some(path) = soundcraft_model::new_cycle(before, &self.doc) {
-            return Err(cmd::bad(id, format!("that route would create a routing loop: {}", soundcraft_model::describe_cycle(&self.doc, &path))));
+        if let Some(path) = transit_model::new_cycle(before, &self.doc) {
+            return Err(cmd::bad(id, format!("that route would create a routing loop: {}", transit_model::describe_cycle(&self.doc, &path))));
         }
-        if let Some(why) = soundcraft_model::new_hardware_problem(before, &self.doc) {
+        if let Some(why) = transit_model::new_hardware_problem(before, &self.doc) {
             return Err(cmd::bad(id, why));
         }
         if cmd::edits_frozen(before, &self.doc) {
@@ -778,7 +778,7 @@ impl Engine {
 
     /// For commands that changed the tempo map from `old`: keep musical material on its bars
     /// (see [`retime`]). Within a merged gesture it converts from the gesture's start.
-    pub(crate) fn retime_after_tempo(&mut self, id: &str, old: &soundcraft_time::TempoMap) -> Result<()> {
+    pub(crate) fn retime_after_tempo(&mut self, id: &str, old: &transit_time::TempoMap) -> Result<()> {
         self.retimed = true;
         let base = self.retime_base.clone();
         let s = self.session_mut();
@@ -848,7 +848,7 @@ fn install_panic_hook() {
     ONCE.call_once(|| {
         let prev = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
-            if soundcraft_mix::on_audio_thread() {
+            if transit_mix::on_audio_thread() {
                 // Neither backtrace/logging nor the previous hook (usually stderr) is realtime
                 // safe. Leave the payload to catch_unwind and report it on the control side.
                 AUDIO_THREAD_PANICS.fetch_add(1, Ordering::Relaxed);
@@ -873,7 +873,7 @@ mod merge_tests {
     #[test]
     fn merged_gesture_is_one_undo_step() {
         let mut e = Engine::default();
-        let t = e.session_mut().add_track(soundcraft_model::TrackKind::Audio, soundcraft_model::ChannelFormat::Mono, None);
+        let t = e.session_mut().add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Mono, None);
         for db in [-1.0, -2.0, -3.0, -4.0] {
             e.execute_merged("mix.volume", &json!({"track": t.0, "db": db}), "fader").unwrap();
         }
@@ -886,7 +886,7 @@ mod merge_tests {
     #[test]
     fn squash_undo_folds_the_last_steps_into_one_labeled_step() {
         let mut e = Engine::default();
-        let t = e.session_mut().add_track(soundcraft_model::TrackKind::Audio, soundcraft_model::ChannelFormat::Mono, None);
+        let t = e.session_mut().add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Mono, None);
         e.execute("mix.pan", &json!({"track": t.0, "pan": 0.5})).unwrap();
         for db in [-1.0, -2.0, -3.0] {
             e.execute("mix.volume", &json!({"track": t.0, "db": db})).unwrap();
@@ -909,7 +909,7 @@ mod merge_tests {
     #[test]
     fn squash_undo_clears_redo_and_rejects_bad_counts() {
         let mut e = Engine::default();
-        let t = e.session_mut().add_track(soundcraft_model::TrackKind::Audio, soundcraft_model::ChannelFormat::Mono, None);
+        let t = e.session_mut().add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Mono, None);
         assert!(e.squash_undo(1, "x").is_err());
         e.execute("mix.volume", &json!({"track": t.0, "db": -1.0})).unwrap();
         e.execute("mix.volume", &json!({"track": t.0, "db": -2.0})).unwrap();
@@ -926,7 +926,7 @@ mod merge_tests {
     #[test]
     fn a_held_merge_joins_other_gestures_into_its_step() {
         let mut e = Engine::default();
-        let t = e.session_mut().add_track(soundcraft_model::TrackKind::Audio, soundcraft_model::ChannelFormat::Mono, None);
+        let t = e.session_mut().add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Mono, None);
         e.hold_merge(Some("pass"));
         for db in [-1.0, -2.0, -3.0] {
             e.execute_merged("mix.volume", &json!({"track": t.0, "db": db}), "fader").unwrap();
@@ -941,7 +941,7 @@ mod merge_tests {
     #[test]
     fn only_a_change_to_the_document_ends_a_gesture() {
         let mut e = Engine::default();
-        let t = e.session_mut().add_track(soundcraft_model::TrackKind::Audio, soundcraft_model::ChannelFormat::Mono, None);
+        let t = e.session_mut().add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Mono, None);
         e.execute_merged("mix.volume", &json!({"track": t.0, "db": -1.0}), "fader").unwrap();
         e.execute("transport.stop", &json!({})).unwrap();
         e.execute_merged("mix.volume", &json!({"track": t.0, "db": -2.0}), "fader").unwrap();

@@ -29,7 +29,7 @@ pub struct Row {
     pub calibration: Option<Result<crate::calibration::Figures, String>>,
     /// With `--settings`: what the file held under this run's key before the run merged its own
     /// (`Some(None)`: nothing).
-    pub stored_calibration: Option<Option<soundcraft_playback::LoopbackCalibration>>,
+    pub stored_calibration: Option<Option<transit_playback::LoopbackCalibration>>,
     /// The device-loop counters of the render and capture streams, when the backend keeps them.
     pub render_stats: Option<ab::StreamStats>,
     pub capture_stats: Option<ab::StreamStats>,

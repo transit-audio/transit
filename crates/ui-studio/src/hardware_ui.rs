@@ -6,8 +6,8 @@ use crate::StudioApp;
 use crate::mixer::MenuItem;
 use crate::theme::{SPACE, TOKENS};
 use serde_json::json;
-use soundcraft_mix::{HardwareReport, HardwareState};
-use soundcraft_model::{IoDirection, IoMap, TrackId};
+use transit_mix::{HardwareReport, HardwareState};
+use transit_model::{IoDirection, IoMap, TrackId};
 
 /// A send and a return path, with the round trip measured for them at the session rate.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -91,7 +91,7 @@ impl StudioApp {
     pub fn hardware_reports(&self) -> Vec<HardwareReport> {
         let io = self.engine.io_map();
         let duplex = self.player.as_ref().is_some_and(|p| p.duplex());
-        soundcraft_mix::hardware_report(self.engine.session(), io, io.outputs, io.inputs, duplex, self.engine.session().sample_rate.hz())
+        transit_mix::hardware_report(self.engine.session(), io, io.outputs, io.inputs, duplex, self.engine.session().sample_rate.hz())
     }
 
     /// Why Measure is off right now.

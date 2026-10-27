@@ -11,15 +11,15 @@
 //! The binary installs `transit_rt::testing::CountingAlloc` and counts the test thread only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_dsp::{Plugin, ProcessStatus, SampleSource, Transport};
-use soundcraft_mix::{
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use transit_audio_io::AudioBuffer;
+use transit_dsp::{Plugin, ProcessStatus, SampleSource, Transport};
+use transit_mix::{
     Adoption, DeviceGeneration, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanEnvelope, PlanGeneration, PlanLimits, PlanStatus,
     RenderTarget, mark_audio_thread,
 };
-use soundcraft_model::{Bus, BusId, ChannelFormat, Clip, ClipId, Insert, OutputPath, Route, Session, SourceAudio, SourceId, TrackId, TrackKind};
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use transit_model::{Bus, BusId, ChannelFormat, Clip, ClipId, Insert, OutputPath, Route, Session, SourceAudio, SourceId, TrackId, TrackKind};
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 
 #[global_allocator]
@@ -48,7 +48,7 @@ struct Fake {
 }
 
 impl Plugin for Fake {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
         self.inner.info()
     }
     fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -89,12 +89,12 @@ impl Drop for Fake {
 /// The control thread's instance factory (playback's `Side::prepare` becomes this).
 fn make(shared: &Arc<Shared>, spec: &InstanceSpec) -> Option<NewInstance> {
     if let Some(rest) = spec.id.strip_prefix("clap:test.") {
-        let mut inner = soundcraft_dsp::create("gain")?;
+        let mut inner = transit_dsp::create("gain")?;
         inner.prepare(SR as f32, BLOCK, spec.ch);
         let plugin: Box<dyn Plugin> = Box::new(Fake { inner, shared: Arc::clone(shared), latent: rest == "latent" });
         return Some(NewInstance { plugin, refused_state: false });
     }
-    soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
+    transit_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
 }
 
 struct Rig {
@@ -140,7 +140,7 @@ impl Rig {
     fn compile(&mut self, s: &Session) -> PlanEnvelope {
         self.generation = self.generation.checked_next().unwrap();
         let shared = Arc::clone(&self.shared);
-        let mut f = move |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| make(&shared, spec);
+        let mut f = move |spec: &InstanceSpec, _: transit_mix::SlotGen| make(&shared, spec);
         self.compiler.compile(Arc::new(s.clone()), self.compiler.active(), self.generation, &mut f).unwrap()
     }
 
@@ -181,7 +181,7 @@ fn new_document_replaces_every_slot_kind_without_callback_allocation() {
     let instrument = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     s.track_mut(instrument).unwrap().instrument = Some(builtin("sampler"));
     for (module, id) in [("eq", "eq_7band"), ("comp", "compressor")] {
-        let param = soundcraft_dsp::plugin_info(id).unwrap().params.first().unwrap();
+        let param = transit_dsp::plugin_info(id).unwrap().params.first().unwrap();
         s.edit.values.insert(format!("clip_fx.{}.{}.{}", clip.0, module, param.id), f64::from(param.default));
     }
     let mut rig = Rig::new(&s);
@@ -191,7 +191,7 @@ fn new_document_replaces_every_slot_kind_without_callback_allocation() {
     let shared = Arc::clone(&rig.shared);
     let mut env = rig
         .compiler
-        .compile_with_mode(Arc::new(s), rig.compiler.active(), rig.generation, soundcraft_mix::CompileMode::NewDocument, &mut |spec, _| {
+        .compile_with_mode(Arc::new(s), rig.compiler.active(), rig.generation, transit_mix::CompileMode::NewDocument, &mut |spec, _| {
             make(&shared, spec)
         })
         .unwrap();
@@ -225,7 +225,7 @@ fn session_with_clip() -> (Session, TrackId, ClipId) {
 
 fn builtin(id: &str) -> Insert {
     let mut ins = Insert::new(id);
-    for p in soundcraft_dsp::plugin_info(id).expect("built-in").params {
+    for p in transit_dsp::plugin_info(id).expect("built-in").params {
         ins.params.insert(p.id.to_string(), p.default);
     }
     ins
@@ -298,7 +298,7 @@ fn bus_add_and_delete_and_a_main_format_change_allocate_nothing() {
 
 #[test]
 fn output_path_routes_allocate_nothing_when_added_moved_and_removed() {
-    use soundcraft_model::{IoMap, SendSlot};
+    use transit_model::{IoMap, SendSlot};
     let (mut s, t, _) = session_with_clip();
     let mut rig = Rig::new(&s);
     rig.compiler.set_io(Arc::new(IoMap::for_device("test", "test", 2, 10)));
@@ -332,7 +332,7 @@ fn output_path_routes_allocate_nothing_when_added_moved_and_removed() {
 
 #[test]
 fn hardware_inserts_allocate_nothing_when_added_bypassed_remeasured_and_removed() {
-    use soundcraft_model::{HardwareLatency, IoMap};
+    use transit_model::{HardwareLatency, IoMap};
     let (mut s, t, _) = session_with_clip();
     let mut rig = Rig::new(&s);
     let mut io = IoMap::for_device("test", "test", 4, 4);
@@ -364,7 +364,7 @@ fn hardware_inserts_allocate_nothing_when_added_bypassed_remeasured_and_removed(
 
 #[test]
 fn sidechain_keys_allocate_nothing_when_added_changed_and_removed() {
-    use soundcraft_model::{Bus, BusId, KeyFrom, KeySource, Tap};
+    use transit_model::{Bus, BusId, KeyFrom, KeySource, Tap};
     let (mut s, bass, _) = session_with_clip();
     // The kick is declared after the bass, so the bass renders in a later layer.
     let kick = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
@@ -394,8 +394,8 @@ fn sidechain_keys_allocate_nothing_when_added_changed_and_removed() {
 fn clip_effects_on_and_off_and_forty_chains_allocate_nothing() {
     let (mut s, t, first) = session_with_clip();
     let mut rig = Rig::new(&s);
-    let eq = soundcraft_dsp::plugin_info("eq_7band").unwrap().params.first().unwrap();
-    let comp = soundcraft_dsp::plugin_info("compressor").unwrap().params.first().unwrap();
+    let eq = transit_dsp::plugin_info("eq_7band").unwrap().params.first().unwrap();
+    let comp = transit_dsp::plugin_info("compressor").unwrap().params.first().unwrap();
     s.edit.values.insert(format!("clip_fx.{}.eq.{}", first.0, eq.id), f64::from(eq.default));
     s.edit.values.insert(format!("clip_fx.{}.comp.{}", first.0, comp.id), f64::from(comp.default));
     no_cost("clip eq + compressor on", &rig.edit(&s));
@@ -526,7 +526,7 @@ fn path_based_delay_compensation_allocates_nothing() {
         tr.mixer.inserts[0] = Some(comp.clone());
     }
     let send = |to: BusId, pre: bool| {
-        let mut x = soundcraft_model::SendSlot::new(Route::Bus(to));
+        let mut x = transit_model::SendSlot::new(Route::Bus(to));
         x.pre_fader = pre;
         Some(x)
     };
@@ -547,7 +547,7 @@ fn path_based_delay_compensation_allocates_nothing() {
 
 #[test]
 fn key_alignment_allocates_nothing_when_a_key_or_a_latency_changes() {
-    use soundcraft_model::{KeyFrom, KeySource, Tap};
+    use transit_model::{KeyFrom, KeySource, Tap};
     let (mut s, bass, _) = session_with_clip();
     s.edit.delay_compensation = true;
     // The kick is declared after the bass: the bass renders in a later layer.
@@ -591,7 +591,7 @@ fn key_alignment_allocates_nothing_when_a_key_or_a_latency_changes() {
 /// with no allocation on the audio thread.
 #[test]
 fn routing_changes_and_a_loop_allocate_nothing() {
-    use soundcraft_model::SendSlot;
+    use transit_model::SendSlot;
     let (mut s, t, _) = session_with_clip();
     s.edit.delay_compensation = true;
     let b = s.add_bus("B", ChannelFormat::Stereo);

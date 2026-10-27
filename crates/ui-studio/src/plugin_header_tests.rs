@@ -7,12 +7,12 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use crate::{Services, StudioApp};
-use soundcraft_dsp::{HeaderAction, JobPoll, StateJob};
-use soundcraft_model::TrackId;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
+use transit_dsp::{HeaderAction, JobPoll, StateJob};
+use transit_model::TrackId;
 
 /// Carries the fixture library the parent built to its children.
 const FIXTURE_LIB: &str = "TRANSIT_HEADER_FIXTURE_LIB";
@@ -55,7 +55,7 @@ fn fixture_lib() -> PathBuf {
 /// Installs the fixture library the parent built as a bundle and adds its folder to the search
 /// path; returns the gain's id.
 fn fixture_gain() -> String {
-    soundcraft_vst3_host::set_scan_extra_dirs_only(true);
+    transit_vst3_host::set_scan_extra_dirs_only(true);
     let lib = PathBuf::from(std::env::var_os(FIXTURE_LIB).expect("the parent passes the fixture it built"));
     let (folder, exe) = if cfg!(target_os = "macos") {
         ("MacOS", "Fixture")
@@ -69,8 +69,8 @@ fn fixture_gain() -> String {
     let bin = dir.join("Fixture.vst3/Contents").join(folder);
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::copy(&lib, bin.join(exe)).unwrap_or_else(|e| panic!("copy {}: {e}", lib.display()));
-    assert_eq!(soundcraft_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
-    soundcraft_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Gain").expect("the fixture's gain").id
+    assert_eq!(transit_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
+    transit_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Gain").expect("the fixture's gain").id
 }
 
 /// One frame of the app, with the device-free player's "audio callback" first.
@@ -122,7 +122,7 @@ fn finish_without_frames(mut job: StateJob<Option<Vec<u8>>>) -> Vec<u8> {
 
 /// The fixture gain's state: component gain (normalized) and controller frequency.
 fn state(gain: f64) -> Vec<u8> {
-    soundcraft_vst3_host::preset::join_state(&gain.to_le_bytes(), &0.5f64.to_le_bytes()).unwrap()
+    transit_vst3_host::preset::join_state(&gain.to_le_bytes(), &0.5f64.to_le_bytes()).unwrap()
 }
 
 /// Frames until the audio side plays the document as it is (its parameter values have reached
@@ -212,9 +212,9 @@ fn rig(tag: &str) -> Rig {
     let gain = fixture_gain();
     let config = std::env::temp_dir().join(format!("studio-header-config-{tag}-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&config);
-    let mut engine = soundcraft_engine::Engine::default();
-    let t = engine.session_mut().add_track(soundcraft_model::TrackKind::Audio, soundcraft_model::ChannelFormat::Stereo, Some("Drums"));
-    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let mut engine = transit_engine::Engine::default();
+    let t = engine.session_mut().add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Stereo, Some("Drums"));
+    let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
     // Save As picks a name the way the dialog would: "My Kit" in the folder offered.
     // What the dialogs answer: Save As's file name, and the confirmations (and what they asked).
     let name = std::sync::Arc::new(std::sync::Mutex::new("My Kit.vstpreset".to_string()));
@@ -269,7 +269,7 @@ fn header_presets_save_load_undo_step_and_paste_through_the_plug_in_host() {
     app.header_action(t, 0, HeaderAction::SaveAs);
     assert_eq!(app.editor_header((t, 0)).unwrap().disabled.as_deref(), Some("Saving preset\u{2026}"), "disabled while it runs");
     settle(&mut app, &ctx);
-    let file = soundcraft_engine::presets::path(&config, &gain, "My Kit").unwrap();
+    let file = transit_engine::presets::path(&config, &gain, "My Kit").unwrap();
     assert_eq!(&std::fs::read(&file).unwrap()[..4], b"VST3", "{}", app.status);
     assert_eq!(app.engine.undo_history().len(), undo_before, "a save is not undoable");
     let header = app.editor_header((t, 0)).unwrap();
@@ -306,7 +306,7 @@ fn header_presets_save_load_undo_step_and_paste_through_the_plug_in_host() {
 
     // Previous/next step through the user presets in name order.
     set_live(&mut app, &ctx, t, 0, state(0.5));
-    soundcraft_engine::io::presets::write(&soundcraft_engine::presets::path(&config, &gain, "A Kit").unwrap(), &gain, &state(0.5)).unwrap();
+    transit_engine::io::presets::write(&transit_engine::presets::path(&config, &gain, "A Kit").unwrap(), &gain, &state(0.5)).unwrap();
     app.plugin_header = crate::plugin_header::HeaderState::default(); // forget the listing
     assert_eq!(app.editor_header((t, 0)).unwrap().user, vec!["A Kit".to_string(), "My Kit".to_string()]);
     app.header_action(t, 0, HeaderAction::Previous);
@@ -349,7 +349,7 @@ fn header_presets_save_load_undo_step_and_paste_through_the_plug_in_host() {
     app.header_action(t, 0, HeaderAction::SaveAs);
     settle(&mut app, &ctx);
     assert_eq!(std::fs::read(&file).unwrap(), kit, "My Kit untouched");
-    let second = soundcraft_engine::presets::path(&config, &gain, "My Kit 2").unwrap();
+    let second = transit_engine::presets::path(&config, &gain, "My Kit 2").unwrap();
     assert!(second.exists(), "saved as My Kit 2: {}", app.status);
     std::fs::remove_file(&second).unwrap();
     app.plugin_header = crate::plugin_header::HeaderState::default();
@@ -385,8 +385,8 @@ fn a_save_as_right_after_a_parameter_change_saves_the_changed_value() {
     app.header_action(t, 0, HeaderAction::SaveAs);
     assert_eq!(app.editor_header((t, 0)).unwrap().disabled.as_deref(), Some("Saving preset\u{2026}"), "disabled while it waits");
     settle(&mut app, &ctx);
-    let file = soundcraft_engine::presets::path(&config, &gain, "Changed").unwrap();
-    let saved = soundcraft_engine::io::presets::read(&file, &gain).unwrap_or_else(|e| panic!("{e} ({})", app.status));
+    let file = transit_engine::presets::path(&config, &gain, "Changed").unwrap();
+    let saved = transit_engine::io::presets::read(&file, &gain).unwrap_or_else(|e| panic!("{e} ({})", app.status));
     assert_eq!(saved, state(0.25), "the preset holds the value set before the save");
     assert_eq!(live(&mut app, &ctx, t, 0), state(0.25));
     let _ = std::fs::remove_dir_all(&config);
@@ -401,8 +401,8 @@ fn a_load_right_after_a_parameter_change_keeps_the_presets_value() {
         return;
     }
     let Rig { mut app, ctx, t, gain, config, .. } = rig("load-twin");
-    let file = soundcraft_engine::presets::path(&config, &gain, "Wins").unwrap();
-    soundcraft_engine::io::presets::write(&file, &gain, &state(0.75)).unwrap();
+    let file = transit_engine::presets::path(&config, &gain, "Wins").unwrap();
+    transit_engine::io::presets::write(&file, &gain, &state(0.75)).unwrap();
     app.plugin_header = crate::plugin_header::HeaderState::default(); // forget the listing
     assert_eq!(app.editor_header((t, 0)).unwrap().user, vec!["Wins".to_string()]);
     until_plays(&mut app, &ctx);
@@ -438,8 +438,8 @@ fn an_undo_right_after_a_parameter_change_restores_the_undone_state() {
         return;
     }
     let Rig { mut app, ctx, t, gain, config, .. } = rig("restore-twin");
-    let file = soundcraft_engine::presets::path(&config, &gain, "Wins").unwrap();
-    soundcraft_engine::io::presets::write(&file, &gain, &state(0.75)).unwrap();
+    let file = transit_engine::presets::path(&config, &gain, "Wins").unwrap();
+    transit_engine::io::presets::write(&file, &gain, &state(0.75)).unwrap();
     app.plugin_header = crate::plugin_header::HeaderState::default(); // forget the listing
     assert_eq!(app.editor_header((t, 0)).unwrap().user, vec!["Wins".to_string()]);
     set_live(&mut app, &ctx, t, 0, state(0.25));

@@ -9,7 +9,7 @@
 use crate::StudioApp;
 
 use crate::theme::{SPACE, TOKENS};
-use soundcraft_playback::telemetry::{CallbackTelemetry, DURATION_LIMITS_NS, StatsBackend, StreamStats};
+use transit_playback::telemetry::{CallbackTelemetry, DURATION_LIMITS_NS, StatsBackend, StreamStats};
 
 /// Minimum time between two reads of the counters (about four a second).
 pub const POLL_SECS: f64 = 0.25;
@@ -143,13 +143,13 @@ pub fn backend_line(s: &StreamStats, capture: bool, wakes_per_second: Option<u64
 /// (see `docs/contributing/knowledge/clocks.md`): native WASAPI with the mode it opened in
 /// (`WASAPI* exclusive`, `WASAPI* shared`), native ASIO as `ASIO*` (it has one mode); cpal's
 /// systems unstarred (`ASIO`, `WASAPI`).
-pub(crate) fn host_name(player: &soundcraft_playback::Player) -> String {
+pub(crate) fn host_name(player: &transit_playback::Player) -> String {
     native_host_name(&player.device_system, player.native_backend, player.device_exclusive)
 }
 
 /// [`host_name`] from its parts.
 pub(crate) fn native_host_name(system: &str, native: bool, exclusive: bool) -> String {
-    match (native, soundcraft_playback::devices::is_asio_system(Some(system))) {
+    match (native, transit_playback::devices::is_asio_system(Some(system))) {
         (false, _) => system.to_owned(),
         (true, true) => format!("{system}*"),
         (true, false) => format!("{system}* {}", if exclusive { "exclusive" } else { "shared" }),

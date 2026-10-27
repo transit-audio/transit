@@ -65,7 +65,7 @@ fn events_go_out_in_order_at_their_instant_plus_the_offset_and_never_from_the_au
     let mut rig = Rig::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 15)]);
     let base = rig.now() + 20_000_000;
     // The producer runs on a thread marked as the audio thread, as the callback is.
-    soundcraft_mix::mark_audio_thread();
+    transit_mix::mark_audio_thread();
     let audio = std::thread::current().id();
     let (pushed, stats) = transit_rt::testing::measure(|| {
         [
@@ -77,7 +77,7 @@ fn events_go_out_in_order_at_their_instant_plus_the_offset_and_never_from_the_au
         .into_iter()
         .all(|e| rig.playback.push(e))
     });
-    soundcraft_mix::unmark_audio_thread();
+    transit_mix::unmark_audio_thread();
     assert!(pushed);
     assert!(stats.is_zero(), "pushing allocated: {stats:?}");
     let sends = rig.wait_sent(4);
@@ -297,7 +297,7 @@ fn a_revoked_echo_route_releases_its_notes_and_pedal_even_when_the_destination_i
 
 #[test]
 fn an_external_instrument_tracks_destination_has_no_offset() {
-    use soundcraft_model::{ChannelFormat, Insert, MidiOutput, Session, TrackKind};
+    use transit_model::{ChannelFormat, Insert, MidiOutput, Session, TrackKind};
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     let track = s.track_mut(t).unwrap();

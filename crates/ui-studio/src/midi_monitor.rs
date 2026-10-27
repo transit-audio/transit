@@ -12,8 +12,8 @@ use crate::StudioApp;
 use crate::theme::{RADIUS, SPACE, TOKENS};
 use egui::{Align2, Color32, Sense, pos2, vec2};
 use serde_json::{Value, json};
-use soundcraft_playback::player::monitor::{Activity, Dir, MonitorEvent, NO_CHANNEL, PortReport, PortState};
 use std::collections::{HashMap, VecDeque};
+use transit_playback::player::monitor::{Activity, Dir, MonitorEvent, NO_CHANNEL, PortReport, PortState};
 
 /// Rows kept; the oldest is evicted past it.
 pub const MAX_ROWS: usize = 5000;
@@ -234,7 +234,7 @@ pub fn cc_name(cc: u8) -> Option<&'static str> {
 }
 
 fn note(n: u8) -> String {
-    format!("{} ({n})", soundcraft_midi::note_name(n))
+    format!("{} ({n})", transit_midi::note_name(n))
 }
 
 /// The class and the decoded text of one ring element. A note-on with velocity 0 is a note-off.
@@ -413,7 +413,7 @@ impl State {
         self.push_captured(e, transport, None);
     }
 
-    fn push_captured(&mut self, e: &MonitorEvent, transport: Option<f64>, payload: Option<&soundcraft_playback::player::monitor::SysEx>) {
+    fn push_captured(&mut self, e: &MonitorEvent, transport: Option<f64>, payload: Option<&transit_playback::player::monitor::SysEx>) {
         let (class, mut text) = describe(e);
         let raw_len = match e.status {
             0x80..=0xBF | 0xE0..=0xEF | 0xF2 => 3,

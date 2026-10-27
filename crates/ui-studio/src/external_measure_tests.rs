@@ -5,8 +5,8 @@
 use crate::external_measure::{CANCELLED, FakeMeasure};
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::{ExternalLatency, ExternalSource, TrackId};
-use soundcraft_playback::external_probe::{MeasureError, Measured, Progress};
+use transit_model::{ExternalLatency, ExternalSource, TrackId};
+use transit_playback::external_probe::{MeasureError, Measured, Progress};
 
 struct T {
     app: StudioApp,
@@ -51,7 +51,7 @@ impl T {
         self.app.external_measure.fake.as_mut().unwrap()
     }
 
-    fn report(&self) -> soundcraft_mix::ExternalReport {
+    fn report(&self) -> transit_mix::ExternalReport {
         self.app.external_reports().into_iter().find(|r| r.track == self.track).unwrap()
     }
 
@@ -63,8 +63,8 @@ impl T {
 /// A Model D track: External Instrument on In 1 of a duplex Scarlett, MIDI to "MODEL D" channel 1,
 /// the device chain showing its card, and a fake Measure on a device running 64 frames.
 fn rig() -> T {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
-    app.engine.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "Focusrite USB ASIO", 2, 2));
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
+    app.engine.set_io_map(transit_model::IoMap::for_device("ASIO", "Focusrite USB ASIO", 2, 2));
     let r = app.run("track.new", json!({"kind": "instrument", "name": "Model D"})).unwrap();
     let track = TrackId(r["tracks"][0].as_u64().unwrap());
     app.run("instrument.external", json!({"track": track.0, "port": {"backend": "winmm", "name": "MODEL D"}, "channel": 1, "return": "In 1"}))
@@ -109,7 +109,7 @@ fn measure_runs_from_the_card_stores_the_median_under_its_key_and_the_lookup_fol
     );
     assert!(t.app.engine.io_map().hardware_latency.is_empty(), "not the hardware insert table");
     assert!(t.app.status.contains("19.9 ms (955 frames), spread 0.4 ms, 8 of 8 notes"), "{}", t.app.status);
-    let today = soundcraft_playback::devices::utc_today();
+    let today = transit_playback::devices::utc_today();
     assert_eq!(t.card().external_state, format!("Measured 19.9 ms on {today} at 48 kHz/64"));
     assert_eq!(t.card().external_measure_text, "Measure again");
     assert_eq!((t.report().latency, matches!(t.report().source, Some(ExternalSource::Measured(_)))), (Some(955), true));
@@ -127,7 +127,7 @@ fn measure_runs_from_the_card_stores_the_median_under_its_key_and_the_lookup_fol
     assert!(t.card().external_stale);
     assert_eq!(t.report().latency, Some(955));
     // The session at 44.1 kHz: rescaled by time, still labeled.
-    t.app.engine.session_mut().sample_rate = soundcraft_time::SampleRate::new(44_100).unwrap();
+    t.app.engine.session_mut().sample_rate = transit_time::SampleRate::new(44_100).unwrap();
     t.frames(2);
     assert_eq!(t.report().latency, Some(877), "955 at 48 kHz is 877 at 44.1 kHz");
     assert_eq!(t.card().external_state, "Measured at 48 kHz / 64, now 44.1 kHz / 128: measure again");

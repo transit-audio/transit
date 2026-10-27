@@ -1,6 +1,6 @@
 //! Meter changes stay on bar lines when an earlier meter is edited (issue #250).
 
-use soundcraft_time::{BarBeat, MeterEvent, SampleRate, TempoMap};
+use transit_time::{BarBeat, MeterEvent, SampleRate, TempoMap};
 
 fn assert_positions_round_trip(map: &TempoMap) {
     for bar in 1..=5 {

@@ -15,7 +15,7 @@ pub fn start(app: &mut SoundApp, params: &Value) {
     if app.capture_plugin_states().is_err() {
         return;
     }
-    match soundcraft_engine::cmd::bounce_job(&app.engine, params) {
+    match transit_engine::cmd::bounce_job(&app.engine, params) {
         Ok(job) => app.bounce = Some(job),
         Err(e) => app.ui.status = e.to_string(),
     }

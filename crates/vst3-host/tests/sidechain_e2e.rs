@@ -4,7 +4,7 @@
 //! every bus arrangement.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::Plugin;
+use transit_dsp::Plugin;
 
 mod common;
 use common::{fixture_dir, sidechain_fixture_dir};
@@ -12,9 +12,9 @@ use common::{fixture_dir, sidechain_fixture_dir};
 const FRAMES: usize = 64;
 
 fn plugin(dir: &std::path::Path, name: &str) -> Box<dyn Plugin> {
-    let found = soundcraft_vst3_host::scan_paths(&[dir.to_path_buf()]);
+    let found = transit_vst3_host::scan_paths(&[dir.to_path_buf()]);
     let id = found.into_iter().find(|d| d.name == name).unwrap().id;
-    let mut p = soundcraft_vst3_host::create(&id).unwrap();
+    let mut p = transit_vst3_host::create(&id).unwrap();
     p.prepare(48_000.0, FRAMES, 2);
     p
 }

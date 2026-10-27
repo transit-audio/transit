@@ -5,11 +5,11 @@ use super::{AudioPorts, sources};
 use super::{Control, endpoints};
 use crate::{Shared, action_lane, device_clock::ClockKey, plan_bridge, timeline_map};
 use crate::{device_clock, record::start};
-#[cfg(test)]
-use soundcraft_mix::{PlanLimits, RenderTarget};
-use soundcraft_time::{MAX_POSITION, Range, Samples};
 use std::sync::Arc;
 use std::sync::atomic::Ordering;
+#[cfg(test)]
+use transit_mix::{PlanLimits, RenderTarget};
+use transit_time::{MAX_POSITION, Range, Samples};
 
 mod phase;
 use phase::Phase;
@@ -38,7 +38,7 @@ pub enum Command {
     /// Retarget (or clear) the loop while running, without reseeking.
     SetLoop(Option<Range>),
     Recording(bool),
-    Note(soundcraft_mix::InstrumentEvent),
+    Note(transit_mix::InstrumentEvent),
 }
 
 /// A record count-in, measured on Main from the tempo map at the record start. The audio thread
@@ -121,7 +121,7 @@ pub enum ActionResult {
     MidiFull,
     InvalidPosition,
     Timeline(timeline_map::MapError),
-    Event(soundcraft_mix::EventOutcome),
+    Event(transit_mix::EventOutcome),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -285,7 +285,7 @@ impl Transport {
             self.looped = looped;
             self.loop_engaged = looped.is_some_and(|r| from < r.end);
             self.discard_pending = true;
-            live.set_transport_epoch(soundcraft_mix::TransportEpoch(epoch));
+            live.set_transport_epoch(transit_mix::TransportEpoch(epoch));
         }
         // Punching in preserves already-rendered audio and DSP state. Monitoring
         // changes at its next render boundary, while capture uses this consumed D.
@@ -335,7 +335,7 @@ impl Transport {
         self.loop_engaged = false;
         self.discard_pending = true;
         self.count_in = Some(Counting { ticket, from, end, looped, plan, left: plan.frames });
-        live.set_transport_epoch(soundcraft_mix::TransportEpoch(self.epoch));
+        live.set_transport_epoch(transit_mix::TransportEpoch(self.epoch));
         ActionResult::Applied
     }
 
@@ -382,7 +382,7 @@ impl Transport {
                     self.end = end;
                     self.loop_engaged = looped.is_some_and(|r| from < r.end);
                     self.discard_pending = true;
-                    live.set_transport_epoch(soundcraft_mix::TransportEpoch(self.epoch));
+                    live.set_transport_epoch(transit_mix::TransportEpoch(self.epoch));
                 })
             }
             action_lane::Event::Action { payload: Command::Locate(at), .. } => {
@@ -394,7 +394,7 @@ impl Transport {
                     self.render_position = at;
                     self.loop_engaged = self.looped.is_some_and(|r| at < r.end);
                     self.discard_pending = true;
-                    live.set_transport_epoch(soundcraft_mix::TransportEpoch(self.epoch));
+                    live.set_transport_epoch(transit_mix::TransportEpoch(self.epoch));
                 })
             }
             action_lane::Event::Action { payload: Command::SetLoop(looped), .. } => {
@@ -416,7 +416,7 @@ impl Transport {
                         counting.looped = looped;
                     }
                     self.loop_engaged = engaged;
-                    live.set_transport_epoch(soundcraft_mix::TransportEpoch(epoch));
+                    live.set_transport_epoch(transit_mix::TransportEpoch(epoch));
                     Ok(())
                 })
             }
@@ -435,7 +435,7 @@ impl Transport {
                 self.end = None;
                 self.loop_engaged = false;
                 self.discard_pending = true;
-                live.set_transport_epoch(soundcraft_mix::TransportEpoch(self.epoch));
+                live.set_transport_epoch(transit_mix::TransportEpoch(self.epoch));
                 live.reset();
                 if let Ok(position) = self.timeline.position() {
                     self.render_position = position.sample;
@@ -585,7 +585,7 @@ impl Audio {
             Ok(value) => value,
             Err(error) => return Err(InitError { error, ports: Box::new(ports) }),
         };
-        let (record_control, record_start) = start::pair(soundcraft_mix::EngineEpoch(key.generation));
+        let (record_control, record_start) = start::pair(transit_mix::EngineEpoch(key.generation));
         Ok((
             Self {
                 plans: ports.plans,
@@ -690,7 +690,7 @@ impl Audio {
             self.transport.render_position = end;
             self.pending = 0;
             self.read.reset();
-            self.plans.processing().set_transport_epoch(soundcraft_mix::TransportEpoch(self.transport.epoch));
+            self.plans.processing().set_transport_epoch(transit_mix::TransportEpoch(self.transport.epoch));
             self.plans.reset();
             self.shared.position.store(end, Ordering::Relaxed);
             self.shared.playing.store(false, Ordering::Relaxed);
@@ -713,7 +713,7 @@ impl Audio {
             if let action_lane::Event::Action { payload: Command::Note(note), .. } = event
                 && !sources.permits(note.source.port, note.source.generation)
             {
-                return ActionResult::Event(soundcraft_mix::EventOutcome::RevokedSource);
+                return ActionResult::Event(transit_mix::EventOutcome::RevokedSource);
             }
             transport.command(event, live)
         });
@@ -750,7 +750,7 @@ impl Audio {
             // Worker admission is provisional: Stop can capture raw input after
             // the worker popped it and before this final dispatch.
             if !sources.permits_sequence(packet.source.port, packet.source.generation, packet.raw.seq) {
-                return ActionResult::Event(soundcraft_mix::EventOutcome::RevokedSource);
+                return ActionResult::Event(transit_mix::EventOutcome::RevokedSource);
             }
             let mapped =
                 state.clock_map.zip(state.clock_now).and_then(|(map, now)| map.host_to_frame(state.clock_key, packet.raw.host_arrival_ns, now).ok());
@@ -830,7 +830,7 @@ impl Audio {
             // Timeline already advanced through that wrap; preserve its precise
             // consumed position/iteration when issuing the new event identity.
             state.change(None, state.playing, state.looped)?;
-            self.plans.processing().set_transport_epoch(soundcraft_mix::TransportEpoch(state.epoch));
+            self.plans.processing().set_transport_epoch(transit_mix::TransportEpoch(state.epoch));
             state.render_position = range.start;
         }
         let mut frames = quantum.clamp(1, self.plans.engine().max_block());
@@ -845,7 +845,7 @@ impl Audio {
             if state.render_position >= end {
                 state.change(Some(end), false, None)?;
                 state.end = None;
-                self.plans.processing().set_transport_epoch(soundcraft_mix::TransportEpoch(state.epoch));
+                self.plans.processing().set_transport_epoch(transit_mix::TransportEpoch(state.epoch));
                 self.plans.reset();
             } else {
                 frames = frames.min(usize::try_from(end - state.render_position).map_err(|_| timeline_map::MapError::Arithmetic)?);
@@ -856,7 +856,7 @@ impl Audio {
             frames = frames.min(usize::try_from(c.left).unwrap_or(usize::MAX));
         }
         self.plans.set_processing(!state.playing, state.recording, self.shared.editors_open.load(Ordering::Relaxed));
-        let click = counting.map(|c| soundcraft_mix::CountInClick { elapsed: c.plan.frames - c.left, beat: c.plan.beat, per_bar: c.plan.per_bar });
+        let click = counting.map(|c| transit_mix::CountInClick { elapsed: c.plan.frames - c.left, beat: c.plan.beat, per_bar: c.plan.per_bar });
         // A real-time render keeps Main as an offline render would: without the metronome, which
         // is not delay-compensated and is never part of a bounce (ADR 0027 decision 1).
         let gain = if self.render_tap.as_ref().is_some_and(|t| t.busy()) { 0.0 } else { gain };
@@ -1025,7 +1025,7 @@ impl Audio {
             self.transport.timeline.change(epoch, None, rate, self.transport.playing, self.transport.looped.map(|r| (r.start, r.end)))?;
             self.transport.rate = rate;
             self.transport.epoch = epoch;
-            self.plans.processing().set_transport_epoch(soundcraft_mix::TransportEpoch(epoch));
+            self.plans.processing().set_transport_epoch(transit_mix::TransportEpoch(epoch));
             self.speed = speed;
         }
         let step = u64::from(self.sample_rate) * u64::from(speed);

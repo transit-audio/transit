@@ -3,7 +3,7 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::{TrackHeight, ZoomToggle};
+use transit_model::{TrackHeight, ZoomToggle};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![cmd!(noundo "view.zoom_toggle", "Zoom Toggle", [], None, "{width_px?: 1200, height_px?: 600}", always, toggle)]

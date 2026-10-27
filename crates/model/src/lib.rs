@@ -47,4 +47,4 @@ pub use session::{
 pub use source::{Source, SourceAudio, SourcePool, VideoSource};
 pub use track::{Frozen, Playlist, TRACK_COLORS, Track, TrackHeight, TrackKind};
 
-pub use soundcraft_time as time;
+pub use transit_time as time;

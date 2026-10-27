@@ -6,8 +6,8 @@
 //! so they always agree. The piano roll keeps its own [`GridView`] (its zoom differs) and asks the
 //! same functions with its own points per tick.
 
-use soundcraft_model::Session;
-use soundcraft_time::TICKS_PER_QUARTER as PPQ;
+use transit_model::Session;
+use transit_time::TICKS_PER_QUARTER as PPQ;
 
 /// The finest grid is the one whose lines are still at least this many points apart.
 pub const MIN_SPACING_PX: f64 = 12.0;

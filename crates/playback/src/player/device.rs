@@ -6,14 +6,14 @@ use crate::backend::native::NativeKind;
 use crate::record::start::Status;
 use crate::{AudioConfig, EditorEdit, Fault, HeldInput, MeterSnapshot, OutputTrouble, PluginStates, Shared};
 use crate::{action_lane, device_clock, devices, plan_bridge, record, scheduling, telemetry};
-use soundcraft_mix::{Arrival, DeviceGeneration, Due, EngineEpoch, InstrumentEvent, Message, NoteId, PlanLimits, RenderTarget, Source};
-use soundcraft_model::{IoMap, Session, TrackId};
-use soundcraft_time::{Range, Samples};
 use std::cell::{Cell, RefCell, RefMut};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU32, Ordering};
 use transit_audio_backend as ab;
+use transit_mix::{Arrival, DeviceGeneration, Due, EngineEpoch, InstrumentEvent, Message, NoteId, PlanLimits, RenderTarget, Source};
+use transit_model::{IoMap, Session, TrackId};
 use transit_rt::handoff::{Anchor, AudioAccess};
+use transit_time::{Range, Samples};
 
 type Owner = RuntimeControl<Command, ActionResult>;
 pub type PlayerNotice = Notice<Command, ActionResult>;
@@ -198,7 +198,7 @@ impl Player {
             output.fill_f32(&mut [0.0f32; 1024]);
         }
         if !was {
-            soundcraft_mix::unmark_audio_thread();
+            transit_mix::unmark_audio_thread();
         }
     }
 
@@ -468,7 +468,7 @@ impl Player {
     /// by the first `start`) and the order cpal's ASIO host needs; native WASAPI pairs two
     /// endpoints the same way. Recording later takes the held input without touching the streams.
     fn open_stepped(session: Arc<Session>, cfg: &AudioConfig, factory: &dyn ab::BackendFactory, step: OpenStep) -> Result<Self, OpenFailure> {
-        let want_ch = u16::try_from(soundcraft_mix::main_channels(&session)).unwrap_or(2);
+        let want_ch = u16::try_from(transit_mix::main_channels(&session)).unwrap_or(2);
         let backend = factory.backend(cfg.system.as_deref()).ok_or_else(|| "no audio system".to_string())?;
         // Prefer a config at the chosen (else session) rate; else the device default (we resample).
         let rates = cfg.sample_rate.into_iter().chain(Some(session.sample_rate.hz())).collect();
@@ -1005,7 +1005,7 @@ impl Player {
         if !owner.source_admitted(token) {
             return Err(PlayerError::Faulted);
         }
-        let target = owner.binding(track, soundcraft_mix::INSTRUMENT_SLOT).ok_or(PlayerError::NoInstrument)?;
+        let target = owner.binding(track, transit_mix::INSTRUMENT_SLOT).ok_or(PlayerError::NoInstrument)?;
         let sequence = self.arrival.get().checked_add(1).ok_or(PlayerError::SequenceExhausted)?;
         self.arrival.set(sequence);
         let message = if velocity == 0 {
@@ -1290,17 +1290,17 @@ impl Player {
         self.shared.editors_open.load(Ordering::Relaxed)
     }
     /// What the header strip of this slot's editor window shows (issue #68).
-    pub fn set_editor_header(&self, track: TrackId, slot: usize, header: &soundcraft_dsp::EditorHeader) -> Result<(), PlayerError> {
+    pub fn set_editor_header(&self, track: TrackId, slot: usize, header: &transit_dsp::EditorHeader) -> Result<(), PlayerError> {
         self.owner()?.set_editor_header(track, slot, header);
         Ok(())
     }
     /// What the user did in the editor windows' header strips: (track, slot, action).
-    pub fn take_header_actions(&self) -> Vec<(TrackId, usize, soundcraft_dsp::HeaderAction)> {
+    pub fn take_header_actions(&self) -> Vec<(TrackId, usize, transit_dsp::HeaderAction)> {
         self.owner().map(|mut owner| owner.take_header_actions()).unwrap_or_default()
     }
     /// The identity of the live instance in this slot (`None`: none). A job started for one
     /// instance must not land on another that took the slot meanwhile (issue #68).
-    pub fn instance(&self, track: TrackId, slot: usize) -> Option<soundcraft_mix::SlotGen> {
+    pub fn instance(&self, track: TrackId, slot: usize) -> Option<transit_mix::SlotGen> {
         self.owner().ok().and_then(|owner| owner.instance(track, slot))
     }
     /// The live plug-in's own name in this slot (`None`: no live instance).
@@ -1312,7 +1312,7 @@ impl Player {
         self.owner().map_err(|e| e.to_string())?.editor_available(track, slot)
     }
     /// Starts reading this slot's live state (a preset save, a copy); poll it once per frame.
-    pub fn begin_save_state(&self, track: TrackId, slot: usize) -> Result<soundcraft_dsp::StateJob<Option<Vec<u8>>>, String> {
+    pub fn begin_save_state(&self, track: TrackId, slot: usize) -> Result<transit_dsp::StateJob<Option<Vec<u8>>>, String> {
         self.owner().map_err(|e| e.to_string())?.begin_save_state(track, slot)
     }
     /// Starts loading a state into this slot's live instance (a preset); poll it once per frame.
@@ -1321,11 +1321,11 @@ impl Player {
         track: TrackId,
         slot: usize,
         data: Vec<u8>,
-    ) -> Result<soundcraft_dsp::StateJob<Option<soundcraft_dsp::LoadedValues>>, String> {
+    ) -> Result<transit_dsp::StateJob<Option<transit_dsp::LoadedValues>>, String> {
         self.owner().map_err(|e| e.to_string())?.begin_load_state(track, slot, data)
     }
     /// Starts reading plug-in `id`'s default state (a fresh instance on the plug-in host thread).
-    pub fn begin_default_state(&self, id: &str, ch: usize) -> Result<soundcraft_dsp::StateJob<Option<Vec<u8>>>, String> {
+    pub fn begin_default_state(&self, id: &str, ch: usize) -> Result<transit_dsp::StateJob<Option<Vec<u8>>>, String> {
         Ok(self.owner().map_err(|e| e.to_string())?.begin_default_state(id, ch))
     }
     pub fn editor_set_param(&self, track: TrackId, slot: usize, id: &str, value: f32) -> Result<(), PlayerError> {
@@ -1372,7 +1372,7 @@ impl Player {
         Ok(())
     }
     /// The scope taps of the open device's plans; `None` while the player is busy or faulted.
-    pub fn scope_hub(&self) -> Option<Arc<soundcraft_mix::ScopeHub>> {
+    pub fn scope_hub(&self) -> Option<Arc<transit_mix::ScopeHub>> {
         self.owner().ok().map(|o| o.scope_hub())
     }
     /// Switches the scope tap of an insert (by `Insert.uid`) on or off, with no recompile; false when
@@ -1381,7 +1381,7 @@ impl Player {
         self.scope_hub().is_some_and(|h| h.set_enabled(track, uid, on))
     }
     /// Copies the last `out.len()` frames of an insert's scope tap into `out` (see
-    /// [`soundcraft_mix::ScopeTap::read`]); 0 while there is no tap.
+    /// [`transit_mix::ScopeTap::read`]); 0 while there is no tap.
     pub fn scope_frames(&self, track: TrackId, uid: u64, out: &mut [f32]) -> usize {
         self.scope_hub().map_or(0, |h| h.frames(track, uid, out))
     }
@@ -1740,12 +1740,12 @@ fn render_callbacks(
     let render = move |block: &mut ab::RenderBlock<'_>| {
         crate::mark_audio_thread();
         let started = telemetry::Timer::start();
-        let creating_before = soundcraft_mix::creating_instance();
+        let creating_before = transit_mix::creating_instance();
         let frames = block.frames;
         clock.observer.record(frames, block.stamp);
         fault.beats.fetch_add(1, Ordering::Relaxed);
         output.render(block);
-        let creating = creating_before || soundcraft_mix::creating_instance();
+        let creating = creating_before || transit_mix::creating_instance();
         output.timing.record_overlap(&fault.telemetry, frames, rate, started.elapsed(), creating);
     };
     (Box::new(render), Box::new(error))

@@ -2,9 +2,9 @@
 
 use crate::{Engine, EngineError, Result};
 use serde_json::Value;
-use soundcraft_model::{ClipId, TrackId};
-use soundcraft_time::{Range, Samples};
 use std::sync::OnceLock;
+use transit_model::{ClipId, TrackId};
+use transit_time::{Range, Samples};
 
 mod audio_midi;
 mod audiosuite;
@@ -301,8 +301,8 @@ pub fn tracks_required(e: &Engine, cmd: &str, p: &Value) -> Result<Vec<TrackId>>
 /// (CLAP, VST3, Audio Unit) keeps its settings in its own state, so its map starts empty:
 /// the defaults it reports are often 0, and pushing them would overwrite what it loads by itself
 /// (Rhapsody came up with its volume and pan at minimum).
-pub(super) fn fill_default_params(ins: &mut soundcraft_model::Insert, info: &soundcraft_dsp::PluginInfo) {
-    if soundcraft_mix::is_third_party(info.id) {
+pub(super) fn fill_default_params(ins: &mut transit_model::Insert, info: &transit_dsp::PluginInfo) {
+    if transit_mix::is_third_party(info.id) {
         return;
     }
     for pi in info.params {
@@ -310,7 +310,7 @@ pub(super) fn fill_default_params(ins: &mut soundcraft_model::Insert, info: &sou
     }
 }
 
-pub use soundcraft_time::MAX_POSITION;
+pub use transit_time::MAX_POSITION;
 
 /// Position from `key`: a number of samples, or `{"seconds": x}`, or a string in the main counter format.
 /// Values are clamped to ±[`MAX_POSITION`].
@@ -325,7 +325,7 @@ fn position_param_raw(e: &Engine, cmd: &str, p: &Value, key: &str) -> Result<Opt
         return Ok(Some(n));
     }
     if let Some(f) = v.as_f64() {
-        return Ok(Some(soundcraft_time::to_samples(f)));
+        return Ok(Some(transit_time::to_samples(f)));
     }
     if let Some(secs) = v.get("seconds").and_then(Value::as_f64) {
         return Ok(Some(s.sample_rate.samples(secs)));
@@ -333,14 +333,14 @@ fn position_param_raw(e: &Engine, cmd: &str, p: &Value, key: &str) -> Result<Opt
     if let Some(text) = v.as_str() {
         // Try each format, starting with an explicit prefix like "bars:5|1|000".
         let (fmt, body) = match text.split_once(':') {
-            Some((f, b)) if soundcraft_time::TimeFormat::from_id(f).is_some() => (soundcraft_time::TimeFormat::from_id(f), b),
+            Some((f, b)) if transit_time::TimeFormat::from_id(f).is_some() => (transit_time::TimeFormat::from_id(f), b),
             _ => (None, text),
         };
-        let fmts: Vec<soundcraft_time::TimeFormat> = match fmt {
+        let fmts: Vec<transit_time::TimeFormat> = match fmt {
             Some(f) => vec![f],
             None => {
                 let mut v = vec![s.edit.main_counter];
-                v.extend(soundcraft_time::TimeFormat::ALL);
+                v.extend(transit_time::TimeFormat::ALL);
                 v
             }
         };
@@ -403,7 +403,7 @@ mod tests {
                 assert!(matches!(e.execute(id, &params), Err(EngineError::Disabled(..))), "{id}: {params}");
             }
         }
-        let t = e.session_mut().add_track(soundcraft_model::TrackKind::Audio, soundcraft_model::ChannelFormat::Mono, None);
+        let t = e.session_mut().add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Mono, None);
         e.execute("mix.volume", &serde_json::json!({"track": t.0, "db": -6.0})).unwrap();
         assert_eq!(e.session().track(t).unwrap().mixer.volume_db, -6.0);
         assert!(matches!(e.execute("mix.volume", &serde_json::json!({"at": 0, "db": 1.0})), Err(EngineError::Disabled(..))));

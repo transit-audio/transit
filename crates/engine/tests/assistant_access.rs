@@ -1,5 +1,5 @@
 use serde_json::{Value, json};
-use soundcraft_engine::Engine;
+use transit_engine::Engine;
 
 fn setup() -> (Engine, Value) {
     let mut e = Engine::default();
@@ -114,7 +114,7 @@ fn retrospective_record_rejects_extreme_addresses_without_an_internal_panic() {
     for start in [json!({"start": "2401919801264265|3|127"}), json!({"start_ticks": i64::MAX}), json!({"start_ticks": i64::MAX - 240})] {
         let result = e.execute("event.retrospective_record", &json!({"track": "Keys", "notes": [start]}));
         let error = result.unwrap_err();
-        assert!(!matches!(error, soundcraft_engine::EngineError::Internal(..)), "{error}");
+        assert!(!matches!(error, transit_engine::EngineError::Internal(..)), "{error}");
         assert_eq!(serde_json::to_value(e.session()).unwrap(), before);
     }
 }
@@ -190,7 +190,7 @@ fn retrospective_position_formats_keep_clock_time_distinct_from_musical_time() {
     assert_eq!(e.session().sample_rate.hz(), 48_000);
     for (position, expected) in position_formats() {
         let result = e.execute("event.retrospective_record", &json!({"track": "Keys", "notes": [{"start": position, "length_ticks": 240}]})).unwrap();
-        let clip_id = soundcraft_model::ClipId(result["clip"].as_u64().unwrap());
+        let clip_id = transit_model::ClipId(result["clip"].as_u64().unwrap());
         let (_, clip) = e.session().find_clip(clip_id).unwrap();
         let origin = e.session().tempo.samples_to_ticks(clip.start, e.session().sample_rate);
         let n = notes(&mut e, &result["clip"]);

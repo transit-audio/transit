@@ -3,7 +3,7 @@
 //! [`crate::mixer`]; this holds the numbers and the state they share, so both stay testable
 //! without a frame.
 
-use soundcraft_model::TrackId;
+use transit_model::TrackId;
 
 /// The fader marks, in dB: 0 dB is the line across the track, the others are fainter.
 pub const DB_MARKS: [f32; 4] = [0.0, -6.0, -12.0, -24.0];

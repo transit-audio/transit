@@ -1,13 +1,13 @@
 //! The browser shell: the eframe web runner around [`SoundApp`].
 
 use serde_json::json;
-use soundcraft_engine::{Engine, io};
-use soundcraft_ui_egui::dialogs::Dialog;
-use soundcraft_ui_egui::sampler_window::SampleRead;
-use soundcraft_ui_egui::{Services, SoundApp};
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
+use transit_engine::{Engine, io};
+use transit_ui_egui::dialogs::Dialog;
+use transit_ui_egui::sampler_window::SampleRead;
+use transit_ui_egui::{Services, SoundApp};
 use wasm_bindgen::JsCast as _;
 
 const CANVAS_ID: &str = "transit_canvas";
@@ -37,10 +37,10 @@ pub fn start() {
                 options,
                 Box::new(move |cc| {
                     if let Some(rs) = &cc.wgpu_render_state {
-                        log::info!("soundcraft-web: wgpu backend {:?}", rs.adapter.get_info().backend);
+                        log::info!("transit-web: wgpu backend {:?}", rs.adapter.get_info().backend);
                     }
-                    let engine = if query().contains("empty") { Engine::default() } else { soundcraft_engine::demo::demo_engine() };
-                    let player = soundcraft_playback::Player::new(Arc::new(engine.session().clone()));
+                    let engine = if query().contains("empty") { Engine::default() } else { transit_engine::demo::demo_engine() };
+                    let player = transit_playback::Player::new(Arc::new(engine.session().clone()));
                     let app = SoundApp::new(engine, Some(player), Services::default());
                     Ok(Box::new(WebShell { app, inbox: Rc::default(), samples: Rc::default() }))
                 }),
@@ -67,7 +67,7 @@ enum Purpose {
     Midi,
 }
 
-const SESSION_EXTS: &[&str] = &[soundcraft_model::BUNDLE_EXTENSION, soundcraft_model::SESSION_EXTENSION];
+const SESSION_EXTS: &[&str] = &[transit_model::BUNDLE_EXTENSION, transit_model::SESSION_EXTENSION];
 const AUDIO_EXTS: &[&str] =
     &["wav", "wave", "bwf", "aif", "aiff", "aifc", "flac", "mp3", "ogg", "oga", "m4a", "m4b", "aac", "mp4", "caf", "mkv", "webm"];
 const MIDI_EXTS: &[&str] = &["mid", "midi", "smf"];
@@ -167,7 +167,7 @@ impl WebShell {
     }
 
     fn handle(&mut self, purpose: Purpose, name: &str, bytes: &[u8]) {
-        if matches!(purpose, Purpose::Session) && soundcraft_ui_egui::bounce::refuses_session_switch(&mut self.app) {
+        if matches!(purpose, Purpose::Session) && transit_ui_egui::bounce::refuses_session_switch(&mut self.app) {
             return;
         }
         let e = &mut self.app.engine;

@@ -1,6 +1,6 @@
 use egui::{Event, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
 use serde_json::json;
-use soundcraft_ui_egui::{Services, SoundApp, edit_window, widgets};
+use transit_ui_egui::{Services, SoundApp, edit_window, widgets};
 
 fn frame(ctx: &egui::Context, app: &mut SoundApp, events: Vec<Event>) {
     let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0))), events, ..Default::default() };
@@ -18,7 +18,7 @@ fn button(pos: Pos2, pressed: bool) -> Event {
 
 #[test]
 fn the_clip_gain_icon_drags_with_the_pointer_in_one_undo_step() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     app.engine.execute("view.clip_gain_info", &json!({"value": true})).unwrap();
     let ctx = egui::Context::default();
     frame(&ctx, &mut app, vec![]);

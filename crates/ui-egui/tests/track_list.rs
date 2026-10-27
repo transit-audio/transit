@@ -2,8 +2,8 @@
 
 use egui::{Event, PointerButton, Pos2, RawInput, Rect, Shape, epaint::ClippedShape, pos2, vec2};
 use serde_json::json;
-use soundcraft_model::TrackId;
-use soundcraft_ui_egui::{Services, SoundApp};
+use transit_model::TrackId;
+use transit_ui_egui::{Services, SoundApp};
 
 struct Rig {
     ctx: egui::Context,
@@ -13,7 +13,7 @@ struct Rig {
 
 impl Rig {
     fn new() -> Rig {
-        let mut engine = soundcraft_engine::Engine::default();
+        let mut engine = transit_engine::Engine::default();
         engine.execute("track.new", &json!({"count": 6})).unwrap();
         let mut r = Rig { ctx: egui::Context::default(), app: SoundApp::new(engine, None, Services::default()), shapes: Vec::new() };
         for _ in 0..4 {

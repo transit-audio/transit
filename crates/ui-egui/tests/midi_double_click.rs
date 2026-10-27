@@ -2,8 +2,8 @@
 
 use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
 use serde_json::json;
-use soundcraft_engine::model::ClipId;
-use soundcraft_ui_egui::{Services, SoundApp, edit_window, midi_editor};
+use transit_engine::model::ClipId;
+use transit_ui_egui::{Services, SoundApp, edit_window, midi_editor};
 
 struct Rig {
     ctx: egui::Context,
@@ -12,7 +12,7 @@ struct Rig {
 
 impl Rig {
     fn new(tool: &str) -> Rig {
-        let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+        let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
         app.engine.execute("edit.tool", &json!({"tool": tool})).unwrap();
         let mut r = Rig { ctx: egui::Context::default(), app };
         for _ in 0..4 {

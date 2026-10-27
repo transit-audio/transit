@@ -3,7 +3,7 @@
 use egui::{Event, Key, Modifiers, PointerButton, Response, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use soundcraft_ui_egui::{Services, SoundApp, theme, widgets};
+use transit_ui_egui::{Services, SoundApp, theme, widgets};
 
 #[derive(Default)]
 struct ButtonState {
@@ -104,7 +104,7 @@ fn tool_and_record_buttons_handle_keyboard_disabled_state_and_cancelled_clicks()
 
 #[test]
 fn toolbar_keyboard_activation_changes_tools_without_transport_or_marker_actions() {
-    let app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
     let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(
         |ui, app: &mut SoundApp| {
             app.logic(&ui.ctx().clone());
@@ -115,10 +115,9 @@ fn toolbar_keyboard_activation_changes_tools_without_transport_or_marker_actions
     h.run_steps(5);
     h.get_by_label("Trim (F6)").click();
     h.run_steps(3);
-    assert_eq!(h.state().engine.session().edit.tool, soundcraft_model::Tool::Trim);
+    assert_eq!(h.state().engine.session().edit.tool, transit_model::Tool::Trim);
     let markers = h.state().engine.session().markers.len();
-    for (label, tool, key) in
-        [("Pencil (F10)", soundcraft_model::Tool::Pencil, Key::Enter), ("Grabber (F8)", soundcraft_model::Tool::Grabber, Key::Space)]
+    for (label, tool, key) in [("Pencil (F10)", transit_model::Tool::Pencil, Key::Enter), ("Grabber (F8)", transit_model::Tool::Grabber, Key::Space)]
     {
         h.get_by_label(label).focus();
         h.run_steps(2);
@@ -134,7 +133,7 @@ fn toolbar_keyboard_activation_changes_tools_without_transport_or_marker_actions
 
 #[test]
 fn track_record_button_arms_the_track_without_starting_transport() {
-    let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
     app.run("track.new", serde_json::json!({"name": "Voice"})).unwrap();
     let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(
         |ui, app: &mut SoundApp| {
@@ -164,7 +163,7 @@ fn shared_controls_visuals() {
     let Some(directory) = std::env::var_os("CRAFT_UI_SUITE_SHOTS").map(std::path::PathBuf::from) else { return };
     std::fs::create_dir_all(&directory).unwrap();
     for scale in [1.0, 2.0] {
-        let app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+        let app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
         let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).with_pixels_per_point(scale).wgpu().build_ui_state(
             |ui, app: &mut SoundApp| {
                 app.logic(&ui.ctx().clone());

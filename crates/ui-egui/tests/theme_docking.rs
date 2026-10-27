@@ -7,13 +7,13 @@
 use egui::{Color32, vec2};
 use egui_kittest::Harness;
 use serde_json::json;
-use soundcraft_ui_egui::{Services, SoundApp, theme, widgets};
+use transit_ui_egui::{Services, SoundApp, theme, widgets};
 
 #[test]
 fn shared_panels_and_controls_follow_manual_and_live_system_appearance() {
     // Keep palette changes in one owning test: upstream custom painters use process-global tokens.
     for scale in [1.0, 2.0] {
-        let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+        let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
         app.run("edit.select", json!({"tracks":["Keys"]})).unwrap();
         for id in ["window.midi_editor", "window.memory_locations", "window.undo_history"] {
             app.run(id, json!({})).unwrap();

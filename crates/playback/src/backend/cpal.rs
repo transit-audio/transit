@@ -10,9 +10,9 @@
 
 use crate::{devices, telemetry};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use soundcraft_model::MAX_DEVICE_CHANNELS;
 use std::sync::{Arc, Mutex, PoisonError};
 use transit_audio_backend as ab;
+use transit_model::MAX_DEVICE_CHANNELS;
 
 /// Sample types the adapter converts to and from `f32`.
 pub(crate) trait Sample: cpal::SizedSample + cpal::FromSample<f32> {}

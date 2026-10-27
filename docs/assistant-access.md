@@ -1,7 +1,7 @@
 # Assistant access over MCP
 
 An MCP client can inspect the open session and edit MIDI through transit's command channel.
-The client runs `soundcraft-cli mcp` as a stdio MCP server. To control the desktop session,
+The client runs `transit-cli mcp` as a stdio MCP server. To control the desktop session,
 that server connects to transit's authenticated TCP socket on `127.0.0.1`.
 
 ## Connect to the desktop session
@@ -13,7 +13,7 @@ MCP server in your client:
 {
   "mcpServers": {
     "transit": {
-      "command": "soundcraft-cli",
+      "command": "transit-cli",
       "args": ["mcp", "--connect", "7801"]
     }
   }
@@ -41,7 +41,7 @@ token and sends `auth <token>` as the first socket line automatically. Do not pa
 into chat or source control. A custom socket client must perform the same authentication;
 see [the control protocol](control-protocol.md#authentication-transit).
 
-For a separate headless session, omit `--connect`: `soundcraft-cli mcp` opens neither a window
+For a separate headless session, omit `--connect`: `transit-cli mcp` opens neither a window
 nor an audio device. That session is separate from the desktop. File access confinement for
 headless clients is described in [MCP server](mcp.md#confining-file-access).
 

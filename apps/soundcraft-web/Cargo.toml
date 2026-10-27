@@ -1,5 +1,5 @@
 [package]
-name = "soundcraft-web"
+name = "transit-web"
 description = "transit in the browser (eframe web runner, WebGPU with WebGL2 fallback, WebAudio playback)"
 version.workspace = true
 edition.workspace = true
@@ -10,14 +10,14 @@ publish = false
 workspace = true
 
 [[bin]]
-name = "soundcraft-web"
+name = "transit-web"
 path = "src/main.rs"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-soundcraft-engine = { workspace = true }
-soundcraft-ui-egui = { workspace = true }
-soundcraft-playback = { workspace = true }
-soundcraft-model = { workspace = true }
+transit-engine = { workspace = true }
+transit-ui-egui = { workspace = true }
+transit-playback = { workspace = true }
+transit-model = { workspace = true }
 egui = { workspace = true }
 log = { workspace = true }
 serde_json = { workspace = true }

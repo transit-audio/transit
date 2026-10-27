@@ -17,10 +17,10 @@ use crate::mixer::{DeviceCard, DevicesLayout, MenuItem, PluginEntry};
 use crate::theme::{self, TOKENS};
 use egui::{Align2, FontId, Rect, Sense, Stroke, Ui, pos2, vec2};
 use serde_json::Value;
-use soundcraft_model::{Insert, KeyFrom, Tap, TrackId, TrackKind};
-use soundcraft_playback::LoadPhase;
-use soundcraft_playback::SlotLoad;
 use std::time::Duration;
+use transit_model::{Insert, KeyFrom, Tap, TrackId, TrackKind};
+use transit_playback::LoadPhase;
+use transit_playback::SlotLoad;
 
 /// Height of the device pane.
 pub const PANE_H: f32 = 132.0;
@@ -103,7 +103,7 @@ impl StudioApp {
     /// hosted plug-in the cache does not know, "Scanning…" while a scan runs or a generic label
     /// ([`hosted_label`]). Reads the caches only; never scans or loads anything.
     pub fn plugin_name(&mut self, id: &str, instrument: bool) -> String {
-        if id == soundcraft_model::EXTERNAL_INSTRUMENT_PLUGIN {
+        if id == transit_model::EXTERNAL_INSTRUMENT_PLUGIN {
             return crate::external_instrument::MENU_LABEL.to_string();
         }
         if self.mixer.builtin.is_none() {
@@ -364,7 +364,7 @@ fn card_body(
     let mut c =
         DeviceCard { slot, plugin: plugin.clone(), name: name.clone(), bypass: ins.is_some_and(|i| i.bypass), rect: r4(r), ..DeviceCard::default() };
     let salt = slot.map_or(u64::MAX, |s| s as u64);
-    let key_slot = slot.unwrap_or(soundcraft_mix::INSTRUMENT_SLOT);
+    let key_slot = slot.unwrap_or(transit_mix::INSTRUMENT_SLOT);
     // The plug-in is still being made (a heavy library can take seconds): say so until it is
     // bound, slow past the display budget, and "Not responding" once the plug-in host gives up
     // waiting (ADR 0018, issue #82).
@@ -496,7 +496,7 @@ fn card_body(
             let label = crate::external_instrument::MENU_LABEL;
             let b = crate::menus::check_button(ui, ext.is_some(), label)
                 .on_hover_text("Play a hardware synth: the track's MIDI goes to its port and its audio comes back on an input");
-            menu.push(MenuItem::at(ui, label.to_string(), soundcraft_model::EXTERNAL_INSTRUMENT_PLUGIN.to_string(), b.rect));
+            menu.push(MenuItem::at(ui, label.to_string(), transit_model::EXTERNAL_INSTRUMENT_PLUGIN.to_string(), b.rect));
             if b.clicked() {
                 external = true;
                 ui.close();
@@ -588,7 +588,7 @@ fn hardware_state(
     lane: Rect,
     t: TrackId,
     slot: usize,
-    h: &soundcraft_model::HardwareInsert,
+    h: &transit_model::HardwareInsert,
     eb: Rect,
     c: &mut DeviceCard,
 ) {
@@ -598,8 +598,7 @@ fn hardware_state(
     let disabled = h.disabled.is_some();
     let resp = ui.interact(eb.intersect(lane), ui.id().with(("hardware_state", t.0, slot)), Sense::click());
     pc.rect_filled(eb, crate::theme::RADIUS, if resp.hovered() && disabled { TOKENS.button_hover } else { TOKENS.button });
-    let ink =
-        if disabled || report.as_ref().is_some_and(|r| r.state != soundcraft_mix::HardwareState::Ready) { TOKENS.text_dim } else { TOKENS.text };
+    let ink = if disabled || report.as_ref().is_some_and(|r| r.state != transit_mix::HardwareState::Ready) { TOKENS.text_dim } else { TOKENS.text };
     pc.with_clip_rect(eb.intersect(lane)).text(eb.center(), Align2::CENTER_CENTER, &text, FontId::proportional(10.5), ink);
     let resp = resp.on_hover_text(if disabled {
         "Make the insert again to switch it on"
@@ -645,8 +644,8 @@ pub(crate) fn load_tip(load: SlotLoad, name: &str, phase: Option<LoadPhase>, las
     match load {
         SlotLoad::Loading { elapsed } => {
             let head = match phase {
-                Some(p) => soundcraft_playback::loading_text(name, elapsed, p),
-                None => format!("Loading {name}… {}", soundcraft_playback::seconds_text(elapsed)),
+                Some(p) => transit_playback::loading_text(name, elapsed, p),
+                None => format!("Loading {name}… {}", transit_playback::seconds_text(elapsed)),
             };
             format!("{head}{last}")
         }
@@ -713,7 +712,7 @@ pub(crate) fn retry_button(
 
 /// What an insert's key dropdown reads: "Key: None", or "Key: Kick (post)" naming the source
 /// track or bus and the tap (a bus key is always post-fader).
-pub(crate) fn key_label(s: &soundcraft_model::Session, ins: &Insert) -> String {
+pub(crate) fn key_label(s: &transit_model::Session, ins: &Insert) -> String {
     let Some(k) = ins.key else { return "Key: None".to_string() };
     let (name, tap) = match k.from {
         KeyFrom::Track(id) => (s.track(id).map_or("?".to_string(), |t| t.name.clone()), if k.tap == Tap::Pre { "pre" } else { "post" }),
@@ -725,7 +724,7 @@ pub(crate) fn key_label(s: &soundcraft_model::Session, ins: &Insert) -> String {
 /// The sources an insert on track `t` can take a key from: every other track that carries audio
 /// (an aux or folder only for an aux or folder track, which render after the audio tracks), then,
 /// for an aux or folder track, every bus. The engine refuses what remains impossible, a loop.
-pub(crate) fn key_sources(s: &soundcraft_model::Session, t: TrackId) -> (Vec<(TrackId, String)>, Vec<(soundcraft_model::BusId, String)>) {
+pub(crate) fn key_sources(s: &transit_model::Session, t: TrackId) -> (Vec<(TrackId, String)>, Vec<(transit_model::BusId, String)>) {
     let late = s.track(t).is_some_and(|x| matches!(x.kind, TrackKind::Aux | TrackKind::Folder));
     let tracks = s
         .tracks
@@ -756,7 +755,7 @@ fn key_control(
     menu: &mut Vec<MenuItem>,
     c: &mut DeviceCard,
 ) {
-    let takes = soundcraft_dsp::builtin_takes_key(plugin) || (hosted(plugin) && app.player.as_ref().is_some_and(|pl| pl.has_key_input(t, slot)));
+    let takes = transit_dsp::builtin_takes_key(plugin) || (hosted(plugin) && app.player.as_ref().is_some_and(|pl| pl.has_key_input(t, slot)));
     if !takes {
         return;
     }
@@ -993,8 +992,8 @@ fn sends_section(
     app: &mut StudioApp,
     ui: &mut Ui,
     p: &egui::Painter,
-    s: &soundcraft_model::Session,
-    t: &soundcraft_model::Track,
+    s: &transit_model::Session,
+    t: &transit_model::Track,
     x: f32,
     lane: Rect,
     layout: &mut DevicesLayout,

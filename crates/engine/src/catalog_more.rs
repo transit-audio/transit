@@ -47,7 +47,7 @@ mod tests {
     fn change_width_aliases_name_real_formats() {
         for (path, _) in ALIASES_MORE.iter().filter(|(_, id)| *id == "track.change_width") {
             let leaf = path.rsplit(" > ").next().unwrap_or("");
-            assert!(soundcraft_model::ChannelFormat::from_id(leaf).is_some(), "no channel format for `{leaf}`");
+            assert!(transit_model::ChannelFormat::from_id(leaf).is_some(), "no channel format for `{leaf}`");
         }
     }
 }

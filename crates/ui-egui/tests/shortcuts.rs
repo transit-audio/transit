@@ -1,7 +1,7 @@
 use egui::os::OperatingSystem;
 use egui::{Key, Modifiers};
 use serde_json::json;
-use soundcraft_ui_egui::{MainWindow, Services, SoundApp, shortcuts};
+use transit_ui_egui::{MainWindow, Services, SoundApp, shortcuts};
 
 fn press(ctx: &egui::Context, app: &mut SoundApp, key: Key, modifiers: Modifiers) {
     let events = [true, false].map(|pressed| egui::Event::Key { key, physical_key: None, pressed, repeat: false, modifiers }).to_vec();
@@ -12,7 +12,7 @@ fn press(ctx: &egui::Context, app: &mut SoundApp, key: Key, modifiers: Modifiers
 fn ctrl_shift_arrows_nudge_the_selected_clip_gain() {
     let pc_ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
     for (os, ctrl) in [(OperatingSystem::Mac, Modifiers::CTRL), (OperatingSystem::Windows, pc_ctrl), (OperatingSystem::Nix, pc_ctrl)] {
-        let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+        let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
         let kick = app.engine.session().track_by_name("Kick").unwrap().clips()[0].id;
         app.engine.execute("edit.select", &json!({"clips": [kick.0]})).unwrap();
         let ctx = egui::Context::default();
@@ -40,7 +40,7 @@ fn type_in_app(ctx: &egui::Context, app: &mut SoundApp, keys: &[(Key, Modifiers)
 
 #[test]
 fn tab_leaves_the_keys_to_the_shortcuts() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     let ctx = egui::Context::default();
     for _ in 0..3 {
         type_in_app(&ctx, &mut app, &[]);
@@ -61,7 +61,7 @@ fn cmd_equals_toggles_mix_and_edit_without_zooming() {
     let mac_cmd = Modifiers { mac_cmd: true, command: true, ..Modifiers::NONE };
     let pc_ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
     for (os, cmd) in [(OperatingSystem::Mac, mac_cmd), (OperatingSystem::Windows, pc_ctrl), (OperatingSystem::Nix, pc_ctrl)] {
-        let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+        let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
         let ctx = egui::Context::default();
         ctx.set_os(os);
         ctx.set_zoom_factor(1.25);

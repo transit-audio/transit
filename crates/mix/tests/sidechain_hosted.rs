@@ -3,14 +3,14 @@
 //! and 0.125 when the key is unrouted), keyed from a kick track that is not in the mix.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_mix::{
-    Adoption, DeviceGeneration, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, create_instance,
-};
-use soundcraft_model::{ChannelFormat, Clip, Insert, KeyFrom, KeySource, Route, Session, SourceAudio, SourceId, Tap, TrackId, TrackKind};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use transit_audio_io::AudioBuffer;
+use transit_mix::{
+    Adoption, DeviceGeneration, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, create_instance,
+};
+use transit_model::{ChannelFormat, Clip, Insert, KeyFrom, KeySource, Route, Session, SourceAudio, SourceId, Tap, TrackId, TrackKind};
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 
 #[global_allocator]
@@ -27,7 +27,7 @@ const BASS: f32 = 0.5;
 fn fixture() {
     static INSTALL: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     INSTALL.get_or_init(|| {
-        soundcraft_clap_host::set_scan_extra_dirs_only(true);
+        transit_clap_host::set_scan_extra_dirs_only(true);
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../clap-host/tests/fixture/Cargo.toml");
         let target = Path::new(env!("CARGO_TARGET_TMPDIR")).join("sidechain-hosted-fixture-target");
         let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
@@ -50,7 +50,7 @@ fn fixture() {
         let dest = if cfg!(target_os = "macos") { dir.join("Fixture.clap/Contents/MacOS/Fixture") } else { dir.join("Fixture.clap") };
         std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
         std::fs::copy(target.join("debug").join(lib), dest).unwrap();
-        assert_eq!(soundcraft_clap_host::add_search_dir(&dir), 1);
+        assert_eq!(transit_clap_host::add_search_dir(&dir), 1);
     });
 }
 
@@ -89,10 +89,10 @@ fn target() -> RenderTarget {
 /// Renders the main mix (left channel); the render itself is measured for allocations.
 fn render(s: &Session) -> (Vec<f32>, AllocStats) {
     fixture();
-    soundcraft_mix::mark_audio_thread();
+    transit_mix::mark_audio_thread();
     let mut mix = MixEngine::realtime(target());
     let mut compiler = PlanCompiler::new(target(), PlanLimits::default());
-    let mut make = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| {
+    let mut make = |spec: &InstanceSpec, _: transit_mix::SlotGen| {
         create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch).map(|n| NewInstance { plugin: n.plugin, refused_state: false })
     };
     let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut make).unwrap();

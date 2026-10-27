@@ -32,12 +32,12 @@ use crate::fit::{self, PositionFit};
 use crate::onset;
 pub(crate) use crate::onset::levels;
 use crate::session::{self, Callbacks, Request};
-use soundcraft_playback::device_clock::{ClockFitter, ClockKey, Observation};
-/// The trial summary is the shared one (`soundcraft_playback::onset`), as the app's Measure uses.
-pub use soundcraft_playback::onset::{OUTLIER_SIGMAS, Summary, summarize};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, OnceLock};
 use transit_audio_backend as ab;
+use transit_playback::device_clock::{ClockFitter, ClockKey, Observation};
+/// The trial summary is the shared one (`transit_playback::onset`), as the app's Measure uses.
+pub use transit_playback::onset::{OUTLIER_SIGMAS, Summary, summarize};
 
 /// Length of the reference noise floor taken before the first note, and of each pre-send window.
 pub const FLOOR_MS: u32 = 100;

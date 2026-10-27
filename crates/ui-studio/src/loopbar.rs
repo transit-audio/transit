@@ -8,8 +8,8 @@ use crate::arrange::Map;
 use crate::theme::TOKENS;
 use egui::{CursorIcon, Rect, Sense, Stroke, StrokeKind, Ui, pos2};
 use serde_json::json;
-use soundcraft_model::Session;
-use soundcraft_time::{Range, Samples};
+use transit_model::Session;
+use transit_time::{Range, Samples};
 
 /// Height of the strip, at the top of the ruler (points).
 pub const STRIP_H: f32 = 8.0;

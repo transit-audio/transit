@@ -2,9 +2,9 @@
 
 use egui::{Event, Id, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
 use serde_json::json;
-use soundcraft_model::ClipContent;
-use soundcraft_time::BarBeat;
-use soundcraft_ui_egui::{Services, SoundApp, edit_window::x_of, midi_editor};
+use transit_model::ClipContent;
+use transit_time::BarBeat;
+use transit_ui_egui::{Services, SoundApp, edit_window::x_of, midi_editor};
 
 struct Rig {
     ctx: egui::Context,
@@ -13,7 +13,7 @@ struct Rig {
 
 impl Rig {
     fn new(kind: &str) -> Rig {
-        let mut engine = soundcraft_engine::Engine::default();
+        let mut engine = transit_engine::Engine::default();
         engine.execute("track.new", &json!({"kind": kind})).unwrap();
         engine.execute("edit.tool", &json!({"tool": "pencil"})).unwrap();
         let mut r = Rig { ctx: egui::Context::default(), app: SoundApp::new(engine, None, Services::default()) };
@@ -130,7 +130,7 @@ fn a_click_in_the_empty_midi_editor_adds_a_clip_at_the_insertion_point() {
     r.app.run("edit.select", json!({"tracks": [track], "start": (r.bar(3) + r.bar(4)) / 2})).unwrap();
     r.frames(4);
     assert_eq!(midi_editor::target_clip(&r.app), None);
-    let body = r.ctx.data(|d| d.get_temp::<Rect>(Id::new("soundcraft-midi-body"))).unwrap();
+    let body = r.ctx.data(|d| d.get_temp::<Rect>(Id::new("transit-midi-body"))).unwrap();
     r.click_at(body.center());
     assert_eq!(r.clips(), vec![(r.bar(3), r.bar(4))]);
     assert_eq!(midi_editor::target_clip(&r.app), Some(r.app.engine.session().tracks[0].clips()[0].id));

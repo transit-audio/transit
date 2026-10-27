@@ -4,7 +4,7 @@
 
 mod common;
 
-use soundcraft_dsp::Plugin;
+use transit_dsp::Plugin;
 
 const GAIN: &str = "clap:org.soundcraft.test.gain";
 
@@ -16,7 +16,7 @@ fn block(p: &mut Box<dyn Plugin>) -> Vec<Vec<f32>> {
 
 fn main() {
     common::fixture_dir();
-    let mut p = soundcraft_clap_host::create(GAIN).expect("fixture");
+    let mut p = transit_clap_host::create(GAIN).expect("fixture");
     p.prepare(48_000.0, 64, 2);
     let mut ed = p.editor().expect("editor handle");
     assert!(!ed.is_open());
@@ -47,7 +47,7 @@ fn main() {
 
     // Issue #68: embedded first where this host has its own window (with the header strip);
     // a plug-in whose embedded editor fails still gets its floating one.
-    let mut p = soundcraft_clap_host::create(GAIN).expect("fixture");
+    let mut p = transit_clap_host::create(GAIN).expect("fixture");
     p.prepare(48_000.0, 64, 2);
     assert!(p.load_state(b"CMD:gui-embedded-fails"));
     let mut ed = p.editor().expect("editor handle");
@@ -56,7 +56,7 @@ fn main() {
     assert!(p.load_state(b"CMD:gui-was-floating"), "the fallback is the floating editor");
     ed.close();
     drop((ed, p));
-    let mut p = soundcraft_clap_host::create(GAIN).expect("fixture");
+    let mut p = transit_clap_host::create(GAIN).expect("fixture");
     p.prepare(48_000.0, 64, 2);
     assert!(p.load_state(b"CMD:gui-embedded"));
     let mut ed = p.editor().expect("editor handle");

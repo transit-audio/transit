@@ -5,9 +5,9 @@ mod cc;
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_midi::{Note, Sequence};
-use soundcraft_model::{Clip, ClipContent, ClipId};
-use soundcraft_time::TICKS_PER_QUARTER;
+use transit_midi::{Note, Sequence};
+use transit_model::{Clip, ClipContent, ClipId};
+use transit_time::TICKS_PER_QUARTER;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -140,9 +140,9 @@ fn new_clip(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut r = midi_time::clip_range(e, p, "midi.new_clip")?;
     if r.is_empty() {
         let s = e.session();
-        let bar = soundcraft_time::GridValue::Note { value: soundcraft_time::NoteValue::Bar, dotted: false, triplet: false };
+        let bar = transit_time::GridValue::Note { value: transit_time::NoteValue::Bar, dotted: false, triplet: false };
         let start = bar.line_at_or_before(r.start, s.sample_rate, &s.tempo, s.frame_rate);
-        r = soundcraft_time::Range::new(start, bar.next_line(start, s.sample_rate, &s.tempo, s.frame_rate));
+        r = transit_time::Range::new(start, bar.next_line(start, s.sample_rate, &s.tempo, s.frame_rate));
     }
     let s = e.session_mut();
     let id = s.new_clip_id();
@@ -318,12 +318,12 @@ fn notes_transpose(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 /// A scale named by id ("minor-pentatonic") or display name ("Minor Pentatonic").
-fn parse_scale(value: &Value) -> Option<soundcraft_midi::scale::Scale> {
-    soundcraft_midi::scale::Scale::parse(value.as_str()?)
+fn parse_scale(value: &Value) -> Option<transit_midi::scale::Scale> {
+    transit_midi::scale::Scale::parse(value.as_str()?)
 }
 
 fn notes_constrain(e: &mut Engine, p: &Value) -> Result<Value> {
-    use soundcraft_midi::scale::KeyScale;
+    use transit_midi::scale::KeyScale;
     let command = "midi.notes_constrain";
     let root = p.get("root").and_then(Value::as_u64).filter(|&n| n < 12).ok_or_else(|| bad(command, "root must be 0..11"))? as u8;
     let scale = p.get("scale").and_then(parse_scale).ok_or_else(|| bad(command, "scale must be a scale id such as major or minor-pentatonic"))?;
@@ -337,7 +337,7 @@ mod pitch_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soundcraft_model::{ChannelFormat, TrackKind};
+    use transit_model::{ChannelFormat, TrackKind};
 
     #[test]
     fn create_clip_add_edit_move_delete() {

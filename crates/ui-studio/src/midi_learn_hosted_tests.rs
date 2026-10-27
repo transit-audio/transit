@@ -12,14 +12,14 @@
 //! one instance before the app looks it up, so nothing waits on a scan.
 use crate::{Services, StudioApp};
 use serde_json::json;
-use soundcraft_dsp::HeaderAction;
-use soundcraft_mix::INSTRUMENT_SLOT;
-use soundcraft_model::{SourceKind, TrackId};
-use soundcraft_playback::MapMsg;
-use soundcraft_time::Range;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
+use transit_dsp::HeaderAction;
+use transit_mix::INSTRUMENT_SLOT;
+use transit_model::{SourceKind, TrackId};
+use transit_playback::MapMsg;
+use transit_time::Range;
 
 /// The events synth's one parameter (VST3 ParamID 5, normalized 0..1).
 const PROBE: &str = "5";
@@ -27,7 +27,7 @@ const PROBE: &str = "5";
 /// Builds the vst3-host fixture, installs it as a bundle in a folder of its own and adds that
 /// folder (only) to the VST3 search path. The id of "Fixture Events".
 fn events_synth() -> String {
-    soundcraft_vst3_host::set_scan_extra_dirs_only(true);
+    transit_vst3_host::set_scan_extra_dirs_only(true);
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../vst3-host/tests/fixture/Cargo.toml");
     let target = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
@@ -54,8 +54,8 @@ fn events_synth() -> String {
     let bin = dir.join("Fixture.vst3/Contents").join(folder);
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::copy(target.join("debug").join(lib), bin.join(exe)).unwrap();
-    assert_eq!(soundcraft_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
-    soundcraft_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Events").expect("the events synth").id
+    assert_eq!(transit_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
+    transit_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Events").expect("the events synth").id
 }
 
 /// One frame of the host loop's parts this test needs: the player's idle (which services the
@@ -103,10 +103,10 @@ fn a_learned_controller_moves_a_hosted_instruments_parameter_in_the_plug_in_and_
     let id = events_synth();
     // Seed the parameter table: one instance of the type caches it, as a plug-in loaded once this
     // run has (K81).
-    let info = soundcraft_vst3_host::plugin_info(&id).expect("the events synth's table");
+    let info = transit_vst3_host::plugin_info(&id).expect("the events synth's table");
     assert!(info.param(PROBE).is_some());
-    let engine = soundcraft_engine::Engine::default();
-    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let engine = transit_engine::Engine::default();
+    let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
     let mut app = StudioApp::new(engine, Some(player), Services::default());
     let r = app.run("track.new", json!({"kind": "instrument"})).unwrap();
     let tr = TrackId(r["tracks"][0].as_u64().unwrap());
@@ -130,7 +130,7 @@ fn a_learned_controller_moves_a_hosted_instruments_parameter_in_the_plug_in_and_
     app.midi_learn_apply((epoch, vec![MapMsg::Move { epoch, index: 0, value: 0.8, seq: 1 }]), 1.0);
     assert_eq!(ins(&app).params.get(PROBE), Some(&0.8), "the move reaches the session (status: {})", app.status);
     // The plug-in's processor receives the value with its own id, normalized.
-    let out = soundcraft_mix::render_track_pre_fader(app.engine.session(), tr, Range::new(0, 512));
+    let out = transit_mix::render_track_pre_fader(app.engine.session(), tr, Range::new(0, 512));
     assert!(points(&out).contains(&(0, 5, 800_000)), "the processor got ParamID 5 = 0.8: {:?}", points(&out));
     // The player's running instance gets it too: its controller (the editor's side) ends with
     // 0.8. (That the frame loop tells the controller between saves, not only a save's handover,

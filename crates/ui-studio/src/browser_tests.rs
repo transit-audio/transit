@@ -5,9 +5,9 @@
 use crate::browser::{Kind, Tab, parse_header};
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::{ClipContent, TrackId, TrackKind};
-use soundcraft_time::{BarBeat, Samples};
 use std::path::{Path, PathBuf};
+use transit_model::{ClipContent, TrackId, TrackKind};
+use transit_time::{BarBeat, Samples};
 
 /// A 16-bit PCM WAV.
 fn wav(channels: u16, rate: u32, frames: u32) -> Vec<u8> {
@@ -73,7 +73,7 @@ impl T {
     /// An audio track and an instrument track, the browser shown, a sample folder with
     /// `Kicks/` (two WAVs), `Snares/` (one), a stereo loop, a Kontakt file and a text file.
     fn new() -> T {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         app.run("track.new", json!({"kind": "audio", "format": "stereo"})).unwrap();
         app.run("track.new", json!({"kind": "instrument"})).unwrap();
         app.ui.show_mixer = false;
@@ -1054,10 +1054,10 @@ fn files_the_engine_would_not_prepare_are_named_in_the_status() {
     let audio = t.track(TrackKind::Audio);
     let ok = t.dir.0.join("loop 90.wav");
     let outside = std::env::temp_dir().join(format!("transit-outside-{}", std::process::id())).join("elsewhere.wav");
-    let roots = soundcraft_engine::file_access::AutomationRoots::new(Some(&t.dir.0), None).unwrap();
+    let roots = transit_engine::file_access::AutomationRoots::new(Some(&t.dir.0), None).unwrap();
     let files = vec![ok, outside];
     let app = &mut t.app;
-    soundcraft_engine::file_access::confine(roots.as_ref(), || app.queue_imports(&files, Some(audio), 0, 0)).unwrap();
+    transit_engine::file_access::confine(roots.as_ref(), || app.queue_imports(&files, Some(audio), 0, 0)).unwrap();
     assert!(t.app.status.starts_with("1 of 2 could not be prepared: elsewhere.wav ("), "{}", t.app.status);
     t.settle_imports();
     assert!(

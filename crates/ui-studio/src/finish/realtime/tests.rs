@@ -5,8 +5,8 @@
 use super::{CANCELLED, FakeRender, REFUSED_TRANSPORT};
 use crate::{Services, StudioApp};
 use serde_json::json;
-use soundcraft_model::TrackId;
-use soundcraft_playback::realtime_render::{RealtimeError, Rendered};
+use transit_model::TrackId;
+use transit_playback::realtime_render::{RealtimeError, Rendered};
 
 struct T {
     app: StudioApp,
@@ -69,8 +69,8 @@ impl T {
 /// A Model D track (MIDI to "MODEL D", return In 1, 20 ms set by hand) with a two-bar clip and a
 /// faked real-time render.
 fn rig() -> T {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
-    app.engine.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "Focusrite USB ASIO", 2, 2));
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
+    app.engine.set_io_map(transit_model::IoMap::for_device("ASIO", "Focusrite USB ASIO", 2, 2));
     let r = app.run("track.new", json!({"kind": "instrument", "name": "Model D"})).unwrap();
     let track = TrackId(r["tracks"][0].as_u64().unwrap());
     app.run("instrument.external", json!({"track": track.0, "port": {"backend": "winmm", "name": "MODEL D"}, "return": "In 1", "manual_ms": 20.0}))

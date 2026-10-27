@@ -2,11 +2,11 @@
 
 use crate::{Engine, EngineError, Result};
 use serde_json::{Value, json};
-use soundcraft_audio_io::{AudioBuffer, EncodeOptions, FileFormat};
-use soundcraft_model::{BusId, ChannelFormat, Clip, ClipContent, Session, Source, SourceAudio, SourceId, TrackId, TrackKind};
-use soundcraft_time::{Range, Samples};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use transit_audio_io::{AudioBuffer, EncodeOptions, FileFormat};
+use transit_model::{BusId, ChannelFormat, Clip, ClipContent, Session, Source, SourceAudio, SourceId, TrackId, TrackKind};
+use transit_time::{Range, Samples};
 
 /// Largest import we accept (samples per channel × channels), ~4 GiB of f32.
 pub(crate) const MAX_IMPORT_SAMPLES: usize = 1 << 30;
@@ -19,7 +19,7 @@ pub(crate) fn at_rate(mut buf: AudioBuffer, rate: u32, limit: usize) -> Option<A
         return None;
     }
     if from != rate {
-        buf.channels = soundcraft_dsp::offline::resample(&buf.channels, from, rate);
+        buf.channels = transit_dsp::offline::resample(&buf.channels, from, rate);
         buf.sample_rate = rate;
     }
     Some(buf)
@@ -28,7 +28,7 @@ pub(crate) fn at_rate(mut buf: AudioBuffer, rate: u32, limit: usize) -> Option<A
 // ─── Checked file access ──────────────────────────────────────────────────────────────────────
 //
 // Every file a command names by path is read and written through the helpers below, so the
-// automation roots (`crate::file_access`, `soundcraft-cli mcp --automation-read-root` and
+// automation roots (`crate::file_access`, `transit-cli mcp --automation-read-root` and
 // `--automation-write-root`) are checked in one place. A test in `file_access` keeps the rest of
 // the engine from calling `std::fs` itself. Audio is decoded into the session's pool the moment it
 // enters it (import, open, sampler load), so playback and bounce read nothing from disk and
@@ -144,7 +144,7 @@ fn unique_audio_rel(s: &Session, stem: &str) -> String {
 pub fn add_source(s: &mut Session, name: &str, mut buf: AudioBuffer, path: Option<&str>, format: FileFormat) -> SourceId {
     let sr = s.sample_rate.hz();
     if buf.sample_rate != sr && buf.sample_rate > 0 {
-        buf.channels = soundcraft_dsp::offline::resample(&buf.channels, buf.sample_rate, sr);
+        buf.channels = transit_dsp::offline::resample(&buf.channels, buf.sample_rate, sr);
         buf.sample_rate = sr;
     }
     add_source_audio(s, name, Arc::new(SourceAudio::new(buf)), path, format)
@@ -216,7 +216,7 @@ pub fn prepare_audio_bytes(name: &str, bytes: &[u8], path: Option<&str>, rate: u
     let canceled = || EngineError::Io(format!("{name}: canceled"));
     let too_large = || crate::cmd::bad("file.import_audio", format!("{name}: file is too large to import"));
     let ext = Path::new(name).extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase);
-    let (info, mut buf) = soundcraft_audio_io::decode(bytes, ext.as_deref()).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
+    let (info, mut buf) = transit_audio_io::decode(bytes, ext.as_deref()).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
     if !progress(0.4) {
         return Err(canceled());
     }
@@ -230,7 +230,7 @@ pub fn prepare_audio_bytes(name: &str, bytes: &[u8], path: Option<&str>, rate: u
         // One channel at a time (as `at_rate` does), so the work can report and stop in between.
         let mut out = Vec::with_capacity(n);
         for (i, ch) in std::mem::take(&mut buf.channels).into_iter().enumerate() {
-            out.extend(soundcraft_dsp::offline::resample(&[ch], from, rate));
+            out.extend(transit_dsp::offline::resample(&[ch], from, rate));
             if !progress(0.4 + 0.45 * (i + 1) as f32 / n as f32) {
                 return Err(canceled());
             }
@@ -308,7 +308,7 @@ pub fn import_video_bytes(e: &mut Engine, path: &str, bytes: Vec<u8>, at: Sample
     let stem = Path::new(path).file_stem().and_then(|n| n.to_str()).unwrap_or("Video").to_string();
     let ext = Path::new(path).extension().and_then(|x| x.to_str()).unwrap_or("mp4").to_ascii_lowercase();
     let bytes: Arc<[u8]> = bytes.into();
-    let movie = soundcraft_video::Movie::open(Arc::clone(&bytes)).map(|m| m.info().clone());
+    let movie = transit_video::Movie::open(Arc::clone(&bytes)).map(|m| m.info().clone());
     let audio_name = format!("{stem} audio.{}", if ext == "mov" { "mp4" } else { ext.as_str() });
     let audio = import_audio_bytes(e, &audio_name, &bytes, Some(path), None, at);
     let info = match (movie, &audio) {
@@ -325,7 +325,7 @@ pub fn import_video_bytes(e: &mut Engine, path: &str, bytes: Vec<u8>, at: Sample
     let len = (info.duration * sr).round();
     let len = if len.is_finite() { (len as Samples).clamp(1, sr as Samples * 3600 * 48) } else { 1 };
     let vid = SourceId(s.alloc());
-    s.videos.push(soundcraft_model::VideoSource {
+    s.videos.push(transit_model::VideoSource {
         id: vid,
         name: Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("movie").to_string(),
         path: abs,
@@ -495,8 +495,8 @@ pub fn transients_in(s: &Session, t: TrackId, r: Range, sens: f32) -> Vec<Sample
     let r = if r.is_empty() { Range::new(0, s.content_end()) } else { r };
     let r = bounded_to_track(s, t, r);
     let _offline = offline();
-    let audio = soundcraft_mix::render_clips(s, t, r);
-    soundcraft_dsp::offline::detect_transients(&audio, s.sample_rate.as_f64() as f32, sens).into_iter().map(|i| r.start + i as i64).collect()
+    let audio = transit_mix::render_clips(s, t, r);
+    transit_dsp::offline::detect_transients(&audio, s.sample_rate.as_f64() as f32, sens).into_iter().map(|i| r.start + i as i64).collect()
 }
 
 /// Strip Silence: keep only the non-silent ranges of clips inside `r`.
@@ -560,7 +560,7 @@ fn non_silent(s: &Session, t: TrackId, r: Range, options: SilenceOptions) -> Res
     }
     let window = i64::try_from(STRIP_WINDOW_SAMPLES / tr.channels().max(1)).unwrap_or(i64::MAX);
     let len = |n: Samples| u64::try_from(n).unwrap_or(0);
-    let mut scan = soundcraft_dsp::offline::SilenceScan::new(thr, len(min_len));
+    let mut scan = transit_dsp::offline::SilenceScan::new(thr, len(min_len));
     let mut at = r.start;
     for x in spans {
         scan.skip(len(x.start - at));
@@ -568,7 +568,7 @@ fn non_silent(s: &Session, t: TrackId, r: Range, options: SilenceOptions) -> Res
         while at < x.end {
             let end = at.saturating_add(window).min(x.end);
             let _offline = offline();
-            scan.push(&soundcraft_mix::render_clips(s, t, Range::new(at, end)));
+            scan.push(&transit_mix::render_clips(s, t, Range::new(at, end)));
             at = end;
         }
     }
@@ -586,14 +586,14 @@ pub fn consolidate(e: &mut Engine, cmd: &str, t: TrackId, r: Range) -> Result<bo
     if len <= 0 {
         return Ok(false);
     }
-    let max = soundcraft_mix::MAX_RENDER_SAMPLES / tr.channels().max(1);
+    let max = transit_mix::MAX_RENDER_SAMPLES / tr.channels().max(1);
     if usize::try_from(len).map_or(true, |n| n > max) {
         let secs = max as f64 / s.sample_rate.as_f64();
         return Err(crate::cmd::bad(cmd, format!("selection is too long to consolidate on `{}` (at most {secs:.0} s)", tr.name)));
     }
     let r = Range::new(start, start + len);
     let _offline = offline();
-    let audio = soundcraft_mix::render_clips(s, t, r);
+    let audio = transit_mix::render_clips(s, t, r);
     if audio.iter().any(|ch| ch.len() as i64 != len) {
         return Err(EngineError::Internal(cmd.to_string(), "consolidate rendered the wrong length".into()));
     }
@@ -609,14 +609,14 @@ pub fn consolidate(e: &mut Engine, cmd: &str, t: TrackId, r: Range) -> Result<bo
 
 /// The most frames of `channels`-channel audio one offline render holds.
 pub fn render_limit(channels: usize) -> usize {
-    soundcraft_mix::MAX_RENDER_SAMPLES / channels.max(1)
+    transit_mix::MAX_RENDER_SAMPLES / channels.max(1)
 }
 
 /// Refuses `len` frames of `name` past `max`, where a render would cut the audio short.
 /// Offline mode for hosted plugins while the guard lives: every plugin made for an offline render
-/// samples its parameter curves at creation (see `soundcraft_vst3_host::offline_scope`).
-pub(crate) fn offline() -> soundcraft_vst3_host::OfflineScope {
-    soundcraft_vst3_host::offline_scope()
+/// samples its parameter curves at creation (see `transit_vst3_host::offline_scope`).
+pub(crate) fn offline() -> transit_vst3_host::OfflineScope {
+    transit_vst3_host::offline_scope()
 }
 
 pub fn refuse_longer(s: &Session, cmd: &str, name: &str, verb: &str, len: Samples, max: usize) -> Result<()> {
@@ -628,7 +628,7 @@ pub fn refuse_longer(s: &Session, cmd: &str, name: &str, verb: &str, len: Sample
 }
 
 /// Render clip gain into a new source and reset the clip's gain.
-pub fn render_clip_gain(e: &mut Engine, cmd: &str, id: soundcraft_model::ClipId) -> Result<bool> {
+pub fn render_clip_gain(e: &mut Engine, cmd: &str, id: transit_model::ClipId) -> Result<bool> {
     let s = e.session();
     let Some((t, c)) = s.find_clip(id).map(|(t, c)| (t, c.clone())) else { return Ok(false) };
     if !c.is_audio() {
@@ -643,7 +643,7 @@ pub fn render_clip_gain(e: &mut Engine, cmd: &str, id: soundcraft_model::ClipId)
         pl.clips = vec![c2];
     }
     let _offline = offline();
-    let audio = soundcraft_mix::render_clips(&tmp, t, c.range());
+    let audio = transit_mix::render_clips(&tmp, t, c.range());
     let buf = AudioBuffer { sample_rate: s.sample_rate.hz(), channels: audio };
     let s = e.session_mut();
     let src = add_source(s, &format!("{}_gain", c.name), buf, None, FileFormat::Wav);
@@ -675,7 +675,7 @@ pub fn commit_track(e: &mut Engine, t: TrackId) -> Result<Option<TrackId>> {
     // The track renders through a main mix of at least two channels.
     refuse_longer(s, "track.commit", &tr.name, "commit", range.len(), render_limit(tr.channels().max(2)))?;
     let _offline = offline();
-    let audio = soundcraft_mix::render_track_pre_fader(s, t, range);
+    let audio = transit_mix::render_track_pre_fader(s, t, range);
     let name = format!("{}.cm", tr.name);
     let fmt = ChannelFormat::for_channels(audio.len().clamp(1, 2));
     let mixer = tr.mixer.clone();
@@ -703,16 +703,16 @@ pub fn commit_track(e: &mut Engine, t: TrackId) -> Result<Option<TrackId>> {
     Ok(Some(nt))
 }
 
-pub fn export_clips(e: &Engine, ids: &[soundcraft_model::ClipId], dir: &str) -> Result<usize> {
+pub fn export_clips(e: &Engine, ids: &[transit_model::ClipId], dir: &str) -> Result<usize> {
     let s = e.session();
     make_dir(dir)?;
     let mut n = 0;
     for id in ids {
         let Some((t, c)) = s.find_clip(*id) else { continue };
         let _offline = offline();
-        let audio = soundcraft_mix::render_clips(s, t, c.range());
+        let audio = transit_mix::render_clips(s, t, c.range());
         let buf = AudioBuffer { sample_rate: s.sample_rate.hz(), channels: audio };
-        let bytes = soundcraft_audio_io::encode(&buf, &EncodeOptions::default()).map_err(|err| EngineError::Io(err.to_string()))?;
+        let bytes = transit_audio_io::encode(&buf, &EncodeOptions::default()).map_err(|err| EngineError::Io(err.to_string()))?;
         let stem = sanitize_name(&c.name);
         let mut path = Path::new(dir).join(format!("{stem}.wav"));
         let mut k = 2u32;
@@ -824,8 +824,8 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
                 continue;
             }
         }
-        let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: soundcraft_audio_io::BitDepth::Float32, dither: false, bwf: None };
-        let bytes = soundcraft_audio_io::encode(&audio.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
+        let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: transit_audio_io::BitDepth::Float32, dither: false, bwf: None };
+        let bytes = transit_audio_io::encode(&audio.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
         let (name, new) = store_wav(&audio_dir, &stem, &bytes)?;
         src.path = format!("Audio Files/{name}");
         src.unsaved = false;
@@ -919,7 +919,7 @@ pub fn session_file(path: &str) -> PathBuf {
     let p = PathBuf::from(path);
     // Only a path the write root allows is probed, so a refused one can't be used to test for files.
     let is_file = crate::file_access::check_write(&p).is_ok() && p.is_file();
-    if p.extension().is_none() && !is_file { p.with_extension(soundcraft_model::SESSION_EXTENSION) } else { p }
+    if p.extension().is_none() && !is_file { p.with_extension(transit_model::SESSION_EXTENSION) } else { p }
 }
 
 /// True when `command` would write a session over the existing `file`. Save, Save As and Save
@@ -1015,7 +1015,7 @@ pub fn session_open_line(path: &str, s: &Session, missing_media: usize, took: st
         .tracks
         .iter()
         .flat_map(|t| t.mixer.inserts.iter().flatten().chain(t.instrument.iter()))
-        .filter(|i| i.hardware.is_none() && soundcraft_mix::is_third_party(&i.plugin))
+        .filter(|i| i.hardware.is_none() && transit_mix::is_third_party(&i.plugin))
         .map(|i| i.plugin.clone())
         .collect();
     needs.sort();
@@ -1031,7 +1031,7 @@ pub fn session_open_line(path: &str, s: &Session, missing_media: usize, took: st
 
 /// Decode one source's audio file at the session rate.
 fn decode_source(bytes: &[u8], ext: Option<&str>, rate: u32) -> std::result::Result<Arc<SourceAudio>, String> {
-    let (_, buf) = soundcraft_audio_io::decode(bytes, ext).map_err(|err| err.to_string())?;
+    let (_, buf) = transit_audio_io::decode(bytes, ext).map_err(|err| err.to_string())?;
     let buf = at_rate(buf, rate, MAX_IMPORT_SAMPLES).ok_or("too large to load")?;
     Ok(Arc::new(SourceAudio::new(buf)))
 }
@@ -1063,7 +1063,7 @@ pub(crate) fn decode_file(files: &mut DecodedFiles, p: &Path, rate: u32) -> std:
 /// Extension of a session bundle: one zip file holding the `.transit` session and its
 /// `Audio Files/`, the same layout as a saved session folder. The browser has no folders, so it
 /// saves and opens sessions as bundles.
-pub use soundcraft_model::BUNDLE_EXTENSION;
+pub use transit_model::BUNDLE_EXTENSION;
 
 /// Most entries and bytes a bundle may unpack to (bundles are hostile input).
 const MAX_BUNDLE_ENTRIES: usize = 10_000;
@@ -1112,8 +1112,8 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
             target = format!("Audio Files/{base}_{k:02}.wav");
             k += 1;
         }
-        let opts_wav = EncodeOptions { format: FileFormat::Wav, bit_depth: soundcraft_audio_io::BitDepth::Float32, dither: false, bwf: None };
-        let bytes = soundcraft_audio_io::encode(&audio.buffer, &opts_wav).map_err(|err| EngineError::Io(err.to_string()))?;
+        let opts_wav = EncodeOptions { format: FileFormat::Wav, bit_depth: transit_audio_io::BitDepth::Float32, dither: false, bwf: None };
+        let bytes = transit_audio_io::encode(&audio.buffer, &opts_wav).map_err(|err| EngineError::Io(err.to_string()))?;
         w.start_file(target.as_str(), opts).map_err(zerr)?;
         w.write_all(&bytes).map_err(ioerr)?;
         taken.insert(target.clone());
@@ -1122,7 +1122,7 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
         src.format = FileFormat::Wav;
     }
     let text = s.to_json().map_err(|err| EngineError::Io(err.to_string()))?;
-    w.start_file(format!("{}.{}", sanitize_name(&s.name), soundcraft_model::SESSION_EXTENSION), opts).map_err(zerr)?;
+    w.start_file(format!("{}.{}", sanitize_name(&s.name), transit_model::SESSION_EXTENSION), opts).map_err(zerr)?;
     w.write_all(text.as_bytes()).map_err(ioerr)?;
     let bytes = w.finish().map_err(zerr)?.into_inner();
     Ok((bytes, s))
@@ -1203,7 +1203,7 @@ fn read_bundle(bytes: &[u8]) -> Result<(String, std::collections::HashMap<String
         let mut data = Vec::new();
         // The declared size is hostile too: never read past it.
         f.by_ref().take(size).read_to_end(&mut data).map_err(|err| EngineError::Io(format!("bundle: {rel}: {err}")))?;
-        let is_session = !rel.contains('/') && soundcraft_model::is_session_file(Path::new(&rel));
+        let is_session = !rel.contains('/') && transit_model::is_session_file(Path::new(&rel));
         if is_session && text.is_none() {
             text = Some(String::from_utf8(data).map_err(|_| EngineError::Io(format!("bundle: {rel} is not text")))?);
         } else {
@@ -1280,7 +1280,7 @@ mod save_tests {
         let mut e = crate::demo::demo_engine();
         let kick = e.session().track_by_name("Kick").unwrap().id;
         let end = e.session().content_end();
-        let render = |e: &Engine| soundcraft_mix::render_clips(e.session(), kick, Range::new(0, end));
+        let render = |e: &Engine| transit_mix::render_clips(e.session(), kick, Range::new(0, end));
         e.execute("edit.consolidate", &json!({"tracks": [kick.0], "start": 500_000, "end": 560_000})).unwrap();
         save_session(&mut e, &path).unwrap();
         e.execute("edit.consolidate", &json!({"tracks": [kick.0], "start": 1_400_000, "end": 1_500_000})).unwrap();
@@ -1426,7 +1426,7 @@ mod open_tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let audio = AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 480]] };
-        std::fs::write(dir.join("k.wav"), soundcraft_audio_io::encode(&audio, &EncodeOptions::default()).unwrap()).unwrap();
+        std::fs::write(dir.join("k.wav"), transit_audio_io::encode(&audio, &EncodeOptions::default()).unwrap()).unwrap();
         let mut s = Session::default();
         for _ in 0..3 {
             add_source(&mut s, "k", audio.clone(), Some("k.wav"), FileFormat::Wav);
@@ -1447,7 +1447,7 @@ mod open_tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(dir.join("Audio Files")).unwrap();
         let audio = AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 480]] };
-        std::fs::write(dir.join("Audio Files/k.wav"), soundcraft_audio_io::encode(&audio, &EncodeOptions::default()).unwrap()).unwrap();
+        std::fs::write(dir.join("Audio Files/k.wav"), transit_audio_io::encode(&audio, &EncodeOptions::default()).unwrap()).unwrap();
         let mut s = Session::default();
         for _ in 0..3 {
             add_source(&mut s, "k", audio.clone(), Some("Audio Files/k.wav"), FileFormat::Wav);
@@ -1469,7 +1469,7 @@ mod open_tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let audio = AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 480]] };
-        std::fs::write(dir.join("k.wav"), soundcraft_audio_io::encode(&audio, &EncodeOptions::default()).unwrap()).unwrap();
+        std::fs::write(dir.join("k.wav"), transit_audio_io::encode(&audio, &EncodeOptions::default()).unwrap()).unwrap();
         let mut saved = Session::default();
         let t = saved.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
         let src = add_source(&mut saved, "k", audio, Some("../k.wav"), FileFormat::Wav);
@@ -1488,7 +1488,7 @@ mod open_tests {
             let mut s = saved.clone();
             s.sources[0].path.clone_from(&p);
             let id = SourceId(s.alloc());
-            s.videos.push(soundcraft_model::VideoSource {
+            s.videos.push(transit_model::VideoSource {
                 id,
                 name: "x".into(),
                 path: p.clone(),
@@ -1525,31 +1525,31 @@ mod name_tests {
 
     #[test]
     fn a_midi_track_name_is_cut_to_a_length_that_can_be_drawn() {
-        let note = soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 960 };
-        let sequence = soundcraft_midi::Sequence { notes: vec![note], ..Default::default() };
-        let smf = soundcraft_midi::Smf { tracks: vec![soundcraft_midi::SmfTrack { name: "n".repeat(1_000_000), sequence }], ..Default::default() };
+        let note = transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 960 };
+        let sequence = transit_midi::Sequence { notes: vec![note], ..Default::default() };
+        let smf = transit_midi::Smf { tracks: vec![transit_midi::SmfTrack { name: "n".repeat(1_000_000), sequence }], ..Default::default() };
         let mut e = Engine::default();
-        let ids = import_midi_bytes(&mut e, &soundcraft_midi::write_smf(&smf).unwrap(), 0, false).unwrap();
+        let ids = import_midi_bytes(&mut e, &transit_midi::write_smf(&smf).unwrap(), 0, false).unwrap();
         let track = e.session().track(ids[0]).unwrap();
-        assert_eq!((track.name.len(), track.clips()[0].name.len()), (soundcraft_model::MAX_NAME_CHARS, soundcraft_model::MAX_NAME_CHARS));
+        assert_eq!((track.name.len(), track.clips()[0].name.len()), (transit_model::MAX_NAME_CHARS, transit_model::MAX_NAME_CHARS));
     }
 
     #[test]
     fn midi_longer_than_a_day_is_refused() {
-        let held = soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: (1 << 28) - 1 };
-        let sequence = soundcraft_midi::Sequence { notes: vec![held], ..Default::default() };
-        let smf = soundcraft_midi::Smf { tracks: vec![soundcraft_midi::SmfTrack { name: String::new(), sequence }], ..Default::default() };
-        let err = import_midi_bytes(&mut Engine::default(), &soundcraft_midi::write_smf(&smf).unwrap(), 0, false).unwrap_err();
+        let held = transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: (1 << 28) - 1 };
+        let sequence = transit_midi::Sequence { notes: vec![held], ..Default::default() };
+        let smf = transit_midi::Smf { tracks: vec![transit_midi::SmfTrack { name: String::new(), sequence }], ..Default::default() };
+        let err = import_midi_bytes(&mut Engine::default(), &transit_midi::write_smf(&smf).unwrap(), 0, false).unwrap_err();
         assert!(err.to_string().contains("longer than 24 hours"), "{err}");
     }
 
     #[test]
     fn midi_with_more_meter_changes_than_scores_have_is_refused() {
-        let note = soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 960 };
-        let sequence = soundcraft_midi::Sequence { notes: vec![note], ..Default::default() };
+        let note = transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 960 };
+        let sequence = transit_midi::Sequence { notes: vec![note], ..Default::default() };
         let meters = (0..=midi::MAX_MIDI_METERS as i64).map(|bar| (bar * 3840, 4, 4)).collect();
-        let smf = soundcraft_midi::Smf { tracks: vec![soundcraft_midi::SmfTrack { name: String::new(), sequence }], meters, ..Default::default() };
-        let err = import_midi_bytes(&mut Engine::default(), &soundcraft_midi::write_smf(&smf).unwrap(), 0, true).unwrap_err();
+        let smf = transit_midi::Smf { tracks: vec![transit_midi::SmfTrack { name: String::new(), sequence }], meters, ..Default::default() };
+        let err = import_midi_bytes(&mut Engine::default(), &transit_midi::write_smf(&smf).unwrap(), 0, true).unwrap_err();
         assert!(err.to_string().contains("meter changes"), "{err}");
         assert!(matches!(&err, EngineError::BadParams(command, _) if command == "file.import_midi"));
     }
@@ -1727,13 +1727,13 @@ mod open_line_tests {
 
     #[test]
     fn the_session_open_line_names_path_version_counts_length_and_needs() {
-        let mut s = Session::new("Song", soundcraft_time::SampleRate::HZ_48000);
+        let mut s = Session::new("Song", transit_time::SampleRate::HZ_48000);
         let line = session_open_line("C:/x/song.transit", &s, 0, std::time::Duration::from_millis(340));
         assert_eq!(
             line,
             "session opened: path=\"C:/x/song.transit\" format_version=1 tracks=0 clips=0 duration=0.0 s needs=none missing_media=0 in 340 ms"
         );
-        s.sample_rate = soundcraft_time::SampleRate::HZ_48000;
+        s.sample_rate = transit_time::SampleRate::HZ_48000;
         let line = session_open_line("a.transit", &s, 2, std::time::Duration::from_millis(5));
         assert!(line.contains("missing_media=2") && line.ends_with("in 5 ms"), "{line}");
     }
@@ -1753,8 +1753,8 @@ mod open_line_tests {
     #[test]
     fn needs_lists_third_party_ids_once_without_reading_their_state() {
         let mut s = crate::demo::demo_engine().session().clone();
-        let prefix = soundcraft_clap_host::ID_PREFIX;
-        let mut ins = soundcraft_model::Insert::new(format!("{prefix}one"));
+        let prefix = transit_clap_host::ID_PREFIX;
+        let mut ins = transit_model::Insert::new(format!("{prefix}one"));
         ins.state = Some("!!! not base64 !!!".into());
         let track = s.tracks.first_mut().expect("a track");
         track.mixer.inserts.push(Some(ins.clone()));

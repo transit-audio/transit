@@ -3,7 +3,7 @@
 use super::{ActionResult, Phase, sources, timeline_map};
 use crate::player::ingress::Packet;
 use crate::{action_lane, plan_bridge};
-use soundcraft_mix::{Arrival, Due, InstrumentEvent, RenderFrame};
+use transit_mix::{Arrival, Due, InstrumentEvent, RenderFrame};
 
 const CAPACITY: usize = action_lane::NOTE_CAPACITY;
 const RELEASE_RESERVE: usize = 32;
@@ -112,7 +112,7 @@ impl Inbox {
                 message: packet.message,
                 arrival: Arrival { host_ns: packet.raw.host_arrival_ns, sequence: packet.raw.seq },
             });
-            if !outcome.accepted() && outcome != soundcraft_mix::EventOutcome::Unmatched && packet.raw.is_release() {
+            if !outcome.accepted() && outcome != transit_mix::EventOutcome::Unmatched && packet.raw.is_release() {
                 sources.invalidate(packet.source.port, packet.source.generation);
             }
         }

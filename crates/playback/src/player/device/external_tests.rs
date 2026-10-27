@@ -2,9 +2,9 @@
 //! External MIDI output (#61) through the real Player: the audio callback schedules a MIDI
 //! track's clip into the output thread, which sends on the fake backend. No hardware MIDI.
 use super::*;
-use soundcraft_model::{ChannelFormat, Clip, ClipId, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
 use std::time::{Duration, Instant};
 use transit_midi_io::fake::Fake;
+use transit_model::{ChannelFormat, Clip, ClipId, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
 use transit_rt::testing::measure;
 
 const QUARTER: i64 = 24_000;
@@ -23,7 +23,7 @@ fn session(fake: &Fake) -> (Session, TrackId, transit_midi_io::PortKey) {
     let key = fake.add_output("Synth OUT");
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
-    let ppq = soundcraft_time::TICKS_PER_QUARTER;
+    let ppq = transit_time::TICKS_PER_QUARTER;
     // Playback does not depend on the sequence crate; the clip's sequence comes from its JSON.
     let seq = serde_json::from_value(serde_json::json!({"notes": [
         {"pitch": 60, "velocity": 100, "release_velocity": 64, "channel": 4, "start": 0, "length": ppq / 2},
@@ -45,7 +45,7 @@ fn a_looped_midi_track_plays_its_clip_to_the_port_off_the_audio_thread_and_stop_
     let fake = Fake::default();
     let (s, track, key) = session(&fake);
     assert_eq!(s.sample_rate.hz(), 48_000);
-    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, transit_model::IoMap::default()).unwrap();
     player.midi.get_mut().as_mut().unwrap().enable(fake.io());
     let mut callback = DeviceOutput::new(access, &player, 2);
     until("the destination opens", || {
@@ -57,7 +57,7 @@ fn a_looped_midi_track_plays_its_clip_to_the_port_off_the_audio_thread_and_stop_
     let audio = std::thread::current().id();
     let mut block = [0.0f32; 1024];
     callback.fill_f32(&mut block);
-    player.play(0, None, Some(soundcraft_time::Range { start: 0, end: QUARTER })).unwrap();
+    player.play(0, None, Some(transit_time::Range { start: 0, end: QUARTER })).unwrap();
     // Real-time pacing (512 frames is 10.7 ms at 48 kHz): the fallback clock stamps blocks by
     // callback time, so callbacks must not run ahead of the wall clock. 80 blocks are 40 960
     // samples: lap 2 stops inside E.
@@ -72,7 +72,7 @@ fn a_looped_midi_track_plays_its_clip_to_the_port_off_the_audio_thread_and_stop_
         callback.fill_f32(&mut block);
         std::thread::sleep(Duration::from_millis(11));
     }
-    soundcraft_mix::unmark_audio_thread();
+    transit_mix::unmark_audio_thread();
     until("Stop's All Notes Off", || fake.sent(&key).contains(&vec![0xB4, 123, 0]));
     let sends = fake.sends(&key);
     let messages: Vec<Vec<u8>> = sends.iter().map(|s| s.message.clone()).collect();
@@ -111,7 +111,7 @@ fn live_input_on_an_armed_external_track_is_echoed_without_an_instrument() {
         channel: MidiOutChannel::Channel(1),
         offset_ms: 100.0,
     };
-    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, transit_model::IoMap::default()).unwrap();
     player.midi.get_mut().as_mut().unwrap().enable(fake.io());
     let mut callback = DeviceOutput::new(access, &player, 2);
     until("the input route and the destination are ready", || {
@@ -145,8 +145,8 @@ fn the_midi_monitor_sees_input_routed_or_not_and_every_message_sent() {
     let keys = fake.add_input("Keys");
     let other = fake.add_input("Unused pads");
     s.track_mut(track).unwrap().mixer.record_arm = true;
-    s.track_mut(track).unwrap().midi_input = soundcraft_model::MidiInput {
-        port: soundcraft_model::MidiPort::Device {
+    s.track_mut(track).unwrap().midi_input = transit_model::MidiInput {
+        port: transit_model::MidiPort::Device {
             backend: keys.backend.as_str().into(),
             name: keys.name.clone(),
             ordinal: keys.ordinal,
@@ -154,7 +154,7 @@ fn the_midi_monitor_sees_input_routed_or_not_and_every_message_sent() {
         },
         channel: None,
     };
-    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, transit_model::IoMap::default()).unwrap();
     player.midi.get_mut().as_mut().unwrap().enable(fake.io());
     player.set_midi_monitor(true, false);
     let mut callback = DeviceOutput::new(access, &player, 2);
@@ -196,7 +196,7 @@ fn held_echo_is_released(unplug: bool) {
     let (mut s, track, key) = session(&fake);
     let input = fake.add_input("Keys");
     s.track_mut(track).unwrap().mixer.record_arm = true;
-    let (mut player, access, _clock) = Player::prepare(Arc::new(s.clone()), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s.clone()), 48_000, transit_model::IoMap::default()).unwrap();
     player.midi.get_mut().as_mut().unwrap().enable(fake.io());
     let mut callback = DeviceOutput::new(access, &player, 2);
     until("ready", || {
@@ -242,7 +242,7 @@ fn an_external_instruments_missing_port_takes_it_out_of_the_plan_until_the_port_
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
     let track = s.track_mut(t).unwrap();
-    let mut ins = soundcraft_model::Insert::external("In 1");
+    let mut ins = transit_model::Insert::external("In 1");
     ins.external.as_mut().unwrap().manual_ms = Some(19.5);
     track.instrument = Some(ins);
     track.midi_output = MidiOutput::External {
@@ -250,7 +250,7 @@ fn an_external_instruments_missing_port_takes_it_out_of_the_plan_until_the_port_
         channel: MidiOutChannel::Channel(0),
         offset_ms: 0.0,
     };
-    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, transit_model::IoMap::default()).unwrap();
     player.midi.get_mut().as_mut().unwrap().enable(fake.io());
     let mut callback = DeviceOutput::new(access, &player, 2);
     let state = |player: &Player| player.midi_status().unwrap().output.track(t).cloned();
@@ -285,7 +285,7 @@ fn a_failed_or_missing_port_or_no_midi_at_all_takes_an_external_instrument_out_o
     let mut s = Session::default();
     let bare = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
     let device = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
-    s.track_mut(device).unwrap().instrument = Some(soundcraft_model::Insert::external("In 1"));
+    s.track_mut(device).unwrap().instrument = Some(transit_model::Insert::external("In 1"));
     for t in [bare, device] {
         s.track_mut(t).unwrap().midi_output =
             MidiOutput::External { port: MidiOutPort::default(), channel: MidiOutChannel::Channel(0), offset_ms: 0.0 };
@@ -312,11 +312,11 @@ fn without_midi_an_external_instrument_is_left_out_of_the_plan() {
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
     let track = s.track_mut(t).unwrap();
-    let mut ins = soundcraft_model::Insert::external("In 1");
+    let mut ins = transit_model::Insert::external("In 1");
     ins.external.as_mut().unwrap().manual_ms = Some(19.5);
     track.instrument = Some(ins);
     track.midi_output = MidiOutput::External { port: MidiOutPort::default(), channel: MidiOutChannel::Channel(0), offset_ms: 0.0 };
-    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, transit_model::IoMap::default()).unwrap();
     // As when the MIDI runtime failed to start.
     drop(player.midi.get_mut().take());
     let mut callback = DeviceOutput::new(access, &player, 2);
@@ -333,7 +333,7 @@ fn without_midi_an_external_instrument_is_left_out_of_the_plan() {
 fn a_loop_set_mid_note_while_playing_ends_the_held_note_at_its_wrap() {
     let fake = Fake::default();
     let (s, track, key) = session(&fake);
-    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    let (mut player, access, _clock) = Player::prepare(Arc::new(s), 48_000, transit_model::IoMap::default()).unwrap();
     player.midi.get_mut().as_mut().unwrap().enable(fake.io());
     let mut callback = DeviceOutput::new(access, &player, 2);
     until("the destination opens", || {
@@ -352,7 +352,7 @@ fn a_loop_set_mid_note_while_playing_ends_the_held_note_at_its_wrap() {
         if k == 29 {
             let at = player.position();
             assert!((QUARTER / 2..QUARTER).contains(&at), "{at}");
-            player.set_loop(Some(soundcraft_time::Range { start: 0, end: QUARTER })).unwrap();
+            player.set_loop(Some(transit_time::Range { start: 0, end: QUARTER })).unwrap();
         }
         wrapped |= k > 29 && player.position() < QUARTER / 2;
         std::thread::sleep(Duration::from_micros(10_700).saturating_sub(started.elapsed()));
@@ -363,7 +363,7 @@ fn a_loop_set_mid_note_while_playing_ends_the_held_note_at_its_wrap() {
         callback.fill_f32(&mut block);
         std::thread::sleep(Duration::from_millis(11));
     }
-    soundcraft_mix::unmark_audio_thread();
+    transit_mix::unmark_audio_thread();
     until("Stop's All Notes Off", || fake.sent(&key).contains(&vec![0xB4, 123, 0]));
     let messages: Vec<Vec<u8>> = fake.sends(&key).iter().map(|s| s.message.clone()).collect();
     // Lap 1: C, C off, E. The wrap ends E; lap 2 starts C again.

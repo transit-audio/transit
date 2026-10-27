@@ -4,11 +4,11 @@
 use crate::automation::{Lane, choices};
 use crate::{Services, StudioApp};
 use serde_json::json;
-use soundcraft_model::{AutoParam, Insert, Session, TrackId};
 use std::process::Command;
+use transit_model::{AutoParam, Insert, Session, TrackId};
 
 fn app_with_track(kind: &str) -> (StudioApp, TrackId) {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let t = TrackId(app.run("track.new", json!({"kind": kind, "name": "T"})).unwrap()["tracks"][0].as_u64().unwrap());
     (app, t)
 }
@@ -45,12 +45,12 @@ fn a_hosted_plug_in_lists_every_parameter_by_name_with_none_stored() {
         tr.mixer.inserts[1].as_mut().unwrap().params.insert("7".into(), 1.0);
     }
     // Never loaded: nothing cached, so no instance is made here; the stored subset is listed by id.
-    assert!(soundcraft_clap_host::cached_info(plugin).is_none());
+    assert!(transit_clap_host::cached_info(plugin).is_none());
     let before = listed(&mut app, t);
     assert!(before.iter().any(|c| c.1 == "param 7" && c.2 == "plugin:b:7"), "stored subset falls back to ids: {before:?}");
     assert!(!before.iter().any(|c| c.1 == "Gain"), "{before:?}");
     // Once an instance has loaded (as any project's plug-ins do), the table is cached.
-    soundcraft_clap_host::plugin_info(plugin).expect("fixture info");
+    transit_clap_host::plugin_info(plugin).expect("fixture info");
     let after = listed(&mut app, t);
     let name = app.plugin_name(plugin, false);
     for lane in ["plugin:a:7", "plugin:a:3", "plugin:b:7", "plugin:instrument:7", "plugin:instrument:3"] {
@@ -72,7 +72,7 @@ fn a_mixed_case_parameter_id_gets_a_lane_that_round_trips() {
     let (_, lane) = Lane::of_param(t, 0, id).expect("a mixed-case id is automatable");
     assert_eq!(lane.id(), "plugin:a:Cutoff_Hz");
     assert_eq!(Lane::parse(&lane.id()), Some(lane.clone()));
-    let inst = Lane::of_param(t, soundcraft_mix::INSTRUMENT_SLOT, id).unwrap().1;
+    let inst = Lane::of_param(t, transit_mix::INSTRUMENT_SLOT, id).unwrap().1;
     assert_eq!(inst.id(), "plugin:instrument:Cutoff_Hz");
     assert_eq!(Lane::parse(&inst.id()), Some(inst));
     // The picker offers it (stored subset) and the lane survives session save and load.
@@ -97,7 +97,7 @@ fn a_mixed_case_parameter_id_gets_a_lane_that_round_trips() {
 
 mod grouping {
     use crate::automation_picker::{DeviceModel, PickerState, RECENT_MAX};
-    use soundcraft_dsp::{Category, ParamInfo, PluginInfo, Taper, Unit};
+    use transit_dsp::{Category, ParamInfo, PluginInfo, Taper, Unit};
 
     /// A Battery-like table: `cells` cells (A1, A2, ...), `per` parameters each, `Cell/<name>`
     /// groups, CLAP-style names that carry their module.

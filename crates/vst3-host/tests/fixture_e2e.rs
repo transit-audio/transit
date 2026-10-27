@@ -2,20 +2,20 @@
 //! install it as a `.vst3` bundle in a temp folder, then scan → instantiate → process → params →
 //! notes.
 
-use soundcraft_dsp::{Category, Taper, Unit};
+use transit_dsp::{Category, Taper, Unit};
 
 mod common;
 use common::fixture_dir;
 
 fn id_of(name: &str) -> String {
-    let found = soundcraft_vst3_host::scan_paths(&[fixture_dir().to_path_buf()]);
+    let found = transit_vst3_host::scan_paths(&[fixture_dir().to_path_buf()]);
     found.into_iter().find(|d| d.name == name).unwrap().id
 }
 
 #[test]
 fn scan_lists_the_audio_modules_but_not_the_controller_class() {
     let dir = fixture_dir();
-    let found = soundcraft_vst3_host::scan_paths(&[dir.to_path_buf()]);
+    let found = transit_vst3_host::scan_paths(&[dir.to_path_buf()]);
     assert_eq!(found.len(), 3, "the gain, the synth and the events synth: {found:?}");
     let g = found.iter().find(|d| d.name == "Fixture Gain").unwrap();
     // `uid()` lays out the first 8 bytes differently on Windows (COM GUID order).
@@ -34,14 +34,14 @@ fn scan_lists_the_audio_modules_but_not_the_controller_class() {
     // The folder joins every later scan, and its plug-ins are known by id without one. (No global
     // `scan()` here: it would load every plug-in installed on the machine, and some never unload,
     // which hangs the test binary at exit.)
-    assert!(soundcraft_vst3_host::search_dirs().1.iter().any(|d| d == dir));
-    assert!(soundcraft_vst3_host::plugin_info(&g.id).is_some() && soundcraft_vst3_host::plugin_info(&s.id).is_some());
+    assert!(transit_vst3_host::search_dirs().1.iter().any(|d| d == dir));
+    assert!(transit_vst3_host::plugin_info(&g.id).is_some() && transit_vst3_host::plugin_info(&s.id).is_some());
 }
 
 #[test]
 fn info_exposes_visible_params_with_plain_ranges() {
     let gain = id_of("Fixture Gain");
-    let info = soundcraft_vst3_host::plugin_info(&gain).unwrap();
+    let info = transit_vst3_host::plugin_info(&gain).unwrap();
     assert_eq!(info.id, gain);
     assert_eq!(info.short_name, "Fixture ");
     let ids: Vec<&str> = info.params.iter().map(|p| p.id).collect();
@@ -55,12 +55,12 @@ fn info_exposes_visible_params_with_plain_ranges() {
     assert_eq!((f.unit, f.taper), (Unit::Hz, Taper::Log));
     assert!((f.min - 20.0).abs() < 1e-3 && (f.max - 20_000.0).abs() < 1e-1, "{f:?}");
     // Cached: the same leaked info every time.
-    assert!(std::ptr::eq(info, soundcraft_vst3_host::plugin_info(&gain).unwrap()));
+    assert!(std::ptr::eq(info, transit_vst3_host::plugin_info(&gain).unwrap()));
 }
 
 #[test]
 fn gain_processes_audio_and_follows_params() {
-    let mut p = soundcraft_vst3_host::create(&id_of("Fixture Gain")).unwrap();
+    let mut p = transit_vst3_host::create(&id_of("Fixture Gain")).unwrap();
     p.prepare(44_100.0, 256, 2);
     assert_eq!(p.latency(), 3);
     // The controller was synced from the component state (gain 0.5), not the declared default.
@@ -102,10 +102,10 @@ fn gain_processes_audio_and_follows_params() {
 #[test]
 fn synth_plays_notes_at_their_offsets() {
     let id = id_of("Fixture Synth");
-    let info = soundcraft_vst3_host::plugin_info(&id).unwrap();
+    let info = transit_vst3_host::plugin_info(&id).unwrap();
     assert!(info.is_instrument);
     assert!(info.params.is_empty());
-    let mut p = soundcraft_vst3_host::create(&id).unwrap();
+    let mut p = transit_vst3_host::create(&id).unwrap();
     p.prepare(48_000.0, 64, 2);
     let mut io = vec![vec![9.0f32; 64], vec![9.0f32; 64]];
     p.note_on(10, 60, 127);
@@ -157,7 +157,7 @@ fn synth_plays_notes_at_their_offsets() {
 fn connected_component_messages_its_controller_through_host_objects() {
     let id = id_of("Fixture Gain");
     for _ in 0..3 {
-        let mut p = soundcraft_vst3_host::create(&id).expect("instantiate");
+        let mut p = transit_vst3_host::create(&id).expect("instantiate");
         p.prepare(48_000.0, 1024, 2);
         let mut io = vec![vec![0.5f32; 1024]; 2];
         p.process(&mut io, 1024);
@@ -168,8 +168,8 @@ fn connected_component_messages_its_controller_through_host_objects() {
 fn many_instances_create_and_drop_cleanly() {
     let (g, s) = (id_of("Fixture Gain"), id_of("Fixture Synth"));
     for _ in 0..50 {
-        let mut a = soundcraft_vst3_host::create(&g).unwrap();
-        let b = soundcraft_vst3_host::create(&s).unwrap();
+        let mut a = transit_vst3_host::create(&g).unwrap();
+        let b = transit_vst3_host::create(&s).unwrap();
         let mut io = vec![vec![0.0f32; 32]; 2];
         a.process(&mut io, 32);
         drop(b);
@@ -209,18 +209,18 @@ fn installed_plugins_smoke() {
     }
     if let Some(root) = std::env::var_os("SOUNDCRAFT_VST3_SMOKE_ROOT") {
         let root = std::path::PathBuf::from(root);
-        let (defaults, extra) = soundcraft_vst3_host::search_dirs();
+        let (defaults, extra) = transit_vst3_host::search_dirs();
         assert!(extra.is_empty());
         assert!(defaults.iter().all(|p| p.starts_with(&root)), "unexpected smoke roots: {defaults:?}");
     }
-    for d in soundcraft_vst3_host::scan() {
+    for d in transit_vst3_host::scan() {
         eprintln!("found {} ({}) {:?} [{}] at {}", d.name, d.vendor, d.category, d.sub_categories.join("|"), d.path.display());
-        let info = soundcraft_vst3_host::plugin_info(&d.id);
+        let info = transit_vst3_host::plugin_info(&d.id);
         eprintln!(
             "  info: {:?}",
             info.map(|i| (i.params.len(), i.params.iter().take(5).map(|p| (p.id, p.name, p.min, p.max, p.unit)).collect::<Vec<_>>()))
         );
-        match soundcraft_vst3_host::instantiate(&d.id) {
+        match transit_vst3_host::instantiate(&d.id) {
             Ok(mut p) => {
                 p.prepare(48_000.0, 512, 2);
                 let mut io = vec![vec![0.1f32; 512], vec![0.1f32; 512]];
@@ -235,14 +235,14 @@ fn installed_plugins_smoke() {
 #[test]
 fn state_saves_component_and_controller_and_restores_them() {
     let id = id_of("Fixture Gain");
-    let mut p = soundcraft_vst3_host::create(&id).unwrap();
+    let mut p = transit_vst3_host::create(&id).unwrap();
     p.prepare(48_000.0, 64, 2);
     assert!(p.set_param("7", 1.5));
     let mut io = vec![vec![0.5f32; 64]; 2];
     p.process(&mut io, 64);
     let blob = p.save_state().expect("component state");
     assert!(blob.starts_with(b"SCV3"));
-    let mut q = soundcraft_vst3_host::create(&id).unwrap();
+    let mut q = transit_vst3_host::create(&id).unwrap();
     q.prepare(48_000.0, 64, 2);
     assert_eq!(q.param("7"), Some(0.5));
     assert!(q.load_state(&blob));
@@ -271,7 +271,7 @@ fn state_saves_component_and_controller_and_restores_them() {
 #[test]
 fn state_reader_reads_while_another_thread_processes() {
     let id = id_of("Fixture Gain");
-    let mut p = soundcraft_vst3_host::create(&id).unwrap();
+    let mut p = transit_vst3_host::create(&id).unwrap();
     p.prepare(48_000.0, 64, 2);
     assert!(p.set_param("7", 1.5));
     p.process(&mut vec![vec![0.5f32; 64]; 2], 64);
@@ -297,7 +297,7 @@ fn host_set_controller_param_survives_state_round_trip() {
     // Freq lives only in the controller (the processor ignores it), so processing never carries
     // the host's value there: the state save has to.
     let id = id_of("Fixture Gain");
-    let mut p = soundcraft_vst3_host::create(&id).unwrap();
+    let mut p = transit_vst3_host::create(&id).unwrap();
     p.prepare(48_000.0, 64, 2);
     assert!(p.set_param("7", 1.5));
     assert!(p.set_param("12", 200.0));
@@ -311,13 +311,13 @@ fn host_set_controller_param_survives_state_round_trip() {
     .unwrap();
     assert!((p.param("12").unwrap() - 200.0).abs() < 0.01);
     let blob = p.save_state().expect("state");
-    let mut q = soundcraft_vst3_host::create(&id).unwrap();
+    let mut q = transit_vst3_host::create(&id).unwrap();
     assert!(q.load_state(&blob));
     assert!((q.param("7").unwrap() - 1.5).abs() < 1e-4, "{:?}", q.param("7"));
     assert!((q.param("12").unwrap() - 200.0).abs() < 0.01, "{:?}", q.param("12"));
     assert!(q.set_param("12", 300.0));
     assert!(q.load_state(&blob));
-    let mut r = soundcraft_vst3_host::create(&id).unwrap();
+    let mut r = transit_vst3_host::create(&id).unwrap();
     assert!(r.load_state(&q.save_state().unwrap()));
     assert!((r.param("12").unwrap() - 200.0).abs() < 0.01, "a loaded state replaces earlier edits: {:?}", r.param("12"));
 }
@@ -325,7 +325,7 @@ fn host_set_controller_param_survives_state_round_trip() {
 #[test]
 fn editor_view_is_probed_and_edits_come_back_as_plain_values() {
     let id = id_of("Fixture Gain");
-    let mut p = soundcraft_vst3_host::instantiate_plugin(&id).unwrap();
+    let mut p = transit_vst3_host::instantiate_plugin(&id).unwrap();
     // Windows permits the creating test thread; macOS requires the process main thread
     // (covered by editor_main_thread), and other platforms have no host windows.
     if cfg!(windows) {
@@ -333,7 +333,7 @@ fn editor_view_is_probed_and_edits_come_back_as_plain_values() {
     } else {
         assert!(p.editor_size().is_err());
     }
-    let mut ed = soundcraft_dsp::Plugin::editor(&mut p).expect("editor handle");
+    let mut ed = transit_dsp::Plugin::editor(&mut p).expect("editor handle");
     // The fixture "edits" Gain to 0.9 (normalized) when it gets the component handler.
     assert_eq!(ed.idle(), vec![("7".to_string(), 1.8)]);
     assert!(ed.idle().is_empty());
@@ -346,6 +346,6 @@ fn editor_view_is_probed_and_edits_come_back_as_plain_values() {
     .unwrap();
     assert!(!ed.is_open());
     // The synth's controller has no view.
-    let synth = soundcraft_vst3_host::instantiate_plugin(&id_of("Fixture Synth")).unwrap();
+    let synth = transit_vst3_host::instantiate_plugin(&id_of("Fixture Synth")).unwrap();
     assert!(synth.editor_size().is_err());
 }

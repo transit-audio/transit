@@ -1,4 +1,4 @@
-//! `ClapPlugin`: a loaded CLAP instance behind the safe `soundcraft_dsp::Plugin` trait.
+//! `ClapPlugin`: a loaded CLAP instance behind the safe `transit_dsp::Plugin` trait.
 //!
 //! # Requests a plug-in makes of the host (audit F08, ADR 0012 G7)
 //!
@@ -45,13 +45,13 @@ use crate::gate::{Gate, MAX_CHANNELS};
 use clap_sys::ext::note_ports::{CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI};
 use clap_sys::ext::params::{CLAP_PARAM_RESCAN_ALL, CLAP_PARAM_RESCAN_INFO, CLAP_PARAM_RESCAN_TEXT, CLAP_PARAM_RESCAN_VALUES};
 use clap_sys::process::{CLAP_PROCESS_CONTINUE, CLAP_PROCESS_CONTINUE_IF_NOT_QUIET, CLAP_PROCESS_SLEEP, CLAP_PROCESS_TAIL, clap_process_status};
-use soundcraft_dsp::event::{Message, NoteId, PluginEvent};
-use soundcraft_dsp::{Plugin, PluginEditor, PluginInfo, ProcessStatus, Transport};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError, Weak};
 use std::thread::ThreadId;
 use std::time::{Duration, Instant};
+use transit_dsp::event::{Message, NoteId, PluginEvent};
+use transit_dsp::{Plugin, PluginEditor, PluginInfo, ProcessStatus, Transport};
 
 /// Largest block we activate a plugin for.
 const MAX_BLOCK: usize = 1 << 16;
@@ -740,7 +740,7 @@ impl ClapPlugin {
                 match key {
                     Some(key) => {
                         if let Some(dst) = core.inputs.port_mut(kp) {
-                            soundcraft_dsp::map_key_channels(key, dst, start, n);
+                            transit_dsp::map_key_channels(key, dst, start, n);
                         }
                         core.inputs.set_port_constant(kp, false);
                         core.key_live = true;
@@ -1005,7 +1005,7 @@ impl Plugin for ClapPlugin {
         Some(Box::new(ClapEditor { link, info: self.info, ids: self.ids.clone(), shared: Arc::downgrade(&self.shared) }))
     }
 
-    fn state_reader(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginStateReader>> {
+    fn state_reader(&mut self) -> Option<Box<dyn transit_dsp::PluginStateReader>> {
         let link = lock(&self.shared.core).inst.state_link()?;
         Some(Box::new(ClapState { link, shared: Arc::downgrade(&self.shared) }))
     }
@@ -1018,7 +1018,7 @@ struct ClapState {
     shared: Weak<Shared>,
 }
 
-impl soundcraft_dsp::PluginStateReader for ClapState {
+impl transit_dsp::PluginStateReader for ClapState {
     fn save_state(&mut self) -> Option<Vec<u8>> {
         self.link.save_state()
     }
@@ -1027,7 +1027,7 @@ impl soundcraft_dsp::PluginStateReader for ClapState {
     /// plug-in synchronizes with its audio thread). The instance is held for the call, so the
     /// audio side skips the blocks meanwhile. As `Plugin::load_state`, the load is the host's own
     /// change: its values become the host's view and nothing is reported as an edit.
-    fn load_state(&mut self, data: &[u8]) -> Option<soundcraft_dsp::LoadedValues> {
+    fn load_state(&mut self, data: &[u8]) -> Option<transit_dsp::LoadedValues> {
         let shared = self.shared.upgrade()?;
         if std::thread::current().id() != shared.main {
             log::warn!("{}: a state load off the instance's main thread was refused", shared.info.id);
@@ -1053,7 +1053,7 @@ impl soundcraft_dsp::PluginStateReader for ClapState {
 }
 
 /// The strip's model as the window shows it (issue #68).
-fn header_view(h: &soundcraft_dsp::EditorHeader) -> transit_rt::editor_window::HeaderView {
+fn header_view(h: &transit_dsp::EditorHeader) -> transit_rt::editor_window::HeaderView {
     transit_rt::editor_window::HeaderView {
         title: h.title.clone(),
         preset: h.preset.clone(),
@@ -1069,8 +1069,8 @@ fn header_view(h: &soundcraft_dsp::EditorHeader) -> transit_rt::editor_window::H
 }
 
 /// What a click in the strip asks of the host.
-fn header_action(c: transit_rt::editor_window::HeaderClick) -> soundcraft_dsp::HeaderAction {
-    use soundcraft_dsp::HeaderAction as A;
+fn header_action(c: transit_rt::editor_window::HeaderClick) -> transit_dsp::HeaderAction {
+    use transit_dsp::HeaderAction as A;
     use transit_rt::editor_window::HeaderClick as C;
     match c {
         C::User(i) => A::User(i),
@@ -1134,11 +1134,11 @@ impl PluginEditor for ClapEditor {
         out
     }
 
-    fn set_header(&mut self, header: &soundcraft_dsp::EditorHeader) {
+    fn set_header(&mut self, header: &transit_dsp::EditorHeader) {
         self.link.header().set(&header_view(header));
     }
 
-    fn take_header_actions(&mut self) -> Vec<soundcraft_dsp::HeaderAction> {
+    fn take_header_actions(&mut self) -> Vec<transit_dsp::HeaderAction> {
         self.link.header().take_clicks().into_iter().map(header_action).collect()
     }
 }

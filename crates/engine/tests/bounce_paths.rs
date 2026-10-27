@@ -4,13 +4,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::json;
-use soundcraft_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
-use soundcraft_engine::Engine;
-use soundcraft_engine::io::{Bounce, PathBounce, PathBounced, PathNormalize, PathStem, bounce_paths, routed_paths};
-use soundcraft_model::{ChannelFormat, Clip, Insert, IoMap, Route, SendSlot, Session, SourceAudio, SourceId, TrackKind};
-use soundcraft_time::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
+use transit_engine::Engine;
+use transit_engine::io::{Bounce, PathBounce, PathBounced, PathNormalize, PathStem, bounce_paths, routed_paths};
+use transit_model::{ChannelFormat, Clip, Insert, IoMap, Route, SendSlot, Session, SourceAudio, SourceId, TrackKind};
+use transit_time::Range;
 
 const SR: u32 = 48_000;
 const AT: usize = 2_400;
@@ -97,7 +97,7 @@ impl Rig {
 }
 
 fn read(path: &Path) -> Vec<Vec<f32>> {
-    let (_, buf) = soundcraft_audio_io::decode(&std::fs::read(path).unwrap(), None).unwrap();
+    let (_, buf) = transit_audio_io::decode(&std::fs::read(path).unwrap(), None).unwrap();
     buf.channels
 }
 
@@ -143,7 +143,7 @@ fn with_every_track_on_main_the_main_stem_is_the_main_bounce() {
     let plain = dir.join("plain.wav");
     Bounce::new(Arc::new(s.clone()), &plain, range(), &opts(), None, false, false).unwrap().run().unwrap();
     assert_eq!(read(&main.file), read(&plain), "bit for bit the plain main bounce");
-    assert_eq!(read(&main.file), soundcraft_mix::render_range(&s, range(), 1024));
+    assert_eq!(read(&main.file), transit_mix::render_range(&s, range(), 1024));
     assert_eq!(peak_at(&read(&main.file)), [AT, AT], "the limiter's latency is removed");
     assert_eq!(std::fs::read_dir(&dir).unwrap().count(), 2, "no part files left");
     let _ = std::fs::remove_dir_all(&dir);
@@ -159,7 +159,7 @@ fn each_path_stem_equals_a_solo_render_of_that_path_and_all_align() {
     // The reference for a path: only the tracks that feed it, everything routed to Main.
     let solo = |enabled: [bool; 3]| {
         let rig = Rig { stem: Route::Main, cue: Route::Main, cue_send: None, enabled, ..Rig::new() };
-        soundcraft_mix::render_range(&rig.build(), range(), 1024)
+        transit_mix::render_range(&rig.build(), range(), 1024)
     };
     let (main, out34, out56) = (read(&stem(&done, "Out 1-2").file), read(&stem(&done, "Out 3-4").file), read(&stem(&done, "Out 5-6").file));
     close(&main, &solo([true, false, true]), "Main is Latent plus the dry Cue");
@@ -179,7 +179,7 @@ fn an_impulse_on_a_path_lands_where_it_would_land_on_main() {
     let routed = Rig { enabled: [true, true, false], ..Rig::new() }.build();
     let on_main = Rig { stem: Route::Main, enabled: [true, true, false], ..Rig::new() }.build();
     let path_stem = read(&stem(&run(&routed, &dir, &["Out 3-4"], PathNormalize::Off), "Out 3-4").file);
-    let main_mix = soundcraft_mix::render_range(&on_main, range(), 1024);
+    let main_mix = transit_mix::render_range(&on_main, range(), 1024);
     assert_eq!(peak_at(&path_stem), peak_at(&main_mix));
     assert_eq!(peak_at(&path_stem), [AT, AT]);
     let _ = std::fs::remove_dir_all(&dir);
@@ -204,7 +204,7 @@ fn an_unrouted_path_renders_a_silent_file_and_is_reported() {
 #[test]
 fn joint_normalize_keeps_relative_levels_and_each_does_not() {
     let s = Rig { cue_send: None, enabled: [true, true, false], ..Rig::new() }.build();
-    let target = soundcraft_dsp::db_to_gain(-0.1);
+    let target = transit_dsp::db_to_gain(-0.1);
     let level = |done: &PathBounced, name: &str| read(&stem(done, name).file).iter().flatten().fold(0.0f32, |a, v| a.max(v.abs()));
     let dir = scratch("paths-norm");
     let off = run(&s, &dir, &[], PathNormalize::Off);

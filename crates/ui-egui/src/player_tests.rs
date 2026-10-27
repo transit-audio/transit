@@ -1,15 +1,15 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 use super::*;
-use soundcraft_playback::{
+use transit_playback::{
     ActionResult, PlayerCommand, PlayerError, PlayerNotice,
     action_lane::{Outcome, Receipt},
     player::{SessionFailure, SessionNotice, SessionOutcome},
 };
 
-fn control() -> soundcraft_playback::player::Control<PlayerCommand, ActionResult> {
-    soundcraft_playback::player::endpoints(
-        soundcraft_mix::RenderTarget { device: Default::default(), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 },
-        soundcraft_mix::PlanLimits::default(),
+fn control() -> transit_playback::player::Control<PlayerCommand, ActionResult> {
+    transit_playback::player::endpoints(
+        transit_mix::RenderTarget { device: Default::default(), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 },
+        transit_mix::PlanLimits::default(),
     )
     .0
 }
@@ -20,7 +20,7 @@ fn pending_play_does_not_claim_applied_transport_and_refusal_is_visible() {
     let command = PlayerCommand::Play { from: 99, end: None, looped: None };
     let sequence = control.send_action(command, false).unwrap();
     let mut requests = PlayerRequests { play: Some(sequence), ..Default::default() };
-    let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, crate::Services::default());
+    let mut app = SoundApp::new(transit_engine::Engine::default(), None, crate::Services::default());
     assert!(!app.is_playing());
     assert!(requests.pending());
     let refused =
@@ -74,7 +74,7 @@ fn recording_only_changes_on_its_matching_successful_receipt() {
 #[test]
 fn idle_frames_reuse_notice_storage_and_return_credits_without_pending_ui_requests() {
     let mut control = control();
-    control.request(std::sync::Arc::new(soundcraft_model::Session::default()), None).unwrap();
+    control.request(std::sync::Arc::new(transit_model::Session::default()), None).unwrap();
     let mut requests = PlayerRequests::default();
     let address = requests.notices.as_ptr();
     let mut status = String::new();
@@ -97,7 +97,7 @@ fn idle_frames_reuse_notice_storage_and_return_credits_without_pending_ui_reques
 #[test]
 fn session_and_untracked_action_failures_reach_status() {
     let mut control = control();
-    let request = control.request(std::sync::Arc::new(soundcraft_model::Session::default()), None).unwrap();
+    let request = control.request(std::sync::Arc::new(transit_model::Session::default()), None).unwrap();
     let mut requests = PlayerRequests::default();
     let mut status = String::new();
     requests.notice(
@@ -132,7 +132,7 @@ fn player_errors_keep_display_text_even_after_a_success_status() {
 
 #[test]
 fn failed_state_capture_aborts_save_and_preserves_document() {
-    let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, crate::Services::default());
+    let mut app = SoundApp::new(transit_engine::Engine::default(), None, crate::Services::default());
     app.run("track.new", serde_json::json!({"name": "Unsaved", "count": 1})).unwrap();
     let before = serde_json::to_value(app.engine.session()).unwrap();
     let revision = app.engine.revision;
@@ -150,10 +150,10 @@ fn failed_state_capture_aborts_save_and_preserves_document() {
 
 #[test]
 fn atomic_record_start_receipt_updates_transport_and_clock_refusal_collects_the_take() {
-    use soundcraft_playback::{record::start, timeline_map::Position};
+    use transit_playback::{record::start, timeline_map::Position};
     for success in [false, true] {
         let mut control = control();
-        let (mut starts, _) = start::pair(soundcraft_mix::EngineEpoch(1));
+        let (mut starts, _) = start::pair(transit_mix::EngineEpoch(1));
         let reader = starts.prepare().unwrap();
         let command = PlayerCommand::Record { ticket: reader.ticket(), from: Some(500), end: None, looped: None, count_in: None };
         let sequence = control.send_action(command, false).unwrap();
@@ -167,7 +167,7 @@ fn atomic_record_start_receipt_updates_transport_and_clock_refusal_collects_the_
                 position: Position { sample: 500, fraction: 0, denominator: 1 },
             })
         } else {
-            ActionResult::RecordingClock(soundcraft_playback::device_clock::Unavailable::Stale)
+            ActionResult::RecordingClock(transit_playback::device_clock::Unavailable::Stale)
         };
         let collect = requests.notice(
             PlayerNotice::Action(Receipt { sequence, payload: command, outcome: Outcome::Applied, handler_result: Some(result) }),
@@ -198,7 +198,7 @@ mod track_render_state {
     fn fixture() {
         static READY: OnceLock<()> = OnceLock::new();
         READY.get_or_init(|| {
-            soundcraft_clap_host::set_scan_extra_dirs_only(true);
+            transit_clap_host::set_scan_extra_dirs_only(true);
             let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../clap-host/tests/fixture/Cargo.toml");
             let target = std::env::var_os("CARGO_TARGET_DIR")
                 .map(PathBuf::from)
@@ -217,7 +217,7 @@ mod track_render_state {
             let dest = dir.join("Fixture.clap");
             std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
             std::fs::copy(target.join("debug/clap_fixture.dll"), dest).unwrap();
-            assert_eq!(soundcraft_clap_host::add_search_dir(&dir), 2);
+            assert_eq!(transit_clap_host::add_search_dir(&dir), 2);
         });
     }
     fn state(gain: f64) -> Vec<u8> {
@@ -225,7 +225,7 @@ mod track_render_state {
     }
     /// Frames until the player's instance is made on the plug-in host thread (ADR 0018) and its
     /// plan is confirmed for the app's document, then a few more.
-    fn settle(app: &mut SoundApp, track: soundcraft_model::TrackId) {
+    fn settle(app: &mut SoundApp, track: transit_model::TrackId) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
         let mut extra = 4;
         while extra > 0 {
@@ -244,7 +244,7 @@ mod track_render_state {
     /// Opens the fixture's window-free editor, which edits gain to 0.25 when it opens. The open
     /// runs on the plug-in host thread and the edit reaches the plug-in's state with the next
     /// block, so render until a state read through that thread shows it; returns that state.
-    fn open_editor_and_render(app: &SoundApp, track: soundcraft_model::TrackId) -> Vec<u8> {
+    fn open_editor_and_render(app: &SoundApp, track: transit_model::TrackId) -> Vec<u8> {
         let player = app.player.as_ref().unwrap();
         player.open_editor(track, 0).unwrap();
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
@@ -259,29 +259,29 @@ mod track_render_state {
     }
     fn run_alias(alias: &str) {
         fixture();
-        let mut engine = soundcraft_engine::Engine::default();
+        let mut engine = transit_engine::Engine::default();
         let session = engine.session_mut();
-        let track = session.add_track(soundcraft_model::TrackKind::Audio, soundcraft_model::ChannelFormat::Stereo, Some("State"));
-        let mut insert = soundcraft_model::Insert::new("clap:org.soundcraft.test.gain");
+        let track = session.add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Stereo, Some("State"));
+        let mut insert = transit_model::Insert::new("clap:org.soundcraft.test.gain");
         insert.set_state_bytes(&state(1.0));
         session.track_mut(track).unwrap().mixer.inserts[0] = Some(insert);
-        let source = soundcraft_engine::io::add_source(
+        let source = transit_engine::io::add_source(
             session,
             "DC",
-            soundcraft_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![1.0; 4_800]; 2] },
+            transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![1.0; 4_800]; 2] },
             None,
-            soundcraft_audio_io::FileFormat::Wav,
+            transit_audio_io::FileFormat::Wav,
         );
         let clip = session.new_clip_id();
-        session.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(soundcraft_model::Clip::audio(clip, "DC", source, 0, 0, 4_800));
-        let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+        session.track_mut(track).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::audio(clip, "DC", source, 0, 0, 4_800));
+        let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
         let mut app = SoundApp::new(engine, Some(player), crate::Services::default());
         settle(&mut app, track);
         // This fixture's floating GUI has no native window. Showing it edits gain internally.
         assert_eq!(open_editor_and_render(&app, track), state(0.25));
         assert_eq!(app.engine.session().tracks[0].mixer.inserts[0].as_ref().unwrap().state_bytes().unwrap(), state(1.0));
         let result = app.run(alias, serde_json::json!({"tracks": [track.0]})).unwrap();
-        let id = soundcraft_model::TrackId(result["tracks"][0].as_u64().unwrap());
+        let id = transit_model::TrackId(result["tracks"][0].as_u64().unwrap());
         let source = app.engine.session().track(id).unwrap().clips()[0].source().unwrap();
         let sample = app.engine.session().pool.get(source).unwrap().channel(0).unwrap()[200];
         assert!((sample - 0.25).abs() < 1e-5, "{alias} rendered stale saved plugin state: {sample}");
@@ -297,32 +297,32 @@ mod track_render_state {
     #[test]
     fn audio_reopen_preserves_live_state_and_refuses_pending_document_without_teardown() {
         fixture();
-        let mut engine = soundcraft_engine::Engine::default();
+        let mut engine = transit_engine::Engine::default();
         let session = engine.session_mut();
-        let track = session.add_track(soundcraft_model::TrackKind::Audio, soundcraft_model::ChannelFormat::Stereo, Some("State"));
-        let mut insert = soundcraft_model::Insert::new("clap:org.soundcraft.test.gain");
+        let track = session.add_track(transit_model::TrackKind::Audio, transit_model::ChannelFormat::Stereo, Some("State"));
+        let mut insert = transit_model::Insert::new("clap:org.soundcraft.test.gain");
         insert.set_state_bytes(&state(1.0));
         session.track_mut(track).unwrap().mixer.inserts[0] = Some(insert);
-        let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+        let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
         let mut app = SoundApp::new(engine, Some(player), crate::Services::default());
         settle(&mut app, track);
         let before = open_editor_and_render(&app, track); // fixture's window-free GUI edits gain
         assert_eq!(before, state(0.25));
         assert_eq!(app.engine.session().track(track).unwrap().mixer.inserts[0].as_ref().unwrap().state_bytes().unwrap(), state(1.0));
-        app.apply_audio_config_using(soundcraft_playback::AudioConfig::default(), |session, _| {
-            soundcraft_playback::Player::prepare_device_free(session).unwrap()
+        app.apply_audio_config_using(transit_playback::AudioConfig::default(), |session, _| {
+            transit_playback::Player::prepare_device_free(session).unwrap()
         })
         .unwrap();
         settle(&mut app, track);
         let after = app.player.as_ref().unwrap().capture_states(&app.engine.session_arc()).unwrap()[0].2.clone();
         assert_eq!(after, before, "Apply audio discarded unsaved native plug-in state");
-        assert!(app.reconnect_audio_using(true, |session, _| soundcraft_playback::Player::prepare_device_free(session).unwrap()).unwrap());
+        assert!(app.reconnect_audio_using(true, |session, _| transit_playback::Player::prepare_device_free(session).unwrap()).unwrap());
         settle(&mut app, track);
         let confirmed = app.engine.session_arc();
         assert_eq!(app.player.as_ref().unwrap().capture_states(&confirmed).unwrap()[0].2, before);
         app.engine.session_mut().track_mut(track).unwrap().name = "Pending".into();
         let old_config = app.ui.audio.clone();
-        let changed = soundcraft_playback::AudioConfig { buffer_size: Some(128), ..old_config.clone() };
+        let changed = transit_playback::AudioConfig { buffer_size: Some(128), ..old_config.clone() };
         assert!(app.apply_audio_config_using(changed, |_, _| panic!("pending document must not open a device")).is_err());
         assert_eq!(app.ui.audio, old_config);
         assert!(app.reconnect_audio_using(true, |_, _| panic!("pending document must not tear down the player")).is_err());

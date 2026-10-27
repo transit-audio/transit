@@ -7,8 +7,8 @@
 //! frame through the device clock map (or, while the map is unavailable, the host time at
 //! callback entry plus the frames between). See `docs/contributing/knowledge/midi-output.md`.
 use crate::player::midi_out::{Kind, OutEvent, Producer};
-use soundcraft_model::Session;
-use soundcraft_time::Samples;
+use transit_model::Session;
+use transit_time::Samples;
 
 pub(in crate::player) struct External {
     out: Producer,
@@ -111,7 +111,7 @@ impl External {
             let host = block.host_for(track.external_instrument().is_some());
             let silent = track.mixer.mute || (any_solo && !track.mixer.solo && !track.mixer.solo_safe);
             let out = &mut self.out;
-            soundcraft_mix::external_midi_events(session, track, block.position, block.frames, chase, |event| {
+            transit_mix::external_midi_events(session, track, block.position, block.frames, chase, |event| {
                 // A muted track still ends its notes.
                 if silent && !transit_midi_io::is_release(event.message()) {
                     return;
@@ -135,7 +135,7 @@ impl External {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use soundcraft_model::{ChannelFormat, Clip, ClipId, Insert, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
+    use transit_model::{ChannelFormat, Clip, ClipId, Insert, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
 
     /// A bare MIDI-out track and an External Instrument track, each with a note at frame 0.
     fn session() -> (Session, u64, u64) {
@@ -144,7 +144,7 @@ mod tests {
             let t = s.add_track(kind, ChannelFormat::Stereo, None);
             // Playback does not depend on the sequence crate; the clip's sequence comes from its JSON.
             let seq = serde_json::from_value(serde_json::json!({"notes": [
-                {"pitch": 60, "velocity": 100, "release_velocity": 64, "channel": 0, "start": 0, "length": soundcraft_time::TICKS_PER_QUARTER},
+                {"pitch": 60, "velocity": 100, "release_velocity": 64, "channel": 0, "start": 0, "length": transit_time::TICKS_PER_QUARTER},
             ], "ctrls": []}))
             .unwrap();
             let track = s.track_mut(t).unwrap();
@@ -237,9 +237,9 @@ mod tests {
         s.edit.click = false;
         let mut sig = vec![0.0f32; LEN];
         sig[AT] = 0.5;
-        let src = soundcraft_model::SourceId(s.next_id + 10_000);
-        let buffer = soundcraft_audio_io::AudioBuffer { sample_rate: SR, channels: vec![sig.clone(), sig] };
-        s.pool.insert(src, std::sync::Arc::new(soundcraft_model::SourceAudio::new(buffer)));
+        let src = transit_model::SourceId(s.next_id + 10_000);
+        let buffer = transit_audio_io::AudioBuffer { sample_rate: SR, channels: vec![sig.clone(), sig] };
+        s.pool.insert(src, std::sync::Arc::new(transit_model::SourceAudio::new(buffer)));
         let t = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, Some("Click"));
         let cid = s.new_clip_id();
         let tr = s.track_mut(t).unwrap();
@@ -282,17 +282,17 @@ mod tests {
     /// does (P(R), and the plan's A from the previous render). The synth on `device` answers `C`
     /// frames after the instant its note-on was stamped, on input 1.
     fn chain(s: &Session, device: Option<u64>) -> Chained {
-        use soundcraft_mix::{Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget};
-        let io = soundcraft_model::IoMap::for_device("test", "fake duplex", 2, 2);
+        use transit_mix::{Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget};
+        let io = transit_model::IoMap::for_device("test", "fake duplex", 2, 2);
         let target =
             RenderTarget { device: DeviceGeneration(1), sample_rate: SR, max_block: BLOCK as u32, out_channels: io.outputs, in_channels: io.inputs };
         MixEngine::force_serial(true);
         let mut mix = MixEngine::realtime(target);
         let mut compiler = PlanCompiler::new(target, PlanLimits::default());
         compiler.set_io(std::sync::Arc::new(io.clone()));
-        let mut maker = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| {
-            soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
-                .map(|n| soundcraft_mix::NewInstance { plugin: n.plugin, refused_state: false })
+        let mut maker = |spec: &InstanceSpec, _: transit_mix::SlotGen| {
+            transit_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
+                .map(|n| transit_mix::NewInstance { plugin: n.plugin, refused_state: false })
         };
         let mut env = compiler.compile(std::sync::Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut maker).unwrap();
         assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
@@ -300,7 +300,7 @@ mod tests {
         let (ring, mut rx) = crate::player::midi_out::test_ring(1024);
         let mut external = External::new(ring);
         let ns = 1e9 / f64::from(SR);
-        let mut out = vec![vec![0.0f32; BLOCK]; soundcraft_mix::main_channels(s)];
+        let mut out = vec![vec![0.0f32; BLOCK]; transit_mix::main_channels(s)];
         let (mut main, mut sends, mut onset, mut pos) = (Vec::new(), Vec::new(), None, 0usize);
         while main.len() < LEN + 3 * C {
             let block = Block {
@@ -355,7 +355,7 @@ mod tests {
         let bare = note_track(&mut s, false);
         let master = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
         s.track_mut(master).unwrap().mixer.inserts[0] = Some(Insert::new("maximizer"));
-        let i = soundcraft_dsp::create("maximizer").unwrap().latency();
+        let i = transit_dsp::create("maximizer").unwrap().latency();
         assert!(i > 0);
         let r = chain(&s, None);
         assert_eq!(r.latency, i, "A is the master insert's latency");

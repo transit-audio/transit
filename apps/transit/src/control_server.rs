@@ -1,30 +1,30 @@
 // Copied from apps/soundcraft/src/control_server.rs at transit 2af868e (file last changed 74b3278); only the
 // request type and the printed port variable differ.
 //! Loopback JSON-lines control server: one request per line, one reply per line.
-//! This is the transport the MCP server (`soundcraft-cli mcp --connect PORT`) wraps.
+//! This is the transport the MCP server (`transit-cli mcp --connect PORT`) wraps.
 //!
 //! Every connection must send `auth <token>` as its first line, the per-run token that `start`
-//! writes to the `control-token` file (see `soundcraft_automation::token`); otherwise it is closed
+//! writes to the `control-token` file (see `transit_automation::token`); otherwise it is closed
 //! without a reply, as it is after a wrong token or a parse error. The bind is loopback only.
 //!
 //! Lines are bounded ([`MAX_LINE`]): a longer one is refused and the connection closed, without
 //! buffering the rest. So is the number of connections served at once ([`MAX_CONNECTIONS`]).
 
 use serde_json::{Value, json};
-use soundcraft_automation::token;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Duration;
+use transit_automation::token;
 use transit_ui_studio::ControlRequest;
 
 /// Longest accepted request line (bytes, without the newline). The largest payload a request
 /// carries is a plugin state for `mix.insert_state`: base64 of at most `b64::MAX_DECODED_BYTES`
 /// (64 MiB, so about 85 MiB of text). Room for that and 1 MiB of JSON around it; replies
 /// (screenshots) aren't bounded by this.
-const MAX_LINE: usize = soundcraft_engine::model::b64::MAX_DECODED_BYTES.div_ceil(3) * 4 + (1 << 20);
+const MAX_LINE: usize = transit_engine::model::b64::MAX_DECODED_BYTES.div_ceil(3) * 4 + (1 << 20);
 // With MAX_CONNECTIONS, at most 1.5 GiB of request lines are buffered at once.
 const _: () = assert!(MAX_LINE <= 96 << 20);
 /// Connections served at once; further ones get an error line and are closed.
@@ -233,7 +233,7 @@ mod tests {
 
     #[test]
     fn the_largest_plugin_state_fits_in_a_line() {
-        let state = soundcraft_engine::model::b64::MAX_DECODED_BYTES.div_ceil(3) * 4;
+        let state = transit_engine::model::b64::MAX_DECODED_BYTES.div_ceil(3) * 4;
         let request = json!({"id": 1, "method": "engine.execute", "params": {"command": "mix.insert_state", "params": {"track": "Audio 1", "slot": 0, "state": ""}}});
         assert!(state + request.to_string().len() <= MAX_LINE);
     }

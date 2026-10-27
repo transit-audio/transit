@@ -5,13 +5,13 @@
 //! them from the plan path, which a change in the mix's output must justify).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_midi::{Note, Sequence};
-use soundcraft_mix::{Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, create_instance};
-use soundcraft_model::{
+use std::sync::Arc;
+use transit_audio_io::AudioBuffer;
+use transit_midi::{Note, Sequence};
+use transit_mix::{Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, create_instance};
+use transit_model::{
     Bus, BusId, ChannelFormat, Clip, Insert, OutputPath, Route, SendSlot, Session, SourceAudio, SourceId, SurroundPan, TrackId, TrackKind,
 };
-use std::sync::Arc;
 
 const SR: u32 = 48_000;
 const BLOCK: usize = 256;
@@ -38,7 +38,7 @@ impl Planned {
 
     fn update(&mut self, s: &Session) {
         self.generation = self.generation.checked_next().unwrap();
-        let mut make = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch);
+        let mut make = |spec: &InstanceSpec, _: transit_mix::SlotGen| create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch);
         let mut env = self.compiler.compile(Arc::new(s.clone()), self.compiler.active(), self.generation, &mut make).unwrap();
         assert_eq!(self.mix.adopt_plan(&mut env), Adoption::Adopted);
         self.compiler.reclaim(env);
@@ -105,7 +105,7 @@ fn assert_parity(name: &str, sessions: &[Session], blocks: usize) {
     let mut heard = false;
     for s in sessions {
         planned.update(s);
-        let ch = soundcraft_mix::main_channels(s);
+        let ch = transit_mix::main_channels(s);
         let mut b = vec![vec![0.0f32; BLOCK]; ch];
         for k in 0..blocks {
             planned.mix.render_active(pos, BLOCK, &mut b);
@@ -132,7 +132,7 @@ fn add_audio(s: &mut Session, fmt: ChannelFormat, src: u64, freq: f32) -> TrackI
 
 fn builtin(id: &str) -> Insert {
     let mut ins = Insert::new(id);
-    for p in soundcraft_dsp::plugin_info(id).unwrap().params {
+    for p in transit_dsp::plugin_info(id).unwrap().params {
         ins.params.insert(p.id.to_string(), p.default);
     }
     ins
@@ -209,7 +209,7 @@ fn surround_and_clip_effects_match_the_golden() {
     let wide = add_audio(&mut s, ChannelFormat::Surround51, 2, 0.01);
     s.track_mut(wide).unwrap().mixer.inserts[0] = Some(builtin("eq_7band"));
     let clip = s.track(mono).unwrap().clips()[0].id.0;
-    let eq = soundcraft_dsp::plugin_info("eq_7band").unwrap().params.first().unwrap();
+    let eq = transit_dsp::plugin_info("eq_7band").unwrap().params.first().unwrap();
     s.edit.values.insert(format!("clip_fx.{clip}.eq.{}", eq.id), f64::from(eq.default));
     s.edit.values.insert(format!("clip_fx.{clip}.comp.threshold"), -20.0);
     s.edit.values.insert(format!("clip_fx.{clip}.gain"), -3.0);

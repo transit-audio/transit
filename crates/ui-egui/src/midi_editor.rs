@@ -4,8 +4,8 @@ use crate::SoundApp;
 use crate::theme::{Tokens, bold, regular};
 use egui::{Align2, Color32, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
-use soundcraft_model::{ClipContent, ClipId, Tool, TrackId};
-use soundcraft_time::TICKS_PER_QUARTER;
+use transit_model::{ClipContent, ClipId, Tool, TrackId};
+use transit_time::TICKS_PER_QUARTER;
 
 const KEY_W: f32 = 48.0;
 const ROW_H: f32 = 9.0;
@@ -128,7 +128,7 @@ pub fn show(app: &mut SoundApp, ui: &mut Ui) {
         t.text_dim,
     );
     let grid_ticks = match app.engine.session().edit.grid {
-        soundcraft_time::GridValue::Note { value, dotted, triplet } => {
+        transit_time::GridValue::Note { value, dotted, triplet } => {
             let mut g = value.ticks();
             if dotted {
                 g = g * 3 / 2;
@@ -199,7 +199,7 @@ pub fn show(app: &mut SoundApp, ui: &mut Ui) {
             painter.text(
                 pos2(key.max.x - 3.0, key.center().y),
                 Align2::RIGHT_CENTER,
-                soundcraft_midi::note_name(pitch as u8),
+                transit_midi::note_name(pitch as u8),
                 regular(8.0),
                 Color32::from_rgb(40, 40, 40),
             );

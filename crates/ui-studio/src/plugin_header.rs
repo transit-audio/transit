@@ -4,7 +4,7 @@
 //! The strip itself is drawn by the editor window on the plug-in host thread
 //! (`transit_rt::editor_window`); every frame the app sends each open hosted editor its
 //! [`EditorHeader`] (sent on only when it changed) and takes the clicks back. A user preset is the
-//! plug-in's full state as the format's preset file (`soundcraft_engine::presets`): a save reads
+//! plug-in's full state as the format's preset file (`transit_engine::presets`): a save reads
 //! the live state on the plug-in host thread, a load loads it into the live instance there, and
 //! both are polled once per frame, so the UI never waits for the plug-in. While one runs, or while
 //! the plug-in is not responding, the strip is disabled with the reason.
@@ -16,14 +16,14 @@
 
 use crate::StudioApp;
 use serde_json::{Map, Value, json};
-use soundcraft_dsp::{EditorHeader, HeaderAction, JobPoll, LoadedValues, StateJob};
-use soundcraft_engine::io::presets as files;
-use soundcraft_engine::presets;
-use soundcraft_mix::SlotGen;
-use soundcraft_model::{Insert, TrackId, b64};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use transit_dsp::{EditorHeader, HeaderAction, JobPoll, LoadedValues, StateJob};
+use transit_engine::io::presets as files;
+use transit_engine::presets;
+use transit_mix::SlotGen;
+use transit_model::{Insert, TrackId, b64};
 
 /// How often the user preset folders are listed again (another host may add presets).
 const LIST_EVERY_S: f64 = 2.0;
@@ -151,11 +151,11 @@ fn unused_name(path: PathBuf) -> PathBuf {
 }
 
 fn slot_json(slot: usize) -> Value {
-    if slot == soundcraft_mix::INSTRUMENT_SLOT { json!("instrument") } else { json!(slot) }
+    if slot == transit_mix::INSTRUMENT_SLOT { json!("instrument") } else { json!(slot) }
 }
 
 fn slot_label(slot: usize) -> String {
-    if slot == soundcraft_mix::INSTRUMENT_SLOT {
+    if slot == transit_mix::INSTRUMENT_SLOT {
         "Instrument".into()
     } else {
         let letter = u8::try_from(slot).ok().filter(|s| *s < 26).map_or('?', |s| char::from(b'A' + s));
@@ -171,7 +171,7 @@ impl StudioApp {
     /// The hosted plug-in insert (or instrument) at `key` that has preset files.
     fn hosted_insert(&self, key: (TrackId, usize)) -> Option<Insert> {
         let t = self.engine.session().track(key.0)?;
-        let ins = if key.1 == soundcraft_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(key.1)?.as_ref() }?;
+        let ins = if key.1 == transit_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(key.1)?.as_ref() }?;
         presets::format_of(&ins.plugin).is_some().then(|| ins.clone())
     }
 
@@ -179,7 +179,7 @@ impl StudioApp {
     fn live_plugin_name(&mut self, key: (TrackId, usize), plugin: &str) -> String {
         match self.player.as_ref().and_then(|p| p.live_name(key.0, key.1)) {
             Some(n) => n.to_owned(),
-            None => self.plugin_name(plugin, key.1 == soundcraft_mix::INSTRUMENT_SLOT),
+            None => self.plugin_name(plugin, key.1 == transit_mix::INSTRUMENT_SLOT),
         }
     }
 
@@ -217,7 +217,7 @@ impl StudioApp {
             user,
             factory: Vec::new(),
             bypassed: ins.bypass,
-            can_bypass: key.1 != soundcraft_mix::INSTRUMENT_SLOT,
+            can_bypass: key.1 != transit_mix::INSTRUMENT_SLOT,
             can_paste: self.plugin_header.clipboard.as_ref().is_some_and(|c| c.plugin == ins.plugin),
             disabled,
             learning: self.midi_learn.next == Some(key),
@@ -296,7 +296,7 @@ impl StudioApp {
                 }
             }
             HeaderAction::Bypass => {
-                if slot != soundcraft_mix::INSTRUMENT_SLOT
+                if slot != transit_mix::INSTRUMENT_SLOT
                     && let Err(e) = self.toggle_bypass(t, slot)
                 {
                     self.status = e;
@@ -577,7 +577,7 @@ impl StudioApp {
                 },
             }
         }
-        let actions = self.player.as_ref().map(soundcraft_playback::Player::take_header_actions).unwrap_or_default();
+        let actions = self.player.as_ref().map(transit_playback::Player::take_header_actions).unwrap_or_default();
         for (t, slot, a) in actions {
             self.header_action(t, slot, a);
         }
@@ -615,13 +615,13 @@ pub fn opening_text(took: Duration) -> String {
 /// `Jup-8 V loaded in 14.1 s`, only for a load over [`REPORT_AFTER`].
 #[must_use]
 pub fn loaded_status(name: &str, total: Duration) -> Option<String> {
-    (total > REPORT_AFTER).then(|| format!("{name} loaded in {}", soundcraft_playback::seconds_text(total)))
+    (total > REPORT_AFTER).then(|| format!("{name} loaded in {}", transit_playback::seconds_text(total)))
 }
 
 /// `Jup-8 V editor opened in 3.2 s`, only for an open over [`REPORT_AFTER`].
 #[must_use]
 pub fn editor_opened_status(name: &str, total: Duration) -> Option<String> {
-    (total > REPORT_AFTER).then(|| format!("{name} editor opened in {}", soundcraft_playback::seconds_text(total)))
+    (total > REPORT_AFTER).then(|| format!("{name} editor opened in {}", transit_playback::seconds_text(total)))
 }
 
 impl StudioApp {

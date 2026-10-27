@@ -2,7 +2,7 @@
 //! incarnation, so callback partitions and speed changes cannot round its phase.
 use crate::timeline_map::MapError;
 #[cfg(not(target_arch = "wasm32"))]
-use soundcraft_mix::RenderFrame;
+use transit_mix::RenderFrame;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Phase {

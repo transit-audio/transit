@@ -4,9 +4,9 @@
 use super::*;
 use crate::player::MapMsg;
 use crate::player::midi_map::MapSpec;
-use soundcraft_model::{MapMode, SourceKind};
 use std::time::{Duration, Instant};
 use transit_midi_io::fake::Fake;
+use transit_model::{MapMode, SourceKind};
 
 fn until(what: &str, mut ready: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
@@ -17,7 +17,7 @@ fn until(what: &str, mut ready: impl FnMut() -> bool) {
 }
 
 fn player(fake: &Fake) -> Player {
-    let (mut player, _access, _clock) = Player::prepare(Arc::new(Session::default()), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    let (mut player, _access, _clock) = Player::prepare(Arc::new(Session::default()), 48_000, transit_model::IoMap::default()).unwrap();
     player.midi.get_mut().as_mut().unwrap().enable(fake.io());
     player
 }

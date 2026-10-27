@@ -33,7 +33,7 @@ fn cargo_commands_use_the_cargo_executable_and_workspace_root() {
 
 #[test]
 fn failed_metadata_is_rejected_even_with_valid_stdout() {
-    let valid = json!({"packages": [{"name": "soundcraft-time", "manifest_path": "Cargo.toml", "dependencies": []}]});
+    let valid = json!({"packages": [{"name": "transit-time", "manifest_path": "Cargo.toml", "dependencies": []}]});
     assert!(metadata_output(output(0, valid.clone())).is_ok());
     let Err(error) = metadata_output(output(1, valid)) else { panic!("accepted failed cargo metadata") };
     assert!(error.contains("cargo metadata failed"));
@@ -47,9 +47,9 @@ fn missing_or_malformed_metadata_never_passes_as_an_empty_workspace() {
         json!({"packages": null}),
         json!({"packages": []}),
         json!({"packages": {}}),
-        json!({"packages": [{"name": "soundcraft-time", "manifest_path": "Cargo.toml"}]}),
-        json!({"packages": [{"name": "soundcraft-time", "manifest_path": "Cargo.toml", "dependencies": null}]}),
-        json!({"packages": [{"name": "soundcraft-time", "dependencies": []}]}),
+        json!({"packages": [{"name": "transit-time", "manifest_path": "Cargo.toml"}]}),
+        json!({"packages": [{"name": "transit-time", "manifest_path": "Cargo.toml", "dependencies": null}]}),
+        json!({"packages": [{"name": "transit-time", "dependencies": []}]}),
         json!({"packages": [{"manifest_path": "Cargo.toml", "dependencies": []}]}),
     ] {
         assert!(metadata_output(output(0, value.clone())).is_err(), "accepted {value}");
@@ -61,7 +61,7 @@ fn missing_or_malformed_metadata_never_passes_as_an_empty_workspace() {
 
 #[test]
 fn unreadable_or_invalid_manifests_fail_even_for_exempt_apps() {
-    for name in ["soundcraft-time", "transit"] {
+    for name in ["transit-time", "transit"] {
         let metadata = Metadata { packages: vec![package(name, &[])] };
         let error = check_layers(&metadata, |_| Err("permission denied".into())).unwrap_err();
         assert!(error.contains("permission denied"));
@@ -91,8 +91,8 @@ fn unsafe_lints_are_parsed_as_toml_instead_of_matching_text() {
 }
 
 #[test]
-fn newly_prefixed_crates_do_not_inherit_layer_or_unsafe_permissions() {
-    for name in ["transit-time", "soundcraft-rt"] {
+fn the_retired_soundcraft_names_do_not_inherit_layer_or_unsafe_permissions() {
+    for name in ["soundcraft-time", "soundcraft-rt"] {
         let metadata = Metadata { packages: vec![package(name, &[])] };
         assert!(check_layers(&metadata, |_| Ok(INHERIT.into())).unwrap_err().contains("not registered"));
         let error = check_layers(&metadata, |_| Ok("[lints.rust]\nunsafe_code = 'allow'".into())).unwrap_err();
@@ -102,16 +102,16 @@ fn newly_prefixed_crates_do_not_inherit_layer_or_unsafe_permissions() {
 
 #[test]
 fn standalone_and_ui_checks_cover_normal_and_build_dependencies_but_not_dev() {
-    for name in ["transit-audio-backend", "soundcraft-dsp"] {
+    for name in ["transit-audio-backend", "transit-dsp"] {
         for kind in [None, Some("build"), Some("dev")] {
-            let metadata = Metadata { packages: vec![package(name, &[("soundcraft-time", kind)]), package("soundcraft-time", &[])] };
+            let metadata = Metadata { packages: vec![package(name, &[("transit-time", kind)]), package("transit-time", &[])] };
             let result = check_layers(&metadata, |_| Ok(INHERIT.into()));
             assert_eq!(result.is_ok(), kind == Some("dev"), "{name}: {kind:?}");
         }
     }
     for name in ["egui_extras", "resvg", "wgpu"] {
         for kind in [None, Some("build"), Some("dev")] {
-            let metadata = Metadata { packages: vec![package("soundcraft-model", &[(name, kind)])] };
+            let metadata = Metadata { packages: vec![package("transit-model", &[(name, kind)])] };
             assert_eq!(check_layers(&metadata, |_| Ok(INHERIT.into())).is_ok(), kind == Some("dev"), "{name}: {kind:?}");
         }
     }
@@ -120,9 +120,9 @@ fn standalone_and_ui_checks_cover_normal_and_build_dependencies_but_not_dev() {
 #[test]
 fn upward_and_app_edges_fail_while_documented_same_layer_edges_remain_valid() {
     for (source, dest, valid) in [
-        ("soundcraft-model", "soundcraft-engine", false),
-        ("soundcraft-model", "transit", false),
-        ("soundcraft-clap-host", "soundcraft-dsp", true),
+        ("transit-model", "transit-engine", false),
+        ("transit-model", "transit", false),
+        ("transit-clap-host", "transit-dsp", true),
         ("transit-audio-wasapi", "transit-rt", true),
     ] {
         let metadata = Metadata { packages: vec![package(source, &[(dest, None)]), package(dest, &[])] };
@@ -134,9 +134,9 @@ fn upward_and_app_edges_fail_while_documented_same_layer_edges_remain_valid() {
 fn legitimate_video_decoding_and_benchmark_app_dependencies_remain_valid() {
     let metadata = Metadata {
         packages: vec![
-            package("soundcraft-video", &[("image", None)]),
-            package("audio-bench", &[("soundcraft-playback", None)]),
-            package("soundcraft-playback", &[]),
+            package("transit-video", &[("image", None)]),
+            package("audio-bench", &[("transit-playback", None)]),
+            package("transit-playback", &[]),
         ],
     };
     assert!(check_layers(&metadata, |_| Ok(INHERIT.into())).is_ok());

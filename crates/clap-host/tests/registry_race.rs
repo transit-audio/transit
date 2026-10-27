@@ -1,12 +1,12 @@
 //! Deterministic scan/publication races.
 mod common;
 
-use soundcraft_clap_host as host;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
+use transit_clap_host as host;
 
 static SERIAL: Mutex<()> = Mutex::new(());
 static NEXT: AtomicUsize = AtomicUsize::new(0);

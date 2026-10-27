@@ -5,17 +5,17 @@
 //! loop renders without hanging, deterministically, with the loop broken.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_dsp::Plugin;
-use soundcraft_mix::{
+use std::sync::Arc;
+use transit_audio_io::AudioBuffer;
+use transit_dsp::Plugin;
+use transit_mix::{
     Adoption, DeviceGeneration, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, create_instance,
     render_range,
 };
-use soundcraft_model::{
+use transit_model::{
     Bus, BusId, ChannelFormat, Clip, EdgeKind, Insert, Route, RouteEdge, RouteNode, SendSlot, Session, SourceAudio, SourceId, TrackId, TrackKind,
 };
-use soundcraft_time::Range;
-use std::sync::Arc;
+use transit_time::Range;
 
 const SR: u32 = 48_000;
 const BLOCK: usize = 256;
@@ -31,8 +31,8 @@ struct Delay {
 }
 
 impl Plugin for Delay {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
-        soundcraft_dsp::plugin_info("gain").unwrap()
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
+        transit_dsp::plugin_info("gain").unwrap()
     }
     fn prepare(&mut self, _sr: f32, _mb: usize, ch: usize) {
         self.ring = vec![vec![0.0; self.n.max(1)]; ch.max(2)];
@@ -76,8 +76,8 @@ struct LatentSynth {
 }
 
 impl Plugin for LatentSynth {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
-        soundcraft_dsp::plugin_info("subtractive_synth").unwrap()
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
+        transit_dsp::plugin_info("subtractive_synth").unwrap()
     }
     fn prepare(&mut self, _sr: f32, _mb: usize, _ch: usize) {}
     fn reset(&mut self) {
@@ -116,8 +116,8 @@ impl Plugin for LatentSynth {
 struct Failing(usize);
 
 impl Plugin for Failing {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
-        soundcraft_dsp::plugin_info("gain").unwrap()
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
+        transit_dsp::plugin_info("gain").unwrap()
     }
     fn prepare(&mut self, _sr: f32, _mb: usize, _ch: usize) {}
     fn reset(&mut self) {}
@@ -147,7 +147,7 @@ fn delay(n: usize) -> Insert {
 /// The plug-in for one slot: test stand-ins by preset, built-ins otherwise.
 fn instance(s: &Session, spec: &InstanceSpec) -> Option<Box<dyn Plugin>> {
     let t = s.track(spec.track)?;
-    let ins = if spec.slot == soundcraft_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(spec.slot)?.as_ref() };
+    let ins = if spec.slot == transit_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(spec.slot)?.as_ref() };
     let preset = ins.map(|i| i.preset.as_str()).unwrap_or("");
     if let Some(n) = preset.strip_prefix("delay:") {
         let mut d = Delay { n: n.parse().unwrap(), ring: Vec::new(), w: 0 };
@@ -173,7 +173,7 @@ fn render(s: &Session) -> (Vec<f32>, usize) {
     MixEngine::force_serial(true);
     let mut mix = MixEngine::realtime(target());
     let mut compiler = PlanCompiler::new(target(), PlanLimits::default());
-    let mut make = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| instance(s, spec).map(|plugin| NewInstance { plugin, refused_state: false });
+    let mut make = |spec: &InstanceSpec, _: transit_mix::SlotGen| instance(s, spec).map(|plugin| NewInstance { plugin, refused_state: false });
     let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut make).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
     compiler.reclaim(env);
@@ -186,7 +186,7 @@ fn render(s: &Session) -> (Vec<f32>, usize) {
 }
 
 fn run(s: &Session, mut block: impl FnMut(i64, &mut [Vec<f32>]) -> usize) -> (Vec<f32>, usize) {
-    let ch = soundcraft_mix::main_channels(s);
+    let ch = transit_mix::main_channels(s);
     let mut out = vec![vec![0.0f32; BLOCK]; ch];
     let mut all = Vec::new();
     let mut latency = 0;
@@ -270,7 +270,7 @@ fn session() -> Session {
 
 fn lookahead_comp() -> Insert {
     let mut c = Insert::new("compressor");
-    for p in soundcraft_dsp::plugin_info("compressor").unwrap().params {
+    for p in transit_dsp::plugin_info("compressor").unwrap().params {
         c.params.insert(p.id.to_string(), p.default);
     }
     c.params.insert("lookahead".into(), 5.0);
@@ -309,9 +309,9 @@ fn a_latent_instrument_lines_up_with_a_dry_audio_track() {
     let mut s = session();
     impulse_track(&mut s, "Dry");
     let inst = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Synth"));
-    let mut seq = soundcraft_midi::Sequence::default();
+    let mut seq = transit_midi::Sequence::default();
     let tempo_ticks = s.tempo.samples_to_ticks(AT as i64, s.sample_rate);
-    seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: tempo_ticks, length: 120 });
+    seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: tempo_ticks, length: 120 });
     let cid = s.new_clip_id();
     let tr = s.track_mut(inst).unwrap();
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, LEN as i64, seq));
@@ -597,8 +597,8 @@ struct Knob {
 }
 
 impl Plugin for Knob {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
-        soundcraft_dsp::plugin_info("gain").unwrap()
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
+        transit_dsp::plugin_info("gain").unwrap()
     }
     fn prepare(&mut self, _sr: f32, _mb: usize, _ch: usize) {}
     fn reset(&mut self) {}
@@ -645,7 +645,7 @@ fn a_plan_realigns_after_a_latency_increase_through_observe_and_a_recompile() {
     let lat = pulses(&mut s, "Lat", 0.5);
     s.track_mut(lat).unwrap().mixer.inserts[0] = Some(Insert::new("gain"));
     let knob = Arc::new(std::sync::atomic::AtomicUsize::new(100));
-    let mut make = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| {
+    let mut make = |spec: &InstanceSpec, _: transit_mix::SlotGen| {
         if spec.track == lat && spec.slot == 0 {
             return Some(NewInstance {
                 plugin: Box::new(Knob { knob: knob.clone(), ring: vec![vec![0.0; 100_000]; 2], w: 0 }),
@@ -701,7 +701,7 @@ fn a_bounce_of_a_looped_bus_holds_no_feedback() {
     let b = aux(&mut s, "B", bb, vec![delay(25)], Route::Main);
     s.track_mut(b).unwrap().mixer.sends[0] = send(ba, false);
     s.track_mut(src).unwrap().mixer.sends[0] = send(ba, false);
-    let out = soundcraft_mix::render_bus(&s, ba, Range::new(0, LEN as i64), 512);
+    let out = transit_mix::render_bus(&s, ba, Range::new(0, LEN as i64), 512);
     // Offline, the stand-in inserts are plain gains: B's feedback would land on the same sample.
     assert_eq!(arrivals(&out[0]), vec![AT], "only the source's send, at its own time");
     assert!((out[0][AT] - 0.5).abs() < 1e-4, "no feedback summed in: {}", out[0][AT]);
@@ -722,7 +722,7 @@ fn a_plan_with_longer_lines_takes_over_seamlessly() {
     let lat = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, Some("Lat"));
     s.track_mut(lat).unwrap().mixer.inserts[0] = Some(Insert::new("gain"));
     let knob = Arc::new(std::sync::atomic::AtomicUsize::new(100));
-    let mut make = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| {
+    let mut make = |spec: &InstanceSpec, _: transit_mix::SlotGen| {
         if spec.track == lat && spec.slot == 0 {
             return Some(NewInstance {
                 plugin: Box::new(Knob { knob: knob.clone(), ring: vec![vec![0.0; 100_000]; 2], w: 0 }),

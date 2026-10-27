@@ -8,8 +8,8 @@
 
 use super::*;
 use serde_json::Value;
-use soundcraft_model::{IoDirection, TrackId};
 use std::path::{Path, PathBuf};
+use transit_model::{IoDirection, TrackId};
 
 pub(crate) const ID: &str = "file.bounce_mix";
 
@@ -60,8 +60,8 @@ pub struct RealtimeStem {
 #[derive(Debug, Clone)]
 pub struct RealtimePlan {
     pub path: PathBuf,
-    pub range: soundcraft_time::Range,
-    pub opts: soundcraft_audio_io::EncodeOptions,
+    pub range: transit_time::Range,
+    pub opts: transit_audio_io::EncodeOptions,
     /// Main's channels and the file's WAV speaker mask.
     pub channels: usize,
     pub mask: u32,
@@ -84,7 +84,7 @@ fn stem_path(path: &Path, track: &str) -> PathBuf {
 }
 
 /// Why one External Instrument cannot render in real time, in ADR 0020 decision 7's words.
-fn stem_blocker(e: &Engine, t: &soundcraft_model::Track, uncompensated: bool) -> std::result::Result<RealtimeStem, String> {
+fn stem_blocker(e: &Engine, t: &transit_model::Track, uncompensated: bool) -> std::result::Result<RealtimeStem, String> {
     let device = t.external_instrument().ok_or("no External Instrument")?;
     if !t.midi_output.is_external() {
         return Err(format!("No MIDI port on {}: choose one on the Out button", t.name));
@@ -125,7 +125,7 @@ pub fn realtime_plan(e: &Engine, p: &Value) -> Result<RealtimePlan> {
         return Err(bad(ID, "A fold-down is not available in a real-time render"));
     }
     let s = e.session();
-    let externals: Vec<&soundcraft_model::Track> =
+    let externals: Vec<&transit_model::Track> =
         s.tracks.iter().filter(|t| !t.inactive && t.freeze.is_none() && t.external_instrument().is_some()).collect();
     if externals.is_empty() {
         return Err(bad(ID, "Nothing in this session needs real time: render it offline"));
@@ -141,18 +141,18 @@ pub fn realtime_plan(e: &Engine, p: &Value) -> Result<RealtimePlan> {
         stems.push(stem);
     }
     let r = range_param(e, ID, p)?;
-    let range = if r.is_empty() { soundcraft_time::Range::new(0, s.content_end().max(1)) } else { r };
+    let range = if r.is_empty() { transit_time::Range::new(0, s.content_end().max(1)) } else { r };
     crate::io::check_bounce_range(s, range, ID)?;
     let ext = path.extension().and_then(|x| x.to_str()).unwrap_or("wav").to_ascii_lowercase();
     let format_name = str_param(p, "format").unwrap_or(ext.as_str());
-    let format = soundcraft_audio_io::encode_format_for(format_name)
-        .ok_or_else(|| bad(ID, format!("cannot write `{format_name}` files (supported: {})", soundcraft_audio_io::ENCODE_EXTENSIONS)))?;
+    let format = transit_audio_io::encode_format_for(format_name)
+        .ok_or_else(|| bad(ID, format!("cannot write `{format_name}` files (supported: {})", transit_audio_io::ENCODE_EXTENSIONS)))?;
     let bit_depth = match p.get("bit_depth").map(|b| b.to_string().trim_matches('"').to_string()).as_deref() {
-        Some("16") => soundcraft_audio_io::BitDepth::Int16,
-        Some("32") | Some("32f") => soundcraft_audio_io::BitDepth::Float32,
-        _ => soundcraft_audio_io::BitDepth::Int24,
+        Some("16") => transit_audio_io::BitDepth::Int16,
+        Some("32") | Some("32f") => transit_audio_io::BitDepth::Float32,
+        _ => transit_audio_io::BitDepth::Int24,
     };
-    let opts = soundcraft_audio_io::EncodeOptions { format, bit_depth, dither: bool_or(p, "dither", true), bwf: None };
+    let opts = transit_audio_io::EncodeOptions { format, bit_depth, dither: bool_or(p, "dither", true), bwf: None };
     for file in std::iter::once(&path).chain(stems.iter().filter_map(|s| s.path.as_ref())) {
         crate::file_access::check_write(file).map_err(EngineError::Io)?;
     }
@@ -171,11 +171,11 @@ pub(crate) fn realtime(e: &Engine, p: &Value) -> Result<Value> {
 mod tests {
     use crate::Engine;
     use serde_json::json;
-    use soundcraft_model::TrackId;
+    use transit_model::TrackId;
 
     fn engine() -> (Engine, TrackId, String) {
         let mut e = Engine::default();
-        e.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "Scarlett", 2, 2));
+        e.set_io_map(transit_model::IoMap::for_device("ASIO", "Scarlett", 2, 2));
         e.execute("track.new", &json!({"kind": "instrument"})).unwrap();
         let t = e.session().tracks.last().unwrap().id;
         e.session_mut().track_mut(t).unwrap().name = "Model D".into();
@@ -221,7 +221,7 @@ mod tests {
         assert!(rt(&mut e, json!({"uncompensated": true, "mode": "live"})).contains("unknown mode"));
         e.execute("instrument.external", &json!({"track": t.0, "manual_ms": 20.0})).unwrap();
         let plan = super::realtime_plan(&e, &json!({"path": path, "start": 0, "end": 48_000, "stems": true})).unwrap();
-        assert_eq!(plan.range, soundcraft_time::Range::new(0, 48_000));
+        assert_eq!(plan.range, transit_time::Range::new(0, 48_000));
         assert_eq!(plan.channels, 2);
         assert_eq!(plan.stems.len(), 1);
         let stem = &plan.stems[0];

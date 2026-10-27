@@ -15,10 +15,10 @@ use crate::theme::TOKENS;
 use egui::Ui;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use soundcraft_dsp::PluginInfo;
-use soundcraft_model::{Insert, TrackId};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use transit_dsp::PluginInfo;
+use transit_model::{Insert, TrackId};
 
 pub const VERSION: u32 = 1;
 
@@ -130,7 +130,7 @@ impl StudioApp {
                 self.touch_param(t, slot, id, false);
             }
         }
-        let r = if slot == soundcraft_mix::INSTRUMENT_SLOT {
+        let r = if slot == transit_mix::INSTRUMENT_SLOT {
             // No batch command for the instrument: one merge key makes the writes one step.
             self.engine.end_merge();
             let mut r = Ok(());
@@ -211,7 +211,7 @@ pub fn control(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &In
         match save_user(&root, info, &n, &values) {
             Ok(n) => {
                 // The name shows in the header; a note-only recall of the same values.
-                if key.1 != soundcraft_mix::INSTRUMENT_SLOT {
+                if key.1 != transit_mix::INSTRUMENT_SLOT {
                     let _ = app.engine.execute("mix.insert_params", &json!({"track": key.0.0, "slot": key.1, "params": {}, "preset": n}));
                 }
                 ui.data_mut(|d| d.insert_temp(name_id, String::new()));

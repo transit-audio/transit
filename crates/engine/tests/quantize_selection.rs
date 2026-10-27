@@ -1,7 +1,7 @@
 use serde_json::json;
-use soundcraft_engine::Engine;
-use soundcraft_midi::Note;
-use soundcraft_model::{ChannelFormat, ClipContent, ClipId, TrackKind};
+use transit_engine::Engine;
+use transit_midi::Note;
+use transit_model::{ChannelFormat, ClipContent, ClipId, TrackKind};
 
 fn fixture() -> (Engine, ClipId) {
     let mut e = Engine::default();

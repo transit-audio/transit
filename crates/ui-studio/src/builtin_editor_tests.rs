@@ -3,7 +3,7 @@
 
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::TrackId;
+use transit_model::TrackId;
 
 struct T {
     app: StudioApp,
@@ -14,7 +14,7 @@ struct T {
 
 impl T {
     fn new() -> T {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         app.ui.show_mixer = true;
         app.ui.show_devices = true;
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0, shapes: Vec::new() };
@@ -105,8 +105,8 @@ fn mid(r: [f32; 4]) -> (f32, f32) {
     ((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0)
 }
 
-fn info(plugin: &str) -> &'static soundcraft_dsp::PluginInfo {
-    soundcraft_dsp::plugin_info(plugin).unwrap()
+fn info(plugin: &str) -> &'static transit_dsp::PluginInfo {
+    transit_dsp::plugin_info(plugin).unwrap()
 }
 
 fn default_of(plugin: &str, id: &str) -> f32 {
@@ -122,7 +122,7 @@ fn the_editor_button_opens_a_window_for_a_built_in_instrument_and_effect() {
     assert!(t.app.mixer.devices.cards.iter().all(|c| c.editor_enabled), "built-in editors need no player");
     assert_eq!(t.app.mixer.devices.cards[0].plugin, "subtractive_synth");
     t.open_editor(0);
-    let key = (tr, soundcraft_mix::INSTRUMENT_SLOT);
+    let key = (tr, transit_mix::INSTRUMENT_SLOT);
     assert_eq!(t.app.ui.plugin_windows, vec![key]);
     let w = t.window(tr);
     assert_eq!(w.title, format!("{} · Subtractive Synth", t.app.engine.session().track(tr).unwrap().name));
@@ -263,7 +263,7 @@ fn a_factory_instrument_preset_applies_without_a_config_directory() {
     t.app.services.config_dir = None;
     assert_ne!(t.param(tr, None, "cutoff"), Some(1400.0));
     let before = t.undo_len();
-    let previous = t.app.builtin_at((tr, soundcraft_mix::INSTRUMENT_SLOT)).unwrap();
+    let previous = t.app.builtin_at((tr, transit_mix::INSTRUMENT_SLOT)).unwrap();
     let preset = t.window(tr).preset;
     t.click(mid(preset), 1);
     // The menu has its Factory heading, Init, then Soft Pad.
@@ -274,7 +274,7 @@ fn a_factory_instrument_preset_applies_without_a_config_directory() {
     assert_eq!(t.undo_len(), before + 1);
     t.app.run("edit.undo", json!({})).unwrap();
     t.frames(3);
-    assert_eq!(t.app.builtin_at((tr, soundcraft_mix::INSTRUMENT_SLOT)).unwrap(), previous);
+    assert_eq!(t.app.builtin_at((tr, transit_mix::INSTRUMENT_SLOT)).unwrap(), previous);
     t.assert_preset_label(tr, "<factory default>");
     t.app.run("edit.redo", json!({})).unwrap();
     t.frames(3);
@@ -383,7 +383,7 @@ fn a_user_preset_saves_loads_lists_and_deletes_as_one_undo_step() {
 fn an_instrument_preset_name_survives_session_save_load_and_undo_restores_the_previous_name() {
     let mut t = T::new();
     let (tr, _) = open_plugin(&mut t, "subtractive_synth");
-    let key = (tr, soundcraft_mix::INSTRUMENT_SLOT);
+    let key = (tr, transit_mix::INSTRUMENT_SLOT);
     let synth = info("subtractive_synth");
     let factory = crate::presets::factory_for(synth.id);
     let soft = &factory.iter().find(|(name, _)| *name == "Soft Pad").unwrap().1;
@@ -412,7 +412,7 @@ fn an_instrument_preset_name_survives_session_save_load_and_undo_restores_the_pr
     // Older sessions may omit the existing optional preset field.
     let mut old: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
     old["tracks"][0]["instrument"].as_object_mut().unwrap().remove("preset");
-    let old = soundcraft_model::Session::from_json(&old.to_string()).unwrap();
+    let old = transit_model::Session::from_json(&old.to_string()).unwrap();
     assert_eq!(old.track(tr).unwrap().instrument.as_ref().unwrap().preset, "");
     assert_eq!(old.track(tr).unwrap().instrument.as_ref().unwrap().params, previous.params);
     std::fs::remove_dir_all(dir).unwrap();
@@ -425,7 +425,7 @@ fn every_factory_preset_file_parses_belongs_to_its_plugin_and_applies_in_one_ste
     let mut files = 0;
     for dir in std::fs::read_dir(&root).unwrap().flatten() {
         let plugin = dir.file_name().to_string_lossy().into_owned();
-        let comp = soundcraft_dsp::plugin_info(&plugin).unwrap_or_else(|| panic!("`{plugin}` is a built-in"));
+        let comp = transit_dsp::plugin_info(&plugin).unwrap_or_else(|| panic!("`{plugin}` is a built-in"));
         for f in std::fs::read_dir(dir.path()).unwrap().flatten() {
             files += 1;
             let name = f.path().file_stem().unwrap().to_string_lossy().into_owned();
@@ -439,9 +439,9 @@ fn every_factory_preset_file_parses_belongs_to_its_plugin_and_applies_in_one_ste
             let mut t = T::new();
             let (tr, slot) = open_plugin(&mut t, &plugin);
             let before = t.undo_len();
-            t.app.apply_preset((tr, slot.unwrap_or(soundcraft_mix::INSTRUMENT_SLOT)), comp, &name, &p);
+            t.app.apply_preset((tr, slot.unwrap_or(transit_mix::INSTRUMENT_SLOT)), comp, &name, &p);
             assert_eq!(t.undo_len(), before + 1, "{plugin}/{name}: one undo step");
-            let key = (tr, slot.unwrap_or(soundcraft_mix::INSTRUMENT_SLOT));
+            let key = (tr, slot.unwrap_or(transit_mix::INSTRUMENT_SLOT));
             assert_eq!(t.app.builtin_at(key).unwrap().preset, name, "{plugin}/{name}: preset name");
             for (id, v) in presets::recall_values(comp, &p) {
                 assert_eq!(t.param(tr, slot, &id).unwrap_or(comp.param(&id).unwrap().default), v, "{plugin}/{name}: {id}");
@@ -452,10 +452,10 @@ fn every_factory_preset_file_parses_belongs_to_its_plugin_and_applies_in_one_ste
 }
 
 /// A tap in a headless hub for the insert in `slot` of `tr`.
-fn tap_for(t: &mut T, tr: TrackId, slot: usize) -> std::sync::Arc<soundcraft_mix::ScopeTap> {
+fn tap_for(t: &mut T, tr: TrackId, slot: usize) -> std::sync::Arc<transit_mix::ScopeTap> {
     let uid = t.app.engine.session().track(tr).unwrap().mixer.inserts[slot].as_ref().unwrap().uid.get();
-    let hub = std::sync::Arc::new(soundcraft_mix::ScopeHub::default());
-    let tap = std::sync::Arc::new(soundcraft_mix::ScopeTap::new());
+    let hub = std::sync::Arc::new(transit_mix::ScopeHub::default());
+    let tap = std::sync::Arc::new(transit_mix::ScopeTap::new());
     hub.register(tr, uid, &tap);
     t.app.builtin_editor.hub = Some(hub);
     tap

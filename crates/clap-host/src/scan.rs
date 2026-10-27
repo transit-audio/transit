@@ -1,7 +1,7 @@
 //! Finding CLAP plugins on disk (safe, pure `std::fs`) and mapping CLAP features to categories.
 
-use soundcraft_dsp::Category;
 use std::path::{Path, PathBuf};
+use transit_dsp::Category;
 
 /// Directory recursion limit while scanning (CLAP folders may be nested, never deeply).
 const MAX_DEPTH: usize = 8;

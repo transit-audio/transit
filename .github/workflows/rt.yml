@@ -49,9 +49,9 @@ jobs:
       - name: clippy (rt, force-fallback)
         run: cargo clippy -p transit-rt --all-targets --features force-fallback -- -D warnings
       - name: clippy (mix)
-        run: cargo clippy -p soundcraft-mix --all-targets -- -D warnings
+        run: cargo clippy -p transit-mix --all-targets -- -D warnings
       - name: test
-        run: cargo test -p transit-rt -p soundcraft-mix
+        run: cargo test -p transit-rt -p transit-mix
       - name: test (rt, force-fallback)
         run: cargo test -p transit-rt --features force-fallback
       # Without privileges SCHED_FIFO is refused: the rt tests accept Denied(EPERM) there. Under

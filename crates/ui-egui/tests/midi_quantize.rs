@@ -2,10 +2,10 @@
 use egui::vec2;
 use egui_kittest::{Harness, kittest::Queryable};
 use serde_json::json;
-use soundcraft_ui_egui::{Services, SoundApp};
+use transit_ui_egui::{Services, SoundApp};
 
 fn quantize_on(grid: &str) -> i64 {
-    let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
     app.run("track.new", json!({"name": "Grid Check", "kind": "midi"})).unwrap();
     let clip = app.run("midi.new_clip", json!({"track": "Grid Check", "start": 0, "end": 96_000})).unwrap()["clip"].clone();
     app.run("midi.note_add", json!({"clip": clip, "pitch": 60, "start_ticks": 300, "length_ticks": 240})).unwrap();

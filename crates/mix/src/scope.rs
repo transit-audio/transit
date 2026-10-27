@@ -10,10 +10,10 @@
 //! The ring is written with relaxed stores and published with a release store of the write index.
 //! A reader may see a block half written; it is a display, so that is accepted.
 
-use soundcraft_model::TrackId;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
+use transit_model::TrackId;
 
 /// The hub key of an instrument (an instrument's instance has no insert uid).
 pub const INSTRUMENT_UID: u64 = u64::MAX;

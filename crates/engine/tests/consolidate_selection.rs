@@ -1,10 +1,10 @@
 //! Consolidate makes one clip per track that covers exactly the edit selection (#164).
 
 use serde_json::json;
-use soundcraft_audio_io::{AudioBuffer, FileFormat};
-use soundcraft_engine::{Engine, EngineError};
-use soundcraft_model::{Clip, TrackId};
-use soundcraft_time::Range;
+use transit_audio_io::{AudioBuffer, FileFormat};
+use transit_engine::{Engine, EngineError};
+use transit_model::{Clip, TrackId};
+use transit_time::Range;
 
 fn stereo_tracks(n: u64) -> Engine {
     let mut e = Engine::default();
@@ -22,9 +22,9 @@ fn add_clip(e: &mut Engine, i: usize, secs: i64) -> TrackId {
     let frames = usize::try_from(secs * sr(e)).unwrap();
     let t = e.session().tracks[i].id;
     let buf = AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; frames]; 2] };
-    let src = soundcraft_engine::io::add_source(e.session_mut(), "tone", buf, None, FileFormat::Wav);
+    let src = transit_engine::io::add_source(e.session_mut(), "tone", buf, None, FileFormat::Wav);
     let id = e.session_mut().new_clip_id();
-    soundcraft_engine::edit::place_clip(e.session_mut(), t, Clip::audio(id, "tone", src, 0, 0, frames as i64));
+    transit_engine::edit::place_clip(e.session_mut(), t, Clip::audio(id, "tone", src, 0, 0, frames as i64));
     t
 }
 
@@ -102,7 +102,7 @@ fn a_selection_too_long_to_render_is_refused_not_shortened() {
     add_clip(&mut e, 0, 1);
     let before: Vec<_> = (0..2).map(|i| clips(&e, i)).collect();
     // A stereo track renders at most MAX_RENDER_SAMPLES / 2 frames (about 93 minutes at 48 kHz).
-    let max = i64::try_from(soundcraft_mix::MAX_RENDER_SAMPLES / 2).unwrap();
+    let max = i64::try_from(transit_mix::MAX_RENDER_SAMPLES / 2).unwrap();
     let err = e.execute("edit.consolidate", &json!({"start": 0, "end": max + 1})).unwrap_err();
     assert!(matches!(err, EngineError::BadParams(..)), "{err}");
     assert!(err.to_string().contains("too long"), "{err}");

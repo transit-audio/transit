@@ -2,15 +2,15 @@
 //! Its own test binary, so saturating the global pool here stalls no other test.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_mix::{
-    Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen, create_instance,
-    mark_audio_thread,
-};
-use soundcraft_model::{ChannelFormat, Clip, Session, SourceAudio, SourceId, TrackKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
+use transit_audio_io::AudioBuffer;
+use transit_mix::{
+    Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen, create_instance,
+    mark_audio_thread,
+};
+use transit_model::{ChannelFormat, Clip, Session, SourceAudio, SourceId, TrackKind};
 
 const FRAMES: usize = 512;
 
@@ -141,13 +141,13 @@ fn render_pool_workers_promote_themselves_at_start() {
         in_channels: 0,
     });
     let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let workers = cores.saturating_sub(1).min(soundcraft_mix::MAX_RENDER_WORKERS);
+    let workers = cores.saturating_sub(1).min(transit_mix::MAX_RENDER_WORKERS);
     if workers < 2 {
         return; // no pool on this machine
     }
     let start = Instant::now();
     let seen = loop {
-        let seen = soundcraft_mix::render_worker_promotions();
+        let seen = transit_mix::render_worker_promotions();
         if seen.iter().take(workers).all(Option::is_some) {
             break seen;
         }
@@ -155,7 +155,7 @@ fn render_pool_workers_promote_themselves_at_start() {
         std::thread::sleep(Duration::from_millis(1));
     };
     assert!(seen.iter().skip(workers).all(Option::is_none), "{seen:?}");
-    let disabled = std::env::var(soundcraft_mix::RENDER_NO_PRIORITY_ENV).is_ok_and(|v| v.trim() == "1");
+    let disabled = std::env::var(transit_mix::RENDER_NO_PRIORITY_ENV).is_ok_and(|v| v.trim() == "1");
     for p in seen.iter().flatten() {
         if disabled {
             assert_eq!(*p, transit_rt::Promotion::Unsupported("disabled"));

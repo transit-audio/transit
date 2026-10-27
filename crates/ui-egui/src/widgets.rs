@@ -331,14 +331,14 @@ pub fn fader(ui: &mut Ui, r: Rect, db: f32, id: egui::Id) -> Option<f32> {
     let numbers_x = slot.center().x - cap_w * 0.5 - 1.0;
     let mut last = f32::NEG_INFINITY;
     for mark in [12.0f32, 6.0, 0.0, -5.0, -10.0, -15.0, -20.0, -30.0, -40.0, -60.0] {
-        let y = slot.max.y - slot.height() * soundcraft_model::fader_db_to_pos(mark);
+        let y = slot.max.y - slot.height() * transit_model::fader_db_to_pos(mark);
         p.hline(slot.min.x - 6.0..=slot.min.x - 2.0, y, Stroke::new(1.0, t.text_dim.gamma_multiply(0.7)));
         if numbers_x - r.min.x >= 10.0 && y - last >= 9.0 {
             p.text(pos2(numbers_x, y), Align2::RIGHT_CENTER, format!("{}", mark.abs()), regular(8.0), t.text_dim);
             last = y;
         }
     }
-    let pos = soundcraft_model::fader_db_to_pos(db);
+    let pos = transit_model::fader_db_to_pos(db);
     let y = slot.max.y - slot.height() * pos;
     let cap = Rect::from_center_size(pos2(slot.center().x, y), vec2(cap_w, FADER_CAP_H));
     p.rect_filled(cap.translate(vec2(0.0, 2.0)).expand(1.0), 4.0, Color32::from_black_alpha(80));
@@ -359,7 +359,7 @@ pub fn fader(ui: &mut Ui, r: Rect, db: f32, id: egui::Id) -> Option<f32> {
         let fine = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
         let dy = resp.drag_delta().y / slot.height() * if fine { 0.1 } else { 1.0 };
         let np = (pos - dy).clamp(0.0, 1.0);
-        return Some(soundcraft_model::fader_pos_to_db(np).clamp(-144.0, 12.0));
+        return Some(transit_model::fader_pos_to_db(np).clamp(-144.0, 12.0));
     }
     None
 }
@@ -698,8 +698,8 @@ mod selector_visual_regressions {
         }
     }
 
-    fn mixer_app(narrow: bool, mode: soundcraft_model::AutomationMode) -> crate::SoundApp {
-        let mut app = crate::SoundApp::new(soundcraft_engine::Engine::default(), None, Default::default());
+    fn mixer_app(narrow: bool, mode: transit_model::AutomationMode) -> crate::SoundApp {
+        let mut app = crate::SoundApp::new(transit_engine::Engine::default(), None, Default::default());
         app.run("track.new", serde_json::json!({"name": "Voice"})).unwrap();
         app.run("track.new", serde_json::json!({"name": "Music"})).unwrap();
         let ids: Vec<_> = app.engine.session().tracks.iter().map(|track| track.id).collect();
@@ -716,7 +716,7 @@ mod selector_visual_regressions {
     fn actual_mixer_keeps_every_active_automation_mode_legible() {
         let _palette = crate::theme::lock_test_palette();
         for narrow in [false, true] {
-            for mode in soundcraft_model::AutomationMode::ALL {
+            for mode in transit_model::AutomationMode::ALL {
                 for scale in [1.0, 1.5, 2.0] {
                     let ctx = egui::Context::default();
                     crate::fonts::install(&ctx);
@@ -727,7 +727,7 @@ mod selector_visual_regressions {
                     assert_eq!(ctx.content_rect().size(), vec2(320.0, 640.0));
                     assert_eq!(ctx.pixels_per_point(), scale);
                     let long = format!("auto {}", mode.label());
-                    let short = if mode == soundcraft_model::AutomationMode::TouchLatch { "t/l" } else { mode.label() };
+                    let short = if mode == transit_model::AutomationMode::TouchLatch { "t/l" } else { mode.label() };
                     let texts: Vec<_> = output
                         .shapes
                         .iter()
@@ -758,7 +758,7 @@ mod selector_visual_regressions {
         let _palette = crate::theme::lock_test_palette();
         let Some(directory) = std::env::var_os("CRAFT_UI_VISUAL_FIXTURES").map(std::path::PathBuf::from) else { return };
         std::fs::create_dir_all(&directory).unwrap();
-        for mode in soundcraft_model::AutomationMode::ALL {
+        for mode in transit_model::AutomationMode::ALL {
             for narrow in [false, true] {
                 for scale in [1.0, 1.5, 2.0] {
                     let mut ready = false;

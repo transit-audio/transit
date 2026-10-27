@@ -1,5 +1,5 @@
-use soundcraft_dsp::offline::detect_transients;
 use std::f32::consts::TAU;
+use transit_dsp::offline::detect_transients;
 
 const SR: f32 = 48_000.0;
 

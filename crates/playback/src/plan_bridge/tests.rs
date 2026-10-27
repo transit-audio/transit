@@ -3,10 +3,10 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 
 use crate::{MeterSnapshot, plan_bridge, publication::Service, record::InputRing};
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_mix::{CompileError, DeviceGeneration, EnvelopeState, InstanceSpec, NewInstance, PlanGeneration, PlanLimits, RenderTarget, SlotGen};
-use soundcraft_model::{ChannelFormat, Clip, Insert, Session, SourceAudio, SourceId, TrackKind};
 use std::sync::{Arc, Mutex};
+use transit_audio_io::AudioBuffer;
+use transit_mix::{CompileError, DeviceGeneration, EnvelopeState, InstanceSpec, NewInstance, PlanGeneration, PlanLimits, RenderTarget, SlotGen};
+use transit_model::{ChannelFormat, Clip, Insert, Session, SourceAudio, SourceId, TrackKind};
 use transit_rt::testing::measure;
 
 #[global_allocator]
@@ -17,7 +17,7 @@ fn target() -> RenderTarget {
 }
 
 fn make(spec: &InstanceSpec, _: SlotGen) -> Option<NewInstance> {
-    soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
+    transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
 }
 
 fn session(format: ChannelFormat) -> Session {
@@ -166,7 +166,7 @@ fn target_and_storage_limits_reject_before_factories_or_active_changes() {
     let (mut control, audio) = plan_bridge::pair(target(), PlanLimits { tracks: 0, ..PlanLimits::default() });
     control.request(Arc::new(session(ChannelFormat::Stereo)), None);
     assert!(matches!(control.prepare(&mut |_, _| panic!("factory must not run")), Err(CompileError::ResourceLimit { .. })));
-    control.request(Arc::new(Session::new("other rate", soundcraft_time::SampleRate::new(44_100).unwrap())), None);
+    control.request(Arc::new(Session::new("other rate", transit_time::SampleRate::new(44_100).unwrap())), None);
     assert!(matches!(control.prepare(&mut |_, _| panic!("factory must not run")), Err(CompileError::TargetMismatch { .. })));
     assert_eq!(control.active(), PlanGeneration::EMPTY);
     control.retire(audio);
@@ -189,13 +189,13 @@ fn rejected_instances_keep_their_binding_when_reused_and_status_never_crosses_ge
     control.request(Arc::clone(&s), None);
     control.prepare(&mut make).unwrap();
     let binding = control.pending_bindings().unwrap();
-    audio.mix = soundcraft_mix::MixEngine::realtime(RenderTarget { device: DeviceGeneration(2), ..target() });
+    audio.mix = transit_mix::MixEngine::realtime(RenderTarget { device: DeviceGeneration(2), ..target() });
     adopt(&mut audio);
     assert!(matches!(control.poll(), Some(super::ReturnReport { state: EnvelopeState::Rejected { .. }, .. })));
     assert_eq!(control.active(), PlanGeneration::EMPTY);
     assert!(control.active_bindings().is_empty());
     assert!(control.take_released().is_empty(), "refused instance is retained in the bounded compiler pool");
-    audio.mix = soundcraft_mix::MixEngine::realtime(target());
+    audio.mix = transit_mix::MixEngine::realtime(target());
     control.request(Arc::clone(&s), None);
     control.prepare(&mut |_, _| panic!("pooled instance must be reused")).unwrap();
     assert_eq!(control.pending_bindings().unwrap(), binding);
@@ -220,14 +220,14 @@ fn rejected_instances_keep_their_binding_when_reused_and_status_never_crosses_ge
 }
 
 struct Tracked {
-    inner: Box<dyn soundcraft_dsp::Plugin>,
+    inner: Box<dyn transit_dsp::Plugin>,
     drops: Arc<Mutex<Vec<std::thread::ThreadId>>>,
     panic_sample: Option<Arc<std::sync::atomic::AtomicBool>>,
     panic_processing: Option<Arc<std::sync::atomic::AtomicBool>>,
 }
 
-impl soundcraft_dsp::Plugin for Tracked {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+impl transit_dsp::Plugin for Tracked {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
         self.inner.info()
     }
     fn prepare(&mut self, rate: f32, block: usize, channels: usize) {
@@ -262,7 +262,7 @@ impl soundcraft_dsp::Plugin for Tracked {
         );
         self.inner.all_notes_off();
     }
-    fn set_sample(&mut self, sample: Option<Arc<dyn soundcraft_dsp::SampleSource>>) -> bool {
+    fn set_sample(&mut self, sample: Option<Arc<dyn transit_dsp::SampleSource>>) -> bool {
         assert!(!self.panic_sample.as_ref().is_some_and(|flag| flag.load(std::sync::atomic::Ordering::Relaxed)), "injected sample adoption fault");
         self.inner.set_sample(sample)
     }
@@ -284,7 +284,7 @@ fn shutdown_recovers_queued_returned_rejected_and_live_instances_on_control() {
         control.request(Arc::new(s), None);
         control
             .prepare(&mut |spec, _| {
-                let mut inner = soundcraft_dsp::create("gain")?;
+                let mut inner = transit_dsp::create("gain")?;
                 inner.prepare(48_000.0, 512, spec.ch);
                 Some(NewInstance {
                     plugin: Box::new(Tracked { inner, drops: Arc::clone(&drops), panic_sample: None, panic_processing: None }),
@@ -294,7 +294,7 @@ fn shutdown_recovers_queued_returned_rejected_and_live_instances_on_control() {
             .unwrap();
         let bindings = control.pending_bindings().unwrap();
         if stage == 4 {
-            audio.mix = soundcraft_mix::MixEngine::realtime(RenderTarget { device: DeviceGeneration(2), ..target() });
+            audio.mix = transit_mix::MixEngine::realtime(RenderTarget { device: DeviceGeneration(2), ..target() });
         }
         if stage != 0 {
             // The owner stays on control in production; this harness returns the entire
@@ -344,7 +344,7 @@ fn an_adoption_unwind_keeps_the_outer_envelope_until_control_teardown() {
     control.request(Arc::new(s.clone()), None);
     control
         .prepare(&mut |spec, _| {
-            let mut inner = soundcraft_dsp::create(&spec.id)?;
+            let mut inner = transit_dsp::create(&spec.id)?;
             inner.prepare(48_000.0, 512, spec.ch);
             Some(NewInstance {
                 plugin: Box::new(Tracked {
@@ -545,7 +545,7 @@ fn stale_status_cannot_change_the_compilers_delay_capacity_hints() {
         .status_tx
         .push(super::StatusReport {
             generation: stale,
-            status: soundcraft_mix::PlanStatus { capacity_exceeded: 1, required_latency: 16_384, ..Default::default() },
+            status: transit_mix::PlanStatus { capacity_exceeded: 1, required_latency: 16_384, ..Default::default() },
         })
         .unwrap();
     control.poll();
@@ -572,7 +572,7 @@ fn a_rejected_plan_cannot_replace_output_input_fold_or_meter_owners() {
     control.request(Arc::new(session(ChannelFormat::Stereo)), Some(InputRing::new(1, 48_000)));
     control.prepare(&mut make).unwrap();
     // Deliberately corrupt the target on control to exercise atomic rejection.
-    audio.mix = soundcraft_mix::MixEngine::realtime(RenderTarget { device: DeviceGeneration(2), ..target() });
+    audio.mix = transit_mix::MixEngine::realtime(RenderTarget { device: DeviceGeneration(2), ..target() });
     adopt(&mut audio);
     assert_eq!(audio.output(), previous_output);
     assert_eq!(*audio.fold(), previous_fold);
@@ -599,7 +599,7 @@ fn public_stop_handler_reaches_the_plugin_before_ack_and_faults_both_classes_on_
         control.request(Arc::new(session), None);
         control
             .prepare(&mut |spec, _| {
-                let mut inner = soundcraft_dsp::create("gain")?;
+                let mut inner = transit_dsp::create("gain")?;
                 inner.prepare(48_000.0, 512, spec.ch);
                 Some(NewInstance {
                     plugin: Box::new(Tracked { inner, drops: Arc::clone(&drops), panic_sample: None, panic_processing: Some(Arc::clone(&fault)) }),

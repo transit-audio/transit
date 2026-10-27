@@ -1,8 +1,8 @@
 use egui::os::OperatingSystem;
 use egui::{Event, Key, Modifiers, PointerButton, Pos2, RawInput, Rect, pos2, vec2};
 use serde_json::json;
-use soundcraft_model::TrackHeight;
-use soundcraft_ui_egui::{Services, SoundApp, shortcuts};
+use transit_model::TrackHeight;
+use transit_ui_egui::{Services, SoundApp, shortcuts};
 
 fn frame(ctx: &egui::Context, app: &mut SoundApp, events: Vec<Event>) {
     let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0))), events, ..Default::default() };
@@ -24,7 +24,7 @@ fn button(pos: Pos2, pressed: bool) -> Event {
 }
 
 fn rig() -> (egui::Context, SoundApp) {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     let ctx = egui::Context::default();
     frame(&ctx, &mut app, vec![]);
     frame(&ctx, &mut app, vec![]);
@@ -94,9 +94,7 @@ fn cmd_drags_to_any_height_alt_resizes_every_track_and_alt_shift_the_selected_on
     assert_eq!((height(&app, "Kick"), height(&app, "Snare")), (TrackHeight::Custom(108), TrackHeight::Medium));
 
     drag_edge(&ctx, &mut app, "Snare", 44.0, Modifiers::ALT);
-    assert!(
-        app.edit_layout.rows.iter().all(|(t, _)| app.engine.session().track(soundcraft_model::TrackId(*t)).unwrap().height == TrackHeight::Large)
-    );
+    assert!(app.edit_layout.rows.iter().all(|(t, _)| app.engine.session().track(transit_model::TrackId(*t)).unwrap().height == TrackHeight::Large));
 
     select(&mut app, &["Hats", "Bass"]);
     drag_edge(&ctx, &mut app, "Kick", -86.0, Modifiers { alt: true, shift: true, ..Modifiers::NONE });

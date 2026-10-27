@@ -5,9 +5,9 @@
 //! sample positions their bars now fall on. Samples-timebase tracks never move.
 
 use serde_json::{Value, json};
-use soundcraft_engine::Engine;
-use soundcraft_model::{Clip, ClipId, Session, Source, SourceId, TrackId};
-use soundcraft_time::{BarBeat, Samples};
+use transit_engine::Engine;
+use transit_model::{Clip, ClipId, Session, Source, SourceId, TrackId};
+use transit_time::{BarBeat, Samples};
 
 /// One bar of 4/4 at 120 BPM and 48 kHz.
 const BAR: Samples = 96_000;
@@ -36,7 +36,7 @@ fn source(id: u64) -> Source {
         channels: 1,
         frames: 10_000_000,
         sample_rate: 48_000,
-        format: soundcraft_audio_io::FileFormat::Wav,
+        format: transit_audio_io::FileFormat::Wav,
         time_reference: 0,
         unsaved: false,
     }
@@ -224,8 +224,8 @@ fn markers_key_changes_and_the_loop_range_stay_on_their_bars() {
     let (mut e, _, _) = midi_at_bar_5();
     run(&mut e, "markers.add", json!({"name": "Chorus", "at": bar(9)}));
     run(&mut e, "event.add_key_change", json!({"key": "A minor", "at": bar(9)}));
-    e.session_mut().edit.timeline_selection = soundcraft_time::Range::new(bar(3), bar(7));
-    e.session_mut().edit.selection = soundcraft_time::Range::new(bar(3), bar(7));
+    e.session_mut().edit.timeline_selection = transit_time::Range::new(bar(3), bar(7));
+    e.session_mut().edit.selection = transit_time::Range::new(bar(3), bar(7));
     run(&mut e, "event.tempo", json!({"bpm": 140, "at": 0}));
     let s = e.session();
     on_bar(s, s.markers[0].start, 9);
@@ -345,16 +345,16 @@ fn a_tempo_change_is_one_undo_step() {
 #[test]
 fn importing_a_midi_tempo_map_keeps_existing_midi_clips_on_their_bars() {
     let (mut e, _, c) = midi_at_bar_5();
-    let mut seq = soundcraft_midi::Sequence::default();
-    seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 960 });
-    let smf = soundcraft_midi::Smf {
+    let mut seq = transit_midi::Sequence::default();
+    seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 960 });
+    let smf = transit_midi::Smf {
         format: 1,
-        tracks: vec![soundcraft_midi::SmfTrack { name: "Lead".into(), sequence: seq }],
+        tracks: vec![transit_midi::SmfTrack { name: "Lead".into(), sequence: seq }],
         tempos: vec![(0, 72.0)],
         ..Default::default()
     };
-    let bytes = soundcraft_midi::write_smf(&smf).unwrap();
-    soundcraft_engine::io::import_midi_bytes(&mut e, &bytes, 0, true).unwrap();
+    let bytes = transit_midi::write_smf(&smf).unwrap();
+    transit_engine::io::import_midi_bytes(&mut e, &bytes, 0, true).unwrap();
     assert!((e.session().tempo.tempo_at_tick(0) - 72.0).abs() < 0.01);
     let k = clip(&e, c);
     on_bar(e.session(), k.start, 5);
@@ -578,7 +578,7 @@ fn moving_the_song_start_moves_all_musical_material() {
 }
 
 /// 10,000 clips and 100,000 automation points under 2,001 tempo events: one retime must fit in a
-/// drag step. Run with `cargo test --release -p soundcraft-engine --test tempo_retime -- --ignored`.
+/// drag step. Run with `cargo test --release -p transit-engine --test tempo_retime -- --ignored`.
 #[test]
 #[ignore]
 fn retiming_a_large_session_is_fast() {
@@ -586,19 +586,19 @@ fn retiming_a_large_session_is_fast() {
     for i in 0..2_000i64 {
         s.tempo.set_tempo(i * 960, 100.0 + (i % 40) as f64).unwrap();
     }
-    let t = s.add_track(soundcraft_model::TrackKind::Midi, soundcraft_model::ChannelFormat::Mono, Some("big"));
+    let t = s.add_track(transit_model::TrackKind::Midi, transit_model::ChannelFormat::Mono, Some("big"));
     let end = s.tempo.tick_to_samples(2_000 * 960, s.sample_rate);
     let step = end / 10_000;
     let clips: Vec<Clip> =
-        (0..10_000).map(|i| Clip::midi(ClipId(1_000_000 + i as u64), "c", i * step, step - 10, soundcraft_midi::Sequence::default())).collect();
+        (0..10_000).map(|i| Clip::midi(ClipId(1_000_000 + i as u64), "c", i * step, step - 10, transit_midi::Sequence::default())).collect();
     let tr = s.track_mut(t).unwrap();
     tr.playlist_mut().unwrap().clips = clips;
-    let lane = tr.lane_mut(&soundcraft_model::AutoParam::Volume);
-    lane.points = (0..100_000).map(|i| soundcraft_model::AutomationPoint { at: i * (end / 100_000), value: 0.0 }).collect();
+    let lane = tr.lane_mut(&transit_model::AutoParam::Volume);
+    lane.points = (0..100_000).map(|i| transit_model::AutomationPoint { at: i * (end / 100_000), value: 0.0 }).collect();
     let old = s.tempo.clone();
     s.tempo.scale_tempos(1.1).unwrap();
     let t0 = std::time::Instant::now();
-    soundcraft_engine::retime::retime_to_tempo(&mut s, &old).unwrap();
+    transit_engine::retime::retime_to_tempo(&mut s, &old).unwrap();
     let took = t0.elapsed();
     eprintln!("retime of 10k clips and 100k points under 2,001 tempo events: {took:?}");
     assert_playlists_valid(&s);
@@ -625,7 +625,7 @@ fn a_refused_step_mid_drag_is_invisible_to_the_gesture() {
     e.execute_merged("event.tempo", &json!({"bpm": 130, "at": 0}), "tempo_drag").unwrap();
     e.execute_merged("event.tempo", &json!({"bpm": 120, "at": 0}), "tempo_drag").unwrap();
     e.end_merge();
-    assert_eq!(clip(&e, d).range(), soundcraft_time::Range::new(0, 2 * BAR), "no truncation from the refused step");
+    assert_eq!(clip(&e, d).range(), transit_time::Range::new(0, 2 * BAR), "no truncation from the refused step");
     assert_eq!(positions(e.session()), before);
     assert_eq!(e.undo_history().len(), undo + 1, "one undo step");
     assert_eq!(e.journal.len(), journal + 1, "one journal line: {:?}", &e.journal[journal..]);

@@ -3,17 +3,17 @@
 //! channel, voice id, offset and order of each one as the plug-in does.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::Plugin;
-use soundcraft_dsp::event::{Message, NoteId, PluginEvent};
+use transit_dsp::Plugin;
+use transit_dsp::event::{Message, NoteId, PluginEvent};
 
 mod common;
 use common::fixture_dir;
 
 /// The fixture's events synth, prepared for blocks of `block` frames.
 fn synth(block: usize) -> Box<dyn Plugin> {
-    let found = soundcraft_vst3_host::scan_paths(&[fixture_dir().to_path_buf()]);
+    let found = transit_vst3_host::scan_paths(&[fixture_dir().to_path_buf()]);
     let id = found.into_iter().find(|d| d.name == "Fixture Events").unwrap().id;
-    let mut p = soundcraft_vst3_host::create(&id).unwrap();
+    let mut p = transit_vst3_host::create(&id).unwrap();
     p.prepare(48_000.0, block, 2);
     p
 }
@@ -53,7 +53,7 @@ fn a_host_set_value_reaches_the_processor_and_then_the_editor() {
     let r = records(&mut p, 256);
     assert!(r.contains(&(4, 0, 5, 800_000)), "the processor got ParamID 5 = 0.8: {r:?}");
     assert!(!r.iter().any(|x| x.0 == 5), "the controller is told on the main thread, not from the audio side: {r:?}");
-    soundcraft_vst3_host::service_requests(); // the frame loop's service, on the instance's main thread
+    transit_vst3_host::service_requests(); // the frame loop's service, on the instance's main thread
     let r = records(&mut p, 256);
     assert_eq!(r.iter().filter(|x| x.0 == 5).copied().collect::<Vec<_>>(), vec![(5, 0, 5, 800_000)], "the controller has 0.8: {r:?}");
 }

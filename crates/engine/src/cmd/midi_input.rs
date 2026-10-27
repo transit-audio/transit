@@ -3,7 +3,7 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::MidiPort;
+use transit_model::MidiPort;
 
 const ID: &str = "midi.input";
 

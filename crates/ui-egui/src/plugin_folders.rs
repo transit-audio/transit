@@ -39,52 +39,52 @@ impl Format {
     }
     fn search_dirs(self) -> (Vec<PathBuf>, Vec<PathBuf>) {
         match self {
-            Format::Vst3 => soundcraft_vst3_host::search_dirs(),
-            Format::Clap => soundcraft_clap_host::search_dirs(),
+            Format::Vst3 => transit_vst3_host::search_dirs(),
+            Format::Clap => transit_clap_host::search_dirs(),
         }
     }
     fn set_extra_dirs(self, dirs: &[String]) {
         let dirs = dirs.iter().map(PathBuf::from).collect();
         match self {
-            Format::Vst3 => soundcraft_vst3_host::set_extra_dirs(dirs),
-            Format::Clap => soundcraft_clap_host::set_extra_dirs(dirs),
+            Format::Vst3 => transit_vst3_host::set_extra_dirs(dirs),
+            Format::Clap => transit_clap_host::set_extra_dirs(dirs),
         }
     }
     /// The number of plugins found, `None` while scanning or before the first scan.
     fn found(self) -> Option<usize> {
         match self {
-            Format::Vst3 => soundcraft_vst3_host::cached().map(|l| l.len()),
-            Format::Clap => soundcraft_clap_host::cached().map(|l| l.len()),
+            Format::Vst3 => transit_vst3_host::cached().map(|l| l.len()),
+            Format::Clap => transit_clap_host::cached().map(|l| l.len()),
         }
     }
     fn scanning(self) -> bool {
         match self {
-            Format::Vst3 => soundcraft_vst3_host::scanning(),
-            Format::Clap => soundcraft_clap_host::scanning(),
+            Format::Vst3 => transit_vst3_host::scanning(),
+            Format::Clap => transit_clap_host::scanning(),
         }
     }
     fn rescan(self, clear_cache: bool) {
         match self {
-            Format::Vst3 => soundcraft_vst3_host::rescan_in_background(clear_cache),
-            Format::Clap => soundcraft_clap_host::rescan_in_background(clear_cache),
+            Format::Vst3 => transit_vst3_host::rescan_in_background(clear_cache),
+            Format::Clap => transit_clap_host::rescan_in_background(clear_cache),
         }
     }
     fn progress(self) -> Option<(usize, usize, PathBuf)> {
         match self {
-            Format::Vst3 => soundcraft_vst3_host::progress(),
-            Format::Clap => soundcraft_clap_host::progress(),
+            Format::Vst3 => transit_vst3_host::progress(),
+            Format::Clap => transit_clap_host::progress(),
         }
     }
     fn skip(self) {
         match self {
-            Format::Vst3 => soundcraft_vst3_host::skip_scan(),
-            Format::Clap => soundcraft_clap_host::skip_scan(),
+            Format::Vst3 => transit_vst3_host::skip_scan(),
+            Format::Clap => transit_clap_host::skip_scan(),
         }
     }
     fn problems(self) -> Vec<(PathBuf, String)> {
         match self {
-            Format::Vst3 => soundcraft_vst3_host::problems(),
-            Format::Clap => soundcraft_clap_host::problems(),
+            Format::Vst3 => transit_vst3_host::problems(),
+            Format::Clap => transit_clap_host::problems(),
         }
     }
 }
@@ -96,13 +96,13 @@ impl Format {
 pub fn start(dirs: &PluginDirs, settings_dir: Option<&Path>, scanner: Option<PathBuf>) {
     Format::Vst3.set_extra_dirs(&dirs.vst3);
     Format::Clap.set_extra_dirs(&dirs.clap);
-    soundcraft_vst3_host::set_scanner(scanner.clone());
-    soundcraft_clap_host::set_scanner(scanner);
+    transit_vst3_host::set_scanner(scanner.clone());
+    transit_clap_host::set_scanner(scanner);
     if let Some(dir) = settings_dir {
-        soundcraft_vst3_host::set_cache_file(Some(dir.join("plugins-vst3.json")));
-        soundcraft_clap_host::set_cache_file(Some(dir.join("plugins-clap.json")));
-        soundcraft_vst3_host::scan_in_background();
-        soundcraft_clap_host::scan_in_background();
+        transit_vst3_host::set_cache_file(Some(dir.join("plugins-vst3.json")));
+        transit_clap_host::set_cache_file(Some(dir.join("plugins-clap.json")));
+        transit_vst3_host::scan_in_background();
+        transit_clap_host::scan_in_background();
     }
 }
 
@@ -111,10 +111,10 @@ pub fn start(dirs: &PluginDirs, settings_dir: Option<&Path>, scanner: Option<Pat
 pub fn scan_child(args: &[String]) -> Option<String> {
     let [flag, file] = args else { return None };
     let file = Path::new(file);
-    if flag == soundcraft_vst3_host::SCAN_FLAG {
-        Some(soundcraft_vst3_host::scan_reply(file))
-    } else if flag == soundcraft_clap_host::SCAN_FLAG {
-        Some(soundcraft_clap_host::scan_reply(file))
+    if flag == transit_vst3_host::SCAN_FLAG {
+        Some(transit_vst3_host::scan_reply(file))
+    } else if flag == transit_clap_host::SCAN_FLAG {
+        Some(transit_clap_host::scan_reply(file))
     } else {
         None
     }
@@ -141,7 +141,7 @@ pub fn scan_notice(ctx: &egui::Context) {
     let now = ctx.input(|i| i.time);
     let Some((format, (i, n, file))) = [Format::Vst3, Format::Clap].into_iter().find_map(|f| f.progress().map(|p| (f, p))) else {
         ctx.data_mut(|d| d.remove_temp::<f64>(since_id));
-        if soundcraft_vst3_host::scanning() || soundcraft_clap_host::scanning() {
+        if transit_vst3_host::scanning() || transit_clap_host::scanning() {
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
         return;

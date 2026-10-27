@@ -1,5 +1,5 @@
 //! Third-party VST3 plugins: discovery (`engine.vst3_plugins`). Hosting itself lives in
-//! `soundcraft-vst3-host`; id lookup for the mixer commands is shared with CLAP in
+//! `transit-vst3-host`; id lookup for the mixer commands is shared with CLAP in
 //! `cmd::clap::plugin_info`.
 
 use super::*;

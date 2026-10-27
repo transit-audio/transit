@@ -1,6 +1,6 @@
 use super::*;
 use crate::Services;
-use soundcraft_midi::scale::{KeyScale, Scale, ScaleMode};
+use transit_midi::scale::{KeyScale, Scale, ScaleMode};
 
 struct Harness {
     app: StudioApp,
@@ -12,7 +12,7 @@ struct Harness {
 
 impl Harness {
     fn new() -> Self {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         let track = app.run("track.new", json!({"kind": "instrument"})).unwrap()["tracks"][0].as_u64().unwrap();
         let clip = ClipId(app.run("midi.new_clip", json!({"track": track, "start": 0, "length": 96000})).unwrap()["clip"].as_u64().unwrap());
         assert!(app.open_keys(clip));
@@ -130,7 +130,7 @@ fn folded_scale_keeps_accidentals_and_live_input_inline() {
     let mode = h.app.keys_scale();
     let rows = scale::Rows::new(mode, &h.app.keys_notes(), &h.app.keys.live, false);
     assert!(!rows.contains(64));
-    h.app.live_midi(soundcraft_playback::PlayedNote { pitch: 64, velocity: 97, on: true });
+    h.app.live_midi(transit_playback::PlayedNote { pitch: 64, velocity: 97, on: true });
     assert_eq!(h.app.live_keys(), [(64, 97)]);
     h.frames(1);
     let (_, rect) = h.app.keys.layout.pitch_rows.iter().find(|(p, _)| *p == 64).unwrap();
@@ -143,7 +143,7 @@ fn folded_scale_keeps_accidentals_and_live_input_inline() {
     let rows = scale::Rows::new(mode, &h.app.keys_notes(), &h.app.keys.live, false);
     assert!(rows.contains(64));
     assert_eq!(rows.pitch(rows.rank(64.0)), 64.0);
-    h.app.live_midi(soundcraft_playback::PlayedNote { pitch: 64, velocity: 0, on: false });
+    h.app.live_midi(transit_playback::PlayedNote { pitch: 64, velocity: 0, on: false });
     assert!(h.app.live_keys().is_empty());
     assert_eq!(h.app.keys_notes().len(), 3);
     let empty = scale::Rows::new(mode, &[], &[0; 128], false);
@@ -168,7 +168,7 @@ fn step_entry_snaps_only_the_edit_and_chromatic_override_keeps_accidentals() {
     let mut h = Harness::new();
     h.minor(false);
     h.app.step_toggle();
-    let note = |on| soundcraft_playback::PlayedNote { pitch: 64, velocity: if on { 97 } else { 0 }, on };
+    let note = |on| transit_playback::PlayedNote { pitch: 64, velocity: if on { 97 } else { 0 }, on };
     h.app.live_midi(note(true));
     assert_eq!(h.app.live_keys(), [(64, 97)]);
     h.app.live_midi(note(false));

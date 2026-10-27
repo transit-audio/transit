@@ -4,11 +4,11 @@
 //! device: the worker's output is fed in as the `MapMsg`s it would publish.
 use super::*;
 use crate::midi_learn::{self, Action, Entry, Info};
-use soundcraft_model::{Control, MapMode, Scope};
-use soundcraft_playback::MapMsg;
+use transit_model::{Control, MapMode, Scope};
+use transit_playback::MapMsg;
 
 fn new_app() -> (StudioApp, egui::Context, f64, TrackId) {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let r = app.run("track.new", json!({"kind": "audio", "format": "stereo", "name": "Gtr"})).unwrap();
     let t = TrackId(r["tracks"][0].as_u64().unwrap());
     app.ui.show_mixer = true;
@@ -62,7 +62,7 @@ fn candidate(app: &mut StudioApp, port: &str, cc: u8) {
     app.midi_learn_apply((0, msgs), 0.0);
 }
 
-use soundcraft_model::SourceKind;
+use transit_model::SourceKind;
 
 #[test]
 fn the_menu_state_machine_offers_learn_forget_and_cancel() {
@@ -263,7 +263,7 @@ fn the_profile_is_kept_in_the_preferences_and_old_preferences_load_without_it() 
     let saved = serde_json::to_value(&app.ui).unwrap();
     // A fresh run: the preferences' profile goes to the engine on the first frame.
     let ui: UiState = serde_json::from_value(saved).unwrap();
-    let mut fresh = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut fresh = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     fresh.ui = ui;
     let ctx = egui::Context::default();
     let mut t2 = 0.0;
@@ -395,7 +395,7 @@ fn the_ui_polls_lightly_when_mapped_and_quiet_and_at_full_rate_only_on_news() {
     // `ui()` turns the feed's answer into a repaint request: none without mappings, a light poll
     // while mapped and quiet, the normal rate when the worker published something.
     let (mut app, ctx, mut time, t) = new_app();
-    app.player = Some(soundcraft_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap());
+    app.player = Some(transit_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap());
     frames(&mut app, &ctx, 3, &mut time);
     assert_eq!(app.midi_learn_feed(time), None, "nothing mapped, nothing waiting: the UI may idle");
     map(&mut app, t, "volume", 7, json!({"mode": "jump"}));
@@ -416,7 +416,7 @@ fn a_candidate_after_the_session_was_replaced_maps_nothing() {
     let (mut app, ctx, mut time, t) = new_app();
     app.run("midi.learn", json!({"target": format!("track:{}:volume", t.0)})).unwrap();
     frames(&mut app, &ctx, 2, &mut time);
-    app.engine.replace_session(soundcraft_model::Session::default());
+    app.engine.replace_session(transit_model::Session::default());
     frames(&mut app, &ctx, 2, &mut time);
     candidate(&mut app, "KeyStep", 74);
     assert!(app.engine.session().midi_mappings.is_empty() && app.engine.midi_profile().is_empty());
@@ -425,7 +425,7 @@ fn a_candidate_after_the_session_was_replaced_maps_nothing() {
 #[test]
 fn an_audio_reconnect_rearms_the_new_worker_and_resets_pickup_counters() {
     let (mut app, ctx, mut time, t) = new_app();
-    let new_player = |app: &StudioApp| soundcraft_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap();
+    let new_player = |app: &StudioApp| transit_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap();
     app.player = Some(new_player(&app));
     app.run("midi.learn", json!({"target": format!("track:{}:volume", t.0)})).unwrap();
     frames(&mut app, &ctx, 2, &mut time);

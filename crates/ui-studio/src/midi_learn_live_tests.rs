@@ -6,9 +6,9 @@
 use crate::midi_learn::Entry;
 use crate::{Services, StudioApp};
 use serde_json::json;
-use soundcraft_model::{Control, TrackId};
 use std::time::{Duration, Instant};
 use transit_midi_io::fake::{Fake, FakeInputPort};
+use transit_model::{Control, TrackId};
 
 const PORT: &str = "KeyStep Pro MIDI IN";
 
@@ -20,8 +20,8 @@ struct T {
 
 impl T {
     fn new(fake: &Fake) -> T {
-        let engine = soundcraft_engine::Engine::default();
-        let mut player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+        let engine = transit_engine::Engine::default();
+        let mut player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
         player.enable_midi_for_test(fake.io());
         let app = StudioApp::new(engine, Some(player), Services::default());
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0 };
@@ -112,7 +112,7 @@ fn a_knob_pickup_holds_back_is_reported_once_and_the_fader_stays() {
     let key = fake.add_input(PORT);
     let port = fake.input_port(&key).unwrap();
     let mut t = T::new(&fake);
-    t.app.ui.midi_takeover = soundcraft_model::MapMode::Pickup;
+    t.app.ui.midi_takeover = transit_model::MapMode::Pickup;
     let r = t.app.run("track.new", json!({"kind": "audio"})).unwrap();
     let tr = TrackId(r["tracks"][0].as_u64().unwrap());
     t.frames(4);

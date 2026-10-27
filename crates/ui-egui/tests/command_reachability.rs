@@ -3,10 +3,10 @@
 //! MCP left users stuck (#282: `midi.new_clip` had no UI path, so an empty instrument track could
 //! never get a MIDI clip).
 
-use soundcraft_engine::{catalog, cmd::command_specs};
-use soundcraft_ui_egui::menus::{self, MenuNode};
 use std::collections::HashSet;
 use std::path::Path;
+use transit_engine::{catalog, cmd::command_specs};
+use transit_ui_egui::menus::{self, MenuNode};
 
 /// Known gaps: commands with no menu, shortcut or literal reference in the UI source today.
 /// Give each one a UI path and remove it from this list; don't add to it.

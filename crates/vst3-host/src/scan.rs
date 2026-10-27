@@ -1,8 +1,8 @@
 //! Finding VST3 plugins on disk (safe, pure `std::fs`), resolving bundles to their binaries and
 //! mapping VST3 sub-categories to SoundCraft categories.
 
-use soundcraft_dsp::Category;
 use std::path::{Path, PathBuf};
+use transit_dsp::Category;
 
 /// Directory recursion limit while scanning (vendors nest folders, never deeply).
 const MAX_DEPTH: usize = 8;

@@ -1,7 +1,7 @@
 //! User presets of hosted plug-ins (issue #68): a preset is the plug-in's full state, the same
 //! state a session stores, written in the format's own preset file so other hosts read it:
 //! `.vstpreset` for VST3 (Steinberg's container, component and controller state) and transit's
-//! documented container for CLAP (`soundcraft_clap_host::preset`). They live in the settings
+//! documented container for CLAP (`transit_clap_host::preset`). They live in the settings
 //! folder's `presets/` (beside the built-in devices' presets), one folder per plug-in type
 //! ([`folder`]). Reading, writing and listing them go through the checked file access
 //! ([`crate::io::presets`]).
@@ -19,9 +19,9 @@ pub enum Format {
 /// here).
 #[must_use]
 pub fn format_of(id: &str) -> Option<Format> {
-    if soundcraft_vst3_host::parse_id(id).is_some() {
+    if transit_vst3_host::parse_id(id).is_some() {
         Some(Format::Vst3)
-    } else if soundcraft_clap_host::parse_id(id).is_some() {
+    } else if transit_clap_host::parse_id(id).is_some() {
         Some(Format::Clap)
     } else {
         None
@@ -32,17 +32,17 @@ pub fn format_of(id: &str) -> Option<Format> {
 #[must_use]
 pub fn extension(id: &str) -> Option<&'static str> {
     Some(match format_of(id)? {
-        Format::Vst3 => soundcraft_vst3_host::preset::EXTENSION,
-        Format::Clap => soundcraft_clap_host::preset::EXTENSION,
+        Format::Vst3 => transit_vst3_host::preset::EXTENSION,
+        Format::Clap => transit_clap_host::preset::EXTENSION,
     })
 }
 
 /// Whether `path` names a preset file of either format (the only files a delete touches).
 #[must_use]
 pub fn is_preset_file(path: &Path) -> bool {
-    path.extension().and_then(|x| x.to_str()).is_some_and(|x| {
-        x.eq_ignore_ascii_case(soundcraft_vst3_host::preset::EXTENSION) || x.eq_ignore_ascii_case(soundcraft_clap_host::preset::EXTENSION)
-    })
+    path.extension()
+        .and_then(|x| x.to_str())
+        .is_some_and(|x| x.eq_ignore_ascii_case(transit_vst3_host::preset::EXTENSION) || x.eq_ignore_ascii_case(transit_clap_host::preset::EXTENSION))
 }
 
 /// A file-safe name: path separators and other trouble characters become spaces.
@@ -88,8 +88,8 @@ pub fn name_of(path: &Path) -> String {
 /// A plug-in without a preset format, or a state the format cannot hold.
 pub fn encode(id: &str, state: &[u8]) -> Result<Vec<u8>, String> {
     match format_of(id).ok_or_else(|| format!("`{id}` has no preset file format"))? {
-        Format::Vst3 => soundcraft_vst3_host::preset::file_from_state(id, state),
-        Format::Clap => soundcraft_clap_host::preset::file_from_state(id, state),
+        Format::Vst3 => transit_vst3_host::preset::file_from_state(id, state),
+        Format::Clap => transit_clap_host::preset::file_from_state(id, state),
     }
 }
 
@@ -99,8 +99,8 @@ pub fn encode(id: &str, state: &[u8]) -> Result<Vec<u8>, String> {
 /// A plug-in without a preset format, a file that is not its preset, or one for another plug-in.
 pub fn decode(id: &str, file: &[u8]) -> Result<Vec<u8>, String> {
     match format_of(id).ok_or_else(|| format!("`{id}` has no preset file format"))? {
-        Format::Vst3 => soundcraft_vst3_host::preset::state_from_file(id, file),
-        Format::Clap => soundcraft_clap_host::preset::state_from_file(id, file),
+        Format::Vst3 => transit_vst3_host::preset::state_from_file(id, file),
+        Format::Clap => transit_clap_host::preset::state_from_file(id, file),
     }
 }
 

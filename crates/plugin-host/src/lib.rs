@@ -37,13 +37,13 @@
 mod hosted;
 mod phases;
 
-use soundcraft_dsp::{Plugin, PluginEditor, PluginStateReader};
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
+use transit_dsp::{Plugin, PluginEditor, PluginStateReader};
 use transit_rt::gui_thread::{MessageQueue, QueueWaker};
 
 use hosted::EditorShared;
@@ -84,12 +84,12 @@ impl Hooks {
     #[must_use]
     pub fn formats() -> Hooks {
         Hooks {
-            start: Some(Arc::new(soundcraft_vst3_host::adopt_main_thread)),
+            start: Some(Arc::new(transit_vst3_host::adopt_main_thread)),
             tick: Some(Arc::new(|| {
-                soundcraft_clap_host::service_requests();
-                soundcraft_vst3_host::service_requests();
+                transit_clap_host::service_requests();
+                transit_vst3_host::service_requests();
             })),
-            shutdown: Some(Arc::new(soundcraft_vst3_host::shutdown)),
+            shutdown: Some(Arc::new(transit_vst3_host::shutdown)),
         }
     }
 }

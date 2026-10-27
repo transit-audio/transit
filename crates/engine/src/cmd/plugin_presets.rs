@@ -7,7 +7,7 @@
 use super::plugin_state::slot_param_for;
 use super::*;
 use serde_json::json;
-use soundcraft_model::{Insert, b64};
+use transit_model::{Insert, b64};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -123,7 +123,7 @@ fn plugin_at(e: &Engine, cmd: &str, p: &Value) -> Result<String> {
 /// the live instance.
 fn mark(e: &mut Engine, cmd: &str, p: &Value) -> Result<()> {
     let t = track_param(e, cmd, p, "track")?.ok_or_else(|| bad(cmd, "`track` required"))?;
-    let slot = slot_param_for(cmd, p)?.unwrap_or(soundcraft_mix::INSTRUMENT_SLOT);
+    let slot = slot_param_for(cmd, p)?.unwrap_or(transit_mix::INSTRUMENT_SLOT);
     e.mark_state_load(t, slot);
     Ok(())
 }
@@ -234,7 +234,7 @@ fn preset_delete(_e: &mut Engine, p: &Value) -> Result<Value> {
 mod tests {
     use crate::Engine;
     use serde_json::json;
-    use soundcraft_model::b64;
+    use transit_model::b64;
 
     const VST3: &str = "vst3:0123456789ABCDEFFEDCBA9876543210";
 
@@ -244,7 +244,7 @@ mod tests {
         let mut e = Engine::default();
         e.execute("track.new", &json!({})).unwrap();
         let t = e.session().tracks[0].id;
-        let mut ins = soundcraft_model::Insert::new(VST3);
+        let mut ins = transit_model::Insert::new(VST3);
         ins.params.insert("7".into(), 1.0);
         e.session_mut().track_mut(t).unwrap().mixer.inserts[0] = Some(ins);
         (e, t.0)
@@ -260,7 +260,7 @@ mod tests {
     fn a_saved_preset_loads_as_one_undo_step_and_the_undo_asks_for_a_live_restore() {
         let (mut e, t) = engine();
         let root = dir("undo");
-        let mine = soundcraft_vst3_host::preset::join_state(b"my kit", b"ctrl").unwrap();
+        let mine = transit_vst3_host::preset::join_state(b"my kit", b"ctrl").unwrap();
         let path = crate::presets::path(&root, VST3, "My Kit").unwrap();
         let undo_before = e.undo_history().len();
         let r =
@@ -272,7 +272,7 @@ mod tests {
         let listed = e.execute("plugin.preset_list", &json!({"plugin": VST3, "root": root.to_string_lossy()})).unwrap();
         assert_eq!(listed["presets"], json!(["My Kit"]));
         // The plug-in moves on (a capture stores its live state), then the preset is loaded back.
-        let later = soundcraft_vst3_host::preset::join_state(b"tweaked", b"ctrl").unwrap();
+        let later = transit_vst3_host::preset::join_state(b"tweaked", b"ctrl").unwrap();
         e.execute("mix.insert_state", &json!({"track": t, "slot": 0, "state": b64::encode(&later)})).unwrap();
         e.session_mut().tracks[0].mixer.inserts[0].as_mut().unwrap().preset = "Other".into();
         let r = e
@@ -289,10 +289,10 @@ mod tests {
         e.execute("edit.undo", &json!({})).unwrap();
         let ins = e.session().tracks[0].mixer.inserts[0].clone().unwrap();
         assert_eq!((ins.state_bytes().unwrap(), ins.preset.as_str(), ins.params.get("7").copied()), (later, "Other", Some(1.0)));
-        assert_eq!(e.take_state_restores(), vec![(soundcraft_model::TrackId(t), 0)]);
+        assert_eq!(e.take_state_restores(), vec![(transit_model::TrackId(t), 0)]);
         assert!(e.take_state_restores().is_empty(), "once");
         e.execute("edit.redo", &json!({})).unwrap();
-        assert_eq!(e.take_state_restores(), vec![(soundcraft_model::TrackId(t), 0)], "a redo restores the preset");
+        assert_eq!(e.take_state_restores(), vec![(transit_model::TrackId(t), 0)], "a redo restores the preset");
         // The values the plug-in reports after the redo's live load: stored, without a step.
         let steps = e.undo_history().len();
         e.execute("plugin.state_values", &json!({"track": t, "slot": 0, "params": {"7": 0.25}})).unwrap();
@@ -310,7 +310,7 @@ mod tests {
         let (mut e, t) = engine();
         // The caller stores the live state before it loads another (the undo returns to it).
         e.execute("mix.insert_state", &json!({"track": t, "slot": 0, "state": b64::encode(b"live before")})).unwrap();
-        let pasted = soundcraft_vst3_host::preset::join_state(b"pasted", b"").unwrap();
+        let pasted = transit_vst3_host::preset::join_state(b"pasted", b"").unwrap();
         e.execute("plugin.state_load", &json!({"track": t, "slot": 0, "state": b64::encode(&pasted), "name": "Kit (copy)"})).unwrap();
         assert_eq!(e.undo_label(), Some("Load Plug-in State"));
         // An unrelated step after it: its undo asks for no live restore (the plug-in may have
@@ -320,7 +320,7 @@ mod tests {
         e.execute("edit.undo", &json!({})).unwrap();
         assert!(e.take_state_restores().is_empty());
         e.execute("edit.undo", &json!({})).unwrap();
-        assert_eq!(e.take_state_restores(), vec![(soundcraft_model::TrackId(t), 0)], "the paste's own undo does");
+        assert_eq!(e.take_state_restores(), vec![(transit_model::TrackId(t), 0)], "the paste's own undo does");
         e.execute("edit.redo", &json!({})).unwrap();
         let _ = e.take_state_restores();
         assert_eq!(e.session().tracks[0].mixer.inserts[0].as_ref().unwrap().preset, "Kit (copy)");
@@ -344,7 +344,7 @@ mod tests {
         }
         // A file of another plug-in, or not a preset at all.
         std::fs::create_dir_all(&root).unwrap();
-        std::fs::write(&elsewhere, soundcraft_vst3_host::preset::encode(&[9; 16], b"c", b"")).unwrap();
+        std::fs::write(&elsewhere, transit_vst3_host::preset::encode(&[9; 16], b"c", b"")).unwrap();
         assert!(e.execute("plugin.preset_load", &json!({"track": t, "slot": 0, "path": elsewhere.to_string_lossy()})).is_err());
         let text = root.join("notes.txt");
         std::fs::write(&text, b"keep me").unwrap();

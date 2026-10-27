@@ -3,10 +3,10 @@
 use super::*;
 use crate::{TransportRequest, cmd};
 use serde_json::json;
-use soundcraft_model::{Clip, ClipContent, SourceAudio};
-use soundcraft_time::SampleRate;
 use std::cell::RefCell;
 use std::sync::{Arc, Weak};
+use transit_model::{Clip, ClipContent, SourceAudio};
+use transit_time::SampleRate;
 
 /// Transients are found in fixed blocks of each clip, so a long clip costs a block per press and
 /// Tab and Alt+Tab always see the same transients.
@@ -181,16 +181,16 @@ fn analysed(e: &Engine, t: TrackId, around: Range) -> Vec<Samples> {
 mod tests {
     use crate::Engine;
     use serde_json::json;
-    use soundcraft_audio_io::{AudioBuffer, FileFormat};
-    use soundcraft_midi::{Note, Sequence};
-    use soundcraft_model::{ChannelFormat, Clip, Session, TrackId, TrackKind};
-    use soundcraft_time::{SampleRate, TICKS_PER_QUARTER};
+    use transit_audio_io::{AudioBuffer, FileFormat};
+    use transit_midi::{Note, Sequence};
+    use transit_model::{ChannelFormat, Clip, Session, TrackId, TrackKind};
+    use transit_time::{SampleRate, TICKS_PER_QUARTER};
 
     #[test]
     fn transient_cache_is_owned_and_cleared_by_its_engine_issue_10() {
         let mut first = Engine::default();
         let second = Engine::default();
-        super::analysed(&first, TrackId(1), soundcraft_time::Range::new(0, 480));
+        super::analysed(&first, TrackId(1), transit_time::Range::new(0, 480));
         assert_eq!(first.transient_cache.0.borrow().len(), 1);
         assert_eq!(second.transient_cache.0.borrow().len(), 0);
         first.replace_session(Session::default());

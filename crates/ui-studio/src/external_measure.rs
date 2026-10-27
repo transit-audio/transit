@@ -1,7 +1,7 @@
 //! The External Instrument's Measure (ADR 0020 decision 3, slice 2) in the studio UI: the card's
 //! Measure button and `instrument.measure_external`. The engine checks what it can see (the track,
 //! its port and return, the transport, the arm); the live Player sends the notes through the MIDI
-//! output thread and records the return ([`soundcraft_playback::external_probe`]), so the app runs
+//! output thread and records the return ([`transit_playback::external_probe`]), so the app runs
 //! the command itself. A run takes about 13 s and never blocks: the card shows "Measuring… 3/8"
 //! with Cancel, a per-frame step collects the result, and it is stored per machine in
 //! `IoMap.external_latency` under (port, return, rate, buffer), next to the hardware insert table.
@@ -10,9 +10,9 @@
 
 use crate::StudioApp;
 use serde_json::{Value, json};
-use soundcraft_model::{ExternalLatency, ExternalSource, IoDirection, MidiOutPort, MidiOutput, TrackId};
-use soundcraft_playback::external_probe::{MAX_SPREAD_MS, MeasureError, Measured, NOTES, Progress};
 use std::time::{Duration, Instant};
+use transit_model::{ExternalLatency, ExternalSource, IoDirection, MidiOutPort, MidiOutput, TrackId};
+use transit_playback::external_probe::{MAX_SPREAD_MS, MeasureError, Measured, NOTES, Progress};
 
 /// The refusal of a transport start while a Measure runs: playback would sound on the synth and
 /// bleed into the return.
@@ -135,7 +135,7 @@ fn ms(frames: f64, rate: u32) -> f64 {
 /// The date of a measurement, `YYYY-MM-DD` in UTC ("unknown date" without one).
 #[must_use]
 pub fn date_text(measured_at: u64) -> String {
-    if measured_at == 0 { "an unknown date".into() } else { soundcraft_playback::devices::utc_date(measured_at) }
+    if measured_at == 0 { "an unknown date".into() } else { transit_playback::devices::utc_date(measured_at) }
 }
 
 /// "Measured 19.9 ms on 2026-10-24 at 48 kHz/64": a measurement of the current key.
@@ -234,7 +234,7 @@ impl StudioApp {
                 .as_ref()
                 .and_then(|p| p.midi_status().ok())
                 .and_then(|m| m.timing_quality)
-                .is_some_and(|q| q != soundcraft_playback::device_clock::Quality::Invalid),
+                .is_some_and(|q| q != transit_playback::device_clock::Quality::Invalid),
             busy: self.external_measure.running.is_some()
                 || self.audio_devices.measuring.is_some()
                 || self.player.as_ref().is_some_and(|p| p.external_measure_running() || p.hardware_probe_running() || p.loop_calibration_running()),
@@ -255,7 +255,7 @@ impl StudioApp {
     /// The card's Measure (and `instrument.measure_external`): check, then start the run and
     /// return at once. Errors say why it did not start.
     pub(crate) fn start_external_measure(&mut self, t: TrackId) -> Result<(), String> {
-        soundcraft_engine::cmd::external_measure_blocker(&self.engine, t)?;
+        transit_engine::cmd::external_measure_blocker(&self.engine, t)?;
         if let Some(why) = self.external_measure_blocker(t) {
             return Err(why);
         }

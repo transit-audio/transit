@@ -13,7 +13,7 @@
 //! (the device is not duplex, or this is an offline render) or a path is unresolved.
 
 use super::{MAX_LATENCY, Session, Sink, Track, TrackId, TrackKind, sink::SinkSpec};
-use soundcraft_model::{Insert, IoDirection, IoMap};
+use transit_model::{Insert, IoDirection, IoMap};
 
 /// What a hardware insert slot will do on this machine.
 #[derive(Debug, Clone, PartialEq, Eq)]

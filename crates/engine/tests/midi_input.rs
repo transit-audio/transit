@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
-use soundcraft_engine::Engine;
-use soundcraft_model::{ChannelFormat, MidiInput, MidiPort, TrackId, TrackKind};
+use transit_engine::Engine;
+use transit_model::{ChannelFormat, MidiInput, MidiPort, TrackId, TrackKind};
 
 fn tracks(e: &mut Engine) -> (TrackId, TrackId, TrackId) {
     let s = e.session_mut();
@@ -36,7 +36,7 @@ fn one_undo_changes_multiple_tracks_and_redo_restores_the_device() {
         assert_eq!(e.session().track(t).unwrap().midi_input, expected);
     }
     let serialized = serde_json::to_string(e.session()).unwrap();
-    let restored: soundcraft_model::Session = serde_json::from_str(&serialized).unwrap();
+    let restored: transit_model::Session = serde_json::from_str(&serialized).unwrap();
     assert_eq!(restored.track(a).unwrap().midi_input, expected);
 }
 

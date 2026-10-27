@@ -2,7 +2,7 @@
 
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::TrackId;
+use transit_model::TrackId;
 
 struct T {
     app: StudioApp,
@@ -13,7 +13,7 @@ struct T {
 impl T {
     fn new() -> Self {
         let mut t =
-            Self { app: StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default()), ctx: egui::Context::default(), time: 0.0 };
+            Self { app: StudioApp::new(transit_engine::Engine::default(), None, Services::default()), ctx: egui::Context::default(), time: 0.0 };
         t.app.set_cursor(48_000, None);
         t.frames(3);
         t
@@ -193,7 +193,7 @@ fn stop_take(tag: &str, approximate: bool) -> T {
     let mut t = T::new();
     let track = TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
     t.app.record_start = 48_000;
-    t.app.take_plan = Some(soundcraft_engine::io::Recording {
+    t.app.take_plan = Some(transit_engine::io::Recording {
         start: 48_000,
         pass: None,
         punch: None,
@@ -233,7 +233,7 @@ fn recording_stop(count: u32) {
     let mut t = T::new();
     let track = TrackId(t.app.run("track.new", json!({"kind": "audio", "format": "mono"})).unwrap()["tracks"][0].as_u64().unwrap());
     t.app.record_start = 48_000;
-    t.app.take_plan = Some(soundcraft_engine::io::Recording {
+    t.app.take_plan = Some(transit_engine::io::Recording {
         start: 48_000,
         pass: None,
         punch: None,

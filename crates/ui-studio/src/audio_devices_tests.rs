@@ -5,7 +5,7 @@
 use crate::audio_devices::{Opened, PAIRED_AUTOMATIC, REFUSED_RECORDING, SHARE_LABEL, calibration_command, calibration_line, fallback_notes};
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_playback::{AudioConfig, Backend};
+use transit_playback::{AudioConfig, Backend};
 
 const SCARLETT_IN: &str = "Analogue 1 + 2 (Focusrite USB Audio)";
 const WEBCAM_IN: &str = "Microphone (HD Webcam)";
@@ -35,7 +35,7 @@ fn devices() -> Value {
 
 impl T {
     fn new() -> T {
-        let app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0, screen: egui::vec2(1400.0, 800.0), events: Vec::new() };
         t.frames(3);
         t.control("audio.fake_devices", devices()).unwrap();
@@ -230,10 +230,10 @@ fn has_control(t: &T, key: &str) -> bool {
 fn the_backend_selector_is_offered_only_with_the_feature_on_the_wasapi_system() {
     let mut t = T::new();
     t.open_window();
-    let compiled = soundcraft_playback::devices::NATIVE_WASAPI_COMPILED;
+    let compiled = transit_playback::devices::NATIVE_WASAPI_COMPILED;
     assert_eq!(has_control(&t, "backend"), compiled, "WASAPI is the default system of the fake devices");
     t.pick("system", "ASIO");
-    assert_eq!(has_control(&t, "backend"), soundcraft_playback::devices::NATIVE_ASIO_COMPILED, "ASIO has a choice only with native ASIO built");
+    assert_eq!(has_control(&t, "backend"), transit_playback::devices::NATIVE_ASIO_COMPILED, "ASIO has a choice only with native ASIO built");
     t.pick("system", "WASAPI");
     assert_eq!(has_control(&t, "backend"), compiled);
     if compiled {
@@ -291,7 +291,7 @@ fn native_asio_is_chosen_on_the_asio_system_with_its_calibration_line_and_driver
     t.control("audio.fake_devices", asio_devices()).unwrap();
     t.open_window();
     t.pick("system", "ASIO");
-    if !soundcraft_playback::devices::NATIVE_ASIO_COMPILED {
+    if !transit_playback::devices::NATIVE_ASIO_COMPILED {
         assert!(!has_control(&t, "backend"));
         return;
     }
@@ -325,7 +325,7 @@ fn native_asio_is_chosen_on_the_asio_system_with_its_calibration_line_and_driver
 
 #[test]
 fn while_the_driver_settings_panel_is_open_reconnect_apply_and_rescan_wait_and_nothing_is_listed() {
-    if !soundcraft_playback::devices::NATIVE_ASIO_COMPILED {
+    if !transit_playback::devices::NATIVE_ASIO_COMPILED {
         return;
     }
     let mut t = T::new();
@@ -381,7 +381,7 @@ fn the_open_lines_and_the_load_readout_say_what_a_native_stream_reported() {
 
 #[test]
 fn without_audio_the_choice_is_only_saved() {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     app.apply_audio(AudioConfig { input: Some(SCARLETT_IN.into()), ..Default::default() }).unwrap();
     assert_eq!(app.ui.audio.input.as_deref(), Some(SCARLETT_IN));
     assert!(app.player.is_none(), "--no-audio stays without audio");
@@ -434,7 +434,7 @@ fn reconnect_drops_in_order_restores_monitoring_and_reopens_editors() {
 
 #[test]
 fn an_external_instrument_return_opens_the_input_armed_or_not_and_disarming_keeps_it() {
-    use soundcraft_model::{ChannelFormat, Insert, TrackKind};
+    use transit_model::{ChannelFormat, Insert, TrackKind};
     let mut t = T::new();
     let id = t.app.engine.session_mut().add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     t.frames(3);
@@ -531,7 +531,7 @@ fn audio_zero_rate_and_buffer_are_refused() {
 #[test]
 fn editors_return_after_device_reopen() {
     let mut t = T::new();
-    let key = (soundcraft_model::TrackId(1), 0);
+    let key = (transit_model::TrackId(1), 0);
     t.app.want_editor(key);
     t.frames(2);
     assert!(t.app.editors[0].opened);
@@ -580,7 +580,7 @@ fn reconnect_menu_and_direct_call_refuse_recording() {
 
 #[test]
 fn driver_panel_follows_running_system_not_draft() {
-    if !soundcraft_playback::devices::NATIVE_ASIO_COMPILED {
+    if !transit_playback::devices::NATIVE_ASIO_COMPILED {
         return;
     }
     let mut t = T::new();
@@ -678,7 +678,7 @@ fn reorder_keeps_the_editor_wanted_until_the_plan_adopts() {
     let track = t.app.engine.session().tracks[0].id;
     // Hosted plug-ins: they have native editor windows, built-ins have ours (`builtin_editor`).
     for (slot, id) in ["clap:test.a", "clap:test.b", "clap:test.c"].into_iter().enumerate() {
-        t.app.engine.session_mut().track_mut(track).unwrap().mixer.inserts[slot] = Some(soundcraft_model::Insert::new(id));
+        t.app.engine.session_mut().track_mut(track).unwrap().mixer.inserts[slot] = Some(transit_model::Insert::new(id));
     }
     t.app.want_editor((track, 2));
     t.frames(2);
@@ -693,7 +693,7 @@ fn reorder_keeps_the_editor_wanted_until_the_plan_adopts() {
 
 mod io_paths {
     use super::*;
-    use soundcraft_model::IoMap;
+    use transit_model::IoMap;
 
     pub(super) fn with_window() -> T {
         let mut t = T::new();
@@ -792,8 +792,8 @@ mod io_paths {
     }
 }
 
-fn calibration(device: &str, input: Option<&str>, rate: u32, period: u32) -> soundcraft_playback::LoopbackCalibration {
-    soundcraft_playback::LoopbackCalibration {
+fn calibration(device: &str, input: Option<&str>, rate: u32, period: u32) -> transit_playback::LoopbackCalibration {
+    transit_playback::LoopbackCalibration {
         device: device.into(),
         input: input.map(str::to_string),
         mode: "shared".into(),
@@ -838,7 +838,7 @@ fn the_calibration_line_reports_the_measured_pair_or_the_command_that_measures_i
         calibration_line(&automatic, out, Some(&SCARLETT_IN.to_uppercase()), 48_000, "ui.json"),
         "measured 480 frames \u{b1}25 (2026-10-21) \u{b7} shared"
     );
-    let measured = soundcraft_playback::LoopbackCalibration {
+    let measured = transit_playback::LoopbackCalibration {
         mode: "exclusive".into(),
         round_trip_frames: 960,
         ..calibration(out, Some(SCARLETT_IN), 48_000, 128)
@@ -858,7 +858,7 @@ fn the_paired_input_and_calibration_line_exist_only_under_the_native_backend() {
     t.open_window();
     let calibration_shown = |t: &T| !t.layout()["calibration"].is_null();
     assert!(!has_control(&t, "paired_input") && !calibration_shown(&t), "the default backend has no pairing");
-    if !soundcraft_playback::devices::NATIVE_WASAPI_COMPILED {
+    if !transit_playback::devices::NATIVE_WASAPI_COMPILED {
         return;
     }
     t.pick("backend", Backend::NativeWasapi.label());
@@ -886,7 +886,7 @@ fn the_share_checkbox_follows_the_native_backend_and_applies_with_the_devices() 
     let mut t = T::new();
     t.open_window();
     assert!(!has_control(&t, "share_device"), "the default backend has no sharing choice");
-    if !soundcraft_playback::devices::NATIVE_WASAPI_COMPILED {
+    if !transit_playback::devices::NATIVE_WASAPI_COMPILED {
         return;
     }
     t.pick("backend", Backend::NativeWasapi.label());
@@ -911,7 +911,7 @@ fn the_share_checkbox_follows_the_native_backend_and_applies_with_the_devices() 
 
 #[test]
 fn a_saved_calibration_is_shown_for_its_pair_and_survives_apply() {
-    if !soundcraft_playback::devices::NATIVE_WASAPI_COMPILED {
+    if !transit_playback::devices::NATIVE_WASAPI_COMPILED {
         return;
     }
     let mut t = T::new();
@@ -990,7 +990,7 @@ mod hardware_inserts {
     }
 
     use crate::hardware_measure::FakeProbe;
-    use soundcraft_playback::hardware_probe::{Measured, ProbeError};
+    use transit_playback::hardware_probe::{Measured, ProbeError};
 
     fn with_fake_probe() -> T {
         let mut t = with_window();
@@ -1145,7 +1145,7 @@ fn the_held_native_asio_input_shows_as_open_and_measure_is_enabled_on_it() {
         .with_latency(std::time::Duration::from_micros(6_800));
     let cfg = AudioConfig { backend: Backend::NativeAsio, system: Some("ASIO".into()), ..Default::default() };
     let mut t = T::new();
-    let player = soundcraft_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, &driver).unwrap();
+    let player = transit_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, &driver).unwrap();
     t.app.engine.set_io_map(player.io_map().as_ref().clone());
     t.app.player = Some(player);
     assert!(t.app.recorder.is_none(), "no track is armed: the recorder has not opened");
@@ -1189,7 +1189,7 @@ fn the_window_shows_the_requested_buffer_next_to_the_one_the_device_runs() {
         .with_capture(2, true)
         .with_fixed_buffer(256);
     let again = driver.clone();
-    let mut t = asio_rig(&driver, move |session, cfg| soundcraft_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+    let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
     t.app.ui.audio.buffer_size = Some(128);
     t.open_window();
     let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
@@ -1206,12 +1206,12 @@ fn the_window_shows_the_requested_buffer_next_to_the_one_the_device_runs() {
 /// opening `reopen` (no device is listed or opened).
 fn asio_rig(
     driver: &transit_audio_backend::fake::FakeBackend,
-    reopen: impl Fn(std::sync::Arc<soundcraft_model::Session>, &AudioConfig) -> soundcraft_playback::Player + 'static,
+    reopen: impl Fn(std::sync::Arc<transit_model::Session>, &AudioConfig) -> transit_playback::Player + 'static,
 ) -> T {
     let cfg =
         AudioConfig { backend: Backend::NativeAsio, system: Some("ASIO".into()), output: Some("Focusrite USB ASIO".into()), ..Default::default() };
     let mut t = T::new();
-    let player = soundcraft_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, driver).unwrap();
+    let player = transit_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, driver).unwrap();
     t.app.player = Some(player);
     t.app.ui.audio = cfg;
     t.app.audio_devices.fake = None;
@@ -1261,7 +1261,7 @@ fn a_driver_reset_reopens_the_native_asio_output_and_input_without_user_action()
     use transit_audio_backend as ab;
     let driver = scarlett_driver();
     let again = driver.clone();
-    let mut t = asio_rig(&driver, move |session, cfg| soundcraft_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+    let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
     let opens = driver.opens().len();
     assert_eq!(opens, 2, "input and output");
     t.app.add_track("audio").unwrap();
@@ -1307,13 +1307,13 @@ fn pump_capture(driver: &transit_audio_backend::fake::FakeBackend, blocks: usize
 /// nothing the driver delivered after it.
 #[test]
 fn a_driver_reset_while_recording_ends_the_take_keeps_it_and_then_reopens() {
-    use soundcraft_playback::record::start::Point;
-    use soundcraft_playback::timeline_map::Position;
     use transit_audio_backend as ab;
+    use transit_playback::record::start::Point;
+    use transit_playback::timeline_map::Position;
     let driver = scarlett_driver();
     let again = driver.clone();
-    let mut t = asio_rig(&driver, move |session, cfg| soundcraft_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
-    let track = soundcraft_model::TrackId(t.app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
+    let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+    let track = transit_model::TrackId(t.app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
     t.app.add_track("audio").unwrap();
     let audio = t.app.engine.session().tracks.iter().find(|tr| tr.id != track).unwrap().id;
     t.app.engine.session_mut().track_mut(audio).unwrap().mixer.input_monitor = true;
@@ -1322,7 +1322,7 @@ fn a_driver_reset_while_recording_ends_the_take_keeps_it_and_then_reopens() {
     std::fs::create_dir_all(&dir).unwrap();
     t.app.recorder.as_mut().expect("the monitored track took the input").arm(vec![(audio, vec![0], dir.join("take.wav"))]).unwrap();
     pump_capture(&driver, 4, 0.25);
-    t.app.take_plan = Some(soundcraft_engine::io::Recording {
+    t.app.take_plan = Some(transit_engine::io::Recording {
         start: 0,
         pass: None,
         punch: None,
@@ -1332,14 +1332,13 @@ fn a_driver_reset_while_recording_ends_the_take_keeps_it_and_then_reopens() {
         midi_placed: false,
     });
     t.app.engine.transport.recording = true;
-    let note = |frame, message| soundcraft_playback::midi_capture::CapturedEvent { frame, track, channel: 0, message, approximate: false };
+    let note = |frame, message| transit_playback::midi_capture::CapturedEvent { frame, track, channel: 0, message, approximate: false };
     let events = vec![
-        note(1_000, soundcraft_mix::Message::NoteOn { key: 60, velocity: 100, id: soundcraft_mix::NoteId::NONE }),
-        note(9_000, soundcraft_mix::Message::NoteOff { key: 60, velocity: 0, id: soundcraft_mix::NoteId::NONE }),
+        note(1_000, transit_mix::Message::NoteOn { key: 60, velocity: 100, id: transit_mix::NoteId::NONE }),
+        note(9_000, transit_mix::Message::NoteOff { key: 60, velocity: 0, id: transit_mix::NoteId::NONE }),
     ];
     let start = Point { host_ns: 0, output_frame: 0, position: Position { sample: 0, fraction: 0, denominator: 1 } };
-    t.app.finished_test_midi =
-        Some(soundcraft_playback::MidiTake { tracks: vec![track], start: Some(start), events, dropped: 0, device_rate: 48_000 });
+    t.app.finished_test_midi = Some(transit_playback::MidiTake { tracks: vec![track], start: Some(start), events, dropped: 0, device_rate: 48_000 });
     assert!(inject(&driver, ab::Direction::Input, ab::StreamError::ResetRequested));
     assert!(inject(&driver, ab::Direction::Output, ab::StreamError::ResetRequested));
     // The driver goes on calling back until the app stops it at its next frame.
@@ -1365,7 +1364,7 @@ fn a_driver_that_stopped_calling_back_is_reopened_the_same_way() {
     use transit_audio_backend as ab;
     let driver = scarlett_driver();
     let again = driver.clone();
-    let mut t = asio_rig(&driver, move |session, cfg| soundcraft_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+    let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
     run(&mut t, &driver, 10);
     assert!(inject(&driver, ab::Direction::Output, ab::StreamError::Stalled));
     assert!(inject(&driver, ab::Direction::Input, ab::StreamError::Stalled));
@@ -1384,7 +1383,7 @@ fn a_driver_reset_waits_for_the_settings_panel_to_close() {
     use transit_audio_backend as ab;
     let driver = scarlett_driver();
     let again = driver.clone();
-    let mut t = asio_rig(&driver, move |session, cfg| soundcraft_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+    let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
     driver.set_host_blocked(true);
     assert!(inject(&driver, ab::Direction::Output, ab::StreamError::ResetRequested));
     run(&mut t, &driver, 120);
@@ -1407,7 +1406,7 @@ fn a_device_that_does_not_reopen_is_tried_three_times_then_left_to_reconnect() {
     let counted = std::rc::Rc::clone(&tries);
     let mut t = asio_rig(&driver, move |session, _| {
         counted.set(counted.get() + 1);
-        soundcraft_playback::Player::prepare_device_free(session).unwrap()
+        transit_playback::Player::prepare_device_free(session).unwrap()
     });
     run(&mut t, &driver, 10);
     assert!(inject(&driver, ab::Direction::Output, ab::StreamError::ResetRequested));
@@ -1452,8 +1451,8 @@ impl Latch {
 }
 
 /// The ASIO system a lister answers: both drivers by name, only the probed one described.
-fn asio_listing_for(selected: Option<&str>) -> soundcraft_playback::devices::AudioSystem {
-    let device = |name: &str| soundcraft_playback::devices::DeviceInfo {
+fn asio_listing_for(selected: Option<&str>) -> transit_playback::devices::AudioSystem {
+    let device = |name: &str| transit_playback::devices::DeviceInfo {
         name: name.into(),
         is_default: false,
         max_channels: if selected == Some(name) { 2 } else { 0 },
@@ -1462,7 +1461,7 @@ fn asio_listing_for(selected: Option<&str>) -> soundcraft_playback::devices::Aud
         buffer_max: None,
     };
     let list = vec![device("Focusrite USB ASIO"), device("Model Mixer ASIO Driver")];
-    soundcraft_playback::devices::AudioSystem { name: "ASIO".into(), is_default: false, outputs: list.clone(), inputs: list, diagnostics: Vec::new() }
+    transit_playback::devices::AudioSystem { name: "ASIO".into(), is_default: false, outputs: list.clone(), inputs: list, diagnostics: Vec::new() }
 }
 
 /// A scripted ASIO lister that records what it was asked to probe and waits on `latch`.
@@ -1489,7 +1488,7 @@ fn the_asio_listing_runs_off_the_ui_thread_probes_the_running_driver_and_never_t
     use crate::audio_devices::ASIO_LISTING;
     let driver = scarlett_driver();
     let again = driver.clone();
-    let mut t = asio_rig(&driver, move |session, cfg| soundcraft_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+    let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
     let (latch, asked) = (std::sync::Arc::new(Latch::default()), std::sync::Arc::default());
     t.app.audio_devices.machine = Some((Vec::new(), slow_lister(&latch, &asked)));
     t.app.open_audio_devices();
@@ -1520,7 +1519,7 @@ fn the_asio_listing_runs_off_the_ui_thread_probes_the_running_driver_and_never_t
 fn an_asio_listing_that_does_not_answer_is_given_up_with_a_note_not_waited_for() {
     let driver = scarlett_driver();
     let again = driver.clone();
-    let mut t = asio_rig(&driver, move |session, cfg| soundcraft_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
+    let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap());
     let (latch, asked) = (std::sync::Arc::new(Latch::default()), std::sync::Arc::default());
     t.app.audio_devices.machine = Some((Vec::new(), slow_lister(&latch, &asked)));
     t.app.audio_devices.asio_listing_limit = Some(std::time::Duration::from_millis(50));
@@ -1540,7 +1539,7 @@ fn an_asio_listing_that_does_not_answer_is_given_up_with_a_note_not_waited_for()
 fn a_saved_asio_driver_that_is_no_longer_installed_is_said_not_replaced() {
     let driver = scarlett_driver().strict_names();
     let again = driver.clone();
-    let mut t = asio_rig(&driver, move |session, cfg| soundcraft_playback::Player::with_fake_native_asio(session, cfg, &again));
+    let mut t = asio_rig(&driver, move |session, cfg| transit_playback::Player::with_fake_native_asio(session, cfg, &again));
     run(&mut t, &driver, 10);
     let opens = driver.opens().len();
     let gone = AudioConfig { output: Some("TASCAM Model 12 ASIO".into()), ..t.app.ui.audio.clone() };
@@ -1564,9 +1563,9 @@ fn a_session_change_reopen_that_succeeds_clears_a_reopen_that_gave_up() {
     let mut t = asio_rig(&driver, move |session, cfg| {
         counted.set(counted.get() + 1);
         if counted.get() <= 3 {
-            soundcraft_playback::Player::prepare_device_free(session).unwrap()
+            transit_playback::Player::prepare_device_free(session).unwrap()
         } else {
-            soundcraft_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap()
+            transit_playback::Player::open_fake_native_asio(session, cfg, &again).unwrap()
         }
     });
     run(&mut t, &driver, 10);
@@ -1576,7 +1575,7 @@ fn a_session_change_reopen_that_succeeds_clears_a_reopen_that_gave_up() {
     }
     assert_eq!(tries.get(), 3);
     assert!(t.app.reopen.gave_up());
-    t.app.engine.session_mut().sample_rate = soundcraft_time::SampleRate::new(44_100).unwrap();
+    t.app.engine.session_mut().sample_rate = transit_time::SampleRate::new(44_100).unwrap();
     run(&mut t, &driver, 2);
     assert_eq!(tries.get(), 4, "the session change reopened the device");
     assert!(t.app.player.as_ref().is_some_and(|p| !p.silent), "the new Player runs");
@@ -1587,7 +1586,7 @@ fn a_session_change_reopen_that_succeeds_clears_a_reopen_that_gave_up() {
 #[test]
 fn the_open_lines_end_with_the_workers_mmcss_state() {
     use crate::audio_devices::priority_detail;
-    use soundcraft_playback::scheduling::WorkerPriority as P;
+    use transit_playback::scheduling::WorkerPriority as P;
     assert_eq!(priority_detail(P::MmcssProAudio), " · MMCSS Pro Audio");
     assert_eq!(priority_detail(P::Pending), " · MMCSS pending");
     assert_eq!(priority_detail(P::PromotionFailed), " · MMCSS refused");
@@ -1599,7 +1598,7 @@ fn the_open_lines_end_with_the_workers_mmcss_state() {
 
 #[test]
 fn the_window_shows_the_backend_loop_lines_under_the_open_lines_from_a_scripted_snapshot() {
-    use soundcraft_playback::telemetry::StreamStats;
+    use transit_playback::telemetry::StreamStats;
     let mut hist = [0u64; 16];
     hist[0] = 90;
     hist[3] = 10; // 10 wakes of 64..127 us
@@ -1688,7 +1687,7 @@ fn the_window_shows_the_backend_loop_lines_under_the_open_lines_from_a_scripted_
 
 #[test]
 fn the_jack_and_wasapi_lines_name_the_gap_over_period_and_leave_out_a_wake_rate_not_yet_known() {
-    use soundcraft_playback::telemetry::StreamStats;
+    use transit_playback::telemetry::StreamStats;
     let output = StreamStats { wakes: 1200, max_wake_late_us: 93_039, ..Default::default() };
     let mut t = T::new();
     t.app.audio_devices.injected_backend = Some((Some(output), None));
@@ -1724,7 +1723,7 @@ fn the_calibration_command_wraps_inside_the_window_and_has_a_copy_button() {
     assert!(command.starts_with("audio-bench --backend wasapi") && command.ends_with("--settings \"ui.json\""), "{command}");
     let measured = "measured 300 frames \u{b1}2 (today) \u{b7} shared";
     assert_eq!(calibration_command(measured), None, "a measured line has nothing to copy");
-    if !soundcraft_playback::devices::NATIVE_WASAPI_COMPILED {
+    if !transit_playback::devices::NATIVE_WASAPI_COMPILED {
         return;
     }
     let mut t = T::new();
@@ -1770,7 +1769,7 @@ fn only_the_selected_asio_driver_says_why_it_did_not_load() {
 fn the_asio_calibration_line_names_the_buffer_size_and_rate_it_was_measured_at() {
     use crate::audio_devices::{asio_calibration_line, period_rate_text};
     let driver = "Focusrite USB ASIO";
-    let at = |period: u32, rate: u32, frames: u32| soundcraft_playback::LoopbackCalibration {
+    let at = |period: u32, rate: u32, frames: u32| transit_playback::LoopbackCalibration {
         device: driver.into(),
         input: None,
         mode: "asio".into(),
@@ -1802,7 +1801,7 @@ fn the_asio_calibration_line_names_the_buffer_size_and_rate_it_was_measured_at()
 #[test]
 fn measure_on_the_asio_calibration_line_times_the_loop_and_stores_it_for_this_buffer_size() {
     use transit_audio_backend as ab;
-    if !soundcraft_playback::devices::NATIVE_ASIO_COMPILED {
+    if !transit_playback::devices::NATIVE_ASIO_COMPILED {
         return;
     }
     const BLOCK: usize = 256;
@@ -1831,7 +1830,7 @@ fn measure_on_the_asio_calibration_line_times_the_loop_and_stores_it_for_this_bu
         ..Default::default()
     };
     let mut t = T::new();
-    let player = soundcraft_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, &driver).unwrap();
+    let player = transit_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, &driver).unwrap();
     t.app.engine.set_io_map(player.io_map().as_ref().clone());
     t.app.player = Some(player);
     t.app.ui.audio = cfg;
@@ -1912,7 +1911,7 @@ fn measure_on_the_asio_calibration_line_times_the_loop_and_stores_it_for_this_bu
 #[test]
 fn a_cancelled_or_silent_asio_calibration_stores_nothing_and_says_why() {
     use transit_audio_backend as ab;
-    if !soundcraft_playback::devices::NATIVE_ASIO_COMPILED {
+    if !transit_playback::devices::NATIVE_ASIO_COMPILED {
         return;
     }
     let format = ab::Format::new(48_000, 2, ab::SampleFormat::F32);
@@ -1928,7 +1927,7 @@ fn a_cancelled_or_silent_asio_calibration_stores_nothing_and_says_why() {
         ..Default::default()
     };
     let mut t = T::new();
-    let player = soundcraft_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, &driver).unwrap();
+    let player = transit_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, &driver).unwrap();
     t.app.engine.set_io_map(player.io_map().as_ref().clone());
     t.app.player = Some(player);
     t.app.ui.audio = cfg;
@@ -1971,7 +1970,7 @@ fn a_cancelled_or_silent_asio_calibration_stores_nothing_and_says_why() {
 #[test]
 fn an_asio_calibration_that_outlives_its_wait_is_given_up_and_stores_nothing() {
     use transit_audio_backend as ab;
-    if !soundcraft_playback::devices::NATIVE_ASIO_COMPILED {
+    if !transit_playback::devices::NATIVE_ASIO_COMPILED {
         return;
     }
     let format = ab::Format::new(48_000, 2, ab::SampleFormat::F32);
@@ -1987,7 +1986,7 @@ fn an_asio_calibration_that_outlives_its_wait_is_given_up_and_stores_nothing() {
         ..Default::default()
     };
     let mut t = T::new();
-    let player = soundcraft_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, &driver).unwrap();
+    let player = transit_playback::Player::open_fake_native_asio(t.app.engine.session_arc(), &cfg, &driver).unwrap();
     t.app.engine.set_io_map(player.io_map().as_ref().clone());
     t.app.player = Some(player);
     t.app.ui.audio = cfg;
@@ -2124,7 +2123,7 @@ fn assert_sections_fit(physical_screen: egui::Vec2, zoom: f32) {
     t.frames(3);
     assert_eq!(t.ctx.zoom_factor(), zoom);
     assert_eq!(t.ctx.pixels_per_point(), zoom);
-    t.app.engine.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10));
+    t.app.engine.set_io_map(transit_model::IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10));
     t.open_window();
     for key in SECTIONS {
         t.section(key);

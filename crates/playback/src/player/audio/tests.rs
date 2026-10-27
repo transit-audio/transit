@@ -5,12 +5,12 @@ use crate::{
     OutputCallback,
     device_clock::{ClockKey, Direction},
 };
-use soundcraft_mix::{DeviceGeneration, InstanceSpec, NewInstance, SlotGen};
-use soundcraft_model::Session;
 use std::sync::{
     Mutex,
     atomic::{AtomicBool, AtomicI64, AtomicU32},
 };
+use transit_mix::{DeviceGeneration, InstanceSpec, NewInstance, SlotGen};
+use transit_model::Session;
 use transit_rt::testing::measure;
 
 fn fixture(device_rate: u32) -> (Control<Command, ActionResult>, Audio, Arc<Shared>) {
@@ -32,7 +32,7 @@ pub(super) fn fixture_session(device_rate: u32, session: Arc<Session>) -> (Contr
     (control, audio, shared)
 }
 pub(super) fn make(spec: &InstanceSpec, _: SlotGen) -> Option<NewInstance> {
-    soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
+    transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
 }
 pub(super) fn fill(audio: &mut Audio, out: &mut [f32]) {
     audio.fill(out, 2, &mut plan_bridge::callback_scope(), &mut action_lane::callback_scope()).unwrap();
@@ -67,7 +67,7 @@ fn recording_waits_for_its_plan_and_publishes_the_actual_consumed_output_boundar
     let (mut control, mut audio, shared) = fixture(48_000);
     fill(&mut audio, &mut [0.0; 8]);
     control.service(&mut make);
-    let (mut start, publisher) = start::pair(soundcraft_mix::EngineEpoch(1));
+    let (mut start, publisher) = start::pair(transit_mix::EngineEpoch(1));
     audio.transport.record_start = publisher;
     recording_clock(&mut audio, 48_000);
     let reader = start.prepare().unwrap();
@@ -105,7 +105,7 @@ fn recording_waits_for_its_plan_and_publishes_the_actual_consumed_output_boundar
 fn cancelled_or_unclocked_recording_cannot_apply_play_or_start_a_newer_take() {
     for unavailable in [false, true] {
         let (mut control, mut audio, shared) = fixture(48_000);
-        let (mut start, publisher) = start::pair(soundcraft_mix::EngineEpoch(1));
+        let (mut start, publisher) = start::pair(transit_mix::EngineEpoch(1));
         audio.transport.record_start = publisher;
         let reader = start.prepare().unwrap();
         reader.mark_audio();
@@ -158,7 +158,7 @@ fn punch_in_retains_fractional_playhead_and_pending_dsp_output() {
     let render_position = audio.transport.render_position;
     let epoch = audio.transport.epoch;
     recording_clock(&mut audio, 44_100);
-    let (mut start, publisher) = start::pair(soundcraft_mix::EngineEpoch(1));
+    let (mut start, publisher) = start::pair(transit_mix::EngineEpoch(1));
     audio.transport.record_start = publisher;
     let reader = start.prepare().unwrap();
     control.send_action(Command::Record { ticket: reader.ticket(), from: None, end: None, looped: None, count_in: None }, true).unwrap();
@@ -170,8 +170,8 @@ fn punch_in_retains_fractional_playhead_and_pending_dsp_output() {
     control.retire(audio.plans, audio.actions);
 }
 
-fn owner_fixture() -> (crate::player::RuntimeControl<Command, ActionResult>, Audio, soundcraft_model::TrackId) {
-    use soundcraft_model::{ChannelFormat, Insert, TrackKind};
+fn owner_fixture() -> (crate::player::RuntimeControl<Command, ActionResult>, Audio, transit_model::TrackId) {
+    use transit_model::{ChannelFormat, Insert, TrackKind};
     let mut session = Session::default();
     let track = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     session.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
@@ -194,17 +194,17 @@ fn owner_fixture() -> (crate::player::RuntimeControl<Command, ActionResult>, Aud
 
 fn owned_note(
     owner: &crate::player::RuntimeControl<Command, ActionResult>,
-    track: soundcraft_model::TrackId,
+    track: transit_model::TrackId,
     token: sources::Token,
-) -> soundcraft_mix::InstrumentEvent {
-    soundcraft_mix::InstrumentEvent {
-        engine: soundcraft_mix::EngineEpoch(73),
-        target: owner.binding(track, soundcraft_mix::INSTRUMENT_SLOT).unwrap(),
-        due: soundcraft_mix::Due::Next,
+) -> transit_mix::InstrumentEvent {
+    transit_mix::InstrumentEvent {
+        engine: transit_mix::EngineEpoch(73),
+        target: owner.binding(track, transit_mix::INSTRUMENT_SLOT).unwrap(),
+        due: transit_mix::Due::Next,
         transport: None,
-        source: soundcraft_mix::Source { port: token.port(), channel: 0, generation: token.generation() },
-        message: soundcraft_mix::Message::NoteOn { key: 60, velocity: 100, id: soundcraft_mix::NoteId::NONE },
-        arrival: soundcraft_mix::Arrival { host_ns: 0, sequence: 1 },
+        source: transit_mix::Source { port: token.port(), channel: 0, generation: token.generation() },
+        message: transit_mix::Message::NoteOn { key: 60, velocity: 100, id: transit_mix::NoteId::NONE },
+        arrival: transit_mix::Arrival { host_ns: 0, sequence: 1 },
     }
 }
 
@@ -222,7 +222,7 @@ fn owner_endpoints_drive_stopped_unarmed_audition_without_callback_heap_work() {
     let mut notices = [None; 16];
     owner.poll_notices(&mut notices);
     assert!(notices.iter().flatten().any(|notice| matches!(notice, crate::player::Notice::Action(r)
-        if r.sequence == sequence && r.handler_result == Some(ActionResult::Event(soundcraft_mix::EventOutcome::Queued)))));
+        if r.sequence == sequence && r.handler_result == Some(ActionResult::Event(transit_mix::EventOutcome::Queued)))));
     owner.retire(audio.into_ports());
 }
 
@@ -252,7 +252,7 @@ fn source_revoke_precedes_note_dispatch_and_old_generation_stays_refused_after_r
     assert!(heap.is_zero(), "{heap:?}");
     let mut notices = [None; 16];
     owner.poll_notices(&mut notices);
-    for (sequence, result) in [(stale, soundcraft_mix::EventOutcome::RevokedSource), (accepted, soundcraft_mix::EventOutcome::Queued)] {
+    for (sequence, result) in [(stale, transit_mix::EventOutcome::RevokedSource), (accepted, transit_mix::EventOutcome::Queued)] {
         assert!(notices.iter().flatten().any(|notice| matches!(notice, crate::player::Notice::Action(r)
             if r.sequence == sequence && r.handler_result == Some(ActionResult::Event(result)))));
     }
@@ -293,7 +293,7 @@ fn completed_releases_do_not_stop_processing_tails_after_an_arbitrary_delay() {
     let mut event = owned_note(&owner, track, token);
     owner.send_note(Command::Note(event), action_lane::NoteKind::On).unwrap();
     fill(&mut audio, &mut [0.0; 128]);
-    event.message = soundcraft_mix::Message::NoteOff { key: 60, velocity: 0, id: soundcraft_mix::NoteId::NONE };
+    event.message = transit_mix::Message::NoteOff { key: 60, velocity: 0, id: transit_mix::NoteId::NONE };
     owner.send_note(Command::Note(event), action_lane::NoteKind::Off).unwrap();
     fill(&mut audio, &mut [0.0; 128]);
     assert!(!audio.plans.engine().has_pending_events());
@@ -513,7 +513,7 @@ fn changed_layout_waits_for_old_render_ahead_and_releases_it_on_control() {
     let old = audio.plans.engine().active().generation;
     control.service(&mut make);
     let mut surround = Session::default();
-    surround.outputs[0].format = soundcraft_model::ChannelFormat::Surround51;
+    surround.outputs[0].format = transit_model::ChannelFormat::Surround51;
     control.request(Arc::new(surround), None).unwrap();
     control.service(&mut make);
     assert!(!audio.read.covers(audio.pending));
@@ -529,12 +529,12 @@ fn changed_layout_waits_for_old_render_ahead_and_releases_it_on_control() {
 }
 
 fn signal() -> Arc<Session> {
-    use soundcraft_model::{ChannelFormat, Clip, Insert, SourceAudio, SourceId, TrackKind};
+    use transit_model::{ChannelFormat, Clip, Insert, SourceAudio, SourceId, TrackKind};
     let mut s = Session::default();
     s.edit.click = false;
     let track = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
     let channels = (0..2).map(|ch| (0..4096).map(|frame| (frame % 31 + 1) as f32 * (ch + 1) as f32 / 128.0).collect()).collect();
-    s.pool.insert(SourceId(1), Arc::new(SourceAudio::new(soundcraft_audio_io::AudioBuffer { sample_rate: 48_000, channels })));
+    s.pool.insert(SourceId(1), Arc::new(SourceAudio::new(transit_audio_io::AudioBuffer { sample_rate: 48_000, channels })));
     let clip = s.new_clip_id();
     let t = s.track_mut(track).unwrap();
     t.playlist_mut().unwrap().clips.push(Clip::audio(clip, "pattern", SourceId(1), 0, 0, 4096));
@@ -599,7 +599,7 @@ fn a_fault_returns_pending_plans_and_actions_and_closes_control_admission() {
     fill(&mut audio, &mut [0.0; 128]);
     control.service(&mut make);
     let mut replacement = Session::default();
-    replacement.outputs[0].format = soundcraft_model::ChannelFormat::Surround51;
+    replacement.outputs[0].format = transit_model::ChannelFormat::Surround51;
     let replacement = Arc::new(replacement);
     let weak = Arc::downgrade(&replacement);
     let request = control.request(replacement, None).unwrap();
@@ -749,15 +749,15 @@ fn a_publication_finishing_after_a_concurrent_fault_is_returned_without_adoption
 }
 
 struct CountedInstrument {
-    inner: Box<dyn soundcraft_dsp::Plugin>,
+    inner: Box<dyn transit_dsp::Plugin>,
     resets: Arc<std::sync::atomic::AtomicUsize>,
     calls: Arc<std::sync::atomic::AtomicUsize>,
     frames: Arc<std::sync::atomic::AtomicUsize>,
     panic: Option<(std::thread::ThreadId, Arc<std::sync::atomic::AtomicUsize>, Arc<AtomicBool>)>,
     gate: Option<(std::sync::mpsc::SyncSender<()>, Arc<std::sync::Barrier>)>,
 }
-impl soundcraft_dsp::Plugin for CountedInstrument {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+impl transit_dsp::Plugin for CountedInstrument {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
         self.inner.info()
     }
     fn prepare(&mut self, rate: f32, frames: usize, channels: usize) {
@@ -792,8 +792,8 @@ impl soundcraft_dsp::Plugin for CountedInstrument {
 
 #[test]
 fn stop_and_end_do_not_process_discarded_instrument_frames_outside_the_render_clock() {
-    use soundcraft_model::{ChannelFormat, Insert, TrackKind};
     use std::sync::atomic::AtomicUsize;
+    use transit_model::{ChannelFormat, Insert, TrackKind};
     for end in [false, true] {
         let (mut control, mut audio, _) = fixture(48_000);
         fill(&mut audio, &mut [0.0; 128]);
@@ -869,8 +869,8 @@ impl Drop for PanicOwner {
 }
 #[test]
 fn escaped_processing_panic_stays_owned_until_main_reclaims_the_callback_holder() {
-    use soundcraft_model::{ChannelFormat, Insert, TrackKind};
     use std::sync::atomic::AtomicUsize;
+    use transit_model::{ChannelFormat, Insert, TrackKind};
     let (mut control, mut audio, _) = fixture(48_000);
     fill(&mut audio, &mut [0.0; 128]);
     control.service(&mut make);
@@ -936,8 +936,8 @@ fn an_already_published_control_fault_is_drained_as_known_failure() {
 
 #[test]
 fn a_control_failure_during_processing_silences_that_callback_before_it_returns() {
-    use soundcraft_model::{ChannelFormat, Insert, TrackKind};
     use std::sync::atomic::AtomicUsize;
+    use transit_model::{ChannelFormat, Insert, TrackKind};
     let (mut control, mut audio, shared) = fixture(48_000);
     fill(&mut audio, &mut [0.0; 128]);
     control.service(&mut make);
@@ -1006,14 +1006,14 @@ fn retained_payload_cleanup_cannot_escape_quiescent_endpoint_return() {
 }
 
 /// Four 256-frame callbacks of the click on a device with `channels` outputs, planar by channel.
-fn click_on_device(channels: usize, io: Option<soundcraft_model::IoMap>) -> Vec<Vec<f32>> {
+fn click_on_device(channels: usize, io: Option<transit_model::IoMap>) -> Vec<Vec<f32>> {
     let mut session = Session::default();
     session.edit.click = true;
     play_on_device(session, channels, io)
 }
 
 /// Four 256-frame callbacks of `session` playing from 0 on a device with `channels` outputs.
-fn play_on_device(session: Session, channels: usize, io: Option<soundcraft_model::IoMap>) -> Vec<Vec<f32>> {
+fn play_on_device(session: Session, channels: usize, io: Option<transit_model::IoMap>) -> Vec<Vec<f32>> {
     let shared = Arc::new(Shared {
         position: AtomicI64::new(0),
         playing: AtomicBool::new(false),
@@ -1059,7 +1059,7 @@ fn a_wide_device_plays_main_on_its_first_pair_and_zeroes_every_other_channel() {
 #[test]
 fn main_follows_the_path_the_io_map_names() {
     let stereo = click_on_device(2, None);
-    let mut io = soundcraft_model::IoMap::for_device("test", "test", 0, 10);
+    let mut io = transit_model::IoMap::for_device("test", "test", 0, 10);
     io.set_main("Out 3-4").unwrap();
     let moved = click_on_device(10, Some(io));
     assert_eq!(moved[2], stereo[0]);
@@ -1085,7 +1085,7 @@ fn a_path_table_edit_on_an_open_stream_moves_main_through_the_published_plan() {
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: channels as u16, in_channels: 0 };
     let key = ClockKey { generation: 1, domain: 1, direction: Direction::Output };
     let (mut control, mut audio) = pair(target, PlanLimits::default(), key, 48_000, shared).unwrap();
-    control.sessions.set_io(Arc::new(soundcraft_model::IoMap::for_device("test", "test", 0, 10)));
+    control.sessions.set_io(Arc::new(transit_model::IoMap::for_device("test", "test", 0, 10)));
     control.request(Arc::clone(&session), None).unwrap();
     control.service(&mut make);
     control.send_action(Command::Play { from: 0, end: None, looped: None }, true).unwrap();
@@ -1103,7 +1103,7 @@ fn a_path_table_edit_on_an_open_stream_moves_main_through_the_published_plan() {
     assert!(loud(&before, 0) && !loud(&before, 2) && !loud(&before, 3));
     let generation = audio.plans.engine().active().generation;
     // Main moves to Out 3-4 (device channels 2 and 3) as a plan on the same device generation.
-    let mut io = soundcraft_model::IoMap::for_device("test", "test", 0, 10);
+    let mut io = transit_model::IoMap::for_device("test", "test", 0, 10);
     io.set_main("Out 3-4").unwrap();
     control.sessions.set_io(Arc::new(io));
     control.request(Arc::clone(&session), None).unwrap();
@@ -1120,11 +1120,11 @@ fn a_path_table_edit_on_an_open_stream_moves_main_through_the_published_plan() {
 }
 
 /// A mono track playing a constant `level` from 0, panned hard left, to `output`.
-fn tone_track(session: &mut Session, name: &str, level: f32, output: soundcraft_model::Route) {
-    use soundcraft_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
+fn tone_track(session: &mut Session, name: &str, level: f32, output: transit_model::Route) {
+    use transit_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
     let len = 4_096;
     let src = SourceId(session.next_id + 10_000);
-    let buffer = soundcraft_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![level; len]] };
+    let buffer = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![level; len]] };
     session.pool.insert(src, Arc::new(SourceAudio::new(buffer)));
     let t = session.add_track(TrackKind::Audio, ChannelFormat::Mono, Some(name));
     let cid = session.new_clip_id();
@@ -1133,7 +1133,7 @@ fn tone_track(session: &mut Session, name: &str, level: f32, output: soundcraft_
     tr.mixer.output = output;
 }
 
-fn tone_session(tones: &[(f32, soundcraft_model::Route)]) -> Session {
+fn tone_session(tones: &[(f32, transit_model::Route)]) -> Session {
     let mut s = Session::default();
     s.edit.click = false;
     for (i, (level, route)) in tones.iter().enumerate() {
@@ -1144,7 +1144,7 @@ fn tone_session(tones: &[(f32, soundcraft_model::Route)]) -> Session {
 
 #[test]
 fn a_track_routed_to_an_output_path_plays_on_that_paths_device_channels_only() {
-    use soundcraft_model::Route;
+    use transit_model::Route;
     let main = click_on_device_of(&tone_session(&[(0.5, Route::Main)]), 10, None);
     let stem = click_on_device_of(&tone_session(&[(0.5, Route::Hardware("Out 5-6".into()))]), 10, None);
     assert!(main[0].iter().any(|v| v.abs() > 0.05), "Main carries the tone");
@@ -1158,8 +1158,8 @@ fn a_track_routed_to_an_output_path_plays_on_that_paths_device_channels_only() {
 
 #[test]
 fn paths_that_share_a_device_channel_sum_there_and_clip_once() {
-    use soundcraft_model::{ChannelFormat, IoDirection, IoPath, Route};
-    let mut io = soundcraft_model::IoMap::for_device("test", "test", 0, 10);
+    use transit_model::{ChannelFormat, IoDirection, IoPath, Route};
+    let mut io = transit_model::IoMap::for_device("test", "test", 0, 10);
     // "Phones" is device channels 5 and 3: it shares channel 3 with "Out 3-4" (channels 2 and 3).
     io.add_path(IoPath { name: "Phones".into(), direction: IoDirection::Output, channels: vec![5, 3], format: ChannelFormat::Stereo }).unwrap();
     let a = tone_session(&[(0.25, Route::Hardware("Out 3-4".into()))]);
@@ -1180,7 +1180,7 @@ fn paths_that_share_a_device_channel_sum_there_and_clip_once() {
     assert!(loud.iter().flatten().all(|v| v.abs() <= 1.0));
 }
 
-fn click_on_device_of(session: &Session, channels: usize, io: Option<soundcraft_model::IoMap>) -> Vec<Vec<f32>> {
+fn click_on_device_of(session: &Session, channels: usize, io: Option<transit_model::IoMap>) -> Vec<Vec<f32>> {
     play_on_device(session.clone(), channels, io)
 }
 
@@ -1247,7 +1247,7 @@ fn counting(from: Samples, bars: i64) -> (Control<Command, ActionResult>, Audio,
     let (mut control, mut audio, shared) = fixture(48_000);
     fill(&mut audio, &mut [0.0; 8]);
     control.service(&mut make);
-    let (mut start, publisher) = start::pair(soundcraft_mix::EngineEpoch(1));
+    let (mut start, publisher) = start::pair(transit_mix::EngineEpoch(1));
     audio.transport.record_start = publisher;
     recording_clock(&mut audio, 48_000);
     let reader = start.prepare().unwrap();
@@ -1444,7 +1444,7 @@ fn record_rig(from: Option<Samples>) -> (Control<Command, ActionResult>, Audio, 
     let (mut control, mut audio, shared) = fixture(48_000);
     fill(&mut audio, &mut [0.0; 8]);
     control.service(&mut make);
-    let (mut start, publisher) = start::pair(soundcraft_mix::EngineEpoch(1));
+    let (mut start, publisher) = start::pair(transit_mix::EngineEpoch(1));
     audio.transport.record_start = publisher;
     let reader = start.prepare().unwrap();
     control.send_action(Command::Record { ticket: reader.ticket(), from, end: None, looped: None, count_in: None }, true).unwrap();
@@ -1471,7 +1471,7 @@ fn an_audio_pass_on_a_duplex_device_without_a_clock_aligns_the_input_by_frame_or
     let (mut control, mut audio, _) = fixture(48_000);
     fill(&mut audio, &mut [0.0; 8]);
     control.service(&mut make);
-    let (mut start, publisher) = start::pair(soundcraft_mix::EngineEpoch(1));
+    let (mut start, publisher) = start::pair(transit_mix::EngineEpoch(1));
     audio.transport.record_start = publisher;
     let reader = start.prepare().unwrap();
     reader.mark_audio();
@@ -1535,7 +1535,7 @@ fn a_non_duplex_audio_pass_without_any_clock_still_fails_with_the_clock_reason()
 /// the grid. Fake clock: a linear output map at 48 kHz.
 #[test]
 fn external_midi_stamps_move_with_the_mixs_delay_compensation() {
-    use soundcraft_model::{ChannelFormat, Insert, TrackKind};
+    use transit_model::{ChannelFormat, Insert, TrackKind};
     let stamp = |latent: bool| {
         let mut s = Session::default();
         s.edit.delay_compensation = true;
@@ -1558,7 +1558,7 @@ fn external_midi_stamps_move_with_the_mixs_delay_compensation() {
     let (zero, plain) = stamp(false);
     let (a, delayed) = stamp(true);
     assert_eq!(zero, 0);
-    let maximizer = soundcraft_dsp::create("maximizer").unwrap().latency();
+    let maximizer = transit_dsp::create("maximizer").unwrap().latency();
     assert!(maximizer > 0);
     assert_eq!(a, maximizer, "A is the plan's delay compensation");
     assert_eq!(plain.ns_per_frame, delayed.ns_per_frame);
@@ -1574,7 +1574,7 @@ fn external_midi_stamps_move_with_the_mixs_delay_compensation() {
 /// on another track A > 0, and the device track's stamp does not move (B1 of the slice review).
 #[test]
 fn an_external_instruments_notes_are_not_stamped_with_the_mixs_delay() {
-    use soundcraft_model::{ChannelFormat, Insert, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
+    use transit_model::{ChannelFormat, Insert, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
     let stamp = |latent: bool| {
         let mut s = Session::default();
         s.edit.delay_compensation = true;

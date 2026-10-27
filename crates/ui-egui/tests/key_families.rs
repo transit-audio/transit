@@ -4,7 +4,7 @@
 use egui::os::OperatingSystem;
 use egui::{Key, Modifiers};
 use serde_json::json;
-use soundcraft_ui_egui::{Services, SoundApp, shortcuts};
+use transit_ui_egui::{Services, SoundApp, shortcuts};
 
 const MAC_CMD: Modifiers = Modifiers { mac_cmd: true, command: true, ..Modifiers::NONE };
 const PC_CTRL: Modifiers = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
@@ -19,7 +19,7 @@ fn press(ctx: &egui::Context, app: &mut SoundApp, key: Key, modifiers: Modifiers
 fn rig(os: OperatingSystem) -> (egui::Context, SoundApp) {
     let ctx = egui::Context::default();
     ctx.set_os(os);
-    (ctx, SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default()))
+    (ctx, SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default()))
 }
 
 #[test]

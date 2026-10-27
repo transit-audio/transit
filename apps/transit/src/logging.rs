@@ -13,7 +13,7 @@
 //!
 //! Levels: `info` for SoundCraft's own crates, `warn` for everything else (wgpu and naga are
 //! chatty). `RUST_LOG` replaces that with env_logger-style directives: `debug`,
-//! `warn,soundcraft_mix=trace`, `wgpu_core=info`. A directive ending in `*` matches every target
+//! `warn,transit_mix=trace`, `wgpu_core=info`. A directive ending in `*` matches every target
 //! that starts with it (`soundcraft*=debug`).
 //!
 //! Choosing the filter (issue #84), strongest first: `--log <directives>` (the same syntax), then
@@ -33,7 +33,7 @@
 //! callback must never do. Code that runs on the audio thread logs anyway (the cpal error callback,
 //! the synth's full event queue, a hosted plugin's failed `process`, a CLAP plugin calling the
 //! host's `log` from its audio thread, the panic hook). So the cpal callbacks mark their thread
-//! (`soundcraft_playback::mark_audio_thread`; the mix engine carries the mark into the worker
+//! (`transit_playback::mark_audio_thread`; the mix engine carries the mark into the worker
 //! threads that render strips for it), and a record from a marked thread is not written
 //! there: the first one is kept in a fixed buffer (`try_lock`, no allocation, never waits) and the
 //! rest are only counted (an atomic). Another thread writes them out: the UI thread every frame
@@ -153,7 +153,7 @@ impl LogArgs {
                 "--log-stderr" => out.stderr = true,
                 "--log" => match it.next() {
                     Some(value) if !value.starts_with("--") => out.log = Some(value.clone()),
-                    _ => return Err("--log requires directives such as debug or warn,soundcraft_mix=trace".to_owned()),
+                    _ => return Err("--log requires directives such as debug or warn,transit_mix=trace".to_owned()),
                 },
                 other => {
                     if let Some(value) = other.strip_prefix("--log=") {
@@ -540,7 +540,7 @@ impl log::Log for AppLogger {
         if !self.enabled(record.metadata()) {
             return;
         }
-        if soundcraft_playback::on_audio_thread() {
+        if transit_playback::on_audio_thread() {
             self.realtime.keep(record);
             return;
         }
@@ -599,7 +599,7 @@ mod tests {
     fn on_audio_thread<T: Send>(f: impl FnOnce() -> T + Send) -> T {
         std::thread::scope(|s| {
             s.spawn(|| {
-                soundcraft_playback::mark_audio_thread();
+                transit_playback::mark_audio_thread();
                 f()
             })
             .join()
@@ -612,8 +612,8 @@ mod tests {
         let f = Filter::parse(DEFAULT_FILTER);
         assert_eq!(f.level_for("soundcraft"), LevelFilter::Info);
         assert_eq!(f.level_for("soundcraft::control_server"), LevelFilter::Info);
-        assert_eq!(f.level_for("soundcraft_playback"), LevelFilter::Info);
-        assert_eq!(f.level_for("soundcraft_clap_host::ffi"), LevelFilter::Info);
+        assert_eq!(f.level_for("transit_playback"), LevelFilter::Info);
+        assert_eq!(f.level_for("transit_clap_host::ffi"), LevelFilter::Info);
         assert_eq!(f.level_for("wgpu_core::device"), LevelFilter::Warn);
         assert_eq!(f.level_for("cpal"), LevelFilter::Warn);
         assert_eq!(f.max(), LevelFilter::Info);
@@ -621,17 +621,17 @@ mod tests {
 
     #[test]
     fn directives_follow_env_logger_and_the_most_specific_one_wins() {
-        let f = Filter::parse("info,wgpu_core=error,soundcraft_mix=trace,soundcraft_mix::pdc=off");
+        let f = Filter::parse("info,wgpu_core=error,transit_mix=trace,transit_mix::pdc=off");
         assert_eq!(f.level_for("eframe"), LevelFilter::Info);
         assert_eq!(f.level_for("wgpu_core::instance"), LevelFilter::Error);
-        assert_eq!(f.level_for("soundcraft_mix::render"), LevelFilter::Trace);
-        assert_eq!(f.level_for("soundcraft_mix::pdc"), LevelFilter::Off);
+        assert_eq!(f.level_for("transit_mix::render"), LevelFilter::Trace);
+        assert_eq!(f.level_for("transit_mix::pdc"), LevelFilter::Off);
         assert_eq!(f.max(), LevelFilter::Trace);
         // A module name is matched at `::` boundaries, not as a bare prefix.
         assert_eq!(f.level_for("wgpu_core_extra"), LevelFilter::Info);
         // A trailing `*` is a prefix.
-        assert_eq!(Filter::parse("warn,soundcraft_ui*=debug").level_for("soundcraft_ui_egui::mix_window"), LevelFilter::Debug);
-        assert_eq!(Filter::parse("warn,soundcraft_ui*=debug").level_for("soundcraft_engine"), LevelFilter::Warn);
+        assert_eq!(Filter::parse("warn,transit_ui*=debug").level_for("transit_ui_egui::mix_window"), LevelFilter::Debug);
+        assert_eq!(Filter::parse("warn,transit_ui*=debug").level_for("transit_engine"), LevelFilter::Warn);
         // A bare target name sets that target to the most verbose level, as env_logger does.
         assert_eq!(Filter::parse("naga").level_for("naga::front"), LevelFilter::Trace);
         assert_eq!(Filter::parse("naga").level_for("eframe"), LevelFilter::Error);
@@ -681,12 +681,12 @@ mod tests {
     #[test]
     fn the_flag_beats_the_environment_which_beats_the_default() {
         let none = LogArgs::default();
-        let log = LogArgs::parse(&args(&["--log", "warn,soundcraft_mix=trace"])).expect("--log");
+        let log = LogArgs::parse(&args(&["--log", "warn,transit_mix=trace"])).expect("--log");
         let verbose = LogArgs::parse(&args(&["--verbose"])).expect("--verbose");
         assert_eq!(resolve(&none, None), Resolved { spec: DEFAULT_FILTER.into(), source: Source::Default, debug: false });
         assert_eq!(resolve(&none, Some("  ")).source, Source::Default, "a blank RUST_LOG is unset");
         assert_eq!(resolve(&none, Some("trace")), Resolved { spec: "trace".into(), source: Source::Env, debug: false });
-        assert_eq!(resolve(&log, Some("trace")), Resolved { spec: "warn,soundcraft_mix=trace".into(), source: Source::LogFlag, debug: false });
+        assert_eq!(resolve(&log, Some("trace")), Resolved { spec: "warn,transit_mix=trace".into(), source: Source::LogFlag, debug: false });
         assert_eq!(resolve(&verbose, Some("error")), Resolved { spec: DEFAULT_FILTER.into(), source: Source::VerboseFlag, debug: true });
         // Both flags: the directives of --log, and our targets at debug at least.
         let both = LogArgs::parse(&args(&["--verbose", "--log=warn"])).expect("both");
@@ -722,24 +722,24 @@ mod tests {
         assert_eq!(logger.file(), Some(path.clone()));
         let debug_meta = |target| log::Metadata::builder().level(log::Level::Debug).target(target).build();
         assert!(!logger.debug());
-        assert!(!logger.enabled(&debug_meta("soundcraft_playback")));
+        assert!(!logger.enabled(&debug_meta("transit_playback")));
         assert_eq!(logger.max_level(), LevelFilter::Info);
         logger.set_debug(true);
-        assert!(logger.debug() && logger.enabled(&debug_meta("soundcraft_playback")) && logger.enabled(&debug_meta("transit")));
+        assert!(logger.debug() && logger.enabled(&debug_meta("transit_playback")) && logger.enabled(&debug_meta("transit")));
         assert!(!logger.enabled(&debug_meta("wgpu_core::device")), "other crates stay as they were");
-        assert_eq!(logger.level_for("soundcraft_mix"), LevelFilter::Debug);
+        assert_eq!(logger.level_for("transit_mix"), LevelFilter::Debug);
         assert_eq!(logger.max_level(), LevelFilter::Debug);
-        record(&logger, log::Level::Debug, "soundcraft_playback", "a debug line");
+        record(&logger, log::Level::Debug, "transit_playback", "a debug line");
         logger.set_debug(false);
-        assert!(!logger.enabled(&debug_meta("soundcraft_playback")));
+        assert!(!logger.enabled(&debug_meta("transit_playback")));
         assert_eq!(logger.max_level(), LevelFilter::Info);
-        record(&logger, log::Level::Debug, "soundcraft_playback", "dropped again");
+        record(&logger, log::Level::Debug, "transit_playback", "dropped again");
         let text = read(&path);
         assert!(text.contains("a debug line") && !text.contains("dropped again"), "{text}");
         // A filter that already asks for more is not lowered by the toggle.
-        let louder = AppLogger::new(Filter::parse("soundcraft_mix=trace"), false);
+        let louder = AppLogger::new(Filter::parse("transit_mix=trace"), false);
         louder.set_debug(true);
-        assert_eq!(louder.level_for("soundcraft_mix"), LevelFilter::Trace);
+        assert_eq!(louder.level_for("transit_mix"), LevelFilter::Trace);
         louder.set_debug(false);
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -788,14 +788,8 @@ mod tests {
     #[test]
     fn a_line_carries_time_level_thread_target_and_message() {
         assert_eq!(
-            format_line(
-                "2026-10-08T07:59:17.728Z",
-                log::Level::Warn,
-                "main",
-                "soundcraft_mix",
-                "eq_7band: the plugin did not accept its stored state"
-            ),
-            "2026-10-08T07:59:17.728Z WARN  [main] soundcraft_mix: eq_7band: the plugin did not accept its stored state\n"
+            format_line("2026-10-08T07:59:17.728Z", log::Level::Warn, "main", "transit_mix", "eq_7band: the plugin did not accept its stored state"),
+            "2026-10-08T07:59:17.728Z WARN  [main] transit_mix: eq_7band: the plugin did not accept its stored state\n"
         );
         // A multi-line message keeps its lines; the record still ends in exactly one newline.
         assert!(format_line("t", log::Level::Error, "w", "x", "a\nb\n").ends_with("x: a\nb\n"));
@@ -875,7 +869,7 @@ mod tests {
         assert_eq!(lines.len(), 2, "{text}");
         assert!(lines.first().is_some_and(|l| l.contains(" INFO  [") && l.ends_with("soundcraft: SoundCraft starting")), "{text}");
         assert!(lines.get(1).is_some_and(|l| l.ends_with("wgpu_hal::vulkan: a real warning")), "{text}");
-        assert!(logger.enabled(&log::Metadata::builder().level(log::Level::Info).target("soundcraft_engine").build()));
+        assert!(logger.enabled(&log::Metadata::builder().level(log::Level::Info).target("transit_engine").build()));
         assert!(!logger.enabled(&log::Metadata::builder().level(log::Level::Info).target("naga").build()));
         // A second launch rotates: the first log becomes `.1`.
         let second = AppLogger::new(Filter::parse(DEFAULT_FILTER), false);
@@ -956,8 +950,8 @@ mod tests {
         let (tx, rx) = std::sync::mpsc::channel();
         std::thread::scope(|s| {
             s.spawn(|| {
-                soundcraft_playback::mark_audio_thread();
-                record(&logger, log::Level::Warn, "soundcraft_playback", "audio stream error: device unplugged");
+                transit_playback::mark_audio_thread();
+                record(&logger, log::Level::Warn, "transit_playback", "audio stream error: device unplugged");
                 let _ = tx.send(());
             });
             let done = rx.recv_timeout(Duration::from_secs(10)).is_ok();
@@ -974,30 +968,30 @@ mod tests {
         let logger = AppLogger::new(Filter::parse(DEFAULT_FILTER), false);
         let path = logger.attach_dir(&dir).expect("attach");
         on_audio_thread(|| {
-            record(&logger, log::Level::Warn, "soundcraft_playback", "audio stream error: device unplugged");
+            record(&logger, log::Level::Warn, "transit_playback", "audio stream error: device unplugged");
             for _ in 0..41 {
-                record(&logger, log::Level::Warn, "soundcraft_playback", "audio stream error: still unplugged");
+                record(&logger, log::Level::Warn, "transit_playback", "audio stream error: still unplugged");
             }
             // Filtered out: neither kept nor counted.
-            record(&logger, log::Level::Debug, "soundcraft_clap_host::plugin", "process failed");
+            record(&logger, log::Level::Debug, "transit_clap_host::plugin", "process failed");
         });
         assert_eq!(read(&path), "");
         logger.report_audio_thread();
         let text = read(&path);
         let lines: Vec<&str> = text.lines().collect();
         assert_eq!(lines.len(), 2, "{text}");
-        assert!(lines.first().is_some_and(|l| l.contains(" WARN  [audio] soundcraft_playback: audio stream error: device unplugged")), "{text}");
+        assert!(lines.first().is_some_and(|l| l.contains(" WARN  [audio] transit_playback: audio stream error: device unplugged")), "{text}");
         assert!(lines.get(1).is_some_and(|l| l.contains("41 more log records from the realtime audio thread were not written")), "{text}");
         // Reported once.
         logger.report_audio_thread();
         assert_eq!(read(&path), text);
         // The next record from any other thread reports what the audio thread kept since, first.
-        on_audio_thread(|| record(&logger, log::Level::Error, "soundcraft_clap_host::ffi", "clap plugin: out of voices"));
+        on_audio_thread(|| record(&logger, log::Level::Error, "transit_clap_host::ffi", "clap plugin: out of voices"));
         record(&logger, log::Level::Info, "soundcraft", "UI thread");
         let text = read(&path);
         let tail: Vec<&str> = text.lines().skip(2).collect();
         assert_eq!(tail.len(), 2, "{text}");
-        assert!(tail.first().is_some_and(|l| l.contains(" ERROR [audio] soundcraft_clap_host::ffi: clap plugin: out of voices")), "{text}");
+        assert!(tail.first().is_some_and(|l| l.contains(" ERROR [audio] transit_clap_host::ffi: clap plugin: out of voices")), "{text}");
         assert!(tail.get(1).is_some_and(|l| l.ends_with("soundcraft: UI thread")), "{text}");
         let _ = std::fs::remove_dir_all(&dir);
     }

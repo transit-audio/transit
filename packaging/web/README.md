@@ -1,13 +1,13 @@
 # Hosting transit for the web
 
-`soundcraft-web-<version>.zip` (from the GitHub release, or `packaging/web/package.sh`) holds a
-static site in `soundcraft-web-<version>/`:
+`transit-web-<version>.zip` (from the GitHub release, or `packaging/web/package.sh`) holds a
+static site in `transit-web-<version>/`:
 
 | File | What it is |
 |---|---|
 | `index.html` | The page. It loads everything through relative URLs. |
-| `soundcraft-web-<hash>.js` | wasm-bindgen glue (generated, ES module) |
-| `soundcraft-web-<hash>_bg.wasm` | The app (size: see the release; roughly a third of that with compression) |
+| `transit-web-<hash>.js` | wasm-bindgen glue (generated, ES module) |
+| `transit-web-<hash>_bg.wasm` | The app (size: see the release; roughly a third of that with compression) |
 | `_headers`, `.htaccess` | Sample header rules for Netlify/Cloudflare Pages and Apache |
 
 There is no server-side code. Upload the folder's contents anywhere that serves static files.

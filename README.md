@@ -275,7 +275,7 @@ Settings, autosaves and logs live in a per-user folder: `%APPDATA%\transit` on W
 `~/.config/transit`) elsewhere. Set `TRANSIT_CONFIG_DIR` to use another folder. An empty value
 disables saving settings.
 
-`transit --control <port>` (or `TRANSIT_CONTROL_PORT`; `0` picks a free port) starts a JSON-lines control server for scripts and the MCP server. It binds to `127.0.0.1` only. At start it writes a random per-run token to `control-token` in the settings folder (override the path with `TRANSIT_CONTROL_TOKEN_FILE`) and logs the path; each connection must send `auth <token>` as its first line or it is closed. `soundcraft-cli mcp --connect <port>` reads the file itself. The MCP tools are `list_commands`, `execute`, `batch`, `inspect_session`, `new_session`, `open_session`, `save_session`, `import_audio`, `bounce_mix`, and, with the app, `screenshot`, `ui_inspect`, `ui_set`, `click`, `drag` and `key`. See `docs/control-protocol.md` and `docs/mcp.md`.
+`transit --control <port>` (or `TRANSIT_CONTROL_PORT`; `0` picks a free port) starts a JSON-lines control server for scripts and the MCP server. It binds to `127.0.0.1` only. At start it writes a random per-run token to `control-token` in the settings folder (override the path with `TRANSIT_CONTROL_TOKEN_FILE`) and logs the path; each connection must send `auth <token>` as its first line or it is closed. `transit-cli mcp --connect <port>` reads the file itself. The MCP tools are `list_commands`, `execute`, `batch`, `inspect_session`, `new_session`, `open_session`, `save_session`, `import_audio`, `bounce_mix`, and, with the app, `screenshot`, `ui_inspect`, `ui_set`, `click`, `drag` and `key`. See `docs/control-protocol.md` and `docs/mcp.md`.
 
 ## Status and known issues
 
@@ -291,7 +291,7 @@ What comes next, by milestone: [docs/roadmap.md](docs/roadmap.md).
 transit began in October 2026 as a fork of [SoundCraft](https://github.com/storytold/soundcraft) by
 storytold, an open-source Rust digital audio workstation. transit has its own audio engine (native
 WASAPI and native ASIO backends) and its own product direction; the plug-in hosts and a number of
-crates were inherited and keep their `soundcraft-*` names until they are renamed. Engine fixes that
+crates were inherited (renamed from `soundcraft-*` to `transit-*` in #37). Engine fixes that
 apply upstream may be offered back.
 
 ## License
@@ -306,7 +306,7 @@ Issues are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md). Background on past d
 ## For contributors and their agents
 
 - [AGENTS.md](AGENTS.md): read this first.
-- Crates we own are `transit-*`; inherited ones are still `soundcraft-*` ([ADR 0014](docs/adr/0014-transit-gets-its-own-repository.md)).
+- Every crate is `transit-*`; the inherited ones were renamed from `soundcraft-*` in #37 ([ADR 0014](docs/adr/0014-transit-gets-its-own-repository.md)).
 - [docs/adr/](docs/adr/README.md): architecture decisions.
 - [docs/contributing/](docs/contributing/README.md): evidence and knowledge notes.
 - [docs/known-issues/](docs/known-issues/README.md): accepted, tracked limitations.

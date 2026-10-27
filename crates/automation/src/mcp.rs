@@ -13,7 +13,7 @@ command: call `list_commands` to discover ids and their params, then `execute` (
 or name. Verify your work with `inspect_session` (tracks, clips, mixer, automation, markers, selection). Programmatic \
 calls never open dialogs. MIDI note start/length accept 1-based bar|beat[|tick] strings: start 1|1 is the clip beginning, length 1|2 is one beat, length 2|1 is one bar. Note aliases must be strings; numeric ticks use start_ticks/length_ticks. Clip and retrospective start positions retain colon clock strings. \
 MIDI clip start/end use session bars; note times are relative to the clip. Use midi.chord_add for chords (root name or MIDI number, quality or intervals, inversion). \
-inspect_session includes tempo/meter maps, key changes and ticks_per_quarter. Tools marked APP_ONLY need the desktop app (`transit --control 0` + `soundcraft-cli mcp --connect PORT`).";
+inspect_session includes tempo/meter maps, key changes and ticks_per_quarter. Tools marked APP_ONLY need the desktop app (`transit --control 0` + `transit-cli mcp --connect PORT`).";
 
 pub struct Server<B: Backend> {
     pub backend: B,

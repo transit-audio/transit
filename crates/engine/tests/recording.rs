@@ -1,6 +1,6 @@
 //! A take being recorded is never replaced or quit away from.
 use serde_json::json;
-use soundcraft_engine::{Engine, EngineError};
+use transit_engine::{Engine, EngineError};
 
 #[test]
 fn nothing_replaces_or_quits_a_session_while_it_records() {

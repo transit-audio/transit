@@ -7,8 +7,8 @@ use crate::SoundApp;
 use crate::theme::{Tokens, mono, regular};
 use egui::{Align2, Color32, CursorIcon, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
-use soundcraft_model::{Insert, TrackId};
 use std::path::Path;
+use transit_model::{Insert, TrackId};
 
 /// The built-in Sampler's plugin id.
 pub const SAMPLER: &str = "sampler";
@@ -33,10 +33,10 @@ pub fn whole_number(plugin: &str, param: &str) -> bool {
 }
 
 /// A built-in instrument's parameter as its window shows it: the sampler's notes by name.
-pub fn format_param(plugin: &str, p: &soundcraft_dsp::ParamInfo, value: f32) -> String {
+pub fn format_param(plugin: &str, p: &transit_dsp::ParamInfo, value: f32) -> String {
     if plugin == SAMPLER && NOTE_PARAMS.contains(&p.id) {
         let n = value.round().clamp(0.0, 127.0) as u8;
-        return format!("{} ({n})", soundcraft_midi::note_name(n));
+        return format!("{} ({n})", transit_midi::note_name(n));
     }
     if whole_number(plugin, p.id) {
         return format!("{:.0}", value.round());
@@ -45,7 +45,7 @@ pub fn format_param(plugin: &str, p: &soundcraft_dsp::ParamInfo, value: f32) -> 
 }
 
 fn param(ins: &Insert, id: &str) -> f32 {
-    let default = soundcraft_dsp::plugin_info(SAMPLER).and_then(|i| i.param(id)).map_or(0.0, |p| p.default);
+    let default = transit_dsp::plugin_info(SAMPLER).and_then(|i| i.param(id)).map_or(0.0, |p| p.default);
     ins.params.get(id).copied().unwrap_or(default)
 }
 
@@ -118,7 +118,7 @@ impl SoundApp {
         }
         let s = self.engine.session();
         let mut open = self.ui.plugin_windows.iter().filter(|(t, slot)| {
-            *slot == soundcraft_mix::INSTRUMENT_SLOT && s.track(*t).and_then(|x| x.instrument.as_ref()).is_some_and(|i| i.plugin == SAMPLER)
+            *slot == transit_mix::INSTRUMENT_SLOT && s.track(*t).and_then(|x| x.instrument.as_ref()).is_some_and(|i| i.plugin == SAMPLER)
         });
         match (open.next(), open.next()) {
             (Some((t, _)), None) => Some(*t),
@@ -135,15 +135,15 @@ impl SoundApp {
     /// sampler, as one undo step.
     pub fn load_sample_bytes(&mut self, read: &SampleRead, bytes: Result<Vec<u8>, String>) {
         let name = read.name();
-        let r = bytes.and_then(|b| soundcraft_engine::io::load_sampler_bytes(&mut self.engine, read.track, &name, &b).map_err(|e| e.to_string()));
+        let r = bytes.and_then(|b| transit_engine::io::load_sampler_bytes(&mut self.engine, read.track, &name, &b).map_err(|e| e.to_string()));
         self.sample_loaded(read.track, &name, r);
     }
 
     fn sample_loaded(&mut self, track: TrackId, what: &str, r: Result<serde_json::Value, String>) {
         match r {
             Ok(v) => {
-                if !self.ui.plugin_windows.contains(&(track, soundcraft_mix::INSTRUMENT_SLOT)) {
-                    self.ui.plugin_windows.push((track, soundcraft_mix::INSTRUMENT_SLOT));
+                if !self.ui.plugin_windows.contains(&(track, transit_mix::INSTRUMENT_SLOT)) {
+                    self.ui.plugin_windows.push((track, transit_mix::INSTRUMENT_SLOT));
                 }
                 let name = v.get("name").and_then(|n| n.as_str()).unwrap_or(what);
                 self.ui.status = format!("{name} loaded into the sampler");
@@ -287,9 +287,9 @@ mod tests {
 
     #[test]
     fn notes_show_by_name() {
-        let info = soundcraft_dsp::plugin_info(SAMPLER).unwrap();
+        let info = transit_dsp::plugin_info(SAMPLER).unwrap();
         let root = info.param("root_note").unwrap();
-        assert_eq!(format_param(SAMPLER, root, 60.0), format!("{} (60)", soundcraft_midi::note_name(60)));
+        assert_eq!(format_param(SAMPLER, root, 60.0), format!("{} (60)", transit_midi::note_name(60)));
         assert_eq!(format_param(SAMPLER, info.param("vel_high").unwrap(), 126.6), "127");
         assert_eq!(format_param(SAMPLER, info.param("attack").unwrap(), 1.0), "1.0 ms");
         assert!(whole_number(SAMPLER, "key_low") && !whole_number(SAMPLER, "attack") && !whole_number("subtractive_synth", "root_note"));

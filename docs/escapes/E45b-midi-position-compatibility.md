@@ -16,7 +16,7 @@
    covers `end` and `length` routing. At 48 kHz, `1:2` is 2,976,000 samples, while `1|2`
    at 120 BPM in 4/4 is 24,000 samples.
 5. **Gate class.** Backward-compatible dispatch of musical aliases and existing position
-   formats. Run with `cargo test --locked -p soundcraft-engine`.
+   formats. Run with `cargo test --locked -p transit-engine`.
 6. **Protocol change, owner, blind spot.** New position syntaxes must be tested alongside
    existing unprefixed and prefixed formats through each affected command. The engine
    command area owns this gate. These rows use the default 48 kHz, 120 BPM, 4/4 session;

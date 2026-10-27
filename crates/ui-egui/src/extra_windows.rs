@@ -5,7 +5,7 @@ use crate::SoundApp;
 use crate::theme::{Tokens, bold, regular};
 use egui::{Align2, Color32, Sense, Stroke, pos2, vec2};
 use serde_json::{Value, json};
-use soundcraft_model::{Speaker, TrackKind};
+use transit_model::{Speaker, TrackKind};
 
 /// How often an auto-updating configuration is refreshed (seconds).
 const AUTO_UPDATE_SECS: f64 = 2.0;

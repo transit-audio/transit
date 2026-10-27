@@ -44,7 +44,7 @@ see `../evidence/hardware-and-ci.md`. Device backend work: [ADR 0016](../../adr/
 picks the implementation: `NativeWasapi` on the WASAPI system, `NativeAsio` on the ASIO system
 (`Backend::native_on`; `crates/playback/src/backend/native.rs`, `factory_for`); `Auto` is cpal until
 ADR 0016 slice (f). A native choice takes effect only in a build with its feature (`native-wasapi`,
-or `native-asio` on 64-bit Windows; `transit`, `soundcraft-playback`, `audio-bench`); if its open
+or `native-asio` on 64-bit Windows; `transit`, `transit-playback`, `audio-bench`); if its open
 fails before `start()`, the Player opens cpal with the same choices and keeps "Native WASAPI failed:
 <reason>; using the cpal backend" (or "Native ASIO failed: ...") in `Player::backend_note`, shown on
 the status line and in Audio Devices. An input opened on demand goes through the backend that serves

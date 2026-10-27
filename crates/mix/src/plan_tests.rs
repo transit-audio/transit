@@ -6,11 +6,11 @@
 use super::active::FAULT_AT;
 use super::plan::{Attach, CellKind, CellMove};
 use super::*;
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_model::{Insert, SourceId};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Mutex, Weak};
 use std::thread::ThreadId;
+use transit_audio_io::AudioBuffer;
+use transit_model::{Insert, SourceId};
 
 /// Counts heap operations on threads a test measures (all other threads are only forwarded).
 #[global_allocator]
@@ -53,7 +53,7 @@ struct Probe {
 }
 
 impl Plugin for Probe {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
         self.inner.info()
     }
     fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -240,7 +240,7 @@ fn audio_session() -> (Session, TrackId, TrackId) {
 
 fn builtin(id: &str) -> Insert {
     let mut ins = Insert::new(id);
-    for p in soundcraft_dsp::plugin_info(id).unwrap().params {
+    for p in transit_dsp::plugin_info(id).unwrap().params {
         ins.params.insert(p.id.to_string(), p.default);
     }
     ins
@@ -520,7 +520,7 @@ fn identity_and_generation_rules() {
     assert!(matches!(e, CompileError::GenerationNotIncreasing { .. }));
     // Target rate.
     let mut other = (*s).clone();
-    other.sample_rate = soundcraft_time::SampleRate::new(44_100).unwrap();
+    other.sample_rate = transit_time::SampleRate::new(44_100).unwrap();
     let e = comp.compile(Arc::new(other), PlanGeneration::EMPTY, g(1), &mut make).unwrap_err();
     assert!(matches!(e, CompileError::TargetMismatch { .. }));
     // In flight (N = 1), then exhausted after the last generation.
@@ -552,7 +552,7 @@ fn limits_are_checked_before_anything_is_allocated() {
     for (limits, what) in cases {
         let mut ses = (*s).clone();
         if what == "buses" {
-            ses.busses.push(soundcraft_model::Bus { id: BusId(77), name: "b".into(), format: ChannelFormat::Stereo });
+            ses.busses.push(transit_model::Bus { id: BusId(77), name: "b".into(), format: ChannelFormat::Stereo });
         }
         if what == "clip_fx_per_strip" {
             let clip = ses.track(a).unwrap().clips()[0].id.0;
@@ -702,7 +702,7 @@ fn a_sampler_sample_swap_keeps_both_owners_until_reclaim() {
     rig.render(2);
     // Only the sample changes, and source 1 leaves the pool.
     s.track_mut(t).unwrap().instrument.as_mut().unwrap().sample = Some(SourceId(2));
-    s.pool = soundcraft_model::SourcePool::default();
+    s.pool = transit_model::SourcePool::default();
     s.pool.insert(SourceId(2), audio(0.25));
     let mut env = rig.compile(&s);
     assert!(env.plan.attach.iter().any(|a| matches!(a, Attach::Sample { .. })), "the sampler is reused with a new sample");
@@ -931,7 +931,7 @@ fn a_refused_replacement_dropped_from_the_pool_is_released_at_an_occupied_key() 
 // Coverage for the review's mutants.
 
 fn synth_track(s: &mut Session) -> TrackId {
-    use soundcraft_midi::{Note, Sequence};
+    use transit_midi::{Note, Sequence};
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     let mut seq = Sequence::default();
     for (i, p) in [60u8, 64, 67].into_iter().enumerate() {
@@ -1568,7 +1568,7 @@ fn frozen_pair(freeze_latency: Option<u32>, render: SourceId) -> (Session, Track
         // The test insert reports latency without delaying audio, so its render starts that much
         // before the timeline for the frozen track to play where the live one does.
         let start = -i64::from(latency);
-        t.freeze = Some(soundcraft_model::Frozen { source: render, start, length: 48_000, hash: t.freeze_hash(), revision: 0, latency });
+        t.freeze = Some(transit_model::Frozen { source: render, start, length: 48_000, hash: t.freeze_hash(), revision: 0, latency });
     }
     (s, a, b)
 }
@@ -1679,7 +1679,7 @@ fn render_flags_prefer_transit_values_and_accept_legacy_aliases() {
 
 #[test]
 fn changed_sink_edges_refresh_cached_indices_even_when_sink_order_stays_the_same() {
-    use soundcraft_model::{IoDirection, IoPath, SendSlot};
+    use transit_model::{IoDirection, IoPath, SendSlot};
     mark_audio_thread();
     let (mut s, a, b) = audio_session();
     let io = IoMap {

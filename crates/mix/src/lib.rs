@@ -10,11 +10,11 @@
 //! The main mix has the format of the session's main output path ([`Session::main_format`]:
 //! stereo by default, up to 16 channels such as 7.1.4 or 9.1.6) and every bus has its own format.
 //! Channels are in SMPTE / WAV order (L R C LFE Ls Rs …, see
-//! [`ChannelFormat::speakers`](soundcraft_model::ChannelFormat::speakers)). Routing a strip into a
+//! [`ChannelFormat::speakers`](transit_model::ChannelFormat::speakers)). Routing a strip into a
 //! destination builds a gain matrix per block:
 //! - mono/stereo sources into a stereo destination use the stereo pan exactly as before;
 //! - into a multichannel destination they use the track's [`SurroundPan`] (pairwise
-//!   constant-power panner over the speaker layout, see `soundcraft_dsp::pan::surround_gains`),
+//!   constant-power panner over the speaker layout, see `transit_dsp::pan::surround_gains`),
 //!   or go to L/R with the stereo pan when the track has no surround pan;
 //! - sources whose format equals the destination's pass straight through, channel for channel;
 //! - other multichannel sources fold to stereo with ITU-R BS.775 coefficients (C and surrounds at
@@ -54,21 +54,21 @@
 //! [`MixEngine::render_active`] renders the active plan, for realtime playback and for offline
 //! renders ([`render_range`], [`RangeRender`]) alike.
 //!
-//! [`Insert::state`]: soundcraft_model::Insert::state
-//! [`Insert::sample`]: soundcraft_model::Insert::sample
+//! [`Insert::state`]: transit_model::Insert::state
+//! [`Insert::sample`]: transit_model::Insert::sample
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
-use soundcraft_dsp::event::{CC_HOLD2, CC_SOFT, CC_SOSTENUTO, CC_SUSTAIN};
-use soundcraft_dsp::pan::{PanLaw, SpeakerPos, SurroundParams, gains};
-use soundcraft_dsp::{Plugin, ProcessStatus, SampleSource, Transport, db_to_gain};
-use soundcraft_midi::CtrlKind;
-use soundcraft_model::{
+use std::ops::Bound;
+use std::sync::Arc;
+use transit_dsp::event::{CC_HOLD2, CC_SOFT, CC_SOSTENUTO, CC_SUSTAIN};
+use transit_dsp::pan::{PanLaw, SpeakerPos, SurroundParams, gains};
+use transit_dsp::{Plugin, ProcessStatus, SampleSource, Transport, db_to_gain};
+use transit_midi::CtrlKind;
+use transit_model::{
     AutoParam, BusId, ChannelFormat, Clip, ClipContent, ClipLoop, IoMap, Route, RouteCycle, RouteScratch, SEND_SLOTS, Session, SourceAudio, Speaker,
     SurroundPan, Track, TrackId, TrackKind,
 };
-use soundcraft_time::{Range, Samples, TICKS_PER_QUARTER};
-use std::ops::Bound;
-use std::sync::Arc;
+use transit_time::{Range, Samples, TICKS_PER_QUARTER};
 
 mod active;
 #[cfg(test)]
@@ -119,17 +119,15 @@ pub const INSTRUMENT_SLOT: usize = usize::MAX;
 
 /// Hosted third-party plugin ids (CLAP or VST3): created off the audio thread in realtime use.
 pub fn is_third_party(id: &str) -> bool {
-    id.starts_with(soundcraft_clap_host::ID_PREFIX)
-        || id.starts_with(soundcraft_vst3_host::ID_PREFIX)
-        || id.starts_with(soundcraft_au_host::ID_PREFIX)
+    id.starts_with(transit_clap_host::ID_PREFIX) || id.starts_with(transit_vst3_host::ID_PREFIX) || id.starts_with(transit_au_host::ID_PREFIX)
 }
 
 /// Top bit of a clip-effect slot index (see [`clip_fx_slot`]). Insert slots are small, and
 /// [`INSTRUMENT_SLOT`] is never a clip-effect slot.
 const CLIP_FX_BIT: usize = 1 << (usize::BITS - 1);
 /// Built-in plugins a clip's effect chain is made of (Clip Effects).
-const CLIP_EQ: &str = soundcraft_dsp::plugins::eq::EQ7_INFO.id;
-const CLIP_COMP: &str = soundcraft_dsp::plugins::dynamics::COMP_INFO.id;
+const CLIP_EQ: &str = transit_dsp::plugins::eq::EQ7_INFO.id;
+const CLIP_COMP: &str = transit_dsp::plugins::dynamics::COMP_INFO.id;
 
 /// Slot index of a clip's effect module in [`InstanceSpec`]: its EQ
 /// (`comp` false) or its compressor. `None` for a clip id too large to encode (not made by
@@ -163,9 +161,9 @@ pub struct InstanceSpec {
     pub id: String,
     /// Channel count the instance is prepared for.
     pub ch: usize,
-    /// Decoded [`Insert::state`](soundcraft_model::Insert::state).
+    /// Decoded [`Insert::state`](transit_model::Insert::state).
     pub state: Option<Vec<u8>>,
-    /// The insert's [`InsertUid`](soundcraft_model::InsertUid): the instance follows it when the
+    /// The insert's [`InsertUid`](transit_model::InsertUid): the instance follows it when the
     /// insert moves to another slot (0 for an instrument or a clip effect).
     pub uid: u64,
 }
@@ -185,7 +183,7 @@ pub fn instance_specs(s: &Session) -> Vec<InstanceSpec> {
 /// their render, [`Session::with_frozen_audio`]).
 pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
     let main_ch = main_channels(s);
-    let state = |ins: &soundcraft_model::Insert| if is_third_party(&ins.plugin) { ins.state_bytes() } else { None };
+    let state = |ins: &transit_model::Insert| if is_third_party(&ins.plugin) { ins.state_bytes() } else { None };
     let mut out = Vec::new();
     for t in s.tracks.iter().filter(|t| s.frozen_audio(t).is_none()) {
         let ch = strip_channels(t, main_ch);
@@ -201,7 +199,7 @@ pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
             }
         }
         // An External Instrument has no plug-in instance (the plan reads its return, `external.rs`).
-        if let Some(ins) = t.instrument.as_ref().filter(|i| i.plugin != soundcraft_model::EXTERNAL_INSTRUMENT_PLUGIN) {
+        if let Some(ins) = t.instrument.as_ref().filter(|i| i.plugin != transit_model::EXTERNAL_INSTRUMENT_PLUGIN) {
             out.push(InstanceSpec { track: t.id, slot: INSTRUMENT_SLOT, id: ins.plugin.clone(), ch: ch.max(2), state: state(ins), uid: 0 });
         }
         if t.kind == TrackKind::Audio {
@@ -1251,7 +1249,7 @@ struct LiveInput<'a> {
     /// The block's first render frame (plan mode: instrument events are due against it).
     frame: u64,
     /// The machine's I/O paths, which resolve an input route's name (a label's number is the fallback).
-    io: Option<&'a soundcraft_model::IoMap>,
+    io: Option<&'a transit_model::IoMap>,
 }
 
 struct StripRender<'a> {
@@ -1284,7 +1282,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
             let n_in = live.input.len().max(1);
             for (k, dst) in strip.buf.iter_mut().enumerate() {
                 let channel = match &t.mixer.input {
-                    Route::Hardware(h) => soundcraft_model::input_channel(live.io, h, k),
+                    Route::Hardware(h) => transit_model::input_channel(live.io, h, k),
                     _ => k,
                 };
                 if let Some(src) = live.input.get(channel % n_in) {
@@ -1652,7 +1650,7 @@ impl ClipFx {
         ClipFx { eq: None, comp: None, eq_on: false, comp_on: false, gain_db: 0.0, sr, ch, lazy }
     }
     fn make(&self, id: &str) -> Option<ClipModule> {
-        soundcraft_dsp::create(id).map(|mut p| {
+        transit_dsp::create(id).map(|mut p| {
             p.prepare(self.sr, 16_384, self.ch.max(1));
             PluginSlot::new(p, String::new(), self.ch, CLIP_FX_BIT)
         })
@@ -1713,7 +1711,7 @@ std::thread_local! {
     static AUDIO_THREAD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// Mark the calling thread as the realtime audio thread (`soundcraft_playback`'s cpal callbacks
+/// Mark the calling thread as the realtime audio thread (`transit_playback`'s cpal callbacks
 /// do, every call: one thread-local store). Strips [`MixEngine::render_active`] hands to worker threads
 /// count as the audio thread while they render for it. Code that might run there asks
 /// [`on_audio_thread`] before doing anything that blocks; the desktop app's logger does, so a
@@ -2013,14 +2011,14 @@ fn path_need(s: &Session, latency: &dyn Fn(&Track) -> usize) -> usize {
         // at worst the strip's input waits for the slowest of its keys, whatever sits before the
         // keyed insert.
         for e in route.edges() {
-            let (soundcraft_model::EdgeKind::Key { .. }, soundcraft_model::RouteNode::Track(to)) = (e.kind, e.to) else { continue };
+            let (transit_model::EdgeKind::Key { .. }, transit_model::RouteNode::Track(to)) = (e.kind, e.to) else { continue };
             if to != i {
                 continue;
             }
             let from = match e.from {
-                soundcraft_model::RouteNode::Track(j) => bus.get(nbus + j).map_or(0, |x| x.0),
-                soundcraft_model::RouteNode::Bus(b) => bus.get(b).map_or(0, |x| x.0),
-                soundcraft_model::RouteNode::Main => 0,
+                transit_model::RouteNode::Track(j) => bus.get(nbus + j).map_or(0, |x| x.0),
+                transit_model::RouteNode::Bus(b) => bus.get(b).map_or(0, |x| x.0),
+                transit_model::RouteNode::Main => 0,
             };
             arrive = arrive.max(from);
         }
@@ -2139,7 +2137,7 @@ mod click {
 
     /// Click pitch for a MIDI note setting (clamped to the MIDI range).
     fn note_hz(note: f64) -> f64 {
-        soundcraft_dsp::midi_to_hz(note.clamp(0.0, 127.0))
+        transit_dsp::midi_to_hz(note.clamp(0.0, 127.0))
     }
 }
 
@@ -2336,9 +2334,9 @@ fn played_note(
     clip: &Clip,
     base: i64,
     rtp: Rtp,
-    n0: &soundcraft_midi::Note,
+    n0: &transit_midi::Note,
     keep_negative: bool,
-) -> Option<(soundcraft_midi::Note, Samples, Samples)> {
+) -> Option<(transit_midi::Note, Samples, Samples)> {
     let sr = s.sample_rate;
     let mut n = *n0;
     n.velocity = (i64::from(n.velocity) + rtp.velocity).clamp(1, 127) as u8;
@@ -2600,7 +2598,7 @@ pub fn clip_note_ons(s: &Session, track: TrackId, pos: Samples, frames: usize) -
 /// A looped MIDI clip written out as it sounds: every cycle's notes and controllers as plain
 /// events, ticks from the clip start, cut at the clip end (ADR 0019). `None` for an unlooped or
 /// non-MIDI clip, or when the result would be unreasonably large.
-pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<soundcraft_midi::Sequence> {
+pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<transit_midi::Sequence> {
     let (origin, l) = midi_loop_frame(s, clip)?;
     let ClipContent::Midi { sequence } = &clip.content else { return None };
     let sr = s.sample_rate;
@@ -2611,7 +2609,7 @@ pub fn unroll_midi_loop(s: &Session, clip: &Clip) -> Option<soundcraft_midi::Seq
         return None;
     }
     let tick = |at: Samples| s.tempo.samples_to_ticks(at, sr) - base;
-    let mut out = soundcraft_midi::Sequence::default();
+    let mut out = transit_midi::Sequence::default();
     // Every sounding position of a content point `rel` samples in: the first pass, then each cycle.
     let places = |rel: Samples| {
         let first = (0..l.end).contains(&rel).then_some(origin + rel);
@@ -2832,7 +2830,7 @@ fn note_insert_latency(t: &Track, strip: &mut Strip, pos: Samples, duplex: bool)
     strip.latency = latency.min(MAX_LATENCY);
 }
 
-fn apply_params(slot: &mut PluginSlot, ins: &soundcraft_model::Insert, t: &Track, i: usize, pos: Samples) {
+fn apply_params(slot: &mut PluginSlot, ins: &transit_model::Insert, t: &Track, i: usize, pos: Samples) {
     // Automation lanes address insert slots; the instrument (`INSTRUMENT_SLOT`) has its own lane
     // slot, so it never picks up slot A's lanes.
     let slot_u8 = if i == INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(i).unwrap_or(u8::MAX) };
@@ -2854,7 +2852,7 @@ fn apply_params(slot: &mut PluginSlot, ins: &soundcraft_model::Insert, t: &Track
 
 /// Sends each stored param (as mapped by `value`) to the plugin when it changed since last time,
 /// and then marks the slot [`woken`](PluginSlot::woken).
-fn apply_values(slot: &mut PluginSlot, ins: &soundcraft_model::Insert, value: impl Fn(&str, f32) -> f32) {
+fn apply_values(slot: &mut PluginSlot, ins: &transit_model::Insert, value: impl Fn(&str, f32) -> f32) {
     // First pass over a hosted plugin: it has just loaded its own settings, so a stored value equal to
     // the default it reports is not a choice and is left alone. Older sessions store every parameter
     // at that default, often 0, and pushing them over a restored plugin silenced Rhapsody (volume and
@@ -2896,7 +2894,7 @@ fn transport_at(s: &Session, pos: Samples, playing: bool, recording: bool) -> Tr
 
 fn volume_db_at(t: &Track, pos: Samples) -> f32 {
     if t.mixer.automation_mode.reads()
-        && t.mixer.automation_mode != soundcraft_model::AutomationMode::Write
+        && t.mixer.automation_mode != transit_model::AutomationMode::Write
         && let Some(l) = t.lane(&AutoParam::Volume)
         && !l.points.is_empty()
     {
@@ -3042,7 +3040,7 @@ fn build_matrix(src_fmt: ChannelFormat, ns: usize, dst_fmt: ChannelFormat, nd: u
             }
             _ if src_amb => {
                 for (d, az) in [(0usize, -30.0f32), (1, 30.0)] {
-                    let g = soundcraft_dsp::pan::ambisonic_decode(az, 0.0, 2);
+                    let g = transit_dsp::pan::ambisonic_decode(az, 0.0, 2);
                     for (c, gc) in g.iter().enumerate() {
                         set(&mut m, c, d, *gc);
                     }
@@ -3084,7 +3082,7 @@ fn build_matrix(src_fmt: ChannelFormat, ns: usize, dst_fmt: ChannelFormat, nd: u
             return identity_matrix(ns.min(nd));
         }
         let mut enc = |m: &mut Matrix, s: usize, az: f32, el: f32, spread: f32| {
-            soundcraft_dsp::pan::ambisonic_encode(az, el, spread, &mut g);
+            transit_dsp::pan::ambisonic_encode(az, el, spread, &mut g);
             for (d, gd) in g.iter().enumerate().take(nd) {
                 set(m, s, d, *gd);
             }
@@ -3094,7 +3092,7 @@ fn build_matrix(src_fmt: ChannelFormat, ns: usize, dst_fmt: ChannelFormat, nd: u
                 for s in 0..ns {
                     let dx = if ns == 2 { if s == 0 { -1.0 } else { 1.0 } } else { 0.0 };
                     let p = surround_params(sp, dx);
-                    enc(&mut m, s, soundcraft_dsp::pan::puck_azimuth(&[], p.x, p.y), p.z * 90.0, p.divergence);
+                    enc(&mut m, s, transit_dsp::pan::puck_azimuth(&[], p.x, p.y), p.z * 90.0, p.divergence);
                 }
             }
             (1, None) => enc(&mut m, 0, pan.stereo[0].clamp(-1.0, 1.0) * 30.0, 0.0, 0.0),
@@ -3121,7 +3119,7 @@ fn build_matrix(src_fmt: ChannelFormat, ns: usize, dst_fmt: ChannelFormat, nd: u
         (1 | 2, Some(sp)) if !src_amb => {
             for s in 0..ns {
                 let dx = if ns == 2 { if s == 0 { -1.0 } else { 1.0 } } else { 0.0 };
-                soundcraft_dsp::pan::surround_gains(layout, &surround_params(sp, dx), &mut g);
+                transit_dsp::pan::surround_gains(layout, &surround_params(sp, dx), &mut g);
                 for (d, gd) in g.iter().enumerate().take(nd) {
                     set(&mut m, s, d, *gd);
                 }
@@ -3155,7 +3153,7 @@ fn build_matrix(src_fmt: ChannelFormat, ns: usize, dst_fmt: ChannelFormat, nd: u
                 if sp.is_lfe() {
                     continue;
                 }
-                let dec = soundcraft_dsp::pan::ambisonic_decode(sp.azimuth(), sp.elevation(), n_spk);
+                let dec = transit_dsp::pan::ambisonic_decode(sp.azimuth(), sp.elevation(), n_spk);
                 for (c, gc) in dec.iter().enumerate() {
                     set(&mut m, c, d, *gc);
                 }
@@ -3168,7 +3166,7 @@ fn build_matrix(src_fmt: ChannelFormat, ns: usize, dst_fmt: ChannelFormat, nd: u
                 } else if sp.is_lfe() {
                     // No LFE in the destination: dropped.
                 } else {
-                    soundcraft_dsp::pan::direction_gains(layout, sp.azimuth(), sp.elevation(), &mut g);
+                    transit_dsp::pan::direction_gains(layout, sp.azimuth(), sp.elevation(), &mut g);
                     for (d, gd) in g.iter().enumerate().take(nd) {
                         set(&mut m, s, d, *gd);
                     }
@@ -3474,7 +3472,7 @@ pub fn render_track_pre_fader_timed(s: &Session, track: TrackId, range: Range) -
     let mut solo = s.clone();
     // Multichannel tracks render into a main mix of their own format (straight through).
     let fmt = s.track(track).map_or(ChannelFormat::Stereo, |t| if t.channels() > 2 { t.format } else { ChannelFormat::Stereo });
-    solo.outputs = vec![soundcraft_model::OutputPath { name: "Out".into(), first_channel: 0, format: fmt }];
+    solo.outputs = vec![transit_model::OutputPath { name: "Out".into(), first_channel: 0, format: fmt }];
     // The tracks and busses that feed the track a sidechain key keep running, so a keyed insert
     // detects as it does live; their audio goes nowhere else (outputs and other sends are cut).
     let (feeding_tracks, feeding_busses) = key_feeders(s, track);
@@ -3522,7 +3520,7 @@ pub fn render_track_pre_fader_timed(s: &Session, track: TrackId, range: Range) -
 /// transitively, whatever feeds those (a bus's writers, a keyed source's own keys). `track`
 /// itself is not marked.
 fn key_feeders(s: &Session, track: TrackId) -> (Vec<bool>, Vec<bool>) {
-    use soundcraft_model::{EdgeKind, RouteNode};
+    use transit_model::{EdgeKind, RouteNode};
     let graph = s.route_graph();
     let mut tracks = vec![false; s.tracks.len()];
     let mut busses = vec![false; s.busses.len()];
@@ -3558,10 +3556,10 @@ fn create_plugin(id: &str) -> Option<Box<dyn Plugin>> {
     if is_third_party(id) {
         return None;
     }
-    soundcraft_dsp::create(id)
-        .or_else(|| soundcraft_clap_host::create(id))
-        .or_else(|| soundcraft_vst3_host::create(id))
-        .or_else(|| soundcraft_au_host::create(id))
+    transit_dsp::create(id)
+        .or_else(|| transit_clap_host::create(id))
+        .or_else(|| transit_vst3_host::create(id))
+        .or_else(|| transit_au_host::create(id))
 }
 
 #[cfg(test)]
@@ -3661,8 +3659,8 @@ mod audio_thread_tests {
 
     /// Sixteen strips of distinct deterministic material, levels, pans and built-in inserts.
     fn sixteen_strips() -> Session {
-        use soundcraft_audio_io::AudioBuffer;
-        use soundcraft_model::{Insert, SourceAudio, SourceId};
+        use transit_audio_io::AudioBuffer;
+        use transit_model::{Insert, SourceAudio, SourceId};
         let mut s = Session::default();
         let len = 48_000usize;
         for k in 0..16u32 {
@@ -3729,14 +3727,14 @@ mod tests {
         assert_eq!(creation_line("vst3:abc", took, true, true), "plug-in instance created: id=vst3:abc in 412 ms (with stored state)");
         assert_eq!(creation_line("clap:x", took, false, false), "plug-in instance failed: id=clap:x in 412 ms (no stored state)");
     }
-    use soundcraft_audio_io::AudioBuffer;
-    use soundcraft_model::{Insert, SourceAudio, SourceId};
     use std::sync::Arc;
+    use transit_audio_io::AudioBuffer;
+    use transit_model::{Insert, SourceAudio, SourceId};
 
     /// What a keyed track needs running: its key sources and, through them, what feeds those.
     #[test]
     fn key_feeders_follow_keys_through_busses_and_keyed_sources() {
-        use soundcraft_model::{ChannelFormat, KeyFrom, KeySource, Tap, TrackKind};
+        use transit_model::{ChannelFormat, KeyFrom, KeySource, Tap, TrackKind};
         let mut s = Session::default();
         let add = |s: &mut Session, k, n: &str| s.add_track(k, ChannelFormat::Stereo, Some(n));
         let a = add(&mut s, TrackKind::Audio, "A");
@@ -3753,7 +3751,7 @@ mod tests {
             tr.mixer.inserts[0] = Some(i);
         }
         s.track_mut(a).unwrap().mixer.output = Route::Bus(bus);
-        s.track_mut(b).unwrap().mixer.sends[0] = Some(soundcraft_model::SendSlot::new(Route::Bus(bus)));
+        s.track_mut(b).unwrap().mixer.sends[0] = Some(transit_model::SendSlot::new(Route::Bus(bus)));
         let ix: Vec<usize> = [a, b, c, unrelated, target].iter().map(|&id| s.track_index(id).unwrap()).collect();
         let idx = |id| ix[[a, b, c, unrelated, target].iter().position(|&x| x == id).unwrap()];
         let (tracks, busses) = key_feeders(&s, target);
@@ -3815,7 +3813,7 @@ mod tests {
     }
 
     fn synth_session(level_db: f32) -> Session {
-        use soundcraft_midi::{Note, Sequence};
+        use transit_midi::{Note, Sequence};
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
         let mut seq = Sequence::default();
@@ -3874,7 +3872,7 @@ mod tests {
         let mut s = synth_session(-6.0);
         let reference = render_range(&s, Range::new(0, 12_000), 512);
         let tr = &mut s.tracks[0];
-        let mut lane = soundcraft_model::AutomationLane::new(AutoParam::Plugin { slot: 0, param: "level".into() });
+        let mut lane = transit_model::AutomationLane::new(AutoParam::Plugin { slot: 0, param: "level".into() });
         lane.set_point(0, -48.0);
         tr.automation.push(lane);
         assert_eq!(render_range(&s, Range::new(0, 12_000), 512), reference);
@@ -3885,13 +3883,13 @@ mod tests {
         let mut s = synth_session(-6.0);
         let reference = render_range(&s, Range::new(0, 12_000), 512);
         let tr = &mut s.tracks[0];
-        tr.mixer.automation_mode = soundcraft_model::AutomationMode::Read;
-        let mut lane = soundcraft_model::AutomationLane::new(AutoParam::Plugin { slot: AutoParam::INSTRUMENT_SLOT, param: "level".into() });
+        tr.mixer.automation_mode = transit_model::AutomationMode::Read;
+        let mut lane = transit_model::AutomationLane::new(AutoParam::Plugin { slot: AutoParam::INSTRUMENT_SLOT, param: "level".into() });
         lane.set_point(0, -48.0);
         tr.automation.push(lane);
         assert_ne!(render_range(&s, Range::new(0, 12_000), 512), reference);
         // Not in Read: the lane is ignored.
-        s.tracks[0].mixer.automation_mode = soundcraft_model::AutomationMode::Off;
+        s.tracks[0].mixer.automation_mode = transit_model::AutomationMode::Off;
         assert_eq!(render_range(&s, Range::new(0, 12_000), 512), reference);
     }
 
@@ -3915,7 +3913,7 @@ mod tests {
 
     #[test]
     fn every_builtin_parameter_map_is_tracked_inline() {
-        for info in soundcraft_dsp::plugins() {
+        for info in transit_dsp::plugins() {
             assert!(info.params.len() <= APPLIED_INLINE, "{}: {} parameters", info.id, info.params.len());
         }
         let mut a = Applied::new();
@@ -3996,7 +3994,7 @@ mod tests {
             for curvature in [-0.5, 0.0, 0.5] {
                 let (mut s, t) = session_with_dc(1.0, 8192);
                 s.track_mut(t).unwrap().mixer.pan = vec![-1.0];
-                let fade = soundcraft_model::Fade { len: 8192, shape: soundcraft_model::FadeShape::SCurve, curvature };
+                let fade = transit_model::Fade { len: 8192, shape: transit_model::FadeShape::SCurve, curvature };
                 let c = &mut s.track_mut(t).unwrap().playlist_mut().unwrap().clips[0];
                 if fade_in {
                     c.fade_in = fade;
@@ -4039,7 +4037,7 @@ mod tests {
         let (mut s, t) = session_with_dc(1.0, 48_000);
         {
             let c = &mut s.track_mut(t).unwrap().playlist_mut().unwrap().clips[0];
-            c.fade_in = soundcraft_model::Fade { len: 1000, shape: soundcraft_model::FadeShape::Linear, curvature: 0.0 };
+            c.fade_in = transit_model::Fade { len: 1000, shape: transit_model::FadeShape::Linear, curvature: 0.0 };
             c.gain_db = -6.0;
         }
         let out = render_range(&s, Range::new(0, 2000), 512);
@@ -4058,7 +4056,7 @@ mod tests {
         {
             let tr = s.track_mut(t).unwrap();
             tr.mixer.output = Route::None;
-            let mut snd = soundcraft_model::SendSlot::new(Route::Bus(bus));
+            let mut snd = transit_model::SendSlot::new(Route::Bus(bus));
             snd.level_db = 0.0;
             tr.mixer.sends[0] = Some(snd);
         }
@@ -4100,7 +4098,7 @@ mod tests {
         s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::new("does-not-exist"));
         let out = render_range(&s, Range::new(0, 4800), 512);
         assert!(out[0][100] > 0.3);
-        let id = soundcraft_dsp::plugins().iter().find(|p| p.id.contains("gain")).map(|p| p.id).unwrap_or("gain");
+        let id = transit_dsp::plugins().iter().find(|p| p.id.contains("gain")).map(|p| p.id).unwrap_or("gain");
         let mut ins = Insert::new(id);
         ins.params.insert("gain".into(), -6.0);
         s.track_mut(t).unwrap().mixer.inserts[0] = Some(ins);
@@ -4115,7 +4113,7 @@ mod tests {
     }
 
     impl Plugin for Stateful {
-        fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
             self.inner.info()
         }
         fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -4134,7 +4132,7 @@ mod tests {
         fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
             self.inner.process(io, frames);
         }
-        fn state_reader(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginStateReader>> {
+        fn state_reader(&mut self) -> Option<Box<dyn transit_dsp::PluginStateReader>> {
             let blob = self.blob.clone();
             Some(Box::new(move || Some(blob.clone())))
         }
@@ -4146,7 +4144,7 @@ mod tests {
     }
 
     impl Plugin for Clock {
-        fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
             self.inner.info()
         }
         fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -4176,7 +4174,7 @@ mod tests {
         s.tempo.set_meter(0, 3, 4).unwrap();
         s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::new("clap:test.clock"));
         let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let clock = Clock { inner: soundcraft_dsp::create("gain").unwrap(), seen: Arc::clone(&seen) };
+        let clock = Clock { inner: transit_dsp::create("gain").unwrap(), seen: Arc::clone(&seen) };
         let mut rig = PlanRig::new(512).fake(t, 0, clock);
         rig.publish(&s);
         render_block(&mut rig, 96_000);
@@ -4196,7 +4194,7 @@ mod tests {
     }
 
     impl Plugin for Ears {
-        fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
             self.inner.info()
         }
         fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -4224,13 +4222,13 @@ mod tests {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
         s.track_mut(t).unwrap().instrument = Some(Insert::new("clap:test.ears"));
-        let cc = |tick, kind, value| soundcraft_midi::CtrlEvent { tick, channel: 0, kind, value };
+        let cc = |tick, kind, value| transit_midi::CtrlEvent { tick, channel: 0, kind, value };
         let ctrls = vec![cc(4, CtrlKind::Cc(64), 127), cc(960, CtrlKind::PitchBend, -8192), cc(1920, CtrlKind::Cc(64), 0)];
-        let seq = soundcraft_midi::Sequence { ctrls, ..Default::default() };
+        let seq = transit_midi::Sequence { ctrls, ..Default::default() };
         let cid = s.new_clip_id();
         s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(Clip::midi(cid, "m", 0, 48_000 * 4, seq));
         let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let ears = Ears { inner: soundcraft_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
+        let ears = Ears { inner: transit_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
         let mut rig = PlanRig::new(512).fake(t, INSTRUMENT_SLOT, ears);
         rig.publish(&s);
         render_block(&mut rig, 0);
@@ -4252,17 +4250,17 @@ mod tests {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
         s.track_mut(t).unwrap().instrument = Some(Insert::new("clap:test.ears"));
-        let q = soundcraft_time::TICKS_PER_QUARTER;
+        let q = transit_time::TICKS_PER_QUARTER;
         let bar = 4 * s.tempo.tick_to_samples(q, s.sample_rate);
-        let cc = |tick, value| soundcraft_midi::CtrlEvent { tick, channel: 0, kind: CtrlKind::Cc(1), value };
+        let cc = |tick, value| transit_midi::CtrlEvent { tick, channel: 0, kind: CtrlKind::Cc(1), value };
         // Value 10 at beat 1, value 20 two ticks (50 samples) later.
-        let seq = soundcraft_midi::Sequence { ctrls: vec![cc(q, 10), cc(q + 2, 20)], ..Default::default() };
+        let seq = transit_midi::Sequence { ctrls: vec![cc(q, 10), cc(q + 2, 20)], ..Default::default() };
         let cid = s.new_clip_id();
         let mut c = Clip::midi(cid, "m", 7, 5 * bar - 7, seq);
         c.looping = Some(ClipLoop { start: 0, end: bar - 7 });
         s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(c);
         let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let ears = Ears { inner: soundcraft_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
+        let ears = Ears { inner: transit_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
         let mut rig = PlanRig::new(512).fake(t, INSTRUMENT_SLOT, ears);
         rig.publish(&s);
         render_block(&mut rig, 0);
@@ -4281,7 +4279,7 @@ mod tests {
     }
 
     impl Plugin for Keys {
-        fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
             self.inner.info()
         }
         fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -4309,14 +4307,14 @@ mod tests {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
         s.track_mut(t).unwrap().instrument = Some(Insert::new("clap:test.keys"));
-        let mut seq = soundcraft_midi::Sequence::default();
-        seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 480 });
+        let mut seq = transit_midi::Sequence::default();
+        seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 480 });
         let cid = s.new_clip_id();
         s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(Clip::midi(cid, "m", 0, 48_000, seq));
         s.edit.values.insert(format!("rtp.{}.transpose", t.0), 12.0);
         s.edit.values.insert(format!("rtp.{}.velocity", t.0), -20.0);
         let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let keys = Keys { inner: soundcraft_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
+        let keys = Keys { inner: transit_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
         let mut rig = PlanRig::new(512).fake(t, INSTRUMENT_SLOT, keys);
         rig.publish(&s);
         render_block(&mut rig, 0);
@@ -4329,7 +4327,7 @@ mod tests {
     }
 
     impl Plugin for Ears2 {
-        fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
             self.inner.info()
         }
         fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -4360,13 +4358,13 @@ mod tests {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
         s.track_mut(t).unwrap().instrument = Some(Insert::new("clap:test.ears2"));
-        let mut seq = soundcraft_midi::Sequence::default();
+        let mut seq = transit_midi::Sequence::default();
         // Far longer than the clip, so the off is clamped to the clip end (sample 1024).
-        seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 480 });
+        seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 480 });
         let cid = s.new_clip_id();
         s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(Clip::midi(cid, "m", 0, 1024, seq));
         let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let ears = Ears2 { inner: soundcraft_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
+        let ears = Ears2 { inner: transit_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
         let mut rig = PlanRig::new(512).fake(t, INSTRUMENT_SLOT, ears);
         rig.publish(&s);
         for pos in [0, 512, 1024] {
@@ -4394,7 +4392,7 @@ mod tests {
     }
 
     impl Plugin for Spy {
-        fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
             self.inner.info()
         }
         fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -4432,8 +4430,8 @@ mod tests {
         let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
         s.track_mut(t).unwrap().instrument = Some(Insert::new("clap:test.ears2"));
         let note = || {
-            let mut seq = soundcraft_midi::Sequence::default();
-            seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 960 });
+            let mut seq = transit_midi::Sequence::default();
+            seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 960 });
             seq
         };
         // The later clip is first in the playlist, so playlist order alone would send its on first.
@@ -4442,7 +4440,7 @@ mod tests {
         clips.push(Clip::midi(late, "b", 24_000, 24_000, note()));
         clips.push(Clip::midi(early, "a", 0, 24_000, note()));
         let heard = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let ears = Ears2 { inner: soundcraft_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
+        let ears = Ears2 { inner: transit_dsp::create("gain").unwrap(), heard: Arc::clone(&heard) };
         let mut rig = PlanRig::new(512).fake(t, INSTRUMENT_SLOT, ears);
         rig.publish(&s);
         // One beat at 120 bpm / 48 kHz is 24 000 samples, so the boundary sits on a tick and lands
@@ -4461,12 +4459,12 @@ mod tests {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
         s.track_mut(t).unwrap().instrument = Some(Insert::new("clap:test.spy"));
-        let mut seq = soundcraft_midi::Sequence::default();
-        seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 48_000 });
+        let mut seq = transit_midi::Sequence::default();
+        seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 48_000 });
         let cid = s.new_clip_id();
         s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(Clip::midi(cid, "m", 0, 48_000 * 4, seq));
         let calls = Arc::new(std::sync::Mutex::new(Calls::default()));
-        let spy = Spy { inner: soundcraft_dsp::create("gain").unwrap(), calls: Arc::clone(&calls) };
+        let spy = Spy { inner: transit_dsp::create("gain").unwrap(), calls: Arc::clone(&calls) };
         let mut rig = PlanRig::new(512).fake(t, INSTRUMENT_SLOT, spy);
         rig.publish(&s);
         render_block(&mut rig, 0);
@@ -4486,12 +4484,12 @@ mod tests {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
         s.track_mut(t).unwrap().instrument = Some(Insert::new("clap:test.spy"));
-        let mut seq = soundcraft_midi::Sequence::default();
-        seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 480 });
+        let mut seq = transit_midi::Sequence::default();
+        seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 480 });
         let cid = s.new_clip_id();
         s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(Clip::midi(cid, "m", 0, 48_000, seq));
         let calls = Arc::new(std::sync::Mutex::new(Calls::default()));
-        let spy = Spy { inner: soundcraft_dsp::create("gain").unwrap(), calls: Arc::clone(&calls) };
+        let spy = Spy { inner: transit_dsp::create("gain").unwrap(), calls: Arc::clone(&calls) };
         let mut rig = PlanRig::new(512).fake(t, INSTRUMENT_SLOT, spy);
         rig.publish(&s);
         rig.eng.flush_releases(512);
@@ -4511,7 +4509,7 @@ mod tests {
         let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
         s.track_mut(t).unwrap().instrument = Some(Insert::new("clap:test.spy"));
         let calls = Arc::new(std::sync::Mutex::new(Calls::default()));
-        let spy = Spy { inner: soundcraft_dsp::create("gain").unwrap(), calls: Arc::clone(&calls) };
+        let spy = Spy { inner: transit_dsp::create("gain").unwrap(), calls: Arc::clone(&calls) };
         let mut rig = PlanRig::new(512).fake(t, INSTRUMENT_SLOT, spy);
         rig.publish(&s);
         let plan = rig.eng.plan.as_deref().unwrap();
@@ -4544,7 +4542,7 @@ mod tests {
     }
 
     impl Plugin for Sleepy {
-        fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
             self.inner.info()
         }
         fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -4589,8 +4587,8 @@ mod tests {
     }
 
     impl Plugin for Ducker {
-        fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
-            soundcraft_dsp::plugin_info("gain").unwrap()
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
+            transit_dsp::plugin_info("gain").unwrap()
         }
         fn prepare(&mut self, _: f32, _: usize, _: usize) {}
         fn reset(&mut self) {}
@@ -4823,7 +4821,7 @@ mod tests {
             let told = Arc::new(std::sync::Mutex::new(Vec::new()));
             let sets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
             let fake = Sleepy {
-                inner: soundcraft_dsp::create("gain").unwrap(),
+                inner: transit_dsp::create("gain").unwrap(),
                 status: row.status,
                 tail: row.tail,
                 decay: row.decay,
@@ -4857,7 +4855,7 @@ mod tests {
     struct Nan(Box<dyn Plugin>);
 
     impl Plugin for Nan {
-        fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
             self.0.info()
         }
         fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -4886,7 +4884,7 @@ mod tests {
         let mut dry = PlanRig::new(512);
         dry.publish(&s);
         let both = render_block(&mut dry, 0);
-        let mut rig = PlanRig::new(512).fake(a, 2, Nan(soundcraft_dsp::create("gain").unwrap()));
+        let mut rig = PlanRig::new(512).fake(a, 2, Nan(transit_dsp::create("gain").unwrap()));
         rig.publish(&s);
         let only_b = render_block(&mut rig, 512);
         assert!(only_b > 0.3 && (only_b - both / 2.0).abs() < 1e-6, "{only_b} vs {both}");
@@ -4907,7 +4905,7 @@ mod tests {
         let b = add_dc_track(&mut s, 0.5, 48_000);
         let m = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
         s.track_mut(m).unwrap().mixer.inserts[0] = Some(Insert::new("clap:test.nan"));
-        let mut rig = PlanRig::new(512).fake(synth, INSTRUMENT_SLOT, Nan(soundcraft_dsp::create("gain").unwrap()));
+        let mut rig = PlanRig::new(512).fake(synth, INSTRUMENT_SLOT, Nan(transit_dsp::create("gain").unwrap()));
         // The master insert is absent in the first plan.
         let mut without = s.clone();
         without.track_mut(m).unwrap().mixer.inserts[0] = None;
@@ -4917,7 +4915,7 @@ mod tests {
         assert!(only_b > 0.3, "{only_b}");
         assert_eq!(failures(&rig, synth), PluginFailures { count: 1, last: INSTRUMENT_SLOT });
         assert_eq!(failures(&rig, b), PluginFailures::default());
-        rig.fakes.push((m, 0, Box::new(Nan(soundcraft_dsp::create("gain").unwrap()))));
+        rig.fakes.push((m, 0, Box::new(Nan(transit_dsp::create("gain").unwrap()))));
         rig.publish(&s);
         assert_eq!(render_block(&mut rig, 512), 0.0);
         assert_eq!(failures(&rig, m), PluginFailures { count: 1, last: 0 });
@@ -4933,7 +4931,7 @@ mod tests {
         s.track_mut(t).unwrap().mixer.inserts[0] = Some(ins);
         assert_eq!(instance_specs(&s)[0].state.as_deref(), Some(&b"stored"[..]));
         let sets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let fake = Stateful { inner: soundcraft_dsp::create("gain").unwrap(), blob: Vec::new(), sets: Arc::clone(&sets) };
+        let fake = Stateful { inner: transit_dsp::create("gain").unwrap(), blob: Vec::new(), sets: Arc::clone(&sets) };
         let mut rig = PlanRig::new(512).fake(t, 0, fake);
         rig.publish(&s);
         render_block(&mut rig, 0);
@@ -4959,7 +4957,7 @@ mod tests {
         ins.set_state_bytes(b"stored");
         s.track_mut(t).unwrap().mixer.inserts[0] = Some(ins);
         let sets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let fake = Stateful { inner: soundcraft_dsp::create("gain").unwrap(), blob: Vec::new(), sets: Arc::clone(&sets) };
+        let fake = Stateful { inner: transit_dsp::create("gain").unwrap(), blob: Vec::new(), sets: Arc::clone(&sets) };
         let mut rig = PlanRig::new(512).fake(t, 0, fake);
         rig.publish(&s);
         let count = || sets.load(std::sync::atomic::Ordering::Relaxed);
@@ -5013,7 +5011,7 @@ mod tests {
             ids.push(t);
         }
         let argmax = |c: &[f32]| c.iter().enumerate().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs())).map(|(i, _)| i).unwrap();
-        let lat = soundcraft_dsp::create("maximizer").unwrap().latency();
+        let lat = transit_dsp::create("maximizer").unwrap().latency();
         assert!(lat > 0, "test needs a latent plugin");
         let out = render_range(&s, Range::new(0, 8000), 512);
         assert_eq!(argmax(&out[0]), argmax(&out[1]), "PDC should align L and R");
@@ -5104,10 +5102,10 @@ mod tests {
         let tr = s.track_mut(t).unwrap();
         tr.playlist_mut().unwrap().clips.push(Clip::audio(cid, "i", SourceId(900), 0, 0, 48_000));
         tr.mixer.inserts[0] = Some(Insert::new("maximizer"));
-        let mut send = soundcraft_model::SendSlot::new(Route::Bus(bus));
+        let mut send = transit_model::SendSlot::new(Route::Bus(bus));
         send.level_db = 0.0;
         tr.mixer.sends[0] = Some(send);
-        let latency = soundcraft_dsp::create("maximizer").unwrap().latency();
+        let latency = transit_dsp::create("maximizer").unwrap().latency();
         assert!(latency > 16);
         for source in [None, Some(bus)] {
             for block in [16, 100, 512] {
@@ -5131,7 +5129,7 @@ mod tests {
     fn a_plugins_bogus_latency_is_capped() {
         struct Latent(Box<dyn Plugin>);
         impl Plugin for Latent {
-            fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+            fn info(&self) -> &'static transit_dsp::PluginInfo {
                 self.0.info()
             }
             fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -5158,7 +5156,7 @@ mod tests {
         let mut rig = PlanRig::new(512);
         for track in [t, aux] {
             s.track_mut(track).unwrap().mixer.inserts[0] = Some(Insert::new("clap:test.latent"));
-            let mut gain = soundcraft_dsp::create("gain").unwrap();
+            let mut gain = transit_dsp::create("gain").unwrap();
             gain.prepare(48_000.0, 512, 1);
             rig.fakes.push((track, 0, Box::new(Latent(gain))));
         }

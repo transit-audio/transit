@@ -1,10 +1,10 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::unwrap_used, clippy::panic)]
 use super::*;
-use soundcraft_dsp::{Plugin, PluginInfo};
-use soundcraft_mix::DeviceGeneration;
-use soundcraft_model::{ChannelFormat, Insert, TrackKind};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use transit_dsp::{Plugin, PluginInfo};
+use transit_mix::DeviceGeneration;
+use transit_model::{ChannelFormat, Insert, TrackKind};
 use transit_rt::testing::measure;
 
 fn target() -> RenderTarget {
@@ -19,7 +19,7 @@ fn session() -> Arc<Session> {
 }
 // A mutable latency REPORT fixture, not a signal-alignment/calibration oracle.
 struct ConstantEditor(u8);
-impl soundcraft_dsp::PluginEditor for ConstantEditor {
+impl transit_dsp::PluginEditor for ConstantEditor {
     fn open(&mut self) -> Result<(), String> {
         Ok(())
     }
@@ -58,10 +58,10 @@ impl Plugin for Latency {
     fn latency(&self) -> usize {
         self.value.load(Ordering::Relaxed)
     }
-    fn editor(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginEditor>> {
+    fn editor(&mut self) -> Option<Box<dyn transit_dsp::PluginEditor>> {
         Some(Box::new(ConstantEditor(self.state)))
     }
-    fn state_reader(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginStateReader>> {
+    fn state_reader(&mut self) -> Option<Box<dyn transit_dsp::PluginStateReader>> {
         let state = self.state;
         Some(Box::new(move || Some(vec![state])))
     }
@@ -71,7 +71,7 @@ fn setup(limits: PlanLimits) -> (RuntimeControl<u8, u8>, AudioPorts<u8, u8>, Arc
     let value = Arc::new(AtomicUsize::new(100));
     let handles = &mut runtime.handles;
     runtime.control.service(&mut |spec, generation| {
-        let made = soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap();
+        let made = transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap();
         handles.capture(
             (spec.track, spec.slot, generation),
             NewInstance { plugin: Box::new(Latency { inner: made.plugin, value: Arc::clone(&value), state: 0xa1 }), refused_state: false },
@@ -238,7 +238,7 @@ fn input_coalescing_and_reopen_refusal_keep_final_owners_on_control() {
     runtime.set_input(Some(input)).unwrap();
     runtime.set_input(None).unwrap();
     assert!(weak.upgrade().is_none(), "unpublished monitor owner reclaimed immediately on control");
-    let wrong = Session { sample_rate: soundcraft_time::SampleRate::new(44_100).unwrap(), ..Session::default() };
+    let wrong = Session { sample_rate: transit_time::SampleRate::new(44_100).unwrap(), ..Session::default() };
     assert_eq!(runtime.update_session(Arc::new(wrong)), Err(PlayerError::NeedsReopen { current_rate: 48_000, requested_rate: 44_100 }));
     assert!(Arc::ptr_eq(runtime.requested_session(), &original));
     assert_eq!(runtime.retire(ports).notices.len(), 3);
@@ -503,7 +503,7 @@ fn state_capture_tracks_the_callers_document_through_preparation_and_adoption() 
     assert_eq!(runtime.capture_states(&replacement), Err(PlayerError::SessionPending));
     let handles = &mut runtime.handles;
     runtime.control.service(&mut |spec, generation| {
-        let made = soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap();
+        let made = transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap();
         handles.capture(
             (spec.track, spec.slot, generation),
             NewInstance { plugin: Box::new(Latency { inner: made.plugin, value: Arc::clone(&value), state: 0xb2 }), refused_state: false },
@@ -554,7 +554,7 @@ fn explicit_same_topology_restore_changes_capture_lineage_but_cow_update_keeps_i
     assert_eq!(runtime.capture_states(&original), Err(PlayerError::SessionPending));
     let handles = &mut runtime.handles;
     runtime.control.service(&mut |spec, generation| {
-        let made = soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap();
+        let made = transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap();
         handles.capture(
             (spec.track, spec.slot, generation),
             NewInstance { plugin: Box::new(Latency { inner: made.plugin, value: Arc::clone(&value), state: 0xb2 }), refused_state: false },
@@ -612,7 +612,7 @@ fn editor_handles_follow_a_moved_insert() {
     runtime.update_session(Arc::clone(&moved)).unwrap();
     let handles = &mut runtime.handles;
     runtime.control.service(&mut |spec, generation| {
-        let made = soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap();
+        let made = transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap();
         handles.capture(
             (spec.track, spec.slot, generation),
             NewInstance { plugin: Box::new(Latency { inner: made.plugin, value: Arc::clone(&value), state: 0xb2 }), refused_state: false },
@@ -630,10 +630,10 @@ fn a_path_table_edit_is_a_plan_on_the_same_engine_and_the_callback_allocates_not
     let (mut runtime, mut ports, _) = setup(PlanLimits::default());
     let engine = ports.plans.engine().active().target;
     let first = ports.plans.engine().active().generation;
-    let mut io = soundcraft_model::IoMap::for_device("test", "test", 0, 2);
-    io.add_path(soundcraft_model::IoPath {
+    let mut io = transit_model::IoMap::for_device("test", "test", 0, 2);
+    io.add_path(transit_model::IoPath {
         name: "Cue".into(),
-        direction: soundcraft_model::IoDirection::Output,
+        direction: transit_model::IoDirection::Output,
         channels: vec![0],
         format: ChannelFormat::Mono,
     })
@@ -655,14 +655,14 @@ fn a_path_table_edit_is_a_plan_on_the_same_engine_and_the_callback_allocates_not
 /// it ran on.
 fn slow_factory(delay: std::time::Duration, made: &Arc<AtomicUsize>) -> super::handles::Factory {
     let made = Arc::clone(made);
-    Arc::new(move |spec: &soundcraft_mix::InstanceSpec| {
+    Arc::new(move |spec: &transit_mix::InstanceSpec| {
         made.fetch_add(1, Ordering::SeqCst);
         std::thread::sleep(delay);
-        soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
+        transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
     })
 }
 
-fn synth_session(with_instrument: bool) -> (Arc<Session>, soundcraft_model::TrackId) {
+fn synth_session(with_instrument: bool) -> (Arc<Session>, transit_model::TrackId) {
     let mut session = Session::default();
     let track = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("keys"));
     if with_instrument {
@@ -676,7 +676,7 @@ fn energy(plans: &plan_bridge::Audio) -> f32 {
 }
 
 /// Plays a note for a few blocks and returns the output energy.
-fn play(plans: &mut plan_bridge::Audio, track: soundcraft_model::TrackId) -> f32 {
+fn play(plans: &mut plan_bridge::Audio, track: transit_model::TrackId) -> f32 {
     plans.live_note(track, 60, 100);
     let mut total = 0.0;
     for _ in 0..8 {
@@ -710,7 +710,7 @@ fn frames_until_loaded(
 }
 
 /// A session whose second request adds the instrument; returns the runtime after the first plan.
-fn with_instrument_requested() -> (RuntimeControl<u8, u8>, AudioPorts<u8, u8>, soundcraft_model::TrackId, PlanGeneration) {
+fn with_instrument_requested() -> (RuntimeControl<u8, u8>, AudioPorts<u8, u8>, transit_model::TrackId, PlanGeneration) {
     let (before, track) = synth_session(false);
     let (mut runtime, mut ports) = RuntimeControl::<u8, u8>::new(before, None, target(), PlanLimits::default()).unwrap();
     runtime.service();
@@ -731,11 +731,11 @@ fn a_slow_instance_is_made_on_the_host_thread_while_frames_advance_and_the_plan_
     let thread = Arc::new(std::sync::Mutex::new(None));
     let slow = slow_factory(std::time::Duration::from_millis(500), &made);
     let seen = Arc::clone(&thread);
-    let factory: super::handles::Factory = Arc::new(move |spec: &soundcraft_mix::InstanceSpec| {
+    let factory: super::handles::Factory = Arc::new(move |spec: &transit_mix::InstanceSpec| {
         *seen.lock().unwrap() = Some(std::thread::current().id());
         slow(spec)
     });
-    let slot = soundcraft_mix::INSTRUMENT_SLOT;
+    let slot = transit_mix::INSTRUMENT_SLOT;
     let third_party = |id: &str| id == "subtractive_synth";
 
     // Frame 1: announced, nothing made, nothing compiled, and the slot reads as loading.
@@ -786,7 +786,7 @@ fn render_while_an_instance_is_made() -> (u32, std::time::Duration, std::time::D
     // True for the whole factory call, so blocks are counted across the sleep as well as the load.
     let in_factory = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let flag = Arc::clone(&in_factory);
-    let factory: super::handles::Factory = Arc::new(move |spec: &soundcraft_mix::InstanceSpec| {
+    let factory: super::handles::Factory = Arc::new(move |spec: &transit_mix::InstanceSpec| {
         flag.store(true, Ordering::Release);
         let made = slow(spec);
         flag.store(false, Ordering::Release);
@@ -844,7 +844,7 @@ fn the_audio_callback_keeps_rendering_while_an_instance_is_made() {
 
 /// Wall-clock companion for quiet hardware (hardware-evidence convention: timing budgets are
 /// checked by hand, not on loaded CI runners): no block over 10 ms against the 10.7 ms budget.
-/// Run with `cargo test -p soundcraft-playback -- --ignored hardware_timing`.
+/// Run with `cargo test -p transit-playback -- --ignored hardware_timing`.
 #[test]
 #[ignore = "wall-clock timing; run on an idle machine"]
 fn hardware_timing_the_audio_callback_keeps_its_budget_while_an_instance_is_made() {
@@ -868,7 +868,7 @@ fn a_request_that_no_longer_wants_a_staged_instance_drops_it() {
     let factory = slow_factory(std::time::Duration::ZERO, &made);
     let third_party = |id: &str| id == "subtractive_synth";
     runtime.handles.service_with(&mut runtime.control, &third_party, &factory);
-    assert!(runtime.loading(track, soundcraft_mix::INSTRUMENT_SLOT));
+    assert!(runtime.loading(track, transit_mix::INSTRUMENT_SLOT));
     // Undo before it is made: nothing is created and nothing is left loading.
     runtime.update_session(base).unwrap();
     runtime.handles.service_with(&mut runtime.control, &third_party, &factory);
@@ -892,11 +892,11 @@ fn a_creation_that_never_returns_is_stuck_after_the_timeout_and_the_session_comp
     }));
     let (release, hang) = std::sync::mpsc::channel::<()>();
     let hang = std::sync::Mutex::new(hang);
-    let factory: super::handles::Factory = Arc::new(move |spec: &soundcraft_mix::InstanceSpec| {
+    let factory: super::handles::Factory = Arc::new(move |spec: &transit_mix::InstanceSpec| {
         let _ = hang.lock().unwrap().recv(); // until the test lets go
-        soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
+        transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
     });
-    let slot = soundcraft_mix::INSTRUMENT_SLOT;
+    let slot = transit_mix::INSTRUMENT_SLOT;
     let third_party = |id: &str| id == "subtractive_synth";
     runtime.handles.service_with(&mut runtime.control, &third_party, &factory);
     assert!(runtime.loading(track, slot));
@@ -931,8 +931,8 @@ fn a_save_after_the_host_thread_returns_from_a_stall_carries_the_live_state() {
         ..transit_plugin_host::Config::default()
     }));
     let value = Arc::new(AtomicUsize::new(0));
-    let factory: super::handles::Factory = Arc::new(move |spec: &soundcraft_mix::InstanceSpec| {
-        let made = soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)?;
+    let factory: super::handles::Factory = Arc::new(move |spec: &transit_mix::InstanceSpec| {
+        let made = transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)?;
         Some(NewInstance { plugin: Box::new(Latency { inner: made.plugin, value: Arc::clone(&value), state: 0x5a }), refused_state: false })
     });
     let third_party = |id: &str| id == "subtractive_synth";
@@ -941,7 +941,7 @@ fn a_save_after_the_host_thread_returns_from_a_stall_carries_the_live_state() {
     adopt(&mut ports.plans);
     runtime.service();
     let session = Arc::clone(runtime.requested_session());
-    let live = vec![(track, soundcraft_mix::INSTRUMENT_SLOT, vec![0x5a])];
+    let live = vec![(track, transit_mix::INSTRUMENT_SLOT, vec![0x5a])];
     assert_eq!(runtime.capture_states(&session).unwrap(), live);
     // A 700 ms call on the instance's own thread, against a 300 ms timeout.
     let host = runtime.handles.host().clone();
@@ -985,7 +985,7 @@ impl Plugin for SlowRead {
     fn process(&mut self, data: &mut [Vec<f32>], frames: usize) {
         self.inner.process(data, frames);
     }
-    fn state_reader(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginStateReader>> {
+    fn state_reader(&mut self) -> Option<Box<dyn transit_dsp::PluginStateReader>> {
         let (delay, state) = (self.delay, self.state);
         Some(Box::new(move || {
             std::thread::sleep(delay);
@@ -1001,14 +1001,14 @@ fn slow_readers(
     n: usize,
     delay: std::time::Duration,
     stored: bool,
-) -> (RuntimeControl<u8, u8>, AudioPorts<u8, u8>, Vec<soundcraft_model::TrackId>, Arc<Session>) {
+) -> (RuntimeControl<u8, u8>, AudioPorts<u8, u8>, Vec<transit_model::TrackId>, Arc<Session>) {
     let mut session = Session::default();
     let tracks: Vec<_> = (0..n)
         .map(|i| {
             let t = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some(&format!("keys {i}")));
             let mut insert = Insert::new("subtractive_synth");
             if stored {
-                insert.state = Some(soundcraft_model::b64::encode(&[0xee]));
+                insert.state = Some(transit_model::b64::encode(&[0xee]));
             }
             session.track_mut(t).unwrap().instrument = Some(insert);
             t
@@ -1018,14 +1018,14 @@ fn slow_readers(
     runtime.handles =
         Handles::with_host(transit_plugin_host::Host::new(transit_plugin_host::Config { inline: false, ..transit_plugin_host::Config::default() }));
     let next = Arc::new(AtomicUsize::new(0));
-    let factory: super::handles::Factory = Arc::new(move |spec: &soundcraft_mix::InstanceSpec| {
-        let made = soundcraft_mix::create_instance(&spec.id, None, 48_000.0, 512, spec.ch)?;
+    let factory: super::handles::Factory = Arc::new(move |spec: &transit_mix::InstanceSpec| {
+        let made = transit_mix::create_instance(&spec.id, None, 48_000.0, 512, spec.ch)?;
         let state = u8::try_from(next.fetch_add(1, Ordering::SeqCst)).unwrap();
         Some(NewInstance { plugin: Box::new(SlowRead { inner: made.plugin, delay, state }), refused_state: false })
     });
     let third_party = |id: &str| id == "subtractive_synth";
     let start = std::time::Instant::now();
-    while (runtime.any_loading() || tracks.iter().any(|t| runtime.binding(*t, soundcraft_mix::INSTRUMENT_SLOT).is_none()))
+    while (runtime.any_loading() || tracks.iter().any(|t| runtime.binding(*t, transit_mix::INSTRUMENT_SLOT).is_none()))
         && start.elapsed() < std::time::Duration::from_secs(20)
     {
         runtime.handles.service_with(&mut runtime.control, &third_party, &factory);
@@ -1068,7 +1068,7 @@ fn a_slow_state_read_on_an_idle_host_thread_is_always_captured() {
         let t = std::time::Instant::now();
         let states = runtime.capture_states(&session).unwrap();
         assert!(t.elapsed() >= std::time::Duration::from_millis(600));
-        assert_eq!(states, vec![(tracks[0], soundcraft_mix::INSTRUMENT_SLOT, vec![0])]);
+        assert_eq!(states, vec![(tracks[0], transit_mix::INSTRUMENT_SLOT, vec![0])]);
         assert!(runtime.take_unrefreshed_states().is_empty());
     }
     runtime.retire(ports);
@@ -1122,7 +1122,7 @@ fn a_never_captured_instance_is_waited_for_even_during_a_modal_dialog() {
     let (mut runtime, ports, tracks, session) = slow_readers(1, std::time::Duration::ZERO, false);
     let dialog = modal_dialog(&runtime, std::time::Duration::from_millis(900));
     let states = runtime.capture_states(&session).unwrap();
-    assert_eq!(states, vec![(tracks[0], soundcraft_mix::INSTRUMENT_SLOT, vec![0])], "waited for, not saved empty");
+    assert_eq!(states, vec![(tracks[0], transit_mix::INSTRUMENT_SLOT, vec![0])], "waited for, not saved empty");
     assert!(runtime.take_unrefreshed_states().is_empty());
     wait_out(&dialog);
     // Captured once, it now has a stored state: the next dialog leaves it out within the deadline.
@@ -1151,7 +1151,7 @@ fn an_instance_the_compile_did_not_predict_loads_without_blocking_a_frame() {
     let made = Arc::new(AtomicUsize::new(0));
     let factory = slow_factory(std::time::Duration::from_millis(500), &made);
     let third_party = |id: &str| id == "subtractive_synth";
-    let slot = soundcraft_mix::INSTRUMENT_SLOT;
+    let slot = transit_mix::INSTRUMENT_SLOT;
     // One UI frame: the Player's service (republish included) and an audio block that adopts.
     let frame = |runtime: &mut RuntimeControl<u8, u8>, ports: &mut AudioPorts<u8, u8>| {
         let t = std::time::Instant::now();

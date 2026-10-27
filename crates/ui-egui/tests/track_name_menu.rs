@@ -3,7 +3,7 @@
 use egui::{Event, Modifiers, PointerButton, Pos2, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use soundcraft_ui_egui::{MainWindow, Services, SoundApp};
+use transit_ui_egui::{MainWindow, Services, SoundApp};
 
 fn right_click(h: &mut Harness<SoundApp>, at: Pos2) {
     h.hover_at(at);
@@ -15,7 +15,7 @@ fn right_click(h: &mut Harness<SoundApp>, at: Pos2) {
 
 #[test]
 fn right_click_on_a_track_name_opens_the_track_menu() {
-    let mut engine = soundcraft_engine::Engine::default();
+    let mut engine = transit_engine::Engine::default();
     engine.execute("track.new", &serde_json::json!({"name": "Voice"})).unwrap();
     let app = SoundApp::new(engine, None, Services::default());
     let mut h = Harness::builder().with_size(vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0).build_ui_state(

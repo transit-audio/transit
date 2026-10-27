@@ -2,7 +2,7 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::unwrap_used, clippy::panic)]
 use crate::action_lane::{self, CALLBACK_ACTIONS, CAPACITY, Class, Event, Outcome, SendError};
-use soundcraft_mix::PlanGeneration;
+use transit_mix::PlanGeneration;
 use transit_rt::testing::measure;
 
 // CountingAlloc is installed once by the playback plan-bridge unit-test module.
@@ -13,14 +13,8 @@ fn generation(n: u64) -> PlanGeneration {
 
 fn bridge() -> (crate::plan_bridge::Control, crate::plan_bridge::Audio) {
     crate::plan_bridge::pair(
-        soundcraft_mix::RenderTarget {
-            device: soundcraft_mix::DeviceGeneration(1),
-            sample_rate: 48_000,
-            max_block: 512,
-            out_channels: 0,
-            in_channels: 0,
-        },
-        soundcraft_mix::PlanLimits::default(),
+        transit_mix::RenderTarget { device: transit_mix::DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 },
+        transit_mix::PlanLimits::default(),
     )
 }
 
@@ -371,7 +365,7 @@ fn production_handler_mutates_the_checked_bridge_without_heap_work() {
             assert!(matches!(event, Event::Action { payload: 1, .. }));
             bridge.set_processing(true, true, true);
             bridge.reset();
-            bridge.live_note(soundcraft_model::TrackId(1), 60, 100);
+            bridge.live_note(transit_model::TrackId(1), 60, 100);
             called += 1;
         })
     });

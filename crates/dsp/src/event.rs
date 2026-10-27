@@ -1,6 +1,6 @@
 //! Instrument events as a plug-in receives them (ADR 0012 G5, F10): one note port, a MIDI 1.0
 //! channel, and a host-assigned voice id. The mix engine wraps these with routing and timing
-//! (`soundcraft_mix::InstrumentEvent`) and re-exports them; plug-in hosts encode them for their
+//! (`transit_mix::InstrumentEvent`) and re-exports them; plug-in hosts encode them for their
 //! format.
 
 /// A sender's note identity: the id an ingress protocol gives a note (MIDI 2.0, OSC, a clip), so

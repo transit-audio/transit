@@ -3,7 +3,7 @@
 //! consumed output, including its named SRC delay; mix PDC must not be subtracted again.
 
 use crate::device_clock::{ClockKey, Direction};
-use soundcraft_time::MAX_POSITION;
+use transit_time::MAX_POSITION;
 
 pub const SEGMENTS: usize = 64;
 

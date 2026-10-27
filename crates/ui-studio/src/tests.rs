@@ -1,10 +1,10 @@
 use crate::mixer::RoutingChoice;
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::{ClipId, TrackId};
+use transit_model::{ClipId, TrackId};
 
 fn app() -> StudioApp {
-    StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default())
+    StudioApp::new(transit_engine::Engine::default(), None, Services::default())
 }
 
 /// An instrument track with a one-bar MIDI clip at bar 1; returns (track, clip, bar length).
@@ -113,7 +113,7 @@ fn play_starts_at_the_cursor_and_stop_returns_there() {
 
 #[test]
 fn new_session_stops_playback() {
-    let mut app = StudioApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     app.run("transport.play", json!({"from": 48_000})).unwrap();
     app.handle_transport(0.25);
     assert!(app.is_playing());
@@ -146,9 +146,9 @@ fn inspect_reports_the_plugin_scan_without_starting_one() {
 /// With no scan started and no folders registered, no test here can see a real plug-in library.
 #[test]
 fn the_shared_host_registries_hold_no_scan_folders_or_results() {
-    assert!(soundcraft_clap_host::cached().is_none() && soundcraft_vst3_host::cached().is_none(), "a test scanned in the shared process");
-    assert!(soundcraft_clap_host::search_dirs().1.is_empty(), "a test registered a CLAP folder in the shared process");
-    assert!(soundcraft_vst3_host::search_dirs().1.is_empty(), "a test registered a VST3 folder in the shared process");
+    assert!(transit_clap_host::cached().is_none() && transit_vst3_host::cached().is_none(), "a test scanned in the shared process");
+    assert!(transit_clap_host::search_dirs().1.is_empty(), "a test registered a CLAP folder in the shared process");
+    assert!(transit_vst3_host::search_dirs().1.is_empty(), "a test registered a VST3 folder in the shared process");
 }
 
 /// Run frames of the real UI, feeding `app.synthetic` like the control channel does.
@@ -261,7 +261,7 @@ fn copy_rig() -> CopyRig {
     let s = app.engine.session();
     assert_eq!(
         crate::automation::grid_ticks(s, layout.samples_per_px, &app.arrange.grid),
-        soundcraft_time::TICKS_PER_QUARTER,
+        transit_time::TICKS_PER_QUARTER,
         "the visible grid is a beat"
     );
     CopyRig {
@@ -382,23 +382,23 @@ fn setting_the_cursor_does_not_dirty_the_document() {
 
 #[test]
 fn a_shuffle_document_keeps_its_mode_and_stays_clean() {
-    let mut e = soundcraft_engine::Engine::default();
+    let mut e = transit_engine::Engine::default();
     e.execute("edit.mode", &json!({"mode": "shuffle"})).unwrap();
     let path = std::env::temp_dir().join(format!("transit-shuffle-{}.sc", std::process::id()));
     e.execute("session.save_as", &json!({"path": path.to_string_lossy(), "replace": true})).unwrap();
     let mut app = StudioApp::new(e, None, Services::default());
-    assert_eq!(app.engine.session().edit.edit_mode, soundcraft_model::EditMode::Shuffle);
+    assert_eq!(app.engine.session().edit.edit_mode, transit_model::EditMode::Shuffle);
     assert!(!app.engine.is_dirty());
     app.run("session.open", json!({"path": path.to_string_lossy()})).unwrap();
     app.handle_transport(0.0);
-    assert_eq!(app.engine.session().edit.edit_mode, soundcraft_model::EditMode::Shuffle);
+    assert_eq!(app.engine.session().edit.edit_mode, transit_model::EditMode::Shuffle);
     assert!(!app.engine.is_dirty());
     // Edits still behave as Slip, and the mode is put back afterwards.
     let (t, clip, bar) = track_with_clip(&mut app);
     app.run("edit.mode", json!({"mode": "shuffle"})).unwrap();
     app.move_clips(&[clip], bar, None).unwrap();
     assert_eq!(clips_on(&app, t), vec![(clip.0, bar, 2 * bar)]);
-    assert_eq!(app.engine.session().edit.edit_mode, soundcraft_model::EditMode::Shuffle);
+    assert_eq!(app.engine.session().edit.edit_mode, transit_model::EditMode::Shuffle);
     let _ = std::fs::remove_file(&path);
 }
 
@@ -410,12 +410,12 @@ fn a_slip_gesture_undoes_without_touching_the_mode() {
     let before = clips_on(&app, t);
     app.move_clips(&[clip], bar, None).unwrap();
     assert_ne!(clips_on(&app, t), before);
-    assert_eq!(app.engine.session().edit.edit_mode, soundcraft_model::EditMode::Shuffle);
+    assert_eq!(app.engine.session().edit.edit_mode, transit_model::EditMode::Shuffle);
     assert!(app.engine.undo());
     assert_eq!(clips_on(&app, t), before);
-    assert_eq!(app.engine.session().edit.edit_mode, soundcraft_model::EditMode::Shuffle);
+    assert_eq!(app.engine.session().edit.edit_mode, transit_model::EditMode::Shuffle);
     assert!(app.engine.redo());
-    assert_eq!(app.engine.session().edit.edit_mode, soundcraft_model::EditMode::Shuffle);
+    assert_eq!(app.engine.session().edit.edit_mode, transit_model::EditMode::Shuffle);
 }
 
 #[test]
@@ -706,9 +706,9 @@ fn add_fx_channel_is_one_undo_step_and_adds_no_send() {
     let fx = app.add_fx_channel().unwrap();
     let s = app.engine.session();
     let aux = s.track(fx).unwrap();
-    assert_eq!(aux.kind, soundcraft_model::TrackKind::Aux);
+    assert_eq!(aux.kind, transit_model::TrackKind::Aux);
     let bus = s.bus_by_name("FX 1").unwrap().id;
-    assert_eq!(aux.mixer.input, soundcraft_model::Route::Bus(bus));
+    assert_eq!(aux.mixer.input, transit_model::Route::Bus(bus));
     assert!(s.track(t).unwrap().mixer.sends.iter().all(Option::is_none), "the selected, focused track gets no send (#145)");
     assert_eq!(undo_len(&mut app), before + 1);
     app.run("edit.undo", json!({})).unwrap();
@@ -836,7 +836,7 @@ fn hover(app: &mut StudioApp, at: (f32, f32)) {
     let _ = crate::control::handle_for_test(app, &ctx, &req);
 }
 
-fn instrument_of(app: &StudioApp, t: TrackId) -> Option<soundcraft_model::Insert> {
+fn instrument_of(app: &StudioApp, t: TrackId) -> Option<transit_model::Insert> {
     app.engine.session().track(t).unwrap().instrument.clone()
 }
 
@@ -968,9 +968,9 @@ fn new_fx_channel_from_a_strip_is_one_undo_step_at_minus_12_db() {
     let s = app.engine.session();
     let bus = s.bus_by_name("FX 1").expect("a bus").id;
     let fx = s.tracks.iter().find(|x| x.name == "FX 1").expect("an FX channel");
-    assert_eq!((fx.kind, &fx.mixer.input), (soundcraft_model::TrackKind::Aux, &soundcraft_model::Route::Bus(bus)));
+    assert_eq!((fx.kind, &fx.mixer.input), (transit_model::TrackKind::Aux, &transit_model::Route::Bus(bus)));
     let send = s.track(t).unwrap().mixer.sends[0].clone().unwrap();
-    assert_eq!((send.target, send.level_db), (soundcraft_model::Route::Bus(bus), -12.0));
+    assert_eq!((send.target, send.level_db), (transit_model::Route::Bus(bus), -12.0));
     let fx_id = TrackId(fx.id.0);
     assert_eq!(undo_len(&mut app), before + 1);
     let fs = strip(&app, fx_id);
@@ -1014,7 +1014,7 @@ fn picking_the_default_input_changes_nothing() {
     click(&mut app, mid(item.rect));
     frames(&mut app, &ctx, 6, &mut time);
     assert_eq!(undo_len(&mut app), before, "no document edit");
-    assert_eq!(app.engine.session().track(t).unwrap().mixer.input, soundcraft_model::Route::None);
+    assert_eq!(app.engine.session().track(t).unwrap().mixer.input, transit_model::Route::None);
     // Another input is a real change.
     app.set_input(t, "In 3-4").unwrap();
     assert_eq!(undo_len(&mut app), before + 1);
@@ -1623,7 +1623,7 @@ fn the_master_or_main_out_strip_is_inside_the_mixer_pane_at_any_scale() {
             assert!(r[0] >= a[0] && r[2] <= a[2] && r[1] >= a[1] && r[3] <= a[3], "ppp {ppp}, master {master}: {r:?} not inside {a:?}");
             assert!(r[2] > r[0] && r[3] > r[1]);
             if master {
-                assert_eq!(m.kind, Some(soundcraft_model::TrackKind::Master));
+                assert_eq!(m.kind, Some(transit_model::TrackKind::Master));
             } else {
                 assert!(l.add_master[2] > l.add_master[0], "the offer to add a master fader");
             }
@@ -1892,7 +1892,7 @@ fn backspace_over_a_control_resets_it_like_delete_and_keeps_the_clip() {
 fn clearing_the_main_meter_clears_the_master_tracks_meter_and_back() {
     let (mut app, _ctx, _time, _a) = mixer_app();
     app.run("track.new", json!({"kind": "master"})).unwrap();
-    let master = app.engine.session().tracks.iter().find(|t| t.kind == soundcraft_model::TrackKind::Master).map(|t| t.id).expect("a Master track");
+    let master = app.engine.session().tracks.iter().find(|t| t.kind == transit_model::TrackKind::Master).map(|t| t.id).expect("a Master track");
     let hot = |app: &mut StudioApp| {
         crate::host::feed_meter(&mut app.main_meter, [1.2, 1.2], 0.0, 0.016);
         crate::host::feed_meter(app.meters.entry(master).or_default(), [1.2, 1.2], 0.0, 0.016);
@@ -1926,9 +1926,9 @@ fn deleting_an_fx_channel_takes_its_bus_and_sends_in_one_undo_step() {
     app.run("edit.undo", json!({})).unwrap();
     let s = app.engine.session();
     let bus = s.bus_by_name("FX 1").expect("bus is back").id;
-    assert_eq!(s.track(fx).unwrap().mixer.input, soundcraft_model::Route::Bus(bus));
+    assert_eq!(s.track(fx).unwrap().mixer.input, transit_model::Route::Bus(bus));
     let send = s.track(t).unwrap().mixer.sends[0].clone().expect("send is back");
-    assert_eq!((send.target, send.level_db), (soundcraft_model::Route::Bus(bus), -7.0));
+    assert_eq!((send.target, send.level_db), (transit_model::Route::Bus(bus), -7.0));
 }
 
 #[test]
@@ -2035,7 +2035,7 @@ fn header_mid(app: &StudioApp, t: TrackId) -> (f32, f32) {
 }
 
 fn track_count(app: &StudioApp) -> usize {
-    app.engine.session().tracks.iter().filter(|t| t.kind != soundcraft_model::TrackKind::Master).count()
+    app.engine.session().tracks.iter().filter(|t| t.kind != transit_model::TrackKind::Master).count()
 }
 
 const NO_HEADER: &str = "Select a track header to delete the track";
@@ -2163,7 +2163,7 @@ fn the_header_menu_delete_asks_when_the_track_has_clips() {
 #[test]
 fn the_master_is_never_deleted() {
     let (mut app, ..) = delete_app();
-    let master = app.engine.session().tracks.iter().find(|t| t.kind == soundcraft_model::TrackKind::Master).map(|t| t.id);
+    let master = app.engine.session().tracks.iter().find(|t| t.kind == transit_model::TrackKind::Master).map(|t| t.id);
     if let Some(m) = master {
         assert!(app.request_delete_tracks(vec![m]).is_err());
         assert!(app.engine.session().track(m).is_some());
@@ -2306,7 +2306,7 @@ fn a_bare_audio_track_is_mono_on_input_one() {
     let r = app.add_track("audio");
     let t = new_audio(&mut app, r);
     assert_eq!(app.engine.session().track(t).unwrap().channels(), 1);
-    assert_eq!(app.engine.session().track(t).unwrap().format, soundcraft_model::ChannelFormat::Mono);
+    assert_eq!(app.engine.session().track(t).unwrap().format, transit_model::ChannelFormat::Mono);
     assert_eq!(input_label(&app, t), "In 1");
 }
 
@@ -2315,7 +2315,7 @@ fn add_track_midi_makes_a_focused_midi_track() {
     let mut app = app();
     let r = app.add_track("midi");
     let t = new_audio(&mut app, r);
-    assert_eq!(app.engine.session().track(t).unwrap().kind, soundcraft_model::TrackKind::Midi);
+    assert_eq!(app.engine.session().track(t).unwrap().kind, transit_model::TrackKind::Midi);
     assert_eq!(app.ui.focus_track, Some(t));
 }
 
@@ -2326,9 +2326,9 @@ fn the_menu_makes_mono_and_stereo_audio_tracks() {
     let mono = new_audio(&mut app, r);
     let r = app.add_audio_track("stereo");
     let stereo = new_audio(&mut app, r);
-    assert_eq!(app.engine.session().track(mono).unwrap().format, soundcraft_model::ChannelFormat::Mono);
+    assert_eq!(app.engine.session().track(mono).unwrap().format, transit_model::ChannelFormat::Mono);
     assert_eq!(input_label(&app, mono), "In 1");
-    assert_eq!(app.engine.session().track(stereo).unwrap().format, soundcraft_model::ChannelFormat::Stereo);
+    assert_eq!(app.engine.session().track(stereo).unwrap().format, transit_model::ChannelFormat::Stereo);
     assert_eq!(input_label(&app, stereo), "In 1-2");
 }
 
@@ -2367,7 +2367,7 @@ fn change_width_is_one_undo_step() {
 
 #[test]
 fn change_width_remaps_hardware_inputs_and_undo_restores_both() {
-    use soundcraft_model::{ChannelFormat, Route};
+    use transit_model::{ChannelFormat, Route};
     for (from, input, to, mapped, channels) in [
         ("mono", "In 2", "stereo", "In 1-2", vec![0, 1]),
         ("mono", "In 3", "stereo", "In 3-4", vec![2, 3]),
@@ -2390,23 +2390,23 @@ fn change_width_remaps_hardware_inputs_and_undo_restores_both() {
         assert!(tr.mixer.record_arm);
         assert_eq!(app.engine.undo_history().len(), steps + 1);
         // Pure planning only: no recorder or hardware device is opened.
-        let takes = soundcraft_engine::io::plan_takes(&app.engine, std::path::Path::new(env!("CARGO_MANIFEST_DIR")), 4);
+        let takes = transit_engine::io::plan_takes(&app.engine, std::path::Path::new(env!("CARGO_MANIFEST_DIR")), 4);
         assert_eq!(takes[0].1, channels);
-        let target = soundcraft_mix::RenderTarget {
-            device: soundcraft_mix::DeviceGeneration(1),
+        let target = transit_mix::RenderTarget {
+            device: transit_mix::DeviceGeneration(1),
             sample_rate: 48_000,
             max_block: 64,
             out_channels: 0,
             in_channels: 0,
         };
-        let mut compiler = soundcraft_mix::PlanCompiler::new(target, soundcraft_mix::PlanLimits::default());
-        let mut make = |spec: &soundcraft_mix::InstanceSpec, _: soundcraft_mix::SlotGen| {
-            soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 64, spec.ch)
+        let mut compiler = transit_mix::PlanCompiler::new(target, transit_mix::PlanLimits::default());
+        let mut make = |spec: &transit_mix::InstanceSpec, _: transit_mix::SlotGen| {
+            transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 64, spec.ch)
         };
         let session = std::sync::Arc::new(app.engine.session().clone());
-        let mut plan = compiler.compile(session, compiler.active(), soundcraft_mix::PlanGeneration::from_raw(1), &mut make).unwrap();
-        let mut mix = soundcraft_mix::MixEngine::realtime(target);
-        assert_eq!(mix.adopt_plan(&mut plan), soundcraft_mix::Adoption::Adopted);
+        let mut plan = compiler.compile(session, compiler.active(), transit_mix::PlanGeneration::from_raw(1), &mut make).unwrap();
+        let mut mix = transit_mix::MixEngine::realtime(target);
+        assert_eq!(mix.adopt_plan(&mut plan), transit_mix::Adoption::Adopted);
         compiler.reclaim(plan);
         mix.monitor_only = true;
         mix.input = vec![vec![0.2; 64], vec![0.4; 64], vec![0.6; 64], vec![0.8; 64]];
@@ -2435,7 +2435,7 @@ fn change_width_remaps_hardware_inputs_and_undo_restores_both() {
 
 #[test]
 fn change_width_keeps_bus_inputs_in_both_directions() {
-    use soundcraft_model::{ChannelFormat, Route};
+    use transit_model::{ChannelFormat, Route};
     let mut app = app();
     let r = app.add_audio_track("mono");
     let t = new_audio(&mut app, r);
@@ -2603,7 +2603,7 @@ fn alt_dragging_a_device_copies_it_into_the_drop_position() {
 mod output_paths {
     use super::*;
     use crate::mixer::{input_choices, output_choices, path_choices, send_targets};
-    use soundcraft_model::{IoDirection, IoMap, Route};
+    use transit_model::{IoDirection, IoMap, Route};
 
     /// Eight in, six out; "Out 3-4" renamed "Headphones", "In 5" renamed "Guitar".
     fn map() -> IoMap {
@@ -2807,7 +2807,7 @@ fn loop_range(app: &StudioApp) -> (i64, i64) {
 /// One beat at the default tempo and rate; the grid at the default zoom is a beat.
 fn beat(app: &StudioApp) -> i64 {
     let s = app.engine.session();
-    s.tempo.tick_to_samples(soundcraft_time::TICKS_PER_QUARTER, s.sample_rate)
+    s.tempo.tick_to_samples(transit_time::TICKS_PER_QUARTER, s.sample_rate)
 }
 
 #[test]
@@ -2927,8 +2927,8 @@ fn right_clicking_the_loop_strip_offers_clear_loop_in_one_undo_step() {
 #[test]
 fn the_bounce_dialog_cycle_range_is_the_cycle_range() {
     use crate::finish::bounce_range;
-    use soundcraft_time::Range;
-    let mut e = soundcraft_model::EditState { selection: Range::new(10, 20), ..Default::default() };
+    use transit_time::Range;
+    let mut e = transit_model::EditState { selection: Range::new(10, 20), ..Default::default() };
     assert_eq!(bounce_range(&e), Range::new(10, 20), "looping off: the selection");
     e.loop_playback = true;
     assert_eq!(bounce_range(&e), Range::new(10, 20), "looping on, no loop region: the selection");
@@ -2980,7 +2980,7 @@ fn ctrl_3_toggles_triplets() {
     grid_key(&mut r, "3");
     assert_eq!(r.app.arrange.layout.grid_text, "Grid: 1/8T");
     let s = r.app.engine.session();
-    assert_eq!(crate::automation::grid_ticks(s, r.app.arrange.layout.samples_per_px, &r.app.arrange.grid), soundcraft_time::TICKS_PER_QUARTER / 3);
+    assert_eq!(crate::automation::grid_ticks(s, r.app.arrange.layout.samples_per_px, &r.app.arrange.grid), transit_time::TICKS_PER_QUARTER / 3);
     grid_key(&mut r, "3");
     assert_eq!(r.app.arrange.layout.grid_text, "Grid: 1/8");
 }
@@ -3031,7 +3031,7 @@ fn key_app() -> (StudioApp, egui::Context, f64, TrackId, TrackId, TrackId) {
     (app, ctx, time, bass, kick, verb)
 }
 
-fn key_of(app: &StudioApp, t: TrackId) -> Option<soundcraft_model::KeySource> {
+fn key_of(app: &StudioApp, t: TrackId) -> Option<transit_model::KeySource> {
     app.engine.session().track(t).unwrap().mixer.inserts[0].as_ref().unwrap().key
 }
 
@@ -3054,7 +3054,7 @@ fn the_key_dropdown_lists_other_tracks_and_a_pick_runs_one_insert_key() {
     click(&mut app, mid(item.rect));
     frames(&mut app, &ctx, 6, &mut time);
     let k = key_of(&app, bass).expect("the key is set");
-    assert_eq!((k.from, k.tap), (soundcraft_model::KeyFrom::Track(kick), soundcraft_model::Tap::Post));
+    assert_eq!((k.from, k.tap), (transit_model::KeyFrom::Track(kick), transit_model::Tap::Post));
     assert_eq!(undo_len(&mut app), before + 1, "one mix.insert_key, one undo step");
     assert_eq!(app.mixer.devices.cards[0].key_label, "Key: Kick (post)");
     // Pre-fader keeps the source; None clears it.
@@ -3064,7 +3064,7 @@ fn the_key_dropdown_lists_other_tracks_and_a_pick_runs_one_insert_key() {
     let pre = app.mixer.devices.menu.iter().find(|m| m.value == "tap:pre").cloned().unwrap();
     click(&mut app, mid(pre.rect));
     frames(&mut app, &ctx, 6, &mut time);
-    assert_eq!(key_of(&app, bass).unwrap().tap, soundcraft_model::Tap::Pre);
+    assert_eq!(key_of(&app, bass).unwrap().tap, transit_model::Tap::Pre);
     assert_eq!(app.mixer.devices.cards[0].key_label, "Key: Kick (pre)");
     let at = mid(app.mixer.devices.cards[0].key_button);
     click(&mut app, at);
@@ -3088,7 +3088,7 @@ fn an_aux_track_lists_busses_and_keys_from_one() {
     let item = app.mixer.devices.menu.iter().find(|m| m.value == format!("bus:{}", drums.0)).cloned().expect("the Drums bus is listed");
     click(&mut app, mid(item.rect));
     frames(&mut app, &ctx, 6, &mut time);
-    assert_eq!(key_of(&app, verb).map(|k| k.from), Some(soundcraft_model::KeyFrom::Bus(drums)));
+    assert_eq!(key_of(&app, verb).map(|k| k.from), Some(transit_model::KeyFrom::Bus(drums)));
     assert_eq!(app.mixer.devices.cards[0].key_label, "Key: Drums (post)");
 }
 
@@ -3125,7 +3125,7 @@ fn a_device_without_a_key_input_has_no_key_dropdown() {
 
 mod hardware_inserts {
     use super::*;
-    use soundcraft_model::IoMap;
+    use transit_model::IoMap;
 
     fn open_add_menu(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64) {
         let at = mid(app.mixer.devices.add);
@@ -3150,7 +3150,7 @@ mod hardware_inserts {
         let values: Vec<&str> = picker.rows.iter().map(|r| r.value.as_str()).collect();
         assert_eq!(values.first(), Some(&"Out 3-4|In 3-4"), "the measured pair comes first: {values:?}");
         let io = app.engine.io_map();
-        let want = io.paths_of(soundcraft_model::IoDirection::Output).count() * io.paths_of(soundcraft_model::IoDirection::Input).count();
+        let want = io.paths_of(transit_model::IoDirection::Output).count() * io.paths_of(transit_model::IoDirection::Input).count();
         assert_eq!(values.len(), want, "every output with every input, the measured pair among them once");
         assert!(picker.rows[0].label.contains("612 frames (12.8 ms)"), "{}", picker.rows[0].label);
         assert!(picker.rows[1..].iter().all(|r| r.label.ends_with("not measured")), "{:?}", picker.rows);
@@ -3202,7 +3202,7 @@ mod hardware_inserts {
     #[test]
     fn the_state_words_and_the_blockers_are_plain() {
         use crate::hardware_ui::{measure_blocker, state_text};
-        use soundcraft_mix::HardwareState as S;
+        use transit_mix::HardwareState as S;
         assert_eq!(state_text(&S::Ready, Some(612), 48_000), "12.8 ms");
         assert_eq!(state_text(&S::Unmeasured, None, 48_000), "Unmeasured");
         assert_eq!(state_text(&S::NoInput, None, 48_000), "No input");
@@ -3321,7 +3321,7 @@ fn spans(app: &StudioApp, t: TrackId) -> Vec<(i64, i64)> {
     clips_on(app, t).iter().map(|c| (c.1, c.2)).collect()
 }
 
-fn the_clip(app: &StudioApp, id: ClipId) -> soundcraft_model::Clip {
+fn the_clip(app: &StudioApp, id: ClipId) -> transit_model::Clip {
     app.engine.session().find_clip(id).unwrap().1.clone()
 }
 
@@ -3341,7 +3341,7 @@ fn dragging_the_loop_handle_extends_the_clip_as_cycles_in_one_undo_step() {
     frames(&mut r.app, &r.ctx, 20, &mut r.time);
     assert_eq!(spans(&r.app, r.t), vec![(0, 3 * bar)], "a looped clip, not copies");
     let c = the_clip(&r.app, clip);
-    assert_eq!(c.looping, Some(soundcraft_model::ClipLoop { start: 0, end: bar }));
+    assert_eq!(c.looping, Some(transit_model::ClipLoop { start: 0, end: bar }));
     assert_eq!(c.loop_id, None);
     assert_eq!(c.cycle_starts(0, c.length).collect::<Vec<_>>(), vec![bar, 2 * bar], "two seams");
     assert_eq!(undo_len(&mut r.app), before + 1, "one undo step");
@@ -3467,7 +3467,7 @@ fn audio_clip_corners_are_fade_handles_clear_of_trim_loop_and_move() {
 #[test]
 fn the_fade_curve_is_the_gain_function_of_its_shape() {
     use crate::fades::{Side, curve_points};
-    use soundcraft_model::{Fade, FadeShape};
+    use transit_model::{Fade, FadeShape};
     for shape in FadeShape::ALL {
         for curvature in [0.0, 0.6, -0.8] {
             let f = Fade { len: 1000, shape, curvature };
@@ -3534,7 +3534,7 @@ struct FadeRig {
 
 /// The demo's Hats audio clip, cut to four bars and with its fades cleared, in view.
 fn fade_rig() -> FadeRig {
-    let mut app = StudioApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     let (t, clip) = {
         let s = app.engine.session();
         let t = s.track_by_name("Hats").unwrap();
@@ -3543,8 +3543,8 @@ fn fade_rig() -> FadeRig {
     let bar = {
         let s = app.engine.session();
         let sr = s.sample_rate;
-        s.tempo.samples_at_bar_beat(soundcraft_time::BarBeat { bar: 2, beat: 1, tick: 0 }, sr)
-            - s.tempo.samples_at_bar_beat(soundcraft_time::BarBeat { bar: 1, beat: 1, tick: 0 }, sr)
+        s.tempo.samples_at_bar_beat(transit_time::BarBeat { bar: 2, beat: 1, tick: 0 }, sr)
+            - s.tempo.samples_at_bar_beat(transit_time::BarBeat { bar: 1, beat: 1, tick: 0 }, sr)
     };
     {
         let c = app.engine.session_mut().find_clip_mut(clip).unwrap();
@@ -3584,7 +3584,7 @@ impl FadeRig {
         let _ = crate::control::handle_for_test(&mut self.app, &egui::Context::default(), &req);
         frames(&mut self.app, &self.ctx, 20, &mut self.time);
     }
-    fn clip(&self, c: ClipId) -> soundcraft_model::Clip {
+    fn clip(&self, c: ClipId) -> transit_model::Clip {
         the_clip(&self.app, c)
     }
     fn item(&self, label: &str) -> (f32, f32) {
@@ -3617,7 +3617,7 @@ fn dragging_the_fade_in_handle_sets_the_length_snapped_in_one_undo_step() {
     r.go(h, (r0[0] + r.px_bar, h.1), json!({}));
     let c = r.clip(r.clip);
     assert_eq!(c.fade_in.len, r.bar, "one bar in");
-    assert_eq!(c.fade_in.shape, soundcraft_model::FadeShape::EqualPower);
+    assert_eq!(c.fade_in.shape, transit_model::FadeShape::EqualPower);
     assert_eq!(c.fade_out.len, 0);
     assert_eq!(undo_len(&mut r.app), before + 1, "one undo step");
     r.app.run("edit.undo", json!({})).unwrap();
@@ -3669,18 +3669,18 @@ fn alt_drag_on_a_fade_bends_its_curvature_and_a_click_opens_the_shape_menu() {
     let c = r.clip(r.clip);
     assert!(c.fade_in.curvature > 0.2, "dragged up: {}", c.fade_in.curvature);
     assert_eq!(c.fade_in.len, r.bar, "the length is untouched");
-    assert_eq!(c.fade_in.shape, soundcraft_model::FadeShape::Linear);
+    assert_eq!(c.fade_in.shape, transit_model::FadeShape::Linear);
     assert_eq!(c.start, 0, "the clip did not move");
     assert_eq!(undo_len(&mut r.app), before + 1, "one undo step");
     // A click on the fade opens the five shapes; picking S-Curve switches it.
     r.click(inside, 1);
-    for shape in soundcraft_model::FadeShape::ALL {
+    for shape in transit_model::FadeShape::ALL {
         assert!(r.app.arrange.menu.iter().any(|m| m.label == shape.label()), "{shape:?} in the menu");
     }
     let pick = r.item("S-Curve");
     r.click(pick, 1);
     let c = r.clip(r.clip);
-    assert_eq!(c.fade_in.shape, soundcraft_model::FadeShape::SCurve);
+    assert_eq!(c.fade_in.shape, transit_model::FadeShape::SCurve);
     assert_eq!(c.fade_in.len, r.bar);
     assert!(c.fade_in.curvature > 0.2, "the bend stays");
     assert!(r.app.arrange.fade_menu.is_none(), "the menu closed");
@@ -3696,14 +3696,14 @@ fn right_click_on_a_fade_offers_the_shapes_and_double_click_resets_it() {
     r.right_click(inside);
     let pick = r.item("Exponential");
     r.click(pick, 1);
-    assert_eq!(r.clip(r.clip).fade_in.shape, soundcraft_model::FadeShape::Exponential);
+    assert_eq!(r.clip(r.clip).fade_in.shape, transit_model::FadeShape::Exponential);
     // Long enough after the last click that egui does not count a triple click.
     frames(&mut r.app, &r.ctx, 60, &mut r.time);
     let len0 = r.clip(r.clip).fade_in.len;
     let before = undo_len(&mut r.app);
     r.click(inside, 2);
     let c = r.clip(r.clip);
-    assert_eq!((c.fade_in.shape, c.fade_in.curvature, c.fade_in.len), (soundcraft_model::FadeShape::EqualPower, 0.0, len0), "reset keeps the length");
+    assert_eq!((c.fade_in.shape, c.fade_in.curvature, c.fade_in.len), (transit_model::FadeShape::EqualPower, 0.0, len0), "reset keeps the length");
     assert_eq!(undo_len(&mut r.app), before + 1, "one undo step");
 }
 
@@ -3721,7 +3721,7 @@ fn the_crossfade_menu_entry_fades_both_clips_over_their_overlap() {
     r.click(pick, 1);
     assert!((r.clip(r.clip).fade_out.len - overlap).abs() <= 2, "{}", r.clip(r.clip).fade_out.len);
     assert_eq!(r.clip(b).fade_in.len, r.clip(r.clip).fade_out.len);
-    assert_eq!(r.clip(b).fade_in.shape, soundcraft_model::FadeShape::EqualPower);
+    assert_eq!(r.clip(b).fade_in.shape, transit_model::FadeShape::EqualPower);
     assert_eq!(undo_len(&mut r.app), before + 1, "one undo step");
     // No overlap, no entry.
     assert!(crate::fades::overlap(r.app.engine.session(), b).is_some());
@@ -3794,7 +3794,7 @@ fn dragging_a_fade_to_nothing_removes_it_and_keeps_the_other_side() {
 
 #[test]
 fn the_last_add_track_row_is_inside_the_scrollable_content_at_the_minimum_header_width() {
-    let mut app = StudioApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     app.ui.header_width = 160.0;
     app.ui.show_mixer = false;
     app.ui.show_devices = false;
@@ -3811,17 +3811,17 @@ fn the_last_add_track_row_is_inside_the_scrollable_content_at_the_minimum_header
 
 // ---- #70: loop follow-ups ----
 
-fn two_note_clip(s: &soundcraft_model::Session, notes: &[(u8, i64)]) -> (soundcraft_model::Clip, i64) {
-    let q = soundcraft_time::TICKS_PER_QUARTER;
-    let seq = soundcraft_midi::Sequence {
+fn two_note_clip(s: &transit_model::Session, notes: &[(u8, i64)]) -> (transit_model::Clip, i64) {
+    let q = transit_time::TICKS_PER_QUARTER;
+    let seq = transit_midi::Sequence {
         notes: notes
             .iter()
-            .map(|&(pitch, beat)| soundcraft_midi::Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start: beat * q, length: q })
+            .map(|&(pitch, beat)| transit_midi::Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start: beat * q, length: q })
             .collect(),
         ..Default::default()
     };
     let beat = s.tempo.tick_to_samples(q, s.sample_rate);
-    (soundcraft_model::Clip::midi(ClipId(900), "m", 0, 2 * beat, seq), beat)
+    (transit_model::Clip::midi(ClipId(900), "m", 0, 2 * beat, seq), beat)
 }
 
 #[test]
@@ -3829,13 +3829,13 @@ fn loop_ghost_cycles_show_the_notes_that_cycle_plays() {
     let app = app();
     let s = app.engine.session();
     let (c, beat) = two_note_clip(s, &[(60, 0), (64, 1)]);
-    let l = soundcraft_model::ClipLoop { start: 0, end: 2 * beat };
+    let l = transit_model::ClipLoop { start: 0, end: 2 * beat };
     // A ghost cycle that begins at the seam plays both notes at their own offsets.
     let spans = crate::arrange::loop_note_spans(s, &c, l, true, 2 * beat);
     assert_eq!(spans, vec![(2 * beat, 3 * beat, 60), (3 * beat, 4 * beat, 64)]);
     // A loop range that starts at beat 1: later cycles skip the intro note, and a ghost that starts
     // at the loop start (phase 1 beat) puts the beat 1 note at the ghost's left edge.
-    let l = soundcraft_model::ClipLoop { start: beat, end: 2 * beat };
+    let l = transit_model::ClipLoop { start: beat, end: 2 * beat };
     let spans = crate::arrange::loop_note_spans(s, &c, l, true, 2 * beat);
     assert_eq!(spans, vec![(2 * beat, 3 * beat, 64)], "the intro note is not in a ghost cycle");
     // The first pass (not a later cycle) keeps the intro note.
@@ -3844,18 +3844,18 @@ fn loop_ghost_cycles_show_the_notes_that_cycle_plays() {
     // A note that crosses the seam ends at it.
     let (long, beat) = {
         let mut x = c.clone();
-        if let soundcraft_model::ClipContent::Midi { sequence } = &mut x.content {
-            sequence.notes[1].length = 3 * soundcraft_time::TICKS_PER_QUARTER;
+        if let transit_model::ClipContent::Midi { sequence } = &mut x.content {
+            sequence.notes[1].length = 3 * transit_time::TICKS_PER_QUARTER;
         }
         (x, beat)
     };
-    let spans = crate::arrange::loop_note_spans(s, &long, soundcraft_model::ClipLoop { start: 0, end: 2 * beat }, true, 2 * beat);
+    let spans = crate::arrange::loop_note_spans(s, &long, transit_model::ClipLoop { start: 0, end: 2 * beat }, true, 2 * beat);
     assert_eq!(spans[1], (3 * beat, 4 * beat, 64));
 }
 
 #[test]
 fn an_off_tick_loop_edge_draws_its_cycle_notes_where_playback_plays_them() {
-    use soundcraft_model::{ChannelFormat, Clip, ClipLoop, Session, TrackKind};
+    use transit_model::{ChannelFormat, Clip, ClipLoop, Session, TrackKind};
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
     let (c, beat) = two_note_clip(&s, &[(60, 0), (64, 1)]);
@@ -3866,7 +3866,7 @@ fn an_off_tick_loop_edge_draws_its_cycle_notes_where_playback_plays_them() {
     clip.content = c.content.clone();
     clip.looping = Some(l);
     s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(clip.clone());
-    let heard: Vec<(i64, u8)> = soundcraft_mix::clip_note_ons(&s, t, 0, (4 * beat) as usize);
+    let heard: Vec<(i64, u8)> = transit_mix::clip_note_ons(&s, t, 0, (4 * beat) as usize);
     let mut drawn: Vec<(i64, u8)> = crate::arrange::loop_note_spans(&s, &clip, l, false, 0).into_iter().map(|(a, _, k)| (a, k)).collect();
     drawn.extend(crate::arrange::loop_note_spans(&s, &clip, l, true, l.end).into_iter().map(|(a, _, k)| (a, k)));
     drawn.sort();
@@ -3876,7 +3876,7 @@ fn an_off_tick_loop_edge_draws_its_cycle_notes_where_playback_plays_them() {
 
 #[test]
 fn a_refused_tempo_change_says_why_in_the_status_line() {
-    use soundcraft_model::{ChannelFormat, Clip, ClipLoop, TrackKind};
+    use transit_model::{ChannelFormat, Clip, ClipLoop, TrackKind};
     let mut app = app();
     let s = app.engine.session_mut();
     let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
@@ -3933,7 +3933,7 @@ fn cycle_on(app: &mut StudioApp, on: bool) {
 fn cycle_on_promotes_the_time_selection_to_the_loop_region() {
     let (mut app, _ctx, _time) = loop_app();
     let b = beat(&app);
-    app.engine.session_mut().edit.selection = soundcraft_time::Range::new(3 * b, 7 * b);
+    app.engine.session_mut().edit.selection = transit_time::Range::new(3 * b, 7 * b);
     cycle_on(&mut app, true);
     assert_eq!(loop_range(&app), (3 * b, 7 * b));
     assert!(app.engine.session().edit.loop_playback);
@@ -4010,7 +4010,7 @@ fn clicking_the_ruler_outside_the_block_still_locates() {
 fn the_ruler_block_ignores_the_selection_when_there_is_no_region() {
     let (mut app, ctx, mut time) = loop_app();
     let b = beat(&app);
-    app.engine.session_mut().edit.selection = soundcraft_time::Range::new(2 * b, 6 * b);
+    app.engine.session_mut().edit.selection = transit_time::Range::new(2 * b, 6 * b);
     app.engine.session_mut().edit.loop_playback = true;
     frames(&mut app, &ctx, 3, &mut time);
     // No region: a drag where the selection is must not move anything (nothing is there to grab).
@@ -4025,7 +4025,7 @@ fn the_ruler_block_ignores_the_selection_when_there_is_no_region() {
 #[test]
 fn the_instrument_menu_puts_an_external_instrument_on_the_track_and_its_card_edits_it() {
     let mut app = app();
-    app.engine.set_io_map(soundcraft_model::IoMap::for_device("test", "test", 2, 2));
+    app.engine.set_io_map(transit_model::IoMap::for_device("test", "test", 2, 2));
     let t = new_track(&mut app, json!({"kind": "instrument", "name": "Model D"}));
     app.ui.show_devices = true;
     app.focus(t);
@@ -4036,13 +4036,13 @@ fn the_instrument_menu_puts_an_external_instrument_on_the_track_and_its_card_edi
     let pick = app.mixer.devices.cards[0].pick_button;
     click(&mut app, mid(pick));
     frames(&mut app, &ctx, 6, &mut time);
-    let item = app.mixer.devices.menu.iter().find(|m| m.value == soundcraft_model::EXTERNAL_INSTRUMENT_PLUGIN).cloned();
+    let item = app.mixer.devices.menu.iter().find(|m| m.value == transit_model::EXTERNAL_INSTRUMENT_PLUGIN).cloned();
     let item = item.expect("the instrument menu offers the External Instrument");
     assert_eq!(item.label, "External Instrument");
     click(&mut app, mid(item.rect));
     frames(&mut app, &ctx, 6, &mut time);
     let ins = instrument_of(&app, t).unwrap();
-    assert_eq!(ins.plugin, soundcraft_model::EXTERNAL_INSTRUMENT_PLUGIN);
+    assert_eq!(ins.plugin, transit_model::EXTERNAL_INSTRUMENT_PLUGIN);
     assert_eq!(ins.external.as_ref().unwrap().ret, "In 1", "the first input path is the return to start with");
     assert_eq!(undo_len(&mut app), before + 1, "one undo step");
     let card = app.mixer.devices.cards[0].clone();

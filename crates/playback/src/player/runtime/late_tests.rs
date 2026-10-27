@@ -9,21 +9,21 @@
 #![allow(clippy::unwrap_used, clippy::panic)]
 use super::*;
 use crate::player::{Clock, Factory, PluginTestHooks, SlotLoad};
-use soundcraft_dsp::{Plugin, PluginInfo};
-use soundcraft_model::{ChannelFormat, Insert, TrackId, TrackKind};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Condvar, Mutex};
 use std::time::{Duration, Instant};
+use transit_dsp::{Plugin, PluginInfo};
+use transit_model::{ChannelFormat, Insert, TrackId, TrackKind};
 use transit_plugin_host::{Config, Host};
 
-const SLOT: usize = soundcraft_mix::INSTRUMENT_SLOT;
+const SLOT: usize = transit_mix::INSTRUMENT_SLOT;
 const SYNTH: &str = "subtractive_synth";
 /// The hosted id the session names (a third-party id, so the session's stored state reaches the
 /// factory); the factory makes the built-in synth for it.
 const HOSTED: &str = "clap:transit.test.late82";
 
 fn target() -> RenderTarget {
-    RenderTarget { device: soundcraft_mix::DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 }
+    RenderTarget { device: transit_mix::DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 }
 }
 
 /// A clock the test moves by hand.
@@ -122,10 +122,10 @@ impl Plugin for Echo {
     fn midi(&mut self, offset: usize, msg: [u8; 3]) {
         self.inner.midi(offset, msg);
     }
-    fn event(&mut self, offset: u32, ev: &soundcraft_dsp::event::PluginEvent) -> bool {
+    fn event(&mut self, offset: u32, ev: &transit_dsp::event::PluginEvent) -> bool {
         self.inner.event(offset, ev)
     }
-    fn state_reader(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginStateReader>> {
+    fn state_reader(&mut self) -> Option<Box<dyn transit_dsp::PluginStateReader>> {
         let state = self.state.clone();
         Some(Box::new(move || state.clone()))
     }
@@ -134,7 +134,7 @@ impl Plugin for Echo {
 /// A factory whose first `hold` calls wait for the gate.
 fn gated(gate: &Arc<Gate>, hold: usize) -> Factory {
     let gate = Arc::clone(gate);
-    Arc::new(move |spec: &soundcraft_mix::InstanceSpec| {
+    Arc::new(move |spec: &transit_mix::InstanceSpec| {
         let n = gate.calls.fetch_add(1, Ordering::SeqCst);
         gate.states.lock().unwrap().push(spec.state.clone());
         if n < hold {
@@ -146,7 +146,7 @@ fn gated(gate: &Arc<Gate>, hold: usize) -> Factory {
             mid.calls.fetch_add(1, Ordering::SeqCst);
             mid.wait();
         }
-        let made = soundcraft_mix::create_instance(SYNTH, None, 48_000.0, 512, spec.ch)?;
+        let made = transit_mix::create_instance(SYNTH, None, 48_000.0, 512, spec.ch)?;
         Some(NewInstance {
             plugin: Box::new(Echo { inner: made.plugin, state: spec.state.clone(), drops: Arc::clone(&gate.drops) }),
             refused_state: false,
@@ -183,7 +183,7 @@ fn rig(n: usize, state: Option<&[u8]>, config: Config, clock: Clock, slow_after:
     let mut edited = (**runtime.requested_session()).clone();
     for t in &tracks {
         let mut insert = Insert::new(HOSTED);
-        insert.state = state.map(soundcraft_model::b64::encode);
+        insert.state = state.map(transit_model::b64::encode);
         edited.track_mut(*t).unwrap().instrument = Some(insert);
     }
     runtime.update_session(Arc::new(edited)).unwrap();

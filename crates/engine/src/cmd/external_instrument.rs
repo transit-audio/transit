@@ -7,7 +7,7 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::{EXTERNAL_GAIN_DB, Insert, MAX_EXTERNAL_LATENCY_MS, MidiOutput, TrackKind};
+use transit_model::{EXTERNAL_GAIN_DB, Insert, MAX_EXTERNAL_LATENCY_MS, MidiOutput, TrackKind};
 
 const ID: &str = "instrument.external";
 
@@ -39,7 +39,7 @@ pub fn specs() -> Vec<CommandSpec> {
 /// The refusal of a Measure the engine can see without the live device, in the card's words
 /// (ADR 0020 decisions 3 and 7): the track holds an External Instrument with a port and a return
 /// on this machine, the transport is stopped and the track is not armed.
-pub fn measure_blocker(e: &Engine, t: soundcraft_model::TrackId) -> std::result::Result<(), String> {
+pub fn measure_blocker(e: &Engine, t: transit_model::TrackId) -> std::result::Result<(), String> {
     let track = e.session().track(t).ok_or_else(|| format!("no track {}", t.0))?;
     let device = track.external_instrument().ok_or("This track has no External Instrument.")?;
     if e.transport.playing || e.transport.recording {
@@ -54,7 +54,7 @@ pub fn measure_blocker(e: &Engine, t: soundcraft_model::TrackId) -> std::result:
     if device.ret.is_empty() {
         return Err("Choose the return input".into());
     }
-    if !e.io_map().path(&device.ret).is_some_and(|p| p.direction == soundcraft_model::IoDirection::Input) {
+    if !e.io_map().path(&device.ret).is_some_and(|p| p.direction == transit_model::IoDirection::Input) {
         return Err(format!("Return {} is not on this interface", device.ret));
     }
     Ok(())
@@ -105,7 +105,7 @@ fn return_param(e: &Engine, v: &Value) -> Result<String> {
     // kept (the session may come from another interface) and reported missing.
     if !name.is_empty()
         && let Some(path) = e.io_map().path(name)
-        && path.direction != soundcraft_model::IoDirection::Input
+        && path.direction != transit_model::IoDirection::Input
     {
         return Err(bad(ID, format!("`{name}` is an output path; the return is an input path")));
     }
@@ -166,7 +166,7 @@ fn set_external(e: &mut Engine, p: &Value) -> Result<Value> {
 /// decision 9), so a render of the session with one is refused unless the caller chose to render
 /// without it.
 #[must_use]
-pub fn external_in_render(s: &soundcraft_model::Session) -> Vec<String> {
+pub fn external_in_render(s: &transit_model::Session) -> Vec<String> {
     s.tracks.iter().filter(|t| !t.inactive && t.freeze.is_none() && t.external_instrument().is_some()).map(|t| t.name.clone()).collect()
 }
 
@@ -198,7 +198,7 @@ pub(crate) fn render_guard(e: &Engine, id: &str, p: &Value) -> Result<Vec<String
 
 /// Freeze, flatten and bounce in place of an External Instrument track itself: it has nothing
 /// to render offline, and the real-time render (ADR 0020 slice 3) is not here yet.
-pub(crate) fn refuse_offline_print(id: &str, t: &soundcraft_model::Track) -> Result<()> {
+pub(crate) fn refuse_offline_print(id: &str, t: &transit_model::Track) -> Result<()> {
     if t.external_instrument().is_some() && t.freeze.is_none() {
         return Err(bad(
             id,
@@ -212,7 +212,7 @@ pub(crate) fn refuse_offline_print(id: &str, t: &soundcraft_model::Track) -> Res
 mod tests {
     use crate::Engine;
     use serde_json::json;
-    use soundcraft_model::{EXTERNAL_INSTRUMENT_PLUGIN, MidiOutChannel, MidiOutPort, MidiOutput, TrackId};
+    use transit_model::{EXTERNAL_INSTRUMENT_PLUGIN, MidiOutChannel, MidiOutPort, MidiOutput, TrackId};
 
     fn instrument_track(e: &mut Engine) -> TrackId {
         e.execute("track.new", &json!({"kind": "instrument"})).unwrap();
@@ -281,7 +281,7 @@ mod tests {
     #[test]
     fn measure_is_refused_in_the_cards_words_and_a_result_is_kept_per_machine() {
         let mut e = Engine::default();
-        e.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "Scarlett", 2, 2));
+        e.set_io_map(transit_model::IoMap::for_device("ASIO", "Scarlett", 2, 2));
         let t = instrument_track(&mut e);
         let why = |e: &mut Engine| e.execute("instrument.measure_external", &json!({"track": t.0})).unwrap_err().to_string();
         assert!(why(&mut e).contains("This track has no External Instrument."), "{}", why(&mut e));
@@ -302,7 +302,7 @@ mod tests {
         assert!(e.execute("instrument.measure_external", &json!({"track": t.0, "action": "go"})).is_err());
         let revision = e.io_revision();
         let dirty = e.is_dirty();
-        let m = soundcraft_model::ExternalLatency {
+        let m = transit_model::ExternalLatency {
             port_id: String::new(),
             port_name: "MODEL D".into(),
             ret: "In 1".into(),

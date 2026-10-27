@@ -1,7 +1,7 @@
 use serde_json::json;
-use soundcraft_engine::{Engine, TransportRequest, TransportStatus};
-use soundcraft_model::Session;
-use soundcraft_time::Range;
+use transit_engine::{Engine, TransportRequest, TransportStatus};
+use transit_model::Session;
+use transit_time::Range;
 
 #[test]
 fn replacing_session_resets_status_and_discards_old_transport_requests() {

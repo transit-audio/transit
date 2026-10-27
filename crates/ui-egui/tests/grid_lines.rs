@@ -1,7 +1,7 @@
 use egui::{Color32, FullOutput, Pos2, RawInput, Rect, Shape, pos2, vec2};
 use serde_json::json;
-use soundcraft_ui_egui::theme::Tokens;
-use soundcraft_ui_egui::{Services, SoundApp, edit_window};
+use transit_ui_egui::theme::Tokens;
+use transit_ui_egui::{Services, SoundApp, edit_window};
 
 fn frame(ctx: &egui::Context, app: &mut SoundApp) -> FullOutput {
     let raw = RawInput { screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 1000.0))), ..Default::default() };
@@ -24,7 +24,7 @@ fn near(a: [i32; 3], b: Color32) -> bool {
 
 #[test]
 fn grid_lines_are_drawn_over_clips_while_shown() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     let ctx = egui::Context::default();
     for theme in ["dark", "light"] {
         for shown in [true, false] {

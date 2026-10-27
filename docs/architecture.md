@@ -53,5 +53,5 @@ See [`ui.md`](contributing/knowledge/ui.md).
 ## Agent control
 
 The desktop app exposes a JSON-lines control channel over TCP (engine commands, inspection, synthetic
-input, screenshots), and `soundcraft-cli mcp` wraps a headless engine or a running app as an MCP
+input, screenshots), and `transit-cli mcp` wraps a headless engine or a running app as an MCP
 server. See [`control-protocol.md`](control-protocol.md) and [`mcp.md`](mcp.md).

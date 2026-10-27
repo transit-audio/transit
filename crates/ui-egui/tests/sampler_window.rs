@@ -4,11 +4,11 @@
 use egui::{DroppedFile, Event, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable as _;
-use soundcraft_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
-use soundcraft_model::TrackId;
-use soundcraft_ui_egui::{Services, SoundApp};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
+use transit_model::TrackId;
+use transit_ui_egui::{Services, SoundApp};
 
 #[derive(Debug)]
 struct Dropped {
@@ -30,7 +30,7 @@ fn wav(secs: f32) -> Vec<u8> {
     let one: Vec<f32> = (0..n).map(|i| 0.4 * (std::f32::consts::TAU * 220.0 * i as f32 / 48_000.0).sin()).collect();
     let buf = AudioBuffer { sample_rate: 48_000, channels: vec![one; 2] };
     let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Int16, dither: false, bwf: None };
-    soundcraft_audio_io::encode(&buf, &opts).unwrap()
+    transit_audio_io::encode(&buf, &opts).unwrap()
 }
 
 fn step(h: &mut Harness<'_, SoundApp>) {
@@ -41,10 +41,10 @@ fn step(h: &mut Harness<'_, SoundApp>) {
 }
 
 fn harness() -> (Harness<'static, SoundApp>, TrackId) {
-    let engine = soundcraft_engine::demo::demo_engine();
+    let engine = transit_engine::demo::demo_engine();
     let keys = engine.session().tracks.iter().find(|t| t.name == "Keys").unwrap().id;
     let mut app = SoundApp::new(engine, None, Services::default());
-    app.ui.plugin_windows.push((keys, soundcraft_mix::INSTRUMENT_SLOT));
+    app.ui.plugin_windows.push((keys, transit_mix::INSTRUMENT_SLOT));
     let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(
         |ui, app: &mut SoundApp| {
             let ctx = ui.ctx().clone();
@@ -60,7 +60,7 @@ fn harness() -> (Harness<'static, SoundApp>, TrackId) {
     (h, keys)
 }
 
-fn instrument(h: &Harness<'_, SoundApp>, t: TrackId) -> soundcraft_model::Insert {
+fn instrument(h: &Harness<'_, SoundApp>, t: TrackId) -> transit_model::Insert {
     h.state().engine.session().track(t).unwrap().instrument.clone().unwrap()
 }
 
@@ -140,15 +140,15 @@ fn non_audio_drops_are_left_to_the_shell() {
 
 #[test]
 fn a_built_in_instruments_menu_opens_its_parameters() {
-    let engine = soundcraft_engine::demo::demo_engine();
+    let engine = transit_engine::demo::demo_engine();
     let keys = engine.session().tracks.iter().find(|t| t.name == "Keys").unwrap().id;
     let app = SoundApp::new(engine, None, Services::default());
     let mut h = Harness::builder()
         .with_size(vec2(400.0, 400.0))
-        .build_ui_state(move |ui, app: &mut SoundApp| soundcraft_ui_egui::mix_window::instrument_menu(app, ui, keys), app);
+        .build_ui_state(move |ui, app: &mut SoundApp| transit_ui_egui::mix_window::instrument_menu(app, ui, keys), app);
     h.step();
     assert!(h.state().ui.plugin_windows.is_empty());
     h.get_by_label("Edit Parameters…").click();
     h.step();
-    assert_eq!(h.state().ui.plugin_windows, vec![(keys, soundcraft_mix::INSTRUMENT_SLOT)]);
+    assert_eq!(h.state().ui.plugin_windows, vec![(keys, transit_mix::INSTRUMENT_SLOT)]);
 }

@@ -28,9 +28,9 @@ use crate::mixer::MenuItem;
 use crate::theme::{self, TOKENS};
 use egui::{Align2, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::{Value, json};
-use soundcraft_midi::Note;
-use soundcraft_model::{ClipContent, ClipId, Session, TrackId};
-use soundcraft_time::{Samples, TICKS_PER_QUARTER as PPQ};
+use transit_midi::Note;
+use transit_model::{ClipContent, ClipId, Session, TrackId};
+use transit_time::{Samples, TICKS_PER_QUARTER as PPQ};
 
 /// Width of the keyboard column, heights of the pane's rows (points).
 pub const KEY_W: f32 = 52.0;
@@ -144,12 +144,12 @@ pub struct KeysPrefs {
     #[serde(deserialize_with = "read_velocity")]
     pub step_velocity: u8,
     /// Hold threshold and repeat floor for step entry.
-    pub step_hold: soundcraft_engine::step_input::HoldPrefs,
+    pub step_hold: transit_engine::step_input::HoldPrefs,
     /// Opt-in Space binding, scoped to the focused piano roll in step mode.
     pub step_tie_rest_space: bool,
-    pub step_bindings: soundcraft_engine::step_input::StepBindings,
+    pub step_bindings: transit_engine::step_input::StepBindings,
     /// Legacy UI preference retained for settings compatibility. Editing uses the clip's key.
-    pub key_scale: soundcraft_midi::scale::KeyScale,
+    pub key_scale: transit_midi::scale::KeyScale,
     pub quantize: QuantizePrefs,
     /// Explicit velocity for new notes and audition; note edits never change it.
     #[serde(deserialize_with = "read_velocity")]
@@ -172,10 +172,10 @@ impl Default for KeysPrefs {
             grid: GridView::default(),
             step_fixed: false,
             step_velocity: 100,
-            step_hold: soundcraft_engine::step_input::HoldPrefs::default(),
+            step_hold: transit_engine::step_input::HoldPrefs::default(),
             step_tie_rest_space: false,
-            step_bindings: soundcraft_engine::step_input::StepBindings::default(),
-            key_scale: soundcraft_midi::scale::KeyScale::default(),
+            step_bindings: transit_engine::step_input::StepBindings::default(),
+            key_scale: transit_midi::scale::KeyScale::default(),
             quantize: QuantizePrefs::default(),
             velocity: 100,
         }
@@ -356,7 +356,7 @@ pub struct KeysState {
     /// Velocity per pitch of the keys held on an armed MIDI input (0 = up). Session state.
     pub live: [u8; 128],
     /// The tracks' MIDI inputs as last seen: a change lets go of every live key.
-    live_inputs: Vec<soundcraft_model::MidiInput>,
+    live_inputs: Vec<transit_model::MidiInput>,
     serial: u64,
     /// The last click on the grid (time, position), for double-clicks.
     last_click: Option<(f64, Pos2)>,
@@ -412,7 +412,7 @@ struct ClipView {
     /// The loop cycle `(start, end)` in ticks from the clip start, when the clip has a valid loop.
     cycle: Option<(i64, i64)>,
     notes: Vec<Note>,
-    ctrls: Vec<soundcraft_midi::CtrlEvent>,
+    ctrls: Vec<transit_midi::CtrlEvent>,
     name: String,
 }
 
@@ -426,7 +426,7 @@ fn clip_view(s: &Session, clip: ClipId) -> Option<ClipView> {
         .looping
         .filter(|l| l.is_valid())
         .map(|l| {
-            let (origin, f) = soundcraft_mix::loop_frame(s, c.start, l);
+            let (origin, f) = transit_mix::loop_frame(s, c.start, l);
             let o = s.tempo.samples_to_ticks(origin, s.sample_rate);
             let tick = |x: i64| s.tempo.samples_to_ticks(origin.saturating_add(x), s.sample_rate) - o;
             (tick(f.start), tick(f.end))
@@ -527,7 +527,7 @@ struct Map {
     /// The grid step in force whether or not it snaps: the lines, new-note and nudge length.
     step: i64,
     rows: scale::Rows,
-    scale: soundcraft_midi::scale::ScaleMode,
+    scale: transit_midi::scale::ScaleMode,
 }
 
 impl Map {
@@ -1125,7 +1125,7 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     let cp = lp.with_clip_rect(corner);
     match layout.live.last() {
         Some((pitch, _)) => {
-            cp.text(corner.center(), Align2::CENTER_CENTER, soundcraft_midi::note_name(*pitch), FontId::proportional(12.0), TOKENS.accent)
+            cp.text(corner.center(), Align2::CENTER_CENTER, transit_midi::note_name(*pitch), FontId::proportional(12.0), TOKENS.accent)
         }
         None => cp.text(corner.center(), Align2::CENTER_CENTER, &grid_text, FontId::proportional(9.5), TOKENS.text_dim),
     };
@@ -1264,7 +1264,7 @@ fn header_row(app: &mut StudioApp, ui: &mut Ui, r: Rect, cv: &ClipView, layout: 
     p.text(b.center(), Align2::CENTER_CENTER, label, small.clone(), if on { theme::text_on(TOKENS.accent) } else { TOKENS.text_dim });
     layout.step = r4(b);
     resp.context_menu(|ui| {
-        use soundcraft_engine::step_input::StepControl;
+        use transit_engine::step_input::StepControl;
         ui.label("Step input settings");
         ui.checkbox(&mut app.ui.keys.step_hold.enabled, "Hold to lengthen");
         ui.horizontal(|ui| {
@@ -2072,7 +2072,7 @@ fn paint_keyboard(app: &StudioApp, ui: &Ui, map: &Map, kb: Rect) {
             p.text(
                 pos2(kb.max.x - 6.0, row.center().y),
                 Align2::RIGHT_CENTER,
-                soundcraft_midi::note_name(pitch),
+                transit_midi::note_name(pitch),
                 FontId::proportional((map.kh - 4.0).clamp(8.0, 11.0)),
                 color,
             );

@@ -2,15 +2,15 @@
 //! allocating. Values are deliberately asymmetric: copying only the left channel cannot pass.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_mix::{
+use std::sync::Arc;
+use transit_audio_io::AudioBuffer;
+use transit_mix::{
     Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen, create_instance,
     render_clips,
 };
-use soundcraft_model::{ChannelFormat, Clip, ClipId, Session, SourceAudio, SourceId, TrackId, TrackKind};
-use soundcraft_time::Range;
-use std::sync::Arc;
+use transit_model::{ChannelFormat, Clip, ClipId, Session, SourceAudio, SourceId, TrackId, TrackKind};
 use transit_rt::testing::{CountingAlloc, measure};
+use transit_time::Range;
 
 #[global_allocator]
 static ALLOC: CountingAlloc = CountingAlloc;
@@ -27,7 +27,7 @@ fn session(values: &[f32], format: ChannelFormat) -> (Session, TrackId) {
 }
 
 fn assert_fold(values: &[f32], format: ChannelFormat, expected: &[f32]) {
-    soundcraft_mix::mark_audio_thread();
+    transit_mix::mark_audio_thread();
     MixEngine::force_serial(true);
     let (s, t) = session(values, format);
     let dry = render_clips(&s, t, Range::new(0, BLOCK as i64));
@@ -107,7 +107,7 @@ fn downmix_preserves_offset_stretch_and_clip_gain() {
     *clip = Clip::audio(ClipId(1), "stretch", SourceId(1), 1, 3, 6);
     clip.stretch = 2.0;
     clip.gain_db = -6.0;
-    let gain = soundcraft_dsp::db_to_gain(-6.0);
+    let gain = transit_dsp::db_to_gain(-6.0);
     let dry = render_clips(&s, t, Range::new(0, 12));
     assert_eq!(&dry[0][..3], &[0.0; 3]);
     for (i, actual) in dry[0][3..9].iter().enumerate() {

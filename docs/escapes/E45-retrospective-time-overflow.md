@@ -17,7 +17,7 @@
    limit. It requires a regular parameter error and an unchanged session. Run before the
    fix: failed with `attempt to add with overflow` and `EngineError::Internal`.
 5. **Gate class.** Checked time arithmetic on nested command inputs, including both musical
-   aliases and legacy numeric paths. Run with `cargo test --locked -p soundcraft-engine`.
+   aliases and legacy numeric paths. Run with `cargo test --locked -p transit-engine`.
 6. **Protocol change, owner, blind spot.** Include nested note-time boundary inputs when
    reviewing MIDI command changes. The engine command area owns this gate. It covers
    retrospective capture admission, not every existing MIDI transform or hostile tempo map.

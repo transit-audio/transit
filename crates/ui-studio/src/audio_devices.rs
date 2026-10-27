@@ -2,8 +2,8 @@
 //! kept as `UiState.audio` (saved in `ui.json` with the other preferences). Every choice starts at
 //! "System default".
 //!
-//! The lists come from [`soundcraft_playback::devices::cpal_audio_systems`] and, in a build with
-//! the native ASIO backend, [`soundcraft_playback::devices::native_asio_system`], read when the
+//! The lists come from [`transit_playback::devices::cpal_audio_systems`] and, in a build with
+//! the native ASIO backend, [`transit_playback::devices::native_asio_system`], read when the
 //! window opens and on Rescan, never per frame. The ASIO system is listed on a worker thread (it
 //! probes the driver that runs, which can take seconds): the window says "Listing the ASIO
 //! drivers…" until it answers and stops waiting after [`ASIO_LISTING_LIMIT`]. A driver only chosen
@@ -21,9 +21,9 @@ use crate::arrange::{R4, r4};
 use crate::icons::{self, Icon};
 use crate::mixer::MenuItem;
 use crate::theme::{SPACE, TOKENS};
-use soundcraft_playback::devices::{self, AudioSystem, DeviceInfo};
-use soundcraft_playback::telemetry::{StatsBackend, StreamStats};
-use soundcraft_playback::{AudioConfig, Backend};
+use transit_playback::devices::{self, AudioSystem, DeviceInfo};
+use transit_playback::telemetry::{StatsBackend, StreamStats};
+use transit_playback::{AudioConfig, Backend};
 
 /// Said when Apply (or `ui.set {audio}`) is asked while recording.
 pub const REFUSED_RECORDING: &str = "Stop recording before changing the audio devices.";
@@ -73,7 +73,7 @@ pub struct AudioDevicesLayout {
     /// Fallbacks and notes, as shown with the warning icon.
     pub notes: Vec<String>,
     /// The path table the I/O section showed (the engine's, read this frame).
-    pub io: Option<soundcraft_model::IoMap>,
+    pub io: Option<transit_model::IoMap>,
     /// The Calibration line (only under a native backend: under the Paired input for WASAPI).
     pub calibration: Option<String>,
     /// The native ASIO Calibration line's Measure, as drawn.
@@ -180,7 +180,7 @@ pub struct AudioDevicesState {
     /// Scripted device-loop counters (output, input) standing in for the streams, so tests can
     /// render the Backend lines without a native backend.
     #[cfg(test)]
-    pub(crate) injected_backend: Option<(Option<soundcraft_playback::telemetry::StreamStats>, Option<soundcraft_playback::telemetry::StreamStats>)>,
+    pub(crate) injected_backend: Option<(Option<transit_playback::telemetry::StreamStats>, Option<transit_playback::telemetry::StreamStats>)>,
     /// The wake counters sampled at the last panel refreshes (output, input), for the rates.
     wake_rates: (WakeRate, WakeRate),
     /// A native ASIO driver's settings panel that is open; its result arrives when it closes.
@@ -277,7 +277,7 @@ struct Verification {
 }
 
 impl Verification {
-    fn ready(&mut self, now: f64, rate: u32, t: soundcraft_playback::telemetry::CallbackTelemetry) -> bool {
+    fn ready(&mut self, now: f64, rate: u32, t: transit_playback::telemetry::CallbackTelemetry) -> bool {
         if rate == 0 || t.callbacks == 0 || !now.is_finite() {
             return false;
         }
@@ -571,7 +571,7 @@ impl StudioApp {
     /// Why the device did not open, when the Player runs silent with an error (a saved ASIO
     /// driver that is no longer installed, say): said, never covered by another device.
     fn not_opened_note(&self) -> Option<String> {
-        let why = self.player.as_ref().filter(|p| p.silent).and_then(soundcraft_playback::Player::initial_error)?;
+        let why = self.player.as_ref().filter(|p| p.silent).and_then(transit_playback::Player::initial_error)?;
         Some(format!("The audio device did not open: {why}."))
     }
 
@@ -881,7 +881,7 @@ pub fn period_rate_text(period: u32, rate: u32) -> String {
 }
 
 /// "1196 frames (24.9 ms) \u{b1}7 at 256 / 48 kHz": a measured loop with its spread and conditions.
-pub fn calibrated_text(c: &soundcraft_playback::LoopbackCalibration) -> String {
+pub fn calibrated_text(c: &transit_playback::LoopbackCalibration) -> String {
     format!("{} \u{b1}{} at {}", crate::hardware_ui::frames_text(c.round_trip_frames, c.rate), c.spread_frames, period_rate_text(c.period, c.rate))
 }
 
@@ -941,14 +941,14 @@ fn pick_path(pick: Option<&str>, remembered: Option<&str>, fallback: Option<&str
 /// Measure, then the progress with Cancel while it runs and what the last run said.
 fn calibration_measure(
     ui: &mut egui::Ui,
-    io: &soundcraft_model::IoMap,
+    io: &transit_model::IoMap,
     (draft, send, ret): (&AudioConfig, &mut Option<String>, &mut Option<String>),
     blocked: Option<&str>,
     progress: Option<(u32, u32)>,
     result: &str,
     (controls, items): (&mut Vec<(String, &'static str, egui::Rect)>, &mut Vec<MenuItem>),
 ) -> (Option<CalibrationAction>, CalibrationLayout) {
-    use soundcraft_model::IoDirection;
+    use transit_model::IoDirection;
     let outputs: Vec<&str> = io.paths_of(IoDirection::Output).map(|p| p.name.as_str()).collect();
     let inputs: Vec<&str> = io.paths_of(IoDirection::Input).map(|p| p.name.as_str()).collect();
     *send = pick_path(send.as_deref(), draft.calibration_send.as_deref(), Some(io.main.as_str()), &outputs);
@@ -1807,7 +1807,7 @@ pub fn requested_note(asked_buffer: Option<u32>, buffer: Option<u32>, asked_rate
 }
 
 /// The "Input open:" line of an input, the recorder's or the player's held one.
-fn input_line(r: &soundcraft_playback::record::Recorder, native: bool) -> String {
+fn input_line(r: &transit_playback::record::Recorder, native: bool) -> String {
     if native {
         let buffer = r.buffer_frames.map_or(String::new(), |b| format!(" · {b}-sample buffer"));
         let detail = achieved_detail(r.sample_format, r.latency, "in");
@@ -1822,8 +1822,8 @@ fn input_line(r: &soundcraft_playback::record::Recorder, native: bool) -> String
 /// WASAPI worker, the ASIO buffer-switch thread once it switched), " · MMCSS pending" before that,
 /// " · MMCSS by driver" where the ASIO driver registered its own thread, and so on; nothing where
 /// the backend observes none.
-pub fn priority_detail(priority: soundcraft_playback::scheduling::WorkerPriority) -> String {
-    use soundcraft_playback::scheduling::WorkerPriority as P;
+pub fn priority_detail(priority: transit_playback::scheduling::WorkerPriority) -> String {
+    use transit_playback::scheduling::WorkerPriority as P;
     let text = match priority {
         P::Pending => "MMCSS pending",
         P::MmcssAudio => "MMCSS Audio",

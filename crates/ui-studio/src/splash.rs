@@ -27,7 +27,7 @@ pub enum Watch {
 /// before the (synchronous) open blocks the UI thread.
 #[derive(Debug, Clone)]
 struct PendingOpen {
-    cfg: soundcraft_playback::AudioConfig,
+    cfg: transit_playback::AudioConfig,
     /// The frame that says "Opening ..." has been drawn; the next one opens.
     announced: bool,
 }
@@ -72,7 +72,7 @@ impl SplashState {
     }
 
     /// Open the audio device on a later frame: this one shows "Opening <device>…" first.
-    pub fn defer_open(&mut self, cfg: soundcraft_playback::AudioConfig) {
+    pub fn defer_open(&mut self, cfg: transit_playback::AudioConfig) {
         self.opening_device = Some(cfg.output.clone().unwrap_or_else(|| "the audio device".to_string()));
         self.pending = Some(PendingOpen { cfg, announced: false });
     }
@@ -129,7 +129,7 @@ pub fn advance_open(app: &mut StudioApp, ctx: &egui::Context) {
     let open = app.services.open_audio.take();
     let player = match &open {
         Some(open) => open(session, &cfg),
-        None => soundcraft_playback::Player::with_config(session, &cfg),
+        None => transit_playback::Player::with_config(session, &cfg),
     };
     app.splash.failed = player.silent.then(|| player.initial_error().unwrap_or("no device").to_string());
     app.player = Some(player);

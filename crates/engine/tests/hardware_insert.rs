@@ -3,8 +3,8 @@
 //! insert's return back into its own send; bypass, move and remove work like any insert's.
 
 use serde_json::json;
-use soundcraft_engine::{Engine, EngineError};
-use soundcraft_model::{IoMap, Route};
+use transit_engine::{Engine, EngineError};
+use transit_model::{IoMap, Route};
 
 fn engine(names: &[(&str, &str)]) -> Engine {
     let mut e = Engine::default();
@@ -113,7 +113,7 @@ fn a_session_that_opens_with_a_conflicting_hardware_insert_opens_with_it_disable
     hardware(&mut e, "A", 0, "Out 3-4").unwrap();
     hardware(&mut e, "C", 0, "Out 5-6").unwrap();
     // A file edited outside the app: B sends on A's path, C's strip routes to its own send.
-    e.session_mut().tracks[1].mixer.inserts[0] = Some(soundcraft_model::Insert::hardware("Out 3-4", "In 1-2"));
+    e.session_mut().tracks[1].mixer.inserts[0] = Some(transit_model::Insert::hardware("Out 3-4", "In 1-2"));
     e.session_mut().tracks[2].mixer.output = Route::Hardware("Out 5-6".into());
     let file = temp("open");
     e.execute("session.save", &json!({"path": file.to_string_lossy(), "replace": true})).unwrap();
@@ -125,15 +125,15 @@ fn a_session_that_opens_with_a_conflicting_hardware_insert_opens_with_it_disable
     assert!(disabled(&e, 2).is_some(), "the strip that feeds its own send is disabled");
     assert!(e.messages.iter().any(|m| m.contains("`B`") && m.contains("send path in use by A")), "{:?}", e.messages);
     // Reverting runs the same check.
-    e.session_mut().tracks[1].mixer.inserts[0] = Some(soundcraft_model::Insert::hardware("Out 3-4", "In 1-2"));
+    e.session_mut().tracks[1].mixer.inserts[0] = Some(transit_model::Insert::hardware("Out 3-4", "In 1-2"));
     e.execute("session.save", &json!({"path": file.to_string_lossy(), "replace": true})).unwrap();
     e.messages.clear();
     e.execute("session.revert", &json!({})).unwrap();
     assert!(disabled(&e, 1).is_some() && e.messages.iter().any(|m| m.contains("`B`")), "{:?}", e.messages);
     // The report shows it, and the plan treats it as dry.
-    let report = soundcraft_mix::hardware_report(e.session(), e.io_map(), 6, 4, true, 48_000);
+    let report = transit_mix::hardware_report(e.session(), e.io_map(), 6, 4, true, 48_000);
     let b = report.iter().find(|r| r.track == e.session().tracks[1].id).unwrap();
-    assert!(matches!(&b.state, soundcraft_mix::HardwareState::Disabled(why) if why == "send path in use by A"), "{:?}", b.state);
+    assert!(matches!(&b.state, transit_mix::HardwareState::Disabled(why) if why == "send path in use by A"), "{:?}", b.state);
     // Making the insert again clears the reason when nothing conflicts.
     e.execute("mix.insert_remove", &json!({"track": "A", "slot": 0})).unwrap();
     hardware(&mut e, "B", 0, "Out 3-4").unwrap();

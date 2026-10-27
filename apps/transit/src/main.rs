@@ -3,7 +3,7 @@
 //! Usage: `transit --report [path]` writes a diagnostics file and exits; otherwise `transit [--demo] [--control <port>] [--no-audio] [--verbose] [--log <directives>] [--log-stderr] [session.transit]`
 //!
 //! `--verbose` logs debug detail for every transit target; `--log <directives>` takes `RUST_LOG` syntax
-//! (`warn,soundcraft_mix=trace`); `--log-stderr` copies the log to standard error when it is not a
+//! (`warn,transit_mix=trace`); `--log-stderr` copies the log to standard error when it is not a
 //! terminal. A flag beats `RUST_LOG`, which beats the default (`logging`, `docs/troubleshooting.md`).
 //!
 //! `--control <port>` (or `TRANSIT_CONTROL_PORT`) starts a localhost JSON-lines control server
@@ -29,8 +29,8 @@ mod update_check;
 #[cfg(test)]
 mod audio_review_tests;
 
-use soundcraft_engine::Engine;
 use std::sync::Arc;
+use transit_engine::Engine;
 use transit_ui_studio::{Services, StudioApp, UiState};
 
 /// Help > Debug Logging: the studio's handle on the logger.
@@ -66,7 +66,7 @@ impl App {
             return result;
         }
         let mut autosaved = false;
-        let clean = soundcraft_engine::emergency::run_bounded("shutdown", soundcraft_engine::emergency::SHUTDOWN_BOUND, || {
+        let clean = transit_engine::emergency::run_bounded("shutdown", transit_engine::emergency::SHUTDOWN_BOUND, || {
             save_prefs(&self.0.ui);
             if let Some(logger) = self.1 {
                 logger.report_audio_thread();
@@ -86,7 +86,7 @@ impl App {
         log::error!("emergency shutdown: {reason}");
         let result = self.shut_down();
         shutdown::tell_user(reason, result);
-        soundcraft_engine::emergency::end_process(result.clean)
+        transit_engine::emergency::end_process(result.clean)
     }
 }
 
@@ -123,7 +123,7 @@ macro_rules! font {
 /// SoundCraft definitions (egui's built-in fonts, the system Hangul fallback) behind them.
 fn font_definitions() -> egui::FontDefinitions {
     use egui::FontFamily;
-    let mut defs = soundcraft_ui_egui::fonts::definitions();
+    let mut defs = transit_ui_egui::fonts::definitions();
     let faces = [
         ("inter-regular", font!("inter/Inter-Regular.ttf")),
         ("inter-medium", font!("inter/Inter-Medium.ttf")),
@@ -217,7 +217,7 @@ impl eframe::App for App {
         // then shut plugin hosting down. If that was not clean, a normal exit would run the unload
         // code of plug-in binaries that never had their module exit (issue #104).
         if !self.shut_down().clean {
-            soundcraft_engine::emergency::end_process(false);
+            transit_engine::emergency::end_process(false);
         }
     }
 }
@@ -442,7 +442,7 @@ fn main() -> eframe::Result {
         let _ = std::io::stdout().flush();
         // Run the module exits now, from `main`, not from the exit handler: a plugin whose
         // `ExitDll` waits for its own threads deadlocks inside `exit()`.
-        soundcraft_engine::shutdown_plugin_hosts();
+        transit_engine::shutdown_plugin_hosts();
         return Ok(());
     }
     // `--report`: write the diagnostics file and exit, before the logger (so the log it reads is not
@@ -517,7 +517,7 @@ fn main() -> eframe::Result {
             if logger.mirrors_stderr() { "on" } else { "off (--log-stderr turns it on)" },
         );
     }
-    let engine = if demo { soundcraft_engine::demo::demo_engine() } else { Engine::default() };
+    let engine = if demo { transit_engine::demo::demo_engine() } else { Engine::default() };
     let loaded = load_prefs();
     // First launch (no preferences yet) opens maximized.
     let mut prefs = loaded.unwrap_or_else(|| UiState { window_maximized: true, ..UiState::default() });
@@ -530,7 +530,7 @@ fn main() -> eframe::Result {
     // Every native window of ours carries the icon: the main one below, the separate Mix window
     // (a second viewport) through the registered copy.
     let icon = Arc::new(app_icon());
-    soundcraft_ui_egui::mix_window::set_window_icon(icon.clone());
+    transit_ui_egui::mix_window::set_window_icon(icon.clone());
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(icon)
@@ -580,7 +580,7 @@ fn main() -> eframe::Result {
                 // without preferences (agents' tests) autosave into a folder of their own, so they
                 // neither offer the user's leftovers nor leave theirs for the user.
                 app.autosave_dir = autosave_dir;
-                app.leftovers = app.autosave_dir.as_deref().map(soundcraft_engine::autosave::leftovers).unwrap_or_default();
+                app.leftovers = app.autosave_dir.as_deref().map(transit_engine::autosave::leftovers).unwrap_or_default();
                 app.ui = prefs;
                 // The plug-in scan cache is SoundCraft's, shared; runs without preferences keep none.
                 let cache = config::soundcraft_dir().filter(|_| prefs_enabled());

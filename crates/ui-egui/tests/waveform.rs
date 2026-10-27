@@ -1,9 +1,9 @@
 use egui::{Color32, Pos2, RawInput, Rect, Shape, vec2};
 use serde_json::json;
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_model::{Clip, ClipId, Session, SourceAudio, SourceId};
-use soundcraft_time::SampleRate;
-use soundcraft_ui_egui::{Services, SoundApp, waveform};
+use transit_audio_io::AudioBuffer;
+use transit_model::{Clip, ClipId, Session, SourceAudio, SourceId};
+use transit_time::SampleRate;
+use transit_ui_egui::{Services, SoundApp, waveform};
 
 const WAVE: Color32 = Color32::from_rgb(12, 12, 14);
 
@@ -81,7 +81,7 @@ fn waveforms(ctx: &egui::Context, app: &mut SoundApp, name: &str, below: f32) ->
 
 #[test]
 fn blocks_hide_waveforms_and_playlist_lanes_show_them() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     app.engine.execute("track.playlist_duplicate", &json!({"track": "Bass"})).unwrap();
     app.engine.execute("track.view", &json!({"tracks": ["Bass"], "view": "playlists"})).unwrap();
     app.engine.execute("track.view", &json!({"tracks": ["Snare"], "view": "blocks"})).unwrap();
@@ -94,7 +94,7 @@ fn blocks_hide_waveforms_and_playlist_lanes_show_them() {
 
 #[test]
 fn overlapped_crossfades_show_the_outgoing_clip_too() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     app.engine.execute("edit.fades_create", &json!({"tracks": ["Bass"], "start": {"seconds": 18.2}, "end": {"seconds": 18.7}})).unwrap();
     app.engine.execute("view.zoom_set", &json!({"samples_per_px": 64})).unwrap();
     app.engine.execute("view.scroll", &json!({"to": {"seconds": 18.0}})).unwrap();

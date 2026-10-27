@@ -227,8 +227,8 @@ fn copy_text_is_plain_aligned_lines_of_the_last_hundred_visible_rows() {
     let lines: Vec<&str> = text.lines().collect();
     assert_eq!(lines.len(), 100);
     let sp = |n: usize| " ".repeat(n);
-    assert_eq!(lines[0], format!("  0:00.050  In   Keys{}1  Note On {} (50) vel 100", sp(17), soundcraft_midi::note_name(50)));
-    assert_eq!(lines[99], format!("  0:00.149  In   Keys{}1  Note On {} (49) vel 100", sp(17), soundcraft_midi::note_name(49)));
+    assert_eq!(lines[0], format!("  0:00.050  In   Keys{}1  Note On {} (50) vel 100", sp(17), transit_midi::note_name(50)));
+    assert_eq!(lines[99], format!("  0:00.149  In   Keys{}1  Note On {} (49) vel 100", sp(17), transit_midi::note_name(49)));
     assert!(!text.ends_with('\n'));
     let s = state_with(&[ev(Dir::Out, 0x90, 60, 1), ev(Dir::In, 0xFA, 0, 0), ev(Dir::In, 0xFC, 0, 0)]);
     let all = copy_text(&s.rows, &Filters::default(), None, 100);
@@ -364,7 +364,7 @@ fn frame(ctx: &egui::Context, app: &mut StudioApp, t: f64) {
 
 #[test]
 fn the_window_menu_and_command_open_and_close_it_without_audio() {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     assert!(!app.ui.midi_monitor.open);
     assert_eq!(app.run("window.midi_monitor", json!({})).unwrap()["open"], true);
     let ctx = egui::Context::default();
@@ -383,8 +383,8 @@ fn the_window_menu_and_command_open_and_close_it_without_audio() {
 
 #[test]
 fn the_header_led_is_drawn_with_audio_and_a_click_opens_the_window() {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
-    app.player = Some(soundcraft_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
+    app.player = Some(transit_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap());
     let ctx = egui::Context::default();
     for i in 0..3 {
         frame(&ctx, &mut app, 1.0 + f64::from(i) / 60.0);
@@ -404,8 +404,8 @@ fn the_header_led_is_drawn_with_audio_and_a_click_opens_the_window() {
 
 #[test]
 fn an_audio_reconnect_keeps_the_monitor_on_for_an_open_window() {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
-    let new_player = |app: &StudioApp| soundcraft_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap();
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
+    let new_player = |app: &StudioApp| transit_playback::Player::prepare_device_free(std::sync::Arc::new(app.engine.session().clone())).unwrap();
     app.player = Some(new_player(&app));
     app.run("window.midi_monitor", json!({"value": true})).unwrap();
     let ctx = egui::Context::default();
@@ -442,7 +442,7 @@ fn removed_ports_remain_closed_and_reopening_replaces_the_closed_row() {
 
 #[test]
 fn learn_scrolls_to_filtered_paused_row_and_flash_expires_without_restarting() {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     app.ui.midi_monitor.open = true;
     app.ui.midi_monitor.autoscroll = false;
     app.ui.midi_monitor.filters.text = "never matches".into();
@@ -507,7 +507,7 @@ fn time_uses_transport_during_playback_and_retains_each_rows_timestamp() {
 
 #[test]
 fn sysex_rows_and_reports_show_the_bounded_prefix_and_search_it() {
-    use soundcraft_playback::player::monitor::SysEx;
+    use transit_playback::player::monitor::SysEx;
     let mut event = MonitorEvent::sysex(Dir::In, 1, 1, 100);
     event.sysex_id = 4;
     let mut payload = SysEx { dir: Dir::In, id: 4, bytes: [0x31; 64], len: 64 };

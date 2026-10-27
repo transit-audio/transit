@@ -1,12 +1,12 @@
 //! Deterministic scan/publication races.
 mod common;
 
-use soundcraft_vst3_host as host;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
+use transit_vst3_host as host;
 
 /// Plug-ins in the VST3 fixture bundle (gain, synth and the F10 events fixture).
 const FIXTURE_PLUGINS: usize = 3;

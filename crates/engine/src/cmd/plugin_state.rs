@@ -4,7 +4,7 @@
 
 use super::*;
 use serde_json::json;
-use soundcraft_model::{INSERT_SLOTS, b64};
+use transit_model::{INSERT_SLOTS, b64};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![CommandSpec {
@@ -71,7 +71,7 @@ fn insert_state(e: &mut Engine, p: &Value) -> Result<Value> {
 mod tests {
     use crate::Engine;
     use serde_json::json;
-    use soundcraft_model::b64;
+    use transit_model::b64;
 
     #[test]
     fn stores_and_clears_state_without_undo() {

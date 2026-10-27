@@ -2,9 +2,9 @@
 use super::*;
 use crate::player::monitor;
 use crate::{action_lane, plan_bridge, player::AudioPorts};
-use soundcraft_mix::{DeviceGeneration, PlanLimits, RenderTarget};
-use soundcraft_model::{ChannelFormat, Insert, Session, TrackId, TrackKind};
 use transit_midi_io::{BackendId, fake::Fake};
+use transit_mix::{DeviceGeneration, PlanLimits, RenderTarget};
+use transit_model::{ChannelFormat, Insert, Session, TrackId, TrackKind};
 
 const EPOCH: EngineEpoch = EngineEpoch(41);
 
@@ -197,7 +197,7 @@ fn an_idle_ingress_worker_wakes_on_the_input_callback_not_on_a_timer() {
     assert!(max < Duration::from_millis(500), "max wake latency {max:?}");
 }
 
-/// The #62 latency claim, run by hand on a quiet machine (`cargo test -p soundcraft-playback -- --ignored
+/// The #62 latency claim, run by hand on a quiet machine (`cargo test -p transit-playback -- --ignored
 /// idle_wake`): a median over 25 wakes stays far below the timer tick. It is a measurement of the
 /// host, so it lives outside the gated unit tests (E49, #110).
 #[test]

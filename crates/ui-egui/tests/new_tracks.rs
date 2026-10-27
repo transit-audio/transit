@@ -4,10 +4,10 @@
 use egui::{Pos2, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use soundcraft_ui_egui::{MainWindow, Services, SoundApp};
+use transit_ui_egui::{MainWindow, Services, SoundApp};
 
 fn harness(tracks: usize) -> Harness<'static, SoundApp> {
-    let mut engine = soundcraft_engine::Engine::default();
+    let mut engine = transit_engine::Engine::default();
     if tracks > 0 {
         engine.execute("track.new", &serde_json::json!({"count": tracks})).unwrap();
     }

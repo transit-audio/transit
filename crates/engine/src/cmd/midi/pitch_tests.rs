@@ -1,5 +1,5 @@
 use super::*;
-use soundcraft_model::{ChannelFormat, TrackKind};
+use transit_model::{ChannelFormat, TrackKind};
 
 fn fixture() -> (Engine, u64, Vec<Note>) {
     let mut e = Engine::default();

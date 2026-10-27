@@ -1,8 +1,8 @@
 //! MIDI input menu, using only the Player's cached device status and engine commands.
 
 use serde_json::{Value, json};
-use soundcraft_model::{MidiInput, MidiPort, TrackId};
-use soundcraft_playback::Player;
+use transit_model::{MidiInput, MidiPort, TrackId};
+use transit_playback::Player;
 
 pub(crate) struct InputView {
     ports: Vec<(MidiPort, String)>,
@@ -226,8 +226,8 @@ mod tests {
         let params = changed.expect("device selection");
         assert_eq!(params["port"]["id"], "device-two");
         assert!(params.get("channel").is_none());
-        let mut engine = soundcraft_engine::Engine::default();
-        let track = engine.session_mut().add_track(soundcraft_model::TrackKind::Instrument, soundcraft_model::ChannelFormat::Stereo, None);
+        let mut engine = transit_engine::Engine::default();
+        let track = engine.session_mut().add_track(transit_model::TrackKind::Instrument, transit_model::ChannelFormat::Stereo, None);
         engine.session_mut().track_mut(track).unwrap().midi_input = input.clone();
         let mut params = params;
         params["track"] = json!(track.0);

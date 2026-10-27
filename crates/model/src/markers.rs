@@ -1,7 +1,7 @@
 //! Memory locations (markers and stored selections) and mix/edit groups.
 
 use crate::{GroupId, MarkerId, TrackId};
-use soundcraft_time::Samples;
+use transit_time::Samples;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]
 pub enum MarkerKind {

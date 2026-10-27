@@ -28,7 +28,7 @@ controllers (CC, pitch bend, pressure, program) are sent.
 
 | Thread | Does | Never |
 |---|---|---|
-| Audio callback (`player/audio/external.rs`) | Per block, visits the clip events of external tracks (`soundcraft_mix::external_midi_events`) and pushes stamped copies into a preallocated SPSC ring | Calls into `transit-midi-io`, allocates, locks, blocks |
+| Audio callback (`player/audio/external.rs`) | Per block, visits the clip events of external tracks (`transit_mix::external_midi_events`) and pushes stamped copies into a preallocated SPSC ring | Calls into `transit-midi-io`, allocates, locks, blocks |
 | MIDI ingress (`player/ingress.rs`) | Pushes live input of echo routes into a second ring as soon as it pops it | Waits on the output thread |
 | MIDI output (`player/midi_out.rs`, `transit-midi-io` sends) | Owns every `OutputHandle`; sorts events by deadline; sends; tracks held notes; polls ports | Runs on an audio thread (counted in `audio_thread_sends`, tested) |
 | Main | Sends the destination table on each `Player::service`, the panic on Stop and All Notes Off; reads the status | Sends MIDI |
@@ -134,7 +134,7 @@ single key press, or transit's own Sustain off and All Notes Off, went round at 
 - **No self-echo by default.** `Native::service` gives each input port its own copy of a track's
   route (`port_routes`): when the port and the destination are one device the route keeps
   capturing for a recording but its `echo` is off. The rule is
-  `soundcraft_model::same_midi_device` (one function, tested): same backend, and either the
+  `transit_model::same_midi_device` (one function, tested): same backend, and either the
   backend ids name one device (`device_of_id`: a WinMM interface path up to its `#{class}`
   suffix) or the port names match once a direction suffix is removed (`device_name`: `MIDI In`,
   `Out 2`, `Input`, `MIDIIN2 (x)`, a trailing `MIDI`). Names are compared even when both ids are
@@ -224,7 +224,7 @@ the latency `manual_ms` set by hand; the measured latency is per machine (Measur
   stamped P(R0), as a clip note on the track would be, and remembers R0; it records the return the
   plan reads for each block at its plan frame, as the hardware insert probe does. Each note's
   latency is R1 - R0 with R1 the onset; C is the median. That is decision 2's C, in plan frames.
-  The detector and the trial summary are the bench's, moved to `soundcraft_playback::onset`
+  The detector and the trial summary are the bench's, moved to `transit_playback::onset`
   (envelope over 0.25 ms, threshold 12 dB over the lowest floor, refined to 10 percent of the
   attack peak); `tools/audio-bench` imports them. The stamp needs the output map: with no valid
   map Measure is refused ("Timing approximate: device clock not settled").

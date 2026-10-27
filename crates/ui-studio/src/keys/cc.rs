@@ -1,6 +1,6 @@
 //! The switchable CC lane. Edits commit only on release, one undo step per gesture.
 use super::*;
-use soundcraft_midi::{CtrlEvent, CtrlKind};
+use transit_midi::{CtrlEvent, CtrlKind};
 
 #[derive(Debug, Default)]
 pub struct State {

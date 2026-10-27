@@ -6,9 +6,9 @@
 use super::*;
 use crate::external_probe::{self, MeasureError};
 use ab::fake::{SliceSink, SliceSource};
-use soundcraft_model::{ChannelFormat, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
 use std::time::{Duration, Instant};
 use transit_midi_io::fake::Fake;
+use transit_model::{ChannelFormat, MidiOutChannel, MidiOutPort, MidiOutput, TrackKind};
 
 const BLOCK: usize = 192;
 /// The Model D on a Scarlett at 48 kHz / 64 (`docs/benchmarks/2026-10-24-...-with-compensation.md`).
@@ -48,7 +48,7 @@ fn rig_with(armed: bool, prefill: usize, duplex: bool) -> Rig {
     let mut s = Session::default();
     let track = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
     let t = s.track_mut(track).unwrap();
-    t.instrument = Some(soundcraft_model::Insert::external("In 1"));
+    t.instrument = Some(transit_model::Insert::external("In 1"));
     t.midi_output = MidiOutput::External {
         port: MidiOutPort { backend: key.backend.as_str().into(), name: key.name.clone(), ordinal: key.ordinal, id: key.id.clone() },
         channel: MidiOutChannel::Channel(2),
@@ -64,7 +64,7 @@ fn rig_with(armed: bool, prefill: usize, duplex: bool) -> Rig {
     player.set_input(Arc::clone(&recorder.monitor)).unwrap();
     if !duplex {
         // A device whose input opened on its own: the app's path table names its inputs.
-        player.set_io(soundcraft_model::IoMap::for_device("test", "fake", 2, 2)).unwrap();
+        player.set_io(transit_model::IoMap::for_device("test", "fake", 2, 2)).unwrap();
     }
     let rig = Rig { player, audio, midi, key, track, _recorder: recorder };
     let (mut output, input) = (vec![0.0f32; BLOCK * 2], vec![0.0f32; BLOCK * 2]);
@@ -297,7 +297,7 @@ fn measure_is_refused_while_playing_armed_without_a_port_or_input_and_one_at_a_t
     let audio = ab::fake::FakeBackend::new(ab::Format::new(48_000, 2, ab::SampleFormat::F32));
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    s.track_mut(t).unwrap().instrument = Some(soundcraft_model::Insert::external("In 1"));
+    s.track_mut(t).unwrap().instrument = Some(transit_model::Insert::external("In 1"));
     let player = Player::open_native_or_cpal(Arc::new(s), &AudioConfig::default(), &audio, &audio).unwrap();
     assert!(player.start_external_measure(t, &[0]).unwrap_err().contains("duplex"));
 }

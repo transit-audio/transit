@@ -4,10 +4,10 @@
 //! Copy payloads carry no heap owners; endpoints stay anchored on control until quiescence.
 
 use crate::plan_bridge;
-use soundcraft_mix::PlanGeneration;
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use transit_mix::PlanGeneration;
 
 pub const CAPACITY: usize = 256;
 pub const NOTE_CAPACITY: usize = 256;
@@ -250,8 +250,8 @@ pub fn pair<T: Copy>(bridge: &plan_bridge::Control) -> (Control<T>, Audio<T>) {
 /// Handler results have a fixed copy budget as well as the `Copy` ownership bound.
 ///
 /// ```compile_fail
-/// use soundcraft_playback::{action_lane, plan_bridge};
-/// use soundcraft_mix::{DeviceGeneration, PlanLimits, RenderTarget};
+/// use transit_playback::{action_lane, plan_bridge};
+/// use transit_mix::{DeviceGeneration, PlanLimits, RenderTarget};
 /// let (bridge, _) = plan_bridge::pair(
 ///     RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 },
 ///     PlanLimits::default(),

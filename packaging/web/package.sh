@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Build the browser version and zip it:  $DIST/soundcraft-web-<version>.zip
+# Build the browser version and zip it:  $DIST/transit-web-<version>.zip
 #
 # Usage: packaging/web/package.sh [--skip-build]
 #
 # Needs: trunk (brew install trunk / cargo install trunk --locked) and the wasm32-unknown-unknown
-# target. The zip holds a self-contained static site in soundcraft-web-<version>/ that works
+# target. The zip holds a self-contained static site in transit-web-<version>/ that works
 # from any URL path and inside an <iframe>. Hosting notes: packaging/web/README.md.
 set -euo pipefail
 # shellcheck source=../env.sh
@@ -24,7 +24,7 @@ if grep -Eq '(src|href)="/[^/]' "$SITE/index.html"; then
   exit 1
 fi
 
-NAME="soundcraft-web-$VERSION"
+NAME="transit-web-$VERSION"
 WORK="$CARGO_TARGET_DIR/web-package"
 rm -rf "$WORK"
 mkdir -p "$WORK/$NAME"

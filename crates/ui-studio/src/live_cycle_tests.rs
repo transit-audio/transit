@@ -5,15 +5,15 @@
 
 use crate::{Services, StudioApp};
 use serde_json::json;
-use soundcraft_engine::Engine;
-use soundcraft_time::Range;
+use transit_engine::Engine;
+use transit_time::Range;
 
 /// Frames per `Player::step_device_free`.
 const BLOCK: i64 = 512;
 
 fn app() -> StudioApp {
     let engine = Engine::default();
-    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
     let mut app = StudioApp::new(engine, Some(player), Services::default());
     steps(&mut app, 3);
     app
@@ -198,7 +198,7 @@ fn cycle_toggled_while_a_take_records_keeps_its_loop_until_the_take_ends() {
     let mut seen = vec![play_from(&mut app, 0)];
     // A pass under way (punched in on the fly, so the player's loop is the one it has: none).
     app.take_cycle = app.wanted_loop();
-    app.take_plan = Some(soundcraft_engine::io::Recording {
+    app.take_plan = Some(transit_engine::io::Recording {
         start: seen[0],
         pass: None,
         punch: None,

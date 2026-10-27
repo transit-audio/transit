@@ -4,10 +4,10 @@
 //! instance, write the file, read it back, load it into a second live instance, and compare.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::{JobPoll, Plugin, StateJob};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
+use transit_dsp::{JobPoll, Plugin, StateJob};
 use transit_plugin_host::{Config, Hooks, Host};
 
 /// Builds a fixture crate of a host crate (a cdylib outside the workspace) into the shared target.
@@ -36,7 +36,7 @@ fn install_dir(name: &str) -> PathBuf {
 }
 
 fn clap_fixture() {
-    soundcraft_clap_host::set_scan_extra_dirs_only(true);
+    transit_clap_host::set_scan_extra_dirs_only(true);
     let built = build("clap-host", "clap-fixture-target");
     let lib = if cfg!(target_os = "macos") {
         "libclap_fixture.dylib"
@@ -54,11 +54,11 @@ fn clap_fixture() {
         std::fs::create_dir_all(dir.join("vendor")).unwrap();
         std::fs::copy(built.join(lib), dir.join("vendor/Fixture.clap")).unwrap();
     }
-    assert_eq!(soundcraft_clap_host::add_search_dir(&dir), 2);
+    assert_eq!(transit_clap_host::add_search_dir(&dir), 2);
 }
 
 fn vst3_fixture() -> String {
-    soundcraft_vst3_host::set_scan_extra_dirs_only(true);
+    transit_vst3_host::set_scan_extra_dirs_only(true);
     let built = build("vst3-host", "vst3-fixture-target");
     let (lib, folder, exe) = if cfg!(target_os = "macos") {
         ("libvst3_fixture.dylib", "MacOS", "Fixture")
@@ -71,8 +71,8 @@ fn vst3_fixture() -> String {
     let bin = dir.join("vendor/Fixture.vst3/Contents").join(folder);
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::copy(built.join(lib), bin.join(exe)).unwrap();
-    assert_eq!(soundcraft_vst3_host::add_search_dir(&dir), 3);
-    soundcraft_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Gain").unwrap().id
+    assert_eq!(transit_vst3_host::add_search_dir(&dir), 3);
+    transit_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Gain").unwrap().id
 }
 
 fn finish<T>(mut job: StateJob<T>) -> T {
@@ -129,7 +129,7 @@ fn clap_and_vst3_presets_round_trip_through_the_host_thread() {
     let host = Host::new(Config { inline: false, hooks: Hooks::formats(), ..Config::default() });
     // CLAP: the gain fixture keeps gain (param 7) and mode in its state.
     clap_fixture();
-    let clap_create: fn(&str) -> Option<Box<dyn Plugin>> = soundcraft_clap_host::create;
+    let clap_create: fn(&str) -> Option<Box<dyn Plugin>> = transit_clap_host::create;
     let mut a = make(&host, "clap:org.soundcraft.test.gain", clap_create);
     let mut b = make(&host, "clap:org.soundcraft.test.gain", clap_create);
     set(&mut a, "7", 0.5);
@@ -137,8 +137,8 @@ fn clap_and_vst3_presets_round_trip_through_the_host_thread() {
         &host,
         &mut a,
         &mut b,
-        |s| soundcraft_clap_host::preset::file_from_state("clap:org.soundcraft.test.gain", s).unwrap(),
-        |f| soundcraft_clap_host::preset::state_from_file("clap:org.soundcraft.test.gain", f).unwrap(),
+        |s| transit_clap_host::preset::file_from_state("clap:org.soundcraft.test.gain", s).unwrap(),
+        |f| transit_clap_host::preset::state_from_file("clap:org.soundcraft.test.gain", f).unwrap(),
     );
     let values = finish(b.state_reader().unwrap().begin_load(finish(a.state_reader().unwrap().begin_save()).unwrap())).unwrap();
     assert!(values.iter().any(|(id, v)| id == "7" && (v - 0.5).abs() < 1e-6), "the loaded gain is reported: {values:?}");
@@ -146,21 +146,21 @@ fn clap_and_vst3_presets_round_trip_through_the_host_thread() {
 
     // VST3: component plus controller state, in a `.vstpreset`.
     let id: &'static str = Box::leak(vst3_fixture().into_boxed_str());
-    let vst3_create: fn(&str) -> Option<Box<dyn Plugin>> = soundcraft_vst3_host::create;
+    let vst3_create: fn(&str) -> Option<Box<dyn Plugin>> = transit_vst3_host::create;
     let mut a = make(&host, id, vst3_create);
     let mut b = make(&host, id, vst3_create);
     // A's own state, loaded live: gain 0.75 (component) and frequency 0.3 (controller).
-    let state = soundcraft_vst3_host::preset::join_state(&0.75f64.to_le_bytes(), &0.3f64.to_le_bytes()).unwrap();
+    let state = transit_vst3_host::preset::join_state(&0.75f64.to_le_bytes(), &0.3f64.to_le_bytes()).unwrap();
     let values = finish(a.state_reader().unwrap().begin_load(state)).expect("A takes a state");
     assert!(values.iter().any(|(id, v)| id == "7" && (v - 1.5).abs() < 1e-4), "gain 0.75 normalized is 1.5 plain: {values:?}");
     round_trip(
         &host,
         &mut a,
         &mut b,
-        |s| soundcraft_vst3_host::preset::file_from_state(id, s).unwrap(),
-        |f| soundcraft_vst3_host::preset::state_from_file(id, f).unwrap(),
+        |s| transit_vst3_host::preset::file_from_state(id, s).unwrap(),
+        |f| transit_vst3_host::preset::state_from_file(id, f).unwrap(),
     );
-    let file = soundcraft_vst3_host::preset::file_from_state(id, &finish(a.state_reader().unwrap().begin_save()).unwrap()).unwrap();
+    let file = transit_vst3_host::preset::file_from_state(id, &finish(a.state_reader().unwrap().begin_save()).unwrap()).unwrap();
     assert_eq!(&file[..4], b"VST3", "a standard .vstpreset");
     drop((a, b));
     assert!(host.shutdown(Duration::from_secs(10)));

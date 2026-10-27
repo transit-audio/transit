@@ -1,20 +1,20 @@
 //! MIDI recording through the host: a finished capture pass becomes clips on the armed tracks.
-//! The audio thread's capture is exercised in `soundcraft-playback`; here a synthetic pass stands
+//! The audio thread's capture is exercised in `transit-playback`; here a synthetic pass stands
 //! in for it (120 bpm, 4/4, 48 kHz: a beat is 24,000 samples and 960 ticks).
 
 use crate::{Services, StudioApp};
 use serde_json::json;
-use soundcraft_engine::Engine;
-use soundcraft_midi::Sequence;
-use soundcraft_mix::{Message, NoteId};
-use soundcraft_model::{ClipContent, TrackId};
-use soundcraft_playback::MidiTake;
-use soundcraft_playback::midi_capture::CapturedEvent;
-use soundcraft_playback::record::start::Point;
-use soundcraft_playback::timeline_map::Position;
+use transit_engine::Engine;
+use transit_midi::Sequence;
+use transit_mix::{Message, NoteId};
+use transit_model::{ClipContent, TrackId};
+use transit_playback::MidiTake;
+use transit_playback::midi_capture::CapturedEvent;
+use transit_playback::record::start::Point;
+use transit_playback::timeline_map::Position;
 
 const BEAT: i64 = 24_000;
-const TICKS: i64 = soundcraft_time::TICKS_PER_QUARTER;
+const TICKS: i64 = transit_time::TICKS_PER_QUARTER;
 /// The device frame the synthetic latch sits at.
 const LATCH: u64 = 10_000;
 
@@ -43,7 +43,7 @@ fn pass(track: TrackId, sample: Option<i64>, events: Vec<CapturedEvent>) -> Midi
 /// then Stop through the host.
 fn record(app: &mut StudioApp, start: i64, pass_len: Option<i64>, stop: i64, take: MidiTake) {
     app.record_start = start;
-    app.take_plan = Some(soundcraft_engine::io::Recording {
+    app.take_plan = Some(transit_engine::io::Recording {
         start,
         pass: pass_len,
         punch: None,
@@ -58,7 +58,7 @@ fn record(app: &mut StudioApp, start: i64, pass_len: Option<i64>, stop: i64, tak
     app.stop_play();
 }
 
-fn clip_notes(app: &StudioApp, id: soundcraft_model::ClipId) -> Vec<(u8, i64, i64, u8)> {
+fn clip_notes(app: &StudioApp, id: transit_model::ClipId) -> Vec<(u8, i64, i64, u8)> {
     let s = app.engine.session_arc();
     let clip = s.tracks.iter().flat_map(|t| t.playlists.iter()).flat_map(|p| p.clips.iter()).find(|c| c.id == id).unwrap();
     let ClipContent::Midi { sequence: Sequence { notes, .. } } = &clip.content else { panic!("not MIDI") };
@@ -184,7 +184,7 @@ fn a_midi_only_pass_needs_an_open_audio_device() {
 #[test]
 fn a_midi_only_pass_runs_the_real_player_plumbing_and_clears_it_at_stop() {
     let engine = Engine::default();
-    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
     let mut app = StudioApp::new(engine, Some(player), Services::default());
     let t = TrackId(app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
     app.run("mix.record_arm", json!({"tracks": [t.0], "value": true})).unwrap();
@@ -225,7 +225,7 @@ fn the_lane_shows_a_growing_recording_clip_with_the_notes_played_so_far_until_st
     assert!(app.arrange.layout.recording.is_empty());
     let events = vec![on(LATCH, t, 60), off(LATCH + BEAT as u64, t, 60), on(LATCH + 2 * BEAT as u64, t, 64)];
     app.record_start = 0;
-    app.take_plan = Some(soundcraft_engine::io::Recording {
+    app.take_plan = Some(transit_engine::io::Recording {
         start: 0,
         pass: None,
         punch: None,
@@ -252,7 +252,7 @@ fn the_lane_shows_a_growing_recording_clip_with_the_notes_played_so_far_until_st
 
 // K11: the MIDI take journal.
 
-use soundcraft_engine::midi_journal;
+use transit_engine::midi_journal;
 
 fn folder(name: &str) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("transit-midijournal-{name}-{}", std::process::id()));
@@ -267,7 +267,7 @@ fn journaled_pass(app: &mut StudioApp, t: TrackId, journal: &std::path::Path) {
     let events = vec![on(frames(1.5), t, 60), off(frames(2.5), t, 60), on(frames(3.0), t, 64), off(frames(3.5), t, 64)];
     app.midi_journal = Some(midi_journal::Writer::new(journal.to_path_buf()));
     app.record_start = 0;
-    app.take_plan = Some(soundcraft_engine::io::Recording {
+    app.take_plan = Some(transit_engine::io::Recording {
         start: 0,
         pass: None,
         punch: None,
@@ -317,7 +317,7 @@ fn crash(root: &std::path::Path) -> (std::path::PathBuf, TrackId) {
 
 /// The folder an unsaved session records its takes (and journals) into.
 fn takes_of(app: &StudioApp, root: &std::path::Path) -> std::path::PathBuf {
-    root.join("Autosave").join(soundcraft_engine::io::sanitize_name(&app.engine.session().name)).join("Audio Files")
+    root.join("Autosave").join(transit_engine::io::sanitize_name(&app.engine.session().name)).join("Audio Files")
 }
 
 /// A pass that has been autosaved once, as the plan alone, and then stopped: the clip is placed
@@ -337,8 +337,8 @@ fn flush(app: &StudioApp) {
     app.autosaver.as_ref().unwrap().flush().unwrap();
 }
 
-fn recovered(root: &std::path::Path) -> (StudioApp, soundcraft_engine::autosave::Leftover) {
-    let left = soundcraft_engine::autosave::leftovers(&root.join("Autosave"));
+fn recovered(root: &std::path::Path) -> (StudioApp, transit_engine::autosave::Leftover) {
+    let left = transit_engine::autosave::leftovers(&root.join("Autosave"));
     assert_eq!(left.len(), 1);
     let mut next = StudioApp::new(Engine::default(), None, Services::default());
     next.autosave_dir = Some(root.join("Autosave"));
@@ -352,7 +352,7 @@ fn a_crash_after_the_clip_is_placed_but_before_the_autosave_rebuilds_it_once() {
     let (app, t, path) = stopped(&root);
     assert!(path.is_file(), "the journal outlives Stop until the autosave has the clip");
     drop(app);
-    let left = soundcraft_engine::autosave::leftovers(&root.join("Autosave"));
+    let left = transit_engine::autosave::leftovers(&root.join("Autosave"));
     assert!(left[0].recording && !left[0].midi_placed, "the leftover autosave still shows a pass under way");
     let (next, left) = recovered(&root);
     let clips = next.engine.session().track(t).unwrap().clips().to_vec();
@@ -369,7 +369,7 @@ fn a_crash_after_the_autosave_landed_discards_the_journal_without_a_duplicate_cl
     flush(&app);
     assert!(path.is_file(), "the plan still names it until a write without the recording lands");
     drop(app);
-    let left = soundcraft_engine::autosave::leftovers(&root.join("Autosave"));
+    let left = transit_engine::autosave::leftovers(&root.join("Autosave"));
     assert!(left[0].midi_placed && left[0].midi_journal.as_deref() == Some(path.as_path()));
     let (next, left) = recovered(&root);
     assert_eq!(next.engine.session().track(t).unwrap().clips().len(), 1, "the clip from the autosave, not a second one");
@@ -389,7 +389,7 @@ fn a_clean_stop_deletes_the_journal_once_the_autosave_without_the_recording_land
     app.poll_journal();
     assert!(!path.exists() && app.placed_journal.is_none());
     app.close_autosave();
-    let left = soundcraft_engine::autosave::leftovers(&root.join("Autosave"));
+    let left = transit_engine::autosave::leftovers(&root.join("Autosave"));
     assert_eq!(left.len(), 1);
     assert!(!left[0].recording && left[0].midi_journal.is_none());
 }
@@ -408,7 +408,7 @@ fn saving_the_session_releases_a_held_journal() {
 fn after_a_crash_the_next_launch_offers_recovery_and_rebuilds_the_clip_on_the_same_track() {
     let root = folder("crash");
     let (path, t) = crash(&root);
-    let left = soundcraft_engine::autosave::leftovers(&root.join("Autosave"));
+    let left = transit_engine::autosave::leftovers(&root.join("Autosave"));
     assert_eq!(left.len(), 1);
     assert_eq!(left[0].midi_journal.as_deref(), Some(path.as_path()));
     let mut next = StudioApp::new(Engine::default(), None, Services::default());
@@ -417,7 +417,7 @@ fn after_a_crash_the_next_launch_offers_recovery_and_rebuilds_the_clip_on_the_sa
     let track = next.engine.session().track(t).unwrap();
     let clips = track.clips().to_vec();
     assert_eq!(clips.len(), 1);
-    assert_eq!(clips[0].name, format!("{}_recovered", soundcraft_engine::io::sanitize_name(&track.name)));
+    assert_eq!(clips[0].name, format!("{}_recovered", transit_engine::io::sanitize_name(&track.name)));
     assert_eq!(clip_notes(&next, clips[0].id), vec![(60, TICKS * 3 / 2, TICKS, 100), (64, TICKS * 3, TICKS / 2, 100)]);
     assert!(next.status.contains("recovered MIDI clip"), "{}", next.status);
     assert!(!path.exists() && !left[0].dir.exists(), "recovered: the journal and the leftover are gone");
@@ -427,21 +427,21 @@ fn after_a_crash_the_next_launch_offers_recovery_and_rebuilds_the_clip_on_the_sa
 fn declining_recovery_deletes_the_journal() {
     let root = folder("decline");
     let (path, _) = crash(&root);
-    let left = soundcraft_engine::autosave::leftovers(&root.join("Autosave"));
-    soundcraft_engine::autosave::discard(&left[0]);
+    let left = transit_engine::autosave::leftovers(&root.join("Autosave"));
+    transit_engine::autosave::discard(&left[0]);
     assert!(!path.exists() && !left[0].dir.exists());
-    assert!(soundcraft_engine::autosave::leftovers(&root.join("Autosave")).is_empty());
+    assert!(transit_engine::autosave::leftovers(&root.join("Autosave")).is_empty());
 }
 
 /// Cycle `4..6` beats with the playhead at `at`, recording from there with no loop pass.
 fn cycling(app: &mut StudioApp, at: i64) {
     let edit = &mut app.engine.session_mut().edit;
     edit.loop_playback = true;
-    edit.loop_range = soundcraft_time::Range::new(4 * BEAT, 6 * BEAT);
+    edit.loop_range = transit_time::Range::new(4 * BEAT, 6 * BEAT);
     // As `plan_recording` fixes it at the start of the pass.
     app.take_cycle = app.wanted_loop();
     app.record_start = at;
-    app.take_plan = Some(soundcraft_engine::io::Recording {
+    app.take_plan = Some(transit_engine::io::Recording {
         start: at,
         pass: None,
         punch: None,
@@ -498,7 +498,7 @@ fn record_pressed_while_cycling_from_the_loop_start_loop_records_in_passes() {
     let _ = t;
     let edit = &mut app.engine.session_mut().edit;
     edit.loop_playback = true;
-    edit.loop_range = soundcraft_time::Range::new(4 * BEAT, 6 * BEAT);
+    edit.loop_range = transit_time::Range::new(4 * BEAT, 6 * BEAT);
     app.engine.transport.playing = true;
     app.engine.transport.position = 4 * BEAT;
     app.begin_pass(Vec::new());
@@ -514,7 +514,7 @@ fn record_with_cycle_on_loops_and_stacks_a_take_per_lap_until_stop() {
     let (mut app, t) = app();
     let edit = &mut app.engine.session_mut().edit;
     edit.loop_playback = true;
-    edit.loop_range = soundcraft_time::Range::new(4 * BEAT, 6 * BEAT);
+    edit.loop_range = transit_time::Range::new(4 * BEAT, 6 * BEAT);
     app.engine.transport.position = 4 * BEAT;
     app.begin_pass(Vec::new());
     app.engine.transport.playing = true;
@@ -551,13 +551,13 @@ fn record_with_cycle_on_loops_and_stacks_a_take_per_lap_until_stop() {
 #[test]
 fn record_with_cycle_off_is_one_open_ended_pass_until_stop() {
     let engine = Engine::default();
-    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
     let mut app = StudioApp::new(engine, Some(player), Services::default());
     let t = TrackId(app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());
     app.run("mix.record_arm", json!({"tracks": [t.0], "value": true})).unwrap();
     let edit = &mut app.engine.session_mut().edit;
     edit.loop_playback = false;
-    edit.loop_range = soundcraft_time::Range::new(4 * BEAT, 6 * BEAT);
+    edit.loop_range = transit_time::Range::new(4 * BEAT, 6 * BEAT);
     app.start_recording();
     let plan = app.take_plan.as_ref().expect("a pass is planned");
     assert_eq!((plan.pass, plan.punch), (None, None), "no cycle: a single pass with no end of its own");
@@ -592,8 +592,8 @@ fn controller_only_capture_reaches_the_clip_through_host_stop_and_is_undoable() 
     assert_eq!(
         sequence.ctrls,
         vec![
-            soundcraft_midi::CtrlEvent { tick: TICKS / 2, channel: 3, kind: soundcraft_midi::CtrlKind::Cc(64), value: 101 },
-            soundcraft_midi::CtrlEvent { tick: TICKS * 3, channel: 3, kind: soundcraft_midi::CtrlKind::Cc(64), value: 12 },
+            transit_midi::CtrlEvent { tick: TICKS / 2, channel: 3, kind: transit_midi::CtrlKind::Cc(64), value: 101 },
+            transit_midi::CtrlEvent { tick: TICKS * 3, channel: 3, kind: transit_midi::CtrlKind::Cc(64), value: 12 },
         ]
     );
     assert_eq!(app.engine.undo_history().len(), before + 1);
@@ -613,12 +613,12 @@ fn the_journal_header_keeps_the_loop_the_take_started_with_when_the_region_is_ed
     app.midi_journal = Some(midi_journal::Writer::new(path.clone()));
     // The region is edited and Cycle turned off while the take records, then the next frame drains.
     let edit = &mut app.engine.session_mut().edit;
-    edit.loop_range = soundcraft_time::Range::new(0, BEAT);
+    edit.loop_range = transit_time::Range::new(0, BEAT);
     edit.loop_playback = false;
     let events = vec![on(LATCH, t, 60), off(LATCH + BEAT as u64 / 2, t, 60)];
     app.finished_test_midi = Some(pass(t, Some(4 * BEAT), events));
     app.update_midi_live();
     app.midi_journal.as_mut().unwrap().flush().unwrap();
     let header = midi_journal::read(&path).unwrap().header;
-    assert_eq!(header.loop_range, Some(soundcraft_time::Range::new(4 * BEAT, 6 * BEAT)));
+    assert_eq!(header.loop_range, Some(transit_time::Range::new(4 * BEAT, 6 * BEAT)));
 }

@@ -1,5 +1,5 @@
-use soundcraft_ui_egui::{Services, SoundApp};
 use std::time::Duration;
+use transit_ui_egui::{Services, SoundApp};
 
 fn pass(ctx: &egui::Context, app: &mut SoundApp, shown: bool) -> Duration {
     let mut out = ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -15,7 +15,7 @@ fn pass(ctx: &egui::Context, app: &mut SoundApp, shown: bool) -> Duration {
 #[test]
 fn only_a_shown_window_animates_and_a_hidden_one_wakes_once_a_second() {
     let ctx = egui::Context::default();
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     for _ in 0..3 {
         pass(&ctx, &mut app, true);
     }

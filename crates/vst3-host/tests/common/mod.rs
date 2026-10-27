@@ -30,7 +30,7 @@ pub fn slow_fixture_dir() -> &'static Path {
 
 fn install(features: &[&str], target_dir: &str, install_dir: &str, plugins: usize) -> PathBuf {
     {
-        soundcraft_vst3_host::set_scan_extra_dirs_only(true);
+        transit_vst3_host::set_scan_extra_dirs_only(true);
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture/Cargo.toml");
         let target =
             Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp"))).join(target_dir);
@@ -61,7 +61,7 @@ fn install(features: &[&str], target_dir: &str, install_dir: &str, plugins: usiz
         std::fs::create_dir_all(&bin).unwrap();
         std::fs::copy(&built, bin.join(exe)).unwrap();
         if plugins > 0 {
-            assert_eq!(soundcraft_vst3_host::add_search_dir(&dir), plugins, "the fixture's plug-ins");
+            assert_eq!(transit_vst3_host::add_search_dir(&dir), plugins, "the fixture's plug-ins");
         }
         dir
     }

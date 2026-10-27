@@ -429,11 +429,11 @@ version = "0.3.2"
 dependencies = [
  "ctrlc",
  "serde_json",
- "soundcraft-playback",
  "transit-audio-asio",
  "transit-audio-backend",
  "transit-audio-wasapi",
  "transit-midi-io",
+ "transit-playback",
  "transit-rt",
 ]
 
@@ -3724,246 +3724,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "soundcraft-au-host"
-version = "0.3.2"
-dependencies = [
- "log",
- "serde",
- "soundcraft-dsp",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "soundcraft-audio-io"
-version = "0.3.2"
-dependencies = [
- "log",
- "proptest",
- "serde",
- "serde_json",
- "symphonia",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "soundcraft-automation"
-version = "0.3.2"
-dependencies = [
- "getrandom 0.3.4",
- "serde_json",
- "soundcraft-engine",
-]
-
-[[package]]
-name = "soundcraft-clap-host"
-version = "0.3.2"
-dependencies = [
- "clap-sys",
- "libloading 0.8.9",
- "log",
- "serde",
- "serde_json",
- "soundcraft-clap-host",
- "soundcraft-dsp",
- "thiserror 2.0.21",
- "transit-rt",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "soundcraft-cli"
-version = "0.3.2"
-dependencies = [
- "serde_json",
- "soundcraft-audio-io",
- "soundcraft-automation",
- "soundcraft-dsp",
- "soundcraft-engine",
-]
-
-[[package]]
-name = "soundcraft-dsp"
-version = "0.3.2"
-dependencies = [
- "log",
- "proptest",
- "rustfft",
- "serde",
-]
-
-[[package]]
-name = "soundcraft-engine"
-version = "0.3.2"
-dependencies = [
- "craft-docpath",
- "log",
- "proptest",
- "serde",
- "serde_json",
- "soundcraft-au-host",
- "soundcraft-audio-io",
- "soundcraft-clap-host",
- "soundcraft-dsp",
- "soundcraft-midi",
- "soundcraft-mix",
- "soundcraft-model",
- "soundcraft-time",
- "soundcraft-video",
- "soundcraft-vst3-host",
- "thiserror 2.0.21",
- "transit-plugin-host",
- "transit-rt",
- "zip",
-]
-
-[[package]]
-name = "soundcraft-midi"
-version = "0.3.2"
-dependencies = [
- "proptest",
- "serde",
- "serde_json",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "soundcraft-mix"
-version = "0.3.2"
-dependencies = [
- "log",
- "rayon",
- "soundcraft-au-host",
- "soundcraft-audio-io",
- "soundcraft-clap-host",
- "soundcraft-dsp",
- "soundcraft-midi",
- "soundcraft-model",
- "soundcraft-time",
- "soundcraft-vst3-host",
- "transit-rt",
-]
-
-[[package]]
-name = "soundcraft-model"
-version = "0.3.2"
-dependencies = [
- "serde",
- "serde_json",
- "soundcraft-audio-io",
- "soundcraft-midi",
- "soundcraft-time",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "soundcraft-playback"
-version = "0.3.2"
-dependencies = [
- "cpal",
- "log",
- "rtrb",
- "serde",
- "serde_json",
- "soundcraft-audio-io",
- "soundcraft-clap-host",
- "soundcraft-dsp",
- "soundcraft-mix",
- "soundcraft-model",
- "soundcraft-time",
- "soundcraft-vst3-host",
- "transit-audio-asio",
- "transit-audio-backend",
- "transit-audio-jack",
- "transit-audio-wasapi",
- "transit-midi-io",
- "transit-plugin-host",
- "transit-rt",
- "triple_buffer",
-]
-
-[[package]]
-name = "soundcraft-time"
-version = "0.3.2"
-dependencies = [
- "serde",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "soundcraft-ui-egui"
-version = "0.3.2"
-dependencies = [
- "craft-ui",
- "egui",
- "egui_kittest",
- "image",
- "log",
- "serde",
- "serde_json",
- "soundcraft-au-host",
- "soundcraft-audio-io",
- "soundcraft-clap-host",
- "soundcraft-dsp",
- "soundcraft-engine",
- "soundcraft-midi",
- "soundcraft-mix",
- "soundcraft-model",
- "soundcraft-playback",
- "soundcraft-time",
- "soundcraft-video",
- "soundcraft-vst3-host",
- "toml",
-]
-
-[[package]]
-name = "soundcraft-video"
-version = "0.3.2"
-dependencies = [
- "image",
- "proptest",
- "serde",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "soundcraft-vst3-host"
-version = "0.3.2"
-dependencies = [
- "libloading 0.8.9",
- "log",
- "objc2 0.6.5",
- "objc2-app-kit 0.3.2",
- "objc2-foundation 0.3.2",
- "serde",
- "serde_json",
- "soundcraft-dsp",
- "soundcraft-vst3-host",
- "thiserror 2.0.21",
- "transit-rt",
- "vst3",
- "windows-sys 0.61.2",
-]
-
-[[package]]
-name = "soundcraft-web"
-version = "0.3.2"
-dependencies = [
- "eframe",
- "egui",
- "js-sys",
- "log",
- "rfd",
- "serde_json",
- "soundcraft-engine",
- "soundcraft-model",
- "soundcraft-playback",
- "soundcraft-ui-egui",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "web-sys",
-]
-
-[[package]]
 name = "spirv"
 version = "0.4.0+sdk-1.4.341.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4458,14 +4218,24 @@ dependencies = [
  "rfd",
  "semver",
  "serde_json",
- "soundcraft-automation",
- "soundcraft-engine",
- "soundcraft-playback",
- "soundcraft-ui-egui",
+ "transit-automation",
+ "transit-engine",
+ "transit-playback",
  "transit-rt",
+ "transit-ui-egui",
  "transit-ui-studio",
  "ureq",
  "winresource",
+]
+
+[[package]]
+name = "transit-au-host"
+version = "0.3.2"
+dependencies = [
+ "log",
+ "serde",
+ "thiserror 2.0.21",
+ "transit-dsp",
 ]
 
 [[package]]
@@ -4482,6 +4252,18 @@ dependencies = [
 [[package]]
 name = "transit-audio-backend"
 version = "0.3.2"
+
+[[package]]
+name = "transit-audio-io"
+version = "0.3.2"
+dependencies = [
+ "log",
+ "proptest",
+ "serde",
+ "serde_json",
+ "symphonia",
+ "thiserror 2.0.21",
+]
 
 [[package]]
 name = "transit-audio-jack"
@@ -4506,6 +4288,87 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-automation"
+version = "0.3.2"
+dependencies = [
+ "getrandom 0.3.4",
+ "serde_json",
+ "transit-engine",
+]
+
+[[package]]
+name = "transit-clap-host"
+version = "0.3.2"
+dependencies = [
+ "clap-sys",
+ "libloading 0.8.9",
+ "log",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "transit-clap-host",
+ "transit-dsp",
+ "transit-rt",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "transit-cli"
+version = "0.3.2"
+dependencies = [
+ "serde_json",
+ "transit-audio-io",
+ "transit-automation",
+ "transit-dsp",
+ "transit-engine",
+]
+
+[[package]]
+name = "transit-dsp"
+version = "0.3.2"
+dependencies = [
+ "log",
+ "proptest",
+ "rustfft",
+ "serde",
+]
+
+[[package]]
+name = "transit-engine"
+version = "0.3.2"
+dependencies = [
+ "craft-docpath",
+ "log",
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "transit-au-host",
+ "transit-audio-io",
+ "transit-clap-host",
+ "transit-dsp",
+ "transit-midi",
+ "transit-mix",
+ "transit-model",
+ "transit-plugin-host",
+ "transit-rt",
+ "transit-time",
+ "transit-video",
+ "transit-vst3-host",
+ "zip",
+]
+
+[[package]]
+name = "transit-midi"
+version = "0.3.2"
+dependencies = [
+ "proptest",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "transit-midi-io"
 version = "0.3.2"
 dependencies = [
@@ -4517,15 +4380,70 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-mix"
+version = "0.3.2"
+dependencies = [
+ "log",
+ "rayon",
+ "transit-au-host",
+ "transit-audio-io",
+ "transit-clap-host",
+ "transit-dsp",
+ "transit-midi",
+ "transit-model",
+ "transit-rt",
+ "transit-time",
+ "transit-vst3-host",
+]
+
+[[package]]
+name = "transit-model"
+version = "0.3.2"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "transit-audio-io",
+ "transit-midi",
+ "transit-time",
+]
+
+[[package]]
+name = "transit-playback"
+version = "0.3.2"
+dependencies = [
+ "cpal",
+ "log",
+ "rtrb",
+ "serde",
+ "serde_json",
+ "transit-audio-asio",
+ "transit-audio-backend",
+ "transit-audio-io",
+ "transit-audio-jack",
+ "transit-audio-wasapi",
+ "transit-clap-host",
+ "transit-dsp",
+ "transit-midi-io",
+ "transit-mix",
+ "transit-model",
+ "transit-plugin-host",
+ "transit-rt",
+ "transit-time",
+ "transit-vst3-host",
+ "triple_buffer",
+]
+
+[[package]]
 name = "transit-plugin-host"
 version = "0.3.2"
 dependencies = [
  "log",
- "soundcraft-clap-host",
- "soundcraft-dsp",
- "soundcraft-vst3-host",
+ "transit-clap-host",
+ "transit-dsp",
  "transit-plugin-host",
  "transit-rt",
+ "transit-vst3-host",
 ]
 
 [[package]]
@@ -4535,6 +4453,40 @@ dependencies = [
  "libc",
  "log",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "transit-time"
+version = "0.3.2"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "transit-ui-egui"
+version = "0.3.2"
+dependencies = [
+ "craft-ui",
+ "egui",
+ "egui_kittest",
+ "image",
+ "log",
+ "serde",
+ "serde_json",
+ "toml",
+ "transit-au-host",
+ "transit-audio-io",
+ "transit-clap-host",
+ "transit-dsp",
+ "transit-engine",
+ "transit-midi",
+ "transit-mix",
+ "transit-model",
+ "transit-playback",
+ "transit-time",
+ "transit-video",
+ "transit-vst3-host",
 ]
 
 [[package]]
@@ -4548,18 +4500,66 @@ dependencies = [
  "resvg",
  "serde",
  "serde_json",
- "soundcraft-clap-host",
- "soundcraft-dsp",
- "soundcraft-engine",
- "soundcraft-midi",
- "soundcraft-mix",
- "soundcraft-model",
- "soundcraft-playback",
- "soundcraft-time",
- "soundcraft-vst3-host",
  "transit-audio-backend",
+ "transit-clap-host",
+ "transit-dsp",
+ "transit-engine",
+ "transit-midi",
  "transit-midi-io",
+ "transit-mix",
+ "transit-model",
+ "transit-playback",
  "transit-plugin-host",
+ "transit-time",
+ "transit-vst3-host",
+]
+
+[[package]]
+name = "transit-video"
+version = "0.3.2"
+dependencies = [
+ "image",
+ "proptest",
+ "serde",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "transit-vst3-host"
+version = "0.3.2"
+dependencies = [
+ "libloading 0.8.9",
+ "log",
+ "objc2 0.6.5",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "transit-dsp",
+ "transit-rt",
+ "transit-vst3-host",
+ "vst3",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "transit-web"
+version = "0.3.2"
+dependencies = [
+ "eframe",
+ "egui",
+ "js-sys",
+ "log",
+ "rfd",
+ "serde_json",
+ "transit-engine",
+ "transit-model",
+ "transit-playback",
+ "transit-ui-egui",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

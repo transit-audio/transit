@@ -6,9 +6,9 @@ use super::super::{
 use super::*;
 use crate::player::Control;
 use crate::record::start;
-use soundcraft_mix::{EngineEpoch, Message, NoteId, SlotBinding, Source};
-use soundcraft_model::{ChannelFormat, Insert, Session, TrackKind};
 use std::sync::{Arc, atomic::Ordering};
+use transit_mix::{EngineEpoch, Message, NoteId, SlotBinding, Source};
+use transit_model::{ChannelFormat, Insert, Session, TrackKind};
 use transit_rt::testing::measure;
 
 struct Rig {
@@ -111,7 +111,7 @@ fn clock_expiry_keeps_releases_working_and_recovery_restores_fitted_placement() 
     assert_eq!(tap.len(), 2);
     assert_eq!(tap[1].due, Some(RenderFrame(39)));
     assert_eq!(tap[1].arrival.sequence, 1);
-    assert_eq!(tap[1].outcome, soundcraft_mix::EventOutcome::Queued);
+    assert_eq!(tap[1].outcome, transit_mix::EventOutcome::Queued);
     assert_eq!(rig.lane.reclaim().unwrap().handler_result, Some(ActionResult::MidiBufferedApproximate));
     assert!(rig.registry.admits(rig.token));
     rig.audio.transport.clock_now = now;
@@ -199,7 +199,7 @@ fn real_audio_path_preserves_original_arrival_and_partition_independent_due_fram
             assert_eq!(tap[0].due, Some(RenderFrame((137 * 48_000 + u64::from(device) / 2) / u64::from(device))));
             assert_eq!(tap[0].arrival, Arrival { host_ns: packet.raw.host_arrival_ns, sequence: 0 });
             assert_eq!(tap[0].source, packet.source);
-            assert_eq!(tap[0].outcome, soundcraft_mix::EventOutcome::Queued);
+            assert_eq!(tap[0].outcome, transit_mix::EventOutcome::Queued);
         }
     }
 }
@@ -264,7 +264,7 @@ fn deferred_capacity_reserves_releases_and_unknown_releases_do_not_revoke_other_
     rig.send(10, 0, true);
     rig.render(64);
     assert!(rig.registry.admits(rig.token));
-    assert_eq!(rig.audio.plans.engine().event_tap()[0].outcome, soundcraft_mix::EventOutcome::Unmatched);
+    assert_eq!(rig.audio.plans.engine().event_tap()[0].outcome, transit_mix::EventOutcome::Unmatched);
 }
 
 fn recording(rig: &mut Rig) {

@@ -91,7 +91,7 @@ mod tests {
     fn write_list_read_and_delete_in_a_temp_folder() {
         let root = std::env::temp_dir().join(format!("transit-presets-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
-        let state = soundcraft_vst3_host::preset::join_state(b"comp", b"ctrl").unwrap();
+        let state = transit_vst3_host::preset::join_state(b"comp", b"ctrl").unwrap();
         for name in ["b kit", "A Kit"] {
             write(&path(&root, VST3, name).unwrap(), VST3, &state).unwrap();
         }

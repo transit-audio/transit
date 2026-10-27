@@ -1,14 +1,14 @@
 //! SoundCraft's VST3 plugin host.
 //!
 //! Scans the standard VST3 folders (plus `VST3_PATH`), loads `.vst3` bundles in-process and
-//! exposes each "Audio Module Class" as a [`soundcraft_dsp::Plugin`], so the mix engine treats
+//! exposes each "Audio Module Class" as a [`transit_dsp::Plugin`], so the mix engine treats
 //! third-party plugins exactly like the built-in ones. Plugin ids are `vst3:<class id hex>` (32
 //! upper-case hex digits of the component's class id); parameter ids are VST3 `ParamID`s as
 //! decimal strings, with titles, units and plain ranges from the edit controller in
 //! [`PluginInfo::params`]. Values are plain (display) values; the host converts to and from the
 //! VST3 normalized 0..1 values. Stepped parameters become toggles or choices.
 //!
-//! Like `soundcraft-clap-host`, this is an isolated `unsafe` crate (craftrules never-crash):
+//! Like `transit-clap-host`, this is an isolated `unsafe` crate (craftrules never-crash):
 //! `unsafe` is denied crate-wide and allowed only in the private `ffi` module. The public API is
 //! safe, returns `Result`/`Option` and never panics. Limits of in-process hosting: a plugin that
 //! itself crashes (segfault) takes the process down with it; we cannot sandbox native code.
@@ -62,8 +62,8 @@ mod scan_cache;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::Vst3Plugin;
 
-use soundcraft_dsp::{Category, Plugin, PluginInfo};
 use std::path::{Path, PathBuf};
+use transit_dsp::{Category, Plugin, PluginInfo};
 
 /// Prefix of every hosted-VST3 plugin id.
 pub const ID_PREFIX: &str = "vst3:";
@@ -379,7 +379,7 @@ pub fn load_bundle(path: &Path) -> Result<Vec<Vst3Descriptor>, Vst3Error> {
 }
 
 /// Creates a plugin by `vst3:<class id>`, prepared for 48 kHz stereo with 1024-frame blocks (like
-/// `soundcraft_dsp::create`), with the reason when it fails.
+/// `transit_dsp::create`), with the reason when it fails.
 pub fn instantiate(id: &str) -> Result<Box<dyn Plugin>, Vst3Error> {
     api::instantiate(id)
 }

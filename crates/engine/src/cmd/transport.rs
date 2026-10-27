@@ -55,8 +55,8 @@ pub fn specs() -> Vec<CommandSpec> {
                 let edit = &e.session().edit;
                 let range = st
                     .zip(en)
-                    .map(|(a, b)| soundcraft_time::Range::new(a.max(0), b.max(0)))
-                    .map(|r| if r.is_empty() { soundcraft_time::Range::default() } else { r });
+                    .map(|(a, b)| transit_time::Range::new(a.max(0), b.max(0)))
+                    .map(|r| if r.is_empty() { transit_time::Range::default() } else { r });
                 // Touch the document only when something changes, so a no-op leaves no undo step.
                 if range.is_some_and(|r| r != edit.loop_range) || enabled.is_some_and(|v| v != edit.loop_playback) {
                     let ed = &mut e.session_mut().edit;
@@ -100,7 +100,7 @@ fn locate(e: &mut Engine, at: i64) -> Result<Value> {
     let s = e.session_mut();
     s.edit.playhead = at;
     if s.edit.selection.is_empty() || !s.edit.selection.contains(at) {
-        s.edit.selection = soundcraft_time::Range::point(at);
+        s.edit.selection = transit_time::Range::point(at);
     }
     e.transport_requests.push(TransportRequest::Locate(at));
     Ok(json!({"at": at}))
@@ -117,7 +117,7 @@ mod tests {
 
     #[test]
     fn cycle_on_makes_a_region_in_the_toggles_undo_step_and_off_keeps_it() {
-        use soundcraft_time::Range;
+        use transit_time::Range;
         let mut e = Engine::default();
         let (steps, tempo, sr) = (undo_len(&mut e), e.session().tempo.clone(), e.session().sample_rate);
         let bar = |n: i64| tempo.tick_to_samples(tempo.bar_start_tick(n), sr);
@@ -153,7 +153,7 @@ mod tests {
 
     #[test]
     fn cycle_on_with_clips_selected_takes_their_span_even_when_a_region_exists() {
-        use soundcraft_time::Range;
+        use transit_time::Range;
         let mut e = Engine::default();
         two_selected_clips(&mut e);
         e.execute("transport.loop", &json!({"start": 100, "end": 200})).unwrap();
@@ -178,7 +178,7 @@ mod tests {
 
     #[test]
     fn cycle_on_with_a_time_selection_takes_it_even_when_a_region_exists() {
-        use soundcraft_time::Range;
+        use transit_time::Range;
         let mut e = Engine::default();
         e.execute("transport.loop", &json!({"start": 100, "end": 200})).unwrap();
         e.session_mut().edit.selection = Range::new(500, 9000);
@@ -190,7 +190,7 @@ mod tests {
 
     #[test]
     fn cycle_on_with_nothing_selected_reuses_the_region_or_makes_four_bars() {
-        use soundcraft_time::Range;
+        use transit_time::Range;
         let mut e = Engine::default();
         let (tempo, sr) = (e.session().tempo.clone(), e.session().sample_rate);
         let bar = |n: i64| tempo.tick_to_samples(tempo.bar_start_tick(n), sr);
@@ -208,7 +208,7 @@ mod tests {
 
     #[test]
     fn cycle_to_selection_sets_the_region_without_toggling_cycle() {
-        use soundcraft_time::Range;
+        use transit_time::Range;
         let mut e = Engine::default();
         // Nothing selected: an error, no change, no undo step.
         let steps = undo_len(&mut e);
@@ -239,7 +239,7 @@ mod tests {
         let steps = undo_len(&mut e);
         let v = e.execute("transport.loop", &json!({"start": 4800, "end": 1200, "enabled": true})).unwrap();
         assert_eq!((v["start"].as_i64(), v["end"].as_i64(), v["enabled"].as_bool()), (Some(1200), Some(4800), Some(true)), "ordered");
-        assert_eq!(e.session().edit.loop_range, soundcraft_time::Range::new(1200, 4800));
+        assert_eq!(e.session().edit.loop_range, transit_time::Range::new(1200, 4800));
         assert!(e.session().edit.loop_playback);
         assert_eq!(undo_len(&mut e), steps + 1);
         // Setting it again is no change, so no undo step.
@@ -247,14 +247,14 @@ mod tests {
         assert_eq!(undo_len(&mut e), steps + 1);
         // Enabled alone leaves the region.
         e.execute("transport.loop", &json!({"enabled": false})).unwrap();
-        assert_eq!(e.session().edit.loop_range, soundcraft_time::Range::new(1200, 4800));
+        assert_eq!(e.session().edit.loop_range, transit_time::Range::new(1200, 4800));
         assert!(!e.session().edit.loop_playback);
         // An empty pair clears; a lone bound is refused; negatives clamp to 0.
         e.execute("transport.loop", &json!({"start": 7, "end": 7})).unwrap();
         assert!(e.session().edit.loop_range.is_empty());
         assert!(e.execute("transport.loop", &json!({"start": 7})).is_err());
         e.execute("transport.loop", &json!({"start": -50, "end": 100})).unwrap();
-        assert_eq!(e.session().edit.loop_range, soundcraft_time::Range::new(0, 100));
+        assert_eq!(e.session().edit.loop_range, transit_time::Range::new(0, 100));
         // Undo restores the previous region.
         e.execute("edit.undo", &json!({})).unwrap();
         assert!(e.session().edit.loop_range.is_empty());

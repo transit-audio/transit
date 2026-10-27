@@ -3,8 +3,8 @@
 //! time and order of each one as the plug-in does.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::Plugin;
-use soundcraft_dsp::event::{Message, NoteId, PluginEvent};
+use transit_dsp::Plugin;
+use transit_dsp::event::{Message, NoteId, PluginEvent};
 
 mod common;
 use common::events_fixture_dir;
@@ -13,7 +13,7 @@ const EVENTS: &str = "clap:org.soundcraft.test.events";
 
 fn plugin(block: usize) -> Box<dyn Plugin> {
     events_fixture_dir();
-    let mut p = soundcraft_clap_host::create(EVENTS).unwrap();
+    let mut p = transit_clap_host::create(EVENTS).unwrap();
     p.prepare(48_000.0, block, 2);
     p
 }
@@ -102,7 +102,7 @@ fn a_reset_keeps_the_pedal_up_and_the_note_offs() {
 
 fn midi_plugin(block: usize) -> Box<dyn Plugin> {
     events_fixture_dir();
-    let mut p = soundcraft_clap_host::create("clap:org.soundcraft.test.events-midi").unwrap();
+    let mut p = transit_clap_host::create("clap:org.soundcraft.test.events-midi").unwrap();
     p.prepare(48_000.0, block, 2);
     p
 }

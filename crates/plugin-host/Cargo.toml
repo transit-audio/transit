@@ -8,9 +8,9 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-soundcraft-dsp.workspace = true
-soundcraft-clap-host.workspace = true
-soundcraft-vst3-host.workspace = true
+transit-dsp.workspace = true
+transit-clap-host.workspace = true
+transit-vst3-host.workspace = true
 transit-rt.workspace = true
 log.workspace = true
 
@@ -22,8 +22,8 @@ testing = []
 transit-rt = { workspace = true, features = ["testing"] }
 transit-plugin-host = { path = ".", features = ["testing"] }
 # The fixture plug-ins' scan stays in their folders (tests/presets.rs).
-soundcraft-clap-host = { workspace = true, features = ["test-hooks"] }
-soundcraft-vst3-host = { workspace = true, features = ["test-hooks"] }
+transit-clap-host = { workspace = true, features = ["test-hooks"] }
+transit-vst3-host = { workspace = true, features = ["test-hooks"] }
 
 [lints]
 workspace = true

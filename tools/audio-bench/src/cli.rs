@@ -197,7 +197,7 @@ pub fn parse(args: impl IntoIterator<Item = String>) -> Result<Command, String> 
         }
     }
     if list {
-        return Ok(Command::List(if jack { Some(soundcraft_playback::devices::JACK_SYSTEM.into()) } else { system }));
+        return Ok(Command::List(if jack { Some(transit_playback::devices::JACK_SYSTEM.into()) } else { system }));
     }
     if jack {
         return Err("--backend jack only lists devices so far (--list-devices); measuring through it comes with ADR 0021 slice 3".into());

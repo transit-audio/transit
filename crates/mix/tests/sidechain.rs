@@ -3,12 +3,12 @@
 //! source whatever the track order, serially and in parallel, with the same output.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_mix::{
+use std::sync::Arc;
+use transit_audio_io::AudioBuffer;
+use transit_mix::{
     Adoption, DeviceGeneration, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, create_instance,
 };
-use soundcraft_model::{Bus, BusId, ChannelFormat, Clip, Insert, KeyFrom, KeySource, Route, Session, SourceAudio, SourceId, Tap, TrackId, TrackKind};
-use std::sync::Arc;
+use transit_model::{Bus, BusId, ChannelFormat, Clip, Insert, KeyFrom, KeySource, Route, Session, SourceAudio, SourceId, Tap, TrackId, TrackKind};
 
 const SR: u32 = 48_000;
 const BLOCK: usize = 256;
@@ -54,7 +54,7 @@ fn bass_signal() -> Vec<f32> {
 /// A compressor that only a loud signal moves: threshold -20 dB, ratio 20, fast attack.
 fn ducker(key: Option<KeySource>) -> Insert {
     let mut c = Insert::new("compressor");
-    for p in soundcraft_dsp::plugin_info("compressor").unwrap().params {
+    for p in transit_dsp::plugin_info("compressor").unwrap().params {
         c.params.insert(p.id.to_string(), p.default);
     }
     for (k, v) in [("threshold", -20.0), ("ratio", 20.0), ("attack", 0.5), ("release", 10.0), ("knee", 0.0)] {
@@ -86,7 +86,7 @@ fn render(s: &Session, serial: bool) -> Vec<f32> {
     let run = move || {
         let mut mix = MixEngine::realtime(target());
         let mut compiler = PlanCompiler::new(target(), PlanLimits::default());
-        let mut make = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| instance(spec);
+        let mut make = |spec: &InstanceSpec, _: transit_mix::SlotGen| instance(spec);
         let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut make).unwrap();
         assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
         compiler.reclaim(env);
@@ -103,7 +103,7 @@ fn render(s: &Session, serial: bool) -> Vec<f32> {
     if serial {
         std::thread::spawn(move || {
             MixEngine::force_serial(true);
-            soundcraft_mix::mark_audio_thread();
+            transit_mix::mark_audio_thread();
             run()
         })
         .join()
@@ -238,9 +238,9 @@ struct Delay {
     w: usize,
 }
 
-impl soundcraft_dsp::Plugin for Delay {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
-        soundcraft_dsp::plugin_info("gain").unwrap()
+impl transit_dsp::Plugin for Delay {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
+        transit_dsp::plugin_info("gain").unwrap()
     }
     fn prepare(&mut self, _sr: f32, _mb: usize, ch: usize) {
         self.ring = vec![vec![0.0; self.n.max(1)]; ch.max(2)];
@@ -287,7 +287,7 @@ fn make(s: &Session, spec: &InstanceSpec) -> Option<NewInstance> {
     match delay {
         Some(n) => {
             let mut d = Delay { n, ring: Vec::new(), w: 0 };
-            soundcraft_dsp::Plugin::prepare(&mut d, SR as f32, BLOCK, spec.ch);
+            transit_dsp::Plugin::prepare(&mut d, SR as f32, BLOCK, spec.ch);
             Some(NewInstance { plugin: Box::new(d), refused_state: false })
         }
         None => instance(spec),
@@ -299,10 +299,10 @@ fn render_latent(s: &Session) -> (Vec<f32>, usize) {
     let s = s.clone();
     std::thread::spawn(move || {
         MixEngine::force_serial(true);
-        soundcraft_mix::mark_audio_thread();
+        transit_mix::mark_audio_thread();
         let mut mix = MixEngine::realtime(target());
         let mut compiler = PlanCompiler::new(target(), PlanLimits::default());
-        let mut maker = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| make(&s, spec);
+        let mut maker = |spec: &InstanceSpec, _: transit_mix::SlotGen| make(&s, spec);
         let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut maker).unwrap();
         assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
         compiler.reclaim(env);
@@ -427,22 +427,22 @@ fn a_key_through_a_latent_bus_chain_is_aligned() {
 
 /// The main mix (left channel) and the latency on a fake duplex device that plays the sinks back on
 /// its input `delay` frames later, with `io`'s measured round trips.
-fn render_duplex(s: &Session, io: &soundcraft_model::IoMap, delay: usize) -> (Vec<f32>, usize) {
+fn render_duplex(s: &Session, io: &transit_model::IoMap, delay: usize) -> (Vec<f32>, usize) {
     let (s, io) = (s.clone(), io.clone());
     std::thread::spawn(move || {
         MixEngine::force_serial(true);
-        soundcraft_mix::mark_audio_thread();
+        transit_mix::mark_audio_thread();
         let t = RenderTarget { device: DeviceGeneration(1), sample_rate: SR, max_block: BLOCK as u32, out_channels: 4, in_channels: 4 };
         let mut mix = MixEngine::realtime(t);
         let mut compiler = PlanCompiler::new(t, PlanLimits::default());
         compiler.set_io(Arc::new(io.clone()));
-        let mut maker = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| instance(spec);
+        let mut maker = |spec: &InstanceSpec, _: transit_mix::SlotGen| instance(spec);
         let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut maker).unwrap();
         assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
         compiler.reclaim(env);
-        let sinks = soundcraft_mix::plan_sinks(&s, &io, 4);
+        let sinks = transit_mix::plan_sinks(&s, &io, 4);
         let dest = sinks.destinations();
-        let main_w = soundcraft_mix::main_channels(&s);
+        let main_w = transit_mix::main_channels(&s);
         let mut out = vec![vec![0.0f32; BLOCK]; main_w + sinks.channels()];
         let mut device: Vec<Vec<f32>> = vec![Vec::new(); 4];
         let (mut all, mut pos) = (Vec::new(), 0usize);
@@ -475,8 +475,8 @@ fn a_key_after_a_hardware_insert_is_aligned() {
     // then its compressor in slot 1 is keyed by a kick with no latency. The key waits for the bass.
     const D: usize = 700;
     let (send, ret) = ("Out 3-4", "In 3-4");
-    let mut io = soundcraft_model::IoMap::for_device("test", "fake duplex", 4, 4);
-    io.set_hardware_latency(soundcraft_model::HardwareLatency {
+    let mut io = transit_model::IoMap::for_device("test", "fake duplex", 4, 4);
+    io.set_hardware_latency(transit_model::HardwareLatency {
         send: send.into(),
         ret: ret.into(),
         round_trip_frames: D as u32,

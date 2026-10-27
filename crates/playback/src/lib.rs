@@ -49,14 +49,14 @@ pub use player::{EditorOpened, LoadedIn};
 pub use player::{MapHeard, MapSpec};
 pub use transit_plugin_host::{LoadPhase, loading_text, seconds_text};
 
-use soundcraft_mix::{MAX_CHANNELS, StripMeter, itu_stereo_fold};
-use soundcraft_model::{Session, TrackId};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU32, Ordering};
+use transit_mix::{MAX_CHANNELS, StripMeter, itu_stereo_fold};
+use transit_model::{Session, TrackId};
 
 /// The realtime audio thread marker lives in the mix engine, which carries it into the strips it
 /// renders on worker threads; the cpal callbacks here set it.
-pub use soundcraft_mix::{mark_audio_thread, on_audio_thread};
+pub use transit_mix::{mark_audio_thread, on_audio_thread};
 
 /// Meter values for the UI.
 #[derive(Debug, Clone, Default)]
@@ -198,8 +198,8 @@ fn stalled(seen: &mut Option<(u64, std::time::Instant)>, beats: u64, playing: bo
 /// Whether any track of `s` carries a hosted (third-party) plug-in. Allocation-free: runs on the audio thread.
 fn session_has_hosted(s: &Session) -> bool {
     s.tracks.iter().any(|t| {
-        t.instrument.as_ref().is_some_and(|i| soundcraft_mix::is_third_party(&i.plugin))
-            || t.mixer.inserts.iter().flatten().any(|i| soundcraft_mix::is_third_party(&i.plugin))
+        t.instrument.as_ref().is_some_and(|i| transit_mix::is_third_party(&i.plugin))
+            || t.mixer.inserts.iter().flatten().any(|i| transit_mix::is_third_party(&i.plugin))
     })
 }
 

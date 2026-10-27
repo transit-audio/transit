@@ -7,11 +7,11 @@ use crate::widgets::{groove, level_pos, meter_pos, raised_key, shade};
 use crate::{Gesture, SoundApp, toolbar};
 use egui::{Align2, Color32, CornerRadius, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
-use soundcraft_engine::edit as ops;
-use soundcraft_model::{AutoParam, Clip, ClipContent, ClipId, EditMode, Session, Tool, Track, TrackHeight, TrackId, TrackKind};
-use soundcraft_time::{GridValue, NoteValue, Range, Samples, TimeFormat, format_position};
 use std::collections::HashSet;
 use std::sync::Arc;
+use transit_engine::edit as ops;
+use transit_model::{AutoParam, Clip, ClipContent, ClipId, EditMode, Session, Tool, Track, TrackHeight, TrackId, TrackKind};
+use transit_time::{GridValue, NoteValue, Range, Samples, TimeFormat, format_position};
 
 pub const HEADER_W: f32 = 136.0;
 pub const COLUMN_W: f32 = 112.0;
@@ -93,7 +93,7 @@ pub fn x_of(s: &Session, tl: Rect, at: Samples) -> f32 {
 }
 
 pub fn sample_at(s: &Session, tl: Rect, x: f32) -> Samples {
-    s.edit.zoom.scroll + soundcraft_time::to_samples(f64::from(x - tl.min.x) * s.edit.zoom.samples_per_px)
+    s.edit.zoom.scroll + transit_time::to_samples(f64::from(x - tl.min.x) * s.edit.zoom.samples_per_px)
 }
 
 pub const LANE_H: f32 = 46.0;
@@ -185,14 +185,14 @@ fn status_bar(app: &mut SoundApp, ui: &mut Ui) {
         s.name,
         s.sample_rate.hz(),
         match s.bit_depth {
-            soundcraft_model::BitDepthSetting::Int16 => "16-bit",
-            soundcraft_model::BitDepthSetting::Int24 => "24-bit",
-            soundcraft_model::BitDepthSetting::Float32 => "32-bit float",
+            transit_model::BitDepthSetting::Int16 => "16-bit",
+            transit_model::BitDepthSetting::Int24 => "24-bit",
+            transit_model::BitDepthSetting::Float32 => "32-bit float",
         },
         s.tracks.len(),
         app.ui.status
     );
-    soundcraft_model::truncate_chars(&mut left, 4 * soundcraft_model::MAX_NAME_CHARS);
+    transit_model::truncate_chars(&mut left, 4 * transit_model::MAX_NAME_CHARS);
     ui.painter().text(pos2(r.min.x + 10.0, r.center().y), Align2::LEFT_CENTER, left, regular(11.0), t.text_dim);
     let undo = app.engine.undo_label().map_or(String::new(), |l| format!("Undo {l}"));
     ui.painter().text(
@@ -359,11 +359,11 @@ fn scroll_and_zoom(app: &mut SoundApp, ui: &Ui, area: Rect, tl: Rect) {
 
 fn pan(app: &mut SoundApp, px: f64) {
     let z = app.engine.session().edit.zoom;
-    let want = (z.scroll as f64 + app.edit_layout.scroll_carry + px * z.samples_per_px).clamp(0.0, soundcraft_engine::cmd::MAX_POSITION as f64);
+    let want = (z.scroll as f64 + app.edit_layout.scroll_carry + px * z.samples_per_px).clamp(0.0, transit_engine::cmd::MAX_POSITION as f64);
     if want.is_nan() {
         return;
     }
-    let to = soundcraft_time::to_samples(want);
+    let to = transit_time::to_samples(want);
     app.edit_layout.scroll_carry = want - to as f64;
     if to != z.scroll {
         let _ = app.engine.execute("view.scroll", &json!({"to": to}));
@@ -572,11 +572,8 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
             }
             "timecode2" => {
                 // A second timecode ruler at 25 fps when the session runs at another rate (or 30 otherwise).
-                let alt = if s.frame_rate == soundcraft_time::FrameRate::Fps25 {
-                    soundcraft_time::FrameRate::Fps30
-                } else {
-                    soundcraft_time::FrameRate::Fps25
-                };
+                let alt =
+                    if s.frame_rate == transit_time::FrameRate::Fps25 { transit_time::FrameRate::Fps30 } else { transit_time::FrameRate::Fps25 };
                 timebase_ruler(ui, &painter, &s, tl, row, view, TimeFormat::Timecode, alt, i + 1 == rulers.len());
             }
             "markers" | "markers2" | "markers3" | "markers4" | "markers5" | "chords" => {
@@ -591,7 +588,7 @@ fn draw_rulers(app: &mut SoundApp, ui: &mut Ui, area: Rect, tl: Rect, rulers: &[
                 for m in s.markers.iter().filter(|m| m.ruler == lane || (lane == 1 && m.ruler == 0)) {
                     let x = x_of(&s, tl, m.start);
                     let col = m.color.map_or(Color32::from_rgb(232, 200, 64), rgb);
-                    if m.kind == soundcraft_model::MarkerKind::Selection {
+                    if m.kind == transit_model::MarkerKind::Selection {
                         let x1 = x_of(&s, tl, m.end);
                         painter.rect_filled(Rect::from_min_max(pos2(x, row.min.y + 3.0), pos2(x1, row.max.y - 3.0)), 2.0, col.gamma_multiply(0.5));
                     }
@@ -662,7 +659,7 @@ fn timebase_ruler(
     row: Rect,
     view: Range,
     f: TimeFormat,
-    rate: soundcraft_time::FrameRate,
+    rate: transit_time::FrameRate,
     bottom: bool,
 ) {
     let t = Tokens::current();
@@ -681,7 +678,7 @@ fn timebase_ruler(
             let mut bar = first - (first - 1).rem_euclid(every);
             let mut guard = 0;
             loop {
-                let at = s.tempo.samples_at_bar_beat(soundcraft_time::BarBeat { bar, beat: 1, tick: 0 }, sr);
+                let at = s.tempo.samples_at_bar_beat(transit_time::BarBeat { bar, beat: 1, tick: 0 }, sr);
                 if at > view.end || guard > 400 {
                     break;
                 }
@@ -689,7 +686,7 @@ fn timebase_ruler(
                 if bar_px * every as f64 >= 240.0 {
                     let m = s.tempo.meter_at_tick(s.tempo.samples_to_ticks(at, sr));
                     for beat in 2..=i64::from(m.numerator) {
-                        marks.push((s.tempo.samples_at_bar_beat(soundcraft_time::BarBeat { bar, beat, tick: 0 }, sr), false));
+                        marks.push((s.tempo.samples_at_bar_beat(transit_time::BarBeat { bar, beat, tick: 0 }, sr), false));
                     }
                 }
                 bar += every;
@@ -1101,15 +1098,15 @@ fn track_header(app: &mut SoundApp, ui: &mut Ui, track: &Track, head: Rect, sele
         }
         let mode = m.automation_mode;
         let col = match mode {
-            soundcraft_model::AutomationMode::Read => t.auto_read,
-            soundcraft_model::AutomationMode::Write => t.auto_write,
-            soundcraft_model::AutomationMode::Touch | soundcraft_model::AutomationMode::TouchLatch => t.auto_touch,
-            soundcraft_model::AutomationMode::Latch => t.auto_latch,
+            transit_model::AutomationMode::Read => t.auto_read,
+            transit_model::AutomationMode::Write => t.auto_write,
+            transit_model::AutomationMode::Touch | transit_model::AutomationMode::TouchLatch => t.auto_touch,
+            transit_model::AutomationMode::Latch => t.auto_latch,
             _ => t.text_dim,
         };
         let aresp = header_selector(ui, at(63.0, 57.0, 59.0, 17.0), ui.id().with(("auto_mode", id.0)), mode.label(), col, true);
         egui::Popup::menu(&aresp).show(|ui| {
-            for m in soundcraft_model::AutomationMode::ALL {
+            for m in transit_model::AutomationMode::ALL {
                 if ui.selectable_label(m == mode, m.label()).clicked() {
                     let _ = app.run("mix.automation_mode", json!({"track": id.0, "mode": m.label()}));
                 }
@@ -1397,7 +1394,7 @@ fn view_menu(app: &mut SoundApp, ui: &mut Ui, track: &Track) {
     }
     for (slot, ins) in track.mixer.inserts.iter().enumerate() {
         let Some(ins) = ins else { continue };
-        let Some(info) = soundcraft_dsp::plugin_info(&ins.plugin) else { continue };
+        let Some(info) = transit_dsp::plugin_info(&ins.plugin) else { continue };
         ui.menu_button(info.name, |ui| {
             for p in info.params {
                 let v = format!("plugin:{}:{}", (b'a' + slot as u8) as char, p.id);
@@ -1470,7 +1467,7 @@ pub(crate) fn track_context_menu(app: &mut SoundApp, ui: &mut Ui, id: TrackId) {
         }
     });
     ui.menu_button("Track Color", |ui| {
-        for (i, c) in soundcraft_model::TRACK_COLORS.iter().enumerate() {
+        for (i, c) in transit_model::TRACK_COLORS.iter().enumerate() {
             let (r, resp) = ui.allocate_exact_size(vec2(120.0, 14.0), Sense::click());
             ui.painter().rect_filled(r, 2.0, rgb(*c));
             if resp.clicked() {
@@ -1510,7 +1507,7 @@ fn clip_name_height(s: &Session, lane: Rect) -> f32 {
     if lane.height() >= 40.0 && s.edit.flag("view.clip.name") { 13.0 } else { 0.0 }
 }
 
-fn fade_curve_points(fade: soundcraft_model::Fade, fade_in: bool, a: f32, b: f32, body: Rect, pixels_per_point: f32) -> Vec<Pos2> {
+fn fade_curve_points(fade: transit_model::Fade, fade_in: bool, a: f32, b: f32, body: Rect, pixels_per_point: f32) -> Vec<Pos2> {
     let scale = if pixels_per_point.is_finite() { pixels_per_point.clamp(0.5, 4.0) } else { 1.0 };
     let extent = (b - a).abs().max(body.height().abs()) * scale;
     let extent = if extent.is_finite() { extent.clamp(64.0, 4096.0) } else { 64.0 };
@@ -1525,14 +1522,14 @@ fn fade_curve_points(fade: soundcraft_model::Fade, fade_in: bool, a: f32, b: f32
         .collect()
 }
 
-fn fade_control_position(fade: soundcraft_model::Fade, a: f32, b: f32, body: Rect) -> Pos2 {
+fn fade_control_position(fade: transit_model::Fade, a: f32, b: f32, body: Rect) -> Pos2 {
     let padding = body.height().clamp(0.0, 8.0) * 0.5;
     let y = body.max.y - body.height() * fade.gain(0.5);
     // Keep the whole handle inside the body when a bend approaches an edge.
     pos2((a + b) * 0.5, y.max(body.min.y + padding).min(body.max.y - padding))
 }
 
-fn clip_preview_fades(clip: &Clip, gesture: Option<&Gesture>) -> (soundcraft_model::Fade, soundcraft_model::Fade) {
+fn clip_preview_fades(clip: &Clip, gesture: Option<&Gesture>) -> (transit_model::Fade, transit_model::Fade) {
     let (mut fade_in, mut fade_out) = (clip.fade_in, clip.fade_out);
     match gesture {
         Some(Gesture::Fade { clip: id, fade_in: side, to, .. }) if *id == clip.id => {
@@ -1560,11 +1557,11 @@ fn clip_preview_fades(clip: &Clip, gesture: Option<&Gesture>) -> (soundcraft_mod
 fn draw_live_take(app: &SoundApp, painter: &egui::Painter, s: &Session, track: &Track, tl: Rect, lane: Rect) {
     let Some(rec) = &app.recorder else { return };
     let Some(take) = rec.live_take(track.id) else { return };
-    let block_len = soundcraft_playback::record::LIVE_BLOCK as f64 * s.sample_rate.as_f64() / f64::from(rec.sample_rate.max(1));
-    let len = soundcraft_time::to_samples(take.first().map_or(0, Vec::len) as f64 * block_len);
+    let block_len = transit_playback::record::LIVE_BLOCK as f64 * s.sample_rate.as_f64() / f64::from(rec.sample_rate.max(1));
+    let len = transit_time::to_samples(take.first().map_or(0, Vec::len) as f64 * block_len);
     let sel = s.edit.cycle_range();
     let (start, pass) = if s.edit.loop_playback && !sel.is_empty() { (sel.start, Some(sel.len())) } else { (app.record_start, None) };
-    let Some((origin, span)) = soundcraft_engine::io::live_span(start, pass, app.punch, len) else { return };
+    let Some((origin, span)) = transit_engine::io::live_span(start, pass, app.punch, len) else { return };
     let r = Rect::from_min_max(pos2(x_of(s, tl, span.start), lane.min.y + 1.0), pos2(x_of(s, tl, span.end), lane.max.y - 1.0));
     let t = Tokens::current();
     let (body, _, wave) = clip_colors([t.rec.r(), t.rec.g(), t.rec.b()], false);
@@ -1850,7 +1847,7 @@ fn draw_automation(painter: &egui::Painter, s: &Session, track: &Track, p: &Auto
 fn plugin_range(track: &Track, p: &AutoParam) -> (f32, f32) {
     if let AutoParam::Plugin { slot, param } = p
         && let Some(Some(ins)) = track.mixer.inserts.get(usize::from(*slot))
-        && let Some(info) = soundcraft_dsp::plugin_info(&ins.plugin)
+        && let Some(info) = transit_dsp::plugin_info(&ins.plugin)
         && let Some(pi) = info.param(param)
     {
         return (pi.min, pi.max);
@@ -1962,14 +1959,14 @@ fn lane_interaction(app: &mut SoundApp, ui: &mut Ui, track: &Track, lane: Rect, 
     {
         let s = app.engine.session();
         let at = drag_snap(s, sample_at(s, tl, p.x).max(0), ui.input(|i| i.modifiers.command));
-        let spot = Spot::source(s, soundcraft_model::SourceId(src.0), track.id, at);
+        let spot = Spot::source(s, transit_model::SourceId(src.0), track.id, at);
         spot_or_run(app, spot);
     }
     if resp.dnd_hover_payload::<crate::DragSource>().is_some() {
         ui.painter().rect_stroke(lane, 0.0, Stroke::new(2.0, Tokens::current().accent), StrokeKind::Inside);
     }
     // Audio files dropped from outside onto an instrument track load its sampler.
-    if track.kind == soundcraft_model::TrackKind::Instrument {
+    if track.kind == transit_model::TrackKind::Instrument {
         crate::sampler_window::drop_target(app, ui.ctx(), lane, track.id);
     }
     let s = app.engine.session_arc();
@@ -2232,17 +2229,17 @@ fn fade_drag_range(clip: &Clip, fade_in: bool, to: Samples) -> Option<Range> {
     })
 }
 
-fn fade_drag_preview(clip: &Clip, fade_in: bool, to: Samples) -> Option<soundcraft_model::Fade> {
+fn fade_drag_preview(clip: &Clip, fade_in: bool, to: Samples) -> Option<transit_model::Fade> {
     let range = fade_drag_range(clip, fade_in, to)?;
     let original = if fade_in { clip.fade_in } else { clip.fade_out };
-    Some(soundcraft_model::Fade {
+    Some(transit_model::Fade {
         len: range.end.saturating_sub(range.start),
-        shape: if original.len > 0 { original.shape } else { soundcraft_model::FadeShape::SCurve },
+        shape: if original.len > 0 { original.shape } else { transit_model::FadeShape::SCurve },
         curvature: if original.len > 0 { original.curvature } else { 0.0 },
     })
 }
 
-fn fade_curve_drag_value(fade: soundcraft_model::Fade, anchor: (f32, f32), height: f32, y: f32) -> f32 {
+fn fade_curve_drag_value(fade: transit_model::Fade, anchor: (f32, f32), height: f32, y: f32) -> f32 {
     fade.curvature_for_midpoint_gain(anchor.1 + (anchor.0 - y) / height.max(1.0))
 }
 
@@ -2751,12 +2748,12 @@ mod tests {
     }
 
     fn harness(n: usize) -> Harness<'static, SoundApp> {
-        let mut engine = soundcraft_engine::Engine::default();
+        let mut engine = transit_engine::Engine::default();
         engine.execute("track.new", &json!({"count": n})).unwrap();
         harness_with(engine)
     }
 
-    fn harness_with(engine: soundcraft_engine::Engine) -> Harness<'static, SoundApp> {
+    fn harness_with(engine: transit_engine::Engine) -> Harness<'static, SoundApp> {
         let app = SoundApp::new(engine, None, crate::Services::default());
         let builder = Harness::builder().with_size(vec2(1400.0, 900.0)).with_step_dt(1.0 / 60.0);
         let builder = if std::env::var_os("SOUNDCRAFT_FADE_SHOTS").is_some() { builder.wgpu() } else { builder };
@@ -2775,7 +2772,7 @@ mod tests {
 
     #[test]
     fn a_file_time_stamp_at_the_end_of_the_range_draws() {
-        let mut engine = soundcraft_engine::demo::demo_engine();
+        let mut engine = transit_engine::demo::demo_engine();
         let s = engine.session_mut();
         s.edit.flags.insert("view.clip.time.original".into());
         s.sources.iter_mut().for_each(|src| src.time_reference = i64::MAX as u64);
@@ -2783,7 +2780,7 @@ mod tests {
     }
 
     fn smart_demo() -> Harness<'static, SoundApp> {
-        let mut engine = soundcraft_engine::demo::demo_engine();
+        let mut engine = transit_engine::demo::demo_engine();
         engine.execute("edit.tool", &json!({"tool": "smart"})).unwrap();
         engine.execute("edit.mode", &json!({"mode": "slip"})).unwrap();
         harness_with(engine)
@@ -3041,7 +3038,7 @@ mod tests {
 
     #[test]
     fn fade_drag_ranges_handle_empty_short_and_saturated_clips() {
-        let mut c = Clip::audio(ClipId(1), "test", soundcraft_model::SourceId(1), 0, 100, 1);
+        let mut c = Clip::audio(ClipId(1), "test", transit_model::SourceId(1), 0, 100, 1);
         for side in [true, false] {
             for to in [i64::MIN, 100, 101, i64::MAX] {
                 assert_eq!(fade_drag_range(&c, side, to), Some(Range::new(100, 101)));
@@ -3126,13 +3123,13 @@ mod tests {
                             let audio = h.state().engine.session().pool.get(source).unwrap().clone();
                             let left = audio.buffer.channels[0].clone();
                             let right = left.iter().map(|sample| sample * 0.5).collect();
-                            let audio = soundcraft_model::SourceAudio::new(soundcraft_audio_io::AudioBuffer {
+                            let audio = transit_model::SourceAudio::new(transit_audio_io::AudioBuffer {
                                 sample_rate: audio.buffer.sample_rate,
                                 channels: vec![left, right],
                             });
                             let s = h.state_mut().engine.session_mut();
                             s.pool.insert(source, std::sync::Arc::new(audio));
-                            s.track_mut(tid).unwrap().format = soundcraft_model::ChannelFormat::Stereo;
+                            s.track_mut(tid).unwrap().format = transit_model::ChannelFormat::Stereo;
                         }
                         if mode == "power" {
                             h.state_mut().engine.execute("view.waveform_power", &json!({})).unwrap();
@@ -3143,12 +3140,12 @@ mod tests {
                         let c = h.state_mut().engine.session_mut().find_clip_mut(clip.id).unwrap();
                         c.gain_db = -3.0;
                         c.gain_env = vec![(0, -3.0), (c.length, 3.0)];
-                        let target = soundcraft_model::Fade {
+                        let target = transit_model::Fade {
                             len: if bend { c.length * 2 / 3 } else { c.length / 4 },
-                            shape: soundcraft_model::FadeShape::SCurve,
+                            shape: transit_model::FadeShape::SCurve,
                             curvature: 0.0,
                         };
-                        let other = soundcraft_model::Fade { len: c.length / 8, shape: soundcraft_model::FadeShape::Linear, curvature: 0.2 };
+                        let other = transit_model::Fade { len: c.length / 8, shape: transit_model::FadeShape::Linear, curvature: 0.2 };
                         (c.fade_in, c.fade_out) = if fade_in { (target, other) } else { (other, target) };
                         h.step();
                         let before = h.state().engine.session().clone();
@@ -3269,7 +3266,7 @@ mod tests {
                 let range = fade_drag_range(&clip, fade_in, sample_at(&before, tl, release.x)).unwrap();
                 let mut expected = before.clone();
                 let c = expected.find_clip_mut(clip.id).unwrap();
-                let fade = soundcraft_model::Fade { len: range.end - range.start, shape: soundcraft_model::FadeShape::SCurve, curvature: 0.0 };
+                let fade = transit_model::Fade { len: range.end - range.start, shape: transit_model::FadeShape::SCurve, curvature: 0.0 };
                 if fade_in {
                     c.fade_in = fade;
                 } else {
@@ -3299,8 +3296,8 @@ mod tests {
                 let tl = timeline(&h);
                 let (clip, lane) = clip_on_screen(&h, |xs, xe| xs > tl.min.x + 30.0 && xe < tl.max.x - 100.0 && xe - xs > 100.0);
                 let c = h.state_mut().engine.session_mut().find_clip_mut(clip.id).unwrap();
-                c.fade_in = soundcraft_model::Fade { len: c.length / 8, shape: soundcraft_model::FadeShape::Linear, curvature: 0.0 };
-                c.fade_out = soundcraft_model::Fade { len: c.length / 8, shape: soundcraft_model::FadeShape::EqualPower, curvature: 0.0 };
+                c.fade_in = transit_model::Fade { len: c.length / 8, shape: transit_model::FadeShape::Linear, curvature: 0.0 };
+                c.fade_out = transit_model::Fade { len: c.length / 8, shape: transit_model::FadeShape::EqualPower, curvature: 0.0 };
                 h.step();
                 let s = h.state().engine.session();
                 let (xs, xe) = (x_of(s, tl, clip.start), x_of(s, tl, clip.end()));
@@ -3341,10 +3338,10 @@ mod tests {
         for (width, height) in [(420.0, 180.0), (75.0, 320.0), (10_000.0, 80.0)] {
             let body = Rect::from_min_size(Pos2::ZERO, vec2(width, height));
             for scale in [1.0, 2.0, 4.0] {
-                for shape in soundcraft_model::FadeShape::ALL {
+                for shape in transit_model::FadeShape::ALL {
                     for curvature in [-1.0, 1.0] {
                         for fade_in in [true, false] {
-                            let fade = soundcraft_model::Fade { len: 1000, shape, curvature };
+                            let fade = transit_model::Fade { len: 1000, shape, curvature };
                             let points = fade_curve_points(fade, fade_in, 0.0, width, body, scale);
                             assert!(points.len() > 17 && points.len() <= 4097);
                             assert_eq!((points.len() - 1) % 2, 0);
@@ -3369,7 +3366,7 @@ mod tests {
         }
         let body = Rect::from_min_size(Pos2::ZERO, vec2(1e20, 1e20));
         for scale in [f32::NAN, f32::INFINITY, 1.0] {
-            let points = fade_curve_points(soundcraft_model::Fade::default(), true, 0.0, 1e20, body, scale);
+            let points = fade_curve_points(transit_model::Fade::default(), true, 0.0, 1e20, body, scale);
             assert!(points.len() <= 4097);
         }
     }
@@ -3398,7 +3395,7 @@ mod tests {
     fn fade_midpoint_handles_remain_visible_and_can_be_grabbed_again() {
         for fade_in in [true, false] {
             for show_name in [true, false] {
-                for shape in [soundcraft_model::FadeShape::SCurve, soundcraft_model::FadeShape::Exponential] {
+                for shape in [transit_model::FadeShape::SCurve, transit_model::FadeShape::Exponential] {
                     for height in ["micro", "jumbo"] {
                         let mut h = smart_demo();
                         let tl = timeline(&h);
@@ -3410,7 +3407,7 @@ mod tests {
                         h.state_mut().engine.execute("view.zoom_set", &json!({"samples_per_px": spp})).unwrap();
                         h.state_mut().engine.execute("view.scroll", &json!({"to": clip.start - clip.length / 5})).unwrap();
                         let c = h.state_mut().engine.session_mut().find_clip_mut(clip.id).unwrap();
-                        let fade = soundcraft_model::Fade { len: c.length * 2 / 3, shape, curvature: 0.0 };
+                        let fade = transit_model::Fade { len: c.length * 2 / 3, shape, curvature: 0.0 };
                         if fade_in {
                             c.fade_in = fade;
                         } else {
@@ -3434,7 +3431,7 @@ mod tests {
                         assert!(h.state().gesture.is_none());
                         painted_fade_control(&h, clip_rect);
                         let side = if fade_in { "in" } else { "out" };
-                        let screenshot = show_name && height == "jumbo" && shape == soundcraft_model::FadeShape::SCurve;
+                        let screenshot = show_name && height == "jumbo" && shape == transit_model::FadeShape::SCurve;
                         if screenshot {
                             fade_shot(&mut h, &format!("fade-{side}-smooth-released"));
                         }
@@ -3487,8 +3484,8 @@ mod tests {
                     let tl = timeline(&h);
                     let (clip, lane) = clip_on_screen(&h, |xs, xe| xs > tl.min.x + 30.0 && xe < tl.max.x - 100.0 && xe - xs > 100.0);
                     let c = h.state_mut().engine.session_mut().find_clip_mut(clip.id).unwrap();
-                    let target = soundcraft_model::Fade { len: c.length * 2 / 3, shape: soundcraft_model::FadeShape::SCurve, curvature: 0.0 };
-                    let other = soundcraft_model::Fade { len: c.length / 8, shape: soundcraft_model::FadeShape::Linear, curvature: -0.2 };
+                    let target = transit_model::Fade { len: c.length * 2 / 3, shape: transit_model::FadeShape::SCurve, curvature: 0.0 };
+                    let other = transit_model::Fade { len: c.length / 8, shape: transit_model::FadeShape::Linear, curvature: -0.2 };
                     (c.fade_in, c.fade_out) = if fade_in { (target, other) } else { (other, target) };
                     h.step();
                     let before = h.state().engine.session().clone();
@@ -3568,7 +3565,7 @@ mod tests {
             let tl = timeline(&h);
             let (clip, lane) = clip_on_screen(&h, |xs, xe| xs > tl.min.x + 30.0 && xe < tl.max.x - 100.0 && xe - xs > 100.0);
             let c = h.state_mut().engine.session_mut().find_clip_mut(clip.id).unwrap();
-            c.fade_out = soundcraft_model::Fade { len: c.length * 2 / 3, shape: soundcraft_model::FadeShape::SCurve, curvature: 0.0 };
+            c.fade_out = transit_model::Fade { len: c.length * 2 / 3, shape: transit_model::FadeShape::SCurve, curvature: 0.0 };
             h.step();
             let midpoint =
                 fade_midpoint(h.state().engine.session(), tl, lane, h.state().engine.session().find_clip(clip.id).unwrap().1, false).unwrap();
@@ -3608,7 +3605,7 @@ mod tests {
                     let (clip, lane) = clip_on_screen(&h, |xs, xe| xs > tl.min.x + 30.0 && xe < tl.max.x - 100.0 && xe - xs > 100.0);
                     let len = if full_length { clip.length } else { clip.length * 2 / 3 };
                     let c = h.state_mut().engine.session_mut().find_clip_mut(clip.id).unwrap();
-                    let fade = soundcraft_model::Fade { len, shape: soundcraft_model::FadeShape::SCurve, curvature: 0.35 };
+                    let fade = transit_model::Fade { len, shape: transit_model::FadeShape::SCurve, curvature: 0.35 };
                     if fade_in {
                         c.fade_in = fade;
                     } else {
@@ -3655,7 +3652,7 @@ mod tests {
                     let range = fade_drag_range(&clip, fade_in, sample_at(&before, tl, to.x)).unwrap();
                     let mut expected = before.clone();
                     let c = expected.find_clip_mut(clip.id).unwrap();
-                    let fade = soundcraft_model::Fade { len: range.end - range.start, shape: soundcraft_model::FadeShape::SCurve, curvature: 0.35 };
+                    let fade = transit_model::Fade { len: range.end - range.start, shape: transit_model::FadeShape::SCurve, curvature: 0.35 };
                     assert!(fade.len < len);
                     if fade_in {
                         c.fade_in = fade;
@@ -3677,7 +3674,7 @@ mod tests {
         let tl = timeline(&h);
         let (clip, lane) = clip_on_screen(&h, |xs, xe| xs > tl.min.x + 30.0 && xe < tl.max.x - 100.0 && xe - xs > 100.0);
         let c = h.state_mut().engine.session_mut().find_clip_mut(clip.id).unwrap();
-        c.fade_out = soundcraft_model::Fade { len: c.length / 2, shape: soundcraft_model::FadeShape::SCurve, curvature: 0.0 };
+        c.fade_out = transit_model::Fade { len: c.length / 2, shape: transit_model::FadeShape::SCurve, curvature: 0.0 };
         h.step();
         let s = h.state().engine.session();
         let rect = Rect::from_min_max(pos2(x_of(s, tl, clip.start), lane.min.y), pos2(x_of(s, tl, clip.end()), lane.max.y));
@@ -3879,7 +3876,7 @@ mod tests {
 
     #[test]
     fn a_pencil_click_on_a_plugin_lane_uses_the_plugin_range() {
-        let mut engine = soundcraft_engine::demo::demo_engine();
+        let mut engine = transit_engine::demo::demo_engine();
         engine.execute("track.view", &json!({"track": "Kick", "view": "plugin:a:input_gain"})).unwrap();
         engine.execute("edit.tool", &json!({"tool": "pencil"})).unwrap();
         let mut h = harness_with(engine);

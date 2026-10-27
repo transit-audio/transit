@@ -7,7 +7,7 @@ use super::*;
 use crate::cmd;
 use crate::{Engine, LearnArm};
 use serde_json::json;
-use soundcraft_model::{AutoParam, Control, ControlTarget, MapMode, Mapping, MappingSet, MidiSource, Scope, SourceKind, Strip};
+use transit_model::{AutoParam, Control, ControlTarget, MapMode, Mapping, MappingSet, MidiSource, Scope, SourceKind, Strip};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -98,7 +98,7 @@ fn check_device(e: &Engine, id: &str, target: &ControlTarget) -> Result<()> {
         track.mixer.inserts.get(usize::from(*slot)).and_then(Option::as_ref)
     };
     let device = device.ok_or_else(|| bad(id, "that slot has no plug-in"))?;
-    if let Some(info) = soundcraft_dsp::plugin_info(&device.plugin)
+    if let Some(info) = transit_dsp::plugin_info(&device.plugin)
         && info.param(param).is_none()
     {
         return Err(bad(id, format!("{} has no parameter `{param}`", info.name)));
@@ -230,7 +230,7 @@ fn describe(m: &Mapping, scope: Scope, overridden: bool) -> Value {
 
 fn mappings(e: &mut Engine, _: &Value) -> Result<Value> {
     let ids: Vec<_> = e.session().tracks.iter().map(|t| t.id).collect();
-    let resolved = soundcraft_model::resolve(&ids, &e.session().midi_mappings, &e.midi_profile);
+    let resolved = transit_model::resolve(&ids, &e.session().midi_mappings, &e.midi_profile);
     let session: Vec<Value> = e.session().midi_mappings.iter().map(|m| describe(m, Scope::Session, false)).collect();
     let profile: Vec<Value> = e
         .midi_profile
@@ -391,7 +391,7 @@ mod replace_tests {
         let t = e.session().tracks[0].id.0;
         e.execute("midi.learn", &json!({"target": format!("track:{t}:volume")})).unwrap();
         let rev = e.midi_profile_revision();
-        e.replace_session(soundcraft_model::Session::default());
+        e.replace_session(transit_model::Session::default());
         assert!(e.learn().is_none(), "the armed control belongs to the old session");
         assert_ne!(e.midi_profile_revision(), rev, "the host is told to disarm the worker");
     }

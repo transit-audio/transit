@@ -4,9 +4,9 @@
 use egui::os::OperatingSystem;
 use egui::{Event, Key, Modifiers, Pos2, RawInput, Rect, vec2};
 use serde_json::json;
-use soundcraft_engine::TransportRequest;
-use soundcraft_model::ClipContent;
-use soundcraft_ui_egui::{Services, SoundApp, shortcuts};
+use transit_engine::TransportRequest;
+use transit_model::ClipContent;
+use transit_ui_egui::{Services, SoundApp, shortcuts};
 
 const MAC_CMD: Modifiers = Modifiers { mac_cmd: true, command: true, ..Modifiers::NONE };
 const PC_CTRL: Modifiers = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
@@ -26,7 +26,7 @@ fn press(ctx: &egui::Context, app: &mut SoundApp, key: Key, modifiers: Modifiers
 fn rig(os: OperatingSystem) -> (egui::Context, SoundApp) {
     let ctx = egui::Context::default();
     ctx.set_os(os);
-    (ctx, SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default()))
+    (ctx, SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default()))
 }
 
 fn start(app: &SoundApp) -> i64 {
@@ -197,7 +197,7 @@ fn window_keys_open_their_windows() {
 
 #[test]
 fn the_piano_roll_leaves_modified_arrows_to_the_shortcuts() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     app.ui.show_midi_editor = true;
     app.run("edit.select", json!({"tracks": ["Keys"]})).unwrap();
     let ctx = egui::Context::default();
@@ -213,11 +213,11 @@ fn the_piano_roll_leaves_modified_arrows_to_the_shortcuts() {
     for _ in 0..6 {
         frame(&mut app, vec![]);
     }
-    let body = ctx.data(|d| d.get_temp::<Rect>(egui::Id::new("soundcraft-midi-body"))).unwrap();
+    let body = ctx.data(|d| d.get_temp::<Rect>(egui::Id::new("transit-midi-body"))).unwrap();
     frame(&mut app, vec![Event::PointerMoved(body.center())]);
     app.midi.selected = vec![0];
     let pitch = |app: &SoundApp| {
-        let clip = soundcraft_ui_egui::midi_editor::target_clip(app).unwrap();
+        let clip = transit_ui_egui::midi_editor::target_clip(app).unwrap();
         match &app.engine.session().find_clip(clip).unwrap().1.content {
             ClipContent::Midi { sequence } => sequence.notes[0].pitch,
             _ => panic!("not a MIDI clip"),

@@ -38,12 +38,12 @@ use clap_sys::plugin::clap_plugin;
 use clap_sys::process::{CLAP_PROCESS_ERROR, clap_process};
 use clap_sys::stream::{clap_istream, clap_ostream};
 use clap_sys::version::{CLAP_VERSION, clap_version_is_compatible};
-use soundcraft_dsp::Transport;
 use std::collections::HashMap;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use transit_dsp::Transport;
 
 /// Most plugins one factory may report (hostile-input cap).
 const MAX_PLUGINS_PER_FACTORY: u32 = 1024;

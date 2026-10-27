@@ -136,7 +136,7 @@ The hardware tests open the owner's default endpoints and stay `#[ignore]`d; run
 
 ```
 cargo test -p transit-audio-wasapi -- --ignored hardware_ --nocapture
-cargo test -p soundcraft-playback --features native-wasapi -- --ignored hardware_ --nocapture
+cargo test -p transit-playback --features native-wasapi -- --ignored hardware_ --nocapture
 ```
 
 Without a device (what CI runs; opens no audio device and finishes at once, in virtual time):

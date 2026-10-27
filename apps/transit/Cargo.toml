@@ -16,23 +16,23 @@ workspace = true
 default = ["update-check", "native-wasapi", "native-asio"]
 update-check = ["dep:ureq", "dep:semver"]
 # The native WASAPI backend (ADR 0016): the "Native WASAPI" choice in Audio Devices.
-native-wasapi = ["soundcraft-playback/native-wasapi"]
+native-wasapi = ["transit-playback/native-wasapi"]
 # The native ASIO backend (no SDK): the "Native ASIO" choice when Audio system is ASIO.
-native-asio = ["soundcraft-playback/native-asio"]
+native-asio = ["transit-playback/native-asio"]
 # The native JACK backend (ADR 0021, Linux): the "Native JACK" choice when Audio system is JACK.
-native-jack = ["soundcraft-playback/native-jack"]
+native-jack = ["transit-playback/native-jack"]
 
 [dependencies]
-soundcraft-engine.workspace = true
-soundcraft-ui-egui.workspace = true
+transit-engine.workspace = true
+transit-ui-egui.workspace = true
 transit-ui-studio.workspace = true
-soundcraft-playback.workspace = true
+transit-playback.workspace = true
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }
 egui.workspace = true
 serde_json.workspace = true
 log.workspace = true
 transit-rt.workspace = true
-soundcraft-automation.workspace = true
+transit-automation.workspace = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rfd.workspace = true

@@ -4,12 +4,12 @@
 use crate::mixer::RoutingChoice;
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::{ChannelFormat, Route, TrackId};
+use transit_model::{ChannelFormat, Route, TrackId};
 
 const HISTORY_REASON: &str = "Stop recording before using Undo or Redo.";
 
 fn app(inputs: usize) -> StudioApp {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     app.audio_devices.fake = crate::audio_devices::fake_from_json(&json!({"systems": [{
         "name": "Test", "is_default": true,
         "inputs": [{"name": "Synthetic input", "is_default": true, "max_channels": inputs}]
@@ -35,7 +35,7 @@ fn history(app: &mut StudioApp) -> Value {
 }
 
 fn capture_inputs(app: &StudioApp) -> Vec<Vec<usize>> {
-    soundcraft_engine::io::plan_takes(&app.engine, std::path::Path::new(env!("CARGO_MANIFEST_DIR")), app.device_inputs())
+    transit_engine::io::plan_takes(&app.engine, std::path::Path::new(env!("CARGO_MANIFEST_DIR")), app.device_inputs())
         .into_iter()
         .map(|(_, inputs, _)| inputs)
         .collect()

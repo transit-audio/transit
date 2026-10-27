@@ -4,8 +4,8 @@
 use super::plan::{Attach, CellKind, CellLoc, CellMove, PlanTables, PreparedPlan, Shape, SlotBinding, needs_storage};
 use super::scope::INSTRUMENT_UID;
 use super::*;
-use soundcraft_model::{IoDirection, IoMap, IoPath};
 use std::collections::{BTreeMap, HashMap};
+use transit_model::{IoDirection, IoMap, IoPath};
 
 /// Whether compilation edits the active document or restores a document's saved state.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -349,7 +349,7 @@ fn measure(
 /// order), every aux and folder (dependency order), then the rest in track order. Also the
 /// number of each of the first two groups.
 /// A sidechain key edge the render honors: keyed track index, insert slot, source, pre-fader.
-type RawKey = (usize, usize, soundcraft_model::RouteNode, bool);
+type RawKey = (usize, usize, transit_model::RouteNode, bool);
 
 struct RenderOrder {
     rows: Vec<usize>,
@@ -393,13 +393,13 @@ fn render_rows(s: &Session) -> RenderOrder {
             layers.push(u16::try_from(k + 1).unwrap_or(u16::MAX));
         }
     }
-    let cut: Vec<soundcraft_model::RouteEdge> = route.dropped().copied().collect();
+    let cut: Vec<transit_model::RouteEdge> = route.dropped().copied().collect();
     let keys = route
         .edges()
         .iter()
         .filter(|e| !cut.contains(e))
         .filter_map(|e| match (e.kind, e.to) {
-            (soundcraft_model::EdgeKind::Key { slot, pre_fader }, soundcraft_model::RouteNode::Track(to)) => Some((to, slot, e.from, pre_fader)),
+            (transit_model::EdgeKind::Key { slot, pre_fader }, transit_model::RouteNode::Track(to)) => Some((to, slot, e.from, pre_fader)),
             _ => None,
         })
         .collect();
@@ -790,9 +790,9 @@ impl PlanCompiler {
         for (to, slot, from, pre) in raw_keys {
             let (Some(t), Some(keyed)) = (s.tracks.get(to), table(to)) else { continue };
             let from = match from {
-                soundcraft_model::RouteNode::Track(i) => table(i).map(KeyEnd::Strip),
-                soundcraft_model::RouteNode::Bus(b) => s.busses.get(b).map(|x| KeyEnd::Bus(x.id)),
-                soundcraft_model::RouteNode::Main => None,
+                transit_model::RouteNode::Track(i) => table(i).map(KeyEnd::Strip),
+                transit_model::RouteNode::Bus(b) => s.busses.get(b).map(|x| KeyEnd::Bus(x.id)),
+                transit_model::RouteNode::Main => None,
             };
             let (Some(from), Ok(slot)) = (from, u16::try_from(slot)) else { continue };
             // An inactive track is never rendered, so its keys (and keys from it) are not honored.
@@ -1328,7 +1328,7 @@ fn clip_entries(t: TrackId, specs: &HashMap<(TrackId, usize), InstanceSpec>) -> 
 fn slot_keys<'a>(
     t: &'a Track,
     clips: &[(u64, Option<InstanceSpec>, Option<InstanceSpec>)],
-) -> Vec<((TrackId, usize), CellKind, Option<&'a soundcraft_model::Insert>)> {
+) -> Vec<((TrackId, usize), CellKind, Option<&'a transit_model::Insert>)> {
     let mut out = Vec::new();
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
         if let Some(ins) = ins {

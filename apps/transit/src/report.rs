@@ -20,7 +20,7 @@ pub fn parse(args: &[String]) -> Option<Option<PathBuf>> {
 pub fn run(
     target: Option<PathBuf>,
     log_dir: Option<PathBuf>,
-    settings: soundcraft_playback::AudioConfig,
+    settings: transit_playback::AudioConfig,
     profile_mappings: usize,
 ) -> Result<PathBuf, String> {
     let now = diagnostics::now_secs();

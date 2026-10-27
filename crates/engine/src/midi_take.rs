@@ -19,9 +19,9 @@
 use crate::Engine;
 use crate::io::Recording;
 use serde_json::json;
-use soundcraft_midi::{CtrlEvent, CtrlKind, Note, Sequence};
-use soundcraft_model::{Clip, ClipContent, ClipId, TrackId};
-use soundcraft_time::{Range, SampleRate, Samples, TempoMap};
+use transit_midi::{CtrlEvent, CtrlKind, Note, Sequence};
+use transit_model::{Clip, ClipContent, ClipId, TrackId};
+use transit_time::{Range, SampleRate, Samples, TempoMap};
 
 /// The most loop passes one recording turns into clips (as for audio takes).
 const MAX_PASSES: i64 = 1_000;
@@ -308,7 +308,7 @@ pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &
             if b.pass > 0
                 && let Some(t) = e.session_mut().track_mut(track)
             {
-                t.playlists.push(soundcraft_model::Playlist::new(format!("{}.{:02}", t.name, t.playlists.len() + 1)));
+                t.playlists.push(transit_model::Playlist::new(format!("{}.{:02}", t.name, t.playlists.len() + 1)));
                 t.active_playlist = t.playlists.len() - 1;
             }
             let s = e.session_mut();
@@ -337,7 +337,7 @@ pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &
 
 /// Overdub: the new notes join the clip, which grows to cover the take (nothing else is in the
 /// way: the caller found this the only clip in the range).
-fn merge(s: &mut soundcraft_model::Session, id: ClipId, built: &Built, tempo: &TempoMap, sr: SampleRate) {
+fn merge(s: &mut transit_model::Session, id: ClipId, built: &Built, tempo: &TempoMap, sr: SampleRate) {
     let Some(clip) = s.find_clip_mut(id) else { return };
     let old_start = clip.start;
     let start = old_start.min(built.range.start);
@@ -369,7 +369,7 @@ mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     use serde_json::json;
-    use soundcraft_time::TICKS_PER_QUARTER;
+    use transit_time::TICKS_PER_QUARTER;
 
     const T: TrackId = TrackId(1);
 
@@ -385,7 +385,7 @@ mod tests {
         ev(offset, Msg::NoteOff { pitch, velocity: 0 })
     }
     fn tempo() -> (TempoMap, SampleRate) {
-        let s = soundcraft_model::Session::default();
+        let s = transit_model::Session::default();
         (s.tempo.clone(), s.sample_rate)
     }
     fn cut(start: Samples, stop: Samples) -> Cut {
@@ -577,7 +577,7 @@ mod tests {
         assert_eq!(e.undo_history().last().map(String::as_str), Some("Record"));
         // Saved and loaded again, the clip is the same.
         let json = serde_json::to_string(e.session()).unwrap();
-        let loaded: soundcraft_model::Session = serde_json::from_str(&json).unwrap();
+        let loaded: transit_model::Session = serde_json::from_str(&json).unwrap();
         assert_eq!(loaded.find_clip(ids[0]).unwrap().1, &clip);
         e.undo();
         assert!(e.session().track(t).unwrap().clips().is_empty(), "undo removes the clip");

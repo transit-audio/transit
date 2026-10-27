@@ -9,7 +9,7 @@ use crate::icons::{self, Icon};
 use crate::mixer::MenuItem;
 use crate::theme::{SPACE, TOKENS};
 use serde_json::{Value, json};
-use soundcraft_model::{IoDirection, IoMap, IoPath, MAX_PATH_WIDTH};
+use transit_model::{IoDirection, IoMap, IoPath, MAX_PATH_WIDTH};
 
 /// One edit of the path table: one `setup.io_map` command.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -457,7 +457,7 @@ mod tests {
         io.remove_path("Out 3-4").unwrap();
         assert_eq!(first_free(&io, IoDirection::Output), 2);
         assert!(overlap_lines(&io).is_empty());
-        io.add_path(IoPath { name: "Cue".into(), direction: IoDirection::Output, channels: vec![1], format: soundcraft_model::ChannelFormat::Mono })
+        io.add_path(IoPath { name: "Cue".into(), direction: IoDirection::Output, channels: vec![1], format: transit_model::ChannelFormat::Mono })
             .unwrap();
         assert_eq!(overlap_lines(&io), ["Out 1-2 and Cue share channel 2 and add together there."]);
         assert!(is_wasapi("wasapi") && !is_wasapi("ASIO"));

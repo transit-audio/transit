@@ -5,8 +5,8 @@ use super::more_util::{set_text, store_value, text, toggle_flag, values_with_pre
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::{BusId, ChannelFormat, OutputPath, Route, Session, TrackId, TrackKind};
-use soundcraft_time::Timecode;
+use transit_model::{BusId, ChannelFormat, OutputPath, Route, Session, TrackId, TrackKind};
+use transit_time::Timecode;
 
 macro_rules! option {
     ($id:literal, $label:literal, $flag:literal) => {
@@ -167,7 +167,7 @@ fn prepare_dpe(e: &mut Engine, p: &Value) -> Result<Value> {
     if end <= 0 {
         return Err(bad(id, "there is no audio to prepare"));
     }
-    let r = soundcraft_time::Range::new(0, end);
+    let r = transit_time::Range::new(0, end);
     let mut n = 0;
     for t in tracks {
         // Each track keeps its own length (its material plus a second), as before.
@@ -255,10 +255,10 @@ fn io_map_state(e: &Engine) -> Value {
 /// `setup.io_map`: the machine's I/O paths. Not a session edit (the table is per machine, kept by
 /// the app with its preferences), so there is no undo step and the document stays clean.
 fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
-    use soundcraft_model::{IoDirection, IoMap, IoPath};
+    use transit_model::{IoDirection, IoMap, IoPath};
     let id = "setup.io_map";
     let action = str_param(p, "action").unwrap_or("list");
-    let refuse = |error: soundcraft_model::IoError| bad(id, error.to_string());
+    let refuse = |error: transit_model::IoError| bad(id, error.to_string());
     let name = || str_param(p, "name").map(str::trim).filter(|n| !n.is_empty()).map(str::to_string).ok_or_else(|| bad(id, "`name` required"));
     let channels = || -> Result<Vec<u16>> {
         let list = p.get("channels").and_then(Value::as_array).ok_or_else(|| bad(id, "`channels` required (0-based device channels)"))?;
@@ -271,7 +271,7 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
             let map: IoMap = serde_json::from_value(p.get("map").cloned().ok_or_else(|| bad(id, "`map` required"))?)
                 .map_err(|error| bad(id, format!("`map` is not an I/O map: {error}")))?;
             // Counts are bounded like a device's: a path beyond them is refused by `add_path`.
-            let cap = soundcraft_model::MAX_DEVICE_CHANNELS as u16;
+            let cap = transit_model::MAX_DEVICE_CHANNELS as u16;
             let mut checked = IoMap { paths: Vec::new(), inputs: map.inputs.min(cap), outputs: map.outputs.min(cap), ..map.clone() };
             for path in map.paths {
                 checked.add_path(path).map_err(refuse)?;
@@ -286,7 +286,7 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
                 Some(other) => return Err(bad(id, format!("direction is input or output, not `{other}`"))),
             };
             let channels = channels()?;
-            let format = soundcraft_model::ChannelFormat::for_channels(channels.len());
+            let format = transit_model::ChannelFormat::for_channels(channels.len());
             io.add_path(IoPath { name: name()?, direction, channels, format }).map_err(refuse)?;
         }
         "rename_path" => {
@@ -436,7 +436,7 @@ fn current_feet_frames(e: &mut Engine, p: &Value) -> Result<Value> {
     let at = s.edit.selection.start.max(0);
     let frames_at = s.frame_rate.frames_at(at, s.sample_rate);
     let start = ft * 16 + fr - frames_at;
-    s.edit.values.insert(soundcraft_model::FEET_FRAMES_START.into(), start as f64);
+    s.edit.values.insert(transit_model::FEET_FRAMES_START.into(), start as f64);
     Ok(json!({"feet_frames_start": start}))
 }
 
@@ -556,7 +556,7 @@ mod tests {
         let saved = e.session().clone();
         let (undo, revision) = (e.can_undo(), e.revision);
         assert_eq!(e.execute("setup.io_map", &json!({})).unwrap()["io"]["main"], "Out 1-2", "headless engines hold the stereo default");
-        e.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "TASCAM", 12, 10));
+        e.set_io_map(transit_model::IoMap::for_device("ASIO", "TASCAM", 12, 10));
         let r = e.execute("setup.io_map", &json!({"action": "add_path", "name": "Headphones", "channels": [2]})).unwrap();
         assert_eq!(r["overlaps"][0]["b"], "Headphones");
         e.execute("setup.io_map", &json!({"action": "rename_path", "name": "Headphones", "new_name": "Cue"})).unwrap();
@@ -574,18 +574,18 @@ mod tests {
     #[test]
     fn io_map_set_bounds_the_channel_counts_like_a_device() {
         let mut e = Engine::default();
-        let mut map = soundcraft_model::IoMap::for_device("ASIO", "x", 2, 2);
+        let mut map = transit_model::IoMap::for_device("ASIO", "x", 2, 2);
         map.inputs = u16::MAX;
         map.outputs = 40;
         let r = e.execute("setup.io_map", &json!({"action": "set", "map": map})).unwrap();
         assert_eq!((r["io"]["inputs"].clone(), r["io"]["outputs"].clone()), (json!(32), json!(32)));
         assert_eq!((e.io_map().inputs, e.io_map().outputs), (32, 32));
         // A path on a channel past the cap is still refused.
-        map.paths.push(soundcraft_model::IoPath {
+        map.paths.push(transit_model::IoPath {
             name: "Far".into(),
-            direction: soundcraft_model::IoDirection::Output,
+            direction: transit_model::IoDirection::Output,
             channels: vec![33],
-            format: soundcraft_model::ChannelFormat::Mono,
+            format: transit_model::ChannelFormat::Mono,
         });
         assert!(matches!(e.execute("setup.io_map", &json!({"action": "set", "map": map})), Err(crate::EngineError::BadParams(..))));
     }
@@ -593,7 +593,7 @@ mod tests {
     #[test]
     fn io_map_commands_refuse_bad_paths_and_leave_the_table_alone() {
         let mut e = Engine::default();
-        e.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "x", 2, 4));
+        e.set_io_map(transit_model::IoMap::for_device("ASIO", "x", 2, 4));
         let before = (e.io_map().clone(), e.io_revision());
         for params in [
             json!({"action": "add_path", "name": "Out 3-4", "channels": [2, 3]}),
@@ -613,7 +613,7 @@ mod tests {
     #[test]
     fn a_bus_cannot_take_a_path_name_and_the_list_names_unresolved_routes() {
         let mut e = Engine::default();
-        e.set_io_map(soundcraft_model::IoMap::for_device("ASIO", "x", 2, 4));
+        e.set_io_map(transit_model::IoMap::for_device("ASIO", "x", 2, 4));
         assert!(matches!(e.execute("setup.io", &json!({"action": "create_bus", "name": "out 3-4"})), Err(crate::EngineError::BadParams(..))));
         assert!(matches!(e.execute("setup.io", &json!({"action": "create_bus", "name": "In 1"})), Err(crate::EngineError::BadParams(..))));
         e.execute("setup.io", &json!({"action": "create_bus", "name": "Drums"})).unwrap();
@@ -622,20 +622,20 @@ mod tests {
             Err(crate::EngineError::BadParams(..))
         ));
         let t = e.execute("track.new", &json!({"name": "Cue"})).unwrap()["tracks"][0].as_u64().unwrap();
-        e.session_mut().track_mut(soundcraft_model::TrackId(t)).unwrap().mixer.output = Route::Hardware("Headphones".into());
+        e.session_mut().track_mut(transit_model::TrackId(t)).unwrap().mixer.output = Route::Hardware("Headphones".into());
         assert_eq!(e.execute("setup.io_map", &json!({})).unwrap()["unresolved"], json!(["Headphones"]));
         // Renaming a path leaves the session's routes alone: the old name is then unresolved.
-        e.session_mut().track_mut(soundcraft_model::TrackId(t)).unwrap().mixer.output = Route::Hardware("Out 3-4".into());
+        e.session_mut().track_mut(transit_model::TrackId(t)).unwrap().mixer.output = Route::Hardware("Out 3-4".into());
         assert_eq!(e.execute("setup.io_map", &json!({})).unwrap()["unresolved"], json!([]));
         e.execute("setup.io_map", &json!({"action": "rename_path", "name": "Out 3-4", "new_name": "Wedge"})).unwrap();
-        assert_eq!(e.session().track(soundcraft_model::TrackId(t)).unwrap().mixer.output, Route::Hardware("Out 3-4".into()));
+        assert_eq!(e.session().track(transit_model::TrackId(t)).unwrap().mixer.output, Route::Hardware("Out 3-4".into()));
         assert_eq!(e.execute("setup.io_map", &json!({})).unwrap()["unresolved"], json!(["Out 3-4"]));
     }
 
     #[test]
     fn io_map_set_replaces_the_table_and_validates_it() {
         let mut e = Engine::default();
-        let mut map = soundcraft_model::IoMap::for_device("ASIO", "TASCAM", 12, 10);
+        let mut map = transit_model::IoMap::for_device("ASIO", "TASCAM", 12, 10);
         map.rename_path("Out 3-4", "Cue").unwrap();
         e.execute("setup.io_map", &json!({"action": "set", "map": map})).unwrap();
         assert_eq!(e.io_map(), &map);
@@ -649,7 +649,7 @@ mod tests {
         e.execute("edit.select", &json!({"start": 48_000})).unwrap();
         e.execute("setup.current_timecode", &json!({"timecode": "01:00:00:00"})).unwrap();
         let s = e.session();
-        let shown = s.format_position(48_000, soundcraft_time::TimeFormat::Timecode);
+        let shown = s.format_position(48_000, transit_time::TimeFormat::Timecode);
         assert_eq!(shown, "01:00:00:00");
     }
 
@@ -710,8 +710,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let wav = dir.join("hit.wav");
-        let buf = soundcraft_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.5; 4_800]] };
-        std::fs::write(&wav, soundcraft_audio_io::encode(&buf, &soundcraft_audio_io::EncodeOptions::default()).unwrap()).unwrap();
+        let buf = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.5; 4_800]] };
+        std::fs::write(&wav, transit_audio_io::encode(&buf, &transit_audio_io::EncodeOptions::default()).unwrap()).unwrap();
         let mut donor = Engine::default();
         donor.execute("track.new", &json!({"count": 1, "name": "Pads", "kind": "instrument"})).unwrap();
         donor.execute("mix.sampler_load", &json!({"track": "Pads", "path": wav.to_string_lossy()})).unwrap();

@@ -1,7 +1,7 @@
 //! SoundCraft's CLAP plugin host.
 //!
 //! Scans the standard CLAP folders (plus `CLAP_PATH`), loads `.clap` binaries in-process and
-//! exposes each plugin as a [`soundcraft_dsp::Plugin`], so the mix engine treats third-party
+//! exposes each plugin as a [`transit_dsp::Plugin`], so the mix engine treats third-party
 //! plugins exactly like the built-in ones. Plugin ids are `clap:<CLAP plugin id>`; parameter ids
 //! are the CLAP param ids as decimal strings, with their human names in [`PluginInfo::params`].
 //!
@@ -47,8 +47,8 @@ mod scan_cache;
 #[cfg(not(target_arch = "wasm32"))]
 pub use plugin::ClapPlugin;
 
-use soundcraft_dsp::{Category, Plugin, PluginInfo};
 use std::path::{Path, PathBuf};
+use transit_dsp::{Category, Plugin, PluginInfo};
 
 /// Prefix of every hosted-CLAP plugin id.
 pub const ID_PREFIX: &str = "clap:";
@@ -304,7 +304,7 @@ pub fn load_bundle(path: &Path) -> Result<Vec<ClapDescriptor>, ClapError> {
 }
 
 /// Creates a plugin by `clap:<id>`, prepared for 48 kHz stereo with 1024-frame blocks (like
-/// `soundcraft_dsp::create`), with the reason when it fails.
+/// `transit_dsp::create`), with the reason when it fails.
 pub fn instantiate(id: &str) -> Result<Box<dyn Plugin>, ClapError> {
     api::instantiate(id)
 }

@@ -9,14 +9,14 @@ use std::time::{Duration, Instant};
 
 pub(crate) const REQUESTS: &str = "clap:org.soundcraft.test.requests";
 
-/// Builds soundcraft-clap-host's fixture with its `requests` feature (a GUI-less CLAP effect)
+/// Builds transit-clap-host's fixture with its `requests` feature (a GUI-less CLAP effect)
 /// once and adds its folder to the CLAP search path.
 pub(crate) fn requests_fixture() {
     static DONE: OnceLock<()> = OnceLock::new();
     DONE.get_or_init(|| {
         // Only the fixture folder: the first `create` runs a scan, which must not read the
         // machine's installed plug-ins.
-        soundcraft_clap_host::set_scan_extra_dirs_only(true);
+        transit_clap_host::set_scan_extra_dirs_only(true);
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../clap-host/tests/fixture/Cargo.toml");
         let target = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/tmp/clap-requests-fixture-target");
         let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
@@ -41,7 +41,7 @@ pub(crate) fn requests_fixture() {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::copy(target.join("debug").join(lib), dir.join("Requests.clap")).unwrap();
-        assert_eq!(soundcraft_clap_host::add_search_dir(&dir), 1);
+        assert_eq!(transit_clap_host::add_search_dir(&dir), 1);
     });
 }
 
@@ -73,10 +73,10 @@ fn the_frame_loop_restarts_a_gui_less_clap_plugin_with_no_audio_running() {
         return;
     }
     requests_fixture();
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let ctx = egui::Context::default();
     // Created on this (the app's) thread, so this is its main thread.
-    let mut p = soundcraft_clap_host::create(REQUESTS).expect("requests fixture");
+    let mut p = transit_clap_host::create(REQUESTS).expect("requests fixture");
     p.prepare(48_000.0, 64, 2);
     assert!(p.editor().is_none(), "no editor: nothing but the frame loop services it");
     p.process(&mut vec![vec![0.5f32; 64]; 2], 64); // in the processing state

@@ -7,8 +7,8 @@ use crate::StudioApp;
 use crate::theme::{self, CLIP_NAME_H, RULER_H, TOKENS};
 use egui::{Align2, Color32, CursorIcon, FontId, Id, LayerId, Order, Pos2, Rect, Sense, Shape, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
-use soundcraft_model::{Clip, ClipContent, ClipId, ClipLoop, Session, Track, TrackId, TrackKind};
-use soundcraft_time::{BarBeat, Samples};
+use transit_model::{Clip, ClipContent, ClipId, ClipLoop, Session, Track, TrackId, TrackKind};
+use transit_time::{BarBeat, Samples};
 
 /// How close (points) to a clip edge a press trims instead of moving.
 const EDGE: f32 = 6.0;
@@ -815,7 +815,7 @@ fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: TrackKind, ha
             ui.close();
         }
         if ui.add_enabled(has_instrument && app.player.is_some(), egui::Button::new("Open Instrument Editor")).clicked() {
-            app.want_editor((id, soundcraft_mix::INSTRUMENT_SLOT));
+            app.want_editor((id, transit_mix::INSTRUMENT_SLOT));
             ui.close();
         }
         ui.separator();
@@ -935,7 +935,7 @@ fn grid_and_ruler(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, 
     let rp = p.with_clip_rect(ruler);
     let ppt = crate::grid::px_per_tick(s, map.spp);
     let step = crate::grid::ticks(ppt, crate::grid::bar_ticks(s), &map.grid);
-    let sub_step = crate::grid::sub_line_step(step, ppt, soundcraft_time::TICKS_PER_QUARTER);
+    let sub_step = crate::grid::sub_line_step(step, ppt, transit_time::TICKS_PER_QUARTER);
     for bar in (first..).take(4000) {
         let x = map.x(bar_at(s, bar));
         if x > tl.max.x {
@@ -1221,7 +1221,7 @@ fn draw_cycles(
     let sx = |rel: Samples| rect.min.x + (rel as f64 / map.spp) as f32;
     // A MIDI clip's seams sit where playback puts them: on the tick-rounded frame.
     let seams = if matches!(c.content, ClipContent::Midi { .. }) {
-        let (origin, f) = soundcraft_mix::loop_frame(s, c.start, l);
+        let (origin, f) = transit_mix::loop_frame(s, c.start, l);
         let gap = origin - c.start;
         ClipLoop { start: f.start + gap, end: f.end + gap }
     } else {
@@ -1283,7 +1283,7 @@ fn clip_base_color(c: &Clip, t: &Track) -> Color32 {
 }
 
 /// The lowest pitch and the pitch span (at least an octave) a MIDI clip's mini notes are laid out in.
-fn pitch_span(notes: &[soundcraft_midi::Note]) -> Option<(u8, f32)> {
+fn pitch_span(notes: &[transit_midi::Note]) -> Option<(u8, f32)> {
     let (lo, hi) = (notes.iter().map(|n| n.pitch).min()?, notes.iter().map(|n| n.pitch).max()?);
     Some((lo, f32::from(hi.saturating_sub(lo)).max(11.0)))
 }
@@ -1291,11 +1291,11 @@ fn pitch_span(notes: &[soundcraft_midi::Note]) -> Option<(u8, f32)> {
 /// The notes one cycle of a looped MIDI clip plays, as (clip-relative start, end, pitch) spans of
 /// the cycle that contains clip time `a` (ADR 0019): cycle 0 plays what starts before the loop end,
 /// a `later` cycle what starts inside the range, and a note crossing the seam ends there. The cycles
-/// come from [`soundcraft_mix::loop_frame`], the tick-rounded frame playback uses, so an off-tick
+/// come from [`transit_mix::loop_frame`], the tick-rounded frame playback uses, so an off-tick
 /// loop edge draws where it is heard.
 pub(crate) fn loop_note_spans(s: &Session, c: &Clip, l: ClipLoop, later: bool, a: Samples) -> Vec<(Samples, Samples, u8)> {
     let ClipContent::Midi { sequence } = &c.content else { return Vec::new() };
-    let (origin, fl) = soundcraft_mix::loop_frame(s, c.start, l);
+    let (origin, fl) = transit_mix::loop_frame(s, c.start, l);
     let clip_tick = s.tempo.samples_to_ticks(c.start, s.sample_rate);
     // Cycle `k >= 1` of the stepped frame that holds `a`.
     let k = (a - (origin - c.start) - fl.end).div_euclid(fl.cycle().max(1)) + 1;
@@ -1308,7 +1308,7 @@ pub(crate) fn loop_note_spans(s: &Session, c: &Clip, l: ClipLoop, later: bool, a
             continue;
         }
         let span = (off.min(origin + fl.end) - on).max(0);
-        let at = if later { soundcraft_mix::cycle_at(origin, fl, rel, k.max(1)) } else { on };
+        let at = if later { transit_mix::cycle_at(origin, fl, rel, k.max(1)) } else { on };
         out.push((at - c.start, at + span - c.start, n.pitch));
     }
     out
@@ -1769,7 +1769,7 @@ fn overlays(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, tl: Re
     // punch range, after a count-in), with a "Recording" name strip.
     let span = app.engine.transport.recording.then(|| {
         let pass = app.take_plan.as_ref().and_then(|p| p.pass);
-        soundcraft_engine::io::live_span(app.record_start, pass, app.punch, (app.position() - app.record_start).max(0))
+        transit_engine::io::live_span(app.record_start, pass, app.punch, (app.position() - app.record_start).max(0))
     });
     if let Some(Some((_, span))) = span {
         let rp = p.with_clip_rect(tl);
@@ -2124,7 +2124,7 @@ mod loop_corner_tests {
 
     impl Rig {
         fn new() -> Rig {
-            let mut app = crate::StudioApp::new(soundcraft_engine::Engine::default(), None, crate::Services::default());
+            let mut app = crate::StudioApp::new(transit_engine::Engine::default(), None, crate::Services::default());
             let r = app.run("track.new", json!({"kind": "instrument"})).unwrap();
             let t = r["tracks"][0].as_u64().unwrap();
             let c = app.run("midi.new_clip", json!({"tracks": [t], "start": 0, "end": 0})).unwrap();
@@ -2220,7 +2220,7 @@ mod loop_corner_tests {
 
     #[test]
     fn the_overwrite_preview_does_not_shade_clips_the_commit_will_not_touch() {
-        use soundcraft_model::{ChannelFormat, Clip, TrackKind};
+        use transit_model::{ChannelFormat, Clip, TrackKind};
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
         let mut ids = Vec::new();

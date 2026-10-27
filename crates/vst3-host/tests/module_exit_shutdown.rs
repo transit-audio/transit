@@ -6,21 +6,21 @@
 
 mod common;
 
-use soundcraft_dsp::Plugin;
 use std::process::{Command, Output};
+use transit_dsp::Plugin;
 
 /// Makes, uses and releases a plugin, then shuts plugin hosting down unless `exit_handler_only`.
 fn child(exit_handler_only: bool) {
     let dir = common::fixture_dir();
-    let gain = soundcraft_vst3_host::scan_paths(&[dir.to_path_buf()]).into_iter().find(|d| d.name == "Fixture Gain").expect("fixture").id;
-    let mut p = soundcraft_vst3_host::instantiate_plugin(&gain).expect("instantiate");
+    let gain = transit_vst3_host::scan_paths(&[dir.to_path_buf()]).into_iter().find(|d| d.name == "Fixture Gain").expect("fixture").id;
+    let mut p = transit_vst3_host::instantiate_plugin(&gain).expect("instantiate");
     p.prepare(48_000.0, 64, 2);
     let mut io = vec![vec![0.5f32; 64]; 2];
     p.process(&mut io, 64);
     drop(p);
     if !exit_handler_only {
-        soundcraft_vst3_host::shutdown();
-        assert!(soundcraft_vst3_host::instantiate_plugin(&gain).is_err(), "loads fail after shutdown");
+        transit_vst3_host::shutdown();
+        assert!(transit_vst3_host::instantiate_plugin(&gain).is_err(), "loads fail after shutdown");
     }
 }
 

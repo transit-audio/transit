@@ -1,8 +1,8 @@
-//! `AuPlugin`: a loaded Audio Unit behind the safe `soundcraft_dsp::Plugin` trait.
+//! `AuPlugin`: a loaded Audio Unit behind the safe `transit_dsp::Plugin` trait.
 
 use crate::ffi::Instance;
-use soundcraft_dsp::{Plugin, PluginInfo, Transport};
 use std::collections::HashMap;
+use transit_dsp::{Plugin, PluginInfo, Transport};
 
 /// Most MIDI events queued between two blocks (extra events are dropped).
 const EVENT_CAP: usize = 1024;
@@ -259,7 +259,7 @@ impl Plugin for AuPlugin {
         ok
     }
 
-    fn state_reader(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginStateReader>> {
+    fn state_reader(&mut self) -> Option<Box<dyn transit_dsp::PluginStateReader>> {
         let link = self.inst.state_link();
         Some(Box::new(move || link.save_state()))
     }

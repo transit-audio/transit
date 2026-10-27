@@ -68,7 +68,7 @@ the real handler, not only a unit test of a helper.
 Logic and Live agree on the model: the editor shows the clip's own content, the loop cycle, with a
 loop-end marker; edits change every repeat. Logic dims the repeats as ghosts, Live shows none.
 `keys.rs` follows that (ADR 0019). For a clip with a valid `ClipLoop` the roll's span
-(`KeysLayout::clip_ticks`) is `0..loop.end` (the first pass, ticks from `soundcraft_mix::loop_frame`,
+(`KeysLayout::clip_ticks`) is `0..loop.end` (the first pass, ticks from `transit_mix::loop_frame`,
 the same frame playback uses), not the arrangement length. A line labeled "Loop end" marks `loop.end`;
 a tint covers the one-shot lead-in before `loop.start`; `loop.end..length` shows the cycle's notes
 (those starting in `loop.start..loop.end`) as dimmed ghosts (`arrange::GHOST_ALPHA`) with thin cycle

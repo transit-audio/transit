@@ -1,9 +1,9 @@
 //! Third-party CLAP plugins: discovery (`engine.clap_plugins`) and id lookup shared by the mixer
-//! commands. Hosting itself lives in `soundcraft-clap-host`.
+//! commands. Hosting itself lives in `transit-clap-host`.
 
 use super::*;
 use crate::cmd;
-use soundcraft_dsp::PluginInfo;
+use transit_dsp::PluginInfo;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![cmd!(
@@ -24,13 +24,13 @@ pub fn specs() -> Vec<CommandSpec> {
 /// on the plug-in host thread (ADR 0018), and waited for at most [`INFO_WAIT`]: a type that takes
 /// longer is "loading" ([`loading`]), its read carries on there, and a later call finds it.
 pub fn plugin_info(id: &str) -> Option<&'static PluginInfo> {
-    // Tests never reach the real hosts (see `soundcraft_mix::create_plugin`): a lookup scans the
+    // Tests never reach the real hosts (see `transit_mix::create_plugin`): a lookup scans the
     // machine's plug-in folders, and some plug-ins never unload.
     #[cfg(test)]
-    if soundcraft_mix::is_third_party(id) {
+    if transit_mix::is_third_party(id) {
         return None;
     }
-    soundcraft_dsp::plugin_info(id).or_else(|| hosted_info(id, INFO_WAIT).ok().flatten())
+    transit_dsp::plugin_info(id).or_else(|| hosted_info(id, INFO_WAIT).ok().flatten())
 }
 
 /// How long a command waits for a hosted type's description from the plug-in host thread.
@@ -57,7 +57,7 @@ pub fn loading(id: &str) -> bool {
 /// A hosted type's description: from the hosts' caches, else read on the plug-in host thread
 /// (which makes and destroys one instance there), waiting at most `wait`.
 fn hosted_info(id: &str, wait: std::time::Duration) -> std::result::Result<Option<&'static PluginInfo>, Loading> {
-    if let Some(info) = soundcraft_clap_host::cached_info(id).or_else(|| soundcraft_vst3_host::cached_info(id)) {
+    if let Some(info) = transit_clap_host::cached_info(id).or_else(|| transit_vst3_host::cached_info(id)) {
         return Ok(Some(info));
     }
     let running = {
@@ -67,7 +67,7 @@ fn hosted_info(id: &str, wait: std::time::Duration) -> std::result::Result<Optio
     let submit = || {
         let id = id.to_owned();
         transit_plugin_host::shared().submit(move |_| {
-            soundcraft_clap_host::plugin_info(&id).or_else(|| soundcraft_vst3_host::plugin_info(&id)).or_else(|| soundcraft_au_host::plugin_info(&id))
+            transit_clap_host::plugin_info(&id).or_else(|| transit_vst3_host::plugin_info(&id)).or_else(|| transit_au_host::plugin_info(&id))
         })
     };
     let mut fresh = running.is_none();
@@ -119,18 +119,18 @@ pub fn unknown(cmd: &str, id: &str) -> EngineError {
 /// plug-in to a session has no use for it: the playback runtime creates the instance itself, one
 /// frame later, with the UI saying so.
 pub fn plugin_head(id: &str, params: bool) -> Option<(String, bool, Option<&'static PluginInfo>)> {
-    if let Some(info) = soundcraft_dsp::plugin_info(id) {
+    if let Some(info) = transit_dsp::plugin_info(id) {
         return Some((info.id.to_string(), info.is_instrument, Some(info)));
     }
     #[cfg(test)]
-    if soundcraft_mix::is_third_party(id) {
+    if transit_mix::is_third_party(id) {
         return None;
     }
     if !params {
-        let scanned = if id.starts_with(soundcraft_clap_host::ID_PREFIX) {
-            soundcraft_clap_host::cached().and_then(|all| all.into_iter().find(|d| d.id == id).map(|d| (d.id, d.is_instrument)))
-        } else if id.starts_with(soundcraft_vst3_host::ID_PREFIX) {
-            soundcraft_vst3_host::cached().and_then(|all| all.into_iter().find(|d| d.id == id).map(|d| (d.id, d.is_instrument)))
+        let scanned = if id.starts_with(transit_clap_host::ID_PREFIX) {
+            transit_clap_host::cached().and_then(|all| all.into_iter().find(|d| d.id == id).map(|d| (d.id, d.is_instrument)))
+        } else if id.starts_with(transit_vst3_host::ID_PREFIX) {
+            transit_vst3_host::cached().and_then(|all| all.into_iter().find(|d| d.id == id).map(|d| (d.id, d.is_instrument)))
         } else {
             None
         };
@@ -141,7 +141,7 @@ pub fn plugin_head(id: &str, params: bool) -> Option<(String, bool, Option<&'sta
     // Adding a plug-in (with parameter values, or one the scan does not list) needs its
     // description: read on the plug-in host thread like `plugin_info`, but waited for up to the
     // host's request timeout, as the command did when it instantiated the plug-in itself.
-    soundcraft_dsp::plugin_info(id)
+    transit_dsp::plugin_info(id)
         .or_else(|| hosted_info(id, transit_plugin_host::shared().timeout()).ok().flatten())
         .map(|info| (info.id.to_string(), info.is_instrument, Some(info)))
 }

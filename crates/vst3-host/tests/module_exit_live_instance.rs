@@ -6,8 +6,8 @@ mod common;
 
 fn main() {
     let dir = common::fixture_dir();
-    let gain = soundcraft_vst3_host::scan_paths(&[dir.to_path_buf()]).into_iter().find(|d| d.name == "Fixture Gain").expect("fixture").id;
-    let p = soundcraft_vst3_host::instantiate_plugin(&gain).expect("instantiate");
+    let gain = transit_vst3_host::scan_paths(&[dir.to_path_buf()]).into_iter().find(|d| d.name == "Fixture Gain").expect("fixture").id;
+    let p = transit_vst3_host::instantiate_plugin(&gain).expect("instantiate");
     // Still alive at exit, like a plugin held by a mixer that is never torn down.
     std::mem::forget(p);
     println!("module_exit_live_instance: ok");

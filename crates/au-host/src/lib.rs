@@ -2,14 +2,14 @@
 //!
 //! Lists the effect (`aufx`), music effect (`aumf`) and instrument (`aumu`) Audio Units
 //! registered with the system's component manager and exposes each one as a
-//! [`soundcraft_dsp::Plugin`], so the mix engine treats them exactly like the built-in plugins.
+//! [`transit_dsp::Plugin`], so the mix engine treats them exactly like the built-in plugins.
 //! Plugin ids are `au:<type>:<subtype>:<manufacturer>` with the three four-char codes written out
 //! (`au:aufx:dely:appl`); a code with bytes outside printable ASCII is written `#` + 8 upper-case
 //! hex digits instead. Parameter ids are global-scope `AudioUnitParameterID`s as decimal strings;
 //! values are the Audio Unit's own (plain) values, ranges and units, so no mapping is needed.
 //! Boolean parameters become toggles, indexed ones starting at 0 become choices.
 //!
-//! Like `soundcraft-vst3-host`, this is an isolated `unsafe` crate (craftrules never-crash):
+//! Like `transit-vst3-host`, this is an isolated `unsafe` crate (craftrules never-crash):
 //! `unsafe` is denied crate-wide and allowed only in the private `ffi` module (hand-written
 //! AudioToolbox / CoreFoundation declarations). The public API is safe, returns
 //! `Result`/`Option` and never panics. Limits of in-process hosting: an Audio Unit that itself
@@ -44,7 +44,7 @@ mod registry;
 #[cfg(target_os = "macos")]
 pub use plugin::AuPlugin;
 
-use soundcraft_dsp::{Category, Plugin, PluginInfo};
+use transit_dsp::{Category, Plugin, PluginInfo};
 
 /// Prefix of every hosted-Audio-Unit plugin id.
 pub const ID_PREFIX: &str = "au:";
@@ -238,7 +238,7 @@ pub fn rescan() -> Vec<AuDescriptor> {
 }
 
 /// Creates a plugin by `au:<type>:<subtype>:<manufacturer>`, prepared for 48 kHz stereo with
-/// 1024-frame blocks (like `soundcraft_dsp::create`), with the reason when it fails.
+/// 1024-frame blocks (like `transit_dsp::create`), with the reason when it fails.
 pub fn instantiate(id: &str) -> Result<Box<dyn Plugin>, AuError> {
     api::instantiate(id)
 }

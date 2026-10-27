@@ -33,12 +33,12 @@ fn copy_dir(from: &Path, to: &Path) {
 /// both loads are over, then exits its own modules.
 fn loader(dir: PathBuf, barrier: Arc<Barrier>, done: mpsc::Sender<(usize, Duration)>) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || {
-        soundcraft_vst3_host::adopt_main_thread();
+        transit_vst3_host::adopt_main_thread();
         let t = Instant::now();
-        let found = soundcraft_vst3_host::scan_paths(&[dir]).len();
+        let found = transit_vst3_host::scan_paths(&[dir]).len();
         let _ = done.send((found, t.elapsed()));
         barrier.wait();
-        soundcraft_vst3_host::shutdown();
+        transit_vst3_host::shutdown();
     })
 }
 

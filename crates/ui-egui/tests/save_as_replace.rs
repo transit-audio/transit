@@ -2,7 +2,7 @@
 use egui::vec2;
 use egui_kittest::{Harness, kittest::Queryable};
 use serde_json::json;
-use soundcraft_ui_egui::{Services, SoundApp, dialogs::Dialog};
+use transit_ui_egui::{Services, SoundApp, dialogs::Dialog};
 
 #[test]
 fn saving_over_another_session_takes_the_replace_button() {
@@ -10,9 +10,9 @@ fn saving_over_another_session_takes_the_replace_button() {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("Song.transit");
-    soundcraft_engine::Engine::default().execute("session.save_as", &json!({"path": path})).unwrap();
+    transit_engine::Engine::default().execute("session.save_as", &json!({"path": path})).unwrap();
     let other = std::fs::read(&path).unwrap();
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     app.dialogs.open = Some(Dialog::PathPrompt {
         cmd: "session.save_as".into(),
         title: "Save Session As".into(),

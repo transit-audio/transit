@@ -21,12 +21,12 @@ native-asio = ["dep:transit-audio-asio"]
 
 # `--backend jack --list-devices`: the native JACK backend's listing (ADR 0021 slice 1), Linux only.
 # Measuring through it comes with slice 2.
-native-jack = ["soundcraft-playback/native-jack"]
+native-jack = ["transit-playback/native-jack"]
 
 [dependencies]
 serde_json.workspace = true
 transit-audio-backend.workspace = true
-soundcraft-playback.workspace = true
+transit-playback.workspace = true
 # `--midi-roundtrip`: the MIDI output port the note goes to.
 transit-midi-io.workspace = true
 # `--midi-roundtrip` releases its note on Ctrl+C (a console's default handler ends the process without unwinding).

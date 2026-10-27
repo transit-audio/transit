@@ -1,8 +1,8 @@
 //! The documented four-bar progression is reachable and verifiable through MCP alone.
 
 use serde_json::{Value, json};
-use soundcraft_automation::{Headless, mcp::Server};
-use soundcraft_engine::Engine;
+use transit_automation::{Headless, mcp::Server};
+use transit_engine::Engine;
 
 fn tool(server: &mut Server<Headless>, name: &str, args: Value) -> Value {
     let reply = server.call_tool(name, &args);

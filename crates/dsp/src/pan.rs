@@ -55,7 +55,7 @@ pub struct SpeakerPos {
     pub lfe: bool,
 }
 
-/// Surround panner controls (see `soundcraft_model::SurroundPan`).
+/// Surround panner controls (see `transit_model::SurroundPan`).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SurroundParams {
     /// -1 (left) ..= 1 (right).

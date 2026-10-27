@@ -13,10 +13,10 @@ use crate::arrange::R4;
 use crate::theme::TOKENS;
 use egui::{Align2, FontId, Rect, Sense, Stroke, StrokeKind, pos2, vec2};
 use serde_json::{Value, json};
-use soundcraft_model::TrackId;
-use soundcraft_time::Samples;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use transit_model::TrackId;
+use transit_time::Samples;
 
 /// Seconds between progress polls.
 const POLL_S: f64 = 0.1;

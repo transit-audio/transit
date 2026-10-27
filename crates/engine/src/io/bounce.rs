@@ -9,7 +9,7 @@ use super::*;
 pub struct Bounce {
     /// Offline mode for hosted plugins: they sample their parameter curves at creation, since no
     /// editor `idle` runs during a render.
-    _offline: soundcraft_vst3_host::OfflineScope,
+    _offline: transit_vst3_host::OfflineScope,
     session: Arc<Session>,
     path: PathBuf,
     part: PathBuf,
@@ -19,13 +19,13 @@ pub struct Bounce {
     normalize: bool,
     /// Measuring the peak to normalize to, the first of two passes.
     measuring: bool,
-    render: soundcraft_mix::RangeRender,
+    render: transit_mix::RangeRender,
     block: Vec<Vec<f32>>,
     done: usize,
     gain: f32,
     peak: f32,
-    meter: soundcraft_dsp::meter::LoudnessMeter,
-    enc: Option<soundcraft_audio_io::FileEncoder<Out>>,
+    meter: transit_dsp::meter::LoudnessMeter,
+    enc: Option<transit_audio_io::FileEncoder<Out>>,
 }
 
 /// A finished bounce: the size of its file and its levels.
@@ -70,8 +70,8 @@ impl Bounce {
         let part = path.with_file_name(format!("{name}.part"));
         crate::file_access::check_write(path).map_err(EngineError::Io)?;
         crate::file_access::check_write(&part).map_err(EngineError::Io)?;
-        let enc = (|| -> std::result::Result<_, soundcraft_audio_io::AudioError> {
-            let enc = soundcraft_audio_io::FileEncoder::new(Out::create(&part)?, opts, channels, s.sample_rate.hz(), Some(fmt.channel_mask()))?;
+        let enc = (|| -> std::result::Result<_, transit_audio_io::AudioError> {
+            let enc = transit_audio_io::FileEncoder::new(Out::create(&part)?, opts, channels, s.sample_rate.hz(), Some(fmt.channel_mask()))?;
             enc.check_room(u64::try_from(r.len()).unwrap_or(0))?;
             Ok(enc)
         })()
@@ -80,10 +80,10 @@ impl Bounce {
             EngineError::Io(format!("{}: {err}", path.display()))
         })?;
         // Hosted plug-ins are created while the render is compiled: offline mode must already be on.
-        let offline = soundcraft_vst3_host::offline_scope();
-        let render = soundcraft_mix::RangeRender::try_new(&s, bus, r, 1024)
+        let offline = transit_vst3_host::offline_scope();
+        let render = transit_mix::RangeRender::try_new(&s, bus, r, 1024)
             .map_err(|err| EngineError::Io(format!("{}: the session could not be prepared for rendering: {err:?}", path.display())))?;
-        let meter = soundcraft_dsp::meter::LoudnessMeter::new(s.sample_rate.as_f64() as f32, channels);
+        let meter = transit_dsp::meter::LoudnessMeter::new(s.sample_rate.as_f64() as f32, channels);
         Ok(Bounce {
             _offline: offline,
             session: s,
@@ -130,7 +130,7 @@ impl Bounce {
                 Some((chunk, n)) => {
                     fill(&mut self.block, chunk, n, self.fold, self.gain);
                     self.done += n;
-                    self.peak = self.peak.max(soundcraft_dsp::offline::peak(&self.block));
+                    self.peak = self.peak.max(transit_dsp::offline::peak(&self.block));
                     if !self.measuring {
                         self.meter.process(&self.block, n);
                         if let Some(enc) = &mut self.enc {
@@ -139,11 +139,11 @@ impl Bounce {
                     }
                 }
                 None if self.measuring => {
-                    self.gain = if self.peak > 0.0 { soundcraft_dsp::db_to_gain(-0.1) / self.peak } else { 1.0 };
+                    self.gain = if self.peak > 0.0 { transit_dsp::db_to_gain(-0.1) / self.peak } else { 1.0 };
                     self.peak = 0.0;
                     self.done = 0;
                     self.measuring = false;
-                    self.render = soundcraft_mix::RangeRender::try_new(&self.session, self.bus, self.range, 1024).map_err(|err| {
+                    self.render = transit_mix::RangeRender::try_new(&self.session, self.bus, self.range, 1024).map_err(|err| {
                         EngineError::Io(format!("{}: the session could not be prepared for rendering: {err:?}", self.path.display()))
                     })?;
                 }
@@ -171,7 +171,7 @@ impl Bounce {
         };
         Ok(Bounced {
             bytes,
-            peak_db: soundcraft_dsp::gain_to_db(self.peak),
+            peak_db: transit_dsp::gain_to_db(self.peak),
             lufs: self.meter.integrated_lufs(),
             true_peak_db: self.meter.true_peak_db(),
         })
@@ -199,7 +199,7 @@ pub(crate) fn check_bounce_range(s: &Session, range: Range, command: &str) -> Re
 /// channel (a mono or stereo main mix as stereo), or an ITU stereo fold-down of a surround source
 /// when `fold_stereo`.
 pub(crate) fn bounce_layout(s: &Session, bus: Option<BusId>, fold_stereo: bool) -> (ChannelFormat, usize, Option<ChannelFormat>) {
-    let nch = soundcraft_mix::source_channels(s, bus);
+    let nch = transit_mix::source_channels(s, bus);
     let fmt = match bus {
         Some(id) => s.bus(id).map_or(ChannelFormat::Stereo, |b| b.format),
         None if nch <= 2 => ChannelFormat::Stereo,
@@ -210,7 +210,7 @@ pub(crate) fn bounce_layout(s: &Session, bus: Option<BusId>, fold_stereo: bool) 
 
 /// The first `n` frames of `chunk`, folded down from `fold` when set and scaled by `gain`.
 fn fill(block: &mut Vec<Vec<f32>>, chunk: &[Vec<f32>], n: usize, fold: Option<ChannelFormat>, gain: f32) {
-    let folded = fold.map(|from| soundcraft_mix::fold_down_stereo(from, chunk));
+    let folded = fold.map(|from| transit_mix::fold_down_stereo(from, chunk));
     let src = folded.as_deref().unwrap_or(chunk);
     block.resize_with(src.len(), Vec::new);
     for (d, c) in block.iter_mut().zip(src) {

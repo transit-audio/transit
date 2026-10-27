@@ -4,18 +4,18 @@
 //! A name the table lacks is a silent, listed sink. Input routes resolve through the table too.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_dsp::Plugin;
-use soundcraft_mix::{
+use std::sync::Arc;
+use transit_audio_io::AudioBuffer;
+use transit_dsp::Plugin;
+use transit_mix::{
     Adoption, DeviceGeneration, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, plan_sinks,
     render_range, unresolved_routes,
 };
-use soundcraft_model::{
+use transit_model::{
     Bus, BusId, ChannelFormat, Clip, Insert, IoDirection, IoMap, IoPath, KeyFrom, KeySource, Route, SendSlot, Session, SourceAudio, SourceId, Tap,
     TrackId, TrackKind,
 };
-use soundcraft_time::Range;
-use std::sync::Arc;
+use transit_time::Range;
 
 const SR: u32 = 48_000;
 const BLOCK: usize = 256;
@@ -30,8 +30,8 @@ struct Delay {
 }
 
 impl Plugin for Delay {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
-        soundcraft_dsp::plugin_info("gain").unwrap()
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
+        transit_dsp::plugin_info("gain").unwrap()
     }
     fn prepare(&mut self, _sr: f32, _mb: usize, ch: usize) {
         self.ring = vec![vec![0.0; self.n.max(1)]; ch.max(2)];
@@ -73,7 +73,7 @@ fn make(s: &Session, spec: &InstanceSpec) -> Option<NewInstance> {
     let t = s.track(spec.track)?;
     let ins = t.mixer.inserts.get(spec.slot)?.as_ref()?;
     let Some(n) = ins.preset.strip_prefix("delay:").and_then(|n| n.parse::<usize>().ok()) else {
-        return soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
+        return transit_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
             .map(|n| NewInstance { plugin: n.plugin, refused_state: false });
     };
     let mut d = Delay { n, ring: Vec::new(), w: 0 };
@@ -131,11 +131,11 @@ fn render(s: &Session, io: &IoMap, input: Option<Vec<Vec<f32>>>) -> Rendered {
     let mut mix = MixEngine::realtime(target(out_channels));
     let mut compiler = PlanCompiler::new(target(out_channels), PlanLimits::default());
     compiler.set_io(Arc::new(io.clone()));
-    let mut maker = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| make(s, spec);
+    let mut maker = |spec: &InstanceSpec, _: transit_mix::SlotGen| make(s, spec);
     let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut maker).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
     compiler.reclaim(env);
-    let main = soundcraft_mix::main_channels(s);
+    let main = transit_mix::main_channels(s);
     let width = main + plan_sinks(s, io, out_channels).channels();
     let mut out = vec![vec![0.0f32; BLOCK]; width];
     let mut channels = vec![Vec::new(); width];

@@ -2,14 +2,14 @@
 //! process → state, plus an instrument playing a note. Skips (passes) when a unit is missing.
 #![cfg(target_os = "macos")]
 
-use soundcraft_dsp::{Category, Plugin};
+use transit_dsp::{Category, Plugin};
 
 const LOWPASS: &str = "au:aufx:lpas:appl";
 const DELAY: &str = "au:aufx:dely:appl";
 const DLS: &str = "au:aumu:dls :appl";
 
 fn available(id: &str) -> bool {
-    let ok = soundcraft_au_host::scan().iter().any(|d| d.id == id);
+    let ok = transit_au_host::scan().iter().any(|d| d.id == id);
     if !ok {
         eprintln!("{id} not installed; skipping");
     }
@@ -46,10 +46,10 @@ fn run_tone(p: &mut dyn Plugin, freq: f32) -> f32 {
 
 #[test]
 fn scan_lists_apple_units() {
-    let all = soundcraft_au_host::scan();
+    let all = transit_au_host::scan();
     for d in &all {
-        assert!(d.id.starts_with(soundcraft_au_host::ID_PREFIX), "{d:?}");
-        assert_eq!(soundcraft_au_host::parse_id(&d.id).map(|(t, s, m)| soundcraft_au_host::format_id(t, s, m)), Some(d.id.clone()));
+        assert!(d.id.starts_with(transit_au_host::ID_PREFIX), "{d:?}");
+        assert_eq!(transit_au_host::parse_id(&d.id).map(|(t, s, m)| transit_au_host::format_id(t, s, m)), Some(d.id.clone()));
         assert_eq!(d.is_instrument, d.component_type == "aumu");
     }
     if let Some(d) = all.iter().find(|d| d.id == LOWPASS) {
@@ -62,7 +62,7 @@ fn scan_lists_apple_units() {
         assert!(d.is_instrument);
         assert_eq!(d.category, Category::Instrument);
     }
-    assert_eq!(soundcraft_au_host::rescan().len(), all.len());
+    assert_eq!(transit_au_host::rescan().len(), all.len());
 }
 
 #[test]
@@ -70,12 +70,12 @@ fn lowpass_attenuates_highs() {
     if !available(LOWPASS) {
         return;
     }
-    let info = soundcraft_au_host::plugin_info(LOWPASS).unwrap();
+    let info = transit_au_host::plugin_info(LOWPASS).unwrap();
     assert_eq!(info.id, LOWPASS);
     assert!(!info.params.is_empty(), "AULowpass has a cutoff");
-    let mut p = soundcraft_au_host::create(LOWPASS).unwrap();
+    let mut p = transit_au_host::create(LOWPASS).unwrap();
     p.prepare(48_000.0, 512, 2);
-    let cutoff = info.params.iter().find(|q| q.unit == soundcraft_dsp::Unit::Hz).unwrap();
+    let cutoff = info.params.iter().find(|q| q.unit == transit_dsp::Unit::Hz).unwrap();
     assert!(p.set_param(cutoff.id, 500.0));
     assert!((p.param(cutoff.id).unwrap() - 500.0).abs() < 1e-3);
     assert!(!p.set_param("999999", 1.0));
@@ -105,9 +105,9 @@ fn state_reader_reads_while_another_thread_renders() {
     if !available(LOWPASS) {
         return;
     }
-    let info = soundcraft_au_host::plugin_info(LOWPASS).unwrap();
-    let cutoff = info.params.iter().find(|q| q.unit == soundcraft_dsp::Unit::Hz).unwrap();
-    let mut p = soundcraft_au_host::create(LOWPASS).unwrap();
+    let info = transit_au_host::plugin_info(LOWPASS).unwrap();
+    let cutoff = info.params.iter().find(|q| q.unit == transit_dsp::Unit::Hz).unwrap();
+    let mut p = transit_au_host::create(LOWPASS).unwrap();
     p.prepare(48_000.0, 512, 2);
     assert!(p.set_param(cutoff.id, 500.0));
     let mut reader = p.state_reader().expect("every unit has a ClassInfo");
@@ -123,7 +123,7 @@ fn state_reader_reads_while_another_thread_renders() {
     let p = audio.join().unwrap();
     let state = reader.save_state().expect("ClassInfo");
     drop(p);
-    let mut q = soundcraft_au_host::create(LOWPASS).unwrap();
+    let mut q = transit_au_host::create(LOWPASS).unwrap();
     assert_eq!(reader.save_state(), None);
     assert!(q.load_state(&state));
     assert!((q.param(cutoff.id).unwrap() - 500.0).abs() < 1.0, "{:?}", q.param(cutoff.id));
@@ -134,7 +134,7 @@ fn delay_runs_mono_stereo_and_odd_blocks() {
     if !available(DELAY) {
         return;
     }
-    let mut p = soundcraft_au_host::instantiate(DELAY).unwrap();
+    let mut p = transit_au_host::instantiate(DELAY).unwrap();
     for (ch, block) in [(2usize, 1024usize), (1, 300), (2, 5000)] {
         p.prepare(44_100.0, block, ch);
         let mut io: Vec<Vec<f32>> = (0..ch).map(|_| sine(440.0, 44_100.0, block, 0)).collect();
@@ -160,7 +160,7 @@ fn dls_synth_plays_a_note() {
     if !available(DLS) {
         return;
     }
-    let mut p = match soundcraft_au_host::instantiate(DLS) {
+    let mut p = match transit_au_host::instantiate(DLS) {
         Ok(p) => p,
         Err(e) => {
             eprintln!("DLSMusicDevice unavailable: {e}");

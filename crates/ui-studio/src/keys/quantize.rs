@@ -1,7 +1,7 @@
 //! Non-destructive quantize preview; only Apply changes the document.
 
 use super::*;
-use soundcraft_midi::ops::QuantizeOptions;
+use transit_midi::ops::QuantizeOptions;
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
@@ -38,7 +38,7 @@ impl StudioApp {
     pub(super) fn keys_quantize_preview(&self) -> Vec<Note> {
         let notes = self.keys_notes();
         let mut selected: Vec<_> = self.quantize_indices(&notes).iter().map(|i| notes[*i]).collect();
-        soundcraft_midi::ops::quantize(&mut selected, &self.ui.keys.quantize.options());
+        transit_midi::ops::quantize(&mut selected, &self.ui.keys.quantize.options());
         selected
     }
 

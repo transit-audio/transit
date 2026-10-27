@@ -7,11 +7,11 @@ For token locations, desktop client configuration, musical addressing, and a com
 four-bar MIDI progression, see [Assistant access](assistant-access.md).
 
 ```sh
-soundcraft-cli mcp                    # headless engine (no window, no audio device)
-soundcraft-cli mcp --demo             # headless, starting from the demo session
-soundcraft-cli mcp --automation-read-root DIR --automation-write-root DIR   # headless, confined to folders
+transit-cli mcp                    # headless engine (no window, no audio device)
+transit-cli mcp --demo             # headless, starting from the demo session
+transit-cli mcp --automation-read-root DIR --automation-write-root DIR   # headless, confined to folders
 transit --control 7801 &              # the desktop app…
-soundcraft-cli mcp --connect 7801     # …driven over MCP: same tools plus screenshots and clicks
+transit-cli mcp --connect 7801     # …driven over MCP: same tools plus screenshots and clicks
 ```
 
 `transit --control PORT` listens on loopback only and requires a per-run token: the app writes it to
@@ -21,17 +21,17 @@ same file and sends `auth <token>` first. See [control-protocol.md](control-prot
 Claude Code:
 
 ```sh
-claude mcp add soundcraft -- soundcraft-cli mcp --demo
+claude mcp add soundcraft -- transit-cli mcp --demo
 ```
 
 ## Confining file access
 
 ```sh
-soundcraft-cli mcp --automation-read-root /work/project --automation-write-root /work/project/out
+transit-cli mcp --automation-read-root /work/project --automation-write-root /work/project/out
 ```
 
 ```json
-{"mcpServers": {"soundcraft": {"command": "soundcraft-cli",
+{"mcpServers": {"soundcraft": {"command": "transit-cli",
   "args": ["mcp", "--automation-read-root", "/work/project", "--automation-write-root", "/work/project/out"]}}}
 ```
 

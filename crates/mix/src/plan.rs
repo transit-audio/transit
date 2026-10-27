@@ -12,9 +12,9 @@
 //! [`PlanCompiler`]: crate::PlanCompiler
 
 use super::{APPLIED_INLINE, BusTable, ChannelFormat, KeyBank, PluginSlot, SampleSource, Session, Sink, SourceAudio, Strip, StripMeter, TrackId};
-use soundcraft_dsp::Plugin;
-use soundcraft_model::IoMap;
 use std::sync::Arc;
+use transit_dsp::Plugin;
+use transit_model::IoMap;
 
 /// A plan's place in the sequence of plans an engine adopts. [`PlanGeneration::EMPTY`] is a
 /// fresh engine's. Generations only advance, with checked arithmetic, and never wrap.

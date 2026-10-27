@@ -15,12 +15,12 @@
 //! snapshot. Timing model, safety rules and reconnects: `docs/contributing/knowledge/midi-output.md`.
 use super::monitor::{Dir, MonitorEvent, Tap};
 use crate::device_clock::HostOrigin;
-use soundcraft_model::{MidiOutChannel, MidiOutPort, Session, TrackId};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
 use transit_midi_io::{Direction, MidiIo, OutputHandle, PortInfo, PortKey, PortWatcher};
+use transit_model::{MidiOutChannel, MidiOutPort, Session, TrackId};
 
 /// Events each ring holds. At 3125 messages a second (a saturated DIN link) this is over a
 /// second of backlog; playback renders at most a few blocks ahead of presentation.
@@ -167,7 +167,7 @@ impl Destination {
             .iter()
             .filter(|t| t.kind.is_midi() && !t.inactive)
             .filter_map(|t| match &t.midi_output {
-                soundcraft_model::MidiOutput::External { port, channel, .. } => Some(Self {
+                transit_model::MidiOutput::External { port, channel, .. } => Some(Self {
                     track: t.id,
                     port: port.clone(),
                     channel: *channel,
@@ -176,7 +176,7 @@ impl Destination {
                     echo: t.mixer.record_arm || t.mixer.input_monitor,
                     device: t.external_instrument().is_some(),
                 }),
-                soundcraft_model::MidiOutput::Internal => None,
+                transit_model::MidiOutput::Internal => None,
             })
             .take(MAX_DESTINATIONS)
             .collect()
@@ -1055,7 +1055,7 @@ impl Worker {
 
     /// Sends on `port`; false when the port is not open or the send failed (then it is lost).
     fn send(&mut self, port: usize, message: &[u8]) -> bool {
-        if soundcraft_mix::on_audio_thread() {
+        if transit_mix::on_audio_thread() {
             // Never: this thread is not an audio thread. Counted so tests can prove it.
             self.counters.audio_thread_sends.fetch_add(1, Ordering::Relaxed);
         }

@@ -1,9 +1,9 @@
 //! The device lifetime boundary. Fakes replace only the device operations; reconnect and editor
 //! retry logic use the same ordering as physical devices.
 
-use soundcraft_model::TrackId;
-use soundcraft_playback::{AudioConfig, Player, record::Recorder, telemetry::CallbackTelemetry};
 use std::{cell::RefCell, rc::Rc};
+use transit_model::TrackId;
+use transit_playback::{AudioConfig, Player, record::Recorder, telemetry::CallbackTelemetry};
 
 pub(crate) trait Editors {
     fn close_editors(&self) -> Result<(), String>;
@@ -131,8 +131,8 @@ impl Connection for FakeConnection {
 mod tests {
     #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
     use super::*;
-    use soundcraft_playback::PlayerError;
     use std::cell::Cell;
+    use transit_playback::PlayerError;
 
     struct RefusingConnection {
         inner: FakeConnection,

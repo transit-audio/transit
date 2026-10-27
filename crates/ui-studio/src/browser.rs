@@ -25,13 +25,13 @@ use crate::shortcuts::{Action as A, pressed};
 use crate::theme::TOKENS;
 use egui::{Align2, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
-use soundcraft_model::{TrackId, TrackKind};
-use soundcraft_time::Samples;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
+use transit_model::{TrackId, TrackKind};
+use transit_time::Samples;
 
 /// Height of a tree or list row.
 pub const ROW_H: f32 = 20.0;
@@ -898,7 +898,7 @@ fn refusal(p: &Path) -> String {
 /// The nearest beat to `at`.
 fn snap_to_beat(app: &StudioApp, at: Samples) -> Samples {
     let s = app.engine.session();
-    let q = soundcraft_time::TICKS_PER_QUARTER;
+    let q = transit_time::TICKS_PER_QUARTER;
     let t = s.tempo.samples_to_ticks(at, s.sample_rate);
     let beat = ((t as f64 / q as f64).round() as i64) * q;
     s.tempo.tick_to_samples(beat.max(0), s.sample_rate)
@@ -908,7 +908,7 @@ fn snap_to_beat(app: &StudioApp, at: Samples) -> Samples {
 pub fn bbs(app: &StudioApp, at: Samples) -> String {
     let s = app.engine.session();
     let bb = s.tempo.bar_beat_at(at.max(0), s.sample_rate);
-    format!("{}.{}.{}", bb.bar, bb.beat, bb.tick / (soundcraft_time::TICKS_PER_QUARTER / 4) + 1)
+    format!("{}.{}.{}", bb.bar, bb.beat, bb.tick / (transit_time::TICKS_PER_QUARTER / 4) + 1)
 }
 
 /// Ctrl+Alt+B shows and hides the browser; Escape closes the Add Folder field it is typing in.

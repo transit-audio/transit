@@ -3,10 +3,10 @@
 use super::*;
 use crate::plan_bridge;
 use crate::player::midi_map::{MapSpec, Wanted};
-use soundcraft_mix::{DeviceGeneration, PlanLimits, RenderTarget};
-use soundcraft_model::{Control, ControlTarget, MapMode, Mapping, MappingSet, MidiSource, Scope, SourceKind, Strip, TrackId, resolve};
 use transit_midi_io::fake::FakeInputPort;
 use transit_midi_io::{InputConfig, fake::Fake};
+use transit_mix::{DeviceGeneration, PlanLimits, RenderTarget};
+use transit_model::{Control, ControlTarget, MapMode, Mapping, MappingSet, MidiSource, Scope, SourceKind, Strip, TrackId, resolve};
 use transit_rt::testing::measure;
 
 const PORT: u64 = 3;
@@ -156,7 +156,7 @@ fn the_session_mapping_wins_a_conflict_with_the_controller_profile() {
 
 #[test]
 fn a_plug_in_parameter_target_matches_like_any_continuous_control_and_is_consumed() {
-    use soundcraft_model::AutoParam;
+    use transit_model::AutoParam;
     let tracks = [TrackId(10)];
     let mut session = MappingSet::default();
     let mut profile = MappingSet::default();

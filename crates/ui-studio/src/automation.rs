@@ -13,7 +13,7 @@
 //!
 //! While playing, tracks in Write record the fader, and tracks in Touch or Latch record the control
 //! being moved (Latch keeps writing it after release until Stop), through `automation.set_point`
-//! with `from` (the write pass `soundcraft-ui-egui` runs, plan 06 section 3). A pass is one undo
+//! with `from` (the write pass `transit-ui-egui` runs, plan 06 section 3). A pass is one undo
 //! step. Clicking a fader, knob or send highlights its lane when that lane is open.
 //!
 //! Model and engine gaps (plan 06 leaks): lanes are linear only (no curve shapes, L38); the mix
@@ -29,9 +29,9 @@ use crate::mixer::{MenuItem, balance_of, db_to_k, k_to_db, pans_for};
 use crate::theme::{self, TOKENS};
 use egui::{Align2, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::{Value, json};
-use soundcraft_model::{AutoParam, AutomationMode, Route, Session, Track, TrackId};
-use soundcraft_time::Samples;
 use std::collections::HashMap;
+use transit_model::{AutoParam, AutomationMode, Route, Session, Track, TrackId};
+use transit_time::Samples;
 
 /// A new lane's height, and the range a drag on its bottom edge keeps it in (points).
 pub const LANE_H: f32 = 56.0;
@@ -110,19 +110,16 @@ impl Lane {
     }
 
     /// The lane of a plug-in parameter: an insert's (`slot` the insert index) or, for
-    /// [`soundcraft_mix::INSTRUMENT_SLOT`], the instrument's. (`fine::Target` is `Copy`, which a
+    /// [`transit_mix::INSTRUMENT_SLOT`], the instrument's. (`fine::Target` is `Copy`, which a
     /// parameter id is not, so plug-in gestures reach the write pass as [`ParamTouch`]es.)
     pub fn of_param(track: TrackId, slot: usize, param: &str) -> Option<(TrackId, Lane)> {
-        let slot = if slot == soundcraft_mix::INSTRUMENT_SLOT {
-            AutoParam::INSTRUMENT_SLOT
-        } else {
-            u8::try_from(slot).ok().filter(|s| *s < u8::MAX - 1)?
-        };
+        let slot =
+            if slot == transit_mix::INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(slot).ok().filter(|s| *s < u8::MAX - 1)? };
         Some((track, Lane::Plugin { slot, param: param.to_string() }))
     }
 
     /// The device a plug-in lane addresses.
-    pub(crate) fn device<'a>(&self, t: &'a Track) -> Option<&'a soundcraft_model::Insert> {
+    pub(crate) fn device<'a>(&self, t: &'a Track) -> Option<&'a transit_model::Insert> {
         let Lane::Plugin { slot, .. } = self else { return None };
         if *slot == AutoParam::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(usize::from(*slot))?.as_ref() }
     }
@@ -162,7 +159,7 @@ impl Lane {
         matches!(self, Lane::Mute | Lane::SendMute(_))
     }
 
-    pub(crate) fn info(&self, t: &Track) -> Option<&'static soundcraft_dsp::ParamInfo> {
+    pub(crate) fn info(&self, t: &Track) -> Option<&'static transit_dsp::ParamInfo> {
         let Lane::Plugin { param, .. } = self else { return None };
         device_info(&self.device(t)?.plugin)?.params.iter().find(|p| p.id == param)
     }
@@ -294,10 +291,10 @@ impl Lane {
 /// A device's parameter table: a built-in's, or a hosted plug-in's from the host registries'
 /// cache. The cache is read only (no instantiation), so this never blocks the UI thread; a type
 /// is cached once any instance of it has loaded (a project's plug-ins do on open).
-pub fn device_info(plugin: &str) -> Option<&'static soundcraft_dsp::PluginInfo> {
-    soundcraft_dsp::plugin_info(plugin)
-        .or_else(|| plugin.starts_with(soundcraft_clap_host::ID_PREFIX).then(|| soundcraft_clap_host::cached_info(plugin)).flatten())
-        .or_else(|| plugin.starts_with(soundcraft_vst3_host::ID_PREFIX).then(|| soundcraft_vst3_host::cached_info(plugin)).flatten())
+pub fn device_info(plugin: &str) -> Option<&'static transit_dsp::PluginInfo> {
+    transit_dsp::plugin_info(plugin)
+        .or_else(|| plugin.starts_with(transit_clap_host::ID_PREFIX).then(|| transit_clap_host::cached_info(plugin)).flatten())
+        .or_else(|| plugin.starts_with(transit_vst3_host::ID_PREFIX).then(|| transit_vst3_host::cached_info(plugin)).flatten())
 }
 
 /// The mixer's and the sends' lanes of `t`, as (section, label, lane id).
@@ -319,7 +316,7 @@ fn base_choices(app: &mut StudioApp, s: &Session, t: &Track) -> Vec<(String, Str
 }
 
 /// The devices of `t` (the instrument, then the inserts) as (slot, device).
-fn devices_of(t: &Track) -> impl Iterator<Item = (u8, &soundcraft_model::Insert)> {
+fn devices_of(t: &Track) -> impl Iterator<Item = (u8, &transit_model::Insert)> {
     t.instrument
         .iter()
         .map(|i| (AutoParam::INSTRUMENT_SLOT, i))
@@ -346,7 +343,7 @@ pub fn choices(app: &mut StudioApp, s: &Session, t: &Track) -> Vec<(String, Stri
 
 /// One device's parameter model for the picker: from the cached table (built once per table), or,
 /// for a plug-in whose table is not cached yet, the parameters the document holds.
-fn device_model(app: &mut StudioApp, ins: &soundcraft_model::Insert) -> std::sync::Arc<crate::automation_picker::DeviceModel> {
+fn device_model(app: &mut StudioApp, ins: &transit_model::Insert) -> std::sync::Arc<crate::automation_picker::DeviceModel> {
     match device_info(&ins.plugin) {
         Some(info) => app.auto.picker.model(&ins.plugin, info),
         None => {
@@ -1462,7 +1459,7 @@ const THIN_TOLERANCE: f32 = 0.1;
 
 /// How many points `automation.thin` would remove from `lane` (within `range`), without touching
 /// the document: a thin that removes nothing must not enter the undo history.
-fn removable(lane: Option<&soundcraft_model::AutomationLane>, range: Option<(Samples, Samples)>) -> usize {
+fn removable(lane: Option<&transit_model::AutomationLane>, range: Option<(Samples, Samples)>) -> usize {
     let Some(l) = lane else { return 0 };
     let mut part = l.clone();
     if let Some((a, b)) = range {

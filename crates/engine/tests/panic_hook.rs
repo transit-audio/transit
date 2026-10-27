@@ -1,10 +1,10 @@
 //! The real installed hook is measured separately from Rust's allocating unwind runtime.
 //! One test in its own binary owns the process-wide hook and logger.
 
-use soundcraft_engine::{Engine, audio_thread_panics};
 use std::cell::Cell;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use transit_engine::{Engine, audio_thread_panics};
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 
 #[global_allocator]
@@ -54,7 +54,7 @@ fn audio_panic_hook_allocates_nothing_and_non_audio_panics_still_log() {
     let before = audio_thread_panics();
     for (i, message) in ["callback panic", "render worker panic"].into_iter().enumerate() {
         let (caught, stats) = std::thread::spawn(move || {
-            soundcraft_mix::mark_audio_thread();
+            transit_mix::mark_audio_thread();
             let caught = std::panic::catch_unwind(|| std::panic::panic_any(message));
             (caught, HOOK_STATS.get())
         })
@@ -70,7 +70,7 @@ fn audio_panic_hook_allocates_nothing_and_non_audio_panics_still_log() {
         assert_eq!(caught.unwrap_err().downcast_ref::<&str>(), Some(&message));
     }
 
-    assert!(!soundcraft_mix::on_audio_thread());
+    assert!(!transit_mix::on_audio_thread());
     let count = audio_thread_panics();
     let caught = std::panic::catch_unwind(|| std::panic::panic_any("control panic"));
     assert_eq!(caught.unwrap_err().downcast_ref::<&str>(), Some(&"control panic"));

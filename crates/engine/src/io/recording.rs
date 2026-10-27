@@ -18,7 +18,7 @@ pub fn plan_takes(e: &Engine, unsaved_dir: &Path, input_channels: usize) -> Vec<
             let inputs = (0..t.channels())
                 .map(|k| {
                     let channel = match &t.mixer.input {
-                        soundcraft_model::Route::Hardware(h) => soundcraft_model::input_channel(Some(e.io_map()), h, k),
+                        transit_model::Route::Hardware(h) => transit_model::input_channel(Some(e.io_map()), h, k),
                         _ => k,
                     };
                     channel % input_channels.max(1)
@@ -61,7 +61,7 @@ pub struct Take {
 }
 
 /// Place recorded take files as `plan` says, as one undo step ("Record").
-pub fn place_recording(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, PathBuf)>) -> Vec<soundcraft_model::ClipId> {
+pub fn place_recording(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, PathBuf)>) -> Vec<transit_model::ClipId> {
     let ids = add_recording(e, plan.start, takes, plan.pass);
     if let Some(p) = plan.punch {
         let clips: Vec<u64> = ids.iter().map(|c| c.0).collect();
@@ -74,7 +74,7 @@ pub fn place_recording(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, Pa
 /// with `new_take`, a track that already has clips under the take (within the punch range)
 /// first gets a duplicate of its playlist, so the old clips stay as the previous take; the punch
 /// trim is folded in too. Loop recordings never duplicate.
-pub fn place_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, PathBuf)>, new_take: bool) -> Vec<soundcraft_model::ClipId> {
+pub fn place_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, PathBuf)>, new_take: bool) -> Vec<transit_model::ClipId> {
     let ids = add_recording_take(e, plan.start, takes, plan.pass, new_take, plan.punch);
     let n0 = e.undo_pushes();
     if !ids.is_empty() {
@@ -94,7 +94,7 @@ pub fn place_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackI
 /// Turn recorded take files into clips at `start`, as one undo step ("Record"); each file is the
 /// source of its clips. With `pass` (loop recording), a take becomes one clip per pass (at most
 /// 1000), each pass after the first on a new playlist.
-pub fn add_recording(e: &mut Engine, start: Samples, takes: Vec<(TrackId, PathBuf)>, pass: Option<Samples>) -> Vec<soundcraft_model::ClipId> {
+pub fn add_recording(e: &mut Engine, start: Samples, takes: Vec<(TrackId, PathBuf)>, pass: Option<Samples>) -> Vec<transit_model::ClipId> {
     add_recording_take(e, start, takes, pass, false, None)
 }
 
@@ -107,13 +107,13 @@ pub fn add_recording_take(
     pass: Option<Samples>,
     new_take: bool,
     punch: Option<Range>,
-) -> Vec<soundcraft_model::ClipId> {
+) -> Vec<transit_model::ClipId> {
     let before = e.session_arc();
     let n0 = e.undo_pushes();
     let mut out = Vec::new();
     for (tid, path) in takes {
         let read =
-            read_file(&path).and_then(|b| soundcraft_audio_io::decode(&b, None).map_err(|err| EngineError::Io(format!("{}: {err}", path.display()))));
+            read_file(&path).and_then(|b| transit_audio_io::decode(&b, None).map_err(|err| EngineError::Io(format!("{}: {err}", path.display()))));
         let Ok((_, buf)) = read.inspect_err(|err| e.message(err.to_string())) else { continue };
         if new_take && pass.is_none() {
             let frames = i64::try_from(buf.frames()).unwrap_or(0);
@@ -144,7 +144,7 @@ pub fn add_recording_take(
             if offset > 0
                 && let Some(t) = s.track_mut(tid)
             {
-                t.playlists.push(soundcraft_model::Playlist::new(format!("{}.{:02}", t.name, t.playlists.len() + 1)));
+                t.playlists.push(transit_model::Playlist::new(format!("{}.{:02}", t.name, t.playlists.len() + 1)));
                 t.active_playlist = t.playlists.len() - 1;
             }
             let cid = s.new_clip_id();
@@ -185,7 +185,7 @@ mod record_tests {
         let clip = e.session_mut().new_clip_id();
         crate::edit::place_clip(e.session_mut(), t, Clip::audio(clip, "Original", source, 0, 0, 480));
         let tr = e.session_mut().track_mut(t).unwrap();
-        tr.freeze = Some(soundcraft_model::Frozen { source, start: 0, length: 480, hash: tr.freeze_hash(), revision: 1, latency: 0 });
+        tr.freeze = Some(transit_model::Frozen { source, start: 0, length: 480, hash: tr.freeze_hash(), revision: 1, latency: 0 });
         let before = e.session_arc();
         let path = std::env::temp_dir().join(format!("failed-playlist-{}.wav", std::process::id()));
         write_take(&path, 480);
@@ -205,7 +205,7 @@ mod record_tests {
     }
 
     fn write_take(path: &Path, frames: usize) {
-        let mut bytes = soundcraft_audio_io::wav_float_header(1, 48_000, frames as u64).unwrap();
+        let mut bytes = transit_audio_io::wav_float_header(1, 48_000, frames as u64).unwrap();
         bytes.extend((0..frames).flat_map(|i| (i as f32 / frames as f32 - 0.5).to_le_bytes()));
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
@@ -213,7 +213,7 @@ mod record_tests {
 
     #[test]
     fn an_input_path_by_name_records_its_channel_and_old_labels_keep_their_meaning() {
-        use soundcraft_model::{ChannelFormat, IoDirection, IoMap, IoPath};
+        use transit_model::{ChannelFormat, IoDirection, IoMap, IoPath};
         let dir = std::env::temp_dir().join(format!("soundcraft-takes-path-{}", std::process::id()));
         let mut e = Engine::default();
         let mut io = IoMap::for_device("ASIO", "x", 8, 2);
@@ -228,8 +228,8 @@ mod record_tests {
         assert_eq!(channels(gtr), [4], "Guitar is input channel 5");
         assert_eq!(channels(drums), [6, 7]);
         assert_eq!(channels(old), [2, 3]);
-        // The same names, resolved by the mix: one function (`soundcraft_model::input_channel`).
-        assert_eq!(soundcraft_model::input_channel(Some(e.io_map()), "Guitar", 0), 4);
+        // The same names, resolved by the mix: one function (`transit_model::input_channel`).
+        assert_eq!(transit_model::input_channel(Some(e.io_map()), "Guitar", 0), 4);
     }
 
     #[test]

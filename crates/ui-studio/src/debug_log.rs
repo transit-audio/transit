@@ -7,8 +7,8 @@
 
 use crate::StudioApp;
 use serde_json::{Value, json};
-use soundcraft_playback::telemetry::CallbackTelemetry;
 use std::path::PathBuf;
+use transit_playback::telemetry::CallbackTelemetry;
 
 /// What the studio asks of the app's logger.
 pub trait LogControl {
@@ -74,7 +74,7 @@ impl StudioApp {
 
 /// Once a frame, from the player read-back: remember the counters when the transport starts and
 /// write the INFO line when it stops.
-pub(crate) fn track_run_counts(counts: &mut Option<RunCounts>, p: &soundcraft_playback::Player, playing: bool) {
+pub(crate) fn track_run_counts(counts: &mut Option<RunCounts>, p: &transit_playback::Player, playing: bool) {
     if playing {
         counts.get_or_insert_with(|| RunCounts::of(&p.callback_telemetry()));
     } else if let Some(start) = counts.take()
@@ -85,8 +85,8 @@ pub(crate) fn track_run_counts(counts: &mut Option<RunCounts>, p: &soundcraft_pl
 }
 
 /// The connected external MIDI output ports named by `tracks`, once each, in order.
-pub fn connected_ports(tracks: &[soundcraft_playback::player::midi_out::TrackOutput]) -> Vec<String> {
-    use soundcraft_playback::player::midi_out::DestinationState;
+pub fn connected_ports(tracks: &[transit_playback::player::midi_out::TrackOutput]) -> Vec<String> {
+    use transit_playback::player::midi_out::DestinationState;
     let mut out: Vec<String> = Vec::new();
     for t in tracks.iter().filter(|t| t.state == DestinationState::Connected) {
         if !out.contains(&t.port) {
@@ -108,7 +108,7 @@ pub fn closed_lines(before: &[String], now: &[String]) -> Vec<String> {
 }
 
 /// Once a frame, from the player read-back: log the output ports that opened or closed since the last frame.
-pub(crate) fn track_midi_outputs(seen: &mut Vec<String>, p: &soundcraft_playback::Player) {
+pub(crate) fn track_midi_outputs(seen: &mut Vec<String>, p: &transit_playback::Player) {
     let Ok(status) = p.midi_status() else { return };
     let now = connected_ports(&status.output.tracks);
     for line in opened_lines(seen, &now).into_iter().chain(closed_lines(seen, &now)) {
@@ -144,7 +144,7 @@ mod tests {
     }
 
     fn app(fake: &Rc<Fake>) -> StudioApp {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, crate::Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, crate::Services::default());
         app.services.log = Some(Box::new(Shared(Rc::clone(fake))));
         app
     }
@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn without_a_logger_the_command_says_so() {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, crate::Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, crate::Services::default());
         let e = app.run("help.debug_logging", json!({})).expect_err("no logger");
         assert!(e.contains("not available"), "{e}");
     }

@@ -6,11 +6,11 @@ use crate::scan as paths;
 use crate::scan_cache;
 use crate::{ClapDescriptor, ClapError, parse_id};
 use clap_sys::ext::params::{CLAP_PARAM_IS_ENUM, CLAP_PARAM_IS_HIDDEN, CLAP_PARAM_IS_READONLY, CLAP_PARAM_IS_STEPPED};
-use soundcraft_dsp::{ParamInfo, Plugin, PluginInfo, Taper, Unit};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+use transit_dsp::{ParamInfo, Plugin, PluginInfo, Taper, Unit};
 
 /// Most labels read for an enum parameter.
 const MAX_CHOICES: f64 = 128.0;

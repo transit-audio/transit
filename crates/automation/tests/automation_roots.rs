@@ -4,10 +4,10 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::{Value, json};
-use soundcraft_automation::{Headless, mcp::Server};
-use soundcraft_engine::Engine;
-use soundcraft_engine::file_access::AutomationRoots;
 use std::path::{Path, PathBuf};
+use transit_automation::{Headless, mcp::Server};
+use transit_engine::Engine;
+use transit_engine::file_access::AutomationRoots;
 
 /// A marker that must never come back from a file outside the read root.
 const SECRET: &str = "TOP-SECRET-MARKER-5f3a";
@@ -40,7 +40,7 @@ fn fixture(name: &str) -> Fixture {
         std::fs::create_dir_all(d).unwrap();
     }
     // Real files, made by an unconfined engine.
-    let mut e = soundcraft_engine::demo::demo_engine();
+    let mut e = transit_engine::demo::demo_engine();
     for dir in [&read, &outside] {
         let run = |e: &mut Engine, id: &str, p: Value| e.execute(id, &p).unwrap_or_else(|err| panic!("{id}: {err}"));
         run(&mut e, "file.bounce_mix", json!({"path": s(dir.join("tone.wav")), "start": 0, "end": 4800}));
@@ -160,7 +160,7 @@ fn reads_outside_the_read_root_are_refused_and_nothing_reaches_the_result() {
 
 /// A clip of the demo session.
 fn kick_clip() -> u64 {
-    soundcraft_engine::demo::demo_engine().session().track_by_name("Kick").unwrap().clips()[0].id.0
+    transit_engine::demo::demo_engine().session().track_by_name("Kick").unwrap().clips()[0].id.0
 }
 
 /// Every command that writes a user-named file or folder, with params for `dir`.
@@ -188,7 +188,7 @@ fn writes(dir: &Path) -> Vec<(&'static str, Value)> {
 
 fn demo_server(read: Option<&Path>, write: Option<&Path>) -> Server<Headless> {
     let roots = AutomationRoots::new(read, write).unwrap();
-    Server::new(Headless::new(soundcraft_engine::demo::demo_engine()).with_automation_roots(roots))
+    Server::new(Headless::new(transit_engine::demo::demo_engine()).with_automation_roots(roots))
 }
 
 #[test]

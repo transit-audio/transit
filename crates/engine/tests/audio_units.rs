@@ -4,7 +4,7 @@
 #![cfg(target_os = "macos")]
 
 use serde_json::json;
-use soundcraft_engine::Engine;
+use transit_engine::Engine;
 
 #[test]
 fn audio_units_insert_by_id() {

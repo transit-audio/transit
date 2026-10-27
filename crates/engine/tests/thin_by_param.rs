@@ -1,6 +1,6 @@
 use serde_json::json;
-use soundcraft_engine::Engine;
-use soundcraft_model::{AutoParam, TrackId};
+use transit_engine::Engine;
+use transit_model::{AutoParam, TrackId};
 
 fn setup() -> (Engine, TrackId) {
     let mut e = Engine::default();

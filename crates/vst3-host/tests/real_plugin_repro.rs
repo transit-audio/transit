@@ -13,10 +13,10 @@
 //! connected to its controller, dereferenced the `IMessage` our `IHostApplication::createInstance`
 //! did not make (access violation in `Ozone 11 Equalizer.vst3` at offset 0x278c6).
 
-use soundcraft_dsp::Plugin;
 use std::io::Write;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
+use transit_dsp::Plugin;
 
 fn step(s: &str) {
     eprintln!("[repro] {s}");
@@ -29,10 +29,10 @@ fn main() {
         return;
     };
     step(&format!("load_bundle {}", path.display()));
-    let ds = soundcraft_vst3_host::load_bundle(&path).expect("load bundle");
+    let ds = transit_vst3_host::load_bundle(&path).expect("load bundle");
     let d = ds.into_iter().next().expect("an audio module class");
     step(&format!("instantiate {} ({})", d.name, d.id));
-    let mut p = soundcraft_vst3_host::instantiate_plugin(&d.id).expect("instantiate");
+    let mut p = transit_vst3_host::instantiate_plugin(&d.id).expect("instantiate");
     step("prepare 48000/1024/2");
     p.prepare(48_000.0, 1024, 2);
     step("process");
@@ -56,7 +56,7 @@ fn main() {
         let mut n = 0u64;
         while Instant::now() < until {
             let _ = ed.idle();
-            let _ = soundcraft_vst3_host::service_requests();
+            let _ = transit_vst3_host::service_requests();
             if n.is_multiple_of(20) {
                 let mut io = vec![vec![0.05f32; 1024]; 2];
                 p.process(&mut io, 1024);
@@ -70,7 +70,7 @@ fn main() {
     step("drop");
     drop(ed);
     drop(p);
-    soundcraft_vst3_host::shutdown();
+    transit_vst3_host::shutdown();
     step("done");
     println!("real_plugin_repro: ok");
 }

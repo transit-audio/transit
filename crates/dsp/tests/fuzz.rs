@@ -1,5 +1,5 @@
 use proptest::prelude::*;
-use soundcraft_dsp::{create, offline, plugins};
+use transit_dsp::{create, offline, plugins};
 
 proptest! {
     #![proptest_config(ProptestConfig::with_cases(48))]
@@ -51,6 +51,6 @@ proptest! {
         offline::normalize(&mut m, a, n % 2 == 0);
         offline::fade(&mut m, n, n / 2, offline::FadeShape::SCurve);
         offline::gain(&mut m, a);
-        let _ = soundcraft_dsp::spectrum::magnitude_db(&ch[0], n);
+        let _ = transit_dsp::spectrum::magnitude_db(&ch[0], n);
     }
 }

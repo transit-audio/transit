@@ -12,16 +12,16 @@
 //! instruments' panics.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::Plugin;
-use soundcraft_mix::{
-    DeviceGeneration, INSTRUMENT_SLOT, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget,
-    mark_audio_thread,
-};
-use soundcraft_model::{ChannelFormat, Insert, Session, TrackId, TrackKind};
 use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
+use transit_dsp::Plugin;
+use transit_mix::{
+    DeviceGeneration, INSTRUMENT_SLOT, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget,
+    mark_audio_thread,
+};
+use transit_model::{ChannelFormat, Insert, Session, TrackId, TrackKind};
 use transit_rt::testing::{CountingAlloc, measure};
 
 #[global_allocator]
@@ -65,7 +65,7 @@ struct Panics {
 }
 
 impl Plugin for Panics {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
         self.inner.info()
     }
     fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
@@ -90,7 +90,7 @@ impl Plugin for Panics {
 }
 
 fn panics(shared: &Arc<Shared>, ch: usize) -> Box<dyn Plugin> {
-    let mut inner = soundcraft_dsp::create("gain").unwrap();
+    let mut inner = transit_dsp::create("gain").unwrap();
     inner.prepare(SR as f32, BLOCK, ch);
     Box::new(Panics { inner, shared: Arc::clone(shared) })
 }
@@ -133,12 +133,12 @@ fn plan_engine(shared: &Arc<Shared>) -> MixEngine {
     let mut mix = MixEngine::realtime(target());
     let mut compiler = PlanCompiler::new(target(), PlanLimits::default());
     let sh = Arc::clone(shared);
-    let mut make = move |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| {
+    let mut make = move |spec: &InstanceSpec, _: transit_mix::SlotGen| {
         assert!(spec.id == "clap:test.panics" && spec.slot == INSTRUMENT_SLOT, "{}", spec.id);
         Some(NewInstance { plugin: panics(&sh, spec.ch), refused_state: false })
     };
     let mut env = compiler.compile(Arc::new(s), compiler.active(), PlanGeneration::EMPTY.checked_next().unwrap(), &mut make).unwrap();
-    assert!(matches!(mix.adopt_plan(&mut env), soundcraft_mix::Adoption::Adopted));
+    assert!(matches!(mix.adopt_plan(&mut env), transit_mix::Adoption::Adopted));
     compiler.reclaim(env);
     let mut out = vec![vec![0.0; BLOCK]; 2];
     for b in 0..4 {
@@ -182,7 +182,7 @@ fn parallel_panicking_instruments_drop_no_payload_on_a_render_worker() {
     let callback = mark.thread().id();
     let (mix, shared, panic) = mark.join().unwrap();
     MixEngine::force_serial(true);
-    let workers = soundcraft_mix::render_worker_promotions().iter().filter(|p| p.is_some()).count();
+    let workers = transit_mix::render_worker_promotions().iter().filter(|p| p.is_some()).count();
     let raised = shared.raised.lock().unwrap().clone();
     let on_workers = raised.iter().filter(|t| **t != callback).count();
     println!("render pool workers: {workers}; {on_workers} of {} panics raised on a worker", raised.len());

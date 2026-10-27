@@ -9,15 +9,15 @@ repository.workspace = true
 publish = false
 
 [dependencies]
-soundcraft-time.workspace = true
-soundcraft-midi.workspace = true
-soundcraft-model.workspace = true
-soundcraft-dsp.workspace = true
-soundcraft-mix.workspace = true
-soundcraft-engine.workspace = true
-soundcraft-playback.workspace = true
-soundcraft-clap-host.workspace = true
-soundcraft-vst3-host.workspace = true
+transit-time.workspace = true
+transit-midi.workspace = true
+transit-model.workspace = true
+transit-dsp.workspace = true
+transit-mix.workspace = true
+transit-engine.workspace = true
+transit-playback.workspace = true
+transit-clap-host.workspace = true
+transit-vst3-host.workspace = true
 egui.workspace = true
 egui_extras.workspace = true
 resvg.workspace = true
@@ -27,9 +27,9 @@ log.workspace = true
 image.workspace = true
 
 [dev-dependencies]
-soundcraft-playback = { workspace = true, features = ["test-hooks"] }
-soundcraft-clap-host = { workspace = true, features = ["test-hooks"] }
-soundcraft-vst3-host = { workspace = true, features = ["test-hooks"] }
+transit-playback = { workspace = true, features = ["test-hooks"] }
+transit-clap-host = { workspace = true, features = ["test-hooks"] }
+transit-vst3-host = { workspace = true, features = ["test-hooks"] }
 transit-plugin-host.workspace = true
 transit-audio-backend.workspace = true
 transit-midi-io = { workspace = true, features = ["fake"] }

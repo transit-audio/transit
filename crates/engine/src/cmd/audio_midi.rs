@@ -4,8 +4,8 @@
 use super::*;
 use crate::{Clipboard, cmd};
 use serde_json::json;
-use soundcraft_midi::{Note, Sequence};
-use soundcraft_model::{Clip, ClipId};
+use transit_midi::{Note, Sequence};
+use transit_model::{Clip, ClipId};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -21,16 +21,16 @@ fn audio_as_midi(e: &mut Engine, p: &Value) -> Result<Value> {
         return Err(bad(id, "select some audio first"));
     }
     let s = e.session();
-    if s.track(t).is_none_or(|x| x.kind != soundcraft_model::TrackKind::Audio) {
+    if s.track(t).is_none_or(|x| x.kind != transit_model::TrackKind::Audio) {
         return Err(bad(id, "select audio on an audio track"));
     }
     let r = crate::io::bounded_to_track(s, t, r);
     let _offline = crate::io::offline();
-    let audio = soundcraft_mix::render_clips(s, t, r);
+    let audio = transit_mix::render_clips(s, t, r);
     let n = audio.first().map_or(0, Vec::len);
     let k = audio.len().max(1) as f32;
     let mono: Vec<f32> = (0..n).map(|i| audio.iter().map(|c| c.get(i).copied().unwrap_or(0.0)).sum::<f32>() / k).collect();
-    let detected = soundcraft_dsp::pitch_detect::audio_to_notes(&mono, s.sample_rate.as_f64() as f32);
+    let detected = transit_dsp::pitch_detect::audio_to_notes(&mono, s.sample_rate.as_f64() as f32);
     let base = s.tempo.samples_to_ticks(r.start, s.sample_rate);
     let mut seq = Sequence::default();
     for d in &detected {
@@ -48,8 +48,8 @@ fn audio_as_midi(e: &mut Engine, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soundcraft_audio_io::AudioBuffer;
-    use soundcraft_model::{ChannelFormat, TrackKind};
+    use transit_audio_io::AudioBuffer;
+    use transit_model::{ChannelFormat, TrackKind};
 
     #[test]
     fn copies_a_melody_as_midi_and_pastes_it() {
@@ -60,7 +60,7 @@ mod tests {
         a.extend(tone(330.0));
         let frames = a.len() as i64;
         let s = e.session_mut();
-        let src = crate::io::add_source(s, "mel", AudioBuffer { sample_rate: 48_000, channels: vec![a] }, None, soundcraft_audio_io::FileFormat::Wav);
+        let src = crate::io::add_source(s, "mel", AudioBuffer { sample_rate: 48_000, channels: vec![a] }, None, transit_audio_io::FileFormat::Wav);
         let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
         let cid = s.new_clip_id();
         crate::edit::place_clip(s, t, Clip::audio(cid, "mel", src, 0, 0, frames));
@@ -70,7 +70,7 @@ mod tests {
         e.execute("edit.paste", &json!({"track": m.0, "at": 0})).unwrap();
         let clip = e.session().track(m).unwrap().clips()[0].clone();
         match clip.content {
-            soundcraft_model::ClipContent::Midi { sequence } => assert_eq!(sequence.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![57, 64]),
+            transit_model::ClipContent::Midi { sequence } => assert_eq!(sequence.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![57, 64]),
             _ => panic!("expected MIDI"),
         }
     }

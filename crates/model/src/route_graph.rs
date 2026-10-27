@@ -1220,7 +1220,7 @@ mod tests {
         assert!(l.cut.iter().all(|e| e.kind == EdgeKind::Output));
     }
 
-    /// Release build: `cargo test -p soundcraft-model --release -- --ignored layering_is_fast`.
+    /// Release build: `cargo test -p transit-model --release -- --ignored layering_is_fast`.
     #[test]
     #[ignore = "timing; run in release"]
     fn layering_is_fast() {

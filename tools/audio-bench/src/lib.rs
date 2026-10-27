@@ -204,7 +204,7 @@ pub fn command_line(args: &[String]) -> String {
 /// rather than the silent fallback the Player takes.
 pub fn cpal_backend(system: Option<&str>) -> Result<Box<dyn ab::Backend>, String> {
     use ab::BackendFactory;
-    let backend = soundcraft_playback::backend::cpal::CpalFactory.backend(system).ok_or("no audio system is available")?;
+    let backend = transit_playback::backend::cpal::CpalFactory.backend(system).ok_or("no audio system is available")?;
     match system {
         Some(want) if !backend.system().eq_ignore_ascii_case(want) => {
             Err(format!("audio system {want} is not available (got {}); ASIO is served by --backend asio", backend.system()))
@@ -263,7 +263,7 @@ pub fn asio_backend() -> Result<Box<dyn ab::Backend>, String> {
 /// The device names of a cpal system, for `--list-devices` (enumerates; opens no stream); the JACK
 /// system through the native JACK backend ([`list_jack`]).
 pub fn list_devices(system: Option<&str>) -> Result<String, String> {
-    if soundcraft_playback::devices::is_jack_system(system) {
+    if transit_playback::devices::is_jack_system(system) {
         return list_jack();
     }
     let backend = cpal_backend(system)?;
@@ -281,7 +281,7 @@ pub fn list_devices(system: Option<&str>) -> Result<String, String> {
 /// group with its ports, rate and quantum, or why the system is unavailable. Opens a short-lived
 /// probe client only; never starts a server and opens no stream.
 pub fn list_jack() -> Result<String, String> {
-    let system = soundcraft_playback::devices::native_jack_system()
+    let system = transit_playback::devices::native_jack_system()
         .ok_or("--backend jack needs Linux and a build with --features native-jack (cargo build -p audio-bench --features native-jack)")?;
     let mut text = format!("system: {} (native)\n", system.name);
     // Without a device the diagnostic says why the system is unavailable; with one, each group's

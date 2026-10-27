@@ -14,8 +14,8 @@ use crate::StudioApp;
 use crate::theme::TOKENS;
 use egui::{RichText, Ui};
 use serde_json::json;
-use soundcraft_dsp::{ParamInfo, PluginInfo, Taper, Unit};
-use soundcraft_model::{Insert, TrackId};
+use transit_dsp::{ParamInfo, PluginInfo, Taper, Unit};
+use transit_model::{Insert, TrackId};
 
 const SAMPLER: &str = "sampler";
 const DRUM_SYNTH: &str = "drum_synth";
@@ -67,7 +67,7 @@ pub struct EditorState {
     /// A control changed since the pointer went down: its undo step ends on release.
     gesture: bool,
     /// The scope taps to use when there is no player (tests, `--no-audio`).
-    pub hub: Option<std::sync::Arc<soundcraft_mix::ScopeHub>>,
+    pub hub: Option<std::sync::Arc<transit_mix::ScopeHub>>,
     /// The frames last read from a tap, reused every frame.
     pub(crate) frames: Vec<f32>,
     /// The insert taps this module switched on: (track, hub uid).
@@ -87,7 +87,7 @@ fn whole_number(plugin: &str, param: &str) -> bool {
 fn format_param(plugin: &str, p: &ParamInfo, value: f32) -> String {
     if plugin == SAMPLER && NOTE_PARAMS.contains(&p.id) {
         let n = value.round().clamp(0.0, 127.0) as u8;
-        return format!("{} ({n})", soundcraft_midi::note_name(n));
+        return format!("{} ({n})", transit_midi::note_name(n));
     }
     if whole_number(plugin, p.id) {
         return format!("{:.0}", value.round());
@@ -111,8 +111,8 @@ impl StudioApp {
     /// The built-in plug-in an editor key names (`None` for a hosted one, or for nothing).
     pub(crate) fn builtin_at(&self, key: (TrackId, usize)) -> Option<Insert> {
         let t = self.engine.session().track(key.0)?;
-        let ins = if key.1 == soundcraft_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(key.1)?.as_ref() }?;
-        (!soundcraft_mix::is_third_party(&ins.plugin) && soundcraft_dsp::plugin_info(&ins.plugin).is_some()).then(|| ins.clone())
+        let ins = if key.1 == transit_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(key.1)?.as_ref() }?;
+        (!transit_mix::is_third_party(&ins.plugin) && transit_dsp::plugin_info(&ins.plugin).is_some()).then(|| ins.clone())
     }
 
     /// Writes one built-in parameter: merged into the gesture in progress.
@@ -120,7 +120,7 @@ impl StudioApp {
         let (t, slot) = key;
         self.builtin_editor.gesture = true;
         self.touch_param(t, slot, param, false);
-        let r = if slot == soundcraft_mix::INSTRUMENT_SLOT {
+        let r = if slot == transit_mix::INSTRUMENT_SLOT {
             self.engine.execute_merged(
                 "mix.instrument_param",
                 &json!({"track": t.0, "param": param, "value": value}),
@@ -147,8 +147,8 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
     let mut active: Vec<(TrackId, u64)> = Vec::new();
     for (n, key) in keys.into_iter().enumerate() {
         let Some(ins) = app.builtin_at(key) else { continue };
-        let Some(info) = soundcraft_dsp::plugin_info(&ins.plugin) else { continue };
-        let instrument = key.1 == soundcraft_mix::INSTRUMENT_SLOT;
+        let Some(info) = transit_dsp::plugin_info(&ins.plugin) else { continue };
+        let instrument = key.1 == transit_mix::INSTRUMENT_SLOT;
         let track_name = app.engine.session().track(key.0).map(|t| t.name.clone()).unwrap_or_default();
         let title = format!("{track_name} · {}", info.name);
         let mut layout = EditorLayout {

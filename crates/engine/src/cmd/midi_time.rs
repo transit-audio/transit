@@ -1,7 +1,7 @@
 //! Checked musical addressing shared by MIDI commands.
 
 use super::*;
-use soundcraft_time::TempoMap;
+use transit_time::TempoMap;
 
 /// A local bar grid begins at `origin`; a later meter change starts a new local bar.
 /// Both components are 1-based, including durations: 1|2 is one beat, 2|1 is one bar.

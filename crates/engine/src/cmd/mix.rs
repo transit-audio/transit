@@ -3,7 +3,7 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::{AutoParam, AutomationMode, INSERT_SLOTS, Insert, SEND_SLOTS, SendSlot, Session, TrackId};
+use transit_model::{AutoParam, AutomationMode, INSERT_SLOTS, Insert, SEND_SLOTS, SendSlot, Session, TrackId};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -144,7 +144,7 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("mix.send_level", "Send Level", [], None, "{track?, slot, db?, pan?, mute?, pre_fader?}", has_selection, send_level),
         cmd!("mix.new_bus", "New Bus", [], None, "{name, format?: stereo}", always, |e, p| {
             let name = str_param(p, "name").filter(|n| !n.trim().is_empty()).ok_or_else(|| bad("mix.new_bus", "`name` required"))?.to_string();
-            let fmt = str_param(p, "format").and_then(soundcraft_model::ChannelFormat::from_id).unwrap_or(soundcraft_model::ChannelFormat::Stereo);
+            let fmt = str_param(p, "format").and_then(transit_model::ChannelFormat::from_id).unwrap_or(transit_model::ChannelFormat::Stereo);
             let id = e.session_mut().add_bus(&name, fmt);
             Ok(json!({"bus": id}))
         }),
@@ -218,7 +218,7 @@ fn remove_bus(e: &mut Engine, p: &Value) -> Result<Value> {
     const ID: &str = "mix.remove_bus";
     let s = e.session();
     let bus = match p.get("bus") {
-        Some(v) if v.is_u64() => s.bus(soundcraft_model::BusId(v.as_u64().unwrap_or(0))),
+        Some(v) if v.is_u64() => s.bus(transit_model::BusId(v.as_u64().unwrap_or(0))),
         Some(v) if v.is_string() => s.bus_by_name(v.as_str().unwrap_or("")),
         _ => return Err(bad(ID, "`bus` required (id or name)")),
     };
@@ -241,7 +241,7 @@ fn remove_bus(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 /// Apply a change to `t` and its active mix-group siblings.
-fn set_grouped(s: &mut Session, t: TrackId, attr: &str, f: impl Fn(&mut soundcraft_model::Track)) {
+fn set_grouped(s: &mut Session, t: TrackId, attr: &str, f: impl Fn(&mut transit_model::Track)) {
     let mut targets = vec![t];
     for g in &s.groups {
         if g.active && g.mix && g.members.contains(&t) && g.attributes.iter().any(|a| a == attr) {
@@ -259,7 +259,7 @@ fn set_grouped(s: &mut Session, t: TrackId, attr: &str, f: impl Fn(&mut soundcra
     }
 }
 
-fn toggle(e: &mut Engine, p: &Value, cmd: &str, set: fn(&mut Session, TrackId, bool), get: fn(&soundcraft_model::Track) -> bool) -> Result<Value> {
+fn toggle(e: &mut Engine, p: &Value, cmd: &str, set: fn(&mut Session, TrackId, bool), get: fn(&transit_model::Track) -> bool) -> Result<Value> {
     let tracks = tracks_required(e, cmd, p)?;
     let s = e.session_mut();
     let v = p.get("value").and_then(Value::as_bool).unwrap_or_else(|| !tracks.iter().all(|t| s.track(*t).is_some_and(get)));
@@ -363,7 +363,7 @@ fn insert_hardware(e: &mut Engine, p: &Value, h: &Value) -> Result<Value> {
     let t = tracks_required(e, "mix.insert", p)?.first().copied().ok_or_else(|| bad("mix.insert", "no track"))?;
     let explicit = slot_of(p, "slot", INSERT_SLOTS);
     let tr = e.session_mut().track_mut(t).ok_or_else(|| bad("mix.insert", "no track"))?;
-    if matches!(tr.kind, soundcraft_model::TrackKind::Master | soundcraft_model::TrackKind::Vca) {
+    if matches!(tr.kind, transit_model::TrackKind::Master | transit_model::TrackKind::Vca) {
         return Err(bad("mix.insert", "a hardware insert goes on a track, aux or folder strip, not a master or VCA"));
     }
     let slot =
@@ -523,7 +523,7 @@ fn insert_copy(e: &mut Engine, p: &Value) -> Result<Value> {
 /// key from the track itself, from a missing track or bus, from a source that renders after the
 /// keyed track (a bus or aux into a track that is not an aux), and a key that closes a loop.
 fn insert_key(e: &mut Engine, p: &Value) -> Result<Value> {
-    use soundcraft_model::{KeyFrom, KeySource, Tap, TrackKind};
+    use transit_model::{KeyFrom, KeySource, Tap, TrackKind};
     const CMD: &str = "mix.insert_key";
     let (t, slot) = track_slot(e, p, CMD, INSERT_SLOTS)?;
     let tap = match str_param(p, "tap") {
@@ -578,7 +578,7 @@ fn insert_key(e: &mut Engine, p: &Value) -> Result<Value> {
         };
         Some(KeySource { from, tap })
     };
-    super::track::refuse_loop(s, CMD, &[soundcraft_model::RouteChange::Key { track: t, slot, key }])?;
+    super::track::refuse_loop(s, CMD, &[transit_model::RouteChange::Key { track: t, slot, key }])?;
     let ins =
         e.session_mut().track_mut(t).and_then(|tr| tr.mixer.inserts.get_mut(slot)).and_then(Option::as_mut).ok_or_else(|| bad(CMD, "empty slot"))?;
     ins.key = key;
@@ -593,18 +593,17 @@ fn send(e: &mut Engine, p: &Value) -> Result<Value> {
     let s = e.session_mut();
     // A send goes to a bus, or to an output path of this machine (a cue or stem mix). A bus that
     // exists keeps its name; a name that is only an output path is that path; else a new bus.
-    let path =
-        io.path(&bus).filter(|x| x.direction == soundcraft_model::IoDirection::Output && s.bus_by_name(&bus).is_none()).map(|x| x.name.clone());
-    if s.bus_by_name(&bus).is_none() && io.path(&bus).is_some_and(|x| x.direction == soundcraft_model::IoDirection::Input) {
+    let path = io.path(&bus).filter(|x| x.direction == transit_model::IoDirection::Output && s.bus_by_name(&bus).is_none()).map(|x| x.name.clone());
+    if s.bus_by_name(&bus).is_none() && io.path(&bus).is_some_and(|x| x.direction == transit_model::IoDirection::Input) {
         return Err(bad("mix.send", format!("`{bus}` is an input path, not an output")));
     }
     let target = match &path {
-        Some(name) => soundcraft_model::Route::Hardware(name.clone()),
-        None => soundcraft_model::Route::Bus(s.add_bus(&bus, soundcraft_model::ChannelFormat::Stereo)),
+        Some(name) => transit_model::Route::Hardware(name.clone()),
+        None => transit_model::Route::Bus(s.add_bus(&bus, transit_model::ChannelFormat::Stereo)),
     };
     let tr = s.track(t).ok_or_else(|| bad("mix.send", "no track"))?;
     let slot = explicit.or_else(|| tr.mixer.sends.iter().position(Option::is_none)).ok_or_else(|| bad("mix.send", "all send slots are in use"))?;
-    let change = soundcraft_model::RouteChange::Send { track: t, slot, route: target.clone() };
+    let change = transit_model::RouteChange::Send { track: t, slot, route: target.clone() };
     super::track::refuse_loop(s, "mix.send", std::slice::from_ref(&change))?;
     let tr = s.track_mut(t).ok_or_else(|| bad("mix.send", "no track"))?;
     // Re-targeting an existing send keeps its level, pan, mute and pre/post setting.
@@ -618,7 +617,7 @@ fn send(e: &mut Engine, p: &Value) -> Result<Value> {
         *x = Some(sl);
     }
     Ok(match target {
-        soundcraft_model::Route::Bus(bid) => json!({"slot": slot, "bus": bid}),
+        transit_model::Route::Bus(bid) => json!({"slot": slot, "bus": bid}),
         other => json!({"slot": slot, "path": other}),
     })
 }
@@ -686,7 +685,7 @@ fn write_range(e: &mut Engine, p: &Value) -> Result<Value> {
 }
 
 /// The static (non-automated) value of a parameter on a track.
-pub(crate) fn current_value(tr: &soundcraft_model::Track, param: &AutoParam) -> f32 {
+pub(crate) fn current_value(tr: &transit_model::Track, param: &AutoParam) -> f32 {
     match param {
         AutoParam::Volume => tr.mixer.volume_db,
         AutoParam::Pan(i) => tr.mixer.pan.get(usize::from(*i)).copied().unwrap_or(0.0),
@@ -942,10 +941,10 @@ fn copy_to_send(e: &mut Engine, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soundcraft_audio_io::AudioBuffer;
-    use soundcraft_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
-    use soundcraft_time::Range;
     use std::sync::Arc;
+    use transit_audio_io::AudioBuffer;
+    use transit_model::{ChannelFormat, Clip, SourceAudio, SourceId, TrackKind};
+    use transit_time::Range;
 
     fn rms_db(before: &[f32], after: &[f32]) -> f32 {
         let energy = |xs: &[f32]| xs.iter().map(|x| x * x).sum::<f32>() / xs.len().max(1) as f32;
@@ -970,7 +969,7 @@ mod tests {
     }
 
     fn rendered(s: &Session) -> Vec<f32> {
-        soundcraft_mix::render_range(s, Range::new(0, 8192), 1024).into_iter().next().unwrap_or_default()
+        transit_mix::render_range(s, Range::new(0, 8192), 1024).into_iter().next().unwrap_or_default()
     }
 
     fn convert(e: &mut Engine, t: TrackId, start: i64, end: i64) {
@@ -1194,7 +1193,7 @@ mod tests {
         e.execute("mix.send", &json!({"track": "Gtr", "slot": 0, "bus": "Delay"})).unwrap();
         let sl = e.session().tracks[0].mixer.sends[0].clone().unwrap();
         let delay = e.session().busses.iter().find(|b| b.name == "Delay").unwrap().id;
-        assert_eq!(sl.target, soundcraft_model::Route::Bus(delay));
+        assert_eq!(sl.target, transit_model::Route::Bus(delay));
         assert_eq!((sl.level_db, sl.pan, sl.mute, sl.pre_fader), (-9.0, 0.5, true, true));
     }
 
@@ -1207,7 +1206,7 @@ mod tests {
         e
     }
 
-    fn bus_id(e: &Engine, name: &str) -> soundcraft_model::BusId {
+    fn bus_id(e: &Engine, name: &str) -> transit_model::BusId {
         e.session().bus_by_name(name).unwrap().id
     }
 
@@ -1241,11 +1240,11 @@ mod tests {
         assert!(e.session().busses.is_empty());
         let gtr = e.session().track_by_name("Gtr").unwrap();
         assert!(gtr.mixer.sends[0].is_none());
-        assert_eq!(gtr.mixer.output, soundcraft_model::Route::Main);
-        assert_eq!(e.session().track_by_name("FX 1").unwrap().mixer.input, soundcraft_model::Route::None);
+        assert_eq!(gtr.mixer.output, transit_model::Route::Main);
+        assert_eq!(e.session().track_by_name("FX 1").unwrap().mixer.input, transit_model::Route::None);
 
         assert!(e.undo());
-        let r = soundcraft_model::Route::Bus(id);
+        let r = transit_model::Route::Bus(id);
         let gtr = e.session().track_by_name("Gtr").unwrap();
         assert_eq!(gtr.mixer.sends[0].as_ref().unwrap().target, r);
         assert_eq!(gtr.mixer.output, r);
@@ -1292,7 +1291,7 @@ mod tests {
         assert!(e.session().track(fx).is_none() && e.session().busses.is_empty());
         assert!(e.undo());
         assert!(e.session().bus(id).is_some());
-        assert_eq!(e.session().track(fx).unwrap().mixer.input, soundcraft_model::Route::Bus(id));
+        assert_eq!(e.session().track(fx).unwrap().mixer.input, transit_model::Route::Bus(id));
     }
 
     #[test]
@@ -1301,13 +1300,13 @@ mod tests {
         e.execute("mix.remove_bus", &json!({"bus": "FX 1", "force": true})).unwrap();
         let back = Session::from_json(&e.session().to_json().unwrap()).unwrap();
         assert!(back.busses.is_empty());
-        assert!(back.tracks.iter().all(|t| t.mixer.sends.iter().flatten().all(|x| matches!(x.target, soundcraft_model::Route::None))));
-        assert_eq!(back.track_by_name("FX 1").unwrap().mixer.input, soundcraft_model::Route::None);
+        assert!(back.tracks.iter().all(|t| t.mixer.sends.iter().flatten().all(|x| matches!(x.target, transit_model::Route::None))));
+        assert_eq!(back.track_by_name("FX 1").unwrap().mixer.input, transit_model::Route::None);
     }
 
     #[test]
     fn insert_key_sets_validates_and_moves_and_copies_with_its_insert() {
-        use soundcraft_model::{KeyFrom, KeySource, Route, Tap};
+        use transit_model::{KeyFrom, KeySource, Route, Tap};
         let mut e = Engine::default();
         for name in ["Kick", "Bass"] {
             e.execute("track.new", &json!({"name": name})).unwrap();

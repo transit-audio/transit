@@ -3,13 +3,13 @@
 use super::monitor::{self, Dir, MonitorEvent};
 use super::{ActionResult, RuntimeControl, ingress, midi_out, sources};
 use crate::{device_clock::HostOrigin, player::audio::Command};
-use soundcraft_mix::{EngineEpoch, INSTRUMENT_SLOT, SlotGen};
-use soundcraft_model::{MidiInput, MidiOutPort, MidiPort};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::time::{Duration, Instant};
 use transit_midi_io::{Direction, InputBoundary, InputConfig, InputConsumer, InputHandle, MidiIo, PortInfo, PortKey};
+use transit_mix::{EngineEpoch, INSTRUMENT_SLOT, SlotGen};
+use transit_model::{MidiInput, MidiOutPort, MidiPort};
 
 type Owner = RuntimeControl<Command, ActionResult>;
 const POLL: Duration = Duration::from_millis(100);
@@ -32,9 +32,9 @@ pub struct Status {
     /// Input ports muted by the feedback storm detector (#99), until the user re-enables them.
     pub muted_inputs: Vec<MutedInput>,
     /// Tracks with an external destination whose MIDI input takes a port of the destination's own
-    /// device ([`soundcraft_model::same_midi_device`], #99), and whether the track allows the echo
+    /// device ([`transit_model::same_midi_device`], #99), and whether the track allows the echo
     /// there. Not allowed: the echo to that port is off, to prevent a feedback loop.
-    pub self_echo: Vec<(soundcraft_model::TrackId, bool)>,
+    pub self_echo: Vec<(transit_model::TrackId, bool)>,
 }
 
 /// An input port muted by the feedback storm detector (#99). It admits no route (no echo, no
@@ -45,7 +45,7 @@ pub struct MutedInput {
     /// The port as the UI lists it.
     pub name: String,
     /// Tracks whose MIDI input takes this port.
-    pub tracks: Vec<soundcraft_model::TrackId>,
+    pub tracks: Vec<transit_model::TrackId>,
     reenable: Arc<AtomicBool>,
 }
 
@@ -103,7 +103,7 @@ impl IoThread {
         let stop = Arc::new(AtomicBool::new(false));
         let finished = Arc::new(AtomicBool::new(false));
         let (end, done) = (Arc::clone(&stop), Arc::clone(&finished));
-        let thread = std::thread::Builder::new().name("soundcraft-midi-devices".into()).spawn(move || {
+        let thread = std::thread::Builder::new().name("transit-midi-devices".into()).spawn(move || {
             struct Finished(Arc<AtomicBool>);
             impl Drop for Finished {
                 fn drop(&mut self) {
@@ -218,7 +218,7 @@ struct Input {
 /// unplug, the monitor turned off) does not unmute it.
 struct Muted {
     key: PortKey,
-    tracks: Vec<soundcraft_model::TrackId>,
+    tracks: Vec<transit_model::TrackId>,
     reenable: Arc<AtomicBool>,
 }
 
@@ -294,7 +294,7 @@ impl Native {
     }
 
     /// Release what `track` holds on its MIDI destination, through the output thread.
-    pub(super) fn release_track(&self, track: soundcraft_model::TrackId) {
+    pub(super) fn release_track(&self, track: transit_model::TrackId) {
         self.out.release_track(track);
     }
 
@@ -547,8 +547,8 @@ impl Native {
                 // No self-echo (#99): the echo is held back per input port when it is the same
                 // device as the destination, unless the track allows it.
                 let guard = match &track.midi_output {
-                    soundcraft_model::MidiOutput::External { port, .. } => Some((port.clone(), track.allow_echo_to_device)),
-                    soundcraft_model::MidiOutput::Internal => None,
+                    transit_model::MidiOutput::External { port, .. } => Some((port.clone(), track.allow_echo_to_device)),
+                    transit_model::MidiOutput::Internal => None,
                 };
                 target.map(|target| {
                     (
@@ -723,7 +723,7 @@ impl Native {
 
     /// What the UI says about the session's routing (#99): the tracks a muted port feeds, and the
     /// tracks whose input and destination are one device. Armed or not, so the card says it first.
-    fn follow_session(muted: &mut [Muted], status: &mut Status, session: &soundcraft_model::Session) {
+    fn follow_session(muted: &mut [Muted], status: &mut Status, session: &transit_model::Session) {
         let ports = &status.inputs;
         let midi = || session.tracks.iter().filter(|t| t.kind.is_midi() && !t.inactive);
         for m in muted {
@@ -731,14 +731,14 @@ impl Native {
         }
         status.self_echo = midi()
             .filter_map(|t| match &t.midi_output {
-                soundcraft_model::MidiOutput::External { port, .. } => ports
+                transit_model::MidiOutput::External { port, .. } => ports
                     .iter()
                     .any(|p| {
                         accepts_port(&t.midi_input, &p.key, ports)
-                            && soundcraft_model::same_midi_device(p.key.backend.as_str(), &p.key.name, &p.key.id, port)
+                            && transit_model::same_midi_device(p.key.backend.as_str(), &p.key.name, &p.key.id, port)
                     })
                     .then_some((t.id, t.allow_echo_to_device)),
-                soundcraft_model::MidiOutput::Internal => None,
+                transit_model::MidiOutput::Internal => None,
             })
             .collect();
     }
@@ -775,7 +775,7 @@ impl Native {
 
 /// The routes an input port gets: those whose selection accepts it, none while the port is muted
 /// (#99), and where the port and the destination are one device
-/// ([`soundcraft_model::same_midi_device`]) with the echo off, or marked `self_echo` when the
+/// ([`transit_model::same_midi_device`]) with the echo off, or marked `self_echo` when the
 /// track allows it (the storm detector correlates what comes back).
 fn port_routes(
     routes: &[(MidiInput, ingress::Route, Option<(MidiOutPort, bool)>)],
@@ -790,7 +790,7 @@ fn port_routes(
         .iter()
         .filter(|(selection, _, _)| accepts_port(selection, key, ports))
         .map(|(_, route, guard)| match guard {
-            Some((port, allow)) if route.echo && soundcraft_model::same_midi_device(key.backend.as_str(), &key.name, &key.id, port) => {
+            Some((port, allow)) if route.echo && transit_model::same_midi_device(key.backend.as_str(), &key.name, &key.id, port) => {
                 if *allow {
                     ingress::Route { self_echo: true, ..*route }
                 } else {

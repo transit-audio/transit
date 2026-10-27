@@ -37,7 +37,7 @@ pub fn sidechain_fixture_dir() -> &'static Path {
 }
 
 fn install(features: &[&str], target_dir: &str, install_dir: &str, name: &str, plugins: usize) -> PathBuf {
-    soundcraft_clap_host::set_scan_extra_dirs_only(true);
+    transit_clap_host::set_scan_extra_dirs_only(true);
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixture/Cargo.toml");
     let target = Path::new(option_env!("CARGO_TARGET_TMPDIR").unwrap_or(concat!(env!("CARGO_MANIFEST_DIR"), "/../../target/tmp"))).join(target_dir);
     let cargo = std::env::var("CARGO").unwrap_or_else(|_| "cargo".into());
@@ -72,7 +72,7 @@ fn install(features: &[&str], target_dir: &str, install_dir: &str, name: &str, p
         std::fs::copy(&built, dir.join(format!("vendor/{name}.clap"))).unwrap();
     }
     if plugins > 0 {
-        assert_eq!(soundcraft_clap_host::add_search_dir(&dir), plugins);
+        assert_eq!(transit_clap_host::add_search_dir(&dir), plugins);
     }
     dir
 }

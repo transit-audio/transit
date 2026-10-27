@@ -6,7 +6,7 @@
 //! callback, which writes each channel to its device channel and sums where paths overlap.
 
 use super::{ChannelFormat, MAX_CHANNELS, Session, TrackKind};
-use soundcraft_model::{IoDirection, IoMap, MAX_DEVICE_CHANNELS, Route};
+use transit_model::{IoDirection, IoMap, MAX_DEVICE_CHANNELS, Route};
 
 /// Most sink channels in a plan; a sink beyond it is unresolved (silent and listed).
 pub const MAX_SINK_CHANNELS: usize = 2 * MAX_DEVICE_CHANNELS;

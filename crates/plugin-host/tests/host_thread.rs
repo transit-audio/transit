@@ -230,7 +230,7 @@ fn a_state_read_from_a_wedged_thread_answers_at_once() {
     assert!(t.elapsed() < FRAME_BUDGET, "the wedged thread was waited for");
     // A save's read (issue #56) gives up at once too, however long it may wait for a dialog.
     let t = Instant::now();
-    assert_eq!(plugin.state_reader().unwrap().save_state_within(Duration::from_secs(60)), Err(soundcraft_dsp::StateBusy));
+    assert_eq!(plugin.state_reader().unwrap().save_state_within(Duration::from_secs(60)), Err(transit_dsp::StateBusy));
     assert!(t.elapsed() < FRAME_BUDGET, "the wedged thread was waited for by a save");
     let mut editor = plugin.editor().unwrap();
     assert!(editor.open().unwrap_err().contains("not responding"));
@@ -574,7 +574,7 @@ fn a_job_sent_after_shutdown_is_never_run() {
 /// changes, and what the user did there comes back through the proxy; a wedged thread disables it.
 #[test]
 fn the_header_reaches_the_editor_on_the_host_thread_and_its_actions_come_back() {
-    use soundcraft_dsp::{EditorHeader, HeaderAction};
+    use transit_dsp::{EditorHeader, HeaderAction};
     let host = host(Duration::from_millis(300));
     let log = Arc::new(Log::default());
     let l = Arc::clone(&log);
@@ -624,8 +624,8 @@ fn the_header_reaches_the_editor_on_the_host_thread_and_its_actions_come_back() 
 /// both on the host thread and polled once per frame; a wedged thread fails them at once.
 #[test]
 fn preset_state_jobs_run_on_the_host_thread_and_never_block_a_frame() {
-    use soundcraft_dsp::JobPoll;
-    fn finish<T>(job: &mut soundcraft_dsp::StateJob<T>) -> (JobPoll<T>, Duration) {
+    use transit_dsp::JobPoll;
+    fn finish<T>(job: &mut transit_dsp::StateJob<T>) -> (JobPoll<T>, Duration) {
         let (deadline, mut worst) = (Instant::now() + Duration::from_secs(5), Duration::ZERO);
         loop {
             let t = Instant::now();
@@ -731,7 +731,7 @@ fn a_save_during_a_slow_creation_waits_about_one_timeout_not_one_per_instance() 
     let results: Vec<_> =
         plugins.iter_mut().map(|p| p.state_reader().unwrap().save_state_within(deadline.saturating_duration_since(Instant::now()))).collect();
     let took = t.elapsed();
-    assert!(results.iter().all(|r| *r == Err(soundcraft_dsp::StateBusy)), "the held thread cannot answer: {results:?}");
+    assert!(results.iter().all(|r| *r == Err(transit_dsp::StateBusy)), "the held thread cannot answer: {results:?}");
     assert!(took < timeout * 3, "the save waited {took:?}: one request timeout per instance would be {:?}", timeout * 5);
     drop(release);
     assert!(slow.wait(Duration::from_secs(5)).is_some(), "the slow creation is still delivered");

@@ -12,27 +12,27 @@ repository = "https://github.com/transit-audio/transit"
 
 [workspace.dependencies]
 # internal
-soundcraft-time = { path = "crates/time" }
+transit-time = { path = "crates/time" }
 transit-rt = { path = "crates/rt" }
-soundcraft-audio-io = { path = "crates/audio-io" }
+transit-audio-io = { path = "crates/audio-io" }
 transit-audio-backend = { path = "crates/audio-backend" }
 transit-audio-wasapi = { path = "crates/audio-wasapi" }
 transit-audio-asio = { path = "crates/audio-asio" }
 transit-audio-jack = { path = "crates/audio-jack" }
 transit-midi-io = { path = "crates/midi-io" }
-soundcraft-midi = { path = "crates/midi" }
-soundcraft-video = { path = "crates/video" }
-soundcraft-dsp = { path = "crates/dsp" }
-soundcraft-clap-host = { path = "crates/clap-host" }
-soundcraft-vst3-host = { path = "crates/vst3-host" }
-soundcraft-au-host = { path = "crates/au-host" }
+transit-midi = { path = "crates/midi" }
+transit-video = { path = "crates/video" }
+transit-dsp = { path = "crates/dsp" }
+transit-clap-host = { path = "crates/clap-host" }
+transit-vst3-host = { path = "crates/vst3-host" }
+transit-au-host = { path = "crates/au-host" }
 transit-plugin-host = { path = "crates/plugin-host" }
-soundcraft-model = { path = "crates/model" }
-soundcraft-mix = { path = "crates/mix" }
-soundcraft-engine = { path = "crates/engine" }
-soundcraft-playback = { path = "crates/playback" }
-soundcraft-automation = { path = "crates/automation" }
-soundcraft-ui-egui = { path = "crates/ui-egui" }
+transit-model = { path = "crates/model" }
+transit-mix = { path = "crates/mix" }
+transit-engine = { path = "crates/engine" }
+transit-playback = { path = "crates/playback" }
+transit-automation = { path = "crates/automation" }
+transit-ui-egui = { path = "crates/ui-egui" }
 transit-ui-studio = { path = "crates/ui-studio" }
 
 # foundation

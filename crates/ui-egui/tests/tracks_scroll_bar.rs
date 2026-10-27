@@ -1,7 +1,7 @@
 use egui::{Event, Modifiers, PointerButton, Pos2, Rect, Shape, pos2, vec2};
 use egui_kittest::Harness;
 use serde_json::json;
-use soundcraft_ui_egui::{Services, SoundApp, theme::Tokens};
+use transit_ui_egui::{Services, SoundApp, theme::Tokens};
 
 fn step(h: &mut Harness<'_, SoundApp>) {
     let mut raw = std::mem::take(h.input_mut());
@@ -36,7 +36,7 @@ fn first_row(h: &Harness<'_, SoundApp>) -> Rect {
 
 #[test]
 fn the_tracks_gutter_pages_a_long_list() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     app.run("track.new", json!({"count": 60})).unwrap();
     let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(
         |ui, app: &mut SoundApp| {

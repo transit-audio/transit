@@ -1,11 +1,11 @@
-//! Per-plugin realtime cost: `cargo run --release -p soundcraft-dsp --example plugin_bench`
+//! Per-plugin realtime cost: `cargo run --release -p transit-dsp --example plugin_bench`
 use std::time::Instant;
 
 fn main() {
     let sr = 48_000.0;
     let secs = 10usize;
-    for info in soundcraft_dsp::plugins() {
-        let Some(mut p) = soundcraft_dsp::create(info.id) else { continue };
+    for info in transit_dsp::plugins() {
+        let Some(mut p) = transit_dsp::create(info.id) else { continue };
         p.prepare(sr, 512, 2);
         let mut io = vec![vec![0.0f32; 512]; 2];
         let t0 = Instant::now();

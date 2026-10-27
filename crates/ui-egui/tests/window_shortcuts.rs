@@ -1,6 +1,6 @@
 use egui::os::OperatingSystem;
 use egui::{Key, Modifiers};
-use soundcraft_ui_egui::{MainWindow, Services, SoundApp, shortcuts};
+use transit_ui_egui::{MainWindow, Services, SoundApp, shortcuts};
 
 const MAC_CMD: Modifiers = Modifiers { mac_cmd: true, command: true, ..Modifiers::NONE };
 
@@ -13,7 +13,7 @@ fn press(ctx: &egui::Context, app: &mut SoundApp, key: Key, modifiers: Modifiers
 fn window_shortcuts_open_and_close_windows() {
     let pc_ctrl = Modifiers { ctrl: true, command: true, ..Modifiers::NONE };
     for (os, cmd) in [(OperatingSystem::Mac, MAC_CMD), (OperatingSystem::Windows, pc_ctrl), (OperatingSystem::Nix, pc_ctrl)] {
-        let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
         let ctx = egui::Context::default();
         ctx.set_os(os);
         for key in [Key::Num1, Key::Num3, Key::Num4, Key::Num5, Key::Num9] {
@@ -32,7 +32,7 @@ fn window_shortcuts_open_and_close_windows() {
 
 #[test]
 fn cmd_ctrl_equals_opens_the_score_editor_on_a_mac() {
-    let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
     let ctx = egui::Context::default();
     ctx.set_os(OperatingSystem::Mac);
     press(&ctx, &mut app, Key::Equals, Modifiers { ctrl: true, ..MAC_CMD });

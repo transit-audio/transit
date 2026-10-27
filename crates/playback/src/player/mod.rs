@@ -2,14 +2,14 @@
 //! No session request, handle lookup or notice storage belongs to the device callback.
 
 use crate::{MeterSnapshot, action_lane, plan_bridge, record::InputRing};
-use soundcraft_mix::{
-    CompileError, CompileMode, EnvelopeState, InstanceSpec, NewInstance, PlanGeneration, PlanLimits, RejectReason, RenderTarget, SlotBinding, SlotGen,
-};
-use soundcraft_model::Session;
 use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
+use transit_mix::{
+    CompileError, CompileMode, EnvelopeState, InstanceSpec, NewInstance, PlanGeneration, PlanLimits, RejectReason, RenderTarget, SlotBinding, SlotGen,
+};
+use transit_model::Session;
 
 mod control;
 pub use control::{Control, Notice, endpoints};
@@ -56,7 +56,7 @@ pub enum MapMsg {
     Candidate {
         port: String,
         channel: u8,
-        kind: soundcraft_model::SourceKind,
+        kind: transit_model::SourceKind,
         number: u8,
     },
 }
@@ -235,11 +235,11 @@ impl SessionControl {
         Ok(id)
     }
     /// A new path table for the open device. The caller then requests the session again.
-    pub fn set_io(&mut self, io: Arc<soundcraft_model::IoMap>) {
+    pub fn set_io(&mut self, io: Arc<transit_model::IoMap>) {
         self.bridge.set_io(io);
     }
     /// External Instrument tracks whose MIDI port is missing. The caller then requests the session again.
-    pub fn set_external_unavailable(&mut self, tracks: Arc<[soundcraft_model::TrackId]>) {
+    pub fn set_external_unavailable(&mut self, tracks: Arc<[transit_model::TrackId]>) {
         self.bridge.set_external_unavailable(tracks);
     }
     /// Replace the document even when IDs/topology are unchanged. Ordinary requests
@@ -371,7 +371,7 @@ impl SessionControl {
     pub fn copy_meters(&self, out: &mut MeterSnapshot) {
         self.bridge.copy_meters(out);
     }
-    pub fn scope_hub(&self) -> Arc<soundcraft_mix::ScopeHub> {
+    pub fn scope_hub(&self) -> Arc<transit_mix::ScopeHub> {
         self.bridge.scope_hub()
     }
     pub(super) fn actions<T: Copy, R: Copy>(&self) -> (action_lane::Control<T, R>, action_lane::Audio<T, R>) {

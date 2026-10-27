@@ -6,8 +6,8 @@
 
 use crate::theme::{RADIUS_SM, TOKENS};
 use egui::{Align2, FontId, Pos2, Sense, Shape, Stroke, Ui, vec2};
-use soundcraft_dsp::{ParamInfo, Unit};
 use std::f32::consts::PI;
+use transit_dsp::{ParamInfo, Unit};
 
 /// The arc starts at the lower left (135 degrees, y down) and sweeps clockwise.
 const START: f32 = 0.75 * PI;
@@ -37,7 +37,7 @@ pub fn value_at(p: &ParamInfo, norm: f32) -> f32 {
 
 /// Whether the dial's arc starts at its center (a range that spans zero, like a gain).
 fn bipolar(p: &ParamInfo) -> bool {
-    p.min < 0.0 && p.max > 0.0 && p.taper == soundcraft_dsp::Taper::Linear
+    p.min < 0.0 && p.max > 0.0 && p.taper == transit_dsp::Taper::Linear
 }
 
 fn arc(center: Pos2, r: f32, from: f32, to: f32) -> Vec<Pos2> {
@@ -113,7 +113,7 @@ pub fn show(ui: &mut Ui, id: egui::Id, label: &str, p: &ParamInfo, value: f32) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soundcraft_dsp::plugin_info;
+    use transit_dsp::plugin_info;
 
     fn p(plugin: &str, id: &str) -> &'static ParamInfo {
         plugin_info(plugin).unwrap().param(id).unwrap()

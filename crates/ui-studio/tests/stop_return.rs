@@ -15,7 +15,7 @@ fn command(app: &mut StudioApp, ctx: &egui::Context, id: &str, params: serde_jso
 #[test]
 fn stop_returns_to_each_user_set_position_then_zero() {
     for source in ["timeline", "ruler", "locate"] {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         let ctx = egui::Context::default();
         let start = 96_000;
         match source {
@@ -40,7 +40,7 @@ fn stop_returns_to_each_user_set_position_then_zero() {
 
 #[test]
 fn stop_returns_to_zero_when_no_cursor_was_set() {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let ctx = egui::Context::default();
     command(&mut app, &ctx, "transport.play", json!({}));
     assert!(app.is_playing());
@@ -71,7 +71,7 @@ fn ui_frame(app: &mut StudioApp, ctx: &egui::Context, time: f64, events: Vec<egu
 
 #[test]
 fn double_click_in_one_frame_stops_then_returns_to_zero() {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let ctx = egui::Context::default();
     for frame in 0..3 {
         ui_frame(&mut app, &ctx, f64::from(frame) / 60.0, Vec::new());
@@ -102,7 +102,7 @@ fn stop_tooltip_explains_both_returns() {
         }
     }
 
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let ctx = egui::Context::default();
     for frame in 0..3 {
         ui_frame(&mut app, &ctx, f64::from(frame), Vec::new());

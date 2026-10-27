@@ -4,7 +4,7 @@
 
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::{TrackId, TrackKind};
+use transit_model::{TrackId, TrackKind};
 
 struct T {
     app: StudioApp,
@@ -19,7 +19,7 @@ struct T {
 impl T {
     /// Three audio tracks, the mixer pane shown, the document clean.
     fn new() -> T {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         let mut ids = Vec::new();
         for name in ["A", "B", "C"] {
             let r = app.run("track.new", json!({"kind": "audio", "name": name})).unwrap();
@@ -278,7 +278,7 @@ fn dragging_into_and_out_of_a_group() {
     assert_eq!(t.order(), ["Group 1", "B", "C", "A"]);
     assert_eq!(t.undo_len(), u0 + 2);
     let out = &t.app.engine.session().track(t.a).unwrap().mixer.output;
-    assert_eq!(*out, soundcraft_model::Route::Main, "out of the group, out of its bus");
+    assert_eq!(*out, transit_model::Route::Main, "out of the group, out of its bus");
     // A back in between the members (the top of C's row is inside the group).
     t.drag(t.header(t.a, 0.5), t.header(t.c, 0.1));
     assert_eq!(t.folder_of(t.a), Some(g));
@@ -306,7 +306,7 @@ fn ungroup_keeps_the_members_in_place_as_one_undo_step() {
     let mut t = T::new();
     let g = t.group_ab();
     let bus = match t.app.engine.session().track(g).unwrap().mixer.input {
-        soundcraft_model::Route::Bus(b) => b,
+        transit_model::Route::Bus(b) => b,
         _ => panic!("a group listens to its bus"),
     };
     let u0 = t.undo_len();
@@ -316,7 +316,7 @@ fn ungroup_keeps_the_members_in_place_as_one_undo_step() {
     assert_eq!(t.undo_len(), u0 + 1, "one undo entry: {:?}", t.app.engine.undo_history());
     let s = t.app.engine.session();
     assert!(s.bus(bus).is_none(), "its bus went with it");
-    assert!(s.tracks.iter().all(|x| x.folder.is_none() && x.mixer.output == soundcraft_model::Route::Main));
+    assert!(s.tracks.iter().all(|x| x.folder.is_none() && x.mixer.output == transit_model::Route::Main));
     assert_eq!(s.edit.selected_tracks, vec![t.a, t.b], "the former members are selected");
     assert_eq!(t.strips(), ["A", "B", "C"]);
     t.app.run("edit.undo", json!({})).unwrap();
@@ -444,7 +444,7 @@ fn delete_on_a_group_header_asks_then_ungroups_with_one_undo_step() {
     let mut t = T::new();
     let g = t.group_ab();
     let bus = match t.app.engine.session().track(g).unwrap().mixer.input {
-        soundcraft_model::Route::Bus(b) => b,
+        transit_model::Route::Bus(b) => b,
         _ => panic!("a group listens to its bus"),
     };
     t.click(t.header(g, 0.5), json!({}));
@@ -462,7 +462,7 @@ fn delete_on_a_group_header_asks_then_ungroups_with_one_undo_step() {
     assert!(t.groups().is_empty(), "no folder");
     let s = t.app.engine.session();
     assert!(s.bus(bus).is_none(), "no bus");
-    assert!(s.tracks.iter().all(|x| x.folder.is_none() && x.mixer.output == soundcraft_model::Route::Main));
+    assert!(s.tracks.iter().all(|x| x.folder.is_none() && x.mixer.output == transit_model::Route::Main));
     assert_eq!(t.order(), ["A", "B", "C"], "members stay, top level");
     assert_eq!(t.undo_len(), u0 + 1, "one undo entry: {:?}", t.app.engine.undo_history());
     t.app.run("edit.undo", json!({})).unwrap();
@@ -566,17 +566,17 @@ fn ungroup_reroutes_an_outside_track_that_fed_the_group_bus() {
     let mut t = T::new();
     let g = t.group_ab();
     let bus = match t.app.engine.session().track(g).unwrap().mixer.input {
-        soundcraft_model::Route::Bus(b) => b,
+        transit_model::Route::Bus(b) => b,
         _ => panic!("a group listens to its bus"),
     };
     let bus_name = t.app.engine.session().bus(bus).unwrap().name.clone();
     t.app.run("track.output", json!({"tracks": [t.c.0], "output": bus_name})).unwrap();
-    assert_eq!(t.app.engine.session().track(t.c).unwrap().mixer.output, soundcraft_model::Route::Bus(bus));
+    assert_eq!(t.app.engine.session().track(t.c).unwrap().mixer.output, transit_model::Route::Bus(bus));
     t.click(t.header(g, 0.5), json!({}));
     let u0 = t.undo_len();
     t.key("G", json!({"cmd": true, "shift": true}));
     assert!(t.groups().is_empty());
-    assert_eq!(t.app.engine.session().track(t.c).unwrap().mixer.output, soundcraft_model::Route::Main, "C is not silent");
+    assert_eq!(t.app.engine.session().track(t.c).unwrap().mixer.output, transit_model::Route::Main, "C is not silent");
     assert_eq!(t.app.status, "Ungrouped Group 1; C now outputs to Main");
     assert_eq!(t.undo_len(), u0 + 1);
 }

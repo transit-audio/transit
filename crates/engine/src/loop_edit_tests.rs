@@ -6,10 +6,10 @@
 
 use crate::Engine;
 use serde_json::json;
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_midi::{CtrlEvent, CtrlKind, Note, Sequence};
-use soundcraft_model::{ChannelFormat, Clip, ClipId, Session, TrackId, TrackKind};
-use soundcraft_time::{Range, Samples, TICKS_PER_QUARTER as Q};
+use transit_audio_io::AudioBuffer;
+use transit_midi::{CtrlEvent, CtrlKind, Note, Sequence};
+use transit_model::{ChannelFormat, Clip, ClipId, Session, TrackId, TrackKind};
+use transit_time::{Range, Samples, TICKS_PER_QUARTER as Q};
 
 fn note(pitch: u8, beat: i64) -> Note {
     Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start: beat * Q, length: Q }
@@ -33,7 +33,7 @@ fn midi() -> (Engine, TrackId, ClipId, Samples) {
 }
 
 fn ons(e: &Engine, t: TrackId, beat: Samples) -> Vec<(f64, u8)> {
-    soundcraft_mix::clip_note_ons(e.session(), t, 0, (20 * beat) as usize).into_iter().map(|(a, k)| (a as f64 / beat as f64, k)).collect()
+    transit_mix::clip_note_ons(e.session(), t, 0, (20 * beat) as usize).into_iter().map(|(a, k)| (a as f64 / beat as f64, k)).collect()
 }
 
 fn full() -> Vec<(f64, u8)> {
@@ -53,7 +53,7 @@ fn trim_drag_keeps_the_cycles_on_the_old_grid_and_the_cut_note_silent() {
     assert_eq!(ons(&e, t, beat), full()[1..].to_vec(), "no C at the new start; Cs at 4, 8, 12");
     // The controller the trim cut is kept: it still plays in the later cycles.
     let c = e.session().find_clip(id).unwrap().1.clone();
-    let soundcraft_model::ClipContent::Midi { sequence } = &c.content else { panic!() };
+    let transit_model::ClipContent::Midi { sequence } = &c.content else { panic!() };
     assert_eq!(sequence.ctrls.len(), 1);
 }
 
@@ -98,7 +98,7 @@ fn consolidate_writes_the_cycles_out_as_they_sound() {
     assert_eq!(clips.len(), 1);
     assert!(clips[0].looping.is_none());
     assert_eq!(ons(&e, t, beat), before);
-    let soundcraft_model::ClipContent::Midi { sequence } = &clips[0].content else { panic!() };
+    let transit_model::ClipContent::Midi { sequence } = &clips[0].content else { panic!() };
     assert_eq!(sequence.ctrls.len(), 4, "the controller in every cycle");
 }
 
@@ -106,8 +106,7 @@ fn audio() -> (Engine, TrackId, ClipId) {
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
     let data: Vec<f32> = (0..1000).map(|i| (i + 1) as f32 / 1000.0).collect();
-    let src =
-        crate::io::add_source(&mut s, "a", AudioBuffer { sample_rate: 48_000, channels: vec![data] }, None, soundcraft_audio_io::FileFormat::Wav);
+    let src = crate::io::add_source(&mut s, "a", AudioBuffer { sample_rate: 48_000, channels: vec![data] }, None, transit_audio_io::FileFormat::Wav);
     let id = s.new_clip_id();
     crate::edit::place_clip(&mut s, t, Clip::audio(id, "a", src, 0, 0, 100));
     s.edit.selected_tracks = vec![t];
@@ -115,7 +114,7 @@ fn audio() -> (Engine, TrackId, ClipId) {
 }
 
 fn render(e: &Engine, t: TrackId, len: Samples) -> Vec<f32> {
-    soundcraft_mix::render_clips(e.session(), t, Range::new(0, len)).remove(0)
+    transit_mix::render_clips(e.session(), t, Range::new(0, len)).remove(0)
 }
 
 #[test]
@@ -137,7 +136,7 @@ fn time_stretch_of_a_looped_clip_stretches_every_cycle() {
     e.execute("clip.loop_to", &json!({"clip": id.0, "to": 400})).unwrap();
     // The live render of all four cycles, stretched the way the process does.
     let live = render(&e, t, 400);
-    let want = soundcraft_dsp::offline::time_stretch(&[live], 2.0, 48_000.0).remove(0);
+    let want = transit_dsp::offline::time_stretch(&[live], 2.0, 48_000.0).remove(0);
     e.execute("audiosuite.process", &json!({"process": "time_stretch", "clip": id.0, "params": {"ratio": 2.0}})).unwrap();
     let c = e.session().track(t).unwrap().clips()[0].clone();
     assert_eq!((c.looping, c.length), (None, 800));
@@ -193,7 +192,7 @@ fn retime_rig(lock_beats: i64, with_lock: bool) -> (Session, TrackId, Samples) {
     seq.notes.push(note(64, 2));
     let id = s.new_clip_id();
     let mut b = Clip::midi(id, "m", 8 * beat, 16 * beat, seq);
-    b.looping = Some(soundcraft_model::ClipLoop { start: 0, end: 4 * beat });
+    b.looping = Some(transit_model::ClipLoop { start: 0, end: 4 * beat });
     crate::edit::place_clip(&mut s, t, b);
     let old = s.tempo.clone();
     s.tempo.set_tempo(0, 240.0).unwrap();
@@ -208,7 +207,7 @@ fn retime_trims_a_looped_midi_clip_through_the_start_helper() {
     let (r, rt, _) = retime_rig(5, false);
     let half = beat / 2;
     let ons = |s: &Session, t: TrackId| -> Vec<(f64, u8)> {
-        soundcraft_mix::clip_note_ons(s, t, 0, (40 * half) as usize).into_iter().map(|(a, k)| (a as f64 / half as f64, k)).collect()
+        transit_mix::clip_note_ons(s, t, 0, (40 * half) as usize).into_iter().map(|(a, k)| (a as f64 / half as f64, k)).collect()
     };
     let want: Vec<(f64, u8)> = ons(&r, rt).into_iter().filter(|(a, _)| *a >= 10.0).collect();
     assert_eq!(ons(&s, t), want);
@@ -273,7 +272,7 @@ fn tiny_loop() -> (Engine, TrackId, ClipId) {
     let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
     let id = s.new_clip_id();
     let mut c = Clip::midi(id, "tiny", 0, 1000, Sequence::default());
-    c.looping = Some(soundcraft_model::ClipLoop { start: 0, end: 100 });
+    c.looping = Some(transit_model::ClipLoop { start: 0, end: 100 });
     crate::edit::place_clip(&mut s, t, c);
     (Engine::new(s), t, id)
 }
@@ -284,11 +283,11 @@ fn a_tempo_change_that_squeezes_a_loop_below_the_minimum_cycle_is_refused_and_ro
     let err = e.execute("event.tempo", &json!({"bpm": 240.0})).unwrap_err().to_string();
     assert!(err.contains("loop") && err.contains("tiny") && err.contains("64"), "{err}");
     let c = e.session().find_clip(id).unwrap().1.clone();
-    assert_eq!(c.looping, Some(soundcraft_model::ClipLoop { start: 0, end: 100 }), "the loop is kept");
+    assert_eq!(c.looping, Some(transit_model::ClipLoop { start: 0, end: 100 }), "the loop is kept");
     assert_eq!((c.length, e.session().tempo.tempos()[0].bpm), (1000, 120.0), "nothing changed");
     // A change that leaves the cycle valid still retimes it: 120 -> 160 bpm makes 100 samples 75.
     e.execute("event.tempo", &json!({"bpm": 160.0})).unwrap();
-    assert_eq!(e.session().find_clip(id).unwrap().1.looping, Some(soundcraft_model::ClipLoop { start: 0, end: 75 }));
+    assert_eq!(e.session().find_clip(id).unwrap().1.looping, Some(transit_model::ClipLoop { start: 0, end: 75 }));
 }
 
 #[test]

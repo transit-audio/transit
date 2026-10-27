@@ -1,7 +1,7 @@
 use egui::{Color32, Event, FullOutput, Rect, Shape, pos2, vec2};
 use egui_kittest::kittest::Queryable;
 use serde_json::json;
-use soundcraft_ui_egui::{Services, SoundApp, theme::ThemeMode};
+use transit_ui_egui::{Services, SoundApp, theme::ThemeMode};
 
 #[derive(Debug)]
 struct Slot {
@@ -74,7 +74,7 @@ fn contrast(a: Color32, b: Color32) -> f64 {
 
 #[test]
 fn populated_mix_instrument_uses_readable_palette_in_real_frames() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     assert_eq!(app.ui.theme, ThemeMode::Dark);
     // Keep demo audio loaded for the preservation check while isolating the new strips.
     for track in &mut app.engine.session_mut().tracks {
@@ -123,7 +123,7 @@ fn populated_mix_instrument_uses_readable_palette_in_real_frames() {
         }
         let ordinary = slot(harness.output(), "SubSynth");
         let insert = slot(harness.output(), "EQ7");
-        let palette = if light { soundcraft_ui_egui::theme::Tokens::LIGHT } else { soundcraft_ui_egui::theme::Tokens::DARK };
+        let palette = if light { transit_ui_egui::theme::Tokens::LIGHT } else { transit_ui_egui::theme::Tokens::DARK };
         let face = palette.slot_face;
         assert!(near(insert.faces, face), "{name}: insert faces {:?}", insert.faces);
         // The empty instrument track's slot sits beside the populated one, drawn as an empty cell.
@@ -186,7 +186,7 @@ fn populated_mix_instrument_uses_readable_palette_in_real_frames() {
     let app = harness.state();
     let replacement = app.engine.session().track(instrument).unwrap().instrument.as_ref().unwrap();
     assert_eq!(replacement.plugin, "drum_synth");
-    for param in soundcraft_dsp::plugin_info("drum_synth").unwrap().params {
+    for param in transit_dsp::plugin_info("drum_synth").unwrap().params {
         assert_eq!(replacement.params.get(param.id), Some(&param.default));
     }
     assert_eq!(app.engine.session().edit.selected_tracks, session.edit.selected_tracks);

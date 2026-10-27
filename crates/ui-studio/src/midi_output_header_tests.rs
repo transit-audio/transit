@@ -5,7 +5,7 @@ use egui::{Pos2, Rect, vec2};
 use serde_json::json;
 
 fn rig(external: bool) -> (StudioApp, egui::Context) {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let t = app.run("track.new", json!({"kind": "midi", "name": "Lead"})).unwrap()["tracks"][0].as_u64().unwrap();
     if external {
         app.run("midi.output", json!({"track": t, "port": {"backend": "fake", "name": "Synth OUT", "ordinal": 0, "id": ""}, "channel": 2})).unwrap();
@@ -91,7 +91,7 @@ fn the_header_chip_opens_the_picker_and_sends_midi_output() {
 }
 
 fn instrument_rig() -> (StudioApp, egui::Context) {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let t = app.run("track.new", json!({"kind": "instrument", "name": "Keys"})).unwrap()["tracks"][0].as_u64().unwrap();
     app.run("midi.output", json!({"track": t, "port": {"backend": "fake", "name": "Synth OUT", "ordinal": 0, "id": ""}, "channel": 2})).unwrap();
     (app, egui::Context::default())

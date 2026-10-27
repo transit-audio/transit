@@ -3,11 +3,11 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::json;
-use soundcraft_engine::{Engine, EngineError};
-use soundcraft_mix::{DeviceGeneration, InstanceSpec, PlanCompiler, PlanLimits, RenderTarget, SlotGen, create_instance};
-use soundcraft_model::{ClipContent, Session, TrackId, TrackKind};
-use soundcraft_time::Range;
 use std::sync::Arc;
+use transit_engine::{Engine, EngineError};
+use transit_mix::{DeviceGeneration, InstanceSpec, PlanCompiler, PlanLimits, RenderTarget, SlotGen, create_instance};
+use transit_model::{ClipContent, Session, TrackId, TrackKind};
+use transit_time::Range;
 
 /// An instrument track (a synth with a note) through a latent insert, with its fader down.
 fn engine() -> (Engine, TrackId) {
@@ -22,12 +22,12 @@ fn engine() -> (Engine, TrackId) {
     (e, TrackId(track))
 }
 
-fn keys(e: &Engine, t: TrackId) -> soundcraft_model::Track {
+fn keys(e: &Engine, t: TrackId) -> transit_model::Track {
     e.session().track(t).unwrap().clone()
 }
 
 fn mix(e: &Engine) -> Vec<Vec<f32>> {
-    soundcraft_mix::render_range(e.session(), Range::new(0, 96_000), 512)
+    transit_mix::render_range(e.session(), Range::new(0, 96_000), 512)
 }
 
 fn peak(a: &[Vec<f32>]) -> f32 {
@@ -49,7 +49,7 @@ fn instances_made(s: &Session) -> usize {
     made.get()
 }
 
-fn source_audio(e: &Engine, id: soundcraft_model::SourceId) -> Vec<Vec<f32>> {
+fn source_audio(e: &Engine, id: transit_model::SourceId) -> Vec<Vec<f32>> {
     e.session().pool.get(id).unwrap().buffer.channels.clone()
 }
 
@@ -57,7 +57,7 @@ fn source_audio(e: &Engine, id: soundcraft_model::SourceId) -> Vec<Vec<f32>> {
 fn a_freeze_is_the_pre_fader_render_a_bounce_in_place_makes() {
     let (mut e, t) = engine();
     let (mut b, _) = engine();
-    let made = soundcraft_engine::io::commit_track(&mut b, t).unwrap().unwrap();
+    let made = transit_engine::io::commit_track(&mut b, t).unwrap().unwrap();
     let ClipContent::Audio { source, .. } = b.session().track(made).unwrap().clips()[0].content else { panic!("an audio clip") };
     let bounced = source_audio(&b, source);
     assert!(peak(&bounced) > 1e-4, "the fixture makes sound");

@@ -45,7 +45,7 @@ fn input_placement_is_latched_independently_of_ui_and_disk_progress() {
         now = offer(&mut observer);
         assert!(pump.step(|| Some(now)));
     }
-    let (mut control, mut publisher) = start::pair(soundcraft_mix::EngineEpoch(1));
+    let (mut control, mut publisher) = start::pair(transit_mix::EngineEpoch(1));
     let start = control.prepare().unwrap();
     let (placement, input) = mapping::pair(start.clone(), key);
     let input = input.with_lifetime(Arc::clone(&pump.state.finished));
@@ -72,7 +72,7 @@ fn clock_worker_shutdown_rejects_both_queued_and_active_record_placements() {
         let (_, reader) = raw_fixture();
         let key = reader.key();
         let (mut pump, _, _, mut placements) = prepare(reader);
-        let (mut control, _) = start::pair(soundcraft_mix::EngineEpoch(1));
+        let (mut control, _) = start::pair(transit_mix::EngineEpoch(1));
         let (placement, input) = mapping::pair(control.prepare().unwrap(), key);
         placements.push(placement).ok().unwrap();
         if !queued {
@@ -90,7 +90,7 @@ fn a_submission_racing_past_the_final_worker_drain_cannot_strand_its_reader() {
     let key = reader.key();
     let (pump, _, _, mut placements) = prepare(reader);
     let finished = Arc::clone(&pump.state.finished);
-    let (mut control, _) = start::pair(soundcraft_mix::EngineEpoch(1));
+    let (mut control, _) = start::pair(transit_mix::EngineEpoch(1));
     let (placement, input) = mapping::pair(control.prepare().unwrap(), key);
     let input = input.with_lifetime(finished);
     drop(pump);

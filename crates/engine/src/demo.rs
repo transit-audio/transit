@@ -2,10 +2,10 @@
 //! a 24-bar groove at 104 BPM with drums, bass, keys, pad, lead, a reverb aux and a master.
 
 use crate::Engine;
-use soundcraft_audio_io::{AudioBuffer, FileFormat};
-use soundcraft_midi::{Note, Sequence};
-use soundcraft_model::{ChannelFormat, Clip, Fade, FadeShape, Insert, MarkerKind, Route, SendSlot, Session, TrackKind};
-use soundcraft_time::{SampleRate, TICKS_PER_QUARTER};
+use transit_audio_io::{AudioBuffer, FileFormat};
+use transit_midi::{Note, Sequence};
+use transit_model::{ChannelFormat, Clip, Fade, FadeShape, Insert, MarkerKind, Route, SendSlot, Session, TrackKind};
+use transit_time::{SampleRate, TICKS_PER_QUARTER};
 
 const BPM: f64 = 104.0;
 const BARS: usize = 24;
@@ -23,7 +23,7 @@ impl Rng {
 
 fn insert(id: &str) -> Insert {
     let mut i = Insert::new(id);
-    if let Some(info) = soundcraft_dsp::plugin_info(id) {
+    if let Some(info) = transit_dsp::plugin_info(id) {
         for p in info.params {
             i.params.insert(p.id.to_string(), p.default);
         }
@@ -123,7 +123,7 @@ fn bass(sr: f64, frames: usize) -> Vec<f32> {
         for (eighth, semi, beats) in pattern {
             let at = bar * beat * 4 + eighth * beat / 2;
             let len = (beats * beat as f64) as usize;
-            let f = soundcraft_dsp::midi_to_hz(root + semi);
+            let f = transit_dsp::midi_to_hz(root + semi);
             let mut ph = 0.0f64;
             for i in 0..len {
                 let Some(o) = out.get_mut(at + i) else { break };
@@ -148,7 +148,7 @@ fn pad(sr: f64, frames: usize) -> (Vec<f32>, Vec<f32>) {
         let chord = PROG[bar % 4];
         let at = bar * bar_len;
         for (vi, n) in chord.iter().enumerate() {
-            let f = soundcraft_dsp::midi_to_hz(f64::from(*n) + 12.0);
+            let f = transit_dsp::midi_to_hz(f64::from(*n) + 12.0);
             for (side, buf) in [(-1.0f64, &mut l), (1.0, &mut r)] {
                 let det = 1.0 + side * 0.0035 * (vi as f64 + 1.0);
                 let mut ph = vi as f64 * 0.17;
@@ -215,14 +215,14 @@ pub fn demo_session() -> Session {
     let verb_bus = s.add_bus("Verb", ChannelFormat::Stereo);
     // Exact bar positions from the tempo map (bar index 0 = bar 1).
     let tempo = s.tempo.clone();
-    let bar_at = move |n: usize| tempo.samples_at_bar_beat(soundcraft_time::BarBeat { bar: n as i64 + 1, beat: 1, tick: 0 }, sr);
+    let bar_at = move |n: usize| tempo.samples_at_bar_beat(transit_time::BarBeat { bar: n as i64 + 1, beat: 1, tick: 0 }, sr);
     let add_audio = |s: &mut Session, name: &str, chans: Vec<Vec<f32>>, start_bar: usize, color: Option<usize>| {
         let fmt = ChannelFormat::for_channels(chans.len());
         let buf = AudioBuffer { sample_rate: sr.hz(), channels: chans };
         let src = crate::io::add_source(s, name, buf, None, FileFormat::Wav);
         let t = s.add_track(TrackKind::Audio, fmt, Some(name));
         if let (Some(c), Some(tr)) = (color, s.track_mut(t)) {
-            tr.color = soundcraft_model::TRACK_COLORS[c % 16];
+            tr.color = transit_model::TRACK_COLORS[c % 16];
         }
         let start = bar_at(start_bar);
         let len = total as i64 - start;
@@ -257,7 +257,7 @@ pub fn demo_session() -> Session {
         crate::edit::place_clip(&mut s, t, Clip::midi(cid, name, start, len, seq));
         if let Some(tr) = s.track_mut(t) {
             tr.instrument = Some(insert("subtractive_synth"));
-            tr.color = soundcraft_model::TRACK_COLORS[color];
+            tr.color = transit_model::TRACK_COLORS[color];
             tr.mixer.volume_db = if t == keys { -9.0 } else { -12.0 };
         }
     }
@@ -267,7 +267,7 @@ pub fn demo_session() -> Session {
         tr.mixer.input = Route::Bus(verb_bus);
         tr.mixer.inserts[0] = Some(insert("plate_reverb"));
         tr.mixer.volume_db = -4.0;
-        tr.color = soundcraft_model::TRACK_COLORS[12];
+        tr.color = transit_model::TRACK_COLORS[12];
     }
     for (t, lvl) in [(ts, -10.0f32), (tp, -8.0), (keys, -12.0), (lead, -6.0)] {
         if let Some(tr) = s.track_mut(t) {
@@ -296,7 +296,7 @@ pub fn demo_session() -> Session {
     if let Some(tr) = s.track_mut(tp) {
         tr.mixer.inserts[0] = Some(insert("chorus"));
         // Pad swells in with volume automation.
-        let l = tr.lane_mut(&soundcraft_model::AutoParam::Volume);
+        let l = tr.lane_mut(&transit_model::AutoParam::Volume);
         l.set_point(0, -30.0);
         l.set_point((4 * bar) as i64, -8.0);
         l.set_point((20 * bar) as i64, -8.0);
@@ -308,13 +308,13 @@ pub fn demo_session() -> Session {
     }
     // Markers.
     for (name, at) in [("Intro", 1i64), ("Verse", 5), ("Chorus", 13), ("Outro", 21)] {
-        let pos = s.tempo.samples_at_bar_beat(soundcraft_time::BarBeat { bar: at, beat: 1, tick: 0 }, sr);
+        let pos = s.tempo.samples_at_bar_beat(transit_time::BarBeat { bar: at, beat: 1, tick: 0 }, sr);
         s.add_marker(name, MarkerKind::Marker, pos, pos);
     }
     s.edit.selected_tracks = vec![tk];
-    s.edit.selection = soundcraft_time::Range::point((4 * bar) as i64);
+    s.edit.selection = transit_time::Range::point((4 * bar) as i64);
     s.edit.zoom.samples_per_px = (total as f64 / 1400.0).max(1.0);
-    s.edit.main_counter = soundcraft_time::TimeFormat::BarsBeats;
+    s.edit.main_counter = transit_time::TimeFormat::BarsBeats;
     s
 }
 
@@ -338,8 +338,8 @@ mod tests {
         assert!(s.tracks.len() >= 9);
         assert!(s.master().is_some());
         let sr = s.sample_rate;
-        let r = soundcraft_time::Range::new(sr.samples(10.0), sr.samples(12.0));
-        let out = soundcraft_mix::render_range(&s, r, 1024);
+        let r = transit_time::Range::new(sr.samples(10.0), sr.samples(12.0));
+        let out = transit_mix::render_range(&s, r, 1024);
         let pk = out.iter().flat_map(|c| c.iter()).fold(0.0f32, |m, v| m.max(v.abs()));
         assert!(pk > 0.05, "demo should be audible, peak {pk}");
         assert!(pk <= 1.5, "demo should not be wildly clipping, peak {pk}");

@@ -6,10 +6,10 @@
 //! are decided here, against the value cell Main keeps current. Learn is Main-side: the worker only
 //! forwards the next candidate when its shared flag is armed.
 
-use soundcraft_mix::Message;
-use soundcraft_model::{MapMode, SourceKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
+use transit_mix::Message;
+use transit_model::{MapMode, SourceKind};
 
 /// An entry whose port is not open matches nothing.
 pub const NO_PORT: u64 = u64::MAX;
@@ -39,7 +39,7 @@ pub struct MapSpec {
 
 impl MapSpec {
     /// The spec of a resolved mapping (callers pass only those not overridden).
-    pub fn from_resolved(r: &soundcraft_model::Resolved) -> Self {
+    pub fn from_resolved(r: &transit_model::Resolved) -> Self {
         let m = &r.mapping;
         MapSpec {
             port: m.source.port.clone(),
@@ -500,7 +500,7 @@ impl Wanted {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soundcraft_mix::NoteId;
+    use transit_mix::NoteId;
 
     fn spec(kind: SourceKind, number: u8, mode: MapMode, button: bool) -> MapSpec {
         MapSpec { port: "KeyStep".into(), channel: Some(0), kind, number, mode, min: 0.0, max: 1.0, toggle: true, button, pass_through: false }

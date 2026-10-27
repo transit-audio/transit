@@ -1,7 +1,7 @@
 use serde_json::json;
-use soundcraft_engine::Engine;
-use soundcraft_midi::scale::{KeyScale, Scale, ScaleMode};
-use soundcraft_model::{ClipId, Session};
+use transit_engine::Engine;
+use transit_midi::scale::{KeyScale, Scale, ScaleMode};
+use transit_model::{ClipId, Session};
 
 #[test]
 fn scale_mode_is_per_clip_undoable_persistent_and_never_rewrites_notes() {
@@ -30,7 +30,7 @@ fn scale_mode_is_per_clip_undoable_persistent_and_never_rewrites_notes() {
 
     let mut legacy = serde_json::to_value(&original).unwrap();
     legacy.as_object_mut().unwrap().remove("scale_mode");
-    let restored: soundcraft_model::Clip = serde_json::from_value(legacy).unwrap();
+    let restored: transit_model::Clip = serde_json::from_value(legacy).unwrap();
     assert_eq!(restored.scale_mode, ScaleMode::default());
 }
 

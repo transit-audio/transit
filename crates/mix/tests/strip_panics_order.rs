@@ -1,17 +1,17 @@
 //! Independent ADR 0009 probes. No audio devices or external plug-ins are opened.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::Plugin;
-use soundcraft_mix::{
-    Adoption, DeviceGeneration, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen,
-    mark_audio_thread,
-};
-use soundcraft_model::{ChannelFormat, Insert, Session, TrackKind};
 use std::any::Any;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::thread::ThreadId;
+use transit_dsp::Plugin;
+use transit_mix::{
+    Adoption, DeviceGeneration, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen,
+    mark_audio_thread,
+};
+use transit_model::{ChannelFormat, Insert, Session, TrackKind};
 use transit_rt::testing::{CountingAlloc, measure};
 
 #[global_allocator]
@@ -58,8 +58,8 @@ impl Drop for Payload {
 
 struct Probe(Arc<State>);
 impl Plugin for Probe {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
-        soundcraft_dsp::plugin_info("gain").unwrap()
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
+        transit_dsp::plugin_info("gain").unwrap()
     }
     fn prepare(&mut self, _: f32, _: usize, _: usize) {}
     fn reset(&mut self) {}

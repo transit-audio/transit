@@ -5,7 +5,7 @@
 use crate::automation::Lane;
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::{AutoParam, AutomationMode, TrackId};
+use transit_model::{AutoParam, AutomationMode, TrackId};
 
 struct T {
     app: StudioApp,
@@ -19,7 +19,7 @@ fn mid(r: [f32; 4]) -> (f32, f32) {
 
 impl T {
     fn new() -> T {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         app.ui.show_mixer = true;
         app.ui.show_devices = true;
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0 };
@@ -189,7 +189,7 @@ fn a_preset_recall_in_latch_writes_one_point_per_changed_parameter() {
     let tr = t.eq(AutomationMode::Latch);
     t.play();
     t.frames(6);
-    let info = soundcraft_dsp::plugin_info("eq_7band").unwrap();
+    let info = transit_dsp::plugin_info("eq_7band").unwrap();
     let mut preset = crate::presets::Preset { plugin: "eq_7band".into(), version: 1, params: Default::default() };
     preset.params.insert("mid_gain".into(), 6.0);
     preset.params.insert("high_shelf_gain".into(), -4.0);
@@ -212,7 +212,7 @@ fn an_instrument_knob_records_into_the_instrument_lane() {
     let pts = t.lane(tr, AutoParam::INSTRUMENT_SLOT, "cutoff");
     assert!(pts.len() >= 5, "the instrument lane took points: {}", pts.len());
     let s = t.app.engine.session_arc();
-    let lane = Lane::of_param(tr, soundcraft_mix::INSTRUMENT_SLOT, "cutoff").unwrap().1;
+    let lane = Lane::of_param(tr, transit_mix::INSTRUMENT_SLOT, "cutoff").unwrap().1;
     assert!(lane.valid(s.track(tr).unwrap()));
     assert_eq!(lane.id(), "plugin:instrument:cutoff");
     assert_eq!(Lane::parse(&lane.id()), Some(lane));

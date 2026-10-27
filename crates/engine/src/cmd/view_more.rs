@@ -230,7 +230,7 @@ mod tests {
         assert!(!e.session().edit.flag("view.clip.rating"));
         e.execute("view.edit_inserts_ae", &json!({"value": true})).unwrap();
         let text = e.session().to_json().unwrap();
-        let back = soundcraft_model::Session::from_json(&text).unwrap();
+        let back = transit_model::Session::from_json(&text).unwrap();
         assert!(back.edit.flag("edit_view.inserts_ae"));
         assert!(!e.can_undo(), "view toggles are not undo steps");
     }

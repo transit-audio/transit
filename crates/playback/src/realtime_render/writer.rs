@@ -4,11 +4,11 @@
 //! `start + i + C`, which is where slice 1 puts it for monitoring (ADR 0020 decisions 2 and 8).
 
 use super::{RenderTap, TapState};
-use soundcraft_model::TrackId;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use transit_model::TrackId;
 
 /// Frames moved from the ring per pass.
 const CHUNK: usize = 4096;
@@ -218,7 +218,7 @@ fn write_all(tap: &RenderTap, layout: &Layout, sink: &mut dyn RenderSink, cancel
 
 /// One file of a render: written to `<name>.part`, renamed over `path` when complete.
 struct Part {
-    enc: Option<soundcraft_audio_io::FileEncoder<std::io::BufWriter<std::fs::File>>>,
+    enc: Option<transit_audio_io::FileEncoder<std::io::BufWriter<std::fs::File>>>,
     part: PathBuf,
     path: PathBuf,
 }
@@ -227,7 +227,7 @@ impl Part {
     fn create(
         path: &Path,
         channels: usize,
-        opts: &soundcraft_audio_io::EncodeOptions,
+        opts: &transit_audio_io::EncodeOptions,
         rate: u32,
         mask: Option<u32>,
         frames: u64,
@@ -236,7 +236,7 @@ impl Part {
         let part = path.with_file_name(format!("{name}.part"));
         let enc = (|| -> Result<_, String> {
             let file = std::fs::File::create(&part).map_err(|e| e.to_string())?;
-            let enc = soundcraft_audio_io::FileEncoder::new(std::io::BufWriter::with_capacity(1 << 20, file), opts, channels, rate, mask)
+            let enc = transit_audio_io::FileEncoder::new(std::io::BufWriter::with_capacity(1 << 20, file), opts, channels, rate, mask)
                 .map_err(|e| e.to_string())?;
             enc.check_room(frames).map_err(|e| e.to_string())?;
             Ok(enc)
@@ -293,7 +293,7 @@ impl FileSink {
         channels: usize,
         mask: Option<u32>,
         stems: &[Option<(PathBuf, usize)>],
-        opts: &soundcraft_audio_io::EncodeOptions,
+        opts: &transit_audio_io::EncodeOptions,
         rate: u32,
         frames: u64,
     ) -> Result<Self, String> {

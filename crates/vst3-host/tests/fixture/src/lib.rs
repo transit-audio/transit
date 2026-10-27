@@ -1,4 +1,4 @@
-//! Test-only VST3 plugin for soundcraft-vst3-host (two audio module classes):
+//! Test-only VST3 plugin for transit-vst3-host (two audio module classes):
 //!
 //! - "Fixture Gain" (`Fx`): stereo or mono in → out × gain, with a separate edit controller
 //!   (connected through IConnectionPoint, synced through the component state). Params: 7 "Gain"

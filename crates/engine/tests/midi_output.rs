@@ -1,6 +1,6 @@
 use serde_json::{Value, json};
-use soundcraft_engine::Engine;
-use soundcraft_model::{ChannelFormat, MidiOutChannel, MidiOutPort, MidiOutput, TrackId, TrackKind};
+use transit_engine::Engine;
+use transit_model::{ChannelFormat, MidiOutChannel, MidiOutPort, MidiOutput, TrackId, TrackKind};
 
 fn tracks(e: &mut Engine) -> (TrackId, TrackId, TrackId) {
     let s = e.session_mut();
@@ -31,7 +31,7 @@ fn one_undo_step_sets_the_destination_on_several_tracks_and_it_round_trips() {
         assert_eq!(e.session().track(t).unwrap().midi_output, expected);
     }
     let text = serde_json::to_string(e.session()).unwrap();
-    let restored: soundcraft_model::Session = serde_json::from_str(&text).unwrap();
+    let restored: transit_model::Session = serde_json::from_str(&text).unwrap();
     assert_eq!(restored.track(b).unwrap().midi_output, expected);
     assert!(e.undo());
     for t in [a, b] {
@@ -65,7 +65,7 @@ fn partial_changes_keep_the_other_fields_and_internal_resets() {
     e.execute("midi.output", &json!({"track": b.0, "channel": "as_recorded"})).unwrap();
     e.execute("midi.output", &json!({"track": b.0, "port": "internal"})).unwrap();
     assert_eq!(e.session().track(b).unwrap().midi_output, MidiOutput::Internal);
-    let inspected = soundcraft_engine::inspect::session(&e, false);
+    let inspected = transit_engine::inspect::session(&e, false);
     let track = inspected["tracks"].as_array().unwrap().iter().find(|t| t["id"] == json!(b.0)).unwrap();
     assert_eq!(track["midi_output"], json!("internal"));
 }

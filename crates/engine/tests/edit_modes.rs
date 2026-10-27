@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
-use soundcraft_engine::Engine;
-use soundcraft_engine::edit::SHUFFLE_LOCK;
-use soundcraft_model::{AutoParam, Clip, ClipId, EditMode, Source, SourceId, TrackId};
+use transit_engine::Engine;
+use transit_engine::edit::SHUFFLE_LOCK;
+use transit_model::{AutoParam, Clip, ClipId, EditMode, Source, SourceId, TrackId};
 
 fn source(id: u64, frames: u64) -> Source {
     Source {
@@ -11,7 +11,7 @@ fn source(id: u64, frames: u64) -> Source {
         channels: 1,
         frames,
         sample_rate: 48_000,
-        format: soundcraft_audio_io::FileFormat::Wav,
+        format: transit_audio_io::FileFormat::Wav,
         time_reference: 0,
         unsaved: false,
     }
@@ -163,7 +163,7 @@ fn shuffle_lock_keeps_shuffle_mode_out() {
 #[test]
 fn snap_to_grid_rides_along_with_the_other_modes() {
     let (mut e, _, _) = engine("slip");
-    let snap = |e: &Engine| e.session().edit.flag(soundcraft_engine::edit::SNAP_TO_GRID);
+    let snap = |e: &Engine| e.session().edit.flag(transit_engine::edit::SNAP_TO_GRID);
     run(&mut e, "edit.snap_to_grid", json!({}));
     assert!(snap(&e));
     run(&mut e, "edit.mode", json!({"mode": "spot", "snap_to_grid": true}));
@@ -328,12 +328,12 @@ fn start_trims_keep_the_sync_point_on_its_audio() {
 
 #[test]
 fn imported_time_stamps_count_at_the_session_rate() {
-    use soundcraft_audio_io::{AudioBuffer, BwfInfo, EncodeOptions, FileFormat};
+    use transit_audio_io::{AudioBuffer, BwfInfo, EncodeOptions, FileFormat};
     let mut e = Engine::default();
     let bwf = BwfInfo { time_reference: 1_587_600_000, ..BwfInfo::default() };
     let opts = EncodeOptions { format: FileFormat::Wav, bwf: Some(bwf), ..EncodeOptions::default() };
-    let bytes = soundcraft_audio_io::encode(&AudioBuffer::new(44_100, 1, 441), &opts).unwrap();
-    soundcraft_engine::io::import_audio_bytes(&mut e, "stamped.wav", &bytes, None, None, 0).unwrap();
+    let bytes = transit_audio_io::encode(&AudioBuffer::new(44_100, 1, 441), &opts).unwrap();
+    transit_engine::io::import_audio_bytes(&mut e, "stamped.wav", &bytes, None, None, 0).unwrap();
     assert_eq!(e.session().sources[0].time_reference, 1_728_000_000);
 }
 

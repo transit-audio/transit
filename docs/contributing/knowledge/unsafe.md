@@ -1,6 +1,6 @@
 # Unsafe policy
 
-Decision: [ADR 0013](../../adr/0013-unsafe-only-in-soundcraft-rt.md) and its amendments.
+Decision: [ADR 0013](../../adr/0013-unsafe-only-in-transit-rt.md) and its amendments.
 
 - New `unsafe` lives only in `crates/rt`. `crates/mix` forbids it.
 - The plug-in host crates (`clap-host`, `vst3-host`, `au-host`) and the ASIO glue keep their existing

@@ -5,8 +5,8 @@
 //! what the hosted instrument would have played. Runs on the audio thread: no allocation, no lock.
 
 use super::{ClipEvent, Rtp, midi_offset, note_spans, played_note, sorted_clip_events};
-use soundcraft_model::{ClipContent, MidiOutChannel, MidiOutput, Session, Track};
-use soundcraft_time::Samples;
+use transit_model::{ClipContent, MidiOutChannel, MidiOutput, Session, Track};
+use transit_time::Samples;
 
 /// One message for an external destination, at a sample offset into the block.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -93,13 +93,13 @@ fn sounding_notes(s: &Session, t: &Track, pos: Samples, mut visit: impl FnMut(u8
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use soundcraft_midi::{CtrlEvent, CtrlKind, Note, Sequence};
-    use soundcraft_model::{ChannelFormat, Clip, ClipId, MidiOutPort, TrackKind};
+    use transit_midi::{CtrlEvent, CtrlKind, Note, Sequence};
+    use transit_model::{ChannelFormat, Clip, ClipId, MidiOutPort, TrackKind};
 
-    fn session(channel: MidiOutChannel) -> (Session, soundcraft_model::TrackId) {
+    fn session(channel: MidiOutChannel) -> (Session, transit_model::TrackId) {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
-        let ppq = soundcraft_time::TICKS_PER_QUARTER;
+        let ppq = transit_time::TICKS_PER_QUARTER;
         let mut seq = Sequence::default();
         // At 120 bpm and 48 kHz a quarter is 24 000 samples.
         seq.notes.push(Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 2, start: 0, length: ppq });
@@ -112,7 +112,7 @@ mod tests {
         (s, t)
     }
 
-    fn events(s: &Session, t: soundcraft_model::TrackId, pos: Samples, frames: usize, chase: bool) -> Vec<(usize, Vec<u8>)> {
+    fn events(s: &Session, t: transit_model::TrackId, pos: Samples, frames: usize, chase: bool) -> Vec<(usize, Vec<u8>)> {
         let mut out = Vec::new();
         external_midi_events(s, s.track(t).unwrap(), pos, frames, chase, |e| out.push((e.offset, e.message().to_vec())));
         out
@@ -156,15 +156,15 @@ mod tests {
 
     /// A looped clip (loop 0..4 beats, length 6) with E64 from beat 3 to 5 (crosses the seam) and a
     /// note a start trim moved before the clip start (-1 beat, 3 beats long).
-    fn looped() -> (Session, soundcraft_model::TrackId, i64) {
+    fn looped() -> (Session, transit_model::TrackId, i64) {
         let (mut s, t) = session(MidiOutChannel::AsRecorded);
-        let ppq = soundcraft_time::TICKS_PER_QUARTER;
+        let ppq = transit_time::TICKS_PER_QUARTER;
         let beat = s.tempo.tick_to_samples(ppq, s.sample_rate);
         let mut seq = Sequence::default();
         seq.notes.push(Note { pitch: 64, velocity: 100, release_velocity: 64, channel: 5, start: 3 * ppq, length: 2 * ppq });
         let track = s.track_mut(t).unwrap();
         let mut c = Clip::midi(ClipId(2), "loop", 0, 6 * beat, seq);
-        c.looping = Some(soundcraft_model::ClipLoop { start: 0, end: 4 * beat });
+        c.looping = Some(transit_model::ClipLoop { start: 0, end: 4 * beat });
         let clips = &mut track.playlist_mut().unwrap().clips;
         clips.clear();
         clips.push(c);
@@ -199,7 +199,7 @@ mod tests {
     #[test]
     fn chase_skips_a_trimmed_negative_tick_note_in_the_first_pass() {
         let (mut s, t, beat) = looped();
-        let ppq = soundcraft_time::TICKS_PER_QUARTER;
+        let ppq = transit_time::TICKS_PER_QUARTER;
         let c = s.find_clip_mut(ClipId(2)).unwrap();
         let ClipContent::Midi { sequence: seq } = &mut c.content else { panic!() };
         seq.notes.clear();

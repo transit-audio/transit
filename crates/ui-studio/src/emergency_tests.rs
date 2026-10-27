@@ -1,6 +1,6 @@
 //! Issue #104 (escape E56): a panic on the UI thread with a plug-in loaded ends the process within
 //! a bound, through the app's quit order ([`StudioApp::shut_down`]) and the bounded emergency
-//! path ([`soundcraft_engine::emergency`]), instead of hanging in a plug-in's unload code.
+//! path ([`transit_engine::emergency`]), instead of hanging in a plug-in's unload code.
 //!
 //! The plug-in is the VST3 test fixture in its unload mode (`VST3_FIXTURE_UNLOAD_WAITS_ON_WORKER`):
 //! its module entry starts a worker thread, its module exit stops it, and its static destructor
@@ -13,13 +13,13 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use crate::{Services, StudioApp};
-use soundcraft_engine::emergency::{EXIT_AFTER_SHUTDOWN, EXIT_TERMINATED, emergency_shutdown};
 use std::io::{BufRead as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
+use transit_engine::emergency::{EXIT_AFTER_SHUTDOWN, EXIT_TERMINATED, emergency_shutdown};
 
 const CHILD: &str = "TRANSIT_EMERGENCY_CHILD";
 const FIXTURE: &str = "TRANSIT_EMERGENCY_FIXTURE";
@@ -63,7 +63,7 @@ fn built_fixture() -> &'static Path {
 /// In the child: installs the built fixture as a bundle in a folder of its own, adds it to the
 /// search path and returns the synth's id.
 fn install_fixture(built: &Path) -> String {
-    soundcraft_vst3_host::set_scan_extra_dirs_only(true);
+    transit_vst3_host::set_scan_extra_dirs_only(true);
     let (folder, exe) = if cfg!(windows) {
         ("x86_64-win", "Fixture.vst3")
     } else {
@@ -74,8 +74,8 @@ fn install_fixture(built: &Path) -> String {
     let bin = dir.join("Fixture.vst3/Contents").join(folder);
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::copy(built, bin.join(exe)).unwrap();
-    assert_eq!(soundcraft_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
-    soundcraft_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Synth").expect("the fixture's synth").id
+    assert_eq!(transit_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
+    transit_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Synth").expect("the fixture's synth").id
 }
 
 fn frame(app: &mut StudioApp, ctx: &egui::Context) {
@@ -87,12 +87,12 @@ fn frame(app: &mut StudioApp, ctx: &egui::Context) {
 /// this thread, then `case`.
 fn child(case: &str) -> ! {
     let synth = install_fixture(Path::new(&std::env::var_os(FIXTURE).expect("the built fixture")));
-    let mut engine = soundcraft_engine::Engine::default();
-    let track = engine.session_mut().add_track(soundcraft_model::TrackKind::Instrument, soundcraft_model::ChannelFormat::Stereo, Some("Synth"));
-    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let mut engine = transit_engine::Engine::default();
+    let track = engine.session_mut().add_track(transit_model::TrackKind::Instrument, transit_model::ChannelFormat::Stereo, Some("Synth"));
+    let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
     let mut app = StudioApp::new(engine, Some(player), Services::default());
     let ctx = egui::Context::default();
-    let slot = soundcraft_mix::INSTRUMENT_SLOT;
+    let slot = transit_mix::INSTRUMENT_SLOT;
     app.set_instrument(track, &synth).unwrap();
     let started = Instant::now();
     while !app.player.as_ref().unwrap().has_editor(track, slot) {
@@ -104,7 +104,7 @@ fn child(case: &str) -> ! {
     }
     if case == "leaked" {
         // A second instance nobody releases: its binary can never have its module exit.
-        std::mem::forget(soundcraft_vst3_host::instantiate_plugin(&synth).expect("a second instance"));
+        std::mem::forget(transit_vst3_host::instantiate_plugin(&synth).expect("a second instance"));
     }
     println!("{READY}");
     std::io::stdout().flush().unwrap();

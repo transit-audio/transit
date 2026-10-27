@@ -1,16 +1,16 @@
 //! File > Bounce in real time (ADR 0027, ADR 0020 slice 3): a mix with an External Instrument is
 //! rendered by playing it through the live device, so the bounce is what the user hears. The
-//! engine checks what it can see (`soundcraft_engine::cmd::realtime_plan`); the app checks the
+//! engine checks what it can see (`transit_engine::cmd::realtime_plan`); the app checks the
 //! device (open, duplex, no measurement running, the ports present), then the Player plays the
-//! range from its pre-roll and keeps Main and the returns ([`soundcraft_playback::realtime_render`]).
+//! range from its pre-roll and keeps Main and the returns ([`transit_playback::realtime_render`]).
 //! The dialog shows "Rendering in real time… bar N of M" with Cancel; Cancel, a failure and a
 //! device loss stop playback, release the synths' notes and remove the partial files.
 
 use crate::StudioApp;
 use serde_json::{Value, json};
-use soundcraft_model::{MidiOutput, TrackId};
-use soundcraft_playback::realtime_render::{FileSink, RealtimeError, RealtimeSpec, Rendered, StemSpec};
 use std::path::PathBuf;
+use transit_model::{MidiOutput, TrackId};
+use transit_playback::realtime_render::{FileSink, RealtimeError, RealtimeSpec, Rendered, StemSpec};
 
 /// The refusal of a transport start while a real-time render plays.
 pub(crate) const REFUSED_TRANSPORT: &str = "Rendering in real time: cancel the render first";
@@ -49,7 +49,7 @@ const TRANSPORT: [&str; 15] = [
 pub struct Rendering {
     pub path: PathBuf,
     pub stems: Vec<PathBuf>,
-    pub range: soundcraft_time::Range,
+    pub range: transit_time::Range,
     pub tracks: Vec<TrackId>,
     pub uncompensated: Vec<String>,
 }
@@ -114,9 +114,9 @@ pub fn progress_text(bar: i64, of: i64) -> String {
 }
 
 /// The message of an engine refusal, without the command's prefix.
-fn said(e: &soundcraft_engine::EngineError) -> String {
+fn said(e: &transit_engine::EngineError) -> String {
     match e {
-        soundcraft_engine::EngineError::BadParams(_, m) => m.clone(),
+        transit_engine::EngineError::BadParams(_, m) => m.clone(),
         other => other.to_string(),
     }
 }
@@ -135,7 +135,7 @@ impl StudioApp {
         let player = self.player.as_ref().filter(|p| !p.silent);
         let c = Conditions {
             live: player.is_some(),
-            duplex: player.is_some_and(soundcraft_playback::Player::duplex),
+            duplex: player.is_some_and(transit_playback::Player::duplex),
             playing: self.is_playing() || self.engine.transport.recording,
             measuring: self.external_measure.running.is_some()
                 || self.audio_devices.measuring.is_some()
@@ -152,7 +152,7 @@ impl StudioApp {
     /// Why `p` (a `file.bounce_mix` in real time) cannot start now: the engine's checks first,
     /// then the device's. `None` when it can.
     pub(crate) fn realtime_blocker(&self, p: &Value) -> Option<String> {
-        if let Err(e) = soundcraft_engine::cmd::realtime_plan(&self.engine, p) {
+        if let Err(e) = transit_engine::cmd::realtime_plan(&self.engine, p) {
             return Some(said(&e));
         }
         device_blocker(&self.realtime_conditions())
@@ -176,7 +176,7 @@ impl StudioApp {
             return Some(Err(self.status.clone()));
         }
         let realtime =
-            id == "file.bounce_mix" && soundcraft_engine::cmd::realtime_plan_mode(p).is_ok_and(|m| m == soundcraft_engine::cmd::RenderMode::Realtime);
+            id == "file.bounce_mix" && transit_engine::cmd::realtime_plan_mode(p).is_ok_and(|m| m == transit_engine::cmd::RenderMode::Realtime);
         realtime.then(|| {
             let r = self.start_realtime(p);
             if let Err(why) = &r {
@@ -192,7 +192,7 @@ impl StudioApp {
             return Err("A real-time render is already running.".into());
         }
         self.finish.realtime.ended = None;
-        let plan = soundcraft_engine::cmd::realtime_plan(&self.engine, p).map_err(|e| said(&e))?;
+        let plan = transit_engine::cmd::realtime_plan(&self.engine, p).map_err(|e| said(&e))?;
         if let Some(why) = device_blocker(&self.realtime_conditions()) {
             return Err(why);
         }
@@ -201,8 +201,8 @@ impl StudioApp {
         let s = self.engine.session_arc();
         let rate = s.sample_rate.hz();
         // C as the live plan compensates it: decision 4's lookup through the Player's own table.
-        let io = self.player.as_ref().map(soundcraft_playback::Player::io_map);
-        let reports = io.as_deref().map(|io| soundcraft_mix::external_report(&s, io, io.inputs, true, rate, &[])).unwrap_or_default();
+        let io = self.player.as_ref().map(transit_playback::Player::io_map);
+        let reports = io.as_deref().map(|io| transit_mix::external_report(&s, io, io.inputs, true, rate, &[])).unwrap_or_default();
         let stems: Vec<StemSpec> = plan
             .stems
             .iter()
@@ -210,7 +210,7 @@ impl StudioApp {
                 track: st.track,
                 channels: st.channels.clone(),
                 latency: reports.iter().find(|r| r.track == st.track).and_then(|r| r.latency).or(st.latency).unwrap_or(0),
-                gain: soundcraft_dsp::db_to_gain(st.gain_db),
+                gain: transit_dsp::db_to_gain(st.gain_db),
             })
             .collect();
         let block = i64::from(self.device_buffer().unwrap_or(512));
@@ -290,7 +290,7 @@ impl StudioApp {
         self.status = match done {
             Ok(d) => {
                 let secs = self.engine.session().sample_rate.seconds(r.range.len());
-                let peak = soundcraft_dsp::gain_to_db(d.peak);
+                let peak = transit_dsp::gain_to_db(d.peak);
                 let path = r.path.to_string_lossy().into_owned();
                 self.finish.layout.last_bounce = Some(
                     json!({"path": path, "seconds": secs, "peak_db": peak, "realtime": true, "stems": r.stems, "uncompensated": r.uncompensated}),

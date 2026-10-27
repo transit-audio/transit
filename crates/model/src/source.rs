@@ -2,9 +2,9 @@
 //! movies video clips reference.
 
 use crate::SourceId;
-use soundcraft_audio_io::{AudioBuffer, FileFormat, peaks::Peaks};
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use transit_audio_io::{AudioBuffer, FileFormat, peaks::Peaks};
 
 /// Metadata for an audio file used by the session (serialised).
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]

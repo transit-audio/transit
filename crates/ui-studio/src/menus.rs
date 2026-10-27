@@ -7,7 +7,7 @@ use crate::shortcuts::{Action as A, label, pressed};
 use crate::theme::{STATUS_H, TOKENS};
 use crate::{Dialog, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::TrackId;
+use transit_model::TrackId;
 
 impl StudioApp {
     /// Run a session-replacing command or Quit, asking to save unsaved changes first.
@@ -686,7 +686,7 @@ pub fn recovery(app: &mut StudioApp, ctx: &egui::Context) {
         if recover {
             app.recover(&left);
         } else {
-            soundcraft_engine::autosave::discard(&left);
+            transit_engine::autosave::discard(&left);
         }
     }
     if later {

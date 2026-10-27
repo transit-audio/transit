@@ -5,7 +5,7 @@ use transit_rt::testing::measure;
 
 fn prepared() -> (Player, DeviceOutput) {
     // Allocates clocks/queues only. No device discovery, stream or fallback worker.
-    let (player, access, _clock) = Player::prepare(Arc::new(Session::default()), 48_000, soundcraft_model::IoMap::default()).unwrap();
+    let (player, access, _clock) = Player::prepare(Arc::new(Session::default()), 48_000, transit_model::IoMap::default()).unwrap();
     let output = DeviceOutput::new(access, &player, 2);
     (player, output)
 }
@@ -196,14 +196,14 @@ impl Drop for PanicPayload {
 }
 
 struct ProbePlugin {
-    inner: Box<dyn soundcraft_dsp::Plugin>,
+    inner: Box<dyn transit_dsp::Plugin>,
     drops: Arc<DropTrace>,
     panic: Option<Arc<DropTrace>>,
     gate: Option<(std::sync::mpsc::SyncSender<()>, Arc<AtomicBool>)>,
 }
 
-impl soundcraft_dsp::Plugin for ProbePlugin {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+impl transit_dsp::Plugin for ProbePlugin {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
         self.inner.info()
     }
     fn prepare(&mut self, rate: f32, frames: usize, channels: usize) {
@@ -247,7 +247,7 @@ fn probe_player(
     panic: Option<Arc<DropTrace>>,
     entered: Option<std::sync::mpsc::SyncSender<()>>,
 ) -> (Player, AudioAccess<Audio>, ProbeControl, Arc<DropTrace>) {
-    use soundcraft_model::{ChannelFormat, Insert, TrackKind};
+    use transit_model::{ChannelFormat, Insert, TrackKind};
     let mut session = Session::default();
     let track = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     session.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
@@ -262,8 +262,8 @@ fn probe_player(
     #[cfg(target_arch = "wasm32")]
     let stop = Arc::new(AtomicBool::new(true));
     control.service(&mut |spec, _generation| {
-        let inner = soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap().plugin;
-        Some(soundcraft_mix::NewInstance {
+        let inner = transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap().plugin;
+        Some(transit_mix::NewInstance {
             plugin: Box::new(ProbePlugin {
                 inner,
                 drops: Arc::clone(&drops),
@@ -664,7 +664,7 @@ fn a_duplex_input_failure_the_ladder_does_not_answer_keeps_the_output_exclusive(
 }
 
 /// Opens the owner's default endpoint through the whole Player path with the native backend.
-/// Run it with `cargo test -p soundcraft-playback --features native-wasapi -- --ignored hardware_ --nocapture`.
+/// Run it with `cargo test -p transit-playback --features native-wasapi -- --ignored hardware_ --nocapture`.
 #[cfg(all(windows, feature = "native-wasapi"))]
 #[test]
 #[ignore = "opens the default audio endpoint"]
@@ -687,7 +687,7 @@ fn hardware_player_opens_native_wasapi() {
 
 /// Opens `driver` through the whole Player path with the native ASIO backend, takes the duplex input
 /// as the recorder does, runs two seconds and checks both streams' counts. Run with
-/// `cargo test -p soundcraft-playback --features native-asio --lib -- --ignored hardware_player_opens_native_asio --nocapture --test-threads 1`.
+/// `cargo test -p transit-playback --features native-asio --lib -- --ignored hardware_player_opens_native_asio --nocapture --test-threads 1`.
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
 fn player_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>) -> (u16, usize) {
     let cfg = AudioConfig {
@@ -746,7 +746,7 @@ fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, se
         buffer_size: buffer,
         ..Default::default()
     };
-    let session = Session { sample_rate: soundcraft_time::SampleRate::new(rate).expect("a rate"), ..Session::default() };
+    let session = Session { sample_rate: transit_time::SampleRate::new(rate).expect("a rate"), ..Session::default() };
     let player = Player::with_config(Arc::new(session), &cfg);
     assert!(!player.silent && player.native_backend, "{:?} {:?}", player.initial_error(), player.backend_note);
     let recorder = player.open_input(&cfg).expect("the duplex input is held");
@@ -1276,7 +1276,7 @@ fn a_hardware_insert_round_trip_excludes_input_queued_before_the_plan_read_it() 
 #[test]
 fn input_monitoring_latency_excludes_input_queued_before_the_plan_read_it() {
     use ab::fake::{SliceSink, SliceSource};
-    use soundcraft_model::{ChannelFormat, TrackKind};
+    use transit_model::{ChannelFormat, TrackKind};
     const BLOCK: usize = 64;
     const AT: usize = 60 * BLOCK + 10;
     let monitored = |prefill: usize| {
@@ -1368,7 +1368,7 @@ fn samples_after_a_reset_request_or_a_stall_never_land_in_the_take() {
         let dir = std::env::temp_dir().join(format!("transit-d1-b1-{}-{error:?}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("take.wav");
-        recorder.arm(vec![(soundcraft_model::TrackId(1), vec![0], path.clone())]).unwrap();
+        recorder.arm(vec![(transit_model::TrackId(1), vec![0], path.clone())]).unwrap();
         let format = ab::Format::new(48_000, 12, ab::SampleFormat::F32);
         let (before, after) = (vec![0.25f32; BLOCK * 12], vec![0.75f32; BLOCK * 12]);
         for _ in 0..4 {

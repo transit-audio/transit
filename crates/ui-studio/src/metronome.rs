@@ -11,8 +11,8 @@ use crate::tempo_edit::{register, small_button};
 use crate::theme::{TOKENS, mono};
 use egui::{Align2, Rect, Sense, Ui, pos2, vec2};
 use serde_json::json;
-use soundcraft_playback::CountIn;
-use soundcraft_time::Samples;
+use transit_playback::CountIn;
+use transit_time::Samples;
 
 /// The popup's level range, in dB.
 const DB_RANGE: (f32, f32) = (-24.0, 12.0);

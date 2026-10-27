@@ -6,12 +6,12 @@
 //! The binary installs `transit_rt::testing::CountingAlloc` and counts the test thread only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_mix::{
+use std::sync::Arc;
+use transit_mix::{
     Adoption, Arrival, DeviceGeneration, Due, EngineEpoch, EventLimits, EventOutcome, INSTRUMENT_SLOT, InstanceSpec, InstrumentEvent, Message,
     MixEngine, NoteId, PlanCompiler, PlanGeneration, PlanLimits, RenderFrame, RenderTarget, SlotGen, Source, TransportEpoch, mark_audio_thread,
 };
-use soundcraft_model::{ChannelFormat, Insert, Session, TrackKind};
-use std::sync::Arc;
+use transit_model::{ChannelFormat, Insert, Session, TrackKind};
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 
 #[global_allocator]
@@ -30,21 +30,21 @@ fn dense_clip_sorting_and_live_pedal_merge_allocate_nothing() {
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     s.track_mut(t).unwrap().instrument = Some(Insert::new("subtractive_synth"));
-    let mut seq = soundcraft_midi::Sequence::default();
+    let mut seq = transit_midi::Sequence::default();
     for start in [8, 1, 4] {
-        seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start, length: 1 });
+        seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start, length: 1 });
     }
     for tick in [5, 2] {
         for _ in 0..300 {
-            seq.ctrls.push(soundcraft_midi::CtrlEvent { tick, channel: 0, kind: soundcraft_midi::CtrlKind::Cc(1), value: 1 });
+            seq.ctrls.push(transit_midi::CtrlEvent { tick, channel: 0, kind: transit_midi::CtrlKind::Cc(1), value: 1 });
         }
     }
     for (tick, value) in [(8, 63), (4, 127)] {
-        seq.ctrls.push(soundcraft_midi::CtrlEvent { tick, channel: 0, kind: soundcraft_midi::CtrlKind::Cc(64), value });
+        seq.ctrls.push(transit_midi::CtrlEvent { tick, channel: 0, kind: transit_midi::CtrlKind::Cc(64), value });
     }
     let cid = s.new_clip_id();
-    s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(soundcraft_model::Clip::midi(cid, "dense", 512, 48_000, seq));
-    let mut make = |spec: &InstanceSpec, _: SlotGen| soundcraft_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
+    s.track_mut(t).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::midi(cid, "dense", 512, 48_000, seq));
+    let mut make = |spec: &InstanceSpec, _: SlotGen| transit_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
     let mut env = comp.compile(Arc::new(s), PlanGeneration::EMPTY, PlanGeneration::EMPTY.checked_next().unwrap(), &mut make).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
     comp.reclaim(env);
@@ -82,7 +82,7 @@ fn admission_delivery_revocation_and_panic_allocate_nothing() {
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     s.track_mut(t).unwrap().instrument = Some(Insert::new("subtractive_synth"));
-    let mut make = |spec: &InstanceSpec, _: SlotGen| soundcraft_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
+    let mut make = |spec: &InstanceSpec, _: SlotGen| transit_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
     let mut env = comp.compile(Arc::new(s), PlanGeneration::EMPTY, PlanGeneration::EMPTY.checked_next().unwrap(), &mut make).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
     comp.reclaim(env);
@@ -210,7 +210,7 @@ fn admission_delivery_revocation_and_panic_allocate_nothing() {
     mix.queue_event(&ev(src, now + 5000, Message::NoteOn { key: 61, velocity: 90, id: NoteId::NONE }, None));
     let mut s = (**mix.session()).clone();
     s.track_mut(t).unwrap().inactive = true;
-    let mut make = |spec: &InstanceSpec, _: SlotGen| soundcraft_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
+    let mut make = |spec: &InstanceSpec, _: SlotGen| transit_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
     let mut env = comp.compile(Arc::new(s), comp.active(), PlanGeneration::EMPTY.checked_next().unwrap().checked_next().unwrap(), &mut make).unwrap();
     let (adopted, stats) = measure(|| {
         let a = mix.adopt_plan(&mut env);

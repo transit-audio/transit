@@ -39,10 +39,10 @@ Issue #68. Read with [ADR 0018](../../adr/0018-plugin-host-thread.md) (the plug-
 ## Presets
 
 - A user preset is the plug-in's full state, the same state a session stores. Files:
-  `.vstpreset` (Steinberg's container, `soundcraft_vst3_host::preset`) and `.clappreset`
-  (transit's documented container, `soundcraft_clap_host::preset`).
-- Folder: `<settings>/presets/<plug-in id made file-safe>/` (`soundcraft_engine::presets`); file
-  access goes through `soundcraft_engine::io::presets` (checked roots).
+  `.vstpreset` (Steinberg's container, `transit_vst3_host::preset`) and `.clappreset`
+  (transit's documented container, `transit_clap_host::preset`).
+- Folder: `<settings>/presets/<plug-in id made file-safe>/` (`transit_engine::presets`); file
+  access goes through `transit_engine::io::presets` (checked roots).
 - State reads and live loads are `StateJob`s on the host thread, polled once per frame
   (`PluginStateReader::begin_save`/`begin_load`); the UI side is `ui-studio/src/plugin_header.rs`.
 - Each job (and each restore after an undo or redo) starts only once the audio side plays the

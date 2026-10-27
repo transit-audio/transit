@@ -53,9 +53,9 @@
 
 use super::plan::SlotGen;
 use super::{INSTRUMENT_SLOT, MixEngine, Plugin, PluginSlot, SlotBinding, Strip};
-use soundcraft_dsp::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_RESET_CONTROLLERS, CC_SOSTENUTO, CC_SUSTAIN, is_pedal};
-pub use soundcraft_dsp::event::{Message, NoteId, PluginEvent};
-use soundcraft_model::Session;
+use transit_dsp::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_RESET_CONTROLLERS, CC_SOSTENUTO, CC_SUSTAIN, is_pedal};
+pub use transit_dsp::event::{Message, NoteId, PluginEvent};
+use transit_model::Session;
 
 /// A position on the engine's render clock (annex R): the frame count rendered since the engine
 /// started, monotonic through same-rate plans and seeks.
@@ -469,7 +469,7 @@ fn pedal_kind(cc: u8) -> usize {
     match cc {
         CC_SUSTAIN => 0,
         CC_SOSTENUTO => 1,
-        soundcraft_dsp::event::CC_SOFT => 2,
+        transit_dsp::event::CC_SOFT => 2,
         _ => 3,
     }
 }
@@ -1212,7 +1212,7 @@ impl EngineEvents {
 fn instrument_of<'a>(
     session: &Session,
     strips: &'a mut [Strip],
-    tracks: &[(soundcraft_model::TrackId, u16)],
+    tracks: &[(transit_model::TrackId, u16)],
     target: &SlotBinding,
 ) -> Result<&'a mut PluginSlot, EventOutcome> {
     let (track, slot, generation) = *target;

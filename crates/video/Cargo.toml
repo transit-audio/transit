@@ -1,5 +1,5 @@
 [package]
-name = "soundcraft-video"
+name = "transit-video"
 description = "transit video: MP4/MOV demux, H.264 / ProRes / Motion JPEG decoding to RGBA, timeline thumbnails"
 version.workspace = true
 edition.workspace = true

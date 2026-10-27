@@ -5,9 +5,9 @@
 //! a chord, overlapping notes are cut at the next onset, and anything crossing a bar line is split
 //! and tied.
 
-use soundcraft_model::{ClipContent, Session, TrackId, TrackKind};
-use soundcraft_time::TICKS_PER_QUARTER;
 use std::fmt::Write as _;
+use transit_model::{ClipContent, Session, TrackId, TrackKind};
+use transit_time::TICKS_PER_QUARTER;
 
 /// Ticks per score unit (a sixteenth).
 const UNIT: i64 = TICKS_PER_QUARTER / 4;

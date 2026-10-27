@@ -16,7 +16,7 @@ fn mid(r: [f32; 4]) -> (f32, f32) {
 
 impl T {
     fn new() -> T {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         app.run("track.new", json!({"kind": "instrument"})).unwrap();
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0 };
         t.frames(3);
@@ -147,7 +147,7 @@ fn interface_zoom_round_trips_defaults_and_clamps_in_ui_json() {
 
 #[test]
 fn interface_zoom_preference_applies_at_startup_and_composes_with_os_scale() {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     app.ui.ui_zoom = 1.5;
     let ctx = egui::Context::default();
     for (native, zoom) in [(1.0, 1.5), (2.0, 1.5), (1.25, 1.0), (1.0, 0.75), (2.0, 3.0)] {
@@ -297,7 +297,7 @@ fn clip_names_read_on_every_track_color_in_both_themes() {
     use crate::theme::{clip_colors, contrast, rgb, set_current};
     for theme in [egui::Theme::Dark, egui::Theme::Light] {
         set_current(theme);
-        for c in soundcraft_model::TRACK_COLORS {
+        for c in transit_model::TRACK_COLORS {
             for selected in [false, true] {
                 for base in [rgb(c), crate::theme::darken(rgb(c), 0.5)] {
                     let (_, strip, ink) = clip_colors(base, selected);
@@ -674,11 +674,11 @@ fn the_shortcut_filter_searches_notes_and_spells_out_shift_plus() {
     assert!(!TABLE.iter().any(|s| text(s).ends_with("++")));
 }
 
-fn snap() -> soundcraft_playback::telemetry::CallbackTelemetry {
+fn snap() -> transit_playback::telemetry::CallbackTelemetry {
     let mut h = [0u64; 16];
     h[3] = 7;
     h[15] = 1;
-    soundcraft_playback::telemetry::CallbackTelemetry {
+    transit_playback::telemetry::CallbackTelemetry {
         callbacks: 100,
         frames: 51_200,
         timed_callbacks: 100,
@@ -751,7 +751,7 @@ fn the_telemetry_readout_texts_and_click_open_the_details_window() {
 #[test]
 fn the_telemetry_readout_has_no_warning_without_errors() {
     let mut t = T::new();
-    t.app.telemetry.injected = Some(soundcraft_playback::telemetry::CallbackTelemetry::default());
+    t.app.telemetry.injected = Some(transit_playback::telemetry::CallbackTelemetry::default());
     t.frames(30);
     let tel = t.inspect()["telemetry"].clone();
     assert_eq!(tel["text"], "0%  -- @ -- kHz");
@@ -762,7 +762,7 @@ fn the_telemetry_readout_has_no_warning_without_errors() {
 fn telemetry_math_saturates_when_the_snapshot_is_torn() {
     use crate::telemetry::{detail_rows, error_count};
     // timed_callbacks ahead of callbacks (a reader that straddled a publication) and a huge sum.
-    let s = soundcraft_playback::telemetry::CallbackTelemetry {
+    let s = transit_playback::telemetry::CallbackTelemetry {
         callbacks: 5,
         timed_callbacks: 9,
         duration_histogram: [u64::MAX; 16],
@@ -785,8 +785,8 @@ fn the_telemetry_is_read_a_few_times_a_second_not_every_frame() {
     assert!((7..=9).contains(&reads), "about four reads a second, not 120: {reads}");
 }
 
-fn load_snap(ppm: u64) -> soundcraft_playback::telemetry::CallbackTelemetry {
-    soundcraft_playback::telemetry::CallbackTelemetry {
+fn load_snap(ppm: u64) -> transit_playback::telemetry::CallbackTelemetry {
+    transit_playback::telemetry::CallbackTelemetry {
         current_load_ppm: ppm,
         max_load_ppm: 755_000,
         callback_frames: 128,
@@ -871,7 +871,7 @@ fn clicking_the_load_readout_opens_the_details_window_and_reset_peak_clears_the_
 fn the_details_window_copies_diagnostics_with_the_counters() {
     let mut t = T::new();
     t.app.diag.machine = Some(crate::diagnostics::Machine { os: "Test OS".into(), ..Default::default() });
-    t.app.telemetry.injected = Some(soundcraft_playback::telemetry::CallbackTelemetry { callbacks: 1234, ..load_snap(300_000) });
+    t.app.telemetry.injected = Some(transit_playback::telemetry::CallbackTelemetry { callbacks: 1234, ..load_snap(300_000) });
     t.frames(30);
     let rect: [f32; 4] = serde_json::from_value(t.inspect()["telemetry"]["rect"].clone()).unwrap();
     t.click(mid(rect));

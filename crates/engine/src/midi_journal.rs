@@ -11,11 +11,11 @@
 use crate::io::{Recording, sanitize_name};
 use crate::midi_take::{Msg, RecEvent};
 use crate::{Engine, EngineError, Result};
-use soundcraft_model::{ClipId, TrackId};
-use soundcraft_time::{Range, Samples};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
+use transit_model::{ClipId, TrackId};
+use transit_time::{Range, Samples};
 
 /// The file extension of a journal.
 pub const EXTENSION: &str = "midijournal";
@@ -335,7 +335,7 @@ mod tests {
         let s = e.session();
         let (_, clip) = s.find_clip(ids[0]).unwrap();
         assert_eq!(clip.name, "Keys_recovered");
-        let soundcraft_model::ClipContent::Midi { sequence } = &clip.content else { panic!("not MIDI") };
+        let transit_model::ClipContent::Midi { sequence } = &clip.content else { panic!("not MIDI") };
         // 120 bpm at 48 kHz: a beat is 24,000 samples, 960 ticks.
         let notes: Vec<_> = sequence.notes.iter().map(|n| (n.pitch, n.start, n.length, n.velocity)).collect();
         assert_eq!(notes, vec![(60, 960, 960, 90), (64, 2880, 960, 80)]);
@@ -343,7 +343,7 @@ mod tests {
 
     /// A recovered journal of one note held across the loop end, with the session's Cycle state
     /// at recovery time set by `edit`: the clips as (range, notes) per lap.
-    fn recovered_laps(name: &str, loop_range: Option<Range>, edit: impl FnOnce(&mut soundcraft_model::Session)) -> Vec<(Range, usize)> {
+    fn recovered_laps(name: &str, loop_range: Option<Range>, edit: impl FnOnce(&mut transit_model::Session)) -> Vec<(Range, usize)> {
         recovered_laps_of(
             name,
             loop_range,
@@ -357,7 +357,7 @@ mod tests {
         name: &str,
         loop_range: Option<Range>,
         msgs: &[(u64, Msg)],
-        edit: impl FnOnce(&mut soundcraft_model::Session),
+        edit: impl FnOnce(&mut transit_model::Session),
     ) -> Vec<(Range, usize)> {
         let d = dir(name);
         let path = d.join("s.midijournal");
@@ -378,7 +378,7 @@ mod tests {
         ids.iter()
             .map(|id| {
                 let clip = s.track(t).unwrap().playlists.iter().flat_map(|p| &p.clips).find(|c| c.id == *id).unwrap();
-                let soundcraft_model::ClipContent::Midi { sequence } = &clip.content else { panic!("not MIDI") };
+                let transit_model::ClipContent::Midi { sequence } = &clip.content else { panic!("not MIDI") };
                 (clip.range(), sequence.notes.len() + sequence.ctrls.len())
             })
             .collect()

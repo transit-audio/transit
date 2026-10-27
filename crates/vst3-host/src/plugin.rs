@@ -1,4 +1,4 @@
-//! `Vst3Plugin`: a loaded VST3 instance behind the safe `soundcraft_dsp::Plugin` trait.
+//! `Vst3Plugin`: a loaded VST3 instance behind the safe `transit_dsp::Plugin` trait.
 //!
 //! # `restartComponent` (audit F08, ADR 0012 G7)
 //!
@@ -45,13 +45,13 @@ use crate::ffi::{
 };
 use crate::gate::{Gate, MAX_CHANNELS};
 use crate::params::{ParamCurves, PendingParams};
-use soundcraft_dsp::event::{Message, PluginEvent};
-use soundcraft_dsp::{Plugin, PluginEditor, PluginInfo, ProcessStatus, Transport};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError, Weak};
 use std::thread::ThreadId;
 use std::time::Duration;
+use transit_dsp::event::{Message, PluginEvent};
+use transit_dsp::{Plugin, PluginEditor, PluginInfo, ProcessStatus, Transport};
 use vst3::ComWrapper;
 
 /// Largest block we set a plugin up for.
@@ -837,7 +837,7 @@ impl Vst3Plugin {
                 match key {
                     Some(key) => {
                         if let Some(dst) = core.inputs.bus_mut(kb) {
-                            soundcraft_dsp::map_key_channels(key, dst, start, n);
+                            transit_dsp::map_key_channels(key, dst, start, n);
                         }
                         core.inputs.set_bus_silent(kb, false);
                         core.key_live = true;
@@ -1022,12 +1022,12 @@ impl Plugin for Vst3Plugin {
     }
 
     fn note_on(&mut self, offset: usize, note: u8, velocity: u8) {
-        let message = Message::NoteOn { key: note, velocity, id: soundcraft_dsp::event::NoteId::NONE };
+        let message = Message::NoteOn { key: note, velocity, id: transit_dsp::event::NoteId::NONE };
         self.event(u32::try_from(offset).unwrap_or(u32::MAX), &PluginEvent { channel: 0, note_id: PluginEvent::NO_ID, message });
     }
 
     fn note_off(&mut self, offset: usize, note: u8) {
-        let message = Message::NoteOff { key: note, velocity: 0, id: soundcraft_dsp::event::NoteId::NONE };
+        let message = Message::NoteOff { key: note, velocity: 0, id: transit_dsp::event::NoteId::NONE };
         self.event(u32::try_from(offset).unwrap_or(u32::MAX), &PluginEvent { channel: 0, note_id: PluginEvent::NO_ID, message });
     }
 
@@ -1035,7 +1035,7 @@ impl Plugin for Vst3Plugin {
     fn midi(&mut self, offset: usize, msg: [u8; 3]) {
         let [status, d1, d2] = msg;
         let (d1, d2) = (d1 & 0x7F, d2 & 0x7F);
-        let none = soundcraft_dsp::event::NoteId::NONE;
+        let none = transit_dsp::event::NoteId::NONE;
         let message = match status & 0xF0 {
             0xA0 => Message::PolyPressure { key: d1, value: d2, id: none },
             0xB0 => Message::Control { cc: d1, value: d2 },
@@ -1091,7 +1091,7 @@ impl Plugin for Vst3Plugin {
         for ch in 0..MIDI_CHANNELS as u8 {
             for key in 0..128u8 {
                 if self.held.get(usize::from(ch)).and_then(|h| h.get(usize::from(key))).copied().unwrap_or(false) {
-                    let message = Message::NoteOff { key, velocity: 0, id: soundcraft_dsp::event::NoteId::NONE };
+                    let message = Message::NoteOff { key, velocity: 0, id: transit_dsp::event::NoteId::NONE };
                     self.event(0, &PluginEvent { channel: ch, note_id: PluginEvent::NO_ID, message });
                 }
             }
@@ -1136,7 +1136,7 @@ impl Plugin for Vst3Plugin {
         Some(Box::new(Vst3Editor { conv: self.converter(link), host, curves: Arc::clone(&self.curves), shared: Arc::downgrade(&self.shared) }))
     }
 
-    fn state_reader(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginStateReader>> {
+    fn state_reader(&mut self) -> Option<Box<dyn transit_dsp::PluginStateReader>> {
         let link = lock(&self.shared.core).inst.state_link();
         let conv = self.converter(link);
         Some(Box::new(Vst3State { conv, unsynced: Arc::clone(&self.unsynced), shared: Arc::downgrade(&self.shared) }))
@@ -1151,7 +1151,7 @@ struct Vst3State {
     shared: Weak<Shared>,
 }
 
-impl soundcraft_dsp::PluginStateReader for Vst3State {
+impl transit_dsp::PluginStateReader for Vst3State {
     fn save_state(&mut self) -> Option<Vec<u8>> {
         let to_controller = self.shared.upgrade().map(|s| Arc::clone(&s.to_controller));
         // A parameter only the controller stores (no processor state) would otherwise be saved
@@ -1178,7 +1178,7 @@ impl soundcraft_dsp::PluginStateReader for Vst3State {
     /// plays the blocks meanwhile as silence with fades, as during a reactivation. As
     /// `Plugin::load_state`, the load is the host's own change: nothing is reported as an edit,
     /// and the values the host set before it are dropped (the caller stores the returned ones).
-    fn load_state(&mut self, data: &[u8]) -> Option<soundcraft_dsp::LoadedValues> {
+    fn load_state(&mut self, data: &[u8]) -> Option<transit_dsp::LoadedValues> {
         let shared = self.shared.upgrade()?;
         if std::thread::current().id() != shared.main {
             log::warn!("{}: a state load off the instance's main thread was refused", shared.info.id);
@@ -1216,7 +1216,7 @@ impl soundcraft_dsp::PluginStateReader for Vst3State {
 }
 
 /// The strip's model as the window shows it (issue #68).
-fn header_view(h: &soundcraft_dsp::EditorHeader) -> transit_rt::editor_window::HeaderView {
+fn header_view(h: &transit_dsp::EditorHeader) -> transit_rt::editor_window::HeaderView {
     transit_rt::editor_window::HeaderView {
         title: h.title.clone(),
         preset: h.preset.clone(),
@@ -1232,8 +1232,8 @@ fn header_view(h: &soundcraft_dsp::EditorHeader) -> transit_rt::editor_window::H
 }
 
 /// What a click in the strip asks of the host.
-fn header_action(c: transit_rt::editor_window::HeaderClick) -> soundcraft_dsp::HeaderAction {
-    use soundcraft_dsp::HeaderAction as A;
+fn header_action(c: transit_rt::editor_window::HeaderClick) -> transit_dsp::HeaderAction {
+    use transit_dsp::HeaderAction as A;
     use transit_rt::editor_window::HeaderClick as C;
     match c {
         C::User(i) => A::User(i),
@@ -1343,11 +1343,11 @@ impl PluginEditor for Vst3Editor {
         }
     }
 
-    fn set_header(&mut self, header: &soundcraft_dsp::EditorHeader) {
+    fn set_header(&mut self, header: &transit_dsp::EditorHeader) {
         self.conv.link.header().set(&header_view(header));
     }
 
-    fn take_header_actions(&mut self) -> Vec<soundcraft_dsp::HeaderAction> {
+    fn take_header_actions(&mut self) -> Vec<transit_dsp::HeaderAction> {
         self.conv.link.header().take_clicks().into_iter().map(header_action).collect()
     }
 }

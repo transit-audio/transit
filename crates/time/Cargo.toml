@@ -1,5 +1,5 @@
 [package]
-name = "soundcraft-time"
+name = "transit-time"
 description = "transit timebases: samples, Bars|Beats, Min:Secs, Timecode, Feet+Frames, tempo and meter maps, grid"
 version.workspace = true
 edition.workspace = true

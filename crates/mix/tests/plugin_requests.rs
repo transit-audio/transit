@@ -2,20 +2,20 @@
 //! is processed again when it asks (`request_process`), with no audio and no editor, and the
 //! latency it reports after a restart reaches delay compensation.
 //!
-//! Uses soundcraft-clap-host's fixture built with its `requests` feature (from
+//! Uses transit-clap-host's fixture built with its `requests` feature (from
 //! `crates/clap-host/tests/fixture`); the requests plug-in reports its lifecycle log as its
 //! "state" (see that crate's `tests/requests.rs`).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::PluginStateReader;
-use soundcraft_mix::{
-    Adoption, DeviceGeneration, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen, realtime_instance_specs,
-};
-use soundcraft_model::{ChannelFormat, Insert, Route, Session, TrackKind};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, Instant};
+use transit_dsp::PluginStateReader;
+use transit_mix::{
+    Adoption, DeviceGeneration, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen, realtime_instance_specs,
+};
+use transit_model::{ChannelFormat, Insert, Route, Session, TrackKind};
 
 const REQUESTS: &str = "clap:org.soundcraft.test.requests";
 const BLOCK: usize = 512;
@@ -54,7 +54,7 @@ fn fixture() {
             std::fs::create_dir_all(&dir).unwrap();
             std::fs::copy(target.join("debug").join(lib), dir.join("Requests.clap")).unwrap();
         }
-        assert_eq!(soundcraft_clap_host::add_search_dir(&dir), 1);
+        assert_eq!(transit_clap_host::add_search_dir(&dir), 1);
         dir
     });
 }
@@ -75,14 +75,14 @@ fn session() -> Session {
 fn engine(s: &Session, command: &[u8]) -> (MixEngine, Box<dyn PluginStateReader>) {
     fixture();
     let spec = realtime_instance_specs(s).into_iter().find(|x| x.id == REQUESTS).unwrap();
-    let mut p = soundcraft_clap_host::create(REQUESTS).unwrap();
+    let mut p = transit_clap_host::create(REQUESTS).unwrap();
     p.prepare(48_000.0, BLOCK, spec.ch);
     assert!(p.load_state(command));
     let reader = p.state_reader().unwrap();
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: BLOCK as u32, out_channels: 0, in_channels: 0 };
     let mut compiler = PlanCompiler::new(target, PlanLimits::default());
     let mut instance = Some(p);
-    let mut make = |_: &soundcraft_mix::InstanceSpec, _: SlotGen| instance.take().map(|plugin| NewInstance { plugin, refused_state: false });
+    let mut make = |_: &transit_mix::InstanceSpec, _: SlotGen| instance.take().map(|plugin| NewInstance { plugin, refused_state: false });
     let mut plan = compiler.compile(Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut make).unwrap();
     let mut eng = MixEngine::realtime(target);
     assert_eq!(eng.adopt_plan(&mut plan), Adoption::Adopted);
@@ -137,7 +137,7 @@ fn the_latency_after_a_clap_restart_reaches_delay_compensation() {
     assert_eq!(eng.latency, 5, "the fixture starts at 5 samples");
     let mut pos = BLOCK as i64;
     for _ in 0..10 {
-        soundcraft_clap_host::service_requests();
+        transit_clap_host::service_requests();
         eng.render_active(pos, BLOCK, &mut out);
         pos += BLOCK as i64;
         if eng.latency == 64 {
@@ -157,12 +157,12 @@ fn the_latency_after_a_clap_restart_reaches_delay_compensation() {
 fn a_parked_clap_effect_is_silent_not_dry_and_keeps_its_compensation() {
     let mut s = session();
     let t = s.tracks[0].id;
-    let src = soundcraft_model::SourceId(77);
-    let dc = soundcraft_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.5; 96_000]; 2] };
-    s.pool.insert(src, std::sync::Arc::new(soundcraft_model::SourceAudio::new(dc)));
+    let src = transit_model::SourceId(77);
+    let dc = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.5; 96_000]; 2] };
+    s.pool.insert(src, std::sync::Arc::new(transit_model::SourceAudio::new(dc)));
     let clip = s.new_clip_id();
     let tr = s.track_mut(t).unwrap();
-    tr.playlist_mut().unwrap().clips.push(soundcraft_model::Clip::audio(clip, "dc", src, 0, 0, 96_000));
+    tr.playlist_mut().unwrap().clips.push(transit_model::Clip::audio(clip, "dc", src, 0, 0, 96_000));
     tr.mixer.inserts[0].as_mut().unwrap().params.insert("7".into(), 0.25);
     // At its 9th block (on the audio thread) the plug-in asks for a restart, keeping 5 samples.
     let (mut eng, _reader) = engine(&s, b"CMD:restart-at:9:5");
@@ -180,7 +180,7 @@ fn a_parked_clap_effect_is_silent_not_dry_and_keeps_its_compensation() {
     let level = wet[BLOCK - 1];
     assert!(level > 0.0 && wet.iter().all(|x| (x - level).abs() < 1e-6), "steady wet level {level}");
     assert_eq!(eng.latency, 5);
-    assert_eq!(soundcraft_clap_host::service_requests().restarts_waiting, 1, "parks on the next block");
+    assert_eq!(transit_clap_host::service_requests().restarts_waiting, 1, "parks on the next block");
     let parked = block(&mut eng);
     let fade = 96; // 2 ms at 48 kHz
     for (i, &x) in parked.iter().enumerate() {
@@ -188,7 +188,7 @@ fn a_parked_clap_effect_is_silent_not_dry_and_keeps_its_compensation() {
         assert!((x - want).abs() < 1e-5, "sample {i}: {x}, want {want} (wet {level}; the dry input is 4x that)");
     }
     assert_eq!(eng.latency, 5, "compensation unchanged while parked");
-    assert_eq!(soundcraft_clap_host::service_requests().restarted, 1);
+    assert_eq!(transit_clap_host::service_requests().restarted, 1);
     let back = block(&mut eng);
     assert!(back[0].abs() < 1e-6 && (back[BLOCK - 1] - level).abs() < 1e-5, "fades back in to the wet level");
     assert!(back.iter().all(|&x| x <= level + 1e-6), "no level jump");

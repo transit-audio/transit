@@ -6,9 +6,9 @@
 use crate::automation::Lane;
 use crate::mixer::MenuItem;
 use egui::Ui;
-use soundcraft_dsp::PluginInfo;
 use std::collections::HashMap;
 use std::sync::Arc;
+use transit_dsp::PluginInfo;
 
 /// Parameters remembered per plug-in type for the "Recent" group.
 pub(crate) const RECENT_MAX: usize = 8;

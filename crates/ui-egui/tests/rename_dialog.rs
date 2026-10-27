@@ -1,11 +1,11 @@
 use egui::{Event, Key, Modifiers, vec2};
 use egui_kittest::Harness;
 use serde_json::json;
-use soundcraft_ui_egui::{Services, SoundApp, menus};
+use transit_ui_egui::{Services, SoundApp, menus};
 
 #[test]
 fn typing_in_the_rename_clip_dialog_replaces_the_old_name() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     let clip = app.engine.session().track_by_name("Kick").unwrap().clips()[0].clone();
     app.run("edit.select", json!({"clips": [clip.id.0]})).unwrap();
     menus::invoke_menu(&mut app, "clip.rename", "Clip > Rename...");

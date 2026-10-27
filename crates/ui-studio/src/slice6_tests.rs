@@ -6,7 +6,7 @@
 use crate::finish::RenameTarget;
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::{ClipId, TrackId};
+use transit_model::{ClipId, TrackId};
 
 struct T {
     app: StudioApp,
@@ -79,7 +79,7 @@ fn wav_frames(path: &std::path::Path) -> (u16, u16, u64) {
 
 impl T {
     fn new() -> T {
-        let app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0 };
         t.frames(3);
         t
@@ -171,15 +171,8 @@ impl T {
         let path = dir.0.join(format!("take{n}.wav"));
         let frames = (secs * 48_000.0) as u32;
         write_wav(&path, frames);
-        let plan = soundcraft_engine::io::Recording {
-            start,
-            pass: None,
-            punch: None,
-            rate: 48_000,
-            takes: Vec::new(),
-            midi_journal: None,
-            midi_placed: false,
-        };
+        let plan =
+            transit_engine::io::Recording { start, pass: None, punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
         self.app.place_takes(&plan, vec![(t, path)], start + i64::from(frames), 1);
         self.frames(3);
         self.app.status.clone()
@@ -528,14 +521,14 @@ fn stop_during_the_count_in_cancels_it_without_playing() {
     assert_eq!(t.app.cursor(), 10 * 48_000);
 }
 
-fn request(t: &mut T, request: soundcraft_engine::TransportRequest) {
+fn request(t: &mut T, request: transit_engine::TransportRequest) {
     t.app.engine.transport_requests.push(request);
     t.app.handle_transport(0.0);
 }
 
 #[test]
 fn space_during_the_count_in_stops_it_without_a_take_and_space_again_plays_plainly() {
-    use soundcraft_engine::TransportRequest::TogglePlay;
+    use transit_engine::TransportRequest::TogglePlay;
     let mut t = T::new();
     t.app.ui.count_in = true;
     t.app.ui.count_in_bars = 2;
@@ -563,7 +556,7 @@ fn space_during_the_count_in_stops_it_without_a_take_and_space_again_plays_plain
 
 #[test]
 fn half_speed_and_play_selection_during_the_count_in_cancel_it_too() {
-    use soundcraft_engine::TransportRequest::{HalfSpeed, PlaySelection};
+    use transit_engine::TransportRequest::{HalfSpeed, PlaySelection};
     for which in [HalfSpeed, PlaySelection] {
         let mut t = T::new();
         t.app.ui.count_in = true;
@@ -579,7 +572,7 @@ fn half_speed_and_play_selection_during_the_count_in_cancel_it_too() {
 
 #[test]
 fn the_first_stop_during_the_count_in_keeps_the_cursor_and_the_second_returns_to_start() {
-    use soundcraft_engine::TransportRequest::Stop;
+    use transit_engine::TransportRequest::Stop;
     let mut t = T::new();
     t.app.ui.count_in = true;
     t.app.set_cursor(10 * 48_000, None);
@@ -594,10 +587,10 @@ fn the_first_stop_during_the_count_in_keeps_the_cursor_and_the_second_returns_to
 
 #[test]
 fn a_failed_start_after_the_count_in_releases_the_take_and_says_why() {
-    let engine = soundcraft_engine::Engine::default();
-    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let engine = transit_engine::Engine::default();
+    let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
     let mut app = StudioApp::new(engine, Some(player), crate::Services::default());
-    app.take_plan = Some(soundcraft_engine::io::Recording {
+    app.take_plan = Some(transit_engine::io::Recording {
         start: 0,
         pass: None,
         punch: None,
@@ -608,7 +601,7 @@ fn a_failed_start_after_the_count_in_releases_the_take_and_says_why() {
     });
     app.status = "Recording".into();
     assert!(app.recording_active());
-    app.player.as_ref().unwrap().report_start_failure(soundcraft_playback::StartFailure::Clock);
+    app.player.as_ref().unwrap().report_start_failure(transit_playback::StartFailure::Clock);
     app.handle_transport(0.0);
     assert!(app.take_plan.is_none() && !app.recording_active());
     assert!(app.status.starts_with("Recording could not start: "), "{}", app.status);
@@ -1034,12 +1027,12 @@ fn flatten_turns_the_track_to_audio_in_one_undo_step() {
     let before = t.undo_len();
     t.app.flatten_track(tr).unwrap();
     let s = t.app.engine.session();
-    assert_eq!(s.track(tr).unwrap().kind, soundcraft_model::TrackKind::Audio);
+    assert_eq!(s.track(tr).unwrap().kind, transit_model::TrackKind::Audio);
     assert!(s.track(tr).unwrap().mixer.inserts.iter().all(Option::is_none));
     assert_eq!(t.undo_len(), before + 1);
     assert!(t.app.status.starts_with("Flattened"), "{}", t.app.status);
     t.app.run("edit.undo", json!({})).unwrap();
-    assert_eq!(t.app.engine.session().track(tr).unwrap().kind, soundcraft_model::TrackKind::Instrument);
+    assert_eq!(t.app.engine.session().track(tr).unwrap().kind, transit_model::TrackKind::Instrument);
     assert!(t.app.engine.session().track(tr).unwrap().mixer.inserts[0].is_some());
 }
 
@@ -1047,7 +1040,7 @@ fn flatten_turns_the_track_to_audio_in_one_undo_step() {
 fn stems_by_output_path_start_one_job_with_the_checked_paths() {
     let dir = Dir::new("stems");
     let mut t = T::new();
-    t.app.engine.set_io_map(soundcraft_model::IoMap::for_device("test", "test", 2, 6));
+    t.app.engine.set_io_map(transit_model::IoMap::for_device("test", "test", 2, 6));
     t.midi_clip();
     let (cue, _) = t.midi_clip();
     t.app.run("track.output", json!({"tracks": [cue.0], "output": "Out 3-4"})).unwrap();

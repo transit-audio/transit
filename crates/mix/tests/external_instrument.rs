@@ -5,14 +5,14 @@
 //! leaves the strip silent with latency 0, so compensation does not move.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_mix::{
+use std::sync::Arc;
+use transit_audio_io::AudioBuffer;
+use transit_mix::{
     Adoption, DeviceGeneration, ExternalState, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, external_report,
 };
-use soundcraft_model::{
+use transit_model::{
     ChannelFormat, Clip, Insert, IoMap, MidiOutChannel, MidiOutPort, MidiOutput, Session, SourceAudio, SourceId, TrackId, TrackKind,
 };
-use std::sync::Arc;
 
 const SR: u32 = 48_000;
 const BLOCK: usize = 64;
@@ -77,7 +77,7 @@ struct Rendered {
 /// How many frames after P(R(S)) an External Instrument track's note for S is sent: 0 (ADR 0020
 /// decision 2: no delay compensation on the device's own send). This crate cannot see the
 /// playback stamp, so the stamp itself is chained to a plan like this one in
-/// `soundcraft-playback` (`audio::external::tests::the_stamped_send_plus_the_round_trip_lands_on_the_click_at_main`),
+/// `transit-playback` (`audio::external::tests::the_stamped_send_plus_the_round_trip_lands_on_the_click_at_main`),
 /// which feeds the return from the frame the real stamp names.
 const SEND: usize = 0;
 
@@ -92,14 +92,14 @@ fn render(s: &Session, duplex: bool, no_port: &[TrackId]) -> Rendered {
     let mut compiler = PlanCompiler::new(target(&io), PlanLimits::default());
     compiler.set_io(Arc::new(io.clone()));
     compiler.set_external_unavailable(Arc::from(no_port.to_vec()));
-    let mut maker = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| {
-        soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
-            .map(|n| soundcraft_mix::NewInstance { plugin: n.plugin, refused_state: false })
+    let mut maker = |spec: &InstanceSpec, _: transit_mix::SlotGen| {
+        transit_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
+            .map(|n| transit_mix::NewInstance { plugin: n.plugin, refused_state: false })
     };
     let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut maker).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
     compiler.reclaim(env);
-    let main_w = soundcraft_mix::main_channels(s);
+    let main_w = transit_mix::main_channels(s);
     let mut out = vec![vec![0.0f32; BLOCK]; main_w];
     let (mut main, mut pos, mut latency) = (Vec::new(), 0usize, 0usize);
     while main.len() < LEN + 2 * C {
@@ -152,7 +152,7 @@ fn an_insert_on_the_strip_adds_to_the_device_latency() {
     click_track(&mut s);
     let synth = synth_track(&mut s, "In 1");
     s.track_mut(synth).unwrap().mixer.inserts[0] = Some(Insert::new("maximizer"));
-    let i = soundcraft_dsp::create("maximizer").unwrap().latency();
+    let i = transit_dsp::create("maximizer").unwrap().latency();
     assert!(i > 0);
     let r = render(&s, true, &[]);
     assert_eq!(r.latency, C + i);
@@ -168,7 +168,7 @@ fn the_return_gain_applies_before_the_inserts() {
     s.track_mut(synth).unwrap().instrument.as_mut().unwrap().external.as_mut().unwrap().gain_db = -6.0;
     let quiet = render(&s, true, &[]);
     let ratio = quiet.main[AT + C] / unity.main[AT + C];
-    assert!((ratio - soundcraft_dsp::db_to_gain(-6.0)).abs() < 1e-6, "{ratio}");
+    assert!((ratio - transit_dsp::db_to_gain(-6.0)).abs() < 1e-6, "{ratio}");
 }
 
 #[test]
@@ -196,6 +196,6 @@ fn an_offline_render_has_no_live_input_and_leaves_the_device_out() {
     let mut s = session();
     click_track(&mut s);
     synth_track(&mut s, "In 1");
-    let out = soundcraft_mix::render_range(&s, soundcraft_time::Range::new(0, LEN as i64), BLOCK);
+    let out = transit_mix::render_range(&s, transit_time::Range::new(0, LEN as i64), BLOCK);
     assert_eq!(hits(&out[0]), [AT], "no latency and no return offline");
 }

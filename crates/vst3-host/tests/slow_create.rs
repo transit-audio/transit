@@ -15,12 +15,12 @@ use common::slow_fixture_dir;
 const FRAMES: usize = 512;
 
 fn id_of(name: &str) -> String {
-    soundcraft_vst3_host::scan_paths(&[slow_fixture_dir().to_path_buf()]).into_iter().find(|d| d.name == name).unwrap().id
+    transit_vst3_host::scan_paths(&[slow_fixture_dir().to_path_buf()]).into_iter().find(|d| d.name == name).unwrap().id
 }
 
 fn run_while_another_is_created() -> (u32, Duration, Duration, Duration) {
     let (gain_id, synth_id) = (id_of("Fixture Gain"), id_of("Fixture Synth"));
-    let mut gain = soundcraft_vst3_host::create(&gain_id).unwrap();
+    let mut gain = transit_vst3_host::create(&gain_id).unwrap();
     gain.prepare(48_000.0, FRAMES, 2);
 
     let stop = Arc::new(AtomicBool::new(false));
@@ -44,7 +44,7 @@ fn run_while_another_is_created() -> (u32, Duration, Duration, Duration) {
     };
     std::thread::sleep(Duration::from_millis(20));
     let started = Instant::now();
-    let synth = soundcraft_vst3_host::create(&synth_id).unwrap();
+    let synth = transit_vst3_host::create(&synth_id).unwrap();
     let took = started.elapsed();
     stop.store(true, Ordering::Release);
     let (blocks, worst, max_gap) = audio.join().unwrap();
@@ -65,7 +65,7 @@ fn a_running_instance_keeps_rendering_while_another_is_created() {
 }
 
 /// Wall-clock companion for quiet hardware (hardware-evidence convention): run with
-/// `cargo test -p soundcraft-vst3-host -- --ignored hardware_timing`.
+/// `cargo test -p transit-vst3-host -- --ignored hardware_timing`.
 #[test]
 #[ignore = "wall-clock timing; run on an idle machine"]
 fn hardware_timing_a_running_instance_keeps_its_budget_while_another_is_created() {

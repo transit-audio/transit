@@ -5,7 +5,7 @@
 use crate::automation::{Lane, snap};
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::{AutoParam, AutomationMode, TrackId};
+use transit_model::{AutoParam, AutomationMode, TrackId};
 
 struct T {
     app: StudioApp,
@@ -38,7 +38,7 @@ impl Drop for Dir {
 
 impl T {
     fn new() -> T {
-        let app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0, shapes: Vec::new() };
         t.frames(3);
         t
@@ -345,7 +345,7 @@ fn delete_removes_selected_points_and_never_the_lane_or_clips() {
     let pts = t.points(a, &AutoParam::Volume);
     assert_eq!(pts.len(), 2);
     assert!(!pts.iter().any(|q| q.0 == p.at));
-    assert!(t.app.engine.session().find_clip(soundcraft_model::ClipId(c)).is_some(), "Delete with points selected keeps the clip");
+    assert!(t.app.engine.session().find_clip(transit_model::ClipId(c)).is_some(), "Delete with points selected keeps the clip");
     assert_eq!(t.app.engine.session().tracks.len(), 2);
     // Delete again with nothing selected: the lane keeps its points (an empty clear range would
     // have cleared it all).

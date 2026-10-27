@@ -2,11 +2,11 @@
 //! step. Files live in a temp folder each test makes.
 
 use serde_json::{Value, json};
-use soundcraft_engine::Engine;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
+use transit_engine::Engine;
 
 /// A 16-bit PCM WAV.
 fn wav(channels: u16, rate: u32, frames: u32) -> Vec<u8> {
@@ -94,7 +94,7 @@ fn fake_clock(e: &mut Engine) -> Arc<AtomicU64> {
 
 fn clips(e: &Engine, track: u64) -> Vec<(i64, i64, String)> {
     let s = e.session();
-    s.track(soundcraft_engine::model::TrackId(track)).unwrap().clips().iter().map(|c| (c.start, c.end() - c.start, c.name.clone())).collect()
+    s.track(transit_engine::model::TrackId(track)).unwrap().clips().iter().map(|c| (c.start, c.end() - c.start, c.name.clone())).collect()
 }
 
 #[test]
@@ -224,7 +224,7 @@ fn more_files_than_workers_all_finish_and_a_missing_track_keeps_the_item() {
     assert!(e.execute("file.commit_import", &json!({"id": id, "track": track})).is_err());
     assert_eq!(e.execute("file.import_progress", &json!({"id": id})).unwrap()["state"], "done", "a refused commit keeps the item");
     let r = e.execute("file.commit_import", &json!({"id": id, "name": "Late Kick"})).unwrap();
-    let t = e.session().track(soundcraft_engine::model::TrackId(r["track"].as_u64().unwrap())).unwrap();
+    let t = e.session().track(transit_engine::model::TrackId(r["track"].as_u64().unwrap())).unwrap();
     assert_eq!(t.name, "Late Kick", "no track: a new one, named as asked");
 }
 
@@ -335,7 +335,7 @@ fn a_commit_after_a_session_rate_change_asks_for_a_re_import() {
     let path = d.file("kick.wav", &wav(1, 44_100, 22_050));
     let id = prepare(&mut e, &path);
     wait(&mut e, id);
-    e.session_mut().sample_rate = soundcraft_time::SampleRate::new(44_100).unwrap();
+    e.session_mut().sample_rate = transit_time::SampleRate::new(44_100).unwrap();
     let err = e.execute("file.commit_import", &json!({"id": id, "track": track})).unwrap_err().to_string();
     assert!(err.contains("prepared at 48000 Hz; the session is now 44100 Hz: re-import"), "{err}");
     assert!(e.session().sources.is_empty() && clips(&e, track).is_empty());

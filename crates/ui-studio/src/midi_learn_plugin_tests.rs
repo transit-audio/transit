@@ -7,9 +7,9 @@
 use crate::midi_learn::{check_param, curve_norm, curve_value, device_value, plugin_value};
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_dsp::{HeaderAction, plugin_info};
-use soundcraft_model::{AutoParam, AutomationMode, Insert, SourceKind, TrackId};
-use soundcraft_playback::MapMsg;
+use transit_dsp::{HeaderAction, plugin_info};
+use transit_model::{AutoParam, AutomationMode, Insert, SourceKind, TrackId};
+use transit_playback::MapMsg;
 
 struct T {
     app: StudioApp,
@@ -23,7 +23,7 @@ fn mid(r: [f32; 4]) -> (f32, f32) {
 
 impl T {
     fn new() -> T {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         app.ui.show_mixer = true;
         app.ui.show_devices = true;
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0 };
@@ -133,7 +133,7 @@ const GAIN: &str = "mid_gain";
 #[test]
 fn a_hosted_parameter_follows_the_plugins_curve_not_the_taper() {
     let p = plugin_info("eq_7band").unwrap().param(GAIN).unwrap();
-    assert_eq!(p.taper, soundcraft_dsp::Taper::Linear);
+    assert_eq!(p.taper, transit_dsp::Taper::Linear);
     let span = p.max - p.min;
     let to_plain = |n: f32| Some(p.min + span * n.powi(3));
     let to_norm = |v: f32| Some(((v - p.min) / span).cbrt());
@@ -162,11 +162,11 @@ fn the_knob_range_maps_onto_the_parameters_normalized_travel() {
     // A logarithmic parameter takes its taper: the middle of the knob is the geometric middle.
     let synth = plugin_info("subtractive_synth").unwrap();
     let cutoff = synth.param("cutoff").unwrap();
-    assert_eq!(cutoff.taper, soundcraft_dsp::Taper::Log);
+    assert_eq!(cutoff.taper, transit_dsp::Taper::Log);
     let half = plugin_value(cutoff, 0.5);
     assert!((half / (cutoff.min * cutoff.max).sqrt() - 1.0).abs() < 0.01, "{half}");
     // A choice lands on a whole step inside its range.
-    let choice = synth.params.iter().find(|p| p.unit == soundcraft_dsp::Unit::Choice).unwrap();
+    let choice = synth.params.iter().find(|p| p.unit == transit_dsp::Unit::Choice).unwrap();
     for i in 0..=20 {
         let v = plugin_value(choice, i as f32 / 20.0);
         assert_eq!(v, v.round());

@@ -5,13 +5,13 @@ use super::midi_map::{self, MapEvent, Snapshot};
 use super::monitor::{self, ClockRate, Dir, MonitorEvent, Tap};
 use super::{ActionResult, PlayedMidi, PlayedNote, RuntimeControl, sources};
 use crate::action_lane::{self, NoteKind, Outcome};
-use soundcraft_mix::{EngineEpoch, EventOutcome, Message, NoteId, SlotBinding, Source};
 use std::cell::RefCell;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::time::Duration;
 use transit_midi_io::{InputBoundary, InputConsumer, InputEvent};
+use transit_mix::{EngineEpoch, EventOutcome, Message, NoteId, SlotBinding, Source};
 
 const BATCH: usize = 256;
 /// A port with no admitting route that holds more than this many events (all already shown by the
@@ -339,7 +339,7 @@ impl Worker {
             #[cfg(test)]
             between_check_and_push: None,
         };
-        let thread = std::thread::Builder::new().name("soundcraft-midi-ingress".into()).spawn(move || {
+        let thread = std::thread::Builder::new().name("transit-midi-ingress".into()).spawn(move || {
             let mut linger = 0u32;
             while !pump.shared.stop.load(Ordering::Acquire) {
                 if pump.step() {

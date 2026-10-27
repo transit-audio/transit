@@ -13,9 +13,9 @@
 
 use crate::StudioApp;
 use serde_json::{Value, json};
-use soundcraft_engine::EngineError;
-use soundcraft_playback::hardware_probe::{Measured, ProbeError};
 use std::time::{Duration, Instant};
+use transit_engine::EngineError;
+use transit_playback::hardware_probe::{Measured, ProbeError};
 
 /// How long to wait for the audio thread to finish a measurement (it needs about 2.3 s of audio).
 const WAIT: Duration = Duration::from_secs(8);
@@ -65,7 +65,7 @@ pub(crate) struct FakeProbe {
     pub started: Vec<(Vec<u16>, Vec<u16>)>,
     pub cancelled: usize,
     /// The key a loop measurement stores under (the open Player's), `None` for none.
-    pub key: Option<soundcraft_playback::devices::CalibrationKey>,
+    pub key: Option<transit_playback::devices::CalibrationKey>,
     /// The loop the driver's figures give, `None` for none.
     pub driver_loop: Option<u32>,
 }
@@ -273,7 +273,7 @@ impl StudioApp {
             }
         };
         let key = self.loop_key().ok_or("the audio device changed while measuring: nothing stored")?;
-        let record = key.record(measured.round_trip_frames, measured.spread_frames.saturating_add(1), &soundcraft_playback::devices::utc_today());
+        let record = key.record(measured.round_trip_frames, measured.spread_frames.saturating_add(1), &transit_playback::devices::utc_today());
         let mut said = crate::audio_devices::calibrated_text(&record);
         // The driver's own figures beside it: a loop more than a buffer away from them is more
         // likely a wrong cable or path, or a loop that came up in another phase, than the driver.
@@ -314,7 +314,7 @@ impl StudioApp {
     }
 
     /// The key a loop measurement of the open device stores under.
-    fn loop_key(&self) -> Option<soundcraft_playback::devices::CalibrationKey> {
+    fn loop_key(&self) -> Option<transit_playback::devices::CalibrationKey> {
         #[cfg(test)]
         if let Some(f) = &self.audio_devices.fake_probe {
             return f.key.clone();

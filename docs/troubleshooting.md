@@ -53,7 +53,7 @@ Three ways, from least to most effort:
    commas. A name ending in `*` matches every target that starts with it.
 
    ```
-   transit --log "warn,soundcraft_playback=trace"
+   transit --log "warn,transit_playback=trace"
    RUST_LOG=debug transit
    ```
 

@@ -1,9 +1,9 @@
 //! Bounce Mix starts in the session's folder and has a Browse button for the file (#186).
 use egui::vec2;
 use egui_kittest::{Harness, kittest::Queryable};
-use soundcraft_ui_egui::{Services, SoundApp, dialogs::Dialog};
 use std::cell::RefCell;
 use std::rc::Rc;
+use transit_ui_egui::{Services, SoundApp, dialogs::Dialog};
 
 #[test]
 fn bounce_starts_in_the_session_folder_and_browse_picks_the_file_and_format() {
@@ -13,7 +13,7 @@ fn bounce_starts_in_the_session_folder_and_browse_picks_the_file_and_format() {
         log.borrow_mut().push((purpose.to_string(), default.to_string()));
         Some("/Mixes/Final Mix.FLAC".into())
     });
-    let mut engine = soundcraft_engine::demo::demo_engine();
+    let mut engine = transit_engine::demo::demo_engine();
     engine.path = Some("/Songs/Midnight Groove/Midnight Groove.transit".into());
     let mut app = SoundApp::new(engine, None, Services { pick_save: Some(pick_save), ..Default::default() });
     assert!(app.dialogs.open_for_command(&app.engine, "file.bounce_mix"));
@@ -37,12 +37,12 @@ fn bounce_starts_in_the_session_folder_and_browse_picks_the_file_and_format() {
 
 #[test]
 fn bounce_of_a_session_with_a_relative_path_starts_in_the_default_folder() {
-    let mut engine = soundcraft_engine::demo::demo_engine();
+    let mut engine = transit_engine::demo::demo_engine();
     engine.path = Some("Midnight Groove.transit".into());
     let name = engine.session().name.clone();
     let mut app = SoundApp::new(engine, None, Services::default());
     assert!(app.dialogs.open_for_command(&app.engine, "file.bounce_mix"));
-    let mut fresh = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut fresh = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     assert!(fresh.dialogs.open_for_command(&fresh.engine, "file.bounce_mix"));
     match (&app.dialogs.open, &fresh.dialogs.open) {
         (Some(Dialog::Bounce { path, .. }), Some(Dialog::Bounce { path: unsaved, .. })) => {

@@ -4,9 +4,9 @@
 //! `midi.note_delete`) command, so one undo step each. Session state only: never saved.
 
 use super::{ClipView, Note, PPQ, StudioApp, clip_view, json, resolve};
-use soundcraft_engine::step_input::{StepAction, StepBinding, StepChord, StepControl, StepController};
-use soundcraft_model::ClipId;
-use soundcraft_playback::{PlayedMidi, PlayedNote};
+use transit_engine::step_input::{StepAction, StepBinding, StepChord, StepControl, StepController};
+use transit_model::ClipId;
+use transit_playback::{PlayedMidi, PlayedNote};
 
 /// What one entered step left behind, for Backspace.
 #[derive(Debug, Clone)]
@@ -467,7 +467,7 @@ mod repaint_tests {
 
     #[test]
     fn busy_covers_the_pedal_and_clears_on_cancel() {
-        use soundcraft_engine::step_input::{HoldPrefs, StepBinding::Cc, StepBindings};
+        use transit_engine::step_input::{HoldPrefs, StepBinding::Cc, StepBindings};
         let mut s = StepState::default();
         assert!(!s.busy());
         let (prefs, bindings) = (HoldPrefs::default(), StepBindings::default());

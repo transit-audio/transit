@@ -2,8 +2,8 @@
 //! backend: a controller whose MIDI thru sends every message transit echoes to it straight back.
 use super::*;
 use crate::player::midi_out::DestinationState;
-use soundcraft_model::{MidiOutChannel, MidiOutPort, MidiOutput};
 use std::sync::atomic::AtomicBool;
+use transit_model::{MidiOutChannel, MidiOutPort, MidiOutput};
 
 fn port_of(key: &PortKey) -> MidiOutPort {
     MidiOutPort { backend: key.backend.as_str().into(), name: key.name.clone(), ordinal: key.ordinal, id: key.id.clone() }
@@ -137,7 +137,7 @@ fn by_default_input_is_not_echoed_to_its_own_device_so_no_loop_forms() {
     let thru = Thru::start(&fake, &output, &input, base, ROUND_TRIP_NS);
     assert!(fake.input_port(&input).unwrap().deliver_at(0, base, &[0x90, 60, 100]));
     let packets = f.packets(1);
-    assert_eq!(packets[0].message, soundcraft_mix::Message::NoteOn { key: 60, velocity: 100, id: soundcraft_mix::NoteId::NONE });
+    assert_eq!(packets[0].message, transit_mix::Message::NoteOn { key: 60, velocity: 100, id: transit_mix::NoteId::NONE });
     // timing: sleep-ok negative check, an echo would go out within the output thread's 1 ms poll
     std::thread::sleep(Duration::from_millis(50));
     f.pump();

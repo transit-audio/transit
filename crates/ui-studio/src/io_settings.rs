@@ -5,7 +5,7 @@
 //! never a reopen.
 
 use crate::StudioApp;
-use soundcraft_model::IoMap;
+use transit_model::IoMap;
 
 /// Tables kept in the preferences; the oldest go first.
 const MAX_SAVED: usize = 64;
@@ -53,7 +53,7 @@ impl StudioApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soundcraft_model::{ChannelFormat, IoDirection, IoPath};
+    use transit_model::{ChannelFormat, IoDirection, IoPath};
 
     fn tascam() -> IoMap {
         IoMap::for_device("ASIO", "TASCAM Model 12", 12, 10)

@@ -224,7 +224,7 @@ impl KeyBank {
                 KeyEnd::Strip(i) => strip(usize::from(i)).map(|st| if e.spec.pre { st.pre.as_slice() } else { st.buf.as_slice() }),
                 KeyEnd::Bus(b) => busses.bus(b).map(|b| b.buf.as_slice()),
             };
-            soundcraft_dsp::map_key_channels(src.unwrap_or(&[]), &mut e.buf, 0, frames);
+            transit_dsp::map_key_channels(src.unwrap_or(&[]), &mut e.buf, 0, frames);
             e.line.apply(e.want, &mut e.buf, &mut e.scratch, frames);
         }
     }

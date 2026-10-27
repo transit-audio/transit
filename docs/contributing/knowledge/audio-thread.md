@@ -77,7 +77,7 @@ Hosted plug-ins (CLAP, VST3) live on the plug-in host thread ([ADR 0018](../../a
 `crates/plugin-host`), not on the UI thread:
 
 - **Creation:** `playback/src/player/handles.rs` announces an instance for a frame ("Loading…"),
-  submits a job that runs `soundcraft_mix::create_instance` (load, `initialize`, state restore,
+  submits a job that runs `transit_mix::create_instance` (load, `initialize`, state restore,
   `prepare`) on the host thread, and polls the result once per frame. The compile takes the
   finished `NewInstance`; the plan is published and adopted exactly as before. Nothing on the
   audio side changes: no new lock, no allocation, no wait. An instance the compile asks for that
@@ -87,7 +87,7 @@ Hosted plug-ins (CLAP, VST3) live on the plug-in host thread ([ADR 0018](../../a
 - **Load and open timing (issue #67):** a load passes four phases, published while it runs
   (`LoadPhase`, `PhaseLog` in `crates/plugin-host/src/phases.rs`): waiting for the host thread,
   creating the instance (module load, parameter table, instance), restoring state (the factory
-  marks it with `report_phase`; `soundcraft_mix::create_instance_with`), binding to the plan
+  marks it with `report_phase`; `transit_mix::create_instance_with`), binding to the plan
   (made, waiting for the compile). Marks take their time from an injected clock (`Config::clock`
   for editors, the handles' clock for loads), so tests drive them with a manual clock and never
   sleep. The slot tooltip reads "Loading X… 12.3 s (creating instance)"; when the compile takes
@@ -143,7 +143,7 @@ that builds the render, not on the host thread; ADR 0018 says why.
 The automation picker and the plug-in parameter lists name a hosted plug-in's parameters from the
 host registry's cache, not from an instance (#58, #65).
 
-- **`cached_info(id)`** (`soundcraft_clap_host`, `soundcraft_vst3_host`; used by `device_info` in
+- **`cached_info(id)`** (`transit_clap_host`, `transit_vst3_host`; used by `device_info` in
   `crates/ui-studio/src/automation.rs`) returns the description of a type already loaded, without
   instantiating anything and without loading a binary, so it is safe on the UI thread. It returns
   `None` for a type not loaded yet; the picker then shows the stored parameters as `param <id>`

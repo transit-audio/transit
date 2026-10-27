@@ -1,7 +1,7 @@
 use serde_json::json;
-use soundcraft_engine::Engine;
-use soundcraft_midi::{CtrlEvent, CtrlKind};
-use soundcraft_model::{ClipContent, ClipId};
+use transit_engine::Engine;
+use transit_midi::{CtrlEvent, CtrlKind};
+use transit_model::{ClipContent, ClipId};
 
 fn setup() -> (Engine, ClipId) {
     let mut e = Engine::default();
@@ -66,12 +66,12 @@ fn invalid_cc_edits_are_atomic_and_do_not_delete_other_event_types() {
 
 #[test]
 fn recorded_sustain_survives_edit_undo_disk_roundtrip_and_audio_playback() {
-    use soundcraft_engine::{
+    use transit_engine::{
         io,
         midi_take::{self, Msg, RecEvent},
     };
-    use soundcraft_model::TrackId;
-    use soundcraft_time::Range;
+    use transit_model::TrackId;
+    use transit_time::Range;
     let mut e = Engine::default();
     let track =
         TrackId(e.execute("track.new", &json!({"kind":"instrument","instrument":"subtractive_synth"})).unwrap()["tracks"][0].as_u64().unwrap());
@@ -91,7 +91,7 @@ fn recorded_sustain_survives_edit_undo_disk_roundtrip_and_audio_playback() {
         original.iter().map(|c| c.tick).collect::<Vec<_>>(),
         [6000, 36000, 40000].map(|sample| e.session().tempo.samples_to_ticks(sample, e.session().sample_rate))
     );
-    let render = |e: &Engine| soundcraft_mix::render_range(e.session(), Range::new(0, 60000), 256);
+    let render = |e: &Engine| transit_mix::render_range(e.session(), Range::new(0, 60000), 256);
     let recorded = render(&e);
     assert!(recorded.iter().flatten().any(|x| x.abs() > 1e-5));
     e.execute("midi.cc_edit", &json!({"clip":clip.0,"index":0,"value":0})).unwrap();
@@ -113,11 +113,11 @@ fn recorded_sustain_survives_edit_undo_disk_roundtrip_and_audio_playback() {
 
 #[test]
 fn controller_only_recording_overdubs_and_undo_preserves_the_existing_notes() {
-    use soundcraft_engine::{
+    use transit_engine::{
         io,
         midi_take::{self, Msg, RecEvent},
     };
-    use soundcraft_model::TrackId;
+    use transit_model::TrackId;
     let (mut e, clip) = setup();
     let track: TrackId = e.session().find_clip(clip).unwrap().0;
     e.execute("midi.note_add", &json!({"clip":clip.0,"pitch":60,"start_ticks":0,"length_ticks":480})).unwrap();
@@ -139,7 +139,7 @@ fn controller_only_recording_overdubs_and_undo_preserves_the_existing_notes() {
     assert_eq!(recorded.iter().map(|c| (c.channel, c.value)).collect::<Vec<_>>(), [(3, 127), (3, 0)]);
     assert_eq!(e.undo_pushes(), undo + 1);
     let serialized = e.session().to_json().unwrap();
-    let loaded = soundcraft_model::Session::from_json(&serialized).unwrap();
+    let loaded = transit_model::Session::from_json(&serialized).unwrap();
     assert_eq!(loaded.find_clip(clip).unwrap().1.content, e.session().find_clip(clip).unwrap().1.content);
     assert!(e.undo());
     assert_eq!(e.session().find_clip(clip).unwrap().1.content, before.find_clip(clip).unwrap().1.content);

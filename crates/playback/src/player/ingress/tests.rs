@@ -2,9 +2,9 @@
 use super::*;
 use crate::plan_bridge;
 use crate::player::monitor;
-use soundcraft_mix::{DeviceGeneration, PlanLimits, RenderTarget, SlotGen};
-use soundcraft_model::TrackId;
 use transit_midi_io::{InputConfig, fake::Fake};
+use transit_mix::{DeviceGeneration, PlanLimits, RenderTarget, SlotGen};
+use transit_model::TrackId;
 use transit_rt::testing::measure;
 
 #[test]
@@ -148,7 +148,7 @@ fn monitor_turned_on_mid_stream_starts_from_clean_baselines() {
 pub(super) fn route() -> Route {
     Route {
         engine: EngineEpoch(1),
-        target: (TrackId(7), soundcraft_mix::INSTRUMENT_SLOT, SlotGen::VACANT),
+        target: (TrackId(7), transit_mix::INSTRUMENT_SLOT, SlotGen::VACANT),
         channels: u16::MAX,
         lookahead: 128,
         deliver: true,
@@ -488,7 +488,7 @@ fn shared_note_budget_is_not_renewed_for_ingress_or_scratch_chunks() {
 fn stop_cutoff_rejects_already_drained_raw_events_and_preserves_later_input() {
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 };
     let (mut owner, mut ports) =
-        RuntimeControl::<(), ()>::new(Arc::new(soundcraft_model::Session::default()), None, target, PlanLimits::default()).unwrap();
+        RuntimeControl::<(), ()>::new(Arc::new(transit_model::Session::default()), None, target, PlanLimits::default()).unwrap();
     let token = owner.register_source(3).unwrap();
     let (lane, mut audio) = owner.midi_lane().unwrap();
     let (send, mut worker) = pump(lane);
@@ -626,7 +626,7 @@ fn one_raw_consumer_fans_out_with_independent_channels_and_identical_timestamps(
     let key = fake.add_input("Fanout");
     let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
     let a = route();
-    let b = Route { target: (TrackId(8), soundcraft_mix::INSTRUMENT_SLOT, SlotGen::VACANT), channels: 1 << 1, ..a };
+    let b = Route { target: (TrackId(8), transit_mix::INSTRUMENT_SLOT, SlotGen::VACANT), channels: 1 << 1, ..a };
     send.send(Update::Input(Box::new(Input {
         id: 1,
         mon: Mon::default(),
@@ -690,7 +690,7 @@ fn reconfiguration_retires_only_removed_routes_and_new_routes_skip_old_raw_offer
     let port = fake.input_port(&key).unwrap();
     port.deliver(1_000, &[0x80, 60, 0]); // offered before the new route, still in the raw ring
     registry.cancel_before(replacement, handle.boundary().cutoff()).unwrap();
-    let next_target = Route { target: (TrackId(9), soundcraft_mix::INSTRUMENT_SLOT, SlotGen::VACANT), ..target };
+    let next_target = Route { target: (TrackId(9), transit_mix::INSTRUMENT_SLOT, SlotGen::VACANT), ..target };
     let applied = Arc::new(AtomicBool::new(false));
     send.send(Update::Routes {
         id: 1,
@@ -850,8 +850,8 @@ fn a_preempted_echo_push_after_a_revocation_is_dropped_by_route_generation() {
     // #69 item 2 through the real ingress worker: the hook runs between the route check and the
     // echo push, where the revocation and its release land.
     use crate::device_clock::HostOrigin;
-    use soundcraft_model::{MidiOutChannel, MidiOutPort};
     use std::sync::Mutex;
+    use transit_model::{MidiOutChannel, MidiOutPort};
     let (control, _plans) = bridge();
     let (mut registry, _sources) = sources::pair(&control).unwrap();
     let token = registry.register(2).unwrap();

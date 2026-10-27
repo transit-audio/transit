@@ -1,5 +1,5 @@
 [package]
-name = "soundcraft-midi"
+name = "transit-midi"
 description = "transit MIDI: note/controller sequences, Standard MIDI File import/export, MIDI editing operations, GM names"
 version.workspace = true
 edition.workspace = true

@@ -3,7 +3,7 @@
 use super::*;
 use crate::{EditorEdit, PluginStates};
 use action_lane::{NoteKind, Sequence};
-use soundcraft_model::TrackId;
+use transit_model::TrackId;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub struct ServiceReport {
@@ -108,13 +108,13 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     }
 
     /// The path table for the first plan, before anything is requested again.
-    pub(super) fn use_io(&mut self, io: Arc<soundcraft_model::IoMap>) {
+    pub(super) fn use_io(&mut self, io: Arc<transit_model::IoMap>) {
         self.control.sessions.set_io(io);
     }
 
     /// Adopt a new path table: a plan for the same document is prepared with it and published
     /// like any other, so the device stays open.
-    pub fn set_io(&mut self, io: Arc<soundcraft_model::IoMap>) -> Result<SessionRequestId, PlayerError> {
+    pub fn set_io(&mut self, io: Arc<transit_model::IoMap>) -> Result<SessionRequestId, PlayerError> {
         if self.faulted() {
             return Err(PlayerError::Faulted);
         }
@@ -129,7 +129,7 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
 
     /// The External Instrument tracks whose MIDI port is missing (ADR 0020 decision 6): a plan for the
     /// same document is prepared that plays them silent with no latency, and published like any other.
-    pub fn set_external_unavailable(&mut self, tracks: Arc<[soundcraft_model::TrackId]>) -> Result<SessionRequestId, PlayerError> {
+    pub fn set_external_unavailable(&mut self, tracks: Arc<[transit_model::TrackId]>) -> Result<SessionRequestId, PlayerError> {
         if self.faulted() {
             return Err(PlayerError::Faulted);
         }
@@ -160,8 +160,8 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     /// bounded refresh for the next call; it never invokes a second compiler pass.
     pub fn service(&mut self) -> ServiceReport {
         self.service_with(|| {
-            let clap = soundcraft_clap_host::service_requests();
-            let vst3 = soundcraft_vst3_host::service_requests();
+            let clap = transit_clap_host::service_requests();
+            let vst3 = transit_vst3_host::service_requests();
             (clap.pending.saturating_add(vst3.pending), clap.failed.saturating_add(vst3.failed), clap.other_thread.saturating_add(vst3.other_thread))
         })
     }
@@ -346,7 +346,7 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn copy_meters(&self, out: &mut MeterSnapshot) {
         self.control.sessions.copy_meters(out);
     }
-    pub fn scope_hub(&self) -> Arc<soundcraft_mix::ScopeHub> {
+    pub fn scope_hub(&self) -> Arc<transit_mix::ScopeHub> {
         self.control.sessions.scope_hub()
     }
 
@@ -424,13 +424,13 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn any_editor_open(&self) -> bool {
         self.handles.any_editor_open()
     }
-    pub fn set_editor_header(&mut self, track: TrackId, slot: usize, header: &soundcraft_dsp::EditorHeader) {
+    pub fn set_editor_header(&mut self, track: TrackId, slot: usize, header: &transit_dsp::EditorHeader) {
         self.handles.set_header(track, slot, header);
     }
-    pub fn take_header_actions(&mut self) -> Vec<(TrackId, usize, soundcraft_dsp::HeaderAction)> {
+    pub fn take_header_actions(&mut self) -> Vec<(TrackId, usize, transit_dsp::HeaderAction)> {
         self.handles.take_header_actions()
     }
-    pub fn instance(&self, track: TrackId, slot: usize) -> Option<soundcraft_mix::SlotGen> {
+    pub fn instance(&self, track: TrackId, slot: usize) -> Option<transit_mix::SlotGen> {
         self.handles.binding(track, slot).map(|b| b.2)
     }
     pub fn live_name(&self, track: TrackId, slot: usize) -> Option<&'static str> {
@@ -439,7 +439,7 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn editor_available(&self, track: TrackId, slot: usize) -> Result<(), String> {
         self.handles.editor_available(track, slot)
     }
-    pub fn begin_save_state(&mut self, track: TrackId, slot: usize) -> Result<soundcraft_dsp::StateJob<Option<Vec<u8>>>, String> {
+    pub fn begin_save_state(&mut self, track: TrackId, slot: usize) -> Result<transit_dsp::StateJob<Option<Vec<u8>>>, String> {
         self.handles.begin_save_state(track, slot)
     }
     pub fn begin_load_state(
@@ -447,10 +447,10 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
         track: TrackId,
         slot: usize,
         data: Vec<u8>,
-    ) -> Result<soundcraft_dsp::StateJob<Option<soundcraft_dsp::LoadedValues>>, String> {
+    ) -> Result<transit_dsp::StateJob<Option<transit_dsp::LoadedValues>>, String> {
         self.handles.begin_load_state(track, slot, data)
     }
-    pub fn begin_default_state(&self, id: &str, ch: usize) -> soundcraft_dsp::StateJob<Option<Vec<u8>>> {
+    pub fn begin_default_state(&self, id: &str, ch: usize) -> transit_dsp::StateJob<Option<Vec<u8>>> {
         self.handles.begin_default_state(id, ch)
     }
     pub fn editor_set_param(&mut self, track: TrackId, slot: usize, id: &str, value: f32) {

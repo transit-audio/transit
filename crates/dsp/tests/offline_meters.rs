@@ -1,9 +1,9 @@
 use std::f32::consts::TAU;
 
-use soundcraft_dsp::meter::LoudnessMeter;
-use soundcraft_dsp::offline::{self, FadeShape, Waveform};
-use soundcraft_dsp::spectrum::{bin_hz, magnitude_db};
-use soundcraft_dsp::{create, db_to_gain, gain_to_db, pan};
+use transit_dsp::meter::LoudnessMeter;
+use transit_dsp::offline::{self, FadeShape, Waveform};
+use transit_dsp::spectrum::{bin_hz, magnitude_db};
+use transit_dsp::{create, db_to_gain, gain_to_db, pan};
 
 fn sine(freq: f32, amp: f32, sr: f32, len: usize) -> Vec<f32> {
     (0..len).map(|i| amp * (TAU * freq * i as f32 / sr).sin()).collect()

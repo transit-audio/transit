@@ -13,10 +13,10 @@
 
 use crate::analysis::FrameTrip;
 use crate::probe::{CLICK_LEVEL, MIN_ENERGY_RATIO};
-use soundcraft_playback::LoopbackCalibration;
-use soundcraft_playback::devices::{MODE_ASIO, MODE_EXCLUSIVE, MODE_SHARED};
 use std::path::Path;
 use transit_audio_backend::Mode;
+use transit_playback::LoopbackCalibration;
+use transit_playback::devices::{MODE_ASIO, MODE_EXCLUSIVE, MODE_SHARED};
 
 /// Fewest clicks that must pair for a calibration to be trusted.
 pub const MIN_PAIRED: usize = 3;
@@ -270,7 +270,7 @@ mod tests {
         assert_eq!(stored(&path, &LoopbackCalibration { period: 64, ..cal.clone() }), None, "another key");
         let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!((doc["theme"].as_str(), doc["zoom"].clone()), (Some("dark"), serde_json::json!([1, 2])));
-        let audio: soundcraft_playback::AudioConfig = serde_json::from_value(doc["audio"].clone()).unwrap();
+        let audio: transit_playback::AudioConfig = serde_json::from_value(doc["audio"].clone()).unwrap();
         assert_eq!((audio.output.as_deref(), audio.buffer_size), (Some("Speakers"), Some(128)));
         assert_eq!(audio.calibrations, std::slice::from_ref(&cal), "merging twice leaves one entry");
         let fresh = dir.join("new.json");

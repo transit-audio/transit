@@ -6,13 +6,13 @@
 //! through dry.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_mix::{
+use std::sync::Arc;
+use transit_audio_io::AudioBuffer;
+use transit_mix::{
     Adoption, DeviceGeneration, HardwareState, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, hardware_report,
     plan_sinks, unresolved_routes,
 };
-use soundcraft_model::{ChannelFormat, Clip, HardwareLatency, Insert, IoMap, Session, SourceAudio, SourceId, TrackId, TrackKind};
-use std::sync::Arc;
+use transit_model::{ChannelFormat, Clip, HardwareLatency, Insert, IoMap, Session, SourceAudio, SourceId, TrackId, TrackKind};
 
 const SR: u32 = 48_000;
 const BLOCK: usize = 256;
@@ -78,16 +78,16 @@ fn render_on(s: &Session, io: &IoMap, duplex: bool, delay: usize, sent: usize, c
     let mut mix = MixEngine::realtime(target(io));
     let mut compiler = PlanCompiler::new(target(io), PlanLimits::default());
     compiler.set_io(Arc::new(io.clone()));
-    let mut maker = |spec: &InstanceSpec, _: soundcraft_mix::SlotGen| {
-        soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
-            .map(|n| soundcraft_mix::NewInstance { plugin: n.plugin, refused_state: false })
+    let mut maker = |spec: &InstanceSpec, _: transit_mix::SlotGen| {
+        transit_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
+            .map(|n| transit_mix::NewInstance { plugin: n.plugin, refused_state: false })
     };
     let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut maker).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
     compiler.reclaim(env);
     let sinks = plan_sinks(s, io, io.outputs);
     let dest = sinks.destinations();
-    let main_w = soundcraft_mix::main_channels(s);
+    let main_w = transit_mix::main_channels(s);
     let mut out = vec![vec![0.0f32; BLOCK]; main_w + sinks.channels()];
     // The device's output stream, per device channel, from sample 0.
     let mut device: Vec<Vec<f32>> = vec![Vec::new(); outs];
@@ -262,6 +262,6 @@ fn an_insert_on_the_last_channels_of_a_12_in_10_out_device_sends_and_returns_the
     assert_eq!((report[0].state.clone(), report[0].latency), (HardwareState::Ready, Some(D as u32)));
     // A stem on the last pair leaves on the same channels (ADR 0015 output paths).
     s.track_mut(t).unwrap().mixer.inserts[0] = None;
-    s.track_mut(dry).unwrap().mixer.output = soundcraft_model::Route::Hardware("Out 9-10".into());
+    s.track_mut(dry).unwrap().mixer.output = transit_model::Route::Hardware("Out 9-10".into());
     assert_eq!(plan_sinks(&s, &io, 10).destinations(), [8, 9]);
 }

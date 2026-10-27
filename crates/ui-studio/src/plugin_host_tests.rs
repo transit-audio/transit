@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 /// Builds the VST3 fixture with `slow-create`, installs it as a bundle and adds its folder to the
 /// VST3 search path. Returns the synth's id.
 fn slow_synth() -> String {
-    soundcraft_vst3_host::set_scan_extra_dirs_only(true);
+    transit_vst3_host::set_scan_extra_dirs_only(true);
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../vst3-host/tests/fixture/Cargo.toml");
     let target = std::env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
@@ -43,8 +43,8 @@ fn slow_synth() -> String {
     let bin = dir.join("Fixture.vst3/Contents").join(folder);
     std::fs::create_dir_all(&bin).unwrap();
     std::fs::copy(target.join("debug").join(lib), bin.join(exe)).unwrap();
-    assert_eq!(soundcraft_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
-    soundcraft_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Synth").expect("the fixture's synth").id
+    assert_eq!(transit_vst3_host::add_search_dir(&dir), 3, "the fixture's plug-ins");
+    transit_vst3_host::scan_paths(&[dir]).into_iter().find(|d| d.name == "Fixture Synth").expect("the fixture's synth").id
 }
 
 /// The fixture synth's creation time in the child. A frame that waited for it takes all of it,
@@ -77,16 +77,16 @@ fn frames_advance_while_a_slow_plug_in_loads_and_the_slot_shows_loading_then_rea
         return;
     }
     let synth = slow_synth();
-    let mut engine = soundcraft_engine::Engine::default();
-    let track = engine.session_mut().add_track(soundcraft_model::TrackKind::Instrument, soundcraft_model::ChannelFormat::Stereo, Some("Slow"));
-    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let mut engine = transit_engine::Engine::default();
+    let track = engine.session_mut().add_track(transit_model::TrackKind::Instrument, transit_model::ChannelFormat::Stereo, Some("Slow"));
+    let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
     let mut app = StudioApp::new(engine, Some(player), Services::default());
     let ctx = egui::Context::default();
     for _ in 0..3 {
         app.player.as_ref().unwrap().step_device_free();
         frame(&mut app, &ctx);
     }
-    let slot = soundcraft_mix::INSTRUMENT_SLOT;
+    let slot = transit_mix::INSTRUMENT_SLOT;
 
     // Add the slow instrument the way the UI does, then keep running frames.
     app.set_instrument(track, &synth).unwrap();
@@ -138,7 +138,7 @@ fn frames_advance_while_a_slow_plug_in_loads_and_the_slot_shows_loading_then_rea
     // The app's quit order: the player (and its instances) first, then plug-in hosting, which
     // runs the module exit on the host thread that entered the module (the fixture checks).
     app.player = None;
-    soundcraft_engine::shutdown_plugin_hosts();
+    transit_engine::shutdown_plugin_hosts();
 }
 
 /// The heavy-instrument fixture's creation time for the late-adoption test (issue #82, E48).
@@ -168,9 +168,9 @@ fn a_heavy_instrument_slower_than_the_display_budget_is_adopted() {
         return;
     }
     let synth = slow_synth();
-    let mut engine = soundcraft_engine::Engine::default();
-    let track = engine.session_mut().add_track(soundcraft_model::TrackKind::Instrument, soundcraft_model::ChannelFormat::Stereo, Some("Heavy"));
-    let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+    let mut engine = transit_engine::Engine::default();
+    let track = engine.session_mut().add_track(transit_model::TrackKind::Instrument, transit_model::ChannelFormat::Stereo, Some("Heavy"));
+    let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
     player.set_slow_after(HEAVY_SLOW_AFTER);
     let mut app = StudioApp::new(engine, Some(player), Services::default());
     let ctx = egui::Context::default();
@@ -178,7 +178,7 @@ fn a_heavy_instrument_slower_than_the_display_budget_is_adopted() {
         app.player.as_ref().unwrap().step_device_free();
         frame(&mut app, &ctx);
     }
-    let slot = soundcraft_mix::INSTRUMENT_SLOT;
+    let slot = transit_mix::INSTRUMENT_SLOT;
     app.set_instrument(track, &synth).unwrap();
     let started = Instant::now();
     let (mut seen_slow, mut seen_stuck) = (false, false);
@@ -187,7 +187,7 @@ fn a_heavy_instrument_slower_than_the_display_budget_is_adopted() {
         app.player.as_ref().unwrap().step_device_free();
         frame(&mut app, &ctx);
         let p = app.player.as_ref().unwrap();
-        seen_slow |= matches!(p.slot_load(track, slot), Some(soundcraft_playback::SlotLoad::Slow { .. }));
+        seen_slow |= matches!(p.slot_load(track, slot), Some(transit_playback::SlotLoad::Slow { .. }));
         seen_stuck |= p.stuck(track, slot);
         std::thread::sleep(Duration::from_millis(5));
     }
@@ -196,5 +196,5 @@ fn a_heavy_instrument_slower_than_the_display_budget_is_adopted() {
     assert!(!seen_stuck, "it never read Not responding");
     assert!(!app.player.as_ref().unwrap().any_loading());
     app.player = None;
-    soundcraft_engine::shutdown_plugin_hosts();
+    transit_engine::shutdown_plugin_hosts();
 }

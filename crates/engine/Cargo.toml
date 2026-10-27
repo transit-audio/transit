@@ -1,5 +1,5 @@
 [package]
-name = "soundcraft-engine"
+name = "transit-engine"
 description = "transit command engine: commands, undo, editing operations, import/export, bounce, parity catalog"
 version.workspace = true
 edition.workspace = true
@@ -8,17 +8,17 @@ rust-version.workspace = true
 repository.workspace = true
 
 [dependencies]
-soundcraft-time.workspace = true
-soundcraft-audio-io.workspace = true
-soundcraft-midi.workspace = true
-soundcraft-dsp.workspace = true
-soundcraft-clap-host.workspace = true
-soundcraft-vst3-host.workspace = true
-soundcraft-au-host.workspace = true
+transit-time.workspace = true
+transit-audio-io.workspace = true
+transit-midi.workspace = true
+transit-dsp.workspace = true
+transit-clap-host.workspace = true
+transit-vst3-host.workspace = true
+transit-au-host.workspace = true
 transit-plugin-host.workspace = true
-soundcraft-model.workspace = true
-soundcraft-mix.workspace = true
-soundcraft-video.workspace = true
+transit-model.workspace = true
+transit-mix.workspace = true
+transit-video.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -2,10 +2,10 @@
 use egui::vec2;
 use egui_kittest::{Harness, kittest::Queryable};
 use serde_json::json;
-use soundcraft_engine::autosave::leftovers;
-use soundcraft_ui_egui::{Services, SoundApp};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard, PoisonError};
+use transit_engine::autosave::leftovers;
+use transit_ui_egui::{Services, SoundApp};
 
 /// One test at a time: a child process another test starts (fontconfig's `fc-match`) holds copies
 /// of this process's open files until it execs, so a released autosave lock can still look taken.
@@ -38,7 +38,7 @@ fn autosaved(root: &Path) -> String {
 }
 
 fn launch(root: &Path) -> SoundApp {
-    let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
     app.autosave_dir = Some(root.to_path_buf());
     app.leftovers = leftovers(root);
     app

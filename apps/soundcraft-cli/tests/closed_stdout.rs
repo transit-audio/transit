@@ -3,7 +3,7 @@
 use std::process::{Command, Stdio};
 
 fn bin() -> Command {
-    let mut cmd = Command::new(env!("CARGO_BIN_EXE_soundcraft-cli"));
+    let mut cmd = Command::new(env!("CARGO_BIN_EXE_transit-cli"));
     cmd.env("SOUNDCRAFT_NO_PREFS", "1");
     cmd
 }

@@ -551,7 +551,7 @@ pub struct Insert {
     /// Stable identity while the insert lives (see [`InsertUid`]).
     #[serde(skip)]
     pub uid: InsertUid,
-    /// Registry id from `soundcraft-dsp` (e.g. `eq7`, `comp`).
+    /// Registry id from `transit-dsp` (e.g. `eq7`, `comp`).
     pub plugin: String,
     #[serde(default, deserialize_with = "finite_params")]
     pub params: BTreeMap<String, f32>,

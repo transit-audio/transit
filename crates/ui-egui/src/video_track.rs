@@ -9,11 +9,11 @@ use crate::SoundApp;
 use crate::edit_window::{sample_at, x_of};
 use crate::theme::regular;
 use egui::{Color32, Painter, Rect, pos2};
-use soundcraft_model::{ClipContent, Session, SourceId, Track};
-use soundcraft_time::Samples;
-use soundcraft_video::{Frame, Movie, MovieInfo};
 use std::collections::HashMap;
 use std::sync::Arc;
+use transit_model::{ClipContent, Session, SourceId, Track};
+use transit_time::Samples;
+use transit_video::{Frame, Movie, MovieInfo};
 
 /// `edit.flags` key set while the Video track is offline (Options › Video Track Online).
 pub const OFFLINE_FLAG: &str = "video.offline";
@@ -407,7 +407,7 @@ pub fn movie_secs(s: &Session, clip_start: Samples, offset: Samples, at: Samples
 /// The picture at `at`: the topmost active Video track with an unmuted clip there. The path is
 /// the movie's, or why it is offline.
 pub fn picture_at(s: &Session, at: Samples) -> Option<(MovieKey, Result<String, String>, f64, f64)> {
-    for t in s.tracks.iter().filter(|t| t.kind == soundcraft_model::TrackKind::Video && !t.inactive) {
+    for t in s.tracks.iter().filter(|t| t.kind == transit_model::TrackKind::Video && !t.inactive) {
         for c in t.clips() {
             if c.muted || !c.range().contains(at) {
                 continue;

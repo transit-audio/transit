@@ -14,8 +14,8 @@ use std::collections::BTreeMap;
 
 use egui::{Align2, Color32, Key, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
-use soundcraft_model::TrackId;
-use soundcraft_time::{Samples, TICKS_PER_QUARTER};
+use transit_model::TrackId;
+use transit_time::{Samples, TICKS_PER_QUARTER};
 
 use crate::SoundApp;
 use crate::theme::{Tokens, bold, regular};
@@ -167,7 +167,7 @@ fn view_start(p: &KeyboardPrefs) -> i32 {
 /// ones, else the track of the clip in the MIDI Editor.
 fn targets(app: &SoundApp) -> Vec<TrackId> {
     let s = app.engine.session();
-    let midi = |t: &&soundcraft_model::Track| t.kind.is_midi() && !t.inactive;
+    let midi = |t: &&transit_model::Track| t.kind.is_midi() && !t.inactive;
     let armed: Vec<TrackId> = s.tracks.iter().filter(midi).filter(|t| t.mixer.record_arm).map(|t| t.id).collect();
     if !armed.is_empty() {
         return armed;
@@ -471,7 +471,7 @@ fn body(app: &mut SoundApp, ui: &mut Ui) {
             painter.text(
                 pos2(kr.center().x, kr.max.y - 9.0),
                 Align2::CENTER_BOTTOM,
-                soundcraft_midi::note_name(u8::try_from(*p).unwrap_or(0)),
+                transit_midi::note_name(u8::try_from(*p).unwrap_or(0)),
                 regular(9.0),
                 Color32::from_gray(120),
             );
@@ -608,7 +608,7 @@ fn readout(app: &mut SoundApp, ui: &mut Ui, width: f32) {
             let low = u8::try_from(low_c(p).clamp(0, 127)).unwrap_or(60);
             let label = |ui: &mut Ui, name: &str| ui.label(egui::RichText::new(name).font(regular(13.0)).color(Color32::from_gray(200)));
             label(ui, "Octave:");
-            ui.label(egui::RichText::new(soundcraft_midi::note_name(low)).font(bold(13.0)).color(Color32::WHITE));
+            ui.label(egui::RichText::new(transit_midi::note_name(low)).font(bold(13.0)).color(Color32::WHITE));
             ui.add_space(14.0);
             label(ui, "Velocity:");
             let mut v = i32::from(p.velocity);

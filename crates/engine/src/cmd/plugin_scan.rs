@@ -12,8 +12,8 @@ impl Default for PluginDiscovery {
         #[cfg(not(test))]
         {
             Self {
-                clap: |rescan| json!(if rescan { soundcraft_clap_host::rescan() } else { soundcraft_clap_host::scan() }),
-                vst3: |rescan| json!(if rescan { soundcraft_vst3_host::rescan() } else { soundcraft_vst3_host::scan() }),
+                clap: |rescan| json!(if rescan { transit_clap_host::rescan() } else { transit_clap_host::scan() }),
+                vst3: |rescan| json!(if rescan { transit_vst3_host::rescan() } else { transit_vst3_host::scan() }),
             }
         }
         // Unit tests exercise command dispatch without loading installed third-party plug-ins.

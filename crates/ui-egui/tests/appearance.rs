@@ -2,7 +2,7 @@ use egui::accesskit::Role;
 use egui::{Event, Modifiers, PointerButton, Pos2, Vec2, pos2, vec2};
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use soundcraft_ui_egui::{Services, SoundApp};
+use transit_ui_egui::{Services, SoundApp};
 
 const WINDOW_PX: Vec2 = vec2(1600.0, 1000.0);
 
@@ -19,7 +19,7 @@ fn frame(h: &mut Harness<'_, SoundApp>, px: Pos2, pressed: Option<bool>) {
 
 #[test]
 fn interface_scale_slider_follows_the_pointer() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     app.extra.show_ui_customization = true;
     let mut h = Harness::builder().with_size(WINDOW_PX).with_pixels_per_point(1.0).build_ui_state(
         |ui, app: &mut SoundApp| {

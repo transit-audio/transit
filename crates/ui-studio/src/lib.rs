@@ -1,9 +1,9 @@
 //! transit's studio UI: an arrangement window and a transport over the transit engine.
 //!
 //! "Cubase bones, Ableton manners" (ADR 0008). The UI draws engine state and acts by executing
-//! engine commands; audio goes through [`soundcraft_playback::Player`] and the host loop in
-//! [`host`], which is a marked copy of `soundcraft-ui-egui`'s `SoundApp` loop (plan 06, section 3).
-//! Nothing here depends on `soundcraft-ui-egui`.
+//! engine commands; audio goes through [`transit_playback::Player`] and the host loop in
+//! [`host`], which is a marked copy of `transit-ui-egui`'s `SoundApp` loop (plan 06, section 3).
+//! Nothing here depends on `transit-ui-egui`.
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 pub mod about;
@@ -61,12 +61,12 @@ pub mod waveform;
 pub mod widgets;
 
 use serde_json::{Value, json};
-use soundcraft_engine::Engine;
-use soundcraft_model::TrackId;
-use soundcraft_playback::Player;
-use soundcraft_time::{Range, Samples};
 use std::collections::HashMap;
 use std::sync::mpsc::Receiver;
+use transit_engine::Engine;
+use transit_model::TrackId;
+use transit_playback::Player;
+use transit_time::{Range, Samples};
 
 pub use control::ControlRequest;
 
@@ -74,24 +74,24 @@ pub use control::ControlRequest;
 const MAX_IMPORTS_PACE: u32 = 600;
 
 /// Our own UI state (serde, so agents can read and set it; saved as `ui.json` in the transit
-/// settings folder). Not `soundcraft-ui-egui`'s `UiState` (plan 06, L13).
+/// settings folder). Not `transit-ui-egui`'s `UiState` (plan 06, L13).
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct UiState {
     /// The audio device choice, kept with the preferences: per machine.
-    pub audio: soundcraft_playback::AudioConfig,
+    pub audio: transit_playback::AudioConfig,
     /// The Audio Devices window's last section (`audio_devices::Section::key`): per machine, in
     /// `ui.json`, never in the session.
     pub audio_devices_section: String,
     /// This machine's I/O paths, one table per audio system plus device (ADR 0015).
-    pub io_maps: Vec<soundcraft_model::IoMap>,
+    pub io_maps: Vec<transit_model::IoMap>,
     /// File > Open Recent: sessions last opened or saved here, most recent first (at most 10).
     /// A per-machine preference; never part of the document or its undo history.
     pub recent_files: Vec<recent::RecentFile>,
     /// The user's own VST3 and CLAP folders.
     pub plugin_dirs: plugin_scan::PluginDirs,
     /// Plug-in editors to have open, as (track, slot); the instrument is
-    /// `soundcraft_mix::INSTRUMENT_SLOT`. `ui.set` opens and closes editors through this list
+    /// `transit_mix::INSTRUMENT_SLOT`. `ui.set` opens and closes editors through this list
     /// (the same field `tools/exp-quit.ps1` sets in SoundCraft).
     pub plugin_windows: Vec<(TrackId, usize)>,
     /// How long each plug-in type took to load the last time, in milliseconds by plug-in id (issue
@@ -115,11 +115,11 @@ pub struct UiState {
     pub midi_mappings: midi_learn::Prefs,
     /// The controller profile: this machine's MIDI Learn mappings, keyed by port name (ADR 0028).
     /// Per machine; never part of a session.
-    pub midi_profile: soundcraft_model::MappingSet,
+    pub midi_profile: transit_model::MappingSet,
     /// How a mapped knob takes over a control it is not at: scaled, jump or pickup (ADR 0028,
     /// amendment 2026-10-25). Per machine, with the profile; one setting for every mapping.
-    #[serde(default = "soundcraft_model::MapMode::takeover_default")]
-    pub midi_takeover: soundcraft_model::MapMode,
+    #[serde(default = "transit_model::MapMode::takeover_default")]
+    pub midi_takeover: transit_model::MapMode,
     /// The mixer fills the window instead of the arrangement (Cubase's F3).
     pub mixer_full: bool,
     /// Height of the mixer pane in points.
@@ -189,7 +189,7 @@ pub struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         UiState {
-            audio: soundcraft_playback::AudioConfig::default(),
+            audio: transit_playback::AudioConfig::default(),
             audio_devices_section: String::new(),
             io_maps: Vec::new(),
             recent_files: Vec::new(),
@@ -205,7 +205,7 @@ impl Default for UiState {
             midi_monitor: midi_monitor::Prefs::default(),
             midi_mappings: midi_learn::Prefs::default(),
             midi_profile: Default::default(),
-            midi_takeover: soundcraft_model::MapMode::takeover_default(),
+            midi_takeover: transit_model::MapMode::takeover_default(),
             mixer_full: false,
             mixer_height: 420.0,
             cursor: 0,
@@ -243,7 +243,7 @@ pub struct Services {
     /// The app's settings folder; user presets live under `presets/` in it. `None`: factory presets only.
     pub config_dir: Option<std::path::PathBuf>,
     /// Replaces the deferred launch open of the audio device (tests); `None`: the real open.
-    pub open_audio: Option<Box<dyn Fn(std::sync::Arc<soundcraft_model::Session>, &soundcraft_playback::AudioConfig) -> Player>>,
+    pub open_audio: Option<Box<dyn Fn(std::sync::Arc<transit_model::Session>, &transit_playback::AudioConfig) -> Player>>,
     /// Starts a new-version check (the app's, behind its `update-check` feature); `None`: no check.
     pub update_check: Option<update::UpdateCheck>,
     /// The check is off because `TRANSIT_NO_UPDATE_CHECK` is set (says why in the Help menu).
@@ -252,7 +252,7 @@ pub struct Services {
     pub log: Option<Box<dyn debug_log::LogControl>>,
 }
 
-/// Ballistic meter display state (copied from `soundcraft-ui-egui`, see [`host::feed_meter`]).
+/// Ballistic meter display state (copied from `transit-ui-egui`, see [`host::feed_meter`]).
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MeterDisplay {
     pub level: [f32; 2],
@@ -297,13 +297,13 @@ pub struct StudioApp {
     pub player: Option<Player>,
     player_requests: host::PlayerRequests,
     /// Input capture, opened on first record.
-    pub recorder: Option<soundcraft_playback::record::Recorder>,
+    pub recorder: Option<transit_playback::record::Recorder>,
     /// Synthetic recorder output for tests that must not open an input device.
     #[cfg(test)]
-    finished_test_takes: Option<soundcraft_playback::record::Takes>,
+    finished_test_takes: Option<transit_playback::record::Takes>,
     /// Synthetic MIDI capture for tests that must not run the audio thread.
     #[cfg(test)]
-    finished_test_midi: Option<soundcraft_playback::MidiTake>,
+    finished_test_midi: Option<transit_playback::MidiTake>,
     record_start: Samples,
     /// Where the pass under way has got to, counting laps of the cycle: the transport position
     /// wraps, the capture's device time does not.
@@ -315,7 +315,7 @@ pub struct StudioApp {
     pub(crate) midi_live: Option<host::MidiLive>,
     midi_live_tick: u32,
     /// The MIDI take journal of the pass under way (crash recovery, K11).
-    pub(crate) midi_journal: Option<soundcraft_engine::midi_journal::Writer>,
+    pub(crate) midi_journal: Option<transit_engine::midi_journal::Writer>,
     /// The journal of a finished pass, until the autosave holds its clips (K13).
     pub(crate) placed_journal: Option<host::PlacedJournal>,
     /// Makes the next Stop see an approximate start, standing in for the recorder's latch.
@@ -325,13 +325,13 @@ pub struct StudioApp {
     punch: Option<Range>,
     recorder_failed: bool,
     /// When to reopen the device after its driver asked for it (ASIO reset), and what to say.
-    pub(crate) reopen: soundcraft_playback::reopen::Reopener,
+    pub(crate) reopen: transit_playback::reopen::Reopener,
     /// Opens the replacement Player of an automatic reopen in tests (a scripted driver); the app
     /// uses `Player::with_config`.
     #[cfg(test)]
-    pub(crate) reopen_with: Option<Box<dyn Fn(std::sync::Arc<soundcraft_model::Session>, &soundcraft_playback::AudioConfig) -> Player>>,
+    pub(crate) reopen_with: Option<Box<dyn Fn(std::sync::Arc<transit_model::Session>, &transit_playback::AudioConfig) -> Player>>,
     lost_shown: u64,
-    take_plan: Option<soundcraft_engine::io::Recording>,
+    take_plan: Option<transit_engine::io::Recording>,
     pub ui: UiState,
     /// The status line.
     pub status: String,
@@ -340,21 +340,21 @@ pub struct StudioApp {
     state_notice: Option<String>,
     pub services: Services,
     pub autosave_dir: Option<std::path::PathBuf>,
-    autosaver: Option<soundcraft_engine::autosave::Autosaver>,
+    autosaver: Option<transit_engine::autosave::Autosaver>,
     autosaved_rev: u64,
-    pub leftovers: Vec<soundcraft_engine::autosave::Leftover>,
+    pub leftovers: Vec<transit_engine::autosave::Leftover>,
     panic_rev: u64,
     last_autosave: Option<std::time::Instant>,
     pub main_meter: MeterDisplay,
     pub meters: HashMap<TrackId, MeterDisplay>,
-    meter_snapshot: soundcraft_playback::MeterSnapshot,
+    meter_snapshot: transit_playback::MeterSnapshot,
     last_meter_poll: f64,
     /// Transport simulation when there is no player (tests, `--no-audio`).
     sim: Option<(Samples, Option<Samples>, Option<Range>)>,
     /// The same for a record count-in: samples left, then what to play when it ends.
     sim_count_in: Option<(Samples, (Samples, Option<Samples>, Option<Range>))>,
     /// The running count-in's grid, for the transport's beat counter.
-    count_in_plan: Option<soundcraft_playback::CountIn>,
+    count_in_plan: Option<transit_playback::CountIn>,
     /// The metronome popup is open.
     pub(crate) metro_popup: bool,
     /// The loop the session asked for at the last frame, so a change while playing retargets the running loop.
@@ -464,7 +464,7 @@ impl StudioApp {
             test_approximate_start: false,
             punch: None,
             recorder_failed: false,
-            reopen: soundcraft_playback::reopen::Reopener::default(),
+            reopen: transit_playback::reopen::Reopener::default(),
             #[cfg(test)]
             reopen_with: None,
             lost_shown: 0,
@@ -482,7 +482,7 @@ impl StudioApp {
             last_autosave: None,
             main_meter: MeterDisplay::default(),
             meters: HashMap::new(),
-            meter_snapshot: soundcraft_playback::MeterSnapshot::default(),
+            meter_snapshot: transit_playback::MeterSnapshot::default(),
             last_meter_poll: f64::NEG_INFINITY,
             sim: None,
             sim_count_in: None,
@@ -568,7 +568,7 @@ impl StudioApp {
     /// Plan 06, L7: this UI offers neither Shuffle nor Spot, so edit commands run as Slip while the
     /// document keeps the mode it was saved with. Only the commands see the override.
     fn slip_override(&self, id: &str) -> bool {
-        use soundcraft_model::EditMode;
+        use transit_model::EditMode;
         let edits = id.starts_with("edit.") || id.starts_with("clip.") || id.starts_with("midi.");
         edits
             && !matches!(id, "edit.mode" | "edit.undo" | "edit.redo")
@@ -666,7 +666,7 @@ impl StudioApp {
         let result = if id == "track.change_width" {
             self.change_track_width(&params)
         } else if self.slip_override(id) {
-            self.engine.execute_with_mode(id, &params, soundcraft_model::EditMode::Slip)
+            self.engine.execute_with_mode(id, &params, transit_model::EditMode::Slip)
         } else {
             self.engine.execute(id, &params)
         };
@@ -866,7 +866,7 @@ impl StudioApp {
             self.status = match stuck.as_slice() {
                 [(_, slot, id)] => format!(
                     "{} is not responding (it has not finished loading); Retry on its slot loads it again",
-                    self.plugin_name(id, *slot == soundcraft_mix::INSTRUMENT_SLOT)
+                    self.plugin_name(id, *slot == transit_mix::INSTRUMENT_SLOT)
                 ),
                 many => format!("{} plug-ins are not responding (they have not finished loading); Retry all loads them again", many.len()),
             };
@@ -882,7 +882,7 @@ impl StudioApp {
     /// Makes a "Not responding" slot's plug-in again (issue #82): `plugin.retry`, as the slot's
     /// Retry button and context menu run it.
     pub fn retry_plugin(&mut self, t: TrackId, slot: usize) -> Result<Value, String> {
-        let slot = if slot == soundcraft_mix::INSTRUMENT_SLOT { json!("instrument") } else { json!(slot) };
+        let slot = if slot == transit_mix::INSTRUMENT_SLOT { json!("instrument") } else { json!(slot) };
         self.run("plugin.retry", json!({"track": t.0, "slot": slot}))
     }
 
@@ -907,9 +907,9 @@ impl StudioApp {
             return Ok(json!({"retried": n}));
         }
         let track = TrackId(checked["track"].as_u64().unwrap_or_default());
-        let slot = checked["slot"].as_u64().and_then(|s| usize::try_from(s).ok()).unwrap_or(soundcraft_mix::INSTRUMENT_SLOT);
+        let slot = checked["slot"].as_u64().and_then(|s| usize::try_from(s).ok()).unwrap_or(transit_mix::INSTRUMENT_SLOT);
         let plugin = checked["plugin"].as_str().unwrap_or_default().to_owned();
-        let name = self.plugin_name(&plugin, slot == soundcraft_mix::INSTRUMENT_SLOT);
+        let name = self.plugin_name(&plugin, slot == transit_mix::INSTRUMENT_SLOT);
         if !self.player.as_ref().is_some_and(|p| p.retry_plugin(track, slot)) {
             self.status = format!("{name} is not waiting for a retry (only a slot that reads Not responding is)");
             return Err(self.status.clone());
@@ -1027,7 +1027,7 @@ impl StudioApp {
 
     /// Feed queued synthetic input (from the control channel) into egui: one pointer event per
     /// frame (so drags span frames like real ones), keys as press+release pairs, text at once.
-    /// Copied from `soundcraft-ui-egui` (`SoundApp::raw_input_hook`, transit 2af868e), plus the
+    /// Copied from `transit-ui-egui` (`SoundApp::raw_input_hook`, transit 2af868e), plus the
     /// modifiers a synthetic gesture holds (`ui.drag {alt: true}`) applied to the frame's input.
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
         if !self.synthetic.is_empty() {
@@ -1254,8 +1254,8 @@ mod slice6_tests;
 /// runtime may call the same functions. True while a request is still in progress, so the frame
 /// loop comes back soon instead of after its idle second.
 fn service_plugin_requests() -> bool {
-    let clap = soundcraft_clap_host::service_requests();
-    let vst3 = soundcraft_vst3_host::service_requests();
+    let clap = transit_clap_host::service_requests();
+    let vst3 = transit_vst3_host::service_requests();
     clap.pending + vst3.pending > 0
 }
 

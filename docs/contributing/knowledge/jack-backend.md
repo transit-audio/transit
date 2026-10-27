@@ -8,7 +8,7 @@ and the duplex process engine (audio plays and records).
 
 ## Building
 
-- Feature `native-jack` on `transit`, `soundcraft-playback` and `audio-bench`; the crate's own
+- Feature `native-jack` on `transit`, `transit-playback` and `audio-bench`; the crate's own
   feature `libjack` turns on the backend. Without it the crate is empty; its tests (the safe core over
   the fake server) build on any platform.
 - `jack-sys` `=0.5.1` with `dynamic_loading`: `libjack.so.0` is dlopened at first use, nothing links

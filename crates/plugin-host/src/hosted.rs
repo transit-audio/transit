@@ -2,14 +2,14 @@
 //! holds, and the editor and state proxies the UI holds.
 
 use crate::{Clock, Host, Inner, Status, Worker, lock};
-use soundcraft_dsp::event::PluginEvent;
-use soundcraft_dsp::{
-    EditorHeader, EditorOpenReport, HeaderAction, JobPoll, LoadedValues, Plugin, PluginEditor, PluginInfo, PluginStateReader, ProcessStatus,
-    SampleSource, StateBusy, StateJob, Transport,
-};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
+use transit_dsp::event::PluginEvent;
+use transit_dsp::{
+    EditorHeader, EditorOpenReport, HeaderAction, JobPoll, LoadedValues, Plugin, PluginEditor, PluginInfo, PluginStateReader, ProcessStatus,
+    SampleSource, StateBusy, StateJob, Transport,
+};
 
 /// What the UI is told when the instance's host thread is wedged or gone.
 pub(crate) const NOT_RESPONDING: &str = "the plug-in is not responding (its host thread is stuck)";

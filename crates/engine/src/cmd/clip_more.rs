@@ -5,8 +5,8 @@ use super::more_util::{render_stretched, replace_clip};
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::{Clip, ClipContent, ClipId, Session, TrackId};
-use soundcraft_time::Samples;
+use transit_model::{Clip, ClipContent, ClipId, Session, TrackId};
+use transit_time::Samples;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -283,7 +283,7 @@ fn remove_pitch_shift(e: &mut Engine, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soundcraft_model::{ChannelFormat, ClipLoop, SourceId, TrackKind};
+    use transit_model::{ChannelFormat, ClipLoop, SourceId, TrackKind};
 
     fn engine_with(clips: &[(Samples, Samples, Samples)]) -> (Engine, TrackId, Vec<ClipId>) {
         let mut s = Session::default();
@@ -312,8 +312,8 @@ mod tests {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Midi, ChannelFormat::Mono, None);
         let id = s.new_clip_id();
-        let mut seq = soundcraft_midi::Sequence::default();
-        seq.notes.push(soundcraft_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 240 });
+        let mut seq = transit_midi::Sequence::default();
+        seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: 240 });
         crate::edit::place_clip(&mut s, t, Clip::midi(id, "m", 0, 100, seq));
         s.edit.selected_tracks = vec![t];
         (Engine::new(s), t, id)
@@ -471,8 +471,8 @@ mod tests {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
         let tone: Vec<f32> = (0..12_000).map(|i| (i as f32 * 0.07).sin() * 0.5).collect();
-        let buf = soundcraft_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![tone] };
-        let src = crate::io::add_source(&mut s, "tone", buf, None, soundcraft_audio_io::FileFormat::Wav);
+        let buf = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![tone] };
+        let src = crate::io::add_source(&mut s, "tone", buf, None, transit_audio_io::FileFormat::Wav);
         let id = s.new_clip_id();
         let mut c = Clip::audio(id, "tone", src, 0, 0, 18_000);
         c.stretch = 1.5;
@@ -504,8 +504,8 @@ mod tests {
                 let mut s = Session::default();
                 let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
                 let tone: Vec<f32> = (0..9_600).map(|i| (i as f32 * 0.05).sin() * 0.4).collect();
-                let buf = soundcraft_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![tone] };
-                let src = crate::io::add_source(&mut s, "tone", buf, None, soundcraft_audio_io::FileFormat::Wav);
+                let buf = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![tone] };
+                let src = crate::io::add_source(&mut s, "tone", buf, None, transit_audio_io::FileFormat::Wav);
                 let id = s.new_clip_id();
                 crate::edit::place_clip(&mut s, t, Clip::audio(id, "tone", src, 0, 0, 9_600));
                 s.edit.selected_clips = vec![id];
@@ -516,12 +516,12 @@ mod tests {
                     e.execute("clip.effects_set", &json!({"clip": id.0, "params": {"gain": 3.0}})).unwrap();
                 }
                 let range = e.session().find_clip(id).unwrap().1.range();
-                let before = soundcraft_mix::render_clips(e.session(), t, range);
+                let before = transit_mix::render_clips(e.session(), t, range);
                 e.execute(command, &json!({"clip": id.0})).unwrap();
                 let c = e.session().find_clip(id).unwrap().1.clone();
                 assert!((c.stretch - 1.0).abs() < 1e-9, "{command} ratio {ratio} left stretch {}", c.stretch);
                 assert_eq!(c.gain_db, 0.0);
-                let after = soundcraft_mix::render_clips(e.session(), t, range);
+                let after = transit_mix::render_clips(e.session(), t, range);
                 let diff = max_abs_diff(&before, &after);
                 assert!(diff < 1e-5, "{command} ratio {ratio} changed the audio by {diff}");
                 if ratio < 1.0 {
@@ -535,8 +535,8 @@ mod tests {
         let mut s = Session::default();
         let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
         let tone: Vec<f32> = (0..9_600).map(|i| (i as f32 * 0.05).sin() * 0.4).collect();
-        let buf = soundcraft_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![tone] };
-        let src = crate::io::add_source(&mut s, "tone", buf, None, soundcraft_audio_io::FileFormat::Wav);
+        let buf = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![tone] };
+        let src = crate::io::add_source(&mut s, "tone", buf, None, transit_audio_io::FileFormat::Wav);
         let id = s.new_clip_id();
         crate::edit::place_clip(&mut s, t, Clip::audio(id, "tone", src, 0, 0, 9_600));
         s.edit.selected_clips = vec![id];
@@ -544,12 +544,12 @@ mod tests {
         e.execute("clip.elastic_properties", &json!({"clip": id.0, "ratio": 0.5})).unwrap();
         e.execute("clip.gain", &json!({"clip": id.0, "db": -6.0})).unwrap();
         let range = e.session().find_clip(id).unwrap().1.range();
-        let before = soundcraft_mix::render_clips(e.session(), t, range);
+        let before = transit_mix::render_clips(e.session(), t, range);
         e.execute("clip.gain_render", &json!({"clip": id.0})).unwrap();
         let c = e.session().find_clip(id).unwrap().1.clone();
         assert_eq!(c.length, 9_600);
         assert!((c.stretch - 1.0).abs() < 1e-9);
-        let after = soundcraft_mix::render_clips(e.session(), t, range);
+        let after = transit_mix::render_clips(e.session(), t, range);
         assert!(max_abs_diff(&before, &after) < 1e-5);
     }
 }

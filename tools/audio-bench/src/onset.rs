@@ -1,16 +1,16 @@
 //! Onset of a sound on the audio return, by sample position, for the MIDI-to-audio onset latency
 //! (`--midi-roundtrip`, `--placement`).
 //!
-//! The detector lives in `soundcraft_playback::onset`, which the app's External Instrument
+//! The detector lives in `transit_playback::onset`, which the app's External Instrument
 //! Measure (ADR 0020 decision 3) uses too, so the bench and the app time a synth one way. This
 //! module re-exports it and says its refusals in the bench's words (its command-line options).
 
-pub use soundcraft_playback::onset::*;
+pub use transit_playback::onset::*;
 
 /// The level an onset's envelope must exceed over the `reference` floor, or why that floor is too
 /// loud to measure over.
 pub fn threshold(reference: Floor) -> Result<f32, String> {
-    soundcraft_playback::onset::threshold(reference).map_err(|loud| {
+    transit_playback::onset::threshold(reference).map_err(|loud| {
         format!(
             "the return is not quiet with no note playing (envelope peak {}, above {}): a drone, a held note or the wrong input; check --in",
             dbfs(loud.peak),
@@ -23,7 +23,7 @@ pub fn threshold(reference: Floor) -> Result<f32, String> {
 /// than [`MAX_FLOOR`] is a release still sounding (or something else playing). A window merely
 /// above the floor is measured with a raised threshold and a warning (`crate::midi_roundtrip`).
 pub fn not_sounding(pre: Floor) -> Result<(), String> {
-    soundcraft_playback::onset::not_sounding(pre).map_err(|loud| {
+    transit_playback::onset::not_sounding(pre).map_err(|loud| {
         format!(
             "the return before the note is above the noise floor (envelope peak {}, above {}): the previous note's release is still sounding or something else plays; use the synth's shortest release, raise --gap-ms",
             dbfs(loud.peak),
@@ -33,10 +33,10 @@ pub fn not_sounding(pre: Floor) -> Result<(), String> {
 }
 
 /// The threshold and the refinement's guard of a send whose pre-send window peaked at `pre`, over
-/// the noise floor `floor` ([`soundcraft_playback::onset::levels`]), with the bench's refusal text.
+/// the noise floor `floor` ([`transit_playback::onset::levels`]), with the bench's refusal text.
 pub fn levels(floor: f32, pre: f32) -> Result<(f32, f32), String> {
     threshold(Floor { peak: floor, rms: 0.0 })?;
-    soundcraft_playback::onset::levels(floor, pre).map_err(|_| "the noise floor is too loud".to_string())
+    transit_playback::onset::levels(floor, pre).map_err(|_| "the noise floor is too loud".to_string())
 }
 
 #[cfg(test)]

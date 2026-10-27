@@ -3,7 +3,7 @@
 
 use crate::{MainWindow, SoundApp};
 use serde_json::{Value, json};
-use soundcraft_engine::catalog;
+use transit_engine::catalog;
 
 /// UI-layer commands: (id, label, catalog path or "", shortcut).
 pub const UI_COMMANDS: &[(&str, &str, &str, Option<&str>)] = &[
@@ -313,7 +313,7 @@ pub fn item_state(app: &SoundApp, path: &str, id: Option<&str>) -> (bool, bool) 
         {
             true
         }
-        Some(i) => soundcraft_engine::find_command(i).is_some_and(|c| (c.enabled)(&app.engine).is_ok() && !app.engine.blocked_while_recording(i)),
+        Some(i) => transit_engine::find_command(i).is_some_and(|c| (c.enabled)(&app.engine).is_ok() && !app.engine.blocked_while_recording(i)),
         None => false,
     };
     (enabled, checked_state(app, path, id))
@@ -423,7 +423,7 @@ const MENU_WINDOWS: &[(&str, &str)] = &[
 
 /// The shortcut of an engine or window command.
 pub fn shortcut_for(id: &str) -> Option<&'static str> {
-    soundcraft_engine::find_command(id).map_or_else(|| UI_COMMANDS.iter().find(|c| c.0 == id).and_then(|c| c.3), |c| c.shortcut)
+    transit_engine::find_command(id).map_or_else(|| UI_COMMANDS.iter().find(|c| c.0 == id).and_then(|c| c.3), |c| c.shortcut)
 }
 
 /// Undo and Redo name the step they would undo or redo; other items keep their catalog label.
@@ -694,7 +694,7 @@ mod tests {
 
     #[test]
     fn programmatic_dialog_commands_stay_closed_and_the_menu_opens_them() {
-        let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
         let err = app.run("ui.new_tracks_dialog", json!({})).unwrap_err();
         assert!(err.contains("track.new"), "{err}");
         let err = app.run("ui.bounce_dialog", json!({})).unwrap_err();
@@ -710,7 +710,7 @@ mod tests {
 
     #[test]
     fn save_asks_for_a_path_until_the_session_has_one() {
-        let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
         invoke_menu(&mut app, "session.save", "File > Save Session");
         assert!(matches!(&app.dialogs.open, Some(crate::dialogs::Dialog::PathPrompt { cmd, .. }) if cmd == "session.save_as"));
         app.dialogs.open = None;
@@ -730,7 +730,7 @@ mod tests {
 
     #[test]
     fn ui_set_cannot_change_the_plugin_folders() {
-        let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
         app.ui.plugin_dirs.vst3.push("C:/Mine".into());
         let err = app.run("ui.set", json!({"plugin_dirs": {"vst3": ["C:/Elsewhere"]}})).unwrap_err();
         assert!(err.contains("Plug-in Folders"), "{err}");

@@ -4,10 +4,10 @@
 //! The arranger track header shows the same state as a compact chip (#69) and opens this picker.
 
 use serde_json::{Value, json};
-use soundcraft_model::{MAX_MIDI_OUT_OFFSET_MS, MidiOutChannel, MidiOutPort, MidiOutput, TrackId};
-use soundcraft_playback::Player;
+use transit_model::{MAX_MIDI_OUT_OFFSET_MS, MidiOutChannel, MidiOutPort, MidiOutput, TrackId};
+use transit_playback::Player;
 #[cfg(not(target_arch = "wasm32"))]
-use soundcraft_playback::player::midi_out::DestinationState;
+use transit_playback::player::midi_out::DestinationState;
 
 /// What the picker knows about one track's destination.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -36,7 +36,7 @@ pub(crate) struct MutedPort {
 
 impl MutedPort {
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn of(m: soundcraft_playback::player::MutedMidiInput) -> Self {
+    pub(crate) fn of(m: transit_playback::player::MutedMidiInput) -> Self {
         Self { name: m.name.clone(), tracks: m.tracks.clone(), reenable: std::rc::Rc::new(move || m.reenable()) }
     }
 
@@ -416,8 +416,8 @@ mod tests {
         let mut params = changed.expect("a port choice");
         assert_eq!(params["port"]["id"], "two");
         assert!(params.get("channel").is_none() && params.get("offset_ms").is_none());
-        let mut engine = soundcraft_engine::Engine::default();
-        let track = engine.session_mut().add_track(soundcraft_model::TrackKind::Midi, soundcraft_model::ChannelFormat::Mono, None);
+        let mut engine = transit_engine::Engine::default();
+        let track = engine.session_mut().add_track(transit_model::TrackKind::Midi, transit_model::ChannelFormat::Mono, None);
         engine.session_mut().track_mut(track).unwrap().midi_output = output.clone();
         params["track"] = json!(track.0);
         engine.execute("midi.output", &params).unwrap();

@@ -5,11 +5,11 @@ use crate::plugin::Vst3Plugin;
 use crate::scan as paths;
 use crate::scan_cache;
 use crate::{AUDIO_MODULE_CLASS, Vst3Descriptor, Vst3Error, parse_id};
-use soundcraft_dsp::{ParamInfo, Plugin, PluginInfo, Taper, Unit};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, OnceLock, PoisonError};
+use transit_dsp::{ParamInfo, Plugin, PluginInfo, Taper, Unit};
 
 /// Most labels read for a stepped parameter (more steps are shown as a plain range).
 const MAX_CHOICES: i32 = 128;

@@ -1,6 +1,7 @@
 # ADR 0014: transit gets its own repository; the fork stays for upstream pull requests
 
 - **Status:** accepted 2026-10-19; move done 2026-10-21 (https://github.com/derekmwright/transit, `main` = transit, tag v0.1.0-alpha.1)
+- **Sweep:** the inherited `soundcraft-*` crates were renamed to `transit-*` in #37 on 2026-10-27 (directories unchanged). Text below records the names as they were.
 - **Date:** 2026-10-19
 - **Reopen when:** SoundCraft upstream and transit converge again (shared engine, as [ADR 0008](0008-fork-soundcraft-keep-the-engine-build-our-own-ux.md) allowed), or the project owner decides to contribute transit's UI upstream.
 

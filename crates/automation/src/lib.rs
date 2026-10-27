@@ -11,12 +11,12 @@ pub mod mcp;
 pub mod token;
 
 use serde_json::{Value, json};
-use soundcraft_engine::Engine;
-use soundcraft_engine::file_access::{self, AutomationRoots};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
 use std::sync::Arc;
 use std::time::Duration;
+use transit_engine::Engine;
+use transit_engine::file_access::{self, AutomationRoots};
 
 /// Answers control-protocol methods.
 pub trait Backend {
@@ -38,7 +38,7 @@ impl Headless {
     }
 
     /// Confine every file the session's commands read and write to `roots`
-    /// (`soundcraft-cli mcp --automation-read-root … --automation-write-root …`).
+    /// (`transit-cli mcp --automation-read-root … --automation-write-root …`).
     pub fn with_automation_roots(mut self, roots: Option<Arc<AutomationRoots>>) -> Self {
         self.roots = roots;
         self
@@ -55,12 +55,12 @@ impl Headless {
                 r
             }
             "engine.commands" => self.engine.execute("engine.commands", &params).map_err(|e| e.to_string()),
-            "engine.parity" => Ok(soundcraft_engine::catalog::parity_json()),
+            "engine.parity" => Ok(transit_engine::catalog::parity_json()),
             "session.inspect" | "document.inspect" => {
-                Ok(soundcraft_engine::inspect::session(&self.engine, params.get("detail").and_then(Value::as_str) == Some("full")))
+                Ok(transit_engine::inspect::session(&self.engine, params.get("detail").and_then(Value::as_str) == Some("full")))
             }
             m if m.starts_with("ui.") => {
-                Err(format!("`{m}` needs the desktop app: start `transit --control 0` and use `soundcraft-cli mcp --connect PORT`"))
+                Err(format!("`{m}` needs the desktop app: start `transit --control 0` and use `transit-cli mcp --connect PORT`"))
             }
             other => Err(format!("unknown method `{other}`")),
         }

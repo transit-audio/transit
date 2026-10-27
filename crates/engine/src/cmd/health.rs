@@ -3,8 +3,8 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::ClipContent;
 use std::collections::BTreeMap;
+use transit_model::ClipContent;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -82,9 +82,9 @@ fn report(e: &mut Engine, _: &Value) -> Result<Value> {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use soundcraft_audio_io::AudioBuffer;
-    use soundcraft_model::{Clip, ClipId, SourceAudio, SourceId};
     use std::sync::Arc;
+    use transit_audio_io::AudioBuffer;
+    use transit_model::{Clip, ClipId, SourceAudio, SourceId};
 
     fn check(e: &mut Engine) -> Value {
         e.execute("session.audio_health", &json!({})).unwrap()
@@ -109,7 +109,7 @@ mod tests {
     fn reports_missing_media_in_inactive_takes() {
         let mut e = crate::demo::demo_engine();
         let t = e.session_mut().tracks.first_mut().unwrap();
-        let mut p = soundcraft_model::Playlist::new("Alternate take");
+        let mut p = transit_model::Playlist::new("Alternate take");
         p.clips.push(Clip::audio(ClipId(999), "Lost take", SourceId(999), 0, 0, 10));
         t.playlists.push(p);
         let r = check(&mut e);
@@ -127,7 +127,7 @@ mod tests {
         e.session_mut().pool.insert(id, Arc::new(SourceAudio::new(AudioBuffer::new(sr, 1, 10))));
         let t = e.session_mut().tracks.first_mut().unwrap();
         t.playlists.clear();
-        let mut p = soundcraft_model::Playlist::new("Bounds");
+        let mut p = transit_model::Playlist::new("Bounds");
         let mut c = Clip::audio(ClipId(999), "Stretch", id, 0, 0, 20);
         c.stretch = 2.0;
         p.clips.push(c);

@@ -3,7 +3,7 @@
 //! writes 0.125 when the key port's `constant_mask` says the key is silent.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::Plugin;
+use transit_dsp::Plugin;
 
 mod common;
 use common::{fixture_dir, sidechain_fixture_dir};
@@ -15,7 +15,7 @@ const FRAMES: usize = 64;
 fn plugin(id: &str) -> Box<dyn Plugin> {
     sidechain_fixture_dir();
     fixture_dir();
-    let mut p = soundcraft_clap_host::create(id).unwrap();
+    let mut p = transit_clap_host::create(id).unwrap();
     p.prepare(48_000.0, FRAMES, 2);
     p
 }

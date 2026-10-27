@@ -6,17 +6,17 @@
 
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::{Insert, TrackId};
-use soundcraft_playback::{Clock, Factory, PluginTestHooks};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::{Duration, Instant};
+use transit_model::{Insert, TrackId};
+use transit_playback::{Clock, Factory, PluginTestHooks};
 use transit_plugin_host::{Config, Host};
 
 /// The id the session names: a CLAP id, so the card reads "CLAP instrument" once it is live and
 /// the stored state reaches the factory. The factory makes the built-in synth for it.
 const HOSTED: &str = "clap:transit.test.retry82";
-const SLOT: usize = soundcraft_mix::INSTRUMENT_SLOT;
+const SLOT: usize = transit_mix::INSTRUMENT_SLOT;
 
 #[derive(Default)]
 struct Gate {
@@ -39,7 +39,7 @@ impl Gate {
 /// A factory whose first `hold` creations wait until the gate opens.
 fn gated(gate: &Arc<Gate>, hold: usize) -> Factory {
     let gate = Arc::clone(gate);
-    Arc::new(move |spec: &soundcraft_mix::InstanceSpec| {
+    Arc::new(move |spec: &transit_mix::InstanceSpec| {
         let n = gate.calls.fetch_add(1, Ordering::SeqCst);
         gate.states.lock().unwrap().push(spec.state.clone());
         if n < hold {
@@ -48,7 +48,7 @@ fn gated(gate: &Arc<Gate>, hold: usize) -> Factory {
                 open = gate.opened.wait(open).unwrap();
             }
         }
-        soundcraft_mix::create_instance("subtractive_synth", None, 48_000.0, 512, spec.ch)
+        transit_mix::create_instance("subtractive_synth", None, 48_000.0, 512, spec.ch)
     })
 }
 
@@ -72,8 +72,8 @@ impl T {
     /// holding its first `hold` creations, on a host with `timeout` and `creation`; the display
     /// budget is `slow_after` on `clock`.
     fn new(timeout: Duration, creation: Duration, clock: Clock, slow_after: Duration, hold: usize) -> T {
-        let engine = soundcraft_engine::Engine::default();
-        let player = soundcraft_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
+        let engine = transit_engine::Engine::default();
+        let player = transit_playback::Player::prepare_device_free(engine.session_arc()).unwrap();
         let gate = Arc::new(Gate::default());
         player.set_plugin_test_hooks(PluginTestHooks {
             host: Host::new(Config { timeout, creation_timeout: creation, inline: false, ..Config::default() }),
@@ -148,7 +148,7 @@ impl T {
     /// `slot`, as a reopened session holds it.
     fn host_plugin(&mut self, t: TrackId, slot: Option<usize>, state: &[u8]) {
         let mut insert = Insert::new(HOSTED);
-        insert.state = Some(soundcraft_model::b64::encode(state));
+        insert.state = Some(transit_model::b64::encode(state));
         let s = self.app.engine.session_mut();
         let tr = s.track_mut(t).unwrap();
         match slot {
@@ -385,8 +385,8 @@ fn a_slow_load_is_reported_in_the_status_line_and_every_load_is_remembered() {
 /// "Loading…" and the "Loading… (slow) N s" text, and the tooltip names the phase.
 #[test]
 fn the_loading_readout_shows_the_last_load_time_and_the_tooltip_the_phase() {
-    use soundcraft_playback::LoadPhase;
-    use soundcraft_playback::SlotLoad;
+    use transit_playback::LoadPhase;
+    use transit_playback::SlotLoad;
     let clock = ManualClock::new();
     let mut t = T::new(Duration::from_millis(100), Duration::from_secs(60), clock.clock(), Duration::from_secs(10), 1);
     t.app.ui.plugin_load_ms.insert(HOSTED.to_string(), 14_100);

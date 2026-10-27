@@ -1,7 +1,7 @@
 //! Hostile inputs must produce `Err` (or a best-effort `Ok`), never a panic.
 
 use proptest::prelude::*;
-use soundcraft_audio_io::{AudioBuffer, AudioError, BitDepth, EncodeOptions, FileFormat, SampleFormat, decode, detect_format, encode, probe};
+use transit_audio_io::{AudioBuffer, AudioError, BitDepth, EncodeOptions, FileFormat, SampleFormat, decode, detect_format, encode, probe};
 
 fn small(format: FileFormat, depth: BitDepth, channels: usize) -> Vec<u8> {
     let mut b = AudioBuffer::new(44_100, channels, 300);

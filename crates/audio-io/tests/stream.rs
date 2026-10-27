@@ -1,5 +1,5 @@
-use soundcraft_audio_io::{AudioBuffer, AudioError, BitDepth, BwfInfo, EncodeOptions, FileEncoder, FileFormat, encode, encode_with_channel_mask};
 use std::io::Cursor;
+use transit_audio_io::{AudioBuffer, AudioError, BitDepth, BwfInfo, EncodeOptions, FileEncoder, FileFormat, encode, encode_with_channel_mask};
 
 fn tone(channels: usize, frames: usize) -> AudioBuffer {
     let channels = (0..channels).map(|c| (0..frames).map(|i| ((i * (c + 3)) as f32 * 0.013).sin() * 1.2).collect()).collect();

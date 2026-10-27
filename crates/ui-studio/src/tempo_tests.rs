@@ -5,7 +5,7 @@
 
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_model::{ClipContent, TrackId};
+use transit_model::{ClipContent, TrackId};
 
 struct T {
     app: StudioApp,
@@ -21,7 +21,7 @@ fn mid(r: [f32; 4]) -> (f32, f32) {
 
 impl T {
     fn new() -> T {
-        let app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0, bar_xs: Vec::new() };
         t.frames(3);
         t
@@ -276,7 +276,7 @@ fn past_a_tempo_change_the_field_edits_that_change_and_says_so() {
     assert_eq!((g0.tick, g0.bpm), (0, 120.0));
     // Put the cursor in bar 4.
     let s = t.app.engine.session();
-    let in_bar4 = s.tempo.samples_at_bar_beat(soundcraft_time::BarBeat { bar: 4, beat: 1, tick: 0 }, s.sample_rate);
+    let in_bar4 = s.tempo.samples_at_bar_beat(transit_time::BarBeat { bar: 4, beat: 1, tick: 0 }, s.sample_rate);
     t.app.ui.cursor = in_bar4;
     t.frames(3);
     let g = crate::tempo_edit::governing_tempo(&t.app);
@@ -308,7 +308,7 @@ fn a_tempo_change_moves_ticks_material_with_the_bars_and_leaves_samples_audio_in
     std::fs::create_dir_all(&dir).unwrap();
     let wav = dir.join("a.wav");
     std::fs::write(&wav, silent_wav(96_000)).unwrap();
-    let plan = soundcraft_engine::io::Recording {
+    let plan = transit_engine::io::Recording {
         start: 96_000,
         pass: None,
         punch: None,
@@ -413,7 +413,7 @@ fn a_field_opened_before_a_tempo_change_edits_the_event_it_opened_on() {
     assert!(t.app.tempo_ui.edit.is_some());
     // Playback crosses into bar 4 while the field is open.
     let s = t.app.engine.session();
-    t.app.ui.cursor = s.tempo.samples_at_bar_beat(soundcraft_time::BarBeat { bar: 4, beat: 1, tick: 0 }, s.sample_rate);
+    t.app.ui.cursor = s.tempo.samples_at_bar_beat(transit_time::BarBeat { bar: 4, beat: 1, tick: 0 }, s.sample_rate);
     t.frames(3);
     assert_eq!(crate::tempo_edit::governing_tempo(&t.app).bpm, 100.0);
     t.typed("90");
@@ -430,7 +430,7 @@ fn a_popup_opened_before_a_meter_change_edits_the_event_it_opened_on() {
     let m = t.rect("meter");
     t.click(m);
     let s = t.app.engine.session();
-    t.app.ui.cursor = s.tempo.samples_at_bar_beat(soundcraft_time::BarBeat { bar: 4, beat: 1, tick: 0 }, s.sample_rate);
+    t.app.ui.cursor = s.tempo.samples_at_bar_beat(transit_time::BarBeat { bar: 4, beat: 1, tick: 0 }, s.sample_rate);
     t.frames(3);
     t.typed("3/4");
     t.key("Enter");
@@ -451,7 +451,7 @@ fn a_mid_song_meter_edit_changes_that_meter_and_later_ones_keep_their_bars() {
     assert_eq!(bars(&t), [(1, 4, 4), (3, 6, 8), (5, 5, 4)]);
     // The playhead in bar 3: the popup edits the 6/8 event.
     let s = t.app.engine.session();
-    t.app.ui.cursor = s.tempo.samples_at_bar_beat(soundcraft_time::BarBeat { bar: 3, beat: 2, tick: 0 }, s.sample_rate);
+    t.app.ui.cursor = s.tempo.samples_at_bar_beat(transit_time::BarBeat { bar: 3, beat: 2, tick: 0 }, s.sample_rate);
     t.frames(3);
     let before = t.undo_len();
     let m = t.rect("meter");

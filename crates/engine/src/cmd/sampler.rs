@@ -8,8 +8,8 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::{Insert, TrackKind};
 use std::path::Path;
+use transit_model::{Insert, TrackKind};
 
 const SAMPLER: &str = "sampler";
 
@@ -44,7 +44,7 @@ fn load(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "mix.sampler_load";
     let path = str_param(p, "path").ok_or_else(|| bad(id, "`path` required"))?.to_string();
     let t = instrument_track(e, id, p)?;
-    let info = soundcraft_dsp::plugin_info(SAMPLER).ok_or_else(|| bad(id, "the sampler is not available"))?;
+    let info = transit_dsp::plugin_info(SAMPLER).ok_or_else(|| bad(id, "the sampler is not available"))?;
     // Validate the parameters before touching the session.
     let mut values = Vec::new();
     if let Some(v) = p.get("params") {
@@ -68,9 +68,9 @@ pub(crate) fn attach(e: &mut Engine, t: TrackId, name: &str, bytes: &[u8], path:
     if e.session().track(t).map(|tr| tr.kind) != Some(TrackKind::Instrument) {
         return Err(bad(id, "only instrument tracks have a sampler"));
     }
-    let info = soundcraft_dsp::plugin_info(SAMPLER).ok_or_else(|| bad(id, "the sampler is not available"))?;
+    let info = transit_dsp::plugin_info(SAMPLER).ok_or_else(|| bad(id, "the sampler is not available"))?;
     let ext = Path::new(name).extension().and_then(|x| x.to_str()).map(str::to_ascii_lowercase);
-    let (format, buf) = soundcraft_audio_io::decode(bytes, ext.as_deref()).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
+    let (format, buf) = transit_audio_io::decode(bytes, ext.as_deref()).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
     if buf.frames() == 0 || buf.num_channels() == 0 {
         return Err(EngineError::Io(format!("{name}: no audio")));
     }
@@ -111,11 +111,11 @@ fn clear(e: &mut Engine, p: &Value) -> Result<Value> {
 mod tests {
     use crate::Engine;
     use serde_json::json;
-    use soundcraft_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
-    use soundcraft_midi::{Note, Sequence};
-    use soundcraft_model::{Clip, TrackId};
-    use soundcraft_time::{Range, TICKS_PER_QUARTER};
     use std::path::PathBuf;
+    use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat};
+    use transit_midi::{Note, Sequence};
+    use transit_model::{Clip, TrackId};
+    use transit_time::{Range, TICKS_PER_QUARTER};
 
     /// A scratch folder for one test.
     fn dir(name: &str) -> PathBuf {
@@ -131,7 +131,7 @@ mod tests {
         let one: Vec<f32> = (0..n).map(|i| 0.5 * (std::f32::consts::TAU * freq * i as f32 / rate as f32).sin()).collect();
         let buf = AudioBuffer { sample_rate: rate, channels: vec![one; channels] };
         let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Int16, dither: false, bwf: None };
-        std::fs::write(path, soundcraft_audio_io::encode(&buf, &opts).unwrap()).unwrap();
+        std::fs::write(path, transit_audio_io::encode(&buf, &opts).unwrap()).unwrap();
     }
 
     fn instrument_track(e: &mut Engine) -> TrackId {
@@ -152,7 +152,7 @@ mod tests {
     }
 
     fn render(e: &Engine, secs: i64) -> Vec<Vec<f32>> {
-        soundcraft_mix::render_range(e.session(), Range::new(0, 48_000 * secs), 512)
+        transit_mix::render_range(e.session(), Range::new(0, 48_000 * secs), 512)
     }
 
     fn peak(x: &[f32]) -> f32 {
@@ -235,7 +235,7 @@ mod tests {
         for (ext, format) in [("flac", FileFormat::Flac), ("aif", FileFormat::Aiff)] {
             let path = d.join(format!("tone.{ext}"));
             let opts = EncodeOptions { format, bit_depth: BitDepth::Int24, dither: false, bwf: None };
-            std::fs::write(&path, soundcraft_audio_io::encode(&buf, &opts).unwrap()).unwrap();
+            std::fs::write(&path, transit_audio_io::encode(&buf, &opts).unwrap()).unwrap();
             let r = e.execute("mix.sampler_load", &json!({"track": t.0, "path": path.to_string_lossy()})).unwrap();
             assert_eq!(r["channels"], 2, "{ext}");
             assert_eq!(r["frames"], 2400, "{ext}: 96 kHz resampled to the 48 kHz session");
@@ -320,7 +320,7 @@ mod tests {
         std::fs::write(&junk, b"definitely not audio").unwrap();
         let empty = d.join("empty.wav");
         let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Int16, dither: false, bwf: None };
-        std::fs::write(&empty, soundcraft_audio_io::encode(&AudioBuffer { sample_rate: 48_000, channels: vec![vec![]] }, &opts).unwrap()).unwrap();
+        std::fs::write(&empty, transit_audio_io::encode(&AudioBuffer { sample_rate: 48_000, channels: vec![vec![]] }, &opts).unwrap()).unwrap();
         let wav = d.join("ok.wav");
         tone_wav(&wav, 440.0, 48_000, 0.1, 1);
         let mut e = Engine::default();
@@ -351,7 +351,7 @@ mod tests {
         let t = instrument_track(&mut e);
         add_notes(&mut e, t, &[(60, 0, 1)]);
         let r = e.execute("mix.sampler_load", &json!({"track": t.0, "path": wav.to_string_lossy()})).unwrap();
-        let src = soundcraft_model::SourceId(r["source"].as_u64().unwrap());
+        let src = transit_model::SourceId(r["source"].as_u64().unwrap());
         e.session_mut().pool.remove(src);
         assert_eq!(peak(&render(&e, 1)[0]), 0.0);
         let _ = std::fs::remove_dir_all(d);

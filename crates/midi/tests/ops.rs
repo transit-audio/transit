@@ -1,5 +1,5 @@
-use soundcraft_midi::ops::*;
-use soundcraft_midi::*;
+use transit_midi::ops::*;
+use transit_midi::*;
 
 fn n(pitch: u8, start: i64, length: i64) -> Note {
     Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start, length }

@@ -3,14 +3,14 @@
 //! its first data callback. Its own test binary: the promotion counter is process-wide.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_mix::{
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use transit_audio_io::AudioBuffer;
+use transit_mix::{
     Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen, create_instance,
     mark_audio_thread,
 };
-use soundcraft_model::{ChannelFormat, Clip, Session, SourceAudio, SourceId, TrackKind};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use transit_model::{ChannelFormat, Clip, Session, SourceAudio, SourceId, TrackKind};
 use transit_rt::testing::promotion_calls;
 
 const FRAMES: usize = 256;

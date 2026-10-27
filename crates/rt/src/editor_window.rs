@@ -33,7 +33,7 @@ pub const HEADER_HEIGHT: i32 = 30;
 /// Most entries a dropdown lists (a folder with thousands of presets stays usable).
 pub const MAX_LISTED: usize = 500;
 
-/// What the strip shows (see `soundcraft_dsp::EditorHeader`, which the format hosts copy here).
+/// What the strip shows (see `transit_dsp::EditorHeader`, which the format hosts copy here).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[allow(clippy::struct_excessive_bools)] // independent flags of a view, not a state
 pub struct HeaderView {

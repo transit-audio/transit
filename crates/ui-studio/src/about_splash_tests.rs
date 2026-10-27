@@ -18,7 +18,7 @@ fn mid(r: [f32; 4]) -> (f32, f32) {
 
 impl T {
     fn new() -> T {
-        let app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         let mut t = T { app, ctx: egui::Context::default(), time: 0.0, copied: Vec::new() };
         t.frames(3);
         t
@@ -183,11 +183,11 @@ fn the_splash_reports_the_device_stage_before_the_scan_stage() {
     let seen = std::rc::Rc::clone(&opened);
     t.app.services.open_audio = Some(Box::new(move |session, _| {
         seen.set(seen.get() + 1);
-        soundcraft_playback::Player::prepare_device_free(session).unwrap()
+        transit_playback::Player::prepare_device_free(session).unwrap()
     }));
     t.app.splash.arm();
     t.app.splash.scan_override = Some(scanning(1, 4));
-    t.app.splash.defer_open(soundcraft_playback::AudioConfig { output: Some("Focusrite USB ASIO".into()), ..Default::default() });
+    t.app.splash.defer_open(transit_playback::AudioConfig { output: Some("Focusrite USB ASIO".into()), ..Default::default() });
     t.frames(1);
     assert_eq!(opened.get(), 0, "the first frame only announces the open");
     assert_eq!(t.inspect()["splash"]["status"], "Opening Focusrite USB ASIO…");

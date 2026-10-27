@@ -1,31 +1,31 @@
-//! `soundcraft-cli`: SoundCraft without a window.
+//! `transit-cli`: SoundCraft without a window.
 //!
 //! ```text
-//! soundcraft-cli info FILE                       audio file or .transit summary
-//! soundcraft-cli convert IN OUT [--bit-depth 16|24|32f] [--rate HZ] [--normalize]
-//! soundcraft-cli run [--in S.transit | --demo] [--cmd ID[=JSON]]… [--bounce OUT] [--start T --end T] [--save S.transit] [--inspect]
-//! soundcraft-cli script FILE [--in S | --demo] [--save S] [--bounce OUT]   (one `ID JSON` per line)
-//! soundcraft-cli commands [FILTER]               list commands
-//! soundcraft-cli describe ID                     one command's details
-//! soundcraft-cli app [--port P] METHOD [JSON]     call a running app's control channel
-//! soundcraft-cli mcp [--connect PORT] [--demo] [--automation-read-root DIR] [--automation-write-root DIR]
+//! transit-cli info FILE                       audio file or .transit summary
+//! transit-cli convert IN OUT [--bit-depth 16|24|32f] [--rate HZ] [--normalize]
+//! transit-cli run [--in S.transit | --demo] [--cmd ID[=JSON]]… [--bounce OUT] [--start T --end T] [--save S.transit] [--inspect]
+//! transit-cli script FILE [--in S | --demo] [--save S] [--bounce OUT]   (one `ID JSON` per line)
+//! transit-cli commands [FILTER]               list commands
+//! transit-cli describe ID                     one command's details
+//! transit-cli app [--port P] METHOD [JSON]     call a running app's control channel
+//! transit-cli mcp [--connect PORT] [--demo] [--automation-read-root DIR] [--automation-write-root DIR]
 //!                                                 MCP server on stdio. The two roots confine every file the
 //!                                                 agent's commands read (open, import, presets) and write
 //!                                                 (save, bounce, export) to those folders, links followed;
 //!                                                 a root left out grants none of its access. They run the
 //!                                                 in-process server, so they conflict with --connect.
-//! soundcraft-cli plugins                          list built-in plugins
+//! transit-cli plugins                          list built-in plugins
 //! ```
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod automation_args;
 
 use serde_json::{Value, json};
-use soundcraft_automation::{Backend, Headless, Remote, mcp::Server};
-use soundcraft_engine::Engine;
-use soundcraft_engine::file_access::{self, AutomationRoots};
 use std::io::Write;
 use std::process::ExitCode;
+use transit_automation::{Backend, Headless, Remote, mcp::Server};
+use transit_engine::Engine;
+use transit_engine::file_access::{self, AutomationRoots};
 
 /// Print without panicking on a closed pipe. A write error must not skip later work
 /// such as `--bounce` or `--save`, and must not by itself report success.
@@ -41,7 +41,7 @@ fn arg_value(args: &[String], flag: &str) -> Option<String> {
 }
 
 fn fail(msg: impl std::fmt::Display) -> ExitCode {
-    eprintln!("soundcraft-cli: {msg}");
+    eprintln!("transit-cli: {msg}");
     ExitCode::FAILURE
 }
 
@@ -59,7 +59,7 @@ fn help_text() -> String {
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let Some(cmd) = args.first().cloned() else {
-        eprintln!("usage: soundcraft-cli <info|convert|run|script|commands|describe|app|mcp|plugins> …  (see --help)");
+        eprintln!("usage: transit-cli <info|convert|run|script|commands|describe|app|mcp|plugins> …  (see --help)");
         return ExitCode::FAILURE;
     };
     let rest: Vec<String> = args.iter().skip(1).cloned().collect();
@@ -81,7 +81,7 @@ fn main() -> ExitCode {
         "app" => app(&rest),
         "mcp" => mcp(&rest),
         "plugins" => {
-            for p in soundcraft_dsp::plugins() {
+            for p in transit_dsp::plugins() {
                 outln!("{:<20} {:<22} {:?}{}", p.id, p.name, p.category, if p.is_instrument { " (instrument)" } else { "" });
             }
             ExitCode::SUCCESS
@@ -89,7 +89,7 @@ fn main() -> ExitCode {
         other => fail(format!("unknown subcommand `{other}`")),
     };
     // The subcommand's engine and its plugin instances are gone by now.
-    soundcraft_engine::shutdown_plugin_hosts();
+    transit_engine::shutdown_plugin_hosts();
     code
 }
 
@@ -97,11 +97,11 @@ fn info(args: &[String]) -> ExitCode {
     let Some(path) = args.first() else { return fail("info FILE") };
     if path.ends_with(".transit") {
         let mut e = Engine::default();
-        match soundcraft_engine::io::open_session(&mut e, path) {
+        match transit_engine::io::open_session(&mut e, path) {
             Ok(missing) => warn_missing(&missing),
             Err(err) => return fail(err),
         }
-        outln!("{}", soundcraft_engine::inspect::session_text(&e));
+        outln!("{}", transit_engine::inspect::session_text(&e));
         return ExitCode::SUCCESS;
     }
     let bytes = match std::fs::read(path) {
@@ -109,7 +109,7 @@ fn info(args: &[String]) -> ExitCode {
         Err(e) => return fail(format!("{path}: {e}")),
     };
     let ext = std::path::Path::new(path).extension().and_then(|x| x.to_str());
-    match soundcraft_audio_io::probe(&bytes, ext) {
+    match transit_audio_io::probe(&bytes, ext) {
         Ok(i) => {
             outln!("{}", serde_json::to_string_pretty(&json!({"format": i.format, "sample_format": i.sample_format, "sample_rate": i.sample_rate, "channels": i.channels, "frames": i.frames, "seconds": i.duration_secs(), "bwf": i.bwf})).unwrap_or_default());
             ExitCode::SUCCESS
@@ -133,23 +133,23 @@ fn convert(args: &[String]) -> ExitCode {
         Err(e) => return fail(format!("{input}: {e}")),
     };
     let ext = std::path::Path::new(input).extension().and_then(|x| x.to_str());
-    let (_, mut buf) = match soundcraft_audio_io::decode(&bytes, ext) {
+    let (_, mut buf) = match transit_audio_io::decode(&bytes, ext) {
         Ok(x) => x,
         Err(e) => return fail(format!("{input}: {e}")),
     };
     if let Some(rate) = rate {
-        buf.channels = soundcraft_dsp::offline::resample(&buf.channels, buf.sample_rate, rate);
+        buf.channels = transit_dsp::offline::resample(&buf.channels, buf.sample_rate, rate);
         buf.sample_rate = rate;
     }
     if args.iter().any(|a| a == "--normalize") {
-        soundcraft_dsp::offline::normalize(&mut buf.channels, -0.1, false);
+        transit_dsp::offline::normalize(&mut buf.channels, -0.1, false);
     }
     let out_ext = std::path::Path::new(output).extension().and_then(|x| x.to_str()).unwrap_or("wav").to_ascii_lowercase();
-    let Some(format) = soundcraft_audio_io::encode_format_for(&out_ext) else {
-        return fail(format!("{output}: cannot write `.{out_ext}` files (supported: {})", soundcraft_audio_io::ENCODE_EXTENSIONS));
+    let Some(format) = transit_audio_io::encode_format_for(&out_ext) else {
+        return fail(format!("{output}: cannot write `.{out_ext}` files (supported: {})", transit_audio_io::ENCODE_EXTENSIONS));
     };
-    let opts = soundcraft_audio_io::EncodeOptions { format, bit_depth, dither: true, bwf: None };
-    match soundcraft_audio_io::encode(&buf, &opts).map_err(|e| e.to_string()).and_then(|b| std::fs::write(output, b).map_err(|e| e.to_string())) {
+    let opts = transit_audio_io::EncodeOptions { format, bit_depth, dither: true, bwf: None };
+    match transit_audio_io::encode(&buf, &opts).map_err(|e| e.to_string()).and_then(|b| std::fs::write(output, b).map_err(|e| e.to_string())) {
         Ok(()) => {
             outln!("wrote {output} ({} ch, {} Hz, {:.2} s)", buf.num_channels(), buf.sample_rate, buf.duration_secs());
             ExitCode::SUCCESS
@@ -168,11 +168,11 @@ fn parse_rate(v: Option<&str>) -> Result<Option<u32>, String> {
     }
 }
 
-fn parse_bit_depth(v: Option<&str>) -> Result<soundcraft_audio_io::BitDepth, String> {
+fn parse_bit_depth(v: Option<&str>) -> Result<transit_audio_io::BitDepth, String> {
     match v {
-        None | Some("24") => Ok(soundcraft_audio_io::BitDepth::Int24),
-        Some("16") => Ok(soundcraft_audio_io::BitDepth::Int16),
-        Some("32") | Some("32f") => Ok(soundcraft_audio_io::BitDepth::Float32),
+        None | Some("24") => Ok(transit_audio_io::BitDepth::Int24),
+        Some("16") => Ok(transit_audio_io::BitDepth::Int16),
+        Some("32") | Some("32f") => Ok(transit_audio_io::BitDepth::Float32),
         Some(b) => Err(format!("--bit-depth: expected 16, 24 or 32f, got `{b}`")),
     }
 }
@@ -191,11 +191,11 @@ fn warn_missing(missing: &[String]) {
 fn load_engine(args: &[String]) -> Result<Engine, String> {
     if let Some(p) = arg_value(args, "--in") {
         let mut e = Engine::default();
-        let missing = soundcraft_engine::io::open_session(&mut e, &p).map_err(|e| e.to_string())?;
+        let missing = transit_engine::io::open_session(&mut e, &p).map_err(|e| e.to_string())?;
         warn_missing(&missing);
         Ok(e)
     } else if args.iter().any(|a| a == "--demo" || a == "--sample") {
-        Ok(soundcraft_engine::demo::demo_engine())
+        Ok(transit_engine::demo::demo_engine())
     } else {
         Ok(Engine::default())
     }
@@ -222,7 +222,7 @@ fn finish(e: &mut Engine, args: &[String]) -> ExitCode {
         }
     }
     if args.iter().any(|a| a == "--inspect") {
-        outln!("{}", serde_json::to_string_pretty(&soundcraft_engine::inspect::session(e, false)).unwrap_or_default());
+        outln!("{}", serde_json::to_string_pretty(&transit_engine::inspect::session(e, false)).unwrap_or_default());
     }
     ExitCode::SUCCESS
 }
@@ -302,7 +302,7 @@ fn script(args: &[String]) -> ExitCode {
 fn commands(args: &[String]) -> ExitCode {
     let filter = args.first().cloned().unwrap_or_default();
     let e = Engine::default();
-    for c in soundcraft_engine::command_specs() {
+    for c in transit_engine::command_specs() {
         if !filter.is_empty() && !c.id.contains(&filter) && !c.label.to_ascii_lowercase().contains(&filter.to_ascii_lowercase()) {
             continue;
         }
@@ -314,7 +314,7 @@ fn commands(args: &[String]) -> ExitCode {
 
 fn describe(args: &[String]) -> ExitCode {
     let Some(id) = args.first() else { return fail("describe ID") };
-    match soundcraft_engine::find_command(id) {
+    match transit_engine::find_command(id) {
         Some(c) => {
             outln!("{}", serde_json::to_string_pretty(&c.info(&Engine::default())).unwrap_or_default());
             ExitCode::SUCCESS
@@ -430,13 +430,13 @@ fn mcp(args: &[String]) -> ExitCode {
         s.serve(stdin.lock(), stdout.lock())
     } else {
         // `--demo` is the operator's own choice, made before the roots come into force.
-        let e = if demo { soundcraft_engine::demo::demo_engine() } else { Engine::default() };
+        let e = if demo { transit_engine::demo::demo_engine() } else { Engine::default() };
         let mut h = Headless::new(e);
         if let Some(roots) = roots {
             // Every thread of this process, not only the server's: nothing reaches past the roots.
             file_access::confine_process(roots.clone());
             let show = |root: Option<&std::path::Path>| root.map_or_else(|| "none".to_string(), |r| r.display().to_string());
-            eprintln!("soundcraft-cli: files confined: read root {}, write root {}", show(roots.read_root()), show(roots.write_root()));
+            eprintln!("transit-cli: files confined: read root {}, write root {}", show(roots.read_root()), show(roots.write_root()));
             h = h.with_automation_roots(Some(roots));
         }
         let mut s = Server::new(h);
@@ -475,9 +475,9 @@ mod tests {
         assert_eq!(parse_rate(Some("44100")), Ok(Some(44_100)));
         assert!(parse_rate(Some("4410x")).is_err());
         assert!(parse_rate(Some("0")).is_err());
-        assert!(matches!(parse_bit_depth(None), Ok(soundcraft_audio_io::BitDepth::Int24)));
-        assert!(matches!(parse_bit_depth(Some("16")), Ok(soundcraft_audio_io::BitDepth::Int16)));
-        assert!(matches!(parse_bit_depth(Some("32f")), Ok(soundcraft_audio_io::BitDepth::Float32)));
+        assert!(matches!(parse_bit_depth(None), Ok(transit_audio_io::BitDepth::Int24)));
+        assert!(matches!(parse_bit_depth(Some("16")), Ok(transit_audio_io::BitDepth::Int16)));
+        assert!(matches!(parse_bit_depth(Some("32f")), Ok(transit_audio_io::BitDepth::Float32)));
         assert!(parse_bit_depth(Some("8")).is_err());
     }
 
@@ -503,8 +503,8 @@ mod tests {
     #[test]
     fn help_text_is_only_the_usage_block() {
         let help = help_text();
-        assert!(help.starts_with("soundcraft-cli info FILE"));
-        assert!(help.ends_with("soundcraft-cli plugins                          list built-in plugins"));
+        assert!(help.starts_with("transit-cli info FILE"));
+        assert!(help.ends_with("transit-cli plugins                          list built-in plugins"));
         assert!(help.contains("--automation-read-root DIR") && help.contains("--automation-write-root DIR"));
         assert!(!help.contains("```"));
         assert!(!help.contains("#![") && !help.contains("use serde_json"));

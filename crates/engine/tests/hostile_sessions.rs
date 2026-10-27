@@ -22,7 +22,7 @@ fn number_paths(v: &Value, path: String, out: &mut Vec<String>) {
 }
 
 fn demo_json() -> Value {
-    let e = soundcraft_engine::demo::demo_engine();
+    let e = transit_engine::demo::demo_engine();
     serde_json::to_value(e.session()).unwrap()
 }
 
@@ -44,20 +44,20 @@ fn positions_at_the_ends_of_the_range_do_not_overflow_commands() {
         ("/markers/1/end".into(), &min, "edit.copy"),
         ("/edit/selection/start".into(), &min, "edit.move_selection_left"),
     ];
-    let (demo, base) = (soundcraft_engine::demo::demo_engine(), demo_json());
+    let (demo, base) = (transit_engine::demo::demo_engine(), demo_json());
     let failed: Vec<String> = cases
         .into_iter()
         .filter_map(|(path, value, cmd)| {
             let mut v = base.clone();
             *v.pointer_mut(&path).unwrap() = value.clone();
-            let mut s = soundcraft_model::Session::from_json(&v.to_string()).unwrap();
+            let mut s = transit_model::Session::from_json(&v.to_string()).unwrap();
             s.pool = demo.session().pool.clone();
-            let mut e = soundcraft_engine::Engine::new(s);
+            let mut e = transit_engine::Engine::new(s);
             if !path.starts_with("/edit") {
                 e.execute("edit.select_all", &serde_json::json!({})).unwrap();
             }
             let r = e.execute(cmd, &serde_json::json!({}));
-            matches!(r, Err(soundcraft_engine::EngineError::Internal(..))).then(|| format!("{path} = {value}, {cmd}: {r:?}"))
+            matches!(r, Err(transit_engine::EngineError::Internal(..))).then(|| format!("{path} = {value}, {cmd}: {r:?}"))
         })
         .collect();
     assert!(failed.is_empty(), "{failed:#?}");
@@ -69,7 +69,7 @@ proptest! {
     fn mutated_sessions_never_panic(picks in proptest::collection::vec((any::<u32>(), prop_oneof![
         Just(-1.0e18f64), Just(-1.0), Just(0.0), Just(1.0e18), Just(4.0e9), Just(-0.5), Just(1.0e-300), Just(123_456_789.0)
     ]), 1..12)) {
-        let demo = soundcraft_engine::demo::demo_engine();
+        let demo = transit_engine::demo::demo_engine();
         let mut v = demo_json();
         let mut paths = Vec::new();
         number_paths(&v, String::new(), &mut paths);
@@ -88,15 +88,15 @@ proptest! {
             }
         }
         let text = v.to_string();
-        let parsed = soundcraft_model::Session::from_json(&text);
+        let parsed = transit_model::Session::from_json(&text);
         if let Ok(mut s) = parsed {
             // Re-attach the decoded audio as the app would after loading the files.
             s.pool = demo.session().pool.clone();
             let start = s.edit.selection.start.clamp(0, 1 << 40);
-            let r = soundcraft_time::Range::new(start, start + 2048);
-            let out = soundcraft_mix::render_range(&s, r, 512);
+            let r = transit_time::Range::new(start, start + 2048);
+            let out = transit_mix::render_range(&s, r, 512);
             prop_assert!(out.iter().all(|c| c.iter().all(|x| x.is_finite())));
-            let mut e = soundcraft_engine::Engine::new(s);
+            let mut e = transit_engine::Engine::new(s);
             let _ = e.execute("session.inspect", &serde_json::json!({}));
             let _ = e.execute("edit.select_all", &serde_json::json!({}));
             let _ = e.execute("edit.duplicate", &serde_json::json!({}));

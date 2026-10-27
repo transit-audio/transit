@@ -10,9 +10,9 @@ use super::*;
 use crate::cmd;
 use crate::io::{add_source, offline, refuse_longer, render_limit};
 use serde_json::json;
-use soundcraft_audio_io::{AudioBuffer, FileFormat};
-use soundcraft_model::{AutoParam, Clip, Frozen, Playlist, Session, Track, TrackKind};
-use soundcraft_time::Range;
+use transit_audio_io::{AudioBuffer, FileFormat};
+use transit_model::{AutoParam, Clip, Frozen, Playlist, Session, Track, TrackKind};
+use transit_time::Range;
 
 /// What a frozen render adds past the last clip: a fixed tail, as Commit does (plug-ins report no
 /// tail length to the host).
@@ -66,7 +66,7 @@ fn freeze_track(e: &mut Engine, id: &str, t: TrackId) -> Result<bool> {
     let range = Range::new(0, end + s.sample_rate.samples(TAIL_SECS));
     refuse_longer(s, id, &tr.name, "freeze", range.len(), render_limit(tr.channels().max(2)))?;
     let _offline = offline();
-    let (audio, latency) = soundcraft_mix::render_track_pre_fader_timed(s, t, range);
+    let (audio, latency) = transit_mix::render_track_pre_fader_timed(s, t, range);
     let name = format!("{}.frz", tr.name);
     let rate = s.sample_rate.hz();
     let revision = e.revision;
@@ -125,7 +125,7 @@ fn flatten(e: &mut Engine, p: &Value) -> Result<Value> {
 
 /// Makes `tr` an audio track of its render: one clip, no instrument, inserts or plug-in
 /// automation. The fader, pan, sends and other automation stay.
-fn flatten_into(tr: &mut Track, f: &Frozen, clip: soundcraft_model::ClipId) {
+fn flatten_into(tr: &mut Track, f: &Frozen, clip: transit_model::ClipId) {
     tr.playlists = vec![Playlist { name: tr.name.clone(), clips: vec![Clip::audio(clip, tr.name.clone(), f.source, 0, f.start, f.length)] }];
     tr.active_playlist = 0;
     tr.kind = TrackKind::Audio;

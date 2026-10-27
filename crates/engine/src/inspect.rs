@@ -2,8 +2,8 @@
 
 use crate::Engine;
 use serde_json::{Value, json};
-use soundcraft_model::{Clip, ClipContent, ClipId, Track, TrackId};
-use soundcraft_time::TimeFormat;
+use transit_model::{Clip, ClipContent, ClipId, Track, TrackId};
+use transit_time::TimeFormat;
 
 fn clip_json(e: &Engine, c: &Clip) -> Value {
     let s = e.session();
@@ -81,7 +81,7 @@ pub fn session(e: &Engine, full: bool) -> Value {
     json!({
         "name": s.name, "path": e.path, "dirty": e.is_dirty(), "sample_rate": s.sample_rate.hz(), "bit_depth": s.bit_depth,
         "frame_rate": s.frame_rate.label(), "tempo": s.tempo.tempos(), "meter": s.tempo.meters(), "main_format": s.main_format().label(),
-        "ticks_per_quarter": soundcraft_time::TICKS_PER_QUARTER,
+        "ticks_per_quarter": transit_time::TICKS_PER_QUARTER,
         "key": s.key_signatures.iter().filter(|(at, _)| *at <= 0).max_by_key(|(at, _)| *at).map(|(_, key)| key),
         "key_signatures": s.key_signatures.iter().map(|(at, key)| json!({"at": at, "key": key})).collect::<Vec<_>>(),
         "length_samples": s.content_end(),
@@ -126,7 +126,7 @@ pub fn session_text(e: &Engine) -> String {
     let mut out = String::new();
     out.push_str(&format!("SESSION NAME:\t{}\nSAMPLE RATE:\t{}\nBIT DEPTH:\t{:?}\nTIMECODE FORMAT:\t{}\n# OF AUDIO TRACKS:\t{}\n# OF AUDIO CLIPS:\t{}\n# OF AUDIO FILES:\t{}\n\n",
         s.name, s.sample_rate.hz(), s.bit_depth, s.frame_rate.label(),
-        s.tracks.iter().filter(|t| t.kind == soundcraft_model::TrackKind::Audio).count(),
+        s.tracks.iter().filter(|t| t.kind == transit_model::TrackKind::Audio).count(),
         s.tracks.iter().map(|t| t.clips().len()).sum::<usize>(), s.sources.len()));
     out.push_str("F I L E S  I N  S E S S I O N\nFilename\tLocation\n");
     for src in &s.sources {

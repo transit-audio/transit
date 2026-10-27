@@ -1,7 +1,7 @@
 //! The bench's position clock (issue #71): a least-squares line of the capture blocks' host
 //! arrival time against their first sample position, over a long history.
 //!
-//! The app's [`ClockFitter`](soundcraft_playback::device_clock::ClockFitter) fits about 64
+//! The app's [`ClockFitter`](transit_playback::device_clock::ClockFitter) fits about 64
 //! points (at least 4 ms apart, 100 to 256 ms) and refuses a fit whose largest residual is above
 //! 2 ms. A driver that delivers its buffers in bursts (the Scarlett 2i2 at buffer 256: arrival
 //! scatter of about one buffer, 5.3 ms) never gets a map from it. This fit keeps the last

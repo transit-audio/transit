@@ -1,9 +1,9 @@
 use egui_kittest::Harness;
-use soundcraft_ui_egui::{Services, SoundApp};
+use transit_ui_egui::{Services, SoundApp};
 
 #[test]
 fn a_long_plugin_window_stays_on_a_short_screen() {
-    let mut app = SoundApp::new(soundcraft_engine::demo::demo_engine(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
     let kick = app.engine.session().track_by_name("Kick").unwrap().id;
     app.ui.plugin_windows = vec![(kick, 0)];
     let mut h = Harness::builder().with_size(egui::vec2(1200.0, 500.0)).build_ui_state(

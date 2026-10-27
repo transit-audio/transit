@@ -5,9 +5,9 @@ use super::more_util::{activate_playlist, target_playlist, track_key};
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_dsp::Category;
-use soundcraft_model::{AutoParam, AutomationLane, ChannelFormat, Clip, ClipContent, Insert, Route, Session, Track, TrackId, TrackKind};
-use soundcraft_time::Samples;
+use transit_dsp::Category;
+use transit_model::{AutoParam, AutomationLane, ChannelFormat, Clip, ClipContent, Insert, Route, Session, Track, TrackId, TrackKind};
+use transit_time::Samples;
 
 /// Trim automation lives in a lane addressed past the last insert slot, so the mixer ignores it
 /// until it is coalesced into the volume lane.
@@ -276,7 +276,7 @@ fn load_preset(e: &mut Engine, p: &Value) -> Result<Value> {
     if v.get("format").and_then(Value::as_str) != Some(PRESET_FORMAT) {
         return Err(EngineError::Io(format!("{path}: not a SoundCraft track preset")));
     }
-    let mut mixer: soundcraft_model::Mixer =
+    let mut mixer: transit_model::Mixer =
         serde_json::from_value(v.get("mixer").cloned().unwrap_or(Value::Null)).map_err(|err| EngineError::Io(format!("{path}: {err}")))?;
     mixer.sanitize();
     let instrument: Option<Insert> = v.get("instrument").cloned().and_then(|x| serde_json::from_value(x).ok());
@@ -310,7 +310,7 @@ fn bypass_where(e: &mut Engine, p: &Value, pick: fn(usize, Option<Category>) -> 
             .iter()
             .enumerate()
             .filter_map(|(i, x)| x.as_ref().map(|ins| (i, ins)))
-            .filter(|(i, ins)| pick(*i, soundcraft_dsp::plugin_info(&ins.plugin).map(|info| info.category)))
+            .filter(|(i, ins)| pick(*i, transit_dsp::plugin_info(&ins.plugin).map(|info| info.category)))
             .map(|(i, _)| i)
             .collect()
     };

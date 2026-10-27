@@ -2,8 +2,8 @@
 //! until the pool beats it in measured headroom"). Ignored by default; a measurement, not a gate:
 //!
 //! ```text
-//! cargo test --release -p soundcraft-mix --test render_headroom -- --ignored --nocapture
-//! SOUNDCRAFT_RENDER_NO_PRIORITY=1 cargo test --release -p soundcraft-mix --test render_headroom -- --ignored --nocapture
+//! cargo test --release -p transit-mix --test render_headroom -- --ignored --nocapture
+//! SOUNDCRAFT_RENDER_NO_PRIORITY=1 cargo test --release -p transit-mix --test render_headroom -- --ignored --nocapture
 //! ```
 //!
 //! The first run promotes the pool workers and the callback thread (as a realtime driver thread
@@ -13,15 +13,15 @@
 //! as a device would call, and prints worst, p99 and median block times against that deadline.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_audio_io::AudioBuffer;
-use soundcraft_mix::{
-    Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen, create_instance,
-    mark_audio_thread,
-};
-use soundcraft_model::{ChannelFormat, Clip, Insert, Session, SourceAudio, SourceId, TrackKind};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
+use transit_audio_io::AudioBuffer;
+use transit_mix::{
+    Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen, create_instance,
+    mark_audio_thread,
+};
+use transit_model::{ChannelFormat, Clip, Insert, Session, SourceAudio, SourceId, TrackKind};
 
 const FRAMES: usize = 128;
 const BLOCKS: usize = 2000;
@@ -138,11 +138,11 @@ fn run(s: &Session, serial: bool, promote: bool) -> Stats {
 #[test]
 #[ignore = "measurement: run in release with --ignored --nocapture"]
 fn headroom_serial_vs_pool_under_load() {
-    let promote = !std::env::var(soundcraft_mix::RENDER_NO_PRIORITY_ENV).is_ok_and(|v| v.trim() == "1");
+    let promote = !std::env::var(transit_mix::RENDER_NO_PRIORITY_ENV).is_ok_and(|v| v.trim() == "1");
     let s = sixteen_strips();
     let _warm = planned_engine(&s);
     std::thread::sleep(Duration::from_millis(100));
-    println!("priority: {}; workers: {:?}", if promote { "promoted" } else { "default" }, soundcraft_mix::render_worker_promotions());
+    println!("priority: {}; workers: {:?}", if promote { "promoted" } else { "default" }, transit_mix::render_worker_promotions());
     println!("{:<6} {:<6} {:>10} {:>10} {:>10} {:>6}", "path", "load", "worst_us", "p99_us", "median_us", "late");
     for loaded in [false, true] {
         for serial in [true, false] {

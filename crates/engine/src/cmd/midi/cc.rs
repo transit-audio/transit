@@ -1,6 +1,6 @@
 //! Undoable CC point operations. Non-CC channel events are never addressed here.
 use super::*;
-use soundcraft_midi::{CtrlEvent, CtrlKind};
+use transit_midi::{CtrlEvent, CtrlKind};
 
 fn number(p: &Value, key: &str, max: i64, default: Option<i64>, cmd: &str) -> Result<i64> {
     let value = match p.get(key) {

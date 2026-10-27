@@ -79,15 +79,15 @@ pub fn after_panic(payload: &(dyn std::any::Any + Send)) -> ! {
     let result = if flags & RAN != 0 {
         ShutDown { clean: flags & CLEAN != 0, autosaved: flags & AUTOSAVED != 0 }
     } else {
-        let clean = soundcraft_engine::emergency::run_bounded(
+        let clean = transit_engine::emergency::run_bounded(
             "shutdown after a panic",
-            soundcraft_engine::emergency::SHUTDOWN_BOUND,
-            soundcraft_engine::shutdown_plugin_hosts,
+            transit_engine::emergency::SHUTDOWN_BOUND,
+            transit_engine::shutdown_plugin_hosts,
         );
         ShutDown { clean, autosaved: false }
     };
     tell_user(&reason, result);
-    soundcraft_engine::emergency::end_process(result.clean)
+    transit_engine::emergency::end_process(result.clean)
 }
 
 /// How long the closing message stays up before the process ends anyway. Short: the whole

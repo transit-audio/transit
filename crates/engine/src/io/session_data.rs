@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::cmd::bad;
-use soundcraft_model::Route;
+use transit_model::Route;
 
 pub(crate) struct ImportedSessionData {
     pub tracks: Vec<TrackId>,
@@ -14,7 +14,7 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
     let id = "file.import_session_data";
     let text = read_text(path)?;
     let other = Session::from_json(&text).map_err(|err| bad(id, format!("{path}: {err}")))?;
-    let picked: Vec<soundcraft_model::Track> = match &names {
+    let picked: Vec<transit_model::Track> = match &names {
         Some(ns) => {
             let mut v = Vec::new();
             for n in ns {
@@ -103,7 +103,7 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
     }
     s.edit.selected_tracks = out.clone();
     // An imported hardware insert whose send path is taken here comes in disabled.
-    let disabled = soundcraft_model::disable_hardware_conflicts(s);
+    let disabled = transit_model::disable_hardware_conflicts(s);
     e.messages.extend(disabled);
     Ok(ImportedSessionData { tracks: out, sources: map.len(), missing })
 }

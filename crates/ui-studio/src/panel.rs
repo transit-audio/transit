@@ -10,8 +10,8 @@ use crate::builtin_editor::{EditorLayout, RowLayout};
 use crate::theme::{RADIUS, TOKENS};
 use crate::widgets::knob;
 use egui::{RichText, Ui};
-use soundcraft_dsp::{ParamInfo, PluginInfo};
-use soundcraft_model::{Insert, KeyFrom, TrackId};
+use transit_dsp::{ParamInfo, PluginInfo};
+use transit_model::{Insert, KeyFrom, TrackId};
 
 /// One control in a section: parameter id and the label under it.
 #[derive(Debug, Clone, Copy)]
@@ -203,7 +203,7 @@ fn key_dropdown(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize)) {
     let label = crate::devices::key_label(&s, ins);
     let (tracks, busses) = crate::devices::key_sources(&s, t);
     let current = ins.key;
-    let pre = current.map_or(app.mixer.key_pre, |k| k.tap == soundcraft_model::Tap::Pre);
+    let pre = current.map_or(app.mixer.key_pre, |k| k.tap == transit_model::Tap::Pre);
     let mut pick: Option<Option<KeyFrom>> = None;
     ui.vertical(|ui| {
         egui::ComboBox::from_id_salt(("panel_key", t.0, slot)).width(150.0).selected_text(label).show_ui(ui, |ui| {
@@ -245,7 +245,7 @@ mod tests {
             let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
             let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).filter_map(|i| item_id(*i)).collect();
             ids.sort_unstable();
-            let mut want: Vec<&str> = soundcraft_dsp::plugin_info(plugin).unwrap().params.iter().map(|p| p.id).collect();
+            let mut want: Vec<&str> = transit_dsp::plugin_info(plugin).unwrap().params.iter().map(|p| p.id).collect();
             want.sort_unstable();
             assert_eq!(ids, want, "{plugin}");
         }

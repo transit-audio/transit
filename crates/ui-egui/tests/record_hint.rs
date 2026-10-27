@@ -3,11 +3,11 @@
 use egui::vec2;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
-use soundcraft_ui_egui::{Services, SoundApp};
+use transit_ui_egui::{Services, SoundApp};
 
 #[test]
 fn record_in_an_empty_session_shows_why_at_both_record_buttons() {
-    let mut app = SoundApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
     app.ui.show_transport = true;
     let mut h = Harness::builder().with_size(vec2(1600.0, 1000.0)).build_ui_state(
         |ui, app: &mut SoundApp| {

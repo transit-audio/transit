@@ -1,15 +1,15 @@
 //! The scope and level strip at the top of a bespoke built-in panel: the last few milliseconds of
 //! the insert's output as an envelope, its peak level in dB, and for the Compressor and the
-//! Expander/Gate the gain reduction. The render fills a tap per insert (`soundcraft_mix::ScopeTap`)
+//! Expander/Gate the gain reduction. The render fills a tap per insert (`transit_mix::ScopeTap`)
 //! while the window is open; this reads it through the player (see `StudioApp::scope_hub`).
 
 use crate::StudioApp;
 use crate::builtin_editor::EditorLayout;
 use crate::theme::{RADIUS_SM, TOKENS};
 use egui::{Pos2, Rect, Sense, Shape, Stroke, Ui, vec2};
-use soundcraft_mix::{INSTRUMENT_SLOT, INSTRUMENT_UID, SCOPE_FRAMES, ScopeHub};
-use soundcraft_model::{Insert, TrackId};
 use std::sync::Arc;
+use transit_mix::{INSTRUMENT_SLOT, INSTRUMENT_UID, SCOPE_FRAMES, ScopeHub};
+use transit_model::{Insert, TrackId};
 
 /// Size of the scope and of the readout column beside it.
 pub const SCOPE_W: f32 = 300.0;

@@ -1,7 +1,7 @@
 //! The production monitor path, without an audio device.
 #![forbid(unsafe_code)]
 
-use soundcraft_playback::record::{InputRing, MonitorTelemetry};
+use transit_playback::record::{InputRing, MonitorTelemetry};
 use transit_rt::testing::measure;
 
 #[global_allocator]

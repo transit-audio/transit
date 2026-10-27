@@ -1,15 +1,15 @@
 //! A document restore must not inherit a matching previous project's live plug-in state.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
-use soundcraft_dsp::PluginStateReader;
-use soundcraft_mix::{
-    Adoption, CompileMode, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanEnvelope, PlanGeneration, PlanLimits, RenderTarget, SlotGen,
-    create_instance,
-};
-use soundcraft_model::{ChannelFormat, Insert, Session, TrackKind};
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
+use transit_dsp::PluginStateReader;
+use transit_mix::{
+    Adoption, CompileMode, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanEnvelope, PlanGeneration, PlanLimits, RenderTarget, SlotGen,
+    create_instance,
+};
+use transit_model::{ChannelFormat, Insert, Session, TrackKind};
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 
 #[global_allocator]
@@ -21,7 +21,7 @@ const BLOCK: usize = 256;
 fn fixture() {
     static INSTALL: std::sync::OnceLock<()> = std::sync::OnceLock::new();
     INSTALL.get_or_init(|| {
-        soundcraft_clap_host::set_scan_extra_dirs_only(true);
+        transit_clap_host::set_scan_extra_dirs_only(true);
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR")).join("../clap-host/tests/fixture/Cargo.toml");
         let target = Path::new(env!("CARGO_TARGET_TMPDIR")).join("document-state-fixture-target");
         let status = Command::new(std::env::var("CARGO").unwrap_or_else(|_| "cargo".into()))
@@ -44,7 +44,7 @@ fn fixture() {
         let dest = if cfg!(target_os = "macos") { dir.join("Fixture.clap/Contents/MacOS/Fixture") } else { dir.join("Fixture.clap") };
         std::fs::create_dir_all(dest.parent().unwrap()).unwrap();
         std::fs::copy(target.join("debug").join(lib), dest).unwrap();
-        assert_eq!(soundcraft_clap_host::add_search_dir(&dir), 2);
+        assert_eq!(transit_clap_host::add_search_dir(&dir), 2);
     });
 }
 
@@ -63,7 +63,7 @@ struct Rig {
 impl Rig {
     fn new() -> Self {
         fixture();
-        soundcraft_mix::mark_audio_thread();
+        transit_mix::mark_audio_thread();
         let target = RenderTarget { device: DeviceGeneration(3), sample_rate: 48_000, max_block: BLOCK as u32, out_channels: 0, in_channels: 0 };
         Self {
             compiler: PlanCompiler::new(target, PlanLimits::default()),

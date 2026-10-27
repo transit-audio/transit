@@ -1,7 +1,7 @@
 //! Tracks and playlists.
 
 use crate::{AutoParam, AutomationLane, ChannelFormat, Clip, ClipId, Insert, Mixer, SourceId, TrackId};
-use soundcraft_time::Samples;
+use transit_time::Samples;
 
 /// Track types (Track › New).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize)]

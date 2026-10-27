@@ -37,7 +37,7 @@ pub fn specs() -> Vec<CommandSpec> {
 }
 
 /// Checks that the slot holds a plug-in; returns where it is and which (the slot as a number,
-/// the instrument as `soundcraft_mix::INSTRUMENT_SLOT`).
+/// the instrument as `transit_mix::INSTRUMENT_SLOT`).
 fn retry(e: &mut Engine, p: &Value) -> Result<Value> {
     const CMD: &str = "plugin.retry";
     let t = track_param(e, CMD, p, "track")?.ok_or_else(|| bad(CMD, "`track` required"))?;
@@ -48,7 +48,7 @@ fn retry(e: &mut Engine, p: &Value) -> Result<Value> {
         None => tr.instrument.as_ref(),
     }
     .ok_or_else(|| bad(CMD, "empty slot"))?;
-    Ok(json!({"track": t.0, "slot": slot.unwrap_or(soundcraft_mix::INSTRUMENT_SLOT), "plugin": ins.plugin}))
+    Ok(json!({"track": t.0, "slot": slot.unwrap_or(transit_mix::INSTRUMENT_SLOT), "plugin": ins.plugin}))
 }
 
 fn retry_all(_: &mut Engine, _: &Value) -> Result<Value> {
@@ -70,7 +70,7 @@ mod tests {
         let (doc, dirty) = (e.session_arc(), e.is_dirty());
         let undo = e.execute("engine.history", &json!({})).unwrap()["undo"].as_array().unwrap().len();
         let v = e.execute("plugin.retry", &json!({"track": t, "slot": "instrument"})).unwrap();
-        assert_eq!(v, json!({"track": t, "slot": soundcraft_mix::INSTRUMENT_SLOT, "plugin": "subtractive_synth"}));
+        assert_eq!(v, json!({"track": t, "slot": transit_mix::INSTRUMENT_SLOT, "plugin": "subtractive_synth"}));
         assert!(std::sync::Arc::ptr_eq(&doc, &e.session_arc()) && e.is_dirty() == dirty, "not a document change");
         assert_eq!(e.execute("engine.history", &json!({})).unwrap()["undo"].as_array().unwrap().len(), undo, "no undo step");
         assert!(e.execute("plugin.retry", &json!({"track": t, "slot": 0})).unwrap_err().to_string().contains("empty slot"));

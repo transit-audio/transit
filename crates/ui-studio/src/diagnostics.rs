@@ -9,9 +9,9 @@
 //! user name with `<user>` everywhere in the finished text, the log lines and the log folder path
 //! included.
 
-use soundcraft_playback::devices::{AsioDescription, AudioConfig, AudioSystem};
-use soundcraft_playback::telemetry::CallbackTelemetry;
 use std::path::{Path, PathBuf};
+use transit_playback::devices::{AsioDescription, AudioConfig, AudioSystem};
+use transit_playback::telemetry::CallbackTelemetry;
 
 /// How many log lines the report ends with.
 pub const LOG_LINES: usize = 200;
@@ -144,7 +144,7 @@ fn run(program: &str, args: &[&str]) -> Result<String, String> {
 /// The audio systems this build can list without opening a stream: cpal's, native JACK, and the
 /// native ASIO driver names (none probed).
 pub fn machine_systems() -> Vec<AudioSystem> {
-    use soundcraft_playback::devices;
+    use transit_playback::devices;
     let mut systems = devices::cpal_audio_systems();
     systems.extend(devices::native_jack_system());
     if devices::NATIVE_ASIO_COMPILED {
@@ -292,7 +292,7 @@ pub fn midi_channel(status: u8) -> Option<u8> {
 }
 
 /// An ASIO device's line when its listing has no channels for it
-/// ([`soundcraft_playback::devices::asio_description`]); `None` for one that was probed with
+/// ([`transit_playback::devices::asio_description`]); `None` for one that was probed with
 /// channels (it prints like any device). `open` is the ASIO driver this process runs, if any.
 fn asio_state(description: AsioDescription, open: Option<&str>, input: bool) -> Option<String> {
     match description {
@@ -376,7 +376,7 @@ impl Report {
                     o.push_str(&format!("  {label}: none\n"));
                 }
                 for d in devices {
-                    let described = soundcraft_playback::devices::asio_description(s, d);
+                    let described = transit_playback::devices::asio_description(s, d);
                     if let Some(state) = described.and_then(|a| asio_state(a, self.open_asio_driver.as_deref(), label == "Input")) {
                         let default = if d.is_default { " (default)" } else { "" };
                         o.push_str(&format!("  {label}: {}{default} \u{b7} {state}\n", d.name));
@@ -522,11 +522,11 @@ impl crate::StudioApp {
 /// The MIDI note of a report made without a Player (no audio device): MIDI runs with the audio.
 pub const NO_PLAYER_MIDI: &str = "MIDI is not running (no audio device is open): the ports are listed, none is open";
 
-/// The ports present as the report lists them, from [`soundcraft_playback::devices::midi_ports`]
+/// The ports present as the report lists them, from [`transit_playback::devices::midi_ports`]
 /// (enumeration only); `open` is what the caller knows of them. An error is the note.
 pub fn list_midi_ports(open: Option<bool>) -> Result<Vec<MidiPort>, String> {
     #[cfg(not(target_arch = "wasm32"))]
-    return soundcraft_playback::devices::midi_ports().map(|ports| ports.into_iter().map(|(name, input)| MidiPort { name, input, open }).collect());
+    return transit_playback::devices::midi_ports().map(|ports| ports.into_iter().map(|(name, input)| MidiPort { name, input, open }).collect());
     #[cfg(target_arch = "wasm32")]
     {
         let _ = open;
@@ -639,7 +639,7 @@ impl crate::StudioApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soundcraft_playback::devices::DeviceInfo;
+    use transit_playback::devices::DeviceInfo;
 
     fn fake() -> Report {
         let dev = |name: &str| DeviceInfo {
@@ -708,7 +708,7 @@ mod tests {
             buffer_min: Some(128),
             buffer_max: Some(128),
         };
-        let note = soundcraft_playback::backend::native::jack_note("PipeWire 1.0.7", 48_000, 128);
+        let note = transit_playback::backend::native::jack_note("PipeWire 1.0.7", 48_000, 128);
         let jack = AudioSystem {
             name: "JACK".into(),
             is_default: false,
@@ -771,7 +771,7 @@ mod tests {
             name: name.into(),
             is_default: false,
             max_channels: channels,
-            sample_rates: if channels == 0 { soundcraft_playback::devices::STANDARD_RATES.to_vec() } else { vec![48000] },
+            sample_rates: if channels == 0 { transit_playback::devices::STANDARD_RATES.to_vec() } else { vec![48000] },
             buffer_min: (channels > 0).then_some(64),
             buffer_max: (channels > 0).then_some(1024),
         }
@@ -779,7 +779,7 @@ mod tests {
 
     fn asio(devices: &[DeviceInfo]) -> AudioSystem {
         AudioSystem {
-            name: soundcraft_playback::devices::ASIO_SYSTEM.into(),
+            name: transit_playback::devices::ASIO_SYSTEM.into(),
             is_default: false,
             outputs: devices.to_vec(),
             inputs: devices.to_vec(),
@@ -811,7 +811,7 @@ mod tests {
         assert!(text.contains("  Output: Broken ASIO \u{b7} probe failed (see the note below)\n"), "{text}");
         assert!(text.contains("  Note: Broken ASIO: ASIOInit failed\n"), "{text}");
         // The window's "updates after Apply" and the report read the same rule.
-        use soundcraft_playback::devices::asio_description;
+        use transit_playback::devices::asio_description;
         let states: Vec<_> = system.inputs.iter().map(|d| asio_description(&system, d)).collect();
         assert_eq!(states, [Some(AsioDescription::NoChannels), Some(AsioDescription::ProbeFailed)]);
         // Another system's device without channels is printed as it is (not an ASIO probe).

@@ -1,4 +1,4 @@
-use soundcraft_audio_io::{FileFormat, encode_format_for};
+use transit_audio_io::{FileFormat, encode_format_for};
 
 #[test]
 fn only_formats_the_encoder_writes_are_named() {

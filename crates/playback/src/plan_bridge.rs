@@ -6,15 +6,15 @@
 //! conversion chunk of an actual device callback. Device/rate transitions need a new pair.
 
 use crate::{MeterSnapshot, fold_gains, publication, record::InputRing, session_has_hosted};
-use soundcraft_mix::{
-    Adoption, CompileError, CompileMode, EnvelopeState, InstanceSpec, MAX_CHANNELS, MixEngine, NewInstance, PlanCompiler, PlanEnvelope,
-    PlanGeneration, PlanLimits, PlanStatus, RenderTarget, SlotBinding, SlotGen, StripMeter, main_channels,
-};
-use soundcraft_model::{IoMap, MAX_DEVICE_CHANNELS, Session, TrackId, TrackKind};
-use soundcraft_time::Samples;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
+use transit_mix::{
+    Adoption, CompileError, CompileMode, EnvelopeState, InstanceSpec, MAX_CHANNELS, MixEngine, NewInstance, PlanCompiler, PlanEnvelope,
+    PlanGeneration, PlanLimits, PlanStatus, RenderTarget, SlotBinding, SlotGen, StripMeter, main_channels,
+};
+use transit_model::{IoMap, MAX_DEVICE_CHANNELS, Session, TrackId, TrackKind};
+use transit_time::Samples;
 
 /// Playback-owned sample/meter storage cap per publication, in addition to PlanLimits.
 const PLAYBACK_BYTES: usize = 16 << 20;
@@ -134,7 +134,7 @@ struct Buffers {
 impl Buffers {
     fn prepare(session: &Session, input: Option<Arc<InputRing>>, target: RenderTarget, io: &IoMap, limits: PlanLimits) -> Result<Self, CompileError> {
         let channels = main_channels(session);
-        let sinks = soundcraft_mix::plan_sinks(session, io, target.out_channels);
+        let sinks = transit_mix::plan_sinks(session, io, target.out_channels);
         let sink_channels = sinks.channels();
         let input_channels = input.as_ref().map_or(0, |r| r.channels.load(Ordering::Relaxed).clamp(1, u16::MAX as usize));
         let block = target.max_block.clamp(16, 16_384) as usize;
@@ -211,7 +211,7 @@ pub struct StatusReport {
 /// Created once per actual device callback, then borrowed across scratch chunks and blocks.
 /// There is no public constructor; the device adapter owns the scope.
 /// ```compile_fail
-/// let _ = soundcraft_playback::plan_bridge::CallbackBudget::default();
+/// let _ = transit_playback::plan_bridge::CallbackBudget::default();
 /// ```
 pub struct CallbackBudget {
     serviced: bool,
@@ -276,7 +276,7 @@ pub struct Control {
     /// This machine's path table for the open device; read when a plan is prepared.
     io: Arc<IoMap>,
     /// External Instrument tracks whose MIDI port is missing (ADR 0020); read when a plan is prepared.
-    no_port: Arc<[soundcraft_model::TrackId]>,
+    no_port: Arc<[transit_model::TrackId]>,
     issued: PlanGeneration,
     meters: Arc<MeterBank>,
     pending_meters: Option<Arc<MeterBank>>,
@@ -317,7 +317,7 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
     };
     // The device adapter issues a fresh, checked device generation before it
     // constructs a runtime. Same-target plans keep this engine incarnation.
-    let mut mix = MixEngine::realtime_with_events(target, soundcraft_mix::EngineEpoch(target.device.0), soundcraft_mix::EventLimits::default());
+    let mut mix = MixEngine::realtime_with_events(target, transit_mix::EngineEpoch(target.device.0), transit_mix::EventLimits::default());
     mix.metronome = true;
     (
         Control {
@@ -351,7 +351,7 @@ impl Control {
 
     /// The External Instrument tracks whose MIDI port is missing: the next prepared plan plays them
     /// silent with no latency (ADR 0020 decision 6). The caller requests the session again.
-    pub fn set_external_unavailable(&mut self, tracks: Arc<[soundcraft_model::TrackId]>) {
+    pub fn set_external_unavailable(&mut self, tracks: Arc<[transit_model::TrackId]>) {
         self.no_port = tracks;
     }
 
@@ -477,8 +477,8 @@ impl Control {
         }
     }
 
-    /// The scope taps of the compiler (see [`soundcraft_mix::ScopeHub`]).
-    pub fn scope_hub(&self) -> Arc<soundcraft_mix::ScopeHub> {
+    /// The scope taps of the compiler (see [`transit_mix::ScopeHub`]).
+    pub fn scope_hub(&self) -> Arc<transit_mix::ScopeHub> {
         self.compiler.scope_hub()
     }
 
@@ -507,19 +507,19 @@ impl Control {
 /// replace the engine while an exact-plan action is being dispatched.
 ///
 /// ```compile_fail
-/// use soundcraft_playback::plan_bridge::{CallbackBudget, Processing};
+/// use transit_playback::plan_bridge::{CallbackBudget, Processing};
 /// fn adopt_during_action(view: &mut Processing<'_>, budget: &mut CallbackBudget) {
 ///     view.service(budget, true);
 /// }
 /// ```
 /// ```compile_fail
-/// use soundcraft_playback::plan_bridge::{Audio, Processing};
+/// use transit_playback::plan_bridge::{Audio, Processing};
 /// fn swap_runtime(view: &mut Processing<'_>, foreign: &mut Audio) {
 ///     std::mem::swap(view, foreign);
 /// }
 /// ```
 /// ```compile_fail
-/// use soundcraft_playback::plan_bridge::{Audio, Processing};
+/// use transit_playback::plan_bridge::{Audio, Processing};
 /// fn requires_owner_access<T: std::ops::DerefMut<Target = Audio>>() {}
 /// requires_owner_access::<Processing<'static>>();
 /// ```
@@ -528,10 +528,10 @@ pub struct Processing<'a> {
 }
 
 impl Processing<'_> {
-    pub fn queue_event(&mut self, event: &soundcraft_mix::InstrumentEvent) -> soundcraft_mix::EventOutcome {
-        if self.audio.faulted() { soundcraft_mix::EventOutcome::Faulted } else { self.audio.mix.queue_event(event) }
+    pub fn queue_event(&mut self, event: &transit_mix::InstrumentEvent) -> transit_mix::EventOutcome {
+        if self.audio.faulted() { transit_mix::EventOutcome::Faulted } else { self.audio.mix.queue_event(event) }
     }
-    pub fn set_transport_epoch(&mut self, epoch: soundcraft_mix::TransportEpoch) {
+    pub fn set_transport_epoch(&mut self, epoch: transit_mix::TransportEpoch) {
         if !self.audio.faulted() {
             self.audio.mix.set_transport_epoch(epoch);
         }
@@ -661,7 +661,7 @@ impl Audio {
         self.mix.no_suspend = editors_open;
     }
     /// The click's trim and the record count-in, for the next block. Plain stores: no allocation.
-    pub fn set_metronome(&mut self, gain: f32, count_in: Option<soundcraft_mix::CountInClick>) {
+    pub fn set_metronome(&mut self, gain: f32, count_in: Option<transit_mix::CountInClick>) {
         self.mix.metronome_gain = gain;
         self.mix.count_in = count_in;
     }

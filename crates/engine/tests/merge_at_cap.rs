@@ -1,8 +1,8 @@
 //! Merged gestures and `squash_undo` at and below `history_limit`.
 
 use serde_json::json;
-use soundcraft_engine::Engine;
-use soundcraft_model::{ChannelFormat, TrackId, TrackKind};
+use transit_engine::Engine;
+use transit_model::{ChannelFormat, TrackId, TrackKind};
 
 fn setup(fill: usize) -> (Engine, TrackId) {
     let mut e = Engine::default();

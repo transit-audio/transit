@@ -18,9 +18,9 @@
 //! nothing is refused, so no material is lost silently.
 
 use crate::edit::{TimeCtx, trim_start};
-use soundcraft_model::{Clip, ClipContent, Session, TrackId};
-use soundcraft_time::{Range, SampleRate, Samples, TICKS_PER_QUARTER, TempoMap, to_samples};
 use std::collections::HashSet;
+use transit_model::{Clip, ClipContent, Session, TrackId};
+use transit_time::{Range, SampleRate, Samples, TICKS_PER_QUARTER, TempoMap, to_samples};
 
 /// A tempo map laid out for many conversions: each segment's first tick, the sample it starts at
 /// and its samples per tick. The starts are summed in the order [`TempoMap`] sums them, so a
@@ -115,7 +115,7 @@ pub fn move_material(s: &mut Session, at: &dyn Fn(Samples) -> Samples) -> Result
                     format!(
                         "the change squeezes the loop of clip `{clip}` on track `{}` below {} samples; shorten the loop or clear it before changing tempo",
                         tr.name,
-                        soundcraft_model::MIN_CYCLE
+                        transit_model::MIN_CYCLE
                     )
                 }
             })?;
@@ -204,7 +204,7 @@ fn move_clip(c: &mut Clip, at: &dyn Fn(Samples) -> Samples) -> Result<(), Squeez
     // would silently turn a looped clip into a long silent one, and clamping it would move the
     // loop off its bars. The command rolls back with the clip named, as for a squeezed clip.
     if let Some(l) = &mut c.looping {
-        let moved = soundcraft_model::ClipLoop { start: rel(l.start), end: rel(l.end) };
+        let moved = transit_model::ClipLoop { start: rel(l.start), end: rel(l.end) };
         if !moved.is_valid() {
             return Err(Squeezed::Loop(c.name.clone()));
         }
@@ -280,7 +280,7 @@ mod tests {
     #[test]
     fn the_segment_table_matches_the_per_position_walk_exactly() {
         let sr = SampleRate::HZ_48000;
-        let mut rng = soundcraft_midi::XorShift::new(0x5eed);
+        let mut rng = transit_midi::XorShift::new(0x5eed);
         for round in 0..40 {
             let (mut old, mut new) = (TempoMap::default(), TempoMap::default());
             for m in [&mut old, &mut new] {

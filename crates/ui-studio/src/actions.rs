@@ -3,8 +3,8 @@
 
 use crate::StudioApp;
 use serde_json::{Value, json};
-use soundcraft_model::{ClipId, Route, Track, TrackId, TrackKind};
-use soundcraft_time::{Range, Samples};
+use transit_model::{ClipId, Route, Track, TrackId, TrackKind};
+use transit_time::{Range, Samples};
 
 impl StudioApp {
     pub(crate) fn width_change_disabled_reason(&self) -> Option<&'static str> {
@@ -54,8 +54,8 @@ impl StudioApp {
 
     /// Keep hardware capture/monitoring and its label consistent with the new width, as one
     /// undo step. Called by `run` so menu and control-channel invocations get the same checks.
-    pub(crate) fn change_track_width(&mut self, params: &Value) -> soundcraft_engine::Result<Value> {
-        use soundcraft_engine::cmd::{bad, tracks_required};
+    pub(crate) fn change_track_width(&mut self, params: &Value) -> transit_engine::Result<Value> {
+        use transit_engine::cmd::{bad, tracks_required};
         const COMMAND: &str = "track.change_width";
         if let Some(reason) = self.width_change_disabled_reason() {
             return Err(bad(COMMAND, reason));
@@ -350,7 +350,7 @@ impl StudioApp {
         if track.kind == TrackKind::Master {
             return Err("The master track can't be deleted".into());
         }
-        let fail = |e: soundcraft_engine::EngineError| format!("Delete {name}: {e}");
+        let fail = |e: transit_engine::EngineError| format!("Delete {name}: {e}");
         let bus = match (&track.kind, &track.mixer.input) {
             (TrackKind::Aux, Route::Bus(b)) => Some(*b),
             _ => None,
@@ -414,7 +414,7 @@ impl StudioApp {
                 sends += n("senders");
                 outputs += n("feeders");
             }
-            Ok::<(), soundcraft_engine::EngineError>(())
+            Ok::<(), transit_engine::EngineError>(())
         })();
         self.engine.end_merge();
         match r {

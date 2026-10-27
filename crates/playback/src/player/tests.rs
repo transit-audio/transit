@@ -1,8 +1,8 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::unwrap_used, clippy::panic)]
 use super::*;
-use soundcraft_mix::DeviceGeneration;
-use soundcraft_model::{ChannelFormat, Insert, TrackKind};
+use transit_mix::DeviceGeneration;
+use transit_model::{ChannelFormat, Insert, TrackKind};
 use transit_rt::testing::measure;
 
 fn target() -> RenderTarget {
@@ -12,7 +12,7 @@ fn session(name: &str) -> Arc<Session> {
     Arc::new(Session { name: name.into(), ..Session::default() })
 }
 fn factory(spec: &InstanceSpec, _: SlotGen) -> Option<NewInstance> {
-    soundcraft_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
+    transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
 }
 fn adopt(audio: &mut plan_bridge::Audio) {
     let (result, stats) = measure(|| audio.service(&mut plan_bridge::callback_scope(), true));
@@ -74,7 +74,7 @@ fn rate_mismatch_and_exhaustion_leave_the_existing_request_intact() {
     let (mut control, audio) = session_pair(target(), PlanLimits::default());
     control.next = u64::MAX - 1;
     let last = control.request(session("last"), None).unwrap();
-    let wrong_rate = Session { sample_rate: soundcraft_time::SampleRate::new(44_100).unwrap(), ..Session::default() };
+    let wrong_rate = Session { sample_rate: transit_time::SampleRate::new(44_100).unwrap(), ..Session::default() };
     assert_eq!(control.request(Arc::new(wrong_rate), None), Err(PlayerError::NeedsReopen { current_rate: 48_000, requested_rate: 44_100 }));
     assert_eq!(control.request(session("wrap"), None), Err(PlayerError::SequenceExhausted));
     assert_eq!(control.state(last), RequestState::Preparing);
@@ -287,7 +287,7 @@ struct TestEditor {
     open: bool,
     events: Arc<std::sync::Mutex<Vec<(u8, &'static str, std::thread::ThreadId)>>>,
 }
-impl soundcraft_dsp::PluginEditor for TestEditor {
+impl transit_dsp::PluginEditor for TestEditor {
     fn open(&mut self) -> Result<(), String> {
         self.open = true;
         Ok(())
@@ -304,7 +304,7 @@ impl soundcraft_dsp::PluginEditor for TestEditor {
     }
 }
 struct HandlePlugin {
-    plugin: Box<dyn soundcraft_dsp::Plugin>,
+    plugin: Box<dyn transit_dsp::Plugin>,
     id: u8,
     events: Arc<std::sync::Mutex<Vec<(u8, &'static str, std::thread::ThreadId)>>>,
     panic_reader: bool,
@@ -314,8 +314,8 @@ impl Drop for HandlePlugin {
         self.events.lock().unwrap().push((self.id, "drop", std::thread::current().id()));
     }
 }
-impl soundcraft_dsp::Plugin for HandlePlugin {
-    fn info(&self) -> &'static soundcraft_dsp::PluginInfo {
+impl transit_dsp::Plugin for HandlePlugin {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
         self.plugin.info()
     }
     fn prepare(&mut self, rate: f32, block: usize, channels: usize) {
@@ -333,10 +333,10 @@ impl soundcraft_dsp::Plugin for HandlePlugin {
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
         self.plugin.process(io, frames);
     }
-    fn editor(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginEditor>> {
+    fn editor(&mut self) -> Option<Box<dyn transit_dsp::PluginEditor>> {
         Some(Box::new(TestEditor { id: self.id, open: false, events: Arc::clone(&self.events) }))
     }
-    fn state_reader(&mut self) -> Option<Box<dyn soundcraft_dsp::PluginStateReader>> {
+    fn state_reader(&mut self) -> Option<Box<dyn transit_dsp::PluginStateReader>> {
         assert!(!self.panic_reader, "reader factory panic");
         let id = self.id;
         Some(Box::new(move || Some(vec![id])))

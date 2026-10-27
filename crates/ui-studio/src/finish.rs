@@ -13,7 +13,7 @@ use crate::theme::TOKENS;
 use crate::{Dialog, StudioApp};
 use egui::{FontId, Rect, pos2, vec2};
 use serde_json::{Value, json};
-use soundcraft_model::{ClipId, TrackId};
+use transit_model::{ClipId, TrackId};
 
 /// File > Bounce in real time through the live device (ADR 0027).
 mod realtime;
@@ -42,7 +42,7 @@ pub struct Rename {
 
 /// The range the dialog's "Cycle range" / "Selection" choice bounces: the cycle range while looping
 /// is on (the loop region, else the selection), otherwise the selection.
-pub fn bounce_range(edit: &soundcraft_model::EditState) -> soundcraft_time::Range {
+pub fn bounce_range(edit: &transit_model::EditState) -> transit_time::Range {
     if edit.loop_playback { edit.cycle_range() } else { edit.selection }
 }
 
@@ -168,9 +168,9 @@ pub struct FinishState {
     pub rename: Option<Rename>,
     pub bounce_form: Option<BounceForm>,
     /// The bounce being rendered, a slice per frame.
-    pub job: Option<soundcraft_engine::io::Bounce>,
+    pub job: Option<transit_engine::io::Bounce>,
     /// The stems by output path being rendered, a slice per frame (instead of `job`).
-    pub path_job: Option<soundcraft_engine::io::PathBounce>,
+    pub path_job: Option<transit_engine::io::PathBounce>,
     /// The parameters of the last `file.bounce_paths` job the form started.
     pub paths_request: Option<Value>,
     /// Gestures started (each composite gets its own merge key).
@@ -424,7 +424,7 @@ impl StudioApp {
         }
         let s = self.engine.session();
         let range = if bounce_range(&s.edit).is_empty() { BounceRange::Whole } else { BounceRange::Selection };
-        let name = format!("{}.wav", soundcraft_engine::io::sanitize_name(&s.name));
+        let name = format!("{}.wav", transit_engine::io::sanitize_name(&s.name));
         let dir =
             self.engine.path.as_ref().and_then(|p| std::path::Path::new(p).parent().map(std::path::Path::to_path_buf)).unwrap_or_else(default_dir);
         self.finish.bounce_form = Some(BounceForm {
@@ -449,9 +449,9 @@ impl StudioApp {
     /// The output paths of this machine for the by-path mode: routed ones (and Main) start checked.
     fn path_choices(&self) -> Vec<PathChoice> {
         let (s, io) = (self.engine.session(), self.engine.io_map());
-        io.paths_of(soundcraft_model::IoDirection::Output)
+        io.paths_of(transit_model::IoDirection::Output)
             .map(|p| {
-                let routed = p.name.eq_ignore_ascii_case(&io.main) || soundcraft_engine::io::is_routed(s, &p.name);
+                let routed = p.name.eq_ignore_ascii_case(&io.main) || transit_engine::io::is_routed(s, &p.name);
                 PathChoice { name: p.name.clone(), routed, checked: routed }
             })
             .collect()
@@ -471,7 +471,7 @@ impl StudioApp {
         };
         // An External Instrument plays only in real time: the bounce leaves it out only when the
         // user chooses that (ADR 0020 decision 9), never silently.
-        let left_out = soundcraft_engine::cmd::external_in_render(s);
+        let left_out = transit_engine::cmd::external_in_render(s);
         if !left_out.is_empty() && !f.without_external && !f.realtime {
             self.status = format!("{}: render without it, or cancel", external_notice(&left_out));
             self.finish.external_question = Some(left_out);
@@ -510,7 +510,7 @@ impl StudioApp {
             p["without_external"] = json!(true);
         }
         self.capture_plugin_states()?;
-        match soundcraft_engine::cmd::bounce_job(&self.engine, &p) {
+        match transit_engine::cmd::bounce_job(&self.engine, &p) {
             Ok(job) => {
                 self.finish.job = Some(job);
                 self.finish.bounce_form = None;
@@ -549,7 +549,7 @@ impl StudioApp {
             p["without_external"] = json!(true);
         }
         self.capture_plugin_states()?;
-        match soundcraft_engine::cmd::bounce_paths_job(&self.engine, &p) {
+        match transit_engine::cmd::bounce_paths_job(&self.engine, &p) {
             Ok(job) if job.files().iter().any(|x| x.exists()) && self.finish.replace != Replace::Yes => {
                 self.finish.replace = Replace::Asking;
                 self.status = "Some stem files exist".into();
@@ -1027,7 +1027,7 @@ pub fn bounce_dialog(app: &mut StudioApp, ctx: &egui::Context) {
     app.finish.layout.bounce = Some(lay);
     if choose && f.by_path {
         // The host offers a save dialog only: the folder of the file picked is the folder.
-        let name = format!("{}_stems", soundcraft_engine::io::sanitize_name(&s.name));
+        let name = format!("{}_stems", transit_engine::io::sanitize_name(&s.name));
         if let Some(p) = app
             .services
             .pick_save
@@ -1061,8 +1061,8 @@ fn external_notice(names: &[String]) -> String {
 
 /// What a bounce started without the External Instruments adds to the status line: the tracks
 /// left out.
-fn left_out_note(engine: &soundcraft_engine::Engine) -> String {
-    let names = soundcraft_engine::cmd::external_in_render(engine.session());
+fn left_out_note(engine: &transit_engine::Engine) -> String {
+    let names = transit_engine::cmd::external_in_render(engine.session());
     if names.is_empty() { String::new() } else { format!(" Left out: {} (External Instrument).", names.join(", ")) }
 }
 

@@ -2,8 +2,8 @@
 //! loop in the error, and leave the session and the undo history as they were.
 
 use serde_json::json;
-use soundcraft_engine::{Engine, EngineError};
-use soundcraft_model::Route;
+use transit_engine::{Engine, EngineError};
+use transit_model::Route;
 
 /// Auxes `names`, each reading its own bus "<name> In".
 fn auxes(names: &[&str]) -> Engine {

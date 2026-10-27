@@ -1,6 +1,6 @@
 //! Stems by output path (ADR 0015 slice e): one file per output path, rendered together in one
 //! pass of the plan renderer. Offline rendering is control-side, so this allocates freely; the
-//! per-block render ([`soundcraft_mix::RangeRender::next_block`]) does not.
+//! per-block render ([`transit_mix::RangeRender::next_block`]) does not.
 //!
 //! Alignment: the plan pads every sink (Main and each output path) to the one device latency L
 //! (ADR 0015 section 6), and `RangeRender` drops the first L samples from all of them together.
@@ -9,11 +9,11 @@
 
 use super::{Out, bounce_layout, check_bounce_range, make_dir, sanitize_name};
 use crate::{EngineError, Result};
-use soundcraft_audio_io::{EncodeOptions, FileEncoder, FileFormat};
-use soundcraft_model::{ChannelFormat, IoDirection, IoMap, Route, Session, TrackKind};
-use soundcraft_time::Range;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use transit_audio_io::{EncodeOptions, FileEncoder, FileFormat};
+use transit_model::{ChannelFormat, IoDirection, IoMap, Route, Session, TrackKind};
+use transit_time::Range;
 
 /// How the peaks of a stem set are normalized to -0.1 dBFS.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -89,14 +89,14 @@ struct Stem {
 /// can show progress. The files appear only once the whole render is complete; a bounce that
 /// fails, or is dropped unfinished, leaves any older files alone.
 pub struct PathBounce {
-    _offline: soundcraft_vst3_host::OfflineScope,
+    _offline: transit_vst3_host::OfflineScope,
     session: Arc<Session>,
     io: IoMap,
     range: Range,
     normalize: PathNormalize,
     /// Measuring the peaks to normalize to, the first of two passes.
     measuring: bool,
-    render: soundcraft_mix::RangeRender,
+    render: transit_mix::RangeRender,
     stems: Vec<Stem>,
     done: usize,
     joint_gain: f32,
@@ -138,8 +138,8 @@ impl PathBounce {
             _ => "wav",
         };
         // Hosted plug-ins are created while the render is compiled: offline mode must already be on.
-        let offline = soundcraft_vst3_host::offline_scope();
-        let render = soundcraft_mix::RangeRender::try_new_paths(&s, r, 1024, io)
+        let offline = transit_vst3_host::offline_scope();
+        let render = transit_mix::RangeRender::try_new_paths(&s, r, 1024, io)
             .map_err(|err| EngineError::Io(format!("the session could not be prepared for rendering: {err:?}")))?;
         let (main_fmt, main_n, _) = bounce_layout(&s, None, false);
         let mut offsets = Vec::new();
@@ -173,7 +173,7 @@ impl PathBounce {
             let part = file.with_file_name(format!("{}.part", file.file_name().map_or_else(String::new, |f| f.to_string_lossy().into_owned())));
             crate::file_access::check_write(&file).map_err(EngineError::Io)?;
             crate::file_access::check_write(&part).map_err(EngineError::Io)?;
-            let enc = (|| -> std::result::Result<_, soundcraft_audio_io::AudioError> {
+            let enc = (|| -> std::result::Result<_, transit_audio_io::AudioError> {
                 let enc = FileEncoder::new(Out::create(&part)?, opts, channels, s.sample_rate.hz(), Some(format.channel_mask()))?;
                 enc.check_room(u64::try_from(r.len()).unwrap_or(0))?;
                 Ok(enc)
@@ -232,7 +232,7 @@ impl PathBounce {
                     let measuring = self.measuring;
                     for st in &mut self.stems {
                         st.fill(chunk, n, if measuring { 1.0 } else { st.gain });
-                        st.peak = st.peak.max(soundcraft_dsp::offline::peak(&st.block));
+                        st.peak = st.peak.max(transit_dsp::offline::peak(&st.block));
                         if !measuring && let Some(enc) = &mut st.enc {
                             enc.write(&st.block, n).map_err(|err| EngineError::Io(format!("{}: {err}", st.file.display())))?;
                         }
@@ -240,7 +240,7 @@ impl PathBounce {
                     self.done += n;
                 }
                 None if self.measuring => {
-                    let target = soundcraft_dsp::db_to_gain(-0.1);
+                    let target = transit_dsp::db_to_gain(-0.1);
                     let loudest = self.stems.iter().map(|s| s.peak).fold(0.0f32, f32::max);
                     self.joint_gain = if loudest > 0.0 { target / loudest } else { 1.0 };
                     for st in &mut self.stems {
@@ -253,7 +253,7 @@ impl PathBounce {
                     }
                     self.done = 0;
                     self.measuring = false;
-                    self.render = soundcraft_mix::RangeRender::try_new_paths(&self.session, self.range, 1024, &self.io)
+                    self.render = transit_mix::RangeRender::try_new_paths(&self.session, self.range, 1024, &self.io)
                         .map_err(|err| EngineError::Io(format!("the session could not be prepared for rendering: {err:?}")))?;
                 }
                 None => return self.finish().map(Some),
@@ -292,12 +292,12 @@ impl PathBounce {
                 file: st.file.clone(),
                 bytes: st.bytes,
                 channels: st.channels,
-                peak_db: soundcraft_dsp::gain_to_db(st.peak),
+                peak_db: transit_dsp::gain_to_db(st.peak),
                 routed: st.routed,
                 empty: st.peak <= 0.0,
             })
             .collect();
-        let joint_gain_db = (self.normalize == PathNormalize::Joint).then(|| soundcraft_dsp::gain_to_db(self.joint_gain));
+        let joint_gain_db = (self.normalize == PathNormalize::Joint).then(|| transit_dsp::gain_to_db(self.joint_gain));
         Ok(PathBounced { stems, joint_gain_db })
     }
 }

@@ -6,11 +6,11 @@
 
 use crate::{Engine, EngineError, Result};
 use serde::{Deserialize, Serialize};
-use soundcraft_audio_io::{EncodeOptions, FileFormat};
-use soundcraft_model::{Clip, ClipContent, ClipId, SourceId, TrackId};
-use soundcraft_time::Samples;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use transit_audio_io::{EncodeOptions, FileFormat};
+use transit_model::{Clip, ClipContent, ClipId, SourceId, TrackId};
+use transit_time::Samples;
 
 pub const EXTENSION: &str = "scgrp";
 const FORMAT: &str = "soundcraft.clipgroup";
@@ -65,8 +65,8 @@ pub fn export(e: &Engine, ids: &[ClipId], path: &str) -> Result<usize> {
             {
                 let rel = format!("{audio_dir_name}/{}_{}.wav", crate::io::sanitize_name(&src.name), source.0);
                 crate::io::make_dir(dir.join(&audio_dir_name))?;
-                let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: soundcraft_audio_io::BitDepth::Float32, dither: false, bwf: None };
-                let bytes = soundcraft_audio_io::encode(&buf.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
+                let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: transit_audio_io::BitDepth::Float32, dither: false, bwf: None };
+                let bytes = transit_audio_io::encode(&buf.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
                 crate::io::write_path(dir.join(&rel), bytes)?;
                 slot.insert(rel);
             }
@@ -106,7 +106,7 @@ pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -
             Some(n) => *n,
             None => {
                 let bytes = crate::io::read_file(&full)?;
-                let (_, buf) = soundcraft_audio_io::decode(&bytes, Some("wav")).map_err(|err| EngineError::Io(format!("{rel}: {err}")))?;
+                let (_, buf) = transit_audio_io::decode(&bytes, Some("wav")).map_err(|err| EngineError::Io(format!("{rel}: {err}")))?;
                 let buf = crate::io::at_rate(buf, rate, crate::io::MAX_IMPORT_SAMPLES)
                     .ok_or_else(|| EngineError::Io(format!("{rel}: too large to import")))?;
                 decoded.push((rel.clone(), buf));
@@ -144,8 +144,8 @@ pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -
                         _ => None,
                     })
                     .unwrap_or(2);
-                let kind = if audio_lane { soundcraft_model::TrackKind::Audio } else { soundcraft_model::TrackKind::Midi };
-                let fmt = if channels == 1 { soundcraft_model::ChannelFormat::Mono } else { soundcraft_model::ChannelFormat::Stereo };
+                let kind = if audio_lane { transit_model::TrackKind::Audio } else { transit_model::TrackKind::Midi };
+                let fmt = if channels == 1 { transit_model::ChannelFormat::Mono } else { transit_model::ChannelFormat::Stereo };
                 s.add_track(kind, fmt, Some("Clip Group"))
             }
         };
@@ -196,14 +196,14 @@ mod tests {
         assert_eq!(placed.len(), 2);
         let bass = e.session().tracks.iter().find(|t| t.name == "Bass").map(|t| t.id).unwrap();
         for id in &placed {
-            let (t, c) = e.session().find_clip(soundcraft_model::ClipId(*id)).unwrap();
+            let (t, c) = e.session().find_clip(transit_model::ClipId(*id)).unwrap();
             assert_eq!(t, bass);
             assert!(c.start >= at && c.group.is_some());
-            assert!(matches!(c.content, soundcraft_model::ClipContent::Audio { source, .. } if e.session().pool.contains(source)));
+            assert!(matches!(c.content, transit_model::ClipContent::Audio { source, .. } if e.session().pool.contains(source)));
         }
         e.undo();
         assert_eq!(e.session().tracks.len(), before);
-        assert!(e.session().find_clip(soundcraft_model::ClipId(placed[0])).is_none());
+        assert!(e.session().find_clip(transit_model::ClipId(placed[0])).is_none());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -219,7 +219,7 @@ mod tests {
         std::fs::write(&p, file.to_string()).unwrap();
         let mut e = crate::demo::demo_engine();
         let r = e.execute("file.import_clip_groups", &json!({"path": p.to_string_lossy()})).unwrap();
-        let id = soundcraft_model::ClipId(r["clips"][0].as_u64().unwrap());
+        let id = transit_model::ClipId(r["clips"][0].as_u64().unwrap());
         let c = e.session().find_clip(id).unwrap().1;
         assert!(c.start <= crate::cmd::MAX_POSITION && c.length <= crate::cmd::MAX_POSITION);
         e.execute("edit.select_all", &json!({})).unwrap();
@@ -233,8 +233,8 @@ mod tests {
     fn a_file_named_by_many_ids_becomes_one_source() {
         let dir = std::env::temp_dir().join(format!("sc-grp-shared-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
-        let audio = soundcraft_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 480]] };
-        std::fs::write(dir.join("k.wav"), soundcraft_audio_io::encode(&audio, &soundcraft_audio_io::EncodeOptions::default()).unwrap()).unwrap();
+        let audio = transit_audio_io::AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 480]] };
+        std::fs::write(dir.join("k.wav"), transit_audio_io::encode(&audio, &transit_audio_io::EncodeOptions::default()).unwrap()).unwrap();
         let clip = |id: u64| json!({"id": id, "name": "k", "start": id * 1000, "length": 480, "content": {"Audio": {"source": id, "offset": 0}}});
         let audio_paths = json!({"1": "k.wav", "2": "./k.wav", "3": "k.wav"});
         let file = json!({"format": "soundcraft.clipgroup", "version": 1, "sample_rate": 48000, "length": 4000, "lanes": [[clip(1), clip(2), clip(3)]], "audio": audio_paths});

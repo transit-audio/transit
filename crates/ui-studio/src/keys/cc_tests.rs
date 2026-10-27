@@ -9,7 +9,7 @@ struct Harness {
 }
 impl Harness {
     fn new() -> Self {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         let track = app.run("track.new", json!({"kind":"instrument"})).unwrap()["tracks"][0].clone();
         let clip = ClipId(app.run("midi.new_clip", json!({"tracks":[track],"start":0,"end":96000})).unwrap()["clip"].as_u64().unwrap());
         app.open_keys(clip);

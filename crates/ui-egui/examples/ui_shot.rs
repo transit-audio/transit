@@ -1,14 +1,14 @@
 //! Render the real UI offscreen (no window, no focus stealing) and save PNGs.
 //!
-//! `cargo run -p soundcraft-ui-egui --example ui_shot -- out.png [script.jsonl] [--blank] [--size WxH] [--system-theme light|dark|none]`
+//! `cargo run -p transit-ui-egui --example ui_shot -- out.png [script.jsonl] [--blank] [--size WxH] [--system-theme light|dark|none]`
 //!
 //! Script lines are control requests (`{"method": "...", "params": {...}}`), `{"shot": "path.png"}`
 //! or `{"steps": n}`. `{"system_theme": "light"}` (also `"dark"` or `"none"`) changes the
 //! simulated OS appearance for subsequent frames. The demo session is loaded unless `--blank`.
 
-use soundcraft_ui_egui::{ControlRequest, Services, SoundApp};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
+use transit_ui_egui::{ControlRequest, Services, SoundApp};
 
 static READY: AtomicBool = AtomicBool::new(false);
 
@@ -42,7 +42,7 @@ fn main() {
         .and_then(|s| s.split_once('x'))
         .and_then(|(a, b)| Some((a.parse::<f32>().ok()?, b.parse::<f32>().ok()?)))
         .unwrap_or((1600.0, 1000.0));
-    let engine = if blank { soundcraft_engine::Engine::default() } else { soundcraft_engine::demo::demo_engine() };
+    let engine = if blank { transit_engine::Engine::default() } else { transit_engine::demo::demo_engine() };
     let (tx, rx) = mpsc::channel::<ControlRequest>();
     let app = SoundApp::new(engine, None, Services::default()).with_control(rx);
     let mut harness =

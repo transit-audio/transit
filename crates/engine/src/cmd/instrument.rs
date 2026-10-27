@@ -5,7 +5,7 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::{Insert, TrackKind};
+use transit_model::{Insert, TrackKind};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -100,14 +100,14 @@ fn set_instrument_param(e: &mut Engine, p: &Value) -> Result<Value> {
 mod tests {
     use crate::Engine;
     use serde_json::json;
-    use soundcraft_midi::{Note, Sequence};
-    use soundcraft_model::{Clip, TrackId};
-    use soundcraft_time::{Range, TICKS_PER_QUARTER};
+    use transit_midi::{Note, Sequence};
+    use transit_model::{Clip, TrackId};
+    use transit_time::{Range, TICKS_PER_QUARTER};
 
     #[test]
     fn hosted_plugins_start_with_an_empty_parameter_map() {
-        use soundcraft_dsp::{Category, ParamInfo, PluginInfo, Taper, Unit};
-        use soundcraft_model::Insert;
+        use transit_dsp::{Category, ParamInfo, PluginInfo, Taper, Unit};
+        use transit_model::Insert;
         static PARAMS: [ParamInfo; 1] = [ParamInfo {
             id: "volume",
             name: "Volume",
@@ -157,7 +157,7 @@ mod tests {
         assert_eq!(r["plugin"], "drum_synth");
         assert_eq!(instrument_of(&e, t).as_deref(), Some("drum_synth"));
         let params = e.session().track(t).and_then(|tr| tr.instrument.as_ref()).map(|i| i.params.len());
-        assert_eq!(params, soundcraft_dsp::plugin_info("drum_synth").map(|p| p.params.len()), "every parameter at its default");
+        assert_eq!(params, transit_dsp::plugin_info("drum_synth").map(|p| p.params.len()), "every parameter at its default");
         e.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(instrument_of(&e, t).as_deref(), Some("subtractive_synth"));
     }
@@ -188,7 +188,7 @@ mod tests {
         let s = e.session_mut();
         let cid = s.new_clip_id();
         crate::edit::place_clip(s, t, Clip::midi(cid, "note", 0, 48_000 * 4, seq));
-        let out = soundcraft_mix::render_range(e.session(), Range::new(0, 48_000 * secs), 512);
+        let out = transit_mix::render_range(e.session(), Range::new(0, 48_000 * secs), 512);
         let n = out[0].len().max(1) as f32;
         (out[0].iter().map(|x| x * x).sum::<f32>() / n).sqrt()
     }
@@ -213,7 +213,7 @@ mod tests {
         e.execute("mix.instrument", &json!({"track": t.0, "plugin": "subtractive_synth", "params": {"cutoff": 1.0e9}})).unwrap();
         let ins = e.session().track(t).and_then(|tr| tr.instrument.clone()).unwrap();
         assert_eq!(ins.params.get("cutoff"), Some(&20_000.0));
-        assert_eq!(ins.params.len(), soundcraft_dsp::plugin_info("subtractive_synth").map(|p| p.params.len()).unwrap());
+        assert_eq!(ins.params.len(), transit_dsp::plugin_info("subtractive_synth").map(|p| p.params.len()).unwrap());
 
         // Nothing is accepted and then ignored: a parameter beside `plugin`, an unknown id, a value
         // that is not a number and a `params` that is not an object are errors, and change nothing.

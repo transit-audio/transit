@@ -5,7 +5,7 @@ use super::*;
 use crate::midi_learn;
 
 fn new_app(w: f32, h: f32) -> (StudioApp, egui::Context, TrackId) {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let r = app.run("track.new", json!({"kind": "audio", "format": "stereo", "name": "Gtr"})).unwrap();
     let t = TrackId(r["tracks"][0].as_u64().unwrap());
     let ctx = egui::Context::default();
@@ -73,7 +73,7 @@ fn the_target_cell_names_a_plugin_parameter_by_its_table() {
     map(&mut app, "KeyStep", &format!("track:{}:plugin:a:mid_gain", t.0), 74);
     map(&mut app, "KeyStep", &format!("track:{}:volume", t.0), 7);
     open(&mut app, &ctx, screen);
-    let info = soundcraft_dsp::plugin_info("eq_7band").unwrap();
+    let info = transit_dsp::plugin_info("eq_7band").unwrap();
     let name = info.param("mid_gain").unwrap().name;
     let targets: Vec<String> = midi_learn::rows(&app).into_iter().map(|r| r.target).collect();
     assert!(targets.contains(&format!("Gtr: {} > {name}", info.name)), "{targets:?}");
@@ -85,7 +85,7 @@ fn the_target_cell_falls_back_to_the_index_while_the_table_is_not_cached() {
     let screen = (1920.0, 1080.0);
     let (mut app, ctx, t) = new_app(screen.0, screen.1);
     // A plug-in the registries do not know: no parameter table is cached for it (K81).
-    app.engine.session_mut().track_mut(t).unwrap().mixer.inserts[0] = Some(soundcraft_model::Insert::new("vst3:not-cached"));
+    app.engine.session_mut().track_mut(t).unwrap().mixer.inserts[0] = Some(transit_model::Insert::new("vst3:not-cached"));
     map(&mut app, "KeyStep", &format!("track:{}:plugin:a:40", t.0), 74);
     open(&mut app, &ctx, screen);
     let targets: Vec<String> = midi_learn::rows(&app).into_iter().map(|r| r.target).collect();

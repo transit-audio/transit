@@ -5,8 +5,8 @@
 use crate::keys::Snap;
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
-use soundcraft_midi::Note;
-use soundcraft_model::{ClipContent, ClipId, TrackId};
+use transit_midi::Note;
+use transit_model::{ClipContent, ClipId, TrackId};
 
 struct T {
     app: StudioApp,
@@ -21,7 +21,7 @@ struct T {
 impl T {
     /// An instrument track with a one-bar MIDI clip at bar 1, the mixer pane shown.
     fn new() -> T {
-        let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+        let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
         let r = app.run("track.new", json!({"kind": "instrument"})).unwrap();
         let track = TrackId(r["tracks"][0].as_u64().unwrap());
         let c = app.run("midi.new_clip", json!({"tracks": [track.0], "start": 0, "end": 0})).unwrap();
@@ -389,7 +389,7 @@ fn pitch_menu_transposes_only_selected_notes_and_undoes_once() {
 
 #[test]
 fn pitch_menu_constrains_selection_and_key_preferences_round_trip() {
-    use soundcraft_midi::scale::{KeyScale, Scale};
+    use transit_midi::scale::{KeyScale, Scale};
     let mut t = T::open();
     t.add(64, 0, 240);
     t.add(69, 480, 240);
@@ -899,7 +899,7 @@ fn notes_past_the_clip_end_are_refused_on_add_and_flagged_when_moved_or_loaded()
 
 #[test]
 fn an_empty_instrument_lane_shows_the_create_clip_hint_until_a_clip_exists() {
-    let mut app = StudioApp::new(soundcraft_engine::Engine::default(), None, Services::default());
+    let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let r = app.run("track.new", json!({"kind": "instrument"})).unwrap();
     let track = TrackId(r["tracks"][0].as_u64().unwrap());
     let mut t = T { app, ctx: egui::Context::default(), time: 0.0, width: 1400.0, painted_text: Vec::new(), track, clip: ClipId(0) };
@@ -978,7 +978,7 @@ fn ctrl_a_in_the_piano_roll_selects_notes_not_clips() {
 
 #[test]
 fn ctrl_t_adds_an_audio_track_and_ctrl_shift_t_an_instrument_track_and_neither_splits() {
-    use soundcraft_model::TrackKind;
+    use transit_model::TrackKind;
     let mut t = T::new();
     t.app.keys.active = false;
     let undo = t.undo_len();
@@ -1092,7 +1092,7 @@ impl T {
     }
 
     fn played(&mut self, pitch: u8, velocity: u8, on: bool) {
-        self.app.live_midi(soundcraft_playback::PlayedNote { pitch, velocity, on });
+        self.app.live_midi(transit_playback::PlayedNote { pitch, velocity, on });
         self.frames(2);
     }
 
@@ -1107,14 +1107,14 @@ impl T {
     }
 }
 
-const SIXTEENTH: i64 = soundcraft_time::TICKS_PER_QUARTER / 4;
+const SIXTEENTH: i64 = transit_time::TICKS_PER_QUARTER / 4;
 
 #[test]
 fn step_hold_commits_the_preview_length_as_one_undo_step() {
     let mut t = T::open();
     t.step_on();
     let undo = t.undo_len();
-    let note = |pitch, on| soundcraft_playback::PlayedNote { pitch, velocity: if on { 90 } else { 0 }, on };
+    let note = |pitch, on| transit_playback::PlayedNote { pitch, velocity: if on { 90 } else { 0 }, on };
     t.app.step_midi_at(note(60, true), 0);
     t.app.step_midi_at(note(64, true), 20);
     t.app.step_midi_at(note(60, false), 600);
@@ -1129,8 +1129,8 @@ fn step_hold_commits_the_preview_length_as_one_undo_step() {
 
 #[test]
 fn step_pedal_down_and_up_drained_in_one_frame_still_insert_a_rest() {
-    use soundcraft_engine::step_input::StepBinding::Cc;
-    use soundcraft_playback::PlayedMidi;
+    use transit_engine::step_input::StepBinding::Cc;
+    use transit_playback::PlayedMidi;
     let mut t = T::open();
     t.step_on();
     t.app.live_played_midi(PlayedMidi::Control { cc: 64, value: 127 });
@@ -1144,7 +1144,7 @@ fn step_pedal_down_and_up_drained_in_one_frame_still_insert_a_rest() {
 
 #[test]
 fn step_events_are_timed_from_their_arrival_stamp_not_from_a_late_drain() {
-    use soundcraft_playback::{PlayedMidi, PlayedNote};
+    use transit_playback::{PlayedMidi, PlayedNote};
     let mut t = T::open();
     t.step_on();
     let note = |on| PlayedMidi::Note(PlayedNote { pitch: 60, velocity: if on { 90 } else { 0 }, on });
@@ -1162,16 +1162,16 @@ fn step_events_are_timed_from_their_arrival_stamp_not_from_a_late_drain() {
 fn clearing_live_input_discards_the_pending_step() {
     let mut t = T::open();
     t.step_on();
-    t.app.step_midi_at(soundcraft_playback::PlayedNote { pitch: 60, velocity: 90, on: true }, 0);
+    t.app.step_midi_at(transit_playback::PlayedNote { pitch: 60, velocity: 90, on: true }, 0);
     t.app.live_clear();
-    t.app.step_midi_at(soundcraft_playback::PlayedNote { pitch: 60, velocity: 0, on: false }, 1000);
+    t.app.step_midi_at(transit_playback::PlayedNote { pitch: 60, velocity: 0, on: false }, 1000);
     assert!(t.notes().is_empty());
     assert_eq!(t.app.keys.step.cursor, 0);
 }
 
 #[test]
 fn step_pedal_rests_repeat_and_sustain_chord_ties_are_undoable() {
-    use soundcraft_engine::step_input::StepBinding::{Cc, Note};
+    use transit_engine::step_input::StepBinding::{Cc, Note};
     let mut t = T::open();
     t.step_on();
     t.app.step_message_at(Cc(64), 127, 0);
@@ -1208,7 +1208,7 @@ fn step_pedal_rests_repeat_and_sustain_chord_ties_are_undoable() {
 
 #[test]
 fn step_learn_consumes_the_learning_press_and_back_key_and_persists_binding() {
-    use soundcraft_engine::step_input::{StepBinding, StepControl};
+    use transit_engine::step_input::{StepBinding, StepControl};
     let mut t = T::open();
     t.step_on();
     t.tap(60, 90);
@@ -1229,7 +1229,7 @@ fn step_learn_consumes_the_learning_press_and_back_key_and_persists_binding() {
 
 #[test]
 fn played_midi_tap_controls_reach_the_step_editor_and_reset_discards_a_hold() {
-    use soundcraft_playback::{PlayedMidi, PlayedNote};
+    use transit_playback::{PlayedMidi, PlayedNote};
     let mut t = T::open();
     t.step_on();
     t.app.live_played_midi(PlayedMidi::Control { cc: 64, value: 127 });
@@ -1244,7 +1244,7 @@ fn played_midi_tap_controls_reach_the_step_editor_and_reset_discards_a_hold() {
 
 #[test]
 fn step_editor_stops_inserting_rests_once_the_tapped_pedal_up_arrives() {
-    use soundcraft_engine::step_input::StepBinding::Cc;
+    use transit_engine::step_input::StepBinding::Cc;
     let mut t = T::open();
     t.step_on();
     t.app.step_message_at(Cc(64), 127, 0);
@@ -1262,8 +1262,8 @@ fn step_editor_stops_inserting_rests_once_the_tapped_pedal_up_arrives() {
 
 #[test]
 fn a_reset_releases_a_held_pedal_and_stops_the_rests() {
-    use soundcraft_engine::step_input::StepBinding::Cc;
-    use soundcraft_playback::PlayedMidi;
+    use transit_engine::step_input::StepBinding::Cc;
+    use transit_playback::PlayedMidi;
     let mut t = T::open();
     t.step_on();
     t.app.step_message_at(Cc(64), 127, 0);
@@ -1360,7 +1360,7 @@ fn rest_advances_and_backspace_takes_the_last_step_back() {
 fn number_keys_set_the_step_length() {
     let mut t = T::open();
     t.step_on();
-    let q = soundcraft_time::TICKS_PER_QUARTER;
+    let q = transit_time::TICKS_PER_QUARTER;
     for (key, ticks) in [("1", q * 4), ("2", q * 2), ("3", q), ("4", q / 2), ("5", q / 4), ("6", q / 8)] {
         t.key(key, json!({}));
         assert_eq!(t.app.keys.layout.step_ticks, ticks, "key {key}");
@@ -1374,7 +1374,7 @@ fn number_keys_set_the_step_length() {
 fn entering_past_the_clip_end_extends_the_clip() {
     let mut t = T::open();
     t.step_on();
-    let q = soundcraft_time::TICKS_PER_QUARTER;
+    let q = transit_time::TICKS_PER_QUARTER;
     t.key("1", json!({}));
     assert_eq!(t.clip_ticks(), 4 * q);
     t.tap(60, 100);
@@ -1394,7 +1394,7 @@ fn entering_stops_at_the_next_clip_and_says_so() {
     t.app.run("midi.new_clip", json!({"tracks": [t.track.0], "start": end, "end": end + 48_000})).unwrap();
     t.frames(2);
     t.step_on();
-    let q = soundcraft_time::TICKS_PER_QUARTER;
+    let q = transit_time::TICKS_PER_QUARTER;
     t.key("1", json!({}));
     t.tap(60, 100);
     assert_eq!(t.notes().len(), 1);
@@ -1474,7 +1474,7 @@ impl T {
 #[test]
 fn zooming_in_subdivides_the_piano_roll_grid_down_to_a_128th_and_lines_and_snap_agree() {
     let mut t = T::open();
-    let q = soundcraft_time::TICKS_PER_QUARTER;
+    let q = transit_time::TICKS_PER_QUARTER;
     // 60 points per quarter: a 1/16 (15 points), as before.
     assert_eq!(t.app.keys.layout.grid_step, q / 4);
     for (px, step) in [(12.0, q), (24.0, q / 2), (60.0, q / 4), (100.0, q / 8), (200.0, q / 16), (400.0, q / 32), (800.0, q / 32)] {
@@ -1497,7 +1497,7 @@ fn zooming_in_subdivides_the_piano_roll_grid_down_to_a_128th_and_lines_and_snap_
 #[test]
 fn ctrl_1_to_4_drive_the_piano_roll_grid() {
     let mut t = T::open();
-    let q = soundcraft_time::TICKS_PER_QUARTER;
+    let q = transit_time::TICKS_PER_QUARTER;
     let arrangement = t.app.arrange.grid;
     t.key("1", json!({"cmd": true}));
     assert_eq!(t.app.ui.keys.grid.mode, crate::grid::GridMode::Fixed(q / 8), "finer than the 1/16 in force");
@@ -1541,7 +1541,7 @@ fn ctrl_4_turns_snap_off_so_a_dragged_note_lands_unsnapped() {
 #[test]
 fn the_snap_menu_pins_fixed_entries_and_adaptive_follows_the_zoom_again() {
     let mut t = T::open();
-    let q = soundcraft_time::TICKS_PER_QUARTER;
+    let q = transit_time::TICKS_PER_QUARTER;
     t.zoom_to(400.0);
     assert_eq!(t.app.keys.layout.grid_step, q / 32, "adaptive");
     let pick = |t: &mut T, label: &str| {
@@ -1566,7 +1566,7 @@ fn the_snap_menu_pins_fixed_entries_and_adaptive_follows_the_zoom_again() {
 #[test]
 fn step_entry_default_length_follows_the_adaptive_grid() {
     let mut t = T::open();
-    let q = soundcraft_time::TICKS_PER_QUARTER;
+    let q = transit_time::TICKS_PER_QUARTER;
     t.zoom_to(200.0);
     t.step_on();
     assert_eq!(t.app.keys.layout.step_ticks, q / 16);
@@ -1622,7 +1622,7 @@ fn the_step_cursor_stays_visible_when_it_jumps() {
     let mut t = T::open();
     t.step_on();
     t.zoom_to(400.0);
-    let q = soundcraft_time::TICKS_PER_QUARTER;
+    let q = transit_time::TICKS_PER_QUARTER;
     t.key("1", json!({}));
     for pitch in 60..70 {
         t.tap(pitch, 100);
@@ -1682,7 +1682,7 @@ fn fixed_step_velocity_overrides_the_played_velocity_and_played_follows_the_key(
 
 #[test]
 fn step_combined_pedal_worked_example_writes_exact_grid_positions() {
-    use soundcraft_engine::step_input::StepBinding::{Cc, Note};
+    use transit_engine::step_input::StepBinding::{Cc, Note};
     let mut t = T::open();
     t.step_on();
     for (pitch, start) in [(60, 0), (62, 3000)] {
@@ -1704,7 +1704,7 @@ fn step_combined_pedal_worked_example_writes_exact_grid_positions() {
 
 #[test]
 fn step_keyboard_combined_enter_and_opt_in_space_are_scoped() {
-    use soundcraft_engine::step_input::StepBinding::Note;
+    use transit_engine::step_input::StepBinding::Note;
     let mut t = T::open();
     t.step_on();
     t.app.ui.keys.step_hold.enabled = false;
@@ -1735,7 +1735,7 @@ fn step_keyboard_combined_enter_and_opt_in_space_are_scoped() {
 
 #[test]
 fn step_hold_preference_and_combined_learning_persist() {
-    use soundcraft_engine::step_input::{StepBinding, StepControl};
+    use transit_engine::step_input::{StepBinding, StepControl};
     let mut t = T::open();
     t.step_on();
     t.app.ui.keys.step_hold.enabled = false;
@@ -1896,7 +1896,7 @@ fn a_loop_with_a_lead_in_spans_zero_to_its_end_and_reports_the_lead_in() {
 
 #[test]
 fn the_clip_length_readout_says_looped_to() {
-    let bar = soundcraft_time::TICKS_PER_QUARTER * 4;
+    let bar = transit_time::TICKS_PER_QUARTER * 4;
     assert_eq!(crate::keys::clip_length_text(bar, Some(4 * bar)), "Clip length 1.00 bars, looped to 4.00");
     assert_eq!(crate::keys::clip_length_text(4 * bar, None), "Clip length 4.00 bars");
     assert_eq!(crate::keys::clip_length_text(bar, Some(bar)), "Clip length 1.00 bars");
@@ -1905,7 +1905,7 @@ fn the_clip_length_readout_says_looped_to() {
 #[test]
 fn step_entry_in_a_looped_clip_wraps_at_the_loop_end() {
     let mut t = T::open();
-    let q = soundcraft_time::TICKS_PER_QUARTER;
+    let q = transit_time::TICKS_PER_QUARTER;
     t.loop_to_bars(0, 4);
     t.step_on();
     t.app.step_set_len(q);
@@ -1921,7 +1921,7 @@ fn step_entry_in_a_looped_clip_wraps_at_the_loop_end() {
 
 #[test]
 fn step_on_polls_at_30_ms_when_idle_and_full_rate_while_holding() {
-    use soundcraft_engine::step_input::StepBinding::Cc;
+    use transit_engine::step_input::StepBinding::Cc;
     let ms = std::time::Duration::from_millis;
     let mut t = T::open();
     // Step off: the existing idle policy, no 30 ms poll.
@@ -1933,10 +1933,10 @@ fn step_on_polls_at_30_ms_when_idle_and_full_rate_while_holding() {
     // egui deducts one predicted frame (16.7 ms at 60 Hz) from the requested 30 ms.
     assert!((ms(10)..=ms(30)).contains(&idle), "Step on and idle polls at about 30 ms, not per frame: {idle:?}");
     // A held key is a pending chord: full rate.
-    t.app.live_midi(soundcraft_playback::PlayedNote { pitch: 60, velocity: 90, on: true });
+    t.app.live_midi(transit_playback::PlayedNote { pitch: 60, velocity: 90, on: true });
     let held = t.frame_with(None);
     assert!(held < idle && held <= ms(1), "a held key repaints at full rate: {held:?}");
-    t.app.live_midi(soundcraft_playback::PlayedNote { pitch: 60, velocity: 0, on: false });
+    t.app.live_midi(transit_playback::PlayedNote { pitch: 60, velocity: 0, on: false });
     t.frames(2);
     // A held pedal: full rate.
     t.app.step_message_at(Cc(64), 127, 0);

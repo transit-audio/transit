@@ -4,7 +4,7 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use soundcraft_model::{MAX_MIDI_OUT_OFFSET_MS, MidiOutChannel, MidiOutPort, MidiOutput};
+use transit_model::{MAX_MIDI_OUT_OFFSET_MS, MidiOutChannel, MidiOutPort, MidiOutput};
 
 const ID: &str = "midi.output";
 

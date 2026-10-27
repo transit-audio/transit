@@ -6,10 +6,10 @@
 mod common;
 
 use common::{Fake, Log};
-use soundcraft_dsp::Transport;
-use soundcraft_dsp::event::{Message, NoteId, PluginEvent};
 use std::sync::Arc;
 use std::time::Duration;
+use transit_dsp::Transport;
+use transit_dsp::event::{Message, NoteId, PluginEvent};
 use transit_plugin_host::{Config, Host};
 
 #[global_allocator]
