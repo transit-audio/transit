@@ -15,6 +15,10 @@ cargo xtask timing      # E49-class timing assertions in tests (xtask/src/timing
 Other `xtask` commands: `cargo xtask wasm` (web build), `cargo xtask rt-targets` (cross-target check
 of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequence).
 
+## Which checkout a gate checks
+
+A gate checks the checkout `cargo xtask` is run from, not the one the xtask binary was built in (#150): cargo reuses one binary across worktrees that share a `CARGO_TARGET_DIR`, so the root is resolved at run time. Every gate prints it as its first line, for example `layers: root E:/transit-wt-150`. Look for that line in a log before trusting a result.
+
 ## File-size budget
 
 No Rust file under `crates/`, `apps/`, `tools/` or `xtask/` may exceed 1500 lines (counted as `wc -l` does). `cargo xtask layers` enforces it, and `cargo xtask file-size` runs the same check alone. Files over the budget today sit in the `OVER_BUDGET` table in `xtask/src/file_size.rs` with their current line count (#149):

@@ -199,3 +199,73 @@ fn file_size_counts_newline_terminated_lines() {
     assert_eq!(file_size::count_lines(b"a\nb\n"), 2);
     assert_eq!(file_size::count_lines(b"a\nb"), 1);
 }
+
+fn temp_tree(name: &str) -> PathBuf {
+    let dir = std::env::temp_dir().join(format!("xtask-root-{name}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    dir
+}
+
+#[test]
+fn root_walks_up_from_a_nested_directory_to_the_workspace() -> Result<(), Box<dyn std::error::Error>> {
+    let top = temp_tree("walk");
+    let nested = top.join("crates/inner/src");
+    std::fs::create_dir_all(&nested)?;
+    std::fs::write(
+        top.join("Cargo.toml"),
+        "[workspace]
+members = [\"crates/inner\"]
+",
+    )?;
+    std::fs::write(
+        top.join("crates/inner/Cargo.toml"),
+        "[package]
+name = \"inner\"
+",
+    )?;
+    assert_eq!(resolve_root(None, Some(nested), PathBuf::from("fallback")), top);
+    std::fs::remove_dir_all(&top)?;
+    Ok(())
+}
+
+#[test]
+fn root_falls_back_when_no_workspace_is_found() -> Result<(), Box<dyn std::error::Error>> {
+    let dir = temp_tree("none");
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(
+        dir.join("Cargo.toml"),
+        "[package]
+name = \"lone\"
+",
+    )?;
+    let found = resolve_root(None, Some(dir.clone()), PathBuf::from("fallback"));
+    // A workspace above the system temp dir would legitimately win; only the no-workspace case is checked.
+    if !dir.ancestors().any(has_workspace_table) {
+        assert_eq!(found, PathBuf::from("fallback"));
+    }
+    assert_eq!(resolve_root(None, None, PathBuf::from("fallback")), PathBuf::from("fallback"));
+    std::fs::remove_dir_all(&dir)?;
+    Ok(())
+}
+
+#[test]
+fn root_prefers_the_manifest_dir_env_over_the_walk() -> Result<(), Box<dyn std::error::Error>> {
+    let top = temp_tree("env");
+    std::fs::create_dir_all(top.join("xtask"))?;
+    std::fs::write(
+        top.join("Cargo.toml"),
+        "[workspace]
+",
+    )?;
+    let other = temp_tree("env-other");
+    std::fs::create_dir_all(&other)?;
+    std::fs::write(
+        other.join("Cargo.toml"),
+        "[workspace]
+",
+    )?;
+    assert_eq!(resolve_root(Some(top.join("xtask").into_os_string()), Some(other.clone()), PathBuf::from("fallback")), top);
+    std::fs::remove_dir_all(&top)?;
+    std::fs::remove_dir_all(&other)?;
+    Ok(())
+}

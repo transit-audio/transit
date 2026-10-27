@@ -9,8 +9,34 @@ mod timing;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Output};
 
+/// The repository root, resolved at run time so a binary shared across checkouts
+/// (one `CARGO_TARGET_DIR`) gates the checkout it is run from (#150).
 fn root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."))
+    let fallback = Path::new(env!("CARGO_MANIFEST_DIR")).parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from("."));
+    resolve_root(std::env::var_os("CARGO_MANIFEST_DIR"), std::env::current_dir().ok(), fallback)
+}
+
+/// `manifest_dir` is the xtask package directory cargo sets for `cargo run`; otherwise walk up from `cwd`
+/// to the nearest `Cargo.toml` with a `[workspace]` table; otherwise the compile-time `fallback`, with a warning.
+fn resolve_root(manifest_dir: Option<std::ffi::OsString>, cwd: Option<PathBuf>, fallback: PathBuf) -> PathBuf {
+    if let Some(parent) = manifest_dir.as_ref().and_then(|dir| Path::new(dir).parent()) {
+        return parent.to_path_buf();
+    }
+    if let Some(found) = cwd.as_deref().and_then(|cwd| cwd.ancestors().find(|dir| has_workspace_table(dir))) {
+        return found.to_path_buf();
+    }
+    eprintln!("xtask: warning: could not find the workspace root at run time; using the compile-time root {}", fallback.display());
+    fallback
+}
+
+fn has_workspace_table(dir: &Path) -> bool {
+    let Ok(text) = std::fs::read_to_string(dir.join("Cargo.toml")) else { return false };
+    text.parse::<toml::Table>().is_ok_and(|table| table.contains_key("workspace"))
+}
+
+/// Every gate prints its root first, so a wrong checkout is visible in logs.
+fn announce(gate: &str) {
+    println!("{gate}: root {}", root().display().to_string().replace(std::path::MAIN_SEPARATOR, "/"));
 }
 
 fn cargo_command() -> Command {
@@ -277,6 +303,13 @@ fn ci() -> Result<(), String> {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(gate) = args
+        .first()
+        .map(String::as_str)
+        .filter(|g| ["ci", "layers", "file-size", "assets", "timing", "wasm", "rt-targets", "audio-bench", "ico"].contains(g))
+    {
+        announce(gate);
+    }
     let r = match args.first().map(String::as_str) {
         Some("ci") => ci(),
         Some("layers") => layers(),
