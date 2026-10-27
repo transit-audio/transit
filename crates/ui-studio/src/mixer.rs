@@ -896,12 +896,11 @@ impl StudioApp {
         self.run("mix.instrument", json!({"track": t.0, "plugin": plugin}))
     }
 
-    /// "+ FX Channel" after the strips: a new FX channel with a send from the focused track
-    /// (not from an FX channel or the master) at -12 dB.
+    /// "+ FX Channel" (mixer button, Track menu, arrange quick-add): a new FX channel and its
+    /// bus, with no send, whatever is selected or focused (Logic's new aux, Live's new return).
+    /// The send comes from a strip's "+ Send" (see [`Self::add_send`]).
     pub fn add_fx_channel(&mut self) -> Result<TrackId, String> {
-        let s = self.engine.session();
-        let from = self.focus_track().filter(|t| s.track(*t).is_some_and(|t| t.kind != TrackKind::Aux && takes_sends(t.kind)));
-        self.new_fx_channel(from, -12.0)
+        self.new_fx_channel(None, 0.0)
     }
 
     /// New FX Channel (plan 06, L5): a bus, an FX (aux) channel listening to it and, from `from`,
@@ -956,10 +955,10 @@ impl StudioApp {
     }
 
     /// "+ Send": a send from `t` to bus `value` at 0 dB in the first free slot, or a new FX
-    /// channel with its send for [`NEW_FX`].
+    /// channel with its send from `t` at -12 dB for [`NEW_FX`], as one undo step.
     pub fn add_send(&mut self, t: TrackId, value: &str) -> Result<Value, String> {
         if value == NEW_FX {
-            return self.new_fx_channel(Some(t), 0.0).map(|id| json!({"track": id.0}));
+            return self.new_fx_channel(Some(t), -12.0).map(|id| json!({"track": id.0}));
         }
         self.run("mix.send", json!({"track": t.0, "bus": value, "level_db": 0.0}))
     }
@@ -1073,7 +1072,7 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
         let p = ui.painter().with_clip_rect(lane);
         p.rect_filled(add, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
         crate::icons::paint_labeled(&p, add, false, crate::icons::Icon::Plus, 12.0, "FX Channel", FontId::proportional(11.5), TOKENS.text);
-        if resp.on_hover_text("A return channel with a send from the focused track").clicked() {
+        if resp.on_hover_text("A new FX channel (add a send to it from a strip's + Send)").clicked() {
             let _ = app.add_fx_channel();
         }
     }

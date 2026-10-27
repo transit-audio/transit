@@ -696,10 +696,10 @@ fn the_output_dropdown_runs_track_output() {
 }
 
 #[test]
-fn add_fx_channel_is_one_undo_step() {
+fn add_fx_channel_is_one_undo_step_and_adds_no_send() {
     let mut app = app();
-    let r = app.run("track.new", json!({"kind": "audio", "name": "Gtr"})).unwrap();
-    let t = TrackId(r["tracks"][0].as_u64().unwrap());
+    let r = app.run("track.new", json!({"kind": "audio", "name": "Gtr"}));
+    let t = TrackId(r.unwrap()["tracks"][0].as_u64().unwrap());
     app.focus(t);
     let before = undo_len(&mut app);
     let tracks = app.engine.session().tracks.len();
@@ -709,18 +709,55 @@ fn add_fx_channel_is_one_undo_step() {
     assert_eq!(aux.kind, soundcraft_model::TrackKind::Aux);
     let bus = s.bus_by_name("FX 1").unwrap().id;
     assert_eq!(aux.mixer.input, soundcraft_model::Route::Bus(bus));
-    let send = s.track(t).unwrap().mixer.sends.iter().flatten().next().unwrap();
-    assert_eq!(send.target, soundcraft_model::Route::Bus(bus));
+    assert!(s.track(t).unwrap().mixer.sends.iter().all(Option::is_none), "the selected, focused track gets no send (#145)");
     assert_eq!(undo_len(&mut app), before + 1);
     app.run("edit.undo", json!({})).unwrap();
     let s = app.engine.session();
     assert_eq!(s.tracks.len(), tracks);
-    assert!(s.bus_by_name("FX 1").is_none() && s.track(t).unwrap().mixer.sends.iter().all(Option::is_none));
+    assert!(s.bus_by_name("FX 1").is_none());
     // A second one gets the next name and its own undo step.
     app.run("edit.redo", json!({})).unwrap();
     app.add_fx_channel().unwrap();
     assert!(app.engine.session().bus_by_name("FX 2").is_some());
     assert_eq!(undo_len(&mut app), before + 2);
+    assert!(app.engine.session().track(t).unwrap().mixer.sends.iter().all(Option::is_none));
+}
+
+#[test]
+fn the_plus_fx_channel_button_adds_the_channel_and_no_send() {
+    let (mut app, ctx, mut time, t) = mixer_app();
+    app.focus(t);
+    frames(&mut app, &ctx, 3, &mut time);
+    let at = mid(app.mixer.layout.add_fx);
+    click(&mut app, at);
+    frames(&mut app, &ctx, 3, &mut time);
+    let s = app.engine.session();
+    assert!(s.tracks.iter().any(|x| x.name == "FX 1"), "the FX channel exists");
+    assert!(s.track(t).unwrap().mixer.sends.iter().all(Option::is_none), "and the focused track has no send");
+}
+
+#[test]
+fn escape_and_a_click_on_empty_space_clear_the_focused_track() {
+    let (mut app, ctx, mut time, t) = mixer_app();
+    app.focus(t);
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(app.focus_track(), Some(t));
+    assert!(strip(&app, t).focused, "the strip is highlighted");
+    key(&mut app, "Escape");
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(app.focus_track(), None, "Escape drops the focused track");
+    assert!(app.engine.session().edit.selected_tracks.is_empty());
+    assert!(!strip(&app, t).focused, "no strip is highlighted");
+    // Click on empty space below the lanes.
+    app.focus(t);
+    assert_eq!(app.focus_track(), Some(t));
+    app.click_empty(None, 1000);
+    assert_eq!(app.focus_track(), None, "a click on empty space drops it too");
+    frames(&mut app, &ctx, 3, &mut time);
+    assert!(!strip(&app, t).focused);
+    // + FX Channel then has no implicit source.
+    app.add_fx_channel().unwrap();
+    assert!(app.engine.session().track(t).unwrap().mixer.sends.iter().all(Option::is_none));
 }
 
 #[test]
@@ -896,7 +933,7 @@ fn a_send_row_drag_is_one_undo_step() {
 }
 
 #[test]
-fn new_fx_channel_from_a_strip_is_one_undo_step_at_0_db() {
+fn new_fx_channel_from_a_strip_is_one_undo_step_at_minus_12_db() {
     let (mut app, ctx, mut time, t) = mixer_app();
     let tracks = app.engine.session().tracks.len();
     let before = undo_len(&mut app);
@@ -911,7 +948,7 @@ fn new_fx_channel_from_a_strip_is_one_undo_step_at_0_db() {
     let fx = s.tracks.iter().find(|x| x.name == "FX 1").expect("an FX channel");
     assert_eq!((fx.kind, &fx.mixer.input), (soundcraft_model::TrackKind::Aux, &soundcraft_model::Route::Bus(bus)));
     let send = s.track(t).unwrap().mixer.sends[0].clone().unwrap();
-    assert_eq!((send.target, send.level_db), (soundcraft_model::Route::Bus(bus), 0.0));
+    assert_eq!((send.target, send.level_db), (soundcraft_model::Route::Bus(bus), -12.0));
     let fx_id = TrackId(fx.id.0);
     assert_eq!(undo_len(&mut app), before + 1);
     let fs = strip(&app, fx_id);
@@ -981,6 +1018,7 @@ fn routing_menus_never_offer_a_loop() {
     let a = new_track(&mut app, json!({"kind": "audio", "name": "A"}));
     app.focus(a);
     let fx1 = app.add_fx_channel().unwrap();
+    app.add_send(a, "FX 1").unwrap();
     let fx2 = app.new_fx_channel(None, 0.0).unwrap();
     let fx3 = app.new_fx_channel(None, 0.0).unwrap();
     // A -> FX 1 -> FX 2 -> FX 3.

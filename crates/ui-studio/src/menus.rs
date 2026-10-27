@@ -516,7 +516,7 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
         app.ui.mixer_full = !app.ui.mixer_full;
     }
     if pressed(ctx, A::SelectNone) {
-        let _ = app.run("edit.select_none", json!({}));
+        app.deselect_all();
     }
     if pressed(ctx, A::ZoomIn) {
         let _ = app.engine.execute("view.zoom_in", &json!({}));

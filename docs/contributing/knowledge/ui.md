@@ -144,6 +144,17 @@ is clipped before a reserved Add cell on the right. The device chain still expos
 Real UI paint tests in `tests.rs`
 check the colors against the painted backgrounds and the overflow text bounds against Add.
 
+## FX channels, sends and deselect (#145)
+
+`StudioApp::add_fx_channel` calls `new_fx_channel(None, ..)`: bus and FX channel only, never a
+send (Logic's new aux, Live's new return). The strip's "+ Send > New FX Channel..." is
+`add_send(.., NEW_FX)`, which calls `new_fx_channel(Some(track), -12.0)`: channel and send as one
+undo step. `deselect_all` (Escape, `A::SelectNone`) and `click_empty(None, ..)` (empty space below
+the lanes) clear clip and track selection plus `ui.focus_track` and `ui.cursor_track`, because
+`focus_track()` falls back to both. The cursor position stays; Split at cursor and New MIDI Clip
+need a track clicked again, and Paste falls back to the first track. A click on an empty part of a
+track lane still selects that track.
+
 ## Audio Devices sections and pending changes (#107, #108)
 
 The window has a left sidebar (Ableton's Preferences shape) with three sections, one visible at a

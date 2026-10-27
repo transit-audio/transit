@@ -29,3 +29,13 @@ there, in one undo step. With nothing selected, Cycle reuses the existing region
 bars from the bar holding the playhead when there is none. Cycle Off keeps the region, and
 Transport > Set Cycle to Selection (Cmd+L) re-sets it from the selection without toggling Cycle.
 While clips are selected, every Cycle On and Set Cycle to Selection takes the selected clips' span, so a region you dragged on the loop bar is replaced on the next Cycle On unless you deselect the clips first (Escape or click empty space); Select All counts as a clip selection.
+
+## FX channels and sends
+
++ FX Channel (the mixer button, Track > Add FX Channel, or the arrangement quick-add) adds an FX channel and
+its bus and nothing else: no track gets a send, whatever is selected. Sends come from a strip's
+**+ Send** slot. Its **New FX Channel...** entry creates the channel and a send to it from that
+strip at -12 dB, in one undo step, the way Logic and Live do it. Escape in the arrangement, or a
+click on empty space below the tracks, deselects the clips and tracks and clears the focused
+track, so no mixer strip is highlighted and the device chain follows nothing until you click a
+track again.

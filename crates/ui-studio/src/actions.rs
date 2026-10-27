@@ -133,6 +133,19 @@ impl StudioApp {
         }
     }
 
+    /// Escape in the arrangement, or a click on empty space below the lanes: no clips or tracks
+    /// selected and no focused track, so the mixer highlights no strip and "+ FX Channel" has no
+    /// implicit source. `cursor_track` is cleared too (focus falls back to it); the cursor
+    /// position stays, but Split, Paste and New MIDI Clip then need a track clicked again
+    /// (Paste falls back to the first track).
+    pub fn deselect_all(&mut self) {
+        self.auto.selection.clear();
+        self.tracks_selected_by_header = false;
+        self.ui.focus_track = None;
+        self.ui.cursor_track = None;
+        let _ = self.run("edit.select_none", json!({}));
+    }
+
     /// Click on empty timeline: deselect the clips, select the track and put the cursor there.
     /// While playing, the playhead jumps there too (Ableton).
     pub fn click_empty(&mut self, track: Option<TrackId>, at: Samples) {
@@ -142,6 +155,10 @@ impl StudioApp {
             Some(t) => json!({"tracks": [t.0], "start": at}),
             None => json!({"start": at}),
         };
+        if track.is_none() {
+            // Empty space below the lanes: no track stays selected or focused.
+            self.deselect_all();
+        }
         let _ = self.run("edit.select", params);
         if track.is_some() {
             self.ui.focus_track = track;
