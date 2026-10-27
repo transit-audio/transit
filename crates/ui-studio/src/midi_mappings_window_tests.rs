@@ -49,7 +49,7 @@ fn an_oversized_stored_size_opens_within_the_bounds() {
     map(&mut app, "KeyStep", &format!("track:{}:pan", t.0), 50);
     app.ui.midi_mappings.size = [4000.0, 3000.0];
     let w = open(&mut app, &ctx, screen);
-    let (min, max) = midi_learn::window_bounds(egui::vec2(screen.0, screen.1));
+    let (min, max) = midi_learn::window_bounds(egui::vec2(screen.0, screen.1), midi_learn::stretch_widths(&ctx, &midi_learn::rows(&app)));
     let (rw, rh) = (w[2] - w[0], w[3] - w[1]);
     assert!(rw >= min.x - 1.0 && rw <= max.x + 1.0, "width {rw} within {}..{}", min.x, max.x);
     assert!(rh >= min.y - 1.0 && rh <= max.y + 1.0, "height {rh} within {}..{}", min.y, max.y);
@@ -184,7 +184,7 @@ fn a_long_port_name_keeps_learn_and_delete_inside_the_window() {
     app.ui.midi_mappings.size = [0.0, 0.0];
     let w = open(&mut app, &ctx, screen);
     let win = egui::Rect::from_min_max(egui::pos2(w[0], w[1]), egui::pos2(w[2], w[3]));
-    let (_, max) = midi_learn::window_bounds(egui::vec2(screen.0, screen.1));
+    let (_, max) = midi_learn::window_bounds(egui::vec2(screen.0, screen.1), midi_learn::stretch_widths(&ctx, &midi_learn::rows(&app)));
     assert!(win.width() <= max.x + 1.0, "the long name does not widen the window: {}", win.width());
     // The buttons are the last cells of the row: find them by their labels in the rendered shapes.
     let mut learn = None;
@@ -215,5 +215,71 @@ fn collect_text(shape: &egui::epaint::Shape, f: &mut dyn FnMut(&str, egui::Rect)
         egui::epaint::Shape::Text(t) => f(t.galley.text(), t.visual_bounding_rect()),
         egui::epaint::Shape::Vec(v) => v.iter().for_each(|s| collect_text(s, f)),
         _ => {}
+    }
+}
+
+/// The text shapes of one frame as (text, rect, clip rect).
+fn texts_clipped(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64) -> Vec<(String, egui::Rect, egui::Rect)> {
+    *time += 1.0 / 60.0;
+    let mut raw = egui::RawInput {
+        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1920.0, 1080.0))),
+        time: Some(*time),
+        ..Default::default()
+    };
+    app.raw_input_hook(&mut raw);
+    let mut out = ctx.run_ui(raw, |ui| {
+        app.logic(ui.ctx());
+        app.ui(ui);
+    });
+    out.textures_delta.clear();
+    let mut v = Vec::new();
+    for c in &out.shapes {
+        collect_text(&c.shape, &mut |t, r| v.push((t.to_string(), r, c.clip_rect)));
+    }
+    v
+}
+
+#[test]
+fn both_range_fields_and_the_buttons_are_drawn_whole_at_the_default_size() {
+    let screen = (1920.0, 1080.0);
+    let (mut app, ctx, t) = new_app(screen.0, screen.1);
+    map(&mut app, "Arturia KeyLab 49 MkII", &format!("track:{}:volume", t.0), 7);
+    app.run("midi.map", json!({"source": {"port": "Pads", "channel": "any", "kind": "cc", "number": 9}, "target": format!("track:{}:pan", t.0), "range": [0.15, 0.75]})).unwrap();
+    open(&mut app, &ctx, screen);
+    let mut time = 10.0;
+    let texts = texts_clipped(&mut app, &ctx, &mut time);
+    let whole = |text: &str| {
+        let hits: Vec<_> = texts.iter().filter(|(t, ..)| t == text).collect();
+        assert!(!hits.is_empty(), "{text:?} is drawn in {:?}", texts.iter().map(|x| x.0.clone()).collect::<Vec<_>>());
+        for (t, r, clip) in hits {
+            assert!(clip.expand(0.5).contains_rect(*r), "{t:?} {r:?} is clipped to {clip:?}");
+        }
+    };
+    for text in ["0.0", "100.0", "15.0", "75.0", "any", "Learn", "Delete"] {
+        whole(text);
+    }
+    assert_eq!(texts.iter().filter(|(t, ..)| t == "%").count(), 4, "four percent suffixes");
+    for (t, r, clip) in texts.iter().filter(|(t, ..)| t == "%") {
+        assert!(clip.expand(0.5).contains_rect(*r), "{t:?} {r:?} is clipped to {clip:?}");
+    }
+}
+
+#[test]
+fn typical_names_show_untruncated_at_the_default_size() {
+    let screen = (1920.0, 1080.0);
+    let (mut app, ctx, t) = new_app(screen.0, screen.1);
+    app.run("track.rename", json!({"track": t.0, "name": "Lead: Subtractive Synth"})).ok();
+    app.add_device(t, "eq_7band").unwrap();
+    map(&mut app, "Arturia KeyLab 49 MkII", &format!("track:{}:plugin:a:mid_gain", t.0), 74);
+    open(&mut app, &ctx, screen);
+    let target = midi_learn::rows(&app)[0].target.clone();
+    let mut time = 10.0;
+    let texts = texts_clipped(&mut app, &ctx, &mut time);
+    for want in ["Arturia KeyLab 49 MkII", target.as_str()] {
+        assert!(
+            texts.iter().any(|(t, ..)| t == want),
+            "{want:?} is drawn whole (not truncated) in {:?}",
+            texts.iter().map(|x| x.0.clone()).collect::<Vec<_>>()
+        );
     }
 }

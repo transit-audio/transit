@@ -870,7 +870,7 @@ fn kind_color(over: bool) -> Color32 {
 
 /// Natural widths of the table's fixed columns, then the least widths of its stretch columns.
 const COL_CH: f32 = 36.0;
-const COL_RANGE: f32 = 140.0;
+const COL_RANGE: f32 = 124.0;
 const COL_THRU: f32 = 90.0;
 const COL_SCOPE: f32 = 176.0;
 const COL_LEARN: f32 = 90.0;
@@ -878,6 +878,10 @@ const COL_DELETE: f32 = 64.0;
 const MIN_PORT: f32 = 70.0;
 const MIN_SOURCE: f32 = 90.0;
 const MIN_TARGET: f32 = 130.0;
+/// The widest the content-sized columns grow to fit a long name.
+const MAX_PORT: f32 = 220.0;
+const MAX_SOURCE: f32 = 170.0;
+const MAX_TARGET: f32 = 360.0;
 const COLUMN_GAP: f32 = 8.0;
 const COLUMNS: f32 = 9.0;
 const ROW_H: f32 = 24.0;
@@ -894,8 +898,8 @@ const SCROLLBAR_W: f32 = 14.0;
 /// The window's size limits (outer rectangle, in points) on a screen whose content area is
 /// `content`: the table's natural width up to 1.5 times it, and from the Takeover row, the header
 /// and three rows up to the content height under the transport bar.
-pub fn window_bounds(content: egui::Vec2) -> (egui::Vec2, egui::Vec2) {
-    let natural = natural_width();
+pub fn window_bounds(content: egui::Vec2, cols: StretchWidths) -> (egui::Vec2, egui::Vec2) {
+    let natural = natural_width(cols);
     let min = egui::vec2(natural.min(content.x), TAKEOVER_H + HEADER_H + 3.0 * ROW_H + CHROME.y);
     let max = egui::vec2((natural * 1.5).min(content.x).max(min.x), (content.y - crate::theme::TRANSPORT_H).max(min.y));
     (min, max)
@@ -903,11 +907,11 @@ pub fn window_bounds(content: egui::Vec2) -> (egui::Vec2, egui::Vec2) {
 
 /// The table at its natural width: every column at its width, the gaps, the scrollbar and the
 /// window's margins.
-fn natural_width() -> f32 {
-    MIN_PORT
+fn natural_width(cols: StretchWidths) -> f32 {
+    cols.port
         + COL_CH
-        + MIN_SOURCE
-        + MIN_TARGET
+        + cols.source
+        + cols.target
         + COL_RANGE
         + COL_THRU
         + COL_SCOPE
@@ -921,12 +925,34 @@ fn natural_width() -> f32 {
 /// The stored size clamped to `bounds`; the default (natural width, ten rows) when it is unusable.
 fn window_size(stored: [f32; 2], bounds: (egui::Vec2, egui::Vec2)) -> egui::Vec2 {
     let (min, max) = bounds;
-    let size = if stored.iter().all(|v| v.is_finite() && *v > 0.0) { egui::vec2(stored[0], stored[1]) } else { default_window_size() };
+    let size = if stored.iter().all(|v| v.is_finite() && *v > 0.0) { egui::vec2(stored[0], stored[1]) } else { min };
     size.clamp(min, max)
 }
 
-fn default_window_size() -> egui::Vec2 {
-    egui::vec2(natural_width(), TAKEOVER_H + HEADER_H + 10.0 * ROW_H + CHROME.y)
+/// The widths of the stretch columns at which the longest port, source and target among the rows
+/// show whole (within the caps; the floors for a short or empty list).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct StretchWidths {
+    pub port: f32,
+    pub source: f32,
+    pub target: f32,
+}
+
+/// The stretch columns' natural widths for `rows`, measured in the table's font.
+pub fn stretch_widths(ctx: &egui::Context, rows: &[Row]) -> StretchWidths {
+    let font = crate::theme::mono(ctx, 12.0);
+    let longest = |f: &dyn Fn(&Row) -> &str, lo: f32, hi: f32| {
+        let w = rows
+            .iter()
+            .map(|r| ctx.fonts_mut(|fonts| fonts.layout_no_wrap(f(r).to_string(), font.clone(), Color32::WHITE).size().x))
+            .fold(0.0, f32::max);
+        (w + 4.0).clamp(lo, hi)
+    };
+    StretchWidths {
+        port: longest(&|r| r.port.as_str(), MIN_PORT, MAX_PORT),
+        source: longest(&|r| r.source.as_str(), MIN_SOURCE, MAX_SOURCE),
+        target: longest(&|r| r.target.as_str(), MIN_TARGET, MAX_TARGET),
+    }
 }
 
 /// `text` with its middle replaced by an ellipsis until it fits `width`.
@@ -954,9 +980,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    let bounds = window_bounds(ctx.content_rect().size());
-    let size = window_size(app.ui.midi_mappings.size, bounds);
     let rows = rows(app);
+    let cols = stretch_widths(ctx, &rows);
+    let bounds = window_bounds(ctx.content_rect().size(), cols);
+    let size = window_size(app.ui.midi_mappings.size, bounds);
     let dropped = app.midi_learn.dropped;
     let mut takeover = app.ui.midi_takeover;
     let mut actions: Vec<(usize, Action)> = Vec::new();
@@ -1015,10 +1042,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 .auto_shrink([false, false])
                 .min_scrolled_height(3.0 * ROW_H)
                 .max_scroll_height(scroll_h)
-                .column(egui_extras::Column::remainder().at_least(MIN_PORT).clip(true))
+                .column(egui_extras::Column::remainder().at_least(cols.port).clip(true))
                 .column(egui_extras::Column::exact(COL_CH))
-                .column(egui_extras::Column::remainder().at_least(MIN_SOURCE).clip(true))
-                .column(egui_extras::Column::remainder().at_least(MIN_TARGET).clip(true))
+                .column(egui_extras::Column::remainder().at_least(cols.source).clip(true))
+                .column(egui_extras::Column::remainder().at_least(cols.target).clip(true))
                 .column(egui_extras::Column::exact(COL_RANGE))
                 .column(egui_extras::Column::exact(COL_THRU))
                 .column(egui_extras::Column::exact(COL_SCOPE))
@@ -1046,8 +1073,14 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                             let edit_id = egui::Id::new(("mm_range_edit", &row.target_id, matches!(row.scope, Scope::Session)));
                             let held: Option<[f32; 2]> = ui.data(|d| d.get_temp(edit_id));
                             let [mut lo, mut hi] = held.unwrap_or(row.range).map(|v| v * 100.0);
-                            let a = ui.add(egui::DragValue::new(&mut lo).range(0.0..=100.0).suffix("%").speed(0.5));
-                            let b = ui.add(egui::DragValue::new(&mut hi).range(0.0..=100.0).suffix("%").speed(0.5));
+                            // A table cell lays out top down: the pair needs a row of its own.
+                            let (a, b) = ui
+                                .horizontal(|ui| {
+                                    let a = ui.add(egui::DragValue::new(&mut lo).range(0.0..=100.0).suffix("%").speed(0.5));
+                                    let b = ui.add(egui::DragValue::new(&mut hi).range(0.0..=100.0).suffix("%").speed(0.5));
+                                    (a, b)
+                                })
+                                .inner;
                             let now = [lo / 100.0, hi / 100.0];
                             let moved = (now[0] - row.range[0]).abs() > 1e-4 || (now[1] - row.range[1]).abs() > 1e-4;
                             if a.drag_stopped() || a.lost_focus() || b.drag_stopped() || b.lost_focus() {
