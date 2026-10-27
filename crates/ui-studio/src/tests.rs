@@ -737,6 +737,25 @@ fn the_plus_fx_channel_button_adds_the_channel_and_no_send() {
 }
 
 #[test]
+fn a_click_on_empty_mixer_space_clears_the_chosen_track() {
+    let (mut app, ctx, mut time, t) = mixer_app();
+    app.focus(t);
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(app.chosen_track(), Some(t));
+    let add = app.mixer.layout.add_fx;
+    click(&mut app, (add[2] + 60.0, add[1] + 200.0));
+    frames(&mut app, &ctx, 8, &mut time);
+    assert_eq!(app.chosen_track(), None);
+    assert!(!strip(&app, t).focused, "no strip is highlighted");
+    assert_eq!(app.cursor_track(), Some(t), "the edit cursor keeps its track");
+    // A click on a strip's name still focuses it.
+    let at = mid(strip(&app, t).name_rect);
+    click(&mut app, at);
+    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(app.chosen_track(), Some(t));
+}
+
+#[test]
 fn escape_and_a_click_on_empty_space_clear_the_focused_track() {
     let (mut app, ctx, mut time, t) = mixer_app();
     app.focus(t);

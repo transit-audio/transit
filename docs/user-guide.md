@@ -36,6 +36,7 @@ While clips are selected, every Cycle On and Set Cycle to Selection takes the se
 its bus and nothing else: no track gets a send, whatever is selected. Sends come from a strip's
 **+ Send** slot. Its **New FX Channel...** entry creates the channel and a send to it from that
 strip at -12 dB, in one undo step, the way Logic and Live do it. Escape in the arrangement, or a
-click on empty space below the tracks, deselects the clips and tracks and clears the focused
-track, so no mixer strip is highlighted and the device chain follows nothing until you click a
-track again.
+click on empty space below the tracks or in the mixer, deselects the clips and tracks: no mixer
+strip or track header is highlighted. The edit cursor keeps its track, which stays the target of
+cursor commands (Paste, Split, New MIDI Clip) and of the Devices pane until you click a track
+again.

@@ -1054,6 +1054,11 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
     let ins_rows = (((free - 2.0 * SEND_ROW_H) / INSERT_ROW_H).floor().max(1.0) as usize).min(INSERT_ROWS);
     let room = ((free - ins_rows as f32 * INSERT_ROW_H) / SEND_ROW_H).floor().max(0.0) as usize;
     let rows = wanted.min(room);
+    // Empty mixer space deselects, like empty space in the arranger. Registered first so every
+    // strip and control above it wins the click.
+    if ui.interact(area, ui.id().with("mixer_empty"), Sense::click()).clicked() {
+        app.deselect_all();
+    }
     for (i, t) in channels.iter().enumerate() {
         let x = lane.min.x + i as f32 * (STRIP_W + GAP) + if i >= track_count { block_gap } else { 0.0 } - app.mixer.hscroll;
         let r = Rect::from_min_size(pos2(x, lane.min.y), vec2(STRIP_W, lane.height()));
