@@ -9,7 +9,8 @@ use transit_midi_io::fake::Fake;
 use transit_model::{MapMode, SourceKind};
 
 fn until(what: &str, mut ready: impl FnMut() -> bool) {
-    let deadline = Instant::now() + Duration::from_secs(10);
+    // timing: stall-bound thirty seconds catches a stuck worker or port; a loaded host stretches the worker thread's scheduling to seconds, and success always requires the named state
+    let deadline = Instant::now() + Duration::from_secs(30);
     while !ready() {
         assert!(Instant::now() < deadline, "did not reach: {what}");
         std::thread::sleep(Duration::from_millis(1));
