@@ -289,10 +289,8 @@ fn an_item_left_uncommitted_while_the_caller_polls_others_goes_to_expired() {
     e.imports.set_limits(Duration::from_millis(100), 32, Duration::from_secs(30));
     let elapsed = fake_clock(&mut e);
     let (a, b) = (prepare(&mut e, &path), prepare(&mut e, &path));
-    // timing: stall-bound worker completion has a 20-second budget; fake_clock freezes the import TTL
     for id in [a, b] {
         let started = Instant::now();
-        // timing: stall-bound worker completion has a 20-second budget; fake_clock freezes the import TTL
         loop {
             let v = e.imports.progress(id).expect("the id is kept");
             match v["state"].as_str() {

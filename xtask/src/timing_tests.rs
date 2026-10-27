@@ -264,6 +264,64 @@ fn rule_d_catches_the_async_import_short_ttl_hidden_behind_a_call() {
 }
 
 #[test]
+fn rule_d_accepts_same_function_clock_helpers() {
+    let polling = "set_limits(Duration::from_millis(100));\nwhile !ready() { thread::sleep(Duration::from_millis(5)); }";
+    assert_eq!(loop_lines(&wrap(polling)), vec![4]);
+    for helper in [
+        "fake_clock()",
+        "helpers::fake_clock()",
+        "set_clock_for_testing(clock)",
+        "imports.set_clock_for_testing(clock)",
+        "with_clock(clock)",
+        "install_test_clock()",
+    ] {
+        assert!(loop_lines(&wrap(&format!("{helper};\n{polling}"))).is_empty(), "{helper}");
+        assert!(loop_lines(&wrap(&format!("{polling}\n{helper};"))).is_empty(), "{helper}");
+        assert!(loop_lines(&wrap(&format!("let callback = || {{ {helper};\n{polling} }};"))).is_empty(), "{helper}");
+    }
+}
+
+#[test]
+fn rule_d_keeps_clock_helpers_inside_their_function_or_closure() {
+    let polling = "set_limits(Duration::from_millis(100));\nwhile !ready() { thread::sleep(tick); }";
+    for setup in [
+        "fn other() { fake_clock(); }",
+        "let callback = || { fake_clock(); };",
+        "// fake_clock()",
+        "let text = \"fake_clock()\";",
+        "let helper = fake_clock;",
+        "clock_helpers::install();",
+    ] {
+        assert_eq!(loop_lines(&wrap(&format!("{setup}\n{polling}"))), vec![5], "{setup}");
+    }
+    assert_eq!(loop_lines(&format!("fn a() {{ fake_clock(); }}\nfn b() {{ {polling} }}")), vec![3]);
+    assert_eq!(loop_lines(&wrap(&format!("fake_clock();\nlet callback = || {{ {polling} }};"))), vec![5]);
+    assert_eq!(loop_lines(&wrap(&format!("fake_clock();\nfn nested() {{ {polling} }}"))), vec![5]);
+}
+
+#[test]
+fn rule_d_clock_helpers_do_not_exempt_short_wall_clock_exits() {
+    for condition in ["start.elapsed() < Duration::from_millis(100)", "Instant::now() < deadline"] {
+        let source = wrap(&format!(
+            "fake_clock();\nlet deadline = Instant::now() + Duration::from_millis(100);\nwhile {condition} {{ thread::yield_now(); }}"
+        ));
+        assert_eq!(loop_lines(&source), vec![5]);
+    }
+}
+
+#[test]
+fn rule_d_reports_only_the_innermost_paced_loop() {
+    for pace in ["thread::sleep(tick)", "thread::park_timeout(tick)", "thread::yield_now()"] {
+        let source = wrap(&format!("set_limits(Duration::from_millis(100));\nfor _ in 0..5 {{\n    loop {{ if ready() {{ break; }} {pace}; }}\n}}"));
+        assert_eq!(loop_lines(&source), vec![5]);
+        let both_paced = source.replace("for _ in 0..5 {", &format!("for _ in 0..5 {{ {pace};"));
+        assert_eq!(loop_lines(&both_paced), vec![4, 5]);
+        let marked_inner = source.replace("    loop", "    // timing: stall-bound deliberate observation window\n    loop");
+        assert!(loop_lines(&marked_inner).is_empty());
+    }
+}
+
+#[test]
 fn rule_d_keeps_short_call_arguments_inside_their_function_or_closure() {
     let short = "set_limits(Duration::from_millis(100));";
     let polling = "while !ready() { thread::sleep(Duration::from_millis(5)); }";

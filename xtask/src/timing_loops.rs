@@ -309,6 +309,7 @@ impl<'ast> Visit<'ast> for Exit<'_> {
 #[derive(Default)]
 struct Function {
     short_expiry: bool,
+    clock_helper: bool,
     loops: Vec<(usize, PollLoop)>,
 }
 
@@ -387,7 +388,7 @@ impl Scanner<'_> {
     fn finish_function(&mut self, outer: Function) {
         let function = std::mem::replace(&mut self.function, outer);
         for (line, l) in function.loops {
-            if self.in_test && l.paced && (l.timed || (function.short_expiry && !l.injected)) && !self.marked(line) {
+            if self.in_test && l.paced && (l.timed || (function.short_expiry && !l.injected && !function.clock_helper)) && !self.marked(line) {
                 self.hits.push(Hit {
                     path: self.path.into(),
                     line,
@@ -570,10 +571,16 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
     }
 
     fn visit_expr_call(&mut self, e: &'ast syn::ExprCall) {
+        // Naming evidence only: fake_clock, set_clock_for_testing and with_clock are
+        // common installers. Keep it in this function/closure; direct real exits still count.
+        if let Expr::Path(p) = e.func.as_ref() {
+            self.function.clock_helper |= p.path.segments.last().is_some_and(|s| s.ident.to_string().contains("clock"));
+        }
         if let Expr::Path(p) = e.func.as_ref()
             && p.path.segments.last().is_some_and(|s| matches!(s.ident.to_string().as_str(), "sleep" | "park_timeout" | "yield_now"))
         {
-            for l in &mut self.loops {
+            // A nested polling loop owns its sleep; do not report its ancestors for it.
+            if let Some(l) = self.loops.last_mut() {
                 l.paced = true;
             }
         } else {
@@ -588,6 +595,7 @@ impl<'ast> Visit<'ast> for Scanner<'_> {
     }
 
     fn visit_expr_method_call(&mut self, e: &'ast syn::ExprMethodCall) {
+        self.function.clock_helper |= e.method.to_string().contains("clock");
         self.call_arguments(e.args.iter());
         if e.method == "now" {
             for l in &mut self.loops {

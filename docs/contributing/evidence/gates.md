@@ -62,6 +62,9 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
   its guarding expression receives the same duration check as a `break` or `return` branch.
   Numeric comparisons of `.elapsed().as_millis()`, `.as_micros()` or `.as_secs_f64()` also
   count when their literal bound represents less than 250 ms.
+  Each sleep/park/yield call paces only its innermost enclosing loop: a nested `for`/`loop`
+  pair with a sleep only in the inner loop produces one finding, on the inner loop. An outer
+  loop with its own pacing call is checked separately.
   The function-scope heuristic also flags a paced loop when the enclosing function or closure
   passes a sub-250 ms Duration to another call, directly or through a same-file constant or
   local binding. This catches a short TTL configured by `set_limits(...)` even when the loop
@@ -77,9 +80,16 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
   shortening sleeps does not fix scheduler dependence. This is syntax and same-file binding
   analysis, not analysis of timing hidden in called functions, other files or macro expansions.
   The function-scope heuristic accepts an injected read in the loop (`clock.now()` or a `now`
-  parameter), or an injected timestamp passed to a polled call. It cannot see a clock installed
-  inside a helper; document that seam with a reasoned marker on each affected loop. An injected
-  read never exempts a separate short wall-clock exit found by the direct duration check.
+  parameter), or an injected timestamp passed to a polled call. A helper call in the same
+  function or closure also counts as injected-clock evidence for that scope's loops when its
+  callee's final name contains the case-sensitive substring `clock` (#135). The intended
+  allow-list includes `fake_clock`, `set_clock_for_testing` and `with_clock`; qualified calls
+  and method calls follow the same substring rule. Calls in another function or nested
+  closure do not contribute, and a name in a comment, string or uncalled function reference
+  does not count. This is a function-scope naming heuristic, independent of call order; it
+  does not prove that the helper installs a clock or executes on every path. Neither a helper
+  call nor an injected read exempts a separate short wall-clock exit found by the direct
+  duration check.
 - A test never derives a rate, BPM or latency from `thread::sleep` pacing. It injects the
   timestamps (the fake input's `deliver_at`) and asserts the exact value (E49 recurrence,
   the MIDI Monitor Clock BPM test).
