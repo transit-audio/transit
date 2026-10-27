@@ -40,9 +40,11 @@ still fine. The loopback tests play a click out of one output and listen on one 
 `out:in` with 1-based channel numbers, read from the environment:
 
 - `TRANSIT_LOOPBACK_SCARLETT` (default `2:2`): Focusrite USB ASIO, output 2 cabled to input 2.
-- `TRANSIT_LOOPBACK_MODEL12` (default `2:1`): Model 12, output 2 cabled to input 1.
+- `TRANSIT_LOOPBACK_MODEL12` (default `1:1`): Model 12, MAIN L cabled to input 1. The Model 12's MAIN L
+  analog output carries USB OUT 1 (OUT 1 and OUT 2 return through the mixer as the left and right of
+  the main bus), so a cable on MAIN L is pair `1:1`.
 
-Set them when the cable sits elsewhere, for example `TRANSIT_LOOPBACK_MODEL12=3:2`. Each loopback
+Set them when the cable sits elsewhere, for example `TRANSIT_LOOPBACK_MODEL12=2:2`. Each loopback
 test prints the measured round trip, the driver-reported output plus input latency and their
 difference; it passes when the measurement is at least the driver figure and at most that plus eight
 buffers. The interface's output level must be up (monitor knob and the output's fader) for the click

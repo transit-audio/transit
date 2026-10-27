@@ -679,10 +679,12 @@ fn hardware_player_measures_a_hardware_insert_on_the_scarlett_at_128_over_native
 }
 
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
+/// The Model 12's MAIN L analog output carries USB OUT 1 (OUT 1 and OUT 2 return through the mixer as the
+/// left and right of the main bus), so a cable from MAIN L to Input 1 is pair `1:1`.
 #[test]
-#[ignore = "plays a click train out of the Model 12 through the Player (TRANSIT_LOOPBACK_MODEL12, default 2:1)"]
+#[ignore = "plays a click train out of the Model 12 through the Player (TRANSIT_LOOPBACK_MODEL12, default 1:1)"]
 fn hardware_player_measures_a_hardware_insert_on_the_model12_over_native_asio() {
-    hardware_ping_on_native_asio("Model Mixer ASIO Driver", 44_100, None, loopback_pair("TRANSIT_LOOPBACK_MODEL12", "2:1"));
+    hardware_ping_on_native_asio("Model Mixer ASIO Driver", 44_100, None, loopback_pair("TRANSIT_LOOPBACK_MODEL12", "1:1"));
 }
 
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
