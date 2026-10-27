@@ -90,6 +90,16 @@ mod midi;
 mod offline;
 mod plan;
 #[cfg(test)]
+mod plan_fault_tests;
+#[cfg(test)]
+mod plan_instrument_tests;
+#[cfg(test)]
+mod plan_latency_tests;
+#[cfg(test)]
+mod plan_ownership_tests;
+#[cfg(test)]
+mod plan_render_tests;
+#[cfg(test)]
 mod plan_tests;
 mod render_pool;
 mod routing;
