@@ -30,6 +30,10 @@
 
 pub mod handoff;
 
+/// Per-strip job slots for the multicore strip render (issue #124, ADR 0029): the claim and
+/// reclaim protocol between the audio callback and the render workers.
+pub mod strip_jobs;
+
 /// The OS message queue of a window-hosting thread that is not the UI thread (the plug-in host
 /// thread, ADR 0018): attach, wait, dispatch, and a cross-thread waker.
 pub mod gui_thread;
