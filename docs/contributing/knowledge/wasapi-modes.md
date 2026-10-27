@@ -52,8 +52,8 @@ read by `Stream::stats()` as an `ab::StreamStats` snapshot). The Audio Devices p
 
 - **wakes / timeouts / faults.** Events served; waits that timed out (the stream ends); faults that ended it.
 - **skipped.** Exclusive events whose buffer was not free yet (`AUDCLNT_E_BUFFER_TOO_LARGE`), skipped.
-- **late p95 / max.** How late each wake was in microseconds: render, against the previous wake plus one
-  period; capture, against the end of the first packet waiting (its QPC plus its duration, so it includes
+- **gap over period (render) / late (capture) p95 / max.** How late each wake was in microseconds: render, against the previous wake plus one
+  period (printed "gap over period", defined in `docs/troubleshooting.md`); capture, against the end of the first packet waiting (its QPC plus its duration, so it includes
   the pipeline delay of the capture path). The first render wake is not measured. p95 is the upper edge of
   the 16-bin log2 histogram bin (bins under 16, 32, 64, ... microseconds), capped at the exact maximum.
 - **service p95 / max.** Wake to after `ReleaseBuffer` (capture: every waiting packet drained): the

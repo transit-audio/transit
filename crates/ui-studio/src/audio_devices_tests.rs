@@ -1620,10 +1620,10 @@ fn the_window_shows_the_backend_loop_lines_under_the_open_lines_from_a_scripted_
     let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
     assert_eq!(lines.len(), 4, "{lines:?}");
     assert!(lines[0].starts_with("Output open"));
-    assert_eq!(lines[1], "Backend: wakes -, late p95 90 µs, max 90 µs; service p95 100 µs, max 100 µs; skipped 2, timeouts 0; min padding 96");
+    assert_eq!(lines[1], "Backend: gap over period p95 90 µs, max 90 µs; service p95 100 µs, max 100 µs; skipped 2, timeouts 0; min padding 96");
     assert!(lines[2].starts_with("Input open"));
     assert_eq!(
-        lines[3], "Backend: wakes -, late p95 5 µs, max 5 µs; service p95 0 µs, max 0 µs; skipped 0, timeouts 1; max packets 3",
+        lines[3], "Backend: late p95 5 µs, max 5 µs; service p95 0 µs, max 0 µs; skipped 0, timeouts 1; max packets 3",
         "the capture line ends with the most packets of a wake"
     );
     // Two samples a second apart give a rate, not a raw counter.
@@ -1636,7 +1636,7 @@ fn the_window_shows_the_backend_loop_lines_under_the_open_lines_from_a_scripted_
     let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
     // The first sample was taken at the window's first frame, so the span is a little over a second.
     assert!(lines[1].contains("wakes 6") || lines[1].contains("wakes 7") || lines[1].contains("wakes 8"), "{lines:?}");
-    assert!(lines[1].starts_with("Backend: wakes ") && lines[1].contains("/s, late p95"), "a rate, not a counter: {lines:?}");
+    assert!(lines[1].starts_with("Backend: wakes ") && lines[1].contains("/s, gap over period p95"), "a rate, not a counter: {lines:?}");
     assert!(lines[3].starts_with("Backend: wakes ") && lines[3].contains("/s, late p95"), "{lines:?}");
     // A native ASIO driver's events, busy skips with the overloads, join the line once one happened.
     output.overloads = 1;
@@ -1660,7 +1660,7 @@ fn the_window_shows_the_backend_loop_lines_under_the_open_lines_from_a_scripted_
     assert_eq!(lines.len(), 3, "{lines:?}");
     assert_eq!(
         lines[1],
-        "Backend (output / input, one ASIO driver): wakes - / -, gap over period p95 90 / 5 µs, max 90 / 5 µs; service p95 100 / 0 µs, \
+        "Backend (output / input, one ASIO driver): gap over period p95 90 / 5 µs, max 90 / 5 µs; service p95 100 / 0 µs, \
          max 100 / 0 µs; faults 0 / 1; timeouts 0; overloads 1, busy skips 2, position jumps 0, resets 0",
         "{lines:?}"
     );
@@ -1684,6 +1684,25 @@ fn the_window_shows_the_backend_loop_lines_under_the_open_lines_from_a_scripted_
     t.frames(1);
     let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
     assert!(lines[1].starts_with("Backend: wakes ") && lines[1].contains("gap over period"), "{lines:?}");
+}
+
+#[test]
+fn the_jack_and_wasapi_lines_name_the_gap_over_period_and_leave_out_a_wake_rate_not_yet_known() {
+    use soundcraft_playback::telemetry::StreamStats;
+    let output = StreamStats { wakes: 1200, max_wake_late_us: 93_039, ..Default::default() };
+    let mut t = T::new();
+    t.app.audio_devices.injected_backend = Some((Some(output), None));
+    t.open_window();
+    t.app.ui.audio.system = Some("JACK".into());
+    t.frames(1);
+    let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
+    assert_eq!(lines.len(), 3, "{lines:?}");
+    assert!(lines[1].starts_with("Backend: gap over period p95 "), "no dash, no 'late': {lines:?}");
+    assert!(lines[1].contains("max 93039 µs") && !lines[1].contains("wakes") && !lines[1].contains("late p95"), "{lines:?}");
+    t.app.ui.audio.system = Some("WASAPI".into());
+    t.frames(1);
+    let lines: Vec<String> = t.layout()["opened"].as_array().unwrap().iter().map(|l| l.as_str().unwrap().to_string()).collect();
+    assert!(lines[1].starts_with("Backend: gap over period p95 ") && !lines[1].contains("wakes"), "{lines:?}");
 }
 
 #[test]

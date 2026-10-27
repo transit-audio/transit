@@ -341,6 +341,11 @@ pub enum StatsBackend {
     Jack,
 }
 
+/// The `wakes X, ` field of a Backend line, empty when the figure is not known (no rate sampled yet).
+fn wakes_field(wakes: Option<&str>) -> String {
+    wakes.map_or_else(String::new, |w| format!("wakes {w}, "))
+}
+
 /// The number of bins of a [`StreamStats`] histogram.
 pub const STATS_BINS: usize = 16;
 
@@ -392,6 +397,10 @@ pub struct StreamStats {
 }
 
 impl StreamStats {
+    /// The name of the wake figure on every backend that computes it as the time since the previous
+    /// wake beyond one period (WASAPI render, ASIO, JACK); `docs/troubleshooting.md` defines it once.
+    pub const GAP_OVER_PERIOD: &'static str = "gap over period";
+
     /// The bin of a value in microseconds, see the type documentation.
     pub fn bin_of_us(us: u64) -> usize {
         match (us / 16).checked_ilog2() {
@@ -422,17 +431,20 @@ impl StreamStats {
     /// own prefix): wakes, lateness and service percentiles, skips and timeouts, then the minimum
     /// padding (render) or the most packets of a wake (`capture`), and the faults when there were any.
     pub fn line(&self, capture: bool) -> String {
-        self.line_with_wakes(capture, &self.wakes.to_string())
+        self.line_with_wakes(capture, Some(&self.wakes.to_string()))
     }
 
-    /// [`Self::line`] with `wakes` as the text of the wake figure (a total, or a rate).
-    pub fn line_with_wakes(&self, capture: bool, wakes: &str) -> String {
+    /// [`Self::line`] with `wakes` as the text of the wake figure (a total, or a rate); `None`
+    /// leaves the field out. Render reads "gap over period" ([`Self::GAP_OVER_PERIOD`]); capture
+    /// keeps "late" (against the end of the first packet waiting).
+    pub fn line_with_wakes(&self, capture: bool, wakes: Option<&str>) -> String {
         let tail = if capture { format!("max packets {}", self.max_packets_per_wake) } else { format!("min padding {}", self.min_padding_frames) };
         let faults = if self.faults > 0 { format!("; faults {}", self.faults) } else { String::new() };
         let events = if self.overloads + self.busy_skips + self.position_jumps + self.resets > 0 { self.events_tail() } else { String::new() };
         format!(
-            "wakes {}, late p95 {} µs, max {} µs; service p95 {} µs, max {} µs; skipped {}, timeouts {}; {tail}{faults}{events}",
-            wakes,
+            "{}{} p95 {} µs, max {} µs; service p95 {} µs, max {} µs; skipped {}, timeouts {}; {tail}{faults}{events}",
+            wakes_field(wakes),
+            if capture { "late" } else { Self::GAP_OVER_PERIOD },
             self.wake_late_p95_us(),
             self.max_wake_late_us,
             self.service_p95_us(),
@@ -447,7 +459,7 @@ impl StreamStats {
     /// driver-event counters instead, always shown. ASIO's lateness reads "gap over period": the
     /// gap since the previous buffer switch beyond one period, which the driver's cadence decides
     /// (`docs/contributing/knowledge/asio-backend.md`, "Counters"). JACK never fills `timeouts`.
-    pub fn line_for(&self, backend: StatsBackend, capture: bool, wakes: &str) -> String {
+    pub fn line_for(&self, backend: StatsBackend, capture: bool, wakes: Option<&str>) -> String {
         let faults = if self.faults > 0 { format!("; faults {}", self.faults) } else { String::new() };
         let (late, service) = (
             format!("p95 {} µs, max {} µs", self.wake_late_p95_us(), self.max_wake_late_us),
@@ -456,19 +468,20 @@ impl StreamStats {
         match backend {
             StatsBackend::Wasapi => self.line_with_wakes(capture, wakes),
             StatsBackend::Asio => {
-                format!("wakes {wakes}, gap over period {late}; {service}; timeouts {}{faults}{}", self.timeouts, self.events_tail())
+                format!("{}{} {late}; {service}; timeouts {}{faults}{}", wakes_field(wakes), Self::GAP_OVER_PERIOD, self.timeouts, self.events_tail())
             }
-            StatsBackend::Jack => format!("wakes {wakes}, late {late}; {service}{faults}{}", self.events_tail()),
+            StatsBackend::Jack => format!("{}{} {late}; {service}{faults}{}", wakes_field(wakes), Self::GAP_OVER_PERIOD, self.events_tail()),
         }
     }
 
     /// One line for both directions of one ASIO driver (#127): each direction's own figures as
     /// `out / in` (wakes, gap over period, service, faults), then the counters the two share once
     /// (the driver's events and the watchdog's timeouts, read from `output`).
-    pub fn asio_duplex_line(output: &StreamStats, input: &StreamStats, wakes_out: &str, wakes_in: &str) -> String {
+    pub fn asio_duplex_line(output: &StreamStats, input: &StreamStats, wakes: Option<(&str, &str)>) -> String {
         let (o, i) = (output, input);
+        let wakes = wakes.map_or_else(String::new, |(out, inp)| format!("wakes {out} / {inp}, "));
         format!(
-            "wakes {wakes_out} / {wakes_in}, gap over period p95 {} / {} µs, max {} / {} µs; service p95 {} / {} µs, max {} / {} µs; faults {} / {}; timeouts {}{}",
+            "{wakes}gap over period p95 {} / {} µs, max {} / {} µs; service p95 {} / {} µs, max {} / {} µs; faults {} / {}; timeouts {}{}",
             o.wake_late_p95_us(),
             i.wake_late_p95_us(),
             o.max_wake_late_us,
@@ -739,24 +752,40 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            s.line_for(StatsBackend::Wasapi, false, "751/s"),
-            "wakes 751/s, late p95 1024 µs, max 1172 µs; service p95 0 µs, max 0 µs; skipped 1, timeouts 0; min padding 7"
+            s.line_for(StatsBackend::Wasapi, false, Some("751/s")),
+            "wakes 751/s, gap over period p95 1024 µs, max 1172 µs; service p95 0 µs, max 0 µs; skipped 1, timeouts 0; min padding 7"
         );
-        assert!(s.line_for(StatsBackend::Wasapi, true, "1").ends_with("; max packets 3"));
-        let asio = s.line_for(StatsBackend::Asio, false, "751/s");
+        let capture = s.line_for(StatsBackend::Wasapi, true, Some("1"));
+        assert!(capture.ends_with("; max packets 3"));
+        assert!(capture.starts_with("wakes 1, late p95 1024 µs"), "capture is against the first packet's end, so it keeps its own name: {capture}");
+        let asio = s.line_for(StatsBackend::Asio, false, Some("751/s"));
         assert_eq!(
             asio,
             "wakes 751/s, gap over period p95 1024 µs, max 1172 µs; service p95 0 µs, max 0 µs; timeouts 0; overloads 0, busy skips 0, position jumps 0, resets 0"
         );
-        assert_eq!(asio, s.line_for(StatsBackend::Asio, true, "751/s"), "both directions read the same");
+        assert_eq!(asio, s.line_for(StatsBackend::Asio, true, Some("751/s")), "both directions read the same");
         for field in ["late p95", "skipped", "min padding", "max packets"] {
             assert!(!asio.contains(field), "{field} is not ASIO's: {asio}");
         }
-        let jack = StreamStats { faults: 1, overloads: 2, ..s }.line_for(StatsBackend::Jack, true, "1");
+        let jack = StreamStats { faults: 1, overloads: 2, ..s }.line_for(StatsBackend::Jack, true, Some("1"));
         assert_eq!(
             jack,
-            "wakes 1, late p95 1024 µs, max 1172 µs; service p95 0 µs, max 0 µs; faults 1; overloads 2, busy skips 0, position jumps 0, resets 0"
+            "wakes 1, gap over period p95 1024 µs, max 1172 µs; service p95 0 µs, max 0 µs; faults 1; overloads 2, busy skips 0, position jumps 0, resets 0"
         );
+    }
+
+    #[test]
+    fn every_backend_names_the_figure_the_same_and_a_missing_wake_figure_is_left_out() {
+        let s = StreamStats { wakes: 9, ..Default::default() };
+        for backend in [StatsBackend::Wasapi, StatsBackend::Asio, StatsBackend::Jack] {
+            let with = s.line_for(backend, false, Some("5/s"));
+            assert!(with.starts_with("wakes 5/s, gap over period p95 "), "{backend:?}: {with}");
+            let without = s.line_for(backend, false, None);
+            assert!(without.starts_with("gap over period p95 ") && !without.contains("wakes"), "{backend:?}: {without}");
+            assert!(!without.contains(" - ") && !without.contains("late p95"), "{backend:?}: {without}");
+        }
+        assert!(!s.line_for(StatsBackend::Wasapi, true, None).contains("wakes"));
+        assert!(StreamStats::asio_duplex_line(&s, &s, None).starts_with("gap over period p95 "));
     }
 
     #[test]
@@ -766,7 +795,7 @@ mod tests {
         let out = StreamStats { wakes: 9, wake_late_us: hist, max_wake_late_us: 1172, overloads: 1, timeouts: 2, ..Default::default() };
         let inp = StreamStats { wakes: 9, faults: 3, service_us: hist, max_service_us: 700, overloads: 1, timeouts: 2, ..Default::default() };
         assert_eq!(
-            StreamStats::asio_duplex_line(&out, &inp, "751/s", "750/s"),
+            StreamStats::asio_duplex_line(&out, &inp, Some(("751/s", "750/s"))),
             "wakes 751/s / 750/s, gap over period p95 1024 / 0 µs, max 1172 / 0 µs; service p95 0 / 700 µs, max 0 / 700 µs; faults 0 / 3; \
              timeouts 2; overloads 1, busy skips 0, position jumps 0, resets 0"
         );

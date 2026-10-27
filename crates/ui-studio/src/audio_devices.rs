@@ -1730,10 +1730,11 @@ pub(crate) fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
     };
     match shared {
         Some((o, i)) => {
-            let rate = |r: Option<u64>| r.map_or_else(|| "-".to_owned(), |r| format!("{r}/s"));
+            let rate = |r: Option<u64>| r.map(|r| format!("{r}/s"));
+            let wakes = rate(output_rate).zip(rate(input_rate));
             lines.push(format!(
                 "Backend (output / input, one ASIO driver): {}",
-                StreamStats::asio_duplex_line(&o, &i, &rate(output_rate), &rate(input_rate))
+                StreamStats::asio_duplex_line(&o, &i, wakes.as_ref().map(|(a, b)| (a.as_str(), b.as_str())))
             ));
         }
         None => lines.extend(output.map(|s| crate::telemetry::backend_line(&s, false, output_rate, kind))),

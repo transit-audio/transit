@@ -336,6 +336,12 @@ fn or_unknown(s: &str) -> &str {
 impl Report {
     /// The plain text, redacted with `redaction`.
     pub fn render(&self, redaction: &Redaction) -> String {
+        self.render_on(redaction, cfg!(windows))
+    }
+
+    /// [`Self::render`] for a platform that has WASAPI (`wasapi`) or not: the Settings section
+    /// prints the shared-device setting only where it means something (#146).
+    fn render_on(&self, redaction: &Redaction, wasapi: bool) -> String {
         let mut o = String::new();
         let section = |o: &mut String, name: &str| {
             o.push_str("\n== ");
@@ -403,7 +409,13 @@ impl Report {
         o.push_str(&format!("Input device: {}\n", some(&c.input)));
         o.push_str(&format!("Sample rate: {}\n", c.sample_rate.map_or("default".into(), |r| format!("{r} Hz"))));
         o.push_str(&format!("Buffer size: {}\n", c.buffer_size.map_or("default".into(), |b| format!("{b} samples"))));
-        o.push_str(&format!("Shared device (WASAPI): {}\n", c.share_device));
+        if wasapi {
+            o.push_str(&format!(
+                "Shared device (WASAPI): {}
+",
+                c.share_device
+            ));
+        }
         section(&mut o, "Open devices");
         if self.opened.is_empty() {
             o.push_str("No stream is open (report mode opens none).\n");
@@ -688,6 +700,41 @@ mod tests {
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
             log_lines: vec!["INFO opened /home/alice/Music/song.transit".into(), "WARN something".into()],
         }
+    }
+
+    #[test]
+    fn a_linux_shaped_report_has_no_wasapi_setting_and_one_jack_note() {
+        let dev = |name: &str| DeviceInfo {
+            name: name.into(),
+            is_default: false,
+            max_channels: 2,
+            sample_rates: vec![48000],
+            buffer_min: Some(128),
+            buffer_max: Some(128),
+        };
+        let note = soundcraft_playback::backend::native::jack_note("PipeWire 1.0.7", 48_000, 128);
+        let jack = AudioSystem {
+            name: "JACK".into(),
+            is_default: false,
+            outputs: vec![dev("system"), dev("Scarlett"), dev("Monitor")],
+            inputs: vec![dev("system"), dev("Scarlett"), dev("Monitor")],
+            diagnostics: vec![note],
+        };
+        let report = Report { systems: vec![jack], ..fake() };
+        let text = report.render_on(&Redaction::default(), false);
+        assert!(!text.contains("Shared device"), "{text}");
+        assert!(report.render_on(&Redaction::default(), true).contains("Shared device (WASAPI): "));
+        assert_eq!(text.matches("Native JACK (PipeWire 1.0.7) runs at 48000 Hz").count(), 1, "{text}");
+        assert_eq!(text.matches("To pin one instead").count(), 1, "{text}");
+        let heading = text
+            .find(
+                "
+JACK
+",
+            )
+            .expect("the JACK heading");
+        let note_at = text.find("  Note: Native JACK").expect("the note");
+        assert!(note_at > text.rfind("  Output: Monitor").unwrap() && note_at > heading, "after the list: {text}");
     }
 
     #[test]

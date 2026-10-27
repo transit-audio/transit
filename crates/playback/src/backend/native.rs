@@ -69,12 +69,13 @@ pub fn auto_jack_candidate(cfg: &AudioConfig) -> bool {
         && (devices::is_jack_system(cfg.system.as_deref()) || (cfg.system.is_none() && cfg.output.is_none() && cfg.input.is_none()))
 }
 
-/// The Audio Devices note of one JACK port group: the server, its rate (the server's) and the
-/// buffer it runs. Picking another buffer size asks the server to change it, for all its clients;
-/// the server can also be pinned (PipeWire's `pw-metadata`).
-pub fn jack_group_note(group: &str, server: &str, rate: u32, buffer: u32) -> String {
+/// The Audio Devices note of the JACK system, once for all its port groups (#146): the server (name
+/// and version), its rate (the server's) and the buffer it runs. Picking another buffer size asks
+/// the server to change it, for all its clients; the server can also be pinned (PipeWire's
+/// `pw-metadata`).
+pub fn jack_note(server: &str, rate: u32, buffer: u32) -> String {
     format!(
-        "{group}: Native JACK ({server}) runs at {rate} Hz (the server's rate) with a {buffer}-sample buffer; a size picked here is requested of the server on Apply. To pin one instead (PipeWire: pw-metadata -n settings 0 clock.force-quantum {buffer}; JACK 2: jackd -p {buffer})"
+        "Native JACK ({server}) runs at {rate} Hz (the server's rate) with a {buffer}-sample buffer; a size picked here is requested of the server on Apply. To pin one instead (PipeWire: pw-metadata -n settings 0 clock.force-quantum {buffer}; JACK 2: jackd -p {buffer})"
     )
 }
 
@@ -170,7 +171,7 @@ pub fn jack_system() -> AudioSystem {
     match &state {
         transit_audio_jack::ServerState::Running(server) => {
             let name = backend.server_name();
-            let notes = server.devices.iter().map(|d| jack_group_note(&d.name, &name, server.rate, server.buffer)).collect();
+            let notes = vec![jack_note(&name, server.rate, server.buffer)];
             system_from_endpoints(devices::JACK_SYSTEM, &server.endpoints(ab::Direction::Output), &server.endpoints(ab::Direction::Input), &[], notes)
         }
         _ => system_from_endpoints(devices::JACK_SYSTEM, &[], &[], &[], state.diagnostic().into_iter().collect()),
@@ -265,8 +266,8 @@ mod tests {
             assert!(factory_for(&auto_jack).is_none(), "a build without the backend stays cpal");
         }
         assert_eq!(
-            jack_group_note("system", "JACK 1.9.20", 48_000, 128),
-            "system: Native JACK (JACK 1.9.20) runs at 48000 Hz (the server's rate) with a 128-sample buffer; a size picked here is requested of the server on Apply. To pin one instead (PipeWire: pw-metadata -n settings 0 clock.force-quantum 128; JACK 2: jackd -p 128)"
+            jack_note("JACK 1.9.20", 48_000, 128),
+            "Native JACK (JACK 1.9.20) runs at 48000 Hz (the server's rate) with a 128-sample buffer; a size picked here is requested of the server on Apply. To pin one instead (PipeWire: pw-metadata -n settings 0 clock.force-quantum 128; JACK 2: jackd -p 128)"
         );
         let crossed = AudioConfig { backend: Backend::NativeAsio, system: Some("WASAPI".into()), ..Default::default() };
         assert!(factory_for(&crossed).is_none(), "native ASIO never serves the WASAPI system");
