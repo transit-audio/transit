@@ -6,7 +6,7 @@
 //! | Platform | [`MessageQueue::attach`] | [`MessageQueue::wait`] | [`MessageQueue::dispatch`] |
 //! |---|---|---|---|
 //! | Windows | `OleInitialize` (a single-threaded apartment, as winit gives the UI thread) and the thread's message queue | `MsgWaitForMultipleObjectsEx` on any input | `PeekMessageW`, `TranslateMessage`, `DispatchMessageW` |
-//! | elsewhere | nothing | `std::thread::park_timeout` | nothing (no window here needs dispatching) |
+//! | elsewhere | nothing | `std::thread::park_timeout` until a wake or the deadline | nothing (no window here needs dispatching) |
 //!
 //! Contract, on every platform:
 //! - Everything acts on the **calling** thread: attach, wait and dispatch on the thread that
@@ -86,8 +86,7 @@ impl MessageQueue {
             imp::consume();
             return;
         }
-        imp::wait(timeout);
-        self.shared.woken.store(false, Ordering::Release);
+        imp::wait(&self.shared.woken, timeout);
     }
 }
 
@@ -109,6 +108,7 @@ impl QueueWaker {
 
 #[cfg(all(windows, not(feature = "force-fallback")))]
 mod imp {
+    use std::sync::atomic::{AtomicBool, Ordering};
     use std::time::Duration;
     use windows_sys::Win32::System::Ole::{OleInitialize, OleUninitialize};
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -170,11 +170,14 @@ mod imp {
         done
     }
 
-    pub(super) fn wait(timeout: Duration) {
+    /// Returns on any input in the thread's queue (a window message or the wake's `WM_NULL`) or
+    /// at the timeout; the queue itself holds any wake, so the flag only resets coalescing.
+    pub(super) fn wait(woken: &AtomicBool, timeout: Duration) {
         let ms = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX - 1);
         // SAFETY: zero handles with a null array is the documented way to wait on the message
         // queue alone; MWMO_INPUTAVAILABLE also returns for input already in the queue.
         unsafe { MsgWaitForMultipleObjectsEx(0, std::ptr::null(), ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
+        woken.store(false, Ordering::Release);
     }
 
     /// The wake's posted message stays queued for `dispatch`; nothing else to consume.
@@ -190,7 +193,8 @@ mod imp {
 
 #[cfg(any(not(windows), feature = "force-fallback"))]
 mod imp {
-    use std::time::Duration;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::time::{Duration, Instant};
 
     pub(super) fn attach() -> (bool, u32) {
         (false, 0)
@@ -202,8 +206,27 @@ mod imp {
         0
     }
 
-    pub(super) fn wait(timeout: Duration) {
-        std::thread::park_timeout(timeout);
+    /// Parks until a wake sets `woken` or the deadline passes, and returns whether a wake ended
+    /// it. `park_timeout` may return spuriously, or on an unpark that is not a wake (any code can
+    /// unpark this thread), so only the flag ends the wait early. A wake that lands after the
+    /// deadline stays set for the next wait.
+    pub(super) fn wait(woken: &AtomicBool, timeout: Duration) -> bool {
+        let deadline = Instant::now().checked_add(timeout);
+        loop {
+            if woken.swap(false, Ordering::Acquire) {
+                // The wake's unpark may still be pending; take it so the next wait parks.
+                consume();
+                return true;
+            }
+            let remaining = match deadline {
+                Some(d) => d.saturating_duration_since(Instant::now()),
+                None => timeout,
+            };
+            if remaining.is_zero() {
+                return false;
+            }
+            std::thread::park_timeout(remaining);
+        }
     }
 
     /// Takes the unpark token of the wake that ended a wait early, so the next wait waits.
@@ -247,6 +270,38 @@ mod tests {
         q.wait(Duration::from_secs(5));
         assert!(t.elapsed() < Duration::from_secs(2));
         h.join().unwrap();
+    }
+
+    #[test]
+    fn a_spurious_unpark_does_not_end_the_wait() {
+        let q = MessageQueue::attach();
+        // An unpark that is not a wake (as `park_timeout` may also return on its own).
+        std::thread::current().unpark();
+        let t = Instant::now();
+        q.wait(Duration::from_millis(50));
+        assert!(t.elapsed() >= Duration::from_millis(30));
+        q.dispatch(64);
+    }
+
+    #[test]
+    fn a_wake_during_the_wait_ends_it_once() {
+        let q = MessageQueue::attach();
+        let w = q.waker();
+        let h = std::thread::spawn(move || {
+            // timing: sleep-ok lets the main thread enter its wait first; nothing measures this sleep
+            std::thread::sleep(Duration::from_millis(20));
+            w.wake();
+        });
+        let t = Instant::now();
+        q.wait(Duration::from_secs(5));
+        assert!(t.elapsed() < Duration::from_secs(2));
+        h.join().unwrap();
+        // The wake was consumed: the next wait, with no wake, runs to its timeout.
+        q.dispatch(64);
+        let t = Instant::now();
+        q.wait(Duration::from_millis(50));
+        assert!(t.elapsed() >= Duration::from_millis(30));
+        q.dispatch(64);
     }
 
     #[test]
