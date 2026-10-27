@@ -13,14 +13,14 @@ use std::time::{Duration, Instant};
 const STALL: Duration = Duration::from_secs(60);
 
 /// A small xorshift generator: deterministic per seed, no dependency.
-struct Rng(u64);
+pub(super) struct Rng(u64);
 
 impl Rng {
-    fn new(seed: u64) -> Self {
+    pub(super) fn new(seed: u64) -> Self {
         Self(seed.wrapping_mul(0x9E37_79B9_7F4A_7C15) | 1)
     }
 
-    fn next(&mut self) -> u64 {
+    pub(super) fn next(&mut self) -> u64 {
         self.0 ^= self.0 << 13;
         self.0 ^= self.0 >> 7;
         self.0 ^= self.0 << 17;
@@ -29,7 +29,7 @@ impl Rng {
 
     /// The adversarial jitter before or after a compare-and-swap: nothing, a short spin, a
     /// yield, or both.
-    fn jitter(&mut self) {
+    pub(super) fn jitter(&mut self) {
         let r = self.next();
         if r & 1 == 1 {
             for _ in 0..(r >> 8) % 512 {
@@ -44,14 +44,14 @@ impl Rng {
 
 /// A strip's processor stand-in: panics if two threads are inside it at once.
 #[derive(Default)]
-struct Reentry(AtomicBool);
+pub(super) struct Reentry(AtomicBool);
 
 impl Reentry {
-    fn enter(&self) {
+    pub(super) fn enter(&self) {
         assert!(!self.0.swap(true, Ordering::AcqRel), "two threads inside one strip's processor");
     }
 
-    fn leave(&self) {
+    pub(super) fn leave(&self) {
         self.0.store(false, Ordering::Release);
     }
 }
@@ -279,7 +279,7 @@ struct Race {
 
 /// Sets the flag when the thread holding it unwinds, so a waiting thread fails at once instead
 /// of at its stall bound.
-struct FailFlag<'a>(&'a AtomicBool);
+pub(super) struct FailFlag<'a>(pub(super) &'a AtomicBool);
 
 impl Drop for FailFlag<'_> {
     fn drop(&mut self) {
@@ -289,7 +289,7 @@ impl Drop for FailFlag<'_> {
     }
 }
 
-fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+pub(super) fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
     let start = Instant::now();
     while !done() {
         assert!(start.elapsed() < STALL, "stalled waiting for {what}");

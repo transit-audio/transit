@@ -37,15 +37,25 @@ Each strip has one `JobSlot`: an `AtomicU8` state and an `AtomicU64` generation 
 | Retirement | Engine retirement gives each outstanding slot a bounded wait, then quarantines: the worker thread is abandoned, the instance never freed or reused, the fault logged with the plug-in's name. |
 | Default | Serial stays the default unless the bench meets gate 6. |
 
+## Preconditions for callers
+
+The slot enforces its transitions; these rules are the caller's, and the executor's refutation review checks them.
+
+| Rule | Detail |
+|---|---|
+| Single publisher | `publish`, `reclaim`, `consume`, `retire` and `JobSet::begin` only from the audio callback; `state`, `counts`, `faults` and `for_each_pending` from anywhere. Workers only `try_claim`/`try_claim_next` and complete. |
+| Buffer ownership follows the slot state, by convention | Touch a strip's buffers and instance only while holding its `ClaimToken`, after a successful `reclaim`, or after `consume` returned `Ready` (until the next publish). Never on `state() == Done` alone: a `Done` result is read only through `consume`. |
+| Faults are failures | `faults()` counts refused transitions in every build; tests outside `transit-rt` assert `faults() == 0` (inside it, a refusal already fails the test). |
+
 ## Correctness gates (#124) and what slice 1 proves
 
 | Gate | Requirement | Slice 1 | Later slices |
 |---|---|---|---|
-| 1 Exclusive execution | one executor per publish | **Proven for the slot:** threaded claim/reclaim race with injected spins and yields; free-running per-block test with a reentry guard; exhaustive operation sequences (depth 8, two actors) against the table | the worker set and the real strip processor under the same guard |
+| 1 Exclusive execution | one executor per publish | **Proven for the slot:** threaded claim/reclaim race with injected spins and yields; free-running per-block test with a reentry guard; exhaustive operation sequences (depth 8, two actors) against the table | the worker set and the real strip processor under the same guard; the payload hand-off checked across threads (an ARM runner or loom) |
 | 2 No incomplete or stale audio | only `Done` of this generation is mixed | **Proven for the slot:** `Ready` only for `Done` of this generation and only once; `Stale` retired unread; exhaustive per-block interleavings over three blocks | the mixdown reads only through `consume` |
 | 3 Bounded waiting and storage | no wait past the deadline; admission; event ring | groundwork only: every operation is wait-free and allocation-free (allocation-armed test) | deadline policy, admission from measured cost, the deferred-event ring |
 | 4 MIDI and state discontinuities | carry-forward and overflow rules | none | MIDI carry-forward, the continuity instrument |
-| 5 Retirement | bounded wait, quarantine | none (a dropped token leaves the slot `Claimed`, which quarantine will detect) | quarantine |
+| 5 Retirement | bounded wait, quarantine | none (a dropped token leaves the slot `Claimed`, which quarantine will detect) | quarantine; a worker unwinding from a plug-in panic drops its token and leaves the slot `Claimed`: catch it and quarantine |
 | 6 Measured improvement | bench, continuity | none | measurement and the default decision |
 
 ## Deviations from #124
