@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use super::*;
+use std::time::Instant;
 use transit_dsp::event::NoteId;
 
 /// Serializes the unit tests that flip the process-wide serial switch.
@@ -67,4 +68,63 @@ fn sending_a_strip_away_keeps_its_routing_state_and_identity_in_the_table() {
     assert_eq!(table.sink_routes, [Some(1)]);
     assert_eq!(cell.generation, SlotGen::VACANT, "the spare carries no identity");
     assert!(cell.sink_routes.is_empty() && cell.buf.is_empty());
+}
+
+/// Test hook: the strip index whose every worker render sleeps past the deadline and then
+/// panics (a runner fault that is also a late result). `usize::MAX`: none.
+pub(crate) static LATE_PANIC: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
+
+pub(crate) fn late_panic(strip: usize) {
+    if LATE_PANIC.load(Ordering::Relaxed) == strip {
+        std::thread::sleep(Duration::from_millis(20));
+        std::panic::panic_any("injected late runner fault");
+    }
+}
+
+/// A late result whose runner panicked makes its strip suspect at `begin_block`; the pool keeps
+/// that same instance silent (never republished) until a plan replaces it.
+#[test]
+fn a_late_runner_fault_keeps_the_same_instance_suspect() {
+    let _switch = SWITCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut s = Session::default();
+    for _ in 0..6 {
+        s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+    }
+    let mut eng = RangeRender::new(&s, None, transit_time::Range::new(0, 512 * 4000), 512).eng;
+    if eng.start_render_workers(16) == 0 {
+        return;
+    }
+    eng.set_strip_deadline(Some(Duration::from_millis(2)));
+    MixEngine::force_serial(false);
+    LATE_PANIC.store(0, Ordering::Relaxed);
+    let eng = std::thread::spawn(move || {
+        mark_audio_thread();
+        let mut out = vec![vec![0.0f32; 512]; 2];
+        let start = Instant::now();
+        let panics = |e: &MixEngine| e.pool.as_ref().map_or(0, |p| p.set.stats().runner_panics);
+        let mut b = 0i64;
+        while panics(&eng) == 0 && start.elapsed() < Duration::from_secs(10) {
+            eng.render_active(b * 512, 512, &mut out);
+            b += 1;
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        // timing: sleep-ok paces the blocks so the late result is retired, not a measurement
+        for k in 0..60 {
+            eng.render_active((b + k) * 512, 512, &mut out);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        unmark_audio_thread();
+        eng
+    })
+    .join()
+    .unwrap();
+    LATE_PANIC.store(usize::MAX, Ordering::Relaxed);
+    MixEngine::force_serial(true);
+    let pool = eng.pool.as_ref().unwrap();
+    let st = pool.set.stats();
+    let suspect = pool.counters.suspect.load(Ordering::Relaxed);
+    assert_eq!(st.runner_panics, 1, "the faulted instance was republished: {st:?}");
+    assert!(suspect > 0, "the strip stayed silent as suspect");
+    assert!(pool.set.is_suspect(0));
+    drop(eng.into_retired());
 }

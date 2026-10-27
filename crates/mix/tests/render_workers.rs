@@ -351,3 +351,90 @@ fn an_overflowing_ring_while_a_strip_is_away_leaves_nothing_stuck() {
     MixEngine::force_serial(true);
     drop(rig.mix.into_retired());
 }
+
+/// Review F1: a strip that comes home between blocks (`render_workers_settled`, as playback's
+/// service calls it every callback) delivers what was parked for it first, so the release that
+/// arrives next is admitted behind its note-on (or pedal-down), never `Unmatched` ahead of it.
+fn parked_then_settled_then_released(press: impl Fn(&mut Rig) -> EventOutcome, release: impl Fn(&mut Rig) -> EventOutcome) {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    let Some(mut rig) = rig(Duration::from_micros(500)) else {
+        MixEngine::force_serial(true);
+        return;
+    };
+    become_callback();
+    for _ in 0..20 {
+        rig.block();
+    }
+    rig.shared[2].stall_ns.store(100_000_000, Ordering::Relaxed);
+    let start = Instant::now();
+    while rig.mix.render_workers_settled() {
+        assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip never went away");
+        rig.block();
+    }
+    assert_eq!(press(&mut rig), EventOutcome::Queued, "parked while away");
+    // The worker finishes; the strip comes home between blocks, with no block rendered.
+    let start = Instant::now();
+    while !rig.mix.render_workers_settled() {
+        assert!(start.elapsed() < Duration::from_secs(10), "the worker never returned");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let off = release(&mut rig);
+    assert!(off.accepted() && off != EventOutcome::Unmatched, "the release went ahead of what it releases: {off:?}");
+    for _ in 0..16 {
+        rig.block();
+    }
+    let r = rig.shared[2].report();
+    assert_eq!((r.stuck_notes, r.stuck_pedals), (0, 0), "{r:?}");
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    drop(rig.mix.into_retired());
+}
+
+#[test]
+fn a_note_parked_while_away_is_released_after_the_strip_comes_home_between_blocks() {
+    parked_then_settled_then_released(|rig| rig.note_on(2, 0, 60), |rig| rig.note_off(2, 0, 60));
+}
+
+#[test]
+fn a_pedal_parked_while_away_is_lifted_after_the_strip_comes_home_between_blocks() {
+    parked_then_settled_then_released(|rig| rig.pedal(2, 0, true), |rig| rig.pedal(2, 0, false));
+}
+
+/// An `Unstarted` strip keeps its block's events in its instrument's queue; at its next block
+/// they are overdue and land at offset 0. A note's on and off overdue together are split by one
+/// sample (no zero-length note), as the ring does for a `Busy` strip.
+#[test]
+fn an_unstarted_strip_plays_its_overdue_notes_without_a_zero_length_one() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    let Some(mut rig) = rig(Duration::from_micros(1500)) else {
+        MixEngine::force_serial(true);
+        return;
+    };
+    become_callback();
+    for _ in 0..20 {
+        rig.block();
+    }
+    for round in 0..50u8 {
+        let key = 40 + round % 40;
+        for k in 0..INSTRUMENTS {
+            assert!(rig.note_on(k, 5, key).accepted());
+            assert!(rig.note_off(k, 9, key).accepted());
+        }
+        // No time at all: every strip no worker took yet is taken back unrendered.
+        rig.mix.set_strip_deadline(Some(Duration::ZERO));
+        rig.block();
+        rig.mix.set_strip_deadline(Some(Duration::from_micros(1500)));
+        settle(&mut rig);
+    }
+    let f = rig.mix.strip_faults().unwrap().snapshot();
+    assert!(f.overruns_unstarted > 0, "some strips were unstarted: {f:?}");
+    for (k, s) in rig.shared.iter().enumerate() {
+        let r = s.report();
+        assert_eq!((r.stuck_notes, r.faults.zero_length, r.faults.unsorted), (0, 0, 0), "instrument {k}: {r:?}");
+    }
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    drop(rig.mix.into_retired());
+}

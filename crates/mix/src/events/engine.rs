@@ -252,7 +252,7 @@ impl MixEngine {
         }
         if let Some(pool) = self.pool.as_mut()
             && let Some(i) = plan.tables.strip_of(ev.target.0)
-            && pool.is_away(i)
+            && pool.parks(i)
         {
             return pool.park(i, ev, &self.events, self.max_block);
         }

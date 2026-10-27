@@ -253,6 +253,8 @@ impl StripRunner for Runner {
     fn run(&self, strip: usize, generation: u64) {
         // A worker only ever renders for the audio thread (the logger never blocks there).
         mark_audio_thread();
+        #[cfg(test)]
+        tests::late_panic(strip);
         if !self.cells.with(strip, |job| job.render(generation)) {
             self.counters.conflicts.fetch_add(1, Ordering::Relaxed);
         }
@@ -514,8 +516,10 @@ impl StripPool {
         if let Some(a) = self.away.get_mut(i) {
             *a = false;
         }
+        // Kept current while the strip is home: events still parked for it (the ring's
+        // end-of-block carry) keep new ones parking behind them, checked against it.
         if let Some(b) = self.binding.get_mut(i) {
-            *b = None;
+            *b = table.instrument.as_ref().map(|inst| inst.generation);
         }
         let flags = self.pending.get_mut(i).map_or(0, std::mem::take);
         if flags != 0 {
@@ -557,8 +561,13 @@ impl StripPool {
     }
 
     /// Between blocks: brings home every away strip whose worker is done (its slot no longer
-    /// `Claimed`; the cell's lock orders the worker's writes). True when every strip is home.
-    pub(crate) fn settle(&mut self, strips: &mut [Strip], events: &EngineEvents) -> bool {
+    /// `Claimed`; the cell's lock orders the worker's writes) and delivers what was parked for it
+    /// into its instrument at once, so an event that arrives next (admitted directly, the strip
+    /// being home) lands behind the older ones: a note-off is never admitted ahead of its parked
+    /// note-on. True when every strip is home.
+    pub(crate) fn settle(&mut self, strips: &mut [Strip], events: &mut EngineEvents, s: &Session, block_len: usize) -> bool {
+        let clock = BlockClock { frame: events.next_frame, frames: block_len };
+        let g = self.generation + 1;
         let mut home = true;
         for (i, st) in strips.iter_mut().enumerate().take(self.away.len()) {
             if !self.is_away(i) {
@@ -567,9 +576,17 @@ impl StripPool {
             let claimed = self.set.jobs().slot(i).is_some_and(|s| s.state() == transit_rt::strip_jobs::State::Claimed);
             if claimed || !self.bring_home(i, st, events) {
                 home = false;
+                continue;
             }
+            self.deliver(i, st, g, &clock, events, s);
         }
         home
+    }
+
+    /// Strip `i` is away, or still has deferred MIDI (the ring's end-of-block carry): an event
+    /// for it is parked behind what it holds, never admitted ahead of it.
+    pub(crate) fn parks(&self, i: usize) -> bool {
+        self.is_away(i) || self.has_parked(i)
     }
 
     /// Phase 1 of one block through the worker set (see the module docs and ADR 0029):
@@ -626,6 +643,10 @@ impl StripPool {
                 continue;
             }
             if self.set.is_suspect(i) {
+                // A late result that panicked made it suspect at `begin_block`: this instance.
+                if self.suspect_gen[i] == SlotGen::VACANT {
+                    self.suspect_gen[i] = st.generation;
+                }
                 if st.generation == self.suspect_gen[i] {
                     self.silent[i] = true;
                     self.counters.suspect.fetch_add(1, Ordering::Relaxed);
@@ -633,6 +654,7 @@ impl StripPool {
                 }
                 // The instance was replaced (ADR 0007: per plug-in, by the next plan).
                 self.set.clear_suspect(i);
+                self.suspect_gen[i] = SlotGen::VACANT;
             }
             if self.send(i, st, b) {
                 if let Ok(Published::Published) = self.set.publish(i) {

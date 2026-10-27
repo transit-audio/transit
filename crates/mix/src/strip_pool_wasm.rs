@@ -74,7 +74,10 @@ impl StripPool {
     ) -> (EventOutcome, Option<u64>) {
         match *self {}
     }
-    pub(crate) fn settle(&mut self, _strips: &mut [Strip], _events: &events::EngineEvents) -> bool {
+    pub(crate) fn settle(&mut self, _strips: &mut [Strip], _events: &mut events::EngineEvents, _s: &Session, _block_len: usize) -> bool {
+        match *self {}
+    }
+    pub(crate) fn parks(&self, _i: usize) -> bool {
         match *self {}
     }
     pub(crate) fn flush_parked(&mut self, _strips: &mut [Strip], _events: &mut events::EngineEvents, _s: &Session, _block_len: usize) {
