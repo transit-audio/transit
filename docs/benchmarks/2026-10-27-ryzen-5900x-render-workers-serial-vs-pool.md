@@ -51,9 +51,21 @@ Loads: `idle`; `spin`, one busy normal-priority thread per logical core; `extern
 
 A second run of the heavy spin rows: workers 5 late at 64 (max 4817 µs), 0 at 128 (p99 2117 µs, max 2295 µs); serial 0 and 0.
 
+## After the slice 4 review (finish spins instead of yielding)
+
+`WorkerSet::finish` now spins between sweeps, bounded by the deadline (ADR 0029 deviation 4 amended). Same harness, same machine:
+
+| fixture | frames | path | load | late /2000 before | late /2000 after | p50/p99/max µs after |
+|---|---|---|---|---|---|---|
+| heavy | 64 | workers | spin | 7 (and 5 in a second run) | 0 | 144/457/510 |
+| heavy | 128 | workers | spin | 39 (and 0, p99 2117, in a second run) | 0 | 232/280/652 |
+| light | 64 | workers | cargo check | 4 | 0 | 81/105/494 |
+
+Every other row of both fixtures also read 0 late blocks after the change; serial is unchanged (heavy spin: 0 late at 64 and 128). The bench measures the deadline from the block's entry (no device callback); the app now measures it from the callback's entry.
+
 ## Reading
 
 - **Typical cost.** The workers cut the median render time by about 2 to 3.5 times in every configuration, and the light fixture never came near the period on either path when idle.
-- **Late blocks under load, with zero overruns.** Under a full spin load or a `cargo check`, the workers path had late blocks (3 to 39 per 2000, up to 18 ms) while serial had none, and **no overrun was counted in those blocks**: every strip finished, but the callback itself lost the processor. The cause is `std::thread::yield_now` in `WorkerSet::finish` (ADR 0029 deviation 4: spin 64 sweeps, then yield between sweeps). On Windows it is `SwitchToThread`, which hands the core to any ready thread, normal-priority ones included, for a scheduler quantum. Experiment (not committed): with the yield replaced by `spin_loop` hints, the same rows read 0 late blocks (heavy spin: max 386 µs at 64, 490 µs at 128; light external: max 587 µs and 576 µs). Changing the wait policy is a `transit-rt` change (ADR 0029 deviation 4 and its refutation review), out of scope for slice 4; it is the first follow-up before a default decision.
+- **Late blocks under load, with zero overruns.** Under a full spin load or a `cargo check`, the workers path had late blocks (3 to 39 per 2000, up to 18 ms) while serial had none, and **no overrun was counted in those blocks**: every strip finished, but the callback itself lost the processor. The cause is `std::thread::yield_now` in `WorkerSet::finish` (ADR 0029 deviation 4: spin 64 sweeps, then yield between sweeps). On Windows it is `SwitchToThread`, which hands the core to any ready thread, normal-priority ones included, for a scheduler quantum. Experiment (not committed): with the yield replaced by `spin_loop` hints, the same rows read 0 late blocks (heavy spin: max 386 µs at 64, 490 µs at 128; light external: max 587 µs and 576 µs). The slice 4 review made that change (see above): 0 late blocks in every row.
 - **Overruns.** Only the forced stall made any: 3 busy and 1 late per run, each busy block a hole of one block in the instrument's time, no stuck note, the sustained note resumed and was released.
 - **Inline renders.** The callback renders one to two strips per block itself (admission), so the workers path is never slower than serial at the median.

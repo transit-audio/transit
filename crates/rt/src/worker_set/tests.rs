@@ -19,8 +19,8 @@ use std::sync::atomic::{AtomicU8, AtomicU32};
 pub(super) const STALL: Duration = Duration::from_secs(60);
 
 /// How far past its deadline `finish` (or past its bound `shutdown`) may return. The overshoot
-/// by design is one sweep of the slots plus one `yield_now` (finish) or one 1 ms sleep
-/// (shutdown); on a loaded runner a yield or a sleep can cost several scheduler quanta (about
+/// by design is one sweep of the slots (finish) or one 1 ms sleep (shutdown); on a loaded runner
+/// the test thread (not promoted) can still be preempted for several scheduler quanta (about
 /// 15 ms each on Windows). 200 ms is over ten quanta: a failure means the call waited for a
 /// worker, not jitter.
 pub(super) const SLACK: Duration = Duration::from_millis(200);
@@ -706,4 +706,64 @@ fn shutdown_with_an_unrepresentable_bound_waits_for_the_worker() {
     fake.release(0);
     let q = shutting.join().expect("shutdown thread");
     assert!(q.is_empty(), "{q:?}");
+}
+
+/// Review of slice 4: with a busy normal-priority thread on every core, `finish` still returns
+/// at its deadline (it spins between sweeps, it never yields its core to the load) and leaves the
+/// stalled strip a counted `Late` overrun. Timing is asserted only as a stall bound: the test
+/// thread is not promoted, so the load can preempt it like any thread.
+#[test]
+fn finish_spins_to_its_deadline_under_a_load_on_every_core() {
+    /// Stops the load when dropped, also when an assertion fails.
+    struct Load(Arc<AtomicBool>, Vec<std::thread::JoinHandle<()>>);
+    impl Drop for Load {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Relaxed);
+            for h in self.1.drain(..) {
+                let _ = h.join();
+            }
+        }
+    }
+    let stop = Arc::new(AtomicBool::new(false));
+    let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+    let handles: Vec<_> = (0..cores)
+        .map(|_| {
+            let stop = Arc::clone(&stop);
+            std::thread::spawn(move || {
+                let mut x = 1u64;
+                while !stop.load(Ordering::Relaxed) {
+                    x = std::hint::black_box(x.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1));
+                }
+            })
+        })
+        .collect();
+    let load = Load(stop, handles);
+    let fake = Fake::new(4, Duration::ZERO);
+    fake.set(2, Behavior::Stall);
+    let mut set = set_of(&fake, 2);
+    // Too costly to render inline: a worker takes it (and stalls), or it is taken back unstarted.
+    set.set_cost_estimate(2, Duration::from_secs(1));
+    let mut worst = Duration::ZERO;
+    let mut overran = false;
+    for g in 1..=20u64 {
+        assert!(set.begin_block(g));
+        for s in 0..4 {
+            let _ = set.publish(s).expect("publish");
+        }
+        set.wake(4);
+        let deadline = Instant::now() + Duration::from_millis(5);
+        let _ = set.finish(deadline, |_| {});
+        let returned = Instant::now();
+        assert!(returned >= deadline || (0..4).all(|s| set.outcome(s) != Some(Outcome::Pending)));
+        worst = worst.max(returned.saturating_duration_since(deadline));
+        assert!((0..4).all(|s| set.outcome(s) != Some(Outcome::Pending)), "every strip resolved");
+        overran |= matches!(set.outcome(2), Some(Outcome::Overrun(_)));
+    }
+    assert!(overran, "once a worker took the stalled strip it was a counted overrun");
+    drop(load);
+    fake.release(2);
+    println!("worst overshoot past the deadline under load: {worst:?}");
+    // timing: stall-bound SLACK is over ten scheduler quanta; see its definition
+    assert!(worst < SLACK, "finish returned {worst:?} past its deadline under load");
+    let _ = set.shutdown(STALL);
 }

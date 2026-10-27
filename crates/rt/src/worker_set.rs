@@ -21,14 +21,15 @@
 //!    - a slot still `Published` is reclaimed and rendered inline through the caller's closure,
 //!      only if the strip's estimated cost fits in the time left (the admission limit):
 //!      [`Outcome::Inline`]; otherwise it stays available to the workers until the deadline;
-//!    - a slot `Claimed` is waited for by sweeping again: spinning with
-//!      [`std::hint::spin_loop`] for a few sweeps, then [`std::thread::yield_now`] between
-//!      sweeps, never a lock and never past the deadline;
+//!    - a slot `Claimed` is waited for by sweeping again, spinning with
+//!      [`std::hint::spin_loop`] between sweeps: never a yield, a lock or a sleep, and never past
+//!      the deadline (a yield on Windows is `SwitchToThread`, which can hand the core to a
+//!      normal-priority thread for a whole scheduler quantum: a late block under load);
 //!    - at the deadline every strip not resolved is an [`Outcome::Overrun`]: a slot still
 //!      `Published` is reclaimed and retired unrendered ([`OverrunCause::Unstarted`]), a slot
 //!      still `Claimed` is left alone ([`OverrunCause::Late`]; the next block skips it).
 //!
-//! `finish` returns no later than the deadline plus one sweep, one yield and whatever inline
+//! `finish` returns no later than the deadline plus one sweep and whatever inline
 //! render was admitted before the deadline (at most one strip's cost beyond its estimate). It
 //! never blocks on a worker. Silence for an overrun strip is the caller's job; the set reports
 //! one [`Outcome`] per strip in a preallocated table and counts overruns, inline renders and late
@@ -265,9 +266,7 @@ impl Quarantine {
 /// How long `Drop` waits for the workers when [`WorkerSet::shutdown`] was not called.
 const DROP_BOUND: Duration = Duration::from_secs(1);
 
-/// Sweeps of `finish` that spin before it starts yielding between sweeps.
-const SPIN_SWEEPS: u32 = 64;
-/// `spin_loop` hints per spinning sweep.
+/// `spin_loop` hints between two sweeps of `finish` that made no progress.
 const SPINS_PER_SWEEP: u32 = 32;
 
 /// The fixed worker set and the publisher of its job slots. See the module docs.
@@ -597,7 +596,6 @@ impl WorkerSet {
     pub fn finish(&mut self, deadline: Instant, mut inline: impl FnMut(usize)) -> BlockReport {
         let g = self.generation;
         let mut open = (0..self.published_len).filter(|&k| self.outcomes[self.published[k]] == Outcome::Pending).count();
-        let mut idle_sweeps = 0u32;
         while open > 0 {
             let mut progressed = false;
             for k in 0..self.published_len {
@@ -636,15 +634,12 @@ impl WorkerSet {
                 self.overrun_the_rest(g);
                 break;
             }
-            if progressed {
-                idle_sweeps = 0;
-            } else if idle_sweeps < SPIN_SWEEPS {
-                idle_sweeps += 1;
+            // Spin, bounded by the deadline (checked once per sweep above): a worker sharing this
+            // core waits at most until the deadline, and then its strip is a counted overrun.
+            if !progressed {
                 for _ in 0..SPINS_PER_SWEEP {
                     std::hint::spin_loop();
                 }
-            } else {
-                std::thread::yield_now();
             }
         }
         self.report()
