@@ -221,4 +221,3 @@ impl IComponentTrait for Synth {
         unsafe { s.write(text.as_mut_ptr().cast(), text.len() as i32, &mut n) }
     }
 }
-

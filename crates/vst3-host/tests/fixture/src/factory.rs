@@ -86,4 +86,3 @@ impl IPluginFactory2Trait for Factory {
         kResultOk
     }
 }
-

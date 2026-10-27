@@ -210,4 +210,3 @@ impl IEditControllerTrait for Synth {
         std::ptr::null_mut()
     }
 }
-

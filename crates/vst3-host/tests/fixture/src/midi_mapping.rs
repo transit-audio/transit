@@ -15,4 +15,3 @@ impl IMidiMappingTrait for Synth {
         }
     }
 }
-

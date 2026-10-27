@@ -39,4 +39,3 @@ impl IConnectionPointTrait for GainController {
         kResultOk
     }
 }
-

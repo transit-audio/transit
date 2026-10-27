@@ -49,13 +49,13 @@
 
 #![allow(non_snake_case, clippy::missing_safety_doc)]
 
+mod audio_processor;
 mod component;
 mod connection_point;
-mod audio_processor;
 mod edit_controller;
+mod factory;
 mod midi_mapping;
 mod plug_view;
-mod factory;
 
 use std::ffi::{c_char, c_int, c_void};
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicPtr, AtomicU32, AtomicU64, AtomicUsize, Ordering};

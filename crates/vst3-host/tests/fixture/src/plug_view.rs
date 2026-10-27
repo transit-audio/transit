@@ -72,4 +72,3 @@ impl IPlugViewTrait for View {
         kResultOk
     }
 }
-
