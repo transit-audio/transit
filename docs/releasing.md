@@ -31,7 +31,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
    GitHub's generated notes. Check the release page when the archives look right. The body can still be
    replaced after publication with `gh release edit <tag> --notes-file <file>`.
 6. `release.yml` then announces the release on Discord (the "Announce on Discord" step, which runs after
-   the release is published). It reads the published release body back, posts the top-level bullets of its `## Highlights` section (up to
+   the release is published). It posts as "transit releaser" and reads the published release body back, posting the top-level bullets of its `## Highlights` section (up to
    1800 characters; the first paragraph when there is no Highlights section) with a link to the
    release, and stops at the checksums section. Put the Highlights first when you write the notes.
    The step uses the `DISCORD_WEBHOOK_URL` repository secret; with the secret missing it logs and

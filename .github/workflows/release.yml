@@ -337,7 +337,7 @@ jobs:
           fi
           desc="${desc}"$'\n\n'"Full notes and downloads: ${url}"
           payload="$(jq -n --arg tag "$TAG" --arg url "$url" --arg desc "$desc" \
-            '{content: ("**transit " + $tag + " is out**"), embeds: [{title: ("transit " + $tag + " is out"), url: $url, description: $desc}]}')"
+            '{username: "transit releaser", content: ("**transit " + $tag + " is out**"), embeds: [{title: ("transit " + $tag + " is out"), url: $url, description: $desc}]}')"
           curl --fail-with-body --silent --show-error --max-time 20 \
             -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"
           echo "posted to Discord"
@@ -355,7 +355,7 @@ jobs:
         run: |
           if [ -z "$DISCORD_WEBHOOK_URL" ]; then echo "no webhook, skipping"; exit 0; fi
           payload="$(jq -n --arg url "https://github.com/${GITHUB_REPOSITORY}/releases" \
-            '{content: "Test post from the release workflow; ignore.", embeds: [{title: "transit release workflow test", url: $url, description: "Test post from the release workflow; ignore."}]}')"
+            '{username: "transit releaser", content: "Test post from the release workflow; ignore.", embeds: [{title: "transit release workflow test", url: $url, description: "Test post from the release workflow; ignore."}]}')"
           curl --fail-with-body --silent --show-error --max-time 20 \
             -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"
           echo "posted to Discord"
