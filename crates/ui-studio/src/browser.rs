@@ -18,6 +18,12 @@
 //! Audition is not built: the engine and `Player` have no way to play a file outside the
 //! document (plan 06, L29; proposal: an additive `Player::audition`).
 
+mod header;
+pub use header::parse_header;
+use header::read_info;
+mod plugins;
+use plugins::{plugins, scan_note};
+
 use crate::StudioApp;
 use crate::arrange::R4;
 use crate::icons::Icon;
@@ -26,7 +32,6 @@ use crate::theme::TOKENS;
 use egui::{Align2, CursorIcon, FontId, Pos2, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use serde_json::json;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::time::Instant;
@@ -38,9 +43,6 @@ pub const ROW_H: f32 = 20.0;
 const MIN_W: f32 = 200.0;
 const MAX_W: f32 = 560.0;
 const INDENT: f32 = 14.0;
-/// How much of an audio file is read for its header.
-const HEADER_BYTES: u64 = 64 * 1024;
-
 /// Extensions `file.import_audio` decodes (the engine's decoders; the same list as the app's
 /// Open dialog).
 pub const AUDIO_EXT: &[&str] = &["wav", "wave", "bwf", "aif", "aiff", "aifc", "flac", "mp3", "ogg"];
@@ -276,13 +278,6 @@ struct PluginItem {
     category: String,
 }
 
-enum PRow {
-    Heading(String),
-    Vendor(String),
-    Note(String),
-    Item(usize),
-}
-
 /// Runtime state of the browser (never saved).
 pub struct BrowserState {
     pub listings: HashMap<PathBuf, Listing>,
@@ -491,139 +486,6 @@ fn hidden(_: &std::fs::DirEntry) -> bool {
     false
 }
 
-/// The most RIFF chunk headers walked, and the furthest file offset looked at, for one WAV.
-const MAX_CHUNKS: usize = 32;
-const MAX_WALK_BYTES: u64 = 4 * 1024 * 1024;
-
-/// A file's header, parsed. A WAV is walked chunk by chunk (headers read, bodies skipped by
-/// seeking, bounded in count and offset) so a large bext, iXML or artwork chunk before `fmt `
-/// does not hide the format; anything else is parsed from its first [`HEADER_BYTES`].
-fn read_info(p: &Path) -> Option<FileInfo> {
-    let mut f = std::fs::File::open(p).ok()?;
-    let mut head = [0u8; 12];
-    f.read_exact(&mut head).ok()?;
-    if matches!(&head[..4], b"RIFF" | b"RF64") && &head[8..12] == b"WAVE" {
-        return read_wav_info(&mut f, head);
-    }
-    let mut b = head.to_vec();
-    f.take(HEADER_BYTES - 12).read_to_end(&mut b).ok()?;
-    parse_header(&b)
-}
-
-/// Collect `fmt `, `ds64` and the `data` header of a WAV into a small synthetic header and parse
-/// that, so the format rules live in [`parse_header`] only.
-fn read_wav_info<F: Read + std::io::Seek>(f: &mut F, head: [u8; 12]) -> Option<FileInfo> {
-    let mut b = head.to_vec();
-    let mut off = 12u64;
-    for _ in 0..MAX_CHUNKS {
-        if off > MAX_WALK_BYTES {
-            return None;
-        }
-        let mut h = [0u8; 8];
-        f.read_exact(&mut h).ok()?;
-        let size = u64::from(u32::from_le_bytes([h[4], h[5], h[6], h[7]]));
-        let keep = match &h[..4] {
-            b"fmt " | b"ds64" => size.min(64) as usize,
-            b"data" => {
-                b.extend_from_slice(&h);
-                return parse_header(&b);
-            }
-            _ => 0,
-        };
-        if keep > 0 {
-            b.extend_from_slice(&h[..4]);
-            b.extend_from_slice(&(keep as u32).to_le_bytes());
-            let at = b.len();
-            b.resize(at + keep, 0);
-            f.read_exact(&mut b[at..]).ok()?;
-        }
-        let next = off.checked_add(8)?.checked_add(size)?.checked_add(size & 1)?;
-        f.seek(std::io::SeekFrom::Start(next)).ok()?;
-        // The synthetic chunk is `keep` bytes long (padded to even), whatever the real one was.
-        if keep & 1 == 1 {
-            b.push(0);
-        }
-        off = next;
-    }
-    None
-}
-
-fn u16le(b: &[u8], at: usize) -> Option<u16> {
-    Some(u16::from_le_bytes(b.get(at..at + 2)?.try_into().ok()?))
-}
-fn u32le(b: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_le_bytes(b.get(at..at + 4)?.try_into().ok()?))
-}
-fn u64le(b: &[u8], at: usize) -> Option<u64> {
-    Some(u64::from_le_bytes(b.get(at..at + 8)?.try_into().ok()?))
-}
-fn u32be(b: &[u8], at: usize) -> Option<u32> {
-    Some(u32::from_be_bytes(b.get(at..at + 4)?.try_into().ok()?))
-}
-
-/// Length, channels and rate from the start of a WAV (RIFF, RF64), AIFF/AIFF-C or FLAC file;
-/// `None` for anything else (MP3 and Ogg have no length in their header).
-pub fn parse_header(b: &[u8]) -> Option<FileInfo> {
-    match b.get(..4)? {
-        b"RIFF" | b"RF64" if b.get(8..12)? == b"WAVE" => {
-            let (mut at, mut fmt, mut ds64, mut data) = (12usize, None, None, None);
-            while at + 8 <= b.len() {
-                let id = b.get(at..at + 4)?;
-                let size = u32le(b, at + 4)? as usize;
-                let body = at + 8;
-                match id {
-                    b"fmt " => fmt = Some((u16le(b, body + 2)?, u32le(b, body + 4)?, u16le(b, body + 12)?)),
-                    b"ds64" => ds64 = u64le(b, body + 8),
-                    b"data" => {
-                        data = Some(if size == u32::MAX as usize { ds64? } else { size as u64 });
-                        break;
-                    }
-                    _ => {}
-                }
-                at = body.checked_add(size)?.checked_add(size & 1)?;
-            }
-            let ((channels, rate, align), data) = (fmt?, data?);
-            (channels > 0 && rate > 0 && align > 0).then(|| FileInfo { secs: (data / u64::from(align)) as f64 / f64::from(rate), channels, rate })
-        }
-        b"FORM" if matches!(b.get(8..12)?, b"AIFF" | b"AIFC") => {
-            let mut at = 12usize;
-            while at + 8 <= b.len() {
-                let id = b.get(at..at + 4)?;
-                let size = u32be(b, at + 4)? as usize;
-                let body = at + 8;
-                if id == b"COMM" {
-                    let channels = u16::from_be_bytes(b.get(body..body + 2)?.try_into().ok()?);
-                    let frames = u32be(b, body + 2)?;
-                    let rate = extended(b.get(body + 8..body + 18)?)?;
-                    return (channels > 0 && rate > 0.0).then(|| FileInfo { secs: f64::from(frames) / rate, channels, rate: rate.round() as u32 });
-                }
-                at = body.checked_add(size)?.checked_add(size & 1)?;
-            }
-            None
-        }
-        b"fLaC" => {
-            // The first metadata block is STREAMINFO: rate (20 bits), channels-1 (3), bits-1 (5),
-            // total samples (36), from byte 10 of its body.
-            let s = b.get(8 + 10..8 + 18)?;
-            let rate = (u32::from(s[0]) << 12) | (u32::from(s[1]) << 4) | (u32::from(s[2]) >> 4);
-            let channels = u16::from((s[2] >> 1) & 0x7) + 1;
-            let total = (u64::from(s[3] & 0x0F) << 32) | u64::from(u32::from_be_bytes([s[4], s[5], s[6], s[7]]));
-            (rate > 0).then(|| FileInfo { secs: total as f64 / f64::from(rate), channels, rate })
-        }
-        _ => None,
-    }
-}
-
-/// An 80-bit IEEE extended float (AIFF's sample rate).
-fn extended(b: &[u8]) -> Option<f64> {
-    let exp = i32::from(u16::from_be_bytes([b[0], b[1]]) & 0x7FFF);
-    let mant = u64::from_be_bytes(b.get(2..10)?.try_into().ok()?);
-    if exp == 0 && mant == 0 {
-        return Some(0.0);
-    }
-    Some(mant as f64 * 2f64.powi(exp - 16383 - 63))
-}
-
 /// What a user-typed folder becomes: trimmed, unquoted, and `D:` read as `D:\`.
 pub fn normalize_location(s: &str) -> Option<String> {
     let t = s.trim().trim_matches('"').trim();
@@ -757,73 +619,6 @@ impl StudioApp {
         let audio = |t: &TrackId| s.track(*t).is_some_and(|t| t.kind == TrackKind::Audio);
         let track = [self.focus_track(), self.cursor_track()].into_iter().flatten().find(audio);
         self.import_files(files, track, self.cursor())
-    }
-
-    /// Put a plug-in where it was dropped: an instrument on an instrument track (or a new
-    /// instrument track below the tracks), an effect at the end of a track's chain.
-    pub fn drop_plugin(&mut self, id: &str, name: &str, instrument: bool, target: Target) -> Result<(), String> {
-        let track = match target {
-            Target::Track { track, .. } => track,
-            Target::Below { .. } if instrument => return self.new_instrument_track(id, name),
-            Target::Below { .. } => {
-                self.status = format!("Drop {name} on a track, a mixer strip or the device chain");
-                return Err(self.status.clone());
-            }
-        };
-        let Some(t) = self.engine.session().track(track).map(|t| (t.kind, t.name.clone())) else { return Err("no such track".into()) };
-        if instrument {
-            if t.0 != TrackKind::Instrument {
-                self.status = format!("{name} is an instrument: drop it on an instrument track (or below the tracks for a new one)");
-                return Err(self.status.clone());
-            }
-            self.set_instrument(track, id)?;
-            self.status = format!("Loaded {name} on {}", t.1);
-        } else {
-            let before = self.status.clone();
-            self.add_device(track, id)?;
-            if self.status == before {
-                self.status = format!("Added {name} to {}", t.1);
-            }
-        }
-        self.ui.focus_track = Some(track);
-        Ok(())
-    }
-
-    /// Double-click on a plug-in: the same as a drop on the focused track.
-    pub fn plugin_to_focus(&mut self, id: &str, name: &str, instrument: bool) -> Result<(), String> {
-        let Some(track) = self.focus_track() else {
-            self.status = format!("Click a track first, then double-click {name}");
-            return Err(self.status.clone());
-        };
-        self.drop_plugin(id, name, instrument, Target::Track { track, at: None })
-    }
-
-    /// A new instrument track playing `id`: `track.new` and `mix.instrument` as one undo step.
-    fn new_instrument_track(&mut self, id: &str, name: &str) -> Result<(), String> {
-        let before = self.engine.session_arc();
-        self.browser.serial += 1;
-        let key = format!("browser:instrument:{}", self.browser.serial);
-        self.engine.end_merge();
-        let r = self.engine.execute_merged("track.new", &json!({"kind": "instrument"}), &key).and_then(|v| {
-            let t = v["tracks"][0].as_u64().unwrap_or_default();
-            self.engine.execute_merged("mix.instrument", &json!({"track": t, "plugin": id}), &key).map(|_| TrackId(t))
-        });
-        self.engine.end_merge();
-        match r {
-            Ok(t) => {
-                let tn = self.engine.session().track(t).map_or_else(String::new, |t| t.name.clone());
-                self.status = format!("Loaded {name} on a new track, {tn}");
-                self.ui.focus_track = Some(t);
-                Ok(())
-            }
-            Err(e) => {
-                if !std::sync::Arc::ptr_eq(&before, &self.engine.session_arc()) {
-                    self.engine.undo();
-                }
-                self.status = format!("{name}: {e}");
-                Err(self.status.clone())
-            }
-        }
     }
 
     /// What lies under `pos` for a drop, from last frame's arrangement, mixer and device layouts.
@@ -1397,200 +1192,5 @@ fn tree(app: &mut StudioApp, ui: &mut Ui, area: Rect, layout: &mut BrowserLayout
         }
         let files = in_order(&app.browser.selected);
         app.browser.drag = Some(Drag { payload: Payload::Files(files), target: None });
-    }
-}
-
-/// "Scanning…", "Not scanned yet…" or a failure, for the Plug-ins tab; `None` once scanned.
-fn scan_note() -> Option<String> {
-    if let Some(s) = crate::plugin_scan::scanning_label() {
-        return Some(s);
-    }
-    match crate::plugin_scan::state().as_str() {
-        "idle" => Some("VST3 and CLAP: not scanned yet (Audio › Scan Plug-ins)".into()),
-        "done" => None,
-        other => Some(format!("Scan {other}")),
-    }
-}
-
-/// Built-in plug-ins plus the scan caches, refreshed when the scan state changes.
-fn catalog(app: &mut StudioApp) -> Vec<PluginItem> {
-    let state = crate::plugin_scan::state();
-    if let Some((s, items)) = &app.browser.catalog
-        && *s == state
-    {
-        return items.clone();
-    }
-    let mut items: Vec<PluginItem> = app
-        .builtin_plugins()
-        .into_iter()
-        .map(|e| PluginItem { id: e.id, name: e.name, vendor: "Built-in".into(), format: "Built-in", instrument: e.instrument, category: e.category })
-        .collect();
-    for (format, list) in [("VST3", crate::plugin_scan::cached_vst3()), ("CLAP", crate::plugin_scan::cached_clap())] {
-        for crate::plugin_scan::CachedPlugin { id, name, vendor, instrument } in list.unwrap_or_default() {
-            let vendor = if vendor.trim().is_empty() { "Other".to_string() } else { vendor };
-            items.push(PluginItem { id, name, vendor, format, instrument, category: String::new() });
-        }
-    }
-    app.browser.catalog = Some((state, items.clone()));
-    items
-}
-
-/// The Plug-ins tab's rows: favorites, then instruments, then effects, each by vendor
-/// (built-in first).
-fn plugin_rows(items: &[PluginItem], favorites: &[String], filter: &str) -> Vec<PRow> {
-    let f = filter.trim().to_lowercase();
-    let keep = |p: &PluginItem| {
-        f.is_empty() || [p.name.as_str(), p.vendor.as_str(), p.format, p.category.as_str()].iter().any(|s| s.to_lowercase().contains(&f))
-    };
-    let mut out = Vec::new();
-    let favs: Vec<usize> = favorites.iter().filter_map(|id| items.iter().position(|p| &p.id == id)).filter(|i| keep(&items[*i])).collect();
-    if !favs.is_empty() {
-        out.push(PRow::Heading("Favorites".into()));
-        out.extend(favs.into_iter().map(PRow::Item));
-    }
-    for (heading, instrument) in [("Instruments", true), ("Effects", false)] {
-        let mut idx: Vec<usize> = (0..items.len()).filter(|i| items[*i].instrument == instrument && keep(&items[*i])).collect();
-        idx.sort_by_key(|i| {
-            let p = &items[*i];
-            (p.vendor != "Built-in", p.vendor.to_lowercase(), p.name.to_lowercase())
-        });
-        out.push(PRow::Heading(heading.into()));
-        if idx.is_empty() {
-            out.push(PRow::Note(if f.is_empty() { "None".into() } else { "No match".into() }));
-        }
-        let mut vendor: Option<&str> = None;
-        for i in idx {
-            let v = items[i].vendor.as_str();
-            if vendor != Some(v) {
-                out.push(PRow::Vendor(v.to_string()));
-                vendor = Some(v);
-            }
-            out.push(PRow::Item(i));
-        }
-    }
-    out
-}
-
-fn plugins(app: &mut StudioApp, ui: &mut Ui, area: Rect, layout: &mut BrowserLayout) {
-    let items = catalog(app);
-    let mut rows = Vec::new();
-    if let Some(note) = scan_note() {
-        rows.push(PRow::Note(note));
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(250));
-    }
-    rows.extend(plugin_rows(&items, &app.ui.browser.favorites, &app.browser.plugin_filter));
-    let content_h = rows.len() as f32 * ROW_H + 8.0;
-    app.browser.plugin_scroll = wheel(ui, area, app.browser.plugin_scroll, content_h);
-    let p = ui.painter().with_clip_rect(area);
-    let mut star_click: Option<String> = None;
-    let mut pick: Option<(usize, bool)> = None;
-    let mut drag_from: Option<usize> = None;
-    for (i, row) in rows.iter().enumerate() {
-        let y = area.min.y + i as f32 * ROW_H - app.browser.plugin_scroll;
-        let r = Rect::from_min_size(pos2(area.min.x, y), vec2(area.width(), ROW_H));
-        let shown = r.max.y >= area.min.y && r.min.y <= area.max.y;
-        let mut out = PluginRowLayout { rect: shown.then(|| r4(r)), ..PluginRowLayout::default() };
-        match row {
-            PRow::Heading(t) => {
-                out.row = "heading";
-                out.name.clone_from(t);
-                if shown {
-                    p.text(pos2(r.min.x + 8.0, r.center().y + 2.0), Align2::LEFT_CENTER, t, FontId::proportional(12.0), TOKENS.text);
-                }
-            }
-            PRow::Vendor(t) => {
-                out.row = "vendor";
-                out.name.clone_from(t);
-                if shown {
-                    p.text(pos2(r.min.x + 14.0, r.center().y), Align2::LEFT_CENTER, t, FontId::proportional(10.5), TOKENS.text_dim);
-                }
-            }
-            PRow::Note(t) => {
-                out.row = "note";
-                out.name.clone_from(t);
-                if shown {
-                    p.text(pos2(r.min.x + 14.0, r.center().y), Align2::LEFT_CENTER, t, FontId::proportional(10.5), TOKENS.text_dim);
-                }
-            }
-            PRow::Item(k) => {
-                let it = &items[*k];
-                let fav = app.ui.browser.favorites.contains(&it.id);
-                let selected = app.browser.plugin_selected.as_deref() == Some(it.id.as_str());
-                out = PluginRowLayout {
-                    row: "plugin",
-                    id: it.id.clone(),
-                    name: it.name.clone(),
-                    vendor: it.vendor.clone(),
-                    format: it.format.to_string(),
-                    instrument: it.instrument,
-                    favorite: fav,
-                    selected,
-                    rect: out.rect,
-                    star: None,
-                };
-                if shown {
-                    let resp = ui.interact(r.intersect(area), ui.id().with(("browser_plugin", i, &it.id)), Sense::click_and_drag());
-                    if selected {
-                        p.rect_filled(r, 0.0, TOKENS.accent.gamma_multiply(0.28));
-                    } else if resp.hovered() {
-                        p.rect_filled(r, 0.0, TOKENS.button);
-                    }
-                    let sr = Rect::from_min_size(pos2(r.max.x - 24.0, r.min.y + 2.0), vec2(16.0, 16.0));
-                    let tag = if it.format == "Built-in" { it.category.clone() } else { it.format.to_string() };
-                    p.text(pos2(sr.min.x - 6.0, r.center().y), Align2::RIGHT_CENTER, &tag, FontId::proportional(10.0), TOKENS.text_dim);
-                    let name_r = Rect::from_min_max(pos2(r.min.x + 24.0, r.min.y), pos2(sr.min.x - 60.0, r.max.y));
-                    p.with_clip_rect(name_r.intersect(area)).text(
-                        name_r.left_center(),
-                        Align2::LEFT_CENTER,
-                        &it.name,
-                        FontId::proportional(12.0),
-                        TOKENS.text,
-                    );
-                    let sresp = ui.interact(sr, ui.id().with(("browser_star", i, &it.id)), Sense::click());
-                    let ink = if fav {
-                        TOKENS.accent
-                    } else if sresp.hovered() {
-                        TOKENS.text
-                    } else {
-                        TOKENS.text_dim.gamma_multiply(0.6)
-                    };
-                    crate::icons::paint(&p, sr.center(), if fav { Icon::StarFilled } else { Icon::Star }, 13.0, ink);
-                    if sresp.on_hover_text(if fav { "Remove from Favorites" } else { "Add to Favorites" }).clicked() {
-                        star_click = Some(it.id.clone());
-                    }
-                    out.star = Some(r4(sr));
-                    if resp.clicked() {
-                        pick = Some((*k, false));
-                    }
-                    if resp.double_clicked() {
-                        pick = Some((*k, true));
-                    }
-                    if resp.drag_started() {
-                        drag_from = Some(*k);
-                    }
-                }
-            }
-        }
-        layout.plugins.push(out);
-    }
-    if let Some(id) = star_click {
-        let favs = &mut app.ui.browser.favorites;
-        if let Some(k) = favs.iter().position(|f| *f == id) {
-            favs.remove(k);
-        } else {
-            favs.push(id);
-        }
-    } else if let Some((k, double)) = pick {
-        let it = &items[k];
-        app.browser.plugin_selected = Some(it.id.clone());
-        if double {
-            let _ = app.plugin_to_focus(&it.id, &it.name, it.instrument);
-        }
-    }
-    if let Some(k) = drag_from {
-        let it = &items[k];
-        app.browser.plugin_selected = Some(it.id.clone());
-        app.browser.drag =
-            Some(Drag { payload: Payload::Plugin { id: it.id.clone(), name: it.name.clone(), instrument: it.instrument }, target: None });
     }
 }
