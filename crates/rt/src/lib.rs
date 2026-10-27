@@ -34,6 +34,10 @@ pub mod handoff;
 /// reclaim protocol between the audio callback and the render workers.
 pub mod strip_jobs;
 
+/// Deferred MIDI for strips the render skipped (issue #124 slice 3, ADR 0029): a fixed per-strip
+/// ring with the carry-forward ordering rule and the overflow rule, and the continuity test
+/// instrument.
+pub mod midi_defer;
 /// The fixed strip render worker set and the audio callback's bounded deadline policy (issue
 /// #124 slice 2, ADR 0029): parked workers, inline admission by measured cost, quarantine.
 pub mod worker_set;
