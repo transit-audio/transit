@@ -1,0 +1,773 @@
+//! A fixed set of strip render workers and the audio callback's bounded deadline policy (issue
+//! #124 slice 2, ADR 0029), built on the job slots of [`crate::strip_jobs`].
+//!
+//! [`WorkerSet::new`] starts N threads once, off the audio path; each promotes itself once with
+//! [`crate::promote_audio_thread`] (unless told not to), then loops: claim a published strip with
+//! [`JobSet::try_claim_next`], run the caller's [`StripRunner`] on it, complete it, and park when
+//! nothing is left. The [`WorkerSet`] value is the one publisher: its block methods take
+//! `&mut self`, so only the thread that owns it (the audio callback) can call them.
+//!
+//! One block, on the audio callback:
+//!
+//! 1. [`WorkerSet::begin_block`]: the per-block rule. Every slot is read first: a `Done` left
+//!    from an earlier block (a late worker's result) is retired unread; a slot still `Claimed`
+//!    marks its strip busy for this whole block.
+//! 2. [`WorkerSet::publish`] for each strip to render. Write a strip's inputs before its publish,
+//!    and only when [`WorkerSet::is_busy`] is false: a busy strip belongs to a worker. Publishing
+//!    a busy strip returns [`Published::Skipped`] and the strip is an overrun for the block.
+//! 3. [`WorkerSet::wake`] to unpark idle workers (allocation-free, never blocks).
+//! 4. [`WorkerSet::finish`] with the block deadline. The deadline policy:
+//!    - a slot `Done` for this block is consumed: [`Outcome::Mixed`] (the caller mixes it);
+//!    - a slot still `Published` is reclaimed and rendered inline through the caller's closure,
+//!      only if the strip's estimated cost fits in the time left (the admission limit):
+//!      [`Outcome::Inline`]; otherwise it stays available to the workers until the deadline;
+//!    - a slot `Claimed` is waited for by sweeping again: spinning with
+//!      [`std::hint::spin_loop`] for a few sweeps, then [`std::thread::yield_now`] between
+//!      sweeps, never a lock and never past the deadline;
+//!    - at the deadline every strip not resolved is an [`Outcome::Overrun`]: a slot still
+//!      `Published` is reclaimed and retired unrendered ([`OverrunCause::Unstarted`]), a slot
+//!      still `Claimed` is left alone ([`OverrunCause::Late`]; the next block skips it).
+//!
+//! `finish` returns no later than the deadline plus one sweep, one yield and whatever inline
+//! render was admitted before the deadline (at most one strip's cost beyond its estimate). It
+//! never blocks on a worker. Silence for an overrun strip is the caller's job; the set reports
+//! one [`Outcome`] per strip in a preallocated table and counts overruns, inline renders and late
+//! results in [`Stats`].
+//!
+//! **Admission.** Each render's duration (worker or inline) updates the strip's cost estimate, a
+//! nanosecond EWMA (weight 1/4) in an `AtomicU64`. A strip is reclaimed for an inline render only
+//! while the time left before the deadline is positive and at least its estimate. A strip never
+//! measured has estimate 0 and is admitted while any time is left.
+//!
+//! **Faults in the runner.** The worker loop catches a panic from [`StripRunner::run`]
+//! (`catch_unwind`), completes the slot anyway (so it is never left `Claimed` by an unwind) and
+//! flags the strip: [`Outcome::Faulted`], counted in [`Stats::runner_panics`]. Its output must not
+//! be mixed and its instance may be in any state; the caller retires the strip. A panic in the
+//! inline closure is the caller's (it unwinds through `finish`; the slot stays `Reclaimed` and
+//! the next `begin_block` retires it).
+//!
+//! **Retirement and quarantine** (gate 5). [`WorkerSet::shutdown`] stops and wakes every
+//! worker and joins each within one bound. A worker still running at the bound is abandoned: its
+//! `JoinHandle` is forgotten (never joined later), its slot stays `Claimed`, one clone of the
+//! shared state (and with it the [`StripRunner`]) is leaked so nothing it may still execute in is
+//! freed, and the [`Quarantine`] report names the worker and its strip. **The caller must never
+//! reuse or free a quarantined strip's instance or buffers.**
+//!
+//! Nothing after [`WorkerSet::new`] allocates on the publisher's path or the worker loop.
+//! No `unsafe`.
+
+use crate::Promotion;
+use crate::strip_jobs::{Consume, JobSet, PublishError, State};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
+
+/// Renders one strip for one block. Called on a worker thread for a claimed strip; the
+/// implementation owns the strip's instance and buffers for the call (ADR 0029, buffer
+/// ownership follows the slot state).
+pub trait StripRunner: Send + Sync + 'static {
+    /// Renders `strip` for block `generation`. Must not allocate, lock or block on the audio
+    /// path; a panic is caught by the worker and reported as [`Outcome::Faulted`].
+    fn run(&self, strip: usize, generation: u64);
+}
+
+/// How a [`WorkerSet`] is built.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Config {
+    /// Worker threads (the caller decides, typically cores minus one; 0 renders everything
+    /// inline).
+    pub workers: usize,
+    /// Strip slots (the most strips a plan can hold).
+    pub strips: usize,
+    /// Promote each worker with [`crate::promote_audio_thread`] at start.
+    pub promote: bool,
+}
+
+/// What became of one strip in the current block.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Outcome {
+    /// Not published this block.
+    NotPublished,
+    /// Published; [`WorkerSet::finish`] has not resolved it yet.
+    Pending,
+    /// A worker rendered it for this block and the result was consumed: mix it.
+    Mixed,
+    /// The callback rendered it inline through the `finish` closure: mix it.
+    Inline,
+    /// No result for this block: the strip is silence (a counted stream fault).
+    Overrun(OverrunCause),
+    /// The runner panicked on a worker: no result, the instance is suspect.
+    Faulted,
+}
+
+/// Why a strip is an [`Outcome::Overrun`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OverrunCause {
+    /// A worker still held it from an earlier block, so it was not published (the per-block
+    /// rule).
+    Busy,
+    /// A worker claimed it this block and had not finished at the deadline.
+    Late,
+    /// No thread had started it at the deadline and the admission limit refused an inline
+    /// render; it was taken back unrendered.
+    Unstarted,
+}
+
+/// What [`WorkerSet::publish`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[must_use]
+pub enum Published {
+    /// The strip is published for this block.
+    Published,
+    /// A worker still holds the strip from an earlier block: not published, an overrun.
+    Skipped,
+}
+
+/// Why [`WorkerSet::publish`] refused (each one a caller error, counted in [`Stats::misuse`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PublishRefused {
+    /// No block is open ([`WorkerSet::begin_block`] not called or refused, or the set is shut
+    /// down).
+    NoBlock,
+    /// No strip slot at that index.
+    OutOfRange,
+    /// The strip was already published (or skipped) in this block.
+    Twice,
+    /// The slot refused the publish (see [`PublishError`]).
+    Slot(PublishError),
+}
+
+/// Counts for one block, from [`WorkerSet::finish`].
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BlockReport {
+    /// [`Outcome::Mixed`] strips.
+    pub mixed: usize,
+    /// [`Outcome::Inline`] strips.
+    pub inline: usize,
+    /// [`Outcome::Overrun`] strips, all causes.
+    pub overrun: usize,
+    /// [`Outcome::Faulted`] strips.
+    pub faulted: usize,
+}
+
+/// Running totals since construction (stream-stats style; a snapshot, workers keep moving).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Stats {
+    /// Blocks begun.
+    pub blocks: u64,
+    /// Worker results consumed ([`Outcome::Mixed`]).
+    pub mixed: u64,
+    /// Inline renders by the callback ([`Outcome::Inline`]).
+    pub inline_renders: u64,
+    /// Runner calls completed by workers (including late and faulted ones).
+    pub worker_runs: u64,
+    /// Overruns, all causes.
+    pub overruns: u64,
+    /// Overruns with [`OverrunCause::Late`]: claimed, not done at the deadline (late claims).
+    pub overruns_late: u64,
+    /// Overruns with [`OverrunCause::Busy`]: skipped, a worker still held the strip.
+    pub overruns_busy: u64,
+    /// Overruns with [`OverrunCause::Unstarted`]: refused by the admission limit.
+    pub overruns_unstarted: u64,
+    /// Late results retired unread at a later `begin_block`.
+    pub late_results: u64,
+    /// Runner panics caught by workers ([`Outcome::Faulted`]).
+    pub runner_panics: u64,
+    /// Refused publisher calls (caller errors).
+    pub misuse: u64,
+}
+
+#[derive(Default)]
+struct Counters {
+    blocks: AtomicU64,
+    mixed: AtomicU64,
+    inline_renders: AtomicU64,
+    worker_runs: AtomicU64,
+    overruns_late: AtomicU64,
+    overruns_busy: AtomicU64,
+    overruns_unstarted: AtomicU64,
+    late_results: AtomicU64,
+    runner_panics: AtomicU64,
+    misuse: AtomicU64,
+}
+
+/// Adds one to a statistic. Relaxed: no other memory is published through it.
+fn bump(c: &AtomicU64) {
+    c.fetch_add(1, Ordering::Relaxed);
+}
+
+/// One worker's shared state.
+struct WorkerSlot {
+    /// Set by the publisher's wake (and by shutdown); taken by the worker before it sweeps.
+    woken: AtomicBool,
+    /// The strip the worker is inside, plus one (0: none). For wake selection and quarantine.
+    current: AtomicUsize,
+    /// What the worker's promotion achieved (unset when promotion is off or not done yet).
+    promotion: OnceLock<Promotion>,
+}
+
+struct Shared {
+    jobs: JobSet,
+    runner: Arc<dyn StripRunner>,
+    /// Per strip: estimated render cost, nanoseconds (EWMA; 0 = never measured).
+    cost_ns: Box<[AtomicU64]>,
+    /// Per strip: the runner panicked on the last claimed render. Written by the worker before
+    /// its completing Release, read by the publisher after its consuming Acquire.
+    panicked: Box<[AtomicBool]>,
+    workers: Box<[WorkerSlot]>,
+    stop: AtomicBool,
+    stats: Counters,
+}
+
+impl Shared {
+    fn record_cost(&self, strip: usize, took: Duration) {
+        let Some(c) = self.cost_ns.get(strip) else { return };
+        let ns = u64::try_from(took.as_nanos()).unwrap_or(u64::MAX).max(1);
+        // Relaxed: an estimate; one executor per strip at a time writes it.
+        let old = c.load(Ordering::Relaxed);
+        let new = if old == 0 { ns } else { old - old / 4 + ns / 4 };
+        c.store(new, Ordering::Relaxed);
+    }
+}
+
+/// The workers [`WorkerSet::shutdown`] abandoned. Empty when every worker returned in time.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[must_use]
+pub struct Quarantine {
+    /// Abandoned worker indices.
+    pub workers: Vec<usize>,
+    /// The strips those workers were inside (left `Claimed`). Never reuse or free their
+    /// instances or buffers.
+    pub strips: Vec<usize>,
+}
+
+impl Quarantine {
+    /// True when no worker was abandoned.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.workers.is_empty()
+    }
+}
+
+/// How long `Drop` waits for the workers when [`WorkerSet::shutdown`] was not called.
+const DROP_BOUND: Duration = Duration::from_secs(1);
+
+/// Sweeps of `finish` that spin before it starts yielding between sweeps.
+const SPIN_SWEEPS: u32 = 64;
+/// `spin_loop` hints per spinning sweep.
+const SPINS_PER_SWEEP: u32 = 32;
+
+/// The fixed worker set and the publisher of its job slots. See the module docs.
+pub struct WorkerSet {
+    shared: Arc<Shared>,
+    handles: Vec<Option<JoinHandle<()>>>,
+    threads: Vec<std::thread::Thread>,
+    /// The open block (0: none).
+    generation: u64,
+    outcomes: Box<[Outcome]>,
+    /// Per strip: a worker held it at `begin_block`.
+    busy: Box<[bool]>,
+    /// Strips published this block, in publish order (the first `published_len`).
+    published: Box<[usize]>,
+    published_len: usize,
+    /// Strips skipped this block (busy).
+    skipped: usize,
+    /// Where the next wake starts looking for an idle worker.
+    wake_cursor: usize,
+    shut: bool,
+}
+
+impl std::fmt::Debug for WorkerSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("WorkerSet")
+            .field("workers", &self.threads.len())
+            .field("strips", &self.outcomes.len())
+            .field("generation", &self.generation)
+            .field("shut", &self.shut)
+            .finish_non_exhaustive()
+    }
+}
+
+impl WorkerSet {
+    /// Starts `config.workers` threads for `config.strips` strips, each running `runner` on the
+    /// strips it claims. Allocates (threads, slots, tables); call it off the audio thread.
+    ///
+    /// # Errors
+    ///
+    /// The OS refused a thread; the workers already started are shut down first.
+    pub fn new(config: Config, runner: Arc<dyn StripRunner>) -> std::io::Result<Self> {
+        let n = config.workers;
+        let strips = config.strips;
+        let shared = Arc::new(Shared {
+            jobs: JobSet::new(strips),
+            runner,
+            cost_ns: (0..strips).map(|_| AtomicU64::new(0)).collect(),
+            panicked: (0..strips).map(|_| AtomicBool::new(false)).collect(),
+            workers: (0..n).map(|_| WorkerSlot { woken: AtomicBool::new(false), current: AtomicUsize::new(0), promotion: OnceLock::new() }).collect(),
+            stop: AtomicBool::new(false),
+            stats: Counters::default(),
+        });
+        let mut set = WorkerSet {
+            shared,
+            handles: Vec::with_capacity(n),
+            threads: Vec::with_capacity(n),
+            generation: 0,
+            outcomes: vec![Outcome::NotPublished; strips].into_boxed_slice(),
+            busy: vec![false; strips].into_boxed_slice(),
+            published: vec![0; strips].into_boxed_slice(),
+            published_len: 0,
+            skipped: 0,
+            wake_cursor: 0,
+            shut: false,
+        };
+        for k in 0..n {
+            let shared = Arc::clone(&set.shared);
+            let start = k * strips / n.max(1);
+            let promote = config.promote;
+            let spawned = std::thread::Builder::new().name(format!("transit-strip-{k}")).spawn(move || worker_main(&shared, k, start, promote));
+            match spawned {
+                Ok(h) => {
+                    set.threads.push(h.thread().clone());
+                    set.handles.push(Some(h));
+                }
+                Err(e) => {
+                    let _ = set.shutdown(DROP_BOUND);
+                    return Err(e);
+                }
+            }
+        }
+        Ok(set)
+    }
+
+    /// Worker threads.
+    #[must_use]
+    pub fn workers(&self) -> usize {
+        self.threads.len()
+    }
+
+    /// Strip slots.
+    #[must_use]
+    pub fn strips(&self) -> usize {
+        self.outcomes.len()
+    }
+
+    /// The job slots (for `counts`, `faults` and `state`; publisher operations go through the
+    /// set).
+    #[must_use]
+    pub fn jobs(&self) -> &JobSet {
+        &self.shared.jobs
+    }
+
+    /// What worker `index`'s promotion achieved; `None` before it ran, or when promotion is off.
+    #[must_use]
+    pub fn promotion(&self, index: usize) -> Option<Promotion> {
+        self.shared.workers.get(index).and_then(|w| w.promotion.get().copied())
+    }
+
+    /// The strip's estimated render cost (`None` for no such strip; zero before any render).
+    #[must_use]
+    pub fn cost_estimate(&self, strip: usize) -> Option<Duration> {
+        self.shared.cost_ns.get(strip).map(|c| Duration::from_nanos(c.load(Ordering::Relaxed)))
+    }
+
+    /// Seeds or overrides the strip's estimated render cost (for example from a serial
+    /// measurement). Later renders keep updating it.
+    pub fn set_cost_estimate(&self, strip: usize, cost: Duration) {
+        if let Some(c) = self.shared.cost_ns.get(strip) {
+            c.store(u64::try_from(cost.as_nanos()).unwrap_or(u64::MAX), Ordering::Relaxed);
+        }
+    }
+
+    /// Running totals.
+    #[must_use]
+    pub fn stats(&self) -> Stats {
+        let c = &self.shared.stats;
+        let r = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let (late, busy, unstarted) = (r(&c.overruns_late), r(&c.overruns_busy), r(&c.overruns_unstarted));
+        Stats {
+            blocks: r(&c.blocks),
+            mixed: r(&c.mixed),
+            inline_renders: r(&c.inline_renders),
+            worker_runs: r(&c.worker_runs),
+            overruns: late + busy + unstarted,
+            overruns_late: late,
+            overruns_busy: busy,
+            overruns_unstarted: unstarted,
+            late_results: r(&c.late_results),
+            runner_panics: r(&c.runner_panics),
+            misuse: r(&c.misuse),
+        }
+    }
+
+    /// The current block's outcome per strip (indexed by strip).
+    #[must_use]
+    pub fn outcomes(&self) -> &[Outcome] {
+        &self.outcomes
+    }
+
+    /// The current block's outcome of one strip.
+    #[must_use]
+    pub fn outcome(&self, strip: usize) -> Option<Outcome> {
+        self.outcomes.get(strip).copied()
+    }
+
+    /// True when a worker held the strip at this block's `begin_block`: do not touch its inputs;
+    /// a publish will skip it.
+    #[must_use]
+    pub fn is_busy(&self, strip: usize) -> bool {
+        self.busy.get(strip).copied().unwrap_or(false)
+    }
+
+    /// Publisher: opens block `generation` (newer than the last) and applies the per-block rule
+    /// to every slot: a late `Done` is retired unread, a `Claimed` slot marks its strip busy.
+    /// False when refused (not newer, or shut down; counted in [`Stats::misuse`]).
+    pub fn begin_block(&mut self, generation: u64) -> bool {
+        // Refuse first, so a refused begin cannot count a jobs fault through `JobSet::begin`.
+        if self.shut || generation <= self.shared.jobs.generation() {
+            bump(&self.shared.stats.misuse);
+            return false;
+        }
+        if !self.shared.jobs.begin(generation) {
+            bump(&self.shared.stats.misuse);
+            return false;
+        }
+        self.generation = generation;
+        self.published_len = 0;
+        self.skipped = 0;
+        bump(&self.shared.stats.blocks);
+        for strip in 0..self.outcomes.len() {
+            self.outcomes[strip] = Outcome::NotPublished;
+            self.busy[strip] = !self.settle(strip);
+        }
+        true
+    }
+
+    /// The per-block rule for one slot: brings it to `Idle` when no worker holds it. False when
+    /// a worker does (the slot is `Claimed`).
+    fn settle(&self, strip: usize) -> bool {
+        let Some(slot) = self.shared.jobs.slot(strip) else { return true };
+        match slot.state() {
+            State::Idle => true,
+            State::Done => {
+                // A late worker's result for an older block: retired unread (Acquire inside
+                // orders the worker's writes before the strip is reused).
+                // A panic flag of a late result was counted by its worker; clear it.
+                self.shared.panicked[strip].store(false, Ordering::Relaxed);
+                bump(&self.shared.stats.late_results);
+                slot.retire()
+            }
+            // An inline render that unwound out of `finish`.
+            State::Reclaimed => slot.retire(),
+            // `finish` was not called for the last block: take the job back.
+            State::Published => {
+                if slot.reclaim() {
+                    slot.retire()
+                } else {
+                    // A worker won it; settle what it left.
+                    self.settle(strip)
+                }
+            }
+            State::Claimed => false,
+        }
+    }
+
+    /// Publisher: publishes `strip` for the open block, or skips it as an overrun when a worker
+    /// still holds it ([`WorkerSet::is_busy`]). Write the strip's inputs before this call, and
+    /// only when it is not busy.
+    ///
+    /// # Errors
+    ///
+    /// [`PublishRefused`]: a caller error, counted in [`Stats::misuse`]; nothing changes.
+    pub fn publish(&mut self, strip: usize) -> Result<Published, PublishRefused> {
+        let refused = |set: &Self, why| {
+            bump(&set.shared.stats.misuse);
+            Err(why)
+        };
+        if self.generation == 0 || self.shut {
+            return refused(self, PublishRefused::NoBlock);
+        }
+        let Some(&outcome) = self.outcomes.get(strip) else {
+            return refused(self, PublishRefused::OutOfRange);
+        };
+        if outcome != Outcome::NotPublished {
+            return refused(self, PublishRefused::Twice);
+        }
+        if self.busy[strip] {
+            self.outcomes[strip] = Outcome::Overrun(OverrunCause::Busy);
+            self.skipped += 1;
+            bump(&self.shared.stats.overruns_busy);
+            return Ok(Published::Skipped);
+        }
+        if let Err(e) = self.shared.jobs.publish(strip) {
+            return refused(self, PublishRefused::Slot(e));
+        }
+        self.outcomes[strip] = Outcome::Pending;
+        self.published[self.published_len] = strip;
+        self.published_len += 1;
+        Ok(Published::Published)
+    }
+
+    /// Publisher: unparks up to `count` workers that are neither working nor already woken, and
+    /// returns how many. Allocation-free and non-blocking (`Thread::unpark`).
+    pub fn wake(&mut self, count: usize) -> usize {
+        let n = self.threads.len();
+        let mut woken = 0;
+        for k in 0..n {
+            if woken >= count {
+                break;
+            }
+            let i = (self.wake_cursor + k) % n;
+            let w = &self.shared.workers[i];
+            if w.current.load(Ordering::Relaxed) != 0 {
+                continue;
+            }
+            // AcqRel: pairs with the worker's taking swap; the jobs themselves are ordered by
+            // the slots' own Release/Acquire.
+            if !w.woken.swap(true, Ordering::AcqRel) {
+                self.threads[i].unpark();
+                woken += 1;
+            }
+        }
+        if n > 0 {
+            self.wake_cursor = (self.wake_cursor + woken.max(1)) % n;
+        }
+        woken
+    }
+
+    /// Admission: may the callback start an inline render of `strip` at `now`?
+    fn admits(&self, strip: usize, now: Instant, deadline: Instant) -> bool {
+        let left = deadline.saturating_duration_since(now);
+        if left.is_zero() {
+            return false;
+        }
+        let est = self.shared.cost_ns[strip].load(Ordering::Relaxed);
+        u128::from(est) <= left.as_nanos()
+    }
+
+    /// Publisher: resolves every strip published this block by `deadline` (see the module docs),
+    /// rendering admitted unstarted strips inline through `inline(strip)`, and returns the
+    /// block's counts. Each strip's [`Outcome`] is in [`WorkerSet::outcomes`]. Never blocks on a
+    /// worker; allocation-free.
+    pub fn finish(&mut self, deadline: Instant, mut inline: impl FnMut(usize)) -> BlockReport {
+        let g = self.generation;
+        let mut open = (0..self.published_len).filter(|&k| self.outcomes[self.published[k]] == Outcome::Pending).count();
+        let mut idle_sweeps = 0u32;
+        while open > 0 {
+            let mut progressed = false;
+            for k in 0..self.published_len {
+                let strip = self.published[k];
+                if self.outcomes[strip] != Outcome::Pending {
+                    continue;
+                }
+                let Some(slot) = self.shared.jobs.slot(strip) else { continue };
+                match slot.state() {
+                    State::Done => {
+                        if let Some(o) = self.take_done(strip, g) {
+                            self.outcomes[strip] = o;
+                            open -= 1;
+                            progressed = true;
+                        }
+                    }
+                    // Admitted, and the reclaim won against the workers (a lost reclaim means a
+                    // worker claimed it; it is waited for like any claimed slot).
+                    State::Published if self.admits(strip, Instant::now(), deadline) && slot.reclaim() => {
+                        let t0 = Instant::now();
+                        inline(strip);
+                        self.shared.record_cost(strip, t0.elapsed());
+                        slot.retire();
+                        bump(&self.shared.stats.inline_renders);
+                        self.outcomes[strip] = Outcome::Inline;
+                        open -= 1;
+                        progressed = true;
+                    }
+                    _ => {}
+                }
+            }
+            if open == 0 {
+                break;
+            }
+            if Instant::now() >= deadline {
+                self.overrun_the_rest(g);
+                break;
+            }
+            if progressed {
+                idle_sweeps = 0;
+            } else if idle_sweeps < SPIN_SWEEPS {
+                idle_sweeps += 1;
+                for _ in 0..SPINS_PER_SWEEP {
+                    std::hint::spin_loop();
+                }
+            } else {
+                std::thread::yield_now();
+            }
+        }
+        self.report()
+    }
+
+    /// Consumes a `Done` slot for block `g`: the outcome, or `None` when it is not ready.
+    fn take_done(&self, strip: usize, g: u64) -> Option<Outcome> {
+        match self.shared.jobs.slot(strip)?.consume(g) {
+            Consume::Ready => {
+                // Relaxed: ordered after the worker's write by consume's Acquire.
+                if self.shared.panicked[strip].swap(false, Ordering::Relaxed) {
+                    Some(Outcome::Faulted)
+                } else {
+                    bump(&self.shared.stats.mixed);
+                    Some(Outcome::Mixed)
+                }
+            }
+            // Stale cannot occur for a strip published this block (its Done is this block's).
+            Consume::Stale | Consume::Pending => None,
+        }
+    }
+
+    /// At the deadline: a last read of `Done`, then every unresolved strip is an overrun.
+    fn overrun_the_rest(&mut self, g: u64) {
+        for k in 0..self.published_len {
+            let strip = self.published[k];
+            if self.outcomes[strip] != Outcome::Pending {
+                continue;
+            }
+            if let Some(o) = self.take_done(strip, g) {
+                self.outcomes[strip] = o;
+                continue;
+            }
+            let Some(slot) = self.shared.jobs.slot(strip) else { continue };
+            let cause = if slot.reclaim() {
+                // Taken back unrendered, so no worker starts it after the deadline.
+                slot.retire();
+                bump(&self.shared.stats.overruns_unstarted);
+                OverrunCause::Unstarted
+            } else if let Some(o) = self.take_done(strip, g) {
+                // Completed between the two reads.
+                self.outcomes[strip] = o;
+                continue;
+            } else {
+                bump(&self.shared.stats.overruns_late);
+                OverrunCause::Late
+            };
+            self.outcomes[strip] = Outcome::Overrun(cause);
+        }
+    }
+
+    fn report(&self) -> BlockReport {
+        let mut r = BlockReport { overrun: self.skipped, ..BlockReport::default() };
+        for &strip in &self.published[..self.published_len] {
+            match self.outcomes[strip] {
+                Outcome::Mixed => r.mixed += 1,
+                Outcome::Inline => r.inline += 1,
+                Outcome::Overrun(_) => r.overrun += 1,
+                Outcome::Faulted => r.faulted += 1,
+                Outcome::NotPublished | Outcome::Pending => {}
+            }
+        }
+        r
+    }
+
+    /// Retires the workers: sets the stop flag, wakes every worker and joins each one within
+    /// `bound` (one bound for all). A worker still running at the bound is abandoned and
+    /// reported; see the module docs ("Retirement and quarantine"). Off the audio thread. After
+    /// it, `begin_block` and `publish` are refused. A second call returns an empty report.
+    pub fn shutdown(&mut self, bound: Duration) -> Quarantine {
+        let mut q = Quarantine::default();
+        if self.shut {
+            return q;
+        }
+        self.shut = true;
+        self.generation = 0;
+        self.shared.stop.store(true, Ordering::Release);
+        for (w, t) in self.shared.workers.iter().zip(&self.threads) {
+            w.woken.store(true, Ordering::Release);
+            t.unpark();
+        }
+        let deadline = Instant::now().checked_add(bound);
+        for (k, handle) in self.handles.iter_mut().enumerate() {
+            let Some(h) = handle.take() else { continue };
+            while !h.is_finished() && deadline.is_some_and(|d| Instant::now() < d) {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if h.is_finished() {
+                // The worker loop catches runner panics, so a join error cannot carry one.
+                let _ = h.join();
+                continue;
+            }
+            // Abandoned: never joined, and the shared state (the runner, the slots) is never
+            // freed, because the thread may still be executing in it.
+            std::mem::forget(h);
+            std::mem::forget(Arc::clone(&self.shared));
+            q.workers.push(k);
+            let current = self.shared.workers[k].current.load(Ordering::Acquire);
+            if let Some(strip) = current.checked_sub(1) {
+                q.strips.push(strip);
+            }
+            log::error!("strip worker {k} did not return within {bound:?}; quarantined (strip {:?})", current.checked_sub(1));
+        }
+        q
+    }
+}
+
+impl Drop for WorkerSet {
+    fn drop(&mut self) {
+        if !self.shut {
+            let q = self.shutdown(DROP_BOUND);
+            if !q.is_empty() {
+                log::error!("strip workers quarantined at drop: {q:?}");
+            }
+        }
+    }
+}
+
+/// A worker: promote once, then claim, run and complete until stopped, parking when idle.
+fn worker_main(shared: &Shared, index: usize, start: usize, promote: bool) {
+    let me = &shared.workers[index];
+    let promotion = promote.then(crate::promote_audio_thread);
+    if let Some(p) = promotion {
+        let _ = me.promotion.set(p);
+    }
+    let mut next = start;
+    'run: loop {
+        if shared.stop.load(Ordering::Acquire) {
+            break;
+        }
+        while let Some((strip, token)) = shared.jobs.try_claim_next(next) {
+            me.current.store(strip + 1, Ordering::Relaxed);
+            let generation = token.generation();
+            let t0 = Instant::now();
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.runner.run(strip, generation)));
+            shared.record_cost(strip, t0.elapsed());
+            if r.is_err() {
+                // Relaxed: published by the completing Release below.
+                shared.panicked[strip].store(true, Ordering::Relaxed);
+                bump(&shared.stats.runner_panics);
+            }
+            bump(&shared.stats.worker_runs);
+            // Drop the panic payload (if any) before completing, outside the strip's ownership.
+            drop(r);
+            token.complete();
+            me.current.store(0, Ordering::Relaxed);
+            next = strip + 1;
+            if shared.stop.load(Ordering::Acquire) {
+                break 'run;
+            }
+        }
+        // Park until woken. A spurious return of `park` (or an unpark that is not a wake) only
+        // loops; only the flag ends the wait, and a wake that lands before the park leaves the
+        // flag set (and the unpark token), so none is lost.
+        loop {
+            if me.woken.swap(false, Ordering::AcqRel) || shared.stop.load(Ordering::Acquire) {
+                break;
+            }
+            std::thread::park();
+        }
+    }
+    if let Some(p) = promotion {
+        crate::demote(p);
+    }
+}
+
+#[cfg(test)]
+mod tests;
+
+#[cfg(test)]
+mod stress_tests;

@@ -1,0 +1,586 @@
+//! The worker set with real threads: the deadline policy, admission, runner faults, retirement
+//! and quarantine, promotion, and the allocation proof. A fake runner gives each strip a
+//! behavior (normal, slow, stalled until released, panicking) and a reentry guard.
+//!
+//! Timing: the tests assert states, outcomes and counters. Wall-clock bounds appear only as
+//! deadlines given to `finish`/`shutdown` and as stall bounds far above scheduling jitter, each
+//! marked with its reason.
+
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
+use super::*;
+use crate::strip_jobs::JobSlot;
+use crate::testing::{AllocStats, count_this_thread, measure, thread_stats};
+use std::cell::Cell;
+use std::sync::atomic::{AtomicU8, AtomicU32};
+
+/// A stall bound, not a latency claim: far above any scheduling jitter, it only turns a hang (a
+/// lost wake-up, a slot stuck claimed) into a failure instead of a stuck test run.
+pub(super) const STALL: Duration = Duration::from_secs(60);
+
+/// How far past its deadline `finish` (or past its bound `shutdown`) may return. The overshoot
+/// by design is one sweep of the slots plus one `yield_now` (finish) or one 1 ms sleep
+/// (shutdown); on a loaded runner a yield or a sleep can cost several scheduler quanta (about
+/// 15 ms each on Windows). 200 ms is over ten quanta: a failure means the call waited for a
+/// worker, not jitter.
+pub(super) const SLACK: Duration = Duration::from_millis(200);
+
+/// A worker-side behavior of the fake runner, per strip.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub(super) enum Behavior {
+    /// Spin `spins[strip]` times.
+    Normal = 0,
+    /// Spin for longer than a block (`Fake::slow`).
+    Slow = 1,
+    /// Block until `Fake::release(strip)`.
+    Stall = 2,
+    /// Panic.
+    Panic = 3,
+}
+
+/// Payload words per strip, standing in for its buffers (relaxed; only the slots order them).
+pub(super) const WORDS: usize = 8;
+/// What the executor adds to the generation when it writes the payload back.
+pub(super) const MARK: u64 = 1 << 40;
+
+/// One strip of the fake.
+pub(super) struct FakeStrip {
+    behavior: AtomicU8,
+    pub(super) spins: AtomicU32,
+    held: AtomicBool,
+    inside: AtomicBool,
+    /// The last generation any thread executed (entered) for this strip.
+    pub(super) last_gen: AtomicU64,
+    pub(super) payload: [AtomicU64; WORDS],
+}
+
+/// The fake strip runner.
+pub(super) struct Fake {
+    pub(super) strips: Box<[FakeStrip]>,
+    /// Strips currently stalled inside the runner.
+    pub(super) stalled: AtomicUsize,
+    /// How long `Slow` spins.
+    slow: Duration,
+    /// Check and write the payload on every execution.
+    payload: AtomicBool,
+    /// Count allocations on the worker threads between runner calls.
+    count_allocs: AtomicBool,
+    /// Heap operations seen on worker threads between two runner calls while counting.
+    pub(super) worker_heap_ops: AtomicU64,
+}
+
+std::thread_local! {
+    /// The worker thread's heap operations at its last runner call while counting.
+    static LAST_OPS: Cell<Option<u64>> = const { Cell::new(None) };
+}
+
+fn ops(s: AllocStats) -> u64 {
+    s.allocs + s.frees
+}
+
+/// Leaves the reentry guard also when the runner unwinds.
+struct Inside<'a>(&'a AtomicBool);
+
+impl Drop for Inside<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+impl Fake {
+    pub(super) fn new(strips: usize, slow: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            strips: (0..strips)
+                .map(|_| FakeStrip {
+                    behavior: AtomicU8::new(Behavior::Normal as u8),
+                    spins: AtomicU32::new(64),
+                    held: AtomicBool::new(false),
+                    inside: AtomicBool::new(false),
+                    last_gen: AtomicU64::new(0),
+                    payload: std::array::from_fn(|_| AtomicU64::new(0)),
+                })
+                .collect(),
+            stalled: AtomicUsize::new(0),
+            slow,
+            payload: AtomicBool::new(false),
+            count_allocs: AtomicBool::new(false),
+            worker_heap_ops: AtomicU64::new(0),
+        })
+    }
+
+    pub(super) fn set(&self, strip: usize, b: Behavior) {
+        if b == Behavior::Stall {
+            self.strips[strip].held.store(true, Ordering::Release);
+        }
+        self.strips[strip].behavior.store(b as u8, Ordering::Release);
+    }
+
+    pub(super) fn release(&self, strip: usize) {
+        self.strips[strip].behavior.store(Behavior::Normal as u8, Ordering::Release);
+        self.strips[strip].held.store(false, Ordering::Release);
+    }
+
+    pub(super) fn check_payload(&self, on: bool) {
+        self.payload.store(on, Ordering::Release);
+    }
+
+    /// Publisher side of the payload: the strip's inputs for block `g`.
+    pub(super) fn write_inputs(&self, strip: usize, g: u64) {
+        for w in &self.strips[strip].payload {
+            w.store(g, Ordering::Relaxed);
+        }
+    }
+
+    /// Publisher side, after `Mixed` or `Inline`: the executor's output for block `g`.
+    pub(super) fn assert_output(&self, strip: usize, g: u64) {
+        for (i, w) in self.strips[strip].payload.iter().enumerate() {
+            assert_eq!(w.load(Ordering::Relaxed), g + MARK, "strip {strip} word {i}: the publisher sees the executor's output");
+        }
+    }
+
+    /// One execution of `strip` for `g`, by a worker (`worker`: its behavior applies) or inline.
+    pub(super) fn execute(&self, strip: usize, g: u64, worker: bool) {
+        let s = &self.strips[strip];
+        assert!(!s.inside.swap(true, Ordering::AcqRel), "two threads inside strip {strip}");
+        let _inside = Inside(&s.inside);
+        let last = s.last_gen.swap(g, Ordering::AcqRel);
+        assert!(last < g, "strip {strip}: generation {g} executed after {last}");
+        let payload = self.payload.load(Ordering::Acquire);
+        if payload {
+            for (i, w) in s.payload.iter().enumerate() {
+                assert_eq!(w.load(Ordering::Relaxed), g, "strip {strip} word {i}: the executor sees the publisher's inputs");
+            }
+        }
+        let behavior = if worker { s.behavior.load(Ordering::Acquire) } else { Behavior::Normal as u8 };
+        match behavior {
+            1 => spin_for(self.slow),
+            2 => {
+                self.stalled.fetch_add(1, Ordering::AcqRel);
+                let t0 = Instant::now();
+                while s.held.load(Ordering::Acquire) {
+                    assert!(t0.elapsed() < STALL, "strip {strip} never released");
+                    // timing: sleep-ok paces a wait for a release flag, measures nothing
+                    std::thread::sleep(Duration::from_millis(1));
+                }
+                self.stalled.fetch_sub(1, Ordering::AcqRel);
+            }
+            3 => panic!("fake runner: strip {strip} panics on purpose"),
+            _ => {
+                for _ in 0..s.spins.load(Ordering::Relaxed) {
+                    std::hint::spin_loop();
+                }
+            }
+        }
+        if payload {
+            for w in &s.payload {
+                w.store(g + MARK, Ordering::Relaxed);
+            }
+        }
+    }
+}
+
+/// Busy work for `d` (a workload, not a bound).
+pub(super) fn spin_for(d: Duration) {
+    let t0 = Instant::now();
+    loop {
+        if t0.elapsed() >= d {
+            break;
+        }
+        std::hint::spin_loop();
+    }
+}
+
+impl StripRunner for Fake {
+    fn run(&self, strip: usize, generation: u64) {
+        if self.count_allocs.load(Ordering::Acquire) {
+            count_this_thread(true);
+            let now = ops(thread_stats());
+            if let Some(before) = LAST_OPS.get() {
+                self.worker_heap_ops.fetch_add(now - before, Ordering::AcqRel);
+            }
+            LAST_OPS.set(Some(now));
+        }
+        self.execute(strip, generation, true);
+    }
+}
+
+pub(super) fn wait_until(what: &str, mut done: impl FnMut() -> bool) {
+    let start = Instant::now();
+    while !done() {
+        assert!(start.elapsed() < STALL, "stalled waiting for {what}");
+        std::thread::yield_now();
+    }
+}
+
+pub(super) fn set_of(fake: &Arc<Fake>, workers: usize) -> WorkerSet {
+    let strips = fake.strips.len();
+    WorkerSet::new(Config { workers, strips, promote: false }, Arc::clone(fake) as Arc<dyn StripRunner>).expect("spawn workers")
+}
+
+fn publish_all(set: &mut WorkerSet) {
+    for s in 0..set.strips() {
+        assert_eq!(set.publish(s), Ok(Published::Published));
+    }
+}
+
+/// Every published strip done by the workers before `finish` (so `finish` only consumes).
+fn wait_done(set: &WorkerSet, done: usize, claimed: usize) {
+    wait_until("the workers", || {
+        let c = set.jobs().counts();
+        c.done == done && c.claimed == claimed
+    });
+}
+
+#[test]
+fn workers_render_published_strips_and_finish_consumes_them_once() {
+    let fake = Fake::new(8, Duration::ZERO);
+    let mut set = set_of(&fake, 3);
+    for g in 1..=20 {
+        assert!(set.begin_block(g));
+        publish_all(&mut set);
+        // A worker whose last wake it has not yet taken is not woken again (it will sweep).
+        assert!(set.wake(3) <= 3);
+        if g.is_multiple_of(2) {
+            wait_done(&set, 8, 0);
+        }
+        let r = set.finish(Instant::now() + STALL, |s| fake.execute(s, g, false));
+        assert_eq!(r.mixed + r.inline, 8, "block {g}: {r:?}");
+        assert_eq!(r.overrun + r.faulted, 0);
+        if g.is_multiple_of(2) {
+            assert_eq!(r.mixed, 8, "everything was done before finish");
+        }
+        for s in 0..8 {
+            assert!(matches!(set.outcome(s), Some(Outcome::Mixed | Outcome::Inline)));
+            assert_eq!(fake.strips[s].last_gen.load(Ordering::Acquire), g);
+        }
+        assert_eq!(set.jobs().counts().idle, 8, "every slot consumed or retired");
+    }
+    let st = set.stats();
+    assert_eq!((st.blocks, st.mixed + st.inline_renders, st.overruns), (20, 160, 0));
+    assert!(set.shutdown(STALL).is_empty());
+    assert_eq!(set.jobs().faults(), 0);
+}
+
+/// Gate 3: one stalled strip among eight. `finish` returns at the deadline (not when the stall
+/// ends), the stalled strip is an overrun, the next block skips it, and after the release its
+/// late result is retired and the strip resumes.
+#[test]
+fn a_stalled_strip_cannot_hold_finish_past_its_deadline() {
+    let fake = Fake::new(8, Duration::ZERO);
+    fake.set(5, Behavior::Stall);
+    let mut set = set_of(&fake, 3);
+
+    assert!(set.begin_block(1));
+    publish_all(&mut set);
+    set.wake(3);
+    wait_done(&set, 7, 1);
+    assert_eq!(fake.stalled.load(Ordering::Acquire), 1);
+    let deadline = Instant::now() + Duration::from_millis(50);
+    let r = set.finish(deadline, |_| panic!("nothing is left to render inline"));
+    let returned = Instant::now();
+    assert!(returned >= deadline, "finish waited for the claimed strip until the deadline");
+    // timing: stall-bound SLACK is over ten scheduler quanta; see its definition
+    assert!(returned - deadline < SLACK, "finish returned {:?} past its deadline", returned - deadline);
+    assert_eq!(set.outcome(5), Some(Outcome::Overrun(OverrunCause::Late)));
+    assert_eq!(r, BlockReport { mixed: 7, inline: 0, overrun: 1, faulted: 0 });
+    assert_eq!(set.jobs().slot(5).map(JobSlot::state), Some(State::Claimed), "a claimed slot is left alone");
+
+    // The next block skips it: a second overrun, the others render.
+    assert!(set.begin_block(2));
+    assert!(set.is_busy(5));
+    for s in 0..8 {
+        let p = set.publish(s).expect("publish");
+        assert_eq!(p == Published::Skipped, s == 5);
+    }
+    set.wake(3);
+    wait_done(&set, 7, 1);
+    let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
+    assert_eq!(r, BlockReport { mixed: 7, inline: 0, overrun: 1, faulted: 0 });
+    assert_eq!(set.outcome(5), Some(Outcome::Overrun(OverrunCause::Busy)));
+    let st = set.stats();
+    assert_eq!((st.overruns, st.overruns_late, st.overruns_busy), (2, 1, 1));
+
+    // Released: its block-1 result is late, retired unread at the next begin; the strip resumes.
+    fake.release(5);
+    wait_until("the late result", || set.jobs().slot(5).map(JobSlot::state) == Some(State::Done));
+    assert_eq!(fake.strips[5].last_gen.load(Ordering::Acquire), 1, "the late worker ran block 1");
+    assert!(set.begin_block(3));
+    assert!(!set.is_busy(5));
+    assert_eq!(set.stats().late_results, 1);
+    publish_all(&mut set);
+    set.wake(3);
+    wait_done(&set, 8, 0);
+    let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
+    assert_eq!(r, BlockReport { mixed: 8, inline: 0, overrun: 0, faulted: 0 });
+    assert_eq!(fake.strips[5].last_gen.load(Ordering::Acquire), 3);
+    assert!(set.shutdown(STALL).is_empty());
+    assert_eq!(set.jobs().faults(), 0);
+}
+
+/// Gate 3, admission: every worker stalled, eight unstarted strips of known cost. `finish`
+/// renders inline only what fits before the deadline, overruns the rest, and returns no later
+/// than one strip's cost past the deadline.
+#[test]
+fn admission_renders_inline_only_what_fits_before_the_deadline() {
+    const COST: Duration = Duration::from_millis(20);
+    const BUDGET: Duration = Duration::from_millis(70);
+    let fake = Fake::new(10, Duration::ZERO);
+    for s in 0..10 {
+        fake.set(s, Behavior::Stall);
+    }
+    let mut set = set_of(&fake, 2);
+    assert!(set.begin_block(1));
+    publish_all(&mut set);
+    set.wake(2);
+    wait_until("both workers stalled", || fake.stalled.load(Ordering::Acquire) == 2);
+    let unstarted: Vec<usize> = (0..10).filter(|&s| set.jobs().slot(s).map(JobSlot::state) == Some(State::Published)).collect();
+    assert_eq!(unstarted.len(), 8);
+    for &s in &unstarted {
+        set.set_cost_estimate(s, COST);
+    }
+    // One strip that can never fit.
+    let huge = unstarted[0];
+    set.set_cost_estimate(huge, STALL);
+
+    let mut rendered = Vec::with_capacity(8);
+    let deadline = Instant::now() + BUDGET;
+    let r = set.finish(deadline, |s| {
+        rendered.push(s);
+        spin_for(COST);
+    });
+    let returned = Instant::now();
+    // Each admitted render starts with at least its estimate left and takes at least COST, and
+    // estimates only grow from COST here: at most BUDGET / COST renders fit.
+    assert!(rendered.len() <= 3, "{rendered:?}");
+    assert!(!rendered.contains(&huge), "a strip that cannot fit is never started");
+    assert_eq!(r.inline, rendered.len());
+    assert_eq!(r.overrun, 10 - rendered.len());
+    // At most one admitted render runs past the deadline, by no more than its own cost.
+    // timing: stall-bound one strip's cost plus SLACK, over ten scheduler quanta
+    assert!(returned.saturating_duration_since(deadline) < COST + SLACK, "overshoot {:?}", returned - deadline);
+    for s in 0..10 {
+        let o = set.outcome(s).unwrap();
+        if rendered.contains(&s) {
+            assert_eq!(o, Outcome::Inline);
+            assert!(set.cost_estimate(s).unwrap() >= COST, "the inline render updated the estimate");
+        } else if unstarted.contains(&s) {
+            assert_eq!(o, Outcome::Overrun(OverrunCause::Unstarted));
+            assert_eq!(set.jobs().slot(s).map(JobSlot::state), Some(State::Idle), "taken back unrendered");
+            assert_eq!(fake.strips[s].last_gen.load(Ordering::Acquire), 0, "never executed");
+        } else {
+            assert_eq!(o, Outcome::Overrun(OverrunCause::Late));
+        }
+    }
+    let st = set.stats();
+    assert_eq!(st.overruns_unstarted, 8 - rendered.len() as u64);
+    assert_eq!(st.overruns_late, 2);
+    for s in 0..10 {
+        fake.release(s);
+    }
+    wait_until("the stalled workers", || set.jobs().counts().claimed == 0);
+    assert!(set.shutdown(STALL).is_empty());
+    assert_eq!(set.jobs().faults(), 0);
+}
+
+/// The other side of admission: with time to spare, the callback renders every unstarted strip
+/// inline (never-measured strips have estimate zero and are admitted).
+#[test]
+fn admission_renders_every_unstarted_strip_when_time_allows() {
+    let fake = Fake::new(10, Duration::ZERO);
+    for s in 0..10 {
+        fake.set(s, Behavior::Stall);
+    }
+    let mut set = set_of(&fake, 2);
+    assert!(set.begin_block(1));
+    publish_all(&mut set);
+    set.wake(2);
+    wait_until("both workers stalled", || fake.stalled.load(Ordering::Acquire) == 2);
+    let r = set.finish(Instant::now(), |_| {});
+    assert_eq!((r.inline, r.overrun), (0, 10), "no time left: nothing admitted, nothing waited for");
+    for s in 0..10 {
+        fake.release(s);
+    }
+    wait_until("the stalled workers", || set.jobs().counts().claimed == 0);
+
+    for s in 0..10 {
+        fake.set(s, Behavior::Stall);
+    }
+    assert!(set.begin_block(2));
+    publish_all(&mut set);
+    set.wake(2);
+    wait_until("both workers stalled", || fake.stalled.load(Ordering::Acquire) == 2);
+    let deadline = Instant::now() + Duration::from_millis(300);
+    let r = set.finish(deadline, |s| fake.execute(s, 2, false));
+    assert_eq!((r.inline, r.overrun), (8, 2), "{r:?}");
+    for s in 0..10 {
+        fake.release(s);
+    }
+    wait_until("the stalled workers", || set.jobs().counts().claimed == 0);
+    assert!(set.shutdown(STALL).is_empty());
+    assert_eq!(set.jobs().faults(), 0);
+}
+
+/// Gate 5 groundwork: a panic in the runner is caught by the worker, the slot completes (never
+/// left `Claimed` by an unwind), the strip is `Faulted` and counted, and the worker lives on.
+#[test]
+fn a_panicking_runner_completes_its_slot_as_a_counted_fault() {
+    let fake = Fake::new(4, Duration::ZERO);
+    fake.set(2, Behavior::Panic);
+    let mut set = set_of(&fake, 1);
+    assert!(set.begin_block(1));
+    publish_all(&mut set);
+    set.wake(1);
+    wait_done(&set, 4, 0);
+    let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
+    assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 0, faulted: 1 });
+    assert_eq!(set.outcome(2), Some(Outcome::Faulted));
+    assert_eq!(set.stats().runner_panics, 1);
+    assert_eq!(set.jobs().counts().idle, 4);
+
+    fake.set(2, Behavior::Normal);
+    assert!(set.begin_block(2));
+    publish_all(&mut set);
+    set.wake(1);
+    wait_done(&set, 4, 0);
+    let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
+    assert_eq!(r.mixed, 4, "the one worker survived the panic");
+    assert!(set.shutdown(STALL).is_empty());
+    assert_eq!(set.jobs().faults(), 0);
+}
+
+#[test]
+fn zero_workers_render_everything_inline() {
+    let fake = Fake::new(4, Duration::ZERO);
+    let mut set = set_of(&fake, 0);
+    assert!(set.begin_block(1));
+    publish_all(&mut set);
+    assert_eq!(set.wake(4), 0);
+    let r = set.finish(Instant::now() + STALL, |s| fake.execute(s, 1, false));
+    assert_eq!(r.inline, 4);
+    assert!(set.shutdown(STALL).is_empty());
+}
+
+#[test]
+fn publisher_misuse_is_refused_and_counted_and_changes_nothing() {
+    let fake = Fake::new(2, Duration::ZERO);
+    let mut set = set_of(&fake, 1);
+    assert_eq!(set.publish(0), Err(PublishRefused::NoBlock));
+    assert!(set.begin_block(3));
+    assert!(!set.begin_block(3), "not newer");
+    assert!(!set.begin_block(2), "older");
+    assert_eq!(set.publish(9), Err(PublishRefused::OutOfRange));
+    assert_eq!(set.publish(0), Ok(Published::Published));
+    assert_eq!(set.publish(0), Err(PublishRefused::Twice));
+    assert_eq!(set.stats().misuse, 5);
+    set.wake(1);
+    let r = set.finish(Instant::now() + STALL, |s| fake.execute(s, 3, false));
+    assert_eq!(r.mixed + r.inline, 1);
+    assert!(set.shutdown(STALL).is_empty());
+    assert!(!set.begin_block(4), "shut down");
+    assert_eq!(set.publish(0), Err(PublishRefused::NoBlock));
+    assert!(set.shutdown(STALL).is_empty(), "a second shutdown is a no-op");
+    assert_eq!(set.jobs().faults(), 0, "refused before reaching a slot");
+}
+
+#[test]
+fn workers_are_promoted_once_at_start() {
+    let before = crate::testing::promotion_calls();
+    let fake = Fake::new(2, Duration::ZERO);
+    let set = WorkerSet::new(Config { workers: 3, strips: 2, promote: true }, Arc::clone(&fake) as Arc<dyn StripRunner>).unwrap();
+    wait_until("every worker's promotion", || (0..3).all(|k| set.promotion(k).is_some()));
+    assert!(crate::testing::promotion_calls() - before >= 3);
+    assert_eq!(set.promotion(3), None);
+    let off = set_of(&fake, 2);
+    assert_eq!((off.promotion(0), off.promotion(1)), (None, None), "promotion off");
+    drop(set);
+    drop(off);
+}
+
+/// Gate 5: an idle set retires at once.
+#[test]
+fn shutdown_of_an_idle_set_returns_every_worker_at_once() {
+    let fake = Fake::new(4, Duration::ZERO);
+    let mut set = set_of(&fake, 4);
+    let t0 = Instant::now();
+    let q = set.shutdown(STALL);
+    assert!(q.is_empty(), "{q:?}");
+    // timing: stall-bound an idle worker returns on its wake; this only proves no worker took
+    // the bound
+    assert!(t0.elapsed() < Duration::from_secs(10));
+}
+
+/// Gate 5: a worker stalled inside a strip is quarantined within the bound, its slot stays
+/// `Claimed`, and releasing it later does not crash the process (its state was leaked, not
+/// freed).
+#[test]
+fn shutdown_quarantines_a_stalled_worker_within_its_bound() {
+    const BOUND: Duration = Duration::from_millis(200);
+    let fake = Fake::new(4, Duration::ZERO);
+    fake.set(1, Behavior::Stall);
+    let mut set = set_of(&fake, 2);
+    assert!(set.begin_block(1));
+    publish_all(&mut set);
+    set.wake(2);
+    wait_done(&set, 3, 1);
+    let r = set.finish(Instant::now(), |_| panic!("nothing is left to render inline"));
+    assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 1, faulted: 0 });
+
+    let t0 = Instant::now();
+    let q = set.shutdown(BOUND);
+    let took = t0.elapsed();
+    assert!(took >= BOUND, "the stalled worker cannot have returned");
+    // timing: stall-bound SLACK is over ten scheduler quanta; see its definition
+    assert!(took < BOUND + SLACK, "shutdown took {took:?}");
+    assert_eq!(q.workers.len(), 1, "{q:?}");
+    assert_eq!(q.strips, vec![1]);
+    assert_eq!(set.jobs().slot(1).map(JobSlot::state), Some(State::Claimed));
+    drop(set);
+
+    // The abandoned worker finishes into leaked state and exits on the stop flag.
+    fake.release(1);
+    wait_until("the abandoned worker", || !fake.strips[1].inside.load(Ordering::Acquire) && fake.stalled.load(Ordering::Acquire) == 0);
+}
+
+/// Gate 3: after construction, the publisher's block path allocates and frees nothing, the
+/// worker loop (claim, run, complete, park, unpark) allocates nothing between runner calls, and
+/// retiring an idle set allocates nothing (joining frees the threads' handles).
+#[test]
+fn no_block_operation_or_worker_loop_allocates_after_construction() {
+    let fake = Fake::new(8, Duration::ZERO);
+    let mut set = set_of(&fake, 3);
+    let block = |set: &mut WorkerSet, g: u64| {
+        assert!(set.begin_block(g));
+        for s in 0..8 {
+            assert_eq!(set.publish(s), Ok(Published::Published));
+        }
+        set.wake(3);
+        if g.is_multiple_of(2) {
+            // Worker coverage that does not depend on the scheduler: every strip by a worker.
+            wait_done(set, 8, 0);
+        }
+        let r = set.finish(Instant::now() + STALL, |s| fake.execute(s, g, false));
+        assert_eq!(r.mixed + r.inline, 8);
+        if g.is_multiple_of(2) {
+            assert_eq!(r.mixed, 8);
+        }
+    };
+    for g in 1..=8 {
+        block(&mut set, g);
+    }
+    fake.count_allocs.store(true, Ordering::Release);
+    let ((), stats) = measure(|| {
+        for g in 9..=300 {
+            block(&mut set, g);
+            std::hint::black_box((set.stats(), set.outcomes(), set.jobs().counts()));
+        }
+    });
+    fake.count_allocs.store(false, Ordering::Release);
+    assert!(stats.is_zero(), "publisher: {stats:?}");
+    assert!(set.stats().mixed > 0, "workers rendered some strips");
+    assert_eq!(fake.worker_heap_ops.load(Ordering::Acquire), 0, "worker loop");
+    let (q, stats) = measure(|| set.shutdown(STALL));
+    assert!(q.is_empty());
+    assert_eq!(stats.allocs, 0, "shutdown of an idle set: {stats:?}");
+    assert_eq!(set.jobs().faults(), 0);
+}

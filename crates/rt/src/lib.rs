@@ -34,6 +34,10 @@ pub mod handoff;
 /// reclaim protocol between the audio callback and the render workers.
 pub mod strip_jobs;
 
+/// The fixed strip render worker set and the audio callback's bounded deadline policy (issue
+/// #124 slice 2, ADR 0029): parked workers, inline admission by measured cost, quarantine.
+pub mod worker_set;
+
 /// The OS message queue of a window-hosting thread that is not the UI thread (the plug-in host
 /// thread, ADR 0018): attach, wait, dispatch, and a cross-thread waker.
 pub mod gui_thread;
