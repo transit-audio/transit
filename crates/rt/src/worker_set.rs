@@ -598,6 +598,8 @@ impl WorkerSet {
         let mut open = (0..self.published_len).filter(|&k| self.outcomes[self.published[k]] == Outcome::Pending).count();
         while open > 0 {
             let mut progressed = false;
+            // One clock read per sweep, again only after an inline render (its cost).
+            let mut now = Instant::now();
             for k in 0..self.published_len {
                 let strip = self.published[k];
                 if self.outcomes[strip] != Outcome::Pending {
@@ -614,10 +616,11 @@ impl WorkerSet {
                     }
                     // Admitted, and the reclaim won against the workers (a lost reclaim means a
                     // worker claimed it; it is waited for like any claimed slot).
-                    State::Published if self.admits(strip, Instant::now(), deadline) && slot.reclaim() => {
+                    State::Published if self.admits(strip, now, deadline) && slot.reclaim() => {
                         let t0 = Instant::now();
                         inline(strip);
-                        self.shared.record_cost(strip, t0.elapsed());
+                        now = Instant::now();
+                        self.shared.record_cost(strip, now.saturating_duration_since(t0));
                         slot.retire();
                         bump(&self.shared.stats.inline_renders);
                         self.outcomes[strip] = Outcome::Inline;
@@ -630,7 +633,7 @@ impl WorkerSet {
             if open == 0 {
                 break;
             }
-            if Instant::now() >= deadline {
+            if now >= deadline {
                 self.overrun_the_rest(g);
                 break;
             }

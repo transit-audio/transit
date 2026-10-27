@@ -52,7 +52,7 @@ pub struct Shared {
 }
 
 impl Shared {
-    fn new() -> Arc<Shared> {
+    pub fn new() -> Arc<Shared> {
         Arc::new(Shared {
             inst: Mutex::new(ContinuityInstrument::new(1 << 16, 1 << 14)),
             inside: AtomicBool::new(false),

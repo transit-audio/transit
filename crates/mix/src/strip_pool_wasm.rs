@@ -72,7 +72,11 @@ impl StripPool {
         _ev: &InstrumentEvent,
         _events: &events::EngineEvents,
         _block_len: usize,
+        _home: Option<Option<SlotGen>>,
     ) -> (EventOutcome, Option<u64>) {
+        match *self {}
+    }
+    pub(crate) fn deliver_home(&mut self, _strips: &mut [Strip], _events: &mut events::EngineEvents, _s: &Session, _frame: u64, _frames: usize) {
         match *self {}
     }
     pub(crate) fn settle(&mut self, _strips: &mut [Strip], _events: &mut events::EngineEvents, _s: &Session, _block_len: usize) -> bool {

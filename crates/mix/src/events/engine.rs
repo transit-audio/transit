@@ -254,7 +254,8 @@ impl MixEngine {
             && let Some(i) = plan.tables.strip_of(ev.target.0)
             && pool.parks(i)
         {
-            return pool.park(i, ev, &self.events, self.max_block);
+            let home = plan.tables.strips.get(i).map(|st| st.instrument.as_ref().map(|inst| inst.generation));
+            return pool.park(i, ev, &self.events, self.max_block, home);
         }
         match instrument_of(&plan.session, &mut plan.tables.strips, &plan.tables.tracks, &ev.target) {
             Ok(inst) => self.events.admit_into(inst, ev),

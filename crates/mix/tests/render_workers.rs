@@ -470,3 +470,111 @@ fn a_late_callback_start_is_counted_as_a_deadline_overshoot() {
     MixEngine::force_serial(true);
     drop(rig.mix.into_retired());
 }
+
+/// Parks a collapsed pair at the last sample for strip 2 while it is away, then brings it home
+/// between blocks: the note-on lands on the last sample and its note-off is carried by the ring
+/// (the end-of-block rule), so strip 2 is home with events still parked.
+fn carry_a_pair(rig: &mut Rig, key: u8) {
+    for _ in 0..20 {
+        rig.block();
+    }
+    rig.shared[2].stall_ns.store(100_000_000, Ordering::Relaxed);
+    let start = Instant::now();
+    while rig.mix.render_workers_settled() {
+        assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip never went away");
+        rig.block();
+    }
+    let last = u32::try_from(FRAMES - 1).unwrap();
+    assert_eq!(rig.note_on(2, last, key), EventOutcome::Queued);
+    assert_eq!(rig.note_off(2, last, key), EventOutcome::Queued);
+    rig.shared[2].stall_ns.store(0, Ordering::Relaxed);
+    let start = Instant::now();
+    // timing: stall-bound polls for the stalled worker; its only exit budget is the 10 s stall bound
+    while !rig.mix.render_workers_settled() {
+        assert!(start.elapsed() < Duration::from_secs(10), "the worker never returned");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+fn heard(rig: &Rig, k: usize) -> Vec<(u8, u8)> {
+    rig.shared[k].inst.lock().unwrap().trace().iter().map(|l| (l.event.status & 0xF0, l.event.data1)).collect()
+}
+
+/// Events still parked for a home strip (the ring's carry) are delivered when the next blocks
+/// take the serial path, and the instrument keeps receiving afterwards.
+#[test]
+fn a_carried_pair_is_delivered_when_the_next_blocks_render_serially() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    let Some(mut rig) = rig(Duration::from_micros(1500)) else {
+        MixEngine::force_serial(true);
+        return;
+    };
+    become_callback();
+    carry_a_pair(&mut rig, 60);
+    MixEngine::force_serial(true);
+    rig.block();
+    assert!(heard(&rig, 2).contains(&(0x80, 60)), "the carried note-off was delivered on the first serial block: {:?}", heard(&rig, 2));
+    assert!(rig.note_on(2, 10, 61).accepted() && rig.note_off(2, 20, 61).accepted());
+    rig.block();
+    let h = heard(&rig, 2);
+    assert!(h.contains(&(0x90, 61)) && h.contains(&(0x80, 61)), "the instrument keeps receiving on the serial path: {h:?}");
+    assert_eq!(rig.shared[2].report().stuck_notes, 0);
+    transit_mix::unmark_audio_thread();
+    drop(rig.mix.into_retired());
+}
+
+/// A new plan that replaces the instruments while a strip still carries parked events: events
+/// for the new instrument at that index are taken (checked against the live instance, not the
+/// one the strip had when it was away) and reach it.
+#[test]
+fn an_adoption_during_a_carry_takes_events_for_the_new_instrument() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    let Some(mut rig) = rig(Duration::from_micros(1500)) else {
+        MixEngine::force_serial(true);
+        return;
+    };
+    become_callback();
+    carry_a_pair(&mut rig, 60);
+    // Parked behind the carry (the strip is home): another pair on the last sample, which the
+    // adoption's flush carries again, past the swap.
+    let last = u32::try_from(FRAMES - 1).unwrap();
+    assert_eq!(rig.note_on(2, last, 62), EventOutcome::Queued);
+    assert_eq!(rig.note_off(2, last, 62), EventOutcome::Queued);
+    // A new document: every instrument is a new instance.
+    let fresh = common::workers::Shared::new();
+    let f = std::sync::Arc::clone(&fresh);
+    let track = rig.bindings[2].0;
+    let others: Vec<_> = rig.shared.clone();
+    let mut make = move |spec: &InstanceSpec, _: SlotGen| -> Option<NewInstance> {
+        let shared = if spec.track == track { std::sync::Arc::clone(&f) } else { std::sync::Arc::clone(&others[0]) };
+        Some(NewInstance { plugin: Box::new(common::workers::ContinuityPlugin::new(shared, spec.ch, FRAMES)), refused_state: false })
+    };
+    let mut env = rig
+        .comp
+        .compile_with_mode(
+            std::sync::Arc::new(rig.session.clone()),
+            rig.comp.active(),
+            transit_mix::PlanGeneration::from_raw(2),
+            transit_mix::CompileMode::NewDocument,
+            &mut make,
+        )
+        .unwrap();
+    assert_eq!(rig.mix.adopt_plan(&mut env), Adoption::Adopted);
+    rig.comp.reclaim(env);
+    let binding = *rig.comp.active_bindings().iter().find(|b| b.0 == track && b.1 == transit_mix::INSTRUMENT_SLOT).unwrap();
+    assert_ne!(binding.2, rig.bindings[2].2, "a new instance");
+    rig.bindings[2] = binding;
+    assert_eq!(rig.note_on(2, 10, 64), EventOutcome::Queued, "taken for the new instrument, not a stale binding");
+    assert!(rig.note_off(2, 20, 64).accepted());
+    for _ in 0..4 {
+        rig.block();
+    }
+    let h: Vec<_> = fresh.inst.lock().unwrap().trace().iter().map(|l| (l.event.status & 0xF0, l.event.data1)).collect();
+    assert!(h.contains(&(0x90, 64)) && h.contains(&(0x80, 64)), "the new instrument received its events: {h:?}");
+    assert_eq!(fresh.report().stuck_notes, 0);
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    drop(rig.mix.into_retired());
+}

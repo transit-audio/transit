@@ -476,6 +476,10 @@ impl MixEngine {
             _ => false,
         };
         if !pooled {
+            // Whatever is still parked for a home strip is delivered now, as the pool path does.
+            if let Some(pool) = self.pool.as_mut() {
+                pool.deliver_home(p1, &mut self.events, s, frame, frames);
+            }
             let busses: &BusTable = busses;
             // One `run_strips` per layer: a strip keyed from another renders after it, and its key
             // is copied from the finished source first. Without keys this is the one call.

@@ -385,9 +385,21 @@ impl StripPool {
     /// [`MixEngine::queue_event`] for strip `i` while it is away: the checks that need no
     /// instrument, then the event goes into the strip's live buffer for the next block, tagged
     /// with its identity. `Queued` once taken (playback must not see a release refused).
-    pub(crate) fn park(&mut self, i: usize, ev: &InstrumentEvent, events: &EngineEvents, block_len: usize) -> (EventOutcome, Option<u64>) {
+    ///
+    /// `home` is the strip's live instrument generation when the strip is home (it parks only
+    /// behind events it still holds); the binding is checked against it, not against the one
+    /// stored when the strip was sent away (an adoption may have put another instance there).
+    pub(crate) fn park(
+        &mut self,
+        i: usize,
+        ev: &InstrumentEvent,
+        events: &EngineEvents,
+        block_len: usize,
+        home: Option<Option<SlotGen>>,
+    ) -> (EventOutcome, Option<u64>) {
         let (_, slot, generation) = ev.target;
-        match self.binding.get(i).copied().flatten() {
+        let current = if self.is_away(i) { self.binding.get(i).copied().flatten() } else { home.flatten() };
+        match current {
             Some(g) if slot == INSTRUMENT_SLOT && generation != SlotGen::VACANT && g == generation => {}
             Some(_) if slot == INSTRUMENT_SLOT => return (EventOutcome::StaleBinding, None),
             _ => return (EventOutcome::NoInstrument, None),
@@ -589,6 +601,25 @@ impl StripPool {
             self.deliver(i, st, g, &clock, events, s);
         }
         home
+    }
+
+    /// The serial path (render workers on, but this block not through them): delivers what is
+    /// still parked for every home strip (the ring's end-of-block carry, events parked behind it)
+    /// against this block's clock before the strips render, so an instrument never stops
+    /// receiving because the next blocks took the serial path.
+    pub(crate) fn deliver_home(&mut self, strips: &mut [Strip], events: &mut EngineEvents, s: &Session, frame: u64, frames: usize) {
+        if !(0..self.away.len()).any(|i| self.has_parked(i)) {
+            return;
+        }
+        // A block of its own for the rings' clock (`begin_block` only needs newer generations).
+        self.generation += 1;
+        let g = self.generation;
+        let clock = BlockClock { frame, frames };
+        for (i, st) in strips.iter_mut().enumerate().take(self.away.len()) {
+            if !self.is_away(i) {
+                self.deliver(i, st, g, &clock, events, s);
+            }
+        }
     }
 
     /// Strip `i` is away, or still has deferred MIDI (the ring's end-of-block carry): an event
