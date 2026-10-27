@@ -375,6 +375,7 @@ fn parked_then_settled_then_released(press: impl Fn(&mut Rig) -> EventOutcome, r
     assert_eq!(press(&mut rig), EventOutcome::Queued, "parked while away");
     // The worker finishes; the strip comes home between blocks, with no block rendered.
     let start = Instant::now();
+    // timing: stall-bound polls for the stalled worker; its only exit budget is the 10 s stall bound
     while !rig.mix.render_workers_settled() {
         assert!(start.elapsed() < Duration::from_secs(10), "the worker never returned");
         std::thread::sleep(Duration::from_millis(5));
