@@ -1918,3 +1918,29 @@ fn step_entry_in_a_looped_clip_wraps_at_the_loop_end() {
     assert!(t.app.keys.layout.notes.iter().all(|n| !n.outside), "no silent note past the loop end");
     assert_eq!(t.clip_ticks(), 4 * q, "the span is still the cycle");
 }
+
+#[test]
+fn step_on_polls_at_30_ms_when_idle_and_full_rate_while_holding() {
+    use soundcraft_engine::step_input::StepBinding::Cc;
+    let ms = std::time::Duration::from_millis;
+    let mut t = T::open();
+    // Step off: the existing idle policy, no 30 ms poll.
+    let off = t.frame_with(None);
+    assert!(off > ms(100), "idle policy with Step off: {off:?}");
+    t.step_on();
+    // timing: value the repaint delay the app requests (a computed interval), not a measured duration
+    let idle = t.frame_with(None);
+    // egui deducts one predicted frame (16.7 ms at 60 Hz) from the requested 30 ms.
+    assert!((ms(10)..=ms(30)).contains(&idle), "Step on and idle polls at about 30 ms, not per frame: {idle:?}");
+    // A held key is a pending chord: full rate.
+    t.app.live_midi(soundcraft_playback::PlayedNote { pitch: 60, velocity: 90, on: true });
+    let held = t.frame_with(None);
+    assert!(held < idle && held <= ms(1), "a held key repaints at full rate: {held:?}");
+    t.app.live_midi(soundcraft_playback::PlayedNote { pitch: 60, velocity: 0, on: false });
+    t.frames(2);
+    // A held pedal: full rate.
+    t.app.step_message_at(Cc(64), 127, 0);
+    let pedal = t.frame_with(None);
+    assert!(pedal < idle && pedal <= ms(1), "a held pedal repaints at full rate: {pedal:?}");
+    t.app.step_message_at(Cc(64), 0, 10);
+}

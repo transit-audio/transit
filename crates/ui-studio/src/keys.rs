@@ -1069,9 +1069,6 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
         }
         ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
     }
-    if app.step_active() && app.keys.step.pending() {
-        ui.ctx().request_repaint_after(std::time::Duration::from_millis(16));
-    }
     grid_input(app, ui, &map, grid, vel, &cv, now, &mut layout);
     if app.keys.cc.controller.is_none() {
         lane_input(app, ui, &map, vel, &cv, &layout);
@@ -1107,7 +1104,9 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
         ));
         layout.step_cursor = at;
         layout.step_ticks = len;
-        ui.ctx().request_repaint();
+    }
+    if let Some(delay) = step::step_repaint_delay(step_cur.is_some(), app.keys.step.busy()) {
+        ui.ctx().request_repaint_after(delay);
     }
     layout.step_on = step_cur.is_some();
     if app.is_playing() {

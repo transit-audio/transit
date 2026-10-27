@@ -168,6 +168,11 @@ impl StepController {
         self.rest.is_some() || self.input.started_ms.is_some()
     }
 
+    /// The sustain pedal (or its learned binding) is down.
+    pub fn pedal_down(&self) -> bool {
+        self.pedal
+    }
+
     pub fn cancel(&mut self) {
         *self = Self::default();
     }

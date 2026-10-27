@@ -45,8 +45,25 @@ impl StepState {
         self.learned_down = None;
     }
 
-    pub(super) fn pending(&self) -> bool {
-        self.input.is_pending()
+    /// Something the display must animate every frame: a pending chord or rest (the hold ramp)
+    /// or a held pedal.
+    pub(super) fn busy(&self) -> bool {
+        self.input.is_pending() || self.input.pedal_down()
+    }
+}
+
+/// Full-rate repaint interval while a hold, pedal or pending chord is animating.
+pub(super) const STEP_ACTIVE_REPAINT: std::time::Duration = std::time::Duration::from_millis(16);
+/// MIDI poll interval while Step is on and idle (#144). Holds and taps are timed from the ingress
+/// worker's stamp (#136), so a slower poll delays pickup by at most this much and skews no timing.
+pub(super) const STEP_POLL: std::time::Duration = std::time::Duration::from_millis(30);
+
+/// The repaint delay Step entry wants: `None` leaves the idle policy alone (Step off).
+pub(super) fn step_repaint_delay(step_on: bool, busy: bool) -> Option<std::time::Duration> {
+    match (step_on, busy) {
+        (false, _) => None,
+        (true, true) => Some(STEP_ACTIVE_REPAINT),
+        (true, false) => Some(STEP_POLL),
     }
 }
 
@@ -432,5 +449,32 @@ impl StudioApp {
             }
         }
         Some((cursor, len))
+    }
+}
+
+#[cfg(test)]
+mod repaint_tests {
+    use super::*;
+
+    #[test]
+    fn step_repaint_rule() {
+        assert_eq!(step_repaint_delay(false, false), None, "Step off: the idle policy");
+        assert_eq!(step_repaint_delay(false, true), None);
+        assert_eq!(step_repaint_delay(true, false), Some(STEP_POLL));
+        assert_eq!(STEP_POLL, std::time::Duration::from_millis(30));
+        assert_eq!(step_repaint_delay(true, true), Some(STEP_ACTIVE_REPAINT));
+    }
+
+    #[test]
+    fn busy_covers_the_pedal_and_clears_on_cancel() {
+        use soundcraft_engine::step_input::{HoldPrefs, StepBinding::Cc, StepBindings};
+        let mut s = StepState::default();
+        assert!(!s.busy());
+        let (prefs, bindings) = (HoldPrefs::default(), StepBindings::default());
+        s.input.message(Cc(64), 127, 0, prefs, bindings);
+        assert!(s.busy(), "pedal held");
+        s.input.message(Cc(64), 0, 10, prefs, bindings);
+        s.input.cancel();
+        assert!(!s.busy());
     }
 }

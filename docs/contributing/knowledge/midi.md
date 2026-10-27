@@ -78,6 +78,14 @@ hold or turn a tap into a ramp. The fast pedal-tap miss (#139) is not yet reprod
 and the UI drain insert one rest for a tap of any length in tests, so the issue stays open for a
 hardware retest.
 
+Repaint while Step is on (#144): the ingress worker cannot wake egui, so the UI polls the tap
+ring. `step_repaint_delay` in `keys/step.rs` is the one rule. A pending chord or rest, a held key
+or a held pedal repaints at full rate (16 ms, for the hold ramp display); otherwise Step on polls
+every 30 ms instead of repainting at display rate. Step off, or the piano roll hidden, leaves the
+idle policy (1 s) alone. Taps and holds are timed from the worker's stamp (#136), so the slower poll
+delays pickup by at most 30 ms and skews no timing. egui deducts one predicted frame from a
+requested delay, so a frame test reads about 13 ms at 60 Hz for the 30 ms poll.
+
 A held pedal cannot be stranded (#134): the ingress worker sets `tap_lost` (the step editor
 then gets a `Reset`) whenever a route stops admitting, whatever the cause: the port goes away,
 the storm detector mutes it, Main drops a permit or rebuilds the routes without it (disarm,
