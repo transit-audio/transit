@@ -60,12 +60,15 @@ impl Default for WorstCallback {
     }
 }
 
-/// Whether a long callback was slow or the thread was not running.
+/// Why a long callback was long.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Verdict {
-    /// The callback stood still in one phase for more than half of its time: the thread was not
-    /// running (a DPC, an interrupt, another thread at higher priority), or one call blocked.
+    /// The thread was not running: the callback stood still in one phase for more than half of
+    /// its work time, and that stretch alone exceeds the callback's whole nominal budget.
     Preempted,
+    /// The callback stood still in one phase for more than half of its work time, but that
+    /// stretch is within the budget: one heavy call (a plug-in) dominated.
+    Stalled,
     /// The time was spread over the phases: the work itself was heavy.
     Slow,
 }
@@ -76,6 +79,7 @@ impl Verdict {
     pub const fn label(self) -> &'static str {
         match self {
             Verdict::Preempted => "preempted",
+            Verdict::Stalled => "stalled in one phase",
             Verdict::Slow => "slow",
         }
     }
@@ -94,11 +98,22 @@ impl WorstCallback {
         self.budget_ns > 0 && self.duration_ns > self.budget_ns
     }
 
-    /// `None` for a callback within its budget (nothing to explain), else whether the phase
-    /// marker stood still for more than half of the callback ([`Verdict::Preempted`]) or not.
+    /// `None` for a callback within its budget (nothing to explain). Otherwise: the longest
+    /// stretch in one phase is more than half the work time and exceeds the nominal budget
+    /// ([`Verdict::Preempted`]), or is more than half but within it ([`Verdict::Stalled`]), or
+    /// is not ([`Verdict::Slow`]).
     #[must_use]
     pub fn verdict(&self) -> Option<Verdict> {
-        self.over_budget().then(|| if self.longest_gap_ns.saturating_mul(2) > self.duration_ns { Verdict::Preempted } else { Verdict::Slow })
+        if !self.over_budget() {
+            return None;
+        }
+        Some(if self.longest_gap_ns.saturating_mul(2) <= self.duration_ns {
+            Verdict::Slow
+        } else if self.longest_gap_ns > self.budget_ns {
+            Verdict::Preempted
+        } else {
+            Verdict::Stalled
+        })
     }
 
     /// A plug-in was being created during the callback.
@@ -669,6 +684,11 @@ mod worst_tests {
         let stops: Vec<_> = (0..4).map(|i| (Phase::StripRender, Some(i), u64::from(i) * 5_000_000)).collect();
         run(&mut accumulate, &counters, 20.0, &stops, false);
         assert_eq!(counters.snapshot().worst[0].verdict(), Some(Verdict::Slow));
+        // 3 ms with 2 ms in one phase of a 2.67 ms budget: stalled, but within the budget.
+        let counters = Counters::default();
+        let mut accumulate = Accumulator::default();
+        run(&mut accumulate, &counters, 3.0, &[(Phase::StripRender, Some(0), 2_000_000)], false);
+        assert_eq!(counters.snapshot().worst[0].verdict(), Some(Verdict::Stalled));
         // Within the budget there is nothing to explain.
         let counters = Counters::default();
         let mut accumulate = Accumulator::default();

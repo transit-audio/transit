@@ -342,16 +342,11 @@ impl Report {
     }
 
     /// Whether the backend in use is WASAPI: only on Windows, and not when the selected audio
-    /// system is another one (ASIO, say) or the backend is a native one that is not WASAPI. The
-    /// untouched default system on Windows is WASAPI (#163).
+    /// system is another one (ASIO, say). The untouched default system on Windows is WASAPI (#163).
     fn backend_is_wasapi(&self, windows: bool) -> bool {
-        use transit_playback::devices::Backend;
-        let c = &self.settings;
-        windows
-            && match c.system.as_deref() {
-                Some(system) => system.eq_ignore_ascii_case("WASAPI") && c.backend != Backend::NativeAsio && c.backend != Backend::NativeJack,
-                None => !matches!(c.backend, Backend::NativeAsio | Backend::NativeJack),
-            }
+        // The audio system decides, not the saved backend: a native ASIO backend saved with the
+        // WASAPI system still opens cpal WASAPI (the crossed configuration).
+        windows && self.settings.system.as_deref().is_none_or(|s| transit_playback::devices::is_wasapi_system(Some(s)))
     }
 
     /// [`Self::render`] with `wasapi` saying the backend is WASAPI: the Settings section prints
@@ -742,8 +737,9 @@ mod tests {
             r.backend_is_wasapi(true)
         };
         use transit_playback::devices::Backend;
+        assert!(on(None, Backend::NativeAsio) && on(Some("WASAPI"), Backend::NativeAsio));
         assert!(on(Some("WASAPI"), Backend::NativeWasapi) && on(None, Backend::Auto) && on(Some("WASAPI"), Backend::Cpal));
-        assert!(!on(Some("ASIO"), Backend::NativeAsio) && !on(None, Backend::NativeAsio) && !on(Some("ASIO"), Backend::Cpal));
+        assert!(!on(Some("ASIO"), Backend::NativeAsio) && !on(Some("ASIO"), Backend::Cpal));
         assert!(!fake().backend_is_wasapi(false));
         assert_eq!(text.matches("Native JACK (PipeWire 1.0.7) runs at 48000 Hz").count(), 1, "{text}");
         assert_eq!(text.matches("To pin one instead").count(), 1, "{text}");

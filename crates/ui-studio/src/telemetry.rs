@@ -172,7 +172,7 @@ fn yes_no(b: bool) -> &'static str {
 
 /// The report's attribution lines for the longest callbacks (#162): the longest one with the
 /// track, plug-in and phase it was in, the loading and editor flags and, for one over its
-/// budget, `(preempted)` or `(slow)`; then the longest three. Empty before a timed callback.
+/// budget, `(preempted)`, `(stalled in one phase)` or `(slow)`; then the longest three. Empty before a timed callback.
 pub fn longest_callback_lines(t: &CallbackTelemetry, strips: &[StripName]) -> Vec<String> {
     let Some(w) = t.worst_callback_snapshot() else { return Vec::new() };
     let mut line = format!(
