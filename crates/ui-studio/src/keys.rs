@@ -440,6 +440,17 @@ fn clip_view(s: &Session, clip: ClipId) -> Option<ClipView> {
 const MAX_GHOSTS: usize = 4096;
 /// Most repeat cycles one frame walks for the ghosts.
 const MAX_GHOST_CYCLES: usize = 4096;
+/// A ghost repeat is a faint fill with a thin outline. The arranger's `GHOST_ALPHA` reads dim over a dark clip
+/// body but near full over the grid (a real note is never fainter than 0.45), so the roll uses its own.
+const GHOST_FILL_ALPHA: f32 = 0.16;
+const GHOST_LINE_ALPHA: f32 = 0.5;
+/// The faintest fill a real note draws with (velocity 0 in `paint_notes`).
+const NOTE_MIN_ALPHA: f32 = 0.45;
+
+/// The fill and outline of a ghost repeat.
+fn ghost_colors() -> (egui::Color32, egui::Color32) {
+    (TOKENS.accent.gamma_multiply(GHOST_FILL_ALPHA), TOKENS.accent.gamma_multiply(GHOST_LINE_ALPHA))
+}
 
 impl ClipView {
     /// The repeats of a looped clip's cycle from `loop.end` to the arrangement length (ADR 0019): the
@@ -1625,7 +1636,8 @@ fn paint_loop_ghosts(ui: &Ui, map: &Map, grid: Rect, cv: &ClipView, layout: &mut
         if r.max.x < grid.min.x || r.min.x > grid.max.x || r.max.y < grid.min.y || r.min.y > grid.max.y {
             continue;
         }
-        p.rect_filled(r, crate::theme::RADIUS_SM, TOKENS.accent.gamma_multiply(crate::arrange::GHOST_ALPHA));
+        p.rect_filled(r, crate::theme::RADIUS_SM, ghost_colors().0);
+        p.rect_stroke(r, crate::theme::RADIUS_SM, Stroke::new(1.0, ghost_colors().1), StrokeKind::Inside);
     }
 }
 
@@ -1707,7 +1719,7 @@ fn paint_notes(
         let r = map.note_rect(n);
         let outside = n.start >= clip_len;
         let alpha = if outside { alpha * 0.4 } else { alpha };
-        let a = 0.45 + 0.55 * f32::from(n.velocity) / 127.0;
+        let a = NOTE_MIN_ALPHA + 0.55 * f32::from(n.velocity) / 127.0;
         let fill = if selected { theme::lighten(TOKENS.accent, 0.25) } else { TOKENS.accent.gamma_multiply(a) };
         p.rect_filled(r, crate::theme::RADIUS_SM, fill.gamma_multiply(alpha));
         if selected {
@@ -2272,5 +2284,19 @@ mod ghost_tests {
         // Off screen (before the repeats or past the end): nothing is built.
         assert_eq!(cv.ghosts((0, 4)), (Vec::new(), 0));
         assert_eq!(cv.ghosts((600 * bar, 601 * bar)), (Vec::new(), 0));
+    }
+}
+
+#[cfg(test)]
+mod ghost_style_tests {
+    use super::*;
+
+    #[test]
+    fn a_ghost_paints_fainter_and_outlined_next_to_the_faintest_real_note() {
+        let (fill, line) = ghost_colors();
+        let faintest_note = TOKENS.accent.gamma_multiply(NOTE_MIN_ALPHA);
+        assert_ne!(fill, faintest_note);
+        assert!(u32::from(fill.a()) * 2 < u32::from(faintest_note.a()), "the ghost fill is well under any real note's");
+        assert!(line.a() > fill.a(), "outlined, so the repeat stays legible");
     }
 }
