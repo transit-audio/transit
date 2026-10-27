@@ -47,8 +47,11 @@ The slot enforces its transitions; these rules are the caller's, and the executo
 | Buffer ownership follows the slot state, by convention | Touch a strip's buffers and instance only while holding its `ClaimToken`, after a successful `reclaim`, or after `consume` returned `Ready` (until the next publish). Never on `state() == Done` alone: a `Done` result is read only through `consume`. |
 | Faults are failures | `faults()` counts refused transitions in every build; tests outside `transit-rt` assert `faults() == 0` (inside it, a refusal already fails the test). |
 | One `WorkerSet`, owned by the callback | Its block methods (`begin_block`, `publish`, `wake`, `finish`) take `&mut self`, which makes the single publisher a compile-time rule; `stats`, `outcomes` and `jobs` are reads. |
-| Inputs only when not busy | Write a strip's inputs before `publish`, and only when `is_busy(strip)` is false: a busy strip's buffers belong to a worker until a later `begin_block` retires its result. |
-| Mix only `Mixed` and `Inline` | After `finish`, a strip is mixed only when its `Outcome` is `Mixed` or `Inline`; `Overrun` is silence; `Faulted` is silence and a strip to retire. |
+| Inputs only when not busy, after `begin_block` | Write a strip's inputs only after this block's `begin_block`, before its `publish`, and only when `is_busy(strip)` is false: a busy strip's buffers belong to a worker until a later `begin_block` retires its result. |
+| Mix only `Mixed` and `Inline`, in the window | After `finish`, a strip is mixed only when its `Outcome` is `Mixed` or `Inline`; `Overrun` is silence; `Faulted` is silence. Read a strip's outputs only between `finish` and that strip's next `publish`, and read the outcomes before the next `begin_block` (which resets them). |
+| Never republish a faulted instance | A strip whose runner panicked (a `Faulted` outcome, or a late result that panicked, seen at a later `begin_block`) is suspect: `publish` refuses it (`PublishRefused::Suspect`) until the caller has replaced the instance and called `clear_suspect`. |
+| The inline closure must not panic | An unwind through `finish` leaves the block unresolved; the caller catches inside the closure (as `guarded` does in `crates/mix`). |
+| Never drop a `WorkerSet` on the audio thread | `Drop` runs `shutdown`, which sleeps while it waits (up to 1 s); retire the set through the garbage path. |
 | Never reuse a quarantined instance | A strip named in a `Quarantine` report keeps its instance and buffers alive and unused for the life of the process. |
 
 ## Correctness gates (#124) and what slices 1 and 2 prove
@@ -62,6 +65,12 @@ The slot enforces its transitions; these rules are the caller's, and the executo
 | 5 Retirement | bounded wait, quarantine | none (a dropped token leaves the slot `Claimed`, which quarantine will detect) | **Proven:** `shutdown(bound)` returns an idle set at once; with a stalled worker it returns within the bound plus slack, reports the worker and its strip and leaves the slot `Claimed`, and the released worker later finishes into leaked state without harm; a runner panic is caught, the slot completed and the strip reported `Faulted` | slice 4: the engine retires through it and logs the plug-in's name; a quarantined instance is never reused |
 | 6 Measured improvement | bench, continuity | none | none | slice 4: wiring into `crates/mix` behind the serial default, the #124 test matrix, and the default decision |
 
+## Notes for slices 3 and 4 (from the slice 2 review)
+
+- Slice 3: defer MIDI only for `Overrun(Busy)` and `Overrun(Unstarted)`; a `Late` strip's worker consumed its events.
+- Slice 4: pass `wake(count)` the number of strips published; read outcomes before the next `begin_block`; retire the set (and quarantined instances) through the garbage path, never on the audio thread; on Linux `SCHED_FIFO` a `yield_now` in `finish` can hand the core to a same-priority worker, so keep the workers at or below cores minus one, or below the callback's priority, and measure it.
+- The busy skip in `wake` is ordered against the worker's `current = 0` by a `SeqCst` fence on each side (store-buffering pattern); a slice that changes either side keeps the pair.
+
 ## Deviations from #124
 
 | # | #124 says | Implemented | Why |
@@ -71,7 +80,7 @@ The slot enforces its transitions; these rules are the caller's, and the executo
 | 3 | a debug assertion in tests | a refused transition asserts only in `transit-rt`'s own tests (`cfg(test)`); everywhere else, debug builds included, it is counted | no panic on the audio thread of a debug build |
 | 4 | the callback waits for `Done` up to the deadline (no wait policy given) | `finish` sweeps the open slots; after a sweep without progress it spins (64 sweeps of 32 `spin_loop` hints), then calls `yield_now` between sweeps; never a lock, a park or a sleep | a spin alone starves a worker that shares the core; a park would need a wake from the worker on every completion |
 | 5 | at the deadline, overrun the rest | an unstarted strip the admission limit refused stays claimable by the workers until the deadline; at the deadline it is reclaimed and retired unrendered (`Overrun(Unstarted)`) | a worker that started it after the deadline would hold the strip into the next block and turn one overrun into two |
-| 6 | a worker unwinding from a plug-in panic leaves the slot `Claimed`: catch it and quarantine | the worker loop catches the panic, completes the slot and reports the strip `Faulted` (`runner_panics`); the worker lives on and the caller retires the strip | the thread is sound after a caught panic; only the instance is suspect, and quarantine is for threads that cannot be joined |
+| 6 | a worker unwinding from a plug-in panic leaves the slot `Claimed`: catch it and quarantine | the worker loop catches the panic, completes the slot and reports the strip `Faulted` (`runner_panics`); the worker lives on; the strip is suspect (also for a panic in a late result) and is not published again until the caller replaces the instance (`clear_suspect`) | the thread is sound after a caught panic; only the instance is suspect, and quarantine is for threads that cannot be joined |
 | 7 | at block start a `Claimed` slot is skipped and counted | `begin_block` marks the strip busy; the overrun is counted when the caller publishes it (`Published::Skipped`, `Overrun(Busy)`), and its result is retired only at a later `begin_block`, even if the worker finishes mid-block | a strip the plan no longer renders is not counted; results are never retired mid-block |
 
 Additions, not deviations: `publish` checks `Idle` before it writes the generation (the single-publisher precondition makes that race-free) and refuses a generation that is not newer; `retire` from `Idle` or `Published` is refused too.

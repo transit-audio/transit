@@ -42,9 +42,14 @@
 //! **Faults in the runner.** The worker loop catches a panic from [`StripRunner::run`]
 //! (`catch_unwind`), completes the slot anyway (so it is never left `Claimed` by an unwind) and
 //! flags the strip: [`Outcome::Faulted`], counted in [`Stats::runner_panics`]. Its output must not
-//! be mixed and its instance may be in any state; the caller retires the strip. A panic in the
-//! inline closure is the caller's (it unwinds through `finish`; the slot stays `Reclaimed` and
-//! the next `begin_block` retires it).
+//! be mixed and its instance may be in any state. The strip becomes suspect (also when the
+//! panic was in a late result, retired at a later `begin_block`): [`WorkerSet::publish`] refuses
+//! it with [`PublishRefused::Suspect`] until the caller replaces the instance and calls
+//! [`WorkerSet::clear_suspect`]. The inline closure must not panic: an unwind through `finish`
+//! leaves the block unresolved (the slot stays `Reclaimed` until the next `begin_block`).
+//!
+//! Never drop a [`WorkerSet`] on the audio thread: `Drop` runs [`WorkerSet::shutdown`], which
+//! sleeps while it waits (up to 1 s).
 //!
 //! **Retirement and quarantine** (gate 5). [`WorkerSet::shutdown`] stops and wakes every
 //! worker and joins each within one bound. A worker still running at the bound is abandoned: its
@@ -124,7 +129,8 @@ pub enum Published {
     Skipped,
 }
 
-/// Why [`WorkerSet::publish`] refused (each one a caller error, counted in [`Stats::misuse`]).
+/// Why [`WorkerSet::publish`] refused. Each one is a caller error counted in [`Stats::misuse`],
+/// except [`PublishRefused::Suspect`], which is the set protecting a suspect instance.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PublishRefused {
     /// No block is open ([`WorkerSet::begin_block`] not called or refused, or the set is shut
@@ -136,6 +142,9 @@ pub enum PublishRefused {
     Twice,
     /// The slot refused the publish (see [`PublishError`]).
     Slot(PublishError),
+    /// The runner panicked on this strip (in this block's result or a late one): its instance
+    /// is suspect and the strip is not published again until [`WorkerSet::clear_suspect`].
+    Suspect,
 }
 
 /// Counts for one block, from [`WorkerSet::finish`].
@@ -215,6 +224,9 @@ struct Shared {
     /// Per strip: the runner panicked on the last claimed render. Written by the worker before
     /// its completing Release, read by the publisher after its consuming Acquire.
     panicked: Box<[AtomicBool]>,
+    /// Per strip: a panic was observed (in a consumed or a late result); refused by `publish`
+    /// until `clear_suspect`. Publisher-only (Relaxed).
+    suspect: Box<[AtomicBool]>,
     workers: Box<[WorkerSlot]>,
     stop: AtomicBool,
     stats: Counters,
@@ -304,6 +316,7 @@ impl WorkerSet {
             runner,
             cost_ns: (0..strips).map(|_| AtomicU64::new(0)).collect(),
             panicked: (0..strips).map(|_| AtomicBool::new(false)).collect(),
+            suspect: (0..strips).map(|_| AtomicBool::new(false)).collect(),
             workers: (0..n).map(|_| WorkerSlot { woken: AtomicBool::new(false), current: AtomicUsize::new(0), promotion: OnceLock::new() }).collect(),
             stop: AtomicBool::new(false),
             stats: Counters::default(),
@@ -452,8 +465,11 @@ impl WorkerSet {
             State::Done => {
                 // A late worker's result for an older block: retired unread (Acquire inside
                 // orders the worker's writes before the strip is reused).
-                // A panic flag of a late result was counted by its worker; clear it.
-                self.shared.panicked[strip].store(false, Ordering::Relaxed);
+                // A late result whose run panicked (counted by its worker): the instance is
+                // suspect, so the strip is not published again until the caller replaces it.
+                if self.shared.panicked[strip].swap(false, Ordering::Relaxed) {
+                    self.shared.suspect[strip].store(true, Ordering::Relaxed);
+                }
                 bump(&self.shared.stats.late_results);
                 slot.retire()
             }
@@ -493,6 +509,9 @@ impl WorkerSet {
         if outcome != Outcome::NotPublished {
             return refused(self, PublishRefused::Twice);
         }
+        if self.shared.suspect[strip].load(Ordering::Relaxed) {
+            return Err(PublishRefused::Suspect);
+        }
         if self.busy[strip] {
             self.outcomes[strip] = Outcome::Overrun(OverrunCause::Busy);
             self.skipped += 1;
@@ -508,9 +527,35 @@ impl WorkerSet {
         Ok(Published::Published)
     }
 
+    /// True when the runner panicked on this strip (in a consumed or a late result): its
+    /// instance is suspect and [`WorkerSet::publish`] refuses it until
+    /// [`WorkerSet::clear_suspect`].
+    #[must_use]
+    pub fn is_suspect(&self, strip: usize) -> bool {
+        self.shared.suspect.get(strip).is_some_and(|f| f.load(Ordering::Relaxed))
+    }
+
+    /// Publisher: the strip's instance has been replaced; it may be published again.
+    pub fn clear_suspect(&mut self, strip: usize) {
+        if let Some(f) = self.shared.suspect.get(strip) {
+            f.store(false, Ordering::Relaxed);
+        }
+    }
+
     /// Publisher: unparks up to `count` workers that are neither working nor already woken, and
-    /// returns how many. Allocation-free and non-blocking (`Thread::unpark`).
+    /// returns how many. Pass the number of strips published. Allocation-free and non-blocking
+    /// (`Thread::unpark`).
     pub fn wake(&mut self, count: usize) -> usize {
+        // Store-buffering pattern (Dekker): the publisher stores slot states (publish) then loads
+        // a worker's `current`; the worker stores `current = 0` then loads slot states (its next
+        // sweep). Without a SeqCst fence on both sides, a weakly ordered CPU (AArch64) can let
+        // both loads see the old values: the publisher skips the worker as busy and the worker's
+        // sweep misses the new job, so it parks with a strip published. With the two fences, at
+        // least one side sees the other's store: the publisher wakes the worker, or the worker
+        // claims the job. Paired with the fence after `current.store(0)` in `worker_main`.
+        // Kept (rather than dropping the busy skip) so `wake(count)` reaches idle workers
+        // instead of spending its count on busy ones.
+        std::sync::atomic::fence(Ordering::SeqCst);
         let n = self.threads.len();
         let mut woken = 0;
         for k in 0..n {
@@ -611,6 +656,7 @@ impl WorkerSet {
             Consume::Ready => {
                 // Relaxed: ordered after the worker's write by consume's Acquire.
                 if self.shared.panicked[strip].swap(false, Ordering::Relaxed) {
+                    self.shared.suspect[strip].store(true, Ordering::Relaxed);
                     Some(Outcome::Faulted)
                 } else {
                     bump(&self.shared.stats.mixed);
@@ -684,7 +730,8 @@ impl WorkerSet {
         let deadline = Instant::now().checked_add(bound);
         for (k, handle) in self.handles.iter_mut().enumerate() {
             let Some(h) = handle.take() else { continue };
-            while !h.is_finished() && deadline.is_some_and(|d| Instant::now() < d) {
+            // No representable deadline (a bound such as `Duration::MAX`) is unbounded.
+            while !h.is_finished() && deadline.is_none_or(|d| Instant::now() < d) {
                 std::thread::sleep(Duration::from_millis(1));
             }
             if h.is_finished() {
@@ -746,6 +793,9 @@ fn worker_main(shared: &Shared, index: usize, start: usize, promote: bool) {
             drop(r);
             token.complete();
             me.current.store(0, Ordering::Relaxed);
+            // The worker's half of the store-buffering pair (see `WorkerSet::wake`): `current = 0`
+            // is ordered before the next sweep's loads of the slot states.
+            std::sync::atomic::fence(Ordering::SeqCst);
             next = strip + 1;
             if shared.stop.load(Ordering::Acquire) {
                 break 'run;

@@ -49,6 +49,8 @@ pub(super) struct FakeStrip {
     behavior: AtomicU8,
     pub(super) spins: AtomicU32,
     held: AtomicBool,
+    /// Panic when the stall is released.
+    panic_after_stall: AtomicBool,
     inside: AtomicBool,
     /// The last generation any thread executed (entered) for this strip.
     pub(super) last_gen: AtomicU64,
@@ -96,6 +98,7 @@ impl Fake {
                     behavior: AtomicU8::new(Behavior::Normal as u8),
                     spins: AtomicU32::new(64),
                     held: AtomicBool::new(false),
+                    panic_after_stall: AtomicBool::new(false),
                     inside: AtomicBool::new(false),
                     last_gen: AtomicU64::new(0),
                     payload: std::array::from_fn(|_| AtomicU64::new(0)),
@@ -114,6 +117,12 @@ impl Fake {
             self.strips[strip].held.store(true, Ordering::Release);
         }
         self.strips[strip].behavior.store(b as u8, Ordering::Release);
+    }
+
+    /// Releases a stalled strip, which then panics in the same run.
+    pub(super) fn release_then_panic(&self, strip: usize) {
+        self.strips[strip].panic_after_stall.store(true, Ordering::Release);
+        self.release(strip);
     }
 
     pub(super) fn release(&self, strip: usize) {
@@ -164,6 +173,8 @@ impl Fake {
                     std::thread::sleep(Duration::from_millis(1));
                 }
                 self.stalled.fetch_sub(1, Ordering::AcqRel);
+                let panic_now = s.panic_after_stall.swap(false, Ordering::AcqRel);
+                assert!(!panic_now, "fake runner: strip {strip} panics after its stall on purpose");
             }
             3 => panic!("fake runner: strip {strip} panics on purpose"),
             _ => {
@@ -440,6 +451,21 @@ fn a_panicking_runner_completes_its_slot_as_a_counted_fault() {
 
     fake.set(2, Behavior::Normal);
     assert!(set.begin_block(2));
+    assert!(set.is_suspect(2), "a faulted strip's instance is suspect");
+    for s in 0..4 {
+        let expect = if s == 2 { Err(PublishRefused::Suspect) } else { Ok(Published::Published) };
+        assert_eq!(set.publish(s), expect);
+    }
+    set.wake(1);
+    wait_done(&set, 3, 0);
+    let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
+    assert_eq!(r.mixed, 3);
+    assert_eq!(set.outcome(2), Some(Outcome::NotPublished));
+    assert_eq!(set.stats().misuse, 0, "a suspect refusal is not a caller error");
+
+    // The caller replaced the instance.
+    set.clear_suspect(2);
+    assert!(set.begin_block(3));
     publish_all(&mut set);
     set.wake(1);
     wait_done(&set, 4, 0);
@@ -583,4 +609,101 @@ fn no_block_operation_or_worker_loop_allocates_after_construction() {
     assert!(q.is_empty());
     assert_eq!(stats.allocs, 0, "shutdown of an idle set: {stats:?}");
     assert_eq!(set.jobs().faults(), 0);
+}
+
+/// Review F2: a runner panic in a late result (retired unread at a later `begin_block`) makes
+/// the strip suspect too, so the next publish cannot hand the suspect instance to a worker.
+#[test]
+fn a_late_result_whose_run_panicked_keeps_the_strip_suspect() {
+    let fake = Fake::new(2, Duration::ZERO);
+    fake.set(1, Behavior::Stall);
+    let mut set = set_of(&fake, 2);
+    assert!(set.begin_block(1));
+    publish_all(&mut set);
+    set.wake(2);
+    wait_done(&set, 1, 1);
+    let r = set.finish(Instant::now(), |_| panic!("nothing is left to render inline"));
+    assert_eq!(set.outcome(1), Some(Outcome::Overrun(OverrunCause::Late)), "{r:?}");
+
+    fake.release_then_panic(1);
+    wait_until("the late, panicking run", || set.jobs().slot(1).map(JobSlot::state) == Some(State::Done));
+    assert!(!set.is_suspect(1), "not seen until the publisher retires the result");
+    assert!(set.begin_block(2));
+    assert!(set.is_suspect(1));
+    assert_eq!(set.publish(1), Err(PublishRefused::Suspect));
+    assert_eq!(set.publish(0), Ok(Published::Published));
+    set.wake(2);
+    wait_done(&set, 1, 0);
+    let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
+    assert_eq!(r.mixed, 1);
+    let st = set.stats();
+    assert_eq!((st.runner_panics, st.late_results, st.misuse), (1, 1, 0));
+
+    set.clear_suspect(1);
+    assert!(set.begin_block(3));
+    publish_all(&mut set);
+    set.wake(2);
+    wait_done(&set, 2, 0);
+    let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
+    assert_eq!(r.mixed, 2, "resumed once the instance was replaced");
+    assert!(set.shutdown(STALL).is_empty());
+    assert_eq!(set.jobs().faults(), 0);
+}
+
+/// Review F1: a wake issued while the one worker is finishing a run. The publisher may skip the
+/// worker as busy only if the worker's next sweep is then certain to see the new job (the `SeqCst`
+/// fence pair in `wake` and `worker_main`); a lost wake parks the worker with a strip published
+/// and fails here at the stall bound. The window is a few instructions wide, so this exercises
+/// the path rather than proving the fences; store-load reordering is allowed on x86 too, and the
+/// weaker `AArch64` model is covered by the macos-aarch64 leg of `rt.yml`, which runs this.
+#[test]
+fn a_wake_while_the_worker_finishes_a_run_is_never_lost() {
+    let fake = Fake::new(2, Duration::ZERO);
+    let mut set = set_of(&fake, 1);
+    let mut x = 0x9E37_79B9_7F4A_7C15_u64;
+    let mut next = move || {
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        x
+    };
+    for g in 1..=5000 {
+        assert!(set.begin_block(g));
+        fake.strips[0].spins.store(u32::try_from(next() % 2000).unwrap_or(0), Ordering::Relaxed);
+        assert_eq!(set.publish(0), Ok(Published::Published));
+        set.wake(1);
+        // The worker is inside strip 0; publish strip 1 at a random point of its run, so some
+        // publishes land while it clears `current` and sweeps again.
+        wait_until("the worker on strip 0", || fake.strips[0].last_gen.load(Ordering::Acquire) == g);
+        for _ in 0..next() % 2000 {
+            std::hint::spin_loop();
+        }
+        assert_eq!(set.publish(1), Ok(Published::Published));
+        set.wake(1);
+        wait_done(&set, 2, 0);
+        let r = set.finish(Instant::now() + STALL, |_| panic!("the worker rendered both"));
+        assert_eq!(r.mixed, 2);
+    }
+    assert!(set.shutdown(STALL).is_empty());
+    assert_eq!(set.jobs().faults(), 0);
+}
+
+/// Review F3: a bound past what `Instant` can represent is unbounded, not zero.
+#[test]
+fn shutdown_with_an_unrepresentable_bound_waits_for_the_worker() {
+    let fake = Fake::new(1, Duration::ZERO);
+    fake.set(0, Behavior::Stall);
+    let mut set = set_of(&fake, 1);
+    assert!(set.begin_block(1));
+    publish_all(&mut set);
+    set.wake(1);
+    wait_until("the stalled worker", || fake.stalled.load(Ordering::Acquire) == 1);
+    let shutting = std::thread::spawn(move || set.shutdown(Duration::MAX));
+    // timing: sleep-ok gives a broken shutdown time to return early; the assertion below holds
+    // by construction once fixed (the worker cannot return while stalled)
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(!shutting.is_finished(), "shutdown(Duration::MAX) returned while a worker was running");
+    fake.release(0);
+    let q = shutting.join().expect("shutdown thread");
+    assert!(q.is_empty(), "{q:?}");
 }
