@@ -1,6 +1,6 @@
 # ADR 0029: Per-strip job slots for the multicore strip render
 
-- **Status:** proposed 2026-10-27 (issue #124; slice 1, the slot protocol, implemented in `transit-rt` `strip_jobs`; slice 2, the worker set and the deadline policy, in `transit-rt` `worker_set`; slice 3, the deferred-MIDI ring and the continuity test instrument, in `transit-rt` `midi_defer`)
+- **Status:** proposed 2026-10-27 (issue #124; slice 1, the slot protocol, implemented in `transit-rt` `strip_jobs`; slice 2, the worker set and the deadline policy, in `transit-rt` `worker_set`; slice 3, the deferred-MIDI ring and the continuity test instrument, in `transit-rt` `midi_defer`; slice 4, the wiring into the live render path in `crates/mix` `strip_pool`, opt-in with `TRANSIT_RENDER_POOL=1`. Serial stays the default: the default decision waits for the maintainer's measurement on the reference hardware, gate 6)
 - **Date:** 2026-10-27
 - **Amends:** [ADR 0012](0012-midi-device-layer.md) gate G1 and [ADR 0013](0013-unsafe-only-in-soundcraft-rt.md) (the lock-free fan-out it names as a `transit-rt` residual)
 - **Reopen when:** the slot needs a field written outside its transitions, a second publisher appears, or a later slice cannot keep the callback's bound with this state machine.
@@ -39,7 +39,7 @@ Each strip has one `JobSlot`: an `AtomicU8` state and an `AtomicU64` generation 
 
 ## Deferred MIDI (slice 3, `midi_defer`)
 
-A `DeferSet` holds one `DeferRing` per strip, each a fixed buffer of the caller's capacity (at least 2), allocated in `DeferSet::new`; nothing after it allocates. The event is a 16-byte `Copy` struct: `status`, `data1`, `data2`, `offset` (the sample offset within its block) and `block` (the generation it belonged to, stamped on defer and kept on delivery).
+A `DeferSet` holds one `DeferRing` per strip, each a fixed buffer of the caller's capacity (at least 2), allocated in `DeferSet::new`; nothing after it allocates. The event is a 24-byte `Copy` struct: `status`, `data1`, `data2`, `offset` (the sample offset within its block), `block` (the generation it belonged to, stamped on defer and kept on delivery) and `tag` (slice 4: an opaque caller value the ring carries unchanged through defer, the overflow compaction, the end-of-block carry and delivery; `Event::NO_TAG` from the constructors and on every event a silence generates). The mix crate keeps each event's identity (source, sender note id, binding, due frame) in a side table and puts its index in the tag, so a carried note-off still ends the voice its note-on started.
 
 **One producer, one consumer, one thread.** The audio callback defers after a block and drains at a later block; `defer_block`, `deliver` and `drain_into` take `&mut self`, so the ring needs no atomics and no lock. Only the fault counters (`DeferStats`, shared through an `Arc` cloned off the audio path) are atomics, readable from any thread.
 
@@ -74,6 +74,41 @@ The slot enforces its transitions; these rules are the caller's, and the executo
 | Defer only what the strip missed; deliver before its next render | Defer with `defer_for` (or `defer_block` after `should_defer`) after `finish`, with the events the block would have delivered; at the strip's next processed block call `deliver` with that block's live events before its `publish` (or `drain_into`, then live events no earlier than `Drained::floor`, and none while events are carried). |
 | Never reuse a quarantined instance | A strip named in a `Quarantine` report keeps its instance and buffers alive and unused for the life of the process. |
 
+## Slice 4: the wiring (`crates/mix` `strip_pool`)
+
+An engine has render workers only after `MixEngine::start_render_workers` (control thread; cores minus one, at most `MAX_RENDER_WORKERS`, promoted once at start unless `TRANSIT_RENDER_NO_PRIORITY=1`). Playback starts them only when `TRANSIT_RENDER_POOL=1` cleared `FORCE_SERIAL`; the per-block path is taken only while `serial_forced()` is off, the plan has no sidechain key and phase 1 has at least `PARALLEL_STRIPS` strips (or a strip is still away). Offline renders never have workers (they keep Rayon's global pool). The rayon render pool and its process-global are removed. No `unsafe`: each strip index has a cell, a `Mutex<Job>` holding a spare strip and the block's inputs, taken only with `try_lock`.
+
+**One block** (`StripPool::render`, after `render_active` cleared the busses and aligned keys):
+
+1. `begin_block(g)`. A strip whose worker has finished (no longer busy) comes home: its late result was retired unread by `begin_block`.
+2. Per phase-1 strip: deliver its deferred MIDI (ring, then the live events taken while it was away) into its instrument's queue; a strip that reads the live input or the hardware renders on the callback; a strip still away is published only to be skipped (`Overrun(Busy)`); otherwise it is sent into its cell (the table keeps a spare with the strip's routing state and identity) and published.
+3. `wake(published)`; the callback renders its own strips while the workers run.
+4. `finish(deadline, inline)`; the inline closure renders the strip from its cell exactly as the serial path does (`guarded(process_strip)`).
+5. `Mixed` and `Inline` strips come home (their job must carry this generation, else silence and a counted fault); `Overrun(Unstarted)` comes home unrendered (its queue keeps its events); `Overrun(Late)` stays away; `Faulted` comes home silent and suspect. The mixdown measures and routes only strips that are home and not silent. The live MIDI of `Busy` strips goes to `defer_for`.
+
+**Deadline.** `start + period * 3 / 4`, where `start` is `Instant::now()` at `render_active`'s entry and the period is `frames / sample rate` of the block. The quarter left covers the auxes, the masters, the output copy and the driver. `MixEngine::set_strip_deadline` overrides it for tests and the bench.
+
+**Caller preconditions, where each is honored.**
+
+| Precondition | Where |
+|---|---|
+| Single publisher | `StripPool` owns the `WorkerSet`; only `render_active` (the callback) and `adopt_plan`/`render_workers_settled` (the callback, between blocks) reach it. |
+| Buffer ownership follows the slot | A strip's state moves into its cell before `publish` and back only after `finish` resolved it (or, between blocks, when its slot is no longer `Claimed`; see deviation 12); every access takes the cell's lock with `try_lock`. |
+| Faults are failures | `StripFaults::conflicts` counts refused borrows, wrong-generation results and refused publisher calls; the tests assert 0. |
+| Inputs only when not busy, after `begin_block` | Delivery and `send` happen after `begin_block` and only for a strip that is home (a busy strip is always away). |
+| Mix only `Mixed` and `Inline`, in the window | `is_silent`/`is_away` gate the meter and `route_into`; outcomes are read before the next `begin_block`. |
+| Never republish a faulted instance | A suspect strip stays silent until its strip's generation changes (a new instance from a plan, ADR 0007's per-plug-in replacement), then `clear_suspect`. |
+| The inline closure must not panic | `Job::render` uses `guarded`. |
+| Never drop a `WorkerSet` on the audio thread | `into_retired` (control thread) shuts the workers down with a 500 ms bound and brings every strip home; a worker that does not return is quarantined and logged with its track and plug-ins. |
+| Defer only what the strip missed; deliver before its next render | `defer_for` after `finish` for every strip with live events (it defers only `Busy` and `Unstarted`); `deliver` after `begin_block`, before that strip's `publish`. |
+| Never reuse a quarantined instance | Its strip stays in its cell, leaked with the worker's state; `Retired::instances` leaves it out. |
+
+**While a strip is away** the engine's other entry points cannot reach its instrument. `queue_event` checks what it can without it (epoch, port, binding, transport), tags the event with its identity and parks it in the strip's live buffer (`Queued`); a seek, reset, All Notes Off, transport change or revocation is a pending flag applied when the strip is back; Stop, panic and All Notes Off also drop every parked event (a parked note-on never starts after Stop). A plan is adopted only when every strip is home (`RejectReason::StripsInFlight`; playback defers the publication while `render_workers_settled` is false), and the parked MIDI is delivered into the instances before the moves.
+
+**Stream faults.** `StripFaults` (overruns by cause, late results, inline and callback renders, faulted renders, suspect blocks, protocol faults, deferred-MIDI events, overflows and silences) reaches `CallbackTelemetry::strip_faults` and the diagnostics report beside the over-budget callbacks (`docs/troubleshooting.md`, "Render worker figures"). `MixEngine::block_overruns` feeds the take journal: while a MIDI pass records, a block with an overrun leaves an `{"overrun":{"frame","strips"}}` line. The take is unaffected: MIDI is captured at admission (`player/audio.rs`, `service_midi`), before any render, and audio by the input callback (`record.rs`).
+
+**What is measured.** `crates/mix/tests/render_headroom.rs` (ignored; release): serial and workers at 64 and 128 frames, idle and under load, late blocks per 2000, render time p50/p95/p99/max, overruns by cause, inline renders, continuity holes and stuck notes; dev-machine numbers in [the 2026-10-27 benchmark](../benchmarks/2026-10-27-ryzen-5900x-render-workers-serial-vs-pool.md). They are not the decision: the default stays serial until the maintainer's run on the reference hardware (the Scarlett at 64 and 128, ADR 0012 G1) shows the workers at least as reliable on deadlines (gate 6). Finding: under a full CPU load the workers path had late blocks (3 to 39 per 2000, up to 18 ms) with no overrun counted, because `finish` yields between sweeps (deviation 4) and on Windows `yield_now` hands the core to normal-priority threads for a quantum; with the yield replaced by spinning (an uncommitted experiment) the same rows had none. Revisiting deviation 4 is the first follow-up before a default decision.
+
 ## Correctness gates (#124) and what slices 1, 2 and 3 prove
 
 | Gate | Requirement | Slice 1 (`strip_jobs`) | Slice 2 (`worker_set`) | Slice 3 (`midi_defer`) | Later slices must prove |
@@ -85,10 +120,21 @@ The slot enforces its transitions; these rules are the caller's, and the executo
 | 5 Retirement | bounded wait, quarantine | none (a dropped token leaves the slot `Claimed`, which quarantine will detect) | **Proven:** `shutdown(bound)` returns an idle set at once; with a stalled worker it returns within the bound plus slack, reports the worker and its strip and leaves the slot `Claimed`, and the released worker later finishes into leaked state without harm; a runner panic is caught, the slot completed and the strip reported `Faulted` | not affected | slice 4: the engine retires through it and logs the plug-in's name; a quarantined instance is never reused |
 | 6 Measured improvement | bench, continuity | none | none | the continuity instrument (holes, stuck notes, event trace), driven directly | slice 4: wiring into `crates/mix` behind the serial default, the #124 test matrix, the measurement, the continuity instrument through a real worker set with injected stalls, and the default decision |
 
+### What slice 4 proves (`crates/mix/tests/render_workers.rs`, `crates/mix/src/render_pool.rs` tests)
+
+| Gate | Slice 4 |
+|---|---|
+| 1 Exclusive execution | **Proven for the real strip processor:** six continuity instruments through a real worker set for 3000 paced blocks with worker stalls of 2 to 10 ms injected; a reentry guard in each instance and the cells' `try_lock` (zero refused borrows). The payload orderings on an ARM runner or under loom stay open. |
+| 2 No incomplete or stale audio | **Proven:** only `Mixed`/`Inline` strips whose job carries this block's generation are mixed; serial and workers bit-identical over 40 blocks of 16 strips with inserts. |
+| 3 Bounded waiting and storage | **Proven on the callback:** zero allocations and frees over 1200 blocks with stalls, overruns, inline renders and parked MIDI; **measured** on the dev machine (see above); the starved gate on the maintainer's hardware is open. |
+| 4 MIDI and state discontinuities | **Proven through the mix:** zero stuck notes and pedals, zero orphan offs, restrikes, zero-length notes and unsorted events over 3000 blocks of live notes and sustain; a ring overflowing while a strip is away drops and silences without leaving anything stuck; a stop while a strip is away drops what was parked for it. Every hole in an instrument's time equals a counted `Busy` or `Unstarted` overrun (samples = overruns × block). |
+| 5 Retirement | **Proven:** retirement returns within the bound with a worker stalled inside a plug-in for 4 s, quarantines it (its instance is not handed back) and brings every other strip home; a plan waits while a strip is away and is adopted once it is back. |
+| 6 Measured improvement | **Measured on the dev machine only.** The default decision is pending the maintainer's run. |
+
 ## Notes for slices 3 and 4 (from the slice 2 review)
 
 - Slice 3 (done): defer MIDI only for `Overrun(Busy)` and `Overrun(Unstarted)`; a `Late` strip's worker consumed its events (`should_defer`).
-- Slice 4: the mix crate delivers `PluginEvent` (channel, voice id, message), not raw bytes; the conversion at the ring's boundary must keep the voice id (a side table per strip, or an id field in the event) so a carried note-off still ends the voice it started. A silence covers only the channels the ring saw; an instrument holding notes from events that never passed through the ring on other channels is the mix crate's to release (its reset path).
+- Slice 4 (done): the ring's event carries a caller tag; the mix crate keeps each event's identity in a per-strip side table and admits it again into the instrument's queue with it. A silence releases every source the instrument holds (`release_all`), not only the channels the ring saw.
 - Slice 4: pass `wake(count)` the number of strips published; read outcomes before the next `begin_block`; retire the set (and quarantined instances) through the garbage path, never on the audio thread; on Linux `SCHED_FIFO` a `yield_now` in `finish` can hand the core to a same-priority worker, so keep the workers at or below cores minus one, or below the callback's priority, and measure it.
 - The busy skip in `wake` is ordered against the worker's `current = 0` by a `SeqCst` fence on each side (store-buffering pattern); a slice that changes either side keeps the pair.
 
@@ -103,11 +149,14 @@ The slot enforces its transitions; these rules are the caller's, and the executo
 | 5 | at the deadline, overrun the rest | an unstarted strip the admission limit refused stays claimable by the workers until the deadline; at the deadline it is reclaimed and retired unrendered (`Overrun(Unstarted)`) | a worker that started it after the deadline would hold the strip into the next block and turn one overrun into two |
 | 6 | a worker unwinding from a plug-in panic leaves the slot `Claimed`: catch it and quarantine | the worker loop catches the panic, completes the slot and reports the strip `Faulted` (`runner_panics`); the worker lives on; the strip is suspect (also for a panic in a late result) and is not published again until the caller replaces the instance (`clear_suspect`) | the thread is sound after a caught panic; only the instance is suspect, and quarantine is for threads that cannot be joined |
 | 7 | at block start a `Claimed` slot is skipped and counted | `begin_block` marks the strip busy; the overrun is counted when the caller publishes it (`Published::Skipped`, `Overrun(Busy)`), and its result is retired only at a later `begin_block`, even if the worker finishes mid-block | a strip the plan no longer renders is not counted; results are never retired mid-block |
-
 | 8 | carried events land "at offset 0" | at offset 0, then non-decreasing in original order: a collapsed off one sample later, everything after it no earlier | a block's events are delivered sorted, and a later event may not overtake an earlier one |
 | 9 | (not stated) | an off that cannot be split from its on before the block ends waits for the next processed block with every event behind it, live ones included | no zero-length note and no reordering; reachable only when about `block_len` collapsed pairs pile up in one block |
 | 10 | "the queue becomes All Sound Off + All Notes Off" | All Sound Off, All Notes Off and sustain off (CC 64 = 0), generated at the drain for every channel the discarded events used (and those dropped while silenced) plus the strip's own; events deferred while silenced are dropped until the drain | the discarded events may hold note-offs and pedal releases on any channel, so one channel left notes stuck on the others (the slice 3 review reproduced 228 stuck notes over 300 seeds); CC 120 does not lift a held pedal, so the sustain off is sent explicitly |
 | 11 | release class: note-off, sustain-off, All Notes Off, All Sound Off | those, plus note-on velocity 0 and sostenuto off (CC 66 below 64); the other pedals (soft, hold 2) are droppable | a dropped sostenuto-off leaves its held notes sounding like a dropped sustain-off; soft and hold 2 release no note |
+| 12 | (slice 4) read a strip's buffers only through `consume` | between blocks (`render_workers_settled`, before an adoption) an away strip whose slot is no longer `Claimed` is taken back from its cell; its slot stays `Done` until `begin_block` retires it unread | without it a strip that is late every other block would keep a plan from ever being adopted; the cell's mutex orders the worker's writes, and a slot that is not `Claimed` is never touched by a worker again until the next publish |
+| 13 | (slice 4) `defer_for` after `finish` with the block's events | the mix crate admits live events between blocks, so an event for a strip that is away is parked when it arrives, in the strip's live buffer; at the strip's next processed block `deliver` lands it (exact offset in its own block), and for a `Busy` strip `defer_for` moves the buffer into the ring after `finish` | `queue_event` runs before the block; the strip may come home at `begin_block` |
+| 14 | (slice 4) every phase-1 strip through the set | strips that read the live input or the hardware (monitored audio tracks, External Instruments, hardware inserts) render on the callback while the workers run; a plan with sidechain keys renders serially | a worker strip reads nothing the next block rewrites (live input, keys, busses) |
+| 15 | (slice 4) a deferred event lands at its landing offset | it is admitted again at `max(landing, its own due frame)` against the block's first frame | the queue's own late delivery would put an on and its off on one sample |
 
 Additions, not deviations: `publish` checks `Idle` before it writes the generation (the single-publisher precondition makes that race-free) and refuses a generation that is not newer; `retire` from `Idle` or `Published` is refused too.
 
@@ -116,6 +165,7 @@ Additions, not deviations: `publish` checks `Idle` before it writes the generati
 - No `unsafe` in the protocol; slots hold no buffers. Buffer and instance ownership follows the slot state and is enforced by the caller (the later executor), which is where its refutation review must look.
 - `loom` was not added (a new dev-dependency in the unsafe crate is the owner's call). The exhaustive tests interleave whole operations, which is complete for this slot because each operation is one atomic read-modify-write on the state; Slice 2 adds parking, wake-ups and the buffer hand-off through the slots; its threaded tests run on x86 only, which cannot catch a weakened ordering on the payload.
 - Slice 2 adds no `unsafe` and no dependency. Parking is `std::thread::park`/`unpark` with a per-worker woken flag: only the flag ends a park, so a spurious return or a stray unpark only loops, and a wake before the park is never lost. The shutdown join polls `JoinHandle::is_finished` against the bound.
+- Slice 4 adds no `unsafe` either: `crates/mix` shares a strip with a worker through a `Mutex` cell taken only with `try_lock` (a checked borrow that never waits; the slot protocol already gives the strip to one thread, so a refused borrow is a counted protocol fault). The mutex is also what orders a worker's writes before the callback's reads of the strip.
 - The WSL gate's starved re-run names `transit-playback`, `transit-plugin-host` and `transit-ui-studio`; the race tests here run starved only once `transit-rt` is added to that list.
 
 ## Related

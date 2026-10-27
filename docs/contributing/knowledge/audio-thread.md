@@ -175,8 +175,40 @@ plug-ins call `performEdit` from the audio thread despite the spec).
 
 ## Worker threads
 
-Pool workers are promoted at thread start (MMCSS, SCHED_FIFO or rtkit, time-constraint policy) by
-`crates/rt`. Never register with the OS inside a timed callback.
+Render workers are promoted once at thread start (MMCSS, SCHED_FIFO or rtkit, time-constraint
+policy) inside `crates/rt` (`worker_set`). Never register with the OS inside a timed callback.
+
+## Render workers (#124, ADR 0029)
+
+Opt-in: `TRANSIT_RENDER_POOL=1` clears `FORCE_SERIAL`, and playback's `plan_bridge::pair` then calls
+`MixEngine::start_render_workers`. Without both, `render_active` renders phase 1 serially exactly as
+before; offline renders never use the workers (they keep Rayon's global pool). The rayon render pool
+is gone.
+
+- **Path.** `strip_pool::StripPool::render`: `begin_block`, bring home strips whose worker is done,
+  deliver each strip's deferred MIDI, send it into its cell and `publish`, `wake`, render the
+  callback's own strips (live input, hardware), `finish` by the deadline (three quarters of the
+  period from `render_active`'s entry), bring home and mix only `Mixed` and `Inline`, defer the MIDI
+  of `Busy` strips. Taken only on the audio thread, without sidechain keys, with at least
+  `PARALLEL_STRIPS` phase-1 strips, or while a strip is still away.
+- **Cells, not `unsafe`.** A strip's state moves into a `Mutex<Job>` cell for the render. Every
+  access is `try_lock`: the slot protocol gives the strip to one thread, so a refused borrow is a
+  counted fault (`StripFaults::conflicts`), never a wait. The table keeps a spare strip with the
+  routing state (delay lines, edges, sink routes, meter, latency) so the delay walk and the meters
+  work while the strip is away.
+- **Away strips.** A late strip stays in its cell across blocks. Everything that touches an
+  instrument between blocks must handle that: `queue_event` parks the event (tagged with its
+  identity) for the strip's next block; seek, reset, All Notes Off, transport and revocation set a
+  pending flag applied when it is back; Stop drops parked events. A plan is adopted only when every
+  strip is home (`render_workers_settled`, `RejectReason::StripsInFlight`). A new engine method that
+  walks `tables.strips` and touches an instrument must do the same.
+- **Retirement.** `MixEngine::into_retired` (control thread) shuts the workers down with a bound and
+  brings every strip home; a worker that does not return is quarantined and its strip leaked. Never
+  drop an engine with workers on the audio thread.
+- **Proof.** `crates/mix/tests/render_workers.rs` (continuity through the worker set with stalls and
+  live MIDI, zero allocations on the callback, adoption while away, stop while away, ring overflow,
+  quarantine) and `render_pool.rs`'s bit-identity test. The measurement is
+  `crates/mix/tests/render_headroom.rs` (ignored, release).
 
 ## Proving it
 

@@ -78,6 +78,10 @@ Accepted with ADR 0016.
 - The crate compiles to empty on other platforms (wholly under `#![cfg(windows)]`).
 - It is registered in xtask `LAYERS`, and the `unsafe` allowlist check lists exactly `crates/rt`, `crates/audio-wasapi`, `crates/clap-host`, `crates/vst3-host` (SDK-interface code) and the older isolated FFI helper `crates/au-host` (the `crates/asio-panel` helper was retired 2026-10-25, see ADR 0016). The check reads every package manifest, exempt ones included, and flags any `unsafe_code` setting other than `forbid` (any spacing or quoting) outside that list.
 
+## Amended 2026-10-27 (ADR 0029): the fan-out is in `transit-rt`, without `unsafe`
+
+Residual 2 is resolved without `unsafe`: the job slots, the worker set and the deferred-MIDI ring (`strip_jobs`, `worker_set`, `midi_defer`) are safe code in `transit-rt`, and `crates/mix` drives them through their safe API (issue #124, [ADR 0029](0029-strip-job-slots.md)). The workers promote themselves once at start inside `transit-rt` (rule 9); `mix` makes no promotion call any more. A strip's state is shared with a worker through a `Mutex` cell taken only with `try_lock`, which never waits (the slot protocol already gives the strip to one thread). Rayon's job queue is no longer on the audio path.
+
 ## Amended 2026-10-24 (ADR 0021): transit-audio-jack
 
 Accepted with ADR 0021 (approved by the project owner on 2026-10-24).
