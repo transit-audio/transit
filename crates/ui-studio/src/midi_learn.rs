@@ -1040,6 +1040,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 .resizable(false)
                 .vscroll(true)
                 .auto_shrink([false, false])
+                .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
                 .min_scrolled_height(3.0 * ROW_H)
                 .max_scroll_height(scroll_h)
                 .column(egui_extras::Column::remainder().at_least(cols.port).clip(true))

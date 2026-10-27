@@ -283,3 +283,18 @@ fn typical_names_show_untruncated_at_the_default_size() {
         );
     }
 }
+
+#[test]
+fn cells_are_centered_vertically_in_a_row() {
+    let screen = (1920.0, 1080.0);
+    let (mut app, ctx, t) = new_app(screen.0, screen.1);
+    map(&mut app, "KeyStep", &format!("track:{}:volume", t.0), 7);
+    open(&mut app, &ctx, screen);
+    let mut time = 10.0;
+    let texts = texts_clipped(&mut app, &ctx, &mut time);
+    let cy = |s: &str| texts.iter().find(|(t, ..)| t == s).unwrap_or_else(|| panic!("{s:?} is drawn")).1.center().y;
+    let learn = cy("Learn");
+    for cell in ["KeyStep", "Gtr: Volume", "CC 7", "Session", "0.0", "Delete"] {
+        assert!((cy(cell) - learn).abs() <= 1.0, "{cell:?} at {} vs Learn at {learn}", cy(cell));
+    }
+}
