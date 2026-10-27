@@ -163,6 +163,39 @@ mod tests {
         assert_eq!(render_range(&s, Range::new(0, 12_000), 512), reference);
     }
 
+    #[test]
+    fn master_fader_samples_and_ramps_like_a_track_fader() {
+        // #151: a block samples its curve at its first and last sample and ramps across
+        // `frames - 1`. A breakpoint on the next block's first sample must not move this one.
+        const BLOCK: usize = 512;
+        let step = |lane: &mut transit_model::AutomationLane| {
+            lane.set_point(0, 0.0);
+            lane.set_point(BLOCK as i64 - 1, 0.0);
+            lane.set_point(BLOCK as i64, -20.0);
+            lane.set_point(2 * BLOCK as i64, -20.0);
+        };
+        let render = |on_master: bool| {
+            let (mut s, t) = session_with_dc(0.5, 4 * BLOCK);
+            let m = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
+            let id = if on_master { m } else { t };
+            let tr = s.track_mut(id).unwrap();
+            tr.mixer.automation_mode = transit_model::AutomationMode::Read;
+            let mut lane = transit_model::AutomationLane::new(AutoParam::Volume);
+            step(&mut lane);
+            tr.automation.push(lane);
+            let mut rig = PlanRig::new(BLOCK);
+            rig.publish(&s);
+            let mut out = rig.render(0)[0].clone();
+            out.extend_from_slice(&rig.render(BLOCK as i64)[0]);
+            out
+        };
+        let (track, master) = (render(false), render(true));
+        assert_eq!(track.len(), master.len());
+        for (i, (a, b)) in track.iter().zip(&master).enumerate() {
+            assert!((a - b).abs() < 1e-6, "sample {i}: track {a} vs master {b}");
+        }
+    }
+
     /// A built-in gain behind a third-party id, with a log of parameter sets.
     struct Stateful {
         inner: Box<dyn Plugin>,

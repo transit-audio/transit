@@ -280,12 +280,13 @@ pub(crate) fn process_master(
         }
     }
     let v0 = volume_db_at(t, pos);
-    let v1 = volume_db_at(t, pos + frames as i64);
+    // Same endpoints as a track fader: the block's first and last sample, ramping over frames - 1.
+    let v1 = volume_db_at(t, pos.saturating_add(frames.saturating_sub(1) as i64));
     let n = main.len();
     for (ch, src) in strip.buf.iter().enumerate().take(n) {
         if let Some(m) = main.get_mut(ch) {
             for i in 0..frames {
-                let g = lerp_gain(v0, v1, i, frames);
+                let g = lerp_gain(v0, v1, i, frames.saturating_sub(1));
                 if let (Some(d), Some(x)) = (m.get_mut(i), src.get(i)) {
                     *d = x * g;
                 }
