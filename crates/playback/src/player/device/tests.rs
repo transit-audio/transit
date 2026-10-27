@@ -477,21 +477,34 @@ fn hardware_guard() -> std::sync::MutexGuard<'static, ()> {
     HARDWARE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-/// Parses a loopback pair `out:in` of 1-based channel numbers into 0-based `(send, return)`.
+/// A loopback pair as 0-based device channels: the output channels the click plays on and the input
+/// channels it is listened for on.
+type LoopbackPair = (Vec<u16>, Vec<u16>);
+
+/// Parses a loopback pair `out:in` of 1-based channel numbers into 0-based channels. Either side
+/// is one channel (`2`) or a stereo range (`1-2`), as the Audio Devices window's paths are, so
+/// `1-2:1` plays the click on outputs 1 and 2 and listens on input 1.
 #[allow(dead_code)]
-fn parse_loopback_pair(text: &str) -> Result<(u16, u16), String> {
-    let (out, inp) = text.trim().split_once(':').ok_or_else(|| format!("{text:?}: expected out:in, such as 2:2"))?;
+fn parse_loopback_pair(text: &str) -> Result<LoopbackPair, String> {
+    let (out, inp) = text.trim().split_once(':').ok_or_else(|| format!("{text:?}: expected out:in, such as 2:2 or 1-2:1"))?;
     let channel = |part: &str| match part.trim().parse::<u16>() {
         Ok(n) if n >= 1 => Ok(n - 1),
         _ => Err(format!("{text:?}: {part:?} is not a 1-based channel number")),
     };
-    Ok((channel(out)?, channel(inp)?))
+    let side = |part: &str| match part.split_once('-') {
+        None => Ok(vec![channel(part)?]),
+        Some((first, last)) => {
+            let (first, last) = (channel(first)?, channel(last)?);
+            if first < last { Ok((first..=last).collect()) } else { Err(format!("{text:?}: {part:?} is not an ascending channel range")) }
+        }
+    };
+    Ok((side(out)?, side(inp)?))
 }
 
 /// The loopback pair a hardware test uses: the environment variable `var` (`out:in`, 1-based), else
 /// `default`. A malformed value panics so a typo does not read as a hardware failure.
 #[allow(dead_code)]
-fn loopback_pair(var: &str, default: &str) -> (u16, u16) {
+fn loopback_pair(var: &str, default: &str) -> LoopbackPair {
     let text = std::env::var(var).unwrap_or_else(|_| default.to_string());
     parse_loopback_pair(&text).unwrap_or_else(|e| panic!("{var}: {e}"))
 }
@@ -505,10 +518,12 @@ fn round_trip_bounds(driver_frames: u32, buffer: u32) -> (u32, u32) {
 
 #[test]
 fn the_loopback_pair_parses_one_based_out_and_in_and_refuses_the_rest() {
-    assert_eq!(parse_loopback_pair("2:2"), Ok((1, 1)));
-    assert_eq!(parse_loopback_pair(" 2 : 1 "), Ok((1, 0)));
-    assert_eq!(parse_loopback_pair("10:12"), Ok((9, 11)));
-    for bad in ["", "2", "0:1", "1:0", "a:1", "1:b", "1:2:3", "-1:1", "70000:1"] {
+    assert_eq!(parse_loopback_pair("2:2"), Ok((vec![1], vec![1])));
+    assert_eq!(parse_loopback_pair(" 2 : 1 "), Ok((vec![1], vec![0])));
+    assert_eq!(parse_loopback_pair("10:12"), Ok((vec![9], vec![11])));
+    assert_eq!(parse_loopback_pair("1-2:1"), Ok((vec![0, 1], vec![0])));
+    assert_eq!(parse_loopback_pair("3-4:1-2"), Ok((vec![2, 3], vec![0, 1])));
+    for bad in ["", "2", "0:1", "1:0", "a:1", "1:b", "1:2:3", "-1:1", "70000:1", "2-1:1", "1-1:1", "1-:1", "0-2:1"] {
         assert!(parse_loopback_pair(bad).is_err(), "{bad:?}");
     }
 }
@@ -592,11 +607,13 @@ fn player_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>) -> (u16, 
     shape
 }
 
-/// The ADR 0015 hardware-insert measurement (the click train) through the Player on native ASIO, over
-/// the bench's loopback cable: output `send` to input `ret` (0-based, from `loopback_pair`). Holds
-/// the hardware lock, then checks the measured round trip against the driver's own figures.
+/// The loopback measurement the Audio Devices window's Calibration > Measure runs, through the Player on
+/// native ASIO: `Player::start_loop_calibration` and `loop_calibration_result`, the very calls the
+/// app makes (`MeasureKind::Loop`), with the send and return channels the app builds from the
+/// calibration paths (0-based, from `loopback_pair`; a stereo send plays the click on both
+/// outputs). Holds the hardware lock, then checks the measured loop against the driver's figures.
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
-fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, (send, ret): (u16, u16)) {
+fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, (send, ret): LoopbackPair) {
     let _hardware = hardware_guard();
     let cfg = AudioConfig {
         backend: crate::Backend::NativeAsio,
@@ -609,59 +626,48 @@ fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, (s
     let session = Session { sample_rate: transit_time::SampleRate::new(rate).expect("a rate"), ..Session::default() };
     let player = Player::with_config(Arc::new(session), &cfg);
     assert!(!player.silent && player.native_backend, "{:?} {:?}", player.initial_error(), player.backend_note);
-    let recorder = player.open_input(&cfg).expect("the duplex input is held");
-    player.set_input(Arc::clone(&recorder.monitor)).expect("input");
+    // The duplex input stays held by the player, as in the app: the loop calibration needs it.
     let settle = std::time::Instant::now() + std::time::Duration::from_millis(500);
     while std::time::Instant::now() < settle {
         player.service().expect("service");
         std::thread::sleep(std::time::Duration::from_millis(10));
     }
-    // No clear here: the ring aligns itself when the plan adopts it (K22), as in the app. The
-    // backlog B after each plan read must be 0 on native ASIO duplex: sample it between callbacks
-    // (a snapshot can land between a capture push and the plan's read and show one block).
-    let mut backlog = Vec::new();
-    for _ in 0..200 {
-        backlog.push(recorder.monitor.buffered_input_frames());
-        std::thread::sleep(std::time::Duration::from_micros(700));
-    }
-    let b_min = backlog.iter().copied().min().unwrap_or(usize::MAX);
-    let zero = backlog.iter().filter(|&&b| b == 0).count();
-    println!("{driver}: input ring backlog B: min {b_min}, max {:?}, {zero} of 200 samples at 0", backlog.iter().max());
-    assert_eq!(b_min, 0, "the live input is aligned: no backlog in front of the plan reader");
-    player.start_hardware_probe(&[send], &[ret]).unwrap_or_else(|e| panic!("{e}"));
+    let (out_names, in_names): (Vec<u16>, Vec<u16>) = (send.iter().map(|c| c + 1).collect(), ret.iter().map(|c| c + 1).collect());
+    println!("{driver}: loopback out {out_names:?} -> in {in_names:?}");
+    player.start_loop_calibration(&send, &ret).unwrap_or_else(|e| panic!("{e}"));
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     let result = loop {
         player.service().expect("service");
-        if let Some(result) = player.hardware_probe_result() {
+        if let Some(result) = player.loop_calibration_result() {
             break result;
         }
-        assert!(std::time::Instant::now() < deadline, "no result in 10 s");
+        if player.loop_calibration_lacks_position() {
+            player.cancel_loop_calibration();
+            panic!("{driver}: the driver reports no sample position, so its loop cannot be measured");
+        }
+        if std::time::Instant::now() >= deadline {
+            player.cancel_loop_calibration();
+            panic!("no result in 10 s");
+        }
         std::thread::sleep(std::time::Duration::from_millis(10));
     };
-    let measured = result.unwrap_or_else(|e| panic!("{driver}: {e}"));
+    let measured = result
+        .unwrap_or_else(|e| panic!("{driver}: {e} (is the interface's output level up, and the cable on out {out_names:?} -> in {in_names:?}?)"));
+    let frames = measured.round_trip_frames;
     println!(
-        "{driver}: out {} -> in {}: {measured:?} ({:.3} ms at {} Hz, buffer {:?})",
-        send + 1,
-        ret + 1,
-        f64::from(measured.round_trip_frames) * 1000.0 / f64::from(rate),
+        "{driver}: {measured:?} ({:.3} ms at {} Hz, buffer {:?})",
+        f64::from(frames) * 1000.0 / f64::from(player.device_rate),
         player.device_rate,
         player.device_buffer
     );
-    let frames = measured.round_trip_frames;
-    let secs = |d: Option<std::time::Duration>| d.map_or(0.0, |d| d.as_secs_f64());
-    let driver_frames = ((secs(player.output_latency) + secs(recorder.latency)) * f64::from(player.device_rate)).round() as u32;
+    let driver_frames = player.driver_loop_frames().unwrap_or(0);
     let buffer_frames = player.device_buffer.unwrap_or(0);
     let (lo, hi) = round_trip_bounds(driver_frames, buffer_frames);
     println!(
         "{driver}: measured {frames} frames, driver output + input {driver_frames} frames, difference {} frames (allowed {lo}..={hi})",
         i64::from(frames) - i64::from(driver_frames)
     );
-    assert!(
-        (lo..=hi).contains(&frames),
-        "{frames} frames is outside {lo}..={hi}: driver output + input {driver_frames}, buffer {buffer_frames}; is the interface's output level up and the cable on out {} -> in {}?",
-        send + 1,
-        ret + 1
-    );
+    assert!((lo..=hi).contains(&frames), "{frames} frames is outside {lo}..={hi}: driver output + input {driver_frames}, buffer {buffer_frames}");
 }
 
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
@@ -679,12 +685,14 @@ fn hardware_player_measures_a_hardware_insert_on_the_scarlett_at_128_over_native
 }
 
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
-/// The Model 12's MAIN L analog output carries USB OUT 1 (OUT 1 and OUT 2 return through the mixer as the
-/// left and right of the main bus), so a cable from MAIN L to Input 1 is pair `1:1`.
+/// The Model 12's rig: the click plays on USB OUT 1 and OUT 2 together (the stereo path "1-2", as the
+/// Audio Devices window's Measure sends it) and returns from MAIN L on input 1. Mixer channel 2 is in PC
+/// mode, so OUT 2 reaches the main bus and the cable on MAIN L carries it.
+#[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
 #[test]
-#[ignore = "plays a click train out of the Model 12 through the Player (TRANSIT_LOOPBACK_MODEL12, default 1:1)"]
+#[ignore = "plays a click train out of the Model 12 through the Player (TRANSIT_LOOPBACK_MODEL12, default 1-2:1)"]
 fn hardware_player_measures_a_hardware_insert_on_the_model12_over_native_asio() {
-    hardware_ping_on_native_asio("Model Mixer ASIO Driver", 44_100, None, loopback_pair("TRANSIT_LOOPBACK_MODEL12", "1:1"));
+    hardware_ping_on_native_asio("Model Mixer ASIO Driver", 44_100, None, loopback_pair("TRANSIT_LOOPBACK_MODEL12", "1-2:1"));
 }
 
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
