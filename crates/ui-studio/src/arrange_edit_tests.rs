@@ -369,3 +369,105 @@ fn the_last_add_track_row_is_inside_the_scrollable_content_at_the_minimum_header
     assert!(l.add_more[3] <= l.track_list[3], "the \"+ ...\" row {:?} is inside the list {:?}", l.add_more, l.track_list);
     assert!(l.add_more[2] <= l.track_list[2] && l.add_group[2] <= l.track_list[2], "and inside its width");
 }
+
+// ---- #165: an edge trim snaps to the grid ----
+
+/// Drags the clip's end (`end` true) or start edge by `beats` beats at its middle height, then settles.
+fn trim_drag(r: &mut CopyRig, clip: ClipId, end: bool, beats: f32, mods: Value) {
+    frames(&mut r.app, &r.ctx, 3, &mut r.time);
+    let rect = r.app.arrange.layout.clips.iter().find(|c| c.id == clip.0).unwrap().rect;
+    let x = if end { rect[2] - 2.0 } else { rect[0] + 2.0 };
+    let y = (rect[1] + rect[3]) / 2.0 + 6.0;
+    drag(&mut r.app, (x, y), (x + beats * r.px_per_beat, y), mods);
+    frames(&mut r.app, &r.ctx, 20, &mut r.time);
+}
+
+#[test]
+fn trimming_the_end_edge_snaps_to_the_nearest_grid_line_and_shift_bypasses() {
+    let mut r = copy_rig();
+    let clip = ClipId(clips_on(&r.app, r.t)[0].0);
+    let (bar, b) = (4 * r.beat, r.beat);
+    // 1.37 beats off the grid right of the end (a bar, on the grid): the edge lands on the beat.
+    // The old delta-free code left it at the pointer.
+    trim_drag(&mut r, clip, true, 1.37, json!({}));
+    assert_eq!(spans(&r.app, r.t), vec![(0, bar + b)]);
+    r.app.run("edit.undo", json!({})).unwrap();
+    // Left 2.62 beats: nearest line is 3 beats in.
+    trim_drag(&mut r, clip, true, -2.62, json!({}));
+    assert_eq!(spans(&r.app, r.t), vec![(0, bar - 3 * b)]);
+    r.app.run("edit.undo", json!({})).unwrap();
+    // Shift: the edge stays at the pointer, off the grid.
+    trim_drag(&mut r, clip, true, 1.37, json!({"shift": true}));
+    let end = the_clip(&r.app, clip).end();
+    assert_ne!(end % b, 0, "off the grid: {end}");
+    assert!((end - (bar + b * 137 / 100)).abs() <= b / 20, "at the pointer: {end}");
+}
+
+#[test]
+fn trimming_the_start_edge_snaps_and_clamps_to_the_other_edge() {
+    let mut r = copy_rig();
+    let clip = ClipId(clips_on(&r.app, r.t)[0].0);
+    let (bar, b) = (4 * r.beat, r.beat);
+    trim_drag(&mut r, clip, false, 1.42, json!({}));
+    assert_eq!(the_clip(&r.app, clip).start, b, "the start lands on the beat");
+    assert_eq!(the_clip(&r.app, clip).end(), bar, "the other edge stays");
+    r.app.run("edit.undo", json!({})).unwrap();
+    // Left of zero (the clip starts at zero): never before zero.
+    trim_drag(&mut r, clip, false, -3.0, json!({}));
+    assert_eq!(the_clip(&r.app, clip).start, 0);
+    // Past the end edge: stops at the end edge, not past it.
+    trim_drag(&mut r, clip, false, 9.0, json!({}));
+    let c = the_clip(&r.app, clip);
+    assert!(c.start < c.end(), "never past the other edge: {:?}", (c.start, c.end()));
+}
+
+#[test]
+fn a_snapped_trim_still_stops_at_the_neighbor() {
+    let mut r = copy_rig();
+    let clip = ClipId(clips_on(&r.app, r.t)[0].0);
+    let (bar, b) = (4 * r.beat, r.beat);
+    // The neighbor starts 0.4 beat past the end, off the grid; the snapped beat would cross it.
+    let next = bar + b * 2 / 5;
+    r.app.run("midi.new_clip", json!({"tracks": [r.t.0], "start": next, "end": next + bar})).unwrap();
+    frames(&mut r.app, &r.ctx, 3, &mut r.time);
+    assert_eq!(spans(&r.app, r.t).len(), 2);
+    trim_drag(&mut r, clip, true, 0.9, json!({}));
+    assert_eq!(the_clip(&r.app, clip).end(), next, "clamped to the neighbor's start, not the grid line past it");
+}
+
+#[test]
+fn an_audio_clip_end_trim_snaps_and_stays_within_its_source() {
+    let mut app = StudioApp::new(transit_engine::demo::demo_engine(), None, Services::default());
+    let (t, clip) = {
+        let s = app.engine.session();
+        let t = s.track_by_name("Hats").unwrap();
+        (t.id, t.clips()[0].id)
+    };
+    let b = beat(&app);
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    app.ui.show_mixer = false;
+    app.ui.show_devices = false;
+    app.engine.session_mut().find_clip_mut(clip).unwrap().length = 8 * b;
+    let c0 = the_clip(&app, clip);
+    let transit_model::ClipContent::Audio { source, .. } = c0.content else { panic!("audio") };
+    let file_end = c0.start - c0.source_offset() + app.engine.session().source(source).unwrap().frames as i64;
+    frames(&mut app, &ctx, 4, &mut time);
+    let px_beat = (b as f64 / app.arrange.layout.samples_per_px) as f32;
+    let go = |app: &mut StudioApp, time: &mut f64, beats: f32, mods: Value| {
+        let rect = app.arrange.layout.clips.iter().find(|c| c.id == clip.0).unwrap().rect;
+        let y = (rect[1] + rect[3]) / 2.0 + 6.0;
+        drag(app, (rect[2] - 2.0, y), (rect[2] - 2.0 + beats * px_beat, y), mods);
+        frames(app, &ctx, 20, time);
+    };
+    assert_eq!(clips_on(&app, t).len(), 1);
+    let start = c0.start;
+    go(&mut app, &mut time, -1.37, json!({}));
+    let end = the_clip(&app, clip).end();
+    // 6.63 beats in: the nearest line is 7 beats (ticks round, so allow a couple of samples).
+    assert!((end - (start + 7 * b)).abs() <= 3, "end snaps to the 7th beat line: {end}");
+    // Far past the source: snapped, then clamped to the file.
+    go(&mut app, &mut time, 400.0, json!({}));
+    let end = the_clip(&app, clip).end();
+    assert_eq!(end, file_end, "snapped past the file, then clamped to its end");
+}

@@ -1,6 +1,6 @@
 //! The arrangement window: a track list on the left, a bar/beat ruler, and the timeline with
 //! clips as colored regions. Clicking a clip selects it; dragging moves it (Ctrl-drag, Cmd on a
-//! Mac, or Alt-drag copies; clip drags snap to the visible grid, Shift bypasses it); dragging an edge trims it; clicking empty timeline sets the
+//! Mac, or Alt-drag copies; clip drags snap to the visible grid, Shift bypasses it); dragging an edge trims it (the dragged edge snaps to the visible grid, Shift bypasses it); clicking empty timeline sets the
 //! cursor. Every edit goes through engine commands (see `actions`).
 
 mod clips;
@@ -580,6 +580,14 @@ pub fn drop_start(start: Samples, dx: Samples, shift: bool, snap: impl Fn(Sample
     start.saturating_add(if shift { dx } else { snap(dx) }).max(0)
 }
 
+/// Where a trimmed edge lands: `edge` moved by `dx` and snapped as a position to the visible grid
+/// (like the loop handle; a move snaps its delta instead), unless Shift is held. The caller clamps
+/// against the other edge; the engine command clamps against neighbors and the source.
+fn trim_edge(app: &StudioApp, map: Map, edge: Samples, dx: Samples, shift: bool) -> Samples {
+    let to = edge.saturating_add(dx).max(0);
+    if shift { to } else { crate::automation::snap(app.engine.session(), map.spp, &map.grid, to) }
+}
+
 /// The clip being dragged, as it would land: (track, start, end).
 fn drag_preview(app: &StudioApp, ui: &Ui, map: Map, rows: &[&Track], tl: Rect, geo: &RowGeo) -> Option<(ClipId, TrackId, Samples, Samples, bool)> {
     let Some(Gesture::Clip { clip, track, kind, press, start, end }) = app.arrange.gesture.clone() else { return None };
@@ -595,8 +603,8 @@ fn drag_preview(app: &StudioApp, ui: &Ui, map: Map, rows: &[&Track], tl: Rect, g
             let dest = row.and_then(|i| rows.get(i)).map(|t| t.id).filter(|t| app.holds_clips(*t)).unwrap_or(track);
             (clip, dest, new_start, new_start + (end - start), drag_copies(m))
         }
-        DragKind::TrimStart => (clip, track, (start + dx).clamp(0, end - 1), end, false),
-        DragKind::TrimEnd => (clip, track, start, (end + dx).max(start + 1), false),
+        DragKind::TrimStart => (clip, track, trim_edge(app, map, start, dx, m.shift).clamp(0, end - 1), end, false),
+        DragKind::TrimEnd => (clip, track, start, trim_edge(app, map, end, dx, m.shift).max(start + 1), false),
         DragKind::Loop | DragKind::FadeIn | DragKind::FadeOut | DragKind::FadeCurveIn | DragKind::FadeCurveOut => return None,
     })
 }
