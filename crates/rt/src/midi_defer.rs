@@ -25,11 +25,14 @@
 //! **Overflow rule**, per strip, when a ring cannot hold a block's events: the oldest events
 //! outside the release class are dropped (note-ons, ordinary controllers, pitch bend, pressure,
 //! program changes, anything that is not a channel release), the release class stays (note-off,
-//! note-on with velocity 0, CC 64 below 64, CC 120 All Sound Off, CC 123 All Notes Off). If the
-//! release class alone does not fit, the ring's whole content becomes exactly two events, CC 120
-//! and CC 123 at offset 0 on the strip's channel ([`DeferSet::set_channel`], channel 1 by
-//! default), and the strip is *silenced*: events deferred while it is silenced are dropped, and
-//! the next drain emits only those two and clears the flag. Every dropped event and every
+//! note-on with velocity 0, CC 64 below 64, CC 66 below 64, CC 120 All Sound Off, CC 123 All
+//! Notes Off). If the release class alone does not fit, the ring's content is discarded and the
+//! strip is *silenced* on every channel the discarded events used, plus the strip's own channel
+//! ([`DeferSet::set_channel`], channel 1 by default): a 16-bit channel mask, no stored events.
+//! Events deferred while it is silenced are dropped and their channels join the mask. The next
+//! drain emits, per channel in the mask (lowest first), CC 120 All Sound Off, CC 123 All Notes
+//! Off and CC 64 = 0 (sustain off: CC 120 does not lift a held pedal on a real instrument) at
+//! offset 0, then the block's live events, and clears the mask. Every dropped event and every
 //! silence is a counted overflow fault ([`DeferStats`]).
 //!
 //! **One producer, one consumer, one thread.** The audio callback defers after a block and
@@ -53,6 +56,7 @@ const NOTE_OFF: u8 = 0x80;
 const NOTE_ON: u8 = 0x90;
 const CONTROL: u8 = 0xB0;
 const CC_SUSTAIN: u8 = 64;
+const CC_SOSTENUTO: u8 = 66;
 /// CC 120, All Sound Off.
 pub const CC_ALL_SOUND_OFF: u8 = 120;
 /// CC 123, All Notes Off.
@@ -104,6 +108,11 @@ impl Event {
         Self::new(CONTROL | (channel & 0x0F), cc, value, offset)
     }
 
+    /// The channel bit of this event in a 16-bit channel mask.
+    const fn channel_bit(&self) -> u16 {
+        1 << self.channel()
+    }
+
     /// The channel, 0..=15.
     #[must_use]
     pub const fn channel(&self) -> u8 {
@@ -124,14 +133,17 @@ impl Event {
     }
 
     /// The release class the overflow rule keeps: a note-off, a note-on with velocity 0, CC 64
-    /// below 64 (sustain off), CC 120 (All Sound Off), CC 123 (All Notes Off).
+    /// below 64 (sustain off), CC 66 below 64 (sostenuto off), CC 120 (All Sound Off), CC 123
+    /// (All Notes Off).
     #[must_use]
     pub const fn is_release(&self) -> bool {
         if self.is_note_off() {
             return true;
         }
         self.status & 0xF0 == CONTROL
-            && ((self.data1 == CC_SUSTAIN && self.data2 < 64) || self.data1 == CC_ALL_SOUND_OFF || self.data1 == CC_ALL_NOTES_OFF)
+            && (((self.data1 == CC_SUSTAIN || self.data1 == CC_SOSTENUTO) && self.data2 < 64)
+                || self.data1 == CC_ALL_SOUND_OFF
+                || self.data1 == CC_ALL_NOTES_OFF)
     }
 
     /// The note table index of a note message (channel and key).
@@ -253,13 +265,16 @@ impl DeferStats {
 pub struct DeferRing {
     buf: Box<[Event]>,
     len: usize,
-    silenced: bool,
+    /// Channels to silence at the next drain (0: not silenced).
+    silence_mask: u16,
+    /// The generation the silence happened in (the `block` of the events it emits).
+    silence_block: u64,
     channel: u8,
 }
 
 impl DeferRing {
     fn new(capacity: usize) -> Self {
-        Self { buf: vec![Event::default(); capacity].into_boxed_slice(), len: 0, silenced: false, channel: 0 }
+        Self { buf: vec![Event::default(); capacity].into_boxed_slice(), len: 0, silence_mask: 0, silence_block: 0, channel: 0 }
     }
 
     /// Events held.
@@ -280,11 +295,16 @@ impl DeferRing {
         self.buf.len()
     }
 
-    /// True after an overflow replaced the content with All Sound Off + All Notes Off, until the
-    /// next drain.
+    /// True after an overflow discarded the content for a silence, until the next drain.
     #[must_use]
     pub fn is_silenced(&self) -> bool {
-        self.silenced
+        self.silence_mask != 0
+    }
+
+    /// The channels the next drain silences (bit `c` for channel `c`), 0 when not silenced.
+    #[must_use]
+    pub fn silence_mask(&self) -> u16 {
+        self.silence_mask
     }
 
     /// The deferred events, oldest first.
@@ -299,7 +319,10 @@ impl DeferRing {
         if n == 0 {
             return;
         }
-        if self.silenced {
+        if self.silence_mask != 0 {
+            for e in events {
+                self.silence_mask |= e.channel_bit();
+            }
             stats.add(strip, |c| &c.dropped, n as u64);
             return;
         }
@@ -315,14 +338,17 @@ impl DeferRing {
         let excess = n - free;
         let droppable = self.events().iter().chain(events).filter(|e| !e.is_release()).count();
         if droppable < excess {
-            // The release class alone does not fit: silence the strip.
+            // The release class alone does not fit: silence every channel the discarded events
+            // used, and the strip's own.
             stats.add(strip, |c| &c.dropped, (self.len + n) as u64);
             stats.add(strip, |c| &c.silences, 1);
-            let ch = self.channel;
-            self.buf[0] = Event::control(ch, CC_ALL_SOUND_OFF, 0, 0).in_block(block);
-            self.buf[1] = Event::control(ch, CC_ALL_NOTES_OFF, 0, 0).in_block(block);
-            self.len = 2;
-            self.silenced = true;
+            let mut mask = 1u16 << self.channel;
+            for e in self.events().iter().chain(events) {
+                mask |= e.channel_bit();
+            }
+            self.silence_mask = mask;
+            self.silence_block = block;
+            self.len = 0;
             return;
         }
         // One pass: drop the oldest `excess` non-release events across the ring and the new ones.
@@ -363,7 +389,8 @@ pub struct Drained {
     /// Events left in the ring for the next processed block (the end-of-block note-off rule,
     /// and the live events behind it).
     pub carried: usize,
-    /// The ring was silenced: the deferred events delivered were All Sound Off + All Notes Off.
+    /// The ring was silenced: the deferred events delivered were All Sound Off, All Notes Off and
+    /// sustain off on each silenced channel (`deferred` counts them).
     pub silenced: bool,
     /// The offset of the last event delivered (0 when none): a caller merging its own events
     /// after a [`DeferSet::drain_into`] delivers them no earlier than this.
@@ -448,7 +475,7 @@ impl DeferSet {
         &self.stats
     }
 
-    /// The channel (0..=15) a silence of `strip` sends All Sound Off and All Notes Off on.
+    /// The strip's own channel (0..=15), always in a silence's channel mask.
     pub fn set_channel(&mut self, strip: usize, channel: u8) {
         if let Some(r) = self.rings.get_mut(strip) {
             r.channel = channel & 0x0F;
@@ -501,13 +528,18 @@ impl DeferSet {
         let mut placer = Placer { notes, stamp: *stamp, now, block_len, floor: 0 };
         let mut done = Drained::default();
         let mut taken = 0;
-        if ring.silenced && block_len > 0 {
-            for e in ring.events() {
-                out(e.at(0));
+        if ring.silence_mask != 0 && block_len > 0 {
+            for ch in 0..16u8 {
+                if ring.silence_mask & (1 << ch) == 0 {
+                    continue;
+                }
+                for (cc, value) in [(CC_ALL_SOUND_OFF, 0), (CC_ALL_NOTES_OFF, 0), (CC_SUSTAIN, 0)] {
+                    out(Event::control(ch, cc, value, 0).in_block(ring.silence_block));
+                    done.deferred += 1;
+                }
             }
-            taken = ring.len;
             done.silenced = true;
-            ring.silenced = false;
+            ring.silence_mask = 0;
         } else {
             for e in ring.events() {
                 let Some(at) = placer.place(e) else { break };
@@ -517,8 +549,7 @@ impl DeferSet {
         }
         ring.buf.copy_within(taken..ring.len, 0);
         ring.len -= taken;
-        done.deferred = taken;
-        let carried_deferred = ring.len;
+        done.deferred += taken;
         if ring.len == 0 {
             for e in live {
                 let e = e.in_block(now);
@@ -531,7 +562,8 @@ impl DeferSet {
         ring.push(strip, now, rest, stats);
         done.carried = ring.len;
         if block_len > 0 {
-            stats.add(strip, |c| &c.carried, (carried_deferred + rest.len()) as u64);
+            // Counted after the push: live events the overflow rule dropped are not carried.
+            stats.add(strip, |c| &c.carried, ring.len as u64);
         }
         done.floor = placer.floor;
         done

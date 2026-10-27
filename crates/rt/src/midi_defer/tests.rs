@@ -267,7 +267,7 @@ fn a_ring_full_of_releases_drops_a_new_droppable_event() {
 }
 
 #[test]
-fn past_the_release_class_the_ring_becomes_all_sound_off_and_all_notes_off() {
+fn past_the_release_class_the_ring_is_silenced_on_its_channel() {
     let mut set = DeferSet::new(2, 6);
     set.set_channel(1, 9);
     let mixed = [Event::note_on(9, 36, 100, 0), Event::note_off(9, 35, 0, 1), Event::control(9, 64, 0, 2), Event::note_off(9, 38, 0, 3)];
@@ -277,17 +277,23 @@ fn past_the_release_class_the_ring_becomes_all_sound_off_and_all_notes_off() {
     // 8 events, 7 releases, capacity 6: the release class alone does not fit.
     let ring = set.ring(1).unwrap();
     assert!(ring.is_silenced());
-    assert_eq!(ring.events(), [Event::control(9, 120, 0, 0).in_block(5), Event::control(9, 123, 0, 0).in_block(5)]);
+    assert_eq!(ring.silence_mask(), 1 << 9);
+    assert_eq!(ring.events(), [], "the content is discarded; the silence is generated at the drain");
     assert_eq!(set.stats().strip(1), DeferCounts { deferred: 4, dropped: 8, silences: 1, carried: 0 });
     // While silenced, more deferred events are dropped and counted.
     set.defer_block(1, 6, &[Event::note_on(9, 50, 100, 0), Event::note_off(9, 50, 0, 1)]);
-    assert_eq!(set.ring(1).unwrap().len(), 2);
+    assert_eq!(set.ring(1).unwrap().len(), 0);
     assert_eq!(set.stats().strip(1).dropped, 10);
-    // The drain emits exactly the two at offset 0, then the block's live events, and clears the flag.
+    // The drain emits All Sound Off, All Notes Off and sustain off at offset 0, then the block's
+    // live events, and clears the flag.
     let (out, d) = deliver(&mut set, 1, 7, 64, &[Event::note_on(9, 60, 100, 8)]);
-    assert_eq!(out.iter().map(|e| (bytes(e), e.offset)).collect::<Vec<_>>(), [((0xB9, 120, 0), 0), ((0xB9, 123, 0), 0), ((0x99, 60, 100), 8)]);
+    assert_eq!(
+        out.iter().map(|e| (bytes(e), e.offset)).collect::<Vec<_>>(),
+        [((0xB9, 120, 0), 0), ((0xB9, 123, 0), 0), ((0xB9, 64, 0), 0), ((0x99, 60, 100), 8)]
+    );
+    assert!(out.iter().take(3).all(|e| e.block == 5), "the silence names the block it happened in");
     assert!(d.silenced);
-    assert_eq!((d.deferred, d.live), (2, 1));
+    assert_eq!((d.deferred, d.live), (3, 1));
     assert!(!set.ring(1).unwrap().is_silenced());
     assert!(set.ring(1).unwrap().is_empty());
     // After the drain, the ring defers normally again.
@@ -300,6 +306,25 @@ fn past_the_release_class_the_ring_becomes_all_sound_off_and_all_notes_off() {
 }
 
 #[test]
+fn a_silence_covers_every_channel_the_discarded_events_used() {
+    // Strip channel 1 (0); the ring holds releases on channels 3 and 6; the overflowing block
+    // adds channel 8; a block dropped while silenced adds channel 12.
+    let mut set = DeferSet::new(1, 3);
+    set.defer_block(0, 1, &[Event::note_off(3, 60, 0, 0), Event::control(6, 64, 0, 1), Event::note_off(3, 61, 0, 2)]);
+    set.defer_block(0, 2, &[Event::note_off(8, 62, 0, 0)]);
+    assert_eq!(set.ring(0).unwrap().silence_mask(), 1 | 1 << 3 | 1 << 6 | 1 << 8);
+    set.defer_block(0, 3, &[Event::note_on(12, 1, 1, 0)]);
+    assert_eq!(set.ring(0).unwrap().silence_mask(), 1 | 1 << 3 | 1 << 6 | 1 << 8 | 1 << 12);
+    let (out, d) = drain(&mut set, 0, 4, 32);
+    let want: Vec<_> = [0u8, 3, 6, 8, 12].iter().flat_map(|&c| [(0xB0 | c, 120, 0), (0xB0 | c, 123, 0), (0xB0 | c, 64, 0)]).collect();
+    assert_eq!(out.iter().map(bytes).collect::<Vec<_>>(), want);
+    assert!(out.iter().all(|e| e.offset == 0 && e.block == 2));
+    assert_eq!((d.deferred, d.silenced), (15, true));
+    assert_eq!(set.ring(0).unwrap().silence_mask(), 0);
+    assert_eq!(set.stats().strip(0), DeferCounts { deferred: 3, dropped: 5, silences: 1, carried: 0 });
+}
+
+#[test]
 fn a_silenced_ring_stays_silenced_through_an_empty_block() {
     let mut set = DeferSet::new(1, 2);
     set.defer_block(0, 1, &[Event::note_off(0, 1, 0, 0), Event::note_off(0, 2, 0, 0), Event::note_off(0, 3, 0, 0)]);
@@ -308,8 +333,29 @@ fn a_silenced_ring_stays_silenced_through_an_empty_block() {
     assert!(out.is_empty() && !d.silenced);
     assert!(set.ring(0).unwrap().is_silenced());
     let (out, d) = drain(&mut set, 0, 3, 16);
-    assert_eq!(out.len(), 2);
+    assert_eq!(out.len(), 3);
     assert!(d.silenced);
+}
+
+#[test]
+fn the_release_class() {
+    for (e, release) in [
+        (Event::note_off(0, 1, 0, 0), true),
+        (Event::note_on(0, 1, 0, 0), true),
+        (Event::note_on(0, 1, 1, 0), false),
+        (Event::control(0, 64, 63, 0), true),
+        (Event::control(0, 64, 64, 0), false),
+        (Event::control(0, 66, 0, 0), true),
+        (Event::control(0, 66, 127, 0), false),
+        (Event::control(0, 67, 0, 0), false),
+        (Event::control(0, 120, 0, 0), true),
+        (Event::control(0, 121, 0, 0), false),
+        (Event::control(0, 123, 0, 0), true),
+        (Event::new(0xE0, 0, 0, 0), false),
+        (Event::new(0xA0, 1, 0, 0), false),
+    ] {
+        assert_eq!(e.is_release(), release, "{e:?}");
+    }
 }
 
 #[test]
@@ -370,7 +416,7 @@ fn defer_and_drain_allocate_nothing_after_construction() {
     let t = set.stats().total();
     assert_eq!(t.silences, 1);
     assert!(t.dropped > 0 && t.carried > 0, "{t:?}");
-    assert_eq!(delivered, 1024 + 2 + 2 + 2 + 4, "every path ran");
+    assert_eq!(delivered, 1024 + 2 + 3 + 2 + 4, "every path ran");
 }
 
 // ---- The continuity instrument ----
@@ -395,19 +441,24 @@ fn the_instrument_reports_holes_stuck_notes_and_bad_deliveries() {
     assert_eq!(inst.trace()[1].sample, 133);
     inst.process(264, 64, &[Event::control(0, CC_ALL_SOUND_OFF, 0, 0)]);
     let r = inst.report();
-    assert_eq!((r.stuck_notes, r.stuck_pedals, r.silenced_notes), (0, 0, 1));
+    assert_eq!((r.stuck_notes, r.stuck_pedals, r.silenced_notes), (0, 1, 1), "like a real instrument, CC 120 leaves the pedal down");
+    inst.process(328, 64, &[Event::control(0, 64, 0, 0)]);
+    assert_eq!(inst.report().stuck_pedals, 0);
 }
 
-/// The generator's state: which keys are on, so it only plays valid pairs.
+/// The generator's state: which keys are on and which sustain pedals are down, so it only plays
+/// valid pairs.
 struct Player {
     on: Vec<bool>,
+    pedal: [bool; 16],
     channels: u8,
     keys: u8,
 }
 
 impl Player {
     /// One block's events at sorted random offsets: note-ons and note-offs for a few keys (so
-    /// pairs collapse often), controllers and bends between them.
+    /// pairs collapse often), sustain pedal presses, controllers between them. The closing block
+    /// releases every note and pedal.
     fn block(&mut self, rng: &mut Rng, block_len: u32, closing: bool) -> Vec<Event> {
         let n = if closing { 0 } else { rng.below(7) };
         let mut offs: Vec<u32> = (0..n).map(|_| rng.below(u64::from(block_len)) as u32).collect();
@@ -417,8 +468,13 @@ impl Player {
             let ch = rng.below(u64::from(self.channels)) as u8;
             let key = 60 + rng.below(u64::from(self.keys)) as u8;
             let i = usize::from(ch) * 128 + usize::from(key);
-            match rng.below(4) {
+            match rng.below(5) {
                 0 => out.push(Event::control(ch, 1 + rng.below(30) as u8, rng.below(128) as u8, o)),
+                1 => {
+                    let down = &mut self.pedal[usize::from(ch)];
+                    *down = !*down;
+                    out.push(Event::control(ch, 64, if *down { 64 + rng.below(64) as u8 } else { rng.below(64) as u8 }, o));
+                }
                 _ if self.on[i] => {
                     self.on[i] = false;
                     let vel0 = rng.below(3) == 0;
@@ -436,15 +492,31 @@ impl Player {
                     out.push(Event::note_off((i / 128) as u8, (i % 128) as u8, 0, block_len - 1));
                 }
             }
+            for (ch, down) in self.pedal.iter_mut().enumerate() {
+                if std::mem::take(down) {
+                    out.push(Event::control(ch as u8, 64, 0, block_len - 1));
+                }
+            }
         }
         out
     }
 }
 
+/// One random run.
+struct Run {
+    inst: ContinuityInstrument,
+    /// Every event the player made, in order.
+    played: Vec<Event>,
+    /// Per trace entry: generated by a silence, not played.
+    synthetic: Vec<bool>,
+    /// Blocks skipped.
+    skipped: u64,
+    set: DeferSet,
+}
+
 /// Plays `blocks` blocks of random events, skipping random runs of blocks (the busy and
-/// unstarted overruns), then closes every note and plays on until nothing is deferred. Returns
-/// the instrument, every event the player made in order, the skipped block count and the set.
-fn run(seed: u64, capacity: usize, channels: u8, blocks: u64) -> (ContinuityInstrument, Vec<Event>, u64, DeferSet) {
+/// unstarted overruns), then closes every note and pedal and plays on until nothing is deferred.
+fn run(seed: u64, capacity: usize, channels: u8, blocks: u64) -> Run {
     let mut rng = Rng::new(seed);
     // Blocks of 1 and 2 samples are covered by the carry tests above; here a block holds a
     // few collapsed pairs.
@@ -452,8 +524,9 @@ fn run(seed: u64, capacity: usize, channels: u8, blocks: u64) -> (ContinuityInst
     let mut set = DeferSet::new(1, capacity);
     let mut inst = ContinuityInstrument::new(1 << 16, 1 << 12);
     inst.expect_from(0);
-    let mut musician = Player { on: vec![false; 16 * 128], channels, keys: 3 };
+    let mut musician = Player { on: vec![false; 16 * 128], pedal: [false; 16], channels, keys: 3 };
     let mut played = Vec::new();
+    let mut synthetic = Vec::new();
     let mut skipped = 0;
     let mut out = Vec::with_capacity(4096);
     let mut g = 0u64;
@@ -463,7 +536,8 @@ fn run(seed: u64, capacity: usize, channels: u8, blocks: u64) -> (ContinuityInst
     loop {
         let closing = g >= blocks && pending_close;
         // Stop on a processed block with nothing left deferred, so every skip is a hole.
-        if g >= blocks && !closing && skip_run == 0 && last_processed && set.ring(0).unwrap().is_empty() {
+        let pending = set.ring(0).unwrap();
+        if g >= blocks && !closing && skip_run == 0 && last_processed && pending.is_empty() && !pending.is_silenced() {
             break;
         }
         // After the closing block the player is silent; the loop only plays out the carry.
@@ -484,22 +558,35 @@ fn run(seed: u64, capacity: usize, channels: u8, blocks: u64) -> (ContinuityInst
         } else {
             last_processed = true;
             out.clear();
-            set.deliver(0, g, block_len, &live, &mut |e| out.push(e));
+            let d = set.deliver(0, g, block_len, &live, &mut |e| out.push(e));
+            synthetic.extend((0..out.len()).map(|k| d.silenced && k < d.deferred));
             inst.process(g * u64::from(block_len), block_len, &out);
         }
         g += 1;
         assert!(g < blocks + 1000, "the carry never drains (seed {seed})");
     }
-    (inst, played, skipped, set)
+    Run { inst, played, synthetic, skipped, set }
+}
+
+/// The property tests' seeds: `default`, or `TRANSIT_MIDI_DEFER_SEEDS=a-b`.
+fn seeds(default: std::ops::RangeInclusive<u64>) -> std::ops::RangeInclusive<u64> {
+    std::env::var("TRANSIT_MIDI_DEFER_SEEDS")
+        .ok()
+        .and_then(|v| {
+            let (a, b) = v.split_once('-')?;
+            Some(a.trim().parse().ok()?..=b.trim().parse().ok()?)
+        })
+        .unwrap_or(default)
 }
 
 #[test]
 fn no_note_is_lost_across_random_skipped_blocks() {
-    for seed in 1..=300 {
-        let (inst, played, skipped, set) = run(seed, 1024, 3, 200);
+    for seed in seeds(1..=300) {
+        let Run { inst, played, synthetic, skipped, set } = run(seed, 1024, 3, 200);
         let r = inst.report();
         assert_eq!(set.stats().overflow_faults(), 0, "seed {seed}: no overflow at this capacity");
-        assert_eq!(r.stuck_notes, 0, "seed {seed}: {r:?}");
+        assert!(!synthetic.contains(&true));
+        assert_eq!((r.stuck_notes, r.stuck_pedals), (0, 0), "seed {seed}: {r:?}");
         assert_eq!(r.faults, ContinuityFaults::default(), "seed {seed}: every off after its on, sorted, in the block: {r:?}");
         let got: Vec<_> = inst.trace().iter().map(|l| bytes(&l.event)).collect();
         let want: Vec<_> = played.iter().map(bytes).collect();
@@ -525,28 +612,51 @@ fn no_note_is_lost_across_random_skipped_blocks() {
 fn no_note_is_stuck_when_the_ring_overflows() {
     let mut silences = 0;
     let mut dropped = 0;
-    for seed in 1..=300 {
-        let (inst, played, _, set) = run(seed, 2 + (seed as usize % 7), 1, 120);
+    let mut multi = 0;
+    for seed in seeds(1..=300) {
+        // Three channels, so a silence must cover channels other than the strip's own.
+        let Run { inst, played, synthetic, set, .. } = run(seed, 2 + (seed as usize % 7), 3, 120);
         let r = inst.report();
         let c = set.stats().total();
         silences += c.silences;
         dropped += c.dropped;
         assert_eq!(r.stuck_notes, 0, "seed {seed}: the release class or the silence ends every note: {r:?}");
-        assert_eq!(r.stuck_pedals, 0, "seed {seed}");
+        assert_eq!(r.stuck_pedals, 0, "seed {seed}: the silence lifts the pedals it may have discarded: {r:?}");
         let f = r.faults;
         assert_eq!((f.overlaps, f.out_of_block, f.unsorted, f.zero_length, f.restrikes, f.unrecorded), (0, 0, 0, 0, 0, 0), "seed {seed}: {f:?}");
-        // Conservation: every event played was delivered, dropped, or is gone in a silence; the
-        // silences add two events each.
-        assert_eq!(r.events + c.dropped, played.len() as u64 + 2 * c.silences, "seed {seed}: {c:?}");
-        // What was delivered is a subsequence of what was played (plus the silence pairs).
+        // Conservation: every event played was delivered or dropped; a silence adds its own.
+        let emitted = synthetic.iter().filter(|&&x| x).count() as u64;
+        assert_eq!(emitted % 3, 0);
+        if emitted > 3 * c.silences {
+            multi += 1;
+        }
+        assert_eq!(r.events + c.dropped, played.len() as u64 + emitted, "seed {seed}: {c:?}");
+        // What was delivered, less the silences, is a subsequence of what was played.
         let mut it = played.iter().map(bytes);
-        for l in inst.trace() {
-            let b = bytes(&l.event);
-            if l.event.status & 0xF0 == 0xB0 && (b.1 == CC_ALL_SOUND_OFF || b.1 == CC_ALL_NOTES_OFF) && b.2 == 0 {
+        for (l, &synth) in inst.trace().iter().zip(&synthetic) {
+            if synth {
+                let b = bytes(&l.event);
+                assert!(b.0 & 0xF0 == 0xB0 && matches!(b.1, 120 | 123 | 64) && b.2 == 0 && l.event.offset == 0, "seed {seed}: {b:?}");
                 continue;
             }
-            assert!(it.any(|p| p == b), "seed {seed}: delivered out of order or invented");
+            assert!(it.any(|p| p == bytes(&l.event)), "seed {seed}: delivered out of order or invented");
         }
     }
     assert!(silences > 0 && dropped > silences, "the overflow paths ran: {silences} silences, {dropped} dropped");
+    assert!(multi > 0, "some silence covered more than one channel");
+}
+
+#[test]
+fn carried_counts_only_what_the_ring_kept() {
+    // Capacity 2: the off is carried, and of three live note-ons behind it the overflow rule
+    // keeps one; `carried` (the result and the counter) is what the ring holds.
+    let mut set = DeferSet::new(1, 2);
+    set.defer_block(0, 1, &[Event::note_on(0, 60, 100, 0), Event::note_off(0, 60, 0, 0)]);
+    let live = [Event::note_on(0, 1, 1, 0), Event::note_on(0, 2, 1, 0), Event::note_on(0, 3, 1, 0)];
+    let (out, d) = deliver(&mut set, 0, 2, 1, &live);
+    assert_eq!(out.len(), 1);
+    assert_eq!(d.carried, 2);
+    let c = set.stats().strip(0);
+    assert_eq!((c.carried, c.dropped), (2, 2));
+    assert_eq!(set.ring(0).unwrap().events().iter().map(bytes).collect::<Vec<_>>(), [(0x80, 60, 0), (0x90, 3, 1)]);
 }

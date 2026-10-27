@@ -180,11 +180,6 @@ impl ContinuityInstrument {
                             self.report.silenced_notes += 1;
                         }
                     }
-                    if event.data1 == CC_ALL_SOUND_OFF
-                        && let Some(p) = self.pedal.get_mut(ch)
-                    {
-                        *p = false;
-                    }
                 }
                 _ => {}
             }
