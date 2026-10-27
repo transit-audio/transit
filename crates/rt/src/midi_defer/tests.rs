@@ -660,3 +660,43 @@ fn carried_counts_only_what_the_ring_kept() {
     assert_eq!((c.carried, c.dropped), (2, 2));
     assert_eq!(set.ring(0).unwrap().events().iter().map(bytes).collect::<Vec<_>>(), [(0x80, 60, 0), (0x90, 3, 1)]);
 }
+
+// ---- The caller tag (slice 4: the mix crate's identity side table) ----
+
+#[test]
+fn the_tag_survives_defer_overflow_carry_and_delivery() {
+    // Constructors carry no tag; `with_tag` sets one and nothing else.
+    let e = Event::note_on(0, 60, 100, 3);
+    assert_eq!(e.tag, Event::NO_TAG);
+    assert_eq!(e.with_tag(7), Event { tag: 7, ..e });
+    // Overflow compaction keeps each kept event's tag (the dropped one's tag is gone with it).
+    let mut set = DeferSet::new(1, 3);
+    let fill = [Event::note_on(0, 60, 100, 0).with_tag(1), Event::note_off(0, 59, 0, 1).with_tag(2), Event::control(0, 1, 5, 2).with_tag(3)];
+    set.defer_block(0, 1, &fill);
+    set.defer_block(0, 2, &[Event::note_off(0, 60, 0, 0).with_tag(4)]);
+    let tags: Vec<u32> = set.ring(0).unwrap().events().iter().map(|e| e.tag).collect();
+    assert_eq!(tags, [2, 3, 4], "the oldest droppable (tag 1) went; the rest keep their tags in order");
+    // Delivery hands every event out with its tag.
+    let (out, _) = deliver(&mut set, 0, 3, 64, &[Event::note_on(0, 61, 90, 5).with_tag(5)]);
+    assert_eq!(out.iter().map(|e| e.tag).collect::<Vec<_>>(), [2, 3, 4, 5]);
+    // The end-of-block carry keeps the tags of the carried events and of the live ones behind.
+    let mut set = DeferSet::new(1, 8);
+    set.defer_block(0, 1, &[Event::note_on(0, 60, 100, 0).with_tag(10), Event::note_off(0, 60, 0, 0).with_tag(11)]);
+    let (out, d) = deliver(&mut set, 0, 2, 1, &[Event::control(0, 7, 1, 0).with_tag(12)]);
+    assert_eq!((out.len(), d.carried), (1, 2));
+    assert_eq!(out[0].tag, 10);
+    assert_eq!(set.ring(0).unwrap().events().iter().map(|e| e.tag).collect::<Vec<_>>(), [11, 12]);
+    let (out, _) = drain(&mut set, 0, 3, 8);
+    assert_eq!(out.iter().map(|e| e.tag).collect::<Vec<_>>(), [11, 12]);
+}
+
+#[test]
+fn a_silence_emits_untagged_events() {
+    let mut set = DeferSet::new(1, 2);
+    let offs: Vec<_> = (0..3u8).map(|k| Event::note_off(1, k, 0, 0).with_tag(u32::from(k))).collect();
+    set.defer_block(0, 1, &offs);
+    assert!(set.ring(0).unwrap().is_silenced());
+    let (out, d) = drain(&mut set, 0, 2, 64);
+    assert!(d.silenced);
+    assert!(!out.is_empty() && out.iter().all(|e| e.tag == Event::NO_TAG), "the silence's events carry no caller tag");
+}

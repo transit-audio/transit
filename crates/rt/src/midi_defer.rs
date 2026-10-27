@@ -65,7 +65,7 @@ pub const CC_ALL_NOTES_OFF: u8 = 123;
 const NOTE_SLOTS: usize = 16 * 128;
 
 /// One MIDI channel message as the ring stores it: the three bytes, the sample offset within its
-/// block, and the block generation it belonged to. `Copy`, 16 bytes.
+/// block, the block generation it belonged to and a caller tag. `Copy`, 24 bytes.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Event {
     /// The status byte (message type in the high nibble, channel 0..=15 in the low one).
@@ -79,15 +79,31 @@ pub struct Event {
     /// The block generation the event belonged to; the ring stamps it on defer. Delivery keeps
     /// it, so a delivered event still names the block it was deferred from.
     pub block: u64,
+    /// An opaque caller value the ring carries unchanged through defer, the overflow rule's
+    /// compaction, the end-of-block carry and delivery. The mix crate stores in it the index of
+    /// the event's identity (source, sender note id, binding) in its own side table, so a
+    /// carried note-off still ends the voice its note-on started (ADR 0029, notes for slice 4).
+    /// The constructors set [`Event::NO_TAG`]; so do the events a silence generates.
+    pub tag: u32,
 }
 
-const _: () = assert!(size_of::<Event>() == 16);
+const _: () = assert!(size_of::<Event>() == 24);
 
 impl Event {
-    /// A message at `offset` (block 0 until deferred).
+    /// The tag of an event that carries none: the constructors' default and every event a
+    /// silence generates (All Sound Off, All Notes Off, sustain off).
+    pub const NO_TAG: u32 = u32::MAX;
+
+    /// A message at `offset` (block 0 until deferred, no tag).
     #[must_use]
     pub const fn new(status: u8, data1: u8, data2: u8, offset: u32) -> Self {
-        Self { status, data1, data2, offset, block: 0 }
+        Self { status, data1, data2, offset, block: 0, tag: Self::NO_TAG }
+    }
+
+    /// The same event with the caller tag `tag`.
+    #[must_use]
+    pub const fn with_tag(self, tag: u32) -> Self {
+        Self { tag, ..self }
     }
 
     /// A note-on (`channel` 0..=15).
