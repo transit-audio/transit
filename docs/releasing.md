@@ -40,6 +40,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
 
 ## Released
 
+- `v0.3.1`, 2026-10-26, commit `c9c73d23`: patch release (interface zoom, step input, looped clips in the piano roll, Cycle from the selection, MIDI Mappings table, diagnostics report); screenshots refreshed.
 - `v0.3.0`, 2026-10-26, commit `8d0925a7`: first release with the Linux packages (AppImage, deb, rpm) carrying the
   native JACK backend, and the Windows MSI with its installer dialogs. Body from `docs/releases/v0.3.0.md`.
 - `v0.2.0-alpha.1`, 2026-10-22, commit `995cf66`. The cpal ASIO zip and MSI were removed from this
