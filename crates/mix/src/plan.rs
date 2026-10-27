@@ -316,6 +316,12 @@ pub enum RejectReason {
     AttachInvalid,
     /// An earlier adoption unwound: the engine may be half-adopted and adopts nothing more.
     Faulted,
+    /// A render worker still holds a strip (an overrun, ADR 0029): nothing moves until it is
+    /// back. Playback defers adoption while [`MixEngine::render_workers_settled`] is false, so
+    /// only a caller that does not ask first sees this.
+    ///
+    /// [`MixEngine::render_workers_settled`]: crate::MixEngine::render_workers_settled
+    StripsInFlight,
 }
 
 /// What [`MixEngine::adopt_plan`](crate::MixEngine::adopt_plan) did.

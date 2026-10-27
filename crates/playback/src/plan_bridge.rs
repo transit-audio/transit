@@ -283,6 +283,8 @@ pub struct Control {
     status_rx: rtrb::Consumer<StatusReport>,
     status: Option<StatusReport>,
     counters: Arc<Counters>,
+    /// The live engine's render-worker faults, when it has workers (opt-in, ADR 0029).
+    strip_faults: Option<transit_mix::StripFaultsReader>,
 }
 
 /// Borrowed by audio, anchored by control until quiescence. The caller owns transport and
@@ -319,6 +321,12 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
     // constructs a runtime. Same-target plans keep this engine incarnation.
     let mut mix = MixEngine::realtime_with_events(target, transit_mix::EngineEpoch(target.device.0), transit_mix::EventLimits::default());
     mix.metronome = true;
+    // The multicore strip render is opt-in (`TRANSIT_RENDER_POOL=1`, #124): only then does the live
+    // engine start render workers. They stop with the engine, in `Control::retire`, on control.
+    if !MixEngine::serial_forced() {
+        mix.start_render_workers(usize::from(limits.tracks));
+    }
+    let strip_faults = mix.strip_faults();
     (
         Control {
             compiler: PlanCompiler::new(target, limits),
@@ -334,6 +342,7 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
             status_rx,
             status: None,
             counters: Arc::clone(&counters),
+            strip_faults,
         },
         Audio { port: audio_port, mix, buffers, status_tx, counters, deferred_age: 0, maximum_age: 0 },
     )
@@ -467,6 +476,12 @@ impl Control {
         self.status.filter(|s| s.generation == self.compiler.active())
     }
 
+    /// The live engine's render-worker stream faults (`None`: no workers, the strips render
+    /// serially). Relaxed loads; call from control or the UI.
+    pub fn strip_faults(&self) -> Option<transit_mix::StripFaults> {
+        self.strip_faults.as_ref().map(transit_mix::StripFaultsReader::snapshot)
+    }
+
     pub fn deferral_telemetry(&self) -> DeferralTelemetry {
         DeferralTelemetry {
             published_generation: self.counters.published.load(Ordering::Acquire),
@@ -591,7 +606,9 @@ impl Audio {
         if self.faulted() {
             return self.return_pending(budget);
         }
-        if budget.serviced || !ready {
+        // A strip a render worker still holds cannot move: the plan waits for it (ADR 0029),
+        // counted like any deferred publication.
+        if budget.serviced || !ready || !self.mix.render_workers_settled() {
             self.deferred(budget);
             return publication::Service::Empty;
         }
@@ -647,6 +664,11 @@ impl Audio {
     /// Give the mix the phase marker its render writes (#162).
     pub fn set_phase_marker(&mut self, marker: Arc<transit_rt::phase_marker::PhaseMarker>) {
         self.mix.set_phase_marker(marker);
+    }
+    /// Strips that were silence in the last rendered block because of a render-worker overrun
+    /// (ADR 0029); 0 without workers.
+    pub fn block_overruns(&self) -> u32 {
+        self.mix.block_overruns()
     }
     #[cfg(test)]
     pub(crate) fn install_event_tap_for_test(&mut self, capacity: usize) {

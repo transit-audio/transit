@@ -118,6 +118,14 @@ pub fn detail_rows(t: &CallbackTelemetry) -> Vec<String> {
         format!("Peak callback load (since open): {}", load_text(t.max_load_ppm)),
         format!("Over-budget callbacks (nominal): {}", t.over_budget_callbacks),
         format!("Over-budget callbacks while a plug-in was loading: {}", t.over_budget_while_creating),
+    ]);
+    // Beside the late-block figures: the render workers' stream faults (ADR 0029), when the
+    // engine has workers (`TRANSIT_RENDER_POOL=1`). Each name is defined once in
+    // docs/troubleshooting.md ("Render worker figures").
+    if let Some(f) = &t.strip_faults {
+        rows.extend(strip_fault_rows(f));
+    }
+    rows.extend([
         format!("Callbacks: {}", t.callbacks),
         format!("Timed callbacks: {}", t.timed_callbacks),
         format!("Callbacks without a timing: {}", t.callbacks.saturating_sub(t.timed_callbacks)),
@@ -188,6 +196,26 @@ pub fn longest_callback_lines(t: &CallbackTelemetry, strips: &[StripName]) -> Ve
     let top: Vec<String> =
         t.worst.iter().filter(|w| w.duration_ns > 0).map(|w| format!("{} {}", ms_text(w.duration_ns), where_text(w, strips, true))).collect();
     vec![line, format!("Longest callbacks: {}", top.join("; "))]
+}
+
+/// The render workers' figures (ADR 0029), one name per figure, as `label: value`.
+pub fn strip_fault_rows(f: &transit_mix::StripFaults) -> Vec<String> {
+    vec![
+        format!("Render workers: {}", f.workers),
+        format!("Strip overruns, busy: {}", f.overruns_busy),
+        format!("Strip overruns, late: {}", f.overruns_late),
+        format!("Strip overruns, unstarted: {}", f.overruns_unstarted),
+        format!("Blocks with a strip overrun: {}", f.overrun_blocks),
+        format!("Late strip results: {}", f.late_results),
+        format!("Strips rendered inline: {}", f.inline_renders),
+        format!("Strips rendered on the callback: {}", f.callback_renders),
+        format!("Faulted strip renders: {}", f.faulted),
+        format!("Suspect strip blocks: {}", f.suspect),
+        format!("Deferred MIDI events: {}", f.midi_deferred),
+        format!("Deferred MIDI overflows: {}", f.midi_dropped),
+        format!("Deferred MIDI silences: {}", f.midi_silences),
+        format!("Render worker protocol faults: {}", f.conflicts),
+    ]
 }
 
 /// The Audio Devices line for the device loop of a native stream, with the fields `backend` fills

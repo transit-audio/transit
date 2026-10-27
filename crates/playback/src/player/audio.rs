@@ -902,9 +902,23 @@ impl Audio {
             None
         };
         let state = &mut self.transport;
+        let block_output = state.timeline.next_output();
         // The mixer owns each processor's suspension rules. A completed note
         // release does not prove that its envelope or any downstream tail ended.
         self.plans.render(state.render_position, frames);
+        // A render-worker overrun in this block (strips were silence, ADR 0029) is marked in the
+        // MIDI take journal while a pass records. The take itself is unaffected: MIDI is captured
+        // at admission (`service_midi`, before any render) and audio by the input callback
+        // (`record.rs`), neither of which waits on the strip render.
+        let overruns = self.plans.block_overruns();
+        if overruns > 0
+            && state.recording
+            && state.playing
+            && state.count_in.is_none()
+            && let Some(capture) = &mut self.capture
+        {
+            capture.mark_overrun(crate::midi_capture::OverrunMark { frame: block_output, strips: overruns });
+        }
         // A real-time render keeps Main and the External Instruments' returns of this block, as
         // live playback renders and reads them (ADR 0027): a copy into its ring, nothing more.
         if let Some(tap) = &self.render_tap {

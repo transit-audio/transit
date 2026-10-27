@@ -2,8 +2,10 @@
 //! runs, so a crash does not lose them (the audio take is a file for the same reason).
 //!
 //! Format: newline-delimited JSON. The first line is the [`Header`] (the record-start latch and
-//! what is needed to rebuild the clip); every other line is one [`Record`]. A record cut off by a
-//! crash fails to parse and ends the journal; everything before it is kept.
+//! what is needed to rebuild the clip); every other line is one [`Record`], or an overrun mark
+//! (`{"overrun":{"frame":..,"strips":..}}`, [`Overrun`]): a block in which render-worker strips
+//! were silence while the pass recorded (ADR 0029). Marks never change the rebuilt clip. A line
+//! cut off by a crash fails to parse and ends the journal; everything before it is kept.
 //!
 //! The writer runs on the control thread (it is fed from the drained capture queue); the audio
 //! thread never touches it.
@@ -84,6 +86,22 @@ pub struct Record {
     pub msg: Msg,
 }
 
+/// A block in which strips were silence because their render worker overran (ADR 0029), while
+/// the pass recorded. The take's events are unaffected (captured at admission, before any render).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Overrun {
+    /// The output-device frame of the block's first sample.
+    pub frame: u64,
+    /// Strips silent in that block.
+    pub strips: u32,
+}
+
+/// The journal line of an [`Overrun`].
+#[derive(serde::Serialize, serde::Deserialize)]
+struct OverrunLine {
+    overrun: Overrun,
+}
+
 /// Where a journal for the session called `name` goes: next to the audio takes, in `dir`
 /// (`<dir>/<name>_<timestamp>.midijournal`).
 pub fn journal_path(dir: &Path, name: &str) -> PathBuf {
@@ -105,13 +123,15 @@ pub struct Writer {
     file: Option<BufWriter<std::fs::File>>,
     /// How many of the pass's captured events are accounted for (written or skipped).
     consumed: usize,
+    /// How many of the pass's overrun marks are written.
+    marks: usize,
     flushed: Instant,
     failed: bool,
 }
 
 impl Writer {
     pub fn new(path: PathBuf) -> Writer {
-        Writer { path, file: None, consumed: 0, flushed: Instant::now(), failed: false }
+        Writer { path, file: None, consumed: 0, marks: 0, flushed: Instant::now(), failed: false }
     }
 
     pub fn path(&self) -> &Path {
@@ -140,6 +160,35 @@ impl Writer {
     }
 
     fn write(&mut self, header: &Header, records: &[Record]) -> std::io::Result<()> {
+        self.write_lines(header, records)
+    }
+
+    /// How many of the pass's overrun marks the journal has taken.
+    pub fn marks(&self) -> usize {
+        self.marks
+    }
+
+    /// Append the pass's overrun marks (`(frame, strips)`, all of them so far, oldest first) that
+    /// the journal has not taken yet, creating the file with `header` first. A failure is
+    /// returned once, as with [`Writer::append`].
+    pub fn mark(&mut self, header: &Header, marks: impl IntoIterator<Item = impl Into<(u64, u32)>>) -> std::io::Result<()> {
+        if self.failed {
+            return Ok(());
+        }
+        let lines: Vec<OverrunLine> =
+            marks.into_iter().skip(self.marks).map(Into::into).map(|(frame, strips)| OverrunLine { overrun: Overrun { frame, strips } }).collect();
+        if lines.is_empty() {
+            return Ok(());
+        }
+        self.marks += lines.len();
+        let written = self.write_lines(header, &lines);
+        if written.is_err() {
+            self.failed = true;
+        }
+        written
+    }
+
+    fn write_lines<T: serde::Serialize>(&mut self, header: &Header, lines: &[T]) -> std::io::Result<()> {
         if self.file.is_none() {
             if let Some(dir) = self.path.parent() {
                 std::fs::create_dir_all(dir)?;
@@ -149,7 +198,7 @@ impl Writer {
             self.file = Some(file);
         }
         let Some(file) = self.file.as_mut() else { return Ok(()) };
-        records.iter().try_for_each(|r| line(file, r))
+        lines.iter().try_for_each(|r| line(file, r))
     }
 
     /// Hand everything written so far to the file.
@@ -175,6 +224,8 @@ fn line<T: serde::Serialize>(file: &mut impl Write, value: &T) -> std::io::Resul
 pub struct Journal {
     pub header: Header,
     pub records: Vec<Record>,
+    /// The overrun marks, in file order.
+    pub overruns: Vec<Overrun>,
     /// The last record was cut off (a crash mid-write); it and anything after it is ignored.
     pub truncated: bool,
 }
@@ -189,17 +240,23 @@ pub fn read(path: &Path) -> Result<Journal> {
         return Err(EngineError::Io(format!("{}: unknown MIDI journal version {}", path.display(), header.version)));
     }
     let mut records = Vec::new();
+    let mut overruns = Vec::new();
     let mut truncated = false;
     for l in lines {
-        match l.ok().and_then(|l| serde_json::from_slice::<Record>(&l).ok()) {
-            Some(r) => records.push(r),
-            None => {
-                truncated = true;
-                break;
-            }
+        let Ok(l) = l else {
+            truncated = true;
+            break;
+        };
+        if let Ok(r) = serde_json::from_slice::<Record>(&l) {
+            records.push(r);
+        } else if let Ok(m) = serde_json::from_slice::<OverrunLine>(&l) {
+            overruns.push(m.overrun);
+        } else {
+            truncated = true;
+            break;
         }
     }
-    Ok(Journal { header, records, truncated })
+    Ok(Journal { header, records, overruns, truncated })
 }
 
 impl Journal {
@@ -303,6 +360,25 @@ mod tests {
         let path = w.path().to_path_buf();
         w.discard();
         assert!(!path.exists(), "a clean stop deletes the journal");
+    }
+
+    #[test]
+    fn overrun_marks_are_journaled_beside_the_records_and_change_no_event() {
+        let d = dir("marks");
+        let mut w = Writer::new(d.join("s.midijournal"));
+        let h = header(vec![TrackId(1)]);
+        let records = two_notes();
+        w.append(&h, &records[..2], 2).unwrap();
+        w.mark(&h, [(10_000u64 + 30_000, 2u32)]).unwrap();
+        w.append(&h, &records[2..], 4).unwrap();
+        // The pass's marks so far: the first is already in the journal.
+        w.mark(&h, [(10_000u64 + 30_000, 2u32)]).unwrap();
+        w.flush().unwrap();
+        assert_eq!(w.marks(), 1);
+        let j = read(w.path()).unwrap();
+        assert_eq!((j.records.clone(), j.overruns.clone(), j.truncated), (records.clone(), vec![Overrun { frame: 40_000, strips: 2 }], false));
+        let plain = Journal { overruns: Vec::new(), ..j.clone() };
+        assert_eq!(j.events(), plain.events(), "a mark changes no event of the take");
     }
 
     #[test]

@@ -233,6 +233,15 @@ impl MixEngine {
         if active.faulted {
             return reject(env, RejectReason::Faulted, active);
         }
+        // Every strip must be home: a strip a render worker holds cannot move (ADR 0029). Playback
+        // defers adoption until then ([`MixEngine::render_workers_settled`]).
+        if let Some(pool) = self.pool.as_mut() {
+            if !pool.settle(&mut active.tables.strips, &self.events) {
+                return reject(env, RejectReason::StripsInFlight, active);
+            }
+            // Deferred MIDI goes into the instances now, so it moves with them.
+            pool.flush_parked(&mut active.tables.strips, &mut self.events, &active.session, self.max_block);
+        }
         if let Err(reason) = validate(active, &mut env.plan) {
             return reject(env, reason, active);
         }
@@ -358,6 +367,13 @@ impl MixEngine {
     /// Control thread, after the audio side is quiescent (also after a fault): everything the
     /// engine owns, to drop there.
     pub fn into_retired(mut self) -> Retired {
+        // The render workers stop here, off the audio thread, and every strip comes home.
+        if let Some(pool) = self.pool.take() {
+            match self.plan.as_deref_mut() {
+                Some(p) => pool.retire(&mut p.tables.strips, &p.session),
+                None => pool.retire(&mut [], &Session::default()),
+            }
+        }
         match self.plan.take() {
             Some(p) => {
                 let p = *p;
@@ -370,6 +386,8 @@ impl MixEngine {
     /// Audio thread: renders `frames` (≤ max block) samples of the active plan starting at `pos`
     /// into `out`. Silence before the first adoption and after a fault.
     pub fn render_active(&mut self, pos: Samples, frames: usize, out: &mut [Vec<f32>]) {
+        // The block's start, which the render workers' deadline is measured from (ADR 0029).
+        let start = self.pool.is_some().then(std::time::Instant::now);
         let frames = frames.min(self.max_block);
         let Some(plan) = self.plan.as_deref_mut().filter(|p| !p.faulted) else {
             self.events.next_frame = self.events.next_frame.saturating_add(frames as u64);
@@ -378,7 +396,8 @@ impl MixEngine {
             }
             return;
         };
-        let ActivePlan { session, tables, status, .. } = plan;
+        let ActivePlan { id, session, tables, status, .. } = plan;
+        let sample_rate = id.target.sample_rate;
         let s: &Session = session;
         // A seek or loop wrap releases what the clips play; live sources keep sounding (F10).
         if pos != self.last_end && !self.monitor_only {
@@ -390,6 +409,9 @@ impl MixEngine {
                     }
                 }
                 st.chase = true;
+            }
+            if let Some(pool) = self.pool.as_mut() {
+                pool.mark_away(strip_pool::PENDING_SEEK);
             }
         }
         let frame = self.events.next_frame;
@@ -425,7 +447,33 @@ impl MixEngine {
         // Phase 1: independent strips. They stay in the table; nothing to restore on an unwind.
         // A strip's panic is kept in the strip (`guarded`); the first one unwinds out of here, the
         // others stay in the table and go back to the control side with it.
-        {
+        //
+        // With render workers (opt-in, ADR 0029) and no sidechain key, the strips go through the
+        // worker set instead, under the block's deadline; a strip a worker still holds comes back
+        // that way whatever the switches say.
+        let pooled = match (self.pool.as_mut(), start) {
+            (Some(pool), Some(start))
+                if on_audio_thread()
+                    && (pool.any_away() || (!self.serial && !MixEngine::serial_forced() && keys.is_empty() && p1.len() >= PARALLEL_STRIPS)) =>
+            {
+                let block = strip_pool::PoolBlock {
+                    session: &*session,
+                    busses: &*busses,
+                    keys: &*keys,
+                    live: &live_in,
+                    pos,
+                    frames,
+                    any_solo,
+                    sample_rate,
+                    start,
+                    budget: self.strip_deadline,
+                };
+                pool.render(&block, p1, &mut self.events);
+                true
+            }
+            _ => false,
+        };
+        if !pooled {
             let busses: &BusTable = busses;
             // One `run_strips` per layer: a strip keyed from another renders after it, and its key
             // is copied from the finished source first. Without keys this is the one call.
@@ -455,8 +503,13 @@ impl MixEngine {
         self.main_arrival = main_arrival;
         self.latency = device;
         let law = self.pan_law;
-        for st in p1.iter_mut() {
+        let pool = if pooled { self.pool.as_ref() } else { None };
+        for (i, st) in p1.iter_mut().enumerate() {
             let Some(t) = track(st).filter(|t| live(t) && !is_aux(t)) else { continue };
+            // An overrun, a faulted or a suspect strip is silence for the block (ADR 0029).
+            if pool.is_some_and(|p| p.is_silent(i) || p.is_away(i)) {
+                continue;
+            }
             st.meter.measure(&st.buf, frames, st.gr);
             st.meter.plugin_failures = st.failures;
             let need = route_into(t, st, pos, frames, MixOut { busses, main, main_fmt, sinks, law, main_arrival });
@@ -654,4 +707,82 @@ fn fold_latency(s: &Session, phases: RenderPhases<'_>, busses: &mut BusTable, si
         k.arrival = device;
     }
     DeviceLatency { main: main_arrival, device }
+}
+
+/// The render workers (issue #124 slice 4, ADR 0029): opt-in, started by the live engine's owner.
+impl MixEngine {
+    /// Control thread: starts this engine's render workers (cores minus one, at most
+    /// [`MAX_RENDER_WORKERS`], each promoted once at start unless [`RENDER_NO_PRIORITY_ENV`] is
+    /// set) with a cell for each of the first `strips` strips (at most 256; strips past them
+    /// render on the callback). Returns how many workers run (0: none, the strips render
+    /// serially: one core, the OS refused a thread, the audio thread called, or wasm). The workers
+    /// render only while [`MixEngine::serial_forced`] is off, and stop at
+    /// [`MixEngine::into_retired`]; never drop an engine with workers on the audio thread.
+    pub fn start_render_workers(&mut self, strips: usize) -> usize {
+        #[cfg(target_arch = "wasm32")]
+        let _ = strips;
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.pool.is_none() && !on_audio_thread() {
+            let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+            let workers = cores.saturating_sub(1).min(MAX_RENDER_WORKERS);
+            let promote = !render_pool::env_flag(RENDER_NO_PRIORITY_ENV, "SOUNDCRAFT_RENDER_NO_PRIORITY");
+            if workers > 0 {
+                match strip_pool::StripPool::new(workers, strips.clamp(1, strip_pool::POOL_STRIPS), promote) {
+                    Ok(pool) => {
+                        log::info!("mix: {workers} render workers ({})", if promote { "promoted" } else { "default priority" });
+                        self.pool = Some(pool);
+                    }
+                    Err(e) => log::warn!("mix: no render workers ({e}); the audio thread renders strips itself"),
+                }
+            }
+        }
+        self.render_workers()
+    }
+
+    /// Render worker threads (0: none).
+    #[must_use]
+    pub fn render_workers(&self) -> usize {
+        self.pool.as_ref().map_or(0, strip_pool::StripPool::workers)
+    }
+
+    /// What each render worker's promotion achieved, by worker (`None` before it ran, or with
+    /// promotion off). For diagnostics and tests; allocates.
+    #[must_use]
+    pub fn render_worker_promotions(&self) -> Vec<Option<transit_rt::Promotion>> {
+        self.pool.as_ref().map(strip_pool::StripPool::promotions).unwrap_or_default()
+    }
+
+    /// A reader of the render workers' stream faults (overruns by cause, late results, deferred
+    /// MIDI overflows and silences, suspect strips), for the diagnostics report; `None` without
+    /// workers. Take it off the audio thread.
+    #[must_use]
+    pub fn strip_faults(&self) -> Option<StripFaultsReader> {
+        self.pool.as_ref().map(strip_pool::StripPool::reader)
+    }
+
+    /// Audio thread, between blocks: brings home every strip whose render worker is done, and
+    /// returns whether every strip is home. A plan is adopted only then (a strip a worker holds
+    /// cannot move); playback defers the adoption while this is false. Always true without
+    /// workers. Allocation-free and non-blocking.
+    pub fn render_workers_settled(&mut self) -> bool {
+        match (self.pool.as_mut(), self.plan.as_deref_mut()) {
+            (Some(pool), Some(p)) => pool.settle(&mut p.tables.strips, &self.events),
+            _ => true,
+        }
+    }
+
+    /// Strips that were silence in the last block because of an overrun (0 without workers): the
+    /// take journal marks the block when this is not zero.
+    #[must_use]
+    pub fn block_overruns(&self) -> u32 {
+        self.pool.as_ref().map_or(0, strip_pool::StripPool::last_overruns)
+    }
+
+    /// Overrides the strips' deadline, measured from the block's start (default: three quarters
+    /// of the block's period). For tests and the bench: a long budget makes the pool path wait
+    /// for every worker, a short one forces overruns.
+    #[doc(hidden)]
+    pub fn set_strip_deadline(&mut self, budget: Option<std::time::Duration>) {
+        self.strip_deadline = budget;
+    }
 }

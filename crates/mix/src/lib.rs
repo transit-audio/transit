@@ -106,6 +106,11 @@ mod routing;
 mod scope;
 mod sink;
 mod strip;
+#[cfg(not(target_arch = "wasm32"))]
+mod strip_pool;
+#[cfg(target_arch = "wasm32")]
+#[path = "strip_pool_wasm.rs"]
+mod strip_pool;
 #[cfg(test)]
 mod tests;
 
@@ -141,9 +146,9 @@ pub use plan::{
 };
 #[cfg(test)]
 use render_pool::flag_value;
-use render_pool::{FORCE_SERIAL, guarded, init_render_pool, run_strips};
+use render_pool::{FORCE_SERIAL, PARALLEL_STRIPS, guarded, init_render_switch, run_strips};
 pub use render_pool::{
-    MAX_RENDER_WORKERS, RENDER_NO_PRIORITY_ENV, RENDER_POOL_ENV, mark_audio_thread, on_audio_thread, render_worker_promotions, unmark_audio_thread,
+    MAX_RENDER_WORKERS, RENDER_NO_PRIORITY_ENV, RENDER_POOL_ENV, StripFaults, mark_audio_thread, on_audio_thread, unmark_audio_thread,
 };
 use routing::{
     MixOut, PdcWalk, is_aux, live, log_loops, path_need, pdc_visit, processing_order, receives_solo, route_into, strip_channels, strip_format,
@@ -152,6 +157,7 @@ pub use scope::{INSTRUMENT_UID, SCOPE_FRAMES, ScopeHub, ScopeTap};
 use sink::Sink;
 pub use sink::{MAX_SINK_CHANNELS, SinkPlan, SinkSpec, plan_sinks, unresolved_routes};
 use strip::{LiveInput, StripRender, head_latency, note_insert_latency, process_master, process_strip};
+pub use strip_pool::StripFaultsReader;
 
 /// Default (stereo) main mix width. The actual width is [`main_channels`].
 pub const MAIN_CHANNELS: usize = 2;
@@ -747,6 +753,10 @@ pub struct MixEngine {
     events: events::EngineEvents,
     /// The callback's phase marker (#162): written with relaxed stores on the audio thread.
     marker: Option<std::sync::Arc<transit_rt::phase_marker::PhaseMarker>>,
+    /// The render workers ([`MixEngine::start_render_workers`]; issue #124, ADR 0029).
+    pool: Option<strip_pool::StripPool>,
+    /// Overrides the strips' deadline share of the block period ([`MixEngine::set_strip_deadline`]).
+    strip_deadline: Option<std::time::Duration>,
 }
 
 impl MixEngine {
@@ -757,23 +767,24 @@ impl MixEngine {
     }
 
     /// Force (or stop forcing) every engine in the process to render its audio-thread strips
-    /// serially on the audio thread, never on the render pool. Serial is the default (see
-    /// [`RENDER_POOL_ENV`]); `force_serial(false)` hands the strips to the pool. Takes effect at
-    /// the next block. Offline renders are not affected.
+    /// serially on the audio thread, never on its render workers. Serial is the default (see
+    /// [`RENDER_POOL_ENV`]); `force_serial(false)` hands the strips to an engine's render workers
+    /// once it has them ([`MixEngine::start_render_workers`]). Takes effect at the next block (a
+    /// strip a worker still holds comes back first). Offline renders are not affected.
     pub fn force_serial(on: bool) {
         FORCE_SERIAL.store(on, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// True while serial rendering is in effect: the default, until [`MixEngine::force_serial`]`(false)`
-    /// or [`RENDER_POOL_ENV`] turns the render pool on.
+    /// or [`RENDER_POOL_ENV`] turns the render workers on.
     #[must_use]
     pub fn serial_forced() -> bool {
         FORCE_SERIAL.load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    /// Also spawns the process's render pool on first use (never from the audio thread).
+    /// Also reads [`RENDER_POOL_ENV`] on first use (never from the audio thread).
     fn new(max_block: usize) -> Self {
-        init_render_pool();
+        init_render_switch();
         MixEngine {
             max_block: max_block.clamp(16, 16_384),
             pan_law: PanLaw::Minus3,
@@ -791,6 +802,8 @@ impl MixEngine {
             marker: None,
             plan: None,
             events: events::EngineEvents::new(None, EventLimits::default()),
+            pool: None,
+            strip_deadline: None,
         }
     }
 
@@ -814,7 +827,8 @@ impl MixEngine {
     }
 
     /// Play (velocity > 0) or release (velocity 0) `pitch` on a track's instrument at the next
-    /// block, outside the clips: the MIDI Editor's audition. Does nothing before a plan is adopted.
+    /// block, outside the clips: the MIDI Editor's audition. Does nothing before a plan is adopted,
+    /// nor while a render worker holds the track's strip (an overrun, ADR 0029).
     ///
     /// Superseded by [`MixEngine::queue_event`] (F10), which carries the source, channel, voice
     /// identity and due frame and reserves the release; kept until the Player migrates. Notes
@@ -832,20 +846,14 @@ impl MixEngine {
     /// [`MixEngine::set_transport_epoch`] and the position jump in [`MixEngine::render_active`]
     /// instead, which release only what the clips play (see the `events` module).
     pub fn reset(&mut self) {
+        // A strip a render worker holds is reset when it is back, and nothing deferred for any
+        // strip plays after the stop (ADR 0029).
+        if let Some(pool) = self.pool.as_mut() {
+            pool.mark_away(strip_pool::PENDING_RESET);
+            pool.discard_parked();
+        }
         for s in self.plan_strips() {
-            for p in s.plugins.iter_mut().flatten() {
-                p.plugin.reset();
-                p.failed = false;
-            }
-            if let Some(i) = &mut s.instrument {
-                if let Some(e) = i.events.as_deref_mut() {
-                    e.release_all(&mut *i.plugin);
-                }
-                i.plugin.all_notes_off();
-                i.plugin.reset();
-                i.failed = false;
-            }
-            s.chase = true;
+            render_pool::reset_render_state(s);
             s.tap.clear();
             s.tap_pre.clear();
             s.tap.idle();
@@ -867,13 +875,12 @@ impl MixEngine {
     /// Every source is released: queued instrument events are dropped and each open note and
     /// pedal gets its release first (stop and panic).
     pub fn all_notes_off(&mut self) {
+        if let Some(pool) = self.pool.as_mut() {
+            pool.mark_away(strip_pool::PENDING_NOTES_OFF);
+            pool.discard_parked();
+        }
         for st in self.plan_strips() {
-            if let Some(i) = &mut st.instrument {
-                if let Some(e) = i.events.as_deref_mut() {
-                    e.release_all(&mut *i.plugin);
-                }
-                i.plugin.all_notes_off();
-            }
+            render_pool::release_instrument(st);
         }
     }
 

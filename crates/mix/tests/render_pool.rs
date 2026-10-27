@@ -1,4 +1,5 @@
-//! The audio callback never waits on Rayon's global pool (ADR 0012 gate G1, audit finding F01a).
+//! The audio callback never waits on Rayon's global pool (ADR 0012 gate G1, audit finding F01a):
+//! its render workers are the engine's own `transit-rt` worker set (#124, ADR 0029).
 //! Its own test binary, so saturating the global pool here stalls no other test.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -26,6 +27,8 @@ fn planned_engine(s: &Session) -> MixEngine {
     let mut engine = MixEngine::realtime(target);
     assert_eq!(engine.adopt_plan(&mut plan), Adoption::Adopted);
     compiler.reclaim(plan);
+    // The multicore render is opt-in: this binary is about that path.
+    engine.start_render_workers(64);
     engine
 }
 /// How long each global-pool job stays busy unless the test releases it earlier. Only a
@@ -48,7 +51,7 @@ fn sixteen_strips() -> Session {
 
 /// Keeps every global-pool worker occupied until dropped (also when the test fails). They sleep
 /// rather than spin: what is under test is queueing behind the global pool's jobs, not CPU
-/// oversubscription (the render pool runs at the default priority; see `build_render_pool`).
+/// oversubscription.
 struct Saturated {
     release: Arc<AtomicBool>,
     /// Jobs that have ended; none does before the release unless `BUSY` ran out.
@@ -95,7 +98,7 @@ impl Drop for Saturated {
 /// Every global-pool worker is held by a job that ends only on release (or after `BUSY`), so a
 /// render that needed a global worker cannot complete while none of those jobs has ended. The
 /// property is that ordering, not a duration: a wall-clock bound on the block failed on a slow
-/// macOS runner (93 ms against 50 ms, E49) because CPU contention stretches the render pool's work,
+/// macOS runner (93 ms against 50 ms, E49) because CPU contention stretches the workers' render,
 /// which says nothing about waiting for the global pool.
 #[test]
 fn audio_thread_render_does_not_wait_for_a_saturated_global_pool() {
@@ -122,18 +125,18 @@ fn audio_thread_render_does_not_wait_for_a_saturated_global_pool() {
     .unwrap();
     let finished = busy.finished();
     drop(busy);
+    MixEngine::force_serial(true); // back to the default
     assert_eq!(finished, 0, "the audio-thread render completed only after a global-pool job ended (worst block {worst:?})");
     assert!(peak > 0.01, "the strips should sound: {peak}");
     eprintln!("worst block with the global pool saturated: {worst:?}");
 }
 
-/// Each render pool worker promotes itself at start through `transit-rt` (ADR 0013), and the
-/// result is kept per worker. Windows grants MMCSS or time-critical priority to any user, so
-/// there every worker must be promoted.
+/// Each render worker promotes itself at start through `transit-rt` (ADR 0013), and the result
+/// is kept per worker. Windows grants MMCSS or time-critical priority to any user, so there every
+/// worker must be promoted.
 #[test]
-fn render_pool_workers_promote_themselves_at_start() {
-    MixEngine::force_serial(false); // the pool is opt-in; this test is about its workers
-    let _eng = MixEngine::realtime(RenderTarget {
+fn render_workers_promote_themselves_at_start() {
+    let mut eng = MixEngine::realtime(RenderTarget {
         device: DeviceGeneration(1),
         sample_rate: 48_000,
         max_block: FRAMES as u32,
@@ -142,25 +145,26 @@ fn render_pool_workers_promote_themselves_at_start() {
     });
     let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
     let workers = cores.saturating_sub(1).min(transit_mix::MAX_RENDER_WORKERS);
-    if workers < 2 {
-        return; // no pool on this machine
+    assert_eq!(eng.start_render_workers(16), workers, "cores minus one, capped");
+    if workers == 0 {
+        return; // no workers on this machine
+    }
+    let disabled = std::env::var(transit_mix::RENDER_NO_PRIORITY_ENV).is_ok_and(|v| v.trim() == "1");
+    if disabled {
+        assert!(eng.render_worker_promotions().iter().all(Option::is_none), "promotion off: nothing recorded");
+        return;
     }
     let start = Instant::now();
     let seen = loop {
-        let seen = transit_mix::render_worker_promotions();
-        if seen.iter().take(workers).all(Option::is_some) {
+        let seen = eng.render_worker_promotions();
+        if seen.iter().all(Option::is_some) {
             break seen;
         }
         assert!(start.elapsed() < Duration::from_secs(5), "workers never started: {seen:?}");
         std::thread::sleep(Duration::from_millis(1));
     };
-    assert!(seen.iter().skip(workers).all(Option::is_none), "{seen:?}");
-    let disabled = std::env::var(transit_mix::RENDER_NO_PRIORITY_ENV).is_ok_and(|v| v.trim() == "1");
-    for p in seen.iter().flatten() {
-        if disabled {
-            assert_eq!(*p, transit_rt::Promotion::Unsupported("disabled"));
-        } else if cfg!(windows) {
-            assert!(p.is_promoted(), "{seen:?}");
-        }
+    assert_eq!(seen.len(), workers, "{seen:?}");
+    if cfg!(windows) {
+        assert!(seen.iter().flatten().all(transit_rt::Promotion::is_promoted), "{seen:?}");
     }
 }

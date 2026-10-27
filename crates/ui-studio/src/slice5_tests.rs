@@ -834,6 +834,25 @@ fn telemetry_math_saturates_when_the_snapshot_is_torn() {
 }
 
 #[test]
+fn render_worker_faults_print_beside_the_over_budget_callbacks_only_with_workers() {
+    use crate::telemetry::detail_rows;
+    let serial = detail_rows(&Default::default());
+    assert!(!serial.iter().any(|r| r.starts_with("Strip overruns")), "no workers, no worker figures: {serial:?}");
+    let f =
+        transit_mix::StripFaults { workers: 7, overruns_busy: 1, overruns_late: 2, overruns_unstarted: 3, midi_silences: 4, ..Default::default() };
+    let s = transit_playback::telemetry::CallbackTelemetry { strip_faults: Some(f), ..Default::default() };
+    let rows = detail_rows(&s);
+    let at = |label: &str| rows.iter().position(|r| r.starts_with(label)).unwrap_or_else(|| panic!("{label} missing: {rows:?}"));
+    assert_eq!(rows[at("Render workers")], "Render workers: 7");
+    assert_eq!(rows[at("Strip overruns, busy")], "Strip overruns, busy: 1");
+    assert_eq!(rows[at("Strip overruns, late")], "Strip overruns, late: 2");
+    assert_eq!(rows[at("Strip overruns, unstarted")], "Strip overruns, unstarted: 3");
+    assert_eq!(rows[at("Deferred MIDI silences")], "Deferred MIDI silences: 4");
+    assert!(at("Over-budget callbacks while a plug-in was loading") < at("Render workers"), "beside the late-block figures");
+    assert!(at("Render worker protocol faults") < at("Callbacks:"), "before the raw counts");
+}
+
+#[test]
 fn the_telemetry_is_read_a_few_times_a_second_not_every_frame() {
     let mut t = T::new();
     t.app.telemetry.injected = Some(snap());

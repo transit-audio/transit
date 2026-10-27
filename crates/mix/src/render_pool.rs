@@ -45,23 +45,24 @@ fn as_audio_thread(audio: bool, f: impl FnOnce()) {
 }
 
 /// Strips render in parallel from this many on; below it the fan-out costs more than it saves.
-#[cfg(not(target_arch = "wasm32"))]
-const PARALLEL_STRIPS: usize = 4;
+pub(crate) const PARALLEL_STRIPS: usize = 4;
 
-/// The render pool never has more workers than this, whatever the core count.
+/// An engine's render workers never number more than this, whatever the core count.
 pub const MAX_RENDER_WORKERS: usize = 8;
 
-/// Environment variable: `1` opts in to the render pool for audio-thread strips, as
-/// [`MixEngine::force_serial`]`(false)` does. Read once, when the render pool is built.
+/// Environment variable: `1` opts in to the multicore strip render for the audio thread, as
+/// [`MixEngine::force_serial`]`(false)` does: the live engine starts its render workers
+/// ([`MixEngine::start_render_workers`], issue #124, ADR 0029). Read once, when the first engine
+/// is made.
 ///
-/// Serial is the realtime default until the bounded render plan lands; measured
-/// 2026-10-18: promoted serial 0 late blocks vs promoted pool 1-5 per 2000 under load.
-/// `SOUNDCRAFT_RENDER_POOL` remains an alias when this variable is unset.
+/// Serial is the realtime default until the measurement of ADR 0012 gate G1 on the reference
+/// hardware says otherwise (#124 gate 6). `SOUNDCRAFT_RENDER_POOL` remains an alias when this
+/// variable is unset.
 pub const RENDER_POOL_ENV: &str = "TRANSIT_RENDER_POOL";
 
-/// Environment variable: `1` leaves the render pool's workers at the OS default priority instead
-/// of promoting them with [`transit_rt::promote_audio_thread`]. Read once, when the render
-/// pool is built. It does not affect the audio callback thread: this crate never promotes that.
+/// Environment variable: `1` leaves the render workers at the OS default priority instead of
+/// promoting them with [`transit_rt::promote_audio_thread`]. Read when the workers start. It does
+/// not affect the audio callback thread: this crate never promotes that.
 /// `SOUNDCRAFT_RENDER_NO_PRIORITY` remains an alias when this variable is unset.
 pub const RENDER_NO_PRIORITY_ENV: &str = "TRANSIT_RENDER_NO_PRIORITY";
 
@@ -69,15 +70,9 @@ pub const RENDER_NO_PRIORITY_ENV: &str = "TRANSIT_RENDER_NO_PRIORITY";
 /// [`RENDER_POOL_ENV`] clears it at startup.
 pub(crate) static FORCE_SERIAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
-/// What each render pool worker's [`transit_rt::promote_audio_thread`] achieved, by worker
-/// index; written once by the worker's start handler, never on the render path.
-#[cfg(not(target_arch = "wasm32"))]
-static WORKER_PROMOTION: [std::sync::OnceLock<transit_rt::Promotion>; MAX_RENDER_WORKERS] =
-    [const { std::sync::OnceLock::new() }; MAX_RENDER_WORKERS];
-
 /// True when `name` is set to `1` (or `true`/`yes`, any case).
 #[cfg(not(target_arch = "wasm32"))]
-fn env_flag(name: &str, alias: &str) -> bool {
+pub(crate) fn env_flag(name: &str, alias: &str) -> bool {
     flag_value(std::env::var(name).ok().as_deref(), std::env::var(alias).ok().as_deref())
 }
 
@@ -86,96 +81,30 @@ pub(crate) fn flag_value(value: Option<&str>, alias: Option<&str>) -> bool {
     value.or(alias).is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
 }
 
-/// What each render pool worker's promotion achieved, by worker index (`None` for a worker that
-/// does not exist or has not started yet; `Unsupported("disabled")` under
-/// [`RENDER_NO_PRIORITY_ENV`]). For diagnostics and tests.
-#[must_use]
-pub fn render_worker_promotions() -> [Option<transit_rt::Promotion>; MAX_RENDER_WORKERS] {
-    #[cfg(not(target_arch = "wasm32"))]
-    return std::array::from_fn(|i| WORKER_PROMOTION.get(i).and_then(|slot| slot.get().copied()));
-    #[cfg(target_arch = "wasm32")]
-    return [None; MAX_RENDER_WORKERS];
-}
-
-/// The realtime render pool: strips rendered for the audio thread run here, never on Rayon's
-/// global pool, which offline bounces and video decode/encode share and which runs at normal
-/// priority behind whatever they queued. `None` when the machine has too few cores for a pool to
-/// pay (or the threads could not be spawned): the audio thread then renders its strips itself.
-///
-/// Serial is the realtime default until the bounded render plan lands; measured
-/// 2026-10-18: promoted serial 0 late blocks vs promoted pool 1-5 per 2000 under load.
-///
-/// The audio callback thread is promoted by the audio backend (`playback`), before its first data
-/// callback; `MixEngine::render_active` makes no OS priority call (MMCSS registration is a service call
-/// that can block). Only the pool workers are promoted here, by their start handler at pool
-/// build, off the callback. The pool
-/// is still built (and its workers promoted) so [`MixEngine::force_serial`]`(false)` and
-/// [`RENDER_POOL_ENV`] can opt in.
+/// Reads [`RENDER_POOL_ENV`] once per process (never on the audio thread): set, it clears
+/// [`FORCE_SERIAL`]. [`MixEngine::new`] calls this.
 #[cfg(not(target_arch = "wasm32"))]
-static RENDER_POOL: std::sync::OnceLock<Option<rayon::ThreadPool>> = std::sync::OnceLock::new();
-
-/// Spawn the render pool, once per process. [`MixEngine::new`] calls this, so the pool exists
-/// before the first callback; it never spawns from the audio thread (a `MixEngine` built there,
-/// on a sample-rate change, reuses the pool an earlier engine built). The switches
-/// [`RENDER_POOL_ENV`] and [`RENDER_NO_PRIORITY_ENV`] are read here, once.
-#[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn init_render_pool() {
+pub(crate) fn init_render_switch() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
     if !on_audio_thread() {
-        RENDER_POOL.get_or_init(|| {
+        ONCE.call_once(|| {
             if env_flag(RENDER_POOL_ENV, "SOUNDCRAFT_RENDER_POOL") {
-                log::info!("mix: {RENDER_POOL_ENV} is set; audio-thread strips render on the pool");
+                log::info!("mix: {RENDER_POOL_ENV} is set; the live engine renders strips on its render workers");
                 FORCE_SERIAL.store(false, std::sync::atomic::Ordering::Relaxed);
             }
-            let promote = !env_flag(RENDER_NO_PRIORITY_ENV, "SOUNDCRAFT_RENDER_NO_PRIORITY");
-            build_render_pool(promote)
         });
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn init_render_pool() {}
-
-/// One worker per core but the one the audio callback runs on, at most [`MAX_RENDER_WORKERS`].
-/// Fewer than two workers is no pool: one worker plus a waiting callback is slower than the
-/// callback alone.
-///
-/// Priority: each worker promotes itself at start with [`transit_rt::promote_audio_thread`]
-/// (MMCSS "Pro Audio" on Windows, `SCHED_FIFO` on Linux, the Mach time-constraint policy on
-/// macOS; ADR 0013 keeps that `unsafe` out of this crate), unless `promote` is false. The result
-/// lands in [`render_worker_promotions`] and is logged once per worker at debug level. A refused
-/// promotion leaves the worker at the default priority; the pool is still dedicated, so nothing
-/// queued by a bounce or a video job runs ahead of a strip.
-#[cfg(not(target_arch = "wasm32"))]
-fn build_render_pool(promote: bool) -> Option<rayon::ThreadPool> {
-    let cores = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
-    let workers = cores.saturating_sub(1).min(MAX_RENDER_WORKERS);
-    if workers < 2 {
-        return None;
-    }
-    rayon::ThreadPoolBuilder::new()
-        .num_threads(workers)
-        .thread_name(|i| format!("mix-render-{i}"))
-        .start_handler(move |i| {
-            let p = if promote { transit_rt::promote_audio_thread() } else { transit_rt::Promotion::Unsupported("disabled") };
-            if let Some(slot) = WORKER_PROMOTION.get(i) {
-                let _ = slot.set(p);
-            }
-            // Before the mark: the logger treats the audio thread as never-block.
-            log::debug!("mix: render worker {i} priority: {p:?}");
-            // A worker only ever renders for the audio thread, so it is the audio thread for good.
-            mark_audio_thread();
-        })
-        .build()
-        .map_err(|e| log::warn!("mix: no render pool ({e}); the audio thread renders strips itself"))
-        .ok()
-}
+pub(crate) fn init_render_switch() {}
 
 /// Runs `f` (one phase-1 strip's processing) unless the strip holds a panic, and keeps a panic
-/// out of it in [`Strip::panic`] instead of letting it unwind. A panic that reached a render pool
-/// worker's frame would end there: Rayon re-raises one panic of a parallel call and drops the
-/// others' payloads, owners plug-ins may have made, on its workers (every last-owner
-/// drop on the permitted thread). Caught the same way on every path, serial, pool and offline,
-/// so the render behaves the same whichever way its strips ran: it re-raises the first strip's.
+/// out of it in [`Strip::panic`] instead of letting it unwind. A panic that reached a worker's
+/// frame would end there and drop its payload, which a plug-in may own, on that thread (every
+/// last-owner drop belongs on the permitted thread). Caught the same way on every path (serial,
+/// render workers, offline), so the render behaves the same whichever way its strips ran: it
+/// re-raises the first strip's.
 pub(crate) fn guarded(strip: &mut Strip, f: impl FnOnce(&mut Strip)) {
     if strip.panic.is_some() {
         return;
@@ -185,28 +114,15 @@ pub(crate) fn guarded(strip: &mut Strip, f: impl FnOnce(&mut Strip)) {
     }
 }
 
-/// Process strips, in parallel on native targets when there are enough of them.
-///
-/// On the audio thread the strips go to the dedicated render pool (or run right here when there
-/// is none, or while [`MixEngine::force_serial`] is on, the default); they never wait behind Rayon's global
-/// pool. Elsewhere (offline bounces) they use the global pool as before. The strips are
-/// independent and are summed afterwards in a fixed order, so the result is the same whichever
-/// way they ran.
-///
-/// Known residual, as before this pool existed: each parallel dispatch pushes one job onto Rayon's
-/// injector queue, which allocates a 1.5 KB block on the caller every 63 pushes.
+/// Process strips: serially on the audio thread (its render workers are driven by
+/// `StripPool::render`, not here), in parallel on Rayon's global pool for an offline render when
+/// there are enough of them. The strips are independent and are summed afterwards in a fixed
+/// order, so the result is the same whichever way they ran.
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn run_strips<T: Send>(work: &mut [T], parallel: bool, f: impl Fn(&mut T) + Sync + Send) {
     use rayon::prelude::*;
-    if !parallel || work.len() < PARALLEL_STRIPS {
+    if !parallel || work.len() < PARALLEL_STRIPS || on_audio_thread() {
         work.iter_mut().for_each(f);
-    } else if on_audio_thread() {
-        let pool = if MixEngine::serial_forced() { None } else { RENDER_POOL.get().and_then(Option::as_ref) };
-        match pool {
-            // The pool's workers are marked as the audio thread (`build_render_pool`).
-            Some(pool) => pool.install(|| work.par_iter_mut().for_each(f)),
-            None => work.iter_mut().for_each(f),
-        }
     } else {
         // A global worker renders for an offline caller here: it is not the audio thread.
         work.par_iter_mut().for_each(|w| as_audio_thread(false, || f(w)));
@@ -216,6 +132,83 @@ pub(crate) fn run_strips<T: Send>(work: &mut [T], parallel: bool, f: impl Fn(&mu
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn run_strips<T: Send>(work: &mut [T], _parallel: bool, f: impl Fn(&mut T) + Sync + Send) {
     work.iter_mut().for_each(f);
+}
+
+/// Stop or panic for the parts of a strip a render owns: plug-ins reset, the instrument's
+/// sources released and the instrument reset ([`MixEngine::reset`] does the rest).
+pub(crate) fn reset_render_state(st: &mut Strip) {
+    for p in st.plugins.iter_mut().flatten() {
+        p.plugin.reset();
+        p.failed = false;
+    }
+    if let Some(i) = &mut st.instrument {
+        if let Some(e) = i.events.as_deref_mut() {
+            e.release_all(&mut *i.plugin);
+        }
+        i.plugin.all_notes_off();
+        i.plugin.reset();
+        i.failed = false;
+    }
+    st.chase = true;
+}
+
+/// Releases every source the strip's instrument holds, and tells the plug-in to release too.
+pub(crate) fn release_instrument(st: &mut Strip) {
+    if let Some(i) = &mut st.instrument {
+        if let Some(e) = i.events.as_deref_mut() {
+            e.release_all(&mut *i.plugin);
+        }
+        i.plugin.all_notes_off();
+    }
+}
+
+/// The multicore strip render's stream faults (ADR 0029), cumulative for the engine's life. Read
+/// with [`MixEngine::strip_faults`]; `docs/troubleshooting.md` defines each figure.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StripFaults {
+    /// Render worker threads (0: no pool, the strips render serially).
+    pub workers: u64,
+    /// Blocks the pool rendered.
+    pub blocks: u64,
+    /// Strip overruns because a worker still held the strip from an earlier block: not rendered
+    /// this block (silence, and a hole in the strip's own time).
+    pub overruns_busy: u64,
+    /// Strip overruns because the worker that took the strip had not finished at the deadline
+    /// (silence this block; the strip's time stays continuous).
+    pub overruns_late: u64,
+    /// Strip overruns because no thread had started the strip at the deadline and the time left
+    /// could not fit it (silence, and a hole).
+    pub overruns_unstarted: u64,
+    /// Late results: renders finished after their block's deadline, discarded.
+    pub late_results: u64,
+    /// Strips the callback rendered itself inside the deadline (unstarted by any worker).
+    pub inline_renders: u64,
+    /// Strips the callback rendered itself because they read the live input or hardware, or lie
+    /// past the pool's cells.
+    pub callback_renders: u64,
+    /// Strip renders that faulted on a worker (silence; the strip is suspect).
+    pub faulted: u64,
+    /// Blocks a suspect strip stayed silent until its instance was replaced.
+    pub suspect: u64,
+    /// Refused cell borrows and results of the wrong block (both protocol faults: zero).
+    pub conflicts: u64,
+    /// Blocks with at least one strip overrun.
+    pub overrun_blocks: u64,
+    /// Live MIDI events deferred for a strip a worker held.
+    pub midi_deferred: u64,
+    /// Deferred MIDI events the overflow rule dropped (silences included).
+    pub midi_dropped: u64,
+    /// Deferred-MIDI rings that overflowed past their release class: the strip got All Sound
+    /// Off, All Notes Off and sustain off.
+    pub midi_silences: u64,
+}
+
+impl StripFaults {
+    /// Overruns of every cause.
+    #[must_use]
+    pub const fn overruns(&self) -> u64 {
+        self.overruns_busy + self.overruns_late + self.overruns_unstarted
+    }
 }
 
 #[cfg(test)]
@@ -248,23 +241,18 @@ mod audio_thread_tests {
         audio: bool,
         /// On a worker of Rayon's global pool.
         global: bool,
-        /// On a worker of the render pool.
-        render: bool,
     }
 
     fn jobs(audio: bool) -> Vec<Job> {
-        init_render_pool();
         std::thread::spawn(move || {
             if audio {
                 mark_audio_thread();
             }
             let mut work = vec![Job::default(); 64];
             run_strips(&mut work, true, |w| {
-                // Long enough that the pool's workers take part.
+                // Long enough that the global pool's workers take part.
                 std::thread::sleep(std::time::Duration::from_millis(1));
-                let render = std::thread::current().name().is_some_and(|n| n.starts_with("mix-render-"));
-                let global = rayon::current_thread_index().is_some() && !render;
-                *w = Job { audio: on_audio_thread(), global, render };
+                *w = Job { audio: on_audio_thread(), global: rayon::current_thread_index().is_some() };
             });
             work
         })
@@ -274,43 +262,16 @@ mod audio_thread_tests {
 
     #[test]
     fn strips_rendered_for_the_audio_thread_count_as_the_audio_thread_and_only_then() {
-        assert!(seen_by_strips(true).iter().all(|&rt| rt), "a worker rendering for the audio thread is on it");
-        assert!(seen_by_strips(false).iter().all(|&rt| !rt), "the workers don't stay marked afterwards");
+        assert!(seen_by_strips(true).iter().all(|&rt| rt), "a strip rendered for the audio thread is on it");
+        assert!(seen_by_strips(false).iter().all(|&rt| !rt), "an offline render's strips are not");
     }
 
-    /// ADR 0012 gate G1: a render on the audio thread dispatches no job to the global pool.
+    /// ADR 0012 gate G1: a render on the audio thread dispatches no job to the global pool (its
+    /// render workers are an engine's own `transit-rt` worker set, see `strip_pool`).
     #[test]
     fn audio_thread_strips_never_reach_the_global_rayon_pool() {
-        let _switch = SERIAL_SWITCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        MixEngine::force_serial(false); // the pool is opt-in; this tests where it runs
-        let audio = jobs(true);
-        assert!(audio.iter().all(|j| !j.global), "an audio-thread strip ran on the global pool");
-        if RENDER_POOL.get().is_some_and(Option::is_some) {
-            assert!(audio.iter().any(|j| j.render), "with a render pool, the strips fan out to it");
-        }
-        let offline = jobs(false);
-        MixEngine::force_serial(true); // back to the default
-        assert!(offline.iter().all(|j| !j.render), "an offline render never takes the render pool");
-    }
-
-    /// Serializes the tests that depend on the process-wide serial switch.
-    static SERIAL_SWITCH: std::sync::Mutex<()> = std::sync::Mutex::new(());
-
-    /// The F01 safety valve: with the switch on, the audio thread renders every strip itself;
-    /// off again, the pool takes them back.
-    #[test]
-    fn force_serial_keeps_audio_thread_strips_on_the_audio_thread() {
-        let _switch = SERIAL_SWITCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        MixEngine::force_serial(true);
-        let forced = jobs(true);
-        let was_forced = MixEngine::serial_forced();
-        MixEngine::force_serial(false);
-        assert!(was_forced);
-        assert!(forced.iter().all(|j| j.audio && !j.render && !j.global), "a strip left the audio thread while forced serial");
-        if RENDER_POOL.get().is_some_and(Option::is_some) {
-            assert!(jobs(true).iter().any(|j| j.render), "the pool is used again once the switch is off");
-        }
-        MixEngine::force_serial(true); // back to the default
+        assert!(jobs(true).iter().all(|j| !j.global), "an audio-thread strip ran on the global pool");
+        assert!(jobs(false).iter().any(|j| j.global), "an offline render still fans out on the global pool");
     }
 
     /// Sixteen strips of distinct deterministic material, levels, pans and built-in inserts.
@@ -335,11 +296,21 @@ mod audio_thread_tests {
         s
     }
 
-    /// Render `blocks` blocks of 512 on a fresh thread, marked as the audio thread or not.
+    /// Render `blocks` blocks of 512 on a fresh thread, marked as the audio thread or not; with
+    /// `workers`, through the engine's render workers (the pool path).
     fn render_blocks(s: &Session, serial: bool, audio: bool, blocks: i64) -> Vec<Vec<f32>> {
+        render_blocks_with(s, serial, audio, false, blocks)
+    }
+
+    fn render_blocks_with(s: &Session, serial: bool, audio: bool, workers: bool, blocks: i64) -> Vec<Vec<f32>> {
         let s = s.clone();
         let mut eng = RangeRender::new(&s, None, Range::new(0, blocks * 512), 512).eng;
         eng.serial = serial;
+        if workers {
+            assert!(eng.start_render_workers(64) > 0 || std::thread::available_parallelism().map_or(1, |n| n.get()) < 2);
+            // A worker descheduled past the default deadline would make its strip silence: wait.
+            eng.set_strip_deadline(Some(std::time::Duration::from_secs(30)));
+        }
         std::thread::spawn(move || {
             if audio {
                 mark_audio_thread();
@@ -352,6 +323,12 @@ mod audio_thread_tests {
                     a.extend_from_slice(o);
                 }
             }
+            if let Some(f) = eng.strip_faults().map(|r| r.snapshot()) {
+                assert_eq!((f.blocks, f.overruns()), (u64::try_from(blocks).unwrap(), 0), "every block went through the workers: {f:?}");
+            }
+            // Off the audio thread: the workers shut down here.
+            unmark_audio_thread();
+            drop(eng.into_retired());
             all
         })
         .join()
@@ -363,8 +340,12 @@ mod audio_thread_tests {
         let s = sixteen_strips();
         let serial = render_blocks(&s, true, false, 40);
         assert!(serial[0].iter().any(|x| x.abs() > 1e-3), "the fixture should sound");
-        assert!(serial == render_blocks(&s, false, true, 40), "render pool differs from serial");
         assert!(serial == render_blocks(&s, false, false, 40), "global pool differs from serial");
         assert!(serial == render_blocks(&s, true, true, 40), "serial on the audio thread differs");
+        let _switch = crate::strip_pool::SWITCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        MixEngine::force_serial(false);
+        let pool = render_blocks_with(&s, false, true, true, 40);
+        MixEngine::force_serial(true);
+        assert!(serial == pool, "the render workers differ from serial");
     }
 }

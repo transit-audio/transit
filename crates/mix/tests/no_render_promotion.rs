@@ -42,7 +42,7 @@ fn eight_strips() -> Session {
     s
 }
 
-/// Wait until the pool workers' start handlers (which promote them, off the callback) are done:
+/// Wait until the render workers' promotions (once each, at start, off the callback) are done:
 /// the counter has not moved for a while.
 fn settle() -> usize {
     let mut last = promotion_calls();
@@ -58,27 +58,34 @@ fn settle() -> usize {
     last
 }
 
-fn render_on_audio_thread(session: Session) -> (usize, usize) {
+fn render_on_audio_thread(session: Session, workers: bool) -> (usize, usize) {
     let mut engine = planned_engine(&session);
+    if workers {
+        // The render workers promote themselves once, at start, off the callback.
+        engine.start_render_workers(16);
+    }
     let before = settle();
-    let after = std::thread::spawn(move || {
+    let (after, engine) = std::thread::spawn(move || {
         mark_audio_thread();
         let mut out = vec![vec![0.0f32; FRAMES]; 2];
         for b in 0..50 {
             engine.render_active((b * FRAMES) as i64, FRAMES, &mut out);
         }
-        promotion_calls()
+        (promotion_calls(), engine)
     })
     .join()
     .unwrap();
+    // Off the audio thread: the workers stop here.
+    drop(engine.into_retired());
     (before, after)
 }
 
 #[test]
-fn render_makes_no_os_promotion_call_serial_and_pool() {
+fn render_makes_no_os_promotion_call_serial_and_with_render_workers() {
     for serial in [true, false] {
         MixEngine::force_serial(serial);
-        let (before, after) = render_on_audio_thread(eight_strips());
+        let (before, after) = render_on_audio_thread(eight_strips(), !serial);
         assert_eq!(before, after, "render promoted a thread (force_serial = {serial})");
     }
+    MixEngine::force_serial(true);
 }

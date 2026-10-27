@@ -2,9 +2,9 @@
 //! that rendered the strip (every last-owner drop happens on the permitted thread). The
 //! render keeps each strip's payload in the strip, re-raises the first one to its caller, and the
 //! rest go back to the control side with the strips. Before this, Rayon re-raised one panic of a
-//! parallel render and dropped the others' payloads on the render pool's workers.
+//! parallel render and dropped the others' payloads on its workers.
 //!
-//! Both paths: the plan on the render pool and serially. The serial run also counts the audio thread's heap operations: the
+//! Both paths: the plan on the engine's render workers and serially. The serial run also counts the audio thread's heap operations: the
 //! render adds none to what the panics themselves cost (each panic's payload box and the unwind's
 //! own exception box, plus one more exception box for the re-raise).
 //!
@@ -172,6 +172,7 @@ fn parallel_panicking_instruments_drop_no_payload_on_a_render_worker() {
     let shared = Shared::new();
     // The pool is built when the first engine is made, off the audio thread.
     let mut mix = plan_engine(&shared);
+    mix.start_render_workers(16);
     let mark = std::thread::spawn(move || {
         MixEngine::force_serial(false);
         mark_audio_thread();
@@ -182,15 +183,14 @@ fn parallel_panicking_instruments_drop_no_payload_on_a_render_worker() {
     let callback = mark.thread().id();
     let (mix, shared, panic) = mark.join().unwrap();
     MixEngine::force_serial(true);
-    let workers = transit_mix::render_worker_promotions().iter().filter(|p| p.is_some()).count();
+    let workers = mix.render_workers();
     let raised = shared.raised.lock().unwrap().clone();
     let on_workers = raised.iter().filter(|t| **t != callback).count();
-    println!("render pool workers: {workers}; {on_workers} of {} panics raised on a worker", raised.len());
+    // The callback takes part (it renders what no worker started yet), so how many ran on a
+    // worker varies; each strip rendered exactly once either way.
+    println!("render workers: {workers}; {on_workers} of {} panics raised on a worker", raised.len());
     assert_eq!(raised.len(), TRACKS);
-    if workers >= 2 {
-        assert_eq!(on_workers, TRACKS, "the strips rendered on the pool");
-    }
-    assert_all_dropped_here("render pool", &shared, panic, mix);
+    assert_all_dropped_here("render workers", &shared, panic, mix);
 }
 
 #[test]

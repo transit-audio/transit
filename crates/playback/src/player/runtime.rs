@@ -258,6 +258,10 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub(super) fn failure_signal(&self) -> plan_bridge::RuntimeIdentity {
         self.control.sessions.bridge.runtime_identity()
     }
+    /// The live engine's render-worker stream faults (`None`: no workers; ADR 0029).
+    pub fn strip_faults(&self) -> Option<transit_mix::StripFaults> {
+        self.control.sessions.bridge.strip_faults()
+    }
     pub fn faulted(&self) -> bool {
         self.control.sessions.faulted() || self.sources.faulted()
     }

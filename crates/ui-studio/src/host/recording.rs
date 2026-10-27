@@ -187,8 +187,9 @@ impl StudioApp {
         transit_engine::midi_journal::journal_path(&home.join("Audio Files"), &self.engine.session().name)
     }
 
-    /// Append the events of the pass the journal hasn't taken yet. Control thread; the audio
-    /// side only pushes to the ring. A failure is reported once and the pass carries on.
+    /// Append the events and render-overrun marks (ADR 0029) of the pass the journal hasn't
+    /// taken yet. Control thread; the audio side only pushes. A failure is reported once and the
+    /// pass carries on.
     fn journal_midi(&mut self, take: &transit_playback::MidiTake, plan: &transit_engine::io::Recording, flush: bool) {
         let (Some(journal), Some(point)) = (self.midi_journal.as_mut(), take.start) else { return };
         let s = self.engine.session();
@@ -205,7 +206,9 @@ impl StudioApp {
         let header = transit_engine::midi_journal::Header::new(latch, &plan, loop_range, take.tracks.clone());
         let from = journal.consumed().min(take.events.len());
         let records: Vec<_> = take.events[from..].iter().filter_map(journal_record).collect();
-        let mut written = journal.append(&header, &records, take.events.len());
+        // Render-worker overruns while the pass recorded (ADR 0029) go in as marks, never events.
+        let marks = self.player.as_ref().map(transit_playback::Player::midi_recording_overruns).unwrap_or_default();
+        let mut written = journal.append(&header, &records, take.events.len()).and_then(|()| journal.mark(&header, marks));
         if flush && written.is_ok() {
             written = journal.flush();
         }
