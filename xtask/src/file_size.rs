@@ -8,7 +8,7 @@ use std::process::Command;
 pub const MAX_LINES: usize = 1500;
 
 /// Files over `MAX_LINES` today, as (repo-relative path, line budget). Remove a row when its file drops to `MAX_LINES` or fewer.
-pub const OVER_BUDGET: &[(&str, usize)] = &[("crates/clap-host/src/ffi.rs", 1928), ("crates/vst3-host/src/ffi.rs", 3779)];
+pub const OVER_BUDGET: &[(&str, usize)] = &[("crates/clap-host/src/ffi.rs", 1928)];
 
 /// Checks `files` (repo-relative path, line count) against `MAX_LINES` and `table`. Reports every problem.
 pub fn check_file_size(files: &[(String, usize)], table: &[(&str, usize)]) -> Result<(), String> {
