@@ -1,7 +1,8 @@
-//! `cargo xtask <ci|layers|assets|timing|wasm|rt-targets|audio-bench|ico>` — repository gates.
+//! `cargo xtask <ci|layers|file-size|assets|timing|wasm|rt-targets|audio-bench|ico>` — repository gates.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod file_size;
 mod ico;
 mod timing;
 
@@ -152,6 +153,7 @@ fn layers() -> Result<(), String> {
     let out = cargo_command().args(["metadata", "--locked", "--format-version", "1", "--no-deps"]).output().map_err(|e| e.to_string())?;
     let metadata = metadata_output(out)?;
     check_layers(&metadata, |path| std::fs::read_to_string(path).map_err(|e| e.to_string()))?;
+    file_size::run(&root())?;
     println!("layers: ok");
     Ok(())
 }
@@ -278,13 +280,14 @@ fn main() -> ExitCode {
     let r = match args.first().map(String::as_str) {
         Some("ci") => ci(),
         Some("layers") => layers(),
+        Some("file-size") => file_size::run(&root()),
         Some("assets") => assets(),
         Some("timing") => timing::run(&root()),
         Some("wasm") => wasm(),
         Some("rt-targets") => rt_targets(),
         Some("audio-bench") => audio_bench(args.get(1..).unwrap_or(&[])),
         Some("ico") => ico::run(args.get(1..).unwrap_or(&[])),
-        _ => Err("usage: cargo xtask <ci|layers|assets|timing|wasm|rt-targets|audio-bench|ico>".into()),
+        _ => Err("usage: cargo xtask <ci|layers|file-size|assets|timing|wasm|rt-targets|audio-bench|ico>".into()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,

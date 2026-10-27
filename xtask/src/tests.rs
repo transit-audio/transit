@@ -150,3 +150,52 @@ fn shipped_app_inherits_the_workspace_version() -> Result<(), Box<dyn std::error
     assert_eq!(workspace["workspace"]["package"]["version"].as_str(), Some(env!("CARGO_PKG_VERSION")));
     Ok(())
 }
+
+fn sized(files: &[(&str, usize)]) -> Vec<(String, usize)> {
+    files.iter().map(|(p, n)| (p.to_string(), *n)).collect()
+}
+
+#[test]
+fn file_size_under_budget_passes() {
+    assert!(file_size::check_file_size(&sized(&[("crates/a/src/lib.rs", 1500)]), &[]).is_ok());
+}
+
+#[test]
+fn file_size_unlisted_file_over_budget_fails() {
+    let error = file_size::check_file_size(&sized(&[("crates/a/src/lib.rs", 1501)]), &[]).unwrap_err();
+    assert!(error.contains("crates/a/src/lib.rs") && error.contains("1501") && error.contains("#149"), "{error}");
+}
+
+#[test]
+fn file_size_listed_file_over_its_budget_fails() {
+    let error = file_size::check_file_size(&sized(&[("big.rs", 2001)]), &[("big.rs", 2000)]).unwrap_err();
+    assert!(error.contains("big.rs") && error.contains("2001") && error.contains("2000") && error.contains("split it by concern"), "{error}");
+}
+
+#[test]
+fn file_size_listed_file_that_shrank_under_budget_must_leave_the_table() {
+    let error = file_size::check_file_size(&sized(&[("big.rs", 1400)]), &[("big.rs", 2000)]).unwrap_err();
+    assert!(error.contains("remove it from OVER_BUDGET") && error.contains("big.rs"), "{error}");
+}
+
+#[test]
+fn file_size_listed_file_that_is_gone_must_leave_the_table() {
+    let error = file_size::check_file_size(&[], &[("gone.rs", 2000)]).unwrap_err();
+    assert!(error.contains("no longer exists") && error.contains("remove it from OVER_BUDGET"), "{error}");
+}
+
+#[test]
+fn file_size_listed_file_that_grew_but_stays_within_budget_passes() {
+    assert!(file_size::check_file_size(&sized(&[("big.rs", 1900), ("ok.rs", 10)]), &[("big.rs", 2000)]).is_ok());
+}
+
+#[test]
+fn file_size_current_tree_matches_the_table() {
+    assert!(file_size::run(&root()).is_ok());
+}
+
+#[test]
+fn file_size_counts_newline_terminated_lines() {
+    assert_eq!(file_size::count_lines(b"a\nb\n"), 2);
+    assert_eq!(file_size::count_lines(b"a\nb"), 1);
+}

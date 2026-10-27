@@ -17,6 +17,7 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask layers
+cargo xtask file-size
 cargo xtask assets
 cargo xtask timing
 ```

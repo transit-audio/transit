@@ -7,12 +7,23 @@ cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo xtask layers      # crate layering and the no-UI-below-L6 rule (xtask/src/main.rs, LAYERS)
+cargo xtask file-size   # no Rust file over 1500 lines; also part of `cargo xtask layers` (xtask/src/file_size.rs)
 cargo xtask assets      # every bundled asset has a row in ATTRIBUTION.md
 cargo xtask timing      # E49-class timing assertions in tests (xtask/src/timing.rs)
 ```
 
 Other `xtask` commands: `cargo xtask wasm` (web build), `cargo xtask rt-targets` (cross-target check
 of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequence).
+
+## File-size budget
+
+No Rust file under `crates/`, `apps/`, `tools/` or `xtask/` may exceed 1500 lines (counted as `wc -l` does). `cargo xtask layers` enforces it, and `cargo xtask file-size` runs the same check alone. Files over the budget today sit in the `OVER_BUDGET` table in `xtask/src/file_size.rs` with their current line count (#149):
+
+- A listed file may not grow past its budget; it may only shrink.
+- A file that is not listed may not cross 1500 lines.
+- A listed file at or under 1500 lines, or one that no longer exists, fails the gate until its row is removed. The table only ever shrinks.
+
+To split a file: cut it by concern (one module per responsibility, not per size), as a pure move that changes no code (`git diff --color-moved` shows no residue), with tests next to the code they test. Then lower or remove its row in the same commit. Do not raise a budget or add a row to make a change pass.
 
 ## By area
 
