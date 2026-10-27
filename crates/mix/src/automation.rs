@@ -1,0 +1,302 @@
+use super::*;
+
+pub(crate) fn apply_params(slot: &mut PluginSlot, ins: &transit_model::Insert, t: &Track, i: usize, pos: Samples) {
+    // Automation lanes address insert slots; the instrument (`INSTRUMENT_SLOT`) has its own lane
+    // slot, so it never picks up slot A's lanes.
+    let slot_u8 = if i == INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(i).unwrap_or(u8::MAX) };
+    if slot_u8 == u8::MAX {
+        return apply_values(slot, ins, |_, v| v);
+    }
+    let automated = t.mixer.automation_mode.reads()
+        && t.automation.iter().any(|l| matches!(&l.param, AutoParam::Plugin { slot, .. } if *slot == slot_u8) && !l.points.is_empty());
+    apply_values(slot, ins, |k, val| {
+        if automated
+            && let Some(l) = t.automation.iter().find(|l| matches!(&l.param, AutoParam::Plugin { slot, param } if *slot == slot_u8 && param == k))
+            && !l.points.is_empty()
+        {
+            return l.value_at(pos, val);
+        }
+        val
+    });
+}
+
+/// Sends each stored param (as mapped by `value`) to the plugin when it changed since last time,
+/// and then marks the slot [`woken`](PluginSlot::woken).
+fn apply_values(slot: &mut PluginSlot, ins: &transit_model::Insert, value: impl Fn(&str, f32) -> f32) {
+    // First pass over a hosted plugin: it has just loaded its own settings, so a stored value equal to
+    // the default it reports is not a choice and is left alone. Older sessions store every parameter
+    // at that default, often 0, and pushing them over a restored plugin silenced Rhapsody (volume and
+    // pan at minimum). Values that differ from the default, and every later change, are pushed.
+    let first = std::mem::take(&mut slot.fresh);
+    for ((k, v), last) in ins.params.iter().zip(slot.applied.values(ins.params.len()).iter_mut()) {
+        let val = value(k, *v);
+        if val.to_bits() != last.to_bits() {
+            let untouched = first && slot.plugin.info().param(k).is_some_and(|pi| pi.default.to_bits() == val.to_bits());
+            if !untouched {
+                slot.plugin.set_param(k, val);
+            }
+            *last = val;
+            slot.woken = true;
+        }
+    }
+}
+
+pub(crate) fn transport_at(s: &Session, pos: Samples, playing: bool, recording: bool) -> Transport {
+    let sr = s.sample_rate;
+    let ticks = Some(s.tempo.samples_to_ticks_f(pos, sr)).filter(|t| t.is_finite()).unwrap_or(0.0);
+    let tick = ticks.floor() as i64;
+    let meter = s.tempo.meter_at_tick(tick);
+    let bar = s.tempo.bar_beat_at_tick(tick).bar;
+    let q = TICKS_PER_QUARTER as f64;
+    Transport {
+        playing,
+        recording,
+        tempo: s.tempo.tempo_at_tick(tick),
+        numerator: meter.numerator,
+        denominator: meter.denominator,
+        samples: pos,
+        seconds: pos as f64 / sr.as_f64().max(1.0),
+        quarters: ticks / q,
+        bar_start: s.tempo.bar_start_tick(bar) as f64 / q,
+        bar: bar - 1,
+    }
+}
+
+pub(crate) fn volume_db_at(t: &Track, pos: Samples) -> f32 {
+    if t.mixer.automation_mode.reads()
+        && t.mixer.automation_mode != transit_model::AutomationMode::Write
+        && let Some(l) = t.lane(&AutoParam::Volume)
+        && !l.points.is_empty()
+    {
+        return l.value_at(pos, t.mixer.volume_db);
+    }
+    t.mixer.volume_db
+}
+
+pub(crate) fn pan_at(t: &Track, idx: usize, pos: Samples) -> f32 {
+    let base = t.mixer.pan.get(idx).copied().unwrap_or(if idx == 0 { 0.0 } else { 1.0 });
+    if t.mixer.automation_mode.reads()
+        && let Some(l) = t.lane(&AutoParam::Pan(u8::try_from(idx).unwrap_or(0)))
+        && !l.points.is_empty()
+    {
+        return l.value_at(pos, base);
+    }
+    base
+}
+
+/// Pan automation is read on a grid of [`PAN_STEP`] timeline samples rather than once per block,
+/// so playback (callback-sized blocks) and bounces (1024-frame blocks) pan identically.
+const PAN_STEP: Samples = 64;
+
+/// The position to read the pan at for the frames from `start` of the block at `pos`, and the end
+/// of the frames that share it. Without pan automation the whole block shares one pan.
+pub(crate) fn pan_segment(t: &Track, pos: Samples, start: usize, frames: usize) -> (Samples, usize) {
+    let automated = t.mixer.automation_mode.reads() && t.automation.iter().any(|l| matches!(l.param, AutoParam::Pan(_)) && !l.points.is_empty());
+    if !automated {
+        return (pos, frames);
+    }
+    let here = pos.saturating_add(start as i64);
+    let at = here.div_euclid(PAN_STEP).saturating_mul(PAN_STEP);
+    let left = usize::try_from(at.saturating_add(PAN_STEP).saturating_sub(here)).unwrap_or(1).max(1);
+    (at, start.saturating_add(left).min(frames))
+}
+
+pub(crate) fn send_level(t: &Track, i: usize, base: f32, pos: Samples) -> f32 {
+    if t.mixer.automation_mode.reads()
+        && let Some(l) = t.lane(&AutoParam::SendLevel(u8::try_from(i).unwrap_or(0)))
+        && !l.points.is_empty()
+    {
+        return l.value_at(pos, base);
+    }
+    base
+}
+
+pub(crate) fn lerp_gain(db0: f32, db1: f32, i: usize, n: usize) -> f32 {
+    let g0 = db_to_gain(db0);
+    let g1 = db_to_gain(db1);
+    if n == 0 { g0 } else { g0 + (g1 - g0) * (i as f32 / n as f32) }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::{PlanRig, render_block, session_with_dc, synth_session};
+    use transit_model::Insert;
+
+    #[test]
+    fn stored_instrument_params_reach_the_plugin() {
+        // #152: a saved instrument level of -12 dB must render quieter than -6 dB.
+        // RMS over the held part of the note, past any parameter smoothing.
+        let rms = |db: f32| {
+            let out = render_range(&synth_session(db), Range::new(0, 12_000), 512);
+            let tail = out[0].get(6_000..).unwrap_or_default();
+            (tail.iter().map(|x| x * x).sum::<f32>() / tail.len().max(1) as f32).sqrt()
+        };
+        let (loud, quiet) = (rms(-6.0), rms(-12.0));
+        assert!(loud > 0.0, "the synth should sound");
+        assert!((quiet / loud - 0.5).abs() < 0.05, "-12 dB vs -6 dB should halve the level: {quiet} / {loud}");
+    }
+
+    #[test]
+    fn insert_slot_a_automation_does_not_drive_the_instrument() {
+        let mut s = synth_session(-6.0);
+        let reference = render_range(&s, Range::new(0, 12_000), 512);
+        let tr = &mut s.tracks[0];
+        let mut lane = transit_model::AutomationLane::new(AutoParam::Plugin { slot: 0, param: "level".into() });
+        lane.set_point(0, -48.0);
+        tr.automation.push(lane);
+        assert_eq!(render_range(&s, Range::new(0, 12_000), 512), reference);
+    }
+
+    #[test]
+    fn instrument_lane_automation_drives_the_instrument() {
+        let mut s = synth_session(-6.0);
+        let reference = render_range(&s, Range::new(0, 12_000), 512);
+        let tr = &mut s.tracks[0];
+        tr.mixer.automation_mode = transit_model::AutomationMode::Read;
+        let mut lane = transit_model::AutomationLane::new(AutoParam::Plugin { slot: AutoParam::INSTRUMENT_SLOT, param: "level".into() });
+        lane.set_point(0, -48.0);
+        tr.automation.push(lane);
+        assert_ne!(render_range(&s, Range::new(0, 12_000), 512), reference);
+        // Not in Read: the lane is ignored.
+        s.tracks[0].mixer.automation_mode = transit_model::AutomationMode::Off;
+        assert_eq!(render_range(&s, Range::new(0, 12_000), 512), reference);
+    }
+
+    /// A built-in gain behind a third-party id, with a log of parameter sets.
+    struct Stateful {
+        inner: Box<dyn Plugin>,
+        blob: Vec<u8>,
+        sets: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl Plugin for Stateful {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
+            self.inner.info()
+        }
+        fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
+            self.inner.prepare(sr, mb, ch);
+        }
+        fn reset(&mut self) {
+            self.inner.reset();
+        }
+        fn set_param(&mut self, id: &str, v: f32) -> bool {
+            self.sets.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.inner.set_param(id, v)
+        }
+        fn param(&self, id: &str) -> Option<f32> {
+            self.inner.param(id)
+        }
+        fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+            self.inner.process(io, frames);
+        }
+        fn state_reader(&mut self) -> Option<Box<dyn transit_dsp::PluginStateReader>> {
+            let blob = self.blob.clone();
+            Some(Box::new(move || Some(blob.clone())))
+        }
+    }
+
+    struct Clock {
+        inner: Box<dyn Plugin>,
+        seen: Arc<std::sync::Mutex<Vec<Transport>>>,
+    }
+
+    impl Plugin for Clock {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
+            self.inner.info()
+        }
+        fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
+            self.inner.prepare(sr, mb, ch);
+        }
+        fn reset(&mut self) {
+            self.inner.reset();
+        }
+        fn set_param(&mut self, id: &str, v: f32) -> bool {
+            self.inner.set_param(id, v)
+        }
+        fn param(&self, id: &str) -> Option<f32> {
+            self.inner.param(id)
+        }
+        fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+            self.inner.process(io, frames);
+        }
+        fn set_transport(&mut self, t: &Transport) {
+            self.seen.lock().unwrap().push(*t);
+        }
+    }
+
+    #[test]
+    fn plugins_get_the_session_transport() {
+        let (mut s, t) = session_with_dc(0.5, 48_000 * 4);
+        s.tempo.set_tempo(0, 90.0).unwrap();
+        s.tempo.set_meter(0, 3, 4).unwrap();
+        s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::new("clap:test.clock"));
+        let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let clock = Clock { inner: transit_dsp::create("gain").unwrap(), seen: Arc::clone(&seen) };
+        let mut rig = PlanRig::new(512).fake(t, 0, clock);
+        rig.publish(&s);
+        render_block(&mut rig, 96_000);
+        rig.eng.monitor_only = true;
+        render_block(&mut rig, 96_000);
+        let seen = seen.lock().unwrap();
+        let t0 = seen[0];
+        assert!(t0.playing && !t0.recording);
+        assert_eq!((t0.tempo, t0.numerator, t0.denominator, t0.samples, t0.bar), (90.0, 3, 4, 96_000, 1));
+        assert!((t0.seconds - 2.0).abs() < 1e-9 && (t0.quarters - 3.0).abs() < 1e-9 && (t0.bar_start - 3.0).abs() < 1e-9);
+        assert!(!seen[1].playing);
+    }
+
+    #[test]
+    fn stored_state_comes_first_then_session_params() {
+        let (mut s, t) = session_with_dc(0.5, 48_000);
+        let mut ins = Insert::new("vst3:00000000000000000000000000000001");
+        ins.params.insert("gain".into(), -6.0);
+        ins.set_state_bytes(b"stored");
+        s.track_mut(t).unwrap().mixer.inserts[0] = Some(ins);
+        assert_eq!(instance_specs(&s)[0].state.as_deref(), Some(&b"stored"[..]));
+        let sets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let fake = Stateful { inner: transit_dsp::create("gain").unwrap(), blob: Vec::new(), sets: Arc::clone(&sets) };
+        let mut rig = PlanRig::new(512).fake(t, 0, fake);
+        rig.publish(&s);
+        render_block(&mut rig, 0);
+        assert_eq!(sets.load(std::sync::atomic::Ordering::Relaxed), 1, "session params apply once");
+        render_block(&mut rig, 512);
+        assert_eq!(sets.load(std::sync::atomic::Ordering::Relaxed), 1);
+        s.track_mut(t).unwrap().mixer.inserts[0].as_mut().unwrap().params.insert("gain".into(), -12.0);
+        rig.publish(&s);
+        render_block(&mut rig, 1024);
+        assert_eq!(sets.load(std::sync::atomic::Ordering::Relaxed), 2, "later session edits apply");
+        // Offline: third-party plugins are simply absent (tests never load real ones).
+        let out = render_range(&s, Range::new(0, 1024), 512);
+        assert!(out[0][100] > 0.3);
+    }
+
+    #[test]
+    fn a_hosted_plugin_keeps_its_own_values_where_the_session_holds_its_defaults() {
+        let (mut s, t) = session_with_dc(0.5, 48_000);
+        let id = "vst3:00000000000000000000000000000002";
+        let mut ins = Insert::new(id);
+        // Older sessions store every parameter at the default the plugin reports (0 for gain).
+        ins.params.insert("gain".into(), 0.0);
+        ins.set_state_bytes(b"stored");
+        s.track_mut(t).unwrap().mixer.inserts[0] = Some(ins);
+        let sets = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let fake = Stateful { inner: transit_dsp::create("gain").unwrap(), blob: Vec::new(), sets: Arc::clone(&sets) };
+        let mut rig = PlanRig::new(512).fake(t, 0, fake);
+        rig.publish(&s);
+        let count = || sets.load(std::sync::atomic::Ordering::Relaxed);
+        render_block(&mut rig, 0);
+        assert_eq!(count(), 0, "a stored default is not pushed over the restored plugin");
+        render_block(&mut rig, 512);
+        assert_eq!(count(), 0);
+        // Later edits are pushed, including a return to the default.
+        s.track_mut(t).unwrap().mixer.inserts[0].as_mut().unwrap().params.insert("gain".into(), -6.0);
+        rig.publish(&s);
+        render_block(&mut rig, 1024);
+        assert_eq!(count(), 1);
+        s.track_mut(t).unwrap().mixer.inserts[0].as_mut().unwrap().params.insert("gain".into(), 0.0);
+        rig.publish(&s);
+        render_block(&mut rig, 1536);
+        assert_eq!(count(), 2);
+    }
+}

@@ -11,7 +11,6 @@ pub const MAX_LINES: usize = 1500;
 pub const OVER_BUDGET: &[(&str, usize)] = &[
     ("crates/clap-host/src/ffi.rs", 1928),
     ("crates/engine/src/io.rs", 1765),
-    ("crates/mix/src/lib.rs", 5374),
     ("crates/mix/src/plan_tests.rs", 1727),
     ("crates/mix/tests/instrument_events.rs", 1653),
     ("crates/playback/src/player/audio/tests.rs", 1609),

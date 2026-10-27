@@ -1357,3 +1357,18 @@ fn slot_keys<'a>(
 fn instrument_sample(s: &Session, t: &Track) -> Option<Arc<SourceAudio>> {
     t.instrument.as_ref().and_then(|i| i.sample).and_then(|id| s.pool.get(id)).cloned()
 }
+
+/// Session audio shared with a sample-playing instrument.
+struct PoolSample(Arc<SourceAudio>);
+
+impl SampleSource for PoolSample {
+    fn sample_rate(&self) -> f32 {
+        self.0.buffer.sample_rate as f32
+    }
+    fn num_channels(&self) -> usize {
+        self.0.buffer.num_channels()
+    }
+    fn channel(&self, ch: usize) -> Option<&[f32]> {
+        self.0.channel(ch)
+    }
+}
