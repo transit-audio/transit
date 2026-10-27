@@ -19,6 +19,15 @@ of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequ
 
 A gate checks the checkout `cargo xtask` is run from, not the one the xtask binary was built in (#150): cargo reuses one binary across worktrees that share a `CARGO_TARGET_DIR`, so the root is resolved at run time. Every gate prints it as its first line, for example `layers: root E:/transit-wt-150`. Look for that line in a log before trusting a result.
 
+## One target directory per checkout class
+
+Cargo's fingerprint for a workspace member records the source paths of whichever checkout built it last. With a target directory shared between the clone and its worktrees, the other checkout's files are unchanged, so the unit counts as fresh and the old binary is reused (#159). Observed 2026-10-27: a test binary that lacked a new module's tests, and an `xtask` running another branch's ratchet table.
+
+- The clone's target directory (`E:/transit/target`) is used only by builds run from the clone: the merge-chain gates and the dev build.
+- Worktrees use one separate shared target directory for pre-hand-back checks. After the first run, check the test count of the crate you changed against what you expect.
+- A Codex worker keeps its own target directory.
+- The chain reports per-crate test counts for the crates a batch touched, so a stale binary shows up as a count that does not match the implementer's report.
+
 ## File-size budget
 
 No Rust file under `crates/`, `apps/`, `tools/` or `xtask/` may exceed 1500 lines (counted as `wc -l` does). `cargo xtask layers` enforces it, and `cargo xtask file-size` runs the same check alone. Files over the budget today sit in the `OVER_BUDGET` table in `xtask/src/file_size.rs` with their current line count (#149):
