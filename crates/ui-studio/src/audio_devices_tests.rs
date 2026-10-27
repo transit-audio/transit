@@ -2020,6 +2020,28 @@ fn buffer_labels(t: &mut T) -> Vec<String> {
 }
 
 #[test]
+fn a_system_note_without_a_device_prefix_shows_once_whichever_output_is_selected() {
+    let note = "Native JACK (PipeWire 1.0.7) runs at 48000 Hz (the server's rate) with a 128-sample buffer";
+    let dev = |n: &str, d: bool| json!({"name": n, "is_default": d, "buffer_min": 128, "buffer_max": 128});
+    let mut t = T::new();
+    t.control(
+        "audio.fake_devices",
+        json!({"systems": [{"name": "JACK", "is_default": true,
+            "outputs": [dev("system", true), dev("Scarlett", false), dev("Monitor", false)],
+            "diagnostics": [note, "Monitor: port group busy"]}]}),
+    )
+    .unwrap();
+    t.open_window();
+    t.pick("system", "JACK");
+    let count = |t: &mut T| t.layout()["controls"].as_array().unwrap().iter().filter(|c| c["value"] == "system_note" && c["label"] == note).count();
+    assert_eq!(count(&mut t), 1);
+    for output in ["Scarlett", "Monitor", "system"] {
+        t.pick("output", &format!("{output} · 2 ch"));
+        assert_eq!(count(&mut t), 1, "{output}");
+    }
+}
+
+#[test]
 fn picking_another_driver_shows_the_pending_line_highlights_apply_and_lists_the_selected_backends_choices() {
     let mut t = T::new();
     t.control("audio.fake_devices", two_backends()).unwrap();

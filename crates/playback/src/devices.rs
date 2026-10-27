@@ -443,6 +443,17 @@ pub struct AudioSystem {
     pub diagnostics: Vec<String>,
 }
 
+impl AudioSystem {
+    /// The diagnostics that name no device of this system (no "<device>: " prefix): notes about
+    /// the system as a whole, such as the JACK server's rate and buffer (#146).
+    pub fn system_notes(&self) -> impl Iterator<Item = &str> {
+        self.diagnostics
+            .iter()
+            .map(String::as_str)
+            .filter(|n| !self.outputs.iter().chain(&self.inputs).any(|d| n.strip_prefix(d.name.as_str()).is_some_and(|rest| rest.starts_with(": "))))
+    }
+}
+
 #[allow(deprecated)]
 fn device_name(d: &cpal::Device) -> Option<String> {
     d.name().ok()

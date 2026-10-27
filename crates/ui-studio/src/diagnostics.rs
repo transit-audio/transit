@@ -410,11 +410,7 @@ impl Report {
         o.push_str(&format!("Sample rate: {}\n", c.sample_rate.map_or("default".into(), |r| format!("{r} Hz"))));
         o.push_str(&format!("Buffer size: {}\n", c.buffer_size.map_or("default".into(), |b| format!("{b} samples"))));
         if wasapi {
-            o.push_str(&format!(
-                "Shared device (WASAPI): {}
-",
-                c.share_device
-            ));
+            o.push_str(&format!("Shared device (WASAPI): {}\n", c.share_device));
         }
         section(&mut o, "Open devices");
         if self.opened.is_empty() {
@@ -726,13 +722,7 @@ mod tests {
         assert!(report.render_on(&Redaction::default(), true).contains("Shared device (WASAPI): "));
         assert_eq!(text.matches("Native JACK (PipeWire 1.0.7) runs at 48000 Hz").count(), 1, "{text}");
         assert_eq!(text.matches("To pin one instead").count(), 1, "{text}");
-        let heading = text
-            .find(
-                "
-JACK
-",
-            )
-            .expect("the JACK heading");
+        let heading = text.find("\nJACK\n").expect("the JACK heading");
         let note_at = text.find("  Note: Native JACK").expect("the note");
         assert!(note_at > text.rfind("  Output: Monitor").unwrap() && note_at > heading, "after the list: {text}");
     }
