@@ -27,6 +27,27 @@ The Windows release job builds one target, `windows-x86_64` (`transit/native-was
 
 ## Hardware evidence
 
+### Running the hardware tests
+
+From a clone, on the machine with the interface (Windows, 64-bit):
+
+```
+cargo test --release -p transit-playback --features native-asio,native-wasapi -- --ignored hardware_ --nocapture
+```
+
+`--test-threads=1` is no longer required (every hardware test holds one process-wide lock) but is
+still fine. The loopback tests play a click out of one output and listen on one input; the pair is
+`out:in` with 1-based channel numbers, read from the environment:
+
+- `TRANSIT_LOOPBACK_SCARLETT` (default `2:2`): Focusrite USB ASIO, output 2 cabled to input 2.
+- `TRANSIT_LOOPBACK_MODEL12` (default `2:1`): Model 12, output 2 cabled to input 1.
+
+Set them when the cable sits elsewhere, for example `TRANSIT_LOOPBACK_MODEL12=3:2`. Each loopback
+test prints the measured round trip, the driver-reported output plus input latency and their
+difference; it passes when the measurement is at least the driver figure and at most that plus eight
+buffers. The interface's output level must be up (monitor knob and the output's fader) for the click
+to return; a silent loop reads as "no click found", not as a failure of the device.
+
 Needed when the claim is about real devices: latency, clock behavior, driver quirks, MIDI timing,
 plug-in editors. A report includes:
 

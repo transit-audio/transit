@@ -465,12 +465,67 @@ fn session_identity_tracks_view_cow_and_same_rate_replace_keeps_the_device_clock
     assert!(!player.has_requested_session(&original));
 }
 
+/// Every hardware test holds this for its whole body: the tests open the same physical devices, so
+/// they never overlap, at any `--test-threads`.
+#[allow(dead_code)]
+static HARDWARE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+/// Takes the process-wide hardware lock, recovering it when an earlier hardware test panicked
+/// (a failed test must not fail the rest as poisoned).
+#[allow(dead_code)]
+fn hardware_guard() -> std::sync::MutexGuard<'static, ()> {
+    HARDWARE.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Parses a loopback pair `out:in` of 1-based channel numbers into 0-based `(send, return)`.
+#[allow(dead_code)]
+fn parse_loopback_pair(text: &str) -> Result<(u16, u16), String> {
+    let (out, inp) = text.trim().split_once(':').ok_or_else(|| format!("{text:?}: expected out:in, such as 2:2"))?;
+    let channel = |part: &str| match part.trim().parse::<u16>() {
+        Ok(n) if n >= 1 => Ok(n - 1),
+        _ => Err(format!("{text:?}: {part:?} is not a 1-based channel number")),
+    };
+    Ok((channel(out)?, channel(inp)?))
+}
+
+/// The loopback pair a hardware test uses: the environment variable `var` (`out:in`, 1-based), else
+/// `default`. A malformed value panics so a typo does not read as a hardware failure.
+#[allow(dead_code)]
+fn loopback_pair(var: &str, default: &str) -> (u16, u16) {
+    let text = std::env::var(var).unwrap_or_else(|_| default.to_string());
+    parse_loopback_pair(&text).unwrap_or_else(|e| panic!("{var}: {e}"))
+}
+
+/// The bounds a measured round trip must fall in: at least the driver-reported output plus input
+/// latency in frames, at most that plus eight buffers.
+#[allow(dead_code)]
+fn round_trip_bounds(driver_frames: u32, buffer: u32) -> (u32, u32) {
+    (driver_frames, driver_frames.saturating_add(buffer.saturating_mul(8)))
+}
+
+#[test]
+fn the_loopback_pair_parses_one_based_out_and_in_and_refuses_the_rest() {
+    assert_eq!(parse_loopback_pair("2:2"), Ok((1, 1)));
+    assert_eq!(parse_loopback_pair(" 2 : 1 "), Ok((1, 0)));
+    assert_eq!(parse_loopback_pair("10:12"), Ok((9, 11)));
+    for bad in ["", "2", "0:1", "1:0", "a:1", "1:b", "1:2:3", "-1:1", "70000:1"] {
+        assert!(parse_loopback_pair(bad).is_err(), "{bad:?}");
+    }
+}
+
+#[test]
+fn the_round_trip_bounds_are_the_driver_figure_plus_up_to_eight_buffers() {
+    assert_eq!(round_trip_bounds(300, 64), (300, 812));
+    assert_eq!(round_trip_bounds(u32::MAX, 64), (u32::MAX, u32::MAX));
+}
+
 /// Opens the owner's default endpoint through the whole Player path with the native backend.
 /// Run it with `cargo test -p transit-playback --features native-wasapi -- --ignored hardware_ --nocapture`.
 #[cfg(all(windows, feature = "native-wasapi"))]
 #[test]
 #[ignore = "opens the default audio endpoint"]
 fn hardware_player_opens_native_wasapi() {
+    let _hardware = hardware_guard();
     let cfg = AudioConfig { backend: crate::Backend::NativeWasapi, system: Some("WASAPI".into()), ..Default::default() };
     let player = Player::with_config(Arc::new(Session::default()), &cfg);
     println!(
@@ -492,6 +547,7 @@ fn hardware_player_opens_native_wasapi() {
 /// `cargo test -p transit-playback --features native-asio --lib -- --ignored hardware_player_opens_native_asio --nocapture --test-threads 1`.
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
 fn player_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>) -> (u16, usize) {
+    let _hardware = hardware_guard();
     let cfg = AudioConfig {
         backend: crate::Backend::NativeAsio,
         system: Some("ASIO".into()),
@@ -537,9 +593,11 @@ fn player_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>) -> (u16, 
 }
 
 /// The ADR 0015 hardware-insert measurement (the click train) through the Player on native ASIO, over
-/// the bench's loopback cable: output `send` to input `ret` (0-based). Returns the measured frames.
+/// the bench's loopback cable: output `send` to input `ret` (0-based, from `loopback_pair`). Holds
+/// the hardware lock, then checks the measured round trip against the driver's own figures.
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
-fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, send: u16, ret: u16) -> u32 {
+fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, (send, ret): (u16, u16)) {
+    let _hardware = hardware_guard();
     let cfg = AudioConfig {
         backend: crate::Backend::NativeAsio,
         system: Some("ASIO".into()),
@@ -589,31 +647,42 @@ fn hardware_ping_on_native_asio(driver: &str, rate: u32, buffer: Option<u32>, se
         player.device_rate,
         player.device_buffer
     );
-    measured.round_trip_frames
+    let frames = measured.round_trip_frames;
+    let secs = |d: Option<std::time::Duration>| d.map_or(0.0, |d| d.as_secs_f64());
+    let driver_frames = ((secs(player.output_latency) + secs(recorder.latency)) * f64::from(player.device_rate)).round() as u32;
+    let buffer_frames = player.device_buffer.unwrap_or(0);
+    let (lo, hi) = round_trip_bounds(driver_frames, buffer_frames);
+    println!(
+        "{driver}: measured {frames} frames, driver output + input {driver_frames} frames, difference {} frames (allowed {lo}..={hi})",
+        i64::from(frames) - i64::from(driver_frames)
+    );
+    assert!(
+        (lo..=hi).contains(&frames),
+        "{frames} frames is outside {lo}..={hi}: driver output + input {driver_frames}, buffer {buffer_frames}; is the interface's output level up and the cable on out {} -> in {}?",
+        send + 1,
+        ret + 1
+    );
 }
 
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
 #[test]
-#[ignore = "plays a click train out of the Scarlett's output 2 (cabled to input 2) through the Player"]
+#[ignore = "plays a click train out of the Scarlett through the Player (TRANSIT_LOOPBACK_SCARLETT, default 2:2)"]
 fn hardware_player_measures_a_hardware_insert_on_the_scarlett_over_native_asio() {
-    let frames = hardware_ping_on_native_asio("Focusrite USB ASIO", 48_000, Some(64), 1, 1);
-    assert!((250..400).contains(&frames), "{frames} frames: the bench measures about 300 at 64");
+    hardware_ping_on_native_asio("Focusrite USB ASIO", 48_000, Some(64), loopback_pair("TRANSIT_LOOPBACK_SCARLETT", "2:2"));
 }
 
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
 #[test]
-#[ignore = "plays a click train out of the Scarlett's output 2 (cabled to input 2) through the Player"]
+#[ignore = "plays a click train out of the Scarlett through the Player (TRANSIT_LOOPBACK_SCARLETT, default 2:2)"]
 fn hardware_player_measures_a_hardware_insert_on_the_scarlett_at_128_over_native_asio() {
-    let frames = hardware_ping_on_native_asio("Focusrite USB ASIO", 48_000, Some(128), 1, 1);
-    assert!((550..750).contains(&frames), "{frames} frames: the position loop is 648 at 128");
+    hardware_ping_on_native_asio("Focusrite USB ASIO", 48_000, Some(128), loopback_pair("TRANSIT_LOOPBACK_SCARLETT", "2:2"));
 }
 
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
 #[test]
-#[ignore = "plays a click train out of the Model 12's output 2 (cabled to input 1) through the Player"]
+#[ignore = "plays a click train out of the Model 12 through the Player (TRANSIT_LOOPBACK_MODEL12, default 2:1)"]
 fn hardware_player_measures_a_hardware_insert_on_the_model12_over_native_asio() {
-    let frames = hardware_ping_on_native_asio("Model Mixer ASIO Driver", 44_100, None, 1, 0);
-    assert!((900..1_300).contains(&frames), "{frames} frames: the bench measures 974 to 1239");
+    hardware_ping_on_native_asio("Model Mixer ASIO Driver", 44_100, None, loopback_pair("TRANSIT_LOOPBACK_MODEL12", "2:1"));
 }
 
 #[cfg(all(windows, target_pointer_width = "64", feature = "native-asio"))]
