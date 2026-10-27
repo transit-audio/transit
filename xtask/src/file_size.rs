@@ -10,7 +10,6 @@ pub const MAX_LINES: usize = 1500;
 /// Files over `MAX_LINES` today, as (repo-relative path, line budget). Remove a row when its file drops to `MAX_LINES` or fewer.
 pub const OVER_BUDGET: &[(&str, usize)] = &[
     ("crates/clap-host/src/ffi.rs", 1928),
-    ("crates/mix/tests/instrument_events.rs", 1653),
     ("crates/video/src/isobmff/codec.rs", 1579),
     ("crates/vst3-host/src/ffi.rs", 3779),
     ("crates/vst3-host/tests/fixture/src/lib.rs", 1763),
