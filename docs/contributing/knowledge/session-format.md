@@ -10,7 +10,8 @@ so it saves a session as one zip bundle, `.transitz`, holding the `.transit` and
    default), so an old session loads unchanged.
 2. **Never `deny_unknown_fields`.** A file written by a newer build must load on the previous build,
    ignoring what it does not know.
-3. **Old sessions must load.** Keep fixtures of older files and test loading them.
+3. **Old sessions must load.** The corpus (below) holds sessions saved by released builds and
+   every build loads them.
 4. **No silent rewrites.** Unknown or unresolved values (for example route names) are preserved on
    save (`routing.md`).
 5. **Hostile input:** treat file contents as untrusted; no panics, bounded allocations
@@ -18,6 +19,25 @@ so it saves a session as one zip bundle, `.transitz`, holding the `.transit` and
 6. **Runtime state stays out.** Record arm and input monitor are runtime state, not session data
    ([ADR 0011](../../adr/0011-record-arm-and-input-monitor-are-runtime-state.md)).
 7. Per-machine settings (devices, paths) belong in `ui.json`, not in the session.
+
+## The corpus and the field rule
+
+`crates/model/tests/corpus/` holds two sessions per release, `v<version>-demo.transit` and
+`v<version>-features.transit`, produced by the release's own code (its README says how). The tests
+in `crates/model/tests/corpus.rs` load each one with no `load_notes`, check that a save then load
+is lossless, and that no JSON key of the old file is missing after a save. **Every release adds
+its two files** (`docs/releasing.md`, step 3); existing files are never regenerated. A change to a
+serialized type in `crates/model` keeps the corpus tests green, or bumps `format_version` with a
+migration.
+
+**Field rule, enforced by `crates/model/tests/serde_defaults.rs`:** every field of a struct that
+derives `Deserialize` is `Option<_>`, carries `#[serde(default ...)]` (or a `skip` attribute), or
+sits in a struct with a container-level `#[serde(default)]`. The fields that are required by design
+(written by every build since the first release) are the baseline list `REQUIRED_BY_DESIGN` in that
+test; a new field joins the code with a default, not that list. The check is a line-based scan of
+`crates/model/src`: it reads structs with named fields and skips enum variants and tuple structs,
+so a new serialized enum variant with fields still needs the review question "does an old file
+load".
 
 ## The `needs` marker
 
