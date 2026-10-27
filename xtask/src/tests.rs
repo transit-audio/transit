@@ -191,7 +191,7 @@ fn file_size_listed_file_that_grew_but_stays_within_budget_passes() {
 
 #[test]
 fn file_size_current_tree_matches_the_table() {
-    assert!(file_size::run(&root()).is_ok());
+    file_size::run(&root()).unwrap_or_else(|e| panic!("file-size: {e}"));
 }
 
 #[test]
