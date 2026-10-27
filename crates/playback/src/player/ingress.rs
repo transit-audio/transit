@@ -615,6 +615,8 @@ impl Pump {
             }
             keep
         });
+        // Inputs the worker held before this step's attachments (they are appended after these).
+        let known = self.inputs.len();
         for _ in 0..sources::PORTS {
             match self.receive.try_recv() {
                 Ok(Update::Input(input)) => {
@@ -743,15 +745,19 @@ impl Pump {
         // listens to still maps, and each message is seen once (`map_next`). A port with an
         // admitting route is matched where it is popped instead, so nothing arriving between this
         // pass and the pop is missed and a consumed message never reaches the route.
+        // The first step after the matcher turns on skips what was already pending on the ports
+        // the worker held while it was off; a port attached in this same step opened after Main
+        // turned the matcher on (an armed learn opens every port), so its backlog is all news and
+        // its first message may be the learn's candidate (#160).
         let learning = self.shared.learn.load(Ordering::Acquire);
         let pass_on = learning || self.maps.as_deref().is_some_and(|maps| !maps.is_empty());
         if pass_on {
             let first = !self.map_pass_on;
-            for input in &mut self.inputs {
+            for (index, input) in self.inputs.iter_mut().enumerate() {
                 if input.routes.iter().any(|(permit, _)| permit.admits()) {
                     continue;
                 }
-                if first {
+                if first && index < known {
                     let Input { consumer, mon, .. } = input;
                     consumer.for_each_pending(|raw| mon.map_next = mon.map_next.max(raw.seq.saturating_add(1)));
                 }

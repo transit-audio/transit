@@ -247,6 +247,41 @@ fn learn_forwards_exactly_the_next_candidate_once() {
     assert!(matches!(rig.drain()[..], [MapEvent::Candidate { .. }]));
 }
 
+/// #160: Main arms the learn, the learn opens the port, and the port's first message lands before
+/// the worker steps once. The worker then sees the attach, the armed learn and the message in one
+/// step; the first-step skip of "what was already pending" must not swallow a port it never had
+/// before, whose whole backlog arrived after the arm. A port it already held keeps the skip.
+#[test]
+fn a_port_the_armed_learn_opens_keeps_its_first_message_when_the_worker_sees_both_in_one_step() {
+    let mut rig = rig();
+    // A port the worker already held while the matcher was off: its backlog predates the arm.
+    rig.port.deliver(0, &[0xB0, 21, 5]);
+    rig.worker.step();
+    let pads = rig.fake.add_input("Pads");
+    rig.worker.shared.learn.store(true, Ordering::Release);
+    let (_pads_handle, consumer) = rig.fake.io().open_input(&pads, InputConfig::default()).unwrap();
+    rig.send
+        .send(Update::Input(Box::new(Input {
+            id: PORT + 1,
+            mon: Mon::default(),
+            guard: storm::Guard::default(),
+            live: false,
+            consumer,
+            routes: Vec::new(),
+        })))
+        .ok()
+        .unwrap();
+    assert!(rig.fake.input_port(&pads).unwrap().deliver(0, &[0x92, 36, 100]));
+    assert!(rig.fake.input_port(&pads).unwrap().deliver(0, &[0x92, 37, 100]));
+    rig.worker.step();
+    assert_eq!(
+        rig.drain(),
+        vec![MapEvent::Candidate { port: PORT + 1, channel: 2, kind: SourceKind::Note, number: 36 }],
+        "the new port's first message is the candidate, the known port's stale CC is not"
+    );
+    assert!(!rig.worker.shared.learn.load(Ordering::Acquire), "once");
+}
+
 // ---- consume by default (ADR 0028) ----
 
 #[test]

@@ -44,7 +44,8 @@ overlapping source. Only those not overridden are matched; the window shows the 
   open port's pending events without popping them (`for_each_pending`), once each (`Mon::map_next`), so a
   controller no track listens to still maps and a route attached later keeps its backlog. An unrouted port is
   trimmed past 512 pending, as for the Monitor. The first step after the matcher turns on skips what was
-  already pending.
+  already pending on the ports the worker already held; a port attached in that same step (an armed
+  learn opens every port) keeps its backlog, so its first message can be the candidate (#160, E58).
 - `handle` matches by port id, channel, kind and number; no allocation or lock (`matching_and_publishing_cost_the_worker_no_heap_work`).
   A continuous control's value goes to the mapping's `Cell` (last value wins, with the publish count); Main takes it once a
   frame (`Wanted::take_moves`), so a slow UI loses no final value. Button presses and learn candidates go into a 256-slot

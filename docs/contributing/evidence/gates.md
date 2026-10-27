@@ -123,6 +123,9 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 - A file lock is released with an explicit unlock, never by closing the file alone: a child
   process spawned meanwhile holds a copy of the descriptor until its exec, and on Linux and macOS
   the lock goes with it (E57, `../../escapes/E57-an-autosave-lock-outlived-its-session-in-a-spawned-child.md`).
+- A "skip what was already pending" cutoff on a worker applies only to the sources it held before
+  the cutoff's trigger; a source attached in the same step is new, and its tests include the
+  trigger and an attach landing in one step (E58, `../../escapes/E58-an-armed-learn-skipped-the-first-message-of-a-port-it-opened.md`).
 - Tests create unique temp dirs: process id plus a per-process counter (or `TemporaryAutosave`),
   never a fixed name or a clock-only suffix; concurrent tests share a process and a clock tick
   (E51, `../../escapes/E51-test-temp-dirs-collided-in-one-process.md`).
