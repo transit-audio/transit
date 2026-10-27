@@ -903,6 +903,11 @@ impl Audio {
         };
         let state = &mut self.transport;
         let block_output = state.timeline.next_output();
+        // The render workers' deadline counts from the device callback's entry, not from here.
+        #[cfg(not(target_arch = "wasm32"))]
+        self.plans.set_block_deadline(crate::telemetry::next_block_deadline(std::time::Duration::from_nanos(
+            frames as u64 * 1_000_000_000 / u64::from(self.sample_rate.max(1)),
+        )));
         // The mixer owns each processor's suspension rules. A completed note
         // release does not prove that its envelope or any downstream tail ended.
         self.plans.render(state.render_position, frames);

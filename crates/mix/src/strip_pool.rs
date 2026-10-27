@@ -48,6 +48,9 @@ const SIDE: usize = RING + LIVE;
 /// The strips' share of the block period: `finish` returns by `start + period * 3 / 4`, which
 /// leaves a quarter of the period for the auxes, the masters, the output copy and the driver.
 const DEADLINE_SHARE: (u32, u32) = (3, 4);
+/// `finish` returning later than this past its deadline counts as an overshoot (the callback
+/// started late, or one admitted inline render ran over).
+const OVERSHOOT: Duration = Duration::from_micros(100);
 /// How long retirement waits for a worker before it quarantines it.
 const RETIRE_BOUND: Duration = Duration::from_millis(500);
 
@@ -207,6 +210,7 @@ struct Counters {
     stale: AtomicU64,
     overrun_blocks: AtomicU64,
     misuse: AtomicU64,
+    overshoot: AtomicU64,
 }
 
 /// Reads an engine's [`StripFaults`] from any thread (relaxed loads; each figure exact on its own).
@@ -236,6 +240,7 @@ impl StripFaultsReader {
             suspect: r(&c.suspect),
             conflicts: r(&c.conflicts).saturating_add(r(&c.stale)).saturating_add(r(&c.misuse)),
             overrun_blocks: r(&c.overrun_blocks),
+            deadline_overshoots: r(&c.overshoot),
             midi_deferred: d.deferred,
             midi_dropped: d.dropped,
             midi_silences: d.silences,
@@ -275,6 +280,9 @@ pub(crate) struct PoolBlock<'a> {
     pub(crate) start: Instant,
     /// Overrides the strips' share of the period ([`MixEngine::set_strip_deadline`]).
     pub(crate) budget: Option<Duration>,
+    /// The deadline from the callback's entry ([`MixEngine::set_block_deadline`]), else
+    /// `start` plus the budget.
+    pub(crate) deadline: Option<Instant>,
 }
 
 /// An engine's render workers and everything the fan-out keeps per strip. See the module docs.
@@ -684,12 +692,19 @@ impl StripPool {
         }
         self.counters.callback_renders.fetch_add(callback, Ordering::Relaxed);
         let budget = b.budget.unwrap_or_else(|| block_period(b.frames, b.sample_rate) * DEADLINE_SHARE.0 / DEADLINE_SHARE.1);
-        let deadline = b.start + budget.min(Duration::from_secs(3600));
+        // A test's budget override wins; then the callback's deadline; then the block's entry.
+        let deadline = match (b.budget, b.deadline) {
+            (None, Some(d)) => d,
+            _ => b.start + budget.min(Duration::from_secs(3600)),
+        };
         let cells_ref = &self.cells;
         let report = self.set.finish(deadline, |i| {
             // Reclaimed by the callback: no worker can hold the cell.
             cells_ref.with(i, |job| job.render(g));
         });
+        if Instant::now().saturating_duration_since(deadline) > OVERSHOOT {
+            self.counters.overshoot.fetch_add(1, Ordering::Relaxed);
+        }
         let mut overruns = 0u32;
         for (i, st) in p1.iter_mut().enumerate().take(cells) {
             let Some(outcome) = self.set.outcome(i) else { continue };

@@ -388,6 +388,7 @@ impl MixEngine {
     pub fn render_active(&mut self, pos: Samples, frames: usize, out: &mut [Vec<f32>]) {
         // The block's start, which the render workers' deadline is measured from (ADR 0029).
         let start = self.pool.is_some().then(std::time::Instant::now);
+        let callback_deadline = self.block_deadline.take();
         let frames = frames.min(self.max_block);
         let Some(plan) = self.plan.as_deref_mut().filter(|p| !p.faulted) else {
             self.events.next_frame = self.events.next_frame.saturating_add(frames as u64);
@@ -467,6 +468,7 @@ impl MixEngine {
                     sample_rate,
                     start,
                     budget: self.strip_deadline,
+                    deadline: callback_deadline,
                 };
                 pool.render(&block, p1, &mut self.events);
                 true
@@ -784,5 +786,14 @@ impl MixEngine {
     #[doc(hidden)]
     pub fn set_strip_deadline(&mut self, budget: Option<std::time::Duration>) {
         self.strip_deadline = budget;
+    }
+
+    /// Audio thread, before a block: the strips' deadline for the next `render_active`, measured
+    /// from the device callback's entry (playback passes callback entry + (blocks rendered in
+    /// this callback + 1) x block period x 3/4). A late wake or the callback's own work before
+    /// the render then shortens the strips' budget instead of moving the deadline. Without it
+    /// the deadline is measured from `render_active`'s entry. Taken by that one block.
+    pub fn set_block_deadline(&mut self, deadline: Option<std::time::Instant>) {
+        self.block_deadline = deadline;
     }
 }

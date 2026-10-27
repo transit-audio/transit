@@ -194,6 +194,9 @@ pub struct StripFaults {
     pub conflicts: u64,
     /// Blocks with at least one strip overrun.
     pub overrun_blocks: u64,
+    /// Blocks whose wait for the workers ended more than 100 µs past the strips' deadline (the
+    /// callback started late, or an inline render ran over its estimate).
+    pub deadline_overshoots: u64,
     /// Live MIDI events deferred for a strip a worker held.
     pub midi_deferred: u64,
     /// Deferred MIDI events the overflow rule dropped (silences included).

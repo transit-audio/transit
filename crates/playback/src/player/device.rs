@@ -1131,6 +1131,8 @@ fn render_callbacks(
     let error = error_callback(Arc::clone(&player.fault), Arc::clone(&player.shared), player.failure_signal.clone());
     let render = move |block: &mut ab::RenderBlock<'_>| {
         crate::mark_audio_thread();
+        #[cfg(not(target_arch = "wasm32"))]
+        telemetry::callback_entered();
         let started = telemetry::Timer::start();
         fault.telemetry.marker().begin();
         let creating_before = transit_mix::creating_instance();

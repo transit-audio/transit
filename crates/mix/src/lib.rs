@@ -757,6 +757,9 @@ pub struct MixEngine {
     pool: Option<strip_pool::StripPool>,
     /// Overrides the strips' deadline share of the block period ([`MixEngine::set_strip_deadline`]).
     strip_deadline: Option<std::time::Duration>,
+    /// The next block's strip deadline from the callback's entry ([`MixEngine::set_block_deadline`]);
+    /// taken by the next `render_active`.
+    block_deadline: Option<std::time::Instant>,
 }
 
 impl MixEngine {
@@ -804,6 +807,7 @@ impl MixEngine {
             events: events::EngineEvents::new(None, EventLimits::default()),
             pool: None,
             strip_deadline: None,
+            block_deadline: None,
         }
     }
 

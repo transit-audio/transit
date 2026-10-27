@@ -38,6 +38,7 @@ pub(crate) struct PoolBlock<'a> {
     pub(crate) sample_rate: u32,
     pub(crate) start: std::time::Instant,
     pub(crate) budget: Option<std::time::Duration>,
+    pub(crate) deadline: Option<std::time::Instant>,
 }
 
 impl StripPool {

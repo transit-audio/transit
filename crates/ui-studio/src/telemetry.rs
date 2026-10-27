@@ -206,6 +206,7 @@ pub fn strip_fault_rows(f: &transit_mix::StripFaults) -> Vec<String> {
         format!("Strip overruns, late: {}", f.overruns_late),
         format!("Strip overruns, unstarted: {}", f.overruns_unstarted),
         format!("Blocks with a strip overrun: {}", f.overrun_blocks),
+        format!("Strip deadline overshoots: {}", f.deadline_overshoots),
         format!("Late strip results: {}", f.late_results),
         format!("Strips rendered inline: {}", f.inline_renders),
         format!("Strips rendered on the callback: {}", f.callback_renders),

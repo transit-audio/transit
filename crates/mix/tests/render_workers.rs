@@ -438,3 +438,34 @@ fn an_unstarted_strip_plays_its_overdue_notes_without_a_zero_length_one() {
     MixEngine::force_serial(true);
     drop(rig.mix.into_retired());
 }
+
+/// The strips' deadline counts from the device callback's entry: a callback that starts the
+/// render late (a late wake, its own service work) shows as a counted deadline overshoot, not
+/// as a late block with every strip figure at zero.
+#[test]
+fn a_late_callback_start_is_counted_as_a_deadline_overshoot() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    let Some(mut rig) = rig(Duration::from_micros(1500)) else {
+        MixEngine::force_serial(true);
+        return;
+    };
+    rig.mix.set_strip_deadline(None);
+    become_callback();
+    for _ in 0..20 {
+        rig.block();
+    }
+    let before = rig.mix.strip_faults().unwrap().snapshot().deadline_overshoots;
+    // The callback entered 5 ms ago; the block's deadline already passed.
+    let entry = Instant::now().checked_sub(Duration::from_millis(5)).unwrap();
+    rig.mix.set_block_deadline(Some(entry + Duration::from_millis(2)));
+    rig.block();
+    let after = rig.mix.strip_faults().unwrap().snapshot().deadline_overshoots;
+    assert_eq!(after, before + 1, "the late start is counted");
+    // One block only: the next is measured from its own entry again.
+    rig.block();
+    settle(&mut rig);
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    drop(rig.mix.into_retired());
+}

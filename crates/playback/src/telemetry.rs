@@ -438,6 +438,29 @@ impl Accumulator {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+std::thread_local! {
+    /// The running device callback's entry and the engine blocks it has rendered so far.
+    static CALLBACK: std::cell::Cell<Option<(std::time::Instant, u32)>> = const { std::cell::Cell::new(None) };
+}
+
+/// The device callback starts (its entry, before any work): the render workers' deadlines of
+/// its blocks are measured from here (ADR 0029). A `Copy` thread-local: no allocation.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn callback_entered() {
+    CALLBACK.set(Some((std::time::Instant::now(), 0)));
+}
+
+/// The strips' deadline of the next engine block of the running callback: entry + (blocks
+/// rendered + 1) x `period` x 3/4. `None` outside a device callback (the engine then measures
+/// from its own entry).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn next_block_deadline(period: Duration) -> Option<std::time::Instant> {
+    let (start, done) = CALLBACK.get()?;
+    CALLBACK.set(Some((start, done.saturating_add(1))));
+    start.checked_add(period.saturating_mul(done.saturating_add(1)) * 3 / 4)
+}
+
 /// std::Instant is not implemented on wasm32-unknown-unknown. Do not call it there or invent
 /// timing from the nominal WebAudio buffer size. A browser clock can be added separately.
 pub(crate) struct Timer {

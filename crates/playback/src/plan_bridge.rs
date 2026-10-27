@@ -670,6 +670,10 @@ impl Audio {
     pub fn block_overruns(&self) -> u32 {
         self.mix.block_overruns()
     }
+    /// The strips' deadline of the next block, from the device callback's entry (ADR 0029).
+    pub fn set_block_deadline(&mut self, deadline: Option<std::time::Instant>) {
+        self.mix.set_block_deadline(deadline);
+    }
     #[cfg(test)]
     pub(crate) fn install_event_tap_for_test(&mut self, capacity: usize) {
         self.mix.install_event_tap(capacity);
