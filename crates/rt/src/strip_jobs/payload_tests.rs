@@ -210,6 +210,15 @@ fn the_per_block_rule_hands_payloads_over_through_the_slots() {
         }
         rng.jitter();
         rng.jitter();
+        if b.is_multiple_of(16) {
+            // Mixed coverage that does not depend on the scheduler (a loaded box can starve the
+            // workers through every free block): the workers take and finish every strip
+            // published this block before the publisher's sweep.
+            wait_until("the workers", || {
+                f.failed.load(Ordering::Acquire)
+                    || was_published.iter().enumerate().all(|(i, &p)| !p || f.set.slot(i).map(JobSlot::state) == Some(State::Done))
+            });
+        }
         for (i, &flag) in was_published.iter().enumerate() {
             if !flag {
                 continue;
