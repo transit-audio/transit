@@ -407,7 +407,7 @@ mod tests {
         assert_eq!(
             with.stats_lines(),
             [
-                "render backend: wakes 10, late p95 0 µs, max 0 µs; service p95 0 µs, max 0 µs; skipped 1, timeouts 0; min padding 64",
+                "render backend: wakes 10, gap over period p95 0 µs, max 0 µs; service p95 0 µs, max 0 µs; skipped 1, timeouts 0; min padding 64",
                 "capture backend: wakes 9, late p95 0 µs, max 0 µs; service p95 0 µs, max 0 µs; skipped 0, timeouts 0; max packets 2",
             ]
         );
