@@ -32,8 +32,9 @@ fn latency(latency: Option<Duration>) -> String {
 /// out as asked is printed once; one that differs says what was asked.
 pub(crate) fn describe(r: &OpenReport<'_>) -> String {
     let (asked, got) = (&r.asked, &r.got);
+    // Sharing is a WASAPI mode; an ASIO driver is always the device's own (#163).
     let mode = match asked.mode {
-        ab::Mode::Shared => "shared",
+        ab::Mode::Shared if !r.host.eq_ignore_ascii_case("ASIO") => "shared",
         _ => "exclusive",
     };
     let rate = if asked.format.rate == got.format.rate {
@@ -98,7 +99,7 @@ mod tests {
         let line = describe(&OpenReport { direction: "input", backend: "cpal", host: "ASIO", device: "Fireface", asked, got });
         assert_eq!(
             line,
-            "audio input opened: backend=cpal host=ASIO device=\"Fireface\" mode=shared rate=48000 Hz (asked 44100 Hz) channels=8 (asked 2) \
+            "audio input opened: backend=cpal host=ASIO device=\"Fireface\" mode=exclusive rate=48000 Hz (asked 44100 Hz) channels=8 (asked 2) \
              sample=I32 buffer=480 frames (10.0 ms, asked device default) latency=not reported"
         );
     }

@@ -336,11 +336,24 @@ fn or_unknown(s: &str) -> &str {
 impl Report {
     /// The plain text, redacted with `redaction`.
     pub fn render(&self, redaction: &Redaction) -> String {
-        self.render_on(redaction, cfg!(windows))
+        self.render_on(redaction, self.backend_is_wasapi(cfg!(windows)))
     }
 
-    /// [`Self::render`] for a platform that has WASAPI (`wasapi`) or not: the Settings section
-    /// prints the shared-device setting only where it means something (#146).
+    /// Whether the backend in use is WASAPI: only on Windows, and not when the selected audio
+    /// system is another one (ASIO, say) or the backend is a native one that is not WASAPI. The
+    /// untouched default system on Windows is WASAPI (#163).
+    fn backend_is_wasapi(&self, windows: bool) -> bool {
+        use transit_playback::devices::Backend;
+        let c = &self.settings;
+        windows
+            && match c.system.as_deref() {
+                Some(system) => system.eq_ignore_ascii_case("WASAPI") && c.backend != Backend::NativeAsio && c.backend != Backend::NativeJack,
+                None => !matches!(c.backend, Backend::NativeAsio | Backend::NativeJack),
+            }
+    }
+
+    /// [`Self::render`] with `wasapi` saying the backend is WASAPI: the Settings section prints
+    /// the shared-device setting only where it means something (#146, #163).
     fn render_on(&self, redaction: &Redaction, wasapi: bool) -> String {
         let mut o = String::new();
         let section = |o: &mut String, name: &str| {
@@ -720,6 +733,15 @@ mod tests {
         let text = report.render_on(&Redaction::default(), false);
         assert!(!text.contains("Shared device"), "{text}");
         assert!(report.render_on(&Redaction::default(), true).contains("Shared device (WASAPI): "));
+        // The flag follows the backend, not the platform (#163).
+        let on = |system: Option<&str>, backend| {
+            let r = Report { settings: AudioConfig { system: system.map(Into::into), backend, ..Default::default() }, ..fake() };
+            r.backend_is_wasapi(true)
+        };
+        use transit_playback::devices::Backend;
+        assert!(on(Some("WASAPI"), Backend::NativeWasapi) && on(None, Backend::Auto) && on(Some("WASAPI"), Backend::Cpal));
+        assert!(!on(Some("ASIO"), Backend::NativeAsio) && !on(None, Backend::NativeAsio) && !on(Some("ASIO"), Backend::Cpal));
+        assert!(!fake().backend_is_wasapi(false));
         assert_eq!(text.matches("Native JACK (PipeWire 1.0.7) runs at 48000 Hz").count(), 1, "{text}");
         assert_eq!(text.matches("To pin one instead").count(), 1, "{text}");
         let heading = text.find("\nJACK\n").expect("the JACK heading");
