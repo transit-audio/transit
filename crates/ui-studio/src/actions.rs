@@ -134,15 +134,13 @@ impl StudioApp {
     }
 
     /// Escape in the arrangement, or a click on empty space below the lanes: no clips or tracks
-    /// selected and no focused track, so the mixer highlights no strip and "+ FX Channel" has no
-    /// implicit source. `cursor_track` is cleared too (focus falls back to it); the cursor
-    /// position stays, but Split, Paste and New MIDI Clip then need a track clicked again
-    /// (Paste falls back to the first track).
+    /// selected and no `ui.focus_track`, so no strip or header is highlighted. The edit cursor
+    /// keeps its track (`cursor_track`), so Paste, Split and New MIDI Clip still work there, as
+    /// in Logic and Live; `focus_track()` still falls back to it for those commands.
     pub fn deselect_all(&mut self) {
         self.auto.selection.clear();
         self.tracks_selected_by_header = false;
         self.ui.focus_track = None;
-        self.ui.cursor_track = None;
         let _ = self.run("edit.select_none", json!({}));
     }
 

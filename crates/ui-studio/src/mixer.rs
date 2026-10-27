@@ -614,6 +614,14 @@ impl StudioApp {
         [self.ui.focus_track, self.ui.cursor_track, s.edit.selected_tracks.first().copied()].into_iter().flatten().find(|t| s.track(*t).is_some())
     }
 
+    /// The track the user chose (clicked or selected), for highlights: `ui.focus_track`, else the
+    /// first selected track. Unlike [`Self::focus_track`] it ignores the edit cursor's track, so
+    /// Escape drops the highlight while the cursor keeps its track.
+    pub fn chosen_track(&self) -> Option<TrackId> {
+        let s = self.engine.session();
+        [self.ui.focus_track, s.edit.selected_tracks.first().copied()].into_iter().flatten().find(|t| s.track(*t).is_some())
+    }
+
     /// Focus a track from either view: it becomes the selected track (as a click on its header
     /// does) and the cursor's track. Selection is not part of the saved document.
     pub fn focus(&mut self, t: TrackId) {
@@ -1023,7 +1031,7 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
     let p = ui.painter();
     p.line_segment([area.left_top(), area.right_top()], Stroke::new(1.0, TOKENS.line));
     let s = app.engine.session_arc();
-    let focus = app.focus_track();
+    let focus = app.chosen_track();
     let master = s.tracks.iter().find(|t| t.kind == TrackKind::Master && !t.hidden);
     // Stable partition of the visible strips only: the document/arranger order never changes.
     // Routing folders are tracks and stay inline with their members, not in the aux block.

@@ -745,14 +745,17 @@ fn escape_and_a_click_on_empty_space_clear_the_focused_track() {
     assert!(strip(&app, t).focused, "the strip is highlighted");
     key(&mut app, "Escape");
     frames(&mut app, &ctx, 3, &mut time);
-    assert_eq!(app.focus_track(), None, "Escape drops the focused track");
+    assert_eq!(app.chosen_track(), None, "Escape drops the chosen track");
+    assert_eq!(app.focus_track(), Some(t), "the edit cursor keeps its track (paste, split, new clip)");
+    assert_eq!(app.cursor_track(), Some(t));
     assert!(app.engine.session().edit.selected_tracks.is_empty());
     assert!(!strip(&app, t).focused, "no strip is highlighted");
     // Click on empty space below the lanes.
     app.focus(t);
     assert_eq!(app.focus_track(), Some(t));
     app.click_empty(None, 1000);
-    assert_eq!(app.focus_track(), None, "a click on empty space drops it too");
+    assert_eq!(app.chosen_track(), None, "a click on empty space drops it too");
+    assert_eq!(app.cursor_track(), Some(t));
     frames(&mut app, &ctx, 3, &mut time);
     assert!(!strip(&app, t).focused);
     // + FX Channel then has no implicit source.

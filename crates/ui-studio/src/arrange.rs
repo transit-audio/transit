@@ -363,7 +363,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         ..Layout::default()
     };
     let selected_tracks = s.edit.selected_tracks.clone();
-    let focus = app.focus_track();
+    let focus = app.chosen_track();
     app.arrange.menu.clear();
     // One status read per frame, and only when some track sends to an external port (#69).
     let outputs = s.tracks.iter().any(|t| t.midi_output.is_external()).then(|| crate::midi_output::OutputView::read(app.player.as_ref()));

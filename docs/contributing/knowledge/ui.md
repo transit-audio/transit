@@ -150,9 +150,11 @@ check the colors against the painted backgrounds and the overflow text bounds ag
 send (Logic's new aux, Live's new return). The strip's "+ Send > New FX Channel..." is
 `add_send(.., NEW_FX)`, which calls `new_fx_channel(Some(track), -12.0)`: channel and send as one
 undo step. `deselect_all` (Escape, `A::SelectNone`) and `click_empty(None, ..)` (empty space below
-the lanes) clear clip and track selection plus `ui.focus_track` and `ui.cursor_track`, because
-`focus_track()` falls back to both. The cursor position stays; Split at cursor and New MIDI Clip
-need a track clicked again, and Paste falls back to the first track. A click on an empty part of a
+the lanes) clear clip and track selection plus `ui.focus_track`, but not `ui.cursor_track`: the
+edit cursor keeps its track, so Paste, Split at cursor and New MIDI Clip still work (Logic and
+Live behave the same). Highlights (mixer strip, arrange header) read `chosen_track()`
+(`ui.focus_track`, else the first selected track); `focus_track()` still falls back to
+`cursor_track` for cursor-based commands and the device chain. A click on an empty part of a
 track lane still selects that track.
 
 ## Audio Devices sections and pending changes (#107, #108)
