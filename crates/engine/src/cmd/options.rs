@@ -16,24 +16,20 @@ macro_rules! toggle {
     };
 }
 
-/// Cycle on/off. Turning it on with something selected makes the region from it, even when a
-/// region exists (see [`selection_span`]): the span of the selected clips, else the time selection.
-/// With nothing selected an existing region is reused, and with none the region is four bars from
-/// the bar containing `at` (default: the playhead), cut at the end of the content when that lies
-/// past `at`. A changed region and the switch land as one undo step; turning Cycle off leaves the
-/// region, so the next toggle restores it.
+/// Cycle on/off. Toggling never moves an existing region (Ableton and Logic agree; #164). Only
+/// when no region exists does turning Cycle on derive one: the span of the selected clips, else the
+/// time selection (see [`selection_span`]), else four bars from the bar containing `at` (default:
+/// the playhead), cut at the end of the content when that lies past `at`. A derived region and the
+/// switch land as one undo step; turning Cycle off leaves the region, so the next toggle restores
+/// it. `transport.cycle_to_selection` is the explicit way to move the region.
 fn loop_playback(e: &mut Engine, p: &Value) -> Result<Value> {
     let on = p.get("value").and_then(Value::as_bool).unwrap_or(!e.session().edit.loop_playback);
     let at = position_param(e, "options.loop_playback", p, "at")?;
     let before = e.session_arc();
-    let region = if !on {
+    let region = if !on || !e.session().edit.loop_range.is_empty() {
         None
-    } else if let Some(span) = selection_span(e.session()) {
-        Some(span)
-    } else if e.session().edit.loop_range.is_empty() {
-        Some(default_region(e, at))
     } else {
-        None
+        Some(selection_span(e.session()).unwrap_or_else(|| default_region(e, at)))
     };
     let region = region.filter(|r| !r.is_empty() && *r != e.session().edit.loop_range);
     let ed = &mut e.session_mut().edit;

@@ -274,12 +274,9 @@ fn two_selected_clips(app: &mut StudioApp) -> (i64, i64) {
 }
 
 #[test]
-fn pressing_c_with_clips_selected_cycles_their_span_and_c_again_turns_it_off_keeping_it() {
+fn pressing_c_with_clips_selected_and_no_region_cycles_their_span_and_a_region_set_by_hand_stays() {
     let (mut app, ctx, mut time) = loop_app();
     let span = two_selected_clips(&mut app);
-    // An older region exists: the selection still wins.
-    app.run("transport.loop", json!({"start": 0, "end": 10})).unwrap();
-    frames(&mut app, &ctx, 3, &mut time);
     let steps = undo_len(&mut app);
     key(&mut app, "c");
     frames(&mut app, &ctx, 3, &mut time);
@@ -290,4 +287,19 @@ fn pressing_c_with_clips_selected_cycles_their_span_and_c_again_turns_it_off_kee
     frames(&mut app, &ctx, 3, &mut time);
     assert!(!app.engine.session().edit.loop_playback, "C again is Cycle off");
     assert_eq!(loop_range(&app), span, "off keeps the region");
+}
+
+#[test]
+fn pressing_c_twice_with_clips_selected_keeps_a_region_set_by_hand() {
+    let (mut app, ctx, mut time) = loop_app();
+    two_selected_clips(&mut app);
+    app.run("transport.loop", json!({"start": 0, "end": 10})).unwrap();
+    app.run("options.loop_playback", json!({"value": false})).unwrap();
+    frames(&mut app, &ctx, 3, &mut time);
+    let steps = undo_len(&mut app);
+    key(&mut app, "c");
+    frames(&mut app, &ctx, 3, &mut time);
+    assert!(app.engine.session().edit.loop_playback);
+    assert_eq!(loop_range(&app), (0, 10), "an existing region is reused, not replaced by the clips");
+    assert_eq!(undo_len(&mut app), steps);
 }

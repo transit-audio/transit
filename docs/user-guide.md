@@ -22,13 +22,13 @@ See the [shortcuts reference](shortcuts.md) and **Help > Keyboard Shortcuts** fo
 
 ## Cycle
 
-Turning Cycle on (C, the transport button or Transport > Cycle On) with clips selected sets the
-cycle region to the span of those clips, from the earliest start to the latest end, and with a
-time range selected it sets the region to that range; either replaces a region that was already
-there, in one undo step. With nothing selected, Cycle reuses the existing region, or makes four
-bars from the bar holding the playhead when there is none. Cycle Off keeps the region, and
-Transport > Set Cycle to Selection (Cmd+L) re-sets it from the selection without toggling Cycle.
-While clips are selected, every Cycle On and Set Cycle to Selection takes the selected clips' span, so a region you dragged on the loop bar is replaced on the next Cycle On unless you deselect the clips first (Escape or click empty space); Select All counts as a clip selection.
+Cycle (C, the transport button or Transport > Cycle On) only turns looping on and off; it never
+moves the cycle region. Turning Cycle on reuses the region you already have, whether you dragged
+it on the loop bar or set it earlier. Only when there is no region does Cycle On make one: from
+the span of the selected clips (earliest start to latest end), else the selected time range, else
+four bars from the bar holding the playhead, in one undo step with the switch. Cycle Off keeps
+the region. To move the region to the current selection, use Transport > Set Cycle to Selection
+(Ctrl+L, Cmd+L on macOS), which does not toggle Cycle.
 
 ## FX channels and sends
 

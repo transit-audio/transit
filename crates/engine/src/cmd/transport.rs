@@ -152,35 +152,49 @@ mod tests {
     }
 
     #[test]
-    fn cycle_on_with_clips_selected_takes_their_span_even_when_a_region_exists() {
+    fn cycle_on_with_clips_selected_and_no_region_takes_their_span() {
         use transit_time::Range;
         let mut e = Engine::default();
         two_selected_clips(&mut e);
-        e.execute("transport.loop", &json!({"start": 100, "end": 200})).unwrap();
         let steps = undo_len(&mut e);
         e.execute("options.loop_playback", &json!({"value": true})).unwrap();
         assert_eq!(e.session().edit.loop_range, Range::new(1000, 9000), "earliest start to latest end");
         assert!(e.session().edit.loop_playback);
         assert_eq!(undo_len(&mut e), steps + 1);
-        // Off keeps the region, with no undo step.
+        // Off keeps the region, on again changes nothing and adds no step.
         e.execute("options.loop_playback", &json!({"value": false})).unwrap();
-        assert_eq!(e.session().edit.loop_range, Range::new(1000, 9000));
-        assert_eq!(undo_len(&mut e), steps + 1);
-        // The same selection again changes nothing about the region and adds no step.
         e.execute("options.loop_playback", &json!({"value": true})).unwrap();
         assert_eq!(e.session().edit.loop_range, Range::new(1000, 9000));
         assert_eq!(undo_len(&mut e), steps + 1);
-        // Undo restores the earlier region and the switch.
+        // Undo restores the empty region and the switch.
         e.execute("edit.undo", &json!({})).unwrap();
-        assert_eq!(e.session().edit.loop_range, Range::new(100, 200));
+        assert!(e.session().edit.loop_range.is_empty());
         assert!(!e.session().edit.loop_playback);
     }
 
     #[test]
-    fn cycle_on_with_a_time_selection_takes_it_even_when_a_region_exists() {
+    fn toggling_cycle_keeps_a_region_set_by_hand_even_with_a_selection() {
         use transit_time::Range;
         let mut e = Engine::default();
+        two_selected_clips(&mut e);
         e.execute("transport.loop", &json!({"start": 100, "end": 200})).unwrap();
+        e.session_mut().edit.selection = Range::new(500, 9000);
+        let steps = undo_len(&mut e);
+        e.execute("options.loop_playback", &json!({"value": false})).unwrap();
+        e.execute("options.loop_playback", &json!({"value": true})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(100, 200));
+        assert!(e.session().edit.loop_playback);
+        assert_eq!(undo_len(&mut e), steps);
+        // Ctrl+L is the explicit way to move it: the clips win over the time selection.
+        e.execute("transport.cycle_to_selection", &json!({})).unwrap();
+        assert_eq!(e.session().edit.loop_range, Range::new(1000, 9000));
+        assert_eq!(undo_len(&mut e), steps + 1);
+    }
+
+    #[test]
+    fn cycle_on_with_a_time_selection_and_no_region_takes_it() {
+        use transit_time::Range;
+        let mut e = Engine::default();
         e.session_mut().edit.selection = Range::new(500, 9000);
         let steps = undo_len(&mut e);
         e.execute("options.loop_playback", &json!({"value": true})).unwrap();
