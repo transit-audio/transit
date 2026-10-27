@@ -22,7 +22,7 @@ layer and egui UI. transit began in October 2026 as a fork of
 credited in About and in NOTICE.
 
 > [!NOTE]
-> transit is alpha software under active development; the current release is [v0.3.0](https://github.com/transit-audio/transit/releases/tag/v0.3.0) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
+> transit is alpha software under active development; the current release is [v0.3.1](https://github.com/transit-audio/transit/releases/tag/v0.3.1) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
 > correctness, stability and performance, measured on real hardware, ahead of new features.
 > Expect rough edges in the UI and some missing features; the audio engine, recording alignment
 > and device handling get fixed first, following [the engineering principles](docs/principles.md).
@@ -39,7 +39,7 @@ credited in About and in NOTICE.
 
 ## Downloads
 
-The current release is [v0.3.0](https://github.com/transit-audio/transit/releases/tag/v0.3.0). The files are `transit-v0.3.0-windows-x86_64.msi` and `.zip`, `transit-v0.3.0-macos-arm64.dmg` and `.tar.gz`, `transit-v0.3.0-linux-x86_64.tar.gz`, and `transit-v0.3.0-linux-x86_64.AppImage`, `.deb` and `.rpm`.
+The current release is [v0.3.1](https://github.com/transit-audio/transit/releases/tag/v0.3.1). The files are `transit-v0.3.1-windows-x86_64.msi` and `.zip`, `transit-v0.3.1-macos-arm64.dmg` and `.tar.gz`, `transit-v0.3.1-linux-x86_64.tar.gz`, and `transit-0.3.1-linux-x86_64.AppImage`, `.deb` and `.rpm`.
 
 - **Windows (x86_64):** one download, the `.zip` (portable) or the `.msi` (installer with the standard install dialogs and license; it registers `.transit` and `.transitz`). It has native WASAPI and native ASIO.
 - **macOS (Apple silicon):** the `.dmg`; open it and drag `transit.app` to Applications.
@@ -50,7 +50,12 @@ The builds are unsigned. On Windows, SmartScreen shows "More info", then "Run an
 ![Arrangement view](docs/images/transit-arrange.png)
 
 ![Mixer](docs/images/transit-mixer.png)
-![Piano roll](docs/images/transit-pianoroll.png)
+
+![Piano roll (a looped clip with ghost repeats)](docs/images/transit-pianoroll.png)
+
+![MIDI Mappings](docs/images/transit-midi.png)
+
+![Audio Devices](docs/images/transit-audio-devices.png)
 
 ## Linux
 

@@ -425,7 +425,7 @@ dependencies = [
 
 [[package]]
 name = "audio-bench"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "ctrlc",
  "serde_json",
@@ -3725,7 +3725,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-au-host"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "log",
  "serde",
@@ -3735,7 +3735,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-audio-io"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "log",
  "proptest",
@@ -3747,7 +3747,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-automation"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "getrandom 0.3.4",
  "serde_json",
@@ -3756,7 +3756,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-clap-host"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "clap-sys",
  "libloading 0.8.9",
@@ -3772,7 +3772,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde_json",
  "soundcraft-audio-io",
@@ -3783,7 +3783,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-dsp"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "log",
  "proptest",
@@ -3793,7 +3793,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-engine"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "craft-docpath",
  "log",
@@ -3818,7 +3818,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-midi"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proptest",
  "serde",
@@ -3828,7 +3828,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-mix"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "log",
  "rayon",
@@ -3845,7 +3845,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-model"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -3857,7 +3857,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-playback"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cpal",
  "log",
@@ -3883,7 +3883,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-time"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "serde",
  "thiserror 2.0.21",
@@ -3891,7 +3891,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-ui-egui"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "craft-ui",
  "egui",
@@ -3917,7 +3917,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-video"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "image",
  "proptest",
@@ -3927,7 +3927,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-vst3-host"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "libloading 0.8.9",
  "log",
@@ -3946,7 +3946,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-web"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "eframe",
  "egui",
@@ -4449,7 +4449,7 @@ dependencies = [
 
 [[package]]
 name = "transit"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "eframe",
  "egui",
@@ -4470,7 +4470,7 @@ dependencies = [
 
 [[package]]
 name = "transit-audio-asio"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "log",
  "transit-audio-backend",
@@ -4481,11 +4481,11 @@ dependencies = [
 
 [[package]]
 name = "transit-audio-backend"
-version = "0.3.0"
+version = "0.3.1"
 
 [[package]]
 name = "transit-audio-jack"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "jack-sys",
  "log",
@@ -4495,7 +4495,7 @@ dependencies = [
 
 [[package]]
 name = "transit-audio-wasapi"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "cpal",
  "log",
@@ -4507,7 +4507,7 @@ dependencies = [
 
 [[package]]
 name = "transit-midi-io"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "log",
  "midir",
@@ -4518,7 +4518,7 @@ dependencies = [
 
 [[package]]
 name = "transit-plugin-host"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "log",
  "soundcraft-clap-host",
@@ -4530,7 +4530,7 @@ dependencies = [
 
 [[package]]
 name = "transit-rt"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "libc",
  "log",
@@ -4539,7 +4539,7 @@ dependencies = [
 
 [[package]]
 name = "transit-ui-studio"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "egui",
  "egui_extras",
@@ -5817,7 +5817,7 @@ checksum = "ec7a2a501ed189703dba8b08142f057e887dfc4b2cc4db2d343ac6376ba3e0b9"
 
 [[package]]
 name = "xtask"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "proc-macro2",
  "serde",
