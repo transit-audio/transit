@@ -199,6 +199,9 @@ impl Plugin for Hosted {
     fn set_param_at(&mut self, offset: u32, id: &str, value: f32) -> bool {
         self.inner.as_mut().is_some_and(|p| p.set_param_at(offset, id, value))
     }
+    fn sample_accurate_params(&self) -> bool {
+        self.inner.as_ref().is_some_and(|p| p.sample_accurate_params())
+    }
     fn set_sample(&mut self, sample: Option<Arc<dyn SampleSource>>) -> bool {
         self.inner.as_mut().is_some_and(|p| p.set_sample(sample))
     }

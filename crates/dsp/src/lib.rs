@@ -333,6 +333,12 @@ pub trait Plugin: Send {
     fn set_param_at(&mut self, _offset: u32, id: &str, value: f32) -> bool {
         self.set_param(id, value)
     }
+    /// Whether [`Plugin::set_param_at`] delivers a point at its offset (the VST3 and CLAP hosts)
+    /// rather than at the block start (the default). The mix sends automation breakpoints inside
+    /// a block only to plug-ins that say so.
+    fn sample_accurate_params(&self) -> bool {
+        false
+    }
     /// Sample-playing instruments (the Sampler): the recorded audio to play, `None` to clear it.
     /// `false` when the plugin does not play samples. Does not allocate; sounding voices stop.
     /// The previous sample is dropped here, so hosts keep their own reference to it (the
