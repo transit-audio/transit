@@ -1,4 +1,4 @@
-//! `cargo xtask <ci|layers|file-size|assets|timing|wasm|rt-targets|audio-bench|ico>` — repository gates.
+//! `cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico>` — repository gates.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
@@ -72,15 +72,14 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-engine", 4),
     ("transit-playback", 4),
     ("transit-automation", 5),
-    ("transit-ui-egui", 6),
     ("transit-ui-studio", 6),
 ];
 /// Standalone crates have no workspace dependencies (dev-dependencies excepted).
 const STANDALONE: &[&str] = &["transit-time", "transit-audio-io", "transit-audio-backend", "transit-midi-io", "transit-midi", "transit-dsp"];
 // The image crate encodes screenshots (PNG); it is not a UI-only dependency.
-const UI_CRATES: &[&str] = &["craft-ui", "egui", "eframe", "winit", "egui_kittest", "rfd", "egui-wgpu", "egui_glow", "egui_extras", "resvg", "wgpu"];
+const UI_CRATES: &[&str] = &["egui", "eframe", "winit", "rfd", "egui-wgpu", "egui_glow", "egui_extras", "resvg", "wgpu"];
 // audio-bench is an app over playback and the native backends, not an engine layer.
-const EXEMPT: &[&str] = &["soundcraft", "transit-cli", "transit-web", "transit", "xtask", "audio-bench"];
+const EXEMPT: &[&str] = &["soundcraft", "transit-cli", "transit", "xtask", "audio-bench"];
 /// Manifest exceptions to the workspace unsafe forbid (ADR 0013 and its amendments).
 const UNSAFE_ALLOWED: &[&str] =
     &["transit-rt", "transit-audio-wasapi", "transit-audio-asio", "transit-audio-jack", "transit-clap-host", "transit-vst3-host", "transit-au-host"];
@@ -214,31 +213,6 @@ fn assets() -> Result<(), String> {
     }
 }
 
-/// Crates that must compile for the web.
-const WASM: &[&str] = &[
-    "transit-time",
-    "transit-audio-io",
-    "transit-audio-backend",
-    "transit-midi",
-    "transit-dsp",
-    "transit-model",
-    "transit-mix",
-    "transit-engine",
-    "transit-playback",
-    "transit-automation",
-    "transit-ui-egui",
-    "transit-web",
-];
-
-fn wasm() -> Result<(), String> {
-    let mut args = vec!["check", "--target", "wasm32-unknown-unknown"];
-    for c in WASM {
-        args.push("-p");
-        args.push(c);
-    }
-    cargo(&args)
-}
-
 /// `transit-rt` type-checks and lints clean on every platform it has code for (ADR 0013, 5),
 /// with and without the portable fallback. Needs `rustup target add` for each; no linker needed.
 const RT_TARGETS: &[&str] = &["x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-apple-darwin"];
@@ -279,7 +253,6 @@ fn ci() -> Result<(), String> {
         ("assets", Box::new(assets)),
         ("layers", Box::new(layers)),
         ("timing", Box::new(|| timing::run(&root()))),
-        ("wasm", Box::new(wasm)),
         ("rt-targets", Box::new(rt_targets)),
         ("audio-bench-fake", Box::new(audio_bench_fake)),
     ];
@@ -303,7 +276,7 @@ fn main() -> ExitCode {
     if let Some(gate) = args
         .first()
         .map(String::as_str)
-        .filter(|g| ["ci", "layers", "file-size", "assets", "timing", "wasm", "rt-targets", "audio-bench", "ico"].contains(g))
+        .filter(|g| ["ci", "layers", "file-size", "assets", "timing", "rt-targets", "audio-bench", "ico"].contains(g))
     {
         announce(gate);
     }
@@ -313,11 +286,10 @@ fn main() -> ExitCode {
         Some("file-size") => file_size::run(&root()),
         Some("assets") => assets(),
         Some("timing") => timing::run(&root()),
-        Some("wasm") => wasm(),
         Some("rt-targets") => rt_targets(),
         Some("audio-bench") => audio_bench(args.get(1..).unwrap_or(&[])),
         Some("ico") => ico::run(args.get(1..).unwrap_or(&[])),
-        _ => Err("usage: cargo xtask <ci|layers|file-size|assets|timing|wasm|rt-targets|audio-bench|ico>".into()),
+        _ => Err("usage: cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico>".into()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,

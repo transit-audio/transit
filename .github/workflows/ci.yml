@@ -1,5 +1,5 @@
 # The push gate (issue #4): clippy, tests and the layer check on every pull request and every push
-# to main, on Windows (default WASAPI, native WASAPI, ASIO), Linux and macOS, plus the web build.
+# to main, on Windows (default WASAPI, native WASAPI, ASIO), Linux and macOS.
 # Hardware tests are #[ignore]d and never run here (docs/contributing/evidence/hardware-and-ci.md).
 # release.yml and rt.yml still run on tags; rt.yml also runs on pushes and pull requests that touch
 # the realtime crates.
@@ -109,17 +109,3 @@ jobs:
       - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace
-
-  wasm:
-    name: wasm
-    runs-on: ubuntu-22.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Install Rust
-        run: rustup toolchain install stable --profile minimal --target wasm32-unknown-unknown --no-self-update && rustup default stable
-        shell: bash
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
-        with:
-          key: wasm
-      - run: cargo xtask wasm
