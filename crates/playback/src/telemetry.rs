@@ -452,13 +452,14 @@ pub(crate) fn callback_entered() {
 }
 
 /// The strips' deadline of the next engine block of the running callback: entry + (blocks
-/// rendered + 1) x `period` x 3/4. `None` outside a device callback (the engine then measures
-/// from its own entry).
+/// rendered + 1) x `period` x `percent` / 100 (the engine's share,
+/// `MixEngine::strip_deadline_percent`; 75 unless `TRANSIT_STRIP_DEADLINE_PERCENT` set another).
+/// `None` outside a device callback (the engine then measures from its own entry).
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn next_block_deadline(period: Duration) -> Option<std::time::Instant> {
+pub(crate) fn next_block_deadline(period: Duration, percent: u32) -> Option<std::time::Instant> {
     let (start, done) = CALLBACK.get()?;
     CALLBACK.set(Some((start, done.saturating_add(1))));
-    start.checked_add(period.saturating_mul(done.saturating_add(1)) * 3 / 4)
+    start.checked_add(transit_mix::strip_deadline_share(period.saturating_mul(done.saturating_add(1)), percent))
 }
 
 /// std::Instant is not implemented on wasm32-unknown-unknown. Do not call it there or invent

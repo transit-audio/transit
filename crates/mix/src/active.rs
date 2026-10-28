@@ -744,10 +744,14 @@ impl MixEngine {
         #[cfg(not(target_arch = "wasm32"))]
         if self.pool.is_none() && !on_audio_thread() {
             let promote = !render_pool::env_flag(RENDER_NO_PRIORITY_ENV, "SOUNDCRAFT_RENDER_NO_PRIORITY");
+            let percent = render_pool::strip_deadline_percent();
             {
-                match strip_pool::StripPool::new(workers.min(MAX_RENDER_WORKERS), strips.clamp(1, strip_pool::POOL_STRIPS), promote) {
+                match strip_pool::StripPool::new(workers.min(MAX_RENDER_WORKERS), strips.clamp(1, strip_pool::POOL_STRIPS), promote, percent) {
                     Ok(pool) => {
-                        log::info!("mix: {workers} render workers ({})", if promote { "promoted" } else { "default priority" });
+                        log::info!(
+                            "mix: {workers} render workers ({}); strip deadline {percent}% of the period",
+                            if promote { "promoted" } else { "default priority" }
+                        );
                         self.pool = Some(pool);
                     }
                     Err(e) => log::warn!("mix: no render workers ({e}); the audio thread renders strips itself"),
@@ -773,6 +777,15 @@ impl MixEngine {
     #[must_use]
     pub fn render_workers(&self) -> usize {
         self.pool.as_ref().map_or(0, strip_pool::StripPool::workers)
+    }
+
+    /// The strips' deadline, percent of the block period: the share the render workers were
+    /// started with ([`STRIP_DEADLINE_PERCENT_ENV`], #172), [`DEFAULT_STRIP_DEADLINE_PERCENT`]
+    /// without them (it then decides nothing). Playback computes [`MixEngine::set_block_deadline`]
+    /// with it. Allocation-free; any thread.
+    #[must_use]
+    pub fn strip_deadline_percent(&self) -> u32 {
+        self.pool.as_ref().map_or(DEFAULT_STRIP_DEADLINE_PERCENT, strip_pool::StripPool::deadline_percent)
     }
 
     /// What each render worker's promotion achieved, by worker (`None` before it ran, or with
@@ -808,9 +821,9 @@ impl MixEngine {
         self.pool.as_ref().map_or(0, strip_pool::StripPool::last_overruns)
     }
 
-    /// Overrides the strips' deadline, measured from the block's start (default: three quarters
-    /// of the block's period). For tests and the bench: a long budget makes the pool path wait
-    /// for every worker, a short one forces overruns.
+    /// Overrides the strips' deadline, measured from the block's start (default: the pool's share
+    /// of the block's period, [`MixEngine::strip_deadline_percent`]). For tests and the bench: a
+    /// long budget makes the pool path wait for every worker, a short one forces overruns.
     #[doc(hidden)]
     pub fn set_strip_deadline(&mut self, budget: Option<std::time::Duration>) {
         self.strip_deadline = budget;
@@ -818,8 +831,9 @@ impl MixEngine {
 
     /// Audio thread, before a block: the strips' deadline for the next `render_active`, measured
     /// from the device callback's entry (playback passes callback entry + (blocks rendered in
-    /// this callback + 1) x block period x 3/4). A late wake or the callback's own work before
-    /// the render then shortens the strips' budget instead of moving the deadline. Without it
+    /// this callback + 1) x block period x [`MixEngine::strip_deadline_percent`] / 100, through
+    /// [`strip_deadline_share`]). A late wake or the callback's own work before the render then
+    /// shortens the strips' budget instead of moving the deadline. Without it
     /// the deadline is measured from `render_active`'s entry. Taken by that one block.
     pub fn set_block_deadline(&mut self, deadline: Option<std::time::Instant>) {
         self.block_deadline = deadline;

@@ -151,7 +151,7 @@ fn a_strip_rendered_inline_marks_the_phase_marker() {
         tr.mixer.inserts[0] = Some(Insert::new("room_reverb"));
     }
     let mut eng = RangeRender::new(&s, None, transit_time::Range::new(0, 512 * 40), 512).eng;
-    eng.pool = Some(StripPool::new(0, 16, false).unwrap());
+    eng.pool = Some(StripPool::new(0, 16, false, DEFAULT_STRIP_DEADLINE_PERCENT).unwrap());
     // A cost history for every strip: a strip without one is never rendered inline (#168).
     eng.seed_strip_costs(Duration::from_micros(1));
     eng.set_strip_deadline(Some(Duration::from_secs(30)));
@@ -179,4 +179,37 @@ fn a_strip_rendered_inline_marks_the_phase_marker() {
     assert_eq!(stamp.gap_phase, Phase::StripRender, "the inline strip renders marked their phase: {stamp:?}");
     assert!(stamp.gap_strip < 6, "with the strip's track index: {stamp:?}");
     drop(eng.into_retired());
+}
+
+/// #172: the strips' deadline share decides whether a strip whose render is longer than three
+/// quarters of the period but shorter than one and a half is mixed. One strip, a render of 1.1
+/// periods (128 frames at 48 kHz) begun at the block's start: at 75% its worker is still
+/// rendering at the deadline (`Overrun(Late)`), at 150% it is done before it (`Mixed`).
+///
+/// Driven by construction, not by the clock: the pool has no worker and the test claims the
+/// slot itself as the worker. The block's start is placed one budget in the past (the pool's
+/// own `strip_budget`, the budget `render` hands `finish`), so `finish`'s deadline has already
+/// come when it is called and it returns at once, and the slot shows the render's state at the
+/// deadline: completed if the render took no longer than the budget, still claimed if not.
+#[test]
+fn a_render_of_1_1_periods_is_late_at_75_percent_and_mixed_at_150() {
+    let (frames, rate) = (128, 48_000);
+    let render = block_period(frames, rate) * 11 / 10;
+    for (percent, expected) in [(75, Outcome::Overrun(OverrunCause::Late)), (150, Outcome::Mixed)] {
+        let mut pool = StripPool::new(0, 1, false, percent).unwrap();
+        let budget = pool.strip_budget(frames, rate);
+        assert_eq!(budget, block_period(frames, rate) * percent / 100, "the pool's share of the period");
+        assert_eq!(pool.reader().snapshot().deadline_percent, u64::from(percent), "the report's share");
+        assert!(pool.set.begin_block(1));
+        assert_eq!(pool.set.publish(0), Ok(Published::Published));
+        let start = Instant::now().checked_sub(budget).unwrap();
+        match pool.set.jobs().slot(0).and_then(transit_rt::strip_jobs::JobSlot::try_claim) {
+            Some(token) if render <= budget => token.complete(),
+            // Still rendering at the deadline: a token left uncompleted keeps the slot claimed.
+            Some(_still_rendering) => {}
+            None => panic!("the test claims the slot as the worker"),
+        }
+        pool.set.finish(start + budget, |_| panic!("a claimed strip is never rendered inline"));
+        assert_eq!(pool.set.outcome(0), Some(expected), "at {percent}% of the period");
+    }
 }

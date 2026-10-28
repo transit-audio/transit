@@ -66,6 +66,56 @@ pub const RENDER_POOL_ENV: &str = "TRANSIT_RENDER_POOL";
 /// `SOUNDCRAFT_RENDER_NO_PRIORITY` remains an alias when this variable is unset.
 pub const RENDER_NO_PRIORITY_ENV: &str = "TRANSIT_RENDER_NO_PRIORITY";
 
+/// Environment variable (#172): the strips' deadline as a whole-number percentage of the block
+/// period, from 25 to 300; unset, [`DEFAULT_STRIP_DEADLINE_PERCENT`]. A measurement knob for the
+/// render workers (ADR 0029 "Deadline"): it moves the one deadline `finish` waits to and the
+/// inline admission measures against. Read once per process, when the first engine starts its
+/// render workers; anything else is logged once and ignored. No effect with the workers off.
+pub const STRIP_DEADLINE_PERCENT_ENV: &str = "TRANSIT_STRIP_DEADLINE_PERCENT";
+
+/// The strips' deadline share of the period unless [`STRIP_DEADLINE_PERCENT_ENV`] sets another:
+/// three quarters, which leaves a quarter for the auxes, the masters, the output copy and the
+/// driver.
+pub const DEFAULT_STRIP_DEADLINE_PERCENT: u32 = 75;
+
+/// The shares [`STRIP_DEADLINE_PERCENT_ENV`] accepts, percent of the period.
+pub const STRIP_DEADLINE_PERCENT_RANGE: std::ops::RangeInclusive<u32> = 25..=300;
+
+/// The strips' share of `span` (a block period, or several of one callback) at `percent`: the
+/// one rule both the engine's own deadline and playback's callback deadline use. Allocation-free.
+#[must_use]
+pub fn strip_deadline_share(span: std::time::Duration, percent: u32) -> std::time::Duration {
+    span.saturating_mul(percent) / 100
+}
+
+/// The share a [`STRIP_DEADLINE_PERCENT_ENV`] value sets: unset is the default, a whole number in
+/// [`STRIP_DEADLINE_PERCENT_RANGE`] is taken, anything else is `Err` (the caller keeps the
+/// default).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn deadline_percent_value(value: Option<&str>) -> Result<u32, ()> {
+    let Some(v) = value else { return Ok(DEFAULT_STRIP_DEADLINE_PERCENT) };
+    v.trim().parse::<u32>().ok().filter(|p| STRIP_DEADLINE_PERCENT_RANGE.contains(p)).ok_or(())
+}
+
+/// Reads [`STRIP_DEADLINE_PERCENT_ENV`] once per process (never on the audio thread: the engine
+/// calls it where it starts its render workers); a rejected value is logged once.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn strip_deadline_percent() -> u32 {
+    static PERCENT: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *PERCENT.get_or_init(|| {
+        let value = std::env::var(STRIP_DEADLINE_PERCENT_ENV).ok();
+        deadline_percent_value(value.as_deref()).unwrap_or_else(|()| {
+            log::warn!(
+                "mix: {STRIP_DEADLINE_PERCENT_ENV}={:?} ignored (a whole number from {} to {}); the strips' deadline stays {DEFAULT_STRIP_DEADLINE_PERCENT}% of the period",
+                value.unwrap_or_default(),
+                STRIP_DEADLINE_PERCENT_RANGE.start(),
+                STRIP_DEADLINE_PERCENT_RANGE.end()
+            );
+            DEFAULT_STRIP_DEADLINE_PERCENT
+        })
+    })
+}
+
 /// Audio-thread strips render serially when set ([`MixEngine::force_serial`]). On by default;
 /// [`RENDER_POOL_ENV`] clears it at startup.
 pub(crate) static FORCE_SERIAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
@@ -168,6 +218,8 @@ pub(crate) fn release_instrument(st: &mut Strip) {
 pub struct StripFaults {
     /// Render worker threads (0: no pool, the strips render serially).
     pub workers: u64,
+    /// The strips' deadline, percent of the block period ([`STRIP_DEADLINE_PERCENT_ENV`], #172).
+    pub deadline_percent: u64,
     /// Blocks the pool rendered.
     pub blocks: u64,
     /// Strip overruns because a worker still held the strip from an earlier block: not rendered
@@ -270,6 +322,41 @@ impl StripFaults {
     #[must_use]
     pub const fn overruns(&self) -> u64 {
         self.overruns_busy + self.overruns_late + self.overruns_unstarted
+    }
+}
+
+#[cfg(test)]
+mod deadline_percent_tests {
+    use super::*;
+
+    #[test]
+    fn unset_is_three_quarters_of_the_period() {
+        assert_eq!(deadline_percent_value(None), Ok(75));
+        assert_eq!(DEFAULT_STRIP_DEADLINE_PERCENT, 75);
+    }
+
+    #[test]
+    fn a_whole_number_from_25_to_300_is_taken() {
+        for (v, p) in [("25", 25), ("75", 75), ("100", 100), (" 150 ", 150), ("300", 300)] {
+            assert_eq!(deadline_percent_value(Some(v)), Ok(p), "{v:?}");
+        }
+    }
+
+    #[test]
+    fn out_of_range_or_garbage_is_rejected() {
+        for v in ["24", "0", "301", "1000", "-75", "75%", "0.75", "1.5", "", "  ", "abc", "99999999999"] {
+            assert_eq!(deadline_percent_value(Some(v)), Err(()), "{v:?}");
+        }
+    }
+
+    #[test]
+    fn the_share_is_the_percentage_of_the_span() {
+        let period = std::time::Duration::from_micros(1000);
+        assert_eq!(strip_deadline_share(period, 75), std::time::Duration::from_micros(750));
+        assert_eq!(strip_deadline_share(period, 150), std::time::Duration::from_micros(1500));
+        // The old rule, `period * 3 / 4`, to the nanosecond.
+        let odd = std::time::Duration::from_nanos(1_333_333);
+        assert_eq!(strip_deadline_share(odd, 75), odd * 3 / 4);
     }
 }
 

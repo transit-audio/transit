@@ -46,9 +46,6 @@ const RING: usize = 64;
 const LIVE: usize = 32;
 /// Identity side-table entries per strip: everything the ring and the live buffer can hold.
 const SIDE: usize = RING + LIVE;
-/// The strips' share of the block period: `finish` returns by `start + period * 3 / 4`, which
-/// leaves a quarter of the period for the auxes, the masters, the output copy and the driver.
-const DEADLINE_SHARE: (u32, u32) = (3, 4);
 /// `finish` returning later than this past its deadline counts as an overshoot (the callback
 /// started late, or one admitted inline render ran over).
 const OVERSHOOT: Duration = Duration::from_micros(100);
@@ -209,6 +206,7 @@ struct Counters {
     overrun_blocks: AtomicU64,
     misuse: AtomicU64,
     overshoot: AtomicU64,
+    deadline_percent: AtomicU64,
 }
 
 /// Reads an engine's [`StripFaults`] from any thread (relaxed loads; each figure exact on its own).
@@ -231,6 +229,7 @@ impl StripFaultsReader {
         let d = self.defer.total();
         StripFaults {
             workers: r(&c.workers),
+            deadline_percent: r(&c.deadline_percent),
             blocks: r(&c.blocks),
             overruns_busy: r(&c.overruns_busy),
             overruns_late: r(&c.overruns_late),
@@ -336,16 +335,20 @@ pub(crate) struct StripPool {
     /// Per strip: the identity of the processing chain the cell last published ([`chain_identity`];
     /// `None` before its first publish). When it changes, the strip's cost history is reset.
     chain: Box<[Option<u64>]>,
+    /// The strips' deadline, percent of the block period (#172; read once at construction).
+    deadline_percent: u32,
 }
 
 impl StripPool {
-    /// `workers` threads for `strips` cells (control thread; allocates).
-    pub(crate) fn new(workers: usize, strips: usize, promote: bool) -> std::io::Result<Self> {
+    /// `workers` threads for `strips` cells, the strips' deadline at `deadline_percent` of the
+    /// period (control thread; allocates).
+    pub(crate) fn new(workers: usize, strips: usize, promote: bool, deadline_percent: u32) -> std::io::Result<Self> {
         let cells = Arc::new(Cells((0..strips).map(|_| Mutex::new(Job::new())).collect()));
         let counters = Arc::new(Counters::default());
         let runner = Arc::new(Runner { cells: Arc::clone(&cells), counters: Arc::clone(&counters) });
         let set = WorkerSet::new(Config { workers, strips, promote }, runner)?;
         counters.workers.store(set.workers() as u64, Ordering::Relaxed);
+        counters.deadline_percent.store(u64::from(deadline_percent), Ordering::Relaxed);
         Ok(StripPool {
             set,
             cells,
@@ -364,11 +367,23 @@ impl StripPool {
             generation: 0,
             last_overruns: 0,
             chain: vec![None; strips].into_boxed_slice(),
+            deadline_percent,
         })
     }
 
     pub(crate) fn workers(&self) -> usize {
         self.set.workers()
+    }
+
+    /// The strips' deadline, percent of the block period.
+    pub(crate) fn deadline_percent(&self) -> u32 {
+        self.deadline_percent
+    }
+
+    /// The strips' budget of one block of `frames` at `rate`, measured from the block's start:
+    /// the pool's share of the period (#172). Allocation-free.
+    pub(crate) fn strip_budget(&self, frames: usize, rate: u32) -> Duration {
+        strip_deadline_share(block_period(frames, rate), self.deadline_percent)
     }
 
     /// Seeds every cell's cost history with `cost` (zero clears it); see
@@ -776,8 +791,10 @@ impl StripPool {
             }
         }
         self.counters.callback_renders.fetch_add(callback, Ordering::Relaxed);
-        let budget = b.budget.unwrap_or_else(|| block_period(b.frames, b.sample_rate) * DEADLINE_SHARE.0 / DEADLINE_SHARE.1);
-        // A test's budget override wins; then the callback's deadline; then the block's entry.
+        let budget = b.budget.unwrap_or_else(|| self.strip_budget(b.frames, b.sample_rate));
+        // A test's budget override wins; then the callback's deadline (playback computes it with
+        // this pool's share, `MixEngine::strip_deadline_percent`); then the block's entry. One
+        // deadline: `finish` waits to it and its inline admission measures the time left to it.
         let deadline = match (b.budget, b.deadline) {
             (None, Some(d)) => d,
             _ => b.start + budget.min(Duration::from_secs(3600)),
