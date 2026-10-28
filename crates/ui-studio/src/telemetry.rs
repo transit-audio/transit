@@ -25,6 +25,13 @@ Over-budget callbacks (nominal): callbacks whose work time exceeded that budget.
 Nominal: the budget is frames / device rate, not the time left before the hardware deadline. A callback can miss that \
 deadline without exceeding the nominal budget, so zero does not prove glitch-free audio.";
 
+/// Space the details window keeps under its scrolling rows: title bar, button row, frame margins
+/// and a gap above the bottom edge.
+const SCROLL_RESERVE: f32 = 150.0;
+
+/// The least height the rows get on a very short window.
+const MIN_SCROLL_H: f32 = 80.0;
+
 /// Where the readout and its window were last drawn, for `ui.inspect` and tests.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct TelemetryLayout {
@@ -342,37 +349,47 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let mut copy_rect = egui::Rect::NOTHING;
     let mut reset_rect = [0.0; 4];
     let mut open = true;
+    let content = ctx.content_rect();
+    let top = crate::theme::TRANSPORT_H + 40.0;
+    // The rows scroll inside what is left under the title bar, so the buttons below stay on the
+    // screen however many rows the render pool adds (#171).
+    let scroll_h = (content.bottom() - top - SCROLL_RESERVE).max(MIN_SCROLL_H);
     let r = egui::Window::new("Callback Telemetry")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
-        .default_pos(egui::pos2(ctx.content_rect().right() - 560.0, crate::theme::TRANSPORT_H + 40.0))
+        .constrain(true)
+        .default_pos(egui::pos2((content.right() - 560.0).max(content.left()), top))
         .show(ctx, |ui| {
             ui.set_width(520.0);
             // Side by side, so the window stays short enough to sit under the transport bar.
-            ui.horizontal_top(|ui| {
-                ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("Callback work time (callbacks per bin)").strong().color(TOKENS.text));
-                    egui::Grid::new("telemetry_hist").num_columns(2).spacing([2.0 * SPACE, SPACE / 2.0]).show(ui, |ui| {
-                        for (i, n) in snap.duration_histogram.iter().enumerate() {
-                            ui.label(egui::RichText::new(bin_label(i)).color(TOKENS.text_dim));
-                            ui.label(egui::RichText::new(n.to_string()).font(crate::theme::mono(ui.ctx(), 12.0)).color(TOKENS.text));
-                            ui.end_row();
-                        }
+            egui::ScrollArea::vertical().id_salt("telemetry_rows").max_height(scroll_h).auto_shrink([false, true]).show(ui, |ui| {
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new("Callback work time (callbacks per bin)").strong().color(TOKENS.text));
+                        egui::Grid::new("telemetry_hist").num_columns(2).spacing([2.0 * SPACE, SPACE / 2.0]).show(ui, |ui| {
+                            for (i, n) in snap.duration_histogram.iter().enumerate() {
+                                ui.label(egui::RichText::new(bin_label(i)).color(TOKENS.text_dim));
+                                ui.label(egui::RichText::new(n.to_string()).font(crate::theme::mono(ui.ctx(), 12.0)).color(TOKENS.text));
+                                ui.end_row();
+                            }
+                        });
+                    });
+                    ui.add_space(2.0 * SPACE);
+                    ui.vertical(|ui| {
+                        ui.label(egui::RichText::new("Counts").strong().color(TOKENS.text));
+                        egui::Grid::new("telemetry_counts").num_columns(2).spacing([2.0 * SPACE, SPACE / 2.0]).show(ui, |ui| {
+                            for row in rows.iter().skip(snap.duration_histogram.len() + 1) {
+                                let (k, v) = row.rsplit_once(": ").unwrap_or((row, ""));
+                                ui.label(egui::RichText::new(k).color(TOKENS.text_dim));
+                                ui.label(egui::RichText::new(v).font(crate::theme::mono(ui.ctx(), 12.0)).color(TOKENS.text));
+                                ui.end_row();
+                            }
+                        });
                     });
                 });
-                ui.add_space(2.0 * SPACE);
-                ui.vertical(|ui| {
-                    ui.label(egui::RichText::new("Counts").strong().color(TOKENS.text));
-                    egui::Grid::new("telemetry_counts").num_columns(2).spacing([2.0 * SPACE, SPACE / 2.0]).show(ui, |ui| {
-                        for row in rows.iter().skip(snap.duration_histogram.len() + 1) {
-                            let (k, v) = row.rsplit_once(": ").unwrap_or((row, ""));
-                            ui.label(egui::RichText::new(k).color(TOKENS.text_dim));
-                            ui.label(egui::RichText::new(v).font(crate::theme::mono(ui.ctx(), 12.0)).color(TOKENS.text));
-                            ui.end_row();
-                        }
-                    });
-                });
+                ui.add_space(SPACE);
+                ui.label(egui::RichText::new(EXPLAIN).color(TOKENS.text_dim).size(11.0));
             });
             ui.add_space(SPACE);
             ui.horizontal(|ui| {
@@ -384,7 +401,6 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 ui.label(egui::RichText::new(format!("Now {} (last second)", load_text(snap.current_load_ppm))).color(TOKENS.text_dim));
                 (copy_rect, copy_clicked) = app.diagnostics_button(ui);
             });
-            ui.label(egui::RichText::new(EXPLAIN).color(TOKENS.text_dim).size(11.0));
         });
     if let Some(r) = r {
         app.telemetry.layout.window = crate::arrange::r4(r.response.rect);

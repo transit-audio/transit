@@ -24,13 +24,14 @@ impl T {
     }
 
     fn frames(&mut self, n: usize) {
+        self.frames_at(n, egui::vec2(1400.0, 800.0));
+    }
+
+    fn frames_at(&mut self, n: usize, size: egui::Vec2) {
         for _ in 0..n {
             self.time += 1.0 / 60.0;
-            let mut raw = egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1400.0, 800.0))),
-                time: Some(self.time),
-                ..Default::default()
-            };
+            let mut raw =
+                egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)), time: Some(self.time), ..Default::default() };
             self.app.raw_input_hook(&mut raw);
             let app = &mut self.app;
             let mut out = self.ctx.run_ui(raw, |ui| {
@@ -1076,4 +1077,58 @@ fn the_details_window_copies_diagnostics_with_the_counters() {
     assert!(text.contains("== Callback telemetry =="), "{text}");
     assert!(text.contains("Callbacks: 1234"), "the counters the window shows: {text}");
     assert!(t.app.diagnostics_copied(t.time - 1.0), "Copied shows");
+}
+
+fn pool_snap(strips: usize) -> transit_playback::telemetry::CallbackTelemetry {
+    let mut top = [None; transit_mix::TOP_STRIPS];
+    for (i, slot) in top.iter_mut().enumerate().take(strips) {
+        *slot = Some(transit_mix::StripFigure { track: i as u32, overruns_busy: 9 - i as u64, ..Default::default() });
+    }
+    let f = transit_mix::StripFaults {
+        workers: 7,
+        top_strips: top,
+        lateness: [5, 4, 3, 2, 1, 0, 6],
+        wake: [10, 20, 30, 0, 0, 0, 1],
+        ..Default::default()
+    };
+    transit_playback::telemetry::CallbackTelemetry { strip_faults: Some(f), ..snap() }
+}
+
+/// Open the details window at 1920x1080 over `s`; returns its window rect, the two buttons and the row count.
+fn telemetry_window_at_1080p(s: transit_playback::telemetry::CallbackTelemetry) -> ([f32; 4], [f32; 4], [f32; 4], usize) {
+    let size = egui::vec2(1920.0, 1080.0);
+    let mut t = T::new();
+    t.app.telemetry.injected = Some(s);
+    t.frames_at(30, size);
+    let rect: [f32; 4] = serde_json::from_value(t.inspect()["telemetry"]["rect"].clone()).unwrap();
+    t.app.telemetry.open = true;
+    t.frames_at(30, size);
+    let _ = rect;
+    let tel = t.inspect()["telemetry"].clone();
+    assert_eq!(tel["open"], true);
+    let get = |k: &str| -> [f32; 4] { serde_json::from_value(tel[k].clone()).unwrap() };
+    let rows: Vec<String> = serde_json::from_value(tel["rows"].clone()).unwrap();
+    (get("window"), get("reset_peak"), get("copy_diagnostics"), rows.len())
+}
+
+#[test]
+fn the_details_window_keeps_its_buttons_on_screen_with_the_pool_rows() {
+    let (w, reset, copy, rows) = telemetry_window_at_1080p(pool_snap(transit_mix::TOP_STRIPS));
+    assert!(rows > 60, "the pool rows are present: {rows}");
+    assert!(w[3] <= 1080.0, "the window ends inside the screen: {w:?}");
+    assert!(w[1] >= 0.0 && w[0] >= 0.0 && w[2] <= 1921.0, "{w:?}");
+    for (name, b) in [("Reset peak", reset), ("Copy diagnostics", copy)] {
+        assert!(b[2] > b[0], "{name} is drawn");
+        assert!(b[1] >= w[1] && b[3] <= w[3] && b[3] <= 1080.0, "{name} {b:?} is inside the window {w:?} and the screen");
+    }
+}
+
+#[test]
+fn the_serial_details_window_is_no_taller_than_it_was_and_shorter_than_the_pool_one() {
+    let (serial, ..) = telemetry_window_at_1080p(snap());
+    let (pool, ..) = telemetry_window_at_1080p(pool_snap(transit_mix::TOP_STRIPS));
+    let (small, ..) = telemetry_window_at_1080p(pool_snap(0));
+    let h = |r: [f32; 4]| r[3] - r[1];
+    assert!(h(serial) < h(small) && h(small) <= h(pool), "serial {serial:?}, pool without strips {small:?}, pool {pool:?}");
+    assert!(h(serial) < 560.0, "the serial window fits without scrolling: {serial:?}");
 }
