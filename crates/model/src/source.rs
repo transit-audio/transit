@@ -1,5 +1,4 @@
-//! Audio sources (files in the session's Audio Files folder) and their decoded data, and the
-//! movies video clips reference.
+//! Audio sources (files in the session's Audio Files folder) and their decoded data.
 
 use crate::SourceId;
 use std::collections::BTreeMap;
@@ -23,39 +22,6 @@ pub struct Source {
     /// True when the file has not been written to disk yet (recorded/rendered this session).
     #[serde(default)]
     pub unsaved: bool,
-}
-
-/// A movie used by Video track clips (serialised). The pictures themselves are never stored in
-/// the session: the UI opens the movie from `path` and decodes frames on demand.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct VideoSource {
-    pub id: SourceId,
-    pub name: String,
-    /// Absolute path of the movie (referenced, never copied into the session folder).
-    pub path: String,
-    #[serde(default)]
-    pub width: u32,
-    #[serde(default)]
-    pub height: u32,
-    /// Frames per second (0 = unknown).
-    #[serde(default)]
-    pub frame_rate: f64,
-    /// Picture length in seconds.
-    #[serde(default)]
-    pub duration: f64,
-    /// Codec id (`h264`, `prores`, `mjpeg`, `hevc`, …).
-    #[serde(default)]
-    pub codec: String,
-    /// Why the movie is not opened, when its stored path was refused on opening the session.
-    #[serde(skip)]
-    pub offline: Option<String>,
-}
-
-impl VideoSource {
-    /// Display aspect ratio (width / height), 16:9 when unknown.
-    pub fn aspect(&self) -> f64 {
-        if self.width == 0 || self.height == 0 { 16.0 / 9.0 } else { f64::from(self.width) / f64::from(self.height) }
-    }
 }
 
 /// Decoded audio plus waveform overviews (not serialised).

@@ -16,6 +16,11 @@ Two per release, named `v<version>-<name>.transit`:
   mapping and an External Instrument track. When a release adds a serialized feature, extend the
   builder in `crates/engine/tests/corpus_generate.rs` to use it before generating that release's file.
 
+One file is hand-written, not saved by a build: `v0.3.2-video.transit` has an audio track, a Video
+track, a video clip and a `videos` entry. It pins the sanitize rule of ADR 0031 (it opens with the video
+dropped and one note) and is loaded by its own test, so the lossless round trip skips it (`SANITIZED`
+in `tests/corpus.rs`).
+
 Files hold the session JSON only, no `Audio Files/`. Nothing here reads audio.
 
 ## Producing a release's files

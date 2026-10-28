@@ -158,9 +158,6 @@ Track.mixer
 Track.name
 Track.playlists
 Track.view
-VideoSource.id
-VideoSource.name
-VideoSource.path
 ZoomState.presets
 ZoomState.samples_per_px
 ZoomState.scroll

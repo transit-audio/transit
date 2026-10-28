@@ -10,6 +10,7 @@ pub mod b64;
 mod clip;
 mod ids;
 mod io_map;
+pub mod legacy;
 mod markers;
 mod midi_input;
 mod midi_map;
@@ -44,7 +45,7 @@ pub use session::{
     BUNDLE_EXTENSION, BitDepthSetting, EditMode, EditState, FEET_FRAMES_START, MAX_COMMENT_CHARS, MAX_NAME_CHARS, SESSION_EXTENSION, Session,
     SessionError, Tool, ZoomState, ZoomToggle, is_session_file, truncate_chars,
 };
-pub use source::{Source, SourceAudio, SourcePool, VideoSource};
+pub use source::{Source, SourceAudio, SourcePool};
 pub use track::{Frozen, Playlist, TRACK_COLORS, Track, TrackHeight, TrackKind};
 
 pub use transit_time as time;
