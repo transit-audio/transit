@@ -152,6 +152,8 @@ fn a_strip_rendered_inline_marks_the_phase_marker() {
     }
     let mut eng = RangeRender::new(&s, None, transit_time::Range::new(0, 512 * 40), 512).eng;
     eng.pool = Some(StripPool::new(0, 16, false).unwrap());
+    // A cost history for every strip: a strip without one is never rendered inline (#168).
+    eng.seed_strip_costs(Duration::from_micros(1));
     eng.set_strip_deadline(Some(Duration::from_secs(30)));
     let marker = Arc::new(PhaseMarker::new());
     eng.set_phase_marker(Arc::clone(&marker));

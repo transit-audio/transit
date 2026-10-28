@@ -734,8 +734,9 @@ impl MixEngine {
     }
 
     /// [`MixEngine::start_render_workers`] with exactly `workers` threads; 0 makes the pool path
-    /// with no worker at all, where the callback renders every strip inline within its deadline
-    /// (a test can then force an outcome by construction, never by scheduling). For tests.
+    /// with no worker at all, where the callback renders inline every strip the admission rule
+    /// lets it (a strip needs a cost history first: [`MixEngine::seed_strip_costs`]), so a test
+    /// can force an outcome by construction, never by scheduling. For tests.
     #[doc(hidden)]
     pub fn start_render_workers_with(&mut self, strips: usize, workers: usize) -> usize {
         #[cfg(target_arch = "wasm32")]
@@ -754,6 +755,17 @@ impl MixEngine {
             }
         }
         self.render_workers()
+    }
+
+    /// Seeds every pool strip's cost history (its estimate and its worst case) with `cost`, as if
+    /// each had been rendered once in that time; zero clears it (ADR 0029, deviation 16: a strip
+    /// with no history is never rendered inline). Between blocks; nothing without workers. For
+    /// tests and the bench.
+    #[doc(hidden)]
+    pub fn seed_strip_costs(&mut self, cost: std::time::Duration) {
+        if let Some(pool) = self.pool.as_mut() {
+            pool.seed_costs(cost);
+        }
     }
 
     /// Render worker threads (0: none).

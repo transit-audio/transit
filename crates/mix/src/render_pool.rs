@@ -183,6 +183,15 @@ pub struct StripFaults {
     pub late_results: u64,
     /// Strips the callback rendered itself inside the deadline (unstarted by any worker).
     pub inline_renders: u64,
+    /// Unstarted strips the callback did not render itself because they had never been rendered
+    /// (no cost history; once per strip per block).
+    pub inline_refused_no_history: u64,
+    /// Unstarted strips the callback did not render itself because their worst observed render
+    /// time did not fit in the time left.
+    pub inline_refused_worst_case: u64,
+    /// Unstarted strips the callback did not render itself because they had overrun in the last
+    /// few blocks.
+    pub inline_refused_recent_overrun: u64,
     /// Strips the callback rendered itself because they read the live input or hardware, or lie
     /// past the pool's cells.
     pub callback_renders: u64,
@@ -195,7 +204,7 @@ pub struct StripFaults {
     /// Blocks with at least one strip overrun.
     pub overrun_blocks: u64,
     /// Blocks whose wait for the workers ended more than 100 µs past the strips' deadline (the
-    /// callback started late, or an inline render ran over its estimate).
+    /// callback started late, or an inline render ran longer than its worst observed time).
     pub deadline_overshoots: u64,
     /// Live MIDI events deferred for a strip a worker held.
     pub midi_deferred: u64,

@@ -44,6 +44,9 @@ pub struct Shared {
     pub reentries: AtomicU64,
     /// Nanoseconds the next render on a worker sleeps (taken by that render).
     pub stall_ns: AtomicU64,
+    /// Nanoseconds the next render sleeps on any thread, the callback included (taken by that
+    /// render): a plug-in's one-time load on its first real render.
+    pub load_ns: AtomicU64,
     /// Renders on a worker, and on the callback.
     pub on_worker: AtomicU64,
     pub on_callback: AtomicU64,
@@ -58,6 +61,7 @@ impl Shared {
             inside: AtomicBool::new(false),
             reentries: AtomicU64::new(0),
             stall_ns: AtomicU64::new(0),
+            load_ns: AtomicU64::new(0),
             on_worker: AtomicU64::new(0),
             on_callback: AtomicU64::new(0),
             cost: AtomicU64::new(0),
@@ -121,6 +125,10 @@ impl Plugin for ContinuityPlugin {
         let sh = &self.shared;
         if sh.inside.swap(true, Ordering::AcqRel) {
             sh.reentries.fetch_add(1, Ordering::Relaxed);
+        }
+        let load = sh.load_ns.swap(0, Ordering::Relaxed);
+        if load > 0 {
+            std::thread::sleep(Duration::from_nanos(load));
         }
         if CALLBACK.get() {
             sh.on_callback.fetch_add(1, Ordering::Relaxed);

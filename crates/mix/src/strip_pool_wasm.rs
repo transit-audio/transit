@@ -45,6 +45,9 @@ impl StripPool {
     pub(crate) fn workers(&self) -> usize {
         match *self {}
     }
+    pub(crate) fn seed_costs(&mut self, _cost: std::time::Duration) {
+        match *self {}
+    }
     pub(crate) fn promotions(&self) -> Vec<Option<transit_rt::Promotion>> {
         match *self {}
     }

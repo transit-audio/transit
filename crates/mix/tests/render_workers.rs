@@ -414,6 +414,9 @@ fn an_unstarted_strip_plays_its_overdue_notes_without_a_zero_length_one() {
     // has no time left, and no thread can have claimed it): `Unstarted`, every strip, every round.
     let mut rig = Rig::new(INSTRUMENTS, 0, FRAMES);
     rig.mix.start_render_workers_with(64, 0);
+    // A cost history for every strip, as a worker's render would leave (a strip without one is
+    // never rendered inline).
+    rig.mix.seed_strip_costs(Duration::from_micros(1));
     // Every other block has all the time it needs (the callback renders every strip inline, however
     // the machine is loaded), so only the forced blocks are unstarted.
     let ample = Duration::from_secs(30);
@@ -439,6 +442,110 @@ fn an_unstarted_strip_plays_its_overdue_notes_without_a_zero_length_one() {
     for (k, s) in rig.shared.iter().enumerate() {
         let r = s.report();
         assert_eq!((r.stuck_notes, r.faults.zero_length, r.faults.unsorted), (0, 0, 0), "instrument {k}: {r:?}");
+    }
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    drop(rig.mix.into_retired());
+}
+
+/// #168: a strip's first render is where a plug-in does its one-time load, and the callback
+/// cannot bound an inline render once it has started, so a strip with no cost history is never
+/// rendered inline: with no worker it is taken back unrendered (`Unstarted`, counted as refused
+/// for no history), its plug-in untouched, whatever the time left. Under the old rule (an
+/// estimate of zero fits any time left) the 20 ms block below rendered every strip inline and
+/// the load landed on the callback.
+#[test]
+fn a_strip_with_no_cost_history_is_never_rendered_inline() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    // No worker: only the callback could render a strip, so every outcome is by construction.
+    let mut rig = Rig::new(INSTRUMENTS, 0, FRAMES);
+    rig.mix.start_render_workers_with(64, 0);
+    rig.shared[2].load_ns.store(200_000_000, Ordering::Relaxed);
+    become_callback();
+    for k in 0..INSTRUMENTS {
+        assert!(rig.note_on(k, 5, 60).accepted());
+    }
+    // A passed deadline, then 20 ms to spare (the deadline only bounds the refused strips' spin).
+    rig.mix.set_strip_deadline(Some(Duration::ZERO));
+    rig.block();
+    rig.mix.set_strip_deadline(Some(Duration::from_millis(20)));
+    rig.block();
+    let f = rig.mix.strip_faults().unwrap().snapshot();
+    let n = INSTRUMENTS as u64;
+    assert_eq!((f.inline_renders, f.overruns_unstarted), (0, 2 * n), "{f:?}");
+    assert_eq!(f.inline_refused_no_history, 2 * n, "every strip, both blocks, refused for no history: {f:?}");
+    assert_eq!((f.inline_refused_worst_case, f.inline_refused_recent_overrun), (0, 0), "{f:?}");
+    for (k, s) in rig.shared.iter().enumerate() {
+        assert_eq!(s.on_callback.load(Ordering::Relaxed), 0, "instrument {k} was rendered on the callback");
+    }
+    assert_eq!(rig.shared[2].load_ns.load(Ordering::Relaxed), 200_000_000, "the one-time load never ran");
+    // Once it has a history (seeded here as a worker's render would leave it), it renders inline,
+    // and the notes held in its queue through the unstarted blocks play and release.
+    rig.shared[2].load_ns.store(0, Ordering::Relaxed);
+    rig.mix.seed_strip_costs(Duration::from_micros(1));
+    rig.mix.set_strip_deadline(Some(Duration::from_secs(30)));
+    for k in 0..INSTRUMENTS {
+        assert!(rig.note_off(k, 9, 60).accepted());
+    }
+    for _ in 0..8 {
+        rig.block();
+    }
+    let f = rig.mix.strip_faults().unwrap().snapshot();
+    assert_eq!((f.inline_renders, f.overruns()), (8 * n, 2 * n), "{f:?}");
+    for (k, s) in rig.shared.iter().enumerate() {
+        let r = s.report();
+        assert!(r.events > 0, "instrument {k} heard its notes");
+        assert_eq!((r.stuck_notes, r.faults.zero_length, r.faults.unsorted), (0, 0, 0), "instrument {k}: {r:?}");
+    }
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    drop(rig.mix.into_retired());
+}
+
+/// #168, the other half: a strip whose first render is a long one-time load gets it on a worker
+/// (with no history it cannot be rendered inline, so with time to spare the callback waits for
+/// the workers), and once a worker has rendered it the strip renders normally: no overrun, no
+/// stuck note, nothing entered twice.
+#[test]
+fn a_long_first_render_runs_on_a_worker_and_the_strip_renders_normally_after() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    // Time to spare: no strip can overrun, so every outcome below holds by construction.
+    let Some(mut rig) = rig(Duration::from_secs(30)) else {
+        MixEngine::force_serial(true);
+        return;
+    };
+    rig.shared[2].load_ns.store(100_000_000, Ordering::Relaxed);
+    become_callback();
+    for k in 0..INSTRUMENTS {
+        assert!(rig.note_on(k, 5, 60).accepted());
+    }
+    rig.block();
+    let f = rig.mix.strip_faults().unwrap().snapshot();
+    assert_eq!((f.inline_renders, f.overruns()), (0, 0), "no history: only the workers rendered the first block: {f:?}");
+    assert!(f.inline_refused_no_history > 0, "{f:?}");
+    for (k, s) in rig.shared.iter().enumerate() {
+        assert_eq!((s.on_worker.load(Ordering::Relaxed), s.on_callback.load(Ordering::Relaxed)), (1, 0), "instrument {k}");
+    }
+    assert_eq!(rig.shared[2].load_ns.load(Ordering::Relaxed), 0, "the load ran, on a worker");
+    for b in 0..60u32 {
+        let k = usize::try_from(b).unwrap() % INSTRUMENTS;
+        assert!(rig.note_off(k, 1, 60).accepted());
+        assert!(rig.note_on(k, 20, 60).accepted());
+        rig.block();
+    }
+    for k in 0..INSTRUMENTS {
+        assert!(rig.note_off(k, 0, 60).accepted());
+    }
+    rig.block();
+    let f = rig.mix.strip_faults().unwrap().snapshot();
+    assert_eq!(f.overruns(), 0, "{f:?}");
+    assert_eq!(f.conflicts, 0, "{f:?}");
+    for (k, s) in rig.shared.iter().enumerate() {
+        let r = s.report();
+        assert_eq!((r.stuck_notes, r.faults.orphan_offs, r.faults.zero_length, r.faults.unsorted), (0, 0, 0, 0), "instrument {k}: {r:?}");
+        assert_eq!(s.reentries.load(Ordering::Relaxed), 0, "instrument {k}");
     }
     transit_mix::unmark_audio_thread();
     MixEngine::force_serial(true);

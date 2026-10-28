@@ -195,6 +195,9 @@ struct Counters {
     overruns_busy: AtomicU64,
     overruns_late: AtomicU64,
     overruns_unstarted: AtomicU64,
+    refused_no_history: AtomicU64,
+    refused_worst_case: AtomicU64,
+    refused_recent_overrun: AtomicU64,
     late_results: AtomicU64,
     inline_renders: AtomicU64,
     callback_renders: AtomicU64,
@@ -229,6 +232,9 @@ impl StripFaultsReader {
             overruns_unstarted: r(&c.overruns_unstarted),
             late_results: r(&c.late_results),
             inline_renders: r(&c.inline_renders),
+            inline_refused_no_history: r(&c.refused_no_history),
+            inline_refused_worst_case: r(&c.refused_worst_case),
+            inline_refused_recent_overrun: r(&c.refused_recent_overrun),
             callback_renders: r(&c.callback_renders),
             faulted: r(&c.faulted),
             suspect: r(&c.suspect),
@@ -338,6 +344,14 @@ impl StripPool {
 
     pub(crate) fn workers(&self) -> usize {
         self.set.workers()
+    }
+
+    /// Seeds every cell's cost history with `cost` (zero clears it); see
+    /// [`MixEngine::seed_strip_costs`]. Between blocks only.
+    pub(crate) fn seed_costs(&mut self, cost: Duration) {
+        for i in 0..self.set.strips() {
+            self.set.set_cost_estimate(i, cost);
+        }
     }
 
     pub(crate) fn promotions(&self) -> Vec<Option<transit_rt::Promotion>> {
@@ -812,6 +826,9 @@ impl StripPool {
         c.overruns_unstarted.store(st.overruns_unstarted, Ordering::Relaxed);
         c.late_results.store(st.late_results, Ordering::Relaxed);
         c.inline_renders.store(st.inline_renders, Ordering::Relaxed);
+        c.refused_no_history.store(st.inline_refused_no_history, Ordering::Relaxed);
+        c.refused_worst_case.store(st.inline_refused_worst_case, Ordering::Relaxed);
+        c.refused_recent_overrun.store(st.inline_refused_recent_overrun, Ordering::Relaxed);
         c.misuse.store(st.misuse, Ordering::Relaxed);
         if overrun {
             c.overrun_blocks.fetch_add(1, Ordering::Relaxed);
