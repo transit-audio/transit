@@ -122,8 +122,8 @@ mod tests {
         }
     }
 
-    /// The floor before #176. It only ever rises, except by a removed feature.
-    const PARITY_FLOOR: u64 = 396;
+    /// The implemented count before #176 (measured on the base). It only ever rises, except by a removed feature.
+    const PARITY_FLOOR: u64 = 398;
     /// Implemented menu rows deleted with a removed feature (#176, video): File > Import > Video,
     /// Options > Video Track Online, Setup > Video Sync Offset and View > Dropped Video Frame
     /// Indicator. Engine parity went from 398 to 394 implemented rows (513 to 507 in all).
