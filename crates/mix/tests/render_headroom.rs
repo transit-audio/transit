@@ -20,10 +20,12 @@
 //! `TRANSIT_BENCH_LOAD=external` the rows are taken under whatever load the caller runs
 //! alongside (for example a `cargo check --workspace`).
 //!
-//! The strips' deadline is the engine's: `TRANSIT_STRIP_DEADLINE_PERCENT` of the period (25 to
-//! 300, default 75), read once per process, so one run measures one share; each worker row prints
-//! the share its engine used (`-` for serial, which has no deadline). Unset the variable before an
-//! ordinary `cargo test`: every pool test in the process would run at that share.
+//! The strips' deadline is the engine's: by default the share of the period for the row's buffer
+//! size (#172: 150% at 64 frames and below, 100% above; the bench hands the engine its block
+//! length as a device callback would), or `TRANSIT_STRIP_DEADLINE_PERCENT` of the period (25 to
+//! 300) at every size, read once per process, so one run measures one override; each worker row
+//! prints the share its engine used (`-` for serial, which has no deadline). Unset the variable
+//! before an ordinary `cargo test`: every pool test in the process would run at that share.
 //!
 //! Per configuration: late blocks per 2000 (render time over the period), the render time's p50,
 //! p95, p99 and max, strip overruns by cause, inline renders, and the continuity instruments'
@@ -93,7 +95,8 @@ struct Row {
     stuck: u64,
 }
 
-/// The strips' deadline share a row's engine used, percent of the period; `-` without workers.
+/// The strips' deadline share a row's engine used (the effective one: the rule for the row's
+/// buffer size, or the override), percent of the period; `-` without workers.
 fn share(f: &StripFaults) -> String {
     if f.workers == 0 { "-".into() } else { f.deadline_percent.to_string() }
 }
@@ -109,6 +112,8 @@ fn run(frames: usize, pool: bool, promote: bool, stall: bool) -> (Vec<Duration>,
     let mut rig = Rig::new(INSTRUMENTS, AUDIO, frames);
     if pool {
         assert!(rig.mix.start_render_workers(64) > 0, "no render workers on this machine");
+        // The device's callback length, as playback hands it (#172): the share follows it.
+        rig.mix.set_device_frames(u32::try_from(frames).unwrap());
     }
     for s in &rig.shared {
         s.cost.store(cost(), Ordering::Relaxed);
