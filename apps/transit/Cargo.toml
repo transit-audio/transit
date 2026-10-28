@@ -24,7 +24,6 @@ native-jack = ["transit-playback/native-jack"]
 
 [dependencies]
 transit-engine.workspace = true
-transit-ui-egui.workspace = true
 transit-ui-studio.workspace = true
 transit-playback.workspace = true
 eframe = { workspace = true, features = ["default_fonts", "wgpu", "accesskit", "wayland", "x11", "links"] }

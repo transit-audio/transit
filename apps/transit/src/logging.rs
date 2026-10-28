@@ -630,7 +630,7 @@ mod tests {
         // A module name is matched at `::` boundaries, not as a bare prefix.
         assert_eq!(f.level_for("wgpu_core_extra"), LevelFilter::Info);
         // A trailing `*` is a prefix.
-        assert_eq!(Filter::parse("warn,transit_ui*=debug").level_for("transit_ui_egui::mix_window"), LevelFilter::Debug);
+        assert_eq!(Filter::parse("warn,transit_ui*=debug").level_for("transit_ui_studio::mixer"), LevelFilter::Debug);
         assert_eq!(Filter::parse("warn,transit_ui*=debug").level_for("transit_engine"), LevelFilter::Warn);
         // A bare target name sets that target to the most verbose level, as env_logger does.
         assert_eq!(Filter::parse("naga").level_for("naga::front"), LevelFilter::Trace);

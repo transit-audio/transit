@@ -123,7 +123,7 @@ macro_rules! font {
 /// SoundCraft definitions (egui's built-in fonts, the system Hangul fallback) behind them.
 fn font_definitions() -> egui::FontDefinitions {
     use egui::FontFamily;
-    let mut defs = transit_ui_egui::fonts::definitions();
+    let mut defs = transit_ui_studio::fonts::definitions();
     let faces = [
         ("inter-regular", font!("inter/Inter-Regular.ttf")),
         ("inter-medium", font!("inter/Inter-Medium.ttf")),
@@ -527,10 +527,8 @@ fn main() -> eframe::Result {
     if !transit_rt::set_app_user_model_id(APP_USER_MODEL_ID) && cfg!(windows) {
         log::warn!("could not set the AppUserModelID");
     }
-    // Every native window of ours carries the icon: the main one below, the separate Mix window
-    // (a second viewport) through the registered copy.
+    // The main window carries the icon below; set_window_icons_from_exe covers the rest.
     let icon = Arc::new(app_icon());
-    transit_ui_egui::mix_window::set_window_icon(icon.clone());
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_icon(icon)

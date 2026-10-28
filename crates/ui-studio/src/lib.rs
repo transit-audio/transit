@@ -25,6 +25,7 @@ mod external_measure;
 pub mod fades;
 pub mod fine;
 pub mod finish;
+pub mod fonts;
 pub mod grid;
 pub mod groups;
 mod hardware_measure;
