@@ -69,4 +69,4 @@ A GPU power-state change lost the graphics device; egui-wgpu panicked on the UI 
 
 ## Related
 
-[ADR 0007](0007-per-plugin-suspension-not-a-global-engine-switch.md) (per-plug-in threading and suspension), [ADR 0013](0013-unsafe-only-in-soundcraft-rt.md) (unsafe home), [ADR 0016](0016-native-wasapi-backend.md) (one owning thread per device, requests with timeouts), `docs/contributing/knowledge/audio-thread.md`, issues #36 and #9.
+[ADR 0007](0007-per-plugin-suspension-not-a-global-engine-switch.md) (per-plug-in threading and suspension), [ADR 0013](0013-unsafe-only-in-soundcraft-rt.md) (unsafe home), [ADR 0016](0016-native-wasapi-backend.md) (one owning thread per device, requests with timeouts), `docs/contributing/knowledge/audio-thread.md`, issues #36 and #9. [ADR 0030](0030-editor-window-cohesion.md) amends section 7: editor windows follow the main window without an owner (#173).
