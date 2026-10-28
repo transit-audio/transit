@@ -385,6 +385,24 @@ fn malformed_bytes_and_active_sensing_are_counted_not_delivered() {
 }
 
 #[test]
+fn a_filtered_active_sensing_records_its_own_host_stamp() {
+    let fake = Fake::default();
+    let (_io, handle, _consumer) = open(&fake, "Keys", InputConfig::default());
+    let slot = fake.input_port(&Fake::key("Keys", 0)).unwrap();
+    assert_eq!(handle.counters().sensing_host_ns, 0, "none yet");
+    slot.deliver_at(0, 7_000, &[0xFE]);
+    assert_eq!(handle.counters().sensing_host_ns, 7_000);
+    // Inside another message too, and the latest FE wins.
+    slot.deliver_at(0, 9_000, &[0x90, 0xFE, 60, 100]);
+    let c = handle.counters();
+    assert_eq!((c.sensing_host_ns, c.filtered, c.delivered), (9_000, 2, 1));
+    let fake = Fake::default();
+    let (_io, passing, _consumer) = open(&fake, "AS", InputConfig { pass_active_sensing: true, ..InputConfig::default() });
+    fake.input_port(&Fake::key("AS", 0)).unwrap().deliver_at(0, 7_000, &[0xFE]);
+    assert_eq!(passing.counters().sensing_host_ns, 0, "a passed FE is an event, not a filtered stamp");
+}
+
+#[test]
 fn the_push_path_allocates_nothing() {
     let cfg = config(64, 8);
     let (mut sink, mut consumer, _shared) = InputSink::new(&cfg);

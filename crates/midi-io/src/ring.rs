@@ -67,6 +67,10 @@ pub struct InputCounters {
     pub malformed_bytes: u64,
     /// Messages filtered by configuration (active sensing).
     pub filtered: u64,
+    /// Host arrival time ([`InputEvent::host_arrival_ns`] scale, this port's origin) of the last
+    /// filtered active-sensing message; 0 if none. Not a count: the one field here that is a
+    /// stamp, so a consumer judges sensing freshness by when the `FE` arrived, not when it looked.
+    pub sensing_host_ns: u64,
     /// Otherwise eligible messages refused because the per-open sequence was exhausted.
     /// These take no sequence number and are not included in the ring-full drop counters.
     pub exhausted_dropped: u64,
@@ -84,6 +88,7 @@ pub(crate) struct Counters {
     sysex_truncated: AtomicU64,
     malformed_bytes: AtomicU64,
     filtered: AtomicU64,
+    sensing_host_ns: AtomicU64,
     exhausted_dropped: AtomicU64,
 }
 
@@ -122,6 +127,7 @@ impl PortShared {
             sysex_truncated: get(&c.sysex_truncated),
             malformed_bytes: get(&c.malformed_bytes),
             filtered: get(&c.filtered),
+            sensing_host_ns: get(&c.sensing_host_ns),
             exhausted_dropped: get(&c.exhausted_dropped),
         }
     }
@@ -396,7 +402,12 @@ impl InputSink {
 
     fn real_time(&mut self, b: u8, backend_time_us: u64, host: u64) {
         match message_len(b) {
-            Some(_) if b == 0xFE && !self.pass_active_sensing => bump(&self.shared.counters.filtered, 1),
+            Some(_) if b == 0xFE && !self.pass_active_sensing => {
+                // The stamp is the FE's own arrival, so sensing freshness never depends on when
+                // (or on which clock) the consumer notices the filtered count.
+                self.shared.counters.sensing_host_ns.store(host, Ordering::Relaxed);
+                bump(&self.shared.counters.filtered, 1);
+            }
             Some(_) => self.offer([b, 0, 0], 1, backend_time_us, host),
             None => bump(&self.shared.counters.malformed_bytes, 1),
         }

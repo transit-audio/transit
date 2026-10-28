@@ -63,6 +63,10 @@ fn monitor_sysex_capture_reaches_unrouted_monitor_with_loss_counts_and_no_ingres
 }
 
 fn monitored(enabled: bool) -> (monitor::Hub, Pump, Fake, transit_midi_io::PortKey, impl Sized) {
+    monitored_with(enabled, InputConfig::default())
+}
+
+fn monitored_with(enabled: bool, config: InputConfig) -> (monitor::Hub, Pump, Fake, transit_midi_io::PortKey, impl Sized) {
     let (control, _plans) = bridge();
     let (lane, _audio) = action_lane::pair_with_result(&control);
     let (send, mut worker) = pump(lane);
@@ -71,7 +75,7 @@ fn monitored(enabled: bool) -> (monitor::Hub, Pump, Fake, transit_midi_io::PortK
     send.send(Update::Monitor(tap)).ok().unwrap();
     let fake = Fake::default();
     let key = fake.add_input("Zero cost");
-    let (handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
+    let (handle, consumer) = fake.io().open_input(&key, config).unwrap();
     send.send(Update::Input(Box::new(Input {
         id: 3,
         mon: Mon::default(),
@@ -96,7 +100,7 @@ fn monitor_off_costs_the_worker_and_the_callback_nothing() {
     for _ in 0..70 {
         port.deliver(0, &bytes);
     }
-    port.deliver(0, &[0xFE]);
+    port.deliver_at(0, 5_000_000_000, &[0xFE]);
     worker.step();
     let input = &mut worker.inputs[0];
     assert!(input.consumer.pop_sysex().is_none(), "no capture push while off");
@@ -104,14 +108,17 @@ fn monitor_off_costs_the_worker_and_the_callback_nothing() {
     assert_eq!((counters.sysex_capture_dropped, counters.sysex_truncated), (0, 0));
     assert_eq!(counters.sysex_dropped, 70, "main's per-message counter still runs");
     assert!(counters.filtered > 0);
-    assert_eq!(input.mon.filtered, 0, "Mon::watch must not run while the monitor is off");
+    assert_eq!(counters.sensing_host_ns, 5_000_000_000, "the ring records the filtered FE's stamp");
+    assert_eq!(input.mon.sensing, 0, "Mon::watch must not run while the monitor is off");
     assert_eq!(hub.dropped(), (0, 0));
     // On: the capture appears.
     hub.set_enabled(true);
     worker.step();
     port.deliver(0, &[0xF0, 1, 0xF7]);
     worker.step();
-    assert_eq!(worker.inputs[0].mon.filtered, counters.filtered, "baseline taken when switched on");
+    assert_eq!(worker.inputs[0].mon.sensing, 5_000_000_000, "the FE seen while off is published with its own stamp");
+    assert!(hub.input_rate(3, 6_000_000_000).1, "1 s after its arrival");
+    assert!(!hub.input_rate(3, 8_000_000_000).1, "3 s after its arrival, whenever the worker looked");
     let mut events = Vec::new();
     hub.drain(&mut events, 100);
     assert_eq!(events.len(), 1);
@@ -143,6 +150,39 @@ fn monitor_turned_on_mid_stream_starts_from_clean_baselines() {
     hub.drain(&mut events, 100);
     assert_eq!(events.len(), 1);
     assert_eq!(hub.sysex_truncated(), 1);
+}
+
+/// A filtered Active Sensing reads by its own arrival stamp, not by when the worker noticed the
+/// filtered count: every stamp and readout here is injected, none reads a clock (#170, E59).
+#[test]
+fn filtered_active_sensing_is_judged_by_its_arrival_stamp() {
+    let (hub, mut worker, fake, key, _keep) = monitored(true);
+    let port = fake.input_port(&key).unwrap();
+    assert!(!hub.input_rate(3, 10_000_000_000).1, "no FE yet");
+    let read_at = 10_000_000_000;
+    assert!(port.deliver_at(0, read_at - 1_000_000_000, &[0xFE]));
+    worker.step();
+    assert!(hub.input_rate(3, read_at).1, "stamped 1 s before the readout");
+    let read_at = 20_000_000_000;
+    assert!(port.deliver_at(0, read_at - 3_000_000_000, &[0xFE]));
+    worker.step();
+    assert_eq!(worker.inputs[0].consumer.counters().filtered, 2);
+    assert!(!hub.input_rate(3, read_at).1, "stamped 3 s before the readout");
+}
+
+/// An Active Sensing passed into the ring (`pass_active_sensing`) is published with its event
+/// stamp by the tap, and the filtered stamp stays unset.
+#[test]
+fn passed_active_sensing_is_judged_by_its_event_stamp() {
+    let (hub, mut worker, fake, key, _keep) = monitored_with(true, InputConfig { pass_active_sensing: true, ..InputConfig::default() });
+    let port = fake.input_port(&key).unwrap();
+    let read_at = 10_000_000_000;
+    assert!(port.deliver_at(0, read_at - 1_000_000_000, &[0xFE]));
+    worker.step();
+    let counters = worker.inputs[0].consumer.counters();
+    assert_eq!((counters.filtered, counters.sensing_host_ns), (0, 0));
+    assert!(hub.input_rate(3, read_at).1, "stamped 1 s before the readout");
+    assert!(!hub.input_rate(3, read_at + 2_000_000_000).1, "3 s after its stamp");
 }
 
 pub(super) fn route() -> Route {

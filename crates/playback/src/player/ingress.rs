@@ -175,7 +175,8 @@ struct Mon {
     clock: ClockRate,
     /// The rate slot this input publishes into.
     slot: Option<(Arc<monitor::Shared>, usize)>,
-    filtered: u64,
+    /// The last filtered Active Sensing stamp published (the ring's `sensing_host_ns`; 0: none).
+    sensing: u64,
     sysex_dropped: u64,
     sysex_truncated: u64,
     /// Whether the callback of this input is told to capture SysEx.
@@ -248,10 +249,12 @@ impl Mon {
     /// Filtered sensing and bounded diagnostic SysEx, independent of playable MIDI routes.
     fn watch(&mut self, tap: &mut Tap, id: u64, consumer: &mut InputConsumer) {
         let counters = consumer.counters();
-        if counters.filtered > self.filtered {
-            self.filtered = counters.filtered;
+        // The FE's own arrival stamp (the ring records it at push), never this worker's clock: a
+        // sensing readout depends on when the controller sent it, not on when the worker looked.
+        if counters.sensing_host_ns != self.sensing {
+            self.sensing = counters.sensing_host_ns;
             if let Some((shared, slot)) = &self.slot {
-                shared.publish_sensing(*slot, consumer.now_ns());
+                shared.publish_sensing(*slot, self.sensing);
             }
         }
         if tap.enabled() {
@@ -625,7 +628,6 @@ impl Pump {
                         if let Some(monitor) = &self.monitor {
                             input.mon.slot = monitor.shared().claim(input.id).map(|slot| (Arc::clone(monitor.shared()), slot));
                             let counters = input.consumer.counters();
-                            input.mon.filtered = counters.filtered;
                             input.mon.sysex_dropped = counters.sysex_capture_dropped;
                             input.mon.sysex_truncated = counters.sysex_truncated;
                         }
