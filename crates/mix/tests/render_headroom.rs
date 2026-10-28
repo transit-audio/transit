@@ -21,8 +21,9 @@
 //! alongside (for example a `cargo check --workspace`).
 //!
 //! The strips' deadline is the engine's: by default the share of the period for the row's buffer
-//! size (#172: 150% at 64 frames and below, 100% above; the bench hands the engine its block
-//! length as a device callback would), or `TRANSIT_STRIP_DEADLINE_PERCENT` of the period (25 to
+//! size (#172: 150% for a period of 1.5 ms and below, 100% above, so 150 at 64 frames and 100
+//! at 128 at 48 kHz; the bench hands the engine its block length and rate as a device callback
+//! would), or `TRANSIT_STRIP_DEADLINE_PERCENT` of the period (25 to
 //! 300) at every size, read once per process, so one run measures one override; each worker row
 //! prints the share its engine used (`-` for serial, which has no deadline). Unset the variable
 //! before an ordinary `cargo test`: every pool test in the process would run at that share.
@@ -113,7 +114,7 @@ fn run(frames: usize, pool: bool, promote: bool, stall: bool) -> (Vec<Duration>,
     if pool {
         assert!(rig.mix.start_render_workers(64) > 0, "no render workers on this machine");
         // The device's callback length, as playback hands it (#172): the share follows it.
-        rig.mix.set_device_frames(u32::try_from(frames).unwrap());
+        rig.mix.set_device_block(u32::try_from(frames).unwrap(), common::workers::SR);
     }
     for s in &rig.shared {
         s.cost.store(cost(), Ordering::Relaxed);

@@ -441,30 +441,42 @@ impl Accumulator {
 #[cfg(not(target_arch = "wasm32"))]
 std::thread_local! {
     /// The running device callback's entry, the engine blocks it has rendered so far, and its
-    /// length in device frames.
-    static CALLBACK: std::cell::Cell<Option<(std::time::Instant, u32, u32)>> = const { std::cell::Cell::new(None) };
+    /// length in device frames at the device's rate.
+    static CALLBACK: std::cell::Cell<Option<(std::time::Instant, u32, (u32, u32))>> = const { std::cell::Cell::new(None) };
 }
 
-/// The device callback of `frames` starts (its entry, before any work): the render workers'
-/// deadlines of its blocks are measured from here (ADR 0029), and their share follows its length
-/// ([`callback_frames`], #172). A `Copy` thread-local: no allocation.
+/// The device callback of `frames` at `rate` Hz starts (its entry, before any work): the render
+/// workers' deadlines of its blocks are measured from here (ADR 0029), and their share follows
+/// its period ([`callback_block`], #172). A `Copy` thread-local: no allocation.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn callback_entered(frames: usize) {
-    CALLBACK.set(Some((std::time::Instant::now(), 0, u32::try_from(frames).unwrap_or(u32::MAX))));
+pub(crate) fn callback_entered(frames: usize, rate: u32) {
+    enter_callback_at(std::time::Instant::now(), frames, rate);
 }
 
-/// The running device callback's length in device frames (the device's buffer size as the
-/// driver calls back with it); `None` outside a device callback. Playback hands it to the engine
-/// (`MixEngine::set_device_frames`) before each block, so the strips' share follows the device
+/// [`callback_entered`] with the entry given (tests inject it; the callback passes `now`).
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn enter_callback_at(entry: std::time::Instant, frames: usize, rate: u32) {
+    CALLBACK.set(Some((entry, 0, (u32::try_from(frames).unwrap_or(u32::MAX), rate))));
+}
+
+/// The running device callback's length in device frames and the device's rate (the buffer the
+/// driver calls back with); `None` outside a device callback. Playback hands it to the engine
+/// (`MixEngine::set_device_block`) before each block, so the strips' share follows the device
 /// (#172). Allocation-free.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn callback_frames() -> Option<u32> {
-    CALLBACK.get().map(|(_, _, frames)| frames)
+pub(crate) fn callback_block() -> Option<(u32, u32)> {
+    CALLBACK.get().map(|(_, _, block)| block)
+}
+
+/// The test seam's end of a callback: no callback runs on this thread.
+#[cfg(all(test, not(target_arch = "wasm32")))]
+pub(crate) fn leave_callback() {
+    CALLBACK.set(None);
 }
 
 /// The strips' deadline of the next engine block of the running callback: entry + (blocks
 /// rendered + 1) x `period` x `percent` / 100 (the engine's share,
-/// `MixEngine::strip_deadline_percent`: 150 for a callback of 64 frames or less, 100 above,
+/// `MixEngine::strip_deadline_percent`: 150 for a callback period of 1.5 ms or less, 100 above,
 /// unless `TRANSIT_STRIP_DEADLINE_PERCENT` set another). `None` outside a device callback (the
 /// engine then measures from its own entry).
 #[cfg(not(target_arch = "wasm32"))]
@@ -651,7 +663,7 @@ mod deadline_tests {
 
     /// The deadlines of two blocks of one callback entered at `entry`, at `percent`.
     fn two_blocks(entry: std::time::Instant, period: Duration, percent: u32) -> [Option<std::time::Instant>; 2] {
-        CALLBACK.set(Some((entry, 0, 64)));
+        CALLBACK.set(Some((entry, 0, (64, 48_000))));
         let d = [next_block_deadline(period, percent), next_block_deadline(period, percent)];
         CALLBACK.set(None);
         d
@@ -673,19 +685,19 @@ mod deadline_tests {
     fn outside_a_callback_there_is_no_deadline() {
         CALLBACK.set(None);
         assert_eq!(next_block_deadline(Duration::from_millis(1), 150), None);
-        assert_eq!(callback_frames(), None, "and no device length");
+        assert_eq!(callback_block(), None, "and no device callback");
     }
 
     /// #172: the callback's length is what the engine's share follows; it stays through the
     /// callback's blocks.
     #[test]
     fn the_callback_says_its_length_through_its_blocks() {
-        callback_entered(64);
-        assert_eq!(callback_frames(), Some(64));
+        callback_entered(64, 48_000);
+        assert_eq!(callback_block(), Some((64, 48_000)));
         let _ = next_block_deadline(Duration::from_micros(1333), 150);
-        assert_eq!(callback_frames(), Some(64), "after a block");
-        callback_entered(128);
-        assert_eq!(callback_frames(), Some(128), "the next callback, another buffer size");
+        assert_eq!(callback_block(), Some((64, 48_000)), "after a block");
+        callback_entered(128, 96_000);
+        assert_eq!(callback_block(), Some((128, 96_000)), "the next callback, another buffer size and rate");
         CALLBACK.set(None);
     }
 }

@@ -857,14 +857,16 @@ fn the_strip_deadline_share_prints_right_after_the_render_workers() {
     use crate::telemetry::detail_rows;
     let rows_of =
         |f: transit_mix::StripFaults| detail_rows(&transit_playback::telemetry::CallbackTelemetry { strip_faults: Some(f), ..Default::default() });
-    let rows = rows_of(transit_mix::StripFaults { workers: 8, deadline_percent: 150, deadline_frames: 64, ..Default::default() });
+    let rows =
+        rows_of(transit_mix::StripFaults { workers: 8, deadline_percent: 150, deadline_frames: 64, deadline_rate: 48_000, ..Default::default() });
     let at = |label: &str| rows.iter().position(|r| r.starts_with(label)).unwrap_or_else(|| panic!("{label} missing: {rows:?}"));
-    assert_eq!(rows[at("Strip deadline:")], "Strip deadline: 150% of the period (default for 64 frames)");
+    assert_eq!(rows[at("Strip deadline:")], "Strip deadline: 150% of the period (default for 64 frames at 48 kHz)");
     assert_eq!(at("Strip deadline:"), at("Render workers") + 1, "beside the worker count");
     // #172: the share in effect says where it came from.
     let row = |f| rows_of(f).into_iter().find(|r| r.starts_with("Strip deadline:")).unwrap_or_default();
-    let default_128 = transit_mix::StripFaults { workers: 8, deadline_percent: 100, deadline_frames: 128, ..Default::default() };
-    assert_eq!(row(default_128), "Strip deadline: 100% of the period (default for 128 frames)");
+    let default_128 =
+        transit_mix::StripFaults { workers: 8, deadline_percent: 100, deadline_frames: 128, deadline_rate: 48_000, ..Default::default() };
+    assert_eq!(row(default_128), "Strip deadline: 100% of the period (default for 128 frames at 48 kHz)");
     let overridden =
         transit_mix::StripFaults { workers: 8, deadline_percent: 150, deadline_frames: 128, deadline_overridden: true, ..Default::default() };
     assert_eq!(row(overridden), "Strip deadline: 150% of the period (TRANSIT_STRIP_DEADLINE_PERCENT)");

@@ -674,10 +674,20 @@ impl Audio {
     pub fn set_block_deadline(&mut self, deadline: Option<std::time::Instant>) {
         self.mix.set_block_deadline(deadline);
     }
-    /// The device's callback is `frames` long: the render workers' deadline share follows it
-    /// (#172, `MixEngine::set_device_frames`). Allocation-free.
-    pub fn set_device_frames(&mut self, frames: u32) {
-        self.mix.set_device_frames(frames);
+    /// Audio thread, before a block of `period` inside a device callback: hands the engine the
+    /// running callback's length and rate first (the render workers' share follows it, #172,
+    /// `MixEngine::set_device_block`), then sets the block's strip deadline from the callback's
+    /// entry at that share (`telemetry::next_block_deadline`). In this order, so a callback whose
+    /// length changed gets the new share's deadline in its first block. Outside a callback the
+    /// engine measures from its own entry. Returns the deadline set. Allocation-free.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn set_callback_deadline(&mut self, period: std::time::Duration) -> Option<std::time::Instant> {
+        if let Some((frames, rate)) = crate::telemetry::callback_block() {
+            self.mix.set_device_block(frames, rate);
+        }
+        let deadline = crate::telemetry::next_block_deadline(period, self.mix.strip_deadline_percent());
+        self.mix.set_block_deadline(deadline);
+        deadline
     }
     #[cfg(test)]
     pub(crate) fn install_event_tap_for_test(&mut self, capacity: usize) {

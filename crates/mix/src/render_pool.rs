@@ -74,45 +74,50 @@ pub const RENDER_NO_PRIORITY_ENV: &str = "TRANSIT_RENDER_NO_PRIORITY";
 /// with the workers off.
 pub const STRIP_DEADLINE_PERCENT_ENV: &str = "TRANSIT_STRIP_DEADLINE_PERCENT";
 
-/// The largest device callback, in frames, whose strips get the small-buffer share
-/// ([`default_strip_deadline_percent`]): 64 frames and below, 150%; 65 and above, 100%.
-pub const SMALL_BUFFER_FRAMES: u32 = 64;
+/// The longest device callback period, microseconds, whose strips get the small-buffer share
+/// ([`default_strip_deadline_percent`]): 1.5 ms and below, 150%; above, 100%. At 48 kHz that is
+/// up to 72 frames (64 frames is 1.33 ms, 72 frames exactly 1.5 ms, 73 frames 1.52 ms); 64 frames at 44.1 kHz
+/// is 1.45 ms and 128 at 96 kHz 1.33 ms (150%), 128 at 48 kHz 2.67 ms (100%).
+pub const SMALL_PERIOD_MICROS: u64 = 1500;
 
 /// The shares [`STRIP_DEADLINE_PERCENT_ENV`] accepts, percent of the period.
 pub const STRIP_DEADLINE_PERCENT_RANGE: std::ops::RangeInclusive<u32> = 25..=300;
 
-/// The strips' deadline share of the period for a device whose callback is `frames` long, unless
-/// [`STRIP_DEADLINE_PERCENT_ENV`] sets another (#172, decided 2026-10-28 on the Scarlett): 150 at
-/// [`SMALL_BUFFER_FRAMES`] (64) and below, 100 above it (so 65 frames already gets 100). At small
-/// buffers a callback that runs late inside the driver's slack is the trade the hardware absorbs,
-/// and a dropped strip is a guaranteed hole; at larger buffers holes are rare and the full period
-/// is the principled line. Pure; allocation-free.
+/// The strips' deadline share of the period for a device whose callback is `frames` long at
+/// `rate` Hz, unless [`STRIP_DEADLINE_PERCENT_ENV`] sets another (#172, decided 2026-10-28 on the
+/// Scarlett): 150 when the callback's period is at most [`SMALL_PERIOD_MICROS`] (1.5 ms, inclusive),
+/// 100 above it; a rate of zero counts as a long period (100). Time-based, so 128 frames at 96 kHz
+/// gets the share of 64 at 48 kHz. At small buffers a callback that runs late inside the driver's
+/// slack is the trade the hardware absorbs, and a dropped strip is a guaranteed hole; at larger
+/// buffers holes are rare and the full period is the principled line. Pure; allocation-free.
 #[must_use]
-pub const fn default_strip_deadline_percent(frames: u32) -> u32 {
-    if frames <= SMALL_BUFFER_FRAMES { 150 } else { 100 }
+pub const fn default_strip_deadline_percent(frames: u32, rate: u32) -> u32 {
+    // frames / rate <= SMALL_PERIOD_MICROS / 1e6, in integers.
+    if rate > 0 && frames as u64 * 1_000_000 <= SMALL_PERIOD_MICROS * rate as u64 { 150 } else { 100 }
 }
 
 /// The share in effect: `overridden` (the [`STRIP_DEADLINE_PERCENT_ENV`] value, when set and
-/// valid) wins, else [`default_strip_deadline_percent`] of the device's callback `frames`. Pure;
-/// allocation-free.
+/// valid) wins, else [`default_strip_deadline_percent`] of the device's callback (`frames` at
+/// `rate`). Pure; allocation-free.
 #[must_use]
-pub const fn resolve_strip_deadline_percent(overridden: Option<u32>, frames: u32) -> u32 {
+pub const fn resolve_strip_deadline_percent(overridden: Option<u32>, frames: u32, rate: u32) -> u32 {
     match overridden {
         Some(p) => p,
-        None => default_strip_deadline_percent(frames),
+        None => default_strip_deadline_percent(frames, rate),
     }
 }
 
 /// How the diagnostics report and the log say the share in effect: `150% of the period (default
-/// for 64 frames)`, or `150% of the period (TRANSIT_STRIP_DEADLINE_PERCENT)` when the variable set
-/// it. One wording for the report row and the log lines. Allocates.
+/// for 64 frames at 48 kHz)`, or `150% of the period (TRANSIT_STRIP_DEADLINE_PERCENT)` when the
+/// variable set it. One wording for the report row and the log lines. Allocates.
 #[must_use]
-pub fn strip_deadline_text(percent: u64, frames: u64, overridden: bool) -> String {
+pub fn strip_deadline_text(percent: u64, frames: u64, rate: u64, overridden: bool) -> String {
     if overridden {
-        format!("{percent}% of the period ({STRIP_DEADLINE_PERCENT_ENV})")
-    } else {
-        format!("{percent}% of the period (default for {frames} frames)")
+        return format!("{percent}% of the period ({STRIP_DEADLINE_PERCENT_ENV})");
     }
+    let (khz, rest) = (rate / 1000, rate % 1000);
+    let rate = if rest == 0 { format!("{khz} kHz") } else { format!("{khz}.{} kHz", format!("{rest:03}").trim_end_matches('0')) };
+    format!("{percent}% of the period (default for {frames} frames at {rate})")
 }
 
 /// The strips' share of `span` (a block period, or several of one callback) at `percent`: the
@@ -268,6 +273,8 @@ pub struct StripFaults {
     /// The device callback length, frames, the default share was taken from (the engine's largest
     /// block until the device's first callback reaches the engine).
     pub deadline_frames: u64,
+    /// The device rate, Hz, of [`StripFaults::deadline_frames`].
+    pub deadline_rate: u64,
     /// The share came from [`STRIP_DEADLINE_PERCENT_ENV`], not the rule.
     pub deadline_overridden: bool,
     /// Blocks the pool rendered.
@@ -398,29 +405,44 @@ mod deadline_percent_tests {
         }
     }
 
-    /// #172: 150% at 64 frames and below, 100% from 65 frames on.
+    /// #172: 150% for a period of 1.5 ms and below, 100% above, whatever the rate.
     #[test]
-    fn the_default_is_150_up_to_64_frames_and_100_above() {
-        for (frames, percent) in [(32, 150), (64, 150), (65, 100), (128, 100), (256, 100)] {
-            assert_eq!(default_strip_deadline_percent(frames), percent, "{frames} frames");
+    fn the_default_is_150_up_to_a_period_of_1_5_ms_and_100_above() {
+        for (frames, rate, percent) in [
+            (32, 48_000, 150),  // 0.67 ms
+            (64, 48_000, 150),  // 1.33 ms
+            (65, 48_000, 150),  // 1.35 ms
+            (72, 48_000, 150),  // 1.5 ms exactly: inclusive
+            (73, 48_000, 100),  // 1.52 ms
+            (128, 48_000, 100), // 2.67 ms
+            (256, 48_000, 100), // 5.33 ms
+            (64, 44_100, 150),  // 1.45 ms
+            (128, 96_000, 150), // 1.33 ms
+            (32, 192_000, 150), // 0.17 ms
+            (256, 96_000, 100), // 2.67 ms
+            (64, 0, 100),       // no rate: a long period
+        ] {
+            assert_eq!(default_strip_deadline_percent(frames, rate), percent, "{frames} frames at {rate} Hz");
         }
-        assert_eq!(SMALL_BUFFER_FRAMES, 64);
+        assert_eq!(SMALL_PERIOD_MICROS, 1500);
     }
 
     #[test]
     fn the_override_wins_over_the_rule_at_every_size() {
-        assert_eq!(resolve_strip_deadline_percent(None, 64), 150);
-        assert_eq!(resolve_strip_deadline_percent(None, 128), 100);
+        assert_eq!(resolve_strip_deadline_percent(None, 64, 48_000), 150);
+        assert_eq!(resolve_strip_deadline_percent(None, 128, 48_000), 100);
         for frames in [32, 64, 128, 512] {
-            assert_eq!(resolve_strip_deadline_percent(Some(75), frames), 75, "{frames} frames");
+            assert_eq!(resolve_strip_deadline_percent(Some(75), frames, 48_000), 75, "{frames} frames");
         }
     }
 
     #[test]
     fn the_share_says_where_it_came_from() {
-        assert_eq!(strip_deadline_text(150, 64, false), "150% of the period (default for 64 frames)");
-        assert_eq!(strip_deadline_text(100, 128, false), "100% of the period (default for 128 frames)");
-        assert_eq!(strip_deadline_text(75, 64, true), "75% of the period (TRANSIT_STRIP_DEADLINE_PERCENT)");
+        assert_eq!(strip_deadline_text(150, 64, 48_000, false), "150% of the period (default for 64 frames at 48 kHz)");
+        assert_eq!(strip_deadline_text(100, 128, 48_000, false), "100% of the period (default for 128 frames at 48 kHz)");
+        assert_eq!(strip_deadline_text(150, 64, 44_100, false), "150% of the period (default for 64 frames at 44.1 kHz)");
+        assert_eq!(strip_deadline_text(150, 32, 22_050, false), "150% of the period (default for 32 frames at 22.05 kHz)");
+        assert_eq!(strip_deadline_text(75, 64, 48_000, true), "75% of the period (TRANSIT_STRIP_DEADLINE_PERCENT)");
     }
 
     #[test]

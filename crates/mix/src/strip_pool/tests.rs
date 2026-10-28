@@ -151,7 +151,7 @@ fn a_strip_rendered_inline_marks_the_phase_marker() {
         tr.mixer.inserts[0] = Some(Insert::new("room_reverb"));
     }
     let mut eng = RangeRender::new(&s, None, transit_time::Range::new(0, 512 * 40), 512).eng;
-    eng.pool = Some(StripPool::new(0, 16, false, None, 512).unwrap());
+    eng.pool = Some(StripPool::new(0, 16, false, None, 512, 48_000).unwrap());
     // A cost history for every strip: a strip without one is never rendered inline (#168).
     eng.seed_strip_costs(Duration::from_micros(1));
     eng.set_strip_deadline(Some(Duration::from_secs(30)));
@@ -196,7 +196,7 @@ fn a_render_of_1_1_periods_is_late_at_75_percent_and_mixed_at_150() {
     let (frames, rate) = (128, 48_000);
     let render = block_period(frames, rate) * 11 / 10;
     for (percent, expected) in [(75, Outcome::Overrun(OverrunCause::Late)), (150, Outcome::Mixed)] {
-        let mut pool = StripPool::new(0, 1, false, Some(percent), u32::try_from(frames).unwrap()).unwrap();
+        let mut pool = StripPool::new(0, 1, false, Some(percent), u32::try_from(frames).unwrap(), rate).unwrap();
         let budget = pool.strip_budget(frames, rate);
         assert_eq!(budget, block_period(frames, rate) * percent / 100, "the pool's share of the period");
         assert_eq!(pool.reader().snapshot().deadline_percent, u64::from(percent), "the report's share");
@@ -214,29 +214,33 @@ fn a_render_of_1_1_periods_is_late_at_75_percent_and_mixed_at_150() {
     }
 }
 
-/// #172: the share follows the device. Without the override, 64 frames give 150% and 128 give
-/// 100%; a reopen from 64 to 128 (the same pool told another callback length) moves it; the
-/// override wins at every length. The report's figures say which. Injected lengths only: no
+/// #172: the share follows the device. Without the override, 64 frames at 48 kHz give 150% and
+/// 128 give 100%; a reopen from 64 to 128 (the same pool told another callback length) moves it,
+/// and so does a rate change at the same length (128 frames at 96 kHz is 64 at 48 kHz's period);
+/// the override wins at every length. The report's figures say which. Injected values only: no
 /// device, no clock.
 #[test]
 fn the_share_follows_the_device_unless_overridden() {
     let figures = |pool: &StripPool| {
         let f = pool.reader().snapshot();
-        (f.deadline_percent, f.deadline_frames, f.deadline_overridden)
+        (f.deadline_percent, f.deadline_frames, f.deadline_rate, f.deadline_overridden)
     };
-    let mut pool = StripPool::new(0, 1, false, None, 512).unwrap();
-    assert_eq!((pool.deadline_percent(), figures(&pool)), (100, (100, 512, false)), "the engine's largest block stands in");
-    pool.set_device_frames(64);
-    assert_eq!((pool.deadline_percent(), figures(&pool)), (150, (150, 64, false)), "64 frames");
+    let mut pool = StripPool::new(0, 1, false, None, 512, 48_000).unwrap();
+    assert_eq!((pool.deadline_percent(), figures(&pool)), (100, (100, 512, 48_000, false)), "the engine's largest block stands in");
+    pool.set_device_block(64, 48_000);
+    assert_eq!((pool.deadline_percent(), figures(&pool)), (150, (150, 64, 48_000, false)), "64 frames");
     assert_eq!(pool.strip_budget(64, 48_000), block_period(64, 48_000) * 3 / 2, "the budget is the share");
-    pool.set_device_frames(0);
-    assert_eq!(figures(&pool), (150, 64, false), "zero frames is ignored");
-    pool.set_device_frames(128);
-    assert_eq!((pool.deadline_percent(), figures(&pool)), (100, (100, 128, false)), "reopened at 128 frames");
+    pool.set_device_block(0, 48_000);
+    pool.set_device_block(128, 0);
+    assert_eq!(figures(&pool), (150, 64, 48_000, false), "zero frames or rate is ignored");
+    pool.set_device_block(128, 48_000);
+    assert_eq!((pool.deadline_percent(), figures(&pool)), (100, (100, 128, 48_000, false)), "reopened at 128 frames");
     assert_eq!(pool.strip_budget(128, 48_000), block_period(128, 48_000), "the full period");
-    let mut overridden = StripPool::new(0, 1, false, Some(75), 512).unwrap();
+    pool.set_device_block(128, 96_000);
+    assert_eq!((pool.deadline_percent(), figures(&pool)), (150, (150, 128, 96_000, false)), "the same length at 96 kHz");
+    let mut overridden = StripPool::new(0, 1, false, Some(75), 512, 48_000).unwrap();
     for frames in [64, 128, 32] {
-        overridden.set_device_frames(frames);
-        assert_eq!((overridden.deadline_percent(), figures(&overridden)), (75, (75, u64::from(frames), true)), "{frames} frames");
+        overridden.set_device_block(frames, 48_000);
+        assert_eq!((overridden.deadline_percent(), figures(&overridden)), (75, (75, u64::from(frames), 48_000, true)), "{frames} frames");
     }
 }

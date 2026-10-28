@@ -1132,7 +1132,7 @@ fn render_callbacks(
     let render = move |block: &mut ab::RenderBlock<'_>| {
         crate::mark_audio_thread();
         #[cfg(not(target_arch = "wasm32"))]
-        telemetry::callback_entered(block.frames);
+        telemetry::callback_entered(block.frames, rate);
         let started = telemetry::Timer::start();
         fault.telemetry.marker().begin();
         let creating_before = transit_mix::creating_instance();

@@ -148,7 +148,7 @@ pub use plan::{
 use render_pool::flag_value;
 use render_pool::{FORCE_SERIAL, PARALLEL_STRIPS, guarded, init_render_switch, run_strips};
 pub use render_pool::{
-    MAX_RENDER_WORKERS, POOL_HISTOGRAM_BUCKETS, POOL_HISTOGRAM_LIMITS_NS, RENDER_NO_PRIORITY_ENV, RENDER_POOL_ENV, SMALL_BUFFER_FRAMES,
+    MAX_RENDER_WORKERS, POOL_HISTOGRAM_BUCKETS, POOL_HISTOGRAM_LIMITS_NS, RENDER_NO_PRIORITY_ENV, RENDER_POOL_ENV, SMALL_PERIOD_MICROS,
     STRIP_DEADLINE_PERCENT_ENV, STRIP_DEADLINE_PERCENT_RANGE, StripFaults, StripFigure, TOP_STRIPS, default_strip_deadline_percent,
     mark_audio_thread, on_audio_thread, resolve_strip_deadline_percent, strip_deadline_override, strip_deadline_share, strip_deadline_text,
     unmark_audio_thread,

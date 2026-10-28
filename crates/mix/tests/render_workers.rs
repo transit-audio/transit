@@ -777,7 +777,7 @@ fn an_adoption_during_a_carry_takes_events_for_the_new_instrument() {
 }
 
 /// #172: the engine's strip deadline share follows the device's callback length it is handed
-/// (`set_device_frames`, as playback does before each block): the engine's largest block stands
+/// (`set_device_block`, as playback does before each block): the engine's largest block stands
 /// in until then, 64 frames give 150% and 128 give 100% unless `TRANSIT_STRIP_DEADLINE_PERCENT`
 /// overrides both, and a reopen from 64 to 128 moves it. The report's figures say the same.
 /// Injected lengths, no worker, no clock.
@@ -786,13 +786,13 @@ fn the_engine_share_follows_the_device_callback_length() {
     let mut rig = Rig::new(INSTRUMENTS, 0, 512);
     rig.mix.start_render_workers_with(64, 0);
     let overridden = transit_mix::strip_deadline_override();
-    let expect = |frames| transit_mix::resolve_strip_deadline_percent(overridden, frames);
+    let expect = |frames| transit_mix::resolve_strip_deadline_percent(overridden, frames, 48_000);
     if overridden.is_none() {
         assert_eq!((expect(64), expect(128)), (150, 100), "the rule without the override");
     }
     assert_eq!(rig.mix.strip_deadline_percent(), expect(512), "before the device's first callback");
     for frames in [64, 128, 64] {
-        rig.mix.set_device_frames(frames);
+        rig.mix.set_device_block(frames, 48_000);
         assert_eq!(rig.mix.strip_deadline_percent(), expect(frames), "{frames} frames");
         let f = rig.mix.strip_faults().unwrap().snapshot();
         assert_eq!(

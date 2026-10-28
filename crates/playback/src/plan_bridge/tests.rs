@@ -734,3 +734,33 @@ fn an_adopted_input_reads_the_newest_capture_whatever_queued_before() {
     control.poll();
     control.retire(audio);
 }
+
+/// #172 (review item 2): the callback's length and rate reach the engine before the block's
+/// deadline is computed (`Audio::set_callback_deadline`, which `player/audio.rs` calls before every
+/// block), so a callback whose length changed gets the new share's deadline in that same block,
+/// not one block later. Injected entry, lengths and rates; no device, no clock decision; the call
+/// is allocation-free whether the share changes or not.
+#[test]
+fn a_callback_of_another_length_gets_the_new_share_in_its_first_block() {
+    let (control, mut audio) = plan_bridge::pair(target(), PlanLimits::default());
+    // A pool with no worker thread unless `pair` already started the real ones.
+    audio.mix.start_render_workers_with(16, 0);
+    assert!(audio.mix.strip_faults().is_some(), "the share belongs to the render workers");
+    let overridden = transit_mix::strip_deadline_override();
+    let share = |frames: usize, rate: u32| transit_mix::resolve_strip_deadline_percent(overridden, u32::try_from(frames).unwrap(), rate);
+    if overridden.is_none() {
+        assert_eq!((share(128, 48_000), share(64, 48_000), share(128, 96_000)), (100, 150, 150), "the rule");
+    }
+    let entry = std::time::Instant::now();
+    for (frames, rate) in [(128usize, 48_000u32), (128, 48_000), (64, 48_000), (128, 48_000), (128, 96_000)] {
+        let period = std::time::Duration::from_nanos(frames as u64 * 1_000_000_000 / u64::from(rate));
+        crate::telemetry::enter_callback_at(entry, frames, rate);
+        let (deadline, stats) = measure(|| audio.set_callback_deadline(period));
+        assert!(stats.is_zero(), "{frames} frames at {rate} Hz: {stats:?}");
+        let percent = share(frames, rate);
+        assert_eq!(audio.mix.strip_deadline_percent(), percent, "{frames} frames at {rate} Hz");
+        assert_eq!(deadline, Some(entry + transit_mix::strip_deadline_share(period, percent)), "{frames} frames at {rate} Hz: this block's deadline");
+    }
+    crate::telemetry::leave_callback();
+    control.retire(audio);
+}

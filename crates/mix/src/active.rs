@@ -745,10 +745,10 @@ impl MixEngine {
         if self.pool.is_none() && !on_audio_thread() {
             let promote = !render_pool::env_flag(RENDER_NO_PRIORITY_ENV, "SOUNDCRAFT_RENDER_NO_PRIORITY");
             // The environment is read here, once per process (never on the audio thread). The
-            // device's callback length is not known yet: the engine's largest block stands in
-            // until playback hands the device's (`set_device_frames`, #172).
+            // device's callback is not known yet: the engine's largest block at its plan's rate
+            // stands in until playback hands the device's (`set_device_block`, #172).
             let overridden = render_pool::strip_deadline_override();
-            let frames = u32::try_from(self.max_block).unwrap_or(u32::MAX);
+            let (frames, rate) = self.stand_in_block();
             {
                 match strip_pool::StripPool::new(
                     workers.min(MAX_RENDER_WORKERS),
@@ -756,12 +756,13 @@ impl MixEngine {
                     promote,
                     overridden,
                     frames,
+                    rate,
                 ) {
                     Ok(pool) => {
                         log::info!(
                             "mix: {workers} render workers ({}); strip deadline {}{}",
                             if promote { "promoted" } else { "default priority" },
-                            strip_deadline_text(u64::from(pool.deadline_percent()), u64::from(frames), overridden.is_some()),
+                            strip_deadline_text(u64::from(pool.deadline_percent()), u64::from(frames), u64::from(rate), overridden.is_some()),
                             if overridden.is_some() { "" } else { ", until the device's buffer size is known" }
                         );
                         self.pool = Some(pool);
@@ -793,26 +794,36 @@ impl MixEngine {
 
     /// The strips' deadline, percent of the block period (#172): the render workers' share, the
     /// [`STRIP_DEADLINE_PERCENT_ENV`] override they were started with, else
-    /// [`default_strip_deadline_percent`] of the device's callback length
-    /// ([`MixEngine::set_device_frames`]; the engine's largest block before it). Without workers,
-    /// the rule at the largest block (it then decides nothing). Playback computes
+    /// [`default_strip_deadline_percent`] of the device's callback
+    /// ([`MixEngine::set_device_block`]; the engine's largest block at its plan's rate before it).
+    /// Without workers, the rule at that stand-in (it then decides nothing). Playback computes
     /// [`MixEngine::set_block_deadline`] with it. Allocation-free; any thread.
     #[must_use]
     pub fn strip_deadline_percent(&self) -> u32 {
         self.pool.as_ref().map_or_else(
-            || default_strip_deadline_percent(u32::try_from(self.max_block).unwrap_or(u32::MAX)),
+            || {
+                let (frames, rate) = self.stand_in_block();
+                default_strip_deadline_percent(frames, rate)
+            },
             strip_pool::StripPool::deadline_percent,
         )
     }
 
-    /// Audio thread (or any owner), before a block: the device's callback is `frames` long. The
-    /// render workers' share follows it ([`default_strip_deadline_percent`]: 150% at 64 frames
-    /// and below, 100% above) unless [`STRIP_DEADLINE_PERCENT_ENV`] overrode it; a new length
-    /// (another buffer size) resolves the share again, the same length costs one compare.
+    /// The device callback the share stands in with before the device's first: the engine's
+    /// largest block at its plan's rate (48 kHz without one).
+    fn stand_in_block(&self) -> (u32, u32) {
+        let rate = self.plan.as_ref().map_or(0, |p| p.id.target.sample_rate);
+        (u32::try_from(self.max_block).unwrap_or(u32::MAX), if rate == 0 { 48_000 } else { rate })
+    }
+
+    /// Audio thread (or any owner), before a block: the device's callback is `frames` long at
+    /// `rate` Hz. The render workers' share follows its period ([`default_strip_deadline_percent`]:
+    /// 150% at 1.5 ms and below, 100% above) unless [`STRIP_DEADLINE_PERCENT_ENV`] overrode it; a
+    /// new length or rate resolves the share again, the same pair costs one compare.
     /// Allocation-free, no environment or clock read. Nothing without workers; zero is ignored.
-    pub fn set_device_frames(&mut self, frames: u32) {
+    pub fn set_device_block(&mut self, frames: u32, rate: u32) {
         if let Some(pool) = self.pool.as_mut() {
-            pool.set_device_frames(frames);
+            pool.set_device_block(frames, rate);
         }
     }
 

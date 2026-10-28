@@ -463,10 +463,11 @@ impl Player {
             // learns at the first callback (#172); said here, on control, with the same rule.
             if let Some(frames) = player.device_buffer.filter(|_| !transit_mix::MixEngine::serial_forced()) {
                 let overridden = transit_mix::strip_deadline_override();
-                let percent = transit_mix::resolve_strip_deadline_percent(overridden, frames);
+                let rate = achieved.format.rate;
+                let percent = transit_mix::resolve_strip_deadline_percent(overridden, frames, rate);
                 log::info!(
                     "audio output: strip deadline {}",
-                    transit_mix::strip_deadline_text(u64::from(percent), u64::from(frames), overridden.is_some())
+                    transit_mix::strip_deadline_text(u64::from(percent), u64::from(frames), u64::from(rate), overridden.is_some())
                 );
             }
             player.output_latency = achieved.latency;
