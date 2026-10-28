@@ -527,7 +527,7 @@ fn main() -> eframe::Result {
     if !transit_rt::set_app_user_model_id(APP_USER_MODEL_ID) && cfg!(windows) {
         log::warn!("could not set the AppUserModelID");
     }
-    // The main window carries the icon below; set_window_icons_from_exe covers the rest.
+    // The main window's icon for eframe; on Windows `apply_exe_icons` also sets the big taskbar icon from the exe resource.
     let icon = Arc::new(app_icon());
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()

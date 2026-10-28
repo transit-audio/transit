@@ -17,7 +17,7 @@ transit is a desktop DAW and ships a desktop app only. One batch removes:
 - `apps/soundcraft-web`, `crates/ui-egui` (tests, examples, the `ui_shot` example and the credits `build.rs`), `packaging/web`, their workspace entries and lockfile rows, and the unused `craft-ui` and `egui_kittest` workspace dependencies.
 - The `cargo xtask wasm` gate, its row in `cargo xtask ci`, the `transit-ui-egui` layer row, the `transit-web` exemption, and the CI `wasm` job.
 - Every `cfg(target_arch = "wasm32")` branch, stub and manifest table that existed only for the web app: the wasm strip pool in `transit-mix`, the stub plug-in host APIs, the `cpal` wasm-bindgen dependency, the browser delivery hook and the in-memory bounce target in the engine, and `BackendId::WebMidi`.
-- Moved, not removed: `fonts.rs` (168 lines, with its tests) now lives in `crates/ui-studio`. The Mix window icon call in `apps/transit` is deleted; `transit_rt::set_window_icons_from_exe` still sets the window icons.
+- Moved, not removed: `fonts.rs` (161 lines, with its tests) now lives in `crates/ui-studio`. The Mix window icon call in `apps/transit` is deleted; `transit_rt::set_window_icons_from_exe` still sets the window icons.
 
 ## Consequences
 

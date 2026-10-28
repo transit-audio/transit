@@ -285,7 +285,7 @@ pub fn import_audio_bytes(e: &mut Engine, name: &str, bytes: &[u8], path: Option
 }
 
 /// Loads an audio file's bytes into an instrument track's Sampler as one undo step ("Load
-/// Sampler Sample"): for files that have no path, such as one dropped into the browser. The same
+/// Sampler Sample"): for files that have no path, such as one dropped onto the window. The same
 /// checks as `mix.sampler_load`; not journaled, since the bytes can be large.
 pub fn load_sampler_bytes(e: &mut Engine, track: TrackId, name: &str, bytes: &[u8]) -> Result<Value> {
     let before = e.session_arc();

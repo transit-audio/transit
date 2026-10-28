@@ -39,7 +39,6 @@ fn path_with(env: impl Fn(&str) -> Option<OsString>) -> Option<PathBuf> {
 }
 
 /// A fresh token: 32 hex characters (128 bits) from the operating system's random generator.
-/// Native targets only; the browser build has no control channel.
 pub fn generate() -> Result<String, String> {
     let mut bytes = [0u8; 16];
     getrandom::fill(&mut bytes).map_err(|e| format!("no random bytes for the control token: {e}"))?;

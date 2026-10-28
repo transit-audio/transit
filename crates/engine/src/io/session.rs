@@ -368,7 +368,7 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
     Ok((bytes, s))
 }
 
-/// Open a session from bytes (the browser has no paths): a bundle ([`session_bundle`]) or a bare
+/// Open a session from bytes (for hosts that have no paths): a bundle ([`session_bundle`]) or a bare
 /// `.transit`, whose audio is then reported missing. Returns the missing media, like
 /// [`open_session`].
 pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Vec<String>> {

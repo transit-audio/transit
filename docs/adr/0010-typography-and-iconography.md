@@ -36,7 +36,7 @@ egui renders text through `ab_glyph` and does no OpenType shaping. That has a di
 - **Tabular readouts do not jitter.** Numbers that change width in lists and meters stay put, because the tabular figures are in the file, not toggled at runtime.
 - **The transport uses the mono family.** That is the one deliberate place where the app shows its character. Everything else stays in Inter.
 - **Icons come only from Lucide at the pinned version.** Any new icon must come from Lucide 1.50.0 or get its own attribution row. An icon from another set needs its own ADR.
-- **Font setup still lives in `apps/transit`.** It depends on `soundcraft-ui-egui` for `fonts::definitions()`. Moving font setup into `ui-studio` and dropping that dependency is open. Until then the leak stays on the list.
+- **Font setup still lives in `apps/transit`.** It depends on `soundcraft-ui-egui` for `fonts::definitions()`. Fixed in #177: `fonts.rs` moved into `ui-studio` and the dependency is gone (ADR 0032).
 - **Open follow-ups from the polish review,** which this ADR does not change: dense header and strip offsets are not yet on the 8 px grid, and dark dim text and light mute and solo fills fall short of contrast targets.
 
 ## Related
