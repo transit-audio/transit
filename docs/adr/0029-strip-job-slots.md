@@ -88,6 +88,8 @@ An engine has render workers only after `MixEngine::start_render_workers` (contr
 
 **Deadline.** `start + period * 3 / 4`, where `start` is `Instant::now()` at `render_active`'s entry and the period is `frames / sample rate` of the block. The quarter left covers the auxes, the masters, the output copy and the driver. `MixEngine::set_strip_deadline` overrides it for tests and the bench.
 
+**Deadline share, a measurement knob (#172).** `TRANSIT_STRIP_DEADLINE_PERCENT` sets the strips' share of the period, a whole number from 25 to 300 (anything else is logged once and ignored). It is read once per process where the engine starts its render workers, kept by the pool (no clock or environment read on the callback), logged beside the worker count, and printed in the diagnostics report as `Strip deadline: N% of the period`. It moves the one deadline: `finish` waits to it and the inline admission measures the time left to it, measured as today (from the device callback's entry when playback passes one with `MixEngine::set_block_deadline`, which it computes with the engine's share, `MixEngine::strip_deadline_percent`, through the same rule, `strip_deadline_share`). It has no effect with the pool off. Above 100 the callback can run past its period while it waits for a slow strip, which is what serial does with the same spike. It exists so the gate 6 runs on the Scarlett can be repeated at 100 and 150 (the bench takes it too); 75 stays the default until #172 decides between a new default, a share per buffer size, or keeping 75 with Super 8-class plug-ins at 64 frames recorded as a known limitation.
+
 **Caller preconditions, where each is honored.**
 
 | Precondition | Where |

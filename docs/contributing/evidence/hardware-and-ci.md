@@ -70,3 +70,12 @@ Backend clock numbers carry unknown offset uncertainty; do not present them as c
 Drivers can report a few frames more than the measured loop (Scarlett at 64: 326 measured against
 328 reported; Model 12 at 256: 987 against 995), so the loopback tests accept a round trip down to
 the driver figure minus one buffer.
+
+### Render worker runs (#124 gate 6)
+
+The gate 6 runs compare serial with the render workers (`TRANSIT_RENDER_POOL=1`) through the device
+([2026-10-28 benchmark](../../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md)). For #172
+the pool runs are repeated with `TRANSIT_STRIP_DEADLINE_PERCENT=100` and `=150` (default 75): the
+strips' deadline as a share of the period. The diagnostics report prints the share each run used
+(`Strip deadline: N% of the period`), and the device-free bench (`crates/mix/tests/render_headroom.rs`)
+takes the same variable and prints it per row.
