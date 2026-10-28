@@ -405,7 +405,7 @@ pub struct ClapPlugin {
     /// Silence with fades for blocks the plug-in is not called for.
     gate: Gate,
     /// Timed parameter points refused by a full queue (the value went onto the parameter's
-    /// latest queued point, so the last point wins).
+    /// latest queued point, so the last point wins, but at that point's earlier time).
     params_dropped: u64,
 }
 
@@ -616,6 +616,34 @@ impl ClapPlugin {
     }
 }
 
+/// A block the plug-in was not called for (#117): queued parameter values collapse to time 0, one
+/// per parameter (the latest wins; queue order is time order), so the next processed block never
+/// replays them at this block's offsets and a plug-in that is never called holds at most one per
+/// parameter. Keeps the queue time-sorted. No allocation (`remove` then `insert` within the
+/// capacity); quadratic in the queue length, only on a skipped block.
+fn collapse_params(queue: &mut Vec<Event>) {
+    let mut k = 0;
+    while k < queue.len() {
+        let Some(&Event::Param { time, id, value }) = queue.get(k) else {
+            k += 1;
+            continue;
+        };
+        if time == 0 {
+            k += 1;
+            continue;
+        }
+        queue.remove(k);
+        let head = queue.iter().take_while(|e| e.time() == 0).count();
+        let same = queue.iter_mut().take(head).find(|e| matches!(e, Event::Param { id: i, .. } if *i == id));
+        if let Some(Event::Param { value: v, .. }) = same {
+            *v = value;
+        } else {
+            queue.insert(head, Event::Param { time: 0, id, value });
+            k += 1;
+        }
+    }
+}
+
 /// The sidechain port: the first non-main audio input with channels (the main input is not one).
 fn pick_key(ports: &[crate::ffi::PortInfo], main: Option<usize>) -> Option<usize> {
     ports.iter().enumerate().position(|(i, p)| !p.main && p.channels > 0 && Some(i) != main)
@@ -678,6 +706,7 @@ impl ClapPlugin {
         let ch = self.channels.min(io.len());
         let frames = io.iter().take(ch).map(Vec::len).fold(frames, usize::min);
         if frames == 0 || ch == 0 {
+            collapse_params(&mut self.queue);
             return;
         }
         let shared: &Shared = &self.shared;
@@ -691,25 +720,30 @@ impl ClapPlugin {
                     drop(core);
                     shared.life.store(PARKED, Ordering::Release);
                 }
+                collapse_params(&mut self.queue);
                 self.gate.skip(io, ch, frames);
                 return;
             }
             _ => {
+                collapse_params(&mut self.queue);
                 self.gate.skip(io, ch, frames);
                 return;
             }
         }
         // Held by the main thread only while it restarts or rescans an instance: skip the block.
         let Some(mut guard) = try_lock(&shared.core) else {
+            collapse_params(&mut self.queue);
             self.gate.skip(io, ch, frames);
             return;
         };
         let core = &mut *guard;
         if core.max_block == 0 {
+            collapse_params(&mut self.queue);
             return; // never prepared
         }
         if !core.inst.is_active() {
             // Its activation failed: silent, not the input at unity (review N2).
+            collapse_params(&mut self.queue);
             drop(guard);
             self.gate.skip(io, ch, frames);
             return;
@@ -848,7 +882,7 @@ impl Plugin for ClapPlugin {
 
     /// One `Event::Param` per offset: points of one parameter coalesce only at an equal time.
     /// With the queue full, the value replaces the parameter's latest queued point (the last
-    /// point wins) and the miss is counted.
+    /// point wins, applied at that point's time: earlier than asked) and the miss is counted.
     fn set_param_at(&mut self, offset: u32, id: &str, value: f32) -> bool {
         let Some((cid, v)) = self.host_value(id, value) else { return false };
         if self.param_at(offset, cid, v) {

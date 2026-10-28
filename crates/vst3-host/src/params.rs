@@ -284,6 +284,20 @@ impl PendingParams {
         self.order.clear();
     }
 
+    /// A block the plug-in was not called for (#117): its timed points, in the order they were
+    /// set, collapse into the values waiting for the next block's start (the last per parameter
+    /// wins), so the next processed block never replays them at this block's offsets and a
+    /// plug-in that is never called holds at most one value per parameter. One scan of `ids` per
+    /// point, only on a skipped block; no allocation.
+    pub fn fold_timed(&mut self, ids: &[u32], timed: &mut Vec<crate::ffi::ParamPoint>) {
+        for p in timed.iter() {
+            if let Some(i) = ids.iter().position(|&id| id == p.id) {
+                self.set(i, p.value);
+            }
+        }
+        timed.clear();
+    }
+
     /// Moves up to `max` waiting values into `out` as (VST3 id, normalized), oldest first, never
     /// past `out`'s capacity.
     pub fn take_into(&mut self, ids: &[u32], out: &mut Vec<(u32, f64)>, max: usize) {

@@ -489,7 +489,8 @@ pub struct Vst3Plugin {
     /// The order points were set in this block (ties at one offset keep it).
     seq: u32,
     /// Parameter points that missed their offset: a block's slab ran out or the timed points were
-    /// full (either way the parameter's last value is kept).
+    /// full. Either way the parameter's last value is kept, but at the offset of its latest kept
+    /// point (or the block start), so it applies earlier than asked.
     points_dropped: u64,
     /// Keys held per MIDI channel, for `all_notes_off` and `reset`.
     held: [[bool; 128]; MIDI_CHANNELS],
@@ -793,16 +794,19 @@ impl Vst3Plugin {
         let ch = self.channels.min(io.len());
         let frames = io.iter().take(ch).map(Vec::len).fold(frames, usize::min);
         if frames == 0 || ch == 0 {
+            self.pending.fold_timed(&self.ids, &mut self.timed);
             return;
         }
         let shared: &Shared = &self.shared;
         // Held by the main thread only while it services the instance: a silent block.
         let Some(mut guard) = try_lock(&shared.core) else {
+            self.pending.fold_timed(&self.ids, &mut self.timed);
             self.gate.skip(io, ch, frames);
             return;
         };
         let core = &mut *guard;
         if !core.inst.is_active() || core.max_block == 0 {
+            self.pending.fold_timed(&self.ids, &mut self.timed);
             if core.block > 0 {
                 // Prepared, but its (re)activation failed: silent, not the buffer as it was
                 // (review N2).
@@ -980,7 +984,7 @@ impl Plugin for Vst3Plugin {
             self.timed.push(ParamPoint { time: offset, id: pid, class: 0, seq: self.seq, value: n, release: false });
         } else if let Some(last) = self.timed.iter_mut().filter(|p| p.id == pid).max_by_key(|p| (p.time, p.seq)) {
             // Out of timed points this block: the parameter's latest point takes the value (the
-            // last point wins).
+            // last point wins, applied at that point's offset: earlier than asked).
             last.value = n;
             self.points_dropped = self.points_dropped.saturating_add(1);
         } else {

@@ -58,6 +58,24 @@ fn a_timed_point_past_the_cap_overwrites_the_latest() {
     assert_eq!(points, vec![(1, 250_000), (2, 750_000)]);
 }
 
+/// #117 review: a block the plug-in is not called for (here: not prepared yet) folds its timed
+/// points into the next block's start values, the latest per parameter, so the next processed
+/// block does not replay them at the old offsets.
+#[test]
+fn timed_points_of_a_skipped_block_fold_into_the_next_block_start() {
+    let found = transit_vst3_host::scan_paths(&[fixture_dir().to_path_buf()]);
+    let id = found.into_iter().find(|d| d.name == "Fixture Events").unwrap().id;
+    let mut p = transit_vst3_host::create(&id).unwrap();
+    assert!(p.set_param_at(5, "5", 0.25));
+    assert!(p.set_param_at(40, "5", 0.75));
+    let mut io = vec![vec![0.0f32; 256], vec![0.0f32; 256]];
+    p.process(&mut io, 256);
+    p.prepare(48_000.0, 256, 2);
+    let r = records(&mut p, 256);
+    let points: Vec<_> = r.iter().filter(|x| x.0 == 4 && x.2 == 5).map(|x| (x.1, x.3)).collect();
+    assert_eq!(points, vec![(0, 750_000)], "{r:?}");
+}
+
 /// A value the host sets (the mixer applying the session, a mapped controller, automation) reaches
 /// the processor in the next block with the parameter's own id, normalized, and the controller
 /// (what the plug-in's editor shows) is told on the main thread, as VST3 has hosts do.
