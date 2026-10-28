@@ -134,6 +134,10 @@ To split a file: cut it by concern (one module per responsibility, not per size)
   (`File::set_modified`), never relying on the real clock between two writes: coarse file-time
   ticks (10 ms at HZ=100) make "later" equal, and a deliberate `>=` then keeps the older item
   (E60, `../../escapes/E60-a-recovered-autosave-test-left-the-save-order-to-the-clock.md`).
+- A gate's starved run (WSL) is valid only on a quiet host: no `cargo` or `rustc` process on the
+  Windows host when it starts or while it runs. A run with host builds is void and runs again;
+  it is neither a pass nor a failure of the tree. A failure on a quiet host is a failure
+  (E61, `../../escapes/E61-a-starved-gate-run-shared-the-host-with-cold-builds.md`).
 - Tests create unique temp dirs: process id plus a per-process counter (or `TemporaryAutosave`),
   never a fixed name or a clock-only suffix; concurrent tests share a process and a clock tick
   (E51, `../../escapes/E51-test-temp-dirs-collided-in-one-process.md`).
