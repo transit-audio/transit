@@ -10,7 +10,6 @@
 - `linux`: `cargo fmt --check`, `cargo xtask timing`, clippy and the tests on default features.
 - `macos`: clippy and the tests on default features (`crates/au-host` and the objc2 code compile only
   there).
-- `wasm`: `cargo xtask wasm`.
 
 `rt.yml` (the realtime-crate platform matrix) runs on pushes and pull requests that touch `crates/rt`,
 `crates/mix` or the workspace manifest, and on tags. `release.yml` runs only on release tags and

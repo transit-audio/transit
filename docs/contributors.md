@@ -7,8 +7,9 @@ this page is the local copy of the decision.
 
 ## Decision
 
-- Two files, both **compiled into the binary** by the UI crate's `build.rs` (nothing is read from
-  disk or the network at run time; the web build has them too):
+- Two files, both **compiled into the binary** by a UI crate's `build.rs` (nothing is read from
+  disk or the network at run time). **Status (#177):** the only consumer was the retired legacy UI; the studio
+  About window does not show contributors yet, so the build step is gone and the files below are kept as data:
   - [`contributors/contributors.json`](../contributors/contributors.json): commit stats per GitHub
     username. **Generated** by `craftrules/scripts/contributors.py`; never hand-edit.
   - [`contributors/people.toml`](../contributors/people.toml): the names people chose for
@@ -23,7 +24,7 @@ this page is the local copy of the decision.
 
 ## In transit
 
-- The About window is `crates/ui-studio/src/about.rs` (Help > About transit); the legacy ui-egui window is `about()` in `crates/ui-egui/src/panels.rs`.
+- The About window is `crates/ui-studio/src/about.rs` (Help > About transit). It shows the fork credit; the contributor list needs a new build step there.
 
 ## Credit yourself
 

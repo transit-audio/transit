@@ -1,8 +1,8 @@
 # Session format
 
 A session is `crates/model` data (`Session` in `crates/model/src/session.rs`), saved as `.transit`
-JSON plus an `Audio Files/` folder. Users' work lives in these files. The browser has no folders,
-so it saves a session as one zip bundle, `.transitz`, holding the `.transit` and its `Audio Files/`.
+JSON plus an `Audio Files/` folder. Users' work lives in these files. The engine can also read and
+write a session as one zip bundle, `.transitz`, holding the `.transit` and its `Audio Files/`; only the retired web app used it (ADR 0032).
 
 ## Rules
 

@@ -12,8 +12,9 @@ cargo xtask assets      # every bundled asset has a row in ATTRIBUTION.md
 cargo xtask timing      # E49-class timing assertions in tests (xtask/src/timing.rs)
 ```
 
-Other `xtask` commands: `cargo xtask wasm` (web build), `cargo xtask rt-targets` (cross-target check
-of `crates/rt`; run it when you touch that crate), `cargo xtask ci` (the CI sequence).
+Other `xtask` commands: `cargo xtask rt-targets` (cross-target check of `crates/rt`; run it when you
+touch that crate), `cargo xtask ci` (the CI sequence). The `wasm` gate is retired ([ADR 0032](../../adr/0032-transit-ships-a-desktop-app-only.md)):
+transit has no web build.
 
 ## Which checkout a gate checks
 

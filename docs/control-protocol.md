@@ -95,10 +95,7 @@ transit-cli app --port $P ui.screenshot '{"path":"/tmp/shot.png"}'
 transit-cli app --port $P ui.menu.invoke '{"path":"Track > New..."}'
 ```
 
-Offscreen (no window): `cargo run -p transit-ui-egui --example ui_shot -- out.png script.jsonl`,
-where each script line is a request (`{"method": …, "params": …}`), `{"shot": "path.png"}` or
-`{"steps": n}`. Use `--system-theme light|dark|none` to supply the initial OS appearance, and
-script events such as `{"system_theme": "dark"}` to change it on subsequent frames.
+There is no offscreen mode: screenshots come from a running app through `ui.screenshot`.
 
 Appearance defaults to Dark. `ui.theme {"mode":"system"}` follows the appearance supplied by
 the native or web integration at launch and on later frames, while the saved choice stays System.

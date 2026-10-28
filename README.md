@@ -246,7 +246,7 @@ You need a Rust toolchain at 1.90 or newer (`rust-version` in `Cargo.toml`). On 
 `libasound2-dev` and `pkg-config` first.
 
 Every pull request and push to `main` is checked with clippy, tests and the layer rules on Windows,
-Linux and macOS, plus the web build and the ASIO and native WASAPI features. Hardware tests are
+Linux and macOS, plus the ASIO and native WASAPI features. Hardware tests are
 never CI gates.
 
 ```sh

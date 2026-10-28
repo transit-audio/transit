@@ -9,8 +9,8 @@ Assets must be original, public domain (CC0) or permissively licensed. See `AGEN
 ## Icons
 
 All UI icons (tools, transport, track buttons) are drawn procedurally in
-`crates/ui-egui/src/icons.rs` by the SoundCraft contributors (MIT OR Apache-2.0). No UI icon image
-files are used by SoundCraft. The transit app's studio UI (`crates/ui-studio`) uses Lucide icons
+`crates/ui-egui/src/icons.rs` (removed in #177, ADR 0032) by the SoundCraft contributors (MIT OR Apache-2.0). No UI icon image
+files were used by SoundCraft. The transit app's studio UI (`crates/ui-studio`) uses Lucide icons
 (ISC), listed under Files below. The app icon (`assets/app-icon/`, the wordmark's first t, original artwork by
 @derekmwright) is listed under Files below.
 

@@ -1,6 +1,6 @@
 # UI
 
-`crates/ui-studio` is transit's UI. `crates/ui-egui` is the legacy upstream UI; do not extend it.
+`crates/ui-studio` is transit's UI, and the only one: the legacy upstream UI crate was removed in #177.
 UI code follows the same no-panic rule (`#![deny(clippy::unwrap_used, ...)]` in `lib.rs`).
 
 ## Conventions
