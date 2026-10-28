@@ -854,6 +854,11 @@ mod tests {
         let mut r = Engine::default();
         recover(&mut r, &left[0]).unwrap();
         assert!(r.is_dirty());
+        // The save comes after the autosave, so its file must be newer. File times are only as fine
+        // as the kernel tick (10 ms at HZ=100), and a save in the autosave's tick keeps the autosave
+        // offered on purpose (the test below), so the autosave is dated before the save here rather
+        // than left to the clock (E60).
+        std::fs::File::options().write(true).open(left[0].dir.join(SESSION)).unwrap().set_modified(SystemTime::UNIX_EPOCH).unwrap();
         r.execute("session.save", &json!({})).unwrap();
         assert!(leftovers(&root).is_empty());
         assert!(!left[0].dir.exists());
