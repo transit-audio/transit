@@ -433,7 +433,9 @@ impl Report {
         section(&mut o, "Callback telemetry");
         match &self.telemetry {
             Some(t) => {
-                for row in crate::telemetry::detail_rows(t).into_iter().chain(crate::telemetry::longest_callback_lines(t, &self.strips)) {
+                for row in
+                    crate::telemetry::detail_rows_named(t, &self.strips).into_iter().chain(crate::telemetry::longest_callback_lines(t, &self.strips))
+                {
                     o.push_str(&row);
                     o.push('\n');
                 }

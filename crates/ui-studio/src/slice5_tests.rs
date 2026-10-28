@@ -879,6 +879,76 @@ fn refused_inline_renders_print_by_reason_after_the_inline_renders() {
 }
 
 #[test]
+fn per_strip_overruns_and_the_pool_histograms_print_after_the_worker_figures() {
+    use crate::telemetry::{StripName, detail_rows, detail_rows_named};
+    let strip = |track, busy, late, unstarted| transit_mix::StripFigure {
+        track,
+        overruns_busy: busy,
+        overruns_late: late,
+        overruns_unstarted: unstarted,
+        inline_renders: 2,
+        cost_ns: 85_400,
+        worst_ns: 410_000,
+    };
+    let mut top = [None; transit_mix::TOP_STRIPS];
+    top[0] = Some(strip(1, 3, 9, 0));
+    top[1] = Some(strip(0, 1, 4, 1));
+    top[2] = Some(strip(7, 0, 2, 0));
+    top[3] = Some(strip(2, 0, 1, 0));
+    let f = transit_mix::StripFaults {
+        workers: 3,
+        top_strips: top,
+        lateness: [5, 4, 3, 2, 1, 0, 6],
+        wake: [10, 20, 30, 0, 0, 0, 1],
+        ..Default::default()
+    };
+    let s = transit_playback::telemetry::CallbackTelemetry { strip_faults: Some(f), ..Default::default() };
+    let names = vec![
+        StripName { track: "Drums".into(), plugin: Some("Battery 4".into()) },
+        StripName { track: "Lead".into(), plugin: Some("Jup-8000 V".into()) },
+        StripName { track: "Vox".into(), plugin: None },
+    ];
+    let rows = detail_rows_named(&s, &names);
+    let at = |label: &str| rows.iter().position(|r| r.starts_with(label)).unwrap_or_else(|| panic!("{label} missing: {rows:?}"));
+    let top_at = at("Strip overruns, top");
+    assert_eq!(
+        rows[top_at], "Strip overruns, top: Lead: Jup-8000 V 12, Drums: Battery 4 6, strip 7 2",
+        "the top three, named as the phase marker names them"
+    );
+    assert!(at("Render worker protocol faults") < top_at, "after the existing worker rows");
+    assert_eq!(rows[top_at + 1], "Strip Lead: Jup-8000 V: overruns busy 3, late 9, unstarted 0; inline 2; cost 85 \u{b5}s, worst 410 \u{b5}s");
+    assert_eq!(rows[top_at + 2], "Strip Drums: Battery 4: overruns busy 1, late 4, unstarted 1; inline 2; cost 85 \u{b5}s, worst 410 \u{b5}s");
+    assert!(rows[top_at + 3].starts_with("Strip strip 7: "), "an index the session no longer has");
+    assert!(rows[top_at + 4].starts_with("Strip Vox: overruns busy 0, late 1,"), "a track with no plug-in");
+    let late = at("Strip lateness");
+    assert_eq!(late, top_at + 5, "the histograms after the table");
+    assert_eq!(
+        rows[late..late + 7],
+        [
+            "Strip lateness, up to 50 \u{b5}s: 5",
+            "Strip lateness, up to 100 \u{b5}s: 4",
+            "Strip lateness, up to 200 \u{b5}s: 3",
+            "Strip lateness, up to 500 \u{b5}s: 2",
+            "Strip lateness, up to 1 ms: 1",
+            "Strip lateness, up to 2 ms: 0",
+            "Strip lateness, over 2 ms: 6",
+        ]
+    );
+    assert_eq!(rows[late + 7], "Worker wake, up to 50 \u{b5}s: 10");
+    assert_eq!(rows[late + 13], "Worker wake, over 2 ms: 1");
+    assert!(late + 13 < at("Callbacks:"), "before the raw counts");
+    // The window has no names: indices.
+    assert!(detail_rows(&s).contains(&"Strip overruns, top: strip 1 12, strip 0 6, strip 7 2".to_string()));
+    // No overrun: the summary says so and no strip row is printed.
+    let quiet = transit_mix::StripFaults { workers: 3, ..Default::default() };
+    let rows = detail_rows(&transit_playback::telemetry::CallbackTelemetry { strip_faults: Some(quiet), ..Default::default() });
+    assert!(rows.contains(&"Strip overruns, top: none".to_string()), "{rows:?}");
+    assert!(!rows.iter().any(|r| r.starts_with("Strip ") && r.contains(": overruns busy")), "{rows:?}");
+    // Serial: none of it.
+    assert!(!detail_rows(&Default::default()).iter().any(|r| r.starts_with("Strip lateness") || r.starts_with("Worker wake")));
+}
+
+#[test]
 fn the_telemetry_is_read_a_few_times_a_second_not_every_frame() {
     let mut t = T::new();
     t.app.telemetry.injected = Some(snap());

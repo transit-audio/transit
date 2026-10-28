@@ -97,10 +97,16 @@ pub fn error_count(t: &CallbackTelemetry) -> Option<u64> {
 
 /// Histogram bin labels, from [`DURATION_LIMITS_NS`] and the open last bin.
 pub fn bin_label(i: usize) -> String {
+    limit_label(&DURATION_LIMITS_NS, i)
+}
+
+/// A histogram bin's label (`up to 50 µs`, `over 2 ms`) from its upper limits, nanoseconds, and
+/// the open last bin.
+fn limit_label(limits: &[u64], i: usize) -> String {
     let unit = |ns: u64| {
         if ns >= 1_000_000 { format!("{} ms", ns as f64 / 1_000_000.0) } else { format!("{} \u{b5}s", ns as f64 / 1_000.0) }
     };
-    match (DURATION_LIMITS_NS.get(i), i.checked_sub(1).and_then(|p| DURATION_LIMITS_NS.get(p))) {
+    match (limits.get(i), i.checked_sub(1).and_then(|p| limits.get(p))) {
         (Some(hi), _) => format!("up to {}", unit(*hi)),
         (None, Some(lo)) => format!("over {}", unit(*lo)),
         (None, None) => String::new(),
@@ -108,8 +114,15 @@ pub fn bin_label(i: usize) -> String {
 }
 
 /// The details window's lines (`label: value`): the histogram, then the raw counts. Nothing is
-/// derived but a saturating "without a timing" and a saturating histogram total.
+/// derived but a saturating "without a timing" and a saturating histogram total. Render worker
+/// strips are named by index; the report names them ([`detail_rows_named`]).
 pub fn detail_rows(t: &CallbackTelemetry) -> Vec<String> {
+    detail_rows_named(t, &[])
+}
+
+/// [`detail_rows`] with the session's strips by track index, for the render worker figures that
+/// name a strip (#169).
+pub fn detail_rows_named(t: &CallbackTelemetry, strips: &[StripName]) -> Vec<String> {
     let mut rows: Vec<String> = t.duration_histogram.iter().enumerate().map(|(i, n)| format!("{}: {n}", bin_label(i))).collect();
     rows.push(format!("Histogram total: {}", t.duration_histogram.iter().fold(0u64, |a, n| a.saturating_add(*n))));
     rows.extend([
@@ -124,6 +137,7 @@ pub fn detail_rows(t: &CallbackTelemetry) -> Vec<String> {
     // docs/troubleshooting.md ("Render worker figures").
     if let Some(f) = &t.strip_faults {
         rows.extend(strip_fault_rows(f));
+        rows.extend(strip_figure_rows(f, strips));
     }
     rows.extend([
         format!("Callbacks: {}", t.callbacks),
@@ -153,22 +167,25 @@ fn ms_text(ns: u64) -> String {
     format!("{:.1} ms", ns as f64 / 1e6)
 }
 
+/// A strip as the phase marker names it: `<track>: <plug-in>`, the track alone without a
+/// plug-in, `strip N` for an index the session no longer has.
+fn strip_text(i: u32, strips: &[StripName]) -> String {
+    match strips.get(i as usize) {
+        Some(s) => match &s.plugin {
+            Some(p) => format!("{}: {p}", s.track),
+            None => s.track.clone(),
+        },
+        None => format!("strip {i}"),
+    }
+}
+
 /// Where a longest callback was: `<track>: <plug-in> (strip render)` for a strip phase, the
 /// phase's name otherwise. An index the session no longer has reads `strip N`.
 fn where_text(w: &WorstCallback, strips: &[StripName], with_verdict: bool) -> String {
     let phase = w.phase.label();
     let verdict = w.verdict().filter(|_| with_verdict).map_or(String::new(), |v| format!(", {}", v.label()));
     match w.strip_index().filter(|_| w.phase.runs_strip()) {
-        Some(i) => {
-            let name = match strips.get(i as usize) {
-                Some(s) => match &s.plugin {
-                    Some(p) => format!("{}: {p}", s.track),
-                    None => s.track.clone(),
-                },
-                None => format!("strip {i}"),
-            };
-            format!("{name} ({phase}{verdict})")
-        }
+        Some(i) => format!("{} ({phase}{verdict})", strip_text(i, strips)),
         None if verdict.is_empty() => phase.to_owned(),
         None => format!("{phase} ({})", verdict.trim_start_matches(", ")),
     }
@@ -220,6 +237,32 @@ pub fn strip_fault_rows(f: &transit_mix::StripFaults) -> Vec<String> {
         format!("Deferred MIDI silences: {}", f.midi_silences),
         format!("Render worker protocol faults: {}", f.conflicts),
     ]
+}
+
+/// The render workers' per-strip figures and histograms (#169), after [`strip_fault_rows`]: the
+/// top three strips by overruns on one line, a row per strip with an overrun (the most first, at
+/// most [`transit_mix::TOP_STRIPS`]), then the lateness of late results and the workers' wake
+/// latency, one row per bucket. Strips are named as the phase marker names them.
+pub fn strip_figure_rows(f: &transit_mix::StripFaults, strips: &[StripName]) -> Vec<String> {
+    let listed: Vec<&transit_mix::StripFigure> = f.top_strips.iter().flatten().collect();
+    let top: Vec<String> = listed.iter().take(3).map(|s| format!("{} {}", strip_text(s.track, strips), s.overruns())).collect();
+    let mut rows = vec![format!("Strip overruns, top: {}", if top.is_empty() { "none".to_owned() } else { top.join(", ") })];
+    rows.extend(listed.iter().map(|s| {
+        format!(
+            "Strip {}: overruns busy {}, late {}, unstarted {}; inline {}; cost {} \u{b5}s, worst {} \u{b5}s",
+            strip_text(s.track, strips),
+            s.overruns_busy,
+            s.overruns_late,
+            s.overruns_unstarted,
+            s.inline_renders,
+            s.cost_ns / 1_000,
+            s.worst_ns / 1_000,
+        )
+    }));
+    let limits = &transit_mix::POOL_HISTOGRAM_LIMITS_NS;
+    rows.extend(f.lateness.iter().enumerate().map(|(i, n)| format!("Strip lateness, {}: {n}", limit_label(limits, i))));
+    rows.extend(f.wake.iter().enumerate().map(|(i, n)| format!("Worker wake, {}: {n}", limit_label(limits, i))));
+    rows
 }
 
 /// The Audio Devices line for the device loop of a native stream, with the fields `backend` fills
