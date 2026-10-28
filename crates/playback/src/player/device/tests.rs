@@ -510,10 +510,11 @@ fn loopback_pair(var: &str, default: &str) -> LoopbackPair {
 }
 
 /// The bounds a measured round trip must fall in: at least the driver-reported output plus input
-/// latency in frames, at most that plus eight buffers.
+/// latency in frames minus one buffer (drivers can over-report by a few frames), at most that plus
+/// eight buffers.
 #[allow(dead_code)]
 fn round_trip_bounds(driver_frames: u32, buffer: u32) -> (u32, u32) {
-    (driver_frames, driver_frames.saturating_add(buffer.saturating_mul(8)))
+    (driver_frames.saturating_sub(buffer), driver_frames.saturating_add(buffer.saturating_mul(8)))
 }
 
 #[test]
@@ -529,9 +530,10 @@ fn the_loopback_pair_parses_one_based_out_and_in_and_refuses_the_rest() {
 }
 
 #[test]
-fn the_round_trip_bounds_are_the_driver_figure_plus_up_to_eight_buffers() {
-    assert_eq!(round_trip_bounds(300, 64), (300, 812));
-    assert_eq!(round_trip_bounds(u32::MAX, 64), (u32::MAX, u32::MAX));
+fn the_round_trip_bounds_are_the_driver_figure_minus_one_buffer_to_plus_eight_buffers() {
+    assert_eq!(round_trip_bounds(300, 64), (236, 812));
+    assert_eq!(round_trip_bounds(u32::MAX, 64), (u32::MAX - 64, u32::MAX));
+    assert_eq!(round_trip_bounds(30, 64), (0, 542));
 }
 
 /// Opens the owner's default endpoint through the whole Player path with the native backend.

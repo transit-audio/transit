@@ -66,3 +66,7 @@ plug-in editors. A report includes:
 
 Backend clock numbers carry unknown offset uncertainty; do not present them as certified latency
 (see `../knowledge/clocks.md`). Fake-device results prove logic, not hardware.
+
+Drivers can report a few frames more than the measured loop (Scarlett at 64: 326 measured against
+328 reported; Model 12 at 256: 987 against 995), so the loopback tests accept a round trip down to
+the driver figure minus one buffer.
