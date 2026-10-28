@@ -85,7 +85,13 @@ pub fn export(e: &Engine, ids: &[ClipId], path: &str) -> Result<usize> {
 pub fn import(e: &mut Engine, path: &str, first: Option<TrackId>, at: Samples) -> Result<Vec<ClipId>> {
     let id = "file.import_clip_groups";
     let text = crate::io::read_text(path)?;
-    let file: GroupFile = serde_json::from_str(&text).map_err(|err| EngineError::BadParams(id.into(), format!("not a clip group file: {err}")))?;
+    let not_a_group = |err: serde_json::Error| EngineError::BadParams(id.into(), format!("not a clip group file: {err}"));
+    let mut value: serde_json::Value = serde_json::from_str(&text).map_err(not_a_group)?;
+    // Video is retired (ADR 0031): its clips are dropped, as when a session opens.
+    if transit_model::legacy::drop_video_from_lanes(&mut value) {
+        e.message(transit_model::legacy::VIDEO_REMOVED_NOTE.to_string());
+    }
+    let file: GroupFile = serde_json::from_value(value).map_err(not_a_group)?;
     if file.format != FORMAT {
         return Err(EngineError::BadParams(id.into(), "not a SoundCraft clip group file".into()));
     }

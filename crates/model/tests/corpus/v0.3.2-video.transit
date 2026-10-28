@@ -419,6 +419,53 @@
             }
           ],
           "name": "Audio A"
+        },
+        {
+          "clips": [
+            {
+              "color": null,
+              "content": {
+                "Audio": {
+                  "offset": 0,
+                  "source": 1
+                }
+              },
+              "edit_locked": false,
+              "fade_in": {
+                "curvature": 0.25,
+                "len": 480,
+                "shape": "SCurve"
+              },
+              "fade_out": {
+                "curvature": 0.0,
+                "len": 960,
+                "shape": "SCurve"
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "group": null,
+              "id": 22,
+              "length": 4800,
+              "loop_id": null,
+              "looping": null,
+              "muted": false,
+              "name": "pasted",
+              "rating": 0,
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "start": 0,
+              "stretch": 1.0,
+              "sync_point": 0,
+              "time_locked": false
+            }
+          ],
+          "name": "Pasted audio"
         }
       ],
       "ticks_timebase": false,

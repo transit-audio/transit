@@ -14,6 +14,9 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
     let id = "file.import_session_data";
     let text = read_text(path)?;
     let other = Session::from_json(&text).map_err(|err| bad(id, format!("{path}: {err}")))?;
+    if other.load_notes.iter().any(|n| n == transit_model::legacy::VIDEO_REMOVED_NOTE) {
+        e.message(transit_model::legacy::VIDEO_REMOVED_NOTE.to_string());
+    }
     let picked: Vec<transit_model::Track> = match &names {
         Some(ns) => {
             let mut v = Vec::new();

@@ -102,9 +102,12 @@ fn a_session_with_video_opens_with_the_video_dropped_and_a_note() {
     let (name, text) = corpus().into_iter().find(|(n, _)| n == "v0.3.2-video.transit").expect("the video fixture is in the corpus");
     let s = Session::from_json(&text).unwrap_or_else(|e| panic!("{name} no longer loads: {e}"));
     assert_eq!(s.load_notes, vec![transit_model::legacy::VIDEO_REMOVED_NOTE.to_string()], "{name}");
-    assert_eq!(s.tracks.len(), 1, "{name}: the audio track stays, the Video track goes");
-    let clips: Vec<_> = s.tracks.iter().flat_map(|t| t.clips()).collect();
-    assert_eq!(clips.len(), 1, "{name}: the audio clip stays, the video clip goes");
+    // The Video track also holds an audio clip on its inactive playlist: it stays, as an Audio track.
+    assert_eq!(s.tracks.len(), 2, "{name}: the Video track that holds audio stays");
+    assert!(s.tracks.iter().all(|t| t.kind == transit_model::TrackKind::Audio), "{name}");
+    let clips: Vec<_> = s.tracks.iter().flat_map(|t| t.playlists.iter().flat_map(|p| p.clips.iter())).collect();
+    assert_eq!(clips.len(), 2, "{name}: both audio clips stay, the video clip goes");
+    assert!(clips.iter().all(|c| c.is_audio()), "{name}");
     let saved = s.to_json().unwrap();
     assert!(!saved.contains("Video") && !saved.contains("videos"), "{name}: a save carries no video");
     let again = Session::from_json(&saved).unwrap();
