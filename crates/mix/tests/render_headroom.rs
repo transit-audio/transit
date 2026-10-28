@@ -23,7 +23,9 @@
 //! p95, p99 and max, strip overruns by cause, inline renders, and the continuity instruments'
 //! holes (blocks of instrument time never processed) and stuck notes and pedals. A last row
 //! forces an overrun (a worker stalls 10 ms inside a strip that holds a sustained note) and checks
-//! the note resumes and is released.
+//! the note resumes and is released. A second table, for the worker rows (#169): the lateness of
+//! late results and the workers' wake latency (publish to claim) by bucket, and the three strips
+//! with the most overruns (track index, then busy/late/unstarted).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 #[allow(dead_code)]
@@ -218,6 +220,31 @@ fn serial_versus_render_workers() {
             f.inline_renders,
             r.holes,
             r.stuck
+        );
+    }
+    let buckets = |h: &[u64]| h.iter().map(u64::to_string).collect::<Vec<_>>().join("/");
+    println!();
+    println!(
+        "| frames | path | load | lateness \u{2264}50 \u{b5}s/100/200/500/1 ms/2 ms/more | wake \u{2264}50 \u{b5}s/100/200/500/1 ms/2 ms/more | top strips: track busy/late/unstarted |"
+    );
+    println!("|---|---|---|---|---|---|");
+    for r in rows.iter().filter(|r| r.mode != "serial") {
+        let f = r.faults;
+        let top: Vec<String> = f
+            .top_strips
+            .iter()
+            .flatten()
+            .take(3)
+            .map(|s| format!("t{} {}/{}/{}", s.track, s.overruns_busy, s.overruns_late, s.overruns_unstarted))
+            .collect();
+        println!(
+            "| {} | {} | {} | {} | {} | {} |",
+            r.frames,
+            r.mode,
+            r.load,
+            buckets(&f.lateness),
+            buckets(&f.wake),
+            if top.is_empty() { "none".into() } else { top.join(", ") }
         );
     }
     for r in &rows {
