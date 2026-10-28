@@ -229,14 +229,14 @@ pub(super) fn set_of(fake: &Arc<Fake>, workers: usize) -> WorkerSet {
     WorkerSet::new(Config { workers, strips, promote: false }, Arc::clone(fake) as Arc<dyn StripRunner>).expect("spawn workers")
 }
 
-fn publish_all(set: &mut WorkerSet) {
+pub(super) fn publish_all(set: &mut WorkerSet) {
     for s in 0..set.strips() {
         assert_eq!(set.publish(s), Ok(Published::Published));
     }
 }
 
 /// Every published strip done by the workers before `finish` (so `finish` only consumes).
-fn wait_done(set: &WorkerSet, done: usize, claimed: usize) {
+pub(super) fn wait_done(set: &WorkerSet, done: usize, claimed: usize) {
     wait_until("the workers", || {
         let c = set.jobs().counts();
         c.done == done && c.claimed == claimed
@@ -294,7 +294,7 @@ fn a_stalled_strip_cannot_hold_finish_past_its_deadline() {
     // timing: stall-bound SLACK is over ten scheduler quanta; see its definition
     assert!(returned - deadline < SLACK, "finish returned {:?} past its deadline", returned - deadline);
     assert_eq!(set.outcome(5), Some(Outcome::Overrun(OverrunCause::Late)));
-    assert_eq!(r, BlockReport { mixed: 7, inline: 0, overrun: 1, faulted: 0 });
+    assert_eq!(r, BlockReport { mixed: 7, inline: 0, overrun: 1, faulted: 0, inline_refused: 0 });
     assert_eq!(set.jobs().slot(5).map(JobSlot::state), Some(State::Claimed), "a claimed slot is left alone");
 
     // The next block skips it: a second overrun, the others render.
@@ -307,7 +307,7 @@ fn a_stalled_strip_cannot_hold_finish_past_its_deadline() {
     set.wake(3);
     wait_done(&set, 7, 1);
     let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
-    assert_eq!(r, BlockReport { mixed: 7, inline: 0, overrun: 1, faulted: 0 });
+    assert_eq!(r, BlockReport { mixed: 7, inline: 0, overrun: 1, faulted: 0, inline_refused: 0 });
     assert_eq!(set.outcome(5), Some(Outcome::Overrun(OverrunCause::Busy)));
     let st = set.stats();
     assert_eq!((st.overruns, st.overruns_late, st.overruns_busy), (2, 1, 1));
@@ -323,7 +323,7 @@ fn a_stalled_strip_cannot_hold_finish_past_its_deadline() {
     set.wake(3);
     wait_done(&set, 8, 0);
     let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
-    assert_eq!(r, BlockReport { mixed: 8, inline: 0, overrun: 0, faulted: 0 });
+    assert_eq!(r, BlockReport { mixed: 8, inline: 0, overrun: 0, faulted: 0, inline_refused: 0 });
     assert_eq!(fake.strips[5].last_gen.load(Ordering::Acquire), 3);
     assert!(set.shutdown(STALL).is_empty());
     assert_eq!(set.jobs().faults(), 0);
@@ -395,7 +395,7 @@ fn admission_renders_inline_only_what_fits_before_the_deadline() {
 }
 
 /// The other side of admission: with time to spare, the callback renders every unstarted strip
-/// inline (never-measured strips have estimate zero and are admitted).
+/// that has a cost history inline.
 #[test]
 fn admission_renders_every_unstarted_strip_when_time_allows() {
     let fake = Fake::new(10, Duration::ZERO);
@@ -409,13 +409,20 @@ fn admission_renders_every_unstarted_strip_when_time_allows() {
     wait_until("both workers stalled", || fake.stalled.load(Ordering::Acquire) == 2);
     let r = set.finish(Instant::now(), |_| {});
     assert_eq!((r.inline, r.overrun), (0, 10), "no time left: nothing admitted, nothing waited for");
+    assert_eq!(r.inline_refused, 8, "the eight unstarted strips have no history: refused, whatever the time");
+    assert_eq!(set.stats().inline_refused_no_history, 8);
     for s in 0..10 {
         fake.release(s);
     }
     wait_until("the stalled workers", || set.jobs().counts().claimed == 0);
+    assert!(set.shutdown(STALL).is_empty());
 
+    // A new set (the two strips that were late above are barred for a few blocks): every strip
+    // seeded with a small cost history.
+    let mut set = set_of(&fake, 2);
     for s in 0..10 {
         fake.set(s, Behavior::Stall);
+        set.set_cost_estimate(s, Duration::from_micros(1));
     }
     assert!(set.begin_block(2));
     publish_all(&mut set);
@@ -444,7 +451,7 @@ fn a_panicking_runner_completes_its_slot_as_a_counted_fault() {
     set.wake(1);
     wait_done(&set, 4, 0);
     let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
-    assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 0, faulted: 1 });
+    assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 0, faulted: 1, inline_refused: 0 });
     assert_eq!(set.outcome(2), Some(Outcome::Faulted));
     assert_eq!(set.stats().runner_panics, 1);
     assert_eq!(set.jobs().counts().idle, 4);
@@ -476,9 +483,12 @@ fn a_panicking_runner_completes_its_slot_as_a_counted_fault() {
 }
 
 #[test]
-fn zero_workers_render_everything_inline() {
+fn zero_workers_render_everything_with_a_history_inline() {
     let fake = Fake::new(4, Duration::ZERO);
     let mut set = set_of(&fake, 0);
+    for s in 0..4 {
+        set.set_cost_estimate(s, Duration::from_micros(1));
+    }
     assert!(set.begin_block(1));
     publish_all(&mut set);
     assert_eq!(set.wake(4), 0);
@@ -550,7 +560,7 @@ fn shutdown_quarantines_a_stalled_worker_within_its_bound() {
     set.wake(2);
     wait_done(&set, 3, 1);
     let r = set.finish(Instant::now(), |_| panic!("nothing is left to render inline"));
-    assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 1, faulted: 0 });
+    assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 1, faulted: 0, inline_refused: 0 });
 
     let t0 = Instant::now();
     let q = set.shutdown(BOUND);

@@ -19,8 +19,8 @@
 //! 4. [`WorkerSet::finish`] with the block deadline. The deadline policy:
 //!    - a slot `Done` for this block is consumed: [`Outcome::Mixed`] (the caller mixes it);
 //!    - a slot still `Published` is reclaimed and rendered inline through the caller's closure,
-//!      only if the strip's estimated cost fits in the time left (the admission limit):
-//!      [`Outcome::Inline`]; otherwise it stays available to the workers until the deadline;
+//!      only if the admission rule below lets it: [`Outcome::Inline`]; otherwise it stays
+//!      available to the workers until the deadline;
 //!    - a slot `Claimed` is waited for by sweeping again, spinning with
 //!      [`std::hint::spin_loop`] between sweeps: never a yield, a lock or a sleep, and never past
 //!      the deadline (a yield on Windows is `SwitchToThread`, which can hand the core to a
@@ -29,16 +29,45 @@
 //!      `Published` is reclaimed and retired unrendered ([`OverrunCause::Unstarted`]), a slot
 //!      still `Claimed` is left alone ([`OverrunCause::Late`]; the next block skips it).
 //!
-//! `finish` returns no later than the deadline plus one sweep and whatever inline
-//! render was admitted before the deadline (at most one strip's cost beyond its estimate). It
-//! never blocks on a worker. Silence for an overrun strip is the caller's job; the set reports
-//! one [`Outcome`] per strip in a preallocated table and counts overruns, inline renders and late
-//! results in [`Stats`].
+//! `finish` returns no later than the deadline plus one sweep, unless an admitted inline render
+//! ran longer than the strip's worst observed cost (a render slower than any it has had): then by
+//! that excess. It never blocks on a worker. Silence for an overrun strip is the caller's job;
+//! the set reports one [`Outcome`] per strip in a preallocated table and counts overruns, inline
+//! renders, refused inline renders and late results in [`Stats`].
 //!
-//! **Admission.** Each render's duration (worker or inline) updates the strip's cost estimate, a
-//! nanosecond EWMA (weight 1/4) in an `AtomicU64`. A strip is reclaimed for an inline render only
-//! while the time left before the deadline is positive and at least its estimate. A strip never
-//! measured has estimate 0 and is admitted while any time is left.
+//! **Admission** (issue #168; ADR 0029, deviation 16). An inline render cannot be bounded once it
+//! has started, so the callback starts one only when the strip's history says it fits. Each
+//! render's duration (worker or inline) updates two per-strip figures, each an `AtomicU64` of
+//! nanoseconds written only by the strip's one executor:
+//!
+//! - the cost estimate, an EWMA with weight 1/4;
+//! - the worst case, a decaying maximum: a render longer than it replaces it; otherwise each
+//!   render moves it 1/[`WORST_DECAY`] of the way down toward the EWMA (never below it). A spike
+//!   is remembered for a few hundred renders (from 40 ms down to 1 ms over a 0.1 ms EWMA takes
+//!   about 240 renders, 0.3 s at 64 frames and 48 kHz), then forgotten unless it comes back. A
+//!   decaying maximum rather than the maximum over the last N renders: one word per strip instead
+//!   of N, an O(1) update, and a spike fades instead of vanishing at once when it leaves a window.
+//!
+//! Both figures are 0 until the strip's first render ("no history"), survive
+//! [`WorkerSet::clear_suspect`] and every publish, and reset only with the set (a new
+//! [`WorkerSet`], which a device reopen builds). [`WorkerSet::set_cost_estimate`] seeds both.
+//!
+//! A strip still `Published` is reclaimed for an inline render only when, checked in this order:
+//!
+//! 1. it has history: a strip never rendered is never rendered inline (its first render is where
+//!    a plug-in does its one-time load); else refused as [`InlineRefusal::NoHistory`];
+//! 2. it has not overrun in the last [`OVERRUN_BAR_BLOCKS`] blocks: an `Overrun(Late)`, an
+//!    `Overrun(Busy)`, or an inline render that ended past its deadline bars the strip from
+//!    inline renders for the next [`OVERRUN_BAR_BLOCKS`] blocks; else refused as
+//!    [`InlineRefusal::RecentOverrun`]. An `Overrun(Unstarted)` does not bar it: no render took
+//!    place, so it says nothing of the strip's cost, and counting it would keep a barred strip the
+//!    workers do not reach barred for good (each refusal would make another `Unstarted`);
+//! 3. time is left before the deadline (no time left is the deadline itself, not a refusal);
+//! 4. its worst case fits in the time left; else refused as [`InlineRefusal::WorstCase`].
+//!
+//! A refused strip stays claimable by the workers until the deadline and is otherwise an
+//! `Overrun(Unstarted)`, the honest failure. Each refused strip is counted once per block, by the
+//! first reason that refused it ([`Stats::inline_refused_no_history`] and its two siblings).
 //!
 //! **Faults in the runner.** The worker loop catches a panic from [`StripRunner::run`]
 //! (`catch_unwind`), completes the slot anyway (so it is never left `Claimed` by an unwind) and
@@ -115,10 +144,31 @@ pub enum OverrunCause {
     Busy,
     /// A worker claimed it this block and had not finished at the deadline.
     Late,
-    /// No thread had started it at the deadline and the admission limit refused an inline
+    /// No thread had started it at the deadline and the admission rule refused an inline
     /// render; it was taken back unrendered.
     Unstarted,
 }
+
+/// Why the admission rule refused to render an unstarted strip inline (see the module docs).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InlineRefusal {
+    /// The strip has never been rendered: its cost is unknown.
+    NoHistory,
+    /// The strip overran (or an inline render of it ended past its deadline) within the last
+    /// [`OVERRUN_BAR_BLOCKS`] blocks.
+    RecentOverrun,
+    /// The strip's worst observed cost is more than the time left.
+    WorstCase,
+}
+
+/// Blocks a strip is barred from inline renders after an overrun (`Late`, `Busy`, or an inline
+/// render that ended past its deadline). Small, so a strip that recovers is soon a candidate
+/// again; never zero, so a strip that just overran is not run on the callback right after.
+pub const OVERRUN_BAR_BLOCKS: u64 = 8;
+
+/// The worst case's decay per render: it moves `1 / WORST_DECAY` of the way down toward the
+/// EWMA. See the module docs.
+pub const WORST_DECAY: u64 = 64;
 
 /// What [`WorkerSet::publish`] did.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -159,6 +209,9 @@ pub struct BlockReport {
     pub overrun: usize,
     /// [`Outcome::Faulted`] strips.
     pub faulted: usize,
+    /// Strips the admission rule refused to render inline this block (any reason; each strip
+    /// once).
+    pub inline_refused: usize,
 }
 
 /// Running totals since construction (stream-stats style; a snapshot, workers keep moving).
@@ -178,8 +231,18 @@ pub struct Stats {
     pub overruns_late: u64,
     /// Overruns with [`OverrunCause::Busy`]: skipped, a worker still held the strip.
     pub overruns_busy: u64,
-    /// Overruns with [`OverrunCause::Unstarted`]: refused by the admission limit.
+    /// Overruns with [`OverrunCause::Unstarted`]: no thread had started the strip at the
+    /// deadline.
     pub overruns_unstarted: u64,
+    /// Inline renders refused because the strip had no cost history
+    /// ([`InlineRefusal::NoHistory`]; each strip once per block).
+    pub inline_refused_no_history: u64,
+    /// Inline renders refused because the strip's worst case did not fit in the time left
+    /// ([`InlineRefusal::WorstCase`]; each strip once per block).
+    pub inline_refused_worst_case: u64,
+    /// Inline renders refused because the strip overran recently
+    /// ([`InlineRefusal::RecentOverrun`]; each strip once per block).
+    pub inline_refused_recent_overrun: u64,
     /// Late results retired unread at a later `begin_block`.
     pub late_results: u64,
     /// Runner panics caught by workers ([`Outcome::Faulted`]).
@@ -197,6 +260,9 @@ struct Counters {
     overruns_late: AtomicU64,
     overruns_busy: AtomicU64,
     overruns_unstarted: AtomicU64,
+    refused_no_history: AtomicU64,
+    refused_worst_case: AtomicU64,
+    refused_recent_overrun: AtomicU64,
     late_results: AtomicU64,
     runner_panics: AtomicU64,
     misuse: AtomicU64,
@@ -222,6 +288,9 @@ struct Shared {
     runner: Arc<dyn StripRunner>,
     /// Per strip: estimated render cost, nanoseconds (EWMA; 0 = never measured).
     cost_ns: Box<[AtomicU64]>,
+    /// Per strip: worst-case render cost, nanoseconds (a decaying maximum, never below the EWMA;
+    /// 0 = never measured: no history).
+    worst_ns: Box<[AtomicU64]>,
     /// Per strip: the runner panicked on the last claimed render. Written by the worker before
     /// its completing Release, read by the publisher after its consuming Acquire.
     panicked: Box<[AtomicBool]>,
@@ -235,13 +304,21 @@ struct Shared {
 
 impl Shared {
     fn record_cost(&self, strip: usize, took: Duration) {
-        let Some(c) = self.cost_ns.get(strip) else { return };
+        let (Some(c), Some(w)) = (self.cost_ns.get(strip), self.worst_ns.get(strip)) else { return };
         let ns = u64::try_from(took.as_nanos()).unwrap_or(u64::MAX).max(1);
-        // Relaxed: an estimate; one executor per strip at a time writes it.
+        // Relaxed: estimates; one executor per strip at a time writes them.
         let old = c.load(Ordering::Relaxed);
-        let new = if old == 0 { ns } else { old - old / 4 + ns / 4 };
-        c.store(new, Ordering::Relaxed);
+        let ewma = if old == 0 { ns } else { old - old / 4 + ns / 4 };
+        c.store(ewma, Ordering::Relaxed);
+        w.store(next_worst(w.load(Ordering::Relaxed), ewma, ns), Ordering::Relaxed);
     }
+}
+
+/// The worst case after a render of `ns`, the EWMA already updated to `ewma`: the render if it is
+/// longer, else the old worst case moved `1 / WORST_DECAY` of the way down to the EWMA.
+fn next_worst(old: u64, ewma: u64, ns: u64) -> u64 {
+    let decayed = if old > ewma { old - (old - ewma).div_ceil(WORST_DECAY) } else { ewma };
+    decayed.max(ns)
 }
 
 /// The workers [`WorkerSet::shutdown`] abandoned. Empty when every worker returned in time.
@@ -284,6 +361,13 @@ pub struct WorkerSet {
     published_len: usize,
     /// Strips skipped this block (busy).
     skipped: usize,
+    /// Blocks begun by this set (the clock of the overrun bar).
+    block_index: u64,
+    /// Per strip: the first block index in which the strip may be rendered inline again (0:
+    /// never barred).
+    barred_until: Box<[u64]>,
+    /// Per strip: a refused inline render was already counted this block.
+    refused: Box<[bool]>,
     /// Where the next wake starts looking for an idle worker.
     wake_cursor: usize,
     shut: bool,
@@ -314,6 +398,7 @@ impl WorkerSet {
             jobs: JobSet::new(strips),
             runner,
             cost_ns: (0..strips).map(|_| AtomicU64::new(0)).collect(),
+            worst_ns: (0..strips).map(|_| AtomicU64::new(0)).collect(),
             panicked: (0..strips).map(|_| AtomicBool::new(false)).collect(),
             suspect: (0..strips).map(|_| AtomicBool::new(false)).collect(),
             workers: (0..n).map(|_| WorkerSlot { woken: AtomicBool::new(false), current: AtomicUsize::new(0), promotion: OnceLock::new() }).collect(),
@@ -330,6 +415,9 @@ impl WorkerSet {
             published: vec![0; strips].into_boxed_slice(),
             published_len: 0,
             skipped: 0,
+            block_index: 0,
+            barred_until: vec![0; strips].into_boxed_slice(),
+            refused: vec![false; strips].into_boxed_slice(),
             wake_cursor: 0,
             shut: false,
         };
@@ -383,11 +471,35 @@ impl WorkerSet {
         self.shared.cost_ns.get(strip).map(|c| Duration::from_nanos(c.load(Ordering::Relaxed)))
     }
 
-    /// Seeds or overrides the strip's estimated render cost (for example from a serial
-    /// measurement). Later renders keep updating it.
+    /// The strip's worst-case render cost, a decaying maximum (`None` for no such strip; zero
+    /// before any render: no history). See the module docs.
+    #[must_use]
+    pub fn worst_case(&self, strip: usize) -> Option<Duration> {
+        self.shared.worst_ns.get(strip).map(|c| Duration::from_nanos(c.load(Ordering::Relaxed)))
+    }
+
+    /// Seeds or overrides the strip's cost history (for example from a serial measurement): its
+    /// estimate and its worst case both become `cost` (zero clears the history). Later renders
+    /// keep updating both. Not while the strip is published.
     pub fn set_cost_estimate(&self, strip: usize, cost: Duration) {
-        if let Some(c) = self.shared.cost_ns.get(strip) {
-            c.store(u64::try_from(cost.as_nanos()).unwrap_or(u64::MAX), Ordering::Relaxed);
+        let ns = u64::try_from(cost.as_nanos()).unwrap_or(u64::MAX);
+        if let (Some(c), Some(w)) = (self.shared.cost_ns.get(strip), self.shared.worst_ns.get(strip)) {
+            c.store(ns, Ordering::Relaxed);
+            w.store(ns, Ordering::Relaxed);
+        }
+    }
+
+    /// True when the strip is barred from inline renders in the open block, because it overran
+    /// within the last [`OVERRUN_BAR_BLOCKS`] blocks.
+    #[must_use]
+    pub fn inline_barred(&self, strip: usize) -> bool {
+        self.barred_until.get(strip).is_some_and(|&until| self.block_index < until)
+    }
+
+    /// Bars `strip` from inline renders for the next [`OVERRUN_BAR_BLOCKS`] blocks.
+    fn bar(&mut self, strip: usize) {
+        if let Some(b) = self.barred_until.get_mut(strip) {
+            *b = self.block_index + OVERRUN_BAR_BLOCKS + 1;
         }
     }
 
@@ -406,6 +518,9 @@ impl WorkerSet {
             overruns_late: late,
             overruns_busy: busy,
             overruns_unstarted: unstarted,
+            inline_refused_no_history: r(&c.refused_no_history),
+            inline_refused_worst_case: r(&c.refused_worst_case),
+            inline_refused_recent_overrun: r(&c.refused_recent_overrun),
             late_results: r(&c.late_results),
             runner_panics: r(&c.runner_panics),
             misuse: r(&c.misuse),
@@ -447,9 +562,11 @@ impl WorkerSet {
         self.generation = generation;
         self.published_len = 0;
         self.skipped = 0;
+        self.block_index += 1;
         bump(&self.shared.stats.blocks);
         for strip in 0..self.outcomes.len() {
             self.outcomes[strip] = Outcome::NotPublished;
+            self.refused[strip] = false;
             self.busy[strip] = !self.settle(strip);
         }
         true
@@ -515,6 +632,7 @@ impl WorkerSet {
             self.outcomes[strip] = Outcome::Overrun(OverrunCause::Busy);
             self.skipped += 1;
             bump(&self.shared.stats.overruns_busy);
+            self.bar(strip);
             return Ok(Published::Skipped);
         }
         if let Err(e) = self.shared.jobs.publish(strip) {
@@ -579,14 +697,45 @@ impl WorkerSet {
         woken
     }
 
-    /// Admission: may the callback start an inline render of `strip` at `now`?
-    fn admits(&self, strip: usize, now: Instant, deadline: Instant) -> bool {
-        let left = deadline.saturating_duration_since(now);
-        if left.is_zero() {
-            return false;
+    /// The admission rule (see the module docs): `Ok` when the callback may start an inline
+    /// render of `strip` with `left` before the deadline; `Err(None)` when no time is left (not a
+    /// refusal), `Err(Some(reason))` when the rule refuses it.
+    fn admission(&self, strip: usize, left: Duration) -> Result<(), Option<InlineRefusal>> {
+        let worst = self.shared.worst_ns.get(strip).map_or(0, |w| w.load(Ordering::Relaxed));
+        if worst == 0 {
+            return Err(Some(InlineRefusal::NoHistory));
         }
-        let est = self.shared.cost_ns[strip].load(Ordering::Relaxed);
-        u128::from(est) <= left.as_nanos()
+        if self.inline_barred(strip) {
+            return Err(Some(InlineRefusal::RecentOverrun));
+        }
+        if left.is_zero() {
+            return Err(None);
+        }
+        if u128::from(worst) > left.as_nanos() {
+            return Err(Some(InlineRefusal::WorstCase));
+        }
+        Ok(())
+    }
+
+    /// Admission at `now`; a refusal is counted once per strip per block.
+    fn admits(&mut self, strip: usize, now: Instant, deadline: Instant) -> bool {
+        match self.admission(strip, deadline.saturating_duration_since(now)) {
+            Ok(()) => true,
+            Err(None) => false,
+            Err(Some(why)) => {
+                if let Some(seen) = self.refused.get_mut(strip)
+                    && !std::mem::replace(seen, true)
+                {
+                    let c = &self.shared.stats;
+                    bump(match why {
+                        InlineRefusal::NoHistory => &c.refused_no_history,
+                        InlineRefusal::WorstCase => &c.refused_worst_case,
+                        InlineRefusal::RecentOverrun => &c.refused_recent_overrun,
+                    });
+                }
+                false
+            }
+        }
     }
 
     /// Publisher: resolves every strip published this block by `deadline` (see the module docs),
@@ -595,6 +744,9 @@ impl WorkerSet {
     /// worker; allocation-free.
     pub fn finish(&mut self, deadline: Instant, mut inline: impl FnMut(usize)) -> BlockReport {
         let g = self.generation;
+        // A second handle on the shared state (no allocation), so a slot can be held across the
+        // publisher-only bookkeeping (admission counts, the overrun bar) that takes `&mut self`.
+        let shared = Arc::clone(&self.shared);
         let mut open = (0..self.published_len).filter(|&k| self.outcomes[self.published[k]] == Outcome::Pending).count();
         while open > 0 {
             let mut progressed = false;
@@ -605,7 +757,7 @@ impl WorkerSet {
                 if self.outcomes[strip] != Outcome::Pending {
                     continue;
                 }
-                let Some(slot) = self.shared.jobs.slot(strip) else { continue };
+                let Some(slot) = shared.jobs.slot(strip) else { continue };
                 match slot.state() {
                     State::Done => {
                         if let Some(o) = self.take_done(strip, g) {
@@ -620,7 +772,11 @@ impl WorkerSet {
                         let t0 = Instant::now();
                         inline(strip);
                         now = Instant::now();
-                        self.shared.record_cost(strip, now.saturating_duration_since(t0));
+                        shared.record_cost(strip, now.saturating_duration_since(t0));
+                        if now > deadline {
+                            // Ran past the deadline: longer than its worst case said.
+                            self.bar(strip);
+                        }
                         slot.retire();
                         bump(&self.shared.stats.inline_renders);
                         self.outcomes[strip] = Outcome::Inline;
@@ -668,6 +824,7 @@ impl WorkerSet {
 
     /// At the deadline: a last read of `Done`, then every unresolved strip is an overrun.
     fn overrun_the_rest(&mut self, g: u64) {
+        let shared = Arc::clone(&self.shared);
         for k in 0..self.published_len {
             let strip = self.published[k];
             if self.outcomes[strip] != Outcome::Pending {
@@ -677,7 +834,7 @@ impl WorkerSet {
                 self.outcomes[strip] = o;
                 continue;
             }
-            let Some(slot) = self.shared.jobs.slot(strip) else { continue };
+            let Some(slot) = shared.jobs.slot(strip) else { continue };
             let cause = if slot.reclaim() {
                 // Taken back unrendered, so no worker starts it after the deadline.
                 slot.retire();
@@ -689,6 +846,7 @@ impl WorkerSet {
                 continue;
             } else {
                 bump(&self.shared.stats.overruns_late);
+                self.bar(strip);
                 OverrunCause::Late
             };
             self.outcomes[strip] = Outcome::Overrun(cause);
@@ -696,7 +854,8 @@ impl WorkerSet {
     }
 
     fn report(&self) -> BlockReport {
-        let mut r = BlockReport { overrun: self.skipped, ..BlockReport::default() };
+        let refused = self.refused.iter().filter(|&&r| r).count();
+        let mut r = BlockReport { overrun: self.skipped, inline_refused: refused, ..BlockReport::default() };
         for &strip in &self.published[..self.published_len] {
             match self.outcomes[strip] {
                 Outcome::Mixed => r.mixed += 1,
@@ -819,3 +978,6 @@ mod tests;
 
 #[cfg(test)]
 mod stress_tests;
+
+#[cfg(test)]
+mod admission_tests;
