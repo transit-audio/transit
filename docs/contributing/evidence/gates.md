@@ -126,10 +126,10 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 - A "skip what was already pending" cutoff on a worker applies only to the sources it held before
   the cutoff's trigger; a source attached in the same step is new, and its tests include the
   trigger and an attach landing in one step (E58, `../../escapes/E58-an-armed-learn-skipped-the-first-message-of-a-port-it-opened.md`).
-- Tests must not read a real clock, and two host origins in one process are two clocks: a
-  freshness or rate is judged from the message's own arrival stamp, never a consumer's clock read
-  when it notices; tests inject the stamp and the readout, and a test waiting on another thread
-  waits for every effect it asserts (E59, `../../escapes/E59-active-sensing-was-stamped-when-the-worker-looked-not-when-it-arrived.md`).
+- Tests must not read a real clock: a freshness or rate is judged from the message's own arrival
+  stamp, never a consumer's clock read when it notices; tests inject the stamp and the readout,
+  and a test waiting on another thread waits for every effect it asserts. A related hazard: two
+  host origins in one process are two clocks, so stamps and readouts share one origin (E59, `../../escapes/E59-active-sensing-was-stamped-when-the-worker-looked-not-when-it-arrived.md`).
 - Tests create unique temp dirs: process id plus a per-process counter (or `TemporaryAutosave`),
   never a fixed name or a clock-only suffix; concurrent tests share a process and a clock tick
   (E51, `../../escapes/E51-test-temp-dirs-collided-in-one-process.md`).

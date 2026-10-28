@@ -27,16 +27,21 @@
    `passed_active_sensing_is_judged_by_its_event_stamp` (`crates/playback/src/player/ingress/tests.rs`)
    and `a_filtered_active_sensing_records_its_own_host_stamp` (`crates/midi-io/src/tests.rs`) use
    injected stamps and readouts only: a filtered `FE` 1 s before the readout reads sensing, one 3 s
-   before does not, and a passed-through `FE` keeps its event stamp. The first fails on the old
-   code (it published the worker's clock, unrelated to the injected readout). The fix: the ring
+   before does not, and a passed-through `FE` keeps its event stamp. The clock-independent
+   negatives are the midi-io stamp test and the monitor-off test's `mon.sensing == 5_000_000_000`
+   assertion (`monitor_off_costs_the_worker_and_the_callback_nothing`): both pin the published
+   stamp to the injected arrival exactly, which the old code (the worker's clock at notice time)
+   never produces. The arrival-stamp test also fails on the old code, but only while the real
+   clock is not near its injected readouts, so it is not the proof. The fix: the ring
    stores the last filtered `FE`'s host stamp at push (a relaxed `AtomicU64` beside the counters,
    allocation-free) and watch publishes that stamp. The native test delivers the `FE` with
    `deliver_at` on the player's origin and waits for sensing as well.
-5. **Gate class.** Tests must not read a real clock, and two host origins in one process are two
-   clocks: a freshness or rate is judged from the message's own arrival stamp, never from a
-   consumer's clock read when it notices, and a test injects both the stamp and the readout. A
-   test that waits on another thread waits for every effect it asserts, since one step can publish
-   them unevenly (`docs/contributing/evidence/gates.md`).
+5. **Gate class.** Tests must not read a real clock: a freshness or rate is judged from the
+   message's own arrival stamp, never from a consumer's clock read when it notices, and a test
+   injects both the stamp and the readout. A test that waits on another thread waits for every
+   effect it asserts, since one step can publish them unevenly. A related hazard, not this
+   escape's mechanism: two host origins in one process are two clocks, so stamps and readouts
+   must share one origin (`docs/contributing/evidence/gates.md`).
 6. **Protocol change, owner, blind spot.** The rule is in `gates.md`. Owner: the coordinator.
    Blind spot: the timing check (`cargo xtask timing`) finds real-clock reads in test loops, not a
    product path that stamps with the consumer's clock; that stays a review item.

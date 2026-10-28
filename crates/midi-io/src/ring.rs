@@ -40,7 +40,8 @@ impl Default for InputConfig {
     }
 }
 
-/// A snapshot of an input port's counters. Counts are cumulative since the port opened.
+/// A snapshot of an input port's counters. Counts are cumulative since the port opened, except
+/// [`sensing_host_ns`](Self::sensing_host_ns), which is a stamp (0: none).
 ///
 /// These independent relaxed counters are diagnostic, not a coherent sequence boundary. Use
 /// [`InputBoundary::cutoff`] to cancel raw events, including offers not yet published to the ring.
@@ -70,6 +71,7 @@ pub struct InputCounters {
     /// Host arrival time ([`InputEvent::host_arrival_ns`] scale, this port's origin) of the last
     /// filtered active-sensing message; 0 if none. Not a count: the one field here that is a
     /// stamp, so a consumer judges sensing freshness by when the `FE` arrived, not when it looked.
+    /// An `FE` stamped exactly 0 is indistinguishable from none and is treated as none.
     pub sensing_host_ns: u64,
     /// Otherwise eligible messages refused because the per-open sequence was exhausted.
     /// These take no sequence number and are not included in the ring-full drop counters.
