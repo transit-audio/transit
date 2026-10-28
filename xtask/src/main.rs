@@ -273,10 +273,8 @@ fn ci() -> Result<(), String> {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(gate) = args
-        .first()
-        .map(String::as_str)
-        .filter(|g| ["ci", "layers", "file-size", "assets", "timing", "rt-targets", "audio-bench", "ico"].contains(g))
+    if let Some(gate) =
+        args.first().map(String::as_str).filter(|g| ["ci", "layers", "file-size", "assets", "timing", "rt-targets", "audio-bench", "ico"].contains(g))
     {
         announce(gate);
     }
