@@ -122,6 +122,7 @@ fn quitting_while_recording_keeps_the_take_for_the_next_launch() {
     let mut app = launch(&root);
     app.run("track.new", json!({"name": "Vocal"})).unwrap();
     app.engine.transport.recording = true;
+    assert!(app.run("app.quit", json!({})).is_err(), "Quit waits for the take on the run path");
     app.quit_requested = true;
     app.close_autosave();
     assert!(!app.engine.transport.recording);
@@ -142,12 +143,35 @@ fn the_session_cannot_be_replaced_while_it_bounces() {
     app.start_bounce().unwrap();
     assert!(app.finish.job.is_some(), "{}", app.status);
     let before = app.engine.session().name.clone();
-    for id in ["session.new", "session.close"] {
+    for id in ["session.new", "session.open", "session.close", "session.revert"] {
         assert!(app.run(id, json!({})).is_err(), "{id}");
         assert_eq!(app.status, "Finish or cancel the bounce first");
         assert_eq!(app.engine.session().name, before, "{id}");
     }
     app.run("app.quit", json!({})).unwrap();
     assert!(app.finish.job.is_none(), "Quit cancels the bounce");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Ported from the legacy `a_panic_in_a_frame_autosaves_and_the_app_carries_on` (#177).
+#[test]
+fn a_panic_in_a_frame_autosaves_and_the_app_carries_on() {
+    let dir = folder("recovery-panic");
+    let root = dir.join("Autosave");
+    let mut app = launch(&root);
+    app.run("track.new", json!({"name": "Vocal"})).unwrap();
+    app.guarded(|_| std::panic::panic_any("a bug in a frame"));
+    assert!(app.status.contains("autosaved"), "{}", app.status);
+    app.guarded(|app| {
+        app.run("track.new", json!({"name": "Bass"})).unwrap();
+    });
+    assert!(app.engine.session().track_by_name("Bass").is_some());
+    app.autosaver.as_ref().unwrap().flush().unwrap();
+    drop(app);
+    let left = leftovers(&root);
+    assert_eq!(left.len(), 1);
+    let mut next = launch(&root);
+    next.recover(&left[0]);
+    assert!(next.engine.session().track_by_name("Vocal").is_some());
     let _ = std::fs::remove_dir_all(&dir);
 }
