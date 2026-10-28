@@ -219,6 +219,7 @@ pub fn longest_callback_lines(t: &CallbackTelemetry, strips: &[StripName]) -> Ve
 pub fn strip_fault_rows(f: &transit_mix::StripFaults) -> Vec<String> {
     vec![
         format!("Render workers: {}", f.workers),
+        format!("Strip deadline: {}% of the period", f.deadline_percent),
         format!("Strip overruns, busy: {}", f.overruns_busy),
         format!("Strip overruns, late: {}", f.overruns_late),
         format!("Strip overruns, unstarted: {}", f.overruns_unstarted),
