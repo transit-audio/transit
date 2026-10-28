@@ -74,8 +74,10 @@ the driver figure minus one buffer.
 ### Render worker runs (#124 gate 6)
 
 The gate 6 runs compare serial with the render workers (`TRANSIT_RENDER_POOL=1`) through the device
-([2026-10-28 benchmark](../../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md)). For #172
-the pool runs are repeated with `TRANSIT_STRIP_DEADLINE_PERCENT=100` and `=150` (default 75): the
-strips' deadline as a share of the period. The diagnostics report prints the share each run used
-(`Strip deadline: N% of the period`), and the device-free bench (`crates/mix/tests/render_headroom.rs`)
-takes the same variable and prints it per row.
+([2026-10-28 benchmark](../../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md)). The
+strips' deadline as a share of the period defaults to 150 at 64 frames and below and 100 above
+(#172, from those runs' share section); `TRANSIT_STRIP_DEADLINE_PERCENT` (25 to 300) overrides it at
+every buffer size to measure another share. The diagnostics report prints the share each run used
+and where it came from (`Strip deadline: 150% of the period (default for 64 frames)`, or
+`(TRANSIT_STRIP_DEADLINE_PERCENT)`), and the device-free bench (`crates/mix/tests/render_headroom.rs`)
+takes the same variable and prints the effective share per row.

@@ -44,6 +44,24 @@ Serial stays the default, and the pool stays opt-in (`TRANSIT_RENDER_POOL=1`). T
 
 The bar for the repeat: no strip rendered inline past the budget, and overrun blocks at 64 frames idle at or near the 128-frame figure (58).
 
+## Share runs
+
+The strips' deadline share (#172), measured after #168 and #169 landed: build `ee038d33`, the same session and machine, 48 kHz, ten minutes per run, pool on, with `TRANSIT_STRIP_DEADLINE_PERCENT` at 75 (the former default), 100 and 150. The full per-run figures are on [#172](https://github.com/transit-audio/transit/issues/172).
+
+| run | strip overrun blocks at 75 / 100 / 150 | longest callback at 75 / 100 / 150 |
+|---|---|---|
+| 64 idle | 1,565 / 406 / 73 | 2.5 / 2.0 / 3.1 ms |
+| 64 under compile | 2,081 / 594 / 111 | 2.2 / 2.6 / 3.0 ms |
+| 128 idle | 47 / 18 / 33 | 2.8 / 26.7 (one unattributed event) / 4.3 ms |
+| 128 under compile | 73 / 29 / 18 | 4.1 / 4.1 / 4.3 ms |
+
+- At 64 frames the share is the lever: strip overrun blocks fall from 1,565 to 406 to 73 idle and from 2,081 to 594 to 111 under compile, while the longest callback stays at 2 to 3 ms. The cost is over-budget callbacks (a few hundred per ten minutes at 100 and 150). Every run that kept its log had 0 driver overloads and 0 stream errors.
+- At 128 frames the three shares are within noise of each other (18 to 73 blocks). The 26.7 ms callback at 100 idle is a single event the telemetry does not attribute; the 150 runs show nothing like it.
+- Worker wake stayed under 50 µs for 99.99% of claims in every run.
+- The maintainer's listening pass at 64 frames and 150% (about six minutes, the last part under a full workspace compile) was smooth until the compile pegged every core. The slight break-up then was the audio thread itself preempted (wake gap max 4.9 ms), which no share can help: 280 strip overrun blocks, 0 driver overloads, 0 stream errors.
+
+**Decision (maintainer, 2026-10-28):** the share defaults to 150% of the period at 64 frames and below and 100% at 128 frames and above, taken from the device's buffer size; `TRANSIT_STRIP_DEADLINE_PERCENT` keeps overriding it for measurement ([ADR 0029](../adr/0029-strip-job-slots.md), "Default share"). The default flip of the pool itself (#124) still waits for #174.
+
 ## Related
 
 - [2026-10-27 benchmark: render workers, serial against the pool (dev machine)](2026-10-27-ryzen-5900x-render-workers-serial-vs-pool.md)
