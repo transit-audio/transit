@@ -853,6 +853,32 @@ fn render_worker_faults_print_beside_the_over_budget_callbacks_only_with_workers
 }
 
 #[test]
+fn refused_inline_renders_print_by_reason_after_the_inline_renders() {
+    use crate::telemetry::detail_rows;
+    let f = transit_mix::StripFaults {
+        workers: 3,
+        inline_renders: 9,
+        inline_refused_no_history: 5,
+        inline_refused_worst_case: 6,
+        inline_refused_recent_overrun: 7,
+        ..Default::default()
+    };
+    let s = transit_playback::telemetry::CallbackTelemetry { strip_faults: Some(f), ..Default::default() };
+    let rows = detail_rows(&s);
+    let at = |label: &str| rows.iter().position(|r| r.starts_with(label)).unwrap_or_else(|| panic!("{label} missing: {rows:?}"));
+    assert_eq!(rows[at("Inline renders refused, no history")], "Inline renders refused, no history: 5");
+    assert_eq!(rows[at("Inline renders refused, worst case")], "Inline renders refused, worst case: 6");
+    assert_eq!(rows[at("Inline renders refused, recent overrun")], "Inline renders refused, recent overrun: 7");
+    let inline = at("Strips rendered inline");
+    assert_eq!(rows[inline], "Strips rendered inline: 9");
+    assert_eq!(
+        [at("Inline renders refused, no history"), at("Inline renders refused, worst case"), at("Inline renders refused, recent overrun")],
+        [inline + 1, inline + 2, inline + 3],
+        "right after the inline renders"
+    );
+}
+
+#[test]
 fn the_telemetry_is_read_a_few_times_a_second_not_every_frame() {
     let mut t = T::new();
     t.app.telemetry.injected = Some(snap());
