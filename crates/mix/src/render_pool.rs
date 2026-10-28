@@ -183,8 +183,8 @@ pub struct StripFaults {
     pub late_results: u64,
     /// Strips the callback rendered itself inside the deadline (unstarted by any worker).
     pub inline_renders: u64,
-    /// Unstarted strips the callback did not render itself because they had never been rendered
-    /// (no cost history; once per strip per block).
+    /// Unstarted strips the callback did not render itself because their processing chain had
+    /// never been rendered (no cost history; once per strip per block).
     pub inline_refused_no_history: u64,
     /// Unstarted strips the callback did not render itself because their worst observed render
     /// time did not fit in the time left.

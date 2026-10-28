@@ -759,8 +759,9 @@ impl MixEngine {
 
     /// Seeds every pool strip's cost history (its estimate and its worst case) with `cost`, as if
     /// each had been rendered once in that time; zero clears it (ADR 0029, deviation 16: a strip
-    /// with no history is never rendered inline). Between blocks; nothing without workers. For
-    /// tests and the bench.
+    /// with no history is never rendered inline). A strip whose chain changes afterwards (a plug-in
+    /// loaded or replaced, a track moved) starts again with none. Between blocks; nothing without
+    /// a pool (a pool with zero workers is one). For tests and the bench.
     #[doc(hidden)]
     pub fn seed_strip_costs(&mut self, cost: std::time::Duration) {
         if let Some(pool) = self.pool.as_mut() {
