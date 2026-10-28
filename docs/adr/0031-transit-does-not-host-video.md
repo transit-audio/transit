@@ -20,8 +20,8 @@ transit does not host video. One batch removes:
 An old session must still open. `Session::from_json` runs a pre-pass on the parsed JSON (`crates/model/src/legacy.rs`, `drop_video`) before serde sees it, because the variants no longer exist and serde would refuse the file:
 
 1. The `videos` list is removed.
-2. A track whose kind is `Video` is deleted, with its clips and automation. The alternative, keeping it as an empty track, would leave a lane that cannot hold anything (a Video track has no audio path, and the other kinds cannot take its place without a guess), so the file would show a dead track the user can only delete. Deleting it is the least surprising result. Nothing routes through a Video track, so no other track loses an input.
-3. A clip whose content is `Video`, on any track, is deleted.
+2. Every `Video` clip is removed, on every playlist of every track.
+3. A track whose kind is `Video` is deleted only when it is left with no clip. A Video track was a live mix strip (it routed, took sends and inserts, and audio clips could be pasted onto it through `track.new` and `edit.paste`), so one that still holds a clip keeps it: the track becomes an Audio track, the kind that already played those clips. Keeping an empty Video track would leave a dead lane the user could only delete, so an empty one goes.
 4. When anything was dropped the session carries one note in `load_notes`, shown where missing plug-ins and missing media are reported: "video clips removed: transit does not host video". A file without video gets no note. The note is not saved back.
 
 `format_version` stays 1: no released build let a user create a video clip through the studio UI, and a save from this build has no `videos` key.
@@ -31,6 +31,7 @@ An old session must still open. `Session::from_json` runs a pre-pass on the pars
 - About 17,000 lines and one crate leave the workspace; the layer table, the standalone list and the wasm list shrink by one entry.
 - Importing a movie file for its audio no longer works through `file.import_video`; extract the audio and use Import Audio.
 - The corpus holds `v0.3.2-video.transit`, a hand-written file pinning the rule, and the key-drop test names `/videos` as retired, so the older corpus files stay as they were written.
+- Clip group files (`.scgrp`) and Import Session Data apply the same drop and post the same note.
 - The `image` dependency stays: screenshots encode PNG in both UI crates.
 
 ## Related
