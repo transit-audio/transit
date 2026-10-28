@@ -503,6 +503,77 @@ fn a_strip_with_no_cost_history_is_never_rendered_inline() {
     drop(rig.mix.into_retired());
 }
 
+/// #168 review C1: the cost history belongs to the instance a strip index holds, not to the
+/// index. With every strip's history seeded and no worker, a plan that loads a new instrument on
+/// strip 2 (a long one-time load on its first render), and then one that swaps two tracks (their
+/// strips trade indices), each make only the strips whose chain changed start again with no
+/// history: they are taken back unrendered and counted as refused for no history, the new
+/// plug-in's load never runs on the callback, and every other strip still renders inline.
+#[test]
+fn a_new_or_moved_chain_on_a_strip_starts_with_no_history() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    // No worker: only the callback could render a strip, so every outcome is by construction.
+    let mut rig = Rig::new(INSTRUMENTS, 0, FRAMES);
+    rig.mix.start_render_workers_with(64, 0);
+    rig.mix.seed_strip_costs(Duration::from_micros(1));
+    rig.mix.set_strip_deadline(Some(Duration::from_secs(30)));
+    become_callback();
+    for _ in 0..4 {
+        rig.block();
+    }
+    let n = INSTRUMENTS as u64;
+    let f0 = rig.mix.strip_faults().unwrap().snapshot();
+    assert_eq!((f0.inline_renders, f0.overruns(), f0.inline_refused_no_history), (4 * n, 0, 0), "seeded: every strip inline: {f0:?}");
+
+    // A new instrument instance on track 2, whose first render is a 200 ms load.
+    let fresh = common::workers::Shared::new();
+    fresh.load_ns.store(200_000_000, Ordering::Relaxed);
+    let track = rig.bindings[2].0;
+    let mut s = rig.session.clone();
+    // Another plug-in id: the compiler keeps an instrument whose id is unchanged.
+    s.track_mut(track).unwrap().instrument = Some(transit_model::Insert::new("clap:test.continuity.heavy"));
+    let f = std::sync::Arc::clone(&fresh);
+    let mut make = move |spec: &InstanceSpec, _: SlotGen| -> Option<NewInstance> {
+        (spec.track == track).then(|| NewInstance {
+            plugin: Box::new(common::workers::ContinuityPlugin::new(std::sync::Arc::clone(&f), spec.ch, FRAMES)),
+            refused_state: false,
+        })
+    };
+    let mut env = rig.comp.compile(std::sync::Arc::new(s.clone()), rig.comp.active(), transit_mix::PlanGeneration::from_raw(2), &mut make).unwrap();
+    assert_eq!(rig.mix.adopt_plan(&mut env), Adoption::Adopted);
+    rig.comp.reclaim(env);
+    rig.session = s;
+    // The deadline only bounds the refused strip's spin.
+    rig.mix.set_strip_deadline(Some(Duration::from_millis(20)));
+    rig.block();
+    let f1 = rig.mix.strip_faults().unwrap().snapshot();
+    assert_eq!(f1.inline_refused_no_history, 1, "only the strip with the new instrument: {f1:?}");
+    assert_eq!((f1.inline_renders - f0.inline_renders, f1.overruns_unstarted), (n - 1, 1), "{f1:?}");
+    assert_eq!(fresh.on_callback.load(Ordering::Relaxed), 0, "the new instrument was rendered on the callback");
+    assert_eq!(fresh.load_ns.load(Ordering::Relaxed), 200_000_000, "its one-time load never ran");
+    fresh.load_ns.store(0, Ordering::Relaxed);
+
+    // Two tracks swapped: their strips trade indices, so each index holds another chain.
+    let mut s = rig.session.clone();
+    s.tracks.swap(0, 1);
+    let mut none = |_: &InstanceSpec, _: SlotGen| -> Option<NewInstance> { None };
+    let mut env = rig.comp.compile(std::sync::Arc::new(s.clone()), rig.comp.active(), transit_mix::PlanGeneration::from_raw(3), &mut none).unwrap();
+    assert_eq!(rig.mix.adopt_plan(&mut env), Adoption::Adopted);
+    rig.comp.reclaim(env);
+    rig.session = s;
+    let before = [0, 1].map(|k| rig.shared[k].on_callback.load(Ordering::Relaxed));
+    rig.block();
+    let f2 = rig.mix.strip_faults().unwrap().snapshot();
+    // Strip 2 is still without history (nothing rendered it), and the two moved strips join it.
+    assert_eq!(f2.inline_refused_no_history - f1.inline_refused_no_history, 3, "{f2:?}");
+    assert_eq!(f2.inline_renders - f1.inline_renders, n - 3, "{f2:?}");
+    assert_eq!([0, 1].map(|k| rig.shared[k].on_callback.load(Ordering::Relaxed)), before, "the moved strips were not rendered inline");
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    drop(rig.mix.into_retired());
+}
+
 /// #168, the other half: a strip whose first render is a long one-time load gets it on a worker
 /// (with no history it cannot be rendered inline, so with time to spare the callback waits for
 /// the workers), and once a worker has rendered it the strip renders normally: no overrun, no

@@ -48,13 +48,16 @@
 //!   decaying maximum rather than the maximum over the last N renders: one word per strip instead
 //!   of N, an O(1) update, and a spike fades instead of vanishing at once when it leaves a window.
 //!
-//! Both figures are 0 until the strip's first render ("no history"), survive
-//! [`WorkerSet::clear_suspect`] and every publish, and reset only with the set (a new
-//! [`WorkerSet`], which a device reopen builds). [`WorkerSet::set_cost_estimate`] seeds both.
+//! The history belongs to the instance a strip slot holds, not to the slot: both figures are 0
+//! until the strip's first render ("no history"), survive every publish, and reset with the
+//! set (a new [`WorkerSet`], which a device reopen builds), with [`WorkerSet::clear_suspect`]
+//! (a replaced instance), and with [`WorkerSet::reset_history`], which the caller calls when the
+//! slot comes to hold another processing chain (a plug-in loaded or replaced, a track moved onto
+//! the index). [`WorkerSet::set_cost_estimate`] seeds both.
 //!
 //! A strip still `Published` is reclaimed for an inline render only when, checked in this order:
 //!
-//! 1. it has history: a strip never rendered is never rendered inline (its first render is where
+//! 1. it has history: a chain never rendered is never rendered inline (its first render is where
 //!    a plug-in does its one-time load); else refused as [`InlineRefusal::NoHistory`];
 //! 2. it has not overrun in the last [`OVERRUN_BAR_BLOCKS`] blocks: an `Overrun(Late)`, an
 //!    `Overrun(Busy)`, or an inline render that ended past its deadline bars the strip from
@@ -652,10 +655,24 @@ impl WorkerSet {
         self.shared.suspect.get(strip).is_some_and(|f| f.load(Ordering::Relaxed))
     }
 
-    /// Publisher: the strip's instance has been replaced; it may be published again.
+    /// Publisher: the strip's instance has been replaced; it may be published again. The new
+    /// instance starts with no history ([`WorkerSet::reset_history`]).
     pub fn clear_suspect(&mut self, strip: usize) {
         if let Some(f) = self.shared.suspect.get(strip) {
             f.store(false, Ordering::Relaxed);
+        }
+        self.reset_history(strip);
+    }
+
+    /// Publisher: the strip now holds another processing chain (a plug-in loaded or replaced,
+    /// another track's strip moved onto this index). Its cost history and its overrun bar are
+    /// cleared, so it is not rendered inline until it has been rendered again (its first render
+    /// is where a plug-in does its one-time load). Not while the strip is published or held by a
+    /// worker. Allocation-free.
+    pub fn reset_history(&mut self, strip: usize) {
+        self.set_cost_estimate(strip, Duration::ZERO);
+        if let Some(b) = self.barred_until.get_mut(strip) {
+            *b = 0;
         }
     }
 

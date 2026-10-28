@@ -1,6 +1,6 @@
 //! The inline admission rule (issue #168, ADR 0029 deviation 16): no inline render without a
-//! cost history, admission by the worst case rather than the EWMA, the overrun bar, and cost
-//! figures that outlive a suspect instance's replacement.
+//! cost history, admission by the worst case rather than the EWMA, the overrun bar, and a
+//! history that belongs to the instance a slot holds (cleared when it is replaced).
 //!
 //! Every assertion is about the rule, never about a race: the rule is checked directly with a
 //! given time left, or through `finish` in a configuration whose outcome holds by construction
@@ -255,10 +255,11 @@ fn an_inline_render_past_its_deadline_and_a_busy_skip_bar_the_strip() {
     assert!(set.shutdown(STALL).is_empty());
 }
 
-/// The cost figures belong to the strip slot, not to an instance: a runner panic, the suspect
-/// mark and `clear_suspect` leave them as they were (only a new set starts without history).
+/// The cost history belongs to the instance a slot holds: `clear_suspect` (the faulted instance
+/// was replaced) clears it, so the replacement's first render is never inline; the other strip,
+/// published again, keeps its own. Only the history of the replaced strip goes.
 #[test]
-fn cost_figures_survive_clear_suspect() {
+fn clear_suspect_clears_the_replaced_instances_history() {
     let fake = Fake::new(2, Duration::ZERO);
     fake.set(1, Behavior::Panic);
     let mut set = set_of(&fake, 1);
@@ -268,14 +269,46 @@ fn cost_figures_survive_clear_suspect() {
     wait_done(&set, 2, 0);
     let _ = set.finish(Instant::now() + STALL, |_| panic!("the worker rendered both"));
     assert_eq!(set.outcome(1), Some(Outcome::Faulted));
-    let before = (set.cost_estimate(1), set.worst_case(1));
-    assert!(before.1.unwrap() > Duration::ZERO, "the faulted run was measured");
+    assert!(set.worst_case(1).unwrap() > Duration::ZERO, "the faulted run was measured");
+    let kept = (set.cost_estimate(0), set.worst_case(0));
     assert!(set.begin_block(2));
     assert!(set.is_suspect(1));
     set.clear_suspect(1);
-    assert_eq!((set.cost_estimate(1), set.worst_case(1)), before, "kept across clear_suspect");
-    assert_eq!(set.admission(1, Duration::from_secs(3600)), Ok(()), "still a history: admissible");
+    assert_eq!((set.cost_estimate(1), set.worst_case(1)), (Some(Duration::ZERO), Some(Duration::ZERO)), "the new instance has no history");
+    assert_eq!(set.admission(1, Duration::from_secs(3600)), Err(Some(InlineRefusal::NoHistory)));
+    assert_eq!((set.cost_estimate(0), set.worst_case(0)), kept, "the other strip keeps its own");
+    // Strip 0 published again (and taken back at a passed deadline, or rendered by the worker):
+    // its history is still there.
+    assert_eq!(set.publish(0), Ok(Published::Published));
+    let _ = set.finish(Instant::now(), |_| {});
+    assert!(set.worst_case(0).unwrap() > Duration::ZERO, "a publish keeps the history");
     assert!(set.shutdown(STALL).is_empty());
     let fresh = set_of(&fake, 0);
-    assert_eq!(fresh.worst_case(1), Some(Duration::ZERO), "a new set has none");
+    assert_eq!(fresh.worst_case(0), Some(Duration::ZERO), "a new set has none");
+}
+
+/// `reset_history` (the caller's signal that a slot holds another processing chain) clears the
+/// cost figures and the overrun bar of that strip only.
+#[test]
+fn reset_history_clears_the_figures_and_the_bar() {
+    let fake = Fake::new(2, Duration::ZERO);
+    fake.set(0, Behavior::Stall);
+    let mut set = set_of(&fake, 1);
+    set.set_cost_estimate(1, Duration::from_micros(5));
+    assert!(set.begin_block(1));
+    assert_eq!(set.publish(0), Ok(Published::Published));
+    set.wake(1);
+    wait_until("the worker on strip 0", || fake.stalled.load(Ordering::Acquire) == 1);
+    let _ = set.finish(Instant::now(), |_| panic!("claimed"));
+    assert_eq!(set.outcome(0), Some(Outcome::Overrun(OverrunCause::Late)));
+    fake.release(0);
+    wait_until("the late result", || set.jobs().slot(0).map(JobSlot::state) == Some(State::Done));
+    assert!(set.begin_block(2));
+    assert!(set.inline_barred(0) && set.worst_case(0).unwrap() > Duration::ZERO);
+    set.reset_history(0);
+    assert!(!set.inline_barred(0), "the bar is cleared");
+    assert_eq!(set.worst_case(0), Some(Duration::ZERO), "and the history");
+    assert_eq!(set.admission(0, Duration::from_secs(3600)), Err(Some(InlineRefusal::NoHistory)));
+    assert_eq!(set.worst_case(1), Some(Duration::from_micros(5)), "strip 1 untouched");
+    assert!(set.shutdown(STALL).is_empty());
 }

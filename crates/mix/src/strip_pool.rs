@@ -313,6 +313,9 @@ pub(crate) struct StripPool {
     generation: u64,
     /// Strips silent by an overrun in the last block.
     last_overruns: u32,
+    /// Per strip: the identity of the processing chain the cell last published ([`chain_identity`];
+    /// `None` before its first publish). When it changes, the strip's cost history is reset.
+    chain: Box<[Option<u64>]>,
 }
 
 impl StripPool {
@@ -339,6 +342,7 @@ impl StripPool {
             on_callback: vec![false; strips].into_boxed_slice(),
             generation: 0,
             last_overruns: 0,
+            chain: vec![None; strips].into_boxed_slice(),
         })
     }
 
@@ -347,7 +351,8 @@ impl StripPool {
     }
 
     /// Seeds every cell's cost history with `cost` (zero clears it); see
-    /// [`MixEngine::seed_strip_costs`]. Between blocks only.
+    /// [`MixEngine::seed_strip_costs`]. Between blocks only. A cell whose chain changes later is
+    /// reset as usual.
     pub(crate) fn seed_costs(&mut self, cost: Duration) {
         for i in 0..self.set.strips() {
             self.set.set_cost_estimate(i, cost);
@@ -704,6 +709,13 @@ impl StripPool {
                 self.set.clear_suspect(i);
                 self.suspect_gen[i] = SlotGen::VACANT;
             }
+            // Another chain on this index (a plug-in loaded or replaced, another track's strip
+            // moved here): its cost history is not this one's (#168, ADR 0029 deviation 16).
+            let id = chain_identity(st);
+            if self.chain[i].is_some_and(|prev| prev != id) {
+                self.set.reset_history(i);
+            }
+            self.chain[i] = Some(id);
             if self.send(i, st, b) {
                 if let Ok(Published::Published) = self.set.publish(i) {
                     published += 1;
@@ -857,6 +869,21 @@ impl StripPool {
             self.away[i] = false;
         }
     }
+}
+
+/// The identity of `st`'s processing chain: the strip state's generation and the generation of
+/// its instrument and of each insert, folded into one word (FNV-1a over the words). Every
+/// generation comes from the compiler's one counter, so a new instance, a moved strip or a slot
+/// emptied changes it. Allocation-free.
+fn chain_identity(st: &Strip) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325_u64;
+    let mut mix = |v: u64| h = (h ^ v).wrapping_mul(0x0000_0100_0000_01b3);
+    mix(st.generation.get());
+    mix(st.instrument.as_ref().map_or(0, |p| p.generation.get()));
+    for p in &st.plugins {
+        mix(p.as_ref().map_or(0, |p| p.generation.get()));
+    }
+    h
 }
 
 /// Where a block starts on the render clock, and its length.
