@@ -60,7 +60,7 @@ The strips' deadline share (#172), measured after #168 and #169 landed: build `e
 - Worker wake stayed under 50 µs for 99.99% of claims in every run.
 - The maintainer's listening pass at 64 frames and 150% (about six minutes, the last part under a full workspace compile) was smooth until the compile pegged every core. The slight break-up then was the audio thread itself preempted (wake gap max 4.9 ms), which no share can help: 280 strip overrun blocks, 0 driver overloads, 0 stream errors.
 
-**Decision (maintainer, 2026-10-28):** the share defaults to 150% of the period at 64 frames and below and 100% at 128 frames and above, taken from the device's buffer size; `TRANSIT_STRIP_DEADLINE_PERCENT` keeps overriding it for measurement ([ADR 0029](../adr/0029-strip-job-slots.md), "Default share"). The default flip of the pool itself (#124) still waits for #174.
+**Decision (maintainer, 2026-10-28):** the share defaults to 150% of the period for device periods of 1.5 ms and below (64 frames at 48 kHz) and 100% for periods above 1.5 ms (128 frames at 48 kHz), taken from the device's callback; `TRANSIT_STRIP_DEADLINE_PERCENT` keeps overriding it for measurement ([ADR 0029](../adr/0029-strip-job-slots.md), "Default share"). The default flip of the pool itself (#124) still waits for #174.
 
 ## Related
 
