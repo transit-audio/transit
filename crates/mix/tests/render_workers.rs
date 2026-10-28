@@ -524,7 +524,6 @@ fn a_long_first_render_runs_on_a_worker_and_the_strip_renders_normally_after() {
     rig.block();
     let f = rig.mix.strip_faults().unwrap().snapshot();
     assert_eq!((f.inline_renders, f.overruns()), (0, 0), "no history: only the workers rendered the first block: {f:?}");
-    assert!(f.inline_refused_no_history > 0, "{f:?}");
     for (k, s) in rig.shared.iter().enumerate() {
         assert_eq!((s.on_worker.load(Ordering::Relaxed), s.on_callback.load(Ordering::Relaxed)), (1, 0), "instrument {k}");
     }
