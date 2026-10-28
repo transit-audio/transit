@@ -60,4 +60,6 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           cargo test -p transit-rt --no-run
-          sudo -E env "PATH=$PATH" SOUNDCRAFT_RT_EXPECT_PROMOTED=1 cargo test -p transit-rt
+          # The runner's sudo ignores -E (env_reset), so root is handed the toolchain explicitly:
+          # PATH for the rustup proxies, RUSTUP_HOME and CARGO_HOME for the toolchain they select.
+          sudo env "PATH=$PATH" "RUSTUP_HOME=${RUSTUP_HOME:-$HOME/.rustup}" "CARGO_HOME=${CARGO_HOME:-$HOME/.cargo}" SOUNDCRAFT_RT_EXPECT_PROMOTED=1 cargo test -p transit-rt
