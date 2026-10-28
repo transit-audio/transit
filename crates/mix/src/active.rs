@@ -816,6 +816,16 @@ impl MixEngine {
         (u32::try_from(self.max_block).unwrap_or(u32::MAX), if rate == 0 { 48_000 } else { rate })
     }
 
+    /// Replaces the render workers' [`STRIP_DEADLINE_PERCENT_ENV`] override (`None`: the rule
+    /// decides) and resolves the share again for the device's callback, so a test's expectation
+    /// does not depend on the process environment. Nothing without workers. For tests.
+    #[doc(hidden)]
+    pub fn set_strip_deadline_override(&mut self, overridden: Option<u32>) {
+        if let Some(pool) = self.pool.as_mut() {
+            pool.set_deadline_override(overridden);
+        }
+    }
+
     /// Audio thread (or any owner), before a block: the device's callback is `frames` long at
     /// `rate` Hz. The render workers' share follows its period ([`default_strip_deadline_percent`]:
     /// 150% at 1.5 ms and below, 100% above) unless [`STRIP_DEADLINE_PERCENT_ENV`] overrode it; a

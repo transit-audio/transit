@@ -778,27 +778,28 @@ fn an_adoption_during_a_carry_takes_events_for_the_new_instrument() {
 
 /// #172: the engine's strip deadline share follows the device's callback length it is handed
 /// (`set_device_block`, as playback does before each block): the engine's largest block stands
-/// in until then, 64 frames give 150% and 128 give 100% unless `TRANSIT_STRIP_DEADLINE_PERCENT`
-/// overrides both, and a reopen from 64 to 128 moves it. The report's figures say the same.
-/// Injected lengths, no worker, no clock.
+/// in until then, 64 frames give 150% and 128 give 100% at 48 kHz, a reopen from 64 to 128 moves
+/// it, and an override wins at every length. The report's figures say the same. The override is
+/// set through the test seam (`None` first), so the result does not depend on
+/// `TRANSIT_STRIP_DEADLINE_PERCENT` in the process environment. Injected lengths, no worker, no
+/// clock.
 #[test]
 fn the_engine_share_follows_the_device_callback_length() {
     let mut rig = Rig::new(INSTRUMENTS, 0, 512);
     rig.mix.start_render_workers_with(64, 0);
-    let overridden = transit_mix::strip_deadline_override();
-    let expect = |frames| transit_mix::resolve_strip_deadline_percent(overridden, frames, 48_000);
-    if overridden.is_none() {
-        assert_eq!((expect(64), expect(128)), (150, 100), "the rule without the override");
+    rig.mix.set_strip_deadline_override(None);
+    let figures = |mix: &MixEngine| {
+        let f = mix.strip_faults().unwrap().snapshot();
+        (mix.strip_deadline_percent(), f.deadline_percent, f.deadline_frames, f.deadline_overridden)
+    };
+    assert_eq!(figures(&rig.mix), (100, 100, 512, false), "before the device's first callback");
+    for (frames, percent) in [(64, 150), (128, 100), (64, 150)] {
+        rig.mix.set_device_block(frames, common::workers::SR);
+        assert_eq!(figures(&rig.mix), (percent, u64::from(percent), u64::from(frames), false), "{frames} frames");
     }
-    assert_eq!(rig.mix.strip_deadline_percent(), expect(512), "before the device's first callback");
-    for frames in [64, 128, 64] {
-        rig.mix.set_device_block(frames, 48_000);
-        assert_eq!(rig.mix.strip_deadline_percent(), expect(frames), "{frames} frames");
-        let f = rig.mix.strip_faults().unwrap().snapshot();
-        assert_eq!(
-            (f.deadline_percent, f.deadline_frames, f.deadline_overridden),
-            (u64::from(expect(frames)), u64::from(frames), overridden.is_some())
-        );
-    }
+    rig.mix.set_strip_deadline_override(Some(75));
+    assert_eq!(figures(&rig.mix), (75, 75, 64, true), "the override wins at 64 frames");
+    rig.mix.set_device_block(128, common::workers::SR);
+    assert_eq!(figures(&rig.mix), (75, 75, 128, true), "and at 128");
     drop(rig.mix.into_retired());
 }

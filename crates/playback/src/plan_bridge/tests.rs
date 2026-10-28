@@ -746,18 +746,14 @@ fn a_callback_of_another_length_gets_the_new_share_in_its_first_block() {
     // A pool with no worker thread unless `pair` already started the real ones.
     audio.mix.start_render_workers_with(16, 0);
     assert!(audio.mix.strip_faults().is_some(), "the share belongs to the render workers");
-    let overridden = transit_mix::strip_deadline_override();
-    let share = |frames: usize, rate: u32| transit_mix::resolve_strip_deadline_percent(overridden, u32::try_from(frames).unwrap(), rate);
-    if overridden.is_none() {
-        assert_eq!((share(128, 48_000), share(64, 48_000), share(128, 96_000)), (100, 150, 150), "the rule");
-    }
+    // The rule decides, whatever `TRANSIT_STRIP_DEADLINE_PERCENT` the process was started with.
+    audio.mix.set_strip_deadline_override(None);
     let entry = std::time::Instant::now();
-    for (frames, rate) in [(128usize, 48_000u32), (128, 48_000), (64, 48_000), (128, 48_000), (128, 96_000)] {
+    for (frames, rate, percent) in [(128usize, 48_000u32, 100u32), (128, 48_000, 100), (64, 48_000, 150), (128, 48_000, 100), (128, 96_000, 150)] {
         let period = std::time::Duration::from_nanos(frames as u64 * 1_000_000_000 / u64::from(rate));
         crate::telemetry::enter_callback_at(entry, frames, rate);
         let (deadline, stats) = measure(|| audio.set_callback_deadline(period));
         assert!(stats.is_zero(), "{frames} frames at {rate} Hz: {stats:?}");
-        let percent = share(frames, rate);
         assert_eq!(audio.mix.strip_deadline_percent(), percent, "{frames} frames at {rate} Hz");
         assert_eq!(deadline, Some(entry + transit_mix::strip_deadline_share(period, percent)), "{frames} frames at {rate} Hz: this block's deadline");
     }

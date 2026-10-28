@@ -403,7 +403,20 @@ impl StripPool {
     /// relaxed stores: allocation-free, no environment or clock read; any thread that owns the
     /// engine, the audio thread included. Zero frames or a zero rate is ignored.
     pub(crate) fn set_device_block(&mut self, frames: u32, rate: u32) {
-        if frames == 0 || rate == 0 || (frames, rate) == self.device_block {
+        self.resolve_share(frames, rate, false);
+    }
+
+    /// Replaces the override the pool was built with (tests: `None` makes the rule decide whatever
+    /// the process environment says) and resolves the share again for the device's callback.
+    pub(crate) fn set_deadline_override(&mut self, overridden: Option<u32>) {
+        self.deadline_override = overridden;
+        self.counters.deadline_overridden.store(overridden.is_some(), Ordering::Relaxed);
+        let (frames, rate) = self.device_block;
+        self.resolve_share(frames, rate, true);
+    }
+
+    fn resolve_share(&mut self, frames: u32, rate: u32, again: bool) {
+        if frames == 0 || rate == 0 || (!again && (frames, rate) == self.device_block) {
             return;
         }
         self.device_block = (frames, rate);

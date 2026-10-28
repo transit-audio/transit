@@ -48,6 +48,9 @@ impl StripPool {
     pub(crate) fn deadline_percent(&self) -> u32 {
         match *self {}
     }
+    pub(crate) fn set_deadline_override(&mut self, _overridden: Option<u32>) {
+        match *self {}
+    }
     pub(crate) fn set_device_block(&mut self, _frames: u32, _rate: u32) {
         match *self {}
     }
