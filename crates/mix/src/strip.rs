@@ -99,7 +99,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                 // instance and the rendered audio matches the plugin's defaults — e.g. a saved
                 // `level = -12 dB` sounds the same as `level = -6 dB`.
                 if let Some(ins) = &t.instrument {
-                    apply_params(inst, ins, t, INSTRUMENT_SLOT, pos, frames);
+                    apply_params(inst, ins, t, INSTRUMENT_SLOT, pos, timed_span(transport, frames));
                 }
                 inst.plugin.set_transport(transport);
                 if let Some(e) = inst.events.as_deref_mut() {
@@ -181,7 +181,7 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
         if !ins.active || ins.bypass || slot.failed {
             continue;
         }
-        apply_params(slot, ins, t, i, pos, frames);
+        apply_params(slot, ins, t, i, pos, timed_span(transport, frames));
         // An insert with a key detects on it when the plan made one for the slot (else on its own input).
         let key = ins.key.and_then(|_| keys.get(t.id, i));
         // A key that arrives late holds the strip's signal back to meet it (`KeyBank::align`).
@@ -278,7 +278,7 @@ pub(crate) fn process_master(
             && !ins.bypass
             && !slot.failed
         {
-            apply_params(slot, ins, t, i, pos, frames);
+            apply_params(slot, ins, t, i, pos, timed_span(transport, frames));
             if run_insert(slot, &mut strip.buf, None, frames, transport, no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
                 strip.failures.record(i);
             } else if let Some(tap) = &slot.tap {
@@ -304,6 +304,14 @@ pub(crate) fn process_master(
 
 /// Below this magnitude (about -120 dBFS) a sample counts as silence for insert suspension.
 const SILENCE_THRESHOLD: f32 = 1e-6;
+
+/// The span whose automation breakpoints `apply_params` sends at their offsets: the block while
+/// the transport plays, none while it is stopped. Stopped, every block renders at the same
+/// position, so sending a breakpoint inside it would flip the parameter between the playhead's
+/// value and the breakpoint's every block (#117 review C1).
+fn timed_span(transport: &Transport, frames: usize) -> usize {
+    if transport.playing { frames } else { 0 }
+}
 
 /// True when every sample of every channel in the block is exactly 0.0: no threshold, because
 /// CLAP's `CLAP_PROCESS_SLEEP` means "sleep until a non-zero input", however quiet.

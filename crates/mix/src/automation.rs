@@ -4,7 +4,8 @@ use super::*;
 /// its curve's value at the block start, then (#117) each breakpoint of its lane inside the block
 /// at its sample offset, to plug-ins whose [`Plugin::sample_accurate_params`] says they take
 /// offsets (the VST3 and CLAP hosts). `frames` 0 sends the block-start values only: the latency
-/// passes run before the block is processed, and processing sends the breakpoints once.
+/// passes run before the block is processed, and processing sends the breakpoints once; with the
+/// transport stopped processing passes 0 too (see `strip::timed_span`).
 pub(crate) fn apply_params(slot: &mut PluginSlot, ins: &transit_model::Insert, t: &Track, i: usize, pos: Samples, frames: usize) {
     // Automation lanes address insert slots; the instrument (`INSTRUMENT_SLOT`) has its own lane
     // slot, so it never picks up slot A's lanes.
@@ -366,5 +367,78 @@ mod tests {
         rig.publish(&s);
         render_block(&mut rig, 1536);
         assert_eq!(count(), 2);
+    }
+
+    /// A built-in gain behind a third-party id that takes timed points, with a log of the
+    /// parameter calls: (offset, value), `None` for `set_param`.
+    struct Timed {
+        inner: Box<dyn Plugin>,
+        log: Arc<std::sync::Mutex<Vec<(Option<u32>, f32)>>>,
+    }
+
+    impl Plugin for Timed {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
+            self.inner.info()
+        }
+        fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
+            self.inner.prepare(sr, mb, ch);
+        }
+        fn reset(&mut self) {
+            self.inner.reset();
+        }
+        fn set_param(&mut self, id: &str, v: f32) -> bool {
+            self.log.lock().unwrap().push((None, v));
+            self.inner.set_param(id, v)
+        }
+        fn set_param_at(&mut self, offset: u32, id: &str, v: f32) -> bool {
+            self.log.lock().unwrap().push((Some(offset), v));
+            self.inner.set_param(id, v)
+        }
+        fn sample_accurate_params(&self) -> bool {
+            true
+        }
+        fn param(&self, id: &str) -> Option<f32> {
+            self.inner.param(id)
+        }
+        fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+            self.inner.process(io, frames);
+        }
+    }
+
+    /// #117 review C1: stopped, every block renders at the same position. A breakpoint inside
+    /// that block must not go out (it would flip the parameter between the playhead's value and
+    /// the breakpoint's every block); the playhead's value arrives once. Playing, it goes out at
+    /// its offset.
+    #[test]
+    fn a_stopped_transport_sends_the_playhead_value_once_and_no_breakpoints() {
+        let (mut s, t) = session_with_dc(0.5, 48_000);
+        let mut ins = Insert::new("clap:test.timed");
+        ins.params.insert("gain".into(), -6.0);
+        let tr = s.track_mut(t).unwrap();
+        tr.mixer.inserts[0] = Some(ins);
+        tr.mixer.automation_mode = transit_model::AutomationMode::Read;
+        let mut lane = transit_model::AutomationLane::new(AutoParam::Plugin { slot: 0, param: "gain".into() });
+        // The block at 512 holds the breakpoint at 1000 (offset 488).
+        lane.set_point(0, -6.0);
+        lane.set_point(1000, -12.0);
+        tr.automation.push(lane);
+        let log = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let fake = Timed { inner: transit_dsp::create("gain").unwrap(), log: Arc::clone(&log) };
+        let mut rig = PlanRig::new(512).fake(t, 0, fake);
+        rig.publish(&s);
+        rig.eng.monitor_only = true;
+        for _ in 0..3 {
+            render_block(&mut rig, 512);
+        }
+        let stopped = std::mem::take(&mut *log.lock().unwrap());
+        let start = -6.0 - 6.0 * (512.0 / 1000.0);
+        assert_eq!(stopped.len(), 1, "one call over three stopped blocks: {stopped:?}");
+        assert_eq!(stopped[0].0, None, "the playhead value, untimed: {stopped:?}");
+        assert!((stopped[0].1 - start).abs() < 1e-4, "the curve at the playhead: {stopped:?}");
+        rig.eng.monitor_only = false;
+        render_block(&mut rig, 512);
+        let playing = std::mem::take(&mut *log.lock().unwrap());
+        let timed: Vec<_> = playing.iter().filter(|c| c.0.is_some()).copied().collect();
+        assert_eq!(timed, vec![(Some(488), -12.0)], "playing, the breakpoint at its offset: {playing:?}");
     }
 }
