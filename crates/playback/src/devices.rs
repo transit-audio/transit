@@ -511,7 +511,6 @@ pub fn audio_systems() -> Vec<AudioSystem> {
 /// The MIDI ports present now as `(name, input)`, inputs first, named as the MIDI menus name them:
 /// enumeration only, no port is opened (`transit --report`, #127). `Err` says why they could not
 /// be listed.
-#[cfg(not(target_arch = "wasm32"))]
 pub fn midi_ports() -> Result<Vec<(String, bool)>, String> {
     let io = transit_midi_io::MidiIo::new("transit");
     let inputs = io.list_inputs().map_err(|e| e.to_string())?;

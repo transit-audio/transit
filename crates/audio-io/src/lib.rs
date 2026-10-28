@@ -1,6 +1,6 @@
 //! SoundCraft audio file I/O.
 //!
-//! Bytes in, bytes out (no filesystem access, so the crate also builds for `wasm32`):
+//! Bytes in, bytes out (no filesystem access):
 //!
 //! * [`detect_format`] / [`probe`] / [`decode`] read WAV (PCM 8/16/24/32, float 32/64,
 //!   `WAVE_FORMAT_EXTENSIBLE`, RF64/BW64, BWF `bext`) and AIFF/AIFF-C (big-endian, `sowt`,

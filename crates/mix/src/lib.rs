@@ -106,10 +106,6 @@ mod routing;
 mod scope;
 mod sink;
 mod strip;
-#[cfg(not(target_arch = "wasm32"))]
-mod strip_pool;
-#[cfg(target_arch = "wasm32")]
-#[path = "strip_pool_wasm.rs"]
 mod strip_pool;
 #[cfg(test)]
 mod tests;

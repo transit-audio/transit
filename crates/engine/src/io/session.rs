@@ -2,13 +2,7 @@ use super::*;
 
 /// Save the session to `path` (a `.transit` file). Audio that only exists in memory is written
 /// as 32-bit float WAV into `Audio Files/` next to it. Returns how many audio files were written.
-///
-/// In the browser there are no folders: the session and all its audio go out as one bundle file
-/// (`<name>.transitz`, see [`session_bundle`]) through the host's delivery hook ([`set_deliver`]).
 pub fn save_session(e: &mut Engine, path: &str) -> Result<usize> {
-    if cfg!(target_arch = "wasm32") {
-        return save_session_bundle(e, path);
-    }
     let (fresh, written, p) = write_session(e.session(), path, false)?;
     // Keep the in-memory document in sync (paths, unsaved flags) without an undo step.
     *e.session_mut() = fresh;
@@ -322,36 +316,18 @@ pub(crate) fn decode_file(files: &mut DecodedFiles, p: &Path, rate: u32) -> std:
         .clone()
 }
 
-// ─── Hosts without a filesystem (the browser) ─────────────────────────────────────────────────
+// ─── Bundles: a session and its audio as one file ─────────────────────────────────────────────
 
 /// Extension of a session bundle: one zip file holding the `.transit` session and its
-/// `Audio Files/`, the same layout as a saved session folder. The browser has no folders, so it
-/// saves and opens sessions as bundles.
+/// `Audio Files/`, the same layout as a saved session folder.
 pub use transit_model::BUNDLE_EXTENSION;
 
 /// Most entries and bytes a bundle may unpack to (bundles are hostile input).
 const MAX_BUNDLE_ENTRIES: usize = 10_000;
 const MAX_BUNDLE_BYTES: u64 = 1 << 30;
 
-/// Hands a finished file (name, bytes) to the person on a host without a filesystem: the web app
-/// installs one that starts a download. Native builds write files and never install it.
-pub type DeliverHook = fn(&str, &[u8]) -> std::result::Result<(), String>;
-
-static DELIVER: std::sync::OnceLock<DeliverHook> = std::sync::OnceLock::new();
-
-/// Install the delivery hook (once, at start-up of the web app).
-pub fn set_deliver(h: DeliverHook) {
-    let _ = DELIVER.set(h);
-}
-
-/// Write one output file: to `path` natively; in the browser, delivered under its file name.
-/// Without this, every export on the web failed with «operation not supported on this platform».
+/// Write one output file to `path`, through the checked file access.
 pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
-    if cfg!(target_arch = "wasm32") {
-        let deliver = DELIVER.get().ok_or_else(|| EngineError::Io("saving files is not available in this build".into()))?;
-        let name = Path::new(path).file_name().and_then(|n| n.to_str()).filter(|n| !n.is_empty()).unwrap_or("Untitled");
-        return deliver(name, bytes).map_err(EngineError::Io);
-    }
     crate::file_access::check_write(path).map_err(EngineError::Io)?;
     std::fs::write(path, bytes).map_err(|err| EngineError::Io(format!("{path}: {err}")))
 }
@@ -390,23 +366,6 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
     w.write_all(text.as_bytes()).map_err(ioerr)?;
     let bytes = w.finish().map_err(zerr)?.into_inner();
     Ok((bytes, s))
-}
-
-/// Save as a bundle named after `path`'s file name, delivered through the host ([`write_file`]).
-fn save_session_bundle(e: &mut Engine, path: &str) -> Result<usize> {
-    let stem = Path::new(path).file_stem().and_then(|x| x.to_str()).filter(|x| !x.is_empty()).map(str::to_string);
-    let mut s = e.session().clone();
-    if let Some(stem) = stem {
-        s.name = stem;
-    }
-    let (bytes, fresh) = session_bundle(&s)?;
-    let file = format!("{}.{BUNDLE_EXTENSION}", sanitize_name(&fresh.name));
-    write_file(&file, &bytes)?;
-    let written = fresh.sources.iter().filter(|x| fresh.pool.get(x.id).is_some()).count();
-    *e.session_mut() = fresh;
-    e.path = Some(file);
-    e.mark_clean();
-    Ok(written)
 }
 
 /// Open a session from bytes (the browser has no paths): a bundle ([`session_bundle`]) or a bare

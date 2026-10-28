@@ -298,7 +298,6 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     }
     /// Build the independent native MIDI producer on Main. Its audio endpoint
     /// must join this runtime's anchored bundle and share its callback budget.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn midi_lane(&self) -> Result<super::ingress::Lane, PlayerError> {
         if self.faulted() {
             return Err(PlayerError::Faulted);

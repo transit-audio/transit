@@ -11,8 +11,6 @@ pub enum BackendId {
     Alsa,
     /// CoreMIDI (macOS, iOS).
     CoreMidi,
-    /// Web MIDI (browser).
-    WebMidi,
     /// The in-process fake used by tests.
     Fake,
 }
@@ -25,8 +23,6 @@ impl BackendId {
             Self::WinMm
         } else if cfg!(any(target_os = "macos", target_os = "ios")) {
             Self::CoreMidi
-        } else if cfg!(target_arch = "wasm32") {
-            Self::WebMidi
         } else {
             Self::Alsa
         }
@@ -39,7 +35,6 @@ impl BackendId {
             Self::WinMm => "winmm",
             Self::Alsa => "alsa",
             Self::CoreMidi => "coremidi",
-            Self::WebMidi => "webmidi",
             Self::Fake => "fake",
         }
     }

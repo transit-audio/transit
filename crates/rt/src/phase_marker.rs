@@ -111,7 +111,6 @@ pub struct PhaseMarker {
     longest_gap_ns: AtomicU64,
     gap_phase: AtomicU8,
     gap_strip: AtomicU32,
-    #[cfg(not(target_arch = "wasm32"))]
     epoch: std::time::Instant,
 }
 
@@ -132,7 +131,6 @@ impl PhaseMarker {
             longest_gap_ns: AtomicU64::new(0),
             gap_phase: AtomicU8::new(Phase::Idle as u8),
             gap_strip: AtomicU32::new(NO_STRIP),
-            #[cfg(not(target_arch = "wasm32"))]
             epoch: std::time::Instant::now(),
         }
     }
@@ -140,14 +138,7 @@ impl PhaseMarker {
     /// Nanoseconds on the marker's clock (0 where the platform has no monotonic clock).
     #[must_use]
     pub fn now_ns(&self) -> u64 {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            u64::try_from(self.epoch.elapsed().as_nanos()).unwrap_or(u64::MAX)
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            0
-        }
+        u64::try_from(self.epoch.elapsed().as_nanos()).unwrap_or(u64::MAX)
     }
 
     /// A callback starts: forget the previous callback's longest stretch and enter `Service`.

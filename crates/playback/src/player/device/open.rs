@@ -31,7 +31,7 @@ impl Player {
 
     /// Runs this Player's MIDI side on `io` (a fake backend in caller integration tests) instead of
     /// the system's MIDI devices.
-    #[cfg(all(feature = "test-hooks", not(target_arch = "wasm32")))]
+    #[cfg(feature = "test-hooks")]
     #[doc(hidden)]
     pub fn enable_midi_for_test(&mut self, io: transit_midi_io::MidiIo) {
         if let Some(midi) = self.midi.get_mut().as_mut() {
@@ -74,11 +74,8 @@ impl Player {
             fault: Arc::default(),
             failure_signal: None,
             owner: RefCell::new(None),
-            #[cfg(not(target_arch = "wasm32"))]
             midi: RefCell::new(None),
-            #[cfg(not(target_arch = "wasm32"))]
             midi_error: None,
-            #[cfg(not(target_arch = "wasm32"))]
             external_off: RefCell::new(Vec::new()),
             record_start: RefCell::new(None),
             capture: RefCell::new(None),
@@ -94,11 +91,8 @@ impl Player {
             audition: None,
             arrival: Cell::new(0),
             initial_error: None,
-            #[cfg(not(target_arch = "wasm32"))]
             watch: RefCell::new(None),
-            #[cfg(not(target_arch = "wasm32"))]
             silent_worker: None,
-            #[cfg(not(target_arch = "wasm32"))]
             silent_stop: Arc::new(AtomicBool::new(false)),
             device_name: "No audio device (silent)".into(),
             paired_input: None,
@@ -162,7 +156,6 @@ impl Player {
             owner.retire(ports);
             return Err("initial audio plan preparation faulted".into());
         }
-        #[cfg_attr(target_arch = "wasm32", allow(unused_mut))]
         let (mut audio, record_start) = match Audio::from_ports(ports, key, device_rate, Arc::clone(&player.shared)) {
             Ok(audio) => audio,
             Err(failure) => {
@@ -172,9 +165,7 @@ impl Player {
         };
         *player.clock.get_mut() =
             device_clock::MaintainedClock::start(reader).map_err(|error| log::warn!("output clock maintenance unavailable: {error}")).ok();
-        #[cfg(not(target_arch = "wasm32"))]
         audio.set_clock(player.clock.get_mut().as_mut().and_then(device_clock::MaintainedClock::take_audio_reader), player.origin);
-        #[cfg(not(target_arch = "wasm32"))]
         match owner.midi_lane() {
             Ok((control, endpoint)) => match super::native::Native::new(control, player.origin) {
                 Ok(mut native) => {
@@ -482,7 +473,7 @@ impl Player {
             player.silent = false;
             // A unit test enables a fake MIDI backend itself: no test reaches the system's MIDI
             // ports (a session naming a real synth's port would otherwise open it and play it).
-            #[cfg(all(not(target_arch = "wasm32"), not(test)))]
+            #[cfg(not(test))]
             if let Some(midi) = player.midi.get_mut() {
                 midi.enable(transit_midi_io::MidiIo::new("transit"));
             }
@@ -505,14 +496,10 @@ impl Player {
         // A timer-driven fallback never claims a physical output clock map.
         *player.clock.get_mut() = None;
         player.initial_error = Some(error);
-        #[cfg(not(target_arch = "wasm32"))]
         player.start_silent(access, |task| std::thread::Builder::new().name("soundcraft-silent-clock".into()).spawn(task));
-        #[cfg(target_arch = "wasm32")]
-        drop(access);
         player
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn start_silent(
         &mut self,
         access: AudioAccess<Audio>,

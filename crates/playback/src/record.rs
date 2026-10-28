@@ -451,7 +451,6 @@ impl Recorder {
         if self.has_pending_take() {
             return Err("already recording".into());
         }
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let clock = self.clock.as_mut().ok_or("input clock is unavailable for recording")?;
             // The key, not a validated map: the audio thread falls back to the degraded policy
@@ -470,11 +469,6 @@ impl Recorder {
                 next: None,
             };
             self.arm_with(takes, Some(gate))
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = (takes, start);
-            Err("timestamped audio recording is unavailable on this platform".into())
         }
     }
 
@@ -831,7 +825,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn mapping_failure_between_write_and_stop_check_reports_failure() {
         let (key, map, now) = recording_map();
@@ -866,7 +859,6 @@ mod tests {
         assert!(error.is_some(), "input mapping failed during Stop, but the take was deleted and success returned");
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn writer_delay_overflow_and_input_partitions_preserve_boundary() {
         let (key, map, now) = recording_map();
@@ -911,7 +903,6 @@ mod tests {
         transit_audio_io::decode(&std::fs::read(path).unwrap(), None).unwrap().1.channels
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn recording_map() -> (crate::device_clock::ClockKey, crate::device_clock::ClockMap, u64) {
         use crate::device_clock::{self, ClockFitter, Direction, Observation, Quality, Stamp};
         let (_, reader) = device_clock::stream_clock(Direction::Input, 48_000).unwrap();
@@ -939,7 +930,6 @@ mod tests {
         (key, map, now)
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn applied_record_boundary_trims_real_wav_channels_across_input_order_and_partitions() {
         let (key, map, now) = recording_map();
@@ -993,7 +983,6 @@ mod tests {
         }
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn stopped_writer_waits_for_clock_ack_without_another_input_callback() {
         use std::sync::mpsc;

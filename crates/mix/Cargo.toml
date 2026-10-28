@@ -18,8 +18,6 @@ transit-au-host.workspace = true
 transit-model.workspace = true
 transit-rt.workspace = true
 log.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rayon.workspace = true
 
 [dev-dependencies]

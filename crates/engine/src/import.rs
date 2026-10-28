@@ -212,9 +212,7 @@ impl Imports {
         };
         if spawn {
             let shared = Arc::clone(&self.shared);
-            if cfg!(target_arch = "wasm32") {
-                work(&shared);
-            } else if let Err(err) = std::thread::Builder::new().name("soundcraft-import".into()).spawn(move || work(&shared)) {
+            if let Err(err) = std::thread::Builder::new().name("soundcraft-import".into()).spawn(move || work(&shared)) {
                 log::warn!("import worker not started ({err}); preparing on this thread");
                 work(&self.shared);
             }

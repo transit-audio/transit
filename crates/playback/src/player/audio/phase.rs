@@ -1,7 +1,6 @@
 //! Converter phase in integer units. The denominator stays fixed for one device
 //! incarnation, so callback partitions and speed changes cannot round its phase.
 use crate::timeline_map::MapError;
-#[cfg(not(target_arch = "wasm32"))]
 use transit_mix::RenderFrame;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -51,13 +50,11 @@ impl Phase {
     /// Output-device frames from the current output frame to render frame 0 of the next block
     /// (zero or negative: that frame is the current one or already behind it). Render frame `k`
     /// of that block is at `lead + k * denominator / step` output frames.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn lead(self, step: u64) -> f64 {
         if step == 0 { 0.0 } else { -(self.units as f64) / step as f64 }
     }
 
     /// Output frames per render frame at `step`.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn ratio(self, step: u64) -> f64 {
         if step == 0 { 1.0 } else { self.denominator as f64 / step as f64 }
     }
@@ -66,7 +63,6 @@ impl Phase {
     /// `next_render` is after all rendered pending frames; it is not the output
     /// playhead. Past events retain their past due frame so the mixer counts them
     /// as late, rather than adding another block of latency at dispatch.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn project(
         self,
         next_render: RenderFrame,
@@ -86,7 +82,7 @@ impl Phase {
     }
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 #[allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 mod tests {
     use super::*;

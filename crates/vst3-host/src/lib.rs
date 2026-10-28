@@ -18,8 +18,6 @@
 //! bounded by the number of distinct installed plugins actually used. Loaded binaries likewise
 //! stay mapped for the life of the process (module exit functions are never called).
 //!
-//! On `wasm32` the crate compiles to stubs: scans are empty and nothing can be created.
-//!
 //! Plugin state: [`Plugin::save_state`] stores the component state and the controller state in
 //! one blob (`SCV3` + length-prefixed parts); [`Plugin::load_state`] restores both (a bare
 //! component state is accepted too) and re-reads the parameter values.
@@ -45,21 +43,14 @@
 pub mod preset;
 pub mod scan;
 
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(unsafe_code)]
 mod ffi;
-#[cfg(not(target_arch = "wasm32"))]
 mod gate;
-#[cfg(not(target_arch = "wasm32"))]
 mod params;
-#[cfg(not(target_arch = "wasm32"))]
 mod plugin;
-#[cfg(not(target_arch = "wasm32"))]
 mod registry;
-#[cfg(not(target_arch = "wasm32"))]
 mod scan_cache;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use plugin::Vst3Plugin;
 
 use std::path::{Path, PathBuf};
@@ -120,7 +111,6 @@ pub enum Vst3Error {
     Unsupported,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 mod api {
     pub(crate) use super::ffi::adopt_main_thread;
     pub(crate) use super::ffi::exit_modules as shutdown;
@@ -133,71 +123,6 @@ mod api {
         let x = f64::from(x);
         let v = super::plugin::with_curve(plugin_id, param_id, |c, i| if forward { c.to_plain(i, x) } else { c.to_normalized(i, x) })?;
         (v.is_finite()).then_some(v as f32)
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-mod api {
-    use super::*;
-
-    pub fn cached() -> Option<Vec<Vst3Descriptor>> {
-        Some(Vec::new())
-    }
-    pub fn scan() -> Vec<Vst3Descriptor> {
-        Vec::new()
-    }
-    pub fn rescan() -> Vec<Vst3Descriptor> {
-        Vec::new()
-    }
-    pub fn set_cache_file(_file: Option<PathBuf>) {}
-    pub fn scan_in_background() {}
-    pub fn rescan_in_background(_clear_cache: bool) {}
-    pub fn scanning() -> bool {
-        false
-    }
-    pub fn search_dirs() -> (Vec<PathBuf>, Vec<PathBuf>) {
-        (Vec::new(), Vec::new())
-    }
-    pub fn set_extra_dirs(_dirs: Vec<PathBuf>) {}
-    pub fn problems() -> Vec<(PathBuf, String)> {
-        Vec::new()
-    }
-    pub fn progress() -> Option<(usize, usize, PathBuf)> {
-        None
-    }
-    pub fn set_scanner(_program: Option<PathBuf>) {}
-    pub fn scan_reply(_file: &Path) -> String {
-        String::new()
-    }
-    pub fn skip_scan() {}
-    pub fn add_search_dir(_dir: &Path) -> usize {
-        0
-    }
-    pub fn scan_paths(_dirs: &[PathBuf]) -> Vec<Vst3Descriptor> {
-        Vec::new()
-    }
-    pub fn load_bundle(_path: &Path) -> Result<Vec<Vst3Descriptor>, Vst3Error> {
-        Err(Vst3Error::Unsupported)
-    }
-    pub fn instantiate(_id: &str) -> Result<Box<dyn Plugin>, Vst3Error> {
-        Err(Vst3Error::Unsupported)
-    }
-    pub fn plugin_info(_id: &str) -> Option<&'static PluginInfo> {
-        None
-    }
-    pub fn cached_info(_id: &str) -> Option<&'static PluginInfo> {
-        None
-    }
-    pub fn param_curve(_plugin_id: &str, _param_id: &str, _x: f32, _forward: bool) -> Option<f32> {
-        None
-    }
-    pub fn shutdown() {}
-    pub fn modules_not_exited() -> usize {
-        0
-    }
-    pub fn adopt_main_thread() {}
-    pub fn service_requests() -> Serviced {
-        Serviced::default()
     }
 }
 
@@ -320,7 +245,7 @@ pub fn add_search_dir(dir: &Path) -> usize {
 }
 
 /// Runs `hook` after each scan round loads its files, before publication. Only for registry tests.
-#[cfg(all(feature = "test-hooks", not(target_arch = "wasm32")))]
+#[cfg(feature = "test-hooks")]
 #[doc(hidden)]
 pub fn set_scan_hook(hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
     registry::set_after_load_hook(hook)
@@ -328,7 +253,7 @@ pub fn set_scan_hook(hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
 
 /// Restricts scans to extra folders for deterministic registry tests. Defaults to false;
 /// enabling test hooks alone does not change normal search paths or installed-plugin smoke tests.
-#[cfg(all(feature = "test-hooks", not(target_arch = "wasm32")))]
+#[cfg(feature = "test-hooks")]
 #[doc(hidden)]
 pub fn set_scan_extra_dirs_only(only: bool) {
     registry::set_scan_extra_dirs_only(only)
@@ -386,7 +311,6 @@ pub fn instantiate(id: &str) -> Result<Box<dyn Plugin>, Vst3Error> {
 
 /// Like [`instantiate`], but returns the concrete [`Vst3Plugin`] (for its extra methods, such
 /// as [`Vst3Plugin::editor_size`]).
-#[cfg(not(target_arch = "wasm32"))]
 pub fn instantiate_plugin(id: &str) -> Result<Vst3Plugin, Vst3Error> {
     registry::instantiate_plugin(id)
 }
@@ -414,7 +338,6 @@ pub fn offline_scope() -> OfflineScope {
     OfflineScope(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn offline_active() -> bool {
     OFFLINE_SCOPES.load(std::sync::atomic::Ordering::SeqCst) > 0
 }

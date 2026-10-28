@@ -23,7 +23,7 @@ mod graphics;
 mod logging;
 mod report;
 mod shutdown;
-#[cfg(all(feature = "update-check", not(target_arch = "wasm32")))]
+#[cfg(feature = "update-check")]
 mod update_check;
 
 #[cfg(test)]
@@ -369,13 +369,13 @@ fn services(logger: Option<&'static logging::AppLogger>) -> Services {
 }
 
 /// The new-version check (feature `update-check`); the studio decides when to run it.
-#[cfg(all(feature = "update-check", not(target_arch = "wasm32")))]
+#[cfg(feature = "update-check")]
 fn install_update_check(services: &mut Services, ctx: &egui::Context) {
     services.update_check = update_check::for_app(ctx);
     services.update_off_by_env = update_check::disabled_by_env();
 }
 
-#[cfg(not(all(feature = "update-check", not(target_arch = "wasm32"))))]
+#[cfg(not(feature = "update-check"))]
 fn install_update_check(_services: &mut Services, _ctx: &egui::Context) {}
 
 /// A saved window size, or the default when the prefs file holds nonsense.

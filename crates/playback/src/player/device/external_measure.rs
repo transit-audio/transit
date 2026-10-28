@@ -61,7 +61,6 @@ impl Player {
     }
 
     /// Whether the output thread has `track`'s MIDI port open.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn external_port_open(&self, track: TrackId) -> Result<(), String> {
         use crate::player::midi_out::DestinationState;
         let midi = self.midi.try_borrow().map_err(|_| "MIDI is busy")?;
@@ -72,21 +71,13 @@ impl Player {
         }
     }
 
-    #[cfg(target_arch = "wasm32")]
-    pub(super) fn external_port_open(&self, _track: TrackId) -> Result<(), String> {
-        Err("MIDI is unavailable".into())
-    }
-
     /// Ask the output thread to release what `track` holds (note-off, Sustain off, All Notes Off).
     pub(super) fn release_external(&self, track: TrackId) {
-        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(midi) = self.midi.try_borrow()
             && let Some(native) = midi.as_ref()
         {
             native.release_track(track);
         }
-        #[cfg(target_arch = "wasm32")]
-        let _ = track;
     }
 
     /// Whether a Measure is running.

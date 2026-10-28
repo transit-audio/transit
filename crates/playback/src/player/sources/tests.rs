@@ -4,7 +4,6 @@ use super::*;
 use transit_mix::{DeviceGeneration, PlanLimits, RenderTarget};
 use transit_rt::testing::measure;
 
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn audio_dispatch_recovery_is_independent_of_stale_worker_signals_and_main_polling() {
     let (_plans, mut plans, mut control, mut audio) = setup();

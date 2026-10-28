@@ -14,7 +14,6 @@ pub(crate) struct InputView {
 
 impl InputView {
     pub(crate) fn read(player: Option<&Player>) -> Self {
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(player) = player {
             return match player.midi_status() {
                 Ok(status) => {
@@ -58,11 +57,7 @@ impl InputView {
             };
         }
         let _ = player;
-        let status = if cfg!(target_arch = "wasm32") {
-            "Hardware MIDI input is not supported in this browser build."
-        } else {
-            "MIDI input is unavailable without an active audio device."
-        };
+        let status = "MIDI input is unavailable without an active audio device.";
         Self { ports: Vec::new(), status: status.into(), known: false, muted: Vec::new() }
     }
 

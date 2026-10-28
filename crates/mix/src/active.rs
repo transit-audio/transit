@@ -721,7 +721,7 @@ impl MixEngine {
     /// [`MAX_RENDER_WORKERS`], each promoted once at start unless [`RENDER_NO_PRIORITY_ENV`] is
     /// set) with a cell for each of the first `strips` strips (at most 256; strips past them
     /// render on the callback). Returns how many workers run (0: none, the strips render
-    /// serially: one core, the OS refused a thread, the audio thread called, or wasm). The workers
+    /// serially: one core, the OS refused a thread, or the audio thread called). The workers
     /// render only while [`MixEngine::serial_forced`] is off, and stop at
     /// [`MixEngine::into_retired`]; never drop an engine with workers on the audio thread.
     pub fn start_render_workers(&mut self, strips: usize) -> usize {
@@ -739,9 +739,6 @@ impl MixEngine {
     /// can force an outcome by construction, never by scheduling. For tests.
     #[doc(hidden)]
     pub fn start_render_workers_with(&mut self, strips: usize, workers: usize) -> usize {
-        #[cfg(target_arch = "wasm32")]
-        let _ = (strips, workers);
-        #[cfg(not(target_arch = "wasm32"))]
         if self.pool.is_none() && !on_audio_thread() {
             let promote = !render_pool::env_flag(RENDER_NO_PRIORITY_ENV, "SOUNDCRAFT_RENDER_NO_PRIORITY");
             // The environment is read here, once per process (never on the audio thread). The
@@ -749,26 +746,24 @@ impl MixEngine {
             // stands in until playback hands the device's (`set_device_block`, #172).
             let overridden = render_pool::strip_deadline_override();
             let (frames, rate) = self.stand_in_block();
-            {
-                match strip_pool::StripPool::new(
-                    workers.min(MAX_RENDER_WORKERS),
-                    strips.clamp(1, strip_pool::POOL_STRIPS),
-                    promote,
-                    overridden,
-                    frames,
-                    rate,
-                ) {
-                    Ok(pool) => {
-                        log::info!(
-                            "mix: {workers} render workers ({}); strip deadline {}{}",
-                            if promote { "promoted" } else { "default priority" },
-                            strip_deadline_text(u64::from(pool.deadline_percent()), u64::from(frames), u64::from(rate), overridden.is_some()),
-                            if overridden.is_some() { "" } else { ", until the device's buffer size is known" }
-                        );
-                        self.pool = Some(pool);
-                    }
-                    Err(e) => log::warn!("mix: no render workers ({e}); the audio thread renders strips itself"),
+            match strip_pool::StripPool::new(
+                workers.min(MAX_RENDER_WORKERS),
+                strips.clamp(1, strip_pool::POOL_STRIPS),
+                promote,
+                overridden,
+                frames,
+                rate,
+            ) {
+                Ok(pool) => {
+                    log::info!(
+                        "mix: {workers} render workers ({}); strip deadline {}{}",
+                        if promote { "promoted" } else { "default priority" },
+                        strip_deadline_text(u64::from(pool.deadline_percent()), u64::from(frames), u64::from(rate), overridden.is_some()),
+                        if overridden.is_some() { "" } else { ", until the device's buffer size is known" }
+                    );
+                    self.pool = Some(pool);
                 }
+                Err(e) => log::warn!("mix: no render workers ({e}); the audio thread renders strips itself"),
             }
         }
         self.render_workers()

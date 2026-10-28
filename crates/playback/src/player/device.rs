@@ -1,7 +1,6 @@
 //! Device facade for the prepared runtime. All factories, editors and reclamation
 //! belong to this creating-thread owner; the device borrows its anchored audio state.
 use super::audio::{ActionResult, Audio, Command, CountIn};
-#[cfg(not(target_arch = "wasm32"))]
 use super::native;
 use super::{Notice, PlayerError, RuntimeControl, ServiceReport, SessionRequestId, sources};
 use crate::backend::native::NativeKind;
@@ -67,12 +66,9 @@ pub struct Player {
     fault: Arc<Fault>,
     failure_signal: Option<plan_bridge::RuntimeIdentity>,
     owner: RefCell<Option<Owner>>,
-    #[cfg(not(target_arch = "wasm32"))]
     midi: RefCell<Option<super::native::Native>>,
-    #[cfg(not(target_arch = "wasm32"))]
     midi_error: Option<String>,
     /// The External Instrument tracks the last plan was told have no MIDI port (ADR 0020).
-    #[cfg(not(target_arch = "wasm32"))]
     external_off: RefCell<Vec<TrackId>>,
     record_start: RefCell<Option<record::start::Control>>,
     /// MIDI recording capture (control side) and the pass it is collecting.
@@ -89,11 +85,8 @@ pub struct Player {
     audition: Option<sources::Token>,
     arrival: Cell<u64>,
     initial_error: Option<String>,
-    #[cfg(not(target_arch = "wasm32"))]
     watch: RefCell<Option<(u64, std::time::Instant)>>,
-    #[cfg(not(target_arch = "wasm32"))]
     silent_worker: Option<std::thread::JoinHandle<()>>,
-    #[cfg(not(target_arch = "wasm32"))]
     silent_stop: Arc<AtomicBool>,
     pub device_name: String,
     /// The name of the capture endpoint the backend paired with the open output (the user's
@@ -438,7 +431,6 @@ impl Player {
     pub fn stop(&self) -> Result<action_lane::Sequence, PlayerError> {
         self.cancel_record_start()?;
         let mut owner = self.owner()?;
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(midi) = &*self.midi.try_borrow().map_err(|_| PlayerError::Busy)? {
             midi.cutoff(&mut owner)?;
             midi.panic_outputs();
@@ -447,7 +439,6 @@ impl Player {
     }
     pub fn all_notes_off(&self) -> Result<action_lane::Sequence, PlayerError> {
         let mut owner = self.owner()?;
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(midi) = &*self.midi.try_borrow().map_err(|_| PlayerError::Busy)? {
             midi.cutoff(&mut owner)?;
             midi.panic_outputs();
@@ -498,7 +489,6 @@ impl Player {
             owner.fault();
         }
         let report = owner.service();
-        #[cfg(not(target_arch = "wasm32"))]
         {
             let mut midi = self.midi.try_borrow_mut().map_err(|_| PlayerError::Busy)?;
             let status = midi.as_mut().map(|midi| {
@@ -515,7 +505,6 @@ impl Player {
     /// another program), or cannot be reached because MIDI itself is unavailable (`status` None)
     /// plays silent with no latency, so delay compensation does not wait for a synth that cannot
     /// play (ADR 0020 decision 6). When the set of such tracks changes, the plan is prepared again.
-    #[cfg(not(target_arch = "wasm32"))]
     fn follow_external_ports(&self, owner: &mut Owner, status: Option<&super::midi_out::OutputStatus>) {
         let session = Arc::clone(owner.requested_session());
         let Ok(mut held) = self.external_off.try_borrow_mut() else { return };
@@ -529,7 +518,6 @@ impl Player {
     }
     /// Notes played on armed MIDI inputs since the last call (the UI's step entry); empty without MIDI.
     pub fn take_played_notes(&self) -> Vec<super::PlayedNote> {
-        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(midi) = self.midi.try_borrow()
             && let Some(m) = midi.as_ref()
         {
@@ -539,7 +527,6 @@ impl Player {
     }
     /// Ordered note/control input for step entry. Shares its drain with `take_played_notes`.
     pub fn take_played_midi(&self) -> Vec<super::PlayedMidi> {
-        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(midi) = self.midi.try_borrow()
             && let Some(m) = midi.as_ref()
         {
@@ -549,7 +536,6 @@ impl Player {
     }
     /// The same, each stamped with the instant the ingress worker saw it (#139).
     pub fn take_played_midi_stamped(&self) -> Vec<(super::PlayedMidi, std::time::Instant)> {
-        #[cfg(not(target_arch = "wasm32"))]
         if let Ok(midi) = self.midi.try_borrow()
             && let Some(m) = midi.as_ref()
         {
@@ -559,7 +545,6 @@ impl Player {
     }
     /// Switches the MIDI Monitor taps (#91). Off by default: the ingress and output threads copy
     /// nothing while it is off.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn set_midi_monitor(&self, enabled: bool, show_clock: bool) {
         if let Ok(midi) = self.midi.try_borrow()
             && let Some(m) = midi.as_ref()
@@ -569,14 +554,12 @@ impl Player {
     }
     /// Whether the MIDI Monitor taps are on in this Player (a new Player after an audio
     /// reconnect starts with them off).
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn midi_monitor_enabled(&self) -> bool {
         self.midi.try_borrow().ok().and_then(|m| m.as_ref().map(|m| m.monitor_enabled())).unwrap_or(false)
     }
     /// Input activity for the header LED (Clock and Active Sensing excluded): the counter, and
     /// the port name and bytes of the last message. Works with the monitor window closed, for
     /// the ports open for routing.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn midi_activity(&self) -> (super::monitor::Activity, String) {
         if let Ok(midi) = self.midi.try_borrow()
             && let Some(m) = midi.as_ref()
@@ -587,7 +570,6 @@ impl Player {
     }
     /// Appends the MIDI Monitor's pending events (inputs and outputs, ordered by time, at most
     /// `max` per direction) to `events`; the report lists the ports and the dropped counts.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn take_midi_monitor(&self, events: &mut Vec<super::monitor::MonitorEvent>, max: usize) -> super::monitor::Report {
         if let Ok(midi) = self.midi.try_borrow()
             && let Some(m) = midi.as_ref()
@@ -596,7 +578,6 @@ impl Player {
         }
         super::monitor::Report::default()
     }
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn midi_status(&self) -> Result<super::MidiStatus, PlayerError> {
         let midi = self.midi.try_borrow().map_err(|_| PlayerError::Busy)?;
         let mut status =
@@ -859,13 +840,10 @@ impl Player {
         self.clock.try_borrow_mut().ok()?.as_mut().map(device_clock::MaintainedClock::report)
     }
     pub fn trouble(&self) -> Option<OutputTrouble> {
-        #[cfg(not(target_arch = "wasm32"))]
         let stalled = self
             .watch
             .try_borrow_mut()
             .is_ok_and(|mut seen| crate::stalled(&mut seen, self.fault.beats.load(Ordering::Relaxed), self.is_playing() && !self.silent));
-        #[cfg(target_arch = "wasm32")]
-        let stalled = false;
         let trouble = self.fault.trouble(stalled);
         if trouble.is_some()
             && let Ok(mut owner) = self.owner()
@@ -983,9 +961,7 @@ impl Drop for Player {
         if let Some(anchor) = &self.state {
             anchor.close();
         }
-        #[cfg(not(target_arch = "wasm32"))]
         drop(self.midi.get_mut().take());
-        #[cfg(not(target_arch = "wasm32"))]
         {
             self.silent_stop.store(true, Ordering::Release);
             if let Some(worker) = &self.silent_worker {
@@ -1005,7 +981,6 @@ impl Drop for Player {
         let input = std::mem::replace(self.input.get_mut(), HeldInput::No);
         drop(input);
         drop(self.stream.take());
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(worker) = self.silent_worker.take() {
             let _ = worker.join();
         }
@@ -1097,7 +1072,6 @@ impl DeviceOutput {
     }
 
     /// The same callback scope over `f32` samples with no device conversion (the silent clock).
-    #[cfg(any(not(target_arch = "wasm32"), feature = "test-hooks"))]
     fn fill_f32(&mut self, data: &mut [f32]) {
         let mut plans = plan_bridge::callback_scope();
         let mut actions = action_lane::callback_scope();
@@ -1131,7 +1105,6 @@ fn render_callbacks(
     let error = error_callback(Arc::clone(&player.fault), Arc::clone(&player.shared), player.failure_signal.clone());
     let render = move |block: &mut ab::RenderBlock<'_>| {
         crate::mark_audio_thread();
-        #[cfg(not(target_arch = "wasm32"))]
         telemetry::callback_entered(block.frames, rate);
         let started = telemetry::Timer::start();
         fault.telemetry.marker().begin();
@@ -1150,12 +1123,10 @@ fn render_callbacks(
 
 /// Virtual fallback pacing, not a physical device clock. Keep sub-frame time
 /// and bounded-work backlog rather than rounding/dropping them on every wake.
-#[cfg(not(target_arch = "wasm32"))]
 #[derive(Default)]
 struct SilentPacer {
     scaled_nanoseconds: u128,
 }
-#[cfg(not(target_arch = "wasm32"))]
 impl SilentPacer {
     fn advance(&mut self, elapsed: std::time::Duration, rate: u32, limit: usize) -> Option<usize> {
         let added = elapsed.as_nanos().checked_mul(u128::from(rate))?;
@@ -1215,7 +1186,6 @@ mod rate_tests {
 }
 mod calibrate;
 mod external_measure;
-#[cfg(not(target_arch = "wasm32"))]
 mod midi_map_api;
 #[cfg(test)]
 mod midi_map_tests;
@@ -1225,7 +1195,6 @@ mod telemetry_api;
 /// The External Instrument tracks of `session` that cannot play: their MIDI port is Missing or
 /// Failed, or MIDI is unavailable (`status` None). A port the output thread has not looked at yet
 /// counts as present.
-#[cfg(not(target_arch = "wasm32"))]
 fn external_unavailable(session: &Session, status: Option<&super::midi_out::OutputStatus>) -> Vec<TrackId> {
     use super::midi_out::DestinationState;
     session
@@ -1237,11 +1206,11 @@ fn external_unavailable(session: &Session, status: Option<&super::midi_out::Outp
         .collect()
 }
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod external_measure_tests;
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod external_tests;
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod realtime_render_tests;
 #[cfg(test)]
 mod tests;

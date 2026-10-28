@@ -339,7 +339,6 @@ impl Audio {
     /// A refused release during final native-input dispatch must close the
     /// source even when Main and the ingress worker are stalled. Registration
     /// generations never repeat, so this cannot invalidate a newer binding.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn invalidate(&self, port: u16, generation: u64) {
         for shared in &self.shared.ports {
             if generation != 0 && shared.generation.load(Ordering::Acquire) == generation && shared.port.load(Ordering::Relaxed) == u32::from(port) {

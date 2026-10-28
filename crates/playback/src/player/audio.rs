@@ -13,9 +13,7 @@ use transit_time::{MAX_POSITION, Range, Samples};
 
 mod phase;
 use phase::Phase;
-#[cfg(not(target_arch = "wasm32"))]
 mod external;
-#[cfg(not(target_arch = "wasm32"))]
 mod midi;
 
 #[derive(Debug, Clone, Copy)]
@@ -475,12 +473,9 @@ pub(super) struct Audio {
     pub(super) plans: plan_bridge::Audio,
     pub(super) actions: action_lane::Audio<Command, ActionResult>,
     pub(super) sources: sources::Audio,
-    #[cfg(not(target_arch = "wasm32"))]
     midi: Option<action_lane::Audio<super::ingress::Packet, ActionResult>>,
-    #[cfg(not(target_arch = "wasm32"))]
     midi_inbox: midi::Inbox,
     /// Clip events for external MIDI destinations (#61), to the MIDI output thread.
-    #[cfg(not(target_arch = "wasm32"))]
     external: Option<external::External>,
     /// Live MIDI copied out for a MIDI recording (preallocated by Main).
     capture: Option<crate::midi_capture::Sink>,
@@ -507,9 +502,7 @@ pub(super) struct Audio {
     /// An escaped panic may own a heap payload. Retain it with the audio holder
     /// until main reclaims that holder; do not destroy it during error handling.
     panic_payload: RetainedPanic,
-    #[cfg(not(target_arch = "wasm32"))]
     clock_reader: Option<device_clock::service::SnapshotReader>,
-    #[cfg(not(target_arch = "wasm32"))]
     clock_origin: device_clock::HostOrigin,
 }
 
@@ -559,7 +552,6 @@ impl Audio {
         self.plans.fault();
         self.actions.fault();
         self.sources.fault();
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(midi) = &mut self.midi {
             midi.fault();
         }
@@ -593,11 +585,8 @@ impl Audio {
                 plans: ports.plans,
                 actions: ports.actions,
                 sources: ports.sources,
-                #[cfg(not(target_arch = "wasm32"))]
                 midi: None,
-                #[cfg(not(target_arch = "wasm32"))]
                 midi_inbox: midi::Inbox::new(),
-                #[cfg(not(target_arch = "wasm32"))]
                 external: None,
                 capture: None,
                 probe: None,
@@ -613,9 +602,7 @@ impl Audio {
                 speed: 1000,
                 faulted: false,
                 panic_payload: RetainedPanic(None),
-                #[cfg(not(target_arch = "wasm32"))]
                 clock_reader: None,
-                #[cfg(not(target_arch = "wasm32"))]
                 clock_origin: device_clock::HostOrigin::default(),
                 transport: Transport {
                     timeline,
@@ -643,19 +630,16 @@ impl Audio {
         ))
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn set_clock(&mut self, reader: Option<device_clock::service::SnapshotReader>, origin: device_clock::HostOrigin) {
         self.clock_reader = reader;
         self.clock_origin = origin;
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn set_midi(&mut self, midi: action_lane::Audio<super::ingress::Packet, ActionResult>) {
         self.midi = Some(midi);
     }
 
     /// The MIDI output thread's playback producer (#61). Main, before the callback starts.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn set_midi_out(&mut self, out: super::midi_out::Producer) {
         self.external = Some(external::External::new(out));
     }
@@ -737,7 +721,6 @@ impl Audio {
             self.pending = 0;
             self.read.reset();
         }
-        #[cfg(not(target_arch = "wasm32"))]
         self.service_midi(budget);
         self.shared.playing.store(self.transport.playing && !self.faulted, Ordering::Relaxed);
         self.publish_count_in();
@@ -750,7 +733,6 @@ impl Audio {
         self.shared.metro.count_in_left.store(left, Ordering::Relaxed);
     }
 
-    #[cfg(not(target_arch = "wasm32"))]
     fn service_midi(&mut self, budget: &mut action_lane::Budget) {
         let Some(midi) = &mut self.midi else { return };
         let sources = &self.sources;
@@ -879,7 +861,6 @@ impl Audio {
         if let Some(marker) = &self.marker {
             marker.enter(crate::telemetry::Phase::MidiDispatch, None);
         }
-        #[cfg(not(target_arch = "wasm32"))]
         self.midi_inbox.dispatch(
             self.read,
             state.timeline.next_output(),
@@ -889,9 +870,6 @@ impl Audio {
             &self.sources,
             &mut self.plans,
         )?;
-        #[cfg(target_arch = "wasm32")]
-        let _ = actions;
-        #[cfg(not(target_arch = "wasm32"))]
         let external_block = if self.external.is_some() {
             let block = self.external_block(frames);
             if let Some(external) = &mut self.external {
@@ -906,7 +884,6 @@ impl Audio {
         // The render workers' deadline counts from the device callback's entry, not from here,
         // at the engine's share (#172): the device's callback reaches the engine first, so the
         // share follows the buffer the device runs (a compare when it is unchanged).
-        #[cfg(not(target_arch = "wasm32"))]
         self.plans.set_callback_deadline(std::time::Duration::from_nanos(frames as u64 * 1_000_000_000 / u64::from(self.sample_rate.max(1))));
         // The mixer owns each processor's suspension rules. A completed note
         // release does not prove that its envelope or any downstream tail ended.
@@ -931,7 +908,6 @@ impl Audio {
         }
         // An External Instrument Measure records the return the plan read for this block and
         // sends the notes due at its first frame, stamped with that frame's presentation time.
-        #[cfg(not(target_arch = "wasm32"))]
         if let (Some(probe), Some(external), Some(block)) = (&self.ext_probe, &mut self.external, external_block) {
             external.measure(probe, &block, self.plans.input(), frames, self.plans.input_backlog());
         }
@@ -953,7 +929,6 @@ impl Audio {
 
     /// The block about to render as the external MIDI scheduler sees it: its first sample's
     /// presentation time from the device clock map (else the callback-entry fallback).
-    #[cfg(not(target_arch = "wasm32"))]
     fn external_block(&self, frames: usize) -> external::Block {
         let state = &self.transport;
         let step = u64::from(self.sample_rate) * u64::from(self.speed);
@@ -1011,7 +986,6 @@ impl Audio {
             self.plans.fault();
             self.actions.fault();
             self.sources.fault();
-            #[cfg(not(target_arch = "wasm32"))]
             if let Some(midi) = &mut self.midi {
                 midi.fault();
                 midi.service(actions, &mut self.plans, &mut |_, _| ActionResult::Timeline(timeline_map::MapError::Invalid));
@@ -1035,12 +1009,10 @@ impl Audio {
     ) -> Result<(), timeline_map::MapError> {
         // fill() excludes an already-faulted local state before entering here.
         out.fill(0.0);
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(reader) = &mut self.clock_reader {
             self.transport.clock_map = reader.poll().map;
             self.transport.clock_now = self.clock_origin.now_ns();
         }
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(external) = &mut self.external {
             let now = self.transport.clock_now.or_else(|| self.clock_origin.now_ns());
             external.callback(now, self.transport.timeline.next_output());

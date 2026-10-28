@@ -508,19 +508,13 @@ impl ClockReader {
 #[cfg(test)]
 mod tests;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub mod service;
 
-/// Native device clocks are maintained independently of UI progress. The web
-/// adapter retains the existing unavailable-host-clock behavior (no native worker).
+/// Native device clocks are maintained independently of UI progress.
 pub(crate) struct MaintainedClock {
-    #[cfg(not(target_arch = "wasm32"))]
     service: Box<service::ClockService>,
-    #[cfg(target_arch = "wasm32")]
-    reader: ClockReader,
 }
 impl MaintainedClock {
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn prepare_recording(
         &mut self,
         start: crate::record::start::Reader,
@@ -528,38 +522,16 @@ impl MaintainedClock {
         self.service.prepare_recording(start)
     }
     pub(crate) fn key(&self) -> ClockKey {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.service.key()
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.reader.key()
-        }
+        self.service.key()
     }
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn take_audio_reader(&mut self) -> Option<service::SnapshotReader> {
         self.service.take_audio_reader()
     }
 
     pub(crate) fn start(reader: ClockReader) -> std::io::Result<Self> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Ok(Self { service: Box::new(service::ClockService::start(reader)?) })
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Ok(Self { reader })
-        }
+        Ok(Self { service: Box::new(service::ClockService::start(reader)?) })
     }
     pub(crate) fn report(&mut self) -> ClockReport {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            self.service.report()
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            self.reader.poll()
-        }
+        self.service.report()
     }
 }

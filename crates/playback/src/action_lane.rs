@@ -111,7 +111,6 @@ struct Shared {
 pub struct Budget {
     remaining: usize,
     notes_remaining: usize,
-    #[cfg(not(target_arch = "wasm32"))]
     midi_dispatch_remaining: usize,
     stop_serviced: bool,
     release_serviced: bool,
@@ -121,7 +120,6 @@ pub(super) fn callback_scope() -> Budget {
     Budget {
         remaining: CALLBACK_ACTIONS,
         notes_remaining: CALLBACK_NOTES,
-        #[cfg(not(target_arch = "wasm32"))]
         midi_dispatch_remaining: CALLBACK_NOTES,
         stop_serviced: false,
         release_serviced: false,
@@ -131,7 +129,6 @@ pub(super) fn callback_scope() -> Budget {
 impl Budget {
     /// Native input staging and final render dispatch have separate fixed work
     /// limits, shared across every scratch chunk of the same device callback.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(super) fn claim_midi_dispatch(&mut self) -> bool {
         if self.midi_dispatch_remaining == 0 {
             return false;

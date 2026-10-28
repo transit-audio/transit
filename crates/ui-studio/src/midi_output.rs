@@ -6,7 +6,6 @@
 use serde_json::{Value, json};
 use transit_model::{MAX_MIDI_OUT_OFFSET_MS, MidiOutChannel, MidiOutPort, MidiOutput, TrackId};
 use transit_playback::Player;
-#[cfg(not(target_arch = "wasm32"))]
 use transit_playback::player::midi_out::DestinationState;
 
 /// What the picker knows about one track's destination.
@@ -35,7 +34,6 @@ pub(crate) struct MutedPort {
 }
 
 impl MutedPort {
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn of(m: transit_playback::player::MutedMidiInput) -> Self {
         Self { name: m.name.clone(), tracks: m.tracks.clone(), reenable: std::rc::Rc::new(move || m.reenable()) }
     }
@@ -65,7 +63,6 @@ pub(crate) struct OutputView {
 
 impl OutputView {
     pub(crate) fn read(player: Option<&Player>) -> Self {
-        #[cfg(not(target_arch = "wasm32"))]
         if let Some(player) = player {
             return match player.midi_status() {
                 Ok(status) => {
@@ -116,11 +113,7 @@ impl OutputView {
             };
         }
         let _ = player;
-        let status = if cfg!(target_arch = "wasm32") {
-            "Hardware MIDI output is not supported in this browser build."
-        } else {
-            "MIDI output is unavailable without an active audio device."
-        };
+        let status = "MIDI output is unavailable without an active audio device.";
         Self { status: status.into(), ..Self::default() }
     }
 

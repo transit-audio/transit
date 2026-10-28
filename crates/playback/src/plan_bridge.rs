@@ -680,7 +680,6 @@ impl Audio {
     /// entry at that share (`telemetry::next_block_deadline`). In this order, so a callback whose
     /// length changed gets the new share's deadline in its first block. Outside a callback the
     /// engine measures from its own entry. Returns the deadline set. Allocation-free.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn set_callback_deadline(&mut self, period: std::time::Duration) -> Option<std::time::Instant> {
         if let Some((frames, rate)) = crate::telemetry::callback_block() {
             self.mix.set_device_block(frames, rate);

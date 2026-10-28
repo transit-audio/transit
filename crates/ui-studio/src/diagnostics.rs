@@ -507,7 +507,6 @@ impl crate::StudioApp {
         let (session, profile, in_force) = crate::midi_learn::mapping_counts(self);
         #[allow(unused_mut)]
         let mut midi = Midi { session_mappings: Some(session), profile_mappings: profile, in_force: Some(in_force), ..Midi::default() };
-        #[cfg(not(target_arch = "wasm32"))]
         match &self.player {
             Some(player) => match player.midi_status() {
                 Ok(status) => {
@@ -537,13 +536,7 @@ pub const NO_PLAYER_MIDI: &str = "MIDI is not running (no audio device is open):
 /// The ports present as the report lists them, from [`transit_playback::devices::midi_ports`]
 /// (enumeration only); `open` is what the caller knows of them. An error is the note.
 pub fn list_midi_ports(open: Option<bool>) -> Result<Vec<MidiPort>, String> {
-    #[cfg(not(target_arch = "wasm32"))]
-    return transit_playback::devices::midi_ports().map(|ports| ports.into_iter().map(|(name, input)| MidiPort { name, input, open }).collect());
-    #[cfg(target_arch = "wasm32")]
-    {
-        let _ = open;
-        Err("this build has no hardware MIDI".into())
-    }
+    transit_playback::devices::midi_ports().map(|ports| ports.into_iter().map(|(name, input)| MidiPort { name, input, open }).collect())
 }
 
 /// The Copy diagnostics button's state: the collection in flight, and when "Copied" stops showing.

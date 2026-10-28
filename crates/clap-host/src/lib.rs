@@ -15,8 +15,6 @@
 //! bounded by the number of distinct installed plugins actually used. Loaded binaries likewise
 //! stay mapped for the life of the process.
 //!
-//! On `wasm32` the crate compiles to stubs: scans are empty and nothing can be created.
-//!
 //! Plugin state (`clap.state`) round-trips through [`Plugin::save_state`] /
 //! [`Plugin::load_state`] as an opaque blob. Plugin editors (`clap.gui`) open as the plugin's own
 //! floating window ([`Plugin::open_editor`], or [`Plugin::editor`] for a handle usable on the main
@@ -32,19 +30,13 @@
 pub mod preset;
 pub mod scan;
 
-#[cfg(not(target_arch = "wasm32"))]
 #[allow(unsafe_code)]
 mod ffi;
-#[cfg(not(target_arch = "wasm32"))]
 mod gate;
-#[cfg(not(target_arch = "wasm32"))]
 mod plugin;
-#[cfg(not(target_arch = "wasm32"))]
 mod registry;
-#[cfg(not(target_arch = "wasm32"))]
 mod scan_cache;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use plugin::ClapPlugin;
 
 use std::path::{Path, PathBuf};
@@ -91,67 +83,9 @@ pub enum ClapError {
     Unsupported,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 mod api {
     pub(crate) use super::plugin::service_requests;
     pub use super::registry::*;
-}
-
-#[cfg(target_arch = "wasm32")]
-mod api {
-    use super::*;
-
-    pub fn cached() -> Option<Vec<ClapDescriptor>> {
-        Some(Vec::new())
-    }
-    pub fn scan() -> Vec<ClapDescriptor> {
-        Vec::new()
-    }
-    pub fn rescan() -> Vec<ClapDescriptor> {
-        Vec::new()
-    }
-    pub fn set_cache_file(_file: Option<PathBuf>) {}
-    pub fn scan_in_background() {}
-    pub fn rescan_in_background(_clear_cache: bool) {}
-    pub fn scanning() -> bool {
-        false
-    }
-    pub fn search_dirs() -> (Vec<PathBuf>, Vec<PathBuf>) {
-        (Vec::new(), Vec::new())
-    }
-    pub fn set_extra_dirs(_dirs: Vec<PathBuf>) {}
-    pub fn problems() -> Vec<(PathBuf, String)> {
-        Vec::new()
-    }
-    pub fn progress() -> Option<(usize, usize, PathBuf)> {
-        None
-    }
-    pub fn set_scanner(_program: Option<PathBuf>) {}
-    pub fn scan_reply(_file: &Path) -> String {
-        String::new()
-    }
-    pub fn skip_scan() {}
-    pub fn add_search_dir(_dir: &Path) -> usize {
-        0
-    }
-    pub fn scan_paths(_dirs: &[PathBuf]) -> Vec<ClapDescriptor> {
-        Vec::new()
-    }
-    pub fn load_bundle(_path: &Path) -> Result<Vec<ClapDescriptor>, ClapError> {
-        Err(ClapError::Unsupported)
-    }
-    pub fn instantiate(_id: &str) -> Result<Box<dyn Plugin>, ClapError> {
-        Err(ClapError::Unsupported)
-    }
-    pub fn plugin_info(_id: &str) -> Option<&'static PluginInfo> {
-        None
-    }
-    pub fn cached_info(_id: &str) -> Option<&'static PluginInfo> {
-        None
-    }
-    pub fn service_requests() -> Serviced {
-        Serviced::default()
-    }
 }
 
 /// What one [`crate::service_requests`] call did.
@@ -274,7 +208,7 @@ pub fn add_search_dir(dir: &Path) -> usize {
 }
 
 /// Runs `hook` after each scan round loads its files, before publication. Only for registry tests.
-#[cfg(all(feature = "test-hooks", not(target_arch = "wasm32")))]
+#[cfg(feature = "test-hooks")]
 #[doc(hidden)]
 pub fn set_scan_hook(hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
     registry::set_after_load_hook(hook)
@@ -282,7 +216,7 @@ pub fn set_scan_hook(hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
 
 /// Restricts scans to extra folders for deterministic registry tests. Defaults to false;
 /// enabling test hooks alone does not change normal search paths or installed-plugin smoke tests.
-#[cfg(all(feature = "test-hooks", not(target_arch = "wasm32")))]
+#[cfg(feature = "test-hooks")]
 #[doc(hidden)]
 pub fn set_scan_extra_dirs_only(only: bool) {
     registry::set_scan_extra_dirs_only(only)

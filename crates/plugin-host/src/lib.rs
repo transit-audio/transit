@@ -28,7 +28,7 @@
 //! elsewhere.
 //!
 //! **Inline mode.** On macOS (AppKit wants editors on the process main thread, and both SDKs want
-//! the editor and the instance on one thread) and on `wasm32` the host runs every job at once on
+//! the editor and the instance on one thread) the host runs every job at once on
 //! the calling thread and [`Ctx::adopt`] returns the instance as it is: the behavior before
 //! ADR 0018.
 
@@ -95,9 +95,9 @@ impl Hooks {
 }
 
 /// Whether hosts run inline unless told otherwise ([`Config::inline`]): on macOS (AppKit wants
-/// editors on the process main thread) and `wasm32`. Tests of host-thread behavior through the
+/// editors on the process main thread). Tests of host-thread behavior through the
 /// default host ([`shared`]) branch on this, so they follow the runtime's own choice.
-pub const INLINE_BY_DEFAULT: bool = cfg!(any(target_os = "macos", target_arch = "wasm32"));
+pub const INLINE_BY_DEFAULT: bool = cfg!(target_os = "macos");
 
 /// How a [`Host`] runs.
 #[derive(Clone)]
@@ -118,7 +118,7 @@ pub struct Config {
     /// The time load and editor-open phases are measured on ([`Instant::now`]; a test sets a
     /// manual one, so it never sleeps).
     pub clock: Clock,
-    /// Run every job on the calling thread (macOS, `wasm32`, or a failed thread start).
+    /// Run every job on the calling thread (macOS, or a failed thread start).
     pub inline: bool,
 }
 

@@ -310,22 +310,18 @@ pub use bounce::{Bounce, BounceOptions, Bounced, bounce_stems, bounce_stems_with
 pub mod presets;
 pub(crate) use bounce::{bounce_layout, check_bounce_range};
 
-/// Where a bounce is written: its part file, or memory in the browser, which has no file system.
+/// Where a bounce is written: its part file.
 enum Out {
     File(std::io::BufWriter<std::fs::File>),
-    Memory(std::io::Cursor<Vec<u8>>),
 }
 
 impl Out {
     fn create(part: &Path) -> std::io::Result<Out> {
-        if cfg!(target_arch = "wasm32") {
-            return Ok(Out::Memory(std::io::Cursor::new(Vec::new())));
-        }
         Ok(Out::File(std::io::BufWriter::with_capacity(1 << 20, std::fs::File::create(part)?)))
     }
 
     /// Puts the finished file at `path` and returns its size: the part file is synced and renamed
-    /// over it; in the browser the bytes are delivered ([`write_file`]).
+    /// over it.
     fn complete(self, part: &Path, path: &Path) -> Result<u64> {
         match self {
             Out::File(out) => {
@@ -337,11 +333,6 @@ impl Out {
                 });
                 replace_with(part, path, synced).map(|()| len)
             }
-            Out::Memory(m) => {
-                let bytes = m.into_inner();
-                write_file(&path.to_string_lossy(), &bytes)?;
-                Ok(bytes.len() as u64)
-            }
         }
     }
 }
@@ -350,20 +341,12 @@ impl std::io::Write for Out {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         match self {
             Out::File(f) => f.write(buf),
-            Out::Memory(m) => {
-                // A long bounce may not fit in the browser's memory: fail instead of aborting.
-                let end = usize::try_from(m.position()).unwrap_or(usize::MAX).saturating_add(buf.len());
-                let v = m.get_mut();
-                v.try_reserve(end.saturating_sub(v.len())).map_err(|_| std::io::ErrorKind::OutOfMemory)?;
-                m.write(buf)
-            }
         }
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         match self {
             Out::File(f) => f.flush(),
-            Out::Memory(_) => Ok(()),
         }
     }
 }
@@ -372,7 +355,6 @@ impl std::io::Seek for Out {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
         match self {
             Out::File(f) => f.seek(pos),
-            Out::Memory(m) => m.seek(pos),
         }
     }
 }
@@ -634,8 +616,8 @@ pub fn sanitize_name(n: &str) -> String {
 mod session;
 use session::replace_with;
 pub use session::{
-    BUNDLE_EXTENSION, DeliverHook, open_session, open_session_bytes, replace_file, replaces, save_copy, save_session, save_session_copy,
-    session_bundle, session_file, session_open_line, set_deliver, write_file,
+    BUNDLE_EXTENSION, open_session, open_session_bytes, replace_file, replaces, save_copy, save_session, save_session_copy, session_bundle,
+    session_file, session_open_line, write_file,
 };
 pub(crate) use session::{DecodedFiles, decode_file, file_key, open_session_linked};
 

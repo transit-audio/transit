@@ -86,7 +86,6 @@ impl EngineEvents {
 
     /// The transport check for an event the engine takes without its instrument at hand (a
     /// strip a render worker holds, ADR 0029): `Err` when a non-release names an old transport.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn transport_ok(&self, ev: &InstrumentEvent) -> Result<(), EventOutcome> {
         if ev.transport.is_some_and(|t| Some(t) != self.transport) && !is_release_message(&ev.message) {
             return Err(EventOutcome::StaleTransport);
@@ -182,7 +181,6 @@ impl EngineEvents {
     /// Admits an event taken while a render worker held its strip (ADR 0029, deferred MIDI) into
     /// `strip`'s instrument, now that the strip is back: the same checks and counters as
     /// [`MixEngine::queue_event`] (the tap records it a second time, with this outcome).
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn readmit(&mut self, session: &Session, strip: &mut Strip, ev: &InstrumentEvent) -> EventOutcome {
         let (outcome, due) = match self.precheck(ev) {
             Some(o) => (o, None),
@@ -197,7 +195,6 @@ impl EngineEvents {
 
     /// The (port, generation) of every revoked port slot, for a strip that was away when the
     /// revocation came.
-    #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn revocations(&self) -> impl Iterator<Item = (u16, u64)> + '_ {
         self.revoked.iter().enumerate().filter_map(|(slot, r)| {
             let port = match slot {

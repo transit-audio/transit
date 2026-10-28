@@ -48,7 +48,6 @@ pub struct Calibration {
 /// Initialized on control. Reading the cached origin performs no lazy callback initialization.
 #[derive(Clone, Copy)]
 pub struct HostOrigin {
-    #[cfg(not(target_arch = "wasm32"))]
     instant: std::time::Instant,
 }
 
@@ -60,14 +59,9 @@ impl std::fmt::Debug for HostOrigin {
 
 impl Default for HostOrigin {
     fn default() -> Self {
-        #[cfg(not(target_arch = "wasm32"))]
         {
             static ORIGIN: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
             Self { instant: *ORIGIN.get_or_init(std::time::Instant::now) }
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Self {}
         }
     }
 }
@@ -75,19 +69,11 @@ impl Default for HostOrigin {
 impl HostOrigin {
     /// The exact origin used by native audio observations. Pass this to other
     /// device adapters rather than comparing nanoseconds from separate origins.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn instant(self) -> std::time::Instant {
         self.instant
     }
 
     pub fn now_ns(self) -> Option<u64> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            u64::try_from(self.instant.elapsed().as_nanos()).ok()
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            None
-        }
+        u64::try_from(self.instant.elapsed().as_nanos()).ok()
     }
 }

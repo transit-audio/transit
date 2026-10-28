@@ -132,7 +132,6 @@ fn returning_input_cannot_finalize_or_discard_an_uncollected_take() {
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
 fn virtual_fallback_conserves_fractional_time_across_irregular_wakes() {
     use std::time::Duration;
     for rate in [44_100, 48_000, 96_000] {
@@ -148,7 +147,6 @@ fn virtual_fallback_conserves_fractional_time_across_irregular_wakes() {
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
 fn virtual_fallback_bounds_each_pass_without_discarding_stall_backlog() {
     use std::time::Duration;
     let mut pacer = SilentPacer::default();
@@ -257,10 +255,7 @@ fn probe_player(
     let (mut control, audio) = super::super::audio::pair(target, PlanLimits::default(), key, 48_000, Arc::clone(&player.shared)).unwrap();
     control.request(Arc::new(session), None).unwrap();
     let drops = DropTrace::new();
-    #[cfg(not(target_arch = "wasm32"))]
     let stop = Arc::clone(&player.silent_stop);
-    #[cfg(target_arch = "wasm32")]
-    let stop = Arc::new(AtomicBool::new(true));
     control.service(&mut |spec, _generation| {
         let inner = transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch).unwrap().plugin;
         Some(transit_mix::NewInstance {
@@ -344,7 +339,6 @@ fn unexpected_callback_unwind_releases_guard_without_moving_destruction_to_worke
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
 fn shutdown_waits_for_active_render_without_requiring_backend_join() {
     let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
     let (player, access, control, drops) = probe_player(None, Some(entered_tx));
@@ -366,7 +360,6 @@ fn shutdown_waits_for_active_render_without_requiring_backend_join() {
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
 fn failed_silent_worker_spawn_drops_endpoint_but_keeps_audio_on_main() {
     let (mut player, access, control, drops) = probe_player(None, None);
     player.start_silent(access, |task| {
@@ -385,7 +378,6 @@ fn failed_silent_worker_spawn_drops_endpoint_but_keeps_audio_on_main() {
 }
 
 #[test]
-#[cfg(not(target_arch = "wasm32"))]
 fn silent_worker_shutdown_reclaims_audio_only_after_join() {
     let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
     let (mut player, access, control, drops) = probe_player(None, Some(entered_tx));
@@ -714,7 +706,6 @@ fn hardware_player_opens_native_asio_on_the_model12() {
 /// The duplex open of the native path on the scripted backend: the output and the paired input are
 /// opened as two streams, each with its own clock key, and the stamps of both are in the one host
 /// origin, so an output frame maps to the input frame that was captured when it was presented.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_native_duplex_open_gives_both_streams_clocks_in_one_host_origin() {
     use ab::fake::{SliceSink, SliceSource};
@@ -818,7 +809,6 @@ fn a_matching_calibration_reaches_both_streams_and_a_mismatched_one_does_not() {
 /// The stamps a calibrated native pair reports are `Measured` with the calibration's bound, and the
 /// recorder's mapping of an output frame to the input frame resolves from the fits (the exact path,
 /// not the approximate placement by input frame ordinal).
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_calibrated_duplex_pair_fits_measured_clocks_and_maps_output_frames_to_input_frames() {
     use ab::fake::{SliceSink, SliceSource};
@@ -875,7 +865,6 @@ fn a_calibrated_duplex_pair_fits_measured_clocks_and_maps_output_frames_to_input
 
 /// A duplex fake device whose capture is the render's channel 0 delayed by `delay` frames: the
 /// plan's own view of a hardware loop. Pumps `blocks` blocks, counting the probe's frames.
-#[cfg(not(target_arch = "wasm32"))]
 fn loopback_player(delay: usize, send: &[u16], ret: &[u16], blocks: usize) -> (Player, Result<crate::hardware_probe::Measured, String>) {
     use ab::fake::{SliceSink, SliceSource};
     const BLOCK: usize = 192;
@@ -919,7 +908,6 @@ fn loopback_player(delay: usize, send: &[u16], ret: &[u16], blocks: usize) -> (P
     (player, result)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_scripted_loopback_delay_is_measured_within_a_frame() {
     for delay in [300usize, 1_000, 2_400] {
@@ -931,7 +919,6 @@ fn a_scripted_loopback_delay_is_measured_within_a_frame() {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_click_plays_on_the_send_channels_only() {
     use ab::fake::{SliceSink, SliceSource};
@@ -959,7 +946,6 @@ fn the_click_plays_on_the_send_channels_only() {
     assert!(right > 0.2, "the click is on the send channel: {right}");
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_measurement_is_refused_without_a_live_input_or_on_an_unknown_channel_and_silence_finds_nothing() {
     let player =
@@ -1057,7 +1043,6 @@ fn a_native_asio_driver_opens_every_channel_capture_first_in_its_one_mode() {
 
 /// The ADR 0015 hardware-insert measurement on the Model 12's last channels: the click leaves on
 /// output 9 only and comes back on input 11 a known number of frames later.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_hardware_insert_is_measured_through_the_model12s_last_channels() {
     use ab::fake::{SliceSink, SliceSource};
@@ -1106,7 +1091,6 @@ fn a_hardware_insert_is_measured_through_the_model12s_last_channels() {
 /// is not part of a hardware insert's round trip. `prefill` capture blocks arrive after
 /// `set_input` and before any render; the measured round trip is still the cable's delay, and
 /// the backlog B in front of the plan reader is 0 (paired ASIO-style fake: capture, then render).
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_hardware_insert_round_trip_excludes_input_queued_before_the_plan_read_it() {
     use ab::fake::{SliceSink, SliceSource};
@@ -1155,7 +1139,6 @@ fn a_hardware_insert_round_trip_excludes_input_queued_before_the_plan_read_it() 
 /// before the plan first read it. A monitored track on a paired ASIO-style fake: an impulse
 /// captured at a known frame reaches the output the same number of frames later with 0 and with
 /// `prefill` blocks queued between `set_input` and the plan's first read.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn input_monitoring_latency_excludes_input_queued_before_the_plan_read_it() {
     use ab::fake::{SliceSink, SliceSource};
@@ -1302,7 +1285,6 @@ fn an_input_opened_on_demand_goes_through_the_native_backend_that_serves_the_out
 /// back on input 2 a scripted number of device frames later; the probe counts sample positions,
 /// so a backlog in the input ring (capture blocks with no render between them) does not enter
 /// it, and the figure is stored under the open key and handed to both running streams.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_loop_over_native_asio_is_measured_in_sample_positions_and_applied_to_the_running_streams() {
     use ab::fake::{SliceSink, SliceSource};
@@ -1372,7 +1354,6 @@ fn a_loop_over_native_asio_is_measured_in_sample_positions_and_applied_to_the_ru
 }
 
 /// A driver that reports no sample position cannot be measured this way; it is said, not hung.
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_loop_measurement_without_sample_positions_says_so_and_is_refused_off_asio() {
     use ab::fake::{SliceSink, SliceSource};

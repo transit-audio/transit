@@ -39,7 +39,6 @@ const HANGUL: &[(&str, u32)] = &[
     ("/usr/share/fonts/naver-nanum/NanumGothic.ttf", 0),
 ];
 /// Font files larger than this are skipped: egui keeps the whole file in memory.
-#[cfg(not(target_arch = "wasm32"))]
 const MAX_FONT_BYTES: u64 = 64 << 20;
 
 /// Asks fontconfig for the desktop's font matching `pattern`. Only TrueType/OpenType results are
@@ -75,7 +74,6 @@ fn load_from_fontconfig(pattern: &str, lang: Option<&str>) -> Option<FontData> {
     Some(font)
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn load(cands: &[(&str, u32)], pattern: &str, lang: Option<&str>) -> Option<FontData> {
     if std::env::var_os("SOUNDCRAFT_NO_SYSTEM_FONTS").is_some() {
         return None;
@@ -96,11 +94,6 @@ fn load(cands: &[(&str, u32)], pattern: &str, lang: Option<&str>) -> Option<Font
             return Some(fd);
         }
     }
-    None
-}
-
-#[cfg(target_arch = "wasm32")]
-fn load(_: &[(&str, u32)], _: &str, _: Option<&str>) -> Option<FontData> {
     None
 }
 

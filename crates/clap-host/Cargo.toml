@@ -12,6 +12,11 @@ transit-dsp.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 log.workspace = true
+serde_json.workspace = true
+clap-sys = "=0.5.0"
+# The editor window with its header strip (issue #68).
+transit-rt.workspace = true
+libloading = "=0.8.9"
 
 # The Windows host window for embedded editors (a top-level HWND the plugin parents its GUI in).
 [target.'cfg(windows)'.dependencies]
@@ -20,13 +25,6 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Grap
 [[test]]
 name = "editor_main_thread"
 harness = false
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-serde_json.workspace = true
-clap-sys = "=0.5.0"
-# The editor window with its header strip (issue #68).
-transit-rt.workspace = true
-libloading = "=0.8.9"
 
 # The isolated unsafe helper crate (craftrules never-crash): this crate opts out of the workspace
 # `unsafe_code = "forbid"` for itself only. It denies unsafe everywhere and allows it solely on the

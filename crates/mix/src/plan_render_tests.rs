@@ -192,7 +192,6 @@ fn clip_fx_with_short_prepared_buffers_renders_every_sample_without_allocating()
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn render_flags_prefer_transit_values_and_accept_legacy_aliases() {
     for (value, alias, expected) in [

@@ -438,7 +438,6 @@ impl Accumulator {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 std::thread_local! {
     /// The running device callback's entry, the engine blocks it has rendered so far, and its
     /// length in device frames at the device's rate.
@@ -448,13 +447,11 @@ std::thread_local! {
 /// The device callback of `frames` at `rate` Hz starts (its entry, before any work): the render
 /// workers' deadlines of its blocks are measured from here (ADR 0029), and their share follows
 /// its period ([`callback_block`], #172). A `Copy` thread-local: no allocation.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn callback_entered(frames: usize, rate: u32) {
     enter_callback_at(std::time::Instant::now(), frames, rate);
 }
 
 /// [`callback_entered`] with the entry given (tests inject it; the callback passes `now`).
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn enter_callback_at(entry: std::time::Instant, frames: usize, rate: u32) {
     CALLBACK.set(Some((entry, 0, (u32::try_from(frames).unwrap_or(u32::MAX), rate))));
 }
@@ -463,13 +460,12 @@ pub(crate) fn enter_callback_at(entry: std::time::Instant, frames: usize, rate: 
 /// driver calls back with); `None` outside a device callback. Playback hands it to the engine
 /// (`MixEngine::set_device_block`) before each block, so the strips' share follows the device
 /// (#172). Allocation-free.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn callback_block() -> Option<(u32, u32)> {
     CALLBACK.get().map(|(_, _, block)| block)
 }
 
 /// The test seam's end of a callback: no callback runs on this thread.
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 pub(crate) fn leave_callback() {
     CALLBACK.set(None);
 }
@@ -479,37 +475,24 @@ pub(crate) fn leave_callback() {
 /// `MixEngine::strip_deadline_percent`: 150 for a callback period of 1.5 ms or less, 100 above,
 /// unless `TRANSIT_STRIP_DEADLINE_PERCENT` set another). `None` outside a device callback (the
 /// engine then measures from its own entry).
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn next_block_deadline(period: Duration, percent: u32) -> Option<std::time::Instant> {
     let (start, done, frames) = CALLBACK.get()?;
     CALLBACK.set(Some((start, done.saturating_add(1), frames)));
     start.checked_add(transit_mix::strip_deadline_share(period.saturating_mul(done.saturating_add(1)), percent))
 }
 
-/// std::Instant is not implemented on wasm32-unknown-unknown. Do not call it there or invent
-/// timing from the nominal WebAudio buffer size. A browser clock can be added separately.
+/// A wall-clock timer over `std::time::Instant`.
 pub(crate) struct Timer {
-    #[cfg(not(target_arch = "wasm32"))]
     start: std::time::Instant,
 }
 
 impl Timer {
     pub fn start() -> Self {
-        Self {
-            #[cfg(not(target_arch = "wasm32"))]
-            start: std::time::Instant::now(),
-        }
+        Self { start: std::time::Instant::now() }
     }
 
     pub fn elapsed(self) -> Option<Duration> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            Some(self.start.elapsed())
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            None
-        }
+        Some(self.start.elapsed())
     }
 }
 
@@ -657,7 +640,7 @@ mod recent_tests {
 
 /// #172: the callback's strip deadlines at the engine's share, from an injected entry (no clock
 /// read decides anything: the entry is set directly).
-#[cfg(all(test, not(target_arch = "wasm32")))]
+#[cfg(test)]
 mod deadline_tests {
     use super::*;
 

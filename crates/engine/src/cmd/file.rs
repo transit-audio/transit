@@ -41,11 +41,7 @@ pub fn specs() -> Vec<CommandSpec> {
             for t in &mut s.tracks { for pl in &mut t.playlists { pl.clips.clear() } }
             s.sources.clear();
             let text = s.to_json().map_err(|err| EngineError::Io(err.to_string()))?;
-            if cfg!(target_arch = "wasm32") {
-                crate::io::write_file(&file.to_string_lossy(), text.as_bytes())?;
-            } else {
-                crate::io::replace_file(&file.with_extension("transit.tmp"), &file, text.as_bytes())?;
-            }
+            crate::io::replace_file(&file.with_extension("transit.tmp"), &file, text.as_bytes())?;
             Ok(json!({"path": file}))
         }),
         cmd!(noundo "session.revert", "Revert Session to Saved...", ["File"], None, "{}", |e| if e.path.is_some() { Ok(()) } else { Err("the session has not been saved".into()) }, |e, _| {

@@ -45,7 +45,6 @@ pub use player::{
 #[cfg(any(test, feature = "test-hooks"))]
 pub use player::{Clock, Deferred, Factory, PluginTestHooks};
 pub use player::{EditorOpened, LoadedIn};
-#[cfg(not(target_arch = "wasm32"))]
 pub use player::{MapHeard, MapSpec};
 pub use transit_plugin_host::{LoadPhase, loading_text, seconds_text};
 
@@ -179,12 +178,10 @@ enum HeldInput {
 }
 
 /// How long a playing output may go without a block before it counts as stalled.
-#[cfg(not(target_arch = "wasm32"))]
 const STALL: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// True once the block count `beats` has stood still for `STALL` while playing; `seen` is the
 /// count last seen and since when.
-#[cfg(not(target_arch = "wasm32"))]
 fn stalled(seen: &mut Option<(u64, std::time::Instant)>, beats: u64, playing: bool) -> bool {
     match *seen {
         Some((b, since)) if playing && b == beats => since.elapsed() >= STALL,

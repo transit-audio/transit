@@ -12,8 +12,6 @@ transit-dsp.workspace = true
 serde.workspace = true
 thiserror.workspace = true
 log.workspace = true
-
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 serde_json.workspace = true
 # The editor window with its header strip (issue #68).
 transit-rt.workspace = true

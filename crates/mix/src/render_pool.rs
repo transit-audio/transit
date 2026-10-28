@@ -32,7 +32,6 @@ pub fn on_audio_thread() -> bool {
 
 /// Run `f` on this thread as (or as not) the audio thread, then restore the thread's own mark
 /// (also when `f` unwinds): a global pool worker may render for an offline bounce.
-#[cfg(not(target_arch = "wasm32"))]
 fn as_audio_thread(audio: bool, f: impl FnOnce()) {
     struct Restore(bool);
     impl Drop for Restore {
@@ -130,7 +129,6 @@ pub fn strip_deadline_share(span: std::time::Duration, percent: u32) -> std::tim
 /// The override a [`STRIP_DEADLINE_PERCENT_ENV`] value sets: unset is `Ok(None)` (the rule
 /// decides), a whole number in [`STRIP_DEADLINE_PERCENT_RANGE`] is taken, anything else is `Err`
 /// (the caller keeps the rule).
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn deadline_percent_value(value: Option<&str>) -> Result<Option<u32>, ()> {
     let Some(v) = value else { return Ok(None) };
     v.trim().parse::<u32>().ok().filter(|p| STRIP_DEADLINE_PERCENT_RANGE.contains(p)).map(Some).ok_or(())
@@ -139,7 +137,6 @@ pub(crate) fn deadline_percent_value(value: Option<&str>) -> Result<Option<u32>,
 /// Reads [`STRIP_DEADLINE_PERCENT_ENV`] once per process (never on the audio thread: the engine
 /// calls it where it starts its render workers, playback where it opens a device); a rejected
 /// value is logged once. `None`: the share follows the device's buffer size.
-#[cfg(not(target_arch = "wasm32"))]
 #[must_use]
 pub fn strip_deadline_override() -> Option<u32> {
     static PERCENT: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
@@ -157,31 +154,21 @@ pub fn strip_deadline_override() -> Option<u32> {
     })
 }
 
-/// No environment on wasm32 (and no render workers): the rule always decides.
-#[cfg(target_arch = "wasm32")]
-#[must_use]
-pub fn strip_deadline_override() -> Option<u32> {
-    None
-}
-
 /// Audio-thread strips render serially when set ([`MixEngine::force_serial`]). On by default;
 /// [`RENDER_POOL_ENV`] clears it at startup.
 pub(crate) static FORCE_SERIAL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
 
 /// True when `name` is set to `1` (or `true`/`yes`, any case).
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn env_flag(name: &str, alias: &str) -> bool {
     flag_value(std::env::var(name).ok().as_deref(), std::env::var(alias).ok().as_deref())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn flag_value(value: Option<&str>, alias: Option<&str>) -> bool {
     value.or(alias).is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"))
 }
 
 /// Reads [`RENDER_POOL_ENV`] once per process (never on the audio thread): set, it clears
 /// [`FORCE_SERIAL`]. [`MixEngine::new`] calls this.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn init_render_switch() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     if !on_audio_thread() {
@@ -193,9 +180,6 @@ pub(crate) fn init_render_switch() {
         });
     }
 }
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn init_render_switch() {}
 
 /// Runs `f` (one phase-1 strip's processing) unless the strip holds a panic, and keeps a panic
 /// out of it in [`Strip::panic`] instead of letting it unwind. A panic that reached a worker's
@@ -216,7 +200,6 @@ pub(crate) fn guarded(strip: &mut Strip, f: impl FnOnce(&mut Strip)) {
 /// `StripPool::render`, not here), in parallel on Rayon's global pool for an offline render when
 /// there are enough of them. The strips are independent and are summed afterwards in a fixed
 /// order, so the result is the same whichever way they ran.
-#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn run_strips<T: Send>(work: &mut [T], parallel: bool, f: impl Fn(&mut T) + Sync + Send) {
     use rayon::prelude::*;
     if !parallel || work.len() < PARALLEL_STRIPS || on_audio_thread() {
@@ -225,11 +208,6 @@ pub(crate) fn run_strips<T: Send>(work: &mut [T], parallel: bool, f: impl Fn(&mu
         // A global worker renders for an offline caller here: it is not the audio thread.
         work.par_iter_mut().for_each(|w| as_audio_thread(false, || f(w)));
     }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(crate) fn run_strips<T: Send>(work: &mut [T], _parallel: bool, f: impl Fn(&mut T) + Sync + Send) {
-    work.iter_mut().for_each(f);
 }
 
 /// Stop or panic for the parts of a strip a render owns: plug-ins reset, the instrument's

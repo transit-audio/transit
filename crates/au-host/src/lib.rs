@@ -28,7 +28,7 @@
 //! Not hosted yet: Audio Unit editor views (Cocoa `AUCocoaUIBase`), sidechain/extra buses, and
 //! parameters outside the global scope.
 //!
-//! Off macOS (and on `wasm32`) the crate compiles to stubs: scans are empty and nothing can be
+//! Off macOS the crate compiles to stubs: scans are empty and nothing can be
 //! created.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
