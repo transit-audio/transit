@@ -507,8 +507,8 @@ fn a_strip_with_no_cost_history_is_never_rendered_inline() {
 /// index. With every strip's history seeded and no worker, a plan that loads a new instrument on
 /// strip 2 (a long one-time load on its first render), and then one that swaps two tracks (their
 /// strips trade indices), each make only the strips whose chain changed start again with no
-/// history: they are taken back unrendered and counted as refused for no history, the new
-/// plug-in's load never runs on the callback, and every other strip still renders inline.
+/// history: they are counted as refused for no history and the new plug-in's load never runs on
+/// the callback. Both blocks have a passed deadline, so the counts hold by construction.
 #[test]
 fn a_new_or_moved_chain_on_a_strip_starts_with_no_history() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -544,12 +544,13 @@ fn a_new_or_moved_chain_on_a_strip_starts_with_no_history() {
     assert_eq!(rig.mix.adopt_plan(&mut env), Adoption::Adopted);
     rig.comp.reclaim(env);
     rig.session = s;
-    // The deadline only bounds the refused strip's spin.
-    rig.mix.set_strip_deadline(Some(Duration::from_millis(20)));
+    // A passed deadline: nothing renders, and the history check comes before the time left, so
+    // the refusals are counted by construction, whatever the scheduling.
+    rig.mix.set_strip_deadline(Some(Duration::ZERO));
     rig.block();
     let f1 = rig.mix.strip_faults().unwrap().snapshot();
     assert_eq!(f1.inline_refused_no_history, 1, "only the strip with the new instrument: {f1:?}");
-    assert_eq!((f1.inline_renders - f0.inline_renders, f1.overruns_unstarted), (n - 1, 1), "{f1:?}");
+    assert_eq!((f1.inline_renders - f0.inline_renders, f1.overruns_unstarted), (0, n), "{f1:?}");
     assert_eq!(fresh.on_callback.load(Ordering::Relaxed), 0, "the new instrument was rendered on the callback");
     assert_eq!(fresh.load_ns.load(Ordering::Relaxed), 200_000_000, "its one-time load never ran");
     fresh.load_ns.store(0, Ordering::Relaxed);
@@ -567,8 +568,15 @@ fn a_new_or_moved_chain_on_a_strip_starts_with_no_history() {
     let f2 = rig.mix.strip_faults().unwrap().snapshot();
     // Strip 2 is still without history (nothing rendered it), and the two moved strips join it.
     assert_eq!(f2.inline_refused_no_history - f1.inline_refused_no_history, 3, "{f2:?}");
-    assert_eq!(f2.inline_renders - f1.inline_renders, n - 3, "{f2:?}");
+    assert_eq!(f2.inline_renders, f1.inline_renders, "{f2:?}");
     assert_eq!([0, 1].map(|k| rig.shared[k].on_callback.load(Ordering::Relaxed)), before, "the moved strips were not rendered inline");
+    // With a history again (seeded, as a render would leave it) and time to spare, every strip
+    // renders inline.
+    rig.mix.seed_strip_costs(Duration::from_micros(1));
+    rig.mix.set_strip_deadline(Some(Duration::from_secs(30)));
+    rig.block();
+    let f3 = rig.mix.strip_faults().unwrap().snapshot();
+    assert_eq!((f3.inline_renders - f2.inline_renders, f3.inline_refused_no_history), (n, f2.inline_refused_no_history), "{f3:?}");
     transit_mix::unmark_audio_thread();
     MixEngine::force_serial(true);
     drop(rig.mix.into_retired());
