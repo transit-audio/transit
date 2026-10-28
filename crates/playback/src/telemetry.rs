@@ -631,6 +631,39 @@ mod recent_tests {
     }
 }
 
+/// #172: the callback's strip deadlines at the engine's share, from an injected entry (no clock
+/// read decides anything: the entry is set directly).
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod deadline_tests {
+    use super::*;
+
+    /// The deadlines of two blocks of one callback entered at `entry`, at `percent`.
+    fn two_blocks(entry: std::time::Instant, period: Duration, percent: u32) -> [Option<std::time::Instant>; 2] {
+        CALLBACK.set(Some((entry, 0)));
+        let d = [next_block_deadline(period, percent), next_block_deadline(period, percent)];
+        CALLBACK.set(None);
+        d
+    }
+
+    #[test]
+    fn two_blocks_at_150_percent_end_at_one_and_a_half_and_three_periods() {
+        let (entry, p) = (std::time::Instant::now(), Duration::from_micros(1000));
+        assert_eq!(two_blocks(entry, p, 150), [Some(entry + Duration::from_micros(1500)), Some(entry + Duration::from_micros(3000))]);
+    }
+
+    #[test]
+    fn at_75_percent_the_old_three_quarter_rule_holds() {
+        let (entry, p) = (std::time::Instant::now(), Duration::from_nanos(1_333_333));
+        assert_eq!(two_blocks(entry, p, 75), [Some(entry + p * 3 / 4), Some(entry + p * 2 * 3 / 4)]);
+    }
+
+    #[test]
+    fn outside_a_callback_there_is_no_deadline() {
+        CALLBACK.set(None);
+        assert_eq!(next_block_deadline(Duration::from_millis(1), 150), None);
+    }
+}
+
 #[cfg(test)]
 mod reset_tests {
     use super::*;
