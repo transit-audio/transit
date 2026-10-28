@@ -22,7 +22,8 @@
 //!
 //! The strips' deadline is the engine's: `TRANSIT_STRIP_DEADLINE_PERCENT` of the period (25 to
 //! 300, default 75), read once per process, so one run measures one share; each worker row prints
-//! the share its engine used (`-` for serial, which has no deadline).
+//! the share its engine used (`-` for serial, which has no deadline). Unset the variable before an
+//! ordinary `cargo test`: every pool test in the process would run at that share.
 //!
 //! Per configuration: late blocks per 2000 (render time over the period), the render time's p50,
 //! p95, p99 and max, strip overruns by cause, inline renders, and the continuity instruments'
