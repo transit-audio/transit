@@ -150,3 +150,34 @@ fn check_held_replacement(operation: &str) {
     assert_eq!(serde_json::to_value(&app.ui.docking).unwrap(), reset);
     assert_eq!(*app.engine.session(), session);
 }
+
+#[test]
+fn only_pencil_inserts_notes_in_the_midi_roll() {
+    use transit_model::{ClipContent, Tool};
+
+    let mut app = SoundApp::new(transit_engine::demo::demo_engine(), None, Services::default());
+    app.ui.show_midi_editor = true;
+    let created = app.run("midi.new_clip", json!({"track": "Keys", "start": 0, "length": 96000})).unwrap();
+    let clip = created["clip"].as_u64().unwrap();
+    app.run("edit.select", json!({"clips": [clip]})).unwrap();
+    let ctx = egui::Context::default();
+    for _ in 0..6 {
+        frame(&ctx, &mut app, vec![]);
+    }
+    let body = panel(&ctx);
+    let point = pos2(body.left() + 200.0, body.top() + 60.0);
+    for tool in Tool::ALL.into_iter().filter(|tool| *tool != Tool::Pencil).chain([Tool::Pencil]) {
+        app.run("edit.tool", json!({"tool": tool.id()})).unwrap();
+        let before = app.engine.session().clone();
+        frame(&ctx, &mut app, vec![Event::PointerMoved(point)]);
+        frame(&ctx, &mut app, vec![button(point, true)]);
+        frame(&ctx, &mut app, vec![button(point, false)]);
+        let (_, edited) = app.engine.session().find_clip(transit_model::ClipId(clip)).unwrap();
+        let ClipContent::Midi { sequence } = &edited.content else { panic!("MIDI clip required") };
+        if tool == Tool::Pencil {
+            assert_eq!(sequence.notes.len(), 1);
+            app.run("edit.undo", json!({})).unwrap();
+        }
+        assert!(*app.engine.session() == before, "{tool:?} click must not change the session");
+    }
+}
