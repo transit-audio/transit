@@ -674,6 +674,11 @@ impl Audio {
     pub fn set_block_deadline(&mut self, deadline: Option<std::time::Instant>) {
         self.mix.set_block_deadline(deadline);
     }
+    /// The device's callback is `frames` long: the render workers' deadline share follows it
+    /// (#172, `MixEngine::set_device_frames`). Allocation-free.
+    pub fn set_device_frames(&mut self, frames: u32) {
+        self.mix.set_device_frames(frames);
+    }
     #[cfg(test)]
     pub(crate) fn install_event_tap_for_test(&mut self, capacity: usize) {
         self.mix.install_event_tap(capacity);

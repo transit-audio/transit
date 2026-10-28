@@ -440,25 +440,37 @@ impl Accumulator {
 
 #[cfg(not(target_arch = "wasm32"))]
 std::thread_local! {
-    /// The running device callback's entry and the engine blocks it has rendered so far.
-    static CALLBACK: std::cell::Cell<Option<(std::time::Instant, u32)>> = const { std::cell::Cell::new(None) };
+    /// The running device callback's entry, the engine blocks it has rendered so far, and its
+    /// length in device frames.
+    static CALLBACK: std::cell::Cell<Option<(std::time::Instant, u32, u32)>> = const { std::cell::Cell::new(None) };
 }
 
-/// The device callback starts (its entry, before any work): the render workers' deadlines of
-/// its blocks are measured from here (ADR 0029). A `Copy` thread-local: no allocation.
+/// The device callback of `frames` starts (its entry, before any work): the render workers'
+/// deadlines of its blocks are measured from here (ADR 0029), and their share follows its length
+/// ([`callback_frames`], #172). A `Copy` thread-local: no allocation.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn callback_entered() {
-    CALLBACK.set(Some((std::time::Instant::now(), 0)));
+pub(crate) fn callback_entered(frames: usize) {
+    CALLBACK.set(Some((std::time::Instant::now(), 0, u32::try_from(frames).unwrap_or(u32::MAX))));
+}
+
+/// The running device callback's length in device frames (the device's buffer size as the
+/// driver calls back with it); `None` outside a device callback. Playback hands it to the engine
+/// (`MixEngine::set_device_frames`) before each block, so the strips' share follows the device
+/// (#172). Allocation-free.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn callback_frames() -> Option<u32> {
+    CALLBACK.get().map(|(_, _, frames)| frames)
 }
 
 /// The strips' deadline of the next engine block of the running callback: entry + (blocks
 /// rendered + 1) x `period` x `percent` / 100 (the engine's share,
-/// `MixEngine::strip_deadline_percent`; 75 unless `TRANSIT_STRIP_DEADLINE_PERCENT` set another).
-/// `None` outside a device callback (the engine then measures from its own entry).
+/// `MixEngine::strip_deadline_percent`: 150 for a callback of 64 frames or less, 100 above,
+/// unless `TRANSIT_STRIP_DEADLINE_PERCENT` set another). `None` outside a device callback (the
+/// engine then measures from its own entry).
 #[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn next_block_deadline(period: Duration, percent: u32) -> Option<std::time::Instant> {
-    let (start, done) = CALLBACK.get()?;
-    CALLBACK.set(Some((start, done.saturating_add(1))));
+    let (start, done, frames) = CALLBACK.get()?;
+    CALLBACK.set(Some((start, done.saturating_add(1), frames)));
     start.checked_add(transit_mix::strip_deadline_share(period.saturating_mul(done.saturating_add(1)), percent))
 }
 
@@ -639,7 +651,7 @@ mod deadline_tests {
 
     /// The deadlines of two blocks of one callback entered at `entry`, at `percent`.
     fn two_blocks(entry: std::time::Instant, period: Duration, percent: u32) -> [Option<std::time::Instant>; 2] {
-        CALLBACK.set(Some((entry, 0)));
+        CALLBACK.set(Some((entry, 0, 64)));
         let d = [next_block_deadline(period, percent), next_block_deadline(period, percent)];
         CALLBACK.set(None);
         d
@@ -661,6 +673,20 @@ mod deadline_tests {
     fn outside_a_callback_there_is_no_deadline() {
         CALLBACK.set(None);
         assert_eq!(next_block_deadline(Duration::from_millis(1), 150), None);
+        assert_eq!(callback_frames(), None, "and no device length");
+    }
+
+    /// #172: the callback's length is what the engine's share follows; it stays through the
+    /// callback's blocks.
+    #[test]
+    fn the_callback_says_its_length_through_its_blocks() {
+        callback_entered(64);
+        assert_eq!(callback_frames(), Some(64));
+        let _ = next_block_deadline(Duration::from_micros(1333), 150);
+        assert_eq!(callback_frames(), Some(64), "after a block");
+        callback_entered(128);
+        assert_eq!(callback_frames(), Some(128), "the next callback, another buffer size");
+        CALLBACK.set(None);
     }
 }
 

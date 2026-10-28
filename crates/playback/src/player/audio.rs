@@ -904,7 +904,12 @@ impl Audio {
         let state = &mut self.transport;
         let block_output = state.timeline.next_output();
         // The render workers' deadline counts from the device callback's entry, not from here,
-        // at the share the engine's workers were started with (#172).
+        // at the engine's share (#172): the device's callback length reaches the engine first,
+        // so the share follows the buffer size the device runs (a compare when it is unchanged).
+        #[cfg(not(target_arch = "wasm32"))]
+        if let Some(device_frames) = crate::telemetry::callback_frames() {
+            self.plans.set_device_frames(device_frames);
+        }
         #[cfg(not(target_arch = "wasm32"))]
         self.plans.set_block_deadline(crate::telemetry::next_block_deadline(
             std::time::Duration::from_nanos(frames as u64 * 1_000_000_000 / u64::from(self.sample_rate.max(1))),

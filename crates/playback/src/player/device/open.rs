@@ -459,6 +459,16 @@ impl Player {
             player.device_system = system.clone();
             player.device_channels = achieved.format.channels;
             player.device_buffer = achieved.period.frames();
+            // The render workers' share follows the device's callback length, which the engine
+            // learns at the first callback (#172); said here, on control, with the same rule.
+            if let Some(frames) = player.device_buffer.filter(|_| !transit_mix::MixEngine::serial_forced()) {
+                let overridden = transit_mix::strip_deadline_override();
+                let percent = transit_mix::resolve_strip_deadline_percent(overridden, frames);
+                log::info!(
+                    "audio output: strip deadline {}",
+                    transit_mix::strip_deadline_text(u64::from(percent), u64::from(frames), overridden.is_some())
+                );
+            }
             player.output_latency = achieved.latency;
             player.output_sample = Some(achieved.format.sample);
             player.output_channel_names = backend.channel_names(endpoint, ab::Direction::Output);
