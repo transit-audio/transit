@@ -122,14 +122,19 @@ mod tests {
         }
     }
 
+    /// The floor before #176. It only ever rises, except by a removed feature.
+    const PARITY_FLOOR: u64 = 396;
+    /// Implemented menu rows deleted with a removed feature (#176, video): File > Import > Video,
+    /// Options > Video Track Online, Setup > Video Sync Offset and View > Dropped Video Frame
+    /// Indicator. Engine parity went from 398 to 394 implemented rows (513 to 507 in all).
+    const RETIRED_IMPLEMENTED: u64 = 4;
+
     #[test]
     fn parity_floor() {
         let p = parity_json();
         let pct = p["percent"].as_f64().unwrap_or(0.0);
         let done = p["implemented"].as_u64().unwrap_or(0);
-        // The floor only ever rises, except by a removed feature: #176 deleted the six video menu
-        // rows (all implemented), 400 to 394.
         assert!(pct >= 25.0, "engine parity regressed: {pct}%");
-        assert!(done >= 394, "engine parity regressed: {done} menu items");
+        assert!(done >= PARITY_FLOOR - RETIRED_IMPLEMENTED, "engine parity regressed: {done} menu items");
     }
 }
