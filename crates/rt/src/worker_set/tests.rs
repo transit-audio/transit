@@ -629,6 +629,8 @@ fn no_block_operation_or_worker_loop_allocates_after_construction() {
     fake.count_allocs.store(false, Ordering::Release);
     assert!(stats.is_zero(), "publisher: {stats:?}");
     assert!(set.stats().mixed > 0, "workers rendered some strips");
+    // #169: every worker run stamped its claim (the wake histogram) inside the counted loop.
+    assert_eq!(set.figures().wake().iter().sum::<u64>(), set.stats().worker_runs, "one wake sample per worker run");
     assert_eq!(fake.worker_heap_ops.load(Ordering::Acquire), 0, "worker loop");
     let (q, stats) = measure(|| set.shutdown(STALL));
     assert!(q.is_empty());

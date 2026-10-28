@@ -81,6 +81,26 @@
 //! [`WorkerSet::clear_suspect`]. The inline closure must not panic: an unwind through `finish`
 //! leaves the block unresolved (the slot stays `Reclaimed` until the next `begin_block`).
 //!
+//! **Diagnostic figures** (issue #169; [`figures`]; ADR 0029, deviation 17). Pool runs only, for
+//! the diagnostics report and the bench; no protocol decision reads them. Per strip, in one cache
+//! line beside the cost figures: overruns by cause, inline renders, and two stamps. Per set: two
+//! histograms with the buckets of [`figures::LIMITS_NS`] (up to 50 µs, 100 µs, 200 µs, 500 µs,
+//! 1 ms, 2 ms, more):
+//!
+//! - **lateness** of `Late` results: the worker stamps its completion (the clock read that ends
+//!   the render's timing, before its Release complete); when [`WorkerSet::begin_block`] retires the
+//!   late result, the callback records how far that stamp is past the deadline the strip was
+//!   late for (kept from `finish`, no clock read);
+//! - **wake** latency, publish to claim: [`WorkerSet::publish`] stamps every strip it publishes
+//!   with one clock read per block (taken at the block's first publish, before the slot's
+//!   Release); the worker records its claim time (the clock read that starts the render's timing)
+//!   less that stamp. Strips published later in the block, and every strip until
+//!   [`WorkerSet::wake`], count the publisher's own time between the first publish and theirs.
+//!
+//! Stamps are nanoseconds since the set's construction in `AtomicU64`s; the job slot is not
+//! touched. The worker adds no clock read; the callback adds one per block. Read them from any
+//! thread through [`WorkerSet::figures`].
+//!
 //! Never drop a [`WorkerSet`] on the audio thread: `Drop` runs [`WorkerSet::shutdown`], which
 //! sleeps while it waits (up to 1 s).
 //!
@@ -94,8 +114,11 @@
 //! Nothing after [`WorkerSet::new`] allocates on the publisher's path or the worker loop.
 //! No `unsafe`.
 
+pub mod figures;
+
 use crate::Promotion;
 use crate::strip_jobs::{Consume, JobSet, PublishError, State};
+use figures::{Count, Figures};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::thread::JoinHandle;
@@ -289,11 +312,9 @@ struct WorkerSlot {
 struct Shared {
     jobs: JobSet,
     runner: Arc<dyn StripRunner>,
-    /// Per strip: estimated render cost, nanoseconds (EWMA; 0 = never measured).
-    cost_ns: Box<[AtomicU64]>,
-    /// Per strip: worst-case render cost, nanoseconds (a decaying maximum, never below the EWMA;
-    /// 0 = never measured: no history).
-    worst_ns: Box<[AtomicU64]>,
+    /// Per strip: the cost history (EWMA and worst case) and the diagnostic figures; per set,
+    /// the histograms. Its own `Arc`, so a reader holds nothing else of the set.
+    figures: Arc<Figures>,
     /// Per strip: the runner panicked on the last claimed render. Written by the worker before
     /// its completing Release, read by the publisher after its consuming Acquire.
     panicked: Box<[AtomicBool]>,
@@ -307,7 +328,8 @@ struct Shared {
 
 impl Shared {
     fn record_cost(&self, strip: usize, took: Duration) {
-        let (Some(c), Some(w)) = (self.cost_ns.get(strip), self.worst_ns.get(strip)) else { return };
+        let Some(cells) = self.figures.cells(strip) else { return };
+        let (c, w) = (&cells.cost_ns, &cells.worst_ns);
         let ns = u64::try_from(took.as_nanos()).unwrap_or(u64::MAX).max(1);
         // Relaxed: estimates; one executor per strip at a time writes them.
         let old = c.load(Ordering::Relaxed);
@@ -373,6 +395,11 @@ pub struct WorkerSet {
     refused: Box<[bool]>,
     /// Where the next wake starts looking for an idle worker.
     wake_cursor: usize,
+    /// The open block's publish stamp (nanoseconds since the figures' origin; 0: none yet).
+    publish_ns: u64,
+    /// Per strip: the deadline (nanoseconds since the figures' origin) of the block its
+    /// outstanding `Late` result was late for (0: none).
+    late_deadline_ns: Box<[u64]>,
     shut: bool,
 }
 
@@ -400,8 +427,7 @@ impl WorkerSet {
         let shared = Arc::new(Shared {
             jobs: JobSet::new(strips),
             runner,
-            cost_ns: (0..strips).map(|_| AtomicU64::new(0)).collect(),
-            worst_ns: (0..strips).map(|_| AtomicU64::new(0)).collect(),
+            figures: Arc::new(Figures::new(strips)),
             panicked: (0..strips).map(|_| AtomicBool::new(false)).collect(),
             suspect: (0..strips).map(|_| AtomicBool::new(false)).collect(),
             workers: (0..n).map(|_| WorkerSlot { woken: AtomicBool::new(false), current: AtomicUsize::new(0), promotion: OnceLock::new() }).collect(),
@@ -422,6 +448,8 @@ impl WorkerSet {
             barred_until: vec![0; strips].into_boxed_slice(),
             refused: vec![false; strips].into_boxed_slice(),
             wake_cursor: 0,
+            publish_ns: 0,
+            late_deadline_ns: vec![0; strips].into_boxed_slice(),
             shut: false,
         };
         for k in 0..n {
@@ -471,14 +499,21 @@ impl WorkerSet {
     /// The strip's estimated render cost (`None` for no such strip; zero before any render).
     #[must_use]
     pub fn cost_estimate(&self, strip: usize) -> Option<Duration> {
-        self.shared.cost_ns.get(strip).map(|c| Duration::from_nanos(c.load(Ordering::Relaxed)))
+        self.shared.figures.cells(strip).map(|c| Duration::from_nanos(c.cost_ns.load(Ordering::Relaxed)))
     }
 
     /// The strip's worst-case render cost, a decaying maximum (`None` for no such strip; zero
     /// before any render: no history). See the module docs.
     #[must_use]
     pub fn worst_case(&self, strip: usize) -> Option<Duration> {
-        self.shared.worst_ns.get(strip).map(|c| Duration::from_nanos(c.load(Ordering::Relaxed)))
+        self.shared.figures.cells(strip).map(|c| Duration::from_nanos(c.worst_ns.load(Ordering::Relaxed)))
+    }
+
+    /// The set's diagnostic figures (per strip and the two histograms; see the module docs), for
+    /// a reader on any thread. The handle holds only the figures, never the runner or a strip.
+    #[must_use]
+    pub fn figures(&self) -> Arc<Figures> {
+        Arc::clone(&self.shared.figures)
     }
 
     /// Seeds or overrides the strip's cost history (for example from a serial measurement): its
@@ -486,9 +521,9 @@ impl WorkerSet {
     /// keep updating both. Not while the strip is published.
     pub fn set_cost_estimate(&self, strip: usize, cost: Duration) {
         let ns = u64::try_from(cost.as_nanos()).unwrap_or(u64::MAX);
-        if let (Some(c), Some(w)) = (self.shared.cost_ns.get(strip), self.shared.worst_ns.get(strip)) {
-            c.store(ns, Ordering::Relaxed);
-            w.store(ns, Ordering::Relaxed);
+        if let Some(c) = self.shared.figures.cells(strip) {
+            c.cost_ns.store(ns, Ordering::Relaxed);
+            c.worst_ns.store(ns, Ordering::Relaxed);
         }
     }
 
@@ -565,6 +600,7 @@ impl WorkerSet {
         self.generation = generation;
         self.published_len = 0;
         self.skipped = 0;
+        self.publish_ns = 0;
         self.block_index += 1;
         bump(&self.shared.stats.blocks);
         for strip in 0..self.outcomes.len() {
@@ -577,8 +613,9 @@ impl WorkerSet {
 
     /// The per-block rule for one slot: brings it to `Idle` when no worker holds it. False when
     /// a worker does (the slot is `Claimed`).
-    fn settle(&self, strip: usize) -> bool {
-        let Some(slot) = self.shared.jobs.slot(strip) else { return true };
+    fn settle(&mut self, strip: usize) -> bool {
+        let shared = Arc::clone(&self.shared);
+        let Some(slot) = shared.jobs.slot(strip) else { return true };
         match slot.state() {
             State::Idle => true,
             State::Done => {
@@ -590,7 +627,15 @@ impl WorkerSet {
                     self.shared.suspect[strip].store(true, Ordering::Relaxed);
                 }
                 bump(&self.shared.stats.late_results);
-                slot.retire()
+                let retired = slot.retire();
+                // After the Acquire retire, so the worker's completion stamp is visible. Only a
+                // result `finish` counted `Late` has a deadline (not one of a block `finish` was
+                // never called for).
+                let deadline = std::mem::take(&mut self.late_deadline_ns[strip]);
+                if retired && deadline != 0 {
+                    shared.figures.retired_late(strip, deadline);
+                }
+                retired
             }
             // An inline render that unwound out of `finish`.
             State::Reclaimed => slot.retire(),
@@ -635,9 +680,16 @@ impl WorkerSet {
             self.outcomes[strip] = Outcome::Overrun(OverrunCause::Busy);
             self.skipped += 1;
             bump(&self.shared.stats.overruns_busy);
+            self.shared.figures.count(strip, Count::Busy);
             self.bar(strip);
             return Ok(Published::Skipped);
         }
+        // The block's publish stamp: one clock read per block, at its first publish; written
+        // before the slot's Release publish, so the claiming worker sees it.
+        if self.publish_ns == 0 {
+            self.publish_ns = self.shared.figures.nanos(Instant::now()).max(1);
+        }
+        self.shared.figures.published(strip, self.publish_ns);
         if let Err(e) = self.shared.jobs.publish(strip) {
             return refused(self, PublishRefused::Slot(e));
         }
@@ -718,7 +770,7 @@ impl WorkerSet {
     /// render of `strip` with `left` before the deadline; `Err(None)` when no time is left (not a
     /// refusal), `Err(Some(reason))` when the rule refuses it.
     fn admission(&self, strip: usize, left: Duration) -> Result<(), Option<InlineRefusal>> {
-        let worst = self.shared.worst_ns.get(strip).map_or(0, |w| w.load(Ordering::Relaxed));
+        let worst = self.shared.figures.cells(strip).map_or(0, |c| c.worst_ns.load(Ordering::Relaxed));
         if worst == 0 {
             return Err(Some(InlineRefusal::NoHistory));
         }
@@ -796,6 +848,7 @@ impl WorkerSet {
                         }
                         slot.retire();
                         bump(&self.shared.stats.inline_renders);
+                        shared.figures.count(strip, Count::Inline);
                         self.outcomes[strip] = Outcome::Inline;
                         open -= 1;
                         progressed = true;
@@ -807,7 +860,7 @@ impl WorkerSet {
                 break;
             }
             if now >= deadline {
-                self.overrun_the_rest(g);
+                self.overrun_the_rest(g, deadline);
                 break;
             }
             // Spin, bounded by the deadline (checked once per sweep above): a worker sharing this
@@ -840,8 +893,10 @@ impl WorkerSet {
     }
 
     /// At the deadline: a last read of `Done`, then every unresolved strip is an overrun.
-    fn overrun_the_rest(&mut self, g: u64) {
+    fn overrun_the_rest(&mut self, g: u64, deadline: Instant) {
         let shared = Arc::clone(&self.shared);
+        // For the lateness of the `Late` results, when they are retired (no clock read).
+        let deadline_ns = shared.figures.nanos(deadline).max(1);
         for k in 0..self.published_len {
             let strip = self.published[k];
             if self.outcomes[strip] != Outcome::Pending {
@@ -856,6 +911,7 @@ impl WorkerSet {
                 // Taken back unrendered, so no worker starts it after the deadline.
                 slot.retire();
                 bump(&self.shared.stats.overruns_unstarted);
+                shared.figures.count(strip, Count::Unstarted);
                 OverrunCause::Unstarted
             } else if let Some(o) = self.take_done(strip, g) {
                 // Completed between the two reads.
@@ -863,6 +919,8 @@ impl WorkerSet {
                 continue;
             } else {
                 bump(&self.shared.stats.overruns_late);
+                shared.figures.count(strip, Count::Late);
+                self.late_deadline_ns[strip] = deadline_ns;
                 self.bar(strip);
                 OverrunCause::Late
             };
@@ -954,9 +1012,14 @@ fn worker_main(shared: &Shared, index: usize, start: usize, promote: bool) {
         while let Some((strip, token)) = shared.jobs.try_claim_next(next) {
             me.current.store(strip + 1, Ordering::Relaxed);
             let generation = token.generation();
+            // The two clock reads that time the render are also its claim and completion stamps
+            // (#169): the wake latency now, the completion stamp before the Release complete.
             let t0 = Instant::now();
+            shared.figures.claimed(strip, shared.figures.nanos(t0));
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.runner.run(strip, generation)));
-            shared.record_cost(strip, t0.elapsed());
+            let end = Instant::now();
+            shared.record_cost(strip, end.saturating_duration_since(t0));
+            shared.figures.done(strip, shared.figures.nanos(end));
             if r.is_err() {
                 // Relaxed: published by the completing Release below.
                 shared.panicked[strip].store(true, Ordering::Relaxed);
@@ -998,3 +1061,6 @@ mod stress_tests;
 
 #[cfg(test)]
 mod admission_tests;
+
+#[cfg(test)]
+mod figures_tests;
