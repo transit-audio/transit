@@ -4,7 +4,7 @@
 //! to sit on a bar. What follows the bars:
 //! - On ticks-timebase tracks (every playlist, not only the active one): clip starts and
 //!   automation. A MIDI clip is musical end to end, so its end, fades, gain breakpoints and sync
-//!   point follow too (its notes are already in ticks). Audio and video clips keep their length,
+//!   point follow too (its notes are already in ticks). Audio clips keep their length,
 //!   file offset, fades and gain envelope: the audio is not stretched.
 //! - Markers and memory locations, except a track-lane marker on a samples-timebase track; key
 //!   changes; the edit and timeline selections (the loop range).

@@ -95,7 +95,6 @@ pub fn specs() -> Vec<CommandSpec> {
         ),
         cmd!(noundo "setup.current_feet_frames", "Current Feet+Frames Position...", ["Setup"], None, "{feet_frames: 'F+FF'} — the feet+frames reading at the insertion point", always, current_feet_frames),
         cmd!(noundo "setup.external_timecode_offset", "External Timecode Offset...", ["Setup"], None, "{frames?: ±, samples?: ±} — offset applied to incoming timecode", always, |e, p| offset_setting(e, p, "sync.external_offset")),
-        cmd!(noundo "setup.video_sync_offset", "Video Sync Offset...", ["Setup"], None, "{frames?: ±, samples?: ±} — offset between audio and video playback", always, |e, p| offset_setting(e, p, "video.sync_offset")),
         cmd!(noundo "setup.click_countoff", "Click/Countoff...", ["Setup"], None, "{volume_db?: -60..12, accent_note?: 0..127, normal_note?: 0..127, accent_velocity?, normal_velocity?, countoff?: bool, countoff_bars?: 1..16, only_during_record?: bool}", always, click_countoff),
         cmd!(query "setup.keyboard_shortcuts", "Keyboard Shortcuts...", ["Setup"], None, "{filter?} — every command shortcut", always, |_, p| {
             let f = str_param(p, "filter").map(str::to_ascii_lowercase);
@@ -681,8 +680,6 @@ mod tests {
             assert!(matches!(e.execute(id, &params), Err(EngineError::Disabled(..))));
             assert_eq!(e.session(), before.as_ref());
         }
-        let r = e.execute("setup.video_sync_offset", &json!({"frames": 2})).unwrap();
-        assert_eq!(r["samples"], 3200.0);
     }
 
     #[test]

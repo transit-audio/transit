@@ -40,7 +40,6 @@ pub fn specs() -> Vec<CommandSpec> {
             let mut s = e.session().clone();
             for t in &mut s.tracks { for pl in &mut t.playlists { pl.clips.clear() } }
             s.sources.clear();
-            s.videos.clear();
             let text = s.to_json().map_err(|err| EngineError::Io(err.to_string()))?;
             if cfg!(target_arch = "wasm32") {
                 crate::io::write_file(&file.to_string_lossy(), text.as_bytes())?;
@@ -82,20 +81,6 @@ pub fn specs() -> Vec<CommandSpec> {
             let tracks = crate::io::import_midi_bytes(e, &bytes, at, bool_or(p, "tempo_map", true))?;
             Ok(json!({"tracks": tracks}))
         }),
-        cmd!(
-            "file.import_video",
-            "Video...",
-            ["File", "Import"],
-            Some("Cmd+Ctrl+I"),
-            "{path, at?} — adds a Video track clip for the movie's picture (H.264, ProRes, Motion JPEG) and imports its audio onto a new track",
-            always,
-            |e, p| {
-                let path = str_param(p, "path").ok_or_else(|| bad("file.import_video", "`path` required"))?.to_string();
-                let at = position_param(e, "file.import_video", p, "at")?.unwrap_or(0).max(0);
-                let bytes = crate::io::read_file(&path)?;
-                crate::io::import_video_bytes(e, &path, bytes, at)
-            }
-        ),
         cmd!(noundo "file.bounce_mix", "Bounce Mix...", ["File"], Some("Cmd+Alt+B"), "{path, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, source?: main|bus name, normalize?: false, dither?: true, fold_down?: stereo, mode?: realtime|offline_without_external, without_external?: false, stems?: false, uncompensated?: false} — with External Instruments, `mode: realtime` plays the range through the live device and keeps the mix (and with `stems`, each return); `offline_without_external` leaves them out", always, bounce),
         cmd!(noundo "file.bounce_stems", "Bounce Stems...", [], None, "{dir, format?: wav|aiff|flac, bit_depth?: 16|24|32f, start?, end?, fold_down?: stereo, mode?: offline_without_external, without_external?: false}", has_tracks, |e, p| {
             let dir = str_param(p, "dir").ok_or_else(|| bad("file.bounce_stems", "`dir` required"))?.to_string();

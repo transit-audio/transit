@@ -21,7 +21,6 @@ transit-audio-asio = { path = "crates/audio-asio" }
 transit-audio-jack = { path = "crates/audio-jack" }
 transit-midi-io = { path = "crates/midi-io" }
 transit-midi = { path = "crates/midi" }
-transit-video = { path = "crates/video" }
 transit-dsp = { path = "crates/dsp" }
 transit-clap-host = { path = "crates/clap-host" }
 transit-vst3-host = { path = "crates/vst3-host" }

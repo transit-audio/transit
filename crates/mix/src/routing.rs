@@ -218,7 +218,7 @@ pub(crate) fn strip_format(t: &Track, n: usize) -> ChannelFormat {
 pub(crate) fn is_aux(t: &Track) -> bool {
     match t.kind {
         TrackKind::Aux | TrackKind::Folder => true,
-        TrackKind::Video | TrackKind::Audio | TrackKind::Instrument | TrackKind::Midi | TrackKind::Master | TrackKind::Vca => false,
+        TrackKind::Audio | TrackKind::Instrument | TrackKind::Midi | TrackKind::Master | TrackKind::Vca => false,
     }
 }
 
@@ -227,7 +227,7 @@ pub(crate) fn live(t: &Track) -> bool {
     !t.inactive
         && match t.kind {
             TrackKind::Master | TrackKind::Vca => false,
-            TrackKind::Video | TrackKind::Audio | TrackKind::Instrument | TrackKind::Midi | TrackKind::Aux | TrackKind::Folder => true,
+            TrackKind::Audio | TrackKind::Instrument | TrackKind::Midi | TrackKind::Aux | TrackKind::Folder => true,
         }
 }
 

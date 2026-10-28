@@ -1851,8 +1851,6 @@ dependencies = [
  "num-traits",
  "png 0.18.1",
  "tiff",
- "zune-core",
- "zune-jpeg",
 ]
 
 [[package]]
@@ -4353,7 +4351,6 @@ dependencies = [
  "transit-plugin-host",
  "transit-rt",
  "transit-time",
- "transit-video",
  "transit-vst3-host",
  "zip",
 ]
@@ -4485,7 +4482,6 @@ dependencies = [
  "transit-model",
  "transit-playback",
  "transit-time",
- "transit-video",
  "transit-vst3-host",
 ]
 
@@ -4512,16 +4508,6 @@ dependencies = [
  "transit-plugin-host",
  "transit-time",
  "transit-vst3-host",
-]
-
-[[package]]
-name = "transit-video"
-version = "0.3.2"
-dependencies = [
- "image",
- "proptest",
- "serde",
- "thiserror 2.0.21",
 ]
 
 [[package]]

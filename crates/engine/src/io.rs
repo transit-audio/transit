@@ -81,16 +81,9 @@ pub fn read_text(path: impl AsRef<Path>) -> Result<String> {
     String::from_utf8(read_file(path)?).map_err(|err| EngineError::Io(format!("{}: {err}", path.display())))
 }
 
-/// Is there a file at `path` the automation read root lets us see? A path outside the root is
-/// reported as not found, so a command can't probe for files beyond it.
-pub fn file_found(path: impl AsRef<Path>) -> bool {
-    let path = path.as_ref();
-    crate::file_access::check_read(path).is_ok() && path.is_file()
-}
-
 /// The file a path stored in the session file `session` refers to, or why it is not opened.
 ///
-/// Every path a session names (audio sources, movies) goes through here before it reaches the
+/// Every path a session names (audio sources) goes through here before it reaches the
 /// file system. A relative path is taken from the session's folder, and only files on this
 /// computer or on the network share the session itself is on are opened (`craft_docpath`).
 /// Paths the person picks in this session (imports) are not stored paths and skip this.
@@ -299,103 +292,6 @@ pub fn load_sampler_bytes(e: &mut Engine, track: TrackId, name: &str, bytes: &[u
     let r = crate::cmd::sampler::attach(e, track, name, bytes, None, Vec::new())?;
     e.push_undo("Load Sampler Sample", before);
     Ok(r)
-}
-
-/// Import a movie: a Video track clip spanning the picture (the movie is referenced by `path`,
-/// never copied) plus its audio on a new audio track when it has a usable audio stream. Fails
-/// only when the file has neither a readable picture nor audio.
-pub fn import_video_bytes(e: &mut Engine, path: &str, bytes: Vec<u8>, at: Samples) -> Result<Value> {
-    let stem = Path::new(path).file_stem().and_then(|n| n.to_str()).unwrap_or("Video").to_string();
-    let ext = Path::new(path).extension().and_then(|x| x.to_str()).unwrap_or("mp4").to_ascii_lowercase();
-    let bytes: Arc<[u8]> = bytes.into();
-    let movie = transit_video::Movie::open(Arc::clone(&bytes)).map(|m| m.info().clone());
-    let audio_name = format!("{stem} audio.{}", if ext == "mov" { "mp4" } else { ext.as_str() });
-    let audio = import_audio_bytes(e, &audio_name, &bytes, Some(path), None, at);
-    let info = match (movie, &audio) {
-        (Ok(info), _) => info,
-        (Err(verr), Ok(a)) => {
-            e.message(format!("{stem}: imported the audio; no picture ({verr})"));
-            return Ok(json!({"audio": a, "video": Value::Null, "video_error": verr.to_string()}));
-        }
-        (Err(verr), Err(aerr)) => return Err(EngineError::Io(format!("{path}: {verr}; no usable audio stream ({aerr})"))),
-    };
-    let abs = std::fs::canonicalize(path).map_or_else(|_| path.to_string(), |p| p.to_string_lossy().into_owned());
-    let s = e.session_mut();
-    let sr = s.sample_rate.as_f64();
-    let len = (info.duration * sr).round();
-    let len = if len.is_finite() { (len as Samples).clamp(1, sr as Samples * 3600 * 48) } else { 1 };
-    let vid = SourceId(s.alloc());
-    s.videos.push(transit_model::VideoSource {
-        id: vid,
-        name: Path::new(path).file_name().and_then(|n| n.to_str()).unwrap_or("movie").to_string(),
-        path: abs,
-        width: info.width,
-        height: info.height,
-        frame_rate: info.frame_rate,
-        duration: info.duration,
-        codec: info.codec.clone(),
-        offline: None,
-    });
-    // Reuse the first Video track when the new clip does not overlap its clips; else add one at the top.
-    let range = Range::new(at, at.saturating_add(len));
-    let track = match s.tracks.iter().find(|t| t.kind == TrackKind::Video) {
-        Some(t) if !t.clips().iter().any(|c| c.range().overlaps(&range)) => t.id,
-        _ => {
-            let id = s.add_track(TrackKind::Video, ChannelFormat::Mono, Some(&stem));
-            if let Some(i) = s.track_index(id) {
-                let t = s.tracks.remove(i);
-                s.tracks.insert(0, t);
-            }
-            id
-        }
-    };
-    let cid = s.new_clip_id();
-    crate::edit::place_clip(s, track, Clip::video(cid, stem.clone(), vid, 0, at, len));
-    if !info.decodable {
-        e.message(format!("{stem}: {} pictures cannot be shown yet; the Video track shows the clip only", info.codec_detail));
-    }
-    if let Err(err) = &audio {
-        e.message(format!("{stem}: no usable audio stream ({err})"));
-    }
-    Ok(json!({
-        "video": {"track": track, "clip": cid, "source": vid, "length": len, "info": info},
-        "audio": audio.as_ref().ok(),
-        "audio_error": audio.as_ref().err().map(ToString::to_string),
-    }))
-}
-
-/// Resolve each movie referenced by the session file `session` ([`stored_path`]): keep the
-/// resolved path when its file exists, else look for a file of the same name next to the session
-/// (moved projects) and relink. A movie whose stored path is refused and has no such copy is
-/// marked offline. Returns the movies still missing.
-pub fn relink_videos(s: &mut Session, session: &Path) -> Vec<String> {
-    let session_dir = session.parent().unwrap_or(Path::new(""));
-    let mut missing = Vec::new();
-    for v in &mut s.videos {
-        v.offline = None;
-        let p = stored_path(&v.path, session);
-        // The UI opens `path` as it is: keep the checked path, not one relative to the working
-        // directory.
-        if let Ok(found) = &p
-            && file_found(found)
-        {
-            v.path = found.to_string_lossy().into_owned();
-            continue;
-        }
-        let name = Path::new(&v.path).file_name().map(PathBuf::from).unwrap_or_default();
-        let near = [session_dir.join(&name), session_dir.join("Video Files").join(&name)]
-            .into_iter()
-            .find(|c| !name.as_os_str().is_empty() && file_found(c));
-        match (near, p) {
-            (Some(c), _) => v.path = c.to_string_lossy().into_owned(),
-            (None, Ok(p)) => missing.push(format!("{} (video)", p.display())),
-            (None, Err(why)) => {
-                missing.push(format!("{} (video): {why}", v.path));
-                v.offline = Some(why);
-            }
-        }
-    }
-    missing
 }
 
 mod midi;

@@ -253,7 +253,6 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
             Err(err) => missing.push(err),
         }
     }
-    missing.extend(relink_videos(&mut s, links));
     s.folder = Some(dir);
     let notes = std::mem::take(&mut s.load_notes);
     log::info!("{}", session_open_line(path, &s, missing.len(), started.elapsed()));
@@ -430,8 +429,6 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
             None => missing.push(src.path.clone()),
         }
     }
-    // Movies are referenced by path, never copied into a session: none can be found here.
-    missing.extend(s.videos.iter().map(|v| v.path.clone()));
     let stem = Path::new(name).file_stem().and_then(|x| x.to_str()).filter(|x| !x.is_empty()).unwrap_or("Untitled").to_string();
     let notes = std::mem::take(&mut s.load_notes);
     e.replace_session(s);
@@ -724,7 +721,7 @@ mod open_tests {
         let src = add_source(&mut saved, "k", audio, Some("../k.wav"), FileFormat::Wav);
         let id = saved.new_clip_id();
         crate::edit::place_clip(&mut saved, t, Clip::audio(id, "k", src, 0, 0, 480));
-        // In a folder of its own, so a movie named `k.wav` is not relinked to a file beside it.
+        // In a folder of its own, so nothing beside the session is found by name.
         std::fs::create_dir_all(dir.join("s")).unwrap();
         let path = dir.join("s").join("Song.transit").to_string_lossy().into_owned();
         let mut stored = vec![r"\\192.0.2.1\share\x.wav".to_string(), "file://192.0.2.1/s/x.wav".to_string()];
@@ -736,24 +733,11 @@ mod open_tests {
         for p in stored {
             let mut s = saved.clone();
             s.sources[0].path.clone_from(&p);
-            let id = SourceId(s.alloc());
-            s.videos.push(transit_model::VideoSource {
-                id,
-                name: "x".into(),
-                path: p.clone(),
-                width: 0,
-                height: 0,
-                frame_rate: 0.0,
-                duration: 0.0,
-                codec: String::new(),
-                offline: None,
-            });
             std::fs::write(&path, s.to_json().unwrap()).unwrap();
             let mut r = Engine::default();
             let missing = open_session(&mut r, &path).unwrap();
-            assert_eq!(missing.iter().filter(|m| refused(m)).count(), 2, "{p}: {missing:?}");
+            assert_eq!(missing.iter().filter(|m| refused(m)).count(), 1, "{p}: {missing:?}");
             assert!(r.session().pool.get(r.session().sources[0].id).is_none(), "{p}");
-            assert!(r.session().videos[0].offline.is_some(), "{p}");
             let mut into = Engine::default();
             let imported = into.execute("file.import_session_data", &json!({"path": path})).unwrap();
             assert!(imported["missing"].as_array().unwrap().iter().any(|m| m.as_str().is_some_and(refused)), "{p}: {imported}");

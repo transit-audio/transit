@@ -127,8 +127,9 @@ mod tests {
         let p = parity_json();
         let pct = p["percent"].as_f64().unwrap_or(0.0);
         let done = p["implemented"].as_u64().unwrap_or(0);
-        // The floor only ever rises.
+        // The floor only ever rises, except by a removed feature: #176 deleted the six video menu
+        // rows (all implemented), 400 to 394.
         assert!(pct >= 25.0, "engine parity regressed: {pct}%");
-        assert!(done >= 396, "engine parity regressed: {done} menu items");
+        assert!(done >= 394, "engine parity regressed: {done} menu items");
     }
 }

@@ -105,7 +105,6 @@ fn same_material(a: &Clip, b: &Clip) -> bool {
             || match (&a.content, &b.content) {
                 (ClipContent::Audio { source: s1, offset: o1 }, ClipContent::Audio { source: s2, offset: o2 }) => s1 == s2 && o1 == o2,
                 (ClipContent::Midi { sequence: q1 }, ClipContent::Midi { sequence: q2 }) => q1 == q2,
-                (ClipContent::Video { source: s1, offset: o1 }, ClipContent::Video { source: s2, offset: o2 }) => s1 == s2 && o1 == o2,
                 _ => false,
             })
 }

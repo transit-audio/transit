@@ -68,7 +68,7 @@ pub fn split_clip(clip: &Clip, at: Samples, new_id: ClipId, t: TimeCtx<'_>) -> O
 }
 
 /// Move a clip's start edge to `to`: the ONE start-trim for every path (trim drag, Trim to
-/// Selection, Trim Start to Insertion, copy of a time range, retime, split). Audio and video
+/// Selection, Trim Start to Insertion, copy of a time range, retime, split). Audio clips
 /// advance into the file at the cycle phase (the model does that). A MIDI clip re-anchors its
 /// notes and controllers by the phase's ticks and moves its loop with them; an unlooped clip drops
 /// what the trim cut off, a looped one keeps it at negative ticks because later cycles play it
@@ -765,11 +765,10 @@ pub fn trim_clip(s: &mut Session, id: ClipId, start: Option<Samples>, end: Optio
     Some(c)
 }
 
-/// Length of the file or movie under a clip; None for MIDI, which has no end.
+/// Length of the file under a clip; None for MIDI, which has no end.
 fn material_len(s: &Session, c: &Clip) -> Option<Samples> {
     match c.content {
         ClipContent::Audio { source, .. } => s.source(source).map(|src| i64::try_from(src.frames).unwrap_or(i64::MAX)),
-        ClipContent::Video { source, .. } => s.video(source).map(|v| s.sample_rate.samples(v.duration.clamp(0.0, 1e7))),
         ClipContent::Midi { .. } => None,
     }
 }

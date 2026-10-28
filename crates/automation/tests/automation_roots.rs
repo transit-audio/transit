@@ -115,7 +115,6 @@ fn reads(dir: &Path, name: &dyn Fn(&str) -> String) -> Vec<(&'static str, Value)
         ("file.import_audio", json!({"path": p("tone.wav")})),
         ("file.import_audio", json!({"paths": [p("tone.wav")]})),
         ("file.import_midi", json!({"path": p("keys.mid")})),
-        ("file.import_video", json!({"path": p("movie.mp4")})),
         ("file.import_clip_groups", json!({"path": p("group.scgrp")})),
         ("file.import_session_data", json!({"path": p("song.transit")})),
         ("track.load_preset", json!({"path": p("bass.json"), "tracks": ["Bass"]})),
@@ -145,9 +144,6 @@ fn reads_outside_the_read_root_are_refused_and_nothing_reaches_the_result() {
     ok(&mut srv, "file.import_session_data", json!({"path": s(f.read.join("song.transit")), "tracks": ["Kick"]}));
     ok(&mut srv, "track.load_preset", json!({"path": s(f.read.join("bass.json")), "tracks": ["Bass"]}));
     ok(&mut srv, "mix.sampler_load", json!({"track": "Pads", "path": s(f.read.join("tone.wav"))}));
-    // A missing movie inside the root is an ordinary error, not a refusal.
-    let (failed, text) = run(&mut srv, "file.import_video", json!({"path": s(f.read.join("movie.mp4"))}));
-    assert!(failed && !text.contains("read root"), "{text}");
     ok(&mut srv, "session.open", json!({"path": s(f.read.join("song.transit"))}));
     // The typed tools take the same path through the same checks.
     let r = srv
