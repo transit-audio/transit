@@ -39,7 +39,7 @@ The two flags (VectorCraft and the other Craft apps take the same ones, so one c
 works across the suite) keep the agent to the folders you give it:
 
 - Every file a command reads must lie inside the **read root**: `open_session`, `session.open`,
-  `import_audio` and `file.import_audio`, `file.import_midi`, `file.import_video`,
+  `import_audio` and `file.import_audio`, `file.import_midi`,
   `file.import_clip_groups`, `file.import_session_data`, `track.load_preset` and
   `mix.sampler_load`. The media a session file names is read too, so an opened session whose
   audio paths lead outside the read root loads without that audio and lists it under `missing`.

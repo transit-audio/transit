@@ -5,7 +5,7 @@ below the UI knows about egui, so the interface can be replaced. Detail lives in
 [`contributing/knowledge/`](contributing/knowledge/README.md); decisions in [`adr/`](adr/README.md).
 
 ```
-L0  time  rt  audio-io  midi-io  midi  video      (standalone or primitives)
+L0  time  rt  audio-io  midi-io  midi            (standalone or primitives)
 L1  dsp  clap-host  vst3-host  au-host (DSP and plug-in hosts)
 L2  model                                          (the session document)
 L3  mix                                            (the plan renderer)
@@ -43,7 +43,6 @@ the sinks. Details: [`plan-renderer.md`](contributing/knowledge/plan-renderer.md
 - Live MIDI: [`midi.md`](contributing/knowledge/midi.md). Recording: [`recording.md`](contributing/knowledge/recording.md).
 - Hosted plug-ins (`clap-host`, `vst3-host`, `au-host`) are scanned, created and destroyed off the
   audio thread; only `process` runs on it. Unsafe code: [`unsafe.md`](contributing/knowledge/unsafe.md).
-- `video` holds our own H.264, ProRes and Motion JPEG decoders and the ISO-BMFF demuxer.
 
 ## UI
 

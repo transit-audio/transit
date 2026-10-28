@@ -51,5 +51,15 @@ file as usual. It cannot warn from builds that shipped before it existed: an old
 drops a loop on save (known issue K40). Add an entry to `needs()` and `KNOWN_NEEDS` together when
 a new feature would be lost by an older reader, and test a round-trip with and without it.
 
+## Retired features
+
+A feature that is removed leaves old files that still carry it. Its serde variants are gone, so
+`Session::from_json` strips it from the parsed JSON before deserializing (`crates/model/src/legacy.rs`)
+and posts one `load_notes` line, so the file opens instead of failing. Today that is video (ADR 0031):
+a `Video` track, `Video` clip content and the `videos` list are dropped. The corpus holds a
+hand-written file for it (`v0.3.2-video.transit`, loaded by its own test, not the lossless round
+trip), and `RETIRED_KEYS` in `tests/corpus.rs` names the key the older corpus files have and a save
+no longer writes. Add a retired feature to the same pre-pass, with a fixture and a note.
+
 A format change is reviewed like an engine change: the refutation attack list includes "old loads,
 new loads on previous build" (`../evidence/refutation-review.md`).

@@ -5,7 +5,7 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 
 | Layer | Crates |
 |---|---|
-| L0 | `time`, `rt`, `audio-io`, `midi-io`, `midi`, `video` |
+| L0 | `time`, `rt`, `audio-io`, `midi-io`, `midi` |
 | L1 | `dsp`, `clap-host`, `vst3-host`, `au-host` |
 | L2 | `model` (the session document) |
 | L3 | `mix` (the render engine) |
@@ -18,7 +18,7 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 
 - Every crate is registered in `LAYERS`; a new crate needs a row (and a layer you can justify).
 - No dependency points upward (dev-dependencies excepted).
-- The standalone crates (`STANDALONE`: `time`, `audio-io`, `midi-io`, `midi`, `video`, `dsp`) have no
+- The standalone crates (`STANDALONE`: `time`, `audio-io`, `midi-io`, `midi`, `dsp`) have no
   workspace dependencies at all.
 - Nothing below L6 depends on egui, eframe, winit, rfd, craft-ui or similar (`UI_CRATES`).
 
