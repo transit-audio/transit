@@ -110,24 +110,18 @@ impl Job {
     }
 
     /// Renders the strip for `generation` exactly as the serial path does (a plug-in panic is
-    /// kept in the strip by [`guarded`]), and stamps the job with it.
-    fn render(&mut self, generation: u64) {
+    /// kept in the strip by [`guarded`]), and stamps the job with it. `marker` is the callback's
+    /// phase marker (#162) when the callback renders the strip itself (inline), `None` on a
+    /// worker: only the audio thread writes it.
+    fn render(&mut self, generation: u64, marker: Option<&transit_rt::phase_marker::PhaseMarker>) {
         let Job { strip, session, pos, frames, any_solo, monitor_only, recording, no_suspend, frame, duplex, no_input, busses, keys, rendered } =
             self;
         if let Some(s) = session.as_deref()
             && let Some(t) = s.tracks.get(usize::from(strip.track))
         {
             let input: &[Vec<f32>] = if *duplex { no_input } else { &[] };
-            // A worker never writes the callback's phase marker (#162): only the callback does.
-            let live = LiveInput {
-                input,
-                monitor_only: *monitor_only,
-                recording: *recording,
-                no_suspend: *no_suspend,
-                frame: *frame,
-                io: None,
-                marker: None,
-            };
+            let live =
+                LiveInput { input, monitor_only: *monitor_only, recording: *recording, no_suspend: *no_suspend, frame: *frame, io: None, marker };
             let block = StripRender { s, busses, live: &live, pos: *pos, frames: *frames, any_solo: *any_solo, keys };
             guarded(strip, |st| process_strip(t, st, &block));
             // Only a strip actually rendered carries this block's generation; the callback mixes
@@ -260,7 +254,8 @@ impl StripRunner for Runner {
         mark_audio_thread();
         #[cfg(test)]
         tests::late_panic(strip);
-        if !self.cells.with(strip, |job| job.render(generation)) {
+        // A worker never writes the callback's phase marker (#162).
+        if !self.cells.with(strip, |job| job.render(generation, None)) {
             self.counters.conflicts.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -731,7 +726,8 @@ impl StripPool {
         let cells_ref = &self.cells;
         let report = self.set.finish(deadline, |i| {
             // Reclaimed by the callback: no worker can hold the cell.
-            cells_ref.with(i, |job| job.render(g));
+            // On the callback: the strip marks the phase marker as a serial render does.
+            cells_ref.with(i, |job| job.render(g, b.live.marker));
         });
         if Instant::now().saturating_duration_since(deadline) > OVERSHOOT {
             self.counters.overshoot.fetch_add(1, Ordering::Relaxed);

@@ -128,3 +128,53 @@ fn a_late_runner_fault_keeps_the_same_instance_suspect() {
     assert!(pool.set.is_suspect(0));
     drop(eng.into_retired());
 }
+
+/// #162 with render workers: a strip the callback renders inline (here a set with no workers,
+/// so every strip is reclaimed inline) marks the phase marker with its own phase and index, as
+/// the serial path does; the block's longest stretch is a strip render, not the mixdown before it.
+#[test]
+fn a_strip_rendered_inline_marks_the_phase_marker() {
+    use transit_audio_io::AudioBuffer;
+    use transit_model::{Clip, Insert, SourceAudio, SourceId};
+    use transit_rt::phase_marker::{Phase, PhaseMarker};
+    let _switch = SWITCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let mut s = Session::default();
+    let len = 48_000usize;
+    for k in 0..6u32 {
+        let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        let signal: Vec<f32> = (0..len).map(|i| (i as f32 * 0.01 * (k + 1) as f32).sin() * 0.2).collect();
+        let src = SourceId(9100 + u64::from(k));
+        s.pool.insert(src, Arc::new(SourceAudio::new(AudioBuffer { sample_rate: 48_000, channels: vec![signal] })));
+        let id = s.new_clip_id();
+        let tr = s.track_mut(t).unwrap();
+        tr.playlist_mut().unwrap().clips.push(Clip::audio(id, "x", src, 0, 0, len as i64));
+        tr.mixer.inserts[0] = Some(Insert::new("room_reverb"));
+    }
+    let mut eng = RangeRender::new(&s, None, transit_time::Range::new(0, 512 * 40), 512).eng;
+    eng.pool = Some(StripPool::new(0, 16, false).unwrap());
+    eng.set_strip_deadline(Some(Duration::from_secs(30)));
+    let marker = Arc::new(PhaseMarker::new());
+    eng.set_phase_marker(Arc::clone(&marker));
+    MixEngine::force_serial(false);
+    let m = Arc::clone(&marker);
+    let (eng, stamp, inline) = std::thread::spawn(move || {
+        mark_audio_thread();
+        let mut out = vec![vec![0.0f32; 512]; 2];
+        for b in 0..4 {
+            eng.render_active(b * 512, 512, &mut out);
+        }
+        m.begin();
+        eng.render_active(4 * 512, 512, &mut out);
+        m.end();
+        let inline = eng.pool.as_ref().map_or(0, |p| p.set.stats().inline_renders);
+        unmark_audio_thread();
+        (eng, m.read(), inline)
+    })
+    .join()
+    .unwrap();
+    MixEngine::force_serial(true);
+    assert_eq!(inline, 5 * 6, "every strip was rendered inline");
+    assert_eq!(stamp.gap_phase, Phase::StripRender, "the inline strip renders marked their phase: {stamp:?}");
+    assert!(stamp.gap_strip < 6, "with the strip's track index: {stamp:?}");
+    drop(eng.into_retired());
+}
