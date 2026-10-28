@@ -31,7 +31,7 @@
 use super::events::EngineEvents;
 use super::render_pool::{release_instrument, reset_render_state};
 use super::*;
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, TryLockError};
 use std::time::{Duration, Instant};
 use transit_rt::midi_defer::{DeferSet, DeferStats, Event};
@@ -207,6 +207,8 @@ struct Counters {
     misuse: AtomicU64,
     overshoot: AtomicU64,
     deadline_percent: AtomicU64,
+    deadline_frames: AtomicU64,
+    deadline_overridden: AtomicBool,
 }
 
 /// Reads an engine's [`StripFaults`] from any thread (relaxed loads; each figure exact on its own).
@@ -230,6 +232,8 @@ impl StripFaultsReader {
         StripFaults {
             workers: r(&c.workers),
             deadline_percent: r(&c.deadline_percent),
+            deadline_frames: r(&c.deadline_frames),
+            deadline_overridden: c.deadline_overridden.load(Ordering::Relaxed),
             blocks: r(&c.blocks),
             overruns_busy: r(&c.overruns_busy),
             overruns_late: r(&c.overruns_late),
@@ -335,21 +339,27 @@ pub(crate) struct StripPool {
     /// Per strip: the identity of the processing chain the cell last published ([`chain_identity`];
     /// `None` before its first publish). When it changes, the strip's cost history is reset.
     chain: Box<[Option<u64>]>,
-    /// The strips' deadline, percent of the block period (#172; read once at construction).
+    /// The strips' deadline in effect, percent of the block period (#172):
+    /// [`resolve_strip_deadline_percent`] of `deadline_override` and `device_frames`.
     deadline_percent: u32,
+    /// [`STRIP_DEADLINE_PERCENT_ENV`]'s value, read once before construction (never here).
+    deadline_override: Option<u32>,
+    /// The device callback length the share was last resolved for, frames.
+    device_frames: u32,
 }
 
 impl StripPool {
-    /// `workers` threads for `strips` cells, the strips' deadline at `deadline_percent` of the
-    /// period (control thread; allocates).
-    pub(crate) fn new(workers: usize, strips: usize, promote: bool, deadline_percent: u32) -> std::io::Result<Self> {
+    /// `workers` threads for `strips` cells, the strips' deadline resolved from
+    /// `deadline_override` and a callback of `frames` until [`StripPool::set_device_frames`] says
+    /// otherwise (control thread; allocates).
+    pub(crate) fn new(workers: usize, strips: usize, promote: bool, deadline_override: Option<u32>, frames: u32) -> std::io::Result<Self> {
         let cells = Arc::new(Cells((0..strips).map(|_| Mutex::new(Job::new())).collect()));
         let counters = Arc::new(Counters::default());
         let runner = Arc::new(Runner { cells: Arc::clone(&cells), counters: Arc::clone(&counters) });
         let set = WorkerSet::new(Config { workers, strips, promote }, runner)?;
         counters.workers.store(set.workers() as u64, Ordering::Relaxed);
-        counters.deadline_percent.store(u64::from(deadline_percent), Ordering::Relaxed);
-        Ok(StripPool {
+        counters.deadline_overridden.store(deadline_override.is_some(), Ordering::Relaxed);
+        let mut pool = StripPool {
             set,
             cells,
             defer: DeferSet::new(strips, RING),
@@ -367,17 +377,37 @@ impl StripPool {
             generation: 0,
             last_overruns: 0,
             chain: vec![None; strips].into_boxed_slice(),
-            deadline_percent,
-        })
+            deadline_percent: 0,
+            deadline_override,
+            device_frames: 0,
+        };
+        pool.set_device_frames(frames);
+        Ok(pool)
     }
 
     pub(crate) fn workers(&self) -> usize {
         self.set.workers()
     }
 
-    /// The strips' deadline, percent of the block period.
+    /// The strips' deadline in effect, percent of the block period.
     pub(crate) fn deadline_percent(&self) -> u32 {
         self.deadline_percent
+    }
+
+    /// The device's callback is `frames` long (#172): resolves the share again when that differs
+    /// from the length it was last resolved for (a device opened at another buffer size than the
+    /// engine's largest block, a driver that changed its buffer). The override, read before
+    /// construction, still wins. A compare and, on a change, three relaxed stores: allocation-free,
+    /// no environment or clock read; any thread that owns the engine, the audio thread included.
+    /// Zero frames is ignored.
+    pub(crate) fn set_device_frames(&mut self, frames: u32) {
+        if frames == 0 || frames == self.device_frames {
+            return;
+        }
+        self.device_frames = frames;
+        self.deadline_percent = resolve_strip_deadline_percent(self.deadline_override, frames);
+        self.counters.deadline_percent.store(u64::from(self.deadline_percent), Ordering::Relaxed);
+        self.counters.deadline_frames.store(u64::from(frames), Ordering::Relaxed);
     }
 
     /// The strips' budget of one block of `frames` at `rate`, measured from the block's start:

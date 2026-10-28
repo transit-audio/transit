@@ -48,6 +48,9 @@ impl StripPool {
     pub(crate) fn deadline_percent(&self) -> u32 {
         match *self {}
     }
+    pub(crate) fn set_device_frames(&mut self, _frames: u32) {
+        match *self {}
+    }
     pub(crate) fn seed_costs(&mut self, _cost: std::time::Duration) {
         match *self {}
     }

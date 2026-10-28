@@ -744,13 +744,25 @@ impl MixEngine {
         #[cfg(not(target_arch = "wasm32"))]
         if self.pool.is_none() && !on_audio_thread() {
             let promote = !render_pool::env_flag(RENDER_NO_PRIORITY_ENV, "SOUNDCRAFT_RENDER_NO_PRIORITY");
-            let percent = render_pool::strip_deadline_percent();
+            // The environment is read here, once per process (never on the audio thread). The
+            // device's callback length is not known yet: the engine's largest block stands in
+            // until playback hands the device's (`set_device_frames`, #172).
+            let overridden = render_pool::strip_deadline_override();
+            let frames = u32::try_from(self.max_block).unwrap_or(u32::MAX);
             {
-                match strip_pool::StripPool::new(workers.min(MAX_RENDER_WORKERS), strips.clamp(1, strip_pool::POOL_STRIPS), promote, percent) {
+                match strip_pool::StripPool::new(
+                    workers.min(MAX_RENDER_WORKERS),
+                    strips.clamp(1, strip_pool::POOL_STRIPS),
+                    promote,
+                    overridden,
+                    frames,
+                ) {
                     Ok(pool) => {
                         log::info!(
-                            "mix: {workers} render workers ({}); strip deadline {percent}% of the period",
-                            if promote { "promoted" } else { "default priority" }
+                            "mix: {workers} render workers ({}); strip deadline {}{}",
+                            if promote { "promoted" } else { "default priority" },
+                            strip_deadline_text(u64::from(pool.deadline_percent()), u64::from(frames), overridden.is_some()),
+                            if overridden.is_some() { "" } else { ", until the device's buffer size is known" }
                         );
                         self.pool = Some(pool);
                     }
@@ -779,13 +791,29 @@ impl MixEngine {
         self.pool.as_ref().map_or(0, strip_pool::StripPool::workers)
     }
 
-    /// The strips' deadline, percent of the block period: the share the render workers were
-    /// started with ([`STRIP_DEADLINE_PERCENT_ENV`], #172), [`DEFAULT_STRIP_DEADLINE_PERCENT`]
-    /// without them (it then decides nothing). Playback computes [`MixEngine::set_block_deadline`]
-    /// with it. Allocation-free; any thread.
+    /// The strips' deadline, percent of the block period (#172): the render workers' share, the
+    /// [`STRIP_DEADLINE_PERCENT_ENV`] override they were started with, else
+    /// [`default_strip_deadline_percent`] of the device's callback length
+    /// ([`MixEngine::set_device_frames`]; the engine's largest block before it). Without workers,
+    /// the rule at the largest block (it then decides nothing). Playback computes
+    /// [`MixEngine::set_block_deadline`] with it. Allocation-free; any thread.
     #[must_use]
     pub fn strip_deadline_percent(&self) -> u32 {
-        self.pool.as_ref().map_or(DEFAULT_STRIP_DEADLINE_PERCENT, strip_pool::StripPool::deadline_percent)
+        self.pool.as_ref().map_or_else(
+            || default_strip_deadline_percent(u32::try_from(self.max_block).unwrap_or(u32::MAX)),
+            strip_pool::StripPool::deadline_percent,
+        )
+    }
+
+    /// Audio thread (or any owner), before a block: the device's callback is `frames` long. The
+    /// render workers' share follows it ([`default_strip_deadline_percent`]: 150% at 64 frames
+    /// and below, 100% above) unless [`STRIP_DEADLINE_PERCENT_ENV`] overrode it; a new length
+    /// (another buffer size) resolves the share again, the same length costs one compare.
+    /// Allocation-free, no environment or clock read. Nothing without workers; zero is ignored.
+    pub fn set_device_frames(&mut self, frames: u32) {
+        if let Some(pool) = self.pool.as_mut() {
+            pool.set_device_frames(frames);
+        }
     }
 
     /// What each render worker's promotion achieved, by worker (`None` before it ran, or with

@@ -146,12 +146,13 @@ pub use plan::{
 };
 #[cfg(test)]
 use render_pool::flag_value;
-pub use render_pool::{
-    DEFAULT_STRIP_DEADLINE_PERCENT, MAX_RENDER_WORKERS, POOL_HISTOGRAM_BUCKETS, POOL_HISTOGRAM_LIMITS_NS, RENDER_NO_PRIORITY_ENV, RENDER_POOL_ENV,
-    STRIP_DEADLINE_PERCENT_ENV, STRIP_DEADLINE_PERCENT_RANGE, StripFaults, StripFigure, TOP_STRIPS, mark_audio_thread, on_audio_thread,
-    strip_deadline_share, unmark_audio_thread,
-};
 use render_pool::{FORCE_SERIAL, PARALLEL_STRIPS, guarded, init_render_switch, run_strips};
+pub use render_pool::{
+    MAX_RENDER_WORKERS, POOL_HISTOGRAM_BUCKETS, POOL_HISTOGRAM_LIMITS_NS, RENDER_NO_PRIORITY_ENV, RENDER_POOL_ENV, SMALL_BUFFER_FRAMES,
+    STRIP_DEADLINE_PERCENT_ENV, STRIP_DEADLINE_PERCENT_RANGE, StripFaults, StripFigure, TOP_STRIPS, default_strip_deadline_percent,
+    mark_audio_thread, on_audio_thread, resolve_strip_deadline_percent, strip_deadline_override, strip_deadline_share, strip_deadline_text,
+    unmark_audio_thread,
+};
 use routing::{
     MixOut, PdcWalk, is_aux, live, log_loops, path_need, pdc_visit, processing_order, receives_solo, route_into, strip_channels, strip_format,
 };

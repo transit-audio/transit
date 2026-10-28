@@ -67,19 +67,53 @@ pub const RENDER_POOL_ENV: &str = "TRANSIT_RENDER_POOL";
 pub const RENDER_NO_PRIORITY_ENV: &str = "TRANSIT_RENDER_NO_PRIORITY";
 
 /// Environment variable (#172): the strips' deadline as a whole-number percentage of the block
-/// period, from 25 to 300; unset, [`DEFAULT_STRIP_DEADLINE_PERCENT`]. A measurement knob for the
-/// render workers (ADR 0029 "Deadline"): it moves the one deadline `finish` waits to and the
-/// inline admission measures against. Read once per process, when the first engine starts its
-/// render workers; anything else is logged once and ignored. No effect with the workers off.
+/// period, from 25 to 300. A measurement knob for the render workers (ADR 0029 "Deadline"): set,
+/// it overrides [`default_strip_deadline_percent`] at every buffer size; it moves the one deadline
+/// `finish` waits to and the inline admission measures against. Read once per process, when the
+/// first engine starts its render workers; anything else is logged once and ignored. No effect
+/// with the workers off.
 pub const STRIP_DEADLINE_PERCENT_ENV: &str = "TRANSIT_STRIP_DEADLINE_PERCENT";
 
-/// The strips' deadline share of the period unless [`STRIP_DEADLINE_PERCENT_ENV`] sets another:
-/// three quarters, which leaves a quarter for the auxes, the masters, the output copy and the
-/// driver.
-pub const DEFAULT_STRIP_DEADLINE_PERCENT: u32 = 75;
+/// The largest device callback, in frames, whose strips get the small-buffer share
+/// ([`default_strip_deadline_percent`]): 64 frames and below, 150%; 65 and above, 100%.
+pub const SMALL_BUFFER_FRAMES: u32 = 64;
 
 /// The shares [`STRIP_DEADLINE_PERCENT_ENV`] accepts, percent of the period.
 pub const STRIP_DEADLINE_PERCENT_RANGE: std::ops::RangeInclusive<u32> = 25..=300;
+
+/// The strips' deadline share of the period for a device whose callback is `frames` long, unless
+/// [`STRIP_DEADLINE_PERCENT_ENV`] sets another (#172, decided 2026-10-28 on the Scarlett): 150 at
+/// [`SMALL_BUFFER_FRAMES`] (64) and below, 100 above it (so 65 frames already gets 100). At small
+/// buffers a callback that runs late inside the driver's slack is the trade the hardware absorbs,
+/// and a dropped strip is a guaranteed hole; at larger buffers holes are rare and the full period
+/// is the principled line. Pure; allocation-free.
+#[must_use]
+pub const fn default_strip_deadline_percent(frames: u32) -> u32 {
+    if frames <= SMALL_BUFFER_FRAMES { 150 } else { 100 }
+}
+
+/// The share in effect: `overridden` (the [`STRIP_DEADLINE_PERCENT_ENV`] value, when set and
+/// valid) wins, else [`default_strip_deadline_percent`] of the device's callback `frames`. Pure;
+/// allocation-free.
+#[must_use]
+pub const fn resolve_strip_deadline_percent(overridden: Option<u32>, frames: u32) -> u32 {
+    match overridden {
+        Some(p) => p,
+        None => default_strip_deadline_percent(frames),
+    }
+}
+
+/// How the diagnostics report and the log say the share in effect: `150% of the period (default
+/// for 64 frames)`, or `150% of the period (TRANSIT_STRIP_DEADLINE_PERCENT)` when the variable set
+/// it. One wording for the report row and the log lines. Allocates.
+#[must_use]
+pub fn strip_deadline_text(percent: u64, frames: u64, overridden: bool) -> String {
+    if overridden {
+        format!("{percent}% of the period ({STRIP_DEADLINE_PERCENT_ENV})")
+    } else {
+        format!("{percent}% of the period (default for {frames} frames)")
+    }
+}
 
 /// The strips' share of `span` (a block period, or several of one callback) at `percent`: the
 /// one rule both the engine's own deadline and playback's callback deadline use. Allocation-free.
@@ -88,32 +122,41 @@ pub fn strip_deadline_share(span: std::time::Duration, percent: u32) -> std::tim
     span.saturating_mul(percent) / 100
 }
 
-/// The share a [`STRIP_DEADLINE_PERCENT_ENV`] value sets: unset is the default, a whole number in
-/// [`STRIP_DEADLINE_PERCENT_RANGE`] is taken, anything else is `Err` (the caller keeps the
-/// default).
+/// The override a [`STRIP_DEADLINE_PERCENT_ENV`] value sets: unset is `Ok(None)` (the rule
+/// decides), a whole number in [`STRIP_DEADLINE_PERCENT_RANGE`] is taken, anything else is `Err`
+/// (the caller keeps the rule).
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn deadline_percent_value(value: Option<&str>) -> Result<u32, ()> {
-    let Some(v) = value else { return Ok(DEFAULT_STRIP_DEADLINE_PERCENT) };
-    v.trim().parse::<u32>().ok().filter(|p| STRIP_DEADLINE_PERCENT_RANGE.contains(p)).ok_or(())
+pub(crate) fn deadline_percent_value(value: Option<&str>) -> Result<Option<u32>, ()> {
+    let Some(v) = value else { return Ok(None) };
+    v.trim().parse::<u32>().ok().filter(|p| STRIP_DEADLINE_PERCENT_RANGE.contains(p)).map(Some).ok_or(())
 }
 
 /// Reads [`STRIP_DEADLINE_PERCENT_ENV`] once per process (never on the audio thread: the engine
-/// calls it where it starts its render workers); a rejected value is logged once.
+/// calls it where it starts its render workers, playback where it opens a device); a rejected
+/// value is logged once. `None`: the share follows the device's buffer size.
 #[cfg(not(target_arch = "wasm32"))]
-pub(crate) fn strip_deadline_percent() -> u32 {
-    static PERCENT: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+#[must_use]
+pub fn strip_deadline_override() -> Option<u32> {
+    static PERCENT: std::sync::OnceLock<Option<u32>> = std::sync::OnceLock::new();
     *PERCENT.get_or_init(|| {
         let value = std::env::var(STRIP_DEADLINE_PERCENT_ENV).ok();
         deadline_percent_value(value.as_deref()).unwrap_or_else(|()| {
             log::warn!(
-                "mix: {STRIP_DEADLINE_PERCENT_ENV}={:?} ignored (a whole number from {} to {}); the strips' deadline stays {DEFAULT_STRIP_DEADLINE_PERCENT}% of the period",
+                "mix: {STRIP_DEADLINE_PERCENT_ENV}={:?} ignored (a whole number from {} to {}); the strips' deadline follows the device's buffer size",
                 value.unwrap_or_default(),
                 STRIP_DEADLINE_PERCENT_RANGE.start(),
                 STRIP_DEADLINE_PERCENT_RANGE.end()
             );
-            DEFAULT_STRIP_DEADLINE_PERCENT
+            None
         })
     })
+}
+
+/// No environment on wasm32 (and no render workers): the rule always decides.
+#[cfg(target_arch = "wasm32")]
+#[must_use]
+pub fn strip_deadline_override() -> Option<u32> {
+    None
 }
 
 /// Audio-thread strips render serially when set ([`MixEngine::force_serial`]). On by default;
@@ -218,8 +261,15 @@ pub(crate) fn release_instrument(st: &mut Strip) {
 pub struct StripFaults {
     /// Render worker threads (0: no pool, the strips render serially).
     pub workers: u64,
-    /// The strips' deadline, percent of the block period ([`STRIP_DEADLINE_PERCENT_ENV`], #172).
+    /// The strips' deadline in effect, percent of the block period (#172): the
+    /// [`STRIP_DEADLINE_PERCENT_ENV`] override, else [`default_strip_deadline_percent`] of
+    /// [`StripFaults::deadline_frames`].
     pub deadline_percent: u64,
+    /// The device callback length, frames, the default share was taken from (the engine's largest
+    /// block until the device's first callback reaches the engine).
+    pub deadline_frames: u64,
+    /// The share came from [`STRIP_DEADLINE_PERCENT_ENV`], not the rule.
+    pub deadline_overridden: bool,
     /// Blocks the pool rendered.
     pub blocks: u64,
     /// Strip overruns because a worker still held the strip from an earlier block: not rendered
@@ -330,15 +380,14 @@ mod deadline_percent_tests {
     use super::*;
 
     #[test]
-    fn unset_is_three_quarters_of_the_period() {
-        assert_eq!(deadline_percent_value(None), Ok(75));
-        assert_eq!(DEFAULT_STRIP_DEADLINE_PERCENT, 75);
+    fn unset_is_no_override() {
+        assert_eq!(deadline_percent_value(None), Ok(None));
     }
 
     #[test]
     fn a_whole_number_from_25_to_300_is_taken() {
         for (v, p) in [("25", 25), ("75", 75), ("100", 100), (" 150 ", 150), ("300", 300)] {
-            assert_eq!(deadline_percent_value(Some(v)), Ok(p), "{v:?}");
+            assert_eq!(deadline_percent_value(Some(v)), Ok(Some(p)), "{v:?}");
         }
     }
 
@@ -347,6 +396,31 @@ mod deadline_percent_tests {
         for v in ["24", "0", "301", "1000", "-75", "75%", "0.75", "1.5", "", "  ", "abc", "99999999999"] {
             assert_eq!(deadline_percent_value(Some(v)), Err(()), "{v:?}");
         }
+    }
+
+    /// #172: 150% at 64 frames and below, 100% from 65 frames on.
+    #[test]
+    fn the_default_is_150_up_to_64_frames_and_100_above() {
+        for (frames, percent) in [(32, 150), (64, 150), (65, 100), (128, 100), (256, 100)] {
+            assert_eq!(default_strip_deadline_percent(frames), percent, "{frames} frames");
+        }
+        assert_eq!(SMALL_BUFFER_FRAMES, 64);
+    }
+
+    #[test]
+    fn the_override_wins_over_the_rule_at_every_size() {
+        assert_eq!(resolve_strip_deadline_percent(None, 64), 150);
+        assert_eq!(resolve_strip_deadline_percent(None, 128), 100);
+        for frames in [32, 64, 128, 512] {
+            assert_eq!(resolve_strip_deadline_percent(Some(75), frames), 75, "{frames} frames");
+        }
+    }
+
+    #[test]
+    fn the_share_says_where_it_came_from() {
+        assert_eq!(strip_deadline_text(150, 64, false), "150% of the period (default for 64 frames)");
+        assert_eq!(strip_deadline_text(100, 128, false), "100% of the period (default for 128 frames)");
+        assert_eq!(strip_deadline_text(75, 64, true), "75% of the period (TRANSIT_STRIP_DEADLINE_PERCENT)");
     }
 
     #[test]
