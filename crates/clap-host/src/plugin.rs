@@ -404,6 +404,9 @@ pub struct ClapPlugin {
     reset_pending: bool,
     /// Silence with fades for blocks the plug-in is not called for.
     gate: Gate,
+    /// Timed parameter points refused by a full queue (the value went onto the parameter's
+    /// latest queued point, so the last point wins).
+    params_dropped: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -537,7 +540,13 @@ impl ClapPlugin {
             tail: 0,
             reset_pending: false,
             gate: Gate::new(),
+            params_dropped: 0,
         }
+    }
+
+    /// Timed parameter points that missed their offset so far (see `params_dropped`).
+    pub fn param_points_dropped(&self) -> u64 {
+        self.params_dropped
     }
 
     /// Re-reads every parameter value from the plugin (after a state load).
@@ -838,9 +847,25 @@ impl Plugin for ClapPlugin {
     }
 
     /// One `Event::Param` per offset: points of one parameter coalesce only at an equal time.
+    /// With the queue full, the value replaces the parameter's latest queued point (the last
+    /// point wins) and the miss is counted.
     fn set_param_at(&mut self, offset: u32, id: &str, value: f32) -> bool {
         let Some((cid, v)) = self.host_value(id, value) else { return false };
-        self.param_at(offset, cid, v)
+        if self.param_at(offset, cid, v) {
+            return true;
+        }
+        self.params_dropped = self.params_dropped.saturating_add(1);
+        match self.queue.iter_mut().rev().find(|e| matches!(e, Event::Param { id, .. } if *id == cid)) {
+            Some(Event::Param { value: last, .. }) => {
+                *last = v;
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn sample_accurate_params(&self) -> bool {
+        true
     }
 
     fn param(&self, id: &str) -> Option<f32> {

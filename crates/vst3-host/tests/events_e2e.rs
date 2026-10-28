@@ -43,6 +43,21 @@ fn two_parameter_edges_per_block_reach_the_plug_in_in_order() {
     assert!(points(100).is_empty(), "channel 1's mapping is another parameter");
 }
 
+/// #117: past the timed points a block holds, a point still lands: the parameter's latest queued
+/// point takes its value (the last point wins).
+#[test]
+fn a_timed_point_past_the_cap_overwrites_the_latest() {
+    let mut p = synth(1024);
+    assert!(p.set_param_at(1, "5", 0.25));
+    for _ in 1..1024 {
+        assert!(p.set_param_at(2, "5", 0.5));
+    }
+    assert!(p.set_param_at(40, "5", 0.75), "absorbed by the latest point");
+    let r = records(&mut p, 1024);
+    let points: Vec<_> = r.iter().filter(|x| x.0 == 4 && x.2 == 5).map(|x| (x.1, x.3)).collect();
+    assert_eq!(points, vec![(1, 250_000), (2, 750_000)]);
+}
+
 /// A value the host sets (the mixer applying the session, a mapped controller, automation) reaches
 /// the processor in the next block with the parameter's own id, normalized, and the controller
 /// (what the plug-in's editor shows) is told on the main thread, as VST3 has hosts do.

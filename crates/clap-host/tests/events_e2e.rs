@@ -56,6 +56,23 @@ fn set_param_at_sends_one_point_per_offset() {
     assert_eq!(r, vec![(4, 5, 5, 200_000), (4, 40, 5, 800_000)]);
 }
 
+/// #117: a timed point the full queue refuses still lands: the parameter's latest queued point
+/// takes its value (the last point wins).
+#[test]
+fn a_timed_point_past_a_full_queue_overwrites_the_latest() {
+    let mut p = plugin(1024);
+    assert!(p.set_param_at(1, "5", 0.25));
+    let n = NoteId::NONE;
+    let mut i = 0u32;
+    while p.event(2, &ev((i % 16) as u8, -1, Message::PolyPressure { key: (i % 128) as u8, value: 1, id: n })) {
+        i += 1;
+    }
+    assert_eq!(i, 1024 - 257 - 1, "non-releases fill the queue up to the release reserve");
+    assert!(p.set_param_at(40, "5", 0.75), "absorbed by the queued point");
+    let r = records(&mut p, 1024);
+    assert_eq!(r.iter().filter(|x| x.0 == 4).copied().collect::<Vec<_>>(), vec![(4, 1, 5, 750_000)]);
+}
+
 #[test]
 fn a_note_off_survives_an_overfull_queue() {
     let mut p = plugin(4096);

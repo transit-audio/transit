@@ -488,7 +488,8 @@ pub struct Vst3Plugin {
     points: Vec<ParamPoint>,
     /// The order points were set in this block (ties at one offset keep it).
     seq: u32,
-    /// Parameter points dropped because a block's slab ran out (the last per parameter is kept).
+    /// Parameter points that missed their offset: a block's slab ran out or the timed points were
+    /// full (either way the parameter's last value is kept).
     points_dropped: u64,
     /// Keys held per MIDI channel, for `all_notes_off` and `reset`.
     held: [[bool; 128]; MIDI_CHANNELS],
@@ -767,7 +768,7 @@ impl Vst3Plugin {
         true
     }
 
-    /// Parameter points dropped so far because a block's point slab ran out.
+    /// Parameter points that missed their offset so far (see `points_dropped`).
     pub fn param_points_dropped(&self) -> u64 {
         self.points_dropped
     }
@@ -977,10 +978,20 @@ impl Plugin for Vst3Plugin {
         if self.timed.len() < self.timed.capacity() {
             self.seq = self.seq.wrapping_add(1);
             self.timed.push(ParamPoint { time: offset, id: pid, class: 0, seq: self.seq, value: n, release: false });
+        } else if let Some(last) = self.timed.iter_mut().filter(|p| p.id == pid).max_by_key(|p| (p.time, p.seq)) {
+            // Out of timed points this block: the parameter's latest point takes the value (the
+            // last point wins).
+            last.value = n;
+            self.points_dropped = self.points_dropped.saturating_add(1);
         } else {
-            // Out of timed points this block: the value still arrives, at the block start.
+            // None of its own to take it: the value still arrives, at the block start.
             self.pending.set(i, n);
+            self.points_dropped = self.points_dropped.saturating_add(1);
         }
+        true
+    }
+
+    fn sample_accurate_params(&self) -> bool {
         true
     }
 
