@@ -3,7 +3,7 @@
 //! One allocation is made by [`Anchor::new`]. Callback entry and exit use one atomic
 //! read-modify-write each, with no allocation, locks, OS calls, or retry loops.
 //! This portable protocol is identical on all supported platforms, including the
-//! scheduling fallback and WASM; it needs no platform-specific OS implementation.
+//! scheduling fallback; it needs no platform-specific OS implementation.
 //!
 //! `T: Send` permits exclusive access on another thread; `T: Sync` is not needed.
 //! Main means the thread that creates the anchor, not an OS-verified UI thread.
