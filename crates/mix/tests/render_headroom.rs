@@ -6,6 +6,7 @@
 //! cargo test --release -p transit-mix --test render_headroom -- --ignored --nocapture
 //! TRANSIT_RENDER_NO_PRIORITY=1 cargo test --release -p transit-mix --test render_headroom -- --ignored --nocapture
 //! TRANSIT_BENCH_LOAD=external cargo test --release ...   # while something else loads the machine
+//! TRANSIT_STRIP_DEADLINE_PERCENT=150 cargo test --release ...   # the strips' deadline at 150% (#172)
 //! ```
 //!
 //! The fixture stands in for the reference project until one is declared (ADR 0012 G13): 16
@@ -18,6 +19,10 @@
 //! Load: `idle`; `spin`, one busy normal-priority thread per logical core (generated here); with
 //! `TRANSIT_BENCH_LOAD=external` the rows are taken under whatever load the caller runs
 //! alongside (for example a `cargo check --workspace`).
+//!
+//! The strips' deadline is the engine's: `TRANSIT_STRIP_DEADLINE_PERCENT` of the period (25 to
+//! 300, default 75), read once per process, so one run measures one share; each worker row prints
+//! the share its engine used (`-` for serial, which has no deadline).
 //!
 //! Per configuration: late blocks per 2000 (render time over the period), the render time's p50,
 //! p95, p99 and max, strip overruns by cause, inline renders, and the continuity instruments'
@@ -85,6 +90,11 @@ struct Row {
     faults: StripFaults,
     holes: u64,
     stuck: u64,
+}
+
+/// The strips' deadline share a row's engine used, percent of the period; `-` without workers.
+fn share(f: &StripFaults) -> String {
+    if f.workers == 0 { "-".into() } else { f.deadline_percent.to_string() }
 }
 
 fn cost() -> u64 {
@@ -187,9 +197,9 @@ fn serial_versus_render_workers() {
         cost()
     );
     println!(
-        "| frames | path | load | late /2000 | p50 µs | p95 µs | p99 µs | max µs | overruns busy/late/unstarted | inline | holes (blocks) | stuck |"
+        "| frames | path | load | deadline % | late /2000 | p50 µs | p95 µs | p99 µs | max µs | overruns busy/late/unstarted | inline | holes (blocks) | stuck |"
     );
-    println!("|---|---|---|---|---|---|---|---|---|---|---|---|");
+    println!("|---|---|---|---|---|---|---|---|---|---|---|---|---|");
     let loads: &[&'static str] = if external { &["external"] } else { &["idle", "spin"] };
     let mut rows = Vec::new();
     for &frames in &[64usize, 128] {
@@ -205,10 +215,11 @@ fn serial_versus_render_workers() {
     for r in &rows {
         let f = r.faults;
         println!(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {}/{}/{} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {}/{}/{} | {} | {} | {} |",
             r.frames,
             r.mode,
             r.load,
+            share(&f),
             r.late,
             r.p50.as_micros(),
             r.p95.as_micros(),
@@ -225,9 +236,9 @@ fn serial_versus_render_workers() {
     let buckets = |h: &[u64]| h.iter().map(u64::to_string).collect::<Vec<_>>().join("/");
     println!();
     println!(
-        "| frames | path | load | lateness \u{2264}50 \u{b5}s/100/200/500/1 ms/2 ms/more | wake \u{2264}50 \u{b5}s/100/200/500/1 ms/2 ms/more | top strips: track busy/late/unstarted |"
+        "| frames | path | load | deadline % | lateness \u{2264}50 \u{b5}s/100/200/500/1 ms/2 ms/more | wake \u{2264}50 \u{b5}s/100/200/500/1 ms/2 ms/more | top strips: track busy/late/unstarted |"
     );
-    println!("|---|---|---|---|---|---|");
+    println!("|---|---|---|---|---|---|---|");
     for r in rows.iter().filter(|r| r.mode != "serial") {
         let f = r.faults;
         let top: Vec<String> = f
@@ -238,10 +249,11 @@ fn serial_versus_render_workers() {
             .map(|s| format!("t{} {}/{}/{}", s.track, s.overruns_busy, s.overruns_late, s.overruns_unstarted))
             .collect();
         println!(
-            "| {} | {} | {} | {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} | {} |",
             r.frames,
             r.mode,
             r.load,
+            share(&f),
             buckets(&f.lateness),
             buckets(&f.wake),
             if top.is_empty() { "none".into() } else { top.join(", ") }
