@@ -716,6 +716,14 @@ impl WorkerSet {
         self.reset_history(strip);
     }
 
+    /// Publisher: zeroes the strip's diagnostic counts (overruns by cause, inline renders; see
+    /// [`figures::StripFigures`]), for a caller whose strip index now holds another track, so the
+    /// counts it reports under a name are that track's. Never touches the cost history, the
+    /// stamps or the histograms; no protocol decision reads the counts. Allocation-free.
+    pub fn reset_counts(&mut self, strip: usize) {
+        self.shared.figures.reset_counts(strip);
+    }
+
     /// Publisher: the strip now holds another processing chain (a plug-in loaded or replaced,
     /// another track's strip moved onto this index). Its cost history and its overrun bar are
     /// cleared, so it is not rendered inline until it has been rendered again (its first render

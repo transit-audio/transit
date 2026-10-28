@@ -202,3 +202,27 @@ fn the_per_strip_counts_add_up_to_the_totals() {
     assert!(set.shutdown(STALL).is_empty());
     assert_eq!(set.jobs().faults(), 0);
 }
+
+/// `reset_counts` zeroes a strip's counts and nothing else: not another strip's, not its cost
+/// history, not the histograms.
+#[test]
+fn reset_counts_zeroes_one_strips_counts_only() {
+    let fake = Fake::new(2, Duration::ZERO);
+    let mut set = set_of(&fake, 0);
+    set.set_cost_estimate(0, Duration::from_micros(7));
+    let f = set.figures();
+    for s in 0..2 {
+        for what in [Count::Busy, Count::Late, Count::Unstarted, Count::Inline] {
+            f.count(s, what);
+        }
+    }
+    f.retired_late(1, 1);
+    set.reset_counts(0);
+    let s0 = f.strip(0).unwrap();
+    assert_eq!((s0.overruns_busy, s0.overruns_late, s0.overruns_unstarted, s0.inline_renders), (0, 0, 0, 0));
+    assert_eq!((s0.cost_ns, s0.worst_ns), (7_000, 7_000), "the cost history is the chain's, not the name's");
+    assert_eq!(f.strip(1).unwrap().overruns(), 3, "another strip keeps its counts");
+    assert_eq!(f.lateness().iter().sum::<u64>(), 1, "the histograms are the set's");
+    set.reset_counts(9);
+    assert!(set.shutdown(STALL).is_empty());
+}

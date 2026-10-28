@@ -49,8 +49,11 @@ pub const fn past(end: u64, start: u64) -> u64 {
     end.saturating_sub(start)
 }
 
-/// A fixed histogram of durations, [`BUCKETS`] counters.
+/// A fixed histogram of durations, [`BUCKETS`] counters. Aligned to a cache line of its own, so
+/// the workers' `fetch_add` on the wake histogram never shares a line with the fields the
+/// callback reads (the origin, the strips' pointer), which would inflate the latency measured.
 #[derive(Debug, Default)]
+#[repr(align(64))]
 pub struct Histogram([AtomicU64; BUCKETS]);
 
 impl Histogram {
@@ -163,6 +166,16 @@ impl Figures {
             Count::Inline => &c.inline_renders,
         };
         cell.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Publisher: zeroes a strip's counts (busy, late, unstarted, inline), all written by the
+    /// publisher alone. The cost history and the stamps are left alone.
+    pub(crate) fn reset_counts(&self, strip: usize) {
+        if let Some(c) = self.strips.get(strip) {
+            for a in [&c.overruns_busy, &c.overruns_late, &c.overruns_unstarted, &c.inline_renders] {
+                a.store(0, Ordering::Relaxed);
+            }
+        }
     }
 
     /// Publisher, before the slot's Release publish: the block's publish stamp for `strip`.
