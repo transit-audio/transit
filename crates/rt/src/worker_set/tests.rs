@@ -610,7 +610,22 @@ fn no_block_operation_or_worker_loop_allocates_after_construction() {
             block(&mut set, g);
             std::hint::black_box((set.stats(), set.outcomes(), set.jobs().counts()));
         }
+        // The refusal and bar paths (#168): every history cleared, then blocks at a passed
+        // deadline with no wake. Each strip is refused for no history (counted) and taken back,
+        // or a sweeping worker has it (`Late`, then `Busy`: both bar the strip).
+        for s in 0..8 {
+            set.reset_history(s);
+        }
+        for g in 301..=304 {
+            assert!(set.begin_block(g));
+            for s in 0..8 {
+                let _ = set.publish(s).expect("publish");
+            }
+            let r = set.finish(Instant::now(), |_| panic!("no strip has a history"));
+            assert_eq!(r.inline, 0);
+        }
     });
+    wait_until("the workers", || set.jobs().counts().claimed == 0);
     fake.count_allocs.store(false, Ordering::Release);
     assert!(stats.is_zero(), "publisher: {stats:?}");
     assert!(set.stats().mixed > 0, "workers rendered some strips");
@@ -619,6 +634,24 @@ fn no_block_operation_or_worker_loop_allocates_after_construction() {
     assert!(q.is_empty());
     assert_eq!(stats.allocs, 0, "shutdown of an idle set: {stats:?}");
     assert_eq!(set.jobs().faults(), 0);
+
+    // The refusal path by construction (#168): no worker, no history, a passed deadline.
+    let mut none = set_of(&fake, 0);
+    let ((), stats) = measure(|| {
+        for g in 1..=4 {
+            for s in 0..8 {
+                none.reset_history(s);
+            }
+            assert!(none.begin_block(g));
+            for s in 0..8 {
+                assert_eq!(none.publish(s), Ok(Published::Published));
+            }
+            let r = none.finish(Instant::now(), |_| panic!("no strip has a history"));
+            assert_eq!((r.overrun, r.inline_refused), (8, 8));
+        }
+    });
+    assert!(stats.is_zero(), "refusals: {stats:?}");
+    assert_eq!(none.stats().inline_refused_no_history, 32);
 }
 
 /// Review F2: a runner panic in a late result (retired unread at a later `begin_block`) makes
