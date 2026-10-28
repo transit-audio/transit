@@ -31,10 +31,11 @@
 use super::events::EngineEvents;
 use super::render_pool::{release_instrument, reset_render_state};
 use super::*;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, TryLockError};
 use std::time::{Duration, Instant};
 use transit_rt::midi_defer::{DeferSet, DeferStats, Event};
+use transit_rt::worker_set::figures::Figures;
 use transit_rt::worker_set::{Config, Outcome, OverrunCause, Published, StripRunner, WorkerSet};
 
 /// The most strips a pool has cells for; strips past it render on the callback.
@@ -215,6 +216,10 @@ struct Counters {
 pub struct StripFaultsReader {
     counters: Arc<Counters>,
     defer: Arc<DeferStats>,
+    /// The worker set's per-strip figures and histograms (#169; only the figures, never a strip).
+    figures: Arc<Figures>,
+    /// Per strip index: the track it last published (the phase marker's strip index).
+    tracks: Arc<[AtomicU32]>,
 }
 
 impl StripFaultsReader {
@@ -244,6 +249,19 @@ impl StripFaultsReader {
             midi_deferred: d.deferred,
             midi_dropped: d.dropped,
             midi_silences: d.silences,
+            top_strips: self.figures.top_overruns::<TOP_STRIPS>().map(|t| {
+                t.map(|(i, f)| StripFigure {
+                    track: self.tracks.get(i).map_or(u32::MAX, |t| t.load(Ordering::Relaxed)),
+                    overruns_busy: f.overruns_busy,
+                    overruns_late: f.overruns_late,
+                    overruns_unstarted: f.overruns_unstarted,
+                    inline_renders: f.inline_renders,
+                    cost_ns: f.cost_ns,
+                    worst_ns: f.worst_ns,
+                })
+            }),
+            lateness: self.figures.lateness(),
+            wake: self.figures.wake(),
         }
     }
 }
@@ -292,6 +310,8 @@ pub(crate) struct StripPool {
     cells: Arc<Cells>,
     defer: DeferSet,
     counters: Arc<Counters>,
+    /// Per strip: the track index it last published, for [`StripFaultsReader`] (#169).
+    tracks: Arc<[AtomicU32]>,
     /// Per strip: in its cell (a worker may hold it).
     away: Box<[bool]>,
     /// Per strip: what to apply when it is back (`PENDING_*`).
@@ -331,6 +351,7 @@ impl StripPool {
             cells,
             defer: DeferSet::new(strips, RING),
             counters,
+            tracks: (0..strips).map(|i| AtomicU32::new(u32::try_from(i).unwrap_or(u32::MAX))).collect(),
             away: vec![false; strips].into_boxed_slice(),
             pending: vec![0; strips].into_boxed_slice(),
             binding: vec![None; strips].into_boxed_slice(),
@@ -364,7 +385,12 @@ impl StripPool {
     }
 
     pub(crate) fn reader(&self) -> StripFaultsReader {
-        StripFaultsReader { counters: Arc::clone(&self.counters), defer: Arc::clone(self.defer.stats()) }
+        StripFaultsReader {
+            counters: Arc::clone(&self.counters),
+            defer: Arc::clone(self.defer.stats()),
+            figures: self.set.figures(),
+            tracks: Arc::clone(&self.tracks),
+        }
     }
 
     /// Strip `i` is in its cell.
@@ -716,6 +742,11 @@ impl StripPool {
                 self.set.reset_history(i);
             }
             self.chain[i] = Some(id);
+            // The name the report gives this index's figures (#169): a store only on a change.
+            let track = u32::from(st.track);
+            if self.tracks[i].load(Ordering::Relaxed) != track {
+                self.tracks[i].store(track, Ordering::Relaxed);
+            }
             if self.send(i, st, b) {
                 if let Ok(Published::Published) = self.set.publish(i) {
                     published += 1;

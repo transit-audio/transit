@@ -213,6 +213,54 @@ pub struct StripFaults {
     /// Deferred-MIDI rings that overflowed past their release class: the strip got All Sound
     /// Off, All Notes Off and sustain off.
     pub midi_silences: u64,
+    /// The strips with the most overruns, most first (#169): at most [`TOP_STRIPS`], only strips
+    /// with an overrun, the rest `None`.
+    pub top_strips: [Option<StripFigure>; TOP_STRIPS],
+    /// Late results by how far past their block's deadline the render finished, by bucket
+    /// ([`POOL_HISTOGRAM_LIMITS_NS`], then the open last bucket).
+    pub lateness: [u64; POOL_HISTOGRAM_BUCKETS],
+    /// Worker wake latency, from a block's publish of a strip to a worker's claim of it, by
+    /// bucket ([`POOL_HISTOGRAM_LIMITS_NS`], then the open last bucket).
+    pub wake: [u64; POOL_HISTOGRAM_BUCKETS],
+}
+
+/// The most strips [`StripFaults::top_strips`] lists.
+pub const TOP_STRIPS: usize = 8;
+
+/// Upper limits of the buckets of [`StripFaults::lateness`] and [`StripFaults::wake`],
+/// nanoseconds: 50 µs, 100 µs, 200 µs, 500 µs, 1 ms, 2 ms.
+pub const POOL_HISTOGRAM_LIMITS_NS: [u64; 6] = transit_rt::worker_set::figures::LIMITS_NS;
+
+/// Buckets of [`StripFaults::lateness`] and [`StripFaults::wake`]: one per limit, then the open
+/// last one.
+pub const POOL_HISTOGRAM_BUCKETS: usize = transit_rt::worker_set::figures::BUCKETS;
+
+/// One strip's render worker figures (#169), cumulative for the strip index since the device
+/// opened, named by the track the index holds now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct StripFigure {
+    /// The track index, as the callback's phase marker names a strip.
+    pub track: u32,
+    /// Overruns because a worker still held the strip.
+    pub overruns_busy: u64,
+    /// Overruns because the strip's worker had not finished by the deadline.
+    pub overruns_late: u64,
+    /// Overruns because no thread had started the strip by the deadline.
+    pub overruns_unstarted: u64,
+    /// Inline renders by the audio thread.
+    pub inline_renders: u64,
+    /// The render cost estimate (an average), nanoseconds; 0 without a history.
+    pub cost_ns: u64,
+    /// The worst recent render cost (a decaying maximum), nanoseconds; 0 without a history.
+    pub worst_ns: u64,
+}
+
+impl StripFigure {
+    /// Overruns of every cause.
+    #[must_use]
+    pub const fn overruns(&self) -> u64 {
+        self.overruns_busy + self.overruns_late + self.overruns_unstarted
+    }
 }
 
 impl StripFaults {
