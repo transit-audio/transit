@@ -409,10 +409,15 @@ fn a_pedal_parked_while_away_is_lifted_after_the_strip_comes_home_between_blocks
 fn an_unstarted_strip_plays_its_overdue_notes_without_a_zero_length_one() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     MixEngine::force_serial(false);
-    let Some(mut rig) = rig(Duration::from_micros(1500)) else {
-        MixEngine::force_serial(true);
-        return;
-    };
+    // The outcome is forced by construction, not by scheduling: no worker at all, so a block
+    // whose deadline has already passed takes every published strip back unrendered (admission
+    // has no time left, and no thread can have claimed it): `Unstarted`, every strip, every round.
+    let mut rig = Rig::new(INSTRUMENTS, 0, FRAMES);
+    rig.mix.start_render_workers_with(64, 0);
+    // Every other block has all the time it needs (the callback renders every strip inline, however
+    // the machine is loaded), so only the forced blocks are unstarted.
+    let ample = Duration::from_secs(30);
+    rig.mix.set_strip_deadline(Some(ample));
     become_callback();
     for _ in 0..20 {
         rig.block();
@@ -423,14 +428,14 @@ fn an_unstarted_strip_plays_its_overdue_notes_without_a_zero_length_one() {
             assert!(rig.note_on(k, 5, key).accepted());
             assert!(rig.note_off(k, 9, key).accepted());
         }
-        // No time at all: every strip no worker took yet is taken back unrendered.
+        // No time at all: every strip is taken back unrendered.
         rig.mix.set_strip_deadline(Some(Duration::ZERO));
         rig.block();
-        rig.mix.set_strip_deadline(Some(Duration::from_micros(1500)));
+        rig.mix.set_strip_deadline(Some(ample));
         settle(&mut rig);
     }
     let f = rig.mix.strip_faults().unwrap().snapshot();
-    assert!(f.overruns_unstarted > 0, "some strips were unstarted: {f:?}");
+    assert_eq!(f.overruns_unstarted, 50 * INSTRUMENTS as u64, "every strip of every forced block was unstarted: {f:?}");
     for (k, s) in rig.shared.iter().enumerate() {
         let r = s.report();
         assert_eq!((r.stuck_notes, r.faults.zero_length, r.faults.unsorted), (0, 0, 0), "instrument {k}: {r:?}");

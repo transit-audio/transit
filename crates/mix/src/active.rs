@@ -725,15 +725,26 @@ impl MixEngine {
     /// render only while [`MixEngine::serial_forced`] is off, and stop at
     /// [`MixEngine::into_retired`]; never drop an engine with workers on the audio thread.
     pub fn start_render_workers(&mut self, strips: usize) -> usize {
+        let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
+        let workers = cores.saturating_sub(1).min(MAX_RENDER_WORKERS);
+        if workers == 0 {
+            return self.render_workers();
+        }
+        self.start_render_workers_with(strips, workers)
+    }
+
+    /// [`MixEngine::start_render_workers`] with exactly `workers` threads; 0 makes the pool path
+    /// with no worker at all, where the callback renders every strip inline within its deadline
+    /// (a test can then force an outcome by construction, never by scheduling). For tests.
+    #[doc(hidden)]
+    pub fn start_render_workers_with(&mut self, strips: usize, workers: usize) -> usize {
         #[cfg(target_arch = "wasm32")]
-        let _ = strips;
+        let _ = (strips, workers);
         #[cfg(not(target_arch = "wasm32"))]
         if self.pool.is_none() && !on_audio_thread() {
-            let cores = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-            let workers = cores.saturating_sub(1).min(MAX_RENDER_WORKERS);
             let promote = !render_pool::env_flag(RENDER_NO_PRIORITY_ENV, "SOUNDCRAFT_RENDER_NO_PRIORITY");
-            if workers > 0 {
-                match strip_pool::StripPool::new(workers, strips.clamp(1, strip_pool::POOL_STRIPS), promote) {
+            {
+                match strip_pool::StripPool::new(workers.min(MAX_RENDER_WORKERS), strips.clamp(1, strip_pool::POOL_STRIPS), promote) {
                     Ok(pool) => {
                         log::info!("mix: {workers} render workers ({})", if promote { "promoted" } else { "default priority" });
                         self.pool = Some(pool);
