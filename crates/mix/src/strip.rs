@@ -99,7 +99,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                 // instance and the rendered audio matches the plugin's defaults — e.g. a saved
                 // `level = -12 dB` sounds the same as `level = -6 dB`.
                 if let Some(ins) = &t.instrument {
-                    apply_params(inst, ins, t, INSTRUMENT_SLOT, pos);
+                    apply_params(inst, ins, t, INSTRUMENT_SLOT, pos, frames);
                 }
                 inst.plugin.set_transport(transport);
                 if let Some(e) = inst.events.as_deref_mut() {
@@ -181,7 +181,7 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
         if !ins.active || ins.bypass || slot.failed {
             continue;
         }
-        apply_params(slot, ins, t, i, pos);
+        apply_params(slot, ins, t, i, pos, frames);
         // An insert with a key detects on it when the plan made one for the slot (else on its own input).
         let key = ins.key.and_then(|_| keys.get(t.id, i));
         // A key that arrives late holds the strip's signal back to meet it (`KeyBank::align`).
@@ -278,7 +278,7 @@ pub(crate) fn process_master(
             && !ins.bypass
             && !slot.failed
         {
-            apply_params(slot, ins, t, i, pos);
+            apply_params(slot, ins, t, i, pos, frames);
             if run_insert(slot, &mut strip.buf, None, frames, transport, no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
                 strip.failures.record(i);
             } else if let Some(tap) = &slot.tap {
@@ -403,7 +403,8 @@ pub(crate) fn note_insert_latency(t: &Track, strip: &mut Strip, pos: Samples, du
         if !ins.active || ins.bypass || slot.failed {
             continue;
         }
-        apply_params(slot, ins, t, i, pos);
+        // Block-start values only: processing sends the breakpoints inside the block.
+        apply_params(slot, ins, t, i, pos, 0);
         // The delay `KeyBank::align` gave the signal before a keyed insert (0 without one).
         if ins.key.is_some()
             && let Some(k) = strip.key_in.iter().find(|k| usize::from(k.slot) == i)

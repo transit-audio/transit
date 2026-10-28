@@ -1,28 +1,55 @@
 use super::*;
 
-pub(crate) fn apply_params(slot: &mut PluginSlot, ins: &transit_model::Insert, t: &Track, i: usize, pos: Samples) {
+/// Sends slot `i`'s parameters for the block of `frames` frames at `pos`: each automated one at
+/// its curve's value at the block start, then (#117) each breakpoint of its lane inside the block
+/// at its sample offset, to plug-ins whose [`Plugin::sample_accurate_params`] says they take
+/// offsets (the VST3 and CLAP hosts). `frames` 0 sends the block-start values only: the latency
+/// passes run before the block is processed, and processing sends the breakpoints once.
+pub(crate) fn apply_params(slot: &mut PluginSlot, ins: &transit_model::Insert, t: &Track, i: usize, pos: Samples, frames: usize) {
     // Automation lanes address insert slots; the instrument (`INSTRUMENT_SLOT`) has its own lane
     // slot, so it never picks up slot A's lanes.
     let slot_u8 = if i == INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(i).unwrap_or(u8::MAX) };
     if slot_u8 == u8::MAX {
-        return apply_values(slot, ins, |_, v| v);
+        return apply_values(slot, ins, pos, |_, v| v, |_| &[]);
     }
     let automated = t.mixer.automation_mode.reads()
         && t.automation.iter().any(|l| matches!(&l.param, AutoParam::Plugin { slot, .. } if *slot == slot_u8) && !l.points.is_empty());
-    apply_values(slot, ins, |k, val| {
-        if automated
-            && let Some(l) = t.automation.iter().find(|l| matches!(&l.param, AutoParam::Plugin { slot, param } if *slot == slot_u8 && param == k))
-            && !l.points.is_empty()
-        {
-            return l.value_at(pos, val);
-        }
-        val
-    });
+    let lane = |k: &str| {
+        t.automation
+            .iter()
+            .filter(|_| automated)
+            .find(|l| matches!(&l.param, AutoParam::Plugin { slot, param } if *slot == slot_u8 && param == k))
+            .filter(|l| !l.points.is_empty())
+    };
+    let timed = frames > 0 && slot.plugin.sample_accurate_params();
+    let end = pos.saturating_add(i64::try_from(frames).unwrap_or(i64::MAX));
+    apply_values(
+        slot,
+        ins,
+        pos,
+        |k, val| lane(k).map_or(val, |l| l.value_at(pos, val)),
+        |k| match lane(k) {
+            // The breakpoints strictly inside the block: one at its start is the start value.
+            Some(l) if timed => {
+                let from = l.points.partition_point(|p| p.at <= pos);
+                let to = l.points.partition_point(|p| p.at < end);
+                l.points.get(from..to.max(from)).unwrap_or_default()
+            }
+            _ => &[],
+        },
+    );
 }
 
 /// Sends each stored param (as mapped by `value`) to the plugin when it changed since last time,
-/// and then marks the slot [`woken`](PluginSlot::woken).
-fn apply_values(slot: &mut PluginSlot, ins: &transit_model::Insert, value: impl Fn(&str, f32) -> f32) {
+/// then each of its `points` (breakpoints inside the block at `pos`) at its offset, and then marks
+/// the slot [`woken`](PluginSlot::woken).
+fn apply_values<'a>(
+    slot: &mut PluginSlot,
+    ins: &transit_model::Insert,
+    pos: Samples,
+    value: impl Fn(&str, f32) -> f32,
+    points: impl Fn(&str) -> &'a [transit_model::AutomationPoint],
+) {
     // First pass over a hosted plugin: it has just loaded its own settings, so a stored value equal to
     // the default it reports is not a choice and is left alone. Older sessions store every parameter
     // at that default, often 0, and pushing them over a restored plugin silenced Rhapsody (volume and
@@ -36,6 +63,14 @@ fn apply_values(slot: &mut PluginSlot, ins: &transit_model::Insert, value: impl 
                 slot.plugin.set_param(k, val);
             }
             *last = val;
+            slot.woken = true;
+        }
+        // Allocation-free: the lane's own points, each one call; the host queues are bounded
+        // (past them the last point wins and the host counts the miss).
+        for p in points(k) {
+            let offset = u32::try_from(p.at.saturating_sub(pos)).unwrap_or(u32::MAX);
+            slot.plugin.set_param_at(offset, k, p.value);
+            *last = p.value;
             slot.woken = true;
         }
     }
