@@ -381,7 +381,8 @@ fn monitor_counts_clock_instead_of_listing_it_and_notes_realtime_and_sysex() {
     // Eleven pulses stamped 20 ms apart (125 BPM at 24 ppqn), Start, Active Sensing, a SysEx and
     // Stop. The stamps are injected, never paced with sleeps, so a slow runner cannot skew them. They
     // are on the native player's host origin (audio-backend's), not midi-io's own default origin:
-    // the two are fixed at separate first uses and can differ by seconds in a test process. The
+    // the two are fixed at separate first uses and can differ by seconds in a test process. Active
+    // Sensing is stamped the same way (the ring records a filtered FE's own arrival, #170). The
     // readout is taken at the last stamp, so the freshness check never reads the real clock.
     assert!(backend.deliver(0, &[0xFA]));
     let base = HostOrigin::default().now_ns().unwrap();
@@ -389,12 +390,18 @@ fn monitor_counts_clock_instead_of_listing_it_and_notes_realtime_and_sysex() {
     for n in 0..11 {
         assert!(backend.deliver_at(n, base + n * 20_000_000, &[0xF8]));
     }
-    assert!(backend.deliver(0, &[0xFE]));
+    assert!(backend.deliver_at(0, read_at, &[0xFE]));
     assert!(backend.deliver(0, &[0xF0, 1, 2, 3, 0xF7]));
     assert!(backend.deliver(0, &[0xFC]));
-    // The SysEx note is raised after the batch's messages, so wait for both ends.
-    let (events, report) =
-        monitored_at(&mut f, read_at, |events, _| events.iter().any(|e| e.status == 0xFC) && events.iter().any(|e| e.status == 0xF0));
+    // The SysEx note is raised after the batch's messages, so wait for both ends. The worker reads
+    // the filtered-sensing stamp once per step, before it drains the ring, so a step can show Stop
+    // and the SysEx while the FE delivered ahead of them is published only in the next step: wait
+    // for sensing too rather than assume it rode along (E59).
+    let (events, report) = monitored_at(&mut f, read_at, |events, report| {
+        events.iter().any(|e| e.status == 0xFC)
+            && events.iter().any(|e| e.status == 0xF0)
+            && report.ports.iter().any(|p| p.name == "Transport keys" && p.sensing)
+    });
     let status: Vec<u8> = events.iter().map(|e| e.status).collect();
     assert!(!status.contains(&0xF8) && !status.contains(&0xFE), "{status:x?}");
     assert!(status.contains(&0xFA));
