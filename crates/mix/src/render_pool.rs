@@ -236,7 +236,9 @@ pub const POOL_HISTOGRAM_LIMITS_NS: [u64; 6] = transit_rt::worker_set::figures::
 pub const POOL_HISTOGRAM_BUCKETS: usize = transit_rt::worker_set::figures::BUCKETS;
 
 /// One strip's render worker figures (#169), cumulative for the strip index since the device
-/// opened, named by the track the index holds now.
+/// opened, named by the track the index holds now. The counts restart from zero when another
+/// track's strip takes the index (the cost figures follow the processing chain, as admission
+/// does).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StripFigure {
     /// The track index, as the callback's phase marker names a strip.

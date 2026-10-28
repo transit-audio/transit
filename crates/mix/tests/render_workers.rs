@@ -115,11 +115,12 @@ fn continuity_through_a_real_worker_set_with_stalls_and_live_midi() {
     assert_eq!(f.conflicts, 0, "no refused cell borrow, no result of another block, no refused publisher call");
     assert!(f.overruns_late > 0 && f.overruns_busy > 0, "the stalls overran: {f:?}");
     // #169: with fewer strips than the report lists, the per-strip figures attribute every overrun,
-    // each to an instrument track; a late result has a lateness once it is retired.
+    // each to an instrument track; every late result was retired (every block finished, then
+    // settled), so each `Late` overrun has exactly one lateness.
     let listed: u64 = f.top_strips.iter().flatten().map(transit_mix::StripFigure::overruns).sum();
     assert_eq!(listed, f.overruns(), "every overrun has its strip: {:?}", f.top_strips);
     assert!(f.top_strips.iter().flatten().all(|s| (s.track as usize) < INSTRUMENTS), "named by track index: {:?}", f.top_strips);
-    assert!(f.lateness.iter().sum::<u64>() <= f.late_results, "a lateness only for a retired late result: {f:?}");
+    assert_eq!(f.lateness.iter().sum::<u64>(), f.overruns_late, "one lateness per late overrun: {f:?}");
     assert!(f.midi_deferred > 0, "live MIDI went through the ring while a worker held a strip: {f:?}");
     assert!(on_worker > 0, "the workers rendered");
     assert_eq!(rig.marked, f.overrun_blocks, "every block with an overrun is reported for the take journal, and only those");

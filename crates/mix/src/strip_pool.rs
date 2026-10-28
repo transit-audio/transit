@@ -742,10 +742,12 @@ impl StripPool {
                 self.set.reset_history(i);
             }
             self.chain[i] = Some(id);
-            // The name the report gives this index's figures (#169): a store only on a change.
+            // The name the report gives this index's figures (#169): a store only on a change,
+            // and another track's counts start from zero, so a name's counts are its track's.
             let track = u32::from(st.track);
             if self.tracks[i].load(Ordering::Relaxed) != track {
                 self.tracks[i].store(track, Ordering::Relaxed);
+                self.set.reset_counts(i);
             }
             if self.send(i, st, b) {
                 if let Ok(Published::Published) = self.set.publish(i) {
