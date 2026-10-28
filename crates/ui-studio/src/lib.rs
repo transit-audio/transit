@@ -1246,6 +1246,8 @@ mod param_capture_tests;
 #[cfg(test)]
 mod recent_tests;
 #[cfg(test)]
+mod recovery_tests;
+#[cfg(test)]
 mod slice5_tests;
 #[cfg(test)]
 mod slice6_tests;
