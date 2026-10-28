@@ -163,7 +163,6 @@ pub(super) fn draw_clip(app: &SoundApp, painter: &egui::Painter, s: &Session, tr
                 painter.text(body_r.center(), Align2::CENTER_CENTER, "media offline", regular(10.0), Color32::from_rgb(220, 120, 120));
             }
         }
-        ClipContent::Video { .. } => {} // thumbnails: video_track::draw_lane
         ClipContent::Midi { sequence } => {
             let (lo, hi) = sequence.notes.iter().fold((127u8, 0u8), |(lo, hi), n| (lo.min(n.pitch), hi.max(n.pitch)));
             let (lo, hi) = if lo > hi { (48, 72) } else { (lo.saturating_sub(2), hi.saturating_add(2)) };

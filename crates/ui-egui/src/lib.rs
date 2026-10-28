@@ -34,8 +34,6 @@ pub mod spot;
 pub mod theme;
 pub mod toolbar;
 mod transport;
-pub mod video_track;
-pub mod video_window;
 pub mod waveform;
 pub mod widgets;
 pub mod windows;
@@ -124,10 +122,6 @@ pub struct UiState {
     pub show_rtp: bool,
     pub show_score: bool,
     pub show_search: bool,
-    /// Window › Video, Window › Video Universe, timecode burn-in in the Video window.
-    pub show_video: bool,
-    pub show_video_universe: bool,
-    pub video_burn_in: bool,
     pub workspace_dir: String,
     pub configurations: Vec<(String, Value)>,
     /// Appearance (`ui.theme`): dark by default, light or follow the system on request.
@@ -191,9 +185,6 @@ impl Default for UiState {
             show_rtp: false,
             show_score: false,
             show_search: false,
-            show_video: false,
-            show_video_universe: false,
-            video_burn_in: false,
             workspace_dir: String::new(),
             configurations: Vec::new(),
             theme: theme::ThemeMode::Dark,
@@ -341,8 +332,6 @@ pub struct SoundApp {
     pub frame_ms: f32,
     last_frame: Option<f64>,
     last_meter_poll: f64,
-    /// Movies for the Video window and Video track (decoded in the background).
-    pub video: video_track::VideoPool,
     /// The Bounce Mix in progress, rendered a slice per frame.
     pub bounce: Option<transit_engine::io::Bounce>,
     /// Test-only: owns the process-wide palette lock while this app exists, so frames painted
@@ -410,7 +399,6 @@ impl SoundApp {
             frame_ms: 0.0,
             last_frame: None,
             last_meter_poll: f64::NEG_INFINITY,
-            video: video_track::VideoPool::default(),
             bounce: None,
             #[cfg(test)]
             _palette_lock: theme::lock_test_palette(),
@@ -911,7 +899,6 @@ impl SoundApp {
         panels::floating(self, &ctx);
         windows::show(self, &ctx);
         plugin_folders::scan_notice(&ctx);
-        video_window::show(self, &ctx);
         ops_windows::show(self, &ctx);
         extra_windows::show(self, &ctx);
         recovery::show(self, &ctx);

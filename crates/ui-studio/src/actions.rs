@@ -549,6 +549,6 @@ impl StudioApp {
 
     /// Whether the track can hold clips (not a master, aux or VCA fader).
     pub fn holds_clips(&self, t: TrackId) -> bool {
-        self.engine.session().track(t).is_some_and(|t| t.kind.has_playlist() && t.kind != TrackKind::Video)
+        self.engine.session().track(t).is_some_and(|t| t.kind.has_playlist())
     }
 }

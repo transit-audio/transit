@@ -64,7 +64,6 @@ const KNOWN_UNREACHED: &[&str] = &[
     "transport.loop", // studio UI only (loop strip on the arrangement ruler); the old UI has no loop strip
     "transport.pause",
     "transport.status",
-    "video.offset",
     "view.sub_counter",
 ];
 

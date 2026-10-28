@@ -62,7 +62,7 @@ pub fn separate_closed(app: &mut SoundApp) {
 }
 
 pub(crate) fn content(app: &mut SoundApp, ui: &mut Ui) {
-    let ids: Vec<TrackId> = app.engine.session().tracks.iter().filter(|x| !x.hidden && x.kind != TrackKind::Video).map(|x| x.id).collect();
+    let ids: Vec<TrackId> = app.engine.session().tracks.iter().filter(|x| !x.hidden).map(|x| x.id).collect();
     // Per-channel peaks for multichannel meters (read once per frame).
     let snap = app.player.as_ref().filter(|_| app.meters_live()).and_then(|p| app.player_requests.result(&mut app.ui.status, p.meters()));
     egui::ScrollArea::horizontal().auto_shrink([false, false]).show(ui, |ui| {
@@ -504,7 +504,6 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
         TrackKind::Instrument => "inst",
         TrackKind::Vca => "vca",
         TrackKind::Folder => "folder",
-        TrackKind::Video => "video",
     };
     ui.painter().text(pos2(vr.center().x, vr.max.y + 9.0), Align2::CENTER_CENTER, kind, regular(9.5), t.text_dim);
     let nr = Rect::from_min_size(pos2(x0, r.max.y - 26.0), vec2(inner_w, 18.0));
@@ -518,7 +517,7 @@ fn strip(app: &mut SoundApp, ui: &mut Ui, id: TrackId, snap: Option<&MeterSnapsh
     ui.painter().with_clip_rect(nr).text(nr.center(), Align2::CENTER_CENTER, &track.name, bold(12.0), t.text_dark);
     let nresp = ui.interact(nr, ui.id().with(("strip_name", id.0)), Sense::click());
     if nresp.clicked() {
-        crate::edit_window::click_track(app, id, ui.input(|i| i.modifiers), |_, t| !t.hidden && t.kind != TrackKind::Video);
+        crate::edit_window::click_track(app, id, ui.input(|i| i.modifiers), |_, t| !t.hidden);
     }
     if nresp.double_clicked() {
         app.dialogs.open_rename_track(id, &track.name);

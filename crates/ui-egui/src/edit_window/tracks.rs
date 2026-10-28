@@ -84,7 +84,6 @@ pub(super) fn track_row(app: &mut SoundApp, ui: &mut Ui, id: TrackId, row: Rect,
         draw_clip(app, &painter, &s, track, clip, tl, lane, auto_view.is_some());
     }
     draw_live_take(app, &painter, &s, track, tl, lane);
-    crate::video_track::draw_lane(app, &painter, &s, track, tl, lane);
     if s.edit.grid_lines {
         grid_lines(&painter, &s, tl, lane);
     }

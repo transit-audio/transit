@@ -16,15 +16,12 @@ fn window_shortcuts_open_and_close_windows() {
         let mut app = SoundApp::new(transit_engine::Engine::default(), None, Services::default());
         let ctx = egui::Context::default();
         ctx.set_os(os);
-        for key in [Key::Num1, Key::Num3, Key::Num4, Key::Num5, Key::Num9] {
+        for key in [Key::Num1, Key::Num3, Key::Num4, Key::Num5] {
             press(&ctx, &mut app, key, cmd);
         }
         press(&ctx, &mut app, Key::M, Modifiers { alt: true, ..cmd });
         let ui = &app.ui;
-        assert!(
-            ui.show_transport && ui.show_big_counter && ui.show_automation && ui.show_memory_locations && ui.show_video && ui.narrow_mix,
-            "{os:?}"
-        );
+        assert!(ui.show_transport && ui.show_big_counter && ui.show_automation && ui.show_memory_locations && ui.narrow_mix, "{os:?}");
         press(&ctx, &mut app, Key::W, cmd);
         assert!(!app.ui.show_transport && !app.ui.show_big_counter && !app.ui.show_memory_locations, "{os:?}");
     }

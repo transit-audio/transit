@@ -167,7 +167,6 @@ fn draw_clip(p: &egui::Painter, s: &Session, map: Map, tl: Rect, t: &Track, c: &
                     }
                 }
             }
-            ClipContent::Video { .. } => {}
         }
     }
     crate::fades::draw(&p, c, map, rect, body, ink, selected);
@@ -255,7 +254,6 @@ fn draw_cycles(
                     }
                 }
             }
-            ClipContent::Video { .. } => {}
         }
     }
 }

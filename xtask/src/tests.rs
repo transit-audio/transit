@@ -131,14 +131,8 @@ fn upward_and_app_edges_fail_while_documented_same_layer_edges_remain_valid() {
 }
 
 #[test]
-fn legitimate_video_decoding_and_benchmark_app_dependencies_remain_valid() {
-    let metadata = Metadata {
-        packages: vec![
-            package("transit-video", &[("image", None)]),
-            package("audio-bench", &[("transit-playback", None)]),
-            package("transit-playback", &[]),
-        ],
-    };
+fn benchmark_app_dependencies_remain_valid() {
+    let metadata = Metadata { packages: vec![package("audio-bench", &[("transit-playback", None)]), package("transit-playback", &[])] };
     assert!(check_layers(&metadata, |_| Ok(INHERIT.into())).is_ok());
 }
 

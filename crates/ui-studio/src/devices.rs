@@ -729,7 +729,7 @@ pub(crate) fn key_sources(s: &transit_model::Session, t: TrackId) -> (Vec<(Track
     let tracks = s
         .tracks
         .iter()
-        .filter(|x| x.id != t && !matches!(x.kind, TrackKind::Master | TrackKind::Vca | TrackKind::Video))
+        .filter(|x| x.id != t && !matches!(x.kind, TrackKind::Master | TrackKind::Vca))
         .filter(|x| late || !matches!(x.kind, TrackKind::Aux | TrackKind::Folder))
         .map(|x| (x.id, x.name.clone()))
         .collect();

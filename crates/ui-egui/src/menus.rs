@@ -28,8 +28,6 @@ pub const UI_COMMANDS: &[(&str, &str, &str, Option<&str>)] = &[
     ("window.hide_floating", "Hide All Floating Windows", "Window > Hide All Floating Windows", Some("Cmd+Ctrl+W")),
     ("window.midi_editor", "MIDI Editor", "Window > MIDI Editor", None),
     ("window.universe", "Universe", "View > Other Displays > Universe", Some("Alt+7")),
-    ("window.video", "Video", "Window > Video", Some("Cmd+9")),
-    ("window.video_universe", "Video Universe", "Window > Video Universe", None),
     ("window.automation", "Automation", "Window > Automation", Some("Cmd+4")),
     ("window.color_palette", "Color Palette", "Window > Color Palette", None),
     ("window.disk_usage", "Disk Usage", "Window > Disk Usage", None),
@@ -591,8 +589,6 @@ pub fn run_ui_command(app: &mut SoundApp, id: &str, p: &Value) -> Option<Result<
             json!({})
         }
         "window.universe" => toggle(&mut app.ui.show_universe),
-        "window.video" => toggle(&mut app.ui.show_video),
-        "window.video_universe" => toggle(&mut app.ui.show_video_universe),
         "window.close" | "window.hide_floating" => {
             app.ui.show_transport = false;
             app.ui.show_big_counter = false;
