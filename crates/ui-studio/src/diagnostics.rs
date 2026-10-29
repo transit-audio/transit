@@ -581,7 +581,10 @@ impl crate::StudioApp {
     /// The plug-in host section (issue #205): each call a host thread is stuck in, naming the
     /// plug-in and the call.
     pub(crate) fn plugin_host_lines(&self) -> Vec<String> {
-        self.player.as_ref().map(|p| p.plugin_host_stuck().iter().map(transit_playback::StuckCall::line).collect()).unwrap_or_default()
+        let Some(p) = &self.player else { return Vec::new() };
+        // Given-up threads whose call returned are parked, not stuck: listed too (#205 review).
+        let stuck = p.plugin_host_stuck().into_iter().map(|s| s.line());
+        stuck.chain(p.plugin_host_quarantined().iter().map(transit_playback::Quarantined::line)).collect()
     }
 
     /// Starts collecting the report for the clipboard. The helper programs run on a worker thread;

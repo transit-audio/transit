@@ -102,7 +102,7 @@ fn the_message_names_the_plug_in_and_give_up_quarantines_it() {
     let layout = t.app.host_hang.layout.clone();
     assert!(layout.lines[0].starts_with("Guitar Rig 7 has not returned from creating it"), "{:?}", layout.lines);
     assert!(layout.lines.iter().any(|l| l.contains("Audio keeps playing")), "{:?}", layout.lines);
-    assert!(layout.lines.iter().any(|l| l.contains("End Task")), "{:?}", layout.lines);
+    assert_eq!(layout.lines.iter().any(|l| l.contains("End Task")), cfg!(windows), "End Task is a Windows sentence: {:?}", layout.lines);
     assert_eq!(layout.give_up_label, "Give up on Guitar Rig 7");
     let report = t.app.diagnostics_report(0.0).render(&crate::diagnostics::Redaction::default());
     assert!(report.contains("Plug-in host: Guitar Rig 7 stuck in creating it"), "{report}");
