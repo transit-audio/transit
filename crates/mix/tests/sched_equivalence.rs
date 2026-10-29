@@ -976,3 +976,41 @@ fn regression_a_chain_held_at_each_link() {
     regression(&top, 2, &Schedule::new(&[(kick, 5, 2), (bass, 12, 1), (pad, 20, 3)]));
     regression(&top, 0, &Schedule::new(&[(kick, 5, 2), (bass, 6, 3), (pad, 20, 1)]));
 }
+
+/// Found by this gate (#174): an early key's strip held one block with no workers is taken back
+/// unrendered at the deadline; its key entry's line must not have run for that block (it did:
+/// the key was filled, early-key delay included, before the publish, so from then on the key ran
+/// one block ahead of the strip's own signal). The keyed strip is Bass.
+#[test]
+fn regression_an_early_key_held_with_no_worker() {
+    let _on = graph_on();
+    let top = Topology::new("an early key", latent_kick_to_bass(0, 128, 0, Tap::Post, 0.0), vec![]);
+    let bass = bass_index(&top);
+    regression(&top, 0, &Schedule::new(&[(bass, 33, 1)]));
+}
+
+/// The same defect with both sides latent and the key early.
+#[test]
+fn regression_both_latent_the_key_early_held_with_no_worker() {
+    let _on = graph_on();
+    let top = Topology::new("both latent, the key early", latent_kick_to_bass(64, 128, 0, Tap::Post, 0.0), vec![]);
+    let bass = bass_index(&top);
+    regression(&top, 0, &Schedule::new(&[(bass, 38, 1)]));
+}
+
+/// The same defect with a pre-fader key from a silent fader, early.
+#[test]
+fn regression_a_pre_fader_key_from_a_silent_fader_early_held_with_no_worker() {
+    let _on = graph_on();
+    let top = Topology::new("a pre-fader key from a silent fader, early", latent_kick_to_bass(0, 128, 0, Tap::Pre, -80.0), vec![]);
+    let bass = bass_index(&top);
+    regression(&top, 0, &Schedule::new(&[(bass, 30, 1)]));
+}
+
+/// Bass's strip index in `top` (the printed schedules name it 5).
+fn bass_index(top: &Topology) -> usize {
+    let rig = top.rig();
+    let bass = rig.mix.strip_index(track(&top.session, "Bass")).unwrap();
+    assert_eq!(bass, 5, "the strip the minimal schedules hold");
+    bass
+}
