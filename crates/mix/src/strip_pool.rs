@@ -395,6 +395,9 @@ pub(crate) struct StripPool {
     deadline_override: Option<u32>,
     /// The device callback the share was last resolved for: frames, rate (Hz).
     device_block: (u32, u32),
+    /// Test seam (issue #210): the strips the test holds this block (`seam`).
+    #[cfg(feature = "testing")]
+    pub(crate) gate: Vec<bool>,
 }
 
 impl StripPool {
@@ -429,6 +432,8 @@ impl StripPool {
             deadline_percent: 0,
             deadline_override,
             device_block: (0, 0),
+            #[cfg(feature = "testing")]
+            gate: Vec::new(),
         };
         pool.set_device_block(frames, rate);
         Ok(pool)
@@ -1129,6 +1134,8 @@ fn apply_pending(st: &mut Strip, flags: u8, events: &EngineEvents) {
 mod graph;
 #[cfg(feature = "testing")]
 mod seam;
+#[cfg(feature = "testing")]
+pub(crate) use seam::pinned;
 
 #[cfg(test)]
 pub(crate) mod tests;

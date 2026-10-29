@@ -499,6 +499,8 @@ impl MixEngine {
                 pool.deliver_home(p1, &mut self.events, s, frame, frames);
             }
             let busses: &BusTable = busses;
+            #[cfg(feature = "testing")]
+            let muted = self.mutes.any();
             // One `run_strips` per layer: a strip keyed from another renders after it, and its key
             // is copied from the finished source first. Without keys this is the one call.
             let mut from = 0;
@@ -508,6 +510,23 @@ impl MixEngine {
                     continue;
                 }
                 let (done, cur) = p1.split_at_mut(from);
+                // Test seam (issue #210): a muted serial block, strip by strip; a skipped strip's
+                // keys are not filled and it does not render.
+                #[cfg(feature = "testing")]
+                if muted {
+                    for (k, st) in cur.iter_mut().take(end - from).enumerate() {
+                        if self.mutes.skips(from + k) {
+                            continue;
+                        }
+                        keys.fill(from + k..from + k + 1, |i| done.get(i), busses, frames);
+                        let keys: &KeyBank = keys;
+                        if let Some(t) = track(st).filter(|t| live(t) && !is_aux(t)) {
+                            guarded(st, |st| process_strip(t, st, &StripRender { s, busses, live: &live_in, pos, frames, any_solo, keys }));
+                        }
+                    }
+                    from = end;
+                    continue;
+                }
                 keys.fill(from..end, |i| done.get(i), busses, frames);
                 let keys: &KeyBank = keys;
                 run_strips(cur.get_mut(..end - from).unwrap_or(&mut []), !self.serial, |st| {
@@ -534,6 +553,10 @@ impl MixEngine {
             if pool.is_some_and(|p| p.is_silent(i) || p.is_away(i)) {
                 continue;
             }
+            #[cfg(feature = "testing")]
+            if self.mutes.silent(i) {
+                continue;
+            }
             st.meter.measure(&st.buf, frames, st.gr);
             st.meter.plugin_failures = st.failures;
             let need = route_into(t, st, pos, frames, MixOut { busses, main, main_fmt, sinks, law, main_arrival });
@@ -556,6 +579,14 @@ impl MixEngine {
                     Some(a) => a < k && tail.get(a).copied().unwrap_or(false),
                 })
             });
+            // Test seam (issue #210): a muted serial block applies the same rule to its mutes.
+            #[cfg(feature = "testing")]
+            let skipped = skipped
+                || (self.mutes.any()
+                    && keys.sources_of(at).any(|j| match j.checked_sub(phase1) {
+                        None => self.mutes.silent(j),
+                        Some(a) => a < k && graph.tail_skipped.get(a).copied().unwrap_or(false),
+                    }));
             if let Some(f) = graph.tail_skipped.get_mut(k) {
                 *f = skipped;
             }
@@ -616,6 +647,8 @@ impl MixEngine {
             }
         }
         main_meter.measure(main, frames, 0.0);
+        #[cfg(feature = "testing")]
+        self.mutes.clear();
     }
 }
 

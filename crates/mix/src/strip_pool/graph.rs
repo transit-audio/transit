@@ -147,6 +147,9 @@ impl GraphHost for Host<'_, '_> {
     }
 
     fn poll(&mut self, deadline: Instant) -> Poll {
+        // Test seam (issue #210): the deterministic deadline of a held block.
+        #[cfg(feature = "testing")]
+        let deadline = self.pool.gated_deadline(deadline);
         let pool = &mut *self.pool;
         let (cells, g, marker) = (&pool.cells, self.g, self.b.live.marker);
         pool.set.poll(deadline, |i| {

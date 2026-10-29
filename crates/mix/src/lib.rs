@@ -107,6 +107,9 @@ mod plan_render_tests;
 mod plan_tests;
 mod render_pool;
 mod routing;
+/// Test seams (issue #210): muted serial blocks, the deterministic deadline, block views.
+#[cfg(feature = "testing")]
+mod sched_seam;
 mod scope;
 mod sink;
 mod strip;
@@ -158,7 +161,8 @@ pub use render_pool::{
 use routing::{
     MixOut, PdcWalk, is_aux, live, log_loops, path_need, pdc_visit, processing_order, receives_solo, route_into, strip_channels, strip_format,
 };
-
+#[cfg(feature = "testing")]
+pub use sched_seam::Mute;
 pub use scope::{INSTRUMENT_UID, SCOPE_FRAMES, ScopeHub, ScopeTap};
 use sink::Sink;
 pub use sink::{MAX_SINK_CHANNELS, SinkPlan, SinkSpec, plan_sinks, unresolved_routes};
@@ -766,6 +770,9 @@ pub struct MixEngine {
     /// The next block's strip deadline from the callback's entry ([`MixEngine::set_block_deadline`]);
     /// taken by the next `render_active`.
     block_deadline: Option<std::time::Instant>,
+    /// Test seam (issue #210): the next serial block's muted strips ([`MixEngine::mute_next_block`]).
+    #[cfg(feature = "testing")]
+    mutes: sched_seam::Mutes,
 }
 
 impl MixEngine {
@@ -814,6 +821,8 @@ impl MixEngine {
             pool: None,
             strip_deadline: None,
             block_deadline: None,
+            #[cfg(feature = "testing")]
+            mutes: sched_seam::Mutes::default(),
         }
     }
 
