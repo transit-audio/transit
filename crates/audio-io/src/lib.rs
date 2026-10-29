@@ -25,6 +25,7 @@ mod symph;
 mod wav;
 
 pub use buffer::AudioBuffer;
+pub use pcm::MAX_DECODE_SAMPLES;
 use std::io::{Seek, Write};
 
 /// Errors from probing, decoding and encoding.
@@ -223,6 +224,21 @@ pub fn probe(bytes: &[u8], ext_hint: Option<&str>) -> Result<AudioInfo> {
             aiff::AiffParse::Foreign => symph::probe(bytes, format),
         },
         _ => symph::probe(bytes, format),
+    }
+}
+
+/// What the first bytes `prefix` of a file of `file_len` bytes say about a WAV/RF64 file the native
+/// reader decodes: its format and, from the header and the file size alone, its frame count (the
+/// data chunk's size, capped by the bytes the file holds, as [`decode`] reads it). Lets a caller
+/// refuse a file over [`MAX_DECODE_SAMPLES`] without reading it. Other files, and a header that
+/// does not fit in `prefix`, are an error: the caller falls back to reading the file.
+pub fn probe_sized(prefix: &[u8], file_len: u64) -> Result<AudioInfo> {
+    if !wav::is_wav(prefix) {
+        return Err(AudioError::Unsupported("only WAV files are sized from their header".into()));
+    }
+    match wav::parse_sized(prefix, usize::try_from(file_len).unwrap_or(usize::MAX))? {
+        wav::WavParse::Native(l) => Ok(l.info),
+        wav::WavParse::Foreign { .. } => Err(AudioError::Unsupported("this WAV codec is not sized from its header".into())),
     }
 }
 

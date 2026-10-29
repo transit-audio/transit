@@ -141,6 +141,12 @@ pub(crate) fn is_wav(b: &[u8]) -> bool {
 }
 
 pub(crate) fn parse(b: &[u8]) -> Result<WavParse> {
+    parse_sized(b, b.len())
+}
+
+/// [`parse`] of the first bytes `b` of a file of `total` bytes: sizes that reach past `b` are
+/// judged against `total`, so a header alone yields the file's frame count.
+pub(crate) fn parse_sized(b: &[u8], total: usize) -> Result<WavParse> {
     if !is_wav(b) {
         return Err(AudioError::Malformed("not a RIFF/RF64 WAVE file".into()));
     }
@@ -159,7 +165,7 @@ pub(crate) fn parse(b: &[u8]) -> Result<WavParse> {
             break;
         }
         let body = pos.checked_add(8).ok_or_else(|| AudioError::Malformed("chunk offset overflow".into()))?;
-        let remaining = b.len().saturating_sub(body);
+        let remaining = total.saturating_sub(body);
         let mut size = u64::from(size32);
         if &id == b"data" && is_rf64 && size32 == u32::MAX {
             size = ds64_data.unwrap_or(remaining as u64);

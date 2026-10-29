@@ -5,7 +5,7 @@ use crate::{AudioError, BitDepth, Result};
 use std::io::Write;
 
 /// Maximum number of decoded `f32` samples (all channels) we will produce: 4 GiB of output.
-pub(crate) const MAX_DECODE_SAMPLES: u64 = (4u64 << 30) / 4;
+pub const MAX_DECODE_SAMPLES: u64 = (4u64 << 30) / 4;
 
 /// Little-endian `u16` at `pos`.
 pub(crate) fn le_u16(b: &[u8], pos: usize) -> Option<u16> {
