@@ -769,6 +769,12 @@ impl Host {
             let outcome = catch_unwind(AssertUnwindSafe(|| job(ctx)));
             let mut value = lock(&theirs.value);
             match outcome {
+                // Given up on while it ran (issue #205): what it made stays quarantined with the
+                // thread, never delivered (a late instance would otherwise join a plan).
+                Ok(v) if ctx.worker.as_ref().is_some_and(|w| w.is_abandoned()) => {
+                    std::mem::forget(v);
+                    theirs.state.store(FAILED, Ordering::Release);
+                }
                 Ok(v) => {
                     *value = Some(v);
                     theirs.state.store(DONE, Ordering::Release);

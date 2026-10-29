@@ -84,16 +84,23 @@ fn giving_up_quarantines_the_stuck_threads_plug_ins_and_new_ones_load_elsewhere(
 fn a_hung_creation_given_up_on_is_named_and_leaves_the_host_working() {
     let host = host();
     let (release, gate) = mpsc::channel::<()>();
-    let _hung = host.submit(move |ctx| {
+    let log = Arc::new(Log::default());
+    let l = Arc::clone(&log);
+    let hung = host.submit(move |ctx| {
         ctx.name_job("Guitar Rig 7");
         let _ = gate.recv();
+        ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))
     });
     let stuck = watch(&host, |s| !s.is_empty());
     assert_eq!((&*stuck[0].plugin, stuck[0].call), ("Guitar Rig 7", call::CREATING));
     let gave = host.give_up();
     assert_eq!(gave.plugins.iter().map(|p| &**p).collect::<Vec<_>>(), ["Guitar Rig 7"]);
     assert_eq!(host.submit(|_| 7).wait(Duration::from_secs(5)), Some(7), "the host goes on");
+    // The creation returns after all: its instance stays quarantined, never delivered.
     drop(release);
+    assert!(hung.wait(Duration::from_secs(5)).is_none(), "a late instance of a given-up thread is not delivered");
+    assert!(log.thread_of("create").is_some(), "it was made");
+    assert_eq!(log.thread_of("destroy"), None, "and never freed");
     assert!(host.shutdown(Duration::from_secs(5)));
 }
 
