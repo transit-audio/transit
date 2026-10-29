@@ -7,6 +7,8 @@
 //!   aux, a chain of two keys, latency on either side of a key) and for the corpus sessions, as
 //!   saved and with a key edge added; through two workers, and through none (every strip
 //!   rendered inline by the callback);
+//! - the opt-out (`TRANSIT_RENDER_GRAPH=0`, the graph switch off with the workers on): a keyed
+//!   plan never reaches the pool and renders bit-exact to the serial path;
 //! - sidechain impulse alignment: an early key, a late key and latency on either side give the
 //!   duck's onset on the same sample under the graph as serially;
 //! - the allocation-armed callback over a keyed plan with worker stalls, upstream-missed skips and
@@ -243,6 +245,9 @@ enum Path {
     Serial,
     /// The task graph through this many workers (0: the callback renders every strip inline).
     Graph(usize),
+    /// The opt-out (`TRANSIT_RENDER_GRAPH=0`): this many render workers started and on, the task
+    /// graph off, so a keyed plan renders serially on the audio thread.
+    OptedOut(usize),
 }
 
 struct Rendered {
@@ -270,7 +275,7 @@ fn render(s: &Session, path: Path, blocks: usize) -> Rendered {
     let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), PlanGeneration::from_raw(1), &mut maker).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
     compiler.reclaim(env);
-    if let Path::Graph(w) = path {
+    if let Path::Graph(w) | Path::OptedOut(w) = path {
         assert_eq!(mix.start_render_workers_with(64, w), w);
         if w == 0 {
             // A cost history for every strip, so the callback renders each inline (#168).
@@ -326,6 +331,20 @@ fn assert_equivalent(name: &str, s: &Session, blocks: usize, pooled: bool) {
     }
 }
 
+/// The opt-out against serial, bit for bit: with the render workers on and the task graph off
+/// (`TRANSIT_RENDER_GRAPH=0`), a keyed plan never reaches the pool (no block, no strip render on
+/// the workers or inline) and renders exactly as the serial path.
+#[track_caller]
+fn assert_opt_out_is_serial(name: &str, s: &Session, blocks: usize) {
+    let serial = render(s, Path::Serial, blocks);
+    let opted_out = render(s, Path::OptedOut(2), blocks);
+    let f = opted_out.faults.unwrap();
+    assert_eq!(f.workers, 2, "{name}: the workers are on");
+    assert_eq!((f.blocks, f.inline_renders, f.callback_renders, f.upstream_missed), (0, 0, 0, 0), "{name}: {f:?}");
+    assert_eq!(opted_out.latency, serial.latency, "{name}: the device latency");
+    assert!(bit_exact(&opted_out.all, &serial.all), "{name}: the opt-out and serial renders are bit-exact");
+}
+
 fn the_key_holds(s: &Session) -> bool {
     s.tracks.iter().any(|t| t.mixer.inserts.iter().flatten().any(|i| i.key.is_some()))
 }
@@ -348,6 +367,26 @@ fn serial_and_graph_renders_of_the_keyed_sessions_are_bit_exact() {
     ] {
         assert!(the_key_holds(&s), "{name}");
         assert_equivalent(name, &s, blocks, true);
+    }
+}
+
+/// #174: the task graph is the default for keyed plans; `TRANSIT_RENDER_GRAPH=0` (the graph
+/// switch off) keeps today's keyed fallback, serial on the audio thread with the workers idle,
+/// for every keyed session of `sidechain.rs`.
+#[test]
+fn the_opt_out_renders_the_keyed_sessions_serially_with_the_workers_on() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let blocks = LEN / BLOCK;
+    for (name, s) in [
+        ("kick to bass, post", kick_to_bass(false, Tap::Post)),
+        ("kick to bass, pre, bass first", kick_to_bass(true, Tap::Pre)),
+        ("a chain of two keys", chain()),
+        ("a bus key onto an aux", bus_key_onto_an_aux()),
+        ("a late key", latent_kick_to_bass(128, 0, 0)),
+        ("both latent, the key late", latent_kick_to_bass(192, 128, 32)),
+    ] {
+        assert!(the_key_holds(&s), "{name}");
+        assert_opt_out_is_serial(name, &s, blocks);
     }
 }
 
