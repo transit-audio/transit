@@ -120,3 +120,25 @@ stored. Mutation: not storing the calibration in `ui.audio` fails the measure te
 lines can see.
 
 Recurrence 2026-10-25 (#106): the playback clamp test now checks its exact queued deadline against an echo stamped in the same scheduler drain and retains port delivery; the two bounce tests keep fake callbacks running until render completion and stop adoption instead of exhausting a fixed block budget, with the existing 10 s stall guards and sample/grid/click assertions retained.
+
+Recurrence 2026-10-29 (Realtime run 40968743055, macos-aarch64, main e7aff39f):
+`parallel_panicking_instruments_drop_no_payload_on_a_render_worker` (`crates/mix/tests/strip_panics.rs`)
+failed "the render panics: ()": `render_active` returned Ok. The test rendered on the render workers
+under the default strip deadline, 100% of a 256-frame period at 48 kHz (5.3 ms, no duration in the
+test). A strip still on its worker at that deadline is `Late` (`WorkerSet::finish`,
+`crates/rt/src/worker_set.rs`): it stays in its cell, is mixed as silence, and its kept payload is
+re-raised by the block that brings it home (`StripPool::render` then the `p1` scan in `active.rs`).
+When every strip missed 5.3 ms on the shared runner (a debug build, six unwinds), nothing
+was home with a payload, so the block raised nothing. The product was right; the test raced a
+wall-clock deadline. Not caused by #78 or #213 (neither touches the panic path; `note_held` and the
+`bring_home` reset only store counters): with the share forced to 25%
+(`TRANSIT_STRIP_DEADLINE_PERCENT=25`) the old test failed the same way on Windows at both
+552a98cb (1 of 300) and e7aff39f (6 of 400 together). Fixed: the test sets a 60 s strip deadline,
+so `finish` waits for every strip's completion; the late path gained its own deterministic test,
+`a_strip_late_at_the_deadline_raises_its_panic_from_the_block_that_brings_it_home`, which holds the
+claimed instruments in `process` past a zero deadline and asserts that block returns Ok, the next
+block re-raises a payload, every strip panics exactly once, and every payload is dropped on the
+control thread. After the fix: 0 of 300 runs failed at the default share and 0 of 300 at 25%.
+Blind spot: `cargo xtask timing` cannot see a deadline a test inherits from the engine's default;
+`render_pool.rs`'s `audio_thread_render_does_not_wait_for_a_saturated_global_pool` still asserts a
+nonzero peak under the default deadline and is a review item.
