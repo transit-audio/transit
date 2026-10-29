@@ -131,6 +131,30 @@ fn upward_and_app_edges_fail_while_documented_same_layer_edges_remain_valid() {
 }
 
 #[test]
+fn no_package_links_a_dev_only_crate() {
+    let oracle = "transit-macro-osc-oracle";
+    for name in ["transit", "transit-mix", "transit-dsp", "audio-bench", "xtask"] {
+        for kind in [None, Some("build"), Some("dev")] {
+            let metadata = Metadata { packages: vec![package(name, &[(oracle, kind)]), package(oracle, &[])] };
+            let result = check_layers(&metadata, |_| Ok(INHERIT.into()));
+            assert_eq!(result.is_ok(), kind == Some("dev"), "{name}: {kind:?}: {result:?}");
+        }
+    }
+}
+
+#[test]
+fn the_oracle_may_opt_out_of_the_unsafe_forbid_and_sits_outside_the_layers() {
+    let oracle = "transit-macro-osc-oracle";
+    let metadata = Metadata { packages: vec![package(oracle, &[("cc", Some("build"))])] };
+    assert!(
+        check_layers(&metadata, |_| Ok("[lints.rust]
+unsafe_code = 'allow'"
+            .into()))
+        .is_ok()
+    );
+}
+
+#[test]
 fn benchmark_app_dependencies_remain_valid() {
     let metadata = Metadata { packages: vec![package("audio-bench", &[("transit-playback", None)]), package("transit-playback", &[])] };
     assert!(check_layers(&metadata, |_| Ok(INHERIT.into())).is_ok());

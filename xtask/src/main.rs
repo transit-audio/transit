@@ -80,9 +80,22 @@ const STANDALONE: &[&str] = &["transit-time", "transit-audio-io", "transit-audio
 const UI_CRATES: &[&str] = &["egui", "eframe", "winit", "rfd", "egui-wgpu", "egui_glow", "egui_extras", "resvg", "wgpu"];
 // audio-bench is an app over playback and the native backends, not an engine layer.
 const EXEMPT: &[&str] = &["soundcraft", "transit-cli", "transit", "xtask", "audio-bench"];
-/// Manifest exceptions to the workspace unsafe forbid (ADR 0013 and its amendments).
-const UNSAFE_ALLOWED: &[&str] =
-    &["transit-rt", "transit-audio-wasapi", "transit-audio-asio", "transit-audio-jack", "transit-clap-host", "transit-vst3-host", "transit-au-host"];
+/// Manifest exceptions to the workspace unsafe forbid (ADR 0013 and its amendments; the oracle's FFI
+/// module per ADR 0033).
+const UNSAFE_ALLOWED: &[&str] = &[
+    "transit-rt",
+    "transit-audio-wasapi",
+    "transit-audio-asio",
+    "transit-audio-jack",
+    "transit-clap-host",
+    "transit-vst3-host",
+    "transit-au-host",
+    "transit-macro-osc-oracle",
+];
+/// Dev-only crates (ADR 0033: the C++ null-test oracle). No package, apps included, may take one as a
+/// normal or build dependency, so none can be linked into a shipped binary; a dev-dependency is
+/// allowed. They are outside the layer order.
+const DEV_ONLY: &[&str] = &["transit-macro-osc-oracle"];
 
 /// Parse Cargo's string and table lint forms, including workspace inheritance.
 fn opts_out_of_forbid(manifest: &str) -> Result<bool, String> {
@@ -137,7 +150,12 @@ fn check_layers(metadata: &Metadata, read_manifest: impl Fn(&Path) -> Result<Str
         if opts_out_of_forbid(&manifest).map_err(|e| format!("{name}: {e}"))? && !UNSAFE_ALLOWED.contains(&name) {
             problems.push(format!("{name}: opts out of unsafe_code = forbid but is not in the xtask unsafe allowlist"));
         }
-        if EXEMPT.contains(&name) {
+        for d in &p.dependencies {
+            if DEV_ONLY.contains(&d.name.as_str()) && d.kind.as_deref() != Some("dev") {
+                problems.push(format!("{name} depends on the dev-only crate {} (only a dev-dependency is allowed)", d.name));
+            }
+        }
+        if EXEMPT.contains(&name) || DEV_ONLY.contains(&name) {
             continue;
         }
         let Some(&(_, layer)) = LAYERS.iter().find(|(n, _)| *n == name) else {
