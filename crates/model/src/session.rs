@@ -342,6 +342,11 @@ pub struct Session {
     /// MIDI Learn mappings saved with this session (ADR 0028). Old files have none.
     #[serde(default, skip_serializing_if = "crate::MappingSet::is_empty")]
     pub midi_mappings: crate::MappingSet,
+    /// Recorded takes the engine could not place (a take over the decode limit, #192): each entry
+    /// names the file kept on disk and what it holds. Saved, so a reopen can find the file; shown
+    /// as a load note and in the diagnostics report.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unplaced_takes: Vec<String>,
     #[serde(skip)]
     pub pool: SourcePool,
     /// The folder relative source paths point into: where the session was opened or last saved.
@@ -405,6 +410,7 @@ impl Session {
             comments: String::new(),
             midi_originals: std::collections::BTreeMap::new(),
             midi_mappings: Default::default(),
+            unplaced_takes: Vec::new(),
             pool: SourcePool::default(),
             folder: None,
             load_notes: Vec::new(),
@@ -679,6 +685,9 @@ impl Session {
         if had_video {
             s.load_notes.push(crate::legacy::VIDEO_REMOVED_NOTE.to_string());
         }
+        for take in &s.unplaced_takes {
+            s.load_notes.push(format!("a recorded take was never placed in this session: {take}"));
+        }
         if !unknown.is_empty() {
             s.load_notes.push(format!(
                 "this session uses features this version does not know ({}): parts of it may be missing or sound different, and saving it from here can drop them",
@@ -885,6 +894,22 @@ mod tests {
         v["videos"] = serde_json::json!([]);
         v["tracks"] = serde_json::json!([]);
         assert!(Session::from_json(&v.to_string()).unwrap().load_notes.is_empty());
+    }
+
+    #[test]
+    fn an_unplaced_take_is_saved_and_reported_on_every_open_issue_192() {
+        let plain = Session::default();
+        assert!(!plain.to_json().unwrap().contains("unplaced_takes"), "a session without one writes what older builds wrote");
+        let mut s = Session::default();
+        s.unplaced_takes.push("/rec/Take_01.wav (8.0 h of mono at 48 kHz)".into());
+        let back = Session::from_json(&s.to_json().unwrap()).unwrap();
+        assert_eq!(back.unplaced_takes, s.unplaced_takes);
+        assert_eq!(back.load_notes.len(), 1);
+        assert!(back.load_notes[0].contains("/rec/Take_01.wav") && back.load_notes[0].contains("never placed"), "{:?}", back.load_notes);
+        // Saved again, it is still there for the next open; the note is not saved.
+        let again = Session::from_json(&back.to_json().unwrap()).unwrap();
+        assert_eq!(again.unplaced_takes, s.unplaced_takes);
+        assert!(!back.to_json().unwrap().contains("load_notes"));
     }
 
     fn looped_session() -> Session {
