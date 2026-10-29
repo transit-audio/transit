@@ -50,7 +50,7 @@ fn offsets(es: &[Event]) -> Vec<u32> {
 // ---- The outcome rule ----
 
 #[test]
-fn only_busy_and_unstarted_overruns_defer() {
+fn only_busy_unstarted_and_upstream_missed_overruns_defer() {
     let all = [
         (Outcome::NotPublished, false),
         (Outcome::Pending, false),
@@ -59,6 +59,8 @@ fn only_busy_and_unstarted_overruns_defer() {
         (Outcome::Overrun(OverrunCause::Busy), true),
         (Outcome::Overrun(OverrunCause::Late), false),
         (Outcome::Overrun(OverrunCause::Unstarted), true),
+        // #174: a dependent skipped because its key source missed is treated as an overrun.
+        (Outcome::Overrun(OverrunCause::UpstreamMissed), true),
         (Outcome::Faulted, false),
     ];
     for (outcome, defer) in all {

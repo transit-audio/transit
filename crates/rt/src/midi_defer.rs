@@ -176,12 +176,13 @@ impl Event {
     }
 }
 
-/// True only for `Overrun(Busy)` and `Overrun(Unstarted)`: the strips that never received their
-/// block's events. A `Late` strip's worker consumed them; `Mixed` and `Inline` were rendered; a
+/// True only for `Overrun(Busy)`, `Overrun(Unstarted)` and `Overrun(UpstreamMissed)` (a
+/// dependent skipped because its key source missed, issue #174, treated as an overrun): the
+/// strips that never received their block's events. A `Late` strip's worker consumed them; `Mixed` and `Inline` were rendered; a
 /// `Faulted` instance is replaced; `NotPublished` and `Pending` had no block to miss.
 #[must_use]
 pub const fn should_defer(outcome: Outcome) -> bool {
-    matches!(outcome, Outcome::Overrun(OverrunCause::Busy | OverrunCause::Unstarted))
+    matches!(outcome, Outcome::Overrun(OverrunCause::Busy | OverrunCause::Unstarted | OverrunCause::UpstreamMissed))
 }
 
 /// Where an event of block `block` at `offset` lands in block `now` of `block_len` samples: its

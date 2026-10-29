@@ -45,6 +45,10 @@ pub mod midi_defer;
 /// #124 slice 2, ADR 0029): parked workers, inline admission by measured cost, quarantine.
 pub mod worker_set;
 
+/// Dependency-aware strip scheduling (issue #174, ADR 0029 amendment): the per-plan task table of
+/// sidechain key edges, its per-block run state and the driver over a worker set.
+pub mod task_graph;
+
 /// The OS message queue of a window-hosting thread that is not the UI thread (the plug-in host
 /// thread, ADR 0018): attach, wait, dispatch, and a cross-thread waker.
 pub mod gui_thread;

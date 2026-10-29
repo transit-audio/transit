@@ -115,6 +115,9 @@
 //! No `unsafe`.
 
 pub mod figures;
+mod stepwise;
+
+pub use stepwise::Poll;
 
 use crate::Promotion;
 use crate::strip_jobs::{Consume, JobSet, PublishError, State};
@@ -173,6 +176,10 @@ pub enum OverrunCause {
     /// No thread had started it at the deadline and the admission rule refused an inline
     /// render; it was taken back unrendered.
     Unstarted,
+    /// Not published: a task it depends on had no result for this block (issue #174, the
+    /// dependency graph of [`crate::task_graph`]; see [`WorkerSet::skip_upstream`]). Counted apart
+    /// from the other causes, which are counted once, at the origin.
+    UpstreamMissed,
 }
 
 /// Why the admission rule refused to render an unstarted strip inline (see the module docs).
@@ -238,6 +245,9 @@ pub struct BlockReport {
     /// Strips the admission rule refused to render inline this block (any reason; each strip
     /// once).
     pub inline_refused: usize,
+    /// Strips skipped because a task they depend on missed ([`OverrunCause::UpstreamMissed`];
+    /// not in `overrun`).
+    pub upstream_missed: usize,
 }
 
 /// Running totals since construction (stream-stats style; a snapshot, workers keep moving).
@@ -251,7 +261,8 @@ pub struct Stats {
     pub inline_renders: u64,
     /// Runner calls completed by workers (including late and faulted ones).
     pub worker_runs: u64,
-    /// Overruns, all causes.
+    /// Overruns of the three causes of a strip's own (late, busy, unstarted); upstream-missed
+    /// skips are apart ([`Stats::upstream_missed`]).
     pub overruns: u64,
     /// Overruns with [`OverrunCause::Late`]: claimed, not done at the deadline (late claims).
     pub overruns_late: u64,
@@ -275,6 +286,8 @@ pub struct Stats {
     pub runner_panics: u64,
     /// Refused publisher calls (caller errors).
     pub misuse: u64,
+    /// Strips skipped because a task they depend on missed ([`OverrunCause::UpstreamMissed`]).
+    pub upstream_missed: u64,
 }
 
 #[derive(Default)]
@@ -292,6 +305,7 @@ struct Counters {
     late_results: AtomicU64,
     runner_panics: AtomicU64,
     misuse: AtomicU64,
+    upstream_missed: AtomicU64,
 }
 
 /// Adds one to a statistic. Relaxed: no other memory is published through it.
@@ -386,6 +400,11 @@ pub struct WorkerSet {
     published_len: usize,
     /// Strips skipped this block (busy).
     skipped: usize,
+    /// Strips not published this block because they became ready only in the deadline phase
+    /// ([`WorkerSet::forgo`]; `Unstarted`).
+    forgone: usize,
+    /// Strips skipped this block because a task they depend on missed.
+    upstream: usize,
     /// Blocks begun by this set (the clock of the overrun bar).
     block_index: u64,
     /// Per strip: the first block index in which the strip may be rendered inline again (0:
@@ -444,6 +463,8 @@ impl WorkerSet {
             published: vec![0; strips].into_boxed_slice(),
             published_len: 0,
             skipped: 0,
+            forgone: 0,
+            upstream: 0,
             block_index: 0,
             barred_until: vec![0; strips].into_boxed_slice(),
             refused: vec![false; strips].into_boxed_slice(),
@@ -562,6 +583,7 @@ impl WorkerSet {
             late_results: r(&c.late_results),
             runner_panics: r(&c.runner_panics),
             misuse: r(&c.misuse),
+            upstream_missed: r(&c.upstream_missed),
         }
     }
 
@@ -600,6 +622,8 @@ impl WorkerSet {
         self.generation = generation;
         self.published_len = 0;
         self.skipped = 0;
+        self.forgone = 0;
+        self.upstream = 0;
         self.publish_ns = 0;
         self.block_index += 1;
         bump(&self.shared.stats.blocks);
@@ -902,43 +926,55 @@ impl WorkerSet {
 
     /// At the deadline: a last read of `Done`, then every unresolved strip is an overrun.
     fn overrun_the_rest(&mut self, g: u64, deadline: Instant) {
-        let shared = Arc::clone(&self.shared);
         // For the lateness of the `Late` results, when they are retired (no clock read).
-        let deadline_ns = shared.figures.nanos(deadline).max(1);
+        let deadline_ns = self.shared.figures.nanos(deadline).max(1);
         for k in 0..self.published_len {
             let strip = self.published[k];
-            if self.outcomes[strip] != Outcome::Pending {
-                continue;
+            if self.outcomes[strip] == Outcome::Pending {
+                self.overrun_strip(strip, g, deadline_ns);
             }
-            if let Some(o) = self.take_done(strip, g) {
-                self.outcomes[strip] = o;
-                continue;
-            }
-            let Some(slot) = shared.jobs.slot(strip) else { continue };
-            let cause = if slot.reclaim() {
-                // Taken back unrendered, so no worker starts it after the deadline.
-                slot.retire();
-                bump(&self.shared.stats.overruns_unstarted);
-                shared.figures.count(strip, Count::Unstarted);
-                OverrunCause::Unstarted
-            } else if let Some(o) = self.take_done(strip, g) {
-                // Completed between the two reads.
-                self.outcomes[strip] = o;
-                continue;
-            } else {
-                bump(&self.shared.stats.overruns_late);
-                shared.figures.count(strip, Count::Late);
-                self.late_deadline_ns[strip] = deadline_ns;
-                self.bar(strip);
-                OverrunCause::Late
-            };
-            self.outcomes[strip] = Outcome::Overrun(cause);
         }
+    }
+
+    /// At the deadline, one strip still pending: a last read of `Done`, else an overrun
+    /// (`Unstarted` when it is taken back unrendered, `Late` when a worker holds it). Sets and
+    /// returns its outcome (`Pending` only for a strip with no slot).
+    fn overrun_strip(&mut self, strip: usize, g: u64, deadline_ns: u64) -> Outcome {
+        if let Some(o) = self.take_done(strip, g) {
+            self.outcomes[strip] = o;
+            return o;
+        }
+        let shared = Arc::clone(&self.shared);
+        let Some(slot) = shared.jobs.slot(strip) else { return Outcome::Pending };
+        let cause = if slot.reclaim() {
+            // Taken back unrendered, so no worker starts it after the deadline.
+            slot.retire();
+            bump(&self.shared.stats.overruns_unstarted);
+            shared.figures.count(strip, Count::Unstarted);
+            OverrunCause::Unstarted
+        } else if let Some(o) = self.take_done(strip, g) {
+            // Completed between the two reads.
+            self.outcomes[strip] = o;
+            return o;
+        } else {
+            bump(&self.shared.stats.overruns_late);
+            shared.figures.count(strip, Count::Late);
+            self.late_deadline_ns[strip] = deadline_ns;
+            self.bar(strip);
+            OverrunCause::Late
+        };
+        self.outcomes[strip] = Outcome::Overrun(cause);
+        self.outcomes[strip]
     }
 
     fn report(&self) -> BlockReport {
         let refused = self.refused.iter().filter(|&&r| r).count();
-        let mut r = BlockReport { overrun: self.skipped, inline_refused: refused, ..BlockReport::default() };
+        let mut r = BlockReport {
+            overrun: self.skipped + self.forgone,
+            inline_refused: refused,
+            upstream_missed: self.upstream,
+            ..BlockReport::default()
+        };
         for &strip in &self.published[..self.published_len] {
             match self.outcomes[strip] {
                 Outcome::Mixed => r.mixed += 1,

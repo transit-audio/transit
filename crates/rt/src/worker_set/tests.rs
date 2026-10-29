@@ -295,7 +295,7 @@ fn a_stalled_strip_cannot_hold_finish_past_its_deadline() {
     // timing: stall-bound SLACK is over ten scheduler quanta; see its definition
     assert!(returned - deadline < SLACK, "finish returned {:?} past its deadline", returned - deadline);
     assert_eq!(set.outcome(5), Some(Outcome::Overrun(OverrunCause::Late)));
-    assert_eq!(r, BlockReport { mixed: 7, inline: 0, overrun: 1, faulted: 0, inline_refused: 0 });
+    assert_eq!(r, BlockReport { mixed: 7, inline: 0, overrun: 1, faulted: 0, inline_refused: 0, upstream_missed: 0 });
     assert_eq!(set.jobs().slot(5).map(JobSlot::state), Some(State::Claimed), "a claimed slot is left alone");
 
     // The next block skips it: a second overrun, the others render.
@@ -308,7 +308,7 @@ fn a_stalled_strip_cannot_hold_finish_past_its_deadline() {
     set.wake(3);
     wait_done(&set, 7, 1);
     let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
-    assert_eq!(r, BlockReport { mixed: 7, inline: 0, overrun: 1, faulted: 0, inline_refused: 0 });
+    assert_eq!(r, BlockReport { mixed: 7, inline: 0, overrun: 1, faulted: 0, inline_refused: 0, upstream_missed: 0 });
     assert_eq!(set.outcome(5), Some(Outcome::Overrun(OverrunCause::Busy)));
     let st = set.stats();
     assert_eq!((st.overruns, st.overruns_late, st.overruns_busy), (2, 1, 1));
@@ -324,7 +324,7 @@ fn a_stalled_strip_cannot_hold_finish_past_its_deadline() {
     set.wake(3);
     wait_done(&set, 8, 0);
     let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
-    assert_eq!(r, BlockReport { mixed: 8, inline: 0, overrun: 0, faulted: 0, inline_refused: 0 });
+    assert_eq!(r, BlockReport { mixed: 8, inline: 0, overrun: 0, faulted: 0, inline_refused: 0, upstream_missed: 0 });
     assert_eq!(fake.strips[5].last_gen.load(Ordering::Acquire), 3);
     assert!(set.shutdown(STALL).is_empty());
     assert_eq!(set.jobs().faults(), 0);
@@ -452,7 +452,7 @@ fn a_panicking_runner_completes_its_slot_as_a_counted_fault() {
     set.wake(1);
     wait_done(&set, 4, 0);
     let r = set.finish(Instant::now() + STALL, |_| panic!("nothing is left to render inline"));
-    assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 0, faulted: 1, inline_refused: 0 });
+    assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 0, faulted: 1, inline_refused: 0, upstream_missed: 0 });
     assert_eq!(set.outcome(2), Some(Outcome::Faulted));
     assert_eq!(set.stats().runner_panics, 1);
     assert_eq!(set.jobs().counts().idle, 4);
@@ -561,7 +561,7 @@ fn shutdown_quarantines_a_stalled_worker_within_its_bound() {
     set.wake(2);
     wait_done(&set, 3, 1);
     let r = set.finish(Instant::now(), |_| panic!("nothing is left to render inline"));
-    assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 1, faulted: 0, inline_refused: 0 });
+    assert_eq!(r, BlockReport { mixed: 3, inline: 0, overrun: 1, faulted: 0, inline_refused: 0, upstream_missed: 0 });
 
     let t0 = Instant::now();
     let q = set.shutdown(BOUND);

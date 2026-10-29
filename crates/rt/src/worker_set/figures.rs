@@ -23,6 +23,11 @@
 //! block (the publish stamp); the lateness of a late result is computed from the completion
 //! stamp and the deadline `finish` was given, with no clock read.
 //!
+//! **Upstream misses** (issue #174). A strip skipped because a task it depends on missed counts an
+//! upstream miss, with the origin (the first task of the branch that missed on its own), in a
+//! second per-strip table beside the line: written by the publisher alone, so the executors' line
+//! keeps its eight words. The origin's own overrun is counted once, at the origin.
+//!
 //! Writers use `Relaxed` (statistics; nothing else is published through them). Readers (the UI
 //! thread, through [`Figures`]) get each figure exact on its own, not a consistent snapshot.
 //! Allocation-free after construction. No `unsafe`.
@@ -106,10 +111,15 @@ pub struct StripFigures {
     pub cost_ns: u64,
     /// The worst-case render cost, nanoseconds (0: no history).
     pub worst_ns: u64,
+    /// Blocks the strip was skipped because a task it depends on missed (issue #174; not in
+    /// [`StripFigures::overruns`], which counts the strip's own).
+    pub upstream_missed: u64,
+    /// The origin of the last upstream miss: the strip index of the task that missed on its own.
+    pub upstream_origin: Option<usize>,
 }
 
 impl StripFigures {
-    /// Overruns of every cause.
+    /// Overruns of the strip's own causes (busy, late, unstarted).
     #[must_use]
     pub const fn overruns(&self) -> u64 {
         self.overruns_busy + self.overruns_late + self.overruns_unstarted
@@ -125,12 +135,21 @@ pub(crate) enum Count {
     Inline,
 }
 
+/// One strip's upstream misses (issue #174): written by the publisher alone.
+#[derive(Debug, Default)]
+struct Upstream {
+    missed: AtomicU64,
+    /// The last origin's strip index plus one (0: none).
+    origin: AtomicU64,
+}
+
 /// The set's figures, shared with the workers and with readers on other threads. A
 /// [`super::WorkerSet::figures`] handle holds nothing else of the set: no runner, no strip.
 #[derive(Debug)]
 pub struct Figures {
     origin: Instant,
     strips: Box<[StripCells]>,
+    upstream: Box<[Upstream]>,
     lateness: Histogram,
     wake: Histogram,
 }
@@ -141,6 +160,7 @@ impl Figures {
         Self {
             origin: Instant::now(),
             strips: (0..strips).map(|_| StripCells::default()).collect(),
+            upstream: (0..strips).map(|_| Upstream::default()).collect(),
             lateness: Histogram::default(),
             wake: Histogram::default(),
         }
@@ -175,6 +195,18 @@ impl Figures {
             for a in [&c.overruns_busy, &c.overruns_late, &c.overruns_unstarted, &c.inline_renders] {
                 a.store(0, Ordering::Relaxed);
             }
+        }
+        if let Some(u) = self.upstream.get(strip) {
+            u.missed.store(0, Ordering::Relaxed);
+            u.origin.store(0, Ordering::Relaxed);
+        }
+    }
+
+    /// Publisher: `strip` was skipped because `origin` missed. Relaxed.
+    pub(crate) fn upstream(&self, strip: usize, origin: usize) {
+        if let Some(u) = self.upstream.get(strip) {
+            u.missed.fetch_add(1, Ordering::Relaxed);
+            u.origin.store(u64::try_from(origin).unwrap_or(u64::MAX - 1).saturating_add(1), Ordering::Relaxed);
         }
     }
 
@@ -227,7 +259,10 @@ impl Figures {
     pub fn strip(&self, strip: usize) -> Option<StripFigures> {
         let c = self.strips.get(strip)?;
         let r = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let (missed, origin) = self.upstream.get(strip).map_or((0, 0), |u| (r(&u.missed), r(&u.origin)));
         Some(StripFigures {
+            upstream_missed: missed,
+            upstream_origin: origin.checked_sub(1).and_then(|o| usize::try_from(o).ok()),
             overruns_busy: r(&c.overruns_busy),
             overruns_late: r(&c.overruns_late),
             overruns_unstarted: r(&c.overruns_unstarted),
@@ -238,13 +273,15 @@ impl Figures {
     }
 
     /// The `N` strips with the most overruns, most first (a tie keeps the lower index first),
-    /// each with its index; only strips with an overrun, the rest `None`. Allocation-free.
+    /// each with its index; only strips with an overrun or an upstream miss, the rest `None`.
+    /// Ranked by their own overruns, then by upstream misses (issue #174). Allocation-free.
     #[must_use]
     pub fn top_overruns<const N: usize>(&self) -> [Option<(usize, StripFigures)>; N] {
         let mut top: [Option<(usize, StripFigures)>; N] = [None; N];
+        let rank = |f: &StripFigures| (f.overruns(), f.upstream_missed);
         for i in 0..self.strips.len() {
-            let Some(f) = self.strip(i).filter(|f| f.overruns() > 0) else { continue };
-            let Some(at) = top.iter().position(|t| t.is_none_or(|(_, g)| f.overruns() > g.overruns())) else { continue };
+            let Some(f) = self.strip(i).filter(|f| rank(f) > (0, 0)) else { continue };
+            let Some(at) = top.iter().position(|t| t.is_none_or(|(_, g)| rank(&f) > rank(&g))) else { continue };
             for k in (at + 1..N).rev() {
                 top[k] = top[k - 1];
             }

@@ -879,6 +879,8 @@ impl StripPool {
                         // The worker keeps it; the next blocks skip it until it is done.
                         OverrunCause::Late => {}
                         OverrunCause::Busy => {}
+                        // Only the graph path skips a strip for its source (`strip_pool::graph`).
+                        OverrunCause::UpstreamMissed => {}
                     }
                 }
                 Outcome::Faulted => {
