@@ -48,7 +48,7 @@ When a plug-in does not return (its editor window turns white and Windows says i
 
 ## A long recording was not placed
 
-A take longer than about 6.2 hours of mono at 48 kHz (3.1 hours of stereo; half again at 96 kHz) is too
+A take longer than about 6.2 hours of mono at 48 kHz (3.1 hours of stereo; half as long at 96 kHz) is too
 long for a session to hold in memory. When the recording stops, transit says so in a message that names the
 file, how long it is and the limit, writes the same as a warning in the log, and keeps the file where it
 recorded: the message ends with "The file is kept at <path>". The session remembers the file: every time
