@@ -696,6 +696,11 @@ impl Player {
     pub fn plugin_host_wedged(&self) -> usize {
         self.owner().map_or(0, |owner| owner.plugin_host_wedged())
     }
+    /// The calls the plug-in host threads that are not responding are stuck in, each naming its
+    /// plug-in and the call (issue #205); empty normally.
+    pub fn plugin_host_stuck(&self) -> Vec<transit_plugin_host::StuckCall> {
+        self.owner().map_or_else(|_| Vec::new(), |owner| owner.plugin_host_stuck())
+    }
     /// Editor windows that were accepted for opening and then failed: (track, slot, why), once.
     pub fn take_editor_errors(&self) -> Vec<(TrackId, usize, String)> {
         self.owner().map(|mut owner| owner.take_editor_errors()).unwrap_or_default()

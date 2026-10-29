@@ -1,7 +1,7 @@
 //! An instance adopted by its host thread ([`crate::Ctx::adopt`]): the forwarder the render graph
 //! holds, and the editor and state proxies the UI holds.
 
-use crate::{Clock, Host, Inner, Status, Worker, lock};
+use crate::{Busy, Clock, Host, Inner, Status, Worker, call, lock};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
@@ -66,24 +66,39 @@ pub(crate) struct Token {
     timeout: Duration,
     host: Weak<Inner>,
     clock: Clock,
+    /// The plug-in's name, for the watchdog's labels (issue #205).
+    name: Arc<str>,
 }
 
 impl Token {
-    pub(crate) fn new(key: u64, worker: Arc<Worker>, shared: Arc<EditorShared>, timeout: Duration, host: Weak<Inner>, clock: Clock) -> Arc<Token> {
-        Arc::new(Token { key, worker, shared, timeout, host, clock })
+    pub(crate) fn new(
+        key: u64,
+        worker: Arc<Worker>,
+        shared: Arc<EditorShared>,
+        timeout: Duration,
+        host: Weak<Inner>,
+        clock: Clock,
+        name: Arc<str>,
+    ) -> Arc<Token> {
+        Arc::new(Token { key, worker, shared, timeout, host, clock, name })
     }
 
-    /// Runs `f` with this instance's editor on its host thread (fire and forget).
-    fn with_editor(&self, f: impl FnOnce(Option<&mut Box<dyn PluginEditor>>, &EditorShared) + Send + 'static) {
+    /// What a request for this instance runs, for the watchdog.
+    fn busy(&self, call: &'static str) -> Busy {
+        Busy::new(&self.name, call)
+    }
+
+    /// Runs `f` (the call `call`) with this instance's editor on its host thread (fire and forget).
+    fn with_editor(&self, call: &'static str, f: impl FnOnce(Option<&mut Box<dyn PluginEditor>>, &EditorShared) + Send + 'static) {
         let (key, shared) = (self.key, Arc::clone(&self.shared));
-        self.worker.send_or_leak(move |ctx| f(ctx.local(key).and_then(|l| l.editor.as_mut()), &shared));
+        self.worker.send_or_leak(self.busy(call), move |ctx| f(ctx.local(key).and_then(|l| l.editor.as_mut()), &shared));
     }
 }
 
 impl Drop for Token {
     fn drop(&mut self) {
         let key = self.key;
-        self.worker.send_or_leak(move |ctx| {
+        self.worker.send_or_leak(self.busy(call::RELEASE), move |ctx| {
             ctx.entries.remove(&key);
         });
     }
@@ -113,7 +128,7 @@ impl Drop for Hosted {
         if let Some(plugin) = self.inner.take() {
             // Destroyed on its own thread, after any request queued before; leaked if that
             // thread is gone. `token` drops after this, so the handles go after the instance.
-            self.token.worker.send_or_leak(move |_| drop(plugin));
+            self.token.worker.send_or_leak(self.token.busy(call::DESTROY), move |_| drop(plugin));
         }
     }
 }
@@ -248,7 +263,7 @@ impl PluginEditor for RemoteEditor {
         *lock(&shared.timing) = OpenTiming { requested: Some((self.token.clock)()), started: None, report: None };
         shared.opening.store(true, Ordering::Release);
         let clock = Arc::clone(&self.token.clock);
-        self.token.with_editor(move |editor, shared| {
+        self.token.with_editor(call::EDITOR_OPEN, move |editor, shared| {
             lock(&shared.timing).started = Some(clock());
             let opened = match editor.map(|e| e.open()) {
                 Some(Ok(())) => {
@@ -285,7 +300,7 @@ impl PluginEditor for RemoteEditor {
         shared.opening.store(false, Ordering::Release);
         shared.closing.store(true, Ordering::Release);
         shared.open.store(false, Ordering::Release);
-        self.token.with_editor(|editor, shared| {
+        self.token.with_editor(call::EDITOR_CLOSE, |editor, shared| {
             if let Some(e) = editor {
                 e.close();
             }
@@ -306,7 +321,7 @@ impl PluginEditor for RemoteEditor {
 
     fn set_param(&mut self, id: &str, value: f32) {
         let id = id.to_owned();
-        self.token.with_editor(move |editor, _| {
+        self.token.with_editor(call::EDITOR_PARAM, move |editor, _| {
             if let Some(e) = editor {
                 e.set_param(&id, value);
             }
@@ -325,7 +340,7 @@ impl PluginEditor for RemoteEditor {
         }
         self.header = Some(header.clone());
         let header = header.clone();
-        self.token.with_editor(move |editor, _| {
+        self.token.with_editor(call::EDITOR_HEADER, move |editor, _| {
             if let Some(e) = editor {
                 e.set_header(&header);
             }
@@ -382,7 +397,9 @@ impl RemoteState {
         }
         let host = Host { inner: self.token.host.upgrade().ok_or(StateBusy)? };
         let key = self.token.key;
-        let pending = host.submit_to(worker, move |ctx| ctx.local(key).and_then(|l| l.state.as_mut()).and_then(|s| s.save_state()));
+        let pending = host.submit_to(worker, self.token.busy(call::STATE_READ), move |ctx| {
+            ctx.local(key).and_then(|l| l.state.as_mut()).and_then(|s| s.save_state())
+        });
         let start = Instant::now();
         loop {
             match pending.poll() {
@@ -412,7 +429,8 @@ impl RemoteState {
         }
         let Some(inner) = self.token.host.upgrade() else { return StateJob::failed("the plug-in host has shut down") };
         let key = self.token.key;
-        let pending = Host { inner }.submit_to(&worker, move |ctx| ctx.local(key).and_then(|l| l.state.as_mut()).map(|s| job(s.as_mut())));
+        let busy = self.token.busy(call::PRESET_JOB);
+        let pending = Host { inner }.submit_to(&worker, busy, move |ctx| ctx.local(key).and_then(|l| l.state.as_mut()).map(|s| job(s.as_mut())));
         StateJob::remote(move || match pending.poll() {
             Status::Ready(v) => JobPoll::Ready(v),
             Status::Waiting { .. } if worker.responsive() => JobPoll::Waiting,

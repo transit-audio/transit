@@ -327,6 +327,9 @@ pub struct Report {
     pub open_asio_driver: Option<String>,
     /// The session's strips by track index, for naming the strip of the longest callback (#162).
     pub strips: Vec<crate::telemetry::StripName>,
+    /// The plug-in host's lines (issue #205): a call a host thread is stuck in, naming the
+    /// plug-in; empty while every host thread responds.
+    pub plugin_host: Vec<String>,
     pub log_dir: Option<PathBuf>,
     pub log_lines: Vec<String>,
     /// The last status-bar message and when it appeared (seconds since the Unix epoch), kept
@@ -450,6 +453,14 @@ impl Report {
             o.push_str(&line);
             o.push('\n');
         }
+        section(&mut o, "Plug-in host");
+        if self.plugin_host.is_empty() {
+            o.push_str("Every plug-in host thread is responding.\n");
+        }
+        for line in &self.plugin_host {
+            o.push_str(line);
+            o.push('\n');
+        }
         section(&mut o, "Log");
         match &self.log_dir {
             Some(dir) => o.push_str(&format!("Log folder: {}\n", dir.display())),
@@ -563,6 +574,12 @@ pub struct DiagState {
 pub const COPIED_SECS: f64 = 2.0;
 
 impl crate::StudioApp {
+    /// The plug-in host section (issue #205): each call a host thread is stuck in, naming the
+    /// plug-in and the call.
+    pub(crate) fn plugin_host_lines(&self) -> Vec<String> {
+        self.player.as_ref().map(|p| p.plugin_host_stuck().iter().map(transit_playback::StuckCall::line).collect()).unwrap_or_default()
+    }
+
     /// Starts collecting the report for the clipboard. The helper programs run on a worker thread;
     /// [`Self::poll_diagnostics`] copies the text when it is ready. One collection at a time.
     pub(crate) fn request_diagnostics(&mut self, now: f64) {
@@ -706,6 +723,7 @@ mod tests {
             },
             open_asio_driver: None,
             strips: Vec::new(),
+            plugin_host: vec!["Plug-in host: Guitar Rig 7 stuck in a window message (its editor or a dialog it opened) for 240 s".into()],
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
             last_status: None,
             log_lines: vec!["INFO opened /home/alice/Music/song.transit".into(), "WARN something".into()],
@@ -763,6 +781,7 @@ mod tests {
             "== Open devices ==",
             "== Callback telemetry ==",
             "== MIDI ==",
+            "== Plug-in host ==",
             "== Log ==",
         ] {
             assert!(text.contains(header), "missing {header}\n{text}");
@@ -785,6 +804,7 @@ mod tests {
             "Callbacks: 42",
             "Log folder: /home/alice/.config/transit/logs",
             "WARN something",
+            "Plug-in host: Guitar Rig 7 stuck in a window message (its editor or a dialog it opened) for 240 s",
         ] {
             assert!(text.contains(want), "missing {want:?}\n{text}");
         }
@@ -848,7 +868,7 @@ mod tests {
     #[test]
     fn the_midi_section_lists_ports_open_state_mappings_and_the_last_source() {
         let text = fake().render(&Redaction::default());
-        let midi = &text[text.find("== MIDI ==").expect("section")..text.find("== Log ==").expect("log")];
+        let midi = &text[text.find("== MIDI ==").expect("section")..text.find("== Plug-in host ==").expect("the next section")];
         assert_eq!(
             midi,
             "== MIDI ==\nInput: Keystation 49 \u{b7} open\nInput: loopMIDI Port \u{b7} not open\nOutput: Model 12 \u{b7} open\n\
@@ -890,6 +910,7 @@ mod tests {
         let text = Report::default().render(&Redaction::default());
         assert!(text.contains("No audio systems listed."));
         assert!(text.contains("No output stream, so no counters."));
+        assert!(text.contains("== Plug-in host ==\nEvery plug-in host thread is responding.\n"), "{text}");
         assert!(text.contains("== Log =="));
     }
 

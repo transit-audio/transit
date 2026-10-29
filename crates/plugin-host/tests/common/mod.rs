@@ -29,6 +29,8 @@ pub struct Log {
     pub actions: Mutex<Vec<HeaderAction>>,
     /// A live load of `b"hang"` waits on this until its sender is dropped.
     pub hang: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
+    /// The next editor open waits on this until its sender is dropped (issue #205).
+    pub open_gate: Mutex<Option<std::sync::mpsc::Receiver<()>>>,
 }
 
 impl Log {
@@ -130,6 +132,10 @@ pub struct FakeEditor {
 impl PluginEditor for FakeEditor {
     fn open(&mut self) -> Result<(), String> {
         self.log.note("editor_open");
+        let gate = self.log.open_gate.lock().unwrap().take();
+        if let Some(rx) = gate {
+            let _ = rx.recv();
+        }
         if self.fails {
             return Err("no window today".into());
         }

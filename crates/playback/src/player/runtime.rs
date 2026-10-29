@@ -403,6 +403,9 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn plugin_host_wedged(&self) -> usize {
         self.handles.host_wedged()
     }
+    pub fn plugin_host_stuck(&self) -> Vec<transit_plugin_host::StuckCall> {
+        self.handles.host_stuck()
+    }
     pub fn take_editor_errors(&mut self) -> Vec<(TrackId, usize, String)> {
         self.handles.take_editor_errors()
     }

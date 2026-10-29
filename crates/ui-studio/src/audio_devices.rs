@@ -643,6 +643,7 @@ impl StudioApp {
             open_asio_driver: self.running_native_asio(),
             strips: self.strip_names(),
             last_status: self.status_age.last().cloned(),
+            plugin_host: self.plugin_host_lines(),
             log_dir: self.services.config_dir.as_ref().map(|d| d.join("logs")),
             ..Default::default()
         }

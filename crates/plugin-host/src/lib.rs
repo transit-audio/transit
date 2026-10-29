@@ -27,6 +27,11 @@
 //! fresh thread. A thread that never returns keeps its instances, leaked rather than destroyed
 //! elsewhere.
 //!
+//! **A stuck call is named** (issue #205). Every busy section carries the plug-in and the call it
+//! runs ([`Busy`]); the watchdog logs both when the section first runs past its budget and every
+//! [`RELOG_EVERY`] while it stays stuck, and [`Host::stuck`] lists them for the UI and the
+//! diagnostics report.
+//!
 //! **Inline mode.** On macOS (AppKit wants editors on the process main thread, and both SDKs want
 //! the editor and the instance on one thread) the host runs every job at once on
 //! the calling thread and [`Ctx::adopt`] returns the instance as it is: the behavior before
@@ -36,6 +41,7 @@
 
 mod hosted;
 mod phases;
+mod stuck;
 
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
@@ -48,6 +54,7 @@ use transit_rt::gui_thread::{MessageQueue, QueueWaker};
 
 use hosted::EditorShared;
 pub use phases::{Clock, LoadPhase, PhaseLog, loading_text, log_lines, open_log_line, report_phase, scope as phase_scope, seconds_text};
+pub use stuck::{Busy, RELOG_EVERY, StuckCall, call};
 
 /// How long a request may run before its host thread counts as wedged (ADR 0018).
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -143,6 +150,8 @@ struct JobCell {
     job: Mutex<Option<Job>>,
     /// A creation ([`Host::submit`]): it runs on the creation budget.
     creation: bool,
+    /// What it runs, for the watchdog (issue #205).
+    busy: Busy,
 }
 
 impl JobCell {
@@ -160,6 +169,8 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 
 /// One host thread.
 pub(crate) struct Worker {
+    /// The thread's name (`plugin-host-0`), for the log.
+    name: String,
     tx: mpsc::Sender<Arc<JobCell>>,
     waker: QueueWaker,
     epoch: Instant,
@@ -183,6 +194,11 @@ pub(crate) struct Worker {
     /// Jobs that may move to a fresh thread if this one wedges (creation jobs).
     movable: Mutex<Vec<Arc<JobCell>>>,
     thread: OnceLock<std::thread::ThreadId>,
+    /// What the current (or last) busy section runs (issue #205).
+    label: Mutex<Busy>,
+    /// The section last logged as stuck and how long it had run then: it is logged again every
+    /// [`RELOG_EVERY`] while it stays stuck.
+    logged: Mutex<(u64, Duration)>,
 }
 
 impl Worker {
@@ -209,21 +225,29 @@ impl Worker {
         self.busy_section().map(|(_, ran)| ran)
     }
 
-    fn busy<R>(&self, f: impl FnOnce() -> R) -> R {
-        self.busy_as(Section::Job, f)
-    }
-
-    /// Runs `f` on the clock, on the budget of `kind`. A thread marked wedged meanwhile is
-    /// responsive again once `f` returns: it was slow, not stuck.
-    fn busy_as<R>(&self, kind: Section, f: impl FnOnce() -> R) -> R {
-        let section = self.enter(kind);
+    /// Runs `f` on the clock, on the budget of `kind`, labeled `busy`. A thread marked wedged
+    /// meanwhile is responsive again once `f` returns: it was slow, not stuck.
+    fn busy_as<R>(&self, kind: Section, busy: Busy, f: impl FnOnce() -> R) -> R {
+        let section = self.enter(kind, busy);
         let r = f();
         self.leave(section);
         r
     }
 
-    /// Starts a busy section; returns its name (odd).
-    fn enter(&self, kind: Section) -> u64 {
+    /// What the current (or last) busy section runs.
+    fn busy_label(&self) -> Busy {
+        lock(&self.label).clone()
+    }
+
+    /// Names what the current section runs from inside it (a creation that learns its plug-in, a
+    /// tick moving from one editor to the next).
+    fn relabel(&self, busy: Busy) {
+        *lock(&self.label) = busy;
+    }
+
+    /// Starts a busy section labeled `busy`; returns its name (odd).
+    fn enter(&self, kind: Section, busy: Busy) -> u64 {
+        *lock(&self.label) = busy;
         self.dispatching.store(kind == Section::Dispatch, Ordering::Release);
         self.creating.store(kind == Section::Creation, Ordering::Release);
         self.busy_since.store(self.now_ms() + 1, Ordering::Release);
@@ -288,10 +312,10 @@ impl Worker {
         Ok(())
     }
 
-    /// Queues `job`, or leaks it (and whatever it owns) when the thread is gone: plug-in objects
-    /// are never destroyed on another thread than their own.
-    pub(crate) fn send_or_leak(&self, job: impl FnOnce(&mut Ctx) + Send + 'static) {
-        let cell = Arc::new(JobCell { job: Mutex::new(Some(Box::new(job))), creation: false });
+    /// Queues `job` (labeled `busy`), or leaks it (and whatever it owns) when the thread is gone:
+    /// plug-in objects are never destroyed on another thread than their own.
+    pub(crate) fn send_or_leak(&self, busy: Busy, job: impl FnOnce(&mut Ctx) + Send + 'static) {
+        let cell = Arc::new(JobCell { job: Mutex::new(Some(Box::new(job))), creation: false, busy });
         if let Err(cell) = self.send(cell) {
             log::debug!("plug-in host: the thread of an instance is gone; leaking what it owned");
             std::mem::forget(cell);
@@ -310,6 +334,45 @@ impl Worker {
 
     pub(crate) fn responsive(&self) -> bool {
         self.running.load(Ordering::Acquire) && !self.is_wedged()
+    }
+
+    /// Logs the section marked wedged a moment ago (at `budget`) and remembers it was logged.
+    fn log_first(&self, budget: Duration, older: bool) {
+        let busy = self.busy_label();
+        if older {
+            log::error!("{}", stuck::older_line(&busy, &self.name, budget));
+        } else {
+            log::error!("{}", stuck::first_line(&busy, &self.name, budget));
+        }
+        if let Some((section, ran)) = self.busy_section() {
+            *lock(&self.logged) = (section, ran);
+        }
+    }
+
+    /// Logs a wedged section again once [`RELOG_EVERY`] has passed since it was last logged.
+    fn relog(&self) {
+        if !self.running.load(Ordering::Acquire) || !self.is_wedged() {
+            return;
+        }
+        let Some((section, ran)) = self.busy_section() else { return };
+        let mut logged = lock(&self.logged);
+        if logged.0 != section {
+            *logged = (section, ran);
+        } else if stuck::relog_due(ran, logged.1) {
+            logged.1 = ran;
+            drop(logged);
+            log::error!("{}", stuck::again_line(&self.busy_label(), &self.name, ran));
+        }
+    }
+
+    /// The stuck call, while this thread is wedged.
+    fn stuck(&self) -> Option<StuckCall> {
+        if !self.running.load(Ordering::Acquire) || !self.is_wedged() {
+            return None;
+        }
+        let (_, ran) = self.busy_section()?;
+        let busy = self.busy_label();
+        Some(StuckCall { thread: self.name.clone(), plugin: busy.plugin, call: busy.call, stuck_for: ran })
     }
 }
 
@@ -446,6 +509,9 @@ pub struct Ctx {
     entries: HashMap<u64, Local>,
     next_key: u64,
     exit: bool,
+    /// The plug-ins whose editors are open, named for a window-message dispatch's label: a click
+    /// in a plug-in's window runs its code inside the dispatch (issue #205).
+    open_editors: Arc<str>,
 }
 
 /// An instance's editor and state reader, kept on its host thread.
@@ -453,6 +519,7 @@ struct Local {
     editor: Option<Box<dyn PluginEditor>>,
     state: Option<Box<dyn PluginStateReader>>,
     shared: Arc<EditorShared>,
+    name: Arc<str>,
 }
 
 impl Ctx {
@@ -465,12 +532,23 @@ impl Ctx {
         let editor = plugin.editor();
         let state = plugin.state_reader();
         let shared = Arc::new(EditorShared::default());
+        let name: Arc<str> = Arc::from(plugin.info().name);
         let key = self.next_key;
         self.next_key += 1;
         let (has_editor, has_state) = (editor.is_some(), state.is_some());
-        self.entries.insert(key, Local { editor, state, shared: Arc::clone(&shared) });
-        let token = hosted::Token::new(key, worker, shared, self.timeout, self.host.clone(), Arc::clone(&self.clock));
+        self.entries.insert(key, Local { editor, state, shared: Arc::clone(&shared), name: Arc::clone(&name) });
+        let token = hosted::Token::new(key, worker, shared, self.timeout, self.host.clone(), Arc::clone(&self.clock), name);
         Box::new(hosted::Hosted::new(plugin, token, has_editor, has_state))
+    }
+
+    /// Names the plug-in the running job works for (issue #205): a creation names the plug-in it
+    /// makes (`id` is the session's plug-in id; the log shows its name once the type is known), so
+    /// a creation that never returns is logged with it. Does nothing in inline mode.
+    pub fn name_job(&self, id: &str) {
+        if let Some(worker) = &self.worker {
+            let call = worker.busy_label().call;
+            worker.relabel(Busy { plugin: plugin_name(id), call });
+        }
     }
 
     /// The number of adopted instances whose handles are still alive here.
@@ -483,16 +561,44 @@ impl Ctx {
         self.entries.get_mut(&key)
     }
 
-    /// Every editor's `idle`: their edits and open state go to the shared side.
+    /// Every editor's `idle`: their edits and open state go to the shared side. Each idle is
+    /// labeled with its plug-in (issue #205), and the open editors are named for the dispatches.
     fn idle(&mut self) {
+        let mut open: Vec<&str> = Vec::new();
         for local in self.entries.values_mut() {
             if let Some(editor) = &mut local.editor {
+                if let Some(worker) = &self.worker {
+                    worker.relabel(Busy::new(&local.name, call::EDITOR_IDLE));
+                }
                 let edits = editor.idle();
                 let actions = editor.take_header_actions();
-                local.shared.publish(edits, actions, editor.is_open());
+                let is_open = editor.is_open();
+                local.shared.publish(edits, actions, is_open);
+                if is_open {
+                    open.push(&local.name);
+                }
             }
         }
+        open.sort_unstable();
+        let label = stuck::open_editors_label(&open);
+        if label != self.open_editors {
+            self.open_editors = label;
+        }
     }
+}
+
+/// The name of plug-in `id` (`clap:…`, `vst3:…`) as its format's cache knows it, or the id itself
+/// before any instance of the type was made. Never loads anything.
+#[must_use]
+pub fn plugin_name(id: &str) -> Arc<str> {
+    let info = if id.starts_with(transit_clap_host::ID_PREFIX) {
+        transit_clap_host::cached_info(id)
+    } else if id.starts_with(transit_vst3_host::ID_PREFIX) {
+        transit_vst3_host::cached_info(id)
+    } else {
+        None
+    };
+    Arc::from(info.map_or(id, |i| i.name))
 }
 
 struct Inner {
@@ -540,6 +646,7 @@ impl Host {
                 entries: HashMap::new(),
                 next_key: 0,
                 exit: false,
+                open_editors: Arc::from(stuck::NO_EDITOR),
             });
         }
         host
@@ -580,6 +687,7 @@ impl Host {
         }
         let waker = ready_rx.recv().ok()?;
         let worker = Arc::new(Worker {
+            name: format!("plugin-host-{n}"),
             tx,
             waker,
             epoch: Instant::now(),
@@ -591,6 +699,8 @@ impl Host {
             running: AtomicBool::new(true),
             movable: Mutex::new(Vec::new()),
             thread: OnceLock::new(),
+            label: Mutex::new(Busy::any(call::START)),
+            logged: Mutex::new((0, Duration::ZERO)),
         });
         worker_tx.send(Arc::clone(&worker)).ok()?;
         lock(&self.inner.workers).push(Arc::clone(&worker));
@@ -602,20 +712,27 @@ impl Host {
     /// Creation jobs (`movable`) run on the creation budget and move to a fresh thread if theirs
     /// wedges, or is held by a slow creation, before starting them; jobs for an existing
     /// instance stay on the instance's thread ([`Host::submit_to`]).
+    /// The job names its plug-in with [`Ctx::name_job`] (issue #205).
     pub fn submit<T: Send + 'static>(&self, job: impl FnOnce(&mut Ctx) -> T + Send + 'static) -> Pending<T> {
         self.check();
         let worker = lock(&self.inner.current).clone();
-        self.submit_on(worker, true, job)
+        self.submit_on(worker, true, Busy::any(call::CREATING), job)
     }
 
-    pub(crate) fn submit_to<T: Send + 'static>(&self, worker: &Arc<Worker>, job: impl FnOnce(&mut Ctx) -> T + Send + 'static) -> Pending<T> {
-        self.submit_on(Some(Arc::clone(worker)), false, job)
+    pub(crate) fn submit_to<T: Send + 'static>(
+        &self,
+        worker: &Arc<Worker>,
+        busy: Busy,
+        job: impl FnOnce(&mut Ctx) -> T + Send + 'static,
+    ) -> Pending<T> {
+        self.submit_on(Some(Arc::clone(worker)), false, busy, job)
     }
 
     fn submit_on<T: Send + 'static>(
         &self,
         worker: Option<Arc<Worker>>,
         movable: bool,
+        busy: Busy,
         job: impl FnOnce(&mut Ctx) -> T + Send + 'static,
     ) -> Pending<T> {
         let slot = Arc::new(Slot { state: AtomicU8::new(QUEUED), started: Mutex::new(None), value: Mutex::new(None), done: Condvar::new() });
@@ -658,7 +775,7 @@ impl Host {
             failed(&slot);
             return Pending { slot, cell: None, host: self.clone(), budget };
         };
-        let cell = Arc::new(JobCell { job: Mutex::new(Some(Box::new(wrapped))), creation: movable });
+        let cell = Arc::new(JobCell { job: Mutex::new(Some(Box::new(wrapped))), creation: movable, busy });
         if movable {
             let mut list = lock(&worker.movable);
             list.retain(|c| !c.claimed());
@@ -685,10 +802,12 @@ impl Host {
             if current.as_ref().is_some_and(|c| Arc::ptr_eq(c, w)) {
                 continue;
             }
-            if w.overdue(w.budget(&self.inner.config)).is_some_and(|section| w.mark_wedged(section)) {
+            let budget = w.budget(&self.inner.config);
+            if w.overdue(budget).is_some_and(|section| w.mark_wedged(section)) {
                 self.inner.wedged.fetch_add(1, Ordering::AcqRel);
-                log::error!("plug-in host: an older host thread stopped responding; its plug-ins are unreachable until it returns");
+                w.log_first(budget, true);
             }
+            w.relog();
         }
         let Some(current) = current else { return };
         let budget = current.budget(&self.inner.config);
@@ -704,9 +823,7 @@ impl Host {
             return;
         }
         self.inner.wedged.fetch_add(1, Ordering::AcqRel);
-        log::error!(
-            "plug-in host: a plug-in has not returned for {budget:?}; a new host thread takes over new plug-ins, and the old one's plug-ins are unreachable until it returns"
-        );
+        current.log_first(budget, false);
         if self.inner.closed.load(Ordering::Acquire) {
             return;
         }
@@ -740,6 +857,13 @@ impl Host {
         self.inner.wedged.load(Ordering::Acquire)
     }
 
+    /// The calls the wedged host threads are stuck in, each naming its plug-in (issue #205): for
+    /// the UI's message and the diagnostics report. Empty while every thread responds.
+    #[must_use]
+    pub fn stuck(&self) -> Vec<StuckCall> {
+        lock(&self.inner.workers).iter().filter_map(|w| w.stuck()).collect()
+    }
+
     /// Ends hosting: no new jobs; each live, responsive host thread drops its instances'
     /// handles, runs the shutdown hook and ends. Waits at most `timeout` in all; a thread still
     /// inside a plug-in is left behind. True when every thread finished in time.
@@ -749,7 +873,7 @@ impl Host {
         let mut pending = Vec::new();
         for w in workers.iter().filter(|w| w.responsive()) {
             let hook = self.inner.config.hooks.shutdown.clone();
-            pending.push(self.submit_to(w, move |ctx| {
+            pending.push(self.submit_to(w, Busy::any(call::SHUTDOWN), move |ctx| {
                 ctx.entries.clear();
                 if let Some(h) = hook {
                     h();
@@ -772,7 +896,7 @@ impl Host {
 /// on this thread after the apartment ends (issue #56).
 fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQueue, config: &Config, host: Weak<Inner>) {
     if let Some(start) = &config.hooks.start {
-        worker.busy(|| catch_unwind(AssertUnwindSafe(|| start())).is_ok());
+        worker.busy_as(Section::Job, Busy::any(call::START), || catch_unwind(AssertUnwindSafe(|| start())).is_ok());
     }
     let mut ctx = Ctx {
         worker: Some(Arc::clone(worker)),
@@ -782,12 +906,13 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
         entries: HashMap::new(),
         next_key: 0,
         exit: false,
+        open_editors: Arc::from(stuck::NO_EDITOR),
     };
     let mut last_tick = Instant::now();
     while !ctx.exit {
         while let Ok(cell) = rx.try_recv() {
             if let Some(job) = cell.take() {
-                worker.busy_as(if cell.creation { Section::Creation } else { Section::Job }, || job(&mut ctx));
+                worker.busy_as(if cell.creation { Section::Creation } else { Section::Job }, cell.busy.clone(), || job(&mut ctx));
             }
             if ctx.exit {
                 break;
@@ -796,10 +921,11 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
         if ctx.exit {
             break;
         }
-        worker.busy_as(Section::Dispatch, || catch_unwind(AssertUnwindSafe(|| queue.dispatch(256))).is_ok());
+        let window_message = Busy::new(&ctx.open_editors, call::WINDOW_MESSAGE);
+        worker.busy_as(Section::Dispatch, window_message, || catch_unwind(AssertUnwindSafe(|| queue.dispatch(256))).is_ok());
         if last_tick.elapsed() >= config.tick {
             last_tick = Instant::now();
-            worker.busy(|| {
+            worker.busy_as(Section::Job, Busy::any(call::SERVICING), || {
                 catch_unwind(AssertUnwindSafe(|| {
                     if let Some(tick) = &config.hooks.tick {
                         tick();
@@ -847,6 +973,7 @@ mod tests {
     fn worker(queue: &MessageQueue) -> Worker {
         let (tx, _) = mpsc::channel();
         Worker {
+            name: "plugin-host-test".into(),
             tx,
             waker: queue.waker(),
             epoch: Instant::now(),
@@ -858,6 +985,8 @@ mod tests {
             running: AtomicBool::new(true),
             movable: Mutex::new(Vec::new()),
             thread: OnceLock::new(),
+            label: Mutex::new(Busy::any(call::START)),
+            logged: Mutex::new((0, Duration::ZERO)),
         }
     }
 
@@ -868,7 +997,7 @@ mod tests {
     fn a_check_that_marks_a_section_after_it_returned_does_not_wedge_the_thread() {
         let queue = MessageQueue::attach();
         let w = worker(&queue);
-        let section = w.enter(Section::Job);
+        let section = w.enter(Section::Job, Busy::any(call::REQUEST));
         let seen = w.overdue(Duration::ZERO);
         assert_eq!(seen, Some(section), "the check sees the section past its budget");
         w.leave(section);
@@ -876,7 +1005,7 @@ mod tests {
         assert!(!w.is_wedged() && w.responsive(), "an idle thread is not wedged");
         assert_eq!(w.wedged.load(Ordering::SeqCst), 0);
         // The next section is not wedged by the stale observation either.
-        let next = w.enter(Section::Job);
+        let next = w.enter(Section::Job, Busy::any(call::REQUEST));
         assert!(!w.is_wedged());
         w.leave(next);
     }
@@ -887,7 +1016,7 @@ mod tests {
     fn a_mark_holds_while_its_section_runs_and_ends_with_it() {
         let queue = MessageQueue::attach();
         let w = worker(&queue);
-        let section = w.enter(Section::Dispatch);
+        let section = w.enter(Section::Dispatch, Busy::any(call::WINDOW_MESSAGE));
         let seen = w.overdue(Duration::ZERO).unwrap();
         assert!(w.mark_wedged(seen));
         assert!(w.is_wedged() && !w.responsive());

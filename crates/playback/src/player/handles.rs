@@ -117,6 +117,8 @@ type Made = Result<Option<NewInstance>, ()>;
 /// when the factory reports it, binding once the instance is made.
 fn creation(spec: InstanceSpec, factory: Factory, phases: Arc<PhaseLog>, clock: Clock) -> impl FnOnce(&mut Ctx) -> Made + Send + 'static {
     move |ctx| {
+        // A creation that never returns is logged with its plug-in (issue #205).
+        ctx.name_job(&spec.id);
         phases.enter(LoadPhase::Creating, clock());
         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             transit_plugin_host::phase_scope(&phases, &clock, || factory(&spec)).map(|mut made| {
@@ -658,6 +660,11 @@ impl Handles {
     /// back down when a thread returns from the long call.
     pub fn host_wedged(&self) -> usize {
         self.host.wedged()
+    }
+
+    /// The calls the wedged host threads are stuck in, each naming its plug-in (issue #205).
+    pub fn host_stuck(&self) -> Vec<transit_plugin_host::StuckCall> {
+        self.host.stuck()
     }
 
     /// How many instances the compile did not predict are being made or wait for their
