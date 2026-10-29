@@ -24,4 +24,4 @@
    hourly watch checks CI first. Owner: the coordinator. Blind spots: preset load and restore
    after undo have no guard test yet (Save As only); continuous document edits (automation
    writes) can starve a job to the 10 s give-up; a bypassed insert's value is not applied, so a
-   save there holds the plug-in's real value (#78 covers the undelivered-value case).
+   save there holds the plug-in's real value (#219 covers the delivery limits left open).

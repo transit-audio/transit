@@ -2,7 +2,7 @@
 
 - **Status:** accepted 2026-10-24 (retroactive; decided 2026-10-23 in #68 and #73, escape E47)
 - **Date:** 2026-10-24
-- **Reopen when:** the parameter-delivery limits tracked in #78 are closed (a bypassed insert's values applied, a guarantee that the plug-in processed what was sent) and `Player::plays` can stop being the gate; continuous edits (automation writes) starve header jobs to the give-up often enough that waiting for an unchanged document is the wrong rule; factory presets (VST3 program lists, CLAP preset discovery) need a container of their own; or a user preset needs to carry more than the plug-in's state.
+- **Reopen when:** the parameter-delivery limits tracked in #219 are closed (a bypassed insert's values applied, a guarantee that the plug-in processed what was sent) and `Player::plays` can stop being the gate; continuous edits (automation writes) starve header jobs to the give-up often enough that waiting for an unchanged document is the wrong rule; factory presets (VST3 program lists, CLAP preset discovery) need a container of their own; or a user preset needs to carry more than the plug-in's state.
 
 ## Context
 
@@ -12,7 +12,7 @@ The jobs raced the audio side (#73, escape E47). Parameter values reach a plug-i
 
 ## Decision
 
-1. **Any UI job that reads or loads live plug-in state after a document change waits for `Player::plays(&session)`.** `plays` is the rendered-document confirmation: the audio side's plan for exactly that session is confirmed active and a block of it has been rendered (`crates/playback/src/player/runtime.rs`). It guarantees the values the document stores were sent to each plug-in's parameter queue after that document was rendered. It does not guarantee the plug-in processed them, and a bypassed or inactive insert's values are not applied at all (#78).
+1. **Any UI job that reads or loads live plug-in state after a document change waits for `Player::plays(&session)`.** `plays` is the rendered-document confirmation: the audio side's plan for exactly that session is confirmed active and a block of it has been rendered (`crates/playback/src/player/runtime.rs`). It guarantees the values the document stores were sent to each plug-in's parameter queue after that document was rendered. It does not guarantee the plug-in processed them, and a bypassed or inactive insert's values are not applied at all (#219).
    - Header jobs (Save As, Copy, preset load) and the live restore after an undo or redo of a load start in a *waiting* step and begin only when `plays` is true (`crates/ui-studio/src/plugin_header.rs`).
    - **Give-up:** a job still waiting after 10 s (`PLAYS_WITHIN`) is dropped with a status line and stores nothing. A restore says "Plug-in state not restored: the audio session did not apply in time; undo again or reload the preset"; other jobs say "The audio session is still updating; try again after it applies". This is the known limit under continuous document edits, because `plays` needs the document to stay unchanged for a rendered block.
    - **Slot-generation check:** every job carries the `SlotGen` (`crates/mix/src/plan.rs`) of the instance it started on, the identity of a plug-in slot across plans. Before the job begins and when it finishes, the UI checks that the slot still holds that instance (`still_holds`). If the plug-in in that slot changed in between, the result is dropped and the status reads "The plug-in in that slot changed while its preset loaded; nothing was stored". A waiting restore whose slot changed is dropped quietly (logged at debug).
@@ -35,7 +35,7 @@ The jobs raced the audio side (#73, escape E47). Parameter values reach a plug-i
 - A preset saved from the header holds the value the user just set, and a load cannot be overwritten by an older value in flight.
 - A header action can be slow right after a document change, and can give up under continuous automation writes. The user is told and nothing is stored, rather than a stale state being saved.
 - `.vstpreset` files load in other VST3 hosts.
-- The wait is the cheapest correct rule while parameter delivery stays what it is. #78 tracks the limits (a bypassed insert's value is not applied, so a save there holds the plug-in's real value).
+- The wait is the cheapest correct rule while parameter delivery stays what it is. #219 tracks the limits (a bypassed insert's value is not applied, so a save there holds the plug-in's real value).
 - Known gaps recorded in #73: a preset load that finishes after the UI gave up on a not-responding host thread leaves the live plug-in and the session disagreeing until the next save; factory presets are not listed; macOS gets no header strip.
 
 ## Alternatives rejected
@@ -45,4 +45,4 @@ The jobs raced the audio side (#73, escape E47). Parameter values reach a plug-i
 
 ## Related
 
-[ADR 0018](0018-plugin-host-thread.md) (host thread), `docs/contributing/knowledge/plugin-presets.md`, `docs/escapes/E47-header-state-jobs-raced-the-rendered-document.md`, issues #68, #73, #78.
+[ADR 0018](0018-plugin-host-thread.md) (host thread), `docs/contributing/knowledge/plugin-presets.md`, `docs/escapes/E47-header-state-jobs-raced-the-rendered-document.md`, issues #68, #73, #78, #219.
