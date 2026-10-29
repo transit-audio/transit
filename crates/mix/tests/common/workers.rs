@@ -206,6 +206,17 @@ pub fn session(instruments: usize, audio: usize) -> (Session, Vec<TrackId>) {
 impl Rig {
     pub fn new(instruments: usize, audio: usize, frames: usize) -> Rig {
         let (s, ids) = session(instruments, audio);
+        Rig::with_session(s, ids, frames, |_| None)
+    }
+
+    /// A rig over `s`, whose continuity instruments are on `ids`; `extra` makes the instances it
+    /// knows (by spec) before the usual factory (#174: test plug-ins on inserts).
+    pub fn with_session(
+        s: Session,
+        ids: Vec<TrackId>,
+        frames: usize,
+        mut extra: impl FnMut(&InstanceSpec) -> Option<NewInstance> + 'static,
+    ) -> Rig {
         let epoch = EngineEpoch(9);
         let mut mix = MixEngine::realtime_with_events(target(frames), epoch, EventLimits::default());
         let mut comp = PlanCompiler::new(target(frames), PlanLimits::default());
@@ -216,6 +227,9 @@ impl Rig {
                 let shared = Shared::new();
                 m.lock().unwrap().push((spec.track, Arc::clone(&shared)));
                 return Some(NewInstance { plugin: Box::new(ContinuityPlugin::new(shared, spec.ch, frames)), refused_state: false });
+            }
+            if let Some(made) = extra(spec) {
+                return Some(made);
             }
             create_instance(&spec.id, spec.state.as_deref(), SR as f32, frames, spec.ch)
         };

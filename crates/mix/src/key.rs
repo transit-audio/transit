@@ -94,11 +94,12 @@ impl KeyLine {
         self.tap = old.tap;
     }
 
-    /// Test view: whether the line holds history (it was written and not idled since), and its
-    /// write position (it moves with every block written).
+    /// Test view: whether the line holds history (it was written and not idled since), its write
+    /// position (it moves with every block written) and how much history it holds (a reset
+    /// starts it again from one block).
     #[cfg(test)]
-    pub(crate) fn history(&self) -> (bool, usize) {
-        (self.line.live, self.line.idx)
+    pub(crate) fn history(&self) -> (bool, usize, usize) {
+        (self.line.live, self.line.idx, self.line.written)
     }
 }
 
@@ -233,7 +234,7 @@ impl KeyBank {
     /// Test view of the entries keyed at `keyed`: whether each line holds history and its write
     /// position, in bank order (a skipped block neither writes nor idles them).
     #[cfg(test)]
-    pub(crate) fn lines_of(&self, keyed: usize) -> Vec<(bool, usize)> {
+    pub(crate) fn lines_of(&self, keyed: usize) -> Vec<(bool, usize, usize)> {
         self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed).map(|e| e.line.history()).collect()
     }
 

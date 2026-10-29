@@ -1115,5 +1115,8 @@ mod graph;
 
 #[cfg(test)]
 pub(crate) mod tests;
+
+#[cfg(test)]
+mod graph_tests;
 #[cfg(test)]
 pub(crate) use tests::SWITCH;

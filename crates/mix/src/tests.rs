@@ -31,6 +31,11 @@ impl PlanRig {
 
     /// Compiles `s` and adopts it.
     pub(crate) fn publish(&mut self, s: &Session) {
+        assert_eq!(self.try_publish(s), Adoption::Adopted);
+    }
+
+    /// Compiles `s` and offers it to the engine: what the adoption said.
+    pub(crate) fn try_publish(&mut self, s: &Session) -> Adoption {
         self.issued += 1;
         let (sr, block, fakes) = (s.sample_rate.as_f64() as f32, self.block, &mut self.fakes);
         let mut make = |spec: &InstanceSpec, _: SlotGen| match fakes.iter().position(|(t, slot, _)| (*t, *slot) == (spec.track, spec.slot)) {
@@ -38,8 +43,9 @@ impl PlanRig {
             None => create_instance(&spec.id, spec.state.as_deref(), sr, block, spec.ch),
         };
         let mut env = self.comp.compile(Arc::new(s.clone()), self.comp.active(), PlanGeneration::from_raw(self.issued), &mut make).unwrap();
-        assert_eq!(self.eng.adopt_plan(&mut env), Adoption::Adopted);
+        let adopted = self.eng.adopt_plan(&mut env);
         self.comp.reclaim(env);
+        adopted
     }
 
     /// Renders one block at `pos` and returns it.
