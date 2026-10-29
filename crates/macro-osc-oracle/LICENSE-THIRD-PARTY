@@ -1,0 +1,72 @@
+Third-party licenses: transit-macro-osc-oracle
+==============================================
+
+This crate is dev-only (tests and CI) and is never linked into or shipped with transit. transit's
+own code in this crate (src/, cpp/, tests/, build.rs, patches/) is MIT OR Apache-2.0, like the rest
+of transit. The C++ under vendor/ is by Emilie Gillet and is used under the MIT License, as below.
+Provenance, the upstream commits and the local build changes are in VENDOR.md.
+
+
+1. vendor/plaits/
+-----------------
+
+Source: https://github.com/pichenettes/eurorack at commit
+08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4. The repository README states: "Code (STM32F projects):
+MIT license." Each vendored file carries this notice in its header (the copyright year varies by
+file, 2016 to 2023); reproduced verbatim from plaits/dsp/voice.cc:
+
+Copyright 2016 Emilie Gillet.
+
+Author: Emilie Gillet (emilie.o.gillet@gmail.com)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
+
+See http://creativecommons.org/licenses/MIT/ for more information.
+
+
+2. vendor/stmlib/
+-----------------
+
+Source: https://github.com/pichenettes/stmlib at commit
+e3bd7c9cc00e4364166f9905c0509b6ffd0535ec. Its LICENSE is copied verbatim to vendor/stmlib/LICENSE.
+That file also covers code this crate does not vendor (third_party/STM and programming/serial);
+the vendored files are all Emilie Gillet's and fall under its MIT section, reproduced verbatim:
+
+Except when noted otherwise, all code is copyright Emilie Gillet and is
+released under the MIT License with the following notice:
+
+Copyright 2012 Emilie Gillet.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.
