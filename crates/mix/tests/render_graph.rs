@@ -781,3 +781,71 @@ fn a_skipped_dependent_s_midi_is_held_and_delivered() {
     assert_eq!(f.conflicts, 0);
     drop(rig.mix.into_retired());
 }
+
+/// #213 on the task-graph path (every keyed session renders through it): instrument 1 is keyed
+/// from instrument 0, whose insert holds the one render worker until the test releases it. The
+/// held strip is reported by track id after the limit's blocks, only that track, and no longer
+/// once the worker is back. Independent of wall time: the hold lasts as long as the test wants.
+#[test]
+fn a_hung_worker_in_a_keyed_session_is_reported_held_on_the_graph_path() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (mut s, ids) = common::workers::session(6, 0);
+    s.track_mut(ids[0]).unwrap().mixer.inserts[0] = Some({
+        let mut g = Insert::new("gain");
+        g.preset = "hold".into();
+        g
+    });
+    s.track_mut(ids[1]).unwrap().mixer.inserts[0] = Some(ducker(key_from(ids[0], Tap::Post)));
+    let (hold, entered, wait) = (Arc::new(AtomicBool::new(false)), Arc::new(AtomicBool::new(false)), Arc::new(Mutex::new(None)));
+    let (h, e, w) = (Arc::clone(&hold), Arc::clone(&entered), Arc::clone(&wait));
+    let gates = s.clone();
+    let held_id = ids[0];
+    let rig = Rig::with_session(s, ids, FRAMES, move |spec| {
+        let preset = gates.track(spec.track)?.mixer.inserts.get(spec.slot)?.as_ref()?.preset.clone();
+        if preset != "hold" {
+            return None;
+        }
+        let inner = create_instance("gain", None, common::workers::SR as f32, FRAMES, spec.ch)?.plugin;
+        Some(NewInstance {
+            plugin: Box::new(Gate { inner, holds: true, hold: Arc::clone(&h), entered: Arc::clone(&e), wait: Arc::clone(&w) }),
+            refused_state: false,
+        })
+    });
+    graph_on();
+    let mut rig = rig;
+    assert_eq!(rig.mix.start_render_workers_with(16, 1), 1);
+    graph_on();
+    let rig = std::thread::spawn(move || {
+        let mut rig = rig;
+        become_callback();
+        ON_CALLBACK.set(true);
+        rig.mix.set_strip_deadline(Some(Duration::from_micros(500)));
+        let reader = rig.mix.strip_faults().unwrap();
+        assert!(reader.held_tracks().is_empty(), "nothing held while every strip is home");
+        // Held from the first block: a strip with no cost history is never rendered inline, so
+        // the worker takes it (and holds it) rather than the callback.
+        hold.store(true, Ordering::Release);
+        let mut blocks = 0u32;
+        while reader.held_tracks().is_empty() {
+            blocks += 1;
+            assert!(blocks < 20_000, "the held strip was never reported on the graph path: {:?}", reader.snapshot());
+            rig.block();
+        }
+        assert_eq!(reader.held_tracks(), [held_id.0], "only the track the worker holds");
+        hold.store(false, Ordering::Release);
+        let t0 = Instant::now();
+        // timing: stall-bound waits for the released worker; its only exit budget is the 60 s bound
+        while !rig.mix.render_workers_settled() {
+            assert!(t0.elapsed() < Duration::from_secs(60), "the worker never returned");
+            std::thread::yield_now();
+        }
+        rig.block();
+        assert!(reader.held_tracks().is_empty(), "back home: no longer held");
+        transit_mix::unmark_audio_thread();
+        rig
+    })
+    .join()
+    .unwrap();
+    graph_off();
+    drop(rig.mix.into_retired());
+}

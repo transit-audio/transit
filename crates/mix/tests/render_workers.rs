@@ -260,15 +260,17 @@ fn a_strip_a_worker_holds_past_the_limit_is_reported_held_and_clears_when_it_is_
         rig.block();
     }
     assert!(reader.held_tracks().is_empty(), "nothing is held while every strip is home");
-    rig.shared[2].stall_ns.store(2_500_000_000, Ordering::Relaxed);
-    let start = Instant::now();
+    // The worker is held inside the plug-in until the test lets it go, so the count of blocks, not
+    // the host's speed, decides when the strip is reported.
+    rig.shared[2].hold.store(true, Ordering::Release);
+    let mut blocks = 0u32;
     while reader.held_tracks().is_empty() {
-        // Blocks run unpaced: the count is of blocks, and the 2.5 s stall outlasts them all.
-        assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip was never reported held");
+        blocks += 1;
+        assert!(blocks < 1_000_000, "the held strip was never reported");
         rig.block();
     }
-    assert_eq!(reader.held_tracks().len(), 1, "only the strip the worker holds");
-    rig.shared[2].stall_ns.store(0, Ordering::Relaxed);
+    assert_eq!(reader.held_tracks(), [rig.bindings[2].0.0], "only the track the worker holds");
+    rig.shared[2].hold.store(false, Ordering::Release);
     settle(&mut rig);
     assert!(reader.held_tracks().is_empty(), "back home: no longer held");
     transit_mix::unmark_audio_thread();

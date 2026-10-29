@@ -250,6 +250,7 @@ impl StripPool {
                     guarded(st, |st| process_strip(t, st, &block));
                 }
             }
+            self.note_held(s);
             return;
         }
         self.generation = g;
@@ -320,6 +321,7 @@ impl StripPool {
             }
         }
         self.last_overruns = overruns;
+        self.note_held(s);
         self.mirror(report.overrun > 0);
     }
 }

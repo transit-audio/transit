@@ -266,6 +266,8 @@ pub struct StripFaultsReader {
     tracks: Arc<[AtomicU32]>,
     /// Per strip index: blocks in a row its strip has been away (#213).
     held: Arc<[AtomicU32]>,
+    /// Per strip index: the id of the track it runs, stored while it is away (#213).
+    held_ids: Arc<[AtomicU64]>,
 }
 
 /// How long a strip stays away before it counts as held by a hung worker (#213, K89): a late
@@ -273,11 +275,11 @@ pub struct StripFaultsReader {
 pub const HELD_SECS: u32 = 2;
 
 impl StripFaultsReader {
-    /// The track indices ([`StripFigure::track`]'s numbering) whose strips a render worker has
+    /// The ids of the tracks whose strips a render worker has
     /// held for [`HELD_SECS`] or more: the plug-in on it does not return from `process`. Relaxed
     /// loads off the audio thread (#213).
     #[must_use]
-    pub fn held_tracks(&self) -> Vec<u32> {
+    pub fn held_tracks(&self) -> Vec<u64> {
         let (frames, rate) = (self.counters.deadline_frames.load(Ordering::Relaxed), self.counters.deadline_rate.load(Ordering::Relaxed));
         if frames == 0 {
             return Vec::new();
@@ -287,7 +289,7 @@ impl StripFaultsReader {
             .iter()
             .enumerate()
             .filter(|(_, h)| u64::from(h.load(Ordering::Relaxed)) >= limit.max(1))
-            .filter_map(|(i, _)| self.tracks.get(i).map(|t| t.load(Ordering::Relaxed)))
+            .filter_map(|(i, _)| self.held_ids.get(i).map(|t| t.load(Ordering::Relaxed)))
             .collect()
     }
 
@@ -393,6 +395,8 @@ pub(crate) struct StripPool {
     tracks: Arc<[AtomicU32]>,
     /// Per strip: blocks in a row it has been away (the audio thread stores; #213).
     held: Arc<[AtomicU32]>,
+    /// Per strip index: the id of the track it runs, stored while it is away (#213).
+    held_ids: Arc<[AtomicU64]>,
     /// Per strip: in its cell (a worker may hold it).
     away: Box<[bool]>,
     /// Per strip: what to apply when it is back (`PENDING_*`).
@@ -447,6 +451,7 @@ impl StripPool {
             counters,
             tracks: (0..strips).map(|i| AtomicU32::new(u32::try_from(i).unwrap_or(u32::MAX))).collect(),
             held: (0..strips).map(|_| AtomicU32::new(0)).collect(),
+            held_ids: (0..strips).map(|_| AtomicU64::new(u64::MAX)).collect(),
             away: vec![false; strips].into_boxed_slice(),
             pending: vec![0; strips].into_boxed_slice(),
             binding: vec![None; strips].into_boxed_slice(),
@@ -534,6 +539,7 @@ impl StripPool {
             figures: self.set.figures(),
             tracks: Arc::clone(&self.tracks),
             held: Arc::clone(&self.held),
+            held_ids: Arc::clone(&self.held_ids),
         }
     }
 
@@ -839,6 +845,7 @@ impl StripPool {
                     guarded(st, |st| process_strip(t, st, &b.render(s)));
                 }
             }
+            self.note_held(s);
             return;
         }
         self.generation = g;
@@ -956,13 +963,7 @@ impl StripPool {
             }
         }
         self.last_overruns = overruns;
-        // How long a worker has held each strip, in blocks (#213): a store per strip, no more.
-        for (h, &away) in self.held.iter().zip(self.away.iter()) {
-            let n = if away { h.load(Ordering::Relaxed).saturating_add(1) } else { 0 };
-            if n != h.load(Ordering::Relaxed) {
-                h.store(n, Ordering::Relaxed);
-            }
-        }
+        self.note_held(s);
         self.mirror(report.overrun > 0);
     }
 
@@ -1038,6 +1039,23 @@ impl StripPool {
         self.away[i] = true;
         self.binding[i] = binding;
         true
+    }
+
+    /// Once per block, both render paths: counts the blocks each strip has now been away in a row
+    /// and names the track a held strip runs (#213). Audio thread: relaxed loads, a store only on
+    /// a change, no allocation. The track is the id in the plan the strip was sent away under,
+    /// which is the session of every block while it is away (a held strip refuses plan changes).
+    fn note_held(&self, s: &Session) {
+        for (i, (h, &away)) in self.held.iter().zip(self.away.iter()).enumerate() {
+            let now = h.load(Ordering::Relaxed);
+            let n = if away { now.saturating_add(1) } else { 0 };
+            if n != now {
+                h.store(n, Ordering::Relaxed);
+            }
+            if away && let (Some(id), Some(t)) = (self.held_ids.get(i), s.tracks.get(self.tracks[i].load(Ordering::Relaxed) as usize)) {
+                id.store(t.id.0, Ordering::Relaxed);
+            }
+        }
     }
 
     /// Copies the worker set's running totals into the counters the reader sees.

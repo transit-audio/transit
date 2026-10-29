@@ -44,6 +44,9 @@ pub struct Shared {
     pub reentries: AtomicU64,
     /// Nanoseconds the next render on a worker sleeps (taken by that render).
     pub stall_ns: AtomicU64,
+    /// While set, a render on a worker waits inside `process` until the test clears it (#213): a
+    /// plug-in that does not return, held for as long as the test needs, whatever the host's speed.
+    pub hold: AtomicBool,
     /// Nanoseconds the next render sleeps on any thread, the callback included (taken by that
     /// render): a plug-in's one-time load on its first real render.
     pub load_ns: AtomicU64,
@@ -61,6 +64,7 @@ impl Shared {
             inside: AtomicBool::new(false),
             reentries: AtomicU64::new(0),
             stall_ns: AtomicU64::new(0),
+            hold: AtomicBool::new(false),
             load_ns: AtomicU64::new(0),
             on_worker: AtomicU64::new(0),
             on_callback: AtomicU64::new(0),
@@ -137,6 +141,10 @@ impl Plugin for ContinuityPlugin {
             let ns = sh.stall_ns.swap(0, Ordering::Relaxed);
             if ns > 0 {
                 std::thread::sleep(Duration::from_nanos(ns));
+            }
+            while sh.hold.load(Ordering::Acquire) {
+                // timing: sleep-ok paces a wait for a release flag, measures nothing
+                std::thread::sleep(Duration::from_millis(1));
             }
         }
         // The mix delivers a block's events in offset order; the instrument checks it.
