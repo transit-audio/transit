@@ -7,6 +7,8 @@ Decision: [ADR 0013](../../adr/0013-unsafe-only-in-transit-rt.md) and its amendm
   FFI `unsafe`, confined to FFI modules; new blocks there need a quoted `// SAFETY:` justification.
 - The native backends `audio-wasapi`, `audio-asio` and `audio-jack` (ADR 0016, ADR 0021) hold their
   system's FFI; in `audio-jack` only `src/ffi.rs` and `src/callback.rs` may, each block quoting jack.h.
+- The dev-only C++ oracle `crates/macro-osc-oracle` (ADR 0033) holds the FFI to the vendored C++ in
+  `src/ffi.rs` only; every other module forbids `unsafe`. It is never linked into the app.
 - `crates/rt` exposes a safe API only. Every `unsafe fn` has a `# Safety` section and every block a
   `// SAFETY:` comment stating the invariant.
 - Per-platform modules (`windows.rs`, `linux.rs`, `macos.rs`) sit behind one API; `fallback.rs`

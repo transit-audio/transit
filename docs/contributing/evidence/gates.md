@@ -63,6 +63,17 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 
 The suite needs the `testing` cargo feature of `transit-mix` (which turns on `transit-dsp`'s): it compiles the seams the gate uses, `Plugin::fingerprint` and the strip state fingerprints, the muted serial blocks, the deterministic deadline and the per-block views (`crates/mix/src/fingerprint.rs`, `sched_seam.rs`, `strip_pool/seam.rs`), and `transit-rt`'s `testing` feature compiles the schedule and its shrinker (`worker_set::schedule`). Each is enabled only by a `[dev-dependencies]` entry (`transit-mix` names itself there), so tests and `--all-targets` lints get it and a release build (`cargo build --release`, `release.yml`) never compiles it; nothing has to be passed by hand. More seeds: `TRANSIT_SCHED_SEEDS=256 cargo test -p transit-mix --test sched_equivalence -- --nocapture`; one seed: `TRANSIT_SCHED_SEED=<n>` (the same command).
 
+## Oracle null tests
+
+A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-mutable-instruments-port.md)): the port is rendered next to the original C++ on the same runner, sample by sample, and a residual above the measured floor is an escape. The oracle for the macro oscillator is `crates/macro-osc-oracle` (`transit-macro-osc-oracle`, #194). It is dev-only: `cargo xtask layers` fails if any package takes it as a normal or build dependency (`DEV_ONLY` in `xtask/src/main.rs`), and its FFI `unsafe` is confined to `src/ffi.rs`.
+
+- **Build:** the vendored C++ (unchanged; commits and the blob check in the crate's `VENDOR.md`) with `-DTEST`, `-O2` in every profile, no fast-math and no FP contraction (`-ffp-contract=off` on GCC and Clang, `/fp:strict` on MSVC). MSVC needs two small patches, applied to copies at build time (`patches/msvc/`).
+- **Sweep:** for each of the 24 engines, 78 engine-level points (float out/aux before post-processing) and 84 voice-level points (int16 frames through the envelopes and low-pass gate): notes 36, 60 and 84, free-running and triggered, harmonics, timbre and morph each at 0, 0.25, 0.5, 0.75 and 1, and the low-pass gate decay. 48 kHz, the firmware's 12-frame blocks, a fresh engine or voice per point, a fixed seed (`src/sweep.rs`).
+- **Residual:** peak and RMS of the difference in dBFS (`src/residual.rs`); bit-identical is `-inf`.
+- **Floor:** the oracle against itself, the same sweep twice in one process and again in a second process (`tests/self_floor.rs`). Measured `-inf` (bit-identical) on Windows x86-64 MSVC on 2026-10-29; the Linux (GCC, x86-64) and macOS (Apple Clang, AArch64) runners prove theirs on every CI run (`cargo test --locked -p transit-macro-osc-oracle`, a step in each job of `ci.yml`). The constants are in `src/floor.rs`. Results are compared within a runner family only, never across: each has its own compiler and instruction set.
+- **Re-measure** after a compiler, flag or vendor change: `cargo test --locked -p transit-macro-osc-oracle --test self_floor -- --nocapture` on each runner. A failure names the engine, the point and the residual; it means the reference itself is unstable, and it blocks every port gate until fixed. Never rerun it to pass.
+- **The port gate** (#195) renders each point through the same sweep functions inside the same `Session` (the same flush-to-zero mode) and sets its bound at the floor with margin. Every ported module adds its own oracle crate and CI step.
+
 ## Rules
 
 - A gate that is not run is not a gate. If one cannot run on your machine, say so in the pull request.
