@@ -41,6 +41,10 @@ strip or track header is highlighted. The edit cursor keeps its track, which sta
 cursor commands (Paste, Split, New MIDI Clip) and of the Devices pane until you click a track
 again.
 
+## A plug-in that stops responding
+
+If a plug-in stops responding (its editor turns white), transit names it in a message: audio keeps playing, **Save now** saves the session with the plug-in's last stored state, and **Give up on <plug-in>** lets transit carry on without it until you restart; End Task on the plug-in's window would end transit ([troubleshooting](troubleshooting.md#a-plug-in-stopped-responding)).
+
 ## Multicore mixer render
 
 transit renders mixer strips on several CPU cores (one render worker per core, minus one for the
