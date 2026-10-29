@@ -140,10 +140,12 @@ pub fn detail_rows_named(t: &CallbackTelemetry, strips: &[StripName]) -> Vec<Str
         format!("Over-budget callbacks while a plug-in was loading: {}", t.over_budget_while_creating),
     ]);
     // Beside the late-block figures: the render workers' stream faults (ADR 0029), when the
-    // engine has workers (the default; `TRANSIT_RENDER_POOL=0` renders serially). A keyed plan
-    // renders through the task graph by default (#174), so its upstream-missed rows appear without
-    // a switch (`TRANSIT_RENDER_GRAPH=0` keeps keyed plans serial and those rows at 0). Each name
-    // is defined once in docs/troubleshooting.md ("Render worker figures").
+    // engine has workers (the default; `TRANSIT_RENDER_POOL=0` renders serially). The
+    // upstream-missed total row is there whenever the workers are; a keyed plan renders through
+    // the task graph by default (#174), so it counts without a switch, and a strip's row gains its
+    // `upstream missed` suffix only for a nonzero count (`TRANSIT_RENDER_GRAPH=0` keeps keyed
+    // plans serial and the total at 0). Each name is defined once in docs/troubleshooting.md
+    // ("Render worker figures").
     if let Some(f) = &t.strip_faults {
         rows.extend(strip_fault_rows(f));
         rows.extend(strip_figure_rows(f, strips));
