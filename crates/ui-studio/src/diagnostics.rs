@@ -333,6 +333,8 @@ pub struct Report {
     /// How many times request servicing or an editor idle waited for a host call into plug-in
     /// code to return (issue #205, `transit_dsp::host_call::deferred`).
     pub deferred_services: u64,
+    /// Recorded takes the session could not place (#192): the file and what it holds.
+    pub unplaced_takes: Vec<String>,
     pub log_dir: Option<PathBuf>,
     pub log_lines: Vec<String>,
     /// The last status-bar message and when it appeared (seconds since the Unix epoch), kept
@@ -465,6 +467,14 @@ impl Report {
             o.push('\n');
         }
         o.push_str(&format!("Request servicing deferred until a plug-in call returned: {}\n", self.deferred_services));
+        if !self.unplaced_takes.is_empty() {
+            section(&mut o, "Unplaced takes");
+            o.push_str("Recorded takes that were never placed in this session (the files are kept):\n");
+            for take in &self.unplaced_takes {
+                o.push_str(take);
+                o.push('\n');
+            }
+        }
         section(&mut o, "Log");
         match &self.log_dir {
             Some(dir) => o.push_str(&format!("Log folder: {}\n", dir.display())),
@@ -732,10 +742,21 @@ mod tests {
             strips: Vec::new(),
             plugin_host: vec!["Plug-in host: Guitar Rig 7 stuck in a window message (its editor or a dialog it opened) for 240 s".into()],
             deferred_services: 3,
+            unplaced_takes: Vec::new(),
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
             last_status: None,
             log_lines: vec!["INFO opened /home/alice/Music/song.transit".into(), "WARN something".into()],
         }
+    }
+
+    #[test]
+    fn unplaced_takes_have_a_section_only_when_there_are_some_issue_192() {
+        let none = fake().render(&Redaction::default());
+        assert!(!none.contains("Unplaced takes"), "{none}");
+        let report = Report { unplaced_takes: vec!["/rec/Loopback_01.wav (8.0 h of mono at 48 kHz)".into()], ..fake() };
+        let text = report.render(&Redaction::default());
+        assert!(text.contains("== Unplaced takes ==") && text.contains("/rec/Loopback_01.wav (8.0 h of mono at 48 kHz)"), "{text}");
+        assert!(text.find("== Unplaced takes ==").unwrap() < text.find("== Log ==").unwrap());
     }
 
     #[test]
