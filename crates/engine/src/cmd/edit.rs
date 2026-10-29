@@ -973,7 +973,22 @@ fn copy_clips(e: &mut Engine, p: &Value) -> Result<Value> {
     if hits_original {
         return Err(bad("edit.copy_clips", "a copy would land on an original clip and replace part of it: drag it further"));
     }
+    let sh = shuffle(e.session());
     let s = e.session_mut();
+    if sh {
+        // Shuffle: like paste, later clips move right by the span each track receives.
+        let mut spans: Vec<(TrackId, transit_time::Range)> = Vec::new();
+        for (t, c) in &src {
+            let (to, r) = (ops::lands(&dest, *t), transit_time::Range::new(c.start + by, c.end() + by));
+            match spans.iter_mut().find(|(x, _)| *x == to) {
+                Some((_, o)) => *o = transit_time::Range::new(o.start.min(r.start), o.end.max(r.end)),
+                None => spans.push((to, r)),
+            }
+        }
+        for (t, r) in spans {
+            ops::make_room(s, t, r.start, r.len()).map_err(|why| bad("edit.copy_clips", why))?;
+        }
+    }
     let mut copies = Vec::new();
     for (t, mut c) in src {
         c.id = s.new_clip_id();

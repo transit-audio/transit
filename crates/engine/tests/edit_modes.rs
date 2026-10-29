@@ -450,3 +450,19 @@ fn a_refused_scoped_command_rolls_back_with_the_original_mode() {
     assert_eq!(e.session().edit.edit_mode, EditMode::Shuffle);
     assert_eq!(snap(&e), doc);
 }
+
+#[test]
+fn copy_clips_makes_room_in_shuffle_like_paste_and_overwrites_in_slip() {
+    let undo = |e: &mut Engine| e.execute("engine.history", &json!({})).unwrap()["undo"].as_array().unwrap().len();
+    // A (0), B (2000) selected, C (4000) not; copied 3000 on.
+    for (mode, want) in [("shuffle", vec![0, 2000, 3000, 5000, 7000]), ("slip", vec![0, 2000, 3000, 4000, 5000])] {
+        let (mut e, t, ids) = long(mode, &[(0, 1000, 0), (2000, 1000, 0), (4000, 1000, 0)]);
+        let before = undo(&mut e);
+        run(&mut e, "edit.copy_clips", json!({"clips": [ids[0].0, ids[1].0], "by": 3000}));
+        let starts: Vec<i64> = clips(&e, t).iter().map(|c| c.0).collect();
+        assert_eq!(starts, want, "{mode}");
+        assert_eq!(undo(&mut e), before + 1, "{mode}: one undo step");
+        run(&mut e, "edit.undo", json!({}));
+        assert_eq!(clips(&e, t).iter().map(|c| c.0).collect::<Vec<_>>(), vec![0, 2000, 4000], "{mode}: undo restores");
+    }
+}
