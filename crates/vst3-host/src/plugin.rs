@@ -44,7 +44,7 @@ use crate::ffi::{
     ParamPoint, RELEASE_RESERVE,
 };
 use crate::gate::{Gate, MAX_CHANNELS};
-use crate::params::{ParamCurves, PendingParams};
+use crate::params::{Loads, Mapping, ParamCurves, PendingParams, differs, drop_before_load, resend_indices};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering, fence};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, PoisonError, TryLockError, Weak};
@@ -75,18 +75,6 @@ const SYNC_CHUNK: usize = 64;
 /// Parameter values one service call re-reads for `kParamValuesChanged`: it holds the instance
 /// (the audio side skips a block it would start meanwhile), so the hold stays short.
 const VALUES_CHUNK: usize = 64;
-
-/// How a SoundCraft parameter value maps to the VST3 normalized value.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Mapping {
-    /// Any stepped parameter (`stepCount > 0`, however many steps): step index `0..=steps` ↔
-    /// `index / steps`, exactly.
-    Stepped(f64),
-    /// Plain value through the controller's curve, sampled on the UI thread ([`ParamCurves`]).
-    Plain,
-    /// Linear over the info range (the controller gave no usable plain range).
-    Linear,
-}
 
 /// The status a VST3 plugin implies through its tail: an infinite tail (`kInfiniteTail`) must
 /// keep processing; a finite one (including none) may stop that many samples after the input
@@ -173,12 +161,6 @@ struct Values {
     active: bool,
 }
 
-/// A normalized value the host does not know yet (beyond conversion rounding).
-fn differs(host: f64, plugin: f64) -> bool {
-    let d = (host - plugin).abs();
-    d.is_nan() || d > 1e-6
-}
-
 /// The part of an instance both its owner (the audio thread, once in the engine) and the main
 /// thread reach (see the module docs).
 pub(crate) struct Shared {
@@ -190,6 +172,8 @@ pub(crate) struct Shared {
     key_input: AtomicBool,
     /// Bumped by every (re)activation: the audio side then sends the values the host set again.
     activation: AtomicU64,
+    /// Live state loads (#78): the audio side drops what it queued before one.
+    loads: Loads,
     map: MidiMap,
     /// The thread that created the instance: its main (UI) thread.
     main: ThreadId,
@@ -230,6 +214,15 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 fn live() -> &'static Mutex<Vec<Weak<Shared>>> {
     static LIVE: OnceLock<Mutex<Vec<Weak<Shared>>>> = OnceLock::new();
     LIVE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Test seam (#78): runs `f` while this thread holds every live instance, as the main thread holds
+/// one while it services it, so a `process` in `f` meets the contended lock and skips its block.
+#[cfg(feature = "test-hooks")]
+pub(crate) fn while_held<R>(f: impl FnOnce() -> R) -> R {
+    let all: Vec<Arc<Shared>> = lock(live()).iter().filter_map(Weak::upgrade).collect();
+    let _held: Vec<MutexGuard<'_, Core>> = all.iter().map(|s| lock(&s.core)).collect();
+    f()
 }
 
 /// Services the `restartComponent` requests of every live instance created on this thread.
@@ -562,6 +555,7 @@ impl Vst3Plugin {
             event_input: AtomicBool::new(false),
             key_input: AtomicBool::new(key_input),
             activation: AtomicU64::new(0),
+            loads: Loads::default(),
             map: MidiMap::new(),
             main: std::thread::current().id(),
             host,
@@ -727,6 +721,7 @@ impl Vst3Plugin {
             }
         }
         self.pending.clear();
+        self.timed.clear();
         for u in self.unsynced.iter() {
             u.store(SYNCED, Ordering::Relaxed);
         }
@@ -811,6 +806,7 @@ impl Vst3Plugin {
             self.gate.skip(io, ch, frames);
             return;
         };
+        drop_before_load(&mut self.pending, &shared.loads, &mut self.timed, &mut self.host_set);
         let core = &mut *guard;
         if !core.inst.is_active() || core.max_block == 0 {
             self.pending.fold_timed(&self.ids, &mut self.timed);
@@ -960,6 +956,7 @@ impl Plugin for Vst3Plugin {
     /// Runs on the audio thread (automation): converts through the sampled curves, never the
     /// controller, and queues without allocating.
     fn set_param(&mut self, id: &str, value: f32) -> bool {
+        drop_before_load(&mut self.pending, &self.shared.loads, &mut self.timed, &mut self.host_set);
         let Some(i) = self.param_index.get(id).copied() else { return false };
         let Some(pi) = self.info.params.get(i) else { return false };
         let v = pi.clamp(value);
@@ -976,6 +973,7 @@ impl Plugin for Vst3Plugin {
     /// Like `set_param`, but the point reaches the plug-in at `offset` within the next block, in
     /// a queue of its own with every other point of that parameter.
     fn set_param_at(&mut self, offset: u32, id: &str, value: f32) -> bool {
+        drop_before_load(&mut self.pending, &self.shared.loads, &mut self.timed, &mut self.host_set);
         let Some(i) = self.param_index.get(id).copied() else { return false };
         let (Some(pi), Some(&pid)) = (self.info.params.get(i), self.ids.get(i)) else { return false };
         let v = pi.clamp(value);
@@ -1004,6 +1002,12 @@ impl Plugin for Vst3Plugin {
 
     fn sample_accurate_params(&self) -> bool {
         true
+    }
+
+    /// A skipped block folds its timed points into `pending` (#117) and a block takes at most
+    /// `PARAM_QUEUE_CAP` values, so after `process` `pending` holds everything not delivered.
+    fn params_pending(&self) -> bool {
+        !self.pending.is_empty() || !self.timed.is_empty()
     }
 
     fn param(&self, id: &str) -> Option<f32> {
@@ -1199,7 +1203,8 @@ impl transit_dsp::PluginStateReader for Vst3State {
     /// call `setState` on the UI thread). The instance is held for the load, so the audio side
     /// plays the blocks meanwhile as silence with fades, as during a reactivation. As
     /// `Plugin::load_state`, the load is the host's own change: nothing is reported as an edit,
-    /// and the values the host set before it are dropped (the caller stores the returned ones).
+    /// and the values the host set before it are dropped, including any still queued on the audio
+    /// side (#78; the caller stores the returned ones).
     fn load_state(&mut self, data: &[u8]) -> Option<transit_dsp::LoadedValues> {
         let shared = self.shared.upgrade()?;
         if std::thread::current().id() != shared.main {
@@ -1210,6 +1215,7 @@ impl transit_dsp::PluginStateReader for Vst3State {
         if !core.inst.load_state(data) {
             return None;
         }
+        shared.loads.bump();
         if shared.host.midi_cc_changed.swap(false, Ordering::Acquire) {
             shared.map.publish(&core.inst.midi_mapping());
         }
@@ -1379,12 +1385,6 @@ impl PluginEditor for Vst3Editor {
     fn take_header_actions(&mut self) -> Vec<transit_dsp::HeaderAction> {
         self.conv.link.header().take_clicks().into_iter().map(header_action).collect()
     }
-}
-
-/// Indices of the values to re-send when the plugin is (re)activated: those the host set, at most
-/// `cap` of them.
-fn resend_indices(host_set: &[bool], cap: usize) -> impl Iterator<Item = usize> + '_ {
-    host_set.iter().enumerate().filter(|(_, set)| **set).map(|(i, _)| i).take(cap)
 }
 
 /// Reset's share of the note queue: drop everything pending except the releases the plug-in is

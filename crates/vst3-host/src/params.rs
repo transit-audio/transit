@@ -249,6 +249,24 @@ impl ParamCurves {
     }
 }
 
+/// How a SoundCraft parameter value maps to the VST3 normalized value.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum Mapping {
+    /// Any stepped parameter (`stepCount > 0`, however many steps): step index `0..=steps` ↔
+    /// `index / steps`, exactly.
+    Stepped(f64),
+    /// Plain value through the controller's curve, sampled on the UI thread ([`ParamCurves`]).
+    Plain,
+    /// Linear over the info range (the controller gave no usable plain range).
+    Linear,
+}
+
+/// A normalized value the host does not know yet (beyond conversion rounding).
+pub(crate) fn differs(host: f64, plugin: f64) -> bool {
+    let d = (host - plugin).abs();
+    d.is_nan() || d > 1e-6
+}
+
 /// Normalized values waiting for the next `process`: one slot per parameter, so the latest value
 /// of each parameter wins and nothing is ever dropped, and no call allocates (all storage is
 /// sized at creation). Parameters leave in the order they first changed; a block takes at most
@@ -258,11 +276,18 @@ pub(crate) struct PendingParams {
     queued: Vec<bool>,
     /// Indices of queued parameters, oldest first; never longer than the parameter count.
     order: Vec<usize>,
+    /// The [`Loads`] count these values were queued under.
+    loads_seen: u64,
 }
 
 impl PendingParams {
     pub fn new(params: usize) -> PendingParams {
-        PendingParams { value: vec![0.0; params], queued: vec![false; params], order: Vec::with_capacity(params) }
+        PendingParams { value: vec![0.0; params], queued: vec![false; params], order: Vec::with_capacity(params), loads_seen: 0 }
+    }
+
+    /// True when no value is waiting.
+    pub fn is_empty(&self) -> bool {
+        self.order.is_empty()
     }
 
     /// Queues normalized `n` for parameter `i`, replacing a value still waiting.
@@ -312,6 +337,39 @@ impl PendingParams {
         }
         self.order.drain(..k);
     }
+}
+
+/// State loads into the live instance on its main thread (the state reader, a user preset), counted
+/// so the audio side can drop the values it queued before one (#78): sent after the load, such a
+/// value would overwrite the state just loaded.
+#[derive(Default)]
+pub(crate) struct Loads(AtomicU64);
+
+impl Loads {
+    /// A state was loaded. Called while holding the instance, so the next block that takes it
+    /// sees the new count.
+    pub fn bump(&self) {
+        self.0.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+/// Audio side, before it queues a value and once it holds the instance for a block: if a state was
+/// loaded since the last call, drops every value queued before it (`pending`, the timed points) and
+/// forgets which values the host set, so a reactivation does not re-send them over the loaded
+/// state either. A value queued while the load runs counts as before it. No allocation.
+pub(crate) fn drop_before_load(pending: &mut PendingParams, loads: &Loads, timed: &mut Vec<crate::ffi::ParamPoint>, host_set: &mut [bool]) {
+    let n = loads.0.load(Ordering::Acquire);
+    if n != std::mem::replace(&mut pending.loads_seen, n) {
+        pending.clear();
+        timed.clear();
+        host_set.fill(false);
+    }
+}
+
+/// Indices of the values to re-send when the plugin is (re)activated: those the host set, at most
+/// `cap` of them.
+pub(crate) fn resend_indices(host_set: &[bool], cap: usize) -> impl Iterator<Item = usize> + '_ {
+    host_set.iter().enumerate().filter(|(_, set)| **set).map(|(i, _)| i).take(cap)
 }
 
 #[cfg(test)]
