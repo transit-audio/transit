@@ -59,6 +59,7 @@ pub mod telemetry;
 pub mod tempo_edit;
 pub mod theme;
 pub mod transport;
+mod unresponsive;
 pub mod update;
 pub mod waveform;
 pub mod widgets;
@@ -1311,6 +1312,8 @@ mod plugin_retry_tests;
 mod tests;
 #[cfg(test)]
 mod track_actions_tests;
+#[cfg(test)]
+mod unresponsive_tests;
 
 #[cfg(test)]
 mod tempo_tests;

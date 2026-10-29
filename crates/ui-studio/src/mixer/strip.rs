@@ -230,7 +230,13 @@ fn inserts_block(
         let load = app.player.as_ref().and_then(|pl| pl.slot_load(id, *slot));
         let stuck = matches!(load, Some(transit_playback::SlotLoad::NotResponding { .. }));
         let last = app.last_load_time(&ins.plugin);
-        let status = load.map(|l| crate::devices::load_text(l, last)).unwrap_or_default();
+        let mut status = load.map(|l| crate::devices::load_text(l, last)).unwrap_or_default();
+        // A loaded plug-in that does not answer (#213): the same marker as the device card.
+        let index = app.engine.session().tracks.iter().position(|x| x.id == id);
+        let hang = if load.is_none() { app.slot_hang(id, index, *slot, &ins.plugin) } else { None };
+        if hang.is_some() {
+            status = crate::devices::UNRESPONSIVE.to_string();
+        }
         let shown = if status.is_empty() { name.clone() } else { format!("{name} ({status})") };
         let mut retry = R4::default();
         if stuck {
@@ -253,7 +259,8 @@ fn inserts_block(
             app.want_editor((id, *slot));
         }
         let state = if ins.bypass { " (bypassed)" } else { "" };
-        let resp = resp.on_hover_text(format!("{name}{state}. Click for its window, right-click for more"));
+        let why = hang.map_or(String::new(), |h| format!(" {}", crate::unresponsive::tip(h, &name)));
+        let resp = resp.on_hover_text(format!("{name}{state}. Click for its window, right-click for more.{why}"));
         let slot = *slot;
         let bypass = ins.bypass;
         let editor_open = app.ui.plugin_windows.contains(&(id, slot));

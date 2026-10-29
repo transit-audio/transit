@@ -46,6 +46,22 @@ pub(super) fn track_header(
     };
     row.subtitle = kind.clone();
     let subtitle = p.text(pos2(tx + 12.0, r.min.y + 30.0), Align2::LEFT_CENTER, kind, FontId::proportional(10.5), TOKENS.text_dim);
+    // A loaded plug-in that does not answer (#213): the marker beside the subtitle.
+    if let Some((plugin, hang)) = app.track_hang(t) {
+        let name = app.plugin_name(&plugin, false);
+        let room = Rect::from_min_max(pos2(subtitle.max.x + 6.0, r.min.y + 22.0), pos2(r.max.x - 100.0, r.min.y + 38.0));
+        let m = p.with_clip_rect(room.intersect(list)).text(
+            room.left_center(),
+            Align2::LEFT_CENTER,
+            crate::devices::UNRESPONSIVE,
+            FontId::proportional(10.5),
+            TOKENS.solo,
+        );
+        ui.interact(m.intersect(room).intersect(list), ui.id().with(("unresponsive", t.id.0)), Sense::hover())
+            .on_hover_text(crate::unresponsive::tip(hang, &name));
+        row.unresponsive = crate::devices::UNRESPONSIVE.to_string();
+        row.unresponsive_rect = r4(m);
+    }
     // Toggles, right-aligned on the first line.
     let m = &t.mixer;
     let mut x = r.max.x - 6.0;

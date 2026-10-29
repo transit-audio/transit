@@ -448,7 +448,16 @@ fn card_body(
     };
     let last = app.last_load_time(&plugin);
     let kind = load.map_or(kind, |l| load_text(l, last));
-    let kind_r = pc.text(pos2(r.min.x + 8.0, title.max.y + 12.0), Align2::LEFT_CENTER, &kind, FontId::proportional(10.0), TOKENS.text_dim);
+    // A loaded plug-in that does not answer (#213): the same marker and hover as the insert row.
+    let index = app.engine.session().tracks.iter().position(|x| x.id == t);
+    let hang = if load.is_none() { app.slot_hang(t, index, key_slot, &plugin) } else { None };
+    let kind = if hang.is_some() { UNRESPONSIVE.to_string() } else { kind };
+    let kind_ink = if hang.is_some() { TOKENS.solo } else { TOKENS.text_dim };
+    let kind_r = pc.text(pos2(r.min.x + 8.0, title.max.y + 12.0), Align2::LEFT_CENTER, &kind, FontId::proportional(10.0), kind_ink);
+    if let Some(hang) = hang {
+        ui.interact(kind_r.intersect(lane), ui.id().with(("unresponsive", t.0, salt)), Sense::hover())
+            .on_hover_text(crate::unresponsive::tip(hang, &name));
+    }
     if let Some(load) = load {
         // How long so far, the phase and how long it took last time (#67), on the status text itself.
         let phase = app.player.as_ref().and_then(|pl| pl.slot_phase(t, key_slot));
@@ -624,6 +633,11 @@ pub(crate) const SLOW: &str = "Loading… (slow)";
 /// host's creation budget (ADR 0018): the slot is empty, with Retry; if the creation still
 /// returns, the plug-in is taken after all.
 pub(crate) const NOT_RESPONDING: &str = "Not responding";
+
+/// What the mixer insert row, the device card and the arrange track header say about a loaded
+/// plug-in that does not answer: its host thread is stuck or given up on (#205), or a render
+/// worker is hung inside it (#190). The hover text is [`crate::unresponsive::tip`] (#213).
+pub(crate) const UNRESPONSIVE: &str = "Unresponsive";
 
 /// The slot's text while its plug-in is on its way: "Loading…", "Loading… (slow) 12 s",
 /// "Not responding".

@@ -175,6 +175,9 @@ pub struct TrackRow {
     pub freeze_button: R4,
     /// The ancestor groups' color bars beside this row, outermost first (#60).
     pub group_bars: Vec<R4>,
+    /// The unresponsive-plug-in marker beside the subtitle (empty: none, #213), and its rect.
+    pub unresponsive: String,
+    pub unresponsive_rect: R4,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
