@@ -882,6 +882,14 @@ impl Handles {
         entry.editor.as_ref().ok_or_else(|| "this plugin has no editor".to_owned())?.available()
     }
 
+    /// Whether this slot's live plug-in is unresponsive: its host thread is stuck past the
+    /// watchdog budget or was given up on (#205, #213). Read from the state reader, else the
+    /// editor. A slot with neither, or none live, is not.
+    pub fn slot_unresponsive(&self, track: TrackId, slot: usize) -> bool {
+        let Some(entry) = self.entry(track, slot) else { return false };
+        entry.state.as_ref().map(|s| s.available()).or_else(|| entry.editor.as_ref().map(|e| e.available())).is_some_and(|r| r.is_err())
+    }
+
     /// Starts reading this slot's live state for a preset save or a copy (issue #68): on the
     /// plug-in host thread, polled once per frame.
     pub fn begin_save_state(&mut self, track: TrackId, slot: usize) -> Result<StateJob<Option<Vec<u8>>>, String> {

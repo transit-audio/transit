@@ -368,6 +368,15 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn any_stuck(&self) -> bool {
         self.handles.any_stuck()
     }
+    /// Whether this slot's live plug-in is unresponsive: its host thread is stuck or given up on (#213).
+    pub fn slot_unresponsive(&self, track: TrackId, slot: usize) -> bool {
+        self.handles.slot_unresponsive(track, slot)
+    }
+    /// Whether a render worker has held the strip of the track at session index `index` past
+    /// [`transit_mix::HELD_SECS`] (#213).
+    pub fn track_held(&self, index: usize) -> bool {
+        u32::try_from(index).is_ok_and(|i| self.control.sessions.bridge.held_tracks().contains(&i))
+    }
     pub fn slot_load(&self, track: TrackId, slot: usize) -> Option<super::SlotLoad> {
         self.handles.slot_load(track, slot)
     }
