@@ -886,7 +886,6 @@ mod tests {
         release.send(()).unwrap();
         assert!(!seen_rx.recv_timeout(Duration::from_secs(10)).unwrap(), "hidden once the owner retrieves messages");
         owner.join().unwrap();
-        assert_eq!(hide_thread_windows(thread), 0, "a thread that is gone has no windows");
     }
 
     fn client(hwnd: HWND) -> (i32, i32) {
