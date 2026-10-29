@@ -43,7 +43,7 @@ Peak callback load since open fell from 3160% to 158% at 64 frames and from 1850
 
 Yes: the keyed plan through the task graph keeps the workers' benefit. It lands where the unkeyed pool rows of gate 6 did, and the keyed compressor never missed its key.
 
-The keyed default flip waits on one more gate. The maintainer asked for a signal-level regression showing that the compressor's gain reduction follows the intended key, with correct latency alignment, in both modes. That is #179, in progress. When it passes, the graph path becomes the default for keyed plans in its own reviewed commit, and K88's "renders serially" sentence goes ([known issues](../known-issues/README.md)). Until then keyed plans keep the serial fallback.
+The keyed default flip waits on one more gate. The maintainer asked for a signal-level regression showing that the compressor's gain reduction follows the intended key, with correct latency alignment, in both modes. That is #179 and #210 (DSP equivalence under seeded stall schedules), in progress. When it passes, the graph path becomes the default for keyed plans in its own reviewed commit, and K88's "renders serially" sentence goes ([known issues](../known-issues/README.md)). Until then keyed plans keep the serial fallback.
 
 Limits of this record: one ten-minute run per row, on one machine, idle only, with the maintainer's listening pass covering the 64-frame pair only.
 
