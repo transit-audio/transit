@@ -483,9 +483,9 @@ impl Control {
         self.strip_faults.as_ref().map(transit_mix::StripFaultsReader::snapshot)
     }
 
-    /// The track indices whose strips a render worker has held past [`transit_mix::HELD_SECS`]
-    /// (#213); empty without workers.
-    pub fn held_tracks(&self) -> Vec<u32> {
+    /// The ids of the tracks whose strips a render worker has held past
+    /// [`transit_mix::HELD_SECS`] (#213); empty without workers.
+    pub fn held_tracks(&self) -> Vec<u64> {
         self.strip_faults.as_ref().map(transit_mix::StripFaultsReader::held_tracks).unwrap_or_default()
     }
 

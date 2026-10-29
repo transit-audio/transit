@@ -652,10 +652,9 @@ impl Player {
     pub fn slot_unresponsive(&self, track: TrackId, slot: usize) -> bool {
         self.owner().is_ok_and(|owner| owner.slot_unresponsive(track, slot))
     }
-    /// Whether a render worker has held the strip of the track at session index `index` past
-    /// [`transit_mix::HELD_SECS`] (#213, K89).
-    pub fn track_held(&self, index: usize) -> bool {
-        self.owner().is_ok_and(|owner| owner.track_held(index))
+    /// Whether a render worker has held `track`'s strip past [`transit_mix::HELD_SECS`] (#213, K89).
+    pub fn track_held(&self, track: TrackId) -> bool {
+        self.owner().is_ok_and(|owner| owner.track_held(track))
     }
     /// The phase this slot's plug-in is in while it loads (issue #67).
     pub fn slot_phase(&self, track: TrackId, slot: usize) -> Option<transit_plugin_host::LoadPhase> {
