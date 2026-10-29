@@ -5,10 +5,10 @@
 //! parallel render and dropped the others' payloads on its workers.
 //!
 //! Both paths: the plan on the engine's render workers and serially. The render-worker tests set
-//! a far strip deadline, so the block waits for every strip's completion instead of racing the
-//! default share of a 5.3 ms period (E49 recurrence 2026-10-29); a strip still away at the
-//! deadline is the late test's subject, and its payload comes out of the block that brings it home. The serial run also counts the audio thread's heap operations: the
-//! render adds none to what the panics themselves cost (each panic's payload box and the unwind's
+//! the strip deadline themselves (far, so the block waits for every strip's completion, or zero
+//! with held workers), never the default share of a 5.3 ms period (E49 recurrence 2026-10-29); a
+//! strip still away at the deadline keeps its payload for the control side (the late test).
+//! The serial run also counts the audio thread's heap operations: the render adds none to what the panics themselves cost (each panic's payload box and the unwind's
 //! own exception box, plus one more exception box for the re-raise).
 //!
 //! The binary installs `transit_rt::testing::CountingAlloc` and a panic hook silent for the
@@ -75,6 +75,15 @@ struct Payload(Arc<Shared>);
 impl Drop for Payload {
     fn drop(&mut self) {
         self.0.payload_drops.lock().unwrap().push(std::thread::current().id());
+    }
+}
+
+/// Clears `hold` when dropped: the held instruments go on to panic.
+struct Release(Arc<Shared>);
+
+impl Drop for Release {
+    fn drop(&mut self) {
+        self.0.hold.store(false, Ordering::Release);
     }
 }
 
@@ -204,7 +213,7 @@ fn parallel_panicking_instruments_drop_no_payload_on_a_render_worker() {
     // The block waits for every strip: with the default share of the 5.3 ms period a strip still
     // on a worker at the deadline is `Late`, its payload stays in its cell for a later block and
     // this render returns Ok (CI run 40968743055 on macos-aarch64; E49). That path is
-    // `a_strip_late_at_the_deadline_raises_its_panic_from_the_block_that_brings_it_home`.
+    // `a_strip_late_at_the_deadline_keeps_its_panic_for_the_control_side`.
     mix.set_strip_deadline(Some(FAR));
     let mark = std::thread::spawn(move || {
         MixEngine::force_serial(false);
@@ -219,20 +228,23 @@ fn parallel_panicking_instruments_drop_no_payload_on_a_render_worker() {
     let workers = mix.render_workers();
     let raised = shared.raised.lock().unwrap().clone();
     let on_workers = raised.iter().filter(|t| **t != callback).count();
-    // The callback takes part (it renders what no worker started yet), so how many ran on a
-    // worker varies; each strip rendered exactly once either way.
+    // Every panic is raised on a worker: this is the pool's first block, so no strip has a cost
+    // history and the callback's inline admission refuses each one (`NoHistory`); no instrument
+    // track reads the live input, so none renders on the callback either.
     println!("render workers: {workers}; {on_workers} of {} panics raised on a worker", raised.len());
     assert_eq!(raised.len(), TRACKS);
+    assert_eq!(on_workers, TRACKS, "every strip rendered on a render worker");
     assert_all_dropped_here("render workers", &shared, panic, mix);
 }
 
-/// A strip still on its worker at the deadline (`Late`) keeps its panic in the strip: that block
-/// returns Ok and mixes the strip as silence, and the block that brings the strip home re-raises
-/// the payload to its caller. Nothing is dropped on a worker and nothing is lost: every strip's
-/// payload comes back to the control side. The strips are held in `process` until every claimed
-/// one is past a zero deadline, so the outcome does not depend on the host's timing.
+/// A strip still on its worker at the deadline (`Late`) keeps its panic for the control side: that
+/// block returns Ok and mixes the strip as silence, no payload is dropped while the strip is away,
+/// the late strips come home (here through `render_workers_settled`) and the next block re-raises a
+/// payload, each strip panics exactly once, and every payload is dropped on the control thread.
+/// The strips a worker claims are held in `process` past a zero deadline, so the outcome does not
+/// depend on the host's timing.
 #[test]
-fn a_strip_late_at_the_deadline_raises_its_panic_from_the_block_that_brings_it_home() {
+fn a_strip_late_at_the_deadline_keeps_its_panic_for_the_control_side() {
     let _one = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     silence_panics();
     let shared = Shared::new();
@@ -250,10 +262,15 @@ fn a_strip_late_at_the_deadline_raises_its_panic_from_the_block_that_brings_it_h
         // and it waits there: each such strip is `Late`, the rest come home unrendered.
         mix.set_strip_deadline(Some(Duration::ZERO));
         shared.hold.store(true, Ordering::Release);
+        // A failed assertion below still releases the held workers (they would poll for the rest
+        // of the binary otherwise).
+        let release = Release(Arc::clone(&shared));
         shared.armed.store(true, Ordering::Relaxed);
         let mut blocks = 0;
+        let start = Instant::now();
+        // timing: stall-bound renders until a worker claims a strip; its only exit budget is the 10 s stall bound
         while shared.entered.load(Ordering::Relaxed) == 0 {
-            assert!(blocks < 10_000, "no worker claimed a strip in {blocks} blocks");
+            assert!(start.elapsed() < Duration::from_secs(10), "no worker claimed a strip in {blocks} blocks");
             let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mix.render_active(pos, BLOCK, &mut out)));
             assert!(r.is_ok(), "block {blocks}: a strip held on its worker raised nothing yet");
             pos += BLOCK as i64;
@@ -262,8 +279,9 @@ fn a_strip_late_at_the_deadline_raises_its_panic_from_the_block_that_brings_it_h
         let late = shared.entered.load(Ordering::Relaxed);
         assert!(shared.raised.lock().unwrap().is_empty(), "the held strips have not panicked yet");
         // Released: the held strips panic on their workers (each keeps its payload) and come home.
-        shared.hold.store(false, Ordering::Release);
+        drop(release);
         let start = Instant::now();
+        // timing: stall-bound polls for the released workers; its only exit budget is the 10 s stall bound
         while !mix.render_workers_settled() {
             assert!(start.elapsed() < Duration::from_secs(10), "a worker never returned");
             // timing: sleep-ok paces a wait for the released workers; measures nothing
