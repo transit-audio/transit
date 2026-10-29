@@ -46,10 +46,16 @@ const BLOCK: usize = 256;
 const LEN: usize = 18_000;
 /// Rendered past `LEN` so the largest latency here (a 700-frame hardware round trip) fits.
 const BLOCKS: usize = (LEN + 1_024).div_ceil(BLOCK);
-/// The key: (start, length, level). Starts off the block grid; a burst shorter than the attack;
-/// one long enough to settle; one under the threshold (-21.9 dB), which must not move the gain.
+/// A burst under the threshold (-21.9 dB) while the gain is settled at exactly 0 dB (before any
+/// burst over it, past the largest lookahead here): the gain must hold there, not move at all.
+const SUB_THRESHOLD: (usize, usize, f32) = (600, 800, 0.08);
+/// The key: (start, length, level). Starts off the block grid; the sub-threshold burst; a burst
+/// shorter than the attack; one long enough to settle.
 const BURSTS: [(usize, usize, f32); 6] =
-    [(1_700, 700, 0.9), (4_100, 300, 0.3), (6_000, 1_500, 0.6), (9_000, 40, 1.0), (10_500, 800, 0.08), (13_000, 500, 0.9)];
+    [SUB_THRESHOLD, (1_700, 700, 0.9), (4_100, 300, 0.3), (6_000, 1_500, 0.6), (9_000, 40, 1.0), (13_000, 500, 0.9)];
+/// The measured gain reduction allowed across the sub-threshold burst: the carrier's own f32
+/// rounding (one ulp of 0.25 is 1.3e-7 dB), nothing of a detector.
+const HELD_DB: f64 = 1e-6;
 /// The steady carrier on the compressed strip.
 const CARRIER: f32 = 0.25;
 const THRESHOLD: f32 = -20.0;
@@ -364,11 +370,18 @@ enum Expect {
 }
 
 fn expected(e: Expect, shift: isize) -> Vec<f64> {
+    expected_with(e, shift, 0)
+}
+
+/// [`expected`] with, in a chain, the second key `second_shift` samples late as well.
+fn expected_with(e: Expect, shift: isize, second_shift: isize) -> Vec<f64> {
     match e {
         Expect::One { gain, la } => detector(&key_at(gain, shift), la),
         Expect::Chain { level } => {
             let first = detector(&key_at(1.0, shift), 0);
-            let second: Vec<f64> = first.iter().map(|gr| level * 10f64.powf(-gr / 20.0)).collect();
+            let second: Vec<f64> = (0..LEN as isize)
+                .map(|p| usize::try_from(p - second_shift).ok().and_then(|i| first.get(i)).map_or(0.0, |gr| level * 10f64.powf(-gr / 20.0)))
+                .collect();
             detector(&second, 0)
         }
     }
@@ -461,6 +474,24 @@ fn check(case: &Case) {
     ] {
         let (err, _) = worst(got, &expected(case.expect, shift));
         assert!(err > by, "{name}: a key {what} would pass ({err:.4} dB)");
+    }
+    match case.expect {
+        Expect::One { .. } => {
+            // The gain holds at exactly 0 dB across the sub-threshold burst.
+            let (at, len, _) = SUB_THRESHOLD;
+            assert!(want[at..at + len].iter().all(|&v| v == 0.0), "{name}: the oracle holds across the sub-threshold burst");
+            for (mode, t) in &traces {
+                let moved = t[at..at + len].iter().fold(0.0f64, |m, v| m.max(v.abs()));
+                assert!(moved <= HELD_DB, "{name}: {mode}: the sub-threshold burst moved the gain by {moved} dB");
+            }
+        }
+        Expect::Chain { .. } => {
+            // A stale or early second key is caught too.
+            for (what, shift) in [("one block early", -(BLOCK as isize)), ("one block late (the previous block)", BLOCK as isize)] {
+                let (err, _) = worst(got, &expected_with(case.expect, 0, shift));
+                assert!(err > DISCRIMINATES_DB, "{name}: a second key {what} would pass ({err:.4} dB)");
+            }
+        }
     }
 }
 
