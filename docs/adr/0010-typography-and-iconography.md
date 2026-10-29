@@ -39,6 +39,13 @@ egui renders text through `ab_glyph` and does no OpenType shaping. That has a di
 - **Font setup still lives in `apps/transit`.** It depends on `soundcraft-ui-egui` for `fonts::definitions()`. Fixed in #177: `fonts.rs` moved into `ui-studio` and the dependency is gone (ADR 0032).
 - **Open follow-ups from the polish review,** which this ADR does not change: dense header and strip offsets are not yet on the 8 px grid, and dark dim text and light mute and solo fills fall short of contrast targets.
 
+## Amendment 2026-10-29: window titles (#206)
+
+- Window titles use the `window-title` text style, Inter at 14 pt (Body plus one point), registered by `theme::apply`. Every internal window is built with `theme::window`, which applies it.
+- egui sizes a window's title bar from `TextStyle::Heading`, so Heading is set to the same 14 pt. Nothing else in transit uses Heading; if something ever needs a real heading, give it its own named style.
+- The title bar's vertical margin is 2 px (the content margin stays 8 px), which makes the bar about 23 px at 1.0 and 1.5 scale, down from about 35 px.
+- The close button's hit area is egui's `spacing.icon_width`, a square of 18 px (egui's default is 14 px). It is not 22 px because the same value sizes every checkbox and radio button.
+
 ## Related
 
 - [ADR 0008](0008-fork-soundcraft-keep-the-engine-build-our-own-ux.md): the spike's UX target and the one-week exit criteria. Fonts and icons are the assets ADR 0008 said to replace.
