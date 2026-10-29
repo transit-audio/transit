@@ -142,7 +142,12 @@ impl Plugin for ContinuityPlugin {
             if ns > 0 {
                 std::thread::sleep(Duration::from_nanos(ns));
             }
+            // Bounded (60 s of polls) like a gate plug-in: a test that failed before releasing it
+            // cannot leave the worker inside `process` for the rest of the binary.
+            let mut polls = 0u32;
             while sh.hold.load(Ordering::Acquire) {
+                polls += 1;
+                assert!(polls < 60_000, "the hold was never released");
                 // timing: sleep-ok paces a wait for a release flag, measures nothing
                 std::thread::sleep(Duration::from_millis(1));
             }
