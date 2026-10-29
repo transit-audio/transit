@@ -27,7 +27,7 @@ fn planned_engine(s: &Session) -> MixEngine {
     let mut engine = MixEngine::realtime(target);
     assert_eq!(engine.adopt_plan(&mut plan), Adoption::Adopted);
     compiler.reclaim(plan);
-    // The multicore render is opt-in: this binary is about that path.
+    // The live engine's owner starts the workers (the default path): this binary is about that path.
     engine.start_render_workers(64);
     engine
 }
@@ -102,7 +102,7 @@ impl Drop for Saturated {
 /// which says nothing about waiting for the global pool.
 #[test]
 fn audio_thread_render_does_not_wait_for_a_saturated_global_pool() {
-    MixEngine::force_serial(false); // the pool is opt-in; this test is about the pool path
+    MixEngine::force_serial(false); // the default, said explicitly: this test is about the pool path
     let s = sixteen_strips();
     let mut eng = planned_engine(&s);
     let mut out = vec![vec![0.0f32; FRAMES]; 2];
@@ -125,7 +125,7 @@ fn audio_thread_render_does_not_wait_for_a_saturated_global_pool() {
     .unwrap();
     let finished = busy.finished();
     drop(busy);
-    MixEngine::force_serial(true); // back to the default
+    MixEngine::force_serial(true); // serial again for the next test in the binary
     assert_eq!(finished, 0, "the audio-thread render completed only after a global-pool job ended (worst block {worst:?})");
     assert!(peak > 0.01, "the strips should sound: {peak}");
     eprintln!("worst block with the global pool saturated: {worst:?}");
