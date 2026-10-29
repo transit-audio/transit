@@ -154,6 +154,9 @@ pub(crate) struct Shared {
     host_gen: AtomicU64,
     processed_gen: AtomicU64,
     set_at: Box<[AtomicU64]>,
+    /// Live state loads (#78), bumped while holding `core`: the audio side drops the values it
+    /// queued before one (see [`drop_before_load`]).
+    loads: AtomicU64,
 }
 
 /// A `params.rescan` of the values being serviced: the next parameter to re-read.
@@ -180,6 +183,15 @@ fn lock<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
 fn live() -> &'static Mutex<Vec<Weak<Shared>>> {
     static LIVE: OnceLock<Mutex<Vec<Weak<Shared>>>> = OnceLock::new();
     LIVE.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+/// Test seam (#78): runs `f` while this thread holds every live instance, as the main thread holds
+/// one while it services it, so a `process` in `f` meets the contended lock and skips its block.
+#[cfg(feature = "test-hooks")]
+pub(crate) fn while_held<R>(f: impl FnOnce() -> R) -> R {
+    let all: Vec<Arc<Shared>> = lock(live()).iter().filter_map(Weak::upgrade).collect();
+    let _held: Vec<MutexGuard<'_, Core>> = all.iter().map(|s| lock(&s.core)).collect();
+    f()
 }
 
 /// Services the requests of every live instance created on this thread (see the module docs).
@@ -415,6 +427,8 @@ pub struct ClapPlugin {
     /// Timed parameter points refused by a full queue (the value went onto the parameter's
     /// latest queued point, so the last point wins, but at that point's earlier time).
     params_dropped: u64,
+    /// The [`Shared::loads`] count the queued values were set under.
+    loads_seen: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -525,6 +539,7 @@ impl ClapPlugin {
             host_gen: AtomicU64::new(0),
             processed_gen: AtomicU64::new(0),
             set_at: ids.iter().map(|_| AtomicU64::new(0)).collect(),
+            loads: AtomicU64::new(0),
         });
         lock(live()).push(Arc::downgrade(&shared));
         ClapPlugin {
@@ -549,6 +564,7 @@ impl ClapPlugin {
             reset_pending: false,
             gate: Gate::new(),
             params_dropped: 0,
+            loads_seen: 0,
         }
     }
 
@@ -652,6 +668,17 @@ fn collapse_params(queue: &mut Vec<Event>) {
     }
 }
 
+/// Audio side (#78), before it queues a value and once it holds the instance for a block: if the
+/// main thread loaded a state since the last call, drops every parameter value queued before it,
+/// which would otherwise overwrite the state just loaded. A value queued while the load runs counts
+/// as before it. No allocation.
+fn drop_before_load(queue: &mut Vec<Event>, loads: &AtomicU64, seen: &mut u64) {
+    let n = loads.load(Ordering::Acquire);
+    if n != std::mem::replace(seen, n) {
+        queue.retain(|e| !matches!(e, Event::Param { .. }));
+    }
+}
+
 /// The sidechain port: the first non-main audio input with channels (the main input is not one).
 fn pick_key(ports: &[crate::ffi::PortInfo], main: Option<usize>) -> Option<usize> {
     ports.iter().enumerate().position(|(i, p)| !p.main && p.channels > 0 && Some(i) != main)
@@ -744,6 +771,7 @@ impl ClapPlugin {
             self.gate.skip(io, ch, frames);
             return;
         };
+        drop_before_load(&mut self.queue, &shared.loads, &mut self.loads_seen);
         let core = &mut *guard;
         if core.max_block == 0 {
             collapse_params(&mut self.queue);
@@ -882,6 +910,7 @@ impl Plugin for ClapPlugin {
     }
 
     fn set_param(&mut self, id: &str, value: f32) -> bool {
+        drop_before_load(&mut self.queue, &self.shared.loads, &mut self.loads_seen);
         let Some((cid, v)) = self.host_value(id, value) else { return false };
         // Coalesce with a pending change of the same parameter at the block start.
         self.param_at(0, cid, v);
@@ -892,6 +921,7 @@ impl Plugin for ClapPlugin {
     /// With the queue full, the value replaces the parameter's latest queued point (the last
     /// point wins, applied at that point's time: earlier than asked) and the miss is counted.
     fn set_param_at(&mut self, offset: u32, id: &str, value: f32) -> bool {
+        drop_before_load(&mut self.queue, &self.shared.loads, &mut self.loads_seen);
         let Some((cid, v)) = self.host_value(id, value) else { return false };
         if self.param_at(offset, cid, v) {
             return true;
@@ -908,6 +938,12 @@ impl Plugin for ClapPlugin {
 
     fn sample_accurate_params(&self) -> bool {
         true
+    }
+
+    /// A processed block takes every queued event (times are clamped into it), so a parameter
+    /// event still queued is one a skipped block kept (collapsed to time 0, #117).
+    fn params_pending(&self) -> bool {
+        self.queue.iter().any(|e| matches!(e, Event::Param { .. }))
     }
 
     fn param(&self, id: &str) -> Option<f32> {
@@ -1093,7 +1129,8 @@ impl transit_dsp::PluginStateReader for ClapState {
     /// `clap.state` `load` on the main thread, which CLAP allows while the plug-in processes (the
     /// plug-in synchronizes with its audio thread). The instance is held for the call, so the
     /// audio side skips the blocks meanwhile. As `Plugin::load_state`, the load is the host's own
-    /// change: its values become the host's view and nothing is reported as an edit.
+    /// change: its values become the host's view, nothing is reported as an edit, and parameter
+    /// values still queued on the audio side from before it are dropped (#78).
     fn load_state(&mut self, data: &[u8]) -> Option<transit_dsp::LoadedValues> {
         let shared = self.shared.upgrade()?;
         if std::thread::current().id() != shared.main {
@@ -1104,6 +1141,7 @@ impl transit_dsp::PluginStateReader for ClapState {
         if !core.inst.load_state(data) {
             return None;
         }
+        shared.loads.fetch_add(1, Ordering::AcqRel);
         let mut values = Vec::new();
         for ((p, id), view) in shared.info.params.iter().zip(&shared.ids).zip(shared.view.iter()) {
             if let Some(x) = core.inst.param_value(*id) {

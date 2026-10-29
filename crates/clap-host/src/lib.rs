@@ -217,6 +217,14 @@ pub fn set_scan_hook(hook: Option<std::sync::Arc<dyn Fn() + Send + Sync>>) {
     registry::set_after_load_hook(hook)
 }
 
+/// Runs `f` while this thread holds every live instance (#78): a `process` in `f` skips its block
+/// as it does while the main thread services the instance. Only for host tests.
+#[cfg(feature = "test-hooks")]
+#[doc(hidden)]
+pub fn while_instances_held<R>(f: impl FnOnce() -> R) -> R {
+    plugin::while_held(f)
+}
+
 /// Restricts scans to extra folders for deterministic registry tests. Defaults to false;
 /// enabling test hooks alone does not change normal search paths or installed-plugin smoke tests.
 #[cfg(feature = "test-hooks")]
