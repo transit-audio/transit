@@ -164,6 +164,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Sidechain any compressor or gate from any track or bus, pre- or post-fader, latency-aligned.
 - Hosted plug-ins can take a sidechain key too.
 - Plug-in delay compensation keeps every path time-aligned.
+- Mixer strips render on several cores with a bounded deadline, so one heavy plug-in no longer stretches the whole audio callback; sessions with sidechain keys render serially until the graph slice (`TRANSIT_RENDER_POOL=0` turns the workers off).
 - Opens every output on your interface; name your own paths and route tracks, buses and sends to any of them.
 - Hardware inserts: send a track through outboard gear on your interface. Choose "Hardware Insert..." in the device chain's "+" menu, then pick a send path and a return path (a pair) on the insert. Audio Devices > I/O > Hardware inserts has a Measure button that plays a click train and records the round trip, which delay compensation then uses so the track stays aligned. Measure runs in the background with a progress count (n/8 clicks) and a Cancel button, so the UI stays responsive. Transport starts (Play, Record, Space) are refused while a measurement runs, and re-opening the audio device cancels it at once. The insert shows Ready, Unmeasured, No input, Missing send, Missing return or Disabled, with the reason. A route to a path an insert sends on is refused.
 

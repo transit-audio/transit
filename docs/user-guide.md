@@ -40,3 +40,19 @@ click on empty space below the tracks or in the mixer, deselects the clips and t
 strip or track header is highlighted. The edit cursor keeps its track, which stays the target of
 cursor commands (Paste, Split, New MIDI Clip) and of the Devices pane until you click a track
 again.
+
+## Multicore mixer render
+
+transit renders mixer strips on several CPU cores (one render worker per core, minus one for the
+audio thread, at most eight). Each block gives the strips a deadline: a strip that misses it is
+silent for that block and is counted under **Render worker figures** in Copy diagnostics
+([troubleshooting](troubleshooting.md)). Sessions with sidechain keys, and strips that read a live
+input or hardware (monitored audio tracks, External Instruments, hardware inserts), render on the
+audio thread as before.
+
+To render every strip on the audio thread instead, start transit with the environment variable
+`TRANSIT_RENDER_POOL=0` (for example `set TRANSIT_RENDER_POOL=0` in a Windows command prompt
+before `transit`, or `TRANSIT_RENDER_POOL=0 transit` on Linux and macOS). Do this when a plug-in
+misbehaves on a worker thread: its track drops out, or keeps going silent while Strip overruns
+(busy) keeps rising, as when a plug-in hangs ([known issue K89](known-issues/README.md)). Unset,
+or `1`, uses the workers.

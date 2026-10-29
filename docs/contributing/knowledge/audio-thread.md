@@ -180,9 +180,10 @@ policy) inside `crates/rt` (`worker_set`). Never register with the OS inside a t
 
 ## Render workers (#124, ADR 0029)
 
-Opt-in: `TRANSIT_RENDER_POOL=1` clears `FORCE_SERIAL`, and playback's `plan_bridge::pair` then calls
-`MixEngine::start_render_workers`. Without both, `render_active` renders phase 1 serially exactly as
-before; offline renders never use the workers (they keep Rayon's global pool). The rayon render pool
+The default since 2026-10-29: `FORCE_SERIAL` starts clear, and playback's `plan_bridge::pair` calls
+`MixEngine::start_render_workers`. `TRANSIT_RENDER_POOL=0` (the opt-out, parsed by
+`render_pool::render_pool_setting`, read once in `init_render_switch`) sets `FORCE_SERIAL`; then no
+workers start and `render_active` renders phase 1 serially exactly as before; offline renders never use the workers (they keep Rayon's global pool). The rayon render pool
 is gone.
 
 - **Path.** `strip_pool::StripPool::render`: `begin_block`, bring home strips whose worker is done,

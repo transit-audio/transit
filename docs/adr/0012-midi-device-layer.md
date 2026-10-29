@@ -48,6 +48,8 @@ The thresholds in G11 and G13 are the audit's proposals, not industry constants.
 
 **Amended 2026-10-27 ([ADR 0029](0029-strip-job-slots.md), #124 slice 4): G1.** The rayon render pool is gone. A live engine renders its strips on its own `transit-rt` worker set (job slots, a bounded deadline, deferred MIDI), opt-in with `TRANSIT_RENDER_POOL=1`; serial stays the default. The callback never dispatches to Rayon's global pool and allocates nothing (allocation-armed test). The before/after callback-time numbers G1 asks for come from `crates/mix/tests/render_headroom.rs` (dev-machine numbers in the 2026-10-27 benchmark) and, for the default decision, from the maintainer's run on the Scarlett at 64 and 128 frames.
 
+**Amended 2026-10-29 ([ADR 0029](0029-strip-job-slots.md), #124): G1 default.** The render workers are the realtime default; `TRANSIT_RENDER_POOL=0` renders serially. Evidence: the [gate 6 benchmark](../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md) (the Scarlett at 64 and 128 frames, 2026-10-28) and the #130 endurance run (eight hours at 64 frames with the workers on, 2026-10-29: the click sample-stable, no drift, no backend errors). Plans with sidechain keys still render serially per block until #174, and strips that read the live input or the hardware render on the callback. The 2026-10-27 paragraph above keeps its wording as the record of slice 4.
+
 ## Consequences
 
 - The epic starts later than "right after slice 5": G1 to G4 and the G6 decision come first. G1 and G3 are small; G2 is small to medium; G4 is a design task plus a test harness.

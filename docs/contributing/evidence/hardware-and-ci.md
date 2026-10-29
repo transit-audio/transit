@@ -72,8 +72,11 @@ the driver figure minus one buffer.
 
 ### Render worker runs (#124 gate 6)
 
-The gate 6 runs compare serial with the render workers (`TRANSIT_RENDER_POOL=1`) through the device
-([2026-10-28 benchmark](../../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md)). The
+The gate 6 runs compared serial (then the default) with the render workers (`TRANSIT_RENDER_POOL=1`,
+then the opt-in) through the device
+([2026-10-28 benchmark](../../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md)). With them
+and the #130 eight-hour run, the workers became the default on 2026-10-29; `TRANSIT_RENDER_POOL=0`
+now renders serially, and a serial-against-workers run sets it for the serial half. The
 strips' deadline as a share of the period defaults to 150 for device periods of 1.5 ms and below
 (64 frames at 48 kHz) and 100 above (#172, from those runs' share section); `TRANSIT_STRIP_DEADLINE_PERCENT` (25 to 300) overrides it at
 every buffer size to measure another share. The diagnostics report prints the share each run used
