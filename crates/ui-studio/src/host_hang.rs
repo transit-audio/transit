@@ -108,9 +108,11 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let give_up_label = give_up_label(first);
     let mut layout = HostHangLayout { lines: lines.clone(), give_up_label: give_up_label.clone(), ..HostHangLayout::default() };
     let mut act = None;
-    egui::Window::new("A plug-in is not responding").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(
-        ctx,
-        |ui| {
+    crate::theme::window(ctx, "A plug-in is not responding")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .show(ctx, |ui| {
             ui.set_max_width(460.0);
             for l in &lines {
                 ui.label(l);
@@ -129,8 +131,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                     }
                 }
             });
-        },
-    );
+        });
     app.host_hang.layout = layout;
     let later = Later { thread: first.thread.clone(), plugin: Arc::clone(&first.plugin), call: first.call, at: first.stuck_for };
     let plugin = Arc::clone(&first.plugin);
