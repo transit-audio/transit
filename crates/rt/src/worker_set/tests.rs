@@ -286,7 +286,8 @@ fn a_stalled_strip_cannot_hold_finish_past_its_deadline() {
     publish_all(&mut set);
     set.wake(3);
     wait_done(&set, 7, 1);
-    assert_eq!(fake.stalled.load(Ordering::Acquire), 1);
+    // Claimed is not yet stalled: wait for the worker to enter the stall.
+    wait_until("the worker on strip 5", || fake.stalled.load(Ordering::Acquire) == 1);
     let deadline = Instant::now() + Duration::from_millis(50);
     let r = set.finish(deadline, |_| panic!("nothing is left to render inline"));
     let returned = Instant::now();
@@ -667,6 +668,9 @@ fn a_late_result_whose_run_panicked_keeps_the_strip_suspect() {
     publish_all(&mut set);
     set.wake(2);
     wait_done(&set, 1, 1);
+    // Claimed is not yet stalled: a release before the worker reads its behavior would run the
+    // strip normally, with no panic to observe.
+    wait_until("the worker on strip 1", || fake.stalled.load(Ordering::Acquire) == 1);
     let r = set.finish(Instant::now(), |_| panic!("nothing is left to render inline"));
     assert_eq!(set.outcome(1), Some(Outcome::Overrun(OverrunCause::Late)), "{r:?}");
 
