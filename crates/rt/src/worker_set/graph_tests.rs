@@ -42,6 +42,10 @@ struct Host {
     gated: bool,
     /// The deadline the host's polls use (`None`: the driver's).
     deadline: Option<Instant>,
+    /// The driver's deadline (`None`: far away).
+    drive_deadline: Option<Instant>,
+    /// Waited for inside each render on the callback.
+    here_gate: Option<fn(&Host) -> bool>,
 }
 
 impl Host {
@@ -64,6 +68,8 @@ impl Host {
             gate: None,
             gated: false,
             deadline: None,
+            drive_deadline: None,
+            here_gate: None,
         }
     }
 
@@ -79,7 +85,8 @@ impl Host {
         self.skipped.clear();
         self.gated = false;
         let graph = Arc::clone(&self.graph);
-        drive(self, &graph, run, Instant::now() + STALL)
+        let deadline = self.drive_deadline.unwrap_or_else(|| Instant::now() + STALL);
+        drive(self, &graph, run, deadline)
     }
 
     fn outcome(&self, s: usize) -> Outcome {
@@ -122,6 +129,9 @@ impl GraphHost for Host {
     }
 
     fn render_here(&mut self, t: usize) {
+        if let Some(gate) = self.here_gate {
+            wait_until("the pinned render's gate", || gate(self));
+        }
         self.fake.execute(t, self.g, false);
         self.here.push(t);
         self.done[t] = true;
@@ -388,4 +398,31 @@ fn the_graph_driver_allocates_nothing() {
     assert!(host.set.stats().upstream_missed > 0, "the skip path ran");
     wait_until("the worker", || host.set.jobs().counts().claimed == 0);
     assert!(host.set.shutdown(STALL).is_empty());
+}
+
+/// Review finding 2 (#174): nothing is published after the deadline. A pinned strip renders on
+/// the callback until the worker's source is done and the deadline has passed; then the source's
+/// result (taken past the deadline) and the pinned strip each have a dependent ready, and neither
+/// is started: both are forgone as `Unstarted`, never published, so no worker can claim them.
+#[test]
+fn dependents_ready_after_the_deadline_are_forgone_unpublished() {
+    let fake = Fake::new(4, Duration::ZERO);
+    // 0 (worker) -> 1, 2 (pinned) -> 3.
+    let mut host = host(&fake, 1, &[(0, 1), (2, 3)], 1);
+    host.pinned[2] = true;
+    let mut run = GraphRun::new(4);
+    host.drive_deadline = Some(Instant::now() + Duration::from_millis(20));
+    host.here_gate = Some(|h| h.slot_done(0) && h.drive_deadline.is_some_and(|d| Instant::now() >= d));
+    let r = host.block(&mut run);
+    assert_eq!(host.outcome(0), Outcome::Mixed, "the source rendered");
+    assert_eq!(host.here, [2], "the pinned strip rendered");
+    for t in [1, 3] {
+        assert_eq!(host.outcome(t), Outcome::Overrun(OverrunCause::Unstarted), "{t}: forgone");
+        assert!(!host.started.contains(&t), "{t} was never started (filled, sent or published): {:?}", host.started);
+        assert_eq!(fake.strips[t].last_gen.load(Ordering::Acquire), 0, "{t} never ran");
+    }
+    assert_eq!((r.overrun, r.upstream_missed), (2, 0), "{r:?}");
+    assert_eq!(host.set.stats().overruns_unstarted, 2);
+    assert!(host.set.shutdown(STALL).is_empty());
+    assert_eq!(host.set.jobs().faults(), 0);
 }
