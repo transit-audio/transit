@@ -8,6 +8,22 @@ measured by identical code, and by host time only.
 Hardware numbers are notes, never CI gates. Fake-device results prove the harness logic, not any
 hardware (see `../contributing/evidence/hardware-and-ci.md`). The fake mode runs inside `cargo xtask ci`.
 
+## What each record decided
+
+A benchmark is only worth keeping if something followed from it. Each row names the question, the decision, and where that decision lives.
+
+| Date | Hardware | Question | Decision | Where it lives |
+| --- | --- | --- | --- | --- |
+| 2026-10-22 | Ryzen 9 5900X, Focusrite Scarlett 2i2 | How much latency do WASAPI shared, exclusive and ASIO add on this interface? | Shared (about 248 ms) and exclusive (about 223 ms) round trips are dominated by the driver; ASIO (about 23 ms at 256 frames) is the low-latency path, so transit builds a native ASIO backend. | [ADR 0016](../adr/0016-native-wasapi-backend.md); [known issues](../known-issues/README.md) K24, K26 |
+| 2026-10-22 | Ryzen 9 5900X, TASCAM Model 12 | Do the shared, exclusive and ASIO paths hold on a mixer-style USB interface with a fixed engine period? | Native ASIO is the path to calibrate against; the driver's quirks became tracked issues rather than workarounds. | [Known issues](../known-issues/README.md) K27, K31 |
+| 2026-10-23 | Ryzen 9 5900X, Focusrite Scarlett 2i2 (ASIO) | Do the driver-reported latencies match the measured click round trip? | Measure by sample position and show the driver figure beside it, not in place of it. | [Known issue](../known-issues/README.md) K31 |
+| 2026-10-24 | Ryzen 9 5900X, Behringer Model D over the TASCAM Model 12 and the Scarlett | How late does a hardware synth's audio arrive after a MIDI note is sent? | Onset latency is measurable and repeatable; the bench limits it exposed were fixed. | Issue #71; [ADR 0020](../adr/0020-external-instrument-device.md) |
+| 2026-10-24 | Ryzen 9 5900X, Behringer Model D on the Scarlett (ASIO) | If every note is sent early by the measured latency, do onsets land on the grid? | Yes at 64 and 128 frames with the measured compensation; a deliberately wrong value misses, as the control predicted. | Issue #71; [ADR 0020](../adr/0020-external-instrument-device.md) |
+| 2026-10-24 | Ryzen 9 5900X, Behringer Model D on the Scarlett (native ASIO) | Which latency does the External Instrument Measure store, and where does a note land? | The stored value includes the input ring backlog, so the Measure refuses a run during which the backlog changed; the backlog became zero by construction. | [ADR 0020](../adr/0020-external-instrument-device.md); known issue K22 (closed, #88) |
+| 2026-10-27 | Ryzen 9 5900X, no audio device | Do render workers beat the serial renderer at engine level? | Not a decision: dev-machine numbers only. They sized the fixture and led to the spin-wait fix in the worker finish. | [ADR 0029](../adr/0029-strip-job-slots.md) |
+| 2026-10-28 | Ryzen 9 5900X, Focusrite Scarlett through the device callback | Do render workers hold up against serial through the real device? | Serial stayed the default at first, pending the inline bound and per-strip diagnostics; superseded on 2026-10-29 when the workers became the default. | [ADR 0029](../adr/0029-strip-job-slots.md); issues #124, #168, #169, #172 |
+| 2026-10-28/29 | Ryzen 9 5900X, Focusrite Scarlett at 64 frames | Does the pool survive eight hours of recording with a hardware synth over MIDI? | It did, which with gate 6 made the render workers the default. This record has no file here; it is the closing comment on issue #130. | [Issue #130](https://github.com/transit-audio/transit/issues/130); [ADR 0029](../adr/0029-strip-job-slots.md) |
+
 ## Method
 
 Every figure comes from the host clock reading (`HostOrigin`, a monotonic `Instant`; QPC on
