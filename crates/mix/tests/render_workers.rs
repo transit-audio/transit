@@ -263,8 +263,8 @@ fn a_strip_a_worker_holds_past_the_limit_is_reported_held_and_clears_when_it_is_
     rig.shared[2].stall_ns.store(2_500_000_000, Ordering::Relaxed);
     let start = Instant::now();
     while reader.held_tracks().is_empty() {
+        // Blocks run unpaced: the count is of blocks, and the 2.5 s stall outlasts them all.
         assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip was never reported held");
-        std::thread::sleep(Duration::from_millis(1));
         rig.block();
     }
     assert_eq!(reader.held_tracks().len(), 1, "only the strip the worker holds");
