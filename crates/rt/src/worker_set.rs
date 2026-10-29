@@ -115,6 +115,9 @@
 //! No `unsafe`.
 
 pub mod figures;
+/// Seeded stall schedules (feature `testing`, issue #210).
+#[cfg(any(test, feature = "testing"))]
+pub mod schedule;
 mod stepwise;
 
 pub use stepwise::Poll;
