@@ -462,6 +462,11 @@ pub trait PluginStateReader: Send {
         let _ = busy;
         Ok(self.save_state())
     }
+    /// `Err(reason)` while the plug-in cannot be reached: its host thread is stuck past the
+    /// watchdog budget or was given up on (#213). The default answers at once.
+    fn available(&self) -> Result<(), String> {
+        Ok(())
+    }
     /// Loads a state blob (as [`Self::save_state`] returns) into the live instance while it
     /// processes, on the thread that may call the plug-in's state interface, as plug-in formats
     /// allow (a user preset, issue #68). `Some(values)`: the parameter values the plug-in reports

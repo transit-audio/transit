@@ -620,6 +620,34 @@ fn the_header_reaches_the_editor_on_the_host_thread_and_its_actions_come_back() 
     assert!(host.shutdown(Duration::from_secs(5)));
 }
 
+/// Issue #213: the state reader says whether its plug-in can be reached: yes, no while the host
+/// thread is wedged (the unresponsive marker's host-thread cause), yes again once it returns.
+#[test]
+fn the_state_reader_reports_a_wedged_host_thread_and_its_return() {
+    let host = host(Duration::from_millis(300));
+    let log = Arc::new(Log::default());
+    let l = Arc::clone(&log);
+    let mut plugin = host.submit(move |ctx| ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))).wait(Duration::from_secs(5)).unwrap();
+    let reader = plugin.state_reader().unwrap();
+    assert_eq!(reader.available(), Ok(()));
+    let (release, hang) = mpsc::channel::<()>();
+    let stuck = host.submit(move |_| {
+        let _ = hang.recv();
+    });
+    assert!(matches!(frames(&stuck, Duration::from_secs(5)).0, Status::Stuck));
+    let t = Instant::now();
+    assert!(reader.available().unwrap_err().contains("not responding"));
+    assert!(t.elapsed() < FRAME_BUDGET);
+    drop(release);
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while reader.available().is_err() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(reader.available(), Ok(()), "reachable again once the thread returns");
+    drop((reader, plugin));
+    assert!(host.shutdown(Duration::from_secs(5)));
+}
+
 /// Issue #68: a preset save reads the state and a preset load loads it into the live instance,
 /// both on the host thread and polled once per frame; a wedged thread fails them at once.
 #[test]

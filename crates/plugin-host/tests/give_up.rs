@@ -64,6 +64,7 @@ fn giving_up_quarantines_the_stuck_threads_plug_ins_and_new_ones_load_elsewhere(
     // Its plug-ins answer at once, as unreachable.
     let mut reader = plugin.state_reader().unwrap();
     assert_eq!(reader.save_state_within(Duration::from_secs(60)), Err(transit_dsp::StateBusy));
+    assert!(reader.available().is_err(), "a given-up thread's plug-ins stay unresponsive, (#213)");
     assert!(editor.available().is_err());
     // New plug-ins load on the fresh thread.
     let l = Arc::clone(&log);
@@ -75,6 +76,7 @@ fn giving_up_quarantines_the_stuck_threads_plug_ins_and_new_ones_load_elsewhere(
     drop(release);
     let parked = watch(&host, <[StuckCall]>::is_empty);
     assert!(parked.is_empty(), "{parked:?}");
+    assert!(reader.available().is_err(), "and also once its call returned: the plug-ins stay quarantined (#213)");
     assert_eq!(
         host.quarantined(),
         [transit_plugin_host::Quarantined { thread: "plugin-host-0".into(), plugins: 2 }],

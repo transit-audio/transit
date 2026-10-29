@@ -450,6 +450,10 @@ impl PluginStateReader for RemoteState {
         self.read(busy)
     }
 
+    fn available(&self) -> Result<(), String> {
+        if self.token.worker.responsive() { Ok(()) } else { Err(NOT_RESPONDING.into()) }
+    }
+
     fn begin_save(&mut self) -> StateJob<Option<Vec<u8>>> {
         let mut job = self.begin(|s| s.save_state());
         StateJob::remote(move || match job.poll() {
