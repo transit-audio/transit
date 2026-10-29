@@ -926,3 +926,95 @@ fn an_import_the_engine_let_expire_says_so_and_is_removed() {
     assert_eq!(t.app.status, "The import of loop 90.wav expired: re-import");
     assert!(t.app.engine.imports.is_empty(), "the staging entry is canceled");
 }
+
+impl T {
+    fn right_click(&mut self, at: (f32, f32)) {
+        self.input("ui.click", json!({"x": at.0, "y": at.1, "button": "right"}));
+    }
+
+    fn menu_item(&self, label: &str) -> crate::mixer::MenuItem {
+        self.app
+            .browser
+            .menu
+            .iter()
+            .find(|m| m.label == label)
+            .cloned()
+            .unwrap_or_else(|| panic!("no menu item {label}: {:?}", self.app.browser.menu))
+    }
+
+    /// The first row at `path` that is not a location row (the tree row under its parent).
+    fn tree_row(&self, path: &str) -> crate::browser::RowLayout {
+        self.app.browser.layout.rows.iter().find(|r| r.path == path && !r.root).cloned().unwrap_or_else(|| panic!("no tree row {path}"))
+    }
+
+    fn roots(&self, path: &str) -> usize {
+        self.app.browser.layout.rows.iter().filter(|r| r.path == path && r.root).count()
+    }
+}
+
+#[test]
+fn add_to_locations_from_a_folder_row_dedupes_like_add_folder_and_is_no_document_change() {
+    let mut t = T::new();
+    t.add_and_expand();
+    let (root, kicks) = (t.dir.s(), t.path("Kicks"));
+    let u0 = t.undo_len();
+    t.right_click(mid(t.tree_row(&kicks).rect.unwrap()));
+    let add = t.menu_item("Add to Locations");
+    assert_eq!(add.value, "add");
+    t.click(mid(add.rect));
+    assert_eq!(t.app.ui.browser.locations, vec![root.clone(), kicks.clone()], "{}", t.app.status);
+    assert_eq!(t.undo_len(), u0, "a view preference, not the session");
+    // Once it is a location the entry is disabled and names it.
+    t.right_click(mid(t.tree_row(&kicks).rect.unwrap()));
+    assert_eq!(t.menu_item("Add to Locations").value, "disabled");
+    t.key("escape", json!({}));
+    // Case-insensitive, like Add Folder.
+    assert!(!t.app.add_location_from_tree(Path::new(&kicks.to_uppercase())));
+    assert_eq!(t.app.ui.browser.locations.len(), 2);
+    assert!(t.app.status.contains("already in Locations"), "{}", t.app.status);
+}
+
+#[test]
+fn a_location_inside_another_shows_once_at_the_top() {
+    let mut t = T::new();
+    t.add_and_expand();
+    let kicks = t.path("Kicks");
+    assert!(t.app.add_location(&kicks));
+    t.frames(3);
+    assert_eq!(t.roots(&kicks), 1);
+    let top: Vec<_> = t.app.browser.layout.rows.iter().filter(|r| r.root).map(|r| r.path.clone()).collect();
+    assert_eq!(top, vec![t.dir.s(), kicks]);
+}
+
+#[test]
+fn remove_from_locations_on_a_location_row_leaves_the_folder_alone() {
+    let mut t = T::new();
+    t.add_and_expand();
+    let (root, kicks) = (t.dir.s(), t.path("Kicks"));
+    assert!(t.app.add_location(&kicks));
+    t.frames(3);
+    let r = t.app.browser.layout.rows.iter().find(|r| r.path == kicks && r.root).cloned().unwrap();
+    t.right_click(mid(r.rect.unwrap()));
+    assert!(t.app.browser.menu.iter().all(|m| m.label != "Add to Locations"), "{:?}", t.app.browser.menu);
+    let rm = t.menu_item("Remove from Locations");
+    t.click(mid(rm.rect));
+    assert_eq!(t.app.ui.browser.locations, vec![root]);
+    assert!(t.dir.0.join("Kicks/Kick 01.wav").exists(), "the folder is untouched");
+    assert_eq!(t.roots(&kicks), 0);
+    assert!(t.app.status.contains("Removed"), "{}", t.app.status);
+}
+
+#[test]
+fn dragging_a_folder_row_onto_the_locations_header_adds_it() {
+    let mut t = T::new();
+    t.add_and_expand();
+    let snares = t.path("Snares");
+    let u0 = t.undo_len();
+    let header = mid(t.app.browser.layout.locations_header);
+    t.drag(mid(t.tree_row(&snares).rect.unwrap()), (header.0 - 40.0, header.1), json!({}));
+    assert_eq!(t.app.ui.browser.locations, vec![t.dir.s(), snares], "{}", t.app.status);
+    assert_eq!(t.undo_len(), u0);
+    // A drag of the same folder again does not duplicate it.
+    t.drag(mid(t.tree_row(&t.path("Snares")).rect.unwrap()), (header.0 - 40.0, header.1), json!({}));
+    assert_eq!(t.app.ui.browser.locations.len(), 2);
+}

@@ -19,6 +19,7 @@
 //! document (plan 06, L29; proposal: an additive `Player::audition`).
 
 mod header;
+mod locations;
 pub use header::parse_header;
 use header::read_info;
 mod plugins;
@@ -245,6 +246,8 @@ pub struct BrowserLayout {
     pub add_field: R4,
     pub add_ok: R4,
     pub add_browse: R4,
+    /// The "Locations" header (a folder row dropped here is added).
+    pub locations_header: R4,
     pub list: R4,
     pub rows: Vec<RowLayout>,
     pub plugins: Vec<PluginRowLayout>,
@@ -293,6 +296,8 @@ pub struct BrowserState {
     rx: Receiver<Msg>,
     probe_tx: Option<Sender<PathBuf>>,
     pub drag: Option<Drag>,
+    /// The Files row context-menu entries as last drawn (for tests and scripts).
+    pub menu: Vec<crate::mixer::MenuItem>,
     /// The Add Folder field while it is open.
     pub adding: Option<String>,
     /// The Add Folder field had the keyboard last frame (Escape then closes it).
@@ -329,6 +334,7 @@ impl Default for BrowserState {
             rx,
             probe_tx: None,
             drag: None,
+            menu: Vec::new(),
             adding: None,
             add_focused: false,
             scroll: 0.0,
@@ -909,6 +915,7 @@ fn body(app: &mut StudioApp, ui: &mut Ui) {
 fn locations_bar(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, area: Rect, top: f32, layout: &mut BrowserLayout) -> f32 {
     let bar = Rect::from_min_max(pos2(area.min.x + 8.0, top), pos2(area.max.x - 10.0, top + 20.0));
     p.text(bar.left_center(), Align2::LEFT_CENTER, "Locations", FontId::proportional(10.5), TOKENS.text_dim);
+    layout.locations_header = r4(bar);
     let plus = Rect::from_min_size(pos2(bar.max.x - 20.0, bar.min.y + 1.0), vec2(20.0, 18.0));
     let resp = ui.interact(plus, ui.id().with("browser_add_folder"), Sense::click());
     p.rect_filled(plus, crate::theme::RADIUS, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
@@ -1046,6 +1053,9 @@ fn tree(app: &mut StudioApp, ui: &mut Ui, area: Rect, layout: &mut BrowserLayout
     let mut remove: Option<usize> = None;
     let mut double: Option<PathBuf> = None;
     let mut drag_from: Option<PathBuf> = None;
+    let mut menu_act: Option<locations::Act> = None;
+    app.browser.menu.clear();
+    let header = rect(layout.locations_header);
     for (i, row) in rows.iter().enumerate() {
         let y = area.min.y + i as f32 * ROW_H - app.browser.scroll;
         let r = Rect::from_min_size(pos2(area.min.x, y), vec2(area.width(), ROW_H));
@@ -1072,7 +1082,7 @@ fn tree(app: &mut StudioApp, ui: &mut Ui, area: Rect, layout: &mut BrowserLayout
             continue;
         }
         out.rect = Some(r4(r));
-        let resp = ui.interact(r.intersect(area), ui.id().with(("browser_row", &row.path)), Sense::click_and_drag());
+        let resp = ui.interact(r.intersect(area), ui.id().with(("browser_row", &row.path, row.root.is_some())), Sense::click_and_drag());
         if selected {
             p.rect_filled(r, 0.0, TOKENS.accent.gamma_multiply(0.28));
         } else if resp.hovered() && row.kind != Kind::Note {
@@ -1139,6 +1149,19 @@ fn tree(app: &mut StudioApp, ui: &mut Ui, area: Rect, layout: &mut BrowserLayout
         if resp.drag_started() && matches!(row.kind, Kind::Audio | Kind::Closed) {
             drag_from = Some(row.path.clone());
         }
+        if let Some(a) = locations::row_menu(app, &resp, row) {
+            menu_act = Some(a);
+        }
+        // A folder row dragged onto the Locations header is added there.
+        if row.kind == Kind::Folder && row.root.is_none() {
+            let over = ui.input(|i| i.pointer.latest_pos()).is_some_and(|h| header.contains(h));
+            if resp.dragged() && over {
+                ui.painter().rect_stroke(header, crate::theme::RADIUS_SM, Stroke::new(2.0, TOKENS.accent), StrokeKind::Inside);
+            }
+            if resp.drag_stopped() && over {
+                menu_act = Some(locations::Act::Add(row.path.clone()));
+            }
+        }
         // A user location's remove button, on hover.
         if let Some(Some(li)) = row.root {
             let xb = Rect::from_min_size(pos2(r.max.x - 22.0, r.min.y + 2.0), vec2(16.0, 16.0));
@@ -1178,6 +1201,13 @@ fn tree(app: &mut StudioApp, ui: &mut Ui, area: Rect, layout: &mut BrowserLayout
     }
     if let Some(i) = remove {
         app.remove_location(i);
+    }
+    match menu_act {
+        Some(locations::Act::Add(dir)) => {
+            app.add_location_from_tree(&dir);
+        }
+        Some(locations::Act::Remove(i)) => app.remove_location(i),
+        None => {}
     }
     // Several selected files go in display order.
     let in_order = |sel: &[PathBuf]| rows.iter().filter(|r| sel.contains(&r.path)).map(|r| r.path.clone()).collect::<Vec<_>>();
