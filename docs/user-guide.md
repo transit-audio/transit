@@ -55,4 +55,7 @@ To render every strip on the audio thread instead, start transit with the enviro
 before `transit`, or `TRANSIT_RENDER_POOL=0 transit` on Linux and macOS). Do this when a plug-in
 misbehaves on a worker thread: its track drops out, or keeps going silent while Strip overruns
 (busy) keeps rising, as when a plug-in hangs ([known issue K89](known-issues/README.md)). Unset,
-or `1`, uses the workers.
+or `1`, uses the workers. An app opened from the Start menu, a desktop shortcut or Finder does not
+see a shell variable, so set `TRANSIT_RENDER_POOL` as a user environment variable instead (Windows:
+System Properties > Environment Variables; macOS: a launchd user environment or a shell launcher)
+and restart transit.

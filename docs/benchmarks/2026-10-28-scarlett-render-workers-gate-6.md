@@ -42,6 +42,8 @@ The maintainer listened through the 64-frame runs and heard no artifacts in eith
 
 Serial stays the default, and the pool stays opt-in (`TRANSIT_RENDER_POOL=1`). The default flips in its own reviewed commit, after #168 lands and #169's data has sized the 64-frame overruns, with the same eight runs repeated.
 
+Superseded 2026-10-29: the render workers became the default (#124, ADR 0029 accepted) on this record and the eight-hour overnight run of #130.
+
 The bar for the repeat: no strip rendered inline past the budget, and overrun blocks at 64 frames idle at or near the 128-frame figure (58).
 
 ## Share runs
