@@ -1,6 +1,8 @@
 //! Every engine of the oracle produces finite, non-silent output over the sweep (#194), and the
 //! wrapper's constants match the firmware's.
 
+#![forbid(unsafe_code)]
+
 use transit_macro_osc_oracle::residual::to_dbfs;
 use transit_macro_osc_oracle::sweep::{engine_points, render_engine_point, render_voice_point, voice_points};
 use transit_macro_osc_oracle::{BLOCK_SIZE, ENGINE_COUNT, Error, MAX_BLOCK_SIZE, Model, SAMPLE_RATE, Session};

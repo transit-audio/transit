@@ -11,6 +11,8 @@
 //! shadows the vendored one, and a patched source file is compiled from the overlay. GCC and Clang
 //! compile vendor/ exactly as fetched.
 
+#![forbid(unsafe_code)]
+
 use std::path::{Path, PathBuf};
 
 fn collect(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {

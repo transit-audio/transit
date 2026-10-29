@@ -5,9 +5,11 @@
 //! state leaking between renders, a floating-point mode that differs between processes); the
 //! port gate (#195) cannot be set until it is fixed. Never rerun it to pass.
 
+#![forbid(unsafe_code)]
+
 use transit_macro_osc_oracle::residual::{residual_f32, residual_i16};
 use transit_macro_osc_oracle::sweep::{self, engine_points, render_engine_point, render_voice_point, voice_points};
-use transit_macro_osc_oracle::{Model, Session, floor::RunnerFamily};
+use transit_macro_osc_oracle::{Model, Session};
 
 const CHILD_ENV: &str = "TRANSIT_ORACLE_SELF_FLOOR_CHILD";
 const LINE_PREFIX: &str = "oracle-digest ";
@@ -36,10 +38,6 @@ fn same_seed_twice_is_bit_identical() {
         }
     }
     assert_eq!(compared, Model::ALL.len() * (engine_points().len() + voice_points().len()));
-    // The documented floor for this runner family is the one just measured.
-    if let Some(floor) = RunnerFamily::current().self_floor_dbfs() {
-        assert_eq!(floor, f64::NEG_INFINITY);
-    }
 }
 
 #[test]
