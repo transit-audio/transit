@@ -297,6 +297,14 @@ pub trait Plugin: Send {
     /// Told before `process`: every audio input of the next block is silent (VST3 hosts pass this
     /// on as the bus silence flags). The default ignores it.
     fn set_input_silent(&mut self, _silent: bool) {}
+    /// True while parameter values given to the plug-in have not reached it yet: a host that
+    /// skipped its last `process` call (the instance busy on its main thread, inactive, a block of
+    /// no frames) or held values back for room keeps them for the next block it runs (#78). Read
+    /// after `process`: the mix keeps a suspended insert awake until this is false, so a queued
+    /// value never waits for the input or the automation lane to change. The default: none.
+    fn params_pending(&self) -> bool {
+        false
+    }
     /// Gain reduction in dB for metering (a non-negative amount); 0 for non-dynamics plugins.
     fn gain_reduction_db(&self) -> f32 {
         0.0

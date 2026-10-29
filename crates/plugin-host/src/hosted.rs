@@ -181,6 +181,9 @@ impl Plugin for Hosted {
             p.set_input_silent(silent);
         }
     }
+    fn params_pending(&self) -> bool {
+        self.inner.as_ref().is_some_and(|p| p.params_pending())
+    }
     fn gain_reduction_db(&self) -> f32 {
         self.inner.as_ref().map_or(0.0, |p| p.gain_reduction_db())
     }
