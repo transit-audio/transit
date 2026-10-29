@@ -73,18 +73,18 @@ fn a_timed_point_past_a_full_queue_overwrites_the_latest() {
     assert_eq!(r.iter().filter(|x| x.0 == 4).copied().collect::<Vec<_>>(), vec![(4, 1, 5, 750_000)]);
 }
 
-/// #117 review: a block the plug-in is not called for (here: not prepared yet) collapses its
-/// timed points to time 0, the latest per parameter, so the next processed block does not replay
-/// them at the old offsets.
+/// #117 review: a block the plug-in is not called for (here: the early return of a block with no
+/// frames) collapses its timed points to time 0, the latest per parameter, so the next processed
+/// block does not replay them at the old offsets. Not an unprepared instance: `create` already
+/// prepares it (48 kHz, 1024 frames), so a `process` before the test's `prepare` is a processed
+/// block that delivers the points at their offsets and proves nothing.
 #[test]
 fn timed_points_of_a_skipped_block_collapse_to_the_next_block_start() {
-    events_fixture_dir();
-    let mut p = transit_clap_host::create(EVENTS).unwrap();
+    let mut p = plugin(256);
     assert!(p.set_param_at(5, "5", 0.25));
     assert!(p.set_param_at(40, "5", 0.75));
     let mut io = vec![vec![0.0f32; 256], vec![0.0f32; 256]];
-    p.process(&mut io, 256);
-    p.prepare(48_000.0, 256, 2);
+    p.process(&mut io, 0);
     let r = records(&mut p, 256);
     assert_eq!(r.iter().filter(|x| x.0 == 4).copied().collect::<Vec<_>>(), vec![(4, 0, 5, 750_000)], "{r:?}");
 }
