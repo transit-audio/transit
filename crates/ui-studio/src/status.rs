@@ -36,6 +36,13 @@ impl StatusAge {
         StatusAge { span: None, ..Self::default() }
     }
 
+    /// A live progress writer calls this with every write of its text (#216): the next [`Self::tick`]
+    /// counts the message from its start even when the text is the same as the last poll's, so a
+    /// progress line that sits at one value ("Importing x… 0%") never ages out and blinks.
+    pub fn restart(&mut self) {
+        self.seen.clear();
+    }
+
     /// Once a frame. `now` is the frame clock, `epoch` the wall time stamped on the kept message.
     /// Returns the seconds until `status` is due to clear, when it is waiting to.
     pub fn tick(&mut self, status: &mut String, now: f64, epoch: u64) -> Option<f64> {
@@ -106,6 +113,34 @@ mod tests {
         age.tick(&mut status, 20.0, 1_700_000_020);
         assert!(status.is_empty());
         assert_eq!(age.last(), Some(&(1_700_000_000, "midi.map: no such control".to_string())));
+    }
+
+    #[test]
+    fn a_progress_text_rewritten_every_poll_never_clears_and_a_plain_message_still_does() {
+        let mut age = StatusAge::default();
+        let mut status = String::new();
+        // 10 s of 60 Hz frames, the progress writer polling every 0.1 s with the same text.
+        for frame in 0..=600 {
+            if frame % 6 == 0 {
+                status = "Importing loop 90.wav… 0%".into();
+                age.restart();
+            }
+            age.tick(&mut status, f64::from(frame) / 60.0, 1000);
+            assert_eq!(status, "Importing loop 90.wav… 0%", "frame {frame}");
+        }
+        // The writer stops: it clears 8 s after its last write.
+        let stopped = 10.0;
+        age.tick(&mut status, stopped + STATUS_SECS - 0.1, 1001);
+        assert!(!status.is_empty());
+        age.tick(&mut status, stopped + STATUS_SECS + 0.1, 1002);
+        assert!(status.is_empty());
+        // Without the restart, the same text clears at 8 s (the plain message).
+        let mut plain = String::from("Command failed: x");
+        let mut a = StatusAge::default();
+        for frame in 0..=540 {
+            a.tick(&mut plain, f64::from(frame) / 60.0, 1);
+        }
+        assert!(plain.is_empty());
     }
 
     #[test]

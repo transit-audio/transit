@@ -290,6 +290,8 @@ pub fn step(app: &mut StudioApp, ctx: &egui::Context) {
             let more = app.imports.items.len() - 1;
             let more = if more > 0 { format!(" ({more} more)") } else { String::new() };
             app.status = format!("Importing {}… {}%{more}", front.name, front.percent);
+            // A live progress line is rewritten every poll: it never ages out, even at one value (#216).
+            app.status_age.restart();
         }
     }
     let ms = t0.elapsed().as_secs_f32() * 1000.0;
