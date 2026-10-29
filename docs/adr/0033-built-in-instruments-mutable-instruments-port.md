@@ -74,3 +74,7 @@ Maintainer decision, 2026-10-29. This amendment supersedes the crate naming in I
 **(c) Fallback.** If the vendored code needs more repair than it saves, port from the firmware instead (option c), behind the same oracle gate. The null tests compare output sample by sample, so the swap is invisible to users.
 
 Related: #193 (the evaluation and this decision), #194 (the C++ oracle that gates each engine).
+
+## Implementation note: oracle
+
+The Gate oracle is `crates/macro-osc-oracle` (`transit-macro-osc-oracle`, #194): the upstream C++ vendored unchanged, dev-only (`cargo xtask layers` rejects any normal or build dependency on it), with its FFI `unsafe` confined to `src/ffi.rs`; the sweep, the residual and the measured floor are in [gates.md, Oracle null tests](../contributing/evidence/gates.md#oracle-null-tests).
