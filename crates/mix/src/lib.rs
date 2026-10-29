@@ -363,8 +363,10 @@ struct PluginSlot {
     /// The block the plugin last processed came out silent (true before the first). A plugin
     /// whose output still rings is not suspended.
     output_silent: bool,
-    /// A parameter was sent to the plugin since it last processed a block. Its next block is
-    /// processed even while suspended, so the queued change reaches it.
+    /// A parameter was sent to the plugin and has not reached it yet. Its next block is processed
+    /// even while suspended, so the queued change reaches it; cleared only after a block the plugin
+    /// ran with nothing left queued ([`Plugin::params_pending`], #78), not by a block its host
+    /// skipped.
     woken: bool,
     /// The slot's identity across plans.
     generation: SlotGen,

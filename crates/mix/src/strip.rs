@@ -330,7 +330,8 @@ fn is_silent(buf: &[Vec<f32>], frames: usize) -> bool {
 /// zero, any nonzero sample wakes it; `ContinueIfNotQuiet` once its last output was silent too; `Tail` once `tail_samples()` of
 /// silence have gone through and its last output was silent). The buffers are then left as they
 /// are: silent in, silent out. Any non-silent block resumes it, and a parameter change wakes it
-/// for one block (without restarting its tail count). `no_suspend` runs every insert. A `key`
+/// until a block delivers the value ([`Plugin::params_pending`], #78), without restarting its tail
+/// count. `no_suspend` runs every insert. A `key`
 /// (sidechain) counts as input: a silent block with a loud key is not silent. True when the
 /// plugin processed the block.
 fn run_insert(slot: &mut PluginSlot, buf: &mut [Vec<f32>], key: Option<&[Vec<f32>]>, frames: usize, transport: &Transport, no_suspend: bool) -> bool {
@@ -358,12 +359,14 @@ fn run_insert(slot: &mut PluginSlot, buf: &mut [Vec<f32>], key: Option<&[Vec<f32
         // nonzero block must not set it.
         slot.plugin.set_input_silent(all_zero);
     }
-    slot.woken = false;
     slot.plugin.set_transport(transport);
     match key {
         Some(k) => slot.plugin.process_with_key(buf, k, frames),
         None => slot.plugin.process(buf, frames),
     }
+    // Cleared only once the plug-in holds no undelivered value (#78): a host that skipped the
+    // block keeps the value queued, and the slot stays awake until a block delivers it.
+    slot.woken = slot.plugin.params_pending();
     if slot.suspendable {
         slot.output_silent = is_silent(buf, frames);
     }
