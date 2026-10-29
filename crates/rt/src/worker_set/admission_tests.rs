@@ -227,15 +227,22 @@ fn an_inline_render_past_its_deadline_and_a_busy_skip_bar_the_strip() {
     // Time to spare admits it (as in the other admission tests); the render then sleeps past
     // the deadline, so it ends past it by construction.
     let deadline = Instant::now() + 300 * MS;
+    // The span the render itself saw. `finish` reads its clock before the call and after it, so
+    // the cost it records covers this span whatever the scheduler did before the call; the 300 ms
+    // to the deadline does not bound it (#189: time spent between this line and the call is
+    // not part of the render).
+    let mut rendered = Duration::ZERO;
     let r = set.finish(deadline, |_| {
+        let start = Instant::now();
         // timing: stall-bound the render outlasts its own deadline by construction, nothing is measured
         while Instant::now() <= deadline + MS {
             std::thread::sleep(MS);
         }
+        rendered = Instant::now().saturating_duration_since(start);
     });
     assert_eq!(set.outcome(0), Some(Outcome::Inline), "{r:?}");
     assert!(set.inline_barred(0), "it ran past its deadline: barred");
-    assert!(set.worst_case(0).unwrap() >= 300 * MS, "and its worst case grew to that render");
+    assert!(set.worst_case(0).unwrap() >= rendered, "and its worst case grew to that render: {rendered:?}");
     assert!(set.shutdown(STALL).is_empty());
 
     // Busy: the one worker holds strip 0 from block 1 into block 2.
