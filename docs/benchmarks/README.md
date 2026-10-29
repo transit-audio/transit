@@ -23,6 +23,7 @@ A benchmark is only worth keeping if something followed from it. Each row names 
 | 2026-10-27 | Ryzen 9 5900X, no audio device | Do render workers beat the serial renderer at engine level? | Not a decision: dev-machine numbers only. They sized the fixture and led to the spin-wait fix in the worker finish. | [ADR 0029](../adr/0029-strip-job-slots.md) |
 | 2026-10-28 | Ryzen 9 5900X, Focusrite Scarlett through the device callback | Do render workers hold up against serial through the real device? | Serial stayed the default at first, pending the inline bound and per-strip diagnostics; superseded on 2026-10-29 when the workers became the default. | [ADR 0029](../adr/0029-strip-job-slots.md); issues #124, #168, #169, #172 |
 | 2026-10-28/29 | Ryzen 9 5900X, Focusrite Scarlett at 64 frames | Does the pool survive eight hours of recording with a hardware synth over MIDI? | It did, which with gate 6 made the render workers the default. This record has no file here; it is the closing comment on issue #130. | [Issue #130](https://github.com/transit-audio/transit/issues/130); [ADR 0029](../adr/0029-strip-job-slots.md) |
+| 2026-10-29 | Ryzen 9 5900X, Focusrite Scarlett 2i2 (native ASIO) | Does a session with a sidechain key keep the workers' benefit through the dependency graph? | Yes: the keyed plan through the graph lands where the unkeyed pool rows did (64: 364 over budget vs 14,388 serial; 128: 14 vs 107), the compressor never missed its key; the keyed default flip waits on the gain-reduction regression #179. | ADR 0029 amendment, #174, #179 |
 
 ## Method
 
