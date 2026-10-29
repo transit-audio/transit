@@ -233,6 +233,7 @@ pub fn strip_fault_rows(f: &transit_mix::StripFaults) -> Vec<String> {
         format!("Strip overruns, busy: {}", f.overruns_busy),
         format!("Strip overruns, late: {}", f.overruns_late),
         format!("Strip overruns, unstarted: {}", f.overruns_unstarted),
+        format!("Strip skips, upstream missed: {}", f.upstream_missed),
         format!("Blocks with a strip overrun: {}", f.overrun_blocks),
         format!("Strip deadline overshoots: {}", f.deadline_overshoots),
         format!("Late strip results: {}", f.late_results),
@@ -259,7 +260,7 @@ pub fn strip_figure_rows(f: &transit_mix::StripFaults, strips: &[StripName]) -> 
     let top: Vec<String> = listed.iter().take(3).map(|s| format!("{} {}", strip_text(s.track, strips), s.overruns())).collect();
     let mut rows = vec![format!("Strip overruns, top: {}", if top.is_empty() { "none".to_owned() } else { top.join(", ") })];
     rows.extend(listed.iter().map(|s| {
-        format!(
+        let mut row = format!(
             "Strip {}: overruns busy {}, late {}, unstarted {}; inline {}; cost {} \u{b5}s, worst {} \u{b5}s",
             strip_text(s.track, strips),
             s.overruns_busy,
@@ -268,7 +269,12 @@ pub fn strip_figure_rows(f: &transit_mix::StripFaults, strips: &[StripName]) -> 
             s.inline_renders,
             s.cost_ns / 1_000,
             s.worst_ns / 1_000,
-        )
+        );
+        // #174: skipped because a key source missed; that overrun is counted at the source.
+        if s.upstream_missed > 0 {
+            row.push_str(&format!("; upstream missed {} (from {})", s.upstream_missed, strip_text(s.upstream_origin, strips)));
+        }
+        row
     }));
     let limits = &transit_mix::POOL_HISTOGRAM_LIMITS_NS;
     rows.extend(f.lateness.iter().enumerate().map(|(i, n)| format!("Strip lateness, {}: {n}", limit_label(limits, i))));

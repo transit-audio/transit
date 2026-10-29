@@ -973,6 +973,28 @@ fn per_strip_overruns_and_the_pool_histograms_print_after_the_worker_figures() {
     assert!(!detail_rows(&Default::default()).iter().any(|r| r.starts_with("Strip lateness") || r.starts_with("Worker wake")));
 }
 
+/// #174: a strip skipped because its key source missed shows its upstream misses and the origin
+/// by name; the origin's own row keeps its overruns, and the total has its own row.
+#[test]
+fn an_upstream_missed_strip_names_its_origin() {
+    use crate::telemetry::{StripName, detail_rows_named};
+    let mut top = [None; transit_mix::TOP_STRIPS];
+    top[0] = Some(transit_mix::StripFigure { track: 0, overruns_late: 2, upstream_origin: u32::MAX, ..Default::default() });
+    top[1] = Some(transit_mix::StripFigure { track: 1, upstream_missed: 2, upstream_origin: 0, ..Default::default() });
+    let f = transit_mix::StripFaults { workers: 3, overruns_late: 2, upstream_missed: 2, top_strips: top, ..Default::default() };
+    let names = vec![StripName { track: "Kick".into(), plugin: None }, StripName { track: "Bass".into(), plugin: Some("Compressor".into()) }];
+    let rows = detail_rows_named(&transit_playback::telemetry::CallbackTelemetry { strip_faults: Some(f), ..Default::default() }, &names);
+    let at = |label: &str| rows.iter().position(|r| r.starts_with(label)).unwrap_or_else(|| panic!("{label} missing: {rows:?}"));
+    assert_eq!(rows[at("Strip skips, upstream missed")], "Strip skips, upstream missed: 2");
+    assert_eq!(at("Strip skips, upstream missed"), at("Strip overruns, unstarted") + 1, "beside the overruns by cause");
+    assert_eq!(rows[at("Strip overruns, top")], "Strip overruns, top: Kick 2, Bass: Compressor 0", "ranked by own overruns");
+    assert_eq!(rows[at("Strip Kick:")], "Strip Kick: overruns busy 0, late 2, unstarted 0; inline 0; cost 0 \u{b5}s, worst 0 \u{b5}s");
+    assert_eq!(
+        rows[at("Strip Bass: Compressor:")],
+        "Strip Bass: Compressor: overruns busy 0, late 0, unstarted 0; inline 0; cost 0 \u{b5}s, worst 0 \u{b5}s; upstream missed 2 (from Kick)"
+    );
+}
+
 #[test]
 fn the_telemetry_is_read_a_few_times_a_second_not_every_frame() {
     let mut t = T::new();
