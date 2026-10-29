@@ -5,7 +5,7 @@ use super::*;
 use crate::edit as ops;
 use crate::{Clipboard, cmd};
 use serde_json::json;
-use transit_model::{EditMode, Fade, FadeShape, Session};
+use transit_model::{Clip, EditMode, Fade, FadeShape, Session};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -181,6 +181,15 @@ pub fn specs() -> Vec<CommandSpec> {
             "{clips?: [id], by?: samples, to?: position for the first clip that can move (Grid modes snap its sync point), track?: where the first clip's track goes; the others keep their distance}",
             has_selection,
             move_clips
+        ),
+        cmd!(
+            "edit.copy_clips",
+            "Copy",
+            [],
+            None,
+            "{clips?: [id], by: samples, track?: where the first clip's track goes; the others keep their distance} — copies every clip by the same offset as one undo step, originals stay, the copies end up selected; refused when a copy would land on an original",
+            has_selection,
+            copy_clips
         ),
         cmd!(
             "edit.trim_clip",
@@ -938,6 +947,43 @@ fn move_clips(e: &mut Engine, p: &Value) -> Result<Value> {
     };
     s.edit.selected_clips = ids;
     Ok(json!({"moved": n, "by": delta}))
+}
+
+fn copy_clips(e: &mut Engine, p: &Value) -> Result<Value> {
+    let ids = clip_ids_param(e, p);
+    let s = e.session();
+    let dest = match track_param(e, "edit.copy_clips", p, "track")? {
+        Some(to) => ids
+            .iter()
+            .find_map(|c| s.find_clip(*c))
+            .and_then(|(from, _)| ops::destinations(s, &ids, from, to))
+            .ok_or_else(|| bad("edit.copy_clips", "the copies can't land there: past the last track, or on a track that can't hold them"))?,
+        None => Vec::new(),
+    };
+    let mut src: Vec<(TrackId, Clip)> = ids.iter().filter_map(|id| s.find_clip(*id)).map(|(t, c)| (t, c.clone())).collect();
+    if src.is_empty() {
+        return Err(bad("edit.copy_clips", "no clips"));
+    }
+    src.sort_by_key(|(_, c)| c.start);
+    let by = position_param(e, "edit.copy_clips", p, "by")?.unwrap_or(0).max(-src[0].1.start);
+    let hits_original = src.iter().any(|(t, c)| {
+        let (to, range) = (ops::lands(&dest, *t), transit_time::Range::new(c.start + by, c.end() + by));
+        src.iter().any(|(ot, o)| *ot == to && o.start < range.end && range.start < o.end())
+    });
+    if hits_original {
+        return Err(bad("edit.copy_clips", "a copy would land on an original clip and replace part of it: drag it further"));
+    }
+    let s = e.session_mut();
+    let mut copies = Vec::new();
+    for (t, mut c) in src {
+        c.id = s.new_clip_id();
+        c.start += by;
+        copies.push(c.id);
+        ops::place_clip(s, ops::lands(&dest, t), c);
+    }
+    let out = json!({"copied": copies.len(), "clips": copies.iter().map(|c| c.0).collect::<Vec<_>>(), "by": by});
+    s.edit.selected_clips = copies;
+    Ok(out)
 }
 
 fn trim_clip(e: &mut Engine, p: &Value) -> Result<Value> {
