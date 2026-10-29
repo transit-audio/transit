@@ -399,3 +399,119 @@ fn a_graph_change_waits_for_the_held_task_and_the_old_result_is_never_read() {
     let PlanRig { eng, .. } = rig;
     drop(eng.into_retired());
 }
+
+/// A keyed insert that records the loudest key it was given and how often it ran.
+struct Probe {
+    inner: Box<dyn Plugin>,
+    calls: Arc<AtomicUsize>,
+    /// The loudest key sample seen, as `f32` bits.
+    loudest: Arc<std::sync::atomic::AtomicU32>,
+}
+
+impl Plugin for Probe {
+    delegate!();
+    fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        self.inner.process(io, frames);
+    }
+    fn process_with_key(&mut self, io: &mut [Vec<f32>], key: &[Vec<f32>], frames: usize) {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+        let peak = key.iter().flat_map(|c| c.iter().take(frames)).fold(0.0f32, |m, v| m.max(v.abs()));
+        self.loudest.fetch_max(peak.to_bits(), Ordering::Relaxed);
+        self.inner.process(io, frames);
+    }
+}
+
+/// Review finding 1 (#174): the tail rule is transitive. Kick (held on the one worker) keys aux
+/// A1; aux A2 is keyed from A1. In a block where Kick misses, A1 is skipped and so is A2: A2's
+/// keyed insert never sees A1's buffer from the last block it ran (a skipped aux keeps it). Both
+/// skips are counted with the upstream-missed ones (`note_tail_skip`).
+#[test]
+fn an_aux_keyed_from_a_skipped_aux_is_skipped_too() {
+    let _switch = SWITCH.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut s = Session::default();
+    s.edit.click = false;
+    let feed = crate::tests::add_dc_track(&mut s, 0.5, 48_000 * 10);
+    let kick = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Kick"));
+    let pad = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Pad"));
+    let filler = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Filler"));
+    let (b1, b2) = (BusId(s.alloc()), BusId(s.alloc()));
+    s.busses.push(transit_model::Bus { id: b1, name: "B1".into(), format: ChannelFormat::Stereo });
+    s.busses.push(transit_model::Bus { id: b2, name: "B2".into(), format: ChannelFormat::Stereo });
+    s.track_mut(feed).unwrap().mixer.output = Route::Bus(b1);
+    let _ = filler;
+    s.track_mut(kick).unwrap().mixer.inserts[0] = Some(Insert::new("gain"));
+    let p = s.track_mut(pad).unwrap();
+    p.mixer.input_monitor = true;
+    p.mixer.inserts[0] = Some(Insert::new("gain"));
+    let keyed = |from: TrackId| {
+        let mut c = Insert::new("compressor");
+        c.key = Some(KeySource { from: KeyFrom::Track(from), tap: Tap::Post });
+        Some(c)
+    };
+    let a1 = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("A1"));
+    let t = s.track_mut(a1).unwrap();
+    t.mixer.input = Route::Bus(b1);
+    t.mixer.output = Route::Main;
+    t.mixer.inserts[0] = keyed(kick);
+    let a2 = s.add_track(TrackKind::Aux, ChannelFormat::Stereo, Some("A2"));
+    let t = s.track_mut(a2).unwrap();
+    t.mixer.input = Route::Bus(b2);
+    t.mixer.output = Route::Main;
+    t.mixer.inserts[0] = keyed(a1);
+
+    let knobs = Knobs {
+        hold: Arc::default(),
+        entered: Arc::default(),
+        armed: Arc::default(),
+        need_entered: Arc::default(),
+        deadline: Arc::default(),
+        pad_renders: Arc::default(),
+    };
+    let (calls, loudest) = (Arc::new(AtomicUsize::new(0)), Arc::new(std::sync::atomic::AtomicU32::new(0)));
+    let hold = Hold { inner: gain(), latency: 0, hold: Arc::clone(&knobs.hold), entered: Arc::clone(&knobs.entered) };
+    let wait = Wait {
+        inner: gain(),
+        armed: Arc::clone(&knobs.armed),
+        entered: Arc::clone(&knobs.entered),
+        need_entered: Arc::clone(&knobs.need_entered),
+        deadline: Arc::clone(&knobs.deadline),
+        renders: Arc::clone(&knobs.pad_renders),
+    };
+    let probe = Probe { inner: gain(), calls: Arc::clone(&calls), loudest: Arc::clone(&loudest) };
+    let mut rig = PlanRig::new(FRAMES).fake(kick, 0, hold).fake(pad, 0, wait).fake(a2, 0, probe);
+    rig.publish(&s);
+    rig.eng.pool = Some(StripPool::new(1, 16, false, None, u32::try_from(FRAMES).unwrap(), 48_000).unwrap());
+    let (c, l) = (Arc::clone(&calls), Arc::clone(&loudest));
+    let rig = as_callback(move || {
+        let (mut rig, mut b) = (rig, 0i64);
+        rig.eng.set_strip_deadline(Some(STALL));
+        for _ in 0..6 {
+            block(&mut rig, &mut b);
+        }
+        assert!(c.load(Ordering::Relaxed) > 0 && f32::from_bits(l.load(Ordering::Relaxed)) > 0.1, "A2's key is A1's signal when A1 runs");
+        let before = pool(&rig).reader().snapshot().upstream_missed;
+        c.store(0, Ordering::Relaxed);
+        l.store(0, Ordering::Relaxed);
+        knobs.hold.store(true, Ordering::Release);
+        deadline_block(&mut rig, &knobs, &mut b, true);
+        assert_eq!(outcome(&rig, kick), Outcome::Overrun(OverrunCause::Late));
+        assert_eq!(pool(&rig).reader().snapshot().upstream_missed, before + 2, "A1 and A2 skipped, counted as upstream-missed tail skips");
+        assert_eq!(rig.eng.plan.as_deref().unwrap().tables.graph.tail_skipped.as_ref(), [true, true]);
+        assert_eq!((c.load(Ordering::Relaxed), l.load(Ordering::Relaxed)), (0, 0), "A2's keyed insert never ran on a stale key");
+        knobs.hold.store(false, Ordering::Release);
+        let t0 = Instant::now();
+        while !rig.eng.render_workers_settled() {
+            assert!(t0.elapsed() < STALL, "the worker never returned");
+            std::thread::yield_now();
+        }
+        rig.eng.set_block_deadline(None);
+        rig.eng.set_strip_deadline(Some(STALL));
+        block(&mut rig, &mut b);
+        assert_eq!(rig.eng.plan.as_deref().unwrap().tables.graph.tail_skipped.as_ref(), [false, false], "the flags are per block");
+        assert!(c.load(Ordering::Relaxed) > 0, "A2 runs again once A1 does");
+        rig
+    });
+    let PlanRig { eng, .. } = rig;
+    drop(eng.into_retired());
+}
