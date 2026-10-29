@@ -546,11 +546,23 @@ impl MixEngine {
             let Some(t) = track(st).filter(|t| live(t)) else { continue };
             let at = phase1.saturating_add(k);
             // The graph's rule on the serial tail (#174): an aux keyed from a phase-1 strip that
-            // missed this block is skipped (silent, not metered, its lines neither run nor idled).
-            if let Some(p) = pool
-                && keys.sources_of(at).any(|j| j < phase1 && (p.is_silent(j) || p.is_away(j)))
-            {
-                p.note_tail_skip();
+            // missed this block, or from an earlier aux skipped by this rule, is skipped (silent, not
+            // metered, its lines neither run nor idled). A skipped aux's buffer still holds the last
+            // block it ran, so a later aux keyed from it must not run either.
+            let skipped = pool.is_some_and(|p| {
+                let tail = &graph.tail_skipped;
+                keys.sources_of(at).any(|j| match j.checked_sub(phase1) {
+                    None => p.is_silent(j) || p.is_away(j),
+                    Some(a) => a < k && tail.get(a).copied().unwrap_or(false),
+                })
+            });
+            if let Some(f) = graph.tail_skipped.get_mut(k) {
+                *f = skipped;
+            }
+            if skipped {
+                if let Some(p) = pool {
+                    p.note_tail_skip();
+                }
                 continue;
             }
             let strip = |i: usize| match i.checked_sub(phase1) {

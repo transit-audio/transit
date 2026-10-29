@@ -245,7 +245,7 @@ impl StripPool {
             }
         }
         let deadline = self.deadline(b);
-        let StripGraph { graph: table, run, layer_start } = graph;
+        let StripGraph { graph: table, run, layer_start, .. } = graph;
         let (report, callback) = {
             let mut host =
                 Host { pool: &mut *self, p1: &mut *p1, events: &mut *events, keys: &mut *keys, graph: table, layer_start, b, g, callback: 0 };

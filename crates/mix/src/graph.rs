@@ -96,6 +96,9 @@ pub(crate) struct StripGraph {
     /// Per phase-1 strip: the first table index of its layer. A key from a strip at or past it
     /// fills silence, as on the serial path (which fills a layer's keys before the layer runs).
     pub(crate) layer_start: Box<[u16]>,
+    /// Per aux (table index less `phase1`): skipped this block because a key source missed (a
+    /// phase-1 strip or an earlier skipped aux). Set by the serial tail each block.
+    pub(crate) tail_skipped: Box<[bool]>,
 }
 
 /// Graph generations: one per table built (0: none).
@@ -103,8 +106,9 @@ static NEXT_GRAPH: AtomicU64 = AtomicU64::new(1);
 
 /// The task graph of a plan with `phase1` phase-1 strips in `layers` (each layer's end) and the
 /// key edges `keys`: an edge from a key source strip to its keyed strip when the source renders
-/// in an earlier layer. Off the audio path (allocates).
-pub(crate) fn strip_graph(phase1: usize, layers: &[u16], keys: &[KeySpec]) -> StripGraph {
+/// in an earlier layer; with a skip flag per aux (`auxes` of them). Off the audio path
+/// (allocates).
+pub(crate) fn strip_graph(phase1: usize, auxes: usize, layers: &[u16], keys: &[KeySpec]) -> StripGraph {
     let mut layer_start = vec![0u16; phase1];
     let mut from = 0usize;
     for end in layers.iter().map(|&e| usize::from(e)).chain(std::iter::once(phase1)) {
@@ -125,7 +129,12 @@ pub(crate) fn strip_graph(phase1: usize, layers: &[u16], keys: &[KeySpec]) -> St
         })
         .collect();
     let generation = NEXT_GRAPH.fetch_add(1, Ordering::Relaxed);
-    StripGraph { graph: TaskGraph::new(generation, phase1, &edges), run: GraphRun::new(phase1), layer_start: layer_start.into() }
+    StripGraph {
+        graph: TaskGraph::new(generation, phase1, &edges),
+        run: GraphRun::new(phase1),
+        layer_start: layer_start.into(),
+        tail_skipped: vec![false; auxes].into(),
+    }
 }
 
 impl StripGraph {
@@ -180,14 +189,14 @@ mod tests {
             key(4, KeyEnd::Bus(BusId(9))),
             key(6, KeyEnd::Strip(0)),
         ];
-        let g = strip_graph(5, &layers, &keys);
+        let g = strip_graph(5, 0, &layers, &keys);
         assert_eq!((0..5).map(|t| g.layer_start(t)).collect::<Vec<_>>(), [0, 0, 2, 2, 4]);
         assert_eq!(g.graph.tasks(), 5);
         assert_eq!(g.graph.dependents(0), [2], "a key within the source's own layer is no edge");
         assert!(g.graph.dependents(2).is_empty(), "3 keyed from 2 in its own layer fills silence: no edge");
         assert_eq!(g.graph.dependents(3), [4]);
         assert_eq!(g.graph.edges(), 2);
-        let h = strip_graph(5, &layers, &keys);
+        let h = strip_graph(5, 0, &layers, &keys);
         assert_ne!(g.graph.generation(), h.graph.generation(), "a new generation per table");
         assert_eq!(g.run.capacity(), 5);
         assert_ne!(task_identity(2, 7, g.graph.edge_hash(2)), task_identity(2, 7, g.graph.edge_hash(1)));
