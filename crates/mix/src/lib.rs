@@ -82,6 +82,7 @@ mod compile;
 mod events;
 mod external;
 mod external_midi;
+mod graph;
 mod hardware;
 mod instance;
 mod key;

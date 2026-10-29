@@ -166,6 +166,9 @@ pub(crate) struct PlanTables {
     pub(crate) layers: Box<[u16]>,
     /// The key buffers of the keyed inserts.
     pub(crate) keys: KeyBank,
+    /// The phase-1 task graph of the key edges and its per-block state (issue #174): the render
+    /// workers' schedule of a keyed plan ([`crate::graph`]).
+    pub(crate) graph: crate::graph::StripGraph,
     /// Cell index → location: the strips first (cell `i` is strip `i`), then the slots.
     pub(crate) cells: Box<[CellLoc]>,
     /// Sorted by track id: the strip of each track.
