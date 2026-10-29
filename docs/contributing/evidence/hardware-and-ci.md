@@ -5,9 +5,10 @@
 `.github/workflows/ci.yml` is the push gate: it runs on every pull request and on every push to
 `main`, and cancels a superseded run. Jobs:
 
-- `windows`: `cargo xtask layers`, `cargo xtask assets`, `cargo xtask timing`, then clippy (`-D warnings`) and the tests for
+- `windows`: `cargo xtask layers` (which includes the file-size ratchet), `cargo xtask assets`, `cargo xtask timing`, then clippy (`-D warnings`) and the tests for
   the whole workspace with `--features transit/native-wasapi,transit/native-asio`.
-- `linux`: `cargo fmt --check`, `cargo xtask timing`, clippy and the tests on default features.
+- `linux`: `cargo fmt --check`, `cargo xtask timing`, clippy and the tests on default features, plus the native JACK
+  clippy and tests. It is the Linux compile proof.
 - `macos`: clippy and the tests on default features (`crates/au-host` and the objc2 code compile only
   there).
 
@@ -73,7 +74,7 @@ the driver figure minus one buffer.
 ### Render worker runs (#124 gate 6)
 
 The gate 6 runs compared serial (then the default) with the render workers (`TRANSIT_RENDER_POOL=1`,
-then the opt-in) through the device
+then opt-in) through the device
 ([2026-10-28 benchmark](../../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md)). With them
 and the #130 eight-hour run, the workers became the default on 2026-10-29; `TRANSIT_RENDER_POOL=0`
 now renders serially, and a serial-against-workers run sets it for the serial half. The
