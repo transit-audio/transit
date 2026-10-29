@@ -55,6 +55,9 @@ jobs:
       # Check production host code without the integration tests' self-dev feature activation.
       - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings
+      # Lib targets only: the dev-dependencies of the test targets turn the `testing` feature on, so a
+      # warning that exists only with it off would otherwise reach the release build alone (#215).
+      - run: cargo clippy --locked -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings
       - run: cargo test --locked --workspace --features transit/native-wasapi,transit/native-asio
 
   linux:
@@ -79,6 +82,9 @@ jobs:
       # Check production host code without the integration tests' self-dev feature activation.
       - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
+      # Lib targets only: the dev-dependencies of the test targets turn the `testing` feature on, so a
+      # warning that exists only with it off would otherwise reach the release build alone (#215).
+      - run: cargo clippy --locked -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings
       # The native JACK backend (ADR 0021): its libjack calls build only with the feature. Its tests use
       # a fake server; no JACK server runs here.
       - run: cargo clippy --locked --workspace --all-targets --features transit/native-jack,audio-bench/native-jack -- -D warnings

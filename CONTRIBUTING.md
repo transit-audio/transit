@@ -15,6 +15,7 @@ Before you open one, read the contributor docs and run the gates:
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings
+cargo clippy -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings   # lib targets only: the `testing` feature stays off (#215)
 cargo test --locked --workspace --features transit/native-wasapi,transit/native-asio --no-fail-fast
 cargo test -p transit-rt --release
 cargo xtask layers
