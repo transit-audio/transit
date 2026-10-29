@@ -46,6 +46,16 @@ Reading it:
 
 When a plug-in does not return (its editor window turns white and Windows says it is not responding), transit shows a message naming it. Audio keeps playing. Press **Save now** first: the session saves with that plug-in's last stored state. Then **Give up on <plug-in>** stops transit from waiting on it: its window hides when Windows lets it, its plug-ins stay unresponsive until you quit and reopen transit, and plug-ins you add load normally. Do not use End Task on the plug-in's window: it ends transit. Copy diagnostics and the log name the plug-in and what it was doing; attach them to a report for the plug-in's maker or for transit ([K90](known-issues/README.md)).
 
+## A long recording was not placed
+
+A take longer than about 6.2 hours of mono at 48 kHz (3.1 hours of stereo; half again at 96 kHz) is too
+long for a session to hold in memory. When the recording stops, transit says so in a message that names the
+file, how long it is and the limit, writes the same as a warning in the log, and keeps the file where it
+recorded: the message ends with "The file is kept at <path>". The session remembers the file: every time
+it opens, a note names it, and Copy diagnostics has an "Unplaced takes" section. The recording is
+intact (an RF64 WAV past 4 GiB); open it in another editor, or split it and import the pieces. Placing
+takes of any length is issue #187 (known issue K91).
+
 ## More detail
 
 Three ways, from least to most effort:
