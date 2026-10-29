@@ -140,7 +140,7 @@ pub fn detail_rows_named(t: &CallbackTelemetry, strips: &[StripName]) -> Vec<Str
         format!("Over-budget callbacks while a plug-in was loading: {}", t.over_budget_while_creating),
     ]);
     // Beside the late-block figures: the render workers' stream faults (ADR 0029), when the
-    // engine has workers (`TRANSIT_RENDER_POOL=1`). Each name is defined once in
+    // engine has workers (the default; `TRANSIT_RENDER_POOL=0` renders serially). Each name is defined once in
     // docs/troubleshooting.md ("Render worker figures").
     if let Some(f) = &t.strip_faults {
         rows.extend(strip_fault_rows(f));

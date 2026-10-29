@@ -769,16 +769,16 @@ impl MixEngine {
     }
 
     /// Force (or stop forcing) every engine in the process to render its audio-thread strips
-    /// serially on the audio thread, never on its render workers. Serial is the default (see
-    /// [`RENDER_POOL_ENV`]); `force_serial(false)` hands the strips to an engine's render workers
-    /// once it has them ([`MixEngine::start_render_workers`]). Takes effect at the next block (a
+    /// serially on the audio thread, never on its render workers. The workers are the default;
+    /// `TRANSIT_RENDER_POOL=0` renders serially ([`RENDER_POOL_ENV`]). `force_serial(false)` hands the
+    /// strips back to an engine's workers once it has them ([`MixEngine::start_render_workers`]). Takes effect at the next block (a
     /// strip a worker still holds comes back first). Offline renders are not affected.
     pub fn force_serial(on: bool) {
         FORCE_SERIAL.store(on, std::sync::atomic::Ordering::Relaxed);
     }
 
-    /// True while serial rendering is in effect: the default, until [`MixEngine::force_serial`]`(false)`
-    /// or [`RENDER_POOL_ENV`] turns the render workers on.
+    /// True while serial rendering is in effect: off by default (the render workers), on after
+    /// [`MixEngine::force_serial`]`(true)` or with `TRANSIT_RENDER_POOL=0` ([`RENDER_POOL_ENV`]).
     #[must_use]
     pub fn serial_forced() -> bool {
         FORCE_SERIAL.load(std::sync::atomic::Ordering::Relaxed)

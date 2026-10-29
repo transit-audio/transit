@@ -449,7 +449,7 @@ impl MixEngine {
         // A strip's panic is kept in the strip (`guarded`); the first one unwinds out of here, the
         // others stay in the table and go back to the control side with it.
         //
-        // With render workers (opt-in, ADR 0029) and no sidechain key, the strips go through the
+        // With render workers (the default, ADR 0029) and no sidechain key, the strips go through the
         // worker set instead, under the block's deadline; a strip a worker still holds comes back
         // that way whatever the switches say.
         let pooled = match (self.pool.as_mut(), start) {
@@ -715,7 +715,7 @@ fn fold_latency(s: &Session, phases: RenderPhases<'_>, busses: &mut BusTable, si
     DeviceLatency { main: main_arrival, device }
 }
 
-/// The render workers (issue #124 slice 4, ADR 0029): opt-in, started by the live engine's owner.
+/// The render workers (issue #124, ADR 0029): the default, started by the live engine's owner.
 impl MixEngine {
     /// Control thread: starts this engine's render workers (cores minus one, at most
     /// [`MAX_RENDER_WORKERS`], each promoted once at start unless [`RENDER_NO_PRIORITY_ENV`] is

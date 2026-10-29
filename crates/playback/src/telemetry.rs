@@ -226,7 +226,7 @@ pub struct CallbackTelemetry {
     pub backend: Option<StreamStats>,
     /// The live engine's render-worker stream faults (strip overruns by cause, late results,
     /// deferred-MIDI overflows and silences, suspect strips; ADR 0029), when it has render
-    /// workers (`TRANSIT_RENDER_POOL=1`); `None` while the strips render serially. Filled by
+    /// workers (the default); `None` while the strips render serially (`TRANSIT_RENDER_POOL=0`). Filled by
     /// `Player::callback_telemetry` from the engine's counters, not by the callback.
     pub strip_faults: Option<transit_mix::StripFaults>,
 }

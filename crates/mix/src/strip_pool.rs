@@ -1,8 +1,9 @@
 //! The audio thread's strip fan-out (issue #124 slice 4, ADR 0029): phase-1 strips rendered by a
 //! fixed [`WorkerSet`] of `transit-rt`, with the callback's bounded deadline, the deferred-MIDI
-//! ring and the stream-fault counters. Opt-in: an engine has a pool only after
-//! [`MixEngine::start_render_workers`], and uses it only while [`MixEngine::serial_forced`] is off
-//! ([`RENDER_POOL_ENV`]). Offline renders never have one.
+//! ring and the stream-fault counters. The default for the live engine: an engine has a pool only
+//! after [`MixEngine::start_render_workers`], and uses it only while [`MixEngine::serial_forced`]
+//! is off; `TRANSIT_RENDER_POOL=0` renders serially ([`RENDER_POOL_ENV`]). Offline renders never
+//! have one.
 //!
 //! **Cells.** Each strip index below the pool's capacity has a cell: a `Mutex<Job>` holding a
 //! spare [`Strip`] and what one strip render reads (the Session, the block's position and

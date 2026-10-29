@@ -283,7 +283,7 @@ pub struct Control {
     status_rx: rtrb::Consumer<StatusReport>,
     status: Option<StatusReport>,
     counters: Arc<Counters>,
-    /// The live engine's render-worker faults, when it has workers (opt-in, ADR 0029).
+    /// The live engine's render-worker faults, when it has workers (the default, ADR 0029).
     strip_faults: Option<transit_mix::StripFaultsReader>,
 }
 
@@ -321,8 +321,9 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
     // constructs a runtime. Same-target plans keep this engine incarnation.
     let mut mix = MixEngine::realtime_with_events(target, transit_mix::EngineEpoch(target.device.0), transit_mix::EventLimits::default());
     mix.metronome = true;
-    // The multicore strip render is opt-in (`TRANSIT_RENDER_POOL=1`, #124): only then does the live
-    // engine start render workers. They stop with the engine, in `Control::retire`, on control.
+    // The multicore strip render is the default (#124); `TRANSIT_RENDER_POOL=0` renders serially
+    // and the live engine starts no render workers. They stop with the engine, in
+    // `Control::retire`, on control.
     if !MixEngine::serial_forced() {
         mix.start_render_workers(usize::from(limits.tracks));
     }

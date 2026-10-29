@@ -18,7 +18,8 @@ impl Player {
     }
     /// The live engine's render-worker stream faults (strip overruns by cause, late results,
     /// deferred-MIDI overflows and silences, suspect strips; ADR 0029), `None` while the strips
-    /// render serially (the default; `TRANSIT_RENDER_POOL=1` opts in). Relaxed reads.
+    /// render serially (render workers are the default; `TRANSIT_RENDER_POOL=0` renders serially).
+    /// Relaxed reads.
     pub fn strip_faults(&self) -> Option<transit_mix::StripFaults> {
         self.owner().ok().and_then(|owner| owner.strip_faults())
     }
