@@ -800,6 +800,17 @@ impl Engine {
     pub fn message(&mut self, m: impl Into<String>) {
         let m = m.into();
         log::info!("{m}");
+        self.push_message(m);
+    }
+
+    /// [`Engine::message`] for something that went wrong: the log line is a warning.
+    pub fn warn(&mut self, m: impl Into<String>) {
+        let m = m.into();
+        log::warn!("{m}");
+        self.push_message(m);
+    }
+
+    fn push_message(&mut self, m: String) {
         self.messages.push(m);
         if self.messages.len() > 100 {
             self.messages.remove(0);

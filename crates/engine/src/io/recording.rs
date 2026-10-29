@@ -111,10 +111,30 @@ pub fn add_recording_take(
     let before = e.session_arc();
     let n0 = e.undo_pushes();
     let mut out = Vec::new();
+    let mut unplaced = Vec::new();
     for (tid, path) in takes {
-        let read =
-            read_file(&path).and_then(|b| transit_audio_io::decode(&b, None).map_err(|err| EngineError::Io(format!("{}: {err}", path.display()))));
-        let Ok((_, buf)) = read.inspect_err(|err| e.message(err.to_string())) else { continue };
+        if let Some(held) = oversize(&path) {
+            unplaced.push(refuse_take(e, &path, &held));
+            continue;
+        }
+        let bytes = match read_file(&path) {
+            Ok(b) => b,
+            Err(err) => {
+                e.message(err.to_string());
+                continue;
+            }
+        };
+        let (_, buf) = match transit_audio_io::decode(&bytes, None) {
+            Ok(x) => x,
+            Err(err @ transit_audio_io::AudioError::TooLarge(_)) => {
+                unplaced.push(refuse_take(e, &path, &Held::Unsized(format!("{}: {err}", path.display()))));
+                continue;
+            }
+            Err(err) => {
+                e.message(format!("{}: {err}", path.display()));
+                continue;
+            }
+        };
         if new_take && pass.is_none() {
             let frames = i64::try_from(buf.frames()).unwrap_or(0);
             let from = punch.map_or(start, |p| p.start.max(start));
@@ -159,7 +179,77 @@ pub fn add_recording_take(
             let _ = e.squash_undo(added, "Record");
         }
     }
+    // After the undo step, so undoing the recording keeps the reference to the file.
+    if !unplaced.is_empty() {
+        let s = e.session_mut();
+        for entry in unplaced {
+            if !s.unplaced_takes.contains(&entry) {
+                s.unplaced_takes.push(entry);
+            }
+        }
+    }
     out
+}
+
+/// What a refused take holds: its length and layout (read from the header), or only the decoder's words.
+enum Held {
+    Sized { frames: u64, channels: u16, rate: u32 },
+    Unsized(String),
+}
+
+/// A rate in kHz: 48000 as "48", 44100 as "44.1".
+fn khz(rate: u32) -> String {
+    let k = f64::from(rate) / 1000.0;
+    if rate.is_multiple_of(1000) { format!("{k:.0}") } else { format!("{k:.1}") }
+}
+
+fn layout(channels: u16) -> String {
+    match channels {
+        1 => "mono".into(),
+        2 => "stereo".into(),
+        n => format!("{n}-channel"),
+    }
+}
+
+/// Hours of `channels`-channel audio at `rate` that fit the decode limit.
+fn limit_hours(channels: u16, rate: u32) -> f64 {
+    transit_audio_io::MAX_DECODE_SAMPLES as f64 / f64::from(channels.max(1)) / f64::from(rate.max(1)) / 3600.0
+}
+
+/// How much of a take file's start holds its WAV header (chunks before the data are small).
+const HEADER_BYTES: u64 = 64 * 1024;
+
+/// The take at `path` when its header says it holds more than the decoder accepts, found without
+/// reading its audio (#187: reading first allocated the whole file). `None` for a file that fits,
+/// is not a WAV the header sizes, or cannot be read (the read then reports why).
+fn oversize(path: &Path) -> Option<Held> {
+    use std::io::Read;
+    crate::file_access::check_read(path).ok()?;
+    let len = std::fs::metadata(path).ok().filter(|m| m.is_file())?.len();
+    let mut head = Vec::new();
+    std::fs::File::open(path).ok()?.take(HEADER_BYTES).read_to_end(&mut head).ok()?;
+    let info = transit_audio_io::probe_sized(&head, len).ok()?;
+    let samples = info.frames.saturating_mul(u64::from(info.channels));
+    (samples > transit_audio_io::MAX_DECODE_SAMPLES).then_some(Held::Sized { frames: info.frames, channels: info.channels, rate: info.sample_rate })
+}
+
+/// Say, loudly, that the take at `path` was not placed and where the file is; returns the entry the
+/// session keeps for it.
+fn refuse_take(e: &mut Engine, path: &Path, held: &Held) -> String {
+    let (what, said) = match held {
+        Held::Sized { frames, channels, rate } => {
+            let hours = *frames as f64 / f64::from((*rate).max(1)) / 3600.0;
+            let what = format!("{hours:.1} h of {} at {} kHz", layout(*channels), khz(*rate));
+            let said = format!("{what} ({frames} frames); the limit is {:.1} h", limit_hours(*channels, *rate));
+            (what, said)
+        }
+        Held::Unsized(why) => (why.clone(), why.clone()),
+    };
+    let shown = path.display();
+    e.warn(format!(
+        "The take {shown} was not placed: it is {said}, more than a session can hold in memory. The file is kept at {shown}; import it in pieces or open it in another editor."
+    ));
+    format!("{shown} ({what})")
 }
 
 /// Where a take recording from `start` shows while it holds `len` samples, as it will be placed:
