@@ -153,6 +153,10 @@ struct KeyEntry {
     line: KeyLine,
     scratch: Vec<Vec<f32>>,
     want: usize,
+    /// Frames of a key filled for a render worker's strip whose early-key delay has not run yet
+    /// (0: none). The delay runs when the strip renders ([`KeyBank::apply_pending`]), so a strip
+    /// taken back unrendered leaves its line neither written nor idled (#174, found by #210).
+    pending: usize,
 }
 
 /// The key buffers of a plan.
@@ -187,6 +191,7 @@ impl KeyBank {
                     line: KeyLine::new(ch, cap_of(spec.keyed), block),
                     scratch: (0..ch).map(|_| Vec::with_capacity(block)).collect(),
                     want: 0,
+                    pending: 0,
                 }
             })
             .collect();
@@ -220,10 +225,12 @@ impl KeyBank {
                 line: KeyLine { line: DelayLine::placeholder(), tap: EdgeTap::default() },
                 scratch: Vec::new(),
                 want: e.want,
+                pending: 0,
             };
             std::mem::swap(&mut e.buf, &mut v.buf);
             std::mem::swap(&mut e.line, &mut v.line);
             std::mem::swap(&mut e.scratch, &mut v.scratch);
+            std::mem::swap(&mut e.pending, &mut v.pending);
             e.lent = true;
             to.entries.push(v);
         }
@@ -240,6 +247,7 @@ impl KeyBank {
             std::mem::swap(&mut e.buf, &mut v.buf);
             std::mem::swap(&mut e.line, &mut v.line);
             std::mem::swap(&mut e.scratch, &mut v.scratch);
+            std::mem::swap(&mut e.pending, &mut v.pending);
             e.lent = false;
         }
         from.entries.clear();
@@ -353,6 +361,39 @@ impl KeyBank {
                 KeyEnd::Bus(b) => busses.bus(b).map(|b| b.buf.as_slice()),
             };
             transit_dsp::map_key_channels(src.unwrap_or(&[]), &mut e.buf, 0, frames);
+            e.line.apply(e.want, &mut e.buf, &mut e.scratch, frames);
+            e.pending = 0;
+        }
+    }
+
+    /// [`KeyBank::fill`] for a strip a render worker may render: the keys are copied from their
+    /// sources now (the callback's only chance to read them), but the early-key delay is left
+    /// pending until the strip actually renders ([`KeyBank::apply_pending`], in the job's bank on
+    /// a worker or inline, in this bank on the callback). A strip taken back unrendered keeps its
+    /// line exactly as it was. The next fill replaces a pending key that never ran.
+    pub(crate) fn fill_deferred<'a>(
+        &mut self,
+        keyed: std::ops::Range<usize>,
+        strip: impl Fn(usize) -> Option<&'a Strip>,
+        busses: &BusTable,
+        frames: usize,
+    ) {
+        for e in self.entries.iter_mut().filter(|e| keyed.contains(&usize::from(e.spec.keyed)) && !e.lent) {
+            let src: Option<&[Vec<f32>]> = match e.spec.from {
+                KeyEnd::Strip(i) => strip(usize::from(i)).map(|st| if e.spec.pre { st.pre.as_slice() } else { st.buf.as_slice() }),
+                KeyEnd::Bus(b) => busses.bus(b).map(|b| b.buf.as_slice()),
+            };
+            transit_dsp::map_key_channels(src.unwrap_or(&[]), &mut e.buf, 0, frames);
+            e.pending = frames;
+        }
+    }
+
+    /// Runs the early-key delay of every entry still pending (keyed at `keyed`, or all for
+    /// `None`), once, as the strip renders. Nothing for an entry that is not pending.
+    /// Allocation-free.
+    pub(crate) fn apply_pending(&mut self, keyed: Option<usize>) {
+        for e in self.entries.iter_mut().filter(|e| e.pending > 0 && !e.lent && keyed.is_none_or(|k| usize::from(e.spec.keyed) == k)) {
+            let frames = std::mem::take(&mut e.pending);
             e.line.apply(e.want, &mut e.buf, &mut e.scratch, frames);
         }
     }

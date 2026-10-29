@@ -61,6 +61,15 @@ impl<'a> Host<'a, '_> {
         self.keys.fill(t..t + 1, |j| if j < start { p1.get(j) } else { None }, self.b.busses, self.b.frames);
     }
 
+    /// [`Host::fill`] for a strip about to be published: its keys are copied now, their early-key
+    /// delay runs only when it renders (#174, found by #210: a strip the deadline takes back
+    /// unrendered must leave its key lines untouched).
+    fn fill_deferred(&mut self, t: usize) {
+        let start = self.layer_start.get(t).map_or(0, |&s| usize::from(s));
+        let p1: &[Strip] = self.p1;
+        self.keys.fill_deferred(t..t + 1, |j| if j < start { p1.get(j) } else { None }, self.b.busses, self.b.frames);
+    }
+
     /// The identity `t`'s job must carry for this graph (its chain as it is home now).
     fn identity(&self, t: usize) -> u64 {
         self.p1.get(t).map_or(0, |st| task_identity(t, chain_identity(st), self.graph.edge_hash(t)))
@@ -107,7 +116,9 @@ impl GraphHost for Host<'_, '_> {
         if !self.pool.admit(t, &self.p1[t]) {
             return Start::Unavailable;
         }
-        self.fill(t);
+        // Pending until it renders: on a worker or inline from its job, or here if it falls back
+        // to the callback (`render_here` runs what is pending).
+        self.fill_deferred(t);
         let (graph, task) = (self.graph.generation(), self.identity(t));
         if !self.pool.send(t, &mut self.p1[t], self.b) {
             self.pool.on_callback[t] = true;
@@ -140,6 +151,9 @@ impl GraphHost for Host<'_, '_> {
         let s: &Session = self.b.session;
         let Some(st) = self.p1.get_mut(t) else { return };
         let Some(track) = s.tracks.get(usize::from(st.track)).filter(|t| live(t) && !is_aux(t)) else { return };
+        // A strip that fell back to the callback after its keys were filled for a worker: their
+        // early-key delay runs now, as it renders.
+        self.keys.apply_pending(Some(t));
         let b = self.b;
         let block = StripRender { s, busses: b.busses, live: b.live, pos: b.pos, frames: b.frames, any_solo: b.any_solo, keys: &*self.keys };
         guarded(st, |st| process_strip(track, st, &block));

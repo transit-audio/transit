@@ -154,6 +154,9 @@ impl Job {
             && let Some(t) = s.tracks.get(usize::from(strip.track))
         {
             let input: &[Vec<f32>] = if *duplex { no_input } else { &[] };
+            // The early-key delay of the keys lent with the strip runs now that it renders, once
+            // (#174, found by #210); nothing on the plain path (no keys are lent there).
+            keys.apply_pending(None);
             let live =
                 LiveInput { input, monitor_only: *monitor_only, recording: *recording, no_suspend: *no_suspend, frame: *frame, io: None, marker };
             let block = StripRender { s, busses, live: &live, pos: *pos, frames: *frames, any_solo: *any_solo, keys };
