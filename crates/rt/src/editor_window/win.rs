@@ -28,14 +28,14 @@ use windows_sys::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows_sys::Win32::UI::HiDpi::{AdjustWindowRectExForDpi, GetDpiForWindow, SystemParametersInfoForDpi};
 use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetFocus, ReleaseCapture, SetCapture, SetFocus, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow, GCW_ATOM,
-    GW_CHILD, GWL_EXSTYLE, GWL_STYLE, GWLP_USERDATA, GetClassLongPtrW, GetClientRect, GetParent, GetWindow, GetWindowLongPtrW, GetWindowRect,
-    GetWindowThreadProcessId, IDC_ARROW, IsChild, IsWindow, IsWindowVisible, LoadCursorW, MF_CHECKED, MF_GRAYED, MF_SEPARATOR, MF_STRING, MINMAXINFO,
-    MoveWindow, NONCLIENTMETRICSW, RegisterClassExW, SPI_GETNONCLIENTMETRICS, SW_HIDE, SW_SHOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOZORDER,
-    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, TPM_LEFTALIGN, TPM_NONOTIFY, TPM_RETURNCMD, TPM_TOPALIGN,
-    TrackPopupMenu, WA_INACTIVE, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND, WM_GETMINMAXINFO, WM_LBUTTONDOWN,
-    WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_PAINT, WM_SETFOCUS, WM_SIZE, WNDCLASSEXW, WS_CAPTION, WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
-    WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
+    AppendMenuW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT, CreatePopupMenu, CreateWindowExW, DefWindowProcW, DestroyMenu, DestroyWindow,
+    EnumThreadWindows, GCW_ATOM, GW_CHILD, GWL_EXSTYLE, GWL_STYLE, GWLP_USERDATA, GetClassLongPtrW, GetClientRect, GetParent, GetWindow,
+    GetWindowLongPtrW, GetWindowRect, GetWindowThreadProcessId, IDC_ARROW, IsChild, IsWindow, IsWindowVisible, LoadCursorW, MF_CHECKED, MF_GRAYED,
+    MF_SEPARATOR, MF_STRING, MINMAXINFO, MoveWindow, NONCLIENTMETRICSW, RegisterClassExW, SPI_GETNONCLIENTMETRICS, SW_HIDE, SW_SHOW, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow, ShowWindowAsync, TPM_LEFTALIGN,
+    TPM_NONOTIFY, TPM_RETURNCMD, TPM_TOPALIGN, TrackPopupMenu, WA_INACTIVE, WM_ACTIVATE, WM_CAPTURECHANGED, WM_CLOSE, WM_DPICHANGED, WM_ERASEBKGND,
+    WM_GETMINMAXINFO, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCDESTROY, WM_PAINT, WM_SETFOCUS, WM_SIZE, WNDCLASSEXW, WS_CAPTION, WS_CHILD,
+    WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_OVERLAPPED, WS_SYSMENU, WS_VISIBLE,
 };
 
 /// `WM_MOUSELEAVE` (winuser.h).
@@ -795,11 +795,99 @@ pub fn resize_content(window: *mut c_void, w: f64, h: f64) -> bool {
     true
 }
 
+/// The calling thread's id as Windows knows it, for [`hide_thread_windows`] from another thread.
+#[must_use]
+pub fn current_thread_id() -> u32 {
+    // SAFETY: no arguments; the calling thread's id.
+    unsafe { windows_sys::Win32::System::Threading::GetCurrentThreadId() }
+}
+
+/// Asks every visible top-level window of `thread` to hide, without waiting for that thread:
+/// issue #205's "Give up" on a plug-in host thread stuck inside a plug-in, whose editor window the
+/// user cannot close otherwise. Returns how many windows were asked.
+///
+/// What Windows allows from a thread that does not own the window (Win32 documentation):
+///
+/// - `EnumThreadWindows`: "Enumerates all nonchild windows associated with a thread by passing the
+///   handle to each window, in turn, to an application-defined callback function." It reads the
+///   window list; no message reaches the owning thread.
+/// - `ShowWindowAsync`: "Sets the show state of a window without waiting for the operation to
+///   complete." Remarks: "This function posts a show-window event to the message queue of the
+///   given window. An application can use this function to avoid becoming nonresponsive while
+///   waiting for a nonresponsive application to finish processing a show-window event."
+/// - `DestroyWindow`: "A thread cannot use `DestroyWindow` to destroy a window created by a different
+///   thread." Not used; neither is `ShowWindow`, which waits for the owning thread to handle the
+///   show messages it sends.
+///
+/// So the hide is queued: it takes effect when the owning thread next retrieves messages (a
+/// plug-in's own modal loop that still pumps, or the thread returning from the plug-in). While the
+/// thread stays hung, Windows keeps showing its "not responding" ghost in the window's place, which
+/// no call from another thread removes.
+pub fn hide_thread_windows(thread: u32) -> usize {
+    unsafe extern "system" fn visible(hwnd: HWND, found: LPARAM) -> windows_sys::core::BOOL {
+        // SAFETY: `found` is the `Vec` passed to `EnumThreadWindows` below, alive and not otherwise
+        // borrowed for the whole enumeration, which calls this on the calling thread.
+        let found = unsafe { &mut *(found as *mut Vec<HWND>) };
+        // SAFETY: accepts any handle; it reads the window's style and sends no message.
+        if unsafe { IsWindowVisible(hwnd) } != 0 {
+            found.push(hwnd);
+        }
+        1
+    }
+    let mut found: Vec<HWND> = Vec::new();
+    // SAFETY: a callback of the documented signature and an `LPARAM` pointing to `found`, which
+    // outlives the call; the enumeration sends nothing to `thread` (see above).
+    unsafe { EnumThreadWindows(thread, Some(visible), (&raw mut found) as LPARAM) };
+    for &hwnd in &found {
+        // SAFETY: accepts any handle (a window destroyed meanwhile fails harmlessly); it posts the
+        // request to the owning thread's queue and returns at once (see above).
+        unsafe { ShowWindowAsync(hwnd, SW_HIDE) };
+    }
+    found.len()
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
     use super::*;
     use std::time::Duration;
+
+    /// Issue #205: the windows of a thread that retrieves no messages (a host thread stuck in a
+    /// plug-in) are asked to hide without the asking thread waiting; the hide happens when the
+    /// owner retrieves messages again. The owner blocks on a channel the test releases.
+    #[test]
+    fn another_threads_windows_are_hidden_without_waiting_for_it() {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{MSG, PM_REMOVE, PeekMessageW};
+        let (made, made_rx) = std::sync::mpsc::channel::<(u32, usize)>();
+        let (release, held) = std::sync::mpsc::channel::<()>();
+        let (seen, seen_rx) = std::sync::mpsc::channel::<bool>();
+        let owner = std::thread::spawn(move || {
+            let win = EditorWindow::new("hung", 200.0, 100.0, None).unwrap();
+            win.raise();
+            made.send((current_thread_id(), win.raw() as usize)).unwrap();
+            let _ = held.recv(); // hung: no message is retrieved until the test releases it
+            // SAFETY: `MSG` is plain data, valid as zero bits.
+            let mut msg: MSG = unsafe { std::mem::zeroed() };
+            // SAFETY: `msg` is writable; retrieving this thread's messages processes the queued
+            // show-window event.
+            while unsafe { PeekMessageW(&raw mut msg, std::ptr::null_mut(), 0, 0, PM_REMOVE) } != 0 {}
+            seen.send(win.is_visible()).unwrap();
+            win.close();
+        });
+        // A stall bound: the owner creates its window at once.
+        let (thread, hwnd) = made_rx.recv_timeout(Duration::from_secs(10)).unwrap();
+        let hwnd = hwnd as HWND;
+        // SAFETY: accepts any handle.
+        assert_ne!(unsafe { IsWindowVisible(hwnd) }, 0, "shown");
+        // Returning at all shows it did not wait: the owner retrieves nothing until released.
+        assert_eq!(hide_thread_windows(thread), 1, "the one visible window was asked to hide");
+        // SAFETY: accepts any handle.
+        assert_ne!(unsafe { IsWindowVisible(hwnd) }, 0, "nothing happens until the owner retrieves messages");
+        release.send(()).unwrap();
+        assert!(!seen_rx.recv_timeout(Duration::from_secs(10)).unwrap(), "hidden once the owner retrieves messages");
+        owner.join().unwrap();
+        assert_eq!(hide_thread_windows(thread), 0, "a thread that is gone has no windows");
+    }
 
     fn client(hwnd: HWND) -> (i32, i32) {
         let mut r = RECT { left: 0, top: 0, right: 0, bottom: 0 };

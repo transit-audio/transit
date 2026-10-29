@@ -465,7 +465,7 @@ fn since(at: Option<std::time::Instant>) -> Duration {
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
-pub use win::{EditorWindow, resize_content};
+pub use win::{EditorWindow, current_thread_id, hide_thread_windows, resize_content};
 
 #[cfg(not(windows))]
 mod other {
@@ -526,9 +526,21 @@ mod other {
     pub fn resize_content(_window: *mut c_void, _w: f64, _h: f64) -> bool {
         false
     }
+
+    /// 0: no editor windows live on a thread of their own here (see the Windows version).
+    #[must_use]
+    pub fn current_thread_id() -> u32 {
+        0
+    }
+
+    /// Nothing to hide here (see the Windows version): Linux hosts no editor windows yet, and on
+    /// macOS editors live on the process main thread (inline mode, ADR 0018).
+    pub fn hide_thread_windows(_thread: u32) -> usize {
+        0
+    }
 }
 #[cfg(not(windows))]
-pub use other::{EditorWindow, resize_content};
+pub use other::{EditorWindow, current_thread_id, hide_thread_windows, resize_content};
 
 #[cfg(test)]
 mod tests {
