@@ -535,6 +535,7 @@ mod other {
 
     /// Nothing to hide here (see the Windows version): Linux hosts no editor windows yet, and on
     /// macOS editors live on the process main thread (inline mode, ADR 0018).
+    #[must_use]
     pub fn hide_thread_windows(_thread: u32) -> usize {
         0
     }
