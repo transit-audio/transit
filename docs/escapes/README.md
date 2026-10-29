@@ -20,3 +20,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E59: Active Sensing was stamped when the worker looked, not when it arrived](E59-active-sensing-was-stamped-when-the-worker-looked-not-when-it-arrived.md)
 - [E60: a recovered-autosave test left the save order to the clock](E60-a-recovered-autosave-test-left-the-save-order-to-the-clock.md)
 - [E61: a starved gate run shared the host with cold builds](E61-a-starved-gate-run-shared-the-host-with-cold-builds.md)
+- [E62: an autosave test polled the clock for a background write (#189)](E62-an-autosave-test-polled-the-clock-for-a-background-write.md)

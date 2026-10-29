@@ -5,6 +5,7 @@
 ```sh
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings
+cargo clippy -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings   # lib targets only: the `testing` feature stays off (#215)
 cargo test --locked --workspace --features transit/native-wasapi,transit/native-asio --no-fail-fast
 cargo test -p transit-rt --release
 cargo xtask layers      # crate layering and the no-UI-below-L6 rule (xtask/src/main.rs, LAYERS)
@@ -134,6 +135,9 @@ The suite needs the `testing` cargo feature of `transit-mix` (which turns on `tr
 - A test never derives a rate, BPM or latency from `thread::sleep` pacing. It injects the
   timestamps (the fake input's `deliver_at`) and asserts the exact value (E49 recurrence,
   the MIDI Monitor Clock BPM test).
+- A test that waits on a background thread waits on its completion signal (a join, a ticket or
+  counter, a channel, a synchronous flush), never on a wall-clock bound (E62, #189: the autosave
+  test now calls `Autosaver::flush`).
 - Injected timestamps need an injected readout: stamp on the origin the code under test reads
   (not another module's default origin) and read at a time consistent with the stamps, never the
   real clock (E49 recurrence 2026-10-25).
