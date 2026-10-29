@@ -516,6 +516,8 @@ fn continuity_across_upstream_missed_skips() {
         assert_eq!(s.reentries.load(Ordering::Relaxed), 0, "instrument {k}");
     }
     assert_eq!(f.conflicts, 0, "{f:?}");
+    // Liveness, not an outcome under test: the injected stalls (2-8 ms against a 1.5 ms deadline,
+    // taken only by a worker render) exist to make the skip paths run at all.
     assert!(f.overruns_late > 0 && f.upstream_missed > 0, "the stalls overran and skipped dependents: {f:?}");
     let hole_samples: u64 = reports.iter().map(|r| r.hole_samples).sum();
     assert_eq!(
@@ -524,6 +526,8 @@ fn continuity_across_upstream_missed_skips() {
         "every hole is a counted busy or unstarted overrun or an upstream-missed skip: {f:?}"
     );
     assert_eq!(rig.marked, f.overrun_blocks, "the take journal marks the blocks with an overrun of a strip's own");
+    // This rig has no keyed aux: every skip is a phase-1 strip's, so each has a per-strip row
+    // (an aux's tail skip counts in `upstream_missed` but has none).
     let listed: u64 = f.top_strips.iter().flatten().map(|s| s.upstream_missed).sum();
     assert_eq!(listed, f.upstream_missed, "every skip is listed with its strip: {:?}", f.top_strips);
     assert!(
@@ -582,6 +586,8 @@ fn the_callback_allocates_nothing_through_the_graph() {
     .unwrap();
     graph_off();
     println!("{f:?}");
+    // Liveness, not an outcome under test: the injected stalls (taken only by a worker render)
+    // exist to make the overrun and skip paths run under the allocation counter.
     assert!(f.overruns() > 0 && f.upstream_missed > 0 && f.midi_deferred + f.inline_renders > 0, "the paths ran: {f:?}");
     assert!(stats.is_zero(), "the callback allocated or freed: {stats:?}");
 }
