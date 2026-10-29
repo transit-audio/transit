@@ -4,7 +4,10 @@
 //! rest go back to the control side with the strips. Before this, Rayon re-raised one panic of a
 //! parallel render and dropped the others' payloads on its workers.
 //!
-//! Both paths: the plan on the engine's render workers and serially. The serial run also counts the audio thread's heap operations: the
+//! Both paths: the plan on the engine's render workers and serially. The render-worker tests set
+//! a far strip deadline, so the block waits for every strip's completion instead of racing the
+//! default share of a 5.3 ms period (E49 recurrence 2026-10-29); a strip still away at the
+//! deadline is the late test's subject, and its payload comes out of the block that brings it home. The serial run also counts the audio thread's heap operations: the
 //! render adds none to what the panics themselves cost (each panic's payload box and the unwind's
 //! own exception box, plus one more exception box for the re-raise).
 //!
@@ -16,6 +19,7 @@ use std::any::Any;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::ThreadId;
+use std::time::{Duration, Instant};
 use transit_dsp::Plugin;
 use transit_mix::{
     DeviceGeneration, INSTRUMENT_SLOT, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget,
@@ -31,6 +35,8 @@ const SR: u32 = 48_000;
 const BLOCK: usize = 256;
 /// More than `PARALLEL_STRIPS` (4), so the strips render in parallel where a pool exists.
 const TRACKS: usize = 6;
+/// A strip deadline no worker misses: the block waits for every published strip's completion.
+const FAR: Duration = Duration::from_secs(60);
 
 /// `MixEngine::force_serial` is process-wide: one test at a time.
 static SERIAL: Mutex<()> = Mutex::new(());
@@ -41,11 +47,25 @@ struct Shared {
     /// Where each panic was raised (reserved: recording one allocates nothing).
     raised: Mutex<Vec<ThreadId>>,
     armed: AtomicBool,
+    /// While set, an armed instrument rendering off the `callback` thread waits in `process`
+    /// before it panics: its strip is still on its worker at the deadline (`Late`).
+    hold: AtomicBool,
+    /// The callback thread (the hold never applies there, so the callback cannot wait on itself).
+    callback: Mutex<Option<ThreadId>>,
+    /// Armed instruments that entered `process` (a held one counts before it waits).
+    entered: std::sync::atomic::AtomicUsize,
 }
 
 impl Shared {
     fn new() -> Arc<Shared> {
-        Arc::new(Shared { payload_drops: Mutex::default(), raised: Mutex::new(Vec::with_capacity(64)), armed: AtomicBool::new(false) })
+        Arc::new(Shared {
+            payload_drops: Mutex::default(),
+            raised: Mutex::new(Vec::with_capacity(64)),
+            armed: AtomicBool::new(false),
+            hold: AtomicBool::new(false),
+            callback: Mutex::new(None),
+            entered: std::sync::atomic::AtomicUsize::new(0),
+        })
     }
 }
 
@@ -82,6 +102,14 @@ impl Plugin for Panics {
     }
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
         if self.shared.armed.load(Ordering::Relaxed) {
+            self.shared.entered.fetch_add(1, Ordering::Relaxed);
+            let here = std::thread::current().id();
+            if *self.shared.callback.lock().unwrap() != Some(here) {
+                // timing: sleep-ok waits for the test's release, measures nothing
+                while self.shared.hold.load(Ordering::Acquire) {
+                    std::thread::sleep(Duration::from_micros(100));
+                }
+            }
             self.shared.raised.lock().unwrap().push(std::thread::current().id());
             std::panic::panic_any(Payload(Arc::clone(&self.shared)));
         }
@@ -173,6 +201,11 @@ fn parallel_panicking_instruments_drop_no_payload_on_a_render_worker() {
     // The pool is built when the first engine is made, off the audio thread.
     let mut mix = plan_engine(&shared);
     mix.start_render_workers(16);
+    // The block waits for every strip: with the default share of the 5.3 ms period a strip still
+    // on a worker at the deadline is `Late`, its payload stays in its cell for a later block and
+    // this render returns Ok (CI run 40968743055 on macos-aarch64; E49). That path is
+    // `a_strip_late_at_the_deadline_raises_its_panic_from_the_block_that_brings_it_home`.
+    mix.set_strip_deadline(Some(FAR));
     let mark = std::thread::spawn(move || {
         MixEngine::force_serial(false);
         mark_audio_thread();
@@ -191,6 +224,61 @@ fn parallel_panicking_instruments_drop_no_payload_on_a_render_worker() {
     println!("render workers: {workers}; {on_workers} of {} panics raised on a worker", raised.len());
     assert_eq!(raised.len(), TRACKS);
     assert_all_dropped_here("render workers", &shared, panic, mix);
+}
+
+/// A strip still on its worker at the deadline (`Late`) keeps its panic in the strip: that block
+/// returns Ok and mixes the strip as silence, and the block that brings the strip home re-raises
+/// the payload to its caller. Nothing is dropped on a worker and nothing is lost: every strip's
+/// payload comes back to the control side. The strips are held in `process` until every claimed
+/// one is past a zero deadline, so the outcome does not depend on the host's timing.
+#[test]
+fn a_strip_late_at_the_deadline_raises_its_panic_from_the_block_that_brings_it_home() {
+    let _one = SERIAL.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    silence_panics();
+    let shared = Shared::new();
+    let mut mix = plan_engine(&shared);
+    if mix.start_render_workers(16) == 0 {
+        return;
+    }
+    let mark = std::thread::spawn(move || {
+        MixEngine::force_serial(false);
+        mark_audio_thread();
+        *shared.callback.lock().unwrap() = Some(std::thread::current().id());
+        let mut out = vec![vec![0.0; BLOCK]; 2];
+        let mut pos = 4 * BLOCK as i64;
+        // No strip is admitted inline at a zero deadline, so only a worker enters an instrument,
+        // and it waits there: each such strip is `Late`, the rest come home unrendered.
+        mix.set_strip_deadline(Some(Duration::ZERO));
+        shared.hold.store(true, Ordering::Release);
+        shared.armed.store(true, Ordering::Relaxed);
+        let mut blocks = 0;
+        while shared.entered.load(Ordering::Relaxed) == 0 {
+            assert!(blocks < 10_000, "no worker claimed a strip in {blocks} blocks");
+            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mix.render_active(pos, BLOCK, &mut out)));
+            assert!(r.is_ok(), "block {blocks}: a strip held on its worker raised nothing yet");
+            pos += BLOCK as i64;
+            blocks += 1;
+        }
+        let late = shared.entered.load(Ordering::Relaxed);
+        assert!(shared.raised.lock().unwrap().is_empty(), "the held strips have not panicked yet");
+        // Released: the held strips panic on their workers (each keeps its payload) and come home.
+        shared.hold.store(false, Ordering::Release);
+        let start = Instant::now();
+        while !mix.render_workers_settled() {
+            assert!(start.elapsed() < Duration::from_secs(10), "a worker never returned");
+            // timing: sleep-ok paces a wait for the released workers; measures nothing
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(shared.payload_drops.lock().unwrap().len(), 0, "a late strip's payload was dropped");
+        mix.set_strip_deadline(Some(FAR));
+        let panic = render_active_panic(&mut mix, pos, &mut out);
+        (mix, shared, panic, late)
+    });
+    let (mix, shared, panic, late) = mark.join().unwrap();
+    MixEngine::force_serial(true);
+    println!("{late} of {TRACKS} strips were late on a worker");
+    assert_eq!(shared.raised.lock().unwrap().len(), TRACKS, "each strip rendered (and panicked) exactly once");
+    assert_all_dropped_here("late", &shared, panic, mix);
 }
 
 #[test]
