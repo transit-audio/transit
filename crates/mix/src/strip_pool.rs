@@ -133,7 +133,22 @@ impl Job {
     /// worker: only the audio thread writes it.
     fn render(&mut self, generation: u64, marker: Option<&transit_rt::phase_marker::PhaseMarker>) {
         let Job {
-            strip, session, pos, frames, any_solo, monitor_only, recording, no_suspend, frame, duplex, no_input, busses, keys, graph, task, rendered,
+            strip,
+            session,
+            pos,
+            frames,
+            any_solo,
+            monitor_only,
+            recording,
+            no_suspend,
+            frame,
+            duplex,
+            no_input,
+            busses,
+            keys,
+            graph,
+            task,
+            rendered,
         } = self;
         if let Some(s) = session.as_deref()
             && let Some(t) = s.tracks.get(usize::from(strip.track))

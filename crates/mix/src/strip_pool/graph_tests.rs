@@ -264,7 +264,10 @@ fn a_late_then_busy_key_source_skips_its_dependents_and_their_lines_keep_their_h
         // Busy: the worker still holds it.
         deadline_block(&mut rig, &knobs, &mut b, false);
         assert_eq!(outcome(&rig, kick), Outcome::Overrun(OverrunCause::Busy));
-        assert_eq!((outcome(&rig, bass), outcome(&rig, lead)), (Outcome::Overrun(OverrunCause::UpstreamMissed), Outcome::Overrun(OverrunCause::UpstreamMissed)));
+        assert_eq!(
+            (outcome(&rig, bass), outcome(&rig, lead)),
+            (Outcome::Overrun(OverrunCause::UpstreamMissed), Outcome::Overrun(OverrunCause::UpstreamMissed))
+        );
         assert_eq!(lines(&rig, &ids), before);
 
         // Released: the late result is retired unread, the branch renders and the lines continue.
@@ -311,7 +314,10 @@ fn an_unstarted_key_source_skips_its_dependents_and_the_pinned_strip_renders() {
         // unrendered at the deadline.
         deadline_block(&mut rig, &knobs, &mut b, false);
         assert_eq!(outcome(&rig, kick), Outcome::Overrun(OverrunCause::Unstarted));
-        assert_eq!((outcome(&rig, bass), outcome(&rig, lead)), (Outcome::Overrun(OverrunCause::UpstreamMissed), Outcome::Overrun(OverrunCause::UpstreamMissed)));
+        assert_eq!(
+            (outcome(&rig, bass), outcome(&rig, lead)),
+            (Outcome::Overrun(OverrunCause::UpstreamMissed), Outcome::Overrun(OverrunCause::UpstreamMissed))
+        );
         assert_eq!(knobs.pad_renders.load(Ordering::Relaxed), 1);
         assert!(!pool(&rig).is_silent(index(&rig, pad)) && pool(&rig).is_silent(index(&rig, bass)));
         assert!(!pool(&rig).any_away(), "every strip home");
@@ -337,7 +343,10 @@ fn a_result_with_another_identity_is_retired_unread_and_skips_the_branch() {
         block(&mut rig, &mut b);
         tests::CORRUPT_STAMP.store(usize::MAX, Ordering::Relaxed);
         assert!(pool(&rig).is_silent(k), "never mixed");
-        assert_eq!((outcome(&rig, bass), outcome(&rig, lead)), (Outcome::Overrun(OverrunCause::UpstreamMissed), Outcome::Overrun(OverrunCause::UpstreamMissed)));
+        assert_eq!(
+            (outcome(&rig, bass), outcome(&rig, lead)),
+            (Outcome::Overrun(OverrunCause::UpstreamMissed), Outcome::Overrun(OverrunCause::UpstreamMissed))
+        );
         block(&mut rig, &mut b);
         assert!(matches!(outcome(&rig, bass), Outcome::Mixed | Outcome::Inline), "the next block renders");
         rig

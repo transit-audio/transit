@@ -211,12 +211,7 @@ impl Rig {
 
     /// A rig over `s`, whose continuity instruments are on `ids`; `extra` makes the instances it
     /// knows (by spec) before the usual factory (#174: test plug-ins on inserts).
-    pub fn with_session(
-        s: Session,
-        ids: Vec<TrackId>,
-        frames: usize,
-        mut extra: impl FnMut(&InstanceSpec) -> Option<NewInstance> + 'static,
-    ) -> Rig {
+    pub fn with_session(s: Session, ids: Vec<TrackId>, frames: usize, mut extra: impl FnMut(&InstanceSpec) -> Option<NewInstance> + 'static) -> Rig {
         let epoch = EngineEpoch(9);
         let mut mix = MixEngine::realtime_with_events(target(frames), epoch, EventLimits::default());
         let mut comp = PlanCompiler::new(target(frames), PlanLimits::default());

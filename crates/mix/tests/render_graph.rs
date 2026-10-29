@@ -371,7 +371,8 @@ fn with_a_key(mut s: Session) -> Session {
 fn serial_and_graph_renders_of_the_corpus_sessions_are_bit_exact() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../model/tests/corpus");
-    let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "transit")).collect();
+    let mut files: Vec<_> =
+        std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "transit")).collect();
     files.sort();
     assert!(files.len() >= 4, "{files:?}");
     let mut keyed = 0;

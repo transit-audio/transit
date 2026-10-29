@@ -89,6 +89,11 @@ impl GraphHost for Host<'_, '_> {
             return Start::Ready;
         };
         let reads = reads_input(track, &self.p1[t]);
+        if t >= self.pool.capacity() {
+            // Past the cells (not taken: `render_active` keeps such plans serial).
+            self.fill(t);
+            return Start::Callback;
+        }
         if self.pool.is_away(t) {
             // A worker still holds it (the per-block rule), or a refused borrow kept it away.
             self.pool.silent[t] = true;
@@ -196,7 +201,14 @@ impl StripPool {
     /// Phase 1 of a keyed plan's block through the worker set as `graph` (see the module docs).
     /// The plan must have no more phase-1 strips than the pool has cells. Allocation-free; never
     /// waits on a worker past the deadline.
-    pub(crate) fn render_graph(&mut self, b: &PoolBlock<'_>, p1: &mut [Strip], events: &mut EngineEvents, keys: &mut KeyBank, graph: &mut StripGraph) {
+    pub(crate) fn render_graph(
+        &mut self,
+        b: &PoolBlock<'_>,
+        p1: &mut [Strip],
+        events: &mut EngineEvents,
+        keys: &mut KeyBank,
+        graph: &mut StripGraph,
+    ) {
         let s: &Session = b.session;
         let g = self.generation + 1;
         let clock = BlockClock { frame: b.live.frame, frames: b.frames };
@@ -235,7 +247,8 @@ impl StripPool {
         let deadline = self.deadline(b);
         let StripGraph { graph: table, run, layer_start } = graph;
         let (report, callback) = {
-            let mut host = Host { pool: &mut *self, p1: &mut *p1, events: &mut *events, keys: &mut *keys, graph: table, layer_start, b, g, callback: 0 };
+            let mut host =
+                Host { pool: &mut *self, p1: &mut *p1, events: &mut *events, keys: &mut *keys, graph: table, layer_start, b, g, callback: 0 };
             let report = drive(&mut host, table, run, deadline);
             (report, host.callback)
         };
