@@ -6,8 +6,8 @@
 //! points differ. Allocation-free; no `unsafe`.
 
 use super::figures::Count;
-use super::{OverrunCause, PublishRefused, SPINS_PER_SWEEP, State, WorkerSet, bump};
 use super::{BlockReport, Outcome};
+use super::{OverrunCause, PublishRefused, SPINS_PER_SWEEP, State, WorkerSet, bump};
 use std::sync::Arc;
 use std::time::Instant;
 

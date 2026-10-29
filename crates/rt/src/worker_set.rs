@@ -969,12 +969,8 @@ impl WorkerSet {
 
     fn report(&self) -> BlockReport {
         let refused = self.refused.iter().filter(|&&r| r).count();
-        let mut r = BlockReport {
-            overrun: self.skipped + self.forgone,
-            inline_refused: refused,
-            upstream_missed: self.upstream,
-            ..BlockReport::default()
-        };
+        let mut r =
+            BlockReport { overrun: self.skipped + self.forgone, inline_refused: refused, upstream_missed: self.upstream, ..BlockReport::default() };
         for &strip in &self.published[..self.published_len] {
             match self.outcomes[strip] {
                 Outcome::Mixed => r.mixed += 1,
