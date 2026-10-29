@@ -59,6 +59,9 @@ jobs:
       # warning that exists only with it off would otherwise reach the release build alone (#215).
       - run: cargo clippy --locked -p transit-mix -p transit-plugin-host -p transit-dsp -p transit-rt -- -D warnings
       - run: cargo test --locked --workspace --features transit/native-wasapi,transit/native-asio
+      # The C++ null-test oracle (ADR 0033, #194): builds with this runner's C++ compiler (MSVC, GCC,
+      # Apple Clang) and proves its self-comparison floor here. Dev-only; never in the app.
+      - run: cargo test --locked -p transit-macro-osc-oracle
 
   linux:
     name: linux
@@ -97,6 +100,9 @@ jobs:
           WGPU_BACKEND: vulkan
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
           VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+      # The C++ null-test oracle (ADR 0033, #194): builds with this runner's C++ compiler (MSVC, GCC,
+      # Apple Clang) and proves its self-comparison floor here. Dev-only; never in the app.
+      - run: cargo test --locked -p transit-macro-osc-oracle
 
   # crates/au-host and the objc2 code in crates/vst3-host compile only here.
   macos:
@@ -115,3 +121,6 @@ jobs:
       - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings
       - run: cargo test --locked --workspace
+      # The C++ null-test oracle (ADR 0033, #194): builds with this runner's C++ compiler (MSVC, GCC,
+      # Apple Clang) and proves its self-comparison floor here. Dev-only; never in the app.
+      - run: cargo test --locked -p transit-macro-osc-oracle
