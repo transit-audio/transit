@@ -296,7 +296,7 @@ fn a_late_then_busy_key_source_skips_its_dependents_and_their_lines_keep_their_h
     assert_eq!((f.overruns_late, f.overruns_busy, f.upstream_missed, f.conflicts), (1, 1, 4, 0), "{f:?}");
     assert_eq!(f.overrun_blocks, 2);
     assert_eq!(pool(&rig).set.stats().late_results, 1);
-    let origin = u32::try_from(rig.eng.plan.as_deref().unwrap().tables.strips[index(&rig, kick)].track).unwrap();
+    let origin = u32::from(rig.eng.plan.as_deref().unwrap().tables.strips[index(&rig, kick)].track);
     let bass_row = f.top_strips.iter().flatten().find(|s| s.upstream_missed > 0).unwrap();
     assert_eq!((bass_row.upstream_missed, bass_row.upstream_origin, bass_row.overruns()), (2, origin, 0), "named with its origin: {f:?}");
     let PlanRig { eng, .. } = rig;
