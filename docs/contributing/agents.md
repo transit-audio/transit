@@ -51,6 +51,23 @@ A good brief is the biggest token saver. Include:
 - American English in code, comments, UI strings and docs.
 - An escaped defect gets an escape record and a gate-class rule
   ([escape record](evidence/escape-record.md)); never patch around a defect, keep the repro.
+- No Rust file over 1500 lines. `cargo xtask file-size` is a ratchet over the `OVER_BUDGET` table: a
+  listed file may only shrink, an unlisted one may not cross the line. Never grow a file near the
+  budget; split it by concern as a pure move first, then add the code ([`evidence/gates.md`](evidence/gates.md)).
+- Tests do not assert scheduling or real-clock outcomes (E49 class). A freshness or rate comes from the
+  message's own stamp (E59), and a test that compares file times sets them itself (E60). A playback
+  or UI test that renders four or more strips calls `MixEngine::force_serial(true)` unless it tests the
+  workers; the render workers are the default, and `TRANSIT_RENDER_POOL=0` renders serially
+  ([ADR 0029](../adr/0029-strip-job-slots.md), [gates](evidence/gates.md)).
+- A failing test is never rerun to make it pass, and a chain never reruns a failed test even to
+  capture its message. Read the output, report it verbatim and bug-hunt the root cause before any test
+  change. A starved or timing-bound failure on a loaded host is not a verdict: rerun on a quiet host,
+  and a quiet failure is real (E61). See [`../escapes/`](../escapes/) and the [escape record](evidence/escape-record.md).
+- One cargo target directory per checkout class. Agents working in different worktrees must not share
+  a target directory at the same time: cargo then reuses another checkout's stale binaries or loses
+  artifacts (E0463, #159). Give each concurrent worktree its own.
+- A default changes only on a measurement on the reference hardware. Benchmarks live in
+  [`../benchmarks/`](../benchmarks/README.md); the escapes behind the rules are in [`../escapes/`](../escapes/).
 - Non-blocking review notes become known issues or follow-up issues. Do not drop them silently.
 - Decisions live in ADRs, which the project owner maintains; do not add or change one unless asked.
 - Crates form layers and a crate depends only on lower ones; nothing below the UI depends on egui.
@@ -65,15 +82,18 @@ A good brief is the biggest token saver. Include:
 "Green" means two things. The local gate, as in [CONTRIBUTING.md](../../CONTRIBUTING.md):
 
 ```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings
+cargo test --locked --workspace --features transit/native-wasapi,transit/native-asio --no-fail-fast
+cargo test -p transit-rt --release
 cargo xtask layers
 cargo xtask assets
 cargo xtask timing
+cargo xtask file-size
 ```
 
-and the Linux job in `.github/workflows/ci.yml`, which runs
+(plus `cargo xtask rt-targets` when `crates/rt` or `crates/mix` changed), and the Linux job in
+`.github/workflows/ci.yml`, the Linux compile proof, which runs
 `cargo clippy --locked --workspace --all-targets -- -D warnings` and
 `cargo test --locked --workspace` on Ubuntu (it needs `libasound2-dev` and `pkg-config`).
 Area gates are in [`evidence/gates.md`](evidence/gates.md).
