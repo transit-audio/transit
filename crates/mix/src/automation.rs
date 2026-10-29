@@ -441,4 +441,88 @@ mod tests {
         let timed: Vec<_> = playing.iter().filter(|c| c.0.is_some()).copied().collect();
         assert_eq!(timed, vec![(Some(488), -12.0)], "playing, the breakpoint at its offset: {playing:?}");
     }
+
+    /// A sleeping hosted effect whose host skips the blocks `busy` says (its instance held on the
+    /// main thread) and keeps the value it was given until a block it runs, as the VST3 and CLAP
+    /// hosts do (#78).
+    struct Busy {
+        inner: Box<dyn Plugin>,
+        busy: Arc<std::sync::atomic::AtomicBool>,
+        held: Option<f32>,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+        got: Arc<std::sync::Mutex<Vec<f32>>>,
+    }
+
+    impl Plugin for Busy {
+        fn info(&self) -> &'static transit_dsp::PluginInfo {
+            self.inner.info()
+        }
+        fn prepare(&mut self, sr: f32, mb: usize, ch: usize) {
+            self.inner.prepare(sr, mb, ch);
+        }
+        fn reset(&mut self) {
+            self.inner.reset();
+        }
+        fn set_param(&mut self, _: &str, v: f32) -> bool {
+            self.held = Some(v);
+            true
+        }
+        fn param(&self, id: &str) -> Option<f32> {
+            self.inner.param(id)
+        }
+        fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            if self.busy.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            if let Some(v) = self.held.take() {
+                self.got.lock().unwrap().push(v);
+                self.inner.set_param("gain", v);
+            }
+            self.inner.process(io, frames);
+        }
+        fn process_status(&self) -> ProcessStatus {
+            ProcessStatus::Sleep
+        }
+        fn params_pending(&self) -> bool {
+            self.held.is_some()
+        }
+    }
+
+    /// #78: a value sent to a sleeping insert in a block its host skipped (the instance busy on its
+    /// main thread) keeps the insert awake, so the next block delivers it although the input stays
+    /// silent and the lane holds the same value (nothing is sent again); then it sleeps again.
+    #[test]
+    fn a_value_a_skipped_block_kept_reaches_a_sleeping_insert_without_the_lane_changing() {
+        use std::sync::atomic::Ordering::Relaxed;
+        let (mut s, t) = session_with_dc(0.0, 48_000);
+        let mut ins = Insert::new("clap:test.busy");
+        ins.params.insert("gain".into(), 0.0);
+        let tr = s.track_mut(t).unwrap();
+        tr.mixer.inserts[0] = Some(ins);
+        tr.mixer.automation_mode = transit_model::AutomationMode::Read;
+        let mut lane = transit_model::AutomationLane::new(AutoParam::Plugin { slot: 0, param: "gain".into() });
+        lane.set_point(0, -6.0);
+        lane.set_point(48_000, -6.0);
+        tr.automation.push(lane);
+        let busy = Arc::new(std::sync::atomic::AtomicBool::new(true));
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let got = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let fake = Busy {
+            inner: transit_dsp::create("gain").unwrap(),
+            busy: Arc::clone(&busy),
+            held: None,
+            calls: Arc::clone(&calls),
+            got: Arc::clone(&got),
+        };
+        let mut rig = PlanRig::new(512).fake(t, 0, fake);
+        rig.publish(&s);
+        render_block(&mut rig, 0);
+        assert_eq!((calls.load(Relaxed), got.lock().unwrap().clone()), (1, vec![]), "the lane's value went out; the host skipped the block");
+        busy.store(false, Relaxed);
+        render_block(&mut rig, 512);
+        assert_eq!((calls.load(Relaxed), got.lock().unwrap().clone()), (2, vec![-6.0]), "kept awake: the next block delivers it");
+        render_block(&mut rig, 1024);
+        assert_eq!(calls.load(Relaxed), 2, "delivered, silent input: asleep again");
+    }
 }

@@ -268,6 +268,27 @@ fn state_saves_component_and_controller_and_restores_them() {
     assert_eq!(q.param("7"), Some(1.0));
 }
 
+/// #78: a live state load (the state reader, on the instance's main thread, as a user preset loads)
+/// drops a value the audio side still had queued from before it, so the next block runs at the
+/// loaded state; a value set after the load goes out as usual.
+#[test]
+fn a_live_state_load_drops_a_value_queued_before_it() {
+    let mut p = transit_vst3_host::create(&id_of("Fixture Gain")).unwrap();
+    p.prepare(48_000.0, 64, 2);
+    let mut reader = p.state_reader().expect("every VST3 component has a state");
+    assert!(p.set_param("7", 2.0), "in flight: no block has taken it yet");
+    // Normalized 0.375: the fixture plays 2 x 0.375 = 0.75.
+    assert!(reader.load_state(&0.375f64.to_le_bytes()).is_some());
+    let mut io = vec![vec![0.5f32; 64]; 2];
+    p.process(&mut io, 64);
+    assert!(io[0].iter().all(|&x| (x - 0.375).abs() < 1e-6), "the loaded gain, not the queued 2.0: {:?}", &io[0][..4]);
+    assert!(!p.params_pending());
+    assert!(p.set_param("7", 2.0));
+    let mut io = vec![vec![0.5f32; 64]; 2];
+    p.process(&mut io, 64);
+    assert!(io[0].iter().all(|&x| (x - 1.0).abs() < 1e-6), "a value set after the load: {:?}", &io[0][..4]);
+}
+
 #[test]
 fn state_reader_reads_while_another_thread_processes() {
     let id = id_of("Fixture Gain");

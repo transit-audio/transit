@@ -155,6 +155,30 @@ fn state_saves_and_restores_into_a_new_instance() {
     assert!(s.open_editor().is_err());
 }
 
+/// #78: a live state load (the state reader, on the instance's main thread, as a user preset loads)
+/// drops a value the audio side still had queued from before it, so the next block runs at the
+/// loaded state; a value set after the load goes out as usual.
+#[test]
+fn a_live_state_load_drops_a_value_queued_before_it() {
+    fixture_dir();
+    let mut p = transit_clap_host::create(GAIN).unwrap();
+    p.prepare(48_000.0, 64, 2);
+    assert!(p.set_param("7", 1.5));
+    p.process(&mut vec![vec![0.5f32; 64]; 2], 64);
+    let blob = p.save_state().unwrap();
+    let mut reader = p.state_reader().expect("the gain fixture has clap.state");
+    assert!(p.set_param("7", 2.0), "in flight: no block has taken it yet");
+    assert!(reader.load_state(&blob).is_some());
+    let mut io = vec![vec![0.5f32; 64]; 2];
+    p.process(&mut io, 64);
+    assert!(io[0].iter().all(|&x| (x - 0.75).abs() < 1e-6), "the loaded gain 1.5, not the queued 2.0: {:?}", &io[0][..4]);
+    assert!(!p.params_pending());
+    assert!(p.set_param("7", 2.0));
+    let mut io = vec![vec![0.5f32; 64]; 2];
+    p.process(&mut io, 64);
+    assert!(io[0].iter().all(|&x| (x - 1.0).abs() < 1e-6), "a value set after the load: {:?}", &io[0][..4]);
+}
+
 #[test]
 fn state_reader_reads_while_another_thread_processes() {
     fixture_dir();

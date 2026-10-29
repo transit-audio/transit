@@ -89,6 +89,24 @@ fn timed_points_of_a_skipped_block_collapse_to_the_next_block_start() {
     assert_eq!(r.iter().filter(|x| x.0 == 4).copied().collect::<Vec<_>>(), vec![(4, 0, 5, 750_000)], "{r:?}");
 }
 
+/// #78: a block the plug-in is not called for (here: no frames) keeps the host's value and says so
+/// (`params_pending`), so the mix keeps a sleeping insert awake; the next processed block delivers
+/// it, once, with nothing sent again.
+#[test]
+fn a_value_a_skipped_block_kept_is_pending_until_a_block_delivers_it() {
+    let mut p = plugin(256);
+    assert!(!p.params_pending());
+    assert!(p.set_param("5", 0.8));
+    let mut io = vec![vec![0.0f32; 256], vec![0.0f32; 256]];
+    p.process(&mut io, 0);
+    assert!(p.params_pending(), "the skipped block kept it");
+    let r = records(&mut p, 256);
+    assert_eq!(r.iter().filter(|x| x.0 == 4).copied().collect::<Vec<_>>(), vec![(4, 0, 5, 800_000)], "{r:?}");
+    assert!(!p.params_pending(), "delivered");
+    let r = records(&mut p, 256);
+    assert!(!r.iter().any(|x| x.0 == 4), "sent once: {r:?}");
+}
+
 #[test]
 fn a_note_off_survives_an_overfull_queue() {
     let mut p = plugin(4096);
