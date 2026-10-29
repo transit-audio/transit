@@ -1108,3 +1108,6 @@ mod admission_tests;
 
 #[cfg(test)]
 mod figures_tests;
+
+#[cfg(test)]
+mod graph_tests;
