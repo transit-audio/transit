@@ -278,6 +278,47 @@ fn a_strip_a_worker_holds_past_the_limit_is_reported_held_and_clears_when_it_is_
     drop(rig.mix.into_retired());
 }
 
+/// #213: a strip that is late on every block (sustained overload) but comes home before the next
+/// one is never reported held, however many blocks that goes on: the count grows only while the
+/// strip never comes home. Block counts and observable state only.
+#[test]
+fn a_strip_that_is_late_every_block_is_not_reported_held() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    let Some(mut rig) = rig(Duration::from_micros(500)) else {
+        MixEngine::force_serial(true);
+        return;
+    };
+    become_callback();
+    let reader = rig.mix.strip_faults().expect("a worker set has a reader");
+    let (frames, rate) = (rig.frames as u64, 48_000u64);
+    let limit_blocks = u64::from(transit_mix::HELD_SECS) * rate / frames;
+    let sh = std::sync::Arc::clone(&rig.shared[2]);
+    for n in 0..limit_blocks * 2 {
+        sh.hold.store(true, Ordering::Release);
+        rig.block();
+        // The worker finishes after the deadline, and the strip is home again before the next block.
+        sh.hold.store(false, Ordering::Release);
+        settle_home(&mut rig);
+        assert!(reader.held_tracks().is_empty(), "block {n}: late every block is not held");
+    }
+    let f = reader.snapshot();
+    assert!(f.overruns_late + f.overruns_busy > 0, "the strip really was late: {f:?}");
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    drop(rig.mix.into_retired());
+}
+
+/// Waits until every strip is home, rendering nothing.
+fn settle_home(rig: &mut Rig) {
+    let start = Instant::now();
+    while !rig.mix.render_workers_settled() {
+        assert!(start.elapsed() < Duration::from_secs(10), "a worker never returned");
+        // timing: sleep-ok paces a wait for the released worker; measures nothing
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 /// Gate 5 through the engine: retirement waits for each worker within a bound; a worker still
 /// inside a plug-in is quarantined (its strip stays in its leaked cell, never freed or reused;
 /// the log names the track and its plug-ins) and every other strip comes home.

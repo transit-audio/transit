@@ -731,6 +731,10 @@ impl StripPool {
         if let Some(a) = self.away.get_mut(i) {
             *a = false;
         }
+        // Back from its worker: a strip that is only late every block is not held (#213).
+        if let Some(h) = self.held.get(i) {
+            h.store(0, Ordering::Relaxed);
+        }
         // Kept current while the strip is home: events still parked for it (the ring's
         // end-of-block carry) keep new ones parking behind them, checked against it.
         if let Some(b) = self.binding.get_mut(i) {
