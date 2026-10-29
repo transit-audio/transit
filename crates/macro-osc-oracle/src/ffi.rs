@@ -10,8 +10,8 @@
 //!    one session stay on the thread that took the lock. Handles borrow their session.
 //! 2. **Valid handles.** [`RawVoice`] and [`RawEngine`] own a non-null pointer returned by the
 //!    matching `_new` function and free it exactly once, in `Drop`.
-//! 3. **Buffer bounds.** Every render checks the length against the firmware's maximum block size
-//!    before the call, and passes buffers whose lengths match the size it passes.
+//! 3. **Buffer bounds.** Every render checks the length is between 1 and the firmware's maximum block
+//!    size before the call, and passes buffers whose lengths match the size it passes.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -92,20 +92,17 @@ unsafe extern "C" {
     ) -> i32;
     fn oracle_seed(seed: u32);
     fn oracle_rng_state() -> u32;
-    fn oracle_fp_enter() -> u64;
-    fn oracle_fp_restore(previous: u64);
 }
 
 static LOCK: Mutex<()> = Mutex::new(());
 
 /// Exclusive access to the oracle for the current thread (invariant 1).
 ///
-/// While a session is alive the thread runs with flush-to-zero on, as the firmware's desktop test
-/// harness does, so a port rendered inside the same session sees the same floating-point mode. The
-/// previous mode is restored on drop. Taking a second session on a thread that already holds one
-/// blocks forever (or panics).
+/// The session never changes the thread's floating-point mode: the C++ wrapper turns flush-to-zero on
+/// around each call into the vendored code, as the firmware's desktop test harness does, and restores
+/// it before returning, so Rust code always runs in its default mode. Taking a second session on a
+/// thread that already holds one blocks forever (or panics).
 pub struct Session {
-    previous_fp: u64,
     _guard: MutexGuard<'static, ()>,
     _not_send_or_sync: PhantomData<*const Cell<()>>,
 }
@@ -117,10 +114,7 @@ impl Session {
     #[must_use]
     pub fn lock() -> Self {
         let guard = LOCK.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        // SAFETY: the lock is held (invariant 1); the call only reads and writes this thread's
-        // floating-point control register.
-        let previous_fp = unsafe { oracle_fp_enter() };
-        Self { previous_fp, _guard: guard, _not_send_or_sync: PhantomData }
+        Self { _guard: guard, _not_send_or_sync: PhantomData }
     }
 
     /// Writes the vendored DSP's random state (`stmlib::Random`).
@@ -158,14 +152,6 @@ impl Session {
     }
 }
 
-impl Drop for Session {
-    fn drop(&mut self) {
-        // SAFETY: the lock is still held (the guard drops after this body); the call restores this
-        // thread's floating-point control register to the value read in `lock`.
-        unsafe { oracle_fp_restore(self.previous_fp) }
-    }
-}
-
 /// A complete voice (engine selection, envelopes, LPG, post-processing) on its own 16 KB arena.
 pub struct RawVoice<'s> {
     ptr: std::ptr::NonNull<std::ffi::c_void>,
@@ -182,11 +168,11 @@ impl<'s> RawVoice<'s> {
         std::ptr::NonNull::new(ptr).map(|ptr| Self { ptr, session })
     }
 
-    /// Renders `frames.len() / 2` interleaved out/aux frames. `None` when the frame count is odd
-    /// or above the maximum block size.
+    /// Renders `frames.len() / 2` interleaved out/aux frames. `None` when the frame count is odd,
+    /// zero (the firmware divides by the block size) or above the maximum block size.
     pub(crate) fn render(&mut self, patch: &CPatch, modulations: &CModulations, frames: &mut [i16]) -> Option<()> {
         let size = frames.len() / 2;
-        if !frames.len().is_multiple_of(2) || size > self.session.max_block_size() {
+        if !frames.len().is_multiple_of(2) || size == 0 || size > self.session.max_block_size() {
             return None;
         }
         // SAFETY: the lock is held through `self.session` (invariant 1); `self.ptr` is a live voice
@@ -223,10 +209,11 @@ impl<'s> RawEngine<'s> {
     }
 
     /// Renders `out.len()` frames of float out and aux; returns the engine's already-enveloped
-    /// report. `None` when the lengths differ or exceed the maximum block size.
+    /// report. `None` when the lengths differ, are zero (the firmware divides by the block size) or
+    /// exceed the maximum block size.
     pub(crate) fn render(&mut self, parameters: &CEngineParameters, out: &mut [f32], aux: &mut [f32]) -> Option<bool> {
         let size = out.len();
-        if aux.len() != size || size > self.session.max_block_size() {
+        if aux.len() != size || size == 0 || size > self.session.max_block_size() {
             return None;
         }
         let mut enveloped = 0u8;

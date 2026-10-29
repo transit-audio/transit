@@ -72,7 +72,7 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
 - **Residual:** peak and RMS of the difference in dBFS (`src/residual.rs`); bit-identical is `-inf`.
 - **Floor:** the oracle against itself, the same sweep twice in one process and again in a second process (`tests/self_floor.rs`). Measured `-inf` (bit-identical) on Windows x86-64 MSVC on 2026-10-29; the Linux (GCC, x86-64) and macOS (Apple Clang, AArch64) runners prove theirs on every CI run (`cargo test --locked -p transit-macro-osc-oracle`, a step in each job of `ci.yml`). The constants are in `src/floor.rs`. Results are compared within a runner family only, never across: each has its own compiler and instruction set.
 - **Re-measure** after a compiler, flag or vendor change: `cargo test --locked -p transit-macro-osc-oracle --test self_floor -- --nocapture` on each runner. A failure names the engine, the point and the residual; it means the reference itself is unstable, and it blocks every port gate until fixed. Never rerun it to pass.
-- **The port gate** (#195) renders each point through the same sweep functions inside the same `Session` (the same flush-to-zero mode) and sets its bound at the floor with margin. Every ported module adds its own oracle crate and CI step.
+- **The port gate** (#195) renders each point through the same sweep functions and sets its bound at the floor with margin. The oracle switches flush-to-zero on only inside its C++ calls; the port runs in Rust's default floating-point mode and reproduces flush-to-zero explicitly in its own code where the firmware relies on it, never by changing the host's mode (Rust treats a changed mode as undefined behavior). Every ported module adds its own oracle crate and CI step.
 
 ## Rules
 

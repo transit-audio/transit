@@ -12,7 +12,7 @@ pub enum Error {
     UnsupportedSampleRate,
     /// The C++ allocation failed.
     OutOfMemory,
-    /// A render asked for more than [`crate::MAX_BLOCK_SIZE`] frames, or out and aux differ in length.
+    /// A render asked for no frames or more than [`crate::MAX_BLOCK_SIZE`], or out and aux differ in length.
     BadBlock,
 }
 
@@ -21,7 +21,7 @@ impl std::fmt::Display for Error {
         f.write_str(match self {
             Self::UnsupportedSampleRate => "the oracle runs at 48 kHz only",
             Self::OutOfMemory => "the oracle could not allocate a voice or engine",
-            Self::BadBlock => "block longer than the maximum block size, or out and aux lengths differ",
+            Self::BadBlock => "empty block or block longer than the maximum block size, or out and aux lengths differ",
         })
     }
 }
@@ -208,11 +208,11 @@ pub struct Voice<'s> {
 }
 
 impl Voice<'_> {
-    /// Renders `frames.len()` frames (at most [`crate::MAX_BLOCK_SIZE`]).
+    /// Renders `frames.len()` frames (1 to [`crate::MAX_BLOCK_SIZE`]).
     ///
     /// # Errors
     ///
-    /// [`Error::BadBlock`] when the block is too long.
+    /// [`Error::BadBlock`] when the block is empty or too long.
     pub fn render(&mut self, patch: &Patch, modulations: &Modulations, frames: &mut [Frame]) -> Result<(), Error> {
         let n = frames.len();
         if n > crate::MAX_BLOCK_SIZE {
@@ -241,12 +241,12 @@ impl EngineOracle<'_> {
         self.model
     }
 
-    /// Renders `out.len()` frames (at most [`crate::MAX_BLOCK_SIZE`]) into `out` and `aux`, and
+    /// Renders `out.len()` frames (1 to [`crate::MAX_BLOCK_SIZE`]) into `out` and `aux`, and
     /// returns whether the engine reports its output as already enveloped.
     ///
     /// # Errors
     ///
-    /// [`Error::BadBlock`] when the block is too long or the lengths differ.
+    /// [`Error::BadBlock`] when the block is empty or too long, or the lengths differ.
     pub fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32]) -> Result<bool, Error> {
         self.raw.render(&parameters.to_c(), out, aux).ok_or(Error::BadBlock)
     }

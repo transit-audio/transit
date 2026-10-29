@@ -56,8 +56,24 @@ fn only_48_khz_and_bounded_blocks_are_accepted() {
     let mods = transit_macro_osc_oracle::Modulations::default();
     let mut too_long = vec![transit_macro_osc_oracle::Frame::default(); MAX_BLOCK_SIZE + 1];
     assert_eq!(voice.render(&patch, &mods, &mut too_long), Err(Error::BadBlock));
+    // The firmware divides by the block size, so an empty block is rejected before the C++ runs.
+    assert_eq!(voice.render(&patch, &mods, &mut []), Err(Error::BadBlock));
     let mut engine = session.engine(Model::VirtualAnalog).unwrap();
     let params = engine_points()[0].parameters(0, 1);
     let (mut out, mut aux) = (vec![0.0; BLOCK_SIZE], vec![0.0; BLOCK_SIZE + 1]);
     assert_eq!(engine.render(&params, &mut out, &mut aux), Err(Error::BadBlock));
+    assert_eq!(engine.render(&params, &mut [], &mut []), Err(Error::BadBlock));
+}
+
+/// The flush-to-zero mode is switched only inside the C++ calls: Rust code in a session runs in
+/// its default floating-point mode, so a denormal result survives right after a render.
+#[test]
+fn rust_keeps_its_default_fp_mode_during_a_session() {
+    let session = Session::lock();
+    let mut engine = session.engine(Model::VirtualAnalog).unwrap();
+    let params = engine_points()[0].parameters(0, 1);
+    let (mut out, mut aux) = (vec![0.0; BLOCK_SIZE], vec![0.0; BLOCK_SIZE]);
+    engine.render(&params, &mut out, &mut aux).unwrap();
+    let denormal = std::hint::black_box(f32::MIN_POSITIVE) * std::hint::black_box(0.5_f32);
+    assert!(denormal != 0.0 && denormal.is_subnormal(), "a denormal result was flushed: {denormal:e}");
 }

@@ -126,6 +126,39 @@ const bool kAlreadyEnveloped[kEngineCount] = {
   false, false, false, true, true, true, true, true,
 };
 
+// The firmware's desktop test harness turns flush-to-zero on (plaits/test/plaits_test.cc). The
+// mode is switched only around each call into the vendored code and restored before returning to
+// Rust, which assumes the default floating-point environment everywhere it runs. On x86 this is
+// MXCSR FTZ (denormal results flush; inputs are not zeroed, as upstream). On aarch64 it is FPCR.FZ,
+// which also zeroes denormal inputs. Elsewhere the mode is left alone.
+class FlushToZeroScope {
+ public:
+  FlushToZeroScope() {
+#if defined(TRANSIT_ORACLE_X86)
+    previous_ = _mm_getcsr();
+    _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
+#elif defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+    __asm__ volatile("mrs %0, fpcr" : "=r"(previous_));
+    const uint64_t next = previous_ | (UINT64_C(1) << 24);
+    __asm__ volatile("msr fpcr, %0" : : "r"(next));
+#else
+    previous_ = 0;
+#endif
+  }
+  ~FlushToZeroScope() {
+#if defined(TRANSIT_ORACLE_X86)
+    _mm_setcsr(static_cast<unsigned int>(previous_));
+#elif defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
+    __asm__ volatile("msr fpcr, %0" : : "r"(previous_));
+#endif
+  }
+
+ private:
+  uint64_t previous_;
+  FlushToZeroScope(const FlushToZeroScope&);
+  void operator=(const FlushToZeroScope&);
+};
+
 }  // namespace
 
 extern "C" {
@@ -145,6 +178,7 @@ void* oracle_voice_new(float sample_rate) {
     return NULL;
   }
   v->allocator.Init(v->arena, kArenaSize);
+  FlushToZeroScope fp;
   v->voice.Init(&v->allocator);
   return v;
 }
@@ -154,14 +188,14 @@ void oracle_voice_free(void* voice) {
 }
 
 // Renders `size` interleaved out/aux int16 frames (2 * size values). Returns 0 on success, -1
-// when size exceeds kMaxBlockSize (nothing is rendered).
+// when size is 0 or exceeds kMaxBlockSize (nothing is rendered; the firmware divides by it).
 int32_t oracle_voice_render(
     void* voice,
     const OraclePatch* patch,
     const OracleModulations* modulations,
     int16_t* frames,
     size_t size) {
-  if (size > plaits::kMaxBlockSize) {
+  if (size == 0 || size > plaits::kMaxBlockSize) {
     return -1;
   }
   plaits::Patch p;
@@ -192,7 +226,10 @@ int32_t oracle_voice_render(
   m.level_patched = modulations->level_patched != 0;
 
   plaits::Voice::Frame out[plaits::kMaxBlockSize];
-  static_cast<OracleVoice*>(voice)->voice.Render(p, m, out, size);
+  {
+    FlushToZeroScope fp;
+    static_cast<OracleVoice*>(voice)->voice.Render(p, m, out, size);
+  }
   for (size_t i = 0; i < size; ++i) {
     frames[2 * i] = out[i].out;
     frames[2 * i + 1] = out[i].aux;
@@ -210,6 +247,7 @@ void* oracle_engine_new(int32_t index) {
   h->index = index;
   h->allocator.Init(h->arena, kArenaSize);
   plaits::Engine* e = h->get();
+  FlushToZeroScope fp;
   e->Init(&h->allocator);
   e->LoadUserData(index >= 2 && index <= 4 ? plaits::fm_patches_table[index - 2] : NULL);
   e->Reset();
@@ -221,7 +259,7 @@ void oracle_engine_free(void* engine) {
 }
 
 // Float out and aux before any post-processing (no gain, limiter or LPG). Returns 0 on success,
-// -1 when size exceeds kMaxBlockSize. `already_enveloped` receives the engine's per-call report,
+// -1 when size is 0 or exceeds kMaxBlockSize. `already_enveloped` receives the engine's per-call report,
 // seeded with the flag Voice::Init registers for it.
 int32_t oracle_engine_render(
     void* engine,
@@ -230,7 +268,7 @@ int32_t oracle_engine_render(
     float* aux,
     size_t size,
     uint8_t* already_enveloped) {
-  if (size > plaits::kMaxBlockSize) {
+  if (size == 0 || size > plaits::kMaxBlockSize) {
     return -1;
   }
   EngineHolder* h = static_cast<EngineHolder*>(engine);
@@ -242,7 +280,10 @@ int32_t oracle_engine_render(
   p.harmonics = parameters->harmonics;
   p.accent = parameters->accent;
   bool enveloped = kAlreadyEnveloped[h->index];
-  h->get()->Render(p, out, aux, size, &enveloped);
+  {
+    FlushToZeroScope fp;
+    h->get()->Render(p, out, aux, size, &enveloped);
+  }
   *already_enveloped = enveloped ? 1 : 0;
   return 0;
 }
@@ -250,35 +291,5 @@ int32_t oracle_engine_render(
 // Writes stmlib's process-wide random state (stmlib/utils/random.h).
 void oracle_seed(uint32_t seed) { stmlib::Random::Seed(seed); }
 uint32_t oracle_rng_state() { return stmlib::Random::state(); }
-
-// The firmware test harness turns flush-to-zero on (plaits/test/plaits_test.cc). Sets this
-// thread's mode and returns the previous control word for oracle_fp_restore. On x86 this is
-// MXCSR FTZ (denormal results flush; denormal inputs are not zeroed, as upstream). On aarch64 it
-// is FPCR.FZ, which also zeroes denormal inputs. Elsewhere it does nothing and returns 0.
-uint64_t oracle_fp_enter() {
-#if defined(TRANSIT_ORACLE_X86)
-  const unsigned int previous = _mm_getcsr();
-  _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
-  return previous;
-#elif defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
-  uint64_t previous;
-  __asm__ volatile("mrs %0, fpcr" : "=r"(previous));
-  const uint64_t next = previous | (UINT64_C(1) << 24);
-  __asm__ volatile("msr fpcr, %0" : : "r"(next));
-  return previous;
-#else
-  return 0;
-#endif
-}
-
-void oracle_fp_restore(uint64_t previous) {
-#if defined(TRANSIT_ORACLE_X86)
-  _mm_setcsr(static_cast<unsigned int>(previous));
-#elif defined(__aarch64__) && (defined(__GNUC__) || defined(__clang__))
-  __asm__ volatile("msr fpcr, %0" : : "r"(previous));
-#else
-  (void)previous;
-#endif
-}
 
 }  // extern "C"
