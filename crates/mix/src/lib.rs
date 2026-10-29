@@ -167,7 +167,7 @@ pub use scope::{INSTRUMENT_UID, SCOPE_FRAMES, ScopeHub, ScopeTap};
 use sink::Sink;
 pub use sink::{MAX_SINK_CHANNELS, SinkPlan, SinkSpec, plan_sinks, unresolved_routes};
 use strip::{LiveInput, StripRender, head_latency, note_insert_latency, process_master, process_strip};
-pub use strip_pool::StripFaultsReader;
+pub use strip_pool::{HELD_SECS, StripFaultsReader};
 
 /// Default (stereo) main mix width. The actual width is [`main_channels`].
 pub const MAIN_CHANNELS: usize = 2;

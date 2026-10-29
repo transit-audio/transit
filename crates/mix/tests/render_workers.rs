@@ -243,6 +243,39 @@ fn a_plan_waits_while_a_worker_holds_a_strip() {
     drop(rig.mix.into_retired());
 }
 
+/// #213: a strip a worker holds for longer than `HELD_SECS` of blocks is reported held (the
+/// unresponsive marker's worker cause); a strip that is only late for a block or two, and every
+/// strip once the worker is back, is not. The reader is relaxed loads, off the audio thread.
+#[test]
+fn a_strip_a_worker_holds_past_the_limit_is_reported_held_and_clears_when_it_is_back() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    let Some(mut rig) = rig(Duration::from_micros(500)) else {
+        MixEngine::force_serial(true);
+        return;
+    };
+    become_callback();
+    let reader = rig.mix.strip_faults().expect("a worker set has a reader");
+    for _ in 0..20 {
+        rig.block();
+    }
+    assert!(reader.held_tracks().is_empty(), "nothing is held while every strip is home");
+    rig.shared[2].stall_ns.store(2_500_000_000, Ordering::Relaxed);
+    let start = Instant::now();
+    while reader.held_tracks().is_empty() {
+        assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip was never reported held");
+        std::thread::sleep(Duration::from_millis(1));
+        rig.block();
+    }
+    assert_eq!(reader.held_tracks().len(), 1, "only the strip the worker holds");
+    rig.shared[2].stall_ns.store(0, Ordering::Relaxed);
+    settle(&mut rig);
+    assert!(reader.held_tracks().is_empty(), "back home: no longer held");
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    drop(rig.mix.into_retired());
+}
+
 /// Gate 5 through the engine: retirement waits for each worker within a bound; a worker still
 /// inside a plug-in is quarantined (its strip stays in its leaked cell, never freed or reused;
 /// the log names the track and its plug-ins) and every other strip comes home.

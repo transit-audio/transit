@@ -264,9 +264,33 @@ pub struct StripFaultsReader {
     figures: Arc<Figures>,
     /// Per strip index: the track it last published (the phase marker's strip index).
     tracks: Arc<[AtomicU32]>,
+    /// Per strip index: blocks in a row its strip has been away (#213).
+    held: Arc<[AtomicU32]>,
 }
 
+/// How long a strip stays away before it counts as held by a hung worker (#213, K89): a late
+/// result is back within a block or two, so this is a plug-in that does not return.
+pub const HELD_SECS: u32 = 2;
+
 impl StripFaultsReader {
+    /// The track indices ([`StripFigure::track`]'s numbering) whose strips a render worker has
+    /// held for [`HELD_SECS`] or more: the plug-in on it does not return from `process`. Relaxed
+    /// loads off the audio thread (#213).
+    #[must_use]
+    pub fn held_tracks(&self) -> Vec<u32> {
+        let (frames, rate) = (self.counters.deadline_frames.load(Ordering::Relaxed), self.counters.deadline_rate.load(Ordering::Relaxed));
+        if frames == 0 {
+            return Vec::new();
+        }
+        let limit = (u64::from(HELD_SECS) * rate).div_ceil(frames);
+        self.held
+            .iter()
+            .enumerate()
+            .filter(|(_, h)| u64::from(h.load(Ordering::Relaxed)) >= limit.max(1))
+            .filter_map(|(i, _)| self.tracks.get(i).map(|t| t.load(Ordering::Relaxed)))
+            .collect()
+    }
+
     /// The figures now.
     #[must_use]
     pub fn snapshot(&self) -> StripFaults {
@@ -367,6 +391,8 @@ pub(crate) struct StripPool {
     counters: Arc<Counters>,
     /// Per strip: the track index it last published, for [`StripFaultsReader`] (#169).
     tracks: Arc<[AtomicU32]>,
+    /// Per strip: blocks in a row it has been away (the audio thread stores; #213).
+    held: Arc<[AtomicU32]>,
     /// Per strip: in its cell (a worker may hold it).
     away: Box<[bool]>,
     /// Per strip: what to apply when it is back (`PENDING_*`).
@@ -420,6 +446,7 @@ impl StripPool {
             defer: DeferSet::new(strips, RING),
             counters,
             tracks: (0..strips).map(|i| AtomicU32::new(u32::try_from(i).unwrap_or(u32::MAX))).collect(),
+            held: (0..strips).map(|_| AtomicU32::new(0)).collect(),
             away: vec![false; strips].into_boxed_slice(),
             pending: vec![0; strips].into_boxed_slice(),
             binding: vec![None; strips].into_boxed_slice(),
@@ -506,6 +533,7 @@ impl StripPool {
             defer: Arc::clone(self.defer.stats()),
             figures: self.set.figures(),
             tracks: Arc::clone(&self.tracks),
+            held: Arc::clone(&self.held),
         }
     }
 
@@ -928,6 +956,13 @@ impl StripPool {
             }
         }
         self.last_overruns = overruns;
+        // How long a worker has held each strip, in blocks (#213): a store per strip, no more.
+        for (h, &away) in self.held.iter().zip(self.away.iter()) {
+            let n = if away { h.load(Ordering::Relaxed).saturating_add(1) } else { 0 };
+            if n != h.load(Ordering::Relaxed) {
+                h.store(n, Ordering::Relaxed);
+            }
+        }
         self.mirror(report.overrun > 0);
     }
 
