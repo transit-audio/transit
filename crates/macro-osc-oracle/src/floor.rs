@@ -2,8 +2,10 @@
 //!
 //! The floor is the residual of the oracle against itself: the same sweep rendered twice with the
 //! same seed, in one process and in a second process (`tests/self_floor.rs`). It was measured as
-//! bit-identical (`-inf` dBFS, zero differing samples) on every runner family below, so a gate on
-//! the port (#195) starts from an exact reference: whatever residual the port shows is the port's.
+//! bit-identical (`-inf` dBFS, zero differing samples) on Windows x86-64 (MSVC) on 2026-10-29; Linux
+//! and macOS are proved by the CI step, where `tests/self_floor.rs` asserts the same on every run.
+//! A gate on the port (#195) starts from an exact reference: whatever residual the port shows is
+//! the port's.
 //!
 //! Each family compiles the C++ with its own compiler (MSVC, GCC, Apple Clang) and runs on its
 //! own instruction set, so the oracle's output is compared only within a family, never across:
@@ -40,8 +42,9 @@ impl RunnerFamily {
         }
     }
 
-    /// The oracle's self-comparison floor on this family, peak and RMS, dBFS: `-inf` (bit-identical)
-    /// on the three CI families; `None` where nothing was measured.
+    /// The oracle's self-comparison floor on this family, peak and RMS, dBFS: `-inf` (bit-identical),
+    /// measured on Windows x86-64 and proved on Linux and macOS by the CI step; `None` for any other
+    /// target.
     #[must_use]
     pub const fn self_floor_dbfs(self) -> Option<f64> {
         match self {
