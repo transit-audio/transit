@@ -330,6 +330,9 @@ pub struct Report {
     /// The plug-in host's lines (issue #205): a call a host thread is stuck in, naming the
     /// plug-in; empty while every host thread responds.
     pub plugin_host: Vec<String>,
+    /// How many times request servicing or an editor idle waited for a host call into plug-in
+    /// code to return (issue #205, `transit_dsp::host_call::deferred`).
+    pub deferred_services: u64,
     pub log_dir: Option<PathBuf>,
     pub log_lines: Vec<String>,
     /// The last status-bar message and when it appeared (seconds since the Unix epoch), kept
@@ -461,6 +464,7 @@ impl Report {
             o.push_str(line);
             o.push('\n');
         }
+        o.push_str(&format!("Request servicing deferred until a plug-in call returned: {}\n", self.deferred_services));
         section(&mut o, "Log");
         match &self.log_dir {
             Some(dir) => o.push_str(&format!("Log folder: {}\n", dir.display())),
@@ -724,6 +728,7 @@ mod tests {
             open_asio_driver: None,
             strips: Vec::new(),
             plugin_host: vec!["Plug-in host: Guitar Rig 7 stuck in a window message (its editor or a dialog it opened) for 240 s".into()],
+            deferred_services: 3,
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
             last_status: None,
             log_lines: vec!["INFO opened /home/alice/Music/song.transit".into(), "WARN something".into()],
@@ -805,6 +810,7 @@ mod tests {
             "Log folder: /home/alice/.config/transit/logs",
             "WARN something",
             "Plug-in host: Guitar Rig 7 stuck in a window message (its editor or a dialog it opened) for 240 s",
+            "Request servicing deferred until a plug-in call returned: 3",
         ] {
             assert!(text.contains(want), "missing {want:?}\n{text}");
         }

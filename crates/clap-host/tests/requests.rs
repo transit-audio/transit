@@ -225,6 +225,30 @@ fn restart_of_an_idle_plugin_is_serviced_on_main_only() {
     assert_eq!(Report::read(&mut reader).processes, 1);
 }
 
+/// Issue #205: a restart and a callback a plug-in asks for while the host thread is inside a
+/// call into it (a state load that pumps the message loop) are not run inside that call: the
+/// servicing the pumped loop reaches leaves them for the next call, which runs them.
+#[test]
+fn a_restart_and_a_callback_asked_for_inside_a_host_call_wait_until_it_returns() {
+    let (mut p, mut reader, base) = new_requests();
+    {
+        let _load = transit_dsp::host_call::enter();
+        assert!(p.load_state(b"CMD:restart-now:32"));
+        assert!(p.load_state(b"CMD:callback-now"));
+        let s = transit_clap_host::service_requests();
+        assert_eq!(s.restarted, 0, "no restart inside the call");
+        assert!(s.deferred >= 1, "{s:?}");
+        let r = Report::read(&mut reader).since(base);
+        assert!(r.calls("deactivate").is_empty() && r.calls("on_main_thread").is_empty(), "nothing ran inside the call: {:?}", r.log);
+        assert_eq!(p.latency(), 5);
+    }
+    let s = transit_clap_host::service_requests();
+    assert_eq!((s.restarted, s.deferred), (1, 0));
+    let r = Report::read(&mut reader).since(base);
+    assert_eq!((r.calls("deactivate").len(), r.calls("on_main_thread").len()), (1, 1), "both ran once the call returned");
+    assert_eq!(p.latency(), 32);
+}
+
 #[test]
 fn request_callback_of_a_plugin_without_editor_runs_on_main() {
     let (mut p, mut reader, _) = new_requests();

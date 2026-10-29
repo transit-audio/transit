@@ -16,6 +16,7 @@
 pub mod biquad;
 pub mod editor_header;
 pub mod event;
+pub mod host_call;
 pub mod meter;
 pub mod offline;
 mod osc;

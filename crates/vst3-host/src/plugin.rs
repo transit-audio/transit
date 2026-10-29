@@ -311,6 +311,13 @@ impl Shared {
             out.other_thread += 1;
             return;
         }
+        // Issue #205: never inside a host call into plug-in code on this thread (a preset load
+        // that pumps the message loop): the requests stay recorded for the next call.
+        if transit_dsp::host_call::active() {
+            transit_dsp::host_call::defer();
+            out.deferred += 1;
+            return;
+        }
         let h = &self.host;
         h.restart_requested.store(false, Ordering::Relaxed);
         if h.titles_changed.swap(false, Ordering::Relaxed) {
@@ -1336,6 +1343,13 @@ impl PluginEditor for Vst3Editor {
     /// `CURVE_BUDGET_TIME` per call) and for `restartComponent` (see the module docs): the host
     /// polls every editor handle each UI frame, open or not.
     fn idle(&mut self) -> Vec<(String, f32)> {
+        // Issue #205: inside a host call into plug-in code on this thread nothing here may call
+        // the plug-in (the service, the view's housekeeping, the curve sampling); the edits stay
+        // queued for the next idle.
+        if transit_dsp::host_call::active() {
+            transit_dsp::host_call::defer();
+            return Vec::new();
+        }
         if let Some(s) = self.shared.upgrade() {
             s.service(&mut Serviced::default());
         }

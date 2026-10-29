@@ -108,6 +108,9 @@ pub struct Serviced {
     pub pending: usize,
     /// Instances skipped because this is not the thread that created them.
     pub other_thread: usize,
+    /// Instances left for the next call because a host call into plug-in code was on this
+    /// thread's stack (issue #205, [`transit_dsp::host_call`]).
+    pub deferred: usize,
 }
 
 /// Every plugin in the standard CLAP folders, `CLAP_PATH` and folders added with

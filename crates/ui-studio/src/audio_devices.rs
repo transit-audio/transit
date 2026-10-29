@@ -644,6 +644,7 @@ impl StudioApp {
             strips: self.strip_names(),
             last_status: self.status_age.last().cloned(),
             plugin_host: self.plugin_host_lines(),
+            deferred_services: transit_dsp::host_call::deferred(),
             log_dir: self.services.config_dir.as_ref().map(|d| d.join("logs")),
             ..Default::default()
         }

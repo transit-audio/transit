@@ -768,6 +768,8 @@ impl Host {
             return Pending { slot, cell: None, host: self.clone(), budget };
         }
         if let Some(ctx) = lock(&self.inner.inline).as_mut() {
+            // The job calls into plug-in code on this thread (issue #205: no servicing inside it).
+            let _call = transit_dsp::host_call::enter();
             wrapped(ctx);
             return Pending { slot, cell: None, host: self.clone(), budget };
         }
@@ -912,7 +914,10 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
     while !ctx.exit {
         while let Ok(cell) = rx.try_recv() {
             if let Some(job) = cell.take() {
-                worker.busy_as(if cell.creation { Section::Creation } else { Section::Job }, cell.busy.clone(), || job(&mut ctx));
+                worker.busy_as(if cell.creation { Section::Creation } else { Section::Job }, cell.busy.clone(), || {
+                    let _call = transit_dsp::host_call::enter();
+                    job(&mut ctx);
+                });
             }
             if ctx.exit {
                 break;
@@ -922,18 +927,14 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
             break;
         }
         let window_message = Busy::new(&ctx.open_editors, call::WINDOW_MESSAGE);
-        worker.busy_as(Section::Dispatch, window_message, || catch_unwind(AssertUnwindSafe(|| queue.dispatch(256))).is_ok());
+        // A window message for a plug-in's window runs its code (a click in its editor).
+        worker.busy_as(Section::Dispatch, window_message, || {
+            let _call = transit_dsp::host_call::enter();
+            catch_unwind(AssertUnwindSafe(|| queue.dispatch(256))).is_ok()
+        });
         if last_tick.elapsed() >= config.tick {
             last_tick = Instant::now();
-            worker.busy_as(Section::Job, Busy::any(call::SERVICING), || {
-                catch_unwind(AssertUnwindSafe(|| {
-                    if let Some(tick) = &config.hooks.tick {
-                        tick();
-                    }
-                    ctx.idle();
-                }))
-                .is_ok()
-            });
+            worker.busy_as(Section::Job, Busy::any(call::SERVICING), || catch_unwind(AssertUnwindSafe(|| tick(config, &mut ctx))).is_ok());
         }
         queue.wait(config.tick.saturating_sub(last_tick.elapsed()).max(Duration::from_millis(1)));
     }
@@ -947,6 +948,21 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
     // apartment still alive; after it every send fails and the sender leaks the job.
     drop(rx);
     drop(ctx);
+}
+
+/// One tick: the formats' request servicing and every editor's `idle`. Never inside a host call
+/// into plug-in code on this thread (issue #205): a call that pumps the message loop must not
+/// reach the servicing, which deactivates and reactivates instances. Such a tick is left for the
+/// next one and counted ([`transit_dsp::host_call::deferred`]).
+fn tick(config: &Config, ctx: &mut Ctx) {
+    if transit_dsp::host_call::active() {
+        transit_dsp::host_call::defer();
+        return;
+    }
+    if let Some(tick) = &config.hooks.tick {
+        tick();
+    }
+    ctx.idle();
 }
 
 /// The process's plug-in host, started on first use with [`Hooks::formats`] and the defaults.
@@ -988,6 +1004,65 @@ mod tests {
             label: Mutex::new(Busy::any(call::START)),
             logged: Mutex::new((0, Duration::ZERO)),
         }
+    }
+
+    /// An editor that counts its `idle` calls.
+    struct Counting(Arc<AtomicUsize>);
+
+    impl PluginEditor for Counting {
+        fn open(&mut self) -> Result<(), String> {
+            Ok(())
+        }
+        fn close(&mut self) {}
+        fn is_open(&self) -> bool {
+            true
+        }
+        fn idle(&mut self) -> Vec<(String, f32)> {
+            self.0.fetch_add(1, Ordering::SeqCst);
+            Vec::new()
+        }
+        fn set_param(&mut self, _: &str, _: f32) {}
+    }
+
+    /// Issue #205: a tick reached from inside a host call into plug-in code (a plug-in's preset
+    /// load that pumps the message loop) services nothing and idles no editor; the next tick does.
+    #[test]
+    fn a_tick_inside_a_host_call_is_deferred_to_the_next_one() {
+        let idles = Arc::new(AtomicUsize::new(0));
+        let serviced = Arc::new(AtomicUsize::new(0));
+        let s = Arc::clone(&serviced);
+        let config = Config {
+            hooks: Hooks {
+                tick: Some(Arc::new(move || {
+                    s.fetch_add(1, Ordering::SeqCst);
+                })),
+                ..Hooks::default()
+            },
+            ..Config::default()
+        };
+        let mut ctx = Ctx {
+            worker: None,
+            host: Weak::new(),
+            timeout: DEFAULT_TIMEOUT,
+            clock: Arc::new(Instant::now),
+            entries: HashMap::new(),
+            next_key: 1,
+            exit: false,
+            open_editors: Arc::from(stuck::NO_EDITOR),
+        };
+        let editor: Box<dyn PluginEditor> = Box::new(Counting(Arc::clone(&idles)));
+        ctx.entries
+            .insert(0, Local { editor: Some(editor), state: None, shared: Arc::new(EditorShared::default()), name: Arc::from("Guitar Rig 7") });
+        let deferred = transit_dsp::host_call::deferred();
+        {
+            let _load = transit_dsp::host_call::enter();
+            tick(&config, &mut ctx);
+            assert_eq!((serviced.load(Ordering::SeqCst), idles.load(Ordering::SeqCst)), (0, 0), "nothing ran inside the call");
+            assert!(transit_dsp::host_call::deferred() > deferred, "the deferral is counted");
+        }
+        tick(&config, &mut ctx);
+        assert_eq!((serviced.load(Ordering::SeqCst), idles.load(Ordering::SeqCst)), (1, 1), "the next tick runs both");
+        assert_eq!(&*ctx.open_editors, "Guitar Rig 7", "a dispatch now names the open editor");
     }
 
     /// Issue #56 (c), the race the review found, in a fixed order: the check sees a section past

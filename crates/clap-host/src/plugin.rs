@@ -205,6 +205,14 @@ impl Shared {
             out.other_thread += 1;
             return;
         }
+        // Issue #205: never inside a host call into plug-in code on this thread (a state load
+        // that pumps the message loop): `restart`, `callback` and `params_rescan` stay set for
+        // the next call.
+        if transit_dsp::host_call::active() {
+            transit_dsp::host_call::defer();
+            out.deferred += 1;
+            return;
+        }
         if !self.link.available() && self.host.callback.load(Ordering::Relaxed) {
             // No editor handle runs `idle` for this plug-in: run it here for `on_main_thread`.
             // (Its edit queue has no reader without an editor; this drains it too.)
@@ -1174,6 +1182,12 @@ impl PluginEditor for ClapEditor {
     }
 
     fn idle(&mut self) -> Vec<(String, f32)> {
+        // Issue #205: inside a host call into plug-in code on this thread nothing here may call
+        // the plug-in (the service, `on_main_thread`); the edits stay queued for the next idle.
+        if transit_dsp::host_call::active() {
+            transit_dsp::host_call::defer();
+            return Vec::new();
+        }
         if let Some(s) = self.shared.upgrade() {
             s.service(&mut Serviced::default());
         }

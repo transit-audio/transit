@@ -155,6 +155,37 @@ fn a_latency_change_reactivates_on_main_and_reports_the_new_latency() {
     assert!((cc_block(&mut p, 7, 127) - 1.0).abs() < 1e-6);
 }
 
+/// Issue #205: a plug-in that asks for a restart while the host thread is inside a call into it
+/// (a preset load in its editor that pumps the message loop) is not deactivated inside that call.
+/// The servicing and the editor idle the pumped loop reaches leave the request for the next idle;
+/// once the call returns, the next service reactivates it.
+#[test]
+fn a_restart_asked_for_inside_a_host_call_waits_until_the_call_returns() {
+    let (mut p, mut reader) = synth();
+    let activations = Report::read(&mut reader).threads("active").len();
+    assert!(p.load_state(b"ARM:LATENCY:32"));
+    {
+        let _load = transit_dsp::host_call::enter();
+        // The call: its getState asks for restartComponent(kLatencyChanged).
+        let _ = reader.save_state();
+        // What a message loop pumped inside the call would reach.
+        let s = transit_vst3_host::service_requests();
+        assert_eq!(s.restarted, 0, "no reactivation inside the call");
+        assert!(s.deferred >= 1, "the request is left for the next call: {s:?}");
+        #[cfg(not(target_os = "macos"))]
+        {
+            let mut ed = p.editor().expect("editor handle");
+            assert!(ed.idle().is_empty());
+        }
+        assert_eq!(p.latency(), 0, "the latency is the old one until the call returns");
+    }
+    let r = Report::read(&mut reader);
+    assert_eq!(r.threads("active").len(), activations, "no setActive inside the call: {}", r.0);
+    let s = transit_vst3_host::service_requests();
+    assert_eq!((s.restarted, s.deferred), (1, 0), "serviced once the call returned");
+    assert_eq!(p.latency(), 32);
+}
+
 #[test]
 fn io_changes_reactivate_and_a_reload_request_is_refused_clearly() {
     let (mut p, _reader) = synth();
