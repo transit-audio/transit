@@ -6,7 +6,10 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
    every crate inherit it) and refresh `Cargo.lock` with `cargo metadata`. Write the release notes in
    `docs/releases/vX.Y.Z.md` with a `## Highlights` section first (see `docs/releases/README.md`). Commit
    both, push, and wait for CI to be green.
-2. Refresh the screenshots (`docs/images` and `site/assets`) from the release build through the control channel at every release that changes the UI.
+2. Refresh the screenshots (`docs/images` and `site/assets`) at every release that changes the UI. Take them
+   from the release build through the control channel, using the built-in demo session
+   (`--demo --no-audio --control 0`) on a scratch config directory, never a user's real config. Five shots:
+   arrange, mixer, piano roll, MIDI mappings, and Audio Devices with fake devices.
 
 3. Add this release's corpus files, `crates/model/tests/corpus/v<version>-demo.transit` and `v<version>-features.transit`,
    from the release commit (before tagging, so the files are what the tag writes):
@@ -15,14 +18,23 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
    `cargo test -p transit-model` and commit the two files (`crates/model/tests/corpus/README.md`). Never
    regenerate an earlier release's files.
 
-4. Tag that commit `vX.Y.Z` or `vX.Y.Z-pre` (for example `v0.2.0-alpha.1`) and push the tag:
+4. Housekeeping, before the tag:
+   - Re-read `AGENTS.md` and everything it points to (`CLAUDE.md`, `docs/contributing/agents.md`,
+     `CONTRIBUTING.md`, the evidence docs) against the rules in force, and fix stale statements.
+   - Refresh the "What each record decided" table in `docs/benchmarks/README.md` with any record or
+     decision since the last release.
+   - Refresh the escapes index (`docs/escapes/README.md`) and the escape count quoted in the README's
+     "How we decide" section.
+   - Confirm the known-issues table matches the Known issues in the release notes.
+
+5. Tag that commit `vX.Y.Z` or `vX.Y.Z-pre` (for example `v0.2.0-alpha.1`) and push the tag:
 
    ```sh
    git tag v0.2.0-alpha.1
    git push origin v0.2.0-alpha.1
    ```
 
-5. `release.yml` builds the archives and attaches them to the GitHub release for the tag (a pre-release only when the tag has a suffix):
+6. `release.yml` builds the archives and attaches them to the GitHub release for the tag (a pre-release only when the tag has a suffix):
    - Windows x86_64 (one download, a `.msi` installer and a portable `.zip`): `windows-x86_64`
      (native WASAPI and native ASIO; see below). Unsigned unless the
      Windows signing secrets below are set. SmartScreen may ask for "More info", then "Run anyway".
@@ -33,11 +45,11 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
      right-click it and choose Open.
    - Linux x86_64: tarball, AppImage, deb and rpm, built with the native JACK backend (`native-jack`;
      libjack is loaded at run time, so the binaries start without JACK installed).
-6. The release body comes from the repository: when `docs/releases/<tag>.md` exists at the tag, the
+7. The release body comes from the repository: when `docs/releases/<tag>.md` exists at the tag, the
    publish job uses it as the whole body. Without that file the body is the generic download text plus
    GitHub's generated notes. Check the release page when the archives look right. The body can still be
    replaced after publication with `gh release edit <tag> --notes-file <file>`.
-7. `release.yml` then announces the release on Discord (the "Announce on Discord" step, which runs after
+8. `release.yml` then announces the release on Discord (the "Announce on Discord" step, which runs after
    the release is published). It posts as "transit releaser" and reads the published release body back, posting the top-level bullets of its `## Highlights` section (up to
    1800 characters; the first paragraph when there is no Highlights section) with a link to the
    release, and stops at the checksums section. Put the Highlights first when you write the notes.
