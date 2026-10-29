@@ -209,6 +209,19 @@ impl Plugin for Compressor {
     fn gain_reduction_db(&self) -> f32 {
         self.gr_meter
     }
+
+    /// The detector envelope, the sidechain filters' memory, the lookahead lines (contents and
+    /// write positions) and the makeup and mix smoothers.
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
+        h.write_u32(self.gr.to_bits());
+        h.write_u32(self.gr_meter.to_bits());
+        h.write_usize(self.lookahead);
+        self.sc.iter().for_each(|b| b.fingerprint(h));
+        self.delay.iter().for_each(|d| d.fingerprint(h));
+        self.makeup.fingerprint(h);
+        self.mix.fingerprint(h);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

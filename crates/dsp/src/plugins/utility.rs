@@ -193,6 +193,12 @@ impl Plugin for Gain {
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
         apply_gain(io, frames, self.ch, &mut self.g);
     }
+
+    /// The gain smoother.
+    #[cfg(feature = "testing")]
+    fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
+        self.g.fingerprint(h);
+    }
 }
 
 // ---------------------------------------------------------------------------------------------

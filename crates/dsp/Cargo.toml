@@ -7,6 +7,10 @@ license.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+[features]
+# Test seams (`Plugin::fingerprint`, issue #210); never enabled by the app.
+testing = []
+
 [dependencies]
 serde.workspace = true
 log.workspace = true
