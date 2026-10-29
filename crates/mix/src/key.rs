@@ -11,6 +11,13 @@
 //! arrival latencies each block; a key that arrives late delays the keyed strip's input before
 //! the insert ([`KeyIn`], part of the strip's latency), a key that arrives early is delayed in its
 //! [`KeyEntry`]. Both are [`KeyLine`]s sized when the plan is built.
+//!
+//! Render workers (issue #174, ADR 0029 amendment): a keyed strip a worker renders reads its keys
+//! from its job, not from the plan's bank. The callback fills the strip's entries in the bank
+//! when its sources are ready, then lends their storage (buffers, delay line, scratch) to the
+//! job's bank ([`KeyBank::lend`]) and takes it back when the strip comes home
+//! ([`KeyBank::take_back`]): swaps of vectors, nothing allocated, and the entry's history goes
+//! with it. A [`KeyIn`] has its own scratch, so its line runs wherever the strip renders.
 
 use super::*;
 
@@ -86,6 +93,13 @@ impl KeyLine {
         self.line.take_history(&old.line);
         self.tap = old.tap;
     }
+
+    /// Test view: whether the line holds history (it was written and not idled since), and its
+    /// write position (it moves with every block written).
+    #[cfg(test)]
+    pub(crate) fn history(&self) -> (bool, usize) {
+        (self.line.live, self.line.idx)
+    }
 }
 
 /// The delay of a keyed strip's own signal before one keyed insert (the key arrives late).
@@ -96,16 +110,21 @@ pub(crate) struct KeyIn {
     pub(crate) line: KeyLine,
     /// The insert ran this block.
     pub(crate) ran: bool,
+    /// Scratch for the line's delayed read (channels x block): the strip's own, so the line runs
+    /// the same on the callback and on a render worker.
+    pub(crate) scratch: Vec<Vec<f32>>,
 }
 
 impl KeyIn {
     pub(crate) fn new(slot: u16, ch: usize, cap: usize, block: usize) -> Self {
-        KeyIn { slot, want: 0, line: KeyLine::new(ch, cap, block), ran: false }
+        KeyIn { slot, want: 0, line: KeyLine::new(ch, cap, block), ran: false, scratch: (0..ch).map(|_| Vec::with_capacity(block)).collect() }
     }
 }
 
 struct KeyEntry {
     spec: KeySpec,
+    /// The entry's storage is lent to a render worker's job ([`KeyBank::lend`]).
+    lent: bool,
     buf: Vec<Vec<f32>>,
     /// Delays the key when it arrives before the keyed strip's signal, by `want` this block.
     line: KeyLine,
@@ -137,6 +156,7 @@ impl KeyBank {
                 let ch = usize::from(spec.ch).max(1);
                 KeyEntry {
                     spec,
+                    lent: false,
                     buf: vec![vec![0.0; block]; ch],
                     line: KeyLine::new(ch, cap_of(spec.keyed), block),
                     scratch: (0..ch).map(|_| Vec::with_capacity(block)).collect(),
@@ -149,6 +169,74 @@ impl KeyBank {
 
     pub(crate) fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    /// An empty bank with room for `n` entries lent to it ([`KeyBank::lend`]), allocated now so a
+    /// lend never allocates.
+    pub(crate) fn with_room(n: usize) -> Self {
+        KeyBank { entries: Vec::with_capacity(n) }
+    }
+
+    /// Lends the storage of every entry keyed at table index `keyed` to `to` (a render worker's
+    /// job), in bank order: `to` then serves those keys ([`KeyBank::get`]), this bank keeps their
+    /// specs and this block's delays. False, with nothing lent, when `to` has no room for them or
+    /// still holds entries. Allocation-free.
+    pub(crate) fn lend(&mut self, keyed: usize, to: &mut KeyBank) -> bool {
+        let n = self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed).count();
+        if !to.entries.is_empty() || to.entries.capacity() < n {
+            return false;
+        }
+        for e in self.entries.iter_mut().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent) {
+            let mut v = KeyEntry {
+                spec: e.spec,
+                lent: false,
+                buf: Vec::new(),
+                line: KeyLine { line: DelayLine::placeholder(), tap: EdgeTap::default() },
+                scratch: Vec::new(),
+                want: e.want,
+            };
+            std::mem::swap(&mut e.buf, &mut v.buf);
+            std::mem::swap(&mut e.line, &mut v.line);
+            std::mem::swap(&mut e.scratch, &mut v.scratch);
+            e.lent = true;
+            to.entries.push(v);
+        }
+        true
+    }
+
+    /// Takes back what [`KeyBank::lend`] lent to `from` for table index `keyed`, and empties
+    /// `from`. Nothing happens when nothing was lent. Allocation-free (the emptied entries hold
+    /// no storage).
+    pub(crate) fn take_back(&mut self, keyed: usize, from: &mut KeyBank) {
+        let mut lent = from.entries.iter_mut();
+        for e in self.entries.iter_mut().filter(|e| usize::from(e.spec.keyed) == keyed && e.lent) {
+            let Some(v) = lent.next() else { break };
+            std::mem::swap(&mut e.buf, &mut v.buf);
+            std::mem::swap(&mut e.line, &mut v.line);
+            std::mem::swap(&mut e.scratch, &mut v.scratch);
+            e.lent = false;
+        }
+        from.entries.clear();
+    }
+
+    /// The table indices of the strips keyed from strip `source` (each once per entry).
+    pub(crate) fn keyed_from(&self, source: usize) -> impl Iterator<Item = usize> + '_ {
+        self.entries.iter().filter(move |e| e.spec.from == KeyEnd::Strip(u16::try_from(source).unwrap_or(u16::MAX))).map(|e| usize::from(e.spec.keyed))
+    }
+
+    /// The strip sources of the entries keyed at table index `keyed`.
+    pub(crate) fn sources_of(&self, keyed: usize) -> impl Iterator<Item = usize> + '_ {
+        self.entries.iter().filter(move |e| usize::from(e.spec.keyed) == keyed).filter_map(|e| match e.spec.from {
+            KeyEnd::Strip(j) => Some(usize::from(j)),
+            KeyEnd::Bus(_) => None,
+        })
+    }
+
+    /// Test view of the entries keyed at `keyed`: whether each line holds history and its write
+    /// position, in bank order (a skipped block neither writes nor idles them).
+    #[cfg(test)]
+    pub(crate) fn lines_of(&self, keyed: usize) -> Vec<(bool, usize)> {
+        self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed).map(|e| e.line.history()).collect()
     }
 
     /// Delay compensation for the keys of the strip at table index `at` (`t`'s): sets the delay
@@ -218,9 +306,9 @@ impl KeyBank {
 
     /// Fills the keys of the strips with table index in `keyed` from `strip` (the strips rendered
     /// so far, by table index) and `busses`, over `frames` samples. A source that has not rendered
-    /// (`strip` gives none) fills silence.
+    /// (`strip` gives none) fills silence. An entry lent to a render worker's job is left alone.
     pub(crate) fn fill<'a>(&mut self, keyed: std::ops::Range<usize>, strip: impl Fn(usize) -> Option<&'a Strip>, busses: &BusTable, frames: usize) {
-        for e in self.entries.iter_mut().filter(|e| keyed.contains(&usize::from(e.spec.keyed))) {
+        for e in self.entries.iter_mut().filter(|e| keyed.contains(&usize::from(e.spec.keyed)) && !e.lent) {
             let src: Option<&[Vec<f32>]> = match e.spec.from {
                 KeyEnd::Strip(i) => strip(usize::from(i)).map(|st| if e.spec.pre { st.pre.as_slice() } else { st.buf.as_slice() }),
                 KeyEnd::Bus(b) => busses.bus(b).map(|b| b.buf.as_slice()),

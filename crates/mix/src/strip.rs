@@ -189,7 +189,7 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
             && let Some(k) = strip.key_in.iter_mut().find(|k| usize::from(k.slot) == i)
         {
             k.ran = true;
-            k.line.apply(k.want, &mut strip.buf, &mut strip.outbuf, frames);
+            k.line.apply(k.want, &mut strip.buf, &mut k.scratch, frames);
             latency = latency.saturating_add(k.want.min(k.line.cap()));
         }
         if run_insert(slot, &mut strip.buf, key, frames, transport, live.no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
