@@ -3,7 +3,7 @@
 Releases are tag-driven. `.github/workflows/release.yml` does the building.
 
 1. Bump `[workspace.package] version` in the root `Cargo.toml` (for example `0.3.0`; the app and
-   every crate inherit it) and refresh `Cargo.lock` with `cargo metadata`. Write the release notes in
+   every crate inherit it) and refresh `Cargo.lock` with `cargo metadata`. Update the README's two current-release sentences (the intro note and the Downloads paragraph: the tag link and the asset names) in the same commit. Write the release notes in
    `docs/releases/vX.Y.Z.md` with a `## Highlights` section first (see `docs/releases/README.md`). Commit
    both, push, and wait for CI to be green.
 2. Refresh the screenshots (`docs/images` and `site/assets`) at every release that changes the UI. Take them
