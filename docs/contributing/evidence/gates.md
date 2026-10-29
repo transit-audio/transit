@@ -71,6 +71,10 @@ The suite needs the `testing` cargo feature of `transit-mix` (which turns on `tr
 - A playback or UI test that renders four or more strips on the audio thread takes the worker path by
   default now. Such a test calls `MixEngine::force_serial(true)` unless it tests the workers, so a loaded
   CI runner cannot silence a strip for a block and fail the test (E49 class).
+- A test that takes the render-worker path and asserts what a strip produced (audio, a panic, an
+  event) sets the strip deadline itself: far (`set_strip_deadline(Some(60 s))`) to wait for every
+  strip, zero or a held worker to force an overrun. Inheriting the default share is a test defect
+  (E49 recurrence 2026-10-29; a `cargo xtask timing` rule is #220).
 - A failing test is never rerun to make it pass, and a chain never reruns a failed test even to
   capture its message: read the output, report it verbatim and bug-hunt the root cause before any test
   change. Three test defects were found this way on 2026-10-29, and no product defect. The escape

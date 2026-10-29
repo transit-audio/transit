@@ -135,10 +135,12 @@ wall-clock deadline. Not caused by #78 or #213 (neither touches the panic path; 
 (`TRANSIT_STRIP_DEADLINE_PERCENT=25`) the old test failed the same way on Windows at both
 552a98cb (1 of 300) and e7aff39f (6 of 400 together). Fixed: the test sets a 60 s strip deadline,
 so `finish` waits for every strip's completion; the late path gained its own deterministic test,
-`a_strip_late_at_the_deadline_raises_its_panic_from_the_block_that_brings_it_home`, which holds the
+`a_strip_late_at_the_deadline_keeps_its_panic_for_the_control_side`, which holds the
 claimed instruments in `process` past a zero deadline and asserts that block returns Ok, the next
 block re-raises a payload, every strip panics exactly once, and every payload is dropped on the
 control thread. After the fix: 0 of 300 runs failed at the default share and 0 of 300 at 25%.
-Blind spot: `cargo xtask timing` cannot see a deadline a test inherits from the engine's default;
+Rule added to `gates.md`: a test that takes the render-worker path and asserts what a strip
+produced sets the strip deadline itself. Blind spot: `cargo xtask timing` cannot see a deadline a
+test inherits from the engine's default (a lint is #220);
 `render_pool.rs`'s `audio_thread_render_does_not_wait_for_a_saturated_global_pool` still asserts a
 nonzero peak under the default deadline and is a review item.
