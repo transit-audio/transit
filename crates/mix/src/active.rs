@@ -457,8 +457,9 @@ impl MixEngine {
         // With render workers (the default, ADR 0029) and no sidechain key, the strips go through the
         // worker set instead, under the block's deadline; a strip a worker still holds comes back
         // that way whatever the switches say. A plan with keys goes through them as a task graph
-        // (#174) only with the graph switch on ([`MixEngine::force_graph`], `TRANSIT_RENDER_GRAPH`)
-        // and no more phase-1 strips than the pool has cells; else serially, as before.
+        // (#174, the default) while the graph switch is on ([`MixEngine::force_graph`];
+        // `TRANSIT_RENDER_GRAPH=0` turns it off) and no more phase-1 strips than the pool has
+        // cells; else serially, as before.
         let keyed = !keys.is_empty();
         let pooled = match (self.pool.as_mut(), start) {
             (Some(pool), Some(start))

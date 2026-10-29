@@ -1,8 +1,9 @@
 //! The graph path of the strip fan-out (issue #174, ADR 0029 amendment, slice 1): a plan with
 //! sidechain keys renders its phase-1 strips through the render workers as the plan's task graph
-//! ([`crate::graph`]), driven by [`transit_rt::task_graph::drive`]. Taken only with
-//! `TRANSIT_RENDER_GRAPH=1` (or [`MixEngine::force_graph`]), or while a strip of a keyed plan is
-//! still away.
+//! ([`crate::graph`]), driven by [`transit_rt::task_graph::drive`]. The default for a keyed plan
+//! on the pool path (since 2026-10-29); not taken with `TRANSIT_RENDER_GRAPH=0` (or
+//! [`MixEngine::force_graph`]`(false)`), where a keyed plan renders serially, unless a strip of a
+//! keyed plan is still away.
 //!
 //! **One block** (`StripPool::render_graph`, after `render_active` cleared the busses and aligned
 //! the keys):

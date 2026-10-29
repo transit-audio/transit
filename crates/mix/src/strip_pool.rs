@@ -21,9 +21,9 @@
 //! **What a worker render reads.** Only the strip and the job: no live input (a strip that reads
 //! the hardware input, an External Instrument, a hardware insert or a monitored audio track,
 //! renders on the callback while the workers run), its sidechain keys only from its job (a plan
-//! with keys renders serially, or through the task graph of [`graph`] with
-//! `TRANSIT_RENDER_GRAPH=1`: the callback fills a keyed strip's keys when its sources are ready
-//! and lends them to its job) and no bus (phase 1 has no aux).
+//! with keys renders through the task graph of [`graph`] by default, or serially with
+//! `TRANSIT_RENDER_GRAPH=0`: on the graph path the callback fills a keyed strip's keys when its
+//! sources are ready and lends them to its job) and no bus (phase 1 has no aux).
 //!
 //! **While a strip is away** the engine's other entry points cannot reach its instrument: events
 //! for it go to its deferred-MIDI buffer ([`StripPool::park`]), and a seek, reset, All Notes

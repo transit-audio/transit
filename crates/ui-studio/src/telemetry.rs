@@ -140,8 +140,10 @@ pub fn detail_rows_named(t: &CallbackTelemetry, strips: &[StripName]) -> Vec<Str
         format!("Over-budget callbacks while a plug-in was loading: {}", t.over_budget_while_creating),
     ]);
     // Beside the late-block figures: the render workers' stream faults (ADR 0029), when the
-    // engine has workers (the default; `TRANSIT_RENDER_POOL=0` renders serially). Each name is defined once in
-    // docs/troubleshooting.md ("Render worker figures").
+    // engine has workers (the default; `TRANSIT_RENDER_POOL=0` renders serially). A keyed plan
+    // renders through the task graph by default (#174), so its upstream-missed rows appear without
+    // a switch (`TRANSIT_RENDER_GRAPH=0` keeps keyed plans serial and those rows at 0). Each name
+    // is defined once in docs/troubleshooting.md ("Render worker figures").
     if let Some(f) = &t.strip_faults {
         rows.extend(strip_fault_rows(f));
         rows.extend(strip_figure_rows(f, strips));
@@ -257,7 +259,8 @@ pub fn strip_fault_rows(f: &transit_mix::StripFaults) -> Vec<String> {
 /// latency, one row per bucket. Strips are named as the phase marker names them.
 pub fn strip_figure_rows(f: &transit_mix::StripFaults, strips: &[StripName]) -> Vec<String> {
     let listed: Vec<&transit_mix::StripFigure> = f.top_strips.iter().flatten().collect();
-    // A strip listed only for its upstream misses (#174) says so instead of a count of 0.
+    // A strip listed only for its upstream misses (#174, the task graph: the default for keyed
+    // plans) says so instead of a count of 0.
     let top: Vec<String> = listed
         .iter()
         .take(3)

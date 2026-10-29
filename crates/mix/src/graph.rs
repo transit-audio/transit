@@ -1,9 +1,9 @@
 //! Dependency-aware strip scheduling (issue #174, ADR 0029 amendment, slice 1): a plan with a
 //! sidechain key renders its phase-1 strips through the render workers as a task graph, one task
-//! per strip with an edge from every key source, instead of serially. Behind a process-wide
-//! opt-in until the measurement the ADR names: [`RENDER_GRAPH_ENV`]`=1`, read once where the
-//! engine starts its render workers ([`init_graph_switch`]); off, a keyed plan renders serially
-//! exactly as before.
+//! per strip with an edge from every key source, instead of serially. The default for keyed plans
+//! since 2026-10-29 (the ADR's section 8 measurement, #179 and #210); [`RENDER_GRAPH_ENV`]`=0`,
+//! read once where the engine starts its render workers ([`init_graph_switch`]), opts out, and a
+//! keyed plan renders serially on the audio thread exactly as before the flip.
 //!
 //! The compiler builds the plan's [`StripGraph`] off the audio path ([`strip_graph`]): the edges
 //! are the key edges of `PlanCompiler::describe` (cut cycles and inactive tracks already left
@@ -17,23 +17,25 @@ use super::*;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use transit_rt::task_graph::{GraphRun, TaskGraph, fnv};
 
-/// Set to `1` to render plans with sidechain keys through the render workers' task graph
-/// (issue #174); unset or `0` renders them serially (the default until the measurement of ADR
-/// 0029's amendment, section 8). Read once per process where the engine starts its render
-/// workers, never on the audio thread; anything else is logged once and leaves it off.
+/// Plans with sidechain keys render through the render workers' task graph by default (issue
+/// #174, since 2026-10-29: ADR 0029's amendment, section 8 measurement); `0` opts out and they
+/// render serially on the audio thread. Unset or `1`: the task graph. Read once per process where
+/// the engine starts its render workers, never on the audio thread; anything else is logged once
+/// and leaves the task graph on.
 pub(crate) const RENDER_GRAPH_ENV: &str = "TRANSIT_RENDER_GRAPH";
 
 /// Keyed plans render through the task graph ([`MixEngine::force_graph`], [`RENDER_GRAPH_ENV`]).
-static GRAPH: AtomicBool = AtomicBool::new(false);
+/// On by default; [`RENDER_GRAPH_ENV`]`=0` clears it at startup.
+static GRAPH: AtomicBool = AtomicBool::new(true);
 
 /// What a [`RENDER_GRAPH_ENV`] value asks for ([`render_graph_setting`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum RenderGraphSetting {
-    /// Unset or `0`: keyed plans render serially (the default).
-    Serial,
-    /// `1`: keyed plans render through the task graph.
+    /// Unset or `1`: keyed plans render through the task graph (the default).
     Graph,
-    /// Anything else: logged once, and keyed plans render serially.
+    /// `0`: the opt-out, keyed plans render serially on the audio thread.
+    Serial,
+    /// Anything else: logged once, and keyed plans render through the task graph.
     Unrecognized,
 }
 
@@ -41,27 +43,28 @@ pub(crate) enum RenderGraphSetting {
 /// ignored. Pure, so the parse is testable without touching the process environment.
 pub(crate) fn render_graph_setting(value: Option<&str>) -> RenderGraphSetting {
     match value.map(str::trim) {
-        None | Some("0") => RenderGraphSetting::Serial,
-        Some("1") => RenderGraphSetting::Graph,
+        None | Some("1") => RenderGraphSetting::Graph,
+        Some("0") => RenderGraphSetting::Serial,
         Some(_) => RenderGraphSetting::Unrecognized,
     }
 }
 
-/// Reads [`RENDER_GRAPH_ENV`] once per process (never on the audio thread): `1` turns the task
-/// graph on for keyed plans; anything but unset, `0` or `1` is logged once and leaves it off.
+/// Reads [`RENDER_GRAPH_ENV`] once per process (never on the audio thread): `0` turns the task
+/// graph off for keyed plans, the opt-out; anything but unset, `1` or `0` is logged once and
+/// leaves it on.
 pub(crate) fn init_graph_switch() {
     static ONCE: std::sync::Once = std::sync::Once::new();
     if !on_audio_thread() {
         ONCE.call_once(|| {
             let value = std::env::var(RENDER_GRAPH_ENV).ok();
             match render_graph_setting(value.as_deref()) {
-                RenderGraphSetting::Serial => {}
-                RenderGraphSetting::Graph => {
-                    log::info!("mix: {RENDER_GRAPH_ENV}=1; plans with sidechain keys render through the render workers (task graph)");
-                    GRAPH.store(true, Ordering::Relaxed);
+                RenderGraphSetting::Graph => {}
+                RenderGraphSetting::Serial => {
+                    log::info!("mix: {RENDER_GRAPH_ENV}=0; plans with sidechain keys render serially on the audio thread");
+                    GRAPH.store(false, Ordering::Relaxed);
                 }
                 RenderGraphSetting::Unrecognized => log::warn!(
-                    "mix: {RENDER_GRAPH_ENV}={:?} ignored (1 renders keyed plans through the render workers, 0 or unset serially)",
+                    "mix: {RENDER_GRAPH_ENV}={:?} ignored (0 renders keyed plans serially, 1 or unset through the render workers); the task graph stays on",
                     value.unwrap_or_default()
                 ),
             }
@@ -71,17 +74,17 @@ pub(crate) fn init_graph_switch() {
 
 impl MixEngine {
     /// Turns the task graph on or off for every engine in the process: on, a plan with sidechain
-    /// keys renders its strips through the render workers (issue #174); off (the default unless
-    /// [`RENDER_GRAPH_ENV`]`=1`), it renders them serially. Takes effect at the next block; a
-    /// strip a worker still holds comes home through the graph path first. For tests and the
-    /// bench.
+    /// keys renders its strips through the render workers (issue #174, the default); off
+    /// ([`RENDER_GRAPH_ENV`]`=0`), it renders them serially on the audio thread. Takes effect at
+    /// the next block; a strip a worker still holds comes home through the graph path first. For
+    /// tests and the bench.
     #[doc(hidden)]
     pub fn force_graph(on: bool) {
         GRAPH.store(on, Ordering::Relaxed);
     }
 
-    /// True while keyed plans render through the task graph ([`MixEngine::force_graph`],
-    /// [`RENDER_GRAPH_ENV`]).
+    /// True while keyed plans render through the task graph: on by default, off after
+    /// [`MixEngine::force_graph`]`(false)` or with [`RENDER_GRAPH_ENV`]`=0`.
     #[must_use]
     pub fn graph_enabled() -> bool {
         GRAPH.load(Ordering::Relaxed)
@@ -154,18 +157,18 @@ pub(crate) fn task_identity(task: usize, chain: u64, edge_hash: u64) -> u64 {
 mod tests {
     use super::*;
 
-    /// #174: off unless `1`; `0` and unset are the serial default; anything else is logged and
-    /// stays off. Pure: no environment is touched.
+    /// #174: the task graph is the default for keyed plans; `0` is the opt-out; anything else is
+    /// logged and keeps the graph. Pure: no environment is touched.
     #[test]
-    fn only_1_turns_the_graph_on() {
-        assert_eq!(render_graph_setting(None), RenderGraphSetting::Serial);
-        for v in ["0", " 0", "0\n"] {
-            assert_eq!(render_graph_setting(Some(v)), RenderGraphSetting::Serial, "{v:?}");
-        }
+    fn unset_and_1_are_the_graph_0_is_serial_and_anything_else_is_logged() {
+        assert_eq!(render_graph_setting(None), RenderGraphSetting::Graph);
         for v in ["1", " 1 ", "1\n"] {
             assert_eq!(render_graph_setting(Some(v)), RenderGraphSetting::Graph, "{v:?}");
         }
-        for v in ["", "2", "01", "true", "yes", "on", "graph", "-1"] {
+        for v in ["0", " 0", "0 ", "0\n"] {
+            assert_eq!(render_graph_setting(Some(v)), RenderGraphSetting::Serial, "{v:?}");
+        }
+        for v in ["", "  ", "2", "00", "01", "true", "false", "yes", "no", "off", "on", "graph", "-1", "0.0"] {
             assert_eq!(render_graph_setting(Some(v)), RenderGraphSetting::Unrecognized, "{v:?}");
         }
         assert_eq!(RENDER_GRAPH_ENV, "TRANSIT_RENDER_GRAPH");
