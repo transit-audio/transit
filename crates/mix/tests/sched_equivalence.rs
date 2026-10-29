@@ -950,3 +950,29 @@ fn a_graph_change_while_a_worker_holds_an_old_task_matches_the_muted_serial_rend
         }
     }
 }
+
+// ---- Regressions ----
+
+/// A minimal schedule from a failing seed, replayed as a named regression: `topology` through
+/// `workers` render workers must equal its muted serial render under `schedule`.
+#[track_caller]
+fn regression(top: &Topology, workers: usize, schedule: &Schedule) {
+    let (_, names) = shape(top, workers);
+    if let Err(e) = check(top, workers, &names, schedule, None) {
+        panic!("{}\n{e}", schedule.to_rust(&|s| names.get(&s).cloned().unwrap_or_default()));
+    }
+}
+
+/// The template a minimal schedule lands as (copy, name it after what it found, paste the
+/// printed literal): here the key source of a chain held two blocks through two workers, then
+/// the middle strip, then both ends through none.
+#[test]
+fn regression_a_chain_held_at_each_link() {
+    let _on = graph_on();
+    let top = Topology::new("a chain of two keys", chain_with(true), vec![]);
+    let rig = top.rig();
+    let [kick, bass, pad] = ["Kick", "Bass", "Pad"].map(|n| rig.mix.strip_index(track(&top.session, n)).unwrap());
+    drop(rig);
+    regression(&top, 2, &Schedule::new(&[(kick, 5, 2), (bass, 12, 1), (pad, 20, 3)]));
+    regression(&top, 0, &Schedule::new(&[(kick, 5, 2), (bass, 6, 3), (pad, 20, 1)]));
+}
