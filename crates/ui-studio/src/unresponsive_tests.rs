@@ -12,7 +12,7 @@ use std::sync::Arc;
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 use transit_model::{Insert, TrackId};
-use transit_playback::PluginTestHooks;
+use transit_playback::{PluginTestHooks, StuckCall};
 use transit_plugin_host::{Config, Host};
 
 const HOSTED: &str = "clap:transit.test.marker213";
@@ -171,12 +171,26 @@ fn a_hung_worker_marks_the_row_the_card_and_the_track_header() {
 
 #[test]
 fn the_hover_text_names_the_cause_and_what_to_do() {
-    let host = tip(Hang::HostThread, "Guitar Rig 7");
-    assert!(host.starts_with("Guitar Rig 7 is unresponsive: its plug-in host thread is stuck"), "{host}");
+    let call = |given_up| StuckCall {
+        thread: "plugin-host-0".into(),
+        plugin: "Guitar Rig 7".into(),
+        call: "a window message",
+        stuck_for: Duration::from_secs(130),
+        given_up,
+        hosted: 2,
+    };
+    let host = tip(Hang::HostThread, "Amp", &[call(false)]);
+    assert!(
+        host.starts_with("Amp is unresponsive: its plug-in host thread has not returned from a window message in Guitar Rig 7 for 130 s"),
+        "{host}"
+    );
     assert!(host.contains("Audio keeps playing") && host.contains("Later or Give up"), "{host}");
-    let worker = tip(Hang::Worker, "Guitar Rig 7");
-    assert!(worker.contains("render worker") && worker.contains("silent") && worker.contains("Reconnect"), "{worker}");
-    assert_ne!(host, worker);
+    let gave = tip(Hang::HostThread, "Amp", &[call(true)]);
+    assert!(gave.contains("you gave up") && !gave.contains("Later"), "after Give up the window is gone: {gave}");
+    assert_eq!(gave, tip(Hang::HostThread, "Amp", &[]), "a parked thread reads the same");
+    let worker = tip(Hang::Worker, "Amp", &[]);
+    assert!(worker.contains("inside a plug-in on this track") && worker.contains("silent") && worker.contains("Reconnect"), "{worker}");
+    assert!(!worker.contains("is unresponsive: a render worker is stuck inside the plug-in"), "no single plug-in is accused: {worker}");
 }
 
 /// The real state: a host thread stuck past its budget inside a call (#205) marks the loaded
@@ -194,6 +208,8 @@ fn a_stuck_host_thread_marks_its_loaded_plug_in_and_clears_when_it_returns() {
         let _ = gate.recv();
     });
     assert!(t.frames_until(Duration::from_secs(5), |t| t.marked(track) == [true; 3]), "marked once the call is past its budget");
+    let tip = t.app.hang_tip(Hang::HostThread, "Amp");
+    assert!(tip.contains("Guitar Rig 7") && tip.contains("Later or Give up"), "the live call is named: {tip}");
     t.release.take();
     assert!(t.frames_until(Duration::from_secs(5), |t| t.marked(track) == [false; 3]), "cleared once the call returns");
 }

@@ -58,7 +58,7 @@ pub(super) fn track_header(
             TOKENS.solo,
         );
         ui.interact(m.intersect(room).intersect(list), ui.id().with(("unresponsive", t.id.0)), Sense::hover())
-            .on_hover_text(crate::unresponsive::tip(hang, &name));
+            .on_hover_text(app.hang_tip(hang, &name));
         row.unresponsive = crate::devices::UNRESPONSIVE.to_string();
         row.unresponsive_rect = r4(m);
     }

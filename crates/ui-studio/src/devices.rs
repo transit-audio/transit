@@ -449,14 +449,12 @@ fn card_body(
     let last = app.last_load_time(&plugin);
     let kind = load.map_or(kind, |l| load_text(l, last));
     // A loaded plug-in that does not answer (#213): the same marker and hover as the insert row.
-    let index = app.engine.session().tracks.iter().position(|x| x.id == t);
-    let hang = if load.is_none() { app.slot_hang(t, index, key_slot, &plugin) } else { None };
+    let hang = if load.is_none() { app.slot_hang(t, key_slot, &plugin) } else { None };
     let kind = if hang.is_some() { UNRESPONSIVE.to_string() } else { kind };
     let kind_ink = if hang.is_some() { TOKENS.solo } else { TOKENS.text_dim };
     let kind_r = pc.text(pos2(r.min.x + 8.0, title.max.y + 12.0), Align2::LEFT_CENTER, &kind, FontId::proportional(10.0), kind_ink);
     if let Some(hang) = hang {
-        ui.interact(kind_r.intersect(lane), ui.id().with(("unresponsive", t.0, salt)), Sense::hover())
-            .on_hover_text(crate::unresponsive::tip(hang, &name));
+        ui.interact(kind_r.intersect(lane), ui.id().with(("unresponsive", t.0, salt)), Sense::hover()).on_hover_text(app.hang_tip(hang, &name));
     }
     if let Some(load) = load {
         // How long so far, the phase and how long it took last time (#67), on the status text itself.

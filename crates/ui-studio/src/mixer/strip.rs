@@ -232,8 +232,7 @@ fn inserts_block(
         let last = app.last_load_time(&ins.plugin);
         let mut status = load.map(|l| crate::devices::load_text(l, last)).unwrap_or_default();
         // A loaded plug-in that does not answer (#213): the same marker as the device card.
-        let index = app.engine.session().tracks.iter().position(|x| x.id == id);
-        let hang = if load.is_none() { app.slot_hang(id, index, *slot, &ins.plugin) } else { None };
+        let hang = if load.is_none() { app.slot_hang(id, *slot, &ins.plugin) } else { None };
         if hang.is_some() {
             status = crate::devices::UNRESPONSIVE.to_string();
         }
@@ -259,7 +258,7 @@ fn inserts_block(
             app.want_editor((id, *slot));
         }
         let state = if ins.bypass { " (bypassed)" } else { "" };
-        let why = hang.map_or(String::new(), |h| format!(" {}", crate::unresponsive::tip(h, &name)));
+        let why = hang.map_or(String::new(), |h| format!(" {}", app.hang_tip(h, &name)));
         let resp = resp.on_hover_text(format!("{name}{state}. Click for its window, right-click for more.{why}"));
         let slot = *slot;
         let bypass = ins.bypass;
