@@ -32,7 +32,7 @@ Rules, each agreed by the maintainer:
 
 ### Implementation
 
-A Rust port in a transit-owned crate, named `transit-mi-*` per the crate naming rule. The shipped app is pure Rust.
+A Rust port in a transit-owned crate with a descriptive, brand-free name (the Plaits port is `transit-macro-osc`; see the amendment below). The shipped app is pure Rust.
 
 Before any port starts, evaluate the existing crates.io port (`mi-plaits-dsp`) for license and fidelity. The evaluation is a prerequisite, not a decision: it informs whether to adopt, fork or write the port, and this ADR does not pre-empt it.
 
@@ -57,3 +57,20 @@ Null tests against her C++, wrapped as a dev-only oracle. The oracle is built wi
 - The C++ via FFI inside the app: adds a toolchain and an unsafe surface. Rejected; the C++ stays in the test oracle.
 - The VCV Rack ports: GPLv3, which conflicts with transit's licensing.
 - Shipping under the original names: contrary to the branding request.
+
+## Amendment 2026-10-29: crate naming and the Plaits source decision
+
+Maintainer decision, 2026-10-29. This amendment supersedes the crate naming in Implementation above and records the outcome of the crates.io evaluation (#193).
+
+**(a) Crate naming.** The rule `transit-mi-*` is replaced. The eurorack README asks derivative works not to keep the original module names, so crate names are descriptive and brand-free: each names what the crate does, not whose module it came from. The Plaits port is the crate `transit-macro-osc` (macro oscillator). Later modules take names that describe what they do, for example Rings is `transit-modal-resonator`, not `transit-rings`.
+
+**(b) Source decision (#193, 2026-10-29): option (b), vendor the MIT Rust port.** The port is `mi-plaits-dsp-rs` by Oliver Rockstedt (GitHub `sourcebox`), vendored at commit `effe9864bb` into `transit-macro-osc`. Its terms:
+
+- Rockstedt's MIT notice stays in the source and the crate.
+- Émilie Gillet's full MIT notice from `eurorack` and `stmlib` is restored in the crate `LICENSE` and in the third-party license file.
+- The source commit (`effe9864bb`) is recorded in the crate and in the third-party file.
+- Before any engine ships, each one is corrected against the C++ oracle (#194): per-instance RNG; sample rate as a parameter, not a constant; an audit of the interpolate clamps; the VA auxiliary oscillator phase returned to firmware behavior; and the snare and VOSIM details.
+
+**(c) Fallback.** If the vendored code needs more repair than it saves, port from the firmware instead (option c), behind the same oracle gate. The null tests compare output sample by sample, so the swap is invisible to users.
+
+Related: #193 (the evaluation and this decision), #194 (the C++ oracle that gates each engine).
