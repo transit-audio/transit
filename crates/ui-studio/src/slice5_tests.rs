@@ -1164,6 +1164,8 @@ fn the_serial_details_window_is_no_taller_than_it_was_and_shorter_than_the_pool_
 #[test]
 fn a_refused_command_error_leaves_the_status_bar_but_not_the_report() {
     let mut t = T::new();
+    // The app's aging: the harness holds messages by default; this test frames deterministically.
+    t.app.status_age = crate::status::StatusAge::default();
     t.app.status = "Command failed: no such control".into();
     t.frames(30);
     assert_eq!(t.app.status, "Command failed: no such control", "half a second in, it still shows");

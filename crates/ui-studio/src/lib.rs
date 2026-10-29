@@ -478,7 +478,9 @@ impl StudioApp {
             take_plan: None,
             ui: UiState::default(),
             status: String::new(),
-            status_age: status::StatusAge::default(),
+            // The crate's tests hold status messages: their harnesses frame through wall-clock
+            // waits, so aging there would be host-speed dependent (#203, E49).
+            status_age: if cfg!(test) { status::StatusAge::held() } else { status::StatusAge::default() },
             state_notice: None,
             services,
             diag: Default::default(),

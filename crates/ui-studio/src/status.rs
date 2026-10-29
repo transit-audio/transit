@@ -5,12 +5,21 @@
 /// How long a status message stays, seconds of the frame clock.
 pub const STATUS_SECS: f64 = 8.0;
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct StatusAge {
     /// The message the clock is counting, so a different text (a newer message) restarts it.
     seen: String,
     since: f64,
     last: Option<(u64, String)>,
+    /// How long a message stays, seconds of the frame clock; `None` holds it until replaced.
+    span: Option<f64>,
+}
+
+impl Default for StatusAge {
+    /// The app's: a message ages out after [`STATUS_SECS`].
+    fn default() -> Self {
+        StatusAge { seen: String::new(), since: 0.0, last: None, span: Some(STATUS_SECS) }
+    }
 }
 
 /// A message that states a transport wait, not an outcome: the transport code clears it itself.
@@ -19,6 +28,14 @@ fn is_state(text: &str) -> bool {
 }
 
 impl StatusAge {
+    /// A message stays until the next one; the last one is still kept for the report. The crate's
+    /// tests use it: their harnesses frame while they wait on background threads for a wall-clock
+    /// span, so 8 s of their frame clock is wall time, and a status assertion after such a wait
+    /// would depend on the host's speed (E49). The tests of the aging opt in with `default()`.
+    pub fn held() -> Self {
+        StatusAge { span: None, ..Self::default() }
+    }
+
     /// Once a frame. `now` is the frame clock, `epoch` the wall time stamped on the kept message.
     /// Returns the seconds until `status` is due to clear, when it is waiting to.
     pub fn tick(&mut self, status: &mut String, now: f64, epoch: u64) -> Option<f64> {
@@ -29,10 +46,11 @@ impl StatusAge {
                 self.last = Some((epoch, status.clone()));
             }
         }
+        let span = self.span?;
         if status.is_empty() || is_state(status) {
             return None;
         }
-        let left = STATUS_SECS - (now - self.since);
+        let left = span - (now - self.since);
         if left <= 0.0 {
             status.clear();
             self.seen.clear();
@@ -99,6 +117,16 @@ mod tests {
             age.tick(&mut status, 100.0, 2);
             assert_eq!(status, text);
         }
+    }
+
+    #[test]
+    fn a_held_message_stays_until_replaced_and_is_still_kept_for_the_report() {
+        let mut age = StatusAge::held();
+        let mut status = String::from("Added /tmp/x to Locations");
+        age.tick(&mut status, 0.0, 5);
+        assert_eq!(age.tick(&mut status, 100.0, 6), None, "no clearing is scheduled");
+        assert_eq!(status, "Added /tmp/x to Locations");
+        assert_eq!(age.last(), Some(&(5, "Added /tmp/x to Locations".to_string())));
     }
 
     #[test]
