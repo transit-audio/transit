@@ -783,33 +783,8 @@ impl StripPool {
                 self.silent[i] = true;
                 continue;
             }
-            if self.set.is_suspect(i) {
-                // A late result that panicked made it suspect at `begin_block`: this instance.
-                if self.suspect_gen[i] == SlotGen::VACANT {
-                    self.suspect_gen[i] = st.generation;
-                }
-                if st.generation == self.suspect_gen[i] {
-                    self.silent[i] = true;
-                    self.counters.suspect.fetch_add(1, Ordering::Relaxed);
-                    continue;
-                }
-                // The instance was replaced (ADR 0007: per plug-in, by the next plan).
-                self.set.clear_suspect(i);
-                self.suspect_gen[i] = SlotGen::VACANT;
-            }
-            // Another chain on this index (a plug-in loaded or replaced, another track's strip
-            // moved here): its cost history is not this one's (#168, ADR 0029 deviation 16).
-            let id = chain_identity(st);
-            if self.chain[i].is_some_and(|prev| prev != id) {
-                self.set.reset_history(i);
-            }
-            self.chain[i] = Some(id);
-            // The name the report gives this index's figures (#169): a store only on a change,
-            // and another track's counts start from zero, so a name's counts are its track's.
-            let track = u32::from(st.track);
-            if self.tracks[i].load(Ordering::Relaxed) != track {
-                self.tracks[i].store(track, Ordering::Relaxed);
-                self.set.reset_counts(i);
+            if !self.admit(i, st) {
+                continue;
             }
             if self.send(i, st, b) {
                 if let Ok(Published::Published) = self.set.publish(i) {
@@ -900,6 +875,41 @@ impl StripPool {
         }
         self.last_overruns = overruns;
         self.mirror(report.overrun > 0);
+    }
+
+    /// Before strip `i` (home, its track live) is sent away: a suspect instance stays silent for
+    /// the block (false, counted); a replaced one is cleared; a new chain on the index starts
+    /// with no cost history; the report's name follows the track on the index.
+    fn admit(&mut self, i: usize, st: &Strip) -> bool {
+        if self.set.is_suspect(i) {
+            // A late result that panicked made it suspect at `begin_block`: this instance.
+            if self.suspect_gen[i] == SlotGen::VACANT {
+                self.suspect_gen[i] = st.generation;
+            }
+            if st.generation == self.suspect_gen[i] {
+                self.silent[i] = true;
+                self.counters.suspect.fetch_add(1, Ordering::Relaxed);
+                return false;
+            }
+            // The instance was replaced (ADR 0007: per plug-in, by the next plan).
+            self.set.clear_suspect(i);
+            self.suspect_gen[i] = SlotGen::VACANT;
+        }
+        // Another chain on this index (a plug-in loaded or replaced, another track's strip
+        // moved here): its cost history is not this one's (#168, ADR 0029 deviation 16).
+        let id = chain_identity(st);
+        if self.chain[i].is_some_and(|prev| prev != id) {
+            self.set.reset_history(i);
+        }
+        self.chain[i] = Some(id);
+        // The name the report gives this index's figures (#169): a store only on a change,
+        // and another track's counts start from zero, so a name's counts are its track's.
+        let track = u32::from(st.track);
+        if self.tracks[i].load(Ordering::Relaxed) != track {
+            self.tracks[i].store(track, Ordering::Relaxed);
+            self.set.reset_counts(i);
+        }
+        true
     }
 
     /// Sends strip `i` away into its cell with the block's inputs. False when the cell's lock was
