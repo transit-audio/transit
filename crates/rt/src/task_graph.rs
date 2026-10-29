@@ -338,7 +338,9 @@ pub fn drive(host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, d
         let t = run.later[k] as usize;
         host.render_here(t);
         run.succeed(graph, t);
-        d.steps(host, graph, run, Phase::Sweep);
+        // A pinned render that ran past the deadline leaves no time for its dependents.
+        let phase = if Instant::now() >= deadline { Phase::Late } else { Phase::Sweep };
+        d.steps(host, graph, run, phase);
         d.wake(host, deadline);
     }
     run.later_len = 0;

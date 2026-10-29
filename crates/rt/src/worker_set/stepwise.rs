@@ -15,8 +15,9 @@ use std::time::Instant;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[must_use]
 pub enum Poll {
-    /// `strip` is resolved: its [`Outcome`] (not `Pending`). `late` when it was resolved in the
-    /// deadline phase (no time is left for anything published after it).
+    /// `strip` is resolved: its [`Outcome`] (not `Pending`). `late` when it was resolved at or
+    /// past the deadline (taken in a sweep that began at or after it, an inline render that ended
+    /// after it, or the deadline phase): no time is left for anything published after it.
     Resolved {
         /// The strip.
         strip: usize,
@@ -54,7 +55,8 @@ impl WorkerSet {
                     State::Done => {
                         if let Some(o) = self.take_done(strip, g) {
                             self.outcomes[strip] = o;
-                            return Poll::Resolved { strip, outcome: o, late: false };
+                            // Taken at or past the deadline: nothing may be published after it.
+                            return Poll::Resolved { strip, outcome: o, late: now >= deadline };
                         }
                     }
                     State::Published if self.admits(strip, now, deadline) && slot.reclaim() => {
@@ -69,7 +71,7 @@ impl WorkerSet {
                         bump(&self.shared.stats.inline_renders);
                         shared.figures.count(strip, Count::Inline);
                         self.outcomes[strip] = Outcome::Inline;
-                        return Poll::Resolved { strip, outcome: Outcome::Inline, late: false };
+                        return Poll::Resolved { strip, outcome: Outcome::Inline, late: end > deadline };
                     }
                     _ => {}
                 }
