@@ -775,7 +775,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let has_player = app.player.is_some();
     let mut hover = None;
     let mut drawn_spotlight = None;
-    let r = egui::Window::new("MIDI Monitor")
+    let r = crate::theme::window(ctx, "MIDI Monitor")
         .open(&mut open)
         .collapsible(false)
         .resizable(true)

@@ -71,7 +71,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     }
     let mut open = true;
     let mut close = false;
-    let r = egui::Window::new("About transit")
+    let r = crate::theme::window(ctx, "About transit")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)

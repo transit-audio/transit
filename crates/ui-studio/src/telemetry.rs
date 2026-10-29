@@ -368,7 +368,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     // The rows scroll inside what is left under the title bar, so the buttons below stay on the
     // screen however many rows the render pool adds (#171).
     let scroll_h = (content.bottom() - top - SCROLL_RESERVE).max(MIN_SCROLL_H);
-    let r = egui::Window::new("Callback Telemetry")
+    let r = crate::theme::window(ctx, "Callback Telemetry")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)

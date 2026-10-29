@@ -889,7 +889,7 @@ const HEADER_H: f32 = 20.0;
 /// The Takeover row: a combo box and its line of text.
 const TAKEOVER_H: f32 = 28.0;
 /// What the window adds to its size limits (measured): the title bar and frame heights; the width limits are the outer width.
-const CHROME: egui::Vec2 = egui::vec2(0.0, 44.0);
+const CHROME: egui::Vec2 = egui::vec2(0.0, 36.0);
 /// Room the table keeps beside the window's content edge.
 const SIDE_ROOM: f32 = 24.0;
 /// The vertical scrollbar's room at the table's right edge.
@@ -987,7 +987,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let dropped = app.midi_learn.dropped;
     let mut takeover = app.ui.midi_takeover;
     let mut actions: Vec<(usize, Action)> = Vec::new();
-    let r = egui::Window::new("MIDI Mappings")
+    let r = crate::theme::window(ctx, "MIDI Mappings")
         .open(&mut open)
         .collapsible(false)
         .resizable(true)

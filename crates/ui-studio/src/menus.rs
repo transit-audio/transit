@@ -662,7 +662,7 @@ pub fn recovery(app: &mut StudioApp, ctx: &egui::Context) {
     }
     let mut act: Option<(usize, bool)> = None;
     let mut later = false;
-    egui::Window::new("Recover unsaved work").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
+    crate::theme::window(ctx, "Recover unsaved work").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
         ui.label("An earlier run left unsaved changes:");
         for (i, l) in app.leftovers.iter().enumerate() {
             ui.horizontal(|ui| {
@@ -714,7 +714,7 @@ pub fn shortcuts_window(app: &mut StudioApp, ctx: &egui::Context) {
         return;
     }
     let mut open = true;
-    let r = egui::Window::new("Keyboard Shortcuts")
+    let r = crate::theme::window(ctx, "Keyboard Shortcuts")
         .open(&mut open)
         .collapsible(false)
         .resizable(true)

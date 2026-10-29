@@ -1155,7 +1155,7 @@ pub fn history_window(app: &mut StudioApp, ctx: &egui::Context) {
     let mut open = true;
     let mut pick = None;
     let mut rows = Vec::new();
-    let r = egui::Window::new("Undo History")
+    let r = crate::theme::window(ctx, "Undo History")
         .open(&mut open)
         .collapsible(false)
         .resizable(true)

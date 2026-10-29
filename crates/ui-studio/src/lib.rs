@@ -1306,3 +1306,6 @@ mod width_history_tests;
 
 #[cfg(test)]
 mod about_splash_tests;
+
+#[cfg(test)]
+mod window_title_tests;

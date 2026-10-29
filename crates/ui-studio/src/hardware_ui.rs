@@ -138,7 +138,7 @@ pub(crate) fn picker(app: &mut StudioApp, ctx: &egui::Context) {
         let mut pick: Option<Pair> = None;
         layout.open = true;
         layout.track = Some(tid.0);
-        egui::Window::new("Hardware Insert").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+        crate::theme::window(ctx, "Hardware Insert").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
             ui.set_width(300.0);
             ui.label(egui::RichText::new("Send the signal out one path and take it back on another.").color(TOKENS.text_dim).size(11.5));
             ui.add_space(SPACE);

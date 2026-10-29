@@ -198,7 +198,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     if cycle != 0 {
         section = section.cycled(cycle);
     }
-    let r = egui::Window::new("Audio Devices")
+    let r = crate::theme::window(ctx, "Audio Devices")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)

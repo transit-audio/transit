@@ -168,7 +168,7 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             rows: Vec::new(),
         };
         let mut open = true;
-        let shown = egui::Window::new(title)
+        let shown = crate::theme::window(ctx, title)
             .id(egui::Id::new(("builtin_editor", ins.uid.get())))
             .open(&mut open)
             .default_width(if crate::panel::layout(&ins.plugin).is_some() { 0.0 } else { 360.0 })

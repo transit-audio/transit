@@ -240,6 +240,37 @@ fn spacing(st: &mut egui::Style) {
     sp.menu_margin = egui::Margin::same(SPACE as i8);
     sp.window_margin = egui::Margin::same(SPACE as i8);
     sp.indent = 2.0 * SPACE;
+    // egui sizes a window's title bar, and the close button inside it, from `TextStyle::Heading`.
+    // transit draws no other heading, so Heading is the window-title size too (#206).
+    let title = egui::FontId::proportional(WINDOW_TITLE_SIZE);
+    st.text_styles.insert(window_title_style(), title.clone());
+    st.text_styles.insert(egui::TextStyle::Heading, title);
+}
+
+/// Window title text: Body (13) plus one point, so a title reads as a label of the window and
+/// not as a heading, at 1.0 and at 1.5 scale (the bar scales with the text and the margins).
+pub const WINDOW_TITLE_SIZE: f32 = 14.0;
+/// Vertical margin of a window's title bar (the content margin stays [`SPACE`]).
+pub const WINDOW_TITLE_PAD_Y: i8 = 2;
+
+/// The text style of window titles (registered by [`apply`]).
+pub fn window_title_style() -> egui::TextStyle {
+    egui::TextStyle::Name("window-title".into())
+}
+
+/// Every internal window in ui-studio starts here (a source-scan test forbids the plain
+/// `egui::Window` constructor elsewhere): its title is in the window-title text style and its
+/// title bar has a tight vertical margin; the content keeps the theme's window margin (#206).
+pub fn window<'a>(ctx: &egui::Context, title: impl Into<String>) -> egui::Window<'a> {
+    let style = ctx.global_style();
+    let side = style.spacing.window_margin.left;
+    let title_frame =
+        egui::Frame::window(&style).inner_margin(egui::Margin { left: side, right: side, top: WINDOW_TITLE_PAD_Y, bottom: WINDOW_TITLE_PAD_Y });
+    // A context the theme was never applied to (a fresh one in a test) has no such style.
+    let text = egui::RichText::new(title);
+    let text =
+        if style.text_styles.contains_key(&window_title_style()) { text.text_style(window_title_style()) } else { text.size(WINDOW_TITLE_SIZE) };
+    egui::Window::new(text).title_frame(title_frame)
 }
 
 /// Install both themes' visuals and follow `appearance` (System: the OS setting, through egui's
