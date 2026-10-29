@@ -10,8 +10,10 @@
 //! 1. `begin_block(g)`; a strip whose worker has finished comes home with its keys; each home
 //!    strip's deferred MIDI is delivered, as on the plain pool path.
 //! 2. The driver starts every strip whose key sources are ready (at first, the strips with none):
-//!    the callback fills its keys in the plan's bank from the sources' finished buffers (the
-//!    early-key delay included, `KeyBank::fill`), sends it into its cell, lends it the keys, stamps
+//!    the callback copies its keys into the plan's bank from the sources' finished buffers
+//!    (`KeyBank::fill_deferred`: the early-key delay is left pending and runs when the strip
+//!    renders, `KeyBank::apply_pending`, so a strip taken back unrendered leaves its key lines
+//!    untouched), sends it into its cell, lends it the keys, stamps
 //!    its job with the graph generation and its task identity, and publishes it; a strip that
 //!    reads the live input or the hardware renders on the callback instead, after the wake.
 //! 3. Each strip the sweep resolves with a result comes home at once; its result is used only
