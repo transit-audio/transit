@@ -38,6 +38,8 @@ pub fn run(
         open_asio_driver: None,
         strips: Vec::new(),
         last_status: None,
+        plugin_host: vec!["No plug-in host runs in report mode.".into()],
+        deferred_services: 0,
         log_lines: log_dir.as_ref().map(|d| diagnostics::tail_log(&d.join(diagnostics::LOG_FILE), diagnostics::LOG_LINES)).unwrap_or_default(),
         log_dir,
     };
