@@ -14,17 +14,6 @@ fn folder(name: &str) -> PathBuf {
     dir
 }
 
-/// Autosaves are written in the background.
-fn eventually(done: impl Fn() -> bool) -> bool {
-    for _ in 0..300 {
-        if done() {
-            return true;
-        }
-        std::thread::sleep(std::time::Duration::from_millis(10));
-    }
-    done()
-}
-
 fn autosaved(root: &Path) -> String {
     let folders = std::fs::read_dir(root).into_iter().flatten().flatten();
     folders.map(|d| std::fs::read_to_string(d.path().join("session.transit")).unwrap_or_default()).collect()
@@ -58,7 +47,9 @@ fn an_exit_without_quit_offers_unsaved_changes_at_the_next_launch() {
     assert!(leftovers(&root).is_empty());
     assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
     next.run("session.save", json!({})).unwrap();
-    assert!(eventually(|| std::fs::read_dir(&root).unwrap().count() == 0));
+    // The save closed the folder on the writer thread; `flush` returns once that job is done.
+    next.autosaver.as_ref().expect("the recovered session has an autosaver").flush().unwrap();
+    assert_eq!(std::fs::read_dir(&root).unwrap().count(), 0);
     let _ = std::fs::remove_dir_all(&dir);
 }
 
@@ -70,7 +61,10 @@ fn every_change_is_autosaved_within_a_second() {
     for name in ["Vocal", "Bass"] {
         app.run("track.new", json!({"name": name})).unwrap();
         app.autosave_changes();
-        assert!(eventually(|| autosaved(&root).contains(name)), "{name}");
+        // `flush` returns when the writer thread has written what was handed over: it waits on the
+        // thread's own completion signal, not on the clock (E62).
+        app.autosaver.as_ref().expect("a change hands a write to the autosaver").flush().unwrap();
+        assert!(autosaved(&root).contains(name), "{name}");
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
