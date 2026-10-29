@@ -56,6 +56,10 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 | `crates/rt` (unsafe) | `cargo xtask rt-targets`, the platform legs of `.github/workflows/rt.yml`, a refutation review quoting every `unsafe` block | See `../knowledge/unsafe.md`. |
 | UI | `crates/ui-studio/src/*_tests.rs`, the shortcut and icon guards | See `../knowledge/ui.md`. |
 
+## Scheduling-condition equivalence (#210)
+
+`crates/mix/tests/sched_equivalence.rs` proves that the render workers' task graph changes nothing but which blocks a strip misses: for every keyed topology, the continuity session and a graph change under a held task, a seeded stall schedule is replayed through deterministic seams (no clock decides who misses, E49), the missed blocks are exactly the counted skips, the output equals a serial render with those blocks muted on every sample, and each strip's state fingerprint (plug-in state, key and delay lines, MIDI) matches at every block boundary. It runs 32 seeds per case by default (`TRANSIT_SCHED_SEEDS=<n>` raises it locally); a failure prints the case, the seed and a minimal schedule found by shrinking. Reproduce one with `TRANSIT_SCHED_SEED=<seed> cargo test -p transit-mix --test sched_equivalence -- --nocapture`; land the minimal schedule as a named `#[test]` that calls `regression(&topology, workers, &Schedule::new(&[...]))` with the printed literal (see `regression_a_chain_held_at_each_link`), named after what it found, in the same change as the fix.
+
 ## Rules
 
 - A gate that is not run is not a gate. If one cannot run on your machine, say so in the pull request.
