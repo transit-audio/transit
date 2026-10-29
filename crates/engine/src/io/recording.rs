@@ -309,19 +309,27 @@ mod record_tests {
         }
     }
 
-    fn oversize_header_only(dir: &TempDir, name: &str) -> PathBuf {
+    /// Holds the faked file length; clears it on drop, even when the test panics.
+    struct FakeLenGuard;
+    impl Drop for FakeLenGuard {
+        fn drop(&mut self) {
+            FAKE_LEN.with(|l| l.set(None));
+        }
+    }
+
+    fn oversize_header_only(dir: &TempDir, name: &str) -> (PathBuf, FakeLenGuard) {
         let frames = transit_audio_io::MAX_DECODE_SAMPLES + 1_000;
         let path = dir.0.join(name);
         std::fs::create_dir_all(&dir.0).unwrap();
         std::fs::write(&path, transit_audio_io::wav_float_header(1, 48_000, frames).unwrap()).unwrap();
         FAKE_LEN.with(|l| l.set(Some(std::fs::metadata(&path).unwrap().len() + frames * 4)));
-        path
+        (path, FakeLenGuard)
     }
 
     #[test]
     fn a_refused_take_survives_undo_and_redo_issue_192() {
         let dir = TempDir(std::env::temp_dir().join(format!("refused-undo-{}", std::process::id())));
-        let path = oversize_header_only(&dir, "Long_01.wav");
+        let (path, _fake_len) = oversize_header_only(&dir, "Long_01.wav");
         let mut e = Engine::default();
         let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
         e.execute("mix.volume", &json!({"tracks": [t.0], "db": -6.0})).unwrap();
@@ -335,7 +343,6 @@ mod record_tests {
         assert_eq!(e.session().unplaced_takes, listed, "undo of an earlier edit keeps the reference");
         assert!(e.redo());
         assert_eq!(e.session().unplaced_takes, listed, "redo keeps it");
-        FAKE_LEN.with(|l| l.set(None));
     }
 
     #[test]

@@ -487,9 +487,8 @@ impl Engine {
         }
     }
 
-    /// Undo and Redo never change record-arm or input-monitor, which are runtime state, nor the list of
-    /// unplaced takes: tracks keep
-    /// what they have now, whatever the restored snapshot held.
+    /// Undo and Redo never change record-arm or input-monitor, which are runtime state, nor the list
+    /// of unplaced takes: tracks keep what they have now, whatever the restored snapshot held.
     fn keep_runtime_state(&mut self, from: &Session) {
         // Takes the session could not place are facts about files on disk, not edits (#192).
         if self.doc.unplaced_takes != from.unplaced_takes {
