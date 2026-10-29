@@ -1274,6 +1274,8 @@ fn service_plugin_requests() -> bool {
 }
 
 #[cfg(test)]
+mod arrange_copy_tests;
+#[cfg(test)]
 mod arrange_edit_tests;
 #[cfg(test)]
 mod arrange_loop_tests;

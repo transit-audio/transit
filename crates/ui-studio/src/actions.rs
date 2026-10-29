@@ -182,6 +182,17 @@ impl StudioApp {
         self.run("edit.move_clips", p)
     }
 
+    /// Ctrl- or Alt-drag of a selection: copies of `clips`, all `by` samples later (time only), in
+    /// one undo step named Copy, selected afterwards. The originals stay.
+    pub fn copy_clips(&mut self, clips: &[ClipId], by: Samples) -> Result<Value, String> {
+        let ids: Vec<u64> = clips.iter().map(|c| c.0).collect();
+        let r = self.run("edit.copy_clips", json!({"clips": ids, "by": by}));
+        if let Err(why) = &r {
+            self.status.clone_from(why);
+        }
+        r
+    }
+
     /// Alt-drag: a copy of `clip` lands at `at` on `to_track`; the original stays and the copy is
     /// selected. Built from Copy and Paste (one undo step: Copy has none); the clipboard is
     /// restored afterwards so the gesture doesn't replace what the user copied.

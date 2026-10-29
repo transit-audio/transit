@@ -4,6 +4,7 @@
 //! cursor. Every edit goes through engine commands (see `actions`).
 
 mod clips;
+mod copy_drag;
 mod tracks;
 pub(crate) use clips::*;
 pub(crate) use tracks::*;
@@ -949,12 +950,11 @@ fn commit_drag(
                 }
                 return;
             }
+            let set = copy_drag::drag_set(app, clip);
             if copy {
-                let _ = app.copy_clip_to(clip, a, dest);
+                copy_drag::copy(app, &set, a, by, dest);
                 return;
             }
-            let sel: Vec<ClipId> = app.selected_clips().into_iter().map(|(_, c, _)| c).collect();
-            let set = if sel.contains(&clip) && sel.len() > 1 { sel } else { vec![clip] };
             // Several clips move in time only; one clip may change track.
             let to = (set.len() == 1 && dest != from).then_some(dest);
             let _ = app.move_clips(&set, by, to);
