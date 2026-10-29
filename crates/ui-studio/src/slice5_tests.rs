@@ -987,7 +987,11 @@ fn an_upstream_missed_strip_names_its_origin() {
     let at = |label: &str| rows.iter().position(|r| r.starts_with(label)).unwrap_or_else(|| panic!("{label} missing: {rows:?}"));
     assert_eq!(rows[at("Strip skips, upstream missed")], "Strip skips, upstream missed: 2");
     assert_eq!(at("Strip skips, upstream missed"), at("Strip overruns, unstarted") + 1, "beside the overruns by cause");
-    assert_eq!(rows[at("Strip overruns, top")], "Strip overruns, top: Kick 2, Bass: Compressor 0", "ranked by own overruns");
+    assert_eq!(
+        rows[at("Strip overruns, top")],
+        "Strip overruns, top: Kick 2, Bass: Compressor upstream missed 2",
+        "ranked by own overruns; a skip-only strip says so"
+    );
     assert_eq!(rows[at("Strip Kick:")], "Strip Kick: overruns busy 0, late 2, unstarted 0; inline 0; cost 0 \u{b5}s, worst 0 \u{b5}s");
     assert_eq!(
         rows[at("Strip Bass: Compressor:")],

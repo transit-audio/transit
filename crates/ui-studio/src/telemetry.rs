@@ -257,7 +257,15 @@ pub fn strip_fault_rows(f: &transit_mix::StripFaults) -> Vec<String> {
 /// latency, one row per bucket. Strips are named as the phase marker names them.
 pub fn strip_figure_rows(f: &transit_mix::StripFaults, strips: &[StripName]) -> Vec<String> {
     let listed: Vec<&transit_mix::StripFigure> = f.top_strips.iter().flatten().collect();
-    let top: Vec<String> = listed.iter().take(3).map(|s| format!("{} {}", strip_text(s.track, strips), s.overruns())).collect();
+    // A strip listed only for its upstream misses (#174) says so instead of a count of 0.
+    let top: Vec<String> = listed
+        .iter()
+        .take(3)
+        .map(|s| match (s.overruns(), s.upstream_missed) {
+            (0, n) if n > 0 => format!("{} upstream missed {n}", strip_text(s.track, strips)),
+            (own, _) => format!("{} {own}", strip_text(s.track, strips)),
+        })
+        .collect();
     let mut rows = vec![format!("Strip overruns, top: {}", if top.is_empty() { "none".to_owned() } else { top.join(", ") })];
     rows.extend(listed.iter().map(|s| {
         let mut row = format!(
