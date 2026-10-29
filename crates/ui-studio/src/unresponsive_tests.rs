@@ -179,15 +179,18 @@ fn the_hover_text_names_the_cause_and_what_to_do() {
         given_up,
         hosted: 2,
     };
-    let host = tip(Hang::HostThread, "Amp", &[call(false)]);
+    let host = tip(Hang::HostThread, "Guitar Rig 7", &[call(false)]);
     assert!(
-        host.starts_with("Amp is unresponsive: its plug-in host thread has not returned from a window message in Guitar Rig 7 for 130 s"),
+        host.starts_with("Guitar Rig 7 is unresponsive: its plug-in host thread has not returned from a window message in Guitar Rig 7 for 130 s"),
         "{host}"
     );
     assert!(host.contains("Audio keeps playing") && host.contains("Later or Give up"), "{host}");
-    let gave = tip(Hang::HostThread, "Amp", &[call(true)]);
+    let gave = tip(Hang::HostThread, "Guitar Rig 7", &[call(true)]);
     assert!(gave.contains("you gave up") && !gave.contains("Later"), "after Give up the window is gone: {gave}");
-    assert_eq!(gave, tip(Hang::HostThread, "Amp", &[]), "a parked thread reads the same");
+    // Another plug-in's stuck call, or none: no call and no choice is named.
+    for other in [tip(Hang::HostThread, "Amp", &[call(false)]), tip(Hang::HostThread, "Amp", &[call(true)]), tip(Hang::HostThread, "Amp", &[])] {
+        assert_eq!(other, "Amp is unresponsive on its host thread.");
+    }
     let worker = tip(Hang::Worker, "Amp", &[]);
     assert!(worker.contains("inside a plug-in on this track") && worker.contains("silent") && worker.contains("Reconnect"), "{worker}");
     assert!(!worker.contains("is unresponsive: a render worker is stuck inside the plug-in"), "no single plug-in is accused: {worker}");
@@ -208,8 +211,9 @@ fn a_stuck_host_thread_marks_its_loaded_plug_in_and_clears_when_it_returns() {
         let _ = gate.recv();
     });
     assert!(t.frames_until(Duration::from_secs(5), |t| t.marked(track) == [true; 3]), "marked once the call is past its budget");
-    let tip = t.app.hang_tip(Hang::HostThread, "Amp");
-    assert!(tip.contains("Guitar Rig 7") && tip.contains("Later or Give up"), "the live call is named: {tip}");
+    let tip = t.app.hang_tip(Hang::HostThread, "Guitar Rig 7");
+    assert!(tip.contains("in Guitar Rig 7 for") && tip.contains("Later or Give up"), "the live call is named: {tip}");
+    assert_eq!(t.app.hang_tip(Hang::HostThread, "Amp"), "Amp is unresponsive on its host thread.", "another plug-in's call is not named");
     t.release.take();
     assert!(t.frames_until(Duration::from_secs(5), |t| t.marked(track) == [false; 3]), "cleared once the call returns");
 }

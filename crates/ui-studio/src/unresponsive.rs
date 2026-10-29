@@ -19,22 +19,26 @@ pub enum Hang {
 }
 
 /// What the marker explains, for the plug-in `name`. `calls` are the host's stuck calls
-/// (`Player::plugin_host_stuck`): a live one is named with how long it has been stuck; none live
-/// means the thread was given up on and its call has since returned, or never will.
+/// (`Player::plugin_host_stuck`); the one whose plug-in is `name` is named with how long it has
+/// been stuck, or, once given up on, said to be given up. No such call: no call and no choice are
+/// named (the thread's call has returned, or another thread's call is not this plug-in's).
 pub(crate) fn tip(hang: Hang, name: &str, calls: &[StuckCall]) -> String {
     match hang {
-        Hang::HostThread => match calls.iter().find(|s| !s.given_up) {
-            Some(s) => format!(
+        Hang::HostThread => match calls.iter().find(|s| &*s.plugin == name) {
+            Some(s) if !s.given_up => format!(
                 "{name} is {}: its plug-in host thread has not returned from {} in {} for {} s. Audio keeps playing, and saving keeps the state this plug-in had when it was last read. Choose Later or Give up in the message window, or save and restart transit if it does not recover.",
                 UNRESPONSIVE.to_lowercase(),
                 s.call,
                 s.plugin,
                 s.stuck_for.as_secs()
             ),
-            None => format!(
+            Some(_) => format!(
                 "{name} is {}: you gave up on its plug-in host thread, so it stays quarantined until transit restarts. Audio keeps playing, and saving keeps the state this plug-in had when it was last read. Save and restart transit to use it again.",
                 UNRESPONSIVE.to_lowercase()
             ),
+            // No stuck record carries this plug-in's name (another thread's call, or a parked thread):
+            // no call and no choice is named.
+            None => format!("{name} is {} on its host thread.", UNRESPONSIVE.to_lowercase()),
         },
         Hang::Worker => format!(
             "A render worker is stuck inside a plug-in on this track ({name} may be the one), so the track is silent. Close the audio device or choose Reconnect to retire the worker."
