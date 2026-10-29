@@ -1,0 +1,3301 @@
+{
+  "format_version": 1,
+  "name": "v0.4.0-demo",
+  "sample_rate": 48000,
+  "bit_depth": "Int24",
+  "frame_rate": "Fps30",
+  "timecode_start": 0,
+  "tempo": {
+    "tempos": [
+      {
+        "tick": 0,
+        "bpm": 104.0
+      }
+    ],
+    "meters": [
+      {
+        "tick": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "key_signatures": [],
+  "tracks": [
+    {
+      "id": 3,
+      "name": "Kick",
+      "kind": "Audio",
+      "format": "Mono",
+      "color": [
+        222,
+        104,
+        72
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Kick",
+          "clips": [
+            {
+              "id": 4,
+              "name": "Kick",
+              "start": 443077,
+              "length": 886154,
+              "content": {
+                "Audio": {
+                  "source": 2,
+                  "offset": 443077
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            },
+            {
+              "id": 18,
+              "name": "Kick",
+              "start": 1329231,
+              "length": 886154,
+              "content": {
+                "Audio": {
+                  "source": 2,
+                  "offset": 1329231
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            },
+            {
+              "id": 20,
+              "name": "Kick",
+              "start": 2215385,
+              "length": 467047,
+              "content": {
+                "Audio": {
+                  "source": 2,
+                  "offset": 2215385
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 24000,
+                "shape": "SCurve",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -3.0,
+        "pan": [
+          0.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": "Main",
+        "inserts": [
+          {
+            "plugin": "eq_7band",
+            "params": {
+              "high_mid_freq": 4000.0,
+              "high_mid_gain": 0.0,
+              "high_mid_q": 1.0,
+              "high_shelf_freq": 8000.0,
+              "high_shelf_gain": 0.0,
+              "high_shelf_q": 0.707,
+              "hpf_freq": 80.0,
+              "hpf_on": 0.0,
+              "hpf_slope": 1.0,
+              "input_gain": 0.0,
+              "low_mid_freq": 250.0,
+              "low_mid_gain": 0.0,
+              "low_mid_q": 1.0,
+              "low_shelf_freq": 100.0,
+              "low_shelf_gain": 0.0,
+              "low_shelf_q": 0.707,
+              "lpf_freq": 18000.0,
+              "lpf_on": 0.0,
+              "lpf_slope": 1.0,
+              "mid_freq": 1000.0,
+              "mid_gain": 0.0,
+              "mid_q": 1.0,
+              "output_gain": 0.0
+            },
+            "bypass": false,
+            "active": true,
+            "preset": "<factory default>"
+          },
+          {
+            "plugin": "compressor",
+            "params": {
+              "attack": 10.0,
+              "knee": 6.0,
+              "limiter": 0.0,
+              "lookahead": 0.0,
+              "makeup": 0.0,
+              "mix": 100.0,
+              "ratio": 4.0,
+              "release": 100.0,
+              "sc_hpf_freq": 100.0,
+              "sc_hpf_on": 0.0,
+              "threshold": -20.0
+            },
+            "bypass": false,
+            "active": true,
+            "preset": "<factory default>"
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "waveform",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 6,
+      "name": "Snare",
+      "kind": "Audio",
+      "format": "Mono",
+      "color": [
+        230,
+        152,
+        62
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Snare",
+          "clips": [
+            {
+              "id": 7,
+              "name": "Snare",
+              "start": 443077,
+              "length": 886154,
+              "content": {
+                "Audio": {
+                  "source": 5,
+                  "offset": 443077
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            },
+            {
+              "id": 17,
+              "name": "Snare",
+              "start": 1329231,
+              "length": 886154,
+              "content": {
+                "Audio": {
+                  "source": 5,
+                  "offset": 1329231
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            },
+            {
+              "id": 19,
+              "name": "Snare",
+              "start": 2215385,
+              "length": 467047,
+              "content": {
+                "Audio": {
+                  "source": 5,
+                  "offset": 2215385
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 24000,
+                "shape": "SCurve",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -4.0,
+        "pan": [
+          0.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": "Main",
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          {
+            "target": {
+              "Bus": 1
+            },
+            "level_db": -10.0,
+            "pan": 0.0,
+            "mute": false,
+            "pre_fader": false,
+            "follow_main_pan": true,
+            "surround": null
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "waveform",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 9,
+      "name": "Hats",
+      "kind": "Audio",
+      "format": "Mono",
+      "color": [
+        222,
+        196,
+        72
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Hats",
+          "clips": [
+            {
+              "id": 10,
+              "name": "Hats",
+              "start": 0,
+              "length": 2682432,
+              "content": {
+                "Audio": {
+                  "source": 8,
+                  "offset": 0
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 24000,
+                "shape": "SCurve",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -10.0,
+        "pan": [
+          0.35
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": "Main",
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "waveform",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 12,
+      "name": "Bass",
+      "kind": "Audio",
+      "format": "Mono",
+      "color": [
+        150,
+        98,
+        206
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Bass",
+          "clips": [
+            {
+              "id": 13,
+              "name": "Bass",
+              "start": 443077,
+              "length": 443077,
+              "content": {
+                "Audio": {
+                  "source": 11,
+                  "offset": 443077
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            },
+            {
+              "id": 21,
+              "name": "Bass",
+              "start": 886154,
+              "length": 886154,
+              "content": {
+                "Audio": {
+                  "source": 11,
+                  "offset": 886154
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            },
+            {
+              "id": 22,
+              "name": "Bass",
+              "start": 1772308,
+              "length": 910124,
+              "content": {
+                "Audio": {
+                  "source": 11,
+                  "offset": 1772308
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 24000,
+                "shape": "SCurve",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -5.0,
+        "pan": [
+          0.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": "Main",
+        "inserts": [
+          {
+            "plugin": "compressor",
+            "params": {
+              "attack": 10.0,
+              "knee": 6.0,
+              "limiter": 0.0,
+              "lookahead": 0.0,
+              "makeup": 0.0,
+              "mix": 100.0,
+              "ratio": 4.0,
+              "release": 100.0,
+              "sc_hpf_freq": 100.0,
+              "sc_hpf_on": 0.0,
+              "threshold": -20.0
+            },
+            "bypass": false,
+            "active": true,
+            "preset": "<factory default>"
+          },
+          {
+            "plugin": "saturator",
+            "params": {
+              "bias": 0.0,
+              "drive": 6.0,
+              "mix": 100.0,
+              "output": 0.0,
+              "tone": 20000.0
+            },
+            "bypass": false,
+            "active": true,
+            "preset": "<factory default>"
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "waveform",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 15,
+      "name": "Pad",
+      "kind": "Audio",
+      "format": "Stereo",
+      "color": [
+        94,
+        170,
+        214
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Pad",
+          "clips": [
+            {
+              "id": 16,
+              "name": "Pad",
+              "start": 0,
+              "length": 2682432,
+              "content": {
+                "Audio": {
+                  "source": 14,
+                  "offset": 0
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 24000,
+                "shape": "SCurve",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -8.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": "Main",
+        "inserts": [
+          {
+            "plugin": "chorus",
+            "params": {
+              "delay": 12.0,
+              "depth": 50.0,
+              "feedback": 0.0,
+              "mix": 50.0,
+              "rate": 0.8,
+              "spread": 100.0
+            },
+            "bypass": false,
+            "active": true,
+            "preset": "<factory default>"
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          {
+            "target": {
+              "Bus": 1
+            },
+            "level_db": -8.0,
+            "pan": 0.0,
+            "mute": false,
+            "pre_fader": false,
+            "follow_main_pan": true,
+            "surround": null
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [
+        {
+          "param": "Volume",
+          "points": [
+            {
+              "at": 0,
+              "value": -30.0
+            },
+            {
+              "at": 443072,
+              "value": -8.0
+            },
+            {
+              "at": 2215360,
+              "value": -8.0
+            },
+            {
+              "at": 2658432,
+              "value": -24.0
+            }
+          ],
+          "enabled": true
+        }
+      ],
+      "view": "waveform",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 23,
+      "name": "Keys",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        80,
+        190,
+        168
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Keys",
+          "clips": [
+            {
+              "id": 25,
+              "name": "Keys",
+              "start": 443077,
+              "length": 2215385,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 1440,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 1440,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 1440,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 2880,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 2880,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 2880,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 3840,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 3840,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 3840,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 5280,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 5280,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 5280,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 6720,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 6720,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 6720,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 7680,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 7680,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 7680,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 9120,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 9120,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 9120,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 10560,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 10560,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 10560,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 11520,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 11520,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 11520,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 12960,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 12960,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 12960,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 14400,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 14400,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 14400,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 15360,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 15360,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 15360,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 16800,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 16800,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 16800,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 18240,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 18240,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 18240,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 19200,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 19200,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 19200,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 20640,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 20640,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 20640,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 22080,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 22080,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 22080,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 23040,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 23040,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 23040,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 24480,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 24480,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 24480,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 25920,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 25920,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 25920,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 26880,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 26880,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 26880,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 28320,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 28320,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 28320,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 29760,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 29760,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 29760,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 30720,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 30720,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 30720,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 32160,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 32160,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 32160,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 33600,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 33600,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 33600,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 34560,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 34560,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 34560,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 36000,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 36000,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 36000,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 37440,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 37440,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 37440,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 38400,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 38400,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 38400,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 39840,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 39840,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 39840,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 41280,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 41280,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 41280,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 42240,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 42240,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 42240,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 43680,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 43680,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 43680,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 45120,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 45120,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 45120,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 46080,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 46080,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 46080,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 47520,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 47520,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 47520,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 48960,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 48960,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 48960,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 49920,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 49920,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 49920,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 51360,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 51360,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 51360,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 52800,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 52800,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 52800,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 53760,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 53760,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 53760,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 55200,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 55200,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 55200,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 56640,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 56640,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 56640,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 57600,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 57600,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 57600,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 59040,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 59040,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 59040,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 60480,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 60480,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 60480,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 61440,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 61440,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 61440,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 62880,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 62880,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 62880,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 64320,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 64320,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 69,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 64320,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 65280,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 65280,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 65280,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 66720,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 66720,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 66720,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 68160,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 68160,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 65,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 68160,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 69120,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 69120,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 69120,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 70560,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 70560,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 70560,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 52,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 72000,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 55,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 72000,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 72000,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 72960,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 72960,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 72960,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 74400,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 74400,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 74400,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 59,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 75840,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 75840,
+                        "length": 920
+                      },
+                      {
+                        "pitch": 67,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 75840,
+                        "length": 920
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -9.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": "Main",
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          {
+            "target": {
+              "Bus": 1
+            },
+            "level_db": -12.0,
+            "pan": 0.0,
+            "mute": false,
+            "pre_fader": false,
+            "follow_main_pan": true,
+            "surround": null
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "subtractive_synth",
+        "params": {
+          "amp_attack": 5.0,
+          "amp_decay": 200.0,
+          "amp_release": 300.0,
+          "amp_sustain": 70.0,
+          "cutoff": 2000.0,
+          "filter_attack": 5.0,
+          "filter_decay": 300.0,
+          "filter_env_amount": 30.0,
+          "filter_release": 300.0,
+          "filter_sustain": 30.0,
+          "glide": 0.0,
+          "level": -6.0,
+          "osc1_wave": 0.0,
+          "osc2_detune": 7.0,
+          "osc2_semitones": 0.0,
+          "osc2_wave": 0.0,
+          "osc_mix": 50.0,
+          "resonance": 20.0,
+          "velocity": 70.0
+        },
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 24,
+      "name": "Lead",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        196,
+        86,
+        168
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Lead",
+          "clips": [
+            {
+              "id": 26,
+              "name": "Lead",
+              "start": 1329231,
+              "length": 886154,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 76,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 1410
+                      },
+                      {
+                        "pitch": 74,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 1440,
+                        "length": 450
+                      },
+                      {
+                        "pitch": 72,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 1920,
+                        "length": 930
+                      },
+                      {
+                        "pitch": 74,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 2880,
+                        "length": 930
+                      },
+                      {
+                        "pitch": 76,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 3840,
+                        "length": 1890
+                      },
+                      {
+                        "pitch": 79,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 5760,
+                        "length": 930
+                      },
+                      {
+                        "pitch": 77,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 6720,
+                        "length": 930
+                      },
+                      {
+                        "pitch": 76,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 7680,
+                        "length": 2850
+                      },
+                      {
+                        "pitch": 72,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 10560,
+                        "length": 930
+                      },
+                      {
+                        "pitch": 74,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 11520,
+                        "length": 3810
+                      },
+                      {
+                        "pitch": 76,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 15360,
+                        "length": 1410
+                      },
+                      {
+                        "pitch": 74,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 16800,
+                        "length": 450
+                      },
+                      {
+                        "pitch": 72,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 17280,
+                        "length": 930
+                      },
+                      {
+                        "pitch": 74,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 18240,
+                        "length": 930
+                      },
+                      {
+                        "pitch": 76,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 19200,
+                        "length": 1890
+                      },
+                      {
+                        "pitch": 79,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 21120,
+                        "length": 930
+                      },
+                      {
+                        "pitch": 77,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 22080,
+                        "length": 930
+                      },
+                      {
+                        "pitch": 76,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 23040,
+                        "length": 2850
+                      },
+                      {
+                        "pitch": 72,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 25920,
+                        "length": 930
+                      },
+                      {
+                        "pitch": 74,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 26880,
+                        "length": 3810
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -12.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": "Main",
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          {
+            "target": {
+              "Bus": 1
+            },
+            "level_db": -6.0,
+            "pan": 0.0,
+            "mute": false,
+            "pre_fader": false,
+            "follow_main_pan": true,
+            "surround": null
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "subtractive_synth",
+        "params": {
+          "amp_attack": 5.0,
+          "amp_decay": 200.0,
+          "amp_release": 300.0,
+          "amp_sustain": 70.0,
+          "cutoff": 2000.0,
+          "filter_attack": 5.0,
+          "filter_decay": 300.0,
+          "filter_env_amount": 30.0,
+          "filter_release": 300.0,
+          "filter_sustain": 30.0,
+          "glide": 0.0,
+          "level": -6.0,
+          "osc1_wave": 0.0,
+          "osc2_detune": 7.0,
+          "osc2_semitones": 0.0,
+          "osc2_wave": 0.0,
+          "osc_mix": 50.0,
+          "resonance": 20.0,
+          "velocity": 70.0
+        },
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 27,
+      "name": "Verb",
+      "kind": "Aux",
+      "format": "Stereo",
+      "color": [
+        130,
+        150,
+        170
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Verb",
+          "clips": []
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -4.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": {
+          "Bus": 1
+        },
+        "output": "Main",
+        "inserts": [
+          {
+            "plugin": "plate_reverb",
+            "params": {
+              "damping": 10000.0,
+              "decay": 2.5,
+              "diffusion": 85.0,
+              "low_cut": 20.0,
+              "mix": 30.0,
+              "pre_delay": 20.0,
+              "size": 50.0,
+              "width": 100.0
+            },
+            "bypass": false,
+            "active": true,
+            "preset": "<factory default>"
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "volume",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 28,
+      "name": "Master 1",
+      "kind": "Master",
+      "format": "Stereo",
+      "color": [
+        140,
+        140,
+        140
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Master 1",
+          "clips": []
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": 0.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "Main",
+        "output": "Main",
+        "inserts": [
+          {
+            "plugin": "maximizer",
+            "params": {
+              "ceiling": -0.3,
+              "release": 50.0,
+              "threshold": 0.0
+            },
+            "bypass": false,
+            "active": true,
+            "preset": "<factory default>"
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "volume",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    }
+  ],
+  "sources": [
+    {
+      "id": 2,
+      "name": "Kick",
+      "path": "Audio Files/Kick.wav",
+      "channels": 1,
+      "frames": 2754432,
+      "sample_rate": 48000,
+      "format": "Wav",
+      "time_reference": 0,
+      "unsaved": false
+    },
+    {
+      "id": 5,
+      "name": "Snare",
+      "path": "Audio Files/Snare.wav",
+      "channels": 1,
+      "frames": 2754432,
+      "sample_rate": 48000,
+      "format": "Wav",
+      "time_reference": 0,
+      "unsaved": false
+    },
+    {
+      "id": 8,
+      "name": "Hats",
+      "path": "Audio Files/Hats.wav",
+      "channels": 1,
+      "frames": 2754432,
+      "sample_rate": 48000,
+      "format": "Wav",
+      "time_reference": 0,
+      "unsaved": false
+    },
+    {
+      "id": 11,
+      "name": "Bass",
+      "path": "Audio Files/Bass.wav",
+      "channels": 1,
+      "frames": 2754432,
+      "sample_rate": 48000,
+      "format": "Wav",
+      "time_reference": 0,
+      "unsaved": false
+    },
+    {
+      "id": 14,
+      "name": "Pad",
+      "path": "Audio Files/Pad.wav",
+      "channels": 2,
+      "frames": 2754432,
+      "sample_rate": 48000,
+      "format": "Wav",
+      "time_reference": 0,
+      "unsaved": false
+    }
+  ],
+  "busses": [
+    {
+      "id": 1,
+      "name": "Verb",
+      "format": "Stereo"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "Out 1-2",
+      "first_channel": 0,
+      "format": "Stereo"
+    }
+  ],
+  "markers": [
+    {
+      "id": 29,
+      "number": 1,
+      "name": "Intro",
+      "kind": "Marker",
+      "start": 0,
+      "end": 0,
+      "comments": "",
+      "color": null,
+      "ruler": 1,
+      "track": null
+    },
+    {
+      "id": 30,
+      "number": 2,
+      "name": "Verse",
+      "kind": "Marker",
+      "start": 443077,
+      "end": 443077,
+      "comments": "",
+      "color": null,
+      "ruler": 1,
+      "track": null
+    },
+    {
+      "id": 31,
+      "number": 3,
+      "name": "Chorus",
+      "kind": "Marker",
+      "start": 1329231,
+      "end": 1329231,
+      "comments": "",
+      "color": null,
+      "ruler": 1,
+      "track": null
+    },
+    {
+      "id": 32,
+      "number": 4,
+      "name": "Outro",
+      "kind": "Marker",
+      "start": 2215385,
+      "end": 2215385,
+      "comments": "",
+      "color": null,
+      "ruler": 1,
+      "track": null
+    }
+  ],
+  "groups": [],
+  "edit": {
+    "tool": "Smart",
+    "edit_mode": "Slip",
+    "selection": {
+      "start": 443072,
+      "end": 443072
+    },
+    "selected_tracks": [
+      3
+    ],
+    "selected_clips": [],
+    "selected_sources": [],
+    "playhead": 0,
+    "grid": {
+      "Note": {
+        "value": "Sixteenth",
+        "dotted": false,
+        "triplet": false
+      }
+    },
+    "nudge": {
+      "Seconds": 1.0
+    },
+    "grid_lines": true,
+    "main_counter": "BarsBeats",
+    "sub_counter": "Samples",
+    "zoom": {
+      "samples_per_px": 1967.4514285714286,
+      "scroll": 0,
+      "waveform_zoom": 1.0,
+      "presets": [
+        64.0,
+        256.0,
+        1024.0,
+        4096.0,
+        16384.0
+      ]
+    },
+    "zoom_toggle": null,
+    "rulers": [
+      "bars_beats",
+      "min_secs",
+      "tempo",
+      "meter",
+      "markers"
+    ],
+    "link_timeline_edit": true,
+    "link_track_edit": false,
+    "insertion_follows_playback": false,
+    "loop_playback": false,
+    "loop_range": {
+      "start": 0,
+      "end": 0
+    },
+    "pre_post_roll": false,
+    "pre_roll": 96000,
+    "post_roll": 96000,
+    "tab_to_transient": false,
+    "automation_follows_edit": true,
+    "markers_follow_edit": false,
+    "layered_editing": false,
+    "mirrored_midi": false,
+    "click": false,
+    "countoff": false,
+    "countoff_bars": 2,
+    "midi_merge": false,
+    "record_mode": "normal",
+    "loop_record": false,
+    "quickpunch": false,
+    "scrolling": "page",
+    "solo_mode": "sip",
+    "pre_fader_metering": false,
+    "delay_compensation": true,
+    "keyboard_focus": "commands",
+    "timeline_selection": {
+      "start": 0,
+      "end": 0
+    },
+    "flags": [
+      "view.clip.gain_line",
+      "view.clip.name",
+      "view.clip.overlap_shadows",
+      "view.marker.ruler_lines",
+      "waveform.peak"
+    ],
+    "values": {}
+  },
+  "next_id": 33,
+  "comments": "",
+  "midi_originals": {}
+}
