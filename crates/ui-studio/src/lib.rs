@@ -31,6 +31,7 @@ pub mod groups;
 mod hardware_measure;
 pub mod hardware_ui;
 pub mod host;
+pub mod host_hang;
 pub mod icons;
 pub mod import;
 mod interface_zoom;
@@ -392,6 +393,8 @@ pub struct StudioApp {
     editors: Vec<EditorWanted>,
     /// Plug-in host threads not responding, as last reported in the status line (ADR 0018).
     host_wedged_shown: usize,
+    /// The message for a plug-in host thread stuck in a plug-in, with Save and Give up (#205).
+    pub host_hang: host_hang::HostHang,
     /// Slots reading "Not responding", as last reported in the status line (issue #82).
     stuck_shown: usize,
     /// The status line's "Retry all" (glyph and label) as last drawn: shown while more than one
@@ -514,6 +517,7 @@ impl StudioApp {
             tracks_selected_by_header: false,
             editors: Vec::new(),
             host_wedged_shown: 0,
+            host_hang: host_hang::HostHang::default(),
             stuck_shown: 0,
             retry_all_rect: None,
             plugin_header: plugin_header::HeaderState::default(),
@@ -1136,6 +1140,7 @@ impl StudioApp {
         finish::bounce_dialog(self, &ctx);
         finish::history_window(self, &ctx);
         menus::recovery(self, &ctx);
+        host_hang::window(self, &ctx);
         menus::shortcuts_window(self, &ctx);
         about::window(self, &ctx);
         telemetry::window(self, &ctx);
@@ -1278,6 +1283,8 @@ mod devices_sidechain_tests;
 mod emergency_tests;
 #[cfg(test)]
 mod fades_gesture_tests;
+#[cfg(test)]
+mod host_hang_tests;
 #[cfg(test)]
 mod loopbar_gesture_tests;
 #[cfg(test)]
