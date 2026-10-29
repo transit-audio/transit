@@ -324,8 +324,7 @@ impl Plugin for Hold {
             let t0 = Instant::now();
             while self.knob.hold.load(Ordering::Acquire) {
                 assert!(t0.elapsed() < STALL, "never released");
-                // timing: sleep-ok paces a wait for a release flag, measures nothing
-                std::thread::sleep(Duration::from_millis(1));
+                std::thread::yield_now();
             }
         }
         self.inner.process(io, frames);
@@ -532,6 +531,25 @@ fn wait_home(rig: &Rig, s: usize) {
     }
 }
 
+/// The phase-1 key edges of `session` as `rig`'s plan lays its strips out: (source, keyed),
+/// from the tracks' inserts, not from the plan's tables.
+fn key_edges(rig: &Rig, session: &Session) -> Vec<(usize, usize)> {
+    let (phase1, _) = rig.mix.strip_phases();
+    let index = |t: TrackId| rig.mix.strip_index(t).filter(|&i| i < phase1);
+    let mut edges = Vec::new();
+    for t in session.tracks.iter().filter(|t| !t.inactive) {
+        let Some(to) = index(t.id) else { continue };
+        for ins in t.mixer.inserts.iter().flatten().filter(|i| i.active && !i.bypass) {
+            if let Some(KeySource { from: KeyFrom::Track(src), .. }) = ins.key
+                && let Some(from) = index(src)
+            {
+                edges.push((from, to));
+            }
+        }
+    }
+    edges
+}
+
 /// Waits until every strip is home (a plan is adopted only then).
 fn settle(rig: &mut Rig) {
     let t0 = Instant::now();
@@ -595,6 +613,8 @@ fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, change: Option
             let before = rig.mix.strip_counts();
             rig.block();
             let (after, outcomes, silence) = (rig.mix.strip_counts(), rig.mix.strip_outcomes(), rig.mix.strip_silence());
+            let session = change.as_ref().filter(|c| b >= c.at).map_or(&top.session, |c| &c.session);
+            let edges = key_edges(&rig, session);
             let mut mutes = Vec::new();
             let mut causes = Vec::new();
             for (i, (a, z)) in after.iter().zip(&before).enumerate() {
@@ -631,6 +651,7 @@ fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, change: Option
                         causes.push((i, cause));
                     }
                     None if held.contains(&i) => why.push("held by the schedule, but rendered"),
+                    None if rig.mix.strip_keys_pending(i) => why.push("rendered, but a key's early delay is still pending"),
                     None => {}
                 }
                 if !why.is_empty() {
@@ -640,6 +661,22 @@ fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, change: Option
                         outcomes[i],
                         silence[i]
                     ));
+                }
+            }
+            // Independently of the graph's tables: from the session's key edges, a strip keyed
+            // from a strip that missed the block misses it as upstream-missed (or, still held by a
+            // worker, busy: A2), and an upstream-missed strip has a source that missed.
+            let missed = |j: usize| causes.iter().any(|c: &(usize, OverrunCause)| c.0 == j);
+            let cause_of = |j: usize| causes.iter().find(|c| c.0 == j).map(|c| c.1);
+            for d in 0..after.len() {
+                let from_missed = edges.iter().any(|&(src, to)| to == d && missed(src));
+                let why = match (from_missed, cause_of(d)) {
+                    (true, Some(OverrunCause::UpstreamMissed | OverrunCause::Busy)) | (false, None | Some(_)) => None,
+                    (true, other) => Some(format!("keyed from a strip that missed, but {other:?}")),
+                };
+                let orphan = cause_of(d) == Some(OverrunCause::UpstreamMissed) && !from_missed;
+                if let Some(why) = why.or_else(|| orphan.then(|| "upstream-missed with no key source that missed".to_string())) {
+                    failure.get_or_insert(format!("block {b}, strip {d}: {why} (key edges {edges:?}, skips {causes:?})"));
                 }
             }
             run.mutes.push(mutes);

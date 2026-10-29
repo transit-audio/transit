@@ -279,6 +279,13 @@ impl KeyBank {
         }
     }
 
+    /// Test seam (issue #210 review): an entry keyed at `keyed` holds a key whose early-key delay
+    /// has not run (filled for a render that has not happened).
+    #[cfg(feature = "testing")]
+    pub(crate) fn any_pending(&self, keyed: usize) -> bool {
+        self.entries.iter().any(|e| usize::from(e.spec.keyed) == keyed && !e.lent && e.pending > 0)
+    }
+
     /// Test seam (issue #210): the entries keyed at `keyed`, readable.
     #[cfg(feature = "testing")]
     pub(crate) fn summary_of(&self, keyed: usize) -> Vec<String> {

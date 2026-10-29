@@ -136,6 +136,14 @@ impl MixEngine {
         })
     }
 
+    /// Strip `i` has a key entry whose early-key delay has not run: filled for a render that
+    /// has not happened. A strip that rendered in the last block has none (the delay runs exactly
+    /// once, as it renders).
+    #[must_use]
+    pub fn strip_keys_pending(&self, i: usize) -> bool {
+        self.plan.as_deref().is_some_and(|p| p.tables.keys.any_pending(i))
+    }
+
     /// A render worker holds strip `i` (claimed, not done).
     #[must_use]
     pub fn strip_claimed(&self, i: usize) -> bool {
