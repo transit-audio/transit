@@ -915,12 +915,12 @@ fn an_import_the_engine_let_expire_says_so_and_is_removed() {
     let audio = t.track(TrackKind::Audio);
     drop_on_lane(&mut t, "loop 90.wav", audio);
     t.app.engine.imports.set_limits(std::time::Duration::ZERO, 32, std::time::Duration::from_secs(30));
-    for _ in 0..40 {
+    // The expiry waits on the background preparation, so the wait is a wall-clock deadline, not a
+    // count of frames (E49).
+    let t0 = std::time::Instant::now();
+    while t.app.imports.active() && t0.elapsed() < std::time::Duration::from_secs(10) {
         t.frames(6);
         std::thread::sleep(std::time::Duration::from_millis(2));
-        if !t.app.imports.active() {
-            break;
-        }
     }
     assert!(!t.app.imports.active(), "{}", t.app.status);
     assert_eq!(t.app.status, "The import of loop 90.wav expired: re-import");

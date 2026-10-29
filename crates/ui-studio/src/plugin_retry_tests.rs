@@ -175,6 +175,13 @@ impl T {
         self.app.player.as_ref().unwrap().live_name(t, slot).is_some()
     }
 
+    /// Whether the hosted plug-in has been taken into a plan (its load time is remembered). Not
+    /// `bound`: an instrument track starts with the built-in synth, which stays live in the slot
+    /// while the hosted one loads (the compile waits for it, #56), so `bound` holds from the start.
+    fn hosted_taken(&self) -> bool {
+        self.app.last_load_time(HOSTED).is_some()
+    }
+
     /// Whether the last frame painted the retry glyph (its arc's signature) inside `r`.
     fn retry_glyph_in(&self, r: [f32; 4]) -> bool {
         fn arc(shape: &egui::Shape, r: egui::Rect) -> bool {
@@ -329,7 +336,7 @@ fn play_pulses_while_loading_is_normal_and_goes_steady_once_the_load_is_slow() {
     assert_eq!(t.app.transport_wait(), slow, "slow load with Play pending: steady too");
     t.app.player_requests.play = None;
     t.gate.open();
-    assert!(t.frames_until(Duration::from_secs(10), |t| t.bound(track, SLOT)));
+    assert!(t.frames_until(Duration::from_secs(10), |t| t.hosted_taken()));
     t.frames(2);
     assert_eq!(t.app.transport_wait(), None, "loaded: Play is ready again");
 }
@@ -365,7 +372,7 @@ fn a_slow_load_is_reported_in_the_status_line_and_every_load_is_remembered() {
     assert_eq!(t.app.last_load_time(HOSTED), None, "never loaded before");
     clock.advance(Duration::from_secs(3));
     t.gate.open();
-    assert!(t.frames_until(Duration::from_secs(10), |t| t.bound(track, SLOT)));
+    assert!(t.frames_until(Duration::from_secs(10), |t| t.hosted_taken()));
     t.frames(2);
     let name = t.app.player.as_ref().unwrap().live_name(track, SLOT).unwrap();
     assert_eq!(t.app.status, format!("{name} loaded in 3.0 s"));
