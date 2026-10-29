@@ -1160,3 +1160,18 @@ fn the_serial_details_window_is_no_taller_than_it_was_and_shorter_than_the_pool_
     assert!(h(serial) < h(small) && h(small) <= h(pool), "serial {serial:?}, pool without strips {small:?}, pool {pool:?}");
     assert!(h(serial) < 560.0, "the serial window fits without scrolling: {serial:?}");
 }
+
+#[test]
+fn a_refused_command_error_leaves_the_status_bar_but_not_the_report() {
+    let mut t = T::new();
+    t.app.status = "Command failed: no such control".into();
+    t.frames(30);
+    assert_eq!(t.app.status, "Command failed: no such control", "half a second in, it still shows");
+    t.frames(480);
+    assert!(t.app.status.is_empty(), "eight seconds of frames clears it: {}", t.app.status);
+    let kept = t.app.diagnostics_report(t.time).last_status;
+    assert_eq!(kept.map(|(_, m)| m), Some("Command failed: no such control".to_string()));
+    t.app.status = "newer".into();
+    t.frames(2);
+    assert_eq!(t.app.status, "newer");
+}

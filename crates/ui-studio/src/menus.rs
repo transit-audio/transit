@@ -354,6 +354,10 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
 }
 
 pub fn status_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
+    let now = ui.ctx().input(|i| i.time);
+    if let Some(left) = app.status_age.tick(&mut app.status, now, crate::diagnostics::now_secs()) {
+        ui.ctx().request_repaint_after_secs(left as f32);
+    }
     egui::Panel::bottom("status")
         .exact_size(STATUS_H)
         .frame(egui::Frame::NONE.fill(TOKENS.panel).inner_margin(egui::Margin::symmetric(crate::theme::SPACE as i8, 2)))
@@ -662,23 +666,26 @@ pub fn recovery(app: &mut StudioApp, ctx: &egui::Context) {
     }
     let mut act: Option<(usize, bool)> = None;
     let mut later = false;
-    crate::theme::window(ctx, "Recover unsaved work").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(ctx, |ui| {
-        ui.label("An earlier run left unsaved changes:");
-        for (i, l) in app.leftovers.iter().enumerate() {
-            ui.horizontal(|ui| {
-                ui.label(&l.name);
-                if ui.button("Recover").clicked() {
-                    act = Some((i, true));
-                }
-                if ui.button("Discard").clicked() {
-                    act = Some((i, false));
-                }
-            });
-        }
-        if ui.button("Later").clicked() {
-            later = true;
-        }
-    });
+    crate::theme::window(ctx, "Recover unsaved work").collapsible(false).resizable(false).anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0]).show(
+        ctx,
+        |ui| {
+            ui.label("An earlier run left unsaved changes:");
+            for (i, l) in app.leftovers.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    ui.label(&l.name);
+                    if ui.button("Recover").clicked() {
+                        act = Some((i, true));
+                    }
+                    if ui.button("Discard").clicked() {
+                        act = Some((i, false));
+                    }
+                });
+            }
+            if ui.button("Later").clicked() {
+                later = true;
+            }
+        },
+    );
     if let Some((i, recover)) = act
         && i < app.leftovers.len()
     {

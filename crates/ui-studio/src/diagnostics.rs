@@ -329,6 +329,9 @@ pub struct Report {
     pub strips: Vec<crate::telemetry::StripName>,
     pub log_dir: Option<PathBuf>,
     pub log_lines: Vec<String>,
+    /// The last status-bar message and when it appeared (seconds since the Unix epoch), kept
+    /// after the status bar has aged it out (#203).
+    pub last_status: Option<(u64, String)>,
 }
 
 fn or_unknown(s: &str) -> &str {
@@ -451,6 +454,10 @@ impl Report {
         match &self.log_dir {
             Some(dir) => o.push_str(&format!("Log folder: {}\n", dir.display())),
             None => o.push_str("Log folder: none (preferences are off in this run)\n"),
+        }
+        match &self.last_status {
+            Some((at, text)) => o.push_str(&format!("Last status message ({}): {text}\n", generated_text(*at))),
+            None => o.push_str("Last status message: none\n"),
         }
         o.push_str(&format!("Last {LOG_LINES} lines of {LOG_FILE}:\n"));
         if self.log_lines.is_empty() {
@@ -700,6 +707,7 @@ mod tests {
             open_asio_driver: None,
             strips: Vec::new(),
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
+            last_status: None,
             log_lines: vec!["INFO opened /home/alice/Music/song.transit".into(), "WARN something".into()],
         }
     }

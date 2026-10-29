@@ -53,6 +53,7 @@ pub mod recent;
 pub mod scope_strip;
 pub mod shortcuts;
 pub mod splash;
+mod status;
 pub mod telemetry;
 pub mod tempo_edit;
 pub mod theme;
@@ -336,6 +337,8 @@ pub struct StudioApp {
     pub ui: UiState,
     /// The status line.
     pub status: String,
+    /// Ages the status line out and keeps the last message for the diagnostics report (#203).
+    pub(crate) status_age: status::StatusAge,
     /// The last plug-in state capture left plug-ins out (issue #56): the notice, for a status
     /// that replaces it in the same action (a bounce starting).
     state_notice: Option<String>,
@@ -472,6 +475,7 @@ impl StudioApp {
             take_plan: None,
             ui: UiState::default(),
             status: String::new(),
+            status_age: status::StatusAge::default(),
             state_notice: None,
             services,
             diag: Default::default(),
