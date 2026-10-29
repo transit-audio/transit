@@ -1,0 +1,2 @@
+# The vendored C++ is kept byte for byte as upstream committed it (LF), on every checkout.
+crates/macro-osc-oracle/vendor/** -text

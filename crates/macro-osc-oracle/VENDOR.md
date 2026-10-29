@@ -5,7 +5,7 @@ It is the oracle: never edit it. Licenses are in [`LICENSE-THIRD-PARTY`](LICENSE
 
 | Directory | Upstream | Commit |
 |---|---|---|
-| `vendor/plaits/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4` (2023-08-16, firmware 1.2, the last change to this code) |
+| `vendor/plaits/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4` (2023-08-16, firmware 1.2: the eurorack commit the oracle pins; the vendored files last changed in `ebe6bbf`, 2023-05-30) |
 | `vendor/stmlib/` | https://github.com/pichenettes/stmlib | `e3bd7c9cc00e4364166f9905c0509b6ffd0535ec` (the submodule commit the eurorack commit above pins) |
 
 ## File set
@@ -32,8 +32,10 @@ Emilie Gillet's MIT notice.
 
 ## Verification
 
-Every vendored file is the upstream blob, byte for byte. To check, clone both repositories and
-compare blob ids (run from the repository root):
+Every vendored file is the upstream blob, byte for byte. The check compares committed blob ids, not
+working-tree bytes; `.gitattributes` marks `vendor/` `-text`, so every checkout (Windows included)
+also has the upstream bytes, with LF line endings. To check, clone both repositories and compare
+blob ids (run from the repository root):
 
 ```sh
 git clone --filter=blob:none https://github.com/pichenettes/eurorack /tmp/er
@@ -59,7 +61,11 @@ No output means every file matches (checked 2026-10-29: 134 of 134).
   - `0001-fm-algorithms-specialization-declarations.patch`: MSVC (error C2737) reads the four
     declarations of explicit specializations of static data members in
     `plaits/dsp/fm/algorithms.h` as definitions without an initializer. They are removed; the
-    specializations are still defined in `plaits/dsp/fm/algorithms.cc`.
+    specializations are still defined in `plaits/dsp/fm/algorithms.cc`. Without the declarations
+    MSVC's copy is formally ill-formed, no diagnostic required (an explicit specialization must be
+    declared before a use that could instantiate it), but it is safe: the class template has no
+    primary definition of `opcodes_` or `renderers_`, so nothing is ever implicitly instantiated and
+    every use links to the definitions in `algorithms.cc`. Data and arithmetic are unchanged.
   - `0002-resources-empty-table.patch`: MSVC (error C2466) rejects the zero-length array
     `lookup_table_i32_table` in `plaits/resources.cc`. It is empty and nothing references it; its
     definition is removed.

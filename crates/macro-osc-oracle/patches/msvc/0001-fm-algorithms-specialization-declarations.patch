@@ -1,3 +1,10 @@
+MSVC only. MSVC (C2737) reads the four declarations of explicit specializations of static data
+members as definitions without an initializer, so they are removed. This makes MSVC's copy formally
+ill-formed, no diagnostic required (a specialization must be declared before a use that could
+instantiate it), but it is safe: the class template has no primary definition of opcodes_ or
+renderers_, so nothing is implicitly instantiated and every use links to the definitions in
+plaits/dsp/fm/algorithms.cc. Data and arithmetic are unchanged.
+
 --- plaits/dsp/fm/algorithms.h
 +++ plaits/dsp/fm/algorithms.h
 @@ -195,17 +195,9 @@ class Algorithms {
