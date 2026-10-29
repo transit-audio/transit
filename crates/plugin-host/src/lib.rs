@@ -57,7 +57,7 @@ use std::time::{Duration, Instant};
 use transit_dsp::{Plugin, PluginEditor, PluginStateReader};
 use transit_rt::gui_thread::{MessageQueue, QueueWaker};
 
-pub use give_up::GaveUp;
+pub use give_up::{GaveUp, Quarantined};
 use hosted::EditorShared;
 pub use phases::{Clock, LoadPhase, PhaseLog, loading_text, log_lines, open_log_line, report_phase, scope as phase_scope, seconds_text};
 pub use stuck::{Busy, RELOG_EVERY, StuckCall, call};
@@ -209,6 +209,9 @@ pub(crate) struct Worker {
     abandoned: AtomicBool,
     /// The thread's id as the OS knows it (Windows: for hiding its windows from another thread).
     os_thread: AtomicU32,
+    /// How many adopted instances this thread hosts (their handles live in its `Ctx`), for the
+    /// give-up message (#205 review): kept in step by the thread itself.
+    hosted: AtomicUsize,
 }
 
 impl Worker {
@@ -370,7 +373,8 @@ impl Worker {
 
     /// Logs a wedged section again once [`RELOG_EVERY`] has passed since it was last logged.
     fn relog(&self) {
-        if !self.running.load(Ordering::Acquire) || !self.is_wedged() {
+        // A thread given up on was logged a last time by `Host::give_up` (#205 review).
+        if !self.running.load(Ordering::Acquire) || !self.is_wedged() || self.is_abandoned() {
             return;
         }
         let Some((section, ran)) = self.busy_section() else { return };
@@ -391,7 +395,14 @@ impl Worker {
         }
         let (_, ran) = self.busy_section()?;
         let busy = self.busy_label();
-        Some(StuckCall { thread: self.name.clone(), plugin: busy.plugin, call: busy.call, stuck_for: ran, given_up: self.is_abandoned() })
+        Some(StuckCall {
+            thread: self.name.clone(),
+            plugin: busy.plugin,
+            call: busy.call,
+            stuck_for: ran,
+            given_up: self.is_abandoned(),
+            hosted: self.hosted.load(Ordering::Acquire),
+        })
     }
 }
 
@@ -556,6 +567,7 @@ impl Ctx {
         self.next_key += 1;
         let (has_editor, has_state) = (editor.is_some(), state.is_some());
         self.entries.insert(key, Local { editor, state, shared: Arc::clone(&shared), name: Arc::clone(&name) });
+        self.count_hosted();
         let token = hosted::Token::new(key, worker, shared, self.timeout, self.host.clone(), Arc::clone(&self.clock), name);
         Box::new(hosted::Hosted::new(plugin, token, has_editor, has_state))
     }
@@ -567,6 +579,14 @@ impl Ctx {
         if let Some(worker) = &self.worker {
             let call = worker.busy_label().call;
             worker.relabel(Busy { plugin: plugin_name(id), call });
+        }
+    }
+
+    /// Publishes how many instances this thread hosts (#205 review: the give-up message counts
+    /// them while the thread is stuck).
+    pub(crate) fn count_hosted(&self) {
+        if let Some(worker) = &self.worker {
+            worker.hosted.store(self.entries.len(), Ordering::Release);
         }
     }
 
@@ -723,6 +743,7 @@ impl Host {
             logged: Mutex::new((0, Duration::ZERO)),
             abandoned: AtomicBool::new(false),
             os_thread: AtomicU32::new(0),
+            hosted: AtomicUsize::new(0),
         });
         worker_tx.send(Arc::clone(&worker)).ok()?;
         lock(&self.inner.workers).push(Arc::clone(&worker));
@@ -905,6 +926,7 @@ impl Host {
             let hook = self.inner.config.hooks.shutdown.clone();
             pending.push(self.submit_to(w, Busy::any(call::SHUTDOWN), move |ctx| {
                 ctx.entries.clear();
+                ctx.count_hosted();
                 if let Some(h) = hook {
                     h();
                 }
@@ -1047,6 +1069,7 @@ mod tests {
             logged: Mutex::new((0, Duration::ZERO)),
             abandoned: AtomicBool::new(false),
             os_thread: AtomicU32::new(0),
+            hosted: AtomicUsize::new(0),
         }
     }
 

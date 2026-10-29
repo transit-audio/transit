@@ -31,6 +31,25 @@ pub struct GaveUp {
     pub plugins: Vec<Arc<str>>,
     /// The windows of those threads asked to hide.
     pub windows: usize,
+    /// The plug-in instances those threads host, all quarantined with them (#205 review).
+    pub quarantined: usize,
+}
+
+/// A host thread the user gave up on whose call returned: it is parked with its plug-ins
+/// quarantined (#205 review: the report still lists it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Quarantined {
+    pub thread: String,
+    /// The plug-in instances it hosts.
+    pub plugins: usize,
+}
+
+impl Quarantined {
+    /// The diagnostics report's line.
+    #[must_use]
+    pub fn line(&self) -> String {
+        format!("Plug-in host: {} given up, {} plug-ins quarantined until transit restarts", self.thread, self.plugins)
+    }
 }
 
 impl Host {
@@ -47,8 +66,10 @@ impl Host {
             let stuck = w.stuck_for().unwrap_or_default();
             let busy = w.busy_label();
             let windows = hide_thread_windows(w.os_thread.load(Ordering::Acquire));
+            let hosted = w.hosted.load(Ordering::Acquire);
+            // The last line about this thread: the 60 s relog stops here (#205 review).
             log::error!(
-                "plug-in host: gave up on {} ({}, stuck in {} for {} s): its plug-ins are quarantined (never called, freed or reused again); {windows} of its windows asked to hide",
+                "plug-in host: given up on {} ({}, stuck in {} for {} s): its {hosted} plug-ins are quarantined (never called, freed or reused again); {windows} of its windows asked to hide",
                 busy.plugin,
                 w.name,
                 busy.call,
@@ -56,6 +77,7 @@ impl Host {
             );
             out.plugins.push(busy.plugin);
             out.windows += windows;
+            out.quarantined += hosted;
             // New creations never go to an abandoned thread.
             let current = lock(&self.inner.current).clone();
             if current.is_some_and(|c| Arc::ptr_eq(&c, &w)) {
@@ -69,6 +91,17 @@ impl Host {
     #[must_use]
     pub fn given_up(&self) -> usize {
         lock(&self.inner.workers).iter().filter(|w| w.abandoned.load(Ordering::Acquire)).count()
+    }
+
+    /// The threads given up on whose call returned (they park; [`Host::stuck`] no longer lists
+    /// them), with how many plug-ins each keeps quarantined.
+    #[must_use]
+    pub fn quarantined(&self) -> Vec<Quarantined> {
+        lock(&self.inner.workers)
+            .iter()
+            .filter(|w| w.abandoned.load(Ordering::Acquire) && !w.running.load(Ordering::Acquire))
+            .map(|w| Quarantined { thread: w.name.clone(), plugins: w.hosted.load(Ordering::Acquire) })
+            .collect()
     }
 }
 

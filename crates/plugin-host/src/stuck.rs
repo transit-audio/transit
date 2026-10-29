@@ -71,9 +71,17 @@ pub struct StuckCall {
     pub stuck_for: Duration,
     /// The user gave up on the thread ([`crate::Host::give_up`]): its plug-ins are quarantined.
     pub given_up: bool,
+    /// How many plug-in instances the thread hosts (a Give up quarantines them all).
+    pub hosted: usize,
 }
 
 impl StuckCall {
+    /// The plug-ins on the thread besides the stuck one (a creation's plug-in is not hosted yet).
+    #[must_use]
+    pub fn others(&self) -> usize {
+        if self.call == call::CREATING { self.hosted } else { self.hosted.saturating_sub(1) }
+    }
+
     /// The diagnostics report's line: `Plug-in host: Guitar Rig 7 stuck in a window message (its
     /// editor or a dialog it opened) for 240 s`.
     #[must_use]
@@ -157,7 +165,10 @@ mod tests {
             call: call::PRESET_JOB,
             stuck_for: Duration::from_millis(240_900),
             given_up: false,
+            hosted: 6,
         };
+        assert_eq!(stuck.others(), 5, "the stuck plug-in is one of them");
+        assert_eq!(StuckCall { call: call::CREATING, ..stuck.clone() }.others(), 6, "a creation's is not hosted yet");
         assert_eq!(stuck.line(), "Plug-in host: Guitar Rig 7 stuck in a preset save or load for 240 s");
         assert_eq!(
             StuckCall { given_up: true, ..stuck }.line(),

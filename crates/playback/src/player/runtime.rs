@@ -409,6 +409,9 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn give_up_on_plugin_host(&self) -> transit_plugin_host::GaveUp {
         self.handles.give_up_host()
     }
+    pub fn plugin_host_quarantined(&self) -> Vec<transit_plugin_host::Quarantined> {
+        self.handles.host_quarantined()
+    }
     pub fn take_editor_errors(&mut self) -> Vec<(TrackId, usize, String)> {
         self.handles.take_editor_errors()
     }

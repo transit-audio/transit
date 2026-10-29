@@ -100,6 +100,7 @@ impl Drop for Token {
         let key = self.key;
         self.worker.send_or_leak(self.busy(call::RELEASE), move |ctx| {
             ctx.entries.remove(&key);
+            ctx.count_hosted();
         });
     }
 }

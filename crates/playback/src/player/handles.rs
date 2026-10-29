@@ -673,6 +673,11 @@ impl Handles {
         self.host.give_up()
     }
 
+    /// The given-up host threads whose call returned, with the plug-ins they keep quarantined.
+    pub fn host_quarantined(&self) -> Vec<transit_plugin_host::Quarantined> {
+        self.host.quarantined()
+    }
+
     /// How many instances the compile did not predict are being made or wait for their
     /// compile (the tests check the path was taken).
     #[cfg(test)]

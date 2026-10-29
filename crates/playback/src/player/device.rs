@@ -707,6 +707,11 @@ impl Player {
     pub fn give_up_on_plugin_host(&self) -> transit_plugin_host::GaveUp {
         self.owner().map_or_else(|_| transit_plugin_host::GaveUp::default(), |owner| owner.give_up_on_plugin_host())
     }
+    /// The plug-in host threads given up on whose call returned: parked, with the plug-ins they
+    /// keep quarantined until transit exits (the diagnostics report lists them).
+    pub fn plugin_host_quarantined(&self) -> Vec<transit_plugin_host::Quarantined> {
+        self.owner().map_or_else(|_| Vec::new(), |owner| owner.plugin_host_quarantined())
+    }
     /// Editor windows that were accepted for opening and then failed: (track, slot, why), once.
     pub fn take_editor_errors(&self) -> Vec<(TrackId, usize, String)> {
         self.owner().map(|mut owner| owner.take_editor_errors()).unwrap_or_default()

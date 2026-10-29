@@ -38,6 +38,11 @@ fn giving_up_quarantines_the_stuck_threads_plug_ins_and_new_ones_load_elsewhere(
     let l = Arc::clone(&log);
     let mut plugin = host.submit(move |ctx| ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))).wait(Duration::from_secs(5)).unwrap();
     let old = log.thread_of("create");
+    // A second plug-in on the same thread: Give up quarantines it too (#205 review).
+    let other_log = Arc::new(Log::default());
+    let o = Arc::clone(&other_log);
+    let other = host.submit(move |ctx| ctx.adopt(Fake::make(&o, Duration::ZERO, Duration::ZERO))).wait(Duration::from_secs(5)).unwrap();
+    assert_eq!(other_log.thread_of("create"), old, "on the same thread");
     assert_eq!(host.give_up(), transit_plugin_host::GaveUp::default(), "nothing is stuck: nothing to give up on");
     // Its editor open never returns (a preset browse that hangs inside the plug-in).
     let (release, gate) = mpsc::channel::<()>();
@@ -46,11 +51,13 @@ fn giving_up_quarantines_the_stuck_threads_plug_ins_and_new_ones_load_elsewhere(
     editor.open().unwrap();
     let stuck = watch(&host, |s| !s.is_empty());
     assert_eq!(stuck.len(), 1, "{stuck:?}");
+    assert_eq!((stuck[0].hosted, stuck[0].others()), (2, 1), "the thread hosts the stuck plug-in and one other");
     // A request queued behind the stuck call before the user gave up.
     editor.set_param("gain", 0.5);
     let gave = host.give_up();
     assert_eq!(gave.plugins.iter().map(|p| &**p).collect::<Vec<_>>(), ["Fake"]);
     assert_eq!(gave.windows, 0, "the fake has no window");
+    assert_eq!(gave.quarantined, 2);
     assert_eq!((host.wedged(), host.given_up()), (0, 1), "given up: no longer counted as not responding");
     assert!(host.stuck()[0].given_up, "the report says it was given up on");
     assert_eq!(host.give_up(), transit_plugin_host::GaveUp::default(), "once");
@@ -68,9 +75,14 @@ fn giving_up_quarantines_the_stuck_threads_plug_ins_and_new_ones_load_elsewhere(
     drop(release);
     let parked = watch(&host, <[StuckCall]>::is_empty);
     assert!(parked.is_empty(), "{parked:?}");
+    assert_eq!(
+        host.quarantined(),
+        [transit_plugin_host::Quarantined { thread: "plugin-host-0".into(), plugins: 2 }],
+        "the report still lists the parked thread"
+    );
     assert_eq!(log.thread_of("editor_set_param"), None, "the request queued behind the call never ran");
     // Dropping the quarantined instance leaks it: its destruction is never sent to a thread.
-    drop((reader, editor, plugin));
+    drop((reader, editor, plugin, other));
     assert_eq!(
         log.calls.lock().unwrap().iter().filter(|(c, t)| *c == "destroy" && Some(*t) == old).count(),
         0,
