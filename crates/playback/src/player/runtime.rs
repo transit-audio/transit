@@ -406,6 +406,9 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn plugin_host_stuck(&self) -> Vec<transit_plugin_host::StuckCall> {
         self.handles.host_stuck()
     }
+    pub fn give_up_on_plugin_host(&self) -> transit_plugin_host::GaveUp {
+        self.handles.give_up_host()
+    }
     pub fn take_editor_errors(&mut self) -> Vec<(TrackId, usize, String)> {
         self.handles.take_editor_errors()
     }

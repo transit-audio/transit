@@ -701,6 +701,12 @@ impl Player {
     pub fn plugin_host_stuck(&self) -> Vec<transit_plugin_host::StuckCall> {
         self.owner().map_or_else(|_| Vec::new(), |owner| owner.plugin_host_stuck())
     }
+    /// Gives up on the plug-in host threads that are stuck (issue #205): their plug-ins are
+    /// quarantined until transit exits and keep the state the session stores, their windows are
+    /// asked to hide, and new plug-ins load on a fresh thread. Never waits for a plug-in.
+    pub fn give_up_on_plugin_host(&self) -> transit_plugin_host::GaveUp {
+        self.owner().map_or_else(|_| transit_plugin_host::GaveUp::default(), |owner| owner.give_up_on_plugin_host())
+    }
     /// Editor windows that were accepted for opening and then failed: (track, slot, why), once.
     pub fn take_editor_errors(&self) -> Vec<(TrackId, usize, String)> {
         self.owner().map(|mut owner| owner.take_editor_errors()).unwrap_or_default()

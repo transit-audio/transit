@@ -69,6 +69,8 @@ pub struct StuckCall {
     pub call: &'static str,
     /// How long the call has run.
     pub stuck_for: Duration,
+    /// The user gave up on the thread ([`crate::Host::give_up`]): its plug-ins are quarantined.
+    pub given_up: bool,
 }
 
 impl StuckCall {
@@ -76,7 +78,8 @@ impl StuckCall {
     /// editor or a dialog it opened) for 240 s`.
     #[must_use]
     pub fn line(&self) -> String {
-        format!("Plug-in host: {} stuck in {} for {} s", self.plugin, self.call, self.stuck_for.as_secs())
+        let given_up = if self.given_up { " (given up: its plug-ins are quarantined until transit restarts)" } else { "" };
+        format!("Plug-in host: {} stuck in {} for {} s{given_up}", self.plugin, self.call, self.stuck_for.as_secs())
     }
 }
 
@@ -153,8 +156,13 @@ mod tests {
             plugin: Arc::from("Guitar Rig 7"),
             call: call::PRESET_JOB,
             stuck_for: Duration::from_millis(240_900),
+            given_up: false,
         };
         assert_eq!(stuck.line(), "Plug-in host: Guitar Rig 7 stuck in a preset save or load for 240 s");
+        assert_eq!(
+            StuckCall { given_up: true, ..stuck }.line(),
+            "Plug-in host: Guitar Rig 7 stuck in a preset save or load for 240 s (given up: its plug-ins are quarantined until transit restarts)"
+        );
     }
 
     #[test]

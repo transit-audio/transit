@@ -32,6 +32,10 @@
 //! [`RELOG_EVERY`] while it stays stuck, and [`Host::stuck`] lists them for the UI and the
 //! diagnostics report.
 //!
+//! **Giving up on a stuck thread** (issue #205). [`Host::give_up`] quarantines the threads that are
+//! stuck: their plug-ins are never called, freed or reused again, their windows are asked to hide
+//! without waiting for them, and a thread that returns later parks (module `give_up`).
+//!
 //! **Inline mode.** On macOS (AppKit wants editors on the process main thread, and both SDKs want
 //! the editor and the instance on one thread) the host runs every job at once on
 //! the calling thread and [`Ctx::adopt`] returns the instance as it is: the behavior before
@@ -39,19 +43,21 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod give_up;
 mod hosted;
 mod phases;
 mod stuck;
 
 use std::collections::HashMap;
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock, PoisonError, Weak};
 use std::time::{Duration, Instant};
 use transit_dsp::{Plugin, PluginEditor, PluginStateReader};
 use transit_rt::gui_thread::{MessageQueue, QueueWaker};
 
+pub use give_up::GaveUp;
 use hosted::EditorShared;
 pub use phases::{Clock, LoadPhase, PhaseLog, loading_text, log_lines, open_log_line, report_phase, scope as phase_scope, seconds_text};
 pub use stuck::{Busy, RELOG_EVERY, StuckCall, call};
@@ -199,6 +205,10 @@ pub(crate) struct Worker {
     /// The section last logged as stuck and how long it had run then: it is logged again every
     /// [`RELOG_EVERY`] while it stays stuck.
     logged: Mutex<(u64, Duration)>,
+    /// The user gave up on this thread ([`Host::give_up`]): it is never sent a job again.
+    abandoned: AtomicBool,
+    /// The thread's id as the OS knows it (Windows: for hiding its windows from another thread).
+    os_thread: AtomicU32,
 }
 
 impl Worker {
@@ -304,7 +314,7 @@ impl Worker {
 
     /// Queues a job; `Err` gives it back when the thread is gone.
     fn send(&self, cell: Arc<JobCell>) -> Result<(), Arc<JobCell>> {
-        if !self.running.load(Ordering::Acquire) {
+        if !self.running.load(Ordering::Acquire) || self.is_abandoned() {
             return Err(cell);
         }
         self.tx.send(cell).map_err(|e| e.0)?;
@@ -333,7 +343,16 @@ impl Worker {
     }
 
     pub(crate) fn responsive(&self) -> bool {
-        self.running.load(Ordering::Acquire) && !self.is_wedged()
+        self.running.load(Ordering::Acquire) && !self.is_wedged() && !self.is_abandoned()
+    }
+
+    fn is_abandoned(&self) -> bool {
+        self.abandoned.load(Ordering::Acquire)
+    }
+
+    /// How long the current section has run, while the thread is wedged.
+    fn stuck_for(&self) -> Option<Duration> {
+        self.is_wedged().then(|| self.busy_for()).flatten()
     }
 
     /// Logs the section marked wedged a moment ago (at `budget`) and remembers it was logged.
@@ -372,7 +391,7 @@ impl Worker {
         }
         let (_, ran) = self.busy_section()?;
         let busy = self.busy_label();
-        Some(StuckCall { thread: self.name.clone(), plugin: busy.plugin, call: busy.call, stuck_for: ran })
+        Some(StuckCall { thread: self.name.clone(), plugin: busy.plugin, call: busy.call, stuck_for: ran, given_up: self.is_abandoned() })
     }
 }
 
@@ -678,6 +697,7 @@ impl Host {
             }
             let Ok(worker) = worker_rx.recv() else { return };
             let _ = worker.thread.set(std::thread::current().id());
+            worker.os_thread.store(transit_rt::editor_window::current_thread_id(), Ordering::Release);
             run(&worker, rx, &queue, &config, weak);
             // `queue` (the OLE apartment on Windows) ends here, after `run` dropped the receiver:
             // no job can reach this thread any more.
@@ -701,6 +721,8 @@ impl Host {
             thread: OnceLock::new(),
             label: Mutex::new(Busy::any(call::START)),
             logged: Mutex::new((0, Duration::ZERO)),
+            abandoned: AtomicBool::new(false),
+            os_thread: AtomicU32::new(0),
         });
         worker_tx.send(Arc::clone(&worker)).ok()?;
         lock(&self.inner.workers).push(Arc::clone(&worker));
@@ -850,7 +872,7 @@ impl Host {
     /// status line says so while it is not 0; it goes back down when a thread returns.
     #[must_use]
     pub fn wedged(&self) -> usize {
-        lock(&self.inner.workers).iter().filter(|w| w.running.load(Ordering::Acquire) && w.is_wedged()).count()
+        lock(&self.inner.workers).iter().filter(|w| w.running.load(Ordering::Acquire) && w.is_wedged() && !w.is_abandoned()).count()
     }
 
     /// How many times a host thread has wedged in this process (returned or not).
@@ -913,6 +935,11 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
     let mut last_tick = Instant::now();
     while !ctx.exit {
         while let Ok(cell) = rx.try_recv() {
+            if worker.is_abandoned() {
+                // Given up on while a job ran: what was queued behind it never runs (or drops).
+                std::mem::forget(cell);
+                break;
+            }
             if let Some(job) = cell.take() {
                 worker.busy_as(if cell.creation { Section::Creation } else { Section::Job }, cell.busy.clone(), || {
                     let _call = transit_dsp::host_call::enter();
@@ -926,15 +953,24 @@ fn run(worker: &Arc<Worker>, rx: mpsc::Receiver<Arc<JobCell>>, queue: &MessageQu
         if ctx.exit {
             break;
         }
+        if worker.is_abandoned() {
+            give_up::park(worker, rx, queue, ctx);
+        }
         let window_message = Busy::new(&ctx.open_editors, call::WINDOW_MESSAGE);
         // A window message for a plug-in's window runs its code (a click in its editor).
         worker.busy_as(Section::Dispatch, window_message, || {
             let _call = transit_dsp::host_call::enter();
             catch_unwind(AssertUnwindSafe(|| queue.dispatch(256))).is_ok()
         });
+        if worker.is_abandoned() {
+            give_up::park(worker, rx, queue, ctx);
+        }
         if last_tick.elapsed() >= config.tick {
             last_tick = Instant::now();
             worker.busy_as(Section::Job, Busy::any(call::SERVICING), || catch_unwind(AssertUnwindSafe(|| tick(config, &mut ctx))).is_ok());
+            if worker.is_abandoned() {
+                give_up::park(worker, rx, queue, ctx);
+            }
         }
         queue.wait(config.tick.saturating_sub(last_tick.elapsed()).max(Duration::from_millis(1)));
     }
@@ -1003,6 +1039,8 @@ mod tests {
             thread: OnceLock::new(),
             label: Mutex::new(Busy::any(call::START)),
             logged: Mutex::new((0, Duration::ZERO)),
+            abandoned: AtomicBool::new(false),
+            os_thread: AtomicU32::new(0),
         }
     }
 

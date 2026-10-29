@@ -667,6 +667,12 @@ impl Handles {
         self.host.stuck()
     }
 
+    /// Gives up on the stuck host threads (issue #205, [`Host::give_up`]): their plug-ins are
+    /// quarantined and keep the state the session stores; their windows are asked to hide.
+    pub fn give_up_host(&self) -> transit_plugin_host::GaveUp {
+        self.host.give_up()
+    }
+
     /// How many instances the compile did not predict are being made or wait for their
     /// compile (the tests check the path was taken).
     #[cfg(test)]

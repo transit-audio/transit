@@ -46,7 +46,7 @@ pub use player::{
 pub use player::{Clock, Deferred, Factory, PluginTestHooks};
 pub use player::{EditorOpened, LoadedIn};
 pub use player::{MapHeard, MapSpec};
-pub use transit_plugin_host::{LoadPhase, StuckCall, loading_text, seconds_text};
+pub use transit_plugin_host::{GaveUp, LoadPhase, StuckCall, loading_text, seconds_text};
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicI64, AtomicU8, AtomicU32, Ordering};
