@@ -240,6 +240,8 @@ fn spacing(st: &mut egui::Style) {
     sp.menu_margin = egui::Margin::same(SPACE as i8);
     sp.window_margin = egui::Margin::same(SPACE as i8);
     sp.indent = 2.0 * SPACE;
+    // egui's window close button is `icon_width` square (so are checkboxes and radio buttons).
+    sp.icon_width = WINDOW_CLOSE_SIZE;
     // egui sizes a window's title bar, and the close button inside it, from `TextStyle::Heading`.
     // transit draws no other heading, so Heading is the window-title size too (#206).
     let title = egui::FontId::proportional(WINDOW_TITLE_SIZE);
@@ -250,6 +252,8 @@ fn spacing(st: &mut egui::Style) {
 /// Window title text: Body (13) plus one point, so a title reads as a label of the window and
 /// not as a heading, at 1.0 and at 1.5 scale (the bar scales with the text and the margins).
 pub const WINDOW_TITLE_SIZE: f32 = 14.0;
+/// The close button's hit area, points (egui's default is 14; 22 would also grow every checkbox).
+pub const WINDOW_CLOSE_SIZE: f32 = 18.0;
 /// Vertical margin of a window's title bar (the content margin stays [`SPACE`]).
 pub const WINDOW_TITLE_PAD_Y: i8 = 2;
 

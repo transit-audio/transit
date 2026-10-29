@@ -132,3 +132,32 @@ fn every_window_goes_through_the_theme_helper() {
     scan(&std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"), &mut found);
     assert!(found.is_empty(), "build windows with theme::window so they get the window-title style: {found:?}");
 }
+
+/// The close button's hit height: the largest distance above the bar's middle that still closes.
+#[test]
+fn the_close_button_hit_area_is_at_least_the_close_size_and_the_bar_does_not_grow() {
+    for scale in [1.0_f32, 1.5] {
+        let mut probe = W::new(scale);
+        probe.settle(true);
+        let bar = bar_height(probe.rect);
+        assert!(bar <= 24.5, "scale {scale}: the bar is still {bar} px");
+        let hits = |dy: f32| {
+            let mut w = W::new(scale);
+            w.settle(true);
+            let at = egui::pos2(w.rect.right() - theme::SPACE - 6.0, w.rect.top() + bar / 2.0 + dy);
+            w.pointer(at, None);
+            w.pointer(at, Some(true));
+            w.pointer(at, Some(false));
+            w.settle(true);
+            !w.open
+        };
+        let half = theme::WINDOW_CLOSE_SIZE / 2.0 - 1.0;
+        assert!(
+            hits(-half) && hits(half),
+            "scale {scale}: a click {half} px off the middle closes (hit height at least {})",
+            theme::WINDOW_CLOSE_SIZE - 2.0
+        );
+        assert!(!hits(theme::WINDOW_CLOSE_SIZE), "scale {scale}: a click well below the button does not close");
+        println!("scale {scale}: close hit height >= {} px, bar {bar:.1} px", theme::WINDOW_CLOSE_SIZE - 2.0);
+    }
+}
