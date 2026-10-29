@@ -476,6 +476,9 @@ fn keyed_rig(workers: Option<usize>, deadline: Duration) -> Option<Rig> {
     if started == 0 && workers != Some(0) {
         return None;
     }
+    // The process's `TRANSIT_RENDER_GRAPH` is read at its first worker start; this rig is for the
+    // graph path, so a developer's `=0` must not put it on the serial path (#174 review).
+    MixEngine::force_graph(true);
     rig.mix.set_strip_deadline(Some(deadline));
     Some(rig)
 }
@@ -725,6 +728,8 @@ fn a_skipped_dependent_s_midi_is_held_and_delivered() {
     graph_on();
     let mut rig = rig;
     assert_eq!(rig.mix.start_render_workers_with(16, 1), 1);
+    // Again after the first worker start, where `TRANSIT_RENDER_GRAPH` is read (#174 review).
+    graph_on();
     let (rig, (on_block, heard)) = std::thread::spawn(move || {
         let mut rig = rig;
         become_callback();

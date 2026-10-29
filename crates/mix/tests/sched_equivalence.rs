@@ -574,6 +574,9 @@ fn record(run: &mut Run, rig: &Rig) {
 fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, change: Option<&Change>) -> Result<Run, String> {
     let mut rig = top.rig();
     assert_eq!(rig.mix.start_render_workers_with(64, workers), workers);
+    // `graph_on` held: again after the worker start, where the process reads
+    // `TRANSIT_RENDER_GRAPH`, so a developer's `=0` cannot put this run on the serial path.
+    MixEngine::force_graph(true);
     rig.mix.seed_strip_costs(TINY);
     rig.mix.set_strip_deadline(Some(FAR));
     let knobs: HashMap<usize, Arc<Knob>> = schedule.holds.iter().map(|h| (h.strip, top.knob(&rig, h.strip))).collect();

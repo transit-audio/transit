@@ -57,18 +57,25 @@ pub(crate) fn init_graph_switch() {
     if !on_audio_thread() {
         ONCE.call_once(|| {
             let value = std::env::var(RENDER_GRAPH_ENV).ok();
-            match render_graph_setting(value.as_deref()) {
-                RenderGraphSetting::Graph => {}
-                RenderGraphSetting::Serial => {
-                    log::info!("mix: {RENDER_GRAPH_ENV}=0; plans with sidechain keys render serially on the audio thread");
-                    GRAPH.store(false, Ordering::Relaxed);
-                }
-                RenderGraphSetting::Unrecognized => log::warn!(
-                    "mix: {RENDER_GRAPH_ENV}={:?} ignored (0 renders keyed plans serially, 1 or unset through the render workers); the task graph stays on",
-                    value.unwrap_or_default()
-                ),
-            }
+            apply_graph_setting(value.as_deref(), &GRAPH);
         });
+    }
+}
+
+/// What [`init_graph_switch`] does with a [`RENDER_GRAPH_ENV`] value (`None`: unset): `0` clears
+/// `switch`, anything else leaves it as it is (an unrecognized value is logged). A seam, so the
+/// switch's handling is testable on a switch of the test's own, without the process environment.
+fn apply_graph_setting(value: Option<&str>, switch: &AtomicBool) {
+    match render_graph_setting(value) {
+        RenderGraphSetting::Graph => {}
+        RenderGraphSetting::Serial => {
+            log::info!("mix: {RENDER_GRAPH_ENV}=0; plans with sidechain keys render serially on the audio thread");
+            switch.store(false, Ordering::Relaxed);
+        }
+        RenderGraphSetting::Unrecognized => log::warn!(
+            "mix: {RENDER_GRAPH_ENV}={:?} ignored (0 renders keyed plans serially, 1 or unset through the render workers); the task graph stays on",
+            value.unwrap_or_default()
+        ),
     }
 }
 
@@ -172,6 +179,20 @@ mod tests {
             assert_eq!(render_graph_setting(Some(v)), RenderGraphSetting::Unrecognized, "{v:?}");
         }
         assert_eq!(RENDER_GRAPH_ENV, "TRANSIT_RENDER_GRAPH");
+    }
+
+    /// #174 review: the switch's handling of the parsed value, on a switch of the test's own
+    /// (starting on, as `GRAPH` does): `0` turns it off; unset, `1` and anything else leave it on.
+    #[test]
+    fn only_0_turns_the_switch_off() {
+        let off = AtomicBool::new(true);
+        apply_graph_setting(Some("0"), &off);
+        assert!(!off.load(Ordering::Relaxed));
+        for v in [None, Some("1"), Some(" 1 "), Some("2"), Some("off"), Some("")] {
+            let on = AtomicBool::new(true);
+            apply_graph_setting(v, &on);
+            assert!(on.load(Ordering::Relaxed), "{v:?}");
+        }
     }
 
     fn key(keyed: u16, from: KeyEnd) -> KeySpec {
