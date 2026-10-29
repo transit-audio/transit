@@ -50,9 +50,10 @@ If a plug-in stops responding (its editor turns white), transit names it in a me
 transit renders mixer strips on several CPU cores (one render worker per core, minus one for the
 audio thread, at most eight). Each block gives the strips a deadline: a strip that misses it is
 silent for that block and is counted under **Render worker figures** in Copy diagnostics
-([troubleshooting](troubleshooting.md)). Sessions with sidechain keys, and strips that read a live
-input or hardware (monitored audio tracks, External Instruments, hardware inserts), render on the
-audio thread as before.
+([troubleshooting](troubleshooting.md)). Sessions with sidechain keys render on the workers too,
+through a dependency graph: a keyed strip starts once its key source has rendered. Strips that read
+a live input or hardware (monitored audio tracks, External Instruments, hardware inserts) render on
+the audio thread as before.
 
 To render every strip on the audio thread instead, start transit with the environment variable
 `TRANSIT_RENDER_POOL=0` (for example `set TRANSIT_RENDER_POOL=0` in a Windows command prompt
@@ -62,4 +63,6 @@ misbehaves on a worker thread: its track drops out, or keeps going silent while 
 or `1`, uses the workers. An app opened from the Start menu, a desktop shortcut or Finder does not
 see a shell variable, so set `TRANSIT_RENDER_POOL` as a user environment variable instead (Windows:
 System Properties > Environment Variables; macOS: a launchd user environment or a shell launcher)
-and restart transit.
+and restart transit. If only sessions with sidechain keys misbehave, set `TRANSIT_RENDER_GRAPH=0` the
+same way instead: those sessions then render on the audio thread, and sessions without keys keep the
+workers.

@@ -190,7 +190,8 @@ is gone.
   deliver each strip's deferred MIDI, send it into its cell and `publish`, `wake`, render the
   callback's own strips (live input, hardware), `finish` by the deadline (three quarters of the
   period from `render_active`'s entry), bring home and mix only `Mixed` and `Inline`, defer the MIDI
-  of `Busy` strips. Taken only on the audio thread, without sidechain keys, with at least
+  of `Busy` strips. Taken only on the audio thread, without sidechain keys (a keyed plan takes
+  the task-graph path by default, `strip_pool::graph`, #174), with at least
   `PARALLEL_STRIPS` phase-1 strips, or while a strip is still away.
 - **Cells, not `unsafe`.** A strip's state moves into a `Mutex<Job>` cell for the render. Every
   access is `try_lock`: the slot protocol gives the strip to one thread, so a refused borrow is a
