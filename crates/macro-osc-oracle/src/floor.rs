@@ -3,7 +3,7 @@
 //! The floor is the residual of the oracle against itself: the same sweep rendered twice with the
 //! same seed, in one process and in a second process (`tests/self_floor.rs`). It was measured as
 //! bit-identical (`-inf` dBFS, zero differing samples) on Windows x86-64 (MSVC) on 2026-10-29; Linux
-//! and macOS are proved by the CI step, where `tests/self_floor.rs` asserts the same on every run.
+//! and macOS are proved by CI, whose workspace test runs `tests/self_floor.rs` on every run.
 //! A gate on the port (#195) starts from an exact reference: whatever residual the port shows is
 //! the port's.
 //!
@@ -43,7 +43,7 @@ impl RunnerFamily {
     }
 
     /// The oracle's self-comparison floor on this family, peak and RMS, dBFS: `-inf` (bit-identical),
-    /// measured on Windows x86-64 and proved on Linux and macOS by the CI step; `None` for any other
+    /// measured on Windows x86-64 and proved on Linux and macOS by CI; `None` for any other
     /// target.
     #[must_use]
     pub const fn self_floor_dbfs(self) -> Option<f64> {

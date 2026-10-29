@@ -8,6 +8,7 @@
 - Linux, the native JACK backend (`--features native-jack`, below): also `libjack-jackd2-dev`, for the build only.
 - Linux, headless test runs (CI, containers, WSL2): the egui tests render with wgpu and need a Vulkan adapter. Install `mesa-vulkan-drivers libvulkan1` (Mesa's CPU driver, lavapipe) and run with `WGPU_BACKEND=vulkan VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.x86_64.json` (`VK_DRIVER_FILES` is the newer name for the same setting). CI sets both. On WSL2 the default GL path can segfault, so set these there too.
 - macOS: the Xcode Command Line Tools (`xcode-select --install`).
+- A C++ compiler for workspace-wide builds and tests (`cargo build`/`cargo test` at the root or `--workspace`): the dev-only null-test oracle `crates/macro-osc-oracle` compiles vendored C++ (ADR 0033). MSVC on Windows (the Build Tools above), `g++` on Linux (`sudo apt install g++`), the Xcode Command Line Tools on macOS. The app itself (`-p transit`) never builds or links it.
 
 ## Build and run
 
