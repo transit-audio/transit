@@ -1,0 +1,29 @@
+[package]
+name = "transit-macro-osc-oracle"
+description = "Dev-only null-test oracle: the original macro-oscillator C++ DSP built for tests and CI, never linked into the app (ADR 0033, #194)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+# transit's own code is MIT OR Apache-2.0; the vendored C++ under vendor/ is MIT (LICENSE-THIRD-PARTY).
+license = "(MIT OR Apache-2.0) AND MIT"
+publish = false
+build = "build.rs"
+
+[build-dependencies]
+cc = "1"
+
+# Mirrors `[workspace.lints]`, except that `unsafe` is allowed for the FFI module only (src/ffi.rs);
+# every other module carries `#![forbid(unsafe_code)]` (ADR 0013 rule, ADR 0033 implementation note).
+[lints.rust]
+unsafe_code = "allow"
+unsafe_op_in_unsafe_fn = "forbid"
+missing_docs = "deny"
+
+[lints.clippy]
+dbg_macro = "warn"
+todo = "warn"
+too_many_arguments = "allow"
+type_complexity = "allow"
+undocumented_unsafe_blocks = "deny"
+missing_safety_doc = "deny"

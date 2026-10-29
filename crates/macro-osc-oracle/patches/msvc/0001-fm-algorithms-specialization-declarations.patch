@@ -1,0 +1,23 @@
+--- plaits/dsp/fm/algorithms.h
++++ plaits/dsp/fm/algorithms.h
+@@ -195,17 +195,9 @@ class Algorithms {
+   DISALLOW_COPY_AND_ASSIGN(Algorithms);
+ };
+ 
+-/* static */
+-template<> const uint8_t Algorithms<4>::opcodes_[][4];  // From DX100
+-
+-/* static */
+-template<> const Algorithms<4>::RendererSpecs Algorithms<4>::renderers_[];
+-
+-/* static */
+-template<> const uint8_t Algorithms<6>::opcodes_[][6];  // From DX7
+-
+-/* static */
+-template<> const Algorithms<6>::RendererSpecs Algorithms<6>::renderers_[];
++// MSVC (C2737) reads a declaration of an explicit specialization of a static data member as a
++// definition without an initializer. The four declarations are removed for MSVC only; the
++// specializations themselves are defined in algorithms.cc.
+ 
+ }  // namespace fm
+ 
