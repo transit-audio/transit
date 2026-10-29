@@ -88,3 +88,7 @@ Accepted with ADR 0021 (approved by the project owner on 2026-10-24).
 
 - The Linux-only crate `crates/audio-jack` (`transit-audio-jack`) may contain `unsafe` for the JACK client API, in `ffi.rs` and `callback.rs` only; every other module keeps `unsafe` denied.
 - Every `unsafe` block carries a `// SAFETY:` comment quoting `jack.h` (or `types.h`) for the rule it relies on, and the crate gets a quoted-unsafe refutation review before merge (ADR 0009).
+
+## Amendment 2026-10-29 (ADR 0033): the dev-only C++ oracle
+
+The dev-only oracle crate `crates/macro-osc-oracle` (`transit-macro-osc-oracle`, #194) is on the xtask unsafe allowlist under ADR 0033's oracle rule, with its FFI `unsafe` confined to `src/ffi.rs` and never linked into the app (`DEV_ONLY` in `xtask/src/main.rs`); the quoted-unsafe refutation review requirement (ADR 0009) is unchanged.
