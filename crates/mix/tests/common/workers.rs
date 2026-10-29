@@ -155,6 +155,20 @@ impl Plugin for ContinuityPlugin {
         }
         sh.inside.store(false, Ordering::Release);
     }
+    /// The tone's phase, the transport and the continuity instrument's whole record (its report
+    /// with the notes and pedals held now, its holes, every event with the sample it landed on).
+    fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
+        h.write_u32(self.phase.to_bits());
+        h.write_u64(self.transport);
+        h.write_usize(self.events.len());
+        let inst = self.shared.inst.lock().unwrap();
+        h.write(format!("{:?}{:?}", inst.report(), inst.holes()).as_bytes());
+        for l in inst.trace() {
+            h.write_u64(l.sample);
+            h.write(&[l.event.status, l.event.data1, l.event.data2]);
+            h.write_u32(l.event.offset);
+        }
+    }
 }
 
 /// A realtime engine with `instruments` continuity instruments (and `audio` audio strips with a

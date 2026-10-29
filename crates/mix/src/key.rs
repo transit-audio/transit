@@ -94,6 +94,19 @@ impl KeyLine {
         self.tap = old.tap;
     }
 
+    /// Test seam (issue #210): the line's history, its write position and its read.
+    #[cfg(feature = "testing")]
+    pub(crate) fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
+        crate::fingerprint::line_print(&self.line, h);
+        crate::fingerprint::edge_print(&self.tap, h);
+    }
+
+    /// Test seam (issue #210): the line's flags and positions, readable.
+    #[cfg(feature = "testing")]
+    pub(crate) fn summary(&self) -> String {
+        format!("{} {:?}", crate::fingerprint::line_summary(&self.line), self.tap)
+    }
+
     /// Test view: whether the line holds history (it was written and not idled since), its write
     /// position (it moves with every block written) and how much history it holds (a reset
     /// starts it again from one block).
@@ -117,6 +130,15 @@ pub(crate) struct KeyIn {
 }
 
 impl KeyIn {
+    /// Test seam (issue #210): this block's delay, whether the insert ran, and the line.
+    #[cfg(feature = "testing")]
+    pub(crate) fn fingerprint(&self, h: &mut dyn std::hash::Hasher) {
+        h.write_u16(self.slot);
+        h.write_usize(self.want);
+        h.write_u8(u8::from(self.ran));
+        self.line.fingerprint(h);
+    }
+
     pub(crate) fn new(slot: u16, ch: usize, cap: usize, block: usize) -> Self {
         KeyIn { slot, want: 0, line: KeyLine::new(ch, cap, block), ran: false, scratch: (0..ch).map(|_| Vec::with_capacity(block)).collect() }
     }
@@ -236,6 +258,24 @@ impl KeyBank {
     #[cfg(test)]
     pub(crate) fn lines_of(&self, keyed: usize) -> Vec<(bool, usize, usize)> {
         self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed).map(|e| e.line.history()).collect()
+    }
+
+    /// Test seam (issue #210): the entries keyed at `keyed`, in bank order: each one's delay
+    /// and line (an entry lent to a render worker's job is skipped: the strip is away).
+    #[cfg(feature = "testing")]
+    pub(crate) fn fingerprint_of(&self, keyed: usize, h: &mut dyn std::hash::Hasher) {
+        for e in self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent) {
+            h.write_u16(e.spec.slot);
+            h.write_usize(e.want);
+            e.line.fingerprint(h);
+        }
+    }
+
+    /// Test seam (issue #210): the entries keyed at `keyed`, readable.
+    #[cfg(feature = "testing")]
+    pub(crate) fn summary_of(&self, keyed: usize) -> Vec<String> {
+        let mine = self.entries.iter().filter(|e| usize::from(e.spec.keyed) == keyed && !e.lent);
+        mine.map(|e| format!("key entry (slot {}): want {}, {}", e.spec.slot, e.want, e.line.summary())).collect()
     }
 
     /// Delay compensation for the keys of the strip at table index `at` (`t`'s): sets the delay

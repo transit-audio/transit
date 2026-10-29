@@ -1127,6 +1127,8 @@ fn apply_pending(st: &mut Strip, flags: u8, events: &EngineEvents) {
 
 /// The graph path (issue #174): a keyed plan's phase-1 strips as a task graph.
 mod graph;
+#[cfg(feature = "testing")]
+mod seam;
 
 #[cfg(test)]
 pub(crate) mod tests;

@@ -1203,3 +1203,5 @@ pub(crate) fn message_from_midi1(msg: [u8; 3]) -> Option<Message> {
 
 mod engine;
 pub(crate) use engine::EngineEvents;
+#[cfg(feature = "testing")]
+mod seam;

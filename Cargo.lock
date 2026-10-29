@@ -4279,6 +4279,7 @@ dependencies = [
  "transit-clap-host",
  "transit-dsp",
  "transit-midi",
+ "transit-mix",
  "transit-model",
  "transit-rt",
  "transit-time",

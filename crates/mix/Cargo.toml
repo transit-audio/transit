@@ -20,8 +20,14 @@ transit-rt.workspace = true
 log.workspace = true
 rayon.workspace = true
 
+[features]
+# Test seams (state fingerprints, muted serial blocks, the deterministic deadline; issue #210);
+# never enabled by the app.
+testing = ["transit-dsp/testing"]
+
 [dev-dependencies]
 transit-rt = { workspace = true, features = ["testing"] }
+transit-mix = { path = ".", features = ["testing"] }
 transit-clap-host = { workspace = true, features = ["test-hooks"] }
 
 [lints]

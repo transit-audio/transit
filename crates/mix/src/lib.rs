@@ -82,6 +82,9 @@ mod compile;
 mod events;
 mod external;
 mod external_midi;
+/// Test seam (issue #210): strip state fingerprints.
+#[cfg(feature = "testing")]
+mod fingerprint;
 mod graph;
 mod hardware;
 mod instance;
@@ -123,6 +126,8 @@ pub use events::{
 };
 pub use external::{ExternalReport, ExternalState, external_report};
 pub use external_midi::{ExternalMidi, external_midi_events};
+#[cfg(feature = "testing")]
+pub use fingerprint::{Fnv, StripPrint};
 pub use hardware::{HardwareReport, HardwareState, hardware_report};
 pub use instance::{
     InstanceSpec, NewInstance, create_instance, create_instance_with, creating_instance, creation_line, instance_specs, realtime_instance_specs,
@@ -153,6 +158,7 @@ pub use render_pool::{
 use routing::{
     MixOut, PdcWalk, is_aux, live, log_loops, path_need, pdc_visit, processing_order, receives_solo, route_into, strip_channels, strip_format,
 };
+
 pub use scope::{INSTRUMENT_UID, SCOPE_FRAMES, ScopeHub, ScopeTap};
 use sink::Sink;
 pub use sink::{MAX_SINK_CHANNELS, SinkPlan, SinkSpec, plan_sinks, unresolved_routes};
