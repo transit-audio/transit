@@ -3,18 +3,19 @@
 ## Every change
 
 ```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings
+cargo test --locked --workspace --features transit/native-wasapi,transit/native-asio --no-fail-fast
+cargo test -p transit-rt --release
 cargo xtask layers      # crate layering and the no-UI-below-L6 rule (xtask/src/main.rs, LAYERS)
-cargo xtask file-size   # no Rust file over 1500 lines; also part of `cargo xtask layers` (xtask/src/file_size.rs)
 cargo xtask assets      # every bundled asset has a row in ATTRIBUTION.md
 cargo xtask timing      # E49-class timing assertions in tests (xtask/src/timing.rs)
+cargo xtask file-size   # no Rust file over 1500 lines; also part of `cargo xtask layers` (xtask/src/file_size.rs)
 ```
 
-Other `xtask` commands: `cargo xtask rt-targets` (cross-target check of `crates/rt`; run it when you
-touch that crate), `cargo xtask ci` (the CI sequence). The `wasm` gate is retired ([ADR 0032](../../adr/0032-transit-ships-a-desktop-app-only.md)):
-transit has no web build.
+Also `cargo xtask rt-targets` (cross-target check) when `crates/rt` or `crates/mix` changed. The
+Linux job of `.github/workflows/ci.yml` is the Linux compile proof. transit ships a desktop app only
+([ADR 0032](../../adr/0032-transit-ships-a-desktop-app-only.md)): there is no web or wasm32 build, gate or CI job.
 
 ## Which checkout a gate checks
 
@@ -24,9 +25,9 @@ A gate checks the checkout `cargo xtask` is run from, not the one the xtask bina
 
 Cargo's fingerprint for a workspace member records the source paths of whichever checkout built it last. With a target directory shared between the clone and its worktrees, the other checkout's files are unchanged, so the unit counts as fresh and the old binary is reused (#159). Observed 2026-10-27: a test binary that lacked a new module's tests, and an `xtask` running another branch's ratchet table.
 
-- The clone's target directory (`E:/transit/target`) is used only by builds run from the clone: the merge-chain gates and the dev build.
-- Worktrees use one separate shared target directory for pre-hand-back checks. After the first run, check the test count of the crate you changed against what you expect.
-- A Codex worker keeps its own target directory.
+- The clone's target directory is used only by builds run from the clone: the merge-chain gates and the dev build.
+- Worktrees use one separate target directory for pre-hand-back checks, and agents working in worktrees must not share a target directory concurrently (stale or missing artifacts, E0463). After the first run, check the test count of the crate you changed against what you expect.
+- An agent that runs alongside others keeps its own target directory.
 - The chain reports per-crate test counts for the crates a batch touched, so a stale binary shows up as a count that does not match the implementer's report.
 
 ## File-size budget
@@ -63,6 +64,12 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 - A playback or UI test that renders four or more strips on the audio thread takes the worker path by
   default now. Such a test calls `MixEngine::force_serial(true)` unless it tests the workers, so a loaded
   CI runner cannot silence a strip for a block and fail the test (E49 class).
+- A failing test is never rerun to make it pass, and a chain never reruns a failed test even to
+  capture its message: read the output, report it verbatim and bug-hunt the root cause before any test
+  change. Three test defects were found this way on 2026-10-29, and no product defect. The escape
+  records are in [`docs/escapes`](../../escapes/), and the process is in [`escape-record.md`](escape-record.md).
+- A default changes only on a measurement on the reference hardware. Benchmarks and the decisions
+  they made are in [`docs/benchmarks/README.md`](../../benchmarks/README.md).
 - A test failure blocks a merge. A suspected flake needs a tracked issue and a green re-run on the
   failing platform before the change merges; "passes locally" or "passes on re-run elsewhere" is not
   enough. The CI conclusion after a push is itself a gate: check it, and a red run is a failure until
