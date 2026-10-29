@@ -2,7 +2,7 @@
 
 - **Status:** proposed 2026-10-29
 - **Date:** 2026-10-29
-- **Reopen when:** zones per member are needed, groups cannot carry the macro model, or keyed plans move off the audio thread (#174) and change the render path.
+- **Reopen when:** groups cannot carry the macro model or the zones, or keyed plans move off the audio thread (#174) and change the render path.
 
 ## Context
 
@@ -19,10 +19,11 @@ This is a design to be refined, kept short.
 - A member's own chain stays ordinary inserts.
 - A rack serializes as a group with its routing. Nothing new is stored per instrument.
 - The render path is the existing group sum. Keyed plans stay on the audio thread until #174.
+- Each member has a key zone and a velocity zone, with a fade range at each edge, as in Ableton's Instrument Rack (the maintainer chose Ableton's way here, 2026-10-29); a note goes to every member whose zones contain it, scaled by the fades. Logic's Track Stack has no zones, so this is the one place the rack goes past what the two agree on.
 
 ### Open questions
 
-- Key and velocity zones per member. Ableton has them and Logic does not, so defer.
+- Chain select zones (Ableton's third zone type, a macro that picks members): not in the first version.
 - Macro curve mapping.
 - A rack preset format, which ties to #191 (session bundles).
 
