@@ -332,6 +332,10 @@ pub struct StripFaults {
     /// Deferred-MIDI rings that overflowed past their release class: the strip got All Sound
     /// Off, All Notes Off and sustain off.
     pub midi_silences: u64,
+    /// Strips (and auxes) skipped for a block because a sidechain key source they depend on had
+    /// no result (#174, the task graph): silent like an overrun, counted apart from the overruns,
+    /// which count the source once.
+    pub upstream_missed: u64,
     /// The strips with the most overruns, most first (#169): at most [`TOP_STRIPS`], only strips
     /// with an overrun, the rest `None`.
     pub top_strips: [Option<StripFigure>; TOP_STRIPS],
@@ -374,6 +378,12 @@ pub struct StripFigure {
     pub cost_ns: u64,
     /// The worst recent render cost (a decaying maximum), nanoseconds; 0 without a history.
     pub worst_ns: u64,
+    /// Blocks the strip was skipped because a key source it depends on missed (#174; not in
+    /// [`StripFigure::overruns`]).
+    pub upstream_missed: u64,
+    /// The track index of the strip the last of those misses came from (its origin), as
+    /// [`StripFigure::track`] names one; `u32::MAX` for none.
+    pub upstream_origin: u32,
 }
 
 impl StripFigure {

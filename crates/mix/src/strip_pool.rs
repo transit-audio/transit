@@ -20,8 +20,10 @@
 //!
 //! **What a worker render reads.** Only the strip and the job: no live input (a strip that reads
 //! the hardware input, an External Instrument, a hardware insert or a monitored audio track,
-//! renders on the callback while the workers run), no sidechain key (a plan with keys renders
-//! serially) and no bus (phase 1 has no aux).
+//! renders on the callback while the workers run), its sidechain keys only from its job (a plan
+//! with keys renders serially, or through the task graph of [`graph`] with
+//! `TRANSIT_RENDER_GRAPH=1`: the callback fills a keyed strip's keys when its sources are ready
+//! and lends them to its job) and no bus (phase 1 has no aux).
 //!
 //! **While a strip is away** the engine's other entry points cannot reach its instrument: events
 //! for it go to its deferred-MIDI buffer ([`StripPool::park`]), and a seek, reset, All Notes
@@ -83,9 +85,24 @@ struct Job {
     /// A one-channel stand-in for the live input (never read: such strips render on the callback).
     no_input: Vec<Vec<f32>>,
     busses: BusTable,
+    /// The strip's keys while it is away on the graph path (lent by the plan's bank; empty
+    /// otherwise), with room for every keyed insert of a strip.
     keys: KeyBank,
-    /// The generation of the last render of this cell.
-    rendered: u64,
+    /// The graph generation and task identity of the publish (graph path; 0 otherwise).
+    graph: u64,
+    task: u64,
+    /// What the last render of this cell was for.
+    rendered: Stamp,
+}
+
+/// What a job's render was for: the block generation, and on the graph path the graph
+/// generation and the task identity it was published with (ADR 0029 amendment section 2). A
+/// result unlocks its dependents only when all three match.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct Stamp {
+    pub(crate) graph: u64,
+    pub(crate) task: u64,
+    pub(crate) block: u64,
 }
 
 impl Job {
@@ -103,8 +120,10 @@ impl Job {
             duplex: false,
             no_input: vec![Vec::new()],
             busses: BusTable::default(),
-            keys: KeyBank::default(),
-            rendered: 0,
+            keys: KeyBank::with_room(transit_model::INSERT_SLOTS),
+            graph: 0,
+            task: 0,
+            rendered: Stamp::default(),
         }
     }
 
@@ -113,8 +132,9 @@ impl Job {
     /// phase marker (#162) when the callback renders the strip itself (inline), `None` on a
     /// worker: only the audio thread writes it.
     fn render(&mut self, generation: u64, marker: Option<&transit_rt::phase_marker::PhaseMarker>) {
-        let Job { strip, session, pos, frames, any_solo, monitor_only, recording, no_suspend, frame, duplex, no_input, busses, keys, rendered } =
-            self;
+        let Job {
+            strip, session, pos, frames, any_solo, monitor_only, recording, no_suspend, frame, duplex, no_input, busses, keys, graph, task, rendered,
+        } = self;
         if let Some(s) = session.as_deref()
             && let Some(t) = s.tracks.get(usize::from(strip.track))
         {
@@ -125,7 +145,7 @@ impl Job {
             guarded(strip, |st| process_strip(t, st, &block));
             // Only a strip actually rendered carries this block's generation; the callback mixes
             // nothing else (a counted fault, never stale audio).
-            *rendered = generation;
+            *rendered = Stamp { graph: *graph, task: *task, block: generation };
         }
     }
 }
@@ -211,6 +231,10 @@ struct Counters {
     deadline_frames: AtomicU64,
     deadline_rate: AtomicU64,
     deadline_overridden: AtomicBool,
+    /// Strips skipped because a key source missed (#174): the worker set's count, mirrored.
+    upstream_missed: AtomicU64,
+    /// Auxes skipped because a phase-1 key source missed (#174).
+    upstream_tail: AtomicU64,
 }
 
 /// Reads an engine's [`StripFaults`] from any thread (relaxed loads; each figure exact on its own).
@@ -255,9 +279,12 @@ impl StripFaultsReader {
             midi_deferred: d.deferred,
             midi_dropped: d.dropped,
             midi_silences: d.silences,
+            upstream_missed: r(&c.upstream_missed).saturating_add(r(&c.upstream_tail)),
             top_strips: self.figures.top_overruns::<TOP_STRIPS>().map(|t| {
                 t.map(|(i, f)| StripFigure {
                     track: self.tracks.get(i).map_or(u32::MAX, |t| t.load(Ordering::Relaxed)),
+                    upstream_missed: f.upstream_missed,
+                    upstream_origin: f.upstream_origin.and_then(|o| self.tracks.get(o)).map_or(u32::MAX, |t| t.load(Ordering::Relaxed)),
                     overruns_busy: f.overruns_busy,
                     overruns_late: f.overruns_late,
                     overruns_unstarted: f.overruns_unstarted,
@@ -285,7 +312,11 @@ impl StripRunner for Runner {
         #[cfg(test)]
         tests::late_panic(strip);
         // A worker never writes the callback's phase marker (#162).
-        if !self.cells.with(strip, |job| job.render(generation, None)) {
+        if !self.cells.with(strip, |job| {
+            job.render(generation, None);
+            #[cfg(test)]
+            tests::corrupt_stamp(strip, &mut job.rendered);
+        }) {
             self.counters.conflicts.fetch_add(1, Ordering::Relaxed);
         }
     }
@@ -453,6 +484,11 @@ impl StripPool {
             figures: self.set.figures(),
             tracks: Arc::clone(&self.tracks),
         }
+    }
+
+    /// The strips the pool has cells for (strips past them render on the callback).
+    pub(crate) fn capacity(&self) -> usize {
+        self.away.len()
     }
 
     /// Strip `i` is in its cell.
@@ -687,7 +723,7 @@ impl StripPool {
     /// into its instrument at once, so an event that arrives next (admitted directly, the strip
     /// being home) lands behind the older ones: a note-off is never admitted ahead of its parked
     /// note-on. True when every strip is home.
-    pub(crate) fn settle(&mut self, strips: &mut [Strip], events: &mut EngineEvents, s: &Session, block_len: usize) -> bool {
+    pub(crate) fn settle(&mut self, strips: &mut [Strip], keys: &mut KeyBank, events: &mut EngineEvents, s: &Session, block_len: usize) -> bool {
         let clock = BlockClock { frame: events.next_frame, frames: block_len };
         let g = self.generation + 1;
         let mut home = true;
@@ -700,6 +736,8 @@ impl StripPool {
                 home = false;
                 continue;
             }
+            // Its keys too, when it went away on the graph path.
+            self.take_keys_back(i, keys);
             self.deliver(i, st, g, &clock, events, s);
         }
         home
@@ -813,14 +851,7 @@ impl StripPool {
             }
         }
         self.counters.callback_renders.fetch_add(callback, Ordering::Relaxed);
-        let budget = b.budget.unwrap_or_else(|| self.strip_budget(b.frames, b.sample_rate));
-        // A test's budget override wins; then the callback's deadline (playback computes it with
-        // this pool's share, `MixEngine::strip_deadline_percent`); then the block's entry. One
-        // deadline: `finish` waits to it and its inline admission measures the time left to it.
-        let deadline = match (b.budget, b.deadline) {
-            (None, Some(d)) => d,
-            _ => b.start + budget.min(Duration::from_secs(3600)),
-        };
+        let deadline = self.deadline(b);
         let cells_ref = &self.cells;
         let report = self.set.finish(deadline, |i| {
             // Reclaimed by the callback: no worker can hold the cell.
@@ -836,7 +867,7 @@ impl StripPool {
             match outcome {
                 Outcome::Mixed | Outcome::Inline => {
                     let mut rendered = 0;
-                    self.cells.with(i, |job| rendered = job.rendered);
+                    self.cells.with(i, |job| rendered = job.rendered.block);
                     if self.bring_home(i, st, events) && rendered != g {
                         // A result of another block (a protocol fault): never mixed.
                         self.counters.stale.fetch_add(1, Ordering::Relaxed);
@@ -912,6 +943,18 @@ impl StripPool {
         true
     }
 
+    /// The strips' deadline of block `b`. A test's budget override wins; then the callback's
+    /// deadline (playback computes it with this pool's share, `MixEngine::strip_deadline_percent`);
+    /// then the block's entry. One deadline: `finish` waits to it and its inline admission
+    /// measures the time left to it.
+    fn deadline(&self, b: &PoolBlock<'_>) -> Instant {
+        let budget = b.budget.unwrap_or_else(|| self.strip_budget(b.frames, b.sample_rate));
+        match (b.budget, b.deadline) {
+            (None, Some(d)) => d,
+            _ => b.start + budget.min(Duration::from_secs(3600)),
+        }
+    }
+
     /// Sends strip `i` away into its cell with the block's inputs. False when the cell's lock was
     /// not free (a counted fault; the strip stays home and renders on the callback).
     fn send(&mut self, i: usize, st: &mut Strip, b: &PoolBlock<'_>) -> bool {
@@ -927,6 +970,8 @@ impl StripPool {
             job.no_suspend = b.live.no_suspend;
             job.frame = b.live.frame;
             job.duplex = !b.live.input.is_empty();
+            job.graph = 0;
+            job.task = 0;
         });
         if !ok {
             self.counters.conflicts.fetch_add(1, Ordering::Relaxed);
@@ -951,6 +996,7 @@ impl StripPool {
         c.refused_worst_case.store(st.inline_refused_worst_case, Ordering::Relaxed);
         c.refused_recent_overrun.store(st.inline_refused_recent_overrun, Ordering::Relaxed);
         c.misuse.store(st.misuse, Ordering::Relaxed);
+        c.upstream_missed.store(st.upstream_missed, Ordering::Relaxed);
         if overrun {
             c.overrun_blocks.fetch_add(1, Ordering::Relaxed);
         }
@@ -1063,6 +1109,9 @@ fn apply_pending(st: &mut Strip, flags: u8, events: &EngineEvents) {
         release_instrument(st);
     }
 }
+
+/// The graph path (issue #174): a keyed plan's phase-1 strips as a task graph.
+mod graph;
 
 #[cfg(test)]
 pub(crate) mod tests;

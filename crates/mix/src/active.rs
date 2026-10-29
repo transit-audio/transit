@@ -8,6 +8,9 @@ use super::plan::{ActivePlan, Attach, CellKind, CellLoc, PlanTables, Shape};
 use super::*;
 use transit_rt::phase_marker::Phase;
 
+/// The keys a pool block hands its plain path when the graph path fills the plan's own.
+static NO_KEYS: KeyBank = KeyBank::EMPTY;
+
 /// The Session of an engine without a plan.
 static NO_METER: std::sync::LazyLock<StripMeter> = std::sync::LazyLock::new(StripMeter::default);
 static NO_SESSION: std::sync::LazyLock<Arc<Session>> = std::sync::LazyLock::new(|| Arc::new(Session::default()));
@@ -236,7 +239,7 @@ impl MixEngine {
         // Every strip must be home: a strip a render worker holds cannot move (ADR 0029). Playback
         // defers adoption until then ([`MixEngine::render_workers_settled`]).
         if let Some(pool) = self.pool.as_mut() {
-            if !pool.settle(&mut active.tables.strips, &mut self.events, &active.session, self.max_block) {
+            if !pool.settle(&mut active.tables.strips, &mut active.tables.keys, &mut self.events, &active.session, self.max_block) {
                 return reject(env, RejectReason::StripsInFlight, active);
             }
             // Deferred MIDI goes into the instances now, so it moves with them.
@@ -422,8 +425,10 @@ impl MixEngine {
             m.enter(Phase::Mixdown, None);
         }
         tables.clear_block(frames);
-        tables.align_keys(s, pos, !self.input.is_empty(), status);
-        let PlanTables { strips, phase1, aux_end, layers, keys, busses, main, main_fmt, main_meter, sinks, io, .. } = tables;
+        // A strip a render worker holds keeps the delays it went away with (its keys are lent).
+        let pool_view = self.pool.as_ref();
+        tables.align_keys(s, pos, !self.input.is_empty(), status, &|i| pool_view.is_some_and(|p| p.is_away(i)));
+        let PlanTables { strips, phase1, aux_end, layers, keys, graph, busses, main, main_fmt, main_meter, sinks, io, .. } = tables;
         let (phase1, aux_end) = (*phase1, *aux_end);
         let main_fmt = *main_fmt;
         let any_solo = s.tracks.iter().any(|t| t.mixer.solo && !t.inactive);
@@ -451,16 +456,25 @@ impl MixEngine {
         //
         // With render workers (the default, ADR 0029) and no sidechain key, the strips go through the
         // worker set instead, under the block's deadline; a strip a worker still holds comes back
-        // that way whatever the switches say.
+        // that way whatever the switches say. A plan with keys goes through them as a task graph
+        // (#174) only with the graph switch on ([`MixEngine::force_graph`], `TRANSIT_RENDER_GRAPH`)
+        // and no more phase-1 strips than the pool has cells; else serially, as before.
+        let keyed = !keys.is_empty();
         let pooled = match (self.pool.as_mut(), start) {
             (Some(pool), Some(start))
                 if on_audio_thread()
-                    && (pool.any_away() || (!self.serial && !MixEngine::serial_forced() && keys.is_empty() && p1.len() >= PARALLEL_STRIPS)) =>
+                    && (pool.any_away()
+                        || (!self.serial
+                            && !MixEngine::serial_forced()
+                            && (!keyed || (MixEngine::graph_enabled() && p1.len() <= pool.capacity()))
+                            && p1.len() >= PARALLEL_STRIPS)) =>
             {
                 let block = strip_pool::PoolBlock {
                     session: &*session,
                     busses: &*busses,
-                    keys: &*keys,
+                    // The plain path runs only for a plan without keys; the graph path fills and
+                    // reads the plan's own.
+                    keys: &NO_KEYS,
                     live: &live_in,
                     pos,
                     frames,
@@ -470,7 +484,11 @@ impl MixEngine {
                     budget: self.strip_deadline,
                     deadline: callback_deadline,
                 };
-                pool.render(&block, p1, &mut self.events);
+                if keyed {
+                    pool.render_graph(&block, p1, &mut self.events, keys, graph);
+                } else {
+                    pool.render(&block, p1, &mut self.events);
+                }
                 true
             }
             _ => false,
@@ -527,6 +545,14 @@ impl MixEngine {
             let Some(st) = rest.first_mut() else { continue };
             let Some(t) = track(st).filter(|t| live(t)) else { continue };
             let at = phase1.saturating_add(k);
+            // The graph's rule on the serial tail (#174): an aux keyed from a phase-1 strip that
+            // missed this block is skipped (silent, not metered, its lines neither run nor idled).
+            if let Some(p) = pool
+                && keys.sources_of(at).any(|j| j < phase1 && (p.is_silent(j) || p.is_away(j)))
+            {
+                p.note_tail_skip();
+                continue;
+            }
             let strip = |i: usize| match i.checked_sub(phase1) {
                 None => p1.get(i),
                 Some(j) => before.get(j).filter(|b| track(b).is_some_and(live)),
@@ -595,7 +621,9 @@ impl PlanTables {
         }
     }
 
-    fn align_keys(&mut self, s: &Session, pos: Samples, duplex: bool, status: &mut PlanStatus) {
+    /// `away`: the strip at that table index is held by a render worker (its keys and its
+    /// chain are in its cell): its delays stay as they were until it is home.
+    fn align_keys(&mut self, s: &Session, pos: Samples, duplex: bool, status: &mut PlanStatus, away: &dyn Fn(usize) -> bool) {
         let PlanTables { strips, phase1, aux_end, keys, busses, sinks, .. } = self;
         let (phase1, aux_end) = (*phase1, *aux_end);
         let track = |st: &Strip| s.tracks.get(usize::from(st.track));
@@ -620,7 +648,7 @@ impl PlanTables {
                 if aux && let Route::Bus(b) = &t.mixer.input {
                     arrive = busses.bus(*b).map_or(0, |x| x.arrival);
                 }
-                if alive {
+                if alive && !away(at) {
                     let from = |sp: &KeySpec| match sp.from {
                         KeyEnd::Strip(j) => before.get(usize::from(j)).filter(|b| track(b).is_some_and(live)).map_or(0, |b| b.pdc_out),
                         KeyEnd::Bus(b) => {
@@ -740,6 +768,8 @@ impl MixEngine {
     #[doc(hidden)]
     pub fn start_render_workers_with(&mut self, strips: usize, workers: usize) -> usize {
         if self.pool.is_none() && !on_audio_thread() {
+            // The task graph's switch is read here too, once per process (#174).
+            crate::graph::init_graph_switch();
             let promote = !render_pool::env_flag(RENDER_NO_PRIORITY_ENV, "SOUNDCRAFT_RENDER_NO_PRIORITY");
             // The environment is read here, once per process (never on the audio thread). The
             // device's callback is not known yet: the engine's largest block at its plan's rate
@@ -853,7 +883,7 @@ impl MixEngine {
     /// workers. Allocation-free and non-blocking.
     pub fn render_workers_settled(&mut self) -> bool {
         match (self.pool.as_mut(), self.plan.as_deref_mut()) {
-            (Some(pool), Some(p)) => pool.settle(&mut p.tables.strips, &mut self.events, &p.session, self.max_block),
+            (Some(pool), Some(p)) => pool.settle(&mut p.tables.strips, &mut p.tables.keys, &mut self.events, &p.session, self.max_block),
             _ => true,
         }
     }

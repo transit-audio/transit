@@ -81,6 +81,16 @@ pub(crate) fn late_panic(strip: usize) {
     }
 }
 
+/// Test hook (#174): the strip index whose every render gets a stamp of another task, so its
+/// completion identity never matches. `usize::MAX`: none.
+pub(crate) static CORRUPT_STAMP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
+
+pub(crate) fn corrupt_stamp(strip: usize, stamp: &mut Stamp) {
+    if CORRUPT_STAMP.load(Ordering::Relaxed) == strip {
+        stamp.task ^= 1;
+    }
+}
+
 /// A late result whose runner panicked makes its strip suspect at `begin_block`; the pool keeps
 /// that same instance silent (never republished) until a plan replaces it.
 #[test]

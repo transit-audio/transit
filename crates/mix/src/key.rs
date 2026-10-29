@@ -147,6 +147,9 @@ pub(crate) struct KeyAlignment {
 }
 
 impl KeyBank {
+    /// A bank of no entries.
+    pub(crate) const EMPTY: KeyBank = KeyBank { entries: Vec::new() };
+
     /// The entries for `specs`, each with a silent buffer of `block` frames and a delay line
     /// holding up to `cap_of(keyed strip)` samples.
     pub(crate) fn new(specs: &[KeySpec], block: usize, cap_of: impl Fn(u16) -> usize) -> Self {
@@ -217,11 +220,6 @@ impl KeyBank {
             e.lent = false;
         }
         from.entries.clear();
-    }
-
-    /// The table indices of the strips keyed from strip `source` (each once per entry).
-    pub(crate) fn keyed_from(&self, source: usize) -> impl Iterator<Item = usize> + '_ {
-        self.entries.iter().filter(move |e| e.spec.from == KeyEnd::Strip(u16::try_from(source).unwrap_or(u16::MAX))).map(|e| usize::from(e.spec.keyed))
     }
 
     /// The strip sources of the entries keyed at table index `keyed`.

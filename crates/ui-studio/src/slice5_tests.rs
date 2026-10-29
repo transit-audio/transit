@@ -912,6 +912,8 @@ fn per_strip_overruns_and_the_pool_histograms_print_after_the_worker_figures() {
         inline_renders: 2,
         cost_ns: 85_400,
         worst_ns: 410_000,
+        upstream_missed: 0,
+        upstream_origin: u32::MAX,
     };
     let mut top = [None; transit_mix::TOP_STRIPS];
     top[0] = Some(strip(1, 3, 9, 0));
