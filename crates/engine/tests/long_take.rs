@@ -1,5 +1,9 @@
 //! A recorded take over the decode limit fails loudly and stays reachable from the session (#192).
+//! Non-Windows only: the fixture is a 4 GiB hole, which NTFS allocates (the engine unit tests cover Windows
+//! with a faked file length).
 //! One test in its own binary owns the process-wide logger.
+
+#![cfg(not(windows))]
 
 use std::io::Write;
 use std::sync::Mutex;
@@ -24,6 +28,15 @@ impl log::Log for TestLog {
     fn flush(&self) {}
 }
 
+/// Removes the directory when the test ends, passing or not.
+struct Cleanup(std::path::PathBuf);
+
+impl Drop for Cleanup {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
 /// A header-only take: an RF64 header for `frames` mono float frames at 48 kHz, then a file
 /// length that holds them as a hole (sparse), never as written bytes.
 fn header_only_take(path: &std::path::Path, frames: u64) {
@@ -39,6 +52,7 @@ fn a_take_over_the_limit_is_refused_loudly_unread_and_remembered_by_the_session(
     log::set_max_level(log::LevelFilter::Info);
     let dir = std::env::temp_dir().join(format!("long-take-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
+    let _cleanup = Cleanup(dir.clone());
     let path = dir.join("Loopback_01.wav");
     header_only_take(&path, transit_audio_io::MAX_DECODE_SAMPLES + 1_000);
 
@@ -55,22 +69,21 @@ fn a_take_over_the_limit_is_refused_loudly_unread_and_remembered_by_the_session(
     // The message says what and how long, and where the file is.
     let shown = path.display().to_string();
     let said = e.messages.last().cloned().unwrap();
-    assert!(said.contains("6.2 h of mono at 48 kHz") && said.contains("the limit is 6.2 h"), "{said}");
+    assert!(said.contains("6.21 h of mono at 48 kHz") && said.contains("the limit is 6.21 h"), "{said}");
     assert!(said.contains(&format!("The file is kept at {shown}")), "{said}");
 
     // The log has it as a warning with the same hours.
     let lines = LOG.0.lock().unwrap().clone();
-    let warn = lines.iter().find(|l| l.starts_with("WARN") && l.contains("6.2 h of mono at 48 kHz")).unwrap_or_else(|| panic!("{lines:?}"));
-    assert!(warn.contains(&shown) && warn.contains("1073742824 frames") && warn.contains("the limit is 6.2 h"), "{warn}");
+    let warn = lines.iter().find(|l| l.starts_with("WARN") && l.contains("6.21 h of mono at 48 kHz")).unwrap_or_else(|| panic!("{lines:?}"));
+    assert!(warn.contains(&shown) && warn.contains("1073742824 frames") && warn.contains("the limit is 6.21 h"), "{warn}");
 
     // The session keeps a reference that survives a save and a load, and the open says so.
     assert_eq!(e.session().unplaced_takes.len(), 1);
     let back = Session::from_json(&e.session().to_json().unwrap()).unwrap();
     assert_eq!(back.unplaced_takes, e.session().unplaced_takes);
-    assert!(back.load_notes.iter().any(|n| n.contains(&shown) && n.contains("6.2 h")), "{:?}", back.load_notes);
+    assert!(back.load_notes.iter().any(|n| n.contains(&shown) && n.contains("6.21 h")), "{:?}", back.load_notes);
 
     // The same take refused again is listed once.
     assert!(add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None).is_empty());
     assert_eq!(e.session().unplaced_takes.len(), 1);
-    std::fs::remove_dir_all(dir).unwrap();
 }
