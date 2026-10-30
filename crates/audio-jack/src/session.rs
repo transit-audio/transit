@@ -113,6 +113,12 @@ impl JackBackend {
         server_name(self.api.version().as_deref())
     }
 
+    /// The Audio Devices line about the library (#230): "JACK library: <path>" once one connected,
+    /// else every library tried with what it did; `None` before any probe.
+    pub fn library_note(&self) -> Option<String> {
+        self.api.library().map(|selection| selection.summary())
+    }
+
     /// "Native JACK (<server>)": how the Audio Devices panel names this backend over its server.
     pub fn label(&self) -> String {
         format!("Native JACK ({})", self.server_name())

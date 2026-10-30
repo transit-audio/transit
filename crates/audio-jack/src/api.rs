@@ -49,6 +49,11 @@ pub(crate) trait JackApi: Send + Sync {
     /// What the library says it is (`jack_get_version_string`, optional in jack.h): "1.9.20" for
     /// JACK 2, a text naming PipeWire for PipeWire's libjack. `None` where it is missing.
     fn version(&self) -> Option<String>;
+    /// Which library this API talks through, with every library it tried to get there (#230):
+    /// the last selection, `None` before the first, or where nothing is chosen (the fake server).
+    fn library(&self) -> Option<crate::library::Selection> {
+        None
+    }
 }
 
 /// One open client. Control-thread calls only, one thread at a time (the backend keeps it behind a

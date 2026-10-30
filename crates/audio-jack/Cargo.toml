@@ -12,7 +12,7 @@ repository.workspace = true
 # nothing links against it). Without this feature the crate is empty (its tests still build the safe
 # core over the fake server, on any platform, with no system package). jack-sys's build script asks pkg-config for `jack` on Linux, so a build with the
 # feature needs jack.pc (Debian and Ubuntu: libjack-jackd2-dev) even though libjack is not linked.
-libjack = ["dep:jack-sys"]
+libjack = ["dep:jack-sys", "dep:libloading"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 transit-audio-backend.workspace = true
@@ -20,6 +20,9 @@ log.workspace = true
 # Pinned: every bump is reviewed against the quoted `// SAFETY:` comments. `dynamic_loading` must be
 # named: 0.5.1's manifest spells its default list `default_features`, so it is not on by default.
 jack-sys = { version = "=0.5.1", features = ["dynamic_loading"], optional = true }
+# The library selection (#230) probes each candidate libjack through its own dlopen before jack-sys
+# loads one: the same libloading jack-sys uses.
+libloading = { version = "=0.7.4", optional = true }
 
 [dev-dependencies]
 transit-audio-backend.workspace = true
