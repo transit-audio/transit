@@ -172,7 +172,9 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
     }
 
     #[inline]
-    pub fn render(&mut self, parameters: &VoiceParameters, buffers: &[RefCell<&mut [f32]>; 4]) {
+    /// Renders into `buffers`: out, aux and one temporary. The firmware passes four buffer
+    /// pointers with the third and fourth the same memory, so buffer 3 is buffer 2 here.
+    pub fn render(&mut self, parameters: &VoiceParameters, buffers: &[RefCell<&mut [f32]>; 3]) {
         if self.setup() {
             // This prevents a CPU overrun, since there is not enough CPU to perform
             // both a patch setup and a full render in the time allotted for
@@ -257,8 +259,8 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
                         &a[i..],
                         &mut self.feedback_state,
                         patch.feedback as i32,
-                        &buffers[call.input_index as usize],
-                        &buffers[call.output_index as usize],
+                        &buffers[usize::min(call.input_index as usize, 2)],
+                        &buffers[usize::min(call.output_index as usize, 2)],
                     );
                 }
 
