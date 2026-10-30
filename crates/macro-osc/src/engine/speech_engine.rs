@@ -134,8 +134,9 @@ impl Engine for SpeechEngine<'_> {
                 &mut self.temp_buffer_2[..out.len()],
             );
 
-            blend = blend * blend * (3.0 - 2.0 * blend);
-            blend = blend * blend * (3.0 - 2.0 * blend);
+            // `blend *= blend * (3 - 2 blend)`, evaluated in the firmware's order.
+            blend *= blend * (3.0 - 2.0 * blend);
+            blend *= blend * (3.0 - 2.0 * blend);
 
             for (i, (out_sample, aux_sample)) in out.iter_mut().zip(aux.iter_mut()).enumerate() {
                 *aux_sample += (self.temp_buffer_1[i] - *aux_sample) * blend;

@@ -115,7 +115,8 @@ fn interpolate_phoneme_data(phoneme: f32, mut formant_shift: f32, formant_freque
     for i in 0..NUM_FORMANTS {
         let f_1 = p_1.formant[i].frequency;
         let f_2 = p_2.formant[i].frequency;
-        let mut f = (f_1.wrapping_add(f_2.wrapping_sub(f_1))) as f32 * phoneme_fractional;
+        let (f_1, f_2) = (f32::from(f_1), f32::from(f_2));
+        let mut f = f_1 + (f_2 - f_1) * phoneme_fractional;
         f *= 8.0 * formant_shift * 4294967296.0 / sample_rate_hz;
         formant_frequency[i] = f as u32;
 
