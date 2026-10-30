@@ -38,7 +38,7 @@ jobs:
       matrix:
         include:
           - { name: windows-x86_64, os: windows-latest, features: "--features transit/native-wasapi,transit/native-asio,audio-bench/native-wasapi,audio-bench/native-asio" }
-          - { name: macos-arm64, os: macos-14 }
+          - { name: macos-arm64, os: macos-15 }
           - { name: linux-x86_64, os: ubuntu-22.04, features: "--features transit/native-jack,audio-bench/native-jack" }
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
