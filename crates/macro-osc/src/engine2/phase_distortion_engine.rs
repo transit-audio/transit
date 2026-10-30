@@ -53,8 +53,8 @@ impl Engine for PhaseDistortionEngine {
         let amount = 8.0 * parameters.timbre * parameters.timbre * (1.0 - modulator_f * 3.8);
 
         // Upsample by 2x
-        let synced = &mut self.temp_buffer_1;
-        let free_running = &mut self.temp_buffer_2;
+        let synced = &mut self.temp_buffer_1[..out.len()];
+        let free_running = &mut self.temp_buffer_2[..out.len()];
         self.shaper.render(f0, modulator_f, pw, 0.0, amount, synced, true, true);
         self.modulator.render(f0, modulator_f, pw, 0.0, amount, free_running, false, true);
 

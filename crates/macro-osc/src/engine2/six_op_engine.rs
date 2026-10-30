@@ -157,7 +157,7 @@ impl Engine for SixOpEngine<'_> {
         for voice in self.voice.iter_mut() {
             self.temp_buffer.fill(0.0);
 
-            voice.render(&mut self.temp_buffer);
+            voice.render(&mut self.temp_buffer[..out.len()]);
 
             for (out_sample, temp_sample) in out.iter_mut().zip(self.temp_buffer.iter()) {
                 *out_sample = soft_clip(*out_sample + *temp_sample * 0.25);
@@ -222,8 +222,13 @@ impl<'a> FmVoice<'a> {
             return;
         }
 
-        let buffers =
-            [RefCell::new(out), RefCell::new(&mut self.temp_buffer_1), RefCell::new(&mut self.temp_buffer_2), RefCell::new(&mut self.temp_buffer_3)];
+        let n = out.len();
+        let buffers = [
+            RefCell::new(out),
+            RefCell::new(&mut self.temp_buffer_1[..n]),
+            RefCell::new(&mut self.temp_buffer_2[..n]),
+            RefCell::new(&mut self.temp_buffer_3[..n]),
+        ];
 
         self.voice.render(&self.parameters, &buffers);
     }

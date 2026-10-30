@@ -4,7 +4,8 @@
 //! 48 kHz, 12-frame blocks, a fresh engine and the same seed per point) by the port and by the
 //! oracle on the same runner, and the residual of out and aux is held to [`BOUND_DBFS`].
 //!
-//! Set `MACRO_OSC_NULL_POINTS=1` to print the residual of every point.
+//! Set `MACRO_OSC_NULL_POINTS` to print the residual and the first differing sample of every point
+//! whose label contains its value (empty: every point).
 
 #![forbid(unsafe_code)]
 
@@ -102,7 +103,7 @@ fn worse(a: Option<(Residual, String)>, r: Residual, label: String) -> Option<(R
 /// Renders the whole engine-level sweep of `model` on both sides and asserts the bound.
 fn null_engine(model: Model) {
     let session = Session::lock();
-    let verbose = std::env::var_os("MACRO_OSC_NULL_POINTS").is_some();
+    let filter = std::env::var("MACRO_OSC_NULL_POINTS").ok();
     let (mut worst_out, mut worst_aux) = (None, None);
     let mut failing = 0usize;
     let points = engine_points();
@@ -114,8 +115,14 @@ fn null_engine(model: Model) {
         if !out.within(BOUND_DBFS) || !aux.within(BOUND_DBFS) {
             failing += 1;
         }
-        if verbose {
-            println!("{} {}: out {out}; aux {aux}", model.label(), point.label());
+        if filter.as_ref().is_some_and(|f| point.label().contains(f.as_str())) {
+            println!(
+                "{} {}: out {out}{}; aux {aux}{}",
+                model.label(),
+                point.label(),
+                first_diff(&port.out, &oracle.out),
+                first_diff(&port.aux, &oracle.aux)
+            );
         }
         worst_out = worse(worst_out, out, point.label());
         worst_aux = worse(worst_aux, aux, point.label());
@@ -162,4 +169,13 @@ null_tests! {
     bass_drum => BassDrum,
     snare_drum => SnareDrum,
     hi_hat => HiHat,
+}
+
+/// The first sample whose bits differ, as `, first at <index> (port <a>, oracle <b>)`.
+fn first_diff(port: &[f32], oracle: &[f32]) -> String {
+    port.iter()
+        .zip(oracle)
+        .position(|(a, b)| a.to_bits() != b.to_bits())
+        .map(|i| format!(", first at {i} (port {:e}, oracle {:e})", port[i], oracle[i]))
+        .unwrap_or_default()
 }

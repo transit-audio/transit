@@ -76,8 +76,8 @@ impl Engine for ModalEngine {
             self.harmonics_lp,
             parameters.timbre,
             parameters.morph,
-            &mut self.temp_buffer_1,
-            &mut self.temp_buffer_2,
+            &mut self.temp_buffer_1[..out.len()],
+            &mut self.temp_buffer_2[..out.len()],
             out,
             aux,
         );

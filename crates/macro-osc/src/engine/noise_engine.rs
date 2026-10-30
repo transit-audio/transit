@@ -84,7 +84,7 @@ impl Engine for NoiseEngine {
         let q = 0.5 * semitones_to_ratio(parameters.morph * 120.0);
         let sync = trigger;
         self.clocked_noise[0].render(&mut self.rng, sync, clock_f, aux);
-        self.clocked_noise[1].render(&mut self.rng, sync, clock_f * f1 / f0, &mut self.temp_buffer);
+        self.clocked_noise[1].render(&mut self.rng, sync, clock_f * f1 / f0, &mut self.temp_buffer[..aux.len()]);
 
         let mut f0_modulation = ParameterInterpolator::new(&mut self.previous_f0, f0, out.len());
         let mut f1_modulation = ParameterInterpolator::new(&mut self.previous_f1, f1, out.len());
@@ -92,7 +92,7 @@ impl Engine for NoiseEngine {
         let mut mode_modulation = ParameterInterpolator::new(&mut self.previous_mode, parameters.harmonics, out.len());
 
         let in_1 = aux;
-        let in_2 = &self.temp_buffer;
+        let in_2 = &self.temp_buffer[..out.len()];
 
         for (out_sample, (in_1_sample, in_2_sample)) in out.iter_mut().zip(in_1.iter_mut().zip(in_2.iter())) {
             let f0 = f0_modulation.next();

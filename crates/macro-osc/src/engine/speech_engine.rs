@@ -98,7 +98,15 @@ impl Engine for SpeechEngine<'_> {
             let mut blend = group;
 
             if group <= 1.0 {
-                self.naive_speech_synth.render(rising_edge_only, f0, parameters.morph, parameters.timbre, &mut self.temp_buffer_1, aux, out);
+                self.naive_speech_synth.render(
+                    rising_edge_only,
+                    f0,
+                    parameters.morph,
+                    parameters.timbre,
+                    &mut self.temp_buffer_1[..out.len()],
+                    aux,
+                    out,
+                );
             } else {
                 self.lpc_speech_synth_controller.render(
                     &mut self.rng,
@@ -117,7 +125,14 @@ impl Engine for SpeechEngine<'_> {
                 blend = 2.0 - blend;
             }
 
-            self.sam_speech_synth.render(rising_edge_only, f0, parameters.morph, parameters.timbre, &mut self.temp_buffer_1, &mut self.temp_buffer_2);
+            self.sam_speech_synth.render(
+                rising_edge_only,
+                f0,
+                parameters.morph,
+                parameters.timbre,
+                &mut self.temp_buffer_1[..out.len()],
+                &mut self.temp_buffer_2[..out.len()],
+            );
 
             blend = blend * blend * (3.0 - 2.0 * blend);
             blend = blend * blend * (3.0 - 2.0 * blend);

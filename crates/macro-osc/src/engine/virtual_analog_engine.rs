@@ -108,7 +108,7 @@ impl Engine for VirtualAnalogEngine {
 
         let square_sync_f = note_to_frequency(parameters.note + square_sync_ratio, parameters.a0_normalized);
 
-        self.sync.render(primary_f, square_sync_f, square_pw, 1.0, 0.0, &mut self.temp_buffer, true, false);
+        self.sync.render(primary_f, square_sync_f, square_pw, 1.0, 0.0, &mut self.temp_buffer[..out.len()], true, false);
         self.variable_saw.render(auxiliary_f, saw_pw, saw_shape, out);
 
         let norm = 1.0 / (f32::max(square_gain, saw_gain));

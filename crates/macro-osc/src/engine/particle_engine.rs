@@ -86,9 +86,9 @@ impl Engine for ParticleEngine {
         }
 
         self.post_filter.set_f_q(f32::min(f0, 0.49), 0.5, FrequencyApproximation::Dirty);
-        self.post_filter.process_buffer(out, &mut self.temp_buffer, FilterMode::LowPass);
+        self.post_filter.process_buffer(out, &mut self.temp_buffer[..out.len()], FilterMode::LowPass);
 
-        out.copy_from_slice(&self.temp_buffer);
+        out.copy_from_slice(&self.temp_buffer[..out.len()]);
 
         self.diffuser.process(0.8 * diffusion * diffusion, 0.5 * diffusion + 0.25, out);
     }
