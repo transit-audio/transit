@@ -4221,6 +4221,7 @@ dependencies = [
  "proptest",
  "rustfft",
  "serde",
+ "transit-macro-osc",
 ]
 
 [[package]]

@@ -4,6 +4,7 @@ pub mod drums;
 pub mod dynamics;
 pub mod eq;
 pub mod harmonic;
+pub mod macro_osc;
 pub mod modulation;
 pub mod pitch;
 pub mod reverb;
@@ -56,4 +57,5 @@ registry! {
     synth::SYNTH_INFO => synth::SubtractiveSynth::new(),
     drums::DRUM_INFO => drums::DrumSynth::new(),
     sampler::SAMPLER_INFO => sampler::Sampler::new(),
+    macro_osc::MACRO_OSC_INFO => macro_osc::MacroOscillator::new(),
 }
