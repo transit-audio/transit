@@ -2,6 +2,7 @@
 
 // Based on MIT-licensed code (c) 2016 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
+use crate::utils::random::Random;
 use std::boxed::Box;
 use std::vec;
 
@@ -78,6 +79,7 @@ impl LpcSpeechSynthController<'_> {
     #[inline]
     pub fn render(
         &mut self,
+        rng: &mut Random,
         free_running: bool,
         trigger: bool,
         bank: i32,
@@ -161,7 +163,7 @@ impl LpcSpeechSynthController<'_> {
                 let mut new_sample = [0.0; 2];
                 let (new_sample_0, new_sample_1) = new_sample.split_at_mut(1);
 
-                self.synth.render(prosody_amount, pitch_shift, new_sample_0, new_sample_1);
+                self.synth.render(rng, prosody_amount, pitch_shift, new_sample_0, new_sample_1);
 
                 let discontinuity = [new_sample[0] - self.sample[0], new_sample[1] - self.sample[1]];
                 this_sample[0] += discontinuity[0] * this_blep_sample(reset_time);
@@ -415,16 +417,16 @@ const K9_LUT: [i8; 8] = [-51, -33, -15, 4, 22, 32, 59, 77];
 #[cfg(test)]
 mod tests {
     use super::LpcSpeechSynthController;
-    use crate::utils::random;
+    use crate::utils::random::Random;
 
     const SAMPLE_RATE: f32 = 48_000.0;
     const BLOCK_SIZE: usize = 24;
     const SEED: u32 = 0x1234_5678;
 
-    fn render_word(controller: &mut LpcSpeechSynthController, trigger: bool) -> ([f32; BLOCK_SIZE], [f32; BLOCK_SIZE]) {
+    fn render_word(controller: &mut LpcSpeechSynthController, rng: &mut Random, trigger: bool) -> ([f32; BLOCK_SIZE], [f32; BLOCK_SIZE]) {
         let mut excitation = [0.0; BLOCK_SIZE];
         let mut output = [0.0; BLOCK_SIZE];
-        controller.render(false, trigger, 0, 220.0 / SAMPLE_RATE, 0.0, 0.0, 0.25, 0.5, 1.0, &mut excitation, &mut output);
+        controller.render(rng, false, trigger, 0, 220.0 / SAMPLE_RATE, 0.0, 0.0, 0.25, 0.5, 1.0, &mut excitation, &mut output);
         (excitation, output)
     }
 
@@ -456,9 +458,9 @@ mod tests {
         let mut reinitialized = LpcSpeechSynthController::new();
         reinitialized.init(SAMPLE_RATE);
 
-        random::seed(SEED);
+        let mut rng = Random::new(SEED);
         for block in 0..8 {
-            let _ = render_word(&mut reinitialized, block == 0);
+            let _ = render_word(&mut reinitialized, &mut rng, block == 0);
         }
         assert!(reinitialized.remaining_frame_samples > 0);
 
@@ -467,10 +469,8 @@ mod tests {
         let mut fresh = LpcSpeechSynthController::new();
         fresh.init(SAMPLE_RATE);
 
-        random::seed(SEED);
-        let actual = render_word(&mut reinitialized, false);
-        random::seed(SEED);
-        let expected = render_word(&mut fresh, false);
+        let actual = render_word(&mut reinitialized, &mut Random::new(SEED), false);
+        let expected = render_word(&mut fresh, &mut Random::new(SEED), false);
 
         assert_eq!(actual, expected);
     }

@@ -18,23 +18,28 @@ use crate::oscillator::sine_oscillator::{FastSineOscillator, sine};
 use crate::utils::one_pole;
 use crate::utils::parameter_interpolator::ParameterInterpolator;
 use crate::utils::polyblep::{next_blep_sample, this_blep_sample};
-use crate::utils::random;
+use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 
 const NUM_SWARM_VOICES: usize = 8;
 
 #[derive(Debug, Default, Clone)]
 pub struct SwarmEngine {
+    rng: Random,
     swarm_voice: [SwarmVoice; NUM_SWARM_VOICES],
 }
 
 impl SwarmEngine {
     pub fn new() -> Self {
-        Self { swarm_voice: core::array::from_fn(|_| SwarmVoice::default()) }
+        Self { rng: Random::default(), swarm_voice: core::array::from_fn(|_| SwarmVoice::default()) }
     }
 }
 
 impl Engine for SwarmEngine {
+    fn seed(&mut self, seed: u32) {
+        self.rng.seed(seed);
+    }
+
     fn init(&mut self, _sample_rate_hz: f32) {
         self.reset();
     }
@@ -66,7 +71,7 @@ impl Engine for SwarmEngine {
         aux.fill(0.0);
 
         for swarm_voice in &mut self.swarm_voice {
-            swarm_voice.render(f0, density, burst_mode, start_burst, spread, size_ratio, out, aux);
+            swarm_voice.render(&mut self.rng, f0, density, burst_mode, start_burst, spread, size_ratio, out, aux);
             size_ratio *= 0.97;
         }
     }
@@ -97,6 +102,7 @@ impl SwarmVoice {
     #[inline]
     pub fn render(
         &mut self,
+        rng: &mut Random,
         mut f0: f32,
         density: f32,
         burst_mode: bool,
@@ -106,7 +112,7 @@ impl SwarmVoice {
         saw: &mut [f32],
         sine: &mut [f32],
     ) {
-        self.envelope.step(density, burst_mode, start_burst);
+        self.envelope.step(rng, density, burst_mode, start_burst);
 
         let scale = 1.0 / NUM_SWARM_VOICES as f32;
         let amplitude = self.envelope.amplitude(size_ratio) * scale;
@@ -206,7 +212,7 @@ impl GrainEnvelope {
     }
 
     #[inline]
-    pub fn step(&mut self, rate: f32, burst_mode: bool, start_burst: bool) {
+    pub fn step(&mut self, rng: &mut Random, rate: f32, burst_mode: bool, start_burst: bool) {
         let mut randomize = false;
 
         if start_burst {
@@ -223,12 +229,12 @@ impl GrainEnvelope {
 
         if randomize {
             self.from += self.interval;
-            self.interval = random::get_float() - self.from;
+            self.interval = rng.get_float() - self.from;
             // Randomize the duration of the grain.
             if burst_mode {
-                self.fm *= 0.8 + 0.2 * random::get_float();
+                self.fm *= 0.8 + 0.2 * rng.get_float();
             } else {
-                self.fm = 0.5 + 1.5 * random::get_float();
+                self.fm = 0.5 + 1.5 * rng.get_float();
             }
         }
     }

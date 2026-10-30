@@ -19,11 +19,13 @@ use std::vec;
 use super::{Engine, EngineParameters, TriggerState, note_to_frequency};
 use crate::physical_modelling::string_voice::StringVoice;
 use crate::utils::delay_line::DelayLine;
+use crate::utils::random::Random;
 
 const NUM_STRINGS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct StringEngine {
+    rng: Random,
     voice: [StringVoice; NUM_STRINGS],
 
     f0: [f32; NUM_STRINGS],
@@ -37,6 +39,7 @@ pub struct StringEngine {
 impl StringEngine {
     pub fn new(block_size: usize) -> Self {
         Self {
+            rng: Random::default(),
             voice: core::array::from_fn(|_| StringVoice::new()),
             f0: [0.0; NUM_STRINGS],
             f0_delay: DelayLine::<f32, 16>::new(),
@@ -48,6 +51,10 @@ impl StringEngine {
 }
 
 impl Engine for StringEngine {
+    fn seed(&mut self, seed: u32) {
+        self.rng.seed(seed);
+    }
+
     fn init(&mut self, sample_rate_hz: f32) {
         for voice in &mut self.voice {
             voice.init(sample_rate_hz);
@@ -85,6 +92,7 @@ impl Engine for StringEngine {
 
         for i in 0..NUM_STRINGS {
             self.voice[i].render(
+                &mut self.rng,
                 sustain && i == self.active_string,
                 trigger && i == self.active_string,
                 parameters.accent,

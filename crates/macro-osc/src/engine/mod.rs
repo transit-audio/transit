@@ -22,6 +22,10 @@ pub mod wavetable_engine;
 use crate::utils::units::semitones_to_ratio;
 
 pub trait Engine: Send {
+    /// Seeds the engine's random generator, as `stmlib::Random::Seed` seeds the firmware's one.
+    /// Engines that never draw a random number ignore it.
+    fn seed(&mut self, _seed: u32) {}
+
     fn init(&mut self, sample_rate_hz: f32);
 
     fn reset(&mut self) {}

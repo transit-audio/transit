@@ -9,7 +9,7 @@
 use crate::oscillator::oscillator::{Oscillator, OscillatorShape};
 use crate::utils::filter::{FilterMode, FrequencyApproximation, Svf};
 use crate::utils::parameter_interpolator::ParameterInterpolator;
-use crate::utils::random;
+use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,6 +63,7 @@ impl Hihat {
     #[inline]
     pub fn render(
         &mut self,
+        rng: &mut Random,
         sustain: bool,
         trigger: bool,
         accent: f32,
@@ -113,7 +114,7 @@ impl Hihat {
             self.noise_clock += noise_f;
             if self.noise_clock >= 1.0 {
                 self.noise_clock -= 1.0;
-                self.noise_sample = random::get_float() - 0.5;
+                self.noise_sample = rng.get_float() - 0.5;
             }
             *out_sample += noisiness * (self.noise_sample - *out_sample);
         }

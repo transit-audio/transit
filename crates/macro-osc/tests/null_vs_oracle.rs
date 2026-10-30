@@ -67,8 +67,8 @@ struct PortRender {
 }
 
 fn render_port_point(model: Model, point: &EnginePoint) -> PortRender {
-    transit_macro_osc::utils::random::seed(SEED);
     let mut engine = port_engine(model);
+    engine.seed(SEED);
     engine.init(transit_macro_osc::REF_SAMPLE_RATE);
     engine.reset();
     let blocks = ENGINE_POINT_FRAMES / BLOCK_SIZE;

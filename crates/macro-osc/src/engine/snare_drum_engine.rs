@@ -15,9 +15,11 @@
 use super::{Engine, EngineParameters, TriggerState, note_to_frequency};
 use crate::drums::analog_snare_drum::AnalogSnareDrum;
 use crate::drums::synthetic_snare_drum::SyntheticSnareDrum;
+use crate::utils::random::Random;
 
 #[derive(Debug, Default, Clone)]
 pub struct SnareDrumEngine {
+    rng: Random,
     analog_snare_drum: AnalogSnareDrum,
     synthetic_snare_drum: SyntheticSnareDrum,
 }
@@ -29,6 +31,10 @@ impl SnareDrumEngine {
 }
 
 impl Engine for SnareDrumEngine {
+    fn seed(&mut self, seed: u32) {
+        self.rng.seed(seed);
+    }
+
     fn init(&mut self, sample_rate_hz: f32) {
         self.analog_snare_drum.init(sample_rate_hz);
         self.synthetic_snare_drum.init(sample_rate_hz);
@@ -41,8 +47,28 @@ impl Engine for SnareDrumEngine {
         let sustain = parameters.trigger.has(TriggerState::UNPATCHED);
         let trigger = parameters.trigger.has(TriggerState::RISING_EDGE);
 
-        self.analog_snare_drum.render(sustain, trigger, parameters.accent, f0, parameters.timbre, parameters.morph, parameters.harmonics, out);
+        self.analog_snare_drum.render(
+            &mut self.rng,
+            sustain,
+            trigger,
+            parameters.accent,
+            f0,
+            parameters.timbre,
+            parameters.morph,
+            parameters.harmonics,
+            out,
+        );
 
-        self.synthetic_snare_drum.render(sustain, trigger, parameters.accent, f0, parameters.timbre, parameters.morph, parameters.harmonics, aux);
+        self.synthetic_snare_drum.render(
+            &mut self.rng,
+            sustain,
+            trigger,
+            parameters.accent,
+            f0,
+            parameters.timbre,
+            parameters.morph,
+            parameters.harmonics,
+            aux,
+        );
     }
 }

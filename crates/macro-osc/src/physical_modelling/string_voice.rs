@@ -5,7 +5,7 @@
 use super::string::String;
 use crate::noise::dust::dust;
 use crate::utils::filter::{FilterMode, FrequencyApproximation, Svf};
-use crate::utils::random;
+use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 
 #[derive(Debug, Clone)]
@@ -40,6 +40,7 @@ impl StringVoice {
     #[inline]
     pub fn render(
         &mut self,
+        rng: &mut Random,
         sustain: bool,
         trigger: bool,
         accent: f32,
@@ -71,7 +72,7 @@ impl StringVoice {
             let dust_f = 0.00005 + 0.99995 * density * density;
 
             for sample_temp in temp.iter_mut() {
-                *sample_temp = dust(dust_f) * (8.0 - dust_f * 6.0) * accent;
+                *sample_temp = dust(rng, dust_f) * (8.0 - dust_f * 6.0) * accent;
             }
         } else if self.remaining_noise_samples > 0 {
             let mut noise_samples = usize::min(self.remaining_noise_samples, out.len());
@@ -79,7 +80,7 @@ impl StringVoice {
             let mut tail = out.len() - noise_samples;
             let mut start_index = 0;
             while noise_samples > 0 {
-                temp[start_index] = 2.0 * random::get_float() - 1.0;
+                temp[start_index] = 2.0 * rng.get_float() - 1.0;
                 start_index += 1;
                 noise_samples -= 1;
             }
@@ -107,6 +108,6 @@ impl StringVoice {
         } else {
             0.0
         };
-        self.string.process(f0, non_linearity, brightness, damping, temp_2, out);
+        self.string.process(rng, f0, non_linearity, brightness, damping, temp_2, out);
     }
 }

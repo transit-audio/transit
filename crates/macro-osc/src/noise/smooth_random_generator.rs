@@ -2,7 +2,7 @@
 
 // Based on MIT-licensed code (c) 2016 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
-use crate::utils::random;
+use crate::utils::random::Random;
 
 #[derive(Debug, Default, Clone)]
 pub struct SmoothRandomGenerator {
@@ -23,13 +23,13 @@ impl SmoothRandomGenerator {
     }
 
     #[inline]
-    pub fn render(&mut self, frequency: f32) -> f32 {
+    pub fn render(&mut self, rng: &mut Random, frequency: f32) -> f32 {
         self.phase += frequency;
 
         if self.phase >= 1.0 {
             self.phase -= 1.0;
             self.from += self.interval;
-            self.interval = random::get_float() * 2.0 - 1.0 - self.from;
+            self.interval = rng.get_float() * 2.0 - 1.0 - self.from;
         }
 
         let t = self.phase * self.phase * (3.0 - 2.0 * self.phase);

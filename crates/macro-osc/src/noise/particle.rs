@@ -3,7 +3,7 @@
 // Based on MIT-licensed code (c) 2016 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
 use crate::utils::filter::{FilterMode, FrequencyApproximation, Svf};
-use crate::utils::random;
+use crate::utils::random::Random;
 use crate::utils::sqrt;
 use crate::utils::units::semitones_to_ratio;
 
@@ -25,8 +25,19 @@ impl Particle {
 
     #[allow(clippy::too_many_arguments)]
     #[inline]
-    pub fn render(&mut self, sync: bool, density: f32, gain: f32, frequency: f32, spread: f32, q: f32, out: &mut [f32], aux: &mut [f32]) {
-        let mut u = random::get_float();
+    pub fn render(
+        &mut self,
+        rng: &mut Random,
+        sync: bool,
+        density: f32,
+        gain: f32,
+        frequency: f32,
+        spread: f32,
+        q: f32,
+        out: &mut [f32],
+        aux: &mut [f32],
+    ) {
+        let mut u = rng.get_float();
         if sync {
             u = density;
         }
@@ -37,7 +48,7 @@ impl Particle {
             if u <= density {
                 s = u * gain;
                 if can_radomize_frequency {
-                    let u = 2.0 * random::get_float() - 1.0;
+                    let u = 2.0 * rng.get_float() - 1.0;
                     let f = f32::min(semitones_to_ratio(spread * u) * frequency, 0.25);
                     self.pre_gain = 0.5 / sqrt(q * f * sqrt(density));
                     self.filter.set_f_q(f, q, FrequencyApproximation::Dirty);
@@ -47,7 +58,7 @@ impl Particle {
             }
             *aux_sample += s;
             *out_sample += self.filter.process(self.pre_gain * s, FilterMode::BandPass);
-            u = random::get_float();
+            u = rng.get_float();
         }
     }
 }

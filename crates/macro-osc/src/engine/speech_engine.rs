@@ -28,9 +28,11 @@ use crate::speech::lpc_speech_synth_words::NUM_WORD_BANKS;
 use crate::speech::naive_speech_synth::NaiveSpeechSynth;
 use crate::speech::sam_speech_synth::SamSpeechSynth;
 use crate::utils::hysteresis_quantizer::HysteresisQuantizer2;
+use crate::utils::random::Random;
 
 #[derive(Debug, Clone)]
 pub struct SpeechEngine<'a> {
+    rng: Random,
     word_bank_quantizer: HysteresisQuantizer2,
 
     naive_speech_synth: NaiveSpeechSynth,
@@ -46,6 +48,7 @@ pub struct SpeechEngine<'a> {
 impl SpeechEngine<'_> {
     pub fn new(block_size: usize) -> Self {
         Self {
+            rng: Random::default(),
             word_bank_quantizer: HysteresisQuantizer2::new(),
             naive_speech_synth: NaiveSpeechSynth::new(),
             sam_speech_synth: SamSpeechSynth::new(),
@@ -59,6 +62,10 @@ impl SpeechEngine<'_> {
 }
 
 impl Engine for SpeechEngine<'_> {
+    fn seed(&mut self, seed: u32) {
+        self.rng.seed(seed);
+    }
+
     fn init(&mut self, sample_rate_hz: f32) {
         self.sam_speech_synth.init(sample_rate_hz);
         self.naive_speech_synth.init(sample_rate_hz);
@@ -93,7 +100,20 @@ impl Engine for SpeechEngine<'_> {
             if group <= 1.0 {
                 self.naive_speech_synth.render(rising_edge_only, f0, parameters.morph, parameters.timbre, &mut self.temp_buffer_1, aux, out);
             } else {
-                self.lpc_speech_synth_controller.render(sustain, trigger, -1, f0, 0.0, 0.0, parameters.morph, parameters.timbre, 1.0, aux, out);
+                self.lpc_speech_synth_controller.render(
+                    &mut self.rng,
+                    sustain,
+                    trigger,
+                    -1,
+                    f0,
+                    0.0,
+                    0.0,
+                    parameters.morph,
+                    parameters.timbre,
+                    1.0,
+                    aux,
+                    out,
+                );
                 blend = 2.0 - blend;
             }
 
@@ -115,6 +135,7 @@ impl Engine for SpeechEngine<'_> {
             *already_enveloped = replay_prosody;
 
             self.lpc_speech_synth_controller.render(
+                &mut self.rng,
                 sustain,
                 trigger,
                 word_bank,

@@ -5,7 +5,7 @@
 use crate::oscillator::sine_oscillator::SineOscillator;
 use crate::utils::filter::{FilterMode, FrequencyApproximation, Svf};
 use crate::utils::parameter_interpolator::ParameterInterpolator;
-use crate::utils::random;
+use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 use crate::utils::{one_pole, soft_clip};
 
@@ -57,7 +57,18 @@ impl AnalogSnareDrum {
 
     #[allow(clippy::too_many_arguments)]
     #[inline]
-    pub fn render(&mut self, sustain: bool, trigger: bool, accent: f32, f0: f32, mut tone: f32, decay: f32, mut snappy: f32, out: &mut [f32]) {
+    pub fn render(
+        &mut self,
+        rng: &mut Random,
+        sustain: bool,
+        trigger: bool,
+        accent: f32,
+        f0: f32,
+        mut tone: f32,
+        decay: f32,
+        mut snappy: f32,
+        out: &mut [f32],
+    ) {
         let decay_xt = decay * (1.0 + decay * (decay - 1.0));
         let q = 2000.0 * semitones_to_ratio(decay_xt * 84.0);
         let noise_envelope_decay = 1.0 - 0.0017 * semitones_to_ratio(-decay * (50.0 + snappy * 10.0));
@@ -135,7 +146,7 @@ impl AnalogSnareDrum {
             shell = soft_clip(shell);
 
             // C56 / R194 / Q48 / C54 / R188 / D54
-            let mut noise = 2.0 * random::get_float() - 1.0;
+            let mut noise = 2.0 * rng.get_float() - 1.0;
             if noise < 0.0 {
                 noise = 0.0;
             }

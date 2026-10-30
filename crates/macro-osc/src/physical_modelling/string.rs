@@ -6,7 +6,7 @@ use crate::resources::svf::LUT_SVF_SHIFT;
 use crate::utils::delay_line::DelayLine;
 use crate::utils::filter::{DcBlocker, FilterMode, FrequencyApproximation, Svf};
 use crate::utils::parameter_interpolator::ParameterInterpolator;
-use crate::utils::random;
+use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 use crate::utils::{crossfade, one_pole};
 
@@ -85,11 +85,11 @@ impl String {
     }
 
     #[inline]
-    pub fn process(&mut self, f0: f32, non_linearity_amount: f32, brightness: f32, damping: f32, in_: &[f32], out: &mut [f32]) {
+    pub fn process(&mut self, rng: &mut Random, f0: f32, non_linearity_amount: f32, brightness: f32, damping: f32, in_: &[f32], out: &mut [f32]) {
         if non_linearity_amount <= 0.0 {
-            self.process_internal(f0, -non_linearity_amount, brightness, damping, in_, out, StringNonLinearity::CurvedBridge);
+            self.process_internal(rng, f0, -non_linearity_amount, brightness, damping, in_, out, StringNonLinearity::CurvedBridge);
         } else {
-            self.process_internal(f0, non_linearity_amount, brightness, damping, in_, out, StringNonLinearity::Dispersion);
+            self.process_internal(rng, f0, non_linearity_amount, brightness, damping, in_, out, StringNonLinearity::Dispersion);
         }
     }
 
@@ -97,6 +97,7 @@ impl String {
     #[inline]
     fn process_internal(
         &mut self,
+        rng: &mut Random,
         f0: f32,
         non_linearity_amount: f32,
         mut brightness: f32,
@@ -165,7 +166,7 @@ impl String {
                 let mut s;
 
                 if matches!(non_linearity, StringNonLinearity::Dispersion) {
-                    let noise = random::get_float() - 0.5;
+                    let noise = rng.get_float() - 0.5;
                     one_pole(&mut self.dispersion_noise, noise, noise_filter);
                     delay *= 1.0 + self.dispersion_noise * noise_amount;
                 } else {

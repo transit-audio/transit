@@ -20,9 +20,11 @@ use super::{Engine, EngineParameters, TriggerState, note_to_frequency};
 use crate::drums::analog_bass_drum::AnalogBassDrum;
 use crate::drums::synthetic_bass_drum::SyntheticBassDrum;
 use crate::fx::overdrive::Overdrive;
+use crate::utils::random::Random;
 
 #[derive(Debug, Default, Clone)]
 pub struct BassDrumEngine {
+    rng: Random,
     analog_bass_drum: AnalogBassDrum,
     synthetic_bass_drum: SyntheticBassDrum,
 
@@ -36,6 +38,10 @@ impl BassDrumEngine {
 }
 
 impl Engine for BassDrumEngine {
+    fn seed(&mut self, seed: u32) {
+        self.rng.seed(seed);
+    }
+
     fn init(&mut self, sample_rate_hz: f32) {
         self.analog_bass_drum.init(sample_rate_hz);
         self.synthetic_bass_drum.init(sample_rate_hz);
@@ -68,6 +74,7 @@ impl Engine for BassDrumEngine {
         self.overdrive.process(0.5 + 0.5 * drive, out);
 
         self.synthetic_bass_drum.render(
+            &mut self.rng,
             sustain,
             trigger,
             parameters.accent,

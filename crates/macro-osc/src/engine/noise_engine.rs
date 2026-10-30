@@ -19,11 +19,13 @@ use super::{Engine, EngineParameters, TriggerState, note_to_frequency};
 use crate::noise::clocked_noise::ClockedNoise;
 use crate::utils::filter::{FilterMode, FrequencyApproximation, Svf};
 use crate::utils::parameter_interpolator::ParameterInterpolator;
+use crate::utils::random::Random;
 use crate::utils::sqrt;
 use crate::utils::units::semitones_to_ratio;
 
 #[derive(Debug, Clone)]
 pub struct NoiseEngine {
+    rng: Random,
     clocked_noise: [ClockedNoise; 2],
     lp_hp_filter: Svf,
     bp_filter: [Svf; 2],
@@ -39,6 +41,7 @@ pub struct NoiseEngine {
 impl NoiseEngine {
     pub fn new(block_size: usize) -> Self {
         Self {
+            rng: Random::default(),
             clocked_noise: [ClockedNoise::default(), ClockedNoise::default()],
             lp_hp_filter: Svf::default(),
             bp_filter: [Svf::default(), Svf::default()],
@@ -52,6 +55,10 @@ impl NoiseEngine {
 }
 
 impl Engine for NoiseEngine {
+    fn seed(&mut self, seed: u32) {
+        self.rng.seed(seed);
+    }
+
     fn init(&mut self, _sample_rate_hz: f32) {
         self.clocked_noise[0].init();
         self.clocked_noise[1].init();
@@ -76,8 +83,8 @@ impl Engine for NoiseEngine {
         let clock_f = note_to_frequency(parameters.timbre * (128.0 - clock_lowest_note) + clock_lowest_note, parameters.a0_normalized);
         let q = 0.5 * semitones_to_ratio(parameters.morph * 120.0);
         let sync = trigger;
-        self.clocked_noise[0].render(sync, clock_f, aux);
-        self.clocked_noise[1].render(sync, clock_f * f1 / f0, &mut self.temp_buffer);
+        self.clocked_noise[0].render(&mut self.rng, sync, clock_f, aux);
+        self.clocked_noise[1].render(&mut self.rng, sync, clock_f * f1 / f0, &mut self.temp_buffer);
 
         let mut f0_modulation = ParameterInterpolator::new(&mut self.previous_f0, f0, out.len());
         let mut f1_modulation = ParameterInterpolator::new(&mut self.previous_f1, f1, out.len());

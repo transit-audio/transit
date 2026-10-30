@@ -1,33 +1,78 @@
 //! Fast 16-bit pseudo random number generator.
+//!
+//! The firmware keeps one generator for the whole module (`stmlib::Random`, a static). Here each
+//! engine owns one and passes it to whatever draws from it, in the firmware's order, so an engine
+//! seeded like the firmware's generator draws the same sequence, and two engines never share or
+//! race over a state.
 
 // Based on MIT-licensed code (c) 2012 by Olivier Gillet (ol.gillet@gmail.com)
 
-use core::sync::atomic::{AtomicU32, Ordering};
-
-static RNG_STATE: AtomicU32 = AtomicU32::new(0x21);
-
-#[inline]
-fn state() -> u32 {
-    RNG_STATE.load(Ordering::Relaxed)
+/// A linear congruential generator, `stmlib::Random`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Random {
+    state: u32,
 }
 
-#[inline]
-pub fn seed(seed: u32) {
-    RNG_STATE.store(seed, Ordering::Relaxed);
+impl Default for Random {
+    fn default() -> Self {
+        Self::new(Self::DEFAULT_SEED)
+    }
 }
 
-#[inline]
-pub fn get_word() -> u32 {
-    RNG_STATE.store(RNG_STATE.load(Ordering::Relaxed).wrapping_mul(1664525).wrapping_add(1013904223), Ordering::Relaxed);
-    state()
+impl Random {
+    /// The firmware's power-on state (`Random::rng_state_` in `stmlib/utils/random.cc`).
+    pub const DEFAULT_SEED: u32 = 0x21;
+
+    /// A generator in state `seed`.
+    #[must_use]
+    pub const fn new(seed: u32) -> Self {
+        Self { state: seed }
+    }
+
+    /// Sets the state (`Random::Seed`).
+    #[inline]
+    pub fn seed(&mut self, seed: u32) {
+        self.state = seed;
+    }
+
+    /// The current state.
+    #[inline]
+    #[must_use]
+    pub fn state(&self) -> u32 {
+        self.state
+    }
+
+    /// The next 32-bit word.
+    #[inline]
+    pub fn get_word(&mut self) -> u32 {
+        self.state = self.state.wrapping_mul(1664525).wrapping_add(1013904223);
+        self.state
+    }
+
+    /// The next signed 16-bit sample.
+    #[inline]
+    pub fn get_sample(&mut self) -> i16 {
+        (self.get_word() >> 16) as i16
+    }
+
+    /// The next float in [0, 1).
+    #[inline]
+    pub fn get_float(&mut self) -> f32 {
+        self.get_word() as f32 / 4294967296.0
+    }
 }
 
-#[inline]
-pub fn get_sample() -> i16 {
-    (get_word() >> 16) as i16
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[inline]
-pub fn get_float() -> f32 {
-    get_word() as f32 / 4294967296.0
+    #[test]
+    fn the_sequence_is_the_firmware_lcg() {
+        let mut r = Random::new(1);
+        assert_eq!(r.get_word(), 1664525 + 1013904223);
+        let mut a = Random::new(0x0194_5EED);
+        let mut b = a.clone();
+        assert_eq!(a.get_float(), b.get_float());
+        assert_eq!(Random::default().state(), 0x21);
+    }
 }

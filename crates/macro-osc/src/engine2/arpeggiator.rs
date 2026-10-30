@@ -2,7 +2,7 @@
 
 // Based on MIT-licensed code (c) 2021 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
-use crate::utils::random;
+use crate::utils::random::Random;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum ArpeggiatorMode {
@@ -72,7 +72,7 @@ impl Arpeggiator {
         self.octave
     }
 
-    pub fn clock(&mut self, num_notes: i32) {
+    pub fn clock(&mut self, rng: &mut Random, num_notes: i32) {
         if num_notes == 0 {
             return;
         }
@@ -85,7 +85,7 @@ impl Arpeggiator {
 
         if self.mode == ArpeggiatorMode::Random {
             loop {
-                let w = random::get_word();
+                let w = rng.get_word();
                 let octave = ((w >> 4) as i32) % self.range;
                 let note = ((w >> 20) as i32) % num_notes;
                 if octave != self.octave || note != self.note {

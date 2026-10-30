@@ -20,12 +20,14 @@ use crate::oscillator::nes_triangle_oscillator::NesTriangleOscillator;
 use crate::oscillator::super_square_oscillator::SuperSquareOscillator;
 use crate::utils::hysteresis_quantizer::HysteresisQuantizer2;
 use crate::utils::one_pole;
+use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 
 pub const NO_ENVELOPE: f32 = 2.0;
 
 #[derive(Debug, Default, Clone)]
 pub struct ChiptuneEngine {
+    rng: Random,
     voice: [SuperSquareOscillator; CHORD_NUM_VOICES],
     bass: NesTriangleOscillator,
 
@@ -42,6 +44,7 @@ pub struct ChiptuneEngine {
 impl ChiptuneEngine {
     pub fn new() -> Self {
         Self {
+            rng: Random::default(),
             voice: core::array::from_fn(|_| SuperSquareOscillator::new()),
             bass: NesTriangleOscillator::new(),
 
@@ -63,6 +66,10 @@ impl ChiptuneEngine {
 }
 
 impl Engine for ChiptuneEngine {
+    fn seed(&mut self, seed: u32) {
+        self.rng.seed(seed);
+    }
+
     fn init(&mut self, sample_rate_hz: f32) {
         self.sample_rate = sample_rate_hz;
         self.bass.init();
@@ -102,7 +109,7 @@ impl Engine for ChiptuneEngine {
                 let pattern = self.arpeggiator_pattern_selector.process(parameters.timbre);
                 self.arpeggiator.set_mode(ArpeggiatorMode::from(pattern / 3));
                 self.arpeggiator.set_range(1 << (pattern % 3));
-                self.arpeggiator.clock(self.chords.num_notes());
+                self.arpeggiator.clock(&mut self.rng, self.chords.num_notes());
                 self.envelope_state = 1.0;
             }
 

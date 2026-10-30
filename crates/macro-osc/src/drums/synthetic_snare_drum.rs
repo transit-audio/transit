@@ -9,7 +9,7 @@
 
 use crate::utils::filter::{FilterMode, FrequencyApproximation, OnePole, Svf};
 use crate::utils::parameter_interpolator::ParameterInterpolator;
-use crate::utils::random;
+use crate::utils::random::Random;
 use crate::utils::sqrt;
 use crate::utils::units::semitones_to_ratio;
 
@@ -49,7 +49,18 @@ impl SyntheticSnareDrum {
 
     #[allow(clippy::too_many_arguments)]
     #[inline]
-    pub fn render(&mut self, sustain: bool, trigger: bool, accent: f32, f0: f32, mut fm_amount: f32, decay: f32, mut snappy: f32, out: &mut [f32]) {
+    pub fn render(
+        &mut self,
+        rng: &mut Random,
+        sustain: bool,
+        trigger: bool,
+        accent: f32,
+        f0: f32,
+        mut fm_amount: f32,
+        decay: f32,
+        mut snappy: f32,
+        out: &mut [f32],
+    ) {
         let decay_xt = decay * (1.0 + decay * (decay - 1.0));
         fm_amount *= fm_amount;
         let drum_decay = 1.0 - 1.0 / (0.015 * self.sample_rate_hz) * semitones_to_ratio(-decay_xt * 72.0 - fm_amount * 12.0 + snappy * 7.0);
@@ -139,7 +150,7 @@ impl SyntheticSnareDrum {
             drum *= self.drum_amplitude * drum_level;
             drum = self.drum_lp.process(drum, FilterMode::LowPass);
 
-            let noise = random::get_float();
+            let noise = rng.get_float();
             let mut snare = self.snare_lp.process(noise, FilterMode::LowPass);
             snare = self.snare_hp.process(snare, FilterMode::HighPass);
             snare = (snare + 0.1) * (self.snare_amplitude + self.fm) * snare_level;

@@ -5,7 +5,7 @@
 use super::dx_units::{lfo_delay, lfo_frequency, pitch_mod_sensitivity};
 use super::patch::ModulationParameters;
 use crate::oscillator::sine_oscillator::sine;
-use crate::utils::random;
+use crate::utils::random::Random;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub enum Waveform {
@@ -109,12 +109,12 @@ impl Lfo {
     }
 
     #[inline]
-    pub fn step(&mut self, scale: f32) {
+    pub fn step(&mut self, rng: &mut Random, scale: f32) {
         self.phase += scale * self.frequency;
 
         if self.phase >= 1.0 {
             self.phase -= 1.0;
-            self.random_value = random::get_float();
+            self.random_value = rng.get_float();
         }
 
         self.value = self.value();
@@ -126,7 +126,7 @@ impl Lfo {
     }
 
     #[inline]
-    pub fn scrub(&mut self, mut sample: f32) {
+    pub fn scrub(&mut self, rng: &mut Random, mut sample: f32) {
         let phase = sample * self.frequency;
         let phase_integral = phase as i32;
         let phase_fractional = phase - (phase_integral as f32);
@@ -135,7 +135,7 @@ impl Lfo {
 
         if phase_integral != self.phase_integral {
             self.phase_integral = phase_integral;
-            self.random_value = random::get_float();
+            self.random_value = rng.get_float();
         }
 
         self.value = self.value();
@@ -195,12 +195,12 @@ mod tests {
         lfo.init(48_000.0);
 
         for _ in 0..10_000 {
-            lfo.step(24.0);
+            lfo.step(&mut Random::default(), 24.0);
         }
         assert_eq!(lfo.phase, 0.0);
 
         lfo.set(&ModulationParameters::default());
-        lfo.step(24.0);
+        lfo.step(&mut Random::default(), 24.0);
         assert!(lfo.phase > 0.0);
     }
 }

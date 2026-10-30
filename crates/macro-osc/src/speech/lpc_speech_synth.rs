@@ -4,7 +4,7 @@
 
 use crate::resources::lpc::{LUT_LPC_EXCITATION_PULSE, LUT_LPC_EXCITATION_PULSE_SIZE};
 use crate::utils::polyblep::{next_blep_sample, this_blep_sample};
-use crate::utils::random;
+use crate::utils::random::Random;
 
 pub const LPC_ORDER: usize = 10;
 pub const LPC_SPEECH_SYNTH_DEFAULT_F0: f32 = 100.0;
@@ -66,7 +66,7 @@ impl LpcSpeechSynth {
     }
 
     #[inline]
-    pub fn render(&mut self, prosody_amount: f32, pitch_shift: f32, excitation: &mut [f32], output: &mut [f32]) {
+    pub fn render(&mut self, rng: &mut Random, prosody_amount: f32, pitch_shift: f32, excitation: &mut [f32], output: &mut [f32]) {
         let base_f0 = LPC_SPEECH_SYNTH_DEFAULT_F0 / 8000.0;
         let d = self.frequency - base_f0;
         let mut f = (base_f0 + d * prosody_amount) * pitch_shift;
@@ -100,7 +100,7 @@ impl LpcSpeechSynth {
 
             let mut e: [f32; 11] = [0.0; 11];
 
-            e[10] = if random::get_sample() > 0 { self.noise_energy } else { -self.noise_energy };
+            e[10] = if rng.get_sample() > 0 { self.noise_energy } else { -self.noise_energy };
 
             if self.excitation_pulse_sample_index < LUT_LPC_EXCITATION_PULSE_SIZE {
                 let s = LUT_LPC_EXCITATION_PULSE[self.excitation_pulse_sample_index];

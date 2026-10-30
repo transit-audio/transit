@@ -6,7 +6,7 @@
 use crate::oscillator::sine_oscillator::sine;
 use crate::utils::filter::{FilterMode, FrequencyApproximation, Svf};
 use crate::utils::parameter_interpolator::ParameterInterpolator;
-use crate::utils::random;
+use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 use crate::utils::{one_pole, slope};
 
@@ -62,6 +62,7 @@ impl SyntheticBassDrum {
     #[inline]
     pub fn render(
         &mut self,
+        rng: &mut Random,
         sustain: bool,
         trigger: bool,
         accent: f32,
@@ -98,7 +99,7 @@ impl SyntheticBassDrum {
         let mut sustain_gain = ParameterInterpolator::new(&mut self.sustain_gain, accent * decay, out.len());
 
         for out_sample in out.iter_mut() {
-            one_pole(&mut self.phase_noise, random::get_float() - 0.5, 0.002);
+            one_pole(&mut self.phase_noise, rng.get_float() - 0.5, 0.002);
 
             let mut mix = 0.0;
 
@@ -135,7 +136,7 @@ impl SyntheticBassDrum {
                 one_pole(&mut self.fm_lp, self.fm, envelope_lp_f);
 
                 let body = Self::distorted_sine(self.phase, self.phase_noise, dirtiness);
-                let transient = self.click.process(if self.body_env_pulse_width != 0 { 0.0 } else { 1.0 }) + self.noise.render();
+                let transient = self.click.process(if self.body_env_pulse_width != 0 { 0.0 } else { 1.0 }) + self.noise.render(rng);
 
                 mix -= Self::transistor_vca(body, self.body_env_lp);
                 mix -= transient * self.transient_env_lp * transient_level;
@@ -214,8 +215,8 @@ impl SyntheticBassDrumAttackNoise {
     }
 
     #[inline]
-    pub fn render(&mut self) -> f32 {
-        let sample = random::get_float();
+    pub fn render(&mut self, rng: &mut Random) -> f32 {
+        let sample = rng.get_float();
         one_pole(&mut self.lp, sample, 0.05);
         one_pole(&mut self.hp, self.lp, 0.005);
 

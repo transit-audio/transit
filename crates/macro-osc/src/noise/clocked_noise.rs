@@ -4,7 +4,7 @@
 
 use crate::utils::parameter_interpolator::ParameterInterpolator;
 use crate::utils::polyblep::{next_blep_sample, this_blep_sample};
-use crate::utils::random;
+use crate::utils::random::Random;
 
 #[derive(Debug, Default, Clone)]
 pub struct ClockedNoise {
@@ -30,7 +30,7 @@ impl ClockedNoise {
     }
 
     #[inline]
-    pub fn render(&mut self, sync: bool, mut frequency: f32, out: &mut [f32]) {
+    pub fn render(&mut self, rng: &mut Random, sync: bool, mut frequency: f32, out: &mut [f32]) {
         frequency = frequency.clamp(0.0, 1.0);
 
         let mut fm = ParameterInterpolator::new(&mut self.frequency, frequency, out.len());
@@ -47,7 +47,7 @@ impl ClockedNoise {
             next_sample = 0.0;
 
             let frequency = fm.next();
-            let raw_sample = random::get_float() * 2.0 - 1.0;
+            let raw_sample = rng.get_float() * 2.0 - 1.0;
             let raw_amount = 4.0 * (frequency - 0.25);
             let raw_amount = raw_amount.clamp(0.0, 1.0);
 
