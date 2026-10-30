@@ -1,7 +1,9 @@
-//! Single synthesis voice with engine dispatch and parameter processing.
+//! The synthesis voice: the firmware's `Voice` (`plaits/dsp/voice.cc`), engine selection, the trigger
+//! delay, the decay envelope, the low-pass gate and its envelope, the limiter and the int16 output.
 //!
-//! Not yet corrected against the firmware: the voice level (envelopes, low-pass gate, limiter,
-//! int16 output) is compared with the oracle in slice 2 of #195. Use the engines directly until then.
+//! Nulled against the oracle's voice frame by frame (`tests/null_vs_oracle_voice.rs`,
+//! `tests/voice_scenarios_vs_oracle.rs`); the one documented difference is the firmware's shared
+//! engine RAM (see the crate README).
 
 // Based on MIT-licensed code (c) 2016 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
@@ -251,7 +253,8 @@ pub struct Voice<'a> {
     engine_quantizer: HysteresisQuantizer2,
 
     reload_resources: bool,
-    previous_engine_index: usize,
+    /// The engine that rendered last (`previous_engine_index_`, -1 before the first render).
+    previous_engine_index: Option<usize>,
     engine_cv: f32,
 
     previous_note: f32,
@@ -313,7 +316,7 @@ impl Voice<'_> {
 
             engine_quantizer: HysteresisQuantizer2::new(),
             reload_resources: false,
-            previous_engine_index: 0,
+            previous_engine_index: None,
             engine_cv: 0.0,
 
             previous_note: 0.0,
@@ -344,10 +347,20 @@ impl Voice<'_> {
         }
 
         self.engine_quantizer.init(NUM_ENGINES as i32, 0.05, true);
+        self.previous_engine_index = None;
+        self.reload_resources = false;
+        self.engine_cv = 0.0;
+
         self.out_post_processor.init();
         self.aux_post_processor.init();
+
         self.decay_envelope.init();
         self.lpg_envelope.init();
+
+        self.trigger_state = false;
+        self.previous_note = 0.0;
+
+        self.trigger_delay.init();
     }
 
     /// Sets the voice's random state (`stmlib::Random::Seed`). A new voice starts from the
@@ -395,10 +408,10 @@ impl Voice<'_> {
         }
 
         // Engine selection.
-        let mut engine_index = self.engine_quantizer.process_with_base(patch.engine as i32, self.engine_cv) as usize;
-        engine_index = engine_index.clamp(0, NUM_ENGINES);
+        // The quantizer bounds the index to 0..NUM_ENGINES.
+        let engine_index = self.engine_quantizer.process_with_base(patch.engine as i32, self.engine_cv) as usize;
 
-        if engine_index != self.previous_engine_index || self.reload_resources {
+        if Some(engine_index) != self.previous_engine_index || self.reload_resources {
             match engine_index {
                 2 => {
                     self.engines.six_op_engine.load_syx_bank(self.resources.syx_bank_a);
@@ -422,7 +435,7 @@ impl Voice<'_> {
             engine.reset();
 
             self.out_post_processor.reset();
-            self.previous_engine_index = engine_index;
+            self.previous_engine_index = Some(engine_index);
             self.reload_resources = false;
         }
 
@@ -564,7 +577,8 @@ impl Voice<'_> {
         }
     }
 
-    pub fn active_engine(&self) -> usize {
+    /// The engine that rendered last, `None` before the first render.
+    pub fn active_engine(&self) -> Option<usize> {
         self.previous_engine_index
     }
 }

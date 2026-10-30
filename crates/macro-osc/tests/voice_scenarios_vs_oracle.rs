@@ -325,3 +325,37 @@ fn macro_ramps_every_engine() {
         null_scenario(&format!("macro ramps, {}", model.label()), &blocks);
     }
 }
+
+/// `init` returns a used voice to its power-on state: after rendering one scenario, a re-initialized
+/// and re-seeded voice renders another exactly as a fresh oracle voice does (the first render then
+/// loads and resets its engine, even engine 0).
+#[test]
+fn reinitialized_voice_matches_a_fresh_one() {
+    // Ends with the gate high and the note input away from 0, so the trigger delay line, the trigger
+    // state, the note smoothing and the envelopes all hold state when `init` runs.
+    let mut warm_up = engine_change_blocks(&[Model::Swarm, Model::Chiptune, Model::SixOpFmBankB]);
+    for _ in 0..7 {
+        let p = oracle::Patch::centered(Model::SixOpFmBankB);
+        warm_up.push((12, p, oracle::Modulations { note: 5.0, engine: 0.3, ..triggered(1.0) }));
+    }
+    let blocks = engine_change_blocks(&[Model::VirtualAnalogFilter, Model::ParticleNoise]);
+    let session = Session::lock();
+    session.seed(SEED);
+    let mut oracle_voice = session.voice(SAMPLE_RATE).expect("oracle voice");
+    let mut port_voice = Voice::new(SAMPLE_RATE);
+    port_voice.init();
+    let mut frames = [Frame::default(); MAX_BLOCK_SIZE];
+    for (size, p, m) in &warm_up {
+        port_voice.render(&patch(p), &modulations(m), &mut frames[..*size]);
+    }
+    port_voice.init();
+    port_voice.seed(SEED);
+    let mut oracle_frames = [oracle::Frame::default(); MAX_BLOCK_SIZE];
+    for (block, (size, p, m)) in blocks.iter().enumerate() {
+        oracle_voice.render(p, m, &mut oracle_frames[..*size]).expect("oracle render");
+        port_voice.render(&patch(p), &modulations(m), &mut frames[..*size]);
+        for (i, (a, b)) in frames[..*size].iter().zip(&oracle_frames[..*size]).enumerate() {
+            assert_eq!((a.out, a.aux), (b.out, b.aux), "block {block}, frame {i}");
+        }
+    }
+}
