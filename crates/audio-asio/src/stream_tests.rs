@@ -562,8 +562,9 @@ fn the_watchdog_leaves_a_driver_that_calls_back_and_a_stopped_one_alone() {
     }
     render.stop().expect("stop");
     capture.stop().expect("stop");
-    // timing: sleep-ok past the limit before a negative check; a slow host cannot fail it
-    std::thread::sleep(limit + Duration::from_millis(250));
+    // timing: sleep-ok two limits before a negative check: the host thread looks every quarter limit,
+    // so a stopped driver still watched would be reported by 1.25 s; a slow host cannot fail it
+    std::thread::sleep(2 * limit);
     assert!(seen.errors.lock().unwrap().is_empty(), "{:?}", seen.errors.lock().unwrap());
     assert_eq!(render.stats().expect("stats").timeouts, 0);
     drop((capture, render));
