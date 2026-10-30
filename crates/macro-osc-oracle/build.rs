@@ -33,6 +33,7 @@ fn collect(dir: &Path, ext: &str, out: &mut Vec<PathBuf>) {
 fn apply_patch(patch: &Path, vendor: &Path, overlay: &Path) -> Result<Vec<PathBuf>, String> {
     let text = std::fs::read_to_string(patch).map_err(|e| format!("{}: {e}", patch.display()))?.replace("\r\n", "\n");
     let mut written = Vec::new();
+    let mut hunks = 0usize;
     let mut lines = text.lines().peekable();
     while let Some(line) = lines.next() {
         let Some(rel) = line.strip_prefix("--- ") else { continue };
@@ -77,12 +78,17 @@ fn apply_patch(patch: &Path, vendor: &Path, overlay: &Path) -> Result<Vec<PathBu
                 return Err(format!("{}: a hunk does not match {rel} exactly once", patch.display()));
             }
             content = content.replacen(&old, &new, 1);
+            hunks += 1;
         }
         if let Some(parent) = target.parent() {
             std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         std::fs::write(&target, content).map_err(|e| e.to_string())?;
         written.push(target);
+    }
+    // A patch that lost its `--- ` header, or has no hunks, would otherwise apply nothing silently.
+    if hunks == 0 {
+        return Err(format!("{}: no hunk applied", patch.display()));
     }
     Ok(written)
 }
