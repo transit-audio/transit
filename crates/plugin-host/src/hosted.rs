@@ -2,7 +2,7 @@
 //! holds, and the editor and state proxies the UI holds.
 
 use crate::{Busy, Clock, Host, Inner, Status, Worker, call, lock};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, Instant};
 use transit_dsp::event::PluginEvent;
@@ -28,6 +28,11 @@ pub(crate) struct EditorShared {
     actions: Mutex<Vec<HeaderAction>>,
     /// The open request on its way and the last one that finished (issue #67).
     timing: Mutex<OpenTiming>,
+    /// The editor's window as its open made it (a handle as a number; 0: none), on the host
+    /// thread's side (issue #173, `editor_windows`).
+    pub(crate) window: AtomicUsize,
+    /// That window's state as the host thread's tick last read it (`editor_windows::decode`).
+    pub(crate) window_state: AtomicU8,
 }
 
 /// When an accepted open was requested and started, on the host's clock.
@@ -269,7 +274,11 @@ impl PluginEditor for RemoteEditor {
         let clock = Arc::clone(&self.token.clock);
         self.token.with_editor(call::EDITOR_OPEN, move |editor, shared| {
             lock(&shared.timing).started = Some(clock());
-            let opened = match editor.map(|e| e.open()) {
+            crate::editor_windows::forget_created();
+            let result = editor.map(|e| e.open());
+            // The window this open made, for the grouping requests (issue #173).
+            crate::editor_windows::note_opened(shared);
+            let opened = match result {
                 Some(Ok(())) => {
                     shared.open.store(true, Ordering::Release);
                     true
@@ -371,6 +380,18 @@ impl PluginEditor for RemoteEditor {
 
     fn take_open_report(&mut self) -> Option<EditorOpenReport> {
         lock(&self.token.shared.timing).report.take()
+    }
+
+    /// Sent to the host thread (fire and forget, issue #173): a thread that is not responding is
+    /// not asked, and the UI never waits for it.
+    fn raise(&mut self) {
+        if self.token.worker.responsive() {
+            self.token.with_editor(call::EDITOR_RAISE, |_, shared| crate::editor_windows::raise(shared));
+        }
+    }
+
+    fn window_state(&self) -> Option<transit_dsp::EditorWindowState> {
+        crate::editor_windows::decode(self.token.shared.window_state.load(Ordering::Acquire))
     }
 }
 

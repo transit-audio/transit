@@ -23,7 +23,14 @@
 //! Contract: every [`EditorWindow`] method and [`resize_content`] act only on a window of the
 //! calling thread (they do nothing otherwise); [`HeaderCell`] may be used from any thread.
 //! Nothing here panics. Other platforms have no such window: [`EditorWindow::new`] says so.
+//!
+//! **Following the main window** (issue #173, ADR 0030). The windows have no owner (ADR 0018
+//! section 7: a cross-thread owner attaches input queues, so a hung plug-in would hang the UI).
+//! The UI groups them by hand instead: it posts a [`Group`] request to each host thread's queue,
+//! and that thread applies it to its own windows with [`group`]. Nothing here is ever called on a
+//! window of another thread, so a host thread that is stuck simply does not apply the request.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
@@ -456,6 +463,72 @@ impl Follow {
     }
 }
 
+/// What the UI asks of the editor windows of a thread when its main window changes (issue #173,
+/// ADR 0030), applied by [`group`] on that thread.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Group {
+    /// The main window was minimized: hide the shown editors and remember them (parked).
+    Park,
+    /// The main window was restored: show the parked editors again where they were, without
+    /// activating them.
+    Unpark,
+    /// The main window was activated: bring the shown editors above it, without activating them.
+    Front,
+    /// Editors follow the main window, in the tool-window style (no taskbar button, not in
+    /// Alt-Tab), or they do not (their own taskbar button, no grouping: the behavior before #173).
+    Follow(bool),
+}
+
+/// An editor window's state, as [`window_state`] reads it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WindowState {
+    /// On screen.
+    Shown,
+    /// Hidden by transit with the main window ([`Group::Park`]); it comes back with it.
+    Parked,
+    /// Minimized on its own.
+    Minimized,
+    /// Hidden: the user closed it (the editor tears it down on its next idle).
+    Hidden,
+}
+
+/// Serializes the tests that change or depend on the process-wide follow state below.
+#[cfg(all(test, windows))]
+pub(crate) static TEST_GLOBALS: Mutex<()> = Mutex::new(());
+
+/// Editors follow the main window ([`Group::Follow`]); new windows take the tool-window style.
+static FOLLOW: AtomicBool = AtomicBool::new(false);
+/// The main window is minimized while editors follow it: a window shown now is parked instead.
+static PARKED: AtomicBool = AtomicBool::new(false);
+
+/// Records what `request` changes for the whole process, so a window made after it (an editor
+/// whose open was queued behind it) follows it too. Any thread; [`group`] calls it as well.
+pub fn note_group(request: Group) {
+    match request {
+        Group::Follow(on) => {
+            FOLLOW.store(on, Ordering::Release);
+            if !on {
+                PARKED.store(false, Ordering::Release);
+            }
+        }
+        Group::Park => PARKED.store(FOLLOW.load(Ordering::Acquire), Ordering::Release),
+        Group::Unpark => PARKED.store(false, Ordering::Release),
+        Group::Front => {}
+    }
+}
+
+/// Whether editors follow the main window now ([`Group::Follow`]).
+#[must_use]
+pub fn follows() -> bool {
+    FOLLOW.load(Ordering::Acquire)
+}
+
+/// Whether the editors are parked with a minimized main window now.
+#[must_use]
+pub fn parked() -> bool {
+    PARKED.load(Ordering::Acquire)
+}
+
 /// When the host last resized a window (for [`Follow`]).
 #[cfg(any(windows, test))]
 fn since(at: Option<std::time::Instant>) -> Duration {
@@ -465,7 +538,7 @@ fn since(at: Option<std::time::Instant>) -> Duration {
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
-pub use win::{EditorWindow, current_thread_id, hide_thread_windows, resize_content};
+pub use win::{EditorWindow, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
 
 #[cfg(not(windows))]
 mod other {
@@ -539,9 +612,34 @@ mod other {
     pub fn hide_thread_windows(_thread: u32) -> usize {
         0
     }
+
+    /// Records the request and applies it to no window: there are none here (Linux: #147).
+    #[must_use]
+    pub fn group(request: super::Group) -> usize {
+        super::note_group(request);
+        0
+    }
+
+    /// No window to raise here.
+    #[must_use]
+    pub fn raise_window(_window: usize) -> bool {
+        false
+    }
+
+    /// No window here.
+    #[must_use]
+    pub fn window_state(_window: usize) -> Option<super::WindowState> {
+        None
+    }
+
+    /// No window is made here.
+    #[must_use]
+    pub fn take_created() -> Vec<usize> {
+        Vec::new()
+    }
 }
 #[cfg(not(windows))]
-pub use other::{EditorWindow, current_thread_id, hide_thread_windows, resize_content};
+pub use other::{EditorWindow, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
 
 #[cfg(test)]
 mod tests {

@@ -30,6 +30,18 @@ four bars from the bar holding the playhead, in one undo step with the switch. C
 the region. To move the region to the current selection, use Transport > Set Cycle to Selection
 (Ctrl+L, Cmd+L on macOS), which does not toggle Cycle.
 
+## Plug-in windows
+
+On Windows, plug-in editor windows stay with transit's window: minimizing transit hides them and
+restoring it brings them back where they were; returning to transit (Alt+Tab, its taskbar button
+or a click on its window) brings them in front of it. They have no taskbar buttons of their own and
+are not listed in Alt+Tab. Clicking a plug-in that already has its window open (its mixer insert,
+its device card's title, or Open Instrument Editor) brings that window to the front instead of
+opening a second one. To keep each plug-in window apart, with its own taskbar button, turn off
+**Window > Plug-in Windows Follow transit**; the choice is saved per machine. A plug-in that stops
+responding does not hold transit up: its window simply stops following until it answers again.
+Windows a plug-in opens by itself (its own preset browser or a licensing dialog) are not grouped.
+
 ## FX channels and sends
 
 + FX Channel (the mixer button, Track > Add FX Channel, or the arrangement quick-add) adds an FX channel and

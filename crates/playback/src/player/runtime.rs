@@ -441,6 +441,15 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn editor_open(&self, track: TrackId, slot: usize) -> bool {
         self.handles.editor_open(track, slot)
     }
+    pub fn editor_windows(&self, request: transit_dsp::EditorWindowRequest) -> usize {
+        self.handles.editor_windows(request)
+    }
+    pub fn raise_editor(&mut self, track: TrackId, slot: usize) {
+        self.handles.raise_editor(track, slot);
+    }
+    pub fn editor_window(&self, track: TrackId, slot: usize) -> Option<transit_dsp::EditorWindowState> {
+        self.handles.editor_window(track, slot)
+    }
     pub fn any_editor_open(&self) -> bool {
         self.handles.any_editor_open()
     }

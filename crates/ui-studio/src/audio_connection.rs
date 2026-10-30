@@ -2,6 +2,7 @@
 //! retry logic use the same ordering as physical devices.
 
 use std::{cell::RefCell, rc::Rc};
+use transit_dsp::{EditorWindowRequest, EditorWindowState};
 use transit_model::TrackId;
 use transit_playback::{AudioConfig, Player, record::Recorder, telemetry::CallbackTelemetry};
 
@@ -9,6 +10,14 @@ pub(crate) trait Editors {
     fn close_editors(&self) -> Result<(), String>;
     fn editor_open(&self, track: TrackId, slot: usize) -> bool;
     fn open_editor(&self, track: TrackId, slot: usize) -> Result<(), String>;
+    /// Issue #173: posts a grouping request to the editors' threads; never waits.
+    fn editor_windows(&self, _request: EditorWindowRequest) {}
+    /// Brings this slot's open editor window to the front, unactivated; never waits.
+    fn raise_editor(&self, _track: TrackId, _slot: usize) {}
+    /// This slot's editor window state as its thread last reported it.
+    fn editor_window(&self, _track: TrackId, _slot: usize) -> Option<EditorWindowState> {
+        None
+    }
 }
 
 pub(crate) trait Connection: Editors {
@@ -32,6 +41,15 @@ impl Editors for Player {
     }
     fn open_editor(&self, track: TrackId, slot: usize) -> Result<(), String> {
         self.open_editor(track, slot)
+    }
+    fn editor_windows(&self, request: EditorWindowRequest) {
+        let _posted = self.editor_windows(request);
+    }
+    fn raise_editor(&self, track: TrackId, slot: usize) {
+        self.raise_editor(track, slot);
+    }
+    fn editor_window(&self, track: TrackId, slot: usize) -> Option<EditorWindowState> {
+        self.editor_window(track, slot)
     }
 }
 
@@ -70,13 +88,57 @@ pub(crate) struct FakeConnection {
     pub telemetry: CallbackTelemetry,
     pub failed: bool,
     pub editors: RefCell<Vec<(TrackId, usize)>>,
+    /// The fake host thread's editor windows (issue #173).
+    pub windows: RefCell<FakeWindows>,
     trace: Trace,
 }
 
 impl FakeConnection {
     pub fn new(config: AudioConfig, trace: Trace) -> Self {
         trace.borrow_mut().push("open output");
-        Self { config, telemetry: CallbackTelemetry::default(), failed: false, editors: RefCell::default(), trace }
+        Self { config, telemetry: CallbackTelemetry::default(), failed: false, editors: RefCell::default(), windows: RefCell::default(), trace }
+    }
+}
+
+/// What the fake host thread was asked of its editor windows (issue #173), applied as the real
+/// host thread applies it (`transit_rt::editor_window::group`), or held in `queued` while the
+/// fake thread is `held` inside a plug-in.
+#[derive(Debug, Default)]
+pub(crate) struct FakeWindows {
+    pub follow: bool,
+    /// Parked editors (hidden with the minimized main window); every other open editor is shown.
+    pub parked: Vec<(TrackId, usize)>,
+    /// Every request posted, in order, applied or not.
+    pub posted: Vec<EditorWindowRequest>,
+    /// Every raise asked for, applied or not.
+    pub raised: Vec<(TrackId, usize)>,
+    /// The fake host thread is stuck inside a plug-in: nothing posted is applied until it is not.
+    pub held: bool,
+    pub queued: Vec<EditorWindowRequest>,
+}
+
+impl FakeWindows {
+    fn apply(&mut self, request: EditorWindowRequest, open: &[(TrackId, usize)]) {
+        match request {
+            EditorWindowRequest::Follow(on) => {
+                self.follow = on;
+                if !on {
+                    self.parked.clear();
+                }
+            }
+            EditorWindowRequest::Park if self.follow => self.parked = open.to_vec(),
+            EditorWindowRequest::Unpark => self.parked.clear(),
+            EditorWindowRequest::Park | EditorWindowRequest::Front => {}
+        }
+    }
+
+    /// The fake thread returns from the plug-in: what was queued is applied, in order.
+    #[cfg(test)]
+    pub fn release(&mut self, open: &[(TrackId, usize)]) {
+        self.held = false;
+        for r in std::mem::take(&mut self.queued) {
+            self.apply(r, open);
+        }
     }
 }
 
@@ -108,6 +170,23 @@ impl Editors for FakeConnection {
         self.trace.borrow_mut().push("open editor");
         self.editors.borrow_mut().push((track, slot));
         Ok(())
+    }
+    fn editor_windows(&self, request: EditorWindowRequest) {
+        let mut w = self.windows.borrow_mut();
+        w.posted.push(request);
+        if w.held {
+            w.queued.push(request);
+        } else {
+            w.apply(request, &self.editors.borrow());
+        }
+    }
+    fn raise_editor(&self, track: TrackId, slot: usize) {
+        self.windows.borrow_mut().raised.push((track, slot));
+    }
+    fn editor_window(&self, track: TrackId, slot: usize) -> Option<EditorWindowState> {
+        let key = (track, slot);
+        let w = self.windows.borrow();
+        self.editors.borrow().contains(&key).then(|| if w.parked.contains(&key) { EditorWindowState::Parked } else { EditorWindowState::Shown })
     }
 }
 

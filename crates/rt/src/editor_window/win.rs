@@ -86,6 +86,9 @@ struct Data {
     /// A focus redirection is under way: a plug-in that answers its `WM_SETFOCUS` by focusing the
     /// frame again is not redirected again (no recursion).
     focusing: Cell<bool>,
+    /// Hidden by transit with the main window (issue #173, [`super::Group::Park`]), not by the
+    /// user: the editor stays open and comes back with the main window.
+    parked: Cell<bool>,
 }
 
 impl Data {
@@ -252,6 +255,9 @@ unsafe extern "system" fn frame_proc(hwnd: HWND, msg: u32, wparam: WPARAM, lpara
     match msg {
         WM_CLOSE => {
             // Closing only hides: the editor link notices in `idle` and tears the view down first.
+            if let Some(d) = data(hwnd) {
+                d.parked.set(false);
+            }
             // SAFETY: the window this procedure was called for.
             unsafe { ShowWindow(hwnd, SW_HIDE) };
             return 0;
@@ -601,12 +607,15 @@ impl EditorWindow {
         // SAFETY: null asks for this process's module handle.
         let instance = unsafe { GetModuleHandleW(std::ptr::null()) };
         // No owner window (ADR 0018 section 7): an owner would be another editor or a plug-in's own
-        // window, and destroying it would destroy this frame behind its plug-in's back.
+        // window, and destroying it would destroy this frame behind its plug-in's back. Editors that
+        // follow the main window (issue #173) take the tool-window style instead: no taskbar
+        // button, not in Alt-Tab.
+        let ex = if super::follows() { group::TOOL } else { 0 };
         // SAFETY: a registered class and NUL-terminated strings that outlive the call; no owner
         // and no parent (a top-level window). Created hidden at a placeholder size.
         let hwnd = unsafe {
             CreateWindowExW(
-                0,
+                ex,
                 usize::from(classes.frame) as *const u16,
                 title.as_ptr(),
                 FRAME_STYLE,
@@ -640,6 +649,7 @@ impl EditorWindow {
             tracking: Cell::new(false),
             focus: Cell::new(std::ptr::null_mut()),
             focusing: Cell::new(false),
+            parked: Cell::new(false),
         });
         let has_header = d.cell.is_some();
         // SAFETY: our frame, on this thread; the box is freed by its WM_NCDESTROY (module docs).
@@ -679,6 +689,7 @@ impl EditorWindow {
         d.content.set(content);
         d.header.set(strip);
         set_content(hwnd, d, w as i32, h as i32);
+        group::created(hwnd);
         let win = EditorWindow { hwnd };
         win.sync();
         Ok(win)
@@ -701,15 +712,27 @@ impl EditorWindow {
         self.live().map_or(std::ptr::null_mut(), |d| d.content.get())
     }
 
-    /// Shows the window and brings it to the front.
+    /// Shows the window and brings it to the front. While the editors are parked with a minimized
+    /// main window (issue #173) it is parked instead and comes back with the others.
     pub fn raise(&self) {
-        if self.live().is_some() {
-            // SAFETY: a live window of this thread.
-            unsafe {
-                ShowWindow(self.hwnd, SW_SHOW);
-                SetForegroundWindow(self.hwnd);
-            }
+        let Some(d) = self.live() else { return };
+        if super::follows() && super::parked() {
+            d.parked.set(true);
+            return;
         }
+        d.parked.set(false);
+        // SAFETY: a live window of this thread.
+        unsafe {
+            ShowWindow(self.hwnd, SW_SHOW);
+            SetForegroundWindow(self.hwnd);
+        }
+    }
+
+    /// The window's state ([`window_state`]); [`WindowState::Hidden`] once it is gone or on
+    /// another thread.
+    #[must_use]
+    pub fn state(&self) -> super::WindowState {
+        window_state(self.hwnd as usize).unwrap_or(super::WindowState::Hidden)
     }
 
     /// The window's content scale: its DPI over 96 (1.0 once the window is gone or on another
@@ -734,11 +757,12 @@ impl EditorWindow {
         self.live().map_or((0, 0), |d| d.size.get())
     }
 
-    /// Whether the window is shown (closing it only hides it).
+    /// Whether the window is open for the user: shown, or parked with the main window (issue
+    /// #173). False once the user closed it (closing only hides it; the editor then tears it down).
     #[must_use]
     pub fn is_visible(&self) -> bool {
         // SAFETY: a live window of this thread.
-        self.live().is_some() && unsafe { IsWindowVisible(self.hwnd) } != 0
+        self.live().is_some_and(|d| d.parked.get() || unsafe { IsWindowVisible(self.hwnd) } != 0)
     }
 
     /// Housekeeping on the window's thread, from the editor's `idle`: shows header changes (title
@@ -794,6 +818,9 @@ pub fn resize_content(window: *mut c_void, w: f64, h: f64) -> bool {
     set_content(window, d, w as i32, h as i32);
     true
 }
+
+mod group;
+pub use group::{group, raise_window, take_created, window_state};
 
 /// The calling thread's id as Windows knows it, for [`hide_thread_windows`] from another thread.
 #[must_use]
@@ -858,6 +885,8 @@ mod tests {
     #[test]
     fn another_threads_windows_are_hidden_without_waiting_for_it() {
         use windows_sys::Win32::UI::WindowsAndMessaging::{MSG, PM_REMOVE, PeekMessageW};
+        // `raise` reads the follow state the grouping tests change.
+        let _globals = crate::editor_window::TEST_GLOBALS.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let (made, made_rx) = std::sync::mpsc::channel::<(u32, usize)>();
         let (release, held) = std::sync::mpsc::channel::<()>();
         let (seen, seen_rx) = std::sync::mpsc::channel::<bool>();

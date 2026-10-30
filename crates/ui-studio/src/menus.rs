@@ -242,6 +242,17 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         let _ = app.run("window.midi_mappings", json!({"value": !on}));
                         ui.close();
                     }
+                    ui.separator();
+                    // Issue #173: a preference; off keeps editors apart from the main window.
+                    let on = app.ui.editors_follow;
+                    let label = "Plug-in Windows Follow transit";
+                    let b = check_button(ui, on, label)
+                        .on_hover_text("Plug-in windows hide, return and come to the front with transit's window, and have no taskbar button");
+                    window_items.push(crate::mixer::MenuItem::at(ui, label.into(), String::new(), b.rect));
+                    if b.clicked() {
+                        let _ = app.run("window.editors_follow", json!({"value": !on}));
+                        ui.close();
+                    }
                 });
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Window".into(), String::new(), window_menu.response.rect));
                 app.arrange.bar_menu.extend(window_items);

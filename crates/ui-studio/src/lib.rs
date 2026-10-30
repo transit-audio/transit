@@ -22,6 +22,7 @@ pub mod debug_log;
 pub mod devices;
 pub mod diagnostics;
 pub mod edit_tools;
+mod editor_group;
 mod external_instrument;
 mod external_measure;
 pub mod fades;
@@ -97,6 +98,9 @@ pub struct UiState {
     pub recent_files: Vec<recent::RecentFile>,
     /// The user's own VST3 and CLAP folders.
     pub plugin_dirs: plugin_scan::PluginDirs,
+    /// Window > Plug-in Windows Follow transit (issue #173): editors hide, return and come to the
+    /// front with the main window and have no taskbar button. Off: the behavior before #173.
+    pub editors_follow: bool,
     /// Plug-in editors to have open, as (track, slot); the instrument is
     /// `transit_mix::INSTRUMENT_SLOT`. `ui.set` opens and closes editors through this list
     /// (the same field `tools/exp-quit.ps1` sets in SoundCraft).
@@ -201,6 +205,7 @@ impl Default for UiState {
             io_maps: Vec::new(),
             recent_files: Vec::new(),
             plugin_dirs: plugin_scan::PluginDirs::default(),
+            editors_follow: true,
             plugin_windows: Vec::new(),
             plugin_load_ms: std::collections::BTreeMap::new(),
             track_height: 46.0,
@@ -395,6 +400,8 @@ pub struct StudioApp {
     /// as a clip click, a lane click or Select All, clears it. View state, not the document.
     pub tracks_selected_by_header: bool,
     editors: Vec<EditorWanted>,
+    /// Editor windows following the main window (issue #173).
+    editor_group: editor_group::EditorGroup,
     /// Plug-in host threads not responding, as last reported in the status line (ADR 0018).
     host_wedged_shown: usize,
     /// The message for a plug-in host thread stuck in a plug-in, with Save and Give up (#205).
@@ -526,6 +533,7 @@ impl StudioApp {
             dialog: None,
             tracks_selected_by_header: false,
             editors: Vec::new(),
+            editor_group: editor_group::EditorGroup::default(),
             host_wedged_shown: 0,
             host_hang: host_hang::HostHang::default(),
             stuck_shown: 0,
@@ -647,6 +655,9 @@ impl StudioApp {
         }
         if id == "window.midi_mappings" {
             return Ok(self.toggle_midi_mappings(params.get("value").and_then(Value::as_bool)));
+        }
+        if id == "window.editors_follow" {
+            return Ok(self.set_editors_follow(params.get("value").and_then(Value::as_bool)));
         }
         if id == "window.midi_monitor" {
             return Ok(self.toggle_midi_monitor(params.get("value").and_then(Value::as_bool)));
@@ -1003,6 +1014,7 @@ impl StudioApp {
         self.update_midi_live();
         self.keys.step.chromatic = ctx.input(|i| i.modifiers.shift);
         self.step_poll();
+        editor_group::drive(self, ctx);
         self.drive_editors();
         self.drive_plugin_headers();
         theme::probe_fonts(ctx);
@@ -1183,8 +1195,7 @@ impl StudioApp {
     /// UI state as JSON (control channel `ui.inspect`).
     pub fn inspect(&self, ctx: &egui::Context) -> Value {
         let size = ctx.content_rect().size();
-        let open: Vec<(TrackId, usize)> =
-            self.player.as_ref().map(|p| self.ui.plugin_windows.iter().copied().filter(|(t, s)| p.editor_open(*t, *s)).collect()).unwrap_or_default();
+        let open = editor_group::open(self);
         let mut v = json!({
             "ui": self.ui,
             "window_size": [size.x, size.y],
@@ -1240,6 +1251,7 @@ impl StudioApp {
         // Added apart from the literal: it is at the macro's recursion limit.
         v["midi_learn"] = midi_learn::inspect(self);
         v["help"] = json!(self.help.layout);
+        v["editor_windows"] = editor_group::inspect(self);
         v
     }
 }

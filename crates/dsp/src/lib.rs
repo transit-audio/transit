@@ -437,6 +437,44 @@ pub trait PluginEditor: Send {
     fn take_open_report(&mut self) -> Option<EditorOpenReport> {
         None
     }
+    /// Brings the open editor's window above the others without taking the keyboard focus:
+    /// selecting its plug-in in the device chain or the mixer (issue #173). Sent, never waited
+    /// for, where the editor lives on another thread. The default does nothing.
+    fn raise(&mut self) {}
+    /// The editor window's state as its thread last reported it (issue #173); `None` where the
+    /// host does not track its window (the default).
+    fn window_state(&self) -> Option<EditorWindowState> {
+        None
+    }
+}
+
+/// What the UI asks of every plug-in editor window when its main window changes (issue #173, ADR
+/// 0030): posted to each plug-in host thread, applied there to its own windows, never waited for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditorWindowRequest {
+    /// The main window was minimized: hide the shown editors and remember them.
+    Park,
+    /// The main window was restored: show the remembered editors in their places, unactivated.
+    Unpark,
+    /// The main window was activated: bring the shown editors above it, unactivated.
+    Front,
+    /// Editors follow the main window in the tool-window style (true), or keep their own taskbar
+    /// button and are not grouped (false: the behavior before #173).
+    Follow(bool),
+}
+
+/// A plug-in editor window's state (issue #173), for `ui.inspect`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum EditorWindowState {
+    /// On screen.
+    Shown,
+    /// Hidden with the minimized main window; it comes back with it.
+    Parked,
+    /// Minimized on its own.
+    Minimized,
+    /// Closed by the user (its editor is being torn down).
+    Hidden,
 }
 
 /// What an editor open took, from the request to the window being up (issue #67).

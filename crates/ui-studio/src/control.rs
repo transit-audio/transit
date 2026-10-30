@@ -112,6 +112,7 @@ fn handle(app: &mut SoundApp, ctx: &egui::Context, req: &ControlRequest) -> Opti
             ok(transit_engine::inspect::session(&app.engine, p.get("detail").and_then(Value::as_str) == Some("full")))
         }
         "ui.inspect" => ok(app.inspect(ctx)),
+        "ui.window" => ok(crate::editor_group::window_command(ctx, p)),
         "ui.set" => match app.run("ui.set", p.clone()) {
             Ok(v) => ok(v),
             Err(e) => err(e),

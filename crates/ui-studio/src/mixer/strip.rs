@@ -256,7 +256,8 @@ fn inserts_block(
         let builtin = app.builtin_at((id, *slot)).is_some();
         let enabled = builtin || app.player.as_ref().is_some_and(|pl| crate::devices::hosted(&ins.plugin) || pl.has_editor(id, *slot));
         if resp.clicked() && enabled {
-            app.want_editor((id, *slot));
+            // Selecting an insert opens its editor, or raises the one already open (#173).
+            app.show_editor((id, *slot));
         }
         let state = if ins.bypass { " (bypassed)" } else { "" };
         let why = hang.map_or(String::new(), |h| format!(" {}", app.hang_tip(h, &name)));

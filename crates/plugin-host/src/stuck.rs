@@ -20,6 +20,10 @@ pub mod call {
     pub const EDITOR_CLOSE: &str = "closing its editor";
     pub const EDITOR_PARAM: &str = "showing a parameter change in its editor";
     pub const EDITOR_HEADER: &str = "updating its editor's header strip";
+    /// Issue #173: its editor window brought to the front (selected in the device chain or mixer).
+    pub const EDITOR_RAISE: &str = "raising its editor window";
+    /// Issue #173: the thread's editor windows following the main window (hide, show, front).
+    pub const EDITOR_WINDOWS: &str = "arranging its editor windows with the main window";
     pub const STATE_READ: &str = "reading its state";
     pub const PRESET_JOB: &str = "a preset save or load";
     pub const DESTROY: &str = "destroying it";

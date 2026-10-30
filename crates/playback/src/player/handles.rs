@@ -791,6 +791,21 @@ impl Handles {
     pub fn editor_open(&self, track: TrackId, slot: usize) -> bool {
         self.entry(track, slot).and_then(|entry| entry.editor.as_ref()).is_some_and(|editor| editor.is_open())
     }
+    /// Issue #173: the editor windows follow the main window; posted to the host threads, never
+    /// waited for ([`Host::editor_windows`]).
+    pub fn editor_windows(&self, request: transit_dsp::EditorWindowRequest) -> usize {
+        self.host.editor_windows(request)
+    }
+    /// Brings this slot's open editor window to the front without activating it (fire and forget).
+    pub fn raise_editor(&mut self, track: TrackId, slot: usize) {
+        if let Some(editor) = self.entry_mut(track, slot).and_then(|entry| entry.editor.as_mut()) {
+            editor.raise();
+        }
+    }
+    /// The state of this slot's editor window, as its host thread last reported it.
+    pub fn editor_window(&self, track: TrackId, slot: usize) -> Option<transit_dsp::EditorWindowState> {
+        self.entry(track, slot).and_then(|entry| entry.editor.as_ref()).and_then(|editor| editor.window_state())
+    }
     pub fn any_editor_open(&self) -> bool {
         self.active.keys().any(|&(track, slot)| self.editor_open(track, slot))
     }

@@ -347,7 +347,7 @@ fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: TrackKind, ha
             ui.close();
         }
         if ui.add_enabled(has_instrument && app.player.is_some(), egui::Button::new("Open Instrument Editor")).clicked() {
-            app.want_editor((id, transit_mix::INSTRUMENT_SLOT));
+            app.show_editor((id, transit_mix::INSTRUMENT_SLOT));
             ui.close();
         }
         ui.separator();

@@ -752,6 +752,21 @@ impl Player {
     pub fn editor_open(&self, track: TrackId, slot: usize) -> bool {
         self.owner().is_ok_and(|owner| owner.editor_open(track, slot))
     }
+    /// Issue #173 (ADR 0030): plug-in editor windows follow the main window. Posted to the plug-in
+    /// host threads and never waited for; returns how many threads it was posted to.
+    pub fn editor_windows(&self, request: transit_dsp::EditorWindowRequest) -> usize {
+        self.owner().map_or(0, |owner| owner.editor_windows(request))
+    }
+    /// Brings this slot's open editor window to the front without taking the focus (fire and forget).
+    pub fn raise_editor(&self, track: TrackId, slot: usize) {
+        if let Ok(mut owner) = self.owner() {
+            owner.raise_editor(track, slot);
+        }
+    }
+    /// The state of this slot's editor window, as its plug-in host thread last reported it.
+    pub fn editor_window(&self, track: TrackId, slot: usize) -> Option<transit_dsp::EditorWindowState> {
+        self.owner().ok().and_then(|owner| owner.editor_window(track, slot))
+    }
     pub fn any_editor_open(&self) -> bool {
         self.shared.editors_open.load(Ordering::Relaxed)
     }

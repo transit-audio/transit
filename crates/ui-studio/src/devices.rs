@@ -582,8 +582,9 @@ fn card_body(
     };
     if resp.on_hover_text(tip).clicked() && enabled {
         app.toggle_editor((t, key_slot));
-    } else if title_double && enabled && !open {
-        app.want_editor((t, key_slot));
+    } else if title_double && enabled {
+        // Opens the editor, or raises the one already open (#173).
+        app.show_editor((t, key_slot));
     }
     c.editor_button = r4(eb);
     c.editor_open = open;

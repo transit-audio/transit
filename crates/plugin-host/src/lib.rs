@@ -43,6 +43,7 @@
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
+mod editor_windows;
 mod give_up;
 mod hosted;
 mod phases;
@@ -613,6 +614,7 @@ impl Ctx {
                 let actions = editor.take_header_actions();
                 let is_open = editor.is_open();
                 local.shared.publish(edits, actions, is_open);
+                editor_windows::publish(&local.shared, is_open);
                 if is_open {
                     open.push(&local.name);
                 }
