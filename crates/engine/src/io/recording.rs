@@ -113,30 +113,15 @@ pub fn add_recording_take(
     let mut out = Vec::new();
     let mut unplaced = Vec::new();
     for (tid, path) in takes {
-        if let Some(held) = oversize(&path) {
-            unplaced.push(refuse_take(e, &path, &held));
-            continue;
-        }
-        let bytes = match read_file(&path) {
-            Ok(b) => b,
-            Err(err) => {
-                e.message(err.to_string());
-                continue;
-            }
-        };
-        let (_, buf) = match transit_audio_io::decode(&bytes, None) {
-            Ok(x) => x,
-            Err(err @ transit_audio_io::AudioError::TooLarge(_)) => {
-                unplaced.push(refuse_take(e, &path, &Held::Unsized(err.to_string())));
-                continue;
-            }
-            Err(err) => {
-                e.message(format!("{}: {err}", path.display()));
+        let got = match take_audio(e, &path) {
+            Ok(got) => got,
+            Err(entry) => {
+                unplaced.extend(entry);
                 continue;
             }
         };
         if new_take && pass.is_none() {
-            let frames = i64::try_from(buf.frames()).unwrap_or(0);
+            let frames = i64::try_from(got.frames()).unwrap_or(0);
             let from = punch.map_or(start, |p| p.start.max(start));
             let to = punch.map_or(start + frames, |p| p.end.min(start + frames));
             let over = to > from && e.session().track(tid).is_some_and(|t| t.clips().iter().any(|c| c.start < to && c.end() > from));
@@ -149,11 +134,20 @@ pub fn add_recording_take(
         if s.track(tid).is_none() {
             continue;
         }
-        let resampled = buf.sample_rate != s.sample_rate.hz();
         let name = path.file_stem().and_then(|x| x.to_str()).unwrap_or("Take");
-        let src = add_source(s, name, buf, Some(&path.to_string_lossy()), FileFormat::Wav);
-        let Some(x) = s.sources.last_mut() else { continue };
-        x.unsaved = resampled;
+        let src = match got {
+            Got::Memory(buf) => {
+                let resampled = buf.sample_rate != s.sample_rate.hz();
+                let src = add_source(s, name, buf, Some(&path.to_string_lossy()), FileFormat::Wav);
+                if let Some(x) = s.sources.last_mut() {
+                    x.unsaved = resampled;
+                }
+                src
+            }
+            // A long take is one clip on one source played from its file (ADR 0035).
+            Got::Disk(audio) => super::disk::add_disk_source(s, name, audio, &path.to_string_lossy()),
+        };
+        let Some(x) = s.source(src) else { continue };
         let len = i64::try_from(x.frames).unwrap_or(0);
         let pass = pass.unwrap_or(len).max(1);
         for offset in (0..len).step_by(usize::try_from(pass).unwrap_or(usize::MAX)).take(1_000) {
@@ -191,6 +185,51 @@ pub fn add_recording_take(
     out
 }
 
+/// A take's audio: decoded, or played from its file.
+enum Got {
+    Memory(AudioBuffer),
+    Disk(Arc<SourceAudio>),
+}
+
+impl Got {
+    fn frames(&self) -> usize {
+        match self {
+            Got::Memory(buf) => buf.frames(),
+            Got::Disk(audio) => audio.frames(),
+        }
+    }
+}
+
+/// The audio of the take at `path`: played from the file when it is long (over the setting or the
+/// decode limit, ADR 0035), else decoded. `Err(Some(entry))` for a take that can be neither (the
+/// entry the session keeps for it, said loudly), `Err(None)` for one that could not be read (said).
+fn take_audio(e: &mut Engine, path: &Path) -> std::result::Result<Got, Option<String>> {
+    let rate = e.session().sample_rate.hz();
+    if let Some((info, len)) = super::disk::probe(path).filter(|(info, _)| super::disk::streams(e.session(), info)) {
+        match super::disk::open_disk_audio(path, len, rate) {
+            Ok(audio) => return Ok(Got::Disk(audio)),
+            Err(why) if super::disk::over_decode_limit(&info) => {
+                let held = Held::Sized { frames: info.frames, channels: info.channels, rate: info.sample_rate };
+                return Err(Some(refuse_take(e, path, &held, Some(&why))));
+            }
+            // Short enough to hold: it is decoded instead.
+            Err(why) => log::info!("{why}; the take is held in memory"),
+        }
+    }
+    let bytes = read_file(path).map_err(|err| {
+        e.message(err.to_string());
+        None
+    })?;
+    match transit_audio_io::decode(&bytes, None) {
+        Ok((_, buf)) => Ok(Got::Memory(buf)),
+        Err(err @ transit_audio_io::AudioError::TooLarge(_)) => Err(Some(refuse_take(e, path, &Held::Unsized(err.to_string()), None))),
+        Err(err) => {
+            e.message(format!("{}: {err}", path.display()));
+            Err(None)
+        }
+    }
+}
+
 /// What a refused take holds: its length and layout (read from the header), or only the decoder's words.
 enum Held {
     Sized { frames: u64, channels: u16, rate: u32 },
@@ -216,40 +255,10 @@ fn limit_hours(channels: u16, rate: u32) -> f64 {
     transit_audio_io::MAX_DECODE_SAMPLES as f64 / f64::from(channels.max(1)) / f64::from(rate.max(1)) / 3600.0
 }
 
-/// How much of a take file's start holds its WAV header (chunks before the data are small).
-const HEADER_BYTES: u64 = 64 * 1024;
-
-#[cfg(test)]
-thread_local! {
-    /// A file length the size check uses instead of the real one, so a test needs no giant file.
-    static FAKE_LEN: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
-}
-
-fn file_len(real: u64) -> u64 {
-    #[cfg(test)]
-    if let Some(n) = FAKE_LEN.with(std::cell::Cell::get) {
-        return n;
-    }
-    real
-}
-
-/// The take at `path` when its header says it holds more than the decoder accepts, found without
-/// reading its audio (#187: reading first allocated the whole file). `None` for a file that fits,
-/// is not a WAV the header sizes, or cannot be read (the read then reports why).
-fn oversize(path: &Path) -> Option<Held> {
-    use std::io::Read;
-    crate::file_access::check_read(path).ok()?;
-    let len = file_len(std::fs::metadata(path).ok().filter(|m| m.is_file())?.len());
-    let mut head = Vec::new();
-    std::fs::File::open(path).ok()?.take(HEADER_BYTES).read_to_end(&mut head).ok()?;
-    let info = transit_audio_io::probe_sized(&head, len).ok()?;
-    let samples = info.frames.saturating_mul(u64::from(info.channels));
-    (samples > transit_audio_io::MAX_DECODE_SAMPLES).then_some(Held::Sized { frames: info.frames, channels: info.channels, rate: info.sample_rate })
-}
-
 /// Say, loudly, that the take at `path` was not placed and where the file is; returns the entry the
-/// session keeps for it.
-fn refuse_take(e: &mut Engine, path: &Path, held: &Held) -> String {
+/// session keeps for it. `why` is why it could not be played from disk either.
+fn refuse_take(e: &mut Engine, path: &Path, held: &Held, why: Option<&str>) -> String {
+    let shown = path.display();
     let (what, said) = match held {
         Held::Sized { frames, channels, rate } => {
             let hours = *frames as f64 / f64::from((*rate).max(1)) / 3600.0;
@@ -259,9 +268,10 @@ fn refuse_take(e: &mut Engine, path: &Path, held: &Held) -> String {
         }
         Held::Unsized(why) => (why.clone(), format!("refused by the decoder ({why})")),
     };
-    let shown = path.display();
+    let prefix = format!("{shown}: ");
+    let disk = why.map_or_else(String::new, |w| format!(", and it cannot be played from disk ({})", w.strip_prefix(prefix.as_str()).unwrap_or(w)));
     e.warn(format!(
-        "The take {shown} was not placed: it is {said}, more than a session can hold in memory. The file is kept at {shown}; import it in pieces or open it in another editor."
+        "The take {shown} was not placed: it is {said}, more than a session can hold in memory{disk}. The file is kept at {shown}; import it in pieces or open it in another editor."
     ));
     format!("{shown} ({what})")
 }
@@ -309,6 +319,8 @@ mod record_tests {
         }
     }
 
+    use super::super::disk::FAKE_LEN;
+
     /// Holds the faked file length; clears it on drop, even when the test panics.
     struct FakeLenGuard;
     impl Drop for FakeLenGuard {
@@ -317,28 +329,57 @@ mod record_tests {
         }
     }
 
-    fn oversize_header_only(dir: &TempDir, name: &str) -> (PathBuf, FakeLenGuard) {
-        let frames = transit_audio_io::MAX_DECODE_SAMPLES + 1_000;
+    /// A header for `frames` mono float frames at `rate`, the file's length faked to hold them.
+    fn header_only(dir: &TempDir, name: &str, frames: u64, rate: u32) -> (PathBuf, FakeLenGuard) {
         let path = dir.0.join(name);
         std::fs::create_dir_all(&dir.0).unwrap();
-        std::fs::write(&path, transit_audio_io::wav_float_header(1, 48_000, frames).unwrap()).unwrap();
+        std::fs::write(&path, transit_audio_io::wav_float_header(1, rate, frames).unwrap()).unwrap();
         FAKE_LEN.with(|l| l.set(Some(std::fs::metadata(&path).unwrap().len() + frames * 4)));
         (path, FakeLenGuard)
     }
 
     #[test]
-    fn a_refused_take_survives_undo_and_redo_issue_192() {
+    fn a_take_over_the_decode_limit_is_one_disk_backed_clip_that_undo_and_redo_keep_issue_187() {
+        let dir = TempDir(std::env::temp_dir().join(format!("disk-take-undo-{}", std::process::id())));
+        let frames = transit_audio_io::MAX_DECODE_SAMPLES + 1_000;
+        let (path, _fake_len) = header_only(&dir, "Long_01.wav", frames, 48_000);
+        let mut e = Engine::default();
+        let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        let ids = add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None);
+        assert_eq!(ids.len(), 1, "one clip: {:?}", e.messages);
+        assert!(e.session().unplaced_takes.is_empty());
+        let src = e.session().sources.last().unwrap().clone();
+        assert!(src.disk && !src.unsaved, "{src:?}");
+        assert_eq!((src.frames, src.path.as_str()), (frames, path.to_string_lossy().as_ref()));
+        let audio = e.session().pool.get(src.id).unwrap();
+        assert!(audio.is_disk() && audio.buffer.channels.iter().all(Vec::is_empty), "nothing decoded");
+        let clip = e.session().find_clip(ids[0]).unwrap().1.clone();
+        assert_eq!((clip.start, clip.length, clip.source()), (0, frames as i64, Some(src.id)));
+        assert_eq!(e.undo_history().last().map(String::as_str), Some("Record"));
+        assert!(e.undo());
+        assert!(e.session().find_clip(ids[0]).is_none());
+        assert!(e.redo());
+        assert!(e.session().find_clip(ids[0]).is_some());
+    }
+
+    #[test]
+    fn a_long_take_that_cannot_stream_is_refused_and_survives_undo_and_redo_issue_192() {
         let dir = TempDir(std::env::temp_dir().join(format!("refused-undo-{}", std::process::id())));
-        let (path, _fake_len) = oversize_header_only(&dir, "Long_01.wav");
+        // At 44.1 kHz in a 48 kHz session: not streamed in slice 1 of ADR 0035, too long to decode.
+        let (path, _fake_len) = header_only(&dir, "Long_01.wav", transit_audio_io::MAX_DECODE_SAMPLES + 1_000, 44_100);
         let mut e = Engine::default();
         let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
         e.execute("mix.volume", &json!({"tracks": [t.0], "db": -6.0})).unwrap();
         assert!(add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None).is_empty());
         let listed = e.session().unplaced_takes.clone();
         assert_eq!(listed.len(), 1, "{listed:?}");
-        assert!(listed[0].contains("Long_01.wav") && listed[0].contains("6.21 h of mono at 48 kHz"), "{listed:?}");
+        assert!(listed[0].contains("Long_01.wav") && listed[0].contains("6.76 h of mono at 44.1 kHz"), "{listed:?}");
         let said = e.messages.last().unwrap();
-        assert!(said.contains("6.21 h of mono at 48 kHz") && said.contains("the limit is 6.21 h") && said.contains("The file is kept at"), "{said}");
+        assert!(
+            said.contains("the limit is 6.76 h") && said.contains("cannot be played from disk") && said.contains("The file is kept at"),
+            "{said}"
+        );
+        assert_eq!(said.matches(path.to_string_lossy().as_ref()).count(), 2, "{said}");
         assert!(e.undo());
         assert_eq!(e.session().unplaced_takes, listed, "undo of an earlier edit keeps the reference");
         assert!(e.redo());
@@ -346,10 +387,29 @@ mod record_tests {
     }
 
     #[test]
+    fn a_take_over_the_setting_streams_and_a_shorter_one_is_decoded_issue_187() {
+        let dir = TempDir(std::env::temp_dir().join(format!("disk-setting-{}", std::process::id())));
+        let mut e = Engine::default();
+        let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
+        // One second at 48 kHz against a setting of half a second.
+        e.session_mut().edit.values.insert(transit_model::disk::STREAM_MINUTES_KEY.into(), 0.5 / 60.0);
+        if std::env::var(transit_model::disk::STREAM_MINUTES_ENV).is_ok() {
+            return;
+        }
+        let long = dir.0.join("Long_01.wav");
+        write_take(&long, 48_000);
+        let short = dir.0.join("Short_01.wav");
+        write_take(&short, 4_800);
+        add_recording_take(&mut e, 0, vec![(t, long), (t, short)], None, false, None);
+        let disk: Vec<bool> = e.session().sources.iter().map(|s| s.disk).collect();
+        assert_eq!(disk, [true, false]);
+    }
+
+    #[test]
     fn the_decoders_own_refusal_reads_once_and_names_no_path_twice_issue_192() {
         let mut e = Engine::default();
         let entry =
-            refuse_take(&mut e, Path::new("/rec/A.wav"), &Held::Unsized("audio too large: 5 samples exceeds the 4-sample decode limit".into()));
+            refuse_take(&mut e, Path::new("/rec/A.wav"), &Held::Unsized("audio too large: 5 samples exceeds the 4-sample decode limit".into()), None);
         assert_eq!(entry, "/rec/A.wav (audio too large: 5 samples exceeds the 4-sample decode limit)");
         assert_eq!(e.messages.last().unwrap().matches("/rec/A.wav").count(), 2, "once as the take, once as where it is kept");
     }

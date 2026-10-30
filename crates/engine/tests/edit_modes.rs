@@ -14,6 +14,7 @@ fn source(id: u64, frames: u64) -> Source {
         format: transit_audio_io::FileFormat::Wav,
         time_reference: 0,
         unsaved: false,
+        disk: false,
     }
 }
 

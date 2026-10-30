@@ -47,11 +47,13 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
         match crate::io::stored_path(&src.path, Path::new(&path)) {
             Ok(abs) => {
                 ns.path = abs.to_string_lossy().into_owned();
-                match crate::io::decode_file(&mut files, &abs, sr) {
+                match crate::io::decode_file_streamed(&mut files, &abs, sr, src.disk) {
                     Ok(audio) => {
-                        ns.frames = audio.buffer.frames() as u64;
+                        ns.frames = audio.frames() as u64;
+                        ns.disk = audio.is_disk();
                         ns.sample_rate = sr;
-                        ns.unsaved = true;
+                        // A disk-backed source plays its file where it is; anything else is copied on save.
+                        ns.unsaved = !ns.disk;
                         s.pool.insert(ns.id, audio);
                     }
                     Err(_) => {

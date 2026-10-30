@@ -32,7 +32,8 @@ pub(crate) fn at_rate(mut buf: AudioBuffer, rate: u32, limit: usize) -> Option<A
 // `--automation-write-root`) are checked in one place. A test in `file_access` keeps the rest of
 // the engine from calling `std::fs` itself. Audio is decoded into the session's pool the moment it
 // enters it (import, open, sampler load), so playback and bounce read nothing from disk and
-// need no check of their own.
+// need no check of their own; a disk-backed source (ADR 0035) is checked once, when it is opened
+// (`io/disk.rs`), and then read by its own streamer.
 
 /// The bytes of the file at `path`, which must be inside the automation read root when there is
 /// one. Only a regular file qualifies: a device or a pipe named by a session or a command would
@@ -163,6 +164,7 @@ pub fn add_source_audio(s: &mut Session, name: &str, audio: Arc<SourceAudio>, pa
         format,
         time_reference: 0,
         unsaved: true,
+        disk: false,
     });
     s.pool.insert(id, audio);
     id
@@ -619,8 +621,10 @@ pub use session::{
     BUNDLE_EXTENSION, open_session, open_session_bytes, replace_file, replaces, save_copy, save_session, save_session_copy, session_bundle,
     session_file, session_open_line, write_file,
 };
-pub(crate) use session::{DecodedFiles, decode_file, file_key, open_session_linked};
+pub(crate) use session::{DecodedFiles, decode_file_streamed, file_key, open_session_linked};
 
+mod disk;
+pub use disk::add_disk_source;
 mod recording;
 pub use recording::{Recording, Take, add_recording, add_recording_take, live_span, place_recording, place_recording_take, plan_takes};
 

@@ -1,32 +1,13 @@
-//! A recorded take over the decode limit fails loudly and stays reachable from the session (#192).
-//! Non-Windows only: the fixture is a 4 GiB hole, which NTFS allocates (the engine unit tests cover Windows
-//! with a faked file length).
-//! One test in its own binary owns the process-wide logger.
+//! A recorded take over the decode limit is placed as one clip played from its file (ADR 0035,
+//! #187; until then it was refused loudly and listed as unplaced, #192).
+//! Non-Windows only: the fixture is a 6 GiB hole, which NTFS allocates (the engine unit tests cover
+//! Windows with a faked file length).
 
 #![cfg(not(windows))]
 
 use std::io::Write;
-use std::sync::Mutex;
 use transit_engine::{Engine, io::add_recording_take};
-use transit_model::{ChannelFormat, Session, TrackKind};
-
-static LOG: TestLog = TestLog(Mutex::new(Vec::new()));
-
-struct TestLog(Mutex<Vec<String>>);
-
-impl log::Log for TestLog {
-    fn enabled(&self, _: &log::Metadata<'_>) -> bool {
-        true
-    }
-
-    fn log(&self, record: &log::Record<'_>) {
-        if let Ok(mut records) = self.0.lock() {
-            records.push(format!("{}: {}", record.level(), record.args()));
-        }
-    }
-
-    fn flush(&self) {}
-}
+use transit_model::{ChannelFormat, TrackKind};
 
 /// Removes the directory when the test ends, passing or not.
 struct Cleanup(std::path::PathBuf);
@@ -47,43 +28,34 @@ fn header_only_take(path: &std::path::Path, frames: u64) {
 }
 
 #[test]
-fn a_take_over_the_limit_is_refused_loudly_unread_and_remembered_by_the_session() {
-    log::set_logger(&LOG).unwrap();
-    log::set_max_level(log::LevelFilter::Info);
+fn a_take_of_one_and_a_half_gi_samples_is_one_disk_backed_clip_and_reopens_so() {
     let dir = std::env::temp_dir().join(format!("long-take-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let _cleanup = Cleanup(dir.clone());
     let path = dir.join("Loopback_01.wav");
-    header_only_take(&path, transit_audio_io::MAX_DECODE_SAMPLES + 1_000);
+    let frames = 3 * (1u64 << 29);
+    assert!(frames > transit_audio_io::MAX_DECODE_SAMPLES);
+    header_only_take(&path, frames);
+    let len = std::fs::metadata(&path).unwrap().len();
 
     let mut e = Engine::default();
     let t = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, None);
-    let before = e.session().sources.len();
-    assert!(add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None).is_empty());
+    let ids = add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None);
+    assert_eq!(ids.len(), 1, "{:?}", e.messages);
+    assert!(e.session().unplaced_takes.is_empty());
+    let src = e.session().sources.last().cloned().unwrap();
+    assert!(src.disk && !src.unsaved && src.frames == frames, "{src:?}");
+    assert!(e.session().pool.get(src.id).is_some_and(|a| a.is_disk()));
+    let clip = e.session().find_clip(ids[0]).unwrap().1.clone();
+    assert_eq!((clip.start, clip.length), (0, frames as i64));
 
-    // Nothing placed, nothing to undo; the file is still there.
-    assert_eq!(e.session().sources.len(), before);
-    assert!(e.undo_history().is_empty());
-    assert!(path.is_file());
-
-    // The message says what and how long, and where the file is.
-    let shown = path.display().to_string();
-    let said = e.messages.last().cloned().unwrap();
-    assert!(said.contains("6.21 h of mono at 48 kHz") && said.contains("the limit is 6.21 h"), "{said}");
-    assert!(said.contains(&format!("The file is kept at {shown}")), "{said}");
-
-    // The log has it as a warning with the same hours.
-    let lines = LOG.0.lock().unwrap().clone();
-    let warn = lines.iter().find(|l| l.starts_with("WARN") && l.contains("6.21 h of mono at 48 kHz")).unwrap_or_else(|| panic!("{lines:?}"));
-    assert!(warn.contains(&shown) && warn.contains("1073742824 frames") && warn.contains("the limit is 6.21 h"), "{warn}");
-
-    // The session keeps a reference that survives a save and a load, and the open says so.
-    assert_eq!(e.session().unplaced_takes.len(), 1);
-    let back = Session::from_json(&e.session().to_json().unwrap()).unwrap();
-    assert_eq!(back.unplaced_takes, e.session().unplaced_takes);
-    assert!(back.load_notes.iter().any(|n| n.contains(&shown) && n.contains("6.21 h")), "{:?}", back.load_notes);
-
-    // The same take refused again is listed once.
-    assert!(add_recording_take(&mut e, 0, vec![(t, path.clone())], None, false, None).is_empty());
-    assert_eq!(e.session().unplaced_takes.len(), 1);
+    // Saved and opened again, it is still played from the file, which the save left alone.
+    let session = dir.join("Long.transit").to_string_lossy().into_owned();
+    e.execute("session.save_as", &serde_json::json!({"path": session})).unwrap();
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), len);
+    let mut r = Engine::default();
+    r.execute("session.open", &serde_json::json!({"path": session})).unwrap();
+    let back = r.session().sources.last().cloned().unwrap();
+    assert!(back.disk && back.frames == frames, "{back:?}");
+    assert!(r.session().pool.get(back.id).is_some_and(|a| a.is_disk() && a.frames() as u64 == frames));
 }

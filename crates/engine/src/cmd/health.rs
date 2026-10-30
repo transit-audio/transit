@@ -50,11 +50,12 @@ fn report(e: &mut Engine, _: &Value) -> Result<Value> {
                 if audio.buffer.sample_rate != s.sample_rate.hz() {
                     add("sample_rate_mismatch", "Loaded audio differs from the session sample rate. Reimport it to convert to the session rate.");
                 }
-                if audio.buffer.channels.is_empty() || audio.frames() == 0 {
+                // A disk-backed source holds no decoded channels (ADR 0035); its file is the audio.
+                if (audio.buffer.channels.is_empty() && !audio.is_disk()) || audio.frames() == 0 {
                     add("empty_audio", "Loaded audio has no playable frames. Reimport a valid audio file.");
                     continue;
                 }
-                if audio.buffer.channels.iter().any(|channel| channel.len() != audio.frames()) {
+                if !audio.is_disk() && audio.buffer.channels.iter().any(|channel| channel.len() != audio.frames()) {
                     add(
                         "uneven_channels",
                         "Loaded audio channels have different lengths. Reimport a valid audio file; bounds below use the shortest channel.",

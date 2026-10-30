@@ -47,8 +47,9 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
     // Files written for audio during this save: sources playing the same audio share one.
     let mut files: HashMap<*const SourceAudio, String> = HashMap::new();
     for (i, src) in s.sources.iter_mut().enumerate() {
+        let streamed = s.pool.get(src.id).is_some_and(|a| a.is_disk());
         if !same_dir
-            && s.pool.get(src.id).is_none()
+            && (s.pool.get(src.id).is_none() || streamed)
             && Path::new(&src.path).is_relative()
             && let Some(f) = &from
         {
@@ -65,6 +66,10 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
             continue;
         }
         let Some(audio) = s.pool.get(src.id) else { continue };
+        // A disk-backed source's file is its audio (ADR 0035): referenced where it is, never rewritten.
+        if audio.is_disk() {
+            continue;
+        }
         if let Some(path) = files.get(&Arc::as_ptr(audio)) {
             src.path.clone_from(path);
             src.unsaved = false;
@@ -240,15 +245,26 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
     let mut missing = Vec::new();
     let mut files = DecodedFiles::new();
     for src in &s.sources {
-        let decoded =
-            stored_path(&src.path, links).map_err(|why| format!("{}: {why}", src.path)).and_then(|p| decode_file(&mut files, &p, s.sample_rate.hz()));
+        let decoded = stored_path(&src.path, links)
+            .map_err(|why| format!("{}: {why}", src.path))
+            .and_then(|p| decode_file_streamed(&mut files, &p, s.sample_rate.hz(), src.disk));
         match decoded {
             Ok(audio) => s.pool.insert(src.id, audio),
             Err(err) => missing.push(err),
         }
     }
+    // A source too long to decode opens disk-backed; it is marked so a save keeps its file.
+    for src in &mut s.sources {
+        src.disk |= s.pool.get(src.id).is_some_and(|a| a.is_disk());
+    }
     s.folder = Some(dir);
-    let notes = std::mem::take(&mut s.load_notes);
+    let mut notes = std::mem::take(&mut s.load_notes);
+    // Takes an older build could not place (#192) are placed now when their files are there.
+    if !s.unplaced_takes.is_empty() {
+        notes.retain(|n| !n.starts_with(transit_model::UNPLACED_NOTE));
+        notes.extend(super::disk::place_unplaced(&mut s));
+        notes.extend(s.unplaced_takes.iter().map(|t| format!("{} {t}", transit_model::UNPLACED_NOTE)));
+    }
     log::info!("{}", session_open_line(path, &s, missing.len(), started.elapsed()));
     e.replace_session(s);
     e.path = Some(path.to_string());
@@ -305,11 +321,19 @@ pub(crate) type DecodedFiles = std::collections::HashMap<PathBuf, std::result::R
 /// The audio of the file at `p` at `rate`, decoded the first time it is asked for. The error
 /// names the file.
 /// A file named in a session is hostile input too: a path that leaves the read root is not read.
-pub(crate) fn decode_file(files: &mut DecodedFiles, p: &Path, rate: u32) -> std::result::Result<Arc<SourceAudio>, String> {
+/// Played from disk (ADR 0035) when `stream` says so or the file is too long to decode at all.
+pub(crate) fn decode_file_streamed(files: &mut DecodedFiles, p: &Path, rate: u32, stream: bool) -> std::result::Result<Arc<SourceAudio>, String> {
     crate::file_access::check_read(p)?;
     files
         .entry(file_key(p))
         .or_insert_with(|| {
+            if let Some((info, len)) = super::disk::probe(p).filter(|(info, _)| stream || super::disk::over_decode_limit(info)) {
+                match super::disk::open_disk_audio(p, len, rate) {
+                    Ok(audio) => return Ok(audio),
+                    Err(e) if super::disk::over_decode_limit(&info) => return Err(e),
+                    Err(e) => log::info!("{e}; it is decoded instead"),
+                }
+            }
             let bytes = read_file(p).map_err(|_| p.display().to_string())?;
             decode_source(&bytes, p.extension().and_then(|x| x.to_str()), rate).map_err(|err| format!("{}: {err}", p.display()))
         })
@@ -352,8 +376,20 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
             target = format!("Audio Files/{base}_{k:02}.wav");
             k += 1;
         }
-        let opts_wav = EncodeOptions { format: FileFormat::Wav, bit_depth: transit_audio_io::BitDepth::Float32, dither: false, bwf: None };
-        let bytes = transit_audio_io::encode(&audio.buffer, &opts_wav).map_err(|err| EngineError::Io(err.to_string()))?;
+        let bytes = match &audio.disk {
+            // A disk-backed source goes in as its file, as long as a bundle can hold it.
+            Some(d) => {
+                let len = std::fs::metadata(d.path()).map_err(ioerr)?.len();
+                if len > MAX_BUNDLE_BYTES {
+                    return Err(EngineError::Io(format!("bundle: {} is too long to bundle; save the session as a folder", d.path().display())));
+                }
+                read_file(d.path())?
+            }
+            None => {
+                let opts_wav = EncodeOptions { format: FileFormat::Wav, bit_depth: transit_audio_io::BitDepth::Float32, dither: false, bwf: None };
+                transit_audio_io::encode(&audio.buffer, &opts_wav).map_err(|err| EngineError::Io(err.to_string()))?
+            }
+        };
         w.start_file(target.as_str(), opts).map_err(zerr)?;
         w.write_all(&bytes).map_err(ioerr)?;
         taken.insert(target.clone());
