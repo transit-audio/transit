@@ -193,3 +193,5 @@ marks it stuck, drops the stream and reads `live`, so no sweep can run in that w
 says when) so the open's own sweep ends the session, not the host's tend, and the test checks that
 `disposeBuffers` came before the new `createBuffers`. After the fix: 0 of 60 with the widened
 window (1 ms and 5 ms), 0 of 60 at 0.2 ms and 2 ms, 0 of 100 unloaded. Rule added to `gates.md`.
+
+Audit 2026-10-30 (#226): every test on the thread, worker, host-thread and backend paths has a row in [`docs/contributing/evidence/e49-audit-2026-10-30.md`](../contributing/evidence/e49-audit-2026-10-30.md).

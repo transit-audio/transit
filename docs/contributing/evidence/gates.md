@@ -116,6 +116,7 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   failing platform before the change merges; "passes locally" or "passes on re-run elsewhere" is not
   enough. The CI conclusion after a push is itself a gate: check it, and a red run is a failure until
   it is explained and fixed (E47, `../../escapes/E47-header-state-jobs-raced-the-rendered-document.md`).
+- Every test that starts a thread or takes the worker or host-thread path is audited, one row each, in [`e49-audit-2026-10-30.md`](e49-audit-2026-10-30.md) (#226); add a row for a new such test.
 - No wall-clock latency bound under about 100 ms in a unit test. Assert a deterministic signal
   (a counter, a state, an ordering) or a stall bound with its rationale in a comment; a shared CI
   runner will exceed a tight bound sooner or later (E49, `../../escapes/E49-echo-latency-test-wall-clock-bound.md`).
