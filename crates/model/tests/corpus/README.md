@@ -18,6 +18,8 @@ Two per release, named `v<version>-<name>.transit`:
 
 v0.4.1 adds an optional `Session.unplaced_takes` (#192, recordings too long to decode). The v0.4.1 features session does not carry one: an entry is a load note, and the corpus test wants zero notes.
 
+v0.5.0 adds optional fields (`Source::disk` for disk-backed takes, the Macro Oscillator's parameters and voice settings by id) that default on load. The v0.5.0 sessions do not carry a disk-backed source or a Macro Oscillator track: the generator builds neither without a file on disk or a hosted instrument, and the corpus test wants zero notes.
+
 One file is hand-written, not saved by a build: `v0.3.2-video.transit` has an audio track, a Video
 track, a video clip and a `videos` entry. It pins the sanitize rule of ADR 0031 (it opens with the video
 dropped and one note) and is loaded by its own test, so the lossless round trip skips it (`SANITIZED`
