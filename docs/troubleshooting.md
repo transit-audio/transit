@@ -89,6 +89,7 @@ Every figure of the Callback Telemetry window, in plain words. The same text app
 - **Backend errors.** Errors the audio backend reported on the stream since open; the warning icon beside the readout shows the same count. Healthy is 0. If it counts up, read the log, then try Reconnect in Audio Devices.
 - **Device-lost errors.** Times the audio device went away, for example unplugged or reset by its driver. These are also counted in Backend errors. Healthy is 0; plug the device back in and press Reconnect.
 - **Frames silenced by a render fault.** Frames of audio replaced by silence because rendering failed. Healthy is 0. If not, find the plug-in that faulted in the log and report it.
+- **Disk underruns.** Blocks of a long take, played from its file, that were not read from disk in time and played as silence instead. Healthy is 0. A count after a jump of the playhead is a slow disk; a count while playing on means the disk cannot keep up: move the take to a faster disk.
 - **Reset peak.** Starts the since-open peak load and longest callback over. Use it after a change to see whether the peak comes back.
 - **Copy diagnostics.** Copies a report of your system, audio devices, these figures and the end of the log to the clipboard. Paste it into a bug report; it holds nothing from your sessions.
 <!-- /help:telemetry -->
