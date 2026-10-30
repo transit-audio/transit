@@ -82,7 +82,7 @@ impl DiskSource {
     /// Give `map`'s clip a stream from clip time `k`: nothing when a ring already holds or is
     /// filling toward it; else a free slot, else the one idle longest (never one the reader is in).
     fn cue_slot(&self, p: &mut Pump, map: &StreamMap, k: i64) {
-        if self.slots.iter().any(|s| s.covers(map.clip, k, self.window)) {
+        if self.slots.iter().any(|s| s.covers(map, k, self.window)) {
             return;
         }
         let mut order: Vec<usize> = (0..self.slots.len()).collect();
@@ -103,6 +103,7 @@ impl DiskSource {
             let channels = self.channels;
             slot.ring.get_or_init(|| (0..window.saturating_mul(channels)).map(|_| AtomicU32::new(0)).collect());
             slot.clip.store(map.clip, Ordering::Relaxed);
+            slot.map.store(map.fingerprint(), Ordering::Relaxed);
             slot.base.store(k, Ordering::Relaxed);
             slot.head.store(k, Ordering::Relaxed);
             slot.read.store(k, Ordering::Relaxed);

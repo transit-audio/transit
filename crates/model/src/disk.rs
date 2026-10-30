@@ -139,6 +139,21 @@ pub struct StreamMap {
 }
 
 impl StreamMap {
+    /// What a ring was filled with besides the clip id (FNV-1a over offset, loop, stretch and
+    /// length): a ring cued under another mapping of the same clip (a slip, a trim, a loop or
+    /// stretch change) is a miss, never a read of the old content.
+    pub fn fingerprint(&self) -> u64 {
+        let (ls, le, lf) = self.looping.map_or((0, 0, 0u8), |l| (l.start, l.end, 1));
+        let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+        let words = [self.offset as u64, ls as u64, le as u64, u64::from(lf), self.stretch.to_bits(), self.length as u64];
+        for w in words {
+            for b in w.to_le_bytes() {
+                h = (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3);
+            }
+        }
+        h
+    }
+
     /// The map of an audio clip; `None` for a MIDI clip.
     pub fn of(clip: &Clip) -> Option<StreamMap> {
         let ClipContent::Audio { offset, .. } = clip.content else { return None };
@@ -180,6 +195,8 @@ struct Slot {
     state: AtomicU8,
     busy: AtomicBool,
     clip: AtomicU64,
+    /// [`StreamMap::fingerprint`] of the mapping the ring was cued with.
+    map: AtomicU64,
     base: AtomicI64,
     head: AtomicI64,
     read: AtomicI64,
@@ -195,6 +212,7 @@ impl Slot {
             state: AtomicU8::new(FREE),
             busy: AtomicBool::new(false),
             clip: AtomicU64::new(0),
+            map: AtomicU64::new(0),
             base: AtomicI64::new(0),
             head: AtomicI64::new(0),
             read: AtomicI64::new(0),
@@ -203,12 +221,19 @@ impl Slot {
         }
     }
 
-    /// Whether this slot streams `clip` and holds, or will hold, clip time `k`.
-    fn covers(&self, clip: u64, k: Samples, window: usize) -> bool {
-        self.state.load(Ordering::Acquire) == LIVE && self.clip.load(Ordering::Acquire) == clip && {
+    /// Whether this slot streams `map`'s clip as `map` maps it, and holds, or will hold, clip time `k`.
+    fn covers(&self, map: &StreamMap, k: Samples, window: usize) -> bool {
+        self.state.load(Ordering::Acquire) == LIVE && self.is(map) && {
             let (base, read) = (self.base.load(Ordering::Acquire), self.read.load(Ordering::Acquire));
             k >= base && k >= read && k < read.saturating_add(window as i64)
         }
+    }
+}
+
+impl Slot {
+    /// The slot's clip and mapping are `map`'s.
+    fn is(&self, map: &StreamMap) -> bool {
+        self.clip.load(Ordering::Acquire) == map.clip && self.map.load(Ordering::Acquire) == map.fingerprint()
     }
 }
 
@@ -282,8 +307,12 @@ impl Request {
         Some((map, k))
     }
 
-    fn is(&self, clip: u64, k: Samples) -> bool {
-        self.state.load(Ordering::Acquire) == READY && self.clip.load(Ordering::Relaxed) == clip && self.k.load(Ordering::Relaxed) == k
+    fn is(&self, map: &StreamMap, k: Samples) -> bool {
+        self.state.load(Ordering::Acquire) == READY
+            && self.clip.load(Ordering::Relaxed) == map.clip
+            && self.k.load(Ordering::Relaxed) == k
+            && self.offset.load(Ordering::Relaxed) == map.offset
+            && self.length.load(Ordering::Relaxed) == map.length
     }
 }
 
@@ -421,19 +450,25 @@ impl DiskSource {
         let _ = self.peaks.set(peaks);
     }
 
-    /// Audio thread: the ring holding clip time `k0..k0 + n` of `clip`, or `None` when no ring
-    /// holds all of it yet. Allocation-free and lock-free; never touches the file.
-    pub fn stream(&self, clip: u64, k0: Samples, n: usize) -> Option<StreamView<'_>> {
+    /// Audio thread: the ring holding clip time `k0..k0 + n` of `map`'s clip as `map` maps it, or
+    /// `None` when no ring holds all of it yet (or only under an older mapping of the clip).
+    /// Allocation-free and lock-free; never touches the file.
+    pub fn stream(&self, map: &StreamMap, k0: Samples, n: usize) -> Option<StreamView<'_>> {
         let k1 = k0.saturating_add(n as i64);
+        let fp = map.fingerprint();
         for slot in self.slots.iter() {
-            if slot.state.load(Ordering::Acquire) != LIVE || slot.clip.load(Ordering::Acquire) != clip {
+            if slot.state.load(Ordering::Acquire) != LIVE || !slot.is(map) {
                 continue;
             }
             slot.busy.store(true, Ordering::SeqCst);
-            let ok = slot.state.load(Ordering::SeqCst) == LIVE && slot.clip.load(Ordering::SeqCst) == clip && {
-                let (base, read, head) = (slot.base.load(Ordering::Acquire), slot.read.load(Ordering::Acquire), slot.head.load(Ordering::Acquire));
-                k0 >= base && k0 >= read && k1 <= head
-            };
+            let ok = slot.state.load(Ordering::SeqCst) == LIVE
+                && slot.clip.load(Ordering::SeqCst) == map.clip
+                && slot.map.load(Ordering::SeqCst) == fp
+                && {
+                    let (base, read, head) =
+                        (slot.base.load(Ordering::Acquire), slot.read.load(Ordering::Acquire), slot.head.load(Ordering::Acquire));
+                    k0 >= base && k0 >= read && k1 <= head
+                };
             match (ok, slot.ring.get()) {
                 (true, Some(ring)) => return Some(StreamView { slot, ring, window: self.window, end: k1 }),
                 _ => slot.busy.store(false, Ordering::Release),
@@ -455,7 +490,7 @@ impl DiskSource {
     /// it (the next block asks again).
     pub fn cue(&self, map: &StreamMap, k: Samples) {
         let k = k.clamp(0, map.length.max(0));
-        if self.slots.iter().any(|s| s.covers(map.clip, k, self.window)) || self.requests.iter().any(|r| r.is(map.clip, k)) {
+        if self.slots.iter().any(|s| s.covers(map, k, self.window)) || self.requests.iter().any(|r| r.is(map, k)) {
             return;
         }
         let _ = self.requests.iter().any(|r| r.post(map, k));
@@ -463,10 +498,10 @@ impl DiskSource {
 
     /// Whether a ring holds clip time `k..k + frames` of `clip`, clipped to the clip's `length` and
     /// to what the ring can hold ahead of its reader.
-    pub fn ready(&self, clip: u64, k: Samples, frames: usize, length: Samples) -> bool {
+    pub fn ready(&self, map: &StreamMap, k: Samples, frames: usize) -> bool {
         self.slots.iter().any(|s| {
             let held = s.read.load(Ordering::Acquire).saturating_add(self.window as i64);
-            s.covers(clip, k, self.window) && s.head.load(Ordering::Acquire) >= k.saturating_add(frames as i64).min(length).min(held)
+            s.covers(map, k, self.window) && s.head.load(Ordering::Acquire) >= k.saturating_add(frames as i64).min(map.length).min(held)
         })
     }
 
@@ -475,7 +510,7 @@ impl DiskSource {
     pub fn prime(&self, map: &StreamMap, k: Samples) -> bool {
         self.cue(map, k);
         self.pump();
-        self.ready(map.clip, k.clamp(0, map.length.max(0)), self.window, map.length)
+        self.ready(map, k.clamp(0, map.length.max(0)), self.window)
     }
 
     /// Off the audio thread: `f` with this file's frames read synchronously (bounce, export,

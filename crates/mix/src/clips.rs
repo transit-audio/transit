@@ -125,7 +125,7 @@ pub(crate) fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize,
         // The audio thread (and a render worker for it) only drains the clip's ring (ADR 0035).
         Some(d) if on_audio_thread() => {
             let k0 = isect.start.saturating_sub(clip.start);
-            match d.stream(map.clip, k0, i1.saturating_sub(i0)) {
+            match d.stream(&map, k0, i1.saturating_sub(i0)) {
                 Some(ring) => mix_clip(clip, pos, i0, i1, buf, d.channels(), |c, k| ring.get(c, k)),
                 None => d.underrun(&map, k0),
             }

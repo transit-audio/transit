@@ -49,12 +49,12 @@ fn a_ring_is_empty_until_the_streamer_fills_it_and_a_miss_asks_for_it() {
     let data = ramp(2, 10_000);
     let (d, _) = fake(data.clone(), 1_000);
     let m = map(7, 10_000);
-    assert!(d.stream(7, 0, 64).is_none());
+    assert!(d.stream(&m, 0, 64).is_none());
     d.underrun(&m, 0);
     assert_eq!(d.underruns(), 1);
-    assert!(d.stream(7, 0, 64).is_none(), "nothing is read until the streamer runs");
+    assert!(d.stream(&m, 0, 64).is_none(), "nothing is read until the streamer runs");
     assert_eq!(d.pump(), 1_000, "one pass fills one window");
-    let v = d.stream(7, 0, 64).expect("filled");
+    let v = d.stream(&m, 0, 64).expect("filled");
     for k in 0..64 {
         assert_eq!(v.get(0, k), data[0][k as usize]);
         assert_eq!(v.get(1, k), data[1][k as usize]);
@@ -70,7 +70,7 @@ fn the_streamer_keeps_a_window_ahead_of_the_reader_and_never_overwrites_what_is_
     d.pump();
     let mut k = 0;
     while k + 64 <= 10_000 {
-        let v = d.stream(1, k, 64).unwrap_or_else(|| panic!("ring short at {k}"));
+        let v = d.stream(&m, k, 64).unwrap_or_else(|| panic!("ring short at {k}"));
         for i in k..k + 64 {
             assert_eq!(v.get(0, i), data[0][i as usize], "clip time {i}");
         }
@@ -88,11 +88,11 @@ fn a_locate_is_a_new_stream_and_reading_behind_the_reader_is_a_miss() {
     let m = map(3, 10_000);
     d.cue(&m, 5_000);
     d.pump();
-    assert!(d.stream(3, 5_000, 64).is_some());
-    assert!(d.stream(3, 4_000, 64).is_none(), "behind the stream");
+    assert!(d.stream(&m, 5_000, 64).is_some());
+    assert!(d.stream(&m, 4_000, 64).is_none(), "behind the stream");
     d.underrun(&m, 4_000);
     d.pump();
-    assert!(d.stream(3, 4_000, 64).is_some(), "re-cued");
+    assert!(d.stream(&m, 4_000, 64).is_some(), "re-cued");
 }
 
 #[test]
@@ -110,7 +110,7 @@ fn looped_and_stretched_clips_stream_what_the_in_memory_read_gives() {
         d.pump();
         while k < 3_000 {
             let n = 100.min(3_000 - k) as usize;
-            let v = d.stream(m.clip, k, n).unwrap_or_else(|| panic!("{m:?} short at {k}"));
+            let v = d.stream(&m, k, n).unwrap_or_else(|| panic!("{m:?} short at {k}"));
             for i in k..k + n as i64 {
                 let want = m.sample(i, |x| data[0].get(x).copied());
                 assert_eq!(v.get(0, i).to_bits(), want.to_bits(), "{m:?} at {i}");
@@ -144,15 +144,15 @@ fn eight_streams_fit_and_a_ninth_takes_the_longest_idle() {
         d.pump();
     }
     for clip in 1..=SLOTS as u64 {
-        assert!(d.stream(clip, 0, 16).is_some(), "clip {clip}");
+        assert!(d.stream(&map(clip, 10_000), 0, 16).is_some(), "clip {clip}");
     }
     // Every stream was read in this pass; the next pass sees them all still, then clip 1 reads on.
     d.pump();
-    drop(d.stream(1, 16, 16));
+    drop(d.stream(&map(1, 10_000), 16, 16));
     d.cue(&map(99, 10_000), 0);
     d.pump();
-    assert!(d.stream(99, 0, 16).is_some(), "the new stream got a slot");
-    assert!(d.stream(1, 32, 16).is_some(), "the stream read since is kept");
+    assert!(d.stream(&map(99, 10_000), 0, 16).is_some(), "the new stream got a slot");
+    assert!(d.stream(&map(1, 10_000), 32, 16).is_some(), "the stream read since is kept");
 }
 
 #[test]
@@ -160,8 +160,8 @@ fn prime_fills_a_window_on_the_calling_thread() {
     let (d, _) = fake(ramp(1, 100_000), 4_096);
     let m = map(5, 100_000);
     assert!(d.prime(&m, 1_000));
-    assert!(d.ready(5, 1_000, 4_096, m.length));
-    assert!(d.stream(5, 1_000, 4_096).is_some());
+    assert!(d.ready(&m, 1_000, 4_096));
+    assert!(d.stream(&m, 1_000, 4_096).is_some());
 }
 
 #[test]
@@ -226,4 +226,24 @@ fn peaks_are_built_once_then_read_from_the_sidecar_until_the_file_changes() {
     let (rebuilt, origin) = load_or_build_peaks(&path, d.opener(), 1, d.frames()).unwrap_or_else(|e| panic!("{e}"));
     assert_eq!(origin, PeaksOrigin::Built);
     assert_ne!(rebuilt, built);
+}
+
+#[test]
+fn a_ring_cued_under_another_mapping_of_the_clip_is_a_miss() {
+    let data = ramp(1, 10_000);
+    let (d, _) = fake(data.clone(), 1_024);
+    let m = map(4, 5_000);
+    d.cue(&m, 0);
+    d.pump();
+    assert!(d.stream(&m, 0, 64).is_some());
+    let slipped = StreamMap { offset: 100, ..m };
+    let longer = StreamMap { length: 6_000, ..m };
+    let looped = StreamMap { looping: Some(ClipLoop { start: 0, end: 500 }), ..m };
+    for other in [slipped, longer, looped] {
+        assert!(d.stream(&other, 64, 64).is_none(), "{other:?}");
+        d.underrun(&other, 64);
+        d.pump();
+        let v = d.stream(&other, 64, 64).expect("re-cued with the new mapping");
+        assert_eq!(v.get(0, 64), other.sample(64, |x| data[0].get(x).copied()));
+    }
 }

@@ -8,7 +8,7 @@ use super::plan_tests::{BLOCK, Rig};
 use super::*;
 use std::path::PathBuf;
 use transit_audio_io::AudioBuffer;
-use transit_model::disk::{DiskFile, DiskSource, Opener};
+use transit_model::disk::{DiskFile, DiskSource, Opener, StreamMap};
 use transit_model::{ChannelFormat, ClipId, SourceAudio, SourceId, TrackKind};
 
 /// A file held in memory.
@@ -64,12 +64,25 @@ fn memory(data: &[Vec<f32>]) -> Arc<SourceAudio> {
 /// Render `blocks` (positions) through a live plan on this thread, marked as the audio thread,
 /// pumping `disk` after each block when given. Returns the concatenated first output channel.
 fn live(s: &Session, blocks: &[i64], disk: Option<&DiskSource>, measure: bool) -> Vec<f32> {
+    live_edited(s, None, blocks, disk, measure)
+}
+
+/// [`live`], publishing `edit.1` (an edit of `s`) before block `edit.0`. With `measure`, every
+/// block is measured for allocation, the first one after a warm-up block where nothing plays.
+fn live_edited(s: &Session, edit: Option<(usize, &Session)>, blocks: &[i64], disk: Option<&DiskSource>, measure: bool) -> Vec<f32> {
     mark_audio_thread();
     let mut rig = Rig::new();
     assert_eq!(rig.publish(s), Adoption::Adopted);
+    // A plan's first block may set things up; the disk-backed path is measured from its first use.
+    rig.eng.render_active(-1_000_000, BLOCK, &mut rig.out);
     let mut out = Vec::new();
     for (i, &pos) in blocks.iter().enumerate() {
-        if measure && i > 0 {
+        if let Some((at, edited)) = edit
+            && at == i
+        {
+            assert_eq!(rig.publish(edited), Adoption::Adopted);
+        }
+        if measure {
             let (_, stats) = transit_rt::testing::measure(|| rig.eng.render_active(pos, BLOCK, &mut rig.out));
             assert!(stats.is_zero(), "a disk-backed clip allocated on the audio thread at {pos}: {stats:?}");
         } else {
@@ -82,6 +95,52 @@ fn live(s: &Session, blocks: &[i64], disk: Option<&DiskSource>, measure: bool) -
     }
     unmark_audio_thread();
     out
+}
+
+/// Clip `a` of [`session`] changed by `f`.
+fn edited(s: &Session, f: impl Fn(&mut Clip)) -> Session {
+    let mut e = s.clone();
+    let t = e.tracks[0].id;
+    let clip = e.track_mut(t).unwrap().playlist_mut().unwrap().clips.iter_mut().find(|c| c.id == ClipId(10)).unwrap();
+    f(clip);
+    e
+}
+
+#[test]
+fn an_edit_of_a_playing_disk_backed_clip_plays_its_new_mapping_from_the_next_block() {
+    let data = content(10_000);
+    type Edit = fn(&mut Clip);
+    let edits: [(&str, Edit); 4] = [
+        ("slip", |c| {
+            if let ClipContent::Audio { offset, .. } = &mut c.content {
+                *offset += 200;
+            }
+        }),
+        ("extend left", |c| {
+            c.start -= 64;
+            c.length += 64;
+            if let ClipContent::Audio { offset, .. } = &mut c.content {
+                *offset -= 64;
+            }
+        }),
+        ("loop", |c| c.set_loop(Some(ClipLoop { start: 200, end: 900 }))),
+        ("extend end", |c| c.length += 3_000),
+    ];
+    for (name, f) in edits {
+        let disk = fake_source(&data, 2_048);
+        let (ds, _) = session(Arc::new(SourceAudio::disk(Arc::clone(&disk))));
+        let (ms, _) = session(memory(&data));
+        let (ds2, ms2) = (edited(&ds, f), edited(&ms, f));
+        assert_eq!(transit_model::disk::prime_session(&ds, 0), 0);
+        // The edit lands at block 4 (1024), the old ring then holds up to clip time 2948.
+        let blocks: Vec<i64> = (0..24).map(|b| b * BLOCK as i64).collect();
+        let got = live_edited(&ds, Some((4, &ds2)), &blocks, Some(&disk), true);
+        let want = live_edited(&ms, Some((4, &ms2)), &blocks, None, false);
+        assert_eq!(got[..4 * BLOCK], want[..4 * BLOCK], "{name}: before the edit");
+        assert!(disk.underruns() <= 2, "{name}: at most the block of the edit (and the extended end's first block): {}", disk.underruns());
+        let bits = |x: &[f32]| x.iter().map(|v| v.to_bits()).collect::<Vec<_>>();
+        assert_eq!(bits(&got[5 * BLOCK..]), bits(&want[5 * BLOCK..]), "{name}: the new mapping from the block after the edit");
+    }
 }
 
 #[test]
@@ -129,7 +188,7 @@ fn a_late_ring_plays_silence_counts_an_underrun_and_recovers() {
     let (ds, _) = session(Arc::new(SourceAudio::disk(Arc::clone(&disk))));
     let (ms, _) = session(memory(&data));
     let before = transit_model::disk::underruns();
-    // Not primed, and the streamer runs only after the first block.
+    // Not primed, and the streamer runs only after the first block; the miss is measured too.
     let blocks: Vec<i64> = (0..8).map(|b| b * BLOCK as i64).collect();
     let got = live(&ds, &blocks, Some(&disk), true);
     let want = live(&ms, &blocks, None, false);
@@ -202,4 +261,23 @@ fn export_of_a_short_file_forced_disk_backed_equals_the_in_memory_render_bit_for
     // Consolidate reads through the same reader.
     let t = ds.tracks[0].id;
     assert_eq!(render_clips(&ds, t, range), render_clips(&ms, t, range));
+}
+
+#[test]
+fn a_full_request_table_drops_the_request_without_allocating() {
+    let data = content(4_000);
+    let disk = fake_source(&data, 512);
+    mark_audio_thread();
+    let maps: Vec<StreamMap> = (0..40u64).map(|c| StreamMap { clip: c, offset: 0, looping: None, stretch: 1.0, length: 4_000 }).collect();
+    let (_, stats) = transit_rt::testing::measure(|| {
+        for m in &maps {
+            disk.underrun(m, 0);
+        }
+    });
+    unmark_audio_thread();
+    assert!(stats.is_zero(), "{stats:?}");
+    assert_eq!(disk.underruns(), 40);
+    disk.pump();
+    let cued = maps.iter().filter(|m| disk.stream(m, 0, 16).is_some()).count();
+    assert!(cued >= 1 && cued <= transit_model::disk::SLOTS, "{cued}");
 }
