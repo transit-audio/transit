@@ -40,23 +40,6 @@ fn zero_crossing_hz(x: &[f64], rate: f32) -> f64 {
     (crossings.len() - 1) as f64 / ((crossings[crossings.len() - 1] - crossings[0]) / f64::from(rate))
 }
 
-/// The fundamental from the autocorrelation peak near `periods` periods of `around_hz` (within 2%),
-/// refined by a parabola. Over many periods a waveform rebuilt on a coarser grid (LPC speech runs
-/// at 8 kHz and is held to the output rate) no longer pulls the peak to a grid multiple.
-fn autocorrelation_hz(x: &[f64], rate: f32, around_hz: f64, periods: f64) -> f64 {
-    let rate = f64::from(rate);
-    let lag = periods * rate / around_hz;
-    let (lo, hi) = ((lag / 1.02) as usize, (lag * 1.02) as usize + 2);
-    let r = |lag: usize| {
-        let n = x.len() - lag;
-        x[..n].iter().zip(&x[lag..]).map(|(a, b)| a * b).sum::<f64>() / n as f64
-    };
-    let best = (lo..=hi).max_by(|&a, &b| r(a).total_cmp(&r(b))).expect("lags");
-    assert!(best > lo && best < hi, "peak at the edge of the search ({lo}..{hi}): {best}");
-    let (a, b, c) = (r(best - 1), r(best), r(best + 1));
-    periods * rate / (best as f64 + 0.5 * (a - c) / (a - 2.0 * b + c))
-}
-
 fn cents(a: f64, b: f64) -> f64 {
     1200.0 * (a / b).log2()
 }
