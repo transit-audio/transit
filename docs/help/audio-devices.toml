@@ -38,7 +38,7 @@ text = "How many channels of the device are open in this direction. Use the I/O 
 [[entry]]
 id = "audio_devices.buffer"
 name = "Buffer size"
-text = "The device buffer in samples. A smaller buffer means lower latency but less time to render each block; a larger one is safer. Healthy is the smallest size at which the load and the counters below stay quiet while you play."
+text = "The device buffer in samples. A smaller buffer means lower latency but less time to render each block; a larger one is safer. Healthy is the smallest size at which the load and the counters below stay quiet while you play. On Linux, under JACK the buffer is the server's quantum; through ALSA under PipeWire it is not: the buffer is split into periods, PipeWire runs transit at the period and the graph at its quantum, so the list shows each size's period and the open lines show all three."
 
 [[entry]]
 id = "audio_devices.host"
@@ -63,7 +63,7 @@ text = "How the audio thread is scheduled: MMCSS Pro Audio is the best case on W
 [[entry]]
 id = "audio_devices.requested"
 name = "Requested versus running"
-text = "You asked for a buffer size or sample rate and the device runs at another. PipeWire runs a stream at the buffer size the server is set to, and any device can step down to what it offers. Change the value in the lists or in the driver's own settings, then press Reconnect."
+text = "You asked for a buffer size or sample rate and the device runs at another, or a saved size the device no longer offers opened at the nearest one it does. Any device can step down to what it offers. Under PipeWire through ALSA the line reads Buffer, period and the server's quantum instead: the server sets the period, change it with pw-metadata -n settings 0 clock.force-quantum or use the JACK system. Otherwise change the value in the lists or in the driver's own settings, then press Reconnect."
 
 [[entry]]
 id = "audio_devices.backend"

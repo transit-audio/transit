@@ -16,6 +16,11 @@ and the duplex process engine (audio plays and records).
   `libjack-jackd2-dev` (CI installs it); the binary does not need libjack to start. 0.5.1's manifest
   misspells its default feature list, so `dynamic_loading` is named explicitly.
 - Building, `pw-jack` and the quantum: [docs/building.md](../../building.md#native-jack-backend-linux).
+- Which libjack (#230): `src/library.rs` lists the candidates (`TRANSIT_JACK_LIBRARY`, the loader's
+  `libjack.so.0`, PipeWire's library at the distributions' paths) and picks the first whose probe
+  connects; `src/ffi.rs` probes each through its own `dlopen` before `jack-sys` loads anything,
+  keeps the winner loaded so `jack-sys`'s soname `dlopen` resolves to it, and checks by the address
+  of `jack_client_open` that it did. Audio Devices shows `JackBackend::library_note`.
 
 ## Shape
 
@@ -33,8 +38,7 @@ and the duplex process engine (audio plays and records).
   names (`system` under JACK 2, one entry per node under PipeWire); its ports are the channels, named
   by their short names. One format per endpoint: `f32` at the server's rate; the period range is 64 to 2048 (wider when the server runs outside it).
 - `JackBackend::probe` opens a short-lived client `transit-probe` with `JackNoStartServer`. Three
-  states: library missing ("JACK library not found: install pipewire-jack (or JACK), or start transit
-  with pw-jack"), no server ("JACK/PipeWire server not running"), or running with its groups. The
+  states: library missing ("JACK library not found: install pipewire-jack (PipeWire) or JACK"), no server ("JACK/PipeWire server not running"), or running with its groups. The
   first two are the system's diagnostic in Audio Devices, with no device.
 
 ## Requested versus achieved

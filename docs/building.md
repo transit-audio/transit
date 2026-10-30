@@ -71,16 +71,29 @@ target/release/audio-bench --backend jack --list-devices
 ```
 
 - **libjack is loaded at run time** (`libjack.so.0`, through `jack-sys`'s `dynamic_loading`), so the
-  binary starts on a system without JACK; the JACK system then says "JACK library not found". On
-  Debian and Ubuntu, PipeWire's `pipewire-jack` keeps its `libjack` off the loader path: start transit
-  with `pw-jack transit`, or install the distribution's `ld.so.conf.d` example file. Fedora and Arch
-  replace `libjack` outright.
+  binary starts on a system without JACK; the JACK system then says "JACK library not found". transit
+  tries, in order, the library `TRANSIT_JACK_LIBRARY` names (a path), the loader's `libjack.so.0`,
+  then PipeWire's library at `/usr/lib/x86_64-linux-gnu/pipewire-0.3/jack/`,
+  `/usr/lib/aarch64-linux-gnu/pipewire-0.3/jack/`, `/usr/lib64/pipewire-0.3/jack/` and
+  `/usr/lib/pipewire-0.3/jack/`, and uses the first whose probe connects (#230). So on Debian and
+  Ubuntu with both `jackd2` and `pipewire-jack` installed and no jackd running, PipeWire answers
+  without `pw-jack`. Audio Devices shows the library in use ("JACK library: ...") or every library
+  tried and why. PipeWire documents no variable for its library path (`pw-jack` sets
+  `LD_LIBRARY_PATH`), hence transit's own `TRANSIT_JACK_LIBRARY`.
 - **The server must be running.** transit never starts one (`JackNoStartServer`); with none it says
   "JACK/PipeWire server not running". The server sets the rate and the quantum; under PipeWire pin
   the quantum (`pw-metadata -n settings 0 clock.force-quantum 128`) or start transit with
   `PIPEWIRE_QUANTUM=128/48000`.
+- **Buffer, period and quantum.** Under JACK (and PipeWire's JACK library) the buffer size is the
+  period is the server's quantum: one number. Through ALSA it is not: transit's buffer size is the
+  ALSA buffer, cpal splits it into 4 periods, PipeWire's ALSA plug-in runs transit's node at the
+  period (the QUANT `pw-top` shows for transit), and the graph runs at the server's quantum (the
+  driver's QUANT), which a client cannot change while `clock.force-quantum` pins it. Audio Devices
+  shows the three numbers for a stream PipeWire serves, and offers only the buffers whose periods the
+  server's `clock.min-quantum` to `clock.max-quantum` allow (read with `pw-metadata -n settings 0`).
 - **Runtime:** a running JACK 2 or PipeWire server (with PipeWire's JACK library, `pipewire-jack`).
-  On Debian and Ubuntu with PipeWire, start transit as `pw-jack transit`. In Audio Devices choose the
+  `pw-jack transit` still works and is the fallback when JACK 2's library is already loaded in the
+  process (the window then says so). In Audio Devices choose the
   JACK system and Backend > Native JACK (or leave Auto: with a server answering, Auto opens Native
   JACK on the JACK system and on the untouched default; with none it opens cpal's ALSA host). The
   buffer size and rate are the server's; the panel shows them and where to change them. Set
