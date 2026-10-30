@@ -117,11 +117,15 @@ Convention: Logic opens a new software-instrument track with its default patch l
 
 **Substitution rule on load.** An instrument slot that names `subtractive_synth` becomes a Macro Oscillator with defaults when the session loads (`transit_model::legacy_synth::retire_subtractive_synth`, called by `Session::from_json`, so every open path, recovery and session import apply it):
 
-- the old synth's parameters and preset name are dropped, since they mean nothing to the new instrument;
+- the old synth's parameters and preset name are dropped, since they mean nothing to the new instrument; the slot's bypass and active flags carry over; the new instrument gets `level` = -19.5 dB instead of its -6 dB default, because the Macro Oscillator at its defaults plays about 13.5 dB louder than the old synth did (derivation below);
 - the session's MIDI mappings, the track's automation lanes and the rack macro targets that addressed the old instrument's parameters (`plugin:instrument:<id>`) are dropped; mappings and lanes on inserts, and everything that addresses the slot as a slot (rack membership, zones, routing, volume, pan), keep working;
 - the load report gets one line per track that lost something, then the status line "N track(s) used the retired Subtractive Synth and now carry the Macro Oscillator";
 - the session opens as modified (the engine keeps the file's own content as the saved state), so the user sees the substitution on save; a saved session no longer names the old id and opens clean.
 
 The corpus keeps the sessions released builds wrote with the old synth (`crates/model/tests/corpus`); `a_release_session_with_the_old_synth_opens_with_a_macro_oscillator_and_one_report` loads them, and the lossless round-trip tests read them with the id swapped. MIDI-mapping profiles are app-level, not session data, and are not rewritten: a profile mapping to an old instrument parameter finds no such parameter and does nothing.
 
-The shared event queue and ADSR that lived in the synth's file stay, as `crates/dsp/src/plugins/instrument_queue.rs`, for the Drum Synth, the Sampler and the Macro Oscillator.
+**Level derivation.** The instrument plan-parity golden (`crates/mix/tests/golden/plan_parity/instrument.f32`) holds the same session rendered with the old synth and with the Macro Oscillator at its defaults: peak 0.0569 and 0.2680, a difference of 20 log10(0.0569 / 0.2680) = -13.46 dB (the held-notes golden: 0.271 and 1.346, -13.9 dB). The default level of -6 dB minus 13.5 dB gives -19.5 dB (`SUBSTITUTE_LEVEL_DB`), which lands a substituted track within about 2 dB of its old peak loudness on that golden. RMS differs more (-18 dB on that golden) because the timbres differ, so loudness is matched by peak, and a patch change will still sound different.
+
+**Status line coverage.** Every open path applies the substitution, but only a normal open and open from bytes show the status line. Crash recovery drops the temporary engine's messages and session-data import shows only the video note; both predate this change.
+
+The event queue and ADSR that lived in the synth's file stay, as `crates/dsp/src/plugins/instrument_queue.rs`: the Drum Synth and the Sampler use the queue and the Sampler the ADSR; the Macro Oscillator uses only the queue's two capacity constants (`MAX_EVENTS`, `RELEASE_RESERVE`), not the queue.

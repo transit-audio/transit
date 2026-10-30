@@ -233,7 +233,7 @@ for 50 ms) is not rendered and costs nothing.
 Memory: an instance builds all 16 voices, each with all 24 engines, whatever `voices` is set to,
 so the instrument can change its voice count on the audio thread without allocating: 1.09 MB in 341
 allocations per instance (about 68 KB per voice), measured 2026-10-30 with the counting allocator
-(`transit_rt::testing`); the Subtractive Synth is 19 KB. Follow-up: building engines (or voices)
+(`transit_rt::testing`). Follow-up: building engines (or voices)
 lazily, off the audio thread when the model or count changes, is a later optimization for racks
 with many instances.
 
