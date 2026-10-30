@@ -309,6 +309,12 @@ pub trait Plugin: Send {
     fn gain_reduction_db(&self) -> f32 {
         0.0
     }
+    /// Instruments with voices: which sound, for a panel's activity lights. Bit `i`: voice `i`
+    /// sounds (a key holds it or its release tail plays); bit `16 + i`: a key holds it. Read after
+    /// `process`, on the audio thread, so it must be cheap and allocation-free. The default: none.
+    fn voice_activity(&self) -> u32 {
+        0
+    }
     /// Test seam (feature `testing`, issue #210): writes the plug-in's DSP state (whatever a
     /// later block's output depends on: detector envelopes, filter memories, delay-line contents
     /// and write positions) into `h`, so a test can compare two renders' state at a block

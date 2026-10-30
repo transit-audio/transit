@@ -5,10 +5,17 @@ const SR: f32 = 48_000.0;
 /// The two-operator FM model: a sine at timbre 0, so zero crossings measure its pitch.
 const FM: f32 = 10.0;
 
+/// A mono instance (`voices` 1, the instrument of #195), prepared at 48 kHz.
 fn inst() -> MacroOscillator {
     let mut m = MacroOscillator::new();
+    m.set_param("voices", 0.0);
     m.prepare(SR, 512, 2);
     m
+}
+
+/// The one voice of a mono instance.
+fn v0(m: &MacroOscillator) -> &voice::Slot {
+    &m.slots[0]
 }
 
 /// Renders `frames` frames in host blocks of `block`, returning the left channel.
@@ -160,27 +167,27 @@ fn legato_and_last_note_priority() {
     let mut triggers = Vec::new();
     let step = |m: &mut MacroOscillator, triggers: &mut Vec<bool>| {
         render(m, 120, 12);
-        triggers.push(m.last_trigger);
+        triggers.push(v0(m).last_trigger);
     };
     m.note_on(0, 60, 100);
     step(&mut m, &mut triggers);
-    assert_eq!((m.note, m.last_trigger), (60.0, true));
+    assert_eq!((v0(&m).note, v0(&m).last_trigger), (60.0, true));
     m.note_on(0, 64, 50);
     step(&mut m, &mut triggers);
-    assert_eq!(m.note, 64.0, "the newest key plays");
-    assert_eq!(m.velocity, 50.0 / 127.0, "the newest key's velocity is the level");
+    assert_eq!(v0(&m).note, 64.0, "the newest key plays");
+    assert_eq!(v0(&m).velocity, 50.0 / 127.0, "the newest key's velocity is the level");
     m.note_on(0, 67, 100);
     m.note_off(0, 64);
     step(&mut m, &mut triggers);
-    assert_eq!(m.note, 67.0, "releasing an older key leaves the newest playing");
+    assert_eq!(v0(&m).note, 67.0, "releasing an older key leaves the newest playing");
     m.note_off(0, 67);
     step(&mut m, &mut triggers);
-    assert_eq!(m.note, 60.0, "releasing the newest returns to the most recent key held");
+    assert_eq!(v0(&m).note, 60.0, "releasing the newest returns to the most recent key held");
     assert!(triggers.iter().all(|t| *t), "legato: the trigger never fell while a key was held: {triggers:?}");
     m.note_off(0, 60);
     step(&mut m, &mut triggers);
-    assert!(!m.last_trigger, "the trigger falls with the last key");
-    assert_eq!(m.note, 60.0, "the release keeps the last pitch");
+    assert!(!v0(&m).last_trigger, "the trigger falls with the last key");
+    assert_eq!(v0(&m).note, 60.0, "the release keeps the last pitch");
 }
 
 /// A new phrase gets a new trigger edge even when its note-on shares a 12-frame block with the
@@ -193,10 +200,10 @@ fn a_new_phrase_retriggers_inside_one_block() {
     m.note_off(0, 60);
     m.note_on(0, 62, 100);
     render(&mut m, 12, 12);
-    assert!(!m.last_trigger, "one low block");
+    assert!(!v0(&m).last_trigger, "one low block");
     render(&mut m, 12, 12);
-    assert!(m.last_trigger, "then the new edge");
-    assert_eq!(m.note, 62.0);
+    assert!(v0(&m).last_trigger, "then the new edge");
+    assert_eq!(v0(&m).note, 62.0);
 }
 
 #[test]
@@ -206,19 +213,19 @@ fn the_sustain_pedal_holds_released_keys() {
     m.note_on(0, 60, 100);
     m.note_off(1, 60);
     render(&mut m, 120, 12);
-    assert!(m.last_trigger, "the pedal holds the released key");
+    assert!(v0(&m).last_trigger, "the pedal holds the released key");
     m.note_on(0, 64, 100);
     m.note_off(1, 64);
     render(&mut m, 120, 12);
-    assert_eq!((m.note, m.last_trigger), (64.0, true), "a key under the pedal plays legato");
+    assert_eq!((v0(&m).note, v0(&m).last_trigger), (64.0, true), "a key under the pedal plays legato");
     m.midi(0, [0xB0, 64, 0]);
     render(&mut m, 24, 12);
-    assert!(!m.last_trigger, "pedal up releases the voice");
+    assert!(!v0(&m).last_trigger, "pedal up releases the voice");
     m.note_on(0, 60, 100);
     m.midi(0, [0xB0, 64, 127]);
     m.all_notes_off();
     render(&mut m, 24, 12);
-    assert!(!m.last_trigger && !m.sustain, "all notes off clears keys and pedal");
+    assert!(!v0(&m).last_trigger && !m.sustain, "all notes off clears keys and pedal");
 }
 
 #[test]
@@ -300,7 +307,33 @@ fn every_model_sounds_and_aux_mix_selects_the_aux_output() {
 fn parameter_ids_are_stable_and_round_trip() {
     let ids: Vec<&str> = MACRO_OSC_INFO.params.iter().map(|p| p.id).collect();
     // Sessions and automation lanes store these ids: never rename one.
-    assert_eq!(ids, ["model", "harmonics", "timbre", "morph", "decay", "lpg_color", "aux_mix", "level", "tune", "bend_range", "mod_wheel"]);
+    assert_eq!(
+        ids,
+        [
+            "model",
+            "harmonics",
+            "timbre",
+            "morph",
+            "decay",
+            "lpg_color",
+            "aux_mix",
+            "level",
+            "tune",
+            "bend_range",
+            "mod_wheel",
+            "voices",
+            "velocity_curve",
+            "velocity_harmonics",
+            "velocity_timbre",
+            "velocity_morph",
+            "velocity_decay",
+            "key_curve",
+            "key_harmonics",
+            "key_timbre",
+            "key_morph",
+            "key_decay",
+        ]
+    );
     assert_eq!(MACRO_OSC_INFO.id, "macro_oscillator");
     assert_eq!(MACRO_OSC_INFO.name, "Macro Oscillator");
     let mut m = inst();
@@ -383,6 +416,6 @@ fn a_full_queue_never_refuses_a_release() {
         assert!(!*a || *b, "note {i} was admitted but its off was refused");
     }
     render(&mut m, 48, 12);
-    assert!(m.notes.top().is_none(), "every admitted note was released");
+    assert!(v0(&m).notes.top().is_none(), "every admitted note was released");
     assert!(m.events.is_empty());
 }
