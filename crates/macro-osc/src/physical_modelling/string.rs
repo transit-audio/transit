@@ -62,21 +62,16 @@ impl String {
 
     pub fn init(&mut self, sample_rate_hz: f32) {
         self.sample_rate_hz = sample_rate_hz;
-        self.string.reset();
-        self.stretch.reset();
-        self.iir_damping_filter.init();
-        self.dc_blocker.init(1.0 - 20.0 / sample_rate_hz);
         self.delay = 100.0;
-        self.dispersion_noise = 0.0;
-        self.curved_bridge = 0.0;
-        self.out_sample[0] = 0.0;
-        self.out_sample[1] = 0.0;
-        self.src_phase = 0.0;
+        self.reset();
     }
 
+    /// `String::Reset`: the delay lines, the damping filter, the DC blocker and the bridge state.
     pub fn reset(&mut self) {
         self.string.reset();
         self.stretch.reset();
+        self.iir_damping_filter.init();
+        self.dc_blocker.init(1.0 - 20.0 / self.sample_rate_hz);
         self.dispersion_noise = 0.0;
         self.curved_bridge = 0.0;
         self.out_sample[0] = 0.0;
