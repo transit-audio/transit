@@ -433,7 +433,7 @@ impl Voice<'_> {
             p.trigger = TriggerState::UNPATCHED;
         }
 
-        let short_decay = (200.0 * out.len() as f32) * self.inv_sr * semitones_to_ratio(-96.0 * patch.decay.clamp(0.1, 1.0));
+        let short_decay = (200.0 * out.len() as f32) * self.inv_sr * semitones_to_ratio(-96.0 * patch.decay);
 
         self.decay_envelope.process(short_decay * 2.0);
 
