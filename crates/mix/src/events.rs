@@ -504,6 +504,11 @@ pub(crate) struct InstrumentEvents {
     writers: [[Option<Writer>; 2]; 16],
     next_voice: u32,
     status: EventStatus,
+    /// Racks (ADR 0034): the live ports (bit per port slot below [`MAX_PORTS`]) a rack has sent
+    /// this instrument notes from, and whether its track played in a rack last block. When it
+    /// leaves the rack, what the rack's clips and those ports hold is released.
+    rack_ports: u64,
+    in_rack: bool,
 }
 
 /// How an admission went, before the engine's own annotations.
@@ -525,6 +530,8 @@ impl InstrumentEvents {
             sent: [[0; 4]; 16],
             writers: [[None; 2]; 16],
             next_voice: 0,
+            rack_ports: 0,
+            in_rack: false,
             status: EventStatus::default(),
         })
     }
@@ -1135,6 +1142,38 @@ impl InstrumentEvents {
     }
 
     /// A clip note-off (nothing when the clip's note is not open: shed, or released at a seek).
+    /// A rack is about to send this instrument an event from `port` (ADR 0034).
+    pub(crate) fn mark_rack_port(&mut self, port: u16) {
+        if usize::from(port) < MAX_PORTS {
+            self.rack_ports |= 1 << port;
+        }
+    }
+
+    /// Once per block, before the clips: whether the instrument's track plays in a rack. When it
+    /// no longer does, every note and pedal the rack's clips and live ports hold here is
+    /// released, so a member removed with a key or the pedal down does not hang.
+    pub(crate) fn rack_membership(&mut self, plugin: &mut dyn Plugin, member: bool) {
+        if self.in_rack && !member {
+            self.release_sender(plugin, Source::CLIP, RACK_CLIP_SOURCE.generation);
+            let mut bits = std::mem::take(&mut self.rack_ports);
+            while bits != 0 {
+                let port = bits.trailing_zeros() as u16;
+                bits &= bits - 1;
+                // Every generation of the port: bounded by the table sizes.
+                for _ in 0..MAX_OPEN + MAX_PEDALS {
+                    let held = self.notes.iter().find(|e| e.used && e.source.port == port).map(|e| e.source.generation);
+                    let Some(g) = held.or_else(|| self.pedals.iter().find(|p| p.used && p.source.port == port).map(|p| p.source.generation)) else {
+                        break;
+                    };
+                    if self.release_sender(plugin, port, g) == 0 {
+                        break;
+                    }
+                }
+            }
+        }
+        self.in_rack = member;
+    }
+
     /// Whether `source` holds an open note on `key` (by `id` when it has one): a rack sends a
     /// member a note-off only then (ADR 0034).
     pub(crate) fn holds_note(&self, source: &Source, key: u8, id: NoteId) -> bool {

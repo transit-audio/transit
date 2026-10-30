@@ -104,6 +104,8 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                 inst.plugin.set_transport(transport);
                 if let Some(e) = inst.events.as_deref_mut() {
                     e.retry_releases(&mut *inst.plugin);
+                    // A member that left its rack lets go of what the rack held (ADR 0034).
+                    e.rack_membership(&mut *inst.plugin, t.folder.is_some() && s.rack_of(t).is_some());
                 }
                 // Stopped: no clips, but the instrument still plays auditioned notes.
                 // An external MIDI destination (#61) takes the clips' notes and controllers; the

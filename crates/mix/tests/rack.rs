@@ -431,3 +431,36 @@ fn a_macro_ruled_parameter_is_set_once_in_a_session_with_a_sidechain_key() {
     rig.render(4);
     assert_eq!(rig.params.lock().unwrap()[&(a, 0)], (value, 0), "no set while the macro lane holds still");
 }
+
+/// Review finding 4: a member taken out of the rack while it holds the rack's notes and pedal
+/// gets their releases, from live input and from the rack's clips.
+#[test]
+fn a_member_that_leaves_the_rack_lets_go_of_what_the_rack_held() {
+    MixEngine::force_serial(true);
+    let mut rig = Rig::new();
+    let (a, b) = (rig.members[0], rig.members[1]);
+    let mut s = rig.session.clone();
+    put_clip(&mut s, rig.rack, &[note(40, 90, 0)]);
+    rig.publish(&s);
+    rig.pos = 0;
+    assert!(rig.send(on(48, 100)).accepted());
+    assert!(rig.send(Message::Control { cc: 64, value: 127 }).accepted());
+    rig.render(2);
+    let held = rig.heard(0);
+    assert!(ons(&held).contains(&(48, 100)) && ons(&held).contains(&(40, 90)), "A holds a live and a clip note: {held:?}");
+    rig.clear();
+    // A leaves the rack's folder (and its member list) while both notes and the pedal are down.
+    let mut s = rig.session.clone();
+    s.track_mut(a).unwrap().folder = None;
+    s.track_mut(a).unwrap().mixer.output = Route::Main;
+    s.track_mut(rig.rack).unwrap().rack.as_mut().unwrap().members.retain(|m| m.track != a);
+    rig.publish(&s);
+    rig.render(1);
+    let after = rig.heard(0);
+    let mut released = offs(&after);
+    released.sort_unstable();
+    assert_eq!(released, [40, 48], "both notes are released");
+    assert!(after.contains(&Message::Control { cc: 64, value: 0 }), "the pedal goes up: {after:?}");
+    assert!(!rig.heard(1).contains(&Message::Control { cc: 64, value: 0 }), "B, still a member, keeps the pedal down");
+    let _ = b;
+}

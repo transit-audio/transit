@@ -69,6 +69,18 @@ impl MixEngine {
                 *slot = Some(InstrumentEvent { target: (member.id, INSTRUMENT_SLOT, inst.generation), message, ..*ev });
             }
         }
+        // Remember which live port the rack plays each member from, so a member that leaves the
+        // rack can let go of what that port holds (`InstrumentEvents::rack_membership`).
+        if let Some(plan) = self.plan.as_deref_mut() {
+            for e in out.iter().flatten() {
+                let parked = self.pool.as_ref().is_some_and(|p| plan.tables.strip_of(e.target.0).is_some_and(|i| p.parks(i)));
+                if let Some(i) = plan.tables.strip_of(e.target.0).filter(|_| !parked)
+                    && let Some(ev) = plan.tables.strips.get_mut(i).and_then(|st| st.instrument.as_mut()).and_then(|x| x.events.as_deref_mut())
+                {
+                    ev.mark_rack_port(e.source.port);
+                }
+            }
+        }
         let mut result = None;
         for e in out.iter().flatten() {
             let o = self.queue_event(e);
