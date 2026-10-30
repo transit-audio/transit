@@ -58,9 +58,10 @@ pub enum AutoParam {
     SendLevel(u8),
     SendPan(u8),
     SendMute(u8),
-    /// Insert slot + parameter id. `u8::MAX` is the track trim lane and [`AutoParam::INSTRUMENT_SLOT`]
-    /// the track's instrument. Both are plain slots, so a build that predates them reads the
-    /// lane and ignores it (no insert has that slot).
+    /// Insert slot + parameter id. `u8::MAX` is the track trim lane, [`AutoParam::INSTRUMENT_SLOT`]
+    /// (254) the track's instrument and [`crate::MACRO_SLOT`] (253) a rack's macro (`param` is
+    /// `macro1` to `macro8`, ADR 0034). All are plain slots, so a build that predates them reads
+    /// the lane and ignores it (no insert has that slot).
     Plugin {
         slot: u8,
         param: String,
@@ -81,6 +82,9 @@ impl AutoParam {
             AutoParam::SendPan(i) => format!("send {} pan", slot_letter(*i)),
             AutoParam::SendMute(i) => format!("send {} mute", slot_letter(*i)),
             AutoParam::Plugin { slot, param } if *slot == Self::INSTRUMENT_SLOT => format!("instrument {param}"),
+            AutoParam::Plugin { slot, param } if *slot == crate::MACRO_SLOT => {
+                crate::macro_index(param).map_or_else(|| format!("macro {param}"), |i| format!("macro {}", i + 1))
+            }
             AutoParam::Plugin { slot, param } => format!("insert {} {param}", slot_letter(*slot)),
         }
     }
@@ -355,6 +359,15 @@ mod tests {
             serde_json::from_value(serde_json::json!({"param": {"Plugin": {"slot": 0, "param": "gain"}}, "points": []})).unwrap();
         assert_eq!(prior.param, AutoParam::Plugin { slot: 0, param: "gain".into() });
         assert_eq!(l.param.label(), "instrument cutoff");
+    }
+
+    #[test]
+    fn a_rack_macro_lane_reads_macro_n() {
+        let lane = |p: &str| AutoParam::Plugin { slot: crate::MACRO_SLOT, param: p.into() };
+        assert_eq!(lane("macro1").label(), "macro 1");
+        assert_eq!(lane("macro8").label(), "macro 8");
+        assert_eq!(lane("odd").label(), "macro odd");
+        assert_eq!(AutoParam::Plugin { slot: 0, param: "macro1".into() }.label(), "insert A macro1", "an insert's parameter stays one");
     }
 
     #[test]
