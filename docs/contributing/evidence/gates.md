@@ -97,7 +97,7 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
 - A test that takes the render-worker path and asserts what a strip produced (audio, a panic, an
   event) sets the strip deadline itself: far (`set_strip_deadline(Some(60 s))`) to wait for every
   strip, zero or a held worker to force an overrun. Inheriting the default share is a test defect
-  (E49 recurrence 2026-10-29; a `cargo xtask timing` rule is #220). A test that needs a worker to
+  (E49 recurrence 2026-10-29; enforced by `cargo xtask timing` rule (e), below). A test that needs a worker to
   hold one strip holds it (`Shared::hold` in `crates/mix/tests/common/workers.rs`) and waits for that
   strip's `holding` signal, never for "some strip is away"; a continuity count starts at the first
   block (`ContinuityInstrument::expect_from`), so overruns before an instrument's first render are
@@ -117,6 +117,30 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   enough. The CI conclusion after a push is itself a gate: check it, and a red run is a failure until
   it is explained and fixed (E47, `../../escapes/E47-header-state-jobs-raced-the-rendered-document.md`).
 - Every test that starts a thread or takes the worker or host-thread path is audited, one row each, in [`e49-audit-2026-10-30.md`](e49-audit-2026-10-30.md) (#226); add a row for a new such test.
+- `cargo xtask timing` rule (e) (#226, `xtask/src/timing_pool.rs`) holds the worker-path rules above for
+  test code in `mix`, `rt`, `plugin-host`, `audio-asio`, `playback` and `ui-studio`. A `#[test]` is a pool
+  test when it (or a same-file helper it calls, one level, with a helper's deadline parameter bound to the
+  call's argument) starts render workers or uses the shared worker rig (`common::workers`) and renders a
+  block; it is a host-thread test when it makes a plug-in host thread (`Host::new`, `host(`, `slow_host(`;
+  not an inline host) or an ASIO host (`rig_watching(`, `hold_host(`). A bare `transit-rt` worker set is not a
+  trigger: `finish` takes each block's deadline. The gate refuses: (1) a pool test with no strip deadline of
+  its own, no held worker, no explicit instants (`set_block_deadline`, `finish`, `run_at`) and no serial
+  switch (`force_serial(true)` before the first render, never set otherwise), or a host-thread test with no
+  give-up of 5 s or more; (2) a short strip deadline (`from_micros`, `from_millis` under 100) with no held
+  worker it waits on (`hold` plus a read of `holding`, `entered` or `held_tracks()`), zero deadline or
+  explicit instants; (3) a `while ..render_workers_settled()` wait for some strip to be away in a test that
+  injects `stall_ns` and asserts `Queued`, `StaleBinding`, `midi_dropped` or `held_tracks` without reading
+  `holding`; (4) a quiet-period wait, a loop that exits on `v.elapsed()` under 5 s for an `Instant` it resets
+  when a value moves, in any test fn or helper; (5) a coverage assertion (`assert_time_covered`,
+  `hole_samples`, `stuck_notes`) after the last stall or hold release with no far deadline
+  (`from_secs(N)`, N at least 10, inline or a same-file name) or serial switch between them. A deliberate case
+  carries `// timing: <tag> <reason>` on the fn header or in the attribute and comment lines directly above
+  it, reason required: `far-deadline` (refusals 1, 2, 5: the far deadline is set where the scan cannot see
+  it), `held-worker` (1, 2), `explicit-deadline` (1, 2: explicit instants, or injected stalls longer than an
+  explicit short deadline with assertions that hold for any schedule), `serial` (1, 5), `host-timeout` (1:
+  the test's subject is the host's own timeout) and `any-strip` (3). Refusal 4 has no marker: the exit names
+  the state. The scan cannot see helpers in another file or a track count passed through one; a runtime
+  guard is the follow-up (#226).
 - No wall-clock latency bound under about 100 ms in a unit test. Assert a deterministic signal
   (a counter, a state, an ordering) or a stall bound with its rationale in a comment; a shared CI
   runner will exceed a tight bound sooner or later (E49, `../../escapes/E49-echo-latency-test-wall-clock-bound.md`).
