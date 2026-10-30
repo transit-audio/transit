@@ -260,7 +260,7 @@ impl ab::Backend for CpalBackend {
             .and_then(|configs| choose_output(&configs.collect::<Vec<_>>(), &wish.rates, self.host.id().name(), wish.channels));
         let (config, format) = match chosen {
             Some((mut c, buffers, format)) => {
-                c.buffer_size = devices::buffer_size(wish.period, &buffers);
+                c.buffer_size = devices::buffer_size_on(wish.period, &buffers, self.host.id().name(), &name);
                 (c, format)
             }
             None => {
@@ -271,7 +271,7 @@ impl ab::Backend for CpalBackend {
                 let buffers = *d.buffer_size();
                 let format = d.sample_format();
                 let mut c = d.config();
-                c.buffer_size = devices::buffer_size(wish.period, &buffers);
+                c.buffer_size = devices::buffer_size_on(wish.period, &buffers, self.host.id().name(), &name);
                 (c, format)
             }
         };
@@ -283,7 +283,7 @@ impl ab::Backend for CpalBackend {
     fn plan_capture(&self, wish: &ab::InputWish) -> Result<ab::Plan, String> {
         let device = device_on(self.host, wish.device.as_deref(), false).ok_or("no audio input device")?;
         let cfg = input_config(&device, wish.rate)?;
-        let buffer = devices::buffer_size(wish.period, cfg.buffer_size());
+        let buffer = devices::buffer_size_on(wish.period, cfg.buffer_size(), self.host.id().name(), &name_of(&device).unwrap_or_default());
         // The chosen buffer size first; if the device refuses it, its default.
         let mut sizes = vec![buffer];
         if buffer != cpal::BufferSize::Default {
