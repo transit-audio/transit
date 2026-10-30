@@ -326,7 +326,7 @@ pub(crate) fn commit(app: &mut StudioApp, live: &Live) {
     });
 }
 
-//// The fade corner under `pos` on a clip drawn in `rect`: the triangle in each top corner of the
+/// The fade corner under `pos` on a clip drawn in `rect`: the triangle in each top corner of the
 /// body (under the header strip, inside the trim edge) as tall as the body and `ZONE_W` wide.
 /// Clips too narrow for that share the room between the trim edges, so the two triangles meet at
 /// the top and the middle move zone is left only below them; under `ZONE_FLOOR` there is none.
