@@ -274,6 +274,11 @@ pub struct Track {
     /// Pinned to top in the Edit window.
     #[serde(default)]
     pub pinned: bool,
+    /// A routing folder that is a rack (ADR 0034): its members, their zones and its macros. Not
+    /// written for other tracks, so files without racks stay as older builds wrote them; a build
+    /// that predates racks loads the folder as a plain group.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rack: Option<crate::Rack>,
 }
 
 fn yes() -> bool {
@@ -321,6 +326,7 @@ impl Track {
             ticks_timebase: kind.is_midi(),
             elastic: None,
             pinned: false,
+            rack: None,
         }
     }
 
@@ -470,6 +476,12 @@ impl Track {
 
     pub fn is_folder(&self) -> bool {
         self.kind == TrackKind::Folder
+    }
+
+    /// A routing folder that is a rack (ADR 0034).
+    #[must_use]
+    pub fn is_rack(&self) -> bool {
+        self.kind == TrackKind::Folder && self.rack.is_some()
     }
 }
 

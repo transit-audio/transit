@@ -33,6 +33,10 @@ pub enum Control {
         slot: u8,
         param: String,
     },
+    /// Macro `n` (0-based) of a rack (ADR 0034). Continuous: the knob's 0..1 is the macro's value.
+    /// Session mappings to a macro are stored on the rack ([`crate::Macro::midi`]), never in
+    /// [`MappingSet`], so a build that predates racks still opens the file.
+    Macro(u8),
 }
 
 impl Control {
@@ -51,6 +55,7 @@ impl Control {
             Control::Send(n) => format!("Send {}", (b'A' + (*n).min(25)) as char),
             Control::Plugin { slot, param } if *slot == AutoParam::INSTRUMENT_SLOT => format!("Instrument {param}"),
             Control::Plugin { slot, param } => format!("Insert {} {param}", (b'A' + (*slot).min(25)) as char),
+            Control::Macro(n) => format!("Macro {}", u16::from(*n) + 1),
         }
     }
 }
@@ -79,6 +84,7 @@ impl fmt::Display for ControlTarget {
             Control::Send(n) => write!(f, "send:{n}"),
             Control::Plugin { slot, param } if *slot == AutoParam::INSTRUMENT_SLOT => write!(f, "plugin:instrument:{param}"),
             Control::Plugin { slot, param } => write!(f, "plugin:{}:{param}", (b'a' + (*slot).min(25)) as char),
+            Control::Macro(n) => write!(f, "macro:{}", u16::from(*n) + 1),
         }
     }
 }
@@ -103,6 +109,10 @@ impl FromStr for ControlTarget {
             (Some("arm"), None) => Control::Arm,
             (Some("send"), Some(n)) => match n.parse::<u8>() {
                 Ok(n) if usize::from(n) < crate::SEND_SLOTS => Control::Send(n),
+                _ => return Err(bad()),
+            },
+            (Some("macro"), Some(n)) => match n.parse::<u8>() {
+                Ok(n) if (1..=crate::RACK_MACROS).contains(&usize::from(n)) => Control::Macro(n - 1),
                 _ => return Err(bad()),
             },
             (Some("plugin"), Some(rest)) => {
@@ -368,6 +378,7 @@ mod tests {
             plug(3, 0, "cutoff"),
             plug(3, 9, "Cell/1:Gain"),
             pos(2, Control::Plugin { slot: AutoParam::INSTRUMENT_SLOT, param: "7".into() }),
+            ControlTarget { strip: Strip::Track(TrackId(5)), control: Control::Macro(7) },
         ] {
             assert_eq!(t.to_string().parse::<ControlTarget>().unwrap(), t);
         }
@@ -386,6 +397,9 @@ mod tests {
             "track:1:plugin:aa:x",
             "track:1:plugin:1:x",
             "track:1:pan:x",
+            "track:1:macro:0",
+            "track:1:macro:9",
+            "track:1:macro",
         ] {
             assert!(bad.parse::<ControlTarget>().is_err(), "{bad}");
         }
