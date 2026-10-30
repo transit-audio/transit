@@ -6,7 +6,7 @@
 //! - Bank A: harmonically poor waveforms obtained by additive synthesis
 //!   (sine harmonics, drawbar organ waveforms).
 //! - Bank B: harmonically rich waveforms obtained by formant synthesis or waveshaping.
-//! - Bank C: wavetables from the Shruthi-1 / Ambika, sampled from classic wavetable
+//! - Bank C: wavetables from the original author's earlier synthesizers, sampled from classic wavetable
 //!   or ROM playback synths.
 //! - Bank D: a joyous semi-random permutation of waveforms from the other 3 banks.
 //!
