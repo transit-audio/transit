@@ -39,6 +39,31 @@ name = "Hardware synth"
 text = "Plays a hardware synth: the track's MIDI goes to its port and its audio comes back on an input path."
 
 [[entry]]
+id = "device_chain.midi_effects"
+name = "MIDI effects"
+text = "Change the notes before the instrument plays them: each effect works on what the one above it put out, top to bottom. They play clips and live input alike, at the same timing."
+
+[[entry]]
+id = "device_chain.midi_effect_add"
+name = "Add MIDI effect"
+text = "Adds Transpose or Velocity at the bottom of the MIDI effects, just before the instrument. A track holds up to eight."
+
+[[entry]]
+id = "device_chain.midi_effect"
+name = "MIDI effect"
+text = "One MIDI effect. Right-click to move it up or down. Adding, removing, moving or bypassing an effect ends the notes it is playing, so none is left hanging."
+
+[[entry]]
+id = "device_chain.midi_transpose"
+name = "Transpose"
+text = "Moves every note up or down by whole semitones (up to four octaves either way). A note that would leave the keyboard is not played. Changing the amount while a note sounds keeps that note where it started."
+
+[[entry]]
+id = "device_chain.midi_velocity"
+name = "Velocity"
+text = "Reshapes how hard notes are played: Scale multiplies the velocity (100 % leaves it), Offset adds to it, and Minimum and Maximum keep the result between them. A note always keeps a velocity of at least 1."
+
+[[entry]]
 id = "device_chain.sidechain"
 name = "Sidechain key"
 text = "Makes a compressor or gate listen to another track or bus instead of this one, for example to duck a pad under a kick."

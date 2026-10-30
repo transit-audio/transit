@@ -447,8 +447,30 @@ fn strip(
         // The MIDI output destination (#61) is the small Out button at the row's end.
         let out_w = 22.0;
         let out_r = Rect::from_min_max(pos2(in_r.max.x - out_w, in_r.min.y), in_r.max);
-        let in_r = Rect::from_min_max(in_r.min, pos2(in_r.max.x - out_w - 2.0, in_r.max.y));
+        let mut in_r = Rect::from_min_max(in_r.min, pos2(in_r.max.x - out_w - 2.0, in_r.max.y));
         midi_output_button(app, ui, &p, clip, t, out_r, &mut sl);
+        if !t.midi_effects.is_empty() {
+            // The MIDI effects ahead of the instrument (#201): a small marker, their chain on hover.
+            let tag = Rect::from_min_max(pos2(in_r.max.x - 26.0, in_r.min.y + 1.5), pos2(in_r.max.x, in_r.max.y - 1.5));
+            let all_off = t.midi_effects.iter().all(|f| f.bypass);
+            p.rect_filled(tag, crate::theme::RADIUS_SM, if all_off { TOKENS.button } else { TOKENS.accent });
+            let ink = if all_off { TOKENS.text_dim } else { theme::text_on(TOKENS.accent) };
+            p.text(tag.center(), Align2::CENTER_CENTER, "MFX", FontId::proportional(8.5), ink);
+            let chain: Vec<String> = t
+                .midi_effects
+                .iter()
+                .map(|f| {
+                    let name = crate::midi_fx_panel::name_of(&f.plugin);
+                    if f.bypass { format!("{name} (bypassed)") } else { name }
+                })
+                .collect();
+            let resp = ui.interact(tag.intersect(clip), ui.id().with(("midi_fx_tag", id.0)), Sense::hover());
+            crate::help::hover(ui, &resp, crate::help::Id::MixerStripMidiEffects);
+            resp.on_hover_text(format!("MIDI effects: {}", chain.join(" → ")));
+            sl.midi_fx = r4(tag);
+            sl.midi_fx_count = t.midi_effects.len();
+            in_r.max.x = tag.min.x - 2.0;
+        }
         let view = crate::midi_input::InputView::read(app.player.as_ref());
         let label = view.label(&t.midi_input);
         let resp = ui.interact(in_r.intersect(clip), ui.id().with(("midi-input", id.0)), Sense::click());

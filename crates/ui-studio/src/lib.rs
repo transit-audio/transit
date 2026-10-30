@@ -45,6 +45,7 @@ pub mod load_readout;
 mod loopbar;
 pub mod menus;
 pub mod metronome;
+pub mod midi_fx_panel;
 mod midi_input;
 pub mod midi_learn;
 pub mod midi_monitor;
@@ -1276,6 +1277,8 @@ mod groups_tests;
 mod help_tests;
 #[cfg(test)]
 mod keys_tests;
+#[cfg(test)]
+mod midi_fx_panel_tests;
 #[cfg(test)]
 mod midi_learn_hosted_tests;
 #[cfg(test)]

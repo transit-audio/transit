@@ -1,5 +1,6 @@
-//! The device chain of the focused track, under the arrangement (Ableton's detail view): the
-//! instrument first on instrument tracks (its name opens the instrument menu; "Choose…" when
+//! The device chain of the focused track, under the arrangement (Ableton's detail view): on
+//! instrument tracks the MIDI effects group first (`midi_fx_panel`, #201), then the
+//! instrument (its name opens the instrument menu; "Choose…" when
 //! there is none), then the occupied insert slots as cards in slot order, then "+", which lists
 //! the built-in effects and the scanned VST3 and CLAP effects, then the track's sends.
 //!
@@ -198,9 +199,10 @@ fn card_size(slot: Option<usize>, ins: Option<&Insert>) -> egui::Vec2 {
 pub(crate) fn pane_height(app: &StudioApp) -> f32 {
     let Some(t) = app.focus_track().and_then(|id| app.engine.session().track(id)) else { return PANE_H };
     let instrument = (t.kind == TrackKind::Instrument).then(|| card_size(None, t.instrument.as_ref()).y);
+    let midi_fx = crate::midi_fx_panel::shows(t).then(|| crate::midi_fx_panel::card_height(t));
     let rack = t.is_rack().then(|| crate::rack_panel::card_height(app.engine.session(), t));
     let inserts = t.mixer.inserts.iter().flatten().map(|i| card_size(Some(0), Some(i)).y);
-    instrument.into_iter().chain(rack).chain(inserts).fold(STOCK_H, f32::max) + 2.0 * LANE_PAD
+    instrument.into_iter().chain(midi_fx).chain(rack).chain(inserts).fold(STOCK_H, f32::max) + 2.0 * LANE_PAD
 }
 
 pub fn chain(app: &mut StudioApp, ui: &mut Ui) {
@@ -224,7 +226,14 @@ pub fn chain(app: &mut StudioApp, ui: &mut Ui) {
     let used = t.mixer.inserts.iter().filter(|i| i.is_some()).count();
     let lane = Rect::from_min_max(pos2(tab.max.x + 8.0, area.min.y + 8.0), pos2(area.max.x - 8.0, area.max.y - 8.0));
     let mut x = lane.min.x;
-    // A rack's own card comes first: its macros and its members' zones (ADR 0034).
+    // MIDI effects come first, in their own group, then a rack's own card (its macros and its
+    // members' zones, ADR 0034) or the instrument, then the inserts (#201, ADR 0036).
+    if crate::midi_fx_panel::shows(t) {
+        let r = Rect::from_min_size(pos2(x, lane.min.y), vec2(crate::midi_fx_panel::CARD_W, crate::midi_fx_panel::card_height(t).max(STOCK_H)));
+        layout.midi_fx = Some(crate::midi_fx_panel::card(app, ui, &p, lane, t, r, &mut layout.menu));
+        crate::icons::paint(&p.with_clip_rect(lane), pos2(r.max.x + 7.0, r.center().y), Icon::ChevronRight, 14.0, TOKENS.text_dim);
+        x += r.width() + 14.0;
+    }
     if t.is_rack() {
         let r = Rect::from_min_size(pos2(x, lane.min.y), vec2(crate::rack_panel::CARD_W, crate::rack_panel::card_height(&s, t)));
         layout.rack = Some(crate::rack_panel::card(app, ui, &p, lane, t, r));

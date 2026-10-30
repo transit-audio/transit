@@ -138,6 +138,9 @@ pub struct StripLayout {
     pub midi_output: R4,
     pub midi_output_label: String,
     pub midi_output_missing: bool,
+    /// Instrument tracks with MIDI effects (#201): the "MFX" marker in the input row, and how many.
+    pub midi_fx: R4,
+    pub midi_fx_count: usize,
     pub knob: R4,
     pub mute: R4,
     pub solo: R4,
@@ -286,6 +289,8 @@ pub struct DevicesLayout {
     pub visible: bool,
     pub track: Option<u64>,
     pub area: R4,
+    /// An instrument track's MIDI effects (#201): their group card ahead of the instrument.
+    pub midi_fx: Option<crate::midi_fx_panel::MidiFxLayout>,
     pub cards: Vec<DeviceCard>,
     pub add: R4,
     /// While a device is dragged: the x of the drop indicator (`None` when releasing now would change nothing).

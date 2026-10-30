@@ -51,6 +51,11 @@ text = "The track's volume. Drag to change it, hold Shift for fine steps, double
 key = "Delete"
 
 [[entry]]
+id = "mixer_strip.midi_effects"
+name = "MIDI effects"
+text = "This instrument track changes its notes with MIDI effects before the instrument plays them. Hover to see them in order; edit them in the device chain. Grey: all bypassed."
+
+[[entry]]
 id = "mixer_strip.insert"
 name = "Effect slot"
 text = "An effect on this track. Click for its window, right-click for more such as bypass or remove. Effects run top to bottom before the fader."

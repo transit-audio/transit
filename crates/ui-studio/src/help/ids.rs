@@ -81,6 +81,11 @@ ids! {
     DeviceChainTitle => "device_chain.title",
     DeviceChainInstrument => "device_chain.instrument",
     DeviceChainHardwareSynth => "device_chain.hardware_synth",
+    DeviceChainMidiEffects => "device_chain.midi_effects",
+    DeviceChainMidiEffectAdd => "device_chain.midi_effect_add",
+    DeviceChainMidiEffect => "device_chain.midi_effect",
+    DeviceChainMidiTranspose => "device_chain.midi_transpose",
+    DeviceChainMidiVelocity => "device_chain.midi_velocity",
     DeviceChainSidechain => "device_chain.sidechain",
     // help\macro-osc.toml
     MacroOscModel => "macro_osc.model",
@@ -122,6 +127,7 @@ ids! {
     MixerStripPeak => "mixer_strip.peak",
     MixerStripMeter => "mixer_strip.meter",
     MixerStripFader => "mixer_strip.fader",
+    MixerStripMidiEffects => "mixer_strip.midi_effects",
     MixerStripInsert => "mixer_strip.insert",
     MixerStripAddEffect => "mixer_strip.add_effect",
     // help\telemetry.toml
