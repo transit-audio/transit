@@ -59,7 +59,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
 
 ## Released
 
-- `v0.5.0`, 2026-10-30, commit `PENDING`: feature release (marquee selection and drag preview, clip tools, Logic-style fades, browser preview, Touch mode, the Info panel, editor windows that follow the main window, Linux plug-in editors, disk-backed long takes, the Macro Oscillator built-in instrument). Body from `docs/releases/v0.5.0.md`.
+- `v0.5.0`, 2026-10-30, commit `f1263acc`: feature release (marquee selection and drag preview, clip tools, Logic-style fades, browser preview, Touch mode, the Info panel, editor windows that follow the main window, Linux plug-in editors, disk-backed long takes, the Macro Oscillator built-in instrument). Body from `docs/releases/v0.5.0.md`.
 - `v0.4.1`, 2026-10-30, commit `4832235a`: point release (keyed plans on the workers by default, stuck plug-in Give up, title bars, status timeout, browser Locations, multi-clip copy, long takes refused loudly). Body from `docs/releases/v0.4.1.md`.
 - `v0.4.0`, 2026-10-29, commit `ef9ad4e5`: engine release (parallel render pool on by default, #172, #117, #171, video removed). Body from `docs/releases/v0.4.0.md`.
 - `v0.3.2`, 2026-10-27, commit `caca6f0e`: patch release (FX channel send, step idle polling, Linux diagnostics report, MIDI Mappings alignment, timing lint). Body from `docs/releases/v0.3.2.md`.
