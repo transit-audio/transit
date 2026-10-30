@@ -185,7 +185,7 @@ impl SquareNoise {
             noise += phase[3] >> 31;
             noise += phase[4] >> 31;
             noise += phase[5] >> 31;
-            *sample_out = 0.33 * ((noise) as f32 - 1.0);
+            *sample_out = 0.33 * noise as f32 - 1.0;
         }
 
         self.phase[..6].copy_from_slice(&phase[..6]);
