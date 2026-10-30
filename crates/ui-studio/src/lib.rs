@@ -20,6 +20,7 @@ pub mod control;
 pub mod debug_log;
 pub mod devices;
 pub mod diagnostics;
+pub mod edit_tools;
 mod external_instrument;
 mod external_measure;
 pub mod fades;
@@ -1288,6 +1289,8 @@ mod arrange_marquee_tests;
 mod devices_chain_tests;
 #[cfg(test)]
 mod devices_sidechain_tests;
+#[cfg(test)]
+mod edit_tools_tests;
 #[cfg(test)]
 mod emergency_tests;
 #[cfg(test)]

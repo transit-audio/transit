@@ -100,6 +100,8 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         }
                     }
                     ui.separator();
+                    crate::edit_tools::edit_menu_items(app, ui);
+                    ui.separator();
                     let b = ui.add(egui::Button::new("Undo History").shortcut_text(label(A::UndoHistory)));
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Undo History".into(), String::new(), b.rect));
                     if b.clicked() {
@@ -455,6 +457,7 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     if pressed(ctx, A::Split) {
         let _ = app.split_at_cursor();
     }
+    crate::edit_tools::shortcuts(app, ctx);
     if pressed(ctx, A::NewInstrumentTrack) {
         let _ = app.add_track("instrument");
     }

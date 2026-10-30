@@ -812,6 +812,8 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
             let _ = app.split_at_cursor();
             ui.close();
         }
+        ui.separator();
+        crate::edit_tools::context_menu_items(app, ui);
     });
 }
 

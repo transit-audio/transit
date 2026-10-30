@@ -438,6 +438,7 @@ fn every_handler_takes_its_keys_from_the_table() {
         include_str!("mixer/strip.rs"),
         include_str!("keys/view.rs"),
         include_str!("arrange/tracks.rs"),
+        include_str!("edit_tools.rs"),
         include_str!("arrange/clips.rs"),
         include_str!("host/transport.rs"),
         include_str!("host/recording.rs"),

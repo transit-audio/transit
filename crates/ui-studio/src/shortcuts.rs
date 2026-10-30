@@ -97,6 +97,13 @@ pub enum Action {
     Paste,
     Duplicate,
     Split,
+    Join,
+    TrimStart,
+    TrimEnd,
+    NudgeEarlier,
+    NudgeLater,
+    NudgeEarlierFine,
+    NudgeLaterFine,
     Delete,
     SelectAll,
     SelectNone,
@@ -174,6 +181,7 @@ const CMD: Modifiers = Modifiers::COMMAND;
 const ALT: Modifiers = Modifiers::ALT;
 const SHIFT: Modifiers = Modifiers::SHIFT;
 const CMD_SHIFT: Modifiers = Modifiers { shift: true, ..Modifiers::COMMAND };
+const ALT_SHIFT: Modifiers = Modifiers { shift: true, ..Modifiers::ALT };
 const CMD_ALT: Modifiers = Modifiers { alt: true, ..Modifiers::COMMAND };
 
 const fn row(action: Action, label: &'static str, mods: Modifiers, key: Key, scope: Scope, note: &'static str) -> Shortcut {
@@ -260,6 +268,48 @@ pub const TABLE: &[Shortcut] = &[
     row(A::Paste, "Paste at Cursor", CMD, Key::V, S::Arrangement, "All DAWs; pastes at the edit cursor."),
     row(A::Duplicate, "Duplicate", CMD, Key::D, S::Arrangement, "Ableton and Cubase agree."),
     row(A::Split, "Split at Cursor", CMD, Key::E, S::Arrangement, "Ableton wins over Cubase (Alt+X) and Logic (T)."),
+    row(
+        A::Join,
+        "Join / Consolidate",
+        CMD,
+        Key::J,
+        S::Arrangement,
+        "Ableton (Consolidate) and Logic (Join) agree; the Edit menu and clip menu carry Crop, which they bind differently.",
+    ),
+    row(A::TrimStart, "Trim Start to Cursor", NONE, Key::OpenBracket, S::Arrangement, "Logic's [ ; Ableton has no key."),
+    row(A::TrimEnd, "Trim End to Cursor", NONE, Key::CloseBracket, S::Arrangement, "Logic's ] ; Ableton has no key."),
+    row(
+        A::NudgeEarlier,
+        "Nudge Clips Earlier by the Grid",
+        ALT,
+        Key::ArrowLeft,
+        S::Arrangement,
+        "Ableton and Logic nudge selected clips by the grid with the arrows; here plain arrows move the cursor, so Alt.",
+    ),
+    row(
+        A::NudgeLater,
+        "Nudge Clips Later by the Grid",
+        ALT,
+        Key::ArrowRight,
+        S::Arrangement,
+        "Ableton and Logic nudge selected clips by the grid with the arrows; Alt here (plain arrows move the cursor).",
+    ),
+    row(
+        A::NudgeEarlierFine,
+        "Nudge Clips Earlier, Fine",
+        ALT_SHIFT,
+        Key::ArrowLeft,
+        S::Arrangement,
+        "Ableton and Logic: a finer step with a modifier; a quarter of the grid step.",
+    ),
+    row(
+        A::NudgeLaterFine,
+        "Nudge Clips Later, Fine",
+        ALT_SHIFT,
+        Key::ArrowRight,
+        S::Arrangement,
+        "Ableton and Logic: a finer step with a modifier; a quarter of the grid step.",
+    ),
     row(A::Delete, "Delete", NONE, Key::Delete, S::Arrangement, "Clips; tracks only when picked by their header (Ableton)."),
     row(A::Delete, "Delete", NONE, Key::Backspace, S::Arrangement, "Same as Delete (laptops)."),
     row(
@@ -455,6 +505,8 @@ fn key_name(k: Key) -> &'static str {
         Key::Plus => "+",
         Key::Minus => "-",
         Key::Equals => "=",
+        Key::OpenBracket => "[",
+        Key::CloseBracket => "]",
         other => other.name(),
     }
 }
