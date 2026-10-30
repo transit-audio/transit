@@ -98,7 +98,7 @@ Both run a chain of MIDI effects before the instrument, in order, each one bypas
   not once per member.
 - **Rack chain, first form (landed with the rebase onto racks).** A track that is a rack may hold MIDI effects
   (the device chain shows their card ahead of the rack card). Until the rack stage above exists, each member's
-  host runs the rack's chain ahead of its own (at most eight together, the rack's first), after the zones:
+  host runs the rack's chain ahead of its own (the rack's, up to eight, then the member's, up to eight), after the zones:
   Transpose and Velocity are per-event, so every member hears the same result, and a rack note-off is still
   gated by the raw key the member holds. Differences from the stage design, to be removed by it: zones and fades
   see the notes before the chain, not after, and a stateful effect would run once per member.

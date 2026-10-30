@@ -518,3 +518,149 @@ fn a_midi_effect_on_the_rack_reaches_every_member() {
         assert!(ons(&rig.heard(k)).iter().all(|(key, _)| *key == 62), "member {k}: {:?}", rig.heard(k));
     }
 }
+
+fn transpose(semitones: f32) -> transit_model::MidiEffectSlot {
+    let mut fx = transit_model::MidiEffectSlot::new("midi_transpose");
+    fx.params.insert("semitones".into(), semitones);
+    fx
+}
+
+fn semitone_lane(s: &mut Session, t: TrackId, index: u8, points: &[(i64, f32)]) {
+    let lane = s.track_mut(t).unwrap().lane_mut(&AutoParam::Plugin { slot: transit_model::MIDI_EFFECT_SLOT + index, param: "semitones".into() });
+    for &(at, v) in points {
+        lane.set_point(at, v);
+    }
+}
+
+/// The rack's chain and the member's own chain both run in full: eight effects between them
+/// are not cut to eight (the review of the racks rebase).
+#[test]
+fn the_racks_chain_and_a_members_own_chain_both_run_in_full() {
+    MixEngine::force_serial(true);
+    let mut rig = Rig::new();
+    let mut s = rig.session.clone();
+    s.track_mut(rig.rack).unwrap().midi_effects = (0..5).map(|_| transpose(1.0)).collect();
+    s.track_mut(rig.members[1]).unwrap().midi_effects = (0..5).map(|_| transpose(2.0)).collect();
+    rig.publish(&s);
+    assert!(rig.send(on(70, 100)).accepted());
+    rig.render(1);
+    assert_eq!(ons(&rig.heard(1)), [(85, 100)], "B: 70 + 5 x 1 + 5 x 2");
+}
+
+/// A note ends on the key it started on, whatever the rack's Transpose says by then.
+#[test]
+fn a_rack_note_off_follows_its_on_when_the_amount_changes_while_held() {
+    MixEngine::force_serial(true);
+    let mut rig = Rig::new();
+    let mut s = rig.session.clone();
+    s.track_mut(rig.rack).unwrap().midi_effects.push(transpose(12.0));
+    rig.publish(&s);
+    assert!(rig.send(on(62, 100)).accepted());
+    rig.render(1);
+    let mut s = rig.session.clone();
+    s.track_mut(rig.rack).unwrap().midi_effects[0].params.insert("semitones".into(), 5.0);
+    rig.publish(&s);
+    rig.clear();
+    assert!(rig.send(off(62)).accepted());
+    rig.render(1);
+    for k in 0..2 {
+        assert_eq!(offs(&rig.heard(k)), [74], "member {k}");
+    }
+}
+
+#[test]
+fn a_rack_lane_changing_between_the_on_and_the_off_does_not_strand_the_note() {
+    MixEngine::force_serial(true);
+    let mut rig = Rig::new();
+    let mut s = rig.session.clone();
+    s.track_mut(rig.rack).unwrap().midi_effects.push(transpose(0.0));
+    // +12 at the first block, -7 from the second.
+    semitone_lane(&mut s, rig.rack, 0, &[(0, 12.0), (1, -7.0)]);
+    rig.publish(&s);
+    rig.pos = 0;
+    assert!(rig.send(on(62, 100)).accepted());
+    rig.render(1);
+    for k in 0..2 {
+        assert_eq!(ons(&rig.heard(k)).first().map(|x| x.0), Some(74), "member {k} on");
+    }
+    rig.clear();
+    assert!(rig.send(off(62)).accepted());
+    rig.send(on(64, 100));
+    rig.render(1);
+    for k in 0..2 {
+        assert_eq!(offs(&rig.heard(k)), [74], "member {k} off");
+    }
+    assert!(ons(&rig.heard(0)).iter().any(|x| x.0 == 57), "a new note takes the new amount: {:?}", rig.heard(0));
+}
+
+/// A member's own chain reads its own lane, after the rack's chain: +12 on the rack and +1 on A.
+#[test]
+fn a_members_own_lane_drives_its_own_effect_behind_the_racks() {
+    MixEngine::force_serial(true);
+    let mut rig = Rig::new();
+    let mut s = rig.session.clone();
+    s.track_mut(rig.rack).unwrap().midi_effects.push(transpose(12.0));
+    s.track_mut(rig.members[0]).unwrap().midi_effects.push(transpose(0.0));
+    semitone_lane(&mut s, rig.members[0], 0, &[(0, 1.0)]);
+    rig.publish(&s);
+    rig.pos = 0;
+    assert!(rig.send(on(62, 100)).accepted());
+    rig.render(1);
+    rig.send(off(62));
+    rig.render(1);
+    let (a, b) = (rig.heard(0), rig.heard(1));
+    assert_eq!((ons(&a).first().map(|x| x.0), offs(&a)), (Some(75), vec![75]), "A: 62 + 12 + 1");
+    assert_eq!((ons(&b).first().map(|x| x.0), offs(&b)), (Some(74), vec![74]), "B: 62 + 12");
+}
+
+/// A rack holding MIDI effects, a member holding one, the rack's clip, live notes, a pedal, the
+/// offs, an edit of the rack's chain and a reset: nothing allocates on the audio thread.
+#[test]
+fn a_rack_chain_allocates_nothing() {
+    MixEngine::force_serial(true);
+    mark_audio_thread();
+    let mut rig = Rig::new();
+    let mut s = rig.session.clone();
+    let mut vel = transit_model::MidiEffectSlot::new("midi_velocity");
+    vel.params.insert("scale".into(), 80.0);
+    s.track_mut(rig.rack).unwrap().midi_effects = vec![transpose(12.0), vel];
+    s.track_mut(rig.members[0]).unwrap().midi_effects.push(transpose(1.0));
+    put_clip(&mut s, rig.rack, &rack_notes());
+    rig.publish(&s);
+    rig.pos = 0;
+    rig.render(2);
+    let events: Vec<InstrumentEvent> =
+        [on(48, 100), on(62, 100), on(72, 100), Message::Control { cc: 64, value: 127 }, off(48), off(62), off(72), off(30)]
+            .map(|m| rig.event(m))
+            .to_vec();
+    let ((), stats) = measure(|| {
+        for e in &events {
+            let _ = rig.mix.queue_event(e);
+        }
+        for _ in 0..8 {
+            rig.mix.render_active(rig.pos, BLOCK, &mut rig.out);
+            rig.pos += BLOCK as i64;
+        }
+    });
+    assert_eq!(stats, AllocStats::default(), "the rack's chain, its clip and live events allocate nothing");
+    assert!(!rig.heard(0).is_empty() && !rig.heard(1).is_empty());
+    // An edit of the rack's chain (a bypass and a reorder), then a late note and a reset.
+    let mut s = rig.session.clone();
+    {
+        let fx = &mut s.track_mut(rig.rack).unwrap().midi_effects;
+        fx.reverse();
+        fx[0].bypass = true;
+    }
+    rig.publish(&s);
+    let late = rig.event(on(66, 90));
+    let ((), stats) = measure(|| {
+        let _ = rig.mix.queue_event(&late);
+        for _ in 0..3 {
+            rig.mix.render_active(rig.pos, BLOCK, &mut rig.out);
+            rig.pos += BLOCK as i64;
+        }
+        rig.mix.reset();
+        rig.mix.render_active(rig.pos, BLOCK, &mut rig.out);
+    });
+    assert_eq!(stats, AllocStats::default(), "an edit of the rack's chain and a reset allocate nothing");
+}

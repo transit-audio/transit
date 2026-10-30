@@ -131,7 +131,7 @@ impl Note {
 
 /// The MIDI effect chain of one instrument slot. See the module documentation.
 pub(crate) struct MidiFxHost {
-    stages: [Option<Stage>; MAX_MIDI_EFFECTS],
+    stages: [Option<Stage>; 2 * MAX_MIDI_EFFECTS],
     /// Effects in the chain (the first `len` stages).
     len: usize,
     /// Within a block: events are collected, not run at once.
@@ -241,9 +241,10 @@ impl MidiFxHost {
         frames: usize,
     ) {
         // A member of a rack runs the rack's chain first, then its own (ADR 0036, racks): the
-        // rack's effects feed every member the same way. Together at most `MAX_MIDI_EFFECTS`.
+        // rack's effects feed every member the same way. Both run in full: the rack's up to
+        // `MAX_MIDI_EFFECTS`, then the member's up to as many.
         let n_rack = rack.map_or(0, |r| r.midi_effects.len().min(MAX_MIDI_EFFECTS));
-        let n = n_rack + t.midi_effects.len().min(MAX_MIDI_EFFECTS - n_rack);
+        let n = n_rack + t.midi_effects.len().min(MAX_MIDI_EFFECTS);
         let entry = |i: usize| match rack.filter(|_| i < n_rack) {
             Some(r) => r.midi_effects.get(i).map(|w| (r, i, w)),
             None => t.midi_effects.get(i - n_rack).map(|w| (t, i - n_rack, w)),
