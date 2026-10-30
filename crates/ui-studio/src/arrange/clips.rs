@@ -6,6 +6,8 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
     let p = ui.painter().with_clip_rect(tl);
     let sel = &s.edit.selected_clips;
     let preview = drag_preview(app, ui, map, rows, tl, geo);
+    // Every clip the drag carries (#218): the whole selection when the dragged clip is in it.
+    let carried = preview.map(|(id, dest, a, b, _)| drag_ghosts::members(app, (id, dest, a, b))).unwrap_or_default();
     let looping = loop_drag(app, ui, map);
     let fading = crate::fades::drag(app, ui, map);
     let rh = geo.rh;
@@ -30,7 +32,7 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
             if rect.max.x < tl.min.x || rect.min.x > tl.max.x || rect.max.y < tl.min.y || rect.min.y > tl.max.y {
                 continue;
             }
-            let moving = preview.is_some_and(|(id, _, _, _, copy)| id == c.id && !copy);
+            let moving = preview.is_some_and(|(_, _, _, _, copy)| !copy) && carried.iter().any(|g| g.clip == c.id.0);
             let alpha = if moving { 0.35 } else { 1.0 };
             match &fading {
                 // The fade being dragged, drawn live over the waveform.
@@ -110,13 +112,12 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
             p.rect_filled(span(a, b), crate::theme::RADIUS, TOKENS.header.gamma_multiply(0.6));
         }
     }
-    // The dragged clip where it would land.
-    if let Some((id, dest, a, b, _)) = preview
-        && let (Some((_, c)), Some(y0)) = (s.find_clip(id), row_y(dest))
-        && let Some(t) = s.track(dest)
-    {
-        let rect = Rect::from_min_max(pos2(map.x(a), y0 + 1.0), pos2(map.x(b).max(map.x(a) + 2.0), y0 + rh - 1.0));
+    // The dragged clips where they would land: the whole selection, in the clip color at the drag alpha.
+    for g in carried {
+        let (Some((_, c)), Some(y0), Some(t)) = (s.find_clip(ClipId(g.clip)), row_y(TrackId(g.track)), s.track(TrackId(g.track))) else { continue };
+        let rect = Rect::from_min_max(pos2(map.x(g.start), y0 + 1.0), pos2(map.x(g.end).max(map.x(g.start) + 2.0), y0 + rh - 1.0));
         draw_clip(&p, s, map, tl, t, c, rect, true, 0.85, false);
+        layout.drag_ghosts.push(drag_ghosts::DragGhost { rect: r4(rect), ..g });
     }
 }
 

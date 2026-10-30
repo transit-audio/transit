@@ -105,6 +105,33 @@ pub(crate) fn drag(app: &mut StudioApp, from: (f32, f32), to: (f32, f32), mods: 
     let _ = crate::control::handle_for_test(app, &ctx, &req);
 }
 
+/// Press at `from` and move to `to`, but do not release: the gesture stays in progress. Plays the
+/// queued events (one per frame) until the queue is empty, then two frames to let the UI settle.
+pub(crate) fn hold_drag(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64, from: (f32, f32), to: (f32, f32), m: egui::Modifiers) {
+    let (a, b) = (egui::pos2(from.0, from.1), egui::pos2(to.0, to.1));
+    app.synthetic.push(egui::Event::PointerMoved(a));
+    app.synthetic.push(egui::Event::PointerButton { pos: a, button: egui::PointerButton::Primary, pressed: true, modifiers: m });
+    for i in 1..=6 {
+        app.synthetic.push(egui::Event::PointerMoved(a + (b - a) * (i as f32 / 6.0)));
+    }
+    play_queue(app, ctx, time);
+}
+
+/// Release the primary button at `at`, then settle.
+pub(crate) fn release_at(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64, at: (f32, f32), m: egui::Modifiers) {
+    let pos = egui::pos2(at.0, at.1);
+    app.synthetic.push(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed: false, modifiers: m });
+    play_queue(app, ctx, time);
+}
+
+/// Run frames until every queued synthetic event has been fed, then two more.
+pub(crate) fn play_queue(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64) {
+    while !app.synthetic.is_empty() {
+        frames(app, ctx, 1, time);
+    }
+    frames(app, ctx, 2, time);
+}
+
 /// A bar-long clip with a second track (at the default zoom the visible grid is a beat); returns what a drag needs.
 pub(crate) struct CopyRig {
     pub(crate) app: StudioApp,

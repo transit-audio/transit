@@ -1279,6 +1279,8 @@ mod arrange_copy_tests;
 #[cfg(test)]
 mod arrange_edit_tests;
 #[cfg(test)]
+mod arrange_ghost_tests;
+#[cfg(test)]
 mod arrange_loop_tests;
 #[cfg(test)]
 mod devices_chain_tests;

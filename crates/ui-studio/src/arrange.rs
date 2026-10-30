@@ -1,10 +1,11 @@
 //! The arrangement window: a track list on the left, a bar/beat ruler, and the timeline with
 //! clips as colored regions. Clicking a clip selects it; dragging moves it (Ctrl-drag, Cmd on a
 //! Mac, or Alt-drag copies; clip drags snap to the visible grid, Shift bypasses it); dragging an edge trims it (the dragged edge snaps to the visible grid, Shift bypasses it); clicking empty timeline sets the
-//! cursor. Every edit goes through engine commands (see `actions`).
+//! cursor. A drag of a selected clip previews and moves the whole selection (`drag_ghosts`). Every edit goes through engine commands (see `actions`).
 
 mod clips;
 mod copy_drag;
+mod drag_ghosts;
 mod tracks;
 pub(crate) use clips::*;
 pub(crate) use tracks::*;
@@ -232,6 +233,8 @@ pub struct Layout {
     pub transport_icons: std::collections::BTreeMap<String, String>,
     /// Where a dragged track header would land: a line between rows or a group header's outline.
     pub drop: Option<R4>,
+    /// The clips a move/copy drag in progress would land, as painted (#218).
+    pub drag_ghosts: Vec<drag_ghosts::DragGhost>,
 }
 
 #[derive(Debug, Default)]
