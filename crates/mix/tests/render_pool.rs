@@ -105,6 +105,11 @@ fn audio_thread_render_does_not_wait_for_a_saturated_global_pool() {
     MixEngine::force_serial(false); // the default, said explicitly: this test is about the pool path
     let s = sixteen_strips();
     let mut eng = planned_engine(&s);
+    // A far strip deadline: every block waits for every strip, so `peak` below is decided by what
+    // the strips produced, never by a slow host leaving them all late under the default share
+    // (E49, #226). The ordering assertion is unaffected: a render that queued behind a global
+    // job still completes only after that job ends.
+    eng.set_strip_deadline(Some(Duration::from_secs(60)));
     let mut out = vec![vec![0.0f32; FRAMES]; 2];
     // Warm up before the global pool is taken.
     eng.render_active(0, FRAMES, &mut out);
