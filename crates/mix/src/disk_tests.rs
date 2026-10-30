@@ -279,5 +279,5 @@ fn a_full_request_table_drops_the_request_without_allocating() {
     assert_eq!(disk.underruns(), 40);
     disk.pump();
     let cued = maps.iter().filter(|m| disk.stream(m, 0, 16).is_some()).count();
-    assert!(cued >= 1 && cued <= transit_model::disk::SLOTS, "{cued}");
+    assert!((1..=transit_model::disk::SLOTS).contains(&cued), "{cued}");
 }
