@@ -59,6 +59,12 @@ pub(crate) fn u32_to_extended(r: u32) -> [u8; 10] {
 }
 
 pub(crate) fn parse(b: &[u8]) -> Result<AiffParse> {
+    parse_sized(b, b.len())
+}
+
+/// [`parse`] of the first bytes `b` of a file of `total` bytes: the sound data's extent is judged
+/// against `total`, so a header alone yields where the samples are and how many there are.
+pub(crate) fn parse_sized(b: &[u8], total: usize) -> Result<AiffParse> {
     if !is_aiff(b) {
         return Err(AudioError::Malformed("not an AIFF/AIFF-C file".into()));
     }
@@ -74,10 +80,11 @@ pub(crate) fn parse(b: &[u8]) -> Result<AiffParse> {
             break;
         }
         let body = pos.checked_add(8).ok_or_else(|| AudioError::Malformed("chunk offset overflow".into()))?;
-        let remaining = b.len().saturating_sub(body);
+        let remaining = total.saturating_sub(body);
         let declared = usize::try_from(size32).unwrap_or(usize::MAX);
         let len = declared.min(remaining);
-        let c = b.get(body..body + len).unwrap_or_default();
+        // A sized parse holds only the file's first bytes: a chunk may run past them.
+        let c = b.get(body..body.saturating_add(len).min(b.len())).unwrap_or_default();
         match &id {
             b"COMM" => {
                 let short = || AudioError::Malformed("COMM chunk too short".into());
@@ -90,7 +97,7 @@ pub(crate) fn parse(b: &[u8]) -> Result<AiffParse> {
             }
             b"SSND" if ssnd.is_none() => {
                 let offset = usize::try_from(be_u32(c, 0).unwrap_or(0)).unwrap_or(usize::MAX);
-                let start = body.saturating_add(8).saturating_add(offset).min(b.len());
+                let start = body.saturating_add(8).saturating_add(offset).min(total);
                 let data_len = len.saturating_sub(8).saturating_sub(offset);
                 ssnd = Some((start, data_len));
             }
@@ -133,7 +140,7 @@ pub(crate) fn parse(b: &[u8]) -> Result<AiffParse> {
         b"fl64" | b"FL64" => (PcmKind::Float { bytes: 8, big_endian: true }, SampleFormat::Float64),
         _ => return Ok(AiffParse::Foreign),
     };
-    let (data_start, data_len) = ssnd.unwrap_or((b.len(), 0));
+    let (data_start, data_len) = ssnd.unwrap_or((total, 0));
     let block = kind.bytes().saturating_mul(channels as usize).max(1);
     let frames = u64::from(frames).min((data_len / block) as u64);
     Ok(AiffParse::Native(AiffLayout {

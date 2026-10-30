@@ -12,9 +12,12 @@
 //! * [`peaks`] builds multi-resolution min/max overviews for waveform drawing.
 //! * [`FileEncoder`] writes the same formats block by block into any `Write + Seek`, so a file
 //!   of any length never has to fit in memory.
+//! * [`BlockReader`] reads a file's audio block by block (the browser's preview): native PCM
+//!   straight from any `Read + Seek`, everything else through the same decoder as [`decode`].
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod aiff;
+mod blocks;
 mod buffer;
 mod caf;
 mod flac;
@@ -24,6 +27,7 @@ pub mod peaks;
 mod symph;
 mod wav;
 
+pub use blocks::{BlockReader, MAX_HELD_BYTES, ReadSeek};
 pub use buffer::AudioBuffer;
 pub use pcm::MAX_DECODE_SAMPLES;
 use std::io::{Seek, Write};

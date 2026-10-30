@@ -8,11 +8,11 @@ use symphonia::core::codecs::{
     CODEC_TYPE_AAC, CODEC_TYPE_ADPCM_G722, CODEC_TYPE_ADPCM_G726, CODEC_TYPE_ADPCM_G726LE, CODEC_TYPE_ADPCM_IMA_QT, CODEC_TYPE_ADPCM_IMA_WAV,
     CODEC_TYPE_ADPCM_MS, CODEC_TYPE_ALAC, CODEC_TYPE_FLAC, CODEC_TYPE_MP1, CODEC_TYPE_MP2, CODEC_TYPE_MP3, CODEC_TYPE_NULL, CODEC_TYPE_OPUS,
     CODEC_TYPE_PCM_ALAW, CODEC_TYPE_PCM_F32BE, CODEC_TYPE_PCM_F32LE, CODEC_TYPE_PCM_F64BE, CODEC_TYPE_PCM_F64LE, CODEC_TYPE_PCM_MULAW,
-    CODEC_TYPE_VORBIS, CodecParameters, CodecType, DecoderOptions,
+    CODEC_TYPE_VORBIS, CodecParameters, CodecType, Decoder, DecoderOptions,
 };
 use symphonia::core::errors::Error as SymError;
 use symphonia::core::formats::{FormatOptions, FormatReader};
-use symphonia::core::io::{MediaSourceStream, MediaSourceStreamOptions, ReadBytes};
+use symphonia::core::io::{MediaSource, MediaSourceStream, MediaSourceStreamOptions, ReadBytes};
 use symphonia::core::meta::MetadataOptions;
 use symphonia::core::probe::Instantiate;
 
@@ -32,14 +32,20 @@ fn map_err(e: SymError) -> AudioError {
 }
 
 /// Run `f`, turning a panic inside the third-party decoder into an error.
-fn guarded<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
+pub(crate) fn guarded<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {
     catch_unwind(AssertUnwindSafe(f)).unwrap_or_else(|_| Err(AudioError::Malformed("decoder failed on malformed input".into())))
 }
 
 /// Symphonia's probe loop (`Probe::format`, whose hint 0.5 ignores), checking the container it
 /// finds before its reader allocates whatever the file claims.
 fn open(bytes: &[u8]) -> Result<Box<dyn FormatReader>> {
-    let mut mss = MediaSourceStream::new(Box::new(Cursor::new(bytes.to_vec())), MediaSourceStreamOptions::default());
+    open_source(bytes, Box::new(Cursor::new(bytes.to_vec())))
+}
+
+/// [`open`] over `source`, a reader of the same `bytes` (the checks walk `bytes`; the format
+/// reader reads `source`).
+fn open_source(bytes: &[u8], source: Box<dyn MediaSource>) -> Result<Box<dyn FormatReader>> {
+    let mut mss = MediaSourceStream::new(source, MediaSourceStreamOptions::default());
     let fmt_opts = FormatOptions { enable_gapless: true, ..FormatOptions::default() };
     loop {
         let found = symphonia::default::get_probe().next(&mut mss).map_err(map_err)?;
@@ -139,97 +145,152 @@ fn info_of(reader: &dyn FormatReader, detected: FileFormat) -> Result<(u32, Audi
     ))
 }
 
+/// The first audio track of a file, decoded packet by packet: [`run`] collects every packet, the
+/// streamed reader (`crate::blocks`) hands them out as it is asked for blocks. One decode path, so
+/// both give the same samples.
+pub(crate) struct Packets {
+    reader: Box<dyn FormatReader>,
+    decoder: Box<dyn Decoder>,
+    track_id: u32,
+    /// What the container says; `channels` follows the decoded stream once a packet decodes.
+    pub(crate) info: AudioInfo,
+    /// The frame count the container declares, if any.
+    pub(crate) declared_frames: Option<u64>,
+    sbuf: Option<SampleBuffer<f32>>,
+    exact_packet_timing: bool,
+    next_packet_ts: Option<u64>,
+    /// Frames decoded so far.
+    pub(crate) frames: u64,
+    /// Channels of the first decoded packet (0 until one decodes).
+    pub(crate) channels: usize,
+}
+
+impl Packets {
+    /// Open `source`, a reader of `bytes` (the container checks walk `bytes`).
+    pub(crate) fn open(bytes: &[u8], source: Box<dyn MediaSource>, detected: FileFormat) -> Result<Self> {
+        let reader = open_source(bytes, source)?;
+        let (track_id, info) = info_of(reader.as_ref(), detected)?;
+        let params = reader
+            .tracks()
+            .iter()
+            .find(|t| t.id == track_id)
+            .map(|t| t.codec_params.clone())
+            .ok_or_else(|| AudioError::Malformed("track vanished".into()))?;
+        let alac = params.extra_data.as_deref().filter(|_| params.codec == CODEC_TYPE_ALAC).and_then(|d| be_u32(d, 0));
+        if params.max_frames_per_packet.into_iter().chain(alac.map(u64::from)).any(|n| n > MAX_PACKET_FRAMES) {
+            return Err(AudioError::Malformed("the file declares packets far longer than any codec uses".into()));
+        }
+        let decoder = symphonia::default::get_codecs().make(&params, &DecoderOptions::default()).map_err(map_err)?;
+        // Native FLAC timestamps and durations are exact sample counts. Other containers can
+        // omit packet durations (Matroska) or round timestamps, so do not infer gaps there.
+        let exact_packet_timing = detected == FileFormat::Flac
+            && params.codec == CODEC_TYPE_FLAC
+            && params.time_base.is_some_and(|base| base.numer == 1 && base.denom == info.sample_rate);
+        Ok(Packets {
+            reader,
+            decoder,
+            track_id,
+            info,
+            declared_frames: params.n_frames,
+            sbuf: None,
+            exact_packet_timing,
+            next_packet_ts: None,
+            frames: 0,
+            channels: 0,
+        })
+    }
+
+    /// Decode the next packet of the track: `Some((frames, channels))`, its interleaved samples in
+    /// [`Self::samples`] when `copy`; `None` at the end of the stream.
+    pub(crate) fn next(&mut self, copy: bool) -> Result<Option<(usize, usize)>> {
+        loop {
+            let packet = match self.reader.next_packet() {
+                Ok(p) => p,
+                Err(SymError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(None),
+                Err(SymError::ResetRequired) => return Ok(None),
+                Err(e) => {
+                    if self.frames == 0 {
+                        return Err(map_err(e));
+                    }
+                    log::warn!("stopping decode after demux error: {e}");
+                    return Ok(None);
+                }
+            };
+            if packet.track_id() != self.track_id {
+                continue;
+            }
+            // Some demuxers discard corrupt packets internally. Their next timestamp still
+            // exposes the missing duration; never concatenate across that gap.
+            if self.exact_packet_timing && self.next_packet_ts.is_some_and(|expected| packet.ts > expected) {
+                return Err(AudioError::Malformed("audio packet timeline contains a gap".into()));
+            }
+            self.next_packet_ts = (packet.dur > 0).then(|| packet.ts.checked_add(packet.dur)).flatten();
+            let decoded = match self.decoder.decode(&packet) {
+                Ok(d) => d,
+                // A skipped packet would move all later audio earlier. Packet durations are not
+                // available for every codec, so refuse the import instead of returning a short clip.
+                Err(SymError::DecodeError(m)) => return Err(AudioError::Malformed(format!("corrupt audio packet: {m}"))),
+                Err(SymError::IoError(_)) => return Ok(None),
+                Err(e) => return Err(map_err(e)),
+            };
+            let spec = *decoded.spec();
+            let ch = spec.channels.count();
+            if ch == 0 {
+                continue;
+            }
+            if self.channels == 0 {
+                // The decoded stream is authoritative for the channel count.
+                self.info.channels = u16::try_from(ch).map_err(|_| AudioError::Unsupported("too many channels".into()))?;
+                self.channels = ch;
+            }
+            let n = decoded.frames();
+            self.frames = self.frames.saturating_add(n as u64);
+            if copy {
+                let needed = decoded.capacity() as u64;
+                let sb = match &mut self.sbuf {
+                    Some(sb) if sb.capacity() >= decoded.capacity() * ch => sb,
+                    _ => self.sbuf.insert(SampleBuffer::<f32>::new(needed, spec)),
+                };
+                sb.copy_interleaved_ref(decoded);
+            }
+            return Ok(Some((n, ch)));
+        }
+    }
+
+    /// The interleaved samples of the packet [`Self::next`] last copied.
+    pub(crate) fn samples(&self) -> &[f32] {
+        self.sbuf.as_ref().map_or(&[], SampleBuffer::samples)
+    }
+}
+
 /// Decode the whole first audio track. When `count_only`, samples are counted but not stored.
 fn run(bytes: &[u8], detected: FileFormat, count_only: bool) -> Result<(AudioInfo, AudioBuffer)> {
-    let mut reader = open(bytes)?;
-    let (track_id, mut info) = info_of(reader.as_ref(), detected)?;
-    if let Some(n) = reader.tracks().iter().find(|t| t.id == track_id).and_then(|t| t.codec_params.n_frames) {
-        let total = n.saturating_mul(u64::from(info.channels.max(1)));
+    let mut packets = Packets::open(bytes, Box::new(Cursor::new(bytes.to_vec())), detected)?;
+    if let Some(n) = packets.declared_frames {
+        let total = n.saturating_mul(u64::from(packets.info.channels.max(1)));
         if !count_only && total > MAX_DECODE_SAMPLES {
             return Err(AudioError::TooLarge(format!("{total} samples exceeds the decode limit")));
         }
     }
-    let params = reader
-        .tracks()
-        .iter()
-        .find(|t| t.id == track_id)
-        .map(|t| t.codec_params.clone())
-        .ok_or_else(|| AudioError::Malformed("track vanished".into()))?;
-    let alac = params.extra_data.as_deref().filter(|_| params.codec == CODEC_TYPE_ALAC).and_then(|d| be_u32(d, 0));
-    if params.max_frames_per_packet.into_iter().chain(alac.map(u64::from)).any(|n| n > MAX_PACKET_FRAMES) {
-        return Err(AudioError::Malformed("the file declares packets far longer than any codec uses".into()));
-    }
-    let mut decoder = symphonia::default::get_codecs().make(&params, &DecoderOptions::default()).map_err(map_err)?;
-
     let mut planar: Vec<Vec<f32>> = Vec::new();
-    let mut frames: u64 = 0;
-    let mut sbuf: Option<SampleBuffer<f32>> = None;
-    // Native FLAC timestamps and durations are exact sample counts. Other containers can
-    // omit packet durations (Matroska) or round timestamps, so do not infer gaps there.
-    let exact_packet_timing = detected == FileFormat::Flac
-        && params.codec == CODEC_TYPE_FLAC
-        && params.time_base.is_some_and(|base| base.numer == 1 && base.denom == info.sample_rate);
-    let mut next_packet_ts = None;
-    loop {
-        let packet = match reader.next_packet() {
-            Ok(p) => p,
-            Err(SymError::IoError(e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
-            Err(SymError::ResetRequired) => break,
-            Err(e) => {
-                if frames == 0 {
-                    return Err(map_err(e));
-                }
-                log::warn!("stopping decode after demux error: {e}");
-                break;
-            }
-        };
-        if packet.track_id() != track_id {
-            continue;
-        }
-        // Some demuxers discard corrupt packets internally. Their next timestamp still
-        // exposes the missing duration; never concatenate across that gap.
-        if exact_packet_timing && next_packet_ts.is_some_and(|expected| packet.ts > expected) {
-            return Err(AudioError::Malformed("audio packet timeline contains a gap".into()));
-        }
-        next_packet_ts = (packet.dur > 0).then(|| packet.ts.checked_add(packet.dur)).flatten();
-        let decoded = match decoder.decode(&packet) {
-            Ok(d) => d,
-            // A skipped packet would move all later audio earlier. Packet durations are not
-            // available for every codec, so refuse the import instead of returning a short clip.
-            Err(SymError::DecodeError(m)) => return Err(AudioError::Malformed(format!("corrupt audio packet: {m}"))),
-            Err(SymError::IoError(_)) => break,
-            Err(e) => return Err(map_err(e)),
-        };
-        let spec = *decoded.spec();
-        let ch = spec.channels.count();
-        if ch == 0 {
-            continue;
-        }
+    while let Some((_, ch)) = packets.next(!count_only)? {
         if planar.is_empty() {
-            // The decoded stream is authoritative for the channel count.
-            info.channels = u16::try_from(ch).map_err(|_| AudioError::Unsupported("too many channels".into()))?;
             planar = (0..ch).map(|_| Vec::new()).collect();
         }
-        let n = decoded.frames() as u64;
-        frames = frames.saturating_add(n);
-        if frames.saturating_mul(ch as u64) > MAX_DECODE_SAMPLES {
+        if packets.frames.saturating_mul(ch as u64) > MAX_DECODE_SAMPLES {
             return Err(AudioError::TooLarge("decoded audio exceeds the 4 GiB limit".into()));
         }
         if count_only {
             continue;
         }
-        let needed = decoded.capacity() as u64;
-        let sb = match &mut sbuf {
-            Some(sb) if sb.capacity() >= decoded.capacity() * ch => sb,
-            _ => sbuf.insert(SampleBuffer::<f32>::new(needed, spec)),
-        };
-        sb.copy_interleaved_ref(decoded);
-        for frame in sb.samples().chunks_exact(ch) {
+        for frame in packets.samples().chunks_exact(ch) {
             for (dst, &s) in planar.iter_mut().zip(frame) {
                 dst.push(if s.is_finite() { s } else { 0.0 });
             }
         }
     }
+    let frames = packets.frames;
+    let mut info = packets.info;
     if info.channels == 0 {
         return Err(AudioError::Malformed("stream contains no audio".into()));
     }

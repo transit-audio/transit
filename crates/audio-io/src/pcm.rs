@@ -66,7 +66,7 @@ impl PcmKind {
 }
 
 /// Decode one sample from exactly `kind.bytes()` bytes. Returns 0 for a short slice.
-fn decode_sample(s: &[u8], kind: PcmKind) -> f32 {
+pub(crate) fn decode_sample(s: &[u8], kind: PcmKind) -> f32 {
     match kind {
         PcmKind::Int { bytes, big_endian, unsigned } => {
             if bytes == 0 || bytes > 4 || s.len() < bytes {
