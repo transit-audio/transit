@@ -182,7 +182,7 @@ pub fn jack_system() -> AudioSystem {
             );
             // Under PipeWire the buffer list is the server's quantum range (#230).
             if name.starts_with("PipeWire")
-                && let Some(clock) = crate::pipewire::server_clock()
+                && let Some(clock) = crate::pipewire::clock()
             {
                 apply_server_clock(&mut system, &clock);
             }

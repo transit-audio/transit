@@ -94,10 +94,27 @@ pub fn parse_settings(text: &str) -> Option<ServerClock> {
     found.then_some(clock)
 }
 
-/// Whether an ALSA device of this name goes through PipeWire's plug-in when a PipeWire server
-/// runs: the `default`, `pipewire` and `pulse` PCMs (`hw:` and `plughw:` devices do not).
+/// Whether an ALSA device of this name goes through PipeWire's plug-in: the `pipewire` PCM always,
+/// `default` only where pipewire-alsa makes it PipeWire's ([`default_is_pipewire`]; a desktop that
+/// runs PipeWire beside PulseAudio keeps `default` on PulseAudio). `pulse`, `hw:` and `plughw:`
+/// are not counted.
 pub fn routed(device: &str) -> bool {
-    ["default", "pipewire", "pulse"].iter().any(|n| device.eq_ignore_ascii_case(n))
+    routed_with(device, default_is_pipewire())
+}
+
+/// [`routed`] with the `default` PCM's owner given.
+pub fn routed_with(device: &str, default_is_pipewire: bool) -> bool {
+    device.eq_ignore_ascii_case("pipewire") || (default_is_pipewire && device.eq_ignore_ascii_case("default"))
+}
+
+/// pipewire-alsa's file that makes ALSA's `default` PipeWire's, where the distributions install it.
+pub const DEFAULT_CONF: [&str; 2] = ["/etc/alsa/conf.d/99-pipewire-default.conf", "/usr/share/alsa/alsa.conf.d/99-pipewire-default.conf"];
+
+/// Whether ALSA's `default` PCM is PipeWire's: one of [`DEFAULT_CONF`] exists (read once; never on
+/// a platform without ALSA).
+pub fn default_is_pipewire() -> bool {
+    static FOUND: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FOUND.get_or_init(|| cfg!(target_os = "linux") && DEFAULT_CONF.iter().any(|p| std::path::Path::new(p).exists()))
 }
 
 /// Narrows a device's buffer range to `range` (the server's), keeping what both allow; the
@@ -110,9 +127,9 @@ pub fn clamp_range(device: &mut DeviceInfo, (min, max): (u32, u32)) {
 
 /// The ALSA system under a PipeWire server: each routed device's buffer list narrowed to the
 /// buffers whose periods the server allows, with the server's line under it.
-pub fn apply_to_alsa(system: &mut AudioSystem, clock: &ServerClock) {
+pub fn apply_to_alsa(system: &mut AudioSystem, clock: &ServerClock, default_is_pipewire: bool) {
     let mut notes = Vec::new();
-    for device in system.outputs.iter_mut().chain(system.inputs.iter_mut()).filter(|d| routed(&d.name)) {
+    for device in system.outputs.iter_mut().chain(system.inputs.iter_mut()).filter(|d| routed_with(&d.name, default_is_pipewire)) {
         if let Some(range) = clock.alsa_buffer_range() {
             clamp_range(device, range);
         }
@@ -125,19 +142,35 @@ pub fn apply_to_alsa(system: &mut AudioSystem, clock: &ServerClock) {
 }
 
 /// The clock read at the last listing (`None` before one, or without a PipeWire server).
-static LAST: Mutex<Option<ServerClock>> = Mutex::new(None);
+/// The outer `None`: never read.
+static LAST: Mutex<Option<Option<ServerClock>>> = Mutex::new(None);
 
 /// The clock read at the last listing, for the window's per-frame lines (no process is started).
 pub fn last_clock() -> Option<ServerClock> {
-    *LAST.lock().unwrap_or_else(PoisonError::into_inner)
+    LAST.lock().unwrap_or_else(PoisonError::into_inner).flatten()
+}
+
+/// The clock read at the last listing, else read now (once): the open path's view.
+pub fn clock() -> Option<ServerClock> {
+    let known = *LAST.lock().unwrap_or_else(PoisonError::into_inner);
+    known.unwrap_or_else(server_clock)
 }
 
 /// Reads the server's clock now (Linux, with a PipeWire server's socket present and `pw-metadata`
 /// installed; it waits one second at most) and keeps it for [`last_clock`]. A control-thread call.
 pub fn server_clock() -> Option<ServerClock> {
     let clock = read_settings().as_deref().and_then(parse_settings);
-    *LAST.lock().unwrap_or_else(PoisonError::into_inner) = clock;
+    *LAST.lock().unwrap_or_else(PoisonError::into_inner) = Some(clock);
     clock
+}
+
+/// The buffer range the server allows a device of `system` named `device`: the window's list and
+/// the open path's clamp both read this (ALSA devices PipeWire serves; `None` for any other).
+pub fn alsa_server_range(system: &str, device: &str) -> Option<(u32, u32)> {
+    if !system.eq_ignore_ascii_case("ALSA") || !routed(device) {
+        return None;
+    }
+    clock()?.alsa_buffer_range()
 }
 
 #[cfg(target_os = "linux")]
@@ -185,12 +218,22 @@ pub fn period_note(asked: Option<u32>, buffer: Option<u32>, period: Option<u32>,
     if buffer == Some(period) && asked.is_none_or(|a| a == period) && forced.is_none_or(|f| f == period) {
         return None;
     }
-    let quantum = forced.unwrap_or(period);
+    // A forced quantum is read; without one the graph's quantum is not (no libpipewire): the
+    // node's period stands in for it, said as "about".
+    let quantum = match forced {
+        Some(f) => format!("{f}, forced: transit cannot change it"),
+        None => format!("about {period}"),
+    };
+    // cpal keeps the whole ALSA buffer queued (playback starts at buffer minus one period), so what
+    // you hear is about the buffer plus the graph's quantum, not the quantum alone.
+    let heard = match buffer {
+        Some(b) => format!("You hear about the buffer plus the quantum ({} frames).", b.saturating_add(forced.unwrap_or(period))),
+        None => "You hear about the buffer plus the quantum.".to_owned(),
+    };
     let buffer = buffer.map_or("default".to_owned(), |b| b.to_string());
-    let pin = if forced.is_some() { ", forced: transit cannot change it" } else { "" };
     let want = asked.unwrap_or(period);
     Some(format!(
-        "Buffer {buffer} · period {period}: period set by the server (PipeWire quantum {quantum}{pin}). The latency you get follows the quantum. To change it: pw-metadata -n settings 0 clock.force-quantum {want} (0 releases it), or use the JACK system."
+        "Buffer {buffer} · period {period}: period set by the server (PipeWire quantum {quantum}). {heard} To change the quantum: pw-metadata -n settings 0 clock.force-quantum {want} (0 releases it), or use the JACK system."
     ))
 }
 
@@ -239,7 +282,7 @@ mod tests {
             inputs: vec![device("default", Some(1), Some(4_194_304))],
             diagnostics: Vec::new(),
         };
-        apply_to_alsa(&mut system, &clock);
+        apply_to_alsa(&mut system, &clock, true);
         assert_eq!(system.outputs[0].buffer_sizes(), [256, 512, 1024, 2048, 4096, 8192]);
         assert_eq!((system.outputs[1].buffer_min, system.outputs[1].buffer_max), (Some(64), Some(16_384)), "hw: is not PipeWire's");
         assert_eq!(system.inputs[0].buffer_sizes(), [256, 512, 1024, 2048, 4096, 8192]);
@@ -258,20 +301,37 @@ mod tests {
     }
 
     #[test]
+    fn default_counts_as_pipewires_only_where_pipewire_alsa_owns_it() {
+        assert!(routed_with("pipewire", false) && routed_with("PipeWire", true));
+        assert!(routed_with("default", true));
+        assert!(!routed_with("default", false), "PipeWire beside PulseAudio: default is PulseAudio's");
+        assert!(!routed_with("pulse", true) && !routed_with("hw:CARD=PCH,DEV=0", true));
+        let mut system = AudioSystem {
+            name: "ALSA".into(),
+            is_default: true,
+            outputs: vec![device("default", Some(1), Some(4_194_304))],
+            inputs: Vec::new(),
+            diagnostics: Vec::new(),
+        };
+        apply_to_alsa(&mut system, &parse_settings(FORCED).unwrap(), false);
+        assert_eq!((system.outputs[0].buffer_min, system.diagnostics.len()), (Some(1), 0), "left alone");
+    }
+
+    #[test]
     fn the_period_line_names_buffer_period_and_quantum_when_they_differ() {
         let forced = parse_settings(FORCED).unwrap();
         // 128 asked, a 128-frame ALSA buffer, 64-frame callbacks, the graph forced to 2048.
         assert_eq!(
             period_note(Some(128), Some(128), Some(64), Some(&forced)).as_deref(),
             Some(
-                "Buffer 128 · period 64: period set by the server (PipeWire quantum 2048, forced: transit cannot change it). The latency you get follows the quantum. To change it: pw-metadata -n settings 0 clock.force-quantum 128 (0 releases it), or use the JACK system."
+                "Buffer 128 · period 64: period set by the server (PipeWire quantum 2048, forced: transit cannot change it). You hear about the buffer plus the quantum (2176 frames). To change the quantum: pw-metadata -n settings 0 clock.force-quantum 128 (0 releases it), or use the JACK system."
             )
         );
         let free = ServerClock { force_quantum: None, ..forced };
         assert_eq!(
             period_note(Some(2048), Some(2048), Some(512), Some(&free)).as_deref(),
             Some(
-                "Buffer 2048 · period 512: period set by the server (PipeWire quantum 512). The latency you get follows the quantum. To change it: pw-metadata -n settings 0 clock.force-quantum 2048 (0 releases it), or use the JACK system."
+                "Buffer 2048 · period 512: period set by the server (PipeWire quantum about 512). You hear about the buffer plus the quantum (2560 frames). To change the quantum: pw-metadata -n settings 0 clock.force-quantum 2048 (0 releases it), or use the JACK system."
             )
         );
         assert_eq!(period_note(Some(256), Some(256), Some(256), Some(&free)), None, "honored as asked");

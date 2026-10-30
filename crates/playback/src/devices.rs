@@ -564,7 +564,7 @@ pub fn cpal_audio_systems() -> Vec<AudioSystem> {
                 && system.outputs.iter().chain(&system.inputs).any(|d| crate::pipewire::routed(&d.name))
                 && let Some(clock) = crate::pipewire::server_clock()
             {
-                crate::pipewire::apply_to_alsa(&mut system, &clock);
+                crate::pipewire::apply_to_alsa(&mut system, &clock, crate::pipewire::default_is_pipewire());
             }
             Some(system)
         })
@@ -647,6 +647,20 @@ pub(crate) fn find_device(host: &cpal::Host, name: Option<&str>, output: bool) -
         log::warn!("audio device `{want}` is not available; using the default");
     }
     if output { host.default_output_device() } else { host.default_input_device() }
+}
+
+/// [`buffer_size`] on a device whose range the PipeWire server narrows (#230): the same range the
+/// window's list offers ([`crate::pipewire::alsa_server_range`]), so a saved size the list snaps
+/// opens at the size the window says.
+pub(crate) fn buffer_size_on(want: Option<u32>, supported: &cpal::SupportedBufferSize, system: &str, device: &str) -> cpal::BufferSize {
+    let narrowed = match (crate::pipewire::alsa_server_range(system, device), supported) {
+        (Some((lo, hi)), cpal::SupportedBufferSize::Range { min, max }) if lo.max(*min) <= hi.min(*max) => {
+            cpal::SupportedBufferSize::Range { min: lo.max(*min), max: hi.min(*max) }
+        }
+        (Some((lo, hi)), cpal::SupportedBufferSize::Unknown) => cpal::SupportedBufferSize::Range { min: lo, max: hi },
+        _ => *supported,
+    };
+    buffer_size(want, &narrowed)
 }
 
 /// The buffer to request: the chosen size, clamped into the device's range (#230: a saved size the
