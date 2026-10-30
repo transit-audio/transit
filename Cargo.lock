@@ -4248,6 +4248,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-macro-osc"
+version = "0.4.1"
+dependencies = [
+ "num-traits",
+ "transit-macro-osc-oracle",
+]
+
+[[package]]
 name = "transit-macro-osc-oracle"
 version = "0.4.1"
 dependencies = [

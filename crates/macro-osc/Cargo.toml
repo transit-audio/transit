@@ -1,0 +1,20 @@
+[package]
+name = "transit-macro-osc"
+description = "transit's macro oscillator: 24 synthesis engines ported to Rust from Émilie Gillet's MIT firmware, nulled against the C++ oracle (ADR 0033, #195)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+# transit's own changes are MIT OR Apache-2.0; the vendored Rust port and the firmware it derives
+# from are MIT (LICENSE-THIRD-PARTY).
+license = "(MIT OR Apache-2.0) AND MIT"
+publish = false
+
+[dependencies]
+num-traits = "0.2"
+
+[dev-dependencies]
+transit-macro-osc-oracle = { path = "../macro-osc-oracle" }
+
+[lints]
+workspace = true
