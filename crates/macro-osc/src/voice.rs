@@ -388,11 +388,23 @@ impl Voice<'_> {
     }
 
     #[inline]
-    /// Renders `frames.len()` frames, 1 to [`MAX_BLOCK_SIZE`] (the firmware renders 12 per call),
-    /// as the firmware's `Voice::Render`: int16 out and aux, inverted as the module's DAC expects.
+    /// Renders `frames.len()` frames as the firmware's `Voice::Render`: int16 out and aux, inverted
+    /// as the module's DAC expects. One call is one control block: the envelopes, the trigger delay
+    /// and the parameter smoothing advance by one 12-frame block whatever the frame count, as in the
+    /// firmware, so call it with 12 frames (any count from 1 to [`MAX_BLOCK_SIZE`] is rendered as
+    /// one block). A longer slice is rendered as consecutive 12-frame blocks with the same inputs;
+    /// an empty one renders nothing.
     pub fn render(&mut self, patch: &Patch, modulations: &Modulations, frames: &mut [Frame]) {
         let size = frames.len();
-        assert!((1..=MAX_BLOCK_SIZE).contains(&size), "block of {size} frames, expected 1 to {MAX_BLOCK_SIZE}");
+        if size > MAX_BLOCK_SIZE {
+            for chunk in frames.chunks_mut(CONTROL_BLOCK_SIZE as usize) {
+                self.render(patch, modulations, chunk);
+            }
+            return;
+        }
+        if size == 0 {
+            return;
+        }
         let (out, aux) = (&mut self.out_buffer[..size], &mut self.aux_buffer[..size]);
         // Trigger, LPG, internal envelope.
 
@@ -686,4 +698,27 @@ fn apply_modulations(
     value = value.clamp(minimum_value, maximum_value);
 
     value
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_long_slice_renders_as_consecutive_twelve_frame_blocks() {
+        let patch = Patch { note: 60.0, engine: 10, ..Patch::default() };
+        let modulations = Modulations::default();
+        let mut whole = Voice::new(SampleRate::Hz48000);
+        whole.init();
+        let mut blocks = Voice::new(SampleRate::Hz48000);
+        blocks.init();
+        let mut long = [Frame::default(); 60];
+        whole.render(&patch, &modulations, &mut long);
+        let mut short = [Frame::default(); 60];
+        for chunk in short.chunks_mut(12) {
+            blocks.render(&patch, &modulations, chunk);
+        }
+        assert_eq!(long, short);
+        whole.render(&patch, &modulations, &mut []);
+    }
 }
