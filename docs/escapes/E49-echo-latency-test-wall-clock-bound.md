@@ -146,8 +146,8 @@ test inherits from the engine's default (a lint is #220);
 nonzero peak under the default deadline and is a review item.
 
 Recurrence 2026-10-30 (main a92db720; CI run 40997977995 macos and Realtime run 40997977992
-macos-x86_64): two `crates/mix/tests/render_workers.rs` tests failed on macOS only; chain BS touched
-nothing in `crates/mix`. Both were test defects; the product was right in each.
+macos-x86_64): two `crates/mix/tests/render_workers.rs` tests failed on macOS only; the commits after the last mix or rt
+change (a2255075..a92db720) touched nothing in `crates/mix` or `crates/rt`. Both were test defects; the product was right in each.
 (1) `continuity_through_a_real_worker_set_with_stalls_and_live_midi` asserted holes 39296 samples
 against (busy 304 + unstarted 9) x 128 = 40064. The continuity instrument started its time at its
 first processed block (`ContinuityInstrument::process`, `crates/rt/src/midi_defer/testing.rs`;
@@ -157,7 +157,8 @@ was counted but left no hole. The 768 samples are six such blocks: all six strip
 first block while the runner's workers were still waking. Fixed: the test calls `expect_from(0)` on
 every instrument and checks processed plus hole samples equal the rig's whole time per instrument; the
 new `strips_unstarted_before_their_first_render_are_holes_too` holds two workers inside their first
-strips on every block so the other four never start, by construction. Without `expect_from` it fails
+strips on every block so the other four never start, by construction. Both tests now run their closing blocks at a 60 s strip deadline, so the last
+block has no overrun and every hole is closed before the reports are read (review). Without `expect_from` it fails
 5 of 5 on Windows (holes 0 to 3840 against 12032 to 13056); with it, 20 of 20 pass unloaded, pinned to
 three cores, and pinned with six spinning processes.
 (2) `a_plan_waits_while_a_worker_holds_a_strip` stored a 300 ms stall for strip 2 and rendered until

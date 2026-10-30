@@ -110,6 +110,10 @@ fn continuity_through_a_real_worker_set_with_stalls_and_live_midi() {
             s.stall_ns.store(0, Ordering::Relaxed);
         }
         player.release_all(&mut rig);
+        // The closing blocks wait for every strip (a far deadline): no overrun in the last block, so
+        // every hole is closed by a later render and no worker still holds a block when the reports
+        // are read. At the test's short deadline the last block is clean only if the host is on time.
+        rig.mix.set_strip_deadline(Some(Duration::from_secs(60)));
         settle(&mut rig);
         transit_mix::unmark_audio_thread();
         rig
@@ -180,6 +184,10 @@ fn strips_unstarted_before_their_first_render_are_holes_too() {
     for s in &rig.shared {
         s.hold.store(false, Ordering::Release);
     }
+    // The closing blocks wait for every strip (a far deadline): no overrun in the last block, so
+    // every hole is closed by a later render and no worker still holds a block when the reports
+    // are read. At the test's short deadline the last block is clean only if the host is on time.
+    rig.mix.set_strip_deadline(Some(Duration::from_secs(60)));
     settle(&mut rig);
     transit_mix::unmark_audio_thread();
     MixEngine::force_serial(true);
@@ -273,7 +281,7 @@ fn a_plan_waits_while_a_worker_holds_a_strip() {
     let mut blocks = 0u32;
     while !rig.shared[2].holding.load(Ordering::Acquire) {
         blocks += 1;
-        assert!(blocks < 1_000_000, "no worker ever took the held strip");
+        assert!(blocks < 100_000, "no worker ever took the held strip");
         rig.block();
     }
     assert!(!rig.mix.render_workers_settled(), "a worker holds strip 2");

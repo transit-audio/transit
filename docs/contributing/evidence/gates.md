@@ -89,7 +89,8 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   hold one strip holds it (`Shared::hold` in `crates/mix/tests/common/workers.rs`) and waits for that
   strip's `holding` signal, never for "some strip is away"; a continuity count starts at the first
   block (`ContinuityInstrument::expect_from`), so overruns before an instrument's first render are
-  holes too (E49 recurrence 2026-10-30).
+  holes too, and the closing blocks before a coverage check run at a far deadline (E49 recurrence
+  2026-10-30).
 - A failing test is never rerun to make it pass, and a chain never reruns a failed test even to
   capture its message: read the output, report it verbatim and bug-hunt the root cause before any test
   change. Three test defects were found this way on 2026-10-29, and no product defect. The escape
