@@ -8,9 +8,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use transit_dsp::Plugin;
 use transit_mix::{
-    Adoption, Arrival, DeviceGeneration, Due, EngineEpoch, EventLimits, EventOutcome, InstanceSpec, InstrumentEvent, Message, MixEngine,
-    NewInstance, NoteId, PlanCompiler, PlanGeneration, PlanLimits, PluginEvent, RenderFrame, RenderTarget, SlotGen, Source, mark_audio_thread,
-    rack_binding, render_range,
+    Adoption, Arrival, DeviceGeneration, Due, EngineEpoch, EventLimits, EventOutcome, InstanceSpec, InstrumentEvent, Message, MixEngine, NewInstance,
+    NoteId, PlanCompiler, PlanGeneration, PlanLimits, PluginEvent, RenderFrame, RenderTarget, SlotGen, Source, mark_audio_thread, rack_binding,
+    render_range,
 };
 use transit_model::{
     AutoParam, BusId, ChannelFormat, Clip, Insert, MACRO_SLOT, MacroMapping, ParamRange, Rack, RackMember, Route, Session, TrackId, TrackKind, Zone,
@@ -360,7 +360,9 @@ fn distributing_the_racks_midi_allocates_nothing() {
     rig.pos = 0;
     rig.render(2);
     let events: Vec<InstrumentEvent> =
-        [on(48, 100), on(62, 100), on(72, 100), Message::Control { cc: 64, value: 127 }, off(48), off(62), off(72), off(30)].map(|m| rig.event(m)).to_vec();
+        [on(48, 100), on(62, 100), on(72, 100), Message::Control { cc: 64, value: 127 }, off(48), off(62), off(72), off(30)]
+            .map(|m| rig.event(m))
+            .to_vec();
     let ((), stats) = measure(|| {
         for e in &events {
             let _ = rig.mix.queue_event(e);

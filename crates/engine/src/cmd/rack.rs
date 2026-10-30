@@ -25,7 +25,15 @@ pub fn specs() -> Vec<CommandSpec> {
             new_rack
         ),
         cmd!("rack.member_add", "Add to Rack", [], None, "{track: rack, member}", always, member_add),
-        cmd!("rack.member_remove", "Remove from Rack", [], None, "{track: rack, member} — the member leaves the rack's folder too", always, member_remove),
+        cmd!(
+            "rack.member_remove",
+            "Remove from Rack",
+            [],
+            None,
+            "{track: rack, member} — the member leaves the rack's folder too",
+            always,
+            member_remove
+        ),
         cmd!(
             "rack.zone",
             "Set Rack Zone",
@@ -54,7 +62,8 @@ pub fn specs() -> Vec<CommandSpec> {
 /// Adds the MIDI and instrument tracks of `tracks` that are directly in `folder` to its rack (when
 /// it is one), with full zones, up to [`MAX_RACK_MEMBERS`]. Called when tracks move into a folder.
 pub(crate) fn join(s: &mut Session, folder: TrackId, tracks: &[TrackId]) {
-    let joining: Vec<TrackId> = tracks.iter().copied().filter(|t| s.track(*t).is_some_and(|x| x.folder == Some(folder) && x.kind.is_midi())).collect();
+    let joining: Vec<TrackId> =
+        tracks.iter().copied().filter(|t| s.track(*t).is_some_and(|x| x.folder == Some(folder) && x.kind.is_midi())).collect();
     let Some(rack) = s.track_mut(folder).filter(|f| f.is_rack()).and_then(|f| f.rack.as_mut()) else { return };
     for t in joining {
         if rack.member(t).is_none() && rack.members.len() < MAX_RACK_MEMBERS {
@@ -232,7 +241,11 @@ fn set_macro(e: &mut Engine, p: &Value) -> Result<Value> {
     let mut written = 0;
     for m in &mappings {
         let Some(ins) = s.track_mut(m.track).filter(|t| t.folder == Some(rack)).and_then(|t| {
-            if m.slot == AutoParam::INSTRUMENT_SLOT { t.instrument.as_mut() } else { t.mixer.inserts.get_mut(usize::from(m.slot)).and_then(Option::as_mut) }
+            if m.slot == AutoParam::INSTRUMENT_SLOT {
+                t.instrument.as_mut()
+            } else {
+                t.mixer.inserts.get_mut(usize::from(m.slot)).and_then(Option::as_mut)
+            }
         }) else {
             continue;
         };
@@ -256,7 +269,11 @@ fn macro_map(e: &mut Engine, p: &Value) -> Result<Value> {
     let num = |k: &str, d: f32, lo: f32, hi: f32| -> Result<f32> {
         match p.get(k) {
             None | Some(Value::Null) => Ok(d),
-            Some(v) => v.as_f64().map(|x| x as f32).filter(|x| x.is_finite() && (lo..=hi).contains(x)).ok_or_else(|| bad(id, format!("`{k}` must be {lo}..{hi}"))),
+            Some(v) => v
+                .as_f64()
+                .map(|x| x as f32)
+                .filter(|x| x.is_finite() && (lo..=hi).contains(x))
+                .ok_or_else(|| bad(id, format!("`{k}` must be {lo}..{hi}"))),
         }
     };
     let (min, max, curve) = (num("min", 0.0, 0.0, 1.0)?, num("max", 1.0, 0.0, 1.0)?, num("curve", 0.0, -1.0, 1.0)?);
@@ -324,11 +341,8 @@ fn info(e: &mut Engine, p: &Value) -> Result<Value> {
     let t = s.track(rack).ok_or_else(|| bad(id, "no rack"))?;
     let r = t.rack.as_ref().ok_or_else(|| bad(id, "`track` is not a rack"))?;
     let playing: Vec<TrackId> = s.rack_members(t).map(|(m, _)| m.id).collect();
-    let members: Vec<Value> = r
-        .members
-        .iter()
-        .map(|m| json!({"track": m.track, "plays": playing.contains(&m.track), "key": m.key_zone, "velocity": m.vel_zone}))
-        .collect();
+    let members: Vec<Value> =
+        r.members.iter().map(|m| json!({"track": m.track, "plays": playing.contains(&m.track), "key": m.key_zone, "velocity": m.vel_zone})).collect();
     let macros: Vec<Value> = (0..RACK_MACROS)
         .filter_map(|i| r.macros.get(i).map(|m| (i, m)))
         .map(|(i, m)| json!({"macro": i + 1, "name": r.macro_name(i), "value": m.value, "mappings": m.mappings, "midi": m.midi}))

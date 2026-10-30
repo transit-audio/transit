@@ -95,7 +95,6 @@ mod matrix;
 mod midi;
 mod offline;
 mod plan;
-mod rack;
 #[cfg(test)]
 mod plan_fault_tests;
 #[cfg(test)]
@@ -108,6 +107,7 @@ mod plan_ownership_tests;
 mod plan_render_tests;
 #[cfg(test)]
 mod plan_tests;
+mod rack;
 mod render_pool;
 mod routing;
 /// Test seams (issue #210): muted serial blocks, the deterministic deadline, block views.
@@ -128,7 +128,6 @@ use automation::{apply_params, lerp_gain, pan_at, pan_segment, send_level, trans
 use clips::render_clip;
 pub use clips::render_clips;
 use clips::{clip_fx_params, render_audio_clips};
-pub use rack::{RACK_SLOT, rack_binding};
 pub use compile::{CompileError, CompileMode, MIN_DELAY_CAPACITY, PlanCompiler, PlanLimits};
 pub use events::{
     Arrival, Due, EngineEpoch, EventLimits, EventOutcome, EventStatus, InstrumentEvent, MAX_OPEN, MAX_PEDALS, MAX_PORTS, Message, NoteId,
@@ -156,6 +155,7 @@ pub use plan::{
     Adoption, DeviceGeneration, EnvelopeState, PlanEnvelope, PlanGeneration, PlanIdentity, PlanStatus, PreparedPlan, RejectReason, Rejected,
     RenderTarget, Retired, SlotBinding, SlotGen,
 };
+pub use rack::{RACK_SLOT, rack_binding};
 #[cfg(test)]
 use render_pool::flag_value;
 use render_pool::{FORCE_SERIAL, PARALLEL_STRIPS, guarded, init_render_switch, run_strips};

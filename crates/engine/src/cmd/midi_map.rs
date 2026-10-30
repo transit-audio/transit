@@ -200,7 +200,11 @@ fn map_macro(e: &mut Engine, id: &str, scope: Scope, target: &ControlTarget, n: 
             }
         }
     }
-    let m = s.track_mut(rack).and_then(|t| t.rack.as_mut()).and_then(|r| r.macros.get_mut(n)).ok_or_else(|| bad(id, "a macro target must name a rack"))?;
+    let m = s
+        .track_mut(rack)
+        .and_then(|t| t.rack.as_mut())
+        .and_then(|r| r.macros.get_mut(n))
+        .ok_or_else(|| bad(id, "a macro target must name a rack"))?;
     m.midi = Some(source);
     if e.learn.as_ref().is_some_and(|l| l.target == *target) {
         e.learn = None;

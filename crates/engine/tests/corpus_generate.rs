@@ -10,8 +10,8 @@ use std::path::{Path, PathBuf};
 use transit_audio_io::{AudioBuffer, FileFormat};
 use transit_engine::Engine;
 use transit_engine::model::{
-    AutoParam, ChannelFormat, Clip, ClipLoop, Control, ControlTarget, Fade, FadeShape, Group, GroupId, Insert, MapMode, Mapping, MarkerKind,
-    MACRO_SLOT, MacroMapping, MidiSource, ParamRange, Rack, RackMember, Route, SendSlot, Session, SourceKind, Strip, TrackKind, Zone, macro_param,
+    AutoParam, ChannelFormat, Clip, ClipLoop, Control, ControlTarget, Fade, FadeShape, Group, GroupId, Insert, MACRO_SLOT, MacroMapping, MapMode,
+    Mapping, MarkerKind, MidiSource, ParamRange, Rack, RackMember, Route, SendSlot, Session, SourceKind, Strip, TrackKind, Zone, macro_param,
 };
 use transit_midi::{Note, Sequence};
 use transit_time::{SampleRate, TICKS_PER_QUARTER};
@@ -156,7 +156,14 @@ fn add_rack(s: &mut Session) {
     rack.macros[1].midi = Some(MidiSource { port: "Controller".into(), channel: Some(0), kind: SourceKind::Cc, number: 21 });
     let mut seq = Sequence::default();
     for (i, pitch) in [48u8, 62, 72].into_iter().enumerate() {
-        seq.notes.push(Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start: i as i64 * TICKS_PER_QUARTER, length: TICKS_PER_QUARTER });
+        seq.notes.push(Note {
+            pitch,
+            velocity: 100,
+            release_velocity: 64,
+            channel: 0,
+            start: i as i64 * TICKS_PER_QUARTER,
+            length: TICKS_PER_QUARTER,
+        });
     }
     let cid = s.new_clip_id();
     let clip = Clip::midi(cid, "Layers", 0, beat * 4, seq);

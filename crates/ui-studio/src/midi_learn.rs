@@ -701,7 +701,9 @@ impl StudioApp {
             }
             // A rack macro (ADR 0034): the macro and every parameter it maps, one merged step.
             Control::Macro(n) => {
-                if let Err(e) = self.engine.execute_merged("rack.macro", &json!({"track": r.track.0, "macro": u16::from(*n) + 1, "value": value}), key) {
+                if let Err(e) =
+                    self.engine.execute_merged("rack.macro", &json!({"track": r.track.0, "macro": u16::from(*n) + 1, "value": value}), key)
+                {
                     self.status = e.to_string();
                 }
                 self.midi_learn.last_move = Some(now);

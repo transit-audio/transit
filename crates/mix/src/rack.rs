@@ -23,7 +23,7 @@
 
 use super::*;
 use crate::events::{EventOutcome, InstrumentEvent, Message};
-use transit_model::{MAX_RACK_MEMBERS, MACRO_SLOT, macro_index};
+use transit_model::{MACRO_SLOT, MAX_RACK_MEMBERS, macro_index};
 
 /// The slot a rack's live input names: not a plug-in slot (inserts are small, the instrument is
 /// [`INSTRUMENT_SLOT`]), so an event bound to it can only mean the rack.

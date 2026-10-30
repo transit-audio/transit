@@ -94,7 +94,17 @@ pub fn card(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, lane: Rect, t: 
     let on = t.mixer.input_monitor;
     let resp = ui.interact(play.intersect(lane), ui.id().with(("rack_play", t.id.0)), Sense::click());
     crate::help::hover(ui, &resp, crate::help::Id::DeviceChainRackPlay);
-    pc.rect_filled(play, theme::RADIUS_SM, if on { TOKENS.monitor } else if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
+    pc.rect_filled(
+        play,
+        theme::RADIUS_SM,
+        if on {
+            TOKENS.monitor
+        } else if resp.hovered() {
+            TOKENS.button_hover
+        } else {
+            TOKENS.button
+        },
+    );
     pc.text(play.center(), Align2::CENTER_CENTER, "Play", FontId::proportional(10.5), if on { theme::text_on(TOKENS.monitor) } else { TOKENS.text });
     if resp.clicked() {
         let _ = app.run("mix.input_monitor", json!({"tracks": [t.id.0], "value": !on}));
@@ -143,7 +153,18 @@ pub fn card(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, lane: Rect, t: 
 }
 
 #[allow(clippy::too_many_arguments)]
-fn macro_knob(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, lane: Rect, rack: TrackId, i: usize, name: &str, value: f32, mapped: bool, cell: Rect) {
+fn macro_knob(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    p: &egui::Painter,
+    lane: Rect,
+    rack: TrackId,
+    i: usize,
+    name: &str,
+    value: f32,
+    mapped: bool,
+    cell: Rect,
+) {
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(cell.intersect(lane)));
     child.spacing_mut().item_spacing = vec2(0.0, 0.0);
     let k = crate::widgets::knob::show(&mut child, egui::Id::new(("rack_macro", rack.0, i)), name, &MACRO_INFO, value);
@@ -209,12 +230,14 @@ fn macro_menu(app: &mut StudioApp, ui: &mut Ui, rack: TrackId, i: usize, control
                     .chain(member.mixer.inserts.iter().enumerate().filter_map(|(k, d)| d.as_ref().map(|d| (u8::try_from(k).unwrap_or(0), d))));
                 for (slot, d) in devices {
                     let Some(info) = crate::automation::device_info(&d.plugin) else { continue };
-                    let title = if slot == AutoParam::INSTRUMENT_SLOT { info.name.to_string() } else { format!("{} ({})", info.name, slot_letter(slot)) };
+                    let title =
+                        if slot == AutoParam::INSTRUMENT_SLOT { info.name.to_string() } else { format!("{} ({})", info.name, slot_letter(slot)) };
                     ui.menu_button(title, |ui| {
                         egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                             for p in info.params {
                                 if ui.button(p.name).clicked() {
-                                    let args = json!({"track": rack.0, "macro": i + 1, "member": member.id.0, "slot": slot_text(slot), "param": p.id});
+                                    let args =
+                                        json!({"track": rack.0, "macro": i + 1, "member": member.id.0, "slot": slot_text(slot), "param": p.id});
                                     let _ = app.run("rack.macro_map", args);
                                     ui.close();
                                 }
@@ -239,7 +262,18 @@ fn slot_text(slot: u8) -> String {
 
 /// One zone bar: the zone filled, the fade ranges as slopes, the four handles; a drag moves one.
 #[allow(clippy::too_many_arguments)]
-fn zone_bar(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, lane: Rect, rack: TrackId, member: TrackId, which: &str, z: Zone, bar: Rect, color: Color32) {
+fn zone_bar(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    p: &egui::Painter,
+    lane: Rect,
+    rack: TrackId,
+    member: TrackId,
+    which: &str,
+    z: Zone,
+    bar: Rect,
+    color: Color32,
+) {
     let z = z.normalized();
     p.rect_filled(bar, theme::RADIUS_SM, TOKENS.bg);
     let (xl, xfl, xfh, xh) = (x_of(bar, z.low), x_of(bar, z.fade_low), x_of(bar, z.fade_high), x_of(bar, z.high));
@@ -256,7 +290,8 @@ fn zone_bar(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, lane: Rect, rac
     let id = ui.id().with(("rack_zone", rack.0, member.0, which));
     let resp = ui.interact(bar.intersect(lane), id, Sense::click_and_drag());
     crate::help::hover(ui, &resp, crate::help::Id::DeviceChainRackZone);
-    let tip = format!("{} {}..{} (fades to {} and from {})", if which == "key" { "Keys" } else { "Velocities" }, z.low, z.high, z.fade_low, z.fade_high);
+    let tip =
+        format!("{} {}..{} (fades to {} and from {})", if which == "key" { "Keys" } else { "Velocities" }, z.low, z.high, z.fade_low, z.fade_high);
     let resp = resp.on_hover_text(tip);
     let handle_id = id.with("handle");
     if resp.drag_started()

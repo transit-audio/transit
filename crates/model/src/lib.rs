@@ -39,6 +39,10 @@ pub use mixer::{
     InsertUid, KeyFrom, KeySource, MAX_EXTERNAL_LATENCY_MS, Mixer, OutputPath, Route, SEND_SLOTS, SendSlot, Speaker, SurroundPan, Tap,
     fader_db_to_pos, fader_pos_to_db,
 };
+pub use rack::{
+    MACRO_SLOT, MAX_RACK_MEMBERS, Macro, MacroMapping, ParamRange, RACK_MACROS, Rack, RackMember, Zone, macro_index, macro_param,
+    shape as macro_shape,
+};
 pub use route_graph::{
     EdgeKind, HardwareConflict, Layering, RouteChange, RouteCycle, RouteEdge, RouteGraph, RouteNode, RouteScratch, describe_cycle,
     disable_hardware_conflicts, hardware_conflict, hardware_problem, new_cycle, new_hardware_problem, would_create_cycle, would_create_cycle_all,
@@ -47,7 +51,6 @@ pub use session::{
     BUNDLE_EXTENSION, BitDepthSetting, EditMode, EditState, FEET_FRAMES_START, MAX_COMMENT_CHARS, MAX_NAME_CHARS, SESSION_EXTENSION, Session,
     SessionError, Tool, UNPLACED_NOTE, ZoomState, ZoomToggle, is_session_file, truncate_chars,
 };
-pub use rack::{MACRO_SLOT, MAX_RACK_MEMBERS, Macro, MacroMapping, ParamRange, RACK_MACROS, Rack, RackMember, Zone, macro_index, macro_param, shape as macro_shape};
 pub use source::{Source, SourceAudio, SourcePool};
 pub use track::{Frozen, Playlist, TRACK_COLORS, Track, TrackHeight, TrackKind};
 

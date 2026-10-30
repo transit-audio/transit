@@ -35,7 +35,10 @@ fn group_into_rack_makes_a_summing_folder_whose_instruments_are_members() {
         assert_eq!((t.folder, &t.mixer.output), (Some(rack), &Route::Bus(bus)), "members sum through the rack's bus");
     }
     let r = rack_of(&e, rack);
-    assert_eq!(r.members.iter().map(|m| (m.track, m.key_zone, m.vel_zone)).collect::<Vec<_>>(), [(a, Zone::FULL, Zone::FULL), (b, Zone::FULL, Zone::FULL)]);
+    assert_eq!(
+        r.members.iter().map(|m| (m.track, m.key_zone, m.vel_zone)).collect::<Vec<_>>(),
+        [(a, Zone::FULL, Zone::FULL), (b, Zone::FULL, Zone::FULL)]
+    );
     assert_eq!(s.rack_members(f).count(), 2);
     assert_eq!(e.undo_history().len(), 3, "the rack is one undo step");
 }
@@ -58,8 +61,11 @@ fn zone_macro_and_member_edits_are_one_undo_step_each() {
     let steps = e.undo_history().len();
     let info = transit_dsp::plugin_info("gain").unwrap();
     let p = info.params.first().unwrap().id;
-    e.execute("rack.macro_map", &json!({"track": rack.0, "macro": 2, "member": b.0, "slot": "a", "param": p, "min": 0.25, "max": 0.75, "curve": 0.5}))
-        .unwrap();
+    e.execute(
+        "rack.macro_map",
+        &json!({"track": rack.0, "macro": 2, "member": b.0, "slot": "a", "param": p, "min": 0.25, "max": 0.75, "curve": 0.5}),
+    )
+    .unwrap();
     e.execute("rack.macro_name", &json!({"track": rack.0, "macro": 2, "name": "Drive"})).unwrap();
     assert_eq!(e.undo_history().len(), steps + 2, "a mapping and a rename: one step each");
     assert_eq!(rack_of(&e, rack).macro_name(1), "Drive");
@@ -88,8 +94,11 @@ fn a_macro_move_writes_the_mapped_parameter_through_its_range_and_curve() {
     e.execute("mix.insert", &json!({"track": a.0, "slot": 0, "plugin": "gain"})).unwrap();
     let info = transit_dsp::plugin_info("gain").unwrap();
     let p = info.params.first().unwrap();
-    e.execute("rack.macro_map", &json!({"track": rack.0, "macro": 1, "member": a.0, "slot": "a", "param": p.id, "min": 0.25, "max": 0.75, "curve": 0.5}))
-        .unwrap();
+    e.execute(
+        "rack.macro_map",
+        &json!({"track": rack.0, "macro": 1, "member": a.0, "slot": "a", "param": p.id, "min": 0.25, "max": 0.75, "curve": 0.5}),
+    )
+    .unwrap();
     let stored = |e: &Engine| e.session().track(a).unwrap().mixer.inserts[0].as_ref().unwrap().params[p.id];
     // Mapping moves the parameter to the macro (at 0): the bottom of the range.
     assert_eq!(stored(&e), p.clamp(p.from_normalized(0.25)));
