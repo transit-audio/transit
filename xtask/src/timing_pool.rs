@@ -16,7 +16,8 @@
 //! 2. A short strip deadline (`from_micros`, `from_millis` below 100) with no held worker.
 //! 3. A `while ..render_workers_settled()` loop (waiting for some strip to go away) in a fn that injects a
 //!    stall (`stall_ns`) and asserts a per-strip outcome without reading `holding` (E49 recurrence 2026-10-30).
-//! 4. A quiet-period wait: a loop that exits on `v.elapsed()` for an `Instant` it resets when a value moves.
+//! 4. A quiet-period wait: a loop that exits on `v.elapsed()` for an `Instant` it resets when a value moves
+//!    (a no-progress guard of 5 s or more that breaks into a failing assertion is allowed, E62).
 //! 5. A coverage assertion (`assert_time_covered`, `hole_samples`, `stuck_notes`) after the last stall or
 //!    hold release with no far deadline (or serial rendering) set between them.
 //!
@@ -328,27 +329,42 @@ fn long_give_up(lines: &[String]) -> bool {
     })
 }
 
-/// Refusal 4 in `f`'s own lines: an `Instant` reassigned in the fn whose `elapsed()` decides a loop exit
-/// against less than 5 s (a longer one is a no-progress guard whose exit fails the test, not a pass).
+/// Refusal 4 in `f`'s own lines: an `Instant` reassigned in the fn (`x = Instant::now()`, or with the
+/// `std::time::` path) whose `elapsed()` decides a loop exit. A `while` condition on it is always a quiet
+/// period: the loop's end is the pass path. An `if` on it that panics or asserts is a failing guard, not a
+/// pass. An `if` that breaks is allowed only as a no-progress guard (E62): a bound of 5 s or more and an
+/// assertion after the exit in the fn, which the guard's exit fails (review still checks that it does).
 fn quiet_period(body: &[String], binds: &[(String, String)]) -> Option<usize> {
     let reset: Vec<String> = body
         .iter()
         .filter_map(|l| {
             let (lhs, rhs) = l.split_once(" = ")?;
             let lhs = lhs.trim();
-            (rhs.trim_start().starts_with("Instant::now()") && !lhs.contains("let ") && lhs.chars().all(|c| c.is_alphanumeric() || c == '_'))
-                .then(|| lhs.to_string())
+            let now = rhs.trim_start().trim_start_matches("std::time::").starts_with("Instant::now()");
+            (now && !lhs.contains("let ") && lhs.chars().all(|c| c.is_alphanumeric() || c == '_')).then(|| lhs.to_string())
         })
         .collect();
     body.iter().enumerate().find_map(|(i, l)| {
         let exit = |v: &String| {
             let read = format!("{v}.elapsed()");
             let Some((_, after)) = l.split_once(&read) else { return false };
-            let loops = l.trim_start().starts_with("while ");
-            let breaks = l.contains("break") || body.get(i + 1).is_some_and(|n| n.contains("break"));
+            if l.trim_start().starts_with("while ") {
+                return true;
+            }
+            let next = body.get(i + 1).map_or("", String::as_str);
+            if !l.contains("if ") {
+                return false;
+            }
+            if [l.as_str(), next].iter().any(|x| x.contains("panic!(") || x.contains("assert")) {
+                return false;
+            }
+            if !(l.contains("break") || next.contains("break")) {
+                return false;
+            }
             let bound = after.trim_start().trim_start_matches(['<', '>', '=']).trim_start();
             let bound = bound.split([' ', '{']).next().unwrap_or("");
-            (loops || (l.contains("if ") && breaks)) && !long(bound, binds)
+            let asserted_after = body[i + 1..].iter().any(|x| x.contains("assert"));
+            !(long(bound, binds) && asserted_after)
         };
         reset.iter().any(exit).then_some(i)
     })

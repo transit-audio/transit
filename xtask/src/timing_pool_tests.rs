@@ -160,6 +160,7 @@ fn t() {
             break;
         }
     }
+    assert_eq!(received, COUNT, \"a no-progress exit fails here\");
 }
 ";
     assert_eq!(refusals(MIX, guard), vec![]);
@@ -198,4 +199,79 @@ fn rule_e_reports_through_the_timing_gate() {
     let hits = super::super::scan(MIX, &pool(""), true);
     assert_eq!(hits.iter().map(|h| (h.line, h.rule)).collect::<Vec<_>>(), vec![(2, 'e')]);
     assert!(hits[0].text.starts_with("refusal 1: fn t()"), "{}", hits[0].text);
+}
+
+/// E62: a long allowance is for a no-progress guard whose exit fails the test, never for a quiet
+/// period whose end is the pass path, and a reset with the `std::time::` path counts too.
+#[test]
+fn refusal_4_allows_only_a_long_guard_that_breaks_into_a_failing_assertion() {
+    let long_while = "fn t() {
+    let mut since = Instant::now();
+    while since.elapsed() < Duration::from_secs(5) {
+        if moved() {
+            since = Instant::now();
+        }
+    }
+    assert!(done());
+}
+";
+    assert_eq!(refusals(MIX, long_while), vec![(3, 4)], "a 5 s quiet period is still a pass condition");
+    let guard = "fn t() {
+    let mut last = Instant::now();
+    loop {
+        if moved() {
+            last = std::time::Instant::now();
+        } else if last.elapsed() >= Duration::from_millis(5_000) {
+            break;
+        }
+    }
+    assert_eq!(count, N);
+}
+";
+    assert_eq!(refusals(MIX, guard), vec![], "a 5000 ms guard with an assertion after it");
+    let no_assert = guard.replace("    assert_eq!(count, N);\n", "");
+    assert_eq!(refusals(MIX, &no_assert), vec![(6, 4)], "a guard whose exit nothing fails");
+    let short = guard.replace("from_millis(5_000)", "from_millis(300)");
+    assert_eq!(refusals(MIX, &short), vec![(6, 4)], "a short guard, std::time path");
+    let panics = short.replace("            break;", "            panic!(\"no progress\");");
+    assert_eq!(refusals(MIX, &panics), vec![], "a guard that fails at once");
+}
+
+/// The marker and evidence combinations the first tests leave out.
+#[test]
+fn the_remaining_markers_and_evidence_forms() {
+    let helper = "fn rig(deadline: Duration) -> Rig {\n    let mut rig = Rig::new(6, 0, 128);\n    rig.mix.start_render_workers(64);\n    rig.mix.set_strip_deadline(Some(deadline));\n    rig\n}\n";
+    let short = |body: &str| {
+        format!(
+            "use common::workers;\n{helper}#[test]\nfn t() {{\n    let mut rig = rig(Duration::from_micros(500));\n{body}\n    rig.block();\n}}\n"
+        )
+    };
+    for tag in ["far-deadline", "held-worker"] {
+        let marked = short("").replace("#[test]", &format!("// timing: {tag} the hold is in another file\n#[test]"));
+        assert_eq!(refusals(MIX, &marked), vec![], "{tag} on refusal 2");
+    }
+    for held in [
+        "    hold_until_away(&mut rig, 2);",
+        "    LATE_HOLD.store(true, Ordering::Release);\n    while !LATE_ENTERED.load(Ordering::Acquire) {}",
+        "    hold.store(true, Ordering::Release);\n    while reader.held_tracks().is_empty() { rig.block(); }",
+    ] {
+        assert_eq!(refusals(MIX, &short(held)), vec![], "{held}");
+    }
+    let closing = test_fn(
+        "    rig.mix.start_render_workers(64);
+    rig.mix.set_strip_deadline(Some(Duration::ZERO));
+    rig.shared[3].stall_ns.store(0, Ordering::Relaxed);
+    rig.block();
+    assert_eq!(rig.shared[3].report().stuck_notes, 0);",
+    );
+    assert_eq!(refusals(MIX, &closing), vec![(7, 5)]);
+    let serial = closing.replace("#[test]", "// timing: serial the closing blocks render serially in a helper\n#[test]");
+    assert_eq!(refusals(MIX, &serial), vec![], "serial on refusal 5");
+    let held = closing.replace("#[test]", "// timing: held-worker not a closing-block reason\n#[test]");
+    assert_eq!(refusals(MIX, &held), vec![(8, 5)], "held-worker does not allow refusal 5");
+    let ph = "crates/plugin-host/tests/t.rs";
+    for make in ["Host::spawn_after(cfg, Duration::from_millis(50))", "slow_host(Duration::from_millis(200), Duration::from_secs(1))"] {
+        let src = test_fn(&format!("    let host = {make};\n    host.submit(|_| ()).wait(Duration::from_millis(500));"));
+        assert_eq!(refusals(ph, &src), vec![(2, 1)], "{make}");
+    }
 }
