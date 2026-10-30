@@ -264,8 +264,9 @@ pub fn window_title_style() -> egui::TextStyle {
 
 /// Every internal window in ui-studio starts here (a source-scan test forbids the plain
 /// `egui::Window` constructor elsewhere): its title is in the window-title text style and its
-/// title bar has a tight vertical margin; the content keeps the theme's window margin (#206).
-pub fn window<'a>(ctx: &egui::Context, title: impl Into<String>) -> egui::Window<'a> {
+/// title bar has a tight vertical margin; the content keeps the theme's window margin (#206). Its
+/// collapse and close controls are Lucide icons ([`crate::title_bar`], #227).
+pub fn window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title_bar::Window<'a> {
     let style = ctx.global_style();
     let side = style.spacing.window_margin.left;
     let title_frame =
@@ -274,7 +275,7 @@ pub fn window<'a>(ctx: &egui::Context, title: impl Into<String>) -> egui::Window
     let text = egui::RichText::new(title);
     let text =
         if style.text_styles.contains_key(&window_title_style()) { text.text_style(window_title_style()) } else { text.size(WINDOW_TITLE_SIZE) };
-    egui::Window::new(text).title_frame(title_frame)
+    crate::title_bar::Window::new(egui::Window::new(text).title_frame(title_frame))
 }
 
 /// Install both themes' visuals and follow `appearance` (System: the OS setting, through egui's

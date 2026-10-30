@@ -62,6 +62,7 @@ mod status;
 pub mod telemetry;
 pub mod tempo_edit;
 pub mod theme;
+pub mod title_bar;
 pub mod transport;
 mod unresponsive;
 pub mod update;

@@ -11,6 +11,8 @@ struct W {
     open: bool,
     pos: egui::Pos2,
     rect: egui::Rect,
+    collapsible: bool,
+    layer: Option<egui::LayerId>,
 }
 
 impl W {
@@ -18,7 +20,7 @@ impl W {
         let ctx = egui::Context::default();
         theme::apply(&ctx, theme::Appearance::Dark);
         ctx.set_pixels_per_point(scale);
-        W { ctx, time: 0.0, open: true, pos: egui::pos2(300.0, 200.0), rect: egui::Rect::NOTHING }
+        W { ctx, time: 0.0, open: true, pos: egui::pos2(300.0, 200.0), rect: egui::Rect::NOTHING, collapsible: false, layer: None }
     }
 
     fn frame(&mut self, events: Vec<egui::Event>, themed: bool) {
@@ -31,17 +33,20 @@ impl W {
         };
         let (open, pos) = (&mut self.open, self.pos);
         let mut rect = self.rect;
+        let (collapsible, mut layer) = (self.collapsible, self.layer);
         let mut out = self.ctx.run_ui(raw, |ui| {
             let ctx = ui.ctx().clone();
-            let w = if themed { theme::window(&ctx, "Callback Telemetry") } else { plain("Callback Telemetry") };
-            if let Some(r) = w.open(open).collapsible(false).resizable(false).default_pos(pos).show(&ctx, |ui| {
+            let w = if themed { theme::window(&ctx, "Callback Telemetry") } else { crate::title_bar::Window::new(plain("Callback Telemetry")) };
+            if let Some(r) = w.open(open).collapsible(collapsible).resizable(false).default_pos(pos).show(&ctx, |ui| {
                 ui.allocate_space(egui::vec2(200.0, BODY_H));
             }) {
                 rect = r.response.rect;
+                layer = Some(r.response.layer_id);
             }
         });
         out.textures_delta.clear();
         self.rect = rect;
+        self.layer = layer;
     }
 
     fn settle(&mut self, themed: bool) {
@@ -160,4 +165,53 @@ fn the_close_button_hit_area_is_at_least_the_close_size_and_the_bar_does_not_gro
         assert!(!hits(theme::WINDOW_CLOSE_SIZE), "scale {scale}: a click well below the button does not close");
         println!("scale {scale}: close hit height >= {} px, bar {bar:.1} px", theme::WINDOW_CLOSE_SIZE - 2.0);
     }
+}
+
+/// #227: the controls are icons from the set at one shared size, and the hit targets still work.
+#[test]
+fn the_collapse_and_close_controls_are_icons_from_the_set() {
+    use crate::icons::Icon;
+    use crate::title_bar::{WINDOW_ICON_SIZE, painted};
+    for scale in [1.0_f32, 1.5] {
+        let mut w = W::new(scale);
+        w.collapsible = true;
+        w.settle(true);
+        let layer = w.layer.expect("shown");
+        let now = painted(&w.ctx, layer);
+        let icons: Vec<Icon> = now.iter().map(|p| p.icon).collect();
+        assert_eq!(icons, [Icon::ChevronDown, Icon::Remove], "scale {scale}: open window");
+        assert!(now.iter().all(|p| p.size == WINDOW_ICON_SIZE), "scale {scale}: one shared size: {now:?}");
+        let (chevron, cross) = (now[0].center, now[1].center);
+        assert!(chevron.x < w.rect.center().x && cross.x > w.rect.center().x, "scale {scale}: left and right ends");
+        assert!(now.iter().all(|p| (p.center.y - w.rect.top()).abs() < 23.0), "scale {scale}: inside the bar: {now:?}");
+
+        // Collapse: a click on the chevron folds the window and the icon turns right.
+        let open_height = w.rect.height();
+        w.pointer(chevron, None);
+        w.pointer(chevron, Some(true));
+        w.pointer(chevron, Some(false));
+        for _ in 0..4 {
+            w.settle(true); // the fold animates
+        }
+        assert!(w.rect.height() < open_height - 20.0, "scale {scale}: the chevron collapses the window");
+        let icons: Vec<Icon> = painted(&w.ctx, w.layer.unwrap()).iter().map(|p| p.icon).collect();
+        assert_eq!(icons, [Icon::ChevronRight, Icon::Remove], "scale {scale}: collapsed window");
+
+        // Close: a click on the X closes.
+        let cross = painted(&w.ctx, w.layer.unwrap())[1].center;
+        w.pointer(cross, None);
+        w.pointer(cross, Some(true));
+        w.pointer(cross, Some(false));
+        w.settle(true);
+        assert!(!w.open, "scale {scale}: the X closes the window");
+    }
+}
+
+/// A non-collapsible window paints only the X.
+#[test]
+fn a_fixed_window_paints_only_the_close_icon() {
+    let mut w = W::new(1.0);
+    w.settle(true);
+    let now = crate::title_bar::painted(&w.ctx, w.layer.unwrap());
+    assert_eq!(now.iter().map(|p| p.icon).collect::<Vec<_>>(), [crate::icons::Icon::Remove]);
 }

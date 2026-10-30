@@ -45,6 +45,7 @@ egui renders text through `ab_glyph` and does no OpenType shaping. That has a di
 - egui sizes a window's title bar from `TextStyle::Heading`, so Heading is set to the same 14 pt. Nothing else in transit uses Heading; if something ever needs a real heading, give it its own named style.
 - The title bar's vertical margin is 2 px (the content margin stays 8 px), which makes the bar about 23 px at 1.0 and 1.5 scale, down from about 35 px.
 - The close button's hit area is egui's `spacing.icon_width`, a square of 18 px (egui's default is 14 px). It is not 22 px because the same value sizes every checkbox and radio button.
+- The collapse and close controls are Lucide `chevron-down`/`chevron-right` and `x` in a 20 pt box (ink about 10 pt, the 14 pt title's cap height), painted by `title_bar::Window` over egui's own shapes with the 18 px hit areas unchanged (#227).
 
 ## Related
 
