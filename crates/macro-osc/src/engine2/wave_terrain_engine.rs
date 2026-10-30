@@ -97,7 +97,12 @@ impl Engine for WaveTerrainEngine<'_> {
 
         // Use the "magic sine" algorithm to generate sin and cos functions for the
         // trajectory coordinates.
-        self.path.render_quadrature(f0 * SCALE, radius, &mut self.temp_buffer_1[..out.len()], &mut self.temp_buffer_2[..out.len()]);
+        self.path.render_quadrature(
+            f0 * SCALE,
+            radius,
+            &mut self.temp_buffer_1[..OVERSAMPLING * out.len()],
+            &mut self.temp_buffer_2[..OVERSAMPLING * out.len()],
+        );
 
         let offset = SimpleParameterInterpolator::new(self.offset, 1.9 * parameters.morph - 1.0, out.len());
         let num_terrains = match self.user_terrain {
