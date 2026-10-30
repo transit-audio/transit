@@ -1,0 +1,41 @@
+--- clouds/resources.cc
++++ clouds/resources.cc
+@@ -1533,2 +1533,4 @@
+    1.000000000e+00,
++  // transit oracle: the last entry repeated, so a read one past lut_window reads it (VENDOR.md).
++   1.000000000e+00,
+ };
+ const float lut_xfade_in[] = {
+@@ -1540,2 +1542,4 @@
+    7.071067812e-01,
++  // transit oracle: the last entry repeated, so a read one past lut_xfade_in reads it (VENDOR.md).
++   7.071067812e-01,
+ };
+ const float lut_xfade_out[] = {
+@@ -1547,2 +1551,4 @@
+    4.329780281e-17,
++  // transit oracle: the last entry repeated, so a read one past lut_xfade_out reads it (VENDOR.md).
++   4.329780281e-17,
+ };
+ const float lut_sine_window_4096[] = {
+@@ -2707,2 +2713,4 @@
+    1.638400000e+04,
++  // transit oracle: the last entry repeated, so a read one past lut_grain_size reads it (VENDOR.md).
++   1.638400000e+04,
+ };
+ const float lut_quantized_pitch[] = {
+--- clouds/dsp/granular_processor.h
++++ clouds/dsp/granular_processor.h
+@@ -201,1 +201,3 @@
+-  int16_t tail_buffer_[2][256];
++  // transit oracle: one more entry per channel, so the freeze crossfade's read of entry 256 (at a
++  // zero gain, on every resume) stays inside the array (VENDOR.md).
++  int16_t tail_buffer_[2][257];
+--- clouds/dsp/correlator.cc
++++ clouds/dsp/correlator.cc
+@@ -59,2 +59,4 @@
+     destination_bits |= destination[i] << offset_bits;
+-    destination_bits |= destination[i + 1] >> (32 - offset_bits);
++    // transit oracle: a shift by 32 (offset_bits == 0) is undefined; pinned to 0, as the module's
++    // Cortex-M4 computes it (VENDOR.md).
++    destination_bits |= offset_bits ? destination[i + 1] >> (32 - offset_bits) : 0;

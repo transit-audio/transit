@@ -95,7 +95,7 @@ No output means every file matches (checked 2026-10-29: 134 of 134; with the res
     `lookup_table_int16_table` and `lookup_table_uint32_table` in `rings/resources.cc`. Nothing
     references them; their definitions are removed.
 - `patches/all/` holds unified diffs `build.rs` applies on every compiler, to copies in the build's
-  output directory, like the MSVC patches. One:
+  output directory, like the MSVC patches. Two:
   - `0001-clouds-window-start-clears-done.patch`: restores `done_ = false;` in `Window::Start`
     (`clouds/dsp/window.h`). Upstream, two commits each removed one of the two duplicate
     `done_ = false;` lines there (`fbb53ba`, a contributor's, and `0e3756f`, the author's, both
@@ -105,6 +105,22 @@ No output means every file matches (checked 2026-10-29: 134 of 134; with the res
     path, so its reference is the upstream file as fetched; the stretch mode's reference is the
     firmware's evident intent, one assignment restored. An upstream finding for the maintainer to
     report.
+  - `0002-clouds-past-the-end-reads-stay-inside.patch`: the granular processor reads one past an
+    array in normal use, from inputs no check can refuse: `lut_window` at a grain's envelope peak
+    (entry 4097 of 4097 whenever the phase lands on exactly 1.0), `lut_xfade_in` and
+    `lut_xfade_out` when the per-sample dry/wet ramp (`ParameterInterpolator`) overshoots 1.0 by
+    rounding (a non-zero fraction then blends in whatever follows the table), and `tail_buffer_`
+    on every resume after a freeze (entry 256, at a zero gain; for the right channel past the
+    array into `parameters_`). The patch repeats the last entry of `lut_window`, `lut_xfade_in`,
+    `lut_xfade_out` and `lut_grain_size` in `clouds/resources.cc` and makes `tail_buffer_`
+    `[2][257]` in `clouds/dsp/granular_processor.h`, so each read stays inside its array and
+    returns exactly what the port's clamp returns (`a + (a - a) * f == a`; the extra tail entry is
+    zero and multiplied by zero). It also pins `Correlator::EvaluateNextCandidate`'s shift by 32
+    (`destination[i + 1] >> (32 - offset_bits)` with `offset_bits == 0`, undefined; x86 scalar
+    code keeps the word, SSE and the module's Cortex-M4 give 0) to 0, the hardware's result, so
+    the stretch mode's reference does not depend on the compiler. The shift is a second upstream
+    finding. No granular-mode output changed (the floor, null, long-run and scenario tests pass
+    unchanged).
 - `cpp/ftz_scope.h` holds the flush-to-zero scope both wrappers open around every call into the
   vendored code (moved out of `cpp/oracle.cc` for #198, unchanged).
 - `cpp/granular_oracle.cc` wraps the granular processor (`clouds::GranularProcessor`, #199) in its
@@ -114,7 +130,9 @@ No output means every file matches (checked 2026-10-29: 134 of 134; with the res
   unwritten. It drives the processor as the firmware's desktop harness (`clouds/test/clouds_test.cc`)
   does: `Prepare` after `Init` and after every block. The memory sizes it accepts must leave room
   for the FX workspace in both channel layouts, the pitch shifter's 8192-byte clear included, and
-  for the longest grain.
+  for the longest grain, and the large block may not exceed 131072 bytes: every layout then
+  records fewer than 131072 samples, below which a grain's 16.16 phase in an `int32_t` cannot
+  overflow (above it the phase wraps negative and the grain reads before the buffer).
 - `cpp/resonator_oracle.cc` wraps the resonator's `rings::Part` (#198). The part and its 32768-word
   reverb memory live in one value-initialized (zeroed) allocation, as the module's globals live in
   zeroed static storage: the part's `Init` leaves some members unwritten (the voice rotation

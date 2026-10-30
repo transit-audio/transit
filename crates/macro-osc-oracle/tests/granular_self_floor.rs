@@ -8,7 +8,7 @@
 #![forbid(unsafe_code)]
 
 use transit_macro_osc_oracle::granular::{
-    FIRMWARE_LARGE_BUFFER, FIRMWARE_SMALL_BUFFER, GRANULAR_BLOCK_SIZE, MAX_DRY_WET, MAX_SIZE, PITCH_RANGE, Parameters, Quality,
+    FIRMWARE_LARGE_BUFFER, FIRMWARE_SMALL_BUFFER, GRANULAR_BLOCK_SIZE, MAX_DRY_WET, MAX_LARGE_BUFFER, MAX_SIZE, PITCH_RANGE, Parameters, Quality,
 };
 use transit_macro_osc_oracle::granular_sweep::{self, center, input_signal, longest_point_frames, points, render_point};
 use transit_macro_osc_oracle::residual::residual_i16;
@@ -145,6 +145,10 @@ fn out_of_range_inputs_are_refused_before_the_cxx() {
     assert_eq!(session.granular(workspace * 2 - 4, workspace, Quality::Stereo).err(), Some(Error::BadParameter));
     assert_eq!(session.granular(FIRMWARE_LARGE_BUFFER + 2, FIRMWARE_SMALL_BUFFER, Quality::Stereo).err(), Some(Error::BadParameter));
     assert!(session.granular(workspace * 2, workspace, Quality::MonoLowFidelity).is_ok());
+    // Above 131072 bytes a grain's 16.16 phase would overflow in the 8-bit mono layout.
+    assert_eq!(session.granular(MAX_LARGE_BUFFER + 4, FIRMWARE_SMALL_BUFFER, Quality::MonoLowFidelity).err(), Some(Error::BadParameter));
+    assert_eq!(session.granular(400_000, FIRMWARE_SMALL_BUFFER, Quality::MonoLowFidelity).err(), Some(Error::BadParameter));
+    assert!(session.granular(MAX_LARGE_BUFFER, FIRMWARE_SMALL_BUFFER, Quality::MonoLowFidelity).is_ok());
 
     let mut processor = session.granular(FIRMWARE_LARGE_BUFFER, FIRMWARE_SMALL_BUFFER, Quality::Stereo).unwrap();
     let input = [[0_i16; 2]; GRANULAR_BLOCK_SIZE];

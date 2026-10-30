@@ -10,8 +10,9 @@
 //! `patches/all/` (on every compiler) and, on MSVC only, `patches/msvc/` (unified diffs against
 //! vendor/, `git apply -p0` format) are applied to copies in `OUT_DIR/overlay`: the overlay comes
 //! first on the include path, so a patched header shadows the vendored one, and a patched source
-//! file is compiled from the overlay. `patches/all/` holds one fix, an upstream merge that lost a
-//! line the stretch mode needs (VENDOR.md); every other file compiles as fetched.
+//! file is compiled from the overlay. `patches/all/` restores a line an upstream merge lost and makes
+//! the granular processor's past-the-end reads and one undefined shift defined (VENDOR.md); every
+//! other file compiles as fetched.
 
 #![forbid(unsafe_code)]
 

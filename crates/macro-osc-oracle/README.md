@@ -22,9 +22,10 @@ reaches a release build.
 - `build.rs`: builds it with the `cc` crate. C++11 (C++14 on MSVC, its minimum), `-DTEST` (the
   desktop branch of the firmware's library, as its own test makefile), `-O2` in every cargo profile,
   no fast-math, no FP contraction (`-ffp-contract=off` on GCC and Clang, `/fp:strict` on MSVC).
-- `patches/msvc/`: three small patches MSVC needs, and `patches/all/`: one upstream line restored for
-  every compiler (the stretch mode's `Window::Start`), applied to copies at build time (VENDOR.md
-  lists them). Every other file builds as fetched.
+- `patches/msvc/`: three small patches MSVC needs, and `patches/all/`, for every compiler: one
+  upstream line restored (the stretch mode's `Window::Start`), and the granular processor's
+  past-the-end reads and its correlator's shift by 32 made defined. They are applied to copies at
+  build time (VENDOR.md lists them); every other file builds as fetched.
 - `cpp/oracle.cc`: a C ABI over one voice (`Patch` and `Modulations` in, int16 out/aux frames, as
   the firmware) and over each engine on its own (float out/aux before the voice's gain, limiter and
   low-pass gate), each on its own 16 KB arena, plus seeding of the random state.

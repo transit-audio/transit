@@ -15,9 +15,17 @@
 //! 4. **Table bounds.** Inputs the C++ indexes tables with are range-checked here before the call:
 //!    the resonator's tonic, note, FM, chord, macros and input samples (`crate::resonator::inputs_in_range`, which
 //!    derives its bounds from the C++), and the granular processor's parameters
-//!    (`crate::granular::parameters_in_range`), so no input from safe Rust can make it read past a
-//!    table. The granular processor's memory sizes and quality are checked by the C++ itself (it
-//!    returns null for sizes that leave no room for its workspace or its longest grain).
+//!    (`crate::granular::parameters_in_range`). The granular processor's memory sizes, quality and
+//!    mode are checked by the C++ itself: it returns null for sizes that leave no room for its
+//!    workspace or its longest grain, or whose recording would reach 131072 samples, where a
+//!    grain's 16.16 phase overflows. The firmware also reads one past an array in normal use, where
+//!    no input check can prevent it: the grain window at its peak (`lut_window`), the dry/wet ramp,
+//!    which can overshoot 1.0 by rounding whatever the parameter (`lut_xfade_in`,
+//!    `lut_xfade_out`), and the freeze crossfade's tail (`tail_buffer_`). The build-time patch
+//!    `patches/all/0002` gives each of those arrays one more entry (the last repeated, or a zero
+//!    the crossfade multiplies by a zero gain), so those reads stay inside them and read what the
+//!    port's clamp reads. With these checks and that patch, no input from safe Rust can make the C++
+//!    read or write outside its memory.
 
 use std::cell::Cell;
 use std::marker::PhantomData;

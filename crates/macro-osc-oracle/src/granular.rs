@@ -29,14 +29,21 @@ pub const FIRMWARE_LARGE_BUFFER: usize = 118_784;
 /// See [`FIRMWARE_LARGE_BUFFER`].
 pub const FIRMWARE_SMALL_BUFFER: usize = 65_536 - 128;
 
+/// The largest large block the oracle accepts, bytes: every layout then records fewer than 131072
+/// samples, below which a grain's 16.16 fixed-point phase in 32 bits cannot overflow.
+pub const MAX_LARGE_BUFFER: usize = 131_072;
+
 /// The largest grain size the oracle accepts: strictly below 1, so `Interpolate(lut_grain_size,
-/// size, 256)` reads at most entries 255 and 256 of 257. (On the module size reaches 1.0 and the
-/// firmware reads one entry past the table, multiplied by a zero fraction; the oracle does not
-/// make that read on purpose.)
+/// size, 256)` reads at most entries 255 and 256 of the upstream table's 257. (On the module size
+/// reaches 1.0 and the firmware reads one entry past the table, multiplied by a zero fraction; the
+/// oracle's build pads the table, but the sweep keeps to the upstream table.)
 pub const MAX_SIZE: f32 = 0.999_999_94;
 
-/// The largest dry/wet the oracle accepts, for the same reason: `Interpolate(lut_xfade_in, dry_wet,
-/// 16)` and `lut_xfade_out` have 17 entries.
+/// The largest dry/wet the oracle accepts. It does not bound the crossfade's table index: that
+/// comes from a per-sample ramp toward the parameter, which can overshoot 1.0 by rounding
+/// (`ParameterInterpolator`), so the oracle's build pads `lut_xfade_in` and `lut_xfade_out`
+/// instead (`patches/all/0002`, VENDOR.md). The top value just keeps the parameter itself below
+/// 1, as for size.
 pub const MAX_DRY_WET: f32 = 0.999_999_94;
 
 /// The pitch the oracle accepts, semitones: the module's CV scaler constrains it to -48 to 48, and
@@ -172,23 +179,24 @@ impl Parameters {
     }
 }
 
-/// Whether the C++ can take these parameters without reading past a table (invariant 4 of the FFI).
+/// Whether the C++ can take these parameters (invariant 4 of the FFI).
 ///
-/// The grain player reads `Interpolate(lut_grain_size, size, 256)` (257 entries), the output stage
-/// `Interpolate(lut_xfade_in, dry_wet, 16)` and `lut_xfade_out` (17 entries each), and an index of
-/// exactly 1.0 would read one entry past each: size and dry/wet stay below 1 ([`MAX_SIZE`],
-/// [`MAX_DRY_WET`]). The pan of a grain, `0.5 + stereo_spread * (random - 0.5)`, indexes `lut_sin`
+/// The grain player reads `Interpolate(lut_grain_size, size, 256)` (257 entries upstream) and size
+/// stays below 1 ([`MAX_SIZE`]); dry/wet stays below 1 too ([`MAX_DRY_WET`]), though the crossfade's
+/// index is a ramp that can overshoot it, which the padded tables absorb. The pan of a grain, `0.5 + stereo_spread * (random - 0.5)`, indexes `lut_sin`
 /// (1281 entries) at most at 513 for a spread within 0 to 1. Pitch reaches `SemitonesToRatio`
 /// within [`PITCH_RANGE`]. Position, density, texture, feedback and reverb index no table but must
 /// stay within 0 to 1, the module's range, which the grain start and the filter cutoffs assume.
 /// Every value must be finite: a NaN reaching a float-to-int cast is undefined behavior in C++.
 ///
-/// One read past a table cannot be refused here because it happens inside the processor in normal
-/// use: a grain's envelope reads `Interpolate(lut_window, gain, 4096)` (4097 entries) at its peak,
-/// and when the envelope phase lands exactly on 1.0 (grains whose width is a power of two, which
-/// sizes 0, 0.25, 0.5 and 0.75 give) it reads entry 4097, multiplied by a zero fraction. The read
-/// stays inside the oracle's own read-only data (the next generated table); a non-finite neighbor
-/// would turn the output into a full-scale click and fail the null tests, never pass them silently.
+/// Three reads one past an array cannot be refused here because they happen inside the processor in
+/// normal use: a grain's envelope reads `Interpolate(lut_window, gain, 4096)` at its peak, and when
+/// the envelope phase lands exactly on 1.0 (grains whose width is a power of two, which sizes 0,
+/// 0.25, 0.5 and 0.75 give) it reads entry 4097 of 4097; the dry/wet ramp's overshoot reads past
+/// `lut_xfade_in` and `lut_xfade_out`; and every resume after a freeze reads entry 256 of the
+/// 256-entry crossfade tail. The oracle's build gives each array one more entry
+/// (`patches/all/0002`): the last repeated for the tables, a zero for the tail (read at a zero
+/// gain), so each read stays inside its array and returns what the port's clamp returns.
 #[must_use]
 pub fn parameters_in_range(parameters: &Parameters) -> bool {
     let unit = |x: f32| (0.0..=1.0).contains(&x);
@@ -265,7 +273,8 @@ impl Session {
     /// [`Error::BadParameter`] when the sizes leave no room for the FX workspace or for the longest
     /// grain (the small block must hold at least [`Session::granular_workspace_size`] bytes and
     /// more than 16392 samples of 16 bits, the large one the small one plus the workspace, both a
-    /// multiple of 4), or when the allocation fails.
+    /// multiple of 4), when the large block exceeds [`MAX_LARGE_BUFFER`] (a grain's 16.16 phase
+    /// would overflow), or when the allocation fails.
     pub fn granular(&self, large: usize, small: usize, quality: Quality) -> Result<GranularOracle<'_>, Error> {
         self.granular_in_mode(large, small, quality, PlaybackMode::Granular)
     }

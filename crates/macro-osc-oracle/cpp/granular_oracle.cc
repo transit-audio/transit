@@ -49,6 +49,14 @@ const size_t kWorkspaceSize =
 // grains longer than half the buffer).
 const size_t kLongestGrain = 16384;
 
+// The largest block the wrapper accepts. A grain's read position is 16.16 fixed point in an
+// int32_t (Grain::OverlapAdd): a transposed grain reads up to a quarter of the recording B ahead,
+// so its phase reaches about B * 16384, which overflows (undefined; it wraps negative and reads
+// before the buffer) once B reaches 131072 samples. Every layout records at most `large` samples
+// less the 8-sample tail (8-bit mono; `small` is smaller), so this one bound keeps B * 16384 below
+// 2^31 in all of them.
+const size_t kMaxLargeBufferSize = 131072;
+
 // Mirrors Parameters (clouds/dsp/parameters.h), the fields the CV scaler writes, with fixed-width
 // fields (bools as uint8_t, after the floats).
 struct OracleGranularParameters {
@@ -88,8 +96,8 @@ bool sizes_supported(size_t large, size_t small) {
   // Stereo: each channel records into `small` bytes and the workspace is `large - small`. Mono:
   // the one channel records into `large` and the workspace is all of `small`. Every layout's
   // recording buffer (at most 2 bytes per sample, less the 8-sample interpolation tail) must hold
-  // more than the longest grain.
-  return small >= kWorkspaceSize && large >= small + kWorkspaceSize &&
+  // more than the longest grain, and none may reach the grain phase's limit (kMaxLargeBufferSize).
+  return small >= kWorkspaceSize && large >= small + kWorkspaceSize && large <= kMaxLargeBufferSize &&
          small / 2 > kLongestGrain + 8 && small % 4 == 0 && large % 4 == 0;
 }
 
