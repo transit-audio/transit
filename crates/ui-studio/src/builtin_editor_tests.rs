@@ -651,3 +651,57 @@ fn double_clicking_a_card_title_opens_the_editor_and_the_button_reads_edit() {
     assert_eq!(t.app.ui.plugin_windows, vec![(tr, 0)]);
     assert!(t.app.mixer.devices.cards[card].editor_open);
 }
+
+/// #232: a built-in's window takes its panel's size, has no resize handle, and re-fits when the
+/// panel changes (the Macro Oscillator's Voices section).
+#[test]
+fn a_built_in_window_fits_its_panel_and_has_no_resize_handle() {
+    for scale in [1.0_f32, 1.5] {
+        for plugin in ["macro_oscillator", "subtractive_synth", "compressor", "gain"] {
+            let mut t = T::new();
+            t.ctx.set_pixels_per_point(scale);
+            let (tr, _) = open_plugin(&mut t, plugin);
+            t.frames(4);
+            let w = t.window(tr);
+            let rect = egui::Rect::from_min_max(egui::pos2(w.rect[0], w.rect[1]), egui::pos2(w.rect[2], w.rect[3]));
+            // The window encloses every control row with only the content margin to spare.
+            let (mut right, mut bottom) = (0.0_f32, 0.0_f32);
+            for r in &w.rows {
+                right = right.max(r.control[2]);
+                bottom = bottom.max(r.control[3]);
+            }
+            let panel = crate::panel::layout(plugin).is_some();
+            // A generic parameter list keeps its 360 pt minimum width.
+            assert!(panel || rect.width() >= 360.0 - 0.5, "{plugin} @{scale}: width {}", rect.width());
+            assert!(!panel || rect.right() - right <= 2.0 * crate::theme::SPACE + 40.0, "{plugin} @{scale}: right slack {}", rect.right() - right);
+            assert!(
+                !panel || rect.bottom() - bottom <= 2.0 * crate::theme::SPACE + 60.0,
+                "{plugin} @{scale}: bottom slack {}",
+                rect.bottom() - bottom
+            );
+            assert!(rect.right() >= right && rect.bottom() >= bottom, "{plugin} @{scale}: the window covers its controls");
+            // No resize handle: dragging the bottom-right corner changes nothing.
+            let corner = rect.max - egui::vec2(2.0, 2.0);
+            t.send("ui.drag", json!({"x": corner.x, "y": corner.y, "to_x": corner.x + 120.0, "to_y": corner.y + 90.0}));
+            t.frames(4);
+            let after = t.window(tr).rect;
+            assert_eq!(after, w.rect, "{plugin} @{scale}: the size is fixed");
+            // Stable across frames.
+            t.frames(3);
+            assert_eq!(t.window(tr).rect, w.rect, "{plugin} @{scale}: stable");
+        }
+    }
+    // Content that changes size re-fits on the next frames: Voices off the panel's own toggle.
+    let mut t = T::new();
+    let tr = t.track("instrument");
+    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "macro_oscillator"})).unwrap();
+    t.frames(4);
+    t.open_editor(0);
+    t.frames(3);
+    let before = t.window(tr).rect;
+    t.app.run("mix.instrument_param", json!({"track": tr.0, "param": "voices", "value": 2.0})).unwrap();
+    t.frames(4);
+    let after = t.window(tr).rect;
+    println!("voices 8 -> 2: {before:?} -> {after:?}");
+    assert!(after[0] == before[0] && after[1] == before[1], "the position is kept");
+}

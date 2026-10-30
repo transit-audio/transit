@@ -13,7 +13,7 @@ use egui::{Align2, Color32, Context, Id, InnerResponse, LayerId, Pos2, Rect, Vec
 
 /// The box of a title-bar icon, points. Lucide inks half of its 24-unit box, so a 20 pt box
 /// inks 10 pt: the cap height of the 14 pt window title (Inter, 0.727 em = 10.2 pt). The box is
-/// wider than the 18 pt close hit area; the overhang is empty padding, and 20 fits the 23 px bar.
+/// wider than the 18 pt close hit area; the overhang is empty padding, and 20 fits the 26 px bar.
 pub const WINDOW_ICON_SIZE: f32 = 20.0;
 
 /// An `egui::Window` whose collapse and close controls are icons. Build it with
@@ -118,8 +118,8 @@ fn swap_controls(ctx: &Context, layer: LayerId, window: Rect, expanded: bool, co
     let style = ctx.global_style();
     let heading = ctx.fonts_mut(|f| f.row_height(&egui::TextStyle::Heading.resolve(&style)));
     let stroke = style.visuals.window_stroke.width;
-    let side = style.spacing.window_margin.left as f32;
-    let bar = window.top() + 2.0 * stroke + 2.0 * theme::WINDOW_TITLE_PAD_Y as f32 + heading + 2.0;
+    let side = theme::WINDOW_TITLE_PAD_X as f32;
+    let bar = window.top() + 2.0 * stroke + (theme::WINDOW_TITLE_PAD_TOP + theme::WINDOW_TITLE_PAD_BOTTOM) as f32 + heading + 2.0;
     let zone = stroke + side + heading + 2.0;
     let left = Rect::from_min_max(window.min, egui::pos2(window.left() + zone, bar));
     let right = Rect::from_min_max(egui::pos2(window.right() - zone, window.top()), egui::pos2(window.right(), bar));

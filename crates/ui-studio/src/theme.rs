@@ -254,8 +254,15 @@ fn spacing(st: &mut egui::Style) {
 pub const WINDOW_TITLE_SIZE: f32 = 14.0;
 /// The close button's hit area, points (egui's default is 14; 22 would also grow every checkbox).
 pub const WINDOW_CLOSE_SIZE: f32 = 18.0;
-/// Vertical margin of a window's title bar (the content margin stays [`SPACE`]).
-pub const WINDOW_TITLE_PAD_Y: i8 = 2;
+/// Margin above a window's title text (the content margin stays [`SPACE`]). The bar is 26 px at
+/// 1.0 scale: the title row (17 px) plus [`WINDOW_TITLE_PAD_TOP`] plus [`WINDOW_TITLE_PAD_BOTTOM`]
+/// plus the 2 px of stroke and slack egui adds (#232; #206 had 2 and 2, a 23 px bar).
+pub const WINDOW_TITLE_PAD_TOP: i8 = 3;
+/// Margin below a window's title text, see [`WINDOW_TITLE_PAD_TOP`].
+pub const WINDOW_TITLE_PAD_BOTTOM: i8 = 4;
+/// Margin between a window's side edge and the chevron or close hit box (was [`SPACE`], 8, in
+/// #206). The title text keeps egui's item spacing (8 px) from the chevron.
+pub const WINDOW_TITLE_PAD_X: i8 = 10;
 
 /// The text style of window titles (registered by [`apply`]).
 pub fn window_title_style() -> egui::TextStyle {
@@ -268,9 +275,12 @@ pub fn window_title_style() -> egui::TextStyle {
 /// collapse and close controls are Lucide icons ([`crate::title_bar`], #227).
 pub fn window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title_bar::Window<'a> {
     let style = ctx.global_style();
-    let side = style.spacing.window_margin.left;
-    let title_frame =
-        egui::Frame::window(&style).inner_margin(egui::Margin { left: side, right: side, top: WINDOW_TITLE_PAD_Y, bottom: WINDOW_TITLE_PAD_Y });
+    let title_frame = egui::Frame::window(&style).inner_margin(egui::Margin {
+        left: WINDOW_TITLE_PAD_X,
+        right: WINDOW_TITLE_PAD_X,
+        top: WINDOW_TITLE_PAD_TOP,
+        bottom: WINDOW_TITLE_PAD_BOTTOM,
+    });
     // A context the theme was never applied to (a fresh one in a test) has no such style.
     let text = egui::RichText::new(title);
     let text =

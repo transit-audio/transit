@@ -83,8 +83,8 @@ fn the_title_bar_is_short_at_one_and_one_and_a_half_scale() {
         after.settle(true);
         let (old, new) = (bar_height(before.rect), bar_height(after.rect));
         println!("scale {scale}: title bar {old:.1} px before, {new:.1} px after");
-        assert!(new <= 24.5, "scale {scale}: the title bar is {new} px (bound 24.5)");
-        assert!(new + 10.0 <= old, "scale {scale}: {new} is much shorter than the heading-sized {old}");
+        assert!(new <= 27.0, "scale {scale}: the title bar is {new} px (bound 27.0)");
+        assert!(new + 8.0 <= old, "scale {scale}: {new} is much shorter than the heading-sized {old}");
         assert!((after.rect.width() - before.rect.width()).abs() < 1.0, "the content margin is unchanged: {:?} vs {:?}", after.rect, before.rect);
     }
 }
@@ -105,7 +105,7 @@ fn the_title_bar_still_drags_and_closes_the_window() {
         w.pointer(grab + egui::vec2(60.0, 40.0), Some(false));
         assert!(w.rect.min.x >= start.x + 40.0 && w.rect.min.y >= start.y + 25.0, "scale {scale}: dragged from {start:?} to {:?}", w.rect.min);
         // Close by the button at the right end of the bar.
-        let close = egui::pos2(w.rect.right() - theme::SPACE - 6.0, w.rect.top() + bar / 2.0);
+        let close = egui::pos2(w.rect.right() - theme::WINDOW_TITLE_PAD_X as f32 - 6.0, w.rect.top() + bar / 2.0);
         w.pointer(close, None);
         w.pointer(close, Some(true));
         w.pointer(close, Some(false));
@@ -145,11 +145,11 @@ fn the_close_button_hit_area_is_at_least_the_close_size_and_the_bar_does_not_gro
         let mut probe = W::new(scale);
         probe.settle(true);
         let bar = bar_height(probe.rect);
-        assert!(bar <= 24.5, "scale {scale}: the bar is still {bar} px");
+        assert!(bar <= 27.0, "scale {scale}: the bar is still {bar} px");
         let hits = |dy: f32| {
             let mut w = W::new(scale);
             w.settle(true);
-            let at = egui::pos2(w.rect.right() - theme::SPACE - 6.0, w.rect.top() + bar / 2.0 + dy);
+            let at = egui::pos2(w.rect.right() - theme::WINDOW_TITLE_PAD_X as f32 - 6.0, w.rect.top() + bar / 2.0 + dy);
             w.pointer(at, None);
             w.pointer(at, Some(true));
             w.pointer(at, Some(false));
@@ -183,7 +183,7 @@ fn the_collapse_and_close_controls_are_icons_from_the_set() {
         assert!(now.iter().all(|p| p.size == WINDOW_ICON_SIZE), "scale {scale}: one shared size: {now:?}");
         let (chevron, cross) = (now[0].center, now[1].center);
         assert!(chevron.x < w.rect.center().x && cross.x > w.rect.center().x, "scale {scale}: left and right ends");
-        assert!(now.iter().all(|p| (p.center.y - w.rect.top()).abs() < 23.0), "scale {scale}: inside the bar: {now:?}");
+        assert!(now.iter().all(|p| (p.center.y - w.rect.top()).abs() < 26.0), "scale {scale}: inside the bar: {now:?}");
 
         // Collapse: a click on the chevron folds the window and the icon turns right.
         let open_height = w.rect.height();
@@ -214,4 +214,22 @@ fn a_fixed_window_paints_only_the_close_icon() {
     w.settle(true);
     let now = crate::title_bar::painted(&w.ctx, w.layer.unwrap());
     assert_eq!(now.iter().map(|p| p.icon).collect::<Vec<_>>(), [crate::icons::Icon::Remove]);
+}
+
+/// #232: the bar is 26 px at 1.0 scale, and the icons sit the padding constant off the edges.
+#[test]
+fn the_title_bar_has_the_padding_constants() {
+    let mut w = W::new(1.0);
+    w.collapsible = true;
+    w.settle(true);
+    let bar = bar_height(w.rect);
+    assert!((bar - 26.0).abs() < 0.5, "the bar is {bar} px (26 at 1.0 scale)");
+    let now = crate::title_bar::painted(&w.ctx, w.layer.unwrap());
+    // The hit box is `WINDOW_CLOSE_SIZE` wide, centered on the icon: its edge is the padding in.
+    let half = theme::WINDOW_CLOSE_SIZE / 2.0;
+    let (left, right) = (now[0].center.x - half - w.rect.left(), w.rect.right() - (now[1].center.x + half));
+    for (side, got) in [("left", left), ("right", right)] {
+        assert!((got - theme::WINDOW_TITLE_PAD_X as f32).abs() <= 1.5, "{side} padding {got} px (constant {})", theme::WINDOW_TITLE_PAD_X);
+    }
+    assert_eq!(theme::WINDOW_CLOSE_SIZE, 18.0, "the close hit area is unchanged");
 }

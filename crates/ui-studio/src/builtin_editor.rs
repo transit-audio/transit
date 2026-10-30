@@ -180,7 +180,11 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
         let shown = crate::theme::window(ctx, title)
             .id(egui::Id::new(("builtin_editor", ins.uid.get())))
             .open(&mut open)
-            .default_width(if crate::panel::layout(&ins.plugin).is_some() { 0.0 } else { 360.0 })
+            // A built-in's panel has a fixed layout: the window takes its content size, offers no
+            // resize handle, and re-fits whenever the content changes (#232). Plug-in windows are
+            // not built here.
+            .resizable(false)
+            .min_size(egui::vec2(if crate::panel::layout(&ins.plugin).is_some() { 0.0 } else { 360.0 }, 0.0))
             .default_pos(egui::pos2(ctx.content_rect().width() - 400.0 - 24.0 * n as f32, 90.0 + 24.0 * n as f32))
             .show(ctx, |ui| body(app, ui, key, &ins, info, instrument, &mut layout));
         if let Some(w) = shown {
