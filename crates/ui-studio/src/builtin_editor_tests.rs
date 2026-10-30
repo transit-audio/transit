@@ -336,6 +336,39 @@ fn the_macro_oscillator_panel_credits_the_original_and_drives_its_controls() {
     assert!(t.param(tr, slot, "timbre").unwrap() > 50.0, "dragging Timbre up raises it");
 }
 
+/// The voices, the note-to-macro grid (a row per source, a column per target) and the voice
+/// lights (#196), which read the instrument's tap.
+#[test]
+fn the_macro_oscillator_panel_shows_voices_the_mapping_grid_and_voice_lights() {
+    let mut t = T::new();
+    let tr = t.track("instrument");
+    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "macro_oscillator"})).unwrap();
+    t.frames(4);
+    let hub = std::sync::Arc::new(transit_mix::ScopeHub::default());
+    let tap = std::sync::Arc::new(transit_mix::ScopeTap::new());
+    hub.register(tr, transit_mix::INSTRUMENT_UID, &tap);
+    t.app.builtin_editor.hub = Some(hub);
+    t.open_editor(0);
+    assert!(tap.enabled(), "the open panel switches the instrument's tap on");
+    assert_eq!(t.row(tr, "voices").value, "8");
+    assert_eq!(t.window(tr).lights, "--------");
+    let grid = |id: &str| t.row(tr, id).control;
+    for (vel, key) in [("velocity_curve", "key_curve"), ("velocity_harmonics", "key_harmonics"), ("velocity_decay", "key_decay")] {
+        let (a, b) = (grid(vel), grid(key));
+        assert!((a[0] - b[0]).abs() < 1.0 && b[1] > a[3] - 1.0, "{key} sits under {vel}: {a:?} {b:?}");
+    }
+    let (h, d) = (grid("velocity_harmonics"), grid("velocity_decay"));
+    assert!(h[1] == d[1] && d[0] > h[2], "the targets are columns of one row");
+    assert_eq!(t.row(tr, "velocity_curve").value, "Linear");
+    assert_eq!(t.row(tr, "key_timbre").value, "0%");
+    t.app.run("mix.instrument_param", json!({"track": tr.0, "param": "voices", "value": 2.0})).unwrap();
+    tap.push_voices(0b011 | 0b001 << 16);
+    t.frames(3);
+    assert_eq!(t.window(tr).lights, "HR-", "three voices: one held, one releasing, one free");
+    let r = t.window(tr).lights_rect;
+    assert!(r[2] > r[0] && r[3] > r[1]);
+}
+
 #[test]
 fn turning_a_knob_is_one_undo_step_and_double_click_resets() {
     let mut t = T::new();

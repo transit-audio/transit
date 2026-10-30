@@ -59,6 +59,36 @@ name = "Mod Wheel"
 text = "Where the mod wheel goes: it adds up to 100% to Timbre, Harmonics or Morph, or Off ignores it."
 
 [[entry]]
+id = "macro_osc.voices"
+name = "Voices"
+text = "How many notes play at once, 1 to 16 (8 by default). A new note takes a free voice, else the quietest voice whose release is still fading, else the oldest held note: the newest note always sounds. At 1 the instrument is mono: last note priority and legato, a note played while another is held changes the pitch without restarting the gate."
+
+[[entry]]
+id = "macro_osc.voice_lights"
+name = "Voice Lights"
+text = "One light per voice: lit while a key holds it, half lit while its release fades, dark while it is free. A voice stays busy until its release has died away."
+
+[[entry]]
+id = "macro_osc.velocity_curve"
+name = "Velocity Curve"
+text = "How velocity moves the Harmonics, Timbre, Morph and Decay depths beside it: Linear, Exponential (soft notes change little, hard notes a lot) or S-curve (little change at both ends). Velocity always sets each note's level."
+
+[[entry]]
+id = "macro_osc.velocity_depth"
+name = "Velocity Depth"
+text = "How far velocity moves this control, from -100% to +100% of its travel: the hardest note adds the whole depth to the knob, the softest adds nothing. A negative depth makes harder notes lower it. 0% by default."
+
+[[entry]]
+id = "macro_osc.key_curve"
+name = "Key Curve"
+text = "How the key moves the Harmonics, Timbre, Morph and Decay depths beside it: Linear, Exponential (little change near middle C, more toward the ends of the keyboard) or S-curve."
+
+[[entry]]
+id = "macro_osc.key_depth"
+name = "Key Depth"
+text = "Key tracking: how far the key moves this control. Middle C (C3, note 60) leaves the knob as set; five octaves up adds the whole depth and five octaves down takes it away, from -100% to +100% of the travel. The Key Tracked Timbre preset brightens higher notes this way. 0% by default."
+
+[[entry]]
 id = "macro_osc.credits"
 name = "Credits"
 text = "The Macro Oscillator is a port of Émilie Gillet's open-source macro oscillator firmware (MIT license), by way of Oliver Rockstedt's Rust port (MIT). It ports the digital synthesis, not the hardware's analog stages; the notices are in Help > About transit."

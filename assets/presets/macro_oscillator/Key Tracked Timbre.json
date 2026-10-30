@@ -1,0 +1,9 @@
+{
+  "plugin": "macro_oscillator",
+  "version": 1,
+  "params": {
+    "model": 8.0,
+    "timbre": 40.0,
+    "key_timbre": 50.0
+  }
+}

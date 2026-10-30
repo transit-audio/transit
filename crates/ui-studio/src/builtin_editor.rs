@@ -61,6 +61,10 @@ pub struct EditorLayout {
     pub rows: Vec<RowLayout>,
     /// The credit line of a ported instrument's panel (the Macro Oscillator), empty elsewhere.
     pub credit: String,
+    /// The voice activity lights of an instrument with voices, one character per voice: `H` held,
+    /// `R` releasing, `-` free (empty elsewhere), and their rect.
+    pub lights: String,
+    pub lights_rect: [f32; 4],
 }
 
 #[derive(Debug, Default)]
@@ -169,6 +173,8 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             groups: Vec::new(),
             rows: Vec::new(),
             credit: String::new(),
+            lights: String::new(),
+            lights_rect: [0.0; 4],
         };
         let mut open = true;
         let shown = crate::theme::window(ctx, title)

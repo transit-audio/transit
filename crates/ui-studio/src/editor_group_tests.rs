@@ -240,3 +240,37 @@ fn the_control_channel_can_minimize_and_focus_the_main_window() {
     assert_eq!((t.windows()["main"].clone(), t.state()), (json!("active"), json!("shown")));
     assert_eq!(t.posted()[t.posted().len() - 2..], ["unpark", "front"]);
 }
+
+/// The Macro Oscillator's editor (#196) is a built-in's: an egui window inside the main window, so
+/// it minimizes, restores and comes to the front with it by construction (ADR 0030's outcome, with
+/// no request to post). `ui.inspect` lists it as `builtin` through every transition; selecting it
+/// again never opens a second window; a hosted editor beside it still follows the requests.
+#[test]
+fn the_macro_oscillator_editor_stays_with_the_main_window_and_is_never_duplicated() {
+    let mut t = T::new();
+    let r = t.app.run("track.new", json!({"kind": "instrument"})).unwrap();
+    let tr = TrackId(r["tracks"][0].as_u64().unwrap());
+    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "macro_oscillator"})).unwrap();
+    let key = (tr, transit_mix::INSTRUMENT_SLOT);
+    t.control("ui.set", json!({"plugin_windows": [[key.0, key.1], [KEY.0, KEY.1]]}));
+    t.frames(2);
+    let state = |t: &T| t.windows()["editors"].as_array().unwrap().iter().find(|e| e["track"] == json!(tr.0)).map(|e| e["state"].clone()).unwrap();
+    let drawn = |t: &T| t.app.builtin_editor.windows.iter().filter(|w| w.key == key).count();
+    assert_eq!(state(&t), json!("builtin"));
+    assert_eq!(drawn(&t), 1, "drawn in the main window");
+    assert_eq!(t.state(), json!("shown"), "the hosted editor beside it");
+    assert_eq!(t.main(false, true), ["park"], "minimize: the hosted editor parks");
+    assert_eq!((state(&t), t.state()), (json!("builtin"), json!("parked")));
+    assert!(t.app.ui.plugin_windows.contains(&key), "still open while minimized");
+    assert_eq!(t.main(true, false), ["unpark", "front"]);
+    assert_eq!(drawn(&t), 1, "back with the main window");
+    for _ in 0..2 {
+        t.app.show_editor(key);
+        t.frames(2);
+    }
+    assert_eq!(t.app.ui.plugin_windows.iter().filter(|k| **k == key).count(), 1, "selected again: no second window");
+    assert_eq!(drawn(&t), 1);
+    let w = t.app.builtin_editor.windows.iter().find(|w| w.key == key).cloned().unwrap();
+    assert!(w.rect[0] >= 0.0 && w.rect[2] <= 1400.0 && w.rect[1] >= 0.0, "inside the main window: {:?}", w.rect);
+    assert_eq!(w.lights, "--------", "eight voices, all free");
+}

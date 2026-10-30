@@ -23,6 +23,8 @@ pub enum Item {
     Menu(&'static str, &'static str),
     /// The sidechain key dropdown (compressor and gate).
     Key,
+    /// The voice activity lights of an instrument with voices (the Macro Oscillator).
+    Lights,
 }
 
 /// A titled group; `cols` items per line.
@@ -35,7 +37,7 @@ pub struct Section {
 
 pub type Row = &'static [Section];
 
-use Item::{Choice, Key, Knob, Menu, Toggle};
+use Item::{Choice, Key, Knob, Lights, Menu, Toggle};
 
 const fn sec(title: &'static str, cols: usize, items: &'static [Item]) -> Section {
     Section { title, cols, items }
@@ -111,7 +113,7 @@ static PLATE: [Row; 1] = [&[
 /// The Macro Oscillator's id (ADR 0033, #195).
 const MACRO_OSC: &str = "macro_oscillator";
 
-static MACRO: [Row; 2] = [
+static MACRO: [Row; 3] = [
     &[
         sec("Model", 1, &[Menu("model", "Model")]),
         sec("Tone", 3, &[Knob("harmonics", "Harmonics"), Knob("timbre", "Timbre"), Knob("morph", "Morph")]),
@@ -121,6 +123,26 @@ static MACRO: [Row; 2] = [
         sec("Pitch", 2, &[Knob("tune", "Tune"), Knob("bend_range", "Bend")]),
         sec("Control", 1, &[Choice("mod_wheel", "Mod Wheel")]),
         sec("Output", 2, &[Knob("aux_mix", "Aux Mix"), Knob("level", "Level")]),
+    ],
+    &[
+        sec("Voices", 1, &[Choice("voices", "Voices"), Lights]),
+        // The mapping grid: a row per source, a column per target.
+        sec(
+            "Note to Macro",
+            5,
+            &[
+                Choice("velocity_curve", "Velocity"),
+                Knob("velocity_harmonics", "Harmonics"),
+                Knob("velocity_timbre", "Timbre"),
+                Knob("velocity_morph", "Morph"),
+                Knob("velocity_decay", "Decay"),
+                Choice("key_curve", "Key"),
+                Knob("key_harmonics", "Harmonics"),
+                Knob("key_timbre", "Timbre"),
+                Knob("key_morph", "Morph"),
+                Knob("key_decay", "Decay"),
+            ],
+        ),
     ],
 ];
 
@@ -142,6 +164,11 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
         "tune" => Id::MacroOscTune,
         "bend_range" => Id::MacroOscBendRange,
         "mod_wheel" => Id::MacroOscModWheel,
+        "voices" => Id::MacroOscVoices,
+        "velocity_curve" => Id::MacroOscVelocityCurve,
+        "velocity_harmonics" | "velocity_timbre" | "velocity_morph" | "velocity_decay" => Id::MacroOscVelocityDepth,
+        "key_curve" => Id::MacroOscKeyCurve,
+        "key_harmonics" | "key_timbre" | "key_morph" | "key_decay" => Id::MacroOscKeyDepth,
         _ => return None,
     })
 }
@@ -199,6 +226,7 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     let (id, label) = match item {
         Knob(id, l) | Toggle(id, l) | Choice(id, l) | Menu(id, l) => (id, l),
         Key => return key_dropdown(app, ui, key),
+        Lights => return lights(app, ui, key, ins, lay),
     };
     let Some(p) = info.param(id) else { return };
     let v = p.clamp(app.followed_param(key, id).or_else(|| ins.params.get(id).copied()).unwrap_or(p.default));
@@ -251,6 +279,48 @@ fn choice(ui: &mut Ui, ins: &Insert, p: &ParamInfo, label: &str, v: f32, width: 
     (r, (idx as f32 != v).then_some(idx as f32), p.format(idx as f32))
 }
 
+/// Diameter of one voice light and the lights per line.
+const LIGHT: f32 = 9.0;
+const LIGHTS_PER_LINE: usize = 8;
+
+/// The voice activity lights: one per voice of the instrument's `voices` count, filled while a key
+/// holds the voice, half-lit while its release tail plays, an outline while it is free. Read from
+/// the instrument's scope tap (the render stores `Plugin::voice_activity` while the panel is open).
+fn lights(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, lay: &mut EditorLayout) {
+    let count = ins.params.get("voices").map_or(8, |v| v.round().clamp(0.0, 15.0) as usize + 1);
+    let uid = crate::scope_strip::hub_uid(key, ins);
+    let activity = app.scope_hub().map_or(0, |h| h.voice_activity(key.0, uid));
+    let lines = count.div_ceil(LIGHTS_PER_LINE);
+    let cols = count.min(LIGHTS_PER_LINE);
+    let gap = 4.0;
+    let size = egui::vec2(cols as f32 * (LIGHT + gap), lines as f32 * (LIGHT + gap));
+    let (rect, resp) = ui.allocate_exact_size(size, egui::Sense::hover());
+    crate::help::hover(ui, &resp, crate::help::Id::MacroOscVoiceLights);
+    let mut text = String::with_capacity(count);
+    for i in 0..count {
+        let (on, held) = (activity >> i & 1 == 1, activity >> (16 + i) & 1 == 1);
+        let c = rect.min
+            + egui::vec2((i % LIGHTS_PER_LINE) as f32 * (LIGHT + gap) + LIGHT / 2.0, (i / LIGHTS_PER_LINE) as f32 * (LIGHT + gap) + LIGHT / 2.0);
+        let p = ui.painter();
+        if held {
+            p.circle_filled(c, LIGHT / 2.0, TOKENS.accent);
+        } else if on {
+            p.circle_filled(c, LIGHT / 2.0, TOKENS.accent.gamma_multiply(0.45));
+        } else {
+            p.circle_stroke(c, LIGHT / 2.0 - 0.5, egui::Stroke::new(1.0, TOKENS.text_dim));
+        }
+        text.push(if held {
+            'H'
+        } else if on {
+            'R'
+        } else {
+            '-'
+        });
+    }
+    lay.lights = text;
+    lay.lights_rect = [rect.min.x, rect.min.y, rect.max.x, rect.max.y];
+}
+
 /// The sidechain key: None, or another track (or a bus), at the tap the device card last used.
 fn key_dropdown(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize)) {
     let (t, slot) = key;
@@ -291,7 +361,7 @@ mod tests {
     fn item_id(i: Item) -> Option<&'static str> {
         match i {
             Knob(id, _) | Toggle(id, _) | Choice(id, _) | Menu(id, _) => Some(id),
-            Key => None,
+            Key | Lights => None,
         }
     }
 

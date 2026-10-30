@@ -90,6 +90,12 @@ ids! {
     MacroOscTune => "macro_osc.tune",
     MacroOscBendRange => "macro_osc.bend_range",
     MacroOscModWheel => "macro_osc.mod_wheel",
+    MacroOscVoices => "macro_osc.voices",
+    MacroOscVoiceLights => "macro_osc.voice_lights",
+    MacroOscVelocityCurve => "macro_osc.velocity_curve",
+    MacroOscVelocityDepth => "macro_osc.velocity_depth",
+    MacroOscKeyCurve => "macro_osc.key_curve",
+    MacroOscKeyDepth => "macro_osc.key_depth",
     MacroOscCredits => "macro_osc.credits",
     // help\midi-mappings.toml
     MidiMappingsWindow => "midi_mappings.window",

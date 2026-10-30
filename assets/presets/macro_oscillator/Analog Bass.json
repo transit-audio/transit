@@ -8,6 +8,7 @@
     "morph": 60.0,
     "decay": 35.0,
     "lpg_color": 25.0,
-    "tune": -12.0
+    "tune": -12.0,
+    "voices": 0.0
   }
 }
