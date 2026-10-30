@@ -42,6 +42,9 @@ use crate::utils::units::semitones_to_ratio;
 const MAX_TRIGGER_DELAY: usize = 8;
 /// The trigger is read 5 blocks late (`kTriggerDelay`), about 1 ms at 48 kHz in 12-frame blocks.
 const TRIGGER_DELAY: f32 = 5.0;
+/// The block the voice's envelopes are timed for (`kBlockSize`): every render call advances them
+/// by one 12-frame block, whatever its frame count, as in the firmware.
+const CONTROL_BLOCK_SIZE: f32 = 12.0;
 pub const NUM_ENGINES: usize = 24;
 
 /// One output frame, as the firmware's DAC receives it (`Voice::Frame`).
@@ -266,14 +269,16 @@ pub struct Voice<'a> {
     aux_buffer: [f32; MAX_BLOCK_SIZE],
 
     sample_rate_hz: f32,
-    inv_sr: f32,
+    /// `(200 * kBlockSize) / kSampleRate`, the short decay before the knob's scaling.
+    short_decay_scale: f32,
+    /// `(20 * kBlockSize) / kSampleRate`, the low-pass gate's decay tail before the knob's scaling.
+    decay_tail_scale: f32,
     a0_normalized: f32,
 }
 
 impl Voice<'_> {
     pub fn new(sample_rate_hz: f32) -> Self {
         let block_size = MAX_BLOCK_SIZE;
-        let inv_sr = 1.0 / sample_rate_hz;
         // The firmware computes pitch against its corrected sample rate (`a0` in `dsp/dsp.h`).
         let a0_normalized = crate::A0 * (crate::REF_SAMPLE_RATE / sample_rate_hz);
 
@@ -326,7 +331,8 @@ impl Voice<'_> {
             aux_buffer: [0.0; MAX_BLOCK_SIZE],
 
             sample_rate_hz,
-            inv_sr,
+            short_decay_scale: (200.0 * CONTROL_BLOCK_SIZE) / sample_rate_hz,
+            decay_tail_scale: (20.0 * CONTROL_BLOCK_SIZE) / sample_rate_hz,
             a0_normalized,
         }
     }
@@ -433,7 +439,7 @@ impl Voice<'_> {
             p.trigger = TriggerState::UNPATCHED;
         }
 
-        let short_decay = (200.0 * out.len() as f32) * self.inv_sr * semitones_to_ratio(-96.0 * patch.decay);
+        let short_decay = self.short_decay_scale * semitones_to_ratio(-96.0 * patch.decay);
 
         self.decay_envelope.process(short_decay * 2.0);
 
@@ -523,12 +529,12 @@ impl Voice<'_> {
         // Compute LPG parameters.
         if !lpg_bypass {
             let hf = patch.lpg_colour;
-            let decay_tail = (20.0 * out.len() as f32) * self.inv_sr * semitones_to_ratio(-72.0 * patch.decay + 12.0 * hf) - short_decay;
+            let decay_tail = self.decay_tail_scale * semitones_to_ratio(-72.0 * patch.decay + 12.0 * hf) - short_decay;
 
             if modulations.level_patched {
                 self.lpg_envelope.process_lp(compressed_level, short_decay, decay_tail, hf);
             } else {
-                let attack = note_to_frequency(p.note, self.a0_normalized) * out.len() as f32 * 2.0;
+                let attack = note_to_frequency(p.note, self.a0_normalized) * CONTROL_BLOCK_SIZE * 2.0;
                 self.lpg_envelope.process_ping(attack, short_decay, decay_tail, hf);
             }
         } else {
