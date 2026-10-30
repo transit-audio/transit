@@ -62,15 +62,17 @@ specify:
   module's globals in static storage, and survive re-initialization: the freeze low-pass, the grain
   player's rate phasor (not reset by its `Init`, so it carries across a quality change), the
   reverb's low-pass states, every field of a grain that never started, the crossfade tail.
-- **Out-of-bounds reads**: three reads one past a table happen in the firmware, each multiplied by
-  a zero fraction: the grain window at its peak (a grain whose envelope phase lands exactly on
-  1.0, which every power-of-two grain width gives, reads entry 4097 of `lut_window`'s 4097), and,
-  at the module's top values, size 1.0 (`lut_grain_size`) and dry/wet 1.0 (`lut_xfade_in` and
-  `lut_xfade_out`). The crossfade from the freeze tail also reads one entry past its 256-sample
-  tail at a zero gain. The port reads the last entry instead, which gives the firmware's value
-  whenever its neighboring memory holds a finite number. The oracle refuses size and dry/wet at
-  1.0 (it stops one `f32` step below), and the window read it cannot avoid stays inside its own
-  read-only data, where a non-finite neighbor would show as a null failure.
+- **Out-of-bounds reads**: the firmware reads one past an array in normal use: the grain window
+  at its peak (a grain whose envelope phase lands exactly on 1.0, which every power-of-two grain
+  width gives, reads entry 4097 of `lut_window`'s 4097, at a zero fraction); the dry/wet crossfade
+  tables (`lut_xfade_in`, `lut_xfade_out`, 17 entries) whenever the per-sample dry/wet ramp
+  overshoots 1.0 by rounding, which happens below a parameter of 1.0 too, and then at a small
+  non-zero fraction; size 1.0 at the module's top (`lut_grain_size`); and the freeze crossfade's
+  256-sample tail at entry 256, at a zero gain, on every resume. The port reads the last entry
+  instead (the tail's read is discarded). The oracle's build pads each of those arrays with one
+  entry, the last repeated or a zero (`patches/all/0002` in the oracle crate), so the C++ reads
+  exactly what the port reads and the comparison is defined; the module itself reads whatever
+  follows each array.
 - **Odd blocks at low fidelity**: the firmware's 2:1 converters take frames in pairs and would run
   past an odd block; the port renders the even part and leaves the last frame silent (the module
   always renders 32 frames; the oracle refuses odd low-fidelity blocks).

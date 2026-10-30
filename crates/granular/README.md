@@ -91,4 +91,5 @@ the DSP. Unlike the resonator, no test here depends on it: the firmware's output
 long run and the scenarios pass with the flush turned off as well (checked 2026-10-30), because a
 subnormal difference never moves an output sample by one LSB. The flush is kept so the port's
 internal state stays the oracle's to the bit, which a float output (a deviation the effect may
-choose) would expose.
+choose) would expose. So the flush is unverified by any oracle comparison today; a float output
+path must bring a test that fails with the flush off (as the resonator's silences do).

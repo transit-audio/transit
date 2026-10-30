@@ -30,9 +30,10 @@ fn index(i: i32, len: usize) -> usize {
 /// `Interpolate(table, index, size)`: linear interpolation at `index * size`.
 ///
 /// At an index of exactly 1.0 the firmware reads one entry past a table of `size + 1` entries and
-/// multiplies it by a zero fraction (the grain window at its peak, and size or dry/wet at 1.0 on
-/// the module); the port reads the last entry instead, which gives the same value whenever the
-/// firmware's neighboring memory holds a finite float.
+/// multiplies it by a zero fraction (the grain window at its peak, size 1.0 on the module), and
+/// the dry/wet ramp's rounding overshoot past 1.0 reads it at a small fraction; the port reads the
+/// last entry instead, which is what the oracle reads too (its build repeats each table's last
+/// entry).
 #[inline(always)]
 #[must_use]
 pub fn interpolate(table: &[f32], index_: F, size: f32) -> F {

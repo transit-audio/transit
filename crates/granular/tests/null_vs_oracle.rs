@@ -13,6 +13,9 @@
 //! the port's own arithmetic (`transit_granular::float::F`); the test process keeps Rust's default
 //! floating-point mode.
 //!
+//! Each point must also sound after its first two blocks, except the few that are silent by design
+//! (listed in `null_quality`), so a later change cannot silence a point and null it trivially.
+//!
 //! Set `GRANULAR_NULL_POINTS` to print the residual and the first differing frame of every point
 //! whose label contains its value (empty: every point).
 
@@ -94,6 +97,21 @@ fn null_quality(quality: OracleQuality, gate: Gate) {
             failures.push(format!("{label}: {r}{at}"));
         } else if port_rng != oracle_rng {
             failures.push(format!("{label}: identical output but the random state differs (port {port_rng:08x}, oracle {oracle_rng:08x})"));
+        }
+        // Every point must sound after its first two blocks (the first still carries the dry input
+        // while dry/wet ramps from 0), except the ones that are silent by design: density 0.50
+        // seeds no grain unless triggered, and in the frozen pattern the oldest position is not yet
+        // recorded when the freeze starts at every quality but 16-bit stereo, the shortest buffer.
+        #[allow(clippy::float_cmp)] // Exact sweep levels.
+        let silent_by_design = (point.base.density == 0.5 && gate != Gate::Trigger)
+            || (point.base.position == 1.0 && gate == Gate::Freeze && quality != OracleQuality::Stereo);
+        let sounds = oracle[2 * MAX_BLOCK_SIZE..].iter().any(|f| *f != [0, 0]);
+        if sounds == silent_by_design {
+            failures.push(format!(
+                "{label}: {} (expected {})",
+                if sounds { "sounds" } else { "silent" },
+                if silent_by_design { "silent" } else { "sound" }
+            ));
         }
         compared += 1;
     }
