@@ -302,6 +302,9 @@ fn a_plan_waits_while_a_worker_holds_a_strip() {
     assert_eq!(rig.mix.adopt_plan(&mut env), Adoption::Rejected(RejectReason::StripsInFlight));
     rig.comp.reclaim(env);
     rig.shared[2].hold.store(false, Ordering::Release);
+    // The closing blocks wait for every strip (a far deadline), so the coverage check below does not
+    // depend on the strip being on time in the last block (E49, #226).
+    rig.mix.set_strip_deadline(Some(Duration::from_secs(60)));
     settle(&mut rig);
     let mut s = rig.session.clone();
     s.track_mut(t).unwrap().mixer.volume_db = -3.0;
@@ -467,6 +470,9 @@ fn stop_while_a_strip_is_away_drops_what_was_parked_for_it() {
     assert_eq!(rig.note_on(1, 0, 70), EventOutcome::Queued, "parked while away");
     rig.mix.reset();
     rig.shared[1].hold.store(false, Ordering::Release);
+    // The closing blocks wait for every strip (a far deadline), so the coverage check below does not
+    // depend on the strip being on time in the last block (E49, #226).
+    rig.mix.set_strip_deadline(Some(Duration::from_secs(60)));
     settle(&mut rig);
     let trace: Vec<_> = rig.shared[1].inst.lock().unwrap().trace().iter().map(|l| (l.event.status & 0xF0, l.event.data1)).collect();
     assert!(!trace.contains(&(0x90, 70)), "a note parked before the stop started after it: {trace:?}");
@@ -508,6 +514,9 @@ fn an_overflowing_ring_while_a_strip_is_away_leaves_nothing_stuck() {
     assert!(rig.shared[3].holding.load(Ordering::Acquire), "strip 3 was away for the whole burst");
     assert!(rig.pedal(3, 0, false).accepted());
     rig.shared[3].hold.store(false, Ordering::Release);
+    // The closing blocks wait for every strip (a far deadline), so the coverage check below does not
+    // depend on the strip being on time in the last block (E49, #226).
+    rig.mix.set_strip_deadline(Some(Duration::from_secs(60)));
     settle(&mut rig);
     let f = rig.mix.strip_faults().unwrap().snapshot();
     let r = rig.shared[3].report();
@@ -546,6 +555,9 @@ fn parked_then_settled_then_released(press: impl Fn(&mut Rig) -> EventOutcome, r
     }
     let off = release(&mut rig);
     assert!(off.accepted() && off != EventOutcome::Unmatched, "the release went ahead of what it releases: {off:?}");
+    // The closing blocks wait for every strip (a far deadline), so the coverage check below does not
+    // depend on the strip being on time in the last block (E49, #226).
+    rig.mix.set_strip_deadline(Some(Duration::from_secs(60)));
     for _ in 0..16 {
         rig.block();
     }

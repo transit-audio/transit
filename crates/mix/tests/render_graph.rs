@@ -541,6 +541,9 @@ fn continuity_across_upstream_missed_skips() {
             s.stall_ns.store(0, Ordering::Relaxed);
         }
         player.release_all(&mut rig);
+        // The closing blocks wait for every strip (a far deadline): the releases are delivered and
+        // no hole is left open in the last block, whatever the host's speed (E49, #226).
+        rig.mix.set_strip_deadline(Some(FAR));
         settle(&mut rig);
         transit_mix::unmark_audio_thread();
         rig
