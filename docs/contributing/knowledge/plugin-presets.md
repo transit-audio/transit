@@ -8,6 +8,9 @@ Issue #68. Read with [ADR 0018](../../adr/0018-plugin-host-thread.md) (the plug-
   on the plug-in host thread with a header strip (GDI, no egui: that thread has no egui context)
   above a content container the plug-in parents its view in. CLAP editors open embedded there when
   the plug-in offers it, so the strip shows; floating CLAP editors and macOS windows have none.
+- On Linux (#147) both format hosts use the same `transit_rt::editor_window` API, an X11 window
+  (`x11.rs`) on the host thread's own connection, without the strip yet (K94): the header's title
+  names the window, and the strip's commands stay in the device card and the mixer.
 - The client area is the plug-in's reported size plus the strip, on open and on every resize
   request (`resize_content`). `EditorWindow::sync`, run from the editor's `idle`, follows the
   plug-in's child window when it settles at another size (`Follow`).
