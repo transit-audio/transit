@@ -68,6 +68,10 @@ pub fn copy_path(from: &Path, to: impl AsRef<Path>) -> Result<()> {
     let to = to.as_ref();
     crate::file_access::check_read(from).map_err(EngineError::Io)?;
     crate::file_access::check_write(to).map_err(EngineError::Io)?;
+    // Copying a file onto itself would truncate it before it is read.
+    if std::fs::canonicalize(to).is_ok_and(|t| std::fs::canonicalize(from).is_ok_and(|f| f == t)) {
+        return Err(EngineError::Io(format!("{} is the file being copied; it was not copied onto itself", to.display())));
+    }
     std::fs::copy(from, to).map(|_| ()).map_err(|err| EngineError::Io(format!("{} to {}: {err}", from.display(), to.display())))
 }
 
@@ -123,7 +127,7 @@ pub(crate) fn place_unplaced(s: &mut Session) -> (Vec<String>, bool) {
         };
         let stem = path.file_stem().and_then(|x| x.to_str()).unwrap_or("Take").to_string();
         let track_name = stem.rsplit_once('_').map_or(stem.as_str(), |(t, _)| t);
-        let format = if info.channels >= 2 { ChannelFormat::Stereo } else { ChannelFormat::Mono };
+        let format = ChannelFormat::for_channels(usize::from(info.channels));
         // Never the take's own track: placing there would clear what is on it now.
         let tid = s.add_track(TrackKind::Audio, format, Some(track_name));
         let src = add_disk_source(s, &stem, audio, &path.to_string_lossy());
@@ -340,5 +344,31 @@ mod tests {
         d.execute("file.export_clip_groups", &serde_json::json!({"path": group, "clips": [id.0]})).unwrap();
         let copied = dir.0.join("g Audio").join(format!("Tone_01_{}.wav", d.session().sources[0].id.0));
         assert_eq!(std::fs::read(&copied).unwrap(), std::fs::read(&path).unwrap(), "the take's file, not an empty WAV");
+    }
+
+    #[test]
+    fn a_file_is_never_copied_onto_itself() {
+        let dir = TempDir::new("self-copy");
+        let path = dir.0.join("Take_01.wav");
+        std::fs::write(&path, b"RIFF....").unwrap();
+        let err = copy_path(&path, dir.0.join(".").join("Take_01.wav")).unwrap_err();
+        assert!(err.to_string().contains("onto itself"), "{err}");
+        assert_eq!(std::fs::read(&path).unwrap(), b"RIFF....", "untouched");
+        copy_path(&path, dir.0.join("Copy.wav")).unwrap();
+        assert_eq!(std::fs::read(dir.0.join("Copy.wav")).unwrap(), b"RIFF....");
+    }
+
+    #[test]
+    fn a_re_placed_take_of_more_than_two_channels_gets_a_track_of_its_width() {
+        let dir = TempDir::new("wide");
+        let path = dir.0.join("Room_01.wav");
+        let mut bytes = transit_audio_io::wav_float_header(6, 48_000, 100).unwrap();
+        bytes.extend([0u8; 6 * 4 * 100]);
+        std::fs::write(&path, &bytes).unwrap();
+        let mut s = Session { unplaced_takes: vec![format!("{} (0.00 h of 6-channel at 48 kHz)", path.display())], ..Session::default() };
+        let (_, placed) = place_unplaced(&mut s);
+        assert!(placed);
+        let t = s.tracks.last().unwrap();
+        assert_eq!((t.format, t.channels()), (ChannelFormat::for_channels(6), 6), "{}", t.name);
     }
 }
