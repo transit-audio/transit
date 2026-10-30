@@ -93,8 +93,8 @@ impl Engine for WaveshapingEngine {
 
             let mix = x + (y - x) * shape_fractional;
             let index = mix * wf_gain_modulation.next() + 0.5;
-            let fold = interpolate_hermite(&LUT_FOLD[1..], index, 512.0);
-            let fold_2 = -interpolate_hermite(&LUT_FOLD_2[1..], index, 512.0);
+            let fold = interpolate_hermite(&LUT_FOLD, 1, index, 512.0);
+            let fold_2 = -interpolate_hermite(&LUT_FOLD_2, 1, index, 512.0);
 
             let sine = sine(*aux_sample * 0.25 + 0.5);
             *out_sample = fold;

@@ -15,28 +15,43 @@ pub mod random;
 pub mod rsqrt;
 pub mod units;
 
+/// `table[i]`, or the nearest end of the table when `i` is outside it.
+///
+/// The firmware's interpolators (`stmlib/dsp/dsp.h`) do not clamp: every caller keeps its index
+/// in range (the sine lookup reads up to 1.25 of the table on purpose, which is why the table
+/// has 640 + 1 entries). Out of range the firmware would read past the table; the port reads
+/// the nearest entry instead of panicking. In range the result is the firmware's, bit for bit.
+#[inline]
+fn at(table: &[f32], i: i32) -> f32 {
+    let last = table.len() as i32 - 1;
+    table[i.clamp(0, last) as usize]
+}
+
+/// `stmlib::Interpolate`: linear interpolation at `index * size`, no clamping.
 #[inline]
 pub fn interpolate(table: &[f32], mut index: f32, size: f32) -> f32 {
-    index = index.clamp(0.0, 1.0);
     index *= size;
-    let index_integral = index as usize;
+    let index_integral = index as i32;
     let index_fractional = index - (index_integral as f32);
-    let a = table[index_integral];
-    let b = table[index_integral + 1];
+    let a = at(table, index_integral);
+    let b = at(table, index_integral + 1);
 
     a + (b - a) * index_fractional
 }
 
+/// `stmlib::InterpolateHermite` on the table that starts at `table[origin]` (the firmware passes
+/// a pointer into its table, such as `lut_fold + 1`, so the sample before index 0 is
+/// `table[origin - 1]`). No clamping.
 #[inline]
-pub fn interpolate_hermite(table: &[f32], mut index: f32, size: f32) -> f32 {
-    index = index.clamp(0.0, 1.0);
+pub fn interpolate_hermite(table: &[f32], origin: usize, mut index: f32, size: f32) -> f32 {
     index *= size;
-    let index_integral = index as usize;
+    let index_integral = index as i32;
     let index_fractional = index - (index_integral as f32);
-    let xm1 = table[index_integral - 1];
-    let x0 = table[index_integral];
-    let x1 = table[index_integral + 1];
-    let x2 = table[index_integral + 2];
+    let i = origin as i32 + index_integral;
+    let xm1 = at(table, i - 1);
+    let x0 = at(table, i);
+    let x1 = at(table, i + 1);
+    let x2 = at(table, i + 2);
     let c = (x1 - xm1) * 0.5;
     let v = x0 - x1;
     let w = c + v;
@@ -47,15 +62,16 @@ pub fn interpolate_hermite(table: &[f32], mut index: f32, size: f32) -> f32 {
     (((a * f) - b_neg) * f + c) * f + x0
 }
 
+/// `stmlib::InterpolateWrap`: the integral part of `index` is dropped (so the index wraps for
+/// positive values), then linear interpolation. No clamping.
 #[inline]
 pub fn interpolate_wrap(table: &[f32], mut index: f32, size: f32) -> f32 {
     index -= (index as i32) as f32;
-    index = index.clamp(0.0, 1.0);
     index *= size;
-    let index_integral = index as usize;
+    let index_integral = index as i32;
     let index_fractional = index - (index_integral as f32);
-    let a = table[index_integral];
-    let b = table[index_integral + 1];
+    let a = at(table, index_integral);
+    let b = at(table, index_integral + 1);
 
     a + (b - a) * index_fractional
 }
@@ -79,9 +95,11 @@ pub fn one_pole(out: &mut f32, in_: f32, coefficient: f32) {
 }
 
 #[inline]
+/// `SLOPE(out, in, positive, negative)`: the coefficient picked by the sign of the error
+/// multiplies the error either way.
 pub fn slope(out: &mut f32, in_: f32, positive: f32, negative: f32) {
     let error = in_ - *out;
-    *out += if error > 0.0 { positive } else { negative * error };
+    *out += (if error > 0.0 { positive } else { negative }) * error;
 }
 
 #[inline]
