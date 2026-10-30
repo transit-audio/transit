@@ -48,7 +48,9 @@ pub(crate) fn apply_params(
             (v, if held { end } else { pos.saturating_add(i64::from(left)) })
         })
     };
-    let rack = |k: &str| session.filter(|_| t.folder.is_some()).and_then(|s| crate::rack::macro_param_value(s, t, slot_u8, k, pos));
+    // Decided once per call: a member of a rack whose macro lanes rule a parameter of this slot.
+    let macros = session.and_then(|s| crate::rack::MacroLanes::of(s, t, slot_u8));
+    let rack = |k: &str| macros.as_ref().and_then(|m| m.value(k, pos));
     apply_values(
         slot,
         ins,
