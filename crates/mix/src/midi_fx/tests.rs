@@ -63,7 +63,8 @@ fn off(voice: i32, key: u8) -> PluginEvent {
 
 /// One block: `events` (offset, event) taken in the given order, then flushed and processed.
 fn block(host: &mut MidiFxHost, rec: &mut Rec, t: &Track, events: &[(u32, PluginEvent)]) {
-    host.begin(rec, t, 0, &Transport::default(), FRAMES);
+    let frame = u64::from(rec.block) * FRAMES as u64;
+    host.begin(rec, t, 0, &Transport::default(), frame, FRAMES);
     for (o, e) in events {
         if host.active() {
             assert!(host.take(rec, *o, e));
@@ -140,7 +141,7 @@ fn events_for_a_later_block_are_carried_through_the_rest_of_the_chain() {
 }
 
 #[test]
-fn a_full_carry_delivers_releases_at_the_last_offset_and_counts() {
+fn a_full_carry_makes_room_for_a_release_and_counts() {
     let t = track(&[("midi_test_delay", &[("samples", 1000.0)])]);
     let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
     let mut input: Vec<(u32, PluginEvent)> =
@@ -148,15 +149,31 @@ fn a_full_carry_delivers_releases_at_the_last_offset_and_counts() {
     input.push((1, on(1, 60, 100)));
     input.push((2, off(1, 60)));
     block(&mut host, &mut rec, &t, &input);
-    assert_eq!(notes(&rec), vec![(0, FRAMES as u32 - 1, "off", 60, 0)], "the release is not lost");
+    assert!(rec.heard.is_empty());
+    // The on found no room and is dropped; the off displaced a controller and arrives on time.
     assert_eq!(host.counts.carry_overflow, 2);
+    for _ in 0..3 {
+        block(&mut host, &mut rec, &t, &[]);
+    }
+    assert_eq!(notes(&rec).into_iter().filter(|n| n.2 != "other").collect::<Vec<_>>(), vec![(3, 1002 - 768, "off", 60, 0)]);
+    assert_eq!(rec.heard.len(), MIDI_FX_CARRY, "63 controllers and the off");
+}
+
+#[test]
+fn a_carry_of_releases_alone_delivers_one_more_at_the_last_offset() {
+    let t = track(&[("midi_test_delay", &[("samples", 1000.0)])]);
+    let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
+    let input: Vec<(u32, PluginEvent)> = (0..=MIDI_FX_CARRY as i32).map(|i| (0, off(i, 60))).collect();
+    block(&mut host, &mut rec, &t, &input);
+    assert_eq!(notes(&rec), vec![(0, FRAMES as u32 - 1, "off", 60, 0)], "the release is not lost");
+    assert_eq!(host.counts.carry_overflow, 1);
 }
 
 #[test]
 fn a_full_block_refuses_and_counts() {
     let t = track(&[("midi_velocity", &[])]);
     let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
-    host.begin(&mut rec, &t, 0, &Transport::default(), FRAMES);
+    host.begin(&mut rec, &t, 0, &Transport::default(), 0, FRAMES);
     for _ in 0..MIDI_FX_BLOCK {
         assert!(host.take(&mut rec, 0, &ev(-1, Message::Control { cc: 1, value: 1 })));
     }
@@ -232,4 +249,15 @@ fn automation_drives_an_effects_parameter() {
     t.mixer.automation_mode = transit_model::AutomationMode::Off;
     block(&mut host, &mut rec, &t, &[(5, on(2, 60, 100))]);
     assert_eq!(notes(&rec), vec![(0, 5, "on", 67, 100), (1, 5, "on", 61, 100)]);
+}
+
+#[test]
+fn carried_events_a_skipped_block_left_overdue_land_at_offset_zero() {
+    let t = track(&[("midi_test_delay", &[("samples", 300.0)])]);
+    let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
+    block(&mut host, &mut rec, &t, &[(10, on(1, 60, 100))]);
+    // The strip misses a block (a render worker held it): the next one starts two blocks later.
+    rec.block += 1;
+    block(&mut host, &mut rec, &t, &[]);
+    assert_eq!(notes(&rec), vec![(2, 0, "on", 60, 100)], "due at 310, overdue by the block at 512");
 }

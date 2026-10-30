@@ -29,8 +29,9 @@
 //! writes at most as many; each effect carries at most [`MIDI_FX_CARRY`] events to later blocks;
 //! the host tracks [`MIDI_FX_NOTES`] sounding notes. Past those limits events are refused and
 //! counted in [`MidiFxCounts`] (in the engine's [`EventStatus`](crate::EventStatus)); a refused
-//! release is retried by the mix at the next block, and a release a full carry cannot hold is
-//! delivered at the block's last offset instead. Nothing here allocates, locks or logs: the
+//! release is retried by the mix at the next block, and a release a full carry cannot hold takes
+//! the place of a carried non-release (only a carry of releases alone delivers it at the block's
+//! last offset instead). Nothing here allocates, locks or logs: the
 //! storage is made with the instrument's event state, off the audio thread, and a built-in effect
 //! is a value made in place ([`Builtin`]).
 
@@ -55,8 +56,8 @@ pub struct MidiFxCounts {
     /// Events a full block buffer refused: the chain's input (the mix retries a refused release)
     /// or an effect's output.
     pub overflow: u64,
-    /// Events due in a later block that a full carry could not hold (a release among them was
-    /// delivered at the block's last offset instead).
+    /// Events due in a later block that a full carry could not hold, or that a release displaced
+    /// from it (a release is never dropped for room).
     pub carry_overflow: u64,
     /// Notes the host ended because the chain changed under them, or at a Stop.
     pub released_on_edit: u64,
@@ -127,7 +128,8 @@ pub(crate) struct MidiFxHost {
     /// Within a block: events are collected, not run at once.
     capturing: bool,
     frames: u32,
-    /// The render clock of the next block's start, in the host's own count of processed frames.
+    /// The render frame of the current block's start (of the next block's, between blocks): carried
+    /// events are due against it.
     clock: u64,
     a: [TimedEvent; MIDI_FX_BLOCK],
     a_len: usize,
@@ -136,6 +138,8 @@ pub(crate) struct MidiFxHost {
     out: [Note; MIDI_FX_NOTES],
     /// Notes the chain was given and has not seen released.
     given: [Note; MIDI_FX_NOTES],
+    /// Used entries of `given`.
+    given_len: usize,
     epoch: u32,
     pub(crate) counts: MidiFxCounts,
 }
@@ -192,6 +196,7 @@ impl MidiFxHost {
             b: [TimedEvent::EMPTY; MIDI_FX_BLOCK],
             out: [NO_NOTE; MIDI_FX_NOTES],
             given: [NO_NOTE; MIDI_FX_NOTES],
+            given_len: 0,
             epoch: 0,
             counts: MidiFxCounts::default(),
         })
@@ -199,7 +204,7 @@ impl MidiFxHost {
 
     /// Events go through the host: it has effects, carried events, or releases to swallow.
     pub(crate) fn active(&self) -> bool {
-        self.len > 0 || self.given.iter().any(|n| n.used) || self.pending()
+        self.len > 0 || self.given_len > 0 || self.pending()
     }
 
     /// Carried events wait for a later block.
@@ -207,10 +212,11 @@ impl MidiFxHost {
         self.stages.iter().flatten().any(|s| s.carry_len > 0)
     }
 
-    /// Start of a block of `frames`: the chain follows `t.midi_effects` (an edit ends the chain's
-    /// notes on `plugin`, see the module documentation), each effect gets its parameter values at
-    /// `pos` and the transport, and events are collected until [`MidiFxHost::flush`].
-    pub(crate) fn begin(&mut self, plugin: &mut dyn Plugin, t: &Track, pos: Samples, transport: &Transport, frames: usize) {
+    /// Start of a block of `frames` at render frame `frame`: the chain follows `t.midi_effects` (an
+    /// edit ends the chain's notes on `plugin`, see the module documentation), each effect gets its
+    /// parameter values at `pos` and the transport, and events are collected until
+    /// [`MidiFxHost::flush`].
+    pub(crate) fn begin(&mut self, plugin: &mut dyn Plugin, t: &Track, pos: Samples, transport: &Transport, frame: u64, frames: usize) {
         let want = t.midi_effects.get(..t.midi_effects.len().min(MAX_MIDI_EFFECTS)).unwrap_or_default();
         let same = want.len() == self.len
             && want
@@ -260,6 +266,9 @@ impl MidiFxHost {
             fx.set_transport(transport);
         }
         self.frames = u32::try_from(frames).unwrap_or(u32::MAX).max(1);
+        // A block the strip did not render (a render worker held it) leaves carried events overdue:
+        // they land at offset 0.
+        self.clock = frame;
         self.capturing = true;
     }
 
@@ -268,19 +277,17 @@ impl MidiFxHost {
     /// retries a release).
     pub(crate) fn take(&mut self, plugin: &mut dyn Plugin, offset: u32, ev: &PluginEvent) -> bool {
         // The release of a note that started before a chain edit: the edit already ended it.
-        if matches!(ev.message, Message::NoteOff { .. } | Message::PolyPressure { .. })
-            && let Some(key) = key_of(&ev.message)
-            && let Some(n) = self.given.iter().position(|n| n.is(ev, key))
+        let off = matches!(ev.message, Message::NoteOff { .. });
+        let known = key_of(&ev.message)
+            .filter(|_| self.given_len > 0 && !matches!(ev.message, Message::NoteOn { .. }))
+            .and_then(|key| self.given.iter().position(|n| n.is(ev, key)));
+        if let Some(n) = known
+            && self.given.get(n).is_some_and(|n| n.epoch != self.epoch)
         {
-            let stale = self.given.get(n).is_some_and(|n| n.epoch != self.epoch);
-            if matches!(ev.message, Message::NoteOff { .. })
-                && let Some(n) = self.given.get_mut(n)
-            {
-                *n = NO_NOTE;
+            if off {
+                self.forget_given(n);
             }
-            if stale {
-                return true;
-            }
+            return true;
         }
         if self.capturing {
             let Some(slot) = self.a.get_mut(self.a_len) else {
@@ -295,17 +302,28 @@ impl MidiFxHost {
             self.a_len = 1;
             self.run(plugin, 1, false);
         }
+        if let Some(n) = known.filter(|_| off) {
+            self.forget_given(n);
+        }
         if let Message::NoteOn { key, .. } = ev.message {
             match self.given.iter().position(|n| !n.used) {
                 Some(n) => {
                     if let Some(n) = self.given.get_mut(n) {
                         *n = Note { used: true, channel: ev.channel & 0x0F, key, voice: ev.note_id, epoch: self.epoch };
+                        self.given_len += 1;
                     }
                 }
                 None => self.counts.untracked = self.counts.untracked.saturating_add(1),
             }
         }
         true
+    }
+
+    fn forget_given(&mut self, n: usize) {
+        if let Some(n) = self.given.get_mut(n).filter(|n| n.used) {
+            *n = NO_NOTE;
+            self.given_len = self.given_len.saturating_sub(1);
+        }
     }
 
     /// End of the block's collection: the block's events through the chain, then to `plugin`,
@@ -377,6 +395,14 @@ impl MidiFxHost {
                     if !e.event.is_release() {
                         continue;
                     }
+                    // A release takes the place of a carried non-release (its note-on, perhaps):
+                    // delivered early it could end up before its own note-on and leave it hanging.
+                    let held = stage.carry.get(..stage.carry_len).unwrap_or_default().iter().position(|c| !c.event.is_release());
+                    if let Some(c) = held.and_then(|k| stage.carry.get_mut(k)) {
+                        *c = Carried { due, event: e.event };
+                        continue;
+                    }
+                    // Every carried event is a release, so this one's note-on is not among them.
                     e.offset = frames - 1;
                 }
                 match self.a.get_mut(n) {

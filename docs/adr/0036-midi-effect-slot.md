@@ -51,7 +51,8 @@ Both run a chain of MIDI effects before the instrument, in order, each one bypas
   and each effect writes at most as many; each effect carries 64 (`MIDI_FX_CARRY`); the host tracks
   256 notes (`MIDI_FX_NOTES`). Past those, events are refused and counted in `MidiFxCounts`
   (`EventStatus::midi_fx`); the mix retries a refused release at the next block, and a release a
-  full carry cannot hold is delivered at the block's last offset. Nothing allocates, locks or logs
+  full carry cannot hold takes the place of a carried non-release (a carry of releases alone
+  delivers it at the block's last offset): a release is never dropped for room. Nothing allocates, locks or logs
   on the audio thread: the storage is made with the instrument's event state, and a built-in effect
   is a value (`transit_dsp::midi_fx::Builtin`) made in place.
 - **The effect trait.** `transit_dsp::midi_fx::MidiEffect`: `process(input, out, frames)` over
