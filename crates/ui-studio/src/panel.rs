@@ -115,7 +115,7 @@ const MACRO_OSC: &str = "macro_oscillator";
 
 static MACRO: [Row; 3] = [
     &[
-        sec("Model", 1, &[Menu("model", "Model")]),
+        sec("Model", 1, &[Menu("model", "")]),
         sec("Tone", 3, &[Knob("harmonics", "Harmonics"), Knob("timbre", "Timbre"), Knob("morph", "Morph")]),
         sec("Gate", 2, &[Knob("decay", "Decay"), Knob("lpg_color", "LPG Color")]),
     ],
@@ -248,7 +248,9 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     }
     let rect = resp.rect;
     if let Some(control) = crate::midi_learn::plugin_control(key.1, id) {
-        resp.context_menu(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
+        // Its own popup id: `Popup::context_menu` closes whatever popup shares the response's id on
+        // a primary click, which was the dropdown's own list (a combo's popup uses its button's id).
+        egui::Popup::context_menu(&resp).id(resp.id.with("learn_ctx")).show(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
         crate::midi_learn::mark(app, ui.painter(), rect, key.0, control);
     }
     if let Some(x) = new.filter(|x| (x - v).abs() > f32::EPSILON) {
@@ -272,7 +274,9 @@ fn choice(ui: &mut Ui, ins: &Insert, p: &ParamInfo, label: &str, v: f32, width: 
                         ui.selectable_value(&mut idx, i, *name);
                     }
                 });
-            ui.label(RichText::new(label).size(10.5).color(TOKENS.text_dim));
+            if !label.is_empty() {
+                ui.label(RichText::new(label).size(10.5).color(TOKENS.text_dim));
+            }
             c.response
         })
         .inner;

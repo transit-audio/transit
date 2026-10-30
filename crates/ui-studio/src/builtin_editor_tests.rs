@@ -94,6 +94,20 @@ impl T {
         assert!(self.shapes.iter().any(|s| contains(&s.shape, rect, expected)), "preset dropdown should show {expected}");
     }
 
+    /// How many painted texts read exactly `want`, and where the first one is.
+    fn painted(&self, want: &str) -> (usize, Option<(f32, f32)>) {
+        fn walk(shape: &egui::Shape, want: &str, out: &mut Vec<(f32, f32)>) {
+            match shape {
+                egui::Shape::Text(t) if t.galley.text() == want => out.push((t.pos.x + t.galley.size().x / 2.0, t.pos.y + t.galley.size().y / 2.0)),
+                egui::Shape::Vec(v) => v.iter().for_each(|s| walk(s, want, out)),
+                _ => {}
+            }
+        }
+        let mut found = Vec::new();
+        self.shapes.iter().for_each(|s| walk(&s.shape, want, &mut found));
+        (found.len(), found.first().copied())
+    }
+
     /// Click the focused track's editor button on card `card`.
     fn open_editor(&mut self, card: usize) {
         let at = mid(self.app.mixer.devices.cards[card].editor_button);
@@ -334,6 +348,48 @@ fn the_macro_oscillator_panel_credits_the_original_and_drives_its_controls() {
     let from = mid(t.row(tr, "timbre").control);
     t.send("ui.drag", json!({"x": from.0, "y": from.1, "to_x": from.0, "to_y": from.1 - 30.0}));
     assert!(t.param(tr, slot, "timbre").unwrap() > 50.0, "dragging Timbre up raises it");
+}
+
+/// One second of the instrument built from the session's parameters, playing middle C.
+fn render_instrument(t: &T, tr: TrackId) -> Vec<f32> {
+    let ins = t.app.engine.session().track(tr).unwrap().instrument.clone().unwrap();
+    let mut m = transit_dsp::create("macro_oscillator").unwrap();
+    for (id, v) in &ins.params {
+        m.set_param(id, *v);
+    }
+    m.prepare(48_000.0, 512, 2);
+    m.note_on(0, 60, 100);
+    let mut out = Vec::new();
+    let mut io = vec![vec![0.0; 512]; 2];
+    for _ in 0..40 {
+        m.process(&mut io, 512);
+        out.extend_from_slice(&io[0]);
+    }
+    out
+}
+
+/// The Model dropdown applies its choice (its list was closing under the MIDI-learn menu, which
+/// shared the dropdown button's popup id), and "Model" is the section header only.
+#[test]
+fn the_macro_oscillator_model_combo_applies_its_choice_and_the_panel_says_model_once() {
+    use transit_dsp::plugins::macro_osc::MODELS;
+    let mut t = T::new();
+    let (tr, slot) = open_plugin(&mut t, "macro_oscillator");
+    assert_eq!(t.painted("Model").0, 1, "one Model text: the section header, not a second control label");
+    assert_eq!(t.row(tr, "model").value, MODELS[8]);
+    let before = render_instrument(&t, tr);
+    assert!(before.iter().any(|v| v.abs() > 1e-4), "the default model sounds");
+    t.click(mid(t.row(tr, "model").control), 1);
+    t.frames(3);
+    let (n, at) = t.painted(MODELS[2]);
+    assert_eq!(n, 1, "the open dropdown lists {}", MODELS[2]);
+    t.click(at.unwrap(), 1);
+    t.frames(3);
+    assert_eq!(t.param(tr, slot, "model"), Some(2.0), "choosing a model writes the model parameter");
+    assert_eq!(t.row(tr, "model").value, MODELS[2], "the panel shows the chosen model");
+    assert_eq!(t.painted("Model").0, 1, "still one Model text");
+    let after = render_instrument(&t, tr);
+    assert_ne!(before, after, "the instrument renders the chosen model");
 }
 
 /// The voices, the note-to-macro grid (a row per source, a column per target) and the voice
