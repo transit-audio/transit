@@ -346,6 +346,7 @@ impl MixEngine {
         if let Some(p) = self.plan.as_deref() {
             for e in p.tables.strips.iter().filter_map(|st| st.instrument.as_ref()).filter_map(|i| i.events.as_deref()) {
                 s.absorb(&e.status);
+                s.midi_fx.add(&e.fx.counts);
             }
         }
         s
@@ -389,6 +390,7 @@ impl MixEngine {
         for e in displaced.iter().filter_map(|st| st.instrument.as_ref()).filter_map(|i| i.events.as_deref()) {
             let [n, r] = e.queued_counts();
             status.absorb(&e.status);
+            status.midi_fx.add(&e.fx.counts);
             status.retired_with_instance[0] = status.retired_with_instance[0].saturating_add(n);
             status.retired_with_instance[1] = status.retired_with_instance[1].saturating_add(r);
         }

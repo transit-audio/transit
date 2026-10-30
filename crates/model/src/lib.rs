@@ -14,6 +14,7 @@ mod io_map;
 pub mod legacy;
 mod markers;
 mod midi_input;
+mod midi_effect;
 mod midi_map;
 mod midi_output;
 mod mixer;
@@ -32,6 +33,7 @@ pub use io_map::{
 };
 pub use markers::{Group, MarkerKind, MemoryLocation};
 pub use midi_input::{MidiInput, MidiPort};
+pub use midi_effect::{MAX_MIDI_EFFECTS, MIDI_EFFECT_SLOT, MidiEffectSlot};
 pub use midi_map::{Control, ControlTarget, MapMode, Mapping, MappingSet, MidiSource, Resolved, Scope, SourceKind, Strip, resolve};
 pub use midi_output::{MAX_MIDI_OUT_OFFSET_MS, MidiOutChannel, MidiOutPort, MidiOutput, device_name, device_of_id, same_midi_device};
 pub use mixer::{

@@ -103,6 +103,8 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                 }
                 inst.plugin.set_transport(transport);
                 if let Some(e) = inst.events.as_deref_mut() {
+                    // The MIDI effects (#201) take the block's events from here to `flush`.
+                    e.fx.begin(&mut *inst.plugin, t, pos, transport, frames);
                     e.retry_releases(&mut *inst.plugin);
                     // A member that left its rack lets go of what the rack held (ADR 0034).
                     e.rack_membership(&mut *inst.plugin, t.folder.is_some() && s.rack_of(t).is_some());
@@ -121,6 +123,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                 // Deliver the remaining live events, including when stopped (F10).
                 if let Some(e) = inst.events.as_deref_mut() {
                     e.deliver(&mut *inst.plugin, live.frame, frames);
+                    e.fx.flush(&mut *inst.plugin);
                 }
                 if strip.buf.len() >= 2 {
                     inst.plugin.process(&mut strip.buf, frames);

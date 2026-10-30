@@ -85,10 +85,14 @@ impl AutoParam {
             AutoParam::Plugin { slot, param } if *slot == crate::MACRO_SLOT => {
                 crate::macro_index(param).map_or_else(|| format!("macro {param}"), |i| format!("macro {}", i + 1))
             }
+            AutoParam::Plugin { slot, param } if Self::midi_effect_index(*slot).is_some() => {
+                format!("MIDI effect {} {param}", Self::midi_effect_index(*slot).map_or(0, |i| i + 1))
+            }
             AutoParam::Plugin { slot, param } => format!("insert {} {param}", slot_letter(*slot)),
         }
     }
-    /// Parse ids like `volume`, `pan`, `pan2`, `mute`, `send_a_level`, `plugin:a:threshold`.
+    /// Parse ids like `volume`, `pan`, `pan2`, `mute`, `send_a_level`, `plugin:a:threshold`,
+    /// `plugin:instrument:cutoff`, `plugin:midi1:semitones` (the first MIDI effect).
     pub fn parse(s: &str) -> Option<AutoParam> {
         let orig = s.trim();
         let s = orig.to_ascii_lowercase();
@@ -112,7 +116,15 @@ impl AutoParam {
         if s.starts_with("plugin:") {
             // The prefix and slot are case-insensitive; the parameter id keeps its case.
             let (slot, param) = orig["plugin:".len()..].split_once(':')?;
-            let slot = if slot.eq_ignore_ascii_case("instrument") { Self::INSTRUMENT_SLOT } else { letter_slot(slot)? };
+            let midi = slot.get(..4).filter(|p| p.eq_ignore_ascii_case("midi")).and_then(|_| slot.get(4..)?.parse::<usize>().ok());
+            let slot = if slot.eq_ignore_ascii_case("instrument") {
+                Self::INSTRUMENT_SLOT
+            } else if let Some(n) = midi {
+                // `midi1` is the first MIDI effect.
+                Self::midi_effect_slot(n.checked_sub(1)?)?
+            } else {
+                letter_slot(slot)?
+            };
             return Some(AutoParam::Plugin { slot, param: param.to_string() });
         }
         None
@@ -273,6 +285,18 @@ mod tests {
         );
         assert_eq!(AutoParam::parse("plugin:a:mid_gain").unwrap(), AutoParam::Plugin { slot: 0, param: "mid_gain".into() });
         assert_eq!(AutoParam::parse("VOLUME"), Some(AutoParam::Volume));
+    }
+
+    #[test]
+    fn midi_effect_lanes_parse_and_label_by_their_place_in_the_chain() {
+        let first = AutoParam::parse("plugin:MIDI1:semitones").unwrap();
+        assert_eq!(first, AutoParam::Plugin { slot: crate::MIDI_EFFECT_SLOT, param: "semitones".into() });
+        assert_eq!(first.label(), "MIDI effect 1 semitones");
+        let last = AutoParam::parse(&format!("plugin:midi{}:scale", crate::MAX_MIDI_EFFECTS)).unwrap();
+        assert_eq!(last.label(), format!("MIDI effect {} scale", crate::MAX_MIDI_EFFECTS));
+        for bad in ["plugin:midi0:x", "plugin:midi9:x", "plugin:midi:x", "plugin:midix:x"] {
+            assert_eq!(AutoParam::parse(bad), None, "{bad}");
+        }
     }
 
     #[test]

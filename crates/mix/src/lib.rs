@@ -93,6 +93,7 @@ mod instance;
 mod key;
 mod matrix;
 mod midi;
+mod midi_fx;
 mod offline;
 mod plan;
 #[cfg(test)]
@@ -135,6 +136,7 @@ pub use events::{
 };
 pub use external::{ExternalReport, ExternalState, external_report};
 pub use external_midi::{ExternalMidi, external_midi_events};
+pub use midi_fx::{MIDI_FX_BLOCK, MIDI_FX_CARRY, MIDI_FX_NOTES, MidiFxCounts};
 #[cfg(feature = "testing")]
 pub use fingerprint::{Fnv, StripPrint};
 pub use hardware::{HardwareReport, HardwareState, hardware_report};

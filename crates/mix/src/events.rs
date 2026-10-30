@@ -287,6 +287,8 @@ pub struct EventStatus {
     pub voided: [u64; 2],
     /// The instrument of the last refusal or shed.
     pub affected: Option<SlotBinding>,
+    /// The MIDI effect chains' counters (#201): overflows of their fixed buffers and more.
+    pub midi_fx: crate::midi_fx::MidiFxCounts,
 }
 
 impl EventStatus {
@@ -331,6 +333,7 @@ impl EventStatus {
         for (a, b) in self.voided.iter_mut().zip(o.voided) {
             add(a, b);
         }
+        self.midi_fx.add(&o.midi_fx);
         if o.affected.is_some() {
             self.affected = o.affected;
         }
@@ -509,6 +512,8 @@ pub(crate) struct InstrumentEvents {
     /// leaves the rack, what the rack's clips and those ports hold is released.
     rack_ports: u64,
     in_rack: bool,
+    /// The track's MIDI effects (#201): every event to the plug-in goes through them.
+    pub(crate) fx: Box<crate::midi_fx::MidiFxHost>,
 }
 
 /// How an admission went, before the engine's own annotations.
@@ -533,6 +538,7 @@ impl InstrumentEvents {
             rack_ports: 0,
             in_rack: false,
             status: EventStatus::default(),
+            fx: crate::midi_fx::MidiFxHost::new(),
         })
     }
 
@@ -786,7 +792,7 @@ impl InstrumentEvents {
     /// Hands one event to the plug-in, counting a refusal.
     fn send(&mut self, plugin: &mut dyn Plugin, offset: u32, channel: u8, note_id: i32, message: Message) -> bool {
         let ev = PluginEvent { channel, note_id, message };
-        let ok = plugin.event(offset, &ev);
+        let ok = if self.fx.active() { self.fx.take(plugin, offset, &ev) } else { plugin.event(offset, &ev) };
         if !ok {
             let i = usize::from(ev.is_release());
             if let Some(n) = self.status.host_refused.get_mut(i) {
@@ -1063,6 +1069,7 @@ impl InstrumentEvents {
     /// Stop or panic: every sounding note and held pedal is released now and the queue is
     /// emptied (the caller also tells the plug-in to release everything).
     pub(crate) fn release_all(&mut self, plugin: &mut dyn Plugin) {
+        self.fx.panic(plugin);
         self.queue.clear();
         self.non_release = 0;
         for e in &mut self.notes {
@@ -1105,7 +1112,7 @@ impl InstrumentEvents {
 
     /// Anything queued, sounding or held.
     fn busy(&self) -> bool {
-        !self.queue.is_empty() || self.notes.iter().any(|e| e.used) || self.pedals.iter().any(|p| p.used)
+        self.fx.pending() || !self.queue.is_empty() || self.notes.iter().any(|e| e.used) || self.pedals.iter().any(|p| p.used)
     }
 
     // ---- clips: delivered at once, through the same table, as `Source::CLIP` ----

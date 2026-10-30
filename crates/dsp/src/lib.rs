@@ -18,6 +18,7 @@ pub mod editor_header;
 pub mod event;
 pub mod host_call;
 pub mod meter;
+pub mod midi_fx;
 pub mod offline;
 mod osc;
 pub mod pan;

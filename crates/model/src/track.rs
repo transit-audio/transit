@@ -216,6 +216,9 @@ struct FreezeInputs<'a> {
     elastic: &'a Option<String>,
     clips: &'a [Clip],
     instrument: &'a Option<Insert>,
+    /// Left out while empty, so a track without MIDI effects keeps the hash older builds gave it.
+    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    midi_effects: &'a [crate::MidiEffectSlot],
     inserts: &'a [Option<Insert>],
     plugin_lanes: Vec<&'a AutomationLane>,
 }
@@ -265,6 +268,10 @@ pub struct Track {
     /// Instrument plugin (instrument tracks) — registry id.
     #[serde(default)]
     pub instrument: Option<crate::Insert>,
+    /// The MIDI effects ahead of the instrument, in processing order (#201, ADR 0036). Not
+    /// written while empty, so files without them stay as older builds wrote them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub midi_effects: Vec<crate::MidiEffectSlot>,
     /// Ticks (musical) or samples timebase for clips.
     #[serde(default)]
     pub ticks_timebase: bool,
@@ -323,6 +330,7 @@ impl Track {
             folder: None,
             folder_open: true,
             instrument: None,
+            midi_effects: Vec::new(),
             ticks_timebase: kind.is_midi(),
             elastic: None,
             pinned: false,
@@ -357,13 +365,14 @@ impl Track {
             elastic: &self.elastic,
             clips: self.clips(),
             instrument: &self.instrument,
+            midi_effects: &self.midi_effects,
             inserts: &self.mixer.inserts,
             plugin_lanes: self.automation.iter().filter(|l| matches!(l.param, AutoParam::Plugin { .. })).collect(),
         }
     }
 
-    /// Whether `other` has the same material as this track: the same clips, instrument, inserts
-    /// and plug-in automation. Fader, pan, sends and other automation are not material.
+    /// Whether `other` has the same material as this track: the same clips, instrument, MIDI
+    /// effects, inserts and plug-in automation. Fader, pan, sends and other automation are not material.
     #[must_use]
     pub fn same_freeze_inputs(&self, other: &Track) -> bool {
         self.freeze_inputs() == other.freeze_inputs()

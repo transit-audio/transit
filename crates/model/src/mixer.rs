@@ -770,7 +770,7 @@ pub(crate) fn finite_or(v: f32, d: f32) -> f32 {
 
 /// Parameters saved as `null` (how JSON writes NaN and infinity) or beyond `f32` are dropped, so
 /// they keep their defaults instead of failing the whole session.
-fn finite_params<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<String, f32>, D::Error> {
+pub(crate) fn finite_params<'de, D: serde::Deserializer<'de>>(d: D) -> Result<BTreeMap<String, f32>, D::Error> {
     let params: BTreeMap<String, Option<f64>> = serde::Deserialize::deserialize(d)?;
     Ok(params.into_iter().filter_map(|(k, v)| Some((k, v.map(|v| v as f32).filter(|v| v.is_finite())?))).collect())
 }
