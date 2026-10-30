@@ -59,7 +59,7 @@ impl Engine for StringEngine {
         for voice in &mut self.voice {
             voice.init(sample_rate_hz);
         }
-        self.f0 = [0.0; NUM_STRINGS];
+        self.f0 = [0.01; NUM_STRINGS];
         self.active_string = NUM_STRINGS - 1;
         self.reset();
     }
