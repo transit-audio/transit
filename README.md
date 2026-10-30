@@ -152,8 +152,11 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 
 - Adaptive grid down to 1/128, with Ctrl+1-4 for narrower, wider, triplet and snap on/off.
 - Clips snap to the grid as you drag; Ctrl-drag or Alt-drag copies; Shift bypasses snap.
+- Move and copy drags preview every selected clip at its destination, not only the one under the pointer.
+- Drag a rectangle across empty lane space to select every clip it touches, as in Logic: Shift adds to the selection, Ctrl toggles, Escape cancels, and a click still sets the cursor.
 - Loop strip on the ruler, in amber: drag to make a loop, drag its edges to resize it, double-click to toggle it. The loop follows tempo changes.
 - Automation lanes under any track for volume, pan, mute, sends and every device parameter; Read, Touch, Latch and Write modes.
+- Touch mode suspends a lane while you hold its control, and the lane takes over again over 0.2 s after you let go, as in Logic and Ableton.
 - Tempo and meter changes along the timeline, edited by dragging or typing in the transport.
 - Transport metronome button: right-click for click level and count-in bars. Count-in works at bar 1, and recording starts sample-exact at the end of it.
 - Transport load readout (for example "30%  128 @ 48 kHz  ASIO") with an overload warning.
@@ -165,7 +168,8 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Note length in the piano roll: Alt-drag a note's edge to set a length shorter than the grid, Alt+Shift-drag a body to move it without snap (Alt-drag a body changes velocity), and a numeric Length field in the inspector. Shift snaps; in scale mode it overrides to chromatic.
 - Freeze, Unfreeze and Flatten a track (the snowflake on the track header); a frozen track plays its rendered audio, with its key sources running.
 - Group tracks: Track > New Group Track or the "+ Group" quick-add; Ctrl+G folds the selected tracks into a group, Ctrl+Shift+G ungroups, and you can drag track headers into a folder. Edit Group… is the separate edit-group feature.
-- Fade and crossfade handles on audio clips: hover a top corner and drag for length (Shift: no snap), Alt-drag to bend, click for the shape menu, double-click to reset; right-click overlapping clips for Crossfade.
+- Clip fades: the whole top corner of a clip is the fade zone, and fades are drawn as visible dimmed areas with their curve. Drag a fade to set its length, drag the curve to bend it, and drag a fade across the junction into an overlapping clip to crossfade. Fade In, Fade Out and Crossfade lengths and curves are in the clip inspector; Alt+[ and Alt+] fade to the cursor.
+- Clip tools: Join or Consolidate (Ctrl+J), Crop (Ctrl+Shift+J), Trim Start and Trim End to the cursor (`[` and `]`), Nudge by grid with Alt+arrows (Alt+Shift for fine), and Rename and Color in the clip menu.
 - Clip-internal loops: drag the loop handle at a clip header's upper right to repeat the clip in cycles (dividers show each cycle; Alt-drag makes independent copies, Ctrl/Cmd-drag overwrites the clips in the way). Edits inside the loop apply to every cycle.
 
 ### Mixer and routing
@@ -188,6 +192,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Plug-ins load on a host thread, so a slow or stuck plug-in no longer freezes the UI: its slot reads "Loading…" while it instantiates and "Not responding" if it stops answering. A slow load shows how long it has taken, the phase it is in and how long it took last time; the status line reports loads and editor opens over 2 s.
 - Plug-in browser with a background scan and your own search folders.
 - Built-in instruments: Subtractive Synth, Drum Synth, Sampler. All built-ins open an editor window: parameter rows, Sampler load or drop, Drum Synth by pad.
+- Work toward more built-in instruments, under [ADR 0033](docs/adr/0033-built-in-instruments-mutable-instruments-port.md): a dev-only test oracle wraps Émilie Gillet's original C++ DSP (MIT licensed), and a Rust port of all 24 synthesis engines nulls against it bit for bit. No such instrument is in the app yet.
 - Built-in panels with knobs, and bespoke layouts for Compressor, Gate, EQ, Synth and Plate; factory and user presets; a scope and a gain-reduction display on the dynamics panels. Moving a plug-in knob while a lane is armed (Write, Latch, Touch) records into it.
 - Built-in dynamics and EQ: Compressor/Limiter, Expander/Gate, De-Esser, Maximizer, Channel Strip, EQ 7-Band, EQ 1-Band.
 - Built-in effects: Room and Plate Reverb, Mod Delay, Chorus, Flanger, Phaser, Saturator, Lo-Fi, Rectifier, Pitch Shifter.
@@ -238,6 +243,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Autosave, and sessions saved as versioned, human-readable JSON in `.transit` files.
 - A launch splash that reports the audio device opening first, then plug-in scan progress, and Help > About with version info and a link to the transit repository.
 - Import audio and MIDI files; export MIDI. File > Open Recent lists your last ten sessions (Ctrl+Shift+O).
+- Browser preview: select a supported audio file in the Files tab and press play to hear it before you drag it in. A headphone toggle auto-previews each selection, and the preview has its own volume on a path that never records, meters or routes to a track. It stops on another file, on transport start or on Escape; every importer format works, including RF64.
 
 ### Under the hood
 
@@ -246,6 +252,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Offline render and playback are checked against each other by golden tests.
 - Every edit is a named command, which is what makes undo and the command catalog uniform.
 - Assistant access (the control server and MCP tools) addresses positions as bar|beat and can add chords.
+- In-app help: Shift+? opens an Info panel that explains the control under the mouse. The diagnostics windows have question-mark markers, and the Callback Telemetry and Audio Devices figures are explained in the same help catalog the troubleshooting guide draws on.
 
 ## Status
 
