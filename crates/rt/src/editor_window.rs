@@ -22,7 +22,8 @@
 //!
 //! Contract: every [`EditorWindow`] method and [`resize_content`] act only on a window of the
 //! calling thread (they do nothing otherwise); [`HeaderCell`] may be used from any thread.
-//! Nothing here panics. Other platforms have no such window: [`EditorWindow::new`] says so.
+//! Nothing here panics. Linux has the same window on X11 (`x11.rs`, issue #147; Wayland sessions
+//! through `XWayland`), without the strip yet; macOS has none here: [`EditorWindow::new`] says so.
 //!
 //! **Following the main window** (issue #173, ADR 0030). The windows have no owner (ADR 0018
 //! section 7: a cross-thread owner attaches input queues, so a hung plug-in would hang the UI).
@@ -530,7 +531,7 @@ pub fn parked() -> bool {
 }
 
 /// When the host last resized a window (for [`Follow`]).
-#[cfg(any(windows, test))]
+#[cfg(any(windows, target_os = "linux", test))]
 fn since(at: Option<std::time::Instant>) -> Duration {
     at.map_or(Duration::MAX, |t| t.elapsed())
 }
@@ -540,7 +541,14 @@ mod win;
 #[cfg(windows)]
 pub use win::{EditorWindow, apply, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+mod x11;
+#[cfg(all(target_os = "linux", not(feature = "force-fallback")))]
+pub(crate) use x11::{connection_fd, pump};
+#[cfg(target_os = "linux")]
+pub use x11::{EditorWindow, apply, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
+
+#[cfg(not(any(windows, target_os = "linux")))]
 mod other {
     use super::HeaderCell;
     use std::ffi::c_void;
@@ -606,14 +614,14 @@ mod other {
         0
     }
 
-    /// Nothing to hide here (see the Windows version): Linux hosts no editor windows yet, and on
-    /// macOS editors live on the process main thread (inline mode, ADR 0018).
+    /// Nothing to hide here (see the Windows version): on macOS editors live on the process main
+    /// thread (inline mode, ADR 0018).
     #[must_use]
     pub fn hide_thread_windows(_thread: u32) -> usize {
         0
     }
 
-    /// Records the request and applies it to no window: there are none here (Linux: #147).
+    /// Records the request and applies it to no window: there are none here.
     #[must_use]
     pub fn group(request: super::Group) -> usize {
         super::note_group(request);
@@ -644,7 +652,7 @@ mod other {
         Vec::new()
     }
 }
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 pub use other::{EditorWindow, apply, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
 
 #[cfg(test)]

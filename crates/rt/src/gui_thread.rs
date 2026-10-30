@@ -6,6 +6,7 @@
 //! | Platform | [`MessageQueue::attach`] | [`MessageQueue::wait`] | [`MessageQueue::dispatch`] |
 //! |---|---|---|---|
 //! | Windows | `OleInitialize` (a single-threaded apartment, as winit gives the UI thread) and the thread's message queue | `MsgWaitForMultipleObjectsEx` on any input | `PeekMessageW`, `TranslateMessage`, `DispatchMessageW` |
+//! | Linux | a wake pipe | `poll(2)` on the wake pipe, the thread's X11 connection and the plug-ins' descriptors ([`crate::run_loop`]), until the next plug-in timer at the latest | the X11 events of this thread's editor windows, then the plug-ins' ready descriptor handlers and due timers (issue #147) |
 //! | elsewhere | nothing | `std::thread::park_timeout` until a wake or the deadline | nothing (no window here needs dispatching) |
 //!
 //! Contract, on every platform:
@@ -41,7 +42,11 @@ struct Shared {
     woken: AtomicBool,
     thread: std::thread::Thread,
     /// Windows: the OS id of the owning thread, for `PostThreadMessageW` (0 elsewhere).
+    #[cfg_attr(not(windows), allow(dead_code))]
     os_thread: u32,
+    /// Linux: the wake pipe (nothing elsewhere).
+    #[cfg_attr(not(all(target_os = "linux", not(feature = "force-fallback"))), allow(dead_code))]
+    wake: imp::Wake,
 }
 
 impl MessageQueue {
@@ -49,9 +54,9 @@ impl MessageQueue {
     /// and creates the thread's message queue so a wake can be posted before the first wait.
     #[must_use]
     pub fn attach() -> MessageQueue {
-        let (apartment, os_thread) = imp::attach();
+        let (apartment, os_thread, wake) = imp::attach();
         MessageQueue {
-            shared: Arc::new(Shared { woken: AtomicBool::new(false), thread: std::thread::current(), os_thread }),
+            shared: Arc::new(Shared { woken: AtomicBool::new(false), thread: std::thread::current(), os_thread, wake }),
             apartment,
             _not_send: PhantomData,
         }
@@ -83,10 +88,10 @@ impl MessageQueue {
     /// happened since the last wait), or `timeout` passes, whichever is first.
     pub fn wait(&self, timeout: Duration) {
         if self.shared.woken.swap(false, Ordering::AcqRel) {
-            imp::consume();
+            imp::consume(&self.shared);
             return;
         }
-        imp::wait(&self.shared.woken, timeout);
+        imp::wait(&self.shared, timeout);
     }
 }
 
@@ -100,7 +105,7 @@ impl QueueWaker {
     /// Makes the owning thread's current or next [`MessageQueue::wait`] return. Any thread.
     pub fn wake(&self) {
         if !self.shared.woken.swap(true, Ordering::AcqRel) {
-            imp::post(self.shared.os_thread);
+            imp::post(&self.shared);
             self.shared.thread.unpark();
         }
     }
@@ -108,7 +113,8 @@ impl QueueWaker {
 
 #[cfg(all(windows, not(feature = "force-fallback")))]
 mod imp {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use super::Shared;
+    use std::sync::atomic::Ordering;
     use std::time::Duration;
     use windows_sys::Win32::System::Ole::{OleInitialize, OleUninitialize};
     use windows_sys::Win32::System::Threading::GetCurrentThreadId;
@@ -117,7 +123,10 @@ mod imp {
         QS_ALLINPUT, TranslateMessage, WM_NULL, WM_QUIT, WM_USER,
     };
 
-    pub(super) fn attach() -> (bool, u32) {
+    /// Nothing: the thread's message queue carries the wake.
+    pub(super) struct Wake;
+
+    pub(super) fn attach() -> (bool, u32, Wake) {
         // SAFETY: `OleInitialize` takes a reserved pointer that must be null and acts on the
         // calling thread only; S_OK and S_FALSE both mean a reference this thread must release
         // with `OleUninitialize` (done in `detach`, on this thread, because `MessageQueue` is not
@@ -130,7 +139,7 @@ mod imp {
         unsafe { PeekMessageW(&raw mut msg, std::ptr::null_mut(), WM_USER, WM_USER, PM_NOREMOVE) };
         // SAFETY: no arguments, no preconditions.
         let id = unsafe { GetCurrentThreadId() };
-        (hr >= 0, id)
+        (hr >= 0, id, Wake)
     }
 
     pub(super) fn detach(apartment: bool) {
@@ -172,18 +181,19 @@ mod imp {
 
     /// Returns on any input in the thread's queue (a window message or the wake's `WM_NULL`) or
     /// at the timeout; the queue itself holds any wake, so the flag only resets coalescing.
-    pub(super) fn wait(woken: &AtomicBool, timeout: Duration) {
+    pub(super) fn wait(shared: &Shared, timeout: Duration) {
         let ms = u32::try_from(timeout.as_millis()).unwrap_or(u32::MAX - 1);
         // SAFETY: zero handles with a null array is the documented way to wait on the message
         // queue alone; MWMO_INPUTAVAILABLE also returns for input already in the queue.
         unsafe { MsgWaitForMultipleObjectsEx(0, std::ptr::null(), ms, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
-        woken.store(false, Ordering::Release);
+        shared.woken.store(false, Ordering::Release);
     }
 
     /// The wake's posted message stays queued for `dispatch`; nothing else to consume.
-    pub(super) fn consume() {}
+    pub(super) fn consume(_shared: &Shared) {}
 
-    pub(super) fn post(thread: u32) {
+    pub(super) fn post(shared: &Shared) {
+        let thread = shared.os_thread;
         // SAFETY: posts a WM_NULL thread message (no pointers in it) to the owning thread's
         // queue, created in `attach`. A failure (the thread ended, or its queue is full) only
         // means no early wake; the wait still ends at its timeout.
@@ -191,13 +201,17 @@ mod imp {
     }
 }
 
-#[cfg(any(not(windows), feature = "force-fallback"))]
+#[cfg(any(not(any(windows, target_os = "linux")), feature = "force-fallback"))]
 mod imp {
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use super::Shared;
+    use std::sync::atomic::Ordering;
     use std::time::{Duration, Instant};
 
-    pub(super) fn attach() -> (bool, u32) {
-        (false, 0)
+    /// Nothing: a wake unparks the thread.
+    pub(super) struct Wake;
+
+    pub(super) fn attach() -> (bool, u32, Wake) {
+        (false, 0, Wake)
     }
 
     pub(super) fn detach(_apartment: bool) {}
@@ -210,12 +224,12 @@ mod imp {
     /// it. `park_timeout` may return spuriously, or on an unpark that is not a wake (any code can
     /// unpark this thread), so only the flag ends the wait early. A wake that lands after the
     /// deadline stays set for the next wait.
-    pub(super) fn wait(woken: &AtomicBool, timeout: Duration) -> bool {
+    pub(super) fn wait(shared: &Shared, timeout: Duration) -> bool {
         let deadline = Instant::now().checked_add(timeout);
         loop {
-            if woken.swap(false, Ordering::Acquire) {
+            if shared.woken.swap(false, Ordering::Acquire) {
                 // The wake's unpark may still be pending; take it so the next wait parks.
-                consume();
+                consume(shared);
                 return true;
             }
             let remaining = match deadline {
@@ -230,11 +244,91 @@ mod imp {
     }
 
     /// Takes the unpark token of the wake that ended a wait early, so the next wait waits.
-    pub(super) fn consume() {
+    pub(super) fn consume(_shared: &Shared) {
         std::thread::park_timeout(Duration::ZERO);
     }
 
-    pub(super) fn post(_thread: u32) {}
+    pub(super) fn post(_shared: &Shared) {}
+}
+
+/// Linux (issue #147): the plug-in host thread waits in `poll(2)` on a wake pipe, its X11
+/// connection and the descriptors plug-ins registered ([`crate::run_loop`]), and dispatches the
+/// X11 events of its editor windows and the plug-ins' handlers and timers.
+#[cfg(all(target_os = "linux", not(feature = "force-fallback")))]
+mod imp {
+    use super::Shared;
+    use std::io::{Read, Write};
+    use std::os::fd::AsRawFd;
+    use std::os::unix::net::UnixStream;
+    use std::sync::atomic::Ordering;
+    use std::time::Duration;
+
+    /// The wake pipe: [`post`] writes a byte to the second end, the wait polls the first. `None`
+    /// when the pair could not be made (no descriptors left); then a wait lasts at most
+    /// [`NO_PIPE_WAIT`].
+    pub(super) struct Wake(Option<(UnixStream, UnixStream)>);
+
+    /// The longest wait without a wake pipe: a wake is noticed this late at worst.
+    const NO_PIPE_WAIT: Duration = Duration::from_millis(5);
+
+    pub(super) fn attach() -> (bool, u32, Wake) {
+        let pair = UnixStream::pair().and_then(|(rx, tx)| {
+            rx.set_nonblocking(true)?;
+            tx.set_nonblocking(true)?;
+            Ok((rx, tx))
+        });
+        let wake = match pair {
+            Ok(p) => Wake(Some(p)),
+            Err(e) => {
+                log::warn!("plug-in host thread: no wake pipe ({e}); waits are cut to {} ms", NO_PIPE_WAIT.as_millis());
+                Wake(None)
+            }
+        };
+        (false, 0, wake)
+    }
+
+    pub(super) fn detach(_apartment: bool) {}
+
+    /// The X11 events of this thread's editor windows, then the plug-ins' handlers and timers.
+    pub(super) fn dispatch(max: usize) -> usize {
+        let done = crate::editor_window::pump(max);
+        done + crate::run_loop::run(max.saturating_sub(done))
+    }
+
+    pub(super) fn wait(shared: &Shared, timeout: Duration) {
+        let mut extra = Vec::with_capacity(2);
+        let timeout = match &shared.wake.0 {
+            Some((rx, _)) => {
+                extra.push(rx.as_raw_fd());
+                timeout
+            }
+            None => timeout.min(NO_PIPE_WAIT),
+        };
+        if let Some(fd) = crate::editor_window::connection_fd() {
+            extra.push(fd);
+        }
+        crate::run_loop::wait(&extra, timeout);
+        // The flag is cleared before the pipe is drained: a wake landing in between leaves the
+        // flag set, so the next wait returns at once and nothing is lost.
+        shared.woken.store(false, Ordering::Release);
+        consume(shared);
+    }
+
+    /// Drains the wake pipe.
+    pub(super) fn consume(shared: &Shared) {
+        if let Some((rx, _)) = &shared.wake.0 {
+            let mut buf = [0u8; 64];
+            while matches!((&*rx).read(&mut buf), Ok(n) if n > 0) {}
+        }
+    }
+
+    pub(super) fn post(shared: &Shared) {
+        if let Some((_, tx)) = &shared.wake.0 {
+            // A full pipe (would block) already holds a wake; any other failure only means no
+            // early wake, and the wait still ends at its timeout.
+            let _ = (&*tx).write(&[1]);
+        }
+    }
 }
 
 #[cfg(test)]

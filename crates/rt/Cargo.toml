@@ -24,6 +24,17 @@ windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_Grap
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc = "=0.2.190"
 
+# Linux plug-in editor windows (issue #147): the pure-Rust X11 client already in the tree (winit),
+# no default features (no libxcb, no unsafe of its own).
+[target.'cfg(target_os = "linux")'.dependencies]
+x11rb = { version = "=0.13.2", default-features = false }
+
+# Linux editor windows on a real X server (issue #147): its own runner, which starts a private Xvfb
+# when there is no DISPLAY (run it under `xvfb-run -a` in CI).
+[[test]]
+name = "editor_x11"
+harness = false
+
 # ADR 0013: this crate is where new `unsafe` lives. It opts out of the workspace
 # `unsafe_code = "forbid"` for itself only; every block carries a `// SAFETY:` comment and every
 # `unsafe fn` a `# Safety` section. The rest mirrors `[workspace.lints]`, plus clippy pedantic.

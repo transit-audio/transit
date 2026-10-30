@@ -57,6 +57,12 @@ pub mod gui_thread;
 /// driven on the plug-in host thread.
 pub mod editor_window;
 
+/// The plug-in run loop of a Linux window-hosting thread (issue #147): descriptor handlers and
+/// timers plug-ins register (VST3 `IRunLoop`, CLAP `timer-support` and `posix-fd-support`), run by
+/// the plug-in host thread's message queue.
+#[cfg(target_os = "linux")]
+pub mod run_loop;
+
 mod shell;
 pub use shell::{attach_parent_console, set_app_user_model_id, set_window_icons_from_exe, stdout_is_missing};
 
