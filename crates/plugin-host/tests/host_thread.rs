@@ -173,9 +173,11 @@ fn a_creation_that_never_returns_is_stuck_after_the_timeout_and_never_blocks_a_f
     assert!(matches!(status, Status::Stuck), "the hung creation reads as stuck, got {status:?}");
     // The property is "never blocks a frame", not a frame rate (#87, E49): a shared runner may
     // run few 5 ms frames in the 300 ms window. More than one frame ran (a blocked loop sees a
-    // single poll, which returns only after the timeout) and none stalled past the bound.
+    // single poll, which returns only after the timeout, so `n >= 2` is the deterministic check)
+    // and none stalled past the stall bound every frame test uses; a tighter 250 ms bound sat
+    // under the rule's margin on a starved runner (E49, #226).
     assert!(n >= 2, "frames ran meanwhile ({n})");
-    assert!(worst < Duration::from_millis(250), "a frame took {worst:?}");
+    assert!(worst < FRAME_BUDGET, "a frame took {worst:?}");
     assert_eq!(host.wedged(), 1);
     let (status, _, _) = frames(&behind, Duration::from_secs(5));
     assert!(matches!(status, Status::Ready(_)), "the queued request ran on the fresh thread");
