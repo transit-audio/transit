@@ -43,7 +43,8 @@ use crate::utils::units::semitones_to_ratio;
 use crate::utils::{clip_16, ftz};
 
 const MAX_TRIGGER_DELAY: usize = 8;
-/// The trigger is read 5 blocks late (`kTriggerDelay`), about 1 ms at 48 kHz in 12-frame blocks.
+/// The trigger is read 5 blocks late (`kTriggerDelay`) at every rate: 1.25 ms at 48 kHz in
+/// 12-frame blocks (1.36 ms at 44.1 kHz, 0.63 ms at 96 kHz).
 const TRIGGER_DELAY: f32 = 5.0;
 /// The block the voice's envelopes are timed for (`kBlockSize`): every render call advances them
 /// by one 12-frame block, whatever its frame count, as in the firmware.
@@ -281,8 +282,9 @@ pub struct Voice<'a> {
 }
 
 impl Voice<'_> {
-    /// A voice at `sample_rate`, rendering blocks of up to [`MAX_BLOCK_SIZE`] frames. Call
-    /// [`Voice::init`] before the first render.
+    /// A voice at `sample_rate`, initialized ([`Voice::init`] runs here, so a new voice renders
+    /// from the firmware's power-on state; calling `init` again returns a used voice to it). Build
+    /// it off the audio thread.
     ///
     /// The firmware computes pitch against its corrected rate, [`crate::CORRECTED_SAMPLE_RATE`]
     /// (`a0` in `dsp/dsp.h`): the module's codec runs at 47872.34 Hz, so the module plays in tune.
@@ -298,7 +300,7 @@ impl Voice<'_> {
         // 48000 / 48000 is exactly 1, so at 48 kHz this is the firmware's `a0` bit for bit.
         let a0_normalized = crate::A0 * (crate::REF_SAMPLE_RATE / sample_rate_hz);
 
-        Self {
+        let mut voice = Self {
             engines: EngineBank {
                 additive_engine: AdditiveEngine::new(),
                 bass_drum_engine: BassDrumEngine::new(),
@@ -350,7 +352,9 @@ impl Voice<'_> {
             short_decay_scale: (200.0 * CONTROL_BLOCK_SIZE) / sample_rate_hz,
             decay_tail_scale: (20.0 * CONTROL_BLOCK_SIZE) / sample_rate_hz,
             a0_normalized,
-        }
+        };
+        voice.init();
+        voice
     }
 
     pub fn init(&mut self) {
@@ -387,13 +391,16 @@ impl Voice<'_> {
         self.reload_resources = true;
     }
 
-    #[inline]
     /// Renders `frames.len()` frames as the firmware's `Voice::Render`: int16 out and aux, inverted
     /// as the module's DAC expects. One call is one control block: the envelopes, the trigger delay
     /// and the parameter smoothing advance by one 12-frame block whatever the frame count, as in the
     /// firmware, so call it with 12 frames (any count from 1 to [`MAX_BLOCK_SIZE`] is rendered as
     /// one block). A longer slice is rendered as consecutive 12-frame blocks with the same inputs;
     /// an empty one renders nothing.
+    ///
+    /// Feed 12-frame blocks for the firmware's envelope timing at every rate: 24 frames are one
+    /// control block (its envelopes then run half as fast per frame), 25 are three (12 + 12 + 1).
+    #[inline]
     pub fn render(&mut self, patch: &Patch, modulations: &Modulations, frames: &mut [Frame]) {
         let size = frames.len();
         if size > MAX_BLOCK_SIZE {
@@ -477,7 +484,10 @@ impl Voice<'_> {
             p.trigger = TriggerState::UNPATCHED;
         }
 
-        let short_decay = self.short_decay_scale * semitones_to_ratio(-96.0 * patch.decay);
+        // Decay and color are knobs in [0, 1]; out of range the pitch table lookup would read past its
+        // end (the firmware reads past its table). Clamping changes no bit in range.
+        let decay = patch.decay.clamp(0.0, 1.0);
+        let short_decay = self.short_decay_scale * semitones_to_ratio(-96.0 * decay);
 
         self.decay_envelope.process(short_decay * 2.0);
 
@@ -566,8 +576,8 @@ impl Voice<'_> {
 
         // Compute LPG parameters.
         if !lpg_bypass {
-            let hf = patch.lpg_colour;
-            let decay_tail = self.decay_tail_scale * semitones_to_ratio(-72.0 * patch.decay + 12.0 * hf) - short_decay;
+            let hf = patch.lpg_colour.clamp(0.0, 1.0);
+            let decay_tail = self.decay_tail_scale * semitones_to_ratio(-72.0 * decay + 12.0 * hf) - short_decay;
 
             if modulations.level_patched {
                 self.lpg_envelope.process_lp(compressed_level, short_decay, decay_tail, hf);
@@ -658,7 +668,9 @@ impl ChannelPostProcessor {
 }
 
 /// The firmware's int16 conversion of a post-processed sample: `Clip16(1 + int32_t(x))`, the cast
-/// truncating toward zero.
+/// truncating toward zero. Identical for every finite value below 2^31 in magnitude. Outside that
+/// the Rust cast saturates: NaN maps to 1 and a huge value to +/-32767, where the C++ cast gives
+/// INT_MIN on x86 (so -32768); the nulled voice never produces either.
 #[inline]
 #[must_use]
 pub fn to_i16(x: f32) -> i16 {
@@ -720,5 +732,15 @@ mod tests {
         }
         assert_eq!(long, short);
         whole.render(&patch, &modulations, &mut []);
+    }
+
+    #[test]
+    fn a_new_voice_renders_without_an_explicit_init_and_knobs_out_of_range_do_not_panic() {
+        let mut voice = Voice::new(SampleRate::Hz48000);
+        let modulations = Modulations { trigger: 1.0, trigger_patched: true, ..Modulations::default() };
+        let mut frames = [Frame::default(); 12];
+        for (decay, lpg_colour) in [(-5.0, 20.0), (5.0, -20.0), (f32::NAN, f32::NAN), (0.5, 0.5)] {
+            voice.render(&Patch { decay, lpg_colour, ..Patch::default() }, &modulations, &mut frames);
+        }
     }
 }
