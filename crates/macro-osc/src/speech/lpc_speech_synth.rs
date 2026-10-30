@@ -151,9 +151,14 @@ impl LpcSpeechSynth {
             frame_fractional = 0.0;
         }
 
-        frame_integral = frame_integral.clamp(0, frames.len() - 2);
+        // The firmware plays `frames[frame_integral]` blended toward the next frame, unclamped: a
+        // consonant or word ending on the table's last frame plays that frame (the port used to clamp
+        // to the frame before it). Past the end the firmware reads whatever follows the table, which
+        // a blend of 0 (no interpolation) cancels exactly, so the frame itself stands in for it.
+        frame_integral = frame_integral.min(frames.len() - 1);
+        let next = frames.get(frame_integral + 1).unwrap_or(&frames[frame_integral]);
 
-        self.play_frame_blend(&frames[frame_integral], &frames[frame_integral + 1], frame_fractional);
+        self.play_frame_blend(&frames[frame_integral], next, frame_fractional);
     }
 
     #[inline]
