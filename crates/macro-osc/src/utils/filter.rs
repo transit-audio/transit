@@ -19,12 +19,18 @@ pub enum FrequencyApproximation {
 }
 
 const M_PI_F: f32 = core::f32::consts::PI;
-const M_PI_POW_2: f32 = M_PI_F * M_PI_F;
-const M_PI_POW_3: f32 = M_PI_POW_2 * M_PI_F;
-const M_PI_POW_5: f32 = M_PI_POW_3 * M_PI_POW_2;
-const M_PI_POW_7: f32 = M_PI_POW_5 * M_PI_POW_2;
-const M_PI_POW_9: f32 = M_PI_POW_7 * M_PI_POW_2;
-const M_PI_POW_11: f32 = M_PI_POW_9 * M_PI_POW_2;
+/// `coefficient * M_PI_POW_<power>` as the firmware evaluates it: its `M_PI_POW_*` macros expand to
+/// an unparenthesized chain of the double `M_PI`, so the product is taken left to right in double
+/// precision and rounded to float once.
+const fn times_pi_pow(coefficient: f32, power: u32) -> f32 {
+    let mut x = coefficient as f64;
+    let mut i = 0;
+    while i < power {
+        x *= core::f64::consts::PI;
+        i += 1;
+    }
+    x as f32
+}
 
 #[derive(Debug, Default, Clone)]
 pub struct DcBlocker {
@@ -92,25 +98,25 @@ impl OnePole {
             }
             FrequencyApproximation::Dirty => {
                 // Optimized for frequencies below 8kHz.
-                const A: f32 = 3.736e-01 * M_PI_POW_3;
+                const A: f32 = times_pi_pow(3.736e-01, 3);
                 f * (M_PI_F + A * f * f)
             }
             FrequencyApproximation::Fast => {
                 // The usual tangent approximation uses 3.1755e-01 and 2.033e-01, but
                 // the coefficients used here are optimized to minimize error for the
                 // 16Hz to 16kHz range, with a sample rate of 48kHz.
-                const A: f32 = 3.260e-01 * M_PI_POW_3;
-                const B: f32 = 1.823e-01 * M_PI_POW_5;
+                const A: f32 = times_pi_pow(3.260e-01, 3);
+                const B: f32 = times_pi_pow(1.823e-01, 5);
                 let f2 = f * f;
                 f * (M_PI_F + f2 * (A + B * f2))
             }
             FrequencyApproximation::Accurate => {
                 // These coefficients don't need to be tweaked for the audio range.
-                const A: f32 = 3.333314036e-01 * M_PI_POW_3;
-                const B: f32 = 1.333923995e-01 * M_PI_POW_5;
-                const C: f32 = 5.33740603e-02 * M_PI_POW_7;
-                const D: f32 = 2.900525e-03 * M_PI_POW_9;
-                const E: f32 = 9.5168091e-03 * M_PI_POW_11;
+                const A: f32 = times_pi_pow(3.333314036e-01, 3);
+                const B: f32 = times_pi_pow(1.333923995e-01, 5);
+                const C: f32 = times_pi_pow(5.33740603e-02, 7);
+                const D: f32 = times_pi_pow(2.900525e-03, 9);
+                const E: f32 = times_pi_pow(9.5168091e-03, 11);
                 let f2 = f * f;
                 f * (M_PI_F + f2 * (A + f2 * (B + f2 * (C + f2 * (D + f2 * E)))))
             }
