@@ -115,6 +115,12 @@ fn new_rack(e: &mut Engine, p: &Value) -> Result<Value> {
         None => (1..).map(|i| format!("Rack {i}")).find(|n| s.track_by_name(n).is_none()).unwrap_or_else(|| "Rack".into()),
     };
     let list: Vec<u64> = tracks.iter().map(|t| t.0).collect();
+    // Tracks inside a group leave it first, as Group Tracks does: their output goes back to where
+    // the group's went, so the rack's bus takes it, and a rack they leave drops them as members.
+    let nested: Vec<u64> = tracks.iter().filter(|t| e.session().track(**t).is_some_and(|x| x.folder.is_some())).map(|t| t.0).collect();
+    if !nested.is_empty() {
+        super::track::remove_from_folder(e, &json!({"tracks": nested}))?;
+    }
     let r = super::track::move_to_folder(e, &json!({"tracks": list, "name": name}))?;
     let folder = TrackId(r.get("folder").and_then(Value::as_u64).ok_or_else(|| bad(id, "no folder made"))?);
     let s = e.session_mut();

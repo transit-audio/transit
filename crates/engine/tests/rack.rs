@@ -185,3 +185,45 @@ fn a_track_dragged_into_a_rack_becomes_a_member_and_one_dragged_out_leaves() {
     assert!(rack_of(&e, rack).member(audio).is_none());
     assert_eq!(e.session().track(audio).unwrap().folder, Some(rack));
 }
+
+/// Review finding 1: Group into Rack on tracks that sit in a group (or another rack) takes them
+/// out of it first, so their audio sums on the rack's bus, through the rack's fader, and the old
+/// rack no longer lists them.
+#[test]
+fn a_rack_made_from_grouped_tracks_sums_them_on_its_own_bus() {
+    let (mut e, old, [a, b]) = racked();
+    let r = e.execute("track.new", &json!({"kind": "instrument"})).unwrap();
+    let c = TrackId(r["tracks"][0].as_u64().unwrap());
+    // A and B sit in rack `old`; C sits in a plain group.
+    let g = e.execute("track.move_to_new_folder", &json!({"tracks": [c.0]})).unwrap();
+    let group = TrackId(g["folder"].as_u64().unwrap());
+    let r = e.execute("rack.new", &json!({"tracks": [a.0, c.0]})).unwrap();
+    let rack = TrackId(r["rack"].as_u64().unwrap());
+    let s = e.session();
+    let Route::Bus(bus) = s.track(rack).unwrap().mixer.input else { panic!("the rack reads its bus") };
+    for m in [a, c] {
+        let t = s.track(m).unwrap();
+        assert_eq!((t.folder, &t.mixer.output), (Some(rack), &Route::Bus(bus)), "{} sums on the rack's bus", t.name);
+    }
+    assert_eq!(rack_of(&e, rack).members.iter().map(|m| m.track).collect::<Vec<_>>(), [a, c]);
+    assert_eq!(rack_of(&e, old).members.iter().map(|m| m.track).collect::<Vec<_>>(), [b], "the old rack drops A");
+    assert_eq!(s.tracks.iter().filter(|t| t.folder == Some(group)).count(), 0, "the old group is empty");
+    assert_eq!(e.undo_history().iter().filter(|l| l.contains("Rack")).count(), 2, "one step per rack");
+
+    // The summed output: notes on the new rack sound, and they all pass its fader. Muting the
+    // old group or the old rack changes nothing; muting the new rack silences them.
+    let mut s = e.session().clone();
+    let mut seq = transit_midi::Sequence::default();
+    seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start: 0, length: 960 });
+    let cid = s.new_clip_id();
+    s.track_mut(rack).unwrap().playlist_mut().unwrap().clips.push(transit_model::Clip::midi(cid, "n", 0, 48_000, seq));
+    let range = transit_time::Range::new(0, 24_000);
+    let loud = |s: &Session| transit_mix::render_range(s, range, 256).iter().flatten().fold(0.0f32, |m, x| m.max(x.abs()));
+    assert!(loud(&s) > 1e-3, "the rack plays");
+    for t in [old, group] {
+        s.track_mut(t).unwrap().mixer.mute = true;
+    }
+    assert!(loud(&s) > 1e-3, "nothing of the rack goes through the old group or rack");
+    s.track_mut(rack).unwrap().mixer.mute = true;
+    assert_eq!(loud(&s), 0.0, "everything the rack plays passes its own fader");
+}
