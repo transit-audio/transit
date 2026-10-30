@@ -139,6 +139,14 @@ impl OnePole {
             _ => 0.0,
         }
     }
+
+    /// `Process<mode>(in_out, size)`: filters a buffer in place.
+    #[inline]
+    pub fn process_buffer(&mut self, in_out: &mut [f32], mode: FilterMode) {
+        for s in in_out.iter_mut() {
+            *s = self.process(*s, mode);
+        }
+    }
 }
 
 #[derive(Debug, Default, Clone)]

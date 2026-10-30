@@ -66,6 +66,6 @@ impl Engine for GrainEngine {
         self.z_oscillator.render(f0, cutoff, parameters.morph, parameters.harmonics, aux);
 
         self.dc_blocker[1].set_f(0.3 * f0, FrequencyApproximation::Dirty);
-        self.dc_blocker[1].process(aux[0], FilterMode::HighPass);
+        self.dc_blocker[1].process_buffer(aux, FilterMode::HighPass);
     }
 }
