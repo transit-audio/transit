@@ -96,8 +96,8 @@ workers.
 
 ## Macro Oscillator
 
-The Macro Oscillator is a built-in instrument (choose it from a track's instrument slot): one mono
-voice with 24 synthesis models, from virtual analog, waveshaping and FM through grain, additive,
+The Macro Oscillator is a built-in instrument (choose it from a track's instrument slot): up to 16
+voices, or one mono voice, with 24 synthesis models, from virtual analog, waveshaping and FM through grain, additive,
 wavetable, chords and speech to swarms, noise, string and modal physical models and three drums.
 It is a port of Émilie Gillet's open-source macro oscillator firmware (MIT license), by way of
 Oliver Rockstedt's Rust port (MIT): the digital synthesis is the original's, checked sample by
@@ -110,7 +110,14 @@ analog stages. Their license notices are in **Help > About transit**.
 - **Playing**: a note opens the voice's low-pass gate at the note's velocity; releasing it closes
   the gate over **Decay**, and **LPG Color** sets how it closes (filtering as it fades at 0%, a plain
   fade and a longer release at 100%). The drum models ring out by themselves over **Decay**.
-- **Mono, last note, legato**: one note sounds at a time. A note played while another is held takes
+- **Voices** sets how many notes sound at once, 1 to 16 (8 by default); the lights beside it show
+  each voice (lit: a key holds it; half lit: its release is fading; dark: free). A new note takes a
+  free voice, else the quietest voice whose release is still fading, else the oldest held note, so
+  the newest note always sounds. A released note fades over **Decay** on its own voice while you
+  play on. Each voice has its own noise, so a chord on a noise model is not one noise in unison, and
+  an export plays the same every time. Voices add, so wide chords are louder than one note: lower
+  **Level** if they clip.
+- **Mono, last note, legato** (**Voices** at 1): one note sounds at a time. A note played while another is held takes
   over without restarting the sound (legato); releasing it returns to the note still held. Notes
   played under the sustain pedal are legato too. A legato note takes its own velocity, so the level
   steps mid-phrase, as the original's level input does (Ableton's and Logic's legato modes keep the
@@ -118,16 +125,24 @@ analog stages. Their license notices are in **Help > About transit**.
 - **Pitch bend** spans **Bend Range** semitones (2 by default), **Tune** transposes, and the **mod
   wheel** adds up to 100% to the control **Mod Wheel** names (Timbre by default; Harmonics, Morph or
   Off).
+- **Note to Macro** is a grid: a row for velocity and a row for the key, a column each for
+  Harmonics, Timbre, Morph and Decay. Each depth (-100% to +100%, 0% by default) is how far the
+  source moves that control from its knob: the hardest note adds the whole velocity depth and the
+  softest nothing; middle C (C3) leaves the knob as set, five octaves up adds the whole key depth
+  and five octaves down takes it away. A negative depth works the other way. Each row's curve
+  (Linear, Exponential or S-curve) shapes the source first. Velocity also always sets each note's
+  level. The **Key Tracked Timbre** preset brightens higher notes this way.
 - **Aux Mix** crossfades to the model's auxiliary output, a variation of the sound. **Level** is
   the output level; at 0 dB the instrument peaks at full scale (one LSB, 0.0003 dB, under 0 dBFS),
   and the -6 dB default leaves headroom on the track.
 - **Tuning**: the port plays at concert pitch, A4 = 440 Hz. The original firmware's arithmetic is
   kept bit-exact in transit's code for its tests; the module itself plays in tune because its audio
   clock runs at the rate that arithmetic assumes.
-- The voice runs at 44.1, 48, 88.2 or 96 kHz. At other project rates it runs at the nearest of
+- The voices run at 44.1, 48, 88.2 or 96 kHz. At other project rates it runs at the nearest of
   these, still in tune, with its envelopes slightly faster or slower. Changing the model while a note
   sounds can click, as on the original.
 
 Every control can be automated (lanes `plugin:instrument:<id>`, for example
 `plugin:instrument:timbre`) and mapped to a MIDI controller (right-click it). Presets: Init, Analog
-Bass, Glass Bell, Plucked String, and your own from the panel's preset menu.
+Bass (mono), Glass Bell, Plucked String, Key Tracked Timbre, and your own from the panel's preset
+menu. The panel opens in a window inside transit's main window, so it minimizes and returns with it.

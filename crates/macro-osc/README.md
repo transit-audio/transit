@@ -9,7 +9,8 @@ trigger delay, the decay envelope, the low-pass gate, the limiter and the int16 
 `#![forbid(unsafe_code)]`, no allocation once a voice or engine is built. The voice runs at 44.1,
 48, 88.2 or 96 kHz. The app plays it as the built-in instrument "Macro Oscillator"
 (`transit-dsp`, `plugins/macro_osc.rs`: MIDI, parameters, 12-frame blocks, the int16-to-float
-output; the panel is in `transit-ui-studio`).
+output, and since #196 up to 16 voices with an allocator and a note-to-macro mapping in
+`plugins/macro_osc_voice.rs`; the panel is in `transit-ui-studio`).
 
 ## Where the code comes from
 
@@ -203,6 +204,30 @@ Two items flagged before the port was vendored turned out to be firmware behavio
 virtual analog engine's auxiliary oscillator starts at phase 0.25 (`set_master_phase(0.25f)` in the
 firmware), and the VOSIM oscillator advances its carrier with the un-interpolated frequency, as the
 firmware does (no firmware 1.2 engine uses that oscillator).
+
+## Render cost per voice
+
+What one sounding voice costs, for the rack budget (ADR 0034): microseconds per 256-frame host
+block at 48 kHz (a block is 5333 us), every voice held on a chord, the median of 9 runs of 400
+blocks divided by the voice count. Measured 2026-10-30 on the development machine (Ryzen 9 5900X, Windows 11,
+release build) by `crates/dsp/tests/macro_osc_cost.rs`, an ignored measurement test that never
+passes or fails on time:
+`cargo test --release -p transit-dsp --test macro_osc_cost -- --ignored --nocapture`.
+
+| Model | 1 voice | 8 voices | 16 voices | Per voice (16) | One core per voice |
+|---|---|---|---|---|---|
+| Virtual analog | 22.7 us | 152.4 us | 301.3 us | 18.8 us | 0.35% |
+| FM | 30.6 us | 224.8 us | 444.0 us | 27.8 us | 0.52% |
+| Six-op FM 1 | 18.2 us | 122.9 us | 243.8 us | 15.2 us | 0.29% |
+| Wavetable | 28.4 us | 205.7 us | 406.8 us | 25.4 us | 0.48% |
+| Chord | 28.9 us | 220.6 us | 462.6 us | 28.9 us | 0.54% |
+| Speech | 8.6 us | 45.1 us | 87.2 us | 5.5 us | 0.10% |
+| Modal | 71.2 us | 582.7 us | 1104.6 us | 69.0 us | 1.29% |
+| Particle noise | 51.4 us | 421.9 us | 909.9 us | 56.9 us | 1.07% |
+
+The cost is linear in the voices sounding: the median voice is 27.8 us (0.52% of one core), the
+dearest model (Modal) 70 us (1.3%), so 16 Modal voices take about a fifth of a core. A free voice
+(released and silent for 50 ms) is not rendered and costs nothing.
 
 ## Credits
 
