@@ -32,6 +32,21 @@ fn window_api() -> Option<&'static CStr> {
     }
 }
 
+/// The embedded editor's parent for `set_parent`: the content window (`HWND` on Win32, the X11
+/// window id on Linux).
+#[cfg(windows)]
+fn window_handle(win: &hostwin::HostWindow) -> clap_window_handle {
+    clap_window_handle { win32: win.parent() }
+}
+#[cfg(target_os = "linux")]
+fn window_handle(win: &hostwin::HostWindow) -> clap_window_handle {
+    clap_window_handle { x11: std::ffi::c_ulong::try_from(win.parent().addr()).unwrap_or(0) }
+}
+#[cfg(not(any(windows, target_os = "linux")))]
+fn window_handle(win: &hostwin::HostWindow) -> clap_window_handle {
+    clap_window_handle { ptr: win.parent() }
+}
+
 pub(super) struct GuiInner {
     pub(super) plugin: *const clap_plugin,
     pub(super) gui: *const clap_plugin_gui,
@@ -105,7 +120,7 @@ impl GuiLink {
         &self.header
     }
 
-    fn vt(g: &GuiInner) -> Option<clap_plugin_gui> {
+    pub(super) fn vt(g: &GuiInner) -> Option<clap_plugin_gui> {
         // SAFETY: `gui` is null or the plugin's static extension vtable, valid while `alive`.
         (g.alive).then(|| unsafe { g.gui.as_ref() }.copied()).flatten()
     }
@@ -141,8 +156,8 @@ impl GuiLink {
         }
         let api = window_api().ok_or_else(|| "plugin editors are not supported on this platform".to_string())?;
         let (Some(supported), Some(create)) = (vt.is_api_supported, vt.create) else { return Err("incomplete clap.gui extension".into()) };
-        // Embedded where this host has its own window (Windows): the window carries the header
-        // strip (issue #68). Floating otherwise, when the plug-in offers nothing else, or when
+        // Embedded where this host has its own window (Windows; Linux on X11, issue #147): the
+        // Windows window carries the header strip (issue #68). Floating otherwise, when the plug-in offers nothing else, or when
         // embedding fails and the plug-in also offers a floating editor (as before #68).
         // SAFETY: live plugin; `api` is a static NUL-terminated string; main thread.
         let floating = unsafe { supported(g.plugin, api.as_ptr(), true) };
@@ -155,7 +170,7 @@ impl GuiLink {
             }
         }
         if !floating {
-            return Err("this plugin offers only an embedded editor, which SoundCraft hosts on Windows only".into());
+            return Err("this plugin offers only an embedded editor, which transit hosts on Windows and Linux only".into());
         }
         self.host.gui_closed.store(false, Ordering::Relaxed);
         self.host.gui_destroyed.store(false, Ordering::Relaxed);
@@ -225,7 +240,7 @@ impl GuiLink {
         }
         let (w, h) = GuiLink::size(g, vt).unwrap_or((640, 480));
         hostwin::resize(win.raw(), f64::from(w), f64::from(h));
-        let parent = clap_window { api: api.as_ptr(), specific: clap_window_handle { win32: win.parent() } };
+        let parent = clap_window { api: api.as_ptr(), specific: window_handle(&win) };
         // SAFETY: live plugin with a created embedded GUI; `parent` names our live window and
         // outlives the call.
         if !unsafe { set_parent(g.plugin, &parent) } {
@@ -257,7 +272,7 @@ impl GuiLink {
     }
 
     /// `clap_plugin_gui.get_size`, clamped to a sane window size (`None` when it reports none).
-    fn size(g: &GuiInner, vt: clap_plugin_gui) -> Option<(u32, u32)> {
+    pub(super) fn size(g: &GuiInner, vt: clap_plugin_gui) -> Option<(u32, u32)> {
         let f = vt.get_size?;
         let (mut a, mut b) = (0u32, 0u32);
         // SAFETY: live plugin with a created GUI; both out-pointers are valid locals.

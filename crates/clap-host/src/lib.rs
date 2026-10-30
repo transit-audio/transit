@@ -16,12 +16,13 @@
 //! stay mapped for the life of the process.
 //!
 //! Plugin state (`clap.state`) round-trips through [`Plugin::save_state`] /
-//! [`Plugin::load_state`] as an opaque blob. Plugin editors (`clap.gui`) open as the plugin's own
-//! floating window ([`Plugin::open_editor`], or [`Plugin::editor`] for a handle usable on the main
-//! thread while the instance processes on the audio thread). Plugins that offer only an embedded
-//! editor get a host window of SoundCraft's on Windows (resized on `request_resize`, closed by
-//! its title bar); elsewhere they are not hosted yet, and SoundCraft's generic parameter editor
-//! still works for them.
+//! [`Plugin::load_state`] as an opaque blob. Plugin editors (`clap.gui`, [`Plugin::open_editor`],
+//! or [`Plugin::editor`] for a handle usable on the main thread while the instance processes on
+//! the audio thread) open embedded in a host window of transit's on Windows and on Linux (X11,
+//! issue #147; Wayland sessions through `XWayland`), resized on `request_resize` and closed by its
+//! title bar, and as the plugin's own floating window elsewhere or when embedding fails. On Linux
+//! the host also offers `clap.timer-support` and `clap.posix-fd-support`, run by the plug-in host
+//! thread's run loop (`transit_rt::run_loop`).
 //! Parameter changes made in the plugin's GUI arrive as output events while the plugin processes
 //! and are reported by the editor's `idle`.
 

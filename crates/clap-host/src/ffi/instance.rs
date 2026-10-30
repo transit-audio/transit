@@ -366,5 +366,8 @@ impl Drop for Instance {
             unsafe { f(self.plugin) };
         }
         self.created = false;
+        // After `destroy`: the plug-in had its chance to unregister its timers and descriptors.
+        #[cfg(target_os = "linux")]
+        self.state.close_run_loop();
     }
 }

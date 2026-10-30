@@ -92,6 +92,8 @@ mod gui;
 mod host;
 mod instance;
 mod module;
+#[cfg(target_os = "linux")]
+mod run_loop;
 mod state;
 
 pub(crate) use audio::*;
@@ -104,11 +106,12 @@ use state::*;
 
 // ---- host window for embedded editors ------------------------------------------------------
 
-/// The Windows host window for embedded editors: `transit_rt`'s editor window (issue #68), a
-/// top-level window on the plug-in host thread whose client area is a header strip above the
-/// plugin's parent `HWND` and nothing else. Closing it only hides it; the editor link notices in
-/// `idle`, destroys the plugin's GUI, then the window.
-#[cfg(windows)]
+/// The Windows and Linux host window for embedded editors: `transit_rt`'s editor window, a
+/// top-level window on the plug-in host thread. On Windows (issue #68) its client area is a header
+/// strip above the plugin's parent `HWND` and nothing else; on Linux (issue #147) it is an X11
+/// window whose content window is the plugin's `x11` parent (no strip yet). Closing it only hides
+/// it; the editor link notices in `idle`, destroys the plugin's GUI, then the window.
+#[cfg(any(windows, target_os = "linux"))]
 mod hostwin {
     pub use transit_rt::editor_window::{EditorWindow as HostWindow, resize_content as resize};
 
@@ -131,7 +134,7 @@ mod hostwin {
     }
 }
 /// Other platforms: embedded editors are not hosted (floating ones still are).
-#[cfg(not(windows))]
+#[cfg(not(any(windows, target_os = "linux")))]
 mod hostwin {
     use std::ffi::c_void;
 
@@ -307,7 +310,7 @@ mod tests {
     }
 
     /// The fixture gain with an embedded GUI, after `commands` (fixture state commands).
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "linux"))]
     fn embedded_gain(commands: &[&[u8]]) -> Instance {
         crate::set_scan_extra_dirs_only(true);
         let descriptors = crate::scan_paths(&[fixture::unregistered_fixture_dir().to_path_buf()]);
@@ -369,6 +372,31 @@ mod tests {
         assert!(link.is_open(), "idle kept the visible window");
         assert_eq!(hostwin::content_size(link.lock().window.as_ref().unwrap()), (800, 600), "idle sent 2.0");
         link.close();
+    }
+
+    /// Linux (issue #147): an embedded GUI is parented in an X11 window of ours on this thread
+    /// (`CLAP_WINDOW_API_X11`), takes the size it reports, and goes with the window on close.
+    /// Needs an X server (CI runs these tests under `xvfb-run -a`); skipped without one.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_embedded_gui_opens_in_an_x11_window() {
+        if std::env::var_os("DISPLAY").is_none() {
+            eprintln!("an_embedded_gui_opens_in_an_x11_window: skipped: no DISPLAY (run under `xvfb-run -a`)");
+            return;
+        }
+        let inst = embedded_gain(&[]);
+        let link = inst.gui().unwrap();
+        link.open_with("x11", |_| {}).unwrap();
+        {
+            let g = link.lock();
+            let win = g.window.as_ref().expect("embedded, not floating");
+            assert!(!win.parent().is_null(), "the content window is the plug-in's parent");
+            let size = hostwin::content_size(win);
+            assert_eq!(Some(size), GuiLink::size(&g, GuiLink::vt(&g).unwrap()), "the window takes the size the GUI reports");
+        }
+        link.close();
+        assert!(link.lock().window.is_none());
+        assert!(!link.is_open());
     }
 
     /// A GUI that ignores `set_scale` (it scales itself) keeps the size it reports: no transform

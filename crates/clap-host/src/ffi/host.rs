@@ -29,6 +29,32 @@ pub(crate) struct HostState {
     /// Parameter changes the plugin reported (output events: typically edits in its GUI),
     /// waiting for the UI. Bounded by `EDIT_CAP`; the audio thread only `try_lock`s it.
     pub edits: Mutex<Vec<(u32, f64)>>,
+    /// Linux: this state itself, for the run-loop registrations, which hold it weakly.
+    #[cfg(target_os = "linux")]
+    pub me: std::sync::Weak<HostState>,
+    /// Linux: the instance's editor link, once made (its timers and descriptors call the plug-in
+    /// through it).
+    #[cfg(target_os = "linux")]
+    pub link: OnceLock<std::sync::Weak<GuiLink>>,
+    /// Linux: the plug-in's timer and descriptor registrations (issue #147).
+    #[cfg(target_os = "linux")]
+    pub run_loop: Mutex<super::run_loop::Registrations>,
+}
+
+impl HostState {
+    /// A shared state for a new instance (on Linux it knows itself, for the run loop).
+    pub(crate) fn new_shared() -> Arc<HostState> {
+        #[cfg(target_os = "linux")]
+        return Arc::new_cyclic(|me| HostState { me: me.clone(), ..HostState::default() });
+        #[cfg(not(target_os = "linux"))]
+        Arc::new(HostState::default())
+    }
+
+    /// Records the instance's editor link (Linux: its timers and descriptors call through it).
+    pub(crate) fn set_link(&self, _link: &Arc<GuiLink>) {
+        #[cfg(target_os = "linux")]
+        let _ = self.link.set(Arc::downgrade(_link));
+    }
 }
 
 impl Default for HostState {
@@ -47,13 +73,19 @@ impl Default for HostState {
             gui_hide: AtomicBool::new(false),
             gui_resize: AtomicU64::new(0),
             edits: Mutex::new(Vec::with_capacity(EDIT_CAP)),
+            #[cfg(target_os = "linux")]
+            me: std::sync::Weak::new(),
+            #[cfg(target_os = "linux")]
+            link: OnceLock::new(),
+            #[cfg(target_os = "linux")]
+            run_loop: Mutex::new(super::run_loop::Registrations::default()),
         }
     }
 }
 
 /// SAFETY contract: `host` is null or one of our `clap_host` structs, whose `host_data` points
 /// to the `HostState` owned by the same `Instance`.
-unsafe fn state<'a>(host: *const clap_host) -> Option<&'a HostState> {
+pub(crate) unsafe fn state<'a>(host: *const clap_host) -> Option<&'a HostState> {
     if host.is_null() {
         return None;
     }
@@ -196,6 +228,11 @@ pub(super) unsafe extern "C" fn host_get_extension(_host: *const clap_host, id: 
     }
     // SAFETY: extension ids are NUL-terminated strings (CLAP contract); non-null checked above.
     let id = unsafe { CStr::from_ptr(id) };
+    // Linux: timers and descriptors on the plug-in host thread's run loop (issue #147).
+    #[cfg(target_os = "linux")]
+    if let Some(ext) = super::run_loop::extension(id) {
+        return ext;
+    }
     if id == CLAP_EXT_LOG {
         (&HOST_LOG as *const clap_host_log).cast()
     } else if id == CLAP_EXT_PARAMS {
@@ -209,7 +246,8 @@ pub(super) unsafe extern "C" fn host_get_extension(_host: *const clap_host, id: 
     } else if id == CLAP_EXT_GUI {
         (&HOST_GUI as *const clap_host_gui).cast()
     } else {
-        // Everything else (thread-check, timers, fd support, …) is unsupported: CLAP allows null.
+        // Everything else (thread-check, and timers and fd support off Linux, …) is unsupported:
+        // CLAP allows null.
         std::ptr::null()
     }
 }

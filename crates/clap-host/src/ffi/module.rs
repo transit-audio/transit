@@ -145,7 +145,7 @@ impl Bundle {
         let err = |m: &str| ClapError::Instantiate(plugin_id.to_string(), m.to_string());
         let create = self.factory().create_plugin.ok_or_else(|| err("factory cannot create plugins"))?;
         let cid = CString::new(plugin_id).map_err(|_| err("id contains NUL"))?;
-        let state = Arc::new(HostState::default());
+        let state = HostState::new_shared();
         let host = Box::new(clap_host {
             clap_version: CLAP_VERSION,
             host_data: Arc::as_ptr(&state).cast_mut().cast::<c_void>(),
@@ -207,6 +207,7 @@ impl Bundle {
             host: Arc::clone(&inst.state),
             header: transit_rt::editor_window::HeaderCell::new(),
         });
+        inst.state.set_link(&inst.gui);
         Ok(inst)
     }
 }
