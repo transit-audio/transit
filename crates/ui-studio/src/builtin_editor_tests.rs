@@ -657,7 +657,7 @@ fn double_clicking_a_card_title_opens_the_editor_and_the_button_reads_edit() {
 #[test]
 fn a_built_in_window_fits_its_panel_and_has_no_resize_handle() {
     for scale in [1.0_f32, 1.5] {
-        for plugin in ["macro_oscillator", "subtractive_synth", "compressor", "gain"] {
+        for plugin in ["macro_oscillator", "compressor", "gain"] {
             let mut t = T::new();
             t.ctx.set_pixels_per_point(scale);
             let (tr, _) = open_plugin(&mut t, plugin);

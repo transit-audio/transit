@@ -131,7 +131,7 @@ fn midi_effect_session() -> Session {
     let cid = s.new_clip_id();
     let clip = Clip::midi(cid, "Line", 0, sr.samples(2.0), seq);
     let tr = s.track_mut(t).unwrap();
-    tr.instrument = Some(Insert::new("subtractive_synth"));
+    tr.instrument = Some(Insert::new("macro_oscillator"));
     let mut transpose = MidiEffectSlot::new("midi_transpose");
     transpose.params.insert("semitones".into(), 7.0);
     tr.add_midi_effect(transpose, None);
