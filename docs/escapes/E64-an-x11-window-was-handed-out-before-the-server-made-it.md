@@ -20,7 +20,7 @@
    first until a loaded runner reordered the two clients. No lint looks at cross-connection
    ordering. It is the E49 family (a test that depended on scheduling), but the wait it lacked was
    in the product.
-4. **Regression test.** No test change was needed: the product now ends `EditorWindow::new`, every
+4. **Regression test.** The product now ends `EditorWindow::new`, every
    resize (`set_content`) and `close` with a round trip (`settle`, x11rb's `sync`: the server has
    processed everything the connection sent before the call returns). The test's checks right after
    those calls now pin that guarantee for windows the server alone decides: before a window is
