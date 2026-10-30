@@ -28,6 +28,7 @@ pub mod onset;
 mod open_log;
 pub mod plan_bridge;
 pub mod player;
+pub mod preview;
 pub mod publication;
 pub mod realtime_render;
 pub mod record;

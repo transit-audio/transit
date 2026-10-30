@@ -489,6 +489,9 @@ pub(super) struct Audio {
     /// The real-time render's capture (ADR 0027): control arms it; this thread copies the blocks
     /// the render keeps into its preallocated ring.
     render_tap: Option<Arc<crate::realtime_render::RenderTap>>,
+    /// The browser's preview (#211): Main asks, a feeder decodes, this thread adds it after Main's
+    /// master section. Never part of the plan.
+    preview: Option<crate::preview::PreviewVoice>,
     /// The callback's phase marker (#162).
     marker: Option<Arc<crate::telemetry::PhaseMarker>>,
     transport: Transport,
@@ -593,6 +596,7 @@ impl Audio {
                 probe_block: None,
                 ext_probe: None,
                 render_tap: None,
+                preview: None,
                 marker: None,
                 shared,
                 pending: 0,
@@ -654,6 +658,10 @@ impl Audio {
 
     pub(super) fn set_render_tap(&mut self, tap: Arc<crate::realtime_render::RenderTap>) {
         self.render_tap = Some(tap);
+    }
+
+    pub(super) fn set_preview(&mut self, voice: crate::preview::PreviewVoice) {
+        self.preview = Some(voice);
     }
 
     pub(super) fn set_midi_capture(&mut self, capture: crate::midi_capture::Sink) {
@@ -905,6 +913,13 @@ impl Audio {
         // live playback renders and reads them (ADR 0027): a copy into its ring, nothing more.
         if let Some(tap) = &self.render_tap {
             tap.block(state.playing, state.render_position, frames, self.plans.engine().latency, self.plans.output(), self.plans.input());
+        }
+        // The browser's preview joins Main after the master section and after the render tap took
+        // its copy, so it is heard and never printed, metered or routed (#211). A transport start
+        // (a count-in included) stops it.
+        if let Some(preview) = &mut self.preview {
+            let channels = self.plans.engine().main_channels();
+            preview.mix(self.plans.output_mut(), channels, frames, state.playing || state.count_in.is_some());
         }
         // An External Instrument Measure records the return the plan read for this block and
         // sends the notes due at its first frame, stamped with that frame's presentation time.

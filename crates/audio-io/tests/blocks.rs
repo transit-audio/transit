@@ -109,3 +109,29 @@ fn a_file_that_is_not_audio_is_refused_at_open() {
     let junk = b"this is not an audio file at all".repeat(10);
     assert!(BlockReader::open(Box::new(Cursor::new(junk.clone())), junk.len() as u64, Some("wav")).is_err());
 }
+
+#[test]
+fn native_pcm_seeks_to_a_frame_and_reads_on_from_there() {
+    let buf = tone(2, 10_000, 48_000);
+    let bytes = encode(&buf, &EncodeOptions { format: FileFormat::Wav, bit_depth: BitDepth::Float32, dither: false, bwf: None }).unwrap();
+    let mut r = BlockReader::open(Box::new(Cursor::new(bytes.clone())), bytes.len() as u64, Some("wav")).unwrap();
+    let mut block = Vec::new();
+    assert!(r.seek(7_000).unwrap());
+    assert_eq!(r.read(&mut block, 100).unwrap(), 100);
+    assert_eq!(block[1], buf.channels[1][7_000..7_100]);
+    assert!(r.seek(20_000).unwrap(), "past the end clamps to it");
+    assert_eq!(r.read(&mut block, 100).unwrap(), 0);
+    let flac = encode(&buf, &EncodeOptions { format: FileFormat::Flac, bit_depth: BitDepth::Int16, dither: false, bwf: None }).unwrap();
+    let mut r = BlockReader::open(Box::new(Cursor::new(flac.clone())), flac.len() as u64, Some("flac")).unwrap();
+    assert!(!r.seek(7_000).unwrap(), "a decoded format does not seek");
+}
+
+#[test]
+fn a_header_claiming_thousands_of_channels_reads_in_bounded_blocks() {
+    // 4,000 channels of 32-bit float, 300 frames: a read of 4096 frames would hold 16 M samples.
+    let bytes = [wav_float_header(4_000, 48_000, 300).unwrap(), vec![0u8; 4_000 * 4 * 300]].concat();
+    let mut r = BlockReader::open(Box::new(Cursor::new(bytes.clone())), bytes.len() as u64, Some("wav")).unwrap();
+    let mut block = Vec::new();
+    let n = r.read(&mut block, 4096).unwrap();
+    assert!(n > 0 && n * 4_000 <= 1 << 20, "{n} frames");
+}

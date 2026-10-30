@@ -739,6 +739,10 @@ impl Audio {
     pub fn output(&self) -> &[Vec<f32>] {
         &self.buffers.output
     }
+    /// The block the last render wrote, for what joins it after the mix (the browser preview).
+    pub(crate) fn output_mut(&mut self) -> &mut [Vec<f32>] {
+        &mut self.buffers.output
+    }
     /// The live input the last render read (planar device channels), for the hardware probe.
     pub fn input(&self) -> &[Vec<f32>] {
         &self.mix.input

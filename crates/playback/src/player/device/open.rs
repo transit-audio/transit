@@ -22,7 +22,7 @@ impl Player {
     #[doc(hidden)]
     pub fn prepare_device_free(session: Arc<Session>) -> Result<Self, String> {
         let rate = session.sample_rate.hz();
-        Self::prepare(session, rate, IoMap::default()).map(|(mut player, access, _clock)| {
+        Self::prepare_with(session, rate, IoMap::default(), true).map(|(mut player, access, _clock)| {
             let output = DeviceOutput::new(access, &player, 2);
             *player.test_output.get_mut() = Some(output);
             player
@@ -51,6 +51,10 @@ impl Player {
         if let Ok(mut output) = self.test_output.try_borrow_mut()
             && let Some(output) = output.as_mut()
         {
+            // The preview's feeder runs here too, before the block: no thread to wait for.
+            if let Some(preview) = &self.preview {
+                preview.pump();
+            }
             output.fill_f32(&mut [0.0f32; 1024]);
         }
         if !was {
@@ -111,6 +115,7 @@ impl Player {
             probe: None,
             ext_probe: None,
             render_tap: None,
+            preview: None,
             render_job: RefCell::new(None),
             loop_probe: None,
             calibration_key: None,
@@ -127,6 +132,17 @@ impl Player {
         session: Arc<Session>,
         device_rate: u32,
         io: IoMap,
+    ) -> Result<(Self, AudioAccess<Audio>, device_clock::CallbackClock), String> {
+        Self::prepare_with(session, device_rate, io, false)
+    }
+
+    /// [`Self::prepare`]; `manual_preview` runs the preview's feeder in `step_device_free` instead
+    /// of on its thread (device-free tests).
+    fn prepare_with(
+        session: Arc<Session>,
+        device_rate: u32,
+        io: IoMap,
+        manual_preview: bool,
     ) -> Result<(Self, AudioAccess<Audio>, device_clock::CallbackClock), String> {
         let (callback_clock, reader) = device_clock::stream_clock(device_clock::Direction::Output, device_rate)?;
         let key = reader.key();
@@ -192,6 +208,15 @@ impl Player {
         audio.set_render_tap(Arc::clone(&render_tap));
         audio.set_phase_marker(Arc::clone(player.fault.telemetry.marker()));
         player.render_tap = Some(render_tap);
+        let preview =
+            if manual_preview { Ok(crate::preview::Preview::manual(target.sample_rate)) } else { crate::preview::Preview::new(target.sample_rate) };
+        match preview {
+            Ok((preview, voice)) => {
+                audio.set_preview(voice);
+                player.preview = Some(preview);
+            }
+            Err(error) => log::warn!("the browser preview is unavailable: {error}"),
+        }
         player.loop_probe = Some(Arc::new(crate::loop_probe::LoopProbe::new(device_rate)));
         *player.capture.get_mut() = Some(capture);
         let (anchor, access) = Anchor::new(audio);

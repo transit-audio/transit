@@ -122,6 +122,8 @@ pub struct Player {
     ext_probe: Option<Arc<crate::external_probe::ExtProbe>>,
     /// The real-time render's capture (ADR 0027); see `realtime_render`.
     render_tap: Option<Arc<crate::realtime_render::RenderTap>>,
+    /// The browser's preview (#211); `None` when its feeder thread did not start.
+    preview: Option<crate::preview::Preview>,
     /// The real-time render running, with its writer thread.
     render_job: RefCell<Option<realtime_render::Job>>,
     /// The loopback calibration probe (native ASIO, #20): the device callbacks play and record it
@@ -827,6 +829,10 @@ impl Player {
     }
     pub fn position(&self) -> Samples {
         self.shared.position.load(Ordering::Relaxed)
+    }
+    /// The browser's preview player (#211): outside the plan and the session.
+    pub fn preview(&self) -> Option<&crate::preview::Preview> {
+        self.preview.as_ref()
     }
     pub fn is_playing(&self) -> bool {
         self.shared.playing.load(Ordering::Relaxed)

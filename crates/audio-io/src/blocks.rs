@@ -24,6 +24,8 @@ impl<T: Read + Seek + Send + Sync> ReadSeek for T {}
 const HEADER_BYTES: u64 = 1 << 20;
 /// The largest file decoded through symphonia: it is held in memory while it is read.
 pub const MAX_HELD_BYTES: u64 = 1 << 30;
+/// The most samples (frames times channels) one read of native PCM returns.
+const MAX_READ_SAMPLES: usize = 1 << 20;
 
 /// A file's audio, decoded on demand in blocks. See the module documentation.
 pub struct BlockReader {
@@ -41,7 +43,8 @@ struct Pcm {
     src: Box<dyn ReadSeek>,
     kind: PcmKind,
     channels: usize,
-    /// Byte offset of the next frame, and of the end of the data.
+    /// Byte offset of the first frame, the next one, and the end of the data.
+    start: u64,
     pos: u64,
     end: u64,
     bytes: Vec<u8>,
@@ -126,7 +129,7 @@ impl BlockReader {
         let block = (layout.kind.bytes() * channels) as u64;
         let end = layout.data_start.saturating_add(layout.info.frames.saturating_mul(block)).min(len);
         src.seek(SeekFrom::Start(layout.data_start))?;
-        let pcm = Pcm { src, kind: layout.kind, channels, pos: layout.data_start, end, bytes: Vec::new() };
+        let pcm = Pcm { src, kind: layout.kind, channels, start: layout.data_start, pos: layout.data_start, end, bytes: Vec::new() };
         Ok(BlockReader { info: layout.info, inner: Inner::Pcm(pcm) })
     }
 
@@ -136,8 +139,20 @@ impl BlockReader {
         &self.info
     }
 
-    /// Decode the next frames, at most `max`, into `out`: one vector per channel of the file,
-    /// cleared and refilled (their capacity is reused). Returns the frames read; 0 at the end.
+    /// Move to `frame` (clamped to the end) when the file can seek: native PCM can, a symphonia
+    /// decode cannot (`Ok(false)`, nothing moves). The next [`Self::read`] starts there.
+    pub fn seek(&mut self, frame: u64) -> Result<bool> {
+        let Inner::Pcm(p) = &mut self.inner else { return Ok(false) };
+        let block = (p.kind.bytes() * p.channels) as u64;
+        let at = p.start.saturating_add(frame.saturating_mul(block)).min(p.end);
+        p.src.seek(SeekFrom::Start(at))?;
+        p.pos = at;
+        Ok(true)
+    }
+
+    /// Decode the next frames, at most `max` (fewer for a file of very many channels), into `out`:
+    /// one vector per channel of the file, cleared and refilled (their capacity is reused).
+    /// Returns the frames read; 0 at the end.
     pub fn read(&mut self, out: &mut Vec<Vec<f32>>, max: usize) -> Result<usize> {
         let n = match &mut self.inner {
             Inner::Pcm(p) => p.read(out, max)?,
@@ -161,6 +176,8 @@ impl Pcm {
             return Ok(0);
         }
         let left = usize::try_from(self.end.saturating_sub(self.pos) / block as u64).unwrap_or(usize::MAX);
+        // A header may claim thousands of channels: a read never holds more than MAX_READ_SAMPLES.
+        let max = max.min((MAX_READ_SAMPLES / self.channels.max(1)).max(1));
         let want = left.min(max).saturating_mul(block);
         if want == 0 {
             return Ok(0);
