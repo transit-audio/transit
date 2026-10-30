@@ -777,6 +777,9 @@ fn the_telemetry_readout_texts_and_click_open_the_details_window() {
     assert_eq!(load_text(123_456), "12.3%");
     assert_eq!(load_text(1_000_000), "100.0%");
     assert_eq!(load_text(0), "0.0%");
+    // One 214 ms callback against a 2.67 ms budget (#230) is an outlier, capped and labeled.
+    assert_eq!(load_text(9_999_999), "999.9%");
+    assert_eq!(load_text(80_470_000), crate::telemetry::OUTLIER_TEXT);
     let mut t = T::new();
     t.app.telemetry.injected = Some(s);
     t.frames(30);
@@ -1027,6 +1030,7 @@ fn the_load_readout_formats_buffer_rate_and_host() {
     assert_eq!(format_text(256, 96_000), "256 @ 96 kHz");
     assert_eq!(format_text(0, 48_000), "-- @ 48 kHz");
     assert_eq!(percent_text(425_000), "42%");
+    assert_eq!(percent_text(80_470_000), ">999%", "a stalled callback is capped (#230)");
     assert_eq!(host_text("ASIO"), "ASIO");
     assert_eq!(host_text("WASAPI"), "WASAPI");
     let mut t = T::new();

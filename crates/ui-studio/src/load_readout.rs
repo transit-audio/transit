@@ -41,6 +41,10 @@ pub fn level(ppm: u64, overloaded: bool) -> Level {
 
 /// `42%`: whole percent from millionths (1_000_000 = 100%).
 pub fn percent_text(ppm: u64) -> String {
+    // One stalled callback, not load: capped (#230), the details window says what it was.
+    if ppm >= crate::telemetry::OUTLIER_PPM {
+        return ">999%".to_owned();
+    }
     format!("{}%", ppm / 10_000)
 }
 
