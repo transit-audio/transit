@@ -22,7 +22,7 @@ layer and egui UI. transit began in October 2026 as a fork of
 credited in About and in NOTICE.
 
 > [!NOTE]
-> transit is alpha software under active development; the current release is [v0.4.1](https://github.com/transit-audio/transit/releases/tag/v0.4.1) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
+> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.4.1](https://github.com/transit-audio/transit/releases/tag/v0.4.1) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
 > correctness, stability and performance, measured on real hardware, ahead of new features.
 > Expect rough edges in the UI and some missing features; the audio engine, recording alignment
 > and device handling get fixed first, following [the engineering principles](docs/principles.md).
