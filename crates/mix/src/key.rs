@@ -299,7 +299,10 @@ impl KeyBank {
     /// latency a key arrives with (its source's output). With `pdc` off nothing is delayed.
     /// `duplex`: the device has live input, so the strip's hardware inserts run and add their round trip.
     /// Returns the longest delay a line could not hold (0: none).
-    pub(crate) fn align(&mut self, t: &Track, st: &mut Strip, alignment: KeyAlignment, source: &dyn Fn(&KeySpec) -> usize) -> usize {
+    ///
+    /// `s` is the plan's session: a rack's macro lanes give the same parameter values here as in
+    /// the strip's processing, so a parameter is not set twice a block.
+    pub(crate) fn align(&mut self, s: &Session, t: &Track, st: &mut Strip, alignment: KeyAlignment, source: &dyn Fn(&KeySpec) -> usize) -> usize {
         let KeyAlignment { at, arrive, pos, pdc, duplex } = alignment;
         for k in st.key_in.iter_mut() {
             k.want = 0;
@@ -322,7 +325,7 @@ impl KeyBank {
                 continue;
             }
             // Block-start values only: processing sends the breakpoints inside the block.
-            apply_params(None, slot, ins, t, &st.touch, i, pos, 0);
+            apply_params(Some(s), slot, ins, t, &st.touch, i, pos, 0);
             if pdc
                 && ins.key.is_some()
                 && let Some(e) = self.entries.iter_mut().find(|e| e.spec.id == t.id && usize::from(e.spec.slot) == i)

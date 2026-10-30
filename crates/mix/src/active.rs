@@ -715,7 +715,7 @@ impl PlanTables {
                             }
                         }
                     };
-                    let short = keys.align(t, st, key::KeyAlignment { at, arrive, pos, pdc, duplex }, &from);
+                    let short = keys.align(s, t, st, key::KeyAlignment { at, arrive, pos, pdc, duplex }, &from);
                     status.note_capacity(short, st);
                 }
                 pdc_visit(t, st, at, alive, PdcWalk { busses, sinks, main_arrival: &mut walked, pdc });

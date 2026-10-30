@@ -13,7 +13,7 @@ use transit_mix::{
     render_range,
 };
 use transit_model::{
-    AutoParam, BusId, ChannelFormat, Clip, Insert, MACRO_SLOT, MacroMapping, ParamRange, Rack, RackMember, Route, Session, TrackId, TrackKind, Zone,
+    AutoParam, BusId, KeyFrom, KeySource, Tap, ChannelFormat, Clip, Insert, MACRO_SLOT, MacroMapping, ParamRange, Rack, RackMember, Route, Session, TrackId, TrackKind, Zone,
     macro_param,
 };
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
@@ -105,7 +105,7 @@ fn the_rack_plays_its_clips_through_the_zones_and_sums_like_its_members_alone() 
 type Heard = Arc<Mutex<HashMap<TrackId, Vec<Option<PluginEvent>>>>>;
 
 /// The last value each (track, slot) instance was given, any parameter.
-type Params = Arc<Mutex<HashMap<(TrackId, usize), f32>>>;
+type Params = Arc<Mutex<HashMap<(TrackId, usize), (f32, u32)>>>;
 
 struct Recorder {
     inner: Box<dyn Plugin>,
@@ -128,7 +128,7 @@ impl Plugin for Recorder {
         if let Ok(mut p) = self.params.try_lock()
             && let Some(x) = p.get_mut(&self.key)
         {
-            *x = v;
+            *x = (v, x.1 + 1);
         }
         self.inner.set_param(id, v)
     }
@@ -180,7 +180,7 @@ impl Rig {
         let params: Params = Arc::default();
         for m in members {
             heard.lock().unwrap().insert(m, Vec::with_capacity(4096));
-            params.lock().unwrap().insert((m, 0), f32::NAN);
+            params.lock().unwrap().insert((m, 0), (f32::NAN, 0));
         }
         let mut rig = Rig {
             mix: MixEngine::realtime_with_events(target, EngineEpoch::FIRST, EventLimits::default()),
@@ -398,5 +398,36 @@ fn a_macro_lane_drives_the_mapped_parameter_with_range_and_curve() {
     rack.lane_mut(&AutoParam::Plugin { slot: MACRO_SLOT, param: macro_param(0) }).set_point(0, 0.5);
     rig.publish(&s);
     rig.render(2);
-    assert_eq!(rig.params.lock().unwrap()[&(a, 0)], expect, "the insert got the mapped value from the rack's macro lane");
+    assert_eq!(rig.params.lock().unwrap()[&(a, 0)].0, expect, "the insert got the mapped value from the rack's macro lane");
+}
+
+/// A session with a sidechain key walks every insert's parameters before the block
+/// (`KeyBank::align`): a macro-ruled parameter gets the same value there, so it is set once and
+/// then left alone while the lane holds still.
+#[test]
+fn a_macro_ruled_parameter_is_set_once_in_a_session_with_a_sidechain_key() {
+    MixEngine::force_serial(true);
+    let mut rig = Rig::new();
+    let (a, b) = (rig.members[0], rig.members[1]);
+    let p = transit_dsp::plugin_info("gain").unwrap().params.first().unwrap();
+    let range = ParamRange { lo: p.min, hi: p.max, log: false, step: false };
+    let mut s = rig.session.clone();
+    let mut ins = Insert::new("clap:test.rack");
+    ins.params.insert(p.id.into(), p.default);
+    s.track_mut(a).unwrap().mixer.inserts[0] = Some(ins);
+    // A key: B's compressor listens to an audio track outside the rack.
+    let kick = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Kick"));
+    let mut comp = Insert::new("compressor");
+    comp.key = Some(KeySource { from: KeyFrom::Track(kick), tap: Tap::Post });
+    s.track_mut(b).unwrap().mixer.inserts[0] = Some(comp);
+    let rack = s.track_mut(rig.rack).unwrap();
+    rack.rack.as_mut().unwrap().macros[0].mappings.push(MacroMapping { track: a, slot: 0, param: p.id.into(), min: 0.0, max: 1.0, curve: 0.0, range });
+    rack.lane_mut(&AutoParam::Plugin { slot: MACRO_SLOT, param: macro_param(0) }).set_point(0, 0.5);
+    rig.publish(&s);
+    rig.render(3);
+    let (value, _) = rig.params.lock().unwrap()[&(a, 0)];
+    assert_eq!(value, range.plain(0.5));
+    rig.params.lock().unwrap().insert((a, 0), (value, 0));
+    rig.render(4);
+    assert_eq!(rig.params.lock().unwrap()[&(a, 0)], (value, 0), "no set while the macro lane holds still");
 }
