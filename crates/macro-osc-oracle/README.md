@@ -40,7 +40,7 @@ The C++ wrapper turns flush-to-zero on around each call into the vendored code, 
 desktop test harness does (MXCSR FTZ on x86-64; FPCR.FZ on AArch64, which also zeroes denormal
 inputs), and restores the previous mode before returning. Rust code, the port included, always runs
 in Rust's default floating-point mode: Rust assumes it, and changing it under Rust code is undefined
-behavior. Where the firmware relies on flush-to-zero, the port reproduces it explicitly in its own
+behavior. Where the reference (the C++ as that harness builds it) relies on flush-to-zero, the port reproduces it explicitly in its own
 code, never by changing the host's floating-point mode.
 
 ## The floor

@@ -110,7 +110,7 @@ voice. Each `render` call is one control block timed as the firmware's 12 frames
 blocks for the firmware's envelope timing at every rate (24 frames are one control block, 25 are
 three). Decay and low-pass gate color are clamped to [0, 1] inside the voice. At 48 kHz the voice is the firmware's arithmetic,
 bit for bit. The firmware computes pitch against its corrected rate, 47872.34 Hz (the module's codec
-clock), so on the module every note is in tune; rendered at a true 48 kHz the same arithmetic plays
+clock), so on the module every note is in tune (the reference computes against that rate; the module's own arithmetic differs in the last bits, see Flush-to-zero); rendered at a true 48 kHz the same arithmetic plays
 4.6 cents sharp (48000 / 47872.34), and so does this voice. At the other rates the normalized pitch
 is scaled by 48000 / rate and the voice's envelope coefficients (`(200 * 12) / rate` and
 `(20 * 12) / rate`) are per block at that rate, so notes and decays keep their 48 kHz frequency and
@@ -140,18 +140,18 @@ module does; the firmware's tuning is kept for the null tests (ADR 0033, impleme
 
 ## Flush-to-zero
 
-The firmware runs with flush-to-zero (the oracle switches the FPU mode on around each C++ call).
+The firmware's desktop test harness runs with flush-to-zero, and the oracle switches the FPU mode on around each C++ call to match it. The hardware does not: the module runs with flush-to-zero off and fused multiply-adds on, so its arithmetic differs from the reference in the last bits. The reference is the firmware's C++ as the harness builds it, and the port matches that bit for bit.
 Rust code always runs in the default mode, where subnormals are kept, and changing the mode under
 Rust is undefined behavior. So the port reproduces flush-to-zero in its own code: `utils::ftz`
 turns a subnormal result into a zero of the same sign, and the operations that can produce a
-subnormal in the firmware's arithmetic are flushed one by one, as the FPU would: the one-pole
+subnormal in the reference's arithmetic are flushed one by one, as the FPU would: the one-pole
 smoother (`ONE_POLE`), the SVF and one-pole filters, the resonator bank, the parameter
 interpolators, the FX engine's low- and high-pass, and the sums of the swarm, particle, sine and saw
 voices. The sweep proves each one (the swarm, modal, string and particle engines decay into the
 subnormal range and null bit-identical only with the flush). The voice adds its own decaying states:
 the decay envelope, the low-pass gate envelope (vactrol state and its powers), the low-pass gate's
 gain and bleed, the limiter's peak follower, and the internal-envelope modulation; with the flush the
-vactrol state freezes at a tiny normal value once its decrement flushes, as on the firmware. The
+vactrol state freezes at a tiny normal value once its decrement flushes, as in the reference. The
 int16 output never showed those subnormals, so that part is state fidelity (unit test and the
 long-silence scenario), not an output fix.
 
