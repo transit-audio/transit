@@ -107,7 +107,8 @@ fn a_missing_library_is_reported_with_the_install_hint() {
     assert_eq!(state.diagnostic().as_deref(), Some(crate::LIBRARY_MISSING));
     let error = backend.endpoints(ab::Direction::Output).unwrap_err();
     assert_eq!(error, ab::OpenError::DeviceNotAvailable(crate::LIBRARY_MISSING.into()));
-    assert!(crate::LIBRARY_MISSING.contains("pipewire-jack") && crate::LIBRARY_MISSING.contains("pw-jack"));
+    // PipeWire's library is found at its own path (#230): the hint names the package, not pw-jack.
+    assert!(crate::LIBRARY_MISSING.contains("pipewire-jack"));
     assert_eq!(backend.plan_render(&ab::OutputWish::default()).unwrap_err(), crate::LIBRARY_MISSING);
 }
 

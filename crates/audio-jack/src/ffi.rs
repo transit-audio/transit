@@ -5,14 +5,23 @@
 //! `jack-sys` resolves every function it binds when the library is first used and panics if one is
 //! missing; [`LibJack::open_client`] makes that first use under `catch_unwind` and reports it as a
 //! missing library, so no later call can panic for that reason.
+//!
+//! Which `libjack.so.0` that is (#230): before `jack-sys` loads anything, [`choose_library`] probes
+//! the candidates of `crate::library` in order through our own `dlopen` ([`DlLoader`]) and keeps
+//! the first that connects loaded. `jack-sys` then opens `libjack.so.0` by its soname, and the
+//! dynamic loader hands back the object already loaded under that soname (glibc's `dlopen` matches
+//! a bare name against the `DT_SONAME` of the loaded objects; PipeWire's library carries
+//! `libjack.so.0`). [`bind`] checks that `jack-sys` did bind that object (the address of
+//! `jack_client_open` in both), and says so when it did not.
 
 use crate::api::{ClientError, JackApi, JackClient, PhysicalPort};
 use crate::callback::{self, CallbackState};
 use crate::engine::{Engine, Shared};
+use crate::library;
 use jack_sys as j;
 use std::ffi::{CStr, CString, c_char, c_int, c_ulong, c_void};
 use std::panic::{AssertUnwindSafe, catch_unwind};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, PoisonError};
 
 /// `JACK_DEFAULT_AUDIO_TYPE` (types.h: `#define JACK_DEFAULT_AUDIO_TYPE "32 bit float mono audio"`).
 const AUDIO_TYPE: &CStr = c"32 bit float mono audio";
@@ -22,8 +31,128 @@ const EEXIST: i32 = 17;
 /// The real libjack.
 pub(crate) struct LibJack;
 
+/// `jack_client_open` as `jack-sys` declares it (without the trailing `...`; see the SAFETY note in
+/// [`LibJack::open_client`]).
+type OpenFn = unsafe extern "C" fn(*const c_char, j::jack_options_t, *mut j::jack_status_t) -> *mut j::jack_client_t;
+/// `jack_client_close` (jack.h: `int jack_client_close (jack_client_t *client)`).
+type CloseFn = unsafe extern "C" fn(*mut j::jack_client_t) -> c_int;
+
+/// The library selection: the library `jack-sys` is bound to once one connected (for the life of
+/// the process: `jack-sys` keeps its library in a static), and the last selection made.
+struct Chosen {
+    bound: Option<String>,
+    last: Option<library::Selection>,
+}
+
+static CHOSEN: Mutex<Chosen> = Mutex::new(Chosen { bound: None, last: None });
+/// The libraries that connected, kept loaded for the life of the process so the loader resolves
+/// `jack-sys`'s `libjack.so.0` to them (never unloaded: `jack-sys` holds its own handle too).
+static KEPT: Mutex<Vec<libloading::Library>> = Mutex::new(Vec::new());
+
+/// Probes the candidates when a library is needed and none is bound yet; with one connected, binds
+/// `jack-sys` to it. A failed selection is not kept: the next open probes again (a server may have
+/// started since).
+fn choose_library() -> Result<(), ClientError> {
+    let mut chosen = CHOSEN.lock().unwrap_or_else(PoisonError::into_inner);
+    if chosen.bound.is_some() {
+        return Ok(());
+    }
+    let named = std::env::var(library::LIBRARY_ENV).ok();
+    let candidates = library::candidates(named.as_deref(), |path| std::path::Path::new(path).exists());
+    let mut selection = library::select(&candidates, &mut DlLoader);
+    let result = match selection.connected().map(str::to_owned) {
+        Some(path) => match bind(&path) {
+            Ok(()) => {
+                log::info!("JACK: using {path}");
+                chosen.bound = Some(path);
+                Ok(())
+            }
+            Err(why) => {
+                if let Some(last) = selection.attempts.last_mut() {
+                    last.outcome = library::Outcome::Failed(why.clone());
+                }
+                Err(ClientError::Failed(why))
+            }
+        },
+        None => Err(selection.error().unwrap_or(ClientError::ServerNotRunning)),
+    };
+    if result.is_err() {
+        log::info!("JACK: {}", selection.summary());
+    }
+    chosen.last = Some(selection);
+    result
+}
+
+/// Loads `jack-sys`'s library (its first use) and checks it is the object the probe of `path` kept.
+fn bind(path: &str) -> Result<(), String> {
+    let theirs = j::library().map_err(|e| e.to_string())?;
+    let address = |library: &libloading::Library| -> Option<usize> {
+        // SAFETY: the symbol is only looked up and its address compared, never called; libloading
+        // returns an error (not a dangling symbol) when it is missing, and both libraries stay
+        // loaded (jack-sys's in its static, ours in `KEPT`) while the symbol is read.
+        unsafe { library.get::<OpenFn>(b"jack_client_open\0") }.ok().map(|f| *f as usize)
+    };
+    let kept = KEPT.lock().unwrap_or_else(PoisonError::into_inner);
+    let ours = kept.last().and_then(address);
+    if ours.is_some() && ours == address(theirs) {
+        Ok(())
+    } else {
+        Err(format!("{path} connected, but another libjack was already loaded in this process; start transit with pw-jack"))
+    }
+}
+
+/// [`library::Loader`] over `dlopen`: opens and closes a probe client through each library's own
+/// `jack_client_open`, with `JackNoStartServer`.
+struct DlLoader;
+
+impl library::Loader for DlLoader {
+    fn probe(&mut self, path: &str) -> library::Outcome {
+        use library::Outcome;
+        // SAFETY: libloading::Library::new runs the library's initializers. Every candidate is a
+        // libjack (the library a user named, the loader's libjack.so.0, or PipeWire's libjack at
+        // its packaged path), whose initializers only set up its own globals, as for any program
+        // linked against it.
+        let lib = match unsafe { libloading::Library::new(path) } {
+            Ok(lib) => lib,
+            Err(e) => return Outcome::LoadFailed(e.to_string()),
+        };
+        // SAFETY: jack.h declares jack_client_open and jack_client_close with these types (the
+        // former's trailing `...` aside, see `LibJack::open_client`); libloading returns an error
+        // when a symbol is missing. The library stays loaded while the copied pointers are used
+        // (`lib` lives to the end of this function, and past it when kept).
+        let symbols = unsafe { (lib.get::<OpenFn>(b"jack_client_open\0"), lib.get::<CloseFn>(b"jack_client_close\0")) };
+        let (open, close) = match symbols {
+            (Ok(open), Ok(close)) => (*open, *close),
+            _ => return Outcome::LoadFailed(format!("{path} lacks jack_client_open or jack_client_close")),
+        };
+        let mut status: j::jack_status_t = 0;
+        // SAFETY: as in `LibJack::open_client`: jack.h, jack_client_open, "@param client_name of at
+        // most jack_client_name_size() characters" (a short NUL-terminated constant); "@param
+        // status (if non-NULL) an address for JACK to return information" (a live local);
+        // JackNoStartServer alone, so no variadic argument follows (the x86_64/aarch64 argument
+        // passing note there applies unchanged).
+        let client = unsafe { open(c"transit-probe".as_ptr(), j::JackNoStartServer, &mut status) };
+        if client.is_null() {
+            // jack.h: "If this is NULL, the open operation failed"; types.h, JackServerFailed:
+            // "Unable to connect to the JACK server." The library is unloaded as `lib` drops.
+            return if status & j::JackServerFailed != 0 {
+                Outcome::NotRunning
+            } else {
+                Outcome::Failed(format!("jack_client_open failed (status 0x{status:x})"))
+            };
+        }
+        // SAFETY: jack.h, jack_client_close: "Disconnects an external client from a JACK server."
+        // `client` is the probe client just opened through this library, closed once, from this
+        // control thread (never a JACK callback); no callback was installed.
+        unsafe { close(client) };
+        KEPT.lock().unwrap_or_else(PoisonError::into_inner).push(lib);
+        Outcome::Connected
+    }
+}
+
 impl JackApi for LibJack {
     fn open_client(&self, name: &str) -> Result<Box<dyn JackClient>, ClientError> {
+        choose_library()?;
         if let Err(e) = j::library() {
             return Err(ClientError::LibraryMissing(e.to_string()));
         }
@@ -61,7 +190,13 @@ impl JackApi for LibJack {
         Ok(Box::new(LibClient { client, inputs: Vec::new(), outputs: Vec::new(), state: std::ptr::null_mut() }))
     }
 
+    fn library(&self) -> Option<library::Selection> {
+        CHOSEN.lock().unwrap_or_else(PoisonError::into_inner).last.clone()
+    }
+
     fn version(&self) -> Option<String> {
+        // Only once a library is bound: loading jack-sys's library earlier would pin the default.
+        CHOSEN.lock().unwrap_or_else(PoisonError::into_inner).bound.as_ref()?;
         let library = j::library().ok()?;
         // SAFETY: jack.h declares "const char * jack_get_version_string(void)
         // JACK_OPTIONAL_WEAK_EXPORT;", so the symbol, when present, has exactly this type;

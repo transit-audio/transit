@@ -47,6 +47,7 @@ mod fake;
 #[cfg(all(target_os = "linux", feature = "libjack"))]
 #[allow(unsafe_code)]
 mod ffi;
+pub mod library;
 #[cfg(all(test, target_os = "linux", feature = "libjack"))]
 mod server_tests;
 mod session;
@@ -59,7 +60,7 @@ pub use session::{AUTO_CONNECT_ENV, JackBackend, auto_connect_from, server_name}
 /// The system name every endpoint of this backend carries (the one saved configurations use).
 pub const SYSTEM: &str = "JACK";
 /// What the system says when `libjack.so.0` does not load.
-pub const LIBRARY_MISSING: &str = "JACK library not found: install pipewire-jack (or JACK), or start transit with pw-jack";
+pub const LIBRARY_MISSING: &str = "JACK library not found: install pipewire-jack (PipeWire) or JACK";
 /// What the system says when no JACK or PipeWire server answers (none is ever started).
 pub const SERVER_NOT_RUNNING: &str = "JACK/PipeWire server not running";
 /// The name transit's client asks for; the server makes it unique.
