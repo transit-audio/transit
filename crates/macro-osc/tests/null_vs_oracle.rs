@@ -2,7 +2,14 @@
 //!
 //! Each engine is rendered over the oracle's engine-level sweep (`sweep::engine_points`: 78 points,
 //! 48 kHz, 12-frame blocks, a fresh engine and the same seed per point) by the port and by the
-//! oracle on the same runner, and the residual of out and aux is held to [`BOUND_DBFS`].
+//! oracle on the same runner, and the peak and RMS residual of out and aux is held to [`bound_dbfs`]:
+//! the oracle's measured floor for this runner family plus [`MARGIN_DB`].
+//!
+//! The margin is zero: every engine nulls bit-identical against the oracle (measured on Windows
+//! x86-64 MSVC, 2026-10-30), so any residual at all is a port defect to hunt, never a margin to
+//! widen. Flush-to-zero, which the oracle runs with, is reproduced in the port's own code
+//! (`transit_macro_osc::utils::ftz`, see the crate README); the test process keeps Rust's default
+//! floating-point mode.
 //!
 //! Set `MACRO_OSC_NULL_POINTS` to print the residual and the first differing sample of every point
 //! whose label contains its value (empty: every point).
@@ -10,13 +17,19 @@
 #![forbid(unsafe_code)]
 
 use transit_macro_osc::engine::{Engine, EngineParameters, TriggerState};
+use transit_macro_osc_oracle::floor::RunnerFamily;
 use transit_macro_osc_oracle::residual::{Residual, residual_f32};
 use transit_macro_osc_oracle::sweep::{ENGINE_POINT_FRAMES, EnginePoint, SEED, engine_points, render_engine_point};
 use transit_macro_osc_oracle::{BLOCK_SIZE, MAX_BLOCK_SIZE, Model, Session, Trigger};
 
-/// The bound every engine is held to, peak and RMS, dBFS: the oracle's floor (`-inf`, bit-identical)
-/// plus the margin. See the crate README.
-const BOUND_DBFS: f64 = f64::NEG_INFINITY;
+/// The margin over the oracle's floor, dB. Zero: the port is held to bit identity.
+const MARGIN_DB: f64 = 0.0;
+
+/// The bound every engine is held to, peak and RMS, dBFS: the oracle's self-comparison floor on this
+/// runner family plus [`MARGIN_DB`]. A family with no measured floor is held to bit identity too.
+fn bound_dbfs() -> f64 {
+    RunnerFamily::current().self_floor_dbfs().unwrap_or(f64::NEG_INFINITY) + MARGIN_DB
+}
 
 fn port_engine(model: Model) -> Box<dyn Engine> {
     use transit_macro_osc::engine::*;
@@ -103,6 +116,7 @@ fn worse(a: Option<(Residual, String)>, r: Residual, label: String) -> Option<(R
 /// Renders the whole engine-level sweep of `model` on both sides and asserts the bound.
 fn null_engine(model: Model) {
     let session = Session::lock();
+    let bound = bound_dbfs();
     let filter = std::env::var("MACRO_OSC_NULL_POINTS").ok();
     let (mut worst_out, mut worst_aux) = (None, None);
     let mut failing = 0usize;
@@ -112,7 +126,7 @@ fn null_engine(model: Model) {
         let port = render_port_point(model, point);
         let out = residual_f32(&port.out, &oracle.out).expect("lengths");
         let aux = residual_f32(&port.aux, &oracle.aux).expect("lengths");
-        if !out.within(BOUND_DBFS) || !aux.within(BOUND_DBFS) {
+        if !out.within(bound) || !aux.within(bound) {
             failing += 1;
         }
         if filter.as_ref().is_some_and(|f| point.label().contains(f.as_str())) {
@@ -130,7 +144,7 @@ fn null_engine(model: Model) {
     let (wo, lo) = worst_out.expect("points");
     let (wa, la) = worst_aux.expect("points");
     println!("{}: worst out {wo} at {lo}; worst aux {wa} at {la}; {failing} of {} points over the bound", model.label(), points.len());
-    assert_eq!(failing, 0, "{}: {failing} points over {BOUND_DBFS} dBFS; worst out {wo} at {lo}; worst aux {wa} at {la}", model.label());
+    assert_eq!(failing, 0, "{}: {failing} points over {bound} dBFS; worst out {wo} at {lo}; worst aux {wa} at {la}", model.label());
 }
 
 macro_rules! null_tests {
