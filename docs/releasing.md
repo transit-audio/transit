@@ -59,6 +59,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
 
 ## Released
 
+- `v0.4.1`, 2026-10-30, commit `(see tag)`: point release (keyed plans on the workers by default, stuck plug-in Give up, title bars, status timeout, browser Locations, multi-clip copy, long takes refused loudly). Body from `docs/releases/v0.4.1.md`.
 - `v0.4.0`, 2026-10-29, commit `ef9ad4e5`: engine release (parallel render pool on by default, #172, #117, #171, video removed). Body from `docs/releases/v0.4.0.md`.
 - `v0.3.2`, 2026-10-27, commit `caca6f0e`: patch release (FX channel send, step idle polling, Linux diagnostics report, MIDI Mappings alignment, timing lint). Body from `docs/releases/v0.3.2.md`.
 - `v0.3.1`, 2026-10-26, commit `c9c73d23`: patch release (interface zoom, step input, looped clips in the piano roll, Cycle from the selection, MIDI Mappings table, diagnostics report); screenshots refreshed.
