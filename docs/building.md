@@ -72,13 +72,16 @@ target/release/audio-bench --backend jack --list-devices
 
 - **libjack is loaded at run time** (`libjack.so.0`, through `jack-sys`'s `dynamic_loading`), so the
   binary starts on a system without JACK; the JACK system then says "JACK library not found". transit
-  tries, in order, the library `TRANSIT_JACK_LIBRARY` names (a path), the loader's `libjack.so.0`,
-  then PipeWire's library at `/usr/lib/x86_64-linux-gnu/pipewire-0.3/jack/`,
+  tries the library `TRANSIT_JACK_LIBRARY` names (a path) first, then the loader's `libjack.so.0` and
+  PipeWire's library at `/usr/lib/x86_64-linux-gnu/pipewire-0.3/jack/`,
   `/usr/lib/aarch64-linux-gnu/pipewire-0.3/jack/`, `/usr/lib64/pipewire-0.3/jack/` and
-  `/usr/lib/pipewire-0.3/jack/`, and uses the first whose probe connects (#230). So on Debian and
-  Ubuntu with both `jackd2` and `pipewire-jack` installed and no jackd running, PipeWire answers
-  without `pw-jack`. Audio Devices shows the library in use ("JACK library: ...") or every library
-  tried and why. PipeWire documents no variable for its library path (`pw-jack` sets
+  `/usr/lib/pipewire-0.3/jack/`, and uses the first whose probe connects (#230). When a PipeWire
+  server's socket exists (and no library is named), PipeWire's library goes before `libjack.so.0`:
+  JACK 2's libjack stays mapped after a failed probe, and once loaded it would be the one `jack-sys`
+  binds, so it must not be loaded first. So on Debian and Ubuntu with both `jackd2` and
+  `pipewire-jack` installed and PipeWire running, PipeWire answers without `pw-jack` (to be
+  confirmed by a tester, known issue KC5). With no PipeWire socket the default goes first. Audio
+  Devices shows the library in use ("JACK library: ...") or every library tried and why. PipeWire documents no variable for its library path (`pw-jack` sets
   `LD_LIBRARY_PATH`), hence transit's own `TRANSIT_JACK_LIBRARY`.
 - **The server must be running.** transit never starts one (`JackNoStartServer`); with none it says
   "JACK/PipeWire server not running". The server sets the rate and the quantum; under PipeWire pin
@@ -91,9 +94,13 @@ target/release/audio-bench --backend jack --list-devices
   driver's QUANT), which a client cannot change while `clock.force-quantum` pins it. Audio Devices
   shows the three numbers for a stream PipeWire serves, and offers only the buffers whose periods the
   server's `clock.min-quantum` to `clock.max-quantum` allow (read with `pw-metadata -n settings 0`).
+  The latency is not the quantum alone: cpal keeps the whole ALSA buffer queued, so you hear about
+  the buffer plus the quantum. ALSA's `default` counts as PipeWire's only where pipewire-alsa's
+  `99-pipewire-default.conf` is installed (`/etc/alsa/conf.d` or `/usr/share/alsa/alsa.conf.d`).
 - **Runtime:** a running JACK 2 or PipeWire server (with PipeWire's JACK library, `pipewire-jack`).
-  `pw-jack transit` still works and is the fallback when JACK 2's library is already loaded in the
-  process (the window then says so). In Audio Devices choose the
+  `pw-jack transit` still works, and is the way out when the window says "another libjack was
+  already loaded in this process" (JACK 2's library was loaded first, for example with no PipeWire
+  socket at the first probe). In Audio Devices choose the
   JACK system and Backend > Native JACK (or leave Auto: with a server answering, Auto opens Native
   JACK on the JACK system and on the untouched default; with none it opens cpal's ALSA host). The
   buffer size and rate are the server's; the panel shows them and where to change them. Set
