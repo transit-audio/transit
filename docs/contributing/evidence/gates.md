@@ -85,7 +85,11 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
 - A test that takes the render-worker path and asserts what a strip produced (audio, a panic, an
   event) sets the strip deadline itself: far (`set_strip_deadline(Some(60 s))`) to wait for every
   strip, zero or a held worker to force an overrun. Inheriting the default share is a test defect
-  (E49 recurrence 2026-10-29; a `cargo xtask timing` rule is #220).
+  (E49 recurrence 2026-10-29; a `cargo xtask timing` rule is #220). A test that needs a worker to
+  hold one strip holds it (`Shared::hold` in `crates/mix/tests/common/workers.rs`) and waits for that
+  strip's `holding` signal, never for "some strip is away"; a continuity count starts at the first
+  block (`ContinuityInstrument::expect_from`), so overruns before an instrument's first render are
+  holes too (E49 recurrence 2026-10-30).
 - A failing test is never rerun to make it pass, and a chain never reruns a failed test even to
   capture its message: read the output, report it verbatim and bug-hunt the root cause before any test
   change. Three test defects were found this way on 2026-10-29, and no product defect. The escape

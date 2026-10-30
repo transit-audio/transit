@@ -144,3 +144,31 @@ produced sets the strip deadline itself. Blind spot: `cargo xtask timing` cannot
 test inherits from the engine's default (a lint is #220);
 `render_pool.rs`'s `audio_thread_render_does_not_wait_for_a_saturated_global_pool` still asserts a
 nonzero peak under the default deadline and is a review item.
+
+Recurrence 2026-10-30 (main a92db720; CI run 40997977995 macos and Realtime run 40997977992
+macos-x86_64): two `crates/mix/tests/render_workers.rs` tests failed on macOS only; chain BS touched
+nothing in `crates/mix`. Both were test defects; the product was right in each.
+(1) `continuity_through_a_real_worker_set_with_stalls_and_live_midi` asserted holes 39296 samples
+against (busy 304 + unstarted 9) x 128 = 40064. The continuity instrument started its time at its
+first processed block (`ContinuityInstrument::process`, `crates/rt/src/midi_defer/testing.rs`;
+`expect_from` was never called), so a strip taken back `Unstarted` before its instrument's first render
+(`WorkerSet::overrun_strip`, `crates/rt/src/worker_set.rs`; no cost history means no inline render)
+was counted but left no hole. The 768 samples are six such blocks: all six strips unstarted on the
+first block while the runner's workers were still waking. Fixed: the test calls `expect_from(0)` on
+every instrument and checks processed plus hole samples equal the rig's whole time per instrument; the
+new `strips_unstarted_before_their_first_render_are_holes_too` holds two workers inside their first
+strips on every block so the other four never start, by construction. Without `expect_from` it fails
+5 of 5 on Windows (holes 0 to 3840 against 12032 to 13056); with it, 20 of 20 pass unloaded, pinned to
+three cores, and pinned with six spinning processes.
+(2) `a_plan_waits_while_a_worker_holds_a_strip` stored a 300 ms stall for strip 2 and rendered until
+`render_workers_settled()` was false, then asserted the adoption was refused. Any away strip ends that
+loop: on a slow host strip 2 renders inline on the callback (`WorkerSet::finish` reclaims an admitted
+unclaimed strip, where the plug-in does not stall) while another strip is `Late`, and that strip is
+home before `adopt_plan` (`MixEngine::adopt_plan`, `crates/mix/src/active.rs`, refuses only while a
+slot is `Claimed`, which is correct). A scratch provocation (one worker held on strip 0 first, then
+the original loop) adopted 10 of 10 with strip 2's stall never taken. Fixed: the test holds strip 2
+with `Shared::hold` and waits for the new `holding` signal the plug-in sets inside the hold, then
+asserts the strip is away and the plan refused. Ambient starvation on Windows (three pinned cores,
+six spinning processes) did not reproduce either original failure (10 and 20 runs per setting): the
+workers wake fast there; the constructed provocations did. Not caused by #213 or #78: `note_held` and
+the `bring_home` reset only store the held counters. Rule added to `gates.md` beside the deadline rule.

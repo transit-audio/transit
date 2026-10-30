@@ -47,6 +47,9 @@ pub struct Shared {
     /// While set, a render on a worker waits inside `process` until the test clears it (#213): a
     /// plug-in that does not return, held for as long as the test needs, whatever the host's speed.
     pub hold: AtomicBool,
+    /// Set by a worker while it waits inside `process` on `hold`, cleared when it leaves: the
+    /// completion signal a test waits on before it asserts that a worker holds this strip.
+    pub holding: AtomicBool,
     /// Nanoseconds the next render sleeps on any thread, the callback included (taken by that
     /// render): a plug-in's one-time load on its first real render.
     pub load_ns: AtomicU64,
@@ -65,6 +68,7 @@ impl Shared {
             reentries: AtomicU64::new(0),
             stall_ns: AtomicU64::new(0),
             hold: AtomicBool::new(false),
+            holding: AtomicBool::new(false),
             load_ns: AtomicU64::new(0),
             on_worker: AtomicU64::new(0),
             on_callback: AtomicU64::new(0),
@@ -146,11 +150,13 @@ impl Plugin for ContinuityPlugin {
             // cannot leave the worker inside `process` for the rest of the binary.
             let mut polls = 0u32;
             while sh.hold.load(Ordering::Acquire) {
+                sh.holding.store(true, Ordering::Release);
                 polls += 1;
                 assert!(polls < 60_000, "the hold was never released");
                 // timing: sleep-ok paces a wait for a release flag, measures nothing
                 std::thread::sleep(Duration::from_millis(1));
             }
+            sh.holding.store(false, Ordering::Release);
         }
         // The mix delivers a block's events in offset order; the instrument checks it.
         sh.inst.lock().unwrap().process(self.transport, u32::try_from(frames).unwrap(), &self.events);

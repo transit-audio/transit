@@ -37,6 +37,27 @@ fn rig(deadline: Duration) -> Option<Rig> {
     Some(rig)
 }
 
+/// Makes each continuity instrument expect its first block at the rig's position, so a block it
+/// missed before its first render (a strip `Unstarted` on the very first blocks while the workers
+/// are still waking: a slow host's normal start) is a hole like any later one. Without it the
+/// first render sets the instrument's start and those overruns leave no hole to match.
+fn expect_from_the_start(rig: &Rig) {
+    let from = u64::try_from(rig.pos).unwrap();
+    for s in &rig.shared {
+        s.inst.lock().unwrap().expect_from(from);
+    }
+}
+
+/// Every instrument's time is covered: the samples it processed and the samples in its holes add
+/// up to every block the rig rendered (no lead-in or tail is left out of the hole count).
+fn assert_time_covered(rig: &Rig) {
+    let total = u64::try_from(rig.pos).unwrap();
+    for (k, s) in rig.shared.iter().enumerate() {
+        let r = s.report();
+        assert_eq!(r.processed_samples + r.hole_samples, total, "instrument {k}: processed and holes cover the rig's time: {r:?}");
+    }
+}
+
 /// Renders until every strip is home and has processed a few more blocks, paced so a stalled
 /// worker can finish.
 fn settle(rig: &mut Rig) {
@@ -64,6 +85,7 @@ fn continuity_through_a_real_worker_set_with_stalls_and_live_midi() {
         MixEngine::force_serial(true);
         return;
     };
+    expect_from_the_start(&rig);
     let seeds: u64 = std::env::var("TRANSIT_WORKER_SEED").ok().and_then(|v| v.parse().ok()).unwrap_or(124);
     let rig = std::thread::spawn(move || {
         let mut rig = rig;
@@ -103,6 +125,7 @@ fn continuity_through_a_real_worker_set_with_stalls_and_live_midi() {
     let on_worker: u64 = rig.shared.iter().map(|s| s.on_worker.load(Ordering::Relaxed)).sum();
     let zero_length: u64 = reports.iter().map(|r| r.faults.zero_length).sum();
     println!("holes {holes} ({hole_samples} samples); renders on a worker {on_worker}; zero-length notes {zero_length}");
+    assert_time_covered(&rig);
     for (k, (r, s)) in reports.iter().zip(&rig.shared).enumerate() {
         assert_eq!((r.stuck_notes, r.stuck_pedals), (0, 0), "instrument {k}: {r:?}");
         let x = r.faults;
@@ -131,6 +154,47 @@ fn continuity_through_a_real_worker_set_with_stalls_and_live_midi() {
     );
     let retired = rig.mix.into_retired();
     assert_eq!(retired.instances().len(), INSTRUMENTS, "every strip came home");
+}
+
+/// The continuity accounting from the first block (macOS 2026-10-30, E49 recurrence): strips
+/// that never start on the first blocks, before their instrument has rendered anything, are holes
+/// counted like any other `Unstarted` overrun. Held by construction, not by the host's speed: two
+/// workers are each held inside the first strip they take, so the other strips (with no cost
+/// history, never admitted inline) are taken back unstarted on every block until the holds end.
+#[test]
+fn strips_unstarted_before_their_first_render_are_holes_too() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    let mut rig = Rig::new(INSTRUMENTS, 0, FRAMES);
+    assert_eq!(rig.mix.start_render_workers_with(64, 2), 2);
+    rig.mix.set_strip_deadline(Some(Duration::from_micros(500)));
+    expect_from_the_start(&rig);
+    for s in &rig.shared {
+        s.hold.store(true, Ordering::Release);
+    }
+    become_callback();
+    let mut rig = rig;
+    for _ in 0..16 {
+        rig.block();
+    }
+    for s in &rig.shared {
+        s.hold.store(false, Ordering::Release);
+    }
+    settle(&mut rig);
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    let f = rig.mix.strip_faults().unwrap().snapshot();
+    println!("{f:?}");
+    // At most two strips are taken (one per worker, held); the other four never start.
+    assert!(f.overruns_unstarted >= 4 * 16, "the strips no worker took were taken back unstarted: {f:?}");
+    let hole_samples: u64 = rig.shared.iter().map(|s| s.report().hole_samples).sum();
+    assert_eq!(
+        hole_samples,
+        (f.overruns_busy + f.overruns_unstarted) * FRAMES as u64,
+        "every busy or unstarted overrun is a hole, the ones before an instrument's first render too: {f:?}"
+    );
+    assert_time_covered(&rig);
+    drop(rig.mix.into_retired());
 }
 
 /// The callback allocates and frees nothing with the worker set on: begin, deliver, publish,
@@ -201,12 +265,18 @@ fn a_plan_waits_while_a_worker_holds_a_strip() {
     for _ in 0..20 {
         rig.block();
     }
-    rig.shared[2].stall_ns.store(300_000_000, Ordering::Relaxed);
-    let start = Instant::now();
-    while rig.mix.render_workers_settled() {
-        assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip never went away");
+    // The worker is held inside strip 2's plug-in until the test lets it go, and the test waits
+    // for that hold itself (the completion signal), not for any strip to be away: on a slow host
+    // another strip can be late in the block the loop ends on while strip 2 renders inline, and
+    // that late strip is home again before the adoption below (E49 recurrence, macOS 2026-10-30).
+    rig.shared[2].hold.store(true, Ordering::Release);
+    let mut blocks = 0u32;
+    while !rig.shared[2].holding.load(Ordering::Acquire) {
+        blocks += 1;
+        assert!(blocks < 1_000_000, "no worker ever took the held strip");
         rig.block();
     }
+    assert!(!rig.mix.render_workers_settled(), "a worker holds strip 2");
     // Away: an event with a stale binding is refused; the right one is parked as `Queued`.
     let mut stale = rig.bindings[2];
     stale.2 = SlotGen::VACANT;
@@ -223,7 +293,7 @@ fn a_plan_waits_while_a_worker_holds_a_strip() {
     let mut env = rig.comp.compile(std::sync::Arc::new(s), rig.comp.active(), transit_mix::PlanGeneration::from_raw(2), &mut none).unwrap();
     assert_eq!(rig.mix.adopt_plan(&mut env), Adoption::Rejected(RejectReason::StripsInFlight));
     rig.comp.reclaim(env);
-    rig.shared[2].stall_ns.store(0, Ordering::Relaxed);
+    rig.shared[2].hold.store(false, Ordering::Release);
     settle(&mut rig);
     let mut s = rig.session.clone();
     s.track_mut(t).unwrap().mixer.volume_db = -3.0;
