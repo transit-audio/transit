@@ -148,3 +148,22 @@ fn turning_a_macro_writes_it_in_one_undo_step() {
     assert!(v > 0.3, "dragged up: {v}");
     assert_eq!(t.app.engine.undo_history().len(), steps + 1, "one drag, one step");
 }
+
+/// Review finding 8: the rack card's Play and the rack header's I both turn the rack's input
+/// monitor on and off (playback then routes live MIDI to the rack).
+#[test]
+fn play_and_the_header_i_button_monitor_the_rack() {
+    let mut t = T::new();
+    let rack = t.rack();
+    let monitoring = |t: &T| t.app.engine.session().track(rack).unwrap().mixer.input_monitor;
+    assert!(!monitoring(&t));
+    let play = t.app.mixer.devices.rack.clone().unwrap().play;
+    t.input("ui.click", json!({"x": (play[0] + play[2]) / 2.0, "y": (play[1] + play[3]) / 2.0}));
+    assert!(monitoring(&t), "Play turns it on");
+    let row = t.app.arrange.layout.tracks.iter().find(|r| r.id == rack.0).cloned().unwrap();
+    let i = row.monitor;
+    t.input("ui.click", json!({"x": (i[0] + i[2]) / 2.0, "y": (i[1] + i[3]) / 2.0}));
+    assert!(!monitoring(&t), "the header's I turns it off");
+    t.input("ui.click", json!({"x": (i[0] + i[2]) / 2.0, "y": (i[1] + i[3]) / 2.0}));
+    assert!(monitoring(&t), "and on again");
+}
