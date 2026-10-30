@@ -31,7 +31,8 @@ impl NaiveSpeechSynth {
 
     pub fn init(&mut self, sample_rate: f32) {
         self.sample_rate_hz = sample_rate;
-        self.a0_normalized = 27.5 / sample_rate;
+        // The firmware's `a0` (A0 against its corrected sample rate).
+        self.a0_normalized = crate::A0 * (crate::REF_SAMPLE_RATE / sample_rate);
 
         self.pulse.init(sample_rate);
         self.frequency = 0.0;
@@ -89,12 +90,12 @@ impl NaiveSpeechSynth {
             let p1r0 = PHONEMES[p_integral + 1][r_integral].formant[i];
             let p1r1 = PHONEMES[p_integral + 1][r_integral + 1].formant[i];
 
-            let p0r_f = (p0r0.frequency.wrapping_add(p0r1.frequency.wrapping_sub(p0r0.frequency))) as f32 * r_fractional;
-            let p1r_f = (p1r0.frequency.wrapping_add(p1r1.frequency.wrapping_sub(p1r0.frequency))) as f32 * r_fractional;
+            let p0r_f = lerp_u8(p0r0.frequency, p0r1.frequency, r_fractional);
+            let p1r_f = lerp_u8(p1r0.frequency, p1r1.frequency, r_fractional);
             let mut f = p0r_f + (p1r_f - p0r_f) * p_fractional;
 
-            let p0r_a = (p0r0.amplitude.wrapping_add(p0r1.amplitude.wrapping_sub(p0r0.amplitude))) as f32 * r_fractional;
-            let p1r_a = (p1r0.amplitude.wrapping_add(p1r1.amplitude.wrapping_sub(p1r0.amplitude))) as f32 * r_fractional;
+            let p0r_a = lerp_u8(p0r0.amplitude, p0r1.amplitude, r_fractional);
+            let p1r_a = lerp_u8(p1r0.amplitude, p1r1.amplitude, r_fractional);
             let a = (p0r_a + (p1r_a - p0r_a) * p_fractional) / 256.0;
 
             if f >= 160.0 {
@@ -109,6 +110,12 @@ impl NaiveSpeechSynth {
             self.filter[i].process_add_buffer(excitation, output, a, FilterMode::BandPass);
         }
     }
+}
+
+/// `a + (b - a) * t` on table bytes, as the firmware evaluates it: the byte difference is an
+/// int (it can be negative), converted to float before the product.
+fn lerp_u8(a: u8, b: u8, t: f32) -> f32 {
+    f32::from(a) + (i32::from(b) - i32::from(a)) as f32 * t
 }
 
 #[derive(Clone, Copy)]

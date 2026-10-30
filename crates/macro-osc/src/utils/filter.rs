@@ -319,16 +319,16 @@ impl Svf {
 
             match mode {
                 FilterMode::LowPass => {
-                    *sample_out = lp * gain;
+                    *sample_out += lp * gain;
                 }
                 FilterMode::BandPass => {
-                    *sample_out = bp * gain;
+                    *sample_out += bp * gain;
                 }
                 FilterMode::BandPassNormalized => {
-                    *sample_out = bp * self.r * gain;
+                    *sample_out += bp * self.r * gain;
                 }
                 FilterMode::HighPass => {
-                    *sample_out = hp * gain;
+                    *sample_out += hp * gain;
                 }
             }
         }
@@ -432,20 +432,20 @@ impl Svf {
 
             match mode {
                 FilterMode::LowPass => {
-                    *sample_out_1 = lp * gain_1;
-                    *sample_out_2 = lp * gain_2;
+                    *sample_out_1 += lp * gain_1;
+                    *sample_out_2 += lp * gain_2;
                 }
                 FilterMode::BandPass => {
-                    *sample_out_1 = bp * gain_1;
-                    *sample_out_2 = bp * gain_2;
+                    *sample_out_1 += bp * gain_1;
+                    *sample_out_2 += bp * gain_2;
                 }
                 FilterMode::BandPassNormalized => {
-                    *sample_out_1 = bp * self.r * gain_1;
-                    *sample_out_2 = bp * self.r * gain_2;
+                    *sample_out_1 += bp * self.r * gain_1;
+                    *sample_out_2 += bp * self.r * gain_2;
                 }
                 FilterMode::HighPass => {
-                    *sample_out_1 = hp * gain_1;
-                    *sample_out_2 = hp * gain_2;
+                    *sample_out_1 += hp * gain_1;
+                    *sample_out_2 += hp * gain_2;
                 }
             }
         }
