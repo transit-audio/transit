@@ -23,8 +23,12 @@
 4. **Regression test.** No test change was needed: the product now ends `EditorWindow::new`, every
    resize (`set_content`) and `close` with a round trip (`settle`, x11rb's `sync`: the server has
    processed everything the connection sent before the call returns). The test's checks right after
-   those calls now pin that guarantee. After the fix, 0 of 20 failed loaded and 0 of 20 plain; it
-   also passed under `xvfb-run -a` and on WSLg.
+   those calls now pin that guarantee for windows the server alone decides: before a window is
+   mapped, and for the content window. One test change: once the frame is mapped, a window manager
+   applies its resize as a ConfigureRequest in its own time (WSLg's Weston), which no round trip of
+   ours covers. The test now waits for the frame's size, with the failing 5 s stall bound. After
+   the fix: 0 of 20 failed under load (20 of 20 before) and 0 of 20 unloaded on the private Xvfb;
+   the rt tests passed 5 of 5 under `xvfb-run -a`, and editor_x11 passed on WSLg.
 5. **Gate class.** Code that hands an X11 resource to another client (a plug-in, a test's observer)
    makes it with a round trip first. Code that checks one client's effect from another client waits
    for the first client's round trip, not for time to pass.
