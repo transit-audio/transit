@@ -1,10 +1,12 @@
 # transit-macro-osc-oracle
 
-The null-test oracle for transit's macro oscillator ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md), #194).
+The null-test oracle for transit's ported instruments ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md)): the macro oscillator (#194) and the resonator (#198).
 
 It builds Émilie Gillet's original C++ DSP (MIT) and lets Rust tests render it sample by sample.
-The Rust port (`transit-macro-osc`, #195) is gated by comparing its output against this crate, engine
-by engine, on the same runner.
+The Rust ports (`transit-macro-osc`, #195; `transit-resonator`, #198) are gated by comparing their
+output against this crate, engine by engine and model by model, on the same runner. One crate holds
+every module family's oracle, a module per family, so they share the build, the session lock, the
+residual and the floor.
 
 ## Why dev-only
 
@@ -27,14 +29,22 @@ reaches a release build.
   low-pass gate), each on its own 16 KB arena, plus seeding of the random state.
 - `src/ffi.rs`: the only `unsafe` in the crate. `Session` holds a process-wide lock, because the
   C++ keeps its random state in one static; everything renders through a session.
+- `cpp/resonator_oracle.cc`: a C ABI over the resonator's part (`rings::Part`: six models,
+  polyphony 1 to 4, the note filter, the reverb and the limiter; float out/aux), on zeroed memory as
+  the module's static storage, with the model, polyphony and bypass settings. `cpp/ftz_scope.h` is
+  the flush-to-zero scope both wrappers share.
+- `src/resonator.rs` and `src/resonator_sweep.rs`: the resonator's safe wrapper and its fixed sweep
+  (159 points per model and polyphony, 6 models, polyphony 1 to 4, 48 kHz, 24-frame blocks, a fresh
+  part and the same seed per point).
 - `src/sweep.rs`: the fixed sweeps (78 engine-level and 84 voice-level points per engine, 48 kHz,
   12-frame blocks, a fresh engine or voice and the same seed per point).
 - `src/residual.rs`: peak and RMS residual in dBFS.
 - `src/floor.rs`: the measured floor per runner family.
 
 Upstream runs at 48 kHz only (its tables and filter coefficients assume it), so the oracle accepts
-48 kHz only. Its block size is the firmware's `kBlockSize`, 12 frames; a render call takes up to
-`kMaxBlockSize`, 24.
+48 kHz only. The macro oscillator's block size is the firmware's `kBlockSize`, 12 frames; a render
+call takes up to `kMaxBlockSize`, 24. The resonator's firmware renders `kMaxBlockSize`, 24 frames,
+per call, and one call is one control block.
 
 The C++ wrapper turns flush-to-zero on around each call into the vendored code, as the firmware's
 desktop test harness does (MXCSR FTZ on x86-64; FPCR.FZ on AArch64, which also zeroes denormal
@@ -52,10 +62,16 @@ bit-identical (`-inf` dBFS peak and RMS, no differing sample) on Windows x86-64 
 Linux and macOS CI runners each time the test passes there. Results are compared only within one
 runner family, never across: each family has its own compiler and instruction set.
 
+`tests/resonator_self_floor.rs` does the same for the resonator: the whole sweep (6 models × 4
+polyphonies × 159 points, 3,816 renders of 100 ms) twice in one process and again in a second
+process. Measured: bit-identical on Windows x86-64 with MSVC (2026-10-30); Linux and macOS prove it
+on every CI run.
+
 To re-measure (after a compiler, flag or vendor change):
 
 ```sh
 cargo test --locked -p transit-macro-osc-oracle --test self_floor -- --nocapture
+cargo test --locked -p transit-macro-osc-oracle --test resonator_self_floor -- --nocapture
 ```
 
 A pass means the floor is still `-inf` on that runner. A failure prints the engine, the point and the
