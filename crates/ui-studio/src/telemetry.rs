@@ -89,7 +89,18 @@ impl TelemetryState {
 }
 
 /// `12.3%` from millionths (1_000_000 = 100%), in integers: no rate is derived from other fields.
+/// A load at or above this (1000% of the budget) is one stalled callback (its thread held off the
+/// CPU, a page fault), not steady work: the readouts cap it and say so (#230: a 214 ms preempted
+/// callback at 128 frames read "8047%").
+pub const OUTLIER_PPM: u64 = 10_000_000;
+
+/// What the details window says for a capped load ([`OUTLIER_PPM`]).
+pub const OUTLIER_TEXT: &str = "over 999% (one stalled callback, not steady load; see Longest callbacks)";
+
 pub fn load_text(ppm: u64) -> String {
+    if ppm >= OUTLIER_PPM {
+        return OUTLIER_TEXT.to_owned();
+    }
     let tenths = ppm / 1000;
     format!("{}.{}%", tenths / 10, tenths % 10)
 }
