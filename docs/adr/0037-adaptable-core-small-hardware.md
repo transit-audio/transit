@@ -8,7 +8,7 @@
 
 transit is a desktop DAW for Windows, macOS and Linux ([ADR 0032](0032-transit-ships-a-desktop-app-only.md)). Its core is layered and the layers are enforced: `time`, `rt`, the audio and MIDI I/O crates, `midi` (L0); `dsp`, the native instruments `macro-osc` and `resonator`, and the plug-in hosts (L1); `model` (L2); `mix` (L3); `engine` and `playback` (L4); `automation` (L5); `ui-studio` (L6) ([`layering.md`](../contributing/knowledge/layering.md), `cargo xtask layers`). The native instruments are deterministic: `forbid(unsafe_code)`, allocation at construction, allocation-free render, and bit-exact against the original reference ([ADR 0033](0033-built-in-instruments-mutable-instruments-port.md), [oracle null testing](../contributing/knowledge/oracle-null-testing.md)). The render runs on a bounded pool with per-strip deadlines ([ADR 0029](0029-strip-job-slots.md)).
 
-On 2026-10-31 the maintainer observed that this core is what a dedicated instrument (a groovebox-class device) needs. What such a device does not need is arbitrary plug-in hosting, or the desktop UI. The observation is about the core's shape, not about a new product.
+On 2026-10-30 the maintainer observed that this core is what a dedicated instrument (a groovebox-class device) needs. What such a device does not need is arbitrary plug-in hosting, or the desktop UI. The observation is about the core's shape, not about a new product.
 
 ## Decision
 
