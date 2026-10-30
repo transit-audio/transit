@@ -93,7 +93,10 @@ impl SyntheticSnareDrum {
 
         let size = out.len();
 
-        for out_sample in out.iter_mut() {
+        for (i, out_sample) in out.iter_mut().enumerate() {
+            // The firmware counts `size` down as it renders: below 0.03 the drum decays on
+            // every other sample, those with an even count of samples still to render.
+            let remaining = size - 1 - i;
             if sustain {
                 self.snare_amplitude = sustain_gain.next();
                 self.drum_amplitude = self.snare_amplitude;
@@ -103,7 +106,7 @@ impl SyntheticSnareDrum {
                 // The envelope for the drum has a very long tail.
                 // The envelope for the snare has a "hold" stage which lasts
                 // between 40 and 70 ms
-                self.drum_amplitude *= if self.drum_amplitude > 0.03 || !(size & 1) != 0 { drum_decay } else { 1.0 };
+                self.drum_amplitude *= if self.drum_amplitude > 0.03 || remaining & 1 == 0 { drum_decay } else { 1.0 };
                 if self.hold_counter != 0 {
                     self.hold_counter -= 1;
                 } else {
