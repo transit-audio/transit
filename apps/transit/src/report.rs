@@ -33,6 +33,7 @@ pub fn run(
         systems: diagnostics::machine_systems(),
         settings,
         opened: vec!["Output open: none (report mode opens no stream)".into()],
+        preview: None,
         telemetry: None,
         midi: midi(profile_mappings),
         open_asio_driver: None,

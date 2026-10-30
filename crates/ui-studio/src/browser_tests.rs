@@ -8,6 +8,9 @@ mod header_tests;
 #[cfg(test)]
 #[path = "browser/plugins_tests.rs"]
 mod plugins_tests;
+#[cfg(test)]
+#[path = "browser/preview_tests.rs"]
+mod preview_tests;
 
 use crate::browser::{Kind, Tab, parse_header};
 use crate::{Services, StudioApp};

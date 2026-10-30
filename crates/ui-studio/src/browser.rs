@@ -15,8 +15,7 @@
 //! plug-ins load with `mix.instrument` or `mix.insert` (one undo step per drop).
 //! Everything else here (tabs, width, expanding, filters, favorites) is view state.
 //!
-//! Audition is not built: the engine and `Player` have no way to play a file outside the
-//! document (plan 06, L29; proposal: an additive `Player::audition`).
+//! The footer previews the selected file outside the document (issue #211, [`preview`]).
 
 mod header;
 mod locations;
@@ -24,6 +23,7 @@ pub use header::parse_header;
 use header::read_info;
 mod plugins;
 use plugins::{plugins, scan_note};
+pub mod preview;
 
 use crate::StudioApp;
 use crate::arrange::R4;
@@ -70,11 +70,23 @@ pub struct BrowserPrefs {
     pub locations: Vec<String>,
     /// Starred plug-ins, by id.
     pub favorites: Vec<String>,
+    /// The headphone toggle: preview each audio file as it is selected.
+    pub auto_preview: bool,
+    /// The preview volume, dB.
+    pub preview_db: f32,
 }
 
 impl Default for BrowserPrefs {
     fn default() -> Self {
-        BrowserPrefs { show: false, width: 280.0, tab: Tab::Files, locations: Vec::new(), favorites: Vec::new() }
+        BrowserPrefs {
+            show: false,
+            width: 280.0,
+            tab: Tab::Files,
+            locations: Vec::new(),
+            favorites: Vec::new(),
+            auto_preview: false,
+            preview_db: preview::DEFAULT_DB,
+        }
     }
 }
 
@@ -203,6 +215,8 @@ pub struct RowLayout {
     pub info: Option<String>,
     /// A user location's remove button.
     pub remove: Option<R4>,
+    /// The selected audio file's preview control.
+    pub play: Option<R4>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize)]
@@ -267,7 +281,8 @@ pub struct BrowserLayout {
     pub dragging: Option<String>,
     pub drop: Option<R4>,
     pub drop_target: Option<Target>,
-    pub audition: &'static str,
+    /// The Files tab's preview footer.
+    pub preview: preview::PreviewLayout,
 }
 
 /// A plug-in the Plug-ins tab offers.
@@ -315,6 +330,7 @@ pub struct BrowserState {
     pub(crate) ctx: Option<egui::Context>,
     /// The last "Importing …" notice, set when a drop or double-click queues an import.
     pub import_notice: String,
+    pub preview: preview::PreviewUi,
 }
 
 impl Default for BrowserState {
@@ -349,6 +365,7 @@ impl Default for BrowserState {
             serial: 0,
             ctx: None,
             import_notice: String::new(),
+            preview: preview::PreviewUi::default(),
         }
     }
 }
@@ -730,6 +747,11 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
         app.cancel_imports(None);
         return;
     }
+    // Escape while a file previews stops it (#211).
+    if app.browser.preview.path.is_some() && !ctx.egui_wants_keyboard_input() && app.dialog.is_none() && pressed(ctx, A::BrowserCancel) {
+        app.preview_stop();
+        return;
+    }
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() {
         return;
     }
@@ -744,6 +766,7 @@ pub fn panel(app: &mut StudioApp, ui: &mut Ui) {
     let t0 = Instant::now();
     let ctx = ui.ctx().clone();
     app.browser.poll();
+    app.preview_frame();
     drive_drag(app, &ctx);
     let listing = app.browser.pending() > 0;
     if listing {
@@ -800,7 +823,6 @@ pub fn panel(app: &mut StudioApp, ui: &mut Ui) {
     });
     b.layout.drop = b.drag.as_ref().and_then(|d| d.target.map(|t| t.1));
     b.layout.drop_target = b.drag.as_ref().and_then(|d| d.target.map(|t| t.0));
-    b.layout.audition = "not built (L29)";
     if listing {
         b.max_panel_ms = b.max_panel_ms.max(t0.elapsed().as_secs_f32() * 1000.0);
     }
@@ -888,10 +910,15 @@ fn body(app: &mut StudioApp, ui: &mut Ui) {
     } else {
         layout.scan = scan_note().unwrap_or_default();
     }
-    let list = Rect::from_min_max(pos2(area.min.x, top), pos2(area.max.x - 4.0, area.max.y));
+    let bottom = if files { area.max.y - preview::FOOTER_H } else { area.max.y };
+    let list = Rect::from_min_max(pos2(area.min.x, top), pos2(area.max.x - 4.0, bottom));
     layout.list = r4(list);
     if files {
         tree(app, ui, list, &mut layout);
+        let foot = Rect::from_min_max(pos2(area.min.x, bottom), pos2(area.max.x - 4.0, area.max.y));
+        let shown = app.browser.preview.path.clone().or_else(|| app.browser.selected.first().cloned());
+        let info = shown.and_then(|s| app.browser.info(&s));
+        layout.preview = preview::footer(app, ui, foot, info);
     } else {
         plugins(app, ui, list, &mut layout);
     }
@@ -1054,6 +1081,7 @@ fn tree(app: &mut StudioApp, ui: &mut Ui, area: Rect, layout: &mut BrowserLayout
     let mut double: Option<PathBuf> = None;
     let mut drag_from: Option<PathBuf> = None;
     let mut menu_act: Option<locations::Act> = None;
+    let mut play: Option<PathBuf> = None;
     app.browser.menu.clear();
     let header = rect(layout.locations_header);
     for (i, row) in rows.iter().enumerate() {
@@ -1107,7 +1135,9 @@ fn tree(app: &mut StudioApp, ui: &mut Ui, area: Rect, layout: &mut BrowserLayout
             Kind::Closed => "Maschine/Kontakt (not supported)".to_string(),
             _ => String::new(),
         };
-        let right_w = if right.is_empty() { 0.0 } else { (right.chars().count() as f32 * 5.6).min(r.width() * 0.55) };
+        // The selected audio file's preview control sits at the row's end, the facts before it.
+        let play_w = if selected && row.kind == Kind::Audio { 22.0 } else { 0.0 };
+        let right_w = play_w + if right.is_empty() { 0.0 } else { (right.chars().count() as f32 * 5.6).min(r.width() * 0.55) };
         // The entry's type: folder (open or closed), audio file, or a file we can't use.
         let kind_icon = match row.kind {
             Kind::Folder if expanded => Some(Icon::FolderOpen),
@@ -1129,12 +1159,15 @@ fn tree(app: &mut StudioApp, ui: &mut Ui, area: Rect, layout: &mut BrowserLayout
         out.shown = shown;
         if !right.is_empty() {
             p.with_clip_rect(r.intersect(area)).text(
-                pos2(r.max.x - 8.0, r.center().y),
+                pos2(r.max.x - 8.0 - play_w, r.center().y),
                 Align2::RIGHT_CENTER,
                 &right,
                 FontId::proportional(10.5),
                 TOKENS.text_dim.gamma_multiply(if row.kind == Kind::Closed { 0.7 } else { 1.0 }),
             );
+        }
+        if play_w > 0.0 {
+            out.play = Some(preview::row_play(app, ui, &p, r.intersect(area), &row.path, &mut play));
         }
         if resp.clicked() {
             match row.kind {
@@ -1195,6 +1228,12 @@ fn tree(app: &mut StudioApp, ui: &mut Ui, area: Rect, layout: &mut BrowserLayout
             app.browser.selected = vec![path.clone()];
             app.browser.anchor = Some(path);
         }
+    }
+    // A selection change stops the preview (and starts the new file with auto-preview on)
+    // before the play control acts, so a click there is not undone by its own selection.
+    app.preview_follow_selection();
+    if let Some(path) = play {
+        app.preview_toggle(&path);
     }
     if let Some(dir) = toggle {
         app.toggle_folder(&dir, &ctx);

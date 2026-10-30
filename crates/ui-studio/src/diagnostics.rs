@@ -320,6 +320,9 @@ pub struct Report {
     /// The lines the Audio Devices window shows for what is open (output, input, backend, reopen,
     /// and the requested-versus-running note).
     pub opened: Vec<String>,
+    /// "Preview playing: ..." (#211): the browser preview plays outside the plan; `None` in
+    /// `transit --report`, which runs no preview.
+    pub preview: Option<String>,
     /// Counters of the running output, or `None` when no stream is open.
     pub telemetry: Option<CallbackTelemetry>,
     pub midi: Midi,
@@ -438,6 +441,10 @@ impl Report {
             o.push_str("No stream is open (report mode opens none).\n");
         }
         for line in &self.opened {
+            o.push_str(line);
+            o.push('\n');
+        }
+        if let Some(line) = &self.preview {
             o.push_str(line);
             o.push('\n');
         }
@@ -725,6 +732,7 @@ mod tests {
                 "Output open: Speakers \u{b7} 48000 Hz \u{b7} 2 ch \u{b7} 256-sample buffer".into(),
                 "Requested 128 \u{b7} running at 256".into(),
             ],
+            preview: Some("Preview playing: Kick 01.wav (playing)".into()),
             telemetry: Some(CallbackTelemetry { callbacks: 42, ..Default::default() }),
             midi: Midi {
                 ports: vec![
@@ -830,6 +838,7 @@ mod tests {
             "Buffer size: 128 samples",
             "Output open: Speakers \u{b7} 48000 Hz \u{b7} 2 ch \u{b7} 256-sample buffer",
             "Requested 128 \u{b7} running at 256",
+            "Preview playing: Kick 01.wav (playing)",
             "Callbacks: 42",
             "Log folder: /home/alice/.config/transit/logs",
             "WARN something",

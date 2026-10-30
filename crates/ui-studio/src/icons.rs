@@ -41,10 +41,12 @@ pub enum Icon {
     Warning,
     /// Lucide snowflake: Freeze on the track header.
     Snowflake,
+    /// Lucide headphones: the browser's auto-preview toggle.
+    Headphones,
 }
 
 impl Icon {
-    pub const ALL: [Icon; 23] = [
+    pub const ALL: [Icon; 24] = [
         Icon::Rewind,
         Icon::Stop,
         Icon::Play,
@@ -68,6 +70,7 @@ impl Icon {
         Icon::File,
         Icon::Warning,
         Icon::Snowflake,
+        Icon::Headphones,
     ];
 
     /// The Lucide name (the file under `assets/icons/`), plus `-filled` for filled variants.
@@ -96,6 +99,7 @@ impl Icon {
             Icon::File => "file",
             Icon::Warning => "triangle-alert",
             Icon::Snowflake => "snowflake",
+            Icon::Headphones => "headphones",
         }
     }
 
@@ -123,6 +127,7 @@ impl Icon {
             Icon::File => include_bytes!("../assets/icons/file.svg"),
             Icon::Warning => include_bytes!("../assets/icons/triangle-alert.svg"),
             Icon::Snowflake => include_bytes!("../assets/icons/snowflake.svg"),
+            Icon::Headphones => include_bytes!("../assets/icons/headphones.svg"),
         }
     }
 

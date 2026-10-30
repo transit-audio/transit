@@ -638,6 +638,7 @@ impl StudioApp {
             systems,
             settings: self.ui.audio.clone(),
             opened,
+            preview: Some(self.preview_line()),
             telemetry,
             midi: self.diagnostics_midi(),
             open_asio_driver: self.running_native_asio(),

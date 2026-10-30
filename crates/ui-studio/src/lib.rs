@@ -634,6 +634,9 @@ impl StudioApp {
         if id == "ui.set" {
             return self.set_ui(&params);
         }
+        if id.starts_with("preview.") {
+            return self.preview_command(id, &params);
+        }
         if id == "help.check_updates" {
             self.check_for_updates_now()?;
             return Ok(json!({"checking": true}));

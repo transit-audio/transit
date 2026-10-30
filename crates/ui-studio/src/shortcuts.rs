@@ -465,7 +465,7 @@ pub const TABLE: &[Shortcut] = &[
     row(A::DeselectPoints, "Deselect Points", NONE, Key::Escape, S::Automation, "Ours; a click on a clip or empty lane does the same."),
     row(A::PickerPickFirst, "Pick First Match", NONE, Key::Enter, S::Automation, "In the lane picker's search field."),
     // Browser.
-    row(A::BrowserCancel, "Cancel Drag, Add Folder or Import", NONE, Key::Escape, S::Browser, "Ours."),
+    row(A::BrowserCancel, "Cancel Drag, Add Folder, Import or Preview", NONE, Key::Escape, S::Browser, "Ours."),
     row(A::BrowserAddFolder, "Add the Typed Folder", NONE, Key::Enter, S::Browser, "In the Add Folder field."),
     // Dialogs.
     row(A::DialogConfirm, "Confirm", NONE, Key::Enter, S::Dialog, "Delete Tracks."),
