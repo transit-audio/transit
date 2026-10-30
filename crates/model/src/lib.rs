@@ -47,7 +47,7 @@ pub use session::{
     BUNDLE_EXTENSION, BitDepthSetting, EditMode, EditState, FEET_FRAMES_START, MAX_COMMENT_CHARS, MAX_NAME_CHARS, SESSION_EXTENSION, Session,
     SessionError, Tool, UNPLACED_NOTE, ZoomState, ZoomToggle, is_session_file, truncate_chars,
 };
-pub use rack::{MACRO_SLOT, Macro, MacroMapping, ParamRange, RACK_MACROS, Rack, RackMember, Zone, macro_index, macro_param, shape as macro_shape};
+pub use rack::{MACRO_SLOT, MAX_RACK_MEMBERS, Macro, MacroMapping, ParamRange, RACK_MACROS, Rack, RackMember, Zone, macro_index, macro_param, shape as macro_shape};
 pub use source::{Source, SourceAudio, SourcePool};
 pub use track::{Frozen, Playlist, TRACK_COLORS, Track, TrackHeight, TrackKind};
 

@@ -28,6 +28,10 @@ use crate::{MidiSource, TrackId};
 /// Macros per rack (Ableton's default bank, Logic's eight Smart Controls on screen).
 pub const RACK_MACROS: usize = 8;
 
+/// Most members a rack plays (its MIDI fan-out is a fixed table on the audio thread). Members
+/// past this are refused by the commands and silent in a hand-edited file.
+pub const MAX_RACK_MEMBERS: usize = 16;
+
 /// The [`AutoParam::Plugin`](crate::AutoParam::Plugin) slot of a rack's macro lanes (`param` is
 /// `macro1` to `macro8`). A plain slot like the instrument's, so a build that predates racks reads
 /// the lane and ignores it.
@@ -308,8 +312,8 @@ impl crate::Session {
             return None;
         }
         let rack = self.track(member.folder?)?;
-        let entry = rack.rack.as_ref().filter(|_| rack.is_rack())?.member(member.id)?;
-        Some((rack, entry))
+        // Only the members the rack plays (the first `MAX_RACK_MEMBERS` that are present).
+        self.rack_members(rack).find(|(t, _)| t.id == member.id).map(|(_, m)| (rack, m))
     }
 
     /// The members of `rack` that play: listed, present, inside its folder, MIDI or instrument
@@ -321,6 +325,7 @@ impl crate::Session {
             .into_iter()
             .flat_map(|r| r.members.iter())
             .filter_map(move |m| self.track(m.track).filter(|t| t.folder == Some(rack.id) && t.kind.is_midi()).map(|t| (t, m)))
+            .take(MAX_RACK_MEMBERS)
     }
 }
 

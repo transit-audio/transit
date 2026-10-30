@@ -8,7 +8,21 @@ use super::*;
 /// transport stopped processing passes 0 too (see `strip::timed_span`). In Touch a held
 /// parameter's lane is not read and a released one returns over the strip's return ramp (`ramps`, #188):
 /// block-start values while it returns, its breakpoints again from the ramp's end.
-pub(crate) fn apply_params(slot: &mut PluginSlot, ins: &transit_model::Insert, t: &Track, ramps: &TouchRamps, i: usize, pos: Samples, frames: usize) {
+///
+/// With `session`, a member of a rack (ADR 0034) takes a mapped parameter from the rack's macro
+/// lane while that lane has points ([`crate::rack::macro_param_value`], at block rate): the macro
+/// rules the parameter, as a mapped parameter follows its macro in Ableton's Instrument Rack.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_params(
+    session: Option<&Session>,
+    slot: &mut PluginSlot,
+    ins: &transit_model::Insert,
+    t: &Track,
+    ramps: &TouchRamps,
+    i: usize,
+    pos: Samples,
+    frames: usize,
+) {
     // Automation lanes address insert slots; the instrument (`INSTRUMENT_SLOT`) has its own lane
     // slot, so it never picks up slot A's lanes.
     let slot_u8 = if i == INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(i).unwrap_or(u8::MAX) };
@@ -34,12 +48,14 @@ pub(crate) fn apply_params(slot: &mut PluginSlot, ins: &transit_model::Insert, t
             (v, if held { end } else { pos.saturating_add(i64::from(left)) })
         })
     };
+    let rack = |k: &str| session.filter(|_| t.folder.is_some()).and_then(|s| crate::rack::macro_param_value(s, t, slot_u8, k, pos));
     apply_values(
         slot,
         ins,
         pos,
-        |k, val| read(k, val).map_or(val, |(v, _)| v),
+        |k, val| rack(k).unwrap_or_else(|| read(k, val).map_or(val, |(v, _)| v)),
         |k| match lane(k) {
+            _ if rack(k).is_some() => &[],
             // The breakpoints strictly inside the block: one at its start is the start value.
             Some(l) if timed => {
                 let after = read(k, 0.0).map_or(pos, |(_, after)| after.max(pos));

@@ -127,6 +127,12 @@ impl Source {
 
 /// The clips' source on MIDI channel 1.
 const CLIP_SOURCE: Source = Source { port: Source::CLIP, channel: 0, generation: 0 };
+/// The clips of the rack an instrument plays in (ADR 0034): the clip port, another generation.
+const RACK_CLIP_SOURCE: Source = Source { port: Source::CLIP, channel: 0, generation: 1 };
+
+const fn clip_source(rack: bool) -> Source {
+    if rack { RACK_CLIP_SOURCE } else { CLIP_SOURCE }
+}
 
 /// When and in what order playback received an event. `sequence` is checked and never wraps.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1098,8 +1104,11 @@ impl InstrumentEvents {
     // ---- clips: delivered at once, through the same table, as `Source::CLIP` ----
 
     /// A clip note-on. A full table sheds it (counted): it is not delivered untracked.
-    pub(crate) fn clip_on(&mut self, plugin: &mut dyn Plugin, offset: u32, key: u8, velocity: u8) {
-        let n = match self.notes.iter().position(|e| e.matches(&CLIP_SOURCE, key, NoteId::NONE) && e.retry_release.is_none()) {
+    /// `rack`: the note comes from the clips of the rack the instrument plays in (ADR 0034), a
+    /// source of its own so the track's own clips on the same key stay apart.
+    pub(crate) fn clip_on(&mut self, plugin: &mut dyn Plugin, offset: u32, key: u8, velocity: u8, rack: bool) {
+        let source = clip_source(rack);
+        let n = match self.notes.iter().position(|e| e.matches(&source, key, NoteId::NONE) && e.retry_release.is_none()) {
             Some(n) => n,
             None => {
                 let Some(n) = self.free_note() else {
@@ -1109,7 +1118,7 @@ impl InstrumentEvents {
                 if let Some(e) = self.notes.get_mut(n) {
                     *e = NoteEntry {
                         used: true,
-                        source: CLIP_SOURCE,
+                        source,
                         key,
                         sender: NoteId::NONE,
                         voice: -1,
@@ -1126,17 +1135,25 @@ impl InstrumentEvents {
     }
 
     /// A clip note-off (nothing when the clip's note is not open: shed, or released at a seek).
-    pub(crate) fn clip_off(&mut self, plugin: &mut dyn Plugin, offset: u32, key: u8) {
-        if let Some(n) = self.notes.iter().position(|e| e.matches(&CLIP_SOURCE, key, NoteId::NONE) && e.retry_release.is_none()) {
+    /// Whether `source` holds an open note on `key` (by `id` when it has one): a rack sends a
+    /// member a note-off only then (ADR 0034).
+    pub(crate) fn holds_note(&self, source: &Source, key: u8, id: NoteId) -> bool {
+        self.notes.iter().any(|e| e.matches(source, key, id))
+    }
+
+    /// A rack's off reaches only an instrument whose on it delivered (the zones decided the on).
+    pub(crate) fn clip_off(&mut self, plugin: &mut dyn Plugin, offset: u32, key: u8, rack: bool) {
+        let source = clip_source(rack);
+        if let Some(n) = self.notes.iter().position(|e| e.matches(&source, key, NoteId::NONE) && e.retry_release.is_none()) {
             self.deliver_off(plugin, offset, n, 0);
         }
     }
 
     /// A clip controller (MIDI 1.0 bytes): pedals through the per-source OR, reset all
     /// controllers keeping other sources' pedals, the rest as is.
-    pub(crate) fn clip_ctrl(&mut self, plugin: &mut dyn Plugin, offset: u32, msg: [u8; 3]) {
+    pub(crate) fn clip_ctrl(&mut self, plugin: &mut dyn Plugin, offset: u32, msg: [u8; 3], rack: bool) {
         let Some(message) = message_from_midi1(msg) else { return };
-        let source = Source { channel: msg[0] & 0x0F, ..CLIP_SOURCE };
+        let source = Source { channel: msg[0] & 0x0F, ..clip_source(rack) };
         match message {
             Message::Control { cc, value } if is_pedal(cc) => {
                 let open = self.pedals.iter().position(|p| p.used && p.source == source && p.cc == cc && p.retry_release.is_none());
@@ -1169,7 +1186,8 @@ impl InstrumentEvents {
 
     /// Seek or loop wrap: the clips' notes and pedals are released (live sources keep sounding).
     pub(crate) fn release_clips(&mut self, plugin: &mut dyn Plugin) {
-        self.release_sender(plugin, Source::CLIP, 0);
+        self.release_sender(plugin, Source::CLIP, CLIP_SOURCE.generation);
+        self.release_sender(plugin, Source::CLIP, RACK_CLIP_SOURCE.generation);
     }
 }
 

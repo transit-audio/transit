@@ -230,7 +230,13 @@ impl MixEngine {
     /// event is checked as far as it can be without the instrument (epoch, port, binding,
     /// transport) and taken into the strip's deferred-MIDI buffer: `Queued`. The strip's next
     /// processed block admits it into the instrument's queue, in order, before the strip renders.
+    ///
+    /// An event bound to a rack ([`crate::rack_binding`], ADR 0034) is fanned out to the rack's
+    /// members, each admitted as above (`rack.rs`).
     pub fn queue_event(&mut self, ev: &InstrumentEvent) -> EventOutcome {
+        if ev.target.1 == crate::RACK_SLOT {
+            return self.queue_rack_event(ev);
+        }
         let (outcome, due) = self.admit(ev);
         self.events.record(ev, outcome, due);
         outcome

@@ -781,7 +781,9 @@ impl Audio {
             };
             // A MIDI recording keeps what the instrument is given, at the frame it is given it:
             // only while the transport records (not during the count-in), and never blocking.
+            // A rack's input is not recorded yet (ADR 0034, slice 1): the rack holds no takes.
             if matches!(result, ActionResult::MidiBuffered | ActionResult::MidiBufferedApproximate)
+                && packet.target.1 != transit_mix::RACK_SLOT
                 && state.recording
                 && state.playing
                 && state.count_in.is_none()

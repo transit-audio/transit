@@ -532,7 +532,7 @@ impl Native {
             .requested_session()
             .tracks
             .iter()
-            .filter(|track| track.kind.is_midi() && !track.inactive && (track.mixer.record_arm || track.mixer.input_monitor))
+            .filter(|track| (track.kind.is_midi() || track.is_rack()) && !track.inactive && (track.mixer.record_arm || track.mixer.input_monitor))
             .filter_map(|track| {
                 let channels = match track.midi_input.channel {
                     None => u16::MAX,
@@ -542,8 +542,15 @@ impl Native {
                 // An external destination (#61) echoes live input through the output thread and
                 // keeps it from the instrument; the route still feeds a MIDI recording, so it
                 // needs no instrument binding.
-                let external = track.midi_output.is_external();
-                let target = if external { Some((track.id, INSTRUMENT_SLOT, SlotGen::VACANT)) } else { owner.binding(track.id, INSTRUMENT_SLOT) };
+                let external = track.midi_output.is_external() && !track.is_rack();
+                // A rack (ADR 0034) has no instrument: the engine fans its input out to the members.
+                let target = if track.is_rack() {
+                    Some(transit_mix::rack_binding(track.id))
+                } else if external {
+                    Some((track.id, INSTRUMENT_SLOT, SlotGen::VACANT))
+                } else {
+                    owner.binding(track.id, INSTRUMENT_SLOT)
+                };
                 // No self-echo (#99): the echo is held back per input port when it is the same
                 // device as the destination, unless the track allows it.
                 let guard = match &track.midi_output {
