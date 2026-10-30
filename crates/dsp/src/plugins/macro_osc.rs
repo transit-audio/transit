@@ -439,7 +439,7 @@ impl Plugin for MacroOscillator {
         let rate = voice_rate(host);
         if rate != self.rate {
             let tuning = self.voice.tuning();
-            self.voice = Box::new(Voice::new(rate));
+            *self.voice = Voice::new(rate);
             self.voice.set_tuning(tuning);
             self.rate = rate;
         }

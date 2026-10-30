@@ -274,7 +274,7 @@ fn host_blocks_split_into_twelve_frame_renders_bit_for_bit() {
 
 #[test]
 fn every_model_sounds_and_aux_mix_selects_the_aux_output() {
-    for model in 0..MODELS.len() {
+    for (model, name) in MODELS.iter().enumerate() {
         let mut m = inst();
         m.set_param("model", model as f32);
         m.note_on(0, 48, 127);
@@ -284,8 +284,8 @@ fn every_model_sounds_and_aux_mix_selects_the_aux_output() {
         a.set_param("aux_mix", 100.0);
         a.note_on(0, 48, 127);
         let aux = render(&mut a, 9600, 256);
-        assert!(peak(&out) > 1e-3 && peak(&aux) > 1e-3, "{}: out {} aux {}", MODELS[model], peak(&out), peak(&aux));
-        assert!(peak(&out) <= db_to_gain(-6.0) * 32769.0 / 32768.0 + 1e-6, "{} within full scale at the default level", MODELS[model]);
+        assert!(peak(&out) > 1e-3 && peak(&aux) > 1e-3, "{name}: out {} aux {}", peak(&out), peak(&aux));
+        assert!(peak(&out) <= db_to_gain(-6.0) * 32769.0 / 32768.0 + 1e-6, "{name} within full scale at the default level");
     }
 }
 
