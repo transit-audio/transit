@@ -213,6 +213,8 @@ mod linux {
         assert_eq!(title, b"Fake Synth", "the header's title names the window");
         let class = obs.get_property(false, frame, AtomEnum::WM_CLASS, AtomEnum::STRING, 0, 64).unwrap().reply().unwrap().value;
         assert_eq!(class, b"plugin-editor\0transit\0");
+        let machine = obs.get_property(false, frame, AtomEnum::WM_CLIENT_MACHINE, AtomEnum::STRING, 0, 64).unwrap().reply().unwrap().value;
+        assert!(!machine.is_empty(), "WM_CLIENT_MACHINE goes with _NET_WM_PID");
 
         // Shown on the host thread.
         win.raise();
@@ -337,9 +339,9 @@ mod linux {
         });
         let (thread, frame) = ready.recv().unwrap();
         let obs = observer();
-        let start = Instant::now();
+        // Returning at all shows the call waits for nothing: the host thread stays held until the
+        // end of the test.
         assert_eq!(ew::hide_thread_windows(thread), 1);
-        assert!(start.elapsed() < Duration::from_millis(500), "the call waits for nothing");
         let start = Instant::now();
         while mapped(&obs, frame) && start.elapsed() < Duration::from_secs(5) {
             std::thread::sleep(Duration::from_millis(10));
@@ -352,6 +354,10 @@ mod linux {
     /// `Xft.dpi` changes (the desktop's scale setting): the window reports the new scale once.
     /// The root's resource database is restored afterwards.
     fn a_dpi_change_reaches_the_window() {
+        if std::env::var_os(CHILD).is_none() {
+            println!("a_dpi_change_reaches_the_window: skipped: it rewrites the root's resource database, so it runs on the private Xvfb only");
+            return;
+        }
         let q = MessageQueue::attach();
         let obs = observer();
         let root = obs.setup().roots[0].root;

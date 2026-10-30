@@ -52,6 +52,13 @@ impl PlugFrame {
         self.run_loop.close(&self.name);
     }
 
+    /// The view is gone but this thread is not the editor's (Linux): its run-loop registrations
+    /// stop calling the plug-in and remove themselves at their next call (nothing elsewhere).
+    pub(super) fn abandon_run_loop(&self) {
+        #[cfg(target_os = "linux")]
+        self.run_loop.mark_closed();
+    }
+
     /// Called right after the view's `attached` returned: from now on `resizeView` resizes the
     /// window, and a size the view asked for before is applied now (issue #105).
     pub(super) fn attach(&self, view: &ComPtr<sb::IPlugView>) {
@@ -528,6 +535,9 @@ impl EditorLink {
                 // `HostWindow` has no destructor: dropping it leaks its retain on purpose.
                 g.window = None;
                 if let Some(f) = g.frame.take() {
+                    // Its timers and handlers live in the editor thread's run loop, out of reach
+                    // here: they stop calling into the leaked view.
+                    f.abandon_run_loop();
                     std::mem::forget(f);
                 }
             }

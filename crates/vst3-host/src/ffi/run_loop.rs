@@ -24,13 +24,21 @@ pub(crate) struct RunLoop {
     owner: std::thread::ThreadId,
     /// The plug-in's handlers (by address) and their registrations.
     regs: Mutex<Vec<(usize, Token)>>,
-    /// The view was torn down: nothing more is registered.
-    closed: AtomicBool,
+    /// The view was torn down: nothing more is registered, and the registrations still in the
+    /// run loop (an instance destroyed off the editor's thread, whose teardown cannot reach them)
+    /// remove themselves at their next call instead of calling the plug-in.
+    closed: Arc<AtomicBool>,
 }
 
 impl RunLoop {
     pub(super) fn new() -> RunLoop {
-        RunLoop { owner: std::thread::current().id(), regs: Mutex::new(Vec::new()), closed: AtomicBool::new(false) }
+        RunLoop { owner: std::thread::current().id(), regs: Mutex::new(Vec::new()), closed: Arc::new(AtomicBool::new(false)) }
+    }
+
+    /// Marks the view gone without touching the run loop (any thread): the registrations stop
+    /// calling the plug-in and remove themselves at their next call.
+    pub(super) fn mark_closed(&self) {
+        self.closed.store(true, Ordering::Release);
     }
 
     fn lock(&self) -> std::sync::MutexGuard<'_, Vec<(usize, Token)>> {
@@ -99,12 +107,17 @@ impl IRunLoopTrait for PlugFrame {
         // SAFETY: the plug-in passes its live handler (or null, refused), valid for this call;
         // `to_com_ptr` takes a reference of ours, released with the registration.
         let Some(h) = (unsafe { vst3::ComRef::from_raw(handler) }).map(|r| r.to_com_ptr()) else { return sb::kInvalidArgument };
+        let closed = Arc::clone(&self.run_loop.closed);
         let token = host_loop::add_fd(
             fd,
             Ready::READ,
             Rc::new(move |fd, _| {
+                if closed.load(Ordering::Acquire) {
+                    return false;
+                }
                 // SAFETY: our counted reference keeps the handler alive; called on the editor's
-                // thread, from its run loop, as the SDK's own run loop calls it.
+                // thread, from its run loop, as the SDK's own run loop calls it, and only while the
+                // view is not torn down (`closed`).
                 unsafe { h.onFDIsSet(fd) };
                 true
             }),
@@ -126,9 +139,13 @@ impl IRunLoopTrait for PlugFrame {
         }
         // SAFETY: as in `registerEventHandler`.
         let Some(h) = (unsafe { vst3::ComRef::from_raw(handler) }).map(|r| r.to_com_ptr()) else { return sb::kInvalidArgument };
+        let closed = Arc::clone(&self.run_loop.closed);
         let token = host_loop::add_timer(
             Duration::from_millis(milliseconds),
             Rc::new(move || {
+                if closed.load(Ordering::Acquire) {
+                    return false;
+                }
                 // SAFETY: as in `registerEventHandler`.
                 unsafe { h.onTimer() };
                 true
@@ -213,12 +230,20 @@ mod tests {
             assert_eq!(run_loop.unregisterTimer(timer), sb::kInvalidArgument, "once");
         }
         assert_eq!(host_loop::counts(), (1, 0));
+        // The instance destroyed off the editor's thread (`EditorLink::kill`'s leak branch) marks
+        // the frame closed from there: the registration stops calling the plug-in and goes.
+        let before = counter.0.load(Ordering::Relaxed);
+        let marker = std::thread::scope(|s| s.spawn(|| frame.run_loop.mark_closed()).join());
+        assert!(marker.is_ok());
+        tx.write_all(b"y").unwrap();
+        assert!(pump(&q, || host_loop::counts() == (0, 0)), "removed itself at its next call");
+        assert_eq!(counter.0.load(Ordering::Relaxed), before, "and did not call the plug-in");
         // Registered from another thread: refused (it would never run there).
         let other = RunLoop::new();
         assert!(other.refused().is_none());
         assert!(std::thread::spawn(move || other.refused().is_some()).join().unwrap());
         frame.run_loop.close("run loop");
-        assert_eq!(host_loop::counts(), (0, 0), "the teardown removed the descriptor handler");
+        assert_eq!(host_loop::counts(), (0, 0));
         // SAFETY: as above.
         unsafe { assert_eq!(run_loop.registerTimer(timer, 5), sb::kResultFalse, "nothing after the teardown") };
         drop(run_loop);

@@ -180,6 +180,13 @@ fn mm_dpi(px: u16, mm: u16) -> u32 {
     dpi
 }
 
+/// This machine's host name (`/proc/sys/kernel/hostname`), for `WM_CLIENT_MACHINE`.
+fn hostname() -> Option<String> {
+    let name = std::fs::read_to_string("/proc/sys/kernel/hostname").ok()?;
+    let name = name.trim();
+    (!name.is_empty()).then(|| name.to_owned())
+}
+
 fn frame_of(id: Window) -> Option<Rc<Frame>> {
     FRAMES.with(|f| f.borrow().iter().find(|f| f.id == id).cloned())
 }
@@ -236,11 +243,14 @@ fn restyle(c: &Conn, f: &Frame, tool: bool) -> bool {
 }
 
 /// Maps the frame; `activate` also asks the window manager to focus it, otherwise it asks it not
-/// to (`_NET_WM_USER_TIME` 0).
+/// to (`_NET_WM_USER_TIME` 0, removed again on an activating show, so a window unparked once is not
+/// kept from focus by focus-stealing prevention afterwards).
 fn show(c: &Conn, f: &Frame, activate: bool) {
     f.minimized.set(false);
     f.requested.set(true);
-    if !activate {
+    if activate {
+        let _ = c.c.delete_property(f.id, c.atoms._NET_WM_USER_TIME);
+    } else {
         let _ = c.c.change_property32(PropMode::REPLACE, f.id, c.atoms._NET_WM_USER_TIME, AtomEnum::CARDINAL, &[0]);
     }
     let _ = c.c.map_window(f.id);
@@ -296,6 +306,10 @@ impl EditorWindow {
         let _ = c.c.change_property32(PropMode::REPLACE, id, atoms.WM_PROTOCOLS, AtomEnum::ATOM, &[atoms.WM_DELETE_WINDOW]);
         let _ = c.c.change_property8(PropMode::REPLACE, id, AtomEnum::WM_CLASS, AtomEnum::STRING, WM_CLASS);
         let _ = c.c.change_property32(PropMode::REPLACE, id, atoms._NET_WM_PID, AtomEnum::CARDINAL, &[std::process::id()]);
+        // EWMH: `_NET_WM_PID` goes with `WM_CLIENT_MACHINE`.
+        if let Some(host) = hostname() {
+            let _ = c.c.change_property8(PropMode::REPLACE, id, AtomEnum::WM_CLIENT_MACHINE, AtomEnum::STRING, host.as_bytes());
+        }
         let _ = c.c.change_property32(PropMode::REPLACE, id, atoms._NET_WM_WINDOW_TYPE, AtomEnum::ATOM, &[atoms._NET_WM_WINDOW_TYPE_NORMAL]);
         let shown = header.as_ref().map(|h| h.view().title).filter(|t| !t.is_empty());
         let frame = Rc::new(Frame {

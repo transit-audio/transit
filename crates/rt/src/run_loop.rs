@@ -207,6 +207,11 @@ pub(crate) fn wait(extra: &[RawFd], timeout: Duration) {
 /// Runs the calling thread's handlers whose descriptors are ready now, then its timers that are
 /// due, at most `max` calls in all. Returns how many it called.
 pub(crate) fn run(max: usize) -> usize {
+    run_at(max, Instant::now())
+}
+
+/// [`run`] with the timers judged at `now` (the tests pass explicit instants).
+fn run_at(max: usize, now: Instant) -> usize {
     let mut done = 0;
     // Descriptors: one zero-timeout poll over the registry, then the handlers of the ready ones.
     let mut polled: Vec<(Token, sys::pollfd)> =
@@ -246,7 +251,6 @@ pub(crate) fn run(max: usize) -> usize {
         }
     }
     // Timers: the due ones, each rescheduled before it runs.
-    let now = Instant::now();
     let due: Vec<(Token, TimerHandler)> = with(|r| {
         r.timers
             .iter_mut()
@@ -294,14 +298,20 @@ mod tests {
             }),
         )
         .unwrap();
-        assert_eq!(run(16), 0, "not due yet");
+        let due = with(|r| r.timers.iter().find(|e| e.token == t).map(|e| e.due)).unwrap();
+        let ms = Duration::from_millis;
+        // The timers are judged at explicit instants: no assertion here depends on the clock.
+        assert_eq!(run_at(16, due.checked_sub(ms(1)).unwrap()), 0, "not due yet");
+        assert_eq!(count.get(), 0);
+        // Overdue by several periods: one call, rescheduled one period after this run.
+        assert_eq!(run_at(16, due + ms(100)), 1, "one call however late");
+        assert_eq!(run_at(16, due + ms(101)), 0, "rescheduled a period ahead, no burst");
+        assert_eq!(run_at(16, due + ms(120)), 1, "due again one period after it last fired");
+        assert_eq!(count.get(), 2);
         let start = Instant::now();
         wait(&[], Duration::from_secs(5));
+        // timing: stall-bound a ceiling far above jitter; the wait ends at the next due timer
         assert!(start.elapsed() < Duration::from_secs(2), "the wait ends at the timer");
-        // timing: sleep-ok makes the timer overdue by several periods; the assertion is on the count
-        std::thread::sleep(Duration::from_millis(100));
-        assert_eq!(run(16), 1, "one call however late");
-        assert_eq!(run(16), 0, "rescheduled a period ahead");
         assert!(remove(t));
         assert!(!remove(t));
         assert_eq!(counts(), (0, 0));
