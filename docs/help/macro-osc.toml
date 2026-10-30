@@ -71,7 +71,7 @@ text = "One light per voice: lit while a key holds it, half lit while its releas
 [[entry]]
 id = "macro_osc.velocity_curve"
 name = "Velocity Curve"
-text = "How velocity moves the Harmonics, Timbre, Morph and Decay depths beside it: Linear, Exponential (soft notes change little, hard notes a lot) or S-curve (little change at both ends). Velocity always sets each note's level."
+text = "How velocity moves Harmonics, Timbre, Morph and Decay through the depths beside it: Linear, Exponential (soft notes change little, hard notes a lot) or S-curve (little change at both ends). Velocity always sets each note's level."
 
 [[entry]]
 id = "macro_osc.velocity_depth"
@@ -81,7 +81,7 @@ text = "How far velocity moves this control, from -100% to +100% of its travel: 
 [[entry]]
 id = "macro_osc.key_curve"
 name = "Key Curve"
-text = "How the key moves the Harmonics, Timbre, Morph and Decay depths beside it: Linear, Exponential (little change near middle C, more toward the ends of the keyboard) or S-curve."
+text = "How the key moves Harmonics, Timbre, Morph and Decay through the depths beside it: Linear, Exponential (little change near middle C, more toward the ends of the keyboard) or S-curve."
 
 [[entry]]
 id = "macro_osc.key_depth"

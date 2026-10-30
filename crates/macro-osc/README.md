@@ -225,9 +225,17 @@ passes or fails on time:
 | Modal | 71.2 us | 582.7 us | 1104.6 us | 69.0 us | 1.29% |
 | Particle noise | 51.4 us | 421.9 us | 909.9 us | 56.9 us | 1.07% |
 
-The cost is linear in the voices sounding: the median voice is 27.8 us (0.52% of one core), the
-dearest model (Modal) 70 us (1.3%), so 16 Modal voices take about a fifth of a core. A free voice
-(released and silent for 50 ms) is not rendered and costs nothing.
+The cost is linear in the voices sounding: the median of the eight models is 26.6 us per voice
+(0.50% of one core; the upper median, FM, 27.8 us), the dearest model (Modal) 70 us (1.3%), so 16
+Modal voices take about a fifth of a core. A free voice (released and within one LSB of silence
+for 50 ms) is not rendered and costs nothing.
+
+Memory: an instance builds all 16 voices, each with all 24 engines, whatever `voices` is set to,
+so the instrument can change its voice count on the audio thread without allocating: 1.09 MB in 341
+allocations per instance (about 68 KB per voice), measured 2026-10-30 with the counting allocator
+(`transit_rt::testing`); the Subtractive Synth is 19 KB. Follow-up: building engines (or voices)
+lazily, off the audio thread when the model or count changes, is a later optimization for racks
+with many instances.
 
 ## Credits
 

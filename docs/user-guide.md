@@ -109,7 +109,8 @@ analog stages. Their license notices are in **Help > About transit**.
   Shift+?, for a summary).
 - **Playing**: a note opens the voice's low-pass gate at the note's velocity; releasing it closes
   the gate over **Decay**, and **LPG Color** sets how it closes (filtering as it fades at 0%, a plain
-  fade and a longer release at 100%). The drum models ring out by themselves over **Decay**.
+  fade and a longer release at 100%). The drum models ring out by themselves over **Decay**; the Chiptune model holds while its key is
+  held and fades over **Decay** after it.
 - **Voices** sets how many notes sound at once, 1 to 16 (8 by default); the lights beside it show
   each voice (lit: a key holds it; half lit: its release is fading; dark: free). A new note takes a
   free voice, else the quietest voice whose release is still fading, else the oldest held note, so
@@ -138,8 +139,8 @@ analog stages. Their license notices are in **Help > About transit**.
 - **Tuning**: the port plays at concert pitch, A4 = 440 Hz. The original firmware's arithmetic is
   kept bit-exact in transit's code for its tests; the module itself plays in tune because its audio
   clock runs at the rate that arithmetic assumes.
-- The voices run at 44.1, 48, 88.2 or 96 kHz. At other project rates it runs at the nearest of
-  these, still in tune, with its envelopes slightly faster or slower. Changing the model while a note
+- The voices run at 44.1, 48, 88.2 or 96 kHz. At other project rates they run at the nearest of
+  these, still in tune, with their envelopes slightly faster or slower. Changing the model while a note
   sounds can click, as on the original.
 
 Every control can be automated (lanes `plugin:instrument:<id>`, for example

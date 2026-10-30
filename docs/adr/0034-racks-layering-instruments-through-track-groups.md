@@ -6,7 +6,7 @@
 
 ## Context
 
-The instrument family of [ADR 0033](0033-built-in-instruments-mutable-instruments-port.md) is small and mono by design and is composed by patching. transit needs the equivalent: a way to layer several instruments and play them as one.
+The instrument family of [ADR 0033](0033-built-in-instruments-mutable-instruments-port.md) is small and composed by patching; its instruments play polyphonically inside one instrument (the Macro Oscillator's voices, #196) but do not layer. transit needs the equivalent: a way to layer several instruments and play them as one.
 
 Convention (transit follows what Ableton and Logic agree on): Ableton's Instrument Rack and Logic's Track Stack (summing stack) both give a group a summed output, let several instruments receive the same MIDI, and expose a few macro controls.
 
