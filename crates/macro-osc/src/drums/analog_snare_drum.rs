@@ -28,7 +28,7 @@ pub struct AnalogSnareDrum {
 
     // Sample rate dependent constants
     trigger_pulse_duration: i32,
-    pulse_decay_time: i32,
+    pulse_decay_time: f32,
 }
 
 impl AnalogSnareDrum {
@@ -52,7 +52,8 @@ impl AnalogSnareDrum {
 
         // Pre-compute sample rate dependent constants
         self.trigger_pulse_duration = (1.0e-3 * sample_rate_hz) as i32;
-        self.pulse_decay_time = (0.1e-3 * sample_rate_hz) as i32;
+        // A float in the firmware (4.8 samples at 48 kHz), not a whole number of samples.
+        self.pulse_decay_time = 0.1e-3 * sample_rate_hz;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -124,7 +125,7 @@ impl AnalogSnareDrum {
                 pulse = if self.pulse_remaining_samples != 0 { self.pulse_height } else { self.pulse_height - 1.0 };
                 self.pulse = pulse;
             } else {
-                self.pulse *= 1.0 - 1.0 / (self.pulse_decay_time as f32);
+                self.pulse *= 1.0 - 1.0 / self.pulse_decay_time;
                 pulse = self.pulse;
             }
 
