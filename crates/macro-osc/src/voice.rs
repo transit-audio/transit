@@ -32,6 +32,7 @@ use super::engine2::virtual_analog_vcf_engine::VirtualAnalogVcfEngine;
 use super::engine2::wave_terrain_engine::WaveTerrainEngine;
 use super::envelope::{DecayEnvelope, LpgEnvelope};
 use super::fx::low_pass_gate::LowPassGate;
+use crate::SampleRate;
 use crate::resources::sysex::{SYX_BANK_0, SYX_BANK_1, SYX_BANK_2};
 use crate::resources::waves::WAV_INTEGRATED_WAVES;
 use crate::utils::clip_16;
@@ -280,9 +281,21 @@ pub struct Voice<'a> {
 }
 
 impl Voice<'_> {
-    pub fn new(sample_rate_hz: f32) -> Self {
+    /// A voice at `sample_rate`, rendering blocks of up to [`MAX_BLOCK_SIZE`] frames. Call
+    /// [`Voice::init`] before the first render.
+    ///
+    /// The firmware computes pitch against its corrected rate, [`crate::CORRECTED_SAMPLE_RATE`]
+    /// (`a0` in `dsp/dsp.h`): the module's codec runs at 47872.34 Hz, so the module plays in tune.
+    /// At 48 kHz the voice keeps the firmware's arithmetic bit for bit, and so plays the firmware's
+    /// pitches scaled by 48000 / 47872.34 (4.6 cents sharp). At the other rates the normalized
+    /// pitch is scaled by 48000 / rate, so every note sounds at the same frequency in hertz as at
+    /// 48 kHz, and the voice's envelope coefficients are per 12-frame block at that rate, so
+    /// decays keep their duration in seconds.
+    #[must_use]
+    pub fn new(sample_rate: SampleRate) -> Self {
+        let sample_rate_hz = sample_rate.hz();
         let block_size = MAX_BLOCK_SIZE;
-        // The firmware computes pitch against its corrected sample rate (`a0` in `dsp/dsp.h`).
+        // 48000 / 48000 is exactly 1, so at 48 kHz this is the firmware's `a0` bit for bit.
         let a0_normalized = crate::A0 * (crate::REF_SAMPLE_RATE / sample_rate_hz);
 
         Self {

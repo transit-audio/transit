@@ -8,6 +8,7 @@
 
 #![forbid(unsafe_code)]
 
+use transit_macro_osc::SampleRate;
 use transit_macro_osc::voice::{Frame, Modulations, Patch, Voice};
 use transit_macro_osc_oracle::residual::residual_i16;
 use transit_macro_osc_oracle::sweep::SEED;
@@ -60,7 +61,7 @@ fn render_both(blocks: &[Block]) -> (Render, Render) {
     let session = Session::lock();
     session.seed(SEED);
     let mut oracle_voice = session.voice(SAMPLE_RATE).expect("oracle voice");
-    let mut port_voice = Voice::new(SAMPLE_RATE);
+    let mut port_voice = Voice::new(SampleRate::Hz48000);
     port_voice.seed(SEED);
     port_voice.init();
 
@@ -342,7 +343,7 @@ fn reinitialized_voice_matches_a_fresh_one() {
     let session = Session::lock();
     session.seed(SEED);
     let mut oracle_voice = session.voice(SAMPLE_RATE).expect("oracle voice");
-    let mut port_voice = Voice::new(SAMPLE_RATE);
+    let mut port_voice = Voice::new(SampleRate::Hz48000);
     port_voice.init();
     let mut frames = [Frame::default(); MAX_BLOCK_SIZE];
     for (size, p, m) in &warm_up {

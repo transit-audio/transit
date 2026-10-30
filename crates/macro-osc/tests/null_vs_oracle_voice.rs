@@ -16,6 +16,7 @@
 
 #![forbid(unsafe_code)]
 
+use transit_macro_osc::SampleRate;
 use transit_macro_osc::voice::{Frame, Modulations, Patch, Voice};
 use transit_macro_osc_oracle::residual::{Residual, residual_i16};
 use transit_macro_osc_oracle::sweep::{SEED, VOICE_POINT_FRAMES, VoicePoint, render_voice_point, voice_points};
@@ -59,7 +60,7 @@ fn modulations(m: &oracle::Modulations) -> Modulations {
 /// Renders one voice-level point from a fresh port voice, as `sweep::render_voice_point` renders it
 /// from a fresh oracle voice: seed, init, then 12-frame blocks.
 fn render_port_point(model: Model, point: &VoicePoint) -> Vec<Frame> {
-    let mut voice = Voice::new(SAMPLE_RATE);
+    let mut voice = Voice::new(SampleRate::Hz48000);
     voice.seed(SEED);
     voice.init();
     let blocks = VOICE_POINT_FRAMES / BLOCK_SIZE;
@@ -80,6 +81,7 @@ fn worse(a: Option<(Residual, String)>, r: Residual, label: String) -> Option<(R
 
 /// Renders the whole voice-level sweep of `model` on both sides and asserts identical frames.
 fn null_voice(model: Model) {
+    assert_eq!(SampleRate::Hz48000.hz().to_bits(), SAMPLE_RATE.to_bits(), "the oracle renders at 48 kHz");
     let session = Session::lock();
     let filter = std::env::var("MACRO_OSC_NULL_POINTS").ok();
     let (mut worst_out, mut worst_aux) = (None, None);

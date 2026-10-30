@@ -5,7 +5,8 @@
 //! the C++ oracle (`transit-macro-osc-oracle`). Every engine is nulled against the oracle sample
 //! by sample (`tests/null_vs_oracle.rs`).
 //!
-//! The firmware runs at 48 kHz in 12-frame blocks; so does this crate for now.
+//! The firmware runs at 48 kHz in 12-frame blocks. A voice here also runs at 44.1, 88.2 and 96 kHz
+//! ([`SampleRate`]), still in 12-frame blocks; only 48 kHz is nulled against the firmware.
 
 #![forbid(unsafe_code)]
 
@@ -34,3 +35,40 @@ pub const CORRECTED_SAMPLE_RATE: f32 = 47872.34;
 
 /// The normalized frequency of A0 that every pitch is computed from (`a0` in `dsp/dsp.h`).
 pub const A0: f32 = (440.0 / 8.0) / CORRECTED_SAMPLE_RATE;
+
+/// The rates a voice runs at. 48 kHz is the firmware's rate and the only one the oracle renders;
+/// the others keep the firmware's pitch and envelope times (see the crate README, "Sample rate").
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum SampleRate {
+    /// 44.1 kHz.
+    Hz44100,
+    /// 48 kHz, the firmware's rate.
+    #[default]
+    Hz48000,
+    /// 88.2 kHz.
+    Hz88200,
+    /// 96 kHz.
+    Hz96000,
+}
+
+impl SampleRate {
+    /// Every supported rate, ascending.
+    pub const ALL: [Self; 4] = [Self::Hz44100, Self::Hz48000, Self::Hz88200, Self::Hz96000];
+
+    /// The rate in hertz.
+    #[must_use]
+    pub const fn hz(self) -> f32 {
+        match self {
+            Self::Hz44100 => 44_100.0,
+            Self::Hz48000 => 48_000.0,
+            Self::Hz88200 => 88_200.0,
+            Self::Hz96000 => 96_000.0,
+        }
+    }
+
+    /// The supported rate equal to `hz`, if any.
+    #[must_use]
+    pub fn from_hz(hz: f32) -> Option<Self> {
+        Self::ALL.into_iter().find(|rate| rate.hz().to_bits() == hz.to_bits())
+    }
+}
