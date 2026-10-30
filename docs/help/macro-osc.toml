@@ -1,0 +1,69 @@
+# The Macro Oscillator's panel (the built-in instrument, ADR 0033).
+area = "macro-osc"
+title = "Macro Oscillator"
+link = "user-guide.md#macro-oscillator"
+
+[[entry]]
+id = "macro_osc.model"
+name = "Model"
+text = "Chooses one of 24 synthesis models, from virtual analog and FM to speech, physical models and drums. Harmonics, Timbre and Morph mean something different for each model."
+
+[[entry]]
+id = "macro_osc.harmonics"
+name = "Harmonics"
+text = "The first of the model's three tone controls: usually the spread or mix of partials, the chord, or the bank of sounds the model picks from."
+
+[[entry]]
+id = "macro_osc.timbre"
+name = "Timbre"
+text = "The model's main brightness or shape control, for example the filter cutoff, the FM amount or the wavetable position. The mod wheel adds to it by default."
+
+[[entry]]
+id = "macro_osc.morph"
+name = "Morph"
+text = "The model's third tone control, for example the waveform blend, the feedback or the vowel."
+
+[[entry]]
+id = "macro_osc.decay"
+name = "Decay"
+text = "How long the low-pass gate takes to close after a note is released, and how long the drum models ring."
+
+[[entry]]
+id = "macro_osc.lpg_color"
+name = "LPG Color"
+text = "How the low-pass gate closes: at 0% it filters as it fades, like a vactrol gate; at 100% it only fades the level, and the release is longer."
+
+[[entry]]
+id = "macro_osc.aux_mix"
+name = "Aux Mix"
+text = "Crossfades from the model's main output to its auxiliary output, a variation of the sound (a sub-oscillator, a different waveform or a second voice, depending on the model)."
+
+[[entry]]
+id = "macro_osc.level"
+name = "Level"
+text = "The instrument's output level. Full scale is 0 dB here; the -6 dB default leaves headroom on the track."
+
+[[entry]]
+id = "macro_osc.tune"
+name = "Tune"
+text = "Transposes the instrument in semitones."
+
+[[entry]]
+id = "macro_osc.bend_range"
+name = "Bend Range"
+text = "How many semitones a full pitch bend moves the note, up and down."
+
+[[entry]]
+id = "macro_osc.mod_wheel"
+name = "Mod Wheel"
+text = "Where the mod wheel goes: it adds up to 100% to Timbre, Harmonics or Morph, or Off ignores it."
+
+[[entry]]
+id = "macro_osc.hardware_tuning"
+name = "Hardware Tuning"
+text = "Off (the default), A4 is 440 Hz. On, the instrument plays the original firmware's pitch arithmetic unchanged, which is 4.6 cents sharp at a true 48 kHz."
+
+[[entry]]
+id = "macro_osc.credits"
+name = "Credits"
+text = "The Macro Oscillator is a port of Émilie Gillet's open-source macro oscillator firmware (MIT license), by way of Oliver Rockstedt's Rust port (MIT). It ports the digital synthesis, not the hardware's analog stages; the notices are in Help > About transit."

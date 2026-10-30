@@ -59,6 +59,8 @@ pub struct EditorLayout {
     pub sample: String,
     pub groups: Vec<String>,
     pub rows: Vec<RowLayout>,
+    /// The credit line of a ported instrument's panel (the Macro Oscillator), empty elsewhere.
+    pub credit: String,
 }
 
 #[derive(Debug, Default)]
@@ -166,6 +168,7 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             sample: String::new(),
             groups: Vec::new(),
             rows: Vec::new(),
+            credit: String::new(),
         };
         let mut open = true;
         let shown = crate::theme::window(ctx, title)

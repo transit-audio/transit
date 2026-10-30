@@ -12,6 +12,7 @@ optional `key` (spelled as the shortcut table spells it) and an optional `link` 
 | [`arrange-header.toml`](arrange-header.toml) | The track header in the arrangement. |
 | [`mixer-strip.toml`](mixer-strip.toml) | A mixer channel strip. |
 | [`device-chain.toml`](device-chain.toml) | The device chain: instrument, effects, sidechain keys. |
+| [`macro-osc.toml`](macro-osc.toml) | The Macro Oscillator's panel. |
 | [`telemetry.toml`](telemetry.toml) | The load readout and every figure of Callback Telemetry. |
 | [`audio-devices.toml`](audio-devices.toml) | The Audio Devices status card and its buttons. |
 | [`midi-monitor.toml`](midi-monitor.toml) | The MIDI Monitor window. |

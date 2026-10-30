@@ -19,6 +19,8 @@ pub enum Item {
     Knob(&'static str, &'static str),
     Toggle(&'static str, &'static str),
     Choice(&'static str, &'static str),
+    /// A choice with long labels: a wide dropdown.
+    Menu(&'static str, &'static str),
     /// The sidechain key dropdown (compressor and gate).
     Key,
 }
@@ -33,7 +35,7 @@ pub struct Section {
 
 pub type Row = &'static [Section];
 
-use Item::{Choice, Key, Knob, Toggle};
+use Item::{Choice, Key, Knob, Menu, Toggle};
 
 const fn sec(title: &'static str, cols: usize, items: &'static [Item]) -> Section {
     Section { title, cols, items }
@@ -106,6 +108,48 @@ static PLATE: [Row; 1] = [&[
     sec("Mix", 1, &[Knob("mix", "Mix")]),
 ]];
 
+/// The Macro Oscillator's id (ADR 0033, #195).
+const MACRO_OSC: &str = "macro_oscillator";
+
+static MACRO: [Row; 2] = [
+    &[
+        sec("Model", 1, &[Menu("model", "Model")]),
+        sec("Tone", 3, &[Knob("harmonics", "Harmonics"), Knob("timbre", "Timbre"), Knob("morph", "Morph")]),
+        sec("Gate", 2, &[Knob("decay", "Decay"), Knob("lpg_color", "LPG Color")]),
+    ],
+    &[
+        sec("Pitch", 3, &[Knob("tune", "Tune"), Knob("bend_range", "Bend"), Toggle("hardware_tuning", "Hardware Tuning")]),
+        sec("Control", 1, &[Choice("mod_wheel", "Mod Wheel")]),
+        sec("Output", 2, &[Knob("aux_mix", "Aux Mix"), Knob("level", "Level")]),
+    ],
+];
+
+/// The help entry of a bespoke panel's control, for the plug-ins that have them.
+fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
+    use crate::help::Id;
+    if plugin != MACRO_OSC {
+        return None;
+    }
+    Some(match param {
+        "model" => Id::MacroOscModel,
+        "harmonics" => Id::MacroOscHarmonics,
+        "timbre" => Id::MacroOscTimbre,
+        "morph" => Id::MacroOscMorph,
+        "decay" => Id::MacroOscDecay,
+        "lpg_color" => Id::MacroOscLpgColor,
+        "aux_mix" => Id::MacroOscAuxMix,
+        "level" => Id::MacroOscLevel,
+        "tune" => Id::MacroOscTune,
+        "bend_range" => Id::MacroOscBendRange,
+        "mod_wheel" => Id::MacroOscModWheel,
+        "hardware_tuning" => Id::MacroOscHardwareTuning,
+        _ => return None,
+    })
+}
+
+/// The credit line under the Macro Oscillator's panel (ADR 0033: credit in the instrument's help).
+pub const MACRO_OSC_CREDIT: &str = "A port of Émilie Gillet's open-source macro oscillator (MIT)";
+
 /// The bespoke layout of a plug-in (`None`: it keeps the generic rows).
 pub fn layout(plugin: &str) -> Option<&'static [Row]> {
     match plugin {
@@ -114,6 +158,7 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         "eq_7band" => Some(&EQ7),
         "subtractive_synth" => Some(&SYNTH),
         "plate_reverb" => Some(&PLATE),
+        MACRO_OSC => Some(&MACRO),
         _ => None,
     }
 }
@@ -128,6 +173,11 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
                 section(app, ui, key, ins, info, s, lay);
             }
         });
+    }
+    if info.id == MACRO_OSC {
+        let r = ui.label(RichText::new(MACRO_OSC_CREDIT).size(10.5).color(TOKENS.text_dim));
+        crate::help::hover(ui, &r, crate::help::Id::MacroOscCredits);
+        lay.credit = MACRO_OSC_CREDIT.to_string();
     }
 }
 
@@ -148,7 +198,7 @@ fn section(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert
 
 fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, info: &'static PluginInfo, item: Item, lay: &mut EditorLayout) {
     let (id, label) = match item {
-        Knob(id, l) | Toggle(id, l) | Choice(id, l) => (id, l),
+        Knob(id, l) | Toggle(id, l) | Choice(id, l) | Menu(id, l) => (id, l),
         Key => return key_dropdown(app, ui, key),
     };
     let Some(p) = info.param(id) else { return };
@@ -163,8 +213,12 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
             let clicked = r.clicked().then_some(if v >= 0.5 { 0.0 } else { 1.0 });
             (r, clicked, p.format(v))
         }
-        _ => choice(ui, ins, p, label, v),
+        Menu(..) => choice(ui, ins, p, label, v, MENU_W),
+        _ => choice(ui, ins, p, label, v, knob::CELL_W - 10.0),
     };
+    if let Some(h) = help(info.id, id) {
+        crate::help::hover(ui, &resp, h);
+    }
     let rect = resp.rect;
     if let Some(control) = crate::midi_learn::plugin_control(key.1, id) {
         resp.context_menu(|ui| app.midi_learn_menu(ui, key.0, control.clone()));
@@ -176,12 +230,15 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     lay.rows.push(RowLayout { param: id.to_string(), control: [rect.min.x, rect.min.y, rect.max.x, rect.max.y], value: shown });
 }
 
-fn choice(ui: &mut Ui, ins: &Insert, p: &ParamInfo, label: &str, v: f32) -> (egui::Response, Option<f32>, String) {
+/// The width of a [`Item::Menu`] dropdown.
+const MENU_W: f32 = 150.0;
+
+fn choice(ui: &mut Ui, ins: &Insert, p: &ParamInfo, label: &str, v: f32, width: f32) -> (egui::Response, Option<f32>, String) {
     let mut idx = (v.round().max(0.0) as usize).min(p.choices.len().saturating_sub(1));
     let r = ui
         .vertical(|ui| {
             let c = egui::ComboBox::from_id_salt(("builtin_choice", ins.uid.get(), p.id))
-                .width(knob::CELL_W - 10.0)
+                .width(width)
                 .selected_text(p.choices.get(idx).copied().unwrap_or(""))
                 .show_ui(ui, |ui| {
                     for (i, name) in p.choices.iter().enumerate() {
@@ -234,14 +291,14 @@ mod tests {
 
     fn item_id(i: Item) -> Option<&'static str> {
         match i {
-            Knob(id, _) | Toggle(id, _) | Choice(id, _) => Some(id),
+            Knob(id, _) | Toggle(id, _) | Choice(id, _) | Menu(id, _) => Some(id),
             Key => None,
         }
     }
 
     #[test]
     fn every_layout_places_each_parameter_of_its_plugin_exactly_once() {
-        for plugin in ["compressor", "expander_gate", "eq_7band", "subtractive_synth", "plate_reverb"] {
+        for plugin in ["compressor", "expander_gate", "eq_7band", "subtractive_synth", "plate_reverb", MACRO_OSC] {
             let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
             let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).filter_map(|i| item_id(*i)).collect();
             ids.sort_unstable();
@@ -249,5 +306,13 @@ mod tests {
             want.sort_unstable();
             assert_eq!(ids, want, "{plugin}");
         }
+    }
+
+    #[test]
+    fn every_macro_oscillator_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(MACRO_OSC).unwrap().params {
+            assert!(help(MACRO_OSC, p.id).is_some(), "{}", p.id);
+        }
+        assert!(help("compressor", "threshold").is_none());
     }
 }

@@ -300,7 +300,7 @@ fn open_plugin(t: &mut T, plugin: &str) -> (TrackId, Option<usize>) {
 
 #[test]
 fn each_bespoke_panel_opens_and_lists_every_parameter() {
-    for plugin in ["compressor", "expander_gate", "eq_7band", "subtractive_synth", "plate_reverb"] {
+    for plugin in ["compressor", "expander_gate", "eq_7band", "subtractive_synth", "plate_reverb", "macro_oscillator"] {
         let mut t = T::new();
         let (tr, _) = open_plugin(&mut t, plugin);
         let w = t.window(tr);
@@ -315,6 +315,25 @@ fn each_bespoke_panel_opens_and_lists_every_parameter() {
     let mut t = T::new();
     let (tr, _) = open_plugin(&mut t, "gain");
     assert_eq!(t.window(tr).preset, [0.0; 4]);
+}
+
+#[test]
+fn the_macro_oscillator_panel_credits_the_original_and_drives_its_controls() {
+    let mut t = T::new();
+    let (tr, slot) = open_plugin(&mut t, "macro_oscillator");
+    let w = t.window(tr);
+    assert_eq!(w.title.split(" · ").last(), Some("Macro Oscillator"));
+    assert_eq!(w.credit, crate::panel::MACRO_OSC_CREDIT);
+    assert!(w.credit.contains("Émilie Gillet"));
+    assert_eq!(t.row(tr, "model").value, "Virtual analog", "the default model, named by what it does");
+    assert_eq!(t.row(tr, "hardware_tuning").value, "Off", "concert pitch by default");
+    let before = t.undo_len();
+    t.click(mid(t.row(tr, "hardware_tuning").control), 1);
+    assert_eq!(t.param(tr, slot, "hardware_tuning"), Some(1.0));
+    assert_eq!(t.undo_len(), before + 1);
+    let from = mid(t.row(tr, "timbre").control);
+    t.send("ui.drag", json!({"x": from.0, "y": from.1, "to_x": from.0, "to_y": from.1 - 30.0}));
+    assert!(t.param(tr, slot, "timbre").unwrap() > 50.0, "dragging Timbre up raises it");
 }
 
 #[test]

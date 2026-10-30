@@ -1,0 +1,13 @@
+{
+  "plugin": "macro_oscillator",
+  "version": 1,
+  "params": {
+    "model": 0.0,
+    "harmonics": 30.0,
+    "timbre": 35.0,
+    "morph": 60.0,
+    "decay": 35.0,
+    "lpg_color": 25.0,
+    "tune": -12.0
+  }
+}

@@ -49,6 +49,10 @@ pub static FACTORY: &[(&str, &str, &str)] = factory![
     "subtractive_synth" / "Bass",
     "plate_reverb" / "Vocal Plate",
     "plate_reverb" / "Bright Plate",
+    "macro_oscillator" / "Init",
+    "macro_oscillator" / "Analog Bass",
+    "macro_oscillator" / "Glass Bell",
+    "macro_oscillator" / "Plucked String",
 ];
 
 /// The factory presets of one plug-in, in table order.
