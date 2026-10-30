@@ -133,7 +133,14 @@ fn null_engine(model: Model) {
         let port = render_port_point(model, point);
         if port.rng_state != oracle_rng_state {
             failing += 1;
-            println!("{} {}: random state {:#010x} ({:?} draws), oracle {oracle_rng_state:#010x} ({:?} draws)", model.label(), point.label(), port.rng_state, draws(port.rng_state), draws(oracle_rng_state));
+            println!(
+                "{} {}: random state {:#010x} ({:?} draws), oracle {oracle_rng_state:#010x} ({:?} draws)",
+                model.label(),
+                point.label(),
+                port.rng_state,
+                draws(port.rng_state),
+                draws(oracle_rng_state)
+            );
         }
         let out = residual_f32(&port.out, &oracle.out).expect("lengths");
         let aux = residual_f32(&port.aux, &oracle.aux).expect("lengths");
