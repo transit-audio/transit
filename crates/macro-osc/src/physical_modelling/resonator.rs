@@ -5,8 +5,8 @@
 use crate::resources::stiffness::LUT_STIFFNESS;
 use crate::utils::cosine_oscillator::{CosineOscillator, CosineOscillatorMode};
 use crate::utils::filter::{FilterMode, FrequencyApproximation, OnePole};
-use crate::utils::{ftz, interpolate};
 use crate::utils::units::semitones_to_ratio;
+use crate::utils::{ftz, interpolate};
 
 pub const MAX_NUM_MODES: usize = 24;
 pub const MODE_BATCH_SIZE: usize = 4;

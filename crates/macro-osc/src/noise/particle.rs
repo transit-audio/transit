@@ -3,6 +3,7 @@
 // Based on MIT-licensed code (c) 2016 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
 use crate::utils::filter::{FilterMode, FrequencyApproximation, Svf};
+use crate::utils::ftz;
 use crate::utils::random::Random;
 use crate::utils::sqrt;
 use crate::utils::units::semitones_to_ratio;
@@ -56,8 +57,8 @@ impl Particle {
                     can_radomize_frequency = false;
                 }
             }
-            *aux_sample += s;
-            *out_sample += self.filter.process(self.pre_gain * s, FilterMode::BandPass);
+            *aux_sample = ftz(*aux_sample + s);
+            *out_sample = ftz(*out_sample + self.filter.process(ftz(self.pre_gain * s), FilterMode::BandPass));
             u = rng.get_float();
         }
     }

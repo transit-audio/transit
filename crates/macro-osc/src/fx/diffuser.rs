@@ -3,6 +3,7 @@
 // Based on MIT-licensed code (c) 2016 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
 use super::{Format12Bit, FxEngine, Lfo, Line, lines};
+use crate::utils::ftz;
 
 // ap1, ap2, ap3, ap4, dapa, dapb, del.
 const LINES: [Line; 7] = lines([126, 180, 269, 444, 1653, 2010, 3411]);
@@ -62,7 +63,7 @@ impl Diffuser {
             e.write_all_pass(dapb, 0, -kap);
             e.write_line(del, 0, 2.0);
             e.write(&mut wet, 0.0);
-            *in_out_sample += amount * (wet - *in_out_sample);
+            *in_out_sample = ftz(*in_out_sample + ftz(amount * ftz(wet - *in_out_sample)));
         }
 
         self.lp_decay = lp;

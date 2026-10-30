@@ -13,8 +13,8 @@ pub mod low_pass_gate;
 pub mod overdrive;
 pub mod sample_rate_reducer;
 
-use crate::utils::clip_16;
 use crate::utils::cosine_oscillator::{CosineOscillator, CosineOscillatorMode};
+use crate::utils::{clip_16, ftz};
 
 /// How samples are stored in the ring buffer (`Format` and `DataType` in `fx/fx_engine.h`).
 pub trait Format {
@@ -218,15 +218,15 @@ impl<const SIZE: usize, F: Format> FxEngine<SIZE, F> {
     /// `Lp(state, coefficient)`.
     #[inline]
     pub fn lp(&mut self, state: &mut f32, coefficient: f32) {
-        *state += coefficient * (self.accumulator - *state);
+        *state = ftz(*state + ftz(coefficient * ftz(self.accumulator - *state)));
         self.accumulator = *state;
     }
 
     /// `Hp(state, coefficient)`.
     #[inline]
     pub fn hp(&mut self, state: &mut f32, coefficient: f32) {
-        *state += coefficient * (self.accumulator - *state);
-        self.accumulator -= *state;
+        *state = ftz(*state + ftz(coefficient * ftz(self.accumulator - *state)));
+        self.accumulator = ftz(self.accumulator - *state);
     }
 
     /// `Interpolate(line, offset, scale)`.
