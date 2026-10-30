@@ -519,7 +519,7 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     if pressed(ctx, A::FullMixer) {
         app.ui.mixer_full = !app.ui.mixer_full;
     }
-    if pressed(ctx, A::SelectNone) {
+    if pressed(ctx, A::SelectNone) && !crate::arrange::marquee::cancel(app) {
         app.deselect_all();
     }
     if pressed(ctx, A::ZoomIn) {

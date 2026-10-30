@@ -1,11 +1,12 @@
 //! The arrangement window: a track list on the left, a bar/beat ruler, and the timeline with
 //! clips as colored regions. Clicking a clip selects it; dragging moves it (Ctrl-drag, Cmd on a
 //! Mac, or Alt-drag copies; clip drags snap to the visible grid, Shift bypasses it); dragging an edge trims it (the dragged edge snaps to the visible grid, Shift bypasses it); clicking empty timeline sets the
-//! cursor. A drag of a selected clip previews and moves the whole selection (`drag_ghosts`). Every edit goes through engine commands (see `actions`).
+//! cursor, and dragging across empty lane space draws a marquee that selects the clips it touches (`marquee`, Logic's convention; Shift adds, Ctrl/Cmd toggles). A drag of a selected clip previews and moves the whole selection (`drag_ghosts`). Every edit goes through engine commands (see `actions`).
 
 mod clips;
 mod copy_drag;
 mod drag_ghosts;
+pub(crate) mod marquee;
 mod tracks;
 pub(crate) use clips::*;
 pub(crate) use tracks::*;
@@ -251,6 +252,8 @@ pub struct ArrangeState {
     pub menu: Vec<crate::mixer::MenuItem>,
     /// A track header being dragged (slice 2c).
     pub header_drag: Option<crate::groups::HeaderDrag>,
+    /// A marquee selection drag in progress (#217).
+    pub marquee: Option<marquee::Marquee>,
     /// The track rows in display order (Shift-click ranges over them).
     pub order: Vec<TrackId>,
     /// The track a plain or Ctrl click on a header last picked (Shift-click ranges from it).
@@ -703,6 +706,7 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
             commit_drag(app, kind, clip, track, dest, start, end, a, b, copy);
         }
     }
+    marquee::input(app, ui, &resp, map, tl, layout, (geo.total() + ADD_STACK_H - tl.height()).max(0.0));
     if resp.clicked()
         && let Some(pos) = resp.interact_pointer_pos()
     {

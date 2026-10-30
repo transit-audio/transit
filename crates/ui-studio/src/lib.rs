@@ -1283,6 +1283,8 @@ mod arrange_ghost_tests;
 #[cfg(test)]
 mod arrange_loop_tests;
 #[cfg(test)]
+mod arrange_marquee_tests;
+#[cfg(test)]
 mod devices_chain_tests;
 #[cfg(test)]
 mod devices_sidechain_tests;
