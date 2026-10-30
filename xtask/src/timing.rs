@@ -16,11 +16,18 @@
 //!
 //! Rule (d), the syntax-based polling-loop check in `timing_loops.rs`, also checks ignored tests.
 //! Its only marker is `// timing: stall-bound <reason>` on or immediately above the loop.
+//!
+//! Rule (e), in `timing_pool.rs` (#226): a render-worker or host-thread test decides every outcome itself
+//! (its own deadline, a held worker it waits on, explicit instants, serial rendering or a long give-up),
+//! never waits for "some strip" before a per-strip assertion, never exits on a quiet period, and runs its
+//! closing blocks at a far deadline before a coverage check. Its markers are its own (see that module).
 
 use std::path::Path;
 
 #[path = "timing_loops.rs"]
 mod loops;
+#[path = "timing_pool.rs"]
+mod pool;
 
 const TAGS: &[&str] = &["stall-bound", "floor-ok", "sleep-ok", "value"];
 const FLOOR_NAMES: &[&str] = &["frames", "blocks", "laps", "iterations", "polls"];
@@ -336,6 +343,7 @@ pub fn scan(path: &str, src: &str, test_file: bool) -> Vec<Hit> {
         }
     }
     hits.extend(loops::scan(path, src, test_file));
+    hits.extend(pool::scan(path, src, test_file));
     hits
 }
 

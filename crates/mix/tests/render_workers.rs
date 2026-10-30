@@ -77,6 +77,8 @@ fn settle(rig: &mut Rig) {
 /// `Late`, then `Busy` until the worker is back, so its live MIDI goes through the ring). No note
 /// or pedal is left stuck, every hole in an instrument's time is a counted `Busy` or `Unstarted`
 /// overrun, no instance is entered twice at once, and no event arrives out of order.
+// timing: explicit-deadline injected 2-10 ms stalls against an explicit 1.5 ms deadline decide the overruns;
+// the assertions are accounting identities and liveness over 3000 blocks, and the closing blocks run at a far deadline
 #[test]
 fn continuity_through_a_real_worker_set_with_stalls_and_live_midi() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -165,6 +167,8 @@ fn continuity_through_a_real_worker_set_with_stalls_and_live_midi() {
 /// counted like any other `Unstarted` overrun. Held by construction, not by the host's speed: two
 /// workers are each held inside the first strip they take, so the other strips (with no cost
 /// history, never admitted inline) are taken back unstarted on every block until the holds end.
+// timing: held-worker both workers are held inside the first strip each takes;
+// the other four strips never start, whenever the workers wake, and no assertion needs to know which were taken
 #[test]
 fn strips_unstarted_before_their_first_render_are_holes_too() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -208,6 +212,8 @@ fn strips_unstarted_before_their_first_render_are_holes_too() {
 /// The callback allocates and frees nothing with the worker set on: begin, deliver, publish,
 /// wake, finish, inline renders, overruns, live MIDI parked for an away strip and delivered
 /// later (the allocation-armed pool test on the new path).
+// timing: explicit-deadline injected 1-4 ms stalls against an explicit 0.8 ms deadline make the overrun paths run;
+// the allocation count does not depend on which strip misses
 #[test]
 fn the_callback_allocates_nothing_with_render_workers() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);

@@ -510,6 +510,8 @@ fn graph_off() {
 /// sources and elsewhere. No note or pedal is left stuck; every hole in an instrument's time is a
 /// counted busy or unstarted overrun or an upstream-missed skip; the take journal counts only the
 /// strips' own overruns.
+// timing: explicit-deadline injected 2-8 ms stalls against an explicit 1.5 ms deadline decide the overruns and skips;
+// the assertions are accounting identities and liveness over 1500 blocks, and the closing blocks run at a far deadline
 #[test]
 fn continuity_across_upstream_missed_skips() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -586,6 +588,8 @@ fn continuity_across_upstream_missed_skips() {
 
 /// Gate 3 through the graph: the callback allocates and frees nothing over a keyed plan with
 /// stalls, overruns, upstream-missed skips, inline renders and live MIDI.
+// timing: explicit-deadline injected stalls against an explicit 0.8 ms deadline make the overrun and skip paths run;
+// the allocation count does not depend on which strip misses
 #[test]
 fn the_callback_allocates_nothing_through_the_graph() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
