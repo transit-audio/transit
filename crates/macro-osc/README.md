@@ -45,7 +45,7 @@ voice-level sweep (84 points: the 78 above with decay 0.5, plus decay 0 and 1 at
 triggered center; 100 ms each, so the envelopes decay) and requires the int16 frames, out and aux,
 to be identical: 0 LSB on every frame. There is no tolerance at all, not even 1 LSB: the port
 reproduces the firmware's int16 conversion (`Clip16(1 + int32_t(x))` after the `-32767` scaling)
-exactly. All 24 engines are identical (Windows x86-64 MSVC, 2026-10-29).
+exactly. All 24 engines are identical (Windows x86-64 MSVC, 2026-10-30).
 
 `tests/voice_scenarios_vs_oracle.rs` covers what the sweep does not reach, against the oracle's voice
 with the same 0-LSB rule: engine changes within one voice by the patch (the six-op banks, every
@@ -58,7 +58,9 @@ re-initialized after use. One documented difference is pinned there, below.
 
 `tests/voice_sample_rates.rs` checks the other rates (the oracle runs at 48 kHz only): a sine voice at
 notes 45, 69 and 93 plays within 1 cent of its 48 kHz pitch at 44.1, 48, 88.2 and 96 kHz, measured
-over two seconds of zero crossings (measured: within 0.001 cent).
+over two seconds of zero crossings (measured: within 0.001 cent); the six-op and LPC speech engines,
+which compute pitch against the corrected rate on their own paths, play at 96 kHz within 1 cent of
+their 48 kHz pitch, measured by autocorrelation (measured: -0.35 and -0.86 cents).
 
 ```sh
 cargo test --locked -p transit-macro-osc --test null_vs_oracle_voice -- --nocapture
@@ -76,8 +78,11 @@ delay), speech, swarm, particle noise, the inharmonic string, and, on a 64-bit h
 wavetable engine (its pointer map is twice as large as on the module). The port's engines own their
 memory, so the six-op engine resumes from its own accumulator, which is exactly what the firmware
 does when nothing overwrote it (re-entry from another six-op bank, or after any of the other 15
-engines). Reproducing the overlap would mean reproducing every engine's byte layout, the host's
-pointer size included, to replay one block of leftover memory, so the port does not.
+engines). On the module those values are another engine's bytes read as floats (the particle
+diffuser's integers, the wavetable engine's pointers), so the module's block can be garbage up to a
+NaN, which the C++ cast turns into a full-scale click; the port is never louder than the module
+there. Won't fix: on the module, the first 12-frame block (0.25 ms) after returning to a six-op bank from one of six engines adds that engine's leftover memory to the output, which can be a click; transit plays the six-op engine's own tail instead, as the module does after any other engine. Reproducing it would mean emulating every engine's byte layout and the host's pointer size to replay garbage. Recorded as an oracle deviation note in
+[ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md#oracle-deviation-note-2026-10-30-the-six-op-engine-after-shared-ram).
 `six_op_reentry_after_a_ram_sharing_engine` pins the difference to that one block: every other frame
 is identical, the block is identical after the other 15 engines and differs after those six.
 
@@ -91,14 +96,18 @@ the nulled voice.
 
 ## Sample rate
 
-`Voice::new` takes a `SampleRate`: 44.1, 48 (the default), 88.2 or 96 kHz, rendered in blocks of 1 to
-24 frames, timed as the firmware's 12-frame blocks. At 48 kHz the voice is the firmware's arithmetic,
+`Voice::new` takes a `SampleRate`: 44.1, 48 (the default), 88.2 or 96 kHz, and returns an initialized
+voice. Each `render` call is one control block timed as the firmware's 12 frames, so feed 12-frame
+blocks for the firmware's envelope timing at every rate (24 frames are one control block, 25 are
+three). Decay and low-pass gate color are clamped to [0, 1] inside the voice. At 48 kHz the voice is the firmware's arithmetic,
 bit for bit. The firmware computes pitch against its corrected rate, 47872.34 Hz (the module's codec
 clock), so on the module every note is in tune; rendered at a true 48 kHz the same arithmetic plays
 4.6 cents sharp (48000 / 47872.34), and so does this voice. At the other rates the normalized pitch
 is scaled by 48000 / rate and the voice's envelope coefficients (`(200 * 12) / rate` and
 `(20 * 12) / rate`) are per block at that rate, so notes and decays keep their 48 kHz frequency and
 duration; the engines' own sample-rate-dependent constants follow the rate given to their `init`.
+The trigger delay is 5 blocks at every rate: 1.25 ms at 48 kHz, 1.36 ms at 44.1 kHz, 0.63 ms at
+96 kHz.
 Per-block coefficients inside the engines and the low-pass gate (the vactrol's 0.6 attack per block,
 filter cutoffs normalized to the sample) are the firmware's 48 kHz values, so timbre can shift
 slightly at the other rates; only 48 kHz is nulled. Whether the instrument retunes by the 4.6 cents
