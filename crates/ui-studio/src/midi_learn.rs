@@ -312,6 +312,7 @@ fn norm_value(s: &Session, track: TrackId, control: &Control) -> f32 {
             let device = lane.device(t).map(|i| i.plugin.as_str()).unwrap_or_default();
             lane.info(t).map_or(0.0, |p| device_norm(device, p, lane.static_value(t)))
         }
+        Control::Macro(n) => t.rack.as_ref().and_then(|r| r.macros.get(usize::from(*n))).map_or(0.0, |m| m.value),
     }
 }
 
@@ -524,10 +525,11 @@ impl StudioApp {
             self.ui.midi_profile = self.engine.midi_profile().clone();
         }
         let ids: Vec<TrackId> = self.engine.session().tracks.iter().map(|t| t.id).collect();
-        let all = if self.engine.session().midi_mappings.is_empty() && self.engine.midi_profile().is_empty() {
+        let racks = self.engine.session().tracks.iter().any(|t| t.rack.as_ref().is_some_and(|r| r.macros.iter().any(|m| m.midi.is_some())));
+        let all = if self.engine.session().midi_mappings.is_empty() && self.engine.midi_profile().is_empty() && !racks {
             Vec::new()
         } else {
-            transit_model::resolve(&ids, &self.engine.session().midi_mappings, self.engine.midi_profile())
+            transit_model::resolve(&ids, &self.engine.session().midi_mappings.with_racks(self.engine.session()), self.engine.midi_profile())
         };
         // A plug-in mapping whose device is gone is stored but idle.
         let live = |r: &Resolved| match &r.control {
@@ -694,6 +696,14 @@ impl StudioApp {
             Control::Send(n) => Some((Target::Send(r.track, usize::from(*n)), k_to_db(value))),
             Control::Plugin { slot, param } => {
                 self.mapped_param_move(r.track, *slot, param, value, key);
+                self.midi_learn.last_move = Some(now);
+                None
+            }
+            // A rack macro (ADR 0034): the macro and every parameter it maps, one merged step.
+            Control::Macro(n) => {
+                if let Err(e) = self.engine.execute_merged("rack.macro", &json!({"track": r.track.0, "macro": u16::from(*n) + 1, "value": value}), key) {
+                    self.status = e.to_string();
+                }
                 self.midi_learn.last_move = Some(now);
                 None
             }

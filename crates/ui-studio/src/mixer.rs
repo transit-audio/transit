@@ -296,6 +296,8 @@ pub struct DevicesLayout {
     /// The focused track's sends.
     pub sends: Vec<SendRow>,
     pub add_send: R4,
+    /// A rack's own card (ADR 0034): its macros and member zones.
+    pub rack: Option<crate::rack_panel::RackLayout>,
 }
 
 /// A plug-in the "+" menu offers.

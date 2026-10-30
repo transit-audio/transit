@@ -54,6 +54,7 @@ pub mod panel;
 pub mod plugin_header;
 pub mod plugin_scan;
 pub mod presets;
+pub mod rack_panel;
 pub mod recent;
 pub mod scope_strip;
 pub mod shortcuts;
@@ -1291,6 +1292,8 @@ mod midi_output_header_tests;
 mod midi_record_tests;
 #[cfg(test)]
 mod param_capture_tests;
+#[cfg(test)]
+mod rack_panel_tests;
 #[cfg(test)]
 mod recent_tests;
 #[cfg(test)]

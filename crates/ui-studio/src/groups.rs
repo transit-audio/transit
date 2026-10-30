@@ -313,6 +313,19 @@ impl StudioApp {
         Ok(folder)
     }
 
+    /// Group into Rack (ADR 0034): a rack of `tracks` ("Rack n"), placed where the first was, as
+    /// one undo step (`rack.new`). Its MIDI and instrument tracks become members with full zones.
+    pub fn group_into_rack(&mut self, tracks: &[TrackId]) -> Result<TrackId, String> {
+        let list: Vec<u64> = tracks.iter().map(|t| t.0).collect();
+        let r = self.run("rack.new", json!({"tracks": list}))?;
+        let rack = TrackId(r.get("rack").and_then(Value::as_u64).unwrap_or(0));
+        self.ui.collapsed.retain(|x| *x != rack);
+        self.focus(rack);
+        let name = self.engine.session().track(rack).map_or_else(String::new, |t| t.name.clone());
+        self.status = format!("Grouped {} track{} into {name}", list.len(), if list.len() == 1 { "" } else { "s" });
+        Ok(rack)
+    }
+
     /// Put every group's members directly after its header (the session order the tree stands
     /// for), keeping the order within each level.
     fn normalize(&mut self, key: &str) -> Result<usize, EngineError> {
@@ -599,14 +612,21 @@ pub fn menu_items(app: &mut StudioApp, ui: &mut egui::Ui, on: Option<TrackId>) {
     let new = ui.button("New Group Track");
     let group =
         ui.add_enabled(!tracks.is_empty(), egui::Button::new("Group Tracks").shortcut_text(crate::shortcuts::label(crate::shortcuts::Action::Group)));
+    // A rack (ADR 0034): a group that also plays its instruments from one MIDI input.
+    let rackable = {
+        let s = app.engine.session();
+        tracks.iter().any(|t| s.track(*t).is_some_and(|x| x.kind.is_midi())) && !tracks.iter().any(|t| s.track(*t).is_some_and(|x| x.is_folder()))
+    };
+    let rack = ui.add_enabled(rackable, egui::Button::new("Group into Rack"));
     let ungroup =
         ui.add_enabled(!groups.is_empty(), egui::Button::new("Ungroup").shortcut_text(crate::shortcuts::label(crate::shortcuts::Action::Ungroup)));
     let edit = ui.add_enabled(!tracks.is_empty(), egui::Button::new("Edit Group…"));
     let list = if on.is_some() { &mut app.arrange.menu } else { &mut app.arrange.bar_menu };
-    list.retain(|m| !matches!(m.label.as_str(), "Group Tracks" | "Ungroup" | "New Group Track" | "Edit Group…"));
+    list.retain(|m| !matches!(m.label.as_str(), "Group Tracks" | "Group into Rack" | "Ungroup" | "New Group Track" | "Edit Group…"));
     list.push(crate::mixer::MenuItem::at(ui, "New Group Track".into(), String::new(), new.rect));
     list.push(crate::mixer::MenuItem::at(ui, "Edit Group…".into(), String::new(), edit.rect));
     list.push(crate::mixer::MenuItem::at(ui, "Group Tracks".into(), String::new(), group.rect));
+    list.push(crate::mixer::MenuItem::at(ui, "Group into Rack".into(), String::new(), rack.rect));
     list.push(crate::mixer::MenuItem::at(ui, "Ungroup".into(), String::new(), ungroup.rect));
     if new.clicked() {
         let _ = app.new_group_track();
@@ -618,6 +638,10 @@ pub fn menu_items(app: &mut StudioApp, ui: &mut egui::Ui, on: Option<TrackId>) {
     }
     if group.clicked() {
         let _ = app.group_tracks(&tracks);
+        ui.close();
+    }
+    if rack.clicked() {
+        let _ = app.group_into_rack(&tracks);
         ui.close();
     }
     if ungroup.clicked() {

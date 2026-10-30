@@ -38,6 +38,10 @@ pub(super) fn track_header(
     let kind = match t.kind {
         TrackKind::Instrument => t.instrument.as_ref().map_or("Instrument".to_string(), |i| short_plugin(&app.plugin_name(&i.plugin, true))),
         TrackKind::Audio => format!("Audio · {}", t.format.label()),
+        TrackKind::Folder if t.is_rack() => {
+            let n = app.engine.session().rack_members(t).count();
+            format!("Rack · {n} instrument{}", if n == 1 { "" } else { "s" })
+        }
         TrackKind::Folder => {
             let n = app.engine.session().tracks.iter().filter(|x| x.folder == Some(t.id) && x.id != t.id).count();
             format!("Group · {n} track{}", if n == 1 { "" } else { "s" })
@@ -45,7 +49,20 @@ pub(super) fn track_header(
         k => format!("{k:?}"),
     };
     row.subtitle = kind.clone();
-    let subtitle = p.text(pos2(tx + 12.0, r.min.y + 30.0), Align2::LEFT_CENTER, kind, FontId::proportional(10.5), TOKENS.text_dim);
+    // A rack (ADR 0034) wears a badge where a group's subtitle starts.
+    let sub_x = if t.is_rack() {
+        let badge = Rect::from_min_size(pos2(tx + 12.0, r.min.y + 24.0), vec2(30.0, 13.0));
+        p.rect_filled(badge, crate::theme::RADIUS_SM, TOKENS.accent);
+        p.text(badge.center(), Align2::CENTER_CENTER, "Rack", FontId::proportional(9.5), theme::text_on(TOKENS.accent));
+        let resp = ui.interact(badge.intersect(list), ui.id().with(("rack_badge", t.id.0)), Sense::hover());
+        crate::help::hover(ui, &resp, crate::help::Id::ArrangeHeaderRack);
+        row.rack_badge = r4(badge);
+        badge.max.x + 5.0
+    } else {
+        tx + 12.0
+    };
+    let kind = if t.is_rack() { kind.trim_start_matches("Rack · ").to_string() } else { kind };
+    let subtitle = p.text(pos2(sub_x, r.min.y + 30.0), Align2::LEFT_CENTER, kind, FontId::proportional(10.5), TOKENS.text_dim);
     // A loaded plug-in that does not answer (#213): the marker beside the subtitle.
     if let Some((plugin, hang)) = app.track_hang(t) {
         let name = app.plugin_name(&plugin, false);
@@ -101,7 +118,8 @@ pub(super) fn track_header(
         r4(b)
     };
     let records = t.kind.has_playlist();
-    row.monitor = toggle(app, "I", m.input_monitor, TOKENS.monitor, "mix.input_monitor", t.kind == TrackKind::Audio);
+    // A rack monitors its MIDI input: while I is on, live notes play its members (ADR 0034).
+    row.monitor = toggle(app, "I", m.input_monitor, TOKENS.monitor, "mix.input_monitor", t.kind == TrackKind::Audio || t.is_rack());
     row.arm = toggle(app, "R", m.record_arm, TOKENS.record, "mix.record_arm", records);
     row.solo = toggle(app, "S", m.solo, TOKENS.solo, "mix.solo", true);
     row.mute = toggle(app, "M", m.mute, TOKENS.mute, "mix.mute", true);

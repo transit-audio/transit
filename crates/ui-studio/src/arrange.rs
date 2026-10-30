@@ -141,6 +141,8 @@ pub struct TrackRow {
     pub kind: TrackKind,
     /// The line under the name (an instrument track: the instrument).
     pub subtitle: String,
+    /// A rack's "Rack" badge (ADR 0034); zero elsewhere.
+    pub rack_badge: R4,
     pub header: R4,
     /// The name in the header (double-click renames, slice 6).
     pub name_rect: R4,

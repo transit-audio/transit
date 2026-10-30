@@ -59,3 +59,8 @@ text = "An effect on this track. Click for its window, right-click for more such
 id = "mixer_strip.add_effect"
 name = "Add effect"
 text = "Adds an effect to the end of this track's chain."
+
+[[entry]]
+id = "mixer_strip.rack"
+name = "Rack"
+text = "A rack's strip: the sum of its instruments, with the rack's own effects and fader after the sum."

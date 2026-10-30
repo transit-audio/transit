@@ -33,6 +33,7 @@ ids! {
     ArrangeHeaderMute => "arrange_header.mute",
     ArrangeHeaderAutomation => "arrange_header.automation",
     ArrangeHeaderVolume => "arrange_header.volume",
+    ArrangeHeaderRack => "arrange_header.rack",
     ArrangeHeaderFreeze => "arrange_header.freeze",
     // help\audio-devices.toml
     AudioDevicesWindow => "audio_devices.window",
@@ -74,6 +75,9 @@ ids! {
     DeviceChainHardwareInsert => "device_chain.hardware_insert",
     DeviceChainBypass => "device_chain.bypass",
     DeviceChainRemove => "device_chain.remove",
+    DeviceChainRackMacro => "device_chain.rack_macro",
+    DeviceChainRackZone => "device_chain.rack_zone",
+    DeviceChainRackPlay => "device_chain.rack_play",
     DeviceChainTitle => "device_chain.title",
     DeviceChainInstrument => "device_chain.instrument",
     DeviceChainHardwareSynth => "device_chain.hardware_synth",
@@ -109,6 +113,7 @@ ids! {
     MidiMonitorTime => "midi_monitor.time",
     // help\mixer-strip.toml
     MixerStripName => "mixer_strip.name",
+    MixerStripRack => "mixer_strip.rack",
     MixerStripPan => "mixer_strip.pan",
     MixerStripMute => "mixer_strip.mute",
     MixerStripSolo => "mixer_strip.solo",

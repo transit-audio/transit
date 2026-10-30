@@ -42,3 +42,18 @@ text = "Plays a hardware synth: the track's MIDI goes to its port and its audio 
 id = "device_chain.sidechain"
 name = "Sidechain key"
 text = "Makes a compressor or gate listen to another track or bus instead of this one, for example to duck a pad under a kick."
+
+[[entry]]
+id = "device_chain.rack_macro"
+name = "Macro"
+text = "One of the rack's eight macro knobs. Right-click to map a parameter of an instrument or effect in the rack, set the mapping's range and curve, or MIDI Learn the knob. Moving it moves every mapped parameter."
+
+[[entry]]
+id = "device_chain.rack_zone"
+name = "Zone"
+text = "The keys (or velocities) this instrument plays in the rack. Drag low in the bar to move an edge, high in the bar to move a fade handle: inside a fade the note plays softer toward the edge."
+
+[[entry]]
+id = "device_chain.rack_play"
+name = "Play"
+text = "Lets the rack take live MIDI: every instrument whose zones hold a note plays it."

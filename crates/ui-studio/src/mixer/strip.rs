@@ -381,6 +381,15 @@ fn strip(
     let name_r = Rect::from_min_size(pos2(r.min.x, r.min.y), vec2(r.width(), 22.0));
     p.rect_filled(Rect::from_min_size(name_r.min, vec2(r.width(), 4.0)), crate::theme::top_corners(), theme::rgb(t.color));
     let mut tr = name_r.shrink2(vec2(5.0, 0.0));
+    if t.is_rack() {
+        // A rack (ADR 0034): a "Rack" tag in the accent color.
+        let tag = Rect::from_min_size(pos2(tr.max.x - 28.0, tr.center().y - 5.0), vec2(28.0, 13.0));
+        p.rect_filled(tag, crate::theme::RADIUS_SM, TOKENS.accent);
+        p.text(tag.center(), Align2::CENTER_CENTER, "Rack", FontId::proportional(9.5), theme::text_on(TOKENS.accent));
+        let resp = ui.interact(tag.intersect(clip), ui.id().with(("rack_tag", t.id.0)), Sense::hover());
+        crate::help::hover(ui, &resp, crate::help::Id::MixerStripRack);
+        tr.max.x = tag.min.x - 3.0;
+    }
     if sl.fx {
         // FX channels: a small "FX" tag and a muted name.
         let tag = Rect::from_min_size(pos2(tr.max.x - 18.0, tr.center().y - 5.0), vec2(18.0, 13.0));
