@@ -123,11 +123,15 @@ slightly at the other rates; only 48 kHz is nulled.
 firmware's arithmetic bit for bit (4.6 cents sharp at a true 48 kHz; the null tests use it).
 `Tuning::Concert` scales every frequency the firmware derives from its corrected rate by
 47872.34 / 48000: the voice's `a0` (so every engine's pitch, and the clocks and densities derived
-from it), the six-operator voices' own reference and the speech formants, so A4 is 440 Hz at every
-rate, as on the module, whose codec runs at the corrected rate. `tests/voice_tuning.rs` checks
-equal temperament at every rate within 0.05 cent on the FM engine, the ratio between the two
-tunings within 0.01 cent, the six-op and LPC speech paths within 0.25 cent, and that the firmware
-tuning round-trips bit for bit. The Macro Oscillator instrument always plays concert pitch, as the
+from it), the six-operator voices' own reference and the speech formants, and divides the LPC
+speech synth's corrected rate by the same factor, so A4 is 440 Hz on every path at every rate. The
+firmware's LPC path is pitched differently by design: in its C++ the corrected rate cancels out of
+the LPC pitch shift and the LPC clock is the raw sample clock / 6, so under `Tuning::Firmware` LPC
+speech plays 440 Hz at a true 48 kHz while the other paths play 4.6 cents sharp (on the module,
+clocked at the corrected rate, the other paths are in tune and LPC speech is 4.6 cents flat).
+`tests/voice_tuning.rs` checks equal temperament at every rate within 0.05 cent on the FM engine,
+the ratio between the two tunings within 0.01 cent, and that the firmware tuning round-trips bit
+for bit; `tests/voice_pitch.rs` checks the absolute pitch of every path under both tunings. The Macro Oscillator instrument always plays concert pitch, as the
 module does; the firmware's tuning is kept for the null tests (ADR 0033, implementation note).
 
 ## Flush-to-zero

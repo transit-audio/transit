@@ -58,10 +58,11 @@ impl SpeechEngine<'_> {
         }
     }
 
-    /// Sets the pitch reference of the formant filters (see [`crate::Tuning`]); kept across `init`.
-    /// The pitch itself follows the voice's `a0`.
+    /// Sets the pitch reference of the naive synth's formant filters and of the LPC synth's pitch
+    /// shift (see [`crate::Tuning`]); kept across `init`. The naive and SAM pitch follows the voice's `a0`.
     pub fn set_tuning(&mut self, tuning: crate::Tuning) {
         self.naive_speech_synth.set_tuning(tuning);
+        self.lpc_speech_synth_controller.set_tuning(tuning);
     }
 }
 

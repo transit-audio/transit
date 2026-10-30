@@ -87,21 +87,8 @@ fn the_tunings_differ_by_the_corrected_rate_factor() {
     }
 }
 
-/// The six-op voices and LPC speech have pitch references of their own; concert tuning lowers them
-/// by the same factor.
-#[test]
-fn six_op_and_speech_follow_the_tuning() {
-    let factor = f64::from(REF_SAMPLE_RATE) / f64::from(CORRECTED_SAMPLE_RATE);
-    for (engine, harmonics, label) in [(2, 0.0, "six-op bank A"), (15, 0.35, "LPC speech")] {
-        let rate = SampleRate::Hz48000;
-        let around = concert_hz(69.0) * factor;
-        let firmware = autocorrelation_hz(&render(rate, Tuning::Firmware, engine, 69.0, harmonics, 0.5, 0.5), rate.hz(), around, 40.0);
-        let concert = autocorrelation_hz(&render(rate, Tuning::Concert, engine, 69.0, harmonics, 0.5, 0.5), rate.hz(), around / factor, 40.0);
-        let off = cents(firmware / concert, factor);
-        println!("{label}: firmware {firmware:.4} Hz, concert {concert:.4} Hz, ratio off by {off:+.4} cents");
-        assert!(off.abs() < 0.25, "{label}: {firmware} / {concert} against {factor} ({off:+.4} cents)");
-    }
-}
+// The six-op voices and LPC speech have pitch paths of their own: their absolute pitch under both
+// tunings, at every rate, is checked in `voice_pitch.rs`.
 
 /// Switching to concert pitch and back leaves the firmware's arithmetic bit for bit.
 #[test]

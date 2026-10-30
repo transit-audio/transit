@@ -14,9 +14,11 @@
 //!    within 1 cent.
 //!
 //! The firmware's tuning: the common and six-op paths play `440 * 48000 / 47872.34` for A4 at every
-//! rate, as the firmware does at 48 kHz; LPC speech plays 440 (its clock assumes 48 kHz while its
-//! pitch shift uses the corrected rate, so at a true 48 kHz the two cancel). Concert tuning: 440 on
-//! every path.
+//! rate, as the firmware does at 48 kHz; LPC speech plays 440, because in the firmware's C++
+//! (`lpc_speech_synth_controller.cc`: `rate = rate_ratio / 6.0f`, `pitch_shift = frequency /
+//! (rate_ratio * kLPCSpeechSynthDefaultF0 / kCorrectedSampleRate)`) the corrected rate cancels out
+//! of the pitch shift and the synth's clock is the raw sample clock / 6 (on the module, clocked at
+//! the corrected rate, LPC speech is 4.6 cents flat). Concert tuning: 440 on every path.
 
 #![forbid(unsafe_code)]
 
@@ -138,6 +140,11 @@ fn check(tuning: Tuning, expected: impl Fn(&str) -> f64) {
 fn every_pitch_path_plays_the_firmware_pitch_at_every_rate() {
     let firmware = 440.0 * f64::from(REF_SAMPLE_RATE) / f64::from(CORRECTED_SAMPLE_RATE);
     check(Tuning::Firmware, |label| if label.starts_with("LPC") { 440.0 } else { firmware });
+}
+
+#[test]
+fn every_pitch_path_plays_concert_pitch_at_every_rate() {
+    check(Tuning::Concert, |_| 440.0);
 }
 
 /// The measurement refuses an octave error: the same render checked against half its frequency

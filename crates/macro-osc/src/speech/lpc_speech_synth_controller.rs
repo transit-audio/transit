@@ -35,6 +35,7 @@ pub struct LpcSpeechSynthController<'a> {
     word_bank: LpcSpeechSynthWordBank<'a>,
 
     sample_rate_hz: f32,
+    tuning: crate::Tuning,
 }
 
 impl Default for LpcSpeechSynthController<'_> {
@@ -56,7 +57,19 @@ impl LpcSpeechSynthController<'_> {
             remaining_frame_samples: 0,
             word_bank: LpcSpeechSynthWordBank::new(WORD_BANKS.as_slice(), NUM_WORD_BANKS),
             sample_rate_hz: 48000.0,
+            tuning: crate::Tuning::Firmware,
         }
+    }
+
+    /// Sets the pitch reference (see [`crate::Tuning`]); kept across `init`. The firmware's LPC
+    /// pitch does not follow its corrected rate: the pitch shift divides the note's frequency (taken
+    /// against the corrected rate) by the corrected rate again, so the two cancel, and the synth's
+    /// clock is the raw sample clock / 6. At a true 48 kHz LPC speech is therefore already at concert
+    /// pitch under the firmware's tuning (on the module, whose clock runs at the corrected rate, it is
+    /// 4.6 cents flat). Concert tuning scales the note's frequency through `a0`, so the corrected rate
+    /// here is divided by the same factor to keep LPC speech at concert pitch too.
+    pub fn set_tuning(&mut self, tuning: crate::Tuning) {
+        self.tuning = tuning;
     }
 
     pub fn init(&mut self, sample_rate_hz: f32) {
@@ -100,7 +113,8 @@ impl LpcSpeechSynthController<'_> {
 
         // All utterances have been normalized for an average f0 of 100 Hz.
         // Against the firmware's corrected sample rate (`kCorrectedSampleRate`).
-        let corrected_sample_rate = crate::CORRECTED_SAMPLE_RATE * (self.sample_rate_hz / crate::REF_SAMPLE_RATE);
+        // Divided by exactly 1 under the firmware's tuning (see `set_tuning`).
+        let corrected_sample_rate = crate::CORRECTED_SAMPLE_RATE * (self.sample_rate_hz / crate::REF_SAMPLE_RATE) / self.tuning.pitch_scale();
         let pitch_shift = frequency / (rate_ratio * LPC_SPEECH_SYNTH_DEFAULT_F0 / corrected_sample_rate);
         let time_stretch = semitones_to_ratio(
             -speed * 24.0
