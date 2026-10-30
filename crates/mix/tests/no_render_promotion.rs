@@ -48,7 +48,10 @@ fn eight_strips() -> Session {
 /// a quiet period on the counter let a worker starved past it promote during the render and fail
 /// the test (E49, #226). With promotion turned off no worker calls it and nothing is recorded.
 fn settle(engine: &MixEngine) -> usize {
-    let disabled = std::env::var(transit_mix::RENDER_NO_PRIORITY_ENV).is_ok_and(|v| v.trim() == "1");
+    // The engine's own reading of the flag (`render_pool::env_flag`): `1`, `true` or `yes` in any
+    // case, through the old name too.
+    let flag = std::env::var(transit_mix::RENDER_NO_PRIORITY_ENV).or_else(|_| std::env::var("SOUNDCRAFT_RENDER_NO_PRIORITY")).ok();
+    let disabled = flag.is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "1" | "true" | "yes"));
     if !disabled {
         let start = Instant::now();
         loop {
