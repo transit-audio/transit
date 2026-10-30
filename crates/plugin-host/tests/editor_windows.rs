@@ -114,10 +114,11 @@ fn a_thread_given_up_on_is_not_sent_the_requests() {
     drop(plugin);
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 mod windows {
     //! The whole path on a real window: a fake plug-in whose editor is an editor window of ours on
-    //! the host thread (no plug-in code), driven the way the UI drives it.
+    //! the host thread (no plug-in code), driven the way the UI drives it. On Linux an X11 window
+    //! (issue #147): it needs an X server (CI runs it under `xvfb-run -a`) and is skipped without.
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use transit_dsp::{Category, Plugin, PluginInfo};
@@ -255,6 +256,10 @@ mod windows {
 
     #[test]
     fn the_editor_window_parks_comes_back_and_raises_without_a_duplicate() {
+        if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
+            eprintln!("the_editor_window_parks_comes_back_and_raises_without_a_duplicate: skipped: no DISPLAY (run under `xvfb-run -a`)");
+            return;
+        }
         let _g = globals();
         let host = host();
         host.editor_windows(R::Follow(true));

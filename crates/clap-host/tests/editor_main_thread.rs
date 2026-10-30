@@ -64,7 +64,10 @@ fn main() {
     assert!(ed.is_open());
     let _ = ed.idle(); // the fixture's resize request reaches the window
     assert!(ed.is_open());
-    assert_eq!(p.load_state(b"CMD:gui-was-floating"), !cfg!(windows), "embedded on Windows, floating elsewhere");
+    // Embedded on Windows, and on Linux with an X server (#147; without one the window cannot be
+    // made and the floating editor opens); floating elsewhere.
+    let embedded = cfg!(windows) || (cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_some());
+    assert_eq!(p.load_state(b"CMD:gui-was-floating"), !embedded, "embedded where transit has a window");
     ed.close();
     assert!(!ed.is_open());
     drop((ed, p));

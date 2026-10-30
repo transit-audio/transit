@@ -42,7 +42,8 @@ jobs:
         shell: bash
       - name: Linux system libraries
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config
+        # xvfb: the X server editor_x11 starts for itself (#147).
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev pkg-config xvfb
       - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2
       - name: clippy (rt)
         run: cargo clippy -p transit-rt --all-targets -- -D warnings

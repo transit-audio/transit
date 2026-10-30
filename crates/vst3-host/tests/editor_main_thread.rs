@@ -9,8 +9,9 @@ fn main() {
     let dir = common::fixture_dir();
     let gain = transit_vst3_host::scan_paths(&[dir.to_path_buf()]).into_iter().find(|d| d.name == "Fixture Gain").expect("fixture").id;
     let mut p = transit_vst3_host::instantiate_plugin(&gain).expect("instantiate");
-    // Editor windows are hosted on macOS and Windows; elsewhere the probe reports "unsupported".
-    if cfg!(any(target_os = "macos", windows)) {
+    // Editor windows are hosted on macOS, Windows and Linux (X11, #147); elsewhere the probe
+    // reports "unsupported". The probe makes no window.
+    if cfg!(any(target_os = "macos", windows, target_os = "linux")) {
         assert_eq!(p.editor_size(), Ok((320, 240)));
     } else {
         assert!(p.editor_size().is_err());

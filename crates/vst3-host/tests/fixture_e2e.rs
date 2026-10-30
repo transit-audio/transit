@@ -347,9 +347,10 @@ fn host_set_controller_param_survives_state_round_trip() {
 fn editor_view_is_probed_and_edits_come_back_as_plain_values() {
     let id = id_of("Fixture Gain");
     let mut p = transit_vst3_host::instantiate_plugin(&id).unwrap();
-    // Windows permits the creating test thread; macOS requires the process main thread
-    // (covered by editor_main_thread), and other platforms have no host windows.
-    if cfg!(windows) {
+    // Windows and Linux (X11, #147) permit the creating test thread; macOS requires the process
+    // main thread (covered by editor_main_thread), and other platforms have no host windows. The
+    // probe makes no window.
+    if cfg!(any(windows, target_os = "linux")) {
         assert_eq!(p.editor_size(), Ok((320, 240)));
     } else {
         assert!(p.editor_size().is_err());

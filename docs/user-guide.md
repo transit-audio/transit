@@ -44,6 +44,19 @@ Windows a plug-in opens by itself (its own preset browser or a licensing dialog)
 Returning to transit by clicking a plug-in window brings up only that window; the main window and
 the other plug-in windows come up on your next click on the main window.
 
+On Linux, VST3 and CLAP editors open in an X11 window of transit's, from the track header, the
+device card and the mixer slot, as on Windows. On a Wayland desktop they open through XWayland,
+the X11 compatibility layer GNOME and KDE start by themselves: the plug-in sees X11 either way, so
+nothing needs setting up. Windows plug-ins run through [yabridge](https://github.com/robbert-vdh/yabridge)
+open their editors the same way (yabridge embeds the Windows editor in that X11 window). The
+editor window takes the size the plug-in asks for and follows it when the plug-in resizes itself;
+its scale is the desktop's (`Xft.dpi`, which GNOME and KDE set from their scaling setting). With
+**Window > Plug-in Windows Follow transit** on, minimizing transit hides the editors and restoring
+it brings them back, and they have no entry of their own in the taskbar. What does not work yet on
+Linux: the editor window has no header strip (presets, Save, Bypass and MIDI Learn stay in the
+device card and the mixer), keyboard focus can stay with the main window until you click into the
+plug-in, and an editor keeps one scale on every monitor ([known issues K92 to K94](known-issues/README.md)).
+
 ## FX channels and sends
 
 + FX Channel (the mixer button, Track > Add FX Channel, or the arrangement quick-add) adds an FX channel and

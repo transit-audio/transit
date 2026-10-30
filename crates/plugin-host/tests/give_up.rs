@@ -118,12 +118,18 @@ fn a_hung_creation_given_up_on_is_named_and_leaves_the_host_working() {
     assert!(host.shutdown(Duration::from_secs(5)));
 }
 
-/// Windows: the stuck thread's editor window is asked to hide from the thread that gives up,
-/// without waiting for the stuck one (the hide itself waits for that thread's next message; the
-/// mechanics are tested in `transit_rt::editor_window`).
-#[cfg(windows)]
+/// Windows and Linux: the stuck thread's editor window is asked to hide from the thread that
+/// gives up, without waiting for the stuck one (on Windows the hide itself waits for that
+/// thread's next message; on X11 another connection hides it at once; the mechanics are tested in
+/// `transit_rt::editor_window` and its `editor_x11` test). Linux needs an X server (CI runs it
+/// under `xvfb-run -a`) and skips without one.
+#[cfg(any(windows, target_os = "linux"))]
 #[test]
 fn giving_up_asks_the_stuck_threads_windows_to_hide() {
+    if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
+        eprintln!("giving_up_asks_the_stuck_threads_windows_to_hide: skipped: no DISPLAY (run under `xvfb-run -a`)");
+        return;
+    }
     let host = host();
     let shown = host
         .submit(|_| {

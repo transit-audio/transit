@@ -47,15 +47,17 @@ pub struct HostHang {
     pub layout: HostHangLayout,
 }
 
-/// What a Give up ends on this platform: the window part is Windows only (macOS hosts inline and
-/// Linux hosts no editor windows yet).
+/// What a Give up ends on this platform: the window part is Windows and Linux only (macOS hosts
+/// inline). On X11 another connection hides the stuck thread's editor windows at once (#147).
 #[cfg(windows)]
 const END_TASK: &str = "Do not end its window with End Task: that ends transit. Save now first.";
 #[cfg(not(windows))]
 const END_TASK: &str = "Save now first: transit cannot stop the plug-in's call.";
 #[cfg(windows)]
 const WINDOW_PART: &str = ", hides its window once Windows allows";
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
+const WINDOW_PART: &str = ", hides its window";
+#[cfg(not(any(windows, target_os = "linux")))]
 const WINDOW_PART: &str = "";
 
 /// The Give up button's label: the plug-in, and the other plug-ins its thread hosts (a Give up

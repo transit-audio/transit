@@ -45,6 +45,10 @@ mod linux {
     const CHILD: &str = "TRANSIT_EDITOR_X11_ON_PRIVATE_XVFB";
 
     pub fn main() {
+        if cfg!(feature = "force-fallback") {
+            println!("editor_x11: skipped: with force-fallback the message queue does not dispatch X11 events");
+            return;
+        }
         if std::env::var_os(CHILD).is_none() && run_under_own_xvfb() {
             return;
         }

@@ -69,7 +69,8 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Linux system libraries
         # libjack-jackd2-dev: jack.pc for jack-sys's build script (native-jack); libjack is loaded at run time.
-        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libjack-jackd2-dev pkg-config mesa-vulkan-drivers libvulkan1
+        # xvfb: an X server for the plug-in editor window tests (#147).
+        run: sudo apt-get update && sudo apt-get install -y libasound2-dev libjack-jackd2-dev pkg-config mesa-vulkan-drivers libvulkan1 xvfb
       - name: Install Rust
         run: rustup toolchain install stable --profile minimal --component rustfmt,clippy --no-self-update && rustup default stable
         shell: bash
@@ -98,6 +99,11 @@ jobs:
           WGPU_BACKEND: vulkan
           VK_ICD_FILENAMES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
           VK_DRIVER_FILES: /usr/share/vulkan/icd.d/lvp_icd.x86_64.json
+      # Plug-in editor windows on an X server (#147): the format hosts' and the host thread's
+      # real-window tests skip without a DISPLAY in the step above. (transit-rt's editor_x11 starts
+      # its own Xvfb there already.)
+      - name: Test editor windows (Xvfb)
+        run: xvfb-run -a cargo test --locked -p transit-rt -p transit-vst3-host -p transit-clap-host -p transit-plugin-host
 
   # crates/au-host and the objc2 code in crates/vst3-host compile only here.
   macos:
