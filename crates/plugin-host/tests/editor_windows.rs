@@ -12,7 +12,7 @@ use std::sync::mpsc;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, Instant};
 use transit_dsp::EditorWindowRequest as R;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "linux"))]
 use transit_dsp::{EditorWindowState as S, PluginEditor};
 use transit_plugin_host::{Config, Host};
 
