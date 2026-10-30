@@ -240,7 +240,7 @@ pub fn open_session(e: &mut Engine, path: &str) -> Result<Vec<String>> {
 pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> Result<Vec<String>> {
     let started = std::time::Instant::now();
     let text = read_text(path)?;
-    let mut s = Session::from_json(&text).map_err(|err| EngineError::Io(err.to_string()))?;
+    let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| EngineError::Io(err.to_string()))?;
     let dir = Path::new(path).parent().map(Path::to_path_buf).unwrap_or_default();
     let mut missing = Vec::new();
     let mut files = DecodedFiles::new();
@@ -258,6 +258,14 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
         src.disk |= s.pool.get(src.id).is_some_and(|a| a.is_disk());
     }
     s.folder = Some(dir);
+    // The retired Subtractive Synth became a Macro Oscillator on parse (#234): the file still has
+    // the old synth, so the opened session reads as modified. The snapshot shares what the open
+    // attached to the session (audio, folder), so only the substitution differs.
+    if let Some(st) = &mut stored {
+        st.pool = s.pool.clone();
+        st.sources.clone_from(&s.sources);
+        st.folder.clone_from(&s.folder);
+    }
     let mut notes = std::mem::take(&mut s.load_notes);
     // Takes an older build could not place (#192) are placed now when their files are there: a
     // change to the session as saved, so it opens modified.
@@ -275,7 +283,7 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
         log::info!("{line}");
     }
     e.replace_session(s);
-    if let Some(before) = as_saved {
+    if let Some(before) = stored.or(as_saved) {
         e.saved = Arc::new(before);
         e.dirty = true;
         e.revision = e.revision.wrapping_add(1);
@@ -447,7 +455,7 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
     } else {
         (String::from_utf8(bytes.to_vec()).map_err(|_| EngineError::Io(format!("{name}: not a transit session")))?, std::collections::HashMap::new())
     };
-    let mut s = Session::from_json(&text).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
+    let (mut s, mut stored) = Session::from_json_as_saved(&text).map_err(|err| EngineError::Io(format!("{name}: {err}")))?;
     let mut missing = Vec::new();
     for src in &s.sources {
         match files.remove(&src.path) {
@@ -463,7 +471,15 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
     for line in unknown_param_lines(&s) {
         log::info!("{line}");
     }
+    if let Some(st) = &mut stored {
+        st.pool = s.pool.clone();
+    }
     e.replace_session(s);
+    if let Some(before) = stored {
+        e.saved = Arc::new(before);
+        e.dirty = true;
+        e.revision = e.revision.wrapping_add(1);
+    }
     for n in notes {
         e.message(n);
     }

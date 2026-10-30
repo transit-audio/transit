@@ -21,8 +21,21 @@ const SANITIZED: &[&str] = &["v0.3.2-video.transit"];
 /// Keys a later build stopped writing, so the key-drop test does not count them (`videos`, ADR 0031).
 const RETIRED_KEYS: &[&str] = &["/videos"];
 
+/// Does the file name the Subtractive Synth, retired in v0.6.0 (#234)? Builds before that wrote it into
+/// every instrument slot. Loading such a file substitutes a Macro Oscillator and drops what pointed at
+/// the old synth's parameters (its own test, below), so the lossless round trip and the key-drop test
+/// read these files with the old id swapped for the new one in the text: every other key still has to
+/// survive a save.
+fn carries_retired_synth(text: &str) -> bool {
+    text.contains("\"subtractive_synth\"")
+}
+
 fn released() -> Vec<(String, String)> {
-    corpus().into_iter().filter(|(n, _)| !SANITIZED.contains(&n.as_str())).collect()
+    corpus()
+        .into_iter()
+        .filter(|(n, _)| !SANITIZED.contains(&n.as_str()))
+        .map(|(n, t)| (n, t.replace("\"subtractive_synth\"", "\"macro_oscillator\"")))
+        .collect()
 }
 
 /// Every key path of `v` (`/tracks/0/mixer/volume_db`); array elements by index, null values included.
@@ -141,4 +154,27 @@ fn the_midi_effect_fixture_loads_its_chain() {
     assert_eq!(t.midi_effects[0].params.get("semitones"), Some(&7.0), "{name}");
     let lane = transit_model::AutoParam::Plugin { slot: transit_model::MIDI_EFFECT_SLOT, param: "semitones".into() };
     assert_eq!(t.lane(&lane).map(|l| l.points.len()), Some(2), "{name}: the first effect's automated parameter");
+}
+
+#[test]
+fn a_release_session_with_the_old_synth_opens_with_a_macro_oscillator_and_one_report() {
+    let old: Vec<_> = corpus().into_iter().filter(|(_, t)| carries_retired_synth(t)).collect();
+    assert!(old.len() >= 2, "the corpus keeps sessions saved by builds that had the synth: {:?}", old.iter().map(|(n, _)| n).collect::<Vec<_>>());
+    for (name, text) in old {
+        let (s, stored) = Session::from_json_as_saved(&text).unwrap_or_else(|e| panic!("{name} no longer loads: {e}"));
+        let stored = stored.unwrap_or_else(|| panic!("{name}: loading did not substitute"));
+        let swapped = stored.tracks.iter().filter(|t| t.instrument.as_ref().is_some_and(|i| i.plugin == "subtractive_synth")).count();
+        assert!(swapped > 0, "{name}");
+        assert!(s.tracks.iter().all(|t| t.instrument.as_ref().is_none_or(|i| i.plugin != "subtractive_synth")), "{name}");
+        let status = format!("{swapped} track(s) used the retired Subtractive Synth and now carry the Macro Oscillator");
+        assert_eq!(s.load_notes.last(), Some(&status), "{name}: {:?}", s.load_notes);
+        // Saved, it is an ordinary session: no old id, no note, and it loads clean and lossless.
+        let saved = s.to_json().unwrap();
+        assert!(!saved.contains("subtractive_synth"), "{name}");
+        let again = Session::from_json(&saved).unwrap();
+        assert!(again.load_notes.is_empty(), "{name}: {:?}", again.load_notes);
+        let mut loaded = s.clone();
+        loaded.load_notes.clear();
+        assert_eq!(loaded, again, "{name}");
+    }
 }

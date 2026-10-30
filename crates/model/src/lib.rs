@@ -12,6 +12,8 @@ pub mod disk;
 mod ids;
 mod io_map;
 pub mod legacy;
+pub mod legacy_synth;
+pub use legacy_synth::DEFAULT_INSTRUMENT;
 mod markers;
 mod midi_effect;
 mod midi_input;

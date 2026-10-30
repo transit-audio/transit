@@ -353,7 +353,7 @@
       "folder": 2,
       "folder_open": true,
       "instrument": {
-        "plugin": "subtractive_synth",
+        "plugin": "macro_oscillator",
         "params": {},
         "bypass": false,
         "active": true,
@@ -436,7 +436,7 @@
       "folder": 2,
       "folder_open": true,
       "instrument": {
-        "plugin": "subtractive_synth",
+        "plugin": "macro_oscillator",
         "params": {},
         "bypass": false,
         "active": true,

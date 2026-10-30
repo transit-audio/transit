@@ -301,6 +301,13 @@ impl MappingSet {
         Ok(())
     }
 
+    /// Remove every mapping whose target `drop` names; how many went.
+    pub fn remove_where(&mut self, mut drop: impl FnMut(&ControlTarget) -> bool) -> usize {
+        let n = self.items.len();
+        self.items.retain(|m| !drop(&m.target));
+        n - self.items.len()
+    }
+
     /// Remove the mapping of `target`; whether there was one.
     pub fn remove(&mut self, target: &ControlTarget) -> bool {
         let n = self.items.len();

@@ -665,6 +665,13 @@ impl Session {
 
     /// Parse a session; decoded audio must be attached separately (`pool`).
     pub fn from_json(text: &str) -> Result<Session, SessionError> {
+        Self::from_json_as_saved(text).map(|(s, _)| s)
+    }
+
+    /// [`Session::from_json`], also returning the session as the file stored it when loading had to
+    /// change it (the retired Subtractive Synth became a Macro Oscillator, #234): a caller that
+    /// tracks "modified" takes it as the saved state, so the open session reads as modified.
+    pub fn from_json_as_saved(text: &str) -> Result<(Session, Option<Session>), SessionError> {
         let mut v: serde_json::Value = serde_json::from_str(text).map_err(|e| SessionError::Format(e.to_string()))?;
         let ver = v.get("format_version").and_then(serde_json::Value::as_u64).ok_or_else(|| SessionError::Format("missing format_version".into()))?;
         if ver > u64::from(Self::FORMAT_VERSION) {
@@ -697,7 +704,9 @@ impl Session {
                 unknown.join(", ")
             ));
         }
-        Ok(s)
+        let as_stored = crate::legacy_synth::uses_retired_synth(&s).then(|| s.clone());
+        crate::legacy_synth::retire_subtractive_synth(&mut s);
+        Ok((s, as_stored))
     }
 
     /// Repair invariants after loading untrusted data.
