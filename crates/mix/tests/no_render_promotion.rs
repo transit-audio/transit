@@ -65,6 +65,9 @@ fn settle(engine: &MixEngine) -> usize {
 
 fn render_on_audio_thread(session: Session, workers: bool) -> (usize, usize) {
     let mut engine = planned_engine(&session);
+    // The test's own deadline, not the default share: the assertion is about promotion calls, and a
+    // far deadline keeps the blocks the same on any host (E49, #226).
+    engine.set_strip_deadline(Some(Duration::from_secs(60)));
     if workers {
         // The render workers promote themselves once, at start, off the callback.
         engine.start_render_workers(16);
