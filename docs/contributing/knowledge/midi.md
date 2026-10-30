@@ -13,6 +13,9 @@ hardware port: `midi-output.md`.
    time until their render block exists. `RELEASE_RESERVE` keeps room so note-offs and pedal-ups are
    admitted even when the inbox is nearly full: dropping a release causes a stuck note.
 4. **Mix** (`crates/mix/src/events.rs`): events become instrument events with sample offsets.
+5. **MIDI effects** (`crates/mix/src/midi_fx.rs`, [ADR 0036](../../adr/0036-midi-effect-slot.md)):
+   while a track has MIDI effects, every event the note table sends the instrument goes through
+   them first, in chain order, at the same offsets; an edit to the chain ends the notes it started.
 
 ## Conventions
 
@@ -37,7 +40,9 @@ Stuck notes and dropped note-offs are merge-blocking defects. Timing may be flag
 OS library (known issue K4); our code on that path may not.
 
 Tests: `crates/midi-io/src/tests.rs`, `crates/playback/src/player/ingress/tests.rs`,
-`crates/playback/src/player/audio/midi/tests.rs`, `crates/engine/tests/midi_input.rs`.
+`crates/playback/src/player/audio/midi/tests.rs`, `crates/engine/tests/midi_input.rs`; the MIDI
+effect slot in `crates/mix/src/midi_fx/tests.rs`, `crates/mix/tests/midi_effects.rs` and
+`crates/engine/tests/midi_effects.rs`.
 
 ## Step entry controls (#92)
 
