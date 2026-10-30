@@ -1,8 +1,11 @@
 //! The graph path through the real strips (issue #174, ADR 0029 amendment section 8),
 //! deterministic: a key source held inside its plug-in on the one render worker (released by the
 //! test, never by a clock), a pinned strip on the callback that waits on observable state (the
-//! hold entered, the block's deadline passed) so the deadline arrives with the source still held,
-//! and a pool with no worker for the unstarted case.
+//! hold entered), the deterministic deadline (`MixEngine::hold_until_alone`, `strip_pool::seam`)
+//! so the deadline arrives with the source still held, and a pool with no worker for the unstarted
+//! case. The block's own deadline is far: the driver wakes no worker once the deadline has passed,
+//! so a short real deadline that a slow host lets pass before the wake would leave the held source
+//! unclaimed and the pinned strip waiting for a hold no worker can enter (macOS CI, 2026-10-30).
 //!
 //! - a key source late, busy and unstarted: its dependents are `Overrun(UpstreamMissed)` with the
 //!   source as the origin, once each per block, the source's own overrun counted once, the
@@ -18,8 +21,8 @@
 
 use super::*;
 use crate::tests::PlanRig;
+use std::sync::PoisonError;
 use std::sync::atomic::AtomicUsize;
-use std::sync::{Mutex as StdMutex, PoisonError};
 use transit_model::{Insert, KeyFrom, KeySource, Tap};
 
 const FRAMES: usize = 128;
@@ -41,13 +44,13 @@ struct Hold {
 }
 
 /// A pinned strip's plug-in that, armed, waits on the callback until the source's hold is entered
-/// (when asked) and the block's deadline has passed.
+/// (when asked). It renders after the driver has woken the workers (a pinned strip renders after
+/// the wake), and the block's deadline is far, so the woken worker can always enter the hold.
 struct Wait {
     inner: Box<dyn Plugin>,
     armed: Arc<AtomicBool>,
     entered: Arc<AtomicBool>,
     need_entered: Arc<AtomicBool>,
-    deadline: Arc<StdMutex<Option<Instant>>>,
     renders: Arc<AtomicUsize>,
 }
 
@@ -101,8 +104,7 @@ impl Plugin for Wait {
         self.renders.fetch_add(1, Ordering::Relaxed);
         if self.armed.load(Ordering::Acquire) {
             let t0 = Instant::now();
-            let deadline = self.deadline.lock().unwrap_or_else(PoisonError::into_inner).unwrap_or(t0);
-            while (self.need_entered.load(Ordering::Acquire) && !self.entered.load(Ordering::Acquire)) || Instant::now() < deadline {
+            while self.need_entered.load(Ordering::Acquire) && !self.entered.load(Ordering::Acquire) {
                 assert!(t0.elapsed() < STALL, "the hold was never entered");
                 std::hint::spin_loop();
             }
@@ -117,7 +119,6 @@ struct Knobs {
     entered: Arc<AtomicBool>,
     armed: Arc<AtomicBool>,
     need_entered: Arc<AtomicBool>,
-    deadline: Arc<StdMutex<Option<Instant>>>,
     pad_renders: Arc<AtomicUsize>,
 }
 
@@ -150,14 +151,8 @@ fn session() -> (Session, [TrackId; 4]) {
 fn rig(workers: usize) -> (PlanRig, Session, [TrackId; 4], Knobs) {
     let (s, ids) = session();
     let [kick, _, lead, pad] = ids;
-    let knobs = Knobs {
-        hold: Arc::default(),
-        entered: Arc::default(),
-        armed: Arc::default(),
-        need_entered: Arc::default(),
-        deadline: Arc::default(),
-        pad_renders: Arc::default(),
-    };
+    let knobs =
+        Knobs { hold: Arc::default(), entered: Arc::default(), armed: Arc::default(), need_entered: Arc::default(), pad_renders: Arc::default() };
     let hold = Hold { inner: gain(), latency: 64, hold: Arc::clone(&knobs.hold), entered: Arc::clone(&knobs.entered) };
     let latent = Hold { inner: gain(), latency: 128, hold: Arc::default(), entered: Arc::default() };
     let wait = Wait {
@@ -165,7 +160,6 @@ fn rig(workers: usize) -> (PlanRig, Session, [TrackId; 4], Knobs) {
         armed: Arc::clone(&knobs.armed),
         entered: Arc::clone(&knobs.entered),
         need_entered: Arc::clone(&knobs.need_entered),
-        deadline: Arc::clone(&knobs.deadline),
         renders: Arc::clone(&knobs.pad_renders),
     };
     let mut rig = PlanRig::new(FRAMES).fake(kick, 0, hold).fake(lead, 0, latent).fake(pad, 0, wait);
@@ -181,16 +175,19 @@ fn block(rig: &mut PlanRig, b: &mut i64) {
     *b += 1;
 }
 
-/// Arms the pinned strip to hold the next block until its deadline (and, when asked, until the
-/// source's hold is entered), and gives the engine that deadline.
-fn deadline_block(rig: &mut PlanRig, knobs: &Knobs, b: &mut i64, need_entered: bool) {
-    let d = Instant::now() + Duration::from_millis(5);
-    *knobs.deadline.lock().unwrap() = Some(d);
+/// One block whose deadline comes when only `held`'s strip is unresolved (and, with a worker,
+/// claimed by it): the deterministic deadline, never the clock. The pinned strip is armed to wait,
+/// when asked, until the source's hold is entered. The block's real deadline is far (a stall bound),
+/// so the driver always wakes the worker before the pinned strip waits on it.
+fn deadline_block(rig: &mut PlanRig, knobs: &Knobs, b: &mut i64, held: TrackId, need_entered: bool) {
     knobs.need_entered.store(need_entered, Ordering::Release);
     knobs.armed.store(true, Ordering::Release);
-    rig.eng.set_strip_deadline(None);
-    rig.eng.set_block_deadline(Some(d));
+    rig.eng.set_block_deadline(None);
+    rig.eng.set_strip_deadline(Some(STALL));
+    let h = index(rig, held);
+    rig.eng.hold_until_alone(&[h]);
     block(rig, b);
+    rig.eng.hold_until_alone(&[]);
     knobs.armed.store(false, Ordering::Release);
 }
 
@@ -252,7 +249,7 @@ fn a_late_then_busy_key_source_skips_its_dependents_and_their_lines_keep_their_h
 
         // Late: the worker is inside the kick's hold when the deadline comes.
         knobs.hold.store(true, Ordering::Release);
-        deadline_block(&mut rig, &knobs, &mut b, true);
+        deadline_block(&mut rig, &knobs, &mut b, kick, true);
         assert_eq!(outcome(&rig, kick), Outcome::Overrun(OverrunCause::Late));
         assert_eq!(outcome(&rig, bass), Outcome::Overrun(OverrunCause::UpstreamMissed));
         assert_eq!(outcome(&rig, lead), Outcome::Overrun(OverrunCause::UpstreamMissed));
@@ -262,7 +259,7 @@ fn a_late_then_busy_key_source_skips_its_dependents_and_their_lines_keep_their_h
         assert_eq!(rig.eng.block_overruns(), 1, "the take journal counts the origin once");
 
         // Busy: the worker still holds it.
-        deadline_block(&mut rig, &knobs, &mut b, false);
+        deadline_block(&mut rig, &knobs, &mut b, kick, false);
         assert_eq!(outcome(&rig, kick), Outcome::Overrun(OverrunCause::Busy));
         assert_eq!(
             (outcome(&rig, bass), outcome(&rig, lead)),
@@ -312,7 +309,7 @@ fn an_unstarted_key_source_skips_its_dependents_and_the_pinned_strip_renders() {
         let (mut rig, mut b) = (rig, 0i64);
         // No worker and no cost history: nothing is rendered inline, the kick is taken back
         // unrendered at the deadline.
-        deadline_block(&mut rig, &knobs, &mut b, false);
+        deadline_block(&mut rig, &knobs, &mut b, kick, false);
         assert_eq!(outcome(&rig, kick), Outcome::Overrun(OverrunCause::Unstarted));
         assert_eq!(
             (outcome(&rig, bass), outcome(&rig, lead)),
@@ -370,7 +367,7 @@ fn a_graph_change_waits_for_the_held_task_and_the_old_result_is_never_read() {
         }
         let old = rig.eng.plan.as_deref().unwrap().tables.graph.graph.generation();
         knobs.hold.store(true, Ordering::Release);
-        deadline_block(&mut rig, &knobs, &mut b, true);
+        deadline_block(&mut rig, &knobs, &mut b, kick, true);
         assert_eq!(outcome(&rig, kick), Outcome::Overrun(OverrunCause::Late));
         // The new graph: Bass is no longer keyed.
         let mut s2 = s.clone();
@@ -460,14 +457,8 @@ fn an_aux_keyed_from_a_skipped_aux_is_skipped_too() {
     t.mixer.output = Route::Main;
     t.mixer.inserts[0] = keyed(a1);
 
-    let knobs = Knobs {
-        hold: Arc::default(),
-        entered: Arc::default(),
-        armed: Arc::default(),
-        need_entered: Arc::default(),
-        deadline: Arc::default(),
-        pad_renders: Arc::default(),
-    };
+    let knobs =
+        Knobs { hold: Arc::default(), entered: Arc::default(), armed: Arc::default(), need_entered: Arc::default(), pad_renders: Arc::default() };
     let (calls, loudest) = (Arc::new(AtomicUsize::new(0)), Arc::new(std::sync::atomic::AtomicU32::new(0)));
     let hold = Hold { inner: gain(), latency: 0, hold: Arc::clone(&knobs.hold), entered: Arc::clone(&knobs.entered) };
     let wait = Wait {
@@ -475,7 +466,6 @@ fn an_aux_keyed_from_a_skipped_aux_is_skipped_too() {
         armed: Arc::clone(&knobs.armed),
         entered: Arc::clone(&knobs.entered),
         need_entered: Arc::clone(&knobs.need_entered),
-        deadline: Arc::clone(&knobs.deadline),
         renders: Arc::clone(&knobs.pad_renders),
     };
     let probe = Probe { inner: gain(), calls: Arc::clone(&calls), loudest: Arc::clone(&loudest) };
@@ -494,7 +484,7 @@ fn an_aux_keyed_from_a_skipped_aux_is_skipped_too() {
         c.store(0, Ordering::Relaxed);
         l.store(0, Ordering::Relaxed);
         knobs.hold.store(true, Ordering::Release);
-        deadline_block(&mut rig, &knobs, &mut b, true);
+        deadline_block(&mut rig, &knobs, &mut b, kick, true);
         assert_eq!(outcome(&rig, kick), Outcome::Overrun(OverrunCause::Late));
         assert_eq!(pool(&rig).reader().snapshot().upstream_missed, before + 2, "A1 and A2 skipped, counted as upstream-missed tail skips");
         assert_eq!(rig.eng.plan.as_deref().unwrap().tables.graph.tail_skipped.as_ref(), [true, true]);

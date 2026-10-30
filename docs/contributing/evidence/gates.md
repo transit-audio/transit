@@ -106,6 +106,11 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   block (`ContinuityInstrument::expect_from`), so overruns before an instrument's first render are
   holes too, and the closing blocks before a coverage check run at a far deadline (E49 recurrence
   2026-10-30).
+- A test that waits for a worker to enter a hold (a pinned strip or the test thread spinning on an
+  `entered` or `holding` flag inside the block) keeps the block's real deadline far: the graph driver
+  wakes no worker once the deadline has passed, so a short explicit instant that a slow host lets pass
+  before the wake leaves the held strip unclaimed and the wait unending. The held strip misses the
+  block through the deterministic deadline (`MixEngine::hold_until_alone`), not the clock (E66).
 - A test that marks the ASIO host stuck (`Host::set_stuck`) holds the host thread in a request
   meanwhile (`hold_host` in `crates/audio-asio/src/stream_tests.rs`): the flag alone leaves the
   thread free to tend and sweep before the test reads its state (E49 recurrence 2026-10-30).

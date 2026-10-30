@@ -23,3 +23,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E62: an autosave test polled the clock for a background write (#189)](E62-an-autosave-test-polled-the-clock-for-a-background-write.md)
 - [E63: the Speech model played out of tune away from 48 kHz (#195)](E63-the-speech-model-played-out-of-tune-away-from-48-khz.md)
 - [E64: an X11 editor window was handed out before the server made it (#147)](E64-an-x11-window-was-handed-out-before-the-server-made-it.md)
+- [E66: a held-source test let its deadline pass before the worker wake](E66-a-held-source-test-let-its-deadline-pass-before-the-worker-wake.md)
