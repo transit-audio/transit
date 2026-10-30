@@ -700,7 +700,15 @@ pub fn reset(app: &mut StudioApp, clip: ClipId, side: Side) {
 /// Context menu "Crossfade": equal-power fades over the overlap, both sides, one undo step.
 pub fn crossfade(app: &mut StudioApp, clip: ClipId) {
     let Some(o) = overlap(app.engine.session(), clip) else { return };
-    let len = o.end - o.start;
+    crossfade_len(app, o, o.end - o.start);
+}
+
+/// Equal-power fades of `len` (at most the overlap's clips' own lengths) on both clips of `o`,
+/// one undo step: what the menu entry sets, and what typing a Crossfade length in the clip
+/// inspector sets.
+pub fn crossfade_len(app: &mut StudioApp, o: Overlap, len: Samples) {
+    let s = app.engine.session();
+    let len = [o.left, o.right].iter().filter_map(|id| s.find_clip(*id)).fold(len, |len, c| len.min(c.1.length));
     let fade = Fade { len, shape: FadeShape::EqualPower, curvature: 0.0 };
     let _ = app.composite("Crossfade", |app, key| {
         app.engine.execute_merged("edit.fades_create", &set_params(o.left, Side::Out, fade), key)?;

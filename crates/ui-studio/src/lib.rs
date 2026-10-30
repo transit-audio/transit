@@ -16,6 +16,7 @@ pub mod automation;
 mod automation_picker;
 pub mod browser;
 pub mod builtin_editor;
+pub mod clip_inspector;
 pub mod control;
 pub mod debug_log;
 pub mod devices;
@@ -411,6 +412,8 @@ pub struct StudioApp {
     /// The mixer and device chain: gesture in progress, scroll, and last frame's layout.
     pub mixer: mixer::MixerState,
     pub tempo_ui: tempo_edit::TempoUi,
+    /// The clip inspector's fade fields: the one being typed in and last frame's drawing (#182).
+    pub inspector: clip_inspector::State,
     /// The piano roll (slice 3): open clip, selection, gesture, scroll, last frame's layout.
     pub keys: keys::KeysState,
     /// The browser (slice 4): listings, selection, drag, last frame's layout.
@@ -529,6 +532,7 @@ impl StudioApp {
             copied: Vec::new(),
             mixer: mixer::MixerState::default(),
             tempo_ui: tempo_edit::TempoUi::default(),
+            inspector: clip_inspector::State::default(),
             keys: keys::KeysState::default(),
             browser: browser::BrowserState::default(),
             imports: import::ImportQueue::default(),
@@ -1127,9 +1131,11 @@ impl StudioApp {
         menus::status_bar(self, ui);
         browser::panel(self, ui); // slice 4: left of the panes and the arrangement
         // Slice 3: the piano roll replaces the mixer and device chain panes while it is open.
-        if !keys::pane(self, ui) {
+        let roll = keys::pane(self, ui);
+        if !roll {
             mixer::panes(self, ui);
         }
+        clip_inspector::panel(self, ui, roll);
         splash::advance_open(self, &ctx);
         if splash::update(self, &ctx) {
             splash::show(self, ui);

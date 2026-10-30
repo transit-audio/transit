@@ -555,3 +555,163 @@ fn the_two_ends_of_a_crossfade_drag_independently_once_their_lengths_differ() {
     assert!(near(r.clip(b).fade_in.len, r.bar / 4), "B's end stayed: {}", r.clip(b).fade_in.len);
     assert_eq!(r.clip(b).start, 3 * r.bar, "nothing moved");
 }
+
+// ---- #182: the clip inspector's fade section ----
+
+impl FadeRig {
+    fn select(&mut self, c: ClipId) {
+        self.app.click_clip(c, false);
+        frames(&mut self.app, &self.ctx, 4, &mut self.time);
+    }
+    fn field(&self, f: crate::clip_inspector::Field) -> crate::clip_inspector::FieldView {
+        self.app.inspector.fields.iter().find(|v| v.field == f).cloned().unwrap_or_else(|| panic!("no {f:?} field shown"))
+    }
+    fn center(rect: [f32; 4]) -> (f32, f32) {
+        ((rect[0] + rect[2]) / 2.0, (rect[1] + rect[3]) / 2.0)
+    }
+    /// Type `text` into a field the way a user does: click it, select all, type, Return.
+    fn type_into(&mut self, f: crate::clip_inspector::Field, text: &str) {
+        let at = Self::center(self.field(f).rect);
+        self.click(at, 1);
+        for (req, args) in [("ui.key", json!({"key": "A", "cmd": true})), ("ui.text", json!({"text": text})), ("ui.key", json!({"key": "Enter"}))] {
+            let (req, _rx) = crate::ControlRequest::new(req, args);
+            let _ = crate::control::handle_for_test(&mut self.app, &egui::Context::default(), &req);
+            frames(&mut self.app, &self.ctx, 6, &mut self.time);
+        }
+    }
+    fn shown(&self, len: i64) -> String {
+        let s = self.app.engine.session();
+        crate::clip_inspector::format_len(s, len, s.edit.main_counter)
+    }
+}
+
+#[test]
+fn the_inspector_shows_one_selected_audio_clip_and_its_lengths_in_the_session_time_format() {
+    use crate::clip_inspector::Field;
+    let mut r = fade_rig();
+    assert!(r.app.inspector.clip.is_none(), "nothing selected, no inspector");
+    r.select(r.clip);
+    assert_eq!(r.app.inspector.clip, Some(r.clip));
+    assert_eq!(r.field(Field::FadeIn).text, r.shown(0));
+    assert_eq!(r.field(Field::FadeOut).text, r.shown(0));
+    assert_eq!(r.field(Field::FadeIn).curve, Some(transit_model::FadeShape::EqualPower.label()));
+    r.app.run("edit.fades_create", json!({"clip": r.clip.0, "side": "out", "length": r.bar + r.beat})).unwrap();
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    assert_eq!(r.field(Field::FadeOut).text, r.shown(r.bar + r.beat));
+    // The text follows the session's main counter.
+    for fmt in transit_time::TimeFormat::ALL {
+        r.app.engine.session_mut().edit.main_counter = fmt;
+        frames(&mut r.app, &r.ctx, 4, &mut r.time);
+        assert_eq!(r.field(Field::FadeOut).text, r.shown(r.bar + r.beat), "{fmt:?}");
+    }
+    r.app.engine.session_mut().edit.main_counter = transit_time::TimeFormat::BarsBeats;
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    assert_eq!(r.field(Field::FadeOut).text, "1| 1| 000", "a bar and a beat is one bar, one beat");
+    // Two clips selected, or a clip of another kind: no inspector.
+    let b = r.add_copy(8 * r.bar);
+    r.app.click_clip(b, true);
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    assert!(r.app.inspector.clip.is_none());
+}
+
+#[test]
+fn lengths_survive_a_format_round_trip_in_every_time_format() {
+    let r = fade_rig();
+    let s = r.app.engine.session();
+    for fmt in transit_time::TimeFormat::ALL {
+        for len in [r.beat, r.bar, 3 * r.beat, 2 * r.bar + r.beat] {
+            let text = crate::clip_inspector::format_len(s, len, fmt);
+            let back = crate::clip_inspector::parse_len(s, &text, fmt).unwrap_or_else(|e| panic!("{fmt:?} {text}: {e}"));
+            let slack = match fmt {
+                transit_time::TimeFormat::Samples | transit_time::TimeFormat::BarsBeats => 1,
+                transit_time::TimeFormat::MinSecs => i64::from(s.sample_rate.hz()) / 1000,
+                _ => i64::from(s.sample_rate.hz()) / 20,
+            };
+            assert!((back - len).abs() <= slack, "{fmt:?} {text}: {back} vs {len}");
+        }
+    }
+    assert!(crate::clip_inspector::parse_len(s, "soon", transit_time::TimeFormat::Samples).is_err());
+    assert!(crate::clip_inspector::parse_len(s, "1| 2", transit_time::TimeFormat::BarsBeats).is_err());
+}
+
+#[test]
+fn typing_a_fade_length_changes_the_clip_and_dragging_the_handle_changes_the_field() {
+    use crate::clip_inspector::Field;
+    let mut r = fade_rig();
+    r.select(r.clip);
+    let before = undo_len(&mut r.app);
+    // Type a length: the clip shows it.
+    let text = r.shown(r.bar);
+    r.type_into(Field::FadeIn, &text);
+    let c = r.clip(r.clip);
+    assert!((c.fade_in.len - r.bar).abs() <= 2, "typed {text}: {}", c.fade_in.len);
+    assert_eq!(c.fade_out.len, 0);
+    assert_eq!(undo_len(&mut r.app), before + 1, "one undo step");
+    assert_eq!(r.field(Field::FadeIn).text, r.shown(c.fade_in.len), "the field reads it back");
+    assert!(r.paints("in").len() == 1, "and the clip draws it");
+    // Drag the handle: the field shows it.
+    let r0 = r.rect(r.clip);
+    let h = (r0[0] + 12.0, r0[1] + crate::theme::CLIP_NAME_H + 2.5);
+    r.go(h, (r0[0] + r.px_bar / 2.0, h.1), json!({}));
+    let len = r.clip(r.clip).fade_in.len;
+    assert!((len - r.bar / 2).abs() <= r.beat, "dragged to half a bar: {len}");
+    assert_eq!(r.field(Field::FadeIn).text, r.shown(len), "the field follows the handle");
+    // Fade Out the same way, and zero removes the fade.
+    let text = r.shown(r.beat * 2);
+    r.type_into(Field::FadeOut, &text);
+    assert!((r.clip(r.clip).fade_out.len - 2 * r.beat).abs() <= 2);
+    let zero = r.shown(0);
+    r.type_into(Field::FadeOut, &zero);
+    assert_eq!(r.clip(r.clip).fade_out.len, 0, "zero removes the fade");
+    assert_eq!(r.clip(r.clip).fade_in.len, len, "and keeps the other");
+    // Text that is not a length changes nothing and says why.
+    let n = undo_len(&mut r.app);
+    r.type_into(Field::FadeIn, "soon");
+    assert_eq!(r.clip(r.clip).fade_in.len, len);
+    assert_eq!(undo_len(&mut r.app), n);
+    assert!(r.app.status.contains("Fade In") && r.app.status.contains("soon"), "{}", r.app.status);
+}
+
+#[test]
+fn the_curve_popup_sets_the_shape_and_keeps_length_and_bend() {
+    use crate::clip_inspector::Field;
+    let mut r = fade_rig();
+    r.app.run("edit.fades_create", json!({"clip": r.clip.0, "side": "in", "length": r.bar, "shape": "linear", "curvature": 0.4})).unwrap();
+    r.select(r.clip);
+    assert_eq!(r.field(Field::FadeIn).curve, Some("Linear"));
+    // The popup's choices are the five shapes; picking one goes through the same path as the
+    // fade's shape menu.
+    crate::fades::set_shape(&mut r.app, r.clip, crate::fades::Side::In, transit_model::FadeShape::SCurve);
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    let c = r.clip(r.clip);
+    assert_eq!((c.fade_in.shape, c.fade_in.len), (transit_model::FadeShape::SCurve, r.bar));
+    assert!((c.fade_in.curvature - 0.4).abs() < 1e-6);
+    assert_eq!(r.field(Field::FadeIn).curve, Some(transit_model::FadeShape::SCurve.label()));
+}
+
+#[test]
+fn the_crossfade_field_sets_both_ends_and_shows_custom_when_they_differ() {
+    use crate::clip_inspector::{CUSTOM, Field};
+    let mut r = fade_rig();
+    let b = r.add_copy(3 * r.bar);
+    r.select(b);
+    assert_eq!(r.field(Field::Crossfade).text, r.shown(0), "an overlap with no fades");
+    let before = undo_len(&mut r.app);
+    let text = r.shown(r.bar / 2);
+    r.type_into(Field::Crossfade, &text);
+    let (a_out, b_in) = (r.clip(r.clip).fade_out, r.clip(b).fade_in);
+    assert!((a_out.len - r.bar / 2).abs() <= 2 && a_out.len == b_in.len, "both ends: {} {}", a_out.len, b_in.len);
+    assert_eq!((a_out.shape, b_in.shape), (transit_model::FadeShape::EqualPower, transit_model::FadeShape::EqualPower));
+    assert_eq!(undo_len(&mut r.app), before + 1, "one undo step");
+    assert_eq!(r.field(Field::Crossfade).text, r.shown(a_out.len));
+    // Typing one end's length leaves the other: the crossfade reads Custom.
+    let text = r.shown(r.beat);
+    r.type_into(Field::FadeIn, &text);
+    assert!((r.clip(b).fade_in.len - r.beat).abs() <= 2);
+    assert_eq!(r.clip(r.clip).fade_out.len, a_out.len, "the other end stayed");
+    assert_eq!(r.field(Field::Crossfade).text, CUSTOM);
+    // A clip that overlaps nothing has no crossfade to edit.
+    r.app.engine.session_mut().find_clip_mut(b).unwrap().start = 8 * r.bar;
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    assert_eq!(r.field(Field::Crossfade).text, "-");
+}
