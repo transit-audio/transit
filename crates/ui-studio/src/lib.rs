@@ -1119,6 +1119,7 @@ impl StudioApp {
         }
         finish::rename_keys(self, &ctx); // slice 6: a name being typed owns Escape and Enter
         tempo_edit::keys(self, &ctx); // the tempo and meter fields own Escape and Enter
+        clip_inspector::keys(self, &ctx); // Escape in a fade field gives its draft up
         keys::shortcuts(self, &ctx); // slice 3: before the arrangement's keys
         automation::shortcuts(self, &ctx); // slice 7: selected points take Delete before clips
         groups::shortcuts(self, &ctx);

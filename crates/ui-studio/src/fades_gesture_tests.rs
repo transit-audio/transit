@@ -742,3 +742,39 @@ fn the_fade_to_cursor_keys_fade_the_selected_clips_to_the_cursor_in_one_undo_ste
         assert!(row.note.contains("Logic") || row.note.contains("Ours"), "the convention is cited: {}", row.note);
     }
 }
+
+#[test]
+fn a_clip_lying_over_another_clips_fade_tail_is_pressed_not_the_fade_beneath() {
+    let mut r = fade_rig();
+    let b = r.add_copy(3 * r.bar);
+    r.app.run("edit.fades_create", json!({"clip": r.clip.0, "side": "out", "length": r.bar})).unwrap();
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    // B has no fade-in: no crossfade, so A's fade under B is not a handle.
+    let rb = r.rect(b);
+    let at = (rb[0] + r.px_bar * 0.8, rb[1] + crate::theme::CLIP_NAME_H + 2.5);
+    r.click(at, 1);
+    assert!(r.app.arrange.fade_menu.is_none(), "no shape menu for the hidden fade");
+    assert_eq!(r.app.engine.session().edit.selected_clips, vec![b], "B was pressed");
+    r.go(at, (at.0 + 30.0, at.1), json!({}));
+    assert!(r.clip(b).start > 3 * r.bar, "the press moved B");
+}
+
+#[test]
+fn escape_in_an_inspector_field_gives_up_what_was_typed() {
+    use crate::clip_inspector::Field;
+    let mut r = fade_rig();
+    r.select(r.clip);
+    let before = undo_len(&mut r.app);
+    let at = FadeRig::center(r.field(Field::FadeIn).rect);
+    r.click(at, 1);
+    for (req, args) in
+        [("ui.key", json!({"key": "A", "cmd": true})), ("ui.text", json!({"text": r.shown(r.bar)})), ("ui.key", json!({"key": "Escape"}))]
+    {
+        let (req, _rx) = crate::ControlRequest::new(req, args);
+        let _ = crate::control::handle_for_test(&mut r.app, &egui::Context::default(), &req);
+        frames(&mut r.app, &r.ctx, 6, &mut r.time);
+    }
+    assert_eq!(r.clip(r.clip).fade_in.len, 0, "Escape drops the draft");
+    assert_eq!(undo_len(&mut r.app), before);
+    assert_eq!(r.field(Field::FadeIn).text, r.shown(0), "and the field reads the clip again");
+}

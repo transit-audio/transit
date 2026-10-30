@@ -69,9 +69,19 @@ pub struct FieldView {
 pub struct State {
     /// The field being typed in and its text.
     pub draft: Option<(Field, String)>,
+    /// Escape was pressed while typing: give the draft up (taken before the shortcuts see it).
+    cancel: bool,
     /// The clip the strip shows (none: hidden) and its fields.
     pub clip: Option<ClipId>,
     pub fields: Vec<FieldView>,
+}
+
+/// Escape belongs to a field being typed in: it gives the draft up and must not also reach
+/// Select None. Call before the other key handlers.
+pub fn keys(app: &mut StudioApp, ctx: &egui::Context) {
+    if app.inspector.draft.is_some() && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+        app.inspector.cancel = true;
+    }
 }
 
 /// The clip the inspector shows: the one audio clip selected.
@@ -187,6 +197,7 @@ fn row(app: &mut StudioApp, ui: &mut Ui, s: &Session, clip: ClipId) {
             let value = length(s, clip, field);
             let enabled = field != Field::Crossfade || fades::overlap(s, clip).is_some();
             ui.label(egui::RichText::new(field.label()).color(TOKENS.text_dim));
+            let mut continue_cancelled = false;
             let editing = app.inspector.draft.as_ref().is_some_and(|d| d.0 == field);
             let mut text = match (&app.inspector.draft, value) {
                 (Some((f, t)), _) if *f == field => t.clone(),
@@ -196,10 +207,15 @@ fn row(app: &mut StudioApp, ui: &mut Ui, s: &Session, clip: ClipId) {
             };
             let resp =
                 ui.add_enabled(enabled, egui::TextEdit::singleline(&mut text).id(ui.id().with(("fade_len", field.label()))).desired_width(FIELD_W));
-            if resp.gained_focus() || resp.changed() {
+            if editing && std::mem::take(&mut app.inspector.cancel) {
+                app.inspector.draft = None;
+                resp.surrender_focus();
+                continue_cancelled = true;
+            }
+            if !continue_cancelled && (resp.gained_focus() || resp.changed()) {
                 app.inspector.draft = Some((field, text.clone()));
             }
-            if editing && resp.lost_focus() {
+            if !continue_cancelled && editing && resp.lost_focus() {
                 // Enter or a click elsewhere commits what was typed (if it differs from what the
                 // field showed); Escape gives it up.
                 let typed = app.inspector.draft.take().map(|d| d.1);

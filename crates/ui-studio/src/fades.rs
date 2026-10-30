@@ -6,10 +6,14 @@
 //!   a minimum target and give up the middle move zone before the fade zones.
 //! - A fade is drawn as a shaded area over the waveform with its curve as a line; the waveform
 //!   under it is dimmed, not hidden ([`overlay`] records the paint in the layout).
-//! - Dragging the curve line bends it, no modifier; Alt only slows the drag ([`FINE`]).
+//! - Dragging the curve line bends it, no modifier. The drag changes the curvature only; the
+//!   shape (linear, equal power, S-curve, exponential, logarithmic) comes from the shape menu or
+//!   the inspector's curve popup. Alt has two meanings by handle: fine adjust (half the step)
+//!   on a bend, and "this side only" on the end of a crossfade ([`plan`]).
 //! - Dragging a fade handle past the clip's end into an overlapping neighbor makes an
 //!   equal-power crossfade over the overlap, drawn as an X ([`draw_cross`]); its two ends are
-//!   the two clips' handles and move independently once their lengths differ.
+//!   the two clips' handles. They move together while equal and above zero, independently once
+//!   their lengths differ; a clip beneath another offers its fade only as such a pair.
 //! - The clip inspector ([`crate::clip_inspector`]) edits the same lengths and curves by number.
 //!
 //! The trim and loop hot zones live in [`crate::arrange::zone`], which asks [`corner`] for the
@@ -198,6 +202,7 @@ pub fn plan(s: &Session, clip: ClipId, side: Side, len: Samples, alt: bool) -> P
         let mut set = vec![(clip, side, fade)];
         if let Some(o) = near
             && !alt
+            && side.other().of(o).len > 0
             && side.of(c).len == side.other().of(o).len
         {
             set.push((o.id, side.other(), Fade { len: len.min(o.length), ..side.other().of(o) }));
@@ -466,8 +471,18 @@ pub(crate) fn grab_at(s: &Session, map: Map, layout: &Layout, pos: Pos2, kind: D
         return None;
     }
     let under = layout.clips.iter().rev().filter(|c| pos.x >= c.rect[0] && pos.x <= c.rect[2] && pos.y >= c.rect[1] && pos.y <= c.rect[3]);
+    let mut top: Option<&Clip> = None;
     for (i, r) in under.enumerate() {
         let Some(c) = s.find_clip(ClipId(r.id)).map(|x| x.1) else { continue };
+        // A clip beneath the top one offers its drawn fade only as the other end of a real
+        // crossfade with it (both facing fades above zero); otherwise the press is the top clip's.
+        if let Some(t) = top {
+            let (l, rt) = if (c.start, c.id.0) < (t.start, t.id.0) { (c, t) } else { (t, c) };
+            if !(is_audio(c) && l.fade_out.len > 0 && rt.fade_in.len > 0) {
+                continue;
+            }
+        }
+        top = top.or(Some(c));
         if let Some(grab) = grab(c, map, r.rect, pos, i == 0 && kind != DragKind::Move) {
             return Some(Target { clip: c.id, track: TrackId(r.track), start: r.start, end: r.end, grab });
         }
