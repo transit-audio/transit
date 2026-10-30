@@ -20,7 +20,7 @@ use transit_macro_osc::engine::{Engine, EngineParameters, TriggerState};
 use transit_macro_osc_oracle::floor::RunnerFamily;
 use transit_macro_osc_oracle::residual::{Residual, residual_f32};
 use transit_macro_osc_oracle::sweep::{ENGINE_POINT_FRAMES, EnginePoint, SEED, engine_points, render_engine_point};
-use transit_macro_osc_oracle::{BLOCK_SIZE, MAX_BLOCK_SIZE, Model, Session, Trigger};
+use transit_macro_osc_oracle::{BLOCK_SIZE, Model, Session, Trigger};
 
 /// The margin over the oracle's floor, dB. Zero: the port is held to bit identity.
 const MARGIN_DB: f64 = 0.0;
@@ -35,7 +35,7 @@ fn port_engine(model: Model) -> Box<dyn Engine> {
     use transit_macro_osc::engine::*;
     use transit_macro_osc::engine2::*;
     use transit_macro_osc::resources::sysex::{SYX_BANK_0, SYX_BANK_1, SYX_BANK_2};
-    let n = MAX_BLOCK_SIZE;
+    let n = transit_macro_osc_oracle::MAX_BLOCK_SIZE;
     match model {
         Model::VirtualAnalogFilter => Box::new(virtual_analog_vcf_engine::VirtualAnalogVcfEngine::new()),
         Model::PhaseDistortion => Box::new(phase_distortion_engine::PhaseDistortionEngine::new(n)),
