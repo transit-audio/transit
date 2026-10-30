@@ -63,7 +63,7 @@ text = "How the audio thread is scheduled: MMCSS Pro Audio is the best case on W
 [[entry]]
 id = "audio_devices.requested"
 name = "Requested versus running"
-text = "You asked for a buffer size or sample rate and the device runs at another. PipeWire runs a stream at the server's quantum, and any device can step down to what it offers. Change the value in the lists or in the driver's own settings, then press Reconnect."
+text = "You asked for a buffer size or sample rate and the device runs at another. PipeWire runs a stream at the buffer size the server is set to, and any device can step down to what it offers. Change the value in the lists or in the driver's own settings, then press Reconnect."
 
 [[entry]]
 id = "audio_devices.backend"
@@ -73,12 +73,12 @@ text = "The device loop's own figures since the stream opened. Healthy is gap ov
 [[entry]]
 id = "audio_devices.wakes"
 name = "Wakes"
-text = "How many times a second the device loop woke to serve the stream. Healthy is the sample rate divided by the buffer size (about 375 a second for 128 samples at 48 kHz). Much lower means the driver is stalling. It is left out until two samples exist."
+text = "How many times a second the device loop woke to serve the stream. With exclusive WASAPI, ASIO and JACK, healthy is about the sample rate divided by the buffer size (375 a second for 128 samples at 48 kHz), and much lower means the driver is stalling. Shared WASAPI and capture wake on their own schedule, so judge those by the other figures; the rate is left out until two samples exist."
 
 [[entry]]
 id = "audio_devices.gap_over_period"
 name = "Gap over period"
-text = "How much longer than one period the time since the previous wake or callback was, never negative: p95 is the value 95% of wakes stayed under, max the worst since open. Healthy is small next to the period. A driver that delivers in bursts can show up to a period here with nothing late, so only worry when you also hear dropouts."
+text = "How much longer than one period the time since the previous wake or callback was, never negative: p95 is about the value 95% of wakes stayed under, max the worst since open. Healthy is small next to the period. A driver that delivers in bursts can show up to a period here with nothing late, so only worry when you also hear dropouts."
 
 [[entry]]
 id = "audio_devices.late"
@@ -113,7 +113,7 @@ text = "The most capture packets one wake had to drain. A few is normal; a high 
 [[entry]]
 id = "audio_devices.faults"
 name = "Faults"
-text = "Failures that ended the stream, such as the device being lost or a failed call. Healthy is 0, and the figure only appears when it is not. Check the log, then press Reconnect."
+text = "Failures that ended the stream, such as the device being lost or a failed call. Healthy is 0; single lines show it only when it is not 0, and the ASIO output and input line always shows it. Check the log, then press Reconnect."
 
 [[entry]]
 id = "audio_devices.overloads"
@@ -123,7 +123,7 @@ text = "Overloads the driver reported to transit (ASIO overloads, JACK xruns). H
 [[entry]]
 id = "audio_devices.busy_skips"
 name = "Busy skips"
-text = "Callbacks that found the engine still busy with the previous one and did nothing, so that buffer kept what it held. Healthy is 0. It means a callback ran longer than a period."
+text = "Callbacks that found the engine still busy (with the previous callback, or delivering an error) and did nothing, so that buffer kept what it held. Healthy is 0. For ASIO it is the driver calling again before the last buffer switch finished, which usually means a callback ran longer than a period."
 
 [[entry]]
 id = "audio_devices.position_jumps"

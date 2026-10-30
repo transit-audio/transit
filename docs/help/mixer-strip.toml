@@ -42,7 +42,7 @@ text = "The highest level since it was cleared; it turns red above 0 dB. Click t
 [[entry]]
 id = "mixer_strip.meter"
 name = "Level meter"
-text = "The track's output level. A red cap at the top means it clipped. Click to clear the clip latch and the peak hold; Ctrl-click clears every strip."
+text = "The track's output level. A red cap at the top means it clipped. Click to clear the red clip marker and the peak hold; Ctrl-click clears every strip."
 
 [[entry]]
 id = "mixer_strip.fader"

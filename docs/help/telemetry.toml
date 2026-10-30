@@ -13,22 +13,22 @@ text = "How hard the audio thread is working. Every audio callback has a time bu
 [[entry]]
 id = "telemetry.readout"
 name = "Load readout"
-text = "Audio thread time per callback as a share of the callback budget, the highest over about the last second, next to the buffer size and sample rate. Healthy is under about 50%; near 100% means dropouts are close. Click for the details window; if it stays high, raise the buffer size or freeze heavy tracks."
+text = "Audio thread time per callback as a share of the callback budget, the highest over the last 1,024 callbacks (about 2.7 s at 128 frames, 11 s at 512), next to the buffer size and sample rate. It turns amber above 80% and red at 100% or after an over-budget callback. Click for the details window; if it stays amber or red, raise the buffer size or freeze heavy tracks."
 
 [[entry]]
 id = "telemetry.histogram"
 name = "Callback work time"
-text = "How many callbacks took each amount of work time, from up to 8 µs to over 16 ms. Healthy is nearly all of them in bins far below the buffer length. A growing tail near or past the buffer length is where dropouts come from: find the heavy track or raise the buffer size."
+text = "How many callbacks took each amount of work time, in bins from up to 1 µs, doubling at each step, to over 16 ms. Healthy is nearly all of them in bins far below the buffer length. A growing tail near or past the buffer length is where dropouts come from: find the heavy track or raise the buffer size."
 
 [[entry]]
 id = "telemetry.load_now"
 name = "Load now"
-text = "Audio thread time per callback divided by the callback budget, the highest over about the last second. Healthy is under about 50% while playing. If it climbs toward 100%, freeze or simplify heavy tracks or raise the buffer size."
+text = "Audio thread time per callback divided by the callback budget, the highest over the last 1,024 callbacks (about 2.7 s at 128 frames, 11 s at 512). The readout turns amber above 80% and red at 100%, so steady values near those mean dropouts are close. If it climbs, freeze or simplify heavy tracks or raise the buffer size."
 
 [[entry]]
 id = "telemetry.recent_over_budget"
 name = "Over-budget callbacks in that window"
-text = "Callbacks in the last second whose work time was longer than the callback budget. Healthy is 0. Anything else means a dropout may have just happened, so check the load and the longest callback."
+text = "Callbacks among the last 1,024 (about 2.7 s at 128 frames) whose work time was longer than the callback budget. Healthy is 0. Anything else means a dropout may have just happened, so check the load and the longest callback."
 
 [[entry]]
 id = "telemetry.peak_load"
@@ -58,7 +58,7 @@ text = "The worker threads that render mixer strips on other cores next to the a
 [[entry]]
 id = "telemetry.strip_deadline"
 name = "Strip deadline"
-text = "How much of each block's period the strips have before one that has not finished counts as an overrun, with where the value came from. The default is 150% for buffers of 1.5 ms or less and 100% for longer ones; TRANSIT_STRIP_DEADLINE_PERCENT (25 to 300) overrides it for measurements. Above 100% the audio thread may wait past the period for a slow strip instead of leaving it silent."
+text = "How much of each block's period the strips have before one that has not finished counts as an overrun, as a percent. The default is 150% for buffers of 1.5 ms or less (up to 72 frames at 48 kHz, 144 at 96 kHz) and 100% for longer ones, and the row reads (default for 64 frames at 48 kHz) with the buffer and rate it was taken from, or (TRANSIT_STRIP_DEADLINE_PERCENT) when that measurement option (25 to 300) is set. Above 100% the audio thread may wait past the period for a slow strip instead of leaving it silent."
 
 [[entry]]
 id = "telemetry.overruns_busy"
@@ -78,7 +78,7 @@ text = "Blocks in which no thread had started a strip by the deadline and the ti
 [[entry]]
 id = "telemetry.upstream_missed"
 name = "Strip skips, upstream missed"
-text = "Blocks in which a strip was skipped because the strip feeding its sidechain key had no result, plus auxes skipped for the same reason. The cause is counted once at the strip that overran, so fix that one. Healthy is 0; it also stays 0 when started with TRANSIT_RENDER_GRAPH=0."
+text = "Blocks in which a strip (or an aux) was skipped because the strip feeding its sidechain key had no result. The cause is counted once, at the strip that overran; a strip that failed, is suspect or was discarded is counted under its own rows, not here. Healthy is 0, and it stays 0 when started with TRANSIT_RENDER_GRAPH=0."
 
 [[entry]]
 id = "telemetry.overrun_blocks"
@@ -128,12 +128,12 @@ text = "Renders that failed on a worker, usually a plug-in error. Healthy is 0. 
 [[entry]]
 id = "telemetry.suspect"
 name = "Suspect strip blocks"
-text = "Blocks in which a strip stayed silent after a fault, until its plug-in is replaced. Healthy is 0. Replace or remove the plug-in on the strip, then it plays again."
+text = "Blocks in which a strip stayed silent after a fault, until its plug-in is replaced. Healthy is 0. Replace the plug-in on the strip, and it plays again."
 
 [[entry]]
 id = "telemetry.midi_deferred"
 name = "Deferred MIDI events"
-text = "Live MIDI held for a strip whose worker was busy and delivered at that strip's next block. A few are harmless; many mean the strip is overrunning and the notes arrive late."
+text = "Live MIDI held for a strip whose worker was busy or had not started the block, and delivered at that strip's next block. A few are harmless; many mean the strip is overrunning and the notes arrive late."
 
 [[entry]]
 id = "telemetry.midi_dropped"
@@ -148,7 +148,7 @@ text = "Times a strip's held MIDI overflowed past its releases, so the strip was
 [[entry]]
 id = "telemetry.protocol_faults"
 name = "Render worker protocol faults"
-text = "Internal consistency failures between the audio thread and the workers. This should always be 0. If it is not, report it with Copy diagnostics."
+text = "Mix-ups between the audio thread and the workers about which block a strip's result belongs to; they would be a bug in transit, not in your session. This should always be 0. If it is not, report it with Copy diagnostics."
 
 [[entry]]
 id = "telemetry.strip_top"
@@ -158,12 +158,12 @@ text = "The three strips with the most overruns, each with its count, or none wh
 [[entry]]
 id = "telemetry.strip_row"
 name = "Strip row"
-text = "One strip that overran: its busy, late and unstarted overruns, how many renders the audio thread did itself (inline), its average render cost and its slowest recent render in µs. Compare cost and worst with the buffer length to see whether the plug-in is simply too heavy. An upstream missed part names the strip the miss came from, and the counts start over when another track moves into that place."
+text = "One row for each strip that overran, the most first and at most eight: its busy, late and unstarted overruns, its inline renders, its average render cost and its slowest recent render in µs, which fades over a few hundred renders. Compare cost and worst with the buffer length to see whether the plug-in is simply too heavy. An upstream missed part names the strip the miss came from, and the counts start over when another track moves into that place."
 
 [[entry]]
 id = "telemetry.strip_lateness"
 name = "Strip lateness"
-text = "Late renders by how far past the strips' deadline they finished. Mostly in the first bins means the deadline is missed narrowly, not by a slow plug-in, so a bigger buffer or a higher deadline helps. Mostly in the last bins points at a heavy strip."
+text = "Late renders by how far past the strips' deadline they finished, counted when the late result is discarded (one per late overrun). Mostly in the first bins means the deadline is missed narrowly, so a larger buffer helps. Mostly in the last bins points at a heavy strip: put fewer heavy plug-ins on it or use a larger buffer."
 
 [[entry]]
 id = "telemetry.worker_wake"
@@ -183,7 +183,7 @@ text = "Callbacks whose work time was measured. Healthy is a number close to Cal
 [[entry]]
 id = "telemetry.untimed_callbacks"
 name = "Callbacks without a timing"
-text = "Callbacks that have no measured work time. It is normally 0 or a handful at the start; a large count means the load figures are based on fewer callbacks than ran."
+text = "Callbacks for which no work time could be measured. Healthy is 0, or a handful; a large count means the load figures are based on fewer callbacks than ran."
 
 [[entry]]
 id = "telemetry.frames"

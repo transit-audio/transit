@@ -8,7 +8,7 @@ publish = false
 [dependencies]
 serde_json.workspace = true
 serde.workspace = true
-toml = "1.1"
+toml.workspace = true
 syn = { version = "2", features = ["full", "visit"] }
 proc-macro2 = { version = "1", features = ["span-locations"] }
 

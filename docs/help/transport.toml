@@ -61,7 +61,7 @@ text = "The time signature at the playhead. Click to change it."
 [[entry]]
 id = "transport.main_meter"
 name = "Main output meter"
-text = "The level of the main output, left over right, with a red cap when it clipped. Click to clear the clip latch and the peak hold; Ctrl-click clears every meter."
+text = "The level of the main output, left over right, with a red cap when it clipped. Click to clear the red clip marker and the peak hold; Ctrl-click clears every meter."
 
 [[entry]]
 id = "transport.midi_led"

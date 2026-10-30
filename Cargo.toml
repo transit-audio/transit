@@ -11,6 +11,7 @@ rust-version = "1.90"
 repository = "https://github.com/transit-audio/transit"
 
 [workspace.dependencies]
+toml = "1.1"
 # internal
 transit-time = { path = "crates/time" }
 transit-rt = { path = "crates/rt" }
