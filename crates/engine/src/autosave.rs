@@ -236,6 +236,15 @@ impl Autosave {
                 continue;
             }
             let Some(audio) = audio else { continue };
+            // A disk-backed source is its file (ADR 0035): the recovery session references it as
+            // it is, even while the file is missing, never an empty copy.
+            if audio.is_disk() {
+                if let Some(f) = &file {
+                    src.path = f.to_string_lossy().into_owned();
+                }
+                log::warn!("autosave: the file of the disk-backed source {} is missing; the recovery copy keeps its path", src.path);
+                continue;
+            }
             let name = match self.copies.remove(&src.id) {
                 Some((copy, name)) if copy.upgrade().is_some_and(|a| Arc::ptr_eq(&a, audio)) => name,
                 _ => {
@@ -597,6 +606,27 @@ mod tests {
         let paths: Vec<_> = r.session().sources.iter().map(|s| (s.path.starts_with("Audio Files/"), s.unsaved)).collect();
         assert_eq!(paths, [(true, false), (false, true)]);
         assert_eq!(levels(&r), [0.5, -0.25]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_disk_backed_source_whose_file_went_missing_is_referenced_not_copied_empty() {
+        let dir = folder("autosave-disk");
+        std::fs::create_dir_all(&dir).unwrap();
+        let take = dir.join("Long_01.wav");
+        let mut bytes = transit_audio_io::wav_float_header(1, 48_000, 480).unwrap();
+        bytes.extend([0u8; 480 * 4]);
+        std::fs::write(&take, &bytes).unwrap();
+        let mut e = Engine::default();
+        let audio = crate::io::disk::open_disk_audio(&take, bytes.len() as u64, 48_000).unwrap();
+        crate::io::add_disk_source(e.session_mut(), "Long_01", audio, &take.to_string_lossy());
+        std::fs::remove_file(&take).unwrap();
+        let mut a = Autosave::create(&dir.join("Autosave"), "Song").unwrap();
+        a.write(e.session(), None, None).unwrap();
+        assert!(!a.dir.join("Audio Files").exists(), "no empty WAV is written for it");
+        let text = std::fs::read_to_string(a.dir.join(SESSION)).unwrap();
+        assert!(text.contains("Long_01.wav"), "{text}");
+        drop(a);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

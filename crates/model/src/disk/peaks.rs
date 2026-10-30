@@ -163,11 +163,16 @@ fn write_sidecar(side: &Path, s: Stamp, p: &DiskPeaks) -> std::io::Result<()> {
         }
     }
     let tmp = sidecar_tmp(side);
-    let mut f = std::fs::File::create(&tmp)?;
-    f.write_all(&bytes)?;
-    f.sync_all()?;
-    drop(f);
-    std::fs::rename(&tmp, side)
+    let written = std::fs::File::create(&tmp).and_then(|mut f| {
+        f.write_all(&bytes)?;
+        f.sync_all()
+    });
+    let done = written.and_then(|()| std::fs::rename(&tmp, side));
+    if done.is_err() {
+        // Nothing half-written is left beside the user's audio.
+        let _ = std::fs::remove_file(&tmp);
+    }
+    done
 }
 
 fn sidecar_tmp(side: &Path) -> PathBuf {

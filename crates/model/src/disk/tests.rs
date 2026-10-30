@@ -247,3 +247,18 @@ fn a_ring_cued_under_another_mapping_of_the_clip_is_a_miss() {
         assert_eq!(v.get(0, 64), other.sample(64, |x| data[0].get(x).copied()));
     }
 }
+
+#[test]
+fn a_sidecar_that_cannot_be_written_leaves_no_temporary_file() {
+    let dir = Dir::new("peaks-fail");
+    let path = dir.0.join("Take_02.wav");
+    write_wav(&path, &[0.25; 3_000]);
+    // A folder where the sidecar would go: the rename fails.
+    std::fs::create_dir_all(sidecar_path(&path).join("x")).unwrap_or_else(|e| panic!("{e}"));
+    let d = DiskSource::open(&path, std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0)).unwrap_or_else(|e| panic!("{e}"));
+    let (peaks, origin) = load_or_build_peaks(&path, d.opener(), 1, d.frames()).unwrap_or_else(|e| panic!("{e}"));
+    assert_eq!((origin, peaks.channels[0][0]), (PeaksOrigin::Built, (0.25, 0.25)), "kept in memory");
+    let mut tmp = sidecar_path(&path).into_os_string();
+    tmp.push(".tmp");
+    assert!(!PathBuf::from(tmp).exists());
+}
