@@ -77,6 +77,8 @@ The suite needs the `testing` cargo feature of `transit-mix` (which turns on `tr
 
 ## Oracle null tests
 
+How the technique works, start to finish: [`knowledge/oracle-null-testing.md`](../knowledge/oracle-null-testing.md).
+
 A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-mutable-instruments-port.md)): the port is rendered next to the original C++ on the same runner, sample by sample, and a residual above the measured floor is an escape. The oracle for the macro oscillator is `crates/macro-osc-oracle` (`transit-macro-osc-oracle`, #194). It is dev-only: `cargo xtask layers` fails if any package takes it as a normal or build dependency (`DEV_ONLY` in `xtask/src/main.rs`), and its FFI `unsafe` is confined to `src/ffi.rs`.
 
 - **Build:** the vendored C++ (unchanged; commits and the blob check in the crate's `VENDOR.md`) with `-DTEST`, `-O2` in every profile, no fast-math and no FP contraction (`-ffp-contract=off` on GCC and Clang, `/fp:strict` on MSVC). MSVC needs two small patches, applied to copies at build time (`patches/msvc/`).

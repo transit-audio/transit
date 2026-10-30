@@ -24,6 +24,7 @@ the ADRs. A new topic gets a new file and a row here.
 | [`commands.md`](commands.md) | User actions, undo, the control channel. |
 | [`ui.md`](ui.md) | `crates/ui-studio`: shortcuts, icons, theme, tests. |
 | [`plugin-presets.md`](plugin-presets.md) | Hosted plug-in editor windows, their header strip, user presets. |
+| [`oracle-null-testing.md`](oracle-null-testing.md) | A ported DSP engine, the oracle crate, a null test or a pitch test. |
 | [`unsafe.md`](unsafe.md) | Any `unsafe`, FFI or OS call. |
 
 Decisions live in [`../../adr/README.md`](../../adr/README.md); the overview is
