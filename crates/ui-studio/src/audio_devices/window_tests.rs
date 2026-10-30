@@ -219,6 +219,31 @@ fn two_backends() -> Value {
     ]})
 }
 
+/// A saved buffer the device does not offer (#230: the tester's 4096 on a server that allows 64 to
+/// 2048) never leaves the list showing a value it cannot take: the window uses the nearest offered
+/// size, says so under the list, and Apply saves it.
+#[test]
+fn a_saved_buffer_the_device_does_not_offer_snaps_to_the_nearest_and_says_so() {
+    let mut t = T::new();
+    t.control("audio.fake_devices", two_backends()).unwrap();
+    t.app.ui.audio.system = Some("ALSA".into());
+    t.app.ui.audio.buffer_size = Some(4096);
+    t.open_window();
+    let lay = t.layout();
+    assert_eq!(lay["draft"]["buffer_size"], json!(2048), "{}", lay["draft"]);
+    let notes: Vec<&str> =
+        lay["controls"].as_array().unwrap().iter().filter(|c| c["value"] == "buffer_snapped").map(|c| c["label"].as_str().unwrap()).collect();
+    assert_eq!(notes, ["Saved buffer 4096 is outside this device's range (64-2048); using 2048. Apply saves it."]);
+    assert!(lay["pending"].is_string(), "Apply is offered: {}", lay["pending"]);
+    assert!(buffer_labels(&mut t).iter().all(|l| l != "4096 samples"), "the list offers only the device's sizes");
+    // An offered saved size is left alone and says nothing.
+    t.app.ui.audio.buffer_size = Some(256);
+    t.frames(3);
+    let lay = t.layout();
+    assert_eq!(lay["draft"]["buffer_size"], json!(256));
+    assert!(lay["controls"].as_array().unwrap().iter().all(|c| c["value"] != "buffer_snapped"));
+}
+
 fn buffer_labels(t: &mut T) -> Vec<String> {
     t.click(mid(t.control_rect("buffer")));
     let labels =

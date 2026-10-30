@@ -402,6 +402,23 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                     let named = draft.output.as_deref().and_then(|w| s.outputs.iter().find(|d| d.name == w));
                                                     named.or_else(|| s.outputs.iter().find(|d| d.is_default))
                                                 });
+                                                // A saved system that did not open (#230): the lists describe the device that did,
+                                                // and the window says so, instead of a system with nothing running behind it.
+                                                let fallback = super::period::fell_back(app, &draft);
+                                                let dev = fallback
+                                                    .as_ref()
+                                                    .and_then(|(_, system, device)| super::period::running_device(&systems, system, device))
+                                                    .or(dev);
+                                                let dev_system =
+                                                    fallback.as_ref().map(|(_, system, _)| system.clone()).or_else(|| sys.map(|s| s.name.clone()));
+                                                if let Some((saved, system, device)) = &fallback {
+                                                    ui.label("");
+                                                    let line = super::period::fallback_note(saved, system, device);
+                                                    let shown =
+                                                        ui.add(egui::Label::new(egui::RichText::new(&line).color(TOKENS.text_dim).size(11.0)).wrap());
+                                                    controls.push((line, "fallback_system", shown.rect));
+                                                    ui.end_row();
+                                                }
                                                 let native =
                                                     devices::native_wasapi_offered(draft.system.as_deref()) && draft.backend == Backend::NativeWasapi;
                                                 let native_asio =
@@ -534,6 +551,19 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
 
                                                 label(ui, "Buffer size");
                                                 let sizes = dev.map_or(devices::STANDARD_BUFFERS.to_vec(), DeviceInfo::buffer_sizes);
+                                                // A saved size this device does not offer (#230): the nearest offered one, said
+                                                // under the list, so the list never shows a value it cannot take.
+                                                let snapped = app
+                                                    .ui
+                                                    .audio
+                                                    .buffer_size
+                                                    .filter(|saved| dev.is_some() && !sizes.contains(saved))
+                                                    .and_then(|saved| super::period::nearest(&sizes, saved).map(|near| (saved, near)));
+                                                if let Some((saved, near)) = snapped
+                                                    && draft.buffer_size == Some(saved)
+                                                {
+                                                    draft.buffer_size = Some(near);
+                                                }
                                                 // The size the open device runs is marked in its own list.
                                                 let running_buffer = app
                                                     .player
@@ -541,21 +571,27 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                     .filter(|p| !p.silent && dev.is_some_and(|d| d.name.eq_ignore_ascii_case(&p.device_name)))
                                                     .and_then(|p| p.device_buffer);
                                                 let bufs: Vec<(u32, String)> = sizes
-                                                    .into_iter()
+                                                    .iter()
+                                                    .copied()
                                                     .map(|b| {
-                                                        (
-                                                            b,
-                                                            if running_buffer == Some(b) {
-                                                                format!("{b} samples \u{b7} running")
-                                                            } else {
-                                                                format!("{b} samples")
-                                                            },
-                                                        )
+                                                        (b, {
+                                                            let label =
+                                                                super::period::size_label(b, dev_system.as_deref(), dev.map(|d| d.name.as_str()));
+                                                            if running_buffer == Some(b) { format!("{label} \u{b7} running") } else { label }
+                                                        })
                                                     })
                                                     .collect();
                                                 let (rect, text) = choose(ui, "buffer", audio_on, &mut draft.buffer_size, &bufs, &mut lay.items);
                                                 controls.push((text, "buffer", rect));
                                                 ui.end_row();
+                                                if let Some((saved, near)) = snapped.filter(|(_, near)| draft.buffer_size == Some(*near)) {
+                                                    ui.label("");
+                                                    let line = super::period::snapped_note(saved, near, &sizes);
+                                                    let shown =
+                                                        ui.add(egui::Label::new(egui::RichText::new(&line).color(TOKENS.text_dim).size(11.0)).wrap());
+                                                    controls.push((line, "buffer_snapped", shown.rect));
+                                                    ui.end_row();
+                                                }
                                                 if stale {
                                                     ui.label("");
                                                     let shown = ui.label(egui::RichText::new(STALE_NOTE).color(TOKENS.text_dim).size(11.0));

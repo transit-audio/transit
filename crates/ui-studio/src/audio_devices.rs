@@ -16,6 +16,7 @@
 //! the same path. A choice that cannot be honored falls back to the default (the playback crate
 //! logs it); the fallback is said on the status line and in the window.
 
+mod period;
 mod window;
 pub use window::{Section, window};
 
@@ -423,7 +424,10 @@ pub fn fallback_notes(cfg: &AudioConfig, systems: Option<&[AudioSystem]>, opened
         && opened.output.is_some()
         && opened.buffer != Some(want)
     {
-        notes.push(format!("A {want}-sample buffer is not available; using the device's default."));
+        notes.push(match opened.buffer {
+            Some(got) => format!("A {want}-sample buffer is outside the device's range; using {got}."),
+            None => format!("A {want}-sample buffer is not available; using the device's default."),
+        });
     }
     notes
 }
@@ -1077,6 +1081,8 @@ pub(crate) fn opened_lines(app: &mut StudioApp, now: f64) -> Vec<String> {
         }
         None => lines.push("Output open: none".into()),
     }
+    // PipeWire through ALSA: the buffer, the period the callbacks see, the server's quantum (#230).
+    lines.extend(period::stream_line(app));
     let output = app.player.as_ref().and_then(|p| p.backend_stats());
     // The input is the recorder's once a track takes it; until then a native duplex output holds
     // the one it opened with, and the panel reads that.
