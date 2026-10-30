@@ -42,20 +42,25 @@ fn eight_strips() -> Session {
     s
 }
 
-/// Wait until the render workers' promotions (once each, at start, off the callback) are done:
-/// the counter has not moved for a while.
-fn settle() -> usize {
-    let mut last = promotion_calls();
-    let mut since = Instant::now();
-    while since.elapsed() < Duration::from_millis(300) {
-        std::thread::sleep(Duration::from_millis(20));
-        let now = promotion_calls();
-        if now != last {
-            last = now;
-            since = Instant::now();
+/// Waits until every render worker has made its one promotion (at start, off the callback): each
+/// records its result after the call the counter counts, so once every worker's result is there
+/// the counter has its final pre-render value. The wait names that state, with a 5 s stall bound;
+/// a quiet period on the counter let a worker starved past it promote during the render and fail
+/// the test (E49, #226). With promotion turned off no worker calls it and nothing is recorded.
+fn settle(engine: &MixEngine) -> usize {
+    let disabled = std::env::var(transit_mix::RENDER_NO_PRIORITY_ENV).is_ok_and(|v| v.trim() == "1");
+    if !disabled {
+        let start = Instant::now();
+        loop {
+            let seen = engine.render_worker_promotions();
+            if seen.iter().all(Option::is_some) {
+                break;
+            }
+            assert!(start.elapsed() < Duration::from_secs(5), "the render workers never promoted themselves: {seen:?}");
+            std::thread::sleep(Duration::from_millis(1));
         }
     }
-    last
+    promotion_calls()
 }
 
 fn render_on_audio_thread(session: Session, workers: bool) -> (usize, usize) {
@@ -64,7 +69,7 @@ fn render_on_audio_thread(session: Session, workers: bool) -> (usize, usize) {
         // The render workers promote themselves once, at start, off the callback.
         engine.start_render_workers(16);
     }
-    let before = settle();
+    let before = settle(&engine);
     let (after, engine) = std::thread::spawn(move || {
         mark_audio_thread();
         let mut out = vec![vec![0.0f32; FRAMES]; 2];
