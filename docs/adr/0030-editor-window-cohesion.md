@@ -47,6 +47,10 @@ Grouping is done by hand, with no ownership link.
 
 The Win32 calls are all made by the thread that owns the window: `EnumThreadWindows` with the calling thread's id, `ShowWindow`, `SetWindowPos` (`HWND_TOP` with `SWP_NOACTIVATE`), `SetWindowLongPtrW` for the extended style, `IsIconic` and `IsWindowVisible`. None is made on another thread's window, so none can wait for a hung one; the UI's side is atomics and a channel send.
 
+## Implementation (Linux, 2026-10-30, #147 slice 1)
+
+`crates/rt/src/editor_window/x11.rs` applies the same requests with X11's means, on the host thread's own connection: park unmaps the shown editors, unpark maps them again with `_NET_WM_USER_TIME` 0 (no focus), front restacks them (`StackMode::Above`), and following drops the taskbar and pager entries (`_NET_WM_STATE_SKIP_TASKBAR`, `_SKIP_PAGER`: a property before the first map, an EWMH request after). Point 9's `WM_TRANSIENT_FOR` is not set yet (the host thread does not know the main window's id), so on some window managers activating transit does not lift the editors above it (K94). Tests: `crates/rt/tests/editor_x11.rs` (park, unpark, front, the taskbar state) and `crates/plugin-host/tests/editor_windows.rs`, which runs on Linux under an X server.
+
 ## Consequences
 
 - For the user: editors follow the main window on Windows (and on Linux after #147): one taskbar button, Alt-Tab returns to the whole set, minimize and restore are shared, selecting a plug-in shows its editor. Plug-in-heavy sessions stop cluttering the taskbar.
