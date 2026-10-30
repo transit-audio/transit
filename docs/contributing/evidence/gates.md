@@ -130,8 +130,10 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   worker it waits on (`hold` plus a read of `holding`, `entered` or `held_tracks()`), zero deadline or
   explicit instants; (3) a `while ..render_workers_settled()` wait for some strip to be away in a test that
   injects `stall_ns` and asserts `Queued`, `StaleBinding`, `midi_dropped` or `held_tracks` without reading
-  `holding`; (4) a quiet-period wait, a loop that exits on `v.elapsed()` under 5 s for an `Instant` it resets
-  when a value moves, in any test fn or helper; (5) a coverage assertion (`assert_time_covered`,
+  `holding`; (4) a quiet-period wait, a loop that exits on `v.elapsed()` for an `Instant` it resets when a
+  value moves, in any test fn or helper (a `while` on it always; an `if` that breaks unless it is a
+  no-progress guard of 5 s or more followed by an assertion its exit fails, E62; an `if` that panics or
+  asserts is a failing guard); (5) a coverage assertion (`assert_time_covered`,
   `hole_samples`, `stuck_notes`) after the last stall or hold release with no far deadline
   (`from_secs(N)`, N at least 10, inline or a same-file name) or serial switch between them. A deliberate case
   carries `// timing: <tag> <reason>` on the fn header or in the attribute and comment lines directly above
@@ -140,7 +142,8 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   explicit short deadline with assertions that hold for any schedule), `serial` (1, 5), `host-timeout` (1:
   the test's subject is the host's own timeout) and `any-strip` (3). Refusal 4 has no marker: the exit names
   the state. The scan cannot see helpers in another file or a track count passed through one; a runtime
-  guard is the follow-up (#226).
+  guard is the follow-up (#226). The scan is keyword-based: review still checks order and targets (its known
+  blind spots are listed in the audit doc). This rule closes #220.
 - No wall-clock latency bound under about 100 ms in a unit test. Assert a deterministic signal
   (a counter, a state, an ordering) or a stall bound with its rationale in a comment; a shared CI
   runner will exceed a tight bound sooner or later (E49, `../../escapes/E49-echo-latency-test-wall-clock-bound.md`).
