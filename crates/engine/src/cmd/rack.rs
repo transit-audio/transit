@@ -72,6 +72,19 @@ pub(crate) fn join(s: &mut Session, folder: TrackId, tracks: &[TrackId]) {
     }
 }
 
+/// `track` leaves the folder it is in: when that folder is a rack, the track is no longer a member
+/// (its zones and the macro mappings to it go too; undo brings them back). Called by every
+/// command that takes a track out of a folder.
+pub(crate) fn leave(s: &mut Session, track: TrackId) {
+    let Some(folder) = s.track(track).and_then(|t| t.folder) else { return };
+    if let Some(rack) = s.track_mut(folder).and_then(|f| f.rack.as_mut()) {
+        rack.members.retain(|m| m.track != track);
+        for m in &mut rack.macros {
+            m.mappings.retain(|x| x.track != track);
+        }
+    }
+}
+
 fn rack_param(e: &Engine, id: &str, p: &Value) -> Result<TrackId> {
     let t = track_param(e, id, p, "track")?.ok_or_else(|| bad(id, "`track` (the rack) required"))?;
     if !e.session().track(t).is_some_and(Track::is_rack) {

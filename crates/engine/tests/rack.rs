@@ -227,3 +227,24 @@ fn a_rack_made_from_grouped_tracks_sums_them_on_its_own_bus() {
     s.track_mut(rack).unwrap().mixer.mute = true;
     assert_eq!(loud(&s), 0.0, "everything the rack plays passes its own fader");
 }
+
+/// Review finding 7: every way out of a rack's folder drops the member and its macro mappings.
+#[test]
+fn every_move_out_of_a_rack_drops_the_member() {
+    let (mut e, rack, [a, b]) = racked();
+    e.execute("mix.insert", &json!({"track": a.0, "slot": 0, "plugin": "gain"})).unwrap();
+    let p = transit_dsp::plugin_info("gain").unwrap().params.first().unwrap().id;
+    e.execute("rack.macro_map", &json!({"track": rack.0, "macro": 1, "member": a.0, "slot": "a", "param": p})).unwrap();
+    // Into a new folder.
+    e.execute("track.move_to_new_folder", &json!({"tracks": [a.0]})).unwrap();
+    let r = rack_of(&e, rack);
+    assert!(r.member(a).is_none() && r.macros[0].mappings.is_empty());
+    // Into an existing folder.
+    let g = e.execute("track.new", &json!({"kind": "folder"})).unwrap();
+    let g = g["tracks"][0].as_u64().unwrap();
+    e.execute("track.move_to_folder", &json!({"tracks": [b.0], "folder": g})).unwrap();
+    assert!(rack_of(&e, rack).members.is_empty());
+    // And back in: members again, with full zones.
+    e.execute("track.move_to_folder", &json!({"tracks": [a.0, b.0], "folder": rack.0})).unwrap();
+    assert_eq!(rack_of(&e, rack).members.len(), 2);
+}

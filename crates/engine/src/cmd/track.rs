@@ -436,6 +436,9 @@ pub(super) fn move_to_folder(e: &mut Engine, p: &Value) -> Result<Value> {
         f.mixer.input = Route::Bus(bus);
     }
     for t in &tracks {
+        if s.track(*t).is_some_and(|x| x.folder != Some(fid)) {
+            super::rack::leave(s, *t);
+        }
         if let Some(tr) = s.track_mut(*t) {
             tr.folder = Some(fid);
             if tr.mixer.output == Route::Main {
@@ -508,6 +511,9 @@ pub(super) fn move_into_folder(e: &mut Engine, p: &Value) -> Result<Value> {
     let bus = folder_bus(session, folder);
     for track in &tracks {
         let old_bus = session.track(*track).and_then(|track| track.folder).and_then(|parent| folder_bus(session, parent));
+        if session.track(*track).is_some_and(|x| x.folder != Some(folder)) {
+            super::rack::leave(session, *track);
+        }
         if let Some(moved) = session.track_mut(*track) {
             moved.folder = Some(folder);
             if let Some(bus) = &bus
@@ -534,9 +540,7 @@ pub(super) fn remove_from_folder(e: &mut Engine, p: &Value) -> Result<Value> {
         let parent = session.track(folder).and_then(|folder| folder.folder);
         let parent_bus = parent.and_then(|parent| folder_bus(session, parent));
         // A track that leaves a rack is no longer a member (ADR 0034).
-        if let Some(rack) = session.track_mut(folder).and_then(|f| f.rack.as_mut()) {
-            rack.members.retain(|m| m.track != *track);
-        }
+        super::rack::leave(session, *track);
         if let Some(moved) = session.track_mut(*track) {
             moved.folder = parent;
             if bus.as_ref() == Some(&moved.mixer.output) {
