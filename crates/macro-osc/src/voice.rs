@@ -21,7 +21,7 @@ use super::engine::swarm_engine::SwarmEngine;
 use super::engine::virtual_analog_engine::VirtualAnalogEngine;
 use super::engine::waveshaping_engine::WaveshapingEngine;
 use super::engine::wavetable_engine::WavetableEngine;
-use super::engine::{Engine, EngineParameters, TriggerState, note_to_frequency};
+use super::engine::{Engine, EngineParameters, MAX_BLOCK_SIZE, TriggerState, note_to_frequency};
 use super::engine2::chiptune_engine::{self, ChiptuneEngine};
 use super::engine2::phase_distortion_engine::PhaseDistortionEngine;
 use super::engine2::six_op_engine::SixOpEngine;
@@ -41,6 +41,15 @@ use crate::utils::units::semitones_to_ratio;
 
 const MAX_TRIGGER_DELAY: usize = 8;
 pub const NUM_ENGINES: usize = 24;
+
+/// One output frame, as the firmware's DAC receives it (`Voice::Frame`).
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Frame {
+    /// Main output.
+    pub out: i16,
+    /// Auxiliary output.
+    pub aux: i16,
+}
 
 /// Patch parameters.
 #[derive(Debug, Clone)]
@@ -251,13 +260,17 @@ pub struct Voice<'a> {
     out_post_processor: ChannelPostProcessor,
     aux_post_processor: ChannelPostProcessor,
 
+    out_buffer: [f32; MAX_BLOCK_SIZE],
+    aux_buffer: [f32; MAX_BLOCK_SIZE],
+
     sample_rate_hz: f32,
     inv_sr: f32,
     a0_normalized: f32,
 }
 
 impl Voice<'_> {
-    pub fn new(block_size: usize, sample_rate_hz: f32) -> Self {
+    pub fn new(sample_rate_hz: f32) -> Self {
+        let block_size = MAX_BLOCK_SIZE;
         let inv_sr = 1.0 / sample_rate_hz;
         // The firmware computes pitch against its corrected sample rate (`a0` in `dsp/dsp.h`).
         let a0_normalized = crate::A0 * (crate::REF_SAMPLE_RATE / sample_rate_hz);
@@ -307,6 +320,9 @@ impl Voice<'_> {
             out_post_processor: ChannelPostProcessor::new(),
             aux_post_processor: ChannelPostProcessor::new(),
 
+            out_buffer: [0.0; MAX_BLOCK_SIZE],
+            aux_buffer: [0.0; MAX_BLOCK_SIZE],
+
             sample_rate_hz,
             inv_sr,
             a0_normalized,
@@ -338,7 +354,12 @@ impl Voice<'_> {
     }
 
     #[inline]
-    pub fn render(&mut self, patch: &Patch, modulations: &Modulations, out: &mut [f32], aux: &mut [f32]) {
+    /// Renders `frames.len()` frames, 1 to [`MAX_BLOCK_SIZE`] (the firmware renders 12 per call),
+    /// as the firmware's `Voice::Render`: int16 out and aux, inverted as the module's DAC expects.
+    pub fn render(&mut self, patch: &Patch, modulations: &Modulations, frames: &mut [Frame]) {
+        let size = frames.len();
+        assert!((1..=MAX_BLOCK_SIZE).contains(&size), "block of {size} frames, expected 1 to {MAX_BLOCK_SIZE}");
+        let (out, aux) = (&mut self.out_buffer[..size], &mut self.aux_buffer[..size]);
         // Trigger, LPG, internal envelope.
 
         // Delay trigger by 1ms to deal with sequencers or MIDI interfaces whose
@@ -530,6 +551,10 @@ impl Voice<'_> {
             self.lpg_envelope.hf_bleed(),
             aux,
         );
+
+        for (frame, (o, a)) in frames.iter_mut().zip(out.iter().zip(aux.iter())) {
+            *frame = Frame { out: to_i16(*o), aux: to_i16(*a) };
+        }
     }
 
     pub fn active_engine(&self) -> usize {
@@ -557,6 +582,9 @@ impl ChannelPostProcessor {
         self.limiter.init();
     }
 
+    /// The firmware's `ChannelPostProcessor::Process` up to the int16 conversion: the limiter
+    /// (negative gain), then the low-pass gate or the plain gain, scaled to int16 full scale and
+    /// inverted (`* -32767`). [`to_i16`] finishes the conversion.
     #[inline]
     pub fn process(
         &mut self,
@@ -571,44 +599,27 @@ impl ChannelPostProcessor {
             self.limiter.process(-gain, in_out);
         }
 
-        let post_gain = if gain < 0.0 { 1.0 } else { gain };
+        let post_gain = (if gain < 0.0 { 1.0 } else { gain }) * -32767.0;
 
         if !bypass_lpg {
             self.lpg.process_replacing(post_gain * low_pass_gate_gain, low_pass_gate_frequency, low_pass_gate_hf_bleed, in_out);
         } else {
-            for in_out_sample in in_out.iter_mut() {
-                *in_out_sample *= post_gain;
-                // *in_out_sample = soft_limit(*in_out_sample);
+            for sample in in_out.iter_mut() {
+                *sample *= post_gain;
             }
         }
     }
+}
 
-    #[allow(clippy::too_many_arguments)]
-    #[inline]
-    pub fn process_to_i16(
-        &mut self,
-        gain: f32,
-        bypass_lpg: bool,
-        low_pass_gate_gain: f32,
-        low_pass_gate_frequency: f32,
-        low_pass_gate_hf_bleed: f32,
-        in_: &mut [f32],
-        out: &mut [i16],
-    ) {
-        if gain < 0.0 {
-            self.limiter.process(-gain, in_);
-        }
-
-        let post_gain = (if gain < 0.0 { 1.0 } else { gain }) * -32767.0;
-
-        if !bypass_lpg {
-            self.lpg.process_to_i16(post_gain * low_pass_gate_gain, low_pass_gate_frequency, low_pass_gate_hf_bleed, in_, out, 1);
-        } else {
-            for (in_sample, out_sample) in in_.iter().zip(out.iter_mut()) {
-                *out_sample = clip_16(1 + (*in_sample * post_gain) as i32) as i16;
-            }
-        }
-    }
+/// The firmware's int16 conversion of a post-processed sample: `Clip16(1 + int32_t(x))`, the cast
+/// truncating toward zero.
+#[inline]
+#[must_use]
+pub fn to_i16(x: f32) -> i16 {
+    // `clip_16` bounds the value to the i16 range, so the narrowing cannot truncate.
+    #[allow(clippy::cast_possible_truncation)]
+    let sample = clip_16(1_i32.saturating_add(x as i32)) as i16;
+    sample
 }
 
 #[allow(clippy::too_many_arguments)]
