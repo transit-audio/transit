@@ -15,6 +15,13 @@ pub const RETIRED_SYNTH_ID: &str = "subtractive_synth";
 /// The plug-in id of the default instrument (the Macro Oscillator; `transit-dsp` registers it).
 pub const DEFAULT_INSTRUMENT: &str = "macro_oscillator";
 
+/// The `level` (dB) a substituted Macro Oscillator gets. Its default (-6 dB) plays about 13.5 dB louder
+/// than the old synth did at its defaults: the instrument plan-parity golden peaked at 0.0569 with the
+/// old synth and 0.2680 with the Macro Oscillator (20 log10(0.0569 / 0.2680) = -13.46 dB), and the
+/// held-notes golden at 0.271 against 1.346 (-13.9 dB). -6 - 13.5 = -19.5 dB brings a substituted track
+/// to within about 2 dB of the old loudness on that golden.
+pub const SUBSTITUTE_LEVEL_DB: f32 = -19.5;
+
 /// How the one-line status of a load that substituted begins and ends: `N track(s) used ...`.
 pub const RETIRED_SYNTH_NOTE: &str = "used the retired Subtractive Synth and now carry the Macro Oscillator";
 
@@ -37,7 +44,11 @@ pub fn retire_subtractive_synth(s: &mut Session) -> usize {
     for &id in &swapped {
         let (mut lanes, mut name) = (0, String::new());
         if let Some(t) = s.track_mut(id) {
-            t.instrument = Some(Insert::new(DEFAULT_INSTRUMENT));
+            let (bypass, active) = t.instrument.as_ref().map_or((false, true), |i| (i.bypass, i.active));
+            let mut new = Insert::new(DEFAULT_INSTRUMENT);
+            new.params.insert("level".into(), SUBSTITUTE_LEVEL_DB);
+            (new.bypass, new.active) = (bypass, active);
+            t.instrument = Some(new);
             let before = t.automation.len();
             t.automation.retain(|l| !matches!(&l.param, AutoParam::Plugin { slot, .. } if *slot == AutoParam::INSTRUMENT_SLOT));
             lanes = before - t.automation.len();
@@ -105,7 +116,9 @@ mod tests {
         let other = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Pad"));
         let mut keep = Insert::new(DEFAULT_INSTRUMENT);
         keep.params.insert("harmonics".into(), 12.0);
-        s.track_mut(old).unwrap().instrument = Some(old_synth());
+        let mut worn = old_synth();
+        (worn.bypass, worn.active) = (true, false);
+        s.track_mut(old).unwrap().instrument = Some(worn);
         s.track_mut(other).unwrap().instrument = Some(keep.clone());
         for t in [old, other] {
             s.track_mut(t).unwrap().lane_mut(&plugin_lane(AutoParam::INSTRUMENT_SLOT, "cutoff")).set_point(0, 1.0);
@@ -127,7 +140,9 @@ mod tests {
 
         let now = s.track(old).unwrap().instrument.as_ref().unwrap();
         assert_eq!(now.plugin, "macro_oscillator");
-        assert!(now.params.is_empty(), "defaults: the old parameters are dropped");
+        assert_eq!(now.params.len(), 1, "defaults: the old parameters are dropped");
+        assert_eq!(now.params.get("level"), Some(&SUBSTITUTE_LEVEL_DB), "only the level that matches the old loudness is set");
+        assert!(now.bypass && !now.active, "the old slot's bypass and active flags carry over");
         assert_eq!(now.preset, Insert::new("x").preset);
         assert_eq!(s.track(other).unwrap().instrument.as_ref().unwrap().params, keep.params, "other tracks are untouched");
         assert!(s.track(old).unwrap().lane(&plugin_lane(AutoParam::INSTRUMENT_SLOT, "cutoff")).is_none());

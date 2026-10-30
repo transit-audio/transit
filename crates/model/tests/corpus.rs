@@ -178,3 +178,50 @@ fn a_release_session_with_the_old_synth_opens_with_a_macro_oscillator_and_one_re
         assert_eq!(loaded, again, "{name}");
     }
 }
+
+#[test]
+fn the_substitution_drops_only_what_addressed_the_old_instrument() {
+    use transit_model::{AutoParam, Control, Strip};
+    let old: Vec<_> = corpus().into_iter().filter(|(_, t)| carries_retired_synth(t)).collect();
+    assert!(!old.is_empty());
+    let (mut lanes_seen, mut maps_seen) = (0, 0);
+    for (name, text) in old {
+        let real = Session::from_json(&text).unwrap();
+        // The same file with the id swapped in the text: nothing is substituted or dropped.
+        let swapped = Session::from_json(&text.replace("\"subtractive_synth\"", "\"macro_oscillator\"")).unwrap();
+        assert!(swapped.load_notes.is_empty(), "{name}");
+        let retired: Vec<_> = text_tracks_with_old_synth(&text);
+        let mut expected = swapped.clone();
+        for id in &retired {
+            let t = expected.track_mut(*id).unwrap_or_else(|| panic!("{name}: track {id:?}"));
+            t.instrument = real.track(*id).unwrap().instrument.clone();
+            let before = t.automation.len();
+            t.automation.retain(|l| !matches!(&l.param, AutoParam::Plugin { slot, .. } if *slot == AutoParam::INSTRUMENT_SLOT));
+            lanes_seen += before - t.automation.len();
+            maps_seen += expected.midi_mappings.remove_where(|m| {
+                matches!((&m.strip, &m.control), (Strip::Track(x), Control::Plugin { slot, .. }) if x == id && *slot == AutoParam::INSTRUMENT_SLOT)
+            });
+        }
+        let mut real = real;
+        real.load_notes.clear();
+        expected.load_notes.clear();
+        assert_eq!(real.to_json().unwrap(), expected.to_json().unwrap(), "{name}: the substitution changed more than the old instrument's slot");
+        for id in &retired {
+            let ins = real.track(*id).unwrap().instrument.as_ref().unwrap();
+            assert_eq!(ins.plugin, "macro_oscillator", "{name}");
+        }
+    }
+    println!("dropped across the corpus: {lanes_seen} lane(s), {maps_seen} mapping(s)");
+}
+
+/// The tracks whose instrument slot names the old synth, read from the file's JSON.
+fn text_tracks_with_old_synth(text: &str) -> Vec<transit_model::TrackId> {
+    let v: Value = serde_json::from_str(text).unwrap();
+    v["tracks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|t| t["instrument"]["plugin"] == "subtractive_synth")
+        .map(|t| transit_model::TrackId(t["id"].as_u64().unwrap()))
+        .collect()
+}
