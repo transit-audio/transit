@@ -4355,7 +4355,7 @@ dependencies = [
 
 [[package]]
 name = "transit-resonator"
-version = "0.4.1"
+version = "0.5.0"
 dependencies = [
  "transit-macro-osc-oracle",
 ]
