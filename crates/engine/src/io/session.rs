@@ -271,6 +271,9 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
         as_saved = placed.then_some(before);
     }
     log::info!("{}", session_open_line(path, &s, missing.len(), started.elapsed()));
+    for line in unknown_param_lines(&s) {
+        log::info!("{line}");
+    }
     e.replace_session(s);
     if let Some(before) = as_saved {
         e.saved = Arc::new(before);
@@ -285,6 +288,27 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
         e.message(format!("missing media: {m}"));
     }
     Ok(missing)
+}
+
+/// One INFO line per stored parameter a built-in instrument or effect no longer has (an id renamed
+/// or removed, such as the Macro Oscillator's `hardware_tuning`, #195): the session still opens,
+/// the value stays in the document (a newer build may know it) and the device ignores it, as
+/// `Plugin::set_param` refuses an unknown id. Hosted plug-ins report their own parameters and are
+/// not checked.
+pub fn unknown_param_lines(s: &Session) -> Vec<String> {
+    let mut out = Vec::new();
+    for t in &s.tracks {
+        for ins in t.instrument.iter().chain(t.mixer.inserts.iter().flatten()) {
+            if transit_mix::is_third_party(&ins.plugin) {
+                continue;
+            }
+            let Some(info) = transit_dsp::plugin_info(&ins.plugin) else { continue };
+            for id in ins.params.keys().filter(|id| info.param(id).is_none()) {
+                out.push(format!("session: track \"{}\": {} ignores the unknown parameter `{id}`", t.name, info.name));
+            }
+        }
+    }
+    out
 }
 
 /// The INFO line an opened session writes (issue #84): `session opened: path="/x/song.transit"
@@ -436,6 +460,9 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
     }
     let stem = Path::new(name).file_stem().and_then(|x| x.to_str()).filter(|x| !x.is_empty()).unwrap_or("Untitled").to_string();
     let notes = std::mem::take(&mut s.load_notes);
+    for line in unknown_param_lines(&s) {
+        log::info!("{line}");
+    }
     e.replace_session(s);
     for n in notes {
         e.message(n);

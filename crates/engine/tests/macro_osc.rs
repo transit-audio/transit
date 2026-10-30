@@ -52,7 +52,7 @@ fn choosing_the_instrument_stores_every_parameter_at_its_default() {
 #[test]
 fn parameters_save_and_load_with_the_session() {
     let (mut e, t) = engine();
-    for (param, value) in [("model", 13.0), ("harmonics", 30.0), ("timbre", 80.0), ("decay", 70.0), ("hardware_tuning", 1.0), ("aux_mix", 40.0)] {
+    for (param, value) in [("model", 13.0), ("harmonics", 30.0), ("timbre", 80.0), ("decay", 70.0), ("tune", -5.0), ("aux_mix", 40.0)] {
         e.execute("mix.instrument_param", &json!({"track": t.0, "param": param, "value": value})).unwrap();
     }
     let before = render(e.session());
@@ -62,7 +62,7 @@ fn parameters_save_and_load_with_the_session() {
     assert_eq!(ins.plugin, ID);
     assert_eq!(ins.params, params(&e, t));
     assert_eq!(ins.params.get("model"), Some(&13.0));
-    assert_eq!(ins.params.get("hardware_tuning"), Some(&1.0));
+    assert_eq!(ins.params.get("tune"), Some(&-5.0));
     assert!(bits(&render(&loaded)) == bits(&before), "the loaded session renders the same bits");
     let mut fresh = engine().0;
     fresh.execute("mix.instrument_param", &json!({"track": t.0, "param": "model", "value": 13.0})).unwrap();
@@ -90,4 +90,30 @@ fn automation_lanes_address_the_parameters_by_id() {
     let text = e.session().to_json().unwrap();
     let loaded = Session::from_json(&text).unwrap();
     assert!(bits(&render(&loaded)) == bits(&automated), "the lane saves and loads with the session");
+}
+
+/// A session saved while the branch had a `hardware_tuning` parameter (removed: the port always
+/// plays concert pitch) opens without an error; the open logs the ignored id and the render is the
+/// same as without it.
+#[test]
+fn a_session_with_the_removed_tuning_id_opens_and_logs_it() {
+    let (mut e, t) = engine();
+    let clean = render(e.session());
+    let ins = e.session_mut().track_mut(t).unwrap().instrument.as_mut().unwrap();
+    ins.params.insert("hardware_tuning".into(), 1.0);
+    let dir = std::env::temp_dir().join(format!("transit-macro-osc-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("old.transit");
+    std::fs::write(&path, e.session().to_json().unwrap()).unwrap();
+    let mut opened = Engine::default();
+    let r = opened.execute("session.open", &json!({"path": path.to_string_lossy()}));
+    let _ = std::fs::remove_dir_all(&dir);
+    r.expect("the session opens");
+    assert_eq!(params(&opened, t).get("hardware_tuning"), Some(&1.0), "the value stays in the document");
+    let lines = transit_engine::io::unknown_param_lines(opened.session());
+    assert_eq!(lines, ["session: track \"Macro\": Macro Oscillator ignores the unknown parameter `hardware_tuning`"]);
+    assert!(bits(&render(opened.session())) == bits(&clean), "the device ignores it");
+    assert!(transit_engine::io::unknown_param_lines(e.session()).len() == 1);
+    let (fresh, _) = engine();
+    assert!(transit_engine::io::unknown_param_lines(fresh.session()).is_empty());
 }

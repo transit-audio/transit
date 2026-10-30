@@ -1,7 +1,7 @@
 //! Allocation probe for the Macro Oscillator on a strip (#195 slice 3, ADR 0012 G5): a realtime
 //! engine playing a MIDI clip into the instrument (overlapping notes for legato, the mod wheel,
 //! pitch bend, the sustain pedal), live notes and controllers, a parameter edit through a new plan
-//! (model, tuning, levels), all notes off and a reset allocate and free nothing on the audio
+//! (model, tune, levels), all notes off and a reset allocate and free nothing on the audio
 //! thread, in host blocks that are not multiples of the voice's 12-frame block.
 //!
 //! The binary installs `transit_rt::testing::CountingAlloc` and counts the test thread only.
@@ -69,7 +69,7 @@ fn the_macro_oscillator_on_a_strip_allocates_nothing_on_the_audio_thread() {
     comp.reclaim(env);
     let binding = comp.active_bindings().into_iter().find(|b| b.1 == INSTRUMENT_SLOT).unwrap();
     // The edited plan is compiled on the control thread before the measured region.
-    let (edited, _) = session(&[("model", 2.0), ("hardware_tuning", 1.0), ("level", 0.0), ("aux_mix", 50.0), ("mod_wheel", 2.0)]);
+    let (edited, _) = session(&[("model", 2.0), ("tune", 7.0), ("level", 0.0), ("aux_mix", 50.0), ("mod_wheel", 2.0)]);
     let next = generation.checked_next().unwrap();
     let mut edit = comp.compile(Arc::new(edited), generation, next, &mut make).unwrap();
     generation = next;

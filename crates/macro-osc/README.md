@@ -124,8 +124,8 @@ from it), the six-operator voices' own reference and the speech formants, so A4 
 rate, as on the module, whose codec runs at the corrected rate. `tests/voice_tuning.rs` checks
 equal temperament at every rate within 0.05 cent on the FM engine, the ratio between the two
 tunings within 0.01 cent, the six-op and LPC speech paths within 0.25 cent, and that the firmware
-tuning round-trips bit for bit. The Macro Oscillator instrument plays concert pitch unless its
-Hardware Tuning switch is on (ADR 0033, implementation note).
+tuning round-trips bit for bit. The Macro Oscillator instrument always plays concert pitch, as the
+module does; the firmware's tuning is kept for the null tests (ADR 0033, implementation note).
 
 ## Flush-to-zero
 

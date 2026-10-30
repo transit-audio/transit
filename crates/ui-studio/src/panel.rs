@@ -118,7 +118,7 @@ static MACRO: [Row; 2] = [
         sec("Gate", 2, &[Knob("decay", "Decay"), Knob("lpg_color", "LPG Color")]),
     ],
     &[
-        sec("Pitch", 3, &[Knob("tune", "Tune"), Knob("bend_range", "Bend"), Toggle("hardware_tuning", "Hardware Tuning")]),
+        sec("Pitch", 2, &[Knob("tune", "Tune"), Knob("bend_range", "Bend")]),
         sec("Control", 1, &[Choice("mod_wheel", "Mod Wheel")]),
         sec("Output", 2, &[Knob("aux_mix", "Aux Mix"), Knob("level", "Level")]),
     ],
@@ -142,7 +142,6 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
         "tune" => Id::MacroOscTune,
         "bend_range" => Id::MacroOscBendRange,
         "mod_wheel" => Id::MacroOscModWheel,
-        "hardware_tuning" => Id::MacroOscHardwareTuning,
         _ => return None,
     })
 }

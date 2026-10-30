@@ -118,9 +118,9 @@ analog stages. Their license notices are in **Help > About transit**.
   Off).
 - **Aux Mix** crossfades to the model's auxiliary output, a variation of the sound. **Level** is
   the output level; full scale is 0 dB, and the -6 dB default leaves headroom on the track.
-- **Hardware Tuning**: off (the default), the instrument plays at concert pitch, A4 = 440 Hz. On,
-  it plays the original firmware's pitch arithmetic unchanged, which runs 4.6 cents sharp at a true
-  48 kHz (the module's own clock runs slightly slow, which puts it in tune).
+- **Tuning**: the port plays at concert pitch, A4 = 440 Hz. The original firmware's arithmetic is
+  kept bit-exact in transit's code for its tests; the module itself plays in tune because its audio
+  clock runs at the rate that arithmetic assumes.
 - The voice runs at 44.1, 48, 88.2 or 96 kHz. At other project rates it runs at the nearest of
   these, still in tune, with its envelopes slightly faster or slower. Changing the model while a note
   sounds can click, as on the original.

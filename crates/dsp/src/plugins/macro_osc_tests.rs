@@ -105,19 +105,26 @@ fn velocity_sets_the_level() {
     assert!(loud > 1.5 * soft && soft > 0.0, "velocity 20: {soft}, 127: {loud}");
 }
 
+/// Concert pitch at every supported rate, after a rate change and after a reset (the voice keeps
+/// its tuning across both); there is no switch back to the firmware's sharp arithmetic.
 #[test]
-fn concert_pitch_by_default_and_the_hardware_toggle_restores_the_firmware_pitch() {
-    let mut m = inst();
-    sine_patch(&mut m);
-    assert_eq!(m.param("hardware_tuning"), Some(0.0));
-    let concert = pitch(&mut m, 69);
-    m.set_param("hardware_tuning", 1.0);
-    let hardware = pitch(&mut m, 69);
-    let factor = f64::from(transit_macro_osc::REF_SAMPLE_RATE) / f64::from(transit_macro_osc::CORRECTED_SAMPLE_RATE);
-    println!("concert {concert:.4} Hz, hardware {hardware:.4} Hz");
-    assert!(cents(concert, 440.0).abs() < 0.05, "A4 at concert pitch: {concert} Hz");
-    let off = cents(hardware / concert, factor);
-    assert!(off.abs() < 0.01, "the toggle shifts by 48000 / 47872.34: {hardware} / {concert} ({off:+.5} cents off)");
+fn the_instrument_plays_concert_pitch() {
+    for rate in [44_100.0, 48_000.0, 96_000.0, 48_000.0] {
+        let mut m = inst();
+        m.prepare(rate, 512, 2);
+        sine_patch(&mut m);
+        m.note_on(0, 69, 100);
+        let x = render(&mut m, rate as usize, 256);
+        let a4 = hz(&x[rate as usize / 4..], rate);
+        println!("{rate} Hz: A4 {a4:.4} Hz");
+        assert!(cents(a4, 440.0).abs() < 0.05, "A4 at {rate} Hz: {a4} Hz");
+        m.reset();
+        m.note_on(0, 69, 100);
+        let x = render(&mut m, rate as usize, 256);
+        assert!(cents(hz(&x[rate as usize / 4..], rate), 440.0).abs() < 0.05, "after a reset at {rate} Hz");
+    }
+    assert!(MACRO_OSC_INFO.param("hardware_tuning").is_none());
+    assert!(!inst().set_param("hardware_tuning", 1.0), "the removed id is unknown");
 }
 
 #[test]
@@ -293,10 +300,7 @@ fn every_model_sounds_and_aux_mix_selects_the_aux_output() {
 fn parameter_ids_are_stable_and_round_trip() {
     let ids: Vec<&str> = MACRO_OSC_INFO.params.iter().map(|p| p.id).collect();
     // Sessions and automation lanes store these ids: never rename one.
-    assert_eq!(
-        ids,
-        ["model", "harmonics", "timbre", "morph", "decay", "lpg_color", "aux_mix", "level", "tune", "bend_range", "mod_wheel", "hardware_tuning"]
-    );
+    assert_eq!(ids, ["model", "harmonics", "timbre", "morph", "decay", "lpg_color", "aux_mix", "level", "tune", "bend_range", "mod_wheel"]);
     assert_eq!(MACRO_OSC_INFO.id, "macro_oscillator");
     assert_eq!(MACRO_OSC_INFO.name, "Macro Oscillator");
     let mut m = inst();

@@ -59,11 +59,6 @@ name = "Mod Wheel"
 text = "Where the mod wheel goes: it adds up to 100% to Timbre, Harmonics or Morph, or Off ignores it."
 
 [[entry]]
-id = "macro_osc.hardware_tuning"
-name = "Hardware Tuning"
-text = "Off (the default), A4 is 440 Hz. On, the instrument plays the original firmware's pitch arithmetic unchanged, which is 4.6 cents sharp at a true 48 kHz."
-
-[[entry]]
 id = "macro_osc.credits"
 name = "Credits"
 text = "The Macro Oscillator is a port of Émilie Gillet's open-source macro oscillator firmware (MIT license), by way of Oliver Rockstedt's Rust port (MIT). It ports the digital synthesis, not the hardware's analog stages; the notices are in Help > About transit."

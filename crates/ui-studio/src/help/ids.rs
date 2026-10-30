@@ -90,7 +90,6 @@ ids! {
     MacroOscTune => "macro_osc.tune",
     MacroOscBendRange => "macro_osc.bend_range",
     MacroOscModWheel => "macro_osc.mod_wheel",
-    MacroOscHardwareTuning => "macro_osc.hardware_tuning",
     MacroOscCredits => "macro_osc.credits",
     // help\midi-mappings.toml
     MidiMappingsWindow => "midi_mappings.window",

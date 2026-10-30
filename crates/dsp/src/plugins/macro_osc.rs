@@ -20,8 +20,9 @@
 //!   limiter and int16 clip keep each output within full scale, so at `level` 0 dB the
 //!   instrument stays within 0 dBFS (+0.0003 dB at the clip); the -6 dB default leaves 6 dB of
 //!   headroom on the strip.
-//! - Tuning: concert pitch by default (A4 = 440 Hz); `hardware_tuning` restores the firmware's
-//!   arithmetic, which at a true 48 kHz plays 4.6 cents sharp (`transit_macro_osc::Tuning`).
+//! - Tuning: concert pitch (A4 = 440 Hz, `transit_macro_osc::Tuning::Concert`), as the module plays:
+//!   its audio clock runs at the firmware's corrected rate. The firmware's arithmetic, 4.6 cents sharp
+//!   at a true 48 kHz, stays bit-exact in the crate for the null tests only.
 //! - Rates: the voice runs at 44.1, 48, 88.2 or 96 kHz. At any other host rate it runs at the
 //!   nearest of those and its pitch is corrected to the host rate; its envelopes and engine
 //!   timbres then run faster or slower by the rate ratio.
@@ -29,7 +30,7 @@
 //! Parameters only: the voice's state is not saved, as for every built-in.
 
 use crate::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_RESET_CONTROLLERS, CC_SUSTAIN, Message, PluginEvent};
-use crate::params::{Params, choice, lin, param_plumbing, toggle};
+use crate::params::{Params, choice, lin, param_plumbing};
 use crate::plugins::synth::{MAX_EVENTS, RELEASE_RESERVE};
 use crate::util::{Smoother, frames_in, sane_channels, sane_sr, sort_events};
 use crate::{Category, ParamInfo, Plugin, PluginInfo, Unit, db_to_gain};
@@ -81,9 +82,8 @@ const LEVEL: usize = 7;
 const TUNE: usize = 8;
 const BEND_RANGE: usize = 9;
 const MOD_WHEEL: usize = 10;
-const HARDWARE_TUNING: usize = 11;
 
-static PARAMS: [ParamInfo; 12] = [
+static PARAMS: [ParamInfo; 11] = [
     choice("model", "Model", &MODELS, 8),
     lin("harmonics", "Harmonics", 0.0, 100.0, 50.0, Unit::Percent),
     lin("timbre", "Timbre", 0.0, 100.0, 50.0, Unit::Percent),
@@ -95,7 +95,6 @@ static PARAMS: [ParamInfo; 12] = [
     lin("tune", "Tune", -24.0, 24.0, 0.0, Unit::Semitones),
     lin("bend_range", "Bend Range", 0.0, 24.0, 2.0, Unit::Semitones),
     choice("mod_wheel", "Mod Wheel", &WHEEL_DESTINATIONS, 0),
-    toggle("hardware_tuning", "Hardware Tuning", false),
 ];
 
 pub static MACRO_OSC_INFO: PluginInfo = PluginInfo {
@@ -310,6 +309,7 @@ impl MacroOscillator {
             last_trigger: false,
             retrigger: false,
         };
+        s.voice.set_tuning(Tuning::Concert);
         s.update();
         s.level.snap();
         s
@@ -317,10 +317,6 @@ impl MacroOscillator {
 
     fn update(&mut self) {
         self.level.set(db_to_gain(self.p.v(LEVEL)));
-        let tuning = if self.p.on(HARDWARE_TUNING) { Tuning::Firmware } else { Tuning::Concert };
-        if self.voice.tuning() != tuning {
-            self.voice.set_tuning(tuning);
-        }
     }
 
     fn push(&mut self, offset: usize, kind: Kind) -> bool {
@@ -438,9 +434,8 @@ impl Plugin for MacroOscillator {
         let host = sane_sr(sample_rate);
         let rate = voice_rate(host);
         if rate != self.rate {
-            let tuning = self.voice.tuning();
             *self.voice = Voice::new(rate);
-            self.voice.set_tuning(tuning);
+            self.voice.set_tuning(Tuning::Concert);
             self.rate = rate;
         }
         self.rate_offset = if rate.hz().to_bits() == host.to_bits() { 0.0 } else { 12.0 * (rate.hz() / host).log2() };
@@ -453,9 +448,8 @@ impl Plugin for MacroOscillator {
     }
 
     fn reset(&mut self) {
-        let tuning = self.voice.tuning();
+        // The tuning survives `init`.
         self.voice.init();
-        self.voice.set_tuning(tuning);
         self.events.clear();
         self.frames = [Frame::default(); BLOCK];
         self.block = [0.0; BLOCK];

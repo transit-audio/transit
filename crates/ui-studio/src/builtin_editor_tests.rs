@@ -326,11 +326,11 @@ fn the_macro_oscillator_panel_credits_the_original_and_drives_its_controls() {
     assert_eq!(w.credit, crate::panel::MACRO_OSC_CREDIT);
     assert!(w.credit.contains("Émilie Gillet"));
     assert_eq!(t.row(tr, "model").value, "Virtual analog", "the default model, named by what it does");
-    assert_eq!(t.row(tr, "hardware_tuning").value, "Off", "concert pitch by default");
+    assert!(t.window(tr).rows.iter().all(|r| r.param != "hardware_tuning"), "no tuning switch: the port plays concert pitch");
     let before = t.undo_len();
-    t.click(mid(t.row(tr, "hardware_tuning").control), 1);
-    assert_eq!(t.param(tr, slot, "hardware_tuning"), Some(1.0));
-    assert_eq!(t.undo_len(), before + 1);
+    t.click(mid(t.row(tr, "mod_wheel").control), 1);
+    t.frames(2);
+    assert_eq!(t.undo_len(), before, "opening a menu writes nothing");
     let from = mid(t.row(tr, "timbre").control);
     t.send("ui.drag", json!({"x": from.0, "y": from.1, "to_x": from.0, "to_y": from.1 - 30.0}));
     assert!(t.param(tr, slot, "timbre").unwrap() > 50.0, "dragging Timbre up raises it");
