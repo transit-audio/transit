@@ -322,7 +322,7 @@ impl KeyBank {
                 continue;
             }
             // Block-start values only: processing sends the breakpoints inside the block.
-            apply_params(slot, ins, t, i, pos, 0);
+            apply_params(slot, ins, t, &st.touch, i, pos, 0);
             if pdc
                 && ins.key.is_some()
                 && let Some(e) = self.entries.iter_mut().find(|e| e.spec.id == t.id && usize::from(e.spec.slot) == i)

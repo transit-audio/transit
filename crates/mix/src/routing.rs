@@ -78,7 +78,8 @@ pub(crate) fn route_into(t: &Track, strip: &mut Strip, pos: Samples, frames: usi
     for h in &strip.hw {
         h.flush(sinks, frames);
     }
-    let Strip { buf, pre, tap, tap_pre, outbuf, muted, pdc_out, pdc_pos, edges, sink_routes, .. } = strip;
+    let Strip { buf, pre, tap, tap_pre, outbuf, muted, pdc_out, pdc_pos, edges, sink_routes, touch, .. } = strip;
+    let touch = *touch;
     let (o, at, muted) = (*pdc_out, *pdc_pos, *muted);
     // The delay of an edge into `r`, `None` when it is dropped (a loop's feedback, or nowhere).
     let delay_of = |busses: &BusTable, sinks: &[Sink], edge: usize, r: &Route| match r {
@@ -136,7 +137,7 @@ pub(crate) fn route_into(t: &Track, strip: &mut Strip, pos: Samples, frames: usi
         if snd.mute || muted {
             continue;
         }
-        let lvl = send_level(t, i, snd.level_db, pos);
+        let lvl = send_level(t, &touch, i, snd.level_db, pos);
         let gain = db_to_gain(lvl);
         if gain <= 0.0 {
             continue;
@@ -193,7 +194,7 @@ pub(crate) fn route_into(t: &Track, strip: &mut Strip, pos: Samples, frames: usi
     let mut start = 0;
     while start < frames {
         let (at, end) = pan_segment(t, pos, start, frames);
-        let spec = PanSpec { stereo: [pan_at(t, 0, at), pan_at(t, 1, at)], surround: t.mixer.surround.as_ref() };
+        let spec = PanSpec { stereo: [pan_at(t, &touch, 0, at, start), pan_at(t, &touch, 1, at, start)], surround: t.mixer.surround.as_ref() };
         let m = build_matrix(src_fmt, src.len(), dst_fmt, dst.len(), &spec, law);
         apply_matrix_span(src, start..end, dst, &m, 1.0);
         start = end;

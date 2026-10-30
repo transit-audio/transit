@@ -1,6 +1,6 @@
 //! Per-track mixer state: inserts, sends, routing, fader, pan, mute/solo.
 
-use crate::{AutomationMode, BusId, SourceId, TrackId};
+use crate::{AutoParam, AutomationMode, BusId, SourceId, TrackId};
 use std::collections::BTreeMap;
 
 pub const INSERT_SLOTS: usize = 10;
@@ -694,6 +694,13 @@ pub struct Mixer {
     /// Surround panner, used when the output is multichannel (None = the stereo pan to L/R).
     #[serde(default)]
     pub surround: Option<SurroundPan>,
+    /// Runtime state, like `record_arm` (ADR 0011): the automated parameters whose controls the
+    /// user holds now. In Touch the mix does not read their lanes while they are held, and
+    /// returns to the lanes over a short ramp on release (#188,
+    /// `docs/contributing/knowledge/automation-modes.md`). Never saved; the UI sets it every
+    /// frame through `Engine::set_touched`.
+    #[serde(skip)]
+    pub touched: Vec<AutoParam>,
 }
 
 impl Mixer {
@@ -720,6 +727,7 @@ impl Mixer {
             trim_db: 0.0,
             vca: None,
             surround: None,
+            touched: Vec::new(),
         }
     }
 

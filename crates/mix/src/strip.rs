@@ -99,7 +99,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                 // instance and the rendered audio matches the plugin's defaults — e.g. a saved
                 // `level = -12 dB` sounds the same as `level = -6 dB`.
                 if let Some(ins) = &t.instrument {
-                    apply_params(inst, ins, t, INSTRUMENT_SLOT, pos, timed_span(transport, frames));
+                    apply_params(inst, ins, t, &strip.touch, INSTRUMENT_SLOT, pos, timed_span(transport, frames));
                 }
                 inst.plugin.set_transport(transport);
                 if let Some(e) = inst.events.as_deref_mut() {
@@ -181,7 +181,7 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
         if !ins.active || ins.bypass || slot.failed {
             continue;
         }
-        apply_params(slot, ins, t, i, pos, timed_span(transport, frames));
+        apply_params(slot, ins, t, &strip.touch, i, pos, timed_span(transport, frames));
         // An insert with a key detects on it when the plan made one for the slot (else on its own input).
         let key = ins.key.and_then(|_| keys.get(t.id, i));
         // A key that arrives late holds the strip's signal back to meet it (`KeyBank::align`).
@@ -224,8 +224,10 @@ fn process_strip_fader(t: &Track, strip: &mut Strip, block: &StripRender<'_>) {
     // Endpoints are the first and last sample of this block. The next block starts on its own
     // first sample, so a breakpoint there does not ramp the block before it.
     let last = pos.saturating_add(frames.saturating_sub(1) as i64);
-    let mut v0 = volume_db_at(t, pos);
-    let mut v1 = volume_db_at(t, last);
+    let end = frames.saturating_sub(1);
+    let ramps = Some(&strip.touch);
+    let mut v0 = volume_db_at(t, ramps, pos, 0);
+    let mut v1 = volume_db_at(t, ramps, last, end);
     // Trim automation (an offset on top of the volume curve).
     if let Some(l) = t
         .automation
@@ -233,15 +235,16 @@ fn process_strip_fader(t: &Track, strip: &mut Strip, block: &StripRender<'_>) {
         .find(|l| matches!(&l.param, AutoParam::Plugin { slot: u8::MAX, param } if param == "trim"))
         .filter(|l| !l.points.is_empty())
     {
-        v0 += l.value_at(pos, 0.0);
-        v1 += l.value_at(last, 0.0);
+        v0 += touch::lane_value(t, ramps, &l.param, l, 0.0, pos, 0);
+        v1 += touch::lane_value(t, ramps, &l.param, l, 0.0, last, end);
     }
-    // VCA master: its fader offsets the member's, and its mute mutes the member.
+    // VCA master: its fader offsets the member's, and its mute mutes the member. The VCA's return
+    // ramp lives on its own strip, so a released VCA fader goes back to its lane without one here.
     if let Some(vid) = t.mixer.vca
         && let Some(vca) = s.tracks.iter().find(|x| x.id.0 == vid && x.kind == TrackKind::Vca)
     {
-        v0 += volume_db_at(vca, pos);
-        v1 += volume_db_at(vca, last);
+        v0 += volume_db_at(vca, None, pos, 0);
+        v1 += volume_db_at(vca, None, last, end);
         if vca.mixer.mute {
             strip.muted = true;
         }
@@ -278,7 +281,7 @@ pub(crate) fn process_master(
             && !ins.bypass
             && !slot.failed
         {
-            apply_params(slot, ins, t, i, pos, timed_span(transport, frames));
+            apply_params(slot, ins, t, &strip.touch, i, pos, timed_span(transport, frames));
             if run_insert(slot, &mut strip.buf, None, frames, transport, no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
                 strip.failures.record(i);
             } else if let Some(tap) = &slot.tap {
@@ -286,9 +289,10 @@ pub(crate) fn process_master(
             }
         }
     }
-    let v0 = volume_db_at(t, pos);
+    let v0 = volume_db_at(t, Some(&strip.touch), pos, 0);
     // Same endpoints as a track fader: the block's first and last sample, ramping over frames - 1.
-    let v1 = volume_db_at(t, pos.saturating_add(frames.saturating_sub(1) as i64));
+    let end = frames.saturating_sub(1);
+    let v1 = volume_db_at(t, Some(&strip.touch), pos.saturating_add(end as i64), end);
     let n = main.len();
     for (ch, src) in strip.buf.iter().enumerate().take(n) {
         if let Some(m) = main.get_mut(ch) {
@@ -415,7 +419,7 @@ pub(crate) fn note_insert_latency(t: &Track, strip: &mut Strip, pos: Samples, du
             continue;
         }
         // Block-start values only: processing sends the breakpoints inside the block.
-        apply_params(slot, ins, t, i, pos, 0);
+        apply_params(slot, ins, t, &strip.touch, i, pos, 0);
         // The delay `KeyBank::align` gave the signal before a keyed insert (0 without one).
         if ins.key.is_some()
             && let Some(k) = strip.key_in.iter().find(|k| usize::from(k.slot) == i)

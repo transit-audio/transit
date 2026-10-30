@@ -10,6 +10,7 @@ pub(crate) fn write_pass(app: &mut StudioApp, ctx: &egui::Context) {
     let held = ctx.input(|i| i.pointer.any_down());
     let now = ctx.input(|i| i.time);
     app.auto.touches.retain(|x| x.fresh || (x.hold == Hold::Pointer && held) || matches!(x.hold, Hold::Until(u) if now <= u));
+    sync_touched(app, held, now);
     let any = app.engine.session().tracks.iter().any(|t| matches!(t.mixer.automation_mode, M::Write | M::Touch | M::Latch | M::TouchLatch));
     let may = playing && any;
     app.engine.hold_merge(may.then_some(PASS));
@@ -63,12 +64,7 @@ pub(crate) fn write_pass(app: &mut StudioApp, ctx: &egui::Context) {
         }
     }
     app.auto.last_at = Some(pos);
-    let header = match &app.arrange.gesture {
-        Some(crate::arrange::Gesture::Volume { track, .. }) => Some((*track, Lane::Volume)),
-        _ => None,
-    };
-    let touched: Option<(TrackId, Lane)> = app.mixer.gesture.map(|g| Lane::of_target(g.target)).or(header);
-    let mut touched: Vec<(TrackId, Lane)> = touched.filter(|_| held).into_iter().collect();
+    let mut touched: Vec<(TrackId, Lane)> = gesture_lane(app).filter(|_| held).into_iter().collect();
     touched.extend(app.auto.touches.iter().map(|x| (x.track, x.lane.clone())));
     for x in &mut app.auto.touches {
         x.fresh = false;
@@ -159,6 +155,46 @@ pub(crate) fn write_pass(app: &mut StudioApp, ctx: &egui::Context) {
     }
     if wrote {
         app.auto.pass_mark = app.engine.revision;
+    }
+}
+
+/// The lane of the mixer control or track-header volume being dragged, if any.
+fn gesture_lane(app: &StudioApp) -> Option<(TrackId, Lane)> {
+    let header = match &app.arrange.gesture {
+        Some(crate::arrange::Gesture::Volume { track, .. }) => Some((*track, Lane::Volume)),
+        _ => None,
+    };
+    app.mixer.gesture.map(|g| Lane::of_target(g.target)).or(header)
+}
+
+/// #188: tells the engine which parameters of Touch tracks the user holds now (`Mixer::touched`,
+/// runtime state), every frame, playing or not, so the mix stops reading their lanes while they
+/// are held and ramps back to them on release. Held means the pointer is down on the control, or a
+/// hosted editor sent the parameter less than `HOSTED_HOLD_S` ago; a click whose pointer is
+/// already up (`fresh`) writes its point but holds nothing.
+fn sync_touched(app: &mut StudioApp, pointer: bool, now: f64) {
+    let mut held: Vec<(TrackId, Lane)> = gesture_lane(app).filter(|_| pointer).into_iter().collect();
+    let holds = |x: &ParamTouch| match x.hold {
+        Hold::Pointer => pointer,
+        Hold::Until(u) => now <= u,
+    };
+    held.extend(app.auto.touches.iter().filter(|x| holds(x)).map(|x| (x.track, x.lane.clone())));
+    let s = app.engine.session_arc();
+    let want: Vec<(TrackId, Vec<AutoParam>)> = s
+        .tracks
+        .iter()
+        .filter_map(|t| {
+            let ps: Vec<AutoParam> = if t.mixer.automation_mode == AutomationMode::Touch {
+                held.iter().filter(|(id, l)| *id == t.id && l.valid(t)).flat_map(|(_, l)| l.params(t)).collect()
+            } else {
+                Vec::new()
+            };
+            (ps != t.mixer.touched).then_some((t.id, ps))
+        })
+        .collect();
+    drop(s);
+    if !want.is_empty() {
+        app.engine.set_touched(&want);
     }
 }
 

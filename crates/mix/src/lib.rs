@@ -116,6 +116,9 @@ mod strip;
 mod strip_pool;
 #[cfg(test)]
 mod tests;
+mod touch;
+#[cfg(test)]
+mod touch_tests;
 
 use automation::{apply_params, lerp_gain, pan_at, pan_segment, send_level, transport_at, volume_db_at};
 #[cfg(test)]
@@ -168,6 +171,8 @@ use sink::Sink;
 pub use sink::{MAX_SINK_CHANNELS, SinkPlan, SinkSpec, plan_sinks, unresolved_routes};
 use strip::{LiveInput, StripRender, head_latency, note_insert_latency, process_master, process_strip};
 pub use strip_pool::{HELD_SECS, StripFaultsReader};
+pub use touch::TOUCH_RETURN_S;
+use touch::TouchRamps;
 
 /// Default (stereo) main mix width. The actual width is [`main_channels`].
 pub const MAIN_CHANNELS: usize = 2;
@@ -468,6 +473,8 @@ struct Strip {
     /// strip for the control side (a plan's returned tables, [`MixEngine::into_retired`]). While
     /// it holds one the strip does not render, so nothing overwrites (drops) it.
     panic: Option<Box<dyn std::any::Any + Send>>,
+    /// Touch mode (#188): the parameters the track holds or returns to their lanes.
+    touch: TouchRamps,
 }
 
 /// Most latency delay compensation handles: 2^20 samples, about 22 s at 48 kHz. A strip reports
@@ -713,6 +720,7 @@ impl Strip {
             hw: Vec::new(),
             ext: None,
             panic: None,
+            touch: TouchRamps::default(),
         }
     }
 }

@@ -14,7 +14,9 @@
 //! While playing, tracks in Write record the fader, and tracks in Touch or Latch record the control
 //! being moved (Latch keeps writing it after release until Stop), through `automation.set_point`
 //! with `from` (the write pass `transit-ui-egui` runs, plan 06 section 3). A pass is one undo
-//! step. Clicking a fader, knob or send highlights its lane when that lane is open.
+//! step. Clicking a fader, knob or send highlights its lane when that lane is open. In Touch the
+//! mix does not read a held control's lane and returns to it over a short ramp on release (#188):
+//! the pass tells the engine what is held every frame (`Engine::set_touched`).
 //!
 //! Model and engine gaps (plan 06 leaks): lanes are linear only (no curve shapes, L38); the mix
 //! does not read send pan or send mute lanes (L39); hosted plug-ins list only the parameters the
@@ -1230,7 +1232,9 @@ fn lane_header(
         let ink = if writing { theme::text_on(TOKENS.record) } else { TOKENS.text };
         p.text(pos2(mr.min.x + 6.0, mr.center().y), Align2::LEFT_CENTER, mode_label(mode), FontId::proportional(10.5), ink);
         crate::icons::paint(&p, pos2(mr.max.x - 8.0, mr.center().y), crate::icons::Icon::ChevronDown, 10.0, ink);
-        let resp = resp.on_hover_text("Automation mode: Read plays the lanes; Touch, Latch and Write record while playing");
+        let resp = resp.on_hover_text(
+            "Automation mode: Read plays the lanes; Touch, Latch and Write record while playing. Touch holds the control's value while you hold it and returns to the lane when you let go",
+        );
         let mut picked = None;
         egui::Popup::menu(&resp).width(120.0).show(|ui| {
             for m in MODES {

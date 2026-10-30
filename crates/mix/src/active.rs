@@ -72,6 +72,9 @@ fn move_strip(old: &mut Strip, new: &mut Strip) {
         }
     }
     new.edges = old.edges;
+    // A press or release can come with new tables (an edit in the same publish): the held and
+    // returning parameters go on (#188).
+    new.touch = old.touch;
     // The delays before keyed inserts continue from the old lines' history, insert by insert.
     for k in new.key_in.iter_mut() {
         if let Some(o) = old.key_in.iter().find(|o| o.slot == k.slot) {
@@ -425,6 +428,13 @@ impl MixEngine {
             m.enter(Phase::Mixdown, None);
         }
         tables.clear_block(frames);
+        // Touch (#188): holds and return ramps advance before anything reads automation.
+        let ramp = touch::return_samples(sample_rate);
+        for st in tables.strips.iter_mut() {
+            if let Some(t) = s.tracks.get(usize::from(st.track)) {
+                st.touch.begin(t, frames, ramp);
+            }
+        }
         // A strip a render worker holds keeps the delays it went away with (its keys are lent).
         let pool_view = self.pool.as_ref();
         tables.align_keys(s, pos, !self.input.is_empty(), status, &|i| pool_view.is_some_and(|p| p.is_away(i)));

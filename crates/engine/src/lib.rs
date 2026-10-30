@@ -377,6 +377,23 @@ impl Engine {
         Arc::make_mut(&mut self.doc)
     }
 
+    /// Runtime state (#188, ADR 0011): the automated parameters whose controls the user holds on
+    /// each listed track (`Mixer::touched`; tracks not listed keep theirs). Not a document edit:
+    /// no undo step, no journal entry, not dirty, no new revision, and a running gesture or write
+    /// pass goes on. The new document pointer reaches the audio thread with the next publish.
+    pub fn set_touched(&mut self, held: &[(TrackId, Vec<transit_model::AutoParam>)]) {
+        let changed = |(id, ps): &(TrackId, Vec<transit_model::AutoParam>)| self.doc.track(*id).is_some_and(|t| t.mixer.touched != *ps);
+        if !held.iter().any(changed) {
+            return;
+        }
+        let doc = Arc::make_mut(&mut self.doc);
+        for (id, ps) in held {
+            if let Some(t) = doc.track_mut(*id) {
+                t.mixer.touched.clone_from(ps);
+            }
+        }
+    }
+
     /// Like `session_mut`, for `edit.zoom` only and without bumping `revision`.
     pub fn zoom_mut(&mut self) -> &mut ZoomState {
         self.dirty = true;
@@ -495,13 +512,16 @@ impl Engine {
             Arc::make_mut(&mut self.doc).unplaced_takes.clone_from(&from.unplaced_takes);
         }
         let differs = |t: &transit_model::Track| {
-            from.track(t.id).is_some_and(|f| f.mixer.record_arm != t.mixer.record_arm || f.mixer.input_monitor != t.mixer.input_monitor)
+            from.track(t.id).is_some_and(|f| {
+                f.mixer.record_arm != t.mixer.record_arm || f.mixer.input_monitor != t.mixer.input_monitor || f.mixer.touched != t.mixer.touched
+            })
         };
         if self.doc.tracks.iter().any(differs) {
             for t in &mut Arc::make_mut(&mut self.doc).tracks {
                 if let Some(f) = from.track(t.id) {
                     t.mixer.record_arm = f.mixer.record_arm;
                     t.mixer.input_monitor = f.mixer.input_monitor;
+                    t.mixer.touched.clone_from(&f.mixer.touched);
                 }
             }
         }
@@ -837,6 +857,7 @@ fn same_document(saved: &Session, doc: &Session) -> bool {
     let mut doc = doc.clone();
     for (t, f) in doc.tracks.iter_mut().zip(&saved.tracks) {
         (t.mixer.record_arm, t.mixer.input_monitor) = (f.mixer.record_arm, f.mixer.input_monitor);
+        t.mixer.touched.clone_from(&f.mixer.touched);
     }
     let (from, to) = (&saved.edit, &mut doc.edit);
     to.selection = from.selection;
@@ -988,5 +1009,32 @@ mod dirty_tests {
         assert!(e.is_dirty());
         e.undo();
         assert!(!e.is_dirty());
+    }
+
+    /// #188: holding a control is runtime state. No undo step, not dirty, no journal entry, a
+    /// running gesture goes on, and undo keeps what is held now.
+    #[test]
+    fn a_held_control_is_runtime_state() {
+        use transit_model::AutoParam;
+        let mut e = crate::demo::demo_engine();
+        let t = e.session().tracks[0].id;
+        e.execute_merged("mix.volume", &json!({"tracks": [t.0], "db": -3.0}), "fader").unwrap();
+        let (undo, journal, rev) = (e.undo_history().len(), e.journal.len(), e.revision);
+        let before = e.session_arc();
+        e.set_touched(&[(t, vec![AutoParam::Volume])]);
+        assert!(!Arc::ptr_eq(&before, &e.session_arc()), "a new document pointer, so the next publish carries it");
+        assert_eq!(e.session().track(t).unwrap().mixer.touched, vec![AutoParam::Volume]);
+        assert_eq!((e.undo_history().len(), e.journal.len(), e.revision), (undo, journal, rev));
+        e.execute_merged("mix.volume", &json!({"tracks": [t.0], "db": -4.0}), "fader").unwrap();
+        assert_eq!(e.undo_history().len(), undo, "the drag is still one step");
+        e.mark_clean();
+        e.set_touched(&[(t, Vec::new())]);
+        assert!(!e.is_dirty(), "holding is not an edit");
+        e.set_touched(&[(t, vec![AutoParam::Volume])]);
+        e.undo();
+        assert_eq!(e.session().track(t).unwrap().mixer.touched, vec![AutoParam::Volume], "undo keeps what is held now");
+        let same = e.session_arc();
+        e.set_touched(&[(t, vec![AutoParam::Volume])]);
+        assert!(Arc::ptr_eq(&same, &e.session_arc()), "no change, no copy");
     }
 }

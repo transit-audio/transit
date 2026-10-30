@@ -540,3 +540,24 @@ fn a_thin_that_is_its_own_push_at_the_cap_still_folds_into_the_pass() {
     t.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(t.points(a, &AutoParam::Volume).len(), 205, "one Undo removes the pass");
 }
+
+/// #188: while the header's volume is held on a Touch track the engine knows it (the mix stops
+/// reading the lane), playing or not, and the release clears it. Read tracks hold nothing.
+#[test]
+fn holding_a_control_on_a_touch_track_tells_the_engine_until_release() {
+    let mut t = T::new();
+    let a = touch_mode(&mut t);
+    let touched = |t: &T| t.app.engine.session().track(a).unwrap().mixer.touched.clone();
+    let v = t.row(a).volume;
+    let (x, y) = ((v[0] + v[2]) / 2.0, (v[1] + v[3]) / 2.0);
+    // 60 steps, one event a frame: `input` returns after 30 frames, mid-drag.
+    t.input("ui.drag", json!({"x": x, "y": y, "to_x": x + 40.0, "to_y": y, "steps": 60}));
+    assert_eq!(touched(&t), vec![AutoParam::Volume], "held");
+    t.frames(40);
+    assert!(touched(&t).is_empty(), "released");
+    t.app.set_automation_mode(a, AutomationMode::Read).unwrap();
+    t.frames(3);
+    t.input("ui.drag", json!({"x": x, "y": y, "to_x": x - 40.0, "to_y": y, "steps": 60}));
+    assert!(touched(&t).is_empty(), "Read: nothing held");
+    t.frames(40);
+}

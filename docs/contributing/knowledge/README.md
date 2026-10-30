@@ -12,6 +12,7 @@ the ADRs. A new topic gets a new file and a row here.
 | [`asio-backend.md`](asio-backend.md) | The native ASIO backend: host thread, bindings, driver listing, streaming, stamps, the open-order rule. |
 | [`jack-backend.md`](jack-backend.md) | The native JACK backend (Linux): runtime-loaded libjack, port groups, the client lifecycle, the watcher. |
 | [`plan-renderer.md`](plan-renderer.md) | `crates/mix`: compile, render, PDC, sinks. |
+| [`automation-modes.md`](automation-modes.md) | Automation modes, how the mix reads lanes, Touch holds and the return ramp. |
 | [`routing.md`](routing.md) | Outputs, inputs, device channel maps, the route graph. |
 | [`sidechain.md`](sidechain.md) | Insert keys and key taps. |
 | [`midi.md`](midi.md) | Live MIDI input, step entry, note delivery. |

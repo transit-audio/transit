@@ -5,8 +5,10 @@ use super::*;
 /// at its sample offset, to plug-ins whose [`Plugin::sample_accurate_params`] says they take
 /// offsets (the VST3 and CLAP hosts). `frames` 0 sends the block-start values only: the latency
 /// passes run before the block is processed, and processing sends the breakpoints once; with the
-/// transport stopped processing passes 0 too (see `strip::timed_span`).
-pub(crate) fn apply_params(slot: &mut PluginSlot, ins: &transit_model::Insert, t: &Track, i: usize, pos: Samples, frames: usize) {
+/// transport stopped processing passes 0 too (see `strip::timed_span`). In Touch a held
+/// parameter's lane is not read and a released one returns over the strip's return ramp (`ramps`, #188):
+/// block-start values while it returns, its breakpoints again from the ramp's end.
+pub(crate) fn apply_params(slot: &mut PluginSlot, ins: &transit_model::Insert, t: &Track, ramps: &TouchRamps, i: usize, pos: Samples, frames: usize) {
     // Automation lanes address insert slots; the instrument (`INSTRUMENT_SLOT`) has its own lane
     // slot, so it never picks up slot A's lanes.
     let slot_u8 = if i == INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(i).unwrap_or(u8::MAX) };
@@ -24,15 +26,24 @@ pub(crate) fn apply_params(slot: &mut PluginSlot, ins: &transit_model::Insert, t
     };
     let timed = frames > 0 && slot.plugin.sample_accurate_params();
     let end = pos.saturating_add(i64::try_from(frames).unwrap_or(i64::MAX));
+    // The value at the block start, and where the lane's own breakpoints may start: past a hold
+    // none, past a return ramp from its end.
+    let read = |k: &str, val: f32| {
+        lane(k).map(|l| {
+            let (v, left, held) = touch::plugin_value(t, ramps, slot_u8, k, l, val, pos);
+            (v, if held { end } else { pos.saturating_add(i64::from(left)) })
+        })
+    };
     apply_values(
         slot,
         ins,
         pos,
-        |k, val| lane(k).map_or(val, |l| l.value_at(pos, val)),
+        |k, val| read(k, val).map_or(val, |(v, _)| v),
         |k| match lane(k) {
             // The breakpoints strictly inside the block: one at its start is the start value.
             Some(l) if timed => {
-                let from = l.points.partition_point(|p| p.at <= pos);
+                let after = read(k, 0.0).map_or(pos, |(_, after)| after.max(pos));
+                let from = l.points.partition_point(|p| p.at <= after);
                 let to = l.points.partition_point(|p| p.at < end);
                 l.points.get(from..to.max(from)).unwrap_or_default()
             }
@@ -98,24 +109,27 @@ pub(crate) fn transport_at(s: &Session, pos: Samples, playing: bool, recording: 
     }
 }
 
-pub(crate) fn volume_db_at(t: &Track, pos: Samples) -> f32 {
+/// The fader level at `pos`, `offset` frames into the block (`ramps`: the track's own strip's
+/// return ramps, #188).
+pub(crate) fn volume_db_at(t: &Track, ramps: Option<&TouchRamps>, pos: Samples, offset: usize) -> f32 {
     if t.mixer.automation_mode.reads()
         && t.mixer.automation_mode != transit_model::AutomationMode::Write
         && let Some(l) = t.lane(&AutoParam::Volume)
         && !l.points.is_empty()
     {
-        return l.value_at(pos, t.mixer.volume_db);
+        return touch::lane_value(t, ramps, &AutoParam::Volume, l, t.mixer.volume_db, pos, offset);
     }
     t.mixer.volume_db
 }
 
-pub(crate) fn pan_at(t: &Track, idx: usize, pos: Samples) -> f32 {
+pub(crate) fn pan_at(t: &Track, ramps: &TouchRamps, idx: usize, pos: Samples, offset: usize) -> f32 {
     let base = t.mixer.pan.get(idx).copied().unwrap_or(if idx == 0 { 0.0 } else { 1.0 });
+    let param = AutoParam::Pan(u8::try_from(idx).unwrap_or(0));
     if t.mixer.automation_mode.reads()
-        && let Some(l) = t.lane(&AutoParam::Pan(u8::try_from(idx).unwrap_or(0)))
+        && let Some(l) = t.lane(&param)
         && !l.points.is_empty()
     {
-        return l.value_at(pos, base);
+        return touch::lane_value(t, Some(ramps), &param, l, base, pos, offset);
     }
     base
 }
@@ -137,12 +151,14 @@ pub(crate) fn pan_segment(t: &Track, pos: Samples, start: usize, frames: usize) 
     (at, start.saturating_add(left).min(frames))
 }
 
-pub(crate) fn send_level(t: &Track, i: usize, base: f32, pos: Samples) -> f32 {
+/// Send `i`'s level for the block at `pos` (its start value).
+pub(crate) fn send_level(t: &Track, ramps: &TouchRamps, i: usize, base: f32, pos: Samples) -> f32 {
+    let param = AutoParam::SendLevel(u8::try_from(i).unwrap_or(0));
     if t.mixer.automation_mode.reads()
-        && let Some(l) = t.lane(&AutoParam::SendLevel(u8::try_from(i).unwrap_or(0)))
+        && let Some(l) = t.lane(&param)
         && !l.points.is_empty()
     {
-        return l.value_at(pos, base);
+        return touch::lane_value(t, Some(ramps), &param, l, base, pos, 0);
     }
     base
 }
