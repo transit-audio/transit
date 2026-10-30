@@ -180,19 +180,62 @@ fn every_tool_is_disabled_with_nothing_selected_and_says_why() {
 }
 
 #[test]
-fn the_shortcut_rows_cite_their_conventions() {
+fn the_shortcut_rows_name_the_commands_they_follow() {
     use crate::shortcuts::{Action as A, label, rows};
     for (action, keys, cited) in [
-        (A::Join, "Ctrl+J", "Ableton"),
-        (A::TrimStart, "[", "Logic"),
-        (A::TrimEnd, "]", "Logic"),
-        (A::NudgeEarlier, "Alt+Left", "Ableton"),
-        (A::NudgeLater, "Alt+Right", "Logic"),
+        (A::Join, "Ctrl+J", &["Ableton's Consolidate", "Logic's Join"][..]),
+        (A::Crop, "Ctrl+Shift+J", &["Ableton's Crop Selected Clips", "Logic has no default"]),
+        (A::TrimStart, "[", &["Ours, Logic-style", "Set Region Start to Playhead Position"]),
+        (A::TrimEnd, "]", &["Ours, Logic-style", "Set Region End to Playhead Position"]),
+        (A::NudgeEarlier, "Alt+Left", &["Ableton nudges selected clips with the arrow keys", "Logic has no default", "Ours"]),
+        (A::NudgeLater, "Alt+Right", &["Ableton nudges selected clips with the arrow keys", "Logic has no default", "Ours"]),
+        (A::NudgeEarlierFine, "Alt+Shift+Left", &["Ours"]),
+        (A::NudgeLaterFine, "Alt+Shift+Right", &["Ours"]),
     ] {
         assert_eq!(label(action), keys);
-        assert!(rows(action).all(|s| s.note.contains(cited)), "{action:?}");
+        for text in cited {
+            assert!(rows(action).all(|s| s.note.contains(text)), "{action:?} should cite {text}");
+        }
     }
-    assert_eq!(Tool::Crop.action(), None, "Ableton and Logic bind Crop differently: menu only");
+    assert!(rows(A::NudgeLater).all(|s| s.label.contains("snap off")), "the row says what snap off does");
+    assert_eq!(Tool::Crop.action(), Some(A::Crop));
+}
+
+#[test]
+fn crop_and_trim_are_refused_in_shuffle_mode_and_change_nothing() {
+    let mut r = copy_rig();
+    let (a, beat) = (first_clip(&r), r.beat);
+    let b = second_clip(&mut r, 4 * beat);
+    r.app.run("edit.mode", json!({"mode": "shuffle"})).unwrap();
+    select(&mut r, &[a, b]);
+    set_time_selection(&mut r, beat, 7 * beat);
+    r.app.set_cursor(2 * beat, Some(r.t));
+    let (rev, before) = (r.app.engine.revision, spans(&r.app, r.t));
+    for tool in [Tool::Crop, Tool::TrimStart, Tool::TrimEnd] {
+        assert!(r.app.clip_tool_blocked(tool).is_some_and(|w| w.contains("Shuffle")), "{tool:?}");
+        assert!(r.app.run_clip_tool(tool).is_err());
+        assert!(r.app.status.contains("Shuffle"), "{}", r.app.status);
+    }
+    assert_eq!(spans(&r.app, r.t), before);
+    assert_eq!(r.app.engine.revision, rev);
+}
+
+#[test]
+fn a_time_range_join_refuses_where_no_clip_lies_in_the_range() {
+    let mut r = copy_rig();
+    let bar = r.beat * 4;
+    r.app.deselect_all();
+    r.app.run("edit.select", json!({"tracks": [r.t2.0], "start": 0, "end": bar})).unwrap();
+    let rev = r.app.engine.revision;
+    assert!(r.app.clip_tool_blocked(Tool::Join).is_some());
+    assert!(r.app.join_selected().is_err());
+    assert!(r.app.status.contains("nothing in the time range"), "{}", r.app.status);
+    assert!(clips_on(&r.app, r.t2).is_empty(), "no empty clip made");
+    assert_eq!(r.app.engine.revision, rev);
+    // A selected track that is empty is skipped when another has material in the range.
+    r.app.run("edit.select", json!({"tracks": [r.t.0, r.t2.0], "start": 0, "end": bar})).unwrap();
+    r.app.join_selected().unwrap();
+    assert!(clips_on(&r.app, r.t2).is_empty());
 }
 
 #[test]

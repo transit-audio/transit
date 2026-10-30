@@ -3,10 +3,20 @@
 //! shortcut-table row (or says why it has none), an Edit menu entry and a clip context menu entry,
 //! is disabled when nothing applies, and says why on the status line when refused.
 //!
-//! Conventions (the Ableton/Logic rule, `docs/adr`): the tools follow what Ableton and Logic agree
-//! on. Join is Ctrl+J (Ableton Consolidate, Logic Join). Crop is a menu entry only: Ableton and
-//! Logic put it on different keys. Trim to cursor uses Logic's `[` and `]` (Ableton has no key).
-//! Nudge uses Alt+Left/Right (plain arrows move the cursor here); Alt+Shift is the fine step.
+//! Conventions (the Ableton/Logic rule, `docs/adr`): Join is Ctrl+J (Ableton Consolidate, Logic
+//! Join agree). Crop is Ctrl+Shift+J (Ableton's Crop Selected Clips; Logic has no default key for
+//! it). Trim to cursor is ours, Logic-style: `[` and `]` for Logic's Set Region Start/End to
+//! Playhead Position, which Logic leaves unbound. Nudge: Ableton nudges with the arrow keys; here
+//! plain arrows move the cursor, so Alt+Left/Right (ours), with Alt+Shift as our fine step.
+//!
+//! Join takes the span from the first to the last selected clip on a track, so an unselected clip
+//! between two selected ones is joined too (Ableton's Consolidate over the span). A time range
+//! with no clip selected consolidates the range, and is refused where no clip lies in it.
+//! Crop and the trims are refused in Shuffle mode, where a trim keeps the clip start and ripples
+//! the clips after it, which these range-based tools do not model.
+//!
+//! Limitation: no UI gesture sets a time range apart from a clip selection yet (#224), so Crop
+//! stays disabled ("Needs a time range (#224)") until one exists; the control channel can set it.
 //!
 //! Engine commands: `edit.heal` joins neighbors that continue one file, `edit.consolidate` renders
 //! or merges the rest; Crop and the trims go through `edit.trim_clip` per selected clip, so
@@ -40,8 +50,8 @@ impl Tool {
             Tool::Crop => "Crop to Selection",
             Tool::TrimStart => "Trim Start to Cursor",
             Tool::TrimEnd => "Trim End to Cursor",
-            Tool::NudgeEarlier => "Nudge Earlier",
-            Tool::NudgeLater => "Nudge Later",
+            Tool::NudgeEarlier => "Nudge Earlier by Grid Step",
+            Tool::NudgeLater => "Nudge Later by Grid Step",
         }
     }
 
@@ -49,7 +59,7 @@ impl Tool {
     pub fn action(self) -> Option<A> {
         match self {
             Tool::Join => Some(A::Join),
-            Tool::Crop => None,
+            Tool::Crop => Some(A::Crop),
             Tool::TrimStart => Some(A::TrimStart),
             Tool::TrimEnd => Some(A::TrimEnd),
             Tool::NudgeEarlier => Some(A::NudgeEarlier),
@@ -57,6 +67,8 @@ impl Tool {
         }
     }
 }
+
+const SHUFFLE: &str = "not in Shuffle mode; switch to Slip";
 
 /// The colors of the clip menu's Color submenu: a name and RGB.
 pub const CLIP_COLORS: [(&str, [u8; 3]); 8] = [
@@ -150,7 +162,14 @@ impl StudioApp {
         if e.selected_tracks.is_empty() {
             return Err("select a track for the time range");
         }
-        Ok(e.selected_tracks.iter().map(|t| (*t, e.selection)).collect())
+        let s = self.engine.session();
+        let out: Vec<(TrackId, Range)> = e
+            .selected_tracks
+            .iter()
+            .filter(|t| s.track(**t).is_some_and(|tr| tr.clips().iter().any(|c| c.range().overlaps(&e.selection))))
+            .map(|t| (*t, e.selection))
+            .collect();
+        if out.is_empty() { Err("nothing in the time range") } else { Ok(out) }
     }
 
     /// Selected adjacent clips become one clip: `edit.heal` for neighbors that continue one file,
@@ -221,7 +240,14 @@ impl StudioApp {
         self.selected_clips().into_iter().filter_map(|(_, id, r)| keep(r).filter(|k| !k.is_empty() && *k != r).map(|k| (id, k))).collect()
     }
 
+    fn in_shuffle(&self) -> bool {
+        self.engine.session().edit.edit_mode == transit_model::EditMode::Shuffle
+    }
+
     fn crop_plan(&self) -> Result<Vec<(ClipId, Range)>, &'static str> {
+        if self.in_shuffle() {
+            return Err(SHUFFLE);
+        }
         if self.selected_clips().is_empty() {
             return Err("select the clips to crop");
         }
@@ -230,7 +256,7 @@ impl StudioApp {
             return Err("make a time selection first");
         }
         let plan = self.trims(|r| r.intersect(&sel));
-        if plan.is_empty() { Err("the selected clips already lie inside the time selection") } else { Ok(plan) }
+        if plan.is_empty() { Err("Needs a time range (#224)") } else { Ok(plan) }
     }
 
     /// Trim the selected clips to the time selection (both edges), on the arrangement's grid.
@@ -246,6 +272,9 @@ impl StudioApp {
     }
 
     fn trim_plan(&self, start: bool) -> Result<Vec<(ClipId, Range)>, &'static str> {
+        if self.in_shuffle() {
+            return Err(SHUFFLE);
+        }
         if self.selected_clips().is_empty() {
             return Err("select the clips to trim");
         }
@@ -321,7 +350,12 @@ fn entry(app: &mut StudioApp, ui: &mut egui::Ui, tool: Tool) {
     if let Some(a) = tool.action() {
         button = button.shortcut_text(label(a));
     }
-    let r = ui.add_enabled(blocked.is_none(), button).on_disabled_hover_text(blocked.unwrap_or_default());
+    let hint = match tool {
+        Tool::Join => "Joins the span from the first to the last selected clip",
+        Tool::NudgeEarlier | Tool::NudgeLater => "One grid step; a quarter step with snap off",
+        _ => "",
+    };
+    let r = ui.add_enabled(blocked.is_none(), button).on_hover_text(hint).on_disabled_hover_text(blocked.unwrap_or_default());
     if r.clicked() {
         let _ = app.run_clip_tool(tool);
         ui.close();
@@ -342,6 +376,8 @@ pub fn context_menu_items(app: &mut StudioApp, ui: &mut egui::Ui) {
     }
     let has_clip = !app.selected_clips().is_empty();
     if ui.add_enabled(has_clip, egui::Button::new("Rename").shortcut_text(label(A::Rename))).clicked() {
+        // The menu is on a clip: rename it even when tracks were picked by their headers.
+        app.tracks_selected_by_header = false;
         app.rename_selected();
         ui.close();
     }
@@ -366,6 +402,9 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     use crate::shortcuts::pressed;
     if pressed(ctx, A::Join) {
         let _ = app.join_selected();
+    }
+    if pressed(ctx, A::Crop) {
+        let _ = app.crop_to_selection();
     }
     if pressed(ctx, A::TrimStart) {
         let _ = app.trim_to_cursor(true);
