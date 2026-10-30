@@ -81,7 +81,10 @@ The oracle runs with flush-to-zero; Rust runs in its default mode. We do not cha
 `core::arch` documents changing the rounding or denormal mode under Rust as undefined behavior. The
 port reproduces the flush in its own code, where the reference's arithmetic produces subnormals
 (`utils::ftz` in `crates/macro-osc`; an `f32` wrapper that flushes every result in
-`crates/resonator/src/float.rs`). It is proven for the sweep, not in general.
+`crates/resonator/src/float.rs`). It is proven for the sweep, not in general. In the granular
+port (`crates/granular`) it is not proven at all yet: the firmware's output is int16, a subnormal
+never moves a sample by one LSB, and every granular test passes with the flush off. TODO (#199
+slice 2): the float output path must bring a test that fails with the flush off.
 
 ## Deviations we keep
 
@@ -109,4 +112,7 @@ block size (32 frames). Two lessons from it: a sweep must let the recording fill
 (the first sweep rendered silence at most positions, and a check on the first block passed on the
 dry signal alone), and vendoring an upstream commit is not the same as vendoring a working module:
 a 2023 merge left the stretch mode silent at the pinned commit, which the oracle's sound check
-found.
+found. The review added a third: "an index of exactly 1.0 reads one past the table" is not bounded
+by bounding the parameter when the index is a ramp toward it (the dry/wet crossfade overshoots by
+rounding), so the oracle defines the firmware's past-the-end reads by padding the arrays on a
+build-time copy, and its memory sizes are capped where the firmware's fixed-point phase overflows.

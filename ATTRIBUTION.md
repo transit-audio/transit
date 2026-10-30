@@ -55,12 +55,6 @@ and, at runtime, the operating system's own UI fonts when available (never redis
 
 ## Files
 
-The granular texture processor (`crates/granular`, #199; not linked into the app) is a Rust port of
-Émilie Gillet's texture processor firmware (`clouds/dsp` in `eurorack`, its granular playback mode)
-and the stmlib helpers it uses, written by transit from her C++ with no third-party Rust code in
-between. Her MIT notices are in `crates/granular/LICENSE-THIRD-PARTY` (provenance in
-`crates/granular/VENDOR.md`).
-
 | Path | Author | Source | License |
 |---|---|---|---|
 | `assets/presets/` | @derekmwright | original parameter sets for the built-in plug-ins (JSON, one file per preset) | MIT OR Apache-2.0 |
