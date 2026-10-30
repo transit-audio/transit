@@ -77,6 +77,14 @@ fn param_help(plugin: &str) -> crate::help::Id {
     }
 }
 
+/// The device pane's height the focused track's MIDI effects group needs (0 without one): the
+/// card and the pane's padding above and below it.
+#[must_use]
+pub fn pane_height(app: &StudioApp) -> f32 {
+    let Some(t) = app.focus_track().and_then(|id| app.engine.session().track(id)).filter(|t| shows(t)) else { return 0.0 };
+    card_height(t) + 16.0
+}
+
 /// The display name of MIDI effect `plugin` (its id when this build does not know it).
 #[must_use]
 pub fn name_of(plugin: &str) -> String {

@@ -98,6 +98,18 @@ fn corpus_files_are_named_by_release_and_stay_small() {
 }
 
 #[test]
+fn the_midi_effect_fixture_loads_its_chain() {
+    let (name, text) = corpus().into_iter().find(|(n, _)| n == "v0.6.0-midi-effects.transit").expect("the MIDI effect fixture is in the corpus");
+    let s = Session::from_json(&text).unwrap_or_else(|e| panic!("{name} no longer loads: {e}"));
+    let t = s.tracks.iter().find(|t| !t.midi_effects.is_empty()).unwrap_or_else(|| panic!("{name}: a track with MIDI effects"));
+    let chain: Vec<_> = t.midi_effects.iter().map(|f| (f.plugin.as_str(), f.bypass)).collect();
+    assert_eq!(chain, [("midi_transpose", false), ("midi_velocity", true)], "{name}");
+    assert_eq!(t.midi_effects[0].params.get("semitones"), Some(&7.0), "{name}");
+    let lane = transit_model::AutoParam::Plugin { slot: transit_model::MIDI_EFFECT_SLOT, param: "semitones".into() };
+    assert_eq!(t.lane(&lane).map(|l| l.points.len()), Some(2), "{name}: the first effect's automated parameter");
+}
+
+#[test]
 fn a_session_with_video_opens_with_the_video_dropped_and_a_note() {
     let (name, text) = corpus().into_iter().find(|(n, _)| n == "v0.3.2-video.transit").expect("the video fixture is in the corpus");
     let s = Session::from_json(&text).unwrap_or_else(|e| panic!("{name} no longer loads: {e}"));

@@ -13,7 +13,7 @@ pub fn panes(app: &mut StudioApp, ui: &mut Ui) {
     app.mixer.devices.visible = app.ui.show_devices;
     if app.ui.show_devices {
         egui::Panel::bottom("devices")
-            .exact_size(crate::devices::pane_height(app))
+            .exact_size(crate::devices::pane_height(app).max(crate::midi_fx_panel::pane_height(app)))
             .frame(egui::Frame::NONE.fill(TOKENS.panel))
             .show(ui, |ui| crate::devices::chain(app, ui));
     }
