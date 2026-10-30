@@ -15,11 +15,11 @@
 use super::{Engine, EngineParameters, TriggerState, note_to_frequency};
 use crate::oscillator::oscillator::MAX_FREQUENCY;
 use crate::oscillator::sine_oscillator::{FastSineOscillator, sine};
-use crate::utils::one_pole;
 use crate::utils::parameter_interpolator::ParameterInterpolator;
 use crate::utils::polyblep::{next_blep_sample, this_blep_sample};
 use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
+use crate::utils::{ftz, one_pole};
 
 const NUM_SWARM_VOICES: usize = 8;
 
@@ -115,7 +115,7 @@ impl SwarmVoice {
         self.envelope.step(rng, density, burst_mode, start_burst);
 
         let scale = 1.0 / NUM_SWARM_VOICES as f32;
-        let amplitude = self.envelope.amplitude(size_ratio) * scale;
+        let amplitude = ftz(self.envelope.amplitude(size_ratio) * scale);
 
         let expo_amount = self.envelope.frequency(size_ratio);
         f0 *= semitones_to_ratio(48.0 * expo_amount * spread * self.rank);
@@ -178,7 +178,7 @@ impl AdditiveSawOscillator {
             }
 
             next_sample += phase;
-            *out_sample += (2.0 * this_sample - 1.0) * gain.next();
+            *out_sample = ftz(*out_sample + ftz((2.0 * this_sample - 1.0) * gain.next()));
         }
         self.phase = phase;
         self.next_sample = next_sample;

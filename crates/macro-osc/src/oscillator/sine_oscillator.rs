@@ -8,7 +8,7 @@
 use crate::resources::sine::{LUT_SINE, LUT_SINE_BITS, LUT_SINE_SIZE};
 use crate::utils::parameter_interpolator::ParameterInterpolator;
 use crate::utils::rsqrt::fast_rsqrt_carmack;
-use crate::utils::{interpolate, interpolate_wrap};
+use crate::utils::{ftz, interpolate, interpolate_wrap};
 
 #[derive(Debug, Default, Clone)]
 pub struct SineOscillator {
@@ -91,7 +91,7 @@ impl SineOscillator {
             let s = sine_no_wrap(self.phase);
 
             if additive {
-                *out_sample += am.next() * s;
+                *out_sample = ftz(*out_sample + ftz(am.next() * s));
             } else {
                 *out_sample = s;
             }
@@ -138,7 +138,7 @@ impl FastSineOscillator {
             frequency = 0.25;
             amplitude = 0.0;
         } else {
-            amplitude *= 1.0 - frequency * 4.0;
+            amplitude = ftz(amplitude * (1.0 - frequency * 4.0));
         }
 
         let mut epsilon = ParameterInterpolator::new(&mut self.epsilon, fast_2_sin(frequency), out.len());
@@ -174,7 +174,7 @@ impl FastSineOscillator {
             frequency = 0.25;
             amplitude = 0.0;
         } else {
-            amplitude *= 1.0 - frequency * 4.0;
+            amplitude = ftz(amplitude * (1.0 - frequency * 4.0));
         }
 
         let mut epsilon = ParameterInterpolator::new(&mut self.epsilon, fast_2_sin(frequency), out.len());
@@ -197,7 +197,7 @@ impl FastSineOscillator {
 
             match mode {
                 RenderMode::Normal => *out_sample = x,
-                RenderMode::Additive => *out_sample += am.next() * x,
+                RenderMode::Additive => *out_sample = ftz(*out_sample + ftz(am.next() * x)),
             };
         }
 

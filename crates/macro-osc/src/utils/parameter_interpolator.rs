@@ -1,6 +1,11 @@
 //! Linear interpolation of parameters in rendering loops.
 
 // Based on MIT-licensed code (c) 2015 by Olivier Gillet (ol.gillet@gmail.com)
+//
+// Every operation is flushed to zero, as on the firmware: a parameter that settles on a value
+// near zero leaves subnormal increments, which the firmware flushes.
+
+use crate::utils::ftz;
 
 /// Original implementation keeping a mutable reference to the interpolated value.
 #[derive(Debug)]
@@ -13,31 +18,31 @@ pub struct ParameterInterpolator<'a> {
 impl<'a> ParameterInterpolator<'a> {
     pub fn new(state: &'a mut f32, new_value: f32, size: usize) -> Self {
         let v = *state;
-        Self { state, value: v, increment: (new_value - v) / (size as f32) }
+        Self { state, value: v, increment: ftz(ftz(new_value - v) / (size as f32)) }
     }
 
     pub fn new_with_step(state: &'a mut f32, new_value: f32, step: f32) -> Self {
         let v = *state;
-        Self { state, value: v, increment: (new_value - v) * step }
+        Self { state, value: v, increment: ftz(ftz(new_value - v) * step) }
     }
 
     pub fn init(&mut self, state: &'a mut f32, new_value: f32, size: usize) {
         let v = *state;
         self.state = state;
         self.value = v;
-        self.increment = (new_value - v) / (size as f32);
+        self.increment = ftz(ftz(new_value - v) / (size as f32));
     }
 
     #[inline]
     #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> f32 {
-        self.value += self.increment;
+        self.value = ftz(self.value + self.increment);
         self.value
     }
 
     #[inline]
     pub fn subsample(&self, t: f32) -> f32 {
-        self.value + self.increment * t
+        ftz(self.value + ftz(self.increment * t))
     }
 }
 
@@ -55,21 +60,21 @@ pub struct SimpleParameterInterpolator {
 
 impl SimpleParameterInterpolator {
     pub fn new(value: f32, new_value: f32, size: usize) -> Self {
-        Self { increment: (new_value - value) / (size as f32) }
+        Self { increment: ftz(ftz(new_value - value) / (size as f32)) }
     }
 
     pub fn init(&mut self, value: f32, new_value: f32, size: usize) {
-        self.increment = (new_value - value) / (size as f32)
+        self.increment = ftz(ftz(new_value - value) / (size as f32));
     }
 
     #[inline]
     pub fn update(&self, value: &mut f32) -> f32 {
-        *value += self.increment;
+        *value = ftz(*value + self.increment);
         *value
     }
 
     #[inline]
     pub fn subsample(&self, value: f32, t: f32) -> f32 {
-        value + self.increment * t
+        ftz(value + ftz(self.increment * t))
     }
 }
