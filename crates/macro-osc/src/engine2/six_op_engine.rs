@@ -31,7 +31,6 @@ static ALGORITHMS: OnceLock<Algorithms<6, 32>> = OnceLock::new();
 /// other block.
 #[derive(Debug, Clone)]
 pub struct SixOpEngine<'a> {
-    rng: Random,
     patches: [Patch; NUM_PATCHES_PER_BANK],
     patch_index_quantizer: HysteresisQuantizer2,
     voice: [FmVoice<'a>; NUM_SIX_OP_VOICES],
@@ -49,7 +48,6 @@ pub struct SixOpEngine<'a> {
 impl SixOpEngine<'_> {
     pub fn new(block_size: usize) -> Self {
         Self {
-            rng: Random::default(),
             patches: core::array::from_fn(|_| Patch::new()),
             patch_index_quantizer: HysteresisQuantizer2::new(),
             voice: core::array::from_fn(|_| FmVoice::new()),
@@ -73,10 +71,6 @@ impl SixOpEngine<'_> {
 }
 
 impl Engine for SixOpEngine<'_> {
-    fn seed(&mut self, seed: u32) {
-        self.rng.seed(seed);
-    }
-
     fn init(&mut self, sample_rate_hz: f32) {
         // The voices and the envelope scrubbing run against the firmware's corrected sample rate.
         self.sample_rate = crate::CORRECTED_SAMPLE_RATE * (sample_rate_hz / crate::REF_SAMPLE_RATE);
@@ -95,14 +89,14 @@ impl Engine for SixOpEngine<'_> {
         self.rendered_voice = 0;
     }
 
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         let size = out.len();
         let patch_index = self.patch_index_quantizer.process(parameters.harmonics * 1.02) as usize;
 
         if parameters.trigger.has(TriggerState::UNPATCHED) {
             let t = parameters.morph;
-            self.voice[0].mutable_lfo().scrub(&mut self.rng, 2.0 * self.sample_rate * t);
+            self.voice[0].mutable_lfo().scrub(rng, 2.0 * self.sample_rate * t);
 
             for i in 0..NUM_SIX_OP_VOICES {
                 self.voice[i].load_patch(patch_index, &self.patches[patch_index]);
@@ -129,7 +123,7 @@ impl Engine for SixOpEngine<'_> {
             p.note = parameters.note;
             p.velocity = parameters.accent;
             p.envelope_control = parameters.morph;
-            self.voice[active].mutable_lfo().step(&mut self.rng, size as f32);
+            self.voice[active].mutable_lfo().step(rng, size as f32);
 
             let active_patch = self.voice[active].patch_index();
             for i in 0..NUM_SIX_OP_VOICES {
@@ -138,7 +132,7 @@ impl Engine for SixOpEngine<'_> {
                 p.sustain = false;
                 p.gate = parameters.trigger.has(TriggerState::HIGH) && i == active;
                 if self.voice[i].patch_index() != active_patch {
-                    self.voice[i].mutable_lfo().step(&mut self.rng, size as f32);
+                    self.voice[i].mutable_lfo().step(rng, size as f32);
                     let (pitch_mod, amp_mod) = (self.voice[i].lfo().pitch_mod(), self.voice[i].lfo().amp_mod());
                     self.voice[i].set_modulations(pitch_mod, amp_mod);
                 } else {

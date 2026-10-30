@@ -1,9 +1,10 @@
 //! Fast 16-bit pseudo random number generator.
 //!
-//! The firmware keeps one generator for the whole module (`stmlib::Random`, a static). Here each
-//! engine owns one and passes it to whatever draws from it, in the firmware's order, so an engine
-//! seeded like the firmware's generator draws the same sequence, and two engines never share or
-//! race over a state.
+//! The firmware keeps one generator for the whole module (`stmlib::Random`, a static) that every
+//! engine draws from. Here the owner of the engines (a voice, or a test rendering one engine) owns
+//! one and passes it to whichever engine renders, which passes it on to whatever draws from it in
+//! the firmware's order. Seeded like the firmware's generator, it draws the same sequence, and two
+//! voices never share or race over a state.
 
 // Based on MIT-licensed code (c) 2012 by Olivier Gillet (ol.gillet@gmail.com)
 

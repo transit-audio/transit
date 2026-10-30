@@ -25,7 +25,6 @@ const NUM_STRINGS: usize = 3;
 
 #[derive(Debug, Clone)]
 pub struct StringEngine {
-    rng: Random,
     voice: [StringVoice; NUM_STRINGS],
 
     f0: [f32; NUM_STRINGS],
@@ -39,7 +38,6 @@ pub struct StringEngine {
 impl StringEngine {
     pub fn new(block_size: usize) -> Self {
         Self {
-            rng: Random::default(),
             voice: core::array::from_fn(|_| StringVoice::new()),
             f0: [0.0; NUM_STRINGS],
             f0_delay: DelayLine::<f32, 16>::new(),
@@ -51,10 +49,6 @@ impl StringEngine {
 }
 
 impl Engine for StringEngine {
-    fn seed(&mut self, seed: u32) {
-        self.rng.seed(seed);
-    }
-
     fn init(&mut self, sample_rate_hz: f32) {
         for voice in &mut self.voice {
             voice.init(sample_rate_hz);
@@ -72,7 +66,7 @@ impl Engine for StringEngine {
     }
 
     #[inline]
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         let sustain = parameters.trigger.has(TriggerState::UNPATCHED);
         let trigger = parameters.trigger.has(TriggerState::RISING_EDGE);
@@ -93,7 +87,7 @@ impl Engine for StringEngine {
 
         for i in 0..NUM_STRINGS {
             self.voice[i].render(
-                &mut self.rng,
+                rng,
                 sustain && i == self.active_string,
                 trigger && i == self.active_string,
                 parameters.accent,

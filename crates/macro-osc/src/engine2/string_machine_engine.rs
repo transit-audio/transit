@@ -17,6 +17,7 @@ use crate::fx::ensemble::Ensemble;
 use crate::oscillator::string_synth_oscillator::StringSynthOscillator;
 use crate::utils::filter::{FilterMode, FrequencyApproximation, NaiveSvf};
 use crate::utils::one_pole;
+use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 
 #[derive(Debug, Default, Clone)]
@@ -65,7 +66,7 @@ impl Engine for StringMachineEngine {
         self.ensemble.reset();
     }
 
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, _rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         one_pole(&mut self.morph_lp, parameters.morph, 0.1);
         one_pole(&mut self.timbre_lp, parameters.timbre, 0.1);

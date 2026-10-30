@@ -36,6 +36,7 @@ use crate::utils::clip_16;
 use crate::utils::delay_line::DelayLine;
 use crate::utils::hysteresis_quantizer::HysteresisQuantizer2;
 use crate::utils::limiter::Limiter;
+use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 
 const MAX_TRIGGER_DELAY: usize = 8;
@@ -161,8 +162,10 @@ impl Default for Resources<'_> {
     }
 }
 
+/// The 24 engines of a voice (22 instances: the three six-operator banks share one), in the
+/// firmware's registration order (`Voice::Init` in `plaits/dsp/voice.cc`).
 #[derive(Debug, Clone)]
-pub struct Voice<'a> {
+pub struct EngineBank<'a> {
     pub additive_engine: AdditiveEngine,
     pub bass_drum_engine: BassDrumEngine,
     pub chiptune_engine: ChiptuneEngine,
@@ -185,6 +188,49 @@ pub struct Voice<'a> {
     pub waveshaping_engine: WaveshapingEngine,
     pub wavetable_engine: WavetableEngine<'a>,
     pub waveterrain_engine: WaveTerrainEngine<'a>,
+}
+
+impl EngineBank<'_> {
+    /// The engine at `index` with its post-processing settings: already enveloped, out gain, aux
+    /// gain (a negative gain runs the limiter at that pre-gain).
+    pub fn get(&mut self, index: usize) -> Option<(&mut dyn Engine, bool, f32, f32)> {
+        match index {
+            0 => Some((&mut self.virtual_analog_vcf_engine, false, 1.0, 1.0)),
+            1 => Some((&mut self.phase_distortion_engine, false, 0.7, 0.7)),
+            2 => Some((&mut self.six_op_engine, true, 1.0, 1.0)),
+            3 => Some((&mut self.six_op_engine, true, 1.0, 1.0)),
+            4 => Some((&mut self.six_op_engine, true, 1.0, 1.0)),
+            5 => Some((&mut self.waveterrain_engine, false, 0.7, 0.7)),
+            6 => Some((&mut self.string_machine_engine, false, 0.8, 0.8)),
+            7 => Some((&mut self.chiptune_engine, false, 0.5, 0.5)),
+            8 => Some((&mut self.virtual_analog_engine, false, 0.8, 0.8)),
+            9 => Some((&mut self.waveshaping_engine, false, 0.7, 0.6)),
+            10 => Some((&mut self.fm_engine, false, 0.6, 0.6)),
+            11 => Some((&mut self.grain_engine, false, 0.7, 0.6)),
+            12 => Some((&mut self.additive_engine, false, 0.8, 0.8)),
+            13 => Some((&mut self.wavetable_engine, false, 0.6, 0.6)),
+            14 => Some((&mut self.chord_engine, false, 0.8, 0.8)),
+            15 => Some((&mut self.speech_engine, false, -0.7, 0.8)),
+            16 => Some((&mut self.swarm_engine, false, -3.0, 1.0)),
+            17 => Some((&mut self.noise_engine, false, -1.0, -1.0)),
+            18 => Some((&mut self.particle_engine, false, -2.0, 1.0)),
+            19 => Some((&mut self.string_engine, true, -1.0, 0.8)),
+            20 => Some((&mut self.modal_engine, true, -1.0, 0.8)),
+            21 => Some((&mut self.bass_drum_engine, true, 0.8, 0.8)),
+            22 => Some((&mut self.snare_drum_engine, true, 0.8, 0.8)),
+            23 => Some((&mut self.hihat_engine, true, 0.8, 0.8)),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Voice<'a> {
+    pub engines: EngineBank<'a>,
+
+    /// The voice's one random generator, handed to whichever engine renders (the firmware's
+    /// `stmlib::Random` is one static shared by all of a voice's engines).
+    rng: Random,
 
     pub resources: Resources<'a>,
 
@@ -217,28 +263,31 @@ impl Voice<'_> {
         let a0_normalized = crate::A0 * (crate::REF_SAMPLE_RATE / sample_rate_hz);
 
         Self {
-            additive_engine: AdditiveEngine::new(),
-            bass_drum_engine: BassDrumEngine::new(),
-            chiptune_engine: ChiptuneEngine::new(),
-            chord_engine: ChordEngine::new(),
-            fm_engine: FmEngine::new(),
-            grain_engine: GrainEngine::new(),
-            hihat_engine: HihatEngine::new(block_size),
-            modal_engine: ModalEngine::new(block_size),
-            noise_engine: NoiseEngine::new(block_size),
-            particle_engine: ParticleEngine::new(block_size),
-            phase_distortion_engine: PhaseDistortionEngine::new(block_size),
-            six_op_engine: SixOpEngine::new(block_size),
-            snare_drum_engine: SnareDrumEngine::new(),
-            speech_engine: SpeechEngine::new(block_size),
-            string_engine: StringEngine::new(block_size),
-            string_machine_engine: StringMachineEngine::new(),
-            swarm_engine: SwarmEngine::new(),
-            virtual_analog_engine: VirtualAnalogEngine::new(block_size),
-            virtual_analog_vcf_engine: VirtualAnalogVcfEngine::new(),
-            waveshaping_engine: WaveshapingEngine::new(),
-            wavetable_engine: WavetableEngine::new(),
-            waveterrain_engine: WaveTerrainEngine::new(block_size),
+            engines: EngineBank {
+                additive_engine: AdditiveEngine::new(),
+                bass_drum_engine: BassDrumEngine::new(),
+                chiptune_engine: ChiptuneEngine::new(),
+                chord_engine: ChordEngine::new(),
+                fm_engine: FmEngine::new(),
+                grain_engine: GrainEngine::new(),
+                hihat_engine: HihatEngine::new(block_size),
+                modal_engine: ModalEngine::new(block_size),
+                noise_engine: NoiseEngine::new(block_size),
+                particle_engine: ParticleEngine::new(block_size),
+                phase_distortion_engine: PhaseDistortionEngine::new(block_size),
+                six_op_engine: SixOpEngine::new(block_size),
+                snare_drum_engine: SnareDrumEngine::new(),
+                speech_engine: SpeechEngine::new(block_size),
+                string_engine: StringEngine::new(block_size),
+                string_machine_engine: StringMachineEngine::new(),
+                swarm_engine: SwarmEngine::new(),
+                virtual_analog_engine: VirtualAnalogEngine::new(block_size),
+                virtual_analog_vcf_engine: VirtualAnalogVcfEngine::new(),
+                waveshaping_engine: WaveshapingEngine::new(),
+                wavetable_engine: WavetableEngine::new(),
+                waveterrain_engine: WaveTerrainEngine::new(block_size),
+            },
+            rng: Random::default(),
 
             resources: Resources::default(),
 
@@ -267,7 +316,7 @@ impl Voice<'_> {
     pub fn init(&mut self) {
         let sample_rate_hz = self.sample_rate_hz;
         for i in 0..NUM_ENGINES {
-            self.get_engine(i).unwrap().0.init(sample_rate_hz);
+            self.engines.get(i).unwrap().0.init(sample_rate_hz);
         }
 
         self.engine_quantizer.init(NUM_ENGINES as i32, 0.05, true);
@@ -275,6 +324,12 @@ impl Voice<'_> {
         self.aux_post_processor.init();
         self.decay_envelope.init();
         self.lpg_envelope.init();
+    }
+
+    /// Sets the voice's random state (`stmlib::Random::Seed`). A new voice starts from the
+    /// firmware's power-on state, [`Random::DEFAULT_SEED`].
+    pub fn seed(&mut self, seed: u32) {
+        self.rng.seed(seed);
     }
 
     #[inline]
@@ -317,24 +372,24 @@ impl Voice<'_> {
         if engine_index != self.previous_engine_index || self.reload_resources {
             match engine_index {
                 2 => {
-                    self.six_op_engine.load_syx_bank(self.resources.syx_bank_a);
+                    self.engines.six_op_engine.load_syx_bank(self.resources.syx_bank_a);
                 }
                 3 => {
-                    self.six_op_engine.load_syx_bank(self.resources.syx_bank_b);
+                    self.engines.six_op_engine.load_syx_bank(self.resources.syx_bank_b);
                 }
                 4 => {
-                    self.six_op_engine.load_syx_bank(self.resources.syx_bank_c);
+                    self.engines.six_op_engine.load_syx_bank(self.resources.syx_bank_c);
                 }
                 5 => {
-                    self.waveterrain_engine.set_user_terrain(self.resources.user_wave_terrain);
+                    self.engines.waveterrain_engine.set_user_terrain(self.resources.user_wave_terrain);
                 }
                 13 => {
-                    self.wavetable_engine.set_wavetables(self.resources.wavetables);
+                    self.engines.wavetable_engine.set_wavetables(self.resources.wavetables);
                 }
                 _ => {}
             }
 
-            let engine = self.get_engine(engine_index).unwrap().0;
+            let engine = self.engines.get(engine_index).unwrap().0;
             engine.reset();
 
             self.out_post_processor.reset();
@@ -375,12 +430,16 @@ impl Voice<'_> {
         if engine_index == 15 {
             internal_envelope_amplitude = 2.0 - p.harmonics * 6.0;
             internal_envelope_amplitude = internal_envelope_amplitude.clamp(0.0, 1.0);
-            self.speech_engine.set_prosody_amount(if !modulations.trigger_patched || modulations.frequency_patched {
+            self.engines.speech_engine.set_prosody_amount(if !modulations.trigger_patched || modulations.frequency_patched {
                 0.0
             } else {
                 patch.frequency_modulation_amount
             });
-            self.speech_engine.set_speed(if !modulations.trigger_patched || modulations.morph_patched { 0.0 } else { patch.morph_modulation_amount });
+            self.engines.speech_engine.set_speed(if !modulations.trigger_patched || modulations.morph_patched {
+                0.0
+            } else {
+                patch.morph_modulation_amount
+            });
         } else if engine_index == 7 {
             if modulations.trigger_patched && !modulations.timbre_patched {
                 // Disable internal envelope on TIMBRE, and enable the envelope generator
@@ -388,9 +447,9 @@ impl Voice<'_> {
                 internal_envelope_amplitude_timbre = 0.0;
                 // Envelope shape is determined by TIMBRE modulation amount. A minimum value
                 // is forced to prevent infinite decay time.
-                self.chiptune_engine.set_envelope_shape(patch.timbre_modulation_amount.max(0.05));
+                self.engines.chiptune_engine.set_envelope_shape(patch.timbre_modulation_amount.max(0.05));
             } else {
-                self.chiptune_engine.set_envelope_shape(chiptune_engine::NO_ENVELOPE);
+                self.engines.chiptune_engine.set_envelope_shape(chiptune_engine::NO_ENVELOPE);
             }
         }
 
@@ -430,12 +489,12 @@ impl Voice<'_> {
             1.0,
         );
 
-        let engine = self.get_engine(engine_index).unwrap();
+        let engine = self.engines.get(engine_index).unwrap();
         let mut already_enveloped = engine.1;
         let out_gain = engine.2;
         let aux_gain = engine.3;
 
-        engine.0.render(&p, out, aux, &mut already_enveloped);
+        engine.0.render(&p, &mut self.rng, out, aux, &mut already_enveloped);
 
         let lpg_bypass = already_enveloped || (!modulations.level_patched && !modulations.trigger_patched);
 
@@ -475,37 +534,6 @@ impl Voice<'_> {
 
     pub fn active_engine(&self) -> usize {
         self.previous_engine_index
-    }
-
-    /// Return reference to engine by index as well as additional parameters
-    fn get_engine(&mut self, index: usize) -> Option<(&mut dyn Engine, bool, f32, f32)> {
-        match index {
-            0 => Some((&mut self.virtual_analog_vcf_engine, false, 1.0, 1.0)),
-            1 => Some((&mut self.phase_distortion_engine, false, 0.7, 0.7)),
-            2 => Some((&mut self.six_op_engine, true, 1.0, 1.0)),
-            3 => Some((&mut self.six_op_engine, true, 1.0, 1.0)),
-            4 => Some((&mut self.six_op_engine, true, 1.0, 1.0)),
-            5 => Some((&mut self.waveterrain_engine, false, 0.7, 0.7)),
-            6 => Some((&mut self.string_machine_engine, false, 0.8, 0.8)),
-            7 => Some((&mut self.chiptune_engine, false, 0.5, 0.5)),
-            8 => Some((&mut self.virtual_analog_engine, false, 0.8, 0.8)),
-            9 => Some((&mut self.waveshaping_engine, false, 0.7, 0.6)),
-            10 => Some((&mut self.fm_engine, false, 0.6, 0.6)),
-            11 => Some((&mut self.grain_engine, false, 0.7, 0.6)),
-            12 => Some((&mut self.additive_engine, false, 0.8, 0.8)),
-            13 => Some((&mut self.wavetable_engine, false, 0.6, 0.6)),
-            14 => Some((&mut self.chord_engine, false, 0.8, 0.8)),
-            15 => Some((&mut self.speech_engine, false, -0.7, 0.8)),
-            16 => Some((&mut self.swarm_engine, false, -3.0, 1.0)),
-            17 => Some((&mut self.noise_engine, false, -1.0, -1.0)),
-            18 => Some((&mut self.particle_engine, false, -2.0, 1.0)),
-            19 => Some((&mut self.string_engine, true, -1.0, 0.8)),
-            20 => Some((&mut self.modal_engine, true, -1.0, 0.8)),
-            21 => Some((&mut self.bass_drum_engine, true, 0.8, 0.8)),
-            22 => Some((&mut self.snare_drum_engine, true, 0.8, 0.8)),
-            23 => Some((&mut self.hihat_engine, true, 0.8, 0.8)),
-            _ => None,
-        }
     }
 }
 

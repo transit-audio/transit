@@ -13,6 +13,7 @@
 
 // Based on MIT-licensed code (c) 2016 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
+use crate::utils::random::Random;
 use std::boxed::Box;
 use std::vec;
 
@@ -61,7 +62,7 @@ impl Engine for VirtualAnalogEngine {
     }
 
     #[inline]
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, _rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         // VA_VARIANT 2
         // 1 = variable square controlled by TIMBRE.

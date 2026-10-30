@@ -23,7 +23,6 @@ use crate::utils::random::Random;
 
 #[derive(Debug, Clone)]
 pub struct ModalEngine {
-    rng: Random,
     voice: ModalVoice,
     harmonics_lp: f32,
 
@@ -34,7 +33,6 @@ pub struct ModalEngine {
 impl ModalEngine {
     pub fn new(block_size: usize) -> Self {
         Self {
-            rng: Random::default(),
             voice: ModalVoice::default(),
             harmonics_lp: 0.0,
             temp_buffer_1: vec![0.0; block_size].into_boxed_slice(),
@@ -44,10 +42,6 @@ impl ModalEngine {
 }
 
 impl Engine for ModalEngine {
-    fn seed(&mut self, seed: u32) {
-        self.rng.seed(seed);
-    }
-
     fn init(&mut self, _sample_rate_hz: f32) {
         self.harmonics_lp = 0.0;
         self.reset();
@@ -58,7 +52,7 @@ impl Engine for ModalEngine {
     }
 
     #[inline]
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         out.fill(0.0);
         aux.fill(0.0);
@@ -69,7 +63,7 @@ impl Engine for ModalEngine {
         let trigger = parameters.trigger.has(TriggerState::RISING_EDGE);
 
         self.voice.render(
-            &mut self.rng,
+            rng,
             sustain,
             trigger,
             parameters.accent,

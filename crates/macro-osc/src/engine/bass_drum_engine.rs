@@ -24,7 +24,6 @@ use crate::utils::random::Random;
 
 #[derive(Debug, Default, Clone)]
 pub struct BassDrumEngine {
-    rng: Random,
     analog_bass_drum: AnalogBassDrum,
     synthetic_bass_drum: SyntheticBassDrum,
 
@@ -38,10 +37,6 @@ impl BassDrumEngine {
 }
 
 impl Engine for BassDrumEngine {
-    fn seed(&mut self, seed: u32) {
-        self.rng.seed(seed);
-    }
-
     fn init(&mut self, sample_rate_hz: f32) {
         self.analog_bass_drum.init(sample_rate_hz);
         self.synthetic_bass_drum.init(sample_rate_hz);
@@ -49,7 +44,7 @@ impl Engine for BassDrumEngine {
     }
 
     #[inline]
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
 
@@ -75,7 +70,7 @@ impl Engine for BassDrumEngine {
         self.overdrive.process(0.5 + 0.5 * drive, out);
 
         self.synthetic_bass_drum.render(
-            &mut self.rng,
+            rng,
             sustain,
             trigger,
             parameters.accent,

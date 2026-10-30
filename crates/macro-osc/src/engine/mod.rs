@@ -19,22 +19,24 @@ pub mod virtual_analog_engine;
 pub mod waveshaping_engine;
 pub mod wavetable_engine;
 
+use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 
 pub trait Engine: Send {
-    /// Seeds the engine's random generator, as `stmlib::Random::Seed` seeds the firmware's one.
-    /// Engines that never draw a random number ignore it.
-    fn seed(&mut self, _seed: u32) {}
-
     fn init(&mut self, sample_rate_hz: f32);
 
     fn reset(&mut self) {}
 
-    /// Renders one block into `out` and `aux`. Contract: `init` (then `reset`) has run; `out` and
-    /// `aux` have the same length, 1 to the block size the engine was built with and never more
-    /// than [`MAX_BLOCK_SIZE`]; `parameters.note` is finite (the pitch is clamped to the firmware's
-    /// range, notes -119 to 136). Checked with `debug_assert!` ([`debug_check_render`]).
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], already_enveloped: &mut bool);
+    /// Renders one block into `out` and `aux`, drawing any random numbers from `rng`. The firmware
+    /// keeps one generator for the whole module (`stmlib::Random`, a static) that every engine draws
+    /// from; the caller owns it here (a voice owns one and hands it to whichever engine renders), so
+    /// the draw sequence matches the firmware across engine switches.
+    ///
+    /// Contract: `init` (then `reset`) has run; `out` and `aux` have the same length, 1 to the block
+    /// size the engine was built with and never more than [`MAX_BLOCK_SIZE`]; `parameters.note` is
+    /// finite (the pitch is clamped to the firmware's range, notes -119 to 136).
+    /// Checked with `debug_assert!` ([`debug_check_render`]).
+    fn render(&mut self, parameters: &EngineParameters, rng: &mut Random, out: &mut [f32], aux: &mut [f32], already_enveloped: &mut bool);
 }
 
 #[derive(Debug, Default, Clone)]

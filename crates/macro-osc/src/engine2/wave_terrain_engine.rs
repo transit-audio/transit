@@ -11,6 +11,7 @@
 
 // Based on MIT-licensed code (c) 2021 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
+use crate::utils::random::Random;
 use std::boxed::Box;
 use std::vec;
 
@@ -87,7 +88,7 @@ impl Engine for WaveTerrainEngine<'_> {
         self.user_terrain = None;
     }
 
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, _rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         const OVERSAMPLING: usize = 2;
         const SCALE: f32 = 1.0 / OVERSAMPLING as f32;

@@ -23,7 +23,6 @@ use crate::utils::random::Random;
 
 #[derive(Debug, Clone)]
 pub struct HihatEngine {
-    rng: Random,
     hi_hat_1: Hihat,
     hi_hat_2: Hihat,
 
@@ -34,7 +33,6 @@ pub struct HihatEngine {
 impl HihatEngine {
     pub fn new(block_size: usize) -> Self {
         Self {
-            rng: Random::default(),
             hi_hat_1: Hihat::default(),
             hi_hat_2: Hihat::default(),
             temp_buffer_1: vec![0.0; block_size].into_boxed_slice(),
@@ -44,17 +42,13 @@ impl HihatEngine {
 }
 
 impl Engine for HihatEngine {
-    fn seed(&mut self, seed: u32) {
-        self.rng.seed(seed);
-    }
-
     fn init(&mut self, sample_rate_hz: f32) {
         self.hi_hat_1.init(sample_rate_hz);
         self.hi_hat_2.init(sample_rate_hz);
     }
 
     #[inline]
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
 
@@ -62,7 +56,7 @@ impl Engine for HihatEngine {
         let trigger = parameters.trigger.has(TriggerState::RISING_EDGE);
 
         self.hi_hat_1.render(
-            &mut self.rng,
+            rng,
             sustain,
             trigger,
             parameters.accent,
@@ -80,7 +74,7 @@ impl Engine for HihatEngine {
         );
 
         self.hi_hat_2.render(
-            &mut self.rng,
+            rng,
             sustain,
             trigger,
             parameters.accent,

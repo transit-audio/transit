@@ -14,6 +14,7 @@ use crate::engine::{Engine, EngineParameters, note_to_frequency};
 use crate::oscillator::variable_shape_oscillator::VariableShapeOscillator;
 use crate::utils::filter::{FilterMode, FrequencyApproximation, Svf};
 use crate::utils::parameter_interpolator::ParameterInterpolator;
+use crate::utils::random::Random;
 use crate::utils::soft_clip;
 use crate::utils::units::semitones_to_ratio;
 
@@ -61,7 +62,7 @@ impl Engine for VirtualAnalogVcfEngine {
         self.previous_gain = 0.0;
     }
 
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, _rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
 

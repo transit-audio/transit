@@ -25,21 +25,16 @@ const NUM_SWARM_VOICES: usize = 8;
 
 #[derive(Debug, Default, Clone)]
 pub struct SwarmEngine {
-    rng: Random,
     swarm_voice: [SwarmVoice; NUM_SWARM_VOICES],
 }
 
 impl SwarmEngine {
     pub fn new() -> Self {
-        Self { rng: Random::default(), swarm_voice: core::array::from_fn(|_| SwarmVoice::default()) }
+        Self { swarm_voice: core::array::from_fn(|_| SwarmVoice::default()) }
     }
 }
 
 impl Engine for SwarmEngine {
-    fn seed(&mut self, seed: u32) {
-        self.rng.seed(seed);
-    }
-
     fn init(&mut self, _sample_rate_hz: f32) {
         self.reset();
     }
@@ -54,7 +49,7 @@ impl Engine for SwarmEngine {
     }
 
     #[inline]
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
         let control_rate = out.len() as f32;
@@ -72,7 +67,7 @@ impl Engine for SwarmEngine {
         aux.fill(0.0);
 
         for swarm_voice in &mut self.swarm_voice {
-            swarm_voice.render(&mut self.rng, f0, density, burst_mode, start_burst, spread, size_ratio, out, aux);
+            swarm_voice.render(rng, f0, density, burst_mode, start_burst, spread, size_ratio, out, aux);
             size_ratio *= 0.97;
         }
     }

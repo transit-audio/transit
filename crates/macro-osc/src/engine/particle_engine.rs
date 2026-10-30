@@ -26,7 +26,6 @@ const NUM_PARTICLES: usize = 6;
 
 #[derive(Debug, Clone)]
 pub struct ParticleEngine {
-    rng: Random,
     particle: [Particle; NUM_PARTICLES],
     diffuser: Diffuser,
     post_filter: Svf,
@@ -37,7 +36,6 @@ pub struct ParticleEngine {
 impl ParticleEngine {
     pub fn new(block_size: usize) -> Self {
         Self {
-            rng: Random::default(),
             particle: core::array::from_fn(|_| Particle::new()),
             diffuser: Diffuser::new(),
             post_filter: Svf::new(),
@@ -47,10 +45,6 @@ impl ParticleEngine {
 }
 
 impl Engine for ParticleEngine {
-    fn seed(&mut self, seed: u32) {
-        self.rng.seed(seed);
-    }
-
     fn init(&mut self, sample_rate_hz: f32) {
         for particle in &mut self.particle {
             particle.init();
@@ -65,7 +59,7 @@ impl Engine for ParticleEngine {
     }
 
     #[inline]
-    fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+    fn render(&mut self, parameters: &EngineParameters, rng: &mut Random, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
         let density_sqrt = note_to_frequency(60.0 + parameters.timbre * parameters.timbre * 72.0, parameters.a0_normalized);
@@ -83,7 +77,7 @@ impl Engine for ParticleEngine {
         aux.fill(0.0);
 
         for particle in &mut self.particle {
-            particle.render(&mut self.rng, sync, density, gain, f0, spread, q, out, aux);
+            particle.render(rng, sync, density, gain, f0, spread, q, out, aux);
         }
 
         self.post_filter.set_f_q(f32::min(f0, 0.49), 0.5, FrequencyApproximation::Dirty);

@@ -17,6 +17,7 @@
 #![forbid(unsafe_code)]
 
 use transit_macro_osc::engine::{Engine, EngineParameters, TriggerState};
+use transit_macro_osc::utils::random::Random;
 use transit_macro_osc_oracle::floor::RunnerFamily;
 use transit_macro_osc_oracle::residual::{Residual, residual_f32};
 use transit_macro_osc_oracle::sweep::{ENGINE_POINT_FRAMES, EnginePoint, SEED, engine_points, render_engine_point};
@@ -82,7 +83,7 @@ struct PortRender {
 
 fn render_port_point(model: Model, point: &EnginePoint) -> PortRender {
     let mut engine = port_engine(model);
-    engine.seed(SEED);
+    let mut rng = Random::new(SEED);
     engine.init(transit_macro_osc::REF_SAMPLE_RATE);
     engine.reset();
     let blocks = ENGINE_POINT_FRAMES / BLOCK_SIZE;
@@ -101,7 +102,7 @@ fn render_port_point(model: Model, point: &EnginePoint) -> PortRender {
             a0_normalized: transit_macro_osc::A0,
         };
         let mut enveloped = false;
-        engine.render(&parameters, out, aux, &mut enveloped);
+        engine.render(&parameters, &mut rng, out, aux, &mut enveloped);
     }
     render
 }
