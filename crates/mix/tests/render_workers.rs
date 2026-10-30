@@ -387,6 +387,20 @@ fn a_strip_that_is_late_every_block_is_not_reported_held() {
     drop(rig.mix.into_retired());
 }
 
+/// Holds strip `k`'s worker inside its plug-in and renders blocks until that worker is there (its
+/// `holding` signal), so the strip is away by construction and stays away until the test clears
+/// `hold`: the wait is on the strip the test asserts about, never on "some strip is away" (on a
+/// slow host another strip can be the late one while `k` renders inline, E49, #226).
+fn hold_until_away(rig: &mut Rig, k: usize) {
+    rig.shared[k].hold.store(true, Ordering::Release);
+    let start = Instant::now();
+    while !rig.shared[k].holding.load(Ordering::Acquire) {
+        assert!(start.elapsed() < Duration::from_secs(10), "no worker ever took held strip {k}");
+        rig.block();
+    }
+    assert!(!rig.mix.render_workers_settled(), "a worker holds strip {k}");
+}
+
 /// Waits until every strip is home, rendering nothing.
 fn settle_home(rig: &mut Rig) {
     let start = Instant::now();
@@ -414,12 +428,9 @@ fn retirement_quarantines_a_worker_that_does_not_return() {
         for _ in 0..20 {
             rig.block();
         }
-        rig.shared[4].stall_ns.store(4_000_000_000, Ordering::Relaxed);
-        let start = Instant::now();
-        while rig.mix.render_workers_settled() {
-            assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip never went away");
-            rig.block();
-        }
+        // Strip 4's worker stays inside the plug-in until the test lets it go (after retirement),
+        // so it is the one quarantined whatever the host's speed.
+        hold_until_away(&mut rig, 4);
         transit_mix::unmark_audio_thread();
         rig
     })
@@ -429,8 +440,11 @@ fn retirement_quarantines_a_worker_that_does_not_return() {
     let start = Instant::now();
     let retired = rig.mix.into_retired();
     let took = start.elapsed();
-    assert!(took < Duration::from_secs(2), "retirement waited {took:?} for a worker inside a plug-in");
     let instances = retired.instances();
+    let still_held = rig.shared[4].holding.load(Ordering::Acquire);
+    rig.shared[4].hold.store(false, Ordering::Release);
+    assert!(still_held, "the worker was still inside strip 4's plug-in at retirement");
+    assert!(took < Duration::from_secs(2), "retirement waited {took:?} for a worker inside a plug-in");
     assert_eq!(instances.len(), INSTRUMENTS - 1, "the quarantined strip stays in its cell: {instances:?}");
     assert!(!instances.iter().any(|b| b.0 == rig.bindings[4].0), "the quarantined instance is never handed back");
 }
@@ -449,15 +463,10 @@ fn stop_while_a_strip_is_away_drops_what_was_parked_for_it() {
     for _ in 0..20 {
         rig.block();
     }
-    rig.shared[1].stall_ns.store(100_000_000, Ordering::Relaxed);
-    let start = Instant::now();
-    while rig.mix.render_workers_settled() {
-        assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip never went away");
-        rig.block();
-    }
+    hold_until_away(&mut rig, 1);
     assert_eq!(rig.note_on(1, 0, 70), EventOutcome::Queued, "parked while away");
     rig.mix.reset();
-    rig.shared[1].stall_ns.store(0, Ordering::Relaxed);
+    rig.shared[1].hold.store(false, Ordering::Release);
     settle(&mut rig);
     let trace: Vec<_> = rig.shared[1].inst.lock().unwrap().trace().iter().map(|l| (l.event.status & 0xF0, l.event.data1)).collect();
     assert!(!trace.contains(&(0x90, 70)), "a note parked before the stop started after it: {trace:?}");
@@ -482,12 +491,9 @@ fn an_overflowing_ring_while_a_strip_is_away_leaves_nothing_stuck() {
     for _ in 0..20 {
         rig.block();
     }
-    rig.shared[3].stall_ns.store(400_000_000, Ordering::Relaxed);
-    let start = Instant::now();
-    while rig.mix.render_workers_settled() {
-        assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip never went away");
-        rig.block();
-    }
+    // Strip 3 is held away for the whole burst (released below), not for a stall a slow host can
+    // outlast.
+    hold_until_away(&mut rig, 3);
     // Forty blocks of dense playing on the away strip: eight notes struck and released per block
     // and the pedal pressed and lifted.
     for b in 0..40u8 {
@@ -499,8 +505,9 @@ fn an_overflowing_ring_while_a_strip_is_away_leaves_nothing_stuck() {
         assert!(rig.pedal(3, 60, b % 2 == 0).accepted());
         rig.block();
     }
+    assert!(rig.shared[3].holding.load(Ordering::Acquire), "strip 3 was away for the whole burst");
     assert!(rig.pedal(3, 0, false).accepted());
-    rig.shared[3].stall_ns.store(0, Ordering::Relaxed);
+    rig.shared[3].hold.store(false, Ordering::Release);
     settle(&mut rig);
     let f = rig.mix.strip_faults().unwrap().snapshot();
     let r = rig.shared[3].report();
@@ -527,14 +534,10 @@ fn parked_then_settled_then_released(press: impl Fn(&mut Rig) -> EventOutcome, r
     for _ in 0..20 {
         rig.block();
     }
-    rig.shared[2].stall_ns.store(100_000_000, Ordering::Relaxed);
-    let start = Instant::now();
-    while rig.mix.render_workers_settled() {
-        assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip never went away");
-        rig.block();
-    }
+    hold_until_away(&mut rig, 2);
     assert_eq!(press(&mut rig), EventOutcome::Queued, "parked while away");
-    // The worker finishes; the strip comes home between blocks, with no block rendered.
+    // The worker is let go; the strip comes home between blocks, with no block rendered.
+    rig.shared[2].hold.store(false, Ordering::Release);
     let start = Instant::now();
     // timing: stall-bound polls for the stalled worker; its only exit budget is the 10 s stall bound
     while !rig.mix.render_workers_settled() {
@@ -829,16 +832,11 @@ fn carry_a_pair(rig: &mut Rig, key: u8) {
     for _ in 0..20 {
         rig.block();
     }
-    rig.shared[2].stall_ns.store(100_000_000, Ordering::Relaxed);
-    let start = Instant::now();
-    while rig.mix.render_workers_settled() {
-        assert!(start.elapsed() < Duration::from_secs(10), "the stalled strip never went away");
-        rig.block();
-    }
+    hold_until_away(rig, 2);
     let last = u32::try_from(FRAMES - 1).unwrap();
     assert_eq!(rig.note_on(2, last, key), EventOutcome::Queued);
     assert_eq!(rig.note_off(2, last, key), EventOutcome::Queued);
-    rig.shared[2].stall_ns.store(0, Ordering::Relaxed);
+    rig.shared[2].hold.store(false, Ordering::Release);
     let start = Instant::now();
     // timing: stall-bound polls for the stalled worker; its only exit budget is the 10 s stall bound
     while !rig.mix.render_workers_settled() {
