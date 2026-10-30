@@ -10,6 +10,10 @@
 //!   host thread's queue (ADR 0018, ADR 0030).
 //! - The host thread's [`crate::gui_thread::MessageQueue`] waits on the connection
 //!   ([`connection_fd`]) and dispatches its events ([`pump`]).
+//! - Other clients see what a call did once it returns: creating, resizing and destroying end with
+//!   a round trip (`settle`). The X server orders requests per connection only, so without it a
+//!   plug-in (its own connection) handed the new window's id could ask for a child in a window the
+//!   server has not created yet (`BadWindow`), or read the old size after `resizeView`.
 //! - Closing (the window manager's close button, `WM_DELETE_WINDOW`) only hides the window; the
 //!   editor link notices it in `idle` ([`EditorWindow::is_visible`]), detaches the view, then
 //!   calls [`EditorWindow::close`].
@@ -214,7 +218,17 @@ fn set_content(c: &Conn, f: &Frame, w: i32, h: i32) {
     let _ = hints.set_normal_hints(&c.c, f.id);
     let _ = c.c.configure_window(f.id, &ConfigureWindowAux::new().width(dim(cw)).height(dim(ch)));
     let _ = c.c.configure_window(f.content, &ConfigureWindowAux::new().x(0).y(0).width(dim(cw)).height(dim(ch)));
-    let _ = c.c.flush();
+    // The plug-in may read its parent's size as soon as this returns (after `resizeView`).
+    settle(c);
+}
+
+/// Waits until the X server has processed every request sent so far on this connection (a
+/// round trip), so a request of another client made after this returns sees their effect. The
+/// server keeps no order between connections: `flush` only puts the requests on the socket.
+fn settle(c: &Conn) {
+    if let Err(e) = c.c.sync() {
+        log::debug!("editor windows: X11 round trip failed: {e}");
+    }
 }
 
 fn set_title(c: &Conn, f: &Frame, title: &str) {
@@ -448,7 +462,7 @@ impl EditorWindow {
     pub fn close(self) {
         let Some((c, f)) = self.live() else { return };
         let _ = c.c.destroy_window(f.id);
-        let _ = c.c.flush();
+        settle(&c);
         FRAMES.with(|v| v.borrow_mut().retain(|x| x.id != f.id));
         BY_THREAD.lock().unwrap_or_else(PoisonError::into_inner).retain(|&(_, id)| id != f.id);
     }
