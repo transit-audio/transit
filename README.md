@@ -22,7 +22,7 @@ layer and egui UI. transit began in October 2026 as a fork of
 credited in About and in NOTICE.
 
 > [!NOTE]
-> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.5.0](https://github.com/transit-audio/transit/releases/tag/v0.5.0) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
+> transit is [alpha](docs/roadmap.md#beta) software under active development; the current release is [v0.5.1](https://github.com/transit-audio/transit/releases/tag/v0.5.1) (see [Downloads](#downloads)). transit checks once a day for a newer release with one anonymous request to GitHub and tells you; turn it off in the Help menu or with `TRANSIT_NO_UPDATE_CHECK=1` ([details](docs/building.md#the-update-check)). The current priority is core engine
 > correctness, stability and performance, measured on real hardware, ahead of new features.
 > Expect rough edges in the UI and some missing features; the audio engine, recording alignment
 > and device handling get fixed first, following [the engineering principles](docs/principles.md).
@@ -41,7 +41,7 @@ credited in About and in NOTICE.
 
 transit changes a default only after a measurement on the reference hardware. The multicore render became the default on two records: the [gate 6 run on a Focusrite Scarlett](docs/benchmarks/2026-10-28-scarlett-render-workers-gate-6.md) and the eight-hour endurance run recorded on [issue #130](https://github.com/transit-audio/transit/issues/130), both listed in the [benchmark index](docs/benchmarks/README.md).
 
-- Every defect that gets past a gate becomes an [escape record](docs/escapes) (21 so far) naming the gate that now catches it.
+- Every defect that gets past a gate becomes an [escape record](docs/escapes) (23 so far) naming the gate that now catches it.
 - Every design change is an [ADR](docs/adr) that cites its evidence, for example [ADR 0029](docs/adr/0029-strip-job-slots.md).
 - Every merge gets a [refutation review](docs/contributing/evidence/refutation-review.md) that tries to break it.
 - What we know is broken is public: the [known issues](docs/known-issues/README.md).
@@ -50,7 +50,7 @@ Send us a measurement with the [measurement issue template](https://github.com/t
 
 ## Downloads
 
-The current release is [v0.5.0](https://github.com/transit-audio/transit/releases/tag/v0.5.0). The files are `transit-v0.5.0-windows-x86_64.msi` and `.zip`, `transit-v0.5.0-macos-arm64.dmg` and `.tar.gz`, `transit-v0.5.0-linux-x86_64.tar.gz`, and `transit-0.5.0-linux-x86_64.AppImage`, `.deb` and `.rpm`.
+The current release is [v0.5.1](https://github.com/transit-audio/transit/releases/tag/v0.5.1). The files are `transit-v0.5.1-windows-x86_64.msi` and `.zip`, `transit-v0.5.1-macos-arm64.dmg` and `.tar.gz`, `transit-v0.5.1-linux-x86_64.tar.gz`, and `transit-0.5.1-linux-x86_64.AppImage`, `.deb` and `.rpm`.
 
 - **Windows (x86_64):** one download, the `.zip` (portable) or the `.msi` (installer with the standard install dialogs and license; it registers `.transit` and `.transitz`). It has native WASAPI and native ASIO.
 - **macOS (Apple silicon):** the `.dmg`; open it and drag `transit.app` to Applications.
