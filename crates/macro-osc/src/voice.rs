@@ -279,6 +279,9 @@ pub struct Voice<'a> {
     /// `(20 * kBlockSize) / kSampleRate`, the low-pass gate's decay tail before the knob's scaling.
     decay_tail_scale: f32,
     a0_normalized: f32,
+    /// The firmware's `a0` at this rate; `a0_normalized` is it times the tuning's pitch scale.
+    a0_firmware: f32,
+    tuning: crate::Tuning,
 }
 
 impl Voice<'_> {
@@ -352,6 +355,8 @@ impl Voice<'_> {
             short_decay_scale: (200.0 * CONTROL_BLOCK_SIZE) / sample_rate_hz,
             decay_tail_scale: (20.0 * CONTROL_BLOCK_SIZE) / sample_rate_hz,
             a0_normalized,
+            a0_firmware: a0_normalized,
+            tuning: crate::Tuning::Firmware,
         };
         voice.init();
         voice
@@ -378,6 +383,23 @@ impl Voice<'_> {
         self.previous_note = 0.0;
 
         self.trigger_delay.init();
+    }
+
+    /// Sets how the voice computes pitch (see [`crate::Tuning`]). A new voice uses
+    /// [`crate::Tuning::Firmware`], the firmware's arithmetic bit for bit. Allocation-free and cheap:
+    /// safe on the audio thread; a sounding note changes pitch at the next block.
+    pub fn set_tuning(&mut self, tuning: crate::Tuning) {
+        self.tuning = tuning;
+        // Times exactly 1 for the firmware's tuning, so its `a0` is kept bit for bit.
+        self.a0_normalized = self.a0_firmware * tuning.pitch_scale();
+        self.engines.six_op_engine.set_tuning(tuning);
+        self.engines.speech_engine.set_tuning(tuning);
+    }
+
+    /// How the voice computes pitch.
+    #[must_use]
+    pub fn tuning(&self) -> crate::Tuning {
+        self.tuning
     }
 
     /// Sets the voice's random state (`stmlib::Random::Seed`). A new voice starts from the

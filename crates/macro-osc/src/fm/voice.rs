@@ -35,6 +35,7 @@ pub struct Voice<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> {
     sample_rate: f32,
     one_hz: f32,
     a0: f32,
+    tuning: crate::Tuning,
 
     gate: bool,
 
@@ -69,6 +70,7 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
             sample_rate: 0.0,
             one_hz: 0.0,
             a0: 0.0,
+            tuning: crate::Tuning::Firmware,
 
             gate: false,
 
@@ -91,13 +93,22 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
         }
     }
 
+    /// Sets the pitch reference (see [`crate::Tuning`]); kept across `init`. Times exactly 1 for
+    /// the firmware's tuning, so its `a0` is kept bit for bit.
+    pub fn set_tuning(&mut self, tuning: crate::Tuning) {
+        self.tuning = tuning;
+        if self.sample_rate > 0.0 {
+            self.a0 = 55.0 / self.sample_rate * tuning.pitch_scale();
+        }
+    }
+
     #[inline]
     pub fn init(&mut self, algorithms: &'a Algorithms<NUM_OPERATORS, NUM_ALGORITHMS>, sample_rate: f32) {
         self.algorithms = Some(algorithms);
 
         self.sample_rate = sample_rate;
         self.one_hz = 1.0 / sample_rate;
-        self.a0 = 55.0 / sample_rate;
+        self.a0 = 55.0 / sample_rate * self.tuning.pitch_scale();
 
         let native_sr = 44100.0; // Legacy sample rate.
         let envelope_scale = native_sr * self.one_hz;

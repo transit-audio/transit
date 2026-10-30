@@ -110,8 +110,20 @@ The trigger delay is 5 blocks at every rate: 1.25 ms at 48 kHz, 1.36 ms at 44.1 
 96 kHz.
 Per-block coefficients inside the engines and the low-pass gate (the vactrol's 0.6 attack per block,
 filter cutoffs normalized to the sample) are the firmware's 48 kHz values, so timbre can shift
-slightly at the other rates; only 48 kHz is nulled. Whether the instrument retunes by the 4.6 cents
-is the wrapper's decision.
+slightly at the other rates; only 48 kHz is nulled.
+
+## Tuning
+
+`Voice::set_tuning` chooses the pitch reference. `Tuning::Firmware`, the default, is the
+firmware's arithmetic bit for bit (4.6 cents sharp at a true 48 kHz; the null tests use it).
+`Tuning::Concert` scales every frequency the firmware derives from its corrected rate by
+47872.34 / 48000: the voice's `a0` (so every engine's pitch, and the clocks and densities derived
+from it), the six-operator voices' own reference and the speech formants, so A4 is 440 Hz at every
+rate, as on the module, whose codec runs at the corrected rate. `tests/voice_tuning.rs` checks
+equal temperament at every rate within 0.05 cent on the FM engine, the ratio between the two
+tunings within 0.01 cent, the six-op and LPC speech paths within 0.25 cent, and that the firmware
+tuning round-trips bit for bit. The Macro Oscillator instrument plays concert pitch unless its
+Hardware Tuning switch is on (ADR 0033, implementation note).
 
 ## Flush-to-zero
 

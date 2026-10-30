@@ -57,6 +57,12 @@ impl SpeechEngine<'_> {
             speed: 1.0,
         }
     }
+
+    /// Sets the pitch reference of the formant filters (see [`crate::Tuning`]); kept across `init`.
+    /// The pitch itself follows the voice's `a0`.
+    pub fn set_tuning(&mut self, tuning: crate::Tuning) {
+        self.naive_speech_synth.set_tuning(tuning);
+    }
 }
 
 impl Engine for SpeechEngine<'_> {

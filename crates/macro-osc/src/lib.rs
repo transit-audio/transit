@@ -37,6 +37,35 @@ pub const CORRECTED_SAMPLE_RATE: f32 = 47872.34;
 /// The normalized frequency of A0 that every pitch is computed from (`a0` in `dsp/dsp.h`).
 pub const A0: f32 = (440.0 / 8.0) / CORRECTED_SAMPLE_RATE;
 
+/// How a voice computes pitch (`Voice::set_tuning`).
+///
+/// The firmware computes every frequency against its corrected rate, [`CORRECTED_SAMPLE_RATE`],
+/// because the module's codec runs at 47872.34 Hz: on the module, A4 is 440 Hz. Rendered at a true
+/// 48 kHz the same arithmetic plays 48000 / 47872.34 sharp (4.6 cents). [`Tuning::Firmware`] keeps
+/// that arithmetic bit for bit (what the oracle null tests check); [`Tuning::Concert`] scales every
+/// frequency the firmware derives from its corrected rate (the `a0` of `dsp/dsp.h`, the six-operator
+/// voices' reference and the speech formants) by 47872.34 / 48000, so A4 is 440 Hz at any rate.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Tuning {
+    /// The firmware's arithmetic: 4.6 cents sharp at a true 48 kHz.
+    #[default]
+    Firmware,
+    /// Concert pitch: A4 = 440 Hz.
+    Concert,
+}
+
+impl Tuning {
+    /// The factor applied to every frequency the firmware derives from its corrected rate: exactly
+    /// 1 for [`Tuning::Firmware`], 47872.34 / 48000 for [`Tuning::Concert`].
+    #[must_use]
+    pub fn pitch_scale(self) -> f32 {
+        match self {
+            Self::Firmware => 1.0,
+            Self::Concert => CORRECTED_SAMPLE_RATE / REF_SAMPLE_RATE,
+        }
+    }
+}
+
 /// The rates a voice runs at. 48 kHz is the firmware's rate and the only one the oracle renders;
 /// the others keep the firmware's pitch and envelope times (see the crate README, "Sample rate").
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]

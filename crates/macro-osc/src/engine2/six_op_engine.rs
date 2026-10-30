@@ -43,6 +43,7 @@ pub struct SixOpEngine<'a> {
     active_voice: usize,
     rendered_voice: usize,
     sample_rate: f32,
+    tuning: crate::Tuning,
 }
 
 impl SixOpEngine<'_> {
@@ -56,6 +57,15 @@ impl SixOpEngine<'_> {
             active_voice: 0,
             rendered_voice: 0,
             sample_rate: 48000.0,
+            tuning: crate::Tuning::Firmware,
+        }
+    }
+
+    /// Sets the voices' pitch reference (see [`crate::Tuning`]); kept across `init`.
+    pub fn set_tuning(&mut self, tuning: crate::Tuning) {
+        self.tuning = tuning;
+        for voice in self.voice.iter_mut() {
+            voice.set_tuning(tuning);
         }
     }
 
@@ -83,6 +93,7 @@ impl Engine for SixOpEngine<'_> {
         });
         for voice in self.voice.iter_mut() {
             voice.init(algorithms, self.sample_rate);
+            voice.set_tuning(self.tuning);
         }
 
         self.active_voice = NUM_SIX_OP_VOICES - 1;
@@ -229,6 +240,11 @@ impl<'a> FmVoice<'a> {
     }
 
     #[inline]
+    /// Sets the voice's pitch reference (see [`crate::Tuning`]).
+    pub fn set_tuning(&mut self, tuning: crate::Tuning) {
+        self.voice.set_tuning(tuning);
+    }
+
     pub fn mutable_lfo(&mut self) -> &mut Lfo {
         &mut self.lfo
     }

@@ -22,6 +22,7 @@ pub struct NaiveSpeechSynth {
 
     sample_rate_hz: f32,
     a0_normalized: f32,
+    tuning: crate::Tuning,
 }
 
 impl NaiveSpeechSynth {
@@ -29,10 +30,18 @@ impl NaiveSpeechSynth {
         Self::default()
     }
 
+    /// Sets the formants' pitch reference (see [`crate::Tuning`]); kept across `init`.
+    pub fn set_tuning(&mut self, tuning: crate::Tuning) {
+        self.tuning = tuning;
+        if self.sample_rate_hz > 0.0 {
+            self.a0_normalized = crate::A0 * (crate::REF_SAMPLE_RATE / self.sample_rate_hz) * tuning.pitch_scale();
+        }
+    }
+
     pub fn init(&mut self, sample_rate: f32) {
         self.sample_rate_hz = sample_rate;
         // The firmware's `a0` (A0 against its corrected sample rate).
-        self.a0_normalized = crate::A0 * (crate::REF_SAMPLE_RATE / sample_rate);
+        self.a0_normalized = crate::A0 * (crate::REF_SAMPLE_RATE / sample_rate) * self.tuning.pitch_scale();
 
         self.pulse.init(sample_rate);
         self.frequency = 0.0;
