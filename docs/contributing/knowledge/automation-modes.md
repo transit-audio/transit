@@ -52,6 +52,9 @@ How it works:
   their 64-sample grid; sends at the block start. Plug-in parameters return in block steps (the
   block-start value), and the lane's breakpoints go out at their offsets again from the ramp's end.
 
+Switching a Touch track to Read or Latch while a control is held counts as a release: the
+parameter ramps back to its lane in the new mode. (Write leaves the Volume lane unread, as always.)
+
 The return length is the constant `TOUCH_RETURN_S` (200 ms, `crates/mix/src/touch.rs`). transit
 has no Ramp Time setting yet; exposing one is #223.
 
@@ -64,6 +67,13 @@ Not covered:
   return without a ramp.
 - The UI's control shows the lane's value again as soon as it is released, while the audio returns
   over the ramp.
+- A strip that cannot move into a new plan's tables (it is rebuilt) starts with a fresh ramp table:
+  a return running at that moment is lost and the lane applies at once; holds still work, since
+  they read `Mixer::touched` directly.
+- A strip still out with a render worker at a block's start (ADR 0029) does not advance its table
+  that block, so its return runs longer by the missed blocks (which are silent for that strip).
+- `sync_touched` reports at most `MAX_HELD` (64) held parameters per track, the newest; older
+  touches past it count as released.
 
 Tests: `crates/mix/src/touch_tests.rs` (block-driven, measured in samples, no clock),
 `crates/engine/src/lib.rs` `a_held_control_is_runtime_state`, and

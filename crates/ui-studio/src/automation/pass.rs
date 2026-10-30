@@ -167,11 +167,17 @@ fn gesture_lane(app: &StudioApp) -> Option<(TrackId, Lane)> {
     app.mixer.gesture.map(|g| Lane::of_target(g.target)).or(header)
 }
 
+/// Most held parameters `sync_touched` reports for one track (a hosted macro can touch many at
+/// once). Bounds what each publish carries and what the mix scans per lane read; past it the oldest
+/// touches count as released.
+const MAX_HELD: usize = 64;
+
 /// #188: tells the engine which parameters of Touch tracks the user holds now (`Mixer::touched`,
 /// runtime state), every frame, playing or not, so the mix stops reading their lanes while they
 /// are held and ramps back to them on release. Held means the pointer is down on the control, or a
 /// hosted editor sent the parameter less than `HOSTED_HOLD_S` ago; a click whose pointer is
-/// already up (`fresh`) writes its point but holds nothing.
+/// already up (`fresh`) writes its point but holds nothing. At most [`MAX_HELD`] per track, the
+/// newest kept.
 fn sync_touched(app: &mut StudioApp, pointer: bool, now: f64) {
     let mut held: Vec<(TrackId, Lane)> = gesture_lane(app).filter(|_| pointer).into_iter().collect();
     let holds = |x: &ParamTouch| match x.hold {
@@ -184,11 +190,13 @@ fn sync_touched(app: &mut StudioApp, pointer: bool, now: f64) {
         .tracks
         .iter()
         .filter_map(|t| {
-            let ps: Vec<AutoParam> = if t.mixer.automation_mode == AutomationMode::Touch {
+            let mut ps: Vec<AutoParam> = if t.mixer.automation_mode == AutomationMode::Touch {
                 held.iter().filter(|(id, l)| *id == t.id && l.valid(t)).flat_map(|(_, l)| l.params(t)).collect()
             } else {
                 Vec::new()
             };
+            // Touches are kept in the order they began: drop the oldest past the cap.
+            ps.drain(..ps.len().saturating_sub(MAX_HELD));
             (ps != t.mixer.touched).then_some((t.id, ps))
         })
         .collect();

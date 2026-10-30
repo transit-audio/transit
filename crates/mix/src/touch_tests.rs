@@ -271,3 +271,23 @@ fn a_release_that_comes_with_new_plan_tables_still_returns() {
     let out = rig.render(BLOCK as i64);
     assert!(close(out[0][0], level(-6.0)), "the return starts at the held value: {} vs {}", out[0][0], level(-6.0));
 }
+
+#[test]
+fn leaving_touch_while_held_returns_to_the_lane_in_the_new_mode() {
+    let (mut s, t) = session(AutomationMode::Touch, -6.0, -20.0, -20.0);
+    hold(&mut s, t, &[AutoParam::Volume]);
+    let mut rig = PlanRig::new(BLOCK);
+    rig.publish(&s);
+    rig.render(0);
+    // Still listed as held, but now in Read: a release.
+    s.track_mut(t).unwrap().mixer.automation_mode = AutomationMode::Read;
+    rig.publish(&s);
+    let first = rig.render(BLOCK as i64);
+    assert!(close(first[0][0], level(-6.0)), "the return starts at the held value");
+    let at = |k: usize| level(-6.0 - 14.0 * (k as f32 / RAMP as f32));
+    assert!(close(first[0][BLOCK - 1], at(BLOCK - 1)));
+    for b in 1..=(RAMP / BLOCK) {
+        rig.render(((b + 1) * BLOCK) as i64);
+    }
+    assert!(close(rig.render(((RAMP / BLOCK + 2) * BLOCK) as i64)[0][0], level(-20.0)), "on the lane after the ramp");
+}

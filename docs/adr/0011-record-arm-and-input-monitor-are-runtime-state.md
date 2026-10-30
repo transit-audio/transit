@@ -39,3 +39,4 @@ The project owner decided on 2026-10-18 that the armed state is never serialized
 - [ADR 0008](0008-fork-soundcraft-keep-the-engine-build-our-own-ux.md): we fork SoundCraft and keep its model layer. This decision changes model behavior in that layer, so it stays additive where it can.
 - Escape record E10 (loading an armed session).
 - PR #769 (withdrawn draft). The thread is where the observation was made.
+- `Mixer::touched` (#188, the controls held in Touch) is runtime state under the same rules: see `docs/contributing/knowledge/automation-modes.md`.
