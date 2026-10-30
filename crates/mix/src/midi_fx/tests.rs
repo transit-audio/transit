@@ -261,3 +261,18 @@ fn carried_events_a_skipped_block_left_overdue_land_at_offset_zero() {
     block(&mut host, &mut rec, &t, &[]);
     assert_eq!(notes(&rec), vec![(2, 0, "on", 60, 100)], "due at 310, overdue by the block at 512");
 }
+
+#[test]
+fn a_release_the_instrument_refuses_is_given_again_next_block() {
+    let t = track(&[("midi_transpose", &[("semitones", 2.0)])]);
+    let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
+    block(&mut host, &mut rec, &t, &[(5, on(1, 60, 100))]);
+    rec.refuse = true;
+    block(&mut host, &mut rec, &t, &[(9, off(1, 60))]);
+    assert!(host.pending(), "the refused off is held");
+    rec.refuse = false;
+    block(&mut host, &mut rec, &t, &[]);
+    assert_eq!(notes(&rec), vec![(0, 5, "on", 62, 100), (2, 0, "off", 62, 0)]);
+    assert_eq!((host.counts.refused, host.counts.retry_overflow), (1, 0));
+    assert!(!host.pending());
+}

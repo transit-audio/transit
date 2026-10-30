@@ -33,6 +33,17 @@ pub struct MidiEffectSlot {
     pub state: Option<String>,
 }
 
+/// Loads a chain of at most [`MAX_MIDI_EFFECTS`]: a hand-edited file with more keeps the first
+/// ones (logged), so every effect has an automation slot and index-based edits reach them all.
+pub(crate) fn at_most_max<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<MidiEffectSlot>, D::Error> {
+    let mut chain: Vec<MidiEffectSlot> = serde::Deserialize::deserialize(d)?;
+    if chain.len() > MAX_MIDI_EFFECTS {
+        log::warn!("a track had {} MIDI effects; the first {MAX_MIDI_EFFECTS} are kept", chain.len());
+        chain.truncate(MAX_MIDI_EFFECTS);
+    }
+    Ok(chain)
+}
+
 impl MidiEffectSlot {
     pub fn new(plugin: impl Into<String>) -> Self {
         MidiEffectSlot { uid: InsertUid::default(), plugin: plugin.into(), params: BTreeMap::new(), bypass: false, state: None }
@@ -204,6 +215,10 @@ mod tests {
         assert!(old.midi_effects.is_empty());
         let plain = Track::new(TrackId(2), "A", TrackKind::Audio, ChannelFormat::Mono, TRACK_COLORS[0]);
         assert!(!serde_json::to_string(&plain).unwrap().contains("midi_effects"), "an empty chain is not written");
+        let mut many = serde_json::to_value(&t).unwrap();
+        many["midi_effects"] = serde_json::Value::Array(vec![many["midi_effects"][0].clone(); MAX_MIDI_EFFECTS + 3]);
+        let capped: Track = serde_json::from_value(many).unwrap();
+        assert_eq!(capped.midi_effects.len(), MAX_MIDI_EFFECTS, "a hand-edited chain keeps the first eight");
         let hostile: MidiEffectSlot = serde_json::from_str(r#"{"plugin":"midi_velocity","params":{"scale":null,"min":3}}"#).unwrap();
         assert_eq!(hostile.params.len(), 1, "a non-finite value is dropped");
     }

@@ -2,7 +2,7 @@
 
 - **Status:** proposed 2026-10-30 (#201)
 - **Date:** 2026-10-30
-- **Reopen when:** hosted MIDI effects (CLAP note effects) are wanted, a generator needs more than the fixed carry, or keyed plans move off the audio thread (#174) and change where an instrument's events are delivered.
+- **Reopen when:** hosted MIDI effects (CLAP note effects) are wanted, a generator needs more than the fixed carry, keyed plans move off the audio thread (#174) and change where an instrument's events are delivered, or before the generators of #202 land: an effect that writes more than one event per input can exceed the 512-event block buffer, whose tail is then dropped, releases included (enlarge the buffer, or apply the carry's release-first rule there).
 
 ## Context
 
@@ -39,8 +39,9 @@ Both run a chain of MIDI effects before the instrument, in order, each one bypas
   due, ahead of that block's own events at its offset; an overdue one (a block the strip did not
   render) lands at offset 0. This is the chain's own deferred path, after the note table: the mix's
   deferred MIDI (#174) is before it and unchanged.
-- **Bypass is transparent.** A bypassed effect is skipped: the instrument gets exactly the events,
-  offsets and order it would get without it, bit for bit.
+- **Bypass is transparent.** A bypassed effect is skipped: the instrument gets the same events,
+  offsets and order it would get without it (tested against no chain). The paths below that refuse
+  or drop events apply to a chain whose effects are all bypassed as well.
 - **Edits end the chain's notes.** Adding, removing, moving or bypassing an effect changes what a
   note's release would pass through. At the first block after such an edit the host sends a note-off
   for every note it started on the instrument, forgets carried events, and swallows the releases of
@@ -50,9 +51,17 @@ Both run a chain of MIDI effects before the instrument, in order, each one bypas
 - **Capacity and diagnostics.** A block takes at most 512 events into the chain (`MIDI_FX_BLOCK`)
   and each effect writes at most as many; each effect carries 64 (`MIDI_FX_CARRY`); the host tracks
   256 notes (`MIDI_FX_NOTES`). Past those, events are refused and counted in `MidiFxCounts`
-  (`EventStatus::midi_fx`); the mix retries a refused release at the next block, and a release a
-  full carry cannot hold takes the place of a carried non-release (a carry of releases alone
-  delivers it at the block's last offset): a release is never dropped for room. Nothing allocates, locks or logs
+  (`EventStatus::midi_fx`). The release paths:
+  - a release the chain's input cannot take is refused to the mix, which retries it next block;
+  - a release the instrument's own queue refuses is held by the host (up to 64, `MIDI_FX_RETRY`;
+    past that it is lost and counted) and given again at offset 0 of the next block;
+  - a release a full carry cannot hold takes the place of a carried non-release (a carry of
+    releases alone delivers it at the block's last offset);
+  - when an effect's output plus its carried events due in the block exceed 512, the tail is
+    dropped and counted, releases included.
+
+  Transpose and Velocity reach none of the last two: each writes one event per event it takes and
+  carries nothing. Nothing allocates, locks or logs
   on the audio thread: the storage is made with the instrument's event state, and a built-in effect
   is a value (`transit_dsp::midi_fx::Builtin`) made in place.
 - **The effect trait.** `transit_dsp::midi_fx::MidiEffect`: `process(input, out, frames)` over
@@ -77,9 +86,16 @@ Both run a chain of MIDI effects before the instrument, in order, each one bypas
   a member's own MIDI effects after it, ahead of its instrument (Ableton's Instrument Rack: MIDI
   effects before the rack, and in each chain before its instrument). The member half is what this
   slot already does, since a member is an ordinary instrument track. The rack half needs the rack
-  (#197) on `transit`: the rack's clip and live events must run through the rack's chain once per
-  block, before the zones split them, rather than once per member, so an effect with state (an
-  arpeggiator, a generator) runs once. It lands with or after #197.
+  (#197) on `transit`, and a design of its own, because the rack's events reach members two ways
+  there: its clips are merged into each member's clip events in `schedule_notes` (once per member),
+  and its live input is fanned out per event in `MixEngine::queue_event` before the block. A rack
+  chain therefore needs its own stage (a host owned by the rack strip, not by an instrument) fed by
+  both sources once per block: the rack's clip events and its live events. The live fan-out moves
+  after that stage, into the block, so zones and fades apply to what the chain put out, and the
+  members read the stage's output instead of the rack's clips. The stage runs before any member
+  renders, on the thread that publishes the strip jobs, so members on render workers see its
+  output for the block; an effect with state (an arpeggiator, a generator) then runs once per rack,
+  not once per member.
 
 ## Consequences
 

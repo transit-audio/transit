@@ -28,10 +28,13 @@
 //! **Capacity.** A block takes at most [`MIDI_FX_BLOCK`] events into the chain and each effect
 //! writes at most as many; each effect carries at most [`MIDI_FX_CARRY`] events to later blocks;
 //! the host tracks [`MIDI_FX_NOTES`] sounding notes. Past those limits events are refused and
-//! counted in [`MidiFxCounts`] (in the engine's [`EventStatus`](crate::EventStatus)); a refused
-//! release is retried by the mix at the next block, and a release a full carry cannot hold takes
-//! the place of a carried non-release (only a carry of releases alone delivers it at the block's
-//! last offset instead). Nothing here allocates, locks or logs: the
+//! counted in [`MidiFxCounts`] (in the engine's [`EventStatus`](crate::EventStatus)). A release
+//! the chain could not take is retried by the mix at the next block; one the instrument's queue
+//! refuses is given again at offset 0 of the next block (up to [`MIDI_FX_RETRY`] at once); one a
+//! full carry cannot hold takes the place of a carried non-release (a carry of releases alone
+//! delivers it at the block's last offset). One path still drops: when an effect's output plus
+//! its carried events due in the block exceed [`MIDI_FX_BLOCK`], the tail is dropped, releases
+//! included. Transpose and Velocity never reach it (one event out per event in, no carry). Nothing here allocates, locks or logs: the
 //! storage is made with the instrument's event state, off the audio thread, and a built-in effect
 //! is a value made in place ([`Builtin`]).
 
@@ -48,6 +51,8 @@ pub const MIDI_FX_CARRY: usize = 64;
 /// Notes the host tracks at once, both the ones it started on the instrument and the ones it was
 /// given (more than an instrument holds open, 224).
 pub const MIDI_FX_NOTES: usize = 256;
+/// Releases from the chain that the instrument's own queue refused, held for the next block.
+pub const MIDI_FX_RETRY: usize = 64;
 
 /// The chain's counters, cumulative for the instrument's life (read through
 /// [`MixEngine::event_status`](crate::MixEngine::event_status)).
@@ -66,8 +71,11 @@ pub struct MidiFxCounts {
     /// Notes started on the instrument, or given to the chain, that a full note table could not
     /// track.
     pub untracked: u64,
-    /// Events the instrument's own queue refused. A release refused here is not retried.
+    /// Events the instrument's own queue refused. A refused release is given again at offset 0 of
+    /// the next block (up to [`MIDI_FX_RETRY`] held at once; past that it is lost and counted in
+    /// `retry_overflow`).
     pub refused: u64,
+    pub retry_overflow: u64,
 }
 
 impl MidiFxCounts {
@@ -79,6 +87,7 @@ impl MidiFxCounts {
         add(&mut self.carry_dropped, o.carry_dropped);
         add(&mut self.untracked, o.untracked);
         add(&mut self.refused, o.refused);
+        add(&mut self.retry_overflow, o.retry_overflow);
     }
 }
 
@@ -140,6 +149,9 @@ pub(crate) struct MidiFxHost {
     given: [Note; MIDI_FX_NOTES],
     /// Used entries of `given`.
     given_len: usize,
+    /// Refused releases, given again at the start of the next block.
+    retry: [PluginEvent; MIDI_FX_RETRY],
+    retry_len: usize,
     epoch: u32,
     pub(crate) counts: MidiFxCounts,
 }
@@ -197,6 +209,8 @@ impl MidiFxHost {
             out: [NO_NOTE; MIDI_FX_NOTES],
             given: [NO_NOTE; MIDI_FX_NOTES],
             given_len: 0,
+            retry: [TimedEvent::EMPTY.event; MIDI_FX_RETRY],
+            retry_len: 0,
             epoch: 0,
             counts: MidiFxCounts::default(),
         })
@@ -209,7 +223,7 @@ impl MidiFxHost {
 
     /// Carried events wait for a later block.
     pub(crate) fn pending(&self) -> bool {
-        self.stages.iter().flatten().any(|s| s.carry_len > 0)
+        self.retry_len > 0 || self.stages.iter().flatten().any(|s| s.carry_len > 0)
     }
 
     /// Start of a block of `frames` at render frame `frame`: the chain follows `t.midi_effects` (an
@@ -350,6 +364,15 @@ impl MidiFxHost {
     /// to `plugin`. `block`: a rendered block, whose carried events come due (else an event run
     /// between blocks, which only adds to the carries).
     fn run(&mut self, plugin: &mut dyn Plugin, frames: u32, block: bool) {
+        if block {
+            // Last block's refused releases first, at offset 0. One refused again is held again,
+            // at or before the index being read, so nothing unread is overwritten.
+            let held = std::mem::take(&mut self.retry_len);
+            for i in 0..held {
+                let Some(e) = self.retry.get(i).copied() else { break };
+                self.deliver(plugin, 0, &e);
+            }
+        }
         let len = self.a_len.min(MIDI_FX_BLOCK);
         if let Some(a) = self.a.get_mut(..len) {
             sort_by_offset(a);
@@ -426,10 +449,24 @@ impl MidiFxHost {
         }
     }
 
+    /// Holds a refused release for the next block (counted when there is no room).
+    fn hold_for_retry(&mut self, ev: &PluginEvent) {
+        match self.retry.get_mut(self.retry_len) {
+            Some(slot) => {
+                *slot = *ev;
+                self.retry_len += 1;
+            }
+            None => self.counts.retry_overflow = self.counts.retry_overflow.saturating_add(1),
+        }
+    }
+
     /// Gives one event to the instrument, keeping the table of the notes the chain started.
     fn deliver(&mut self, plugin: &mut dyn Plugin, offset: u32, ev: &PluginEvent) {
         if !plugin.event(offset, ev) {
             self.counts.refused = self.counts.refused.saturating_add(1);
+            if ev.is_release() {
+                self.hold_for_retry(ev);
+            }
             return;
         }
         match ev.message {
@@ -453,11 +490,15 @@ impl MidiFxHost {
     /// Ends the chain's notes at the instrument, forgets the carries and the effects' state, and
     /// starts a new edit epoch: the given notes' later releases are swallowed.
     fn end_notes(&mut self, plugin: &mut dyn Plugin) {
-        for n in self.out.iter_mut().filter(|n| n.used) {
+        for i in 0..MIDI_FX_NOTES {
+            let Some(n) = self.out.get_mut(i).filter(|n| n.used) else { continue };
             let off = PluginEvent { channel: n.channel, note_id: n.voice, message: Message::NoteOff { key: n.key, velocity: 0, id: NoteId::NONE } };
-            plugin.event(0, &off);
             *n = NO_NOTE;
             self.counts.released_on_edit = self.counts.released_on_edit.saturating_add(1);
+            if !plugin.event(0, &off) {
+                self.counts.refused = self.counts.refused.saturating_add(1);
+                self.hold_for_retry(&off);
+            }
         }
         for s in self.stages.iter_mut().flatten() {
             self.counts.carry_dropped = self.counts.carry_dropped.saturating_add(s.carry_len as u64);

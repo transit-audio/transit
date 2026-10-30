@@ -59,9 +59,10 @@ pub enum AutoParam {
     SendPan(u8),
     SendMute(u8),
     /// Insert slot + parameter id. `u8::MAX` is the track trim lane, [`AutoParam::INSTRUMENT_SLOT`]
-    /// (254) the track's instrument and [`crate::MACRO_SLOT`] (253) a rack's macro (`param` is
-    /// `macro1` to `macro8`, ADR 0034). All are plain slots, so a build that predates them reads
-    /// the lane and ignores it (no insert has that slot).
+    /// (254) the track's instrument, [`crate::MACRO_SLOT`] (253) a rack's macro (`param` is
+    /// `macro1` to `macro8`, ADR 0034) and 240..=247 ([`crate::MIDI_EFFECT_SLOT`] + index) the
+    /// track's MIDI effects. All are plain slots, so a build that predates them reads the lane
+    /// and ignores it (no insert has that slot).
     Plugin {
         slot: u8,
         param: String,

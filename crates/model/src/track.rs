@@ -270,7 +270,7 @@ pub struct Track {
     pub instrument: Option<crate::Insert>,
     /// The MIDI effects ahead of the instrument, in processing order (#201, ADR 0036). Not
     /// written while empty, so files without them stay as older builds wrote them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty", deserialize_with = "crate::midi_effect::at_most_max")]
     pub midi_effects: Vec<crate::MidiEffectSlot>,
     /// Ticks (musical) or samples timebase for clips.
     #[serde(default)]
