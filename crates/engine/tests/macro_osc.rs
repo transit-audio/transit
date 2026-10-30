@@ -1,6 +1,7 @@
 //! The Macro Oscillator in a session (#195 slice 3): chosen as a track's instrument it stores every
 //! parameter at its default, its parameters are set by command, saved and loaded with the session
-//! (the render after a JSON round trip is the same bits), and automation lanes address them by id.
+//! (the render after a JSON round trip is the same bits), and automation lanes address them by id;
+//! with #196 the voice count and the note-to-macro mapping too.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::json;
@@ -67,6 +68,33 @@ fn parameters_save_and_load_with_the_session() {
     let mut fresh = engine().0;
     fresh.execute("mix.instrument_param", &json!({"track": t.0, "param": "model", "value": 13.0})).unwrap();
     assert!(bits(&render(fresh.session())) != bits(&before), "the parameters matter to the render");
+}
+
+/// The voice count and the note-to-macro mapping (#196) are parameters like the others: saved,
+/// loaded, and the loaded session plays the same bits; a session saved before #196 (without them)
+/// opens with eight voices and no mapping.
+#[test]
+fn voices_and_the_mapping_save_and_load_with_the_session() {
+    let (mut e, t) = engine();
+    let set = [("voices", 2.0), ("velocity_curve", 1.0), ("velocity_timbre", 70.0), ("key_curve", 2.0), ("key_morph", -35.0), ("key_decay", 20.0)];
+    for (param, value) in set {
+        e.execute("mix.instrument_param", &json!({"track": t.0, "param": param, "value": value})).unwrap();
+    }
+    let before = render(e.session());
+    let loaded = Session::from_json(&e.session().to_json().unwrap()).unwrap();
+    let ins = loaded.track(t).unwrap().instrument.as_ref().unwrap();
+    for (param, value) in set {
+        assert_eq!(ins.params.get(param), Some(&value), "{param}");
+    }
+    assert!(bits(&render(&loaded)) == bits(&before), "the loaded session renders the same bits");
+    let (plain, _) = engine();
+    assert!(bits(&render(plain.session())) != bits(&before), "voices and mapping change the render");
+    // An older session: only the eleven parameters of #195.
+    let mut old = plain.session().clone();
+    let ins = old.track_mut(t).unwrap().instrument.as_mut().unwrap();
+    ins.params.retain(|k, _| !k.starts_with("velocity_") && !k.starts_with("key_") && k != "voices");
+    assert_eq!(ins.params.len(), 11);
+    assert!(bits(&render(&old)) == bits(&render(plain.session())), "the new parameters take their defaults");
 }
 
 #[test]
