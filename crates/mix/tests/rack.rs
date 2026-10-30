@@ -472,3 +472,49 @@ fn a_member_that_leaves_the_rack_lets_go_of_what_the_rack_held() {
     assert!(!rig.heard(1).contains(&Message::Control { cc: 64, value: 0 }), "B, still a member, keeps the pedal down");
     let _ = b;
 }
+
+/// The rack's own MIDI effects (ADR 0036) run ahead of every member: a Transpose on the rack moves
+/// the rack's clips and its live notes for each member that takes them, the offs follow the
+/// transposed notes, and bypassing it gives back the plain notes.
+#[test]
+fn a_midi_effect_on_the_rack_reaches_every_member() {
+    MixEngine::force_serial(true);
+    let mut rig = Rig::new();
+    let mut s = rig.session.clone();
+    let mut fx = transit_model::MidiEffectSlot::new("midi_transpose");
+    fx.params.insert("semitones".into(), 12.0);
+    s.track_mut(rig.rack).unwrap().midi_effects.push(fx);
+    put_clip(&mut s, rig.rack, &[note(62, 100, 0)]);
+    rig.publish(&s);
+    rig.pos = 0;
+    // The clip's 62 (both members) and a live 62 (both, in their fades): 74 on each.
+    assert!(rig.send(on(62, 100)).accepted());
+    rig.render(1);
+    for k in 0..2 {
+        let m = rig.heard(k);
+        let velocities: Vec<u8> = ons(&m)
+            .into_iter()
+            .inspect(|(key, _)| assert_eq!(*key, 74, "member {k} hears the rack's note an octave up: {m:?}"))
+            .map(|(_, v)| v)
+            .collect();
+        assert_eq!(velocities.len(), 2, "member {k}: the clip's note and the live one");
+    }
+    assert_eq!(ons(&rig.heard(0)).iter().map(|x| x.1).collect::<Vec<_>>(), [60, 60], "A at 3/5 of 100, the zones before the chain");
+    // The off of the live note reaches the members as the transposed note's off.
+    rig.clear();
+    assert!(rig.send(off(62)).accepted());
+    rig.render(1);
+    for k in 0..2 {
+        assert!(offs(&rig.heard(k)).contains(&74), "member {k}: {:?}", rig.heard(k));
+    }
+    // Bypassed: the plain notes.
+    let mut s = rig.session.clone();
+    s.track_mut(rig.rack).unwrap().midi_effects[0].bypass = true;
+    rig.publish(&s);
+    rig.clear();
+    assert!(rig.send(on(62, 100)).accepted());
+    rig.render(1);
+    for k in 0..2 {
+        assert!(ons(&rig.heard(k)).iter().all(|(key, _)| *key == 62), "member {k}: {:?}", rig.heard(k));
+    }
+}

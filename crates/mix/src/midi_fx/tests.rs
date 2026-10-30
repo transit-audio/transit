@@ -64,7 +64,7 @@ fn off(voice: i32, key: u8) -> PluginEvent {
 /// One block: `events` (offset, event) taken in the given order, then flushed and processed.
 fn block(host: &mut MidiFxHost, rec: &mut Rec, t: &Track, events: &[(u32, PluginEvent)]) {
     let frame = u64::from(rec.block) * FRAMES as u64;
-    host.begin(rec, t, 0, &Transport::default(), frame, FRAMES);
+    host.begin(rec, t, None, 0, &Transport::default(), frame, FRAMES);
     for (o, e) in events {
         if host.active() {
             assert!(host.take(rec, *o, e));
@@ -173,7 +173,7 @@ fn a_carry_of_releases_alone_delivers_one_more_at_the_last_offset() {
 fn a_full_block_refuses_and_counts() {
     let t = track(&[("midi_velocity", &[])]);
     let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
-    host.begin(&mut rec, &t, 0, &Transport::default(), 0, FRAMES);
+    host.begin(&mut rec, &t, None, 0, &Transport::default(), 0, FRAMES);
     for _ in 0..MIDI_FX_BLOCK {
         assert!(host.take(&mut rec, 0, &ev(-1, Message::Control { cc: 1, value: 1 })));
     }

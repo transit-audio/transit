@@ -251,14 +251,6 @@ pub fn chain(app: &mut StudioApp, ui: &mut Ui) {
         }
     }
     for (slot, ins) in cards {
-        // An instrument track's MIDI effects come before its instrument, in their own group (#201).
-        if slot.is_none() && crate::midi_fx_panel::shows(t) {
-            let h = crate::midi_fx_panel::card_height(t).max(STOCK_H);
-            let r = Rect::from_min_size(pos2(x, lane.min.y), vec2(crate::midi_fx_panel::CARD_W, h));
-            layout.midi_fx = Some(crate::midi_fx_panel::card(app, ui, &p, lane, t, r, &mut layout.menu));
-            crate::icons::paint(&p.with_clip_rect(lane), pos2(r.max.x + 7.0, r.center().y), Icon::ChevronRight, 14.0, TOKENS.text_dim);
-            x += r.width() + 14.0;
-        }
         let size = card_size(slot, ins.as_ref());
         let r = Rect::from_min_size(pos2(x, lane.min.y), size);
         if r.min.x < lane.max.x {

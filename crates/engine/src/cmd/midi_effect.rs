@@ -29,7 +29,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add MIDI Effect",
             [],
             None,
-            "{track?, plugin: id (engine.midi_effects), at?: index (default: the end), params?: {id: value}} — an instrument track, at most 8",
+            "{track?, plugin: id (engine.midi_effects), at?: index (default: the end), params?: {id: value}} — an instrument track or a rack, at most 8",
             has_selection,
             add
         ),
@@ -52,8 +52,9 @@ fn track_of<'a>(e: &'a mut Engine, cmd: &str, p: &Value) -> Result<&'a mut Track
     let t = tracks_required(e, cmd, p)?.first().copied().ok_or_else(|| bad(cmd, "no track"))?;
     let tr = e.session_mut().track_mut(t).ok_or_else(|| bad(cmd, "no track"))?;
     // The chain feeds the instrument: a MIDI track's external output (#61) does not go through it.
-    if tr.kind != transit_model::TrackKind::Instrument {
-        return Err(bad(cmd, "MIDI effects go on an instrument track"));
+    // A rack's chain feeds every member (ADR 0036).
+    if tr.kind != transit_model::TrackKind::Instrument && !tr.is_rack() {
+        return Err(bad(cmd, "MIDI effects go on an instrument track or a rack"));
     }
     Ok(tr)
 }

@@ -230,17 +230,33 @@ impl MidiFxHost {
     /// edit ends the chain's notes on `plugin`, see the module documentation), each effect gets its
     /// parameter values at `pos` and the transport, and events are collected until
     /// [`MidiFxHost::flush`].
-    pub(crate) fn begin(&mut self, plugin: &mut dyn Plugin, t: &Track, pos: Samples, transport: &Transport, frame: u64, frames: usize) {
-        let want = t.midi_effects.get(..t.midi_effects.len().min(MAX_MIDI_EFFECTS)).unwrap_or_default();
-        let same = want.len() == self.len
-            && want
-                .iter()
-                .zip(self.stages.iter())
-                .all(|(w, s)| s.as_ref().is_some_and(|s| s.uid == w.uid.get() && s.bypass == w.bypass && s.plugin == fnv(&w.plugin)));
+    pub(crate) fn begin(
+        &mut self,
+        plugin: &mut dyn Plugin,
+        t: &Track,
+        rack: Option<&Track>,
+        pos: Samples,
+        transport: &Transport,
+        frame: u64,
+        frames: usize,
+    ) {
+        // A member of a rack runs the rack's chain first, then its own (ADR 0036, racks): the
+        // rack's effects feed every member the same way. Together at most `MAX_MIDI_EFFECTS`.
+        let n_rack = rack.map_or(0, |r| r.midi_effects.len().min(MAX_MIDI_EFFECTS));
+        let n = n_rack + t.midi_effects.len().min(MAX_MIDI_EFFECTS - n_rack);
+        let entry = |i: usize| match rack.filter(|_| i < n_rack) {
+            Some(r) => r.midi_effects.get(i).map(|w| (r, i, w)),
+            None => t.midi_effects.get(i - n_rack).map(|w| (t, i - n_rack, w)),
+        };
+        let same = n == self.len
+            && (0..n).zip(self.stages.iter()).all(|(i, s)| {
+                entry(i)
+                    .is_some_and(|(_, _, w)| s.as_ref().is_some_and(|s| s.uid == w.uid.get() && s.bypass == w.bypass && s.plugin == fnv(&w.plugin)))
+            });
         if !same {
             self.end_notes(plugin);
             for (i, slot) in self.stages.iter_mut().enumerate() {
-                let Some(w) = want.get(i) else {
+                let Some((_, _, w)) = entry(i).filter(|_| i < n) else {
                     *slot = None;
                     continue;
                 };
@@ -265,13 +281,14 @@ impl MidiFxHost {
                     }
                 }
             }
-            self.len = want.len();
+            self.len = n;
         }
-        for (i, (w, s)) in want.iter().zip(self.stages.iter_mut()).enumerate() {
+        for (i, s) in self.stages.iter_mut().enumerate().take(n) {
+            let Some((owner, index, w)) = entry(i) else { continue };
             let Some(fx) = s.as_mut().filter(|s| !s.bypass).and_then(|s| s.fx.as_mut()) else { continue };
             let fx = fx.effect();
             for p in fx.info().params {
-                if let Some(v) = param_value(t, i, w, p.id, pos) {
+                if let Some(v) = param_value(owner, index, w, p.id, pos) {
                     fx.set_param(p.id, v);
                 } else if fx.param(p.id) != Some(p.default) {
                     fx.set_param(p.id, p.default);

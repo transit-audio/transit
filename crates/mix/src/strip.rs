@@ -104,10 +104,12 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                 inst.plugin.set_transport(transport);
                 if let Some(e) = inst.events.as_deref_mut() {
                     // The MIDI effects (#201) take the block's events from here to `flush`.
-                    e.fx.begin(&mut *inst.plugin, t, pos, transport, live.frame, frames);
+                    // A member of a rack runs the rack's MIDI effects ahead of its own (ADR 0036).
+                    let rack = t.folder.and_then(|_| s.rack_of(t)).map(|(r, _)| r);
+                    e.fx.begin(&mut *inst.plugin, t, rack, pos, transport, live.frame, frames);
                     e.retry_releases(&mut *inst.plugin);
                     // A member that left its rack lets go of what the rack held (ADR 0034).
-                    e.rack_membership(&mut *inst.plugin, t.folder.is_some() && s.rack_of(t).is_some());
+                    e.rack_membership(&mut *inst.plugin, rack.is_some());
                 }
                 // Stopped: no clips, but the instrument still plays auditioned notes.
                 // An external MIDI destination (#61) takes the clips' notes and controllers; the

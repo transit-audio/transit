@@ -167,3 +167,22 @@ fn play_and_the_header_i_button_monitor_the_rack() {
     t.input("ui.click", json!({"x": (i[0] + i[2]) / 2.0, "y": (i[1] + i[3]) / 2.0}));
     assert!(monitoring(&t), "and on again");
 }
+
+/// ADR 0036, racks: a rack's own MIDI effects come first in the chain, then the rack card, and the
+/// pane is as tall as the taller of the two.
+#[test]
+fn a_rack_with_midi_effects_shows_both_cards_effects_first() {
+    let mut t = T::new();
+    let rack = t.rack();
+    t.app.add_midi_effect(rack, "midi_transpose").unwrap();
+    t.app.add_midi_effect(rack, "midi_velocity").unwrap();
+    t.frames(5);
+    let (fx, card) = (t.app.mixer.devices.midi_fx.clone().expect("the MIDI effects card"), t.app.mixer.devices.rack.clone().expect("the rack card"));
+    assert_eq!(fx.rows.len(), 2);
+    assert!(fx.rect[2] <= card.rect[0], "the MIDI effects card is ahead of the rack card: {:?} then {:?}", fx.rect, card.rect);
+    assert!(t.app.mixer.devices.cards.is_empty(), "a rack has no instrument card");
+    let track = t.app.engine.session().track(rack).unwrap();
+    let need = crate::midi_fx_panel::card_height(track).max(crate::rack_panel::card_height(t.app.engine.session(), track)).max(116.0) + 16.0;
+    assert!((crate::devices::pane_height(&t.app) - need).abs() < 0.5, "{} covers both cards ({need})", crate::devices::pane_height(&t.app));
+    assert!(fx.rect[3] - fx.rect[1] <= crate::devices::pane_height(&t.app) && card.rect[3] - card.rect[1] <= crate::devices::pane_height(&t.app));
+}

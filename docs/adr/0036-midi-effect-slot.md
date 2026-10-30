@@ -21,7 +21,7 @@ Both run a chain of MIDI effects before the instrument, in order, each one bypas
 - **Model.** `Track::midi_effects: Vec<MidiEffectSlot { plugin, params, bypass, state }>`, ahead of
   the instrument, at most 8 (`MAX_MIDI_EFFECTS`). Not written while empty (serde default), so older
   sessions load and files without effects stay as older builds wrote them. Each slot has a
-  process-unique `uid` (not saved) by which the mix knows its chain. Instrument tracks only: a MIDI
+  process-unique `uid` (not saved) by which the mix knows its chain. Instrument tracks and racks (below): a MIDI
   track's external output (#61) does not go through the chain.
 - **Where it runs.** Every event the mix gives an instrument already leaves through one call of its
   note and pedal table (`InstrumentEvents::send`): live input, clips, the controller chase, and the
@@ -96,6 +96,12 @@ Both run a chain of MIDI effects before the instrument, in order, each one bypas
   renders, on the thread that publishes the strip jobs, so members on render workers see its
   output for the block; an effect with state (an arpeggiator, a generator) then runs once per rack,
   not once per member.
+- **Rack chain, first form (landed with the rebase onto racks).** A track that is a rack may hold MIDI effects
+  (the device chain shows their card ahead of the rack card). Until the rack stage above exists, each member's
+  host runs the rack's chain ahead of its own (at most eight together, the rack's first), after the zones:
+  Transpose and Velocity are per-event, so every member hears the same result, and a rack note-off is still
+  gated by the raw key the member holds. Differences from the stage design, to be removed by it: zones and fades
+  see the notes before the chain, not after, and a stateful effect would run once per member.
 
 ## Consequences
 
