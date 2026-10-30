@@ -1,4 +1,5 @@
-//! Builds the vendored macro-oscillator C++ (vendor/) and the C ABI wrapper (cpp/oracle.cc).
+//! Builds the vendored C++ (vendor/: the macro oscillator and the resonator) and the C ABI wrappers
+//! (cpp/oracle.cc, cpp/resonator_oracle.cc).
 //!
 //! Floating point is kept strict so the oracle is a stable reference: `-DTEST` (the desktop branch
 //! of stmlib, as the firmware's own test makefile), `-O2` whatever the cargo profile, no
@@ -105,9 +106,11 @@ fn main() {
 
     let mut sources = Vec::new();
     collect(&vendor.join("plaits"), "cc", &mut sources);
+    collect(&vendor.join("rings"), "cc", &mut sources);
     sources.push(vendor.join("stmlib/dsp/units.cc"));
     sources.push(vendor.join("stmlib/utils/random.cc"));
     sources.push(cpp.join("oracle.cc"));
+    sources.push(cpp.join("resonator_oracle.cc"));
 
     let mut build = cc::Build::new();
     build.cpp(true).define("TEST", None).opt_level(2).debug(false).warnings(false);

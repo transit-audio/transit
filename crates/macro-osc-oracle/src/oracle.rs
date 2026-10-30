@@ -14,6 +14,9 @@ pub enum Error {
     OutOfMemory,
     /// A render asked for no frames or more than [`crate::MAX_BLOCK_SIZE`], or out and aux differ in length.
     BadBlock,
+    /// A resonator setting outside the firmware's range (a polyphony outside 1 to 4, a chord
+    /// outside the chord table).
+    BadParameter,
 }
 
 impl std::fmt::Display for Error {
@@ -22,6 +25,7 @@ impl std::fmt::Display for Error {
             Self::UnsupportedSampleRate => "the oracle runs at 48 kHz only",
             Self::OutOfMemory => "the oracle could not allocate a voice or engine",
             Self::BadBlock => "empty block or block longer than the maximum block size, or out and aux lengths differ",
+            Self::BadParameter => "a resonator setting outside the firmware's range",
         })
     }
 }

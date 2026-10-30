@@ -1,5 +1,5 @@
-//! The only module with `unsafe`: the C ABI of `cpp/oracle.cc` and the session lock that makes it
-//! sound to call.
+//! The only module with `unsafe`: the C ABI of `cpp/oracle.cc` and `cpp/resonator_oracle.cc`, and
+//! the session lock that makes it sound to call.
 //!
 //! Soundness rests on three invariants, each enforced here:
 //!
@@ -8,8 +8,8 @@
 //!    C++) and would also make the noise sequence depend on scheduling. Every call goes through a
 //!    [`Session`], which holds a process-wide mutex and is neither `Send` nor `Sync`, so all calls of
 //!    one session stay on the thread that took the lock. Handles borrow their session.
-//! 2. **Valid handles.** [`RawVoice`] and [`RawEngine`] own a non-null pointer returned by the
-//!    matching `_new` function and free it exactly once, in `Drop`.
+//! 2. **Valid handles.** [`RawVoice`], [`RawEngine`] and [`RawResonator`] own a non-null pointer
+//!    returned by the matching `_new` function and free it exactly once, in `Drop`.
 //! 3. **Buffer bounds.** Every render checks the length is between 1 and the firmware's maximum block
 //!    size before the call, and passes buffers whose lengths match the size it passes.
 
@@ -64,7 +64,32 @@ pub struct CEngineParameters {
     pub(crate) accent: f32,
 }
 
-// SAFETY: these declarations match the `extern "C"` definitions in cpp/oracle.cc one for one
+/// Mirrors `OracleResonatorPatch` in `cpp/resonator_oracle.cc` (the resonator's `Patch`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CResonatorPatch {
+    pub(crate) structure: f32,
+    pub(crate) brightness: f32,
+    pub(crate) damping: f32,
+    pub(crate) position: f32,
+}
+
+/// Mirrors `OraclePerformanceState` in `cpp/resonator_oracle.cc` (bools as `u8`, after the floats).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CPerformanceState {
+    pub(crate) tonic: f32,
+    pub(crate) note: f32,
+    pub(crate) fm: f32,
+    pub(crate) chord: i32,
+    pub(crate) strum: u8,
+    pub(crate) internal_exciter: u8,
+    pub(crate) internal_strum: u8,
+    pub(crate) internal_note: u8,
+}
+
+// SAFETY: these declarations match the `extern "C"` definitions in cpp/oracle.cc and
+// cpp/resonator_oracle.cc one for one
 // (names, argument order, and C types: `size_t` is `usize`, `void*` is `*mut c_void`, the structs
 // are the `#[repr(C)]` mirrors above). The build script compiles that file into this crate.
 unsafe extern "C" {
@@ -92,6 +117,23 @@ unsafe extern "C" {
     ) -> i32;
     fn oracle_seed(seed: u32);
     fn oracle_rng_state() -> u32;
+    fn oracle_resonator_max_block_size() -> usize;
+    fn oracle_resonator_max_polyphony() -> i32;
+    fn oracle_resonator_model_count() -> i32;
+    fn oracle_resonator_new() -> *mut std::ffi::c_void;
+    fn oracle_resonator_free(part: *mut std::ffi::c_void);
+    fn oracle_resonator_set_model(part: *mut std::ffi::c_void, model: i32) -> i32;
+    fn oracle_resonator_set_polyphony(part: *mut std::ffi::c_void, polyphony: i32) -> i32;
+    fn oracle_resonator_set_bypass(part: *mut std::ffi::c_void, bypass: u8);
+    fn oracle_resonator_process(
+        part: *mut std::ffi::c_void,
+        performance: *const CPerformanceState,
+        patch: *const CResonatorPatch,
+        input: *const f32,
+        out: *mut f32,
+        aux: *mut f32,
+        size: usize,
+    ) -> i32;
 }
 
 static LOCK: Mutex<()> = Mutex::new(());
@@ -149,6 +191,27 @@ impl Session {
     pub fn engine_count(&self) -> usize {
         // SAFETY: returns a compile-time constant; no state is touched.
         usize::try_from(unsafe { oracle_engine_count() }).unwrap_or(0)
+    }
+
+    /// The resonator's block size, `kMaxBlockSize` in `rings/dsp/dsp.h` (24 frames).
+    #[must_use]
+    pub fn resonator_max_block_size(&self) -> usize {
+        // SAFETY: returns a compile-time constant; no state is touched.
+        unsafe { oracle_resonator_max_block_size() }
+    }
+
+    /// The resonator's largest polyphony, `kMaxPolyphony` (4).
+    #[must_use]
+    pub fn resonator_max_polyphony(&self) -> usize {
+        // SAFETY: returns a compile-time constant; no state is touched.
+        usize::try_from(unsafe { oracle_resonator_max_polyphony() }).unwrap_or(0)
+    }
+
+    /// The number of resonator models, `RESONATOR_MODEL_LAST` (6).
+    #[must_use]
+    pub fn resonator_model_count(&self) -> usize {
+        // SAFETY: returns a compile-time constant; no state is touched.
+        usize::try_from(unsafe { oracle_resonator_model_count() }).unwrap_or(0)
     }
 }
 
@@ -240,5 +303,82 @@ impl Drop for RawEngine<'_> {
         // SAFETY: `self.ptr` came from `oracle_engine_new` and is freed only here (invariant 2),
         // through the holder of its concrete type. Freeing touches no shared state.
         unsafe { oracle_engine_free(self.ptr.as_ptr()) }
+    }
+}
+
+/// The resonator's part (`rings::Part`) with its reverb memory, in zero-initialized storage as on
+/// the module.
+pub struct RawResonator<'s> {
+    ptr: std::ptr::NonNull<std::ffi::c_void>,
+    session: &'s Session,
+}
+
+impl<'s> RawResonator<'s> {
+    /// `None` when the allocation fails.
+    pub(crate) fn new(session: &'s Session) -> Option<Self> {
+        // SAFETY: the lock is held through `session` (invariant 1); the call allocates and
+        // initializes a part, or returns null.
+        let ptr = unsafe { oracle_resonator_new() };
+        std::ptr::NonNull::new(ptr).map(|ptr| Self { ptr, session })
+    }
+
+    /// `None` when `model` is not a model index (0 to 5).
+    pub(crate) fn set_model(&mut self, model: i32) -> Option<()> {
+        // SAFETY: the lock is held through `self.session` (invariant 1); `self.ptr` is a live part
+        // (invariant 2) used by this thread only; the wrapper range-checks `model`.
+        let status = unsafe { oracle_resonator_set_model(self.ptr.as_ptr(), model) };
+        (status == 0).then_some(())
+    }
+
+    /// `None` when `polyphony` is outside 1 to 4.
+    pub(crate) fn set_polyphony(&mut self, polyphony: i32) -> Option<()> {
+        // SAFETY: as `set_model`; the wrapper range-checks `polyphony`.
+        let status = unsafe { oracle_resonator_set_polyphony(self.ptr.as_ptr(), polyphony) };
+        (status == 0).then_some(())
+    }
+
+    pub(crate) fn set_bypass(&mut self, bypass: bool) {
+        // SAFETY: as `set_model`; the call writes one flag of the part.
+        unsafe { oracle_resonator_set_bypass(self.ptr.as_ptr(), u8::from(bypass)) }
+    }
+
+    /// Processes `input.len()` frames into `out` and `aux`. `None` when the lengths differ, are zero
+    /// or exceed the maximum block size, or the chord is outside the chord table.
+    pub(crate) fn process(
+        &mut self,
+        performance: &CPerformanceState,
+        patch: &CResonatorPatch,
+        input: &[f32],
+        out: &mut [f32],
+        aux: &mut [f32],
+    ) -> Option<()> {
+        let size = input.len();
+        if out.len() != size || aux.len() != size || size == 0 || size > self.session.resonator_max_block_size() {
+            return None;
+        }
+        // SAFETY: the lock is held through `self.session` (invariant 1); `self.ptr` is a live part
+        // (invariant 2) used by this thread only; `performance` and `patch` are valid for reads;
+        // `input`, `out` and `aux` each hold exactly `size <= kMaxBlockSize` floats (invariant 3),
+        // and `input` does not alias the outputs (they are distinct borrows).
+        let status = unsafe {
+            oracle_resonator_process(
+                self.ptr.as_ptr(),
+                std::ptr::from_ref(performance),
+                std::ptr::from_ref(patch),
+                input.as_ptr(),
+                out.as_mut_ptr(),
+                aux.as_mut_ptr(),
+                size,
+            )
+        };
+        (status == 0).then_some(())
+    }
+}
+
+impl Drop for RawResonator<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.ptr` came from `oracle_resonator_new` and is freed only here (invariant 2).
+        // Freeing touches no shared state.
+        unsafe { oracle_resonator_free(self.ptr.as_ptr()) }
     }
 }

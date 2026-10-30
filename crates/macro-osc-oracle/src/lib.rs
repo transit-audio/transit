@@ -1,4 +1,5 @@
-//! The null-test oracle for transit's macro oscillator (ADR 0033, #194).
+//! The null-test oracle for transit's ported instruments (ADR 0033): the macro oscillator (#194)
+//! and the resonator (#198).
 //!
 //! This crate builds Émilie Gillet's original C++ DSP (MIT; vendored under `vendor/`, see
 //! `VENDOR.md` and `LICENSE-THIRD-PARTY`) with the `cc` crate and exposes it to Rust tests. It is
@@ -12,12 +13,16 @@
 //!   firmware's 12-frame blocks.
 //! - [`residual`]: peak and RMS residual between two renders, in dBFS.
 //! - [`floor`]: the measured residual floor per CI runner family.
+//! - [`resonator`] and [`resonator_sweep`]: the resonator part (six models, polyphony 1 to 4, float
+//!   out/aux) and its fixed sweep, at 48 kHz in the firmware's 24-frame blocks (#198).
 
 mod ffi;
 pub mod floor;
 mod model;
 mod oracle;
 pub mod residual;
+pub mod resonator;
+pub mod resonator_sweep;
 pub mod sweep;
 
 pub use ffi::Session;
