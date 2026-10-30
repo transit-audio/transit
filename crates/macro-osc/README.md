@@ -23,7 +23,7 @@ notes 36, 60 and 84, free-running and triggered, each macro at 0, 0.25, 0.5, 0.7
 the firmware's 12-frame blocks; a fresh engine and the same seed per point), next to the oracle on
 the same runner, and holds the peak and RMS residual of both outputs to the oracle's floor plus a
 margin. The floor is `-inf` (the oracle is bit-identical to itself) and the margin is zero: all 24
-engines null bit-identical (measured on Windows x86-64 MSVC on 2026-10-30; Linux and macOS prove it
+engines null bit-identical (measured on Windows x86-64 MSVC on 2026-10-29; Linux and macOS prove it
 on every CI run). Any residual is a port defect: hunt it against the C++, never widen the bound.
 
 ```sh
@@ -45,6 +45,12 @@ smoother (`ONE_POLE`), the SVF and one-pole filters, the resonator bank, the par
 interpolators, the FX engine's low- and high-pass, and the sums of the swarm, particle, sine and saw
 voices. The sweep proves each one (the swarm, modal, string and particle engines decay into the
 subnormal range and null bit-identical only with the flush).
+
+The copy is proven for the sweep, not in general: an operation the sweep never drives into the
+subnormal range may still be unflushed. On AArch64 (the macOS runner) the oracle's FPCR.FZ also
+flushes subnormal inputs, which x86 FTZ does not; the port reproduces the x86 behavior. So a residual
+on macOS in the swarm, modal, string or particle engines (the ones that decay into the subnormal
+range) is blamed on that difference first, then hunted like any other.
 
 ## Corrections against the firmware
 

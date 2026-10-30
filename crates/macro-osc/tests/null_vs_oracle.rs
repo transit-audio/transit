@@ -6,7 +6,7 @@
 //! the oracle's measured floor for this runner family plus [`MARGIN_DB`].
 //!
 //! The margin is zero: every engine nulls bit-identical against the oracle (measured on Windows
-//! x86-64 MSVC, 2026-10-30), so any residual at all is a port defect to hunt, never a margin to
+//! x86-64 MSVC, 2026-10-29), so any residual at all is a port defect to hunt, never a margin to
 //! widen. Flush-to-zero, which the oracle runs with, is reproduced in the port's own code
 //! (`transit_macro_osc::utils::ftz`, see the crate README); the test process keeps Rust's default
 //! floating-point mode.
