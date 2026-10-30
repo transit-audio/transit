@@ -29,7 +29,7 @@ fn dense_clip_sorting_and_live_pedal_merge_allocate_nothing() {
     let mut comp = PlanCompiler::new(target, PlanLimits::default());
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    s.track_mut(t).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+    s.track_mut(t).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     let mut seq = transit_midi::Sequence::default();
     for start in [8, 1, 4] {
         seq.notes.push(transit_midi::Note { pitch: 60, velocity: 100, release_velocity: 0, channel: 0, start, length: 1 });
@@ -81,7 +81,7 @@ fn admission_delivery_revocation_and_panic_allocate_nothing() {
     let mut comp = PlanCompiler::new(target, PlanLimits::default());
     let mut s = Session::default();
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    s.track_mut(t).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+    s.track_mut(t).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     let mut make = |spec: &InstanceSpec, _: SlotGen| transit_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
     let mut env = comp.compile(Arc::new(s), PlanGeneration::EMPTY, PlanGeneration::EMPTY.checked_next().unwrap(), &mut make).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);

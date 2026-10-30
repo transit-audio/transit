@@ -17,7 +17,7 @@ use transit_model::{ChannelFormat, Insert, TrackId, TrackKind};
 use transit_plugin_host::{Config, Host};
 
 const SLOT: usize = transit_mix::INSTRUMENT_SLOT;
-const SYNTH: &str = "subtractive_synth";
+const SYNTH: &str = "macro_oscillator";
 /// The hosted id the session names (a third-party id, so the session's stored state reaches the
 /// factory); the factory makes the built-in synth for it.
 const HOSTED: &str = "clap:transit.test.late82";

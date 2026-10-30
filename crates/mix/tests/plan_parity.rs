@@ -190,7 +190,7 @@ fn instruments_and_midi_match_the_golden() {
     let cid = s.new_clip_id();
     let tr = s.track_mut(t).unwrap();
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, 96_000, seq));
-    tr.instrument = Some(builtin("subtractive_synth"));
+    tr.instrument = Some(builtin("macro_oscillator"));
     tr.mixer.inserts[0] = Some(builtin("chorus"));
     let mut steps = vec![s.clone()];
     s.track_mut(t).unwrap().mixer.inserts[1] = Some(builtin("plate_reverb"));
@@ -282,7 +282,7 @@ fn seeks_with_held_notes_match_the_golden() {
     let cid = s.new_clip_id();
     let tr = s.track_mut(t).unwrap();
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, 96_000, seq));
-    tr.instrument = Some(builtin("subtractive_synth"));
+    tr.instrument = Some(builtin("macro_oscillator"));
     let mut planned = Planned::new();
     planned.update(&s);
     let mut golden = Golden::new("seeks with held notes");
@@ -386,7 +386,7 @@ fn path_based_delay_compensation_matches_the_golden() {
     let cid = s.new_clip_id();
     let tr = s.track_mut(inst).unwrap();
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, 96_000, seq));
-    tr.instrument = Some(builtin("subtractive_synth"));
+    tr.instrument = Some(builtin("macro_oscillator"));
     tr.mixer.inserts[0] = Some(la.clone());
     tr.mixer.output = Route::Bus(chain[2]);
     let mut steps = vec![s.clone()];

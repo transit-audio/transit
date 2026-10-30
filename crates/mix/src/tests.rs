@@ -65,7 +65,7 @@ pub(crate) fn synth_session(level_db: f32) -> Session {
     let cid = s.new_clip_id();
     let tr = s.track_mut(t).unwrap();
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, 24_000, seq));
-    let mut ins = Insert::new("subtractive_synth");
+    let mut ins = Insert::new("macro_oscillator");
     ins.params.insert("level".into(), level_db);
     tr.instrument = Some(ins);
     s

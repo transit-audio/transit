@@ -134,13 +134,13 @@ fn the_editor_button_opens_a_window_for_a_built_in_instrument_and_effect() {
     t.app.add_device(tr, "gain").unwrap();
     t.frames(4);
     assert!(t.app.mixer.devices.cards.iter().all(|c| c.editor_enabled), "built-in editors need no player");
-    assert_eq!(t.app.mixer.devices.cards[0].plugin, "subtractive_synth");
+    assert_eq!(t.app.mixer.devices.cards[0].plugin, "macro_oscillator");
     t.open_editor(0);
     let key = (tr, transit_mix::INSTRUMENT_SLOT);
     assert_eq!(t.app.ui.plugin_windows, vec![key]);
     let w = t.window(tr);
-    assert_eq!(w.title, format!("{} · Subtractive Synth", t.app.engine.session().track(tr).unwrap().name));
-    assert_eq!(w.rows.len(), info("subtractive_synth").params.len(), "one row per parameter");
+    assert_eq!(w.title, format!("{} · Macro Oscillator", t.app.engine.session().track(tr).unwrap().name));
+    assert_eq!(w.rows.len(), info("macro_oscillator").params.len(), "one row per parameter");
     assert!(t.app.mixer.devices.cards[0].editor_open);
     t.open_editor(1);
     assert_eq!(t.app.ui.plugin_windows.len(), 2);
@@ -273,18 +273,18 @@ fn the_drum_synth_lists_its_parameters_by_pad() {
 #[test]
 fn a_factory_instrument_preset_applies_without_a_config_directory() {
     let mut t = T::new();
-    let (tr, _) = open_plugin(&mut t, "subtractive_synth");
+    let (tr, _) = open_plugin(&mut t, "macro_oscillator");
     t.app.services.config_dir = None;
-    assert_ne!(t.param(tr, None, "cutoff"), Some(1400.0));
+    assert_ne!(t.param(tr, None, "harmonics"), Some(30.0));
     let before = t.undo_len();
     let previous = t.app.builtin_at((tr, transit_mix::INSTRUMENT_SLOT)).unwrap();
     let preset = t.window(tr).preset;
     t.click(mid(preset), 1);
-    // The menu has its Factory heading, Init, then Soft Pad.
+    // The menu has its Factory heading, Init, then Analog Bass.
     t.click(((preset[0] + preset[2]) / 2.0, preset[3] + 52.0), 1);
-    assert_eq!(t.param(tr, None, "cutoff"), Some(1400.0));
-    assert_eq!(t.row(tr, "cutoff").value, info("subtractive_synth").param("cutoff").unwrap().format(1400.0));
-    t.assert_preset_label(tr, "Soft Pad");
+    assert_eq!(t.param(tr, None, "harmonics"), Some(30.0));
+    assert_eq!(t.row(tr, "harmonics").value, info("macro_oscillator").param("harmonics").unwrap().format(30.0));
+    t.assert_preset_label(tr, "Analog Bass");
     assert_eq!(t.undo_len(), before + 1);
     t.app.run("edit.undo", json!({})).unwrap();
     t.frames(3);
@@ -292,7 +292,7 @@ fn a_factory_instrument_preset_applies_without_a_config_directory() {
     t.assert_preset_label(tr, "<factory default>");
     t.app.run("edit.redo", json!({})).unwrap();
     t.frames(3);
-    t.assert_preset_label(tr, "Soft Pad");
+    t.assert_preset_label(tr, "Analog Bass");
 }
 
 /// A track with `plugin` open in its editor: an instrument for the synth, an insert otherwise.
@@ -314,7 +314,7 @@ fn open_plugin(t: &mut T, plugin: &str) -> (TrackId, Option<usize>) {
 
 #[test]
 fn each_bespoke_panel_opens_and_lists_every_parameter() {
-    for plugin in ["compressor", "expander_gate", "eq_7band", "subtractive_synth", "plate_reverb", "macro_oscillator"] {
+    for plugin in ["compressor", "expander_gate", "eq_7band", "plate_reverb", "macro_oscillator"] {
         let mut t = T::new();
         let (tr, _) = open_plugin(&mut t, plugin);
         let w = t.window(tr);
@@ -490,21 +490,21 @@ fn a_user_preset_saves_loads_lists_and_deletes_as_one_undo_step() {
 #[test]
 fn an_instrument_preset_name_survives_session_save_load_and_undo_restores_the_previous_name() {
     let mut t = T::new();
-    let (tr, _) = open_plugin(&mut t, "subtractive_synth");
+    let (tr, _) = open_plugin(&mut t, "macro_oscillator");
     let key = (tr, transit_mix::INSTRUMENT_SLOT);
-    let synth = info("subtractive_synth");
+    let synth = info("macro_oscillator");
     let factory = crate::presets::factory_for(synth.id);
-    let soft = &factory.iter().find(|(name, _)| *name == "Soft Pad").unwrap().1;
-    let bass = &factory.iter().find(|(name, _)| *name == "Bass").unwrap().1;
-    t.app.apply_preset(key, synth, "Soft Pad", soft);
+    let soft = &factory.iter().find(|(name, _)| *name == "Analog Bass").unwrap().1;
+    let bass = &factory.iter().find(|(name, _)| *name == "Glass Bell").unwrap().1;
+    t.app.apply_preset(key, synth, "Analog Bass", soft);
     let previous = t.app.builtin_at(key).unwrap();
     let before = t.undo_len();
-    t.app.apply_preset(key, synth, "Bass", bass);
+    t.app.apply_preset(key, synth, "Glass Bell", bass);
     assert_eq!(t.undo_len(), before + 1);
     t.app.run("edit.undo", json!({})).unwrap();
     t.frames(3);
     assert_eq!(t.app.builtin_at(key).unwrap(), previous);
-    t.assert_preset_label(tr, "Soft Pad");
+    t.assert_preset_label(tr, "Analog Bass");
 
     let dir = temp_config("instrument-session");
     let path = dir.join("preset.transit");
@@ -513,9 +513,9 @@ fn an_instrument_preset_name_survives_session_save_load_and_undo_restores_the_pr
     t.app.engine.execute("session.open", &json!({"path": path})).unwrap();
     t.frames(3);
     let loaded = t.app.builtin_at(key).unwrap();
-    assert_eq!(loaded.preset, "Soft Pad");
+    assert_eq!(loaded.preset, "Analog Bass");
     assert_eq!(loaded.params, previous.params);
-    t.assert_preset_label(tr, "Soft Pad");
+    t.assert_preset_label(tr, "Analog Bass");
 
     // Older sessions may omit the existing optional preset field.
     let mut old: Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();

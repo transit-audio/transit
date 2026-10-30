@@ -49,7 +49,7 @@ fn synth_track(s: &mut Session) -> TrackId {
     let cid = s.new_clip_id();
     let tr = s.track_mut(t).unwrap();
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, 96_000, seq));
-    tr.instrument = Some(builtin("subtractive_synth"));
+    tr.instrument = Some(builtin("macro_oscillator"));
     t
 }
 

@@ -250,7 +250,7 @@ fn new_track(e: &mut Engine, p: &Value) -> Result<Value> {
                 t.ticks_timebase = tb;
             }
             if kind == TrackKind::Instrument {
-                t.instrument = Some(transit_model::Insert::new(instrument.clone().unwrap_or_else(|| "subtractive_synth".into())));
+                t.instrument = Some(transit_model::Insert::new(instrument.clone().unwrap_or_else(|| transit_model::DEFAULT_INSTRUMENT.into())));
             }
         }
         if kind == TrackKind::Folder {

@@ -248,7 +248,7 @@ fn probe_player(
     use transit_model::{ChannelFormat, Insert, TrackKind};
     let mut session = Session::default();
     let track = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    session.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+    session.track_mut(track).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     let mut player = Player::empty(48_000);
     let key = device_clock::ClockKey { generation: 1, domain: 1, direction: device_clock::Direction::Output };
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 };

@@ -191,7 +191,7 @@ mod tests {
         assert!(peak(&out[0][36_000..48_000]) < 1e-3, "released between the notes");
         e.execute("edit.undo", &json!({})).unwrap();
         let back = e.session().track(t).unwrap().instrument.clone().unwrap();
-        assert_eq!(back.plugin, "subtractive_synth");
+        assert_eq!(back.plugin, "macro_oscillator");
         assert!(back.sample.is_none());
         assert!(e.session().sources.is_empty(), "undo removes the source too");
         let _ = std::fs::remove_dir_all(d);
@@ -215,7 +215,7 @@ mod tests {
         assert!(src.unsaved, "written into Audio Files on the next save");
         assert!(e.undo());
         assert!(e.session().sources.is_empty());
-        assert_eq!(e.session().track(t).unwrap().instrument.as_ref().map(|i| i.plugin.as_str()), Some("subtractive_synth"));
+        assert_eq!(e.session().track(t).unwrap().instrument.as_ref().map(|i| i.plugin.as_str()), Some("macro_oscillator"));
         assert!(crate::io::load_sampler_bytes(&mut e, t, "junk.wav", b"not audio").is_err());
         e.execute("track.new", &json!({"kind": "audio"})).unwrap();
         let audio = e.session().tracks.last().unwrap().id;
@@ -338,7 +338,7 @@ mod tests {
         assert!(e.execute("mix.sampler_load", &json!({"track": t.0})).is_err(), "no path");
         assert!(e.execute("mix.sampler_clear", &json!({"track": audio.0})).is_err());
         assert!(e.session().sources.is_empty());
-        assert_eq!(e.session().track(t).unwrap().instrument.as_ref().map(|i| i.plugin.as_str()), Some("subtractive_synth"));
+        assert_eq!(e.session().track(t).unwrap().instrument.as_ref().map(|i| i.plugin.as_str()), Some("macro_oscillator"));
         let _ = std::fs::remove_dir_all(d);
     }
 

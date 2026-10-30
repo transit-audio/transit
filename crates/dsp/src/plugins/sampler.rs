@@ -8,7 +8,7 @@
 
 use std::sync::Arc;
 
-use super::synth::{Adsr, AdsrRates, EventKind, EventQueue, Stage, run_block};
+use super::instrument_queue::{Adsr, AdsrRates, EventKind, EventQueue, Stage, run_block};
 use crate::event::PluginEvent;
 use crate::params::{Params, choice, lin, log, param_plumbing, toggle};
 use crate::util::{Smoother, frames_in, ms_to_samples, sane_channels, sane_sr};
@@ -306,7 +306,6 @@ impl Sampler {
                     v.env.gate_off();
                 }
             }
-            EventKind::Sustain(..) | EventKind::Sostenuto(..) | EventKind::Bend(..) | EventKind::ResetControllers(_) => {}
         }
     }
 

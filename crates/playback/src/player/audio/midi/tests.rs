@@ -25,7 +25,7 @@ impl Rig {
     fn new(device: u32) -> Self {
         let mut session = Session::default();
         let track = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-        session.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+        session.track_mut(track).unwrap().instrument = Some(Insert::new("macro_oscillator"));
         let (mut control, mut audio, _) = fixture_session(device, Arc::new(session));
         let (mut registry, sources) = sources::pair(&control.sessions.bridge).unwrap();
         let token = registry.register(4).unwrap();

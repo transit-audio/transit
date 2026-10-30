@@ -66,7 +66,7 @@ fn features_session() -> Session {
     midi.set_loop(Some(ClipLoop { start: 0, end: beat * 4 }));
     transit_engine::edit::place_clip(&mut s, inst, midi);
     if let Some(t) = s.track_mut(inst) {
-        t.instrument = Some(Insert::new("subtractive_synth"));
+        t.instrument = Some(Insert::new(transit_model::DEFAULT_INSTRUMENT));
     }
     // An External Instrument track.
     let ext = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Hardware Synth"));
@@ -129,7 +129,7 @@ fn add_rack(s: &mut Session) {
     ] {
         let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some(name));
         if let Some(tr) = s.track_mut(t) {
-            tr.instrument = Some(Insert::new("subtractive_synth"));
+            tr.instrument = Some(Insert::new(transit_model::DEFAULT_INSTRUMENT));
             tr.folder = Some(folder);
             tr.mixer.output = Route::Bus(bus);
         }

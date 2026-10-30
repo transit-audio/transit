@@ -77,7 +77,7 @@ fn rack_notes() -> Vec<transit_midi::Note> {
 #[test]
 fn the_rack_plays_its_clips_through_the_zones_and_sums_like_its_members_alone() {
     let range = Range::new(0, 72_000);
-    let (mut rack, folder, _, _) = rack_session("subtractive_synth", true);
+    let (mut rack, folder, _, _) = rack_session("macro_oscillator", true);
     put_clip(&mut rack, folder, &rack_notes());
     let got = render_range(&rack, range, BLOCK);
     assert!(got.iter().flatten().any(|x| x.abs() > 1e-4), "the rack sounds");
@@ -86,15 +86,15 @@ fn the_rack_plays_its_clips_through_the_zones_and_sums_like_its_members_alone() 
     // the velocities the fades give (62: A 100 x 3/5 = 60, B 100 x 3/4 = 75).
     let a_notes = [note(48, 100, 0), note(62, 60, 240)];
     let b_notes = [note(62, 75, 240), note(66, 100, 480), note(72, 100, 960)];
-    let (mut group, _, [a, b], _) = rack_session("subtractive_synth", false);
+    let (mut group, _, [a, b], _) = rack_session("macro_oscillator", false);
     put_clip(&mut group, a, &a_notes);
     put_clip(&mut group, b, &b_notes);
     assert_eq!(got, render_range(&group, range, BLOCK), "bit-equal to the members playing the zoned notes themselves");
 
     // And the sum of each member rendered alone.
-    let (mut only_a, _, [a, _], _) = rack_session("subtractive_synth", false);
+    let (mut only_a, _, [a, _], _) = rack_session("macro_oscillator", false);
     put_clip(&mut only_a, a, &a_notes);
-    let (mut only_b, _, [_, b], _) = rack_session("subtractive_synth", false);
+    let (mut only_b, _, [_, b], _) = rack_session("macro_oscillator", false);
     put_clip(&mut only_b, b, &b_notes);
     let (ra, rb) = (render_range(&only_a, range, BLOCK), render_range(&only_b, range, BLOCK));
     let summed: Vec<Vec<f32>> = ra.iter().zip(&rb).map(|(x, y)| x.iter().zip(y).map(|(p, q)| p + q).collect()).collect();

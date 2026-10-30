@@ -160,8 +160,8 @@ fn the_knob_range_maps_onto_the_parameters_normalized_travel() {
     assert_eq!((plugin_value(eq, 0.0), plugin_value(eq, 1.0)), (eq.min, eq.max), "the ends are the parameter's own, not 0 and 127");
     assert!((plugin_value(eq, 0.5) - (eq.min + eq.max) / 2.0).abs() < 1e-4);
     // A logarithmic parameter takes its taper: the middle of the knob is the geometric middle.
-    let synth = plugin_info("subtractive_synth").unwrap();
-    let cutoff = synth.param("cutoff").unwrap();
+    let synth = plugin_info("macro_oscillator").unwrap();
+    let cutoff = plugin_info("eq_7band").unwrap().param("hpf_freq").unwrap();
     assert_eq!(cutoff.taper, transit_dsp::Taper::Log);
     let half = plugin_value(cutoff, 0.5);
     assert!((half / (cutoff.min * cutoff.max).sqrt() - 1.0).abs() < 0.01, "{half}");

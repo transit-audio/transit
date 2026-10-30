@@ -144,7 +144,7 @@ fn reset_controllers_preserves_other_sources_pedals_without_a_glitch() {
     assert_eq!(ctl, vec![(now, 64, 100)]);
 }
 fn synth_energy_after_seek(seek: bool, pedal: u8, clip_pedal: bool) -> f32 {
-    let (mut session, track) = instrument_session("subtractive_synth");
+    let (mut session, track) = instrument_session("macro_oscillator");
     if clip_pedal {
         let mut seq = transit_midi::Sequence::default();
         for (tick, value) in [(0, 110), (100, 63)] {
@@ -158,7 +158,7 @@ fn synth_energy_after_seek(seek: bool, pedal: u8, clip_pedal: bool) -> f32 {
     let mut make = |spec: &InstanceSpec, _: SlotGen| {
         let mut p = transit_dsp::create(&spec.id)?;
         p.prepare(SR as f32, BLOCK, spec.ch);
-        p.set_param("amp_release", 1.0);
+        p.set_param("decay", 0.0);
         Some(NewInstance { plugin: p, refused_state: false })
     };
     let mut env = comp.compile(Arc::new(session), PlanGeneration::EMPTY, PlanGeneration::EMPTY.checked_next().unwrap(), &mut make).unwrap();

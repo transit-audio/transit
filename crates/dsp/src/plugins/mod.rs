@@ -4,13 +4,13 @@ pub mod drums;
 pub mod dynamics;
 pub mod eq;
 pub mod harmonic;
+pub mod instrument_queue;
 pub mod macro_osc;
 pub mod modulation;
 pub mod pitch;
 pub mod reverb;
 pub mod sampler;
 pub mod strip;
-pub mod synth;
 pub mod utility;
 
 use crate::{Plugin, PluginInfo};
@@ -54,7 +54,6 @@ registry! {
     utility::DC_INFO => utility::DcRemoval::new(),
     utility::GEN_INFO => utility::SignalGenerator::new(),
     utility::DITHER_INFO => utility::Dither::new(),
-    synth::SYNTH_INFO => synth::SubtractiveSynth::new(),
     drums::DRUM_INFO => drums::DrumSynth::new(),
     sampler::SAMPLER_INFO => sampler::Sampler::new(),
     macro_osc::MACRO_OSC_INFO => macro_osc::MacroOscillator::new(),

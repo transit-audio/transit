@@ -666,7 +666,7 @@ fn synth_session(with_instrument: bool) -> (Arc<Session>, transit_model::TrackId
     let mut session = Session::default();
     let track = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("keys"));
     if with_instrument {
-        session.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+        session.track_mut(track).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     }
     (Arc::new(session), track)
 }
@@ -719,7 +719,7 @@ fn with_instrument_requested() -> (RuntimeControl<u8, u8>, AudioPorts<u8, u8>, t
     let first = ports.plans.engine().active().generation;
     // Same track id: the second session adds only the instrument.
     let mut edited = (**runtime.requested_session()).clone();
-    edited.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+    edited.track_mut(track).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     runtime.update_session(Arc::new(edited)).unwrap();
     (runtime, ports, track, first)
 }
@@ -736,7 +736,7 @@ fn a_slow_instance_is_made_on_the_host_thread_while_frames_advance_and_the_plan_
         slow(spec)
     });
     let slot = transit_mix::INSTRUMENT_SLOT;
-    let third_party = |id: &str| id == "subtractive_synth";
+    let third_party = |id: &str| id == "macro_oscillator";
 
     // Frame 1: announced, nothing made, nothing compiled, and the slot reads as loading.
     let started = std::time::Instant::now();
@@ -792,7 +792,7 @@ fn render_while_an_instance_is_made() -> (u32, std::time::Duration, std::time::D
         flag.store(false, Ordering::Release);
         made
     });
-    let third_party = |id: &str| id == "subtractive_synth";
+    let third_party = |id: &str| id == "macro_oscillator";
     runtime.handles.service_with(&mut runtime.control, &third_party, &factory);
 
     // 512 frames at 48 kHz is a 10.7 ms budget. The audio thread renders while the host thread
@@ -862,11 +862,11 @@ fn a_request_that_no_longer_wants_a_staged_instance_drops_it() {
     runtime.service();
     let base = Arc::clone(runtime.requested_session());
     let mut edited = (*base).clone();
-    edited.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+    edited.track_mut(track).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     runtime.update_session(Arc::new(edited)).unwrap();
     let made = Arc::new(AtomicUsize::new(0));
     let factory = slow_factory(std::time::Duration::ZERO, &made);
-    let third_party = |id: &str| id == "subtractive_synth";
+    let third_party = |id: &str| id == "macro_oscillator";
     runtime.handles.service_with(&mut runtime.control, &third_party, &factory);
     assert!(runtime.loading(track, transit_mix::INSTRUMENT_SLOT));
     // Undo before it is made: nothing is created and nothing is left loading.
@@ -897,7 +897,7 @@ fn a_creation_that_never_returns_is_stuck_after_the_timeout_and_the_session_comp
         transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)
     });
     let slot = transit_mix::INSTRUMENT_SLOT;
-    let third_party = |id: &str| id == "subtractive_synth";
+    let third_party = |id: &str| id == "macro_oscillator";
     runtime.handles.service_with(&mut runtime.control, &third_party, &factory);
     assert!(runtime.loading(track, slot));
     let (frames, worst) = frames_until_loaded(&mut runtime, &third_party, &factory);
@@ -935,7 +935,7 @@ fn a_save_after_the_host_thread_returns_from_a_stall_carries_the_live_state() {
         let made = transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch)?;
         Some(NewInstance { plugin: Box::new(Latency { inner: made.plugin, value: Arc::clone(&value), state: 0x5a }), refused_state: false })
     });
-    let third_party = |id: &str| id == "subtractive_synth";
+    let third_party = |id: &str| id == "macro_oscillator";
     runtime.handles.service_with(&mut runtime.control, &third_party, &factory);
     frames_until_loaded(&mut runtime, &third_party, &factory);
     adopt(&mut ports.plans);
@@ -1006,7 +1006,7 @@ fn slow_readers(
     let tracks: Vec<_> = (0..n)
         .map(|i| {
             let t = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some(&format!("keys {i}")));
-            let mut insert = Insert::new("subtractive_synth");
+            let mut insert = Insert::new("macro_oscillator");
             if stored {
                 insert.state = Some(transit_model::b64::encode(&[0xee]));
             }
@@ -1023,7 +1023,7 @@ fn slow_readers(
         let state = u8::try_from(next.fetch_add(1, Ordering::SeqCst)).unwrap();
         Some(NewInstance { plugin: Box::new(SlowRead { inner: made.plugin, delay, state }), refused_state: false })
     });
-    let third_party = |id: &str| id == "subtractive_synth";
+    let third_party = |id: &str| id == "macro_oscillator";
     let start = std::time::Instant::now();
     while (runtime.any_loading() || tracks.iter().any(|t| runtime.binding(*t, transit_mix::INSTRUMENT_SLOT).is_none()))
         && start.elapsed() < std::time::Duration::from_secs(20)
@@ -1144,13 +1144,13 @@ fn a_never_captured_instance_is_waited_for_even_during_a_modal_dialog() {
 fn an_instance_the_compile_did_not_predict_loads_without_blocking_a_frame() {
     let mut session = Session::default();
     let track = session.add_track(TrackKind::Instrument, ChannelFormat::Quad, Some("keys"));
-    session.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+    session.track_mut(track).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     let (mut runtime, mut ports) = RuntimeControl::<u8, u8>::new(Arc::new(session), None, target(), PlanLimits::default()).unwrap();
     runtime.handles =
         Handles::with_host(transit_plugin_host::Host::new(transit_plugin_host::Config { inline: false, ..transit_plugin_host::Config::default() }));
     let made = Arc::new(AtomicUsize::new(0));
     let factory = slow_factory(std::time::Duration::from_millis(500), &made);
-    let third_party = |id: &str| id == "subtractive_synth";
+    let third_party = |id: &str| id == "macro_oscillator";
     let slot = transit_mix::INSTRUMENT_SLOT;
     // One UI frame: the Player's service (republish included) and an audio block that adopts.
     let frame = |runtime: &mut RuntimeControl<u8, u8>, ports: &mut AudioPorts<u8, u8>| {

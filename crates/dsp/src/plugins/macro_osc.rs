@@ -42,7 +42,7 @@
 
 use crate::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_RESET_CONTROLLERS, CC_SUSTAIN, Message, PluginEvent};
 use crate::params::{Params, choice, lin, param_plumbing};
-use crate::plugins::synth::{MAX_EVENTS, RELEASE_RESERVE};
+use crate::plugins::instrument_queue::{MAX_EVENTS, RELEASE_RESERVE};
 use crate::util::{Smoother, frames_in, sane_channels, sane_sr, sort_events};
 use crate::{Category, ParamInfo, Plugin, PluginInfo, Unit, db_to_gain};
 use transit_macro_osc::SampleRate;

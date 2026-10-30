@@ -82,28 +82,6 @@ static EQ7: [Row; 1] = [&[
     sec("Out", 1, &[Knob("output_gain", "Output")]),
 ]];
 
-static SYNTH: [Row; 2] = [
-    &[
-        sec(
-            "Oscillators",
-            3,
-            &[
-                Choice("osc1_wave", "Osc 1"),
-                Choice("osc2_wave", "Osc 2"),
-                Knob("osc_mix", "Mix"),
-                Knob("osc2_semitones", "Pitch"),
-                Knob("osc2_detune", "Detune"),
-            ],
-        ),
-        sec("Filter", 3, &[Knob("cutoff", "Cutoff"), Knob("resonance", "Reso"), Knob("filter_env_amount", "Env Amt")]),
-        sec("Voice", 3, &[Knob("glide", "Glide"), Knob("velocity", "Velocity"), Knob("level", "Level")]),
-    ],
-    &[
-        sec("Amp Env", 4, &[Knob("amp_attack", "A"), Knob("amp_decay", "D"), Knob("amp_sustain", "S"), Knob("amp_release", "R")]),
-        sec("Filter Env", 4, &[Knob("filter_attack", "A"), Knob("filter_decay", "D"), Knob("filter_sustain", "S"), Knob("filter_release", "R")]),
-    ],
-];
-
 static PLATE: [Row; 1] = [&[
     sec("Space", 2, &[Knob("decay", "Decay"), Knob("size", "Size"), Knob("pre_delay", "Pre-Delay"), Knob("diffusion", "Diffusion")]),
     sec("Tone", 3, &[Knob("damping", "Damping"), Knob("low_cut", "Low Cut"), Knob("width", "Width")]),
@@ -182,7 +160,6 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         "compressor" => Some(&COMPRESSOR),
         "expander_gate" => Some(&GATE),
         "eq_7band" => Some(&EQ7),
-        "subtractive_synth" => Some(&SYNTH),
         "plate_reverb" => Some(&PLATE),
         MACRO_OSC => Some(&MACRO),
         _ => None,
@@ -371,7 +348,7 @@ mod tests {
 
     #[test]
     fn every_layout_places_each_parameter_of_its_plugin_exactly_once() {
-        for plugin in ["compressor", "expander_gate", "eq_7band", "subtractive_synth", "plate_reverb", MACRO_OSC] {
+        for plugin in ["compressor", "expander_gate", "eq_7band", "plate_reverb", MACRO_OSC] {
             let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
             let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).filter_map(|i| item_id(*i)).collect();
             ids.sort_unstable();

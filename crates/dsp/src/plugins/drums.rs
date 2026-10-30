@@ -5,7 +5,7 @@
 
 use std::f32::consts::TAU;
 
-use super::synth::{EventKind, EventQueue, run_block};
+use super::instrument_queue::{EventKind, EventQueue, run_block};
 use crate::biquad::{Biquad, FilterType};
 use crate::event::PluginEvent;
 use crate::params::{Params, lin, log, param_plumbing};
@@ -373,7 +373,7 @@ impl DrumSynth {
     fn apply(&mut self, kind: EventKind) {
         match kind {
             EventKind::On(_, n, v, _) => self.trigger(n, v),
-            EventKind::Off(..) | EventKind::Sustain(..) | EventKind::Sostenuto(..) | EventKind::Bend(..) | EventKind::ResetControllers(_) => {}
+            EventKind::Off(..) => {}
             EventKind::AllOff => {
                 let fast = decay60(30.0, self.sr);
                 for v in &mut self.voices {

@@ -48,7 +48,7 @@ fn gated(gate: &Arc<Gate>, hold: usize) -> Factory {
                 open = gate.opened.wait(open).unwrap();
             }
         }
-        transit_mix::create_instance("subtractive_synth", None, 48_000.0, 512, spec.ch)
+        transit_mix::create_instance("macro_oscillator", None, 48_000.0, 512, spec.ch)
     })
 }
 

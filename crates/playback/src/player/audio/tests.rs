@@ -174,7 +174,7 @@ fn owner_fixture() -> (crate::player::RuntimeControl<Command, ActionResult>, Aud
     use transit_model::{ChannelFormat, Insert, TrackKind};
     let mut session = Session::default();
     let track = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    session.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+    session.track_mut(track).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     let target = RenderTarget { device: DeviceGeneration(73), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 };
     let key = ClockKey { generation: 73, domain: 73, direction: Direction::Output };
     let shared = Arc::new(Shared {
@@ -800,7 +800,7 @@ fn stop_and_end_do_not_process_discarded_instrument_frames_outside_the_render_cl
         control.service(&mut make);
         let mut s = Session::default();
         let track = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-        s.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+        s.track_mut(track).unwrap().instrument = Some(Insert::new("macro_oscillator"));
         control.request(Arc::new(s), None).unwrap();
         let resets = Arc::new(AtomicUsize::new(0));
         let calls = Arc::new(AtomicUsize::new(0));
@@ -876,7 +876,7 @@ fn escaped_processing_panic_stays_owned_until_main_reclaims_the_callback_holder(
     control.service(&mut make);
     let mut session = Session::default();
     let track = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    session.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+    session.track_mut(track).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     control.request(Arc::new(session), None).unwrap();
     let main = std::thread::current().id();
     let drops = Arc::new(AtomicUsize::new(0));
@@ -943,7 +943,7 @@ fn a_control_failure_during_processing_silences_that_callback_before_it_returns(
     control.service(&mut make);
     let mut session = Session::default();
     let track = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
-    session.track_mut(track).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+    session.track_mut(track).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     let (entered, in_process) = std::sync::mpsc::sync_channel(1);
     let resume = Arc::new(std::sync::Barrier::new(2));
     control.request(Arc::new(session), None).unwrap();

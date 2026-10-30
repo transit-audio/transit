@@ -152,31 +152,31 @@ mod tests {
     fn sets_an_instrument_tracks_instrument_with_defaults_and_undoes() {
         let mut e = Engine::default();
         let t = track(&mut e, "instrument");
-        assert_eq!(instrument_of(&e, t).as_deref(), Some("subtractive_synth"));
+        assert_eq!(instrument_of(&e, t).as_deref(), Some("macro_oscillator"));
         let r = e.execute("mix.instrument", &json!({"track": t.0, "plugin": "drum_synth"})).unwrap();
         assert_eq!(r["plugin"], "drum_synth");
         assert_eq!(instrument_of(&e, t).as_deref(), Some("drum_synth"));
         let params = e.session().track(t).and_then(|tr| tr.instrument.as_ref()).map(|i| i.params.len());
         assert_eq!(params, transit_dsp::plugin_info("drum_synth").map(|p| p.params.len()), "every parameter at its default");
         e.execute("edit.undo", &json!({})).unwrap();
-        assert_eq!(instrument_of(&e, t).as_deref(), Some("subtractive_synth"));
+        assert_eq!(instrument_of(&e, t).as_deref(), Some("macro_oscillator"));
     }
 
     #[test]
     fn sets_a_built_in_instruments_parameters() {
         let mut e = Engine::default();
         let t = track(&mut e, "instrument");
-        let r = e.execute("mix.instrument_param", &json!({"track": t.0, "param": "cutoff", "value": 5000})).unwrap();
-        assert_eq!(r["value"], 5000.0);
-        let r = e.execute("mix.instrument_param", &json!({"track": t.0, "param": "cutoff", "value": 1.0e9})).unwrap();
-        assert_eq!(r["value"], 20000.0, "clamped");
-        let v = e.session().track(t).and_then(|tr| tr.instrument.as_ref()).and_then(|i| i.params.get("cutoff").copied());
-        assert_eq!(v, Some(20000.0));
+        let r = e.execute("mix.instrument_param", &json!({"track": t.0, "param": "level", "value": -20})).unwrap();
+        assert_eq!(r["value"], -20.0);
+        let r = e.execute("mix.instrument_param", &json!({"track": t.0, "param": "level", "value": 1.0e9})).unwrap();
+        assert_eq!(r["value"], 6.0, "clamped");
+        let v = e.session().track(t).and_then(|tr| tr.instrument.as_ref()).and_then(|i| i.params.get("level").copied());
+        assert_eq!(v, Some(6.0));
         assert!(e.execute("mix.instrument_param", &json!({"track": t.0, "param": "nope", "value": 1})).is_err());
-        assert!(e.execute("mix.instrument_param", &json!({"track": t.0, "param": "cutoff"})).is_err());
-        assert!(e.execute("mix.instrument_param", &json!({"track": t.0, "param": "cutoff", "value": "loud"})).is_err());
+        assert!(e.execute("mix.instrument_param", &json!({"track": t.0, "param": "level"})).is_err());
+        assert!(e.execute("mix.instrument_param", &json!({"track": t.0, "param": "level", "value": "loud"})).is_err());
         let audio = track(&mut e, "audio");
-        assert!(e.execute("mix.instrument_param", &json!({"track": audio.0, "param": "cutoff", "value": 1})).is_err());
+        assert!(e.execute("mix.instrument_param", &json!({"track": audio.0, "param": "level", "value": 1})).is_err());
         e.execute("edit.undo", &json!({})).unwrap();
     }
 
@@ -195,31 +195,31 @@ mod tests {
 
     #[test]
     fn parameters_given_with_the_instrument_reach_the_render_and_unknown_fields_are_refused() {
-        // A high note through a closed and an open filter: the cutoff has to change the render.
+        // One note at -40 dB and at 0 dB: the level given with the instrument has to change the render.
         let mut closed = Engine::default();
         let t = track(&mut closed, "instrument");
-        let r = closed.execute("mix.instrument", &json!({"track": t.0, "plugin": "subtractive_synth", "params": {"cutoff": 200}})).unwrap();
-        assert_eq!(r["plugin"], "subtractive_synth");
-        let stored = closed.session().track(t).and_then(|tr| tr.instrument.as_ref()).and_then(|i| i.params.get("cutoff").copied());
-        assert_eq!(stored, Some(200.0));
+        let r = closed.execute("mix.instrument", &json!({"track": t.0, "plugin": "macro_oscillator", "params": {"level": -40}})).unwrap();
+        assert_eq!(r["plugin"], "macro_oscillator");
+        let stored = closed.session().track(t).and_then(|tr| tr.instrument.as_ref()).and_then(|i| i.params.get("level").copied());
+        assert_eq!(stored, Some(-40.0));
         let mut open = Engine::default();
         let o = track(&mut open, "instrument");
-        open.execute("mix.instrument", &json!({"track": o.0, "plugin": "subtractive_synth", "params": {"cutoff": 12_000}})).unwrap();
+        open.execute("mix.instrument", &json!({"track": o.0, "plugin": "macro_oscillator", "params": {"level": 0}})).unwrap();
         let (quiet, loud) = (rms_of_a_note(&mut closed, t, 2), rms_of_a_note(&mut open, o, 2));
-        assert!(loud > quiet * 3.0, "cutoff 12000 plays a high note much louder than 200: {loud} vs {quiet}");
+        assert!(loud > quiet * 3.0, "level 0 dB plays a note much louder than -40 dB: {loud} vs {quiet}");
         // Values are clamped into range; the instrument starts from its defaults for the rest.
         let mut e = Engine::default();
         let t = track(&mut e, "instrument");
-        e.execute("mix.instrument", &json!({"track": t.0, "plugin": "subtractive_synth", "params": {"cutoff": 1.0e9}})).unwrap();
+        e.execute("mix.instrument", &json!({"track": t.0, "plugin": "macro_oscillator", "params": {"level": 1.0e9}})).unwrap();
         let ins = e.session().track(t).and_then(|tr| tr.instrument.clone()).unwrap();
-        assert_eq!(ins.params.get("cutoff"), Some(&20_000.0));
-        assert_eq!(ins.params.len(), transit_dsp::plugin_info("subtractive_synth").map(|p| p.params.len()).unwrap());
+        assert_eq!(ins.params.get("level"), Some(&6.0));
+        assert_eq!(ins.params.len(), transit_dsp::plugin_info("macro_oscillator").map(|p| p.params.len()).unwrap());
 
         // Nothing is accepted and then ignored: a parameter beside `plugin`, an unknown id, a value
         // that is not a number and a `params` that is not an object are errors, and change nothing.
         let mut e = Engine::default();
         let t = track(&mut e, "instrument");
-        e.execute("mix.instrument_param", &json!({"track": t.0, "param": "cutoff", "value": 777})).unwrap();
+        e.execute("mix.instrument_param", &json!({"track": t.0, "param": "level", "value": -12})).unwrap();
         let before = e.session().track(t).and_then(|tr| tr.instrument.clone());
         let depth = e.revision;
         for bad in [
@@ -246,7 +246,7 @@ mod tests {
         assert!(e.execute("mix.instrument", &json!({"track": inst.0, "plugin": "vst3:00000000000000000000000000000000"})).is_err());
         assert!(e.execute("mix.instrument", &json!({"track": inst.0})).is_err(), "no plugin");
         assert!(e.execute("mix.instrument", &json!({"track": audio.0, "plugin": "drum_synth"})).is_err(), "an audio track");
-        assert_eq!(instrument_of(&e, inst).as_deref(), Some("subtractive_synth"));
+        assert_eq!(instrument_of(&e, inst).as_deref(), Some("macro_oscillator"));
         assert_eq!(instrument_of(&e, audio), None);
     }
 }

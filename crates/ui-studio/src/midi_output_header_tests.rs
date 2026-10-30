@@ -132,7 +132,7 @@ fn the_chip_never_lands_on_the_subtitle() {
     for width in [160.0, 200.0, 236.0, 300.0] {
         let (mut app, ctx) = instrument_rig();
         let (texts, dots) = shapes(&mut app, &ctx, width);
-        let subtitle = texts.iter().find(|(t, _)| t == "Subtractive Synth").unwrap_or_else(|| panic!("subtitle at {width}: {texts:?}")).1;
+        let subtitle = texts.iter().find(|(t, _)| t == "Macro Oscillator").unwrap_or_else(|| panic!("subtitle at {width}: {texts:?}")).1;
         for d in &dots {
             assert!(!d.intersects(subtitle), "dot {d:?} overlaps subtitle {subtitle:?} at {width}");
         }

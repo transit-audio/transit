@@ -77,7 +77,7 @@ struct LatentSynth {
 
 impl Plugin for LatentSynth {
     fn info(&self) -> &'static transit_dsp::PluginInfo {
-        transit_dsp::plugin_info("subtractive_synth").unwrap()
+        transit_dsp::plugin_info("macro_oscillator").unwrap()
     }
     fn prepare(&mut self, _sr: f32, _mb: usize, _ch: usize) {}
     fn reset(&mut self) {
@@ -315,7 +315,7 @@ fn a_latent_instrument_lines_up_with_a_dry_audio_track() {
     let cid = s.new_clip_id();
     let tr = s.track_mut(inst).unwrap();
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, LEN as i64, seq));
-    let mut synth = Insert::new("subtractive_synth");
+    let mut synth = Insert::new("macro_oscillator");
     synth.preset = "latent:300".into();
     tr.instrument = Some(synth);
     tr.mixer.pan = vec![-1.0, 1.0];

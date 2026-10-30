@@ -138,17 +138,17 @@ mod tests {
 
     #[test]
     fn value_and_position_map_through_the_taper() {
-        let cutoff = p("subtractive_synth", "cutoff");
-        assert!((value_at(cutoff, 0.0) - 20.0).abs() < 1e-3);
-        assert!((value_at(cutoff, 1.0) - 20_000.0).abs() < 1.0);
+        let cutoff = p("eq_7band", "hpf_freq");
+        assert!((value_at(cutoff, 0.0) - 10.0).abs() < 1e-3);
+        assert!((value_at(cutoff, 1.0) - 2_000.0).abs() < 1.0);
         let mid = value_at(cutoff, 0.5);
-        assert!((mid - (20.0f32 * 20_000.0).sqrt()).abs() < 1.0, "log taper: the middle is the geometric mean, got {mid}");
+        assert!((mid - (10.0f32 * 2_000.0).sqrt()).abs() < 1.0, "log taper: the middle is the geometric mean, got {mid}");
         let thr = p("compressor", "threshold");
         assert!((value_at(thr, 0.5) - -30.0).abs() < 1e-4, "linear");
         for n in [0.0, 0.25, 0.5, 1.0] {
             assert!((cutoff.to_normalized(value_at(cutoff, n)) - n).abs() < 1e-3);
         }
-        let semis = p("subtractive_synth", "osc2_semitones");
+        let semis = p("macro_oscillator", "tune");
         assert_eq!(value_at(semis, 0.51).fract(), 0.0, "semitones are whole");
     }
 

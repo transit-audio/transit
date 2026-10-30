@@ -139,7 +139,7 @@ fn dense_clip_events_keep_every_release_and_same_sample_order() {
 }
 
 fn dense_clip_pedal_trial(transitions: usize) -> (transit_mix::EventStatus, bool, f32) {
-    let (mut session, track) = instrument_session("subtractive_synth");
+    let (mut session, track) = instrument_session("macro_oscillator");
     let mut seq = transit_midi::Sequence::default();
     for i in 0..transitions {
         seq.ctrls.push(transit_midi::CtrlEvent {
@@ -156,7 +156,7 @@ fn dense_clip_pedal_trial(transitions: usize) -> (transit_mix::EventStatus, bool
     let mut make = |spec: &InstanceSpec, _: SlotGen| {
         let mut p = transit_dsp::create(&spec.id)?;
         p.prepare(SR as f32, BLOCK, spec.ch);
-        p.set_param("amp_release", 1.0);
+        p.set_param("decay", 0.0);
         Some(NewInstance { plugin: p, refused_state: false })
     };
     let mut env = comp.compile(Arc::new(session), PlanGeneration::EMPTY, PlanGeneration::EMPTY.checked_next().unwrap(), &mut make).unwrap();
@@ -179,7 +179,7 @@ fn dense_clip_pedal_trial(transitions: usize) -> (transit_mix::EventStatus, bool
     assert!(mix.queue_event(&ev(612, off(60))).accepted());
     let ((), stats) = measure(|| {
         mix.render_active(512, BLOCK, &mut out);
-        for i in 3..16 {
+        for i in 3..64 {
             mix.render_active(i * BLOCK as i64, BLOCK, &mut out);
         }
     });

@@ -74,7 +74,7 @@ fn recorded_sustain_survives_edit_undo_disk_roundtrip_and_audio_playback() {
     use transit_time::Range;
     let mut e = Engine::default();
     let track =
-        TrackId(e.execute("track.new", &json!({"kind":"instrument","instrument":"subtractive_synth"})).unwrap()["tracks"][0].as_u64().unwrap());
+        TrackId(e.execute("track.new", &json!({"kind":"instrument","instrument":"macro_oscillator"})).unwrap()["tracks"][0].as_u64().unwrap());
     let events = [
         (0, Msg::NoteOn { pitch: 60, velocity: 100 }),
         (6000, Msg::Cc { cc: 64, value: 101 }),

@@ -69,7 +69,7 @@ impl T {
         player.set_plugin_test_hooks(PluginTestHooks {
             host: host.clone(),
             factory: Arc::new(|spec: &transit_mix::InstanceSpec| {
-                transit_mix::create_instance("subtractive_synth", None, 48_000.0, 512, spec.ch)
+                transit_mix::create_instance("macro_oscillator", None, 48_000.0, 512, spec.ch)
                     .map(|n| transit_mix::NewInstance { plugin: Box::new(Stateful(n.plugin)), ..n })
             }),
             deferred: Arc::new(|id: &str| id == HOSTED),

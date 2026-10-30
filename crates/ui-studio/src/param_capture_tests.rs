@@ -208,13 +208,13 @@ fn an_instrument_knob_records_into_the_instrument_lane() {
     t.app.set_automation_mode(tr, AutomationMode::Latch).unwrap();
     t.open_editor();
     t.play();
-    t.turn(tr, "cutoff", 50.0, 20);
-    let pts = t.lane(tr, AutoParam::INSTRUMENT_SLOT, "cutoff");
+    t.turn(tr, "harmonics", 50.0, 20);
+    let pts = t.lane(tr, AutoParam::INSTRUMENT_SLOT, "harmonics");
     assert!(pts.len() >= 5, "the instrument lane took points: {}", pts.len());
     let s = t.app.engine.session_arc();
-    let lane = Lane::of_param(tr, transit_mix::INSTRUMENT_SLOT, "cutoff").unwrap().1;
+    let lane = Lane::of_param(tr, transit_mix::INSTRUMENT_SLOT, "harmonics").unwrap().1;
     assert!(lane.valid(s.track(tr).unwrap()));
-    assert_eq!(lane.id(), "plugin:instrument:cutoff");
+    assert_eq!(lane.id(), "plugin:instrument:harmonics");
     assert_eq!(Lane::parse(&lane.id()), Some(lane));
     t.play();
 }

@@ -256,7 +256,7 @@ pub fn demo_session() -> Session {
         let name = s.track(t).map(|x| x.name.clone()).unwrap_or_default();
         crate::edit::place_clip(&mut s, t, Clip::midi(cid, name, start, len, seq));
         if let Some(tr) = s.track_mut(t) {
-            tr.instrument = Some(insert("subtractive_synth"));
+            tr.instrument = Some(insert(transit_model::DEFAULT_INSTRUMENT));
             tr.color = transit_model::TRACK_COLORS[color];
             tr.mixer.volume_db = if t == keys { -9.0 } else { -12.0 };
         }

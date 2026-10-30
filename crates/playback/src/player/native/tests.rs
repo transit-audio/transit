@@ -21,7 +21,7 @@ fn until(mut ready: impl FnMut() -> bool) {
 fn track(session: &mut Session, selection: MidiInput) -> TrackId {
     let id = session.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     let track = session.track_mut(id).unwrap();
-    track.instrument = Some(Insert::new("subtractive_synth"));
+    track.instrument = Some(Insert::new("macro_oscillator"));
     track.mixer.record_arm = true;
     track.midi_input = selection;
     id
@@ -500,7 +500,7 @@ fn removed_and_replaced_routes_release_old_generations_and_can_rearm() {
     f.tick();
     assert!(f.native.retired.is_empty());
 
-    session.track_mut(edit).unwrap().instrument = Some(Insert::new("subtractive_synth"));
+    session.track_mut(edit).unwrap().instrument = Some(Insert::new("macro_oscillator"));
     f.owner.update_session(Arc::new(session.clone())).unwrap();
     f.ready(1, 2);
     let replacement = f.native.inputs[0].routes.iter().find(|b| b.route.target.0 == edit).unwrap();

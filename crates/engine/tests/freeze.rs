@@ -12,7 +12,7 @@ use transit_time::Range;
 /// An instrument track (a synth with a note) through a latent insert, with its fader down.
 fn engine() -> (Engine, TrackId) {
     let mut e = Engine::default();
-    let r = e.execute("track.new", &json!({"kind": "instrument", "name": "Keys", "instrument": "subtractive_synth"})).unwrap();
+    let r = e.execute("track.new", &json!({"kind": "instrument", "name": "Keys", "instrument": "macro_oscillator"})).unwrap();
     let track = r["tracks"][0].as_u64().unwrap();
     let r = e.execute("midi.new_clip", &json!({"track": track, "start": 12_000, "length": 48_000})).unwrap();
     let clip = r["clip"].as_u64().unwrap();
@@ -172,7 +172,7 @@ fn a_session_with_a_freeze_round_trips_and_older_files_load() {
 
 /// A synth track playing one held note.
 fn synth(e: &mut Engine, name: &str, pitch: u32, vel: u32) -> TrackId {
-    let r = e.execute("track.new", &json!({"kind": "instrument", "name": name, "instrument": "subtractive_synth"})).unwrap();
+    let r = e.execute("track.new", &json!({"kind": "instrument", "name": name, "instrument": "macro_oscillator"})).unwrap();
     let track = r["tracks"][0].as_u64().unwrap();
     let r = e.execute("midi.new_clip", &json!({"track": track, "start": 12_000, "length": 48_000})).unwrap();
     let clip = r["clip"].as_u64().unwrap();

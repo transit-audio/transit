@@ -66,11 +66,11 @@ mod tests {
         let mut e = Engine::default();
         let r = e.execute("track.new", &json!({"kind": "instrument"})).unwrap();
         let t = r["tracks"][0].as_u64().unwrap();
-        e.execute("mix.instrument", &json!({"track": t, "plugin": "subtractive_synth"})).unwrap();
+        e.execute("mix.instrument", &json!({"track": t, "plugin": "macro_oscillator"})).unwrap();
         let (doc, dirty) = (e.session_arc(), e.is_dirty());
         let undo = e.execute("engine.history", &json!({})).unwrap()["undo"].as_array().unwrap().len();
         let v = e.execute("plugin.retry", &json!({"track": t, "slot": "instrument"})).unwrap();
-        assert_eq!(v, json!({"track": t, "slot": transit_mix::INSTRUMENT_SLOT, "plugin": "subtractive_synth"}));
+        assert_eq!(v, json!({"track": t, "slot": transit_mix::INSTRUMENT_SLOT, "plugin": "macro_oscillator"}));
         assert!(std::sync::Arc::ptr_eq(&doc, &e.session_arc()) && e.is_dirty() == dirty, "not a document change");
         assert_eq!(e.execute("engine.history", &json!({})).unwrap()["undo"].as_array().unwrap().len(), undo, "no undo step");
         assert!(e.execute("plugin.retry", &json!({"track": t, "slot": 0})).unwrap_err().to_string().contains("empty slot"));

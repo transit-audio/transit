@@ -1,4 +1,4 @@
-//! Band-limited (PolyBLEP) oscillators shared by the generator and the synth.
+//! Band-limited (PolyBLEP) oscillators shared by the signal generator.
 
 use std::f32::consts::TAU;
 

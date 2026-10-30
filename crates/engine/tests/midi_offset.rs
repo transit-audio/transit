@@ -9,7 +9,7 @@ fn render(e: &Engine) -> Vec<Vec<f32>> {
 #[test]
 fn midi_track_offset_moves_the_notes_like_moving_the_clip() {
     let mut e = Engine::default();
-    let r = e.execute("track.new", &json!({"kind": "instrument", "name": "Timing", "instrument": "subtractive_synth"})).unwrap();
+    let r = e.execute("track.new", &json!({"kind": "instrument", "name": "Timing", "instrument": "macro_oscillator"})).unwrap();
     let track = r["tracks"][0].as_u64().unwrap();
     let r = e.execute("midi.new_clip", &json!({"track": track, "start": 12_000, "length": 96_000})).unwrap();
     let clip = r["clip"].as_u64().unwrap();

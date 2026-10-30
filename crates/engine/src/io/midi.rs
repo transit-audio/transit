@@ -35,7 +35,7 @@ pub fn import_midi_bytes(e: &mut Engine, bytes: &[u8], at: Samples, tempo_map: b
         let id = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some(&name));
         let drums = tr.sequence.notes.iter().all(|n| n.channel == 9);
         if let Some(t) = s.track_mut(id) {
-            t.instrument = Some(transit_model::Insert::new(if drums { "drum_synth" } else { "subtractive_synth" }));
+            t.instrument = Some(transit_model::Insert::new(if drums { "drum_synth" } else { transit_model::DEFAULT_INSTRUMENT }));
         }
         let end_tick = base_tick.saturating_add(tr.sequence.end_tick().max(1));
         let len = s.tempo.tick_to_samples(end_tick, s.sample_rate).saturating_sub(at);

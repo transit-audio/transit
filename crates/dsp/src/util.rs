@@ -304,12 +304,6 @@ pub(crate) fn sort_events<T: Copy>(ev: &mut [T], key: impl Fn(&T) -> usize) {
     }
 }
 
-/// Converts a MIDI note number to Hz (A4 = 440).
-#[inline]
-pub(crate) fn note_hz(note: f32) -> f32 {
-    440.0 * 2f32.powf((note - 69.0) / 12.0)
-}
-
 /// Test seam (feature `testing`, issue #210): the state of the shared building blocks.
 #[cfg(feature = "testing")]
 impl Smoother {

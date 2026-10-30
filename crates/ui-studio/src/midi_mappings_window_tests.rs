@@ -268,7 +268,7 @@ fn both_range_fields_and_the_buttons_are_drawn_whole_at_the_default_size() {
 fn typical_names_show_untruncated_at_the_default_size() {
     let screen = (1920.0, 1080.0);
     let (mut app, ctx, t) = new_app(screen.0, screen.1);
-    app.run("track.rename", json!({"track": t.0, "name": "Lead: Subtractive Synth"})).ok();
+    app.run("track.rename", json!({"track": t.0, "name": "Lead: Macro Oscillator"})).ok();
     app.add_device(t, "eq_7band").unwrap();
     map(&mut app, "Arturia KeyLab 49 MkII", &format!("track:{}:plugin:a:mid_gain", t.0), 74);
     open(&mut app, &ctx, screen);

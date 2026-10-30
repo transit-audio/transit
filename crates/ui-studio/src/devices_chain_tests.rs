@@ -45,7 +45,21 @@ fn the_instrument_is_the_first_device() {
     frames(&mut app, &ctx, 3, &mut time);
     let cards = &app.mixer.devices.cards;
     assert_eq!(cards.iter().map(|c| c.slot).collect::<Vec<_>>(), vec![None, Some(0)]);
-    assert_eq!(cards[0].plugin, "subtractive_synth");
+    assert_eq!(cards[0].plugin, "macro_oscillator");
+}
+
+#[test]
+fn a_new_instrument_track_carries_the_macro_oscillator_and_the_menu_no_longer_offers_the_old_synth() {
+    let mut app = app();
+    let t = new_track(&mut app, json!({"kind": "instrument"}));
+    let ins = app.engine.session().track(t).unwrap().instrument.clone().unwrap();
+    assert_eq!(ins.plugin, transit_model::DEFAULT_INSTRUMENT);
+    assert_eq!(ins.plugin, "macro_oscillator");
+    let info = transit_dsp::plugin_info(&ins.plugin).unwrap();
+    assert_eq!(info.param("voices").unwrap().default, 7.0, "the default is 8 voices (index 7)");
+    let ids: Vec<String> = app.instrument_lists().builtin.into_iter().map(|e| e.id).collect();
+    assert!(ids.iter().any(|i| i == "macro_oscillator"), "{ids:?}");
+    assert!(ids.iter().all(|i| i != "subtractive_synth"), "{ids:?}");
 }
 
 fn hover(app: &mut StudioApp, at: (f32, f32)) {
@@ -69,7 +83,7 @@ fn the_instrument_menu_runs_mix_instrument_and_a_replace_is_one_undo_step() {
     let mut time = 0.0;
     frames(&mut app, &ctx, 3, &mut time);
     let card = app.mixer.devices.cards.first().cloned().unwrap();
-    assert_eq!((card.slot, card.plugin.as_str()), (None, "subtractive_synth"));
+    assert_eq!((card.slot, card.plugin.as_str()), (None, "macro_oscillator"));
     let before = undo_len(&mut app);
     click(&mut app, mid(card.pick_button));
     frames(&mut app, &ctx, 6, &mut time);
@@ -91,7 +105,7 @@ fn the_instrument_menu_runs_mix_instrument_and_a_replace_is_one_undo_step() {
     assert_eq!(undo_len(&mut app), n);
     app.run("edit.undo", json!({})).unwrap();
     app.run("edit.undo", json!({})).unwrap();
-    assert_eq!(instrument_of(&app, t).unwrap().plugin, "subtractive_synth");
+    assert_eq!(instrument_of(&app, t).unwrap().plugin, "macro_oscillator");
 }
 
 #[test]
@@ -257,7 +271,7 @@ fn the_device_chain_and_strip_plus_menus_list_effects_only_and_both_add() {
     assert!(menu.iter().any(|m| m.value == "dither" && !m.visible), "rows scrolled out of the menu are flagged: {menu:?}");
     assert!(menu.iter().any(|m| m.value == "gain"), "{menu:?}");
     assert_ne!(app.mixer.filter_rect, [0.0; 4], "the filter box is published");
-    assert!(menu.iter().all(|m| m.value != "sampler" && m.value != "subtractive_synth"), "instruments are refused in an effects menu");
+    assert!(menu.iter().all(|m| m.value != "sampler" && m.value != "macro_oscillator"), "instruments are refused in an effects menu");
     let fr = mid(app.mixer.filter_rect);
     click(&mut app, fr);
     frames(&mut app, &ctx, 3, &mut time);
