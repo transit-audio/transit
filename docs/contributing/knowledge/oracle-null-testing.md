@@ -1,7 +1,7 @@
 # Oracle null tests
 
 How we know a ported engine is right. Read it before you port DSP, touch `crates/macro-osc`,
-`crates/resonator` or `crates/macro-osc-oracle`, or write a test that compares audio. The gate list
+`crates/resonator`, `crates/granular` or `crates/macro-osc-oracle`, or write a test that compares audio. The gate list
 is in [`../evidence/gates.md`](../evidence/gates.md#oracle-null-tests); the decision is
 [ADR 0033](../../adr/0033-built-in-instruments-mutable-instruments-port.md).
 
@@ -100,3 +100,13 @@ prerequisite for the workspace tests, not for the app (`docs/building.md`).
 The Rings resonator (`crates/resonator`) was written from the firmware, not from a Rust port. Its six
 models matched the oracle bit for bit on the first full run, at every polyphony, using the same
 crate for the oracle.
+
+## A third port
+
+The texture processor's granular mode (`crates/granular`) was written from the firmware too, and
+nulled at 0 LSB at its four buffer qualities on the first full run, at its own rate (32 kHz) and
+block size (32 frames). Two lessons from it: a sweep must let the recording fill before it measures
+(the first sweep rendered silence at most positions, and a check on the first block passed on the
+dry signal alone), and vendoring an upstream commit is not the same as vendoring a working module:
+a 2023 merge left the stretch mode silent at the pinned commit, which the oracle's sound check
+found.

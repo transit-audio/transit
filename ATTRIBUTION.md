@@ -34,11 +34,18 @@ Gillet's resonator firmware (`rings/dsp` in `eurorack`) and the stmlib helpers i
 transit from her C++ with no third-party Rust code in between. Her MIT notices are in
 `crates/resonator/LICENSE-THIRD-PARTY` (provenance in `crates/resonator/VENDOR.md`).
 
+The granular texture processor (`crates/granular`, #199; not linked into the app) is a Rust port of
+Émilie Gillet's texture processor firmware (`clouds/dsp` in `eurorack`, its granular playback mode)
+and the stmlib helpers it uses, written by transit from her C++ with no third-party Rust code in
+between. Her MIT notices are in `crates/granular/LICENSE-THIRD-PARTY` (provenance in
+`crates/granular/VENDOR.md`).
+
 | Path | Author | Source | License |
 |---|---|---|---|
 | `crates/macro-osc/src/` | Émilie Gillet (firmware and stmlib); Oliver Rockstedt (Rust port); transit contributors (corrections) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c`, https://github.com/sourcebox/mi-plaits-dsp-rs `effe9864bb` | MIT (`crates/macro-osc/LICENSE-THIRD-PARTY`); transit's changes MIT OR Apache-2.0 |
 | `crates/resonator/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/resonator/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
-| `crates/macro-osc-oracle/vendor/` | Émilie Gillet | the firmware's C++ (the macro oscillator and the resonator), for the null tests only (never linked into the app) | MIT (`crates/macro-osc-oracle/LICENSE-THIRD-PARTY`) |
+| `crates/granular/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/granular/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
+| `crates/macro-osc-oracle/vendor/` | Émilie Gillet | the firmware's C++ (the macro oscillator, the resonator and the granular texture processor), for the null tests only (never linked into the app) | MIT (`crates/macro-osc-oracle/LICENSE-THIRD-PARTY`) |
 
 ## Fonts
 
@@ -47,6 +54,12 @@ SoundCraft bundles no font files; the transit app bundles Inter and JetBrains Mo
 and, at runtime, the operating system's own UI fonts when available (never redistributed).
 
 ## Files
+
+The granular texture processor (`crates/granular`, #199; not linked into the app) is a Rust port of
+Émilie Gillet's texture processor firmware (`clouds/dsp` in `eurorack`, its granular playback mode)
+and the stmlib helpers it uses, written by transit from her C++ with no third-party Rust code in
+between. Her MIT notices are in `crates/granular/LICENSE-THIRD-PARTY` (provenance in
+`crates/granular/VENDOR.md`).
 
 | Path | Author | Source | License |
 |---|---|---|---|
