@@ -1,4 +1,5 @@
 use super::*;
+use transit_model::disk::StreamMap;
 
 /// Render and sum one clip, reusing the prepared FX buffer in bounded chunks.
 fn mix_clip_fx(
@@ -31,6 +32,9 @@ fn mix_clip_fx(
 
 pub(crate) fn render_audio_clips(s: &Session, t: &Track, strip: &mut Strip, pos: Samples, frames: usize) {
     let block = Range { start: pos, end: pos.saturating_add(frames as i64) };
+    if on_audio_thread() {
+        cue_disk_clips(s, t, block);
+    }
     for clip in t.clips() {
         if clip.muted || !clip.is_audio() || !clip.range().overlaps(&block) {
             continue;
@@ -47,6 +51,37 @@ pub(crate) fn render_audio_clips(s: &Session, t: &Track, strip: &mut Strip, pos:
             Some(fx) => mix_clip_fx(frames, &mut strip.buf, &mut strip.clipbuf, fx, |done, n, buf| {
                 render_clip(s, clip, pos.saturating_add(done as i64), n, buf);
             }),
+        }
+    }
+}
+
+/// Audio thread: ask the streamer for what the playhead reaches next (ADR 0035), lock-free: each
+/// disk-backed clip starting within half a ring after this block, and when the block ends within
+/// half a ring before the cycle's end, each clip under the cycle's start. A clip that is
+/// playing asks for itself when its ring runs short ([`render_clip`]).
+fn cue_disk_clips(s: &Session, t: &Track, block: Range) {
+    if !s.pool.has_disk() {
+        return;
+    }
+    let cycle = s.edit.cycle_range();
+    let looping = s.edit.loop_playback && !cycle.is_empty() && block.end <= cycle.end;
+    // No ring is longer than two seconds at the session rate, or its floor: half of that bounds the
+    // lead, so only clips that close look their source up.
+    let horizon = i64::from(s.sample_rate.hz()).max(1 << 13);
+    let near_cycle = looping && cycle.end - block.end <= horizon;
+    for clip in t.clips() {
+        let ahead = clip.start >= block.end && clip.start < block.end.saturating_add(horizon);
+        if clip.muted || !(ahead || near_cycle && clip.range().overlaps(&Range::new(cycle.start, cycle.start.saturating_add(horizon)))) {
+            continue;
+        }
+        let Some(d) = clip.source().and_then(|id| s.pool.get(id)).and_then(|a| a.disk.as_deref()) else { continue };
+        let Some(map) = StreamMap::of(clip) else { continue };
+        let lead = (d.window() / 2) as i64;
+        if clip.start >= block.end && clip.start < block.end.saturating_add(lead) {
+            d.cue(&map, 0);
+        }
+        if looping && cycle.end - block.end <= lead && clip.range().overlaps(&Range::new(cycle.start, cycle.start.saturating_add(lead))) {
+            d.cue(&map, cycle.start.saturating_sub(clip.start).max(0));
         }
     }
 }
@@ -75,22 +110,41 @@ pub(crate) fn clip_fx_params(s: &Session, clip: u64) -> Option<impl Iterator<Ite
 /// (0 + 2 + 4) / 3 and (1 + 3 + 5) / 3, including LFE if present. Nothing is discarded.
 /// Equal widths map directly; narrower sources retain cyclic duplication (mono to both sides).
 pub(crate) fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize, buf: &mut [Vec<f32>]) {
-    let ClipContent::Audio { source, offset } = clip.content else { return };
+    let ClipContent::Audio { source, .. } = clip.content else { return };
+    let Some(map) = StreamMap::of(clip) else { return };
     let block = Range { start: pos, end: pos.saturating_add(frames as i64) };
     let Some(isect) = clip.range().intersect(&block) else { return };
     let Some(audio) = s.pool.get(source) else { return };
-    let nsrc = audio.buffer.channels.len();
+    let i0 = usize::try_from(isect.start - pos).unwrap_or(0);
+    let i1 = usize::try_from(isect.end - pos).unwrap_or(0).min(frames);
+    match audio.disk.as_deref() {
+        None => {
+            let src = &audio.buffer.channels;
+            mix_clip(clip, pos, i0, i1, buf, src.len(), |c, k| map.sample(k, |x| src.get(c).and_then(|ch| ch.get(x)).copied()));
+        }
+        // The audio thread (and a render worker for it) only drains the clip's ring (ADR 0035).
+        Some(d) if on_audio_thread() => {
+            let k0 = isect.start.saturating_sub(clip.start);
+            match d.stream(map.clip, k0, i1.saturating_sub(i0)) {
+                Some(ring) => mix_clip(clip, pos, i0, i1, buf, d.channels(), |c, k| ring.get(c, k)),
+                None => d.underrun(&map, k0),
+            }
+        }
+        // Offline (bounce, export, consolidate): the same file, read here.
+        Some(d) => d.with_sync(|get| mix_clip(clip, pos, i0, i1, buf, d.channels(), |c, k| map.sample(k, |x| get(c, x)))),
+    }
+}
+
+/// Sum frames `i0..i1` of a block at `pos` of `clip` into `buf`, with its gain, reading source
+/// channel `c` at clip time `k` through `fetch(c, k)` (`nsrc` channels).
+fn mix_clip(clip: &Clip, pos: Samples, i0: usize, i1: usize, buf: &mut [Vec<f32>], nsrc: usize, mut fetch: impl FnMut(usize, Samples) -> f32) {
     if nsrc == 0 {
         return;
     }
-    let stretch = if clip.stretch.is_finite() && clip.stretch > 0.0 { clip.stretch } else { 1.0 };
-    let i0 = usize::try_from(isect.start - pos).unwrap_or(0);
-    let i1 = usize::try_from(isect.end - pos).unwrap_or(0).min(frames);
     // Gain is evaluated every 32 samples and interpolated (fades and envelopes stay smooth).
     const STEP: usize = 32;
     let ndst = buf.len();
     for (ch, dst) in buf.iter_mut().enumerate() {
-        let src = audio.buffer.channels.get(ch % nsrc).map(Vec::as_slice).unwrap_or(&[]);
         let contributors = if nsrc > ndst { (nsrc - 1 - ch) / ndst + 1 } else { 1 };
         let mut i = i0;
         while i < i1 {
@@ -103,24 +157,12 @@ pub(crate) fn render_clip(s: &Session, clip: &Clip, pos: Samples, frames: usize,
             let g1 = clip.gain_at(rel1.min(clip.length));
             let n = (seg_end - i).saturating_sub(1).max(1) as f32;
             for k in i..seg_end {
-                // A looped clip (ADR 0019) reads its content modulo the loop range.
-                let rel = clip.content_pos(pos.saturating_add(k as i64).saturating_sub(clip.start));
-                let sample = |src: &[f32]| {
-                    if (stretch - 1.0).abs() < 1e-9 {
-                        usize::try_from(offset.saturating_add(rel)).ok().and_then(|x| src.get(x)).copied().unwrap_or(0.0)
-                    } else {
-                        let f = offset as f64 + rel as f64 / stretch;
-                        let x0 = f.floor();
-                        let fr = (f - x0) as f32;
-                        let a = if x0 >= 0.0 { src.get(x0 as usize).copied().unwrap_or(0.0) } else { 0.0 };
-                        let b = if x0 + 1.0 >= 0.0 { src.get((x0 as usize).saturating_add(1)).copied().unwrap_or(0.0) } else { 0.0 };
-                        a + (b - a) * fr
-                    }
-                };
+                // Clip time; a looped clip (ADR 0019) reads its content modulo the loop range.
+                let rel = pos.saturating_add(k as i64).saturating_sub(clip.start);
                 let v = if nsrc > ndst {
-                    audio.buffer.channels.iter().skip(ch).step_by(ndst).map(|src| sample(src)).sum::<f32>() / contributors as f32
+                    (ch..nsrc).step_by(ndst).map(|c| fetch(c, rel)).sum::<f32>() / contributors as f32
                 } else {
-                    sample(src)
+                    fetch(ch % nsrc, rel)
                 };
                 let t = (k - i) as f32 / n;
                 if let Some(d) = dst.get_mut(k) {

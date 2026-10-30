@@ -79,6 +79,8 @@ mod click;
 mod clip_loop_tests;
 mod clips;
 mod compile;
+#[cfg(test)]
+mod disk_tests;
 mod events;
 mod external;
 mod external_midi;
