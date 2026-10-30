@@ -108,3 +108,20 @@ The first instrument of the family ships as the built-in "Macro Oscillator" (`ma
 - **Gate.** All six models at polyphony 1 to 4 null bit-identical over the resonator sweep and the scenarios ([gates.md, Oracle null tests](../contributing/evidence/gates.md#oracle-null-tests)). The reference is the firmware's C++ as its desktop test harness builds it (flush-to-zero on, no fused multiply-adds), not the hardware's bits: the module runs with FZ off and its GCC build fuses multiply-adds. The oracle's flush-to-zero is reproduced by doing the port's arithmetic in an `f32` newtype that flushes every subnormal result, rather than at chosen spots; the sweep never reaches the subnormal range, the 20 s silences do.
 - **Rate and pitch.** The firmware computes pitch against a true 48 kHz (`a3 = 440 / 48000`), so it needs no tuning switch: MIDI note 69 plays 440 Hz. The port runs at 48 kHz only, like the firmware; supporting other host rates (resampling, or a rate parameter with E63 pitch tests at every rate) is the instrument's decision in slice 3.
 - **User-facing names (proposal).** The instrument over this port: "Resonator". Its models: Modal, Sympathetic Strings, Inharmonic String, FM Voice, Chord Strings (the quantized sympathetic strings), String and Reverb. The instrument over the second module of the pair: "Modal Voice". No module or brand name in a UI string or identifier.
+
+## Decision note 2026-10-31: the Macro Oscillator is the default instrument, the Subtractive Synth is removed (#234)
+
+With polyphony in (#196), a new instrument track carries the Macro Oscillator (default model, 8 voices) and the built-in Subtractive Synth is removed outright: its code, plug-in id (`subtractive_synth`), editor panel, factory presets, help and README line. transit is alpha software, so there is no compatibility shim for the synth itself; the one rule below keeps old sessions opening. Drum Synth and Sampler are unchanged.
+
+Convention: Logic opens a new software-instrument track with its default patch loaded and Ableton leaves a MIDI track empty; we keep Logic's "ready to play" default, which is what the Subtractive Synth gave until now. Every path that creates an instrument track (`track.new`, the Add Instrument Track menu and shortcut, MIDI file import, the demo) uses `transit_model::DEFAULT_INSTRUMENT`.
+
+**Substitution rule on load.** An instrument slot that names `subtractive_synth` becomes a Macro Oscillator with defaults when the session loads (`transit_model::legacy_synth::retire_subtractive_synth`, called by `Session::from_json`, so every open path, recovery and session import apply it):
+
+- the old synth's parameters and preset name are dropped, since they mean nothing to the new instrument;
+- the session's MIDI mappings, the track's automation lanes and the rack macro targets that addressed the old instrument's parameters (`plugin:instrument:<id>`) are dropped; mappings and lanes on inserts, and everything that addresses the slot as a slot (rack membership, zones, routing, volume, pan), keep working;
+- the load report gets one line per track that lost something, then the status line "N track(s) used the retired Subtractive Synth and now carry the Macro Oscillator";
+- the session opens as modified (the engine keeps the file's own content as the saved state), so the user sees the substitution on save; a saved session no longer names the old id and opens clean.
+
+The corpus keeps the sessions released builds wrote with the old synth (`crates/model/tests/corpus`); `a_release_session_with_the_old_synth_opens_with_a_macro_oscillator_and_one_report` loads them, and the lossless round-trip tests read them with the id swapped. MIDI-mapping profiles are app-level, not session data, and are not rewritten: a profile mapping to an old instrument parameter finds no such parameter and does nothing.
+
+The shared event queue and ADSR that lived in the synth's file stay, as `crates/dsp/src/plugins/instrument_queue.rs`, for the Drum Synth, the Sampler and the Macro Oscillator.

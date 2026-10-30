@@ -23,7 +23,7 @@ track, a video clip and a `videos` entry. It pins the sanitize rule of ADR 0031 
 dropped and one note) and is loaded by its own test, so the lossless round trip skips it (`SANITIZED`
 in `tests/corpus.rs`).
 
-One more is saved ahead of its release: `v0.6.0-rack.transit` (#197, ADR 0034) holds one rack
+One more is saved ahead of its release: `v0.6.0-rack.transit` (#197, ADR 0034; its two members carry the Macro Oscillator, the default instrument since #234) holds one rack
 (a routing folder with two instrument members, key and velocity zones with fades, a MIDI clip on
 the rack, a mapped and automated macro and a learned one). It is written by `write_rack_fixture` in
 `corpus_generate.rs` from the racks branch, named for the release that ships racks, and goes
@@ -56,3 +56,7 @@ the `.transit` files here.
 
 Every release adds its two files before the tag (`docs/releasing.md`). Existing files are never
 regenerated or edited: they are the record of what that release wrote.
+
+## Sessions saved with the retired Subtractive Synth
+
+Every released file above (v0.3.2 to v0.4.1) names `subtractive_synth` in an instrument slot, which v0.6.0 removed (#234, ADR 0033). They stay as they are, because they are what those builds wrote. Loading one substitutes a default Macro Oscillator and reports it: `a_release_session_with_the_old_synth_opens_with_a_macro_oscillator_and_one_report` checks that, and the lossless round-trip and key-drop tests read these files with the old id swapped for `macro_oscillator` in the text, so every other key still has to survive a save. A release's generated files from v0.6.0 on carry the Macro Oscillator.
