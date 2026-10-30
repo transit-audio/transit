@@ -192,6 +192,15 @@ fn in_child(test: &str) -> bool {
     false
 }
 
+/// The app's quit order (`StudioApp::shut_down`, issue #104), at the end of every rig test: the
+/// player's instances live on the plug-in host thread, which releases them after the player is
+/// gone. A child that ended without it raced that release against the module exit handler, and
+/// the fixture's static teardown could find its module entered, unused and never exited (E65).
+fn quit(app: &mut StudioApp) {
+    let down = app.shut_down();
+    assert!(down.clean, "plug-in hosting shut down cleanly: every module exited (status: {})", app.status);
+}
+
 type Shared<T> = std::sync::Arc<std::sync::Mutex<T>>;
 
 /// The app with the fixture gain on inserts A and B of "Drums", both live and their own edit
@@ -366,6 +375,7 @@ fn header_presets_save_load_undo_step_and_paste_through_the_plug_in_host() {
     *yes.lock().unwrap() = true;
     app.header_action(t, 0, HeaderAction::Delete);
     assert!(!file.exists());
+    quit(&mut app);
     let _ = std::fs::remove_dir_all(&config);
 }
 
@@ -389,6 +399,7 @@ fn a_save_as_right_after_a_parameter_change_saves_the_changed_value() {
     let saved = transit_engine::io::presets::read(&file, &gain).unwrap_or_else(|e| panic!("{e} ({})", app.status));
     assert_eq!(saved, state(0.25), "the preset holds the value set before the save");
     assert_eq!(live(&mut app, &ctx, t, 0), state(0.25));
+    quit(&mut app);
     let _ = std::fs::remove_dir_all(&config);
 }
 
@@ -425,6 +436,7 @@ fn a_load_right_after_a_parameter_change_keeps_the_presets_value() {
     settle(&mut app, &ctx);
     let before = app.engine.session().tracks[0].mixer.inserts[0].as_ref().unwrap().state_bytes().unwrap();
     assert_eq!(before, state(0.25), "the state before the load includes the change");
+    quit(&mut app);
     let _ = std::fs::remove_dir_all(&config);
 }
 
@@ -466,6 +478,7 @@ fn an_undo_right_after_a_parameter_change_restores_the_undone_state() {
     assert_eq!(live(&mut app, &ctx, t, 0), state(0.25), "the restored state is live and stays: {}", app.status);
     let stored = app.engine.session().tracks[0].mixer.inserts[0].as_ref().unwrap().params["7"];
     assert!((stored - 0.5).abs() < 1e-3, "the session stores the restored state's gain: {stored}");
+    quit(&mut app);
     let _ = std::fs::remove_dir_all(&config);
 }
 

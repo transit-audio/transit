@@ -143,4 +143,11 @@ fn a_learned_controller_moves_a_hosted_instruments_parameter_in_the_plug_in_and_
         }
         assert!(Instant::now() < deadline, "the editor never saw 0.8: {:?} (status: {})", controller_probe(&app, tr), app.status);
     }
+    // The app's quit order (`StudioApp::shut_down`, issue #104): the player's instance lives on
+    // the plug-in host thread, which releases it after the player is gone. Ending the process
+    // without this raced that release against the module exit handler: the handler saw the
+    // instance alive and kept the module, the host thread then released it, and the fixture's
+    // static teardown found a module entered, unused and never exited (escape E65).
+    let down = app.shut_down();
+    assert!(down.clean, "plug-in hosting shut down cleanly: every module exited (status: {})", app.status);
 }

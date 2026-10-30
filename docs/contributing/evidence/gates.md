@@ -208,6 +208,11 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   trip first; one client's effect is checked from another only after the first client's round
   trip. The server orders requests per connection only (E64, #147: `EditorWindow::new`, resize
   and close end with `settle`).
+- A test that hosts a plug-in through the player or the plug-in host ends with the app's quit
+  order (`StudioApp::shut_down`, or the player dropped and then
+  `transit_engine::shutdown_plugin_hosts`) and asserts it was clean before its process ends: the
+  host thread releases instances in its own time, and a release that overlaps the exit handlers
+  leaves a module entered and never exited (E65).
 - Injected timestamps need an injected readout: stamp on the origin the code under test reads
   (not another module's default origin) and read at a time consistent with the stamps, never the
   real clock (E49 recurrence 2026-10-25).
