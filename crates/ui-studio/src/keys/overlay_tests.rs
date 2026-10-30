@@ -61,3 +61,17 @@ fn the_wheel_and_the_pinch_over_a_dialog_or_its_backdrop_leave_the_views_behind_
     let after = view(&t);
     assert!(after.1 != before.1 && after.4 != before.4, "the wheel reaches the views again: {before:?} -> {after:?}");
 }
+
+#[test]
+fn the_wheel_over_a_dialog_scrolls_the_dialog_and_nothing_behind_it() {
+    let mut t = T::open();
+    t.app.ui.show_shortcuts = true;
+    t.frames(4);
+    let w = t.app.shortcuts_window.window;
+    assert!(w[2] > w[0], "the shortcuts dialog is up");
+    let at = mid(w);
+    let (views, text) = (view(&t), t.painted_text.clone());
+    t.wheel(at, json!({"dy": -3}));
+    assert_eq!(view(&t), views, "the views behind stay put");
+    assert_ne!(t.painted_text, text, "the dialog's own list scrolled");
+}
