@@ -27,3 +27,10 @@ pub mod voice;
 
 /// The sample rate the firmware's tables and coefficients assume.
 pub const REF_SAMPLE_RATE: f32 = 48000.0;
+
+/// The firmware's corrected sample rate (`kCorrectedSampleRate` in `dsp/dsp.h`): the module's
+/// audio clock runs at 47872.34 Hz, and pitch is computed against it so notes are in tune.
+pub const CORRECTED_SAMPLE_RATE: f32 = 47872.34;
+
+/// The normalized frequency of A0 that every pitch is computed from (`a0` in `dsp/dsp.h`).
+pub const A0: f32 = (440.0 / 8.0) / CORRECTED_SAMPLE_RATE;

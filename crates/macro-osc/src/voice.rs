@@ -210,7 +210,8 @@ pub struct Voice<'a> {
 impl Voice<'_> {
     pub fn new(block_size: usize, sample_rate_hz: f32) -> Self {
         let inv_sr = 1.0 / sample_rate_hz;
-        let a0_normalized = 55.0 * inv_sr;
+        // The firmware computes pitch against its corrected sample rate (`a0` in `dsp/dsp.h`).
+        let a0_normalized = crate::A0 * (crate::REF_SAMPLE_RATE / sample_rate_hz);
 
         Self {
             additive_engine: AdditiveEngine::new(),

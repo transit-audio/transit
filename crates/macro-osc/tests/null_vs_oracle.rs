@@ -84,7 +84,7 @@ fn render_port_point(model: Model, point: &EnginePoint) -> PortRender {
             morph: p.morph,
             harmonics: p.harmonics,
             accent: p.accent,
-            a0_normalized: 55.0 / transit_macro_osc::REF_SAMPLE_RATE,
+            a0_normalized: transit_macro_osc::A0,
         };
         let mut enveloped = false;
         engine.render(&parameters, out, aux, &mut enveloped);

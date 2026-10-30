@@ -44,12 +44,12 @@ impl FmEngine {
 }
 
 impl Engine for FmEngine {
-    fn init(&mut self, _sample_rate_hz: f32) {
+    fn init(&mut self, sample_rate_hz: f32) {
         self.carrier_phase = 0;
         self.modulator_phase = 0;
         self.sub_phase = 0;
 
-        let a0 = 55.0 / _sample_rate_hz; // A0 normalized
+        let a0 = crate::A0 * (crate::REF_SAMPLE_RATE / sample_rate_hz);
         self.previous_carrier_frequency = a0;
         self.previous_modulator_frequency = a0;
         self.previous_amount = 0.0;
