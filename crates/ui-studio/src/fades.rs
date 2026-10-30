@@ -717,6 +717,33 @@ pub fn crossfade_len(app: &mut StudioApp, o: Overlap, len: Samples) {
     });
 }
 
+/// Fade the selected audio clips from their `side` edge to the cursor (Fade to Start / Fade to
+/// End): the cursor must lie inside the clip. The fade keeps its shape and bend; every clip is
+/// set in one undo step.
+pub fn fade_to_cursor(app: &mut StudioApp, side: Side) {
+    let at = app.cursor();
+    let s = app.engine.session();
+    let sets: Vec<(ClipId, Fade)> = s
+        .edit
+        .selected_clips
+        .iter()
+        .filter_map(|id| s.find_clip(*id))
+        .map(|x| x.1)
+        .filter(|c| is_audio(c) && c.start < at && at < c.end())
+        .map(|c| (c.id, Fade { len: if side == Side::In { at - c.start } else { c.end() - at }, ..side.of(c) }))
+        .collect();
+    if sets.is_empty() {
+        app.status = format!("{}: select an audio clip and put the cursor inside it.", side.label());
+        return;
+    }
+    let _ = app.composite("Fade to Cursor", |app, key| {
+        for (clip, fade) in sets {
+            app.engine.execute_merged("edit.fades_create", &set_params(clip, side, fade), key)?;
+        }
+        Ok(())
+    });
+}
+
 /// The shape menu a click on a fade opens, drawn at the click until a pick or a click elsewhere.
 pub(crate) fn click_menu(app: &mut StudioApp, ui: &mut Ui) {
     let Some(m) = app.arrange.fade_menu else { return };

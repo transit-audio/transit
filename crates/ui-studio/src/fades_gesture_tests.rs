@@ -715,3 +715,30 @@ fn the_crossfade_field_sets_both_ends_and_shows_custom_when_they_differ() {
     frames(&mut r.app, &r.ctx, 4, &mut r.time);
     assert_eq!(r.field(Field::Crossfade).text, "-");
 }
+
+#[test]
+fn the_fade_to_cursor_keys_fade_the_selected_clips_to_the_cursor_in_one_undo_step() {
+    let mut r = fade_rig();
+    let b = r.add_copy(8 * r.bar);
+    r.app.click_clip(r.clip, false);
+    r.app.click_clip(b, true);
+    r.app.set_cursor(r.bar, Some(r.t));
+    let before = undo_len(&mut r.app);
+    let key = |r: &mut FadeRig, k: &str| {
+        let (req, _rx) = crate::ControlRequest::new("ui.key", json!({"key": k, "alt": true}));
+        let _ = crate::control::handle_for_test(&mut r.app, &egui::Context::default(), &req);
+        frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    };
+    key(&mut r, "[");
+    assert_eq!(r.clip(r.clip).fade_in.len, r.bar, "from the clip start to the cursor");
+    assert_eq!(r.clip(b).fade_in.len, 0, "the cursor is not inside the other clip");
+    assert_eq!(undo_len(&mut r.app), before + 1);
+    key(&mut r, "]");
+    assert_eq!(r.clip(r.clip).fade_out.len, 3 * r.bar, "from the cursor to the clip end");
+    assert_eq!(undo_len(&mut r.app), before + 2);
+    // Every row has a key, a note and no clash.
+    for action in [crate::shortcuts::Action::FadeInToCursor, crate::shortcuts::Action::FadeOutFromCursor] {
+        let row = crate::shortcuts::rows(action).next().expect("a row");
+        assert!(row.note.contains("Logic") || row.note.contains("Ours"), "the convention is cited: {}", row.note);
+    }
+}

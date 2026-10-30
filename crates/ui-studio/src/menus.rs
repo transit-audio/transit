@@ -458,6 +458,12 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
         let _ = app.split_at_cursor();
     }
     crate::edit_tools::shortcuts(app, ctx);
+    if pressed(ctx, A::FadeInToCursor) {
+        crate::fades::fade_to_cursor(app, crate::fades::Side::In);
+    }
+    if pressed(ctx, A::FadeOutFromCursor) {
+        crate::fades::fade_to_cursor(app, crate::fades::Side::Out);
+    }
     if pressed(ctx, A::NewInstrumentTrack) {
         let _ = app.add_track("instrument");
     }
