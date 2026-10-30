@@ -186,6 +186,11 @@ impl ParamRange {
         let v = if self.log && self.lo > 0.0 && self.hi > 0.0 { self.lo * (self.hi / self.lo).powf(t) } else { self.lo + (self.hi - self.lo) * t };
         let v = if self.step { v.round() } else { v };
         let (a, b) = (self.lo.min(self.hi), self.lo.max(self.hi));
+        // A hand-edited file may hold any number: `clamp` with a NaN bound would panic, and this
+        // runs on the audio thread.
+        if !(a.is_finite() && b.is_finite()) {
+            return 0.0;
+        }
         if v.is_finite() { v.clamp(a, b) } else { a }
     }
 }
@@ -195,7 +200,7 @@ fn one() -> f32 {
 }
 
 /// One target of a macro: a member's parameter by its automation address.
-#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
 pub struct MacroMapping {
     /// Defaulted only for the field rule (as `slot` and `param`): a mapping without a target is idle.
     #[serde(default)]
@@ -397,6 +402,20 @@ mod tests {
         assert!((m.plain(0.5) - 632.455_5).abs() < 0.01, "log taper: the geometric middle");
         m.range = ParamRange { lo: 0.0, hi: 3.0, log: false, step: true };
         assert_eq!(m.plain(0.6), 2.0, "a choice lands on a whole step");
+    }
+
+    #[test]
+    fn a_hostile_range_never_panics() {
+        for (lo, hi) in [(f32::NAN, f32::NAN), (f32::NAN, 1.0), (f32::INFINITY, f32::NEG_INFINITY), (5.0, -5.0)] {
+            for log in [false, true] {
+                let r = ParamRange { lo, hi, log, step: true };
+                for t in [f32::NAN, -1.0, 0.0, 0.5, 1.0, 2.0] {
+                    assert!(r.plain(t).is_finite(), "{lo} {hi} {log} {t}");
+                }
+            }
+        }
+        let m = MacroMapping { min: f32::NAN, max: f32::INFINITY, curve: f32::NAN, ..MacroMapping::default() };
+        assert!((0.0..=1.0).contains(&m.travel(0.5)));
     }
 
     #[test]
