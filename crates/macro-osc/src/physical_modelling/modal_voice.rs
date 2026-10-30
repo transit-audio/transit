@@ -82,7 +82,7 @@ impl ModalVoice {
         );
 
         for (aux_sample, temp_2_sample) in aux.iter_mut().zip(temp_2.iter()) {
-            *aux_sample += *temp_2_sample;
+            *aux_sample = crate::utils::ftz(*aux_sample + *temp_2_sample);
         }
 
         self.resonator.process(f0, structure, brightness, damping, temp_2, out);

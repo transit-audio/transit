@@ -5,7 +5,7 @@
 use crate::resources::stiffness::LUT_STIFFNESS;
 use crate::utils::cosine_oscillator::{CosineOscillator, CosineOscillatorMode};
 use crate::utils::filter::{FilterMode, FrequencyApproximation, OnePole};
-use crate::utils::interpolate;
+use crate::utils::{ftz, interpolate};
 use crate::utils::units::semitones_to_ratio;
 
 pub const MAX_NUM_MODES: usize = 24;
@@ -152,16 +152,19 @@ impl<const BATCH_SIZE: usize> ResonatorSvf<BATCH_SIZE> {
             let mut s_out = 0.0;
 
             for i in 0..BATCH_SIZE {
-                let hp = (s_in - r_plus_g[i] * state_1[i] - state_2[i]) * h[i];
-                let bp = g[i] * hp + state_1[i];
-                state_1[i] = g[i] * hp + bp;
-                let lp = g[i] * bp + state_2[i];
-                state_2[i] = g[i] * bp + lp;
-                s_out += gains[i] * (if matches!(mode, FilterMode::LowPass) { lp } else { bp });
+                // Flushed to zero operation by operation, as on the firmware.
+                let hp = ftz(ftz(ftz(s_in - ftz(r_plus_g[i] * state_1[i])) - state_2[i]) * h[i]);
+                let g_hp = ftz(g[i] * hp);
+                let bp = ftz(g_hp + state_1[i]);
+                state_1[i] = ftz(g_hp + bp);
+                let g_bp = ftz(g[i] * bp);
+                let lp = ftz(g_bp + state_2[i]);
+                state_2[i] = ftz(g_bp + lp);
+                s_out = ftz(s_out + ftz(gains[i] * (if matches!(mode, FilterMode::LowPass) { lp } else { bp })));
             }
 
             if add {
-                *out_sample += s_out;
+                *out_sample = ftz(*out_sample + s_out);
             } else {
                 *out_sample = s_out;
             }
