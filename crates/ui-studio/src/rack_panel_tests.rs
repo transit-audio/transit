@@ -113,6 +113,28 @@ fn dragging_a_zone_edge_is_one_undo_step() {
     assert_eq!(t.zone(rack, t.a).fade_low, 0);
 }
 
+/// Review finding 6: a double-click reset is its own undo step, closed at once, so a later drag
+/// of the same knob does not merge into it.
+#[test]
+fn a_double_click_reset_is_its_own_step() {
+    let mut t = T::new();
+    let rack = t.rack();
+    t.app.run("rack.macro", json!({"track": rack.0, "macro": 1, "value": 0.5})).unwrap();
+    let steps = t.app.engine.undo_history().len();
+    let k = t.app.mixer.devices.rack.clone().unwrap().macros[0];
+    let c = ((k[0] + k[2]) / 2.0, k[1] + 20.0);
+    t.input("ui.click", json!({"x": c.0, "y": c.1, "count": 2}));
+    let value = |t: &T| t.app.engine.session().track(rack).unwrap().rack.as_ref().unwrap().macros[0].value;
+    assert_eq!(value(&t), 0.0, "reset");
+    assert_eq!(t.app.engine.undo_history().len(), steps + 1);
+    // The knob's next move, under the knob's own gesture key, is a step of its own.
+    let key = format!("rack_macro:{}:0", rack.0);
+    t.app.engine.execute_merged("rack.macro", &json!({"track": rack.0, "macro": 1, "value": 0.7}), &key).unwrap();
+    assert_eq!(t.app.engine.undo_history().len(), steps + 2, "the next move is a step of its own");
+    assert!(t.app.engine.undo());
+    assert_eq!(value(&t), 0.0, "undo takes back the next move only");
+}
+
 #[test]
 fn turning_a_macro_writes_it_in_one_undo_step() {
     let mut t = T::new();

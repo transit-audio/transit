@@ -180,7 +180,8 @@ fn macro_knob(
             app.status = e.to_string();
         }
     }
-    if k.response.drag_stopped() {
+    // A drag is one step; a double-click reset is a click, so it closes its own step at once.
+    if k.response.drag_stopped() || (k.value.is_some() && !k.response.dragged()) {
         app.engine.end_merge();
     }
     k.response.context_menu(|ui| macro_menu(app, ui, rack, i, control));
@@ -202,13 +203,19 @@ fn macro_menu(app: &mut StudioApp, ui: &mut Ui, rack: TrackId, i: usize, control
             let a = ui.add(egui::DragValue::new(&mut min).range(0.0..=1.0).speed(0.005).prefix("min "));
             let b = ui.add(egui::DragValue::new(&mut max).range(0.0..=1.0).speed(0.005).prefix("max "));
             let c = ui.add(egui::DragValue::new(&mut curve).range(-1.0..=1.0).speed(0.01).prefix("curve "));
-            if a.changed() || b.changed() || c.changed() {
+            let changed = a.changed() || b.changed() || c.changed();
+            if changed {
                 let slot = slot_text(m.slot);
                 let key = format!("rack_map:{}:{i}:{}:{}:{}", rack.0, m.track.0, m.slot, m.param);
                 let p = json!({"track": rack.0, "macro": i + 1, "member": m.track.0, "slot": slot, "param": m.param, "min": min, "max": max, "curve": curve});
                 if let Err(e) = app.engine.execute_merged("rack.macro_map", &p, &key) {
                     app.status = e.to_string();
                 }
+            }
+            // A drag of a value is one step; a typed value, or the end of a drag, closes it.
+            let dragging = a.dragged() || b.dragged() || c.dragged();
+            if a.drag_stopped() || b.drag_stopped() || c.drag_stopped() || (changed && !dragging) {
+                app.engine.end_merge();
             }
             if ui.small_button("Unmap").clicked() {
                 let p = json!({"track": rack.0, "macro": i + 1, "member": m.track.0, "slot": slot_text(m.slot), "param": m.param});
