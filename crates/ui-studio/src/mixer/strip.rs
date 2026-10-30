@@ -110,6 +110,7 @@ fn strips(app: &mut StudioApp, ui: &mut Ui) {
     // Wheel over the strips scrolls them sideways.
     if let Some(pos) = ui.input(|i| i.pointer.hover_pos())
         && lane.contains(pos)
+        && ui.rect_contains_pointer(lane)
         && app.mixer.gesture.is_none()
         && !app.mixer.wheel_taken
     {

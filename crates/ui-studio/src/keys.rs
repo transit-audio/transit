@@ -1353,7 +1353,8 @@ fn clip_end_handle(app: &mut StudioApp, ui: &mut Ui, map: &Map, ruler: Rect, gri
 /// Wheel: scroll pitch (Shift: time); Ctrl+wheel zooms time, Ctrl+Shift+wheel or Alt+wheel zooms keys.
 fn wheel(app: &mut StudioApp, ui: &Ui, map: &Map, body: Rect) {
     let Some(pos) = ui.input(|i| i.pointer.hover_pos()) else { return };
-    if !body.contains(pos) {
+    // The layer check: a dialog or its scrim over the view takes the wheel (#244).
+    if !body.contains(pos) || !ui.rect_contains_pointer(body) {
         return;
     }
     // The wheel event's own modifiers when there is one (synthetic input sends no key changes).

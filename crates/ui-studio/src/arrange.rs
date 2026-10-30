@@ -1093,7 +1093,8 @@ pub(crate) fn wheel_pan(ui: &Ui, dx: f32) -> f64 {
 /// Wheel scrolls the rows, Shift+wheel or a sideways swipe scrolls time, Ctrl+wheel or a pinch zooms.
 fn scroll_and_zoom(app: &mut StudioApp, ui: &Ui, map: Map, full: Rect, tl: Rect, content_h: f32) {
     let Some(pos) = ui.input(|i| i.pointer.hover_pos()) else { return };
-    if !full.contains(pos) {
+    // The layer check: a dialog or its scrim over the view takes the wheel (#244).
+    if !full.contains(pos) || !ui.rect_contains_pointer(full) {
         return;
     }
     let (delta, zoom) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta()));

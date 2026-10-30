@@ -73,7 +73,7 @@ pub(super) fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let mut open = true;
     let mut apply = false;
     let mut cancel = false;
-    crate::theme::window(ctx, "Quantize notes").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
+    crate::theme::modal_window(ctx, "Quantize notes").open(&mut open).collapsible(false).resizable(false).show(ctx, |ui| {
         ui.label(if app.keys.selection.is_empty() { "All notes in this clip" } else { "Selected notes only" });
         let prefs = &mut app.ui.keys.quantize;
         prefs.strength = prefs.strength.min(100);

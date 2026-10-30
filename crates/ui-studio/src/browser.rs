@@ -1054,7 +1054,7 @@ fn walk(b: &BrowserState, dir: &Path, depth: usize, f: &str, forced: bool, out: 
 
 /// Wheel scroll of a list: returns the new offset.
 fn wheel(ui: &Ui, area: Rect, scroll: f32, content_h: f32) -> f32 {
-    let hovered = ui.input(|i| i.pointer.hover_pos()).is_some_and(|p| area.contains(p));
+    let hovered = ui.rect_contains_pointer(area);
     let dy = if hovered { ui.input(|i| i.smooth_scroll_delta.y) } else { 0.0 };
     (scroll - dy).clamp(0.0, (content_h - area.height()).max(0.0))
 }

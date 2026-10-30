@@ -288,6 +288,25 @@ pub fn window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title
     crate::title_bar::Window::new(egui::Window::new(text).title_frame(title_frame))
 }
 
+/// A dialog: [`window`] over a full-screen scrim that takes the pointer (#244). The scrim is an
+/// invisible, interactable `Area` in the background order (below every window, above the panels),
+/// so the views behind the dialog see another layer under the pointer: their wheel, zoom and drag
+/// handling asks `Ui::rect_contains_pointer`, which is false there, and clicks cannot reach them
+/// either. A wheel over the dialog itself reaches only the dialog's own scroll areas. Call it each
+/// frame the dialog is shown, as `window`.
+pub fn modal_window<'a>(ctx: &egui::Context, title: impl Into<String>) -> crate::title_bar::Window<'a> {
+    egui::Area::new(egui::Id::new("modal_scrim"))
+        .order(egui::Order::Background)
+        .fixed_pos(ctx.content_rect().min)
+        .sense(egui::Sense::click_and_drag())
+        .show(ctx, |ui| {
+            let r = ctx.content_rect();
+            ui.set_clip_rect(r);
+            ui.allocate_rect(r, egui::Sense::click_and_drag());
+        });
+    window(ctx, title)
+}
+
 /// Install both themes' visuals and follow `appearance` (System: the OS setting, through egui's
 /// `system_theme`). Call when the appearance changes; [`follow`] runs every frame.
 pub fn apply(ctx: &egui::Context, appearance: Appearance) {
