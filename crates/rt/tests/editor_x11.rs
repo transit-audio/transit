@@ -227,8 +227,11 @@ mod linux {
         let plugin = FakePlugin::attach(content, 300, 200);
         assert!(ew::resize_content(win.raw(), 400.0, 250.0), "honored on the window's thread");
         assert_eq!(win.content_size(), (400, 250));
-        assert_eq!(geometry(&obs, frame), Some((400, 250)));
+        // The content window is ours alone: settled when the call returns. The mapped frame's new
+        // size goes through the window manager when there is one (a ConfigureRequest it applies in
+        // its own time), so it is waited for.
         assert_eq!(geometry(&obs, content), Some((400, 250)));
+        assert!(pump_until(&q, Some(&win), || geometry(&obs, frame) == Some((400, 250))), "frame {:?}", geometry(&obs, frame));
         assert!(
             pump_until(&q, Some(&win), || plugin.timer_calls.get() >= 3 && plugin.events_seen.get() > 0),
             "the timer fired and the descriptor handler ran"
@@ -239,7 +242,7 @@ mod linux {
         plugin.conn.configure_window(plugin.window, &x11rb::protocol::xproto::ConfigureWindowAux::new().width(520).height(330)).unwrap();
         plugin.conn.flush().unwrap();
         assert!(pump_until(&q, Some(&win), || win.content_size() == (520, 330)), "followed the plug-in's window: {:?}", win.content_size());
-        assert_eq!(geometry(&obs, frame), Some((520, 330)));
+        assert!(pump_until(&q, Some(&win), || geometry(&obs, frame) == Some((520, 330))), "frame {:?}", geometry(&obs, frame));
 
         // Teardown in the editor link's order: the view goes, then the window.
         plugin.detach();
