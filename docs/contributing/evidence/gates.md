@@ -91,6 +91,9 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   block (`ContinuityInstrument::expect_from`), so overruns before an instrument's first render are
   holes too, and the closing blocks before a coverage check run at a far deadline (E49 recurrence
   2026-10-30).
+- A test that marks the ASIO host stuck (`Host::set_stuck`) holds the host thread in a request
+  meanwhile (`hold_host` in `crates/audio-asio/src/stream_tests.rs`): the flag alone leaves the
+  thread free to tend and sweep before the test reads its state (E49 recurrence 2026-10-30).
 - A failing test is never rerun to make it pass, and a chain never reruns a failed test even to
   capture its message: read the output, report it verbatim and bug-hunt the root cause before any test
   change. Three test defects were found this way on 2026-10-29, and no product defect. The escape

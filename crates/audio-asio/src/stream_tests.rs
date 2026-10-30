@@ -768,11 +768,30 @@ fn a_position_that_goes_back_invalidates_the_next_stamp_and_reanchors() {
     drop((capture, render));
 }
 
+/// Holds the host thread inside a request until `release` gets a message (or is dropped), the
+/// way a stuck host is held in a driver call: it cannot tend (sweep) behind the test's back. Returns
+/// once the host is inside the request.
+fn hold_host<'scope>(scope: &'scope std::thread::Scope<'scope, '_>, host: &'scope crate::host::Host) -> std::sync::mpsc::Sender<()> {
+    let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    scope.spawn(move || {
+        host.call("hold", move |_| {
+            let _ = entered_tx.send(());
+            let _ = release_rx.recv();
+            Ok(())
+        })
+        .expect("the hold is answered");
+    });
+    entered_rx.recv_timeout(Duration::from_secs(10)).expect("the host thread entered the hold");
+    release_tx
+}
+
 #[test]
 fn a_session_orphaned_while_the_host_was_stuck_is_swept() {
     let _guard = lock();
     let rig = rig(scarlett());
     let seen = seen();
+    let host = &*rig.backend.host;
     let open_render = |rig: &Rig| {
         rig.backend
             .open_render(
@@ -785,26 +804,48 @@ fn a_session_orphaned_while_the_host_was_stuck_is_swept() {
             .0
     };
     // A stream dropped in the window where the host refuses requests: its detach is never sent,
-    // and the driver keeps running with no stream.
+    // and the driver keeps running with no stream. The host is held in a request meanwhile, so the
+    // count read here is not raced by its sweep between requests (E49).
     let render = open_render(&rig);
     render.start().expect("start");
-    rig.backend.host.set_stuck(true);
-    drop(render);
-    assert_eq!(rig.observed.live.load(Ordering::Acquire), 1, "nothing told the host");
-    rig.backend.host.set_stuck(false);
-    // The next open ends that session instead of refusing to attach to a running driver.
-    let (capture, _) = rig
-        .backend
-        .open_capture(&rig.endpoint, &request(&rig, ab::Direction::Input, 48_000, Some(64)), capture_cb(&seen), error_cb(&seen, ab::Direction::Input))
-        .expect("the orphaned session is swept first");
-    drop(capture);
+    let capture_request = request(&rig, ab::Direction::Input, 48_000, Some(64));
+    std::thread::scope(|scope| {
+        let release = hold_host(scope, host);
+        host.set_stuck(true);
+        drop(render);
+        assert_eq!(rig.observed.live.load(Ordering::Acquire), 1, "nothing told the host");
+        host.set_stuck(false);
+        // The next open ends that session instead of refusing to attach to a running driver: it
+        // is queued behind the hold, so it runs before the host tends.
+        let queued = host.requests_sent();
+        scope.spawn(move || {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while host.requests_sent() == queued && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let _ = release.send(());
+        });
+        let (capture, _) = rig
+            .backend
+            .open_capture(&rig.endpoint, &capture_request, capture_cb(&seen), error_cb(&seen, ab::Direction::Input))
+            .expect("the orphaned session is swept first");
+        let calls = rig.observed.call_names();
+        let creates: Vec<usize> = calls.iter().enumerate().filter(|(_, n)| **n == "createBuffers").map(|(i, _)| i).collect();
+        assert!(creates.len() == 2 && calls[creates[0]..creates[1]].contains(&"disposeBuffers"), "the old session ended first: {calls:?}");
+        drop(capture);
+    });
     assert_eq!(rig.observed.live.load(Ordering::Acquire), 0);
     // With no open coming, the idle host sweeps it by itself.
     let render = open_render(&rig);
     render.start().expect("start");
-    rig.backend.host.set_stuck(true);
-    drop(render);
-    rig.backend.host.set_stuck(false);
+    std::thread::scope(|scope| {
+        let release = hold_host(scope, host);
+        host.set_stuck(true);
+        drop(render);
+        assert_eq!(rig.observed.live.load(Ordering::Acquire), 1, "nothing told the host");
+        host.set_stuck(false);
+        drop(release);
+    });
     let deadline = std::time::Instant::now() + Duration::from_secs(5);
     while rig.observed.live.load(Ordering::Acquire) != 0 && std::time::Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(5));

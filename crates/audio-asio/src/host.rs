@@ -337,6 +337,9 @@ struct Shared {
     busy: Mutex<Option<String>>,
     /// The host thread's id, once it runs (0 before).
     thread: AtomicU32,
+    /// Requests queued so far (tests wait on it to know a request is queued behind another).
+    #[cfg(test)]
+    sent: std::sync::atomic::AtomicUsize,
 }
 
 /// The answer cell of one request: the caller waits on it, the host fills it unless the caller
@@ -376,8 +379,14 @@ impl Host {
         let (started_tx, started_rx) = mpsc::channel();
         let (exited_tx, exited) = mpsc::channel();
         let wake = Arc::new(Event::new()?);
-        let shared =
-            Arc::new(Shared { quit: AtomicBool::new(false), stuck: AtomicBool::new(false), busy: Mutex::new(None), thread: AtomicU32::new(0) });
+        let shared = Arc::new(Shared {
+            quit: AtomicBool::new(false),
+            stuck: AtomicBool::new(false),
+            busy: Mutex::new(None),
+            thread: AtomicU32::new(0),
+            #[cfg(test)]
+            sent: std::sync::atomic::AtomicUsize::new(0),
+        });
         let (thread_wake, thread_shared) = (Arc::clone(&wake), Arc::clone(&shared));
         let thread = std::thread::Builder::new()
             .name("transit-asio-host".into())
@@ -443,6 +452,8 @@ impl Host {
         });
         let Some(tx) = &self.tx else { return Err(exited()) };
         tx.send((label.to_owned(), job)).map_err(|_| exited())?;
+        #[cfg(test)]
+        self.shared.sent.fetch_add(1, Ordering::AcqRel);
         self.wake.set();
         let cell = answer.state.lock().unwrap_or_else(PoisonError::into_inner);
         let (mut cell, _) = answer.ready.wait_timeout_while(cell, timeout, |c| c.0.is_none()).unwrap_or_else(PoisonError::into_inner);
@@ -475,11 +486,19 @@ impl Host {
     }
 
     /// Marks the host stuck (or not) without a blocking request: the window in which a stream's
-    /// detach is refused (tests of the orphaned-session sweep).
+    /// detach is refused (tests of the orphaned-session sweep). The flag alone leaves the host
+    /// thread free to tend (and sweep) at any moment, so a test holds it in a request meanwhile, as
+    /// a really stuck host is held in its driver call.
     #[cfg(test)]
     pub(crate) fn set_stuck(&self, stuck: bool) {
         self.shared.stuck.store(stuck, Ordering::Release);
         self.wake.set();
+    }
+
+    /// How many requests were queued so far: one counted here is in the queue or served.
+    #[cfg(test)]
+    pub(crate) fn requests_sent(&self) -> usize {
+        self.shared.sent.load(Ordering::Acquire)
     }
 }
 

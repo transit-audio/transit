@@ -173,3 +173,23 @@ asserts the strip is away and the plan refused. Ambient starvation on Windows (t
 six spinning processes) did not reproduce either original failure (10 and 20 runs per setting): the
 workers wake fast there; the constructed provocations did. Not caused by #213 or #78: `note_held` and
 the `bring_home` reset only store the held counters. Rule added to `gates.md` beside the deadline rule.
+
+Recurrence 2026-10-30 (main c7ff2192; CI run 41004648072, `windows (wasapi, native-wasapi)`):
+`stream_tests::a_session_orphaned_while_the_host_was_stuck_is_swept` (`crates/audio-asio/src/stream_tests.rs`)
+failed "nothing told the host: left 0, right 1". The test simulated a stuck host with `Host::set_stuck`
+(`crates/audio-asio/src/host.rs`), which only sets the flag that makes `call_within` refuse requests;
+the host thread itself stayed free. Dropping the stream had its detach refused (correct) and its
+`SideOwner` marked the side `DETACHED` (`crates/audio-asio/src/session.rs`), and the host thread, woken
+by `set_stuck`'s own `wake.set()` or still finishing the start request, ran `HostState::tend`, whose
+`sweep` ended the abandoned session and released the driver (`live` 1 to 0), the designed recovery,
+before the test read `live`. A really stuck host is blocked in a driver call and cannot tend, so the product was
+right; the test raced the host thread's scheduling. Not caused by c7ff2192 (it touches only
+`crates/mix` tests); `crates/audio-asio` last changed in 9d4243ef. Repro: delaying `tend` 1 ms and
+the test's read 5 ms after the drop failed the old test 30 of 30 with the CI message; unmodified, it
+failed under three High-priority spinning processes pinned with the test to two cores (one natural
+failure in a partial run); 0 of 100 unloaded. Fixed: the test holds the host thread inside a request (`hold_host`) while it
+marks it stuck, drops the stream and reads `live`, so no sweep can run in that window; the
+"next open sweeps" step queues the open behind the hold (a test-only `Host::requests_sent` count
+says when) so the open's own sweep ends the session, not the host's tend, and the test checks that
+`disposeBuffers` came before the new `createBuffers`. After the fix: 0 of 60 with the widened
+window (1 ms and 5 ms), 0 of 60 at 0.2 ms and 2 ms, 0 of 100 unloaded. Rule added to `gates.md`.
