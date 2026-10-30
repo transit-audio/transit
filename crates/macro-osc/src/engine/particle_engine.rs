@@ -66,6 +66,7 @@ impl Engine for ParticleEngine {
 
     #[inline]
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
         let density_sqrt = note_to_frequency(60.0 + parameters.timbre * parameters.timbre * 72.0, parameters.a0_normalized);
         let density = density_sqrt * density_sqrt * (1.0 / NUM_PARTICLES as f32);

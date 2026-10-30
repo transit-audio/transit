@@ -50,6 +50,7 @@ impl Engine for BassDrumEngine {
 
     #[inline]
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
 
         let attack_fm_amount = f32::min(parameters.harmonics * 4.0, 1.0);

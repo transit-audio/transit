@@ -1,4 +1,7 @@
 //! Single synthesis voice with engine dispatch and parameter processing.
+//!
+//! Not yet corrected against the firmware: the voice level (envelopes, low-pass gate, limiter,
+//! int16 output) is compared with the oracle in slice 2 of #195. Use the engines directly until then.
 
 // Based on MIT-licensed code (c) 2016 by Emilie Gillet (emilie.o.gillet@gmail.com)
 

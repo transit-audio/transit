@@ -59,6 +59,7 @@ impl Engine for FmEngine {
 
     #[inline]
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         // 4x oversampling
         let note = parameters.note - 24.0;
 

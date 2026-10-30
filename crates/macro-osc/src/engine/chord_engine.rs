@@ -92,6 +92,7 @@ impl Engine for ChordEngine<'_> {
 
     #[inline]
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         one_pole(&mut self.morph_lp, parameters.morph, 0.1);
         one_pole(&mut self.timbre_lp, parameters.timbre, 0.1);
 

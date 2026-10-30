@@ -30,6 +30,10 @@ pub trait Engine: Send {
 
     fn reset(&mut self) {}
 
+    /// Renders one block into `out` and `aux`. Contract: `init` (then `reset`) has run; `out` and
+    /// `aux` have the same length, 1 to the block size the engine was built with and never more
+    /// than [`MAX_BLOCK_SIZE`]; `parameters.note` is finite (the pitch is clamped to the firmware's
+    /// range, notes -119 to 136). Checked with `debug_assert!` ([`debug_check_render`]).
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], already_enveloped: &mut bool);
 }
 
@@ -98,4 +102,15 @@ pub fn note_to_frequency(mut midi_note: f32, a0_normalized: f32) -> f32 {
     midi_note = midi_note.clamp(-128.0, 127.0);
 
     a0_normalized * 0.25 * semitones_to_ratio(midi_note)
+}
+
+/// The firmware's largest block (`kMaxBlockSize`); engines allocate their scratch for it.
+pub const MAX_BLOCK_SIZE: usize = 24;
+
+/// The render contract of [`Engine::render`], checked in debug builds.
+#[inline]
+pub fn debug_check_render(parameters: &EngineParameters, out: &[f32], aux: &[f32]) {
+    debug_assert_eq!(out.len(), aux.len(), "out and aux must have the same length");
+    debug_assert!((1..=MAX_BLOCK_SIZE).contains(&out.len()), "block of {} frames, expected 1 to {MAX_BLOCK_SIZE}", out.len());
+    debug_assert!(parameters.note.is_finite(), "note must be finite");
 }

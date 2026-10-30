@@ -94,6 +94,7 @@ impl Engine for ChiptuneEngine {
     }
 
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
         let shape = parameters.morph * 0.995;
         let clocked = !parameters.trigger.has(TriggerState::UNPATCHED);

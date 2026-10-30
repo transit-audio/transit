@@ -62,6 +62,7 @@ impl Engine for VirtualAnalogEngine {
 
     #[inline]
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         // VA_VARIANT 2
         // 1 = variable square controlled by TIMBRE.
         // 2 = variable saw controlled by MORPH.

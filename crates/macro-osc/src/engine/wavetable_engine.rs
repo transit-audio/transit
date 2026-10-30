@@ -115,6 +115,7 @@ impl Engine for WavetableEngine<'_> {
 
     #[inline]
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
 
         one_pole(&mut self.x_pre_lp, parameters.timbre * 6.9999, 0.2);

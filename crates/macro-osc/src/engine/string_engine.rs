@@ -73,6 +73,7 @@ impl Engine for StringEngine {
 
     #[inline]
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         let sustain = parameters.trigger.has(TriggerState::UNPATCHED);
         let trigger = parameters.trigger.has(TriggerState::RISING_EDGE);
 

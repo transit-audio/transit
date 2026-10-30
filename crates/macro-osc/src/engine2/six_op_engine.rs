@@ -96,6 +96,7 @@ impl Engine for SixOpEngine<'_> {
     }
 
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         let size = out.len();
         let patch_index = self.patch_index_quantizer.process(parameters.harmonics * 1.02) as usize;
 

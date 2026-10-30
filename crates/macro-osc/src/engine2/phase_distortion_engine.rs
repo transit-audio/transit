@@ -47,6 +47,7 @@ impl Engine for PhaseDistortionEngine {
     }
 
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         let f0 = 0.5 * note_to_frequency(parameters.note, parameters.a0_normalized);
         let modulator_f = f32::min(0.25, f0 * semitones_to_ratio(interpolate(&LUT_FM_FREQUENCY_QUANTIZER, parameters.harmonics, 128.0)));
         let pw = 0.5 + parameters.morph * 0.49;

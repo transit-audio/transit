@@ -62,6 +62,7 @@ impl Engine for VirtualAnalogVcfEngine {
     }
 
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
 
         let shape = ((parameters.morph - 0.25) * 2.0 + 0.5).clamp(0.5, 1.0);

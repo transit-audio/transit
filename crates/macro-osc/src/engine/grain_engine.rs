@@ -45,6 +45,7 @@ impl Engine for GrainEngine {
 
     #[inline]
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         let root = parameters.note;
         let f0 = note_to_frequency(root, parameters.a0_normalized);
 

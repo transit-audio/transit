@@ -55,6 +55,7 @@ impl Engine for SwarmEngine {
 
     #[inline]
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
+        crate::engine::debug_check_render(parameters, out, aux);
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
         let control_rate = out.len() as f32;
         let density = note_to_frequency(parameters.timbre * 120.0, parameters.a0_normalized) * 0.025 * control_rate;
