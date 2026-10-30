@@ -109,7 +109,7 @@ The first instrument of the family ships as the built-in "Macro Oscillator" (`ma
 - **Rate and pitch.** The firmware computes pitch against a true 48 kHz (`a3 = 440 / 48000`), so it needs no tuning switch: MIDI note 69 plays 440 Hz. The port runs at 48 kHz only, like the firmware; supporting other host rates (resampling, or a rate parameter with E63 pitch tests at every rate) is the instrument's decision in slice 3.
 - **User-facing names (proposal).** The instrument over this port: "Resonator". Its models: Modal, Sympathetic Strings, Inharmonic String, FM Voice, Chord Strings (the quantized sympathetic strings), String and Reverb. The instrument over the second module of the pair: "Modal Voice". No module or brand name in a UI string or identifier.
 
-## Decision note 2026-10-31: the Macro Oscillator is the default instrument, the Subtractive Synth is removed (#234)
+## Decision note 2026-10-30: the Macro Oscillator is the default instrument, the Subtractive Synth is removed (#234)
 
 With polyphony in (#196), a new instrument track carries the Macro Oscillator (default model, 8 voices) and the built-in Subtractive Synth is removed outright: its code, plug-in id (`subtractive_synth`), editor panel, factory presets, help and README line. transit is alpha software, so there is no compatibility shim for the synth itself; the one rule below keeps old sessions opening. Drum Synth and Sampler are unchanged.
 

@@ -47,7 +47,7 @@ egui renders text through `ab_glyph` and does no OpenType shaping. That has a di
 - The close button's hit area is egui's `spacing.icon_width`, a square of 18 px (egui's default is 14 px). It is not 22 px because the same value sizes every checkbox and radio button.
 - The collapse and close controls are Lucide `chevron-down`/`chevron-right` and `x` in a 20 pt box (ink about 10 pt, the 14 pt title's cap height), painted by `title_bar::Window` over egui's own shapes with the 18 px hit areas unchanged (#227).
 
-## Amendment 2026-10-31: built-in windows and title padding (#232)
+## Amendment 2026-10-30: built-in windows and title padding (#232)
 
 - Built-in editor windows take their panel's size and are not resizable (as Ableton's device views and Logic's stock plug-in windows are); the title bar is 26 px at 1.0 scale (top 3, bottom 4 px, 10 px beside the controls; `theme::WINDOW_TITLE_PAD_*`), the 18 px close hit area unchanged.
 
