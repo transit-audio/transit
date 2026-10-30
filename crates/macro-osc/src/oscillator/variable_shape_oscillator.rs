@@ -120,6 +120,11 @@ impl VariableShapeOscillator {
                     this_sample -= value * this_blep_sample(reset_time);
                     next_sample -= value * next_blep_sample(reset_time);
                 }
+            } else if output_phase {
+                self.master_phase += master_frequency;
+                if self.master_phase >= 1.0 {
+                    self.master_phase -= 1.0;
+                }
             }
 
             self.slave_phase += slave_frequency;
