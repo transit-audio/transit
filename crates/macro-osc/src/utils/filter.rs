@@ -2,6 +2,8 @@
 
 // Based on MIT-licensed code (c) 2014 by Olivier Gillet (ol.gillet@gmail.com)
 
+use crate::utils::ftz;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FilterMode {
     LowPass,
@@ -131,8 +133,9 @@ impl OnePole {
 
     #[inline]
     pub fn process(&mut self, in_: f32, mode: FilterMode) -> f32 {
-        let lp = (self.g * in_ + self.state) * self.gi;
-        self.state = self.g * (in_ - lp) + lp;
+        // Flushed to zero operation by operation, as on the firmware.
+        let lp = ftz(ftz(ftz(self.g * in_) + self.state) * self.gi);
+        self.state = ftz(ftz(self.g * ftz(in_ - lp)) + lp);
         match mode {
             FilterMode::LowPass => lp,
             FilterMode::HighPass => in_ - lp,
@@ -216,11 +219,7 @@ impl Svf {
 
     #[inline]
     pub fn process(&mut self, in_: f32, mode: FilterMode) -> f32 {
-        let hp = (in_ - self.r * self.state_1 - self.g * self.state_1 - self.state_2) * self.h;
-        let bp = self.g * hp + self.state_1;
-        self.state_1 = self.g * hp + bp;
-        let lp = self.g * bp + self.state_2;
-        self.state_2 = self.g * bp + lp;
+        let (hp, bp, lp) = svf_tick(self.g, self.r, self.h, in_, &mut self.state_1, &mut self.state_2);
 
         match mode {
             FilterMode::LowPass => lp,
@@ -232,11 +231,7 @@ impl Svf {
 
     #[inline]
     pub fn process_dual(&mut self, in_: f32, out_1: &mut f32, out_2: &mut f32, mode_1: FilterMode, mode_2: FilterMode) {
-        let hp = (in_ - self.r * self.state_1 - self.g * self.state_1 - self.state_2) * self.h;
-        let bp = self.g * hp + self.state_1;
-        self.state_1 = self.g * hp + bp;
-        let lp = self.g * bp + self.state_2;
-        self.state_2 = self.g * bp + lp;
+        let (hp, bp, lp) = svf_tick(self.g, self.r, self.h, in_, &mut self.state_1, &mut self.state_2);
 
         match mode_1 {
             FilterMode::LowPass => {
@@ -277,11 +272,7 @@ impl Svf {
         let iter = in_.iter().zip(out.iter_mut());
 
         for (sample_in, sample_out) in iter {
-            let hp = (*sample_in - self.r * state_1 - self.g * state_1 - state_2) * self.h;
-            let bp = self.g * hp + state_1;
-            state_1 = self.g * hp + bp;
-            let lp = self.g * bp + state_2;
-            state_2 = self.g * bp + lp;
+            let (hp, bp, lp) = svf_tick(self.g, self.r, self.h, *sample_in, &mut state_1, &mut state_2);
 
             match mode {
                 FilterMode::LowPass => {
@@ -311,11 +302,7 @@ impl Svf {
         let iter = in_.iter().zip(out.iter_mut());
 
         for (sample_in, sample_out) in iter {
-            let hp = (*sample_in - self.r * state_1 - self.g * state_1 - state_2) * self.h;
-            let bp = self.g * hp + state_1;
-            state_1 = self.g * hp + bp;
-            let lp = self.g * bp + state_2;
-            state_2 = self.g * bp + lp;
+            let (hp, bp, lp) = svf_tick(self.g, self.r, self.h, *sample_in, &mut state_1, &mut state_2);
 
             match mode {
                 FilterMode::LowPass => {
@@ -345,11 +332,7 @@ impl Svf {
         let iter = in_.iter().zip(out.iter_mut()).step_by(stride);
 
         for (sample_in, sample_out) in iter {
-            let hp = (*sample_in - self.r * state_1 - self.g * state_1 - state_2) * self.h;
-            let bp = self.g * hp + state_1;
-            state_1 = self.g * hp + bp;
-            let lp = self.g * bp + state_2;
-            state_2 = self.g * bp + lp;
+            let (hp, bp, lp) = svf_tick(self.g, self.r, self.h, *sample_in, &mut state_1, &mut state_2);
 
             match mode {
                 FilterMode::LowPass => {
@@ -382,11 +365,7 @@ impl Svf {
         let iter = in_.iter().zip(out.iter_mut());
 
         for (sample_in, sample_out) in iter {
-            let hp = (*sample_in - self.r * state_1 - self.g * state_1 - state_2) * self.h;
-            let bp = self.g * hp + state_1;
-            state_1 = self.g * hp + bp;
-            let lp = self.g * bp + state_2;
-            state_2 = self.g * bp + lp;
+            let (hp, bp, lp) = svf_tick(self.g, self.r, self.h, *sample_in, &mut state_1, &mut state_2);
             *sample_out = hp_gain * hp + bp_gain * bp + lp_gain * lp;
         }
 
@@ -404,11 +383,7 @@ impl Svf {
         let lp_gain = f32::max(1.0 - mode * 2.0, 0.0);
 
         for (sample_in, sample_out) in in_.iter().zip(out.iter_mut()) {
-            let hp = (*sample_in - self.r * state_1 - self.g * state_1 - state_2) * self.h;
-            let bp = self.g * hp + state_1;
-            state_1 = self.g * hp + bp;
-            let lp = self.g * bp + state_2;
-            state_2 = self.g * bp + lp;
+            let (hp, bp, lp) = svf_tick(self.g, self.r, self.h, *sample_in, &mut state_1, &mut state_2);
             *sample_out = hp_gain * hp + bp_gain * bp + lp_gain * lp;
         }
 
@@ -424,11 +399,7 @@ impl Svf {
         let iter = in_.iter().zip(out_1.iter_mut().zip(out_2.iter_mut()));
 
         for (sample_in, (sample_out_1, sample_out_2)) in iter {
-            let hp = (*sample_in - self.r * state_1 - self.g * state_1 - state_2) * self.h;
-            let bp = self.g * hp + state_1;
-            state_1 = self.g * hp + bp;
-            let lp = self.g * bp + state_2;
-            state_2 = self.g * bp + lp;
+            let (hp, bp, lp) = svf_tick(self.g, self.r, self.h, *sample_in, &mut state_1, &mut state_2);
 
             match mode {
                 FilterMode::LowPass => {
@@ -777,4 +748,20 @@ impl CrossoverSvf {
         self.x[0] = x_1;
         self.x[1] = x_2;
     }
+}
+
+/// One sample of the state-variable filter (`Svf::Process`), returning high-, band- and low-pass.
+///
+/// Every operation is flushed to zero as on the firmware's FPU: a filter whose input stops
+/// decays its states into the subnormal range, where the firmware flushes them to zero.
+#[inline]
+fn svf_tick(g: f32, r: f32, h: f32, in_: f32, state_1: &mut f32, state_2: &mut f32) -> (f32, f32, f32) {
+    let hp = ftz(ftz(ftz(ftz(in_ - ftz(r * *state_1)) - ftz(g * *state_1)) - *state_2) * h);
+    let g_hp = ftz(g * hp);
+    let bp = ftz(g_hp + *state_1);
+    *state_1 = ftz(g_hp + bp);
+    let g_bp = ftz(g * bp);
+    let lp = ftz(g_bp + *state_2);
+    *state_2 = ftz(g_bp + lp);
+    (hp, bp, lp)
 }
