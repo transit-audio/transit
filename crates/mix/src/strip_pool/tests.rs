@@ -103,6 +103,17 @@ impl Drop for ReleaseLate {
     }
 }
 
+/// Turns the [`LATE_PANIC`] hook off when dropped, also when the test fails first: no later worker
+/// render of that strip in this binary panics.
+struct DisarmLate;
+
+impl Drop for DisarmLate {
+    fn drop(&mut self) {
+        LATE_HOLD.store(false, Ordering::Release);
+        LATE_PANIC.store(usize::MAX, Ordering::Relaxed);
+    }
+}
+
 /// Test hook (#174): the strip index whose every render gets a stamp of another task, so its
 /// completion identity never matches. `usize::MAX`: none.
 pub(crate) static CORRUPT_STAMP: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
@@ -133,6 +144,7 @@ fn a_late_runner_fault_keeps_the_same_instance_suspect() {
     LATE_ENTERED.store(false, Ordering::Release);
     LATE_HOLD.store(true, Ordering::Release);
     LATE_PANIC.store(0, Ordering::Relaxed);
+    let disarm = DisarmLate;
     let eng = std::thread::spawn(move || {
         let release = ReleaseLate;
         mark_audio_thread();
@@ -170,7 +182,7 @@ fn a_late_runner_fault_keeps_the_same_instance_suspect() {
     })
     .join()
     .unwrap();
-    LATE_PANIC.store(usize::MAX, Ordering::Relaxed);
+    drop(disarm);
     MixEngine::force_serial(true);
     let pool = eng.pool.as_ref().unwrap();
     let st = pool.set.stats();
