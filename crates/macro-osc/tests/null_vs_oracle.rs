@@ -126,7 +126,9 @@ fn null_engine(model: Model) {
         let port = render_port_point(model, point);
         let out = residual_f32(&port.out, &oracle.out).expect("lengths");
         let aux = residual_f32(&port.aux, &oracle.aux).expect("lengths");
-        if !out.within(bound) || !aux.within(bound) {
+        // Bits, not values: a +0.0 against -0.0 is a residual of -inf dBFS but still a difference.
+        let exact_required = bound == f64::NEG_INFINITY;
+        if !out.within(bound) || !aux.within(bound) || (exact_required && !(out.is_exact() && aux.is_exact())) {
             failing += 1;
         }
         if filter.as_ref().is_some_and(|f| point.label().contains(f.as_str())) {
