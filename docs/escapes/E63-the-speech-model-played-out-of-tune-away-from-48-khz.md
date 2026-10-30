@@ -1,6 +1,6 @@
 # E63: the Speech model played out of tune away from 48 kHz
 
-1. **Failure.** Found in review of #195 slice 3 (claude-review-195-3, finding 1), before any build
+1. **Failure.** Found in review of #195 slice 3, before any build
    shipped the instrument. The macro oscillator's LPC speech synth (the Speech model when Harmonics
    is above 1/3, blended with SAM between 1/6 and 1/3) played 1.47 semitones flat at 44.1 kHz,
    10.5 semitones sharp at 88.2 kHz and an octave sharp at 96 kHz, formants moved by the same factor.
@@ -22,9 +22,11 @@
    at 44.1, 48, 88.2 and 96 kHz under both tunings: the common path (eight engines that read `a0`),
    the six-op voices' own reference and the LPC synth's own clock, each within 1 cent. The
    measurement refuses aliases: the autocorrelation peak must be a real periodicity within 3% of the
-   expected period and must not repeat at a half or a third of it, and the frequency is read from
-   the spectrum (a DFT peak, no lag grid). `the_measurement_refuses_an_octave_alias` proves the check
-   fails a 440 Hz signal tested as 220 Hz. Run against the unfixed step, the new test fails LPC
+   expected period and must not repeat at a half or a third of it, its spectrum near half the pitch
+   must be 12 dB under the peak, and the frequency is read from the spectrum (a DFT peak, no lag
+   grid). `the_measurement_refuses_an_octave_alias` proves the check fails a 440 Hz signal tested as
+   220 Hz, and `the_measurement_refuses_an_octave_down_alias` a 220 Hz tone with a 10.5 dB stronger
+   second harmonic tested as 440 Hz. Run against the unfixed step, the new test fails LPC
    speech at 44.1 kHz, the first rate it measures (no periodicity at the expected period:
    normalized correlation 0.18 against the 0.3 floor, 2026-10-30); with the fix, LPC speech measures within 0.001 cent of
    440 Hz at every rate.

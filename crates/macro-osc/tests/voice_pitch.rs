@@ -8,7 +8,9 @@
 //! 1. the autocorrelation peak is searched within 3% of the expected period only, and must be a
 //!    real periodicity (normalized correlation above 0.3);
 //! 2. the signal must not also repeat at a half or a third of that lag (an octave or a twelfth up:
-//!    a signal of period T/2 peaks at T too, which is how the slice 2 test passed an octave error);
+//!    a signal of period T/2 peaks at T too, which is how the slice 2 test passed an octave error),
+//!    and its spectrum near half the pitch must be 12 dB under the peak (an octave down: a signal of
+//!    period 2T with a strong second harmonic also repeats at T);
 //! 3. the frequency is then read from the spectrum (the strongest DFT peak within 1.5% of the
 //!    autocorrelation's estimate; no lag grid, so LPC's 8 kHz clock cannot bias it) and must be
 //!    within 1 cent.
@@ -35,10 +37,13 @@ const PATHS: [(usize, f32, f32, &str); 10] = [
     // patch: 15.5 / 32 / 1.02). Most of the bank sounds an octave below the note (0.5 carrier
     // ratios) or detuned by the patch's own fine tuning, as on the module.
     (2, 15.5 / 32.0 / 1.02, 0.5, "six-op bank A (own reference)"),
-    (8, 0.0, 0.5, "virtual analog"),
+    // Harmonics 0.5: the second oscillator in unison (at 0 it sits two octaves down).
+    (8, 0.5, 0.5, "virtual analog"),
     (9, 0.5, 0.5, "waveshaper"),
     (10, 0.5, 0.0, "FM"),
-    (12, 0.5, 0.5, "additive"),
+    // One spectral bump on the fundamental (harmonics 0, timbre 0): at other settings a partial can
+    // outweigh the fundamental, and a pitch measurement has no single answer.
+    (12, 0.0, 0.0, "additive"),
     (13, 0.5, 0.5, "wavetable"),
     (15, 0.0, 0.5, "naive speech"),
     (15, 0.35, 0.5, "LPC speech (own clock)"),
@@ -82,14 +87,21 @@ fn pitch_hz(x: &[f64], rate: f32, expected_hz: f64, label: &str) -> f64 {
         let (_, rk) = peak(x, r0, tk / 1.03, tk * 1.03);
         assert!(rk < rb - 0.1, "{label}: repeats at 1/{k} of the period ({rk:.3} against {rb:.3}): an alias, not the fundamental");
     }
-    dft_peak_hz(x, rate, rate / best as f64)
+    let (hz, peak_mag) = dft_peak(x, rate, rate / best as f64);
+    // An octave down: a signal whose fundamental is half the expected pitch, with a strong second
+    // harmonic, passes the lag checks above (it repeats at the expected period too). Its spectrum
+    // near half the measured pitch must be at least 12 dB under the peak.
+    let (_, half_mag) = dft_peak(x, rate, hz / 2.0);
+    let below_db = 20.0 * (peak_mag - half_mag) / std::f64::consts::LN_10;
+    assert!(below_db > 12.0, "{label}: the spectrum at half the pitch is only {below_db:.1} dB under the peak: an octave-down alias");
+    hz
 }
 
-/// The frequency of the strongest spectral peak within 1.5% of `around_hz`: a Hann-windowed DFT
-/// over the whole render, scanned in 0.05 Hz steps and refined by a parabola through the log
-/// magnitudes. Unlike a lag search it has no sample grid, so neither LPC speech's 8 kHz clock nor a
-/// detuned operator pair biases it.
-fn dft_peak_hz(x: &[f64], rate: f64, around_hz: f64) -> f64 {
+/// The frequency of the strongest spectral peak within 1.5% of `around_hz` and its log magnitude: a
+/// Hann-windowed DFT over the whole render, scanned in 0.05 Hz steps and refined by a parabola
+/// through the log magnitudes. Unlike a lag search it has no sample grid, so neither LPC speech's
+/// 8 kHz clock nor a detuned operator pair biases it.
+fn dft_peak(x: &[f64], rate: f64, around_hz: f64) -> (f64, f64) {
     let n = x.len();
     let w: Vec<f64> = x.iter().enumerate().map(|(i, v)| v * (0.5 - 0.5 * (std::f64::consts::TAU * i as f64 / n as f64).cos())).collect();
     let mag = |f: f64| {
@@ -114,7 +126,8 @@ fn dft_peak_hz(x: &[f64], rate: f64, around_hz: f64) -> f64 {
     let mags: Vec<f64> = (0..=steps).map(|k| mag(lo + k as f64 * step)).collect();
     let k = (1..steps).max_by(|a, b| mags[*a].total_cmp(&mags[*b])).expect("steps");
     let (a, m, c) = (mags[k - 1], mags[k], mags[k + 1]);
-    lo + (k as f64 + 0.5 * (a - c) / (a - 2.0 * m + c)) * step
+    let d = 0.5 * (a - c) / (a - 2.0 * m + c);
+    (lo + (k as f64 + d) * step, m - 0.25 * (a - c) * d)
 }
 
 fn cents(a: f64, b: f64) -> f64 {
@@ -154,4 +167,25 @@ fn the_measurement_refuses_an_octave_alias() {
     let x = render(SampleRate::Hz48000, Tuning::Concert, 10, 0.5, 0.0);
     let refused = std::panic::catch_unwind(|| pitch_hz(&x, 48_000.0, 220.0, "FM checked an octave low"));
     assert!(refused.is_err(), "a 440 Hz sine passed as 220 Hz");
+}
+
+/// The measurement refuses an octave-down error: a 220 Hz tone whose second harmonic (440 Hz) is
+/// 10.5 dB stronger than its fundamental repeats at the 440 Hz period and passes the lag checks,
+/// but its spectrum at 220 Hz is within 12 dB of the 440 Hz peak.
+#[test]
+fn the_measurement_refuses_an_octave_down_alias() {
+    let rate = 48_000.0f64;
+    let x: Vec<f64> = (0..72_000)
+        .map(|i| {
+            let t = i as f64 / rate;
+            0.3 * (std::f64::consts::TAU * 220.0 * t).sin() + (std::f64::consts::TAU * 440.0 * t).sin()
+        })
+        .collect();
+    let refused = std::panic::catch_unwind(|| pitch_hz(&x, 48_000.0, 440.0, "a 220 Hz tone checked at 440 Hz"));
+    let message = refused.expect_err("a 220 Hz tone with a strong second harmonic passed as 440 Hz");
+    let text = message.downcast_ref::<String>().cloned().unwrap_or_default();
+    assert!(text.contains("octave-down"), "refused for the octave-down check, not another one: {text}");
+    // The same tone without the sub-octave passes.
+    let clean: Vec<f64> = (0..72_000).map(|i| (std::f64::consts::TAU * 440.0 * i as f64 / rate).sin()).collect();
+    assert!((pitch_hz(&clean, 48_000.0, 440.0, "a 440 Hz sine") - 440.0).abs() < 0.01);
 }
