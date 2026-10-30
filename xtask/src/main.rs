@@ -66,6 +66,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-dsp", 1),
     ("transit-macro-osc", 1),
     ("transit-resonator", 1),
+    ("transit-granular", 1),
     ("transit-clap-host", 1),
     ("transit-vst3-host", 1),
     ("transit-au-host", 1),
@@ -78,8 +79,16 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-ui-studio", 6),
 ];
 /// Standalone crates have no workspace dependencies (dev-dependencies excepted).
-const STANDALONE: &[&str] =
-    &["transit-time", "transit-audio-io", "transit-audio-backend", "transit-midi-io", "transit-midi", "transit-macro-osc", "transit-resonator"];
+const STANDALONE: &[&str] = &[
+    "transit-time",
+    "transit-audio-io",
+    "transit-audio-backend",
+    "transit-midi-io",
+    "transit-midi",
+    "transit-macro-osc",
+    "transit-resonator",
+    "transit-granular",
+];
 // The image crate encodes screenshots (PNG); it is not a UI-only dependency.
 const UI_CRATES: &[&str] = &["egui", "eframe", "winit", "rfd", "egui-wgpu", "egui_glow", "egui_extras", "resvg", "wgpu"];
 // audio-bench is an app over playback and the native backends, not an engine layer.

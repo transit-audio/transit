@@ -4249,6 +4249,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-granular"
+version = "0.4.1"
+dependencies = [
+ "transit-macro-osc-oracle",
+]
+
+[[package]]
 name = "transit-macro-osc"
 version = "0.5.0"
 dependencies = [
