@@ -338,10 +338,10 @@ mod tests {
 
     #[test]
     fn a_closed_descriptor_is_dropped_not_spun_on() {
-        let (_a, b) = UnixStream::pair().unwrap();
-        let fd = b.as_raw_fd();
+        // A number no descriptor of this process has (closing a real one here would race with the
+        // other tests' threads, which may get its number again at once).
+        let fd = 999_983;
         add_fd(fd, Ready::READ, Rc::new(|_, _| true)).unwrap();
-        drop(b);
         assert_eq!(run(16), 0);
         assert_eq!(counts(), (0, 0));
         assert!(add_fd(-1, Ready::READ, Rc::new(|_, _| true)).is_none());
