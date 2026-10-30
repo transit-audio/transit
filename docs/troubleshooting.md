@@ -144,8 +144,9 @@ Since issue #187 a long take is played from its file instead of from memory, so 
 the session's sample rate is placed: as one clip, with its waveform shown once its peaks are read (they are
 kept beside the file as `<file>.peaks`). A clip played from disk that the disk could not read in time plays
 silence for that moment and counts under "Disk underruns" in Callback telemetry. A session saved by an
-older build that left takes unplaced places them when it opens, at the start of the track the file is named
-after; move each where it was recorded.
+older build that left takes unplaced places them when it opens, each at the start of a new track named after
+the file (nothing already in the session moves), and the session opens modified; move each take where it was
+recorded, then save.
 
 What follows still applies to a take that cannot be played from disk (one recorded at a rate other than
 the session's). A take longer than about 6.2 hours of mono at 48 kHz (3.1 hours of stereo; half as long at 96 kHz) is too
