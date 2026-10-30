@@ -10,6 +10,23 @@ use crate::player::midi_out::{Kind, OutEvent, Producer};
 use transit_model::Session;
 use transit_time::Samples;
 
+#[cfg(test)]
+std::thread_local! {
+    /// Test seam (#226): on the calling thread (the test's device callback), the callback-entry
+    /// host time is frame-derived, `base + output_frame / device rate`, instead of the real clock,
+    /// so external MIDI stamps follow the frames rendered, not how fast the test thread runs.
+    pub(in crate::player) static FRAME_CLOCK_BASE: std::cell::Cell<Option<u64>> = const { std::cell::Cell::new(None) };
+}
+
+/// The callback-entry host time of `output_frame` at `device_rate` under [`FRAME_CLOCK_BASE`],
+/// when a test set it on this thread.
+#[cfg(test)]
+pub(in crate::player) fn frame_clock_now(output_frame: u64, device_rate: u32) -> Option<u64> {
+    let base = FRAME_CLOCK_BASE.get()?;
+    let ns = u128::from(output_frame) * 1_000_000_000 / u128::from(device_rate.max(1));
+    Some(base.saturating_add(u64::try_from(ns).unwrap_or(u64::MAX)))
+}
+
 pub(in crate::player) struct External {
     out: Producer,
     was_playing: bool,

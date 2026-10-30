@@ -40,6 +40,26 @@ fn session(fake: &Fake) -> (Session, TrackId, transit_midi_io::PortKey) {
     (s, t, key)
 }
 
+/// Stamps this thread's device callbacks from a frame-derived clock (#226): the callback-entry
+/// host time of output frame `f` is `now + f / 48 kHz`, so the external MIDI stamps follow the
+/// frames rendered and the callbacks need no real-time pacing. The stamps lie ahead of real time
+/// while the test renders faster than that; the output thread sends each at its stamp.
+fn frame_clock() {
+    let base = transit_audio_backend::HostOrigin::default().now_ns().unwrap();
+    crate::player::audio::FRAME_CLOCK_BASE.set(Some(base));
+}
+
+/// Releases the frame-derived clock on this thread.
+fn real_clock() {
+    crate::player::audio::FRAME_CLOCK_BASE.set(None);
+}
+
+/// Waits until the output thread has sent `message` `n` times: everything stamped before it was
+/// sent first, and a stop after this cannot drop it as scheduled playback.
+fn sent_times(fake: &Fake, key: &transit_midi_io::PortKey, message: &[u8], n: usize) {
+    until(&format!("{message:x?} sent {n} times"), || fake.sent(key).iter().filter(|m| m.as_slice() == message).count() >= n);
+}
+
 #[test]
 fn a_looped_midi_track_plays_its_clip_to_the_port_off_the_audio_thread_and_stop_releases() {
     let fake = Fake::default();
@@ -56,22 +76,23 @@ fn a_looped_midi_track_plays_its_clip_to_the_port_off_the_audio_thread_and_stop_
     crate::mark_audio_thread();
     let audio = std::thread::current().id();
     let mut block = [0.0f32; 1024];
+    frame_clock();
     callback.fill_f32(&mut block);
     player.play(0, None, Some(transit_time::Range { start: 0, end: QUARTER })).unwrap();
-    // Real-time pacing (512 frames is 10.7 ms at 48 kHz): the fallback clock stamps blocks by
-    // callback time, so callbacks must not run ahead of the wall clock. 80 blocks are 40 960
-    // samples: lap 2 stops inside E.
+    // The blocks are stamped by frame (`frame_clock`), not by when this thread runs them, so
+    // they need no pacing. 80 blocks are 40 960 samples: lap 2 stops inside E.
     for _ in 0..80 {
-        let started = Instant::now();
         let ((), heap) = measure(|| callback.fill_f32(&mut block));
         assert!(heap.is_zero(), "the callback allocated while scheduling external MIDI: {heap:?}");
-        std::thread::sleep(Duration::from_micros(10_700).saturating_sub(started.elapsed()));
     }
+    // Stop drops playback still scheduled; it comes once lap 2's E has gone out (observable
+    // state), so the output thread's speed does not decide whether E is held at the stop.
+    sent_times(&fake, &key, &[0x94, 64, 90], 2);
     player.stop().unwrap();
     for _ in 0..4 {
         callback.fill_f32(&mut block);
-        std::thread::sleep(Duration::from_millis(11));
     }
+    real_clock();
     transit_mix::unmark_audio_thread();
     until("Stop's All Notes Off", || fake.sent(&key).contains(&vec![0xB4, 123, 0]));
     let sends = fake.sends(&key);
@@ -342,11 +363,13 @@ fn a_loop_set_mid_note_while_playing_ends_the_held_note_at_its_wrap() {
     });
     crate::mark_audio_thread();
     let mut block = [0.0f32; 1024];
+    frame_clock();
     callback.fill_f32(&mut block);
     player.play(0, None, None).unwrap();
     let mut wrapped = false;
+    // Stamped by frame (`frame_clock`): no pacing. The position is the callback's own count of
+    // rendered samples, so the window below is decided by the block count.
     for k in 0..80 {
-        let started = Instant::now();
         callback.fill_f32(&mut block);
         // E sounds from 12 000; the loop goes on at about 15 000, ahead of its 24 000 end.
         if k == 29 {
@@ -355,14 +378,15 @@ fn a_loop_set_mid_note_while_playing_ends_the_held_note_at_its_wrap() {
             player.set_loop(Some(transit_time::Range { start: 0, end: QUARTER })).unwrap();
         }
         wrapped |= k > 29 && player.position() < QUARTER / 2;
-        std::thread::sleep(Duration::from_micros(10_700).saturating_sub(started.elapsed()));
     }
     assert!(wrapped, "the transport never wrapped");
+    // Lap 2's E has gone out before the stop (observable state), as in the looped test.
+    sent_times(&fake, &key, &[0x94, 64, 90], 2);
     player.stop().unwrap();
     for _ in 0..4 {
         callback.fill_f32(&mut block);
-        std::thread::sleep(Duration::from_millis(11));
     }
+    real_clock();
     transit_mix::unmark_audio_thread();
     until("Stop's All Notes Off", || fake.sent(&key).contains(&vec![0xB4, 123, 0]));
     let messages: Vec<Vec<u8>> = fake.sends(&key).iter().map(|s| s.message.clone()).collect();

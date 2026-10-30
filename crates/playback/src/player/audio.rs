@@ -14,6 +14,8 @@ use transit_time::{MAX_POSITION, Range, Samples};
 mod phase;
 use phase::Phase;
 mod external;
+#[cfg(test)]
+pub(in crate::player) use external::FRAME_CLOCK_BASE;
 mod midi;
 
 #[derive(Debug, Clone, Copy)]
@@ -1030,6 +1032,8 @@ impl Audio {
         }
         if let Some(external) = &mut self.external {
             let now = self.transport.clock_now.or_else(|| self.clock_origin.now_ns());
+            #[cfg(test)]
+            let now = external::frame_clock_now(self.transport.timeline.next_output(), self.device_rate).or(now);
             external.callback(now, self.transport.timeline.next_output());
         }
         let channels = channels.max(1);
