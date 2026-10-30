@@ -611,8 +611,9 @@ impl EditorWindow {
         // follow the main window (issue #173) take the tool-window style instead: no taskbar
         // button, not in Alt-Tab.
         let ex = if super::follows() { group::TOOL } else { 0 };
-        // SAFETY: a registered class and NUL-terminated strings that outlive the call; no owner
-        // and no parent (a top-level window). Created hidden at a placeholder size.
+        // SAFETY: a registered class and NUL-terminated strings that outlive the call; `ex` is an
+        // extended-style value only (0 or `WS_EX_TOOLWINDOW`); no owner and no parent (a top-level
+        // window). Created hidden at a placeholder size.
         let hwnd = unsafe {
             CreateWindowExW(
                 ex,
@@ -820,7 +821,7 @@ pub fn resize_content(window: *mut c_void, w: f64, h: f64) -> bool {
 }
 
 mod group;
-pub use group::{group, raise_window, take_created, window_state};
+pub use group::{apply, group, raise_window, take_created, window_state};
 
 /// The calling thread's id as Windows knows it, for [`hide_thread_windows`] from another thread.
 #[must_use]

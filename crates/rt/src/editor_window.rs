@@ -538,7 +538,7 @@ fn since(at: Option<std::time::Instant>) -> Duration {
 #[cfg(windows)]
 mod win;
 #[cfg(windows)]
-pub use win::{EditorWindow, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
+pub use win::{EditorWindow, apply, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
 
 #[cfg(not(windows))]
 mod other {
@@ -620,6 +620,12 @@ mod other {
         0
     }
 
+    /// Applies the request to no window: there are none here (Linux: #147).
+    #[must_use]
+    pub fn apply(_request: super::Group) -> usize {
+        0
+    }
+
     /// No window to raise here.
     #[must_use]
     pub fn raise_window(_window: usize) -> bool {
@@ -639,7 +645,7 @@ mod other {
     }
 }
 #[cfg(not(windows))]
-pub use other::{EditorWindow, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
+pub use other::{EditorWindow, apply, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
 
 #[cfg(test)]
 mod tests {

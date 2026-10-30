@@ -165,3 +165,35 @@ fn the_windows_an_open_made_are_handed_out_once() {
     assert!(other.is_empty(), "per thread");
     a.close();
 }
+
+/// #173 review: a host thread that was stuck applies its queued requests late. They bring its
+/// windows to the state the process is in now and never record anything, so the UI's later
+/// restore stands and an editor opened meanwhile (on another thread) is shown.
+#[test]
+fn a_late_request_follows_what_the_ui_did_since_and_records_nothing() {
+    let _g = Globals::follow(true);
+    let a = shown("A");
+    // The UI minimized and restored while this thread was held: both were recorded then.
+    note_group(Group::Park);
+    note_group(Group::Unpark);
+    // The held thread catches up: its stale park hides nothing and leaves the state alone.
+    assert_eq!(apply(Group::Park), 0);
+    assert_eq!(a.state(), WindowState::Shown);
+    assert!(!crate::editor_window::parked(), "the restore stands");
+    let late = std::thread::spawn(|| {
+        let w = shown("opened on another thread");
+        let s = w.state();
+        w.close();
+        s
+    })
+    .join()
+    .unwrap();
+    assert_eq!(late, WindowState::Shown, "an editor opening now is shown, not parked");
+    // A stale setting change restyles to the current setting, and does not change it.
+    assert_eq!(apply(Group::Follow(false)), 1);
+    assert!(crate::editor_window::follows());
+    assert_ne!(ex_style(a.raw()) & TOOL, 0, "still the tool style: the setting is on");
+    // The stale unpark after it changes nothing either.
+    assert_eq!(apply(Group::Unpark), 0);
+    a.close();
+}

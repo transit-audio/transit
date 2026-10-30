@@ -7,14 +7,14 @@
 //! hang isolation). The calls are the ones a thread makes on its own windows (`ShowWindow`,
 //! `SetWindowPos`, `SetWindowLongPtrW`); none of them is ever made on another thread's window.
 
-use super::{Data, data, set_content};
+use super::{data, set_content};
 use crate::editor_window::{Group, WindowState, note_group};
 use std::cell::RefCell;
 use windows_sys::Win32::Foundation::{HWND, LPARAM};
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumThreadWindows, GWL_EXSTYLE, GetWindowLongPtrW, HWND_TOP, IsIconic, IsWindowVisible, SW_HIDE, SW_SHOWNA, SW_SHOWNOACTIVATE, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_TOOLWINDOW,
+    EnumThreadWindows, GWL_EXSTYLE, GetWindowLongPtrW, HWND_TOP, IsIconic, IsWindowVisible, SW_HIDE, SW_SHOWNA, SWP_FRAMECHANGED, SWP_NOACTIVATE,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_TOOLWINDOW,
 };
 
 /// The extended style of an editor that follows the main window: no taskbar button, not in
@@ -80,7 +80,8 @@ fn to_front(hwnd: HWND, show: bool) {
 
 /// Gives a frame of this thread the tool-window style (`tool`) or takes it away, keeping the
 /// plug-in's content size. A shown window is hidden around the change, so the taskbar notices.
-fn restyle(hwnd: HWND, d: &Data, tool: bool) {
+/// `hwnd` is a live frame of this thread (the callers checked it with `data`).
+fn restyle(hwnd: HWND, tool: bool) {
     // SAFETY: a style read of a live frame of this thread.
     let ex = unsafe { GetWindowLongPtrW(hwnd, GWL_EXSTYLE) } as u32;
     let want = if tool { ex | TOOL } else { ex & !TOOL };
@@ -97,6 +98,9 @@ fn restyle(hwnd: HWND, d: &Data, tool: bool) {
         SetWindowLongPtrW(hwnd, GWL_EXSTYLE, want as isize);
         SetWindowPos(hwnd, std::ptr::null_mut(), 0, 0, 0, 0, SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
     }
+    // The sends above ran window procedures (the plug-in's children among them): take the frame's
+    // data again, and stop if the frame is gone.
+    let Some(d) = data(hwnd) else { return };
     // The tool caption is shorter: the frame is resized so the plug-in keeps its pixel size.
     let (w, h) = d.size.get();
     set_content(hwnd, d, w, h);
@@ -106,16 +110,39 @@ fn restyle(hwnd: HWND, d: &Data, tool: bool) {
     }
 }
 
-/// Applies `request` to every editor window of the calling thread (the plug-in host thread runs
-/// it from its queue) and records it for windows made later ([`note_group`]). Returns how many
-/// windows it changed. Park, Unpark and Front do nothing while editors do not follow the main
-/// window ([`Group::Follow`]`(false)`, the behavior before #173).
+/// Records `request` for the whole process ([`note_group`]) and applies it to every editor window
+/// of the calling thread ([`apply`]): where the thread that records it owns the windows (inline
+/// mode, the tests). Returns how many windows it changed.
 #[must_use = "the count tells the tests what changed; `let _ =` where it does not matter"]
 pub fn group(request: Group) -> usize {
     note_group(request);
+    apply(request)
+}
+
+/// Applies `request` to every editor window of the calling thread without recording anything: what
+/// a plug-in host thread runs from its queue, after the UI recorded the request when it posted it
+/// (the UI is the only writer of the process-wide state). Each window is brought to the state the
+/// process is in now ([`follows`], [`parked`]), not the one the request was posted for, so a thread
+/// that was stuck and applies its queued requests late never undoes what the UI did since (#173
+/// review): a stale park while the main window is up hides nothing, and a stale follow change
+/// restyles to the current setting. Park, Unpark and Front do nothing while editors do not follow
+/// the main window ([`Group::Follow`]`(false)`, the behavior before #173). Returns how many
+/// windows it changed.
+///
+/// [`follows`]: crate::editor_window::follows
+/// [`parked`]: crate::editor_window::parked
+#[must_use = "the count tells the tests what changed; `let _ =` where it does not matter"]
+pub fn apply(request: Group) -> usize {
     let follow = crate::editor_window::follows();
+    let parked = crate::editor_window::parked();
     let mut changed = 0;
     let frames = frames();
+    let request = match request {
+        Group::Follow(_) => Group::Follow(follow),
+        Group::Park if !parked => return 0,
+        Group::Unpark if parked => return 0,
+        r => r,
+    };
     match request {
         Group::Park if follow => {
             for &hwnd in &frames {
@@ -132,16 +159,16 @@ pub fn group(request: Group) -> usize {
             for &hwnd in &frames {
                 let Some(d) = data(hwnd) else { continue };
                 if d.parked.replace(false) {
-                    // Shown where it was, at its size, without taking the focus.
+                    // Shown where it was, in its current state, without taking the focus.
                     // SAFETY: a live frame of this thread.
-                    unsafe { ShowWindow(hwnd, SW_SHOWNOACTIVATE) };
+                    unsafe { ShowWindow(hwnd, SW_SHOWNA) };
                     changed += 1;
                 }
             }
             if request == Group::Follow(false) {
                 for &hwnd in &frames {
-                    if let Some(d) = data(hwnd) {
-                        restyle(hwnd, d, false);
+                    if data(hwnd).is_some() {
+                        restyle(hwnd, false);
                     }
                 }
             }
@@ -157,8 +184,8 @@ pub fn group(request: Group) -> usize {
         }
         Group::Follow(true) => {
             for &hwnd in &frames {
-                if let Some(d) = data(hwnd) {
-                    restyle(hwnd, d, true);
+                if data(hwnd).is_some() {
+                    restyle(hwnd, true);
                     changed += 1;
                 }
             }

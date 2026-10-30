@@ -50,6 +50,15 @@ impl T {
                 app.ui(ui);
             });
             out.textures_delta.clear();
+            // What the window would do with the frame's commands (`ui.window`): the next frame's
+            // viewport info shows it, as eframe's does.
+            for c in out.viewport_output.get(&egui::ViewportId::ROOT).map(|v| v.commands.clone()).unwrap_or_default() {
+                match c {
+                    egui::ViewportCommand::Minimized(m) => self.minimized = m,
+                    egui::ViewportCommand::Focus => self.focused = true,
+                    _ => {}
+                }
+            }
         }
     }
 
@@ -220,7 +229,14 @@ fn a_stuck_host_thread_leaves_the_frame_loop_running_and_applies_the_requests_la
 #[test]
 fn the_control_channel_can_minimize_and_focus_the_main_window() {
     let mut t = T::new();
-    // The commands go to the window; the frames the test runs stand in for its events.
-    assert_eq!(t.control("ui.window", json!({"minimized": true, "focus": true})), json!({}));
-    assert_eq!(t.follow(json!({"value": true}))["editors_follow"], json!(true));
+    t.open_editor();
+    t.focused = false;
+    t.frames(2);
+    // The commands go to the window; the test's frames apply them as the window would.
+    assert_eq!(t.control("ui.window", json!({"minimized": true})), json!({}));
+    assert_eq!((t.windows()["main"].clone(), t.state()), (json!("minimized"), json!("parked")));
+    assert_eq!(t.posted().last().map(String::as_str), Some("park"));
+    assert_eq!(t.control("ui.window", json!({"minimized": false, "focus": true})), json!({}));
+    assert_eq!((t.windows()["main"].clone(), t.state()), (json!("active"), json!("shown")));
+    assert_eq!(t.posted()[t.posted().len() - 2..], ["unpark", "front"]);
 }

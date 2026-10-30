@@ -5,7 +5,7 @@
 //! UI with it. Transit groups them by hand instead. The UI sees its main window's transitions and
 //! calls [`Host::editor_windows`], which posts the request to every host thread's queue and
 //! returns: nothing here waits for a host thread. Each thread applies the request to its own
-//! windows ([`transit_rt::editor_window::group`]) between jobs, as it runs any job. A thread
+//! windows ([`transit_rt::editor_window::apply`]) between jobs, as it runs any job. A thread
 //! stuck inside a plug-in simply does not run it (the request waits in its queue, or is dropped
 //! with a thread given up on), so the UI stays responsive: hang isolation is the invariant kept.
 //!
@@ -69,8 +69,10 @@ impl Host {
         let workers = lock(&self.inner.workers).clone();
         let mut posted = 0;
         for w in workers.iter().filter(|w| w.running.load(Ordering::Acquire) && !w.is_abandoned()) {
+            // Apply only: this call already recorded the request, and a thread that runs it late
+            // (it was stuck) must not record it again over what the UI did since (#173 review).
             w.send_or_leak(Busy::any(call::EDITOR_WINDOWS), move |_| {
-                let _changed = window::group(group);
+                let _changed = window::apply(group);
             });
             posted += 1;
         }

@@ -27,7 +27,7 @@ fn host() -> Host {
 }
 
 /// Waits (a stall bound, polling once per 5 ms frame) until `done` holds; false if it never did.
-fn until(done: impl Fn() -> bool) -> bool {
+fn until(mut done: impl FnMut() -> bool) -> bool {
     let deadline = Instant::now() + Duration::from_secs(10);
     // timing: stall-bound ten seconds for the host thread's next tick to publish the state
     while !done() {
@@ -41,8 +41,8 @@ fn until(done: impl Fn() -> bool) -> bool {
 
 /// The host thread is held inside a plug-in (its editor open waits on a channel): every call the
 /// UI makes for the grouping returns at once, and nothing is applied until the thread returns.
-/// Without the fire-and-forget path, the first call below would wait for the held thread and the
-/// test would never reach the release.
+/// The UI's calls run on a helper thread the test waits for with a stall bound: a call that
+/// waited for the held thread fails the test instead of hanging it (#213 review minor D).
 #[test]
 fn a_held_host_thread_never_holds_the_ui_and_applies_the_requests_when_it_returns() {
     let _g = globals();
@@ -56,13 +56,19 @@ fn a_held_host_thread_never_holds_the_ui_and_applies_the_requests_when_it_return
     editor.open().unwrap();
     // The open is running and blocked: the thread is inside the plug-in.
     assert!(until(|| log.thread_of("editor_open").is_some()), "the open started");
-    // Everything the UI does for the grouping, on this (the UI's) thread, while it is held.
-    for request in [R::Follow(true), R::Park, R::Unpark, R::Front, R::Follow(false)] {
-        assert_eq!(host.editor_windows(request), 1, "posted to the one host thread");
-    }
-    editor.raise();
-    assert_eq!(editor.window_state(), None, "nothing published yet");
-    assert!(editor.is_open(), "the open on its way counts as open");
+    // Everything the UI does for the grouping, on a stand-in UI thread, while it is held.
+    let ui_host = host.clone();
+    let (done, finished) = mpsc::channel();
+    std::thread::spawn(move || {
+        let posted: Vec<usize> =
+            [R::Follow(true), R::Park, R::Unpark, R::Front, R::Follow(false)].into_iter().map(|r| ui_host.editor_windows(r)).collect();
+        editor.raise();
+        let seen = (editor.window_state(), editor.is_open());
+        let _ = done.send((posted, seen, editor));
+    });
+    let (posted, seen, editor) = finished.recv_timeout(Duration::from_secs(10)).expect("a UI call waited for the held host thread");
+    assert_eq!(posted, [1; 5], "each posted to the one host thread");
+    assert_eq!(seen, (None, true), "nothing published yet; the open on its way counts as open");
     // A request queued behind them (a completion signal, not a clock): it runs after them.
     let l = Arc::clone(&log);
     let behind = host.submit(move |_| {
@@ -182,6 +188,67 @@ mod windows {
             }
             Vec::new()
         }
+    }
+
+    /// #173 review: thread A is held while the user minimizes and restores. When A catches up and
+    /// runs its stale park, the process-wide state stays as the UI set it, and an editor that
+    /// opens on thread B meanwhile is shown. A is held again between its stale park and unpark
+    /// (an editor open queued between them waits on a channel), the moment the old code got wrong.
+    #[test]
+    fn a_thread_that_catches_up_never_parks_an_editor_opening_elsewhere() {
+        let _g = globals();
+        let timeout = Duration::from_millis(200);
+        let host = Host::new(Config { timeout, creation_timeout: Duration::from_secs(60), inline: false, ..Config::default() });
+        host.editor_windows(R::Follow(true));
+        // A plug-in on thread A, then A held by a slow creation; the one queued behind it moves
+        // to a fresh thread B (issue #82), which becomes current.
+        let log = Arc::new(Log::default());
+        let l = Arc::clone(&log);
+        let mut on_a = host.submit(move |ctx| ctx.adopt(Fake::make(&l, Duration::ZERO, Duration::ZERO))).wait(Duration::from_secs(10)).unwrap();
+        let (release_a, held_a) = mpsc::channel::<()>();
+        let slow = host.submit(move |_| {
+            let _ = held_a.recv();
+        });
+        let behind = host.submit(|_| std::thread::current().id());
+        let mut b_thread = None;
+        assert!(
+            until(|| {
+                if let transit_plugin_host::Status::Ready(id) = behind.poll() {
+                    b_thread = Some(id);
+                }
+                b_thread.is_some()
+            }),
+            "the queued creation moved to a fresh thread"
+        );
+        assert_ne!(b_thread, log.thread_of("create"), "B is another thread");
+        assert_eq!(host.wedged(), 0, "A is slow, not stuck: it still gets requests");
+        // The user minimizes; A's queue then holds the park and, behind it, an editor open that
+        // waits on a channel; then the user restores.
+        assert_eq!(host.editor_windows(R::Park), 2);
+        let (release_open, open_gate) = mpsc::channel::<()>();
+        *log.open_gate.lock().unwrap() = Some(open_gate);
+        let mut editor = on_a.editor().unwrap();
+        editor.open().unwrap();
+        assert_eq!(host.editor_windows(R::Unpark), 2);
+        assert!(!transit_rt::editor_window::parked());
+        // A catches up: its stale park runs, then it is held in the open, before its unpark.
+        drop(release_a);
+        assert!(until(|| log.thread_of("editor_open").is_some()), "A ran its stale park and is in the open");
+        assert!(!transit_rt::editor_window::parked(), "the stale park did not undo the restore");
+        assert!(transit_rt::editor_window::follows());
+        // An editor opening on B now is shown.
+        let made = Arc::new(AtomicUsize::new(0));
+        let m = Arc::clone(&made);
+        let mut on_b = host.submit(move |ctx| ctx.adopt(Box::new(Windowed(m)))).wait(Duration::from_secs(10)).unwrap();
+        let mut b_editor = on_b.editor().unwrap();
+        b_editor.open().unwrap();
+        assert!(until(|| b_editor.window_state() == Some(S::Shown)), "shown, not parked: {:?}", b_editor.window_state());
+        drop(release_open);
+        assert!(slow.wait(Duration::from_secs(10)).is_some());
+        b_editor.close();
+        host.editor_windows(R::Follow(false));
+        drop((editor, b_editor, on_a, on_b));
+        assert!(host.shutdown(Duration::from_secs(10)));
     }
 
     #[test]

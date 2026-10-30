@@ -41,6 +41,8 @@ opening a second one. To keep each plug-in window apart, with its own taskbar bu
 **Window > Plug-in Windows Follow transit**; the choice is saved per machine. A plug-in that stops
 responding does not hold transit up: its window simply stops following until it answers again.
 Windows a plug-in opens by itself (its own preset browser or a licensing dialog) are not grouped.
+Returning to transit by clicking a plug-in window brings up only that window; the main window and
+the other plug-in windows come up on your next click on the main window.
 
 ## FX channels and sends
 
