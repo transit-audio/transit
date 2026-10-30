@@ -624,7 +624,7 @@ pub use session::{
 pub(crate) use session::{DecodedFiles, decode_file_streamed, file_key, open_session_linked};
 
 mod disk;
-pub use disk::add_disk_source;
+pub use disk::{add_disk_source, copy_path};
 mod recording;
 pub use recording::{Recording, Take, add_recording, add_recording_take, live_span, place_recording, place_recording_take, plan_takes};
 

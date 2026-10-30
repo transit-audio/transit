@@ -63,11 +63,25 @@ pub fn export(e: &Engine, ids: &[ClipId], path: &str) -> Result<usize> {
                 && let std::collections::btree_map::Entry::Vacant(slot) = audio.entry(source.0)
                 && let (Some(buf), Some(src)) = (s.pool.get(source), s.sources.iter().find(|x| x.id == source))
             {
-                let rel = format!("{audio_dir_name}/{}_{}.wav", crate::io::sanitize_name(&src.name), source.0);
                 crate::io::make_dir(dir.join(&audio_dir_name))?;
-                let opts = EncodeOptions { format: FileFormat::Wav, bit_depth: transit_audio_io::BitDepth::Float32, dither: false, bwf: None };
-                let bytes = transit_audio_io::encode(&buf.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
-                crate::io::write_path(dir.join(&rel), bytes)?;
+                let name = format!("{audio_dir_name}/{}_{}", crate::io::sanitize_name(&src.name), source.0);
+                let rel = match &buf.disk {
+                    // A disk-backed source's file is its audio (ADR 0035): copied as it is.
+                    Some(d) => {
+                        let ext = d.path().extension().and_then(|x| x.to_str()).unwrap_or("wav");
+                        let rel = format!("{name}.{ext}");
+                        crate::io::copy_path(d.path(), dir.join(&rel))?;
+                        rel
+                    }
+                    None => {
+                        let rel = format!("{name}.wav");
+                        let opts =
+                            EncodeOptions { format: FileFormat::Wav, bit_depth: transit_audio_io::BitDepth::Float32, dither: false, bwf: None };
+                        let bytes = transit_audio_io::encode(&buf.buffer, &opts).map_err(|err| EngineError::Io(err.to_string()))?;
+                        crate::io::write_path(dir.join(&rel), bytes)?;
+                        rel
+                    }
+                };
                 slot.insert(rel);
             }
             lane.push(c);

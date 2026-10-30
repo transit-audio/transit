@@ -156,27 +156,31 @@ pub fn render_stretched(s: &mut Session, cmd: &str, c: &Clip, out_len: Samples) 
     }
     let a = usize::try_from(offset.max(0)).unwrap_or(0);
     let n = src_len as usize;
-    let ch: Vec<Vec<f32>> = audio
-        .buffer
-        .channels
-        .iter()
-        .map(|x| {
-            if c.looping.is_some() {
-                // A looped clip plays its cycles: read the file the way playback does (ADR 0019).
-                return (0..n)
-                    .map(|i| {
-                        // Clip time wraps in the loop; the file is read at 1 / stretch, as playback does.
-                        let rel = c.content_pos((i as f64 * stretch).round() as Samples);
-                        let at = offset.saturating_add((rel as f64 / stretch).round() as Samples);
-                        usize::try_from(at).ok().and_then(|at| x.get(at)).copied().unwrap_or(0.0)
-                    })
-                    .collect();
-            }
-            let mut v: Vec<f32> = x.iter().skip(a).take(n).copied().collect();
-            v.resize(n, 0.0);
-            v
-        })
-        .collect();
+    let channels = audio.buffer.channels.len();
+    // Channel `ch`'s samples as the clip plays them, read through `get(ch, frame)`.
+    let read = |get: &mut dyn FnMut(usize, usize) -> Option<f32>| -> Vec<Vec<f32>> {
+        (0..channels)
+            .map(|ch| {
+                if c.looping.is_some() {
+                    // A looped clip plays its cycles: read the file the way playback does (ADR 0019).
+                    return (0..n)
+                        .map(|i| {
+                            // Clip time wraps in the loop; the file is read at 1 / stretch, as playback does.
+                            let rel = c.content_pos((i as f64 * stretch).round() as Samples);
+                            let at = offset.saturating_add((rel as f64 / stretch).round() as Samples);
+                            usize::try_from(at).ok().and_then(|at| get(ch, at)).unwrap_or(0.0)
+                        })
+                        .collect();
+                }
+                (0..n).map(|i| get(ch, a.saturating_add(i)).unwrap_or(0.0)).collect()
+            })
+            .collect()
+    };
+    // A disk-backed source is read from its file here, off the audio thread (ADR 0035).
+    let ch = match &audio.disk {
+        Some(d) => d.with_sync(read),
+        None => read(&mut |ch, x| audio.buffer.channels.get(ch).and_then(|v| v.get(x)).copied()),
+    };
     let sr = s.sample_rate;
     let mut out = transit_dsp::offline::time_stretch(&ch, ratio, sr.as_f64() as f32);
     let want = usize::try_from(out_len).unwrap_or(0);

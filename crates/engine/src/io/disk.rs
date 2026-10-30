@@ -62,6 +62,15 @@ pub(crate) fn open_disk_audio(path: &Path, len: u64, rate: u32) -> std::result::
     Ok(Arc::new(SourceAudio::disk(disk)))
 }
 
+/// Copy the file at `from` to `to` (a disk-backed source's audio, which is never decoded), both
+/// through the checked file access.
+pub fn copy_path(from: &Path, to: impl AsRef<Path>) -> Result<()> {
+    let to = to.as_ref();
+    crate::file_access::check_read(from).map_err(EngineError::Io)?;
+    crate::file_access::check_write(to).map_err(EngineError::Io)?;
+    std::fs::copy(from, to).map(|_| ()).map_err(|err| EngineError::Io(format!("{} to {}: {err}", from.display(), to.display())))
+}
+
 /// Register a disk-backed source's audio as a new source playing the file at `path`, as saved
 /// (never rewritten; ADR 0035).
 pub fn add_disk_source(s: &mut Session, name: &str, audio: Arc<SourceAudio>, path: &str) -> SourceId {
@@ -234,5 +243,86 @@ mod tests {
         let flac = dir.0.join("B.flac");
         std::fs::write(&flac, b"fLaC\0\0\0\0").unwrap();
         assert!(open_disk_audio(&flac, 8, 48_000).is_err());
+    }
+
+    /// A short tone in a real WAV, and two engines playing it as one clip of 24 000 frames: one
+    /// from memory, one forced disk-backed. (dir, path, memory engine, disk engine, track, clip)
+    fn pair(tag: &str) -> (TempDir, PathBuf, Engine, Engine, TrackId, transit_model::ClipId) {
+        let dir = TempDir::new(tag);
+        let path = dir.0.join("Tone_01.wav");
+        let data: Vec<f32> = (0..24_000).map(|i| (i as f32 * 0.05).sin() * 0.5).collect();
+        let mut bytes = transit_audio_io::wav_float_header(1, 48_000, data.len() as u64).unwrap();
+        bytes.extend(data.iter().flat_map(|v| v.to_le_bytes()));
+        std::fs::write(&path, &bytes).unwrap();
+        let make = |disk: bool| {
+            let mut e = Engine::default();
+            let s = e.session_mut();
+            let t = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Tone"));
+            let src = if disk {
+                let audio = open_disk_audio(&path, bytes.len() as u64, 48_000).unwrap();
+                add_disk_source(s, "Tone_01", audio, &path.to_string_lossy())
+            } else {
+                let (_, buf) = transit_audio_io::decode(&bytes, Some("wav")).unwrap();
+                crate::io::add_source(s, "Tone_01", buf, None, FileFormat::Wav)
+            };
+            let id = s.new_clip_id();
+            crate::edit::place_clip(s, t, Clip::audio(id, "Tone", src, 0, 0, 24_000));
+            (e, t, id)
+        };
+        let (m, t, id) = make(false);
+        let (d, _, _) = make(true);
+        (dir, path, m, d, t, id)
+    }
+
+    /// The audio of the clip `id` now plays (its source is in memory: a render, never empty).
+    fn rendered(e: &Engine, id: transit_model::ClipId) -> Vec<Vec<f32>> {
+        let src = e.session().find_clip(id).unwrap().1.source().unwrap();
+        let audio = e.session().pool.get(src).unwrap();
+        assert!(!audio.is_disk(), "a render is a new source in memory");
+        audio.buffer.channels.clone()
+    }
+
+    fn same_render(m: &Engine, d: &Engine, id: transit_model::ClipId, what: &str) {
+        let (a, b) = (rendered(m, id), rendered(d, id));
+        assert!(a[0].iter().any(|v| v.abs() > 0.1), "{what}: the reference is not silent");
+        assert_eq!(a, b, "{what}: read from the file, the render equals the in-memory one");
+    }
+
+    #[test]
+    fn elastic_warp_of_a_disk_backed_clip_renders_its_audio_not_silence() {
+        let (_dir, _, mut m, mut d, t, id) = pair("elastic");
+        for e in [&mut m, &mut d] {
+            e.execute("track.elastic", &serde_json::json!({"track": t.0, "algorithm": "polyphonic"})).unwrap();
+            assert_eq!(e.execute("clip.elastic_properties", &serde_json::json!({"clips": [id.0], "ratio": 1.5})).unwrap()["rendered"], 1);
+        }
+        same_render(&m, &d, id, "elastic warp");
+    }
+
+    #[test]
+    fn remove_pitch_shift_of_a_disk_backed_clip_renders_its_audio_not_silence() {
+        let (_dir, _, mut m, mut d, _, id) = pair("pitch");
+        for e in [&mut m, &mut d] {
+            e.session_mut().find_clip_mut(id).unwrap().stretch = 1.25;
+            assert_eq!(e.execute("clip.remove_pitch_shift", &serde_json::json!({"clips": [id.0]})).unwrap()["clips"], 1);
+        }
+        same_render(&m, &d, id, "remove pitch shift");
+    }
+
+    #[test]
+    fn tce_to_timeline_of_a_disk_backed_clip_renders_its_audio_not_silence() {
+        let (_dir, _, mut m, mut d, _, id) = pair("tce");
+        for e in [&mut m, &mut d] {
+            e.execute("edit.tce_to_timeline", &serde_json::json!({"clips": [id.0], "start": 1_000, "end": 31_000})).unwrap();
+        }
+        same_render(&m, &d, id, "TCE to timeline");
+    }
+
+    #[test]
+    fn a_clip_group_export_of_a_disk_backed_clip_carries_its_file() {
+        let (dir, path, _, mut d, _, id) = pair("group");
+        let group = dir.0.join("g.scgrp").to_string_lossy().into_owned();
+        d.execute("file.export_clip_groups", &serde_json::json!({"path": group, "clips": [id.0]})).unwrap();
+        let copied = dir.0.join("g Audio").join(format!("Tone_01_{}.wav", d.session().sources[0].id.0));
+        assert_eq!(std::fs::read(&copied).unwrap(), std::fs::read(&path).unwrap(), "the take's file, not an empty WAV");
     }
 }
