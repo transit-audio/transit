@@ -121,3 +121,51 @@ fn every_model_sounds() {
         }
     }
 }
+
+/// Inputs the C++ would index a table with out of bounds are refused before the call (FFI invariant
+/// 4): macros outside 0 to 1, a tonic, note or FM outside their ranges, NaN or infinite values, and a
+/// chord outside the table. The sweep's own extremes are accepted.
+#[test]
+fn out_of_range_inputs_are_refused_before_the_cxx() {
+    use transit_macro_osc_oracle::Error;
+    use transit_macro_osc_oracle::resonator::{FM_RANGE, NOTE_RANGE, TONIC_RANGE};
+    let session = Session::lock();
+    let mut part = session.resonator().unwrap();
+    let ok_patch = ResonatorPatch { structure: 0.5, brightness: 0.5, damping: 0.5, position: 0.5 };
+    let ok = PerformanceState { tonic: 36.0, note: 24.0, ..PerformanceState::default() };
+    let input = [0.0_f32; RESONATOR_BLOCK_SIZE];
+    let (mut out, mut aux) = ([0.0_f32; RESONATOR_BLOCK_SIZE], [0.0_f32; RESONATOR_BLOCK_SIZE]);
+    let mut run = |p: &PerformanceState, m: &ResonatorPatch| part.process(p, m, &input, &mut out, &mut aux);
+
+    assert_eq!(run(&ok, &ok_patch), Ok(()));
+    let edges = PerformanceState { tonic: *TONIC_RANGE.end(), note: *NOTE_RANGE.end(), fm: *FM_RANGE.end(), chord: 10, ..ok };
+    assert_eq!(run(&edges, &ResonatorPatch { structure: 1.0, brightness: 1.0, damping: 1.0, position: 1.0 }), Ok(()));
+    let low = PerformanceState { tonic: *TONIC_RANGE.start(), note: *NOTE_RANGE.start(), fm: *FM_RANGE.start(), ..ok };
+    assert_eq!(run(&low, &ResonatorPatch { structure: 0.0, brightness: 0.0, damping: 0.0, position: 0.0 }), Ok(()));
+
+    let bad_performances = [
+        PerformanceState { tonic: 72.5, ..ok },
+        PerformanceState { tonic: 11.0, ..ok },
+        PerformanceState { note: 84.5, ..ok },
+        PerformanceState { note: -44.0, ..ok },
+        PerformanceState { fm: 15.5, ..ok },
+        PerformanceState { fm: -16.0, ..ok },
+        PerformanceState { note: f32::NAN, ..ok },
+        PerformanceState { tonic: f32::INFINITY, ..ok },
+        PerformanceState { fm: f32::NEG_INFINITY, ..ok },
+        PerformanceState { chord: 11, ..ok },
+        PerformanceState { chord: -1, ..ok },
+    ];
+    for p in bad_performances {
+        assert_eq!(run(&p, &ok_patch), Err(Error::BadParameter), "{p:?}");
+    }
+    let bad_patches = [
+        ResonatorPatch { structure: 1.01, ..ok_patch },
+        ResonatorPatch { brightness: -0.01, ..ok_patch },
+        ResonatorPatch { damping: f32::NAN, ..ok_patch },
+        ResonatorPatch { position: f32::INFINITY, ..ok_patch },
+    ];
+    for m in bad_patches {
+        assert_eq!(run(&ok, &m), Err(Error::BadParameter), "{m:?}");
+    }
+}

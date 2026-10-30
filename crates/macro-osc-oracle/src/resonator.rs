@@ -20,6 +20,44 @@ pub const MAX_POLYPHONY: usize = 4;
 /// The number of chords of the quantized sympathetic strings, `kNumChords`.
 pub const CHORD_COUNT: i32 = 11;
 
+/// The tonic the oracle accepts, semitones: the module's frequency knob, `12 + transpose` with
+/// `transpose` 0 to 60.
+pub const TONIC_RANGE: std::ops::RangeInclusive<f32> = 12.0..=72.0;
+
+/// The V/OCT note (over the tonic) the oracle accepts, semitones.
+pub const NOTE_RANGE: std::ops::RangeInclusive<f32> = -43.0..=84.0;
+
+/// The FM input the oracle accepts, semitones.
+pub const FM_RANGE: std::ops::RangeInclusive<f32> = -15.0..=15.0;
+
+/// Whether the C++ can take these inputs without reading past a table (invariant 4 of the FFI).
+///
+/// The part indexes `lut_pitch_ratio_high[int(semitones + 128)]` (`stmlib::SemitonesToRatio`,
+/// 256 entries) with `voice note - 69`, where a voice note is at most `tonic + note + fm + 0.15`
+/// (the note filter's output stays within the hull of its past inputs, and `set_polyphony` detunes
+/// new voices by up to 0.15) and a string adds -12 to +24 (`ComputeSympatheticStringsNotes`: the
+/// note table and the chord table), and `tonic + fm - 69` for the sympathetic tonic string. With the
+/// ranges above the worst cases are `72 + 84 + 15 + 0.15 + 24 - 69 = 126.15` and
+/// `12 - 43 - 15 - 12 - 69 = -127`, inside -128 to 127 (index 0 to 255) with a semitone of margin
+/// below for the interpolations rounding. The four macros index
+/// `lut_stiffness`, `lut_4_decades`, `lut_svf_shift` and `lut_fm_frequency_quantizer` through
+/// `Interpolate` and drive the other `SemitonesToRatio` arguments (at most 96, from damping, and 84,
+/// the strings' damping cutoff; that cutoff reaches just under 128 at damping 1 but is then read
+/// only through `Interpolate` over `lut_svf_shift`'s 257 entries); each must be within 0 to 1. Every value must be finite: a NaN
+/// reaching a float-to-int cast is undefined behavior in C++. The chord must index the chord table.
+#[must_use]
+pub fn inputs_in_range(performance: &PerformanceState, patch: &ResonatorPatch) -> bool {
+    let unit = |x: f32| (0.0..=1.0).contains(&x);
+    TONIC_RANGE.contains(&performance.tonic)
+        && NOTE_RANGE.contains(&performance.note)
+        && FM_RANGE.contains(&performance.fm)
+        && (0..CHORD_COUNT).contains(&performance.chord)
+        && unit(patch.structure)
+        && unit(patch.brightness)
+        && unit(patch.damping)
+        && unit(patch.position)
+}
+
 /// One resonator model, in the firmware's order (`ResonatorModel` in `rings/dsp/part.h`). Names
 /// describe what each model does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -87,7 +125,7 @@ pub struct ResonatorPatch {
 }
 
 impl ResonatorPatch {
-    fn to_c(self) -> CResonatorPatch {
+    pub(crate) fn to_c(self) -> CResonatorPatch {
         CResonatorPatch { structure: self.structure, brightness: self.brightness, damping: self.damping, position: self.position }
     }
 }
@@ -115,7 +153,7 @@ pub struct PerformanceState {
 }
 
 impl PerformanceState {
-    fn to_c(self) -> CPerformanceState {
+    pub(crate) fn to_c(self) -> CPerformanceState {
         CPerformanceState {
             tonic: self.tonic,
             note: self.note,
@@ -164,7 +202,10 @@ impl ResonatorOracle<'_> {
     /// # Errors
     ///
     /// [`Error::BadBlock`] when the block is empty or too long or the lengths differ;
-    /// [`Error::BadParameter`] when the chord is outside the chord table.
+    /// [`Error::BadParameter`] when an input is outside what the C++ can take without reading past
+    /// a table ([`inputs_in_range`]: a macro outside 0 to 1, a tonic, note or FM outside
+    /// [`TONIC_RANGE`], [`NOTE_RANGE`] or [`FM_RANGE`], anything not finite, a chord outside the
+    /// table).
     pub fn process(
         &mut self,
         performance: &PerformanceState,
@@ -177,10 +218,10 @@ impl ResonatorOracle<'_> {
         if n == 0 || n > RESONATOR_BLOCK_SIZE || out.len() != n || aux.len() != n {
             return Err(Error::BadBlock);
         }
-        if !(0..CHORD_COUNT).contains(&performance.chord) {
+        if !inputs_in_range(performance, patch) {
             return Err(Error::BadParameter);
         }
-        self.raw.process(&performance.to_c(), &patch.to_c(), input, out, aux).ok_or(Error::BadBlock)
+        self.raw.process(performance, patch, input, out, aux).ok_or(Error::BadBlock)
     }
 }
 

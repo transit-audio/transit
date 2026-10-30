@@ -12,6 +12,9 @@
 //!    returned by the matching `_new` function and free it exactly once, in `Drop`.
 //! 3. **Buffer bounds.** Every render checks the length is between 1 and the firmware's maximum block
 //!    size before the call, and passes buffers whose lengths match the size it passes.
+//! 4. **Table bounds.** Inputs the C++ indexes tables with are range-checked here before the call:
+//!    the resonator's tonic, note, FM, chord and macros (`crate::resonator::inputs_in_range`, which
+//!    derives its bounds from the C++), so no input from safe Rust can make it read past a table.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -343,11 +346,11 @@ impl<'s> RawResonator<'s> {
     }
 
     /// Processes `input.len()` frames into `out` and `aux`. `None` when the lengths differ, are zero
-    /// or exceed the maximum block size, or the chord is outside the chord table.
+    /// or exceed the maximum block size, or an input is out of range (invariant 4).
     pub(crate) fn process(
         &mut self,
-        performance: &CPerformanceState,
-        patch: &CResonatorPatch,
+        performance: &crate::resonator::PerformanceState,
+        patch: &crate::resonator::ResonatorPatch,
         input: &[f32],
         out: &mut [f32],
         aux: &mut [f32],
@@ -356,15 +359,20 @@ impl<'s> RawResonator<'s> {
         if out.len() != size || aux.len() != size || size == 0 || size > self.session.resonator_max_block_size() {
             return None;
         }
+        if !crate::resonator::inputs_in_range(performance, patch) {
+            return None;
+        }
+        let (performance, patch) = (performance.to_c(), patch.to_c());
         // SAFETY: the lock is held through `self.session` (invariant 1); `self.ptr` is a live part
         // (invariant 2) used by this thread only; `performance` and `patch` are valid for reads;
         // `input`, `out` and `aux` each hold exactly `size <= kMaxBlockSize` floats (invariant 3),
-        // and `input` does not alias the outputs (they are distinct borrows).
+        // and `input` does not alias the outputs (they are distinct borrows); every value the C++
+        // indexes a table with was range-checked just above (invariant 4).
         let status = unsafe {
             oracle_resonator_process(
                 self.ptr.as_ptr(),
-                std::ptr::from_ref(performance),
-                std::ptr::from_ref(patch),
+                std::ptr::from_ref(&performance),
+                std::ptr::from_ref(&patch),
                 input.as_ptr(),
                 out.as_mut_ptr(),
                 aux.as_mut_ptr(),
