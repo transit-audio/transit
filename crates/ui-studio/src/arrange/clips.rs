@@ -34,6 +34,14 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
             }
             let moving = preview.is_some_and(|(_, _, _, _, copy)| !copy) && carried.iter().any(|g| g.clip == c.id.0);
             let alpha = if moving { 0.35 } else { 1.0 };
+            // The fade handle dot: on the side being dragged, else where the pointer is over one.
+            let hot_fade = match &fading {
+                Some(f) if f.clip == c.id => Some(f.side),
+                _ => hover.filter(|pos| rect.contains(*pos)).and_then(|pos| {
+                    let kind = zone(r4(rect), pos, true);
+                    crate::fades::grab_at(s, map, layout, pos, kind).filter(|t| t.clip == c.id).map(|t| t.grab.side)
+                }),
+            };
             match &fading {
                 // The fade being dragged, drawn live over the waveform.
                 Some(f) if f.clip == c.id => {
@@ -43,9 +51,20 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
                         crate::fades::Side::Out => live.fade_out = f.fade,
                     }
                     draw_clip(&p, s, map, tl, t, &live, rect, sel.contains(&c.id), alpha, hot(c.id.0, rect));
+                    crate::fades::overlay(&p, layout, &live, map, rect, hot_fade);
                 }
-                _ => draw_clip(&p, s, map, tl, t, c, rect, sel.contains(&c.id), alpha, hot(c.id.0, rect)),
+                _ => {
+                    draw_clip(&p, s, map, tl, t, c, rect, sel.contains(&c.id), alpha, hot(c.id.0, rect));
+                    crate::fades::overlay(&p, layout, c, map, rect, hot_fade);
+                }
             }
+        }
+    }
+    // Crossfades drawn as an X over their overlap, on top of both clips.
+    for t in rows {
+        let Some(y0) = row_y(t.id) else { continue };
+        for o in crate::fades::crossfades(s, t.id) {
+            crate::fades::draw_cross(&p, layout, s, map, o, y0, rh);
         }
     }
     // A crossfade drag across an abutting boundary: the band it would make.
@@ -170,7 +189,7 @@ fn draw_clip(p: &egui::Painter, s: &Session, map: Map, tl: Rect, t: &Track, c: &
             }
         }
     }
-    crate::fades::draw(&p, c, map, rect, body, ink, selected);
+    crate::fades::draw(&p, c, map, rect, body, ink, body_col.gamma_multiply(alpha), selected);
     let stroke = if selected { Stroke::new(2.0, TOKENS.selection_outline) } else { Stroke::new(1.0, theme::darken(base, 0.45)) };
     p.rect_stroke(rect, crate::theme::RADIUS, stroke, StrokeKind::Inside);
 }

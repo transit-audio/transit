@@ -3,31 +3,62 @@ use crate::tests::*;
 // ---- #63: fade and crossfade handles ----
 
 #[test]
-fn audio_clip_corners_are_fade_handles_clear_of_trim_loop_and_move() {
+fn hit_zone_table_of_a_40_point_and_a_200_point_clip() {
     use crate::arrange::{DragKind, zone};
+    use DragKind::{FadeIn as FI, FadeOut as FO, Loop, Move, TrimEnd as TE, TrimStart as TS};
     use egui::pos2;
-    // A 200-point wide audio clip at x 100..300, y 50..110; the header strip is its top 14 points.
-    let r = [100.0, 50.0, 300.0, 110.0];
-    let (lo, hi) = (50.0 + 14.0 + 4.0, 50.0 + 14.0 + 13.0);
-    assert_eq!(zone(r, pos2(112.0, lo), true), DragKind::FadeIn, "top left corner of the body");
-    assert_eq!(zone(r, pos2(288.0, lo), true), DragKind::FadeOut, "top right corner of the body");
-    assert_eq!(zone(r, pos2(112.0, hi), true), DragKind::FadeIn);
-    assert_eq!(zone(r, pos2(112.0, 50.0 + 14.0 + 15.0), true), DragKind::Move, "below the fade zone");
-    assert_eq!(zone(r, pos2(103.0, lo), true), DragKind::TrimStart, "the trim edge wins");
-    assert_eq!(zone(r, pos2(297.0, lo), true), DragKind::TrimEnd, "the trim edge wins");
-    assert_eq!(zone(r, pos2(290.0, 55.0), true), DragKind::Loop, "the loop zone is in the header strip");
-    assert_eq!(zone(r, pos2(110.0, 55.0), true), DragKind::Move, "the header strip has no fade handle");
-    assert_eq!(zone(r, pos2(150.0, lo), true), DragKind::Move, "the rest of the body moves");
-    assert_eq!(zone(r, pos2(250.0, lo), true), DragKind::Move);
-    assert_eq!(zone(r, pos2(112.0, lo), false), DragKind::Move, "only audio clips fade");
-    // A narrow clip keeps a move area between the zones.
-    let n = [0.0, 0.0, 30.0, 60.0];
-    assert_eq!(zone(n, pos2(15.0, 20.0), true), DragKind::Move);
-    assert_eq!(zone(n, pos2(8.0, 20.0), true), DragKind::FadeIn);
-    assert_eq!(zone(n, pos2(22.0, 20.0), true), DragKind::FadeOut);
-    // Too narrow for any: the edges trim, the middle moves.
+    // The clip body starts under the 14 point header strip (y 64 for a clip at y 50), 46 points
+    // tall. Trim edges are 6 points (a quarter of a narrow clip at most); the fade corner is a
+    // triangle as tall as the body and 36 points wide, or half the room between the edges.
+    let wide = [100.0, 50.0, 300.0, 110.0];
+    let narrow = [100.0, 50.0, 140.0, 110.0];
+    let cases: &[(&str, [f32; 4], (f32, f32), DragKind)] = &[
+        // Corner points of the 200 point clip.
+        ("wide: top left of the clip", wide, (100.0, 50.0), TS),
+        ("wide: bottom left of the clip", wide, (100.0, 110.0), TS),
+        ("wide: top right of the clip", wide, (300.0, 50.0), TE),
+        ("wide: bottom right of the clip", wide, (300.0, 110.0), TE),
+        ("wide: top left of the body, inside the trim edge", wide, (107.0, 65.0), FI),
+        ("wide: top right of the body, inside the trim edge", wide, (293.0, 65.0), FO),
+        ("wide: the corner triangle's far end on the top edge", wide, (141.0, 65.0), FI),
+        ("wide: past the corner triangle on the top edge", wide, (143.0, 65.0), Move),
+        ("wide: the corner triangle's low tip on the inner edge", wide, (107.0, 105.0), FI),
+        ("wide: below the hypotenuse is the body", wide, (125.0, 100.0), Move),
+        ("wide: bottom left of the body, outside the triangle", wide, (115.0, 108.0), Move),
+        ("wide: the middle of the body", wide, (200.0, 85.0), Move),
+        ("wide: the header strip is not a fade", wide, (112.0, 57.0), Move),
+        ("wide: the loop corner is in the header strip", wide, (290.0, 57.0), Loop),
+        ("wide: trim wins over the corner", wide, (103.0, 70.0), TS),
+        ("wide: the right triangle mirrors the left", wide, (259.0, 65.0), FO),
+        ("wide: ... and past it", wide, (257.0, 65.0), Move),
+        // Corner points of the 40 point clip: the triangles are 14 wide and meet at the top.
+        ("narrow: top left of the clip", narrow, (100.0, 50.0), TS),
+        ("narrow: bottom right of the clip", narrow, (140.0, 110.0), TE),
+        ("narrow: top left of the body", narrow, (107.0, 65.0), FI),
+        ("narrow: top right of the body", narrow, (133.0, 65.0), FO),
+        ("narrow: just left of the middle on the top edge", narrow, (119.0, 64.5), FI),
+        ("narrow: just right of the middle on the top edge", narrow, (121.0, 64.5), FO),
+        ("narrow: the middle is a move zone below the triangles", narrow, (120.0, 90.0), Move),
+        ("narrow: the loop corner survives", narrow, (130.0, 57.0), Loop),
+        ("narrow: the header strip has no fade", narrow, (110.0, 57.0), Move),
+    ];
+    for (what, rect, at, want) in cases {
+        assert_eq!(zone(*rect, pos2(at.0, at.1), true), *want, "{what} at {at:?}");
+    }
+    // Only audio clips fade.
+    assert_eq!(zone(wide, pos2(107.0, 65.0), false), Move, "a MIDI clip has no fade corner");
+    // A clip too narrow for a fade target (under twice the floor plus the edges) keeps trim and move.
     let tiny = [0.0, 0.0, 12.0, 60.0];
-    assert_eq!(zone(tiny, pos2(6.0, 20.0), true), DragKind::Move);
+    assert_eq!(zone(tiny, pos2(6.0, 20.0), true), Move);
+    assert_eq!(zone(tiny, pos2(2.0, 20.0), true), TS);
+    // Narrow clips lose the middle move zone before the fade zones: shrinking a clip never
+    // shrinks a fade corner below half of what lies between its trim edges.
+    for w in [24.0_f32, 30.0, 40.0, 60.0] {
+        let r = [0.0, 0.0, w, 60.0];
+        let edge = 6.0_f32.min(w / 4.0);
+        assert_eq!(zone(r, pos2(edge + 1.0, 15.0), true), FI, "{w} wide keeps a left fade corner");
+        assert_eq!(zone(r, pos2(w - edge - 1.0, 15.0), true), FO, "{w} wide keeps a right fade corner");
+    }
 }
 
 #[test]
@@ -136,6 +167,20 @@ impl FadeRig {
         let r = self.rect(c);
         (if left { r[0] + 12.0 } else { r[2] - 12.0 }, r[1] + crate::theme::CLIP_NAME_H + 6.0)
     }
+    /// The `i`th of 25 points of the painted curve of a clip's fade on `side` ("in" or "out").
+    fn curve_point(&self, c: ClipId, side: &str, i: usize) -> (f32, f32) {
+        let p = self.app.arrange.layout.fades.iter().find(|p| p.clip == c.0 && p.kind == side).unwrap_or_else(|| panic!("no {side} fade painted"));
+        (p.curve[i][0], p.curve[i][1])
+    }
+    /// The painted fades of `kind` on the rig's clip (the demo has other fades on other tracks).
+    fn paints(&self, kind: &str) -> Vec<crate::fades::Paint> {
+        self.app.arrange.layout.fades.iter().filter(|p| p.kind == kind && (p.clip == self.clip.0 || kind == "cross")).cloned().collect()
+    }
+    fn hover(&mut self, at: (f32, f32)) {
+        let (req, _rx) = crate::ControlRequest::new("ui.move", json!({"x": at.0, "y": at.1}));
+        let _ = crate::control::handle_for_test(&mut self.app, &egui::Context::default(), &req);
+        frames(&mut self.app, &self.ctx, 4, &mut self.time);
+    }
     fn go(&mut self, from: (f32, f32), to: (f32, f32), mods: Value) {
         drag(&mut self.app, from, to, mods);
         frames(&mut self.app, &self.ctx, 20, &mut self.time);
@@ -224,21 +269,23 @@ fn a_fade_drag_that_changes_nothing_adds_no_undo_step() {
 }
 
 #[test]
-fn alt_drag_on_a_fade_bends_its_curvature_and_a_click_opens_the_shape_menu() {
+fn dragging_the_curve_line_bends_it_and_a_click_on_the_fade_opens_the_shape_menu() {
     let mut r = fade_rig();
     r.app.run("edit.fades_create", json!({"clip": r.clip.0, "side": "in", "length": r.bar, "shape": "linear"})).unwrap();
     frames(&mut r.app, &r.ctx, 4, &mut r.time);
     let r0 = r.rect(r.clip);
-    let inside = (r0[0] + r.px_bar * 0.5, r0[1] + 40.0);
+    let on_curve = r.curve_point(r.clip, "in", 12);
     let before = undo_len(&mut r.app);
-    r.go(inside, (inside.0, inside.1 - 40.0), json!({"alt": true}));
+    // No modifier: up bends the fade up.
+    r.go(on_curve, (on_curve.0, on_curve.1 - 40.0), json!({}));
     let c = r.clip(r.clip);
     assert!(c.fade_in.curvature > 0.2, "dragged up: {}", c.fade_in.curvature);
     assert_eq!(c.fade_in.len, r.bar, "the length is untouched");
     assert_eq!(c.fade_in.shape, transit_model::FadeShape::Linear);
     assert_eq!(c.start, 0, "the clip did not move");
     assert_eq!(undo_len(&mut r.app), before + 1, "one undo step");
-    // A click on the fade opens the five shapes; picking S-Curve switches it.
+    // A click on the fade's area, off the curve, opens the five shapes; picking S-Curve switches it.
+    let inside = (r0[0] + r.px_bar * 0.5, r0[1] + crate::theme::CLIP_NAME_H + 6.0);
     r.click(inside, 1);
     for shape in transit_model::FadeShape::ALL {
         assert!(r.app.arrange.menu.iter().any(|m| m.label == shape.label()), "{shape:?} in the menu");
@@ -356,4 +403,155 @@ fn dragging_a_fade_to_nothing_removes_it_and_keeps_the_other_side() {
     assert_eq!(undo_len(&mut r.app), before + 1, "one undo step");
     r.app.run("edit.undo", json!({})).unwrap();
     assert_eq!(r.clip(r.clip).fade_in.len, r.bar);
+}
+
+// ---- #182: Logic's look and feel ----
+
+#[test]
+fn a_fade_is_painted_as_a_dimmed_area_with_its_curve_and_the_hover_shows_the_handle_dot() {
+    let mut r = fade_rig();
+    r.app.run("edit.fades_create", json!({"clip": r.clip.0, "side": "in", "length": r.bar, "shape": "linear"})).unwrap();
+    r.app.run("edit.fades_create", json!({"clip": r.clip.0, "side": "out", "length": r.bar / 2})).unwrap();
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    let r0 = r.rect(r.clip);
+    let fi = r.paints("in");
+    assert_eq!(fi.len(), 1);
+    let (a, curve) = (fi[0].area, &fi[0].curve);
+    assert!((a[0] - r0[0]).abs() < 0.01 && (a[2] - a[0] - r.px_bar).abs() < 1.0, "the area is the fade's extent: {a:?}");
+    assert!(fi[0].dim > 0.0 && fi[0].dim < 1.0, "the waveform is dimmed, not hidden: {}", fi[0].dim);
+    assert_eq!(curve.len(), 25);
+    assert!((curve[0][1] - a[3]).abs() < 0.01, "a fade-in starts at silence (the bottom)");
+    assert!((curve[24][1] - a[1]).abs() < 0.01, "and ends at unity (the top)");
+    let fo = r.paints("out");
+    assert!((fo[0].curve[0][1] - fo[0].area[1]).abs() < 0.01, "a fade-out starts at unity");
+    assert!((fo[0].area[2] - r0[2]).abs() < 0.01, "and runs to the clip end");
+    assert!(fi[0].dot.is_none() && fo[0].dot.is_none(), "no dot without the pointer");
+    // Over the fade-in's area: the dot sits at the fade end on the clip top edge.
+    r.hover((r0[0] + r.px_bar * 0.5, r0[1] + crate::theme::CLIP_NAME_H + 6.0));
+    let fi = r.paints("in");
+    let dot = fi[0].dot.expect("a dot on the hovered fade");
+    assert!((dot[0] - (r0[0] + r.px_bar)).abs() < 1.0 && (dot[1] - fi[0].area[1]).abs() < 0.01, "{dot:?}");
+    assert!(r.paints("out")[0].dot.is_none(), "only the hovered fade");
+    // Over the empty corner of a clip with no fade there: a dot at the clip corner.
+    r.app.run("edit.fades_delete", json!({"tracks": [r.t.0], "start": 0, "end": 5 * r.bar})).unwrap();
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    r.hover((r0[0] + 12.0, r0[1] + crate::theme::CLIP_NAME_H + 6.0));
+    let h = r.paints("handle");
+    assert_eq!(h.len(), 1);
+    assert!((h[0].dot.unwrap()[0] - r0[0]).abs() < 0.01);
+    // Away from the clip: no dot.
+    r.hover((r0[0] + 3.0 * r.px_bar, r0[3] + 200.0));
+    assert!(r.paints("handle").is_empty() && r.paints("in").is_empty());
+}
+
+#[test]
+fn bending_by_the_curve_line_is_monotonic_within_range_and_alt_halves_the_step() {
+    let mut r = fade_rig();
+    r.app.run("edit.fades_create", json!({"clip": r.clip.0, "side": "in", "length": r.bar, "shape": "linear"})).unwrap();
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    let on = r.curve_point(r.clip, "in", 12);
+    let mut last = 0.0f32;
+    let mut seen = Vec::new();
+    for up in [8.0f32, 12.0, 20.0, 40.0, 80.0, 400.0] {
+        r.go(on, (on.0, on.1 - up), json!({}));
+        let k = r.clip(r.clip).fade_in.curvature;
+        assert!((-1.0..=1.0).contains(&k), "within the documented -1..1: {k}");
+        assert!(k >= last, "monotonic: {k} after {last} at {up} up");
+        last = k;
+        seen.push(k);
+        r.app.run("edit.undo", json!({})).unwrap();
+        frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    }
+    assert_eq!(seen[5], 1.0, "clamped at the top of the range");
+    assert!(seen[0] > 0.0, "even a small drag bends");
+    // Down bends the other way, and the range is symmetric.
+    r.go(on, (on.0, on.1 + 400.0), json!({}));
+    assert_eq!(r.clip(r.clip).fade_in.curvature, -1.0);
+    r.app.run("edit.undo", json!({})).unwrap();
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    // Alt is fine adjust: half the step for the same travel.
+    r.go(on, (on.0, on.1 - 40.0), json!({}));
+    let full = r.clip(r.clip).fade_in.curvature;
+    r.app.run("edit.undo", json!({})).unwrap();
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    r.go(on, (on.0, on.1 - 40.0), json!({"alt": true}));
+    let fine = r.clip(r.clip).fade_in.curvature;
+    assert!((fine - full / 2.0).abs() < 0.02, "Alt halves the step: {fine} vs {full}");
+    assert_eq!(r.clip(r.clip).start, 0, "Alt on a fade does not move the clip");
+    assert_eq!(r.app.engine.session().track(r.t).unwrap().clips().len(), 1, "and does not copy it");
+}
+
+#[test]
+fn dragging_a_fade_handle_past_the_clip_edge_into_an_overlapping_neighbor_makes_the_menus_crossfade() {
+    // B starts a bar before A ends. B's fade-in handle pulled back past B's start crosses into A.
+    let make = || {
+        let mut r = fade_rig();
+        let b = r.add_copy(3 * r.bar);
+        (r, b)
+    };
+    let (mut r, b) = make();
+    let rb = r.rect(b);
+    let h = r.handle(b, true);
+    let before = undo_len(&mut r.app);
+    r.go(h, (rb[0] - 10.0, h.1), json!({}));
+    let (a_out, b_in) = (r.clip(r.clip).fade_out, r.clip(b).fade_in);
+    assert_eq!(a_out.len, r.bar, "the whole overlap");
+    assert_eq!(b_in.len, r.bar);
+    assert_eq!((a_out.shape, b_in.shape), (transit_model::FadeShape::EqualPower, transit_model::FadeShape::EqualPower));
+    assert_eq!(undo_len(&mut r.app), before + 1, "one undo step");
+    // The same state as the context menu's Crossfade.
+    let (mut m, mb) = make();
+    let rmb = m.rect(mb);
+    m.right_click((rmb[0] + 3.0, rmb[1] + 8.0));
+    let pick = m.item("Crossfade");
+    m.click(pick, 1);
+    assert_eq!((m.clip(m.clip).fade_out, m.clip(mb).fade_in), (a_out, b_in), "drag and menu agree");
+    // One undo takes it back.
+    r.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!((r.clip(r.clip).fade_out.len, r.clip(b).fade_in.len), (0, 0));
+    // The crossfade is drawn as an X over the overlap.
+    r.app.run("edit.redo", json!({})).unwrap();
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    let x = r.paints("cross");
+    assert_eq!(x.len(), 1);
+    let ra = r.rect(r.clip);
+    assert!((x[0].area[0] - rb[0]).abs() < 1.0 && (x[0].area[2] - ra[2]).abs() < 1.0, "over the overlap: {:?}", x[0].area);
+    assert!(x[0].curve[0][1] < x[0].curve[24][1], "the outgoing curve falls");
+    assert!(x[0].curve2[0][1] > x[0].curve2[24][1], "the incoming curve rises");
+}
+
+#[test]
+fn dragging_a_fade_out_handle_past_the_end_into_an_abutting_neighbor_is_one_undo_step() {
+    let mut r = fade_rig();
+    let b = r.add_copy(4 * r.bar);
+    let ra = r.rect(r.clip);
+    let h = r.handle(r.clip, false);
+    let before = undo_len(&mut r.app);
+    r.go(h, (ra[2] + r.px_bar / 2.0, h.1), json!({}));
+    assert!(r.clip(r.clip).fade_out.len > 0 && r.clip(b).fade_in.len > 0, "both clips fade");
+    assert_eq!(undo_len(&mut r.app), before + 1);
+    r.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!((r.clip(r.clip).fade_out.len, r.clip(b).fade_in.len), (0, 0));
+}
+
+#[test]
+fn the_two_ends_of_a_crossfade_drag_independently_once_their_lengths_differ() {
+    let mut r = fade_rig();
+    let b = r.add_copy(3 * r.bar);
+    r.app.run("edit.fades_create", json!({"clip": r.clip.0, "side": "out", "length": r.bar / 2})).unwrap();
+    r.app.run("edit.fades_create", json!({"clip": b.0, "side": "in", "length": r.bar})).unwrap();
+    frames(&mut r.app, &r.ctx, 4, &mut r.time);
+    let (ra, rb) = (r.rect(r.clip), r.rect(b));
+    let top = rb[1] + crate::theme::CLIP_NAME_H + 2.5;
+    let tol = r.bar / 30;
+    let near = move |got: i64, want: i64| (got - want).abs() < tol;
+    // B's end of the X: its fade-in handle, a bar in, dragged to a quarter (Shift: no snap).
+    r.go((rb[0] + 24.0, top), (rb[0] + r.px_bar / 4.0, top), json!({"shift": true}));
+    assert!(near(r.clip(b).fade_in.len, r.bar / 4), "{}", r.clip(b).fade_in.len);
+    assert_eq!(r.clip(r.clip).fade_out.len, r.bar / 2, "A's end stayed");
+    // A's end: its fade-out area reaches under B; press where B has no fade, near the top.
+    r.go((rb[0] + 48.0, top), (ra[2] - 20.0, top), json!({"shift": true}));
+    assert!(near(r.clip(r.clip).fade_out.len, (20.0 * r.bar as f64 / f64::from(r.px_bar)) as i64), "{}", r.clip(r.clip).fade_out.len);
+    assert!(near(r.clip(b).fade_in.len, r.bar / 4), "B's end stayed: {}", r.clip(b).fade_in.len);
+    assert_eq!(r.clip(b).start, 3 * r.bar, "nothing moved");
 }

@@ -19,16 +19,12 @@ use transit_model::{Clip, ClipContent, ClipId, ClipLoop, Session, Track, TrackId
 use transit_time::{BarBeat, Samples};
 
 /// How close (points) to a clip edge a press trims instead of moving.
-const EDGE: f32 = 6.0;
+pub(crate) const EDGE: f32 = 6.0;
 
 /// Opacity of a loop-drag ghost cycle and the notes drawn in it.
 pub(crate) const GHOST_ALPHA: f32 = 0.45;
 /// Width (points) of the loop handle's hot zone, measured back from a clip's right edge.
 const LOOP_ZONE_W: f32 = 20.0;
-/// Audio clips: the fade handle zones are this wide (from inside the trim edge) and this tall
-/// (from under the header strip), in each top corner of the body.
-pub const FADE_ZONE_W: f32 = 18.0;
-pub const FADE_ZONE_H: f32 = 14.0;
 /// Room under the rows for the Add Track buttons: the gap, three rows of buttons, a margin.
 const ADD_STACK_H: f32 = 8.0 + 60.0 + 22.0 + 8.0;
 /// Quick-add buttons: height, the gap between them, and the reserved right-hand slot.
@@ -76,10 +72,11 @@ pub enum DragKind {
     TrimEnd,
     /// The loop handle: the upper right corner of the header strip (Logic's loop corner).
     Loop,
-    /// Audio clips: the fade handles in the top corners of the body, just under the header strip.
+    /// Audio clips: the fade corners of the body, under the header strip (`fades::corner`), and
+    /// the area of an existing fade.
     FadeIn,
     FadeOut,
-    /// Alt-drag on an existing fade: bend its curvature (decided at the press, not by position).
+    /// The curve line of an existing fade: bend its curvature (decided at the press).
     FadeCurveIn,
     FadeCurveOut,
 }
@@ -87,9 +84,10 @@ pub enum DragKind {
 /// What a press at `pos` on a clip drawn in `rect` (`[x0, y0, x1, y1]`) would do. The edges trim
 /// (`EDGE` wide, as before); the loop handle is the header strip's part of the last
 /// `LOOP_ZONE_W` points before the right-edge trim handle; on an `audio` clip the top corners of
-/// the body, under the header strip and clear of the trim edges, are the fade handles
-/// (`FADE_ZONE_W` by `FADE_ZONE_H`); everything else moves. Narrow clips shrink the edges and the
-/// loop and fade zones so the middle still moves.
+/// the body are the fade zones, whole triangles the height of the body (`fades::corner`);
+/// everything else moves. Narrow clips shrink the edges and the loop zone, and the fade zones
+/// share what is left, so the middle moves last. The area and curve of an existing fade are
+/// found by `fades::grab_at`, which needs the clip's fades.
 pub fn zone(rect: R4, pos: Pos2, audio: bool) -> DragKind {
     let w = rect[2] - rect[0];
     let edge = EDGE.min(w / 4.0);
@@ -99,24 +97,14 @@ pub fn zone(rect: R4, pos: Pos2, audio: bool) -> DragKind {
         DragKind::TrimEnd
     } else if pos.y - rect[1] <= CLIP_NAME_H && rect[2] - pos.x <= LOOP_ZONE_W.min(w / 3.0) {
         DragKind::Loop
-    } else if audio && pos.y - rect[1] > CLIP_NAME_H && pos.y - rect[1] <= CLIP_NAME_H + FADE_ZONE_H && fade_w(w, edge) > 0.0 {
-        let zw = edge + fade_w(w, edge);
-        if pos.x - rect[0] <= zw {
-            DragKind::FadeIn
-        } else if rect[2] - pos.x <= zw {
-            DragKind::FadeOut
-        } else {
-            DragKind::Move
+    } else if audio && let Some(side) = crate::fades::corner(rect, pos) {
+        match side {
+            crate::fades::Side::In => DragKind::FadeIn,
+            crate::fades::Side::Out => DragKind::FadeOut,
         }
     } else {
         DragKind::Move
     }
-}
-
-/// The width of a fade zone on a clip `w` wide with trim edges `edge`: three parts of the room
-/// between the edges, so the two zones never meet.
-fn fade_w(w: f32, edge: f32) -> f32 {
-    FADE_ZONE_W.min((w - 2.0 * edge) / 3.0).max(0.0)
 }
 
 /// The repeats a loop drag lays down: back-to-back copies of length `len` from `from` up to `to`,
@@ -236,6 +224,8 @@ pub struct Layout {
     pub drop: Option<R4>,
     /// The clips a move/copy drag in progress would land, as painted (#218).
     pub drag_ghosts: Vec<drag_ghosts::DragGhost>,
+    /// Every fade and crossfade as painted: area, curve, dimming, hover dot (#182).
+    pub fades: Vec<crate::fades::Paint>,
 }
 
 #[derive(Debug, Default)]
@@ -638,13 +628,17 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
     if let Some(pos) = resp.hover_pos()
         && app.arrange.gesture.is_none()
     {
-        match hit(layout, pos).0 {
-            Some((_, _, DragKind::TrimStart | DragKind::TrimEnd, _, _)) => ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal),
-            Some((_, _, DragKind::Loop, _, _)) => loop_cursor(ui.ctx(), pos),
-            Some((_, _, DragKind::FadeIn, _, _)) => ui.ctx().set_cursor_icon(CursorIcon::ResizeNwSe),
-            Some((_, _, DragKind::FadeOut, _, _)) => ui.ctx().set_cursor_icon(CursorIcon::ResizeNeSw),
-            Some(_) => ui.ctx().set_cursor_icon(CursorIcon::Grab),
-            None => {}
+        let over = hit(layout, pos).0;
+        // The fade cursor over a fade corner, a drawn fade or its curve (#182).
+        if let Some(t) = over.and_then(|(_, _, kind, _, _)| crate::fades::grab_at(s, map, layout, pos, kind)) {
+            ui.ctx().set_cursor_icon(t.grab.cursor());
+        } else {
+            match over {
+                Some((_, _, DragKind::TrimStart | DragKind::TrimEnd, _, _)) => ui.ctx().set_cursor_icon(CursorIcon::ResizeHorizontal),
+                Some((_, _, DragKind::Loop, _, _)) => loop_cursor(ui.ctx(), pos),
+                Some(_) => ui.ctx().set_cursor_icon(CursorIcon::Grab),
+                None => {}
+            }
         }
     }
     if app.arrange.gesture.is_none()
@@ -660,14 +654,16 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
         if !s.edit.selected_clips.contains(&clip) {
             app.click_clip(clip, false);
         }
-        // Alt on an existing fade bends it instead of copying or resizing.
-        let alt = ui.input(|i| i.modifiers.alt);
-        let kind = match crate::fades::hit(s, map, layout, press) {
-            Some((c, side)) if alt && c == clip && matches!(kind, DragKind::Move | DragKind::FadeIn | DragKind::FadeOut) => match side {
-                crate::fades::Side::In => DragKind::FadeCurveIn,
-                crate::fades::Side::Out => DragKind::FadeCurveOut,
-            },
-            _ => kind,
+        // A press on a fade corner, a drawn fade or its curve line takes the fade, whichever clip
+        // of an overlap draws it (#182); Alt only slows the drag.
+        let (clip, track, kind, start, end) = match crate::fades::grab_at(s, map, layout, press, kind) {
+            Some(t) => {
+                if !s.edit.selected_clips.contains(&t.clip) {
+                    app.click_clip(t.clip, false);
+                }
+                (t.clip, t.track, t.grab.kind(), t.start, t.end)
+            }
+            None => (clip, track, kind, start, end),
         };
         app.arrange.gesture = Some(Gesture::Clip { clip, track, kind, press, start, end });
     }
