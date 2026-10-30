@@ -8,7 +8,6 @@
 //! The firmware runs at 48 kHz in 12-frame blocks; so does this crate for now.
 
 #![forbid(unsafe_code)]
-#![allow(missing_docs)]
 
 pub mod chords;
 pub mod downsampler;
