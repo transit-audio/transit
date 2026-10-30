@@ -31,6 +31,8 @@ pub struct ScopeTap {
     write: AtomicUsize,
     /// The plug-in's gain reduction in dB as of the last block, as `f32` bits.
     gr: AtomicU32,
+    /// An instrument's voices as of the last block (`Plugin::voice_activity`).
+    voices: AtomicU32,
 }
 
 impl Default for ScopeTap {
@@ -48,6 +50,7 @@ impl ScopeTap {
             buf: (0..SCOPE_FRAMES).map(|_| AtomicU32::new(0)).collect(),
             write: AtomicUsize::new(0),
             gr: AtomicU32::new(0),
+            voices: AtomicU32::new(0),
         }
     }
 
@@ -68,6 +71,20 @@ impl ScopeTap {
     #[must_use]
     pub fn gain_reduction_db(&self) -> f32 {
         f32::from_bits(self.gr.load(Ordering::Relaxed))
+    }
+
+    /// An instrument's voices as the render last stored them (`Plugin::voice_activity`: bit `i`
+    /// sounding, bit `16 + i` held).
+    #[must_use]
+    pub fn voice_activity(&self) -> u32 {
+        self.voices.load(Ordering::Relaxed)
+    }
+
+    /// Audio thread: stores an instrument's voice activity. Does nothing while disabled.
+    pub fn push_voices(&self, activity: u32) {
+        if self.enabled() {
+            self.voices.store(activity, Ordering::Relaxed);
+        }
     }
 
     /// Audio thread: stores the peak of each of the first `frames` frames of `buf` and `gr_db`.
@@ -158,6 +175,12 @@ impl ScopeHub {
     pub fn gain_reduction_db(&self, track: TrackId, uid: u64) -> f32 {
         self.get(track, uid).map_or(0.0, |t| t.gain_reduction_db())
     }
+
+    /// An instrument's last reported voice activity (see [`ScopeTap::voice_activity`]); 0 with no tap.
+    #[must_use]
+    pub fn voice_activity(&self, track: TrackId, uid: u64) -> u32 {
+        self.get(track, uid).map_or(0, |t| t.voice_activity())
+    }
 }
 
 #[cfg(test)]
@@ -180,6 +203,16 @@ mod tests {
         assert_eq!(t.read(&mut out), 8);
         assert!(out.iter().all(|x| (*x - 0.5).abs() < 1e-6));
         assert!((t.gain_reduction_db() - 3.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn voice_activity_is_stored_only_while_enabled() {
+        let t = ScopeTap::new();
+        t.push_voices(0b101);
+        assert_eq!(t.voice_activity(), 0);
+        t.set_enabled(true);
+        t.push_voices(0b101 | 1 << 16);
+        assert_eq!(t.voice_activity(), 0b101 | 1 << 16);
     }
 
     #[test]

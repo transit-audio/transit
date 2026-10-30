@@ -4,6 +4,10 @@
 //! (model, tune, levels), all notes off and a reset allocate and free nothing on the audio
 //! thread, in host blocks that are not multiples of the voice's 12-frame block.
 //!
+//! With #196 the default is eight voices; a second test plays sixteen voices with chords wider
+//! than the voice count (steals of held and releasing voices), the note-to-macro mapping, the panel's
+//! voice activity tap switched on, and a plan edit down to three voices.
+//!
 //! The binary installs `transit_rt::testing::CountingAlloc` and counts the test thread only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -123,4 +127,74 @@ fn the_macro_oscillator_on_a_strip_allocates_nothing_on_the_audio_thread() {
     assert_eq!(stats, AllocStats::default(), "the Macro Oscillator's callback path");
     assert!(loudest > 0.01, "the clip played the instrument: peak {loudest}");
     assert!(after_edit > 0.01, "the edited instrument plays: peak {after_edit}");
+}
+
+#[test]
+fn sixteen_voices_with_steals_and_the_mapping_allocate_nothing() {
+    MixEngine::force_serial(true);
+    mark_audio_thread();
+    let target = RenderTarget { device: DeviceGeneration(1), sample_rate: SR, max_block: BLOCK as u32, out_channels: 0, in_channels: 0 };
+    let epoch = EngineEpoch::FIRST;
+    let mut mix = MixEngine::realtime_with_events(target, epoch, EventLimits::default());
+    let mut comp = PlanCompiler::new(target, PlanLimits::default());
+    let mut make = |spec: &InstanceSpec, _: SlotGen| transit_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
+    let mapping = [("velocity_timbre", 60.0), ("velocity_curve", 2.0), ("key_morph", -50.0), ("key_curve", 1.0), ("velocity_decay", 30.0)];
+    let (s, t) = session(&[&[("voices", 15.0), ("model", 15.0)][..], &mapping[..]].concat());
+    let mut generation = PlanGeneration::EMPTY.checked_next().unwrap();
+    let mut env = comp.compile(Arc::new(s), PlanGeneration::EMPTY, generation, &mut make).unwrap();
+    assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
+    comp.reclaim(env);
+    let hub = comp.scope_hub();
+    assert!(hub.set_enabled(t, transit_mix::INSTRUMENT_UID, true), "the instrument has a tap");
+    let binding = comp.active_bindings().into_iter().find(|b| b.1 == INSTRUMENT_SLOT).unwrap();
+    let (edited, _) = session(&[&[("voices", 2.0), ("model", 18.0), ("key_timbre", 50.0)][..], &mapping[..]].concat());
+    let next = generation.checked_next().unwrap();
+    let mut edit = comp.compile(Arc::new(edited), generation, next, &mut make).unwrap();
+    generation = next;
+
+    let ev = |at: u64, message: Message| InstrumentEvent {
+        engine: epoch,
+        target: binding,
+        due: Due::Frame(RenderFrame(at)),
+        transport: None,
+        source: Source { port: 1, channel: 0, generation: 1 },
+        message,
+        arrival: Arrival { host_ns: 0, sequence: 0 },
+    };
+    let mut out = vec![vec![0.0f32; BLOCK]; 2];
+    let mut pos = 0i64;
+    let mut loudest = 0.0f32;
+    let mut most_voices = 0u32;
+    let ((), stats) = measure(|| {
+        for round in 0..6u64 {
+            let now = mix.next_frame().0;
+            // 20 keys on 16 voices: the last four steal; half are released early (tails to steal).
+            for k in 0..20u64 {
+                let key = 36 + (k * 3 + round) as u8;
+                let at = now + 11 * k;
+                assert!(mix.queue_event(&ev(at, Message::NoteOn { key, velocity: 30 + (k * 5) as u8, id: NoteId::NONE })).accepted());
+                let off = if k % 2 == 0 { at + 700 } else { at + 6000 };
+                assert!(mix.queue_event(&ev(off, Message::NoteOff { key, velocity: 0, id: NoteId::NONE })).accepted());
+            }
+            for _ in 0..30 {
+                mix.render_active(pos, BLOCK, &mut out);
+                loudest = loudest.max(peak(&out));
+                most_voices = most_voices.max((hub.voice_activity(t, transit_mix::INSTRUMENT_UID) & 0xFFFF).count_ones());
+                pos += BLOCK as i64;
+            }
+            if round == 3 {
+                assert_eq!(mix.adopt_plan(&mut edit), Adoption::Adopted);
+            }
+        }
+        mix.all_notes_off();
+        mix.render_active(pos, BLOCK, &mut out);
+        pos += BLOCK as i64;
+        mix.reset();
+        mix.render_active(pos, BLOCK, &mut out);
+    });
+    comp.reclaim(edit);
+    println!("{stats:?}; peak {loudest}; most voices sounding {most_voices}; generation {generation:?}");
+    assert_eq!(stats, AllocStats::default(), "sixteen voices on the callback path");
+    assert!(loudest > 0.01, "the voices play: peak {loudest}");
+    assert_eq!(most_voices, 16, "every voice sounded at once, read through the tap");
 }
