@@ -70,14 +70,36 @@ fn sending_a_strip_away_keeps_its_routing_state_and_identity_in_the_table() {
     assert!(cell.sink_routes.is_empty() && cell.buf.is_empty());
 }
 
-/// Test hook: the strip index whose every worker render sleeps past the deadline and then
-/// panics (a runner fault that is also a late result). `usize::MAX`: none.
+/// Test hook: the strip index whose every worker render panics (a runner fault). `usize::MAX`:
+/// none. While [`LATE_HOLD`] is set the render first waits for its release, so the panic comes
+/// after the block's deadline by construction (a late result that is also a runner fault), not
+/// after a sleep a stalled callback can outlast (E49, #226).
 pub(crate) static LATE_PANIC: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(usize::MAX);
+/// Holds the [`LATE_PANIC`] strip's worker before its panic until the test clears it.
+pub(crate) static LATE_HOLD: AtomicBool = AtomicBool::new(false);
+/// Set by the worker once it waits on [`LATE_HOLD`]: the completion signal the test waits on.
+pub(crate) static LATE_ENTERED: AtomicBool = AtomicBool::new(false);
 
 pub(crate) fn late_panic(strip: usize) {
     if LATE_PANIC.load(Ordering::Relaxed) == strip {
-        std::thread::sleep(Duration::from_millis(20));
+        // Bounded (60 s of polls): a test that failed before releasing it cannot keep the worker.
+        let mut polls = 0u32;
+        while LATE_HOLD.load(Ordering::Acquire) && polls < 60_000 {
+            LATE_ENTERED.store(true, Ordering::Release);
+            polls += 1;
+            // timing: sleep-ok paces a wait for a release flag, measures nothing
+            std::thread::sleep(Duration::from_millis(1));
+        }
         std::panic::panic_any("injected late runner fault");
+    }
+}
+
+/// Releases a held [`LATE_PANIC`] worker when dropped, also when the test fails first.
+struct ReleaseLate;
+
+impl Drop for ReleaseLate {
+    fn drop(&mut self) {
+        LATE_HOLD.store(false, Ordering::Release);
     }
 }
 
@@ -92,7 +114,9 @@ pub(crate) fn corrupt_stamp(strip: usize, stamp: &mut Stamp) {
 }
 
 /// A late result whose runner panicked makes its strip suspect at `begin_block`; the pool keeps
-/// that same instance silent (never republished) until a plan replaces it.
+/// that same instance silent (never republished) until a plan replaces it. Late by construction:
+/// at a zero deadline nothing is admitted inline, and the worker that claims strip 0 is held
+/// inside it until the block has ended, then panics.
 #[test]
 fn a_late_runner_fault_keeps_the_same_instance_suspect() {
     let _switch = SWITCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
@@ -104,24 +128,42 @@ fn a_late_runner_fault_keeps_the_same_instance_suspect() {
     if eng.start_render_workers(16) == 0 {
         return;
     }
-    eng.set_strip_deadline(Some(Duration::from_millis(2)));
+    eng.set_strip_deadline(Some(Duration::ZERO));
     MixEngine::force_serial(false);
+    LATE_ENTERED.store(false, Ordering::Release);
+    LATE_HOLD.store(true, Ordering::Release);
     LATE_PANIC.store(0, Ordering::Relaxed);
     let eng = std::thread::spawn(move || {
+        let release = ReleaseLate;
         mark_audio_thread();
         let mut out = vec![vec![0.0f32; 512]; 2];
-        let start = Instant::now();
-        let panics = |e: &MixEngine| e.pool.as_ref().map_or(0, |p| p.set.stats().runner_panics);
+        let pool = |e: &MixEngine| {
+            (e.pool.as_ref().map_or(0, |p| p.set.stats().runner_panics), e.pool.as_ref().map_or(0, |p| p.counters.suspect.load(Ordering::Relaxed)))
+        };
         let mut b = 0i64;
-        while panics(&eng) == 0 && start.elapsed() < Duration::from_secs(10) {
+        let start = Instant::now();
+        // Renders until a worker waits inside strip 0: that block ended with strip 0 late.
+        while !LATE_ENTERED.load(Ordering::Acquire) {
+            assert!(start.elapsed() < Duration::from_secs(10), "no worker claimed strip 0 in {b} blocks");
             eng.render_active(b * 512, 512, &mut out);
             b += 1;
+        }
+        assert_eq!(pool(&eng).0, 0, "strip 0 is held, not yet panicked");
+        // Released: the worker panics on the late strip. Every block from here waits for every
+        // published strip (a far deadline), so only the suspect rule can keep strip 0 out.
+        drop(release);
+        eng.set_strip_deadline(Some(Duration::from_secs(60)));
+        let start = Instant::now();
+        // Renders until the late result is home and its instance refused as suspect.
+        while pool(&eng).1 == 0 {
+            assert!(start.elapsed() < Duration::from_secs(10), "the late fault never came home: {:?}", pool(&eng));
+            eng.render_active(b * 512, 512, &mut out);
+            b += 1;
+            // timing: sleep-ok paces blocks while the released worker unwinds; measures nothing
             std::thread::sleep(Duration::from_millis(1));
         }
-        // timing: sleep-ok paces the blocks so the late result is retired, not a measurement
         for k in 0..60 {
             eng.render_active((b + k) * 512, 512, &mut out);
-            std::thread::sleep(Duration::from_millis(1));
         }
         unmark_audio_thread();
         eng
