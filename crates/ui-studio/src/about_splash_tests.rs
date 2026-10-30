@@ -83,6 +83,12 @@ fn the_help_menu_opens_about_with_wordmark_version_and_credit() {
     assert_eq!(about["credit"], "Forked from SoundCraft by storytold, October 2026");
     assert_eq!(about["repo"], "https://github.com/transit-audio/transit");
     assert_eq!(about["licenses"], "MIT OR Apache-2.0");
+    // ADR 0033: the ported instrument's original author and the port's author, with their notices.
+    assert_eq!(about["third_party"], crate::about::THIRD_PARTY);
+    assert!(crate::about::THIRD_PARTY.contains("Émilie Gillet") && crate::about::THIRD_PARTY.contains("Oliver Rockstedt"));
+    let notices = crate::about::THIRD_PARTY_NOTICES;
+    assert!(notices.contains("Copyright (c) 2022 Oliver Rockstedt") && notices.contains("Copyright 2016 Emilie Gillet"));
+    assert!(notices.contains("Copyright 2012 Emilie Gillet"), "the stmlib notice");
     let w = rect(&about["wordmark"]);
     assert!((w[2] - w[0] - 260.0).abs() < 1.5, "260 points wide: {w:?}");
     assert!(((w[2] - w[0]) / (w[3] - w[1]) - 3.0).abs() < 0.05, "3:1, never stretched");

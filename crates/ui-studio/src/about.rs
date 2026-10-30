@@ -1,5 +1,5 @@
-//! Help > About transit: the wordmark, the version, the repository link, the fork credit to SoundCraft, the licenses and a
-//! button that copies the facts a bug report needs.
+//! Help > About transit: the wordmark, the version, the repository link, the fork credit to SoundCraft, the licenses, the
+//! third-party credits and notices (the Macro Oscillator's, ADR 0033) and a button that copies the facts a bug report needs.
 
 use crate::StudioApp;
 use crate::arrange::{R4, r4};
@@ -13,6 +13,11 @@ const CREDIT_URL: &str = "https://github.com/storytold/soundcraft";
 const REPO_LINK: &str = "github.com/transit-audio/transit";
 const REPO_URL: &str = "https://github.com/transit-audio/transit";
 const LICENSES: &str = "MIT OR Apache-2.0";
+/// The ported DSP the app ships, credited by name (ADR 0033).
+pub const THIRD_PARTY: &str =
+    "Macro Oscillator: a port of Émilie Gillet's macro oscillator firmware and stmlib (MIT), by way of Oliver Rockstedt's Rust port (MIT)";
+/// Their license notices, verbatim.
+pub const THIRD_PARTY_NOTICES: &str = include_str!("../../macro-osc/LICENSE-THIRD-PARTY");
 /// Wordmark width in points.
 const WORDMARK_W: f32 = 260.0;
 
@@ -31,6 +36,7 @@ pub struct AboutState {
     pub repo: String,
     pub credit: String,
     pub licenses: String,
+    pub third_party: String,
     pub copy: R4,
     pub close: R4,
     /// What the Copy button put on the clipboard last.
@@ -97,6 +103,14 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 s.licenses = LICENSES.to_string();
                 ui.label(egui::RichText::new(format!("Licensed {LICENSES}")).color(TOKENS.text_dim));
                 ui.label(egui::RichText::new(crate::update::PRIVACY).color(TOKENS.text_dim).size(11.0));
+                ui.add_space(SPACE / 2.0);
+                s.third_party = THIRD_PARTY.to_string();
+                ui.label(egui::RichText::new(THIRD_PARTY).color(TOKENS.text_dim).size(11.0));
+                egui::CollapsingHeader::new("Third-party notices").id_salt("about_notices").show(ui, |ui| {
+                    egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+                        ui.label(egui::RichText::new(THIRD_PARTY_NOTICES).monospace().size(10.0).color(TOKENS.text_dim));
+                    });
+                });
                 ui.add_space(SPACE);
                 ui.horizontal(|ui| {
                     let copy = ui.button("Copy version info");
