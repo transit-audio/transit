@@ -259,14 +259,24 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
     }
     s.folder = Some(dir);
     let mut notes = std::mem::take(&mut s.load_notes);
-    // Takes an older build could not place (#192) are placed now when their files are there.
+    // Takes an older build could not place (#192) are placed now when their files are there: a
+    // change to the session as saved, so it opens modified.
+    let mut as_saved = None;
     if !s.unplaced_takes.is_empty() {
+        let before = s.clone();
         notes.retain(|n| !n.starts_with(transit_model::UNPLACED_NOTE));
-        notes.extend(super::disk::place_unplaced(&mut s));
+        let (said, placed) = super::disk::place_unplaced(&mut s);
+        notes.extend(said);
         notes.extend(s.unplaced_takes.iter().map(|t| format!("{} {t}", transit_model::UNPLACED_NOTE)));
+        as_saved = placed.then_some(before);
     }
     log::info!("{}", session_open_line(path, &s, missing.len(), started.elapsed()));
     e.replace_session(s);
+    if let Some(before) = as_saved {
+        e.saved = Arc::new(before);
+        e.dirty = true;
+        e.revision = e.revision.wrapping_add(1);
+    }
     e.path = Some(path.to_string());
     for n in notes {
         e.message(n);

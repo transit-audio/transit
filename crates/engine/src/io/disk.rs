@@ -99,10 +99,11 @@ fn unplaced_file(entry: &str) -> Option<PathBuf> {
 }
 
 /// On open: place each take an older build left unplaced (#192) whose file is still there, as one
-/// disk-backed clip at the session's start, on the track whose name the file is named after
-/// (`<track>_<NN>.wav`) or else a new track. Returns what it says; the entries placed leave
-/// the list.
-pub(crate) fn place_unplaced(s: &mut Session) -> Vec<String> {
+/// disk-backed clip at the session's start on a new track named after the file (`<track>_<NN>.wav`
+/// gives `<track>`), so nothing already in the session is touched. Returns what it says and whether
+/// anything was placed; the entries placed leave the list.
+pub(crate) fn place_unplaced(s: &mut Session) -> (Vec<String>, bool) {
+    let mut placed_any = false;
     let mut said = Vec::new();
     let entries = std::mem::take(&mut s.unplaced_takes);
     for entry in entries {
@@ -123,21 +124,20 @@ pub(crate) fn place_unplaced(s: &mut Session) -> Vec<String> {
         let stem = path.file_stem().and_then(|x| x.to_str()).unwrap_or("Take").to_string();
         let track_name = stem.rsplit_once('_').map_or(stem.as_str(), |(t, _)| t);
         let format = if info.channels >= 2 { ChannelFormat::Stereo } else { ChannelFormat::Mono };
-        let tid = match s.tracks.iter().find(|t| t.kind == TrackKind::Audio && sanitize_name(&t.name) == track_name) {
-            Some(t) => t.id,
-            None => s.add_track(TrackKind::Audio, format, Some(track_name)),
-        };
+        // Never the take's own track: placing there would clear what is on it now.
+        let tid = s.add_track(TrackKind::Audio, format, Some(track_name));
         let src = add_disk_source(s, &stem, audio, &path.to_string_lossy());
         let len = i64::try_from(info.frames).unwrap_or(i64::MAX);
         let cid = s.new_clip_id();
         crate::edit::place_clip(s, tid, Clip::audio(cid, &stem, src, 0, 0, len));
         let track = s.track(tid).map_or_else(String::new, |t| t.name.clone());
         said.push(format!(
-            "the take {} is placed now, played from disk, at the start of track {track}: move it where it was recorded",
+            "the take {} is placed now, played from disk, at the start of a new track {track}: move it where it was recorded",
             path.display()
         ));
+        placed_any = true;
     }
-    said
+    (said, placed_any)
 }
 
 #[cfg(test)]
@@ -179,6 +179,16 @@ mod tests {
         let gone = dir.0.join("Gone_01.wav");
         let mut e = Engine::default();
         let vox = e.session_mut().add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Loopback"));
+        // A clip already on the track the take was recorded on.
+        let kept = crate::io::add_source(
+            e.session_mut(),
+            "Kept",
+            AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.25; 4_800]] },
+            None,
+            FileFormat::Wav,
+        );
+        let kept_clip = e.session_mut().new_clip_id();
+        crate::edit::place_clip(e.session_mut(), vox, Clip::audio(kept_clip, "Kept", kept, 0, 1_000, 4_800));
         e.session_mut().unplaced_takes =
             vec![format!("{} (6.21 h of mono at 48 kHz)", path.display()), format!("{} (6.21 h of mono at 48 kHz)", gone.display())];
         let session = dir.0.join("Old.transit").to_string_lossy().into_owned();
@@ -188,12 +198,18 @@ mod tests {
         open_session(&mut r, &session).unwrap();
         let s = r.session();
         assert_eq!(s.unplaced_takes, [format!("{} (6.21 h of mono at 48 kHz)", gone.display())], "the missing file stays listed");
-        let src = s.sources.last().unwrap();
-        assert!(src.disk && src.frames == frames && src.path == path.to_string_lossy(), "{src:?}");
-        let clips = s.track(vox).unwrap().clips();
-        assert_eq!(clips.len(), 1, "on the track the file is named after");
+        let src = s.sources.iter().find(|x| x.disk).unwrap();
+        assert!(src.frames == frames && src.path == path.to_string_lossy(), "{src:?}");
+        let old = s.track(vox).unwrap().clips();
+        assert_eq!(old.len(), 1, "the recorded-on track keeps what it had");
+        assert_eq!((old[0].id, old[0].start, old[0].length), (kept_clip, 1_000, 4_800));
+        let new = s.tracks.last().unwrap();
+        assert!(new.id != vox && new.name.starts_with("Loopback"), "{}", new.name);
+        let clips = new.clips();
+        assert_eq!(clips.len(), 1, "on a new track named after the file");
         assert_eq!((clips[0].start, clips[0].length, clips[0].source()), (0, frames as i64, Some(src.id)));
-        assert!(r.messages.iter().any(|m| m.contains("is placed now, played from disk")), "{:?}", r.messages);
+        assert!(r.messages.iter().any(|m| m.contains("is placed now, played from disk") && m.contains("a new track")), "{:?}", r.messages);
+        assert!(r.is_dirty(), "the placement is a change the next close asks to save");
         assert!(r.messages.iter().any(|m| m.contains("never placed") && m.contains("Gone_01.wav")), "{:?}", r.messages);
         assert!(!r.messages.iter().any(|m| m.contains("never placed") && m.contains("Loopback_01.wav")), "{:?}", r.messages);
     }
