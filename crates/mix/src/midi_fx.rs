@@ -213,9 +213,10 @@ impl MidiFxHost {
     pub(crate) fn begin(&mut self, plugin: &mut dyn Plugin, t: &Track, pos: Samples, transport: &Transport, frames: usize) {
         let want = t.midi_effects.get(..t.midi_effects.len().min(MAX_MIDI_EFFECTS)).unwrap_or_default();
         let same = want.len() == self.len
-            && want.iter().zip(self.stages.iter()).all(|(w, s)| {
-                s.as_ref().is_some_and(|s| s.uid == w.uid.get() && s.bypass == w.bypass && s.plugin == fnv(&w.plugin))
-            });
+            && want
+                .iter()
+                .zip(self.stages.iter())
+                .all(|(w, s)| s.as_ref().is_some_and(|s| s.uid == w.uid.get() && s.bypass == w.bypass && s.plugin == fnv(&w.plugin)));
         if !same {
             self.end_notes(plugin);
             for (i, slot) in self.stages.iter_mut().enumerate() {
@@ -233,7 +234,14 @@ impl MidiFxHost {
                         s.carry_len = 0;
                     }
                     None => {
-                        *slot = Some(Stage { uid: w.uid.get(), plugin: fnv(&w.plugin), bypass: w.bypass, fx, carry: [NO_CARRY; MIDI_FX_CARRY], carry_len: 0 });
+                        *slot = Some(Stage {
+                            uid: w.uid.get(),
+                            plugin: fnv(&w.plugin),
+                            bypass: w.bypass,
+                            fx,
+                            carry: [NO_CARRY; MIDI_FX_CARRY],
+                            carry_len: 0,
+                        });
                     }
                 }
             }
@@ -343,7 +351,8 @@ impl MidiFxHost {
                     let Some(c) = stage.carry.get(k).copied() else { break };
                     if c.due < end {
                         if let Some(slot) = self.a.get_mut(n) {
-                            *slot = TimedEvent { offset: u32::try_from(c.due.saturating_sub(self.clock)).unwrap_or(0).min(frames - 1), event: c.event };
+                            *slot =
+                                TimedEvent { offset: u32::try_from(c.due.saturating_sub(self.clock)).unwrap_or(0).min(frames - 1), event: c.event };
                             n += 1;
                         } else {
                             self.counts.overflow = self.counts.overflow.saturating_add(1);

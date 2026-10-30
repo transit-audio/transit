@@ -47,7 +47,10 @@ fn every_edit_is_one_undo_step() {
         assert_eq!(e.undo_pushes(), before + 1, "{cmd}: one undo step");
         states.push(chain(&e));
     }
-    assert_eq!(chain(&e), vec![("midi_velocity".to_string(), false, vec![("max".into(), 127.0), ("min".into(), 1.0), ("offset".into(), 0.0), ("scale".into(), 50.0)])]);
+    assert_eq!(
+        chain(&e),
+        vec![("midi_velocity".to_string(), false, vec![("max".into(), 127.0), ("min".into(), 1.0), ("offset".into(), 0.0), ("scale".into(), 50.0)])]
+    );
     for want in states.iter().rev().skip(1) {
         assert!(e.undo());
         assert_eq!(&chain(&e), want);
@@ -58,7 +61,7 @@ fn every_edit_is_one_undo_step() {
 #[test]
 fn edits_are_checked() {
     let mut e = engine();
-    refused(e.execute("mix.midi_effect", &json!({"track": "Gtr", "plugin": "midi_transpose"})), "MIDI or instrument track");
+    refused(e.execute("mix.midi_effect", &json!({"track": "Gtr", "plugin": "midi_transpose"})), "instrument track");
     refused(e.execute("mix.midi_effect", &json!({"track": "Keys", "plugin": "eq7"})), "not a MIDI effect");
     refused(e.execute("mix.midi_effect", &json!({"track": "Keys", "plugin": "midi_transpose", "params": {"cents": 1}})), "no parameter");
     for _ in 0..transit_model::MAX_MIDI_EFFECTS {
@@ -116,7 +119,14 @@ fn midi_effect_session() -> Session {
     let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Keys"));
     let mut seq = transit_midi::Sequence::default();
     for (i, pitch) in [60u8, 64, 67].into_iter().enumerate() {
-        seq.notes.push(transit_midi::Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start: i as i64 * TICKS_PER_QUARTER, length: TICKS_PER_QUARTER });
+        seq.notes.push(transit_midi::Note {
+            pitch,
+            velocity: 100,
+            release_velocity: 64,
+            channel: 0,
+            start: i as i64 * TICKS_PER_QUARTER,
+            length: TICKS_PER_QUARTER,
+        });
     }
     let cid = s.new_clip_id();
     let clip = Clip::midi(cid, "Line", 0, sr.samples(2.0), seq);

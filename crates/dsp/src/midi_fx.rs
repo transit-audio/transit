@@ -124,6 +124,9 @@ pub fn info(id: &str) -> Option<&'static PluginInfo> {
 }
 
 /// A built-in MIDI effect by value: made in place on the audio thread without allocating.
+// Boxing the large variant would allocate on the audio thread when a chain edit makes one; every
+// slot is sized for the largest effect on purpose.
+#[allow(clippy::large_enum_variant)]
 #[derive(Clone, Debug)]
 pub enum Builtin {
     Transpose(transpose::Transpose),

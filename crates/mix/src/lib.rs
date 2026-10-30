@@ -136,7 +136,6 @@ pub use events::{
 };
 pub use external::{ExternalReport, ExternalState, external_report};
 pub use external_midi::{ExternalMidi, external_midi_events};
-pub use midi_fx::{MIDI_FX_BLOCK, MIDI_FX_CARRY, MIDI_FX_NOTES, MidiFxCounts};
 #[cfg(feature = "testing")]
 pub use fingerprint::{Fnv, StripPrint};
 pub use hardware::{HardwareReport, HardwareState, hardware_report};
@@ -152,6 +151,7 @@ use midi::{
 #[cfg(test)]
 use midi::{PEDAL_SCANS, visit_clip_events};
 pub use midi::{clip_note_ons, cycle_at, loop_frame, unroll_midi_loop};
+pub use midi_fx::{MIDI_FX_BLOCK, MIDI_FX_CARRY, MIDI_FX_NOTES, MidiFxCounts};
 pub use offline::{MAX_RENDER_SAMPLES, RangeRender, render_bus, render_range, render_track_pre_fader, render_track_pre_fader_timed, source_channels};
 pub use plan::{
     Adoption, DeviceGeneration, EnvelopeState, PlanEnvelope, PlanGeneration, PlanIdentity, PlanStatus, PreparedPlan, RejectReason, Rejected,

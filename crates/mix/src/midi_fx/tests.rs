@@ -143,7 +143,8 @@ fn events_for_a_later_block_are_carried_through_the_rest_of_the_chain() {
 fn a_full_carry_delivers_releases_at_the_last_offset_and_counts() {
     let t = track(&[("midi_test_delay", &[("samples", 1000.0)])]);
     let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
-    let mut input: Vec<(u32, PluginEvent)> = (0..MIDI_FX_CARRY as i32).map(|i| (0, ev(-1, Message::Control { cc: 1, value: (i % 100) as u8 }))).collect();
+    let mut input: Vec<(u32, PluginEvent)> =
+        (0..MIDI_FX_CARRY as i32).map(|i| (0, ev(-1, Message::Control { cc: 1, value: (i % 100) as u8 }))).collect();
     input.push((1, on(1, 60, 100)));
     input.push((2, off(1, 60)));
     block(&mut host, &mut rec, &t, &input);

@@ -29,22 +29,31 @@ pub fn specs() -> Vec<CommandSpec> {
             "Add MIDI Effect",
             [],
             None,
-            "{track?, plugin: id (engine.midi_effects), at?: index (default: the end), params?: {id: value}} — a MIDI or instrument track, at most 8",
+            "{track?, plugin: id (engine.midi_effects), at?: index (default: the end), params?: {id: value}} — an instrument track, at most 8",
             has_selection,
             add
         ),
         cmd!("mix.midi_effect_remove", "Remove MIDI Effect", [], None, "{track?, index}", has_selection, remove),
         cmd!("mix.midi_effect_move", "Move MIDI Effect", [], None, "{track?, from, to}", has_selection, move_fx),
         cmd!("mix.midi_effect_bypass", "Bypass MIDI Effect", [], None, "{track?, index, value?: bool (default: toggle)}", has_selection, bypass),
-        cmd!("mix.midi_effect_param", "Set MIDI Effect Parameter", [], None, "{track?, index, param, value} (clamped into range)", has_selection, param),
+        cmd!(
+            "mix.midi_effect_param",
+            "Set MIDI Effect Parameter",
+            [],
+            None,
+            "{track?, index, param, value} (clamped into range)",
+            has_selection,
+            param
+        ),
     ]
 }
 
 fn track_of<'a>(e: &'a mut Engine, cmd: &str, p: &Value) -> Result<&'a mut Track> {
     let t = tracks_required(e, cmd, p)?.first().copied().ok_or_else(|| bad(cmd, "no track"))?;
     let tr = e.session_mut().track_mut(t).ok_or_else(|| bad(cmd, "no track"))?;
-    if !tr.kind.is_midi() {
-        return Err(bad(cmd, "MIDI effects go on a MIDI or instrument track"));
+    // The chain feeds the instrument: a MIDI track's external output (#61) does not go through it.
+    if tr.kind != transit_model::TrackKind::Instrument {
+        return Err(bad(cmd, "MIDI effects go on an instrument track"));
     }
     Ok(tr)
 }

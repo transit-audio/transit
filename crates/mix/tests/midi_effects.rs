@@ -108,7 +108,10 @@ fn events_moved_past_the_block_arrive_in_a_later_block() {
     assert!(rig.heard_by(1).is_empty());
     assert!(rig.mix.has_pending_events(), "the carried events are pending");
     rig.render(2);
-    assert_eq!(summary(&rig.heard_by(1)).into_iter().map(|(f, k, key, _)| (f - now, k, key)).collect::<Vec<_>>(), [(400, "on", 62), (500, "off", 62)]);
+    assert_eq!(
+        summary(&rig.heard_by(1)).into_iter().map(|(f, k, key, _)| (f - now, k, key)).collect::<Vec<_>>(),
+        [(400, "on", 62), (500, "off", 62)]
+    );
     assert!(!rig.mix.has_pending_events());
     assert_eq!(rig.mix.event_status().midi_fx, transit_mix::MidiFxCounts::default());
 }
@@ -148,7 +151,11 @@ fn a_chain_with_events_flowing_allocates_nothing() {
     rig.render(1);
     // The rig's own helpers allocate (the binding lookup, the recorder's list): kept outside.
     let binding = rig.binding();
-    let event = |at: u64, message: Message| transit_mix::InstrumentEvent { target: binding, due: Due::Frame(RenderFrame(at)), ..rig.event(src, Due::Next, message) };
+    let event = |at: u64, message: Message| transit_mix::InstrumentEvent {
+        target: binding,
+        due: Due::Frame(RenderFrame(at)),
+        ..rig.event(src, Due::Next, message)
+    };
     let ons: Vec<_> = (0..40u8).map(|k| event(rig.mix.next_frame().0 + u64::from(k) * 7, on(40 + k))).collect();
     let offs: Vec<_> = (0..40u8).map(|k| event(rig.mix.next_frame().0 + 2 * 256 + u64::from(k), off(40 + k))).collect();
     let late = event(rig.mix.next_frame().0 + 3 * 256, on(50));

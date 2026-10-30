@@ -59,7 +59,9 @@ impl Transpose {
     fn find(&self, ev: &PluginEvent, key: u8) -> Option<usize> {
         let ch = ev.channel & 0x0F;
         self.held.iter().position(|h| {
-            h.used && h.channel == ch && if ev.note_id != PluginEvent::NO_ID { h.voice == ev.note_id } else { h.voice == PluginEvent::NO_ID && h.key == key }
+            h.used
+                && h.channel == ch
+                && if ev.note_id != PluginEvent::NO_ID { h.voice == ev.note_id } else { h.voice == PluginEvent::NO_ID && h.key == key }
         })
     }
 
@@ -179,7 +181,21 @@ mod tests {
         t.set_param("semitones", 12.0);
         let first = run(&mut t, &[on(0, 5, 60, 100)]);
         t.set_param("semitones", -12.0);
-        let second = run(&mut t, &[TimedEvent { offset: 2, event: PluginEvent { channel: 0, note_id: 5, message: Message::PolyPressure { key: 60, value: 9, id: crate::event::NoteId::NONE } } }, off(9, 5, 60), on(10, 6, 60, 90)]);
+        let second = run(
+            &mut t,
+            &[
+                TimedEvent {
+                    offset: 2,
+                    event: PluginEvent {
+                        channel: 0,
+                        note_id: 5,
+                        message: Message::PolyPressure { key: 60, value: 9, id: crate::event::NoteId::NONE },
+                    },
+                },
+                off(9, 5, 60),
+                on(10, 6, 60, 90),
+            ],
+        );
         assert_eq!(keys(&first), vec![(0, "on", 72)]);
         assert_eq!(keys(&second), vec![(2, "pp", 72), (9, "off", 72), (10, "on", 48)]);
     }
