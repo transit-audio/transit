@@ -417,7 +417,7 @@ fn unique_folder_bus_name(s: &Session, base: &str, own: Option<transit_model::Bu
     format!("{base} {}", s.busses.len().saturating_add(3))
 }
 
-fn move_to_folder(e: &mut Engine, p: &Value) -> Result<Value> {
+pub(super) fn move_to_folder(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "track.move_to_new_folder", p)?;
     let name = str_param(p, "name").map(str::to_string);
     let s = e.session_mut();
@@ -492,7 +492,7 @@ fn root_tracks(s: &Session, tracks: Vec<TrackId>) -> Vec<TrackId> {
     tracks.iter().copied().filter(|track| !tracks.iter().any(|root| root != track && in_folder(s, *track, *root))).collect()
 }
 
-fn move_into_folder(e: &mut Engine, p: &Value) -> Result<Value> {
+pub(super) fn move_into_folder(e: &mut Engine, p: &Value) -> Result<Value> {
     let folder = track_param(e, "track.move_to_folder", p, "folder")?.ok_or_else(|| bad("track.move_to_folder", "`folder` required"))?;
     let tracks = tracks_required(e, "track.move_to_folder", p)?;
     let session = e.session_mut();
@@ -518,10 +518,12 @@ fn move_into_folder(e: &mut Engine, p: &Value) -> Result<Value> {
         }
     }
     place_under(session, folder, &tracks);
+    // A MIDI or instrument track that joins a rack becomes a member, playing every note (ADR 0034).
+    super::rack::join(session, folder, &tracks);
     Ok(json!({"folder": folder, "moved": tracks.len()}))
 }
 
-fn remove_from_folder(e: &mut Engine, p: &Value) -> Result<Value> {
+pub(super) fn remove_from_folder(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "track.remove_from_folder", p)?;
     let session = e.session_mut();
     let tracks = root_tracks(session, tracks);
@@ -531,6 +533,10 @@ fn remove_from_folder(e: &mut Engine, p: &Value) -> Result<Value> {
         let bus = folder_bus(session, folder);
         let parent = session.track(folder).and_then(|folder| folder.folder);
         let parent_bus = parent.and_then(|parent| folder_bus(session, parent));
+        // A track that leaves a rack is no longer a member (ADR 0034).
+        if let Some(rack) = session.track_mut(folder).and_then(|f| f.rack.as_mut()) {
+            rack.members.retain(|m| m.track != *track);
+        }
         if let Some(moved) = session.track_mut(*track) {
             moved.folder = parent;
             if bus.as_ref() == Some(&moved.mixer.output) {

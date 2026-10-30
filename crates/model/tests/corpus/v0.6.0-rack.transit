@@ -1,0 +1,630 @@
+{
+  "format_version": 1,
+  "name": "v0.4.1-rack",
+  "sample_rate": 48000,
+  "bit_depth": "Int24",
+  "frame_rate": "Fps30",
+  "timecode_start": 0,
+  "tempo": {
+    "tempos": [
+      {
+        "tick": 0,
+        "bpm": 120.0
+      }
+    ],
+    "meters": [
+      {
+        "tick": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "key_signatures": [],
+  "tracks": [
+    {
+      "id": 2,
+      "name": "Rack",
+      "kind": "Folder",
+      "format": "Stereo",
+      "color": [
+        86,
+        132,
+        214
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Rack",
+          "clips": [
+            {
+              "id": 5,
+              "name": "Layers",
+              "start": 0,
+              "length": 96000,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 48,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 960
+                      },
+                      {
+                        "pitch": 62,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 960,
+                        "length": 960
+                      },
+                      {
+                        "pitch": 72,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 1920,
+                        "length": 960
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": 0.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": {
+          "Bus": 1
+        },
+        "output": "Main",
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [
+        {
+          "param": {
+            "Plugin": {
+              "slot": 253,
+              "param": "macro1"
+            }
+          },
+          "points": [
+            {
+              "at": 0,
+              "value": 0.25
+            },
+            {
+              "at": 96000,
+              "value": 0.75
+            }
+          ],
+          "enabled": true
+        }
+      ],
+      "view": "volume",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false,
+      "rack": {
+        "members": [
+          {
+            "track": 3,
+            "key_zone": {
+              "low": 0,
+              "high": 64,
+              "fade_low": 0,
+              "fade_high": 60
+            },
+            "vel_zone": {
+              "low": 0,
+              "high": 127,
+              "fade_low": 0,
+              "fade_high": 127
+            }
+          },
+          {
+            "track": 4,
+            "key_zone": {
+              "low": 60,
+              "high": 127,
+              "fade_low": 64,
+              "fade_high": 127
+            },
+            "vel_zone": {
+              "low": 1,
+              "high": 127,
+              "fade_low": 1,
+              "fade_high": 100
+            }
+          }
+        ],
+        "macros": [
+          {
+            "name": "Tone",
+            "value": 0.5,
+            "mappings": [
+              {
+                "track": 3,
+                "slot": 0,
+                "param": "gain",
+                "min": 0.25,
+                "max": 0.75,
+                "curve": 0.5,
+                "range": {
+                  "lo": -96.0,
+                  "hi": 24.0,
+                  "log": false,
+                  "step": false
+                }
+              }
+            ]
+          },
+          {
+            "value": 0.0,
+            "midi": {
+              "port": "Controller",
+              "channel": 0,
+              "kind": "cc",
+              "number": 21
+            }
+          },
+          {
+            "value": 0.0
+          },
+          {
+            "value": 0.0
+          },
+          {
+            "value": 0.0
+          },
+          {
+            "value": 0.0
+          },
+          {
+            "value": 0.0
+          },
+          {
+            "value": 0.0
+          }
+        ]
+      }
+    },
+    {
+      "id": 3,
+      "name": "Low Layer",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        94,
+        170,
+        214
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Low Layer",
+          "clips": []
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": 0.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": {
+          "Bus": 1
+        },
+        "inserts": [
+          {
+            "plugin": "gain",
+            "params": {
+              "gain": 0.0
+            },
+            "bypass": false,
+            "active": true,
+            "preset": "<factory default>"
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": 2,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "subtractive_synth",
+        "params": {},
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 4,
+      "name": "High Layer",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        80,
+        190,
+        168
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "High Layer",
+          "clips": []
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": 0.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": {
+          "Bus": 1
+        },
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": 2,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "subtractive_synth",
+        "params": {},
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 6,
+      "name": "Master 1",
+      "kind": "Master",
+      "format": "Stereo",
+      "color": [
+        140,
+        140,
+        140
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Master 1",
+          "clips": []
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": 0.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "Main",
+        "output": "Main",
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "volume",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    }
+  ],
+  "sources": [],
+  "busses": [
+    {
+      "id": 1,
+      "name": "Rack Bus",
+      "format": "Stereo"
+    }
+  ],
+  "outputs": [
+    {
+      "name": "Out 1-2",
+      "first_channel": 0,
+      "format": "Stereo"
+    }
+  ],
+  "markers": [],
+  "groups": [],
+  "edit": {
+    "tool": "Smart",
+    "edit_mode": "Slip",
+    "selection": {
+      "start": 0,
+      "end": 0
+    },
+    "selected_tracks": [],
+    "selected_clips": [],
+    "selected_sources": [],
+    "playhead": 0,
+    "grid": {
+      "Note": {
+        "value": "Sixteenth",
+        "dotted": false,
+        "triplet": false
+      }
+    },
+    "nudge": {
+      "Seconds": 1.0
+    },
+    "grid_lines": true,
+    "main_counter": "MinSecs",
+    "sub_counter": "Samples",
+    "zoom": {
+      "samples_per_px": 1024.0,
+      "scroll": 0,
+      "waveform_zoom": 1.0,
+      "presets": [
+        64.0,
+        256.0,
+        1024.0,
+        4096.0,
+        16384.0
+      ]
+    },
+    "zoom_toggle": null,
+    "rulers": [
+      "bars_beats",
+      "min_secs",
+      "tempo",
+      "meter",
+      "markers"
+    ],
+    "link_timeline_edit": true,
+    "link_track_edit": false,
+    "insertion_follows_playback": false,
+    "loop_playback": false,
+    "loop_range": {
+      "start": 0,
+      "end": 0
+    },
+    "pre_post_roll": false,
+    "pre_roll": 96000,
+    "post_roll": 96000,
+    "tab_to_transient": false,
+    "automation_follows_edit": true,
+    "markers_follow_edit": false,
+    "layered_editing": false,
+    "mirrored_midi": false,
+    "click": false,
+    "countoff": false,
+    "countoff_bars": 2,
+    "midi_merge": false,
+    "record_mode": "normal",
+    "loop_record": false,
+    "quickpunch": false,
+    "scrolling": "page",
+    "solo_mode": "sip",
+    "pre_fader_metering": false,
+    "delay_compensation": true,
+    "keyboard_focus": "commands",
+    "timeline_selection": {
+      "start": 0,
+      "end": 0
+    },
+    "flags": [
+      "view.clip.gain_line",
+      "view.clip.name",
+      "view.clip.overlap_shadows",
+      "view.marker.ruler_lines",
+      "waveform.peak"
+    ],
+    "values": {}
+  },
+  "next_id": 7,
+  "comments": "",
+  "midi_originals": {}
+}

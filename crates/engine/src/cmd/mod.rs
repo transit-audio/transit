@@ -35,6 +35,7 @@ mod plugin_retry;
 mod plugin_scan;
 mod plugin_state;
 mod query;
+mod rack;
 mod realtime_render;
 pub(crate) mod sampler;
 mod setup_more;
@@ -176,6 +177,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(external_instrument::specs());
         v.extend(sampler::specs());
         v.extend(zoom_toggle::specs());
+        v.extend(rack::specs());
         v
     })
 }

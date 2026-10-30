@@ -11,7 +11,7 @@ use transit_audio_io::{AudioBuffer, FileFormat};
 use transit_engine::Engine;
 use transit_engine::model::{
     AutoParam, ChannelFormat, Clip, ClipLoop, Control, ControlTarget, Fade, FadeShape, Group, GroupId, Insert, MapMode, Mapping, MarkerKind,
-    MidiSource, Route, SendSlot, Session, SourceKind, Strip, TrackKind,
+    MACRO_SLOT, MacroMapping, MidiSource, ParamRange, Rack, RackMember, Route, SendSlot, Session, SourceKind, Strip, TrackKind, Zone, macro_param,
 };
 use transit_midi::{Note, Sequence};
 use transit_time::{SampleRate, TICKS_PER_QUARTER};
@@ -110,6 +110,74 @@ fn features_session() -> Session {
     let mut m = Mapping::new(source, ControlTarget { strip: Strip::Track(audio[0]), control: Control::Volume });
     m.mode = MapMode::Scaled;
     s.midi_mappings.set(m).unwrap();
+    add_rack(&mut s);
+    s
+}
+
+/// A rack (ADR 0034, #197): two instruments in a routing folder with its bus, overlapping key
+/// zones with fades and a velocity zone, a MIDI clip on the rack, macro 1 mapped with a range and a
+/// curve and automated, macro 2 learned to a controller.
+fn add_rack(s: &mut Session) {
+    let sr = s.sample_rate;
+    let beat = sr.samples(0.5);
+    let bus = s.add_bus("Rack Bus", ChannelFormat::Stereo);
+    let folder = s.add_track(TrackKind::Folder, ChannelFormat::Stereo, Some("Rack"));
+    let mut members = Vec::new();
+    for (name, key_zone, vel_zone) in [
+        ("Low Layer", Zone { low: 0, fade_low: 0, fade_high: 60, high: 64 }, Zone::FULL),
+        ("High Layer", Zone { low: 60, fade_low: 64, fade_high: 127, high: 127 }, Zone { low: 1, fade_low: 1, fade_high: 100, high: 127 }),
+    ] {
+        let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some(name));
+        if let Some(tr) = s.track_mut(t) {
+            tr.instrument = Some(Insert::new("subtractive_synth"));
+            tr.folder = Some(folder);
+            tr.mixer.output = Route::Bus(bus);
+        }
+        members.push(RackMember { track: t, key_zone, vel_zone });
+    }
+    let low = members[0].track;
+    let mut gain = Insert::new("gain");
+    gain.params.insert("gain".into(), 0.0);
+    if let Some(t) = s.track_mut(low) {
+        t.mixer.inserts[0] = Some(gain);
+    }
+    let mut rack = Rack { members, ..Rack::default() };
+    rack.macros[0].name = "Tone".into();
+    rack.macros[0].value = 0.5;
+    rack.macros[0].mappings.push(MacroMapping {
+        track: low,
+        slot: 0,
+        param: "gain".into(),
+        min: 0.25,
+        max: 0.75,
+        curve: 0.5,
+        range: ParamRange { lo: -96.0, hi: 24.0, log: false, step: false },
+    });
+    rack.macros[1].midi = Some(MidiSource { port: "Controller".into(), channel: Some(0), kind: SourceKind::Cc, number: 21 });
+    let mut seq = Sequence::default();
+    for (i, pitch) in [48u8, 62, 72].into_iter().enumerate() {
+        seq.notes.push(Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start: i as i64 * TICKS_PER_QUARTER, length: TICKS_PER_QUARTER });
+    }
+    let cid = s.new_clip_id();
+    let clip = Clip::midi(cid, "Layers", 0, beat * 4, seq);
+    if let Some(t) = s.track_mut(folder) {
+        t.mixer.input = Route::Bus(bus);
+        t.rack = Some(rack);
+        if let Some(p) = t.playlist_mut() {
+            p.clips.push(clip);
+        }
+        let lane = t.lane_mut(&AutoParam::Plugin { slot: MACRO_SLOT, param: macro_param(0) });
+        lane.set_point(0, 0.25);
+        lane.set_point(beat * 4, 0.75);
+    }
+}
+
+/// A session with one rack and nothing else: the corpus fixture of #197.
+fn rack_session() -> Session {
+    let mut s = Session::new("Rack", SampleRate::HZ_48000);
+    let _ = s.tempo.set_tempo(0, 120.0);
+    add_rack(&mut s);
+    s.add_track(TrackKind::Master, ChannelFormat::Stereo, Some("Master"));
     s
 }
 
@@ -118,4 +186,10 @@ fn features_session() -> Session {
 fn write_corpus_files() {
     save_corpus_file(transit_engine::demo::demo_session(), "demo");
     save_corpus_file(features_session(), "features");
+}
+
+#[test]
+#[ignore = "writes the rack fixture (#197) into crates/model/tests/corpus; run it by hand"]
+fn write_rack_fixture() {
+    save_corpus_file(rack_session(), "rack");
 }

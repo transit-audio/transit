@@ -116,3 +116,17 @@ fn a_session_with_video_opens_with_the_video_dropped_and_a_note() {
     loaded.load_notes.clear();
     assert_eq!(loaded, again);
 }
+
+#[test]
+fn the_rack_fixture_loads_its_rack() {
+    let (name, text) = corpus().into_iter().find(|(n, _)| n == "v0.6.0-rack.transit").expect("the rack fixture is in the corpus");
+    let s = Session::from_json(&text).unwrap_or_else(|e| panic!("{name} no longer loads: {e}"));
+    let racks: Vec<_> = s.tracks.iter().filter(|t| t.is_rack()).collect();
+    assert_eq!(racks.len(), 1, "{name}: one rack");
+    let rack = racks[0];
+    assert_eq!(s.rack_members(rack).count(), 2, "{name}: both members play");
+    let r = rack.rack.as_ref().unwrap();
+    assert_eq!(r.macros[0].mappings.len(), 1, "{name}: macro 1 is mapped");
+    assert!(r.macros[1].midi.is_some(), "{name}: macro 2 has a controller");
+    assert!(rack.clips().iter().any(|c| !c.is_audio()), "{name}: the rack holds a MIDI clip");
+}

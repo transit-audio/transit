@@ -23,6 +23,12 @@ track, a video clip and a `videos` entry. It pins the sanitize rule of ADR 0031 
 dropped and one note) and is loaded by its own test, so the lossless round trip skips it (`SANITIZED`
 in `tests/corpus.rs`).
 
+One more is saved ahead of its release: `v0.6.0-rack.transit` (#197, ADR 0034) holds one rack
+(a routing folder with two instrument members, key and velocity zones with fades, a MIDI clip on
+the rack, a mapped and automated macro and a learned one). It is written by `write_rack_fixture` in
+`corpus_generate.rs` from the racks branch, named for the release that ships racks, and goes
+through the same lossless round trip as the release files; its own test checks the rack loads.
+
 Files hold the session JSON only, no `Audio Files/`. Nothing here reads audio.
 
 ## Producing a release's files

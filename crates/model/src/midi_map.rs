@@ -307,6 +307,28 @@ impl MappingSet {
         self.items.retain(|m| m.target != *target);
         self.items.len() != n
     }
+
+    /// The session's mappings in force: these plus every rack macro's learned source
+    /// ([`crate::Macro::midi`], ADR 0034) as a [`Control::Macro`] mapping of the rack. A macro whose
+    /// source a stored mapping already drives is left out (the stored one wins).
+    #[must_use]
+    pub fn with_racks(&self, s: &crate::Session) -> MappingSet {
+        let mut out = self.clone();
+        for t in s.tracks.iter().filter(|t| t.is_rack()) {
+            let Some(rack) = &t.rack else { continue };
+            for (i, m) in rack.macros.iter().enumerate() {
+                let Some(source) = &m.midi else { continue };
+                let Ok(n) = u8::try_from(i) else { continue };
+                if out.items.iter().any(|x| x.source.overlaps(source)) {
+                    continue;
+                }
+                let mut mapping = Mapping::new(source.clone(), ControlTarget { strip: Strip::Track(t.id), control: Control::Macro(n) });
+                mapping.mode = MapMode::Scaled;
+                out.items.push(mapping);
+            }
+        }
+        out
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]

@@ -89,6 +89,11 @@ fn target_param(p: &Value, id: &str) -> Result<ControlTarget> {
 /// exist. (A hosted plug-in's table lives in the host registries, so the UI checks that a
 /// hosted parameter is one the picker offers: not hidden, not read-only.)
 fn check_device(e: &Engine, id: &str, target: &ControlTarget) -> Result<()> {
+    if let (Control::Macro(_), Strip::Track(t)) = (&target.control, target.strip)
+        && !e.session().track(t).is_some_and(transit_model::Track::is_rack)
+    {
+        return Err(bad(id, "a macro target must name a rack"));
+    }
     let Control::Plugin { slot, param } = &target.control else { return Ok(()) };
     let Strip::Track(t) = target.strip else { return Ok(()) };
     let track = e.session().track(t).ok_or_else(|| bad(id, format!("no track with id {}", t.0)))?;
@@ -158,6 +163,9 @@ fn map(e: &mut Engine, p: &Value) -> Result<Value> {
         m.pass_through = t.as_bool().ok_or_else(|| bad(id, "`pass_through` must be a boolean"))?;
     }
     m.validate().map_err(|why| bad(id, why))?;
+    if let Control::Macro(n) = target.control {
+        return map_macro(e, id, scope, &target, usize::from(n), m.source);
+    }
     let replaced = match scope {
         Scope::Session => store(&mut e.session_mut().midi_mappings, m.clone()),
         Scope::Profile => {
@@ -171,6 +179,34 @@ fn map(e: &mut Engine, p: &Value) -> Result<Value> {
         e.midi_profile_revision = e.midi_profile_revision.wrapping_add(1);
     }
     Ok(json!({"target": target.to_string(), "scope": scope, "replaced": replaced}))
+}
+
+/// A rack macro's source is stored on the rack (ADR 0034), so a build that predates racks still
+/// opens the file: `Session::midi_mappings` never holds a macro target. One source drives one
+/// target, so a session mapping or another macro on the same source lets go of it.
+fn map_macro(e: &mut Engine, id: &str, scope: Scope, target: &ControlTarget, n: usize, source: MidiSource) -> Result<Value> {
+    let (Scope::Session, Strip::Track(rack)) = (scope, target.strip) else {
+        return Err(bad(id, "a macro is mapped in the session only"));
+    };
+    let s = e.session_mut();
+    let stale: Vec<ControlTarget> = s.midi_mappings.iter().filter(|m| m.source.overlaps(&source)).map(|m| m.target.clone()).collect();
+    for t in &stale {
+        s.midi_mappings.remove(t);
+    }
+    for t in s.tracks.iter_mut() {
+        for m in t.rack.iter_mut().flat_map(|r| r.macros.iter_mut()) {
+            if m.midi.as_ref().is_some_and(|x| x.overlaps(&source)) {
+                m.midi = None;
+            }
+        }
+    }
+    let m = s.track_mut(rack).and_then(|t| t.rack.as_mut()).and_then(|r| r.macros.get_mut(n)).ok_or_else(|| bad(id, "a macro target must name a rack"))?;
+    m.midi = Some(source);
+    if e.learn.as_ref().is_some_and(|l| l.target == *target) {
+        e.learn = None;
+        e.midi_profile_revision = e.midi_profile_revision.wrapping_add(1);
+    }
+    Ok(json!({"target": target.to_string(), "scope": scope, "replaced": stale.len()}))
 }
 
 /// Store `m`; how many mappings it displaced.
@@ -191,6 +227,18 @@ fn unmap(e: &mut Engine, p: &Value) -> Result<Value> {
     for scope in scopes {
         let t = normalize(e, id, target.clone(), scope)?;
         let removed = match scope {
+            Scope::Session if matches!(t.control, Control::Macro(_)) => {
+                let (Strip::Track(rack), Control::Macro(n)) = (t.strip, &t.control) else { continue };
+                let m = e.session().track(rack).and_then(|r| r.rack.as_ref()).and_then(|r| r.macros.get(usize::from(*n)));
+                if m.is_some_and(|m| m.midi.is_some()) {
+                    if let Some(m) = e.session_mut().track_mut(rack).and_then(|r| r.rack.as_mut()).and_then(|r| r.macros.get_mut(usize::from(*n))) {
+                        m.midi = None;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
             Scope::Session => {
                 if e.session().midi_mappings.for_target(&t).is_none() {
                     false
@@ -230,8 +278,9 @@ fn describe(m: &Mapping, scope: Scope, overridden: bool) -> Value {
 
 fn mappings(e: &mut Engine, _: &Value) -> Result<Value> {
     let ids: Vec<_> = e.session().tracks.iter().map(|t| t.id).collect();
-    let resolved = transit_model::resolve(&ids, &e.session().midi_mappings, &e.midi_profile);
-    let session: Vec<Value> = e.session().midi_mappings.iter().map(|m| describe(m, Scope::Session, false)).collect();
+    let in_force = e.session().midi_mappings.with_racks(e.session());
+    let resolved = transit_model::resolve(&ids, &in_force, &e.midi_profile);
+    let session: Vec<Value> = in_force.iter().map(|m| describe(m, Scope::Session, false)).collect();
     let profile: Vec<Value> = e
         .midi_profile
         .iter()
