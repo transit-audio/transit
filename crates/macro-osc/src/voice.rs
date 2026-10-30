@@ -40,6 +40,8 @@ use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
 
 const MAX_TRIGGER_DELAY: usize = 8;
+/// The trigger is read 5 blocks late (`kTriggerDelay`), about 1 ms at 48 kHz in 12-frame blocks.
+const TRIGGER_DELAY: f32 = 5.0;
 pub const NUM_ENGINES: usize = 24;
 
 /// One output frame, as the firmware's DAC receives it (`Voice::Frame`).
@@ -365,7 +367,7 @@ impl Voice<'_> {
         // Delay trigger by 1ms to deal with sequencers or MIDI interfaces whose
         // CV out lags behind the GATE out.
         self.trigger_delay.write(modulations.trigger);
-        let trigger_value = self.trigger_delay.read_with_delay(MAX_TRIGGER_DELAY);
+        let trigger_value = self.trigger_delay.read_with_delay_frac(TRIGGER_DELAY);
 
         let previous_trigger_state = self.trigger_state;
 
