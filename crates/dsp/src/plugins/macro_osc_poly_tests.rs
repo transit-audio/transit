@@ -288,7 +288,12 @@ fn mapping_curves_hold_their_extremes() {
         assert_eq!(shape(c, f32::NAN), 0.0);
     }
     assert_eq!(shape(0, 0.5), 0.5);
-    assert_eq!(shape(1, 0.5), 0.125, "exponential is the cube");
+    for (c, fade) in [(0, crate::offline::FadeShape::Linear), (1, crate::offline::FadeShape::Exponential), (2, crate::offline::FadeShape::SCurve)] {
+        for t in [0.1, 0.25, 0.5, 0.9] {
+            assert_eq!(shape(c, t), fade.gain(t), "curve {c} is the clip fade's {fade:?}");
+        }
+    }
+    assert!((shape(1, 0.5) - 0.1192).abs() < 1e-4, "exponential: (e^4t - 1) / (e^4 - 1)");
     assert!((shape(2, 0.5) - 0.5).abs() < 1e-7, "the S-curve's midpoint");
     assert!(shape(2, 0.1) < 0.1 && shape(2, 0.9) > 0.9, "the S-curve is flat at both ends");
     assert_eq!(voice::key_source(60.0), 0.0);
@@ -361,4 +366,48 @@ fn each_voice_has_its_own_random_state() {
     let first = play(8, None);
     assert!(first == play(1, None), "voice 0 is seeded as a mono instance");
     assert!(first != play(1, Some(Random::DEFAULT_SEED + 1)), "voice 1's seed plays other noise");
+}
+
+/// Every model's released voice goes idle within `tail_samples` (decay and color at their slowest),
+/// so "a free voice costs nothing" holds for all 24: none keeps rendering forever.
+#[test]
+fn every_model_releases_to_an_idle_voice_within_the_tail() {
+    let mut stuck = Vec::new();
+    for (model, name) in MODELS.iter().enumerate() {
+        let mut m = poly(2);
+        m.set_param("model", model as f32);
+        m.set_param("decay", 100.0);
+        m.set_param("lpg_color", 100.0);
+        m.note_on(0, 48, 127);
+        run(&mut m, 4800);
+        m.note_off(0, 48);
+        let tail_len = m.tail_samples();
+        let mut io = vec![vec![0.0; 512]; 2];
+        let mut frames = 0;
+        while frames < tail_len && !m.slots[0].idle {
+            m.process(&mut io, 512);
+            frames += 512;
+        }
+        println!("{name}: idle after {:.2} s", frames as f32 / SR);
+        if !m.slots[0].idle {
+            stuck.push(*name);
+        }
+    }
+    assert!(stuck.is_empty(), "never idle: {stuck:?}");
+}
+
+/// The chiptune model holds while its key is held (its own envelope off, as on the module) and
+/// decays after the note-off instead of sounding for ever.
+#[test]
+fn the_chiptune_model_holds_while_held_and_ends_after_the_note_off() {
+    let mut m = poly(1);
+    m.set_param("model", voice::CHIPTUNE as f32);
+    m.note_on(0, 48, 127);
+    let held = run(&mut m, 96_000);
+    assert!(peak(&held[90_000..]) > 0.1, "still at level after 2 s held");
+    m.note_off(0, 48);
+    let tail_len = m.tail_samples();
+    let tail = run(&mut m, tail_len);
+    assert_eq!(peak(&tail[tail.len() - 4800..]), 0.0, "silent within the tail");
+    assert!(m.slots[0].idle);
 }

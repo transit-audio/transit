@@ -3,10 +3,15 @@
 //! velocity, its trigger), the note-to-macro mapping, and the bookkeeping the allocator reads
 //! (age, loudness, idle).
 //!
-//! - A voice is **idle** once it holds no key, its trigger is low and it has rendered
-//!   [`QUIET_SECONDS`] of exact digital silence (both outputs). An idle voice is not rendered,
-//!   costs nothing and is the first one a new note takes. Until then its low-pass gate tail
-//!   plays out after the note-off.
+//! - A voice is **idle** once it holds no key, its trigger is low and both its outputs have stayed
+//!   within one int16 LSB of silence (-90 dBFS) for [`QUIET_SECONDS`]: some models settle on a
+//!   +-1 LSB residue rather than exact zero (six-op FM 2 does). An idle voice is not rendered,
+//!   costs nothing and is the first one a new note takes. Until then its low-pass gate tail plays
+//!   out after the note-off.
+//! - The chiptune model envelopes itself (the voice bypasses its low-pass gate) and, with no
+//!   envelope set, holds its note for ever. A held key keeps it held, as on the module; after the
+//!   note-off the voice gives it the decay envelope the module's TIMBRE attenuverter would
+//!   ([`chiptune_release`]), so the note ends as on every other model.
 //! - The mapping adds to the knobs, before the mod wheel, clamped to 0..1. Velocity is a 0..1
 //!   source (velocity / 127); the key is a -1..1 source centered on middle C (key 60: 0, key 0:
 //!   -1, key 120 and up: +1). As in the MIDI Learn range model, the source's travel spans a part of
@@ -14,6 +19,7 @@
 //!   (key); a negative depth inverts. The curve shapes the source's travel first.
 
 use super::{BLOCK, to_f32};
+use crate::offline::FadeShape;
 use transit_macro_osc::voice::{Frame, Modulations, Patch, Voice};
 use transit_macro_osc::{SampleRate, Tuning};
 
@@ -24,20 +30,34 @@ pub const QUIET_SECONDS: f32 = 0.05;
 /// -8.7 dB at 48 kHz), so a voice crossing zero does not read as quiet.
 const LOUDNESS_FALL: f32 = 0.995;
 
+/// The chiptune model's index: the one model that holds its note with the low-pass gate bypassed.
+pub const CHIPTUNE: usize = 7;
+
+/// The chiptune engine's envelope shape after a note-off for a Decay of `decay` (0..1): 0.25 at
+/// 100% (silent in about 9 s) to 1 at 0% (about 0.15 s); the engine decays by
+/// `1 - 2 / rate * 2^(5 shape) * shape` per sample.
+#[must_use]
+pub fn chiptune_release(decay: f32) -> f32 {
+    1.0 - 0.75 * decay.clamp(0.0, 1.0)
+}
+
+/// One int16 step as a float: a block whose samples all stay within it counts as silent.
+const LSB: f32 = 1.0 / 32768.0;
+
 /// The shapes a mapping source's travel takes (`velocity_curve`, `key_curve`).
 pub const CURVES: [&str; 3] = ["Linear", "Exponential", "S-curve"];
 
-/// A source position 0..1 through curve `curve` ([`CURVES`]); 0 and 1 are fixed points of every
-/// curve. Exponential is the cube (the clip fade's exponential), S-curve the raised cosine (the
-/// clip fade's S-curve).
+/// A source position 0..1 through curve `curve` ([`CURVES`]): the clip fades' curves themselves
+/// (`FadeShape::gain`: Linear, Exponential, S-curve), so 0 and 1 are fixed points of every curve
+/// and out-of-range or NaN positions clamp.
 #[must_use]
 pub fn shape(curve: usize, t: f32) -> f32 {
-    let t = if t.is_nan() { 0.0 } else { t.clamp(0.0, 1.0) };
-    match curve {
-        1 => t * t * t,
-        2 => 0.5 - 0.5 * (t * std::f32::consts::PI).cos(),
-        _ => t,
-    }
+    let fade = match curve {
+        1 => FadeShape::Exponential,
+        2 => FadeShape::SCurve,
+        _ => FadeShape::Linear,
+    };
+    fade.gain(t)
 }
 
 /// The key as a mapping source: -1 at key 0, 0 at middle C (60), +1 from key 120 up.
@@ -332,7 +352,10 @@ impl Slot {
         }
         let sounding = self.sounding();
         let [harmonics, timbre, morph, decay] = targets(s, self.note, self.velocity);
-        let patch = Patch { note: s.offset, harmonics, timbre, morph, engine: s.engine, decay, lpg_colour: s.lpg_color, ..Patch::default() };
+        let mut patch = Patch { note: s.offset, harmonics, timbre, morph, engine: s.engine, decay, lpg_colour: s.lpg_color, ..Patch::default() };
+        if s.engine == CHIPTUNE && !sounding {
+            patch.timbre_modulation_amount = chiptune_release(decay);
+        }
         let trigger = sounding && !self.retrigger;
         self.retrigger = false;
         self.last_trigger = trigger;
@@ -349,7 +372,7 @@ impl Slot {
         let mut silent = true;
         for (y, f) in self.mixed.iter_mut().zip(&self.frames) {
             let (out, aux) = (to_f32(f.out), to_f32(f.aux));
-            silent &= out == 0.0 && aux == 0.0;
+            silent &= out.abs() <= LSB && aux.abs() <= LSB;
             *y = out + (aux - out) * s.aux_mix;
             peak = peak.max(y.abs());
         }
