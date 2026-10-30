@@ -360,3 +360,29 @@ fn reinitialized_voice_matches_a_fresh_one() {
         }
     }
 }
+
+/// Long silences after a trigger, so the voice's own states (the decay envelope, the low-pass gate's
+/// vactrol, its filter, the limiter's peak) decay into the subnormal range, which the firmware
+/// flushes to zero. The internal envelope drives timbre and morph from 0, so a decayed envelope
+/// reaches the engine's parameters too.
+#[test]
+fn long_decays_reach_subnormals() {
+    for (model, seconds) in [(Model::VirtualAnalog, 20), (Model::Fm, 20), (Model::FilteredNoise, 100), (Model::ModalResonator, 100)] {
+        let mut blocks = Vec::new();
+        for b in 0..seconds * 4000 {
+            let p = oracle::Patch {
+                note: 57.0,
+                timbre: 0.0,
+                morph: 0.0,
+                timbre_modulation_amount: 1.0,
+                morph_modulation_amount: 1.0,
+                frequency_modulation_amount: 0.5,
+                decay: 0.0,
+                lpg_color: 0.5,
+                ..oracle::Patch::centered(model)
+            };
+            blocks.push((12, p, triggered(if b < 10 { 1.0 } else { 0.0 })));
+        }
+        null_scenario(&format!("long decay, {}", model.label()), &blocks);
+    }
+}

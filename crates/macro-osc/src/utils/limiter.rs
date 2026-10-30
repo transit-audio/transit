@@ -2,7 +2,7 @@
 
 // Based on MIT-licensed code (c) 2015 by Olivier Gillet (ol.gillet@gmail.com)
 
-use super::slope;
+use super::ftz;
 
 #[derive(Debug, Default, Clone)]
 pub struct Limiter {
@@ -20,11 +20,14 @@ impl Limiter {
 
     #[inline]
     pub fn process(&mut self, pre_gain: f32, in_out: &mut [f32]) {
+        // Every operation is flushed to zero, as on the firmware: in silence the peak follower
+        // decays toward zero and the samples are tiny.
         for sample in in_out.iter_mut() {
-            let s = *sample * pre_gain;
-            slope(&mut self.peak, s.abs(), 0.05, 0.00002);
+            let s = ftz(*sample * pre_gain);
+            let error = ftz(s.abs() - self.peak);
+            self.peak = ftz(self.peak + ftz((if error > 0.0 { 0.05 } else { 0.00002 }) * error));
             let gain = if self.peak <= 1.0 { 1.0 } else { 1.0 / self.peak };
-            *sample = s * gain * 0.8;
+            *sample = ftz(ftz(s * gain) * 0.8);
         }
     }
 }

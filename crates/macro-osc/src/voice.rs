@@ -35,12 +35,12 @@ use super::fx::low_pass_gate::LowPassGate;
 use crate::SampleRate;
 use crate::resources::sysex::{SYX_BANK_0, SYX_BANK_1, SYX_BANK_2};
 use crate::resources::waves::WAV_INTEGRATED_WAVES;
-use crate::utils::clip_16;
 use crate::utils::delay_line::DelayLine;
 use crate::utils::hysteresis_quantizer::HysteresisQuantizer2;
 use crate::utils::limiter::Limiter;
 use crate::utils::random::Random;
 use crate::utils::units::semitones_to_ratio;
+use crate::utils::{clip_16, ftz};
 
 const MAX_TRIGGER_DELAY: usize = 8;
 /// The trigger is read 5 blocks late (`kTriggerDelay`), about 1 ms at 48 kHz in 12-frame blocks.
@@ -513,7 +513,7 @@ impl Voice<'_> {
             modulations.frequency_patched,
             modulations.frequency,
             use_internal_envelope,
-            internal_envelope_amplitude * self.decay_envelope.value() * self.decay_envelope.value() * 48.0,
+            ftz(ftz(ftz(internal_envelope_amplitude * self.decay_envelope.value()) * self.decay_envelope.value()) * 48.0),
             1.0,
             -119.0,
             120.0,
@@ -525,7 +525,7 @@ impl Voice<'_> {
             modulations.timbre_patched,
             modulations.timbre,
             use_internal_envelope,
-            internal_envelope_amplitude_timbre * self.decay_envelope.value(),
+            ftz(internal_envelope_amplitude_timbre * self.decay_envelope.value()),
             0.0,
             0.0,
             1.0,
@@ -537,7 +537,7 @@ impl Voice<'_> {
             modulations.morph_patched,
             modulations.morph,
             use_internal_envelope,
-            internal_envelope_amplitude * self.decay_envelope.value(),
+            ftz(internal_envelope_amplitude * self.decay_envelope.value()),
             0.0,
             0.0,
             1.0,
@@ -672,6 +672,7 @@ fn apply_modulations(
     let mut value = base_value;
     modulation_amount *= f32::max(modulation_amount.abs() - 0.05, 0.05);
     modulation_amount *= 1.05;
+    // The envelope decays toward zero, so the product and the sum are flushed as on the firmware.
 
     let modulation = if use_external_modulation {
         external_modulation
@@ -681,7 +682,7 @@ fn apply_modulations(
         default_internal_modulation
     };
 
-    value += modulation_amount * modulation;
+    value = ftz(value + ftz(modulation_amount * modulation));
     value = value.clamp(minimum_value, maximum_value);
 
     value

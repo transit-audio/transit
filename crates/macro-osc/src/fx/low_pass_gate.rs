@@ -3,6 +3,7 @@
 // Based on MIT-licensed code (c) 2014 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
 use crate::utils::filter::{FilterMode, FrequencyApproximation, Svf};
+use crate::utils::ftz;
 use crate::utils::parameter_interpolator::ParameterInterpolator;
 
 #[derive(Debug, Default, Clone)]
@@ -26,10 +27,11 @@ impl LowPassGate {
         let mut gain_modulation = ParameterInterpolator::new(&mut self.previous_gain, gain, in_out.len());
         self.filter.set_f_q(frequency, 0.4, FrequencyApproximation::Dirty);
 
+        // Flushed to zero as on the firmware: the gate closes toward a zero gain.
         for in_out_sample in in_out.iter_mut() {
-            let s = *in_out_sample * gain_modulation.next();
+            let s = ftz(*in_out_sample * gain_modulation.next());
             let lp = self.filter.process(s, FilterMode::LowPass);
-            *in_out_sample = lp + (s - lp) * hf_bleed;
+            *in_out_sample = ftz(lp + ftz(ftz(s - lp) * hf_bleed));
         }
     }
 }
