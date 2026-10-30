@@ -364,6 +364,30 @@ fn a_wrap_releases_a_device_track_without_the_mixs_delay_and_a_bare_track_with_i
 /// goes out on time and is not held to the old lap's deadline.
 #[test]
 fn a_locate_with_a_lower_a_resets_the_deadline_clamp_so_the_next_lap_is_on_time() {
+    // The clamp state, on the real scheduler run synchronously: the next lap's deadline is its own
+    // stamp, not the old lap's, and the old lap's note is gone. This replaces a 100 ms bound on how
+    // late the send was, which an output thread descheduled for 100 ms failed (E49, #226).
+    let fake = Fake::default();
+    let key = fake.add_output("Synth OUT");
+    let (mut playback, receive_playback) = test_ring(QUEUE);
+    let (_echo, receive_echo) = test_ring(QUEUE);
+    let (_control, receive) = mpsc::sync_channel(1);
+    let origin = HostOrigin::default();
+    let mut worker = Worker::new(fake.io(), origin, receive, receive_playback, receive_echo, Arc::default(), Arc::default());
+    worker.set_destinations(vec![destination(1, &key, MidiOutChannel::AsRecorded, 0)]);
+    let base = origin.now_ns().unwrap() + 30_000_000;
+    assert!(playback.push(message(1, base + 200_000_000, [0x90, 60, 100]))); // the old lap, A_old large
+    assert!(playback.push(OutEvent { kind: Kind::Release, at_ns: base, delay_ns: 0, ..OutEvent::default() }));
+    assert!(playback.push(message(1, base + 1_000_000, [0x90, 62, 100])));
+    worker.drain();
+    let pending: Vec<_> = worker.pending.iter().map(|p| (p.event.kind, p.event.bytes, p.deadline)).collect();
+    assert_eq!(
+        pending,
+        [(Kind::Release, OutEvent::default().bytes, base), (Kind::Message, [0x90, 62, 100], base + 1_000_000)],
+        "the old lap's note was dropped and the next lap keeps its own instant, not the old lap's deadline"
+    );
+
+    // End to end on the output thread: the order, and the discarded note never goes out.
     let mut rig = Rig::new(|key| vec![destination(1, key, MidiOutChannel::AsRecorded, 0)]);
     let base = rig.now() + 30_000_000;
     assert!(rig.playback.push(message(1, 0, [0x90, 50, 100])));
@@ -374,9 +398,8 @@ fn a_locate_with_a_lower_a_resets_the_deadline_clamp_so_the_next_lap_is_on_time(
     let sends = rig.wait_sent(3);
     let order: Vec<Vec<u8>> = sends.iter().map(|s| s.message.clone()).collect();
     assert_eq!(order, [vec![0x90, 50, 100], vec![0x80, 50, 64], vec![0x90, 62, 100]]);
-    let late = sends[2].at.saturating_duration_since(rig.origin.instant() + Duration::from_nanos(base + 1_000_000));
-    // A lap held to the old deadline is ~200 ms late; host jitter is far below this (#87, E49).
-    assert!(late < Duration::from_millis(100), "the next lap was held to the old lap's deadline: {late:?}");
+    assert!(sends[2].at >= rig.origin.instant() + Duration::from_nanos(base + 1_000_000), "the next lap went out before its instant");
+    // timing: sleep-ok past the discarded note's instant before a negative check; a slow host cannot fail it
     std::thread::sleep(Duration::from_millis(250));
     assert!(!rig.sent().contains(&vec![0x90, 60, 100]), "the discarded old-lap note went out");
 }
