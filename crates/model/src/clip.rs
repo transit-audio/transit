@@ -113,6 +113,15 @@ impl ClipLoop {
     }
 }
 
+/// [`Clip::content_pos`] of a clip looping over `looping`: also what a disk-backed source's
+/// streamer maps clip time with (ADR 0035), so both read the same content.
+pub(crate) fn content_pos(looping: Option<ClipLoop>, rel: Samples) -> Samples {
+    match looping {
+        Some(l) if l.is_valid() && rel >= l.end => l.start.saturating_add((rel - l.start).rem_euclid(l.cycle())),
+        _ => rel,
+    }
+}
+
 /// A clip on a playlist.
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Clip {
@@ -233,10 +242,7 @@ impl Clip {
     /// Where in the clip's content `rel` samples of clip time play: `rel` until the loop's end,
     /// then the cycle. Integer math only, so the audio thread can call it every block.
     pub fn content_pos(&self, rel: Samples) -> Samples {
-        match self.looping {
-            Some(l) if l.is_valid() && rel >= l.end => l.start.saturating_add((rel - l.start).rem_euclid(l.cycle())),
-            _ => rel,
-        }
+        content_pos(self.looping, rel)
     }
 
     /// The clip-time start of every cycle boundary in `from..to`: where cycle 1, 2, ... begin.

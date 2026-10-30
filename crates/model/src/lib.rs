@@ -8,6 +8,7 @@
 mod automation;
 pub mod b64;
 mod clip;
+pub mod disk;
 mod ids;
 mod io_map;
 pub mod legacy;
@@ -43,7 +44,7 @@ pub use route_graph::{
 };
 pub use session::{
     BUNDLE_EXTENSION, BitDepthSetting, EditMode, EditState, FEET_FRAMES_START, MAX_COMMENT_CHARS, MAX_NAME_CHARS, SESSION_EXTENSION, Session,
-    SessionError, Tool, ZoomState, ZoomToggle, is_session_file, truncate_chars,
+    SessionError, Tool, UNPLACED_NOTE, ZoomState, ZoomToggle, is_session_file, truncate_chars,
 };
 pub use source::{Source, SourceAudio, SourcePool};
 pub use track::{Frozen, Playlist, TRACK_COLORS, Track, TrackHeight, TrackKind};

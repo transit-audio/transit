@@ -252,14 +252,26 @@ fn scan(file: &str, text: &str, found: &mut Found) {
     }
 }
 
+/// The `.rs` files under `dir`, in module folders too (`src/disk/`), sorted.
+fn rs_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut out = Vec::new();
+    for e in std::fs::read_dir(dir).unwrap() {
+        let path = e.unwrap().path();
+        if path.is_dir() {
+            out.extend(rs_files(&path));
+        } else if path.extension().is_some_and(|x| x == "rs") {
+            out.push(path);
+        }
+    }
+    out.sort();
+    out
+}
+
 #[test]
 fn every_deserialized_field_loads_when_an_older_file_lacks_it() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut found = Found::default();
-    let mut files: Vec<_> =
-        std::fs::read_dir(&src).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "rs")).collect();
-    files.sort();
-    for path in files {
+    for path in rs_files(&src) {
         let text = std::fs::read_to_string(&path).unwrap();
         // Unit tests sit at the end of a file and declare throwaway structs.
         let body = text.split("#[cfg(test)]").next().unwrap_or(&text);
@@ -284,8 +296,8 @@ fn every_deserialized_field_loads_when_an_older_file_lacks_it() {
 fn the_required_list_names_only_fields_that_exist() {
     let src = Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
     let mut text = String::new();
-    for e in std::fs::read_dir(src).unwrap() {
-        text.push_str(&std::fs::read_to_string(e.unwrap().path()).unwrap());
+    for path in rs_files(&src) {
+        text.push_str(&std::fs::read_to_string(path).unwrap());
     }
     for entry in REQUIRED_BY_DESIGN.split_whitespace() {
         let (st, field) = entry.split_once('.').unwrap();

@@ -1,6 +1,7 @@
 //! Audio sources (files in the session's Audio Files folder) and their decoded data.
 
 use crate::SourceId;
+use crate::disk::DiskSource;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use transit_audio_io::{AudioBuffer, FileFormat, peaks::Peaks};
@@ -22,22 +23,41 @@ pub struct Source {
     /// True when the file has not been written to disk yet (recorded/rendered this session).
     #[serde(default)]
     pub unsaved: bool,
+    /// Played from its file instead of from memory (ADR 0035): a long take. Its file is the
+    /// audio; saving never rewrites it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub disk: bool,
 }
 
-/// Decoded audio plus waveform overviews (not serialised).
+/// Decoded audio plus waveform overviews (not serialised), or a disk-backed source's file.
 #[derive(Debug)]
 pub struct SourceAudio {
+    /// The decoded audio. A disk-backed source has its rate and one empty vector per channel.
     pub buffer: AudioBuffer,
     pub peaks: Vec<Peaks>,
+    /// Set for a disk-backed source (ADR 0035): the audio is read from the file, never held.
+    pub disk: Option<Arc<DiskSource>>,
 }
 
 impl SourceAudio {
     pub fn new(buffer: AudioBuffer) -> Self {
         let peaks = buffer.channels.iter().map(|c| Peaks::build(c)).collect();
-        SourceAudio { buffer, peaks }
+        SourceAudio { buffer, peaks, disk: None }
     }
+    /// A disk-backed source's audio: nothing decoded, the file read through `disk`.
+    pub fn disk(disk: Arc<DiskSource>) -> Self {
+        let buffer = AudioBuffer { sample_rate: disk.rate(), channels: vec![Vec::new(); disk.channels()] };
+        SourceAudio { buffer, peaks: Vec::new(), disk: Some(disk) }
+    }
+    pub fn is_disk(&self) -> bool {
+        self.disk.is_some()
+    }
+    /// Frames of audio: the file's for a disk-backed source.
     pub fn frames(&self) -> usize {
-        self.buffer.frames()
+        match &self.disk {
+            Some(d) => usize::try_from(d.frames()).unwrap_or(usize::MAX),
+            None => self.buffer.frames(),
+        }
     }
     pub fn channel(&self, ch: usize) -> Option<&[f32]> {
         self.buffer.channels.get(ch).map(Vec::as_slice)
@@ -48,11 +68,19 @@ impl SourceAudio {
 #[derive(Debug, Clone, Default)]
 pub struct SourcePool {
     map: BTreeMap<SourceId, Arc<SourceAudio>>,
+    /// A disk-backed source was ever inserted (ADR 0035): the audio thread skips its disk work
+    /// for a session without one.
+    disk: bool,
 }
 
 impl SourcePool {
     pub fn insert(&mut self, id: SourceId, audio: Arc<SourceAudio>) {
+        self.disk |= audio.is_disk();
         self.map.insert(id, audio);
+    }
+    /// Whether this pool may hold a disk-backed source (once true, it stays true).
+    pub fn has_disk(&self) -> bool {
+        self.disk
     }
     pub fn get(&self, id: SourceId) -> Option<&Arc<SourceAudio>> {
         self.map.get(&id)

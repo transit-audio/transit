@@ -228,6 +228,9 @@ pub struct EditState {
     pub values: std::collections::BTreeMap<String, f64>,
 }
 
+/// How an open says a recorded take was never placed (#192), before the take's entry.
+pub const UNPLACED_NOTE: &str = "a recorded take was never placed in this session:";
+
 impl EditState {
     /// The range Cycle plays and records: the loop region when one is set, else the selection.
     ///
@@ -686,7 +689,7 @@ impl Session {
             s.load_notes.push(crate::legacy::VIDEO_REMOVED_NOTE.to_string());
         }
         for take in &s.unplaced_takes {
-            s.load_notes.push(format!("a recorded take was never placed in this session: {take}"));
+            s.load_notes.push(format!("{UNPLACED_NOTE} {take}"));
         }
         if !unknown.is_empty() {
             s.load_notes.push(format!(
