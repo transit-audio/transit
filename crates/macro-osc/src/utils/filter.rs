@@ -386,6 +386,28 @@ impl Svf {
         self.state_2 = state_2;
     }
 
+    /// `ProcessMultimodeLPtoHP`: low-pass at 0, band-pass at 0.5, high-pass at 1.
+    #[inline]
+    pub fn process_multimode_lp_to_hp_buffer(&mut self, in_: &[f32], out: &mut [f32], mode: f32) {
+        let mut state_1 = self.state_1;
+        let mut state_2 = self.state_2;
+        let hp_gain = f32::min(-mode * 2.0 + 1.0, 0.0);
+        let bp_gain = 1.0 - 2.0 * f32::abs(mode - 0.5);
+        let lp_gain = f32::max(1.0 - mode * 2.0, 0.0);
+
+        for (sample_in, sample_out) in in_.iter().zip(out.iter_mut()) {
+            let hp = (*sample_in - self.r * state_1 - self.g * state_1 - state_2) * self.h;
+            let bp = self.g * hp + state_1;
+            state_1 = self.g * hp + bp;
+            let lp = self.g * bp + state_2;
+            state_2 = self.g * bp + lp;
+            *sample_out = hp_gain * hp + bp_gain * bp + lp_gain * lp;
+        }
+
+        self.state_1 = state_1;
+        self.state_2 = state_2;
+    }
+
     #[inline]
     pub fn process_add_dual_buffer(&mut self, in_: &[f32], out_1: &mut [f32], out_2: &mut [f32], gain_1: f32, gain_2: f32, mode: FilterMode) {
         let mut state_1 = self.state_1;

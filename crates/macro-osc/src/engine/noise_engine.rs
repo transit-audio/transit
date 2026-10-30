@@ -105,7 +105,11 @@ impl Engine for NoiseEngine {
 
             let input_1 = *in_1_sample * gain;
             let input_2 = *in_2_sample * gain;
-            self.lp_hp_filter.process_multimode_buffer(core::slice::from_ref(&input_1), core::slice::from_mut(out_sample), mode_modulation.next());
+            self.lp_hp_filter.process_multimode_lp_to_hp_buffer(
+                core::slice::from_ref(&input_1),
+                core::slice::from_mut(out_sample),
+                mode_modulation.next(),
+            );
             *in_1_sample = self.bp_filter[0].process(input_1, FilterMode::BandPass) + self.bp_filter[1].process(input_2, FilterMode::BandPass);
         }
     }
