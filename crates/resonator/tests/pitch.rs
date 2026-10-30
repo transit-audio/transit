@@ -18,9 +18,11 @@
 //! compensation (the FIR's one sample, the IIR's group delay read from a table), which is
 //! approximate and goes flat as the note rises, as on the module: within 0.8 cent at A2 and A4 for
 //! the plain strings (2.3 cents with the reverb's chorus LFO), 1.3 to 2.5 cents flat at A5 (5.9
-//! with the reverb), 6 to 7 cents flat at A6. So the string models are held to 3 cents at their
-//! first two notes and 8 cents at the third: tight enough for an octave, a twelfth or a wrong
-//! sample rate (44.1 against 48 kHz is 147 cents) to fail.
+//! with the reverb), 6 to 7 cents flat at A6 (measured, not gated). So the string models are held
+//! to 3 cents at their first two notes and 8 cents at the third: tight enough for an octave, a
+//! twelfth or a wrong sample rate (44.1 against 48 kHz is 147 cents) to fail. The strings' error is
+//! the firmware's own comb tuning, not a port error: do not correct or tighten it in the port
+//! without changing the oracle first.
 
 #![forbid(unsafe_code)]
 

@@ -46,8 +46,9 @@ oscillator), so MIDI note 69 plays 440 Hz. `tests/pitch.rs` measures every model
 48 kHz with the alias-rejecting measurement of the E63 gate class, at A2, A4 and A5: the modal and
 FM paths within 0.2 cent; the strings within 0.8 cent at A2 and A4 (2.3 with the reverb's chorus)
 and 1.3 to 2.5 cents flat at A5 (5.9 with the reverb), 6 to 7 cents flat at A6, which is the
-firmware's own comb tuning (its delay compensation is approximate); held to 3 cents at A2 and A4
-and 8 at A5. Other rates are the instrument's question (resampling, or a rate parameter with its
+firmware's own comb tuning (its delay compensation is approximate; the A6 figure is measured, not
+gated); held to 3 cents at A2 and A4 and 8 at A5. This is not a port error: do not correct or
+tighten the strings' tuning in the port without changing the oracle first. Other rates are the instrument's question (resampling, or a rate parameter with its
 own pitch tests).
 
 ## The gate
@@ -78,7 +79,10 @@ contains the filter.
 
 ## Flush-to-zero
 
-The firmware runs with flush-to-zero (the oracle switches it on around each C++ call). Rust code
+The oracle runs the C++ with flush-to-zero, as the firmware's desktop test harness does
+(`rings/test/rings_test.cc`); the module itself runs with FZ off (its firmware never writes FPSCR,
+the Cortex-M4 resets with FZ off, and its GCC build fuses multiply-adds), so the reference is the
+C++ as the desktop harness builds it, not the hardware's bits. Rust code
 always runs in the default floating-point mode, and changing it under Rust is undefined behavior.
 So the port's arithmetic is done in `float::F`, an `f32` whose `+`, `-`, `*` and `/` flush a
 subnormal result to a zero of the same sign, as x86 FTZ does to every result, everywhere in the DSP

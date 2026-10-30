@@ -9,8 +9,9 @@
 //! [`Resonator::process`] for the render contract.
 //!
 //! Pure Rust, `#![forbid(unsafe_code)]`, no allocation once a [`Resonator`] is built, one random
-//! generator per resonator, and the firmware's flush-to-zero reproduced in its own arithmetic
-//! ([`float::F`]), never by changing the host's floating-point mode.
+//! generator per resonator, and the oracle's flush-to-zero (the firmware's desktop test harness; the
+//! module itself runs with FZ off) reproduced in its own arithmetic ([`float::F`]), never by
+//! changing the host's floating-point mode.
 
 #![forbid(unsafe_code)]
 

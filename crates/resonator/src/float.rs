@@ -1,7 +1,10 @@
-//! `F`: an `f32` whose arithmetic flushes subnormal results to zero, as the firmware's FPU does.
+//! `F`: an `f32` whose arithmetic flushes subnormal results to zero, as the oracle's FPU does.
 //!
-//! The module runs with flush-to-zero, and so does the oracle (it turns FTZ on around each call into
-//! the C++). Rust code always runs in the default floating-point mode, where subnormals are kept,
+//! The reference is the firmware's C++ as its desktop test harness builds and runs it: the harness
+//! turns flush-to-zero on (`rings/test/rings_test.cc`), and so does the oracle around each call into
+//! the C++. The module itself does not: its firmware never writes FPSCR, the Cortex-M4 resets with
+//! FZ off, and its GCC build fuses multiply-adds, so the hardware's bits differ from both oracle
+//! families; the port matches the x86 oracle, which is what the null tests prove. Rust code always runs in the default floating-point mode, where subnormals are kept,
 //! and changing that mode under Rust is undefined behavior. So the port reproduces flush-to-zero
 //! explicitly: every `+`, `-`, `*` and `/` between `F` values (or an `F` and an `f32`) rounds as
 //! IEEE single precision does and then turns a subnormal result into a zero of the same sign, which
