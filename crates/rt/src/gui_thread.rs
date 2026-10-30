@@ -41,8 +41,9 @@ struct Shared {
     /// A wake is pending that no wait has consumed yet.
     woken: AtomicBool,
     thread: std::thread::Thread,
-    /// Windows: the OS id of the owning thread, for `PostThreadMessageW` (0 elsewhere).
-    #[cfg_attr(not(windows), allow(dead_code))]
+    /// Windows: the OS id of the owning thread, for `PostThreadMessageW` (0 elsewhere). Read only
+    /// by the Windows message queue, which `force-fallback` replaces.
+    #[cfg_attr(not(all(windows, not(feature = "force-fallback"))), allow(dead_code))]
     os_thread: u32,
     /// Linux: the wake pipe (nothing elsewhere).
     #[cfg_attr(not(all(target_os = "linux", not(feature = "force-fallback"))), allow(dead_code))]

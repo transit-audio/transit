@@ -124,6 +124,16 @@ mod windows {
     use transit_dsp::{Category, Plugin, PluginInfo};
     use transit_rt::editor_window::EditorWindow;
 
+    /// Linux needs an X server for these windows: true (with a message) when there is none, so
+    /// the test returns. CI's plain test step has no `DISPLAY`; its Xvfb step runs them.
+    fn no_display(test: &str) -> bool {
+        let missing = cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none();
+        if missing {
+            eprintln!("{test}: skipped: no DISPLAY (run under `xvfb-run -a`)");
+        }
+        missing
+    }
+
     static INFO: PluginInfo = PluginInfo {
         id: "clap:test.window",
         name: "Windowed",
@@ -199,6 +209,9 @@ mod windows {
     /// (an editor open queued between them waits on a channel), the moment the old code got wrong.
     #[test]
     fn a_thread_that_catches_up_never_parks_an_editor_opening_elsewhere() {
+        if no_display("a_thread_that_catches_up_never_parks_an_editor_opening_elsewhere") {
+            return;
+        }
         let _g = globals();
         let timeout = Duration::from_millis(200);
         let host = Host::new(Config { timeout, creation_timeout: Duration::from_secs(60), inline: false, ..Config::default() });
@@ -256,8 +269,7 @@ mod windows {
 
     #[test]
     fn the_editor_window_parks_comes_back_and_raises_without_a_duplicate() {
-        if cfg!(target_os = "linux") && std::env::var_os("DISPLAY").is_none() {
-            eprintln!("the_editor_window_parks_comes_back_and_raises_without_a_duplicate: skipped: no DISPLAY (run under `xvfb-run -a`)");
+        if no_display("the_editor_window_parks_comes_back_and_raises_without_a_duplicate") {
             return;
         }
         let _g = globals();
