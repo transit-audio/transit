@@ -33,6 +33,10 @@ plays every member through the member's key and velocity zones.
   `(k + 1) / (n + 1)` and the floor of 1 are transit's own choice (the manual does not give the
   ramp's shape): a note inside the zone always sounds, and a scaled note-on never becomes a note-off.
 - A member that leaves the rack lets go of the rack's notes and pedal (`rack_membership`).
+- A member armed on its own on the same input port the rack takes has its own-route notes cut too
+  when it leaves the rack: the release goes by port, and the two routes look like one source there.
+- A live note admitted while a render worker held the member's strip is not released on leaving
+  (K96): it waits for the port's revocation or a panic.
 - Nothing on the audio thread allocates: the fan-out is a fixed array, the clip merge a fixed
   scratch. `crates/mix/tests/rack.rs` has the allocation probe.
 - A rack field or variant must load in older builds: the rack is skipped when absent, its macro
