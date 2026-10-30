@@ -14,8 +14,8 @@
 
 use super::*;
 use clap_sys::ext::posix_fd_support::{
-    CLAP_EXT_POSIX_FD_SUPPORT, CLAP_POSIX_FD_ERROR, CLAP_POSIX_FD_READ, CLAP_POSIX_FD_WRITE, clap_host_posix_fd_support, clap_plugin_posix_fd_support,
-    clap_posix_fd_flags,
+    CLAP_EXT_POSIX_FD_SUPPORT, CLAP_POSIX_FD_ERROR, CLAP_POSIX_FD_READ, CLAP_POSIX_FD_WRITE, clap_host_posix_fd_support,
+    clap_plugin_posix_fd_support, clap_posix_fd_flags,
 };
 use clap_sys::ext::timer_support::{CLAP_EXT_TIMER_SUPPORT, clap_host_timer_support, clap_plugin_timer_support};
 use std::rc::Rc;
@@ -188,11 +188,8 @@ unsafe extern "C" fn host_unregister_fd(host: *const clap_host, fd: i32) -> bool
 
 pub(super) static HOST_TIMER_SUPPORT: clap_host_timer_support =
     clap_host_timer_support { register_timer: Some(host_register_timer), unregister_timer: Some(host_unregister_timer) };
-pub(super) static HOST_POSIX_FD_SUPPORT: clap_host_posix_fd_support = clap_host_posix_fd_support {
-    register_fd: Some(host_register_fd),
-    modify_fd: Some(host_modify_fd),
-    unregister_fd: Some(host_unregister_fd),
-};
+pub(super) static HOST_POSIX_FD_SUPPORT: clap_host_posix_fd_support =
+    clap_host_posix_fd_support { register_fd: Some(host_register_fd), modify_fd: Some(host_modify_fd), unregister_fd: Some(host_unregister_fd) };
 
 /// The host's timer and descriptor extensions for `get_extension`.
 pub(super) fn extension(id: &CStr) -> Option<*const c_void> {

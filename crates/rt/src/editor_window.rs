@@ -543,10 +543,10 @@ pub use win::{EditorWindow, apply, current_thread_id, group, hide_thread_windows
 
 #[cfg(target_os = "linux")]
 mod x11;
-#[cfg(all(target_os = "linux", not(feature = "force-fallback")))]
-pub(crate) use x11::{connection_fd, pump};
 #[cfg(target_os = "linux")]
 pub use x11::{EditorWindow, apply, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
+#[cfg(all(target_os = "linux", not(feature = "force-fallback")))]
+pub(crate) use x11::{connection_fd, pump};
 
 #[cfg(not(any(windows, target_os = "linux")))]
 mod other {

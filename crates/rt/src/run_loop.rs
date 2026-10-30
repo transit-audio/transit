@@ -286,10 +286,13 @@ mod tests {
     fn a_timer_fires_when_due_and_reschedules_without_a_burst() {
         let count = Rc::new(Cell::new(0));
         let c = Rc::clone(&count);
-        let t = add_timer(Duration::from_millis(20), Rc::new(move || {
-            c.set(c.get() + 1);
-            true
-        }))
+        let t = add_timer(
+            Duration::from_millis(20),
+            Rc::new(move || {
+                c.set(c.get() + 1);
+                true
+            }),
+        )
         .unwrap();
         assert_eq!(run(16), 0, "not due yet");
         let start = Instant::now();
@@ -310,12 +313,16 @@ mod tests {
         let seen = Rc::new(Cell::new(0));
         let s = Rc::clone(&seen);
         let fd = b.as_raw_fd();
-        add_fd(fd, Ready::READ, Rc::new(move |got, ready| {
-            assert_eq!(got, fd);
-            assert!(ready.read);
-            s.set(s.get() + 1);
-            false
-        }))
+        add_fd(
+            fd,
+            Ready::READ,
+            Rc::new(move |got, ready| {
+                assert_eq!(got, fd);
+                assert!(ready.read);
+                s.set(s.get() + 1);
+                false
+            }),
+        )
         .unwrap();
         assert_eq!(run(16), 0, "nothing to read");
         a.write_all(b"x").unwrap();
@@ -354,10 +361,13 @@ mod tests {
         }
         let other = add_timer(Duration::from_secs(60), Rc::new(|| true)).unwrap();
         let guard = CallsBack(Cell::new(Some(other)));
-        let first = add_timer(Duration::from_secs(60), Rc::new(move || {
-            let _ = &guard;
-            true
-        }))
+        let first = add_timer(
+            Duration::from_secs(60),
+            Rc::new(move || {
+                let _ = &guard;
+                true
+            }),
+        )
         .unwrap();
         assert!(remove(first));
         assert_eq!(counts(), (0, 0));

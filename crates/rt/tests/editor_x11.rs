@@ -227,7 +227,10 @@ mod linux {
         assert_eq!(win.content_size(), (400, 250));
         assert_eq!(geometry(&obs, frame), Some((400, 250)));
         assert_eq!(geometry(&obs, content), Some((400, 250)));
-        assert!(pump_until(&q, Some(&win), || plugin.timer_calls.get() >= 3 && plugin.events_seen.get() > 0), "the timer fired and the descriptor handler ran");
+        assert!(
+            pump_until(&q, Some(&win), || plugin.timer_calls.get() >= 3 && plugin.events_seen.get() > 0),
+            "the timer fired and the descriptor handler ran"
+        );
 
         // A plug-in whose window is not the size it reported: the window follows it once it is
         // stable (`Follow`, the grace after the host's own resize included).
@@ -273,7 +276,8 @@ mod linux {
         let raw = win.raw().addr();
         let (win, seen) = std::thread::spawn(move || {
             let raw = std::ptr::without_provenance_mut(raw);
-            let seen = (win.parent().is_null(), win.content_size(), win.is_visible(), ew::resize_content(raw, 50.0, 50.0), ew::window_state(raw.addr()));
+            let seen =
+                (win.parent().is_null(), win.content_size(), win.is_visible(), ew::resize_content(raw, 50.0, 50.0), ew::window_state(raw.addr()));
             win.raise();
             (win, seen)
         })

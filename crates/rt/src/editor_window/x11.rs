@@ -511,7 +511,8 @@ fn handle(c: &Conn, ev: Event) {
             if let Some(f) = frame_of(e.window) {
                 // A window manager that forces another size (a tiling one) gets the content laid
                 // out in it; the plug-in's size is unchanged.
-                let _ = c.c.configure_window(f.content, &ConfigureWindowAux::new().width(u32::from(e.width.max(1))).height(u32::from(e.height.max(1))));
+                let _ =
+                    c.c.configure_window(f.content, &ConfigureWindowAux::new().width(u32::from(e.width.max(1))).height(u32::from(e.height.max(1))));
             } else if let Some(f) = frame_of_content(e.event)
                 && f.child.get().is_some_and(|(w, _)| w == e.window)
             {
@@ -696,7 +697,8 @@ pub fn current_thread_id() -> u32 {
 /// nothing waits for the stuck thread or makes an X11 call on the UI thread. The window manager
 /// hides them at once, also while their thread stays stuck.
 pub fn hide_thread_windows(thread: u32) -> usize {
-    let windows: Vec<Window> = BY_THREAD.lock().unwrap_or_else(PoisonError::into_inner).iter().filter(|&&(t, _)| t == thread).map(|&(_, id)| id).collect();
+    let windows: Vec<Window> =
+        BY_THREAD.lock().unwrap_or_else(PoisonError::into_inner).iter().filter(|&&(t, _)| t == thread).map(|&(_, id)| id).collect();
     if windows.is_empty() {
         return 0;
     }
