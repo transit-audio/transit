@@ -14,12 +14,12 @@
 //!   in a 12-frame buffer for the next one, so any host block size gives the same output bit for
 //!   bit as 12-frame host blocks. Events take effect at the first 12-frame boundary at or after
 //!   their offset (at most 0.25 ms late at 48 kHz), the resolution of the module's own inputs.
-//! - Output: the voice's int16 frames are read as -1..1 floats ([`to_f32`]: full scale = 0 dBFS,
-//!   polarity restored, silence exactly 0), crossfaded between the main and
+//! - Output: the voice's int16 frames are read as -1..1 floats ([`to_f32`]: polarity restored,
+//!   silence exactly 0, full scale one LSB under 0 dBFS), crossfaded between the main and
 //!   auxiliary outputs by `aux_mix`, scaled by `level` and written to every channel. The voice's
 //!   limiter and int16 clip keep each output within full scale, so at `level` 0 dB the
-//!   instrument stays within 0 dBFS (+0.0003 dB at the clip); the -6 dB default leaves 6 dB of
-//!   headroom on the strip.
+//!   instrument peaks within 0.0003 dB of 0 dBFS; the -6 dB default leaves 6 dB of headroom on
+//!   the strip.
 //! - Tuning: concert pitch (A4 = 440 Hz, `transit_macro_osc::Tuning::Concert`), as the module plays:
 //!   its audio clock runs at the firmware's corrected rate. The firmware's arithmetic, 4.6 cents sharp
 //!   at a true 48 kHz, stays bit-exact in the crate for the null tests only.
@@ -241,9 +241,11 @@ fn voice_rate(host: f32) -> SampleRate {
     SampleRate::ALL.into_iter().min_by(|a, b| dist(*a).total_cmp(&dist(*b))).unwrap_or_default()
 }
 
-/// One int16 output sample as a float at full scale -1..1: the firmware writes inverted samples
-/// for its DAC and adds 1 when it truncates to int16, so the polarity is restored and the 1 taken
-/// off; silence (1) is exactly 0, and the int16 clip (-32768) is 32769 / 32768 (+0.0003 dB).
+/// One int16 output sample as a float in -1..1. The firmware writes `clip16(1 + trunc(y * -32767))`
+/// (inverted for its DAC, plus 1 against the truncation), so the polarity is restored and the 1
+/// taken off: silence (1) is exactly 0. Full scale is one LSB under 0 dBFS: y = +1 reads
+/// 32767 / 32768 (-0.0003 dB), y = -1 reads -32766 / 32768 (-0.0005 dB, the clip at +32767 absorbs
+/// the offset), and only the -32768 clip, reached by y beyond +1, reads 32769 / 32768 (+0.0003 dB).
 #[inline]
 pub fn to_f32(sample: i16) -> f32 {
     (1.0 - f32::from(sample)) / 32768.0
@@ -448,8 +450,10 @@ impl Plugin for MacroOscillator {
     }
 
     fn reset(&mut self) {
-        // The tuning survives `init`.
+        // The tuning survives `init`; the random state is the voice's power-on one again, so the
+        // noise-driven models play after a reset as from a new instance.
         self.voice.init();
+        self.voice.seed(transit_macro_osc::utils::random::Random::DEFAULT_SEED);
         self.events.clear();
         self.frames = [Frame::default(); BLOCK];
         self.block = [0.0; BLOCK];

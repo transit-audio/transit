@@ -336,6 +336,27 @@ fn the_parameters_are_the_state() {
     assert!(a.save_state().is_none(), "no state blob beyond the parameters");
 }
 
+/// The noise-driven models (swarm, noise, particles, string, drums, speech consonants) draw from the
+/// voice's random generator: after a reset they play the same bits as a new instance.
+#[test]
+fn reset_reseeds_the_noise_models() {
+    for (model, harmonics) in [(16.0, 50.0), (17.0, 50.0), (18.0, 50.0), (19.0, 50.0), (22.0, 50.0), (23.0, 50.0), (15.0, 80.0)] {
+        let play = |m: &mut MacroOscillator| {
+            m.note_on(0, 60, 100);
+            let x = render(m, 4800, 256);
+            m.note_off(0, 60);
+            x
+        };
+        let mut m = inst();
+        m.set_param("model", model);
+        m.set_param("harmonics", harmonics);
+        let fresh = play(&mut m);
+        render(&mut m, 9600, 256);
+        m.reset();
+        assert!(play(&mut m) == fresh, "model {model}: after a reset the noise differs from a new instance");
+    }
+}
+
 #[test]
 fn reset_returns_to_silence_and_a_fresh_voice() {
     let mut m = inst();
