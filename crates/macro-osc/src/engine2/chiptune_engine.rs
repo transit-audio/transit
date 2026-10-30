@@ -14,7 +14,7 @@
 // Based on MIT-licensed code (c) 2021 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
 use super::arpeggiator::{Arpeggiator, ArpeggiatorMode};
-use crate::chords::chord_bank::{CHORD_NUM_VOICES, ChordBank};
+use crate::chords::chord_bank::{CHORD_NUM_NOTES, CHORD_NUM_VOICES, ChordBank};
 use crate::engine::{Engine, EngineParameters, TriggerState, note_to_frequency};
 use crate::oscillator::nes_triangle_oscillator::NesTriangleOscillator;
 use crate::oscillator::super_square_oscillator::SuperSquareOscillator;
@@ -68,7 +68,10 @@ impl Engine for ChiptuneEngine {
         self.sample_rate = sample_rate_hz;
         self.bass.init();
 
-        for voice in &mut self.voice {
+        // As the firmware, which initializes only the first kChordNumNotes (4) of its five square
+        // voices: the fifth keeps its zeroed power-on state (slave frequency 0, not 0.01), which
+        // shifts its first transitions.
+        for voice in &mut self.voice[..CHORD_NUM_NOTES] {
             voice.init();
         }
 
