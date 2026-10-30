@@ -41,7 +41,7 @@ text = "Crossfades from the model's main output to its auxiliary output, a varia
 [[entry]]
 id = "macro_osc.level"
 name = "Level"
-text = "The instrument's output level. Full scale is 0 dB here; the -6 dB default leaves headroom on the track."
+text = "The instrument's output level. At 0 dB the instrument peaks at full scale (within 0.001 dB of 0 dBFS); the -6 dB default leaves headroom on the track."
 
 [[entry]]
 id = "macro_osc.tune"

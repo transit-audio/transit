@@ -112,12 +112,15 @@ analog stages. Their license notices are in **Help > About transit**.
   fade and a longer release at 100%). The drum models ring out by themselves over **Decay**.
 - **Mono, last note, legato**: one note sounds at a time. A note played while another is held takes
   over without restarting the sound (legato); releasing it returns to the note still held. Notes
-  played under the sustain pedal are legato too.
+  played under the sustain pedal are legato too. A legato note takes its own velocity, so the level
+  steps mid-phrase, as the original's level input does (Ableton's and Logic's legato modes keep the
+  running envelope instead).
 - **Pitch bend** spans **Bend Range** semitones (2 by default), **Tune** transposes, and the **mod
   wheel** adds up to 100% to the control **Mod Wheel** names (Timbre by default; Harmonics, Morph or
   Off).
 - **Aux Mix** crossfades to the model's auxiliary output, a variation of the sound. **Level** is
-  the output level; full scale is 0 dB, and the -6 dB default leaves headroom on the track.
+  the output level; at 0 dB the instrument peaks at full scale (one LSB, 0.0003 dB, under 0 dBFS),
+  and the -6 dB default leaves headroom on the track.
 - **Tuning**: the port plays at concert pitch, A4 = 440 Hz. The original firmware's arithmetic is
   kept bit-exact in transit's code for its tests; the module itself plays in tune because its audio
   clock runs at the rate that arithmetic assumes.
