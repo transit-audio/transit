@@ -128,7 +128,7 @@ fn every_model_sounds() {
 #[test]
 fn out_of_range_inputs_are_refused_before_the_cxx() {
     use transit_macro_osc_oracle::Error;
-    use transit_macro_osc_oracle::resonator::{FM_RANGE, NOTE_RANGE, TONIC_RANGE};
+    use transit_macro_osc_oracle::resonator::{FM_RANGE, MAX_DAMPING, NOTE_RANGE, STRUCTURE_RANGE, TONIC_RANGE};
     let session = Session::lock();
     let mut part = session.resonator().unwrap();
     let ok_patch = ResonatorPatch { structure: 0.5, brightness: 0.5, damping: 0.5, position: 0.5 };
@@ -139,7 +139,7 @@ fn out_of_range_inputs_are_refused_before_the_cxx() {
 
     assert_eq!(run(&ok, &ok_patch), Ok(()));
     let edges = PerformanceState { tonic: *TONIC_RANGE.end(), note: *NOTE_RANGE.end(), fm: *FM_RANGE.end(), chord: 10, ..ok };
-    assert_eq!(run(&edges, &ResonatorPatch { structure: 1.0, brightness: 1.0, damping: 1.0, position: 1.0 }), Ok(()));
+    assert_eq!(run(&edges, &ResonatorPatch { structure: *STRUCTURE_RANGE.end(), brightness: 1.0, damping: MAX_DAMPING, position: 1.0 }), Ok(()));
     let low = PerformanceState { tonic: *TONIC_RANGE.start(), note: *NOTE_RANGE.start(), fm: *FM_RANGE.start(), ..ok };
     assert_eq!(run(&low, &ResonatorPatch { structure: 0.0, brightness: 0.0, damping: 0.0, position: 0.0 }), Ok(()));
 
@@ -161,11 +161,23 @@ fn out_of_range_inputs_are_refused_before_the_cxx() {
     }
     let bad_patches = [
         ResonatorPatch { structure: 1.01, ..ok_patch },
+        // Exactly 1.0 would make `Interpolate` read one past `lut_stiffness` (modal) or
+        // `lut_fm_frequency_quantizer` (FM voice), and damping 1.0 one past `lut_4_decades`.
+        ResonatorPatch { structure: 1.0, ..ok_patch },
+        ResonatorPatch { structure: 0.9996, ..ok_patch },
+        ResonatorPatch { damping: 1.0, ..ok_patch },
         ResonatorPatch { brightness: -0.01, ..ok_patch },
         ResonatorPatch { damping: f32::NAN, ..ok_patch },
         ResonatorPatch { position: f32::INFINITY, ..ok_patch },
     ];
     for m in bad_patches {
         assert_eq!(run(&ok, &m), Err(Error::BadParameter), "{m:?}");
+    }
+    // Audio input samples must be finite and within the codec's -1 to 1.
+    for bad in [f32::NAN, f32::INFINITY, 1.5, -1.01] {
+        let mut samples = [0.0_f32; RESONATOR_BLOCK_SIZE];
+        samples[5] = bad;
+        let (mut o, mut a) = ([0.0_f32; RESONATOR_BLOCK_SIZE], [0.0_f32; RESONATOR_BLOCK_SIZE]);
+        assert_eq!(part.process(&ok, &ok_patch, &samples, &mut o, &mut a), Err(Error::BadParameter), "input {bad}");
     }
 }

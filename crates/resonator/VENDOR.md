@@ -59,7 +59,12 @@ specify:
   counter, `String::src_phase_`, `FMVoice::previous_sample_`, `Plucker::comb_filter_gain_`, the
   reverb's low-pass states).
 - **Out-of-bounds reads**: a table index the firmware never produces for in-range inputs is
-  clamped to the table instead of reading past it (in-range inputs are unaffected).
+  clamped to the table instead of reading past it (in-range inputs are unaffected). One read past a
+  table happens on the module itself: at damping 1.0 (which its CV scaler allows) the modal model's
+  `Interpolate(lut_4_decades, damping, 256)` reads one entry past the table, multiplied by a zero
+  fraction. The port clamps that index, so its value is the firmware's whenever the module's
+  neighboring memory holds a finite float; the oracle refuses damping 1.0 (and structure above the
+  module's 0.9995 ceiling), so the null tests stop just below it.
 
 ## Changes
 

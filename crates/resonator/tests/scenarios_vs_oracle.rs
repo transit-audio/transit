@@ -175,8 +175,14 @@ fn full_range_macro_ramps_on_every_model() {
             for b in 0..blocks {
                 let t = b as f32 / (blocks - 1) as f32;
                 // Each macro ramps at its own rate, so the ramps cross at different points.
-                let patch =
-                    ResonatorPatch { structure: t, brightness: (t * 3.0).fract(), damping: 1.0 - (t * 2.0).fract(), position: (t * 5.0).fract() };
+                let patch = ResonatorPatch {
+                    // The module's ranges: structure up to 0.9995, damping below 1 (the oracle
+                    // refuses an index that would read past an `Interpolate` table).
+                    structure: t * 0.9995,
+                    brightness: (t * 3.0).fract(),
+                    damping: (1.0 - (t * 2.0).fract()) * 0.999,
+                    position: (t * 5.0).fract(),
+                };
                 let mut s = Step::block(internal(50.0, b % 25 == 0), patch, vec![0.0; 24]);
                 s.performance.chord = ((t * 10.0) + 0.5) as i32;
                 if b == 0 {

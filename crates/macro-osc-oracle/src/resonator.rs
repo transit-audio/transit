@@ -30,6 +30,17 @@ pub const NOTE_RANGE: std::ops::RangeInclusive<f32> = -43.0..=84.0;
 /// The FM input the oracle accepts, semitones.
 pub const FM_RANGE: std::ops::RangeInclusive<f32> = -15.0..=15.0;
 
+/// The structure the oracle accepts: the module's own range (its CV scaler caps structure at
+/// 0.9995), which keeps `Interpolate(lut_stiffness, structure, 256)` and
+/// `Interpolate(lut_fm_frequency_quantizer, structure, 128)` inside their tables.
+pub const STRUCTURE_RANGE: std::ops::RangeInclusive<f32> = 0.0..=0.9995;
+
+/// The largest damping the oracle accepts: strictly below 1, so `Interpolate(lut_4_decades,
+/// damping, 256)` reads at most entries 255 and 256 of 257. (On the module damping reaches 1.0 and
+/// the firmware's modal model then reads one entry past `lut_4_decades`, multiplied by a zero
+/// fraction; the oracle cannot reproduce that read soundly.)
+pub const MAX_DAMPING: f32 = 0.999_999_94;
+
 /// Whether the C++ can take these inputs without reading past a table (invariant 4 of the FFI).
 ///
 /// The part indexes `lut_pitch_ratio_high[int(semitones + 128)]` (`stmlib::SemitonesToRatio`,
@@ -39,23 +50,28 @@ pub const FM_RANGE: std::ops::RangeInclusive<f32> = -15.0..=15.0;
 /// note table and the chord table), and `tonic + fm - 69` for the sympathetic tonic string. With the
 /// ranges above the worst cases are `72 + 84 + 15 + 0.15 + 24 - 69 = 126.15` and
 /// `12 - 43 - 15 - 12 - 69 = -127`, inside -128 to 127 (index 0 to 255) with a semitone of margin
-/// below for the interpolations rounding. The four macros index
-/// `lut_stiffness`, `lut_4_decades`, `lut_svf_shift` and `lut_fm_frequency_quantizer` through
-/// `Interpolate` and drive the other `SemitonesToRatio` arguments (at most 96, from damping, and 84,
-/// the strings' damping cutoff; that cutoff reaches just under 128 at damping 1 but is then read
-/// only through `Interpolate` over `lut_svf_shift`'s 257 entries); each must be within 0 to 1. Every value must be finite: a NaN
-/// reaching a float-to-int cast is undefined behavior in C++. The chord must index the chord table.
+/// below for the interpolations rounding. `Interpolate(table, x, size)` reads `table[int(x * size)]`
+/// and the entry after it, so an index of exactly 1.0 reads one past a table of `size + 1` entries:
+/// structure (`lut_stiffness`, `lut_fm_frequency_quantizer`) is limited to [`STRUCTURE_RANGE`] and
+/// damping (`lut_4_decades`) to below 1 ([`MAX_DAMPING`]). Damping also drives the strings' damping
+/// cutoff, read through `Interpolate` over `lut_svf_shift`'s 257 entries at an index under 128, and
+/// `SemitonesToRatio` arguments of at most 96. Brightness and position index no table and stay
+/// within 0 to 1. The audio input must be finite and within -1 to 1 (the codec's range): it reaches
+/// the FM voice's phase modulation, where a NaN would hit a float-to-int cast. Every value must be
+/// finite: a NaN reaching a float-to-int cast is undefined behavior in C++. The chord must index
+/// the chord table.
 #[must_use]
-pub fn inputs_in_range(performance: &PerformanceState, patch: &ResonatorPatch) -> bool {
+pub fn inputs_in_range(performance: &PerformanceState, patch: &ResonatorPatch, input: &[f32]) -> bool {
     let unit = |x: f32| (0.0..=1.0).contains(&x);
     TONIC_RANGE.contains(&performance.tonic)
         && NOTE_RANGE.contains(&performance.note)
         && FM_RANGE.contains(&performance.fm)
         && (0..CHORD_COUNT).contains(&performance.chord)
-        && unit(patch.structure)
+        && STRUCTURE_RANGE.contains(&patch.structure)
         && unit(patch.brightness)
-        && unit(patch.damping)
+        && (0.0..=MAX_DAMPING).contains(&patch.damping)
         && unit(patch.position)
+        && input.iter().all(|x| (-1.0..=1.0).contains(x))
 }
 
 /// One resonator model, in the firmware's order (`ResonatorModel` in `rings/dsp/part.h`). Names
@@ -203,7 +219,8 @@ impl ResonatorOracle<'_> {
     ///
     /// [`Error::BadBlock`] when the block is empty or too long or the lengths differ;
     /// [`Error::BadParameter`] when an input is outside what the C++ can take without reading past
-    /// a table ([`inputs_in_range`]: a macro outside 0 to 1, a tonic, note or FM outside
+    /// a table ([`inputs_in_range`]: structure outside [`STRUCTURE_RANGE`], damping not below 1,
+    /// brightness or position outside 0 to 1, an input sample outside -1 to 1, a tonic, note or FM outside
     /// [`TONIC_RANGE`], [`NOTE_RANGE`] or [`FM_RANGE`], anything not finite, a chord outside the
     /// table).
     pub fn process(
@@ -218,7 +235,7 @@ impl ResonatorOracle<'_> {
         if n == 0 || n > RESONATOR_BLOCK_SIZE || out.len() != n || aux.len() != n {
             return Err(Error::BadBlock);
         }
-        if !inputs_in_range(performance, patch) {
+        if !inputs_in_range(performance, patch, input) {
             return Err(Error::BadParameter);
         }
         self.raw.process(performance, patch, input, out, aux).ok_or(Error::BadBlock)

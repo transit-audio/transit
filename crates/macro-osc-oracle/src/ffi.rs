@@ -13,7 +13,7 @@
 //! 3. **Buffer bounds.** Every render checks the length is between 1 and the firmware's maximum block
 //!    size before the call, and passes buffers whose lengths match the size it passes.
 //! 4. **Table bounds.** Inputs the C++ indexes tables with are range-checked here before the call:
-//!    the resonator's tonic, note, FM, chord and macros (`crate::resonator::inputs_in_range`, which
+//!    the resonator's tonic, note, FM, chord, macros and input samples (`crate::resonator::inputs_in_range`, which
 //!    derives its bounds from the C++), so no input from safe Rust can make it read past a table.
 
 use std::cell::Cell;
@@ -359,7 +359,7 @@ impl<'s> RawResonator<'s> {
         if out.len() != size || aux.len() != size || size == 0 || size > self.session.resonator_max_block_size() {
             return None;
         }
-        if !crate::resonator::inputs_in_range(performance, patch) {
+        if !crate::resonator::inputs_in_range(performance, patch, input) {
             return None;
         }
         let (performance, patch) = (performance.to_c(), patch.to_c());

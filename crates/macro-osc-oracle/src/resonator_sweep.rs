@@ -31,8 +31,9 @@ pub const NOTES: [f32; 3] = [36.0, 60.0, 84.0];
 /// The tonic (the frequency knob's `12 + transpose`); the V/OCT input carries the rest of the note.
 pub const TONIC: f32 = 36.0;
 
-/// Values each macro is swept over.
-pub const LEVELS: [f32; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+/// Values each macro is swept over. The top is 0.9995, the module's structure ceiling, so no macro
+/// reads past an `Interpolate` table (`crate::resonator::inputs_in_range`).
+pub const LEVELS: [f32; 5] = [0.0, 0.25, 0.5, 0.75, 0.9995];
 
 /// FM input values (semitones) rendered at each note's internally excited center.
 pub const FMS: [f32; 2] = [-7.5, 12.25];
@@ -268,6 +269,6 @@ mod tests {
             }
             .chord()
         };
-        assert_eq!([at(0.0), at(0.25), at(0.5), at(0.75), at(1.0)], [0, 3, 5, 8, 10]);
+        assert_eq!([at(0.0), at(0.25), at(0.5), at(0.75), at(0.9995)], [0, 3, 5, 8, 10]);
     }
 }

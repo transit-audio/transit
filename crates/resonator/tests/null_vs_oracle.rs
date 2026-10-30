@@ -2,7 +2,7 @@
 //!
 //! Each model and polyphony is rendered over the oracle's resonator sweep
 //! (`resonator_sweep::points`: 159 points, notes 36, 60 and 84, three exciters, each macro at 0,
-//! 0.25, 0.5, 0.75 and 1, two FM offsets; 48 kHz; the firmware's 24-frame blocks; a fresh part and
+//! 0.25, 0.5, 0.75 and 0.9995, two FM offsets; 48 kHz; the firmware's 24-frame blocks; a fresh part and
 //! the same seed per point) by the port and by the oracle on the same runner. Both outputs must be
 //! bit-identical: the bound is the oracle's measured floor for this runner family (`-inf`) plus a
 //! margin of zero, and the bits are compared too (a `+0.0` against a `-0.0` fails). The random state

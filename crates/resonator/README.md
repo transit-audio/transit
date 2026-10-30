@@ -56,7 +56,8 @@ own pitch tests).
 `tests/null_vs_oracle.rs` renders every model at every polyphony (24 tests) over the oracle's
 resonator sweep (`transit_macro_osc_oracle::resonator_sweep`: 159 points of 100 ms: notes 36, 60
 and 84; the internal exciter strummed, an external impulse unstrummed and strummed; structure,
-brightness, damping and position each at 0, 0.25, 0.5, 0.75 and 1; two FM offsets; 24-frame
+brightness, damping and position each at 0, 0.25, 0.5, 0.75 and 0.9995 (the module's structure
+ceiling; the oracle refuses structure above it and damping at 1); two FM offsets; 24-frame
 blocks; a fresh part and the same seed per point) next to the oracle on the same runner. Both
 outputs must be bit-identical (the oracle's floor is `-inf`, the margin zero, the bits compared),
 and the random state after each point must equal the oracle's. All 24 pass (Windows x86-64 MSVC,
