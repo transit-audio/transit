@@ -24,6 +24,7 @@ transit-midi-io = { path = "crates/midi-io" }
 transit-midi = { path = "crates/midi" }
 transit-dsp = { path = "crates/dsp" }
 transit-macro-osc = { path = "crates/macro-osc" }
+transit-resonator = { path = "crates/resonator" }
 transit-clap-host = { path = "crates/clap-host" }
 transit-vst3-host = { path = "crates/vst3-host" }
 transit-au-host = { path = "crates/au-host" }
