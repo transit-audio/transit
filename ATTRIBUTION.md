@@ -20,6 +20,20 @@ The demo session's audio (drums, bass, pad) and its MIDI parts are synthesised i
 `crates/engine/src/demo.rs` by the SoundCraft contributors (MIT OR Apache-2.0). No sample files
 are bundled.
 
+## Third-party code
+
+The Macro Oscillator instrument (`crates/macro-osc`, linked into the app through `transit-dsp`) is
+a Rust port of Émilie Gillet's macro oscillator firmware and the stmlib helpers it uses (the
+`eurorack` and `stmlib` repositories, MIT), vendored from Oliver Rockstedt's Rust port
+`mi-plaits-dsp-rs` at commit `effe9864bb` (MIT) and corrected by transit against her C++ (ADR 0033).
+All three MIT notices are in `crates/macro-osc/LICENSE-THIRD-PARTY` (provenance in
+`crates/macro-osc/VENDOR.md`), and the app shows them under Help > About transit.
+
+| Path | Author | Source | License |
+|---|---|---|---|
+| `crates/macro-osc/src/` | Émilie Gillet (firmware and stmlib); Oliver Rockstedt (Rust port); transit contributors (corrections) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c`, https://github.com/sourcebox/mi-plaits-dsp-rs `effe9864bb` | MIT (`crates/macro-osc/LICENSE-THIRD-PARTY`); transit's changes MIT OR Apache-2.0 |
+| `crates/macro-osc-oracle/vendor/` | Émilie Gillet | the firmware's C++, for the null tests only (never linked into the app) | MIT (`crates/macro-osc-oracle/LICENSE-THIRD-PARTY`) |
+
 ## Fonts
 
 SoundCraft bundles no font files; the transit app bundles Inter and JetBrains Mono (rows under Files). SoundCraft uses the default fonts shipped inside the `egui` crate

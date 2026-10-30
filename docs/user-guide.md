@@ -93,3 +93,38 @@ System Properties > Environment Variables; macOS: a launchd user environment or 
 and restart transit. If only sessions with sidechain keys misbehave, set `TRANSIT_RENDER_GRAPH=0` the
 same way instead: those sessions then render on the audio thread, and sessions without keys keep the
 workers.
+
+## Macro Oscillator
+
+The Macro Oscillator is a built-in instrument (choose it from a track's instrument slot): one mono
+voice with 24 synthesis models, from virtual analog, waveshaping and FM through grain, additive,
+wavetable, chords and speech to swarms, noise, string and modal physical models and three drums.
+It is a port of Émilie Gillet's open-source macro oscillator firmware (MIT license), by way of
+Oliver Rockstedt's Rust port (MIT): the digital synthesis is the original's, checked sample by
+sample against her C++ code, but it is a port, not an emulation of the hardware module or its
+analog stages. Their license notices are in **Help > About transit**.
+
+- **Model** picks the synthesis model. **Harmonics**, **Timbre** and **Morph** are the model's
+  three tone controls; what each does depends on the model (hover a control with the Info panel on,
+  Shift+?, for a summary).
+- **Playing**: a note opens the voice's low-pass gate at the note's velocity; releasing it closes
+  the gate over **Decay**, and **LPG Color** sets how it closes (filtering as it fades at 0%, a plain
+  fade and a longer release at 100%). The drum models ring out by themselves over **Decay**.
+- **Mono, last note, legato**: one note sounds at a time. A note played while another is held takes
+  over without restarting the sound (legato); releasing it returns to the note still held. Notes
+  played under the sustain pedal are legato too.
+- **Pitch bend** spans **Bend Range** semitones (2 by default), **Tune** transposes, and the **mod
+  wheel** adds up to 100% to the control **Mod Wheel** names (Timbre by default; Harmonics, Morph or
+  Off).
+- **Aux Mix** crossfades to the model's auxiliary output, a variation of the sound. **Level** is
+  the output level; full scale is 0 dB, and the -6 dB default leaves headroom on the track.
+- **Hardware Tuning**: off (the default), the instrument plays at concert pitch, A4 = 440 Hz. On,
+  it plays the original firmware's pitch arithmetic unchanged, which runs 4.6 cents sharp at a true
+  48 kHz (the module's own clock runs slightly slow, which puts it in tune).
+- The voice runs at 44.1, 48, 88.2 or 96 kHz. At other project rates it runs at the nearest of
+  these, still in tune, with its envelopes slightly faster or slower. Changing the model while a note
+  sounds can click, as on the original.
+
+Every control can be automated (lanes `plugin:instrument:<id>`, for example
+`plugin:instrument:timbre`) and mapped to a MIDI controller (right-click it). Presets: Init, Analog
+Bass, Glass Bell, Plucked String, and your own from the panel's preset menu.

@@ -12,4 +12,16 @@ None: every bundled asset is original to SoundCraft. Icons are drawn in code; de
 synthesised in code. The egui default fonts (Ubuntu-Light, Hack, Noto Emoji, Emoji Icon Font) ship
 inside the egui crate under their own open licenses (see ATTRIBUTION.md).
 
+transit's Macro Oscillator instrument is a Rust port of Emilie Gillet's macro oscillator firmware
+and stmlib (https://github.com/pichenettes/eurorack, https://github.com/pichenettes/stmlib), by way
+of Oliver Rockstedt's Rust port (https://github.com/sourcebox/mi-plaits-dsp-rs), all under the MIT
+License:
+
+  Copyright 2016 Emilie Gillet (eurorack; the year varies by file, 2016 to 2023)
+  Copyright 2012 Emilie Gillet (stmlib)
+  Copyright (c) 2022 Oliver Rockstedt
+
+The full notices are in crates/macro-osc/LICENSE-THIRD-PARTY and in the app under
+Help > About transit.
+
 transit is based on SoundCraft by storytold (https://github.com/storytold/soundcraft), MIT OR Apache-2.0.

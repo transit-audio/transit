@@ -7,8 +7,9 @@ wavetable, chords, speech, swarm, filtered and particle noise, inharmonic string
 and three drum models), and the voice that plays them (`voice::Voice`: engine selection, the
 trigger delay, the decay envelope, the low-pass gate, the limiter and the int16 output). Pure Rust,
 `#![forbid(unsafe_code)]`, no allocation once a voice or engine is built. The voice runs at 44.1,
-48, 88.2 or 96 kHz. The transit instrument wrapper (MIDI, parameters, panel) comes in a later
-slice of #195.
+48, 88.2 or 96 kHz. The app plays it as the built-in instrument "Macro Oscillator"
+(`transit-dsp`, `plugins/macro_osc.rs`: MIDI, parameters, 12-frame blocks, the int16-to-float
+output; the panel is in `transit-ui-studio`).
 
 ## Where the code comes from
 
@@ -92,7 +93,8 @@ The firmware 1.2 voice does not crossfade or fade between engines. On a change (
 reload) it loads the new engine's data (the six-op bank, the wavetables), resets the new engine and
 resets the out channel's limiter (not the aux's), and the next block is the new engine's. The port
 does the same; an anti-click fade, if transit wants one, belongs to the instrument wrapper, outside
-the nulled voice.
+the nulled voice (the Macro Oscillator has none yet: a model change under a sounding note can click,
+as on the module).
 
 ## Sample rate
 
