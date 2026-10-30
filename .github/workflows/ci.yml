@@ -52,6 +52,7 @@ jobs:
       - run: cargo xtask layers
       - run: cargo xtask assets
       - run: cargo xtask timing
+      - run: cargo xtask help
       # Check production host code without the integration tests' self-dev feature activation.
       - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets --features transit/native-wasapi,transit/native-asio -- -D warnings

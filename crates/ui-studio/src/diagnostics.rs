@@ -668,12 +668,13 @@ impl crate::StudioApp {
 
     /// Draws the "Copy diagnostics" button and, for two seconds after a copy, "Copied". Returns the
     /// button's rect (for the layout) and whether it was clicked.
-    pub(crate) fn diagnostics_button(&self, ui: &mut egui::Ui) -> (egui::Rect, bool) {
+    pub(crate) fn diagnostics_button(&self, ui: &mut egui::Ui, help: crate::help::Id) -> (egui::Rect, bool) {
         let now = ui.input(|i| i.time);
         ui.horizontal(|ui| {
             let b = ui
                 .add_enabled(self.diag.pending.is_none(), egui::Button::new("Copy diagnostics"))
                 .on_hover_text("Copy a report of this computer's audio setup, the device list and the log's last lines.");
+            crate::help::hover(ui, &b, help);
             if now < self.diag.copied_until {
                 ui.label(egui::RichText::new("Copied").color(crate::theme::TOKENS.text_dim).size(11.5));
                 ui.ctx().request_repaint_after(std::time::Duration::from_secs_f64(self.diag.copied_until - now));

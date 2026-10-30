@@ -104,6 +104,7 @@ pub fn readout(app: &mut StudioApp, ui: &mut Ui) {
         icons::paint(p, c, Icon::Warning, 14.0, TOKENS.record);
         p.text(pos2(c.x + 12.0, c.y), Align2::LEFT_CENTER, n.to_string(), crate::theme::mono(ui.ctx(), 11.5), TOKENS.text);
     }
+    crate::help::hover(ui, &resp, crate::help::Id::TelemetryReadout);
     if resp.on_hover_text(format!("{TIP}\nClick for details.")).clicked() {
         app.telemetry.open = !app.telemetry.open;
     }

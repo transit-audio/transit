@@ -117,6 +117,7 @@ pub fn button(app: &mut StudioApp, ui: &mut Ui) {
     if resp.secondary_clicked() {
         app.metro_popup = !app.metro_popup;
     }
+    crate::help::hover(ui, &resp, crate::help::Id::TransportMetronome);
     resp.on_hover_text("Metronome: click to turn the click on or off, right-click for level and count-in");
     if app.metro_popup {
         popup(app, ui.ctx(), r);

@@ -218,25 +218,30 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                     }
                     let b = ui.add_enabled(!recording && !panel_open, apply_button);
                     controls.push(("Apply".into(), "apply", b.rect));
+                    crate::help::hover(ui, &b, crate::help::Id::AudioDevicesApply);
                     apply = b
                         .on_hover_text("Reopen the devices with these choices. Playback stops first.")
                         .on_disabled_hover_text(if panel_open { PANEL_OPEN_FIRST } else { REFUSED_RECORDING })
                         .clicked();
                     let b = ui.add_enabled(pending.is_some(), egui::Button::new("Revert"));
                     controls.push(("Revert".into(), "revert", b.rect));
+                    crate::help::hover(ui, &b, crate::help::Id::AudioDevicesRevert);
                     revert = b.on_hover_text("Discard these changes (Esc).").clicked();
                     let b = ui.add_enabled(!recording && audio_on && !panel_open, egui::Button::new("Reconnect"));
                     controls.push(("Reconnect".into(), "reconnect", b.rect));
+                    crate::help::hover(ui, &b, crate::help::Id::AudioDevicesReconnect);
                     reconnect = b
                         .on_hover_text("Reopen the saved devices (after plugging one back in).")
                         .on_disabled_hover_text(if panel_open { PANEL_OPEN_FIRST } else { REFUSED_RECORDING })
                         .clicked();
                     let b = ui.add_enabled(audio_on && !panel_open, egui::Button::new("Rescan Devices"));
                     controls.push(("Rescan Devices".into(), "rescan", b.rect));
+                    crate::help::hover(ui, &b, crate::help::Id::AudioDevicesRescan);
                     rescan = b.on_disabled_hover_text(PANEL_OPEN_FIRST).clicked();
                     if let Some(driver) = app.running_native_asio() {
                         let b = ui.add_enabled(!panel_open, egui::Button::new(DRIVER_SETTINGS));
                         controls.push((DRIVER_SETTINGS.into(), "panel", b.rect));
+                        crate::help::hover(ui, &b, crate::help::Id::AudioDevicesDriverSettings);
                         if b.on_hover_text("The open ASIO driver's own settings (buffer size, clock). Reconnect afterwards.")
                             .on_disabled_hover_text(PANEL_OPEN_FIRST)
                             .clicked()
@@ -259,9 +264,14 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                     .inner_margin(egui::Margin::same(8))
                     .show(ui, |ui| {
                         ui.set_width(ui.available_width());
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("Hover a figure for what it means.").color(TOKENS.text_dim).size(11.0));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                crate::help::header_button(app, ui, crate::help::Id::AudioDevicesWindow)
+                            });
+                        });
                         for line in &lay.opened {
-                            let text = egui::RichText::new(line).color(TOKENS.text_dim).size(11.5);
-                            ui.label(if line.starts_with("Backend") { text.monospace() } else { text });
+                            crate::help::status_line(ui, line, line.starts_with("Backend"));
                         }
                         if !audio_on {
                             ui.label(
@@ -277,7 +287,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                 ui.label(egui::RichText::new(n).color(TOKENS.text).size(11.5));
                             });
                         }
-                        let (rect, clicked) = app.diagnostics_button(ui);
+                        let (rect, clicked) = app.diagnostics_button(ui, crate::help::Id::AudioDevicesCopyDiagnostics);
                         controls.push(("Copy diagnostics".into(), "copy_diagnostics", rect));
                         copy_diagnostics |= clicked;
                     });
@@ -447,6 +457,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                         let text = egui::RichText::new(&line).color(TOKENS.text_dim).size(11.5);
                                                         let shown = ui.add(egui::Label::new(text).wrap());
                                                         controls.push((line.clone(), "calibration_text", shown.rect));
+                                                        crate::help::hover(ui, &shown, crate::help::Id::AudioDevicesCalibration);
                                                         if let Some(command) = calibration_command(&line) {
                                                             let copy = ui.small_button("Copy").on_hover_text("Copy the command to the clipboard");
                                                             if copy.clicked() {
@@ -482,6 +493,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                             egui::Label::new(egui::RichText::new(&line).color(TOKENS.text_dim).size(11.5)).wrap(),
                                                         );
                                                         controls.push((line.clone(), "calibration_text", shown.rect));
+                                                        crate::help::hover(ui, &shown, crate::help::Id::AudioDevicesCalibration);
                                                         let (measure, drawn) = calibration_measure(
                                                             ui,
                                                             &io,

@@ -162,6 +162,7 @@ pub(crate) fn add_device_menu(app: &mut StudioApp, resp: &egui::Response, tid: T
     egui::Popup::menu(resp).width(260.0).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
         // A hardware insert (ADR 0015 section 5): the signal leaves on one path and returns on another.
         let b = ui.button("Hardware Insert…").on_hover_text("Send the signal through outboard gear on the audio interface");
+        crate::help::hover(ui, &b, crate::help::Id::DeviceChainHardwareInsert);
         menu.push(MenuItem::at(ui, "Hardware Insert…".into(), "hardware_insert".into(), b.rect));
         if b.clicked() {
             hardware = true;
@@ -251,6 +252,7 @@ pub fn chain(app: &mut StudioApp, ui: &mut Ui) {
     layout.add = r4(add);
     let full = used >= t.mixer.inserts.len();
     let resp = ui.interact(add.intersect(lane), ui.id().with(("add_device", tid.0)), Sense::click());
+    crate::help::hover(ui, &resp, crate::help::Id::DeviceChainAdd);
     let pc = p.with_clip_rect(lane);
     pc.rect_filled(add, crate::theme::RADIUS, if resp.hovered() && !full { TOKENS.button_hover } else { TOKENS.button });
     crate::icons::paint(&pc, add.center(), Icon::Plus, 20.0, if full { TOKENS.text_dim } else { TOKENS.text });
@@ -397,6 +399,7 @@ fn card_body(
             TOKENS.text_dim
         };
         crate::icons::paint(&pc, pb.center(), Icon::Power, 14.0, ink);
+        crate::help::hover(ui, &resp, crate::help::Id::DeviceChainBypass);
         if resp.on_hover_text(if on { "Bypass" } else { "Turn on" }).clicked() {
             let _ = app.toggle_bypass(t, slot);
         }
@@ -405,6 +408,7 @@ fn card_body(
         let xb = Rect::from_min_size(pos2(r.max.x - 20.0, r.min.y + 3.0), vec2(16.0, 16.0));
         let resp = ui.interact(xb.intersect(lane), ui.id().with(("remove", t.0, salt)), Sense::click());
         crate::icons::paint(&pc, xb.center(), Icon::Remove, 14.0, if resp.hovered() { TOKENS.record } else { TOKENS.text_dim });
+        crate::help::hover(ui, &resp, crate::help::Id::DeviceChainRemove);
         if resp.on_hover_text("Remove").clicked() {
             let _ = app.remove_device(t, slot);
         }
@@ -425,6 +429,7 @@ fn card_body(
         } else if grip.hovered() {
             ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
         }
+        crate::help::hover(ui, &grip, crate::help::Id::DeviceChainTitle);
         grip.on_hover_text("Drag to reorder; Alt-drag to copy; double-click to edit");
     }
     pc.with_clip_rect(name_r.intersect(lane)).text(
@@ -493,6 +498,7 @@ fn card_body(
             pc.text(eb.center(), Align2::CENTER_CENTER, "Choose…", FontId::proportional(10.5), TOKENS.text);
         }
         c.pick_button = r4(pick);
+        crate::help::hover(ui, &resp, crate::help::Id::DeviceChainInstrument);
         let resp = resp.on_hover_text(if ins.is_some() { "Replace the instrument" } else { "Choose an instrument" });
         let mut filter = std::mem::take(&mut app.mixer.instrument_filter);
         let mut filter_rect = app.mixer.filter_rect;
@@ -503,6 +509,7 @@ fn card_body(
             let label = crate::external_instrument::MENU_LABEL;
             let b = crate::menus::check_button(ui, ext.is_some(), label)
                 .on_hover_text("Play a hardware synth: the track's MIDI goes to its port and its audio comes back on an input");
+            crate::help::hover(ui, &b, crate::help::Id::DeviceChainHardwareSynth);
             menu.push(MenuItem::at(ui, label.to_string(), transit_model::EXTERNAL_INSTRUMENT_PLUGIN.to_string(), b.rect));
             if b.clicked() {
                 external = true;
@@ -788,6 +795,7 @@ fn key_control(
     crate::icons::paint(&pc, pos2(kb.max.x - 10.0, kb.center().y), Icon::ChevronDown, 12.0, TOKENS.text_dim);
     c.key_button = r4(kb);
     c.key_label = label;
+    crate::help::hover(ui, &resp, crate::help::Id::DeviceChainSidechain);
     let resp = resp.on_hover_text("Sidechain key: detect on another track or bus instead of this track");
     let current = ins.key;
     let pre = current.map_or(app.mixer.key_pre, |k| k.tap == Tap::Pre);

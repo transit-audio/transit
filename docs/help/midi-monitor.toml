@@ -1,0 +1,29 @@
+# The MIDI Monitor window: every message on the open ports, and what the controls do.
+area = "midi-monitor"
+title = "MIDI Monitor"
+link = "user-guide.md"
+
+[[entry]]
+id = "midi_monitor.window"
+name = "MIDI Monitor"
+text = "Lists every MIDI message arriving on or leaving the open ports, with its time, port, channel and a plain reading. Use it to check that a controller is connected and to see exactly what it sends. While this window is open transit opens every input port it sees."
+
+[[entry]]
+id = "midi_monitor.learn"
+name = "Learn"
+text = "Press a button or move a knob on your controller: the next message is shown here in large type, so you can tell what it sends."
+
+[[entry]]
+id = "midi_monitor.dropped"
+name = "Dropped events"
+text = "Events the monitor skipped because its buffer was full. They were skipped, not delayed. Healthy is none; filter out clock pulses or active sensing if a busy device fills it."
+
+[[entry]]
+id = "midi_monitor.truncated"
+name = "SysEx truncated"
+text = "System-exclusive messages longer than 64 bytes are shown with their total length and first 64 bytes only."
+
+[[entry]]
+id = "midi_monitor.time"
+name = "Time column"
+text = "The transport position while playing, or the UTC wall clock (marked Z) while stopped. Times are sampled as rows arrive."

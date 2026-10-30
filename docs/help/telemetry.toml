@@ -1,0 +1,226 @@
+# Callback Telemetry: the load readout in the transport bar and every figure of its details window.
+# Plain words: what it counts, what a healthy value is, what to do when it is not.
+area = "telemetry"
+title = "Callback Telemetry figures"
+page = "troubleshooting.md"
+link = "troubleshooting.md#callback-telemetry-figures"
+
+[[entry]]
+id = "telemetry.window"
+name = "Callback Telemetry"
+text = "How hard the audio thread is working. Every audio callback has a time budget (the buffer length divided by the sample rate), and these figures count how much of it is used and how often it ran out. Healthy is no over-budget callbacks and a load well under 100%."
+
+[[entry]]
+id = "telemetry.readout"
+name = "Load readout"
+text = "Audio thread time per callback as a share of the callback budget, the highest over about the last second, next to the buffer size and sample rate. Healthy is under about 50%; near 100% means dropouts are close. Click for the details window; if it stays high, raise the buffer size or freeze heavy tracks."
+
+[[entry]]
+id = "telemetry.histogram"
+name = "Callback work time"
+text = "How many callbacks took each amount of work time, from up to 8 µs to over 16 ms. Healthy is nearly all of them in bins far below the buffer length. A growing tail near or past the buffer length is where dropouts come from: find the heavy track or raise the buffer size."
+
+[[entry]]
+id = "telemetry.load_now"
+name = "Load now"
+text = "Audio thread time per callback divided by the callback budget, the highest over about the last second. Healthy is under about 50% while playing. If it climbs toward 100%, freeze or simplify heavy tracks or raise the buffer size."
+
+[[entry]]
+id = "telemetry.recent_over_budget"
+name = "Over-budget callbacks in that window"
+text = "Callbacks in the last second whose work time was longer than the callback budget. Healthy is 0. Anything else means a dropout may have just happened, so check the load and the longest callback."
+
+[[entry]]
+id = "telemetry.peak_load"
+name = "Peak callback load (since open)"
+text = "The longest callback's work time as a share of its nominal budget since the device opened, startup included. A single high peak at the start (a plug-in loading) is normal; a peak that keeps coming back is not. Reset peak starts it over."
+
+[[entry]]
+id = "telemetry.over_budget"
+name = "Over-budget callbacks (nominal)"
+text = "Callbacks since open whose work time was longer than the nominal budget, which is frames divided by the device rate. Healthy is 0, but 0 does not prove glitch-free audio: a callback can miss the hardware deadline without exceeding the nominal budget. If it counts up, raise the buffer size or lighten the session."
+
+[[entry]]
+id = "telemetry.over_budget_loading"
+name = "Over-budget callbacks while a plug-in was loading"
+text = "The part of the over-budget callbacks that happened while a plug-in was being created. Loading a plug-in during playback can cost a callback or two; that is expected. If the rest of the over-budget count is higher, loading is not the cause."
+
+[[entry]]
+id = "telemetry.nominal"
+name = "Nominal budget"
+text = "The budget is the number of frames divided by the device rate, not the time left before the hardware deadline. A callback can miss that deadline without exceeding the nominal budget, so zero over-budget callbacks is good but not proof."
+
+[[entry]]
+id = "telemetry.render_workers"
+name = "Render workers"
+text = "The worker threads that render mixer strips on other cores next to the audio thread. They are on by default, and the count is fixed when the device opens. Started with TRANSIT_RENDER_POOL=0 the audio thread renders every strip alone and the render worker rows are not shown."
+
+[[entry]]
+id = "telemetry.strip_deadline"
+name = "Strip deadline"
+text = "How much of each block's period the strips have before one that has not finished counts as an overrun, with where the value came from. The default is 150% for buffers of 1.5 ms or less and 100% for longer ones; TRANSIT_STRIP_DEADLINE_PERCENT (25 to 300) overrides it for measurements. Above 100% the audio thread may wait past the period for a slow strip instead of leaving it silent."
+
+[[entry]]
+id = "telemetry.overruns_busy"
+name = "Strip overruns, busy"
+text = "Blocks in which a strip was not rendered because its worker was still busy with an earlier block, so the strip was silent for that block. Healthy is 0. If it counts up, that strip's plug-in is too slow for this buffer size: raise the buffer or freeze the track."
+
+[[entry]]
+id = "telemetry.overruns_late"
+name = "Strip overruns, late"
+text = "Blocks in which a strip's worker had not finished by the deadline, so the strip was silent for that block and its late render was discarded. Healthy is 0. Look at the strip's cost and worst figures to see which plug-in is slow."
+
+[[entry]]
+id = "telemetry.overruns_unstarted"
+name = "Strip overruns, unstarted"
+text = "Blocks in which no thread had started a strip by the deadline and the time left could not fit it, so it was silent. Healthy is 0. Many of these mean the workers are all busy or slow to wake: close other programs and check Worker wake."
+
+[[entry]]
+id = "telemetry.upstream_missed"
+name = "Strip skips, upstream missed"
+text = "Blocks in which a strip was skipped because the strip feeding its sidechain key had no result, plus auxes skipped for the same reason. The cause is counted once at the strip that overran, so fix that one. Healthy is 0; it also stays 0 when started with TRANSIT_RENDER_GRAPH=0."
+
+[[entry]]
+id = "telemetry.overrun_blocks"
+name = "Blocks with a strip overrun"
+text = "Blocks with at least one busy, late or unstarted strip overrun. Each one is an audible gap on that strip. Healthy is 0; if not, see which of the three overrun counts is rising."
+
+[[entry]]
+id = "telemetry.deadline_overshoots"
+name = "Strip deadline overshoots"
+text = "Blocks whose wait for the workers ended more than 0.1 ms past the strips' deadline, measured from the start of the device callback. It means the callback itself started late or was held up, which the strip figures do not show. Healthy is 0; if not, close other programs and check power and driver settings."
+
+[[entry]]
+id = "telemetry.late_results"
+name = "Late strip results"
+text = "Renders that finished after their block had already been played and were discarded. Healthy is 0. It rises with Strip overruns, late."
+
+[[entry]]
+id = "telemetry.inline_renders"
+name = "Strips rendered inline"
+text = "Strips the audio thread rendered itself before the deadline because no worker had started them. A few are normal under load. Many mean the workers wake slowly, so check Worker wake."
+
+[[entry]]
+id = "telemetry.inline_refused_no_history"
+name = "Inline renders refused, no history"
+text = "Strips no worker had started that the audio thread did not render itself, because it has no earlier render to judge them by (a new strip, or a plug-in just loaded, replaced or moved). The audio thread cannot stop a render once begun, so it leaves these to the workers. A few after editing are normal."
+
+[[entry]]
+id = "telemetry.inline_refused_worst_case"
+name = "Inline renders refused, worst case"
+text = "Strips the audio thread did not render itself because the strip's slowest recent render would not fit in the time left. They stay with the workers and count as unstarted if none picks them up. A steady count points at a heavy strip."
+
+[[entry]]
+id = "telemetry.inline_refused_recent_overrun"
+name = "Inline renders refused, recent overrun"
+text = "Strips the audio thread did not render itself because the strip had overrun in the last few blocks. They stay with the workers. Healthy is 0; if it counts up, look at the strip rows to find which one keeps overrunning."
+
+[[entry]]
+id = "telemetry.callback_renders"
+name = "Strips rendered on the callback"
+text = "Strips the audio thread always renders itself because they read the live input or the hardware. Not a problem figure: it only tells you how much work stays on the audio thread."
+
+[[entry]]
+id = "telemetry.faulted"
+name = "Faulted strip renders"
+text = "Renders that failed on a worker, usually a plug-in error. Healthy is 0. If it counts up, note which plug-in is on the strip and report it with Copy diagnostics."
+
+[[entry]]
+id = "telemetry.suspect"
+name = "Suspect strip blocks"
+text = "Blocks in which a strip stayed silent after a fault, until its plug-in is replaced. Healthy is 0. Replace or remove the plug-in on the strip, then it plays again."
+
+[[entry]]
+id = "telemetry.midi_deferred"
+name = "Deferred MIDI events"
+text = "Live MIDI held for a strip whose worker was busy and delivered at that strip's next block. A few are harmless; many mean the strip is overrunning and the notes arrive late."
+
+[[entry]]
+id = "telemetry.midi_dropped"
+name = "Deferred MIDI overflows"
+text = "Held MIDI events dropped because a strip's buffer was full. Note-ons and ordinary controllers go first; note-offs and pedal releases are kept. Healthy is 0; if not, the strip is badly overloaded."
+
+[[entry]]
+id = "telemetry.midi_silences"
+name = "Deferred MIDI silences"
+text = "Times a strip's held MIDI overflowed past its releases, so the strip was sent All Sound Off, All Notes Off and sustain off to avoid stuck notes. Healthy is 0."
+
+[[entry]]
+id = "telemetry.protocol_faults"
+name = "Render worker protocol faults"
+text = "Internal consistency failures between the audio thread and the workers. This should always be 0. If it is not, report it with Copy diagnostics."
+
+[[entry]]
+id = "telemetry.strip_top"
+name = "Strip overruns, top"
+text = "The three strips with the most overruns, each with its count, or none when nothing overran. A strip that was only skipped for its sidechain source reads upstream missed. Fix the first strip in the list first."
+
+[[entry]]
+id = "telemetry.strip_row"
+name = "Strip row"
+text = "One strip that overran: its busy, late and unstarted overruns, how many renders the audio thread did itself (inline), its average render cost and its slowest recent render in µs. Compare cost and worst with the buffer length to see whether the plug-in is simply too heavy. An upstream missed part names the strip the miss came from, and the counts start over when another track moves into that place."
+
+[[entry]]
+id = "telemetry.strip_lateness"
+name = "Strip lateness"
+text = "Late renders by how far past the strips' deadline they finished. Mostly in the first bins means the deadline is missed narrowly, not by a slow plug-in, so a bigger buffer or a higher deadline helps. Mostly in the last bins points at a heavy strip."
+
+[[entry]]
+id = "telemetry.worker_wake"
+name = "Worker wake"
+text = "Worker renders by the time from the audio thread handing out the block's first strip to a worker picking it up. Healthy is mostly the first bins. A long tail means the workers wake slowly: close other programs and check power settings."
+
+[[entry]]
+id = "telemetry.callbacks"
+name = "Callbacks"
+text = "Audio callbacks since the device opened. Not a problem figure; it shows the stream is running and gives the other counts a scale."
+
+[[entry]]
+id = "telemetry.timed_callbacks"
+name = "Timed callbacks"
+text = "Callbacks whose work time was measured. Healthy is a number close to Callbacks."
+
+[[entry]]
+id = "telemetry.untimed_callbacks"
+name = "Callbacks without a timing"
+text = "Callbacks that have no measured work time. It is normally 0 or a handful at the start; a large count means the load figures are based on fewer callbacks than ran."
+
+[[entry]]
+id = "telemetry.frames"
+name = "Frames"
+text = "Audio frames rendered since the device opened. A frame is one sample for every channel; divide by the sample rate for seconds of audio."
+
+[[entry]]
+id = "telemetry.total_work"
+name = "Total work time (ns)"
+text = "The audio thread's total work time since open, in nanoseconds. Divided by the real time since open it is the average load, which should be well under 100%."
+
+[[entry]]
+id = "telemetry.longest_callback"
+name = "Longest callback (ns)"
+text = "The longest single callback since open, in nanoseconds. Healthy is well under the buffer length (frames divided by the rate). Reset peak starts it over."
+
+[[entry]]
+id = "telemetry.backend_errors"
+name = "Backend errors"
+text = "Errors the audio backend reported on the stream since open; the warning icon beside the readout shows the same count. Healthy is 0. If it counts up, read the log, then try Reconnect in Audio Devices."
+
+[[entry]]
+id = "telemetry.device_lost"
+name = "Device-lost errors"
+text = "Times the audio device went away, for example unplugged or reset by its driver. These are also counted in Backend errors. Healthy is 0; plug the device back in and press Reconnect."
+
+[[entry]]
+id = "telemetry.fault_silence"
+name = "Frames silenced by a render fault"
+text = "Frames of audio replaced by silence because rendering failed. Healthy is 0. If not, find the plug-in that faulted in the log and report it."
+
+[[entry]]
+id = "telemetry.reset_peak"
+name = "Reset peak"
+text = "Starts the since-open peak load and longest callback over. Use it after a change to see whether the peak comes back."
+
+[[entry]]
+id = "telemetry.copy_diagnostics"
+name = "Copy diagnostics"
+text = "Copies a report of your system, audio devices, these figures and the end of the log to the clipboard. Paste it into a bug report; it holds nothing from your sessions."

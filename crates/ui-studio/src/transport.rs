@@ -5,6 +5,7 @@
 //! stopped, or a double-click, returns to zero. Space remains Play/Stop, without this second-stop action.
 
 use crate::StudioApp;
+use crate::help::Id;
 use crate::icons::{self, Icon};
 use crate::theme::{TOKENS, TRANSPORT_H};
 use egui::{Align2, Color32, Rect, Sense, Ui, pos2, vec2};
@@ -27,6 +28,17 @@ fn button(app: &mut StudioApp, ui: &mut Ui, name: &str, which: Icon, on: bool, o
     app.arrange.layout.transport.insert(name.to_string(), [r.min.x, r.min.y, r.max.x, r.max.y]);
     app.arrange.layout.transport_icons.insert(name.to_string(), which.name().to_string());
     let tooltip = if name == "stop" { "Stop: back to start position; again: to the beginning" } else { name };
+    let id = match name {
+        "rtz" => Some(Id::TransportRtz),
+        "stop" => Some(Id::TransportStop),
+        "play" => Some(Id::TransportPlay),
+        "record" => Some(Id::TransportRecord),
+        "cycle" => Some(Id::TransportCycle),
+        _ => None,
+    };
+    if let Some(id) = id {
+        crate::help::hover(ui, &resp, id);
+    }
     resp.on_hover_text(tooltip)
 }
 
@@ -96,6 +108,7 @@ fn play_button(app: &mut StudioApp, ui: &mut Ui, on: bool) -> egui::Response {
     ui.ctx().request_repaint_after(std::time::Duration::from_millis(if pulsing { 50 } else { 250 }));
     app.arrange.layout.transport.insert("play".to_string(), [r.min.x, r.min.y, r.max.x, r.max.y]);
     app.arrange.layout.transport_icons.insert("play".to_string(), Icon::Play.name().to_string());
+    crate::help::hover(ui, &resp, Id::TransportPlay);
     resp.on_hover_text(reason)
 }
 
@@ -153,10 +166,10 @@ pub fn bar(app: &mut StudioApp, ui: &mut Ui) {
                 ui.add_space(2.0 * crate::theme::SPACE);
                 let at = app.position();
                 match &counting {
-                    Some(label) => readout(ui, &format!("Count-in {label}"), 128.0, TOKENS.record),
-                    None => readout(ui, &bars_beats(app, at), 128.0, TOKENS.text),
+                    Some(label) => readout(ui, &format!("Count-in {label}"), 128.0, TOKENS.record, Id::TransportPosition),
+                    None => readout(ui, &bars_beats(app, at), 128.0, TOKENS.text, Id::TransportPosition),
                 }
-                readout(ui, &min_sec(app, at), 92.0, TOKENS.text_dim);
+                readout(ui, &min_sec(app, at), 92.0, TOKENS.text_dim, Id::TransportTime);
                 ui.add_space(2.0 * crate::theme::SPACE);
                 crate::tempo_edit::tempo_field(app, ui);
                 crate::tempo_edit::meter_field(app, ui);
@@ -173,14 +186,16 @@ pub fn bar(app: &mut StudioApp, ui: &mut Ui) {
         });
 }
 
-fn readout(ui: &mut Ui, text: &str, w: f32, color: Color32) {
-    let (r, _) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());
+fn readout(ui: &mut Ui, text: &str, w: f32, color: Color32, help: Id) {
+    let (r, resp) = ui.allocate_exact_size(vec2(w, 26.0), Sense::hover());
+    crate::help::hover(ui, &resp, help);
     ui.painter().rect_filled(r, crate::theme::RADIUS, TOKENS.bg);
     ui.painter().text(r.center(), Align2::CENTER_CENTER, text, crate::theme::mono(ui.ctx(), 13.0), color);
 }
 
 fn main_meter(app: &mut StudioApp, ui: &mut Ui) {
     let (r, resp) = ui.allocate_exact_size(vec2(120.0, 16.0), Sense::click());
+    crate::help::hover(ui, &resp, Id::TransportMainMeter);
     if resp.on_hover_text("Click to clear the clip latch and the peak hold, Ctrl-click for every meter").clicked() {
         if ui.input(|i| i.modifiers.command || i.modifiers.ctrl) {
             app.reset_meters(None);

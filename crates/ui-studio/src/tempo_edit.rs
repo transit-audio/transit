@@ -266,6 +266,7 @@ pub fn tempo_field(app: &mut StudioApp, ui: &mut Ui) {
         }
     }
     let tip = if g.tick > 0 { format!("Tempo at bar {}", g.bar) } else { "Tempo".to_string() };
+    crate::help::hover(ui, &resp, crate::help::Id::TransportTempo);
     resp.on_hover_text(format!("{tip}. Drag to change, Shift for fine, double-click to type, wheel nudges"));
 }
 
@@ -324,6 +325,7 @@ pub fn meter_field(app: &mut StudioApp, ui: &mut Ui) {
     if resp.clicked() {
         app.tempo_ui.meter = if open { None } else { Some(MeterPopup { text: format!("{n}/{d}"), tick: mtick, fresh: true }) };
     }
+    crate::help::hover(ui, &resp, crate::help::Id::TransportMeter);
     resp.on_hover_text("Meter. Click to change");
     if app.tempo_ui.meter.is_some() {
         popup(app, ui.ctx(), r);

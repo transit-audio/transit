@@ -1,0 +1,44 @@
+# The device chain below the mixer: instrument, effects, sidechain keys and hardware.
+area = "device-chain"
+title = "Device chain"
+link = "user-guide.md"
+
+[[entry]]
+id = "device_chain.add"
+name = "Add effect"
+text = "Adds an effect, a hardware insert or a plug-in to the end of the chain. A chain holds up to ten devices."
+
+[[entry]]
+id = "device_chain.hardware_insert"
+name = "Hardware insert"
+text = "Sends the signal out of one path of the audio interface through outboard gear and brings it back on another. Measure its delay in Audio Devices so it lines up."
+
+[[entry]]
+id = "device_chain.bypass"
+name = "Bypass"
+text = "Turns the device off without removing it, so you can compare with and without it. Click again to turn it back on."
+
+[[entry]]
+id = "device_chain.remove"
+name = "Remove"
+text = "Takes the device out of the chain. Undo brings it back."
+
+[[entry]]
+id = "device_chain.title"
+name = "Device title"
+text = "Drag to reorder the chain, Alt-drag to copy the device, double-click to open its window."
+
+[[entry]]
+id = "device_chain.instrument"
+name = "Instrument"
+text = "The plug-in that makes sound from this track's MIDI. Click to choose one or replace it."
+
+[[entry]]
+id = "device_chain.hardware_synth"
+name = "Hardware synth"
+text = "Plays a hardware synth: the track's MIDI goes to its port and its audio comes back on an input path."
+
+[[entry]]
+id = "device_chain.sidechain"
+name = "Sidechain key"
+text = "Makes a compressor or gate listen to another track or bus instead of this one, for example to duck a pad under a kick."

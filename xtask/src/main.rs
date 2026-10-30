@@ -1,8 +1,9 @@
-//! `cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico>` — repository gates.
+//! `cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico|help>` — repository gates.
 
 #![deny(clippy::unwrap_used, clippy::expect_used, clippy::panic, clippy::unimplemented, clippy::todo, clippy::unreachable)]
 
 mod file_size;
+mod help;
 mod ico;
 mod timing;
 
@@ -273,6 +274,7 @@ fn ci() -> Result<(), String> {
         ("assets", Box::new(assets)),
         ("layers", Box::new(layers)),
         ("timing", Box::new(|| timing::run(&root()))),
+        ("help", Box::new(|| help::run(&root(), &[]))),
         ("rt-targets", Box::new(rt_targets)),
         ("audio-bench-fake", Box::new(audio_bench_fake)),
     ];
@@ -293,8 +295,10 @@ fn ci() -> Result<(), String> {
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    if let Some(gate) =
-        args.first().map(String::as_str).filter(|g| ["ci", "layers", "file-size", "assets", "timing", "rt-targets", "audio-bench", "ico"].contains(g))
+    if let Some(gate) = args
+        .first()
+        .map(String::as_str)
+        .filter(|g| ["ci", "layers", "file-size", "assets", "timing", "rt-targets", "audio-bench", "ico", "help"].contains(g))
     {
         announce(gate);
     }
@@ -302,12 +306,13 @@ fn main() -> ExitCode {
         Some("ci") => ci(),
         Some("layers") => layers(),
         Some("file-size") => file_size::run(&root()),
+        Some("help") => help::run(&root(), args.get(1..).unwrap_or(&[])),
         Some("assets") => assets(),
         Some("timing") => timing::run(&root()),
         Some("rt-targets") => rt_targets(),
         Some("audio-bench") => audio_bench(args.get(1..).unwrap_or(&[])),
         Some("ico") => ico::run(args.get(1..).unwrap_or(&[])),
-        _ => Err("usage: cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico>".into()),
+        _ => Err("usage: cargo xtask <ci|layers|file-size|assets|timing|rt-targets|audio-bench|ico|help>".into()),
     };
     match r {
         Ok(()) => ExitCode::SUCCESS,

@@ -4,6 +4,14 @@
 The keymap is defined in `crates/ui-studio/src/shortcuts.rs`. Ctrl means Cmd on macOS.
 Global shortcuts apply anywhere unless a text field or dialog has the keyboard.
 
+## Info panel
+
+| Scope | Action | Keys |
+|---|---|---|
+| Global | Info Panel | Shift+? |
+
+Ableton's Info View and Logic's Quick Help both use Shift+?. The panel sits bottom-left and explains the control or figure under the pointer, with its key and a More button for the docs page. Help > Info Panel does the same.
+
 ## Interface and arrangement zoom
 
 | Scope | Action | Keys |

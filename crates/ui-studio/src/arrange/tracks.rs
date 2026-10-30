@@ -69,6 +69,16 @@ pub(super) fn track_header(
         let b = Rect::from_min_size(pos2(x - 20.0, r.min.y + 5.0), vec2(19.0, 16.0));
         x -= 22.0;
         let resp = ui.interact(b.intersect(list), ui.id().with((cmd, t.id.0)), Sense::click());
+        let help = match cmd {
+            "mix.input_monitor" => Some(crate::help::Id::ArrangeHeaderMonitor),
+            "mix.record_arm" => Some(crate::help::Id::ArrangeHeaderArm),
+            "mix.solo" => Some(crate::help::Id::ArrangeHeaderSolo),
+            "mix.mute" => Some(crate::help::Id::ArrangeHeaderMute),
+            _ => None,
+        };
+        if let Some(help) = help {
+            crate::help::hover(ui, &resp, help);
+        }
         let fill = if on {
             color
         } else if resp.hovered() && enabled {
@@ -99,6 +109,7 @@ pub(super) fn track_header(
     let shown = app.ui.auto_shown.contains(&t.id);
     let b = Rect::from_min_size(pos2(x - 20.0, r.min.y + 5.0), vec2(19.0, 16.0));
     let resp = ui.interact(b.intersect(list), ui.id().with(("auto_toggle", t.id.0)), Sense::click());
+    crate::help::hover(ui, &resp, crate::help::Id::ArrangeHeaderAutomation);
     let fill = if shown {
         TOKENS.accent
     } else if resp.hovered() {
@@ -117,6 +128,7 @@ pub(super) fn track_header(
     let vol = Rect::from_min_size(pos2(r.max.x - 72.0, r.min.y + 23.0), vec2(66.0, 15.0));
     row.volume = r4(vol);
     let resp = ui.interact(vol.intersect(list), ui.id().with(("vol", t.id.0)), Sense::click_and_drag());
+    crate::help::hover(ui, &resp, crate::help::Id::ArrangeHeaderVolume);
     p.rect_filled(vol, crate::theme::RADIUS_SM, TOKENS.bg);
     let db = app.followed(t, &crate::automation::Lane::Volume).unwrap_or(m.volume_db);
     let text = if db <= -144.0 { "-inf dB".to_string() } else { format!("{db:+.1} dB") };
@@ -148,6 +160,7 @@ pub(super) fn track_header(
         let frozen = t.freeze.is_some();
         let b = Rect::from_min_size(pos2(vol.min.x - 24.0, r.min.y + 22.0), vec2(19.0, 16.0));
         let resp = ui.interact(b.intersect(list), ui.id().with(("freeze", t.id.0)), Sense::click());
+        crate::help::hover(ui, &resp, crate::help::Id::ArrangeHeaderFreeze);
         let fill = if frozen {
             TOKENS.accent
         } else if resp.hovered() {
@@ -173,6 +186,7 @@ pub(super) fn track_header(
     // right-click opens the track menu.
     let name_area = Rect::from_min_max(r.min, pos2(r.max.x - 114.0, r.max.y));
     let resp = ui.interact(name_area.intersect(list), ui.id().with(("hdr", t.id.0)), Sense::click_and_drag());
+    crate::help::hover(ui, &resp, crate::help::Id::ArrangeHeaderName);
     // Interacted after the name area so the chip wins where they overlap.
     let chip = outputs.and_then(|view| {
         let frozen_button = if matches!(t.kind, TrackKind::Audio | TrackKind::Instrument) { 24.0 } else { 0.0 };

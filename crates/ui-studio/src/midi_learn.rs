@@ -996,6 +996,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         .default_size(size - CHROME)
         .default_pos(egui::pos2(ctx.content_rect().center().x - size.x / 2.0, crate::theme::TRANSPORT_H + 80.0))
         .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Hover a control for what it does.").color(TOKENS.text_dim).size(11.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| crate::help::header_button(app, ui, crate::help::Id::MidiMappingsWindow));
+            });
             if dropped > 0 {
                 ui.label(egui::RichText::new(format!("{dropped} controller button presses or learn messages were dropped (the UI was not draining fast enough).")).color(TOKENS.record));
             }
@@ -1097,11 +1101,11 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                         });
                         tr.col(|ui| {
                             let mut thru = row.pass_through;
-                            if ui
+                            let check = ui
                                 .checkbox(&mut thru, "")
-                                .on_hover_text("Also send the mapped message to the track (its instrument, a recording). Off: only the control hears it.")
-                                .changed()
-                            {
+                                .on_hover_text("Also send the mapped message to the track (its instrument, a recording). Off: only the control hears it.");
+                            crate::help::hover(ui, &check, crate::help::Id::MidiMappingsPassThrough);
+                            if check.changed() {
                                 actions.push((i, Action::PassThrough(thru)));
                             }
                         });
@@ -1115,7 +1119,9 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                         });
                         tr.col(|ui| {
                             let label = if row.learning { "Listening..." } else { "Learn" };
-                            if ui.button(label).on_hover_text("Press a key or move a knob: it replaces this row's source.").clicked() {
+                            let learn = ui.button(label).on_hover_text("Press a key or move a knob: it replaces this row's source.");
+                            crate::help::hover(ui, &learn, crate::help::Id::MidiMappingsLearn);
+                            if learn.clicked() {
                                 actions.push((i, if row.learning { Action::Cancel } else { Action::Learn }));
                             }
                         });

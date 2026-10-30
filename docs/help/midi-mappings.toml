@@ -1,0 +1,19 @@
+# The MIDI Mappings window: controller messages mapped to transit controls.
+area = "midi-mappings"
+title = "MIDI Mappings"
+link = "user-guide.md"
+
+[[entry]]
+id = "midi_mappings.window"
+name = "MIDI Mappings"
+text = "Every control a controller message is mapped to, for this session and for this computer's controller profile. Right-click a mixer control and choose MIDI Learn to add a row; here you change its range, relearn it or delete it."
+
+[[entry]]
+id = "midi_mappings.pass_through"
+name = "Pass through"
+text = "Also send the mapped message to the track (its instrument, a recording). Off means only the control hears it."
+
+[[entry]]
+id = "midi_mappings.learn"
+name = "Learn"
+text = "Press a key or move a knob: it replaces this row's source. Press again while it is listening to cancel."

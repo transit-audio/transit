@@ -577,6 +577,7 @@ pub fn led(app: &mut StudioApp, ui: &mut egui::Ui) {
     p.text(pos2(c.x + 11.0, r.center().y), Align2::LEFT_CENTER, "MIDI", font, TOKENS.text_dim);
     app.midi_monitor.led_rect = crate::arrange::r4(r);
     let tip = led_tip(&app.midi_monitor.led.tip.0, &app.midi_monitor.led.tip.1);
+    crate::help::hover(ui, &resp, crate::help::Id::TransportMidiLed);
     if resp.on_hover_text(tip).clicked() {
         let _ = app.run("window.midi_monitor", json!({"value": true}));
     }
@@ -782,6 +783,10 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         .default_size(size)
         .default_pos(egui::pos2(ctx.content_rect().center().x - size[0] / 2.0, crate::theme::TRANSPORT_H + 60.0))
         .show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Hover a control for what it does.").color(TOKENS.text_dim).size(11.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| crate::help::header_button(app, ui, crate::help::Id::MidiMonitorWindow));
+            });
             let s = &app.midi_monitor;
             if !has_player {
                 ui.label(egui::RichText::new("No audio engine is running (started with --no-audio), so no MIDI ports are open.").color(TOKENS.text_dim));
@@ -806,20 +811,23 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                 ui.toggle_value(&mut pause, "Pause");
                 clear = ui.button("Clear").clicked();
                 ui.toggle_value(&mut prefs.autoscroll, "Follow");
-                ui.toggle_value(&mut learn, "Learn").on_hover_text("Press a button on your controller: the next message is shown here in large type.");
+                let learn_toggle = ui.toggle_value(&mut learn, "Learn").on_hover_text("Press a button on your controller: the next message is shown here in large type.");
+                crate::help::hover(ui, &learn_toggle, crate::help::Id::MidiMonitorLearn);
                 copy = ui.button("Copy last 100 lines").clicked();
                 copy_report = ui.button("Copy report").clicked();
                 ui.checkbox(&mut prefs.show_clock, "Show clock pulses");
                 let (din, dout) = s.dropped;
                 if din + dout > 0 {
-                    ui.label(egui::RichText::new(format!("Dropped events: {din} in, {dout} out")).color(TOKENS.record))
+                    let dropped = ui.label(egui::RichText::new(format!("Dropped events: {din} in, {dout} out")).color(TOKENS.record))
                         .on_hover_text("The monitor's ring was full: events were skipped, not delayed.");
+                    crate::help::hover(ui, &dropped, crate::help::Id::MidiMonitorDropped);
                 } else {
                     ui.label(egui::RichText::new("No dropped events").color(TOKENS.text_dim));
                 }
                 if s.sysex_truncated > 0 {
-                    ui.label(format!("SysEx truncated: {}", s.sysex_truncated))
+                    let truncated = ui.label(format!("SysEx truncated: {}", s.sysex_truncated))
                         .on_hover_text("Messages longer than 64 bytes retain their total length and first 64 bytes.");
+                    crate::help::hover(ui, &truncated, crate::help::Id::MidiMonitorTruncated);
                 }
                 if s.paused_at.is_some() {
                     ui.label(egui::RichText::new(format!("Paused: {} new events behind the view", s.behind())).color(TOKENS.mute));
@@ -836,8 +844,9 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
             let mono = crate::theme::mono(ui.ctx(), 12.0);
             let cw = ui.painter().layout_no_wrap("0".into(), mono.clone(), TOKENS.text).size().x;
             let head = format!("{:>13}  {:<5} {:<w$}  {:>2}  Message", "Time", "Dir", "  Port", "Ch", w = PORT_WIDTH + 2);
-            ui.label(egui::RichText::new(head).font(mono.clone()).strong().color(TOKENS.text_dim))
+            let head = ui.label(egui::RichText::new(head).font(mono.clone()).strong().color(TOKENS.text_dim))
                 .on_hover_text("Transport position while playing; UTC wall clock (Z) while stopped. Times are sampled as rows arrive.");
+            crate::help::hover(ui, &head, crate::help::Id::MidiMonitorTime);
             let upto = s.paused_at;
             let caught = match &s.learn { Learn::Caught(row) => Some(row.seq), _ => None };
             let shown: Vec<&Row> = s.rows.iter().filter(|r| caught == Some(r.seq) || (upto.is_none_or(|u| r.seq <= u) && passes(&prefs.filters, r))).collect();

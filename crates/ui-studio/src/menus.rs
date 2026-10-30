@@ -313,6 +313,12 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         app.ui.show_shortcuts = true;
                         ui.close();
                     }
+                    let b = ui.add(egui::Button::new("Info Panel").selected(app.help.open).shortcut_text(label(A::ToggleInfo)));
+                    app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Info Panel".into(), String::new(), b.rect));
+                    if b.clicked() {
+                        app.help.toggle();
+                        ui.close();
+                    }
                     ui.separator();
                     let why = app.update_check_unavailable();
                     let b = ui.add_enabled(why.is_none(), egui::Button::new("Check for Updates…")).on_disabled_hover_text(why.unwrap_or_default());

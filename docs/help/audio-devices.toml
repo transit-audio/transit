@@ -1,0 +1,176 @@
+# Audio Devices: the status card (what is open, the backend's own counters, recovery) and its buttons.
+# Plain words: what it counts, what a healthy value is, what to do when it is not.
+area = "audio-devices"
+title = "Audio Devices figures"
+page = "troubleshooting.md"
+link = "troubleshooting.md#audio-devices-figures"
+
+[[entry]]
+id = "audio_devices.window"
+name = "Audio Devices"
+text = "Choose the audio system, devices, sample rate and buffer size, and read what is actually open and how the driver is keeping up. The lines in the card above the settings are live; the settings change only when you press Apply."
+
+[[entry]]
+id = "audio_devices.output_open"
+name = "Output open"
+text = "The output device that is running, then its sample rate, channels and buffer, and what the backend reported at open. If it says none, no audio device is open: pick one and press Apply, or press Reconnect."
+
+[[entry]]
+id = "audio_devices.input_open"
+name = "Input open"
+text = "The input device that is running, in the same terms as the output. It opens when a track is armed or monitored, so none yet is normal on a fresh start. For ASIO the input is the output driver's own."
+
+[[entry]]
+id = "audio_devices.device"
+name = "Device"
+text = "The name of the device as the driver reports it. If it is not the interface you meant, choose it in the lists below and press Apply."
+
+[[entry]]
+id = "audio_devices.rate"
+name = "Sample rate"
+text = "The rate the device runs at. It should match the session rate; if it differs, transit converts, which costs a little CPU. A Requested line appears when the device runs at something else than you asked for."
+
+[[entry]]
+id = "audio_devices.channels"
+name = "Channels"
+text = "How many channels of the device are open in this direction. Use the I/O paths section to choose which of them tracks and the main output use."
+
+[[entry]]
+id = "audio_devices.buffer"
+name = "Buffer size"
+text = "The device buffer in samples. A smaller buffer means lower latency but less time to render each block; a larger one is safer. Healthy is the smallest size at which the load and the counters below stay quiet while you play."
+
+[[entry]]
+id = "audio_devices.host"
+name = "Audio system"
+text = "The audio system and mode serving the device. A star (WASAPI* or ASIO*) means transit's own native backend, which reports the counters below; WASAPI also says exclusive or shared. Exclusive and ASIO give the lowest latency."
+
+[[entry]]
+id = "audio_devices.sample_format"
+name = "Device sample format"
+text = "The sample format the device was opened in, for example i24 for 24-bit integers or f32 for floating point. Nothing to fix: it tells you the converter transit uses between its own float audio and the device."
+
+[[entry]]
+id = "audio_devices.latency"
+name = "Reported latency"
+text = "The latency the driver reports for this direction, in milliseconds. Output plus input is roughly what you hear when monitoring through transit. Lower it with a smaller buffer; the Calibration line shows the measured round trip."
+
+[[entry]]
+id = "audio_devices.priority"
+name = "Thread priority"
+text = "How the audio thread is scheduled: MMCSS Pro Audio is the best case on Windows, MMCSS by driver means the ASIO driver registered its own thread, and raised priority is the fallback. MMCSS refused or pending for long means Windows would not promote the thread, and dropouts are more likely."
+
+[[entry]]
+id = "audio_devices.requested"
+name = "Requested versus running"
+text = "You asked for a buffer size or sample rate and the device runs at another. PipeWire runs a stream at the server's quantum, and any device can step down to what it offers. Change the value in the lists or in the driver's own settings, then press Reconnect."
+
+[[entry]]
+id = "audio_devices.backend"
+name = "Backend counters"
+text = "The device loop's own figures since the stream opened. Healthy is gap over period and service far below one buffer period, and no skipped wakes, timeouts, faults or driver events. Hover each figure for what it counts."
+
+[[entry]]
+id = "audio_devices.wakes"
+name = "Wakes"
+text = "How many times a second the device loop woke to serve the stream. Healthy is the sample rate divided by the buffer size (about 375 a second for 128 samples at 48 kHz). Much lower means the driver is stalling. It is left out until two samples exist."
+
+[[entry]]
+id = "audio_devices.gap_over_period"
+name = "Gap over period"
+text = "How much longer than one period the time since the previous wake or callback was, never negative: p95 is the value 95% of wakes stayed under, max the worst since open. Healthy is small next to the period. A driver that delivers in bursts can show up to a period here with nothing late, so only worry when you also hear dropouts."
+
+[[entry]]
+id = "audio_devices.late"
+name = "Late (capture)"
+text = "How late a capture wake was, measured against the end of the first packet waiting. Healthy is under one period. A large max with dropouts in recordings points at the input device or its USB connection."
+
+[[entry]]
+id = "audio_devices.service"
+name = "Service time"
+text = "How long the loop took per wake to run the audio callback and hand the data to the device, p95 and max in µs. Healthy is well under one period. If max nears the period, the callback is the bottleneck: check Callback Telemetry."
+
+[[entry]]
+id = "audio_devices.skipped"
+name = "Skipped wakes"
+text = "WASAPI exclusive wakes whose buffer was not free yet, so the loop skipped them. Healthy is 0. If it counts up while you hear dropouts, raise the buffer size."
+
+[[entry]]
+id = "audio_devices.timeouts"
+name = "Timeouts"
+text = "Times the device stopped signaling for too long, which ended the stream (for ASIO the watchdog found the driver had stopped calling back). Healthy is 0. Press Reconnect, and if it repeats, check the cable, the driver and USB power saving."
+
+[[entry]]
+id = "audio_devices.min_padding"
+name = "Min padding"
+text = "The smallest amount of audio, in frames, waiting in the device buffer at a wake in shared mode. Near 0 means the loop is running close to empty. It reads 0 in exclusive mode; raise the buffer if dropouts go with a value of 0."
+
+[[entry]]
+id = "audio_devices.max_packets"
+name = "Max packets"
+text = "The most capture packets one wake had to drain. A few is normal; a high number means wakes were late and data piled up. Healthy is a small, steady number."
+
+[[entry]]
+id = "audio_devices.faults"
+name = "Faults"
+text = "Failures that ended the stream, such as the device being lost or a failed call. Healthy is 0, and the figure only appears when it is not. Check the log, then press Reconnect."
+
+[[entry]]
+id = "audio_devices.overloads"
+name = "Overloads"
+text = "Overloads the driver reported to transit (ASIO overloads, JACK xruns). Healthy is 0. If it counts up with dropouts, raise the buffer size or reduce the session's load."
+
+[[entry]]
+id = "audio_devices.busy_skips"
+name = "Busy skips"
+text = "Callbacks that found the engine still busy with the previous one and did nothing, so that buffer kept what it held. Healthy is 0. It means a callback ran longer than a period."
+
+[[entry]]
+id = "audio_devices.position_jumps"
+name = "Position jumps"
+text = "Callbacks whose device position did not advance by exactly one buffer. Healthy is 0. It is not proof of an audible glitch, but with dropouts it points at the driver or interface."
+
+[[entry]]
+id = "audio_devices.resets"
+name = "Resets"
+text = "Reset, resync and sample-rate-change requests from the driver. Healthy is 0. Changing the buffer size in the driver's own panel causes one; transit reopens the device by itself."
+
+[[entry]]
+id = "audio_devices.recovery"
+name = "Recovery"
+text = "What transit did after the driver asked for a reset or stalled: how it is reopening and the counts of resets, stalls and reopens. Healthy is reconnected or reopened automatically. If it says the device did not reopen, press Reconnect."
+
+[[entry]]
+id = "audio_devices.calibration"
+name = "Calibration"
+text = "The measured round-trip latency of this device at this buffer size and rate, so recordings line up with what you heard. Not calibrated means recordings are placed by the driver's reported latency. Measure it with a cable from an output to an input."
+
+[[entry]]
+id = "audio_devices.apply"
+name = "Apply"
+text = "Reopens the devices with the choices in this window. Playback stops first, and it is refused while recording."
+
+[[entry]]
+id = "audio_devices.revert"
+name = "Revert"
+text = "Discards the changes you have made here and goes back to the running choices."
+
+[[entry]]
+id = "audio_devices.reconnect"
+name = "Reconnect"
+text = "Reopens the saved devices. Use it after plugging a device back in or after a recovery message says the device did not reopen."
+
+[[entry]]
+id = "audio_devices.rescan"
+name = "Rescan Devices"
+text = "Lists the audio devices again. Use it after plugging in or switching on an interface that is not in the lists."
+
+[[entry]]
+id = "audio_devices.driver_settings"
+name = "Driver settings"
+text = "Opens the running ASIO driver's own settings panel, where its buffer size and clock are set. Reconnect afterwards."
+
+[[entry]]
+id = "audio_devices.copy_diagnostics"
+name = "Copy diagnostics"
+text = "Copies a report of your system, audio devices, these figures and the end of the log to the clipboard. Paste it into a bug report; it holds nothing from your sessions."

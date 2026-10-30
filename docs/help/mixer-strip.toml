@@ -1,0 +1,61 @@
+# A mixer channel strip: name, pan, buttons, meter, fader and effect slots.
+area = "mixer-strip"
+title = "Mixer strip"
+link = "user-guide.md"
+
+[[entry]]
+id = "mixer_strip.name"
+name = "Strip name"
+text = "Click to focus the track; its device chain shows below. Double-click to rename it."
+
+[[entry]]
+id = "mixer_strip.pan"
+name = "Pan"
+text = "Places the track between left and right. Drag up or down to change it, double-click to center it, Delete resets it, right-click to map it to a MIDI controller."
+key = "Delete"
+
+[[entry]]
+id = "mixer_strip.mute"
+name = "Mute (M)"
+text = "Silences the track without changing its fader. Right-click to map it to a MIDI controller."
+
+[[entry]]
+id = "mixer_strip.solo"
+name = "Solo (S)"
+text = "Plays only the soloed tracks. Right-click to map it to a MIDI controller."
+
+[[entry]]
+id = "mixer_strip.arm"
+name = "Record arm (R)"
+text = "Arms the track for recording. The next record takes audio or MIDI onto every armed track."
+
+[[entry]]
+id = "mixer_strip.monitor"
+name = "Input monitor (I)"
+text = "Hear the track's live input through the mixer. Audio tracks only."
+
+[[entry]]
+id = "mixer_strip.peak"
+name = "Peak hold"
+text = "The highest level since it was cleared; it turns red above 0 dB. Click to reset it, Ctrl-click to reset every strip."
+
+[[entry]]
+id = "mixer_strip.meter"
+name = "Level meter"
+text = "The track's output level. A red cap at the top means it clipped. Click to clear the clip latch and the peak hold; Ctrl-click clears every strip."
+
+[[entry]]
+id = "mixer_strip.fader"
+name = "Fader"
+text = "The track's volume. Drag to change it, hold Shift for fine steps, double-click for 0 dB, double-click the readout under it to type a value, and Delete resets it."
+key = "Delete"
+
+[[entry]]
+id = "mixer_strip.insert"
+name = "Effect slot"
+text = "An effect on this track. Click for its window, right-click for more such as bypass or remove. Effects run top to bottom before the fader."
+
+[[entry]]
+id = "mixer_strip.add_effect"
+name = "Add effect"
+text = "Adds an effect to the end of this track's chain."

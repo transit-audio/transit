@@ -1,0 +1,46 @@
+# The track header in the arrangement: name, toggles, volume and freeze.
+area = "arrange-header"
+title = "Track header"
+link = "user-guide.md"
+
+[[entry]]
+id = "arrange_header.name"
+name = "Track name"
+text = "Click to select the track; Shift selects a range and Ctrl adds. Double-click to rename it, drag to move it, right-click for more."
+key = "F2"
+
+[[entry]]
+id = "arrange_header.monitor"
+name = "Input monitor (I)"
+text = "Hear the track's live input through the mixer. Audio tracks only."
+
+[[entry]]
+id = "arrange_header.arm"
+name = "Record arm (R)"
+text = "Arms the track for recording. The next record takes audio or MIDI onto every armed track."
+
+[[entry]]
+id = "arrange_header.solo"
+name = "Solo (S)"
+text = "Plays only the soloed tracks. Other tracks go quiet until you turn solo off."
+
+[[entry]]
+id = "arrange_header.mute"
+name = "Mute (M)"
+text = "Silences the track without changing its fader."
+
+[[entry]]
+id = "arrange_header.automation"
+name = "Show automation (A)"
+text = "Shows or hides the track's automation lanes under it. It only changes the view."
+key = "A"
+
+[[entry]]
+id = "arrange_header.volume"
+name = "Track volume"
+text = "The track's fader level in dB. Drag sideways to change it, hold Shift for fine steps, double-click for 0 dB."
+
+[[entry]]
+id = "arrange_header.freeze"
+name = "Freeze"
+text = "Renders the track to audio and turns its plug-ins off to save CPU. Click again to unfreeze."

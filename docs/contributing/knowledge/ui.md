@@ -180,3 +180,16 @@ A draft that differs from the running choices is pending, and nothing is opened 
   the UI thread) and any other chosen driver shows the standard rates and buffers marked "updates
   after Apply". Listing again for the new driver happens after Apply, never on a draft change.
 - The "Requested N, running at M" line follows the running device and is not part of the draft.
+
+## Info panel and help catalog (#178)
+
+`crates/ui-studio/src/help/` is the in-app help: Ableton's Info View and Logic's Quick Help, toggled
+with Shift+? (both agree; Help > Info Panel is the menu item). A widget registers the control it
+draws with `help::hover(ui, &response, Id::X)`; the panel (bottom-left, drawn last in the frame) shows
+the entry of the last control the pointer was over and keeps it when the pointer goes to the panel to
+press More. Circled question marks (`help::header_button`) exist only on the diagnostics windows'
+headers, where nothing can be hovered. The text lives in `docs/help/*.toml`, not in Rust: see
+[`../../help/README.md`](../../help/README.md). `help/map.rs` maps the Callback Telemetry rows and
+the pieces of the Audio Devices status lines to ids; `cargo xtask help` is the gate. With the panel
+on, `ui.inspect` has a `help` object with the entry shown and `targets`, the rect of every help
+target drawn last frame, which tests use to hover a figure.

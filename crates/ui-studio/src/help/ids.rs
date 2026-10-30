@@ -1,0 +1,161 @@
+//! Every help id: one variant per catalog entry (`docs/help/*.toml`), with its dotted key.
+//! `cargo xtask help` reads the `Variant => "key",` lines below: each key needs an entry and each
+//! entry needs a key, and each variant must be used by a widget outside this file.
+
+macro_rules! ids {
+    ($($variant:ident => $key:literal,)*) => {
+        /// A control or figure that has a help entry.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        pub enum Id {
+            $($variant,)*
+        }
+
+        impl Id {
+            /// Every id, in catalog order.
+            pub const ALL: &[Id] = &[$(Id::$variant,)*];
+
+            /// The entry key in `docs/help/`, for example `telemetry.load_now`.
+            pub const fn key(self) -> &'static str {
+                match self {
+                    $(Id::$variant => $key,)*
+                }
+            }
+        }
+    };
+}
+
+ids! {
+    // help\arrange-header.toml
+    ArrangeHeaderName => "arrange_header.name",
+    ArrangeHeaderMonitor => "arrange_header.monitor",
+    ArrangeHeaderArm => "arrange_header.arm",
+    ArrangeHeaderSolo => "arrange_header.solo",
+    ArrangeHeaderMute => "arrange_header.mute",
+    ArrangeHeaderAutomation => "arrange_header.automation",
+    ArrangeHeaderVolume => "arrange_header.volume",
+    ArrangeHeaderFreeze => "arrange_header.freeze",
+    // help\audio-devices.toml
+    AudioDevicesWindow => "audio_devices.window",
+    AudioDevicesOutputOpen => "audio_devices.output_open",
+    AudioDevicesInputOpen => "audio_devices.input_open",
+    AudioDevicesDevice => "audio_devices.device",
+    AudioDevicesRate => "audio_devices.rate",
+    AudioDevicesChannels => "audio_devices.channels",
+    AudioDevicesBuffer => "audio_devices.buffer",
+    AudioDevicesHost => "audio_devices.host",
+    AudioDevicesSampleFormat => "audio_devices.sample_format",
+    AudioDevicesLatency => "audio_devices.latency",
+    AudioDevicesPriority => "audio_devices.priority",
+    AudioDevicesRequested => "audio_devices.requested",
+    AudioDevicesBackend => "audio_devices.backend",
+    AudioDevicesWakes => "audio_devices.wakes",
+    AudioDevicesGapOverPeriod => "audio_devices.gap_over_period",
+    AudioDevicesLate => "audio_devices.late",
+    AudioDevicesService => "audio_devices.service",
+    AudioDevicesSkipped => "audio_devices.skipped",
+    AudioDevicesTimeouts => "audio_devices.timeouts",
+    AudioDevicesMinPadding => "audio_devices.min_padding",
+    AudioDevicesMaxPackets => "audio_devices.max_packets",
+    AudioDevicesFaults => "audio_devices.faults",
+    AudioDevicesOverloads => "audio_devices.overloads",
+    AudioDevicesBusySkips => "audio_devices.busy_skips",
+    AudioDevicesPositionJumps => "audio_devices.position_jumps",
+    AudioDevicesResets => "audio_devices.resets",
+    AudioDevicesRecovery => "audio_devices.recovery",
+    AudioDevicesCalibration => "audio_devices.calibration",
+    AudioDevicesApply => "audio_devices.apply",
+    AudioDevicesRevert => "audio_devices.revert",
+    AudioDevicesReconnect => "audio_devices.reconnect",
+    AudioDevicesRescan => "audio_devices.rescan",
+    AudioDevicesDriverSettings => "audio_devices.driver_settings",
+    AudioDevicesCopyDiagnostics => "audio_devices.copy_diagnostics",
+    // help\device-chain.toml
+    DeviceChainAdd => "device_chain.add",
+    DeviceChainHardwareInsert => "device_chain.hardware_insert",
+    DeviceChainBypass => "device_chain.bypass",
+    DeviceChainRemove => "device_chain.remove",
+    DeviceChainTitle => "device_chain.title",
+    DeviceChainInstrument => "device_chain.instrument",
+    DeviceChainHardwareSynth => "device_chain.hardware_synth",
+    DeviceChainSidechain => "device_chain.sidechain",
+    // help\midi-mappings.toml
+    MidiMappingsWindow => "midi_mappings.window",
+    MidiMappingsPassThrough => "midi_mappings.pass_through",
+    MidiMappingsLearn => "midi_mappings.learn",
+    // help\midi-monitor.toml
+    MidiMonitorWindow => "midi_monitor.window",
+    MidiMonitorLearn => "midi_monitor.learn",
+    MidiMonitorDropped => "midi_monitor.dropped",
+    MidiMonitorTruncated => "midi_monitor.truncated",
+    MidiMonitorTime => "midi_monitor.time",
+    // help\mixer-strip.toml
+    MixerStripName => "mixer_strip.name",
+    MixerStripPan => "mixer_strip.pan",
+    MixerStripMute => "mixer_strip.mute",
+    MixerStripSolo => "mixer_strip.solo",
+    MixerStripArm => "mixer_strip.arm",
+    MixerStripMonitor => "mixer_strip.monitor",
+    MixerStripPeak => "mixer_strip.peak",
+    MixerStripMeter => "mixer_strip.meter",
+    MixerStripFader => "mixer_strip.fader",
+    MixerStripInsert => "mixer_strip.insert",
+    MixerStripAddEffect => "mixer_strip.add_effect",
+    // help\telemetry.toml
+    TelemetryWindow => "telemetry.window",
+    TelemetryReadout => "telemetry.readout",
+    TelemetryHistogram => "telemetry.histogram",
+    TelemetryLoadNow => "telemetry.load_now",
+    TelemetryRecentOverBudget => "telemetry.recent_over_budget",
+    TelemetryPeakLoad => "telemetry.peak_load",
+    TelemetryOverBudget => "telemetry.over_budget",
+    TelemetryOverBudgetLoading => "telemetry.over_budget_loading",
+    TelemetryNominal => "telemetry.nominal",
+    TelemetryRenderWorkers => "telemetry.render_workers",
+    TelemetryStripDeadline => "telemetry.strip_deadline",
+    TelemetryOverrunsBusy => "telemetry.overruns_busy",
+    TelemetryOverrunsLate => "telemetry.overruns_late",
+    TelemetryOverrunsUnstarted => "telemetry.overruns_unstarted",
+    TelemetryUpstreamMissed => "telemetry.upstream_missed",
+    TelemetryOverrunBlocks => "telemetry.overrun_blocks",
+    TelemetryDeadlineOvershoots => "telemetry.deadline_overshoots",
+    TelemetryLateResults => "telemetry.late_results",
+    TelemetryInlineRenders => "telemetry.inline_renders",
+    TelemetryInlineRefusedNoHistory => "telemetry.inline_refused_no_history",
+    TelemetryInlineRefusedWorstCase => "telemetry.inline_refused_worst_case",
+    TelemetryInlineRefusedRecentOverrun => "telemetry.inline_refused_recent_overrun",
+    TelemetryCallbackRenders => "telemetry.callback_renders",
+    TelemetryFaulted => "telemetry.faulted",
+    TelemetrySuspect => "telemetry.suspect",
+    TelemetryMidiDeferred => "telemetry.midi_deferred",
+    TelemetryMidiDropped => "telemetry.midi_dropped",
+    TelemetryMidiSilences => "telemetry.midi_silences",
+    TelemetryProtocolFaults => "telemetry.protocol_faults",
+    TelemetryStripTop => "telemetry.strip_top",
+    TelemetryStripRow => "telemetry.strip_row",
+    TelemetryStripLateness => "telemetry.strip_lateness",
+    TelemetryWorkerWake => "telemetry.worker_wake",
+    TelemetryCallbacks => "telemetry.callbacks",
+    TelemetryTimedCallbacks => "telemetry.timed_callbacks",
+    TelemetryUntimedCallbacks => "telemetry.untimed_callbacks",
+    TelemetryFrames => "telemetry.frames",
+    TelemetryTotalWork => "telemetry.total_work",
+    TelemetryLongestCallback => "telemetry.longest_callback",
+    TelemetryBackendErrors => "telemetry.backend_errors",
+    TelemetryDeviceLost => "telemetry.device_lost",
+    TelemetryFaultSilence => "telemetry.fault_silence",
+    TelemetryResetPeak => "telemetry.reset_peak",
+    TelemetryCopyDiagnostics => "telemetry.copy_diagnostics",
+    // help\transport.toml
+    TransportRtz => "transport.rtz",
+    TransportStop => "transport.stop",
+    TransportPlay => "transport.play",
+    TransportRecord => "transport.record",
+    TransportCycle => "transport.cycle",
+    TransportMetronome => "transport.metronome",
+    TransportPosition => "transport.position",
+    TransportTime => "transport.time",
+    TransportTempo => "transport.tempo",
+    TransportMeter => "transport.meter",
+    TransportMainMeter => "transport.main_meter",
+    TransportMidiLed => "transport.midi_led",
+}

@@ -12,6 +12,7 @@ cargo xtask layers      # crate layering and the no-UI-below-L6 rule (xtask/src/
 cargo xtask assets      # every bundled asset has a row in ATTRIBUTION.md
 cargo xtask timing      # E49-class timing assertions in tests (xtask/src/timing.rs)
 cargo xtask file-size   # no Rust file over 1500 lines; also part of `cargo xtask layers` (xtask/src/file_size.rs)
+cargo xtask help        # the help catalog: every registered help id has an entry, every entry is used, the generated docs sections are current (xtask/src/help.rs)
 ```
 
 Also `cargo xtask rt-targets` (cross-target check) when `crates/rt` or `crates/mix` changed. The
@@ -56,6 +57,17 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 | Session format | Load tests with old fixtures; `crates/engine/tests/hostile_sessions.rs` | Old sessions load; hostile input does not panic. |
 | `crates/rt` (unsafe) | `cargo xtask rt-targets`, the platform legs of `.github/workflows/rt.yml`, a refutation review quoting every `unsafe` block | See `../knowledge/unsafe.md`. |
 | UI | `crates/ui-studio/src/*_tests.rs`, the shortcut and icon guards | See `../knowledge/ui.md`. |
+
+## Help catalog (#178)
+
+`cargo xtask help` checks the in-app help against `docs/help/*.toml` (one file per area). It fails when
+
+- an id in `crates/ui-studio/src/help/ids.rs` has no entry: a widget registered a help id and nobody wrote its text;
+- an entry has no id, or its id is never used by a widget outside tests: a dead entry;
+- an entry has no name or text, or an id appears twice;
+- a generated section of a docs page (`<!-- help:telemetry -->` and `<!-- help:audio-devices -->` in `docs/troubleshooting.md`) differs from the catalog. `cargo xtask help --write` fills those sections, so the figure definitions of the troubleshooting page and the Info panel come from one source.
+
+It runs in the Windows job of `.github/workflows/ci.yml` next to `layers`, `assets` and `timing`, and as a step of `cargo xtask ci`. Adding a control with a help id means adding its entry in the same commit ([`../../help/README.md`](../../help/README.md)).
 
 ## Scheduling-condition equivalence (#210)
 

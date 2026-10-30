@@ -17,17 +17,16 @@ pub const POLL_SECS: f64 = 0.25;
 /// How long the readout keeps its overload color after an over-budget callback.
 pub const OVERLOAD_HOLD_SECS: f64 = 2.0;
 
-/// What the two numbers are, and why "nominal" matters (the playback module's wording).
-pub const EXPLAIN: &str = "Load now: audio thread time per callback divided by the callback budget, the highest over about the last second.
-\nPeak callback load (since open): the longest callback's work time as a share of its nominal budget, \
-startup included.\n\
-Over-budget callbacks (nominal): callbacks whose work time exceeded that budget.\n\
-Nominal: the budget is frames / device rate, not the time left before the hardware deadline. A callback can miss that \
-deadline without exceeding the nominal budget, so zero does not prove glitch-free audio.";
+/// What "nominal" means, and where the rest is explained: the catalog's wording (#178), so the
+/// window, the Info panel and docs/troubleshooting.md say the same.
+pub fn explain() -> String {
+    let nominal = crate::help::entry(crate::help::Id::TelemetryNominal).map_or("", |e| e.text.as_str());
+    format!("{nominal}\nHover a figure, or press ? (Info panel), for what it means and what a healthy value is.")
+}
 
 /// Space the details window keeps under its scrolling rows: title bar, button row, frame margins
 /// and a gap above the bottom edge.
-const SCROLL_RESERVE: f32 = 150.0;
+const SCROLL_RESERVE: f32 = 176.0;
 
 /// The least height the rows get on a very short window.
 const MIN_SCROLL_H: f32 = 80.0;
@@ -144,8 +143,7 @@ pub fn detail_rows_named(t: &CallbackTelemetry, strips: &[StripName]) -> Vec<Str
     // upstream-missed total row is there whenever the workers are; a keyed plan renders through
     // the task graph by default (#174), so it counts without a switch, and a strip's row gains its
     // `upstream missed` suffix only for a nonzero count (`TRANSIT_RENDER_GRAPH=0` keeps keyed
-    // plans serial and the total at 0). Each name is defined once in docs/troubleshooting.md
-    // ("Render worker figures").
+    // plans serial and the total at 0). Each name is defined once in docs/help/telemetry.toml.
     if let Some(f) = &t.strip_faults {
         rows.extend(strip_fault_rows(f));
         rows.extend(strip_figure_rows(f, strips));
@@ -381,15 +379,24 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
         .default_pos(egui::pos2((content.right() - 560.0).max(content.left()), top))
         .show(ctx, |ui| {
             ui.set_width(520.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new("Hover a figure for what it means.").color(TOKENS.text_dim).size(11.0));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    crate::help::header_button(app, ui, crate::help::Id::TelemetryWindow)
+                });
+            });
             // Side by side, so the window stays short enough to sit under the transport bar.
             egui::ScrollArea::vertical().id_salt("telemetry_rows").max_height(scroll_h).auto_shrink([false, true]).show(ui, |ui| {
                 ui.horizontal_top(|ui| {
                     ui.vertical(|ui| {
-                        ui.label(egui::RichText::new("Callback work time (callbacks per bin)").strong().color(TOKENS.text));
+                        let heading = ui.label(egui::RichText::new("Callback work time (callbacks per bin)").strong().color(TOKENS.text));
+                        crate::help::hover(ui, &heading, crate::help::Id::TelemetryHistogram);
                         egui::Grid::new("telemetry_hist").num_columns(2).spacing([2.0 * SPACE, SPACE / 2.0]).show(ui, |ui| {
                             for (i, n) in snap.duration_histogram.iter().enumerate() {
-                                ui.label(egui::RichText::new(bin_label(i)).color(TOKENS.text_dim));
-                                ui.label(egui::RichText::new(n.to_string()).font(crate::theme::mono(ui.ctx(), 12.0)).color(TOKENS.text));
+                                let a = ui.label(egui::RichText::new(bin_label(i)).color(TOKENS.text_dim));
+                                let b = ui.label(egui::RichText::new(n.to_string()).font(crate::theme::mono(ui.ctx(), 12.0)).color(TOKENS.text));
+                                crate::help::hover(ui, &a, crate::help::Id::TelemetryHistogram);
+                                crate::help::hover(ui, &b, crate::help::Id::TelemetryHistogram);
                                 ui.end_row();
                             }
                         });
@@ -400,25 +407,30 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                         egui::Grid::new("telemetry_counts").num_columns(2).spacing([2.0 * SPACE, SPACE / 2.0]).show(ui, |ui| {
                             for row in rows.iter().skip(snap.duration_histogram.len() + 1) {
                                 let (k, v) = row.rsplit_once(": ").unwrap_or((row, ""));
-                                ui.label(egui::RichText::new(k).color(TOKENS.text_dim));
-                                ui.label(egui::RichText::new(v).font(crate::theme::mono(ui.ctx(), 12.0)).color(TOKENS.text));
+                                let a = ui.label(egui::RichText::new(k).color(TOKENS.text_dim));
+                                let b = ui.label(egui::RichText::new(v).font(crate::theme::mono(ui.ctx(), 12.0)).color(TOKENS.text));
+                                if let Some(id) = crate::help::map::telemetry_row(row) {
+                                    crate::help::hover(ui, &a, id);
+                                    crate::help::hover(ui, &b, id);
+                                }
                                 ui.end_row();
                             }
                         });
                     });
                 });
                 ui.add_space(SPACE);
-                ui.label(egui::RichText::new(EXPLAIN).color(TOKENS.text_dim).size(11.0));
+                ui.label(egui::RichText::new(explain()).color(TOKENS.text_dim).size(11.0));
             });
             ui.add_space(SPACE);
             ui.horizontal(|ui| {
                 let reset = ui.button("Reset peak").on_hover_text("Start the since-open peak load and longest callback over");
+                crate::help::hover(ui, &reset, crate::help::Id::TelemetryResetPeak);
                 reset_rect = crate::arrange::r4(reset.rect);
                 if reset.clicked() {
                     reset_clicked = true;
                 }
                 ui.label(egui::RichText::new(format!("Now {} (last second)", load_text(snap.current_load_ppm))).color(TOKENS.text_dim));
-                (copy_rect, copy_clicked) = app.diagnostics_button(ui);
+                (copy_rect, copy_clicked) = app.diagnostics_button(ui, crate::help::Id::TelemetryCopyDiagnostics);
             });
         });
     if let Some(r) = r {

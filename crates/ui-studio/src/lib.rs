@@ -32,6 +32,7 @@ pub mod grid;
 pub mod groups;
 mod hardware_measure;
 pub mod hardware_ui;
+pub mod help;
 pub mod host;
 pub mod host_hang;
 pub mod icons;
@@ -434,6 +435,8 @@ pub struct StudioApp {
     pub splash: splash::SplashState,
     /// The output-callback telemetry readout and its window (polled a few times a second).
     pub telemetry: telemetry::TelemetryState,
+    /// The Info panel (#178): on or off, and the entry it shows.
+    pub help: help::HelpState,
     /// Slice 6: the name being typed, the bounce dialog and job, take lanes, the undo history.
     pub finish: finish::FinishState,
     /// Slice 7: the automation lanes' gesture, point selection, write pass and last layout.
@@ -543,6 +546,7 @@ impl StudioApp {
             midi_out_connected: Vec::new(),
             splash: splash::SplashState::default(),
             telemetry: telemetry::TelemetryState::default(),
+            help: help::HelpState::default(),
             finish: finish::FinishState::default(),
             auto: automation::AutoState::default(),
             audio_devices: audio_devices::AudioDevicesState::default(),
@@ -1129,6 +1133,10 @@ impl StudioApp {
         browser::shortcuts(self, &ctx);
         finish::shortcuts(self, &ctx);
         menus::shortcuts(self, &ctx);
+        if !ctx.egui_wants_keyboard_input() && self.dialog.is_none() && shortcuts::pressed(&ctx, shortcuts::Action::ToggleInfo) {
+            self.help.toggle();
+        }
+        self.help.layout.question_marks.clear();
         menus::menu_bar(self, ui);
         transport::bar(self, ui);
         self.update_tick(&ctx);
@@ -1162,6 +1170,7 @@ impl StudioApp {
         midi_monitor::window(self, &ctx);
         midi_learn::window(self, &ctx);
         builtin_editor::windows(self, &ctx);
+        help::panel(self, &ctx); // last, so it sees the control hovered in this frame
         if self.is_playing() || self.engine.transport.recording {
             ctx.request_repaint_after(std::time::Duration::from_millis(1000 / 30));
         } else if self.main_meter.level[0] > 0.0001 {
@@ -1230,6 +1239,7 @@ impl StudioApp {
         });
         // Added apart from the literal: it is at the macro's recursion limit.
         v["midi_learn"] = midi_learn::inspect(self);
+        v["help"] = json!(self.help.layout);
         v
     }
 }
@@ -1248,6 +1258,8 @@ mod builtin_editor_tests;
 mod external_measure_tests;
 #[cfg(test)]
 mod groups_tests;
+#[cfg(test)]
+mod help_tests;
 #[cfg(test)]
 mod keys_tests;
 #[cfg(test)]

@@ -25,6 +25,7 @@ serde.workspace = true
 serde_json.workspace = true
 log.workspace = true
 image.workspace = true
+toml = "1.1"
 
 [dev-dependencies]
 transit-playback = { workspace = true, features = ["test-hooks"] }

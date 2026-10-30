@@ -1,0 +1,69 @@
+# The transport bar: buttons, readouts, tempo and meter, meters and the load readout's neighbors.
+area = "transport"
+title = "Transport"
+link = "user-guide.md"
+
+[[entry]]
+id = "transport.rtz"
+name = "Return to Zero"
+text = "Moves the playhead to the start of the session. While playing it jumps and keeps playing."
+key = "Home or Enter"
+
+[[entry]]
+id = "transport.stop"
+name = "Stop"
+text = "Stops playback and returns to where you started. Press it again while stopped, or double-click it, to go to the beginning. Stopping a recording finishes the take."
+key = "Space"
+
+[[entry]]
+id = "transport.play"
+name = "Play"
+text = "Starts playback from the playhead. It pulses while it waits for plug-ins to load, and its tip names the plug-in when one is slow or not responding."
+key = "Space"
+
+[[entry]]
+id = "transport.record"
+name = "Record"
+text = "Records onto the armed tracks from the playhead. With the count-in on, the button pulses on each beat first. Arm a track with its R button before recording."
+key = "R or F9"
+
+[[entry]]
+id = "transport.cycle"
+name = "Cycle"
+text = "Loops playback over the cycle region. Turning it on with clips or a time range selected sets the region to them; with nothing selected it reuses the region."
+key = "C"
+
+[[entry]]
+id = "transport.metronome"
+name = "Metronome"
+text = "Turns the click on or off. Right-click for the click level and the count-in before recording."
+
+[[entry]]
+id = "transport.position"
+name = "Position (bars and beats)"
+text = "The playhead as bar, beat, sixteenth and tick. During a recording count-in it shows the count-in beats instead."
+
+[[entry]]
+id = "transport.time"
+name = "Position (time)"
+text = "The playhead as minutes, seconds and milliseconds from the start of the session."
+
+[[entry]]
+id = "transport.tempo"
+name = "Tempo"
+text = "The tempo at the playhead. Drag to change it, hold Shift for fine steps, double-click to type a value, or use the mouse wheel to nudge it."
+
+[[entry]]
+id = "transport.meter"
+name = "Meter"
+text = "The time signature at the playhead. Click to change it."
+
+[[entry]]
+id = "transport.main_meter"
+name = "Main output meter"
+text = "The level of the main output, left over right, with a red cap when it clipped. Click to clear the clip latch and the peak hold; Ctrl-click clears every meter."
+
+[[entry]]
+id = "transport.midi_led"
+name = "MIDI activity"
+text = "Lights when MIDI arrives on an input port. Click to open the MIDI Monitor, which lists every message."

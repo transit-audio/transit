@@ -4379,6 +4379,7 @@ dependencies = [
  "resvg",
  "serde",
  "serde_json",
+ "toml",
  "transit-audio-backend",
  "transit-clap-host",
  "transit-dsp",

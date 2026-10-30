@@ -223,6 +223,7 @@ fn inserts_block(
         let rr = row_r(i);
         let name = app.plugin_name(&ins.plugin, false);
         let resp = ui.interact(rr.intersect(clip), ui.id().with(("insert", id.0, *slot)), Sense::click());
+        crate::help::hover(ui, &resp, crate::help::Id::MixerStripInsert);
         p.rect_filled(rr, crate::theme::RADIUS_SM, if resp.hovered() { TOKENS.button_hover } else { TOKENS.bg });
         let mut text_r = rr.shrink2(vec2(4.0, 0.0));
         // While the plug-in is on its way: "Loading…", "Loading… (slow) 12 s", "Not responding"
@@ -323,6 +324,7 @@ fn inserts_block(
             rr.min.x = rr.max.x - 18.0;
         }
         let resp = ui.interact(rr.intersect(clip), ui.id().with(("add_insert", id.0)), Sense::click());
+        crate::help::hover(ui, &resp, crate::help::Id::MixerStripAddEffect);
         if resp.hovered() {
             p.rect_filled(rr, crate::theme::RADIUS_SM, TOKENS.button_hover);
         }
@@ -401,6 +403,7 @@ fn strip(
     sl.name_rect = r4(name_r);
     // Anywhere on the strip focuses it; controls drawn after this take their own clicks.
     let resp = ui.interact(r.intersect(clip), ui.id().with(("strip_name", id.0)), Sense::click());
+    crate::help::hover(ui, &resp, crate::help::Id::MixerStripName);
     if resp.clicked() {
         let shift = ui.input(|i| i.modifiers.shift);
         app.focus_header(id, shift);
@@ -481,6 +484,7 @@ fn strip(
     let has_pan = !m.pan.is_empty();
     let pan = Target::Pan(id);
     let resp = ui.interact(knob.intersect(clip), ui.id().with(("knob", id.0)), Sense::click_and_drag());
+    crate::help::hover(ui, &resp, crate::help::Id::MixerStripPan);
     let hot = resp.hovered() || app.mixer.gesture.is_some_and(|g| g.target == pan);
     draw_knob(&p, knob, b, hot, background);
     if has_pan {
@@ -530,6 +534,7 @@ fn strip(
     if t.kind == TrackKind::Master {
         // A master has no solo, record or input.
         let resp = small_button(ui, clip, cell(0, y), ui.id().with(("mix.mute", id.0)), "M", m.mute, TOKENS.mute, true);
+        crate::help::hover(ui, &resp, crate::help::Id::MixerStripMute);
         if resp.clicked() {
             let _ = app.run("mix.mute", json!({"tracks": [id.0], "value": !m.mute}));
         }
@@ -539,6 +544,16 @@ fn strip(
     } else {
         for (label, on, color, cmd, enabled, br) in buttons {
             let resp = small_button(ui, clip, br, ui.id().with((cmd, id.0, "strip")), label, on, color, enabled);
+            crate::help::hover(
+                ui,
+                &resp,
+                match label {
+                    "M" => crate::help::Id::MixerStripMute,
+                    "S" => crate::help::Id::MixerStripSolo,
+                    "R" => crate::help::Id::MixerStripArm,
+                    _ => crate::help::Id::MixerStripMonitor,
+                },
+            );
             if resp.clicked() && enabled {
                 let _ = app.run(cmd, json!({"tracks": [id.0], "value": !on}));
             }
@@ -567,6 +582,7 @@ fn strip(
     let (peak_text, over) = peak_text(held);
     let over = over || app.meters.get(&id).is_some_and(|d| d.clip);
     let resp = ui.interact(peak_r.intersect(clip), ui.id().with(("peak", id.0)), Sense::click());
+    crate::help::hover(ui, &resp, crate::help::Id::MixerStripPeak);
     p.rect_filled(peak_r, crate::theme::RADIUS_SM, TOKENS.bg);
     p.with_clip_rect(peak_r).text(
         peak_r.center(),
@@ -597,6 +613,7 @@ fn strip(
     let d = app.meters.get(&id).copied().unwrap_or_default();
     draw_meter(&p, meter, d.level, d.clip);
     let resp = ui.interact(meter.intersect(clip), ui.id().with(("meter", id.0)), Sense::click());
+    crate::help::hover(ui, &resp, crate::help::Id::MixerStripMeter);
     if resp.on_hover_text("Click to clear the clip latch and the peak hold, Ctrl-click for every strip").clicked() {
         let all = ui.input(|i| i.modifiers.command || i.modifiers.ctrl);
         app.reset_meters(if all { None } else { Some(id) });

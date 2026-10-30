@@ -165,6 +165,7 @@ pub enum Action {
     GridSnap,
     DeletePoints,
     DeselectPoints,
+    ToggleInfo,
 }
 
 /// One row: an action on a key in a scope.
@@ -470,6 +471,16 @@ pub const TABLE: &[Shortcut] = &[
     // Dialogs.
     row(A::DialogConfirm, "Confirm", NONE, Key::Enter, S::Dialog, "Delete Tracks."),
     row(A::DialogCancel, "Cancel", NONE, Key::Escape, S::Dialog, "Every dialog."),
+    // Help.
+    row(
+        A::ToggleInfo,
+        "Info Panel",
+        SHIFT,
+        Key::Questionmark,
+        S::Global,
+        "Ableton (Info View) and Logic (Quick Help) agree on Shift+?: a panel explaining the control under the pointer.",
+    ),
+    row(A::ToggleInfo, "Info Panel", SHIFT, Key::Slash, S::Global, "The same key where the layout reports it as Shift+/."),
 ];
 
 /// The rows of `action`, in table order.
@@ -534,6 +545,8 @@ fn key_name(k: Key) -> &'static str {
         Key::Equals => "=",
         Key::OpenBracket => "[",
         Key::CloseBracket => "]",
+        Key::Questionmark => "?",
+        Key::Slash => "/",
         other => other.name(),
     }
 }

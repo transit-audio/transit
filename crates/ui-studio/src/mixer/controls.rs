@@ -89,6 +89,7 @@ pub(super) fn fader_widget(app: &mut StudioApp, ui: &mut Ui, p: &egui::Painter, 
     let mut zero = (None, None);
     let me = Target::Fader(id);
     let resp = ui.interact(r.expand2(vec2(4.0, 6.0)).intersect(clip), ui.id().with(("fader", id.0)), Sense::click_and_drag());
+    crate::help::hover(ui, &resp, crate::help::Id::MixerStripFader);
     // Track and marks: a line across the track at 0 dB, fainter ticks at -6, -12 and -24.
     let groove = Rect::from_center_size(r.center(), vec2(4.0, r.height()));
     p.rect_filled(groove, crate::theme::RADIUS_SM, TOKENS.bg);
