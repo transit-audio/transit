@@ -79,6 +79,8 @@ fn trigger(t: Trigger) -> TriggerState {
 struct PortRender {
     out: Vec<f32>,
     aux: Vec<f32>,
+    /// The random state after the last block.
+    rng_state: u32,
 }
 
 fn render_port_point(model: Model, point: &EnginePoint) -> PortRender {
@@ -87,7 +89,7 @@ fn render_port_point(model: Model, point: &EnginePoint) -> PortRender {
     engine.init(transit_macro_osc::REF_SAMPLE_RATE);
     engine.reset();
     let blocks = ENGINE_POINT_FRAMES / BLOCK_SIZE;
-    let mut render = PortRender { out: vec![0.0; ENGINE_POINT_FRAMES], aux: vec![0.0; ENGINE_POINT_FRAMES] };
+    let mut render = PortRender { out: vec![0.0; ENGINE_POINT_FRAMES], aux: vec![0.0; ENGINE_POINT_FRAMES], rng_state: 0 };
     let (outs, _) = render.out.as_chunks_mut::<BLOCK_SIZE>();
     let (auxes, _) = render.aux.as_chunks_mut::<BLOCK_SIZE>();
     for (block, (out, aux)) in outs.iter_mut().zip(auxes.iter_mut()).enumerate() {
@@ -104,6 +106,7 @@ fn render_port_point(model: Model, point: &EnginePoint) -> PortRender {
         let mut enveloped = false;
         engine.render(&parameters, &mut rng, out, aux, &mut enveloped);
     }
+    render.rng_state = rng.state();
     render
 }
 
@@ -124,7 +127,14 @@ fn null_engine(model: Model) {
     let points = engine_points();
     for point in &points {
         let oracle = render_engine_point(&session, model, point).expect("oracle render");
+        // The generator is shared by every engine of a voice, so an engine must draw exactly as
+        // often as the firmware's, even where a draw does not reach the output.
+        let oracle_rng_state = session.rng_state();
         let port = render_port_point(model, point);
+        if port.rng_state != oracle_rng_state {
+            failing += 1;
+            println!("{} {}: random state {:#010x} ({:?} draws), oracle {oracle_rng_state:#010x} ({:?} draws)", model.label(), point.label(), port.rng_state, draws(port.rng_state), draws(oracle_rng_state));
+        }
         let out = residual_f32(&port.out, &oracle.out).expect("lengths");
         let aux = residual_f32(&port.aux, &oracle.aux).expect("lengths");
         // Bits, not values: a +0.0 against -0.0 is a residual of -inf dBFS but still a difference.
@@ -195,4 +205,14 @@ fn first_diff(port: &[f32], oracle: &[f32]) -> String {
         .position(|(a, b)| a.to_bits() != b.to_bits())
         .map(|i| format!(", first at {i} (port {:e}, oracle {:e})", port[i], oracle[i]))
         .unwrap_or_default()
+}
+
+/// The number of draws from [`SEED`] that reach `state`, if fewer than a million.
+fn draws(state: u32) -> Option<u32> {
+    let mut r = Random::new(SEED);
+    (0..1_000_000).find(|_| {
+        let hit = r.state() == state;
+        r.get_word();
+        hit
+    })
 }

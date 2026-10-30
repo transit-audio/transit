@@ -63,9 +63,10 @@ impl Lfo {
     #[inline]
     pub fn init(&mut self, sample_rate: f32) {
         self.phase = 0.0;
-        // An LFO has no valid rate until a patch is set. Keep its phase fixed so
-        // an unloaded voice cannot accumulate phase before its first note.
-        self.frequency = 0.0;
+        // As the firmware: 0.1 per sample until a patch sets the rate. An unloaded voice's LFO
+        // still steps (and draws a random value on every wrap), so its phase and the shared
+        // random sequence advance as on the module.
+        self.frequency = 0.1;
         self.delay_phase = 0.0;
         self.delay_increment[0] = 0.1;
         self.delay_increment[1] = 0.1;
@@ -190,17 +191,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn init_holds_phase_until_set() {
+    fn an_unset_lfo_runs_at_the_firmware_init_rate() {
+        // `Lfo::Init` sets 0.1 per sample: a 12-frame step adds 1.2, wraps once and draws once, so
+        // the phase grows by 0.2 per block until a patch sets the rate.
         let mut lfo = Lfo::new();
         lfo.init(48_000.0);
-
-        for _ in 0..10_000 {
-            lfo.step(&mut Random::default(), 24.0);
+        let mut rng = Random::new(1);
+        for _ in 0..10 {
+            lfo.step(&mut rng, 12.0);
         }
-        assert_eq!(lfo.phase, 0.0);
-
-        lfo.set(&ModulationParameters::default());
-        lfo.step(&mut Random::default(), 24.0);
-        assert!(lfo.phase > 0.0);
+        let mut expected = Random::new(1);
+        for _ in 0..10 {
+            expected.get_word();
+        }
+        assert_eq!(rng.state(), expected.state());
+        assert!(lfo.phase > 1.0);
     }
 }
