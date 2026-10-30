@@ -8,7 +8,7 @@ The plan is the set of GitHub milestones at https://github.com/transit-audio/tra
 | v0.4.0 | Engine: multicore and plug-in reliability | Does transit stay on deadline with the cores on and plug-ins loaded? |
 | v0.5.0 | Editing: arrangement and MIDI workflow | Does editing feel like Ableton and Logic? |
 | v0.6.0 | Instruments | Can you make a track from nothing but transit? Direction: [ADR 0033](adr/0033-built-in-instruments-mutable-instruments-port.md) and [ADR 0034](adr/0034-racks-layering-instruments-through-track-groups.md). |
-| v0.7.0 | Performance and control surfaces | Can you play transit from hardware? |
+| v0.7.0 | Performance and control surfaces | Can you play transit from hardware? Direction: [ADR 0037](adr/0037-adaptable-core-small-hardware.md) (headless core gate, Raspberry Pi 5 benchmark). |
 
 Rules that shape the list:
 
