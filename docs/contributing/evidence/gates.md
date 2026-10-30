@@ -202,6 +202,10 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
 - A test that waits on a background thread waits on its completion signal (a join, a ticket or
   counter, a channel, a synchronous flush), never on a wall-clock bound (E62, #189: the autosave
   test now calls `Autosaver::flush`).
+- An X11 resource handed to another client (a plug-in, a test's observer) is made with a round
+  trip first; one client's effect is checked from another only after the first client's round
+  trip. The server orders requests per connection only (E64, #147: `EditorWindow::new`, resize
+  and close end with `settle`).
 - Injected timestamps need an injected readout: stamp on the origin the code under test reads
   (not another module's default origin) and read at a time consistent with the stamps, never the
   real clock (E49 recurrence 2026-10-25).
