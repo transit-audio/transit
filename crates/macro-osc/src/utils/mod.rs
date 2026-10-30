@@ -60,9 +60,22 @@ pub fn interpolate_wrap(table: &[f32], mut index: f32, size: f32) -> f32 {
     a + (b - a) * index_fractional
 }
 
+/// Flush to zero: a subnormal result becomes a zero of the same sign.
+///
+/// The firmware runs with flush-to-zero on (the oracle reproduces it with the FPU mode, as the
+/// firmware's desktop test harness does). Rust code always runs in the default mode, where
+/// subnormals are kept, so the port flushes explicitly, operation by operation, wherever a state
+/// can decay into the subnormal range (a decaying filter, envelope or resonator). Elsewhere a
+/// subnormal never occurs in the sweep and the flush would be a no-op.
+#[inline]
+pub fn ftz(x: f32) -> f32 {
+    if x.is_subnormal() { 0.0_f32.copysign(x) } else { x }
+}
+
+/// `ONE_POLE(out, in, coefficient)`, with each operation flushed to zero as on the firmware.
 #[inline]
 pub fn one_pole(out: &mut f32, in_: f32, coefficient: f32) {
-    *out += (coefficient) * ((in_) - *out);
+    *out = ftz(*out + ftz(coefficient * ftz(in_ - *out)));
 }
 
 #[inline]
