@@ -13,8 +13,8 @@ use transit_mix::{
     render_range,
 };
 use transit_model::{
-    AutoParam, BusId, KeyFrom, KeySource, Tap, ChannelFormat, Clip, Insert, MACRO_SLOT, MacroMapping, ParamRange, Rack, RackMember, Route, Session, TrackId, TrackKind, Zone,
-    macro_param,
+    AutoParam, BusId, ChannelFormat, Clip, Insert, KeyFrom, KeySource, MACRO_SLOT, MacroMapping, ParamRange, Rack, RackMember, Route, Session, Tap,
+    TrackId, TrackKind, Zone, macro_param,
 };
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 use transit_time::Range;
@@ -421,7 +421,15 @@ fn a_macro_ruled_parameter_is_set_once_in_a_session_with_a_sidechain_key() {
     comp.key = Some(KeySource { from: KeyFrom::Track(kick), tap: Tap::Post });
     s.track_mut(b).unwrap().mixer.inserts[0] = Some(comp);
     let rack = s.track_mut(rig.rack).unwrap();
-    rack.rack.as_mut().unwrap().macros[0].mappings.push(MacroMapping { track: a, slot: 0, param: p.id.into(), min: 0.0, max: 1.0, curve: 0.0, range });
+    rack.rack.as_mut().unwrap().macros[0].mappings.push(MacroMapping {
+        track: a,
+        slot: 0,
+        param: p.id.into(),
+        min: 0.0,
+        max: 1.0,
+        curve: 0.0,
+        range,
+    });
     rack.lane_mut(&AutoParam::Plugin { slot: MACRO_SLOT, param: macro_param(0) }).set_point(0, 0.5);
     rig.publish(&s);
     rig.render(3);

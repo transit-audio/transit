@@ -10,7 +10,7 @@ use super::*;
 /// block-start values while it returns, its breakpoints again from the ramp's end.
 ///
 /// With `session`, a member of a rack (ADR 0034) takes a mapped parameter from the rack's macro
-/// lane while that lane has points ([`crate::rack::macro_param_value`], at block rate): the macro
+/// lane while that lane has points ([`crate::rack::MacroLanes`], at block rate): the macro
 /// rules the parameter, as a mapped parameter follows its macro in Ableton's Instrument Rack.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn apply_params(

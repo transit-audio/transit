@@ -141,11 +141,6 @@ impl<'a> MacroLanes<'a> {
     }
 }
 
-/// The value a rack's macro lane gives a member's parameter at `pos` ([`MacroLanes`]).
-pub(crate) fn macro_param_value(s: &Session, t: &Track, slot: u8, param: &str, pos: Samples) -> Option<f32> {
-    MacroLanes::of(s, t, slot)?.value(param, pos)
-}
-
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]
@@ -169,7 +164,13 @@ mod tests {
         s.track_mut(folder).unwrap().rack = Some(Rack { members: vec![RackMember::new(a)], ..Rack::default() });
         assert!(MacroLanes::of(&s, &t, 0).is_none(), "a rack without mappings");
         let r = s.track_mut(folder).unwrap();
-        r.rack.as_mut().unwrap().macros[0].mappings.push(MacroMapping { track: a, slot: 0, param: "gain".into(), max: 1.0, ..MacroMapping::default() });
+        r.rack.as_mut().unwrap().macros[0].mappings.push(MacroMapping {
+            track: a,
+            slot: 0,
+            param: "gain".into(),
+            max: 1.0,
+            ..MacroMapping::default()
+        });
         let t = s.track(a).unwrap().clone();
         assert!(MacroLanes::of(&s, &t, 0).is_none(), "a mapping whose macro lane has no points");
         s.track_mut(folder).unwrap().lane_mut(&AutoParam::Plugin { slot: MACRO_SLOT, param: macro_param(0) }).set_point(0, 1.0);
