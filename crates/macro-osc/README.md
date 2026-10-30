@@ -64,7 +64,9 @@ absolute pitch of every pitch path at every rate: the common path (eight engines
 six-op voices' own reference and the LPC speech synth's own 8 kHz clock, each within 1 cent of the
 frequency it must play. Its measurement cannot lock onto an alias: the autocorrelation peak is
 searched within 3% of the expected period and must not repeat at a half or a third of it (an
-octave or a twelfth up), and the frequency is read from the spectrum, which has no lag grid.
+octave or a twelfth up), and the frequency is read from the spectrum, which has no lag grid. It
+replaces a slice 2 test that accepted an octave alias and so passed LPC speech an octave sharp at
+96 kHz ([escape E63](../../docs/escapes/E63-the-speech-model-played-out-of-tune-away-from-48-khz.md)).
 
 ```sh
 cargo test --locked -p transit-macro-osc --test null_vs_oracle_voice -- --nocapture

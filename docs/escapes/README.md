@@ -21,3 +21,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E60: a recovered-autosave test left the save order to the clock](E60-a-recovered-autosave-test-left-the-save-order-to-the-clock.md)
 - [E61: a starved gate run shared the host with cold builds](E61-a-starved-gate-run-shared-the-host-with-cold-builds.md)
 - [E62: an autosave test polled the clock for a background write (#189)](E62-an-autosave-test-polled-the-clock-for-a-background-write.md)
+- [E63: the Speech model played out of tune away from 48 kHz (#195)](E63-the-speech-model-played-out-of-tune-away-from-48-khz.md)
