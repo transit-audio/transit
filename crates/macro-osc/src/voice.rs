@@ -468,9 +468,8 @@ impl Voice<'_> {
                 // Disable internal envelope on TIMBRE, and enable the envelope generator
                 // built into the chiptune engine.
                 internal_envelope_amplitude_timbre = 0.0;
-                // Envelope shape is determined by TIMBRE modulation amount. A minimum value
-                // is forced to prevent infinite decay time.
-                self.engines.chiptune_engine.set_envelope_shape(patch.timbre_modulation_amount.max(0.05));
+                // The envelope shape is the TIMBRE modulation amount, as is (0 holds the note).
+                self.engines.chiptune_engine.set_envelope_shape(patch.timbre_modulation_amount);
             } else {
                 self.engines.chiptune_engine.set_envelope_shape(chiptune_engine::NO_ENVELOPE);
             }
