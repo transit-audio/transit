@@ -15,6 +15,7 @@ the ADRs. A new topic gets a new file and a row here.
 | [`automation-modes.md`](automation-modes.md) | Automation modes, how the mix reads lanes, Touch holds and the return ramp. |
 | [`routing.md`](routing.md) | Outputs, inputs, device channel maps, the route graph. |
 | [`sidechain.md`](sidechain.md) | Insert keys and key taps. |
+| [`racks.md`](racks.md) | Racks: a group that plays its instruments from one MIDI input, zones, macros. |
 | [`midi.md`](midi.md) | Live MIDI input, step entry, note delivery. |
 | [`midi-output.md`](midi-output.md) | External MIDI destinations: the output thread, send timing, note safety. |
 | [`midi-monitor.md`](midi-monitor.md) | Window > MIDI Monitor and the input LED: the two tap rings, their thread contract, filters. |
