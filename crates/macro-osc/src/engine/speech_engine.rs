@@ -79,8 +79,10 @@ impl Engine for SpeechEngine<'_> {
 
         let group = parameters.harmonics * 6.0;
 
-        let sustain = matches!(parameters.trigger, TriggerState::Unpatched);
-        let trigger = matches!(parameters.trigger, TriggerState::RisingEdge);
+        let sustain = parameters.trigger.has(TriggerState::UNPATCHED);
+        let trigger = parameters.trigger.has(TriggerState::RISING_EDGE);
+        // The firmware passes `trigger == TRIGGER_RISING_EDGE` (exact) to the naive and SAM synths.
+        let rising_edge_only = parameters.trigger == TriggerState::RISING_EDGE;
 
         // Interpolates between the 3 models: naive, SAM, LPC.
         if group <= 2.0 {
@@ -89,13 +91,13 @@ impl Engine for SpeechEngine<'_> {
             let mut blend = group;
 
             if group <= 1.0 {
-                self.naive_speech_synth.render(trigger, f0, parameters.morph, parameters.timbre, &mut self.temp_buffer_1, aux, out);
+                self.naive_speech_synth.render(rising_edge_only, f0, parameters.morph, parameters.timbre, &mut self.temp_buffer_1, aux, out);
             } else {
                 self.lpc_speech_synth_controller.render(sustain, trigger, -1, f0, 0.0, 0.0, parameters.morph, parameters.timbre, 1.0, aux, out);
                 blend = 2.0 - blend;
             }
 
-            self.sam_speech_synth.render(sustain, f0, parameters.morph, parameters.timbre, &mut self.temp_buffer_1, &mut self.temp_buffer_2);
+            self.sam_speech_synth.render(rising_edge_only, f0, parameters.morph, parameters.timbre, &mut self.temp_buffer_1, &mut self.temp_buffer_2);
 
             blend = blend * blend * (3.0 - 2.0 * blend);
             blend = blend * blend * (3.0 - 2.0 * blend);

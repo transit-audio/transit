@@ -56,19 +56,9 @@ fn port_engine(model: Model) -> Box<dyn Engine> {
     }
 }
 
-/// The firmware's `TriggerState` bit set, as the port's enum. The port has no combined
-/// rising-edge-and-high value; a rising edge is reported as `RisingEdge`, which every engine
-/// tests with a bit mask.
+/// The oracle's trigger bits, which are the firmware's `TriggerState` bit set, as the port's.
 fn trigger(t: Trigger) -> TriggerState {
-    if t.0 & Trigger::RISING_EDGE.0 != 0 {
-        TriggerState::RisingEdge
-    } else if t.0 & Trigger::UNPATCHED.0 != 0 {
-        TriggerState::Unpatched
-    } else if t.0 & Trigger::HIGH.0 != 0 {
-        TriggerState::High
-    } else {
-        TriggerState::Low
-    }
+    TriggerState(u8::try_from(t.0).expect("trigger bits fit a byte"))
 }
 
 struct PortRender {

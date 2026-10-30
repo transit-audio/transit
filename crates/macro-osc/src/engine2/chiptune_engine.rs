@@ -89,13 +89,13 @@ impl Engine for ChiptuneEngine {
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], already_enveloped: &mut bool) {
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
         let shape = parameters.morph * 0.995;
-        let clocked = parameters.trigger != TriggerState::Unpatched;
+        let clocked = !parameters.trigger.has(TriggerState::UNPATCHED);
         let mut root_transposition = 1.0;
 
         *already_enveloped = clocked;
 
         if clocked {
-            if parameters.trigger == TriggerState::RisingEdge {
+            if parameters.trigger.has(TriggerState::RISING_EDGE) {
                 self.chords.set_chord(parameters.harmonics);
                 self.chords.sort();
 

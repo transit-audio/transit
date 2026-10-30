@@ -67,8 +67,8 @@ impl Engine for NoiseEngine {
 
     #[inline]
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
-        let sustain = matches!(parameters.trigger, TriggerState::Unpatched);
-        let trigger = matches!(parameters.trigger, TriggerState::RisingEdge);
+        let sustain = parameters.trigger.has(TriggerState::UNPATCHED);
+        let trigger = parameters.trigger.has(TriggerState::RISING_EDGE);
 
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
         let f1 = note_to_frequency(parameters.note + parameters.harmonics * 48.0 - 24.0, parameters.a0_normalized);

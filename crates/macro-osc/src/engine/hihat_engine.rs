@@ -50,8 +50,8 @@ impl Engine for HihatEngine {
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         let f0 = note_to_frequency(parameters.note, parameters.a0_normalized);
 
-        let sustain = matches!(parameters.trigger, TriggerState::Unpatched);
-        let trigger = matches!(parameters.trigger, TriggerState::RisingEdge);
+        let sustain = parameters.trigger.has(TriggerState::UNPATCHED);
+        let trigger = parameters.trigger.has(TriggerState::RISING_EDGE);
 
         self.hi_hat_1.render(
             sustain,

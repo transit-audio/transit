@@ -50,8 +50,8 @@ impl Engine for BassDrumEngine {
         let self_fm_amount = (parameters.harmonics * 4.0 - 1.0).clamp(0.0, 1.0);
         let drive = f32::max(parameters.harmonics * 2.0 - 1.0, 0.0) * f32::max(1.0 - 16.0 * f0, 0.0);
 
-        let sustain = matches!(parameters.trigger, TriggerState::Unpatched);
-        let trigger = matches!(parameters.trigger, TriggerState::RisingEdge);
+        let sustain = parameters.trigger.has(TriggerState::UNPATCHED);
+        let trigger = parameters.trigger.has(TriggerState::RISING_EDGE);
 
         self.analog_bass_drum.render(
             sustain,

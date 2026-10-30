@@ -58,13 +58,34 @@ pub struct EngineParameters {
     pub a0_normalized: f32,
 }
 
+/// The trigger state of a block, a bit set as in the firmware (`TriggerState` in
+/// `engine/engine.h`): a block can carry a rising edge and a high gate at once.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum TriggerState {
-    #[default]
-    Low = 0,
-    RisingEdge = 1,
-    Unpatched = 2,
-    High = 4,
+pub struct TriggerState(pub u8);
+
+impl TriggerState {
+    /// Gate low.
+    pub const LOW: Self = Self(0);
+    /// A rising edge in this block.
+    pub const RISING_EDGE: Self = Self(1);
+    /// No cable in the trigger input: the engine free-runs.
+    pub const UNPATCHED: Self = Self(2);
+    /// Gate high.
+    pub const HIGH: Self = Self(4);
+
+    /// Any bit of `other` is set (the firmware's `trigger & TRIGGER_*`).
+    #[inline]
+    pub const fn has(self, other: Self) -> bool {
+        self.0 & other.0 != 0
+    }
+}
+
+impl std::ops::BitOr for TriggerState {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self {
+        Self(self.0 | rhs.0)
+    }
 }
 
 #[inline]

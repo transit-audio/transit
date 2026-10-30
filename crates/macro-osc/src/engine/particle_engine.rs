@@ -69,7 +69,7 @@ impl Engine for ParticleEngine {
         let raw_diffusion_sqrt = 2.0 * (parameters.morph - 0.5).abs();
         let raw_diffusion = raw_diffusion_sqrt * raw_diffusion_sqrt;
         let diffusion = if parameters.morph < 0.5 { raw_diffusion } else { 0.0 };
-        let sync = matches!(parameters.trigger, TriggerState::RisingEdge);
+        let sync = parameters.trigger.has(TriggerState::RISING_EDGE);
 
         out.fill(0.0);
         aux.fill(0.0);

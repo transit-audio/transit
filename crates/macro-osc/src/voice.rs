@@ -345,15 +345,10 @@ impl Voice<'_> {
         self.previous_note = modulations.note;
 
         if modulations.trigger_patched {
-            p.trigger = if rising_edge {
-                TriggerState::RisingEdge
-            } else if self.trigger_state {
-                TriggerState::High
-            } else {
-                TriggerState::Low
-            };
+            p.trigger = (if rising_edge { TriggerState::RISING_EDGE } else { TriggerState::LOW })
+                | (if self.trigger_state { TriggerState::HIGH } else { TriggerState::LOW });
         } else {
-            p.trigger = TriggerState::Unpatched;
+            p.trigger = TriggerState::UNPATCHED;
         }
 
         let short_decay = (200.0 * out.len() as f32) * self.inv_sr * semitones_to_ratio(-96.0 * patch.decay.clamp(0.1, 1.0));

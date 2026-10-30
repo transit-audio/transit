@@ -88,7 +88,7 @@ impl Engine for SixOpEngine<'_> {
     fn render(&mut self, parameters: &EngineParameters, out: &mut [f32], aux: &mut [f32], _already_enveloped: &mut bool) {
         let patch_index = self.patch_index_quantizer.process(parameters.harmonics * 1.02) as usize;
 
-        if parameters.trigger == TriggerState::Unpatched {
+        if parameters.trigger.has(TriggerState::UNPATCHED) {
             let t = parameters.morph;
             self.voice[0].mutable_lfo().scrub(2.0 * self.sample_rate * t);
 
@@ -107,7 +107,7 @@ impl Engine for SixOpEngine<'_> {
                 voice.set_modulations(pitch_mod, amp_mod);
             }
         } else {
-            if parameters.trigger == TriggerState::RisingEdge {
+            if parameters.trigger.has(TriggerState::RISING_EDGE) {
                 self.active_voice = (self.active_voice + 1) % NUM_SIX_OP_VOICES as i32;
                 self.voice[self.active_voice as usize].load_patch(Some(self.patches[patch_index].clone()));
                 self.voice[self.active_voice as usize].mutable_lfo().reset();
@@ -135,7 +135,7 @@ impl Engine for SixOpEngine<'_> {
                 let p = voice.mutable_parameters();
                 p.brightness = parameters.timbre;
                 p.sustain = false;
-                p.gate = (parameters.trigger == TriggerState::High) && (i == self.active_voice as usize);
+                p.gate = parameters.trigger.has(TriggerState::HIGH) && (i == self.active_voice as usize);
                 if voice_patch_changed[i] {
                     voice.mutable_lfo().step(out.len() as f32);
                     voice.set_modulations(voice.lfo().pitch_mod(), voice.lfo().amp_mod());
