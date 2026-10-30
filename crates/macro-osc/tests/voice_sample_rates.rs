@@ -66,53 +66,7 @@ fn rates_round_trip_through_hertz() {
     assert_eq!(SampleRate::default(), SampleRate::Hz48000);
 }
 
-/// The main output of a free-running voice on `engine` at note 69 and `rate`: 2 s, the first 0.5 s
-/// skipped (smoothing, the six-op envelope settling), DC removed.
-fn render_free(rate: SampleRate, engine: usize, harmonics: f32) -> Vec<f64> {
-    let mut voice = Voice::new(rate);
-    let patch = Patch { note: 69.0, harmonics, timbre: 0.5, morph: 0.5, engine, ..Patch::default() };
-    let modulations = Modulations::default();
-    let frames = (2.0 * rate.hz()) as usize / 12 * 12;
-    let mut out = Vec::with_capacity(frames);
-    let mut block = [Frame::default(); 12];
-    for _ in 0..frames / 12 {
-        voice.render(&patch, &modulations, &mut block);
-        out.extend(block.iter().map(|f| f64::from(f.out)));
-    }
-    let out = out.split_off((0.5 * f64::from(rate.hz())) as usize);
-    let mean = out.iter().sum::<f64>() / out.len() as f64;
-    out.into_iter().map(|x| x - mean).collect()
-}
-
-/// The fundamental of `x` in hertz, from the normalized autocorrelation peak within a quarter
-/// octave of `around_hz`, refined by a parabola through the peak and its neighbors (the waveform
-/// need not be a sine).
-fn autocorrelation_hz(x: &[f64], rate: f32, around_hz: f64) -> f64 {
-    let rate = f64::from(rate);
-    let period = rate / around_hz;
-    let (lo, hi) = ((period / 1.19) as usize, (period * 1.19) as usize + 2);
-    let r = |lag: usize| {
-        let n = x.len() - lag;
-        x[..n].iter().zip(&x[lag..]).map(|(a, b)| a * b).sum::<f64>() / n as f64
-    };
-    let best = (lo..=hi).max_by(|&a, &b| r(a).total_cmp(&r(b))).expect("lags");
-    assert!(best > lo && best < hi, "peak at the edge of the search ({lo}..{hi}): {best}");
-    let (a, b, c) = (r(best - 1), r(best), r(best + 1));
-    let offset = 0.5 * (a - c) / (a - 2.0 * b + c);
-    rate / (best as f64 + offset)
-}
-
-/// The two pitch paths besides `a0`: the six-op engine computes against the corrected rate scaled by
-/// rate / 48000, and LPC speech (harmonics 0.35: the vowel table scanned by morph, free-running, so
-/// stationary) its pitch shift against the same corrected rate. At 96 kHz each plays within 1 cent of
-/// its 48 kHz pitch.
-#[test]
-fn six_op_and_speech_keep_their_48_khz_pitch_at_96_khz() {
-    for (engine, harmonics, label) in [(2, 0.0, "six-op bank A"), (15, 0.35, "LPC speech")] {
-        let at_48 = autocorrelation_hz(&render_free(SampleRate::Hz48000, engine, harmonics), 48_000.0, expected_hz(69.0));
-        let at_96 = autocorrelation_hz(&render_free(SampleRate::Hz96000, engine, harmonics), 96_000.0, at_48);
-        let cents = 1200.0 * (at_96 / at_48).log2();
-        println!("{label}: {at_48:.4} Hz at 48 kHz, {at_96:.4} Hz at 96 kHz, {cents:+.4} cents");
-        assert!(cents.abs() < 1.0, "{label}: {at_48} Hz at 48 kHz, {at_96} Hz at 96 kHz ({cents:+.3} cents)");
-    }
-}
+// The six-op and LPC speech pitch paths at other rates are checked in `voice_pitch.rs`, with a
+// measurement that refuses octave aliases. The test that was here searched lags within 1.19x of one
+// 48 kHz period, which an octave-up signal also satisfies, and so passed LPC speech playing an
+// octave sharp at 96 kHz (escape E63).

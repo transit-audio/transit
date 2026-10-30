@@ -93,7 +93,10 @@ impl LpcSpeechSynthController<'_> {
         output: &mut [f32],
     ) {
         let rate_ratio = semitones_to_ratio((formant_shift - 0.5) * 36.0);
-        let rate = rate_ratio / 6.0;
+        // The synth's own clock: 8 kHz (one sixth of 48 kHz) times the formant shift, as the firmware
+        // runs it at 48 kHz. At other rates the per-sample step is scaled by 48000 / rate so the clock
+        // stays 8 kHz (the factor is exactly 1 at 48 kHz: the firmware's arithmetic, bit for bit).
+        let rate = rate_ratio / 6.0 * (crate::REF_SAMPLE_RATE / self.sample_rate_hz);
 
         // All utterances have been normalized for an average f0 of 100 Hz.
         // Against the firmware's corrected sample rate (`kCorrectedSampleRate`).

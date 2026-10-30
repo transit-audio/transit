@@ -59,9 +59,12 @@ re-initialized after use. One documented difference is pinned there, below.
 
 `tests/voice_sample_rates.rs` checks the other rates (the oracle runs at 48 kHz only): a sine voice at
 notes 45, 69 and 93 plays within 1 cent of its 48 kHz pitch at 44.1, 48, 88.2 and 96 kHz, measured
-over two seconds of zero crossings (measured: within 0.001 cent); the six-op and LPC speech engines,
-which compute pitch against the corrected rate on their own paths, play at 96 kHz within 1 cent of
-their 48 kHz pitch, measured by autocorrelation (measured: -0.35 and -0.86 cents).
+over two seconds of zero crossings (measured: within 0.001 cent). `tests/voice_pitch.rs` checks the
+absolute pitch of every pitch path at every rate: the common path (eight engines that read `a0`), the
+six-op voices' own reference and the LPC speech synth's own 8 kHz clock, each within 1 cent of the
+frequency it must play. Its measurement cannot lock onto an alias: the autocorrelation peak is
+searched within 3% of the expected period and must not repeat at a half or a third of it (an
+octave or a twelfth up), and the frequency is read from the spectrum, which has no lag grid.
 
 ```sh
 cargo test --locked -p transit-macro-osc --test null_vs_oracle_voice -- --nocapture
@@ -107,7 +110,7 @@ clock), so on the module every note is in tune; rendered at a true 48 kHz the sa
 4.6 cents sharp (48000 / 47872.34), and so does this voice. At the other rates the normalized pitch
 is scaled by 48000 / rate and the voice's envelope coefficients (`(200 * 12) / rate` and
 `(20 * 12) / rate`) are per block at that rate, so notes and decays keep their 48 kHz frequency and
-duration; the engines' own sample-rate-dependent constants follow the rate given to their `init`.
+duration; the LPC speech synth's clock step is scaled by 48000 / rate so it stays at 8 kHz; the engines' own sample-rate-dependent constants follow the rate given to their `init`.
 The trigger delay is 5 blocks at every rate: 1.25 ms at 48 kHz, 1.36 ms at 44.1 kHz, 0.63 ms at
 96 kHz.
 Per-block coefficients inside the engines and the low-pass gate (the vactrol's 0.6 attack per block,
