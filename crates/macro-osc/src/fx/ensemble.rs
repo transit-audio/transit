@@ -2,16 +2,15 @@
 
 // Based on MIT-licensed code (c) 2014 by Emilie Gillet (emilie.o.gillet@gmail.com)
 
-use super::{DataFormat32Bit, FxContext, FxEngine};
+use super::{Format32Bit, FxEngine, Line, lines};
 use crate::oscillator::sine_oscillator::sine_raw;
-use crate::utils::delay_line::DelayLine;
+
+// Left and right.
+const LINES: [Line; 2] = lines([511, 511]);
 
 #[derive(Debug, Default, Clone)]
 pub struct Ensemble {
-    line_l: DelayLine<f32, 511>,
-    line_r: DelayLine<f32, 511>,
-
-    engine: FxEngine<1024, DataFormat32Bit>,
+    engine: FxEngine<1024, Format32Bit>,
 
     amount: f32,
     depth: f32,
@@ -22,7 +21,7 @@ pub struct Ensemble {
 
 impl Ensemble {
     pub fn new() -> Self {
-        Self { line_l: DelayLine::new(), line_r: DelayLine::new(), engine: FxEngine::new(), amount: 0.0, depth: 0.0, phase_1: 0, phase_2: 0 }
+        Self { engine: FxEngine::new(), amount: 0.0, depth: 0.0, phase_1: 0, phase_2: 0 }
     }
 
     pub fn init(&mut self) {
@@ -35,17 +34,15 @@ impl Ensemble {
     }
 
     pub fn clear(&mut self) {
-        self.line_l.reset();
-        self.line_r.reset();
         self.engine.clear();
     }
 
     #[inline]
     pub fn process(&mut self, left: &mut [f32], right: &mut [f32]) {
-        let mut c = FxContext::new();
+        let [line_l, line_r] = LINES;
 
         for (left_sample, right_sample) in left.iter_mut().zip(right.iter_mut()) {
-            self.engine.start(&mut c);
+            self.engine.start();
             let dry_amount = 1.0 - self.amount * 0.5;
 
             // Update LFO.
@@ -72,21 +69,22 @@ impl Ensemble {
             let mut wet = 0.0;
 
             // Sum L & R channel to send to chorus line.
-            c.read_with_scale(*left_sample, 1.0);
-            c.write_line(&mut self.line_l, 0.0);
-            c.read_with_scale(*right_sample, 1.0);
-            c.write_line(&mut self.line_r, 0.0);
+            let e = &mut self.engine;
+            e.read(*left_sample, 1.0);
+            e.write_line(line_l, 0, 0.0);
+            e.read(*right_sample, 1.0);
+            e.write_line(line_r, 0, 0.0);
 
-            c.interpolate(&mut self.line_l, mod_1 + 192.0, 0.0, 0.33);
-            c.interpolate(&mut self.line_l, mod_2 + 192.0, 0.0, 0.33);
-            c.interpolate(&mut self.line_r, mod_3 + 192.0, 0.0, 0.33);
-            c.write(&mut wet);
+            e.interpolate(line_l, mod_1 + 192.0, 0.33);
+            e.interpolate(line_l, mod_2 + 192.0, 0.33);
+            e.interpolate(line_r, mod_3 + 192.0, 0.33);
+            e.write(&mut wet, 0.0);
             *left_sample = wet * self.amount + *left_sample * dry_amount;
 
-            c.interpolate(&mut self.line_r, mod_1 + 192.0, 0.0, 0.33);
-            c.interpolate(&mut self.line_r, mod_2 + 192.0, 0.0, 0.33);
-            c.interpolate(&mut self.line_l, mod_3 + 192.0, 0.0, 0.33);
-            c.write(&mut wet);
+            e.interpolate(line_r, mod_1 + 192.0, 0.33);
+            e.interpolate(line_r, mod_2 + 192.0, 0.33);
+            e.interpolate(line_l, mod_3 + 192.0, 0.33);
+            e.write(&mut wet, 0.0);
             *right_sample = wet * self.amount + *right_sample * dry_amount;
         }
     }
