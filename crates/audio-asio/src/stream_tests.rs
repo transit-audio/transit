@@ -539,16 +539,22 @@ fn a_driver_that_stops_calling_back_is_reported_stalled_once_by_the_watchdog() {
     drop((capture, render));
 }
 
+/// The wiring of the watchdog to a real session: the callbacks' stamps keep a calling driver from
+/// being reported, and a stop disarms it. The limit is a 1 s floor, so only a stall of the driving
+/// thread of a whole second between two callbacks could report it (a stall bound; the 250 ms floor
+/// it had sat within reach of a starved runner, E49, #226). The callbacks run for two limits, so a
+/// session that ignored them would report the driver; the decision logic itself is the pure
+/// `watchdog` tests' (explicit instants, `a_calling_driver_then_a_stopped_one_is_never_reported`).
 #[test]
 fn the_watchdog_leaves_a_driver_that_calls_back_and_a_stopped_one_alone() {
     let _guard = lock();
-    let rig = rig_watching(scarlett(), Duration::from_millis(250));
+    let limit = Duration::from_secs(1);
+    let rig = rig_watching(scarlett(), limit);
     let seen = seen();
     let (capture, render, _, _) = duplex(&rig, 48_000, Some(64), &seen, vec![0.0; 2]);
-    // The first callback may take up to a second after the start.
-    std::thread::sleep(Duration::from_millis(400));
     let mut position = 0;
-    let until = std::time::Instant::now() + Duration::from_millis(500);
+    let until = std::time::Instant::now() + 2 * limit;
+    // timing: stall-bound calls back every 5 ms for two 1 s watchdog limits; only a 1 s stall of this thread fails it
     while std::time::Instant::now() < until {
         drive(&rig, 64, position, 1, &[]);
         position += 64;
@@ -556,7 +562,8 @@ fn the_watchdog_leaves_a_driver_that_calls_back_and_a_stopped_one_alone() {
     }
     render.stop().expect("stop");
     capture.stop().expect("stop");
-    std::thread::sleep(Duration::from_millis(600));
+    // timing: sleep-ok past the limit before a negative check; a slow host cannot fail it
+    std::thread::sleep(limit + Duration::from_millis(250));
     assert!(seen.errors.lock().unwrap().is_empty(), "{:?}", seen.errors.lock().unwrap());
     assert_eq!(render.stats().expect("stats").timeouts, 0);
     drop((capture, render));

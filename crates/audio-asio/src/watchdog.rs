@@ -127,6 +127,24 @@ mod tests {
         assert!(!w.check(u64::MAX, 0, true));
     }
 
+    /// The two halves of the stream test `the_watchdog_leaves_a_driver_that_calls_back_and_a_stopped_one_alone`
+    /// at explicit instants: callbacks every 5 ms for many limits are never a stall, and once the
+    /// streams stop (not running, then disarmed) no silence is, however long.
+    #[test]
+    fn a_calling_driver_then_a_stopped_one_is_never_reported() {
+        let mut w = Watchdog::new(64, 48_000, STALL_FLOOR);
+        w.arm(1_000 * MS);
+        let mut last = 1_000 * MS;
+        for step in 1..=400 {
+            last = 1_000 * MS + step * 5 * MS;
+            assert!(!w.check(last + 4 * MS, last, true), "a callback every 5 ms, step {step}");
+        }
+        assert!(!w.check(last + 10_000 * MS, last, false), "every stream stopped: not watched");
+        w.disarm();
+        assert_eq!(w.tick(), None, "the host thread sleeps until a request");
+        assert!(!w.check(last + 60_000 * MS, last, true), "disarmed: nothing is due");
+    }
+
     #[test]
     fn a_callback_from_before_the_start_does_not_count() {
         let mut w = Watchdog::new(64, 48_000, STALL_FLOOR);
