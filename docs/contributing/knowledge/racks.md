@@ -29,7 +29,10 @@ plays every member through the member's key and velocity zones.
 ## Rules
 
 - A note-off follows the note-on that was delivered, never the zones of the moment.
-- Zone fades scale velocity, not level (Ableton's rule for key and velocity zones).
+- Zone fades scale velocity, not level: Ableton's rule for key and velocity zones. The ramp
+  `(k + 1) / (n + 1)` and the floor of 1 are transit's own choice (the manual does not give the
+  ramp's shape): a note inside the zone always sounds, and a scaled note-on never becomes a note-off.
+- A member that leaves the rack lets go of the rack's notes and pedal (`rack_membership`).
 - Nothing on the audio thread allocates: the fan-out is a fixed array, the clip merge a fixed
   scratch. `crates/mix/tests/rack.rs` has the allocation probe.
 - A rack field or variant must load in older builds: the rack is skipped when absent, its macro

@@ -11,10 +11,12 @@
 //!   Stack (a summing stack whose main track plays every subtrack); Logic has no zones, so zones
 //!   follow Ableton.
 //! - **Fades.** Each zone has a fade range at each edge. Inside a fade range the note's velocity is
-//!   scaled by a linear ramp ([`Zone::gain`]); the key-zone and velocity-zone factors multiply. This
-//!   is Ableton's rule: "Key zone fade ranges attenuate the velocities of notes entering a chain",
-//!   and the same for velocity zones (Live manual, Instrument, Drum and Effect Racks, Zones). Only
-//!   Ableton's chain select zones fade the chain's output level, and those are out of scope.
+//!   scaled by a linear ramp ([`Zone::gain`]); the key-zone and velocity-zone factors multiply. That
+//!   a fade scales velocity, not level, is Ableton's rule: "Key zone fade ranges attenuate the
+//!   velocities of notes entering a chain", and the same for velocity zones (Live manual,
+//!   Instrument, Drum and Effect Racks, Zones); only chain select zones fade the chain's output
+//!   level, and those are out of scope. The ramp's shape and its floor (never 0 inside the zone,
+//!   never a velocity below 1) are transit's own choice: the manual does not give them.
 //! - **Macros.** Eight knobs on the rack, each mapped to any number of member parameters (an
 //!   instrument or an insert parameter, by its automation address) with a range and a curve, like
 //!   Ableton's Macro Controls and Logic's Smart Controls. The range is the MIDI Learn range model
