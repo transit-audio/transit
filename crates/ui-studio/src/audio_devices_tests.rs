@@ -399,6 +399,10 @@ fn refused_rates_and_buffers_are_reported() {
     let opened = Opened { output: Some("X".into()), rate: Some(48_000), buffer: None };
     let notes = fallback_notes(&cfg, None, &opened);
     assert_eq!(notes, ["96000 Hz is not available; running at 48000 Hz.", "A 64-sample buffer is not available; using the device's default."]);
+    // A saved size the device no longer allows opened at the nearest one it does (#230).
+    let clamped = Opened { output: Some("X".into()), rate: Some(96_000), buffer: Some(256) };
+    let big = AudioConfig { buffer_size: Some(4096), ..cfg.clone() };
+    assert_eq!(fallback_notes(&big, None, &clamped), ["A 4096-sample buffer is outside the device's range; using 256."]);
     let honored = Opened { output: Some("X".into()), rate: Some(96_000), buffer: Some(64) };
     assert!(fallback_notes(&cfg, None, &honored).is_empty());
     let missing_system = AudioConfig { system: Some("JACK".into()), ..Default::default() };

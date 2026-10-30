@@ -171,11 +171,40 @@ pub fn jack_system() -> AudioSystem {
     match &state {
         transit_audio_jack::ServerState::Running(server) => {
             let name = backend.server_name();
-            let notes = vec![jack_note(&name, server.rate, server.buffer)];
-            system_from_endpoints(devices::JACK_SYSTEM, &server.endpoints(ab::Direction::Output), &server.endpoints(ab::Direction::Input), &[], notes)
+            let mut notes = vec![jack_note(&name, server.rate, server.buffer)];
+            notes.extend(backend.library_note());
+            let mut system = system_from_endpoints(
+                devices::JACK_SYSTEM,
+                &server.endpoints(ab::Direction::Output),
+                &server.endpoints(ab::Direction::Input),
+                &[],
+                notes,
+            );
+            // Under PipeWire the buffer list is the server's quantum range (#230).
+            if name.starts_with("PipeWire")
+                && let Some(clock) = crate::pipewire::server_clock()
+            {
+                apply_server_clock(&mut system, &clock);
+            }
+            system
         }
-        _ => system_from_endpoints(devices::JACK_SYSTEM, &[], &[], &[], state.diagnostic().into_iter().collect()),
+        _ => {
+            let mut diagnostics: Vec<String> = state.diagnostic().into_iter().collect();
+            diagnostics.extend(backend.library_note());
+            system_from_endpoints(devices::JACK_SYSTEM, &[], &[], &[], diagnostics)
+        }
     }
+}
+
+/// The JACK system under a PipeWire server (#230): every port group offers the quanta the server
+/// allows, and the server's line (its default quantum, range and a forced one) is a system note.
+pub fn apply_server_clock(system: &mut AudioSystem, clock: &crate::pipewire::ServerClock) {
+    if let Some(range) = clock.quantum_range() {
+        for device in system.outputs.iter_mut().chain(system.inputs.iter_mut()) {
+            crate::pipewire::clamp_range(device, range);
+        }
+    }
+    system.diagnostics.push(clock.device_note("Server", false));
 }
 
 /// Opens the control panel of the ASIO driver `driver` on the backend's host thread (where every
@@ -214,6 +243,30 @@ mod tests {
             .map(|r| ab::FormatRange { sample: ab::SampleFormat::I24, channels, min_rate: *r, max_rate: *r, period: Some((32, 2048)) })
             .collect();
         ab::Endpoint::new(name.into(), name.into(), "ASIO".into(), inputs, outputs, formats, Arc::new(()))
+    }
+
+    /// Native JACK under PipeWire (#230): each port group offers the quanta the server allows
+    /// (64-2048 on the tester's machine) instead of the backend's standard list, and the server's
+    /// line, with a forced quantum, is a system note.
+    #[test]
+    fn the_jack_system_under_pipewire_offers_the_servers_quantum_range() {
+        let group = endpoint("alsa_output.pci", 0, 2, &[48_000]);
+        let mut system = system_from_endpoints(devices::JACK_SYSTEM, std::slice::from_ref(&group), &[], &[], Vec::new());
+        let clock = crate::pipewire::ServerClock {
+            rate: Some(48_000),
+            quantum: Some(128),
+            min_quantum: Some(64),
+            max_quantum: Some(1024),
+            force_quantum: Some(256),
+        };
+        apply_server_clock(&mut system, &clock);
+        assert_eq!(system.outputs[0].buffer_sizes(), [64, 128, 256, 512, 1024]);
+        assert_eq!(
+            system.system_notes().collect::<Vec<_>>(),
+            [
+                "Server: PipeWire server, default quantum 128, allowed 64-1024, forced to 256 (transit cannot change it). The buffer size here is the quantum."
+            ]
+        );
     }
 
     #[test]

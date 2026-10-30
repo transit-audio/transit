@@ -557,7 +557,16 @@ pub fn cpal_audio_systems() -> Vec<AudioSystem> {
                 host.output_devices().map(|ds| ds.filter_map(|d| describe(&d, def_out.as_deref(), true)).collect()).unwrap_or_default();
             let inputs: Vec<DeviceInfo> =
                 host.input_devices().map(|ds| ds.filter_map(|d| describe(&d, def_in.as_deref(), false)).collect()).unwrap_or_default();
-            Some(AudioSystem { name: id.name().to_string(), is_default: id == default_id, outputs, inputs, diagnostics: Vec::new() })
+            let mut system = AudioSystem { name: id.name().to_string(), is_default: id == default_id, outputs, inputs, diagnostics: Vec::new() };
+            // PipeWire's ALSA plug-in (#230): its devices offer the buffers whose periods the
+            // server allows, with the server's quantum under them.
+            if system.name.eq_ignore_ascii_case("ALSA")
+                && system.outputs.iter().chain(&system.inputs).any(|d| crate::pipewire::routed(&d.name))
+                && let Some(clock) = crate::pipewire::server_clock()
+            {
+                crate::pipewire::apply_to_alsa(&mut system, &clock);
+            }
+            Some(system)
         })
         .collect()
 }
@@ -640,13 +649,15 @@ pub(crate) fn find_device(host: &cpal::Host, name: Option<&str>, output: bool) -
     if output { host.default_output_device() } else { host.default_input_device() }
 }
 
-/// The buffer to request: the chosen size when the device's range allows it, else the default.
+/// The buffer to request: the chosen size, clamped into the device's range (#230: a saved size the
+/// device no longer allows opens at the nearest one it does, and the window says so, instead of
+/// silently falling to the device's default).
 pub(crate) fn buffer_size(want: Option<u32>, supported: &cpal::SupportedBufferSize) -> cpal::BufferSize {
     match (want, supported) {
-        (Some(n), cpal::SupportedBufferSize::Range { min, max }) if (*min..=*max).contains(&n) => cpal::BufferSize::Fixed(n),
-        // The device does not say: ask anyway (cpal reports an error if it cannot, and the caller
-        // falls back to the default).
-        (Some(n), cpal::SupportedBufferSize::Unknown) if (16..=8192).contains(&n) => cpal::BufferSize::Fixed(n),
+        (Some(n), cpal::SupportedBufferSize::Range { min, max }) if min <= max => cpal::BufferSize::Fixed(n.clamp(*min, *max)),
+        // The device does not say: ask anyway, inside the sizes any backend takes (cpal reports an
+        // error if it cannot, and the caller falls back to the default).
+        (Some(n), cpal::SupportedBufferSize::Unknown) => cpal::BufferSize::Fixed(n.clamp(16, 8192)),
         _ => cpal::BufferSize::Default,
     }
 }
@@ -854,11 +865,12 @@ mod tests {
     fn buffer_sizes_follow_the_device_range() {
         let r = cpal::SupportedBufferSize::Range { min: 64, max: 1024 };
         assert_eq!(buffer_size(Some(256), &r), cpal::BufferSize::Fixed(256));
-        assert_eq!(buffer_size(Some(32), &r), cpal::BufferSize::Default);
-        assert_eq!(buffer_size(Some(4096), &r), cpal::BufferSize::Default);
+        // A saved size outside the range opens at the nearest end of it (#230), not the default.
+        assert_eq!(buffer_size(Some(32), &r), cpal::BufferSize::Fixed(64));
+        assert_eq!(buffer_size(Some(4096), &r), cpal::BufferSize::Fixed(1024));
         assert_eq!(buffer_size(None, &r), cpal::BufferSize::Default);
         assert_eq!(buffer_size(Some(128), &cpal::SupportedBufferSize::Unknown), cpal::BufferSize::Fixed(128));
-        assert_eq!(buffer_size(Some(1 << 20), &cpal::SupportedBufferSize::Unknown), cpal::BufferSize::Default);
+        assert_eq!(buffer_size(Some(1 << 20), &cpal::SupportedBufferSize::Unknown), cpal::BufferSize::Fixed(8192));
         let d = DeviceInfo {
             name: "x".into(),
             is_default: true,

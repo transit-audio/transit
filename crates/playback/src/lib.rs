@@ -26,6 +26,7 @@ pub mod loop_probe;
 pub mod midi_capture;
 pub mod onset;
 mod open_log;
+pub mod pipewire;
 pub mod plan_bridge;
 pub mod player;
 pub mod preview;
