@@ -22,13 +22,31 @@ fn previewing(t: &T) -> Option<String> {
     t.app.browser.preview.path.as_ref().map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
 }
 
-/// The sample folder added and expanded, with Kicks/ open.
-fn kicks() -> T {
+/// The sample folder added and expanded, with Kicks/ open, and no audio device.
+fn kicks_without_a_device() -> T {
     let mut t = T::new();
     t.add_and_expand();
     t.click(mid(t.row(&t.path("Kicks")).rect.unwrap()));
     t.settle();
     t
+}
+
+/// [`kicks_without_a_device`] with a device-free Player: its blocks run only in [`step`], which
+/// also runs the preview's feeder, so nothing waits on a thread.
+fn kicks() -> T {
+    let mut t = kicks_without_a_device();
+    let player = transit_playback::Player::prepare_device_free(t.app.engine.session_arc()).unwrap();
+    t.app.player = Some(player);
+    t.frames(2);
+    t
+}
+
+/// `n` device blocks of 512 frames, then a UI frame.
+fn step(t: &mut T, n: usize) {
+    for _ in 0..n {
+        t.app.player.as_ref().unwrap().step_device_free();
+    }
+    t.frames(1);
 }
 
 #[test]
@@ -40,7 +58,7 @@ fn the_headphone_toggle_previews_each_selected_file_and_escape_stops_it() {
     assert!(t.app.ui.browser.auto_preview && t.app.browser.layout.preview.auto_on);
     t.click(mid(t.row_named("Kick 01.wav").rect.unwrap()));
     assert_eq!(previewing(&t).as_deref(), Some("Kick 01.wav"));
-    assert_eq!(t.app.browser.preview.state, "silent", "no audio device in this test: nothing can be heard, and the footer says so");
+    assert_eq!(t.app.browser.preview.state, "loading");
     t.click(mid(t.row_named("Kick 02.wav").rect.unwrap()));
     assert_eq!(previewing(&t).as_deref(), Some("Kick 02.wav"), "another file selected: the old preview stops, the new one starts");
     t.key("escape", json!({}));
@@ -84,7 +102,7 @@ fn starting_the_transport_stops_the_preview() {
     assert_eq!(v["result"]["path"], json!(kick), "{v}");
     assert_eq!(previewing(&t).as_deref(), Some("Kick 01.wav"));
     exec(&mut t, "transport.play", json!({}));
-    t.frames(2);
+    step(&mut t, 2);
     assert!(t.app.is_playing());
     assert_eq!(previewing(&t), None);
     // A preview started while the transport runs plays: the transport did not start again.
@@ -109,7 +127,7 @@ fn the_control_channel_drives_the_preview_and_never_touches_the_document() {
     t.click(mid(t.row_named("Kick 02.wav").rect.unwrap()));
     let v = exec(&mut t, "preview.play", json!({}));
     assert_eq!(v["result"]["path"].as_str().map(PathBuf::from), Some(PathBuf::from(t.path("Kicks/Kick 02.wav"))), "the selected file: {v}");
-    assert_eq!(exec(&mut t, "preview.status", json!({}))["result"]["state"], json!("silent"));
+    assert_eq!(exec(&mut t, "preview.status", json!({}))["result"]["state"], json!("loading"));
     assert_eq!(exec(&mut t, "preview.stop", json!({}))["result"]["path"], Value::Null);
     assert_eq!(document(&t), before);
     // The toggle and the volume are view preferences: kept in ui.json, an old one loads with defaults.
@@ -122,20 +140,11 @@ fn the_control_channel_drives_the_preview_and_never_touches_the_document() {
 #[test]
 fn a_device_free_player_plays_the_preview_to_its_end_and_the_report_says_so() {
     let mut t = kicks();
-    let player = transit_playback::Player::prepare_device_free(t.app.engine.session_arc()).unwrap();
-    t.app.player = Some(player);
-    t.frames(2);
     let before = document(&t);
     // Kick 02 is a quarter second: 12,000 frames at 48 kHz, 24 device blocks of 512.
     let kick = t.path("Kicks/Kick 02.wav");
     exec(&mut t, "preview.play", json!({"path": kick}));
     assert_eq!(t.app.browser.preview.state, "loading");
-    let step = |t: &mut T, n: usize| {
-        for _ in 0..n {
-            t.app.player.as_ref().unwrap().step_device_free();
-        }
-        t.frames(1);
-    };
     step(&mut t, 4);
     assert_eq!(t.app.browser.preview.state, "playing");
     assert!(t.app.preview_line().starts_with("Preview playing: Kick 02.wav"), "{}", t.app.preview_line());
@@ -144,6 +153,20 @@ fn a_device_free_player_plays_the_preview_to_its_end_and_the_report_says_so() {
     assert_eq!(previewing(&t), None, "it ended");
     assert_eq!(t.app.preview_line(), "Preview playing: no");
     assert_eq!(document(&t), before);
+}
+
+#[test]
+fn without_an_audio_device_a_preview_is_refused_and_nothing_shows_stop() {
+    let mut t = kicks_without_a_device();
+    t.click(mid(t.app.browser.layout.preview.auto));
+    t.click(mid(t.row_named("Kick 01.wav").rect.unwrap()));
+    assert_eq!(previewing(&t), None, "auto-preview starts nothing it cannot play");
+    assert_eq!(t.app.status, crate::browser::preview::NO_DEVICE);
+    let kick = t.path("Kicks/Kick 01.wav");
+    assert_eq!(exec(&mut t, "preview.play", json!({"path": kick}))["ok"], json!(false));
+    t.click(mid(t.row_named("Kick 01.wav").play.unwrap()));
+    assert_eq!(previewing(&t), None);
+    assert_eq!(t.app.preview_line(), "Preview playing: no");
 }
 
 #[test]

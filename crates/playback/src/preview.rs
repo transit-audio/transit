@@ -34,6 +34,10 @@ pub const RING_CHUNKS: usize = 128;
 /// The preview volume's range in dB; at the floor the preview is silent.
 pub const MIN_DB: f32 = -60.0;
 pub const MAX_DB: f32 = 6.0;
+/// The fade at a start, a stop, a switch and a cut: about 5 ms at `rate`.
+pub fn fade_frames(rate: u32) -> usize {
+    (rate as usize / 200).clamp(16, 1024)
+}
 /// Frames the feeder reads from the file at a time.
 const READ_FRAMES: usize = 4096;
 
@@ -176,6 +180,11 @@ impl Preview {
             started: false,
             played: 0,
             was_playing: false,
+            fade_len: fade_frames(rate),
+            fade_chunk: Box::new(Chunk::EMPTY),
+            fade_at: 0,
+            fade_left: 0,
+            fade_generation: 0,
         };
         let preview = Preview {
             shared,
@@ -473,34 +482,82 @@ pub struct PreviewVoice {
     started: bool,
     played: u64,
     was_playing: bool,
+    /// The fade's length in frames (about 5 ms at the engine's rate).
+    fade_len: usize,
+    /// What was playing when it was stopped, switched or cut: it fades out from `fade_at` in
+    /// `fade_chunk` (and the chunks of `fade_generation` behind it) over `fade_left` more frames.
+    fade_chunk: Box<Chunk>,
+    fade_at: usize,
+    fade_left: usize,
+    fade_generation: u64,
+}
+
+/// Add `src` (interleaved stereo) into Main's first channels from frame `at`, each frame `k` at
+/// `gain(k)`.
+fn add(main: &mut [Vec<f32>], channels: usize, at: usize, src: &[f32], gain: impl Fn(usize) -> f32) {
+    let frames = src.as_chunks::<2>().0;
+    match main {
+        [l, r, ..] if channels >= 2 => {
+            for (k, (s, (dl, dr))) in frames.iter().zip(l.iter_mut().skip(at).zip(r.iter_mut().skip(at))).enumerate() {
+                let g = gain(k);
+                *dl += s[0] * g;
+                *dr += s[1] * g;
+            }
+        }
+        [m, ..] if channels == 1 => {
+            for (k, (s, d)) in frames.iter().zip(m.iter_mut().skip(at)).enumerate() {
+                *d += (s[0] + s[1]) * 0.5 * gain(k);
+            }
+        }
+        _ => {}
+    }
 }
 
 impl PreviewVoice {
     /// Audio thread, after the master section: add the preview into the first `channels`
     /// channels of `main` (Main's), `frames` of them. `transport` is whether the transport runs
-    /// (a count-in included): when it starts, the preview stops. Allocation-free and lock-free.
+    /// (a count-in included): when it starts, the preview stops. A stop, a new request or a cut
+    /// fades what played out over about 5 ms, and a new request fades in, so neither clicks.
+    /// Allocation-free and lock-free.
     pub fn mix(&mut self, main: &mut [Vec<f32>], channels: usize, frames: usize, transport: bool) {
         let wanted = self.shared.wanted.load(Ordering::Acquire);
+        let mut cut_now = false;
         if transport && !self.was_playing && wanted > self.cut {
             self.cut = wanted;
             self.shared.cut.store(wanted, Ordering::Release);
+            cut_now = true;
         }
         self.was_playing = transport;
-        if wanted != self.generation {
+        let switching = wanted != self.generation;
+        let gain = f32::from_bits(self.shared.gain.load(Ordering::Relaxed));
+        let gain = if gain.is_finite() { gain.clamp(0.0, 2.0) } else { 0.0 };
+        if (switching || cut_now) && self.held && self.ended < self.generation {
+            // Keep what was playing to fade it out; the new request gets the other buffer.
+            std::mem::swap(&mut self.chunk, &mut self.fade_chunk);
+            (self.fade_at, self.fade_left, self.fade_generation) = (self.at, self.fade_len, self.generation);
+            self.held = false;
+        }
+        if self.fade_left > 0 {
+            self.fade_out(main, channels, frames, gain);
+        }
+        if switching {
             self.generation = wanted;
             self.held = false;
             self.started = false;
             self.played = 0;
         }
         if wanted <= self.cut || wanted <= self.ended {
-            // Nothing to play: free the ring of whatever is left of older requests.
-            while self.ring.pop().is_ok() {}
+            // Nothing to play: free the ring of what is left of older requests (but what fades).
+            if self.fade_left == 0 {
+                self.skip(u64::MAX);
+            }
             self.held = false;
             self.shared.sounding.store(0, Ordering::Release);
             return;
         }
-        let gain = f32::from_bits(self.shared.gain.load(Ordering::Relaxed));
-        let gain = if gain.is_finite() { gain.clamp(0.0, 2.0) } else { 0.0 };
+        if self.fade_left == 0 {
+            self.skip(wanted);
+        }
         let mut i = 0;
         let mut pops = 0;
         while i < frames {
@@ -513,12 +570,13 @@ impl PreviewVoice {
                 if pops > 2 * RING_CHUNKS {
                     break;
                 }
-                match self.ring.pop() {
-                    Ok(c) if c.generation < wanted => {}
-                    Ok(c) => {
-                        *self.chunk = c;
-                        (self.at, self.held, self.started) = (0, true, true);
-                    }
+                if self.fade_left == 0 {
+                    self.skip(wanted);
+                }
+                match self.ring.peek() {
+                    // Behind the fading request's chunks: wait for its fade to take them.
+                    Ok(c) if c.generation < wanted => break,
+                    Ok(_) => {}
                     Err(_) => {
                         if self.started {
                             self.shared.underruns.fetch_add(1, Ordering::Relaxed);
@@ -526,24 +584,20 @@ impl PreviewVoice {
                         break;
                     }
                 }
+                if let Ok(c) = self.ring.pop() {
+                    *self.chunk = c;
+                    (self.at, self.held) = (0, true);
+                    if !self.started {
+                        self.started = true;
+                    }
+                }
                 continue;
             }
             let n = (frames - i).min(usize::from(self.chunk.frames) - self.at);
             let src = self.chunk.data.get(2 * self.at..2 * (self.at + n)).unwrap_or_default();
-            match &mut *main {
-                [l, r, ..] if channels >= 2 => {
-                    for (s, (dl, dr)) in src.as_chunks::<2>().0.iter().zip(l.iter_mut().skip(i).zip(r.iter_mut().skip(i))) {
-                        *dl += s[0] * gain;
-                        *dr += s[1] * gain;
-                    }
-                }
-                [m, ..] if channels == 1 => {
-                    for (s, d) in src.as_chunks::<2>().0.iter().zip(m.iter_mut().skip(i)) {
-                        *d += (s[0] + s[1]) * 0.5 * gain;
-                    }
-                }
-                _ => {}
-            }
+            // The request's first frames fade in.
+            let (played, len) = (self.played as usize + i, self.fade_len.max(1));
+            add(main, channels, i, src, |k| gain * ((played + k + 1) as f32 / len as f32).min(1.0));
             self.at += n;
             i += n;
         }
@@ -554,6 +608,43 @@ impl PreviewVoice {
         self.shared.played.store(self.played, Ordering::Relaxed);
         let sounding = if self.started && self.ended < wanted { wanted } else { 0 };
         self.shared.sounding.store(sounding, Ordering::Release);
+    }
+
+    /// Fade the stopped request out over the rest of its fade, taking its next chunk from the
+    /// ring when the held one runs out.
+    fn fade_out(&mut self, main: &mut [Vec<f32>], channels: usize, frames: usize, gain: f32) {
+        let mut i = 0;
+        while i < frames && self.fade_left > 0 {
+            if self.fade_at >= usize::from(self.fade_chunk.frames) {
+                let next = matches!(self.ring.peek(), Ok(c) if c.generation == self.fade_generation);
+                match self.ring.pop() {
+                    Ok(c) if next => (*self.fade_chunk, self.fade_at) = (c, 0),
+                    _ => {
+                        // The request ended (or nothing more came): the fade is over.
+                        self.fade_left = 0;
+                        break;
+                    }
+                }
+                continue;
+            }
+            let n = (frames - i).min(usize::from(self.fade_chunk.frames) - self.fade_at).min(self.fade_left);
+            let src = self.fade_chunk.data.get(2 * self.fade_at..2 * (self.fade_at + n)).unwrap_or_default();
+            let (left, len) = (self.fade_left, self.fade_len.max(1));
+            add(main, channels, i, src, |k| gain * (left - k - 1) as f32 / len as f32);
+            self.fade_at += n;
+            self.fade_left -= n;
+            i += n;
+        }
+    }
+
+    /// Drop the chunks at the front of the ring older than `generation`, without copying them.
+    fn skip(&mut self, generation: u64) {
+        let slots = self.ring.slots();
+        if let Ok(chunk) = self.ring.read_chunk(slots) {
+            let (a, b) = chunk.as_slices();
+            let stale = a.iter().chain(b).take_while(|c| c.generation < generation).count();
+            chunk.commit(stale);
+        }
     }
 
     fn end(&mut self, generation: u64) {

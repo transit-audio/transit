@@ -3,6 +3,14 @@ use super::*;
 use transit_audio_io::{AudioBuffer, BitDepth, EncodeOptions, FileFormat, encode};
 use transit_rt::testing::measure;
 
+/// The fade at 48 kHz (5 ms).
+const FADE: usize = 240;
+
+/// The largest change from one frame to the next in `out`, from frame `from` on.
+fn largest_step(out: &[f32], from: usize) -> f32 {
+    out[from..].windows(2).map(|w| (w[1] - w[0]).abs()).fold(0.0, f32::max)
+}
+
 /// A scratch folder of this test's own.
 fn scratch(name: &str) -> PathBuf {
     let dir = std::env::temp_dir().join(format!("transit-preview-{}-{name}", std::process::id()));
@@ -48,8 +56,13 @@ fn a_file_at_the_engine_rate_plays_sample_for_sample_then_ends() {
     preview.play(&path);
     assert_eq!(preview.status().state, PreviewState::Loading);
     let out = run(&preview, &mut voice, 512, 30, false);
+    assert_eq!(fade_frames(48_000), FADE);
     for (c, (heard, file)) in out.iter().zip(&buf.channels).enumerate() {
-        assert_eq!(&heard[..10_000], &file[..], "channel {c}: exactly the file at unity gain");
+        assert_eq!(&heard[FADE..10_000], &file[FADE..], "channel {c}: exactly the file at unity gain after the fade-in");
+        for k in 0..FADE {
+            let want = file[k] * (k + 1) as f32 / FADE as f32;
+            assert!((heard[k] - want).abs() < 1e-6, "channel {c} frame {k}: the fade-in");
+        }
         assert!(heard[10_000..].iter().all(|v| *v == 0.0), "silence after the end");
     }
     let status = preview.status();
@@ -81,7 +94,8 @@ fn the_transport_starting_stops_it_and_a_preview_started_while_playing_plays() {
     assert!(before[0].iter().any(|v| *v != 0.0));
     assert_eq!(preview.status().state, PreviewState::Playing);
     let after = run(&preview, &mut voice, 256, 4, true);
-    assert!(after[0].iter().chain(&after[1]).all(|v| *v == 0.0), "cut at the start of the transport");
+    assert!(after[0][FADE..].iter().chain(&after[1][FADE..]).all(|v| *v == 0.0), "cut at the start of the transport");
+    assert!(after[0][..FADE].iter().any(|v| *v != 0.0), "after a fade");
     assert_eq!(preview.status().state, PreviewState::Cut);
     // The transport keeps running: a new preview is not a transport start.
     preview.play(&path);
@@ -98,15 +112,19 @@ fn stop_and_another_file_replace_what_plays_and_no_stale_chunk_is_heard() {
     let (preview, mut voice) = Preview::manual(48_000);
     preview.play(&a);
     let first = run(&preview, &mut voice, 256, 4, false);
-    assert!(first[0].iter().all(|v| *v == 0.25));
-    // The ring is full of `a` when `b` is chosen: none of it is heard.
+    assert!(first[0][FADE..].iter().all(|v| *v == 0.25));
+    // The ring is full of `a` when `b` is chosen: `a` fades out, none of the rest of it is heard.
     preview.play(&b);
     let second = run(&preview, &mut voice, 256, 8, false);
-    assert!(second[0].iter().all(|v| *v == -0.5), "only the new file");
+    assert!(second[0][FADE..].iter().all(|v| *v == -0.5), "only the new file once the crossfade is over");
+    let step = (0.25 + 0.5) / FADE as f32 * 1.01;
+    assert!(largest_step(&[&first[0][..], &second[0][..]].concat(), 0) <= step, "the switch does not click");
     assert_eq!(preview.status().path.as_deref(), Some(b.as_path()));
     preview.stop();
     let stopped = run(&preview, &mut voice, 256, 4, false);
-    assert!(stopped[0].iter().all(|v| *v == 0.0));
+    assert!(stopped[0][FADE..].iter().all(|v| *v == 0.0));
+    let tail = [&second[0][second[0].len() - 1..], &stopped[0][..FADE + 1]].concat();
+    assert!(largest_step(&tail, 0) <= 0.5 / FADE as f32 * 1.01, "the stop fades over 5 ms: {}", largest_step(&tail, 0));
     assert_eq!(preview.status().state, PreviewState::Idle);
     assert_eq!(preview.status().path, None);
 }
@@ -119,7 +137,7 @@ fn the_preview_volume_scales_it_and_the_floor_is_silence() {
     preview.set_volume_db(-6.0);
     preview.play(&path);
     let out = run(&preview, &mut voice, 256, 4, false);
-    assert!((out[0][0] - 0.5 * 10f32.powf(-6.0 / 20.0)).abs() < 1e-6, "{}", out[0][0]);
+    assert!((out[0][FADE] - 0.5 * 10f32.powf(-6.0 / 20.0)).abs() < 1e-6, "{}", out[0][FADE]);
     preview.set_volume_db(MIN_DB);
     let out = run(&preview, &mut voice, 256, 4, false);
     assert!(out[0].iter().all(|v| *v == 0.0));
@@ -178,5 +196,5 @@ fn a_mono_main_hears_both_sides_at_half() {
     preview.pump();
     let mut main = vec![vec![0.0f32; 256]];
     voice.mix(&mut main, 1, 256, false);
-    assert!(main[0].iter().all(|v| (*v - 0.375).abs() < 1e-7));
+    assert!(main[0][FADE..].iter().all(|v| (*v - 0.375).abs() < 1e-7));
 }

@@ -29,6 +29,8 @@ use transit_playback::preview::{MAX_DB, MIN_DB, PreviewState};
 
 /// Height of the Files tab's preview footer.
 pub const FOOTER_H: f32 = 76.0;
+/// The status when a preview is asked for with no audio device open.
+pub const NO_DEVICE: &str = "Preview: no audio device is open, so the file can't be heard";
 /// The preview volume a new install starts at.
 pub const DEFAULT_DB: f32 = -6.0;
 /// Columns of a footer waveform.
@@ -54,7 +56,7 @@ pub struct PreviewLayout {
     pub file: Option<String>,
     /// Its length, rate and channels, from the header.
     pub facts: String,
-    /// "idle", "loading", "playing", "silent" (no audio device) or "failed".
+    /// "idle", "loading", "playing" or "failed".
     pub state: &'static str,
     pub auto_on: bool,
     pub db: f32,
@@ -167,19 +169,15 @@ impl StudioApp {
             self.status = format!("{}: not an audio file this app previews", file_name(path));
             return Err(self.status.clone());
         }
-        let db = self.ui.browser.preview_db;
+        let Some(p) = self.player.as_ref().and_then(transit_playback::Player::preview) else {
+            // No audio device: nothing could be heard, so nothing starts (and nothing shows Stop).
+            self.status = NO_DEVICE.into();
+            return Err(self.status.clone());
+        };
+        p.set_volume_db(self.ui.browser.preview_db);
+        p.play(path);
         let pv = &mut self.browser.preview;
-        pv.path = Some(path.to_path_buf());
-        pv.progress = 0.0;
-        match self.player.as_ref().and_then(transit_playback::Player::preview) {
-            Some(p) => {
-                p.set_volume_db(db);
-                p.play(path);
-                pv.state = "loading";
-            }
-            // No audio device: nothing can be heard (the footer says so).
-            None => pv.state = "silent",
-        }
+        (pv.path, pv.state, pv.progress) = (Some(path.to_path_buf()), "loading", 0.0);
         Ok(())
     }
 
@@ -395,7 +393,6 @@ pub(super) fn footer(app: &mut StudioApp, ui: &mut Ui, area: Rect, info: Option<
     let y3 = wave.max.y + 3.0;
     out.facts = info.filter(|_| shown.is_some()).map(facts).unwrap_or_default();
     let note = match app.browser.preview.state {
-        "silent" if playing => "No audio device".to_string(),
         "loading" if playing => "Loading…".to_string(),
         _ => out.facts.clone(),
     };

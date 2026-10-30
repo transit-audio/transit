@@ -36,7 +36,7 @@ fn a_preview_plays_through_the_callback_without_a_plan_change_a_meter_or_an_allo
         assert!(heap.is_zero(), "{heap:?}");
         frames += heard(&out, 0.25);
     }
-    assert_eq!(frames, 20 * 480 * 2, "every sample of both channels is the file's");
+    assert_eq!(frames, (20 * 480 - crate::preview::fade_frames(48_000) + 1) * 2, "every sample of both channels is the file's after the fade-in");
     assert_eq!(preview.status().state, PreviewState::Playing);
     assert_eq!(*audio.plans.engine().active(), plan, "the plan is the one adopted before the preview");
     assert_eq!(audio.plans.engine().active_main_meter().peak, [0.0, 0.0], "Main's meter never sees the preview");
@@ -53,7 +53,7 @@ fn starting_the_transport_stops_the_preview_in_the_callback() {
     let mut out = vec![0.0f32; 480 * 2];
     preview.pump();
     fill(&mut audio, &mut out);
-    assert_eq!(heard(&out, 0.5), 480 * 2);
+    assert!(heard(&out, 0.5) > 0);
     control.send_action(Command::Play { from: 0, end: None, looped: None }, true).unwrap();
     for _ in 0..4 {
         preview.pump();
