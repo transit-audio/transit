@@ -13,7 +13,10 @@
 //! - Everything acts on the **calling** thread's registry (a thread-local): a handler runs only on
 //!   the thread that registered it, inside that thread's `dispatch`, never inside `wait`.
 //! - A handler is called with nothing here borrowed, so it may register and remove entries
-//!   (itself included). It returns whether it stays registered.
+//!   (itself included). It returns whether it stays registered. A removed handler is dropped
+//!   after the registry is released too, so a handler whose drop runs plug-in code (a VST3
+//!   handler's last `release`) may call back in. During the thread's exit the registry is gone and
+//!   every call does nothing.
 //! - A descriptor the kernel reports invalid (`POLLNVAL`: closed without being removed) is dropped
 //!   from the registry with a warning, so it cannot spin the loop.
 //! - A timer fires at most once per `dispatch` and is rescheduled one period after it last fired
@@ -102,8 +105,10 @@ thread_local! {
     static REGISTRY: RefCell<Registry> = RefCell::new(Registry::default());
 }
 
-fn with<R>(f: impl FnOnce(&mut Registry) -> R) -> R {
-    REGISTRY.with(|r| f(&mut r.borrow_mut()))
+/// Runs `f` on the calling thread's registry; the default when it is in use further up this
+/// thread's stack (a handler's drop calling back in) or gone (the thread is exiting).
+fn with<R: Default>(f: impl FnOnce(&mut Registry) -> R) -> R {
+    REGISTRY.try_with(|r| r.try_borrow_mut().map(|mut r| f(&mut r)).ok()).ok().flatten().unwrap_or_default()
 }
 
 /// Registers `handler` for `fd` on the calling thread, called from its `dispatch` when the
@@ -148,12 +153,15 @@ pub fn add_timer(period: Duration, handler: TimerHandler) -> Option<Token> {
 /// made on another thread).
 #[must_use = "false: nothing was registered under the token on this thread"]
 pub fn remove(token: Token) -> bool {
-    with(|r| {
-        let before = r.fds.len() + r.timers.len();
-        r.fds.retain(|e| e.token != token);
-        r.timers.retain(|e| e.token != token);
-        r.fds.len() + r.timers.len() != before
-    })
+    // Taken out under the borrow, dropped after it (a handler's drop may call back in).
+    let (fds, timers): (Vec<FdEntry>, Vec<TimerEntry>) = with(|r| {
+        let fds = r.fds.iter().position(|e| e.token == token).map(|i| r.fds.remove(i)).into_iter().collect();
+        let timers = r.timers.iter().position(|e| e.token == token).map(|i| r.timers.remove(i)).into_iter().collect();
+        (fds, timers)
+    });
+    let removed = !fds.is_empty() || !timers.is_empty();
+    drop((fds, timers));
+    removed
 }
 
 /// The calling thread's registrations: (descriptors, timers).
@@ -330,6 +338,29 @@ mod tests {
         assert_eq!(run(16), 0);
         assert_eq!(counts(), (0, 0));
         assert!(add_fd(-1, Ready::READ, Rc::new(|_, _| true)).is_none());
+    }
+
+    /// A handler whose drop calls back in (a VST3 handler's last `release` unregistering its other
+    /// registrations) neither panics nor deadlocks.
+    #[test]
+    fn a_handler_dropped_on_removal_may_call_back_in() {
+        struct CallsBack(Cell<Option<Token>>);
+        impl Drop for CallsBack {
+            fn drop(&mut self) {
+                if let Some(other) = self.0.take() {
+                    assert!(remove(other), "the other registration goes from inside the drop");
+                }
+            }
+        }
+        let other = add_timer(Duration::from_secs(60), Rc::new(|| true)).unwrap();
+        let guard = CallsBack(Cell::new(Some(other)));
+        let first = add_timer(Duration::from_secs(60), Rc::new(move || {
+            let _ = &guard;
+            true
+        }))
+        .unwrap();
+        assert!(remove(first));
+        assert_eq!(counts(), (0, 0));
     }
 
     #[test]

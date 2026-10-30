@@ -16,11 +16,14 @@ pub(crate) struct PlugFrame {
     /// `resizeView` calls under way (see [`PlugFrame::MAX_NESTED`]).
     depth: AtomicU32,
     /// The plug-in's name, for the log.
-    name: String,
+    pub(super) name: String,
     /// The view is attached to the window (between `attached` and `removed`).
     attached: AtomicBool,
     /// The last size asked for before `attached`, applied once attached.
     pending: Mutex<Option<sb::ViewRect>>,
+    /// Linux: the view's `IRunLoop` (issue #147), answered by this frame.
+    #[cfg(target_os = "linux")]
+    pub(super) run_loop: super::run_loop::RunLoop,
 }
 
 impl PlugFrame {
@@ -37,7 +40,16 @@ impl PlugFrame {
             name: name.to_owned(),
             attached: AtomicBool::new(false),
             pending: Mutex::new(None),
+            #[cfg(target_os = "linux")]
+            run_loop: super::run_loop::RunLoop::new(),
         }
+    }
+
+    /// After the view was removed and its frame cleared: what it left registered with the run
+    /// loop goes (Linux, issue #147; nothing elsewhere).
+    pub(super) fn close_run_loop(&self) {
+        #[cfg(target_os = "linux")]
+        self.run_loop.close(&self.name);
     }
 
     /// Called right after the view's `attached` returned: from now on `resizeView` resizes the
@@ -80,6 +92,10 @@ impl PlugFrame {
 }
 
 impl Class for PlugFrame {
+    /// Linux views ask their frame for the host's run loop (issue #147).
+    #[cfg(target_os = "linux")]
+    type Interfaces = (sb::IPlugFrame, sb::Linux::IRunLoop);
+    #[cfg(not(target_os = "linux"))]
     type Interfaces = (sb::IPlugFrame,);
 }
 
@@ -187,7 +203,7 @@ fn follow_view_size(view: &ComPtr<sb::IPlugView>, win: &window::HostWindow, name
 }
 
 /// The size `view` reports (`None` when it reports none).
-fn view_size(view: &ComPtr<sb::IPlugView>) -> Option<(f64, f64)> {
+pub(super) fn view_size(view: &ComPtr<sb::IPlugView>) -> Option<(f64, f64)> {
     let mut r = sb::ViewRect { left: 0, top: 0, right: 0, bottom: 0 };
     // SAFETY: valid view; `r` is writable.
     ok(unsafe { view.getSize(&mut r) }).then(|| rect_size(&r))
@@ -378,7 +394,10 @@ impl EditorLink {
                 view.setFrame(std::ptr::null_mut());
             }
         }
-        g.frame = None;
+        if let Some(f) = g.frame.take() {
+            // After `removed`: the view had its chance to unregister its timers and handlers.
+            f.close_run_loop();
+        }
         if let Some(w) = g.window.take() {
             w.close();
         }

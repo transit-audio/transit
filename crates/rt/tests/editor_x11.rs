@@ -78,7 +78,7 @@ mod linux {
     }
 
     /// Runs this binary again on a private `Xvfb`; false when there is no `Xvfb`. It listens on
-    /// the abstract socket only (`-nolisten unix`): WSLg mounts `/tmp/.X11-unix` read-only.
+    /// the abstract socket only (`-nolisten unix`): `WSLg` mounts `/tmp/.X11-unix` read-only.
     fn run_under_own_xvfb() -> bool {
         let xvfb = Command::new("Xvfb")
             .args(["-displayfd", "1", "-nolisten", "tcp", "-nolisten", "unix", "-screen", "0", "1280x1024x24"])

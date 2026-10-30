@@ -99,6 +99,8 @@ mod host_context;
 mod host_objects;
 mod instance;
 mod module;
+#[cfg(target_os = "linux")]
+mod run_loop;
 mod view;
 
 pub(crate) use events::*;
@@ -232,19 +234,24 @@ mod window {
     }
 }
 
-/// The Windows host window: `transit_rt`'s editor window (issue #68), a top-level window on the
-/// plug-in host thread whose client area is a header strip above the plugin view's `HWND` parent
-/// and nothing else. Closing it only hides it; the editor link notices in `idle`, detaches the
-/// view, then destroys the window.
-#[cfg(windows)]
+/// The Windows and Linux host window: `transit_rt`'s editor window, a top-level window on the
+/// plug-in host thread. On Windows (issue #68) its client area is a header strip above the plugin
+/// view's `HWND` parent and nothing else; on Linux (issue #147) it is an X11 window whose content
+/// window's id is the view's `X11EmbedWindowID` parent (no strip yet). Closing it only hides it;
+/// the editor link notices in `idle`, detaches the view, then destroys the window.
+#[cfg(any(windows, target_os = "linux"))]
 mod window {
     use std::ffi::c_char;
 
     pub use transit_rt::editor_window::{EditorWindow as HostWindow, resize_content as resize};
 
+    #[cfg(windows)]
     pub const PLATFORM_TYPE: Option<*const c_char> = Some(vst3::Steinberg::kPlatformTypeHWND);
+    #[cfg(target_os = "linux")]
+    pub const PLATFORM_TYPE: Option<*const c_char> = Some(vst3::Steinberg::kPlatformTypeX11EmbedWindowID);
 
-    /// The window's DPI scale: a VST3 view cannot read it itself on Windows (issue #101).
+    /// The window's DPI scale: a VST3 view cannot read it itself on Windows (issue #101), nor
+    /// reliably on X11 (`Xft.dpi`, issue #147).
     pub fn content_scale(win: &HostWindow) -> Option<f64> {
         Some(win.scale())
     }
@@ -260,13 +267,14 @@ mod window {
         (f64::from(w), f64::from(h))
     }
 
-    /// Windows permits GUI creation on any thread; the editor link checks its creating thread.
+    /// Windows and X11 permit GUI creation on any thread; the editor link checks its creating
+    /// thread.
     pub fn on_main_thread() -> bool {
         true
     }
 }
 /// Other platforms: no editor windows yet (opening reports "unsupported").
-#[cfg(not(any(target_os = "macos", windows)))]
+#[cfg(not(any(target_os = "macos", windows, target_os = "linux")))]
 mod window {
     use std::ffi::{c_char, c_void};
 
