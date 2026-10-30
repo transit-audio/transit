@@ -56,6 +56,34 @@ fn a_selection_drag_paints_every_member_at_its_offset() {
 }
 
 #[test]
+fn a_diagonal_drag_of_a_selection_keeps_every_ghost_on_its_own_track() {
+    let mut r = copy_rig();
+    let (a, b, c) = three(&mut r);
+    r.app.run("edit.select", json!({"clips": [a.0, b.0, c.0]})).unwrap();
+    frames(&mut r.app, &r.ctx, 3, &mut r.time);
+    let bar_px = 4.0 * r.px_per_beat;
+    let to = (r.grab.0 + bar_px, r.lane2_y);
+    hold_drag(&mut r.app, &r.ctx, &mut r.time, r.grab, to, egui::Modifiers::NONE);
+    let on = |id: ClipId| r.app.arrange.layout.drag_ghosts.iter().find(|g| g.clip == id.0).unwrap().track;
+    assert_eq!((on(a), on(b), on(c)), (r.t.0, r.t.0, r.t2.0), "the grabbed clip stays on its track");
+    release_at(&mut r.app, &r.ctx, &mut r.time, to, egui::Modifiers::NONE);
+    assert_eq!(spans(&r.app, r.t), vec![(4 * r.beat, 8 * r.beat), (12 * r.beat, 16 * r.beat)], "the drop matches the ghosts");
+    assert_eq!(spans(&r.app, r.t2).len(), 1);
+}
+
+#[test]
+fn a_single_clip_dragged_to_another_track_ghosts_on_that_track() {
+    let mut r = copy_rig();
+    let (a, _b, _c) = three(&mut r);
+    r.app.run("edit.select_none", json!({})).unwrap();
+    frames(&mut r.app, &r.ctx, 3, &mut r.time);
+    let to = (r.grab.0 + 4.0 * r.px_per_beat, r.lane2_y);
+    hold_drag(&mut r.app, &r.ctx, &mut r.time, r.grab, to, egui::Modifiers::NONE);
+    let g = &r.app.arrange.layout.drag_ghosts;
+    assert_eq!((g.len(), g[0].clip, g[0].track), (1, a.0, r.t2.0));
+}
+
+#[test]
 fn a_single_unselected_clip_drags_with_one_ghost() {
     let mut r = copy_rig();
     let (a, _b, _c) = three(&mut r);

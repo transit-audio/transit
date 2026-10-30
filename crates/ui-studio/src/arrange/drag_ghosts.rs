@@ -21,7 +21,8 @@ pub struct DragGhost {
 }
 
 /// Every clip the drag in progress carries, at its proposed position. `preview` is the dragged
-/// clip's own landing (track, start, end); a trim drag has only that one.
+/// clip's own landing (track, start, end); a trim drag has only that one. With two or more
+/// clips every ghost stays on its own track; one clip may land on the row under the pointer.
 pub(super) fn members(app: &StudioApp, preview: (ClipId, TrackId, Samples, Samples)) -> Vec<DragGhost> {
     let (clip, dest, a, b) = preview;
     let own = DragGhost { clip: clip.0, track: dest.0, start: a, end: b, rect: [0.0; 4] };
@@ -34,9 +35,8 @@ pub(super) fn members(app: &StudioApp, preview: (ClipId, TrackId, Samples, Sampl
     let s = app.engine.session();
     set.into_iter()
         .filter_map(|id| {
-            if id == clip {
-                return Some(own.clone());
-            }
+            // Several clips move in time only (like `commit_drag`): each keeps its own track,
+            // the grabbed one too, whatever row the pointer is over.
             let (t, c) = s.find_clip(id)?;
             Some(DragGhost { clip: id.0, track: t.0, start: c.start + by, end: c.end() + by, rect: [0.0; 4] })
         })

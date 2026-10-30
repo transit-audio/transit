@@ -126,7 +126,10 @@ pub(crate) fn release_at(app: &mut StudioApp, ctx: &egui::Context, time: &mut f6
 
 /// Run frames until every queued synthetic event has been fed, then two more.
 pub(crate) fn play_queue(app: &mut StudioApp, ctx: &egui::Context, time: &mut f64) {
+    let mut spent = 0;
     while !app.synthetic.is_empty() {
+        assert!(spent < 200, "the queued input did not drain in 200 frames");
+        spent += 1;
         frames(app, ctx, 1, time);
     }
     frames(app, ctx, 2, time);

@@ -12,7 +12,8 @@
 //! (`edit.select`), the same one the move and copy paths read, so the multi-clip copy (#214) and
 //! the whole-selection drag preview (#218) work on it. Clips are the rectangles the arrangement
 //! drew (`Layout::clips`), so the children of a collapsed folder, which its row shows only as
-//! read-only summary bars, are not selected. Escape cancels the drag and leaves the selection as
+//! read-only summary bars, are not selected. The modifiers are read when the button is released, as Logic does.
+//! Escape cancels the drag and leaves the selection as
 //! it was (`menus.rs` offers the key to [`cancel`] before Select None).
 
 use super::{ClipId, Layout, Map, R4, StudioApp, r4};
@@ -22,8 +23,10 @@ use serde_json::json;
 use transit_time::Samples;
 
 /// How far (points) the pointer must travel from the press before the marquee is live; a shakier
-/// click stays a click.
-pub(super) const THRESHOLD: f32 = 4.0;
+/// click stays a click. egui starts a drag only past about 6 points, so this sits above that:
+/// a press that drifts 6 to 8 points and lets go is a drag that never went live and counts as a
+/// click (see `input`).
+pub(super) const THRESHOLD: f32 = 8.0;
 /// Within this many points of a lane edge the drag scrolls the view; farther out scrolls faster.
 const EDGE: f32 = 24.0;
 /// Most points one frame scrolls.
@@ -127,7 +130,11 @@ pub(super) fn input(app: &mut StudioApp, ui: &Ui, resp: &Response, map: Map, tl:
             .filter(|c| rect.intersects(Rect::from_min_max(pos2(c.rect[0], c.rect[1]), pos2(c.rect[2], c.rect[3]))))
             .map(|c| ClipId(c.id))
             .collect();
-        let selected = combine(mode(ui.input(|i| i.modifiers)), &m.base, &hit);
+        let how = mode(ui.input(|i| i.modifiers));
+        if how != Mode::Replace && hit.is_empty() {
+            return;
+        }
+        let selected = combine(how, &m.base, &hit);
         select(app, &selected, hit.first().copied());
     }
 }

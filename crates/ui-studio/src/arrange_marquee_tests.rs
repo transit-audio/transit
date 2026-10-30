@@ -145,13 +145,13 @@ fn a_click_without_a_drag_sets_the_cursor_and_selects_nothing() {
 }
 
 #[test]
-fn a_one_point_jitter_draws_no_marquee_and_selects_nothing() {
+fn a_short_drift_draws_no_marquee_and_selects_nothing() {
     let mut g = Rig::new();
     g.r.app.run("edit.select", json!({"clips": [g.a.0]})).unwrap();
     frames(&mut g.r.app, &g.r.ctx, 3, &mut g.r.time);
     let from = (g.x(14.0), g.y(g.r.t));
-    // Over a clip's lane but not on a clip; one point to the side.
-    let to = (from.0 + 1.0, from.1);
+    // Not on a clip; drifts 7 points, past egui's drag start but under the marquee threshold.
+    let to = (from.0 + 7.0, from.1);
     hold_drag(&mut g.r.app, &g.r.ctx, &mut g.r.time, from, to, NONE);
     assert!(g.r.app.arrange.marquee.as_ref().is_none_or(|m| !m.live), "not live under the threshold");
     release_at(&mut g.r.app, &g.r.ctx, &mut g.r.time, to, NONE);

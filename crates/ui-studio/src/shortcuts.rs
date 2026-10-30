@@ -270,7 +270,7 @@ pub const TABLE: &[Shortcut] = &[
         S::Arrangement,
         "Ableton. The piano roll's own Ctrl+A (notes) wins while it is active; Delete after it removes clips, never tracks.",
     ),
-    row(A::SelectNone, "Select None", NONE, Key::Escape, S::Arrangement, "Ours."),
+    row(A::SelectNone, "Select None", NONE, Key::Escape, S::Arrangement, "Ours; first cancels a marquee."),
     row(
         A::Rename,
         "Rename",
