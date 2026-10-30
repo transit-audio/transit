@@ -58,7 +58,7 @@ fn choose_library() -> Result<(), ClientError> {
         return Ok(());
     }
     let named = std::env::var(library::LIBRARY_ENV).ok();
-    let candidates = library::candidates(named.as_deref(), |path| std::path::Path::new(path).exists());
+    let candidates = library::candidates(named.as_deref(), library::pipewire_socket(), |path| std::path::Path::new(path).exists());
     let mut selection = library::select(&candidates, &mut DlLoader);
     let result = match selection.connected().map(str::to_owned) {
         Some(path) => match bind(&path) {
@@ -93,8 +93,7 @@ fn bind(path: &str) -> Result<(), String> {
         unsafe { library.get::<OpenFn>(b"jack_client_open\0") }.ok().map(|f| *f as usize)
     };
     let kept = KEPT.lock().unwrap_or_else(PoisonError::into_inner);
-    let ours = kept.last().and_then(address);
-    if ours.is_some() && ours == address(theirs) {
+    if library::same_object(kept.last().and_then(address), address(theirs)) {
         Ok(())
     } else {
         Err(format!("{path} connected, but another libjack was already loaded in this process; start transit with pw-jack"))
@@ -135,11 +134,7 @@ impl library::Loader for DlLoader {
         if client.is_null() {
             // jack.h: "If this is NULL, the open operation failed"; types.h, JackServerFailed:
             // "Unable to connect to the JACK server." The library is unloaded as `lib` drops.
-            return if status & j::JackServerFailed != 0 {
-                Outcome::NotRunning
-            } else {
-                Outcome::Failed(format!("jack_client_open failed (status 0x{status:x})"))
-            };
+            return library::outcome_of_status(status);
         }
         // SAFETY: jack.h, jack_client_close: "Disconnects an external client from a JACK server."
         // `client` is the probe client just opened through this library, closed once, from this

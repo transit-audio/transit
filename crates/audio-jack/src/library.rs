@@ -1,10 +1,14 @@
 //! Which libjack the backend uses (#230). The loader's default `libjack.so.0` is JACK 2's when the
 //! `jackd2` package is installed, and JACK 2's library finds no server under PipeWire: PipeWire's
 //! replacement library lives off the loader path on Debian and Ubuntu (`pw-jack` puts it on
-//! `LD_LIBRARY_PATH`). So the backend tries, in order, the library `TRANSIT_JACK_LIBRARY` names,
-//! the loader's default, then PipeWire's library at the distributions' paths, and uses the first one
-//! whose probe client connects. Safe code over a [`Loader`]: `crate::ffi` implements it over
-//! `dlopen`, the tests over a script, so the order is tested without a server.
+//! `LD_LIBRARY_PATH`). So the backend tries the library `TRANSIT_JACK_LIBRARY` names, the loader's
+//! default and PipeWire's library at the distributions' paths, and uses the first one whose probe
+//! client connects. When a PipeWire server runs (its socket exists) and no library is named,
+//! PipeWire's library goes first: JACK 2's libjack stays mapped after `dlclose` (measured with
+//! libjack-jackd2 1.9.20), so once it was loaded, `jack-sys`'s `dlopen("libjack.so.0")` binds it
+//! again and PipeWire's library could not serve the process. Without a PipeWire socket the default
+//! goes first. Safe code over a [`Loader`]: `crate::ffi` implements it over `dlopen`, the tests over
+//! a script, so the order is tested without a server.
 
 /// The environment variable that names a libjack to try first (a path, or a soname the loader
 /// resolves). PipeWire documents no such variable (`pw-jack` sets `LD_LIBRARY_PATH`), so this one is
@@ -48,17 +52,48 @@ pub(crate) trait Loader {
     fn probe(&mut self, library: &str) -> Outcome;
 }
 
-/// The libraries to try, in order: `env` (the [`LIBRARY_ENV`] value) when set, the loader's
-/// default, then each of [`PIPEWIRE_LIBRARIES`] that `exists`. No library is listed twice.
-pub fn candidates(env: Option<&str>, exists: impl Fn(&str) -> bool) -> Vec<String> {
+/// The libraries to try, in order: `env` (the [`LIBRARY_ENV`] value) when set, then the loader's
+/// default and each of [`PIPEWIRE_LIBRARIES`] that `exists`: PipeWire's first when `pipewire` (a
+/// PipeWire server's socket exists) and nothing is named, else the default first. No library is
+/// listed twice.
+pub fn candidates(env: Option<&str>, pipewire: bool, exists: impl Fn(&str) -> bool) -> Vec<String> {
     let mut list: Vec<String> = Vec::new();
     let named = env.map(str::trim).filter(|v| !v.is_empty());
-    for library in named.into_iter().chain([DEFAULT_LIBRARY]).chain(PIPEWIRE_LIBRARIES.into_iter().filter(|p| exists(p))) {
+    let installed: Vec<&str> = PIPEWIRE_LIBRARIES.into_iter().filter(|p| exists(p)).collect();
+    let rest: Vec<&str> = if pipewire && named.is_none() {
+        installed.iter().copied().chain([DEFAULT_LIBRARY]).collect()
+    } else {
+        [DEFAULT_LIBRARY].into_iter().chain(installed.iter().copied()).collect()
+    };
+    for library in named.into_iter().chain(rest) {
         if !list.iter().any(|l| l == library) {
             list.push(library.to_owned());
         }
     }
     list
+}
+
+/// Whether a PipeWire server's socket exists: `$PIPEWIRE_RUNTIME_DIR` (else `$XDG_RUNTIME_DIR`)
+/// joined with `$PIPEWIRE_REMOTE` (else `pipewire-0`), PipeWire's own lookup.
+pub fn pipewire_socket() -> bool {
+    let Some(runtime) = std::env::var_os("PIPEWIRE_RUNTIME_DIR").or_else(|| std::env::var_os("XDG_RUNTIME_DIR")) else { return false };
+    let remote = std::env::var_os("PIPEWIRE_REMOTE").unwrap_or_else(|| "pipewire-0".into());
+    std::path::Path::new(&runtime).join(remote).exists()
+}
+
+/// `JackServerFailed` (types.h: "Unable to connect to the JACK server", 0x10).
+const SERVER_FAILED: u32 = 0x10;
+
+/// What a failed `jack_client_open`'s status says: no server when `JackServerFailed` is set (JACK 2
+/// 1.9.20 with no jackd returns 0x11, `JackFailure | JackServerFailed`), else a refusal.
+pub fn outcome_of_status(status: u32) -> Outcome {
+    if status & SERVER_FAILED != 0 { Outcome::NotRunning } else { Outcome::Failed(format!("jack_client_open failed (status 0x{status:x})")) }
+}
+
+/// Whether `jack-sys` is bound to the object the probe kept: both handles resolve
+/// `jack_client_open` to the same address (`dlsym` on a handle resolves in that object first).
+pub fn same_object(kept: Option<usize>, bound: Option<usize>) -> bool {
+    kept.is_some() && kept == bound
 }
 
 /// What the selection found: every library tried, in order, and the one that connected.
@@ -156,20 +191,83 @@ mod tests {
     const UBUNTU: &str = PIPEWIRE_LIBRARIES[0];
 
     #[test]
-    fn the_order_is_the_named_library_the_default_then_pipewires_installed_paths() {
+    fn the_order_is_the_named_library_then_pipewires_first_when_its_server_runs() {
         let installed = |p: &str| p == UBUNTU || p == PIPEWIRE_LIBRARIES[3];
-        assert_eq!(candidates(None, installed), [DEFAULT_LIBRARY, UBUNTU, PIPEWIRE_LIBRARIES[3]]);
-        assert_eq!(candidates(Some("/opt/jack/libjack.so.0"), installed), ["/opt/jack/libjack.so.0", DEFAULT_LIBRARY, UBUNTU, PIPEWIRE_LIBRARIES[3]]);
-        assert_eq!(candidates(Some("  "), |_| false), [DEFAULT_LIBRARY], "an empty variable names nothing");
-        assert_eq!(candidates(Some(UBUNTU), installed), [UBUNTU, DEFAULT_LIBRARY, PIPEWIRE_LIBRARIES[3]], "no library twice");
+        assert_eq!(
+            candidates(None, true, installed),
+            [UBUNTU, PIPEWIRE_LIBRARIES[3], DEFAULT_LIBRARY],
+            "PipeWire serving: never load JACK 2's first"
+        );
+        assert_eq!(candidates(None, false, installed), [DEFAULT_LIBRARY, UBUNTU, PIPEWIRE_LIBRARIES[3]], "no PipeWire socket: the default first");
+        assert_eq!(
+            candidates(Some("/opt/jack/libjack.so.0"), true, installed),
+            ["/opt/jack/libjack.so.0", DEFAULT_LIBRARY, UBUNTU, PIPEWIRE_LIBRARIES[3]],
+            "a named library keeps the default-first order after it"
+        );
+        assert_eq!(candidates(Some("  "), false, |_| false), [DEFAULT_LIBRARY], "an empty variable names nothing");
+        assert_eq!(candidates(Some(UBUNTU), false, installed), [UBUNTU, DEFAULT_LIBRARY, PIPEWIRE_LIBRARIES[3]], "no library twice");
+    }
+
+    #[test]
+    fn jack2s_status_without_a_server_reads_as_not_running() {
+        // libjack-jackd2 1.9.20 with no jackd: JackFailure | JackServerFailed.
+        assert_eq!(outcome_of_status(0x11), Outcome::NotRunning);
+        assert_eq!(outcome_of_status(0x21), Outcome::Failed("jack_client_open failed (status 0x21)".into()));
+    }
+
+    /// The loader as glibc behaves (#230 review): a library stays mapped after a failed probe when
+    /// it is sticky (JACK 2's), and `jack-sys`'s `dlopen("libjack.so.0")` binds the first mapped
+    /// object with that soname. Each library's `jack_client_open` has its own address.
+    struct Glibc {
+        answers: Vec<(&'static str, Outcome, usize, bool)>,
+        mapped: Vec<String>,
+    }
+
+    impl Loader for Glibc {
+        fn probe(&mut self, library: &str) -> Outcome {
+            let (_, outcome, _, sticky) = self.answers.iter().find(|a| a.0 == library).cloned().unwrap();
+            if outcome == Outcome::Connected || sticky {
+                self.mapped.push(library.to_owned());
+            }
+            outcome
+        }
+    }
+
+    impl Glibc {
+        fn address(&self, library: &str) -> Option<usize> {
+            self.answers.iter().find(|a| a.0 == library).map(|a| a.2)
+        }
+        /// jack-sys's soname open: the first mapped object (all carry `libjack.so.0`), else the default.
+        fn soname_binds(&self) -> Option<usize> {
+            self.address(self.mapped.first().map_or(DEFAULT_LIBRARY, String::as_str))
+        }
+    }
+
+    #[test]
+    fn the_already_loaded_check_refuses_the_default_first_order_and_passes_pipewire_first() {
+        let tester = || Glibc {
+            answers: vec![(DEFAULT_LIBRARY, outcome_of_status(0x11), 0x1000, true), (UBUNTU, Outcome::Connected, 0x2000, false)],
+            mapped: Vec::new(),
+        };
+        // The old order: JACK 2's library is probed first and stays mapped; jack-sys binds it again.
+        let mut old = tester();
+        let selection = select(&candidates(None, false, |p| p == UBUNTU), &mut old);
+        assert_eq!(selection.connected(), Some(UBUNTU));
+        assert!(!same_object(old.address(UBUNTU), old.soname_binds()), "bound to JACK 2's object: refused");
+        // PipeWire first: JACK 2's library is never loaded, jack-sys binds PipeWire's.
+        let mut new = tester();
+        let selection = select(&candidates(None, true, |p| p == UBUNTU), &mut new);
+        assert_eq!(selection.attempts.len(), 1, "the default is not loaded");
+        assert!(same_object(new.address(UBUNTU), new.soname_binds()));
+        assert!(!same_object(None, None), "nothing kept is never the same object");
     }
 
     #[test]
     fn jack2s_library_without_jackd_falls_back_to_pipewires() {
-        // The tester's machine (#230): jackd2's libjack is the default and finds no jackd;
-        // PipeWire answers through its own library.
-        let mut loader = Script { answers: vec![(DEFAULT_LIBRARY, Outcome::NotRunning), (UBUNTU, Outcome::Connected)], asked: Vec::new() };
-        let list = candidates(None, |p| p == UBUNTU);
+        // No PipeWire socket seen, the default first: jackd2's libjack finds no jackd (status 0x11),
+        // then PipeWire's library connects (the window then checks the binding, see the next test).
+        let mut loader = Script { answers: vec![(DEFAULT_LIBRARY, outcome_of_status(0x11)), (UBUNTU, Outcome::Connected)], asked: Vec::new() };
+        let list = candidates(None, false, |p| p == UBUNTU);
         let selection = select(&list, &mut loader);
         assert_eq!(loader.asked, [DEFAULT_LIBRARY, UBUNTU]);
         assert_eq!(selection.connected(), Some(UBUNTU));
@@ -180,7 +278,7 @@ mod tests {
     #[test]
     fn the_first_library_that_connects_wins_and_the_rest_are_not_loaded() {
         let mut loader = Script { answers: vec![(DEFAULT_LIBRARY, Outcome::Connected), (UBUNTU, Outcome::Connected)], asked: Vec::new() };
-        let selection = select(&candidates(None, |_| true), &mut loader);
+        let selection = select(&candidates(None, false, |_| true), &mut loader);
         assert_eq!(loader.asked, [DEFAULT_LIBRARY], "JACK 2 with jackd running, or pw-jack: the default serves");
         assert_eq!(selection.connected(), Some(DEFAULT_LIBRARY));
     }
@@ -188,17 +286,17 @@ mod tests {
     #[test]
     fn with_none_connected_the_error_and_the_line_say_what_each_library_did() {
         let mut loader = Script { answers: vec![(DEFAULT_LIBRARY, Outcome::NotRunning), (UBUNTU, Outcome::NotRunning)], asked: Vec::new() };
-        let selection = select(&candidates(None, |p| p == UBUNTU), &mut loader);
+        let selection = select(&candidates(None, false, |p| p == UBUNTU), &mut loader);
         assert_eq!(selection.error(), Some(ClientError::ServerNotRunning));
         assert_eq!(selection.summary(), format!("JACK libraries tried: libjack.so.0 (no server answered), {UBUNTU} (no server answered)"));
 
         let mut nothing = Script { answers: Vec::new(), asked: Vec::new() };
-        let selection = select(&candidates(None, |_| false), &mut nothing);
+        let selection = select(&candidates(None, false, |_| false), &mut nothing);
         assert_eq!(selection.error(), Some(ClientError::LibraryMissing("no such file".into())));
         assert_eq!(selection.summary(), "JACK libraries tried: libjack.so.0 (not loaded); PipeWire's JACK library is not installed (pipewire-jack)");
 
         let mut refused = Script { answers: vec![(DEFAULT_LIBRARY, Outcome::Failed("status 0x21".into()))], asked: Vec::new() };
-        let selection = select(&candidates(None, |_| false), &mut refused);
+        let selection = select(&candidates(None, false, |_| false), &mut refused);
         assert_eq!(selection.error(), Some(ClientError::Failed("status 0x21".into())));
     }
 }
