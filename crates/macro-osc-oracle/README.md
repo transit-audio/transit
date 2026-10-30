@@ -1,9 +1,9 @@
 # transit-macro-osc-oracle
 
-The null-test oracle for transit's ported instruments ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md)): the macro oscillator (#194) and the resonator (#198).
+The null-test oracle for transit's ported instruments ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md)): the macro oscillator (#194), the resonator (#198) and the granular texture processor (#199).
 
 It builds Émilie Gillet's original C++ DSP (MIT) and lets Rust tests render it sample by sample.
-The Rust ports (`transit-macro-osc`, #195; `transit-resonator`, #198) are gated by comparing their
+The Rust ports (`transit-macro-osc`, #195; `transit-resonator`, #198; `transit-granular`, #199) are gated by comparing their
 output against this crate, engine by engine and model by model, on the same runner. One crate holds
 every module family's oracle, a module per family, so they share the build, the session lock, the
 residual and the floor.
@@ -22,8 +22,9 @@ reaches a release build.
 - `build.rs`: builds it with the `cc` crate. C++11 (C++14 on MSVC, its minimum), `-DTEST` (the
   desktop branch of the firmware's library, as its own test makefile), `-O2` in every cargo profile,
   no fast-math, no FP contraction (`-ffp-contract=off` on GCC and Clang, `/fp:strict` on MSVC).
-- `patches/msvc/`: two small patches MSVC needs, applied to copies at build time on MSVC only
-  (VENDOR.md lists them). GCC and Clang build `vendor/` unchanged.
+- `patches/msvc/`: three small patches MSVC needs, and `patches/all/`: one upstream line restored for
+  every compiler (the stretch mode's `Window::Start`), applied to copies at build time (VENDOR.md
+  lists them). Every other file builds as fetched.
 - `cpp/oracle.cc`: a C ABI over one voice (`Patch` and `Modulations` in, int16 out/aux frames, as
   the firmware) and over each engine on its own (float out/aux before the voice's gain, limiter and
   low-pass gate), each on its own 16 KB arena, plus seeding of the random state.
@@ -33,6 +34,13 @@ reaches a release build.
   polyphony 1 to 4, the note filter, the reverb and the limiter; float out/aux), on zeroed memory as
   the module's static storage, with the model, polyphony and bypass settings. `cpp/ftz_scope.h` is
   the flush-to-zero scope both wrappers share.
+- `cpp/granular_oracle.cc`, `src/granular.rs` and `src/granular_sweep.rs`: the granular processor
+  (#199) in its granular and its pitch-shifter / time-stretcher playback modes, at its four buffer
+  qualities, stereo int16 in and out at 32 kHz in the firmware's 32-frame blocks, on the module's
+  memory sizes or others, driven as the firmware's harness drives it (`Prepare` after every block);
+  and its fixed sweep (each of nine parameters at five levels, three freeze and trigger patterns,
+  both modes, every quality: 888 points, each the quality's whole recording plus 0.25 s long, a
+  fresh processor and a fixed seed and input per point).
 - `src/resonator.rs` and `src/resonator_sweep.rs`: the resonator's safe wrapper and its fixed sweep
   (159 points per model and polyphony, 6 models, polyphony 1 to 4, 48 kHz, 24-frame blocks, a fresh
   part and the same seed per point).
@@ -41,8 +49,9 @@ reaches a release build.
 - `src/residual.rs`: peak and RMS residual in dBFS.
 - `src/floor.rs`: the measured floor per runner family.
 
-Upstream runs at 48 kHz only (its tables and filter coefficients assume it), so the oracle accepts
-48 kHz only. The macro oscillator's block size is the firmware's `kBlockSize`, 12 frames; a render
+The macro oscillator and the resonator run at 48 kHz only (their tables and filter coefficients
+assume it), so their oracles accept 48 kHz only; the granular processor runs at 32 kHz only, its
+module's codec rate. The macro oscillator's block size is the firmware's `kBlockSize`, 12 frames; a render
 call takes up to `kMaxBlockSize`, 24. The resonator's firmware renders `kMaxBlockSize`, 24 frames,
 per call, and one call is one control block.
 
@@ -67,11 +76,16 @@ polyphonies × 159 points, 3,816 renders of 100 ms) twice in one process and aga
 process. Measured: bit-identical on Windows x86-64 with MSVC (2026-10-30); Linux and macOS prove it
 on every CI run.
 
+`tests/granular_self_floor.rs` does the same for the granular processor: the whole sweep (888
+renders, 4 qualities, 2 modes) twice in one process and again in a second process. Measured:
+bit-identical on Windows x86-64 with MSVC (2026-10-30); Linux and macOS prove it on every CI run.
+
 To re-measure (after a compiler, flag or vendor change):
 
 ```sh
 cargo test --locked -p transit-macro-osc-oracle --test self_floor -- --nocapture
 cargo test --locked -p transit-macro-osc-oracle --test resonator_self_floor -- --nocapture
+cargo test --locked -p transit-macro-osc-oracle --test granular_self_floor -- --nocapture
 ```
 
 A pass means the floor is still `-inf` on that runner. A failure prints the engine, the point and the

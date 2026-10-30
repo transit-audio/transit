@@ -1,0 +1,13 @@
+--- clouds/dsp/window.h
++++ clouds/dsp/window.h
+@@ -64,6 +64,10 @@
+     first_sample_ = (start + buffer_size) % buffer_size;
+     phase_increment_ = phase_increment;
+     phase_ = 0;
++    // Restored for the transit oracle: the merge d1d8839 (2023-03-13) combined two commits that
++    // each removed one of the two duplicate `done_ = false;` lines here (fbb53ba, 0e3756f), so
++    // neither is left and no window ever starts: the stretch mode is silent at 08460a69.
++    done_ = false;
+     regenerated_ = false;
+     envelope_phase_increment_ = 2.0f / static_cast<float>(width);
+   }

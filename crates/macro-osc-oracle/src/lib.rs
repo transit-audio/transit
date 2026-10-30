@@ -1,5 +1,5 @@
-//! The null-test oracle for transit's ported instruments (ADR 0033): the macro oscillator (#194)
-//! and the resonator (#198).
+//! The null-test oracle for transit's ported instruments (ADR 0033): the macro oscillator (#194),
+//! the resonator (#198) and the granular texture processor (#199).
 //!
 //! This crate builds Émilie Gillet's original C++ DSP (MIT; vendored under `vendor/`, see
 //! `VENDOR.md` and `LICENSE-THIRD-PARTY`) with the `cc` crate and exposes it to Rust tests. It is
@@ -15,9 +15,14 @@
 //! - [`floor`]: the measured residual floor per CI runner family.
 //! - [`resonator`] and [`resonator_sweep`]: the resonator part (six models, polyphony 1 to 4, float
 //!   out/aux) and its fixed sweep, at 48 kHz in the firmware's 24-frame blocks (#198).
+//! - [`granular`] and [`granular_sweep`]: the granular texture processor (its granular playback
+//!   mode at four buffer qualities, stereo int16 in and out) and its fixed sweep, at 32 kHz in the
+//!   firmware's 32-frame blocks (#199).
 
 mod ffi;
 pub mod floor;
+pub mod granular;
+pub mod granular_sweep;
 mod model;
 mod oracle;
 pub mod residual;

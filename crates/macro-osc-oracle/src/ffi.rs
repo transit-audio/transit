@@ -1,5 +1,5 @@
-//! The only module with `unsafe`: the C ABI of `cpp/oracle.cc` and `cpp/resonator_oracle.cc`, and
-//! the session lock that makes it sound to call.
+//! The only module with `unsafe`: the C ABI of `cpp/oracle.cc`, `cpp/resonator_oracle.cc` and
+//! `cpp/granular_oracle.cc`, and the session lock that makes it sound to call.
 //!
 //! Soundness rests on three invariants, each enforced here:
 //!
@@ -8,13 +8,16 @@
 //!    C++) and would also make the noise sequence depend on scheduling. Every call goes through a
 //!    [`Session`], which holds a process-wide mutex and is neither `Send` nor `Sync`, so all calls of
 //!    one session stay on the thread that took the lock. Handles borrow their session.
-//! 2. **Valid handles.** [`RawVoice`], [`RawEngine`] and [`RawResonator`] own a non-null pointer
+//! 2. **Valid handles.** [`RawVoice`], [`RawEngine`], [`RawResonator`] and [`RawGranular`] own a non-null pointer
 //!    returned by the matching `_new` function and free it exactly once, in `Drop`.
 //! 3. **Buffer bounds.** Every render checks the length is between 1 and the firmware's maximum block
 //!    size before the call, and passes buffers whose lengths match the size it passes.
 //! 4. **Table bounds.** Inputs the C++ indexes tables with are range-checked here before the call:
 //!    the resonator's tonic, note, FM, chord, macros and input samples (`crate::resonator::inputs_in_range`, which
-//!    derives its bounds from the C++), so no input from safe Rust can make it read past a table.
+//!    derives its bounds from the C++), and the granular processor's parameters
+//!    (`crate::granular::parameters_in_range`), so no input from safe Rust can make it read past a
+//!    table. The granular processor's memory sizes and quality are checked by the C++ itself (it
+//!    returns null for sizes that leave no room for its workspace or its longest grain).
 
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -91,8 +94,28 @@ pub struct CPerformanceState {
     pub(crate) internal_note: u8,
 }
 
-// SAFETY: these declarations match the `extern "C"` definitions in cpp/oracle.cc and
-// cpp/resonator_oracle.cc one for one
+/// Mirrors `OracleGranularParameters` in `cpp/granular_oracle.cc` (the granular processor's
+/// `Parameters`, bools as `u8` after the floats).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CGranularParameters {
+    pub(crate) position: f32,
+    pub(crate) size: f32,
+    pub(crate) pitch: f32,
+    pub(crate) density: f32,
+    pub(crate) texture: f32,
+    pub(crate) dry_wet: f32,
+    pub(crate) stereo_spread: f32,
+    pub(crate) feedback: f32,
+    pub(crate) reverb: f32,
+    pub(crate) freeze: u8,
+    pub(crate) trigger: u8,
+    pub(crate) gate: u8,
+    pub(crate) reserved: u8,
+}
+
+// SAFETY: these declarations match the `extern "C"` definitions in cpp/oracle.cc,
+// cpp/resonator_oracle.cc and cpp/granular_oracle.cc one for one
 // (names, argument order, and C types: `size_t` is `usize`, `void*` is `*mut c_void`, the structs
 // are the `#[repr(C)]` mirrors above). The build script compiles that file into this crate.
 unsafe extern "C" {
@@ -135,6 +158,23 @@ unsafe extern "C" {
         input: *const f32,
         out: *mut f32,
         aux: *mut f32,
+        size: usize,
+    ) -> i32;
+    fn oracle_granular_max_block_size() -> usize;
+    fn oracle_granular_firmware_large_size() -> usize;
+    fn oracle_granular_firmware_small_size() -> usize;
+    fn oracle_granular_workspace_size() -> usize;
+    fn oracle_granular_new(large: usize, small: usize, quality: i32, mode: i32) -> *mut std::ffi::c_void;
+    fn oracle_granular_set_mode(processor: *mut std::ffi::c_void, mode: i32) -> i32;
+    fn oracle_granular_free(processor: *mut std::ffi::c_void);
+    fn oracle_granular_set_quality(processor: *mut std::ffi::c_void, quality: i32) -> i32;
+    fn oracle_granular_set_bypass(processor: *mut std::ffi::c_void, bypass: u8);
+    fn oracle_granular_set_silence(processor: *mut std::ffi::c_void, silence: u8);
+    fn oracle_granular_process(
+        processor: *mut std::ffi::c_void,
+        parameters: *const CGranularParameters,
+        input: *const i16,
+        out: *mut i16,
         size: usize,
     ) -> i32;
 }
@@ -215,6 +255,28 @@ impl Session {
     pub fn resonator_model_count(&self) -> usize {
         // SAFETY: returns a compile-time constant; no state is touched.
         usize::try_from(unsafe { oracle_resonator_model_count() }).unwrap_or(0)
+    }
+
+    /// The granular processor's block size, `kMaxBlockSize` in `clouds/dsp/frame.h` (32 frames).
+    #[must_use]
+    pub fn granular_max_block_size(&self) -> usize {
+        // SAFETY: returns a compile-time constant; no state is touched.
+        unsafe { oracle_granular_max_block_size() }
+    }
+
+    /// The module's two memory blocks, bytes: `block_mem` and `block_ccm` in `clouds/clouds.cc`.
+    #[must_use]
+    pub fn granular_firmware_sizes(&self) -> (usize, usize) {
+        // SAFETY: both return compile-time constants; no state is touched.
+        unsafe { (oracle_granular_firmware_large_size(), oracle_granular_firmware_small_size()) }
+    }
+
+    /// The bytes of FX workspace the processor carves out of its memory (diffuser, reverb,
+    /// correlator).
+    #[must_use]
+    pub fn granular_workspace_size(&self) -> usize {
+        // SAFETY: returns a compile-time constant; no state is touched.
+        unsafe { oracle_granular_workspace_size() }
     }
 }
 
@@ -388,5 +450,86 @@ impl Drop for RawResonator<'_> {
         // SAFETY: `self.ptr` came from `oracle_resonator_new` and is freed only here (invariant 2).
         // Freeing touches no shared state.
         unsafe { oracle_resonator_free(self.ptr.as_ptr()) }
+    }
+}
+
+/// The granular processor (`clouds::GranularProcessor`) with its two memory blocks, in
+/// zero-initialized storage as on the module.
+pub struct RawGranular<'s> {
+    ptr: std::ptr::NonNull<std::ffi::c_void>,
+    session: &'s Session,
+}
+
+impl<'s> RawGranular<'s> {
+    /// `None` when the sizes leave no room for the workspace or the longest grain, the quality is
+    /// outside 0 to 3, the mode outside 0 to 1, or an allocation fails.
+    pub(crate) fn new(session: &'s Session, large: usize, small: usize, quality: i32, mode: i32) -> Option<Self> {
+        // SAFETY: the lock is held through `session` (invariant 1); the call checks the sizes, the
+        // quality and the mode, then allocates and initializes a processor, or returns null.
+        let ptr = unsafe { oracle_granular_new(large, small, quality, mode) };
+        std::ptr::NonNull::new(ptr).map(|ptr| Self { ptr, session })
+    }
+
+    /// `None` when `quality` is outside 0 to 3.
+    pub(crate) fn set_quality(&mut self, quality: i32) -> Option<()> {
+        // SAFETY: the lock is held through `self.session` (invariant 1); `self.ptr` is a live
+        // processor (invariant 2) used by this thread only; the wrapper range-checks `quality`.
+        let status = unsafe { oracle_granular_set_quality(self.ptr.as_ptr(), quality) };
+        (status == 0).then_some(())
+    }
+
+    /// `None` when `mode` is outside 0 to 1.
+    pub(crate) fn set_mode(&mut self, mode: i32) -> Option<()> {
+        // SAFETY: as `set_quality`; the wrapper range-checks `mode`.
+        let status = unsafe { oracle_granular_set_mode(self.ptr.as_ptr(), mode) };
+        (status == 0).then_some(())
+    }
+
+    pub(crate) fn set_bypass(&mut self, bypass: bool) {
+        // SAFETY: as `set_quality`; the call writes one flag of the processor.
+        unsafe { oracle_granular_set_bypass(self.ptr.as_ptr(), u8::from(bypass)) }
+    }
+
+    pub(crate) fn set_silence(&mut self, silence: bool) {
+        // SAFETY: as `set_quality`; the call writes one flag of the processor.
+        unsafe { oracle_granular_set_silence(self.ptr.as_ptr(), u8::from(silence)) }
+    }
+
+    /// Processes `input.len()` stereo frames into `out`. `None` when the lengths differ, the frame
+    /// count is zero, exceeds the maximum block size or is odd at a low-fidelity quality (the C++
+    /// checks the last), or a parameter is out of range (invariant 4).
+    pub(crate) fn process(&mut self, parameters: &crate::granular::Parameters, input: &[[i16; 2]], out: &mut [[i16; 2]]) -> Option<()> {
+        let size = input.len();
+        if out.len() != size || size == 0 || size > self.session.granular_max_block_size() {
+            return None;
+        }
+        if !crate::granular::parameters_in_range(parameters) {
+            return None;
+        }
+        let parameters = parameters.to_c();
+        // SAFETY: the lock is held through `self.session` (invariant 1); `self.ptr` is a live
+        // processor (invariant 2) used by this thread only; `parameters` is valid for reads;
+        // `input` and `out` each hold exactly `2 * size` contiguous `i16` values (`[i16; 2]` has
+        // no padding) with `size <= kMaxBlockSize` (invariant 3), and they do not alias (distinct
+        // borrows); every value the C++ indexes a table with was range-checked just above
+        // (invariant 4).
+        let status = unsafe {
+            oracle_granular_process(
+                self.ptr.as_ptr(),
+                std::ptr::from_ref(&parameters),
+                input.as_ptr().cast::<i16>(),
+                out.as_mut_ptr().cast::<i16>(),
+                size,
+            )
+        };
+        (status == 0).then_some(())
+    }
+}
+
+impl Drop for RawGranular<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.ptr` came from `oracle_granular_new` and is freed only here (invariant 2).
+        // Freeing touches no shared state.
+        unsafe { oracle_granular_free(self.ptr.as_ptr()) }
     }
 }

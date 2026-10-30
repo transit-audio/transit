@@ -1,16 +1,17 @@
-//! Builds the vendored C++ (vendor/: the macro oscillator and the resonator) and the C ABI wrappers
-//! (cpp/oracle.cc, cpp/resonator_oracle.cc).
+//! Builds the vendored C++ (vendor/: the macro oscillator, the resonator and the granular texture
+//! processor) and the C ABI wrappers (cpp/oracle.cc, cpp/resonator_oracle.cc, cpp/granular_oracle.cc).
 //!
 //! Floating point is kept strict so the oracle is a stable reference: `-DTEST` (the desktop branch
 //! of stmlib, as the firmware's own test makefile), `-O2` whatever the cargo profile, no
 //! fast-math, and no FP contraction (`-ffp-contract=off` on GCC and Clang; `/fp:strict` on MSVC,
 //! where contraction cannot be turned off on its own on every supported version).
 //!
-//! vendor/ is never edited. `cpp/compat.h` is force-included into every file. On MSVC only, the
-//! patches in `patches/msvc/` (unified diffs against vendor/, `git apply -p0` format) are applied
-//! to copies in `OUT_DIR/overlay`: the overlay comes first on the include path, so a patched header
-//! shadows the vendored one, and a patched source file is compiled from the overlay. GCC and Clang
-//! compile vendor/ exactly as fetched.
+//! vendor/ is never edited. `cpp/compat.h` is force-included into every file. The patches in
+//! `patches/all/` (on every compiler) and, on MSVC only, `patches/msvc/` (unified diffs against
+//! vendor/, `git apply -p0` format) are applied to copies in `OUT_DIR/overlay`: the overlay comes
+//! first on the include path, so a patched header shadows the vendored one, and a patched source
+//! file is compiled from the overlay. `patches/all/` holds one fix, an upstream merge that lost a
+//! line the stretch mode needs (VENDOR.md); every other file compiles as fetched.
 
 #![forbid(unsafe_code)]
 
@@ -107,30 +108,37 @@ fn main() {
     let mut sources = Vec::new();
     collect(&vendor.join("plaits"), "cc", &mut sources);
     collect(&vendor.join("rings"), "cc", &mut sources);
+    collect(&vendor.join("clouds"), "cc", &mut sources);
+    sources.push(vendor.join("stmlib/dsp/atan.cc"));
     sources.push(vendor.join("stmlib/dsp/units.cc"));
     sources.push(vendor.join("stmlib/utils/random.cc"));
     sources.push(cpp.join("oracle.cc"));
     sources.push(cpp.join("resonator_oracle.cc"));
+    sources.push(cpp.join("granular_oracle.cc"));
 
     let mut build = cc::Build::new();
     build.cpp(true).define("TEST", None).opt_level(2).debug(false).warnings(false);
     let compat = cpp.join("compat.h");
-    if build.get_compiler().is_like_msvc() {
-        let overlay = out_dir.join("overlay");
-        let _ = std::fs::remove_dir_all(&overlay);
-        let mut patches = Vec::new();
+    let msvc = build.get_compiler().is_like_msvc();
+    let overlay = out_dir.join("overlay");
+    let _ = std::fs::remove_dir_all(&overlay);
+    let mut patches = Vec::new();
+    collect(&root.join("patches/all"), "patch", &mut patches);
+    if msvc {
         collect(&root.join("patches/msvc"), "patch", &mut patches);
-        for patch in &patches {
-            let written = apply_patch(patch, &vendor, &overlay).unwrap_or_else(|e| panic!("MSVC patch failed: {e}"));
-            // A patched source file is compiled from the overlay instead of vendor/.
-            for file in written {
-                let Ok(rel) = file.strip_prefix(&overlay) else { continue };
-                if let Some(source) = sources.iter_mut().find(|s| s.strip_prefix(&vendor).is_ok_and(|r| r == rel)) {
-                    *source = file.clone();
-                }
+    }
+    for patch in &patches {
+        let written = apply_patch(patch, &vendor, &overlay).unwrap_or_else(|e| panic!("patch failed: {e}"));
+        // A patched source file is compiled from the overlay instead of vendor/.
+        for file in written {
+            let Ok(rel) = file.strip_prefix(&overlay) else { continue };
+            if let Some(source) = sources.iter_mut().find(|s| s.strip_prefix(&vendor).is_ok_and(|r| r == rel)) {
+                *source = file.clone();
             }
         }
-        build.include(&overlay);
+    }
+    build.include(&overlay);
+    if msvc {
         build.flag("/std:c++14").flag("/fp:strict").flag("/EHsc").flag(format!("/FI{}", compat.display()));
     } else {
         build.flag("-std=c++11").flag("-ffp-contract=off").flag("-fno-fast-math").flag("-include").flag(compat.to_string_lossy().as_ref());
