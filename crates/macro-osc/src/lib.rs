@@ -3,7 +3,8 @@
 //! The DSP is Émilie Gillet's MIT firmware, as ported to Rust by Oliver Rockstedt (MIT) and
 //! vendored here (see `VENDOR.md` and `LICENSE-THIRD-PARTY`), with transit's corrections against
 //! the C++ oracle (`transit-macro-osc-oracle`). Every engine is nulled against the oracle sample
-//! by sample (`tests/null_vs_oracle.rs`).
+//! by sample (`tests/null_vs_oracle.rs`), and so is the voice, int16 frame by frame
+//! (`tests/null_vs_oracle_voice.rs`, `tests/voice_scenarios_vs_oracle.rs`).
 //!
 //! The firmware runs at 48 kHz in 12-frame blocks. A voice here also runs at 44.1, 88.2 and 96 kHz
 //! ([`SampleRate`]), still in 12-frame blocks; only 48 kHz is nulled against the firmware.
