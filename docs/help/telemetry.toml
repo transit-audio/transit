@@ -216,6 +216,11 @@ name = "Frames silenced by a render fault"
 text = "Frames of audio replaced by silence because rendering failed. Healthy is 0. If not, find the plug-in that faulted in the log and report it."
 
 [[entry]]
+id = "telemetry.disk_underruns"
+name = "Disk underruns"
+text = "Blocks of a long take, played from its file, that were not read from disk in time and played as silence instead. Healthy is 0. A count after a jump of the playhead is a slow disk; a count while playing on means the disk cannot keep up: move the take to a faster disk."
+
+[[entry]]
 id = "telemetry.reset_peak"
 name = "Reset peak"
 text = "Starts the since-open peak load and longest callback over. Use it after a change to see whether the peak comes back."

@@ -40,6 +40,7 @@ pub fn telemetry_row(row: &str) -> Option<Id> {
         ("Timed callbacks:", Id::TelemetryTimedCallbacks),
         ("Callbacks:", Id::TelemetryCallbacks),
         ("Frames silenced by a render fault:", Id::TelemetryFaultSilence),
+        ("Disk underruns:", Id::TelemetryDiskUnderruns),
         ("Frames:", Id::TelemetryFrames),
         ("Total work time", Id::TelemetryTotalWork),
         ("Longest callback", Id::TelemetryLongestCallback),

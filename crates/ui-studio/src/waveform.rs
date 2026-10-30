@@ -7,9 +7,43 @@ use transit_time::Samples;
 
 /// Draw a clip's audio across `body`, one band per channel, `channels` of them at most.
 pub fn draw(painter: &Painter, s: &Session, tl: Rect, clip: &Clip, audio: &SourceAudio, channels: usize, body: Rect, wave: Color32) {
+    // A disk-backed source draws from its peaks once they are built (ADR 0035); nothing before.
+    if let Some(disk) = &audio.disk {
+        if let Some(peaks) = disk.peaks() {
+            for (ch, band) in bands(body, channels.min(peaks.channels.len()).max(1)).enumerate() {
+                disk_channel(painter, s, tl, clip, peaks, ch, band, wave);
+            }
+        }
+        return;
+    }
     for (ch, band) in bands(body, channels.min(audio.peaks.len()).max(1)).enumerate() {
         channel(painter, s, tl, clip, audio, ch, band, wave);
     }
+}
+
+/// One channel of a disk-backed source, from its bucketed peaks (min and max per column).
+#[allow(clippy::too_many_arguments)]
+fn disk_channel(painter: &Painter, s: &Session, tl: Rect, clip: &Clip, peaks: &transit_model::disk::DiskPeaks, ch: usize, band: Rect, wave: Color32) {
+    let Some(g) = Grid::new(painter, s, tl, band) else { return };
+    let (rectified, outlines) = (s.edit.flag("waveform.rectified"), s.edit.flag("waveform.outlines"));
+    let origin = clip.start.saturating_sub(clip.source_offset()) as f64;
+    let gain = |pos: f64| clip.gain_at((pos as Samples).saturating_sub(clip.start).min(clip.length).max(0)) * s.edit.zoom.waveform_zoom;
+    let (start, overlap) = (g.start() - origin, g.overlap());
+    let step = g.step.max(1.0);
+    let base = g.cy + g.half;
+    let ys: Vec<Option<(f32, f32)>> = (0..g.cols)
+        .map(|c| {
+            let a = start + step * c as f64;
+            let (lo, hi) = peaks.minmax(ch, a, a + step + overlap)?;
+            let k = gain((g.k0 + c as f64 + 0.5) * g.step);
+            Some(if rectified {
+                (base - level(lo.abs().max(hi.abs()) * k) * g.half * 2.0, base)
+            } else {
+                (g.cy - level(hi * k) * g.half, g.cy - level(lo * k) * g.half)
+            })
+        })
+        .collect();
+    g.paint(painter, &ys, wave, outlines, rectified);
 }
 
 fn bands(body: Rect, n: usize) -> impl Iterator<Item = Rect> {

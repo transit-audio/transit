@@ -143,6 +143,7 @@ ids! {
     TelemetryBackendErrors => "telemetry.backend_errors",
     TelemetryDeviceLost => "telemetry.device_lost",
     TelemetryFaultSilence => "telemetry.fault_silence",
+    TelemetryDiskUnderruns => "telemetry.disk_underruns",
     TelemetryResetPeak => "telemetry.reset_peak",
     TelemetryCopyDiagnostics => "telemetry.copy_diagnostics",
     // help\transport.toml

@@ -218,6 +218,9 @@ pub struct CallbackTelemetry {
     pub unavailable_silence_frames: u64,
     /// Render frames silenced because rendering panicked, or an earlier panic latched the fault.
     pub fault_silence_frames: u64,
+    /// Clip blocks of disk-backed sources played as silence because their ring was short
+    /// (ADR 0035), every source in the process.
+    pub disk_underruns: u64,
     /// The longest callbacks since open (peak resets restart them), longest first, with what the
     /// callback was doing (#162). Empty slots have a zero duration.
     pub worst: [WorstCallback; WORST_KEPT],
@@ -321,6 +324,7 @@ impl Counters {
             contention_silence_frames: self.contention_silence_frames.load(Ordering::Relaxed),
             unavailable_silence_frames: self.unavailable_silence_frames.load(Ordering::Relaxed),
             fault_silence_frames: self.fault_silence_frames.load(Ordering::Relaxed),
+            disk_underruns: transit_model::disk::underruns(),
             worst: std::array::from_fn(|i| self.worst[i].load()),
             backend: None,
             strip_faults: None,

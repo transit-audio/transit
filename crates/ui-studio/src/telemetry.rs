@@ -158,6 +158,8 @@ pub fn detail_rows_named(t: &CallbackTelemetry, strips: &[StripName]) -> Vec<Str
         format!("Backend errors: {}", t.backend_errors),
         format!("Device-lost errors: {}", t.device_lost_errors),
         format!("Frames silenced by a render fault: {}", t.fault_silence_frames),
+        // ADR 0035: a disk-backed clip whose ring was short played silence for the block.
+        format!("Disk underruns: {}", t.disk_underruns),
     ]);
     rows
 }

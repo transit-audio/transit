@@ -10,6 +10,8 @@ impl StudioApp {
             return;
         }
         if let Some(p) = &self.player {
+            // Disk-backed clips under the playhead are read before the transport moves (ADR 0035).
+            prime_disk(self.engine.session(), from);
             let Some(sequence) = self.player_requests.result(&mut self.status, p.play(from, end, looped)) else { return };
             self.player_requests.play = Some(sequence);
             self.status = "Play pending".into();
@@ -75,6 +77,7 @@ impl StudioApp {
         if !self.is_playing() {
             return;
         }
+        prime_disk(self.engine.session(), at);
         if let Some(p) = &self.player
             && let Some(sequence) = self.player_requests.result(&mut self.status, p.locate(at))
         {
@@ -164,6 +167,7 @@ impl StudioApp {
                     self.auto.gesture = None;
                     self.auto.selection.clear();
                     self.engine.transport.position = self.cursor();
+                    prime_disk(self.engine.session(), self.engine.transport.position);
                     if self.sync_player_session()
                         && let Some(p) = &self.player
                         && let Some(sequence) = self.player_requests.result(&mut self.status, p.locate(self.engine.transport.position))
@@ -313,3 +317,12 @@ impl StudioApp {
 #[cfg(test)]
 #[path = "live_cycle_tests.rs"]
 mod live_cycle_tests;
+
+/// Prime the disk-backed clips the playhead reaches from `at` (ADR 0035): the transport waits for
+/// their rings as it waits for a plan. A clip still late plays silence, counted as a disk underrun.
+fn prime_disk(s: &transit_model::Session, at: Samples) {
+    let late = transit_model::disk::prime_session(s, at);
+    if late > 0 {
+        log::info!("{late} disk-backed clips were not ready to play from {at}");
+    }
+}
