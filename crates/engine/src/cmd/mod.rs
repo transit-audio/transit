@@ -23,6 +23,7 @@ mod health;
 mod instrument;
 mod midi;
 mod midi_chord;
+mod midi_effect;
 mod midi_input;
 mod midi_map;
 mod midi_output;
@@ -159,6 +160,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(audio_midi::specs());
         v.extend(midi::specs());
         v.extend(midi_input::specs());
+        v.extend(midi_effect::specs());
         v.extend(midi_map::specs());
         v.extend(midi_output::specs());
         v.extend(view_more::specs());

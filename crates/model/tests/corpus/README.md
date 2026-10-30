@@ -28,6 +28,11 @@ One more is saved ahead of its release: `v0.6.0-rack.transit` (#197, ADR 0034) h
 the rack, a mapped and automated macro and a learned one). It is written by `write_rack_fixture` in
 `corpus_generate.rs` from the racks branch, named for the release that ships racks, and goes
 through the same lossless round trip as the release files; its own test checks the rack loads.
+Another is saved ahead of its release: `v0.6.0-midi-effects.transit` (#201, ADR 0036) holds an
+instrument track playing a MIDI clip through two MIDI effects, Transpose with an automated
+parameter and a bypassed Velocity. It is written by `write_midi_effect_fixture` in
+`crates/engine/tests/midi_effects.rs`, named for the release that ships the slot, and goes through
+the same lossless round trip as the release files; its own test checks the chain loads.
 
 Files hold the session JSON only, no `Audio Files/`. Nothing here reads audio.
 
