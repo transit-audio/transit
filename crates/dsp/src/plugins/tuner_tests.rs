@@ -103,14 +103,14 @@ fn quiet_input_is_no_signal_and_the_display_lets_go_after_a_few_misses() {
     m.analyze(440.0, false);
     assert!(m.reading().is_some());
     // -60 dBFS RMS: a clean sine, but under the gate.
-    m.window_mut().copy_from_slice(&sine(440.0, sr, n, 0.001 * 1.414_213_6));
+    m.window_mut().copy_from_slice(&sine(440.0, sr, n, 0.001 * std::f32::consts::SQRT_2));
     m.analyze(440.0, false);
     m.analyze(440.0, false);
     assert!(m.reading().is_some(), "two misses keep the last note");
     m.analyze(440.0, false);
     assert_eq!(m.reading(), None, "the third lets go");
     // The same tone at -40 dBFS RMS is read.
-    m.window_mut().copy_from_slice(&sine(440.0, sr, n, 0.01 * 1.414_213_6));
+    m.window_mut().copy_from_slice(&sine(440.0, sr, n, 0.01 * std::f32::consts::SQRT_2));
     m.analyze(440.0, false);
     assert!(m.reading().is_some());
 }

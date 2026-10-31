@@ -190,7 +190,7 @@ impl PitchDetector {
         // r(tau) = buf[tau].re / (2 * win); m(tau) = sum of x[j]^2 + x[j + tau]^2 over the overlap.
         let scale = 1.0 / (2 * win) as f32;
         let mut m: f64 = 2.0 * x.iter().map(|s| f64::from((s - mean) * (s - mean))).sum::<f64>();
-        if !(m > 1e-12) {
+        if m.is_nan() || m <= 1e-12 {
             return None;
         }
         let at = |i: usize| x.get(i).map_or(0.0, |s| f64::from((s - mean) * (s - mean)));
