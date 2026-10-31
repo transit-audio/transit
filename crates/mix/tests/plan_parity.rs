@@ -270,6 +270,46 @@ fn aux_chains_folders_inactive_tracks_and_two_masters_match_the_golden() {
     assert_parity("aux chains", &steps, 16);
 }
 
+/// The Filter insert (#242) reading the track's notes: envelope, LFO, key tracking and the amp
+/// stage on a Macro Oscillator, then the same with a MIDI effect ahead of the instrument (the
+/// Filter follows the transposed notes) and with the Filter's mode and slope changed.
+#[test]
+fn a_filter_reading_the_tracks_notes_matches_the_golden() {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+    let mut seq = Sequence::default();
+    for (i, p) in [48u8, 55, 60, 67].into_iter().enumerate() {
+        seq.notes.push(Note { pitch: p, velocity: 60 + 20 * i as u8, release_velocity: 64, channel: 0, start: i as i64 * 397 + 3, length: 500 });
+    }
+    let cid = s.new_clip_id();
+    let tr = s.track_mut(t).unwrap();
+    tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, 96_000, seq));
+    tr.instrument = Some(builtin("macro_oscillator"));
+    let mut filter = builtin("filter");
+    for (k, v) in [
+        ("cutoff", 250.0),
+        ("resonance", 55.0),
+        ("env_amount", 65.0),
+        ("lfo_amount", 10.0),
+        ("key_track", 50.0),
+        ("amp_on", 1.0),
+        ("amp_sustain", 70.0),
+    ] {
+        filter.params.insert(k.into(), v);
+    }
+    tr.mixer.inserts[0] = Some(filter);
+    let mut steps = vec![s.clone()];
+    let mut fx = transit_model::MidiEffectSlot::new("midi_transpose");
+    fx.params.insert("semitones".into(), 7.0);
+    s.track_mut(t).unwrap().midi_effects.push(fx);
+    steps.push(s.clone());
+    let f = s.track_mut(t).unwrap().mixer.inserts[0].as_mut().unwrap();
+    f.params.insert("mode".into(), 2.0);
+    f.params.insert("slope".into(), 1.0);
+    steps.push(s.clone());
+    assert_parity("filter insert", &steps, 24);
+}
+
 #[test]
 fn seeks_with_held_notes_match_the_golden() {
     MixEngine::force_serial(true);

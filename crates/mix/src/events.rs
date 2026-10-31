@@ -792,7 +792,7 @@ impl InstrumentEvents {
     /// Hands one event to the plug-in, counting a refusal.
     fn send(&mut self, plugin: &mut dyn Plugin, offset: u32, channel: u8, note_id: i32, message: Message) -> bool {
         let ev = PluginEvent { channel, note_id, message };
-        let ok = if self.fx.active() { self.fx.take(plugin, offset, &ev) } else { plugin.event(offset, &ev) };
+        let ok = if self.fx.active() { self.fx.take(plugin, offset, &ev) } else { self.fx.give(plugin, offset, &ev) };
         if !ok {
             let i = usize::from(ev.is_release());
             if let Some(n) = self.status.host_refused.get_mut(i) {

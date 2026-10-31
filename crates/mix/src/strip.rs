@@ -174,6 +174,9 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
     let mut latency = head_latency(t, strip, !live.input.is_empty());
     strip.key_in.iter_mut().for_each(|k| k.ran = false);
     strip.hw.iter_mut().for_each(hardware::HwSlot::rest);
+    // What the track's instrument accepted this block, for the inserts that read notes (#242,
+    // ADR 0038): a read-only view, the same events at the same offsets for each such insert.
+    let notes = strip.instrument.as_ref().and_then(|x| x.events.as_deref()).map_or(&[][..], |e| e.fx.notes.events());
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
         // A hardware insert sends the signal out and takes the return up; with no live input, or
         // an unresolved path, it passes the signal through dry and adds no latency.
@@ -189,9 +192,18 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
         }
         let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
         if !ins.active || ins.bypass || slot.failed {
+            // A skipped insert misses the block's notes: it lets go of what it held.
+            if slot.plugin.reads_track_notes() {
+                slot.plugin.all_notes_off();
+            }
             continue;
         }
         apply_params(Some(block.s), slot, ins, t, &strip.touch, i, pos, timed_span(transport, frames));
+        if slot.plugin.reads_track_notes() {
+            for e in notes {
+                slot.plugin.event(e.offset, &e.event);
+            }
+        }
         // An insert with a key detects on it when the plan made one for the slot (else on its own input).
         let key = ins.key.and_then(|_| keys.get(t.id, i));
         // A key that arrives late holds the strip's signal back to meet it (`KeyBank::align`).
@@ -216,6 +228,9 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
         }
     }
     strip.key_in.iter_mut().filter(|k| !k.ran).for_each(|k| k.line.idle());
+    if let Some(e) = strip.instrument.as_mut().and_then(|x| x.events.as_deref_mut()) {
+        e.fx.notes.clear();
+    }
     strip.gr = gr;
     strip.latency = latency.min(MAX_LATENCY);
 }

@@ -94,6 +94,7 @@ mod key;
 mod matrix;
 mod midi;
 mod midi_fx;
+mod note_view;
 mod offline;
 mod plan;
 #[cfg(test)]

@@ -44,6 +44,8 @@ use transit_dsp::{Plugin, Transport};
 use transit_model::{AutoParam, MAX_MIDI_EFFECTS, MidiEffectSlot, Track};
 use transit_time::Samples;
 
+use crate::note_view::NoteView;
+
 /// Events one block takes into the chain, and each effect writes, at most.
 pub const MIDI_FX_BLOCK: usize = 512;
 /// Events each effect holds for later blocks at most.
@@ -76,6 +78,9 @@ pub struct MidiFxCounts {
     /// `retry_overflow`).
     pub refused: u64,
     pub retry_overflow: u64,
+    /// Events the instrument accepted that a full note view (#242, [`crate::note_view`]) could
+    /// not keep for the track's inserts that read notes; the view ended with an all-notes-off.
+    pub note_view_dropped: u64,
 }
 
 impl MidiFxCounts {
@@ -88,6 +93,7 @@ impl MidiFxCounts {
         add(&mut self.untracked, o.untracked);
         add(&mut self.refused, o.refused);
         add(&mut self.retry_overflow, o.retry_overflow);
+        add(&mut self.note_view_dropped, o.note_view_dropped);
     }
 }
 
@@ -154,6 +160,10 @@ pub(crate) struct MidiFxHost {
     retry_len: usize,
     epoch: u32,
     pub(crate) counts: MidiFxCounts,
+    /// What the instrument accepted this block, for the inserts that read notes (#242). Kept here
+    /// because every event to the instrument leaves through this host or past it
+    /// ([`MidiFxHost::give`]).
+    pub(crate) notes: NoteView,
 }
 
 fn fnv(s: &str) -> u64 {
@@ -213,6 +223,7 @@ impl MidiFxHost {
             retry_len: 0,
             epoch: 0,
             counts: MidiFxCounts::default(),
+            notes: NoteView::new(),
         })
     }
 
@@ -478,9 +489,21 @@ impl MidiFxHost {
         }
     }
 
+    /// Gives one event to the instrument and, when it accepts it, keeps it in the note view (#242).
+    /// Every event the mix gives an instrument goes through here: the chain's deliveries and
+    /// releases, and the note table's own when the track has no MIDI effects.
+    pub(crate) fn give(&mut self, plugin: &mut dyn Plugin, offset: u32, ev: &PluginEvent) -> bool {
+        let ok = plugin.event(offset, ev);
+        if ok {
+            let lost = self.notes.record(offset, ev);
+            self.counts.note_view_dropped = self.counts.note_view_dropped.saturating_add(lost);
+        }
+        ok
+    }
+
     /// Gives one event to the instrument, keeping the table of the notes the chain started.
     fn deliver(&mut self, plugin: &mut dyn Plugin, offset: u32, ev: &PluginEvent) {
-        if !plugin.event(offset, ev) {
+        if !self.give(plugin, offset, ev) {
             self.counts.refused = self.counts.refused.saturating_add(1);
             if ev.is_release() {
                 self.hold_for_retry(ev);
@@ -513,7 +536,7 @@ impl MidiFxHost {
             let off = PluginEvent { channel: n.channel, note_id: n.voice, message: Message::NoteOff { key: n.key, velocity: 0, id: NoteId::NONE } };
             *n = NO_NOTE;
             self.counts.released_on_edit = self.counts.released_on_edit.saturating_add(1);
-            if !plugin.event(0, &off) {
+            if !self.give(plugin, 0, &off) {
                 self.counts.refused = self.counts.refused.saturating_add(1);
                 self.hold_for_retry(&off);
             }
