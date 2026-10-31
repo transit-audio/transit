@@ -213,7 +213,7 @@ pub struct Block {
 }
 
 const NUM_SCALE_SLOTS: usize = 7;
-const PENDING: usize = 256;
+const PENDING: usize = 128;
 /// Edges a tick schedules per gate channel at most (a 16-times divider: 16 starts and 16 ends).
 const EDGES: usize = 72;
 /// Beats closer than this many samples before a sample count as on it (the transport's beat

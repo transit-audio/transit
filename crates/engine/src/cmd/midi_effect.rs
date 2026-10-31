@@ -45,6 +45,15 @@ pub fn specs() -> Vec<CommandSpec> {
             has_selection,
             param
         ),
+        cmd!(
+            "mix.midi_effect_params",
+            "Set MIDI Effect Parameters",
+            [],
+            None,
+            "{track?, index, params: {id: value}} (each clamped into range; one undo step, as a preset recall)",
+            has_selection,
+            params
+        ),
     ]
 }
 
@@ -129,4 +138,24 @@ fn param(e: &mut Engine, p: &Value) -> Result<Value> {
     let v = pi.clamp(value);
     fx.params.insert(id, v);
     Ok(json!({"value": v}))
+}
+
+fn params(e: &mut Engine, p: &Value) -> Result<Value> {
+    const CMD: &str = "mix.midi_effect_params";
+    let obj = p.get("params").and_then(Value::as_object).ok_or_else(|| bad(CMD, "`params` must be an object"))?.clone();
+    let tr = track_of(e, CMD, p)?;
+    let i = index_of(p, "index", CMD, tr.midi_effects.len())?;
+    let fx = tr.midi_effects.get_mut(i).ok_or_else(|| bad(CMD, "no such MIDI effect"))?;
+    let info = transit_dsp::midi_fx::info(&fx.plugin).ok_or_else(|| bad(CMD, format!("`{}` is not a MIDI effect this build knows", fx.plugin)))?;
+    // Check every value before writing any, so a bad one changes nothing.
+    let mut values = Vec::with_capacity(obj.len());
+    for (k, v) in &obj {
+        let pi = info.param(k).ok_or_else(|| bad(CMD, format!("`{}` has no parameter `{k}`", info.id)))?;
+        let v = v.as_f64().filter(|f| f.is_finite()).ok_or_else(|| bad(CMD, format!("`{k}` needs a number")))?;
+        values.push((k.clone(), pi.clamp(v as f32)));
+    }
+    for (k, v) in &values {
+        fx.params.insert(k.clone(), *v);
+    }
+    Ok(json!({"set": values.len()}))
 }

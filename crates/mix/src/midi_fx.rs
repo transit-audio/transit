@@ -249,7 +249,7 @@ impl MidiFxHost {
 
     /// Start of a block of `frames` at render frame `frame`: the chain follows `t.midi_effects` (an
     /// edit ends the chain's notes on `plugin`, see the module documentation), each effect gets its
-    /// parameter values at `pos` and the transport, and events are collected until
+    /// parameter values at `pos`, the transport and the sample rate, and events are collected until
     /// [`MidiFxHost::flush`].
     pub(crate) fn begin(
         &mut self,
@@ -258,6 +258,7 @@ impl MidiFxHost {
         rack: Option<&Track>,
         pos: Samples,
         transport: &Transport,
+        sample_rate: f64,
         frame: u64,
         frames: usize,
     ) {
@@ -317,6 +318,7 @@ impl MidiFxHost {
                 }
             }
             fx.set_transport(transport);
+            fx.set_sample_rate(sample_rate);
         }
         self.frames = u32::try_from(frames).unwrap_or(u32::MAX).max(1);
         // A block the strip did not render (a render worker held it) leaves carried events overdue:

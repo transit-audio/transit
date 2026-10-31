@@ -75,7 +75,7 @@ fn edits_are_checked() {
     assert_eq!(v["value"], json!(400.0), "clamped into range");
     let list = run(&mut e, "engine.midi_effects", json!({}));
     let ids: Vec<&str> = list.as_array().unwrap().iter().filter_map(|i| i["id"].as_str()).collect();
-    assert_eq!(ids, ["midi_transpose", "midi_velocity"]);
+    assert_eq!(ids, ["midi_transpose", "midi_velocity", "random_sequencer"]);
 }
 
 #[test]

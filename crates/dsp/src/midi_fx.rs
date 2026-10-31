@@ -19,12 +19,14 @@
 //! - **Velocity 1..=127.** A note-on it writes has a velocity of at least 1 (0 would be an off).
 //!
 //! The built-ins are values ([`Builtin`]), so the audio thread can make one in place without
-//! allocating. A hosted MIDI effect (a CLAP note effect) can occupy a slot later through the same
+//! allocating. Transpose and Velocity rewrite events; the Random Sequencer (#202) generates notes on
+//! the transport clock. A hosted MIDI effect (a CLAP note effect) can occupy a slot later through the same
 //! [`MidiEffect`] trait, made off the audio thread like any hosted plug-in.
 
 /// A test-only effect that delays every event (feature `testing`): it proves the carry.
 #[cfg(feature = "testing")]
 pub mod delay;
+pub mod random_sequencer;
 pub mod transpose;
 pub mod velocity;
 
@@ -109,13 +111,16 @@ pub trait MidiEffect: Send {
     fn param(&self, id: &str) -> Option<f32>;
     /// The transport for the next block, given before `process` (generators follow the tempo).
     fn set_transport(&mut self, _transport: &Transport) {}
+    /// The session's sample rate, given before `process` with the transport (generators turn beats
+    /// into sample offsets).
+    fn set_sample_rate(&mut self, _sample_rate: f64) {}
     /// Transforms one block: `input` is sorted by offset, each below `frames`. Writes to `out`;
     /// an offset at or past `frames` is due in a later block.
     fn process(&mut self, input: &[TimedEvent], out: &mut MidiOut<'_>, frames: u32);
 }
 
 /// The built-in MIDI effects, in menu order.
-pub static REGISTRY: &[&PluginInfo] = &[&transpose::TRANSPOSE_INFO, &velocity::VELOCITY_INFO];
+pub static REGISTRY: &[&PluginInfo] = &[&transpose::TRANSPOSE_INFO, &velocity::VELOCITY_INFO, &random_sequencer::RANDOM_SEQUENCER_INFO];
 
 /// The description of built-in MIDI effect `id`.
 #[must_use]
@@ -131,6 +136,7 @@ pub fn info(id: &str) -> Option<&'static PluginInfo> {
 pub enum Builtin {
     Transpose(transpose::Transpose),
     Velocity(velocity::Velocity),
+    RandomSequencer(random_sequencer::RandomSequencer),
     #[cfg(feature = "testing")]
     Delay(delay::Delay),
 }
@@ -143,6 +149,8 @@ impl Builtin {
             Some(Builtin::Transpose(transpose::Transpose::new()))
         } else if id == velocity::VELOCITY_INFO.id {
             Some(Builtin::Velocity(velocity::Velocity::new()))
+        } else if id == random_sequencer::RANDOM_SEQUENCER_INFO.id {
+            Some(Builtin::RandomSequencer(random_sequencer::RandomSequencer::new()))
         } else {
             #[cfg(feature = "testing")]
             if id == delay::DELAY_INFO.id {
@@ -156,6 +164,7 @@ impl Builtin {
         match self {
             Builtin::Transpose(x) => x,
             Builtin::Velocity(x) => x,
+            Builtin::RandomSequencer(x) => x,
             #[cfg(feature = "testing")]
             Builtin::Delay(x) => x,
         }
@@ -166,6 +175,7 @@ impl Builtin {
         match self {
             Builtin::Transpose(x) => x,
             Builtin::Velocity(x) => x,
+            Builtin::RandomSequencer(x) => x,
             #[cfg(feature = "testing")]
             Builtin::Delay(x) => x,
         }
