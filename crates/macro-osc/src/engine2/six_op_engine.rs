@@ -99,6 +99,13 @@ impl SixOpEngine<'_> {
         self.same_pitch_restart = on;
     }
 
+    /// The internal voice the last trigger selected still sounds: its gate is high or an operator
+    /// envelope has not finished its release. This is what the same-pitch restart reads at an edge.
+    #[must_use]
+    pub fn sounding(&self) -> bool {
+        self.voice[self.active_voice].sounding()
+    }
+
     /// Sets the voices' pitch reference (see [`crate::Tuning`]); kept across `init`.
     pub fn set_tuning(&mut self, tuning: crate::Tuning) {
         self.tuning = tuning;

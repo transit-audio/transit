@@ -203,3 +203,29 @@ fn a_restrike_under_a_held_bend_restarts() {
     };
     assert!(play(true) != play(false), "the held bend does not stop the restart");
 }
+
+/// The restart and the crossfade that covers its phase reset share one condition: a same-pitch
+/// re-strike in the same render as a tuning change restarts with the crossfade, so the phase reset
+/// makes no step above the click bound (the held note's and the attack's own corner).
+#[test]
+fn a_restrike_in_the_render_of_a_tuning_change_has_no_click() {
+    let play = |restart: bool| {
+        let mut m = inst(1, &[("model", SIX_OP_1)]);
+        m.slots[0].voice.set_same_pitch_restart(restart);
+        m.note_on(0, KEY, 100);
+        let mut x = render(&mut m, 24_000, 240);
+        m.note_off(0, KEY);
+        let at = x.len();
+        m.slots[0].voice.set_tuning(transit_macro_osc::Tuning::Firmware);
+        m.note_on(0, KEY, 100);
+        x.extend(render(&mut m, 24_000, 240));
+        (x, at)
+    };
+    let ((x, at), (off, _)) = (play(true), play(false));
+    assert!(x != off, "the restart engages in the render of the tuning change");
+    let held = &x[at - 4800..at];
+    let reference = largest_corner(held).max(largest_corner(&x[at + 240..at + 2640]));
+    let corner = largest_corner(&x[at - 2..at + 242]);
+    println!("largest corner {corner} (held and attack {reference})");
+    assert!(corner <= reference, "a corner of {corner} at the re-strike (reference {reference})");
+}

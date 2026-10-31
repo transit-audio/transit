@@ -161,7 +161,14 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
     /// patch asks for it): the step the reset makes in a sounding waveform needs the crossfade.
     #[must_use]
     pub fn restart_resets_phase(&self, parameters: &VoiceParameters) -> bool {
-        self.restart && parameters.gate && !parameters.sustain && !self.dirty && self.patch.as_ref().is_some_and(|p| p.reset_phase != 0)
+        self.restart_due(parameters) && self.patch.as_ref().is_some_and(|p| p.reset_phase != 0)
+    }
+
+    /// The next render with `parameters` restarts the voice: one condition for the restart itself
+    /// and for the crossfade that covers its phase reset, so they can never disagree.
+    #[must_use]
+    fn restart_due(&self, parameters: &VoiceParameters) -> bool {
+        self.restart && parameters.gate && !parameters.sustain && !self.dirty
     }
 
     /// The same voice, restarting but keeping its phase: the crossfade's outgoing side.
@@ -243,7 +250,8 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
         let envelope_sample = gate_duration * parameters.envelope_control;
 
         // transit's same-pitch restart (#263): the envelopes restart from where they are.
-        let restart = core::mem::take(&mut self.restart) && parameters.gate && !parameters.sustain;
+        let restart = self.restart_due(parameters);
+        self.restart = false;
         if restart {
             self.pitch_envelope.0.restart();
             for envelope in self.operator_envelope.iter_mut() {

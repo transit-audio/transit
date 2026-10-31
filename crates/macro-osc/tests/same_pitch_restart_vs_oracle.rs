@@ -187,3 +187,115 @@ fn same_pitch_restrikes_deviate_only_with_the_restart_on() {
     assert!(nulls(&blocks, false), "the restart off is the firmware");
     assert!(!nulls(&blocks, true), "the restart on engages at a same-pitch re-strike");
 }
+
+/// The rule's boundaries at the engine, against the same engine with the restart off. "Engages"
+/// means the two renders differ; they are exact, deterministic block renders.
+mod boundaries {
+    use super::*;
+
+    const BLOCK: usize = MAX_BLOCK_SIZE;
+    /// Blocks of each strike's gate (2400 frames).
+    const HELD: usize = 100;
+    const NOTE: f32 = 60.0;
+    /// Harmonics 0.5 and 0.8 select different patches of bank A.
+    const HARMONICS: f32 = 0.5;
+    const OTHER_HARMONICS: f32 = 0.8;
+
+    struct Rig {
+        engine: SixOpEngine<'static>,
+        rng: Random,
+        out: Vec<f32>,
+    }
+
+    impl Rig {
+        fn new(restart: bool) -> Self {
+            let mut engine = SixOpEngine::new(MAX_BLOCK_SIZE);
+            engine.load_syx_bank(&SYX_BANK_0);
+            engine.set_same_pitch_restart(restart);
+            let rng = Random::new(SEED);
+            engine.init(transit_macro_osc::REF_SAMPLE_RATE);
+            engine.reset();
+            Self { engine, rng, out: Vec::new() }
+        }
+
+        fn block(&mut self, trigger: TriggerState, note: f32, harmonics: f32) {
+            let parameters =
+                EngineParameters { trigger, note, timbre: 0.5, morph: 0.5, harmonics, accent: 0.8, a0_normalized: transit_macro_osc::A0 };
+            let (mut out, mut aux) = ([0.0f32; BLOCK], [0.0f32; BLOCK]);
+            let mut enveloped = false;
+            self.engine.render(&parameters, &mut self.rng, &mut out, &mut aux, &mut enveloped);
+            self.out.extend_from_slice(&out);
+        }
+
+        /// A strike: a rising edge, then the gate held for `HELD` blocks in all.
+        fn strike(&mut self, note: f32, harmonics: f32) {
+            self.block(TriggerState::RISING_EDGE | TriggerState::HIGH, note, harmonics);
+            for _ in 1..HELD {
+                self.block(TriggerState::HIGH, note, harmonics);
+            }
+        }
+
+        fn release(&mut self, blocks: usize) {
+            for _ in 0..blocks {
+                self.block(TriggerState::LOW, NOTE, HARMONICS);
+            }
+        }
+    }
+
+    /// Strikes the note, releases for `gap` blocks and strikes `note` with `harmonics`.
+    fn play(restart: bool, gap: usize, note: f32, harmonics: f32) -> Vec<f32> {
+        let mut rig = Rig::new(restart);
+        rig.strike(NOTE, HARMONICS);
+        rig.release(gap);
+        rig.strike(note, harmonics);
+        rig.out
+    }
+
+    fn engages(gap: usize, note: f32, harmonics: f32) -> bool {
+        play(true, gap, note, harmonics) != play(false, gap, note, harmonics)
+    }
+
+    #[test]
+    fn half_a_semitone_is_not_the_same_pitch_and_less_is() {
+        for gap in [0, 4] {
+            assert!(engages(gap, NOTE, HARMONICS), "the same note engages (gap {gap})");
+            assert!(engages(gap, NOTE + 0.49, HARMONICS), "+0.49 semitone engages (gap {gap})");
+            assert!(engages(gap, NOTE - 0.49, HARMONICS), "-0.49 semitone engages (gap {gap})");
+            assert!(!engages(gap, NOTE + 0.5, HARMONICS), "+0.5 semitone switches voices as the firmware does (gap {gap})");
+            assert!(!engages(gap, NOTE - 0.5, HARMONICS), "-0.5 semitone switches voices as the firmware does (gap {gap})");
+            assert!(!engages(gap, NOTE + 1.0, HARMONICS), "+1 semitone switches voices as the firmware does (gap {gap})");
+        }
+    }
+
+    #[test]
+    fn a_patch_change_between_strikes_does_not_restart() {
+        for gap in [0, 4] {
+            assert!(!engages(gap, NOTE, OTHER_HARMONICS), "another patch switches voices as the firmware does (gap {gap})");
+        }
+    }
+
+    /// Blocks of release after which the voice no longer sounds, found by rendering it: the gate
+    /// is low and every operator envelope has finished its release (counted in blocks, not time).
+    fn blocks_until_finished() -> usize {
+        let mut rig = Rig::new(true);
+        rig.strike(NOTE, HARMONICS);
+        assert!(rig.engine.sounding(), "the note sounds at the end of its gate");
+        let mut blocks = 0;
+        while rig.engine.sounding() {
+            rig.release(1);
+            blocks += 1;
+            assert!(blocks < 4_000_000, "the release never finished");
+        }
+        blocks
+    }
+
+    #[test]
+    fn a_restrike_after_the_envelopes_finish_switches_voices() {
+        let finished = blocks_until_finished();
+        println!("the envelopes finish {finished} blocks ({:.1} s) after the gate", (finished * BLOCK) as f64 / 48_000.0);
+        assert!(finished > 0);
+        assert!(!engages(finished, NOTE, HARMONICS), "finished envelopes: the firmware's switch");
+        assert!(!engages(finished + 100, NOTE, HARMONICS), "well past the end: the firmware's switch");
+        assert!(engages(finished - 1, NOTE, HARMONICS), "one block before the end the voice still sounds, so it restarts");
+    }
+}

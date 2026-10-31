@@ -8,6 +8,9 @@
 //! than the voice count (steals of held and releasing voices), the note-to-macro mapping, the panel's
 //! voice activity tap switched on, and a plan edit down to three voices.
 //!
+//! A third test re-strikes the same key on a six-op model (the #263 restart, with and without a
+//! gap) and switches the shaper on and off under held notes (#262) through two plan edits.
+//!
 //! The binary installs `transit_rt::testing::CountingAlloc` and counts the test thread only.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -226,4 +229,95 @@ fn sixteen_voices_with_steals_the_shaper_and_a_full_matrix_allocate_nothing() {
     assert_eq!(stats, AllocStats::default(), "sixteen voices on the callback path");
     assert!(loudest > 0.01, "the voices play: peak {loudest}");
     assert_eq!(most_voices, 16, "every voice sounded at once, read through the tap");
+}
+
+/// Same-key re-strikes on a six-op model (the #263 restart and its phase crossfade, zero gap and
+/// with a gap) and the shaper switched on and off under held notes (#262, two plan edits) on the
+/// callback path.
+#[test]
+fn restarts_and_shaper_toggles_on_held_notes_allocate_nothing() {
+    MixEngine::force_serial(true);
+    mark_audio_thread();
+    let target = RenderTarget { device: DeviceGeneration(1), sample_rate: SR, max_block: BLOCK as u32, out_channels: 0, in_channels: 0 };
+    let epoch = EngineEpoch::FIRST;
+    let mut mix = MixEngine::realtime_with_events(target, epoch, EventLimits::default());
+    let mut comp = PlanCompiler::new(target, PlanLimits::default());
+    let mut make = |spec: &InstanceSpec, _: SlotGen| transit_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
+    let base: &[(&str, f32)] = &[("voices", 7.0), ("model", 2.0), ("cutoff", 900.0), ("filter_env_amount", 50.0)];
+    let with_shaper = |on: f32| session(&[base, &[("shaper", on)][..]].concat());
+    let (s, _) = with_shaper(0.0);
+    let mut generation = PlanGeneration::EMPTY.checked_next().unwrap();
+    let mut env = comp.compile(Arc::new(s), PlanGeneration::EMPTY, generation, &mut make).unwrap();
+    assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
+    comp.reclaim(env);
+    let binding = comp.active_bindings().into_iter().find(|b| b.1 == INSTRUMENT_SLOT).unwrap();
+    let ev = |at: u64, message: Message| InstrumentEvent {
+        engine: epoch,
+        target: binding,
+        due: Due::Frame(RenderFrame(at)),
+        transport: None,
+        source: Source { port: 1, channel: 0, generation: 1 },
+        message,
+        arrival: Arrival { host_ns: 0, sequence: 0 },
+    };
+    let mut out = vec![vec![0.0f32; BLOCK]; 2];
+    let mut pos = 0i64;
+    let mut loudest = 0.0f32;
+    let mut total = AllocStats::default();
+    // Phase 0 holds two notes and re-strikes; phases 1 and 2 switch the shaper on and then off
+    // through a plan compiled before its measured region, adopted in the middle of it.
+    for phase in 0..3usize {
+        let mut edit = (phase > 0).then(|| {
+            let (edited, _) = with_shaper(if phase == 1 { 1.0 } else { 0.0 });
+            let next = generation.checked_next().unwrap();
+            let env = comp.compile(Arc::new(edited), generation, next, &mut make).unwrap();
+            generation = next;
+            env
+        });
+        let ((), stats) = measure(|| {
+            let now = mix.next_frame().0;
+            if phase == 0 {
+                // Two held notes that outlast the toggles.
+                for key in [48u8, 55] {
+                    assert!(mix.queue_event(&ev(now, Message::NoteOn { key, velocity: 100, id: NoteId::NONE })).accepted());
+                }
+            }
+            for round in 0..3u64 {
+                let now = mix.next_frame().0;
+                // Same-key re-strikes of key 60: off and on again 0, 40 and 700 frames apart.
+                for (k, gap) in [0u64, 40, 700].into_iter().enumerate() {
+                    let at = now + 300 * k as u64;
+                    assert!(mix.queue_event(&ev(at, Message::NoteOn { key: 60, velocity: 100, id: NoteId::NONE })).accepted());
+                    assert!(mix.queue_event(&ev(at + 120, Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE })).accepted());
+                    assert!(mix.queue_event(&ev(at + 120 + gap, Message::NoteOn { key: 60, velocity: 90, id: NoteId::NONE })).accepted());
+                    assert!(mix.queue_event(&ev(at + 240 + gap, Message::NoteOff { key: 60, velocity: 0, id: NoteId::NONE })).accepted());
+                }
+                for _ in 0..12 {
+                    mix.render_active(pos, BLOCK, &mut out);
+                    loudest = loudest.max(peak(&out));
+                    pos += BLOCK as i64;
+                }
+                if round == 1
+                    && let Some(edit) = edit.as_mut()
+                {
+                    assert_eq!(mix.adopt_plan(edit), Adoption::Adopted);
+                }
+            }
+            if phase == 2 {
+                mix.all_notes_off();
+                mix.render_active(pos, BLOCK, &mut out);
+                pos += BLOCK as i64;
+                mix.reset();
+                mix.render_active(pos, BLOCK, &mut out);
+            }
+        });
+        if let Some(edit) = edit {
+            comp.reclaim(edit);
+        }
+        println!("phase {phase}: {stats:?}");
+        assert_eq!(stats, AllocStats::default(), "restarts and shaper toggles on the callback path, phase {phase}");
+        total = stats;
+    }
+    println!("{total:?}; peak {loudest}; generation {generation:?}");
+    assert!(loudest > 0.01, "the voices play: peak {loudest}");
 }
