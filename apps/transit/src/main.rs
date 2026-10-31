@@ -316,6 +316,12 @@ fn parse_control_port(args: &[String], environment: Option<&str>) -> Result<Opti
 }
 
 fn services(logger: Option<&'static logging::AppLogger>) -> Services {
+    // User presets saved for the inherited effects retired in v0.6.0 (#264) are skipped, with a line each.
+    if let Some(dir) = config::config_dir() {
+        for line in transit_ui_studio::presets::retired_user_preset_lines(&dir) {
+            log::info!("{line}");
+        }
+    }
     Services {
         log: logger.map(|l| Box::new(LoggerControl(l)) as Box<dyn transit_ui_studio::debug_log::LogControl>),
         pick_open: Some(Box::new(|purpose: &str| {

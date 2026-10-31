@@ -133,6 +133,42 @@ pub fn delete_user(root: &Path, plugin: &str, name: &str) -> Result<(), String> 
     std::fs::remove_file(dir_of(root, plugin).join(format!("{}.json", file_name(name)))).map_err(|e| e.to_string())
 }
 
+/// One line per user preset file under the config dir `root` that names a retired built-in device
+/// (the inherited effects retired in v0.6.0, #264, ADR 0040), in a folder of its own or filed under
+/// another device's. The file stays where it is, and nothing lists or loads it: the device is gone.
+pub fn retired_user_preset_lines(root: &Path) -> Vec<String> {
+    let mut lines = Vec::new();
+    let mut dirs: Vec<PathBuf> =
+        std::fs::read_dir(root.join("presets")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    dirs.sort();
+    for dir in dirs {
+        let folder = dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+        let mut files: Vec<PathBuf> = std::fs::read_dir(&dir)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().is_some_and(|x| x == "json"))
+            .collect();
+        files.sort();
+        for f in files {
+            let named = std::fs::read_to_string(&f)
+                .ok()
+                .and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok())
+                .and_then(|v| v.get("plugin").and_then(serde_json::Value::as_str).map(str::to_string));
+            let device = named
+                .as_deref()
+                .and_then(transit_model::legacy_effects::retired_name)
+                .or_else(|| transit_model::legacy_effects::retired_name(&folder));
+            if let Some(device) = device {
+                let name = f.file_stem().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+                lines.push(format!("presets: user preset \"{name}\" skipped: it is for the retired {device} (presets/{folder})"));
+            }
+        }
+    }
+    lines
+}
+
 impl StudioApp {
     /// Recalls `preset` on the effect or instrument at `key` as one undo step.
     pub(crate) fn apply_preset(&mut self, key: (TrackId, usize), info: &PluginInfo, name: &str, preset: &Preset) {
@@ -239,5 +275,34 @@ pub fn control(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &In
         && let Err(e) = delete_user(&root, info.id, &n)
     {
         app.status = format!("Preset: {e}");
+    }
+}
+
+#[cfg(test)]
+mod retired_tests {
+    use super::*;
+
+    #[test]
+    fn a_user_preset_for_a_retired_device_is_reported_and_the_others_are_not() {
+        let root = std::env::temp_dir().join(format!("transit-retired-presets-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        for (dir, file, text) in [
+            ("chorus", "Wide", r#"{"plugin": "chorus", "version": 1, "params": {"rate": 1.0}}"#),
+            ("compressor", "Mine", r#"{"plugin": "compressor", "version": 1, "params": {}}"#),
+            ("compressor", "Strayed", r#"{"plugin": "maximizer", "version": 1, "params": {}}"#),
+        ] {
+            std::fs::create_dir_all(root.join("presets").join(dir)).unwrap();
+            std::fs::write(root.join("presets").join(dir).join(format!("{file}.json")), text).unwrap();
+        }
+        let lines = retired_user_preset_lines(&root);
+        assert_eq!(
+            lines,
+            [
+                "presets: user preset \"Wide\" skipped: it is for the retired Chorus (presets/chorus)",
+                "presets: user preset \"Strayed\" skipped: it is for the retired Maximizer (presets/compressor)",
+            ]
+        );
+        assert!(retired_user_preset_lines(&root.join("none")).is_empty());
+        let _ = std::fs::remove_dir_all(&root);
     }
 }
