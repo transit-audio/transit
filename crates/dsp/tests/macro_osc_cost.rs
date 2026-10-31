@@ -6,7 +6,8 @@
 //!
 //! Each figure is the median of 9 runs of 400 host blocks of 256 frames with every voice held
 //! (a chord of N notes, retriggered so no voice goes idle), divided by N; the realtime share is
-//! that time over the block's 5.33 ms.
+//! that time over the block's 5.33 ms. `timing_shaper_and_full_matrix_at_128` (#243) measures 16
+//! held voices per 128-frame block with and without the shaper and all sixteen matrix rows.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::time::Instant;
@@ -87,4 +88,80 @@ fn timing_render_cost_per_voice() {
         worst.0,
         100.0 * worst.0 / block_us
     );
+}
+
+/// The shaper (#243) on with all sixteen matrix rows active (every source kind, vias, curves,
+/// every destination), two LFOs (one synced), 16 voices held, 128-frame blocks at 48 kHz.
+fn shaped_params(m: &mut Box<dyn transit_dsp::Plugin>) {
+    for (k, v) in [
+        ("shaper", 1.0),
+        ("filter_slope", 1.0),
+        ("cutoff", 1500.0),
+        ("resonance", 40.0),
+        ("drive", 6.0),
+        ("filter_env_amount", 40.0),
+        ("key_track", 50.0),
+        ("lfo1_shape", 5.0),
+        ("lfo2_shape", 0.0),
+        ("lfo2_sync", 1.0),
+    ] {
+        assert!(m.set_param(k, v), "{k}");
+    }
+    for n in 1..=16usize {
+        let (source, dest) = (1 + (n * 7) % 20, 1 + (n * 5) % 14);
+        for (f, v) in
+            [("source", source as f32), ("via", ((n * 3) % 21) as f32), ("dest", dest as f32), ("amount", 10.0 + n as f32), ("curve", (n % 5) as f32)]
+        {
+            assert!(m.set_param(&format!("mod{n}_{f}"), v));
+        }
+    }
+}
+
+/// Median microseconds per 128-frame block for 16 voices on `model`, shaped (the shaper and a full
+/// matrix) or not.
+fn per_block_128_us(model: f32, shaped: bool) -> f64 {
+    const B: usize = 128;
+    const N: usize = 1600;
+    let mut m = transit_dsp::create("macro_oscillator").unwrap();
+    m.set_param("voices", 15.0);
+    m.set_param("model", model);
+    if shaped {
+        shaped_params(&mut m);
+    }
+    m.prepare(SR, B, 2);
+    let mut io = vec![vec![0.0f32; B]; 2];
+    let mut times = Vec::with_capacity(RUNS);
+    for _ in 0..RUNS {
+        for k in 0..16 {
+            m.note_on(0, 40 + 3 * k as u8, 100);
+        }
+        // timing: value the measured figures are printed, never compared with a bound
+        let t = Instant::now();
+        for _ in 0..N {
+            m.process(&mut io, B);
+        }
+        times.push(t.elapsed().as_secs_f64() * 1e6 / N as f64);
+        assert_eq!(m.voice_activity() & 0xFFFF, 0xFFFF, "every voice sounding");
+        for k in 0..16 {
+            m.note_off(0, 40 + 3 * k as u8);
+        }
+        for _ in 0..400 {
+            m.process(&mut io, B);
+        }
+    }
+    times.sort_by(f64::total_cmp);
+    times[RUNS / 2]
+}
+
+#[test]
+#[ignore = "timing: measurement, run in release with --ignored --nocapture"]
+fn timing_shaper_and_full_matrix_at_128() {
+    let block_us = 128.0 / f64::from(SR) * 1e6;
+    println!("| Model | 16 voices | 16 voices, shaper + 16 rows | added | share of the 128-frame block |");
+    println!("|---|---|---|---|---|");
+    for (model, name) in [(8.0, "Virtual analog"), (2.0, "Six-op FM 1"), (13.0, "Wavetable"), (20.0, "Modal")] {
+        let (plain, shaped) = (per_block_128_us(model, false), per_block_128_us(model, true));
+        println!("| {name} | {plain:.1} us | {shaped:.1} us | {:.1} us | {:.1}% |", shaped - plain, 100.0 * shaped / block_us);
+    }
+    println!("budget: one 128-frame block at 48 kHz is {block_us:.0} us");
 }
