@@ -190,6 +190,7 @@ pub struct Clip {
 
 /// Fade lengths of a whole take, kept on its pieces ([`Clip::whole_fades`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
 pub struct WholeFades {
     /// The take's fade-in length, measured from the start of its first piece.
     pub fade_in: Samples,
