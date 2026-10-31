@@ -191,16 +191,17 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - The device card shows Loading while a heavy plug-in instantiates.
 - Plug-ins load on a host thread, so a slow or stuck plug-in no longer freezes the UI: its slot reads "Loading…" while it instantiates and "Not responding" if it stops answering. A slow load shows how long it has taken, the phase it is in and how long it took last time; the status line reports loads and editor opens over 2 s.
 - Plug-in browser with a background scan and your own search folders.
-- Built-in instruments: Macro Oscillator (the default for a new instrument track), Drum Synth, Sampler. All built-ins open an editor window: parameter rows, Sampler load or drop, Drum Synth by pad.
+- Built-in instruments: Macro Oscillator (the default for a new instrument track), Sampler. All built-ins open an editor window: parameter rows, Sampler load or drop.
 - The Macro Oscillator's optional per-voice shaper (amp and filter envelopes, a multimode filter, two LFOs with tempo sync) and a 16-row modulation matrix with via sources and curves (aftertouch, poly aftertouch, the envelopes, the LFOs, rack macros and more), transit's own addition, off by default.
 - Work toward more built-in instruments, under [ADR 0033](docs/adr/0033-built-in-instruments-mutable-instruments-port.md): a dev-only test oracle wraps Émilie Gillet's original C++ DSP (MIT licensed), and a Rust port of all 24 synthesis engines nulls against it bit for bit. The first of them, the Macro Oscillator (Plaits), is the built-in instrument and the default for a new instrument track.
 - Built-in panels with knobs, and bespoke layouts for Compressor, Gate, EQ, Macro Oscillator and Plate; factory and user presets; a scope and a gain-reduction display on the dynamics panels. Moving a plug-in knob while a lane is armed (Write, Latch, Touch) records into it.
-- Built-in dynamics and EQ: Compressor/Limiter, Expander/Gate, De-Esser, Maximizer, Channel Strip, EQ 7-Band, EQ 1-Band.
-- Built-in effects: Room and Plate Reverb, Mod Delay, Chorus, Flanger, Phaser, Saturator, Lo-Fi, Rectifier, Pitch Shifter.
+- Built-in dynamics and EQ: Compressor/Limiter, Expander/Gate, EQ 7-Band, EQ 1-Band.
+- Built-in effects: Room and Plate Reverb, Saturator.
+- The effects inherited from the SoundCraft fork are retired in stages ([ADR 0040](docs/adr/0040-inherited-built-in-effects-retired-in-stages.md)): twelve are gone in v0.6.0 (Pitch Shifter, Drum Synth, Channel Strip, Maximizer, De-Esser, Rectifier, Lo-Fi, Time Shift, Mod Delay, Chorus, Flanger, Phaser). A session that used one opens with that slot emptied and says so.
 - Filter insert: a resonant multimode filter (low, high, band, notch; 12 or 24 dB) whose envelope plays from the track's notes, paraphonically, with an LFO (free or tempo-synced), an envelope follower, key tracking and an optional amp envelope; presets Pluck, Wah and Paraphonic Brass.
 - Texture insert: a granular texture processor and tape delay ported from Émilie Gillet's texture synthesizer firmware (MIT) and checked bit for bit against it: grains with random time, size, shape and pitch, freeze, seed and trigger, four buffer qualities at the module's own rates (converted at the edges at any session rate, latency compensated), a 4 to 8 second buffer and the module's automatic input gain; presets Granular Cloud, Frozen Pad and Tape Delay.
 - Time Stretcher insert: the pitch shifter and time stretcher of Émilie Gillet's texture processor firmware (MIT), checked bit for bit against it: pitch two octaves either way without changing speed, a read position that scrubs a frozen recording at its own pitch, a trigger that restarts the read, window, diffusion, tone, feedback and reverb, four buffer qualities, at the module's 32 kHz converted at the edges (latency compensated); presets Octave Shimmer, Sub Doubler and Stretch Pad.
-- Utilities: Gain, Trim, Invert, Time Shift, DC Offset Removal, Signal Generator, Dither.
+- Utilities: Gain, Trim, Invert, DC Offset Removal, Signal Generator, Dither.
 
 ### MIDI
 

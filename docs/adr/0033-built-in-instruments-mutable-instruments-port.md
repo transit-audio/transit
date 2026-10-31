@@ -73,7 +73,7 @@ Maintainer decision, 2026-10-29. This amendment supersedes the crate naming in I
 
 **(c) Fallback.** If the vendored code needs more repair than it saves, port from the firmware instead (option c), behind the same oracle gate. The null tests compare output sample by sample, so the swap is invisible to users.
 
-Related: #193 (the evaluation and this decision), #194 (the C++ oracle that gates each engine).
+Related: #193 (the evaluation and this decision), #194 (the C++ oracle that gates each engine). Naming also runs the other way: the devices transit inherited under their old names are retired in stages, twelve in v0.6.0 ([ADR 0040](0040-inherited-built-in-effects-retired-in-stages.md), #264).
 
 ## Implementation note: oracle
 
@@ -179,7 +179,7 @@ Convention: Ableton's Wavetable and Logic's ES2 and Alchemy route modulation thr
 
 ## Decision note 2026-10-30: the Macro Oscillator is the default instrument, the Subtractive Synth is removed (#234)
 
-With polyphony in (#196), a new instrument track carries the Macro Oscillator (default model, 8 voices) and the built-in Subtractive Synth is removed outright: its code, plug-in id (`subtractive_synth`), editor panel, factory presets, help and README line. transit is alpha software, so there is no compatibility shim for the synth itself; the one rule below keeps old sessions opening. Drum Synth and Sampler are unchanged.
+With polyphony in (#196), a new instrument track carries the Macro Oscillator (default model, 8 voices) and the built-in Subtractive Synth is removed outright: its code, plug-in id (`subtractive_synth`), editor panel, factory presets, help and README line. transit is alpha software, so there is no compatibility shim for the synth itself; the one rule below keeps old sessions opening. The Sampler is unchanged; the Drum Synth went with the inherited effects in v0.6.0 ([ADR 0040](0040-inherited-built-in-effects-retired-in-stages.md)), which applies the same load rule to its slot.
 
 Convention: Logic opens a new software-instrument track with its default patch loaded and Ableton leaves a MIDI track empty; we keep Logic's "ready to play" default, which is what the Subtractive Synth gave until now. Every path that creates an instrument track (`track.new`, the Add Instrument Track menu and shortcut, MIDI file import, the demo) uses `transit_model::DEFAULT_INSTRUMENT`.
 

@@ -332,3 +332,31 @@ samples at 48 kHz), the same for every quality, which delay compensation makes u
 Quality restarts the firmware: the output fades out over 10 ms, the recording starts over, and it
 fades back in. The recording is not saved with the session. Every control can be automated and
 mapped to a MIDI controller. Presets: Octave Shimmer, Sub Doubler, Stretch Pad, and your own.
+
+## Retired built-in effects
+
+transit retires the effects it inherited from the SoundCraft fork in stages
+([ADR 0040](adr/0040-inherited-built-in-effects-retired-in-stages.md)). Stage 1, in v0.6.0, removes
+twelve: Pitch Shifter, Drum Synth, Channel Strip, Maximizer, De-Esser, Rectifier, Lo-Fi, Time
+Shift, Mod Delay, Chorus, Flanger and Phaser. They are not in the device chain's **+** menu, the
+mixer strip's insert menu or the instrument menu any more, and the control commands and the
+assistant refuse them.
+
+A session saved by an older build that used one opens with that slot **empty**. The device's
+settings go with it, and so do the MIDI mappings, automation lanes and rack macro targets that
+pointed at it. Nothing else on the track changes. The status line reads "N insert(s) used retired
+built-in effects and were removed", and the load report lists each track,
+slot and device by name, for example `track "Vox", insert B: the retired Chorus was removed`. The
+session opens as modified, so the removal shows when you save; until then the file still holds the
+old devices. A track that used the Drum Synth keeps its clips and notes but has no instrument until
+you choose one (the Macro Oscillator's drum models or the Sampler).
+
+What to use instead: the **Compressor** in limiter mode for a Maximizer, the **EQ 7-Band** for a Channel Strip's filters and bands, the
+**Macro Oscillator** for the Drum Synth, the **Gain** or **Trim** device for gain. The Pitch
+Shifter and the modulation effects have their replacements coming (the ported Time Stretcher and
+the Texture insert for echoes and grains).
+
+A user preset file saved for a retired device is skipped, with a line in the log.
+
+Stage 2 (Compressor/Limiter, Expander/Gate, EQ 7-Band and EQ 1-Band, Room and Plate Reverb,
+Saturator and Gain) follows each device's replacement, with the same rule for old sessions.
