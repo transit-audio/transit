@@ -51,7 +51,7 @@ text = "The module's reverb after everything else: more of it, and a longer tail
 [[entry]]
 id = "texture.freeze"
 name = "Freeze"
-text = "Stops recording, so the grains keep playing the audio already in the buffer. In the delay mode the frozen buffer is cut into slices that Time picks from. Saving with Freeze on stores the recording as a 32-bit float WAV and its playback state beside the session in Audio Files, so it resumes when reopened. Keep both files with the session. Missing files or a quality, rate or buffer mismatch open silent and appear in the load report. Saving with Freeze off clears the reference; older media stays for backups."
+text = "Stops recording, so the grains keep playing the audio already in the buffer. In the delay mode the frozen buffer is cut into slices that Time picks from. Saving with live Freeze on stores a 32-bit float WAV beside the session in Audio Files, including when automation or a rack macro controls Freeze. The WAV restores the same recording and plays deterministically on each reopen. An optional playback-state companion also restores the exact continuation from before the save. A missing or invalid companion still restores the WAV; the load report says the continuation was not restored. A missing or inconsistent WAV, or an incompatible session rate, opens silent with a report line; later saves keep the missing reference until recording resumes. Autosave carries captured frozen media into crash recovery. With no audio callback, capture is skipped with a notice and the stored recording is kept. Saving with live Freeze off clears the reference; older media stays for backups."
 
 [[entry]]
 id = "texture.seed"
