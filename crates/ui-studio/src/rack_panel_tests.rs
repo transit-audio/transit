@@ -186,3 +186,34 @@ fn a_rack_with_midi_effects_shows_both_cards_effects_first() {
     assert!((crate::devices::pane_height(&t.app) - need).abs() < 0.5, "{} covers both cards ({need})", crate::devices::pane_height(&t.app));
     assert!(fx.rect[3] - fx.rect[1] <= crate::devices::pane_height(&t.app) && card.rect[3] - card.rect[1] <= crate::devices::pane_height(&t.app));
 }
+
+/// #260: the eight macro cells are at least as big as the knob widget's own cell (dial plus label), so
+/// neighbors do not overlap; the second row starts below the first row's label, and the member rows
+/// start to the right of the knobs.
+#[test]
+fn the_macro_knobs_do_not_overlap_each_other_or_the_member_rows() {
+    let mut t = T::new();
+    t.rack();
+    let card = t.app.mixer.devices.rack.clone().expect("the rack card");
+    assert_eq!(card.macros.len(), 8);
+    for (i, k) in card.macros.iter().enumerate() {
+        assert!(k[2] - k[0] >= crate::widgets::knob::CELL_W, "knob {i} is wide enough for the widget: {k:?}");
+        assert!(k[3] - k[1] >= crate::widgets::knob::CELL_H, "knob {i} is tall enough for dial and label: {k:?}");
+    }
+    let hit = |a: &[f32; 4], b: &[f32; 4]| a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+    for i in 0..8 {
+        for j in (i + 1)..8 {
+            assert!(!hit(&card.macros[i], &card.macros[j]), "knobs {i} and {j} overlap: {:?} {:?}", card.macros[i], card.macros[j]);
+        }
+    }
+    let first_bottom = card.macros[..4].iter().map(|k| k[3]).fold(f32::MIN, f32::max);
+    let second_top = card.macros[4..].iter().map(|k| k[1]).fold(f32::MAX, f32::min);
+    assert!(second_top >= first_bottom, "row two ({second_top}) starts at or below row one's label ({first_bottom})");
+    let knobs_right = card.macros.iter().map(|k| k[2]).fold(f32::MIN, f32::max);
+    assert!(!card.members.is_empty());
+    for (id, key, _) in &card.members {
+        assert!(key[0] >= knobs_right, "member {id} starts right of the knobs: {} vs {knobs_right}", key[0]);
+    }
+    let knobs_bottom = card.macros.iter().map(|k| k[3]).fold(f32::MIN, f32::max);
+    assert!(knobs_bottom <= card.rect[3], "the knobs fit inside the card: {knobs_bottom} vs {}", card.rect[3]);
+}

@@ -21,10 +21,10 @@ use transit_dsp::{ParamInfo, Taper, Unit};
 use transit_model::{AutoParam, Control, RACK_MACROS, Track, TrackId, Zone};
 
 /// The card's width and its parts.
-pub const CARD_W: f32 = 600.0;
+pub const CARD_W: f32 = 660.0;
 const HEAD_H: f32 = 20.0;
-const KNOB_W: f32 = 50.0;
-const KNOB_H: f32 = 46.0;
+const KNOB_W: f32 = crate::widgets::knob::CELL_W;
+const KNOB_H: f32 = crate::widgets::knob::CELL_H;
 const ROW_H: f32 = 18.0;
 const NAME_W: f32 = 92.0;
 const KEY_W: f32 = 170.0;

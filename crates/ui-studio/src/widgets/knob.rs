@@ -15,9 +15,10 @@ const SWEEP: f32 = 1.5 * PI;
 /// Pixels of vertical drag for the full travel, and the divisor Shift applies.
 const DRAG_PX: f32 = 180.0;
 const FINE: f32 = 10.0;
-/// Width of one knob cell and its dial diameter.
+/// Width and height of one knob cell (the dial plus its label) and the dial diameter.
 pub const CELL_W: f32 = 62.0;
 const DIAL: f32 = 40.0;
+pub const CELL_H: f32 = DIAL + 16.0;
 
 /// The pointer angle of a normalized position (0..1).
 pub fn angle(norm: f32) -> f32 {
@@ -63,7 +64,7 @@ pub struct KnobOut {
 
 /// Draws the knob for `p` at `value` with `label` under it.
 pub fn show(ui: &mut Ui, id: egui::Id, label: &str, p: &ParamInfo, value: f32) -> KnobOut {
-    let (rect, _) = ui.allocate_exact_size(vec2(CELL_W, DIAL + 16.0), Sense::hover());
+    let (rect, _) = ui.allocate_exact_size(vec2(CELL_W, CELL_H), Sense::hover());
     let dial = egui::Rect::from_center_size(rect.center_top() + vec2(0.0, DIAL / 2.0), vec2(DIAL, DIAL));
     let r = ui.interact(dial, id, Sense::click_and_drag());
     let norm = p.to_normalized(value);
