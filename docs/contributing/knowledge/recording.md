@@ -31,6 +31,15 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   there and resumes at offset zero in the next lap with the same pitch and velocity, repeating
   at each wrap until the real release. Each loop lap stays exactly loop-length; a release exactly
   at the loop end produces no remainder. Journal recovery uses the same rule.
+- **Take stacks** (#25, [ADR 0039](../../adr/0039-takes-and-comping.md)): after placing passes,
+  both recorders call `crate::takes::settle_new_takes`: the track plays the playlist it played
+  before the passes (never the last pass's playlist alone, which silenced the rest of the track),
+  the passes get take numbers (`Clip::take`) after the material they cover, and each pass is made
+  to play in turn so the newest is on top. Material a take covers is numbered by
+  `takes::number_covered` right after the playlist duplicate, inside the same "Record" step (never
+  before it: `squash_undo` keeps the oldest snapshot). Audio cycle recordings over clips duplicate
+  the playlist like MIDI ones. Choosing a take moves clips between playlists (`takes::activate_clip`);
+  the mix still reads only the active playlist.
 - **Cycle changed during a take** (#81): a pass keeps the loop it started with until Stop
   (`StudioApp::take_cycle`); laps and MIDI clips are cut by it, and the player is not retargeted
   meanwhile. Cycle turned on mid-take plays straight through with no lap cuts; turned off, the

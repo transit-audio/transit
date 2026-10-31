@@ -30,6 +30,29 @@ four bars from the bar holding the playhead, in one undo step with the switch. C
 the region. To move the region to the current selection, use Transport > Set Cycle to Selection
 (Ctrl+L, Cmd+L on macOS), which does not toggle Cycle.
 
+## Takes and comping
+
+With Cycle on, Record keeps a take per lap until Stop; recording over clips keeps the old clips as
+the previous take. The takes of one stretch of time form a stack, and the track plays one of them:
+the newest when you stop. Takes work the same for audio and MIDI.
+
+- **Take lanes.** After cycle recording the track's take lanes open under it: one lane per take,
+  the newest on top, labeled **Take 1**, **Take 2** and so on. A take's clips are highlighted
+  where it plays and dimmed elsewhere. Click **T** in the track header (or **Show Take Lanes** in
+  the track's right-click menu) to show or hide the lanes; a clip with stacked takes also carries
+  an "n takes" chip that does the same. Showing lanes only changes the view.
+- **Choose a take.** Click a dimmed clip in a lane: that take plays over the clip's range, and the
+  rest of the track keeps playing. Click a lane's label to play that take wherever it was
+  recorded. A shorter take plays over its own range, with the longer take around it. Each choice
+  is one undo step.
+- **Flatten Takes** (the lane menu at the label's right end, the track menu, or the clip menu for
+  that stack) keeps what plays and removes the other takes. One undo brings them back.
+- **Delete Take** (the lane menu) removes a take that is not playing, after asking.
+
+Swipe comping (picking a range from one take and the next range from another, with crossfades),
+renaming or coloring takes and auditioning a lane are not in this version. Logic's Take Folder and
+Live's Take Lanes work the same way for everything above.
+
 ## Plug-in windows
 
 On Windows, plug-in editor windows stay with transit's window: minimizing transit hides them and
