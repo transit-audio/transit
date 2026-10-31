@@ -4,13 +4,13 @@
 //!
 //! **Rates.** Each quality runs the firmware at its own codec rate, as the module does: 24 kHz for
 //! dirty tape, 32 kHz for vintage digital, 48 kHz for clean tape and digital. The device converts at
-//! its edges from the session rate and back ([`resample`], the offline resampler's windowed-sinc
+//! its edges from the session rate and back ([`super::resample`], the offline resampler's windowed-sinc
 //! family), so a grain's pitch and the buffer's length in seconds are the module's at any session
 //! rate. A 48 kHz session with the digital or clean tape quality converts nothing: the firmware
 //! hears the session's samples and its output is the session's output, bit for bit.
 //!
 //! **Blocks.** The firmware runs in its own blocks of `rate / 4000` frames (12, 8 or 6), gathered
-//! across host blocks ([`path`]): the output for the same input and the same parameter values is
+//! across host blocks ([`super::codec_path`]): the output for the same input and the same parameter values is
 //! bit-identical whatever the host block size. The latency (the block plus the converters, a whole
 //! number of session samples) goes to delay compensation ([`Plugin::latency`]).
 //!
@@ -29,16 +29,14 @@
 //! parameters reach a built-in only on the audio thread, and a rebuild there at a frame the
 //! parameter values fix keeps a render deterministic (offline and realtime alike).
 
-mod path;
-mod resample;
 #[cfg(test)]
 mod tests;
 
+use super::codec_path::Path;
+use super::resample::Kernel;
 use crate::params::{Params, choice, lin, toggle};
 use crate::util::{MAX_CHANNELS, flush, frames_in, ms_to_samples, sane_channels, sane_sr};
 use crate::{Category, ParamInfo, Plugin, PluginInfo, Unit};
-use path::Path;
-use resample::Kernel;
 use transit_texture::stmlib::extract_gate_flags;
 use transit_texture::{BufferSize, Controls, InputStage, MAX_BLOCK_SIZE, Media, Parameter, SeedButton, SoftClipping, Texture};
 

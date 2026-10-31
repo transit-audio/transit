@@ -1,5 +1,6 @@
 //! The built-in plugins and their registry.
 
+mod codec_path;
 pub mod drums;
 pub mod dynamics;
 pub mod eq;
@@ -10,6 +11,7 @@ pub mod lfo;
 pub mod macro_osc;
 pub mod modulation;
 pub mod pitch;
+mod resample;
 pub mod reverb;
 pub mod sampler;
 pub mod strip;
