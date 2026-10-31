@@ -38,5 +38,24 @@ fn unchanged_tempo_render_goldens() {
     if std::env::var_os("TRANSIT_CAPTURE_TEMPO_GOLDENS").is_some() {
         std::fs::write(fixture, &rows).unwrap();
     }
-    assert_eq!(rows, std::fs::read_to_string(fixture).unwrap());
+    assert_golden_rows(&rows, &std::fs::read_to_string(fixture).unwrap());
+}
+
+/// Compares line by line so a fixture checked out with CRLF endings (git
+/// `core.autocrlf` on Windows) still matches the LF rows built above.
+fn assert_golden_rows(rows: &str, fixture_text: &str) {
+    assert_eq!(rows.lines().collect::<Vec<_>>(), fixture_text.lines().collect::<Vec<_>>());
+}
+
+#[test]
+fn the_golden_comparison_ignores_line_endings() {
+    let rows = "default 64 0123456789abcdef\nsingle 512 fedcba9876543210\n";
+    assert_golden_rows(rows, &rows.replace('\n', "\r\n"));
+    assert_golden_rows(rows, rows);
+}
+
+#[test]
+#[should_panic]
+fn the_golden_comparison_still_catches_a_changed_row() {
+    assert_golden_rows("default 64 0123456789abcdef\n", "default 64 0123456789abcdee\r\n");
 }
