@@ -5,6 +5,46 @@
 use super::*;
 use crate::arrange::TAKE_H;
 
+fn assert_lane_geometry(t: &T, track: TrackId) {
+    let header = t.row(track).header;
+    let rows = t.rows_of(track);
+    assert_eq!(rows.len(), 3);
+    for row in rows {
+        // The lane spans the header and timeline; TakeRow::lane stores its timeline portion.
+        let lane = [header[0], row.lane[1], row.lane[2], row.lane[3]];
+        assert_eq!(row.lane[3] - row.lane[1], 22.0, "lane: {lane:?}");
+        for rect in [row.label, row.menu] {
+            assert!(rect[0] < rect[2] && rect[1] < rect[3], "empty rect: {rect:?}");
+            assert!(
+                rect[0] >= lane[0] && rect[1] >= lane[1] && rect[2] <= header[2] && rect[3] <= lane[3],
+                "rect: {rect:?}, lane: {lane:?}, header: {header:?}"
+            );
+        }
+        assert!(row.label[2] < row.menu[0], "label: {:?}, menu: {:?}", row.label, row.menu);
+    }
+}
+
+#[test]
+fn take_lane_geometry_at_fractional_scale() {
+    let dir = Dir::new("lanes-scale");
+    let mut t = T::new();
+    t.ctx.set_pixels_per_point(1.25);
+    let a = t.cycled(&dir);
+    assert_eq!(t.ctx.pixels_per_point(), 1.25);
+    assert_lane_geometry(&t, a);
+}
+
+#[test]
+fn take_lane_menu_fits_the_narrowest_track_header() {
+    let dir = Dir::new("lanes-narrow-header");
+    let mut t = T::new();
+    t.app.ui.header_width = 0.0; // Arrange clamps this to its minimum, 160 points.
+    let a = t.cycled(&dir);
+    let list = t.app.arrange.layout.track_list;
+    assert_eq!(list[2] - list[0], 160.0);
+    assert_lane_geometry(&t, a);
+}
+
 /// A 16-bit mono WAV of `laps` laps of `lap` frames at 48 kHz, lap k (from 1) a constant
 /// `k * 1000`, so each take renders its own level.
 fn write_laps(path: &std::path::Path, lap: u32, laps: u32) {
