@@ -19,8 +19,9 @@ and require the same bits.
 file (`src/ffi.rs`).
 
 - The reference is the original C++ as its own desktop test harness builds it: `-DTEST`, `-O2`,
-  FP contraction off (`-ffp-contract=off`, `/fp:strict` on MSVC), no fast-math, and flush-to-zero on
-  x86-64 around each call (`cpp/oracle.cc`; FPCR.FZ on AArch64). The module itself is not the oracle,
+  FP contraction off (`-ffp-contract=off`, `/fp:strict` on MSVC), no fast-math, `-flifetime-dse=1`
+  on GCC (so a value-initialized holder really starts at zero, as the module's globals do; see the
+  texture lessons), and flush-to-zero on x86-64 around each call (`cpp/oracle.cc`; FPCR.FZ on AArch64). The module itself is not the oracle,
   because a module cannot be nulled against. Its arithmetic differs from the reference in the last
   bits (fused multiply-adds, no flush-to-zero).
 - `vendor/` is the upstream tree, byte for byte. MSVC needs two small patches; `build.rs` applies
@@ -152,6 +153,16 @@ for bit on its first full run at all eight qualities, its synth and its input st
   minutes; every push runs every 10th sweep point per quality (a fixed subset, same order), and
   `TRANSIT_FULL_ORACLE=1` runs them all (the release chain sets it). The rule lives in the oracle
   crate's `subset` module so any family can adopt it.
+- **"Zeroed like a global" must survive the compiler.** The input stage reads one member before
+  anything writes it (the manual gain's smoothing state); on the module the object is a global and
+  starts at 0. The wrapper value-initializes its holder to get the same zeros, but GCC's default
+  lifetime dead-store elimination drops zeroing in front of a user-provided empty constructor when
+  that constructor's object fills the whole holder, so on Linux the stage started from whatever the
+  heap last held: the first render in a process matched the port and later ones did not (a
+  difference near -112 dBFS from the first manual-gain block). MSVC kept the zeros, so only the
+  Linux gate saw it. The oracle now builds with `-flifetime-dse=1` on GCC, and a build-time patch
+  starts the member at 0 in the constructor (an upstream finding). A floor that fails only on one
+  compiler is a reference reading memory it never wrote until shown otherwise.
 - **Fresh buffers read silence.** A deep TIME position reads nothing until the recording reaches
   it, so a sweep point lasts until its grains or taps read recorded audio; the few points silent by
   design (taps-only density) are listed and asserted both ways.

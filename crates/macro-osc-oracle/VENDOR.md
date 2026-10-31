@@ -97,6 +97,12 @@ No output means every file matches (checked 2026-10-29: 134 of 134; with the res
   `_USE_MATH_DEFINES` (MSVC and MinGW hide `M_PI` without it), defines `__attribute__(x)` away on
   MSVC (`stmlib/utils/dsp.h` uses a GCC attribute), and includes `<cstdio>` (the `-DTEST` branch of
   `plaits/user_data.h` calls `printf` without including it). Nothing in it changes arithmetic.
+- `build.rs` passes `-flifetime-dse=1` to GCC. The wrappers value-initialize their holders so that
+  every member a constructor and `Init` leave unwritten starts at zero, as on the module, where
+  these objects are globals. GCC's default (`-flifetime-dse=2`) treats an object's storage as
+  indeterminate when its constructor begins and drops the zeroing in front of a user-provided empty
+  constructor when that object fills the whole holder (the input stage's holder, #241); level 1
+  keeps stores made before a constructor. Clang and MSVC keep them without a flag.
 - `patches/msvc/` holds unified diffs (`git apply -p0` format, paths relative to `vendor/`) that
   `build.rs` applies on MSVC only, to copies in the build's output directory. GCC and Clang compile
   `vendor/` exactly as fetched.
@@ -153,7 +159,7 @@ No output means every file matches (checked 2026-10-29: 134 of 134; with the res
     storage unit (and `compat.h` defines the attribute away), so the items would take 4 bytes and
     the 12-bit delay lines would outgrow their banks. The patch packs the same two values into 3
     bytes by hand: the same values and the same item size.
-- `patches/all/` holds six more for the texture synthesizer (#241), each defining what the C++
+- `patches/all/` holds seven more for the texture synthesizer (#241), each defining what the C++
   leaves open or undefined, so the reference is the same on every compiler (each an upstream
   finding where it is a defect):
   - `0003-texture-grain-arguments-in-source-order.patch`: the grain players pass three
@@ -180,6 +186,13 @@ No output means every file matches (checked 2026-10-29: 134 of 134; with the res
     effect chain at the port's longest buffer (8 s, in a renamed namespace; see `build.rs`).
   - `0008-texture-quiet-test-build.patch`: removes the desktop build's diagnostic `printf` in the
     wavetable grain player (one line on stdout per stolen grain); it computes nothing.
+  - `0009-texture-input-manual-gain-initialized.patch`: the input stage (`beads/gain_control.h`)
+    smooths `manual_gain_` toward the knob's gain on every block before anything writes it; neither
+    the constructor nor `Init` sets it. On the module the object is a global, zeroed at startup, so
+    it starts at 0; any other instance reads an indeterminate value. The constructor starts it at 0,
+    as the module does. Found on Linux: the wrapper's value-initialized holder lost its zeroing
+    under GCC's lifetime dead-store elimination, so each render after the first in a process began
+    from the previous one's state (`build.rs` now also passes `-flifetime-dse=1` to GCC).
 - `cpp/shim/beads/drivers/codec.h` stands in for the codec driver's header, which
   `beads/gain_control.h` includes for one type: the codec's raw frame (two `int32_t`). It is on the
   include path after the overlay and before `vendor/`, and no vendored file of that name exists.

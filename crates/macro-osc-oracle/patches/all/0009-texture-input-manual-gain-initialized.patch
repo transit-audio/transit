@@ -1,0 +1,11 @@
+--- beads/gain_control.h
++++ beads/gain_control.h
+@@ -44,2 +44,8 @@
+-  GainControl() { }
++  // transit oracle: Process smooths manual_gain_ toward the knob's gain
++  // (ONE_POLE) before anything writes it, and neither the constructor nor
++  // Init sets it. On the module the object is a global, zeroed before
++  // main, so it starts at 0; a heap or stack instance reads an indeterminate
++  // value. The constructor now starts it at 0, as the module does.
++  GainControl() : manual_gain_(0.0f) { }
+   ~GainControl() { }
