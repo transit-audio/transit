@@ -94,8 +94,10 @@ cargo test --locked -p transit-texture
 
 ## Flush-to-zero
 
-The module's firmware turns flush-to-zero on (FPSCR.FZ in `beads/drivers/system.cc`), and the
-oracle sets the x86 equivalent around every call. Rust code always runs in the default
+The flush is a pinned choice. The firmware's `SystemInit` sets FPSCR.FZ (`beads/drivers/system.cc`),
+but `Process` runs in an interrupt handler whose FP mode comes from FPDSCR, which the firmware
+never writes, so the module's actual flush state during `Process` is not established. The oracle
+sets the x86 equivalent around every call and the null is against that flushed desktop reference. Rust code always runs in the default
 floating-point mode, so the port does its arithmetic in `float::F`, an `f32` whose `+`, `-`, `*`
 and `/` flush a subnormal result to a zero of the same sign. The output here is float, so the flush
 is visible: `the_flush_to_zero_is_visible_and_reproduced` renders a decaying tail with and without

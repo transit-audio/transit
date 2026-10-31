@@ -19,8 +19,8 @@
 //! is sized at construction ([`BufferSize`]). See [`Texture::process`] for the render contract.
 //!
 //! Pure Rust, `#![forbid(unsafe_code)]`, no allocation once built, one random generator per
-//! instance, and the module's flush-to-zero (its firmware sets FPSCR.FZ; the oracle sets the x86
-//! equivalent) reproduced in its own arithmetic ([`float::F`]), never by changing the host's
+//! instance, and the pinned flush-to-zero choice (the oracle flushes; see [`float::F`] for why the
+//! module's own state is not established) reproduced in its own arithmetic ([`float::F`]), never by changing the host's
 //! floating-point mode.
 
 #![forbid(unsafe_code)]

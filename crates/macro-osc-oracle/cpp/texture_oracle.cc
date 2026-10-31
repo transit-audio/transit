@@ -166,7 +166,7 @@ int32_t TRANSIT_TEXTURE_SYMBOL(configure)(void* processor, int32_t media, uint8_
   return 0;
 }
 
-// Whether Process runs inside the flush-to-zero scope (1, the default: the module's FPSCR.FZ) or
+// Whether Process runs inside the flush-to-zero scope (1, the default: a pinned choice, the module's own state during Process is not established) or
 // in the default floating-point mode (0). For the tests that prove the flush matters.
 void TRANSIT_TEXTURE_SYMBOL(set_flush)(void* processor, uint8_t flush) {
   static_cast<TextureHolder*>(processor)->unflushed = flush ? 0 : 1;
