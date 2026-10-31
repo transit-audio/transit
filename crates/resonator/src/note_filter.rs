@@ -25,6 +25,22 @@ pub struct NoteFilter {
 }
 
 impl NoteFilter {
+    /// This filter as [`Default`] builds it, moving its delay line out without allocating.
+    #[must_use]
+    pub fn take_zeroed(&mut self) -> Self {
+        Self {
+            previous_values: [F::ZERO; ORDER],
+            note: F::ZERO,
+            stable_note: F::ZERO,
+            delayed_stable_note: self.delayed_stable_note.take_zeroed(),
+            coefficient: F::ZERO,
+            stable_coefficient: F::ZERO,
+            fast_coefficient: F::ZERO,
+            slow_coefficient: F::ZERO,
+            lag_coefficient: F::ZERO,
+        }
+    }
+
     /// `Init(sample_rate, time_constant_fast_edge, time_constant_steady_part, edge_recovery_time,
     /// edge_avoidance_delay)`; the rate is the block rate.
     pub fn init(&mut self, sample_rate: F, fast_edge: F, steady_part: F, edge_recovery: F, edge_avoidance_delay: F) {

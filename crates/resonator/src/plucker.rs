@@ -20,6 +20,12 @@ pub struct Plucker {
 }
 
 impl Plucker {
+    /// This plucker as [`Default`] builds it, moving its comb filter out without allocating.
+    #[must_use]
+    pub fn take_zeroed(&mut self) -> Self {
+        Self { svf: Svf::default(), comb_filter: self.comb_filter.take_zeroed(), remaining_samples: 0, comb_filter_period: F::ZERO, comb_filter_gain: F::ZERO }
+    }
+
     /// `Init`.
     pub fn init(&mut self) {
         self.svf.init();

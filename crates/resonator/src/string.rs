@@ -79,6 +79,34 @@ pub struct KarplusString {
 }
 
 impl KarplusString {
+    /// This string as [`Default`] builds it (the module's zeroed memory), moving its delay lines out
+    /// without allocating: `self` is left only fit to be dropped or replaced.
+    #[must_use]
+    pub fn take_zeroed(&mut self) -> Self {
+        Self {
+            frequency: F::ZERO,
+            dispersion: F::ZERO,
+            brightness: F::ZERO,
+            damping: F::ZERO,
+            position: F::ZERO,
+            delay: F::ZERO,
+            clamped_position: F::ZERO,
+            previous_dispersion: F::ZERO,
+            previous_damping_compensation: F::ZERO,
+            enable_dispersion: false,
+            dispersion_noise: F::ZERO,
+            src_phase: F::ZERO,
+            out_sample: [F::ZERO; 2],
+            aux_sample: [F::ZERO; 2],
+            curved_bridge: F::ZERO,
+            string: self.string.take_zeroed(),
+            stretch: self.stretch.take_zeroed(),
+            fir_damping_filter: DampingFilter::default(),
+            iir_damping_filter: Svf::default(),
+            dc_blocker: DcBlocker::default(),
+        }
+    }
+
     /// `Init(enable_dispersion)`.
     pub fn init(&mut self, enable_dispersion: bool) {
         self.enable_dispersion = enable_dispersion;

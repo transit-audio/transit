@@ -186,6 +186,39 @@ impl Resonator {
         part
     }
 
+    /// Back to what [`Resonator::new`] builds (the module's zeroed memory, then `Part::Init`, the
+    /// random state at its power-on value), without allocating: the delay lines and the reverb
+    /// memory are cleared in place. For a host's reset on the audio thread.
+    pub fn reset(&mut self) {
+        let mut fresh = Self {
+            bypass: false,
+            dirty: true,
+            model: ResonatorModel::Modal,
+            active_voice: 0,
+            step_counter: 0,
+            polyphony: 1,
+            resonator: std::array::from_fn(|_| ModalResonator::default()),
+            string: std::array::from_fn(|i| self.string[i].take_zeroed()),
+            lfo: [CosineOscillator::default(); NUM_STRINGS],
+            fm_voice: [FmVoice::default(); MAX_POLYPHONY],
+            excitation_filter: [Svf::default(); MAX_POLYPHONY],
+            dc_blocker: [DcBlocker::default(); MAX_POLYPHONY],
+            plucker: std::array::from_fn(|i| self.plucker[i].take_zeroed()),
+            note: [F::ZERO; MAX_POLYPHONY],
+            note_filter: self.note_filter.take_zeroed(),
+            resonator_input: [F::ZERO; MAX_BLOCK_SIZE],
+            sympathetic_resonator_input: [F::ZERO; MAX_BLOCK_SIZE],
+            noise_burst_buffer: [F::ZERO; MAX_BLOCK_SIZE],
+            out_buffer: [F::ZERO; MAX_BLOCK_SIZE],
+            aux_buffer: [F::ZERO; MAX_BLOCK_SIZE],
+            reverb: self.reverb.take_zeroed(),
+            limiter: Limiter::default(),
+            random: Random::default(),
+        };
+        fresh.init();
+        *self = fresh;
+    }
+
     /// `Part::Init`. Members the firmware's `Init` does not write keep their values.
     fn init(&mut self) {
         self.active_voice = 0;
@@ -677,6 +710,39 @@ mod tests {
         assert_eq!(part.polyphony(), MAX_POLYPHONY);
         for i in 1..MAX_POLYPHONY {
             assert_eq!(part.note[i], part.note[0] + F::from_usize(i) * 0.05);
+        }
+    }
+
+    /// A part played through every model, polyphony and a low string (the resampler), then reset,
+    /// renders what a new part renders, bit for bit, with the same random state.
+    #[test]
+    fn reset_returns_to_what_new_builds() {
+        let render = |part: &mut Resonator, model: ResonatorModel, polyphony: usize| {
+            part.set_model(model);
+            part.set_polyphony(polyphony);
+            let input = [0.0; 24];
+            let (mut out, mut aux) = ([0.0; 24], [0.0; 24]);
+            let mut bits = Vec::new();
+            for block in 0..400 {
+                let p = PerformanceState { strum: block % 37 == 0, note: [-30.0, 24.0, 40.0][block % 3], ..performance() };
+                part.process(&p, &Patch { damping: 0.9, ..Patch::default() }, &input, &mut out, &mut aux);
+                bits.extend(out.iter().chain(&aux).map(|s| s.to_bits()));
+            }
+            (bits, part.rng_state())
+        };
+        let mut dirty = Resonator::new();
+        for model in ResonatorModel::ALL {
+            for polyphony in [1, 3, 4] {
+                let _ = render(&mut dirty, model, polyphony);
+            }
+        }
+        for model in ResonatorModel::ALL {
+            for polyphony in 1..=4 {
+                dirty.reset();
+                let mut fresh = Resonator::new();
+                assert!(render(&mut dirty, model, polyphony) == render(&mut fresh, model, polyphony), "{model:?} at polyphony {polyphony}");
+                let _ = render(&mut dirty, ResonatorModel::StringAndReverb, 4);
+            }
         }
     }
 

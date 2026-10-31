@@ -30,6 +30,15 @@ impl<const N: usize> DelayLine<N> {
         i
     }
 
+    /// This line as [`Default`] builds it (cleared, delay 0, write pointer 0), moving the buffer out
+    /// without allocating: `self` keeps an empty buffer and is only fit to be dropped or replaced.
+    #[must_use]
+    pub fn take_zeroed(&mut self) -> Self {
+        let mut line = std::mem::take(&mut self.line);
+        line.fill(F::ZERO);
+        Self { line, write_ptr: 0, delay: 0 }
+    }
+
     /// `Init` / `Reset`: cleared, delay 1, write pointer 0.
     pub fn init(&mut self) {
         self.line.fill(F::ZERO);

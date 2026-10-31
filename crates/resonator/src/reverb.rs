@@ -154,6 +154,25 @@ impl Default for Reverb {
 }
 
 impl Reverb {
+    /// This reverb as [`Default`] builds it, moving its memory out without allocating.
+    #[must_use]
+    pub fn take_zeroed(&mut self) -> Self {
+        let mut buffer = std::mem::take(&mut self.buffer);
+        buffer.fill(0);
+        Self {
+            buffer,
+            write_ptr: 0,
+            lfo: [CosineOscillator::default(); 2],
+            amount: F::ZERO,
+            input_gain: F::ZERO,
+            reverb_time: F::ZERO,
+            diffusion: F::ZERO,
+            lp: F::ZERO,
+            lp_decay_1: F::ZERO,
+            lp_decay_2: F::ZERO,
+        }
+    }
+
     /// `Init(buffer)`: the memory cleared, the LFOs at 0.5 and 0.3 Hz. The amount, gain, time and
     /// low-pass states are left as they are (zero at power-on), as the firmware's `Init`.
     pub fn init(&mut self) {
