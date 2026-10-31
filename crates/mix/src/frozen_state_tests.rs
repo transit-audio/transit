@@ -18,6 +18,7 @@ impl Plugin for IdleProbe {
     fn prepare(&mut self, _: f32, _: usize, _: usize) {}
     fn reset(&mut self) {}
     fn set_param(&mut self, id: &str, v: f32) -> bool {
+        assert_eq!(id, "freeze", "idle service must leave other pending edits alone");
         if id == "freeze" {
             self.freeze = v >= 0.5;
         }
@@ -46,11 +47,57 @@ fn bypassed_and_inactive_inserts_and_tracks_service_state_at_the_block_boundary(
         ins.bypass = mode == 0;
         ins.active = mode != 1;
         ins.params.insert("freeze".into(), 1.0);
+        ins.params.insert("quality".into(), 0.0);
+        ins.params.insert("buffer".into(), 4.0);
         tr.mixer.inserts[0] = Some(ins);
         let seen = Arc::new(AtomicU32::new(0));
         let mut rig = PlanRig::new(64).fake(t, 0, IdleProbe { seen: seen.clone(), freeze: false });
         rig.publish(&s);
         rig.render(0);
         assert_eq!(seen.load(Ordering::Relaxed), 1, "mode {mode}");
+    }
+}
+
+#[test]
+fn bypassed_freeze_follows_automation_and_macros_without_applying_other_edits() {
+    for mapped in [false, true] {
+        let mut s = Session::default();
+        // Rack macros address MIDI/instrument members, never audio tracks (Session::rack_of).
+        let kind = if mapped { TrackKind::Instrument } else { TrackKind::Audio };
+        let t = s.add_track(kind, ChannelFormat::Stereo, None);
+        let tr = s.track_mut(t).unwrap();
+        let mut ins = Insert::new("texture");
+        ins.bypass = true;
+        ins.params.insert("freeze".into(), 0.0);
+        ins.params.insert("quality".into(), 0.0);
+        tr.mixer.inserts[0] = Some(ins);
+        tr.mixer.automation_mode = transit_model::AutomationMode::Read;
+        let mut lane = transit_model::AutomationLane::new(AutoParam::Plugin { slot: 0, param: "freeze".into() });
+        lane.set_point(0, 1.0);
+        tr.automation.push(lane);
+        if mapped {
+            use transit_model::{MACRO_SLOT, MacroMapping, Rack, RackMember, macro_param};
+            s.track_mut(t).unwrap().automation.clear();
+            let folder = s.add_track(TrackKind::Folder, ChannelFormat::Stereo, None);
+            s.track_mut(t).unwrap().folder = Some(folder);
+            let rack = s.track_mut(folder).unwrap();
+            rack.rack = Some(Rack { members: vec![RackMember::new(t)], ..Rack::default() });
+            rack.rack.as_mut().unwrap().macros[0].mappings.push(MacroMapping {
+                track: t,
+                slot: 0,
+                param: "freeze".into(),
+                max: 1.0,
+                ..Default::default()
+            });
+            rack.lane_mut(&AutoParam::Plugin { slot: MACRO_SLOT, param: macro_param(0) }).set_point(0, 1.0);
+            let member = s.track(t).unwrap();
+            assert!(s.rack_of(member).is_some(), "the macro fixture must be a real rack member");
+            assert_eq!(crate::rack::MacroLanes::of(&s, member, 0).unwrap().value("freeze", 0), Some(1.0));
+        }
+        let seen = Arc::new(AtomicU32::new(0));
+        let mut rig = PlanRig::new(64).fake(t, 0, IdleProbe { seen: seen.clone(), freeze: false });
+        rig.publish(&s);
+        rig.render(0);
+        assert_eq!(seen.load(Ordering::Relaxed), 1);
     }
 }

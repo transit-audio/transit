@@ -57,7 +57,23 @@ impl StudioApp {
         if (action_pending && changed) || !self.sync_player_session() {
             return Err("The audio session is still updating; try again after it applies".into());
         }
-        let Some(p) = &self.player else { return Ok(()) };
+        let Some(p) = &self.player else {
+            let skipped = self
+                .engine
+                .session()
+                .tracks
+                .iter()
+                .flat_map(|t| {
+                    t.mixer.inserts.iter().enumerate().filter_map(move |(i, ins)| {
+                        ins.as_ref()
+                            .filter(|ins| ins.plugin == "texture")
+                            .map(|_| format!("{}: Texture insert {} (no audio callback)", t.name, i + 1))
+                    })
+                })
+                .collect();
+            self.note_unrefreshed(skipped);
+            return Ok(());
+        };
         let states = p.capture_states(&self.engine.session_arc());
         let busy = p.take_unrefreshed_states();
         self.store_plugin_states(states)?;
@@ -69,7 +85,7 @@ impl StudioApp {
     /// into the save, the render or the reopened device (issue #56). The status line says so;
     /// [`Self::state_notice`] keeps it for a status that replaces this one in the same action.
     fn note_unrefreshed(&mut self, busy: Vec<String>) {
-        self.state_notice = (!busy.is_empty()).then(|| format!("State of {} not refreshed: plug-in busy", busy.join(", ")));
+        self.state_notice = (!busy.is_empty()).then(|| format!("State of {} not refreshed; stored state kept", busy.join(", ")));
         if let Some(notice) = &self.state_notice {
             self.status = notice.clone();
         }

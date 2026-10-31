@@ -598,7 +598,8 @@ impl Player {
     }
     /// Refuse a save until the exact caller snapshot has a confirmed active plan.
     pub fn capture_states(&self, expected: &Arc<Session>) -> Result<PluginStates, PlayerError> {
-        self.owner()?.capture_states(expected)
+        let mut owner = self.owner()?;
+        if self.silent { owner.capture_states_with_audio(expected, false) } else { owner.capture_states(expected) }
     }
     /// Whether the audio side plays exactly `expected` (its plan confirmed and rendered). Live
     /// state reads and loads wait for it. It guarantees that the values the document stores were
@@ -611,7 +612,12 @@ impl Player {
     /// Preserve confirmed live state before a device reopen, including after a
     /// fault. None requires an explicit document-only recovery notice to the user.
     pub fn capture_states_for_reopen(&self, expected: &Arc<Session>) -> Result<Option<PluginStates>, PlayerError> {
-        self.owner()?.capture_states_for_reopen(expected)
+        let mut owner = self.owner()?;
+        if self.silent || self.fault.failed.load(Ordering::Acquire) || self.reopen_cause().is_some() {
+            owner.capture_states_for_reopen_with_audio(expected, false)
+        } else {
+            owner.capture_states_for_reopen(expected)
+        }
     }
     /// The plug-ins the last [`Self::capture_states`] (or reopen capture) left out, issue #56:
     /// their thread was stuck, or held by a modal dialog past the save deadline, so their stored

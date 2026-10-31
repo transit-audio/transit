@@ -41,7 +41,7 @@ fn gated(gate: &Arc<Gate>, hold: usize) -> Factory {
     let gate = Arc::clone(gate);
     Arc::new(move |spec: &transit_mix::InstanceSpec| {
         let n = gate.calls.fetch_add(1, Ordering::SeqCst);
-        gate.states.lock().unwrap().push(spec.state.clone());
+        gate.states.lock().unwrap().push(spec.state.as_deref().map(<[u8]>::to_vec));
         if n < hold {
             let mut open = gate.open.lock().unwrap();
             while !*open {

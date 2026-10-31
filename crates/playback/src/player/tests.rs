@@ -436,6 +436,24 @@ fn handle_factory_unwind_leaves_no_partial_visible_instance() {
 }
 
 #[test]
+fn a_capture_without_audio_keeps_texture_state_without_requesting_a_callback() {
+    let (mut control, mut plans, actions) = endpoints::<u8, u8>(target(), PlanLimits::default());
+    let mut handles = Handles::default();
+    let s = with_effect("texture");
+    control.request(s, None).unwrap();
+    control.service(&mut |spec, generation| handles.capture((spec.track, spec.slot, generation), factory(spec, generation).unwrap()));
+    adopt(&mut plans);
+    control.service(&mut factory);
+    handles.refresh(&mut control.sessions);
+    // No block is rendered: a callback loan would have no consumer. The note proves the
+    // explicit skip path was taken; no wall-clock deadline is part of the assertion.
+    assert!(handles.capture_states_with_audio(false).is_empty());
+    assert_eq!(handles.take_unrefreshed(), ["Texture (no audio callback)"]);
+    let (_, released) = control.retire(plans, actions);
+    handles.release(released);
+}
+
+#[test]
 fn an_unadopted_publication_finishes_its_action_without_any_later_plan() {
     let (mut control, mut plans, mut actions) = endpoints::<u32, u32>(target(), PlanLimits::default());
     control.request(session("never adopted"), None).unwrap();

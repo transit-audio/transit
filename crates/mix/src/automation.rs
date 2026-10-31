@@ -70,6 +70,35 @@ pub(crate) fn apply_params(
     );
 }
 
+/// The Texture idle hook may follow Freeze without delivering any other pending edit.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn apply_idle_freeze(
+    s: &Session,
+    slot: &mut PluginSlot,
+    ins: &transit_model::Insert,
+    t: &Track,
+    ramps: &TouchRamps,
+    i: usize,
+    pos: Samples,
+) {
+    let Ok(slot_u8) = u8::try_from(i) else { return };
+    let Some((index, (_, base))) = ins.params.iter().enumerate().find(|(_, (k, _))| k.as_str() == "freeze") else { return };
+    let macros = crate::rack::MacroLanes::of(s, t, slot_u8);
+    let value = macros.as_ref().and_then(|m| m.value("freeze", pos)).unwrap_or_else(|| {
+        t.automation
+            .iter()
+            .filter(|_| t.mixer.automation_mode.reads())
+            .find(|l| matches!(&l.param, AutoParam::Plugin { slot, param } if *slot == slot_u8 && param == "freeze") && !l.points.is_empty())
+            .map_or(*base, |l| touch::plugin_value(t, ramps, slot_u8, "freeze", l, *base, pos).0)
+    });
+    let Some(last) = slot.applied.values(ins.params.len()).get_mut(index) else { return };
+    if value.to_bits() != last.to_bits() {
+        slot.plugin.set_param("freeze", value);
+        *last = value;
+        slot.woken = true;
+    }
+}
+
 /// Sends each stored param (as mapped by `value`) to the plugin when it changed since last time,
 /// then each of its `points` (breakpoints inside the block at `pos`) at its offset, and then marks
 /// the slot [`woken`](PluginSlot::woken).

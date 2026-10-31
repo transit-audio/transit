@@ -146,6 +146,8 @@ struct Entry {
     /// The session holds a state for it: restored at creation, or captured since. Until then a
     /// save waits for its read even while its thread is held by a modal dialog (issue #56).
     stored: bool,
+    /// Texture reads its state only at an audio block boundary.
+    needs_callback: bool,
 }
 
 /// Where a third-party instance the next plan needs is on its way to being made.
@@ -712,7 +714,8 @@ impl Handles {
         let state = made.plugin.state_reader();
         let key_input = made.plugin.has_key_input();
         let name = made.plugin.info().name;
-        self.entries.insert(key, Entry { editor, state, refused: made.refused_state, key_input, name, stored });
+        let needs_callback = made.plugin.info().id == "texture";
+        self.entries.insert(key, Entry { editor, state, refused: made.refused_state, key_input, name, stored, needs_callback });
         Some(made)
     }
 
@@ -823,6 +826,11 @@ impl Handles {
     /// like the others: it would otherwise be saved with none). A plug-in left out keeps its
     /// stored state and is named by [`Self::take_unrefreshed`].
     pub fn capture_states(&mut self) -> PluginStates {
+        self.capture_states_with_audio(true)
+    }
+
+    /// With no audio device, keep callback-owned states instead of waiting for a reply.
+    pub fn capture_states_with_audio(&mut self, audio: bool) -> PluginStates {
         let deadline = Instant::now() + self.save_deadline;
         let mut unrefreshed = Vec::new();
         let states = self
@@ -831,6 +839,11 @@ impl Handles {
             .filter_map(|(&(track, slot), &generation)| {
                 let entry = self.entries.get_mut(&(track, generation))?;
                 if entry.refused {
+                    return None;
+                }
+                if entry.needs_callback && !audio {
+                    log::warn!("{}: frozen recording not refreshed: no audio callback; its stored state is kept", entry.name);
+                    unrefreshed.push(format!("{} (no audio callback)", entry.name));
                     return None;
                 }
                 let busy = if entry.stored { deadline.saturating_duration_since(Instant::now()) } else { Duration::MAX };

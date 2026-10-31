@@ -11,7 +11,7 @@ pub struct InstanceSpec {
     /// Channel count the instance is prepared for.
     pub ch: usize,
     /// Decoded [`Insert::state`](transit_model::Insert::state).
-    pub state: Option<Vec<u8>>,
+    pub state: Option<Arc<[u8]>>,
     /// The insert's [`InsertUid`](transit_model::InsertUid): the instance follows it when the
     /// insert moves to another slot (0 for an instrument or a clip effect).
     pub uid: u64,
@@ -27,16 +27,16 @@ pub fn instance_specs(s: &Session) -> Vec<InstanceSpec> {
 
 /// Every plugin instance a realtime engine takes from its host: each insert and instrument, built-in or third-party, and each clip-effect module
 /// (an EQ or compressor per clip, [`clip_fx_slot`]) of an audio track, with the channel count
-/// a plan prepares it for. Only third-party plugins carry a state to restore.
+/// a plan prepares it for. Third-party plugins and frozen Texture inserts carry state to restore.
 /// Inactive and master tracks are included (they have strips); frozen tracks are not (they play
 /// their render, [`Session::with_frozen_audio`]).
 pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
     let main_ch = main_channels(s);
     let state = |ins: &transit_model::Insert| {
         if is_third_party(&ins.plugin) {
-            ins.state_bytes()
-        } else if ins.plugin == "texture" && ins.params.get("freeze").is_some_and(|v| *v >= 0.5) {
-            ins.frozen_recording.as_ref().and_then(|r| r.data.as_deref()).map(<[u8]>::to_vec)
+            ins.state_bytes().map(Into::into)
+        } else if ins.plugin == "texture" {
+            ins.frozen_recording.as_ref().and_then(|r| r.data.clone())
         } else {
             None
         }
@@ -185,5 +185,19 @@ mod tests {
         assert_eq!(slots, [(0, "room_reverb"), (1, "clap:test.x"), (clip_fx_slot(clip, true).unwrap(), CLIP_COMP)]);
         assert!(specs.iter().all(|x| x.state.is_none()));
         assert_eq!(instance_specs(&s).iter().map(|x| x.id.as_str()).collect::<Vec<_>>(), ["clap:test.x"]);
+    }
+
+    #[test]
+    fn frozen_instance_specs_share_captured_bytes_even_when_base_freeze_is_off() {
+        let (mut s, t) = session_with_dc(0.5, 4800);
+        let data: Arc<[u8]> = vec![1, 2, 3].into();
+        let mut ins = Insert::new("texture");
+        ins.params.insert("freeze".into(), 0.0);
+        ins.frozen_recording = Some(transit_model::FrozenRecording { data: Some(data.clone()), ..Default::default() });
+        s.track_mut(t).unwrap().mixer.inserts[0] = Some(ins);
+        let first = realtime_instance_specs(&s);
+        let second = realtime_instance_specs(&s);
+        assert!(Arc::ptr_eq(first[0].state.as_ref().unwrap(), &data));
+        assert!(Arc::ptr_eq(second[0].state.as_ref().unwrap(), &data));
     }
 }

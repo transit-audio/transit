@@ -136,7 +136,7 @@ fn gated(gate: &Arc<Gate>, hold: usize) -> Factory {
     let gate = Arc::clone(gate);
     Arc::new(move |spec: &transit_mix::InstanceSpec| {
         let n = gate.calls.fetch_add(1, Ordering::SeqCst);
-        gate.states.lock().unwrap().push(spec.state.clone());
+        gate.states.lock().unwrap().push(spec.state.as_deref().map(<[u8]>::to_vec));
         if n < hold {
             gate.wait();
         }
@@ -148,7 +148,7 @@ fn gated(gate: &Arc<Gate>, hold: usize) -> Factory {
         }
         let made = transit_mix::create_instance(SYNTH, None, 48_000.0, 512, spec.ch)?;
         Some(NewInstance {
-            plugin: Box::new(Echo { inner: made.plugin, state: spec.state.clone(), drops: Arc::clone(&gate.drops) }),
+            plugin: Box::new(Echo { inner: made.plugin, state: spec.state.as_deref().map(<[u8]>::to_vec), drops: Arc::clone(&gate.drops) }),
             refused_state: false,
         })
     })

@@ -490,13 +490,16 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     /// comparing only the most recent request would then corrupt replacement state.
     /// Internal latency refreshes preserve this document lineage, including refusal.
     pub fn capture_states(&mut self, expected: &Arc<Session>) -> Result<PluginStates, PlayerError> {
+        self.capture_states_with_audio(expected, true)
+    }
+    pub fn capture_states_with_audio(&mut self, expected: &Arc<Session>, audio: bool) -> Result<PluginStates, PlayerError> {
         if self.faulted() {
             return Err(PlayerError::Faulted);
         }
         if !Arc::ptr_eq(expected, &self.requested) || self.confirmed != Some(self.control.sessions.bridge.active()) {
             return Err(PlayerError::SessionPending);
         }
-        Ok(self.handles.capture_states())
+        Ok(if audio { self.handles.capture_states() } else { self.handles.capture_states_with_audio(false) })
     }
     /// Whether the audio side plays exactly `expected`: its plan is confirmed active and a block
     /// of it has been rendered. That guarantees the values the document stores were sent to each
@@ -515,8 +518,11 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     /// for a different or unconfirmed document. None means a terminal fault made
     /// that lineage unavailable; the caller must disclose document-only recovery.
     pub fn capture_states_for_reopen(&mut self, expected: &Arc<Session>) -> Result<Option<PluginStates>, PlayerError> {
+        self.capture_states_for_reopen_with_audio(expected, true)
+    }
+    pub fn capture_states_for_reopen_with_audio(&mut self, expected: &Arc<Session>, audio: bool) -> Result<Option<PluginStates>, PlayerError> {
         if Arc::ptr_eq(expected, &self.requested) && self.confirmed == Some(self.control.sessions.bridge.active()) {
-            return Ok(Some(self.handles.capture_states()));
+            return Ok(Some(if audio { self.handles.capture_states() } else { self.handles.capture_states_with_audio(false) }));
         }
         if self.faulted() {
             return Ok(None);
