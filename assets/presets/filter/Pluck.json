@@ -1,0 +1,22 @@
+{
+  "plugin": "filter",
+  "version": 1,
+  "params": {
+    "mode": 0.0,
+    "slope": 1.0,
+    "cutoff": 180.0,
+    "resonance": 35.0,
+    "env_amount": 70.0,
+    "env_attack": 1.0,
+    "env_decay": 250.0,
+    "env_sustain": 0.0,
+    "env_release": 200.0,
+    "env_velocity": 60.0,
+    "amp_on": 1.0,
+    "amp_attack": 1.0,
+    "amp_decay": 450.0,
+    "amp_sustain": 0.0,
+    "amp_release": 250.0,
+    "amp_velocity": 60.0
+  }
+}

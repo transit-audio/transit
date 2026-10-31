@@ -1,0 +1,119 @@
+# The Filter's panel (the built-in insert, #242, ADR 0038).
+area = "filter"
+title = "Filter"
+link = "user-guide.md#filter"
+
+[[entry]]
+id = "filter.curve"
+name = "Response"
+text = "The filter's response at the knob settings, with the range the envelope and the LFO move the cutoff over shaded behind it. The modulation itself does not move the curve."
+
+[[entry]]
+id = "filter.mode"
+name = "Mode"
+text = "Low pass keeps what is below the cutoff, high pass what is above it, band pass a band around it, and notch takes a band out."
+
+[[entry]]
+id = "filter.slope"
+name = "Slope"
+text = "12 dB per octave (one two-pole section) or 24 dB per octave (two in a row, for a steeper, darker sweep)."
+
+[[entry]]
+id = "filter.cutoff"
+name = "Cutoff"
+text = "The filter frequency before modulation. The envelope, LFO, follower and key tracking move it from here."
+
+[[entry]]
+id = "filter.resonance"
+name = "Resonance"
+text = "Emphasis at the cutoff: none at 0%, a sharp ringing peak at 100%. It does not self-oscillate."
+
+[[entry]]
+id = "filter.drive"
+name = "Drive"
+text = "Gain into a soft clipper before the filter. At 0 dB a signal up to full scale passes untouched; more drive adds saturation."
+
+[[entry]]
+id = "filter.output"
+name = "Output"
+text = "The level after the filter and the amp envelope."
+
+[[entry]]
+id = "filter.env_amount"
+name = "Envelope Amount"
+text = "How far the note envelope moves the cutoff, up or down: 100% is six octaves at the envelope's peak. The envelope starts on the track's notes, at the note's exact sample."
+
+[[entry]]
+id = "filter.env_adsr"
+name = "Envelope Times"
+text = "Attack, decay, sustain and release of the note envelope. It is paraphonic: one envelope for every held note, open while any note is held."
+
+[[entry]]
+id = "filter.env_velocity"
+name = "Envelope Velocity"
+text = "How much the note's velocity scales the envelope: at 0% every note sweeps the same, at 100% a soft note barely moves the cutoff."
+
+[[entry]]
+id = "filter.retrigger"
+name = "Retrigger"
+text = "Every note restarts both envelopes on each new note, for all held notes alike (classic paraphonic behavior); Legato restarts them only when no note was held."
+
+[[entry]]
+id = "filter.lfo_amount"
+name = "LFO Amount"
+text = "How far the LFO swings the cutoff, both ways: 100% is six octaves up and down. Negative inverts it."
+
+[[entry]]
+id = "filter.lfo_shape"
+name = "LFO Shape"
+text = "Sine, triangle, saw, square, or random (a new random step each cycle)."
+
+[[entry]]
+id = "filter.lfo_rate"
+name = "LFO Rate"
+text = "The LFO's speed in hertz when Sync is off."
+
+[[entry]]
+id = "filter.lfo_sync"
+name = "LFO Sync"
+text = "Follows the project tempo: the LFO takes one Division per cycle."
+
+[[entry]]
+id = "filter.lfo_division"
+name = "LFO Division"
+text = "One cycle per this note length when Sync is on: bars, straight notes, triplets (T) or dotted notes (D)."
+
+[[entry]]
+id = "filter.lfo_retrigger"
+name = "LFO Retrigger"
+text = "Restarts the LFO's cycle whenever the envelopes restart; off, it runs freely."
+
+[[entry]]
+id = "filter.follow_amount"
+name = "Follow Amount"
+text = "How far the input's level moves the cutoff: louder playing opens (or with a negative amount, closes) the filter, as an auto-wah does."
+
+[[entry]]
+id = "filter.follow_times"
+name = "Follow Attack and Release"
+text = "How fast the follower rises with the input's level and falls back after it."
+
+[[entry]]
+id = "filter.key_track"
+name = "Key Track"
+text = "Moves the cutoff with the last note played: at 100% it follows the keyboard an octave per octave from middle C, at negative values it goes the other way."
+
+[[entry]]
+id = "filter.amp_on"
+name = "Amp Envelope"
+text = "Shapes the level with its own envelope from the same notes, like a synthesizer's amplifier. With it on, the track is silent between notes."
+
+[[entry]]
+id = "filter.amp_adsr"
+name = "Amp Times"
+text = "Attack, decay, sustain and release of the amp envelope, which shares the note envelope's trigger and retrigger mode."
+
+[[entry]]
+id = "filter.amp_velocity"
+name = "Amp Velocity"
+text = "How much the note's velocity sets the level: at 0% every note is as loud, at 100% the level follows velocity."

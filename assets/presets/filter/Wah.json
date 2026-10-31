@@ -1,0 +1,14 @@
+{
+  "plugin": "filter",
+  "version": 1,
+  "params": {
+    "mode": 2.0,
+    "slope": 0.0,
+    "cutoff": 450.0,
+    "resonance": 65.0,
+    "drive": 3.0,
+    "follow_amount": 55.0,
+    "follow_attack": 5.0,
+    "follow_release": 150.0
+  }
+}

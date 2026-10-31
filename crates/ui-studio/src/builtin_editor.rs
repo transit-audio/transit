@@ -52,6 +52,8 @@ pub struct EditorLayout {
     /// The scope and level strip of a bespoke panel: the scope, the peak readout, and for the
     /// Compressor and Expander/Gate the gain-reduction bar and readout (zero rects and empty text elsewhere).
     pub scope: [f32; 4],
+    /// The Filter's response curve (a zero rect elsewhere).
+    pub curve: [f32; 4],
     pub level: String,
     pub gr_bar: [f32; 4],
     pub gr: String,
@@ -165,6 +167,7 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             bypass: [0.0; 4],
             preset: [0.0; 4],
             scope: [0.0; 4],
+            curve: [0.0; 4],
             level: String::new(),
             gr_bar: [0.0; 4],
             gr: String::new(),

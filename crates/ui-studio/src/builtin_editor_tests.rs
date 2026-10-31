@@ -705,3 +705,22 @@ fn a_built_in_window_fits_its_panel_and_has_no_resize_handle() {
     println!("voices 8 -> 2: {before:?} -> {after:?}");
     assert!(after[0] == before[0] && after[1] == before[1], "the position is kept");
 }
+
+#[test]
+fn the_filter_is_in_the_insert_picker_and_its_panel_draws_the_response_above_the_knobs() {
+    let mut t = T::new();
+    let picker = t.app.builtin_plugins();
+    assert!(picker.iter().any(|p| p.id == "filter" && p.name == "Filter" && !p.instrument), "the Filter is an insert effect");
+    let tr = t.track("instrument");
+    t.app.add_device(tr, "filter").unwrap();
+    t.frames(4);
+    // Card 0 is the instrument, card 1 the Filter.
+    t.open_editor(1);
+    let w = t.window(tr);
+    assert_eq!(w.title.rsplit(" · ").next(), Some("Filter"));
+    let (cw, ch) = (w.curve[2] - w.curve[0], w.curve[3] - w.curve[1]);
+    assert_eq!((cw, ch), (crate::filter_curve::CURVE_W, crate::filter_curve::CURVE_H), "the response curve has its rect");
+    assert!(w.curve[1] < w.rows[0].control[1], "the curve is above the knobs");
+    assert_eq!(w.rows.len(), info("filter").params.len(), "every parameter has a control");
+    assert!(w.preset[2] > w.preset[0], "the preset dropdown");
+}

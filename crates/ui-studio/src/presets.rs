@@ -51,6 +51,9 @@ pub static FACTORY: &[(&str, &str, &str)] = factory![
     "macro_oscillator" / "Glass Bell",
     "macro_oscillator" / "Plucked String",
     "macro_oscillator" / "Key Tracked Timbre",
+    "filter" / "Pluck",
+    "filter" / "Wah",
+    "filter" / "Paraphonic Brass",
 ];
 
 /// The factory presets of one plug-in, in table order.

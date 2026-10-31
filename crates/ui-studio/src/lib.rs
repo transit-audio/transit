@@ -26,6 +26,7 @@ mod editor_group;
 mod external_instrument;
 mod external_measure;
 pub mod fades;
+pub mod filter_curve;
 pub mod fine;
 pub mod finish;
 pub mod fonts;

@@ -124,9 +124,103 @@ static MACRO: [Row; 3] = [
     ],
 ];
 
+/// The Filter's id (#242).
+const FILTER: &str = "filter";
+
+static FILTER_LAYOUT: [Row; 3] = [
+    &[
+        sec(
+            "Filter",
+            3,
+            &[
+                Choice("mode", "Mode"),
+                Choice("slope", "Slope"),
+                Knob("drive", "Drive"),
+                Knob("cutoff", "Cutoff"),
+                Knob("resonance", "Resonance"),
+                Knob("output", "Output"),
+            ],
+        ),
+        sec("Key", 1, &[Knob("key_track", "Key Track")]),
+        sec("Follower", 1, &[Knob("follow_amount", "Amount"), Knob("follow_attack", "Attack"), Knob("follow_release", "Release")]),
+    ],
+    &[
+        sec(
+            "Envelope",
+            4,
+            &[
+                Knob("env_amount", "Amount"),
+                Knob("env_velocity", "Velocity"),
+                Choice("retrigger", "Retrigger"),
+                Knob("env_attack", "Attack"),
+                Knob("env_decay", "Decay"),
+                Knob("env_sustain", "Sustain"),
+                Knob("env_release", "Release"),
+            ],
+        ),
+        sec(
+            "Amp",
+            4,
+            &[
+                Toggle("amp_on", "Amp Env"),
+                Knob("amp_velocity", "Velocity"),
+                Knob("amp_attack", "Attack"),
+                Knob("amp_decay", "Decay"),
+                Knob("amp_sustain", "Sustain"),
+                Knob("amp_release", "Release"),
+            ],
+        ),
+    ],
+    &[sec(
+        "LFO",
+        6,
+        &[
+            Knob("lfo_amount", "Amount"),
+            Choice("lfo_shape", "Shape"),
+            Knob("lfo_rate", "Rate"),
+            Toggle("lfo_sync", "Sync"),
+            Choice("lfo_division", "Division"),
+            Toggle("lfo_retrigger", "Retrigger"),
+        ],
+    )],
+];
+
+/// The help entry of a Filter control.
+fn filter_help(param: &str) -> Option<crate::help::Id> {
+    use crate::help::Id;
+    Some(match param {
+        "mode" => Id::FilterMode,
+        "slope" => Id::FilterSlope,
+        "cutoff" => Id::FilterCutoff,
+        "resonance" => Id::FilterResonance,
+        "drive" => Id::FilterDrive,
+        "output" => Id::FilterOutput,
+        "env_amount" => Id::FilterEnvAmount,
+        "env_attack" | "env_decay" | "env_sustain" | "env_release" => Id::FilterEnvAdsr,
+        "env_velocity" => Id::FilterEnvVelocity,
+        "retrigger" => Id::FilterRetrigger,
+        "lfo_amount" => Id::FilterLfoAmount,
+        "lfo_shape" => Id::FilterLfoShape,
+        "lfo_rate" => Id::FilterLfoRate,
+        "lfo_sync" => Id::FilterLfoSync,
+        "lfo_division" => Id::FilterLfoDivision,
+        "lfo_retrigger" => Id::FilterLfoRetrigger,
+        "follow_amount" => Id::FilterFollowAmount,
+        "follow_attack" | "follow_release" => Id::FilterFollowTimes,
+        "key_track" => Id::FilterKeyTrack,
+        "amp_on" => Id::FilterAmpOn,
+        "amp_attack" | "amp_decay" | "amp_sustain" | "amp_release" => Id::FilterAmpAdsr,
+        "amp_velocity" => Id::FilterAmpVelocity,
+        _ => return None,
+    })
+}
+
 /// The help entry of a bespoke panel's control, for the plug-ins that have them.
 fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
     use crate::help::Id;
+    if plugin == FILTER {
+        return filter_help(param);
+    }
     if plugin != MACRO_OSC {
         return None;
     }
@@ -162,6 +256,7 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         "eq_7band" => Some(&EQ7),
         "plate_reverb" => Some(&PLATE),
         MACRO_OSC => Some(&MACRO),
+        FILTER => Some(&FILTER_LAYOUT),
         _ => None,
     }
 }
@@ -170,6 +265,9 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
 pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, info: &'static PluginInfo, rows: &[Row], lay: &mut EditorLayout) {
     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
     crate::scope_strip::show(app, ui, key, ins, lay);
+    if info.id == FILTER {
+        crate::filter_curve::show(app, ui, key, ins, info, lay);
+    }
     for row in rows {
         ui.horizontal_top(|ui| {
             for s in *row {
@@ -348,7 +446,7 @@ mod tests {
 
     #[test]
     fn every_layout_places_each_parameter_of_its_plugin_exactly_once() {
-        for plugin in ["compressor", "expander_gate", "eq_7band", "plate_reverb", MACRO_OSC] {
+        for plugin in ["compressor", "expander_gate", "eq_7band", "plate_reverb", MACRO_OSC, FILTER] {
             let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
             let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).filter_map(|i| item_id(*i)).collect();
             ids.sort_unstable();
@@ -364,5 +462,12 @@ mod tests {
             assert!(help(MACRO_OSC, p.id).is_some(), "{}", p.id);
         }
         assert!(help("compressor", "threshold").is_none());
+    }
+
+    #[test]
+    fn every_filter_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(FILTER).unwrap().params {
+            assert!(help(FILTER, p.id).is_some(), "{}", p.id);
+        }
     }
 }
