@@ -194,6 +194,56 @@ fn refusal_5_flags_a_coverage_check_after_closing_blocks_at_the_short_deadline()
     assert_eq!(refusals(MIX, &helper), vec![(8, 5)], "in a helper of the test");
 }
 
+/// The first-block baseline of a hole count (E49 recurrences 2026-10-30 and 2026-10-31).
+#[test]
+fn refusal_6_flags_a_hole_count_with_no_first_block_baseline() {
+    let src = test_fn(
+        "    rig.mix.start_render_workers(64);
+    rig.mix.set_strip_deadline(Some(Duration::from_secs(60)));
+    rig.block();
+    let holes: u64 = rig.shared.iter().map(|s| s.report().hole_samples).sum();
+    assert_eq!(holes, f.overruns_unstarted * 128);",
+    );
+    assert_eq!(refusals(MIX, &src), vec![(6, 6)], "render_graph.rs before the fix");
+    let based = src.replace(
+        "    rig.block();",
+        "    expect_from_the_start(&rig);
+    rig.block();",
+    );
+    assert_eq!(refusals(MIX, &based), vec![], "the shared helper's call names it");
+    let direct = src.replace(
+        "    rig.block();",
+        "    s.inst.lock().unwrap().expect_from(0);
+    rig.block();",
+    );
+    assert_eq!(refusals(MIX, &direct), vec![]);
+    let covered = src.replace("let holes: u64 = rig.shared.iter().map(|s| s.report().hole_samples).sum();", "assert_time_covered(&rig);");
+    assert_eq!(refusals(MIX, &covered), vec![(6, 6)], "the processed-plus-holes identity too");
+    for tag in ["far-deadline", "held-worker", "explicit-deadline", "serial", "any-strip"] {
+        let marked = src.replace(
+            "#[test]",
+            &format!(
+                "// timing: {tag} no marker allows it
+#[test]"
+            ),
+        );
+        assert_eq!(refusals(MIX, &marked), vec![(7, 6)], "{tag}");
+    }
+    let helper = format!(
+        "fn count(rig: &Rig) -> u64 {{
+    rig.shared.iter().map(|s| s.report().hole_samples).sum()
+}}
+{}",
+        src.replace("let holes: u64 = rig.shared.iter().map(|s| s.report().hole_samples).sum();", "let holes = count(&rig);")
+    );
+    assert_eq!(refusals(MIX, &helper), vec![(5, 6)], "a same-file helper's count, reported on the test");
+    let not_pool = test_fn(
+        "    let r = inst.report();
+    assert_eq!(r.hole_samples, 0);",
+    );
+    assert_eq!(refusals("crates/rt/src/midi_defer/tests.rs", &not_pool), vec![], "the instrument's own tests");
+}
+
 #[test]
 fn rule_e_reports_through_the_timing_gate() {
     let hits = super::super::scan(MIX, &pool(""), true);

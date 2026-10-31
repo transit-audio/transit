@@ -20,6 +20,10 @@
 //!    (a no-progress guard of 5 s or more that breaks into a failing assertion is allowed, E62).
 //! 5. A coverage assertion (`assert_time_covered`, `hole_samples`, `stuck_notes`) after the last stall or
 //!    hold release with no far deadline (or serial rendering) set between them.
+//! 6. A pool test that reads a hole count (`hole_samples`, `assert_time_covered`) with no `expect_from` in
+//!    its evidence: a continuity instrument's time starts at its first processed block unless told its
+//!    first block, so a skip before its first render leaves no hole (E49 recurrences 2026-10-30 and
+//!    2026-10-31). No marker allows it.
 //!
 //! Markers, `// timing: <tag> <reason>` on the fn header or in the attribute and comment lines directly
 //! above it, reason required: `far-deadline`, `held-worker`, `explicit-deadline`, `serial` and
@@ -43,6 +47,8 @@ const MARKERS: &[(&str, &[u8])] = &[
 const PER_STRIP: &[&str] = &["Queued", "StaleBinding", "midi_dropped", "held_tracks"];
 /// Coverage assertions refusal 5 is about.
 const COVERAGE: &[&str] = &["assert_time_covered", "hole_samples", "stuck_notes"];
+/// Hole counts refusal 6 is about.
+const HOLES: &[&str] = &["assert_time_covered", "hole_samples"];
 
 /// What a strip deadline argument resolves to.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -417,6 +423,11 @@ pub fn scan(path: &str, src: &str, test_file: bool) -> Vec<Hit> {
             }
         } else if host_test(&ev, krate) && !long_give_up(&ev.lines) {
             refuse(1, f.start);
+        }
+        // 6: a hole count with no baseline for the instruments' first block.
+        if pool && any(&ev.lines, HOLES) && !any(&ev.lines, &["expect_from"]) {
+            let line = own.iter().position(|l| HOLES.iter().any(|h| l.contains(h))).map_or(f.start, |i| f.start + i);
+            refuse(6, line);
         }
         // 3: a wait for some strip to be away, then a per-strip assertion, with no wait on the strip.
         let away = |l: &String| {

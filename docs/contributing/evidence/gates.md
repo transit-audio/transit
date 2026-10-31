@@ -147,7 +147,9 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   no-progress guard of 5 s or more followed by an assertion its exit fails, E62; an `if` that panics or
   asserts is a failing guard); (5) a coverage assertion (`assert_time_covered`,
   `hole_samples`, `stuck_notes`) after the last stall or hold release with no far deadline
-  (`from_secs(N)`, N at least 10, inline or a same-file name) or serial switch between them. A deliberate case
+  (`from_secs(N)`, N at least 10, inline or a same-file name) or serial switch between them; (6) a pool test that
+  reads a hole count (`hole_samples`, `assert_time_covered`) with no `expect_from` in it or its same-file helpers
+  (no marker allows it; E49 recurrence 2026-10-31). A deliberate case
   carries `// timing: <tag> <reason>` on the fn header or in the attribute and comment lines directly above
   it, reason required: `far-deadline` (refusals 1, 2, 5: the far deadline is set where the scan cannot see
   it), `held-worker` (1, 2), `explicit-deadline` (1, 2: explicit instants, or injected stalls longer than an
