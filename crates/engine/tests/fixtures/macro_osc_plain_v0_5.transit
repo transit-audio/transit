@@ -1,0 +1,523 @@
+{
+  "format_version": 1,
+  "name": "Untitled",
+  "sample_rate": 48000,
+  "bit_depth": "Int24",
+  "frame_rate": "Fps30",
+  "timecode_start": 0,
+  "tempo": {
+    "tempos": [
+      {
+        "tick": 0,
+        "bpm": 120.0
+      }
+    ],
+    "meters": [
+      {
+        "tick": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "key_signatures": [],
+  "tracks": [
+    {
+      "id": 1,
+      "name": "Plain",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        86,
+        132,
+        214
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Plain",
+          "clips": [
+            {
+              "id": 2,
+              "name": "Plain",
+              "start": 0,
+              "length": 96000,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 36,
+                        "velocity": 30,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 700
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 240,
+                        "length": 900
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 127,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 480,
+                        "length": 600
+                      },
+                      {
+                        "pitch": 72,
+                        "velocity": 60,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 960,
+                        "length": 1200
+                      },
+                      {
+                        "pitch": 84,
+                        "velocity": 90,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 1440,
+                        "length": 500
+                      },
+                      {
+                        "pitch": 96,
+                        "velocity": 110,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 1920,
+                        "length": 960
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": 0.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": "Main",
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "macro_oscillator",
+        "params": {
+          "aux_mix": 0.0,
+          "bend_range": 2.0,
+          "decay": 50.0,
+          "harmonics": 50.0,
+          "key_curve": 0.0,
+          "key_decay": 0.0,
+          "key_harmonics": 0.0,
+          "key_morph": 0.0,
+          "key_timbre": 0.0,
+          "level": -6.0,
+          "lpg_color": 50.0,
+          "mod_wheel": 0.0,
+          "model": 8.0,
+          "morph": 50.0,
+          "timbre": 50.0,
+          "tune": 0.0,
+          "velocity_curve": 0.0,
+          "velocity_decay": 0.0,
+          "velocity_harmonics": 0.0,
+          "velocity_morph": 0.0,
+          "velocity_timbre": 0.0,
+          "voices": 7.0
+        },
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 3,
+      "name": "Mono",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        94,
+        170,
+        214
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Mono",
+          "clips": [
+            {
+              "id": 4,
+              "name": "Mono",
+              "start": 0,
+              "length": 96000,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 36,
+                        "velocity": 30,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 700
+                      },
+                      {
+                        "pitch": 57,
+                        "velocity": 100,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 240,
+                        "length": 900
+                      },
+                      {
+                        "pitch": 64,
+                        "velocity": 127,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 480,
+                        "length": 600
+                      },
+                      {
+                        "pitch": 72,
+                        "velocity": 60,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 960,
+                        "length": 1200
+                      },
+                      {
+                        "pitch": 84,
+                        "velocity": 90,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 1440,
+                        "length": 500
+                      },
+                      {
+                        "pitch": 96,
+                        "velocity": 110,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 1920,
+                        "length": 960
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": 0.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": "Main",
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "macro_oscillator",
+        "params": {
+          "aux_mix": 0.0,
+          "bend_range": 2.0,
+          "decay": 50.0,
+          "harmonics": 50.0,
+          "key_curve": 0.0,
+          "key_decay": 0.0,
+          "key_harmonics": 0.0,
+          "key_morph": 0.0,
+          "key_timbre": 0.0,
+          "level": -6.0,
+          "lpg_color": 50.0,
+          "mod_wheel": 0.0,
+          "model": 20.0,
+          "morph": 50.0,
+          "timbre": 50.0,
+          "tune": 0.0,
+          "velocity_curve": 0.0,
+          "velocity_decay": 0.0,
+          "velocity_harmonics": 0.0,
+          "velocity_morph": 0.0,
+          "velocity_timbre": 0.0,
+          "voices": 0.0
+        },
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    }
+  ],
+  "sources": [],
+  "busses": [],
+  "outputs": [
+    {
+      "name": "Out 1-2",
+      "first_channel": 0,
+      "format": "Stereo"
+    }
+  ],
+  "markers": [],
+  "groups": [],
+  "edit": {
+    "tool": "Smart",
+    "edit_mode": "Slip",
+    "selection": {
+      "start": 0,
+      "end": 0
+    },
+    "selected_tracks": [
+      3
+    ],
+    "selected_clips": [],
+    "selected_sources": [],
+    "playhead": 0,
+    "grid": {
+      "Note": {
+        "value": "Sixteenth",
+        "dotted": false,
+        "triplet": false
+      }
+    },
+    "nudge": {
+      "Seconds": 1.0
+    },
+    "grid_lines": true,
+    "main_counter": "MinSecs",
+    "sub_counter": "Samples",
+    "zoom": {
+      "samples_per_px": 1024.0,
+      "scroll": 0,
+      "waveform_zoom": 1.0,
+      "presets": [
+        64.0,
+        256.0,
+        1024.0,
+        4096.0,
+        16384.0
+      ]
+    },
+    "zoom_toggle": null,
+    "rulers": [
+      "bars_beats",
+      "min_secs",
+      "tempo",
+      "meter",
+      "markers"
+    ],
+    "link_timeline_edit": true,
+    "link_track_edit": false,
+    "insertion_follows_playback": false,
+    "loop_playback": false,
+    "loop_range": {
+      "start": 0,
+      "end": 0
+    },
+    "pre_post_roll": false,
+    "pre_roll": 96000,
+    "post_roll": 96000,
+    "tab_to_transient": false,
+    "automation_follows_edit": true,
+    "markers_follow_edit": false,
+    "layered_editing": false,
+    "mirrored_midi": false,
+    "click": false,
+    "countoff": false,
+    "countoff_bars": 2,
+    "midi_merge": false,
+    "record_mode": "normal",
+    "loop_record": false,
+    "quickpunch": false,
+    "scrolling": "page",
+    "solo_mode": "sip",
+    "pre_fader_metering": false,
+    "delay_compensation": true,
+    "keyboard_focus": "commands",
+    "timeline_selection": {
+      "start": 0,
+      "end": 0
+    },
+    "flags": [
+      "view.clip.gain_line",
+      "view.clip.name",
+      "view.clip.overlap_shadows",
+      "view.marker.ruler_lines",
+      "waveform.peak"
+    ],
+    "values": {}
+  },
+  "next_id": 5,
+  "comments": "",
+  "midi_originals": {}
+}

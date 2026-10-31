@@ -4,6 +4,10 @@
   "params": {
     "model": 8.0,
     "timbre": 40.0,
-    "key_timbre": 50.0
+    "mod1_source": 6.0,
+    "mod1_via": 0.0,
+    "mod1_dest": 3.0,
+    "mod1_amount": 50.0,
+    "mod1_curve": 0.0
   }
 }

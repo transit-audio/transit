@@ -669,7 +669,8 @@ impl Session {
     }
 
     /// [`Session::from_json`], also returning the session as the file stored it when loading had to
-    /// change it (the retired Subtractive Synth became a Macro Oscillator, #234): a caller that
+    /// change it (the retired Subtractive Synth became a Macro Oscillator, #234; the Macro
+    /// Oscillator's note-to-macro mapping became matrix rows, #243): a caller that
     /// tracks "modified" takes it as the saved state, so the open session reads as modified.
     pub fn from_json_as_saved(text: &str) -> Result<(Session, Option<Session>), SessionError> {
         let mut v: serde_json::Value = serde_json::from_str(text).map_err(|e| SessionError::Format(e.to_string()))?;
@@ -704,8 +705,10 @@ impl Session {
                 unknown.join(", ")
             ));
         }
-        let as_stored = crate::legacy_synth::uses_retired_synth(&s).then(|| s.clone());
+        let changes = crate::legacy_synth::uses_retired_synth(&s) || crate::legacy_mapping::uses_old_mapping(&s);
+        let as_stored = changes.then(|| s.clone());
         crate::legacy_synth::retire_subtractive_synth(&mut s);
+        crate::legacy_mapping::migrate_session(&mut s);
         Ok((s, as_stored))
     }
 

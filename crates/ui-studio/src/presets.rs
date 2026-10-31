@@ -61,10 +61,15 @@ pub fn factory_for(plugin: &str) -> Vec<(&'static str, Preset)> {
     FACTORY.iter().filter(|(p, ..)| *p == plugin).filter_map(|(_, name, text)| parse(text).ok().map(|p| (*name, p))).collect()
 }
 
+/// Parses a preset. A Macro Oscillator preset saved before #243 has its note-to-macro mapping
+/// rewritten as matrix rows, as a session's is when it loads (`transit_model::legacy_mapping`).
 pub fn parse(text: &str) -> Result<Preset, String> {
-    let p: Preset = serde_json::from_str(text).map_err(|e| e.to_string())?;
+    let mut p: Preset = serde_json::from_str(text).map_err(|e| e.to_string())?;
     if p.version > VERSION {
         return Err(format!("preset version {} is newer than this build reads ({VERSION})", p.version));
+    }
+    if p.plugin == transit_model::legacy_mapping::MACRO_OSC_ID {
+        transit_model::legacy_mapping::migrate_params(&mut p.params, |_| false);
     }
     Ok(p)
 }

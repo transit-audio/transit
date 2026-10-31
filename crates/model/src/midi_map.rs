@@ -308,6 +308,14 @@ impl MappingSet {
         n - self.items.len()
     }
 
+    /// Rewrites mapping targets in place (a load migration renames a parameter, #243). The caller
+    /// keeps targets unique.
+    pub fn retarget(&mut self, mut f: impl FnMut(&mut ControlTarget)) {
+        for m in &mut self.items {
+            f(&mut m.target);
+        }
+    }
+
     /// Remove the mapping of `target`; whether there was one.
     pub fn remove(&mut self, target: &ControlTarget) -> bool {
         let n = self.items.len();

@@ -12,6 +12,7 @@ pub mod disk;
 mod ids;
 mod io_map;
 pub mod legacy;
+pub mod legacy_mapping;
 pub mod legacy_synth;
 pub use legacy_synth::DEFAULT_INSTRUMENT;
 mod markers;
