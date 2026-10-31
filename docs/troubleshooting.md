@@ -137,7 +137,7 @@ Every status line and figure of the Audio Devices window, in plain words. The sa
 
 ## A figure only in Copy diagnostics
 
-- **Note view events dropped.** In Copy diagnostics (not in the window): note events a track's inserts that read notes (the Filter's envelopes and amp stage) never saw, since transit started, summed over the tracks. A block gives such an insert at most 512 note events, and the last 64 slots are kept for note-offs and pedal releases. Healthy is 0. It is non-zero only when one block holds hundreds of notes at once (a very dense clip, a stuck arpeggiator or a MIDI flood); the insert then lets go of all its notes, so a note may cut off early, and the releases that follow still reach it. Thin out the notes in the block, or report it with Copy diagnostics.
+- **Note view events dropped.** In Copy diagnostics (not in the window): note events a track's inserts that read notes (the Filter's envelopes and amp stage) never saw, since transit started, summed over the tracks. Bounces, freezes and exports run in the same process and count too, and `transit report` does not measure it. A block gives such an insert at most 512 note events, and the last 64 slots are kept for note-offs and pedal releases. Healthy is 0. It is non-zero only when one block holds hundreds of notes at once (a very dense clip, a stuck arpeggiator or a MIDI flood); the insert then lets go of all its notes, so a note may cut off early, and the releases that follow still reach it. Thin out the notes in the block, or report it with Copy diagnostics.
 
 ## A plug-in stopped responding
 

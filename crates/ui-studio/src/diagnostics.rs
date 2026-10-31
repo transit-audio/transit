@@ -338,7 +338,8 @@ pub struct Report {
     pub deferred_services: u64,
     /// Note events dropped by a full note view since transit started, summed over the tracks
     /// (#246, `transit_mix::note_view_dropped_total`).
-    pub note_view_dropped: u64,
+    /// `None` in report mode, where no engine runs.
+    pub note_view_dropped: Option<u64>,
     /// Recorded takes the session could not place (#192): the file and what it holds.
     pub unplaced_takes: Vec<String>,
     pub log_dir: Option<PathBuf>,
@@ -463,7 +464,10 @@ impl Report {
             }
             None => o.push_str("No output stream, so no counters.\n"),
         }
-        o.push_str(&format!("Note view events dropped (inserts that read notes): {}\n", self.note_view_dropped));
+        match self.note_view_dropped {
+            Some(n) => o.push_str(&format!("Note view events dropped (inserts that read notes): {n}\n")),
+            None => o.push_str("Note view events dropped (inserts that read notes): not measured in report mode\n"),
+        }
         section(&mut o, "MIDI");
         for line in self.midi.lines() {
             o.push_str(&line);
@@ -755,7 +759,7 @@ mod tests {
             strips: Vec::new(),
             plugin_host: vec!["Plug-in host: Guitar Rig 7 stuck in a window message (its editor or a dialog it opened) for 240 s".into()],
             deferred_services: 3,
-            note_view_dropped: 7,
+            note_view_dropped: Some(7),
             unplaced_takes: Vec::new(),
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
             last_status: None,

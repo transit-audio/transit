@@ -365,7 +365,7 @@ fn a_synced_lfo_starts_at_the_song_position_wherever_playback_starts() {
 }
 
 #[test]
-fn a_synced_lfo_gives_the_same_bits_in_any_host_block_size_at_a_constant_tempo() {
+fn a_synced_lfo_agrees_within_a_millionth_in_any_host_block_size_at_a_constant_tempo() {
     let input = tone(24_000);
     let run = |block| render_playing(&mut filter(&SYNCED), &input, block, 7_000, 3.5, true);
     let reference = run(512);

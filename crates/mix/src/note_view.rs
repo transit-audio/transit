@@ -17,7 +17,9 @@
 //! the next entry becomes an all-notes-off and later note-ons and pedal-downs are dropped (counted
 //! in [`MidiFxCounts::note_view_dropped`](crate::midi_fx::MidiFxCounts)): an insert that lost
 //! events releases everything rather than holding a note forever, and the releases that follow
-//! still reach it until the reserve is spent too.
+//! still reach it until the reserve is spent too. The final slot is always kept for that
+//! all-notes-off: a release that would take it becomes the stand-in instead, so whenever anything
+//! was dropped, the view holds one.
 
 use transit_dsp::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_SUSTAIN, Message, PluginEvent};
 use transit_dsp::midi_fx::TimedEvent;
@@ -66,22 +68,32 @@ impl NoteView {
             return 0;
         }
         let release = is_release(&ev.message);
-        if !release && self.full {
+        if self.full && !release {
             return 1;
+        }
+        if release && !self.full && self.len + 1 >= NOTE_VIEW_CAP {
+            // The final slot is always the stand-in's: a release that would take it is lost, so
+            // the insert lets go of everything instead of holding the note it names.
+            return self.stand_in(offset);
         }
         if !release && self.len + 1 >= NOTE_VIEW_CAP - RELEASE_RESERVE {
             // The last open slot: note-ons from here on are lost, so the insert releases all it holds.
-            if let Some(slot) = self.events.get_mut(self.len) {
-                *slot = TimedEvent { offset, event: ALL_OFF };
-                self.len += 1;
-            }
-            self.full = true;
-            return 1;
+            return self.stand_in(offset);
         }
         let Some(slot) = self.events.get_mut(self.len) else { return 1 };
         *slot = TimedEvent { offset, event: *ev };
         self.len += 1;
         0
+    }
+
+    /// Writes the all-notes-off that stands in for the event being dropped; counts that event.
+    fn stand_in(&mut self, offset: u32) -> u64 {
+        if let Some(slot) = self.events.get_mut(self.len) {
+            *slot = TimedEvent { offset, event: ALL_OFF };
+            self.len += 1;
+        }
+        self.full = true;
+        1
     }
 
     /// The block's events in delivery order (offsets never decrease within a block's delivery,
@@ -169,5 +181,22 @@ mod tests {
         assert_eq!(dropped, 5, "releases past the reserve are the only ones lost");
         let pedal_up = PluginEvent { channel: 0, note_id: -1, message: Message::Control { cc: CC_SUSTAIN, value: 0 } };
         assert_eq!(v.record(2, &pedal_up), 1, "and the view is full");
+    }
+
+    #[test]
+    fn a_lost_release_leaves_the_all_notes_off_stand_in() {
+        let mut v = NoteView::new();
+        let mut dropped = 0;
+        for i in 0..400 {
+            dropped += v.record(0, &on((i % 128) as u8));
+        }
+        for i in 0..112 {
+            dropped += v.record(1, &off((i % 100) as u8));
+        }
+        dropped += v.record(2, &off(120));
+        assert_eq!(v.events().len(), NOTE_VIEW_CAP);
+        assert_eq!(dropped, 2, "the release that took the final slot and the one after it");
+        let last = v.events().last().unwrap();
+        assert!(matches!(last.event.message, Message::Control { cc: CC_ALL_NOTES_OFF, .. }), "the insert is told to let go of everything");
     }
 }

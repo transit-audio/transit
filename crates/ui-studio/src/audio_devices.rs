@@ -650,7 +650,7 @@ impl StudioApp {
             last_status: self.status_age.last().cloned(),
             plugin_host: self.plugin_host_lines(),
             deferred_services: transit_dsp::host_call::deferred(),
-            note_view_dropped: transit_mix::note_view_dropped_total(),
+            note_view_dropped: Some(transit_mix::note_view_dropped_total()),
             unplaced_takes: self.engine.session().unplaced_takes.clone(),
             log_dir: self.services.config_dir.as_ref().map(|d| d.join("logs")),
             ..Default::default()
