@@ -382,8 +382,11 @@ fn addition_header(ui: &mut Ui, ins: &Insert, lay: &mut EditorLayout) -> bool {
         || ins.params.iter().any(|(k, v)| k.starts_with("mod") && k.ends_with("_source") && *v >= 0.5);
     let chosen: Option<bool> = ui.ctx().data(|d| d.get_temp(id));
     let open = chosen.unwrap_or(in_use);
-    let text = format!("{} {MACRO_OSC_ADDITION}", if open { "▾" } else { "▸" });
-    let r = ui.add(egui::Label::new(RichText::new(text).size(10.5).italics().color(TOKENS.text_dim)).sense(egui::Sense::click()));
+    let line = ui.horizontal(|ui| {
+        crate::icons::icon(ui, if open { crate::icons::Icon::ChevronDown } else { crate::icons::Icon::ChevronRight });
+        ui.label(RichText::new(MACRO_OSC_ADDITION).size(10.5).italics().color(TOKENS.text_dim));
+    });
+    let r = ui.interact(line.response.rect, id.with("toggle"), egui::Sense::click());
     crate::help::hover(ui, &r, crate::help::Id::MacroOscAddition);
     if r.clicked() {
         ui.ctx().data_mut(|d| d.insert_temp(id, !open));
