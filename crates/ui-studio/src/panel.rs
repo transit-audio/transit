@@ -18,6 +18,8 @@ use transit_model::{Insert, KeyFrom, TrackId};
 pub enum Item {
     Knob(&'static str, &'static str),
     Toggle(&'static str, &'static str),
+    /// A button that holds its switch on while pressed (the Texture's Seed, #241).
+    Hold(&'static str, &'static str),
     Choice(&'static str, &'static str),
     /// A choice with long labels: a wide dropdown.
     Menu(&'static str, &'static str),
@@ -274,6 +276,9 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
     if plugin == FILTER {
         return filter_help(param);
     }
+    if plugin == crate::texture_panel::TEXTURE {
+        return crate::texture_panel::help(param);
+    }
     if plugin != MACRO_OSC {
         return None;
     }
@@ -344,6 +349,7 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         "plate_reverb" => Some(&PLATE),
         MACRO_OSC => Some(&MACRO),
         FILTER => Some(&FILTER_LAYOUT),
+        crate::texture_panel::TEXTURE => Some(&crate::texture_panel::LAYOUT),
         _ => None,
     }
 }
@@ -369,6 +375,11 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
         let r = ui.label(RichText::new(MACRO_OSC_CREDIT).size(10.5).color(TOKENS.text_dim));
         crate::help::hover(ui, &r, crate::help::Id::MacroOscCredits);
         lay.credit = MACRO_OSC_CREDIT.to_string();
+    }
+    if info.id == crate::texture_panel::TEXTURE {
+        let r = ui.label(RichText::new(crate::texture_panel::CREDIT).size(10.5).color(TOKENS.text_dim));
+        crate::help::hover(ui, &r, crate::help::Id::TextureCredits);
+        lay.credit = crate::texture_panel::CREDIT.to_string();
     }
 }
 
@@ -413,7 +424,7 @@ fn section(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert
 
 fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, info: &'static PluginInfo, item: Item, lay: &mut EditorLayout) {
     let (id, label) = match item {
-        Knob(id, l) | Toggle(id, l) | Choice(id, l) | Menu(id, l) => (id, l),
+        Knob(id, l) | Toggle(id, l) | Item::Hold(id, l) | Choice(id, l) | Menu(id, l) => (id, l),
         Key => return key_dropdown(app, ui, key),
         Lights => return lights(app, ui, key, ins, lay),
         Matrix => return crate::panel_matrix::show(app, ui, key, ins, info, lay),
@@ -429,6 +440,13 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
             let r = ui.selectable_label(v >= 0.5, label);
             let clicked = r.clicked().then_some(if v >= 0.5 { 0.0 } else { 1.0 });
             (r, clicked, p.format(v))
+        }
+        Item::Hold(..) => {
+            // On while the pointer holds it down, off when it lets go (wherever it is then).
+            let r = ui.selectable_label(v >= 0.5, label);
+            let down = r.is_pointer_button_down_on();
+            let changed = (down != (v >= 0.5)).then_some(if down { 1.0 } else { 0.0 });
+            (r, changed, p.format(v))
         }
         Menu(..) => choice(ui, ins, p, label, v, MENU_W),
         _ => choice(ui, ins, p, label, v, knob::CELL_W - 10.0),
@@ -571,7 +589,7 @@ mod tests {
 
     fn item_ids(i: Item) -> Vec<&'static str> {
         match i {
-            Knob(id, _) | Toggle(id, _) | Choice(id, _) | Menu(id, _) => vec![id],
+            Knob(id, _) | Toggle(id, _) | Item::Hold(id, _) | Choice(id, _) | Menu(id, _) => vec![id],
             Matrix => crate::panel_matrix::params().collect(),
             Key | Lights => Vec::new(),
         }
@@ -579,7 +597,7 @@ mod tests {
 
     #[test]
     fn every_layout_places_each_parameter_of_its_plugin_exactly_once() {
-        for plugin in ["compressor", "expander_gate", "eq_7band", "plate_reverb", MACRO_OSC, FILTER] {
+        for plugin in ["compressor", "expander_gate", "eq_7band", "plate_reverb", MACRO_OSC, FILTER, crate::texture_panel::TEXTURE] {
             let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
             let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).flat_map(|i| item_ids(*i)).collect();
             ids.sort_unstable();
@@ -595,6 +613,13 @@ mod tests {
             assert!(help(MACRO_OSC, p.id).is_some(), "{}", p.id);
         }
         assert!(help("compressor", "threshold").is_none());
+    }
+
+    #[test]
+    fn every_texture_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::texture_panel::TEXTURE).unwrap().params {
+            assert!(help(crate::texture_panel::TEXTURE, p.id).is_some(), "{}", p.id);
+        }
     }
 
     #[test]

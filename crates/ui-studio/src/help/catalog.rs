@@ -18,6 +18,7 @@ const FILES: &[&str] = &[
     include_str!("../../../../docs/help/device-chain.toml"),
     include_str!("../../../../docs/help/filter.toml"),
     include_str!("../../../../docs/help/macro-osc.toml"),
+    include_str!("../../../../docs/help/texture.toml"),
     include_str!("../../../../docs/help/telemetry.toml"),
     include_str!("../../../../docs/help/audio-devices.toml"),
     include_str!("../../../../docs/help/midi-monitor.toml"),

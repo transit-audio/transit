@@ -1,0 +1,15 @@
+{
+  "plugin": "texture",
+  "version": 1,
+  "params": {
+    "quality": 0.0,
+    "size": 100.0,
+    "size_random": 20.0,
+    "time": 50.0,
+    "shape": 50.0,
+    "density": 25.0,
+    "feedback": 45.0,
+    "dry_wet": 40.0,
+    "reverb": 15.0
+  }
+}

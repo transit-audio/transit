@@ -54,6 +54,9 @@ pub static FACTORY: &[(&str, &str, &str)] = factory![
     "filter" / "Pluck",
     "filter" / "Wah",
     "filter" / "Paraphonic Brass",
+    "texture" / "Granular Cloud",
+    "texture" / "Frozen Pad",
+    "texture" / "Tape Delay",
 ];
 
 /// The factory presets of one plug-in, in table order.

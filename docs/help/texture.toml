@@ -1,0 +1,109 @@
+# The Texture's panel (the built-in insert effect, #241, ADR 0033).
+area = "texture"
+title = "Texture"
+link = "user-guide.md#texture"
+
+[[entry]]
+id = "texture.time"
+name = "Time"
+text = "Where in the recording a grain starts: at 0% the newest audio, at 100% the oldest the buffer holds. In the delay mode (Size at the top) it sets the delay time; frozen there, it picks the slice that plays."
+
+[[entry]]
+id = "texture.size"
+name = "Size"
+text = "A grain's length: shortest (a few milliseconds) a third of the way up, longer toward the top, up to about four seconds; below a third the grains play backward, longer toward 0%. At the very top the Texture turns into a tape delay, the grains fading out and the echoes in."
+
+[[entry]]
+id = "texture.shape"
+name = "Shape"
+text = "The grain's envelope, from a sharp click through a smooth bell to a slow swell; in the delay mode, the envelope of each echo."
+
+[[entry]]
+id = "texture.pitch"
+name = "Pitch"
+text = "Transposes the grains (or the delay's echoes) up to two octaves either way, in semitones. The pitch holds at every session rate."
+
+[[entry]]
+id = "texture.random"
+name = "Random"
+text = "How much the knob above wanders on its own, as the module's attenuverter does with nothing patched: turning right adds smooth random movement (or a new value per grain), turning left occasional jumps. At the center the knob stays where you set it; in the delay mode, Size's Random sets the echoes' bandwidth instead."
+
+[[entry]]
+id = "texture.density"
+name = "Density"
+text = "How often grains start: left of center at a steady rate, right of center at random, faster toward either end, with none at the center (then only Seed starts them). In the delay mode it sets how the echoes divide the seed clock."
+
+[[entry]]
+id = "texture.feedback"
+name = "Feedback"
+text = "How much of the output goes back into the recording, for grains of grains or repeating echoes."
+
+[[entry]]
+id = "texture.dry_wet"
+name = "Dry/Wet"
+text = "The balance of the input and the grains (or echoes). At 0% only the input passes, delayed by the device's latency, which delay compensation makes up for."
+
+[[entry]]
+id = "texture.reverb"
+name = "Reverb"
+text = "The module's reverb after everything else: more of it, and a longer tail, as it turns up."
+
+[[entry]]
+id = "texture.freeze"
+name = "Freeze"
+text = "Stops recording, so the grains keep playing the audio already in the buffer. In the delay mode the frozen buffer is cut into slices that Time picks from."
+
+[[entry]]
+id = "texture.seed"
+name = "Seed"
+text = "Press to start a grain (with Density at the center, one per press); hold to keep grains coming. In the delay mode, tap it twice or more to set the delay clock."
+
+[[entry]]
+id = "texture.seed_latch"
+name = "Latch"
+text = "Holds Seed down for you, so grains flow continuously at the rate Density sets (the module's long press). On by default."
+
+[[entry]]
+id = "texture.trigger"
+name = "Trigger"
+text = "The seed input's gate, for automation: each rise starts a grain or, with Latch on, clocks the grains and the delay. It is heard only when Trig In is on."
+
+[[entry]]
+id = "texture.trigger_input"
+name = "Trig In"
+text = "Treats the seed input as patched, as a cable in the module's seed jack would: Trigger's gates then seed the grains, and with Latch on they become the clock that Density divides."
+
+[[entry]]
+id = "texture.quality"
+name = "Quality"
+text = "The buffer's recording quality, each at the module's own rate: Digital (16-bit at 48 kHz, 4 seconds at the default Length), Vintage Digital (12-bit at 32 kHz, 8 seconds), Clean Tape (12-bit grains at 24 kHz, about 10.7 seconds) and Dirty Tape (8-bit at 24 kHz with wow and flutter, 16 seconds). Changing it fades the output out, clears the recording and fades back in."
+
+[[entry]]
+id = "texture.buffer"
+name = "Length"
+text = "The buffer's memory, as seconds of the Digital quality: 4 s is the module's, up to 8 s; the other qualities hold proportionally more. Changing it rebuilds the Texture, which starts over from silence after a short fade."
+
+[[entry]]
+id = "texture.mono_input"
+name = "Mono In"
+text = "Records the left input only, in mono, which doubles the time the buffer holds (the module does this when only its left input is patched)."
+
+[[entry]]
+id = "texture.mono_grains"
+name = "Mono Grains"
+text = "Plays one grain at a time, each cutting off the last, instead of up to 32 overlapping (an advanced setting of the module)."
+
+[[entry]]
+id = "texture.input_gain"
+name = "Input Gain"
+text = "Auto lets the module's input stage learn the input's level over its first seconds and keep it where the processor expects it, as the module does. Manual sets the gain with Level instead, for material that is already leveled."
+
+[[entry]]
+id = "texture.input_level"
+name = "Input Level"
+text = "The input gain in Manual, 0 to 32 dB; at 0 dB the input passes at unity, clipped at full scale (softly on the tape qualities)."
+
+[[entry]]
+id = "texture.credits"
+name = "Credits"
+text = "The Texture is a port of Émilie Gillet's open-source texture synthesizer firmware (MIT license), checked bit for bit against her code. The notices are in Help > About transit."

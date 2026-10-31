@@ -40,11 +40,12 @@ and the stmlib helpers it uses, written by transit from her C++ with no third-pa
 between. Her MIT notices are in `crates/granular/LICENSE-THIRD-PARTY` (provenance in
 `crates/granular/VENDOR.md`).
 
-The texture processor (`crates/texture`, #241; not yet linked into the app) is a Rust port of Émilie
-Gillet's texture synthesizer firmware (`beads/dsp` and `beads/gain_control.cc` in `eurorack`) and
-the stmlib helpers it uses, written by transit from her C++ with no third-party Rust code in between.
-Her MIT notices are in `crates/texture/LICENSE-THIRD-PARTY` (provenance in
-`crates/texture/VENDOR.md`); the device that plays it credits her in the app (#241 slice 2).
+The texture processor (`crates/texture`, #241; linked into the app through `transit-dsp` as the
+Texture insert effect) is a Rust port of Émilie Gillet's texture synthesizer firmware (`beads/dsp`
+and `beads/gain_control.cc` in `eurorack`) and the stmlib helpers it uses, written by transit from
+her C++ with no third-party Rust code in between. Her MIT notices are in
+`crates/texture/LICENSE-THIRD-PARTY` (provenance in `crates/texture/VENDOR.md`); the Texture's panel,
+its help entry and Help > About transit credit her, and the About window shows the notices.
 
 | Path | Author | Source | License |
 |---|---|---|---|

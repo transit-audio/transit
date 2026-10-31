@@ -14,10 +14,10 @@ const REPO_LINK: &str = "github.com/transit-audio/transit";
 const REPO_URL: &str = "https://github.com/transit-audio/transit";
 const LICENSES: &str = "MIT OR Apache-2.0";
 /// The ported DSP the app ships, credited by name (ADR 0033).
-pub const THIRD_PARTY: &str =
-    "Macro Oscillator: a port of Émilie Gillet's macro oscillator firmware and stmlib (MIT), by way of Oliver Rockstedt's Rust port (MIT)";
+pub const THIRD_PARTY: &str = "Macro Oscillator: a port of Émilie Gillet's macro oscillator firmware and stmlib (MIT), by way of Oliver Rockstedt's Rust port (MIT)\nTexture: a port of Émilie Gillet's texture synthesizer firmware and stmlib (MIT)";
 /// Their license notices, verbatim.
-pub const THIRD_PARTY_NOTICES: &str = include_str!("../../macro-osc/LICENSE-THIRD-PARTY");
+pub const THIRD_PARTY_NOTICES: &str =
+    concat!(include_str!("../../macro-osc/LICENSE-THIRD-PARTY"), "\n\n", include_str!("../../texture/LICENSE-THIRD-PARTY"));
 /// Wordmark width in points.
 const WORDMARK_W: f32 = 260.0;
 

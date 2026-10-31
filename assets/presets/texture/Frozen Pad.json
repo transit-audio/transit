@@ -1,0 +1,16 @@
+{
+  "plugin": "texture",
+  "version": 1,
+  "params": {
+    "freeze": 1.0,
+    "time": 50.0,
+    "time_random": 60.0,
+    "size": 78.0,
+    "shape": 85.0,
+    "pitch_random": 15.0,
+    "density": 88.0,
+    "feedback": 0.0,
+    "dry_wet": 100.0,
+    "reverb": 60.0
+  }
+}
