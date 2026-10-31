@@ -632,6 +632,12 @@ pub fn plugin_info(id: &str) -> Option<&'static PluginInfo> {
     plugins::REGISTRY.iter().copied().find(|i| i.id == id)
 }
 
+/// Whether the plugin `id` asks for a sample tap ([`Plugin::wants_sample_tap`]) without making an
+/// instance, for the plan's byte count. A test keeps it equal to what every registered plugin says.
+pub fn wants_sample_tap(id: &str) -> bool {
+    id == plugins::tuner::TUNER_INFO.id
+}
+
 /// Whether a plugin makes sound instead of processing its input (it ignores the input).
 pub fn is_generator(id: &str) -> bool {
     id == "signal_generator"

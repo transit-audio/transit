@@ -325,8 +325,8 @@ fn measure(
             let line = mul(mul(ch, add(key_cap_of(t, ch), block)?)?, size_of::<f32>())?;
             bytes = add(bytes, mul(mul(keyed, 2)?, line)?)?;
         }
-        // A sample ring for each Tuner.
-        let tuners = t.mixer.inserts.iter().flatten().filter(|i| i.plugin == transit_dsp::plugins::tuner::TUNER_INFO.id).count();
+        // A sample ring for each insert that asks for one (the Tuner).
+        let tuners = t.mixer.inserts.iter().flatten().filter(|i| transit_dsp::wants_sample_tap(&i.plugin)).count();
         bytes = add(bytes, mul(tuners, SampleTap::BYTES)?)?;
         // A scope ring for each insert and the instrument.
         bytes = add(bytes, mul(add(t.mixer.inserts.iter().flatten().count(), usize::from(t.instrument.is_some()))?, ScopeTap::BYTES)?)?;
