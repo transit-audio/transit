@@ -1,5 +1,5 @@
-//! The Texture's rate edges (#241): streaming sample-rate converters between the session rate and a
-//! quality's codec rate, from the windowed-sinc family of the offline resampler
+//! The rate edges of the firmware-exact devices (the Texture, #241; the Time Stretcher, #199):
+//! streaming sample-rate converters between the session rate and a firmware's codec rate, from the windowed-sinc family of the offline resampler
 //! ([`crate::offline::resample`]: a Kaiser window with beta 9 over 32 zero crossings each side).
 //!
 //! **Timing is exact and rational.** With `g = gcd(from, to)`, one input sample lasts `to / g` ticks
@@ -43,7 +43,7 @@ const LENGTH_CUTOFF: f64 = 0.94;
 /// session rate) reads the kernel table per output sample instead, to the same values.
 const MAX_ROWS: usize = 1 << 17;
 /// Frames a firmware block can push ahead of what the output reads (the largest codec block).
-const AHEAD: usize = transit_texture::MAX_BLOCK_SIZE;
+const AHEAD: usize = super::codec_path::MAX_BLOCK_SIZE;
 
 /// The sinc `sinc(πu)` for `u` in zero crossings and the Kaiser window `w(x)` for `x` in `[0, 1]`,
 /// tabulated.

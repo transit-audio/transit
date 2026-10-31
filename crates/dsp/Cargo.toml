@@ -19,6 +19,8 @@ rustfft.workspace = true
 transit-macro-osc.workspace = true
 # The Texture insert (ADR 0033, #241): a same-layer (L1) dependency.
 transit-texture.workspace = true
+# The Time Stretcher insert (ADR 0033, #199): a same-layer (L1) dependency.
+transit-granular.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

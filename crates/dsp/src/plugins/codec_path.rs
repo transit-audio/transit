@@ -1,5 +1,6 @@
-//! The Texture's signal path at one codec rate (#241): the session's frames go down to the
-//! quality's codec rate, gather into the firmware's blocks, and come back up.
+//! A firmware's signal path at its codec rate (the Texture's per quality, #241; the Time
+//! Stretcher's at 32 kHz, #199): the session's frames go down to the codec rate, gather into the
+//! firmware's blocks, and come back up.
 //!
 //! ```text
 //! session rate ── down converter ── codec rate ── block of B frames ── firmware ── up converter ── session rate
@@ -10,7 +11,7 @@
 //! (`pad` ticks) so the whole delay is a whole number of session samples, which
 //! [`Path::latency`] reports to delay compensation and the tests measure. At equal rates (a 48 kHz
 //! session with the digital or clean tape quality) both converters are exact copies and the
-//! latency is `B − 1` = 11 frames.
+//! latency is `B − 1` frames (11 for the Texture's 12-frame blocks).
 //!
 //! **Why the up converter never waits.** With `H` the session rate, `I` the codec rate and
 //! `g = gcd(H, I)`, a session sample lasts `I/g` ticks and a codec frame `H/g`. Codec frame `k` is
@@ -21,7 +22,10 @@
 //! (the tests hold it at zero for every quality and rate).
 
 use super::resample::{Converter, Kernel, half_taps, ticks};
-use transit_texture::{MAX_BLOCK_SIZE, Media};
+
+/// The longest firmware block a path gathers, frames (the Time Stretcher's 32; the Texture's are
+/// 12, 8 and 6).
+pub(crate) const MAX_BLOCK_SIZE: usize = 32;
 
 pub(crate) struct Path {
     /// The codec rate and its block.
@@ -36,10 +40,10 @@ pub(crate) struct Path {
 }
 
 impl Path {
-    /// The path of `media`'s codec rate in a session at `host` Hz.
-    pub(crate) fn new(kernel: &Kernel, host: u32, media: Media) -> Self {
-        let rate = media.sample_rate();
-        let block = media.block_size().clamp(1, MAX_BLOCK_SIZE);
+    /// The path of a firmware running at `rate` Hz in blocks of `block` frames (at most
+    /// [`MAX_BLOCK_SIZE`]), in a session at `host` Hz.
+    pub(crate) fn new(kernel: &Kernel, host: u32, rate: u32, block: usize) -> Self {
+        let block = block.clamp(1, MAX_BLOCK_SIZE);
         let b = i64::try_from(block).unwrap_or(1) - 1;
         let (down, up, latency) = if host == rate {
             (Converter::new(kernel, host, rate, 0), Converter::new(kernel, rate, host, b), block - 1)

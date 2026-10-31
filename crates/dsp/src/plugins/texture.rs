@@ -248,7 +248,8 @@ impl TextureFx {
 
     fn make_paths(&mut self) {
         let host = self.sr.round() as u32;
-        self.paths = [Media::DirtyTape, Media::VintageDigital, Media::Digital].map(|m| Path::new(&self.kernel, host, m)).into();
+        self.paths =
+            [Media::DirtyTape, Media::VintageDigital, Media::Digital].map(|m| Path::new(&self.kernel, host, m.sample_rate(), m.block_size())).into();
     }
 
     /// The setup the parameter values ask for.

@@ -103,7 +103,7 @@ fn each_path_delays_an_impulse_by_its_reported_latency() {
     let kernel = Kernel::new();
     for sr in RATES.into_iter().chain([22_050, 176_400, 192_000, 44_056]) {
         for media in [Media::DirtyTape, Media::VintageDigital, Media::Digital] {
-            let mut path = Path::new(&kernel, sr, media);
+            let mut path = Path::new(&kernel, sr, media.sample_rate(), media.block_size());
             let at = 3000;
             let y: Vec<f32> =
                 (0..9000).map(|n| path.tick(&kernel, if n == at { [0.5, -0.5] } else { [0.0; 2] }, &mut |i, o| o.copy_from_slice(i))[0]).collect();

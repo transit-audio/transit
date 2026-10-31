@@ -16,6 +16,7 @@ pub mod reverb;
 pub mod sampler;
 pub mod strip;
 pub mod texture;
+pub mod time_stretcher;
 pub mod utility;
 
 use crate::{Plugin, PluginInfo};
@@ -54,6 +55,7 @@ registry! {
     harmonic::RECT_INFO => harmonic::Rectifier::new(),
     pitch::PITCH_INFO => pitch::PitchShifter::new(),
     texture::TEXTURE_INFO => texture::TextureFx::new(),
+    time_stretcher::TIME_STRETCHER_INFO => time_stretcher::TimeStretcher::new(),
     utility::SHIFT_INFO => utility::TimeShift::new(),
     utility::GAIN_INFO => utility::Gain::new(),
     utility::TRIM_INFO => utility::Trim::new(),

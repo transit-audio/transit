@@ -4222,6 +4222,7 @@ dependencies = [
  "proptest",
  "rustfft",
  "serde",
+ "transit-granular",
  "transit-macro-osc",
  "transit-rt",
  "transit-texture",
