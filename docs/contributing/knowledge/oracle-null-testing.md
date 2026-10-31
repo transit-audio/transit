@@ -142,6 +142,16 @@ for bit on its first full run at all eight qualities, its synth and its input st
   stretch the delay clock to 13 times the buffer: the firmware's frozen slices then start before
   the buffer. The oracle defines that case (and a division by zero at audio-rate SEED clocks) on a
   build-time copy, and the port follows it.
+- **"Bit-exact" names its reference.** The null is against the desktop reference as patched
+  (source-order arguments, as GCC evaluates them on ARM; libstdc++'s tie order; flush-to-zero on),
+  not measured on the module. The firmware sets FPSCR.FZ in its startup code, but the audio
+  callback runs in an interrupt handler whose floating-point mode comes from FPDSCR, which the
+  firmware never writes, so the module's own flush state is not established. These pins are our
+  reading of the module's toolchain; say so wherever the claim is made.
+- **Long nulls run in full only on request.** The texture floor and sweep nulls cost about ten
+  minutes; every push runs every 10th sweep point per quality (a fixed subset, same order), and
+  `TRANSIT_FULL_ORACLE=1` runs them all (the release chain sets it). The rule lives in the oracle
+  crate's `subset` module so any family can adopt it.
 - **Fresh buffers read silence.** A deep TIME position reads nothing until the recording reaches
   it, so a sweep point lasts until its grains or taps read recorded audio; the few points silent by
   design (taps-only density) are listed and asserted both ways.

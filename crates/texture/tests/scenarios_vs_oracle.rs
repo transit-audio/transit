@@ -219,7 +219,16 @@ fn the_shortest_and_the_longest_buffers() {
 fn the_undefined_slices_are_defined_as_the_oracle_defines_them() {
     let session = Session::lock();
     for buffer in [BufferSize::MIN, BufferSize::MAX] {
-        for (media, mono) in [(Media::CleanTape, true), (Media::Digital, false), (Media::DirtyTape, true)] {
+        for (media, mono) in [
+            (Media::Digital, false),
+            (Media::Digital, true),
+            (Media::VintageDigital, false),
+            (Media::VintageDigital, true),
+            (Media::CleanTape, false),
+            (Media::CleanTape, true),
+            (Media::DirtyTape, false),
+            (Media::DirtyTape, true),
+        ] {
             let (mut port, mut oracle) = pair(&session, buffer, media, mono, 15);
             let block = media.block_size();
             let rate = media.sample_rate() as usize;
@@ -243,6 +252,56 @@ fn the_undefined_slices_are_defined_as_the_oracle_defines_them() {
                 })
                 .collect();
             run(&format!("undefined slices, {buffer:?} {media:?} mono {mono}"), &mut port, &mut oracle, &session, &blocks);
+        }
+    }
+}
+
+/// Reconfigures while the buffer is frozen: a mono toggle, then a quality change (and back), in the
+/// granular mode and in the delay mode (SIZE 1), at both buffer sizes. Each segment lasts 1.5 s at
+/// its quality's rate; the freeze starts at 3 s and the first change comes at 4.5 s.
+#[test]
+fn reconfiguring_while_frozen() {
+    let session = Session::lock();
+    for buffer in [BufferSize::FIRMWARE, BufferSize::MAX] {
+        for delay_mode in [false, true] {
+            for (start, mono) in [(Media::Digital, false), (Media::CleanTape, true), (Media::VintageDigital, false)] {
+                let (mut port, mut oracle) = pair(&session, buffer, start, mono, 17);
+                let other = if start == Media::DirtyTape { Media::Digital } else { Media::DirtyTape };
+                // (media, mono) in force from each segment on: filled (2 x), frozen, mono toggled,
+                // quality changed, quality restored.
+                let segments = [
+                    (start, mono, false),
+                    (start, mono, false),
+                    (start, mono, true),
+                    (start, !mono, true),
+                    (other, !mono, true),
+                    (start, mono, true),
+                ];
+                let mut blocks = Vec::new();
+                for (k, &(media, mono, freeze)) in segments.iter().enumerate() {
+                    let block = media.block_size();
+                    let count = media.sample_rate() as usize * 3 / 2 / block;
+                    for b in 0..count {
+                        let mut c = near();
+                        if delay_mode {
+                            c.size.base = 1.0;
+                        }
+                        let mut step = Step::new(c);
+                        step.freeze = freeze;
+                        if b == 0 && k >= 3 {
+                            step.configure = Some((media, mono));
+                        }
+                        blocks.push((block, step));
+                    }
+                }
+                run(
+                    &format!("reconfiguring while frozen, {buffer:?} {start:?} mono {mono} delay mode {delay_mode}"),
+                    &mut port,
+                    &mut oracle,
+                    &session,
+                    &blocks,
+                );
+            }
         }
     }
 }
