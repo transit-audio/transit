@@ -112,7 +112,8 @@ pub fn fade(ch: &mut [Vec<f32>], fade_in: usize, fade_out: usize, shape: FadeSha
 // ---------------------------------------------------------------------------------------------
 // Resampling (Kaiser-windowed sinc)
 
-fn bessel_i0(x: f64) -> f64 {
+/// The zeroth-order modified Bessel function of the first kind (the Kaiser window's).
+pub(crate) fn bessel_i0(x: f64) -> f64 {
     let mut sum = 1.0;
     let mut term = 1.0;
     let y = x * x / 4.0;
@@ -126,8 +127,11 @@ fn bessel_i0(x: f64) -> f64 {
     sum
 }
 
-const SINC_ZC: f64 = 32.0;
+/// The windowed-sinc kernel's zero crossings each side, its table steps per crossing and its
+/// Kaiser window's beta (shared with the Texture's realtime converters, #241).
+pub(crate) const SINC_ZC: f64 = 32.0;
 const SINC_RES: usize = 512;
+pub(crate) const SINC_BETA: f64 = 9.0;
 
 /// Precomputed one-sided windowed-sinc kernel for a given cutoff (fraction of input Nyquist).
 struct SincTable {
@@ -140,7 +144,7 @@ impl SincTable {
         let cutoff = cutoff.clamp(0.01, 1.0);
         let half_width = SINC_ZC / cutoff;
         let n = (half_width * SINC_RES as f64).ceil() as usize + 2;
-        let beta = 9.0;
+        let beta = SINC_BETA;
         let i0b = bessel_i0(beta);
         let table = (0..n)
             .map(|i| {

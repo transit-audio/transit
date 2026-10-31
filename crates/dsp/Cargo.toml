@@ -17,9 +17,13 @@ log.workspace = true
 rustfft.workspace = true
 # The Macro Oscillator instrument (ADR 0033): a same-layer (L1) dependency.
 transit-macro-osc.workspace = true
+# The Texture insert (ADR 0033, #241): a same-layer (L1) dependency.
+transit-texture.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
+# The Texture's allocation probe (`tests/texture_alloc.rs`) counts heap use on the test thread.
+transit-rt = { workspace = true, features = ["testing"] }
 
 [lints]
 workspace = true

@@ -4223,6 +4223,8 @@ dependencies = [
  "rustfft",
  "serde",
  "transit-macro-osc",
+ "transit-rt",
+ "transit-texture",
 ]
 
 [[package]]
