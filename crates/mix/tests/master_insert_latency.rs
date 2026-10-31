@@ -55,10 +55,11 @@ fn peak_at(ch: &[f32]) -> usize {
 fn a_master_insert_with_lookahead_does_not_delay_the_bounce() {
     let control = render_range(&session(None), Range::new(0, 12_000), 512);
     assert_eq!(peak_at(&control[0]), AT);
-    let mut maximizer = Insert::new("maximizer");
-    maximizer.params.insert("threshold".into(), -7.0);
-    maximizer.params.insert("ceiling".into(), -1.0);
-    let s = session(Some(maximizer));
+    let mut limiter = Insert::new("compressor");
+    limiter.params.insert("lookahead".into(), 5.0);
+    limiter.params.insert("limiter".into(), 1.0);
+    limiter.params.insert("threshold".into(), -7.0);
+    let s = session(Some(limiter));
     let out = render_range(&s, Range::new(0, 12_000), 512);
     assert_eq!(out[0].len(), 12_000);
     assert_eq!(peak_at(&out[0]), AT, "the limited impulse lines up with the mix without the master insert");
@@ -66,7 +67,7 @@ fn a_master_insert_with_lookahead_does_not_delay_the_bounce() {
     let mut probe = planned_engine(&s);
     let mut tmp = vec![vec![0.0f32; 512]; 2];
     probe.render_active(0, 512, &mut tmp);
-    assert!(probe.latency > 0, "the Maximizer reports a lookahead");
+    assert!(probe.latency > 0, "the limiter reports its lookahead");
     // With Delay Compensation off nothing is compensated (and nothing is dropped).
     let mut off = s.clone();
     off.edit.delay_compensation = false;

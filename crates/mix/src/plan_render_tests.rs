@@ -135,9 +135,9 @@ fn instances_made(mut comp: PlanCompiler, s: &Session) -> usize {
 #[test]
 fn an_inactive_tracks_plugins_are_made_by_a_live_compile_but_not_an_offline_one() {
     let (mut s, a, b) = audio_session();
-    s.track_mut(a).unwrap().mixer.inserts[0] = Some(builtin("maximizer"));
-    s.track_mut(b).unwrap().mixer.inserts[0] = Some(builtin("maximizer"));
-    s.track_mut(b).unwrap().mixer.inserts[1] = Some(builtin("maximizer"));
+    s.track_mut(a).unwrap().mixer.inserts[0] = Some(latent());
+    s.track_mut(b).unwrap().mixer.inserts[0] = Some(latent());
+    s.track_mut(b).unwrap().mixer.inserts[1] = Some(latent());
     let live = || PlanCompiler::new(target(), PlanLimits::default());
     assert_eq!(instances_made(live(), &s), 3);
     assert_eq!(instances_made(live().skipping_inactive_instances(), &s), 3, "active tracks keep every instance");

@@ -371,8 +371,17 @@ mod tests {
         let mut s = chain_session();
         let bare = note_track(&mut s, false);
         let master = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
-        s.track_mut(master).unwrap().mixer.inserts[0] = Some(Insert::new("maximizer"));
-        let i = transit_dsp::create("maximizer").unwrap().latency();
+        s.track_mut(master).unwrap().mixer.inserts[0] = Some({
+            let mut ins = Insert::new("compressor");
+            ins.params.insert("lookahead".into(), 5.0);
+            ins
+        });
+        let i = {
+            let mut p = transit_dsp::create("compressor").unwrap();
+            p.set_param("lookahead", 5.0);
+            p.prepare(48_000.0, 512, 2);
+            p.latency()
+        };
         assert!(i > 0);
         let r = chain(&s, None);
         assert_eq!(r.latency, i, "A is the master insert's latency");

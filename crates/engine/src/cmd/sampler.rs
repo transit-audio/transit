@@ -283,7 +283,7 @@ mod tests {
         let r = e.execute("mix.sampler_clear", &json!({"track": t.0})).unwrap();
         assert!(r["cleared"].is_u64());
         assert_eq!(peak(&render(&e, 1)[0]), 0.0);
-        e.execute("mix.instrument", &json!({"track": t.0, "plugin": "drum_synth"})).unwrap();
+        e.execute("mix.instrument", &json!({"track": t.0, "plugin": "macro_oscillator"})).unwrap();
         assert!(e.execute("mix.sampler_clear", &json!({"track": t.0})).is_err(), "not a sampler");
         let _ = std::fs::remove_dir_all(d);
     }

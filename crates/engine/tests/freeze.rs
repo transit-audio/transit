@@ -17,7 +17,7 @@ fn engine() -> (Engine, TrackId) {
     let r = e.execute("midi.new_clip", &json!({"track": track, "start": 12_000, "length": 48_000})).unwrap();
     let clip = r["clip"].as_u64().unwrap();
     e.execute("event.midi_note", &json!({"clip": clip, "pitch": 60, "start_ticks": 0, "length_ticks": 960, "velocity": 100})).unwrap();
-    e.execute("mix.insert", &json!({"track": track, "slot": 0, "plugin": "maximizer"})).unwrap();
+    e.execute("mix.insert", &json!({"track": track, "slot": 0, "plugin": "compressor", "params": {"lookahead": 5.0}})).unwrap();
     e.execute("mix.volume", &json!({"tracks": [track], "db": -6.0})).unwrap();
     (e, TrackId(track))
 }
@@ -65,7 +65,7 @@ fn a_freeze_is_the_pre_fader_render_a_bounce_in_place_makes() {
     e.execute("track.freeze", &json!({"tracks": [t.0]})).unwrap();
     let f = keys(&e, t).freeze.unwrap();
     assert_eq!(source_audio(&e, f.source), bounced, "bit for bit, with the fader out of it");
-    assert!(f.latency > 0, "the maximizer's latency is kept: {f:?}");
+    assert!(f.latency > 0, "the compressor's lookahead latency is kept: {f:?}");
     assert_eq!(f.hash, keys(&e, t).freeze_hash());
     assert_eq!((f.start, f.length), (0, 48_000 + 12_000 + 96_000));
 }
@@ -74,7 +74,7 @@ fn a_freeze_is_the_pre_fader_render_a_bounce_in_place_makes() {
 fn a_frozen_track_plays_the_render_with_no_instances_and_unfreeze_brings_them_back() {
     let (mut e, t) = engine();
     let live = mix(&e);
-    assert_eq!(instances_made(e.session()), 2, "the synth and the maximizer");
+    assert_eq!(instances_made(e.session()), 2, "the synth and the compressor");
     e.execute("track.freeze", &json!({"tracks": [t.0]})).unwrap();
     assert_eq!(instances_made(e.session()), 0);
     let frozen = mix(&e);
@@ -101,7 +101,7 @@ fn an_edit_to_what_was_rendered_is_refused_and_changes_nothing() {
     let clip = keys(&e, t).clips()[0].id.0;
     let refused = [
         ("event.midi_note", json!({"clip": clip, "pitch": 64, "start_ticks": 0, "length_ticks": 960})),
-        ("mix.insert_param", json!({"track": t.0, "slot": 0, "param": "ceiling", "value": -3.0})),
+        ("mix.insert_param", json!({"track": t.0, "slot": 0, "param": "threshold", "value": -3.0})),
         ("mix.insert_remove", json!({"track": t.0, "slot": 0})),
         ("mix.insert", json!({"track": t.0, "slot": 1, "plugin": "compressor"})),
         ("edit.move_clips", json!({"clip": clip, "by": 480})),
@@ -229,7 +229,7 @@ fn a_frozen_track_with_latency_keys_another_track_as_it_did_live() {
         let kick = synth(&mut e, "Kick", 36, 127);
         let pad = synth(&mut e, "Pad", 60, 100);
         clamp(&mut e, pad, 0);
-        e.execute("mix.insert", &json!({"track": kick.0, "slot": 0, "plugin": "maximizer"})).unwrap();
+        e.execute("mix.insert", &json!({"track": kick.0, "slot": 0, "plugin": "compressor", "params": {"lookahead": 5.0}})).unwrap();
         e.execute("mix.insert_key", &json!({"track": pad.0, "slot": 0, "from": {"track": kick.0}, "tap": tap})).unwrap();
         let live = mix(&e);
         e.execute("track.freeze", &json!({"tracks": [kick.0]})).unwrap();

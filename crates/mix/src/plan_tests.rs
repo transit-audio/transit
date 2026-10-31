@@ -245,6 +245,13 @@ pub(super) fn builtin(id: &str) -> Insert {
     ins
 }
 
+/// A built-in insert that reports latency: the Compressor with 5 ms of lookahead.
+pub(super) fn latent() -> Insert {
+    let mut ins = builtin("compressor");
+    ins.params.insert("lookahead".into(), 5.0);
+    ins
+}
+
 /// An active plan with two reused inserts on track `a`, and a structural plan that keeps both
 /// and adds a fresh third (so it has slot moves, a strip move, and a fresh slot).
 pub(super) fn rig_with_pending() -> (Rig, Session, PlanEnvelope) {

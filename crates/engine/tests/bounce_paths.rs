@@ -83,7 +83,9 @@ impl Rig {
             tr.mixer.pan = vec![-1.0, 1.0];
             tr.mixer.output = out;
             if latent {
-                tr.mixer.inserts[0] = Some(Insert::new("maximizer"));
+                let mut lookahead = Insert::new("compressor");
+                lookahead.params.insert("lookahead".into(), 5.0);
+                tr.mixer.inserts[0] = Some(lookahead);
             }
             if name == "Cue"
                 && let Some(target) = self.cue_send.clone()

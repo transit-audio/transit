@@ -157,11 +157,11 @@ fn the_editor_button_opens_a_window_for_a_built_in_instrument_and_effect() {
 fn dragging_a_slider_writes_the_value_in_one_undo_step() {
     let mut t = T::new();
     let tr = t.track("instrument");
-    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "drum_synth"})).unwrap();
+    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "sampler"})).unwrap();
     t.frames(4);
     t.open_editor(0);
-    let id = "snare_decay";
-    let p = info("drum_synth").param(id).unwrap();
+    let id = "velocity";
+    let p = info("sampler").param(id).unwrap();
     let before = t.undo_len();
     let r = t.row(tr, id);
     let from = mid(r.control);
@@ -178,13 +178,13 @@ fn dragging_a_slider_writes_the_value_in_one_undo_step() {
 fn double_clicking_a_control_resets_it() {
     let mut t = T::new();
     let tr = t.track("instrument");
-    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "drum_synth"})).unwrap();
+    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "sampler"})).unwrap();
     t.frames(4);
-    t.app.run("mix.instrument_param", json!({"track": tr.0, "param": "snare_decay", "value": 100.0})).unwrap();
+    t.app.run("mix.instrument_param", json!({"track": tr.0, "param": "velocity", "value": 10.0})).unwrap();
     t.frames(3);
     t.open_editor(0);
-    t.click(mid(t.row(tr, "snare_decay").control), 2);
-    assert_eq!(t.param(tr, None, "snare_decay"), Some(default_of("drum_synth", "snare_decay")));
+    t.click(mid(t.row(tr, "velocity").control), 2);
+    assert_eq!(t.param(tr, None, "velocity"), Some(default_of("sampler", "velocity")));
 }
 
 #[test]
@@ -257,18 +257,6 @@ fn the_sampler_window_has_a_sample_picker_and_names_the_sample() {
     let s = t.window(tr).sample;
     assert!(s.starts_with("hit"), "the loaded sample is named: {s}");
     let _ = std::fs::remove_dir_all(dir);
-}
-
-#[test]
-fn the_drum_synth_lists_its_parameters_by_pad() {
-    let mut t = T::new();
-    let tr = t.track("instrument");
-    t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "drum_synth"})).unwrap();
-    t.frames(4);
-    t.open_editor(0);
-    let w = t.window(tr);
-    assert_eq!(w.groups, ["Output", "Kick", "Snare", "Closed Hat", "Open Hat", "Toms", "Cymbals"]);
-    assert_eq!(w.rows.len(), info("drum_synth").params.len());
 }
 
 #[test]

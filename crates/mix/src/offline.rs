@@ -331,11 +331,20 @@ mod tests {
         let cid = s.new_clip_id();
         let tr = s.track_mut(t).unwrap();
         tr.playlist_mut().unwrap().clips.push(Clip::audio(cid, "i", SourceId(900), 0, 0, 48_000));
-        tr.mixer.inserts[0] = Some(Insert::new("maximizer"));
+        tr.mixer.inserts[0] = Some({
+            let mut ins = Insert::new("compressor");
+            ins.params.insert("lookahead".into(), 5.0);
+            ins
+        });
         let mut send = transit_model::SendSlot::new(Route::Bus(bus));
         send.level_db = 0.0;
         tr.mixer.sends[0] = Some(send);
-        let latency = transit_dsp::create("maximizer").unwrap().latency();
+        let latency = {
+            let mut p = transit_dsp::create("compressor").unwrap();
+            p.set_param("lookahead", 5.0);
+            p.prepare(48_000.0, 512, 1);
+            p.latency()
+        };
         assert!(latency > 16);
         for source in [None, Some(bus)] {
             for block in [16, 100, 512] {

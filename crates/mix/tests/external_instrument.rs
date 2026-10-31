@@ -22,6 +22,13 @@ const LEN: usize = 8_192;
 /// The fake chain's latency in plan frames (the ADR's example; more than a block, not a multiple).
 const C: usize = 1061;
 
+/// A built-in insert that reports latency: the Compressor with 5 ms of lookahead.
+fn latent_insert() -> Insert {
+    let mut ins = Insert::new("compressor");
+    ins.params.insert("lookahead".into(), 5.0);
+    ins
+}
+
 fn session() -> Session {
     let mut s = Session::default();
     s.edit.delay_compensation = true;
@@ -151,8 +158,13 @@ fn an_insert_on_the_strip_adds_to_the_device_latency() {
     let mut s = session();
     click_track(&mut s);
     let synth = synth_track(&mut s, "In 1");
-    s.track_mut(synth).unwrap().mixer.inserts[0] = Some(Insert::new("maximizer"));
-    let i = transit_dsp::create("maximizer").unwrap().latency();
+    s.track_mut(synth).unwrap().mixer.inserts[0] = Some(latent_insert());
+    let i = {
+        let mut p = transit_dsp::create("compressor").unwrap();
+        p.set_param("lookahead", 5.0);
+        p.prepare(48_000.0, 512, 1);
+        p.latency()
+    };
     assert!(i > 0);
     let r = render(&s, true, &[]);
     assert_eq!(r.latency, C + i);

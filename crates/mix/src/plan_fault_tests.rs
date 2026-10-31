@@ -75,7 +75,7 @@ fn reclaiming_a_torn_envelope_pools_nothing_under_the_wrong_spec() {
     let mut rig = Rig::new();
     rig.publish(&s);
     rig.render(2);
-    s.track_mut(a).unwrap().mixer.inserts[0] = Some(builtin("chorus"));
+    s.track_mut(a).unwrap().mixer.inserts[0] = Some(builtin("filter"));
     let mut env = rig.compile(&s);
     FAULT_AT.set(4);
     let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| rig.eng.adopt_plan(&mut env)));
@@ -248,7 +248,7 @@ fn rich_torn(step: usize) -> (Vec<SlotBinding>, Vec<SlotBinding>, Vec<SlotBindin
     assert_eq!(rig.comp.pooled(), 1);
     // The torn plan: reuse the pooled gain, replace the reverb (displaced), keep the compressor,
     // swap the sampler's sample.
-    s2.track_mut(a).unwrap().mixer.inserts[0] = Some(builtin("chorus"));
+    s2.track_mut(a).unwrap().mixer.inserts[0] = Some(builtin("filter"));
     s2.track_mut(inst).unwrap().instrument.as_mut().unwrap().sample = Some(SourceId(6));
     let mut env = rig.compile(&s2);
     assert!(env.plan.attach.iter().any(|x| matches!(x, Attach::Sample { .. })));

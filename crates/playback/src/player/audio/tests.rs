@@ -1315,7 +1315,11 @@ fn external_midi_stamps_move_with_the_mixs_delay_compensation() {
         s.edit.delay_compensation = true;
         let t = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
         if latent {
-            s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::new("maximizer"));
+            s.track_mut(t).unwrap().mixer.inserts[0] = Some({
+                let mut ins = Insert::new("compressor");
+                ins.params.insert("lookahead".into(), 5.0);
+                ins
+            });
         }
         let (mut control, mut audio, _) = fixture_session(48_000, Arc::new(s));
         fill(&mut audio, &mut [0.0; 8]);
@@ -1332,9 +1336,14 @@ fn external_midi_stamps_move_with_the_mixs_delay_compensation() {
     let (zero, plain) = stamp(false);
     let (a, delayed) = stamp(true);
     assert_eq!(zero, 0);
-    let maximizer = transit_dsp::create("maximizer").unwrap().latency();
-    assert!(maximizer > 0);
-    assert_eq!(a, maximizer, "A is the plan's delay compensation");
+    let latency = {
+        let mut p = transit_dsp::create("compressor").unwrap();
+        p.set_param("lookahead", 5.0);
+        p.prepare(48_000.0, 512, 2);
+        p.latency()
+    };
+    assert!(latency > 0);
+    assert_eq!(a, latency, "A is the plan's delay compensation");
     assert_eq!(plain.ns_per_frame, delayed.ns_per_frame);
     assert_eq!(plain.host_ns, delayed.host_ns, "P(R) itself does not move");
     let (p, d) = (plain.host_for(false).unwrap(), delayed.host_for(false).unwrap());
@@ -1354,7 +1363,11 @@ fn an_external_instruments_notes_are_not_stamped_with_the_mixs_delay() {
         s.edit.delay_compensation = true;
         let a = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
         if latent {
-            s.track_mut(a).unwrap().mixer.inserts[0] = Some(Insert::new("maximizer"));
+            s.track_mut(a).unwrap().mixer.inserts[0] = Some({
+                let mut ins = Insert::new("compressor");
+                ins.params.insert("lookahead".into(), 5.0);
+                ins
+            });
         }
         let x = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Model D"));
         let tr = s.track_mut(x).unwrap();

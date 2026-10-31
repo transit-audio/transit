@@ -260,12 +260,14 @@ fn signal_generator_offline() {
 #[test]
 fn apply_plugin_compensates_latency() {
     let sr = 48_000.0;
-    let mut p = create("pitch_shifter").unwrap();
+    let mut p = create("compressor").unwrap();
+    assert!(p.set_param("lookahead", 5.0));
     let mut x = vec![vec![0.0f32; 10_000]];
     x[0][2000] = 1.0;
     offline::apply_plugin(&mut x, p.as_mut(), sr);
     let pos = x[0].iter().enumerate().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs())).unwrap().0;
     assert_eq!(pos, 2000);
+    assert!(p.latency() > 0, "the compressor's lookahead is reported as latency");
 
     let mut r = create("room_reverb").unwrap();
     let out = offline::apply_plugin_with_tail(&[vec![1.0; 100]], r.as_mut(), sr);

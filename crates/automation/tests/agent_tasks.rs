@@ -68,7 +68,7 @@ fn agent_builds_and_mixes_a_session() {
         json!({"calls": [
             {"command": "track.new", "params": {"kind": "aux", "format": "stereo", "name": "Delay"}},
             {"command": "track.input", "params": {"track": "Delay", "input": "DelayBus"}},
-            {"command": "mix.insert", "params": {"track": "Delay", "plugin": "mod_delay"}},
+            {"command": "mix.insert", "params": {"track": "Delay", "plugin": "texture"}},
             {"command": "mix.send", "params": {"track": "Lead", "slot": 1, "bus": "DelayBus", "level_db": -6}},
         ]}),
     );

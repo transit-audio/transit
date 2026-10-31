@@ -62,7 +62,52 @@ fn registry_ids_unique_and_creatable() {
         assert_eq!(plugin_info(info.id).unwrap().id, info.id);
     }
     assert!(create("nope").is_none());
-    assert!(plugins().len() >= 25);
+}
+
+/// The built-ins, exactly. The effects inherited from the SoundCraft fork are retired in stages
+/// (ADR 0040): twelve went in stage 1 and none may come back under their old ids.
+#[test]
+fn the_registry_lists_exactly_the_kept_built_ins() {
+    let mut ids: Vec<&str> = plugins().iter().map(|i| i.id).collect();
+    ids.sort_unstable();
+    let mut kept = [
+        "compressor",
+        "dc_offset_removal",
+        "dither",
+        "eq_1band",
+        "eq_7band",
+        "expander_gate",
+        "filter",
+        "gain",
+        "invert",
+        "macro_oscillator",
+        "plate_reverb",
+        "room_reverb",
+        "sampler",
+        "saturator",
+        "signal_generator",
+        "texture",
+        "time_stretcher",
+        "trim",
+    ];
+    kept.sort_unstable();
+    assert_eq!(ids, kept);
+    for retired in [
+        "pitch_shifter",
+        "drum_synth",
+        "channel_strip",
+        "maximizer",
+        "de_esser",
+        "rectifier",
+        "lofi",
+        "time_shift",
+        "mod_delay",
+        "chorus",
+        "flanger",
+        "phaser",
+    ] {
+        assert!(plugin_info(retired).is_none() && create(retired).is_none(), "{retired} is retired");
+    }
 }
 
 #[test]
@@ -205,14 +250,13 @@ fn eq_magnitude_at_center_matches_gain() {
 #[test]
 fn eq_switches_and_choices_apply_to_a_running_eq() {
     // (plugin, settings, the one switch or choice changed while running, test tone)
-    let cases: [(&str, &[(&str, f32)], (&str, f32), f32); 7] = [
+    let cases: [(&str, &[(&str, f32)], (&str, f32), f32); 6] = [
         ("eq_7band", &[("hpf_freq", 2000.0), ("hpf_slope", 3.0)], ("hpf_on", 1.0), 1000.0),
         ("eq_7band", &[("hpf_freq", 2000.0), ("hpf_slope", 3.0), ("hpf_on", 1.0)], ("hpf_on", 0.0), 1000.0),
         ("eq_7band", &[("hpf_freq", 2000.0), ("hpf_slope", 0.0), ("hpf_on", 1.0)], ("hpf_slope", 3.0), 1000.0),
         ("eq_7band", &[("lpf_freq", 2000.0), ("lpf_slope", 3.0)], ("lpf_on", 1.0), 4000.0),
         ("eq_7band", &[("lpf_freq", 2000.0), ("lpf_slope", 0.0), ("lpf_on", 1.0)], ("lpf_slope", 3.0), 4000.0),
         ("eq_1band", &[("freq", 1000.0)], ("type", 4.0), 10_000.0),
-        ("channel_strip", &[("hpf_freq", 2000.0)], ("hpf_on", 1.0), 1000.0),
     ];
     let mut stale = Vec::new();
     for (id, setup, (key, value), tone) in cases {
@@ -286,56 +330,6 @@ fn gate_closes_below_threshold() {
 }
 
 #[test]
-fn maximizer_respects_ceiling_and_reports_latency() {
-    let mut p = prepared("maximizer");
-    p.set_param("threshold", -12.0);
-    p.set_param("ceiling", -1.0);
-    let x = sine(220.0, 0.9, 48_000);
-    let out = run(p.as_mut(), &[x.clone(), x]);
-    assert!(peak(&out[0]) <= db_to_gain(-1.0) + 1e-5, "{}", peak(&out[0]));
-    assert!(p.latency() > 0 && p.latency() < 200);
-    assert!(p.gain_reduction_db() > 5.0);
-}
-
-#[test]
-fn de_esser_reduces_sibilance_only() {
-    let mut p = prepared("de_esser");
-    p.set_param("threshold", -40.0);
-    p.set_param("range", 20.0);
-    let hi = sine(8000.0, 0.5, 48_000);
-    let out = run(p.as_mut(), std::slice::from_ref(&hi));
-    assert!(gain_to_db(rms(&out[0][24_000..]) / rms(&hi[24_000..])) < -6.0);
-    p.reset();
-    let lo = sine(200.0, 0.005, 48_000);
-    let out = run(p.as_mut(), std::slice::from_ref(&lo));
-    assert!(gain_to_db(rms(&out[0][24_000..]) / rms(&lo[24_000..])).abs() < 0.5);
-}
-
-#[test]
-fn latency_reporting_aligns_pitch_shifter() {
-    let mut p = prepared("pitch_shifter");
-    let lat = p.latency();
-    assert!(lat > 0);
-    let mut x = vec![0.0f32; 8000];
-    x[1000] = 1.0;
-    let out = run(p.as_mut(), &[x]);
-    let pos = out[0].iter().enumerate().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs())).unwrap().0;
-    assert_eq!(pos, 1000 + lat);
-}
-
-#[test]
-fn pitch_shifter_moves_pitch() {
-    let mut p = prepared("pitch_shifter");
-    p.set_param("semitones", 12.0);
-    p.reset();
-    let out = run(p.as_mut(), &[sine(440.0, 0.5, 48_000)]);
-    let spec = transit_dsp::spectrum::magnitude_db(&out[0][16_384..], 16_384);
-    let bin = spec.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).unwrap().0;
-    let hz = transit_dsp::spectrum::bin_hz(bin, 16_384, SR);
-    assert!((hz - 880.0).abs() < 15.0, "peak at {hz}");
-}
-
-#[test]
 fn reverb_has_tail_and_decays() {
     for id in ["room_reverb", "plate_reverb"] {
         let mut p = prepared(id);
@@ -356,38 +350,6 @@ fn reverb_has_tail_and_decays() {
 }
 
 #[test]
-fn delay_repeats_at_time() {
-    let mut p = prepared("mod_delay");
-    p.set_param("time", 100.0);
-    p.set_param("mix", 100.0);
-    p.set_param("feedback", 0.0);
-    p.set_param("lpf", 20_000.0);
-    p.reset();
-    let mut x = vec![0.0f32; 20_000];
-    x[0] = 1.0;
-    let out = run(p.as_mut(), &[x]);
-    let pos = out[0].iter().enumerate().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs())).unwrap().0;
-    assert!((pos as i64 - 4800).abs() <= 2, "echo at {pos}");
-}
-
-#[test]
-fn modulation_tail_covers_feedback_echoes() {
-    for (id, delay, feedback) in [("chorus", 30.0, 90.0), ("flanger", 10.0, 95.0), ("flanger", 10.0, -95.0)] {
-        let mut p = prepared(id);
-        for (param, v) in [("delay", delay), ("feedback", feedback), ("depth", 0.0), ("mix", 100.0)] {
-            assert!(p.set_param(param, v));
-        }
-        p.reset();
-        let mut x = vec![0.0f32; 48_000 * 5];
-        x[0] = 0.5;
-        let out = run(p.as_mut(), &[x]);
-        let floor = peak(&out[0]) * 1e-3;
-        let last = out[0].iter().rposition(|v| v.abs() > floor).unwrap();
-        assert!(last < p.tail_samples(), "{id} feedback {feedback}: echo at {last}, tail {}", p.tail_samples());
-    }
-}
-
-#[test]
 fn trim_and_invert() {
     let mut p = prepared("invert");
     let out = run(p.as_mut(), &[vec![0.5; 16]]);
@@ -402,17 +364,6 @@ fn trim_and_invert() {
     t.reset();
     let out = run(t.as_mut(), &[vec![0.5; 16]]);
     assert!(out[0].iter().all(|&v| (v + 0.5).abs() < 1e-6));
-}
-
-#[test]
-fn time_shift_delays() {
-    let mut p = prepared("time_shift");
-    p.set_param("delay_samples", 123.0);
-    p.reset();
-    let mut x = vec![0.0f32; 1000];
-    x[10] = 1.0;
-    let out = run(p.as_mut(), &[x]);
-    assert_eq!(out[0][133], 1.0);
 }
 
 #[test]
@@ -454,21 +405,6 @@ fn macro_oscillator_note_on_sounds_and_note_off_decays() {
 }
 
 #[test]
-fn drum_kit_notes_sound_and_end() {
-    for note in [36, 38, 39, 42, 46, 45, 47, 50, 49, 51] {
-        let mut p = prepared("drum_synth");
-        p.note_on(0, note, 120);
-        let out = run(p.as_mut(), &[vec![0.0; 48_000 * 7]]);
-        assert!(peak(&out[0][..4800]) > 0.01, "drum note {note} silent");
-        assert!(peak(&out[0][48_000 * 6..]) < 1e-6, "drum note {note} rings forever");
-    }
-    let mut p = prepared("drum_synth");
-    p.note_on(0, 99, 120);
-    let out = run(p.as_mut(), &[vec![0.0; 4800]]);
-    assert!(peak(&out[0]) == 0.0, "unmapped note should be silent");
-}
-
-#[test]
 fn saturator_adds_harmonics_and_stays_bounded() {
     let mut p = prepared("saturator");
     p.set_param("drive", 30.0);
@@ -477,16 +413,4 @@ fn saturator_adds_harmonics_and_stays_bounded() {
     let spec = transit_dsp::spectrum::magnitude_db(&out[0][8192..], 8192);
     let third = (3000.0 / (SR / 8192.0)) as usize;
     assert!(spec[third - 1..=third + 1].iter().cloned().fold(f32::MIN, f32::max) > -30.0);
-}
-
-#[test]
-fn lofi_quantizes() {
-    let mut p = prepared("lofi");
-    p.set_param("bits", 2.0);
-    p.set_param("sample_rate", 48_000.0);
-    let out = run(p.as_mut(), &[sine(100.0, 0.9, 4800)]);
-    let mut levels: Vec<i32> = out[0].iter().map(|v| (v * 1000.0).round() as i32).collect();
-    levels.sort();
-    levels.dedup();
-    assert!(levels.len() <= 5, "{levels:?}");
 }

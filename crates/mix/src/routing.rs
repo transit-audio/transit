@@ -351,12 +351,21 @@ mod tests {
             tr.playlist_mut().unwrap().clips.push(Clip::audio(cid, "i", SourceId(900), 0, 0, 48_000));
             tr.mixer.pan = vec![pan];
             if fx {
-                tr.mixer.inserts[0] = Some(Insert::new("maximizer"));
+                tr.mixer.inserts[0] = Some({
+                    let mut ins = Insert::new("compressor");
+                    ins.params.insert("lookahead".into(), 5.0);
+                    ins
+                });
             }
             ids.push(t);
         }
         let argmax = |c: &[f32]| c.iter().enumerate().max_by(|a, b| a.1.abs().total_cmp(&b.1.abs())).map(|(i, _)| i).unwrap();
-        let lat = transit_dsp::create("maximizer").unwrap().latency();
+        let lat = {
+            let mut p = transit_dsp::create("compressor").unwrap();
+            p.set_param("lookahead", 5.0);
+            p.prepare(48_000.0, 512, 1);
+            p.latency()
+        };
         assert!(lat > 0, "test needs a latent plugin");
         let out = render_range(&s, Range::new(0, 8000), 512);
         assert_eq!(argmax(&out[0]), argmax(&out[1]), "PDC should align L and R");

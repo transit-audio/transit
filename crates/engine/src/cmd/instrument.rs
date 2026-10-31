@@ -153,11 +153,11 @@ mod tests {
         let mut e = Engine::default();
         let t = track(&mut e, "instrument");
         assert_eq!(instrument_of(&e, t).as_deref(), Some("macro_oscillator"));
-        let r = e.execute("mix.instrument", &json!({"track": t.0, "plugin": "drum_synth"})).unwrap();
-        assert_eq!(r["plugin"], "drum_synth");
-        assert_eq!(instrument_of(&e, t).as_deref(), Some("drum_synth"));
+        let r = e.execute("mix.instrument", &json!({"track": t.0, "plugin": "sampler"})).unwrap();
+        assert_eq!(r["plugin"], "sampler");
+        assert_eq!(instrument_of(&e, t).as_deref(), Some("sampler"));
         let params = e.session().track(t).and_then(|tr| tr.instrument.as_ref()).map(|i| i.params.len());
-        assert_eq!(params, transit_dsp::plugin_info("drum_synth").map(|p| p.params.len()), "every parameter at its default");
+        assert_eq!(params, transit_dsp::plugin_info("sampler").map(|p| p.params.len()), "every parameter at its default");
         e.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(instrument_of(&e, t).as_deref(), Some("macro_oscillator"));
     }
@@ -223,17 +223,17 @@ mod tests {
         let before = e.session().track(t).and_then(|tr| tr.instrument.clone());
         let depth = e.revision;
         for bad in [
-            json!({"track": t.0, "plugin": "drum_synth", "cutoff": 200}),
-            json!({"track": t.0, "plugin": "drum_synth", "params": {"nope": 1}}),
-            json!({"track": t.0, "plugin": "drum_synth", "params": {"decay": "long"}}),
-            json!({"track": t.0, "plugin": "drum_synth", "params": 3}),
+            json!({"track": t.0, "plugin": "macro_oscillator", "cutoff": 200}),
+            json!({"track": t.0, "plugin": "macro_oscillator", "params": {"nope": 1}}),
+            json!({"track": t.0, "plugin": "macro_oscillator", "params": {"decay": "long"}}),
+            json!({"track": t.0, "plugin": "macro_oscillator", "params": 3}),
         ] {
             let err = e.execute("mix.instrument", &bad).unwrap_err().to_string();
             assert!(!err.is_empty(), "{bad}");
             assert_eq!(e.session().track(t).and_then(|tr| tr.instrument.clone()), before, "{bad}: the instrument is untouched");
             assert_eq!(e.revision, depth, "{bad}: nothing was recorded");
         }
-        let err = e.execute("mix.instrument", &json!({"track": t.0, "plugin": "drum_synth", "cutoff": 200})).unwrap_err().to_string();
+        let err = e.execute("mix.instrument", &json!({"track": t.0, "plugin": "macro_oscillator", "cutoff": 200})).unwrap_err().to_string();
         assert!(err.contains("cutoff") && err.contains("params"), "{err}");
     }
 
@@ -245,7 +245,7 @@ mod tests {
         assert!(e.execute("mix.instrument", &json!({"track": inst.0, "plugin": "eq_7band"})).is_err(), "an effect");
         assert!(e.execute("mix.instrument", &json!({"track": inst.0, "plugin": "vst3:00000000000000000000000000000000"})).is_err());
         assert!(e.execute("mix.instrument", &json!({"track": inst.0})).is_err(), "no plugin");
-        assert!(e.execute("mix.instrument", &json!({"track": audio.0, "plugin": "drum_synth"})).is_err(), "an audio track");
+        assert!(e.execute("mix.instrument", &json!({"track": audio.0, "plugin": "macro_oscillator"})).is_err(), "an audio track");
         assert_eq!(instrument_of(&e, inst).as_deref(), Some("macro_oscillator"));
         assert_eq!(instrument_of(&e, audio), None);
     }

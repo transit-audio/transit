@@ -194,7 +194,7 @@ fn a_mapped_move_sets_the_session_parameter_in_its_own_units_as_one_undo_step() 
 
 #[test]
 fn right_click_learn_forget_and_markers_work_on_panel_knobs_and_generic_rows() {
-    for (plugin, param) in [("eq_7band", GAIN), ("chorus", "rate")] {
+    for (plugin, param) in [("eq_7band", GAIN), ("filter", "cutoff")] {
         let mut t = T::new();
         let tr = t.insert(plugin, AutomationMode::Off);
         assert!(t.app.builtin_editor.windows[0].rows.iter().any(|r| r.param == param), "{plugin} has {param}");

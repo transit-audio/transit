@@ -91,17 +91,17 @@ fn the_instrument_menu_runs_mix_instrument_and_a_replace_is_one_undo_step() {
     assert!(menu.iter().any(|m| m.value == "sampler"), "built-in instruments are listed: {menu:?}");
     assert!(menu.iter().all(|m| m.value != "gain"), "no effects in the instrument menu");
     assert!(menu.iter().all(|m| !m.value.contains(':')), "no hosted plug-ins in a hermetic test");
-    let item = menu.iter().find(|m| m.value == "drum_synth").cloned().unwrap();
+    let item = menu.iter().find(|m| m.value == "sampler").cloned().unwrap();
     click(&mut app, mid(item.rect));
     frames(&mut app, &ctx, 6, &mut time);
-    assert_eq!(instrument_of(&app, t).unwrap().plugin, "drum_synth");
+    assert_eq!(instrument_of(&app, t).unwrap().plugin, "sampler");
     assert_eq!(undo_len(&mut app), before + 1, "a replace is one undo step");
-    app.run("mix.instrument", json!({"track": t2.0, "plugin": "drum_synth"})).unwrap();
+    app.run("mix.instrument", json!({"track": t2.0, "plugin": "sampler"})).unwrap();
     assert_eq!(instrument_of(&app, t), instrument_of(&app, t2), "the menu and mix.instrument give the same instrument");
-    assert_eq!(app.mixer.devices.cards[0].plugin, "drum_synth");
+    assert_eq!(app.mixer.devices.cards[0].plugin, "sampler");
     // Picking the instrument it already has changes nothing.
     let n = undo_len(&mut app);
-    app.set_instrument(t, "drum_synth").unwrap();
+    app.set_instrument(t, "sampler").unwrap();
     assert_eq!(undo_len(&mut app), n);
     app.run("edit.undo", json!({})).unwrap();
     app.run("edit.undo", json!({})).unwrap();
@@ -143,10 +143,10 @@ fn the_track_menu_has_an_instrument_submenu() {
     let sub = app.arrange.menu.iter().find(|m| m.label == "Instrument").cloned().expect("Instrument in the track menu");
     hover(&mut app, mid(sub.rect));
     frames(&mut app, &ctx, 10, &mut time);
-    let item = app.arrange.menu.iter().find(|m| m.value == "drum_synth").cloned().expect("the submenu lists the instruments");
+    let item = app.arrange.menu.iter().find(|m| m.value == "sampler").cloned().expect("the submenu lists the instruments");
     click(&mut app, mid(item.rect));
     frames(&mut app, &ctx, 6, &mut time);
-    assert_eq!(instrument_of(&app, t).unwrap().plugin, "drum_synth");
+    assert_eq!(instrument_of(&app, t).unwrap().plugin, "sampler");
 }
 
 #[test]
@@ -241,6 +241,7 @@ fn the_plus_menu_is_shaped_like_the_instrument_menu_and_publishes_its_rows() {
     assert_eq!(items.len(), 20, "built-in and hosted rows are all published");
     assert!(items.iter().any(|m| m.value == "vst3:Native3" && m.label == "Native Amp 3"), "hosted names come from the scan");
     assert!(items.iter().all(|m| m.rect != [0.0; 4]));
+    assert!(items.iter().any(|m| !m.visible), "rows scrolled out of the menu are flagged");
     filter = "guitar".into();
     items.clear();
     run(&mut filter, &mut rect, &mut items);
@@ -268,21 +269,13 @@ fn the_device_chain_and_strip_plus_menus_list_effects_only_and_both_add() {
     click(&mut app, at);
     frames(&mut app, &ctx, 6, &mut time);
     let menu = app.mixer.devices.menu.clone();
-    assert!(menu.iter().any(|m| m.value == "dither" && !m.visible), "rows scrolled out of the menu are flagged: {menu:?}");
+    assert!(menu.iter().any(|m| m.value == "dither"), "the last built-in effect is listed: {menu:?}");
     assert!(menu.iter().any(|m| m.value == "gain"), "{menu:?}");
-    assert_ne!(app.mixer.filter_rect, [0.0; 4], "the filter box is published");
+    assert_eq!(app.mixer.filter_rect, [0.0; 4], "the built-in effects alone fit without a filter box");
     assert!(menu.iter().all(|m| m.value != "sampler" && m.value != "macro_oscillator"), "instruments are refused in an effects menu");
-    let fr = mid(app.mixer.filter_rect);
-    click(&mut app, fr);
-    frames(&mut app, &ctx, 3, &mut time);
-    app.mixer.effect_filter = "gain".into();
-    frames(&mut app, &ctx, 3, &mut time);
-    // The Hardware Insert entry is not an effect: the filter leaves it alone.
-    let menu: Vec<_> = app.mixer.devices.menu.iter().filter(|m| m.value != "hardware_insert").cloned().collect();
-    assert_eq!(menu.len(), 1, "the filter narrows the rows: {menu:?}");
-    assert!(menu[0].visible);
     // The chain menu's rows are reachable by UI input, like the instrument menu's.
-    let item = menu[0].clone();
+    let item = menu.iter().find(|m| m.value == "gain").cloned().unwrap();
+    assert!(item.visible);
     click(&mut app, mid(item.rect));
     frames(&mut app, &ctx, 6, &mut time);
     assert_eq!(app.engine.session().track(t).unwrap().mixer.inserts[0].as_ref().unwrap().plugin, "gain");
@@ -290,9 +283,7 @@ fn the_device_chain_and_strip_plus_menus_list_effects_only_and_both_add() {
     let at = mid(strip(&app, t).add_insert);
     click(&mut app, at);
     frames(&mut app, &ctx, 6, &mut time);
-    assert_ne!(app.mixer.filter_rect, [0.0; 4]);
-    app.mixer.effect_filter = "dither".into();
-    frames(&mut app, &ctx, 3, &mut time);
+    assert_eq!(app.mixer.filter_rect, [0.0; 4]);
     let strip_menu = app.mixer.layout.menu.clone();
     assert!(strip_menu.iter().any(|m| m.value == "dither"));
     assert!(strip_menu.iter().all(|m| m.value != "sampler"));

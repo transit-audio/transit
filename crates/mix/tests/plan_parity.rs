@@ -138,6 +138,13 @@ fn builtin(id: &str) -> Insert {
     ins
 }
 
+/// A built-in insert that reports latency: the Compressor with 5 ms of lookahead.
+fn latent() -> Insert {
+    let mut ins = builtin("compressor");
+    ins.params.insert("lookahead".into(), 5.0);
+    ins
+}
+
 fn send(bus: BusId, pre: bool) -> Option<SendSlot> {
     let x = SendSlot { target: Route::Bus(bus), level_db: -6.0, pan: 0.0, mute: false, pre_fader: pre, follow_main_pan: true, surround: None };
     Some(x)
@@ -154,7 +161,7 @@ fn inserts_sends_auxes_and_a_master_fader_match_the_golden() {
     s.track_mut(aux).unwrap().mixer.input = Route::Bus(BusId(900));
     s.track_mut(aux).unwrap().mixer.inserts[0] = Some(builtin("plate_reverb"));
     let master = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
-    s.track_mut(master).unwrap().mixer.inserts[0] = Some(builtin("maximizer"));
+    s.track_mut(master).unwrap().mixer.inserts[0] = Some(latent());
     let ta = s.track_mut(a).unwrap();
     ta.mixer.inserts[0] = Some(builtin("compressor"));
     ta.mixer.inserts[1] = Some(builtin("room_reverb"));
@@ -167,7 +174,7 @@ fn inserts_sends_auxes_and_a_master_fader_match_the_golden() {
     s.track_mut(a).unwrap().mixer.volume_db = -4.0;
     steps.push(s.clone());
     // Insert add on b, and a latent one (PDC changes).
-    s.track_mut(b).unwrap().mixer.inserts[0] = Some(builtin("maximizer"));
+    s.track_mut(b).unwrap().mixer.inserts[0] = Some(latent());
     steps.push(s.clone());
     // Insert removal on a, solo on b.
     s.track_mut(a).unwrap().mixer.inserts[0] = None;
@@ -191,7 +198,7 @@ fn instruments_and_midi_match_the_golden() {
     let tr = s.track_mut(t).unwrap();
     tr.playlist_mut().unwrap().clips.push(Clip::midi(cid, "n", 0, 96_000, seq));
     tr.instrument = Some(builtin("macro_oscillator"));
-    tr.mixer.inserts[0] = Some(builtin("chorus"));
+    tr.mixer.inserts[0] = Some(builtin("filter"));
     let mut steps = vec![s.clone()];
     s.track_mut(t).unwrap().mixer.inserts[1] = Some(builtin("plate_reverb"));
     steps.push(s.clone());
@@ -249,7 +256,7 @@ fn aux_chains_folders_inactive_tracks_and_two_masters_match_the_golden() {
     s.track_mut(dead).unwrap().mixer.inserts[0] = Some(la.clone());
     s.track_mut(dead).unwrap().inactive = true;
     let m1 = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
-    s.track_mut(m1).unwrap().mixer.inserts[0] = Some(builtin("maximizer"));
+    s.track_mut(m1).unwrap().mixer.inserts[0] = Some(latent());
     let m2 = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
     s.track_mut(m2).unwrap().mixer.volume_db = -2.0;
     s.track_mut(a).unwrap().mixer.sends[0] = send(BusId(901), false);
@@ -329,7 +336,7 @@ fn seeks_with_held_notes_match_the_golden() {
     let mut b = vec![vec![0.0f32; BLOCK]; 2];
     for (k, pos) in [0i64, 256, 512, 768, 20_000, 20_256, 0, 256, 512].into_iter().enumerate() {
         if k == 5 {
-            s.track_mut(t).unwrap().mixer.inserts[0] = Some(builtin("chorus"));
+            s.track_mut(t).unwrap().mixer.inserts[0] = Some(builtin("filter"));
             planned.update(&s);
         }
         planned.mix.render_active(pos, BLOCK, &mut b);
@@ -418,7 +425,7 @@ fn path_based_delay_compensation_matches_the_golden() {
     auxes.reverse();
     s.track_mut(a).unwrap().mixer.sends[0] = send(chain[0], false);
     s.track_mut(a).unwrap().mixer.sends[1] = send(chain[4], true);
-    s.track_mut(b).unwrap().mixer.inserts[0] = Some(builtin("maximizer"));
+    s.track_mut(b).unwrap().mixer.inserts[0] = Some(latent());
     s.track_mut(b).unwrap().mixer.sends[0] = send(chain[7], false);
     let inst = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
     let mut seq = Sequence::default();
