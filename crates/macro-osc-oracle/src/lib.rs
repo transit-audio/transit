@@ -22,6 +22,7 @@
 //!   players, the multitap delay, four buffer qualities, the reverb; float stereo in and out), its
 //!   synth and its input stage, and the chain's fixed sweep, at each quality's codec rate in the
 //!   module's blocks (#241).
+//! - [`subset`]: the strided-or-full rule for the long tests (`TRANSIT_FULL_ORACLE=1`, #241).
 
 mod ffi;
 pub mod floor;
@@ -32,6 +33,7 @@ mod oracle;
 pub mod residual;
 pub mod resonator;
 pub mod resonator_sweep;
+pub mod subset;
 pub mod sweep;
 pub mod texture;
 pub mod texture_sweep;

@@ -465,7 +465,8 @@ pub fn digest_frames(frames: &[[f32; 2]]) -> u64 {
     crate::sweep::digest(frames.iter().flatten().flat_map(|s| s.to_bits().to_le_bytes()))
 }
 
-/// One line per quality and point, `<quality> <point> <digest>`, for the whole sweep, then one per
+/// One line per quality and point, `<quality> <point> <digest>`, for the sweep ([`crate::subset`]:
+/// the strided subset unless `TRANSIT_FULL_ORACLE=1`), then one per
 /// synth resolution and point and one per input-stage run. Two runs with equal lines rendered
 /// bit-identical output.
 ///
@@ -476,7 +477,7 @@ pub fn digest_lines(session: &Session) -> Result<Vec<String>, Error> {
     let input = input_signal(longest_point_frames());
     let mut lines = Vec::new();
     for quality in Quality::all() {
-        for point in points() {
+        for point in crate::subset::strided_quiet(points()) {
             let out = render_point(session, quality, &point, &input)?;
             lines.push(format!("{} {} {:016x}", quality.label(), point.label(), digest_frames(&out)));
         }

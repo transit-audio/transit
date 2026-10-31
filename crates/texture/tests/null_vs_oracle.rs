@@ -7,9 +7,9 @@
 
 mod common;
 
-use transit_macro_osc_oracle::Session;
 use transit_macro_osc_oracle::texture::Media;
 use transit_macro_osc_oracle::texture_sweep::{Gate, Point, Quality, input_signal, longest_point_frames, points, render_point};
+use transit_macro_osc_oracle::{Session, subset};
 
 /// The points that render silence by design: DENSITY 0.5 (between 0.48 and 0.52 only taps seed
 /// grains, and neither the latched button nor freeze taps) in the granular sweep, in the free and
@@ -25,18 +25,19 @@ fn null_quality(media: Media, mono: bool) {
     let input = input_signal(longest_point_frames());
     let mut failures = Vec::new();
     let mut silent_mismatch = Vec::new();
-    for point in points() {
+    let sweep = subset::strided(&format!("texture null, {}", quality.label()), points());
+    for point in sweep.iter() {
         let expected = {
             let session = Session::lock();
-            render_point(&session, quality, &point, &input).unwrap()
+            render_point(&session, quality, point, &input).unwrap()
         };
-        let got = common::render_point(quality, &point, &input);
+        let got = common::render_point(quality, point, &input);
         let r = common::residual(&expected, &got);
         if !r.is_exact() {
             failures.push(format!("{} {}: {r}", quality.label(), point.label()));
         }
         // From the second block on: the first block still carries the dry/wet ramp from 0.
-        if common::sounds(&expected, 2 * media.block_size()) == silent_by_design(&point) {
+        if common::sounds(&expected, 2 * media.block_size()) == silent_by_design(point) {
             silent_mismatch.push(format!("{} {}", quality.label(), point.label()));
         }
     }

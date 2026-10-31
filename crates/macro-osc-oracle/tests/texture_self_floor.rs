@@ -15,7 +15,7 @@ use transit_macro_osc_oracle::texture_sweep::{
     self, Gate, INPUT_RUNS, Point, Quality, center, delay_center, input_signal, longest_point_frames, points, render_input_run, render_point,
     render_synth_point, synth_center, synth_points,
 };
-use transit_macro_osc_oracle::{Error, Session};
+use transit_macro_osc_oracle::{Error, Session, subset};
 
 const CHILD_ENV: &str = "TRANSIT_TEXTURE_ORACLE_SELF_FLOOR_CHILD";
 const LINE_PREFIX: &str = "texture-digest ";
@@ -42,10 +42,11 @@ fn same_seed_twice_is_bit_identical() {
     let session = Session::lock();
     let input = input_signal(longest_point_frames());
     let mut compared = 0usize;
+    let sweep = subset::strided("texture self floor, same seed twice", points());
     for quality in Quality::all() {
-        for point in points() {
-            let a = render_point(&session, quality, &point, &input).unwrap();
-            let b = render_point(&session, quality, &point, &input).unwrap();
+        for point in &sweep {
+            let a = render_point(&session, quality, point, &input).unwrap();
+            let b = render_point(&session, quality, point, &input).unwrap();
             let r = residual_f32(&flat(&a), &flat(&b)).unwrap();
             assert!(r.is_exact(), "{} {}: {r}", quality.label(), point.label());
             compared += 1;
@@ -66,7 +67,7 @@ fn same_seed_twice_is_bit_identical() {
         assert!(residual_f32(&flat(&a), &flat(&b)).unwrap().is_exact(), "input {rate} {mode}");
         compared += 1;
     }
-    assert_eq!(compared, Quality::all().len() * points().len() + 4 * synth_points().len() + INPUT_RUNS.len());
+    assert_eq!(compared, Quality::all().len() * sweep.len() + 4 * synth_points().len() + INPUT_RUNS.len());
 }
 
 #[test]
