@@ -42,6 +42,13 @@ pub(crate) struct Path {
 transit_texture::state_fields!(Path, s, [down, up, frames, fill], s.fill < s.block);
 
 impl Path {
+    /// An upper bound on the bytes of this path's checkpoint at a session rate of `host` Hz and a
+    /// firmware rate of `rate` Hz.
+    pub(crate) fn state_bound(host: u32, rate: u32) -> usize {
+        // Both converters, the gathered frames and the fill counter (a usize, at most 8 bytes).
+        super::resample::state_bound(host, rate) + super::resample::state_bound(rate, host) + MAX_BLOCK_SIZE * 2 * 4 + 8
+    }
+
     /// The path of a firmware running at `rate` Hz in blocks of `block` frames (at most
     /// [`MAX_BLOCK_SIZE`]), in a session at `host` Hz.
     pub(crate) fn new(kernel: &Kernel, host: u32, rate: u32, block: usize) -> Self {

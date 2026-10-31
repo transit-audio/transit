@@ -20,7 +20,25 @@ const HEADER: usize = 8 + 7 * 4 + 23 * 4 + 1;
 const CAPACITY: usize = 9 * 1024 * 1024;
 // At most 64 KiB of recording copied per callback, independent of quality and span.
 const COPY_ITEMS: usize = 32 * 1024;
-const CHECKPOINT_CAPACITY: usize = 128 * 1024;
+/// The host rates a frozen capture supports: one limit for `Recording::parse` and for the audio
+/// thread's decision to answer at all (a session may run at up to 768 kHz, and a capture at a
+/// rate that `parse` would refuse is never written).
+pub const MIN_HOST_RATE: f32 = 8_000.0;
+pub const MAX_HOST_RATE: f32 = 384_000.0;
+/// Header plus the continuation excluding the rate path (the texture checkpoint, input stage and
+/// fade): fixed in shape, 73,519 bytes measured; the test below fails if it outgrows this.
+const FIXED_STATE: usize = 80 * 1024;
+
+/// The state capacity of a loan: the worst case over every supported host rate and quality, from
+/// the converter ring sizes the writer uses, plus a quarter of margin.
+fn checkpoint_capacity() -> usize {
+    let path = Media::ALL
+        .iter()
+        .flat_map(|m| [MIN_HOST_RATE, MAX_HOST_RATE].map(|host| Path::state_bound(host as u32, m.sample_rate())))
+        .max()
+        .unwrap_or(0);
+    (FIXED_STATE + path) * 5 / 4
+}
 
 #[cfg(test)]
 #[path = "freeze_state_tests.rs"]
@@ -77,7 +95,7 @@ impl<'a> Recording<'a> {
         let mut host_channels = 0u32;
         host_rate.read(&mut input)?;
         host_channels.read(&mut input)?;
-        if !host_rate.is_finite() || !(8_000.0..=384_000.0).contains(&host_rate) || !(1..=MAX_CHANNELS as u32).contains(&host_channels) {
+        if !host_rate.is_finite() || !(MIN_HOST_RATE..=MAX_HOST_RATE).contains(&host_rate) || !(1..=MAX_CHANNELS as u32).contains(&host_channels) {
             return None;
         }
         let mut params = [0.0f32; 23];
@@ -162,7 +180,7 @@ pub(super) fn channel() -> (Capture, Reader) {
     let (replies, reply) = RingBuffer::new(1);
     let loan = Loan {
         raw: vec![0; 2 * BufferSize::MAX.max_delay(Media::DirtyTape) as usize + 8],
-        state: Vec::with_capacity(CHECKPOINT_CAPACITY),
+        state: Vec::with_capacity(checkpoint_capacity()),
         copied: 0,
         setup: Setup::DEFAULT,
         canceled: false,
@@ -281,6 +299,12 @@ impl TextureFx {
             if !self.p.on(P_FREEZE) || loan.setup != self.setup || loan.generation != self.recording_generation {
                 loan.canceled = loan.copied != 0;
                 loan.unavailable = self.p.on(P_FREEZE);
+                capture.pending = Some(loan);
+            } else if self.sr > MAX_HOST_RATE {
+                // Above the supported host rate `Recording::parse` would refuse the packet, and its
+                // state could outgrow the loan: answer unavailable without writing anything.
+                loan.canceled = false;
+                loan.unavailable = true;
                 capture.pending = Some(loan);
             } else {
                 let raw = self.texture.raw_recording();

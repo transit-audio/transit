@@ -125,6 +125,14 @@ pub(crate) fn ticks(from: u32, to: u32) -> (i64, i64) {
     (i64::try_from(u64::from(to) / g).unwrap_or(1), i64::try_from(u64::from(from) / g).unwrap_or(1))
 }
 
+/// An upper bound on the bytes `Converter::write` produces for a conversion `from` Hz to `to` Hz:
+/// the two history rings (sized exactly as `Converter::new` sizes them) plus three counters.
+pub(crate) fn state_bound(from: u32, to: u32) -> usize {
+    let taps = usize::try_from(2 * half_taps(from, to) + 1).unwrap_or(1);
+    let len = (2 * taps + 4 * AHEAD + 64).next_power_of_two();
+    2 * len * 4 + 3 * 8
+}
+
 /// One stereo converter. Allocates at construction only.
 pub(crate) struct Converter {
     identity: bool,

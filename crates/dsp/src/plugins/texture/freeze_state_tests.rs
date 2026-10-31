@@ -72,13 +72,40 @@ fn frozen_continuation_is_bit_exact_at_every_quality_and_layout() {
 fn a_capture_loan_is_filled_and_returned_without_allocation_or_free() {
     for quality in 0..4 {
         for mono in [false, true] {
-            bounded_capture(quality, mono);
+            bounded_capture(44_100.0, quality, mono);
+        }
+    }
+    // Dirty Tape carries the longest converter histories: the supported extremes, then a rate
+    // above the supported limit, which must answer unavailable without writing state.
+    for sr in [48_000.0, 384_000.0, 768_000.0] {
+        for mono in [false, true] {
+            bounded_capture(sr, 0, mono);
         }
     }
 }
 
-fn bounded_capture(quality: u32, mono: bool) {
-    let mut t = running(44_100.0, quality as f32, mono, false);
+#[test]
+fn the_state_capacity_covers_every_supported_rate_and_quality_with_margin() {
+    let capacity = checkpoint_capacity();
+    let mut worst = 0;
+    for sr in [8_000.0, 11_025.0, 22_050.0, 44_100.0, 48_000.0, 88_200.0, 96_000.0, 176_400.0, 192_000.0, 352_800.0, MAX_HOST_RATE] {
+        for quality in 0..4 {
+            let t = running(sr, quality as f32, false, true);
+            let mut state = Vec::new();
+            t.write_header(&mut state);
+            t.write_continuation(&mut state);
+            let mut path = Vec::new();
+            t.paths[t.active_path].write(&mut path);
+            assert!(state.len() - path.len() <= FIXED_STATE, "{sr} quality {quality}: fixed part {}", state.len() - path.len());
+            assert!(path.len() <= Path::state_bound(sr as u32, t.setup.media.sample_rate()), "{sr} quality {quality}: path bound");
+            worst = worst.max(state.len());
+        }
+    }
+    assert!(worst * 11 <= capacity * 10, "worst {worst} leaves under 10% of {capacity}");
+}
+
+fn bounded_capture(sr: f32, quality: u32, mono: bool) {
+    let mut t = running(sr, quality as f32, mono, false);
     t.set_param("buffer", 4.0);
     t.reset();
     let (capture, mut reader) = channel();
@@ -97,8 +124,12 @@ fn bounded_capture(quality: u32, mono: bool) {
         }
     }
     let loan = reader.replies.pop().expect("answered at final block boundary");
+    if sr > MAX_HOST_RATE {
+        assert!(loan.unavailable && loan.state.is_empty() && loan.packet().is_none());
+        return;
+    }
     assert_eq!(loan.copied, items);
-    assert!(loan.state.len() < CHECKPOINT_CAPACITY);
+    assert!(loan.state.len() <= loan.state.capacity() && loan.state.capacity() >= checkpoint_capacity());
     let packet = loan.packet().unwrap();
     let r = Recording::parse(&packet).unwrap();
     assert_eq!(r.span as usize, span);
@@ -251,3 +282,4 @@ fn partial_host_input_does_not_claim_a_new_recording_before_a_codec_block() {
     let packet = t.save_state().unwrap();
     assert!(Recording::parse(&packet).unwrap().has_recorded());
 }
+
