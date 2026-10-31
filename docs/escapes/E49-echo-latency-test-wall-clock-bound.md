@@ -233,4 +233,4 @@ at the top of each block, before anything of the block is counted, so a dependen
 longer wipes its earlier skips (`skips_before_a_dependent_s_first_admission_are_listed_with_its_strip`
 lists all 48, none before); #257 applies the one-sample rule to every off, live or overdue, through one
 helper shared with the ring's placer (`midi_defer::past_its_note_on`;
-`a_live_note_off_raised_onto_its_note_on_moves_one_sample_later` hears off 62 at offset 2, not 1).
+`a_live_note_off_raised_onto_its_note_on_moves_one_sample_later` hears off 62 at offset 2, not 1). `a_hung_worker_in_a_keyed_session_is_reported_held_on_the_graph_path` also took the `expect_from_the_start` baseline, for uniformity with the other pool tests in render_graph.rs.
