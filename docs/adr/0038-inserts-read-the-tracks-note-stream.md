@@ -1,0 +1,39 @@
+# ADR 0038: Inserts may read the track's note stream; the Filter insert plays envelopes from it
+
+- **Status:** proposed 2026-10-31 (#242)
+- **Date:** 2026-10-31
+- **Reopen when:** a hosted effect with a note input (a CLAP effect with a note port, a VST3 effect with an event bus) should get the stream too; an insert needs per-voice information the summed audio cannot give it (the per-voice filter of the Macro Oscillator, #243, is that case and stays inside the instrument); a rack strip's own inserts want the notes of the rack's members; or a block's note view overflows in practice (`EventStatus::midi_fx.note_view_dropped` above zero in a field report).
+
+## Context
+
+The Macro Oscillator ([ADR 0033](0033-built-in-instruments-mutable-instruments-port.md)) is true to its source: it has no filter, amplifier or ADSR beyond the firmware's low-pass gate. Users who want a classic subtractive sweep on it, or on any instrument, need a filter whose cutoff follows the notes. An insert effect sees only audio: until now nothing gave an insert the notes its track plays.
+
+Convention (transit follows what Ableton and Logic agree on): Ableton's Auto Filter and Logic's AutoFilter both offer an envelope follower and an LFO on the cutoff, and neither offers a note-triggered ADSR: an effect in either DAW cannot see the track's MIDI (Ableton's sidechain is audio; Logic's AutoFilter has no MIDI input). Here transit does better on purpose, because the note stream is already in hand at the strip (ADR 0036) and the missing envelope is the most requested piece of a subtractive patch built from a plain oscillator.
+
+## Decision
+
+- **The plumbing.** `Plugin::reads_track_notes` (default false). Every event the mix gives an instrument already leaves through one call: the note table's `send`, or the MIDI effect host's deliveries and its edit releases when the track has MIDI effects ([ADR 0036](0036-midi-effect-slot.md)). Both now go through `MidiFxHost::give`, which, when the plug-in accepts the event, records it in the host's `NoteView` (`crates/mix/src/note_view.rs`): note-ons, note-offs, the sustain pedal and the all-notes-off and all-sound-off controllers, at the offsets the instrument got them. After the instrument processes, the strip gives the view, through `Plugin::event`, to each running insert that reads notes, then clears it. It is a read-only view: the same events at the same offsets for every reader, after the MIDI effect slot, and nothing an insert does reaches the instrument.
+  - Events given between blocks (a Stop's or a seek's releases, at offset 0) wait in the view for the next block, at offset 0.
+  - An insert skipped for a block (bypassed, inactive, failed) gets `Plugin::all_notes_off` instead: it lets go of what it held, since it will not hear the releases.
+  - A track without an instrument gives its inserts nothing. A rack member's insert reads that member's own stream (what its instrument accepted after the rack's and its own MIDI effects); the rack strip's own inserts read nothing.
+  - Fixed storage made with the instrument's event state: 512 events a block (`NOTE_VIEW_CAP`, the most a block takes into the MIDI effect chain). A full view ends with an all-notes-off and counts what it dropped (`MidiFxCounts::note_view_dropped`), so an overflow never holds a note forever. Nothing allocates, locks or logs on the audio thread.
+  - Only built-ins read notes for now. A hosted effect keeps the default.
+- **The Filter (`filter`).** One insert effect, paraphonic: one filter and one envelope pair after the instrument's voice sum. A new note retriggers the envelopes for every held note (Every note mode; Legato retriggers only when nothing was held), the gate stays open while any note is held or sustained by the pedal, and the envelopes release when the last note lets go. This is the classic paraphonic behavior and the limit of an insert: it cannot give each voice its own filter. The per-voice filter belongs in the instrument (#243).
+  - A multimode trapezoidal state-variable filter (low pass, high pass, band pass with unity gain at the cutoff, notch), 12 dB per octave or 24 dB as two sections in series (the second a Butterworth section, so the resonance peak keeps its height), resonance from Q 0.707 to 25 (no self-oscillation), stereo-linked coefficients, and drive into a soft clip before it that is exactly linear up to full scale.
+  - The cutoff is `cutoff · 2^(6·(env·env_amount·velocity + follower·follow_amount + lfo·lfo_amount) + key_track·(key − 60)/12)`: each source has a bipolar amount, 100% is six octaves at full swing, key tracking at 100% is an octave per octave from middle C (the last note played). Sources: the ADSR (velocity amount, retrigger mode), an envelope follower on the input (attack, release), an LFO (sine, triangle, saw, square, random; a free rate or a tempo-synced division; phase retrigger on the envelope trigger).
+  - An amp stage: a second ADSR from the same notes, with velocity, multiplies the output when on (off by default, so the Filter passes audio with no notes).
+  - **Timing.** Every source and the filter run per sample on the plug-in's own sample clock, which a host block boundary does not interrupt; a note starts its envelopes at its own frame. The coefficients are worked out every 16 samples of that clock (a 3 kHz control rate at 48 kHz) and at every note-on: `tan` per sample costs far more than the zipper it would remove, and a note-on update means a pluck's first cycle already sees its envelope. The output for the same input and the same events at the same absolute frames is bit-identical whatever the host block size (tested from 1 to 1024 frames, and in the engine at 64 and 512).
+  - Presets Pluck, Wah (envelope follower on a resonant band pass) and Paraphonic Brass (Legato). Category EQ, as hosted filters are classified. Not offered as an offline process: it plays from notes an offline process does not have.
+
+## Consequences
+
+- Any built-in effect can now follow the notes (a gate, a tremolo, a vocoder later) with one trait method and no new plan cell; the view travels with the instrument instance like its queue.
+- Hosted effects with note inputs are not served yet; their hosts would need to forward `Plugin::event` for effects, which the CLAP and VST3 hosts do not do for effect slots today.
+- The Filter is not polyphonic, and says so in its help and the user guide. Playing chords with retrigger on restarts the sweep for the whole chord.
+- A bypassed Filter forgets held notes; un-bypassing mid-note leaves the envelopes released until the next note.
+
+## Alternatives considered
+
+- **A MIDI sidechain from another track.** More general, but needs routing UI and a key-like source selection for notes; the track's own notes are what this use asks for. Can be added later on the same view.
+- **Feeding inserts from the clips and live input directly.** Would bypass the MIDI effect slot and the note table's matching, so a transposed or velocity-scaled note would not be what the insert hears.
+- **Putting the envelope and filter inside each built-in instrument.** That is #243 for the Macro Oscillator; an insert also serves hosted instruments.

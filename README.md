@@ -196,6 +196,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Built-in panels with knobs, and bespoke layouts for Compressor, Gate, EQ, Macro Oscillator and Plate; factory and user presets; a scope and a gain-reduction display on the dynamics panels. Moving a plug-in knob while a lane is armed (Write, Latch, Touch) records into it.
 - Built-in dynamics and EQ: Compressor/Limiter, Expander/Gate, De-Esser, Maximizer, Channel Strip, EQ 7-Band, EQ 1-Band.
 - Built-in effects: Room and Plate Reverb, Mod Delay, Chorus, Flanger, Phaser, Saturator, Lo-Fi, Rectifier, Pitch Shifter.
+- Filter insert: a resonant multimode filter (low, high, band, notch; 12 or 24 dB) whose envelope plays from the track's notes, paraphonically, with an LFO (free or tempo-synced), an envelope follower, key tracking and an optional amp envelope; presets Pluck, Wah and Paraphonic Brass.
 - Utilities: Gain, Trim, Invert, Time Shift, DC Offset Removal, Signal Generator, Dither.
 
 ### MIDI

@@ -16,6 +16,10 @@ hardware port: `midi-output.md`.
 5. **MIDI effects** (`crates/mix/src/midi_fx.rs`, [ADR 0036](../../adr/0036-midi-effect-slot.md)):
    while a track has MIDI effects, every event the note table sends the instrument goes through
    them first, in chain order, at the same offsets; an edit to the chain ends the notes it started.
+6. **Inserts that read notes** (`crates/mix/src/note_view.rs`, [ADR 0038](../../adr/0038-inserts-read-the-tracks-note-stream.md)):
+   what the instrument accepted (notes, sustain, all-notes-off) is kept per block and given to the
+   track's inserts whose `Plugin::reads_track_notes` is true (the Filter), at the same offsets; a
+   skipped reader gets all-notes-off.
 
 ## Conventions
 
@@ -42,7 +46,7 @@ OS library (known issue K4); our code on that path may not.
 Tests: `crates/midi-io/src/tests.rs`, `crates/playback/src/player/ingress/tests.rs`,
 `crates/playback/src/player/audio/midi/tests.rs`, `crates/engine/tests/midi_input.rs`; the MIDI
 effect slot in `crates/mix/src/midi_fx/tests.rs`, `crates/mix/tests/midi_effects.rs` and
-`crates/engine/tests/midi_effects.rs`.
+`crates/engine/tests/midi_effects.rs`; inserts reading notes in `crates/mix/tests/insert_notes.rs`.
 
 ## Step entry controls (#92)
 

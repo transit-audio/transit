@@ -147,3 +147,42 @@ Every control can be automated (lanes `plugin:instrument:<id>`, for example
 `plugin:instrument:timbre`) and mapped to a MIDI controller (right-click it). Presets: Init, Analog
 Bass (mono), Glass Bell, Plucked String, Key Tracked Timbre, and your own from the panel's preset
 menu. The panel opens in a window inside transit's main window, so it minimizes and returns with it.
+
+## Filter
+
+The Filter is a built-in insert effect (the device chain's **+**, or the mixer strip's insert
+picker): a resonant multimode filter whose cutoff can follow the track's notes, so a plain
+instrument such as the Macro Oscillator gets a classic subtractive sweep. It works after any
+instrument, built-in or hosted.
+
+- **Mode** (low pass, high pass, band pass, notch) and **Slope** (12 or 24 dB per octave),
+  **Cutoff**, **Resonance** (no peak at 0%, a sharp peak at 100%; it does not self-oscillate),
+  **Drive** (gain into a soft clipper before the filter; at 0 dB a signal up to full scale passes
+  untouched) and **Output**. The curve at the top shows the response at the knob settings, with
+  the range the envelope and the LFO reach shaded behind it.
+- **Envelope**: an ADSR started by the track's notes, at the note's exact sample, after the
+  track's MIDI effects. **Amount** moves the cutoff up (or, negative, down) by up to six octaves
+  at the envelope's peak; **Velocity** sets how much a soft note sweeps less.
+- **Paraphonic**: there is one filter and one envelope for the whole instrument, after its voices
+  are summed. With **Retrigger** on Every note, each new note restarts the envelope for all the
+  notes you hold, the classic paraphonic behavior; on Legato it restarts only when no note was
+  held. The envelope releases when the last note (or the sustain pedal) lets go. Each voice does
+  not get its own filter; for that the filter has to be inside the instrument.
+- **LFO**: sine, triangle, saw, square or random steps, at a free **Rate** or, with **Sync**, one
+  cycle per **Division** of the project tempo (bars, straight, triplet T or dotted D notes).
+  **Amount** swings the cutoff both ways, up to six octaves at 100%; **Retrigger** restarts the
+  cycle with the envelope.
+- **Follower**: the input's level moves the cutoff (an auto-wah), with its own attack and release.
+- **Key Track** moves the cutoff with the last note played: an octave per octave at 100%, none at
+  middle C.
+- **Amp**: with **Amp Env** on, a second ADSR from the same notes shapes the level, like a
+  synthesizer's amplifier, with its own velocity amount. The track is then silent between notes.
+
+The Filter hears the notes the track's instrument plays: on an audio track, or a rack's own
+strip, the envelopes and key tracking do nothing (the LFO and the follower still work). A
+bypassed Filter lets go of the notes it held. Every control can be automated (lanes
+`plugin:<insert letter>:<id>`, for example `plugin:a:cutoff` for the first insert) and mapped to a
+MIDI controller. Presets:
+Pluck, Wah, Paraphonic Brass, and your own from the panel's preset menu. Ableton's Auto Filter
+and Logic's AutoFilter offer the follower and the LFO; the note-triggered envelope is transit's
+addition ([ADR 0038](adr/0038-inserts-read-the-tracks-note-stream.md)).
