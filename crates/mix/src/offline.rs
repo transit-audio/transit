@@ -23,7 +23,7 @@ fn render_in_memory(s: &Session, bus: Option<BusId>, range: Range, block: usize)
     render_in_memory_timed(s, bus, range, block).0
 }
 
-/// [`render_in_memory`] and the mix's latency in samples that the render removed.
+/// [`render_in_memory`] and the mix's initial latency in samples (freeze metadata).
 fn render_in_memory_timed(s: &Session, bus: Option<BusId>, range: Range, block: usize) -> (Vec<Vec<f32>>, usize) {
     let nch = source_channels(s, bus);
     let len = usize::try_from(range.len().max(0)).unwrap_or(0).min(MAX_RENDER_SAMPLES / nch.max(1));
@@ -50,16 +50,27 @@ pub fn source_channels(s: &Session, bus: Option<BusId>) -> usize {
 /// It renders through the plan renderer, the one the live player uses: the session is compiled
 /// once by a [`PlanCompiler`] for a headless [`RenderTarget`] (device generation 0), adopted by a
 /// [`MixEngine::realtime`] engine and driven with [`MixEngine::render_active`], so tempo and meter
-/// maps, automation, delay compensation and plug-in state behave exactly as they do live. The
+/// maps, automation, delay compensation and plug-in state behave exactly as they do live. Each
+/// block is placed at its render position minus its reported latency: overlapping frames are
+/// dropped on growth, and gaps are filled with silence on shrinkage. The live compensation
+/// crossfade and device restart fades are retained; only this timeline splice differs. The
 /// engine works on a snapshot of the session taken in [`RangeRender::try_new`].
 pub struct RangeRender {
     pub(crate) eng: MixEngine,
     bus: Option<BusId>,
     tmp: Vec<Vec<f32>>,
     start: Samples,
+    /// Input frames rendered, independently of output frames delivered.
     done: usize,
+    written: usize,
     total: usize,
+    /// Initial latency, retained for the freeze metadata returned by the timed helper.
     latency: usize,
+    current_latency: usize,
+    /// A rendered block waiting behind a gap introduced by a latency decrease.
+    pending: usize,
+    gap: usize,
+    silence: Vec<Vec<f32>>,
     /// The output paths this render fills after Main's channels in `tmp`, in order (empty unless
     /// built by [`RangeRender::try_new_paths`]).
     sinks: Vec<SinkSpec>,
@@ -78,8 +89,13 @@ impl RangeRender {
                 tmp: Vec::new(),
                 start: range.start,
                 done: 0,
+                written: 0,
                 total: 0,
                 latency: 0,
+                current_latency: 0,
+                pending: 0,
+                gap: 0,
+                silence: Vec::new(),
                 sinks: Vec::new(),
             }
         })
@@ -141,8 +157,23 @@ impl RangeRender {
         let nch = source_channels(s, bus);
         let width = nch + sinks.iter().map(|k| k.dest.len()).sum::<usize>();
         let tmp = vec![vec![0.0f32; eng.max_block()]; width];
+        let silence = tmp.clone();
         let len = if nch == 0 || adoption != Adoption::Adopted { 0 } else { usize::try_from(range.len().max(0)).unwrap_or(0) };
-        Ok(RangeRender { eng, bus, tmp, start: range.start, done: 0, total: len, latency: 0, sinks })
+        Ok(RangeRender {
+            eng,
+            bus,
+            tmp,
+            start: range.start,
+            done: 0,
+            written: 0,
+            total: len,
+            latency: 0,
+            current_latency: 0,
+            pending: 0,
+            gap: 0,
+            silence,
+            sinks,
+        })
     }
 
     /// The output paths after Main's channels in each block, in order (see [`RangeRender::try_new_paths`]).
@@ -162,29 +193,46 @@ impl RangeRender {
 
     /// Renders one more block of the mix and returns it as `(channels, n)`: the next `n` samples
     /// of the range lead each channel (none while the mix's latency is still being skipped).
+    /// Latency changes use the same per-block readout as live PDC. Growth discards the overlap
+    /// with already delivered audio; shrinkage inserts silence before the newly rendered audio,
+    /// even when either adjustment spans multiple blocks. The requested length never changes.
     /// `None` once the range is done. The per-block work allocates nothing.
     pub fn next_block(&mut self) -> Option<(&[Vec<f32>], usize)> {
-        if self.done >= self.total {
+        if self.written >= self.total {
             return None;
         }
-        let n = (self.total - self.done).min(self.eng.max_block());
-        self.render(self.start + self.done as i64, n);
-        if self.done == 0 {
-            // The first block tells the mix's latency: render that much more and drop the head.
-            self.latency = match self.bus {
+        if self.pending == 0 && self.gap == 0 {
+            // Preserve the original block partition for constant latency, including its tail.
+            let n = self.total.saturating_add(self.current_latency).saturating_sub(self.done).min(self.eng.max_block());
+            self.render(self.start.saturating_add(self.done as i64), n);
+            self.current_latency = match self.bus {
                 Some(b) => self.eng.bus_latency_active(b),
                 None => self.eng.latency,
             };
-            self.total = self.total.saturating_add(self.latency);
-        }
-        let skip = self.latency.saturating_sub(self.done).min(n);
-        self.done += n;
-        if skip > 0 && skip < n {
-            for c in &mut self.tmp {
-                c.copy_within(skip..n, 0);
+            if self.done == 0 {
+                self.latency = self.current_latency;
+            }
+            // Raw frame r belongs at r - L. Keep the first sample already emitted for an
+            // overlapping position; missing positions have no sample and are explicitly silent.
+            let skip = self.written.saturating_add(self.current_latency).saturating_sub(self.done).min(n);
+            self.gap = self.done.saturating_sub(self.current_latency).saturating_sub(self.written);
+            self.pending = n - skip;
+            self.done = self.done.saturating_add(n);
+            if skip > 0 && skip < n {
+                for c in &mut self.tmp {
+                    c.copy_within(skip..n, 0);
+                }
             }
         }
-        Some((&self.tmp, n - skip))
+        if self.gap > 0 {
+            let n = self.gap.min(self.total - self.written).min(self.eng.max_block());
+            self.gap -= n;
+            self.written += n;
+            return Some((&self.silence, n));
+        }
+        let n = std::mem::take(&mut self.pending).min(self.total - self.written);
+        self.written += n;
+        Some((&self.tmp, n))
     }
 }
 
@@ -193,8 +241,9 @@ pub fn render_track_pre_fader(s: &Session, track: TrackId, range: Range) -> Vec<
     render_track_pre_fader_timed(s, track, range).0
 }
 
-/// [`render_track_pre_fader`], and the latency in samples of the track's instrument and inserts
-/// (what delay compensation holds the track back by; the render has it removed).
+/// [`render_track_pre_fader`], and the initial latency in samples of the track's instrument and
+/// inserts. The render follows later latency changes; freeze retains this initial value as its
+/// constant playback delay (the rendered audio is already placed on the timeline).
 pub fn render_track_pre_fader_timed(s: &Session, track: TrackId, range: Range) -> (Vec<Vec<f32>>, usize) {
     let mut solo = s.clone();
     // Multichannel tracks render into a main mix of their own format (straight through).
