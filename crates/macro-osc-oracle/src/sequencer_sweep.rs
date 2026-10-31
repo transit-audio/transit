@@ -286,8 +286,11 @@ pub fn points() -> Vec<Point> {
     for deja_vu in [0.2, 0.49, 0.5, 0.75, 1.0] {
         for length in [0.0, 0.3, 0.6, 1.0] {
             p.push(
-                Point::new(format!("deja vu {deja_vu:.2} len{length:.1}"), Controls { deja_vu, deja_vu_length: length, t_deja_vu: 1, x_deja_vu: 1, ..c })
-                    .long(),
+                Point::new(
+                    format!("deja vu {deja_vu:.2} len{length:.1}"),
+                    Controls { deja_vu, deja_vu_length: length, t_deja_vu: 1, x_deja_vu: 1, ..c },
+                )
+                .long(),
             );
         }
     }
@@ -309,13 +312,18 @@ pub fn points() -> Vec<Point> {
     }
     for mode in 0..3 {
         for range in 0..3 {
-            p.push(Point::new(format!("x mode{mode} range{range}"), Controls { x_control_mode: mode, x_range: range, x_spread: 0.8, x_bias: 0.3, ..c }));
+            p.push(Point::new(
+                format!("x mode{mode} range{range}"),
+                Controls { x_control_mode: mode, x_range: range, x_spread: 0.8, x_bias: 0.3, ..c },
+            ));
         }
     }
     for value in [0.1, 0.5, 0.93] {
         p.push(Point::new(format!("register {value:.2}"), Controls { x_register_mode: 1, x_register_value: value, ..c }));
     }
-    for (spread, bias, steps, divider, range) in [(0, 0, 0, 255, 0), (255, 255, 255, 255, 1), (64, 200, 128, 0, 2), (200, 64, 200, 100, 2), (128, 128, 0, 170, 1), (32, 32, 255, 220, 0)] {
+    for (spread, bias, steps, divider, range) in
+        [(0, 0, 0, 255, 0), (255, 255, 255, 255, 1), (64, 200, 128, 0, 2), (200, 64, 200, 100, 2), (128, 128, 0, 170, 1), (32, 32, 255, 220, 0)]
+    {
         p.push(Point::new(
             format!("y s{spread} b{bias} st{steps} d{divider} r{range}"),
             Controls { y_spread: spread, y_bias: bias, y_steps: steps, y_divider: divider, y_range: range, ..c },

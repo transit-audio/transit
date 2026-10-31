@@ -309,7 +309,11 @@ impl SequencerOracle<'_> {
         voltages: &mut [[f32; 4]],
     ) -> Result<(), Error> {
         let n = gates.len();
-        if n == 0 || n > SEQUENCER_BLOCK_SIZE || voltages.len() != n || t_clock.is_some_and(|c| c.len() != n) || xy_clock.is_some_and(|c| c.len() != n)
+        if n == 0
+            || n > SEQUENCER_BLOCK_SIZE
+            || voltages.len() != n
+            || t_clock.is_some_and(|c| c.len() != n)
+            || xy_clock.is_some_and(|c| c.len() != n)
         {
             return Err(Error::BadBlock);
         }
