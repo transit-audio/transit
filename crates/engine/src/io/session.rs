@@ -295,6 +295,7 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
     for m in &missing {
         e.message(format!("missing media: {m}"));
     }
+    crate::takes::migration::on_open(e);
     Ok(missing)
 }
 
@@ -487,6 +488,7 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
     for m in &missing {
         e.message(format!("missing media: {m}"));
     }
+    crate::takes::migration::on_open(e);
     Ok(missing)
 }
 

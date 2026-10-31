@@ -51,6 +51,16 @@ impl TakeCache {
 }
 
 impl StudioApp {
+    /// A session replacement clears lane view state and reports its take migration, if any.
+    pub(crate) fn reset_take_lanes_for_session(&mut self) {
+        self.ui.takes_open.clear();
+        if self.engine.undo_label() == Some("Migrate takes")
+            && let Some(note) = self.engine.messages.iter().rev().find(|m| m.ends_with(transit_engine::takes::migration::NOTE))
+        {
+            self.status.clone_from(note);
+        }
+    }
+
     /// `t`'s take stacks and lane numbers, from the cache while the document is unchanged.
     pub(crate) fn takes_of(&self, t: &Track) -> Rc<TrackTakes> {
         let doc = self.engine.session();

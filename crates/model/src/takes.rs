@@ -144,6 +144,27 @@ enum Key {
 }
 
 impl Track {
+    /// A pre-take-lane recording: only the newest lap plays, on a later playlist, and its
+    /// overlapping stack has no explicit take numbers. Returns the original (earliest
+    /// participating) playlist and the stack. Uses the ordinary material/copy rules, so a
+    /// duplicate playlist or a lone clip is not a migration candidate. Frozen tracks can be
+    /// detected too; the loader must report them without editing them.
+    #[must_use]
+    pub fn legacy_take_stack(&self) -> Option<(usize, TakeStack)> {
+        let [clip] = self.clips() else { return None };
+        if self.active_playlist == 0 || clip.take.is_some() {
+            return None;
+        }
+        let (_, stack) = self.take_stack_of(clip.id)?;
+        if stack.takes.iter().any(|t| t.explicit) {
+            return None;
+        }
+        let playlists = stack.takes.iter().flat_map(|t| t.clips.iter().map(|(pl, _)| *pl));
+        let base = playlists.clone().min()?;
+        let newest = playlists.max()?;
+        (base < self.active_playlist && newest == self.active_playlist).then_some((base, stack))
+    }
+
     /// The track's take stacks in time order (see the module docs). Empty for a track whose
     /// playlists hold no overlapping takes.
     #[must_use]

@@ -17,6 +17,9 @@
 use transit_model::{ClipId, Session, TakeStack, TrackId};
 use transit_time::{Range, Samples};
 
+#[path = "takes_migration.rs"]
+pub mod migration;
+
 /// Why a take edit did nothing.
 pub type Refusal = String;
 

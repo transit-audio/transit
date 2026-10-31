@@ -720,7 +720,7 @@ impl StudioApp {
                 if replacing {
                     // Collapsed groups and open take lanes belong to the session that was open.
                     self.ui.collapsed.clear();
-                    self.ui.takes_open.clear();
+                    self.reset_take_lanes_for_session();
                     self.ui.auto_shown.clear();
                     self.ui.auto_lanes.clear();
                     self.auto.selection.clear();
