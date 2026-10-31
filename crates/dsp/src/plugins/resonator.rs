@@ -139,7 +139,10 @@ enum Kind {
     On(u8, u8),
     /// Key and note-off velocity.
     Off(u8, u8),
+    /// All Notes Off (CC 123): release the keys, let the part ring down.
     AllOff,
+    /// All Sound Off (CC 120): silence at once.
+    SoundOff,
     Sustain(bool),
     /// -1..1.
     Bend(f32),
@@ -154,7 +157,7 @@ enum Kind {
 
 impl Kind {
     fn is_release(self) -> bool {
-        matches!(self, Kind::Off(..) | Kind::AllOff | Kind::Sustain(false) | Kind::ResetControllers)
+        matches!(self, Kind::Off(..) | Kind::AllOff | Kind::SoundOff | Kind::Sustain(false) | Kind::ResetControllers)
     }
 
     /// Omni: every channel plays the instrument.
@@ -175,7 +178,8 @@ impl Kind {
         Some(match cc {
             1 => Kind::Wheel(f32::from(value.min(127)) / 127.0),
             CC_SUSTAIN => Kind::Sustain(value >= 64),
-            CC_ALL_SOUND_OFF | CC_ALL_NOTES_OFF => Kind::AllOff,
+            CC_ALL_SOUND_OFF => Kind::SoundOff,
+            CC_ALL_NOTES_OFF => Kind::AllOff,
             CC_RESET_CONTROLLERS => Kind::ResetControllers,
             _ => return None,
         })
@@ -460,6 +464,28 @@ impl ResonatorInstrument {
         self.held.iter().zip(&self.pedalled).any(|(h, p)| *h || *p)
     }
 
+    /// All Sound Off: the part, the shapers and the edge converter back to power-on at once (the
+    /// part's `reset` allocates nothing), the keys, the pedal and the queued strums cleared. The
+    /// queued events and the controllers stay.
+    fn silence(&mut self) {
+        self.part.reset();
+        self.part.set_model(self.model);
+        if self.polyphony != 1 {
+            self.part.set_polyphony(self.polyphony);
+        }
+        self.up.reset();
+        self.strum_at = 0;
+        self.strum_len = 0;
+        self.held = [false; 128];
+        self.pedalled = [false; 128];
+        self.sustain = false;
+        for sh in &mut self.shapers {
+            sh.reset();
+        }
+        self.shaped = self.settings.on;
+        self.gate = false;
+    }
+
     fn apply(&mut self, kind: Kind) {
         match kind {
             Kind::On(key, 0) => self.apply(Kind::Off(key, 0)),
@@ -494,6 +520,7 @@ impl ResonatorInstrument {
                 self.sustain = false;
                 self.strum_len = 0;
             }
+            Kind::SoundOff => self.silence(),
             Kind::Sustain(on) => {
                 self.sustain = on;
                 if !on {

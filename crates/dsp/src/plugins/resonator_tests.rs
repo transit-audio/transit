@@ -515,3 +515,30 @@ fn spread_and_a_mono_strip_and_hostile_values() {
     let y = render(&mut h, 48_000, 512, &script);
     assert!(y.iter().flatten().all(|v| v.is_finite()), "finite");
 }
+
+/// A strummed A4 at 48 kHz, then `cc` (120 or 123) at frame 4800; returns the left channel.
+fn strum_then_cc(cc: Option<u8>) -> Vec<f32> {
+    let mut r = instrument(48_000, &[]);
+    let mut script = vec![(0, Ev::On(69, 127))];
+    script.extend(cc.map(|c| (4800, Ev::Cc(c, 0))));
+    let [l, _] = render(&mut r, 24_000, 512, &script);
+    l
+}
+
+#[test]
+fn all_sound_off_silences_the_ringing_part_at_once() {
+    let on = strum_then_cc(None);
+    let off = strum_then_cc(Some(120));
+    assert!(peak(&on[4800..9600]) > 0.01, "the strum rings without the panic");
+    assert!(off[..4800].iter().zip(&on).all(|(a, b)| a.to_bits() == b.to_bits()), "nothing changes before the CC");
+    // The panic takes effect at the next 24-frame block.
+    assert!(peak(&off[4800 + 48..]) == 0.0, "silent from two blocks on: peak {}", peak(&off[4800 + 48..]));
+}
+
+#[test]
+fn all_notes_off_lets_the_part_ring_down() {
+    let on = strum_then_cc(None);
+    let off = strum_then_cc(Some(123));
+    assert!(same_from(&on, &off, 0, on.len()), "All Notes Off leaves the unshaped part's sound alone");
+    assert!(peak(&off[4800 + 48..9600]) > 0.01, "and it keeps ringing");
+}
