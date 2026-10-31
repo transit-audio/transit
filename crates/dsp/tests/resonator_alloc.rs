@@ -83,3 +83,42 @@ fn the_resonator_callback_allocates_nothing() {
         assert!(total.is_zero(), "{sr} Hz: {total:?}");
     }
 }
+
+/// The shaper switched on while a key is held (the crossfade-in path), switched off again under
+/// the held key (the fade-out path), then All Notes Off and All Sound Off, all inside the
+/// measured window.
+#[test]
+fn the_shaper_fade_in_and_the_panics_allocate_nothing() {
+    for sr in [44_100.0, 48_000.0] {
+        let mut p = create("resonator").unwrap();
+        p.prepare(sr, BLOCK, 2);
+        let mut io = vec![vec![0.0f32; BLOCK]; 2];
+        // Warm up with the key held and the shaper off, outside the window.
+        p.note_on(0, 60, 100);
+        for _ in 0..6 {
+            p.process(&mut io, BLOCK);
+        }
+        let mut total = AllocStats::default();
+        for round in 0..40 {
+            let ((), stats) = measure(|| {
+                match round {
+                    2 => assert!(p.set_param("shaper", 1.0)),
+                    12 => assert!(p.set_param("shaper", 0.0)),
+                    20 => {
+                        assert!(p.set_param("shaper", 1.0));
+                        p.note_on(4, 64, 100);
+                    }
+                    28 => p.midi(10, [0xB0, 123, 0]),
+                    30 => p.note_on(0, 67, 100),
+                    34 => p.midi(10, [0xB0, 120, 0]),
+                    _ => {}
+                }
+                p.process(&mut io, BLOCK);
+            });
+            total.allocs += stats.allocs;
+            total.frees += stats.frees;
+            assert!(io.iter().flatten().all(|v| v.is_finite()));
+        }
+        assert!(total.is_zero(), "{sr} Hz: {total:?}");
+    }
+}
