@@ -1,0 +1,114 @@
+# The Resonator's panel (the built-in instrument, ADR 0033, #198).
+area = "resonator"
+title = "Resonator"
+link = "user-guide.md#resonator"
+
+[[entry]]
+id = "resonator.model"
+name = "Model"
+text = "Chooses what rings: Modal (a bank of tuned modes, like a bar, a bell or a plate), Sympathetic Strings (a plucked string with strings ringing in sympathy), Inharmonic String (a string with stiffness or a buzzing bridge), FM Voice (two sine operators), Chord Strings (sympathetic strings tuned to a chord) or String and Reverb. Structure, Brightness, Damping and Position mean something different for each."
+
+[[entry]]
+id = "resonator.polyphony"
+name = "Polyphony"
+text = "How many voices ring at once: 1, 2 or 4 (4 by default). Every note strikes the next voice in turn while the others ring on, one strike per 24-frame block, so the notes of a chord strike 0.5 ms apart. At 2 and 4 the odd and even voices come out on the two sides (see Spread)."
+
+[[entry]]
+id = "resonator.structure"
+name = "Structure"
+text = "The model's shape: the modes' spacing and stiffness, the sympathetic strings' intervals, the string's dispersion, the FM ratio, or the chord of Chord Strings (eleven chords across its travel). It stops just short of 100%, as on the module."
+
+[[entry]]
+id = "resonator.brightness"
+name = "Brightness"
+text = "How bright the strike and the ringing are: the exciter's filter and how fast the high modes die away (the FM index on FM Voice). Accent darkens it for soft notes."
+
+[[entry]]
+id = "resonator.damping"
+name = "Damping"
+text = "How long a strike rings: short at 0%, nearly for ever at 100%. On String and Reverb it also sets the reverb's size and amount."
+
+[[entry]]
+id = "resonator.position"
+name = "Position"
+text = "Where the voice is struck or picked up, which brings out or hides partials (the feedback on FM Voice, the dry/reverb balance on String and Reverb)."
+
+[[entry]]
+id = "resonator.accent"
+name = "Accent"
+text = "How much velocity matters: each strike darkens Brightness by Accent times how far the velocity is below full, from that note on (and for the voices still ringing, since Brightness is one control for all of them). At 0%, or at full velocity, Brightness is the knob. 50% by default."
+
+[[entry]]
+id = "resonator.tonic"
+name = "Tonic"
+text = "The note the sympathetic strings drone on at low Structure (the module's frequency knob). It does not move the pitch you play: a note plays its own pitch, A3 (MIDI 69) at 440 Hz."
+
+[[entry]]
+id = "resonator.spread"
+name = "Spread"
+text = "How far apart the two outputs sit: at 100% the left is the module's first output and the right its second, so at polyphony 2 and 4 the notes alternate between the sides; lower, each side takes in the other, down to the module's mono mix on both at 0%. 50% by default."
+
+[[entry]]
+id = "resonator.level"
+name = "Level"
+text = "The instrument's output level; the -6 dB default leaves headroom for several ringing voices. The module's own limiter keeps each output near full scale at 0 dB."
+
+[[entry]]
+id = "resonator.tune"
+name = "Tune"
+text = "Transposes every voice in semitones, at once, ringing ones included (through the module's FM input)."
+
+[[entry]]
+id = "resonator.bend_range"
+name = "Bend Range"
+text = "How many semitones a full pitch bend moves every voice, up and down. The mod wheel and aftertouch do nothing until a matrix row uses them."
+
+[[entry]]
+id = "resonator.shaper"
+name = "Shaper"
+text = "Switches on the shaper on the instrument's output: the filter and the amp envelope, which opens at each note and closes when no key is held (the sustain pedal holds it). Switched while a key is held it takes over at once with a short crossfade; with no key held it waits for the next note. Off by default; the envelopes and LFOs run either way, as matrix sources."
+
+[[entry]]
+id = "resonator.amp_adsr"
+name = "Amp Envelope"
+text = "The output's level envelope while the shaper is on: Attack (to full level, restarted from where it is at each note), Decay (toward Sustain), Sustain (while a key is held) and Release (after the last key). Decay and Release times are to -60 dB. Also the Amp envelope source of the matrix."
+
+[[entry]]
+id = "resonator.filter_mode"
+name = "Filter Mode"
+text = "The shaper's filter: low pass, band pass or high pass, the Filter effect's state-variable filter, one per output."
+
+[[entry]]
+id = "resonator.filter_adsr"
+name = "Filter Envelope"
+text = "The envelope for the cutoff: Attack, Decay, Sustain and Release, restarted at each note like the amp envelope. Also the Filter envelope source of the matrix."
+
+[[entry]]
+id = "resonator.lfo_shape"
+name = "LFO Shape"
+text = "Sine, triangle, saw, square, sample and hold (a random step each cycle) or smooth random (random steps joined by a glide). The instrument has two LFOs, shared by all its voices."
+
+[[entry]]
+id = "resonator.matrix"
+name = "Modulation Matrix"
+text = "Sixteen rows, each routing a source to a destination: the row adds its amount times the source, shaped by its curve and scaled by its via source. The resonator's macros and pitch are worked out once per 24-frame block, the shaper's destinations every 12 frames. A row whose source or destination is Off, or whose amount is 0%, does nothing."
+
+[[entry]]
+id = "resonator.matrix_dest"
+name = "Matrix Destination"
+text = "What the row moves. At 100% and a full source: Pitch 24 semitones (every voice); Structure, Brightness, Damping, Position and Resonance their whole travel; Level from silence to double; Cutoff six octaves; Filter env amount its whole range; an LFO rate four octaves; an LFO amount its whole range; Pan from left to right."
+
+[[entry]]
+id = "resonator.strums"
+name = "Strums"
+text = "The resonator has no gate: a note-off or the sustain pedal does not stop a ringing voice; Damping decides how long it rings. Every note strikes with the module's internal exciter: an instrument cannot take a track's audio as its exciter yet."
+
+[[entry]]
+id = "resonator.rate"
+name = "Rate and Latency"
+text = "The resonator runs at the module's 48 kHz in 24-frame blocks, and a note takes effect at the next block (at most 0.5 ms later at 48 kHz). In a 48 kHz session nothing is converted or delayed. At other rates its output is converted to the session rate and delay compensation takes the delay: 35 samples at 44.1 kHz, 65 at 88.2 kHz, 70 at 96 kHz."
+
+[[entry]]
+id = "resonator.credits"
+name = "Credits"
+text = "The Resonator is a port of Émilie Gillet's open-source resonator firmware (MIT license), written by transit from her code and checked against it sample by sample. It ports the digital signal processing, not the hardware; the notices are in Help > About transit."

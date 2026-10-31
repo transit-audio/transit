@@ -18,7 +18,8 @@ pub const THIRD_PARTY: &str =
     "Macro Oscillator: a port of Émilie Gillet's macro oscillator firmware and stmlib (MIT), by way of Oliver Rockstedt's Rust port (MIT)
 Texture: a port of Émilie Gillet's texture synthesizer firmware and stmlib (MIT)
 Time Stretcher: a port of Émilie Gillet's texture processor firmware and stmlib (MIT)
-Cross Modulator: a port of Émilie Gillet's meta-modulator firmware and stmlib (MIT)";
+Cross Modulator: a port of Émilie Gillet's meta-modulator firmware and stmlib (MIT)
+Resonator: a port of Émilie Gillet's resonator firmware and stmlib (MIT)";
 /// Their license notices, verbatim.
 pub const THIRD_PARTY_NOTICES: &str = concat!(
     include_str!("../../macro-osc/LICENSE-THIRD-PARTY"),
@@ -29,7 +30,11 @@ pub const THIRD_PARTY_NOTICES: &str = concat!(
     "
 
 ",
-    include_str!("../../modulator/LICENSE-THIRD-PARTY")
+    include_str!("../../modulator/LICENSE-THIRD-PARTY"),
+    "
+
+",
+    include_str!("../../resonator/LICENSE-THIRD-PARTY")
 );
 /// Wordmark width in points.
 const WORDMARK_W: f32 = 260.0;

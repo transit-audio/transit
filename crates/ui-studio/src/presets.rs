@@ -63,6 +63,12 @@ pub static FACTORY: &[(&str, &str, &str)] = factory![
     "cross_modulator" / "Ring Bell",
     "cross_modulator" / "Vocoder",
     "cross_modulator" / "XOR Grit",
+    "resonator" / "Struck Bell",
+    "resonator" / "Sympathetic Harp",
+    "resonator" / "Steel Pluck",
+    "resonator" / "FM Mallet",
+    "resonator" / "Strummed Chords",
+    "resonator" / "Ambient Pluck",
 ];
 
 /// The factory presets of one plug-in, in table order.

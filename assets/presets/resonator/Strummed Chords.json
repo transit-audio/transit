@@ -1,0 +1,11 @@
+{
+  "plugin": "resonator",
+  "version": 1,
+  "params": {
+    "model": 4.0,
+    "structure": 30.0,
+    "brightness": 60.0,
+    "damping": 80.0,
+    "position": 30.0
+  }
+}

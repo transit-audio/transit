@@ -60,6 +60,7 @@ pub mod plugin_scan;
 pub mod presets;
 pub mod rack_panel;
 pub mod recent;
+pub mod resonator_panel;
 pub mod scope_strip;
 pub mod shortcuts;
 pub mod splash;
@@ -1311,6 +1312,8 @@ mod param_capture_tests;
 mod rack_panel_tests;
 #[cfg(test)]
 mod recent_tests;
+#[cfg(test)]
+mod resonator_panel_tests;
 #[cfg(test)]
 mod recovery_tests;
 #[cfg(test)]

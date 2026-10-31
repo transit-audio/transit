@@ -93,6 +93,71 @@ static PLATE: [Row; 1] = [&[
     sec("Mix", 1, &[Knob("mix", "Mix")]),
 ]];
 
+/// transit's addition (#243), shared by the Macro Oscillator and the Resonator (#198): the
+/// shaper, the filter and both LFOs in one row of two lines, so the expanded window stays within
+/// 800 pt (1080p at 125% with the title bar).
+pub(crate) const SHAPER_ROW: Row = &[
+    sec(
+        "Shaper",
+        3,
+        &[
+            Toggle("shaper", "Shaper"),
+            Knob("amp_velocity", "Velocity"),
+            Knob("amp_attack", "Attack"),
+            Knob("amp_decay", "Decay"),
+            Knob("amp_sustain", "Sustain"),
+            Knob("amp_release", "Release"),
+        ],
+    ),
+    // The filter on the first line, its envelope on the second.
+    sec(
+        "Filter",
+        6,
+        &[
+            Choice("filter_mode", "Mode"),
+            Choice("filter_slope", "Slope"),
+            Knob("drive", "Drive"),
+            Knob("cutoff", "Cutoff"),
+            Knob("resonance", "Resonance"),
+            Knob("key_track", "Key Track"),
+            Knob("filter_env_amount", "Env Amount"),
+            Knob("filter_attack", "Attack"),
+            Knob("filter_decay", "Decay"),
+            Knob("filter_sustain", "Sustain"),
+            Knob("filter_release", "Release"),
+        ],
+    ),
+    sec(
+        "LFO 1",
+        4,
+        &[
+            Choice("lfo1_shape", "Shape"),
+            Knob("lfo1_rate", "Rate"),
+            Toggle("lfo1_sync", "Sync"),
+            Choice("lfo1_division", "Division"),
+            Toggle("lfo1_retrigger", "Retrigger"),
+            Knob("lfo1_fade", "Fade In"),
+            Knob("lfo1_amount", "Amount"),
+        ],
+    ),
+    sec(
+        "LFO 2",
+        4,
+        &[
+            Choice("lfo2_shape", "Shape"),
+            Knob("lfo2_rate", "Rate"),
+            Toggle("lfo2_sync", "Sync"),
+            Choice("lfo2_division", "Division"),
+            Toggle("lfo2_retrigger", "Retrigger"),
+            Knob("lfo2_fade", "Fade In"),
+            Knob("lfo2_amount", "Amount"),
+        ],
+    ),
+];
+
+/// The modulation matrix's row, below the shaper.
+pub(crate) const MATRIX_ROW: Row = &[sec("Modulation Matrix", 1, &[Matrix])];
+
 /// The Macro Oscillator's id (ADR 0033, #195).
 const MACRO_OSC: &str = "macro_oscillator";
 
@@ -108,68 +173,9 @@ static MACRO: [Row; 4] = [
         sec("Output", 2, &[Knob("aux_mix", "Aux Mix"), Knob("level", "Level")]),
         sec("Voices", 1, &[Choice("voices", "Voices"), Lights]),
     ],
-    // From here on: transit's addition (#243), labeled as such above this row. The shaper, the
-    // filter and both LFOs share one row of two lines, so the expanded window stays within 800 pt
-    // (1080p at 125% with the title bar).
-    &[
-        sec(
-            "Shaper",
-            3,
-            &[
-                Toggle("shaper", "Shaper"),
-                Knob("amp_velocity", "Velocity"),
-                Knob("amp_attack", "Attack"),
-                Knob("amp_decay", "Decay"),
-                Knob("amp_sustain", "Sustain"),
-                Knob("amp_release", "Release"),
-            ],
-        ),
-        // The filter on the first line, its envelope on the second.
-        sec(
-            "Filter",
-            6,
-            &[
-                Choice("filter_mode", "Mode"),
-                Choice("filter_slope", "Slope"),
-                Knob("drive", "Drive"),
-                Knob("cutoff", "Cutoff"),
-                Knob("resonance", "Resonance"),
-                Knob("key_track", "Key Track"),
-                Knob("filter_env_amount", "Env Amount"),
-                Knob("filter_attack", "Attack"),
-                Knob("filter_decay", "Decay"),
-                Knob("filter_sustain", "Sustain"),
-                Knob("filter_release", "Release"),
-            ],
-        ),
-        sec(
-            "LFO 1",
-            4,
-            &[
-                Choice("lfo1_shape", "Shape"),
-                Knob("lfo1_rate", "Rate"),
-                Toggle("lfo1_sync", "Sync"),
-                Choice("lfo1_division", "Division"),
-                Toggle("lfo1_retrigger", "Retrigger"),
-                Knob("lfo1_fade", "Fade In"),
-                Knob("lfo1_amount", "Amount"),
-            ],
-        ),
-        sec(
-            "LFO 2",
-            4,
-            &[
-                Choice("lfo2_shape", "Shape"),
-                Knob("lfo2_rate", "Rate"),
-                Toggle("lfo2_sync", "Sync"),
-                Choice("lfo2_division", "Division"),
-                Toggle("lfo2_retrigger", "Retrigger"),
-                Knob("lfo2_fade", "Fade In"),
-                Knob("lfo2_amount", "Amount"),
-            ],
-        ),
-    ],
-    &[sec("Modulation Matrix", 1, &[Matrix])],
+    // From here on: transit's addition (#243), labeled as such above this row.
+    SHAPER_ROW,
+    MATRIX_ROW,
 ];
 
 /// The row of the Macro Oscillator's layout where transit's addition starts: the line above it
@@ -288,6 +294,9 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
     if plugin == crate::modulator_panel::CROSS_MODULATOR {
         return crate::modulator_panel::help(param);
     }
+    if plugin == crate::resonator_panel::RESONATOR {
+        return crate::resonator_panel::help(param);
+    }
     if plugin != MACRO_OSC {
         return None;
     }
@@ -362,6 +371,7 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         crate::time_stretcher_panel::TIME_STRETCHER => Some(&crate::time_stretcher_panel::LAYOUT),
         crate::modulator_panel::CROSS_MODULATOR => Some(&crate::modulator_panel::LAYOUT),
         crate::tuner_panel::TUNER => Some(&crate::tuner_panel::LAYOUT),
+        crate::resonator_panel::RESONATOR => Some(&crate::resonator_panel::LAYOUT),
         _ => None,
     }
 }
@@ -378,7 +388,7 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
         crate::filter_curve::show(app, ui, key, ins, info, lay);
     }
     for (i, row) in rows.iter().enumerate() {
-        if info.id == MACRO_OSC && i == ADDITION_ROW && !addition_header(ui, ins, lay) {
+        if addition_row(info.id) == Some(i) && !addition_header(ui, ins, lay) {
             break;
         }
         ui.horizontal_top(|ui| {
@@ -402,6 +412,18 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
         crate::help::hover(ui, &r, crate::help::Id::TimeStretcherCredits);
         lay.credit = crate::time_stretcher_panel::CREDIT.to_string();
     }
+    if info.id == crate::resonator_panel::RESONATOR {
+        // The strum and rate lines side by side, so the expanded window keeps within 800 pt.
+        ui.horizontal(|ui| {
+            for (text, id) in [(crate::resonator_panel::STRUMS, crate::help::Id::ResonatorStrums), (crate::resonator_panel::RATE, crate::help::Id::ResonatorRate)] {
+                let r = ui.label(RichText::new(text).size(10.5).color(TOKENS.text_dim));
+                crate::help::hover(ui, &r, id);
+            }
+        });
+        let r = ui.label(RichText::new(crate::resonator_panel::CREDIT).size(10.5).color(TOKENS.text_dim));
+        crate::help::hover(ui, &r, crate::help::Id::ResonatorCredits);
+        lay.credit = crate::resonator_panel::CREDIT.to_string();
+    }
     if info.id == crate::modulator_panel::CROSS_MODULATOR {
         let v = app.followed_param(key, "algorithm").or_else(|| ins.params.get("algorithm").copied());
         let v = info.param("algorithm").map_or(0.0, |p| p.clamp(v.unwrap_or(p.default)));
@@ -413,7 +435,16 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
     }
 }
 
-/// The line above the Macro Oscillator's shaper and matrix: it labels them as transit's addition
+/// The row of a plug-in's layout where transit's addition (the shaper and the matrix) starts.
+fn addition_row(plugin: &str) -> Option<usize> {
+    match plugin {
+        MACRO_OSC => Some(ADDITION_ROW),
+        crate::resonator_panel::RESONATOR => Some(crate::resonator_panel::ADDITION_ROW),
+        _ => None,
+    }
+}
+
+/// The line above the Macro Oscillator's (and the Resonator's) shaper and matrix: it labels them as transit's addition
 /// and shows or hides them (a click). Until clicked, they show while they are in use (the shaper on
 /// or a matrix row with a source), so a session of defaults keeps the module's own panel size and
 /// a migrated mapping shows its rows. Returns whether they show.
@@ -640,6 +671,7 @@ mod tests {
             crate::time_stretcher_panel::TIME_STRETCHER,
             crate::modulator_panel::CROSS_MODULATOR,
             crate::tuner_panel::TUNER,
+            crate::resonator_panel::RESONATOR,
         ] {
             let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
             let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).flat_map(|i| item_ids(*i)).collect();
@@ -676,6 +708,13 @@ mod tests {
     fn every_cross_modulator_control_has_a_help_entry() {
         for p in transit_dsp::plugin_info(crate::modulator_panel::CROSS_MODULATOR).unwrap().params {
             assert!(help(crate::modulator_panel::CROSS_MODULATOR, p.id).is_some(), "{}", p.id);
+        }
+    }
+
+    #[test]
+    fn every_resonator_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::resonator_panel::RESONATOR).unwrap().params {
+            assert!(help(crate::resonator_panel::RESONATOR, p.id).is_some(), "{}", p.id);
         }
     }
 

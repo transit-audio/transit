@@ -1,4 +1,4 @@
-//! The Macro Oscillator's modulation matrix on its panel (#243): a compact grid below the shaper,
+//! The Macro Oscillator's (and the Resonator's, #198) modulation matrix on its panel (#243): a compact grid below the shaper,
 //! the sixteen rows in two columns of eight, each row a source, a via, a destination and a curve
 //! dropdown and an amount you drag (-100% to +100%). Every cell is a parameter of its own
 //! (`mod<n>_<field>`), so it takes MIDI Learn, automation and undo like the panel's knobs; values go
@@ -36,9 +36,14 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
 }
 
 fn grid(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, info: &'static PluginInfo, lay: &mut EditorLayout) {
-    let heading =
-        ui.label(RichText::new("Each row adds amount × curve(source) × via to its destination, per voice").size(10.5).color(TOKENS.text_dim));
-    crate::help::hover(ui, &heading, crate::help::Id::MacroOscMatrix);
+    // The Resonator (#198) is one sound source: its matrix runs once for the instrument.
+    let (text, help) = if info.id == crate::resonator_panel::RESONATOR {
+        ("Each row adds amount × curve(source) × via to its destination", crate::help::Id::ResonatorMatrix)
+    } else {
+        ("Each row adds amount × curve(source) × via to its destination, per voice", crate::help::Id::MacroOscMatrix)
+    };
+    let heading = ui.label(RichText::new(text).size(10.5).color(TOKENS.text_dim));
+    crate::help::hover(ui, &heading, help);
     ui.horizontal_top(|ui| {
         for first in (0..ROWS).step_by(PER_COLUMN) {
             ui.vertical(|ui| {
