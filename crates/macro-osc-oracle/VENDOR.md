@@ -1,8 +1,8 @@
 # Vendored sources
 
 `vendor/` holds Émilie Gillet's original C++ DSP (the macro oscillator, #194, the resonator, #198,
-the granular texture processor, #199, and the texture synthesizer, #241), copied unchanged from two
-upstream repositories.
+the granular texture processor, #199, the texture synthesizer, #241, and the meta-modulator, #200),
+copied unchanged from two upstream repositories.
 It is the oracle: never edit it. Licenses are in [`LICENSE-THIRD-PARTY`](LICENSE-THIRD-PARTY).
 
 | Directory | Upstream | Commit |
@@ -11,6 +11,7 @@ It is the oracle: never edit it. Licenses are in [`LICENSE-THIRD-PARTY`](LICENSE
 | `vendor/rings/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4`, the same commit (the vendored files last changed in `c5f910f`, 2022-01-22, typo fixes, after `43b9c9f`, 2020-04-29, which initializes the resonator's `previous_position_`) |
 | `vendor/clouds/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4`, the same commit (the vendored files last changed in the merge `d1d8839`, 2023-03-13, which lost a line of `clouds/dsp/window.h`; see Local changes) |
 | `vendor/beads/` | https://github.com/pichenettes/eurorack | `f4cfa7697095a28d292bff758beb51deb49b5a86` (2026-10-12: the directory arrived in `d8f47391` the day before; this commit only adds the README footnote "builds on a Desktop platform but not verified to build and run on a module". Both pin the same stmlib, `e3bd7c9c`) |
+| `vendor/warps/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4`, the same commit as the first three (the vendored files last changed in `2a46873`, 2019-04-02, the author's name in the notices; the processing path last changed in `a78a2f7`, a fix to the vocoder's limiter, and `5115a25` regenerated the frequency shifter's waveform tables in `resources.cc`, which the oracle does not render) |
 | `vendor/stmlib/` | https://github.com/pichenettes/stmlib | `e3bd7c9cc00e4364166f9905c0509b6ffd0535ec` (the submodule commit the eurorack commit above pins) |
 
 ## File set
@@ -52,6 +53,16 @@ From eurorack, paths kept relative to the repository root:
   normalization detector, the buffer backup, `beads.cc` and `beads/resources/` (the generators) are
   not vendored.
 
+- `warps/dsp/**/*.cc` and `warps/dsp/**/*.h` (the modulator: the two saturating input
+  amplifiers, the internal oscillator, the six cross-modulation algorithms and their 6x
+  converters, the vocoder with its 20-band filter bank, envelope followers and limiter, and the
+  frequency shifter's quadrature transform and oscillator, which the oracle does not call),
+  `warps/resources.cc` and `warps/resources.h`, and `warps/drivers/debug_pin.h`
+  (`modulator.cc` includes it; under `-DTEST` it is empty). 17 files, each carrying Émilie Gillet's
+  MIT notice (2014 and 2015). `warps/test/`, the other drivers, the UI, the CV scaler, the
+  settings, the bootloader and `warps/resources/` (the generators) are not vendored. The stmlib
+  helpers it uses are already vendored.
+
 From stmlib:
 
 - `stmlib.h`, `dsp/*.h`, `dsp/units.cc`, `dsp/atan.cc` (the phase vocoder's `fast_atan2r` table),
@@ -62,10 +73,10 @@ From stmlib:
   `murmurhash3.h`, public domain) carry no MIT notice, so they are left out.
 
 Nothing from `drivers/`, the UI, settings, the bootloader, `user_data_receiver`, `test/` or
-`resources/` (the table generators) is vendored. 231 files in all (134 for the macro oscillator,
+`resources/` (the table generators) is vendored. 248 files in all (134 for the macro oscillator,
 28 for the resonator, 28 for the granular processor, and `dsp/atan.cc` and `fft/shy_fft.h` added to
-stmlib for it, 38 for the texture synthesizer and `utils/gate_flags.h` for it), every source file
-carrying Emilie Gillet's MIT notice.
+stmlib for it, 38 for the texture synthesizer and `utils/gate_flags.h` for it, 17 for the
+meta-modulator), every source file carrying Emilie Gillet's MIT notice.
 
 ## Verification
 
@@ -78,7 +89,8 @@ blob ids (run from the repository root):
 git clone --filter=blob:none https://github.com/pichenettes/eurorack /tmp/er
 git clone --filter=blob:none https://github.com/pichenettes/stmlib /tmp/stm
 ( git -C /tmp/er ls-tree -r 08460a69a7e1 plaits rings/dsp rings/resources.cc rings/resources.h \
-    clouds/dsp clouds/resources.cc clouds/resources.h clouds/drivers/debug_pin.h | awk '{print $3, $4}'
+    clouds/dsp clouds/resources.cc clouds/resources.h clouds/drivers/debug_pin.h \
+    warps/dsp warps/resources.cc warps/resources.h warps/drivers/debug_pin.h | awk '{print $3, $4}'
   git -C /tmp/er ls-tree -r f4cfa769 beads/dsp beads/resources.cc beads/resources.h \
     beads/gain_control.cc beads/gain_control.h | awk '{print $3, $4}'
   git -C /tmp/stm ls-tree -r e3bd7c9c | awk '{print $3, "stmlib/"$4}' ) | sort -k2 > /tmp/upstream.txt
@@ -89,7 +101,7 @@ join -1 2 -2 2 /tmp/ours.txt /tmp/upstream.txt | awk '$2 != $3 {print "differs:"
 
 No output means every file matches (checked 2026-10-29: 134 of 134; with the resonator, 2026-10-30:
 162 of 162; with the granular processor, 2026-10-30: 192 of 192; with the texture synthesizer,
-2026-10-31: 231 of 231).
+2026-10-31: 231 of 231; with the meta-modulator, 2026-10-31: 248 of 248).
 
 ## Local changes (outside vendor/)
 
@@ -193,6 +205,26 @@ No output means every file matches (checked 2026-10-29: 134 of 134; with the res
     as the module does. Found on Linux: the wrapper's value-initialized holder lost its zeroing
     under GCC's lifetime dead-store elimination, so each render after the first in a process began
     from the previous one's state (`build.rs` now also passes `-flifetime-dse=1` to GCC).
+- `patches/all/` holds one for the meta-modulator (#200):
+  - `0010-modulator-table-reads-clamped.patch`: the crossfade algorithm reads `lut_xfade_in` and
+    `lut_xfade_out` (257 entries) at `parameter * 256`, where the parameter is a per-sample ramp
+    that reaches 1.0 (then entry 257 is read, past the table, at a zero fraction) and can overshoot
+    it by rounding; the fold algorithm reads `lut_bipolar_fold` (4097 entries) from its middle at
+    `sum * kScale`, which reaches the last entry plus one at full-scale inputs and goes past either
+    end when the input amplifiers' saturation and the 6x up converter's overshoot push the signals
+    over full scale. Both reads go through one helper that clamps each index to its table (and
+    bounds the scaled index before its integer conversion), so a read at an end returns that end's
+    value. The arithmetic is `Interpolate()`'s, so every read upstream keeps inside its table is
+    unchanged. The port clamps the same way. An upstream finding (the reads past the tables).
+- `cpp/modulator_oracle.cc` wraps the meta-modulator (`warps::Modulator`, #200). The modulator is
+  value-initialized (zeroed), as the module's global: `Init` leaves the input amplifiers' level
+  followers and gains (`level_`, `pre_gain_`, `post_gain_` in `SaturatingAmplifier`) unwritten,
+  and the first block reads them (an upstream finding). It drives the modulator as the firmware's
+  main loop does (`Init(96000)`, then per block the parameters and `Process`), in the module's
+  60-frame codec blocks or any whole number of 12-frame groups below them (the vocoder's 3x and 4x
+  decimators need groups of 12; from 64 frames the 6x down converter takes another branch, which
+  the desktop harness's 96-frame blocks use and the module never does). Its wrapper range-checks
+  the parameters, and can run without the flush-to-zero scope (an evidence switch).
 - `cpp/shim/beads/drivers/codec.h` stands in for the codec driver's header, which
   `beads/gain_control.h` includes for one type: the codec's raw frame (two `int32_t`). It is on the
   include path after the overlay and before `vendor/`, and no vendored file of that name exists.

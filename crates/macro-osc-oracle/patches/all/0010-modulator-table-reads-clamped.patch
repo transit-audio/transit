@@ -1,0 +1,47 @@
+--- warps/dsp/modulator.cc
++++ warps/dsp/modulator.cc
+@@ -41,2 +41,30 @@
+ using namespace stmlib;
+ 
++// transit oracle: Interpolate() with every table read kept inside the table.
++// The crossfade reads lut_xfade_in and lut_xfade_out (257 entries) at
++// parameter * 256, and the parameter is a per-sample ramp that reaches 1.0
++// (entry 257 is then read at a zero fraction) and can overshoot it by
++// rounding; the fold reads lut_bipolar_fold (4097 entries, from its middle)
++// at sum * kScale, which reaches the last entry at full-scale inputs and goes
++// past either end for inputs the amplifiers push over full scale. Each index
++// is clamped to the table, so a read at an end returns that end's value: the
++// arithmetic is Interpolate()'s, unchanged wherever the upstream read stays
++// inside. The scaled index is bounded first so the integer conversion stays
++// defined. The port does the same.
++static inline float TransitInterpolateClamped(
++    const float* table, int32_t base, int32_t size, float index, float scale) {
++  index *= scale;
++  if (index > 65536.0f) index = 65536.0f;
++  if (index < -65536.0f) index = -65536.0f;
++  MAKE_INTEGRAL_FRACTIONAL(index)
++  int32_t i = base + index_integral;
++  int32_t j = i + 1;
++  i = i < 0 ? 0 : (i > size - 1 ? size - 1 : i);
++  j = j < 0 ? 0 : (j > size - 1 ? size - 1 : j);
++  float a = table[i];
++  float b = table[j];
++  return a + (b - a) * index_fractional;
++}
++
+ void Modulator::Init(float sample_rate) {
+@@ -361,4 +389,6 @@
+     float x_1, float x_2, float parameter) {
+-  float fade_in = Interpolate(lut_xfade_in, parameter, 256.0f);
+-  float fade_out = Interpolate(lut_xfade_out, parameter, 256.0f);
++  float fade_in = TransitInterpolateClamped(
++      lut_xfade_in, 0, LUT_XFADE_IN_SIZE, parameter, 256.0f);
++  float fade_out = TransitInterpolateClamped(
++      lut_xfade_out, 0, LUT_XFADE_OUT_SIZE, parameter, 256.0f);
+   return x_1 * fade_in + x_2 * fade_out;
+@@ -376,3 +406,4 @@
+   const float kScale = 2048.0f / ((1.0f + 1.0f + 0.25f) * 1.02f);
+-  return Interpolate(lut_bipolar_fold + 2048, sum, kScale);
++  return TransitInterpolateClamped(
++      lut_bipolar_fold, 2048, LUT_BIPOLAR_FOLD_SIZE, sum, kScale);
+ }

@@ -1,5 +1,6 @@
-//! The only module with `unsafe`: the C ABI of `cpp/oracle.cc`, `cpp/resonator_oracle.cc` and
-//! `cpp/granular_oracle.cc`, and the session lock that makes it sound to call.
+//! The only module with `unsafe`: the C ABI of the wrappers in `cpp/` (the macro oscillator, the
+//! resonator, the granular processor, the texture synthesizer and the meta-modulator), and the
+//! session lock that makes it sound to call.
 //!
 //! Soundness rests on three invariants, each enforced here:
 //!
@@ -32,6 +33,10 @@
 //!    define (`patches/all/0005` and `0006`): a frozen slice longer than the buffer, a slice shorter
 //!    than a sample (a division by zero), and the last wave of the last bank. With these checks and
 //!    those patches, no input from safe Rust can make the C++ read or write outside its memory.
+//!    The meta-modulator's parameters are range-checked by its wrapper, and its inputs are int16;
+//!    its crossfade and fold read their tables at indices computed from the processed signal
+//!    (the crossfade's ramp reaches the last entry plus one, the fold goes past either end on
+//!    inputs the amplifiers push over full scale), which `patches/all/0010` clamps to the tables.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -159,9 +164,21 @@ pub struct CTextureControls {
     pub(crate) reserved: [u8; 2],
 }
 
+/// Mirrors `OracleModulatorParameters` in `cpp/modulator_oracle.cc` (the meta-modulator's
+/// `Parameters` the main path reads).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CModulatorParameters {
+    pub(crate) channel_drive: [f32; 2],
+    pub(crate) modulation_algorithm: f32,
+    pub(crate) modulation_parameter: f32,
+    pub(crate) note: f32,
+    pub(crate) carrier_shape: i32,
+}
+
 // SAFETY: these declarations match the `extern "C"` definitions in cpp/oracle.cc,
 // cpp/resonator_oracle.cc, cpp/granular_oracle.cc, cpp/texture_oracle.cc (in both of its builds)
-// and cpp/texture_extras_oracle.cc one for one
+// cpp/texture_extras_oracle.cc and cpp/modulator_oracle.cc one for one
 // (names, argument order, and C types: `size_t` is `usize`, `void*` is `*mut c_void`, the structs
 // are the `#[repr(C)]` mirrors above). The build script compiles that file into this crate.
 unsafe extern "C" {
@@ -279,6 +296,19 @@ unsafe extern "C" {
         out: *mut f32,
         size: usize,
     ) -> i32;
+    fn oracle_modulator_codec_block_size() -> usize;
+    fn oracle_modulator_max_block_size() -> usize;
+    fn oracle_modulator_oversampling() -> usize;
+    fn oracle_modulator_new() -> *mut std::ffi::c_void;
+    fn oracle_modulator_free(modulator: *mut std::ffi::c_void);
+    fn oracle_modulator_set_flush(modulator: *mut std::ffi::c_void, flush: u8);
+    fn oracle_modulator_process(
+        modulator: *mut std::ffi::c_void,
+        parameters: *const CModulatorParameters,
+        input: *const i16,
+        out: *mut i16,
+        size: usize,
+    ) -> i32;
 }
 
 static LOCK: Mutex<()> = Mutex::new(());
@@ -392,6 +422,14 @@ impl Session {
     pub fn granular_workspace_size(&self) -> usize {
         // SAFETY: returns a compile-time constant; no state is touched.
         unsafe { oracle_granular_workspace_size() }
+    }
+
+    /// The meta-modulator's constants: the module's codec block (60 frames), `kMaxBlockSize` (96)
+    /// and `kOversampling` (6).
+    #[must_use]
+    pub fn modulator_constants(&self) -> (usize, usize, usize) {
+        // SAFETY: each returns a compile-time constant; no state is touched.
+        unsafe { (oracle_modulator_codec_block_size(), oracle_modulator_max_block_size(), oracle_modulator_oversampling()) }
     }
 }
 
@@ -909,5 +947,64 @@ impl Drop for RawTextureInput<'_> {
         // SAFETY: `self.ptr` came from `oracle_texture_input_new` and is freed only here
         // (invariant 2). Freeing touches no shared state.
         unsafe { oracle_texture_input_free(self.ptr.as_ptr()) }
+    }
+}
+
+/// The meta-modulator (`warps::Modulator`), zero-initialized as on the module.
+pub struct RawModulator<'s> {
+    ptr: std::ptr::NonNull<std::ffi::c_void>,
+    /// Ties the handle to its session (invariant 1).
+    _session: &'s Session,
+}
+
+impl<'s> RawModulator<'s> {
+    /// `None` when the allocation fails.
+    pub(crate) fn new(session: &'s Session) -> Option<Self> {
+        // SAFETY: the lock is held through `session` (invariant 1); the call allocates and
+        // initializes a modulator, or returns null.
+        let ptr = unsafe { oracle_modulator_new() };
+        std::ptr::NonNull::new(ptr).map(|ptr| Self { ptr, _session: session })
+    }
+
+    pub(crate) fn set_flush(&mut self, flush: bool) {
+        // SAFETY: the lock is held through `self._session` (invariant 1); `self.ptr` is a live
+        // modulator (invariant 2) used by this thread only; the call writes one flag.
+        unsafe { oracle_modulator_set_flush(self.ptr.as_ptr(), u8::from(flush)) }
+    }
+
+    /// Processes `input.len()` stereo frames into `out`. `None` when the lengths differ, the frame
+    /// count is not a multiple of 12 from 12 to 60, or a parameter is out of range (the C++ checks
+    /// both, invariants 3 and 4).
+    pub(crate) fn process(&mut self, parameters: &CModulatorParameters, input: &[[i16; 2]], out: &mut [[i16; 2]]) -> Option<()> {
+        let size = input.len();
+        if out.len() != size || size == 0 || size > crate::modulator::MODULATOR_BLOCK_SIZE {
+            return None;
+        }
+        // SAFETY: the lock is held through `self._session` (invariant 1); `self.ptr` is a live
+        // modulator (invariant 2) used by this thread only; `parameters` is valid for reads;
+        // `input` and `out` each hold exactly `2 * size` contiguous `i16` (`[i16; 2]` has no
+        // padding), `size` is at most the 60 frames the wrapper's copies hold and the wrapper
+        // refuses anything but whole groups of 12 (invariant 3); the wrapper range-checks every
+        // parameter it indexes a table with, and every input sample is an int16, which keeps every
+        // table read of the processing path inside its table (patches/all/0010 clamps the two
+        // whose index comes from the processed signal) (invariant 4).
+        let status = unsafe {
+            oracle_modulator_process(
+                self.ptr.as_ptr(),
+                std::ptr::from_ref(parameters),
+                input.as_ptr().cast::<i16>(),
+                out.as_mut_ptr().cast::<i16>(),
+                size,
+            )
+        };
+        (status == 0).then_some(())
+    }
+}
+
+impl Drop for RawModulator<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.ptr` came from `oracle_modulator_new` and is freed only here
+        // (invariant 2). Freeing touches no shared state.
+        unsafe { oracle_modulator_free(self.ptr.as_ptr()) }
     }
 }

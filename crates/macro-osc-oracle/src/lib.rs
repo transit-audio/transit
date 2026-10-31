@@ -1,5 +1,6 @@
 //! The null-test oracle for transit's ported instruments (ADR 0033): the macro oscillator (#194),
-//! the resonator (#198), the granular texture processor (#199) and the texture effect chain (#241).
+//! the resonator (#198), the granular texture processor (#199), the texture effect chain (#241) and
+//! the meta-modulator (#200).
 //!
 //! This crate builds Émilie Gillet's original C++ DSP (MIT; vendored under `vendor/`, see
 //! `VENDOR.md` and `LICENSE-THIRD-PARTY`) with the `cc` crate and exposes it to Rust tests. It is
@@ -22,6 +23,9 @@
 //!   players, the multitap delay, four buffer qualities, the reverb; float stereo in and out), its
 //!   synth and its input stage, and the chain's fixed sweep, at each quality's codec rate in the
 //!   module's blocks (#241).
+//! - [`modulator`] and [`modulator_sweep`]: the meta-modulator (two input amplifiers, the internal
+//!   oscillator, six cross-modulation algorithms and the vocoder; stereo int16 in and out) and its
+//!   fixed sweep, at 96 kHz in the module's 60-frame blocks (#200).
 //! - [`subset`]: the strided-or-full rule for the long tests (`TRANSIT_FULL_ORACLE=1`, #241).
 
 mod ffi;
@@ -29,6 +33,8 @@ pub mod floor;
 pub mod granular;
 pub mod granular_sweep;
 mod model;
+pub mod modulator;
+pub mod modulator_sweep;
 mod oracle;
 pub mod residual;
 pub mod resonator;

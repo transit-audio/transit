@@ -1,9 +1,9 @@
 # transit-macro-osc-oracle
 
-The null-test oracle for transit's ported instruments ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md)): the macro oscillator (#194), the resonator (#198), the granular texture processor (#199) and the texture synthesizer (#241).
+The null-test oracle for transit's ported instruments ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md)): the macro oscillator (#194), the resonator (#198), the granular texture processor (#199), the texture synthesizer (#241) and the meta-modulator (#200).
 
 It builds Émilie Gillet's original C++ DSP (MIT) and lets Rust tests render it sample by sample.
-The Rust ports (`transit-macro-osc`, #195; `transit-resonator`, #198; `transit-granular`, #199; `transit-texture`, #241) are gated by comparing their
+The Rust ports (`transit-macro-osc`, #195; `transit-resonator`, #198; `transit-granular`, #199; `transit-texture`, #241; `transit-modulator`, #200) are gated by comparing their
 output against this crate, engine by engine and model by model, on the same runner. One crate holds
 every module family's oracle, a module per family, so they share the build, the session lock, the
 residual and the floor.
@@ -27,7 +27,8 @@ reaches a release build.
   past-the-end reads and its correlator's shift by 32 made defined, and for the texture
   synthesizer the unspecified argument order and sort ties pinned, its undefined frozen-delay slices
   and last-wave read defined, its buffer size made overridable for a second build, and a desktop
-  diagnostic silenced. They are applied to copies at
+  diagnostic silenced; for the meta-modulator, its crossfade and fold table reads kept inside
+  their tables. They are applied to copies at
   build time (VENDOR.md lists them); every other file builds as fetched.
 - `cpp/oracle.cc`: a C ABI over one voice (`Patch` and `Modulations` in, int16 out/aux frames, as
   the firmware) and over each engine on its own (float out/aux before the voice's gain, limiter and
@@ -52,6 +53,12 @@ reaches a release build.
   input stage; and the fixed sweeps (twelve controls at five levels around a granular and a
   delay-mode center, free, frozen and SEED-pulsed: 2280 points; the synth's 588; nine input-stage
   runs), each point long enough for its grains or taps to read recorded audio.
+- `cpp/modulator_oracle.cc`, `src/modulator.rs` and `src/modulator_sweep.rs`: the meta-modulator
+  (#200): two saturating input amplifiers, the internal oscillator, six cross-modulation
+  algorithms at 6x oversampling and the 20-band vocoder, stereo int16 in and out at 96 kHz in the
+  module's 60-frame blocks; and its fixed sweep (every algorithm and morph at three timbres, drives
+  and note axes, ramps and jumps, for the external carrier and the three oscillator shapes: 432
+  points of 0.25 s or 1 s, a fresh modulator and the same seed and two inputs per point).
 - `src/resonator.rs` and `src/resonator_sweep.rs`: the resonator's safe wrapper and its fixed sweep
   (159 points per model and polyphony, 6 models, polyphony 1 to 4, 48 kHz, 24-frame blocks, a fresh
   part and the same seed per point).
@@ -63,7 +70,7 @@ reaches a release build.
 The macro oscillator and the resonator run at 48 kHz only (their tables and filter coefficients
 assume it), so their oracles accept 48 kHz only; the granular processor runs at 32 kHz only, its
 module's codec rate; the texture synthesizer runs each quality at its codec rate (48, 32 or 24 kHz)
-and its synth at 48 kHz. The macro oscillator's block size is the firmware's `kBlockSize`, 12 frames; a render
+and its synth at 48 kHz; the meta-modulator runs at 96 kHz only, its module's codec rate. The macro oscillator's block size is the firmware's `kBlockSize`, 12 frames; a render
 call takes up to `kMaxBlockSize`, 24. The resonator's firmware renders `kMaxBlockSize`, 24 frames,
 per call, and one call is one control block.
 
@@ -97,6 +104,12 @@ effect-chain renders over 8 qualities, 588 synth renders, 9 input-stage runs) tw
 and again in a second process. Measured: bit-identical on Windows x86-64 with MSVC (2026-10-31);
 Linux and macOS prove it on every CI run.
 
+`tests/modulator_self_floor.rs` does the same for the meta-modulator: the sweep (432 renders)
+twice in one process (strided without `TRANSIT_FULL_ORACLE=1`) and the whole of it again in a
+second process. Measured: bit-identical on Windows x86-64 with MSVC (2026-10-31); Linux and macOS
+prove it on every CI run. Rendering without flush-to-zero moved no output sample over its slowest
+decays (`the_flush_choice_is_measured`).
+
 To re-measure (after a compiler, flag or vendor change):
 
 ```sh
@@ -104,6 +117,7 @@ cargo test --locked -p transit-macro-osc-oracle --test self_floor -- --nocapture
 cargo test --locked -p transit-macro-osc-oracle --test resonator_self_floor -- --nocapture
 cargo test --locked -p transit-macro-osc-oracle --test granular_self_floor -- --nocapture
 cargo test --locked -p transit-macro-osc-oracle --test texture_self_floor -- --nocapture
+cargo test --locked -p transit-macro-osc-oracle --test modulator_self_floor -- --nocapture
 ```
 
 A pass means the floor is still `-inf` on that runner. A failure prints the engine, the point and the

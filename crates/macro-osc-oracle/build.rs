@@ -1,5 +1,5 @@
-//! Builds the vendored C++ (vendor/: the macro oscillator, the resonator and the granular texture
-//! processor) and the C ABI wrappers (cpp/oracle.cc, cpp/resonator_oracle.cc, cpp/granular_oracle.cc).
+//! Builds the vendored C++ (vendor/: the macro oscillator, the resonator, the granular texture
+//! processor, the texture synthesizer and the meta-modulator) and the C ABI wrappers (cpp/*.cc).
 //!
 //! Floating point is kept strict so the oracle is a stable reference: `-DTEST` (the desktop branch
 //! of stmlib, as the firmware's own test makefile), `-O2` whatever the cargo profile, no
@@ -12,8 +12,8 @@
 //! vendor/, `git apply -p0` format) are applied to copies in `OUT_DIR/overlay`: the overlay comes
 //! first on the include path, so a patched header shadows the vendored one, and a patched source
 //! file is compiled from the overlay. `patches/all/` restores a line an upstream merge lost and makes
-//! the granular processor's past-the-end reads and one undefined shift defined (VENDOR.md); every
-//! other file compiles as fetched.
+//! past-the-end reads and other undefined or unspecified behavior defined (VENDOR.md); every other
+//! file compiles as fetched.
 
 #![forbid(unsafe_code)]
 
@@ -114,6 +114,8 @@ fn main() {
     collect(&vendor.join("beads/dsp"), "cc", &mut sources);
     sources.push(vendor.join("beads/resources.cc"));
     sources.push(vendor.join("beads/gain_control.cc"));
+    collect(&vendor.join("warps/dsp"), "cc", &mut sources);
+    sources.push(vendor.join("warps/resources.cc"));
     sources.push(vendor.join("stmlib/dsp/atan.cc"));
     sources.push(vendor.join("stmlib/dsp/units.cc"));
     sources.push(vendor.join("stmlib/utils/random.cc"));
@@ -122,6 +124,7 @@ fn main() {
     sources.push(cpp.join("granular_oracle.cc"));
     sources.push(cpp.join("texture_oracle.cc"));
     sources.push(cpp.join("texture_extras_oracle.cc"));
+    sources.push(cpp.join("modulator_oracle.cc"));
     // The texture processor's second build, at the port's longest buffer (cpp/texture_oracle.cc):
     // the effect chain's sources only, in a renamed namespace.
     let mut long_sources: Vec<PathBuf> = ["processor.cc", "mu_law.cc", "delay_clock.cc", "delay_controller.cc", "trigger_generator.cc"]
