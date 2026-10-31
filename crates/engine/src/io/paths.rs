@@ -3,7 +3,8 @@
 //! per-block render ([`transit_mix::RangeRender::next_block`]) does not.
 //!
 //! Alignment: the plan pads every sink (Main and each output path) to the one device latency L
-//! (ADR 0015 section 6), and `RangeRender` drops the first L samples from all of them together.
+//! (ADR 0015 section 6), and `RangeRender` removes that latency from all of them together,
+//! following changes per block with the same overlap/gap splice as a plain main bounce (#251).
 //! Every file therefore starts at the range start, sample-aligned with the others and with a
 //! plain main bounce of the same session.
 

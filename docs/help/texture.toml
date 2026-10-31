@@ -76,7 +76,7 @@ text = "Treats the seed input as patched, as a cable in the module's seed jack w
 [[entry]]
 id = "texture.quality"
 name = "Quality"
-text = "The buffer's recording quality, each at the module's own rate: Digital (16-bit at 48 kHz, 4 seconds at the default Length), Vintage Digital (12-bit at 32 kHz, 8 seconds), Clean Tape (12-bit grains at 24 kHz, about 10.7 seconds) and Dirty Tape (8-bit at 24 kHz with wow and flutter, 16 seconds). Changing it restarts the chain with a short fade: the output dips for about 20 ms and the recording starts over, so automating it makes a stutter at every change."
+text = "The buffer's recording quality, each at the module's own rate: Digital (16-bit at 48 kHz, 4 seconds at the default Length), Vintage Digital (12-bit at 32 kHz, 8 seconds), Clean Tape (12-bit grains at 24 kHz, about 10.7 seconds) and Dirty Tape (8-bit at 24 kHz with wow and flutter, 16 seconds). Changing it restarts the chain with a short fade: the output dips for about 20 ms and the recording starts over, so automating it makes a stutter at every change. Bounces follow the changed latency so later audio stays on the timeline; the restart and tape modulation remain audible."
 
 [[entry]]
 id = "texture.buffer"

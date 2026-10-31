@@ -40,3 +40,46 @@ Convention (transit follows what Ableton and Logic agree on): Ableton's Auto Fil
 - **A MIDI sidechain from another track.** More general, but needs routing UI and a key-like source selection for notes; the track's own notes are what this use asks for. Can be added later on the same view.
 - **Feeding inserts from the clips and live input directly.** Would bypass the MIDI effect slot and the note table's matching, so a transposed or velocity-scaled note would not be what the insert hears.
 - **Putting the envelope and filter inside each built-in instrument.** That is #243 for the Macro Oscillator; an insert also serves hosted instruments.
+
+## Amendment: offline latency changes (#251)
+
+The offline range renderer tracks the chain latency per block exactly as the live path's
+compensation does: Main and output paths use the one device latency from ADR 0015 section 6;
+a bus render uses that bus's arrival latency. This replaces the Texture review's #251 known
+limit in ADR 0033. Device latency declarations and the live renderer are unchanged (option A).
+A fixed maximum for all settings (option B) would charge every live Digital Texture the
+Dirty Tape converter latency to solve an offline placement problem.
+
+For a rendered block starting at relative frame R with reported latency L, its first sample
+belongs at output frame R - L. The output cursor only advances: discard the part overlapping
+already delivered frames when L grows, and insert zero frames for the missing interval when
+L shrinks. A decrease does not keep the larger skip, which would leave subsequent audio early.
+Both adjustments can span several blocks; later changes replace the current mapping rather
+than accumulating stale skip debt. Render extra input as needed and deliver exactly the requested
+range length. Freeze, commit, mix/bus bounce and path export all use this same `RangeRender`.
+Freeze metadata retains the initial chain latency as a constant playback delay; the stored
+audio has already been aligned.
+
+**Equality and transition limits.** With constant latency, bounce is bit-identical to the live
+samples after the initial trim, including the pre-change goldens. A latency change is the case
+where a single trim no longer makes them equal: bounce splices the live samples using the
+mapping above. Every retained sample is still bit-identical, and inserted gap samples are zero;
+the dense-audio live oracle in `crates/mix/tests/offline_latency.rs` asserts that distinction over
+growth, shrinkage and repeated changes. This keeps subsequent audio on the timeline rather than
+preserving a permanent offset merely to match a live capture with one fixed trim.
+
+An exact reconstruction through the transition is not available from the existing block-latency
+interface. Live PDC blends two different delay positions for 256 samples, and a Texture restart
+can occur within a block whose latency readout describes its ending state. The summed output
+cannot be unmixed into its two delay histories. Keep that crossfade and the device's restart fade;
+do not claim the splice removes their audible transition or recovers discarded audio. Built-in
+parameter automation still takes effect at block starts, so a point inside a block is observed
+at the next start, just as live. Offline does not change automation timing or plug-in DSP.
+
+At 48 kHz, Digital to Dirty Tape changes the reported latency from 11 to 149 frames; Digital to
+Vintage Digital changes it from 11 to 115. The dry peer's impulses now remain at their exact
+timeline positions in either direction. Dirty Tape itself applies intentional wow/flutter after
+the dry/wet mix, even at 0% wet: those effect offsets remain, as the DSP impulse tests already
+require. The regression asserts its measured peak positions separately; it does not confuse
+that modulation with converter or compensation latency. Compressor lookahead growth and
+shrinkage preserve both tracks' exact impulse positions.
