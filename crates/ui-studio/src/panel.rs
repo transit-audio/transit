@@ -94,7 +94,7 @@ static PLATE: [Row; 1] = [&[
 /// The Macro Oscillator's id (ADR 0033, #195).
 const MACRO_OSC: &str = "macro_oscillator";
 
-static MACRO: [Row; 5] = [
+static MACRO: [Row; 4] = [
     &[
         sec("Model", 1, &[Menu("model", "")]),
         sec("Tone", 3, &[Knob("harmonics", "Harmonics"), Knob("timbre", "Timbre"), Knob("morph", "Morph")]),
@@ -106,7 +106,9 @@ static MACRO: [Row; 5] = [
         sec("Output", 2, &[Knob("aux_mix", "Aux Mix"), Knob("level", "Level")]),
         sec("Voices", 1, &[Choice("voices", "Voices"), Lights]),
     ],
-    // From here on: transit's addition (#243), labeled as such above this row.
+    // From here on: transit's addition (#243), labeled as such above this row. The shaper, the
+    // filter and both LFOs share one row of two lines, so the expanded window stays within 800 pt
+    // (1080p at 125% with the title bar).
     &[
         sec(
             "Shaper",
@@ -138,11 +140,9 @@ static MACRO: [Row; 5] = [
                 Knob("filter_release", "Release"),
             ],
         ),
-    ],
-    &[
         sec(
             "LFO 1",
-            7,
+            4,
             &[
                 Choice("lfo1_shape", "Shape"),
                 Knob("lfo1_rate", "Rate"),
@@ -155,7 +155,7 @@ static MACRO: [Row; 5] = [
         ),
         sec(
             "LFO 2",
-            7,
+            4,
             &[
                 Choice("lfo2_shape", "Shape"),
                 Knob("lfo2_rate", "Rate"),

@@ -435,7 +435,7 @@ fn the_macro_oscillator_panel_shows_voices_the_shaper_the_matrix_grid_and_voice_
     let (right, bottom) = w.rows.iter().fold((0.0f32, 0.0f32), |(r, b), x| (r.max(x.control[2]), b.max(x.control[3])));
     assert!(w.rect[2] >= right && w.rect[2] - right <= 2.0 * crate::theme::SPACE + 40.0, "{:?} around {right}", w.rect);
     assert!(w.rect[3] >= bottom, "{:?} covers {bottom}", w.rect);
-    assert!(w.rect[2] - w.rect[0] < 1000.0 && w.rect[3] - w.rect[1] < 1000.0, "{:?}", w.rect);
+    assert!(w.rect[2] - w.rect[0] <= 1300.0 && w.rect[3] - w.rect[1] <= 800.0, "{:?}", w.rect);
     assert_eq!(t.row(tr, "mod1_source").value, "Off");
     assert_eq!(t.row(tr, "mod16_amount").value, "0%");
     assert_eq!(t.row(tr, "shaper").value, "Off");
@@ -763,4 +763,25 @@ fn a_macro_oscillator_preset_from_before_the_matrix_parses_into_rows() {
         assert_eq!(p.params.get(id), Some(&v), "{id}");
     }
     assert!(!p.params.contains_key("mod2_source"), "a zero depth makes no row");
+}
+
+/// The Macro Oscillator's window with the shaper and the matrix shown fits a 1080p screen at 125%
+/// scaling with its title bar (864 pt of height there, less the title bar and a taskbar): at most
+/// 800 pt tall and 1300 pt wide at 100% (#243, #232). Collapsed, it keeps the module's own size
+/// (556 x 358 pt, as before the shaper and the matrix).
+#[test]
+fn the_expanded_macro_oscillator_window_fits_1080p_at_125_percent() {
+    let mut t = T::new();
+    let (tr, _) = open_plugin(&mut t, "macro_oscillator");
+    t.frames(3);
+    let c = t.window(tr).rect;
+    let (cw, ch) = (c[2] - c[0], c[3] - c[1]);
+    assert!((cw - 556.0).abs() < 1.0 && (ch - 358.125).abs() < 1.0, "collapsed {cw} x {ch} pt");
+    let r = t.window(tr).addition_rect;
+    t.click(((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0), 1);
+    t.frames(3);
+    let w = t.window(tr);
+    assert!(w.rows.iter().any(|r| r.param == "mod16_amount") && w.rows.iter().any(|r| r.param == "lfo2_amount"), "all of it shows");
+    let (width, height) = (w.rect[2] - w.rect[0], w.rect[3] - w.rect[1]);
+    assert!(height <= 800.0 && width <= 1300.0, "expanded {width} x {height} pt");
 }

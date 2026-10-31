@@ -20,6 +20,10 @@ const COLUMNS: [(usize, &str, f32); 5] = [(0, "Source", 88.0), (1, "Via", 70.0),
 /// Rows per column of the grid.
 const PER_COLUMN: usize = 8;
 const NUMBER_W: f32 = 16.0;
+/// A grid line's height and the gap between lines: compact, so the expanded window stays within
+/// 800 pt.
+const LINE_H: f32 = 18.0;
+const LINE_GAP: f32 = 2.0;
 
 /// Every row parameter the grid shows, in row order.
 pub fn params() -> impl Iterator<Item = &'static str> {
@@ -38,7 +42,9 @@ fn grid(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     ui.horizontal_top(|ui| {
         for first in (0..ROWS).step_by(PER_COLUMN) {
             ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 3.0;
+                ui.spacing_mut().item_spacing.y = LINE_GAP;
+                ui.spacing_mut().button_padding.y = 1.0;
+                ui.spacing_mut().interact_size.y = LINE_H;
                 ui.horizontal(|ui| {
                     ui.add_sized([NUMBER_W, 14.0], egui::Label::new(""));
                     for (_, title, w) in COLUMNS {
@@ -47,7 +53,7 @@ fn grid(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
                 });
                 for r in first..(first + PER_COLUMN).min(ROWS) {
                     ui.horizontal(|ui| {
-                        ui.add_sized([NUMBER_W, 18.0], egui::Label::new(RichText::new(format!("{}", r + 1)).size(10.5).color(TOKENS.text_dim)));
+                        ui.add_sized([NUMBER_W, LINE_H], egui::Label::new(RichText::new(format!("{}", r + 1)).size(10.5).color(TOKENS.text_dim)));
                         for (field, _, w) in COLUMNS {
                             cell(app, ui, key, ins, info, r, field, w, lay);
                         }
@@ -79,7 +85,7 @@ fn cell(
     let v = p.clamp(app.followed_param(key, id).or_else(|| ins.params.get(id).copied()).unwrap_or(p.default));
     let drawn = if p.choices.is_empty() {
         let mut x = v;
-        let r = ui.add_sized([width, 18.0], egui::DragValue::new(&mut x).range(p.min..=p.max).speed(0.5).fixed_decimals(0).suffix("%"));
+        let r = ui.add_sized([width, LINE_H], egui::DragValue::new(&mut x).range(p.min..=p.max).speed(0.5).fixed_decimals(0).suffix("%"));
         let reset = crate::builtin_editor::double_clicked(ui, &r);
         let new = if reset { Some(p.default) } else { (x != v).then_some(x) };
         (r, new, p.format(new.unwrap_or(v)))
