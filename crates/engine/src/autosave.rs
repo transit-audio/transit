@@ -262,6 +262,16 @@ impl Autosave {
             src.unsaved = true;
             copies.insert(src.id, (Arc::downgrade(audio), name));
         }
+        crate::io::frozen_recording::save(&mut s, &self.dir)?;
+        // Recovery resolves ordinary media against the original session; autosave's frozen
+        // files therefore carry absolute paths into this recovery folder.
+        for saved in s.tracks.iter_mut().flat_map(|t| t.mixer.inserts.iter_mut().flatten()).filter_map(|i| i.frozen_recording.as_mut()) {
+            for path in [&mut saved.path, &mut saved.continuation] {
+                if !path.is_empty() && Path::new(path).is_relative() {
+                    *path = self.dir.join(&*path).to_string_lossy().into_owned();
+                }
+            }
+        }
         let text = s.to_json().map_err(|err| EngineError::Io(err.to_string()))?;
         write_atomically(&self.dir.join(ORIGIN), origin.unwrap_or_default().as_bytes())?;
         write_atomically(&self.dir.join(SESSION), text.as_bytes())?;
@@ -607,6 +617,41 @@ mod tests {
         assert_eq!(paths, [(true, false), (false, true)]);
         assert_eq!(levels(&r), [0.5, -0.25]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn frozen_texture_media_survives_autosave_and_crash_recovery() {
+        use transit_dsp::{Plugin, plugins::texture::TextureFx};
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        let dir = std::env::temp_dir().join(format!(
+            "transit-frozen-autosave-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let mut e = Engine::default();
+        e.execute("track.new", &json!({"name": "Pad"})).unwrap();
+        let track = e.session().tracks[0].id.0;
+        e.execute("mix.insert", &json!({"track": track, "slot": 0, "plugin": "texture"})).unwrap();
+        let mut device = TextureFx::new();
+        device.prepare(48_000.0, 64, 2);
+        let mut audio = vec![vec![0.25; 64]; 2];
+        for _ in 0..30 {
+            device.process(&mut audio, 64);
+        }
+        device.set_param("freeze", 1.0);
+        device.process(&mut audio, 64);
+        let data = device.save_state().unwrap();
+        e.execute("mix.insert_state", &json!({"track": track, "slot": 0, "state": transit_model::b64::encode(&data)})).unwrap();
+        let mut autosave = Autosave::create(&dir, "Pad").unwrap();
+        autosave.write(e.session(), None, None).unwrap();
+        autosave.write(e.session(), None, None).unwrap();
+        assert_eq!(std::fs::read_dir(autosave.dir.join("Audio Files")).unwrap().count(), 2, "unchanged media is reused");
+        drop(autosave);
+        let mut recovered = Engine::default();
+        assert!(recover(&mut recovered, &leftovers(&dir)[0]).unwrap().is_empty());
+        let saved = recovered.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap();
+        assert_eq!(saved.data.as_deref(), Some(data.as_slice()));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

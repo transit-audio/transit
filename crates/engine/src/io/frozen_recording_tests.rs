@@ -121,7 +121,7 @@ fn missing_and_wrong_quality_media_open_silent_and_name_track_and_insert() {
         if missing {
             std::fs::remove_file(folder.0.join(&ins.frozen_recording.as_ref().unwrap().path)).unwrap();
         } else {
-            ins.params.insert("quality".into(), 3.0);
+            ins.frozen_recording.as_mut().unwrap().quality = 3;
             std::fs::write(folder.file(), e.session().to_json().unwrap()).unwrap();
         }
         let (loaded, notes) = opened(&folder);
@@ -147,6 +147,8 @@ fn freeze_off_clears_the_reference_keeps_old_media_and_round_trips_as_before() {
     let ins = e.session_mut().tracks[0].mixer.inserts[0].as_mut().unwrap();
     let old = ins.frozen_recording.as_ref().unwrap().path.clone();
     ins.params.insert("freeze".into(), 0.0);
+    let track = e.session().tracks[0].id.0;
+    e.execute("mix.insert_state", &json!({"track": track, "slot": 0, "state": null})).unwrap();
     super::super::session::save_session(&mut e, folder.file().to_str().unwrap()).unwrap();
     assert!(e.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.is_none());
     assert!(folder.0.join(old).is_file(), "immutable media remains for backups");
@@ -175,4 +177,170 @@ fn importing_a_frozen_track_at_another_host_rate_reports_the_mismatch() {
     assert!(result.missing[0].contains("Texture insert 1") && result.missing[0].contains("mismatch"));
     let ins = receiver.session().track(result.tracks[0]).unwrap().mixer.inserts[0].as_ref().unwrap();
     assert!(ins.frozen_recording.as_ref().unwrap().data.is_none());
+}
+
+#[test]
+fn captured_setup_and_live_freeze_win_over_stored_base_values() {
+    let folder = Folder::new();
+    let (mut e, _) = fixture(2, true);
+    let ins = e.session_mut().tracks[0].mixer.inserts[0].as_mut().unwrap();
+    ins.params.insert("quality".into(), 0.0);
+    ins.params.insert("buffer".into(), 4.0);
+    ins.params.insert("mono_input".into(), 1.0);
+    ins.params.insert("freeze".into(), 0.0);
+    super::super::session::save_session(&mut e, folder.file().to_str().unwrap()).unwrap();
+    let (loaded, notes) = opened(&folder);
+    assert!(notes.is_empty(), "{notes:?}");
+    let saved = loaded.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap();
+    assert_eq!((saved.quality, saved.buffer_frames, saved.channels), (2, 192_000, 2));
+    assert!(saved.data.is_some());
+    // Live Freeze off clears the captured reference even if base Freeze remains on.
+    let track = e.session().tracks[0].id.0;
+    e.session_mut().tracks[0].mixer.inserts[0].as_mut().unwrap().params.insert("freeze".into(), 1.0);
+    e.execute("mix.insert_state", &json!({"track": track, "slot": 0, "state": null})).unwrap();
+    super::super::session::save_session(&mut e, folder.file().to_str().unwrap()).unwrap();
+    assert!(opened(&folder).0.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.is_none());
+}
+
+#[test]
+fn wav_alone_restores_the_recording_and_reopens_deterministically() {
+    for quality in 0..4 {
+        for corrupt in [false, true] {
+            let folder = Folder::new();
+            let (mut e, _) = fixture(quality, true);
+            super::super::session::save_session(&mut e, folder.file().to_str().unwrap()).unwrap();
+            let saved = e.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap();
+            let original_pcm = Recording::parse(saved.data.as_ref().unwrap()).unwrap().pcm.to_vec();
+            let companion = folder.0.join(&saved.continuation);
+            if corrupt {
+                std::fs::write(companion, b"future continuation version").unwrap();
+            } else {
+                std::fs::remove_file(companion).unwrap();
+            }
+            let (a, notes) = opened(&folder);
+            assert_eq!(notes.len(), 1);
+            assert!(notes[0].contains("WAV restored") && notes[0].contains("continuation not restored"), "{notes:?}");
+            let data = a.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap().data.as_ref().unwrap();
+            let r = Recording::parse(data).unwrap();
+            assert_eq!(r.pcm, original_pcm);
+            assert!(r.continuation.is_empty());
+            let (b, _) = opened(&folder);
+            let (mut a, mut b) = (device(&a), device(&b));
+            let mut heard = false;
+            for _ in 0..64 {
+                let mut x = vec![vec![0.0; 250]; 2];
+                let mut y = x.clone();
+                a.process(&mut x, 250);
+                b.process(&mut y, 250);
+                heard |= x.iter().flatten().any(|v| *v != 0.0);
+                assert_eq!(x, y);
+            }
+            assert!(heard, "quality {quality}");
+        }
+    }
+}
+
+#[test]
+fn failed_restore_retains_missing_reference_through_capture_save_and_copy() {
+    let folder = Folder::new();
+    let (mut e, _) = fixture(0, true);
+    super::super::session::save_session(&mut e, folder.file().to_str().unwrap()).unwrap();
+    let saved = e.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap();
+    let missing = folder.0.join(&saved.path);
+    std::fs::remove_file(&missing).unwrap();
+    let (mut loaded, _) = opened(&folder);
+    let mut silent = device(&loaded);
+    let state = silent.save_state().map(|data| transit_model::b64::encode(&data));
+    let track = loaded.session().tracks[0].id.0;
+    loaded.execute("mix.insert_state", &json!({"track": track, "slot": 0, "state": state})).unwrap();
+    super::super::session::save_session(&mut loaded, folder.file().to_str().unwrap()).unwrap();
+    assert!(!missing.exists(), "saving must never replace missing audio with silence");
+    let copy = Folder::new();
+    super::super::session::save_session_copy(&loaded, copy.file().to_str().unwrap()).unwrap();
+    for f in [&folder, &copy] {
+        let (again, notes) = opened(f);
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        assert!(notes[0].contains("opens silent"));
+        assert!(again.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap().restore_failed);
+    }
+    // Recording after unfreezing permits replacement even without saving while Freeze is off.
+    silent.set_param("freeze", 0.0);
+    let mut audio = vec![vec![0.25; 250]; 2];
+    silent.process(&mut audio, 250);
+    silent.set_param("freeze", 1.0);
+    silent.process(&mut audio, 250);
+    let new = silent.save_state().unwrap();
+    loaded.execute("mix.insert_state", &json!({"track": track, "slot": 0, "state": transit_model::b64::encode(&new)})).unwrap();
+    assert!(!loaded.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap().restore_failed);
+    // A live Freeze-off capture also ends the missing recording.
+    loaded.execute("mix.insert_state", &json!({"track": track, "slot": 0, "state": null})).unwrap();
+    assert!(loaded.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.is_none());
+}
+
+#[test]
+fn legacy_wav_without_a_companion_uses_its_saved_setup_metadata() {
+    let folder = Folder::new();
+    let (mut e, _) = fixture(1, true);
+    super::super::session::save_session(&mut e, folder.file().to_str().unwrap()).unwrap();
+    let saved = e.session_mut().tracks[0].mixer.inserts[0].as_mut().unwrap().frozen_recording.as_mut().unwrap();
+    std::fs::remove_file(folder.0.join(&saved.continuation)).unwrap();
+    saved.header.clear();
+    std::fs::write(folder.file(), e.session().to_json().unwrap()).unwrap();
+    let (loaded, notes) = opened(&folder);
+    assert_eq!(notes.len(), 1, "{notes:?}");
+    assert!(notes[0].contains("WAV restored"));
+    assert!(loaded.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap().data.is_some());
+}
+
+#[test]
+fn frozen_media_write_failure_does_not_refuse_the_session() {
+    let (mut e, _) = fixture(0, true);
+    store(e.session_mut(), &mut |_, _, _| Err(EngineError::Io("disk refused media".into()))).unwrap();
+    let saved = e.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap();
+    assert!(saved.report.contains("disk refused media"));
+    assert!(e.session().to_json().unwrap().contains("disk refused media"));
+    // Invalid runtime packets also cannot refuse unrelated session state.
+    e.session_mut().tracks[0].mixer.inserts[0].as_mut().unwrap().frozen_recording.as_mut().unwrap().data = Some(vec![0; 20].into());
+    store(e.session_mut(), &mut |_, _, _| panic!("invalid capture must not be written")).unwrap();
+}
+
+#[test]
+fn failed_media_write_retains_the_previous_file_and_its_setup() {
+    let folder = Folder::new();
+    let (mut e, _) = fixture(0, true);
+    super::super::session::save_session(&mut e, folder.file().to_str().unwrap()).unwrap();
+    let before = e.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.clone().unwrap();
+    let (_, mut newer) = fixture(2, true);
+    let packet = newer.save_state().unwrap();
+    let track = e.session().tracks[0].id.0;
+    e.execute("mix.insert_state", &json!({"track": track, "slot": 0, "state": transit_model::b64::encode(&packet)})).unwrap();
+    store(e.session_mut(), &mut |_, _, _| Err(EngineError::Io("disk refused media".into()))).unwrap();
+    let saved = e.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap();
+    assert_eq!(
+        (&saved.path, &saved.continuation, &saved.header, saved.quality),
+        (&before.path, &before.continuation, &before.header, before.quality)
+    );
+    std::fs::write(folder.file(), e.session().to_json().unwrap()).unwrap();
+    let (loaded, notes) = opened(&folder);
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(loaded.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap().data, before.data);
+}
+
+#[test]
+fn invalid_capture_keeps_previous_frozen_media_and_does_not_abort_save() {
+    let folder = Folder::new();
+    let (mut e, _) = fixture(0, true);
+    super::super::session::save_session(&mut e, folder.file().to_str().unwrap()).unwrap();
+    let before = e.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.clone().unwrap();
+    let track = e.session().tracks[0].id.0;
+    let response =
+        e.execute("mix.insert_state", &json!({"track": track, "slot": 0, "state": transit_model::b64::encode(b"invalid frozen packet")})).unwrap();
+    assert!(response["report"].as_str().unwrap().contains("invalid frozen capture"));
+    let retained = e.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap();
+    assert_eq!((&retained.path, &retained.header, &retained.data), (&before.path, &before.header, &before.data));
+    assert!(retained.report.contains("invalid frozen capture"));
+    e.execute("session.save", &json!({"path": folder.file().to_string_lossy()})).unwrap();
+    let (loaded, notes) = opened(&folder);
+    assert!(notes.is_empty(), "{notes:?}");
+    assert_eq!(loaded.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap().data, before.data);
 }

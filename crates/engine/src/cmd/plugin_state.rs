@@ -63,16 +63,36 @@ fn insert_state(e: &mut Engine, p: &Value) -> Result<Value> {
     if ins.plugin == "texture" {
         ins.frozen_recording = match state.filter(|data| !data.is_empty()) {
             Some(data) => {
-                let r = transit_dsp::plugins::texture::freeze_state::Recording::parse(&data).ok_or_else(|| bad(CMD, "invalid frozen recording"))?;
-                Some(transit_model::FrozenRecording {
+                let Some(r) = transit_dsp::plugins::texture::freeze_state::Recording::parse(&data) else {
+                    let report = format!(
+                        "track {:?}, Texture insert {}: invalid frozen capture; previous recording retained",
+                        tr.name,
+                        slot.map_or_else(|| "instrument".to_string(), |i| (i + 1).to_string())
+                    );
+                    ins.frozen_recording.get_or_insert_with(Default::default).report.clone_from(&report);
+                    log::warn!("{report}");
+                    e.message(report.clone());
+                    return Ok(json!({"bytes": 0, "report": report}));
+                };
+                // A silent device created after a failed restore is not replacement media.
+                // Only a device that has actually recorded since reset may replace it.
+                if !r.has_recorded() && ins.frozen_recording.as_ref().is_some_and(|saved| saved.restore_failed) {
+                    return Ok(json!({"bytes": 0, "retained_missing_recording": true}));
+                }
+                let mut saved = ins.frozen_recording.clone().unwrap_or_else(|| transit_model::FrozenRecording {
                     quality: r.quality,
                     rate: r.rate,
                     channels: r.channels,
                     span: r.span,
                     buffer_frames: r.buffer_frames,
-                    data: Some(data.into()),
+                    header: r.wav_header(),
                     ..Default::default()
-                })
+                });
+                // Keep the previous on-disk setup and reference until the new media is
+                // successfully written. The runtime packet owns its captured setup.
+                saved.data = Some(data.into());
+                saved.restore_failed = false;
+                Some(saved)
             }
             None => None,
         };

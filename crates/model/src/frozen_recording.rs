@@ -17,6 +17,14 @@ pub struct FrozenRecording {
     pub span: u32,
     /// The buffer setting in 16-bit stereo frames at 48 kHz.
     pub buffer_frames: u32,
+    /// Captured setup header, independent of the optional continuation file.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub header: Vec<u8>,
+    /// A media problem survives saving until the recording is available again.
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub report: String,
+    #[serde(skip)]
+    pub restore_failed: bool,
     #[serde(skip)]
     pub data: Option<Arc<[u8]>>,
 }

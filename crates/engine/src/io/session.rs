@@ -6,6 +6,18 @@ pub fn save_session(e: &mut Engine, path: &str) -> Result<usize> {
     let (fresh, written, p) = write_session(e.session(), path, false)?;
     // Keep the in-memory document in sync (paths, unsaved flags) without an undo step.
     *e.session_mut() = fresh;
+    let reports: Vec<_> = e
+        .session()
+        .tracks
+        .iter()
+        .flat_map(|t| t.mixer.inserts.iter().flatten())
+        .filter_map(|ins| ins.frozen_recording.as_ref())
+        .filter(|saved| !saved.report.is_empty())
+        .map(|saved| saved.report.clone())
+        .collect();
+    for report in reports {
+        e.message(report);
+    }
     e.path = Some(p.to_string_lossy().into_owned());
     e.mark_clean();
     Ok(written)
@@ -488,8 +500,8 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
     }
     missing.extend(super::frozen_recording::load_with(&mut s, &mut |saved| {
         let audio = files.get(&saved.path).ok_or_else(|| format!("missing {}", saved.path))?;
-        let state = files.get(&saved.continuation).ok_or_else(|| format!("missing {}", saved.continuation))?;
-        super::frozen_recording::from_files(audio, state)
+        let state = files.get(&saved.continuation).map_or(&[][..], Vec::as_slice);
+        super::frozen_recording::from_files(saved, audio, state)
     }));
     let stem = Path::new(name).file_stem().and_then(|x| x.to_str()).filter(|x| !x.is_empty()).unwrap_or("Untitled").to_string();
     let notes = std::mem::take(&mut s.load_notes);
