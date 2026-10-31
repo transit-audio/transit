@@ -149,6 +149,20 @@ impl Default for Settings {
     }
 }
 
+/// A held voice crossing the shaper's switch in this block (#262): its output crossfades over the
+/// block's frames from the old path to the new, so the switch makes no step.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Fade {
+    /// No switch: the voice stays on its path.
+    None,
+    /// Into the shaper: from the low-pass gate's output to the filtered, enveloped one. The filter
+    /// starts from rest.
+    In,
+    /// Out of the shaper: from the filtered, enveloped output to the low-pass gate's. The filter
+    /// then rests.
+    Out,
+}
+
 /// The modulations one block of the shaper's filter takes from the matrix (destination sums).
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct FilterMods {
@@ -324,13 +338,19 @@ impl Shaper {
     }
 
     /// Runs one block: the envelopes advance a frame at a time; when the voice is `shaped`, each
-    /// frame of `block` goes through the drive, the filter and the amp envelope's gain.
-    pub(crate) fn process(&mut self, s: &Settings, shaped: bool, block: &mut [f32]) {
+    /// frame of `block` goes through the drive, the filter and the amp envelope's gain. A `fade`
+    /// (a held voice crossing the switch) runs the filter as well and crossfades linearly over the
+    /// block from the old path to the new: frame `k` of `n` takes `(k + 1) / n` of the new one.
+    pub(crate) fn process(&mut self, s: &Settings, shaped: bool, fade: Fade, block: &mut [f32]) {
+        if fade == Fade::In {
+            self.sections = [Section::default(); 2];
+        }
         let [c0, c1] = self.coefs;
-        for y in block.iter_mut() {
+        let step = 1.0 / block.len().max(1) as f32;
+        for (k, y) in block.iter_mut().enumerate() {
             let amp = self.amp.next(&s.amp);
             self.filter_env.next(&s.filter_env);
-            if !shaped {
+            if !shaped && fade == Fade::None {
                 continue;
             }
             let [s0, s1] = &mut self.sections;
@@ -338,7 +358,16 @@ impl Shaper {
             if s.slope24 {
                 v = s1.tick(&c1, s.mode, v);
             }
-            *y = v * amp * self.amp_scale;
+            let out = v * amp * self.amp_scale;
+            let w = (k + 1) as f32 * step;
+            *y = match fade {
+                Fade::None => out,
+                Fade::In => *y + (out - *y) * w,
+                Fade::Out => out + (*y - out) * w,
+            };
+        }
+        if fade == Fade::Out {
+            self.sections = [Section::default(); 2];
         }
     }
 }
@@ -364,7 +393,7 @@ mod tests {
         sh.note(&s, 1.0, [0.0; 2]);
         let mut block = [0.3f32; super::super::BLOCK];
         sh.design(&s, 60.0, FilterMods::default());
-        sh.process(&s, s.on, &mut block);
+        sh.process(&s, s.on, Fade::None, &mut block);
         assert!(block.iter().all(|y| y.to_bits() == 0.3f32.to_bits()));
         assert!(sh.amp.level > 0.0 && sh.filter_env.level > 0.0);
     }
@@ -376,20 +405,20 @@ mod tests {
         let mut sh = Shaper::new(3);
         let mut block = [0.5f32; super::super::BLOCK];
         sh.design(&s, 60.0, FilterMods::default());
-        sh.process(&s, s.on, &mut block);
+        sh.process(&s, s.on, Fade::None, &mut block);
         assert!(block.iter().all(|y| *y == 0.0), "no note, no sound");
         sh.note(&s, 1.0, [0.0; 2]);
         let mut peak = 0.0f32;
         for _ in 0..400 {
             let mut b = [0.5f32; super::super::BLOCK];
-            sh.process(&s, s.on, &mut b);
+            sh.process(&s, s.on, Fade::None, &mut b);
             peak = peak.max(b.iter().fold(0.0, |m, y| m.max(y.abs())));
         }
         assert!(peak > 0.2, "{peak}");
         sh.release();
         for _ in 0..2000 {
             let mut b = [0.5f32; super::super::BLOCK];
-            sh.process(&s, s.on, &mut b);
+            sh.process(&s, s.on, Fade::None, &mut b);
         }
         assert!(sh.amp_idle());
     }

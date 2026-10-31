@@ -686,3 +686,7 @@ mod poly_tests;
 #[cfg(test)]
 #[path = "macro_osc_shaper_tests.rs"]
 mod shaper_tests;
+
+#[cfg(test)]
+#[path = "macro_osc_retrigger_tests.rs"]
+mod retrigger_tests;

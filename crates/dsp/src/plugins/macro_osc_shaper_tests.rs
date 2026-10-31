@@ -212,41 +212,117 @@ fn largest_step(x: &[f32]) -> f32 {
     x.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()))
 }
 
-/// Turning the shaper on under a held chord does not cut the voices: each keeps its low-pass
-/// gate and its idle rule until it ends, so there is no step at the switch, the voices end when
-/// the gate's decay does, and the render is the one without the switch. A phrase started after
-/// the switch is shaped (its short amp release ends it long before the gate would).
+fn rms(x: &[f32]) -> f32 {
+    (x.iter().map(|v| v * v).sum::<f32>() / x.len().max(1) as f32).sqrt()
+}
+
+/// The held-note rule's bound on a switch (#262): no step past the larger of the two paths' own
+/// largest steps plus the crossfade's, the gap between the paths spread over the 12-frame block
+/// (at most the sum of their peaks over 12).
+fn switch_bound(before: &[f32], after: &[f32]) -> f32 {
+    largest_step(before).max(largest_step(after)) + (peak(before) + peak(after)) / BLOCK as f32
+}
+
+/// A held sine (the two-operator FM model at Timbre 0, whose own steps are small, so a step at
+/// the switch shows) and the shaper's settings that make it audible: a low-pass at 300 Hz, the
+/// amp envelope sustaining at 70 %, a short release.
+const DARK: [(&str, f32); 6] = [("model", 10.0), ("timbre", 0.0), ("decay", 60.0), ("cutoff", 300.0), ("amp_sustain", 70.0), ("amp_release", 10.0)];
+
+/// Turning the shaper on under a held chord shapes it at once (#262): from the block after the
+/// switch's 12-frame crossfade the voices sound as voices shaped from the start do (the
+/// envelopes ran all along, so they are where a shaped phrase's would be: no attack restarts),
+/// and the switch makes no step past the crossfade's bound. The voices then end on the amp
+/// envelope's short release, not the low-pass gate's long decay.
 #[test]
-fn switching_the_shaper_on_keeps_the_sounding_voices_on_their_gate() {
+fn switching_the_shaper_on_shapes_held_notes_at_once() {
+    let chord = [60u8, 64, 67];
+    let play = |shaper: [bool; 2]| {
+        let mut m = inst(4, &DARK);
+        assert!(m.set_param("shaper", if shaper[0] { 1.0 } else { 0.0 }));
+        for k in chord {
+            m.note_on(0, k, 110);
+        }
+        let (before, _) = render(&mut m, 9600, 240);
+        assert!(m.set_param("shaper", if shaper[1] { 1.0 } else { 0.0 }));
+        let (after, _) = render(&mut m, 9600, 240);
+        (m, before, after)
+    };
+    let (_, _, unshaped) = play([false, false]);
+    let (_, _, shaped) = play([true, true]);
+    let (mut m, before, after) = play([false, true]);
+    let diff = |a: &[f32], b: &[f32]| a.iter().zip(b).map(|(x, y)| x - y).collect::<Vec<f32>>();
+    // Within one block: from frame 12 on, far closer to the shaped render than the unshaped is.
+    let window = 12..480;
+    let to_shaped = rms(&diff(&after[window.clone()], &shaped[window.clone()]));
+    let apart = rms(&diff(&unshaped[window.clone()], &shaped[window]));
+    assert!(to_shaped < 0.1 * apart, "the held voices are filtered within one block: {to_shaped} from the shaped render, {apart} between the paths");
+    // And they settle on it (the low-pass gate opens over a few blocks, the filter from rest).
+    let late = rms(&diff(&after[4800..], &shaped[4800..]));
+    println!("on: {to_shaped} from the shaped render in frames 12..480 ({apart} between the paths), {late} after 100 ms");
+    assert!(late < 1e-3 * rms(&shaped[4800..]), "the held voices sound as shaped ones: {late}");
+    let mut joined = before[before.len() - 2400..].to_vec();
+    joined.extend_from_slice(&after[..2400]);
+    let bound = switch_bound(&before[before.len() - 2400..], &after[12..2400]);
+    println!("on: largest step {} at the switch, bound {bound}", largest_step(&joined));
+    assert!(largest_step(&joined) <= bound, "no step past {bound} at the switch: {}", largest_step(&joined));
+    for k in chord {
+        m.note_off(0, k);
+    }
+    let (_, idle_at) = render_until_idle(&mut m, 4, 4000);
+    assert!(idle_at.is_some_and(|b| b < 4), "the amp envelope's release ends the voices: {idle_at:?}");
+}
+
+/// Turning the shaper off under a held note takes it out at once (#262): no step past the
+/// crossfade's bound, the low-pass gate carries the note on, and after the note-off the gate's
+/// decay ends it (no stuck note).
+#[test]
+fn switching_the_shaper_off_under_a_held_note_leaves_no_stuck_note_and_no_click() {
+    let mut m = inst(2, &DARK);
+    assert!(m.set_param("shaper", 1.0));
+    m.note_on(0, 60, 110);
+    let (before, _) = render(&mut m, 9600, 240);
+    assert!(m.set_param("shaper", 0.0));
+    let (after, _) = render(&mut m, 9600, 240);
+    let mut joined = before[before.len() - 2400..].to_vec();
+    joined.extend_from_slice(&after[..2400]);
+    let bound = switch_bound(&before[before.len() - 2400..], &after[12..2400]);
+    assert!(largest_step(&joined) <= bound, "no step past {bound} at the switch: {}", largest_step(&joined));
+    println!("off: largest step {} at the switch, bound {bound}", largest_step(&joined));
+    assert!(peak(&after[4800..]) > 0.05, "the gate carries the note on");
+    m.note_off(0, 60);
+    let (_, idle_at) = render_until_idle(&mut m, 2, 4000);
+    assert!(idle_at.is_some_and(|b| b > 4), "the gate's decay ends the note: {idle_at:?}");
+}
+
+/// Turning the shaper on while a chord tails in its low-pass gate does not cut it: a voice in its
+/// release keeps its path, so the render is the one without the switch, with no step, and the
+/// voices end when the gate's decay does. A phrase started after the switch is shaped (its short
+/// amp release ends it long before the gate would).
+#[test]
+fn switching_the_shaper_on_keeps_released_voices_on_their_gate() {
     let chord = [60u8, 64, 67];
     let play = |switch: bool| {
         let mut m = inst(4, &[("model", 8.0), ("decay", 60.0), ("amp_release", 10.0)]);
         for k in chord {
             m.note_on(0, k, 110);
         }
-        let (before, _) = render(&mut m, 9600, 240);
-        if switch {
-            assert!(m.set_param("shaper", 1.0));
-        }
-        let (mut after, _) = render(&mut m, 4800, 240);
+        let (mut before, _) = render(&mut m, 9600, 240);
         for k in chord {
             m.note_off(0, k);
         }
-        let (tail, idle_at) = render_until_idle(&mut m, 4, 4000);
-        after.extend_from_slice(&tail);
+        before.extend(render(&mut m, 480, 240).0);
+        if switch {
+            assert!(m.set_param("shaper", 1.0));
+        }
+        let (after, idle_at) = render_until_idle(&mut m, 4, 4000);
         (m, before, after, idle_at)
     };
     let (_, ref_before, ref_after, ref_idle) = play(false);
     let (mut m, before, after, idle_at) = play(true);
     assert_eq!(before, ref_before);
-    let pre = largest_step(&before);
-    let mut joined = vec![before.last().copied().unwrap_or(0.0)];
-    joined.extend_from_slice(&after);
-    assert!(largest_step(&joined) <= pre, "no step past the pre-switch maximum {pre}");
     assert!(ref_idle.is_some_and(|b| b > 10), "the gate's decay takes a while: {ref_idle:?}");
     assert_eq!(idle_at, ref_idle, "the old voices end when their gate's decay does");
-    assert!(after == ref_after, "the voices sounding at the switch play on as before");
-    // A new phrase after the switch is shaped: 10 ms of release, not the gate's decay.
+    assert!(after == ref_after, "the voices tailing at the switch play on as before");
     m.note_on(0, 72, 110);
     let _ = render(&mut m, 2400, 240);
     m.note_off(0, 72);

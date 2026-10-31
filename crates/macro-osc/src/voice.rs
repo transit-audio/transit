@@ -396,6 +396,16 @@ impl Voice<'_> {
         self.engines.speech_engine.set_tuning(tuning);
     }
 
+    /// transit's same-pitch restart on the six-op models (#263, ADR 0033): a re-strike of the
+    /// note the six-op engine is still sounding restarts that internal voice instead of starting
+    /// the note on the other one under the old note's release (see
+    /// [`SixOpEngine::set_same_pitch_restart`] for the rule). Off in a new voice, the firmware's
+    /// behavior bit for bit, which the null tests compare; transit's instrument turns it on. Kept
+    /// across `init`; allocation-free, safe on the audio thread.
+    pub fn set_same_pitch_restart(&mut self, on: bool) {
+        self.engines.six_op_engine.set_same_pitch_restart(on);
+    }
+
     /// How the voice computes pitch.
     #[must_use]
     pub fn tuning(&self) -> crate::Tuning {

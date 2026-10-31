@@ -55,6 +55,13 @@ pub struct Voice<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> {
     patch: Option<Patch>,
 
     dirty: bool,
+
+    /// A restart is due at the next render (transit's same-pitch restart, #263): never set on
+    /// the firmware's path.
+    restart: bool,
+    /// The restart keeps the operators' phase: set only on the copy that renders the
+    /// declicking crossfade's outgoing side (see `FmVoice::render`).
+    keep_phase: bool,
 }
 
 impl<const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Default for Voice<'_, NUM_OPERATORS, NUM_ALGORITHMS> {
@@ -90,6 +97,9 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
             patch: None,
 
             dirty: false,
+
+            restart: false,
+            keep_phase: false,
         }
     }
 
@@ -129,6 +139,37 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
         self.normalized_velocity = 10.0;
 
         self.dirty = true;
+        self.restart = false;
+        self.keep_phase = false;
+    }
+
+    /// Restarts the voice at its next render, if its gate is high then: the operator and pitch
+    /// envelopes start their attack from their current levels and the note and velocity are
+    /// sampled, as at a note-on (transit's same-pitch restart, #263; see
+    /// `SixOpEngine::set_same_pitch_restart`).
+    pub fn restart(&mut self) {
+        self.restart = true;
+    }
+
+    /// The voice sounds: its gate is high or an operator envelope has not finished its release.
+    #[must_use]
+    pub fn sounding(&self) -> bool {
+        self.gate || self.operator_envelope.iter().any(|e| !e.0.finished())
+    }
+
+    /// The next render with `parameters` restarts the voice and resets its operators' phase (the
+    /// patch asks for it): the step the reset makes in a sounding waveform needs the crossfade.
+    #[must_use]
+    pub fn restart_resets_phase(&self, parameters: &VoiceParameters) -> bool {
+        self.restart && parameters.gate && !parameters.sustain && !self.dirty && self.patch.as_ref().is_some_and(|p| p.reset_phase != 0)
+    }
+
+    /// The same voice, restarting but keeping its phase: the crossfade's outgoing side.
+    #[must_use]
+    pub fn keeping_phase(&self) -> Self {
+        let mut v = self.clone();
+        v.keep_phase = true;
+        v
     }
 
     #[inline]
@@ -201,6 +242,15 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
         let gate_duration = 1.5 * self.sample_rate;
         let envelope_sample = gate_duration * parameters.envelope_control;
 
+        // transit's same-pitch restart (#263): the envelopes restart from where they are.
+        let restart = core::mem::take(&mut self.restart) && parameters.gate && !parameters.sustain;
+        if restart {
+            self.pitch_envelope.0.restart();
+            for envelope in self.operator_envelope.iter_mut() {
+                envelope.0.restart();
+            }
+        }
+
         // Apply LFO and pitch envelope modulations.
         let pitch_envelope = if parameters.sustain {
             self.pitch_envelope.0.render_at_sample(envelope_sample, gate_duration)
@@ -214,15 +264,17 @@ impl<'a, const NUM_OPERATORS: usize, const NUM_ALGORITHMS: usize> Voice<'a, NUM_
         // is received, or constantly when we are in free-running mode.
         let note_on = parameters.gate && !self.gate;
         self.gate = parameters.gate;
+        let struck = note_on || restart;
 
-        if note_on || parameters.sustain {
+        if struck || parameters.sustain {
             self.normalized_velocity = normalize_velocity(parameters.velocity);
             self.note = parameters.note;
         }
 
         if let Some(ref patch) = self.patch {
             // Reset operator phase if a note on is detected & if the patch requires it.
-            if note_on && patch.reset_phase != 0 {
+            // transit's restart resets it too, unless this is the copy that keeps it (#263).
+            if struck && patch.reset_phase != 0 && !self.keep_phase {
                 for i in 0..NUM_OPERATORS {
                     self.operator[i].phase = 0;
                 }

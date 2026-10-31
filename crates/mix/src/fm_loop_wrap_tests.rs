@@ -5,11 +5,13 @@
 //! chases the controllers at the block start (note-off, CC 121, then the clip's note-on, all at
 //! offset 0), and the instrument renders exactly what it renders for the same notes played
 //! straight through, or from live input with the off and the on at one block start. The
-//! excursion is the instrument's: a note-off and note-on of one key within one 12-frame block
-//! retrigger the same voice with its low-pass gate open, and the six-op engine starts the new note
-//! on its second internal voice while the first plays the old note's release (this patch's
-//! modulators hold at release level 99) at the same pitch. The two sum with a phase offset the
-//! loop length fixes, so every other lap the fundamental cancels for about 90 ms.
+//! excursion was the instrument's: a note-off and note-on of one key within one 12-frame block
+//! retrigger the same voice with its low-pass gate open, and the firmware's six-op engine starts
+//! the new note on its second internal voice while the first plays the old note's release (this
+//! patch's modulators hold at release level 99) at the same pitch. The two summed with a phase
+//! offset the loop length fixes, so every other lap the fundamental cancelled for about 90 ms. The
+//! instrument now restarts the voice already sounding at a same-pitch re-strike (#263), and every
+//! lap keeps the first lap's pitch.
 
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -140,18 +142,18 @@ fn a_loop_wrap_plays_a_rack_member_as_straight_through_playback_and_live_input_d
     assert_eq!(first_difference(&live), None, "live input");
 }
 
-/// #263: every lap should keep the pitch the first lap has (its fundamental leads and stays within
-/// the patch's vibrato, 23 cents). Measured at f2498a35: the second lap's third partial leads 70
-/// to 100 ms after the wrap and its second partial 100 to 160 ms (9 of 30 windows), and the
-/// fundamental reads down to -90 cents; the third lap is clean.
+/// #263: every lap keeps the pitch the first lap has (its fundamental leads and stays within the
+/// patch's vibrato, 23 cents). Measured at f2498a35, before the same-pitch restart: the second
+/// lap's third partial led 70 to 100 ms after the wrap and its second partial 100 to 160 ms (9 of
+/// 30 windows), and the fundamental read down to -90 cents; the third lap was clean.
 #[test]
-#[ignore = "#263: the six-op engine's second internal voice plays the old note's release under a same-key retrigger; the fix needs a design decision"]
 fn every_lap_of_a_six_op_fm_loop_keeps_the_first_laps_pitch() {
     let (l, [wrap, ..]) = renders();
     for lap in 0..3 {
         let t = track(&wrap, lap * l);
         let led_by_overtones = t.iter().filter(|(h, _)| *h != 1).count();
         let worst = t.iter().map(|(_, c)| c.abs()).max().unwrap_or(0);
+        println!("lap {}: overtones lead {led_by_overtones}/30 windows, worst {worst} cents", lap + 1);
         assert!(
             led_by_overtones == 0 && worst <= 50,
             "lap {}: overtones lead {led_by_overtones}/30 windows, fundamental off by up to {worst} cents: {t:?}",

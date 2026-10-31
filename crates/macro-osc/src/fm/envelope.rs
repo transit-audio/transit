@@ -94,6 +94,22 @@ impl<const NUM_STAGES: usize, const RESHAPE_ASCENDING_SEGMENTS: bool> Envelope<N
         self.value(stage, t * self.increment[stage], PREVIOUS_LEVEL)
     }
 
+    /// Starts the attack from the current level, as a gate rising after a release does (transit's
+    /// same-pitch restart, #263: a re-strike that saw no low gate).
+    #[inline]
+    pub fn restart(&mut self) {
+        self.start = self.current_value();
+        self.stage = 0;
+        self.phase = 0.0;
+    }
+
+    /// In its last stage with the phase run out: at its final level and not moving.
+    #[inline]
+    #[must_use]
+    pub fn finished(&self) -> bool {
+        self.stage == NUM_STAGES - 1 && self.phase >= 1.0
+    }
+
     #[inline]
     pub fn render_default(&mut self, gate: bool) -> f32 {
         self.render(gate, 1.0, 1.0, 1.0)

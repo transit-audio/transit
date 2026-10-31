@@ -5,14 +5,28 @@
 //!
 //! - A voice is **idle** once it holds no key, its trigger is low and both its outputs have stayed
 //!   within one int16 LSB of silence (-90 dBFS) for [`QUIET_SECONDS`]: some models settle on a
-//!   +-1 LSB residue rather than exact zero (six-op FM 2 does). A voice whose phrase started with
-//!   the shaper on is idle as soon as it holds no key and its amp envelope has finished. An idle voice is not rendered,
-//!   costs nothing and is the first one a new note takes. Until then its tail plays out after the
+//!   +-1 LSB residue rather than exact zero (six-op FM 2 does). A shaped voice is idle as soon as
+//!   it holds no key and its amp envelope has finished. An idle voice is not rendered, costs
+//!   nothing and is the first one a new note takes. Until then its tail plays out after the
 //!   note-off.
-//! - Whether the shaper shapes a voice is taken when its phrase starts and kept until the voice
-//!   is idle: turning the shaper on does not cut a voice tailing in its low-pass gate (it keeps
-//!   the gate and its idle rule until it ends), and turning it off does not cut a shaped voice's
-//!   release. Phrases started after the switch follow the new setting.
+//! - The held-note rule for the shaper's switch (#262): a voice a key holds (or the pedal keeps)
+//!   follows the switch at once. Turned on, the voice joins the shaper with its envelopes where
+//!   they are (they run whether or not the shaper is on, so a note past its decay is at the
+//!   sustain level, or at full level with Sustain 100 %: no attack restarts) and its low-pass gate
+//!   opens (level 1); turned off, it leaves the filter and the amp envelope and its gate carries
+//!   on at the velocity. Either way the block of the switch crossfades from the old path to the
+//!   new over its 12 frames ([`Fade`]). A voice in its release keeps the path it has until it is
+//!   idle: turning the shaper on does not cut a tail in the low-pass gate, and turning it off does
+//!   not cut a shaped release.
+//! - Same-key re-strikes (#263): a key struck again on the voice that plays it (held, under the
+//!   pedal, or in its tail) starts a new phrase there. When the trigger is still high, the voice
+//!   gets one low trigger block first so the firmware voice sees a new edge; the level input
+//!   (the low-pass gate) stays at the velocity through it. The edge is what restarts the six-op
+//!   models (the port's same-pitch restart, on in every voice here: the note restarts the internal
+//!   voice already sounding instead of layering the old note's release under the new one). Closing
+//!   the gate for that block too was weighed and left out: the six-op models bypass the gate, so it
+//!   would change nothing there, and on the gated models the vactrol would only dip for a block
+//!   and reopen, a notch rather than a new attack.
 //! - The chiptune model envelopes itself (the voice bypasses its low-pass gate) and, with no
 //!   envelope set, holds its note for ever. A held key keeps it held, as on the module; after the
 //!   note-off the voice gives it the decay envelope the module's TIMBRE attenuverter would
@@ -25,7 +39,7 @@
 //!   exactly what it was before the matrix.
 
 use super::matrix::{Matrix, NDST, NSRC, PITCH_SEMITONES, RATE_OCTAVES, dst, src};
-use super::shaper::{FilterMods, Settings, Shaper};
+use super::shaper::{Fade, FilterMods, Settings, Shaper};
 use super::{BLOCK, to_f32};
 use transit_macro_osc::voice::{Frame, Modulations, Patch, Voice};
 use transit_macro_osc::{SampleRate, Tuning};
@@ -240,8 +254,8 @@ pub struct Slot {
     started: bool,
     /// A key held the voice in the last block (its envelopes are gated).
     was_sounding: bool,
-    /// The shaper shapes this voice: the shaper's switch when the phrase started, kept until the
-    /// voice is idle.
+    /// The shaper shapes this voice: the shaper's switch while a key holds the voice, kept through
+    /// its release until it is idle.
     shaped: bool,
     /// When the voice's newest phrase started (the allocator's counter).
     pub age: u64,
@@ -284,6 +298,7 @@ impl Slot {
             seed,
         };
         s.voice.set_tuning(Tuning::Concert);
+        s.voice.set_same_pitch_restart(true);
         s.reset();
         s
     }
@@ -292,6 +307,7 @@ impl Slot {
     pub fn rebuild(&mut self, rate: SampleRate) {
         *self.voice = Voice::new(rate);
         self.voice.set_tuning(Tuning::Concert);
+        self.voice.set_same_pitch_restart(true);
     }
 
     pub fn set_seed(&mut self, seed: u32) {
@@ -410,12 +426,17 @@ impl Slot {
         }
         let sounding = self.sounding();
         let sh = s.shaper;
+        let mut fade = Fade::None;
         if self.started {
             self.started = false;
             self.shaped = sh.on;
             self.shaper.note(sh, self.velocity, s.free_phase);
         } else if !sounding && self.was_sounding {
             self.shaper.release();
+        } else if sounding && sh.on != self.shaped {
+            // The held-note rule (#262): a held voice follows the switch, crossfading this block.
+            self.shaped = sh.on;
+            fade = if sh.on { Fade::In } else { Fade::Out };
         }
         self.was_sounding = sounding;
         if let Some(q) = s.quarters {
@@ -457,11 +478,11 @@ impl Slot {
             silent &= out.abs() <= LSB && aux.abs() <= LSB;
             *y = out + (aux - out) * s.aux_mix;
         }
-        if shaped {
+        if shaped || fade != Fade::None {
             let mods = FilterMods { cutoff: sum(dst::CUTOFF), resonance: sum(dst::RESONANCE), env_amount: sum(dst::ENV_AMOUNT) };
             self.shaper.design(sh, self.note, mods);
         }
-        self.shaper.process(sh, shaped, &mut self.mixed);
+        self.shaper.process(sh, shaped, fade, &mut self.mixed);
         self.shaper.lfo_amount_mod = [sum(dst::LFO1_AMOUNT), sum(dst::LFO2_AMOUNT)];
         let rate = |d: usize| RATE_OCTAVES * sum(d).clamp(-1.0, 1.0);
         self.shaper.advance_lfos(sh, s.tempo, [rate(dst::LFO1_RATE), rate(dst::LFO2_RATE)], s.quarters.is_some());
