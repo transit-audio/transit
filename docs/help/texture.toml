@@ -51,7 +51,7 @@ text = "The module's reverb after everything else: more of it, and a longer tail
 [[entry]]
 id = "texture.freeze"
 name = "Freeze"
-text = "Stops recording, so the grains keep playing the audio already in the buffer. In the delay mode the frozen buffer is cut into slices that Time picks from."
+text = "Stops recording, so the grains keep playing the audio already in the buffer. In the delay mode the frozen buffer is cut into slices that Time picks from. The recording is not saved with the session: a session reopened with Freeze on stays silent until Freeze is released and the Texture hears its input again (#252)."
 
 [[entry]]
 id = "texture.seed"
@@ -76,17 +76,17 @@ text = "Treats the seed input as patched, as a cable in the module's seed jack w
 [[entry]]
 id = "texture.quality"
 name = "Quality"
-text = "The buffer's recording quality, each at the module's own rate: Digital (16-bit at 48 kHz, 4 seconds at the default Length), Vintage Digital (12-bit at 32 kHz, 8 seconds), Clean Tape (12-bit grains at 24 kHz, about 10.7 seconds) and Dirty Tape (8-bit at 24 kHz with wow and flutter, 16 seconds). Changing it fades the output out, clears the recording and fades back in."
+text = "The buffer's recording quality, each at the module's own rate: Digital (16-bit at 48 kHz, 4 seconds at the default Length), Vintage Digital (12-bit at 32 kHz, 8 seconds), Clean Tape (12-bit grains at 24 kHz, about 10.7 seconds) and Dirty Tape (8-bit at 24 kHz with wow and flutter, 16 seconds). Changing it restarts the chain with a short fade: the output dips for about 20 ms and the recording starts over, so automating it makes a stutter at every change."
 
 [[entry]]
 id = "texture.buffer"
 name = "Length"
-text = "The buffer's memory, as seconds of the Digital quality: 4 s is the module's, up to 8 s; the other qualities hold proportionally more. Changing it rebuilds the Texture, which starts over from silence after a short fade."
+text = "The buffer's memory, as seconds of the Digital quality: 4 s is the module's, up to 8 s; the other qualities hold proportionally more. Changing it restarts the chain with a short fade: the output dips for about 20 ms and the Texture starts over from silence, so automating it makes a stutter at every change."
 
 [[entry]]
 id = "texture.mono_input"
 name = "Mono In"
-text = "Records the left input only, in mono, which doubles the time the buffer holds (the module does this when only its left input is patched)."
+text = "Records the left input only, in mono, which doubles the time the buffer holds (the module does this when only its left input is patched). Changing it restarts the chain with a short fade: the output dips for about 20 ms and the recording starts over, so automating it makes a stutter at every change."
 
 [[entry]]
 id = "texture.mono_grains"
@@ -96,7 +96,7 @@ text = "Plays one grain at a time, each cutting off the last, instead of up to 3
 [[entry]]
 id = "texture.input_gain"
 name = "Input Gain"
-text = "Auto lets the module's input stage learn the input's level over its first seconds and keep it where the processor expects it, as the module does. Manual sets the gain with Level instead, for material that is already leveled."
+text = "Auto lets the module's input stage learn the input's level over its first seconds and keep it where the processor expects it, as the module does. Manual sets the gain with Level instead, for material that is already leveled. As on the module, Auto raises its gain over silence, so a loud entry after a quiet stretch can come out hot (around +12 dBFS) for a moment until its peak protection catches it."
 
 [[entry]]
 id = "texture.input_level"

@@ -297,5 +297,5 @@ conversion and the firmware's block delay the signal by a few milliseconds (11 s
 with Digital, about 3 ms with Dirty Tape), which delay compensation makes up for. Changing
 Quality, Mono In or Length restarts the firmware: the output fades out over 10 ms, the recording
 starts over, and it fades back in. Every control can be automated (for example
-`plugin:a:freeze`) and mapped to a MIDI controller. Presets: Granular Cloud, Frozen Pad (recall it
-while audio plays: it freezes what the buffer holds), Tape Delay, and your own.
+`plugin:a:freeze`) and mapped to a MIDI controller. Presets: Granular Cloud, Frozen Pad (a dense,
+slow cloud: press Freeze once it has heard what it should hold), Tape Delay, and your own.
