@@ -644,7 +644,15 @@ fn a_live_note_off_raised_onto_its_note_on_moves_one_sample_later() {
     assert_eq!(f.overruns_unstarted, INSTRUMENTS as u64, "every strip of the forced block was unstarted: {f:?}");
     for (k, s) in rig.shared.iter().enumerate() {
         // The notes only (the instrument's start-up reset controllers is not under test).
-        let landed: Vec<_> = s.inst.lock().unwrap().trace().iter().map(|l| (l.event.status & 0xF0, l.event.data1, l.event.offset)).filter(|l| matches!(l.0, 0x80 | 0x90)).collect();
+        let landed: Vec<_> = s
+            .inst
+            .lock()
+            .unwrap()
+            .trace()
+            .iter()
+            .map(|l| (l.event.status & 0xF0, l.event.data1, l.event.offset))
+            .filter(|l| matches!(l.0, 0x80 | 0x90))
+            .collect();
         assert_eq!(landed, [(0x90, 60, 0), (0x80, 60, 1), (0x90, 62, 1), (0x80, 62, 2)], "instrument {k}");
         let r = s.report();
         assert_eq!((r.stuck_notes, r.faults.zero_length, r.faults.unsorted), (0, 0, 0), "instrument {k}: {r:?}");

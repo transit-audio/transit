@@ -626,9 +626,17 @@ fn skips_before_a_dependent_s_first_admission_are_listed_with_its_strip() {
     // Six strips, at most eight rows: every strip with a count has its row.
     let rows = || f.top_strips.iter().flatten();
     assert_eq!(rows().map(|s| s.upstream_missed).sum::<u64>(), f.upstream_missed, "every skip is listed with its strip: {:?}", f.top_strips);
-    assert!(rows().filter(|s| s.upstream_missed > 0).all(|s| [0, 3].contains(&s.upstream_origin)), "named with their origin, a key source: {:?}", f.top_strips);
+    assert!(
+        rows().filter(|s| s.upstream_missed > 0).all(|s| [0, 3].contains(&s.upstream_origin)),
+        "named with their origin, a key source: {:?}",
+        f.top_strips
+    );
     assert_eq!(
-        (rows().map(|s| s.overruns_busy).sum::<u64>(), rows().map(|s| s.overruns_late).sum::<u64>(), rows().map(|s| s.overruns_unstarted).sum::<u64>()),
+        (
+            rows().map(|s| s.overruns_busy).sum::<u64>(),
+            rows().map(|s| s.overruns_late).sum::<u64>(),
+            rows().map(|s| s.overruns_unstarted).sum::<u64>()
+        ),
         (f.overruns_busy, f.overruns_late, f.overruns_unstarted),
         "every overrun is listed with its strip: {:?}",
         f.top_strips
