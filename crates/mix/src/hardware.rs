@@ -175,7 +175,7 @@ impl HwSlot {
     /// Run the slot on the strip's `buf` with this block's live `input` (planar, device channels):
     /// keep the signal for the send and replace it with the return. False (and `buf` untouched)
     /// when the slot is inactive.
-    pub(crate) fn run(&mut self, buf: &mut [Vec<f32>], input: &[Vec<f32>], frames: usize) -> bool {
+    pub(crate) fn run(&mut self, buf: &mut [Vec<f32>], input: &[Vec<f32>], frames: usize, offset: usize) -> bool {
         self.live = false;
         if input.is_empty() || !self.spec.runs() || buf.is_empty() {
             return false;
@@ -200,7 +200,7 @@ impl HwSlot {
         for (k, dst) in buf.iter_mut().enumerate() {
             // A mono return feeds every channel of a wider strip.
             let dev = usize::from(self.spec.src.get(k.min(last)).copied().unwrap_or(0));
-            let src = input.get(dev % input.len());
+            let src = input.get(dev % input.len()).map(|c| c.get(offset..).unwrap_or(&[]));
             let dst = dst.get_mut(..frames).unwrap_or(&mut []);
             match src {
                 Some(src) => {

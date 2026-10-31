@@ -268,17 +268,16 @@ impl StripPool {
         }
         let deadline = self.deadline(b);
         let StripGraph { graph: table, run, layer_start, .. } = graph;
-        let (report, callback) = {
+        let (_report, callback) = {
             let mut host =
                 Host { pool: &mut *self, p1: &mut *p1, events: &mut *events, keys: &mut *keys, graph: table, layer_start, b, g, callback: 0 };
             let report = drive(&mut host, table, run, deadline);
             (report, host.callback)
         };
         if Instant::now().saturating_duration_since(deadline) > OVERSHOOT {
-            self.counters.overshoot.fetch_add(1, Ordering::Relaxed);
+            self.note_host_overshoot();
         }
         self.counters.callback_renders.fetch_add(callback, Ordering::Relaxed);
-        let mut overruns = 0u32;
         for (i, st) in p1.iter_mut().enumerate().take(cells) {
             let Some(outcome) = self.set.outcome(i) else { continue };
             match outcome {
@@ -299,10 +298,6 @@ impl StripPool {
                         // Never sent: home, its queue keeps this block's events.
                         OverrunCause::UpstreamMissed => {}
                     }
-                    // Counted once, at the origin: a skip for a source is not an overrun of its own.
-                    if cause != OverrunCause::UpstreamMissed {
-                        overruns += 1;
-                    }
                 }
                 Outcome::Faulted => {
                     if self.bring_home(i, st, events) {
@@ -321,8 +316,6 @@ impl StripPool {
                 self.live_len[i] = 0;
             }
         }
-        self.last_overruns = overruns;
-        self.note_held(s);
-        self.mirror(report.overrun > 0);
+        self.mirror();
     }
 }

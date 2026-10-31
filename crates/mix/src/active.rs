@@ -331,7 +331,7 @@ impl MixEngine {
             o.iter_mut().take(frames).for_each(|x| *x = 0.0);
         }
         let Some(src) = self.plan.as_deref().and_then(|p| p.tables.busses.bus(bus)) else { return };
-        for (o, c) in out.iter_mut().zip(src.buf.iter()) {
+        for (o, c) in out.iter_mut().zip(src.host_buf.iter()) {
             for (d, v) in o.iter_mut().zip(c.iter()).take(frames) {
                 *d = if v.is_finite() { *v } else { 0.0 };
             }
@@ -391,7 +391,7 @@ impl MixEngine {
 
     /// Audio thread: renders `frames` (≤ max block) samples of the active plan starting at `pos`
     /// into `out`. Silence before the first adoption and after a fault.
-    pub fn render_active(&mut self, pos: Samples, frames: usize, out: &mut [Vec<f32>]) {
+    pub(crate) fn render_sub_block(&mut self, pos: Samples, frames: usize, out: &mut [Vec<f32>], offset: usize) {
         // The block's start, which the render workers' deadline is measured from (ADR 0029).
         let start = self.pool.is_some().then(std::time::Instant::now);
         let callback_deadline = self.block_deadline.take();
@@ -399,7 +399,7 @@ impl MixEngine {
         let Some(plan) = self.plan.as_deref_mut().filter(|p| !p.faulted) else {
             self.events.next_frame = self.events.next_frame.saturating_add(frames as u64);
             for o in out.iter_mut() {
-                o.iter_mut().take(frames).for_each(|x| *x = 0.0);
+                o.iter_mut().skip(offset).take(frames).for_each(|x| *x = 0.0);
             }
             return;
         };
@@ -422,6 +422,7 @@ impl MixEngine {
             }
         }
         let frame = self.events.next_frame;
+        let host_frame = frame.saturating_sub(offset as u64);
         self.events.next_frame = frame.saturating_add(frames as u64);
         self.last_end = pos.saturating_add(frames as i64);
         if let Some(m) = self.marker.as_deref() {
@@ -446,6 +447,7 @@ impl MixEngine {
         let track = |st: &Strip| s.tracks.get(usize::from(st.track));
         let live_in = LiveInput {
             input: &self.input,
+            input_offset: offset,
             monitor_only: self.monitor_only,
             recording: self.recording,
             no_suspend: self.no_suspend,
@@ -493,7 +495,7 @@ impl MixEngine {
                     any_solo,
                     sample_rate,
                     start,
-                    budget: self.strip_deadline,
+                    budget: None,
                     deadline: callback_deadline,
                 };
                 if keyed {
@@ -569,7 +571,7 @@ impl MixEngine {
             if self.mutes.silent(i) {
                 continue;
             }
-            st.meter.measure(&st.buf, frames, st.gr);
+            st.meter.measure(&st.buf, frames, st.gr, host_frame);
             st.meter.plugin_failures = st.failures;
             let need = route_into(t, st, pos, frames, MixOut { busses, main, main_fmt, sinks, law, main_arrival });
             status.note_capacity(need, st);
@@ -614,7 +616,7 @@ impl MixEngine {
             };
             keys.fill(at..at + 1, strip, busses, frames);
             process_strip(t, st, &StripRender { s, busses, live: &live_in, pos, frames, any_solo, keys });
-            st.meter.measure(&st.buf, frames, st.gr);
+            st.meter.measure(&st.buf, frames, st.gr, host_frame);
             st.meter.plugin_failures = st.failures;
             let need = route_into(t, st, pos, frames, MixOut { busses, main, main_fmt, sinks, law, main_arrival });
             status.note_capacity(need, st);
@@ -625,7 +627,7 @@ impl MixEngine {
             let Some(t) = track(st).filter(|t| t.kind == TrackKind::Master && !t.inactive) else { continue };
             mark(Phase::Masters, Some(u32::from(st.track)));
             process_master(t, st, main, pos, frames, &transport, self.no_suspend);
-            st.meter.measure(main, frames, 0.0);
+            st.meter.measure(main, frames, 0.0, host_frame);
             st.meter.plugin_failures = st.failures;
         }
         mark(Phase::Mixdown, None);
@@ -640,7 +642,7 @@ impl MixEngine {
             let src = main.get(c);
             for i in 0..frames {
                 let v = src.and_then(|m| m.get(i)).copied().unwrap_or(0.0);
-                if let Some(d) = o.get_mut(i) {
+                if let Some(d) = o.get_mut(offset + i) {
                     *d = if v.is_finite() { v } else { 0.0 };
                 }
             }
@@ -651,16 +653,21 @@ impl MixEngine {
         for k in sinks.iter() {
             for src in &k.buf {
                 if let Some(o) = out.get_mut(at) {
-                    for (d, v) in o.iter_mut().zip(src.iter()).take(frames) {
+                    for (d, v) in o.iter_mut().skip(offset).zip(src.iter()).take(frames) {
                         *d = if v.is_finite() { *v } else { 0.0 };
                     }
                 }
                 at += 1;
             }
         }
-        main_meter.measure(main, frames, 0.0);
-        #[cfg(feature = "testing")]
-        self.mutes.clear();
+        main_meter.measure(main, frames, 0.0, host_frame);
+        for (_, bus) in &mut busses.0 {
+            for (dst, src) in bus.host_buf.iter_mut().zip(&bus.buf) {
+                for (d, v) in dst.iter_mut().skip(offset).zip(src).take(frames) {
+                    *d = *v;
+                }
+            }
+        }
     }
 }
 

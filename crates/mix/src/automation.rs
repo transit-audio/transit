@@ -137,7 +137,7 @@ fn apply_values<'a>(
 
 pub(crate) fn transport_at(s: &Session, pos: Samples, playing: bool, recording: bool) -> Transport {
     let sr = s.sample_rate;
-    let ticks = Some(s.tempo.samples_to_ticks_f(pos, sr)).filter(|t| t.is_finite()).unwrap_or(0.0);
+    let ticks = Some(s.tempo.render_ticks(pos, sr)).filter(|t| t.is_finite()).unwrap_or(0.0);
     let tick = ticks.floor() as i64;
     let meter = s.tempo.meter_at_tick(tick);
     let bar = s.tempo.bar_beat_at_tick(tick).bar;

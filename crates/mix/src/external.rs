@@ -140,7 +140,7 @@ impl ExtSlot {
     /// Fill the strip's `buf` with this block's return from the live `input` (planar, device
     /// channels), times `gain`. A mono return feeds every channel of the strip. False, with `buf`
     /// left as it is (silence), when there is no live input or the return is unresolved.
-    pub(crate) fn run(&self, buf: &mut [Vec<f32>], input: &[Vec<f32>], frames: usize, gain: f32) -> bool {
+    pub(crate) fn run(&self, buf: &mut [Vec<f32>], input: &[Vec<f32>], frames: usize, gain: f32, offset: usize) -> bool {
         if input.is_empty() || self.spec.src.is_empty() || buf.is_empty() {
             return false;
         }
@@ -148,7 +148,7 @@ impl ExtSlot {
         for (k, dst) in buf.iter_mut().enumerate() {
             let dev = usize::from(self.spec.src.get(k.min(last)).copied().unwrap_or(0));
             let dst = dst.get_mut(..frames).unwrap_or(&mut []);
-            match input.get(dev) {
+            match input.get(dev).map(|c| c.get(offset..).unwrap_or(&[])) {
                 Some(src) => {
                     for (d, x) in dst.iter_mut().zip(src.iter()) {
                         *d = *x * gain;
@@ -255,11 +255,11 @@ mod tests {
         let slot = ExtSlot::new(ExtSpec { src: vec![1], latency: 0 });
         let input = vec![vec![0.0; 4], vec![0.5, -0.5, 0.25, 1.0]];
         let mut buf = vec![vec![9.0; 4]; 2];
-        assert!(slot.run(&mut buf, &input, 4, 0.5));
+        assert!(slot.run(&mut buf, &input, 4, 0.5, 0));
         assert_eq!(buf, vec![vec![0.25, -0.25, 0.125, 0.5]; 2]);
         let mut buf = vec![vec![0.0; 4]; 2];
-        assert!(!slot.run(&mut buf, &[], 4, 1.0), "no live input");
-        assert!(!ExtSlot::new(ExtSpec { src: Vec::new(), latency: 9 }).run(&mut buf, &input, 4, 1.0));
+        assert!(!slot.run(&mut buf, &[], 4, 1.0, 0), "no live input");
+        assert!(!ExtSlot::new(ExtSpec { src: Vec::new(), latency: 9 }).run(&mut buf, &input, 4, 1.0, 0));
         assert_eq!(buf, vec![vec![0.0; 4]; 2]);
     }
 }

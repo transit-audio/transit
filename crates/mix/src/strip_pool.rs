@@ -157,8 +157,16 @@ impl Job {
             // The early-key delay of the keys lent with the strip runs now that it renders, once
             // (#174, found by #210); nothing on the plain path (no keys are lent there).
             keys.apply_pending(None);
-            let live =
-                LiveInput { input, monitor_only: *monitor_only, recording: *recording, no_suspend: *no_suspend, frame: *frame, io: None, marker };
+            let live = LiveInput {
+                input,
+                input_offset: 0,
+                monitor_only: *monitor_only,
+                recording: *recording,
+                no_suspend: *no_suspend,
+                frame: *frame,
+                io: None,
+                marker,
+            };
             let block = StripRender { s, busses, live: &live, pos: *pos, frames: *frames, any_solo: *any_solo, keys };
             guarded(strip, |st| process_strip(t, st, &block));
             // Only a strip actually rendered carries this block's generation; the callback mixes
@@ -418,6 +426,10 @@ pub(crate) struct StripPool {
     generation: u64,
     /// Strips silent by an overrun in the last block.
     last_overruns: u32,
+    /// Host-block accounting, independent of the worker generation of each sub-block.
+    host_seen: Box<[u8]>,
+    host_counted: bool,
+    host_overshot: bool,
     /// Per strip: the identity of the processing chain the cell last published ([`chain_identity`];
     /// `None` before its first publish). When it changes, the strip's cost history is reset.
     chain: Box<[Option<u64>]>,
@@ -463,6 +475,9 @@ impl StripPool {
             on_callback: vec![false; strips].into_boxed_slice(),
             generation: 0,
             last_overruns: 0,
+            host_seen: vec![0; strips].into_boxed_slice(),
+            host_counted: false,
+            host_overshot: false,
             chain: vec![None; strips].into_boxed_slice(),
             deadline_percent: 0,
             deadline_override,
@@ -916,15 +931,14 @@ impl StripPool {
         self.counters.callback_renders.fetch_add(callback, Ordering::Relaxed);
         let deadline = self.deadline(b);
         let cells_ref = &self.cells;
-        let report = self.set.finish(deadline, |i| {
+        let _report = self.set.finish(deadline, |i| {
             // Reclaimed by the callback: no worker can hold the cell.
             // On the callback: the strip marks the phase marker as a serial render does.
             cells_ref.with(i, |job| job.render(g, b.live.marker));
         });
         if Instant::now().saturating_duration_since(deadline) > OVERSHOOT {
-            self.counters.overshoot.fetch_add(1, Ordering::Relaxed);
+            self.note_host_overshoot();
         }
-        let mut overruns = 0u32;
         for (i, st) in p1.iter_mut().enumerate().take(cells) {
             let Some(outcome) = self.set.outcome(i) else { continue };
             match outcome {
@@ -938,7 +952,6 @@ impl StripPool {
                     }
                 }
                 Outcome::Overrun(cause) => {
-                    overruns += 1;
                     self.silent[i] = true;
                     match cause {
                         // Taken back unrendered: home again, its queue keeps this block's events.
@@ -967,9 +980,7 @@ impl StripPool {
                 self.live_len[i] = 0;
             }
         }
-        self.last_overruns = overruns;
-        self.note_held(s);
-        self.mirror(report.overrun > 0);
+        self.mirror();
     }
 
     /// Before strip `i` (home, its track live) is sent away: a suspect instance stays silent for
@@ -1072,23 +1083,16 @@ impl StripPool {
     }
 
     /// Copies the worker set's running totals into the counters the reader sees.
-    fn mirror(&self, overrun: bool) {
+    fn mirror(&mut self) {
+        self.note_host_outcomes();
         let st = self.set.stats();
         let c = &self.counters;
-        c.blocks.store(st.blocks, Ordering::Relaxed);
-        c.overruns_busy.store(st.overruns_busy, Ordering::Relaxed);
-        c.overruns_late.store(st.overruns_late, Ordering::Relaxed);
-        c.overruns_unstarted.store(st.overruns_unstarted, Ordering::Relaxed);
         c.late_results.store(st.late_results, Ordering::Relaxed);
         c.inline_renders.store(st.inline_renders, Ordering::Relaxed);
         c.refused_no_history.store(st.inline_refused_no_history, Ordering::Relaxed);
         c.refused_worst_case.store(st.inline_refused_worst_case, Ordering::Relaxed);
         c.refused_recent_overrun.store(st.inline_refused_recent_overrun, Ordering::Relaxed);
         c.misuse.store(st.misuse, Ordering::Relaxed);
-        c.upstream_missed.store(st.upstream_missed, Ordering::Relaxed);
-        if overrun {
-            c.overrun_blocks.fetch_add(1, Ordering::Relaxed);
-        }
     }
 
     /// Control thread, at engine retirement: shuts the workers down within a bound and brings
@@ -1201,6 +1205,7 @@ fn apply_pending(st: &mut Strip, flags: u8, events: &EngineEvents) {
 
 /// The graph path (issue #174): a keyed plan's phase-1 strips as a task graph.
 mod graph;
+mod host;
 #[cfg(feature = "testing")]
 mod seam;
 #[cfg(feature = "testing")]

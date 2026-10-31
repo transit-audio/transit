@@ -124,6 +124,7 @@ mod scope;
 mod sink;
 mod strip;
 mod strip_pool;
+mod tempo_split;
 #[cfg(test)]
 mod tests;
 mod touch;
@@ -246,6 +247,8 @@ pub struct StripMeter {
     /// Gain reduction of the first dynamics insert, dB.
     pub gain_reduction_db: f32,
     pub plugin_failures: PluginFailures,
+    /// Render-clock origin of the host block whose sub-block peaks are being accumulated.
+    host_frame: Option<u64>,
 }
 
 /// How often a strip's plugins were taken out of the signal path for putting out NaN or infinity.
@@ -266,13 +269,16 @@ impl PluginFailures {
 }
 
 impl StripMeter {
-    fn measure(&mut self, bufs: &[Vec<f32>], frames: usize, gr: f32) {
+    fn measure(&mut self, bufs: &[Vec<f32>], frames: usize, gr: f32, host_frame: u64) {
+        let append = self.host_frame == Some(host_frame);
+        self.host_frame = Some(host_frame);
         for (p, b) in self.peaks.iter_mut().zip(bufs.iter()) {
-            *p = peak(b.get(..frames).unwrap_or(&[]));
+            let value = peak(b.get(..frames).unwrap_or(&[]));
+            *p = if append { p.max(value) } else { value };
         }
         let last = self.peaks.len().saturating_sub(1);
         self.peak = [self.peaks.first().copied().unwrap_or(0.0), self.peaks.get(1.min(last)).copied().unwrap_or(0.0)];
-        self.gain_reduction_db = gr;
+        self.gain_reduction_db = if append { self.gain_reduction_db.max(gr) } else { gr };
     }
 }
 
@@ -280,6 +286,8 @@ impl StripMeter {
 struct BusBuf {
     fmt: ChannelFormat,
     buf: Vec<Vec<f32>>,
+    /// Complete host block, assembled from tempo-map sub-blocks for bus exports.
+    host_buf: Vec<Vec<f32>>,
     /// Delay compensation, this block: the latency every signal summed onto the bus is aligned
     /// to (the slowest path into it), so what reads the bus starts at this latency.
     arrival: usize,
@@ -290,7 +298,7 @@ struct BusBuf {
 
 impl BusBuf {
     fn new(fmt: ChannelFormat, buf: Vec<Vec<f32>>) -> Self {
-        BusBuf { fmt, buf, arrival: 0, reader: usize::MAX }
+        BusBuf { fmt, host_buf: buf.clone(), buf, arrival: 0, reader: usize::MAX }
     }
 
     /// Silence the block and forget the last block's delay-compensation pass.

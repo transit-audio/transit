@@ -18,6 +18,7 @@ use transit_rt::phase_marker::Phase;
 /// Live input routed to monitored tracks.
 pub(crate) struct LiveInput<'a> {
     pub(crate) input: &'a [Vec<f32>],
+    pub(crate) input_offset: usize,
     pub(crate) monitor_only: bool,
     pub(crate) recording: bool,
     /// [`MixEngine::no_suspend`]: every insert runs every block.
@@ -68,7 +69,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                     _ => k,
                 };
                 if let Some(src) = live.input.get(channel % n_in) {
-                    for (d, x) in dst.iter_mut().zip(src.iter()).take(frames) {
+                    for (d, x) in dst.iter_mut().zip(src.iter().skip(live.input_offset)).take(frames) {
                         *d = *x;
                     }
                 }
@@ -104,7 +105,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
             // added delay whether or not the transport runs (ADR 0020 decision 2).
             if let Some(x) = &strip.ext {
                 let gain = t.external_instrument().map_or(1.0, |e| db_to_gain(e.gain_db()));
-                x.run(&mut strip.buf, live.input, frames, gain);
+                x.run(&mut strip.buf, live.input, frames, gain, live.input_offset);
             }
             if let Some(inst) = strip.instrument.as_mut().filter(|i| !i.failed) {
                 // #152: push the instrument's stored parameter values into the live plugin
@@ -202,7 +203,7 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
             if ins.active
                 && !ins.bypass
                 && let Some(h) = strip.hw.iter_mut().find(|h| usize::from(h.spec.slot) == i)
-                && h.run(&mut strip.buf, live.input, frames)
+                && h.run(&mut strip.buf, live.input, frames, live.input_offset)
             {
                 latency = latency.saturating_add(h.round_trip());
             }

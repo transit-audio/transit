@@ -74,6 +74,36 @@ impl TempoMap {
         &self.meters
     }
 
+    /// Length of the next render sub-block at `first`, at most `frames`.
+    /// Tempo and meter changes take effect on the first integer frame at or after their
+    /// exact position. Only boundaries strictly after `first` and before the exclusive end
+    /// split: a change on the last included frame leaves a one-frame sub-block. Changes
+    /// sharing a frame coalesce; each nonempty sub-block advances at least one frame, so
+    /// a host block needs at most `frames` sub-blocks. No allocation or mutable cursor.
+    pub fn render_span(&self, first: Samples, frames: usize, sr: SampleRate) -> usize {
+        let end = first.saturating_add(i64::try_from(frames).unwrap_or(i64::MAX));
+        let frame = |tick| self.tick_to_samples_f(tick, sr).ceil() as Samples;
+        let ti = self.tempos.partition_point(|e| frame(e.tick) <= first).max(1);
+        let mi = self.meters.partition_point(|e| frame(e.tick) <= first).max(1);
+        let next =
+            self.tempos.get(ti).map(|e| frame(e.tick)).into_iter().chain(self.meters.get(mi).map(|e| frame(e.tick))).min().filter(|next| *next < end);
+        next.map_or(frames, |next| usize::try_from(next.saturating_sub(first)).unwrap_or(frames).min(frames))
+    }
+
+    /// Fractional ticks for a render transport, honoring the same frame grid as `render_span`.
+    /// The inverse conversion can round a boundary just below its event tick (for example
+    /// bar 18 at 90 BPM). Clamp to changes already due on this frame so flooring the result
+    /// cannot select the previous tempo, meter or bar for a whole sub-block.
+    pub fn render_ticks(&self, frame: Samples, sr: SampleRate) -> f64 {
+        let ticks = self.samples_to_ticks_f(frame, sr);
+        let due = |tick| (self.tick_to_samples_f(tick, sr).ceil() as Samples) <= frame;
+        let ti = self.tempos.partition_point(|e| due(e.tick));
+        let mi = self.meters.partition_point(|e| due(e.tick));
+        let tempo = ti.checked_sub(1).and_then(|i| self.tempos.get(i)).map(|e| e.tick);
+        let meter = mi.checked_sub(1).and_then(|i| self.meters.get(i)).map(|e| e.tick);
+        tempo.into_iter().chain(meter).fold(ticks, |ticks, at| ticks.max(at as f64))
+    }
+
     /// Repair a map read from a file: only valid tempos and meters, in tick order, with one of each
     /// at tick 0.
     pub fn sanitize(&mut self) {
