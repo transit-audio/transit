@@ -97,6 +97,32 @@ fn live_notes_sound_while_stopped_without_the_clips() {
     assert!(peak(&last) < 1e-4, "the released note should die away: {}", peak(&last));
 }
 
+/// `live_note` goes through the event host's `give` (#246), so an insert that reads notes hears the
+/// auditioned note: the Filter's amp stage passes nothing until a note opens it.
+#[test]
+fn live_notes_reach_the_inserts_that_read_notes() {
+    let mut s = synth_session(-6.0);
+    let t = s.tracks[0].id;
+    let mut f = Insert::new("filter");
+    f.params.insert("amp_on".into(), 1.0);
+    f.params.insert("cutoff".into(), 20_000.0);
+    s.track_mut(t).unwrap().mixer.inserts[0] = Some(f);
+    let mut rig = PlanRig::new(512);
+    rig.publish(&s);
+    rig.eng.monitor_only = true;
+    let peak = |out: &[Vec<f32>]| out.iter().flatten().fold(0.0f32, |m, x| m.max(x.abs()));
+    let mut loudest = 0.0f32;
+    for _ in 0..8 {
+        loudest = loudest.max(peak(&rig.render(0)));
+    }
+    assert_eq!(loudest, 0.0, "no note: the amp stage is closed");
+    rig.eng.live_note(t, 72, 100);
+    for _ in 0..8 {
+        loudest = loudest.max(peak(&rig.render(0)));
+    }
+    assert!(loudest > 0.01, "the Filter heard the auditioned note: {loudest}");
+}
+
 pub(crate) fn session_with_dc(level: f32, frames: usize) -> (Session, TrackId) {
     let mut s = Session::default();
     let t = add_dc_track(&mut s, level, frames);

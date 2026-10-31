@@ -336,6 +336,9 @@ pub struct Report {
     /// How many times request servicing or an editor idle waited for a host call into plug-in
     /// code to return (issue #205, `transit_dsp::host_call::deferred`).
     pub deferred_services: u64,
+    /// Note events dropped by a full note view since transit started, summed over the tracks
+    /// (#246, `transit_mix::note_view_dropped_total`).
+    pub note_view_dropped: u64,
     /// Recorded takes the session could not place (#192): the file and what it holds.
     pub unplaced_takes: Vec<String>,
     pub log_dir: Option<PathBuf>,
@@ -460,6 +463,7 @@ impl Report {
             }
             None => o.push_str("No output stream, so no counters.\n"),
         }
+        o.push_str(&format!("Note view events dropped (inserts that read notes): {}\n", self.note_view_dropped));
         section(&mut o, "MIDI");
         for line in self.midi.lines() {
             o.push_str(&line);
@@ -751,6 +755,7 @@ mod tests {
             strips: Vec::new(),
             plugin_host: vec!["Plug-in host: Guitar Rig 7 stuck in a window message (its editor or a dialog it opened) for 240 s".into()],
             deferred_services: 3,
+            note_view_dropped: 7,
             unplaced_takes: Vec::new(),
             log_dir: Some(PathBuf::from("/home/alice/.config/transit/logs")),
             last_status: None,
@@ -845,6 +850,7 @@ mod tests {
             "WARN something",
             "Plug-in host: Guitar Rig 7 stuck in a window message (its editor or a dialog it opened) for 240 s",
             "Request servicing deferred until a plug-in call returned: 3",
+            "Note view events dropped (inserts that read notes): 7",
         ] {
             assert!(text.contains(want), "missing {want:?}\n{text}");
         }

@@ -11,10 +11,13 @@
 //! here for the next block, at offset 0.
 //!
 //! Fixed storage, made with the instrument's event state: nothing allocates on the audio thread.
-//! A block holds at most [`NOTE_VIEW_CAP`] events. When it is full, the last entry becomes an
-//! all-notes-off and later events are dropped (counted in
-//! [`MidiFxCounts::note_view_dropped`](crate::midi_fx::MidiFxCounts)): an insert that lost events
-//! releases everything rather than holding a note forever.
+//! A block holds at most [`NOTE_VIEW_CAP`] events, and the last [`RELEASE_RESERVE`] slots are kept
+//! for releases (note-offs, the pedal coming up, the all-notes-off and all-sound-off controllers),
+//! as the Filter's own queue keeps a quarter of its room for them (#246). When the rest is full,
+//! the next entry becomes an all-notes-off and later note-ons and pedal-downs are dropped (counted
+//! in [`MidiFxCounts::note_view_dropped`](crate::midi_fx::MidiFxCounts)): an insert that lost
+//! events releases everything rather than holding a note forever, and the releases that follow
+//! still reach it until the reserve is spent too.
 
 use transit_dsp::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_SUSTAIN, Message, PluginEvent};
 use transit_dsp::midi_fx::TimedEvent;
@@ -22,19 +25,33 @@ use transit_dsp::midi_fx::TimedEvent;
 /// Events one block's view holds at most (the most a block takes into the MIDI effect chain).
 pub const NOTE_VIEW_CAP: usize = 512;
 
+/// Slots only releases may fill: a dense block of note-ons never crowds out the note-offs after it.
+pub const RELEASE_RESERVE: usize = 64;
+
 /// The all-notes-off that stands in for events a full view dropped.
 const ALL_OFF: PluginEvent = PluginEvent { channel: 0, note_id: PluginEvent::NO_ID, message: Message::Control { cc: CC_ALL_NOTES_OFF, value: 0 } };
 
 pub(crate) struct NoteView {
     events: [TimedEvent; NOTE_VIEW_CAP],
     len: usize,
-    /// The view overflowed this block: its last entry is the stand-in all-notes-off.
+    /// The non-release slots filled this block: an all-notes-off stands in for the events dropped
+    /// from there on.
     full: bool,
 }
 
 /// Whether an insert reading notes cares about `m`.
 fn is_note_stream(m: &Message) -> bool {
     matches!(m, Message::NoteOn { .. } | Message::NoteOff { .. } | Message::Control { cc: CC_SUSTAIN | CC_ALL_NOTES_OFF | CC_ALL_SOUND_OFF, .. })
+}
+
+/// Whether `m` lets go of something, so it may use the reserved slots.
+fn is_release(m: &Message) -> bool {
+    match m {
+        Message::NoteOff { .. } => true,
+        Message::Control { cc: CC_ALL_NOTES_OFF | CC_ALL_SOUND_OFF, .. } => true,
+        Message::Control { cc: CC_SUSTAIN, value } => *value < 64,
+        _ => false,
+    }
 }
 
 impl NoteView {
@@ -48,11 +65,12 @@ impl NoteView {
         if !is_note_stream(&ev.message) {
             return 0;
         }
-        if self.full {
+        let release = is_release(&ev.message);
+        if !release && self.full {
             return 1;
         }
-        if self.len + 1 >= NOTE_VIEW_CAP {
-            // The last slot: everything from here on is lost, so the insert releases all it holds.
+        if !release && self.len + 1 >= NOTE_VIEW_CAP - RELEASE_RESERVE {
+            // The last open slot: note-ons from here on are lost, so the insert releases all it holds.
             if let Some(slot) = self.events.get_mut(self.len) {
                 *slot = TimedEvent { offset, event: ALL_OFF };
                 self.len += 1;
@@ -60,10 +78,9 @@ impl NoteView {
             self.full = true;
             return 1;
         }
-        if let Some(slot) = self.events.get_mut(self.len) {
-            *slot = TimedEvent { offset, event: *ev };
-            self.len += 1;
-        }
+        let Some(slot) = self.events.get_mut(self.len) else { return 1 };
+        *slot = TimedEvent { offset, event: *ev };
+        self.len += 1;
         0
     }
 
@@ -103,18 +120,54 @@ mod tests {
         assert!(v.events().is_empty());
     }
 
+    fn off(key: u8) -> PluginEvent {
+        PluginEvent { channel: 0, note_id: i32::from(key), message: Message::NoteOff { key, velocity: 0, id: NoteId::NONE } }
+    }
+
     #[test]
-    fn a_full_view_ends_with_an_all_notes_off_and_counts_the_rest() {
+    fn a_full_view_stands_in_an_all_notes_off_and_counts_the_note_ons_after_it() {
+        let open = NOTE_VIEW_CAP - RELEASE_RESERVE;
         let mut v = NoteView::new();
         let mut dropped = 0;
-        for i in 0..NOTE_VIEW_CAP + 10 {
+        for i in 0..NOTE_VIEW_CAP {
             dropped += v.record(u32::try_from(i % 256).unwrap(), &on((i % 128) as u8));
         }
-        assert_eq!(v.events().len(), NOTE_VIEW_CAP);
-        assert_eq!(dropped, 11, "the stand-in's own event and the ten after it");
+        assert_eq!(v.events().len(), open, "the open slots, the last of them the stand-in");
+        assert_eq!(dropped, (NOTE_VIEW_CAP - open + 1) as u64, "the stand-in's own event and every note-on after it");
         let last = v.events().last().unwrap();
         assert!(matches!(last.event.message, Message::Control { cc: CC_ALL_NOTES_OFF, .. }));
         v.clear();
         assert_eq!(v.record(0, &on(1)), 0, "a cleared view takes events again");
+    }
+
+    #[test]
+    fn a_note_off_after_a_dense_block_of_note_ons_is_kept() {
+        let mut v = NoteView::new();
+        let mut dropped = 0;
+        for i in 0..600 {
+            dropped += v.record(u32::try_from(i % 256).unwrap(), &on((i % 128) as u8));
+        }
+        let before = v.events().len();
+        assert_eq!(v.record(255, &off(60)), 0, "a release takes a reserved slot");
+        assert_eq!(v.events().len(), before + 1);
+        let last = v.events().last().unwrap();
+        assert!(matches!(last.event.message, Message::NoteOff { key: 60, .. }));
+        assert_eq!(dropped, 600 - (NOTE_VIEW_CAP - RELEASE_RESERVE) as u64 + 1);
+    }
+
+    #[test]
+    fn the_reserve_holds_exactly_the_releases_then_drops_the_rest() {
+        let mut v = NoteView::new();
+        for i in 0..NOTE_VIEW_CAP {
+            v.record(0, &on((i % 128) as u8));
+        }
+        let mut dropped = 0;
+        for i in 0..RELEASE_RESERVE + 5 {
+            dropped += v.record(1, &off((i % 128) as u8));
+        }
+        assert_eq!(v.events().len(), NOTE_VIEW_CAP, "capacity is unchanged");
+        assert_eq!(dropped, 5, "releases past the reserve are the only ones lost");
+        let pedal_up = PluginEvent { channel: 0, note_id: -1, message: Message::Control { cc: CC_SUSTAIN, value: 0 } };
+        assert_eq!(v.record(2, &pedal_up), 1, "and the view is full");
     }
 }

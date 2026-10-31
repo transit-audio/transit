@@ -136,6 +136,16 @@ impl Note {
 }
 
 /// The MIDI effect chain of one instrument slot. See the module documentation.
+/// Events a full note view dropped in this process, across every track (the diagnostics report;
+/// the per-engine figure is [`MidiFxCounts::note_view_dropped`]).
+static NOTE_VIEW_DROPPED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// How many events the note views dropped since transit started (#246): the report's figure.
+#[must_use]
+pub fn note_view_dropped_total() -> u64 {
+    NOTE_VIEW_DROPPED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
 pub(crate) struct MidiFxHost {
     stages: [Option<Stage>; 2 * MAX_MIDI_EFFECTS],
     /// Effects in the chain (the first `len` stages).
@@ -497,6 +507,9 @@ impl MidiFxHost {
         if ok {
             let lost = self.notes.record(offset, ev);
             self.counts.note_view_dropped = self.counts.note_view_dropped.saturating_add(lost);
+            if lost > 0 {
+                NOTE_VIEW_DROPPED.fetch_add(lost, std::sync::atomic::Ordering::Relaxed);
+            }
         }
         ok
     }

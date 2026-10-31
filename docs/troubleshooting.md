@@ -135,6 +135,10 @@ Every status line and figure of the Audio Devices window, in plain words. The sa
 - **Copy diagnostics.** Copies a report of your system, audio devices, these figures and the end of the log to the clipboard. Paste it into a bug report; it holds nothing from your sessions.
 <!-- /help:audio-devices -->
 
+## A figure only in Copy diagnostics
+
+- **Note view events dropped.** In Copy diagnostics (not in the window): note events a track's inserts that read notes (the Filter's envelopes and amp stage) never saw, since transit started, summed over the tracks. A block gives such an insert at most 512 note events, and the last 64 slots are kept for note-offs and pedal releases. Healthy is 0. It is non-zero only when one block holds hundreds of notes at once (a very dense clip, a stuck arpeggiator or a MIDI flood); the insert then lets go of all its notes, so a note may cut off early, and the releases that follow still reach it. Thin out the notes in the block, or report it with Copy diagnostics.
+
 ## A plug-in stopped responding
 
 When a plug-in does not return (its editor window turns white and Windows says it is not responding), transit shows a message naming it. Audio keeps playing. Press **Save now** first: the session saves with that plug-in's last stored state. Then **Give up on <plug-in>** stops transit from waiting on it: its window hides when Windows lets it, its plug-ins stay unresponsive until you quit and reopen transit, and plug-ins you add load normally. Do not use End Task on the plug-in's window: it ends transit. Copy diagnostics and the log name the plug-in and what it was doing; attach them to a report for the plug-in's maker or for transit ([K90](known-issues/README.md)).
