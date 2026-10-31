@@ -566,6 +566,9 @@ pub struct Insert {
     /// state), standard base64. Restored into a new instance before it first processes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub state: Option<String>,
+    /// Frozen Texture recording and its continuation state, stored beside the session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub frozen_recording: Option<crate::FrozenRecording>,
     /// The session audio source a sample-playing instrument (the built-in Sampler) plays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sample: Option<SourceId>,
@@ -597,6 +600,7 @@ impl Insert {
             active: true,
             preset: String::from("<factory default>"),
             state: None,
+            frozen_recording: None,
             sample: None,
             key: None,
             hardware: None,

@@ -8,6 +8,8 @@
 mod automation;
 pub mod b64;
 mod clip;
+mod frozen_recording;
+pub use frozen_recording::FrozenRecording;
 pub mod disk;
 mod ids;
 mod io_map;
