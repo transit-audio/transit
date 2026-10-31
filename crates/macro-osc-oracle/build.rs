@@ -1,5 +1,6 @@
 //! Builds the vendored C++ (vendor/: the macro oscillator, the resonator, the granular texture
-//! processor, the texture synthesizer and the meta-modulator) and the C ABI wrappers (cpp/*.cc).
+//! processor, the texture synthesizer, the meta-modulator and the random sequencer) and the C ABI
+//! wrappers (cpp/*.cc).
 //!
 //! Floating point is kept strict so the oracle is a stable reference: `-DTEST` (the desktop branch
 //! of stmlib, as the firmware's own test makefile), `-O2` whatever the cargo profile, no
@@ -116,6 +117,14 @@ fn main() {
     sources.push(vendor.join("beads/gain_control.cc"));
     collect(&vendor.join("warps/dsp"), "cc", &mut sources);
     sources.push(vendor.join("warps/resources.cc"));
+    // The random sequencer (#202): its generators and lag processor, the quantizer, the clock
+    // recovery and the tables. `discrete_distribution_quantizer.cc` (unused by the firmware) and the
+    // reference-only `marbles.cc` and `settings.cc` (hardware glue) are not compiled.
+    for f in ["lag_processor.cc", "output_channel.cc", "quantizer.cc", "t_generator.cc", "x_y_generator.cc"] {
+        sources.push(vendor.join("marbles/random").join(f));
+    }
+    sources.push(vendor.join("marbles/ramp/ramp_extractor.cc"));
+    sources.push(vendor.join("marbles/resources.cc"));
     sources.push(vendor.join("stmlib/dsp/atan.cc"));
     sources.push(vendor.join("stmlib/dsp/units.cc"));
     sources.push(vendor.join("stmlib/utils/random.cc"));
@@ -125,6 +134,7 @@ fn main() {
     sources.push(cpp.join("texture_oracle.cc"));
     sources.push(cpp.join("texture_extras_oracle.cc"));
     sources.push(cpp.join("modulator_oracle.cc"));
+    sources.push(cpp.join("sequencer_oracle.cc"));
     // The texture processor's second build, at the port's longest buffer (cpp/texture_oracle.cc):
     // the effect chain's sources only, in a renamed namespace.
     let mut long_sources: Vec<PathBuf> = ["processor.cc", "mu_law.cc", "delay_clock.cc", "delay_controller.cc", "trigger_generator.cc"]

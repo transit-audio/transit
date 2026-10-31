@@ -1,0 +1,92 @@
+--- marbles/random/distributions.h
++++ marbles/random/distributions.h
+@@ -41,2 +41,25 @@
+ const float kIcdfTableSize = 128.0f;
+ 
++// transit oracle: Interpolate(table + offset, index, size) with both reads
++// kept inside the inverse-cdf table (three sub-tables of 129 entries, 387 in
++// all). A component of a random vector is a 32-bit word divided by 2^32, so it
++// rounds to exactly 1.0 for the top 128 words; a pulse width drawn from such a
++// component reads the upper sub-table at (1.0 - 0.95) * 20 * 128, entry 386
++// plus a sliver, so entry 387, past the table, is read at a nonzero fraction.
++// The index is clamped to the table, so a read at the end returns the end's
++// value; inside, this is Interpolate() exactly. The port does the same.
++inline float TransitInterpolateIcdf(
++    const float* table, int32_t offset, float index, float size) {
++  const int32_t last = 3 * (static_cast<int32_t>(kIcdfTableSize) + 1) - 1;
++  index *= size;
++  MAKE_INTEGRAL_FRACTIONAL(index)
++  int32_t i = offset + index_integral;
++  int32_t j = i + 1;
++  i = i < 0 ? 0 : (i > last ? last : i);
++  j = j < 0 ? 0 : (j > last ? last : j);
++  float a = table[i];
++  float b = table[j];
++  return a + (b - a) * index_fractional;
++}
++
+ // Generates samples from beta distribution, from uniformly distributed samples.
+@@ -74,16 +97,16 @@
+   
+-  float x1y1 = stmlib::Interpolate(
+-      distributions_table[cell] + offset,
++  float x1y1 = TransitInterpolateIcdf(
++      distributions_table[cell], offset,
+       uniform,
+       kIcdfTableSize);
+-  float x2y1 = stmlib::Interpolate(
+-      distributions_table[cell + 1] + offset,
++  float x2y1 = TransitInterpolateIcdf(
++      distributions_table[cell + 1], offset,
+       uniform,
+       kIcdfTableSize);
+-  float x1y2 = stmlib::Interpolate(
+-      distributions_table[cell + kNumRangeValues + 1] + offset,
++  float x1y2 = TransitInterpolateIcdf(
++      distributions_table[cell + kNumRangeValues + 1], offset,
+       uniform,
+       kIcdfTableSize);
+-  float x2y2 = stmlib::Interpolate(
+-      distributions_table[cell + kNumRangeValues + 2] + offset,
++  float x2y2 = TransitInterpolateIcdf(
++      distributions_table[cell + kNumRangeValues + 2], offset,
+       uniform,
+--- marbles/random/t_generator.cc
++++ marbles/random/t_generator.cc
+@@ -205,2 +205,8 @@
+     drum_pattern_index_ = static_cast<int32_t>(kNumDrumPatterns * u);
++    // transit oracle: u reaches 1.0 when the random component rounds to 1.0
++    // and the bias is at an end; the index then names the 19th of 18
++    // patterns. It stays on the last one. The port does the same.
++    if (drum_pattern_index_ >= kNumDrumPatterns) {
++      drum_pattern_index_ = kNumDrumPatterns - 1;
++    }
+     if (bias_ <= 0.5f) {
+@@ -303,2 +309,7 @@
+-          pattern = divider_patterns[static_cast<size_t>(
+-              u * kNumDividerPatterns)];
++          // transit oracle: the same at 1.0, one past the 17 patterns; the
++          // index stays on the last one. The port does the same.
++          size_t transit_index = static_cast<size_t>(u * kNumDividerPatterns);
++          if (transit_index >= kNumDividerPatterns) {
++            transit_index = kNumDividerPatterns - 1;
++          }
++          pattern = divider_patterns[transit_index];
+--- marbles/random/lag_processor.cc
++++ marbles/random/lag_processor.cc
+@@ -79,1 +79,15 @@
+-  float warped_phase = Interpolate(lut_raised_cosine, phase, 256.0f);
++  // transit oracle: a channel's phase reaches exactly 1.0 (a bernoulli slave
++  // ramp holds its output there, the master ramp wraps only above 1.0), and
++  // Interpolate() then reads entry 257 of the 257-entry table at a zero
++  // fraction. Both reads are kept inside the table; inside, this is
++  // Interpolate() exactly. The port does the same.
++  float transit_index = phase * 256.0f;
++  MAKE_INTEGRAL_FRACTIONAL(transit_index)
++  int32_t transit_i = transit_index_integral;
++  int32_t transit_j = transit_i + 1;
++  transit_i = transit_i < 0 ? 0 : (transit_i > 256 ? 256 : transit_i);
++  transit_j = transit_j < 0 ? 0 : (transit_j > 256 ? 256 : transit_j);
++  float warped_phase = lut_raised_cosine[transit_i] + (
++      lut_raised_cosine[transit_j] - lut_raised_cosine[transit_i]) *
++      transit_index_fractional;

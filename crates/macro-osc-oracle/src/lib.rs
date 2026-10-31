@@ -1,6 +1,6 @@
 //! The null-test oracle for transit's ported instruments (ADR 0033): the macro oscillator (#194),
-//! the resonator (#198), the granular texture processor (#199), the texture effect chain (#241) and
-//! the meta-modulator (#200).
+//! the resonator (#198), the granular texture processor (#199), the texture effect chain (#241),
+//! the meta-modulator (#200) and the random sequencer (#202).
 //!
 //! This crate builds Émilie Gillet's original C++ DSP (MIT; vendored under `vendor/`, see
 //! `VENDOR.md` and `LICENSE-THIRD-PARTY`) with the `cc` crate and exposes it to Rust tests. It is
@@ -26,6 +26,9 @@
 //! - [`modulator`] and [`modulator_sweep`]: the meta-modulator (two input amplifiers, the internal
 //!   oscillator, six cross-modulation algorithms and the vocoder; stereo int16 in and out) and its
 //!   fixed sweep, at 96 kHz in the module's 60-frame blocks (#200).
+//! - [`sequencer`] and [`sequencer_sweep`]: the random sequencer (the t generator's gates, the X
+//!   and Y generators' voltages through the quantizer, deja vu, the clock recovery, the scale
+//!   recorder) and its fixed sweep, at 32 kHz in the module's 5-frame blocks (#202).
 //! - [`subset`]: the strided-or-full rule for the long tests (`TRANSIT_FULL_ORACLE=1`, #241).
 
 mod ffi;
@@ -39,6 +42,8 @@ mod oracle;
 pub mod residual;
 pub mod resonator;
 pub mod resonator_sweep;
+pub mod sequencer;
+pub mod sequencer_sweep;
 pub mod subset;
 pub mod sweep;
 pub mod texture;

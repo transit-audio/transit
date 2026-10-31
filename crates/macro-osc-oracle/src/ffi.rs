@@ -1,6 +1,6 @@
 //! The only module with `unsafe`: the C ABI of the wrappers in `cpp/` (the macro oscillator, the
-//! resonator, the granular processor, the texture synthesizer and the meta-modulator), and the
-//! session lock that makes it sound to call.
+//! resonator, the granular processor, the texture synthesizer, the meta-modulator and the random
+//! sequencer), and the session lock that makes it sound to call.
 //!
 //! Soundness rests on three invariants, each enforced here:
 //!
@@ -37,6 +37,11 @@
 //!    its crossfade and fold read their tables at indices computed from the processed signal
 //!    (the crossfade's ramp reaches the last entry plus one, the fold goes past either end on
 //!    inputs the amplifiers push over full scale), which `patches/all/0010` clamps to the tables.
+//!    The random sequencer's controls and clock flags are range-checked by its wrapper (every
+//!    knob, state byte and enumeration it indexes a table or an array with); its loaded scales are
+//!    checked there too. Its firmware reads past four arrays on inputs no check can refuse (a
+//!    random component of exactly 1.0, a channel phase of exactly 1.0), which `patches/all/0011`
+//!    clamps to the arrays.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -176,9 +181,44 @@ pub struct CModulatorParameters {
     pub(crate) carrier_shape: i32,
 }
 
+/// Mirrors `OracleSequencerControls` in `cpp/sequencer_oracle.cc` (what the random sequencer's
+/// main loop reads each block).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CSequencerControls {
+    pub(crate) t_model: i32,
+    pub(crate) t_range: i32,
+    pub(crate) t_rate: f32,
+    pub(crate) t_bias: f32,
+    pub(crate) t_jitter: f32,
+    pub(crate) deja_vu: f32,
+    pub(crate) deja_vu_length: f32,
+    pub(crate) t_deja_vu: i32,
+    pub(crate) x_deja_vu: i32,
+    pub(crate) t_pulse_width_mean: i32,
+    pub(crate) t_pulse_width_std: i32,
+    pub(crate) x_control_mode: i32,
+    pub(crate) x_range: i32,
+    pub(crate) x_register_mode: i32,
+    pub(crate) x_register_value: f32,
+    pub(crate) x_spread: f32,
+    pub(crate) x_bias: f32,
+    pub(crate) x_steps: f32,
+    pub(crate) x_scale: i32,
+    pub(crate) y_spread: i32,
+    pub(crate) y_bias: i32,
+    pub(crate) y_steps: i32,
+    pub(crate) y_divider: i32,
+    pub(crate) y_range: i32,
+    pub(crate) t_reset: i32,
+    pub(crate) x_reset: i32,
+    pub(crate) t_external: i32,
+    pub(crate) xy_clock_source: i32,
+}
+
 // SAFETY: these declarations match the `extern "C"` definitions in cpp/oracle.cc,
 // cpp/resonator_oracle.cc, cpp/granular_oracle.cc, cpp/texture_oracle.cc (in both of its builds)
-// cpp/texture_extras_oracle.cc and cpp/modulator_oracle.cc one for one
+// cpp/texture_extras_oracle.cc, cpp/modulator_oracle.cc and cpp/sequencer_oracle.cc one for one
 // (names, argument order, and C types: `size_t` is `usize`, `void*` is `*mut c_void`, the structs
 // are the `#[repr(C)]` mirrors above). The build script compiles that file into this crate.
 unsafe extern "C" {
@@ -309,6 +349,43 @@ unsafe extern "C" {
         out: *mut i16,
         size: usize,
     ) -> i32;
+    fn oracle_sequencer_block_size() -> usize;
+    fn oracle_sequencer_sample_rate() -> i32;
+    fn oracle_sequencer_loop_length_count() -> usize;
+    fn oracle_sequencer_loop_length(i: usize) -> i32;
+    fn oracle_sequencer_y_divider_count() -> usize;
+    fn oracle_sequencer_y_divider(i: usize, p: *mut i32, q: *mut i32) -> i32;
+    fn oracle_sequencer_preset_scale(index: usize, base_interval: *mut f32, num_degrees: *mut i32, voltages: *mut f32, weights: *mut u8) -> i32;
+    fn oracle_sequencer_new(seed: u32) -> *mut std::ffi::c_void;
+    fn oracle_sequencer_free(sequencer: *mut std::ffi::c_void);
+    fn oracle_sequencer_set_flush(sequencer: *mut std::ffi::c_void, flush: u8);
+    fn oracle_sequencer_load_scale(
+        sequencer: *mut std::ffi::c_void,
+        index: usize,
+        base_interval: f32,
+        num_degrees: i32,
+        voltages: *const f32,
+        weights: *const u8,
+    ) -> i32;
+    fn oracle_sequencer_process(
+        sequencer: *mut std::ffi::c_void,
+        controls: *const CSequencerControls,
+        t_clock: *const u8,
+        xy_clock: *const u8,
+        size: usize,
+        gates: *mut u8,
+        voltages: *mut f32,
+    ) -> i32;
+    fn oracle_sequencer_recorder_new() -> *mut std::ffi::c_void;
+    fn oracle_sequencer_recorder_free(recorder: *mut std::ffi::c_void);
+    fn oracle_sequencer_recorder_event(recorder: *mut std::ffi::c_void, kind: i32, voltage: f32) -> i32;
+    fn oracle_sequencer_recorder_extract(
+        recorder: *mut std::ffi::c_void,
+        base_interval: *mut f32,
+        num_degrees: *mut i32,
+        voltages: *mut f32,
+        weights: *mut u8,
+    ) -> i32;
 }
 
 static LOCK: Mutex<()> = Mutex::new(());
@@ -430,6 +507,49 @@ impl Session {
     pub fn modulator_constants(&self) -> (usize, usize, usize) {
         // SAFETY: each returns a compile-time constant; no state is touched.
         unsafe { (oracle_modulator_codec_block_size(), oracle_modulator_max_block_size(), oracle_modulator_oversampling()) }
+    }
+
+    /// The random sequencer's block size and sample rate (`kBlockSize`, `kSampleRate`).
+    #[must_use]
+    pub fn sequencer_constants(&self) -> (usize, i32) {
+        // SAFETY: each returns a compile-time constant; no state is touched.
+        unsafe { (oracle_sequencer_block_size(), oracle_sequencer_sample_rate()) }
+    }
+
+    /// The wrapper's copy of the firmware's deja vu loop lengths (`loop_length` in
+    /// `marbles/marbles.cc`).
+    #[must_use]
+    pub fn sequencer_loop_lengths(&self) -> Vec<i32> {
+        // SAFETY: returns a compile-time constant; no state is touched.
+        let n = unsafe { oracle_sequencer_loop_length_count() };
+        // SAFETY: reads one entry of a constant table; an index past it returns -1.
+        (0..n).map(|i| unsafe { oracle_sequencer_loop_length(i) }).collect()
+    }
+
+    /// The wrapper's copy of the firmware's Y clock divisions (`y_divider_ratios`), as `(p, q)`.
+    #[must_use]
+    pub fn sequencer_y_dividers(&self) -> Vec<(i32, i32)> {
+        // SAFETY: returns a compile-time constant; no state is touched.
+        let n = unsafe { oracle_sequencer_y_divider_count() };
+        (0..n)
+            .filter_map(|i| {
+                let (mut p, mut q) = (0, 0);
+                // SAFETY: `p` and `q` are valid for one write each; the index is checked by the C++.
+                let status = unsafe { oracle_sequencer_y_divider(i, &raw mut p, &raw mut q) };
+                (status == 0).then_some((p, q))
+            })
+            .collect()
+    }
+
+    /// The wrapper's copy of preset scale `index` (`preset_scales` in `marbles/settings.cc`): base
+    /// interval, degree count, and 16 voltages and weights (unused slots zero).
+    #[must_use]
+    pub fn sequencer_preset_scale(&self, index: usize) -> Option<(f32, i32, [f32; 16], [u8; 16])> {
+        let (mut base, mut n, mut v, mut w) = (0.0_f32, 0_i32, [0.0_f32; 16], [0_u8; 16]);
+        // SAFETY: every pointer is valid for the writes the C++ makes (one float, one int, 16
+        // floats, 16 bytes); the index is checked by the C++.
+        let status = unsafe { oracle_sequencer_preset_scale(index, &raw mut base, &raw mut n, v.as_mut_ptr(), w.as_mut_ptr()) };
+        (status == 0).then_some((base, n, v, w))
     }
 }
 
@@ -1006,5 +1126,128 @@ impl Drop for RawModulator<'_> {
         // SAFETY: `self.ptr` came from `oracle_modulator_new` and is freed only here
         // (invariant 2). Freeing touches no shared state.
         unsafe { oracle_modulator_free(self.ptr.as_ptr()) }
+    }
+}
+
+/// The random sequencer's generators (`marbles::TGenerator`, `marbles::XYGenerator` and their own
+/// random generator), driven as the firmware's main loop drives them.
+pub struct RawSequencer<'s> {
+    ptr: std::ptr::NonNull<std::ffi::c_void>,
+    /// Ties the handle to its session (invariant 1).
+    _session: &'s Session,
+}
+
+impl<'s> RawSequencer<'s> {
+    /// `None` when the allocation fails.
+    pub(crate) fn new(session: &'s Session, seed: u32) -> Option<Self> {
+        // SAFETY: the lock is held through `session` (invariant 1); the call allocates and
+        // initializes the generators, or returns null.
+        let ptr = unsafe { oracle_sequencer_new(seed) };
+        std::ptr::NonNull::new(ptr).map(|ptr| Self { ptr, _session: session })
+    }
+
+    pub(crate) fn set_flush(&mut self, flush: bool) {
+        // SAFETY: the lock is held through `self._session` (invariant 1); `self.ptr` is live
+        // (invariant 2) and used by this thread only; the call writes one flag.
+        unsafe { oracle_sequencer_set_flush(self.ptr.as_ptr(), u8::from(flush)) }
+    }
+
+    /// Loads a scale into slot `index`. `None` when the C++ refuses it (it checks every argument).
+    pub(crate) fn load_scale(&mut self, index: usize, base_interval: f32, voltages: &[f32], weights: &[u8]) -> Option<()> {
+        let n = voltages.len();
+        if weights.len() != n || n == 0 || n > 16 {
+            return None;
+        }
+        let n = i32::try_from(n).ok()?;
+        // SAFETY: the lock is held (invariant 1); `self.ptr` is live (invariant 2); `voltages` and
+        // `weights` each hold `n` (1 to 16) readable values (invariant 3); the C++ checks the slot,
+        // the interval and every degree before it touches the quantizers (invariant 4).
+        let status = unsafe { oracle_sequencer_load_scale(self.ptr.as_ptr(), index, base_interval, n, voltages.as_ptr(), weights.as_ptr()) };
+        (status == 0).then_some(())
+    }
+
+    /// One block of `gates.len()` frames (1 to 5). `None` when the lengths disagree, a clock the
+    /// controls need is missing, or the C++ refuses a control.
+    pub(crate) fn process(
+        &mut self,
+        controls: &CSequencerControls,
+        t_clock: Option<&[u8]>,
+        xy_clock: Option<&[u8]>,
+        gates: &mut [[u8; 3]],
+        voltages: &mut [[f32; 4]],
+    ) -> Option<()> {
+        let size = gates.len();
+        if voltages.len() != size || size == 0 || size > crate::sequencer::SEQUENCER_BLOCK_SIZE {
+            return None;
+        }
+        if t_clock.is_some_and(|c| c.len() != size) || xy_clock.is_some_and(|c| c.len() != size) {
+            return None;
+        }
+        let t = t_clock.map_or(std::ptr::null(), <[u8]>::as_ptr);
+        let xy = xy_clock.map_or(std::ptr::null(), <[u8]>::as_ptr);
+        // SAFETY: the lock is held (invariant 1); `self.ptr` is live (invariant 2) and used by this
+        // thread only; `controls` is valid for reads; each clock is null or holds `size` bytes, and
+        // `gates` and `voltages` hold `3 * size` bytes and `4 * size` floats (`[u8; 3]` and
+        // `[f32; 4]` have no padding), `size` at most the 5 frames the wrapper's buffers hold
+        // (invariant 3); the C++ range-checks every control and clock byte (invariant 4).
+        let status = unsafe {
+            oracle_sequencer_process(
+                self.ptr.as_ptr(),
+                std::ptr::from_ref(controls),
+                t,
+                xy,
+                size,
+                gates.as_mut_ptr().cast::<u8>(),
+                voltages.as_mut_ptr().cast::<f32>(),
+            )
+        };
+        (status == 0).then_some(())
+    }
+}
+
+impl Drop for RawSequencer<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.ptr` came from `oracle_sequencer_new` and is freed only here (invariant 2).
+        unsafe { oracle_sequencer_free(self.ptr.as_ptr()) }
+    }
+}
+
+/// The random sequencer's scale recorder (`marbles::ScaleRecorder`).
+pub struct RawRecorder<'s> {
+    ptr: std::ptr::NonNull<std::ffi::c_void>,
+    /// Ties the handle to its session (invariant 1).
+    _session: &'s Session,
+}
+
+impl<'s> RawRecorder<'s> {
+    pub(crate) fn new(session: &'s Session) -> Option<Self> {
+        // SAFETY: the lock is held through `session` (invariant 1); allocates or returns null.
+        let ptr = unsafe { oracle_sequencer_recorder_new() };
+        std::ptr::NonNull::new(ptr).map(|ptr| Self { ptr, _session: session })
+    }
+
+    /// One event (0 new note, 1 update, 2 accept). `None` when the C++ refuses it.
+    pub(crate) fn event(&mut self, kind: i32, voltage: f32) -> Option<()> {
+        // SAFETY: the lock is held (invariant 1); `self.ptr` is live (invariant 2); the C++
+        // checks the kind and the voltage.
+        let status = unsafe { oracle_sequencer_recorder_event(self.ptr.as_ptr(), kind, voltage) };
+        (status == 0).then_some(())
+    }
+
+    /// The recorded scale, or `None` below two degrees.
+    pub(crate) fn extract(&mut self) -> Option<(f32, i32, [f32; 16], [u8; 16])> {
+        let (mut base, mut n, mut v, mut w) = (0.0_f32, 0_i32, [0.0_f32; 16], [0_u8; 16]);
+        // SAFETY: the lock is held (invariant 1); `self.ptr` is live (invariant 2); every pointer is
+        // valid for the writes the C++ makes (one float, one int, 16 floats, 16 bytes).
+        let status = unsafe { oracle_sequencer_recorder_extract(self.ptr.as_ptr(), &raw mut base, &raw mut n, v.as_mut_ptr(), w.as_mut_ptr()) };
+        (status == 1).then_some((base, n, v, w))
+    }
+}
+
+impl Drop for RawRecorder<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.ptr` came from `oracle_sequencer_recorder_new` and is freed only here
+        // (invariant 2).
+        unsafe { oracle_sequencer_recorder_free(self.ptr.as_ptr()) }
     }
 }

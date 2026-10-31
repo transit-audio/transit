@@ -1,7 +1,8 @@
 # Vendored sources
 
 `vendor/` holds Émilie Gillet's original C++ DSP (the macro oscillator, #194, the resonator, #198,
-the granular texture processor, #199, the texture synthesizer, #241, and the meta-modulator, #200),
+the granular texture processor, #199, the texture synthesizer, #241, the meta-modulator, #200, and
+the random sequencer, #202),
 copied unchanged from two upstream repositories.
 It is the oracle: never edit it. Licenses are in [`LICENSE-THIRD-PARTY`](LICENSE-THIRD-PARTY).
 
@@ -12,6 +13,7 @@ It is the oracle: never edit it. Licenses are in [`LICENSE-THIRD-PARTY`](LICENSE
 | `vendor/clouds/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4`, the same commit (the vendored files last changed in the merge `d1d8839`, 2023-03-13, which lost a line of `clouds/dsp/window.h`; see Local changes) |
 | `vendor/beads/` | https://github.com/pichenettes/eurorack | `f4cfa7697095a28d292bff758beb51deb49b5a86` (2026-10-12: the directory arrived in `d8f47391` the day before; this commit only adds the README footnote "builds on a Desktop platform but not verified to build and run on a module". Both pin the same stmlib, `e3bd7c9c`) |
 | `vendor/warps/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4`, the same commit as the first three (the vendored files last changed in `2a46873`, 2019-04-02, the author's name in the notices; the processing path last changed in `a78a2f7`, a fix to the vocoder's limiter, and `5115a25` regenerated the frequency shifter's waveform tables in `resources.cc`, which the oracle does not render) |
+| `vendor/marbles/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4`, the same commit as the first three (the vendored files last changed in `db1566f`, 2023-01-08, "latest update with reset input mode and bug fixes") |
 | `vendor/stmlib/` | https://github.com/pichenettes/stmlib | `e3bd7c9cc00e4364166f9905c0509b6ffd0535ec` (the submodule commit the eurorack commit above pins) |
 
 ## File set
@@ -63,20 +65,38 @@ From eurorack, paths kept relative to the repository root:
   settings, the bootloader and `warps/resources/` (the generators) are not vendored. The stmlib
   helpers it uses are already vendored.
 
+- `marbles/random/**` (the t generator and its seven models, the X and Y generators, the output
+  channel with its lag processor and quantizer, the random stream, generator and sequence with deja
+  vu, the distributions and their inverse-cdf tables' reader, and the discrete-distribution
+  quantizer, which the firmware never calls and the oracle does not compile), `marbles/ramp/**`
+  (the master and slave ramps, the ramp divider, and the clock recovery), `marbles/resources.cc`
+  and `.h`, `marbles/scale_recorder.h` and `marbles/note_filter.h`; and, for reference only (not
+  compiled), `marbles/marbles.cc` (the main loop the wrapper follows: the deja vu dead band, the
+  loop lengths, the Y divisions) and `marbles/settings.cc` (the six preset scales): the wrapper
+  carries copies of those tables, and `tests/sequencer_self_floor.rs` reads both files and checks
+  every value. 28 files, each carrying Émilie Gillet's MIT notice (2015). The random sequencer is
+  an STM32 project, MIT by the eurorack README and by every header. `marbles/test/`, the drivers,
+  the UI, the CV reader and its channels, the clock self-patching detector, the I/O buffer, the
+  bootloader and `marbles/resources/` (the generators) are not vendored. The topographic drum
+  sequencer of the same repository (`grids/`) is an AVR project under GPL 3.0 and is not vendored.
+
 From stmlib:
 
 - `stmlib.h`, `dsp/*.h`, `dsp/units.cc`, `dsp/atan.cc` (the phase vocoder's `fast_atan2r` table),
   `fft/shy_fft.h` (its FFT), `utils/random.cc`, and `LICENSE`
 - from `utils/`, only the headers the DSP includes: `buffer_allocator.h`, `dsp.h`, `random.h`, and
-  `gate_flags.h` (the texture synthesizer's SEED gates; MIT, 2017).
+  `gate_flags.h` (the texture synthesizer's SEED gates; MIT, 2017), and `ring_buffer.h` (the
+  random sequencer's random stream includes it; MIT, 2012).
   The other `utils/` headers are unused, and two of them (`crc32.h`, after Gary S. Brown, and
   `murmurhash3.h`, public domain) carry no MIT notice, so they are left out.
 
-Nothing from `drivers/`, the UI, settings, the bootloader, `user_data_receiver`, `test/` or
-`resources/` (the table generators) is vendored. 248 files in all (134 for the macro oscillator,
+Nothing from `drivers/`, the UI, settings (but the random sequencer's `settings.cc`, for
+reference), the bootloader, `user_data_receiver`, `test/` or `resources/` (the table generators) is
+vendored. 277 files in all (134 for the macro oscillator,
 28 for the resonator, 28 for the granular processor, and `dsp/atan.cc` and `fft/shy_fft.h` added to
 stmlib for it, 38 for the texture synthesizer and `utils/gate_flags.h` for it, 17 for the
-meta-modulator), every source file carrying Emilie Gillet's MIT notice.
+meta-modulator, 28 for the random sequencer and `utils/ring_buffer.h` for it), every source file
+carrying Emilie Gillet's MIT notice.
 
 ## Verification
 
@@ -90,7 +110,9 @@ git clone --filter=blob:none https://github.com/pichenettes/eurorack /tmp/er
 git clone --filter=blob:none https://github.com/pichenettes/stmlib /tmp/stm
 ( git -C /tmp/er ls-tree -r 08460a69a7e1 plaits rings/dsp rings/resources.cc rings/resources.h \
     clouds/dsp clouds/resources.cc clouds/resources.h clouds/drivers/debug_pin.h \
-    warps/dsp warps/resources.cc warps/resources.h warps/drivers/debug_pin.h | awk '{print $3, $4}'
+    warps/dsp warps/resources.cc warps/resources.h warps/drivers/debug_pin.h \
+    marbles/random marbles/ramp marbles/resources.cc marbles/resources.h marbles/scale_recorder.h \
+    marbles/note_filter.h marbles/marbles.cc marbles/settings.cc | awk '{print $3, $4}'
   git -C /tmp/er ls-tree -r f4cfa769 beads/dsp beads/resources.cc beads/resources.h \
     beads/gain_control.cc beads/gain_control.h | awk '{print $3, $4}'
   git -C /tmp/stm ls-tree -r e3bd7c9c | awk '{print $3, "stmlib/"$4}' ) | sort -k2 > /tmp/upstream.txt
@@ -101,7 +123,8 @@ join -1 2 -2 2 /tmp/ours.txt /tmp/upstream.txt | awk '$2 != $3 {print "differs:"
 
 No output means every file matches (checked 2026-10-29: 134 of 134; with the resonator, 2026-10-30:
 162 of 162; with the granular processor, 2026-10-30: 192 of 192; with the texture synthesizer,
-2026-10-31: 231 of 231; with the meta-modulator, 2026-10-31: 248 of 248).
+2026-10-31: 231 of 231; with the meta-modulator, 2026-10-31: 248 of 248; with the random
+sequencer, 2026-10-31: 277 of 277).
 
 ## Local changes (outside vendor/)
 
@@ -216,6 +239,34 @@ No output means every file matches (checked 2026-10-29: 134 of 134; with the res
     bounds the scaled index before its integer conversion), so a read at an end returns that end's
     value. The arithmetic is `Interpolate()`'s, so every read upstream keeps inside its table is
     unchanged. The port clamps the same way. An upstream finding (the reads past the tables).
+- `patches/all/` holds one for the random sequencer (#202):
+  - `0011-sequencer-reads-stay-inside.patch`: four reads past an array, each from inputs no check
+    can refuse. A component of a random vector is a 32-bit word divided by 2^32, which rounds to
+    exactly 1.0 for the top 128 words. A pulse width drawn from such a component reads the upper
+    inverse-cdf sub-table at entry 386 plus a sliver, so entry 387, past the 387-entry table, is
+    read at a nonzero fraction (`BetaDistributionSample`, `marbles/random/distributions.h`); the
+    drum model picks pattern 18 of 18 (`GenerateDrums`) and the clusters model pattern 17 of 17
+    when such a component meets a bias at either end; and the lag processor reads entry 257 of the
+    257-entry `lut_raised_cosine` at a zero fraction whenever a channel's phase is exactly 1.0
+    (a Bernoulli slave ramp holds its output there; `lag_processor.cc`). Each index is clamped to
+    its table or pattern list, so a read at an end returns the end; inside, the arithmetic is
+    unchanged. The port clamps the same way. An upstream finding (the four reads).
+- `cpp/sequencer_oracle.cc` wraps the random sequencer (`marbles::TGenerator` and
+  `marbles::XYGenerator` with their random generator, #202), driven as the firmware's main loop
+  (`marbles/marbles.cc`) drives them: at 32 kHz in blocks of 5 frames, the t generator first, then
+  the X and Y generators, with the main loop's deja vu dead band, loop-length quantizer and Y
+  divisions; the CV reader, the UI, the clock self-patching detector and the DAC are left out (the
+  caller passes the knob values, the clock sources and the clock inputs' gate flags), and the gate
+  outputs are the generators' (the firmware's two-sample DAC alignment is not applied). Each
+  sequencer owns its random generator, seeded by the caller (the module seeds it with 1); the
+  hardware random number generator never writes the stream, so it draws from the generator alone,
+  as on a module whose hardware generator has not filled the buffer. The generators are
+  value-initialized (zeroed), as the module's globals: the Y generator's ramp divider leaves
+  `reset_at_next_pulse_` unwritten and reads it at its first wrap (an upstream finding). The
+  wrapper carries copies of the main loop's loop lengths and Y divisions and of `settings.cc`'s six
+  preset scales (that array has internal linkage, and the file needs the hardware's flash storage);
+  `tests/sequencer_self_floor.rs` checks every value against the vendored files. It also wraps the
+  scale recorder on its own, and can run without the flush-to-zero scope (an evidence switch).
 - `cpp/modulator_oracle.cc` wraps the meta-modulator (`warps::Modulator`, #200). The modulator is
   value-initialized (zeroed), as the module's global: `Init` leaves the input amplifiers' level
   followers and gains (`level_`, `pre_gain_`, `post_gain_` in `SaturatingAmplifier`) unwritten,
