@@ -88,6 +88,8 @@ mod external_midi;
 #[cfg(feature = "testing")]
 mod fingerprint;
 #[cfg(test)]
+mod fm_loop_wrap_tests;
+#[cfg(test)]
 mod frozen_state_tests;
 mod graph;
 mod hardware;
