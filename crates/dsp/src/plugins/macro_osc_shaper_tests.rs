@@ -192,3 +192,87 @@ fn a_synced_lfo_follows_the_song_position() {
     let (a, b) = (from_start.slots[0].shaper.lfo[0].phase(), from_bar.slots[0].shaper.lfo[0].phase());
     assert!((a - b).abs() < 1e-9, "{a} vs {b}");
 }
+
+/// Renders host blocks of 240 frames until the first `n` voices are idle (at most `cap` blocks):
+/// the left channel and the block in which they all were idle.
+fn render_until_idle(m: &mut MacroOscillator, n: usize, cap: usize) -> (Vec<f32>, Option<usize>) {
+    let mut io = vec![vec![0.0; 240]; 2];
+    let mut l = Vec::new();
+    for b in 0..cap {
+        m.process(&mut io, 240);
+        l.extend_from_slice(&io[0]);
+        if m.slots.iter().take(n).all(|s| s.idle) {
+            return (l, Some(b));
+        }
+    }
+    (l, None)
+}
+
+fn largest_step(x: &[f32]) -> f32 {
+    x.windows(2).fold(0.0f32, |m, w| m.max((w[1] - w[0]).abs()))
+}
+
+/// Turning the shaper on under a held chord does not cut the voices: each keeps its low-pass
+/// gate and its idle rule until it ends, so there is no step at the switch, the voices end when
+/// the gate's decay does, and the render is the one without the switch. A phrase started after
+/// the switch is shaped (its short amp release ends it long before the gate would).
+#[test]
+fn switching_the_shaper_on_keeps_the_sounding_voices_on_their_gate() {
+    let chord = [60u8, 64, 67];
+    let play = |switch: bool| {
+        let mut m = inst(4, &[("model", 8.0), ("decay", 60.0), ("amp_release", 10.0)]);
+        for k in chord {
+            m.note_on(0, k, 110);
+        }
+        let (before, _) = render(&mut m, 9600, 240);
+        if switch {
+            assert!(m.set_param("shaper", 1.0));
+        }
+        let (mut after, _) = render(&mut m, 4800, 240);
+        for k in chord {
+            m.note_off(0, k);
+        }
+        let (tail, idle_at) = render_until_idle(&mut m, 4, 4000);
+        after.extend_from_slice(&tail);
+        (m, before, after, idle_at)
+    };
+    let (_, ref_before, ref_after, ref_idle) = play(false);
+    let (mut m, before, after, idle_at) = play(true);
+    assert_eq!(before, ref_before);
+    let pre = largest_step(&before);
+    let mut joined = vec![before.last().copied().unwrap_or(0.0)];
+    joined.extend_from_slice(&after);
+    assert!(largest_step(&joined) <= pre, "no step past the pre-switch maximum {pre}");
+    assert!(ref_idle.is_some_and(|b| b > 10), "the gate's decay takes a while: {ref_idle:?}");
+    assert_eq!(idle_at, ref_idle, "the old voices end when their gate's decay does");
+    assert!(after == ref_after, "the voices sounding at the switch play on as before");
+    // A new phrase after the switch is shaped: 10 ms of release, not the gate's decay.
+    m.note_on(0, 72, 110);
+    let _ = render(&mut m, 2400, 240);
+    m.note_off(0, 72);
+    let (_, shaped_idle) = render_until_idle(&mut m, 4, 4000);
+    assert!(shaped_idle.is_some_and(|b| b < 4), "the amp envelope ends the new voice: {shaped_idle:?}");
+}
+
+/// Turning the shaper off during a shaped voice's release does not cut it: the release plays out
+/// on the amp envelope and the render is the one without the switch.
+#[test]
+fn switching_the_shaper_off_keeps_a_shaped_release() {
+    let play = |switch: bool| {
+        let mut m = inst(2, &[("model", 8.0), ("shaper", 1.0), ("amp_release", 500.0)]);
+        m.note_on(0, 60, 120);
+        let (mut l, _) = render(&mut m, 4800, 240);
+        m.note_off(0, 60);
+        l.extend(render(&mut m, 2400, 240).0);
+        if switch {
+            assert!(m.set_param("shaper", 0.0));
+        }
+        let (tail, idle_at) = render_until_idle(&mut m, 2, 4000);
+        l.extend_from_slice(&tail);
+        (l, idle_at)
+    };
+    let (reference, ref_idle) = play(false);
+    let (switched, idle_at) = play(true);
+    assert!(switched == reference, "the release plays out as if the shaper stayed on");
+    assert!(idle_at.is_some() && idle_at == ref_idle);
+}

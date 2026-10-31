@@ -323,14 +323,14 @@ impl Shaper {
         self.coefs = [Coefs::new(g, k), Coefs::new(g, K_BUTTERWORTH)];
     }
 
-    /// Runs one block: the envelopes advance a frame at a time; with the shaper on, each frame of
-    /// `block` goes through the drive, the filter and the amp envelope's gain.
-    pub(crate) fn process(&mut self, s: &Settings, block: &mut [f32]) {
+    /// Runs one block: the envelopes advance a frame at a time; when the voice is `shaped`, each
+    /// frame of `block` goes through the drive, the filter and the amp envelope's gain.
+    pub(crate) fn process(&mut self, s: &Settings, shaped: bool, block: &mut [f32]) {
         let [c0, c1] = self.coefs;
         for y in block.iter_mut() {
             let amp = self.amp.next(&s.amp);
             self.filter_env.next(&s.filter_env);
-            if !s.on {
+            if !shaped {
                 continue;
             }
             let [s0, s1] = &mut self.sections;
@@ -364,7 +364,7 @@ mod tests {
         sh.note(&s, 1.0, [0.0; 2]);
         let mut block = [0.3f32; super::super::BLOCK];
         sh.design(&s, 60.0, FilterMods::default());
-        sh.process(&s, &mut block);
+        sh.process(&s, s.on, &mut block);
         assert!(block.iter().all(|y| y.to_bits() == 0.3f32.to_bits()));
         assert!(sh.amp.level > 0.0 && sh.filter_env.level > 0.0);
     }
@@ -376,20 +376,20 @@ mod tests {
         let mut sh = Shaper::new(3);
         let mut block = [0.5f32; super::super::BLOCK];
         sh.design(&s, 60.0, FilterMods::default());
-        sh.process(&s, &mut block);
+        sh.process(&s, s.on, &mut block);
         assert!(block.iter().all(|y| *y == 0.0), "no note, no sound");
         sh.note(&s, 1.0, [0.0; 2]);
         let mut peak = 0.0f32;
         for _ in 0..400 {
             let mut b = [0.5f32; super::super::BLOCK];
-            sh.process(&s, &mut b);
+            sh.process(&s, s.on, &mut b);
             peak = peak.max(b.iter().fold(0.0, |m, y| m.max(y.abs())));
         }
         assert!(peak > 0.2, "{peak}");
         sh.release();
         for _ in 0..2000 {
             let mut b = [0.5f32; super::super::BLOCK];
-            sh.process(&s, &mut b);
+            sh.process(&s, s.on, &mut b);
         }
         assert!(sh.amp_idle());
     }

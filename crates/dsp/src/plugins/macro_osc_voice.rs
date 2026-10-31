@@ -5,10 +5,14 @@
 //!
 //! - A voice is **idle** once it holds no key, its trigger is low and both its outputs have stayed
 //!   within one int16 LSB of silence (-90 dBFS) for [`QUIET_SECONDS`]: some models settle on a
-//!   +-1 LSB residue rather than exact zero (six-op FM 2 does). With the shaper on, it is idle as
-//!   soon as it holds no key and its amp envelope has finished. An idle voice is not rendered,
+//!   +-1 LSB residue rather than exact zero (six-op FM 2 does). A voice whose phrase started with
+//!   the shaper on is idle as soon as it holds no key and its amp envelope has finished. An idle voice is not rendered,
 //!   costs nothing and is the first one a new note takes. Until then its tail plays out after the
 //!   note-off.
+//! - Whether the shaper shapes a voice is taken when its phrase starts and kept until the voice
+//!   is idle: turning the shaper on does not cut a voice tailing in its low-pass gate (it keeps
+//!   the gate and its idle rule until it ends), and turning it off does not cut a shaped voice's
+//!   release. Phrases started after the switch follow the new setting.
 //! - The chiptune model envelopes itself (the voice bypasses its low-pass gate) and, with no
 //!   envelope set, holds its note for ever. A held key keeps it held, as on the module; after the
 //!   note-off the voice gives it the decay envelope the module's TIMBRE attenuverter would
@@ -236,6 +240,9 @@ pub struct Slot {
     started: bool,
     /// A key held the voice in the last block (its envelopes are gated).
     was_sounding: bool,
+    /// The shaper shapes this voice: the shaper's switch when the phrase started, kept until the
+    /// voice is idle.
+    shaped: bool,
     /// When the voice's newest phrase started (the allocator's counter).
     pub age: u64,
     /// The peak of its recent output, falling slowly: what "quietest" compares.
@@ -266,6 +273,7 @@ impl Slot {
             retrigger: false,
             started: false,
             was_sounding: false,
+            shaped: false,
             age: 0,
             loudness: 0.0,
             quiet: 0,
@@ -306,6 +314,7 @@ impl Slot {
         self.retrigger = false;
         self.started = false;
         self.was_sounding = false;
+        self.shaped = false;
         self.age = 0;
         self.loudness = 0.0;
         self.quiet = 0;
@@ -403,6 +412,7 @@ impl Slot {
         let sh = s.shaper;
         if self.started {
             self.started = false;
+            self.shaped = sh.on;
             self.shaper.note(sh, self.velocity, s.free_phase);
         } else if !sounding && self.was_sounding {
             self.shaper.release();
@@ -423,8 +433,9 @@ impl Slot {
         let trigger = sounding && !self.retrigger;
         self.retrigger = false;
         self.last_trigger = trigger;
-        // With the shaper on its amp envelope is the voice's envelope: the low-pass gate stays open.
-        let level = if sh.on {
+        // A shaped voice's envelope is the amp envelope: the low-pass gate stays open.
+        let shaped = self.shaped;
+        let level = if shaped {
             1.0
         } else if sounding {
             self.velocity
@@ -446,18 +457,18 @@ impl Slot {
             silent &= out.abs() <= LSB && aux.abs() <= LSB;
             *y = out + (aux - out) * s.aux_mix;
         }
-        if sh.on {
+        if shaped {
             let mods = FilterMods { cutoff: sum(dst::CUTOFF), resonance: sum(dst::RESONANCE), env_amount: sum(dst::ENV_AMOUNT) };
             self.shaper.design(sh, self.note, mods);
         }
-        self.shaper.process(sh, &mut self.mixed);
+        self.shaper.process(sh, shaped, &mut self.mixed);
         self.shaper.lfo_amount_mod = [sum(dst::LFO1_AMOUNT), sum(dst::LFO2_AMOUNT)];
         let rate = |d: usize| RATE_OCTAVES * sum(d).clamp(-1.0, 1.0);
         self.shaper.advance_lfos(sh, s.tempo, [rate(dst::LFO1_RATE), rate(dst::LFO2_RATE)], s.quarters.is_some());
         self.gain = voice_gains(sum(dst::LEVEL), sum(dst::PAN));
         let peak = self.mixed.iter().fold(0.0f32, |p, y| p.max(y.abs()));
         self.loudness = peak.max(self.loudness * LOUDNESS_FALL);
-        if sh.on {
+        if shaped {
             self.idle = !sounding && self.shaper.amp_idle();
         } else if sounding || trigger || !silent {
             self.quiet = 0;
