@@ -90,6 +90,22 @@ pub struct Texture {
 }
 
 impl Texture {
+    /// Active line's stored items, including its interpolation tail. Copy these on the audio
+    /// thread; decoding and chronological reordering belong on the control thread.
+    #[must_use]
+    pub fn raw_recording(&self) -> &[i16] {
+        let line = self.processors[self.media.index()].recording_line(self.mono);
+        self.memory.raw(line.items_needed())
+    }
+
+    /// Restore an in-process raw capture into a chain at its captured setup, off-thread.
+    pub fn restore_raw_recording(&mut self, items: &[i16]) -> Option<()> {
+        if items.len() != self.raw_recording().len() {
+            return None;
+        }
+        self.memory.restore_raw(items)
+    }
+
     /// Active recording length at the codec rate (clean tape repeats each 24 kHz sample twice).
     #[must_use]
     pub fn recording_frames(&self) -> usize {

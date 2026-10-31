@@ -157,6 +157,7 @@ struct Block<'a> {
     gate_flags: &'a mut u8,
     gain: u8,
     mono: bool,
+    recorded: &'a mut bool,
 }
 
 impl Block<'_> {
@@ -180,6 +181,9 @@ impl Block<'_> {
             &flags[..n]
         });
         self.texture.process(self.controls, &freeze[..n], seed, &leveled[..n], &mut output[..n]);
+        if !self.freeze && n != 0 {
+            *self.recorded = true;
+        }
     }
 }
 
@@ -207,6 +211,8 @@ pub struct TextureFx {
     idle: bool,
     capture: Option<freeze_state::Capture>,
     restored: bool,
+    recorded: bool,
+    recording_generation: u64,
 }
 
 impl Default for TextureFx {
@@ -245,6 +251,8 @@ impl TextureFx {
             idle: true,
             capture: None,
             restored: false,
+            recorded: false,
+            recording_generation: 0,
         };
         t.make_paths();
         t.update();
@@ -294,6 +302,7 @@ impl TextureFx {
 
     /// The restart at the bottom of the fade: the chain takes the wanted setup.
     fn restart(&mut self) {
+        self.recording_generation = self.recording_generation.wrapping_add(1);
         let want = self.want;
         let old = self.setup;
         if want.buffer != old.buffer {
@@ -310,6 +319,7 @@ impl TextureFx {
         }
         self.gate_flags = 0;
         self.setup = want;
+        self.recorded = false;
     }
 
     /// The fade's gain for the next sample, restarting at its bottom.
@@ -368,10 +378,6 @@ impl TextureFx {
 
 impl Plugin for TextureFx {
     fn service_idle_state(&mut self) {
-        if self.want != self.setup {
-            self.restored = false;
-            self.reset();
-        }
         self.answer_capture();
     }
     fn save_state(&mut self) -> Option<Vec<u8>> {
@@ -392,6 +398,9 @@ impl Plugin for TextureFx {
     }
 
     fn set_param(&mut self, id: &str, value: f32) -> bool {
+        if id == "freeze" && self.p.on(P_FREEZE) && value < 0.5 {
+            self.recording_generation = self.recording_generation.wrapping_add(1);
+        }
         if self.p.set(id, value).is_none() {
             return false;
         }
@@ -422,6 +431,7 @@ impl Plugin for TextureFx {
         if self.restored {
             return;
         }
+        self.recording_generation = self.recording_generation.wrapping_add(1);
         let want = self.want;
         self.texture.rebuild(want.buffer, want.media, want.mono);
         self.stage = InputStage::new(want.media.sample_rate() as f32, clipping(want.media));
@@ -431,6 +441,7 @@ impl Plugin for TextureFx {
         self.setup = want;
         self.fade = Fade::Steady;
         self.idle = true;
+        self.recorded = false;
     }
 
     fn latency(&self) -> usize {
@@ -472,6 +483,7 @@ impl Plugin for TextureFx {
                 gate_flags: &mut self.gate_flags,
                 gain: gain_setting,
                 mono: self.setup.mono,
+                recorded: &mut self.recorded,
             };
             let Some(path) = self.paths.get_mut(self.active_path) else { return };
             let y = path.tick(&self.kernel, x, &mut |i, o| block.render(i, o));

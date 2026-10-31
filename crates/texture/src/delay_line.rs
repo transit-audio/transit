@@ -91,6 +91,15 @@ pub struct DelayMemory {
 }
 
 impl DelayMemory {
+    pub(crate) fn raw(&self, items: usize) -> &[i16] {
+        &self.items[..items.min(self.span)]
+    }
+
+    pub(crate) fn restore_raw(&mut self, items: &[i16]) -> Option<()> {
+        self.items.get_mut(..items.len())?.copy_from_slice(items);
+        Some(())
+    }
+
     pub(crate) fn write_tail(&self, out: &mut Vec<u8>) {
         use crate::checkpoint::State;
         self.freeze_tail.write(out);
