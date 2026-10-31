@@ -176,7 +176,7 @@ pub use render_pool::{
 use routing::{
     MixOut, PdcWalk, is_aux, live, log_loops, path_need, pdc_visit, processing_order, receives_solo, route_into, strip_channels, strip_format,
 };
-pub use sample_tap::{SAMPLE_FRAMES, SampleTap};
+pub use sample_tap::{READ_MARGIN, SAMPLE_FRAMES, SampleTap};
 #[cfg(feature = "testing")]
 pub use sched_seam::Mute;
 pub use scope::{INSTRUMENT_UID, SCOPE_FRAMES, ScopeHub, ScopeTap};

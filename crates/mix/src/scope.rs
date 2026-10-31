@@ -189,8 +189,15 @@ impl ScopeHub {
         self.samples.lock().ok()?.get(&(track, uid))?.upgrade()
     }
 
-    /// Copies the last `out.len()` input frames of an insert's sample tap (see [`SampleTap::read`]);
-    /// 0 with no tap.
+    /// Frames the render has written to an insert's sample tap in all (see [`SampleTap::written`]);
+    /// `None` with no tap.
+    #[must_use]
+    pub fn samples_written(&self, track: TrackId, uid: u64) -> Option<usize> {
+        self.get_samples(track, uid).map(|t| t.written())
+    }
+
+    /// Copies the newest settled `out.len()` input frames of an insert's sample tap (see
+    /// [`SampleTap::read`]); 0 with no tap.
     pub fn samples(&self, track: TrackId, uid: u64, out: &mut [f32]) -> usize {
         self.get_samples(track, uid).map_or(0, |t| t.read(out))
     }
