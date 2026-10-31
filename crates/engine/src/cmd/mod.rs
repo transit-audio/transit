@@ -42,6 +42,7 @@ pub(crate) mod sampler;
 mod setup_more;
 mod surround;
 mod tab;
+mod takes;
 mod track;
 mod track_more;
 mod transport;
@@ -180,6 +181,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(sampler::specs());
         v.extend(zoom_toggle::specs());
         v.extend(rack::specs());
+        v.extend(takes::specs());
         v
     })
 }

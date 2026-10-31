@@ -23,6 +23,7 @@ pub mod presets;
 pub mod retime;
 pub mod score;
 pub mod step_input;
+pub mod takes;
 
 use serde_json::{Value, json};
 use std::cell::Cell;
