@@ -140,7 +140,8 @@ fn the_editor_button_opens_a_window_for_a_built_in_instrument_and_effect() {
     assert_eq!(t.app.ui.plugin_windows, vec![key]);
     let w = t.window(tr);
     assert_eq!(w.title, format!("{} · Macro Oscillator", t.app.engine.session().track(tr).unwrap().name));
-    assert_eq!(w.rows.len(), info("macro_oscillator").params.len(), "one row per parameter");
+    // One row per parameter of the module's own; the shaper and the matrix (#243) hide until used.
+    assert_eq!(w.rows.len(), 12, "one row per parameter of the module");
     assert!(t.app.mixer.devices.cards[0].editor_open);
     t.open_editor(1);
     assert_eq!(t.app.ui.plugin_windows.len(), 2);
@@ -317,6 +318,12 @@ fn each_bespoke_panel_opens_and_lists_every_parameter() {
     for plugin in ["compressor", "expander_gate", "eq_7band", "plate_reverb", "macro_oscillator"] {
         let mut t = T::new();
         let (tr, _) = open_plugin(&mut t, plugin);
+        let r = t.window(tr).addition_rect;
+        if r != [0.0; 4] {
+            // The Macro Oscillator's shaper and matrix (#243) show after a click on their line.
+            t.click(((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0), 1);
+            t.frames(3);
+        }
         let w = t.window(tr);
         let mut got: Vec<String> = w.rows.iter().map(|r| r.param.clone()).collect();
         got.sort();
@@ -392,10 +399,11 @@ fn the_macro_oscillator_model_combo_applies_its_choice_and_the_panel_says_model_
     assert_ne!(before, after, "the instrument renders the chosen model");
 }
 
-/// The voices, the note-to-macro grid (a row per source, a column per target) and the voice
-/// lights (#196), which read the instrument's tap.
+/// The voices and the voice lights (#196), which read the instrument's tap; the line that labels
+/// the shaper and the matrix as transit's addition, and the matrix as a grid below the shaper
+/// (#243): a row's cells side by side, rows 1 to 8 down the first column, 9 to 16 down the second.
 #[test]
-fn the_macro_oscillator_panel_shows_voices_the_mapping_grid_and_voice_lights() {
+fn the_macro_oscillator_panel_shows_voices_the_shaper_the_matrix_grid_and_voice_lights() {
     let mut t = T::new();
     let tr = t.track("instrument");
     t.app.run("mix.instrument", json!({"track": tr.0, "plugin": "macro_oscillator"})).unwrap();
@@ -408,15 +416,32 @@ fn the_macro_oscillator_panel_shows_voices_the_mapping_grid_and_voice_lights() {
     assert!(tap.enabled(), "the open panel switches the instrument's tap on");
     assert_eq!(t.row(tr, "voices").value, "8");
     assert_eq!(t.window(tr).lights, "--------");
-    let grid = |id: &str| t.row(tr, id).control;
-    for (vel, key) in [("velocity_curve", "key_curve"), ("velocity_harmonics", "key_harmonics"), ("velocity_decay", "key_decay")] {
-        let (a, b) = (grid(vel), grid(key));
-        assert!((a[0] - b[0]).abs() < 1.0 && b[1] > a[3] - 1.0, "{key} sits under {vel}: {a:?} {b:?}");
+    assert_eq!(t.window(tr).addition, crate::panel::MACRO_OSC_ADDITION);
+    assert!(t.window(tr).rows.iter().all(|r| r.param != "shaper"), "not in use: the shaper and the matrix are hidden");
+    let r = t.window(tr).addition_rect;
+    t.click(((r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0), 1);
+    t.frames(3);
+    let cell = |id: &str| t.row(tr, id).control;
+    let row1: Vec<[f32; 4]> = ["mod1_source", "mod1_via", "mod1_dest", "mod1_curve", "mod1_amount"].iter().map(|id| cell(id)).collect();
+    for w in row1.windows(2) {
+        assert!(w[1][0] > w[0][2] - 1.0 && (w[1][1] - w[0][1]).abs() < 6.0, "a row's cells side by side: {row1:?}");
     }
-    let (h, d) = (grid("velocity_harmonics"), grid("velocity_decay"));
-    assert!(h[1] == d[1] && d[0] > h[2], "the targets are columns of one row");
-    assert_eq!(t.row(tr, "velocity_curve").value, "Linear");
-    assert_eq!(t.row(tr, "key_timbre").value, "0%");
+    let (s1, s2, s9) = (cell("mod1_source"), cell("mod2_source"), cell("mod9_source"));
+    assert!(s2[1] > s1[3] - 1.0 && (s2[0] - s1[0]).abs() < 1.0, "row 2 under row 1");
+    assert!(s9[0] > row1[4][2] && (s9[1] - s1[1]).abs() < 1.0, "row 9 heads the second column");
+    assert!(s1[1] > cell("shaper")[3] && s1[1] > cell("lfo2_amount")[3], "the matrix sits below the shaper");
+    // The window re-fits around the shown rows (#232), and stays a size a 1080p screen holds.
+    let w = t.window(tr);
+    let (right, bottom) = w.rows.iter().fold((0.0f32, 0.0f32), |(r, b), x| (r.max(x.control[2]), b.max(x.control[3])));
+    assert!(w.rect[2] >= right && w.rect[2] - right <= 2.0 * crate::theme::SPACE + 40.0, "{:?} around {right}", w.rect);
+    assert!(w.rect[3] >= bottom, "{:?} covers {bottom}", w.rect);
+    assert!(w.rect[2] - w.rect[0] < 1000.0 && w.rect[3] - w.rect[1] < 1000.0, "{:?}", w.rect);
+    assert_eq!(t.row(tr, "mod1_source").value, "Off");
+    assert_eq!(t.row(tr, "mod16_amount").value, "0%");
+    assert_eq!(t.row(tr, "shaper").value, "Off");
+    t.app.run("mix.instrument_param", json!({"track": tr.0, "param": "mod3_dest", "value": 7.0})).unwrap();
+    t.frames(2);
+    assert_eq!(t.row(tr, "mod3_dest").value, "Cutoff");
     t.app.run("mix.instrument_param", json!({"track": tr.0, "param": "voices", "value": 2.0})).unwrap();
     tap.push_voices(0b011 | 0b001 << 16);
     t.frames(3);
@@ -666,9 +691,10 @@ fn a_built_in_window_fits_its_panel_and_has_no_resize_handle() {
             let rect = egui::Rect::from_min_max(egui::pos2(w.rect[0], w.rect[1]), egui::pos2(w.rect[2], w.rect[3]));
             // The window encloses every control row with only the content margin to spare.
             let (mut right, mut bottom) = (0.0_f32, 0.0_f32);
-            for r in &w.rows {
-                right = right.max(r.control[2]);
-                bottom = bottom.max(r.control[3]);
+            // The rows, and the line that shows the Macro Oscillator's shaper and matrix (#243).
+            for c in w.rows.iter().map(|r| r.control).chain(std::iter::once(w.addition_rect)) {
+                right = right.max(c[2]);
+                bottom = bottom.max(c[3]);
             }
             let panel = crate::panel::layout(plugin).is_some();
             // A generic parameter list keeps its 360 pt minimum width.
@@ -723,4 +749,18 @@ fn the_filter_is_in_the_insert_picker_and_its_panel_draws_the_response_above_the
     assert!(w.curve[1] < w.rows[0].control[1], "the curve is above the knobs");
     assert_eq!(w.rows.len(), info("filter").params.len(), "every parameter has a control");
     assert!(w.preset[2] > w.preset[0], "the preset dropdown");
+}
+
+/// A Macro Oscillator preset saved before the matrix (#243) parses into matrix rows: the
+/// note-to-macro mapping's ids become a row, as in a session that loads.
+#[test]
+fn a_macro_oscillator_preset_from_before_the_matrix_parses_into_rows() {
+    let old =
+        r#"{"plugin": "macro_oscillator", "version": 1, "params": {"model": 8.0, "key_curve": 2.0, "key_timbre": 50.0, "velocity_morph": 0.0}}"#;
+    let p = crate::presets::parse(old).unwrap();
+    assert!(!p.params.keys().any(|k| transit_model::legacy_mapping::is_old_param(k)), "{:?}", p.params);
+    for (id, v) in [("model", 8.0), ("mod1_source", 6.0), ("mod1_dest", 3.0), ("mod1_amount", 50.0), ("mod1_curve", 2.0)] {
+        assert_eq!(p.params.get(id), Some(&v), "{id}");
+    }
+    assert!(!p.params.contains_key("mod2_source"), "a zero depth makes no row");
 }

@@ -63,6 +63,10 @@ pub struct EditorLayout {
     pub rows: Vec<RowLayout>,
     /// The credit line of a ported instrument's panel (the Macro Oscillator), empty elsewhere.
     pub credit: String,
+    /// The line that labels the Macro Oscillator's shaper and matrix as transit's addition (#243),
+    /// empty elsewhere, and its rect (a click shows or hides them).
+    pub addition: String,
+    pub addition_rect: [f32; 4],
     /// The voice activity lights of an instrument with voices, one character per voice: `H` held,
     /// `R` releasing, `-` free (empty elsewhere), and their rect.
     pub lights: String,
@@ -176,6 +180,8 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             groups: Vec::new(),
             rows: Vec::new(),
             credit: String::new(),
+            addition: String::new(),
+            addition_rect: [0.0; 4],
             lights: String::new(),
             lights_rect: [0.0; 4],
         };

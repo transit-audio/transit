@@ -69,24 +69,129 @@ name = "Voice Lights"
 text = "One light per voice: lit while a key holds it, half lit while its release fades, dark while it is free. A voice stays busy until its release has died away."
 
 [[entry]]
-id = "macro_osc.velocity_curve"
-name = "Velocity Curve"
-text = "How velocity moves Harmonics, Timbre, Morph and Decay through the depths beside it: Linear, Exponential (soft notes change little, hard notes a lot) or S-curve (little change at both ends). Velocity always sets each note's level."
+id = "macro_osc.addition"
+name = "transit's Addition"
+text = "The shaper and the modulation matrix are transit's own addition, not part of the original module. Both are off by default: with the shaper off and every matrix row Off, the instrument plays exactly as the module does."
 
 [[entry]]
-id = "macro_osc.velocity_depth"
-name = "Velocity Depth"
-text = "How far velocity moves this control, from -100% to +100% of its travel: the hardest note adds the whole depth to the knob, the softest adds nothing. A negative depth makes harder notes lower it. 0% by default."
+id = "macro_osc.shaper"
+name = "Shaper"
+text = "Switches on the per-voice shaper after each voice's low-pass gate: the filter, and the amp envelope as the voice's envelope (the gate stays open and the voice ends when the amp envelope's release does). Off by default. The envelopes and LFOs run either way, as matrix sources."
 
 [[entry]]
-id = "macro_osc.key_curve"
-name = "Key Curve"
-text = "How the key moves Harmonics, Timbre, Morph and Decay through the depths beside it: Linear, Exponential (little change near middle C, more toward the ends of the keyboard) or S-curve."
+id = "macro_osc.amp_adsr"
+name = "Amp Envelope"
+text = "Each voice's level envelope while the shaper is on: Attack (to full level), Decay (toward Sustain), Sustain (the level while the key is held) and Release (after the key is let go). Decay and Release times are to -60 dB. Also the Amp envelope source of the matrix."
 
 [[entry]]
-id = "macro_osc.key_depth"
-name = "Key Depth"
-text = "Key tracking: how far the key moves this control. Middle C (C3, note 60) leaves the knob as set; five octaves up adds the whole depth and five octaves down takes it away, from -100% to +100% of the travel. The Key Tracked Timbre preset brightens higher notes this way. 0% by default."
+id = "macro_osc.amp_velocity"
+name = "Amp Velocity"
+text = "How much velocity sets the amp envelope's level: at 0% every note plays at full level, at 100% the level follows velocity all the way. 50% by default."
+
+[[entry]]
+id = "macro_osc.filter_mode"
+name = "Filter Mode"
+text = "The shaper's filter: low pass, band pass or high pass, a state-variable filter per voice (the Filter effect's own)."
+
+[[entry]]
+id = "macro_osc.filter_slope"
+name = "Filter Slope"
+text = "12 dB per octave (one section) or 24 dB (two; the second keeps the resonance peak at its height)."
+
+[[entry]]
+id = "macro_osc.cutoff"
+name = "Cutoff"
+text = "The filter's cutoff frequency before modulation: key tracking, the filter envelope and the matrix move it from here. 20 kHz (open) by default."
+
+[[entry]]
+id = "macro_osc.resonance"
+name = "Resonance"
+text = "The peak at the cutoff: 0% is flat, 100% rings. The matrix can add to it."
+
+[[entry]]
+id = "macro_osc.drive"
+name = "Drive"
+text = "Gain into the filter through a soft clip: louder voices saturate before the filter."
+
+[[entry]]
+id = "macro_osc.key_track"
+name = "Key Track"
+text = "How the cutoff follows the note: at 100% it moves one octave per octave from middle C, at -100% the other way. 0% by default."
+
+[[entry]]
+id = "macro_osc.filter_env_amount"
+name = "Filter Env Amount"
+text = "How far the filter envelope moves the cutoff: 100% opens it up to six octaves at the envelope's peak, a negative amount closes it. The matrix can add to it, for example from velocity."
+
+[[entry]]
+id = "macro_osc.filter_adsr"
+name = "Filter Envelope"
+text = "Each voice's envelope for the cutoff: Attack, Decay, Sustain and Release, as the amp envelope's. Also the Filter envelope source of the matrix."
+
+[[entry]]
+id = "macro_osc.lfo_shape"
+name = "LFO Shape"
+text = "Sine, triangle, saw, square, sample and hold (a random step each cycle) or smooth random (random steps joined by a glide). Each voice has its own two LFOs."
+
+[[entry]]
+id = "macro_osc.lfo_rate"
+name = "LFO Rate"
+text = "The LFO's speed in cycles per second when it is not synced. The matrix's LFO rate destinations move it up to four octaves either way."
+
+[[entry]]
+id = "macro_osc.lfo_sync"
+name = "LFO Sync"
+text = "Ties the LFO to the tempo: one cycle per division. A synced LFO that is not retriggered follows the song position while the transport plays, so it lines up with the bars wherever playback starts."
+
+[[entry]]
+id = "macro_osc.lfo_division"
+name = "LFO Division"
+text = "The length of one cycle when the LFO is synced, from four bars to a 32nd note, with triplets and dotted values."
+
+[[entry]]
+id = "macro_osc.lfo_retrigger"
+name = "LFO Retrigger"
+text = "On (the default), each new note starts the LFO from the beginning of its cycle. Off, the LFO runs free: a note picks it up where the instrument's running LFO is, so held notes move together."
+
+[[entry]]
+id = "macro_osc.lfo_fade"
+name = "LFO Fade In"
+text = "How long the LFO takes to reach its full amount after each new note, for a vibrato that grows. 0 ms by default."
+
+[[entry]]
+id = "macro_osc.lfo_amount"
+name = "LFO Amount"
+text = "The LFO's output level as a matrix source, 0 to 100%. The matrix's LFO amount destinations add to it, for example the mod wheel for vibrato depth."
+
+[[entry]]
+id = "macro_osc.matrix"
+name = "Modulation Matrix"
+text = "Sixteen rows, each routing a source to a destination: the row adds its amount times the source, shaped by its curve and scaled by its via source, every 12 frames for every voice. A row whose source or destination is Off, or whose amount is 0%, does nothing. Older sessions' velocity and key mapping is in the first rows."
+
+[[entry]]
+id = "macro_osc.matrix_source"
+name = "Matrix Source"
+text = "What moves the destination: LFO 1 or 2, the amp or filter envelope, velocity, the key (centered on middle C), the release velocity, aftertouch, poly aftertouch, the mod wheel, pitch bend, a random value per note, or one of the rack's eight macros when the track is in a rack."
+
+[[entry]]
+id = "macro_osc.matrix_via"
+name = "Matrix Via"
+text = "A second source that scales the row's amount: with the mod wheel as the via, an LFO to Pitch row is vibrato that the wheel brings in. Off uses the amount as set."
+
+[[entry]]
+id = "macro_osc.matrix_dest"
+name = "Matrix Destination"
+text = "What the row moves. At 100% and a full source: Pitch 24 semitones; Harmonics, Timbre, Morph, Decay and Resonance their whole travel; Level from silence to double; Cutoff six octaves; Filter env amount its whole range; an LFO rate four octaves; an LFO amount its whole range; Pan from left to right."
+
+[[entry]]
+id = "macro_osc.matrix_amount"
+name = "Matrix Amount"
+text = "How far the row moves its destination, from -100% to +100%; a negative amount inverts the source. Every row's amount is an automation target."
+
+[[entry]]
+id = "macro_osc.matrix_curve"
+name = "Matrix Curve"
+text = "Bends the source before the amount: Linear, Exponential, S-curve, Equal power or Logarithmic (the clip fades' shapes), the same way on both sides of zero for a bipolar source."
 
 [[entry]]
 id = "macro_osc.credits"

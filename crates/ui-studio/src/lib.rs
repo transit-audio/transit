@@ -53,6 +53,7 @@ pub mod midi_monitor;
 mod midi_output;
 pub mod mixer;
 pub mod panel;
+pub mod panel_matrix;
 pub mod plugin_header;
 pub mod plugin_scan;
 pub mod presets;
