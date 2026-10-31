@@ -200,3 +200,60 @@ fn write_corpus_files() {
 fn write_rack_fixture() {
     save_corpus_file(rack_session(), "rack");
 }
+
+/// An audio track and a MIDI track, each with a take stack of three takes on three playlists
+/// (#25, ADR 0039): the audio track plays take 2 over half the stack with take 3 around it, the
+/// MIDI track plays take 3; a clip outside the stacks plays on the audio track.
+fn takes_session() -> Session {
+    let sr = SampleRate::HZ_48000;
+    let mut s = Session::new("Takes", sr);
+    let _ = s.tempo.set_tempo(0, 120.0);
+    let tone: Vec<f32> = (0..96_000).map(|i| (i as f32 * 0.01).sin() * 0.5).collect();
+    let src = transit_engine::io::add_source(&mut s, "Vox_01", AudioBuffer { sample_rate: sr.hz(), channels: vec![tone] }, None, FileFormat::Wav);
+    let vox = s.add_track(TrackKind::Audio, ChannelFormat::Mono, Some("Vox"));
+    let mut lists: Vec<Vec<Clip>> = vec![Vec::new(), Vec::new(), Vec::new()];
+    let take = |s: &mut Session, n: u32, offset: i64, start: i64, len: i64| {
+        let mut c = Clip::audio(s.new_clip_id(), format!("Vox_01.{n}"), src, offset, start, len);
+        c.take = Some(n);
+        c
+    };
+    // Playing: take 3, then take 2 over the second half (a shorter take chosen inside a longer one).
+    lists[0].push(take(&mut s, 3, 64_000, 0, 24_000));
+    lists[0].push(take(&mut s, 2, 56_000, 24_000, 8_000));
+    lists[0].push(Clip::audio(s.new_clip_id(), "Later", src, 0, 192_000, 24_000));
+    lists[1].push(take(&mut s, 1, 0, 0, 32_000));
+    lists[2].push(take(&mut s, 2, 32_000, 0, 24_000));
+    lists[2].push(take(&mut s, 3, 88_000, 24_000, 8_000));
+    if let Some(t) = s.track_mut(vox) {
+        t.playlists = lists.into_iter().enumerate().map(|(i, clips)| transit_model::Playlist { name: format!("Vox.{:02}", i + 1), clips }).collect();
+        t.active_playlist = 0;
+    }
+    let keys = s.add_track(TrackKind::Midi, ChannelFormat::Mono, Some("Keys"));
+    let q = TICKS_PER_QUARTER;
+    let mut midi = Vec::new();
+    for (n, pitch) in [(1u32, 60u8), (2, 62), (3, 64)] {
+        let mut seq = Sequence::default();
+        seq.notes.push(Note { pitch, velocity: 100, release_velocity: 64, channel: 0, start: 0, length: q });
+        let mut c = Clip::midi(s.new_clip_id(), format!("Keys_{n:02}"), 0, 48_000, seq);
+        c.take = Some(n);
+        midi.push(c);
+    }
+    if let Some(t) = s.track_mut(keys) {
+        let mut it = midi.into_iter();
+        let (a, b, c) = (it.next(), it.next(), it.next());
+        t.playlists = [c, a, b]
+            .into_iter()
+            .enumerate()
+            .map(|(i, clip)| transit_model::Playlist { name: format!("Keys.{:02}", i + 1), clips: clip.into_iter().collect() })
+            .collect();
+        t.active_playlist = 0;
+    }
+    s.add_track(TrackKind::Master, ChannelFormat::Stereo, Some("Master"));
+    s
+}
+
+#[test]
+#[ignore = "writes the take stack fixture (#25) into crates/model/tests/corpus; run it by hand"]
+fn write_takes_fixture() {
+    save_corpus_file(takes_session(), "takes");
+}

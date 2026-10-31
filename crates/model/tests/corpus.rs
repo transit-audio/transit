@@ -145,6 +145,21 @@ fn the_rack_fixture_loads_its_rack() {
 }
 
 #[test]
+fn the_takes_fixture_loads_its_take_stacks_and_what_plays() {
+    let (name, text) = corpus().into_iter().find(|(n, _)| n == "v0.6.0-takes.transit").expect("the takes fixture is in the corpus");
+    let s = Session::from_json(&text).unwrap_or_else(|e| panic!("{name} no longer loads: {e}"));
+    let vox = s.track_by_name("Vox").unwrap_or_else(|| panic!("{name}: the Vox track"));
+    let st = vox.take_stacks();
+    assert_eq!(st.len(), 1, "{name}: one audio stack");
+    assert_eq!(st[0].takes.iter().map(|t| (t.number, t.is_active())).collect::<Vec<_>>(), vec![(1, false), (2, true), (3, true)], "{name}");
+    assert_eq!(st[0].active(), Some(3), "{name}: take 3 plays most of it");
+    assert_eq!(vox.clips().len(), 3, "{name}: two takes and the clip after the stack play");
+    let keys = s.track_by_name("Keys").unwrap_or_else(|| panic!("{name}: the Keys track"));
+    let st = keys.take_stacks();
+    assert_eq!((st.len(), st[0].takes.len(), st[0].active()), (1, 3, Some(3)), "{name}: the MIDI stack");
+}
+
+#[test]
 fn the_midi_effect_fixture_loads_its_chain() {
     let (name, text) = corpus().into_iter().find(|(n, _)| n == "v0.6.0-midi-effects.transit").expect("the MIDI effect fixture is in the corpus");
     let s = Session::from_json(&text).unwrap_or_else(|e| panic!("{name} no longer loads: {e}"));

@@ -36,6 +36,12 @@ parameter and a bypassed Velocity. It is written by `write_midi_effect_fixture` 
 `crates/engine/tests/midi_effects.rs`, named for the release that ships the slot, and goes through
 the same lossless round trip as the release files; its own test checks the chain loads.
 
+Another is saved ahead of its release: `v0.6.0-takes.transit` (#25, ADR 0039) holds an audio
+track and a MIDI track, each with a take stack of three numbered takes (`Clip::take`) on three
+playlists; the audio track plays a shorter take inside a longer one. It is written by
+`write_takes_fixture` in `corpus_generate.rs`, named for the release that ships take lanes, and
+goes through the same lossless round trip; its own test checks the stacks and what plays.
+
 Files hold the session JSON only, no `Audio Files/`. Nothing here reads audio.
 
 ## Producing a release's files
