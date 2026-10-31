@@ -83,6 +83,7 @@ fn the_registry_lists_exactly_the_kept_built_ins() {
         "invert",
         "macro_oscillator",
         "plate_reverb",
+        "resonator",
         "room_reverb",
         "sampler",
         "saturator",

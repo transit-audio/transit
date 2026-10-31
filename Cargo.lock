@@ -4227,6 +4227,7 @@ dependencies = [
  "transit-macro-osc",
  "transit-macro-osc-oracle",
  "transit-modulator",
+ "transit-resonator",
  "transit-rt",
  "transit-texture",
 ]

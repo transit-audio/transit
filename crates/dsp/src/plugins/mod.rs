@@ -10,6 +10,7 @@ pub mod lfo;
 pub mod macro_osc;
 pub mod modulator;
 mod resample;
+pub mod resonator;
 pub mod reverb;
 pub mod sampler;
 pub mod texture;
@@ -54,4 +55,5 @@ registry! {
     tuner::TUNER_INFO => tuner::Tuner::new(),
     sampler::SAMPLER_INFO => sampler::Sampler::new(),
     macro_osc::MACRO_OSC_INFO => macro_osc::MacroOscillator::new(),
+    resonator::RESONATOR_INFO => resonator::ResonatorInstrument::new(),
 }

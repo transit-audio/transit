@@ -24,6 +24,8 @@ transit-texture.workspace = true
 transit-granular.workspace = true
 # The Cross Modulator insert (ADR 0033, #200): a same-layer (L1) dependency.
 transit-modulator.workspace = true
+# The Resonator instrument (ADR 0033, #198): a same-layer (L1) dependency.
+transit-resonator.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
