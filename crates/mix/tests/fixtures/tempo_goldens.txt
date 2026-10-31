@@ -1,0 +1,6 @@
+default 64 5c34133a3c10941d
+default 512 c048202eaaf28159
+default 4096 a7781e68f779ed51
+single 64 569b8cd6144d1c25
+single 512 463a8273bdf70ec5
+single 4096 93c509f1cfd77e3d
