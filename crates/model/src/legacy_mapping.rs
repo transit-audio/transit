@@ -14,7 +14,13 @@
 //! moves what drove the old parameters onto the rows: a depth's lane, MIDI mapping and macro
 //! targets go to the row's amount; a curve's lane and macro targets go to the curve of every row of
 //! that source (a lane is copied per row), and its MIDI mapping (a source drives one target) to the
-//! first such row's curve.
+//! first such row's curve, its range rescaled from the old curve's three choices to the matrix
+//! curve's five so the same travel picks the same curve.
+//!
+//! Every build before #243 stored all ten old ids, mostly at depth 0 with nothing driving them. A
+//! track like that has nothing to migrate: the ids are stripped silently, so the session opens
+//! unmodified and with no load note. Only a track that gets a row or has a lane, a MIDI mapping or
+//! a macro target moved (or dropped) counts as migrated.
 
 use crate::{AutoParam, Control, Session, Strip, TrackId};
 use std::collections::BTreeMap;
@@ -39,6 +45,26 @@ pub const OLD_MAPPING: [(f32, &str, [&str; 4]); 2] = [
 
 /// How a load note about the migration begins: `N track(s) ...`.
 pub const MIGRATED_NOTE: &str = "had the Macro Oscillator's note-to-macro mapping, now rows of its modulation matrix";
+
+/// Added to the load note when a curve's MIDI mapping moved to a source with several rows.
+pub const CURVE_MAPPING_NOTE: &str = "a curve's MIDI mapping now drives only the first row of its source";
+
+/// Choices of the old velocity and key curves (Linear, Exponential, S-curve) and of a matrix row's
+/// curve (the same three first, then Equal power and Logarithmic).
+pub const OLD_CURVE_CHOICES: usize = 3;
+pub const ROW_CURVE_CHOICES: usize = 5;
+
+/// A MIDI mapping's travel on an old curve as travel on a row's curve that picks the same choice:
+/// the old curve's travel `t` was the value `2 t`, a row curve's is `4 t`.
+#[must_use]
+pub fn curve_travel(t: f32) -> f32 {
+    t * (OLD_CURVE_CHOICES - 1) as f32 / (ROW_CURVE_CHOICES - 1) as f32
+}
+
+/// Is `id` one of the old curve parameters?
+fn is_old_curve(id: &str) -> bool {
+    OLD_MAPPING.iter().any(|(_, curve, _)| *curve == id)
+}
 
 /// Is `id` one of the old mapping's parameters?
 #[must_use]
@@ -103,48 +129,81 @@ fn moved<'a>(moves: &'a Moves, old: &str) -> Option<&'a [String]> {
 /// Does any Macro Oscillator of the session still carry the old mapping's parameters?
 #[must_use]
 pub fn uses_old_mapping(s: &Session) -> bool {
-    s.tracks.iter().any(|t| t.instrument.as_ref().is_some_and(|i| i.plugin == MACRO_OSC_ID && i.params.keys().any(|k| is_old_param(k))))
+    !old_mapping_tracks(s).is_empty()
 }
 
-/// Migrates every Macro Oscillator of the session (see the module documentation) and pushes one
-/// load note. Returns how many tracks changed.
-pub fn migrate_session(s: &mut Session) -> usize {
-    let slot = AutoParam::INSTRUMENT_SLOT;
-    let ids: Vec<TrackId> = s
-        .tracks
+/// The Macro Oscillator tracks that still carry the old ids.
+fn old_mapping_tracks(s: &Session) -> Vec<TrackId> {
+    s.tracks
         .iter()
         .filter(|t| t.instrument.as_ref().is_some_and(|i| i.plugin == MACRO_OSC_ID && i.params.keys().any(|k| is_old_param(k))))
         .map(|t| t.id)
-        .collect();
-    let mut lost = 0usize;
-    for &id in &ids {
-        // What drives each old parameter: the track's lanes, the session's MIDI mappings, the racks' macros.
-        let mut driven: Vec<String> = Vec::new();
-        if let Some(t) = s.track(id) {
-            for l in &t.automation {
-                if let AutoParam::Plugin { slot: sl, param } = &l.param
-                    && *sl == slot
-                    && is_old_param(param)
-                {
-                    driven.push(param.clone());
-                }
-            }
-        }
-        for m in s.midi_mappings.iter() {
-            if let (Strip::Track(t), Control::Plugin { slot: sl, param }) = (&m.target.strip, &m.target.control)
-                && *t == id
+        .collect()
+}
+
+/// The old parameters of track `id`'s instrument that something drives: the track's lanes, the
+/// session's MIDI mappings, the racks' macros.
+fn driven_params(s: &Session, id: TrackId) -> Vec<String> {
+    let slot = AutoParam::INSTRUMENT_SLOT;
+    let mut driven: Vec<String> = Vec::new();
+    if let Some(t) = s.track(id) {
+        for l in &t.automation {
+            if let AutoParam::Plugin { slot: sl, param } = &l.param
                 && *sl == slot
                 && is_old_param(param)
             {
                 driven.push(param.clone());
             }
         }
-        for r in s.tracks.iter().filter_map(|t| t.rack.as_ref()) {
-            for m in r.macros.iter().flat_map(|m| m.mappings.iter()) {
-                if m.track == id && m.slot == slot && is_old_param(&m.param) {
-                    driven.push(m.param.clone());
-                }
+    }
+    for m in s.midi_mappings.iter() {
+        if let (Strip::Track(t), Control::Plugin { slot: sl, param }) = (&m.target.strip, &m.target.control)
+            && *t == id
+            && *sl == slot
+            && is_old_param(param)
+        {
+            driven.push(param.clone());
+        }
+    }
+    for r in s.tracks.iter().filter_map(|t| t.rack.as_ref()) {
+        for m in r.macros.iter().flat_map(|m| m.mappings.iter()) {
+            if m.track == id && m.slot == slot && is_old_param(&m.param) {
+                driven.push(m.param.clone());
             }
+        }
+    }
+    driven
+}
+
+/// Does migrating track `id` change more than stripping unused ids: a depth that is not 0 (it
+/// becomes a row) or an old parameter something drives (it moves, or is dropped)?
+fn migration_matters(s: &Session, id: TrackId) -> bool {
+    let depth_set = s
+        .track(id)
+        .and_then(|t| t.instrument.as_ref())
+        .is_some_and(|i| OLD_MAPPING.iter().flat_map(|(_, _, d)| d.iter()).any(|d| i.params.get(*d).is_some_and(|v| *v != 0.0)));
+    depth_set || !driven_params(s, id).is_empty()
+}
+
+/// Does loading change the session in a way the user should see (a row made, a lane, MIDI mapping
+/// or macro target moved or dropped)? Stripping unused old ids alone does not count.
+#[must_use]
+pub fn migration_changes(s: &Session) -> bool {
+    old_mapping_tracks(s).into_iter().any(|id| migration_matters(s, id))
+}
+
+/// Migrates every Macro Oscillator of the session (see the module documentation) and pushes one
+/// load note when a track's migration mattered. Returns how many tracks it mattered for.
+pub fn migrate_session(s: &mut Session) -> usize {
+    let slot = AutoParam::INSTRUMENT_SLOT;
+    let ids = old_mapping_tracks(s);
+    let mut lost = 0usize;
+    let mut noted = 0usize;
+    let mut curve_split = false;
+    for &id in &ids {
+        let driven = driven_params(s, id);
+        if migration_matters(s, id) {
+            noted += 1;
         }
         let Some(moves) =
             s.track_mut(id).and_then(|t| t.instrument.as_mut()).map(|i| migrate_params(&mut i.params, |p| driven.iter().any(|d| d == p)))
@@ -174,16 +233,25 @@ pub fn migrate_session(s: &mut Session) -> usize {
             }
             t.automation = out;
         }
-        // MIDI mappings: a source drives one target, so a curve's goes to its first row.
+        // MIDI mappings: a source drives one target, so a curve's goes to its first row, its
+        // range rescaled to the row curve's choices.
         let mut gone = 0usize;
-        s.midi_mappings.retarget(|target| {
-            if let (Strip::Track(t), Control::Plugin { slot: sl, param }) = (&target.strip, &mut target.control)
+        s.midi_mappings.edit(|m| {
+            if let (Strip::Track(t), Control::Plugin { slot: sl, param }) = (&m.target.strip, &mut m.target.control)
                 && *t == id
                 && *sl == slot
                 && is_old_param(param)
             {
-                match moved(&moves, param).and_then(|n| n.first()) {
-                    Some(new) => *param = new.clone(),
+                let rows = moved(&moves, param).unwrap_or_default();
+                match rows.first() {
+                    Some(new) => {
+                        if is_old_curve(param) {
+                            m.min = curve_travel(m.min);
+                            m.max = curve_travel(m.max);
+                            curve_split |= rows.len() > 1;
+                        }
+                        *param = new.clone();
+                    }
                     None => gone += 1,
                 }
             }
@@ -213,15 +281,18 @@ pub fn migrate_session(s: &mut Session) -> usize {
             }
         }
     }
-    if !ids.is_empty() {
-        let mut note = format!("{} track(s) {MIGRATED_NOTE}", ids.len());
+    if noted > 0 {
+        use std::fmt::Write as _;
+        let mut note = format!("{noted} track(s) {MIGRATED_NOTE}");
+        if curve_split {
+            let _ = write!(note, "; {CURVE_MAPPING_NOTE}");
+        }
         if lost > 0 {
-            use std::fmt::Write as _;
             let _ = write!(note, "; {lost} lane(s), mapping(s) or macro target(s) of a curve with no rows were dropped");
         }
         s.load_notes.push(note);
     }
-    ids.len()
+    noted
 }
 
 #[cfg(test)]
@@ -337,5 +408,61 @@ mod tests {
         let macro_targets: Vec<&str> = s.track(host).unwrap().rack.as_ref().unwrap().macros[0].mappings.iter().map(|m| m.param.as_str()).collect();
         assert_eq!(macro_targets, ["mod1_curve", "mod2_curve"]);
         assert!(s.load_notes.iter().any(|n| n.contains(MIGRATED_NOTE)));
+        assert!(
+            s.load_notes.iter().any(|n| n.contains(CURVE_MAPPING_NOTE)),
+            "the velocity curve's mapping drives one of two rows: {:?}",
+            s.load_notes
+        );
+        let m = s.midi_mappings.for_target(&target("mod1_curve")).unwrap();
+        assert_eq!((m.min, m.max), (0.0, 0.5), "the curve mapping's range on the five-choice curve");
+        let m = s.midi_mappings.for_target(&target("mod3_amount")).unwrap();
+        assert_eq!((m.min, m.max), (0.0, 1.0), "a depth's mapping keeps its range");
+    }
+
+    /// A track that stored the old ids at depth 0 with nothing driving them (every build before
+    /// #243 did) loses them silently: no row, no load note, and the session is not changed.
+    #[test]
+    fn unused_old_ids_are_stripped_silently() {
+        let mut s = Session::default();
+        let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Lead"));
+        let mut ins = Insert::new(MACRO_OSC_ID);
+        let mut pairs = vec![("model", 8.0)];
+        for (_, curve, depths) in OLD_MAPPING {
+            pairs.push((curve, 2.0));
+            pairs.extend(depths.iter().map(|d| (*d, 0.0)));
+        }
+        ins.params = params(&pairs);
+        s.track_mut(t).unwrap().instrument = Some(ins);
+        assert!(uses_old_mapping(&s));
+        assert!(!migration_changes(&s), "nothing to migrate");
+        assert_eq!(migrate_session(&mut s), 0);
+        assert!(!uses_old_mapping(&s));
+        assert!(s.load_notes.is_empty(), "{:?}", s.load_notes);
+        assert_eq!(s.track(t).unwrap().instrument.as_ref().unwrap().params, params(&[("model", 8.0)]));
+        // A lane on a zero depth makes it matter: the depth gets a row.
+        let mut s2 = Session::default();
+        let t2 = s2.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some("Lead"));
+        let mut ins = Insert::new(MACRO_OSC_ID);
+        ins.params = params(&pairs);
+        s2.track_mut(t2).unwrap().instrument = Some(ins);
+        s2.track_mut(t2)
+            .unwrap()
+            .automation
+            .push(AutomationLane::new(AutoParam::Plugin { slot: AutoParam::INSTRUMENT_SLOT, param: "key_decay".into() }));
+        assert!(migration_changes(&s2));
+        assert_eq!(migrate_session(&mut s2), 1);
+        assert!(s2.load_notes.iter().any(|n| n.starts_with("1 track(s)") && !n.contains(CURVE_MAPPING_NOTE)), "{:?}", s2.load_notes);
+    }
+
+    /// The old curve's travel picks the same choice on a row's curve: full travel S-curve (2), half
+    /// travel Exponential (1), as the old three-choice curve did.
+    #[test]
+    fn curve_travel_picks_the_same_choice() {
+        let pick = |t: f32, choices: usize| (t * (choices - 1) as f32).round() as usize;
+        for t in [0.0, 0.2, 0.25, 0.5, 0.74, 0.76, 1.0] {
+            assert_eq!(pick(curve_travel(t), ROW_CURVE_CHOICES), pick(t, OLD_CURVE_CHOICES), "travel {t}");
+        }
+        assert_eq!(pick(curve_travel(1.0), ROW_CURVE_CHOICES), 2);
+        assert_eq!(pick(curve_travel(0.5), ROW_CURVE_CHOICES), 1);
     }
 }

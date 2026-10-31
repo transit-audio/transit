@@ -316,6 +316,12 @@ impl MappingSet {
         }
     }
 
+    /// Edit every mapping in place (a migration that moves a target and rescales its range).
+    /// The caller keeps each one valid.
+    pub fn edit(&mut self, f: impl FnMut(&mut Mapping)) {
+        self.items.iter_mut().for_each(f);
+    }
+
     /// Remove the mapping of `target`; whether there was one.
     pub fn remove(&mut self, target: &ControlTarget) -> bool {
         let n = self.items.len();

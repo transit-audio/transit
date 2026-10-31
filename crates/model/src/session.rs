@@ -705,7 +705,7 @@ impl Session {
                 unknown.join(", ")
             ));
         }
-        let changes = crate::legacy_synth::uses_retired_synth(&s) || crate::legacy_mapping::uses_old_mapping(&s);
+        let changes = crate::legacy_synth::uses_retired_synth(&s) || crate::legacy_mapping::migration_changes(&s);
         let as_stored = changes.then(|| s.clone());
         crate::legacy_synth::retire_subtractive_synth(&mut s);
         crate::legacy_mapping::migrate_session(&mut s);

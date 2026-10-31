@@ -73,7 +73,9 @@ fn an_old_session_migrates_its_mapping_to_rows_and_renders_the_same_bits() {
 /// their defaults (a new one); and at any host block size.
 #[test]
 fn off_by_default_the_render_is_the_build_before_243() {
-    let old = Session::from_json(&fixture("macro_osc_plain_v0_5.transit")).unwrap();
+    let (old, stored) = Session::from_json_as_saved(&fixture("macro_osc_plain_v0_5.transit")).unwrap();
+    assert!(stored.is_none(), "unused old mapping ids go silently: the session opens unmodified");
+    assert!(old.load_notes.is_empty(), "no load note: {:?}", old.load_notes);
     assert!(!old.tracks[0].instrument.as_ref().unwrap().params.contains_key("shaper"), "the flag is absent from the old file");
     assert_eq!(fnv(&render(&old, 512)), PLAIN_GOLDEN);
     assert_eq!(fnv(&render(&old, 37)), PLAIN_GOLDEN);
@@ -278,4 +280,20 @@ fn a_rack_members_matrix_reads_the_rack_macros() {
     e.session_mut().track_mut(folder).unwrap().rack.as_mut().unwrap().macros[0].value = 1.0;
     let at_one = fnv(&render(e.session(), 512));
     assert_ne!(at_one, at_zero, "the macro at 1 opens Timbre");
+}
+
+/// A MIDI mapping on an old curve, moved to a row's curve with its range rescaled: full travel
+/// still picks S-curve and half travel Exponential, as on the old three-choice curve.
+#[test]
+fn a_curve_mapping_picks_the_same_curves_after_the_migration() {
+    use transit_model::legacy_mapping as lm;
+    let info = transit_dsp::plugin_info(ID).unwrap();
+    let row_curve = info.param(&lm::row_id(1, "curve")).unwrap();
+    assert_eq!(row_curve.choices.len(), lm::ROW_CURVE_CHOICES);
+    // A knob's travel t over a mapping's range (min, max) is the control's travel min + (max - min) t.
+    let (min, max) = (lm::curve_travel(0.0), lm::curve_travel(1.0));
+    let pick = |t: f32| row_curve.format(row_curve.from_normalized(min + (max - min) * t));
+    assert_eq!(pick(1.0), "S-curve", "full travel");
+    assert_eq!(pick(0.5), "Exponential", "half travel");
+    assert_eq!(pick(0.0), "Linear");
 }
