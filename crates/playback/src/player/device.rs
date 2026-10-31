@@ -603,8 +603,9 @@ impl Player {
     }
     /// Whether a render callback can still answer a callback-owned state read: the silent clock
     /// renders too, so only a terminal device fault (the stream failed or the endpoint is gone)
-    /// ends it. A reset or stall that is being reopened is not terminal: its state is read within
-    /// the save deadline, and a reader that gets no answer keeps the stored state.
+    /// ends it. A reset or stall also marks the device gone (the error handler sets it for both),
+    /// and that is right, because the callback has stopped: the read is skipped and the stored
+    /// state is kept until the stream is reopened.
     fn render_callback_runs(&self) -> bool {
         !(self.fault.failed.load(Ordering::Acquire) || self.fault.gone.load(Ordering::Acquire))
     }

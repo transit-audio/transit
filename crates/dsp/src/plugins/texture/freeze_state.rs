@@ -42,7 +42,8 @@ const FIXED_STATE: usize = 80 * 1024;
 /// The state capacity of a loan: the worst case over every supported host rate and quality, from
 /// the converter ring sizes the writer uses, plus a quarter of margin.
 fn checkpoint_capacity() -> usize {
-    let path = Media::ALL.iter().flat_map(|m| [MIN_HOST_RATE, MAX_HOST_RATE].map(|host| Path::state_bound(host as u32, m.sample_rate()))).max().unwrap_or(0);
+    let path =
+        Media::ALL.iter().flat_map(|m| [MIN_HOST_RATE, MAX_HOST_RATE].map(|host| Path::state_bound(host as u32, m.sample_rate()))).max().unwrap_or(0);
     (FIXED_STATE + path) * 5 / 4
 }
 
