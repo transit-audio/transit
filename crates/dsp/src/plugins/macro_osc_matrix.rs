@@ -282,15 +282,15 @@ mod tests {
     /// Every curve keeps 0 and ±1 and the sign, is monotonic on 0..1, and clamps past ±1.
     #[test]
     fn curves_fix_the_ends_and_keep_the_sign() {
-        for c in 0..CURVES.len() {
-            assert_eq!(curve(c, 0.0), 0.0, "{}", CURVES[c]);
-            assert!((curve(c, 1.0) - 1.0).abs() < 1e-6 && (curve(c, -1.0) + 1.0).abs() < 1e-6, "{}", CURVES[c]);
+        for (c, name) in CURVES.iter().enumerate() {
+            assert_eq!(curve(c, 0.0), 0.0, "{name}");
+            assert!((curve(c, 1.0) - 1.0).abs() < 1e-6 && (curve(c, -1.0) + 1.0).abs() < 1e-6, "{name}");
             assert_eq!(curve(c, 2.0), curve(c, 1.0));
             let mut last = 0.0;
             for i in 1..=100 {
                 let x = i as f32 / 100.0;
                 let y = curve(c, x);
-                assert!(y >= last && curve(c, -x) == -y, "{} at {x}", CURVES[c]);
+                assert!(y >= last && curve(c, -x) == -y, "{name} at {x}");
                 last = y;
             }
         }
