@@ -173,6 +173,12 @@ pub struct Clip {
     /// may exceed the source and the content cycles modulo the range.
     #[serde(default)]
     pub looping: Option<ClipLoop>,
+    /// The take this clip belongs to when it is part of a take stack (#25, ADR 0039): shown as
+    /// "Take n" on the track's take lanes, 1 for the first take. Recording writes it; a take
+    /// command writes it for clips that had none. Not written while unset, so files without take
+    /// stacks stay as older builds wrote them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub take: Option<u32>,
 }
 
 fn one() -> f64 {
@@ -202,6 +208,7 @@ impl Clip {
             group: None,
             loop_id: None,
             looping: None,
+            take: None,
         }
     }
 
@@ -348,6 +355,8 @@ impl Clip {
     /// Repair a clip read from a file: positions and lengths within ±[`MAX_POSITION`], as commands
     /// keep theirs, fades within the clip, a name that can be drawn, and a usable gain and stretch.
     pub fn sanitize(&mut self) {
+        // Take numbers start at 1; a 0 from a hand-edited file means no take.
+        self.take = self.take.filter(|n| *n > 0);
         bound(&mut self.start);
         self.length = self.length.clamp(1, MAX_POSITION);
         bound(&mut self.sync_point);

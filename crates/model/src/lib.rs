@@ -25,6 +25,7 @@ mod rack;
 mod route_graph;
 mod session;
 mod source;
+mod takes;
 mod track;
 
 pub use automation::{AutoParam, AutomationLane, AutomationMode, AutomationPoint};
@@ -57,6 +58,7 @@ pub use session::{
     SessionError, Tool, UNPLACED_NOTE, ZoomState, ZoomToggle, is_session_file, truncate_chars,
 };
 pub use source::{Source, SourceAudio, SourcePool};
+pub use takes::{StackTake, TakeStack, same_material};
 pub use track::{Frozen, Playlist, TRACK_COLORS, Track, TrackHeight, TrackKind};
 
 pub use transit_time as time;
