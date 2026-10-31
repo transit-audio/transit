@@ -151,7 +151,13 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
     let note_rect = Rect::from_min_size(card.min, vec2(W, NOTE_H));
     p.text(note_rect.center(), Align2::CENTER_CENTER, &t.note, FontId::proportional(52.0), color);
     if reading.is_some() {
-        p.text(Pos2::new(note_rect.max.x - 8.0, note_rect.max.y - 14.0), Align2::RIGHT_CENTER, format!("{} cents", t.cents), FontId::monospace(11.0), TOKENS.text_dim);
+        p.text(
+            Pos2::new(note_rect.max.x - 8.0, note_rect.max.y - 14.0),
+            Align2::RIGHT_CENTER,
+            format!("{} cents", t.cents),
+            FontId::monospace(11.0),
+            TOKENS.text_dim,
+        );
     }
     t.note_rect = r4(note_rect);
     let note_resp = ui.interact(note_rect, ui.id().with(("tuner_note", uid)), Sense::hover());
