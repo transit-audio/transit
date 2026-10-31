@@ -1,0 +1,57 @@
+--- beads/dsp/delay_granular_player.h
++++ beads/dsp/delay_granular_player.h
+@@ -63,10 +63,19 @@
+       const int max_delay = delay_line->duration() - 2 * safety;
+
++      // transit oracle: C++ leaves the evaluation order of function arguments
++      // unspecified, and three of these draw from the shared random state. The
++      // module's ARM GCC evaluates them in source order (x86-64 GCC and MSVC
++      // go right to left), so they are sequenced here in that order, the same
++      // on every compiler.
++      const float time_value = p.time.value();
++      const float pitch_value = p.pitch.pitch_value();
++      const float grain_duration = ComputeGrainDuration(duration);
++      const float shape_value = p.shape.value();
+       new_grain()->Start(
+           delay_line,
+-          p.time.value() * float(max_delay) + float(safety),
+-          (reverse ? -1.0f : 1.0f) * p.pitch.pitch_value(),
+-          ComputeGrainDuration(duration),
+-          p.shape.value(),
++          time_value * float(max_delay) + float(safety),
++          (reverse ? -1.0f : 1.0f) * pitch_value,
++          grain_duration,
++          shape_value,
+           amplitude, pan,
+           trigger.fractional_sample);
+--- beads/dsp/wavetable_granular_player.h
++++ beads/dsp/wavetable_granular_player.h
+@@ -56,20 +56,26 @@
+ #ifdef TEST
+       if (!new_grain()->done()) {
+         printf("stealing, duration = %d\n", new_grain()->remaining_samples());
+       }
+ #endif  // TEST
+
++      // transit oracle: the arguments are sequenced in source order, as in
++      // delay_granular_player.h: four of them draw from the shared random
++      // state, and C++ leaves their order unspecified.
++      const float time_value = p.time.value();
++      const float frequency =
++          p.pitch.pitch_value() * kWavetableRootNote * one_hertz_;
++      const float grain_duration = ComputeGrainDuration(p.size.value());
++      const float shape_value = p.shape.value();
+       new_grain()->Start(
+           bank,
+           bit_shift,
+-          p.time.value(),
+-          p.pitch.pitch_value() * kWavetableRootNote * one_hertz_,
+-          ComputeGrainDuration(p.size.value()),
+-          p.shape.value(),
++          time_value,
++          frequency,
++          grain_duration,
++          shape_value,
+           amplitude,
+           pan,
+           trigger.fractional_sample);

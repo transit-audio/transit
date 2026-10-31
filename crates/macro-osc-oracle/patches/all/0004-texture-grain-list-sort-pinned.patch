@@ -1,0 +1,80 @@
+--- beads/dsp/granular_player.h
++++ beads/dsp/granular_player.h
+@@ -47,6 +47,71 @@
+ struct Parameters {
+   RandomizedParameter time;
+   RandomizedParameter size;
+   RandomizedParameter shape;
+   RandomizedParameter pitch;
+   bool monophonic_mode;
+ };
++
++// transit oracle: std::partial_sort is not stable, and each standard library
++// orders equal elements its own way. The grain list holds many grains with the
++// same remaining length (every finished grain has 0), and which of them is
++// stolen decides the order in which the grains are summed, so the output would
++// depend on the library. This is the heap selection of GCC's libstdc++, the
++// module's library (make_heap over the first `middle` elements, a sift for
++// every later element smaller than the top, then sort_heap), written out so
++// that every compiler orders ties the same way.
++template<typename T, typename Compare>
++inline void TransitAdjustHeap(T* first, int hole, int len, T value,
++                              Compare comp) {
++  const int top = hole;
++  int child = hole;
++  while (child < (len - 1) / 2) {
++    child = 2 * (child + 1);
++    if (comp(first[child], first[child - 1])) {
++      --child;
++    }
++    first[hole] = first[child];
++    hole = child;
++  }
++  if ((len & 1) == 0 && child == (len - 2) / 2) {
++    child = 2 * (child + 1);
++    first[hole] = first[child - 1];
++    hole = child - 1;
++  }
++  int parent = (hole - 1) / 2;
++  while (hole > top && comp(first[parent], value)) {
++    first[hole] = first[parent];
++    hole = parent;
++    parent = (hole - 1) / 2;
++  }
++  first[hole] = value;
++}
++
++template<typename T, typename Compare>
++inline void TransitPartialSort(T* first, int middle, int last, Compare comp) {
++  if (middle > 1) {
++    for (int parent = (middle - 2) / 2; ; --parent) {
++      TransitAdjustHeap(first, parent, middle, first[parent], comp);
++      if (parent == 0) {
++        break;
++      }
++    }
++  }
++  for (int i = middle; i < last; ++i) {
++    if (comp(first[i], first[0])) {
++      T value = first[i];
++      first[i] = first[0];
++      TransitAdjustHeap(first, 0, middle, value, comp);
++    }
++  }
++  for (int end = middle; end > 1; ) {
++    --end;
++    T value = first[end];
++    first[end] = first[0];
++    TransitAdjustHeap(first, 0, end, value, comp);
++  }
++}
+@@ -176,8 +241,8 @@
+         // likely to have already completed their course anyway.
+-        std::partial_sort(
++        TransitPartialSort(
+             &grain_priority_list_[0],
+-            &grain_priority_list_[num_safety_grains],
+-            &grain_priority_list_[num_grains],
++            num_safety_grains,
++            num_grains,
+             T::Compare);

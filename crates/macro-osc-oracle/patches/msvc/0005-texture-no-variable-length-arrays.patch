@@ -1,0 +1,44 @@
+--- beads/dsp/processor.cc
++++ beads/dsp/processor.cc
+@@ -124,3 +124,6 @@
+-  TriggerGenerator::Output triggers_buffer[size];
+-  DelayController::Output taps_buffer[size];
+-  bool gate_out[size];
++  // transit oracle (MSVC): no variable-length arrays; the oracle passes at
++  // most 24 frames, the codec's largest block (kMaxCodecBlockSize).
++  TriggerGenerator::Output triggers_buffer[24];
++  DelayController::Output taps_buffer[24];
++  bool gate_out[24];
+@@ -163,1 +166,1 @@
+-  FloatFrame dry_signal[size];
++  FloatFrame dry_signal[24];
+--- beads/dsp/synth.cc
++++ beads/dsp/synth.cc
+@@ -72,1 +72,2 @@
+-  TriggerGenerator::Output triggers[size];
++  // transit oracle (MSVC): no variable-length arrays (at most 24 frames).
++  TriggerGenerator::Output triggers[24];
+--- beads/dsp/trigger_generator.cc
++++ beads/dsp/trigger_generator.cc
+@@ -253,1 +253,2 @@
+-    stmlib::GateFlags merged_gate_flags[size];
++    // transit oracle (MSVC): no variable-length arrays (at most 24 frames).
++    stmlib::GateFlags merged_gate_flags[24];
+--- beads/dsp/granular_processor.h
++++ beads/dsp/granular_processor.h
+@@ -166,7 +166,9 @@
+-      bool d_freeze[d_size];
+-      TriggerGenerator::Output d_triggers[d_size];
+-      DelayController::Output d_taps[d_size];
+-      FloatFrame d_in[d_size];
+-      FloatFrame d_out[d_size];
+-      float downsampled[d_size];
+-      float upsampled[size];
++      // transit oracle (MSVC): no variable-length arrays (at most 24 frames).
++      bool d_freeze[24];
++      TriggerGenerator::Output d_triggers[24];
++      DelayController::Output d_taps[24];
++      FloatFrame d_in[24];
++      FloatFrame d_out[24];
++      float downsampled[24];
++      float upsampled[24];

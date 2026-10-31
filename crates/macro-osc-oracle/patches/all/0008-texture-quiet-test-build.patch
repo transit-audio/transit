@@ -1,0 +1,10 @@
+--- beads/dsp/wavetable_granular_player.h
++++ beads/dsp/wavetable_granular_player.h
+@@ -56,6 +56,8 @@
+ #ifdef TEST
+-      if (!new_grain()->done()) {
+-        printf("stealing, duration = %d\n", new_grain()->remaining_samples());
+-      }
++      // transit oracle: the desktop build's diagnostic (one line on stdout
++      // per stolen grain) is removed; it prints and computes nothing else.
+ #endif  // TEST

@@ -1,0 +1,88 @@
+--- beads/dsp/delay_line.h
++++ beads/dsp/delay_line.h
+@@ -87,36 +87,72 @@
+ struct Item<RESOLUTION_12_BIT, 2> {
+   void Store(int i, FloatFrame s) {
+-    l = stmlib::Clip16(static_cast<int32_t>(s.l * 32768.0f)) >> 4;
+-    r = stmlib::Clip16(static_cast<int32_t>(s.r * 32768.0f)) >> 4;
++    set_low(stmlib::Clip16(static_cast<int32_t>(s.l * 32768.0f)) >> 4);
++    set_high(stmlib::Clip16(static_cast<int32_t>(s.r * 32768.0f)) >> 4);
+   }
+   inline FloatFrame value(int i) const {
+     FloatFrame result;
+-    result.l = static_cast<float>(l) / 2048.0f;
+-    result.r = static_cast<float>(r) / 2048.0f;
++    result.l = static_cast<float>(low()) / 2048.0f;
++    result.r = static_cast<float>(high()) / 2048.0f;
+     return result;
+   }
+   enum { bundle_size = 1 };
+-  int16_t l : 12;
+-  int16_t r : 12;
+-} __attribute__((packed));
++  // transit oracle (MSVC): MSVC never lets a bit field straddle its storage
++  // unit, so two 12-bit fields of int16_t take 4 bytes (GCC packs them into
++  // 3), and the delay line would outgrow its banks. The two signed 12-bit
++  // values are packed into 3 bytes by hand instead: the same values, the same
++  // item size.
++  inline int16_t low() const {
++    return static_cast<int16_t>(
++        static_cast<int16_t>((b[0] | (b[1] << 8)) << 4) >> 4);
++  }
++  inline int16_t high() const {
++    return static_cast<int16_t>(
++        static_cast<int16_t>(((b[1] >> 4) | (b[2] << 4)) << 4) >> 4);
++  }
++  inline void set_low(int32_t v) {
++    b[0] = static_cast<uint8_t>(v & 0xff);
++    b[1] = static_cast<uint8_t>((b[1] & 0xf0) | ((v >> 8) & 0x0f));
++  }
++  inline void set_high(int32_t v) {
++    b[1] = static_cast<uint8_t>((b[1] & 0x0f) | ((v & 0x0f) << 4));
++    b[2] = static_cast<uint8_t>((v >> 4) & 0xff);
++  }
++  uint8_t b[3];
++};
+
+ template<>
+ struct Item<RESOLUTION_12_BIT, 1> {
+   void Store(int i, FloatFrame s) {
+     int16_t lr = \
+         stmlib::Clip16(static_cast<int32_t>((s.l + s.r) * 16384.0f)) >> 4;
+     if (i) {
+-      odd = lr;
++      set_high(lr);
+     } else {
+-      even = lr;
++      set_low(lr);
+     }
+   }
+   inline FloatFrame value(int i) const {
+     FloatFrame result;
+-    result.l = result.r = static_cast<float>(i ? odd : even) / 2048.0f;
++    result.l = result.r = static_cast<float>(i ? high() : low()) / 2048.0f;
+     return result;
+   }
+   enum { bundle_size = 2 };
+-  int16_t odd : 12;
+-  int16_t even : 12;
+-} __attribute__((packed));
++  // transit oracle (MSVC): packed by hand, as Item<RESOLUTION_12_BIT, 2>.
++  inline int16_t low() const {
++    return static_cast<int16_t>(
++        static_cast<int16_t>((b[0] | (b[1] << 8)) << 4) >> 4);
++  }
++  inline int16_t high() const {
++    return static_cast<int16_t>(
++        static_cast<int16_t>(((b[1] >> 4) | (b[2] << 4)) << 4) >> 4);
++  }
++  inline void set_low(int32_t v) {
++    b[0] = static_cast<uint8_t>(v & 0xff);
++    b[1] = static_cast<uint8_t>((b[1] & 0xf0) | ((v >> 8) & 0x0f));
++  }
++  inline void set_high(int32_t v) {
++    b[1] = static_cast<uint8_t>((b[1] & 0x0f) | ((v & 0x0f) << 4));
++    b[2] = static_cast<uint8_t>((v >> 4) & 0xff);
++  }
++  uint8_t b[3];
++};

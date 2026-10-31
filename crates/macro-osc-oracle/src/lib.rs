@@ -1,5 +1,5 @@
 //! The null-test oracle for transit's ported instruments (ADR 0033): the macro oscillator (#194),
-//! the resonator (#198) and the granular texture processor (#199).
+//! the resonator (#198), the granular texture processor (#199) and the texture effect chain (#241).
 //!
 //! This crate builds Émilie Gillet's original C++ DSP (MIT; vendored under `vendor/`, see
 //! `VENDOR.md` and `LICENSE-THIRD-PARTY`) with the `cc` crate and exposes it to Rust tests. It is
@@ -18,6 +18,10 @@
 //! - [`granular`] and [`granular_sweep`]: the granular texture processor (its granular playback
 //!   mode at four buffer qualities, stereo int16 in and out) and its fixed sweep, at 32 kHz in the
 //!   firmware's 32-frame blocks (#199).
+//! - [`texture`] and [`texture_sweep`]: the texture effect chain (grain and wavetable-grain
+//!   players, the multitap delay, four buffer qualities, the reverb; float stereo in and out), its
+//!   synth and its input stage, and the chain's fixed sweep, at each quality's codec rate in the
+//!   module's blocks (#241).
 
 mod ffi;
 pub mod floor;
@@ -29,6 +33,8 @@ pub mod residual;
 pub mod resonator;
 pub mod resonator_sweep;
 pub mod sweep;
+pub mod texture;
+pub mod texture_sweep;
 
 pub use ffi::Session;
 pub use model::Model;

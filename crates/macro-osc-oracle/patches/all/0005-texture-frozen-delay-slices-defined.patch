@@ -1,0 +1,24 @@
+--- beads/dsp/delay_controller.cc
++++ beads/dsp/delay_controller.cc
+@@ -274,4 +274,19 @@
+         if (new_head) {
+-          const int slice_duration = int(
+-              clock_.interval(interval) * tap_ratio[ratio]);
+-          const int num_slices = max_delay_ / slice_duration;
++          // transit oracle: two inputs make these lines undefined. With the
++          // SEED button latched and nothing patched, a negative density CV can
++          // stretch the clock interval to about 13 times the buffer: no slice
++          // fits, the quantizer returns -1, the play head starts before the
++          // buffer and its 22.10 fixed-point delay overflows (an out-of-bounds
++          // read). A slice is therefore at most the whole buffer. And a SEED
++          // clock faster than 1/16 of the sample rate gives slices shorter than
++          // one sample: an integer division by zero (x86 traps; the module's
++          // Cortex-M7 returns 0, which leaves the play head silent), so zero
++          // slices are counted as the module counts them. Wherever the
++          // firmware's own result is defined, it is unchanged.
++          const int slice_duration = std::min(
++              int(clock_.interval(interval) * tap_ratio[ratio]), max_delay_);
++          const int num_slices = slice_duration
++              ? max_delay_ / slice_duration
++              : 0;
+           if (numerator_quantizer_[i].num_steps() != num_slices) {

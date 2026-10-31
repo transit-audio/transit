@@ -110,17 +110,28 @@ fn main() {
     collect(&vendor.join("plaits"), "cc", &mut sources);
     collect(&vendor.join("rings"), "cc", &mut sources);
     collect(&vendor.join("clouds"), "cc", &mut sources);
+    collect(&vendor.join("beads/dsp"), "cc", &mut sources);
+    sources.push(vendor.join("beads/resources.cc"));
+    sources.push(vendor.join("beads/gain_control.cc"));
     sources.push(vendor.join("stmlib/dsp/atan.cc"));
     sources.push(vendor.join("stmlib/dsp/units.cc"));
     sources.push(vendor.join("stmlib/utils/random.cc"));
     sources.push(cpp.join("oracle.cc"));
     sources.push(cpp.join("resonator_oracle.cc"));
     sources.push(cpp.join("granular_oracle.cc"));
+    sources.push(cpp.join("texture_oracle.cc"));
+    sources.push(cpp.join("texture_extras_oracle.cc"));
+    // The texture processor's second build, at the port's longest buffer (cpp/texture_oracle.cc):
+    // the effect chain's sources only, in a renamed namespace.
+    let mut long_sources: Vec<PathBuf> = ["processor.cc", "mu_law.cc", "delay_clock.cc", "delay_controller.cc", "trigger_generator.cc"]
+        .iter()
+        .map(|f| vendor.join("beads/dsp").join(f))
+        .collect();
+    long_sources.push(vendor.join("beads/resources.cc"));
+    long_sources.push(cpp.join("texture_oracle.cc"));
 
-    let mut build = cc::Build::new();
-    build.cpp(true).define("TEST", None).opt_level(2).debug(false).warnings(false);
     let compat = cpp.join("compat.h");
-    let msvc = build.get_compiler().is_like_msvc();
+    let msvc = cc::Build::new().cpp(true).get_compiler().is_like_msvc();
     let overlay = out_dir.join("overlay");
     let _ = std::fs::remove_dir_all(&overlay);
     let mut patches = Vec::new();
@@ -133,16 +144,41 @@ fn main() {
         // A patched source file is compiled from the overlay instead of vendor/.
         for file in written {
             let Ok(rel) = file.strip_prefix(&overlay) else { continue };
-            if let Some(source) = sources.iter_mut().find(|s| s.strip_prefix(&vendor).is_ok_and(|r| r == rel)) {
-                *source = file.clone();
+            for source in sources.iter_mut().chain(long_sources.iter_mut()) {
+                if source.strip_prefix(&vendor).is_ok_and(|r| r == rel) {
+                    *source = file.clone();
+                }
             }
         }
     }
-    build.include(&overlay);
-    if msvc {
-        build.flag("/std:c++14").flag("/fp:strict").flag("/EHsc").flag(format!("/FI{}", compat.display()));
-    } else {
-        build.flag("-std=c++11").flag("-ffp-contract=off").flag("-fno-fast-math").flag("-include").flag(compat.to_string_lossy().as_ref());
-    }
-    build.include(&vendor).files(&sources).compile("macro_osc_oracle");
+    let configure = |build: &mut cc::Build| {
+        build.cpp(true).define("TEST", None).opt_level(2).debug(false).warnings(false);
+        // The overlay first (a patched header shadows the vendored one), then the stand-in for the
+        // one hardware header the texture processor's input stage includes, then vendor/.
+        build.include(&overlay).include(cpp.join("shim"));
+        if msvc {
+            build.flag("/std:c++14").flag("/fp:strict").flag("/EHsc").flag(format!("/FI{}", compat.display()));
+        } else {
+            build.flag("-std=c++11").flag("-ffp-contract=off").flag("-fno-fast-math").flag("-include").flag(compat.to_string_lossy().as_ref());
+        }
+        build.include(&vendor);
+    };
+    let mut build = cc::Build::new();
+    configure(&mut build);
+    build.files(&sources).compile("macro_osc_oracle");
+
+    // 8 seconds of 16-bit stereo at 48 kHz (384000 frames of 32 bits): TEXTURE_LONG_BUFFER_BITS in
+    // src/texture.rs. The banks must hold the longest layout (8-bit mono, 1536004 bytes) and the
+    // 2048-byte freeze tail at the end of the last bank.
+    let mut long = cc::Build::new();
+    configure(&mut long);
+    // Its own object directory: the same source paths would otherwise overwrite the first build's
+    // objects.
+    long.out_dir(out_dir.join("texture_long"))
+        .define("beads", "transit_texture_long")
+        .define("TRANSIT_TEXTURE_LONG", None)
+        .define("TRANSIT_ORACLE_DELAY_BUFFER_SIZE_BITS", "12288000")
+        .define("TRANSIT_ORACLE_DELAY_BANK_SIZE", "524288")
+        .files(&long_sources)
+        .compile("texture_oracle_long");
 }

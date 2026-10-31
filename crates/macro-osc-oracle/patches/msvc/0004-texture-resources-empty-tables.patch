@@ -1,0 +1,12 @@
+--- beads/resources.cc
++++ beads/resources.cc
+@@ -366,9 +366,6 @@
+-const int16_t* lookup_table_i16_table[] = {
+-};
++// transit oracle (MSVC, C2466): zero-length arrays. These two tables are
++// empty and nothing references them, so their definitions are removed.
+
+
+
+-const int8_t* lookup_table_i8_table[] = {
+-};

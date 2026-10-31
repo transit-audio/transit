@@ -1,9 +1,9 @@
 # transit-macro-osc-oracle
 
-The null-test oracle for transit's ported instruments ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md)): the macro oscillator (#194), the resonator (#198) and the granular texture processor (#199).
+The null-test oracle for transit's ported instruments ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md)): the macro oscillator (#194), the resonator (#198), the granular texture processor (#199) and the texture synthesizer (#241).
 
 It builds Émilie Gillet's original C++ DSP (MIT) and lets Rust tests render it sample by sample.
-The Rust ports (`transit-macro-osc`, #195; `transit-resonator`, #198; `transit-granular`, #199) are gated by comparing their
+The Rust ports (`transit-macro-osc`, #195; `transit-resonator`, #198; `transit-granular`, #199; `transit-texture`, #241) are gated by comparing their
 output against this crate, engine by engine and model by model, on the same runner. One crate holds
 every module family's oracle, a module per family, so they share the build, the session lock, the
 residual and the floor.
@@ -22,9 +22,12 @@ reaches a release build.
 - `build.rs`: builds it with the `cc` crate. C++11 (C++14 on MSVC, its minimum), `-DTEST` (the
   desktop branch of the firmware's library, as its own test makefile), `-O2` in every cargo profile,
   no fast-math, no FP contraction (`-ffp-contract=off` on GCC and Clang, `/fp:strict` on MSVC).
-- `patches/msvc/`: three small patches MSVC needs, and `patches/all/`, for every compiler: one
-  upstream line restored (the stretch mode's `Window::Start`), and the granular processor's
-  past-the-end reads and its correlator's shift by 32 made defined. They are applied to copies at
+- `patches/msvc/`: six small patches MSVC needs, and `patches/all/`, for every compiler: one
+  upstream line restored (the stretch mode's `Window::Start`), the granular processor's
+  past-the-end reads and its correlator's shift by 32 made defined, and for the texture
+  synthesizer the unspecified argument order and sort ties pinned, its undefined frozen-delay slices
+  and last-wave read defined, its buffer size made overridable for a second build, and a desktop
+  diagnostic silenced. They are applied to copies at
   build time (VENDOR.md lists them); every other file builds as fetched.
 - `cpp/oracle.cc`: a C ABI over one voice (`Patch` and `Modulations` in, int16 out/aux frames, as
   the firmware) and over each engine on its own (float out/aux before the voice's gain, limiter and
@@ -42,6 +45,13 @@ reaches a release build.
   and its fixed sweep (each of nine parameters at five levels, three freeze and trigger patterns,
   both modes, every quality: 888 points, each the quality's whole recording plus 0.25 s long, a
   fresh processor and a fixed seed and input per point).
+- `cpp/texture_oracle.cc`, `cpp/texture_extras_oracle.cc`, `src/texture.rs` and
+  `src/texture_sweep.rs`: the texture synthesizer (#241): its effect chain (four buffer qualities,
+  stereo or mono, each at its own codec rate, float stereo in and out, blocks of up to 24 frames),
+  built twice (the module's 4-second memory and the port's longest, 8 seconds); its synth; its
+  input stage; and the fixed sweeps (twelve controls at five levels around a granular and a
+  delay-mode center, free, frozen and SEED-pulsed: 2280 points; the synth's 588; nine input-stage
+  runs), each point long enough for its grains or taps to read recorded audio.
 - `src/resonator.rs` and `src/resonator_sweep.rs`: the resonator's safe wrapper and its fixed sweep
   (159 points per model and polyphony, 6 models, polyphony 1 to 4, 48 kHz, 24-frame blocks, a fresh
   part and the same seed per point).
@@ -52,7 +62,8 @@ reaches a release build.
 
 The macro oscillator and the resonator run at 48 kHz only (their tables and filter coefficients
 assume it), so their oracles accept 48 kHz only; the granular processor runs at 32 kHz only, its
-module's codec rate. The macro oscillator's block size is the firmware's `kBlockSize`, 12 frames; a render
+module's codec rate; the texture synthesizer runs each quality at its codec rate (48, 32 or 24 kHz)
+and its synth at 48 kHz. The macro oscillator's block size is the firmware's `kBlockSize`, 12 frames; a render
 call takes up to `kMaxBlockSize`, 24. The resonator's firmware renders `kMaxBlockSize`, 24 frames,
 per call, and one call is one control block.
 
@@ -81,12 +92,18 @@ on every CI run.
 renders, 4 qualities, 2 modes) twice in one process and again in a second process. Measured:
 bit-identical on Windows x86-64 with MSVC (2026-10-30); Linux and macOS prove it on every CI run.
 
+`tests/texture_self_floor.rs` does the same for the texture synthesizer: the whole sweep (2280
+effect-chain renders over 8 qualities, 588 synth renders, 9 input-stage runs) twice in one process
+and again in a second process. Measured: bit-identical on Windows x86-64 with MSVC (2026-10-31);
+Linux and macOS prove it on every CI run.
+
 To re-measure (after a compiler, flag or vendor change):
 
 ```sh
 cargo test --locked -p transit-macro-osc-oracle --test self_floor -- --nocapture
 cargo test --locked -p transit-macro-osc-oracle --test resonator_self_floor -- --nocapture
 cargo test --locked -p transit-macro-osc-oracle --test granular_self_floor -- --nocapture
+cargo test --locked -p transit-macro-osc-oracle --test texture_self_floor -- --nocapture
 ```
 
 A pass means the floor is still `-inf` on that runner. A failure prints the engine, the point and the

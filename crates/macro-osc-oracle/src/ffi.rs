@@ -24,8 +24,14 @@
 //!    `lut_xfade_out`), and the freeze crossfade's tail (`tail_buffer_`). The build-time patch
 //!    `patches/all/0002` gives each of those arrays one more entry (the last repeated, or a zero
 //!    the crossfade multiplies by a zero gain), so those reads stay inside them and read what the
-//!    port's clamp reads. With these checks and that patch, no input from safe Rust can make the C++
-//!    read or write outside its memory.
+//!    port's clamp reads. The texture synthesizer's controls and input samples are range-checked
+//!    here too (`crate::texture::controls_in_range`, `crate::texture::input_in_range`: the pitch and
+//!    the density CV reach `SemitonesToRatio`, and every sample the chain converts to an integer
+//!    stays in range); its media, resolution, mode and block sizes are checked by the C++. Its
+//!    firmware has three out-of-bounds cases no input check can refuse, which build-time patches
+//!    define (`patches/all/0005` and `0006`): a frozen slice longer than the buffer, a slice shorter
+//!    than a sample (a division by zero), and the last wave of the last bank. With these checks and
+//!    those patches, no input from safe Rust can make the C++ read or write outside its memory.
 
 use std::cell::Cell;
 use std::marker::PhantomData;
@@ -122,8 +128,40 @@ pub struct CGranularParameters {
     pub(crate) reserved: u8,
 }
 
+/// Mirrors `OracleTextureParameter` in `cpp/texture_oracle.cc` and `cpp/texture_extras_oracle.cc`
+/// (the texture processor's `RandomizedParameter`, the flag as `u8` after the floats).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CTextureParameter {
+    pub(crate) base: f32,
+    pub(crate) attenuverter: f32,
+    pub(crate) cv: f32,
+    pub(crate) has_cv: u8,
+    pub(crate) reserved: [u8; 3],
+}
+
+/// Mirrors `OracleTextureControls` in `cpp/texture_oracle.cc` and `cpp/texture_extras_oracle.cc`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CTextureControls {
+    pub(crate) time: CTextureParameter,
+    pub(crate) size: CTextureParameter,
+    pub(crate) shape: CTextureParameter,
+    pub(crate) pitch: CTextureParameter,
+    pub(crate) density: f32,
+    pub(crate) density_cv: f32,
+    pub(crate) feedback: f32,
+    pub(crate) dry_wet: f32,
+    pub(crate) reverb: f32,
+    pub(crate) seed_button: i32,
+    pub(crate) monophonic: u8,
+    pub(crate) output_gate: u8,
+    pub(crate) reserved: [u8; 2],
+}
+
 // SAFETY: these declarations match the `extern "C"` definitions in cpp/oracle.cc,
-// cpp/resonator_oracle.cc and cpp/granular_oracle.cc one for one
+// cpp/resonator_oracle.cc, cpp/granular_oracle.cc, cpp/texture_oracle.cc (in both of its builds)
+// and cpp/texture_extras_oracle.cc one for one
 // (names, argument order, and C types: `size_t` is `usize`, `void*` is `*mut c_void`, the structs
 // are the `#[repr(C)]` mirrors above). The build script compiles that file into this crate.
 unsafe extern "C" {
@@ -183,6 +221,62 @@ unsafe extern "C" {
         parameters: *const CGranularParameters,
         input: *const i16,
         out: *mut i16,
+        size: usize,
+    ) -> i32;
+    fn oracle_texture_max_block_size() -> usize;
+    fn oracle_texture_delay_buffer_size_bits() -> usize;
+    fn oracle_texture_new(media: i32, mono: u8) -> *mut std::ffi::c_void;
+    fn oracle_texture_free(processor: *mut std::ffi::c_void);
+    fn oracle_texture_configure(processor: *mut std::ffi::c_void, media: i32, mono: u8) -> i32;
+    fn oracle_texture_trim(processor: *mut std::ffi::c_void);
+    fn oracle_texture_set_flush(processor: *mut std::ffi::c_void, flush: u8);
+    fn oracle_texture_process(
+        processor: *mut std::ffi::c_void,
+        controls: *const CTextureControls,
+        freeze: *const u8,
+        seed: *const u8,
+        input: *const f32,
+        out: *mut f32,
+        size: usize,
+    ) -> i32;
+    fn oracle_texture_long_max_block_size() -> usize;
+    fn oracle_texture_long_delay_buffer_size_bits() -> usize;
+    fn oracle_texture_long_new(media: i32, mono: u8) -> *mut std::ffi::c_void;
+    fn oracle_texture_long_free(processor: *mut std::ffi::c_void);
+    fn oracle_texture_long_configure(processor: *mut std::ffi::c_void, media: i32, mono: u8) -> i32;
+    fn oracle_texture_long_trim(processor: *mut std::ffi::c_void);
+    fn oracle_texture_long_set_flush(processor: *mut std::ffi::c_void, flush: u8);
+    fn oracle_texture_long_process(
+        processor: *mut std::ffi::c_void,
+        controls: *const CTextureControls,
+        freeze: *const u8,
+        seed: *const u8,
+        input: *const f32,
+        out: *mut f32,
+        size: usize,
+    ) -> i32;
+    fn oracle_texture_synth_new() -> *mut std::ffi::c_void;
+    fn oracle_texture_synth_free(synth: *mut std::ffi::c_void);
+    fn oracle_texture_synth_render(
+        synth: *mut std::ffi::c_void,
+        controls: *const CTextureControls,
+        resolution: i32,
+        freeze: *const u8,
+        seed: *const u8,
+        out: *mut f32,
+        size: usize,
+    ) -> i32;
+    fn oracle_texture_input_new(sample_rate: f32, mode: i32) -> *mut std::ffi::c_void;
+    fn oracle_texture_input_free(input: *mut std::ffi::c_void);
+    fn oracle_texture_input_init(input: *mut std::ffi::c_void, sample_rate: f32, mode: i32, reset: u8) -> i32;
+    fn oracle_texture_input_process(
+        input: *mut std::ffi::c_void,
+        active: u8,
+        gain: u8,
+        left_normalized: u8,
+        right_normalized: u8,
+        frames: *const i32,
+        out: *mut f32,
         size: usize,
     ) -> i32;
 }
@@ -277,6 +371,19 @@ impl Session {
     pub fn granular_firmware_sizes(&self) -> (usize, usize) {
         // SAFETY: both return compile-time constants; no state is touched.
         unsafe { (oracle_granular_firmware_large_size(), oracle_granular_firmware_small_size()) }
+    }
+
+    /// The texture processor's largest block, the codec's `kMaxCodecBlockSize` (24 frames), and
+    /// its delay memory in bits (`kDelayBufferSizeBits`), in its firmware build and its long build.
+    #[must_use]
+    pub fn texture_constants(&self) -> [(usize, usize); 2] {
+        // SAFETY: each returns a compile-time constant; no state is touched.
+        unsafe {
+            [
+                (oracle_texture_max_block_size(), oracle_texture_delay_buffer_size_bits()),
+                (oracle_texture_long_max_block_size(), oracle_texture_long_delay_buffer_size_bits()),
+            ]
+        }
     }
 
     /// The bytes of FX workspace the processor carves out of its memory (diffuser, reverb,
@@ -539,5 +646,268 @@ impl Drop for RawGranular<'_> {
         // SAFETY: `self.ptr` came from `oracle_granular_new` and is freed only here (invariant 2).
         // Freeing touches no shared state.
         unsafe { oracle_granular_free(self.ptr.as_ptr()) }
+    }
+}
+
+/// Which build of the texture processor a [`RawTexture`] belongs to (`cpp/texture_oracle.cc`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TextureBuild {
+    /// The module's buffer.
+    Firmware,
+    /// The port's longest buffer, in a renamed namespace.
+    Long,
+}
+
+/// The texture processor's effect chain (`beads::Processor`) with its delay and reverb memory, in
+/// zero-initialized storage as on the module, in one of its two builds.
+pub struct RawTexture<'s> {
+    ptr: std::ptr::NonNull<std::ffi::c_void>,
+    build: TextureBuild,
+    /// Ties the handle to its session: every call happens while the lock is held (invariant 1).
+    _session: &'s Session,
+}
+
+impl<'s> RawTexture<'s> {
+    /// `None` when `media` is outside 0 to 3 or an allocation fails.
+    pub(crate) fn new(session: &'s Session, build: TextureBuild, media: i32, mono: bool) -> Option<Self> {
+        // SAFETY: the lock is held through `session` (invariant 1); the call checks the media, then
+        // allocates and initializes a processor, or returns null.
+        let ptr = unsafe {
+            match build {
+                TextureBuild::Firmware => oracle_texture_new(media, u8::from(mono)),
+                TextureBuild::Long => oracle_texture_long_new(media, u8::from(mono)),
+            }
+        };
+        std::ptr::NonNull::new(ptr).map(|ptr| Self { ptr, build, _session: session })
+    }
+
+    /// `None` when `media` is outside 0 to 3.
+    pub(crate) fn configure(&mut self, media: i32, mono: bool) -> Option<()> {
+        // SAFETY: the lock is held through `self._session` (invariant 1); `self.ptr` is a live
+        // processor of this build (invariant 2) used by this thread only; the wrapper range-checks
+        // `media`.
+        let status = unsafe {
+            match self.build {
+                TextureBuild::Firmware => oracle_texture_configure(self.ptr.as_ptr(), media, u8::from(mono)),
+                TextureBuild::Long => oracle_texture_long_configure(self.ptr.as_ptr(), media, u8::from(mono)),
+            }
+        };
+        (status == 0).then_some(())
+    }
+
+    pub(crate) fn trim(&mut self) {
+        // SAFETY: as `configure`; the call writes two integers of each delay line it trims.
+        unsafe {
+            match self.build {
+                TextureBuild::Firmware => oracle_texture_trim(self.ptr.as_ptr()),
+                TextureBuild::Long => oracle_texture_long_trim(self.ptr.as_ptr()),
+            }
+        }
+    }
+
+    pub(crate) fn set_flush(&mut self, flush: bool) {
+        // SAFETY: as `configure`; the call writes one flag of the holder.
+        unsafe {
+            match self.build {
+                TextureBuild::Firmware => oracle_texture_set_flush(self.ptr.as_ptr(), u8::from(flush)),
+                TextureBuild::Long => oracle_texture_long_set_flush(self.ptr.as_ptr(), u8::from(flush)),
+            }
+        }
+    }
+
+    /// Processes `input.len()` stereo frames into `out`. `None` when the lengths differ, the frame
+    /// count is zero, exceeds the maximum block size or is odd at the clean-tape quality (the C++
+    /// checks the last), or an input is out of range (invariant 4).
+    pub(crate) fn process(
+        &mut self,
+        controls: &crate::texture::Controls,
+        freeze: &[bool],
+        seed: Option<&[u8]>,
+        input: &[[f32; 2]],
+        out: &mut [[f32; 2]],
+    ) -> Option<()> {
+        let size = input.len();
+        if out.len() != size
+            || freeze.len() != size
+            || seed.is_some_and(|s| s.len() != size)
+            || size == 0
+            || size > crate::texture::TEXTURE_MAX_BLOCK_SIZE
+        {
+            return None;
+        }
+        if !crate::texture::controls_in_range(controls) || !crate::texture::input_in_range(input) {
+            return None;
+        }
+        let c = controls.to_c();
+        let freeze: [u8; crate::texture::TEXTURE_MAX_BLOCK_SIZE] = std::array::from_fn(|i| u8::from(freeze.get(i).copied().unwrap_or(false)));
+        let seed_ptr = seed.map_or(std::ptr::null(), <[u8]>::as_ptr);
+        let f = match self.build {
+            TextureBuild::Firmware => oracle_texture_process,
+            TextureBuild::Long => oracle_texture_long_process,
+        };
+        // SAFETY: the lock is held through `self._session` (invariant 1); `self.ptr` is a live
+        // processor of this build (invariant 2) used by this thread only; `c` is valid for reads;
+        // `freeze` holds at least `size` bytes, `seed` is null or holds exactly `size` bytes, and
+        // `input` and `out` each hold exactly `2 * size` contiguous floats (`[f32; 2]` has no
+        // padding) with `size <= kMaxBlockSize` (invariant 3); they do not alias (distinct
+        // borrows); every input the C++ indexes a table with or converts to an integer was
+        // range-checked just above (invariant 4).
+        let status = unsafe {
+            f(
+                self.ptr.as_ptr(),
+                std::ptr::from_ref(&c),
+                freeze.as_ptr(),
+                seed_ptr,
+                input.as_ptr().cast::<f32>(),
+                out.as_mut_ptr().cast::<f32>(),
+                size,
+            )
+        };
+        (status == 0).then_some(())
+    }
+}
+
+impl Drop for RawTexture<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.ptr` came from the `_new` function of the same build and is freed only
+        // here (invariant 2). Freeing touches no shared state.
+        unsafe {
+            match self.build {
+                TextureBuild::Firmware => oracle_texture_free(self.ptr.as_ptr()),
+                TextureBuild::Long => oracle_texture_long_free(self.ptr.as_ptr()),
+            }
+        }
+    }
+}
+
+/// The texture processor's synth (`beads::Synth`) with its own reverb memory, zero-initialized.
+pub struct RawTextureSynth<'s> {
+    ptr: std::ptr::NonNull<std::ffi::c_void>,
+    /// Ties the handle to its session (invariant 1).
+    _session: &'s Session,
+}
+
+impl<'s> RawTextureSynth<'s> {
+    /// `None` when the allocation fails.
+    pub(crate) fn new(session: &'s Session) -> Option<Self> {
+        // SAFETY: the lock is held through `session` (invariant 1); the call allocates and
+        // initializes a synth, or returns null.
+        let ptr = unsafe { oracle_texture_synth_new() };
+        std::ptr::NonNull::new(ptr).map(|ptr| Self { ptr, _session: session })
+    }
+
+    /// Renders `out.len()` stereo frames. `None` when the lengths differ, the frame count is zero or
+    /// exceeds the maximum block size, the resolution is outside 0 to 3, or a control is out of
+    /// range (invariant 4).
+    pub(crate) fn render(
+        &mut self,
+        controls: &crate::texture::Controls,
+        resolution: i32,
+        freeze: &[bool],
+        seed: Option<&[u8]>,
+        out: &mut [[f32; 2]],
+    ) -> Option<()> {
+        let size = out.len();
+        if freeze.len() != size || seed.is_some_and(|s| s.len() != size) || size == 0 || size > crate::texture::TEXTURE_MAX_BLOCK_SIZE {
+            return None;
+        }
+        if !crate::texture::controls_in_range(controls) {
+            return None;
+        }
+        let c = controls.to_c();
+        let freeze: [u8; crate::texture::TEXTURE_MAX_BLOCK_SIZE] = std::array::from_fn(|i| u8::from(freeze.get(i).copied().unwrap_or(false)));
+        let seed_ptr = seed.map_or(std::ptr::null(), <[u8]>::as_ptr);
+        // SAFETY: the lock is held through `self._session` (invariant 1); `self.ptr` is a live synth
+        // (invariant 2) used by this thread only; `c` is valid for reads; `freeze` holds at least
+        // `size` bytes, `seed` is null or holds exactly `size`, `out` holds exactly `2 * size`
+        // floats with `size <= kMaxBlockSize` (invariant 3); the C++ range-checks `resolution`;
+        // the controls were range-checked just above (invariant 4).
+        let status = unsafe {
+            oracle_texture_synth_render(
+                self.ptr.as_ptr(),
+                std::ptr::from_ref(&c),
+                resolution,
+                freeze.as_ptr(),
+                seed_ptr,
+                out.as_mut_ptr().cast::<f32>(),
+                size,
+            )
+        };
+        (status == 0).then_some(())
+    }
+}
+
+impl Drop for RawTextureSynth<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.ptr` came from `oracle_texture_synth_new` and is freed only here
+        // (invariant 2). Freeing touches no shared state.
+        unsafe { oracle_texture_synth_free(self.ptr.as_ptr()) }
+    }
+}
+
+/// The texture processor's input stage (`beads::GainControl`), zero-initialized.
+pub struct RawTextureInput<'s> {
+    ptr: std::ptr::NonNull<std::ffi::c_void>,
+    /// Ties the handle to its session (invariant 1).
+    _session: &'s Session,
+}
+
+impl<'s> RawTextureInput<'s> {
+    /// `None` when the mode is outside 0 to 2, the sample rate is not one of the codec's, or the
+    /// allocation fails.
+    pub(crate) fn new(session: &'s Session, sample_rate: f32, mode: i32) -> Option<Self> {
+        if !crate::texture::input_sample_rate_supported(sample_rate) {
+            return None;
+        }
+        // SAFETY: the lock is held through `session` (invariant 1); the call checks the mode, then
+        // allocates and initializes the stage, or returns null.
+        let ptr = unsafe { oracle_texture_input_new(sample_rate, mode) };
+        std::ptr::NonNull::new(ptr).map(|ptr| Self { ptr, _session: session })
+    }
+
+    /// `None` when the mode is outside 0 to 2 or the sample rate is not one of the codec's.
+    pub(crate) fn init(&mut self, sample_rate: f32, mode: i32, reset: bool) -> Option<()> {
+        if !crate::texture::input_sample_rate_supported(sample_rate) {
+            return None;
+        }
+        // SAFETY: the lock is held through `self._session` (invariant 1); `self.ptr` is a live stage
+        // (invariant 2) used by this thread only; the C++ range-checks `mode`.
+        let status = unsafe { oracle_texture_input_init(self.ptr.as_ptr(), sample_rate, mode, u8::from(reset)) };
+        (status == 0).then_some(())
+    }
+
+    /// Converts `input.len()` raw frames into `out`. `None` when the lengths differ or the frame
+    /// count is zero or exceeds the maximum block size.
+    pub(crate) fn process(&mut self, active: bool, gain: u8, normalized: [bool; 2], input: &[[i32; 2]], out: &mut [[f32; 2]]) -> Option<()> {
+        let size = input.len();
+        if out.len() != size || size == 0 || size > crate::texture::TEXTURE_MAX_BLOCK_SIZE {
+            return None;
+        }
+        // SAFETY: the lock is held through `self._session` (invariant 1); `self.ptr` is a live stage
+        // (invariant 2) used by this thread only; `input` holds exactly `2 * size` contiguous
+        // `i32` and `out` exactly `2 * size` floats, `size <= kMaxBlockSize` (invariant 3); every
+        // `i32` and every gain setting is a valid input (no table is indexed, no float is
+        // converted to an integer).
+        let status = unsafe {
+            oracle_texture_input_process(
+                self.ptr.as_ptr(),
+                u8::from(active),
+                gain,
+                u8::from(normalized[0]),
+                u8::from(normalized[1]),
+                input.as_ptr().cast::<i32>(),
+                out.as_mut_ptr().cast::<f32>(),
+                size,
+            )
+        };
+        (status == 0).then_some(())
+    }
+}
+
+impl Drop for RawTextureInput<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.ptr` came from `oracle_texture_input_new` and is freed only here
+        // (invariant 2). Freeing touches no shared state.
+        unsafe { oracle_texture_input_free(self.ptr.as_ptr()) }
     }
 }

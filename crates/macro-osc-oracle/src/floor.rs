@@ -4,7 +4,8 @@
 //! same seed, in one process and in a second process (`tests/self_floor.rs`). It was measured as
 //! bit-identical (`-inf` dBFS, zero differing samples) on Windows x86-64 (MSVC) on 2026-10-29, and for
 //! the resonator (`tests/resonator_self_floor.rs`, #198) and the granular processor
-//! (`tests/granular_self_floor.rs`, #199) on 2026-10-30; Linux
+//! (`tests/granular_self_floor.rs`, #199) on 2026-10-30, and for the texture synthesizer
+//! (`tests/texture_self_floor.rs`, #241) on 2026-10-31; Linux
 //! and macOS are proved by CI, whose workspace test runs `tests/self_floor.rs` on every run.
 //! A gate on the port (#195) starts from an exact reference: whatever residual the port shows is
 //! the port's.

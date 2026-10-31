@@ -1,0 +1,32 @@
+--- beads/dsp/processor.h
++++ beads/dsp/processor.h
+@@ -50,2 +50,9 @@
+ // (512 + 256) * 1000 bytes, 48kHz 16-bit stereo = 4 seconds
+-const size_t kDelayBufferSizeBits = 768 * 1000 * 8;
++// transit oracle: overridable, for the oracle's second build at the port's
++// longest buffer; the module's value otherwise. The second build also renames
++// the namespace (-Dbeads=...), so the two builds never share a symbol.
++#ifndef TRANSIT_ORACLE_DELAY_BUFFER_SIZE_BITS
++#define TRANSIT_ORACLE_DELAY_BUFFER_SIZE_BITS (768 * 1000 * 8)
++#endif
++const size_t kDelayBufferSizeBits = TRANSIT_ORACLE_DELAY_BUFFER_SIZE_BITS;
+--- beads/dsp/delay_line.h
++++ beads/dsp/delay_line.h
+@@ -160,8 +160,15 @@
+   INTERPOLATION_HERMITE
+ };
+
++// transit oracle: overridable with the buffer size (processor.h), which needs
++// larger banks in the oracle's second build. Where the banks split the items
++// changes nothing the delay line reads.
++#ifndef TRANSIT_ORACLE_DELAY_BANK_SIZE
++#define TRANSIT_ORACLE_DELAY_BANK_SIZE 262144
++#endif
++
+ template<
+     Resolution resolution,
+     int max_delay,
+     int num_channels,
+-    size_t bank_size=262144,
++    size_t bank_size=TRANSIT_ORACLE_DELAY_BANK_SIZE,
+     size_t num_banks=3>
