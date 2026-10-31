@@ -286,7 +286,6 @@ fn partial_host_input_does_not_claim_a_new_recording_before_a_codec_block() {
     assert!(Recording::parse(&packet).unwrap().has_recorded());
 }
 
-
 #[test]
 fn a_capture_finishes_in_a_bounded_number_of_blocks_at_any_block_size() {
     for len in [768_000, 1_024_000, 1_536_000, 2 * BufferSize::MAX.max_delay(Media::DirtyTape) as usize + 8] {
