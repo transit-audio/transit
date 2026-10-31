@@ -66,7 +66,8 @@ impl StudioApp {
                 .flat_map(|t| {
                     t.mixer.inserts.iter().enumerate().filter_map(move |(i, ins)| {
                         ins.as_ref()
-                            .filter(|ins| ins.plugin == "texture")
+                            // Only a frozen Texture has a recording to refresh; the rest has no state to keep.
+                            .filter(|ins| ins.plugin == "texture" && ins.params.get("freeze").is_some_and(|v| *v >= 0.5))
                             .map(|_| format!("{}: Texture insert {} (no audio callback)", t.name, i + 1))
                     })
                 })
