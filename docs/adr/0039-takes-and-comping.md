@@ -25,9 +25,27 @@ Convention (transit follows what Ableton and Logic agree on): Logic's Take Folde
 - Playlists stay the storage, so Pro Tools style playlist commands keep working; after a take change a non-active playlist holds a mix of takes, which only the playlist selector shows.
 - Cost: `Track::take_stacks` sorts the track's clips and groups them (O(n log n) per track; the copy check compares only clips that start together, field by field, cloning nothing). The arrange view asks for it several times a frame per track, so the UI caches it per track for the document revision (`TakeCache`, keyed on the engine's revision and the document's address): a frame with no edit recomputes nothing.
 - Known limit: hand-made alternate playlists with overlapping clips (the playlist workflow) show as take stacks and take lanes. Choosing a take there moves material between those playlists; it is one undo step and nothing is lost.
-- Known limit: sessions recorded before this change (the active playlist holds only the last lap) are not migrated; the playlist selector still reaches the rest.
 - Known limit: pieces are joined only by the rule in decision 3 (exactly what a take cut made, the take chosen back over them). A piece edited after the cut stays apart. Swipe comping (ranges across takes with crossfades) is slice 2.
 - Swipe comping, take names and colors, lane order and audition (per-lane solo) are slice 2. No recording time is stored, so lanes are labeled by number only.
+
+## Migration
+
+On open, a pre-slice-1 track whose active playlist holds only the newest lap of an unnumbered
+take stack is migrated (#249). Detection uses `Track::take_stacks`, including its range and
+`same_material` copy rules; numbered stacks, lone clips, duplicate playlists and an older
+selected take stay unchanged. The earliest playlist participating in that stack becomes active,
+the takes receive numbers in playlist order, and each lap is made to play in order through the
+ordinary take cut/join operations. The newest lap plays over its range, the preceding lap plays
+around a partial final lap, and material outside the stack stays on the original playlist.
+No recording timestamp or original-playlist marker exists in these files: playlist order is the
+evidence available, and a hand-made alternate playlist with this same shape also qualifies.
+
+All migrated tracks form one **Migrate takes** undo step; the session opens modified and undo
+restores the loaded shape. The load report names each track and says **N track(s) recorded with
+an earlier build now show their laps as takes** in the status line. Frozen tracks are left alone
+and reported. A file with no eligible track opens unmodified, and saving a migrated file makes
+later opens unchanged. The corpus fixture `v0.5.1-pre-take-lanes.transit` pins the old shape;
+`v0.6.0-takes.transit` and an ordinary session keep their bytes through load and save.
 
 ## Alternatives considered
 

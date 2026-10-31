@@ -42,6 +42,12 @@ playlists; the audio track plays a shorter take inside a longer one. It is writt
 `write_takes_fixture` in `corpus_generate.rs`, named for the release that ships take lanes, and
 goes through the same lossless round trip; its own test checks the stacks and what plays.
 
+The hand-assembled `v0.5.1-pre-take-lanes.transit` (#249) preserves the pre-#25 shape: three
+unnumbered audio laps (the last partial), a later clip on the original playlist, and three MIDI
+laps with different pitches. Each track has only its last lap active on playlist 3. The model
+round trip preserves that shape; engine open migrates it in one undoable step. It is derived
+from the take-lane fixture, with no embedded media or retired instruments.
+
 Files hold the session JSON only, no `Audio Files/`. Nothing here reads audio.
 
 ## Producing a release's files
