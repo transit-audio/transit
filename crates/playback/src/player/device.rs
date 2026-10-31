@@ -599,7 +599,14 @@ impl Player {
     /// Refuse a save until the exact caller snapshot has a confirmed active plan.
     pub fn capture_states(&self, expected: &Arc<Session>) -> Result<PluginStates, PlayerError> {
         let mut owner = self.owner()?;
-        if self.silent { owner.capture_states_with_audio(expected, false) } else { owner.capture_states(expected) }
+        owner.capture_states_with_audio(expected, self.render_callback_runs())
+    }
+    /// Whether a render callback can still answer a callback-owned state read: the silent clock
+    /// renders too, so only a terminal device fault (the stream failed or the endpoint is gone)
+    /// ends it. A reset or stall that is being reopened is not terminal: its state is read within
+    /// the save deadline, and a reader that gets no answer keeps the stored state.
+    fn render_callback_runs(&self) -> bool {
+        !(self.fault.failed.load(Ordering::Acquire) || self.fault.gone.load(Ordering::Acquire))
     }
     /// Whether the audio side plays exactly `expected` (its plan confirmed and rendered). Live
     /// state reads and loads wait for it. It guarantees that the values the document stores were
@@ -613,11 +620,7 @@ impl Player {
     /// fault. None requires an explicit document-only recovery notice to the user.
     pub fn capture_states_for_reopen(&self, expected: &Arc<Session>) -> Result<Option<PluginStates>, PlayerError> {
         let mut owner = self.owner()?;
-        if self.silent || self.fault.failed.load(Ordering::Acquire) || self.reopen_cause().is_some() {
-            owner.capture_states_for_reopen_with_audio(expected, false)
-        } else {
-            owner.capture_states_for_reopen(expected)
-        }
+        owner.capture_states_for_reopen_with_audio(expected, self.render_callback_runs())
     }
     /// The plug-ins the last [`Self::capture_states`] (or reopen capture) left out, issue #56:
     /// their thread was stuck, or held by a modal dialog past the save deadline, so their stored
