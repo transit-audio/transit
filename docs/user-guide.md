@@ -126,13 +126,6 @@ analog stages. Their license notices are in **Help > About transit**.
 - **Pitch bend** spans **Bend Range** semitones (2 by default), **Tune** transposes, and the **mod
   wheel** adds up to 100% to the control **Mod Wheel** names (Timbre by default; Harmonics, Morph or
   Off).
-- **Note to Macro** is a grid: a row for velocity and a row for the key, a column each for
-  Harmonics, Timbre, Morph and Decay. Each depth (-100% to +100%, 0% by default) is how far the
-  source moves that control from its knob: the hardest note adds the whole velocity depth and the
-  softest nothing; middle C (C3) leaves the knob as set, five octaves up adds the whole key depth
-  and five octaves down takes it away. A negative depth works the other way. Each row's curve
-  (Linear, Exponential or S-curve) shapes the source first. Velocity also always sets each note's
-  level. The **Key Tracked Timbre** preset brightens higher notes this way.
 - **Aux Mix** crossfades to the model's auxiliary output, a variation of the sound. **Level** is
   the output level; at 0 dB the instrument peaks at full scale (one LSB, 0.0003 dB, under 0 dBFS),
   and the -6 dB default leaves headroom on the track.
@@ -143,10 +136,50 @@ analog stages. Their license notices are in **Help > About transit**.
   these, still in tune, with their envelopes slightly faster or slower. Changing the model while a note
   sounds can click, as on the original.
 
+### Shaper and modulation matrix
+
+Below the module's own controls, a line labels the **shaper** and the **modulation matrix** as
+transit's addition: they are not part of the original module, and both are off by default (with the
+shaper off and every matrix row Off, the instrument plays exactly as the module does). Click the
+line to show or hide them; they show by themselves while they are in use.
+
+- **Shaper** switches on a section after each voice's low-pass gate, per voice: an **amp envelope**
+  (Attack, Decay, Sustain, Release, and **Velocity**: how much velocity sets the level) that becomes
+  the voice's envelope (the gate stays open and the note ends when the amp envelope's release
+  does), and a **filter** (low, band or high pass; 12 or 24 dB; **Cutoff**, **Resonance**, **Drive**,
+  **Key Track**) with its own envelope (**Env Amount**, up to six octaves, and its ADSR). The
+  filter is the Filter effect's own, one per voice, so a chord's notes each get their own sweep.
+- **LFO 1** and **LFO 2**, per voice: Sine, Triangle, Saw, Square, Sample & hold or Smooth random;
+  a **Rate** or, with **Sync**, a **Division** of the tempo; **Retrigger** (on: each new note starts
+  the cycle; off: notes pick up the instrument's running LFO, so held notes move together);
+  **Fade In** after each note; **Amount**. A synced LFO with Retrigger off follows the song position
+  while the transport plays, so it lines up with the bars wherever playback starts. The envelopes
+  and LFOs run whether or not the shaper is on: they reach the sound through the matrix.
+- The **matrix** has 16 rows, in two columns of eight. Each row has a **Source**, a **Via**, a
+  **Destination**, a **Curve** and an **Amount** (-100% to +100%): every 12 frames, for every voice,
+  it adds amount × curve(source) × via to its destination. Sources: LFO 1 and 2, the amp and filter
+  envelopes, velocity, the key (centered on middle C, C3), release velocity, aftertouch, poly
+  aftertouch, the mod wheel, pitch bend, a random value per note, and the rack's eight macros when
+  the track is in a rack. Destinations, at 100% and a full source: Pitch (24 semitones), Harmonics,
+  Timbre, Morph and Decay (their whole travel), Level (silence to double), Cutoff (six octaves),
+  Resonance, Filter env amount, LFO 1 and 2 rate (four octaves; a synced LFO follows the tempo),
+  LFO 1 and 2 amount, and Pan (left to right). The curve (Linear, Exponential, S-curve, Equal power,
+  Logarithmic: the clip fades' shapes) bends the source the same way on both sides of zero. A via
+  scales the amount by a second source: an LFO 1 to Pitch row with the mod wheel as its via is
+  vibrato that the wheel brings in.
+- Sessions and presets saved before the matrix had a **Note to Macro** grid (velocity and key
+  depths with a curve each); they open with those depths as the first matrix rows (Velocity or Key
+  to Harmonics, Timbre, Morph or Decay) and sound exactly as before. The **Key Tracked Timbre**
+  preset is one such row: Key to Timbre at +50%.
+
+Ableton's Wavetable and Logic's ES2 and Alchemy route modulation through a matrix too; the via is
+Alchemy's idea.
+
 Every control can be automated (lanes `plugin:instrument:<id>`, for example
-`plugin:instrument:timbre`) and mapped to a MIDI controller (right-click it). Presets: Init, Analog
-Bass (mono), Glass Bell, Plucked String, Key Tracked Timbre, and your own from the panel's preset
-menu. The panel opens in a window inside transit's main window, so it minimizes and returns with it.
+`plugin:instrument:timbre`, or `plugin:instrument:mod1_amount` for the first matrix row's amount)
+and mapped to a MIDI controller (right-click it). Presets: Init, Analog Bass (mono), Glass Bell,
+Plucked String, Key Tracked Timbre, and your own from the panel's preset menu. The panel opens in a
+window inside transit's main window, so it minimizes and returns with it.
 
 ## Filter
 
