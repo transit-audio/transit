@@ -814,7 +814,12 @@ fn key_control(
     c.key_button = r4(kb);
     c.key_label = label;
     crate::help::hover(ui, &resp, crate::help::Id::DeviceChainSidechain);
-    let resp = resp.on_hover_text("Sidechain key: detect on another track or bus instead of this track");
+    let tip = if plugin == crate::modulator_panel::CROSS_MODULATOR {
+        "Sidechain key: the carrier this track is combined with (another track or bus)"
+    } else {
+        "Sidechain key: detect on another track or bus instead of this track"
+    };
+    let resp = resp.on_hover_text(tip);
     let current = ins.key;
     let pre = current.map_or(app.mixer.key_pre, |k| k.tap == Tap::Pre);
     let (tracks, busses) = key_sources(&s, t);

@@ -95,6 +95,9 @@ fn the_help_menu_opens_about_with_wordmark_version_and_credit() {
     // #199: the Time Stretcher insert's credit and notices.
     assert!(crate::about::THIRD_PARTY.contains("Time Stretcher: a port of Émilie Gillet's texture processor firmware"));
     assert!(notices.contains("Third-party licenses: transit-granular") && notices.contains("Copyright 2014 Emilie Gillet"));
+    // #200: the Cross Modulator's credit and notices.
+    assert!(crate::about::THIRD_PARTY.contains("Cross Modulator: a port of Émilie Gillet's meta-modulator firmware"));
+    assert!(notices.contains("Third-party licenses: transit-modulator") && notices.contains("Copyright 2014 Emilie Gillet"));
     let w = rect(&about["wordmark"]);
     assert!((w[2] - w[0] - 260.0).abs() < 1.5, "260 points wide: {w:?}");
     assert!(((w[2] - w[0]) / (w[3] - w[1]) - 3.0).abs() < 0.05, "3:1, never stretched");

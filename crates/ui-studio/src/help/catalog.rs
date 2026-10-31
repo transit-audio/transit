@@ -20,6 +20,7 @@ const FILES: &[&str] = &[
     include_str!("../../../../docs/help/macro-osc.toml"),
     include_str!("../../../../docs/help/texture.toml"),
     include_str!("../../../../docs/help/time-stretcher.toml"),
+    include_str!("../../../../docs/help/cross-modulator.toml"),
     include_str!("../../../../docs/help/telemetry.toml"),
     include_str!("../../../../docs/help/audio-devices.toml"),
     include_str!("../../../../docs/help/midi-monitor.toml"),

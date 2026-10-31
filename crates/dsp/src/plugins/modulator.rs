@@ -4,9 +4,9 @@
 //!
 //! **Inputs.** The firmware combines a carrier (its input 1) with a modulator (its input 2). The
 //! track is the modulator and the sidechain key is the carrier: pick the key in the insert's key
-//! picker (the compressor's route, ADR 0024). With no key set, the firmware's internal oscillator is
-//! the carrier, as on the module with nothing patched into input 1 and the oscillator on (`Osc
-//! Shape`, `Osc Frequency`). `Carrier: Oscillator` keeps the oscillator with a key set, the key then
+//! picker (the compressor's route, ADR 0015 section 4). With no key set, the firmware's internal
+//! oscillator is the carrier, as on the module with nothing patched into input 1 and the oscillator
+//! on (`Osc Shape`, `Osc Frequency`). `Carrier: Oscillator` keeps the oscillator with a key set, the key then
 //! modulating its phase (sine) or frequency (triangle, saw), as input 1 does on the module. `Swap
 //! Inputs` makes the key the modulator and the track the carrier (or the oscillator's modulation).
 //! The vocoder's convention is the same: the modulator (a voice) shapes the carrier's spectrum

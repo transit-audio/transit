@@ -66,7 +66,7 @@ text = "Reshapes how hard notes are played: Scale multiplies the velocity (100 %
 [[entry]]
 id = "device_chain.sidechain"
 name = "Sidechain key"
-text = "Makes a compressor or gate listen to another track or bus instead of this one, for example to duck a pad under a kick."
+text = "Makes a compressor or gate listen to another track or bus instead of this one, for example to duck a pad under a kick. On the Cross Modulator the key is the second signal it combines with this track: the carrier."
 
 [[entry]]
 id = "device_chain.rack_macro"

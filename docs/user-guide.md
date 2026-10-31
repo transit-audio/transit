@@ -334,6 +334,36 @@ Quality restarts the firmware: the output fades out over 10 ms, the recording st
 fades back in. The recording is not saved with the session. Every control can be automated and
 mapped to a MIDI controller. Presets: Octave Shimmer, Sub Doubler, Stretch Pad, and your own.
 
+## Cross Modulator
+
+The Cross Modulator is a built-in insert effect that combines two signals: this track (the
+modulator) and a carrier, which is the sidechain key you pick in its key picker (the same route the
+compressor uses), or, with no key set, its own oscillator. It is a port of Émilie Gillet's
+open-source meta-modulator firmware (MIT), checked bit for bit against her code
+([ADR 0033](adr/0033-built-in-instruments-mutable-instruments-port.md)).
+
+- **Algorithm** (0 to 8) chooses how they combine: 0 Crossfade, 1 Cross-fold (their sum and product
+  through a wavefolder), 2 Diode Ring (an analog ring modulator), 3 Digital Ring, 4 XOR (the two as
+  16-bit words, bit by bit), 5 Comparator; between two positions the sound morphs from one to the
+  next. Past 5 it crossfades into a 20-band **Vocoder**: this track's band envelopes shape the
+  carrier's spectrum, and from 6 to 8 the release grows until the bands freeze. The line under the
+  panel names where the knob sits. **Timbre** is the algorithm's own control (the vocoder's formant
+  shift).
+- **Carrier** and **Modulator** set the two inputs' levels into a soft saturator. **Carrier**: Auto
+  takes the key when one is set, else the oscillator; Oscillator always takes the oscillator, the
+  key then moving its pitch or phase. **Swap** makes the key the modulator and this track the
+  carrier (for example, put it on a synth and key it from a voice to vocode the synth).
+- **Oscillator**: **Shape** (Sine, Triangle, Saw for the algorithms; sawtooth, pulse and noise for
+  the vocoder) and **Frequency** (65 Hz to 2.09 kHz).
+- **Dry/Wet** and **Output**.
+
+A stereo track runs two firmware instances, left with the key's left and right with its right. The
+firmware runs at 96 kHz; the device converts from the session rate and back at its edges (the
+Texture's converters), so the oscillator's pitch and the vocoder's bands are the module's at any
+session rate. The delay (59 samples at 96 kHz, 97 at 44.1 kHz, 99 at 48 kHz) goes to delay
+compensation. Every control can be automated and mapped to a MIDI controller. Presets: Ring Bell,
+Vocoder, XOR Grit, and your own.
+
 ## Retired built-in effects
 
 transit retires the effects it inherited from the SoundCraft fork in stages

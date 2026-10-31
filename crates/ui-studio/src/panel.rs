@@ -282,6 +282,9 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
     if plugin == crate::time_stretcher_panel::TIME_STRETCHER {
         return crate::time_stretcher_panel::help(param);
     }
+    if plugin == crate::modulator_panel::CROSS_MODULATOR {
+        return crate::modulator_panel::help(param);
+    }
     if plugin != MACRO_OSC {
         return None;
     }
@@ -354,6 +357,7 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         FILTER => Some(&FILTER_LAYOUT),
         crate::texture_panel::TEXTURE => Some(&crate::texture_panel::LAYOUT),
         crate::time_stretcher_panel::TIME_STRETCHER => Some(&crate::time_stretcher_panel::LAYOUT),
+        crate::modulator_panel::CROSS_MODULATOR => Some(&crate::modulator_panel::LAYOUT),
         _ => None,
     }
 }
@@ -389,6 +393,15 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
         let r = ui.label(RichText::new(crate::time_stretcher_panel::CREDIT).size(10.5).color(TOKENS.text_dim));
         crate::help::hover(ui, &r, crate::help::Id::TimeStretcherCredits);
         lay.credit = crate::time_stretcher_panel::CREDIT.to_string();
+    }
+    if info.id == crate::modulator_panel::CROSS_MODULATOR {
+        let v = app.followed_param(key, "algorithm").or_else(|| ins.params.get("algorithm").copied());
+        let v = info.param("algorithm").map_or(0.0, |p| p.clamp(v.unwrap_or(p.default)));
+        let r = ui.label(RichText::new(crate::modulator_panel::algorithm_line(v)).size(11.5).color(TOKENS.text));
+        crate::help::hover(ui, &r, crate::help::Id::CrossModulatorAlgorithm);
+        let r = ui.label(RichText::new(crate::modulator_panel::CREDIT).size(10.5).color(TOKENS.text_dim));
+        crate::help::hover(ui, &r, crate::help::Id::CrossModulatorCredits);
+        lay.credit = crate::modulator_panel::CREDIT.to_string();
     }
 }
 
@@ -617,6 +630,7 @@ mod tests {
             FILTER,
             crate::texture_panel::TEXTURE,
             crate::time_stretcher_panel::TIME_STRETCHER,
+            crate::modulator_panel::CROSS_MODULATOR,
         ] {
             let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
             let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).flat_map(|i| item_ids(*i)).collect();
@@ -646,6 +660,13 @@ mod tests {
     fn every_time_stretcher_control_has_a_help_entry() {
         for p in transit_dsp::plugin_info(crate::time_stretcher_panel::TIME_STRETCHER).unwrap().params {
             assert!(help(crate::time_stretcher_panel::TIME_STRETCHER, p.id).is_some(), "{}", p.id);
+        }
+    }
+
+    #[test]
+    fn every_cross_modulator_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::modulator_panel::CROSS_MODULATOR).unwrap().params {
+            assert!(help(crate::modulator_panel::CROSS_MODULATOR, p.id).is_some(), "{}", p.id);
         }
     }
 

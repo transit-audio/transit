@@ -1,0 +1,12 @@
+{
+  "plugin": "cross_modulator",
+  "version": 1,
+  "params": {
+    "algorithm": 2.0,
+    "timbre": 45.0,
+    "modulator_level": 80.0,
+    "shape": 0.0,
+    "frequency": 440.0,
+    "dry_wet": 100.0
+  }
+}

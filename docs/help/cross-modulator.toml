@@ -1,0 +1,59 @@
+# The Cross Modulator's panel (the built-in insert effect, #200, ADR 0033).
+area = "cross-modulator"
+title = "Cross Modulator"
+link = "user-guide.md#cross-modulator"
+
+[[entry]]
+id = "cross_modulator.algorithm"
+name = "Algorithm"
+text = "How the two signals combine: 0 Crossfade, 1 Cross-fold (their sum and product through a wavefolder), 2 Diode Ring (an analog ring modulator), 3 Digital Ring (their product), 4 XOR (the two as 16-bit words, bit by bit), 5 Comparator. Between two positions the sound morphs from one to the next. Past 5 it crossfades through the dry modulator into the Vocoder (from about 5.8), whose release grows from 6 up to a freeze of the bands near 8. The line under the panel names where the knob sits."
+
+[[entry]]
+id = "cross_modulator.timbre"
+name = "Timbre"
+text = "The algorithm's own control: the crossfade's position (0% the carrier, 100% this track), the fold's depth, the ring modulators' drive, the XOR's amount, which comparison the comparator makes. In the vocoder it shifts the formants: at 50% each band of the carrier follows the same band of this track; toward 0% it follows a higher band (the formants move down), toward 100% a lower one (they move up), and more smoothly."
+
+[[entry]]
+id = "cross_modulator.carrier_level"
+name = "Carrier Level"
+text = "The level of the carrier (the sidechain key) into the effect, through a soft saturator that clips harder as it goes up. Unused while the internal oscillator is the carrier."
+
+[[entry]]
+id = "cross_modulator.modulator_level"
+name = "Modulator Level"
+text = "The level of the modulator (this track) into the effect, through the same saturator. Below about -40 dB a gate closes the input."
+
+[[entry]]
+id = "cross_modulator.carrier"
+name = "Carrier"
+text = "Which signal carries. Auto: the sidechain key when one is set in the key picker, else the internal oscillator. Oscillator: always the internal oscillator; a key, if set, then moves the oscillator's phase (the sine) or frequency (triangle and saw), as the module's first input does."
+
+[[entry]]
+id = "cross_modulator.shape"
+name = "Osc Shape"
+text = "The internal oscillator's waveform: Sine, Triangle or Saw for the algorithms; for the vocoder the same three positions give a sawtooth, a pulse and filtered noise."
+
+[[entry]]
+id = "cross_modulator.frequency"
+name = "Osc Frequency"
+text = "The internal oscillator's pitch, 65 Hz (C2) to 2.09 kHz (C7), the same at every session rate."
+
+[[entry]]
+id = "cross_modulator.swap"
+name = "Swap Inputs"
+text = "With a key set, makes the key the modulator and this track the carrier: for example, put the Cross Modulator on a synth track and key it from a voice to vocode the synth. Without a key it does nothing."
+
+[[entry]]
+id = "cross_modulator.dry_wet"
+name = "Dry/Wet"
+text = "The mix of this track as it came in (delayed to line up) and the effect's output."
+
+[[entry]]
+id = "cross_modulator.output"
+name = "Output"
+text = "The output level, -24 to +12 dB."
+
+[[entry]]
+id = "cross_modulator.credits"
+name = "Credits"
+text = "The Cross Modulator is a port of Émilie Gillet's open-source meta-modulator firmware (MIT license), checked bit for bit against her code. The notices are in Help > About transit."

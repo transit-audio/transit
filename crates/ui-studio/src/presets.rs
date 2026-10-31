@@ -60,6 +60,9 @@ pub static FACTORY: &[(&str, &str, &str)] = factory![
     "time_stretcher" / "Octave Shimmer",
     "time_stretcher" / "Sub Doubler",
     "time_stretcher" / "Stretch Pad",
+    "cross_modulator" / "Ring Bell",
+    "cross_modulator" / "Vocoder",
+    "cross_modulator" / "XOR Grit",
 ];
 
 /// The factory presets of one plug-in, in table order.

@@ -261,6 +261,18 @@ ids! {
     TimeStretcherQuality => "time_stretcher.quality",
     TimeStretcherInputLevel => "time_stretcher.input_level",
     TimeStretcherCredits => "time_stretcher.credits",
+    // help\cross-modulator.toml
+    CrossModulatorAlgorithm => "cross_modulator.algorithm",
+    CrossModulatorTimbre => "cross_modulator.timbre",
+    CrossModulatorCarrierLevel => "cross_modulator.carrier_level",
+    CrossModulatorModulatorLevel => "cross_modulator.modulator_level",
+    CrossModulatorCarrier => "cross_modulator.carrier",
+    CrossModulatorShape => "cross_modulator.shape",
+    CrossModulatorFrequency => "cross_modulator.frequency",
+    CrossModulatorSwap => "cross_modulator.swap",
+    CrossModulatorDryWet => "cross_modulator.dry_wet",
+    CrossModulatorOutput => "cross_modulator.output",
+    CrossModulatorCredits => "cross_modulator.credits",
     // help\transport.toml
     TransportRtz => "transport.rtz",
     TransportStop => "transport.stop",

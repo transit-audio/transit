@@ -50,13 +50,22 @@ her C++ with no third-party Rust code in between. Her MIT notices are in
 `crates/texture/LICENSE-THIRD-PARTY` (provenance in `crates/texture/VENDOR.md`); the Texture's panel,
 its help entry and Help > About transit credit her, and the About window shows the notices.
 
+The meta-modulator (`crates/modulator`, #200; linked into the app through `transit-dsp` as the
+Cross Modulator insert effect) is a Rust port of Émilie Gillet's meta-modulator firmware
+(`warps/dsp` and `warps/resources.cc` in `eurorack`) and the stmlib helpers it uses, written by
+transit from her C++ with no third-party Rust code in between. Her MIT notices are in
+`crates/modulator/LICENSE-THIRD-PARTY` (provenance in `crates/modulator/VENDOR.md`); the Cross
+Modulator's panel, its help entry and Help > About transit credit her, and the About window shows
+the notices.
+
 | Path | Author | Source | License |
 |---|---|---|---|
 | `crates/macro-osc/src/` | Émilie Gillet (firmware and stmlib); Oliver Rockstedt (Rust port); transit contributors (corrections) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c`, https://github.com/sourcebox/mi-plaits-dsp-rs `effe9864bb` | MIT (`crates/macro-osc/LICENSE-THIRD-PARTY`); transit's changes MIT OR Apache-2.0 |
 | `crates/resonator/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/resonator/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
 | `crates/granular/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/granular/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
 | `crates/texture/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `f4cfa769`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/texture/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
-| `crates/macro-osc-oracle/vendor/` | Émilie Gillet | the firmware's C++ (the macro oscillator, the resonator, the granular texture processor and the texture synthesizer), for the null tests only (never linked into the app) | MIT (`crates/macro-osc-oracle/LICENSE-THIRD-PARTY`) |
+| `crates/modulator/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/modulator/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
+| `crates/macro-osc-oracle/vendor/` | Émilie Gillet | the firmware's C++ (the macro oscillator, the resonator, the granular texture processor, the texture synthesizer and the meta-modulator), for the null tests only (never linked into the app) | MIT (`crates/macro-osc-oracle/LICENSE-THIRD-PARTY`) |
 
 ## Fonts
 
