@@ -7,8 +7,6 @@
 //! merged while the pointer is held so a drag is one undo step. Double-clicking a control resets
 //! it to its default. The window is keyed by `Insert.uid`, so it follows its insert when the
 //! chain is reordered (the `plugin_windows` entry follows too, see `StudioApp::reorder_device`).
-//! Parameters of a plug-in that groups them per pad (the Drum Synth) are listed under a heading
-//! for each pad.
 
 use crate::StudioApp;
 use crate::theme::TOKENS;
@@ -18,15 +16,11 @@ use transit_dsp::{ParamInfo, PluginInfo, Taper, Unit};
 use transit_model::{Insert, TrackId};
 
 const SAMPLER: &str = "sampler";
-const DRUM_SYNTH: &str = "drum_synth";
 /// Sampler parameters that are MIDI notes, and the ones that are whole numbers besides.
 const NOTE_PARAMS: [&str; 3] = ["root_note", "key_low", "key_high"];
 const WHOLE_PARAMS: [&str; 2] = ["vel_low", "vel_high"];
 /// What the sample picker offers and a dropped file may be.
 const AUDIO_EXTS: &[&str] = &["wav", "wave", "bwf", "aif", "aiff", "aifc", "flac", "mp3", "ogg", "oga", "m4a", "aac", "mp4", "caf"];
-/// The Drum Synth's pads, in the order their parameters are listed (a parameter's id starts with its pad).
-const PADS: [(&str, &str); 6] =
-    [("kick", "Kick"), ("snare", "Snare"), ("open_hat", "Open Hat"), ("hat", "Closed Hat"), ("tom", "Toms"), ("cymbal", "Cymbals")];
 
 /// One parameter row as last drawn.
 #[derive(Debug, Clone)]
@@ -59,7 +53,6 @@ pub struct EditorLayout {
     pub gr: String,
     pub picker: [f32; 4],
     pub sample: String,
-    pub groups: Vec<String>,
     pub rows: Vec<RowLayout>,
     /// The credit line of a ported instrument's panel (the Macro Oscillator), empty elsewhere.
     pub credit: String,
@@ -105,14 +98,6 @@ fn format_param(plugin: &str, p: &ParamInfo, value: f32) -> String {
         return format!("{:.0}", value.round());
     }
     p.format(value)
-}
-
-/// The heading a parameter is listed under, if its plug-in groups parameters.
-fn group_of(plugin: &str, param: &str) -> Option<&'static str> {
-    if plugin != DRUM_SYNTH {
-        return None;
-    }
-    Some(PADS.iter().find(|(prefix, _)| param.strip_prefix(prefix).is_some_and(|rest| rest.starts_with('_'))).map_or("Output", |(_, name)| name))
 }
 
 fn is_audio_name(name: &str) -> bool {
@@ -177,7 +162,6 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             gr: String::new(),
             picker: [0.0; 4],
             sample: String::new(),
-            groups: Vec::new(),
             rows: Vec::new(),
             credit: String::new(),
             addition: String::new(),
@@ -260,16 +244,7 @@ fn body(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     egui::ScrollArea::vertical().max_height(480.0).show(ui, |ui| {
         ui.spacing_mut().slider_width = 170.0;
         egui::Grid::new(("builtin_params", ins.uid.get())).num_columns(3).spacing([8.0, 4.0]).show(ui, |ui| {
-            let mut group: Option<&str> = None;
             for p in info.params {
-                if let Some(g) = group_of(&ins.plugin, p.id).filter(|g| group != Some(*g)) {
-                    group = Some(g);
-                    lay.groups.push(g.to_string());
-                    ui.label(RichText::new(g).strong().color(TOKENS.text));
-                    ui.label("");
-                    ui.label("");
-                    ui.end_row();
-                }
                 param_row(app, ui, key, ins, p, lay);
                 ui.end_row();
             }

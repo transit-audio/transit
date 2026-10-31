@@ -153,22 +153,6 @@ impl DelayLine {
         let b = self.tap(i + 1);
         a + (b - a) * f
     }
-
-    /// Cubic (Hermite) interpolated read, for modulated delays.
-    #[inline]
-    pub(crate) fn read_cubic(&self, d: f32) -> f32 {
-        let d = if d.is_finite() { d.clamp(2.0, (self.max_delay() - 1.0).max(2.0)) } else { 2.0 };
-        let i = d as usize;
-        let f = d - i as f32;
-        let xm1 = self.tap(i - 1);
-        let x0 = self.tap(i);
-        let x1 = self.tap(i + 1);
-        let x2 = self.tap(i + 2);
-        let c1 = 0.5 * (x1 - xm1);
-        let c2 = xm1 - 2.5 * x0 + 2.0 * x1 - 0.5 * x2;
-        let c3 = 0.5 * (x2 - xm1) + 1.5 * (x0 - x1);
-        ((c3 * f + c2) * f + c1) * f + x0
-    }
 }
 
 /// Xorshift32 noise source (deterministic, allocation free).
@@ -220,38 +204,6 @@ impl PinkNoise {
         let out = b[0] + b[1] + b[2] + b[3] + b[4] + b[5] + b[6] + white * 0.5362;
         b[6] = white * 0.115926;
         out * 0.11
-    }
-}
-
-/// Sine LFO with phase in 0..1.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Lfo {
-    phase: f32,
-}
-
-impl Lfo {
-    pub(crate) fn new() -> Self {
-        Self { phase: 0.0 }
-    }
-
-    pub(crate) fn reset(&mut self) {
-        self.phase = 0.0;
-    }
-
-    /// Advances by `inc` cycles and returns sin at `offset` cycles ahead (for stereo spread).
-    #[inline]
-    pub(crate) fn tick(&mut self, inc: f32) -> f32 {
-        let inc = if inc.is_finite() { inc.clamp(0.0, 0.5) } else { 0.0 };
-        self.phase += inc;
-        if self.phase >= 1.0 {
-            self.phase -= 1.0;
-        }
-        self.phase
-    }
-
-    #[inline]
-    pub(crate) fn sin_at(phase: f32) -> f32 {
-        (phase * TAU).sin()
     }
 }
 

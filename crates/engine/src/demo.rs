@@ -294,7 +294,7 @@ pub fn demo_session() -> Session {
         tr.mixer.inserts[1] = Some(insert("saturator"));
     }
     if let Some(tr) = s.track_mut(tp) {
-        tr.mixer.inserts[0] = Some(insert("chorus"));
+        tr.mixer.inserts[0] = Some(insert("filter"));
         // Pad swells in with volume automation.
         let l = tr.lane_mut(&transit_model::AutoParam::Volume);
         l.set_point(0, -30.0);
@@ -304,7 +304,11 @@ pub fn demo_session() -> Session {
     }
     let m = s.add_track(TrackKind::Master, ChannelFormat::Stereo, Some("Master"));
     if let Some(tr) = s.track_mut(m) {
-        tr.mixer.inserts[0] = Some(insert("maximizer"));
+        // A limiter on the master: the compressor in limiter mode, threshold just under full scale.
+        let mut limiter = insert("compressor");
+        limiter.params.insert("limiter".into(), 1.0);
+        limiter.params.insert("threshold".into(), -1.0);
+        tr.mixer.inserts[0] = Some(limiter);
     }
     // Markers.
     for (name, at) in [("Intro", 1i64), ("Verse", 5), ("Chorus", 13), ("Outro", 21)] {

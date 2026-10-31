@@ -1,7 +1,6 @@
 //! The built-in plugins and their registry.
 
 mod codec_path;
-pub mod drums;
 pub mod dynamics;
 pub mod eq;
 pub mod filter;
@@ -9,12 +8,9 @@ pub mod harmonic;
 pub mod instrument_queue;
 pub mod lfo;
 pub mod macro_osc;
-pub mod modulation;
-pub mod pitch;
 mod resample;
 pub mod reverb;
 pub mod sampler;
-pub mod strip;
 pub mod texture;
 pub mod time_stretcher;
 pub mod utility;
@@ -41,29 +37,17 @@ registry! {
     filter::FILTER_INFO => filter::Filter::new(),
     dynamics::COMP_INFO => dynamics::Compressor::new(),
     dynamics::GATE_INFO => dynamics::ExpanderGate::new(),
-    dynamics::DEESS_INFO => dynamics::DeEsser::new(),
-    dynamics::MAX_INFO => dynamics::Maximizer::new(),
-    strip::STRIP_INFO => strip::ChannelStrip::new(),
     reverb::ROOM_INFO => reverb::Reverb::room(),
     reverb::PLATE_INFO => reverb::Reverb::plate(),
-    modulation::DELAY_INFO => modulation::ModDelay::new(),
-    modulation::CHORUS_INFO => modulation::ModFx::chorus(),
-    modulation::FLANGER_INFO => modulation::ModFx::flanger(),
-    modulation::PHASER_INFO => modulation::Phaser::new(),
     harmonic::SAT_INFO => harmonic::Saturator::new(),
-    harmonic::LOFI_INFO => harmonic::LoFi::new(),
-    harmonic::RECT_INFO => harmonic::Rectifier::new(),
-    pitch::PITCH_INFO => pitch::PitchShifter::new(),
     texture::TEXTURE_INFO => texture::TextureFx::new(),
     time_stretcher::TIME_STRETCHER_INFO => time_stretcher::TimeStretcher::new(),
-    utility::SHIFT_INFO => utility::TimeShift::new(),
     utility::GAIN_INFO => utility::Gain::new(),
     utility::TRIM_INFO => utility::Trim::new(),
     utility::INVERT_INFO => utility::Invert::default(),
     utility::DC_INFO => utility::DcRemoval::new(),
     utility::GEN_INFO => utility::SignalGenerator::new(),
     utility::DITHER_INFO => utility::Dither::new(),
-    drums::DRUM_INFO => drums::DrumSynth::new(),
     sampler::SAMPLER_INFO => sampler::Sampler::new(),
     macro_osc::MACRO_OSC_INFO => macro_osc::MacroOscillator::new(),
 }
