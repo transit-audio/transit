@@ -63,6 +63,7 @@ pub mod scope_strip;
 pub mod shortcuts;
 pub mod splash;
 mod status;
+mod takes;
 pub mod telemetry;
 pub mod tempo_edit;
 pub mod theme;
@@ -292,8 +293,8 @@ pub enum Dialog {
     DeleteTracks { tracks: Vec<TrackId>, clips: bool },
     /// File > Bounce: its form, then its progress (slice 6, `finish`).
     Bounce,
-    /// Delete one of a track's two takes (slice 6): the take lane's Delete asks first.
-    DeleteTake { track: TrackId, index: usize },
+    /// Delete a take (#25): the take lane menu's Delete Take asks first.
+    DeleteTake { track: TrackId, take: u32 },
 }
 
 /// An editor asked for (by `ui.set` or a menu) and not open yet: retried until the plug-in is

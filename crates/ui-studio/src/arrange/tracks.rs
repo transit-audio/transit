@@ -142,6 +142,7 @@ pub(super) fn track_header(
     }
     row.automation = r4(b);
     row.automation_shown = shown;
+    let stacked = t.playlists.len() > 1 && !t.take_stacks().is_empty();
     // Volume readout: drag sideways to change, double-click for 0 dB.
     let vol = Rect::from_min_size(pos2(r.max.x - 72.0, r.min.y + 23.0), vec2(66.0, 15.0));
     row.volume = r4(vol);
@@ -193,6 +194,29 @@ pub(super) fn track_header(
         }
         row.freeze_button = r4(b);
     }
+    // Take lanes (#25): T, left of the freeze button, shows or hides the lanes of a track with
+    // stacked takes (view state; Live's Show Take Lanes, Logic's take folder disclosure).
+    if stacked {
+        let frozen_button = if matches!(t.kind, TrackKind::Audio | TrackKind::Instrument) { 24.0 } else { 0.0 };
+        let shown = app.ui.takes_open.contains(&t.id);
+        let b = Rect::from_min_size(pos2(vol.min.x - frozen_button - 24.0, r.min.y + 22.0), vec2(19.0, 16.0));
+        let resp = ui.interact(b.intersect(list), ui.id().with(("takes_toggle", t.id.0)), Sense::click());
+        crate::help::hover(ui, &resp, crate::help::Id::ArrangeHeaderTakes);
+        let fill = if shown {
+            TOKENS.accent
+        } else if resp.hovered() {
+            TOKENS.button_hover
+        } else {
+            TOKENS.button
+        };
+        p.rect_filled(b, crate::theme::RADIUS_SM, fill);
+        p.text(b.center(), Align2::CENTER_CENTER, "T", FontId::proportional(11.0), if shown { theme::text_on(TOKENS.accent) } else { TOKENS.text });
+        if resp.on_hover_text(if shown { "Hide take lanes" } else { "Show take lanes" }).clicked() {
+            app.toggle_takes(t.id);
+        }
+        row.takes = r4(b);
+        row.takes_shown = shown;
+    }
     // Meter: a thin bar at the right edge.
     if let Some(d) = app.meters.get(&t.id) {
         let lvl = d.level[0].max(d.level[1]).clamp(0.0, 1.0);
@@ -208,7 +232,8 @@ pub(super) fn track_header(
     // Interacted after the name area so the chip wins where they overlap.
     let chip = outputs.and_then(|view| {
         let frozen_button = if matches!(t.kind, TrackKind::Audio | TrackKind::Instrument) { 24.0 } else { 0.0 };
-        midi_output_chip(app, ui, &p, t, view, subtitle, vol.min.x - frozen_button, list)
+        let takes_button = if stacked { 24.0 } else { 0.0 };
+        midi_output_chip(app, ui, &p, t, view, subtitle, vol.min.x - frozen_button - takes_button, list)
     });
     if resp.clicked() {
         let m = ui.input(|i| i.modifiers);
@@ -376,6 +401,18 @@ fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: TrackKind, ha
     }
     if kind == TrackKind::Audio {
         width_item(app, ui, id);
+    }
+    // Take lanes (#25): shown while the track has stacked takes.
+    if app.engine.session().track(id).is_some_and(|t| t.playlists.len() > 1 && !t.take_stacks().is_empty()) {
+        let label = if app.ui.takes_open.contains(&id) { "Hide Take Lanes" } else { "Show Take Lanes" };
+        let b = ui.button(label);
+        app.arrange.menu.push(crate::mixer::MenuItem::at(ui, label.into(), String::new(), b.rect));
+        if b.clicked() {
+            app.toggle_takes(id);
+            ui.close();
+        }
+        super::take_lanes::flatten_item(app, ui, id, None);
+        ui.separator();
     }
     if matches!(kind, TrackKind::Audio | TrackKind::Instrument) {
         let frozen = app.engine.session().track(id).is_some_and(|t| t.freeze.is_some());

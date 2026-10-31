@@ -7,8 +7,11 @@ mod clips;
 mod copy_drag;
 mod drag_ghosts;
 pub(crate) mod marquee;
+mod take_lanes;
 mod tracks;
 pub(crate) use clips::*;
+use take_lanes::takes;
+pub(crate) use take_lanes::takes_shown;
 pub(crate) use tracks::*;
 
 use crate::StudioApp;
@@ -162,6 +165,9 @@ pub struct TrackRow {
     /// Slice 7: the A toggle (show the track's automation lanes) and whether they are shown.
     pub automation: R4,
     pub automation_shown: bool,
+    /// The take lanes button (#25), drawn while the track has stacked takes; zero otherwise.
+    pub takes: R4,
+    pub takes_shown: bool,
     /// The track is frozen: its lane is tinted cold; the snowflake button unfreezes it.
     pub frozen: bool,
     pub freeze_button: R4,
@@ -279,7 +285,7 @@ impl Map {
     }
 }
 
-/// Height of one take lane (slice 6).
+/// Height of one take lane (slice 6, #25).
 pub const TAKE_H: f32 = 22.0;
 
 /// Row geometry: each row's top (content coordinates, before scrolling) and full height. A row is
@@ -313,11 +319,6 @@ impl RowGeo {
         }
         (0..self.tops.len()).find(|i| y >= self.tops[*i] && y < self.tops[*i] + self.heights[*i])
     }
-}
-
-/// How many take lanes a track shows: all its playlists when it has several and they are open.
-pub(crate) fn takes_shown(app: &StudioApp, t: &Track) -> usize {
-    if t.playlists.len() > 1 && app.ui.takes_open.contains(&t.id) { t.playlists.len() } else { 0 }
 }
 
 /// A row in the track list: not hidden, and not in a collapsed group (view state, slice 2c).
@@ -356,6 +357,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     let geo = RowGeo::new(app, &rows, rh);
     let content_h = geo.total() + ADD_STACK_H;
     app.finish.layout.takes.clear();
+    app.finish.layout.take_clips.clear();
     app.finish.layout.chips.clear();
     app.arrange.vscroll = app.arrange.vscroll.clamp(0.0, (content_h - tl.height()).max(0.0));
     let mut layout = Layout {
@@ -783,6 +785,12 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
                     ui.close();
                 }
             }
+            // A clip in a take stack (#25): flatten that stack.
+            if let Some((t, _)) = s.find_clip(clip)
+                && let Some((stack, _)) = s.track(t).and_then(|tr| tr.take_stack_of(clip))
+            {
+                take_lanes::flatten_item(app, ui, t, Some(stack));
+            }
             ui.separator();
         }
         if ui.button("Add Mono Audio Track").clicked() {
@@ -1123,129 +1131,5 @@ fn follow_playhead(app: &mut StudioApp, map: Map, tl: Rect) {
     if x > tl.max.x - 8.0 || x < tl.min.x {
         let to = app.engine.transport.position - (f64::from(tl.width()) * map.spp * 0.05) as Samples;
         let _ = app.engine.execute("view.scroll", &json!({"to": to.max(0)}));
-    }
-}
-
-/// Slice 6: a chip on each clip that other takes overlap ("2 takes", click to show or hide the
-/// track's take lanes), and the take lanes of tracks whose takes are shown: one lane per playlist
-/// with its clips as bars (click: that take plays), and in the track list its label with Promote
-/// (keep only this take) and Delete. Drawn after the timeline's input, so these take the clicks.
-#[allow(clippy::too_many_arguments)]
-fn takes(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: Rect, list: Rect, rows: &[&Track], geo: &RowGeo, layout: &Layout) {
-    let _ = s;
-    for (i, t) in rows.iter().enumerate() {
-        if t.playlists.len() < 2 {
-            continue;
-        }
-        let y0 = tl.min.y + geo.tops[i] - app.arrange.vscroll;
-        let open = app.ui.takes_open.contains(&t.id);
-        for c in t.clips() {
-            let others = t
-                .playlists
-                .iter()
-                .enumerate()
-                .filter(|(k, pl)| *k != t.active_playlist && pl.clips.iter().any(|o| o.start < c.end() && o.end() > c.start))
-                .count();
-            let Some(cr) = layout.clips.iter().find(|r| r.id == c.id.0).map(|r| r.rect) else { continue };
-            let wide = cr[2] - cr[0] >= 64.0 + 8.0;
-            if others == 0 {
-                continue;
-            }
-            // Wide clips get the "2 takes" chip at their right end; narrower ones a 10 px glyph at
-            // their left edge, so the lanes stay reachable at any zoom.
-            let chip = if wide {
-                Rect::from_min_max(pos2(cr[2] - 64.0 - 2.0, cr[1] + 1.5), pos2(cr[2] - 2.0, cr[1] + CLIP_NAME_H - 0.5))
-            } else {
-                Rect::from_min_max(pos2(cr[0].max(tl.min.x) + 1.0, cr[1] + 1.5), pos2(cr[0].max(tl.min.x) + 11.0, cr[1] + CLIP_NAME_H - 0.5))
-            };
-            if !tl.intersects(chip) {
-                continue;
-            }
-            let resp = ui.interact(chip.intersect(tl), ui.id().with(("take_chip", c.id.0)), Sense::click());
-            let p = ui.painter().with_clip_rect(tl);
-            p.rect_filled(chip, crate::theme::RADIUS_SM, if resp.hovered() { TOKENS.button_hover } else { TOKENS.button });
-            let icon = if open { crate::icons::Icon::ChevronDown } else { crate::icons::Icon::ChevronRight };
-            if wide {
-                crate::icons::paint(&p, pos2(chip.min.x + 8.0, chip.center().y), icon, 12.0, TOKENS.text);
-                p.text(
-                    pos2(chip.min.x + 16.0, chip.center().y),
-                    Align2::LEFT_CENTER,
-                    format!("{} takes", others + 1),
-                    FontId::proportional(10.5),
-                    TOKENS.text,
-                );
-            } else {
-                crate::icons::paint(&p, chip.center(), icon, 10.0, TOKENS.text);
-            }
-            if resp.on_hover_text(if open { "Hide the takes" } else { "Show the takes" }).clicked() {
-                app.toggle_takes(t.id);
-            }
-            app.finish.layout.chips.push(crate::finish::TakeChip { track: t.id.0, clip: c.id.0, takes: others + 1, open, rect: r4(chip) });
-        }
-        if !open {
-            continue;
-        }
-        let n = t.playlists.len();
-        for (k, pl) in t.playlists.iter().enumerate() {
-            let ly = y0 + geo.rh + k as f32 * TAKE_H;
-            let lane = Rect::from_min_max(pos2(tl.min.x, ly), pos2(tl.max.x, ly + TAKE_H));
-            let active = k == t.active_playlist;
-            let p = ui.painter().with_clip_rect(tl);
-            p.rect_filled(lane.shrink2(vec2(0.0, 1.0)), 0.0, if active { TOKENS.accent.gamma_multiply(0.2) } else { TOKENS.bg });
-            for c in &pl.clips {
-                let r = Rect::from_min_max(pos2(map.x(c.start), ly + 4.0), pos2(map.x(c.end()).max(map.x(c.start) + 2.0), ly + TAKE_H - 4.0));
-                let col = theme::rgb(c.color.unwrap_or(t.color));
-                p.rect_filled(r, crate::theme::RADIUS_SM, if active { col } else { col.gamma_multiply(0.5) });
-            }
-            let lresp = ui.interact(lane.intersect(tl), ui.id().with(("take_lane", t.id.0, k)), Sense::click());
-            // In the track list: the take's label, Promote and Delete.
-            let lp = ui.painter().with_clip_rect(list);
-            let hl = Rect::from_min_max(pos2(list.min.x + 20.0, ly + 1.0), pos2(list.max.x - 6.0, ly + TAKE_H - 1.0));
-            let del = Rect::from_min_size(pos2(hl.max.x - 20.0, hl.min.y + 1.0), vec2(20.0, hl.height() - 2.0));
-            let pro = Rect::from_min_size(pos2(del.min.x - 70.0, hl.min.y + 1.0), vec2(66.0, hl.height() - 2.0));
-            let label = Rect::from_min_max(hl.min, pos2(pro.min.x - 4.0, hl.max.y));
-            let hresp = ui.interact(label.intersect(list), ui.id().with(("take_label", t.id.0, k)), Sense::click());
-            if active {
-                lp.rect_filled(label, crate::theme::RADIUS_SM, TOKENS.accent.gamma_multiply(0.2));
-            }
-            let text = if active { format!("Take {} · playing", k + 1) } else { format!("Take {}", k + 1) };
-            lp.text(
-                pos2(label.min.x + 6.0, label.center().y),
-                Align2::LEFT_CENTER,
-                text,
-                FontId::proportional(11.0),
-                if active { TOKENS.text } else { TOKENS.text_dim },
-            );
-            let presp = ui.interact(pro.intersect(list), ui.id().with(("take_promote", t.id.0, k)), Sense::click());
-            lp.rect_filled(pro, crate::theme::RADIUS_SM, if presp.hovered() { TOKENS.button_hover } else { TOKENS.button });
-            lp.text(pro.center(), Align2::CENTER_CENTER, "Promote", FontId::proportional(10.5), TOKENS.text);
-            let can_delete = n == 2;
-            let dresp = ui.interact(del.intersect(list), ui.id().with(("take_delete", t.id.0, k)), Sense::click());
-            lp.rect_filled(del, crate::theme::RADIUS_SM, if dresp.hovered() && can_delete { TOKENS.button_hover } else { TOKENS.button });
-            let ink = if can_delete { TOKENS.text } else { TOKENS.text_dim.gamma_multiply(0.5) };
-            crate::icons::paint(&lp, del.center(), crate::icons::Icon::Remove, 12.0, ink);
-            app.finish.layout.takes.push(crate::finish::TakeRow {
-                track: t.id.0,
-                index: k,
-                active,
-                clips: pl.clips.len(),
-                lane: r4(lane),
-                label: r4(label),
-                promote: r4(pro),
-                delete: r4(del),
-                delete_enabled: can_delete,
-            });
-            if (lresp.clicked() || hresp.clicked()) && !active {
-                let _ = app.select_take(t.id, k);
-            }
-            if presp.on_hover_text("Keep this take and remove the others").clicked() {
-                let _ = app.promote_take(t.id, k);
-            }
-            let tip =
-                if can_delete { "Delete this take" } else { "Deleting one of three or more takes needs an engine command; promote a take instead" };
-            if dresp.on_hover_text(tip).clicked() && can_delete {
-                app.dialog = Some(crate::Dialog::DeleteTake { track: t.id, index: k });
-            }
-        }
     }
 }

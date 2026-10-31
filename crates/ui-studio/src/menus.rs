@@ -583,8 +583,8 @@ pub fn dialogs(app: &mut StudioApp, ctx: &egui::Context) {
     if let Some(Dialog::DeleteTracks { tracks, clips }) = app.dialog.clone() {
         return delete_tracks_dialog(app, ctx, &tracks, clips);
     }
-    if let Some(Dialog::DeleteTake { track, index }) = app.dialog.clone() {
-        return delete_take_dialog(app, ctx, track, index);
+    if let Some(Dialog::DeleteTake { track, take }) = app.dialog.clone() {
+        return delete_take_dialog(app, ctx, track, take);
     }
     let Some(Dialog::SaveChanges { then }) = app.dialog.clone() else { return };
     let mut choice = None;
@@ -662,11 +662,11 @@ fn delete_tracks_dialog(app: &mut StudioApp, ctx: &egui::Context, tracks: &[Trac
 }
 
 /// "Delete take 2? Ctrl+Z undoes." [Delete] [Cancel]; Enter confirms, Escape cancels.
-fn delete_take_dialog(app: &mut StudioApp, ctx: &egui::Context, track: TrackId, index: usize) {
+fn delete_take_dialog(app: &mut StudioApp, ctx: &egui::Context, track: TrackId, take: u32) {
     let mut choice = None;
     egui::Modal::new(egui::Id::new("delete_take")).show(ctx, |ui| {
         ui.set_width(340.0);
-        ui.label(egui::RichText::new(format!("Delete take {}? {} undoes.", index + 1, label(A::Undo))).strong());
+        ui.label(egui::RichText::new(format!("Delete take {take}? {} undoes.", label(A::Undo))).strong());
         ui.add_space(crate::theme::SPACE);
         ui.horizontal(|ui| {
             if ui.button("Delete").clicked() || ui.input(|i| crate::shortcuts::hit(i, A::DialogConfirm)) {
@@ -680,7 +680,7 @@ fn delete_take_dialog(app: &mut StudioApp, ctx: &egui::Context, track: TrackId, 
     if let Some(yes) = choice {
         app.dialog = None;
         if yes {
-            let _ = app.delete_take(track, index);
+            let _ = app.delete_take(track, take);
         }
     }
 }

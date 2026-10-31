@@ -360,102 +360,15 @@ fn recording_over_a_clip_makes_a_take_and_the_old_clip_stays_as_take_1() {
     assert_eq!((t.undo_len(), t.app.engine.undo_history().pop().as_deref()), (before + 1, Some("Record")), "a take is one undo step");
     let tr = t.app.engine.session().track(a).unwrap().clone();
     assert_eq!((tr.playlists.len(), tr.active_playlist), (2, 1));
-    assert!(tr.playlists[0].clips.iter().any(|c| c.id == first && c.length == 96_000), "take 1 keeps the old clip whole");
-    assert!(tr.clips().iter().any(|c| c.start == 24_000 && c.length == 48_000), "take 2 has the new clip");
+    assert!(tr.playlists[0].clips.iter().any(|c| c.id == first && c.length == 96_000 && c.take == Some(1)), "take 1 keeps the old clip whole");
+    assert!(tr.clips().iter().any(|c| c.start == 24_000 && c.length == 48_000 && c.take == Some(2)), "take 2 has the new clip");
+    // The old clip's pieces around the new take still play, as take 1 (#25).
+    let around: Vec<(i64, i64, Option<u32>)> = tr.clips().iter().map(|c| (c.start, c.length, c.take)).collect();
+    assert_eq!(around, vec![(0, 24_000, Some(1)), (24_000, 48_000, Some(2)), (72_000, 24_000, Some(1))]);
+    assert_eq!(t.app.ui.takes_open, Vec::<TrackId>::new(), "one take over a clip leaves the lanes closed");
     // A take recorded where nothing is adds no playlist.
     t.record(&dir, a, 480_000, 0.5, 3);
     assert_eq!(t.app.engine.session().track(a).unwrap().playlists.len(), 2);
-}
-
-/// An audio track with two takes over bars 1-2, take lanes not yet shown: (track).
-fn two_takes(t: &mut T, dir: &Dir) -> TrackId {
-    let a = t.track(json!({"kind": "audio", "name": "Audio 1"}));
-    t.record(dir, a, 0, 4.0, 1);
-    t.record(dir, a, 0, 4.0, 2);
-    let _ = t.app.engine.execute("view.zoom_set", &json!({"samples_per_px": 500.0}));
-    t.frames(3);
-    a
-}
-
-#[test]
-fn the_take_chip_shows_the_lanes_and_a_lane_or_label_click_switches_the_take() {
-    let dir = Dir::new("chip");
-    let mut t = T::new();
-    let a = two_takes(&mut t, &dir);
-    let chip = t.app.finish.layout.chips.first().cloned().expect("a takes chip on the clip");
-    assert_eq!((chip.track, chip.takes, chip.open), (a.0, 2, false));
-    assert!(t.app.finish.layout.takes.is_empty(), "collapsed by default");
-    let rev = t.app.engine.revision;
-    t.click(mid(chip.rect));
-    assert_eq!(t.app.ui.takes_open, vec![a]);
-    assert_eq!(t.app.engine.revision, rev, "showing takes is view state");
-    let rows = t.app.finish.layout.takes.clone();
-    assert_eq!(rows.len(), 2);
-    assert!(rows[1].active && !rows[0].active);
-    // The track row grew by the take lanes; the next row moved down.
-    let h = t.row(a).header;
-    assert!(h[3] - h[1] >= t.app.ui.track_height + 2.0 * crate::arrange::TAKE_H - 1.0, "{h:?}");
-    // A lane click plays take 1; a label click plays take 2 again.
-    t.click(mid(rows[0].lane));
-    assert_eq!(t.app.engine.session().track(a).unwrap().active_playlist, 0);
-    assert!(t.app.status.contains("Take 1 of Audio 1"), "{}", t.app.status);
-    let rows = t.app.finish.layout.takes.clone();
-    t.click(mid(rows[1].label));
-    assert_eq!(t.app.engine.session().track(a).unwrap().active_playlist, 1);
-    // The chip hides them again.
-    let chip = t.app.finish.layout.chips.first().cloned().unwrap();
-    t.click(mid(chip.rect));
-    assert!(t.app.ui.takes_open.is_empty() && t.app.finish.layout.takes.is_empty());
-}
-
-#[test]
-fn promote_keeps_one_take_in_one_undo_step() {
-    let dir = Dir::new("promote");
-    let mut t = T::new();
-    let a = two_takes(&mut t, &dir);
-    t.app.toggle_takes(a);
-    t.frames(3);
-    let before = t.undo_len();
-    let take1 = t.app.engine.session().track(a).unwrap().playlists[0].clips.clone();
-    let rows = t.app.finish.layout.takes.clone();
-    t.click(mid(rows[0].promote));
-    let tr = t.app.engine.session().track(a).unwrap().clone();
-    assert_eq!(tr.playlists.len(), 1);
-    assert_eq!(tr.clips(), take1.as_slice(), "take 1 is what is left");
-    assert_eq!(t.undo_len(), before + 1, "one undo step");
-    assert!(t.app.finish.layout.takes.is_empty() && t.app.finish.layout.chips.is_empty(), "no takes left to show");
-    t.app.run("edit.undo", json!({})).unwrap();
-    let tr = t.app.engine.session().track(a).unwrap().clone();
-    assert_eq!((tr.playlists.len(), tr.active_playlist), (2, 1), "undo brings both takes back");
-}
-
-#[test]
-fn delete_take_keeps_the_other_and_is_refused_with_three() {
-    let dir = Dir::new("delete");
-    let mut t = T::new();
-    let a = two_takes(&mut t, &dir);
-    t.app.toggle_takes(a);
-    t.frames(3);
-    let rows = t.app.finish.layout.takes.clone();
-    assert!(rows.iter().all(|r| r.delete_enabled));
-    let take2 = t.app.engine.session().track(a).unwrap().playlists[1].clips.clone();
-    t.click(mid(rows[0].delete));
-    t.key("Enter", json!({}));
-    let tr = t.app.engine.session().track(a).unwrap().clone();
-    assert_eq!(tr.playlists.len(), 1);
-    assert_eq!(tr.clips(), take2.as_slice(), "take 2 stays");
-    assert!(t.app.status.contains("Deleted take 1"), "{}", t.app.status);
-    // Accident path: with three takes the delete button is disabled and a click changes nothing.
-    t.record(&dir, a, 0, 4.0, 3);
-    t.record(&dir, a, 0, 4.0, 4);
-    t.app.ui.takes_open = vec![a];
-    t.frames(3);
-    let rows = t.app.finish.layout.takes.clone();
-    assert_eq!(rows.len(), 3);
-    assert!(rows.iter().all(|r| !r.delete_enabled));
-    let before = (t.undo_len(), t.app.engine.session().track(a).unwrap().playlists.len());
-    t.click(mid(rows[0].delete));
-    assert_eq!((t.undo_len(), t.app.engine.session().track(a).unwrap().playlists.len()), before);
 }
 
 #[test]
@@ -818,40 +731,6 @@ fn undo_history_lists_the_steps_and_a_click_undoes_back_to_there() {
 // ---- Review follow-ups ----
 
 #[test]
-fn deleting_a_take_asks_first_enter_deletes_escape_keeps_both() {
-    let dir = Dir::new("delask");
-    let mut t = T::new();
-    let a = two_takes(&mut t, &dir);
-    t.app.toggle_takes(a);
-    t.frames(3);
-    let rows = t.app.finish.layout.takes.clone();
-    let before = t.undo_len();
-    t.click(mid(rows[0].delete));
-    assert_eq!(t.inspect_dialog(), "delete_take", "the click only asks");
-    assert_eq!(t.app.engine.session().track(a).unwrap().playlists.len(), 2);
-    assert_eq!(t.undo_len(), before);
-    t.key("Escape", json!({}));
-    assert!(t.app.dialog.is_none());
-    assert_eq!(t.app.engine.session().track(a).unwrap().playlists.len(), 2, "Escape keeps both takes");
-    assert_eq!(t.undo_len(), before);
-    t.click(mid(rows[0].delete));
-    t.key("Enter", json!({}));
-    assert!(t.app.dialog.is_none());
-    assert_eq!(t.app.engine.session().track(a).unwrap().playlists.len(), 1, "Enter deletes");
-    assert!(t.app.status.contains("Deleted take 1"), "{}", t.app.status);
-}
-
-#[test]
-fn promote_is_one_undo_step_whose_label_is_documented_as_the_first_command() {
-    let dir = Dir::new("promlabel");
-    let mut t = T::new();
-    let a = two_takes(&mut t, &dir);
-    t.app.promote_take(a, 0).unwrap();
-    // The engine has no relabel and orders select before delete-unused (L20): left as is.
-    assert_eq!(t.app.engine.undo_label(), Some("Select Playlist"));
-}
-
-#[test]
 fn fit_extension_replaces_only_known_audio_extensions() {
     use crate::finish::fit_extension;
     use std::path::Path;
@@ -919,22 +798,6 @@ fn bounce_to_an_existing_file_asks_and_choose_defaults_to_the_new_extension() {
     let choose = t.app.finish.layout.bounce.clone().unwrap().choose;
     t.click(mid(choose));
     assert_eq!(*seen.borrow(), "mix.v2.flac", "Choose... starts from the new extension");
-}
-
-#[test]
-fn the_take_glyph_keeps_the_lanes_reachable_at_a_narrow_zoom() {
-    let dir = Dir::new("narrow");
-    let mut t = T::new();
-    let a = two_takes(&mut t, &dir);
-    // 4 s is 192000 samples: at 4000 samples per pixel the clip is 48 px wide, too narrow for the chip.
-    let _ = t.app.engine.execute("view.zoom_set", &json!({"samples_per_px": 4000.0}));
-    t.frames(3);
-    let chip = t.app.finish.layout.chips.first().cloned().expect("a glyph on the narrow clip");
-    assert!(chip.rect[2] - chip.rect[0] <= 12.0, "{:?}", chip.rect);
-    assert!(t.app.finish.layout.takes.is_empty());
-    t.click(mid(chip.rect));
-    assert_eq!(t.app.ui.takes_open, vec![a], "the glyph opens the lanes");
-    assert_eq!(t.app.finish.layout.takes.len(), 2);
 }
 
 #[test]
@@ -1100,3 +963,6 @@ fn the_transport_menu_lists_set_cycle_to_selection_and_it_leaves_cycle_alone() {
     assert_eq!((r.start, r.end), (1000, 8000));
     assert!(!t.app.engine.session().edit.loop_playback);
 }
+
+#[path = "take_lanes_tests.rs"]
+mod take_lanes;

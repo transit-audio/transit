@@ -420,7 +420,7 @@ impl StudioApp {
             return;
         }
         let s = self.engine.session_arc();
-        // A take of an earlier lap lives on a playlist that is no longer the active one.
+        // A take of an earlier lap lives on a playlist that is not the active one.
         let placed: Vec<(TrackId, &transit_model::Clip)> = ids
             .iter()
             .filter_map(|id| s.tracks.iter().find_map(|t| t.playlists.iter().flat_map(|p| p.clips.iter()).find(|c| c.id == *id).map(|c| (t.id, c))))
@@ -438,6 +438,9 @@ impl StudioApp {
         let notes: usize =
             placed.iter().map(|(_, c)| if let transit_model::ClipContent::Midi { sequence } = &c.content { sequence.notes.len() } else { 0 }).sum();
         let passes = ids.len() / lanes.len().max(1);
+        if passes > 1 {
+            self.show_new_takes(&ids);
+        }
         let status = if passes > 1 {
             format!("Recorded {passes} takes ({notes} notes) on {}", names.join(", "))
         } else {
@@ -448,6 +451,18 @@ impl StudioApp {
         let _ = self.run("edit.select", json!({"clips": clips}));
         if let Some((t, _)) = ids.first().and_then(|id| s.find_clip(*id)) {
             self.ui.focus_track = Some(t);
+        }
+    }
+
+    /// After cycle recording, open the take lanes of each track where `ids` (just recorded) made
+    /// or joined a take stack (#25): Logic opens the take folder, Live shows the take lanes. A
+    /// single take over a clip leaves the lanes as they were (its chip shows them).
+    fn show_new_takes(&mut self, ids: &[transit_model::ClipId]) {
+        let s = self.engine.session_arc();
+        for t in &s.tracks {
+            if t.playlists.len() > 1 && t.take_stacks().iter().any(|st| ids.iter().any(|id| st.contains(*id))) {
+                self.show_takes(t.id);
+            }
         }
     }
 
@@ -475,6 +490,7 @@ impl StudioApp {
         }
         let ids = transit_engine::io::place_recording_take(&mut self.engine, plan, takes, true);
         if plan.pass.is_some() {
+            self.show_new_takes(&ids);
             let passes = ids.len() / tracks.max(1);
             self.status = if passes > 1 { format!("Recorded {passes} takes") } else { format!("Loop-recorded {passes} take(s)") };
             return;
@@ -497,9 +513,9 @@ impl StudioApp {
         let n = placed.len();
         self.status = format!("Recorded {n} clip{} ({secs:.1} s) on {}", if n == 1 { "" } else { "s" }, names.join(", "));
         if let [t] = new_take.as_slice()
-            && let Some(tr) = s.track(*t)
+            && let Some(n) = placed.iter().find(|(pt, _)| pt == t).and_then(|(_, c)| c.take)
         {
-            self.status.push_str(&format!(" as take {}", tr.active_playlist + 1));
+            self.status.push_str(&format!(" as take {n}"));
         }
         let clips: Vec<u64> = ids.iter().map(|c| c.0).collect();
         let _ = self.run("edit.select", json!({"clips": clips}));

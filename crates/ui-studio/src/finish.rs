@@ -1,10 +1,7 @@
-//! Slice 6, finishing a track: rename in place (tracks and clips), takes (track playlists shown as
-//! take lanes), File > Bounce with progress and cancel, Track > Bounce in Place, and the undo
-//! history window. Everything that changes the document runs an engine command.
-//!
-//! Takes are the engine's track playlists (plan 06, L8): a take is a whole playlist, not a lane
-//! inside one clip. Recording over clips duplicates the active playlist first
-//! (`StudioApp::place_takes`), so the previous take keeps the old clips.
+//! Slice 6, finishing a track: rename in place (tracks and clips), File > Bounce with progress and
+//! cancel, Track > Bounce in Place, and the undo history window. Everything that changes the
+//! document runs an engine command. Take lanes are in `crate::takes` and `arrange::take_lanes`
+//! (#25); their drawn layout is kept here with the rest of the slice's.
 
 use crate::arrange::R4;
 use crate::mixer::MenuItem;
@@ -92,20 +89,35 @@ pub struct PathChoice {
     pub checked: bool,
 }
 
-/// One take lane as last drawn.
+/// One take lane as last drawn (#25): the lane of take `take`, `index` from the top.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct TakeRow {
     pub track: u64,
     pub index: usize,
+    /// The take number ("Take n").
+    pub take: u32,
+    /// Some of this take plays.
     pub active: bool,
     pub clips: usize,
-    /// The lane in the timeline (click: make this take active).
+    /// The lane in the timeline.
     pub lane: R4,
-    /// Its label in the track list (click: the same).
+    /// Its label in the track list (click: this take plays in every stack it is in).
     pub label: R4,
-    pub promote: R4,
-    pub delete: R4,
+    /// The lane menu button at the label's right end (Flatten Takes, Delete Take).
+    pub menu: R4,
+    /// Delete Take is offered (the take plays nowhere).
     pub delete_enabled: bool,
+}
+
+/// A take's clip in its lane as last drawn (click: that take plays over the clip's range).
+#[derive(Debug, Clone, Default, serde::Serialize)]
+pub struct TakeClip {
+    pub track: u64,
+    pub take: u32,
+    pub clip: u64,
+    /// The clip is on the playlist that plays (drawn highlighted).
+    pub active: bool,
+    pub rect: R4,
 }
 
 /// A clip's take disclosure chip ("2 takes"), as last drawn.
@@ -154,6 +166,7 @@ pub struct HistoryRow {
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct FinishLayout {
     pub takes: Vec<TakeRow>,
+    pub take_clips: Vec<TakeClip>,
     pub chips: Vec<TakeChip>,
     pub bounce: Option<BounceLayout>,
     pub history_open: bool,
@@ -173,8 +186,6 @@ pub struct FinishState {
     pub path_job: Option<transit_engine::io::PathBounce>,
     /// The parameters of the last `file.bounce_paths` job the form started.
     pub paths_request: Option<Value>,
-    /// Gestures started (each composite gets its own merge key).
-    serial: u64,
     pub layout: FinishLayout,
     /// The progress window's Cancel button as last drawn.
     pub cancel: R4,
@@ -343,76 +354,6 @@ impl StudioApp {
             RenameTarget::Track(t) => self.run("track.rename", json!({"track": t.0, "name": name})),
             RenameTarget::Clip(c) => self.run("clip.rename", json!({"clips": [c.0], "name": name})),
         }
-    }
-
-    // ---- Takes ----
-
-    /// Show or hide a track's take lanes (view state only).
-    pub fn toggle_takes(&mut self, t: TrackId) {
-        if let Some(i) = self.ui.takes_open.iter().position(|x| *x == t) {
-            self.ui.takes_open.remove(i);
-        } else {
-            self.ui.takes_open.push(t);
-        }
-    }
-
-    fn take_count(&self, t: TrackId) -> usize {
-        self.engine.session().track(t).map_or(0, |t| t.playlists.len())
-    }
-
-    fn track_name(&self, t: TrackId) -> String {
-        self.engine.session().track(t).map_or_else(String::new, |t| t.name.clone())
-    }
-
-    /// Make take `k` the one that plays (`track.playlist_select`).
-    pub fn select_take(&mut self, t: TrackId, k: usize) -> Result<Value, String> {
-        let r = self.run("track.playlist_select", json!({"track": t.0, "index": k}))?;
-        self.status = format!("Take {} of {} plays", k + 1, self.track_name(t));
-        Ok(r)
-    }
-
-    /// Promote take `k`: it becomes the track's only take, the others are removed. One undo step
-    /// (`track.playlist_select` then `track.playlist_delete_unused`, merged). The undo entry keeps
-    /// the first command's label, "Select Playlist": the engine has no relabel for a merged step,
-    /// the order is forced (delete-unused keeps the active take), and `track.playlist_promote`
-    /// copies a range between playlists instead, so this is left documented (L20).
-    pub fn promote_take(&mut self, t: TrackId, k: usize) -> Result<Value, String> {
-        let n = self.take_count(t);
-        if k >= n {
-            return Err("no such take".into());
-        }
-        let active = self.engine.session().track(t).map_or(0, |t| t.active_playlist);
-        let r = if active == k {
-            self.run("track.playlist_delete_unused", json!({"track": t.0}))
-        } else {
-            self.finish.serial += 1;
-            let key = format!("promote:{}", self.finish.serial);
-            self.engine.end_merge();
-            let first = self.engine.execute_merged("track.playlist_select", &json!({"track": t.0, "index": k}), &key);
-            let r = first.and_then(|_| self.engine.execute_merged("track.playlist_delete_unused", &json!({"track": t.0}), &key));
-            self.engine.end_merge();
-            r.map_err(|e| {
-                self.status = e.to_string();
-                e.to_string()
-            })
-        }?;
-        self.ui.takes_open.retain(|x| *x != t);
-        self.status = format!("Kept take {} of {}; removed {} other take{}", k + 1, self.track_name(t), n - 1, if n == 2 { "" } else { "s" });
-        Ok(r)
-    }
-
-    /// Delete take `k`. The engine removes playlists only as "all but the active one", so this
-    /// works when the track has two takes (it keeps the other); with more it is refused (L33).
-    pub fn delete_take(&mut self, t: TrackId, k: usize) -> Result<Value, String> {
-        let n = self.take_count(t);
-        if n != 2 || k >= n {
-            self.status = "Deleting one of three or more takes needs an engine command (track.playlist_delete); promote a take instead.".into();
-            return Err(self.status.clone());
-        }
-        let keep = 1 - k;
-        self.promote_take(t, keep)?;
-        self.status = format!("Deleted take {} of {}", k + 1, self.track_name(t));
-        Ok(json!({"kept": keep}))
     }
 
     // ---- Bounce ----

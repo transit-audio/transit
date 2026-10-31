@@ -49,3 +49,21 @@ text = "Renders the track to audio and turns its plug-ins off to save CPU. Click
 id = "arrange_header.rack"
 name = "Rack"
 text = "This group is a rack: it sums its tracks like any group and also plays every instrument in it from its own MIDI, through each one's key and velocity zones. Turn on I to play it live; its macros and zones are in the device chain."
+
+[[entry]]
+id = "arrange_header.takes"
+name = "Take lanes (T)"
+text = "Shows or hides the track's take lanes: one lane per recorded take, newest on top. It appears when takes are stacked, for example after cycle recording, and only changes the view."
+link = "user-guide.md#takes-and-comping"
+
+[[entry]]
+id = "arrange_header.take_lane"
+name = "Take lane"
+text = "One take of the track. Click a dimmed clip in the lane to play that take over its range, or click this label to play the take everywhere it was recorded. Each choice is one undo step."
+link = "user-guide.md#takes-and-comping"
+
+[[entry]]
+id = "arrange_header.take_lane_menu"
+name = "Take lane menu"
+text = "Flatten Takes keeps what plays and removes the other takes. Delete Take removes this take; a take that plays cannot be deleted until another one is chosen."
+link = "user-guide.md#takes-and-comping"

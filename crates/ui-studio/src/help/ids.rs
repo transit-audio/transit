@@ -35,6 +35,9 @@ ids! {
     ArrangeHeaderVolume => "arrange_header.volume",
     ArrangeHeaderRack => "arrange_header.rack",
     ArrangeHeaderFreeze => "arrange_header.freeze",
+    ArrangeHeaderTakes => "arrange_header.takes",
+    ArrangeHeaderTakeLane => "arrange_header.take_lane",
+    ArrangeHeaderTakeLaneMenu => "arrange_header.take_lane_menu",
     // help\audio-devices.toml
     AudioDevicesWindow => "audio_devices.window",
     AudioDevicesOutputOpen => "audio_devices.output_open",
