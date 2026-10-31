@@ -67,6 +67,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-macro-osc", 1),
     ("transit-resonator", 1),
     ("transit-granular", 1),
+    ("transit-texture", 1),
     ("transit-clap-host", 1),
     ("transit-vst3-host", 1),
     ("transit-au-host", 1),
@@ -88,6 +89,7 @@ const STANDALONE: &[&str] = &[
     "transit-macro-osc",
     "transit-resonator",
     "transit-granular",
+    "transit-texture",
 ];
 // The image crate encodes screenshots (PNG); it is not a UI-only dependency.
 const UI_CRATES: &[&str] = &["egui", "eframe", "winit", "rfd", "egui-wgpu", "egui_glow", "egui_extras", "resvg", "wgpu"];

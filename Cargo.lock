@@ -4379,6 +4379,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-texture"
+version = "0.5.1"
+dependencies = [
+ "transit-macro-osc-oracle",
+]
+
+[[package]]
 name = "transit-time"
 version = "0.5.1"
 dependencies = [

@@ -102,7 +102,7 @@ fn the_retired_soundcraft_names_do_not_inherit_layer_or_unsafe_permissions() {
 
 #[test]
 fn standalone_and_ui_checks_cover_normal_and_build_dependencies_but_not_dev() {
-    for name in ["transit-audio-backend", "transit-macro-osc", "transit-resonator", "transit-granular"] {
+    for name in ["transit-audio-backend", "transit-macro-osc", "transit-resonator", "transit-granular", "transit-texture"] {
         for kind in [None, Some("build"), Some("dev")] {
             let metadata = Metadata { packages: vec![package(name, &[("transit-time", kind)]), package("transit-time", &[])] };
             let result = check_layers(&metadata, |_| Ok(INHERIT.into()));

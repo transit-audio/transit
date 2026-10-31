@@ -1,0 +1,16 @@
+[package]
+name = "transit-texture"
+description = "transit's texture processor (grains, wavetable grains, a multitap delay, four buffer qualities), ported to Rust from Émilie Gillet's MIT firmware and nulled against the C++ oracle (ADR 0033, #241)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+# transit's own code is MIT OR Apache-2.0; the firmware it is ported from is MIT (LICENSE-THIRD-PARTY).
+license = "(MIT OR Apache-2.0) AND MIT"
+publish = false
+
+[dev-dependencies]
+transit-macro-osc-oracle = { path = "../macro-osc-oracle" }
+
+[lints]
+workspace = true
