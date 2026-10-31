@@ -4,7 +4,8 @@
 //! Floating point is kept strict so the oracle is a stable reference: `-DTEST` (the desktop branch
 //! of stmlib, as the firmware's own test makefile), `-O2` whatever the cargo profile, no
 //! fast-math, and no FP contraction (`-ffp-contract=off` on GCC and Clang; `/fp:strict` on MSVC,
-//! where contraction cannot be turned off on its own on every supported version).
+//! where contraction cannot be turned off on its own on every supported version). On GCC,
+//! `-flifetime-dse=1` keeps the zeroing of the wrappers' value-initialized holders (see below).
 //!
 //! vendor/ is never edited. `cpp/compat.h` is force-included into every file. The patches in
 //! `patches/all/` (on every compiler) and, on MSVC only, `patches/msvc/` (unified diffs against
@@ -131,7 +132,9 @@ fn main() {
     long_sources.push(cpp.join("texture_oracle.cc"));
 
     let compat = cpp.join("compat.h");
-    let msvc = cc::Build::new().cpp(true).get_compiler().is_like_msvc();
+    let compiler = cc::Build::new().cpp(true).get_compiler();
+    let msvc = compiler.is_like_msvc();
+    let gnu = compiler.is_like_gnu();
     let overlay = out_dir.join("overlay");
     let _ = std::fs::remove_dir_all(&overlay);
     let mut patches = Vec::new();
@@ -160,6 +163,16 @@ fn main() {
             build.flag("/std:c++14").flag("/fp:strict").flag("/EHsc").flag(format!("/FI{}", compat.display()));
         } else {
             build.flag("-std=c++11").flag("-ffp-contract=off").flag("-fno-fast-math").flag("-include").flag(compat.to_string_lossy().as_ref());
+        }
+        if gnu {
+            // The wrappers value-initialize their holders so every member a constructor and Init
+            // leave unwritten starts at zero, as the module's globals do. GCC's default lifetime
+            // dead-store elimination (-flifetime-dse=2) treats an object's storage as indeterminate
+            // when its constructor begins, so it drops the zeroing in front of a user-provided
+            // empty constructor whenever that constructor's object fills the whole store (the
+            // input stage's holder, #241). Level 1 keeps the stores made before the constructor.
+            // Clang and MSVC keep them without a flag.
+            build.flag("-flifetime-dse=1");
         }
         build.include(&vendor);
     };
