@@ -87,6 +87,8 @@ mod external_midi;
 /// Test seam (issue #210): strip state fingerprints.
 #[cfg(feature = "testing")]
 mod fingerprint;
+#[cfg(test)]
+mod frozen_state_tests;
 mod graph;
 mod hardware;
 mod instance;
