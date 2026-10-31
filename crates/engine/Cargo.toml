@@ -30,6 +30,8 @@ transit-rt.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 transit-rt = { workspace = true, features = ["testing"] }
+# The Cross Modulator's keyed test renders the C++ oracle (dev-only, ADR 0033).
+transit-macro-osc-oracle = { path = "../macro-osc-oracle" }
 
 [lints]
 workspace = true

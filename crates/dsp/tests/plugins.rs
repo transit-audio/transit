@@ -56,7 +56,7 @@ fn registry_ids_unique_and_creatable() {
         assert!(info.short_name.chars().count() <= 8, "{} short name too long", info.id);
         let p = create(info.id).unwrap_or_else(|| panic!("cannot create {}", info.id));
         assert_eq!(p.info().id, info.id);
-        let keyed = matches!(info.id, "compressor" | "expander_gate");
+        let keyed = matches!(info.id, "compressor" | "expander_gate" | "cross_modulator");
         assert_eq!(transit_dsp::builtin_takes_key(info.id), keyed);
         assert_eq!(p.has_key_input(), keyed);
         assert_eq!(plugin_info(info.id).unwrap().id, info.id);
@@ -72,6 +72,7 @@ fn the_registry_lists_exactly_the_kept_built_ins() {
     ids.sort_unstable();
     let mut kept = [
         "compressor",
+        "cross_modulator",
         "dc_offset_removal",
         "dither",
         "eq_1band",

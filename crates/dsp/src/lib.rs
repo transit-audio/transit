@@ -219,9 +219,10 @@ fn key_part(s: &[f32], start: usize) -> impl Iterator<Item = f32> + '_ {
     s.get(start..).unwrap_or(&[]).iter().copied()
 }
 
-/// Whether the built-in plug-in `id` detects on a sidechain key ([`Plugin::process_with_key`]).
+/// Whether the built-in plug-in `id` reads a sidechain key ([`Plugin::process_with_key`]): the
+/// detectors, and the Cross Modulator's second input (#200).
 pub fn builtin_takes_key(id: &str) -> bool {
-    id == plugins::dynamics::COMP_INFO.id || id == plugins::dynamics::GATE_INFO.id
+    id == plugins::dynamics::COMP_INFO.id || id == plugins::dynamics::GATE_INFO.id || id == plugins::modulator::MODULATOR_INFO.id
 }
 
 /// Maps the key `src` onto the planar channels `dst` for `n` frames from frame `start` of `src`

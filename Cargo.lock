@@ -4224,6 +4224,8 @@ dependencies = [
  "serde",
  "transit-granular",
  "transit-macro-osc",
+ "transit-macro-osc-oracle",
+ "transit-modulator",
  "transit-rt",
  "transit-texture",
 ]
@@ -4242,6 +4244,7 @@ dependencies = [
  "transit-audio-io",
  "transit-clap-host",
  "transit-dsp",
+ "transit-macro-osc-oracle",
  "transit-midi",
  "transit-mix",
  "transit-model",

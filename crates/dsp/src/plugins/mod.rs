@@ -8,6 +8,7 @@ pub mod harmonic;
 pub mod instrument_queue;
 pub mod lfo;
 pub mod macro_osc;
+pub mod modulator;
 mod resample;
 pub mod reverb;
 pub mod sampler;
@@ -42,6 +43,7 @@ registry! {
     harmonic::SAT_INFO => harmonic::Saturator::new(),
     texture::TEXTURE_INFO => texture::TextureFx::new(),
     time_stretcher::TIME_STRETCHER_INFO => time_stretcher::TimeStretcher::new(),
+    modulator::MODULATOR_INFO => modulator::CrossModulator::new(),
     utility::GAIN_INFO => utility::Gain::new(),
     utility::TRIM_INFO => utility::Trim::new(),
     utility::INVERT_INFO => utility::Invert::default(),

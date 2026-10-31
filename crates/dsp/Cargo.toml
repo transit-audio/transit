@@ -21,11 +21,15 @@ transit-macro-osc.workspace = true
 transit-texture.workspace = true
 # The Time Stretcher insert (ADR 0033, #199): a same-layer (L1) dependency.
 transit-granular.workspace = true
+# The Cross Modulator insert (ADR 0033, #200): a same-layer (L1) dependency.
+transit-modulator.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true
 # The Texture's allocation probe (`tests/texture_alloc.rs`) counts heap use on the test thread.
 transit-rt = { workspace = true, features = ["testing"] }
+# The Cross Modulator's firmware-exact path is checked against the C++ oracle (dev-only, ADR 0033).
+transit-macro-osc-oracle = { path = "../macro-osc-oracle" }
 
 [lints]
 workspace = true
