@@ -1,10 +1,12 @@
-//! The granular processor (`clouds/dsp/granular_processor.{h,cc}`) in its granular playback mode:
-//! the input (with feedback) recorded into the buffers, the grains, the diffuser, the reverb and
-//! the dry/wet crossfade, at 32 kHz, at four buffer qualities.
+//! The granular processor (`clouds/dsp/granular_processor.{h,cc}`) in its granular and its pitch
+//! shifter / time stretcher playback modes: the input (with feedback) recorded into the buffers,
+//! the grains or the WSOLA player, the diffuser, the stretch mode's low-pass and high-pass filters,
+//! the reverb and the dry/wet crossfade, at 32 kHz, at four buffer qualities.
 
 #![forbid(unsafe_code)]
 
 use crate::audio_buffer::{AudioBuffer, Resolution};
+use crate::correlator::Correlator;
 use crate::float::F;
 use crate::fx::{Diffuser, Reverb};
 use crate::resources::{LUT_XFADE_IN, LUT_XFADE_OUT};
@@ -13,7 +15,8 @@ use crate::sample_rate_converter::SampleRateConverter;
 use crate::stmlib::filter::{FilterMode, FrequencyApproximation, Svf};
 use crate::stmlib::parameter_interpolator::ParameterInterpolator;
 use crate::stmlib::random::Random;
-use crate::stmlib::{constrain, interpolate, one_pole, soft_convert, soft_limit};
+use crate::stmlib::{constrain, interpolate, one_pole, semitones_to_ratio, soft_convert, soft_limit};
+use crate::wsola::{WsolaParameters, WsolaPlayer};
 use crate::{MAX_BLOCK_SIZE, SAMPLE_RATE};
 
 /// One stereo frame of the codec, left then right, as the firmware's `ShortFrame`.
@@ -21,6 +24,19 @@ pub type Frame = [i16; 2];
 
 /// `kDownsamplingFactor`: the low-fidelity qualities run the grains at half the rate.
 const DOWNSAMPLING_FACTOR: usize = 2;
+
+/// The playback modes ported (`PlaybackMode` in `clouds/dsp/granular_processor.h`; the looping
+/// delay and the spectral mode are not).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum PlaybackMode {
+    /// `PLAYBACK_MODE_GRANULAR`: overlapping grains.
+    #[default]
+    Granular,
+    /// `PLAYBACK_MODE_STRETCH`: the pitch shifter and time stretcher (a WSOLA player that aligns
+    /// its windows with a correlator, then low-pass and high-pass filters set by TEXTURE; DENSITY
+    /// sets the diffuser).
+    Stretch,
+}
 
 /// The buffer quality (`set_quality`), in the firmware's order: bit 0 selects mono, bit 1 the 8-bit
 /// mu-law buffers with the grains at 16 kHz.
@@ -168,7 +184,12 @@ impl BufferSize {
 }
 
 /// What the module's CV scaler hands the processor each block (`Parameters` in
-/// `clouds/dsp/parameters.h`; the granular sub-structure is derived from them every block).
+/// `clouds/dsp/parameters.h`; the granular sub-structure is derived from them every block). The
+/// field documents describe the granular mode; in the stretch mode position is where the windows
+/// read (a trigger restarts the read from the oldest audio, gliding back to position at the rate
+/// of the triggers), size the window length (4096 samples at 1 down to 128 at 0), pitch the transposition,
+/// density the diffuser amount, texture the low-pass (below 0.5) and high-pass (above it)
+/// filters, and spread and gate are not read.
 ///
 /// The ranges are the module's: 0 to 1, pitch -48 to 48 semitones. [`Granular::process`] clamps
 /// values outside them (a NaN to the bottom), which leaves values inside untouched.
@@ -251,15 +272,21 @@ pub struct Granular {
     silence: bool,
     bypass: bool,
     reset_buffers: bool,
-    prepared: bool,
+    mode: PlaybackMode,
+    /// `previous_playback_mode_`; `None` is `PLAYBACK_MODE_LAST` (after `Init`).
+    previous_mode: Option<PlaybackMode>,
     freeze_lp: F,
     dry_wet: F,
     random: Random,
     buffers: [AudioBuffer; 2],
     player: GranularSamplePlayer,
+    ws_player: WsolaPlayer,
+    correlator: Correlator,
     diffuser: Diffuser,
     reverb: Reverb,
     fb_filter: [Svf; 2],
+    lp_filter: [Svf; 2],
+    hp_filter: [Svf; 2],
     input: [[F; 2]; MAX_BLOCK_SIZE],
     input_downsampled: [[F; 2]; MAX_BLOCK_SIZE / DOWNSAMPLING_FACTOR],
     output_downsampled: [[F; 2]; MAX_BLOCK_SIZE / DOWNSAMPLING_FACTOR],
@@ -275,10 +302,15 @@ impl Granular {
     /// state starts at the firmware's power-on value ([`Random::DEFAULT_SEED`]).
     #[must_use]
     pub fn new(buffer_size: BufferSize, quality: Quality) -> Self {
-        let mut fb_filter = [Svf::default(); 2];
-        for f in &mut fb_filter {
-            f.init();
-        }
+        Self::new_in_mode(buffer_size, quality, PlaybackMode::Granular)
+    }
+
+    /// As [`Granular::new`], in playback mode `mode` (`Init`, the quality and the mode, then
+    /// `Prepare`).
+    #[must_use]
+    pub fn new_in_mode(buffer_size: BufferSize, quality: Quality, mode: PlaybackMode) -> Self {
+        let mut filter = Svf::default();
+        filter.init();
         let mut processor = Self {
             buffer_size,
             stereo: true,
@@ -286,15 +318,20 @@ impl Granular {
             silence: false,
             bypass: false,
             reset_buffers: true,
-            prepared: false,
+            mode,
+            previous_mode: None,
             freeze_lp: F::ZERO,
             dry_wet: F::ZERO,
             random: Random::default(),
             buffers: [AudioBuffer::new(buffer_size.large.max(buffer_size.small)), AudioBuffer::new(buffer_size.small)],
             player: GranularSamplePlayer::default(),
+            ws_player: WsolaPlayer::default(),
+            correlator: Correlator::default(),
             diffuser: Diffuser::default(),
             reverb: Reverb::default(),
-            fb_filter,
+            fb_filter: [filter; 2],
+            lp_filter: [filter; 2],
+            hp_filter: [filter; 2],
             input: [[F::ZERO; 2]; MAX_BLOCK_SIZE],
             input_downsampled: [[F::ZERO; 2]; MAX_BLOCK_SIZE / DOWNSAMPLING_FACTOR],
             output_downsampled: [[F::ZERO; 2]; MAX_BLOCK_SIZE / DOWNSAMPLING_FACTOR],
@@ -343,6 +380,61 @@ impl Granular {
         Quality::from_index(usize::from(!self.stereo) | (usize::from(self.low_fidelity) << 1)).unwrap_or_default()
     }
 
+    /// Selects the playback mode, as the panel's mode button does (`set_playback_mode`). Between the
+    /// granular and the stretch modes the change is benign: the next block is silent, then the
+    /// filters are reset and the recording kept.
+    pub fn set_playback_mode(&mut self, mode: PlaybackMode) {
+        self.mode = mode;
+    }
+
+    /// The current playback mode.
+    #[must_use]
+    pub fn playback_mode(&self) -> PlaybackMode {
+        self.mode
+    }
+
+    /// Back to what [`Granular::new_in_mode`] builds with these memory sizes, quality and mode,
+    /// without allocating: every state the constructor sets (the random state at its power-on
+    /// value, the filters, the converters, the grains, the windows, the correlator, the effects'
+    /// memories and the recording) is set again, then `Prepare` runs as after `Init`.
+    pub fn reset(&mut self) {
+        let mut filter = Svf::default();
+        filter.init();
+        self.silence = false;
+        self.bypass = false;
+        self.reset_buffers = true;
+        self.previous_mode = None;
+        self.freeze_lp = F::ZERO;
+        self.dry_wet = F::ZERO;
+        self.random = Random::default();
+        for buffer in &mut self.buffers {
+            buffer.clear();
+        }
+        self.player = GranularSamplePlayer::default();
+        self.ws_player = WsolaPlayer::default();
+        self.correlator = Correlator::default();
+        self.diffuser.clear();
+        self.reverb.clear();
+        self.fb_filter = [filter; 2];
+        self.lp_filter = [filter; 2];
+        self.hp_filter = [filter; 2];
+        self.input = [[F::ZERO; 2]; MAX_BLOCK_SIZE];
+        self.input_downsampled = [[F::ZERO; 2]; MAX_BLOCK_SIZE / DOWNSAMPLING_FACTOR];
+        self.output_downsampled = [[F::ZERO; 2]; MAX_BLOCK_SIZE / DOWNSAMPLING_FACTOR];
+        self.output = [[F::ZERO; 2]; MAX_BLOCK_SIZE];
+        self.feedback = [[F::ZERO; 2]; MAX_BLOCK_SIZE];
+        self.src_down = SampleRateConverter::new(false);
+        self.src_up = SampleRateConverter::new(true);
+        self.prepare();
+    }
+
+    /// `ResetFilters()`.
+    fn reset_filters(&mut self) {
+        for f in self.fb_filter.iter_mut().chain(&mut self.lp_filter).chain(&mut self.hp_filter) {
+            f.init();
+        }
+    }
+
     /// Bypass: the input is copied to the output, and nothing is recorded.
     pub fn set_bypass(&mut self, bypass: bool) {
         self.bypass = bypass;
@@ -378,7 +470,7 @@ impl Granular {
             output.copy_from_slice(input);
             return;
         }
-        if self.silence || self.reset_buffers || !self.prepared {
+        if self.silence || self.reset_buffers || self.previous_mode != Some(self.mode) {
             output.fill([0, 0]);
             return;
         }
@@ -425,11 +517,22 @@ impl Granular {
             self.process_granular(p, false, size);
         }
 
-        // Diffusion post-processing (the granular mode's TEXTURE above 0.75).
+        // Diffusion post-processing (the granular mode's TEXTURE above 0.75, the stretch mode's
+        // DENSITY).
         let texture = p.texture;
-        let diffusion = if texture > 0.75 { (texture - 0.75) * 4.0 } else { F::ZERO };
+        let diffusion = match self.mode {
+            PlaybackMode::Granular if texture > 0.75 => (texture - 0.75) * 4.0,
+            PlaybackMode::Granular => F::ZERO,
+            PlaybackMode::Stretch => p.density,
+        };
         self.diffuser.set_amount(diffusion);
         self.diffuser.process(&mut self.output[..size]);
+
+        // The stretch mode's filters: TEXTURE below 0.5 closes the low-pass, above it opens the
+        // high-pass.
+        if self.mode == PlaybackMode::Stretch {
+            self.stretch_filters(texture, feedback, size);
+        }
 
         // This is what is fed back. Reverb is not fed back.
         self.feedback[..size].copy_from_slice(&self.output[..size]);
@@ -460,9 +563,30 @@ impl Granular {
         self.dry_wet = dry_wet_mod.value();
     }
 
-    /// `ProcessGranular(input, output, size)` in the granular mode: record, then play the grains.
-    /// Reads `input_downsampled` and writes `output_downsampled` at low fidelity, `input` and
-    /// `output` otherwise.
+    /// The stretch mode's low-pass and high-pass filters over `output` (`Process`, "Apply
+    /// filters").
+    fn stretch_filters(&mut self, cutoff: F, feedback: F, size: usize) {
+        let lp_cutoff = 0.5 * semitones_to_ratio((if cutoff < 0.5 { cutoff - 0.5 } else { F::ZERO }) * 216.0);
+        let hp_cutoff = 0.25 * semitones_to_ratio((if cutoff < 0.5 { F(-0.5) } else { cutoff - 1.0 }) * 216.0);
+        let lp_cutoff = constrain(lp_cutoff, F::ZERO, F(0.499));
+        let hp_cutoff = constrain(hp_cutoff, F::ZERO, F(0.499));
+        let lpq = 1.0 + 3.0 * (1.0 - feedback) * (0.5 - lp_cutoff);
+        let output = &mut self.output[..size];
+        self.lp_filter[0].set_f_q(FrequencyApproximation::Fast, lp_cutoff, lpq);
+        self.lp_filter[0].process_channel(output, 0, FilterMode::LowPass);
+        let lp = self.lp_filter[0];
+        self.lp_filter[1].set(&lp);
+        self.lp_filter[1].process_channel(output, 1, FilterMode::LowPass);
+        self.hp_filter[0].set_f_q(FrequencyApproximation::Fast, hp_cutoff, F(1.0));
+        self.hp_filter[0].process_channel(output, 0, FilterMode::HighPass);
+        let hp = self.hp_filter[0];
+        self.hp_filter[1].set(&hp);
+        self.hp_filter[1].process_channel(output, 1, FilterMode::HighPass);
+    }
+
+    /// `ProcessGranular(input, output, size)` in the granular and stretch modes: record, then play
+    /// the grains or the windows. Reads `input_downsampled` and writes `output_downsampled` at low
+    /// fidelity, `input` and `output` otherwise.
     fn process_granular(&mut self, p: &Inputs, downsampled: bool, size: usize) {
         let (input, output) = if downsampled {
             (&self.input_downsampled[..size], &mut self.output_downsampled[..size])
@@ -472,6 +596,12 @@ impl Granular {
         let channels = if self.stereo { 2 } else { 1 };
         for (channel, buffer) in self.buffers.iter_mut().enumerate().take(channels) {
             buffer.write_fade(input, channel, !p.freeze);
+        }
+
+        if self.mode == PlaybackMode::Stretch {
+            let parameters = WsolaParameters { position: p.position, size: p.size, pitch: p.pitch, trigger: p.trigger };
+            self.ws_player.play(&self.buffers, &mut self.correlator, &parameters, output);
+            return;
         }
 
         // In the granular mode, DENSITY is a meta parameter, and TEXTURE too.
@@ -497,17 +627,41 @@ impl Granular {
         self.player.play(&self.buffers, &grain, &mut self.random, output);
     }
 
-    /// `Prepare()` for the granular mode: after a quality change (or at construction) the effects'
-    /// memory and the buffers are re-initialized and the grain player is set to the quality's grain
-    /// count. (The firmware also initializes the correlator and the pitch shifter of the other
-    /// modes here; nothing of theirs reaches the granular mode's output.)
+    /// `Prepare()`: after a quality change (or at construction) the effects' memory, the
+    /// correlator, the buffers and both players are re-initialized; after a change between the two
+    /// modes the filters are reset and the correlator's memory cleared (the looping delay's pitch
+    /// shifter shares it on the module); in the stretch mode the correlator then takes the sign bits
+    /// of the window just scheduled, if any, and evaluates some candidates, once per block as the
+    /// harness runs it (the module runs `Prepare` from its main loop, as often as it can). The
+    /// firmware also clears the freeze parameter on a reset; the parameters are written every
+    /// block here, so that has no effect.
     fn prepare(&mut self) {
-        if !self.reset_buffers && self.prepared {
-            return;
+        let mode_changed = self.previous_mode != Some(self.mode);
+        // Both ported modes are benign to switch between; only the first `Prepare` after `Init`
+        // (from `PLAYBACK_MODE_LAST`) is not.
+        let benign_change = self.previous_mode.is_some();
+        if !self.reset_buffers && mode_changed && benign_change {
+            self.reset_filters();
+            self.correlator.clear_memory();
+            self.previous_mode = Some(self.mode);
         }
+        if self.reset_buffers || (mode_changed && !benign_change) {
+            self.reset_buffers_now();
+        }
+        if self.mode == PlaybackMode::Stretch {
+            self.ws_player.load_correlator(&self.buffers, &mut self.correlator);
+            self.correlator.evaluate_some_candidates();
+        }
+    }
+
+    /// The reset half of `Prepare`.
+    fn reset_buffers_now(&mut self) {
         let bytes = if self.stereo { [self.buffer_size.small; 2] } else { [self.buffer_size.large, 0] };
         self.diffuser.init();
         self.reverb.init();
+        self.correlator.init();
+        // The pitch shifter's memory, initialized (cleared) over the correlator's.
+        self.correlator.clear_memory();
         let resolution = if self.low_fidelity { Resolution::MuLaw8 } else { Resolution::Linear16 };
         let channels = if self.stereo { 2 } else { 1 };
         for (buffer, bytes) in self.buffers.iter_mut().zip(bytes).take(channels) {
@@ -515,7 +669,8 @@ impl Granular {
         }
         let num_grains = ((if self.stereo { 32 } else { 40 }) * (if self.low_fidelity { 23 } else { 16 })) >> 4;
         self.player.init(self.stereo, num_grains);
+        self.ws_player.init(self.stereo);
         self.reset_buffers = false;
-        self.prepared = true;
+        self.previous_mode = Some(self.mode);
     }
 }

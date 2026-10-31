@@ -48,6 +48,12 @@ impl Diffuser {
         self.write_ptr = 0;
     }
 
+    /// Back to the default state on the same memory, without allocating.
+    pub(crate) fn clear(&mut self) {
+        self.init();
+        self.amount = F::ZERO;
+    }
+
     /// `set_amount`.
     pub(crate) fn set_amount(&mut self, amount: F) {
         self.amount = amount;
@@ -256,6 +262,20 @@ impl Reverb {
         self.lfo[1].init_approximate(F(0.3) / 32000.0 * 32.0);
         self.lp = F(0.7);
         self.diffusion = F(0.625);
+    }
+
+    /// Back to the default state on the same memory, without allocating.
+    pub(crate) fn clear(&mut self) {
+        self.buffer.fill(0);
+        self.write_ptr = 0;
+        self.lfo = [CosineOscillator::default(); 2];
+        self.amount = F::ZERO;
+        self.input_gain = F::ZERO;
+        self.reverb_time = F::ZERO;
+        self.diffusion = F::ZERO;
+        self.lp = F::ZERO;
+        self.lp_decay_1 = F::ZERO;
+        self.lp_decay_2 = F::ZERO;
     }
 
     /// `set_amount`.

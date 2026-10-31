@@ -10,8 +10,10 @@
 //! 8-bit mu-law, stereo or mono), on memory sized at construction ([`BufferSize`]). See
 //! [`Granular::process`] for the render contract.
 //!
-//! The firmware's other playback modes (pitch shifter and time stretcher, looping delay, spectral)
-//! are not ported yet.
+//! [`PlaybackMode::Stretch`] is the firmware's pitch shifter and time stretcher (#199 slice 2): a
+//! WSOLA player whose two windows read the recording at the pitch ratio, each new one aligned by a
+//! sign-bit correlator, then the diffuser (DENSITY) and low-pass and high-pass filters (TEXTURE).
+//! The looping delay and the spectral mode are not ported.
 //!
 //! Pure Rust, `#![forbid(unsafe_code)]`, no allocation once a [`Granular`] is built, one random
 //! generator per processor, and the oracle's flush-to-zero (the firmware's desktop test harness;
@@ -21,6 +23,7 @@
 #![forbid(unsafe_code)]
 
 mod audio_buffer;
+mod correlator;
 pub mod float;
 mod fx;
 mod grain;
@@ -29,8 +32,9 @@ mod resources;
 mod sample_player;
 mod sample_rate_converter;
 pub mod stmlib;
+mod wsola;
 
-pub use processor::{BufferSize, Frame, Granular, Parameters, Quality};
+pub use processor::{BufferSize, Frame, Granular, Parameters, PlaybackMode, Quality};
 
 /// The firmware's sample rate: the module's codec runs at 32 kHz (`clouds/clouds.cc`), and its
 /// filters, grain sizes, effects and reverb are tuned for it. The low-fidelity qualities run the

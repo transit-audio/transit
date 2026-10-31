@@ -5,9 +5,16 @@ transit's granular texture processor ([ADR 0033](../../docs/adr/0033-built-in-in
 processor in its granular playback mode: it records its stereo input (with feedback) into a buffer,
 plays up to 64 overlapping grains from it, then runs a diffuser, a reverb and a dry/wet crossfade.
 Pure Rust, `#![forbid(unsafe_code)]`, no allocation once a `Granular` is built, one random
-generator per processor. Not played by the app: it is the nulled reference port of the module's
-granular mode, and the base the pitch shifter and time stretcher (the stretch mode, slice 2) builds
-on.
+generator per processor. The granular mode is not played by the app (the nulled reference port);
+the stretch mode (`PlaybackMode::Stretch`, #199 slice 2), the firmware's pitch shifter and time
+stretcher, is: the Pitch Shifter insert (`crates/dsp/src/plugins/pitch_shifter.rs`) runs it.
+
+In the stretch mode two triangular windows read the recording at the pitch ratio (WSOLA): each
+new window starts where a sign-bit correlator found it lines up best with the one fading out, so
+the pitch moves without the speed and the read position without the pitch. Position is where the
+windows read (a trigger restarts the read at the oldest audio, gliding back to Position at the rate
+of the triggers), Size the window (4096 samples down to 128), Density the diffuser, Texture the
+low-pass (below 0.5) and high-pass (above it) filters; spread is not read.
 
 | Parameter | What it does |
 |---|---|
@@ -72,6 +79,15 @@ block size, bypass and silence, the shortest and the longest buffer sizes with t
 transposed grains, and full-range ramps. `tests/pitch.rs` measures one grain's transposition (-12,
 0, +7, +12 semitones of a 440 Hz sine) at the expected absolute frequency within 1 cent, with
 the alias rejection of the E63 gate class (measured: 0.00 cents).
+
+`tests/stretch_vs_oracle.rs` holds the stretch mode to the same rule (#199 slice 2): every quality
+over the oracle's stretch-mode sweep (the same 111 points per quality, 12 tests), a 60 s run per
+quality (the pitch stepping over the whole range, freeze, triggers, 10 s of silence), and the
+scenarios (mode changes between granular and stretch in one processor, quality changes, every
+block size, bypass and silence, the shortest and longest memory with the extreme windows and
+transpositions, full-range ramps), plus `reset` against a new processor. All pass at 0 LSB
+(Windows x86-64 MSVC, 2026-10-31). The correlator evaluates its candidates in `Prepare`, once per
+block, as the harness orders it; on the module it runs from the main loop, timing-dependent.
 
 ```sh
 cargo test --locked -p transit-granular -- --nocapture

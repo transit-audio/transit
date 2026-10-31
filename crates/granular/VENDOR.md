@@ -20,6 +20,8 @@ cannot null. The port was never written from VCV Rack's Audible Instruments (GPL
 |---|---|
 | `clouds/dsp/granular_processor.{h,cc}` (`GranularProcessor`: `Init`, `Process`, `ProcessGranular`, `Prepare`, the quality), `parameters.h`, `frame.h` | `src/processor.rs` (`Granular`, `Parameters`, `Quality`, `BufferSize`) |
 | `clouds/dsp/granular_sample_player.h` | `src/sample_player.rs` |
+| `clouds/dsp/wsola_sample_player.h`, `window.h` | `src/wsola.rs` |
+| `clouds/dsp/correlator.{h,cc}` | `src/correlator.rs` |
 | `clouds/dsp/grain.h` | `src/grain.rs` |
 | `clouds/dsp/audio_buffer.h`, `mu_law.{h,cc}` | `src/audio_buffer.rs` |
 | `clouds/dsp/fx/diffuser.h`, `fx/reverb.h`, `fx/fx_engine.h` | `src/fx.rs` |
@@ -27,12 +29,13 @@ cannot null. The port was never written from VCV Rack's Audible Instruments (GPL
 | `clouds/resources.cc` (the six tables the granular mode reads), `clouds/dsp/mu_law.cc` (`lut_ulaw`) | `src/resources.rs` (generated) |
 | `stmlib/dsp/{filter,cosine_oscillator,parameter_interpolator,dsp,units,rsqrt}.h`, `units.cc`, `stmlib/utils/random.h` | `src/stmlib/` (`pitch_tables.rs` generated) |
 
-Not ported (later slices): the other playback modes, the pitch shifter and time stretcher
-(`wsola_sample_player.h`, `correlator.{h,cc}`, `window.h`, and the low-pass and high-pass filters
-of `Process`), the looping delay (`looping_sample_player.h`, `fx/pitch_shifter.h`) and the spectral
-mode (`pvoc/`); the persistent-buffer save and load (`GetPersistentData`, `LoadPersistentData`);
-and everything outside `clouds/dsp` (drivers, UI, CV scaler, settings, meter). The oracle already
-wraps the stretch mode and sweeps it, for its port.
+Ported in slice 2 (#199): the pitch shifter and time stretcher (`PLAYBACK_MODE_STRETCH`:
+`wsola_sample_player.h`, `correlator.{h,cc}`, `window.h`, the low-pass and high-pass filters of
+`Process`, the density-driven diffuser, and the benign mode change of `Prepare`). Not ported: the
+looping delay (`looping_sample_player.h`, `fx/pitch_shifter.h`, whose memory clear over the
+correlator's words is reproduced) and the spectral mode (`pvoc/`); the persistent-buffer save and
+load (`GetPersistentData`, `LoadPersistentData`); and everything outside `clouds/dsp` (drivers, UI,
+CV scaler, settings, meter).
 
 The helpers in `src/float.rs` and `src/stmlib/` (except `mod.rs`'s `soft_convert` and
 `fast_rsqrt_carmack`, and the filter's `set` and `process_channel`) are the resonator port's
@@ -73,6 +76,20 @@ specify:
   entry, the last repeated or a zero (`patches/all/0002` in the oracle crate), so the C++ reads
   exactly what the port reads and the comparison is defined; the module itself reads whatever
   follows each array.
+- **The silent stretch mode** (`window.h`): at `08460a69` `Window::Start` no longer clears
+  `done_` (two commits each removed one of two duplicate lines; the merge `d1d8839` kept both
+  removals), so no window starts and the mode is silent. The oracle restores the line on its
+  build-time copy (`patches/all/0001`) and the port does the same.
+- **The correlator's shift by 32** (`correlator.cc`): a candidate that is a multiple of 32 shifts a
+  32-bit word right by 32, undefined in C++; the oracle pins it to 0 (`patches/all/0002`, the
+  Cortex-M4's result) and so does the port.
+- **The correlator's words**: a search reads one word past the destination it loaded (shifted-in
+  bits of the last word), which holds what an earlier, longer search left there; the port keeps
+  the words across searches and clears them where the firmware's memory is cleared (the pitch
+  shifter's `Init` and `Clear` over the same words, at a reset and at a mode change).
+- **When the correlator runs**: the module evaluates candidates from its main loop, as often as the
+  CPU allows, so its windows' alignment depends on timing; the desktop harness (and the oracle)
+  runs `Prepare` once after every block, and the port follows the harness.
 - **Odd blocks at low fidelity**: the firmware's 2:1 converters take frames in pairs and would run
   past an odd block; the port renders the even part and leaves the last frame silent (the module
   always renders 32 frames; the oracle refuses odd low-fidelity blocks).

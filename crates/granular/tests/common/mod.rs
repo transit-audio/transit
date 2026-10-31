@@ -4,9 +4,9 @@
 #![forbid(unsafe_code)]
 #![allow(dead_code)] // Each test binary uses part of it.
 
-use transit_granular::{BufferSize, Granular, Parameters, Quality};
+use transit_granular::{BufferSize, Granular, Parameters, PlaybackMode, Quality};
 use transit_macro_osc_oracle::Session;
-use transit_macro_osc_oracle::granular::{Parameters as OracleParameters, Quality as OracleQuality};
+use transit_macro_osc_oracle::granular::{Parameters as OracleParameters, PlaybackMode as OracleMode, Quality as OracleQuality};
 
 /// One step of a scenario, applied to both sides in order.
 #[derive(Clone, Copy, Debug)]
@@ -19,6 +19,16 @@ pub enum Step {
     Bypass(bool),
     /// Set silence.
     Silence(bool),
+    /// Change the playback mode.
+    Mode(OracleMode),
+}
+
+/// The port's playback mode for an oracle mode.
+pub fn port_mode(m: OracleMode) -> PlaybackMode {
+    match m {
+        OracleMode::Granular => PlaybackMode::Granular,
+        OracleMode::Stretch => PlaybackMode::Stretch,
+    }
 }
 
 /// The port's quality for an oracle quality.
@@ -57,13 +67,28 @@ pub fn compare(
     input: &[[i16; 2]],
     steps: &[Step],
 ) -> Option<(usize, [i16; 2], [i16; 2])> {
+    compare_in_mode(label, large, small, quality, OracleMode::Granular, seed, input, steps)
+}
+
+/// As [`compare`], both sides starting in playback mode `mode`.
+#[allow(clippy::too_many_arguments)]
+pub fn compare_in_mode(
+    label: &str,
+    large: usize,
+    small: usize,
+    quality: OracleQuality,
+    mode: OracleMode,
+    seed: u32,
+    input: &[[i16; 2]],
+    steps: &[Step],
+) -> Option<(usize, [i16; 2], [i16; 2])> {
     let consumed: usize = steps.iter().map(|s| if let Step::Block(n, _) = s { *n } else { 0 }).sum();
     assert!(consumed <= input.len(), "{label}: the steps consume {consumed} frames of {}", input.len());
 
     let (oracle, oracle_rng) = {
         let session = Session::lock();
         session.seed(seed);
-        let mut o = session.granular(large, small, quality).unwrap();
+        let mut o = session.granular_in_mode(large, small, quality, mode).unwrap();
         let mut out = vec![[0_i16; 2]; consumed];
         let mut at = 0;
         for step in steps {
@@ -75,13 +100,14 @@ pub fn compare(
                 Step::Quality(q) => o.set_quality(q),
                 Step::Bypass(b) => o.set_bypass(b),
                 Step::Silence(s) => o.set_silence(s),
+                Step::Mode(m) => o.set_mode(m),
             }
         }
         (out, session.rng_state())
     };
 
     let buffer_size = BufferSize::new(large, small).expect("the port accepts every size the oracle does");
-    let mut g = Granular::new(buffer_size, port_quality(quality));
+    let mut g = Granular::new_in_mode(buffer_size, port_quality(quality), port_mode(mode));
     g.seed(seed);
     let mut port = vec![[0_i16; 2]; consumed];
     let mut at = 0;
@@ -94,6 +120,7 @@ pub fn compare(
             Step::Quality(q) => g.set_quality(port_quality(q)),
             Step::Bypass(b) => g.set_bypass(b),
             Step::Silence(s) => g.set_silence(s),
+            Step::Mode(m) => g.set_playback_mode(port_mode(m)),
         }
     }
 

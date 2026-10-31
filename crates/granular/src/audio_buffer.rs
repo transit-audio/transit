@@ -95,6 +95,16 @@ impl AudioBuffer {
         }
     }
 
+    /// Back to [`AudioBuffer::new`]'s state on the same memory (zeroed), without allocating.
+    pub(crate) fn clear(&mut self) {
+        self.memory.fill(0);
+        self.resolution = Resolution::Linear16;
+        self.size = 0;
+        self.write_head = 0;
+        self.crossfade_counter = 0;
+        self.tail = [0; CROSSFADE_SIZE as usize];
+    }
+
     /// `Init(buffer, size, tail)` over the first `bytes` bytes of the memory: `bytes / 2` 16-bit
     /// samples or `bytes` mu-law samples, cleared (mu-law silence is 127), less the interpolation
     /// tail.

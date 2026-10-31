@@ -1,6 +1,6 @@
 [package]
 name = "transit-granular"
-description = "transit's granular texture processor, ported to Rust from Émilie Gillet's MIT firmware and nulled against the C++ oracle (ADR 0033, #199)."
+description = "transit's granular texture processor and pitch shifter / time stretcher, ported to Rust from Émilie Gillet's MIT firmware and nulled against the C++ oracle (ADR 0033, #199)."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
