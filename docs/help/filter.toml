@@ -76,7 +76,7 @@ text = "The LFO's speed in hertz when Sync is off."
 [[entry]]
 id = "filter.lfo_sync"
 name = "LFO Sync"
-text = "Follows the project tempo: the LFO takes one Division per cycle."
+text = "Follows the project tempo: the LFO takes one Division per cycle, and while the song plays it follows the song position, so playing from any bar sweeps the same way. Stopped, or with Retrigger on, it runs freely."
 
 [[entry]]
 id = "filter.lfo_division"

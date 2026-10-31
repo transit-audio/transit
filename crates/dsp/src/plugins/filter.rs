@@ -180,6 +180,14 @@ pub struct Filter {
     state: Vec<[Section; 2]>,
     tempo: f64,
     bar_quarters: f64,
+    /// While the transport plays: the sample and song position (quarter notes) a synced LFO counts
+    /// from, set when playback starts, jumps or changes tempo (the Macro Oscillator's rule, #243;
+    /// see [`Filter::anchored_phase`]).
+    anchor: Option<(i64, f64)>,
+    /// The timeline sample of the current host block's first frame, and the one the next block
+    /// should start at if playback runs on.
+    host_pos: i64,
+    next_pos: i64,
 }
 
 impl Default for Filter {
@@ -215,6 +223,9 @@ impl Filter {
             state: vec![[Section::default(); 2]; 2],
             tempo: 120.0,
             bar_quarters: 4.0,
+            anchor: None,
+            host_pos: 0,
+            next_pos: 0,
         };
         f.update();
         f
@@ -237,6 +248,21 @@ impl Filter {
         } else {
             f64::from(p.v(P_LFO_RATE)) / f64::from(self.sr)
         };
+    }
+
+    /// The synced LFO's phase (cycles) at the start of this host block while the transport plays:
+    /// the song position over the division's length, the position counted in whole frames from one
+    /// anchor so every host block size gives the same phase for the same frame (at a tempo that
+    /// changes only at host block starts). `None` when the LFO is free-running: sync off, the
+    /// retrigger on (a note restarts it), or the transport stopped.
+    fn anchored_phase(&self) -> Option<f64> {
+        if !self.p.on(P_LFO_SYNC) || self.p.on(P_LFO_RETRIG) {
+            return None;
+        }
+        let (sample, quarters) = self.anchor?;
+        let frames = self.host_pos.saturating_sub(sample);
+        let at = quarters + frames as f64 * self.tempo / 60.0 / f64::from(self.sr);
+        Some(at / division_quarters(self.p.choice(P_LFO_DIV), self.bar_quarters))
     }
 
     fn push(&mut self, offset: usize, kind: Kind) -> bool {
@@ -359,6 +385,7 @@ impl Plugin for Filter {
         self.amp = Adsr::new();
         self.velocity = 127;
         self.lfo = Lfo::new();
+        self.anchor = None;
         self.follower.level = 0.0;
         for s in [&mut self.cutoff, &mut self.k, &mut self.drive, &mut self.output] {
             s.snap();
@@ -369,6 +396,14 @@ impl Plugin for Filter {
     fn set_transport(&mut self, t: &Transport) {
         let tempo = if t.tempo.is_finite() && t.tempo > 0.0 { t.tempo.clamp(1.0, 999.0) } else { 120.0 };
         let bar = if t.numerator > 0 && t.denominator > 0 { f64::from(t.numerator) * 4.0 / f64::from(t.denominator) } else { 4.0 };
+        let jumped = t.samples != self.next_pos || tempo != self.tempo;
+        self.anchor = match self.anchor {
+            _ if !t.playing || !t.quarters.is_finite() => None,
+            Some(a) if !jumped => Some(a),
+            _ => Some((t.samples, t.quarters)),
+        };
+        self.host_pos = t.samples;
+        self.next_pos = t.samples;
         if tempo != self.tempo || bar != self.bar_quarters {
             self.tempo = tempo;
             self.bar_quarters = bar.clamp(0.25, 64.0);
@@ -412,6 +447,10 @@ impl Plugin for Filter {
         let slope24 = self.p.choice(P_SLOPE) == 1;
         let amp_on = self.p.on(P_AMP_ON);
         let amp_vel = self.p.v(P_AMP_VEL) / 100.0;
+        if let Some(phase) = self.anchored_phase() {
+            self.lfo.set_phase(phase);
+        }
+        self.next_pos = self.host_pos.saturating_add(frames as i64);
         let mut next = 0;
         for n in 0..frames {
             // Events due at this frame (and, at the last frame, any past the block) first.

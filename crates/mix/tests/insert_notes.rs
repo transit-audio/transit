@@ -292,6 +292,33 @@ fn the_filter_renders_the_same_bits_in_64_and_512_frame_blocks() {
     assert!(render_range(&silent, range, 512).iter().flatten().all(|v| *v == 0.0));
 }
 
+/// The review's repro (#245): the synced LFO at 1/16 and 100 %, with the tempo changing at tick 44.
+fn tempo_change_session() -> Session {
+    let mut s = filter_session();
+    let f = s.tracks[0].mixer.inserts[0].as_mut().unwrap();
+    f.params.insert("lfo_amount".into(), 100.0);
+    f.params.insert("lfo_shape".into(), 0.0);
+    f.params.insert("lfo_division".into(), 6.0);
+    s.tempo.set_tempo(44, 150.0).unwrap();
+    s
+}
+
+#[test]
+fn a_synced_filter_lfo_follows_the_song_position_across_a_tempo_change() {
+    MixEngine::force_serial(true);
+    let s = tempo_change_session();
+    let range = Range::new(0, 48_000);
+    let a = render_range(&s, range, 512);
+    let b = render_range(&s, range, 64);
+    assert!(a.iter().flatten().any(|v| v.abs() > 0.01), "the track sounds");
+    // The tempo takes effect at a host block start, so the two block sizes run the old tempo for
+    // different stretches after frame 1100; from the first block start at or after 1536 (both
+    // sizes use the new tempo and anchor to the same song position) the sweep is the same.
+    let from = 1536 + 2048;
+    let worst = a.iter().zip(&b).flat_map(|(x, y)| x[from..].iter().zip(&y[from..]).map(|(p, q)| (p - q).abs())).fold(0.0f32, f32::max);
+    assert!(worst < 1e-6, "max difference {worst}");
+}
+
 #[test]
 fn the_filter_on_a_strip_allocates_nothing_on_the_audio_thread() {
     MixEngine::force_serial(true);

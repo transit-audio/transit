@@ -316,6 +316,88 @@ fn a_tempo_synced_lfo_runs_at_the_division() {
     assert!((free.lfo_inc - 2.0 / 48_000.0).abs() < 1e-15);
 }
 
+/// Renders `input` (mono, to both channels) in host blocks of `block` with the transport at 120 BPM
+/// in 4/4 given to each block: `first` is the timeline sample of the first frame, and the quarter
+/// note position follows from it (`quarters_at_first` there). Returns the left channel.
+fn render_playing(f: &mut Filter, input: &[f32], block: usize, first: i64, quarters_at_first: f64, playing: bool) -> Vec<f32> {
+    let mut out = Vec::with_capacity(input.len());
+    let mut io = vec![vec![0.0; block]; 2];
+    let mut start = 0;
+    while start < input.len() {
+        let n = block.min(input.len() - start);
+        let samples = first + start as i64;
+        let quarters = quarters_at_first + start as f64 * 2.0 / f64::from(SR);
+        f.set_transport(&Transport { playing, tempo: 120.0, numerator: 4, denominator: 4, samples, quarters, ..Transport::default() });
+        for c in &mut io {
+            c[..n].copy_from_slice(&input[start..start + n]);
+        }
+        f.process(&mut io, n);
+        out.extend_from_slice(&io[0][..n]);
+        start += n;
+    }
+    out
+}
+
+fn tone(frames: usize) -> Vec<f32> {
+    (0..frames).map(|i| (i as f32 * 0.05).sin() * 0.5 + (i as f32 * 0.31).sin() * 0.25).collect()
+}
+
+const SYNCED: [(&str, f32); 5] = [("lfo_sync", 1.0), ("lfo_division", 4.0), ("lfo_amount", 100.0), ("cutoff", 800.0), ("resonance", 30.0)];
+
+#[test]
+fn a_synced_lfo_starts_at_the_song_position_wherever_playback_starts() {
+    // Playing from bar 1 up to a half quarter past bar 5, and starting there: the same sweep.
+    let start = 396_000usize;
+    let window = 4096;
+    let input = tone(start + window);
+    let mut from_top = filter(&SYNCED);
+    let a = render_playing(&mut from_top, &input, 512, 0, 0.0, true);
+    let mut seeked = filter(&SYNCED);
+    let b = render_playing(&mut seeked, &input[start..], 512, start as i64, 16.5, true);
+    // The filter's own memory is a few hundred frames; compare after it settled.
+    let worst = (1024..window).map(|i| (a[start + i] - b[i]).abs()).fold(0.0f32, f32::max);
+    assert!(worst < 1e-4, "{worst}");
+    // Anchored to the wrong position (the top of the song) it would sweep somewhere else.
+    let mut wrong = filter(&SYNCED);
+    let c = render_playing(&mut wrong, &input[start..], 512, start as i64, 0.0, true);
+    let apart = (1024..window).map(|i| (a[start + i] - c[i]).abs()).fold(0.0f32, f32::max);
+    assert!(apart > 1e-2, "{apart}");
+}
+
+#[test]
+fn a_synced_lfo_gives_the_same_bits_in_any_host_block_size_at_a_constant_tempo() {
+    let input = tone(24_000);
+    let run = |block| render_playing(&mut filter(&SYNCED), &input, block, 7_000, 3.5, true);
+    let reference = run(512);
+    for block in [1, 16, 64, 200, 1024] {
+        let got = run(block);
+        let worst = reference.iter().zip(&got).map(|(x, y)| (x - y).abs()).fold(0.0f32, f32::max);
+        assert!(worst < 1e-6, "block {block}: {worst}");
+    }
+}
+
+#[test]
+fn a_stopped_transport_leaves_the_lfo_free_running_and_sync_off_ignores_the_position() {
+    let input = tone(2_000);
+    let mut f = filter(&SYNCED);
+    render_playing(&mut f, &input[..100], 100, 0, 16.5, false);
+    let inc = f.lfo_inc;
+    assert!((f.lfo.phase() - 100.0 * inc).abs() < 1e-12, "stopped: no re-anchor, {}", f.lfo.phase());
+    // Playing: the same block starts from the song position.
+    let mut g = filter(&SYNCED);
+    render_playing(&mut g, &input[..100], 100, 0, 16.5, true);
+    assert!((g.lfo.phase() - (0.5 + 100.0 * inc)).abs() < 1e-12, "playing: {}", g.lfo.phase());
+    // Sync off: the output does not depend on the transport at all.
+    let free: [(&str, f32); 3] = [("lfo_amount", 100.0), ("lfo_rate", 3.0), ("cutoff", 800.0)];
+    let playing = render_playing(&mut filter(&free), &input, 256, 5_000, 9.25, true);
+    let stopped = render_playing(&mut filter(&free), &input, 256, 0, 0.0, false);
+    assert!(playing.iter().zip(&stopped).all(|(x, y)| x.to_bits() == y.to_bits()));
+    // A retriggering LFO is not anchored either: a note restarts it.
+    let mut r = filter(&[("lfo_sync", 1.0), ("lfo_retrigger", 1.0)]);
+    render_playing(&mut r, &input[..100], 100, 0, 16.5, true);
+    assert!((r.lfo.phase() - 100.0 * r.lfo_inc).abs() < 1e-12, "retrigger: {}", r.lfo.phase());
+}
+
 #[test]
 fn every_lfo_shape_stays_bipolar_and_the_random_one_is_repeatable() {
     let mut a = Lfo::new();
