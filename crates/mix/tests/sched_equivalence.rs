@@ -45,7 +45,7 @@
 //! schedule lands as a named regression test ([`regression`], see the template at the end).
 //!
 //! **Where state cannot be read** (the corpus sessions' equalizers, saturator, chorus, reverb,
-//! maximizer and synths have no fingerprint): the holds end `WINDOW` blocks before the end of the
+//! limiter-mode compressor and synths have no fingerprint): the holds end `WINDOW` blocks before the end of the
 //! render and every corpus case states its post-fault window, the longest tail and latency of its
 //! plug-ins plus the plan's latency, rounded up to whole blocks; the render runs that long after
 //! the last hold, and every sample of it is compared.
@@ -936,7 +936,7 @@ fn post_fault_window(s: &Session, latency: usize) -> usize {
 }
 
 /// Gate (#210): the corpus sessions with a key edge added (their equalizers, saturator, chorus,
-/// reverb, maximizer and synths have no fingerprint: each case states its post-fault window).
+/// reverb, limiter-mode compressor and synths have no fingerprint: each case states its post-fault window).
 #[test]
 fn the_corpus_sessions_with_a_key_equal_their_muted_serial_render_under_seeded_stall_schedules() {
     let _on = graph_on();

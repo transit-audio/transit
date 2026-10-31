@@ -308,7 +308,8 @@ open-source texture processor firmware (MIT), checked bit for bit against her co
 ([ADR 0033](adr/0033-built-in-instruments-mutable-instruments-port.md)). It records what comes into
 it; two overlapping windows read the recording back at the pitch you set, each new window placed
 where it lines up best with the one fading out, so the pitch moves without the speed and the read
-position moves without the pitch. (The simpler Pitch Shifter built-in stays as it was.)
+position moves without the pitch. (The inherited two-tap Pitch Shifter was retired in the same release, so the Time Stretcher is
+the pitch shifter now.)
 
 - **Shift**: **Pitch** (two octaves either way, in semitones; a big jump glides there an octave per
   window), **Fine** (cents) and **Window** (the windows' length: short is grainy, long is smooth).
