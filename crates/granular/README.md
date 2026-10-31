@@ -7,7 +7,7 @@ plays up to 64 overlapping grains from it, then runs a diffuser, a reverb and a 
 Pure Rust, `#![forbid(unsafe_code)]`, no allocation once a `Granular` is built, one random
 generator per processor. The granular mode is not played by the app (the nulled reference port);
 the stretch mode (`PlaybackMode::Stretch`, #199 slice 2), the firmware's pitch shifter and time
-stretcher, is: the Pitch Shifter insert (`crates/dsp/src/plugins/pitch_shifter.rs`) runs it.
+stretcher, is: the Time Stretcher insert (`crates/dsp/src/plugins/time_stretcher.rs`) runs it.
 
 In the stretch mode two triangular windows read the recording at the pitch ratio (WSOLA): each
 new window starts where a sign-bit correlator found it lines up best with the one fading out, so

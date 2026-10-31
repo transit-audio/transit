@@ -84,8 +84,10 @@ port reproduces the flush in its own code, where the reference's arithmetic prod
 (`utils::ftz` in `crates/macro-osc`; an `f32` wrapper that flushes every result in
 `crates/resonator/src/float.rs`). It is proven for the sweep, not in general. In the granular
 port (`crates/granular`) it is not proven at all yet: the firmware's output is int16, a subnormal
-never moves a sample by one LSB, and every granular test passes with the flush off. TODO (#199
-slice 2): the float output path must bring a test that fails with the flush off. The texture port
+never moves a sample by one LSB, and every granular and stretch test passes with the flush off.
+The Time Stretcher (#199 slice 2) did not change that: it uses the firmware's int16 output and
+converts it to float after the firmware, so there is still no float path inside the port to
+discriminate the flush; a later slice that taps the firmware's float output must bring the test. The texture port
 (`crates/texture`) has such a test: its output is float, the oracle can render without the flush
 (an evidence switch), the two renders differ in hundreds of subnormal samples, and the port matches
 the flushed one; with the port's flush made the identity, the test and the long runs fail.
