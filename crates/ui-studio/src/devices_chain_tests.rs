@@ -260,6 +260,17 @@ fn the_plus_menu_is_shaped_like_the_instrument_menu_and_publishes_its_rows() {
     assert_eq!(rect, [0.0; 4]);
 }
 
+/// The filter box shows exactly when the menu's plug-in entries (the Hardware Insert row is not one)
+/// outnumber `FILTER_OVER`, whatever the number of built-ins; a shown box is a non-empty rect.
+fn assert_filter_box_follows_entry_count(filter_rect: &[f32; 4], menu: &[crate::mixer::MenuItem]) {
+    let entries = menu.iter().filter(|m| m.value != "hardware_insert").count();
+    if entries > crate::devices::FILTER_OVER {
+        assert!(filter_rect[2] > filter_rect[0] && filter_rect[3] > filter_rect[1], "{entries} entries show a filter box: {filter_rect:?}");
+    } else {
+        assert_eq!(*filter_rect, [0.0; 4], "{entries} entries fit without a filter box");
+    }
+}
+
 #[test]
 fn the_device_chain_and_strip_plus_menus_list_effects_only_and_both_add() {
     let (mut app, ctx, mut time, t) = mixer_app();
@@ -271,7 +282,7 @@ fn the_device_chain_and_strip_plus_menus_list_effects_only_and_both_add() {
     let menu = app.mixer.devices.menu.clone();
     assert!(menu.iter().any(|m| m.value == "dither"), "the last built-in effect is listed: {menu:?}");
     assert!(menu.iter().any(|m| m.value == "gain"), "{menu:?}");
-    assert_eq!(app.mixer.filter_rect, [0.0; 4], "the built-in effects alone fit without a filter box");
+    assert_filter_box_follows_entry_count(&app.mixer.filter_rect, &menu);
     assert!(menu.iter().all(|m| m.value != "sampler" && m.value != "macro_oscillator"), "instruments are refused in an effects menu");
     // The chain menu's rows are reachable by UI input, like the instrument menu's.
     let item = menu.iter().find(|m| m.value == "gain").cloned().unwrap();
@@ -283,11 +294,19 @@ fn the_device_chain_and_strip_plus_menus_list_effects_only_and_both_add() {
     let at = mid(strip(&app, t).add_insert);
     click(&mut app, at);
     frames(&mut app, &ctx, 6, &mut time);
-    assert_eq!(app.mixer.filter_rect, [0.0; 4]);
     let strip_menu = app.mixer.layout.menu.clone();
+    assert_filter_box_follows_entry_count(&app.mixer.filter_rect, &strip_menu);
     assert!(strip_menu.iter().any(|m| m.value == "dither"));
     assert!(strip_menu.iter().all(|m| m.value != "sampler"));
-    let item = strip_menu.iter().find(|m| m.value == "dither").cloned().expect("Dither in the strip menu");
+    let mut item = strip_menu.iter().find(|m| m.value == "dither").cloned().expect("Dither in the strip menu");
+    if !item.visible {
+        // A long menu scrolls its last rows out; the filter box (shown above the threshold) reaches them.
+        assert_ne!(app.mixer.filter_rect, [0.0; 4], "rows only scroll out of a menu that has a filter box");
+        app.mixer.effect_filter = "dither".into();
+        frames(&mut app, &ctx, 3, &mut time);
+        item = app.mixer.layout.menu.iter().find(|m| m.value == "dither").cloned().expect("Dither survives its own filter");
+        assert!(item.visible);
+    }
     click(&mut app, mid(item.rect));
     frames(&mut app, &ctx, 6, &mut time);
     let ins = app.engine.session().track(t).unwrap().mixer.inserts.clone();
