@@ -3,6 +3,7 @@
 pub mod drums;
 pub mod dynamics;
 pub mod eq;
+pub mod filter;
 pub mod harmonic;
 pub mod instrument_queue;
 pub mod macro_osc;
@@ -32,6 +33,7 @@ macro_rules! registry {
 registry! {
     eq::EQ1_INFO => eq::Eq1::new(),
     eq::EQ7_INFO => eq::Eq7::new(),
+    filter::FILTER_INFO => filter::Filter::new(),
     dynamics::COMP_INFO => dynamics::Compressor::new(),
     dynamics::GATE_INFO => dynamics::ExpanderGate::new(),
     dynamics::DEESS_INFO => dynamics::DeEsser::new(),

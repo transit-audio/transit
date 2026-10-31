@@ -32,6 +32,7 @@ pub use editor_header::{EditorHeader, HeaderAction, JobPoll, LoadedValues, State
 pub use offline::FadeShape;
 pub use osc::Waveform;
 pub use plugins::eq::{eq1_response, eq7_response};
+pub use plugins::filter::filter_response;
 
 use std::sync::Arc;
 
@@ -332,6 +333,16 @@ pub trait Plugin: Send {
     /// program change) at a sample offset within the next block.
     fn midi(&mut self, _offset: usize, _msg: [u8; 3]) {}
     fn all_notes_off(&mut self) {}
+    /// Effect inserts: true when the insert reads its track's note stream (ADR 0038, #242). The
+    /// mix then gives it, through [`Plugin::event`] before each `process`, every note-on, note-off,
+    /// sustain pedal and all-notes-off its track's instrument accepted in the block, at the same
+    /// offsets (after the MIDI effect slot, ADR 0036), and calls [`Plugin::all_notes_off`] for each
+    /// block it skips the insert (bypassed, inactive, failed). A read-only view: nothing the insert
+    /// does reaches the instrument. Inserts on a track without an instrument get nothing. The
+    /// default (hosted plug-ins, every other built-in) is no.
+    fn reads_track_notes(&self) -> bool {
+        false
+    }
     /// Instruments: one event at a sample offset within the next block, on a MIDI 1.0 channel
     /// and with the host's voice id (see [`event::PluginEvent`]). `false` only when the
     /// plug-in's own queue refused it (the mix counts it). The default maps the event onto
