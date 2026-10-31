@@ -125,3 +125,15 @@ Both run a chain of MIDI effects before the instrument, in order, each one bypas
 - **Transforming events before the note table.** The table's source and identity matching would
   then see transformed keys, and every path that releases a source (seek, revoke, Stop) would need
   the chain's mapping.
+
+## Note 2026-10-31: the first generator (#202)
+
+The Reopen-when item "before the generators of #202 land" is answered for the Random Sequencer
+(`random_sequencer`): it keeps its own schedule in beats and writes only events due in the block
+(at most a few per tick: two gate channels' starts and ends, the clock's), never one at or past the
+block's end, so it uses no carry; it passes its input through one for one (note-ons dropped unless
+Thru). Its output therefore stays within the 512-event block buffer unless the input alone fills it.
+It needs the session's sample rate to turn beats into offsets: `MidiEffect::set_sample_rate`, given
+with the transport at the start of every block. A chain edit or a Stop resets it with the other
+effects (its notes are ended by the host); its next playing block restarts it on the grid.
+

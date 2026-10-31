@@ -182,7 +182,10 @@ fn a_rack_with_midi_effects_shows_both_cards_effects_first() {
     assert!(fx.rect[2] <= card.rect[0], "the MIDI effects card is ahead of the rack card: {:?} then {:?}", fx.rect, card.rect);
     assert!(t.app.mixer.devices.cards.is_empty(), "a rack has no instrument card");
     let track = t.app.engine.session().track(rack).unwrap();
-    let need = crate::midi_fx_panel::card_height(track).max(crate::rack_panel::card_height(t.app.engine.session(), track)).max(116.0) + 16.0;
+    let need = crate::midi_fx_panel::card_height(&t.app.ui.midi_fx_sections, track)
+        .max(crate::rack_panel::card_height(t.app.engine.session(), track))
+        .max(116.0)
+        + 16.0;
     assert!((crate::devices::pane_height(&t.app) - need).abs() < 0.5, "{} covers both cards ({need})", crate::devices::pane_height(&t.app));
     assert!(fx.rect[3] - fx.rect[1] <= crate::devices::pane_height(&t.app) && card.rect[3] - card.rect[1] <= crate::devices::pane_height(&t.app));
 }

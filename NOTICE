@@ -64,4 +64,14 @@ transit from her C++, under the MIT License:
 The full notices are in crates/resonator/LICENSE-THIRD-PARTY and in the app under
 Help > About transit.
 
+transit's Random Sequencer MIDI effect is a Rust port of Emilie Gillet's random sampler firmware
+and stmlib (https://github.com/pichenettes/eurorack, https://github.com/pichenettes/stmlib),
+written by transit from her C++, under the MIT License:
+
+  Copyright 2015 Emilie Gillet (eurorack)
+  Copyright 2012 Emilie Gillet (stmlib)
+
+The full notices are in crates/random-sequencer/LICENSE-THIRD-PARTY and in the app under
+Help > About transit.
+
 transit is based on SoundCraft by storytold (https://github.com/storytold/soundcraft), MIT OR Apache-2.0.

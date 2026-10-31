@@ -399,6 +399,36 @@ session rate. The delay (59 samples at 96 kHz, 97 at 44.1 kHz, 99 at 48 kHz) goe
 compensation. Every control can be automated and mapped to a MIDI controller. Presets: Ring Bell,
 Vocoder, XOR Grit, and your own.
 
+## Random Sequencer
+
+The Random Sequencer is a built-in MIDI effect: add it with "+" in the MIDI Effects card of an
+instrument track (or a rack), and it plays random notes into the instrument while the transport
+runs. It is a port of Émilie Gillet's open-source random sampler firmware (MIT), checked bit for
+bit against her code ([ADR 0033](adr/0033-built-in-instruments-mutable-instruments-port.md)). Its
+controls sit in sections (Rhythm, Pitch, Loop, Velocity, Seed); click a section's header to show or
+hide it. Right-click its name for the presets: Drifting Melody, Locked Loop, Sparse Random Bass.
+
+- **Rhythm.** **Rate** is how often the clock ticks, as a note value of the song's tempo (4/1 to
+  1/64, with dotted and triplet values); ticks stay on that grid when the tempo changes. **Model**
+  decides at each tick which of two gates fire (Coin Toss, Clusters, Drums, Independent, Divider,
+  Three States) and **Gate Bias** leans it. **Jitter** moves ticks early or late. A note lasts as
+  long as its gate: **Gate Length** and **Length Random**. **Play** picks the voices: gate 1, gate
+  2, both, the clock (a note every tick), or all three.
+- **Pitch.** **Spread** and **Bias** shape where the pitches fall in the **Range** (2 or 5 octaves up
+  from **Root** in **Octave**, or 10 around it); **Steps** keeps them to the **Scale** (every
+  semitone at 0, then the scale, then ever fewer of its strongest notes, the root alone at 100%).
+  **Pitch Mode** spreads the three voices' settings apart (Same, Bump, Tilt).
+- **Loop.** **Deja Vu** repeats the random decisions: new at 0, an exact loop of **Loop Length**
+  steps across its middle, shuffled above. **Freeze** locks the loop; **Deja Vu On** picks the gates,
+  the pitches or both.
+- **Velocity** and **Dynamics** set the notes' velocity and how far it varies.
+- **Seed** picks the random sequence. With **Latch** on, every play start, locate and loop starts
+  it over, so a passage plays the same notes each time; off, each pass differs. **Thru** lets the
+  notes you play through as well.
+
+The notes land on exact samples, the same at any buffer size, and every one ends when you stop.
+Every control can be automated and mapped to a MIDI controller.
+
 ## Retired built-in effects
 
 transit retires the effects it inherited from the SoundCraft fork in stages

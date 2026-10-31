@@ -17,6 +17,7 @@ optional `key` (spelled as the shortcut table spells it) and an optional `link` 
 | [`time-stretcher.toml`](time-stretcher.toml) | The Time Stretcher insert's panel. |
 | [`cross-modulator.toml`](cross-modulator.toml) | The Cross Modulator insert's panel. |
 | [`tuner.toml`](tuner.toml) | The Tuner insert's panel. |
+| [`random-sequencer.toml`](random-sequencer.toml) | The Random Sequencer MIDI effect's controls. |
 | [`macro-osc.toml`](macro-osc.toml) | The Macro Oscillator's panel. |
 | [`resonator.toml`](resonator.toml) | The Resonator's panel. |
 | [`telemetry.toml`](telemetry.toml) | The load readout and every figure of Callback Telemetry. |

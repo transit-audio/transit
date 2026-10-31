@@ -59,6 +59,7 @@ pub mod plugin_header;
 pub mod plugin_scan;
 pub mod presets;
 pub mod rack_panel;
+pub mod random_sequencer_panel;
 pub mod recent;
 pub mod resonator_panel;
 pub mod scope_strip;
@@ -196,6 +197,10 @@ pub struct UiState {
     /// document; the lanes it opens are in `ui.inspect`'s slice 6 layout.
     #[serde(skip)]
     pub takes_open: Vec<TrackId>,
+    /// MIDI effect parameter sections opened or closed from their default (the first open): track,
+    /// effect index, section (view state, not saved).
+    #[serde(skip)]
+    pub midi_fx_sections: Vec<(TrackId, usize, String)>,
     /// Edit > Undo History is open (view state, not saved).
     #[serde(skip)]
     pub show_history: bool,
@@ -248,6 +253,7 @@ impl Default for UiState {
             check_for_updates: true,
             last_update_check: 0,
             takes_open: Vec::new(),
+            midi_fx_sections: Vec::new(),
             show_history: false,
             auto_shown: Vec::new(),
             auto_lanes: Vec::new(),
@@ -790,6 +796,7 @@ impl StudioApp {
         (ns.cursor, ns.cursor_track, ns.focus_track) = (self.ui.cursor, self.ui.cursor_track, self.ui.focus_track);
         ns.collapsed = std::mem::take(&mut self.ui.collapsed);
         ns.takes_open = std::mem::take(&mut self.ui.takes_open);
+        ns.midi_fx_sections = std::mem::take(&mut self.ui.midi_fx_sections);
         ns.auto_shown = std::mem::take(&mut self.ui.auto_shown);
         ns.auto_lanes = std::mem::take(&mut self.ui.auto_lanes);
         let before = std::mem::replace(&mut self.ui, ns);

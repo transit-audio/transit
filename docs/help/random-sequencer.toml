@@ -1,0 +1,129 @@
+# The Random Sequencer's controls (the built-in MIDI effect, #202, ADR 0033).
+area = "random-sequencer"
+title = "Random Sequencer"
+link = "user-guide.md#random-sequencer"
+
+[[entry]]
+id = "random_sequencer.rate"
+name = "Rate"
+text = "How often the clock ticks, as a note value of the song's tempo: from a tick every four whole notes to sixty-fourths, with the dotted and triplet values between (the divisions the module's clock input offers, with the beat as the clock). Ticks fall on that grid from the start of the song, so a tempo change keeps them on the beat."
+
+[[entry]]
+id = "random_sequencer.model"
+name = "Model"
+text = "How each tick decides which gates fire. Coin Toss: one of the two gates, the bias leaning it. Clusters: bursts at multiples and divisions of the clock, denser toward either end of the bias. Drums: eight-step kick and snare patterns, busier toward either end. Independent: a coin toss per gate. Divider: fixed multiplications and divisions of the clock, from 8 times on gate 1 to 8 times on gate 2. Three States: gate 1, gate 2 or neither."
+
+[[entry]]
+id = "random_sequencer.gate_bias"
+name = "Gate Bias"
+text = "Leans the model's decisions: toward gate 1 below 50%, toward gate 2 above. In Clusters and Drums it chooses how dense the patterns are, in Divider which division plays."
+
+[[entry]]
+id = "random_sequencer.jitter"
+name = "Jitter"
+text = "Moves each tick early or late by a random amount, more toward 100%; the clock is pulled back toward the grid so the ticks keep the tempo on average. At 0 every tick is exactly on the grid."
+
+[[entry]]
+id = "random_sequencer.gate_length"
+name = "Gate Length"
+text = "How long each gate stays high, as a share of its tick (5% to 95%). A note lasts as long as its gate: a gate followed by silence stays up longer, as the module's slows its ramp when no pulse follows."
+
+[[entry]]
+id = "random_sequencer.length_random"
+name = "Length Random"
+text = "Varies the gate lengths around Gate Length: at 0 every gate has the same length, toward 100% they spread from short to long."
+
+[[entry]]
+id = "random_sequencer.play"
+name = "Play"
+text = "Which gates make notes. Both Gates: gate 1 plays the first pitch channel and gate 2 the third. Gate 1 or Gate 2 alone. Clock: a note every tick on the second pitch channel, half a tick long. All: the three together. A key one voice holds ends before another voice plays it."
+
+[[entry]]
+id = "random_sequencer.spread"
+name = "Spread"
+text = "How far the pitches stray: at 0 every note is the Bias pitch, around 50% they cluster near it, toward 100% they fill the range, and at the top they jump between its ends."
+
+[[entry]]
+id = "random_sequencer.bias"
+name = "Bias"
+text = "Where the pitches center within the range: low notes below 50%, high notes above."
+
+[[entry]]
+id = "random_sequencer.steps"
+name = "Steps"
+text = "How strictly the pitches keep to the scale: at 0 every semitone (the free voltage rounded to the nearest one), then only the scale's notes, then ever fewer of its strongest notes, until at 100% only the root plays."
+
+[[entry]]
+id = "random_sequencer.scale"
+name = "Scale"
+text = "The notes Steps keeps, each with a weight that decides which stay as Steps rises: Major, Minor, Pentatonic, Pelog, Bhairav and Shri (the module's six; the last three use notes between the semitones, which round to the nearest semitone here), and Chromatic, every semitone at every Steps level."
+
+[[entry]]
+id = "random_sequencer.root"
+name = "Root"
+text = "The scale's root note."
+
+[[entry]]
+id = "random_sequencer.octave"
+name = "Octave"
+text = "The octave of the root at the bottom of the range (3: C3, MIDI note 48)."
+
+[[entry]]
+id = "random_sequencer.range"
+name = "Range"
+text = "How wide the pitches spread: 2 or 5 octaves up from the root, or 10 octaves centered on it. Notes beyond the keyboard fold back by octaves."
+
+[[entry]]
+id = "random_sequencer.pitch_mode"
+name = "Pitch Mode"
+text = "How the three pitch channels share Spread, Bias and Steps. Same: all three follow them. Bump: the second follows them, the first and third mirror them around the center. Tilt: the first mirrors them, the second sits at the center, the third follows."
+
+[[entry]]
+id = "random_sequencer.deja_vu"
+name = "Deja Vu"
+text = "How often the random decisions repeat. At 0 every decision is new; toward the middle the last Loop Length decisions come back more and more often; across the middle (47% to 53%) they loop exactly; above it they come back in a random order, shuffled completely at 100%."
+
+[[entry]]
+id = "random_sequencer.loop_length"
+name = "Loop Length"
+text = "How many decisions Deja Vu loops: 1 to 16."
+
+[[entry]]
+id = "random_sequencer.freeze"
+name = "Freeze"
+text = "Locks the loop: the last Loop Length decisions repeat exactly whatever Deja Vu says, on what Deja Vu On picks."
+
+[[entry]]
+id = "random_sequencer.deja_vu_on"
+name = "Deja Vu On"
+text = "What Deja Vu and Freeze loop: the gates and the pitches, the gates alone (the rhythm repeats under new pitches), or the pitches alone."
+
+[[entry]]
+id = "random_sequencer.velocity"
+name = "Velocity"
+text = "The center of the notes' velocities, drawn by a fourth random channel at every tick."
+
+[[entry]]
+id = "random_sequencer.dynamics"
+name = "Dynamics"
+text = "How far the velocities stray from Velocity: at 0 every note has the same velocity."
+
+[[entry]]
+id = "random_sequencer.seed"
+name = "Seed"
+text = "Picks the random sequence: the same seed, settings and passage play the same notes."
+
+[[entry]]
+id = "random_sequencer.seed_latch"
+name = "Latch"
+text = "Holds the seed: every play start, locate and loop restarts the sequence from Seed, so a passage plays the same notes each time (on by default). Off, the sequence runs on, and each pass differs."
+
+[[entry]]
+id = "random_sequencer.thru"
+name = "Thru"
+text = "Lets the notes you play through to the instrument along with the generated ones. Off, played notes are swallowed (their releases and controllers still pass)."
+
+[[entry]]
+id = "random_sequencer.credits"
+name = "Credits"
+text = "The Random Sequencer is a port of Émilie Gillet's open-source random sampler firmware (MIT), checked bit for bit against her original code."

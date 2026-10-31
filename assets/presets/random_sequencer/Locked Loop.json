@@ -1,0 +1,21 @@
+{
+  "plugin": "random_sequencer",
+  "version": 1,
+  "params": {
+    "rate": 16.0,
+    "model": 0.0,
+    "gate_length": 40.0,
+    "play": 3.0,
+    "spread": 50.0,
+    "bias": 50.0,
+    "steps": 80.0,
+    "scale": 1.0,
+    "octave": 4.0,
+    "range": 0.0,
+    "deja_vu": 50.0,
+    "loop_length": 7.0,
+    "freeze": 1.0,
+    "velocity": 75.0,
+    "dynamics": 45.0
+  }
+}

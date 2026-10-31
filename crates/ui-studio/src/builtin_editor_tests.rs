@@ -546,7 +546,9 @@ fn every_factory_preset_file_parses_belongs_to_its_plugin_and_applies_in_one_ste
     let mut files = 0;
     for dir in std::fs::read_dir(&root).unwrap().flatten() {
         let plugin = dir.file_name().to_string_lossy().into_owned();
-        let comp = transit_dsp::plugin_info(&plugin).unwrap_or_else(|| panic!("`{plugin}` is a built-in"));
+        // A MIDI effect's presets (#202) are recalled from its row in the MIDI effects card.
+        let midi = transit_dsp::midi_fx::info(&plugin);
+        let comp = midi.or_else(|| transit_dsp::plugin_info(&plugin)).unwrap_or_else(|| panic!("`{plugin}` is a built-in"));
         for f in std::fs::read_dir(dir.path()).unwrap().flatten() {
             files += 1;
             let name = f.path().file_stem().unwrap().to_string_lossy().into_owned();
@@ -558,6 +560,18 @@ fn every_factory_preset_file_parses_belongs_to_its_plugin_and_applies_in_one_ste
             }
             assert!(presets::FACTORY.iter().any(|(pl, n, _)| *pl == plugin && *n == name), "{plugin}/{name} is missing from presets::FACTORY");
             let mut t = T::new();
+            if midi.is_some() {
+                let tr = t.track("instrument");
+                t.app.add_midi_effect(tr, &plugin).unwrap();
+                let before = t.undo_len();
+                t.app.apply_midi_preset(tr, 0, &name).unwrap();
+                assert_eq!(t.undo_len(), before + 1, "{plugin}/{name}: one undo step");
+                let stored = t.app.engine.session().track(tr).unwrap().midi_effects[0].params.clone();
+                for (id, v) in presets::recall_values(comp, &p) {
+                    assert_eq!(stored.get(&id).copied(), Some(v), "{plugin}/{name}: {id}");
+                }
+                continue;
+            }
             let (tr, slot) = open_plugin(&mut t, &plugin);
             let before = t.undo_len();
             t.app.apply_preset((tr, slot.unwrap_or(transit_mix::INSTRUMENT_SLOT)), comp, &name, &p);

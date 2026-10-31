@@ -6,7 +6,8 @@
 //!
 //! `params` maps parameter ids to values. Recalling a preset sets every parameter of the plug-in:
 //! the ones it lists to its values, the rest to their defaults, so a preset sounds the same
-//! whatever came before. Ids the plug-in does not have are ignored. Factory presets live in
+//! whatever came before. Ids the plug-in does not have are ignored. MIDI effects (#202) have
+//! factory presets too, recalled from the effect's row menu. Factory presets live in
 //! `assets/presets/<plugin-id>/<name>.json` and are compiled in; user presets are the same files
 //! in `<config dir>/presets/<plugin-id>/`.
 
@@ -69,6 +70,9 @@ pub static FACTORY: &[(&str, &str, &str)] = factory![
     "resonator" / "FM Mallet",
     "resonator" / "Strummed Chords",
     "resonator" / "Ambient Pluck",
+    "random_sequencer" / "Drifting Melody",
+    "random_sequencer" / "Locked Loop",
+    "random_sequencer" / "Sparse Random Bass",
 ];
 
 /// The factory presets of one plug-in, in table order.

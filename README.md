@@ -205,6 +205,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Cross Modulator insert: a meta-modulator ported from Émilie Gillet's firmware (MIT) and checked bit for bit against it: the track combined with a sidechain key (or its own oscillator) by crossfade, cross-folding, diode or digital ring modulation, XOR, comparison or a 20-band vocoder, at the module's own 96 kHz (converted at the edges, latency compensated); presets Ring Bell, Vocoder and XOR Grit.
 - Tuner insert: a chromatic tuner for any audio track or an External Instrument's return. The audio passes through untouched, with no latency; the panel shows the note with its octave, a cents meter (green within 3 cents), the frequency, a reference pitch from 415 to 466 Hz and a Hold toggle, and says "No signal" when the input is too quiet or has no clear pitch. The pitch is read on the UI thread, so the device costs the audio callback nothing.
 - Utilities: Gain, Trim, Invert, DC Offset Removal, Signal Generator, Dither.
+- Random Sequencer MIDI effect: a random sampler ported from Émilie Gillet's firmware (MIT) and checked bit for bit against it: random gates on the tempo grid (six models, jitter, gate lengths) playing pitches drawn through a scale (spread, bias, steps), velocities from a fourth random channel, deja vu loops of 1 to 16 steps with Freeze, and a latched seed that replays a passage; presets Drifting Melody, Locked Loop and Sparse Random Bass.
 
 ### MIDI
 

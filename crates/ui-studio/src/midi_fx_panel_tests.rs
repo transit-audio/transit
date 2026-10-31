@@ -99,3 +99,62 @@ fn only_instrument_tracks_show_the_group_and_the_strip_marks_a_chain() {
     let gtr = app.mixer.layout.strips.iter().find(|s| s.track == audio.0).cloned().unwrap();
     assert_eq!(gtr.midi_fx_count, 0);
 }
+
+fn fx_params(app: &StudioApp, t: TrackId) -> std::collections::BTreeMap<String, f32> {
+    app.engine.session().track(t).unwrap().midi_effects[0].params.clone()
+}
+
+#[test]
+fn the_random_sequencer_shows_sections_choices_a_credit_and_its_presets() {
+    let mut app = app();
+    let t = keys(&mut app);
+    app.add_midi_effect(t, "random_sequencer").unwrap();
+    let ctx = egui::Context::default();
+    let mut time = 0.0;
+    frames(&mut app, &ctx, 3, &mut time);
+    let row = app.mixer.devices.midi_fx.clone().unwrap().rows[0].clone();
+    assert_eq!(row.name, "Random Sequencer");
+    let sections: Vec<(&str, bool)> = row.sections.iter().map(|(g, open, _)| (g.as_str(), *open)).collect();
+    assert_eq!(sections, [("Rhythm", true), ("Pitch", false), ("Loop", false), ("Velocity", false), ("Seed", false)]);
+    assert_eq!(
+        row.params.iter().map(|p| p.0.as_str()).collect::<Vec<_>>(),
+        ["rate", "model", "gate_bias", "jitter", "gate_length", "length_random", "play"]
+    );
+    assert!(row.credit.is_some(), "the port's credit line");
+    // Every shown control lies inside the card.
+    let card = app.mixer.devices.midi_fx.clone().unwrap().rect;
+    for (id, _, r) in &row.params {
+        assert!(r[0] >= card[0] && r[2] <= card[2] && r[3] <= card[3] + 0.5, "{id} at {r:?} outside {card:?}");
+    }
+    // A header opens its section (view state: no undo step).
+    let before = undo_len(&mut app);
+    click(&mut app, mid(row.sections[1].2));
+    // The pane grows with the card a frame after the click.
+    frames(&mut app, &ctx, 6, &mut time);
+    let row = app.mixer.devices.midi_fx.clone().unwrap().rows[0].clone();
+    assert!(row.sections[1].1, "Pitch is open: {:?}", row.sections);
+    assert!(row.params.iter().any(|p| p.0 == "scale"));
+    assert_eq!(undo_len(&mut app), before);
+    // A choice lists its values (in a scrolling list): Rate 1/2 is one undo step.
+    let rate = row.params.iter().find(|p| p.0 == "rate").unwrap().2;
+    click(&mut app, mid(rate));
+    frames(&mut app, &ctx, 6, &mut time);
+    let item = app.mixer.devices.menu.iter().find(|m| m.value == "rate=7").cloned().expect("1/2 in Rate's list");
+    assert_eq!(item.label, "1/2");
+    click(&mut app, mid(item.rect));
+    frames(&mut app, &ctx, 6, &mut time);
+    assert_eq!(fx_params(&app, t)["rate"], 7.0);
+    assert_eq!(undo_len(&mut app), before + 1);
+    // The row's menu recalls a factory preset in one step.
+    let row = app.mixer.devices.midi_fx.clone().unwrap().rows[0].clone();
+    right_click(&mut app, ((row.rect[0] + row.rect[2]) / 2.0, row.rect[1] + 10.0));
+    frames(&mut app, &ctx, 6, &mut time);
+    let item = app.mixer.devices.menu.iter().find(|m| m.label == "Preset: Locked Loop").cloned().expect("the preset in the row's menu");
+    click(&mut app, mid(item.rect));
+    frames(&mut app, &ctx, 6, &mut time);
+    let p = fx_params(&app, t);
+    assert_eq!((p["freeze"], p["play"], p["rate"]), (1.0, 3.0, 16.0));
+    assert_eq!(undo_len(&mut app), before + 2);
+    // The card grew with the open sections; the pane follows it.
+    assert!(crate::midi_fx_panel::pane_height(&app) > 300.0);
+}
