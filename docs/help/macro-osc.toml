@@ -76,7 +76,7 @@ text = "The shaper and the modulation matrix are transit's own addition, not par
 [[entry]]
 id = "macro_osc.shaper"
 name = "Shaper"
-text = "Switches on the per-voice shaper after each voice's low-pass gate: the filter, and the amp envelope as the voice's envelope (the gate stays open and the voice ends when the amp envelope's release does). Off by default. The envelopes and LFOs run either way, as matrix sources."
+text = "Switches on the per-voice shaper after each voice's low-pass gate: the filter, and the amp envelope as the voice's envelope (the gate stays open and the voice ends when the amp envelope's release does). Off by default. The envelopes and LFOs run either way, as matrix sources. Held notes follow the switch at once, with a short crossfade and no new attack: on, they go through the filter at their envelopes' current level (the sustain level for a note past its decay); off, they leave it and the gate carries them on. Notes already released keep the path they had until they end."
 
 [[entry]]
 id = "macro_osc.amp_adsr"
