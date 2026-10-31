@@ -179,6 +179,22 @@ pub struct Clip {
     /// stacks stay as older builds wrote them.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub take: Option<u32>,
+    /// The fade lengths of the whole take this clip is a piece of, where a take cut clamped them
+    /// (#25, ADR 0039). Choosing a shorter take inside a take cuts the take at the shorter one's
+    /// edges, and a fade that crosses a cut is clamped to its piece; when the pieces are joined
+    /// again (the take is chosen back), the joined clip gets these lengths back. Not written
+    /// while unset.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub whole_fades: Option<WholeFades>,
+}
+
+/// Fade lengths of a whole take, kept on its pieces ([`Clip::whole_fades`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub struct WholeFades {
+    /// The take's fade-in length, measured from the start of its first piece.
+    pub fade_in: Samples,
+    /// The take's fade-out length, measured back from the end of its last piece.
+    pub fade_out: Samples,
 }
 
 fn one() -> f64 {
@@ -209,6 +225,7 @@ impl Clip {
             loop_id: None,
             looping: None,
             take: None,
+            whole_fades: None,
         }
     }
 
@@ -357,6 +374,10 @@ impl Clip {
     pub fn sanitize(&mut self) {
         // Take numbers start at 1; a 0 from a hand-edited file means no take.
         self.take = self.take.filter(|n| *n > 0);
+        if let Some(w) = &mut self.whole_fades {
+            w.fade_in = w.fade_in.clamp(0, MAX_POSITION);
+            w.fade_out = w.fade_out.clamp(0, MAX_POSITION);
+        }
         bound(&mut self.start);
         self.length = self.length.clamp(1, MAX_POSITION);
         bound(&mut self.sync_point);

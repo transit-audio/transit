@@ -29,7 +29,7 @@ mod takes;
 mod track;
 
 pub use automation::{AutoParam, AutomationLane, AutomationMode, AutomationPoint};
-pub use clip::{Clip, ClipContent, ClipLoop, Fade, FadeShape, MIN_CYCLE};
+pub use clip::{Clip, ClipContent, ClipLoop, Fade, FadeShape, MIN_CYCLE, WholeFades};
 pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
 pub use io_map::{
     ExternalLatency, ExternalLookup, ExternalSource, HardwareLatency, IoDirection, IoError, IoMap, IoPath, MAX_DEVICE_CHANNELS, MAX_PATH_WIDTH,

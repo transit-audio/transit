@@ -86,16 +86,54 @@ impl TakeStack {
     }
 }
 
-/// Whether `a` and `b` are the same material: equal in everything but id and take number.
+/// Whether `a` and `b` are the same material: equal in everything but id, take number and the
+/// whole-take fade lengths. Compares field by field (cheap fields first) and clones nothing; the
+/// destructuring names every field, so a new one cannot be forgotten here.
 #[must_use]
 pub fn same_material(a: &Clip, b: &Clip) -> bool {
-    if a.start != b.start || a.length != b.length || a.name != b.name {
-        return false;
-    }
-    let mut x = a.clone();
-    x.id = b.id;
-    x.take = b.take;
-    x == *b
+    let Clip {
+        id: _,
+        take: _,
+        whole_fades: _,
+        name,
+        start,
+        length,
+        content,
+        scale_mode,
+        gain_db,
+        gain_env,
+        fade_in,
+        fade_out,
+        muted,
+        edit_locked,
+        time_locked,
+        rating,
+        sync_point,
+        color,
+        stretch,
+        group,
+        loop_id,
+        looping,
+    } = a;
+    *start == b.start
+        && *length == b.length
+        && *muted == b.muted
+        && *edit_locked == b.edit_locked
+        && *time_locked == b.time_locked
+        && *rating == b.rating
+        && *sync_point == b.sync_point
+        && *color == b.color
+        && *group == b.group
+        && *loop_id == b.loop_id
+        && *gain_db == b.gain_db
+        && *stretch == b.stretch
+        && *fade_in == b.fade_in
+        && *fade_out == b.fade_out
+        && *scale_mode == b.scale_mode
+        && *looping == b.looping
+        && *name == b.name
+        && *gain_env == b.gain_env
+        && *content == b.content
 }
 
 /// Who a clip's take is, before numbering: its number, or its playlist's untagged take.
@@ -119,13 +157,24 @@ impl Track {
     pub fn take_stacks_except(&self, skip: &[ClipId]) -> Vec<TakeStack> {
         let active = self.active_playlist;
         let act = self.clips();
+        let sorted = act.windows(2).all(|w| w[0].start <= w[1].start);
         let mut entries: Vec<(usize, &Clip)> = Vec::new();
         for (i, p) in self.playlists.iter().enumerate() {
             for c in &p.clips {
                 if skip.contains(&c.id) {
                     continue;
                 }
-                if i != active && act.iter().any(|a| same_material(a, c)) {
+                // On a sorted active playlist only the clips starting where `c` does can be its
+                // copy, so a frame does not compare every pair.
+                let copy = || {
+                    if sorted {
+                        let from = act.partition_point(|a| a.start < c.start);
+                        act[from..].iter().take_while(|a| a.start == c.start).any(|a| same_material(a, c))
+                    } else {
+                        act.iter().any(|a| same_material(a, c))
+                    }
+                };
+                if i != active && copy() {
                     continue;
                 }
                 entries.push((i, c));
