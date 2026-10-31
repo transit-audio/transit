@@ -786,10 +786,27 @@ fn tuner_taps(t: &mut T, tr: TrackId) -> std::sync::Arc<transit_mix::SampleTap> 
     samples
 }
 
-fn feed_sine(t: &T, tap: &transit_mix::SampleTap, hz: f32) {
-    let sr = t.app.engine.session().sample_rate.as_f64();
-    let x: Vec<f32> = (0..8192).map(|i| 0.5 * (std::f64::consts::TAU * f64::from(hz) * i as f64 / sr).sin() as f32).collect();
-    tap.push(&[x], 8192);
+/// A tone streamed into a headless tap the way a running render fills it: 1024 frames before each
+/// UI frame, phase-continuous across calls, the ring primed with 8192 frames on the first call.
+struct Tone {
+    n: u64,
+}
+
+impl Tone {
+    fn new() -> Self {
+        Tone { n: 0 }
+    }
+
+    fn run(&mut self, t: &mut T, tap: &transit_mix::SampleTap, hz: f32, frames: usize) {
+        let sr = t.app.engine.session().sample_rate.as_f64();
+        for _ in 0..frames {
+            let len = if self.n == 0 { 8192 } else { 1024 };
+            let x: Vec<f32> = (0..len).map(|i| 0.5 * (std::f64::consts::TAU * f64::from(hz) * (self.n + i) as f64 / sr).sin() as f32).collect();
+            self.n += len;
+            tap.push(&[x], len as usize);
+            t.frames(1);
+        }
+    }
 }
 
 #[test]
@@ -843,8 +860,8 @@ fn the_tuner_panel_reads_a_tone_from_its_tap_and_switches_the_tap_with_the_windo
     assert_eq!((w.tuner.text.as_str(), w.tuner.freq.as_str()), ("no signal", "No signal"));
     assert_eq!(w.tuner.needle_x, None);
     // A 440 Hz tone at the session rate.
-    feed_sine(&t, &tap, 440.0);
-    t.frames(6);
+    let mut tone = Tone::new();
+    tone.run(&mut t, &tap, 440.0, 8);
     let w = t.window(tr);
     assert_eq!(w.tuner.text, "A4 +0.0 cents");
     assert_eq!(w.tuner.freq, "440.0 Hz");
@@ -854,11 +871,15 @@ fn the_tuner_panel_reads_a_tone_from_its_tap_and_switches_the_tap_with_the_windo
     assert!((needle - center).abs() < 1.0, "centered: {needle} vs {center}");
     assert_eq!(t.painted("A4").0, 1, "the note is drawn once");
     // A flat note moves the needle left and is not in tune.
-    feed_sine(&t, &tap, 440.0 * 2.0f32.powf(-25.0 / 1200.0));
-    t.frames(15);
+    tone.run(&mut t, &tap, 440.0 * 2.0f32.powf(-25.0 / 1200.0), 20);
     let w = t.window(tr);
     assert_eq!(w.tuner.note, "A4");
     assert!(!w.tuner.in_tune && w.tuner.needle_x.unwrap() < center - 10.0, "{:?}", w.tuner);
+    // The source stops (a bypassed Tuner writes nothing): no new frames are a miss, so the note
+    // is let go instead of the last ring contents being read again.
+    t.frames(12);
+    let w = t.window(tr);
+    assert_eq!((w.tuner.text.as_str(), w.tuner.freq.as_str()), ("no signal", "No signal"));
     // Closing the window switches the tap off.
     t.open_editor(0);
     t.frames(2);
@@ -873,23 +894,22 @@ fn the_tuner_reference_moves_the_reading_and_hold_freezes_the_display() {
     t.frames(4);
     let tap = tuner_taps(&mut t, tr);
     t.open_editor(0);
-    feed_sine(&t, &tap, 440.0);
-    t.frames(6);
+    let mut tone = Tone::new();
+    tone.run(&mut t, &tap, 440.0, 8);
     assert_eq!(t.window(tr).tuner.text, "A4 +0.0 cents");
     // Reference 432 Hz: the same 440 Hz is about 31 cents sharp (a hair under 32 for the A in 432).
     t.app.run("mix.insert_param", json!({"track": tr.0, "slot": 0, "param": "reference_hz", "value": 432.0})).unwrap();
-    t.frames(6);
+    tone.run(&mut t, &tap, 440.0, 6);
     let w = t.window(tr);
     assert!(w.tuner.cents.starts_with('+') && w.tuner.cents != "+0.0", "{:?}", w.tuner);
     assert_eq!(w.rows.iter().find(|r| r.param == "reference_hz").unwrap().value, "432.0 Hz");
     // Hold: the tone changes and the display stays.
     let held = w.tuner.text.clone();
     t.app.run("mix.insert_param", json!({"track": tr.0, "slot": 0, "param": "hold", "value": 1.0})).unwrap();
-    t.frames(2);
-    feed_sine(&t, &tap, 220.0);
-    t.frames(9);
+    tone.run(&mut t, &tap, 440.0, 2);
+    tone.run(&mut t, &tap, 220.0, 9);
     assert_eq!(t.window(tr).tuner.text, held, "held");
     t.app.run("mix.insert_param", json!({"track": tr.0, "slot": 0, "param": "hold", "value": 0.0})).unwrap();
-    t.frames(9);
+    tone.run(&mut t, &tap, 220.0, 12);
     assert_eq!(t.window(tr).tuner.note, "A3", "released");
 }

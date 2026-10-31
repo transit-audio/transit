@@ -150,11 +150,7 @@ impl TunerModel {
         let rms = (self.window.iter().map(|x| x * x).sum::<f32>() / self.window.len().max(1) as f32).sqrt();
         let found = if rms >= GATE_RMS { self.det.detect(&self.window, DEFAULT_CLARITY) } else { None };
         let Some(e) = found else {
-            self.misses += 1;
-            if self.misses >= MISSES_TO_LOSE {
-                self.count = 0;
-                self.reading = None;
-            }
+            self.miss();
             return;
         };
         self.misses = 0;
@@ -165,6 +161,17 @@ impl TunerModel {
         self.count += 1;
         let hz = self.median();
         self.reading = nearest_note(hz, reference_hz).map(|(note, cents)| Reading { note, cents, hz });
+    }
+
+    /// An analysis round that found nothing to analyze: no new frames reached the tap since the
+    /// last one (a bypassed Tuner, a stopped source), or no pitch in them. Three in a row let go
+    /// of the note. Does nothing while the display is held (hold never calls it).
+    pub fn miss(&mut self) {
+        self.misses += 1;
+        if self.misses >= MISSES_TO_LOSE {
+            self.count = 0;
+            self.reading = None;
+        }
     }
 
     /// Median of the estimates kept (the newest five).

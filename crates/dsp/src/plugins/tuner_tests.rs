@@ -157,3 +157,29 @@ fn note_names_count_octaves_from_c4_at_60() {
     assert_eq!(signed_tenths(12.34), "+12.3");
     assert_eq!(signed_tenths(-7.86), "-7.9");
 }
+
+#[test]
+fn the_registry_helper_agrees_with_every_plugin_about_wanting_a_sample_tap() {
+    for info in plugins() {
+        let asks = crate::create(info.id).is_some_and(|p| p.wants_sample_tap());
+        assert_eq!(crate::wants_sample_tap(info.id), asks, "{}", info.id);
+    }
+    assert!(crate::wants_sample_tap("tuner") && !crate::wants_sample_tap("gain") && !crate::wants_sample_tap("clap:x"));
+}
+
+#[test]
+fn rounds_with_no_new_frames_are_misses_and_three_let_go_of_the_note() {
+    let mut m = TunerModel::new(48_000.0);
+    let w = sine(440.0, 48_000.0, m.window_mut().len(), 0.5);
+    m.window_mut().copy_from_slice(&w);
+    m.analyze(440.0, false);
+    assert_eq!(m.reading().map(|r| r.text()), Some("A4 +0.0 cents".to_string()));
+    m.miss();
+    m.miss();
+    assert!(m.reading().is_some(), "two misses keep the note");
+    m.miss();
+    assert!(m.reading().is_none(), "the third lets go");
+    // A new tone starts the median over from nothing.
+    m.analyze(440.0, false);
+    assert_eq!(m.reading().map(|r| r.text()), Some("A4 +0.0 cents".to_string()));
+}

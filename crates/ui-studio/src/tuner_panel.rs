@@ -67,10 +67,11 @@ pub struct TunerLayout {
     pub in_tune: bool,
 }
 
-/// A Tuner's model and when it last analyzed.
+/// A Tuner's model, when it last analyzed and how many frames its tap had received then.
 pub struct TunerState {
     model: TunerModel,
     at: f64,
+    written: Option<usize>,
 }
 
 impl std::fmt::Debug for TunerState {
@@ -93,15 +94,24 @@ fn update(app: &mut StudioApp, ui: &Ui, key: (TrackId, usize), uid: u64, referen
     let rate = app.engine.session().sample_rate.as_f64() as f32;
     let hub = app.scope_hub();
     let now = ui.input(|i| i.time);
-    let st = app.builtin_editor.tuners.entry(uid).or_insert_with(|| TunerState { model: TunerModel::new(rate), at: f64::NEG_INFINITY });
+    let st =
+        app.builtin_editor.tuners.entry(uid).or_insert_with(|| TunerState { model: TunerModel::new(rate), at: f64::NEG_INFINITY, written: None });
     if (st.model.sample_rate() - rate).abs() > f32::EPSILON {
-        *st = TunerState { model: TunerModel::new(rate), at: f64::NEG_INFINITY };
+        *st = TunerState { model: TunerModel::new(rate), at: f64::NEG_INFINITY, written: None };
     }
     if now - st.at < UPDATE_S {
         return;
     }
     st.at = now;
     if hold {
+        return;
+    }
+    // Nothing new since the last round (bypassed, stopped, no tap): a miss, not the old audio again.
+    let written = hub.as_ref().and_then(|h| h.samples_written(key.0, uid));
+    let fresh = written.is_some() && written != st.written;
+    st.written = written;
+    if !fresh {
+        st.model.miss();
         return;
     }
     let window = st.model.window_mut();
