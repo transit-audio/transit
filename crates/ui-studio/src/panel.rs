@@ -415,7 +415,9 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
     if info.id == crate::resonator_panel::RESONATOR {
         // The strum and rate lines side by side, so the expanded window keeps within 800 pt.
         ui.horizontal(|ui| {
-            for (text, id) in [(crate::resonator_panel::STRUMS, crate::help::Id::ResonatorStrums), (crate::resonator_panel::RATE, crate::help::Id::ResonatorRate)] {
+            for (text, id) in
+                [(crate::resonator_panel::STRUMS, crate::help::Id::ResonatorStrums), (crate::resonator_panel::RATE, crate::help::Id::ResonatorRate)]
+            {
                 let r = ui.label(RichText::new(text).size(10.5).color(TOKENS.text_dim));
                 crate::help::hover(ui, &r, id);
             }

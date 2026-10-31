@@ -25,7 +25,9 @@ fn per_block_us(sr: f32, model: usize, polyphony: usize, shaper: bool) -> f64 {
     m.set_param("damping", 90.0);
     m.set_param("shaper", if shaper { 1.0 } else { 0.0 });
     if shaper {
-        for (id, v) in [("mod1_source", 1.0), ("mod1_dest", 3.0), ("mod1_amount", 20.0), ("mod2_source", 2.0), ("mod2_dest", 7.0), ("mod2_amount", 30.0)] {
+        for (id, v) in
+            [("mod1_source", 1.0), ("mod1_dest", 3.0), ("mod1_amount", 20.0), ("mod2_source", 2.0), ("mod2_dest", 7.0), ("mod2_amount", 30.0)]
+        {
             m.set_param(id, v);
         }
     }

@@ -56,7 +56,18 @@ fn choosing_the_instrument_stores_every_parameter_at_its_default_and_plays_the_n
 #[test]
 fn parameters_save_and_load_with_the_session() {
     let (mut e, t) = engine();
-    let set = [("model", 4.0), ("polyphony", 1.0), ("structure", 35.0), ("damping", 85.0), ("tune", -5.0), ("spread", 80.0), ("shaper", 1.0), ("mod1_source", 5.0), ("mod1_dest", 3.0), ("mod1_amount", 40.0)];
+    let set = [
+        ("model", 4.0),
+        ("polyphony", 1.0),
+        ("structure", 35.0),
+        ("damping", 85.0),
+        ("tune", -5.0),
+        ("spread", 80.0),
+        ("shaper", 1.0),
+        ("mod1_source", 5.0),
+        ("mod1_dest", 3.0),
+        ("mod1_amount", 40.0),
+    ];
     for (param, value) in set {
         e.execute("mix.instrument_param", &json!({"track": t.0, "param": param, "value": value})).unwrap();
     }

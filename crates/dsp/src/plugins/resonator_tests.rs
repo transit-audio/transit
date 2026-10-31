@@ -515,4 +515,3 @@ fn spread_and_a_mono_strip_and_hostile_values() {
     let y = render(&mut h, 48_000, 512, &script);
     assert!(y.iter().flatten().all(|v| v.is_finite()), "finite");
 }
-

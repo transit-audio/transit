@@ -33,7 +33,11 @@ const fn sec(title: &'static str, cols: usize, items: &'static [crate::panel::It
 pub static LAYOUT: [Row; 4] = [
     &[
         sec("Model", 1, &[Menu("model", "")]),
-        sec("Resonator", 4, &[Knob("structure", "Structure"), Knob("brightness", "Brightness"), Knob("damping", "Damping"), Knob("position", "Position")]),
+        sec(
+            "Resonator",
+            4,
+            &[Knob("structure", "Structure"), Knob("brightness", "Brightness"), Knob("damping", "Damping"), Knob("position", "Position")],
+        ),
         sec("Voices", 1, &[Choice("polyphony", "Polyphony")]),
     ],
     &[
