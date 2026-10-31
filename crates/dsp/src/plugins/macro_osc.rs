@@ -124,7 +124,10 @@ enum Kind {
     On(u8, u8),
     /// Key and note-off velocity.
     Off(u8, u8),
+    /// All Notes Off (CC 123): release the keys.
     AllOff,
+    /// All Sound Off (CC 120): silence at once.
+    SoundOff,
     Sustain(bool),
     /// -1..1.
     Bend(f32),
@@ -139,7 +142,7 @@ enum Kind {
 
 impl Kind {
     fn is_release(self) -> bool {
-        matches!(self, Kind::Off(..) | Kind::AllOff | Kind::Sustain(false) | Kind::ResetControllers)
+        matches!(self, Kind::Off(..) | Kind::AllOff | Kind::SoundOff | Kind::Sustain(false) | Kind::ResetControllers)
     }
 
     /// Omni: every channel plays the instrument.
@@ -160,7 +163,8 @@ impl Kind {
         Some(match cc {
             1 => Kind::Wheel(f32::from(value.min(127)) / 127.0),
             CC_SUSTAIN => Kind::Sustain(value >= 64),
-            CC_ALL_SOUND_OFF | CC_ALL_NOTES_OFF => Kind::AllOff,
+            CC_ALL_SOUND_OFF => Kind::SoundOff,
+            CC_ALL_NOTES_OFF => Kind::AllOff,
             CC_RESET_CONTROLLERS => Kind::ResetControllers,
             _ => return None,
         })
@@ -426,6 +430,12 @@ impl MacroOscillator {
             Kind::AllOff => {
                 for s in &mut self.slots {
                     s.notes.clear();
+                }
+                self.sustain = false;
+            }
+            Kind::SoundOff => {
+                for s in &mut self.slots {
+                    s.reset();
                 }
                 self.sustain = false;
             }

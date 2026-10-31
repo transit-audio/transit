@@ -442,3 +442,27 @@ fn a_full_queue_never_refuses_a_release() {
     assert!(v0(&m).notes.top().is_none(), "every admitted note was released");
     assert!(m.events.is_empty());
 }
+
+/// A held A3 sine, then `cc` at frame 4800 (a block boundary); returns 12 000 frames.
+fn hold_then_cc(cc: Option<u8>) -> Vec<f32> {
+    let mut m = inst();
+    sine_patch(&mut m);
+    m.note_on(0, 57, 100);
+    let mut x = render(&mut m, 4800, 240);
+    if let Some(cc) = cc {
+        m.midi(0, [0xB0, cc, 0]);
+    }
+    x.extend(render(&mut m, 7200, 240));
+    x
+}
+
+#[test]
+fn all_sound_off_silences_at_once_and_all_notes_off_releases() {
+    let held = hold_then_cc(None);
+    let sound_off = hold_then_cc(Some(120));
+    let notes_off = hold_then_cc(Some(123));
+    assert!(peak(&held[4800..4900]) > 0.05, "the note sounds");
+    assert!(held[..4800].iter().zip(&sound_off).all(|(a, b)| a.to_bits() == b.to_bits()), "nothing changes before the CC");
+    assert_eq!(peak(&sound_off[4800 + 12..]), 0.0, "All Sound Off: silent from the next block on");
+    assert!(peak(&notes_off[4800..4800 + 48]) > 0.01, "All Notes Off: the release still sounds");
+}
