@@ -344,3 +344,13 @@ fn invalid_capture_keeps_previous_frozen_media_and_does_not_abort_save() {
     assert!(notes.is_empty(), "{notes:?}");
     assert_eq!(loaded.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.as_ref().unwrap().data, before.data);
 }
+
+#[test]
+fn an_invalid_capture_without_an_earlier_reference_creates_no_frozen_entry() {
+    let (mut e, _) = fixture(0, false);
+    let track = e.session().tracks[0].id.0;
+    let response =
+        e.execute("mix.insert_state", &json!({"track": track, "slot": 0, "state": transit_model::b64::encode(b"invalid frozen packet")})).unwrap();
+    assert!(response["report"].as_str().unwrap().contains("invalid frozen capture"));
+    assert!(e.session().tracks[0].mixer.inserts[0].as_ref().unwrap().frozen_recording.is_none());
+}

@@ -69,7 +69,10 @@ fn insert_state(e: &mut Engine, p: &Value) -> Result<Value> {
                         tr.name,
                         slot.map_or_else(|| "instrument".to_string(), |i| (i + 1).to_string())
                     );
-                    ins.frozen_recording.get_or_insert_with(Default::default).report.clone_from(&report);
+                    // With no earlier reference there is nothing to annotate: no empty entry, no false "opens silent" line later.
+                    if let Some(saved) = ins.frozen_recording.as_mut() {
+                        saved.report.clone_from(&report);
+                    }
                     log::warn!("{report}");
                     e.message(report.clone());
                     return Ok(json!({"bytes": 0, "report": report}));
