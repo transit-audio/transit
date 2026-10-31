@@ -345,3 +345,31 @@ mod midi {
         assert_eq!(pitch(&t), 62, "undo restores the newest pass");
     }
 }
+
+#[test]
+fn take_stacks_are_computed_once_per_document_revision_and_again_after_an_edit() {
+    let dir = Dir::new("lanes-cache");
+    let mut t = T::new();
+    let a = t.cycled(&dir);
+    // Frames without an edit compute nothing, however often the view asks.
+    t.frames(1);
+    let n = t.app.take_cache.computed.get();
+    t.frames(3);
+    assert_eq!(t.app.take_cache.computed.get(), n, "no edit, no recomputation");
+    assert_eq!(t.rows_of(a).iter().map(|r| (r.take, r.active)).collect::<Vec<_>>(), vec![(3, true), (2, false), (1, false)]);
+    // An edit invalidates: the next frame computes again and draws the new state.
+    t.app.run("takes.set_active", json!({"track": a.0, "take": 1})).unwrap();
+    t.frames(1);
+    let m = t.app.take_cache.computed.get();
+    assert!(m > n, "the edit recomputes");
+    assert_eq!(t.rows_of(a).iter().map(|r| (r.take, r.active)).collect::<Vec<_>>(), vec![(3, false), (2, false), (1, true)]);
+    t.frames(2);
+    assert_eq!(t.app.take_cache.computed.get(), m);
+    // A track from an older snapshot is computed, never stored in place of the live one.
+    let old = t.app.engine.session_arc();
+    t.app.run("edit.undo", json!({})).unwrap();
+    let stale = t.app.takes_of(old.track(a).unwrap());
+    assert_eq!(stale.stacks[0].active(), Some(1));
+    let live = t.app.engine.session_arc();
+    assert_eq!(t.app.takes_of(live.track(a).unwrap()).stacks[0].active(), Some(3), "undo is drawn, not the snapshot");
+}

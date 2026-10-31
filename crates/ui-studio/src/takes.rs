@@ -9,9 +9,73 @@
 
 use crate::StudioApp;
 use serde_json::{Value, json};
-use transit_model::{ClipId, TrackId};
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::rc::Rc;
+use transit_model::{ClipId, TakeStack, Track, TrackId};
+
+/// A track's take stacks and its lane numbers (newest first), as the arrange view draws them.
+#[derive(Debug, Default)]
+pub(crate) struct TrackTakes {
+    pub stacks: Vec<TakeStack>,
+    pub numbers: Vec<u32>,
+}
+
+/// [`Track::take_stacks`] per track, kept until the document changes (#25): the arrange view asks
+/// several times a frame per track, and a frame with no edit recomputes nothing. The key is the
+/// engine's document revision (it bumps on every document change but zoom and scroll) and the
+/// document's address (another engine or a replaced document never matches); only the live
+/// document's tracks are cached, so a track from an older snapshot is computed, never stored.
+#[derive(Default)]
+pub(crate) struct TakeCache {
+    key: Cell<(u64, usize)>,
+    tracks: RefCell<HashMap<TrackId, Rc<TrackTakes>>>,
+    /// How many times stacks were computed (tests count recomputations).
+    #[cfg(test)]
+    pub(crate) computed: Cell<usize>,
+}
+
+impl TakeCache {
+    fn compute(&self, t: &Track) -> Rc<TrackTakes> {
+        #[cfg(test)]
+        self.computed.set(self.computed.get() + 1);
+        if t.playlists.len() < 2 {
+            return Rc::new(TrackTakes::default());
+        }
+        let stacks = t.take_stacks();
+        let mut numbers: Vec<u32> = stacks.iter().flat_map(|s| s.takes.iter().map(|k| k.number)).collect();
+        numbers.sort_unstable_by(|a, b| b.cmp(a));
+        numbers.dedup();
+        Rc::new(TrackTakes { stacks, numbers })
+    }
+}
 
 impl StudioApp {
+    /// `t`'s take stacks and lane numbers, from the cache while the document is unchanged.
+    pub(crate) fn takes_of(&self, t: &Track) -> Rc<TrackTakes> {
+        let doc = self.engine.session();
+        if t.playlists.len() < 2 || !doc.track(t.id).is_some_and(|live| std::ptr::eq(live, t)) {
+            return self.take_cache.compute(t);
+        }
+        let c = &self.take_cache;
+        let key = (self.engine.revision, std::ptr::from_ref(doc) as usize);
+        if c.key.get() != key {
+            c.key.set(key);
+            c.tracks.borrow_mut().clear();
+        }
+        if let Some(hit) = c.tracks.borrow().get(&t.id) {
+            return Rc::clone(hit);
+        }
+        let v = c.compute(t);
+        c.tracks.borrow_mut().insert(t.id, Rc::clone(&v));
+        v
+    }
+
+    /// Whether the live document's track `t` has stacked takes.
+    pub(crate) fn has_takes(&self, t: TrackId) -> bool {
+        self.engine.session().track(t).is_some_and(|tr| !self.takes_of(tr).stacks.is_empty())
+    }
+
     /// Show or hide a track's take lanes (view state only).
     pub fn toggle_takes(&mut self, t: TrackId) {
         if let Some(i) = self.ui.takes_open.iter().position(|x| *x == t) {
@@ -23,8 +87,7 @@ impl StudioApp {
 
     /// Show a track's take lanes if it has stacked takes (after a recording made some).
     pub fn show_takes(&mut self, t: TrackId) {
-        let stacked = self.engine.session().track(t).is_some_and(|tr| !tr.take_stacks().is_empty());
-        if stacked && !self.ui.takes_open.contains(&t) {
+        if self.has_takes(t) && !self.ui.takes_open.contains(&t) {
             self.ui.takes_open.push(t);
         }
     }
@@ -61,7 +124,7 @@ impl StudioApp {
             p["stack"] = json!(i);
         }
         let r = self.take_run("takes.flatten", p)?;
-        if self.engine.session().track(t).is_some_and(|tr| tr.take_stacks().is_empty()) {
+        if !self.has_takes(t) {
             self.ui.takes_open.retain(|x| *x != t);
         }
         let n = r["removed"].as_u64().unwrap_or(0);
@@ -72,7 +135,7 @@ impl StudioApp {
     /// Delete take `number` everywhere it does not play (refused where it plays).
     pub fn delete_take(&mut self, t: TrackId, number: u32) -> Result<Value, String> {
         let r = self.take_run("takes.delete", json!({"track": t.0, "take": number}))?;
-        if self.engine.session().track(t).is_some_and(|tr| tr.take_stacks().is_empty()) {
+        if !self.has_takes(t) {
             self.ui.takes_open.retain(|x| *x != t);
         }
         self.status = format!("Deleted take {number} of {}", self.track_name(t));

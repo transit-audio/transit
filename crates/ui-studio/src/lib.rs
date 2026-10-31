@@ -312,6 +312,8 @@ struct EditorWanted {
 
 pub struct StudioApp {
     pub engine: Engine,
+    /// Take stacks per track for the open document's current revision (#25).
+    pub(crate) take_cache: takes::TakeCache,
     pub player: Option<Player>,
     player_requests: host::PlayerRequests,
     /// Input capture, opened on first record.
@@ -476,6 +478,7 @@ impl StudioApp {
             engine,
             player,
             player_requests: host::PlayerRequests::default(),
+            take_cache: takes::TakeCache::default(),
             recorder: None,
             #[cfg(test)]
             finished_test_takes: None,

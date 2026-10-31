@@ -142,7 +142,7 @@ pub(super) fn track_header(
     }
     row.automation = r4(b);
     row.automation_shown = shown;
-    let stacked = t.playlists.len() > 1 && !t.take_stacks().is_empty();
+    let stacked = t.playlists.len() > 1 && !app.takes_of(t).stacks.is_empty();
     // Volume readout: drag sideways to change, double-click for 0 dB.
     let vol = Rect::from_min_size(pos2(r.max.x - 72.0, r.min.y + 23.0), vec2(66.0, 15.0));
     row.volume = r4(vol);
@@ -403,7 +403,7 @@ fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: TrackKind, ha
         width_item(app, ui, id);
     }
     // Take lanes (#25): shown while the track has stacked takes.
-    if app.engine.session().track(id).is_some_and(|t| t.playlists.len() > 1 && !t.take_stacks().is_empty()) {
+    if app.has_takes(id) {
         let label = if app.ui.takes_open.contains(&id) { "Hide Take Lanes" } else { "Show Take Lanes" };
         let b = ui.button(label);
         app.arrange.menu.push(crate::mixer::MenuItem::at(ui, label.into(), String::new(), b.rect));

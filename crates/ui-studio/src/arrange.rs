@@ -787,7 +787,7 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
             }
             // A clip in a take stack (#25): flatten that stack.
             if let Some((t, _)) = s.find_clip(clip)
-                && let Some((stack, _)) = s.track(t).and_then(|tr| tr.take_stack_of(clip))
+                && let Some(stack) = s.track(t).and_then(|tr| app.takes_of(tr).stacks.iter().position(|st| st.contains(clip)))
             {
                 take_lanes::flatten_item(app, ui, t, Some(stack));
             }

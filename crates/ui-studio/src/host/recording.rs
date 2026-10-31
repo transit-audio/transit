@@ -460,7 +460,7 @@ impl StudioApp {
     fn show_new_takes(&mut self, ids: &[transit_model::ClipId]) {
         let s = self.engine.session_arc();
         for t in &s.tracks {
-            if t.playlists.len() > 1 && t.take_stacks().iter().any(|st| ids.iter().any(|id| st.contains(*id))) {
+            if t.playlists.len() > 1 && self.takes_of(t).stacks.iter().any(|st| ids.iter().any(|id| st.contains(*id))) {
                 self.show_takes(t.id);
             }
         }

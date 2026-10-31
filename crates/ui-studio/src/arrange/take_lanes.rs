@@ -13,14 +13,9 @@
 use super::*;
 use transit_model::TakeStack;
 
-/// The take lanes a track shows, newest first: its take numbers while its lanes are open.
-pub(crate) fn lanes(app: &StudioApp, t: &Track) -> Vec<u32> {
-    if t.playlists.len() > 1 && app.ui.takes_open.contains(&t.id) { t.take_numbers() } else { Vec::new() }
-}
-
-/// How many take lanes a track shows.
+/// How many take lanes a track shows: its takes while its lanes are open.
 pub(crate) fn takes_shown(app: &StudioApp, t: &Track) -> usize {
-    lanes(app, t).len()
+    if t.playlists.len() > 1 && app.ui.takes_open.contains(&t.id) { app.takes_of(t).numbers.len() } else { 0 }
 }
 
 /// Draw each row's take chips and, for tracks whose lanes are open, the lanes and their labels.
@@ -32,19 +27,20 @@ pub(super) fn takes(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl:
         if t.playlists.len() < 2 {
             continue;
         }
-        let stacks = t.take_stacks();
+        let takes = app.takes_of(t);
+        let stacks = &takes.stacks;
         if stacks.is_empty() {
             continue;
         }
         let y0 = tl.min.y + geo.tops[i] - app.arrange.vscroll;
         let open = app.ui.takes_open.contains(&t.id);
-        chips(app, ui, t, &stacks, tl, layout, open);
+        chips(app, ui, t, stacks, tl, layout, open);
         if !open {
             continue;
         }
-        for (k, number) in t.take_numbers().into_iter().enumerate() {
+        for (k, number) in takes.numbers.iter().copied().enumerate() {
             let ly = y0 + geo.rh + k as f32 * TAKE_H;
-            lane(app, ui, t, &stacks, number, k, ly, map, tl, list);
+            lane(app, ui, t, stacks, number, k, ly, map, tl, list);
         }
     }
 }
