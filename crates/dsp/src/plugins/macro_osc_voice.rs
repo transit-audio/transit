@@ -1,25 +1,28 @@
 //! One voice of the Macro Oscillator (#196): a `transit_macro_osc::Voice` with the per-voice MIDI
 //! state the mono instrument of #195 kept for its one voice (the keys it holds, its note, its
-//! velocity, its trigger), the note-to-macro mapping, and the bookkeeping the allocator reads
-//! (age, loudness, idle).
+//! velocity, its trigger), its shaper and matrix sources (#243), and the bookkeeping the allocator
+//! reads (age, loudness, idle).
 //!
 //! - A voice is **idle** once it holds no key, its trigger is low and both its outputs have stayed
 //!   within one int16 LSB of silence (-90 dBFS) for [`QUIET_SECONDS`]: some models settle on a
-//!   +-1 LSB residue rather than exact zero (six-op FM 2 does). An idle voice is not rendered,
-//!   costs nothing and is the first one a new note takes. Until then its low-pass gate tail plays
-//!   out after the note-off.
+//!   +-1 LSB residue rather than exact zero (six-op FM 2 does). With the shaper on, it is idle as
+//!   soon as it holds no key and its amp envelope has finished. An idle voice is not rendered,
+//!   costs nothing and is the first one a new note takes. Until then its tail plays out after the
+//!   note-off.
 //! - The chiptune model envelopes itself (the voice bypasses its low-pass gate) and, with no
 //!   envelope set, holds its note for ever. A held key keeps it held, as on the module; after the
 //!   note-off the voice gives it the decay envelope the module's TIMBRE attenuverter would
 //!   ([`chiptune_release`]), so the note ends as on every other model.
-//! - The mapping adds to the knobs, before the mod wheel, clamped to 0..1. Velocity is a 0..1
-//!   source (velocity / 127); the key is a -1..1 source centered on middle C (key 60: 0, key 0:
-//!   -1, key 120 and up: +1). As in the MIDI Learn range model, the source's travel spans a part of
-//!   the target's travel, here from no change to `depth` (velocity) or from `-depth` to `depth`
-//!   (key); a negative depth inverts. The curve shapes the source's travel first.
+//! - Each block the voice reads its matrix sources at the block's start (velocity 0..1; the key
+//!   -1..1 centered on middle C: key 60 is 0, key 0 is -1, key 120 and up +1; the envelopes and
+//!   LFOs; the controllers), evaluates the matrix ([`super::matrix`]) and applies the sums: Pitch
+//!   to the note, Harmonics, Timbre, Morph and Decay to the knobs ([`targets`]), Level and Pan to
+//!   its gains ([`voice_gains`]), the filter's to the shaper. With no row, every one of those is
+//!   exactly what it was before the matrix.
 
+use super::matrix::{Matrix, NDST, NSRC, PITCH_SEMITONES, RATE_OCTAVES, dst, src};
+use super::shaper::{FilterMods, Settings, Shaper};
 use super::{BLOCK, to_f32};
-use crate::offline::FadeShape;
 use transit_macro_osc::voice::{Frame, Modulations, Patch, Voice};
 use transit_macro_osc::{SampleRate, Tuning};
 
@@ -44,66 +47,32 @@ pub fn chiptune_release(decay: f32) -> f32 {
 /// One int16 step as a float: a block whose samples all stay within it counts as silent.
 const LSB: f32 = 1.0 / 32768.0;
 
-/// The shapes a mapping source's travel takes (`velocity_curve`, `key_curve`).
-pub const CURVES: [&str; 3] = ["Linear", "Exponential", "S-curve"];
-
-/// A source position 0..1 through curve `curve` ([`CURVES`]): the clip fades' curves themselves
-/// (`FadeShape::gain`: Linear, Exponential, S-curve), so 0 and 1 are fixed points of every curve
-/// and out-of-range or NaN positions clamp.
-#[must_use]
-pub fn shape(curve: usize, t: f32) -> f32 {
-    let fade = match curve {
-        1 => FadeShape::Exponential,
-        2 => FadeShape::SCurve,
-        _ => FadeShape::Linear,
-    };
-    fade.gain(t)
-}
-
-/// The key as a mapping source: -1 at key 0, 0 at middle C (60), +1 from key 120 up.
+/// The key as a matrix source: -1 at key 0, 0 at middle C (60), +1 from key 120 up.
 #[must_use]
 pub fn key_source(note: f32) -> f32 {
     ((note - 60.0) / 60.0).clamp(-1.0, 1.0)
 }
 
-/// The macros a mapping drives, in the order of their depth parameters.
+/// The macros the matrix's Harmonics, Timbre, Morph and Decay destinations move, in that order.
 pub const TARGETS: usize = 4;
 
-/// The note-to-macro mapping of one block: curves and depths (-1..1) per target (Harmonics,
-/// Timbre, Morph, Decay).
+/// The controllers every voice reads as matrix sources.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct Mapping {
-    pub velocity_curve: usize,
-    pub velocity: [f32; TARGETS],
-    pub key_curve: usize,
-    pub key: [f32; TARGETS],
+pub struct Controls {
+    /// Channel pressure, 0..1.
+    pub aftertouch: f32,
+    /// 0..1.
+    pub wheel: f32,
+    /// -1..1.
+    pub bend: f32,
+    /// The rack's eight macros (0..1) when the track is a rack member, else 0.
+    pub macros: [f32; 8],
 }
 
-impl Mapping {
-    /// What the mapping adds to each target for a note at `note` played at `velocity` (0..1).
-    #[must_use]
-    pub fn offsets(&self, note: f32, velocity: f32) -> [f32; TARGETS] {
-        let mut out = [0.0; TARGETS];
-        if self.velocity.iter().any(|d| *d != 0.0) {
-            let v = shape(self.velocity_curve, velocity);
-            for (o, d) in out.iter_mut().zip(self.velocity) {
-                *o += d * v;
-            }
-        }
-        if self.key.iter().any(|d| *d != 0.0) {
-            let k = key_source(note);
-            let kv = shape(self.key_curve, k.abs()).copysign(k);
-            for (o, d) in out.iter_mut().zip(self.key) {
-                *o += d * kv;
-            }
-        }
-        out
-    }
-}
-
-/// What every voice renders a block with: the patch without the per-voice parts.
+/// What every voice renders a block with: the patch without the per-voice parts, the matrix, the
+/// shaper's settings and the controllers.
 #[derive(Debug, Clone, Copy)]
-pub struct Shared {
+pub(crate) struct Shared<'a> {
     /// The knobs, 0..1: Harmonics, Timbre, Morph, Decay.
     pub knobs: [f32; TARGETS],
     /// Which target the mod wheel adds to (an index into `knobs`; none for Off) and how much.
@@ -113,27 +82,52 @@ pub struct Shared {
     pub engine: usize,
     pub lpg_color: f32,
     pub aux_mix: f32,
-    pub mapping: Mapping,
+    pub matrix: &'a Matrix,
+    pub(crate) shaper: &'a Settings,
+    pub controls: Controls,
+    /// Poly pressure per key, 0..127.
+    pub poly: &'a [u8; 128],
+    /// The instrument's running LFO phases (cycles): where a free-running LFO starts a note.
+    pub free_phase: [f64; 2],
+    /// The song position at the block's first frame, in quarter notes, while the transport plays.
+    pub quarters: Option<f64>,
+    pub tempo: f64,
     /// Blocks of silence after which a released voice is idle.
     pub quiet_blocks: u32,
 }
 
-/// Harmonics, Timbre, Morph and Decay (0..1) for a note at `note` played at `velocity` (0..1):
-/// the knobs, plus the mapping (clamped to 0..1), plus the mod wheel (capped at 1). With no
-/// mapping a target is its knob exactly.
+/// Harmonics, Timbre, Morph and Decay (0..1) from the knobs and the matrix's sums `sums` for them
+/// (in that order): the knob plus the sum, clamped to 0..1, then the mod wheel (capped at 1). A
+/// target no row moves is its knob exactly, as before the matrix.
 #[must_use]
-pub fn targets(s: &Shared, note: f32, velocity: f32) -> [f32; TARGETS] {
-    let map = s.mapping.offsets(note, velocity);
+pub fn targets(knobs: [f32; TARGETS], wheel: Option<(usize, f32)>, sums: [f32; TARGETS]) -> [f32; TARGETS] {
     let mut t = [0.0f32; TARGETS];
-    for ((t, k), m) in t.iter_mut().zip(s.knobs).zip(map) {
+    for ((t, k), m) in t.iter_mut().zip(knobs).zip(sums) {
         *t = if m == 0.0 { k } else { (k + m).clamp(0.0, 1.0) };
     }
-    if let Some((i, w)) = s.wheel
+    if let Some((i, w)) = wheel
         && let Some(x) = t.get_mut(i)
     {
         *x = (*x + w).min(1.0);
     }
     t
+}
+
+/// The voice's gain into the left and right channels for the matrix's Level and Pan sums: Level
+/// scales by `1 + level` (0..2), Pan is a balance (-1 left, +1 right) that leaves the near side at
+/// unity, so the center is exactly 1 on both sides and a voice no row moves is untouched.
+#[must_use]
+pub fn voice_gains(level: f32, pan: f32) -> (f32, f32) {
+    let g = if level == 0.0 { 1.0 } else { (1.0 + level).clamp(0.0, 2.0) };
+    let p = pan.clamp(-1.0, 1.0);
+    let (l, r) = if p > 0.0 {
+        (1.0 - p, 1.0)
+    } else if p < 0.0 {
+        (1.0, 1.0 + p)
+    } else {
+        (1.0, 1.0)
+    };
+    (g * l, g * r)
 }
 
 /// The keys sounding on one voice, oldest first: each held, or released while the sustain pedal
@@ -224,18 +218,24 @@ impl NoteStack {
 pub struct Slot {
     pub voice: Box<Voice<'static>>,
     frames: [Frame; BLOCK],
-    /// The last block, out and aux crossfaded, before the level.
+    /// The last block, out and aux crossfaded (and shaped, with the shaper on), before the level.
     pub mixed: [f32; BLOCK],
     pub notes: NoteStack,
     /// The note the voice plays (kept after the release, so the tail keeps its pitch).
     pub note: f32,
     /// The level input while a key sounds: the velocity (0..1) of the newest key.
     pub velocity: f32,
+    /// The note-off velocity (0..1) of the key that last let go of the voice.
+    pub release_velocity: f32,
     /// The trigger input of the last block rendered.
     pub last_trigger: bool,
     /// A note started while the trigger was still high: one low block first, so the voice sees
     /// the new edge.
     pub retrigger: bool,
+    /// A new phrase started since the last block: the shaper's envelopes and LFOs start with it.
+    started: bool,
+    /// A key held the voice in the last block (its envelopes are gated).
+    was_sounding: bool,
     /// When the voice's newest phrase started (the allocator's counter).
     pub age: u64,
     /// The peak of its recent output, falling slowly: what "quietest" compares.
@@ -245,6 +245,9 @@ pub struct Slot {
     pub idle: bool,
     /// Rendered the last block (its `mixed` counts).
     pub rendered: bool,
+    /// The last block's gains into the left and right channels (the matrix's Level and Pan).
+    pub gain: (f32, f32),
+    pub(crate) shaper: Shaper,
     seed: u32,
 }
 
@@ -258,13 +261,18 @@ impl Slot {
             notes: NoteStack::new(),
             note: 60.0,
             velocity: 0.0,
+            release_velocity: 0.0,
             last_trigger: false,
             retrigger: false,
+            started: false,
+            was_sounding: false,
             age: 0,
             loudness: 0.0,
             quiet: 0,
             idle: true,
             rendered: false,
+            gain: (1.0, 1.0),
+            shaper: Shaper::new(seed),
             seed,
         };
         s.voice.set_tuning(Tuning::Concert);
@@ -281,6 +289,7 @@ impl Slot {
     pub fn set_seed(&mut self, seed: u32) {
         self.seed = seed;
         self.voice.seed(seed);
+        self.shaper.set_seed(seed);
     }
 
     /// The voice's power-on state and its seed again (the tuning survives `init`), idle.
@@ -292,13 +301,18 @@ impl Slot {
         self.notes.clear();
         self.note = 60.0;
         self.velocity = 0.0;
+        self.release_velocity = 0.0;
         self.last_trigger = false;
         self.retrigger = false;
+        self.started = false;
+        self.was_sounding = false;
         self.age = 0;
         self.loudness = 0.0;
         self.quiet = 0;
         self.idle = true;
         self.rendered = false;
+        self.gain = (1.0, 1.0);
+        self.shaper.set_seed(self.seed);
     }
 
     /// A key sounds on this voice (held, or kept by the pedal).
@@ -317,6 +331,7 @@ impl Slot {
         if self.notes.top().is_none() {
             self.retrigger = self.last_trigger;
             self.age = age;
+            self.started = true;
         }
         self.notes.push(key);
         self.note = f32::from(key);
@@ -325,9 +340,11 @@ impl Slot {
         self.quiet = 0;
     }
 
-    pub fn off(&mut self, key: u8, sustain: bool) {
+    /// A note-off at `velocity` (0..127).
+    pub fn off(&mut self, key: u8, velocity: u8, sustain: bool) {
         if self.notes.contains(key) {
             self.notes.release(key, sustain);
+            self.release_velocity = f32::from(velocity.min(127)) / 127.0;
             self.follow_top();
         }
     }
@@ -344,44 +361,113 @@ impl Slot {
         }
     }
 
+    /// The matrix's source values for this block (index [`src`]), read at the block's start.
+    fn sources(&self, s: &Shared) -> [f32; NSRC] {
+        let mut v = [0.0f32; NSRC];
+        let mut set = |i: usize, x: f32| {
+            if let Some(slot) = v.get_mut(i) {
+                *slot = x;
+            }
+        };
+        let m = s.matrix;
+        if m.reads(src::LFO1) {
+            set(src::LFO1, self.shaper.lfo_value(s.shaper, 0));
+        }
+        if m.reads(src::LFO2) {
+            set(src::LFO2, self.shaper.lfo_value(s.shaper, 1));
+        }
+        set(src::AMP_ENV, self.shaper.amp.level);
+        set(src::FILTER_ENV, self.shaper.filter_env.level);
+        set(src::VELOCITY, self.velocity);
+        set(src::KEY, key_source(self.note));
+        set(src::RELEASE_VELOCITY, self.release_velocity);
+        set(src::AFTERTOUCH, s.controls.aftertouch);
+        let key = if self.note.is_finite() { self.note.clamp(0.0, 127.0) as usize } else { 0 };
+        set(src::POLY_AFTERTOUCH, f32::from(s.poly.get(key).copied().unwrap_or(0)) / 127.0);
+        set(src::MOD_WHEEL, s.controls.wheel);
+        set(src::PITCH_BEND, s.controls.bend);
+        set(src::RANDOM, self.shaper.random);
+        for (i, x) in s.controls.macros.iter().enumerate() {
+            set(src::MACRO1 + i, *x);
+        }
+        v
+    }
+
     /// Renders the next 12 frames into `mixed`; an idle voice renders nothing.
-    pub fn render(&mut self, s: &Shared) {
+    pub(crate) fn render(&mut self, s: &Shared) {
         self.rendered = !self.idle;
         if self.idle {
             return;
         }
         let sounding = self.sounding();
-        let [harmonics, timbre, morph, decay] = targets(s, self.note, self.velocity);
-        let mut patch = Patch { note: s.offset, harmonics, timbre, morph, engine: s.engine, decay, lpg_colour: s.lpg_color, ..Patch::default() };
+        let sh = s.shaper;
+        if self.started {
+            self.started = false;
+            self.shaper.note(sh, self.velocity, s.free_phase);
+        } else if !sounding && self.was_sounding {
+            self.shaper.release();
+        }
+        self.was_sounding = sounding;
+        if let Some(q) = s.quarters {
+            self.shaper.anchor(sh, q);
+        }
+        let sums = if s.matrix.is_empty() { [0.0; NDST] } else { s.matrix.evaluate(&self.sources(s)) };
+        let sum = |d: usize| sums.get(d).copied().unwrap_or(0.0);
+        let [harmonics, timbre, morph, decay] = targets(s.knobs, s.wheel, [sum(dst::HARMONICS), sum(dst::TIMBRE), sum(dst::MORPH), sum(dst::DECAY)]);
+        let pitch = sum(dst::PITCH);
+        let note = if pitch == 0.0 { s.offset } else { (s.offset + PITCH_SEMITONES * pitch).clamp(-96.0, 96.0) };
+        let mut patch = Patch { note, harmonics, timbre, morph, engine: s.engine, decay, lpg_colour: s.lpg_color, ..Patch::default() };
         if s.engine == CHIPTUNE && !sounding {
             patch.timbre_modulation_amount = chiptune_release(decay);
         }
         let trigger = sounding && !self.retrigger;
         self.retrigger = false;
         self.last_trigger = trigger;
+        // With the shaper on its amp envelope is the voice's envelope: the low-pass gate stays open.
+        let level = if sh.on {
+            1.0
+        } else if sounding {
+            self.velocity
+        } else {
+            0.0
+        };
         let mods = Modulations {
             note: self.note,
             trigger: if trigger { 1.0 } else { 0.0 },
-            level: if sounding { self.velocity } else { 0.0 },
+            level,
             trigger_patched: true,
             level_patched: true,
             ..Modulations::default()
         };
         self.voice.render(&patch, &mods, &mut self.frames);
-        let mut peak = 0.0f32;
         let mut silent = true;
         for (y, f) in self.mixed.iter_mut().zip(&self.frames) {
             let (out, aux) = (to_f32(f.out), to_f32(f.aux));
             silent &= out.abs() <= LSB && aux.abs() <= LSB;
             *y = out + (aux - out) * s.aux_mix;
-            peak = peak.max(y.abs());
         }
+        if sh.on {
+            let mods = FilterMods { cutoff: sum(dst::CUTOFF), resonance: sum(dst::RESONANCE), env_amount: sum(dst::ENV_AMOUNT) };
+            self.shaper.design(sh, self.note, mods);
+        }
+        self.shaper.process(sh, &mut self.mixed);
+        self.shaper.lfo_amount_mod = [sum(dst::LFO1_AMOUNT), sum(dst::LFO2_AMOUNT)];
+        let rate = |d: usize| RATE_OCTAVES * sum(d).clamp(-1.0, 1.0);
+        self.shaper.advance_lfos(sh, s.tempo, [rate(dst::LFO1_RATE), rate(dst::LFO2_RATE)], s.quarters.is_some());
+        self.gain = voice_gains(sum(dst::LEVEL), sum(dst::PAN));
+        let peak = self.mixed.iter().fold(0.0f32, |p, y| p.max(y.abs()));
         self.loudness = peak.max(self.loudness * LOUDNESS_FALL);
-        if sounding || trigger || !silent {
+        if sh.on {
+            self.idle = !sounding && self.shaper.amp_idle();
+        } else if sounding || trigger || !silent {
             self.quiet = 0;
         } else {
             self.quiet += 1;
             self.idle = self.quiet >= s.quiet_blocks;
+        }
+        if self.idle {
+            self.shaper.rest();
+            self.was_sounding = false;
         }
     }
 }

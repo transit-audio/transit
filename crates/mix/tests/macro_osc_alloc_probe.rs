@@ -130,7 +130,7 @@ fn the_macro_oscillator_on_a_strip_allocates_nothing_on_the_audio_thread() {
 }
 
 #[test]
-fn sixteen_voices_with_steals_and_the_mapping_allocate_nothing() {
+fn sixteen_voices_with_steals_the_shaper_and_a_full_matrix_allocate_nothing() {
     MixEngine::force_serial(true);
     mark_audio_thread();
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: SR, max_block: BLOCK as u32, out_channels: 0, in_channels: 0 };
@@ -138,7 +138,32 @@ fn sixteen_voices_with_steals_and_the_mapping_allocate_nothing() {
     let mut mix = MixEngine::realtime_with_events(target, epoch, EventLimits::default());
     let mut comp = PlanCompiler::new(target, PlanLimits::default());
     let mut make = |spec: &InstanceSpec, _: SlotGen| transit_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
-    let mapping = [("velocity_timbre", 60.0), ("velocity_curve", 2.0), ("key_morph", -50.0), ("key_curve", 1.0), ("velocity_decay", 30.0)];
+    // The shaper on (both LFOs, one synced) and all sixteen matrix rows (#243).
+    let mut owned: Vec<(String, f32)> = [
+        ("shaper", 1.0),
+        ("filter_slope", 1.0),
+        ("cutoff", 900.0),
+        ("resonance", 50.0),
+        ("filter_env_amount", 50.0),
+        ("lfo1_shape", 5.0),
+        ("lfo2_shape", 4.0),
+        ("lfo2_sync", 1.0),
+        ("lfo2_retrigger", 0.0),
+    ]
+    .iter()
+    .map(|(k, v)| (k.to_string(), *v))
+    .collect();
+    for n in 1..=16usize {
+        let (source, dest) = (1 + (n * 7) % 20, 1 + (n * 5) % 14);
+        owned.extend([
+            (format!("mod{n}_source"), source as f32),
+            (format!("mod{n}_via"), ((n * 3) % 21) as f32),
+            (format!("mod{n}_dest"), dest as f32),
+            (format!("mod{n}_amount"), 20.0 + n as f32),
+            (format!("mod{n}_curve"), (n % 5) as f32),
+        ]);
+    }
+    let mapping: Vec<(&str, f32)> = owned.iter().map(|(k, v)| (k.as_str(), *v)).collect();
     let (s, t) = session(&[&[("voices", 15.0), ("model", 15.0)][..], &mapping[..]].concat());
     let mut generation = PlanGeneration::EMPTY.checked_next().unwrap();
     let mut env = comp.compile(Arc::new(s), PlanGeneration::EMPTY, generation, &mut make).unwrap();
@@ -147,7 +172,7 @@ fn sixteen_voices_with_steals_and_the_mapping_allocate_nothing() {
     let hub = comp.scope_hub();
     assert!(hub.set_enabled(t, transit_mix::INSTRUMENT_UID, true), "the instrument has a tap");
     let binding = comp.active_bindings().into_iter().find(|b| b.1 == INSTRUMENT_SLOT).unwrap();
-    let (edited, _) = session(&[&[("voices", 2.0), ("model", 18.0), ("key_timbre", 50.0)][..], &mapping[..]].concat());
+    let (edited, _) = session(&[&[("voices", 2.0), ("model", 18.0), ("mod16_amount", -50.0)][..], &mapping[..]].concat());
     let next = generation.checked_next().unwrap();
     let mut edit = comp.compile(Arc::new(edited), generation, next, &mut make).unwrap();
     generation = next;
@@ -174,7 +199,11 @@ fn sixteen_voices_with_steals_and_the_mapping_allocate_nothing() {
                 let at = now + 11 * k;
                 assert!(mix.queue_event(&ev(at, Message::NoteOn { key, velocity: 30 + (k * 5) as u8, id: NoteId::NONE })).accepted());
                 let off = if k % 2 == 0 { at + 700 } else { at + 6000 };
-                assert!(mix.queue_event(&ev(off, Message::NoteOff { key, velocity: 0, id: NoteId::NONE })).accepted());
+                assert!(mix.queue_event(&ev(off, Message::NoteOff { key, velocity: 64, id: NoteId::NONE })).accepted());
+                assert!(mix.queue_event(&ev(at + 50, Message::PolyPressure { key, value: 90, id: NoteId::NONE })).accepted());
+            }
+            for (k, value) in [(0u64, 30u8), (1, 100), (2, 0)] {
+                assert!(mix.queue_event(&ev(now + 300 * k, Message::ChannelPressure { value })).accepted());
             }
             for _ in 0..30 {
                 mix.render_active(pos, BLOCK, &mut out);

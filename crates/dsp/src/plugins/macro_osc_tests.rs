@@ -256,11 +256,11 @@ fn host_blocks_split_into_twelve_frame_renders_bit_for_bit() {
         (5, Kind::On(60, 100)),
         (700, Kind::On(67, 90)),
         (1013, Kind::Bend(0.5)),
-        (1500, Kind::Off(67)),
+        (1500, Kind::Off(67, 0)),
         (2049, Kind::Wheel(0.7)),
-        (3001, Kind::Off(60)),
+        (3001, Kind::Off(60, 0)),
         (3002, Kind::On(48, 127)),
-        (6000, Kind::Off(48)),
+        (6000, Kind::Off(48, 0)),
     ];
     let run = |block: usize| {
         let mut m = inst();
@@ -306,34 +306,57 @@ fn every_model_sounds_and_aux_mix_selects_the_aux_output() {
 #[test]
 fn parameter_ids_are_stable_and_round_trip() {
     let ids: Vec<&str> = MACRO_OSC_INFO.params.iter().map(|p| p.id).collect();
-    // Sessions and automation lanes store these ids: never rename one.
-    assert_eq!(
-        ids,
-        [
-            "model",
-            "harmonics",
-            "timbre",
-            "morph",
-            "decay",
-            "lpg_color",
-            "aux_mix",
-            "level",
-            "tune",
-            "bend_range",
-            "mod_wheel",
-            "voices",
-            "velocity_curve",
-            "velocity_harmonics",
-            "velocity_timbre",
-            "velocity_morph",
-            "velocity_decay",
-            "key_curve",
-            "key_harmonics",
-            "key_timbre",
-            "key_morph",
-            "key_decay",
-        ]
-    );
+    // Sessions and automation lanes store these ids: never rename one. The note-to-macro mapping's
+    // ids of #196 left with #243 (`transit_model::legacy_mapping` migrates them to matrix rows).
+    let mut want: Vec<String> = [
+        "model",
+        "harmonics",
+        "timbre",
+        "morph",
+        "decay",
+        "lpg_color",
+        "aux_mix",
+        "level",
+        "tune",
+        "bend_range",
+        "mod_wheel",
+        "voices",
+        "shaper",
+        "amp_attack",
+        "amp_decay",
+        "amp_sustain",
+        "amp_release",
+        "amp_velocity",
+        "filter_mode",
+        "filter_slope",
+        "cutoff",
+        "resonance",
+        "drive",
+        "key_track",
+        "filter_env_amount",
+        "filter_attack",
+        "filter_decay",
+        "filter_sustain",
+        "filter_release",
+    ]
+    .iter()
+    .map(|s| s.to_string())
+    .collect();
+    for l in 1..=2 {
+        for f in ["shape", "rate", "sync", "division", "retrigger", "fade", "amount"] {
+            want.push(format!("lfo{l}_{f}"));
+        }
+    }
+    for n in 1..=16 {
+        for f in ["source", "via", "dest", "amount", "curve"] {
+            want.push(format!("mod{n}_{f}"));
+        }
+    }
+    assert_eq!(ids, want);
+    for (r, f) in [(0, 0), (15, 4), (3, 2)] {
+        assert_eq!(row_param(r, f), Some(want[43 + r * 5 + f].as_str()));
+    }
+    assert_eq!(row_param(16, 0), None);
     assert_eq!(MACRO_OSC_INFO.id, "macro_oscillator");
     assert_eq!(MACRO_OSC_INFO.name, "Macro Oscillator");
     let mut m = inst();

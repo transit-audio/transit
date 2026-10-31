@@ -259,8 +259,8 @@ pub(super) fn rig_with_pending() -> (Rig, Session, PlanEnvelope) {
     let ins = &mut s2.track_mut(a).unwrap().mixer.inserts;
     ins[2] = Some(builtin("compressor"));
     // The reverb's parameter map grows past the inline storage: an `Attach::Applied`.
-    for i in 0..70 {
-        ins[0].as_mut().unwrap().params.insert(format!("extra{i:02}"), 0.5);
+    for i in 0..140 {
+        ins[0].as_mut().unwrap().params.insert(format!("extra{i:03}"), 0.5);
     }
     let env = rig.compile(&s2);
     assert_eq!(env.plan.attach.len(), 1);

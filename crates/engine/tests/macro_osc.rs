@@ -1,7 +1,8 @@
 //! The Macro Oscillator in a session (#195 slice 3): chosen as a track's instrument it stores every
 //! parameter at its default, its parameters are set by command, saved and loaded with the session
 //! (the render after a JSON round trip is the same bits), and automation lanes address them by id;
-//! with #196 the voice count and the note-to-macro mapping too.
+//! with #196 the voice count, and with #243 the matrix rows that took over the note-to-macro
+//! mapping (`macro_osc_matrix.rs` has the shaper, the matrix and the migration).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::json;
@@ -70,13 +71,22 @@ fn parameters_save_and_load_with_the_session() {
     assert!(bits(&render(fresh.session())) != bits(&before), "the parameters matter to the render");
 }
 
-/// The voice count and the note-to-macro mapping (#196) are parameters like the others: saved,
+/// The voice count (#196) and the matrix rows (#243) are parameters like the others: saved,
 /// loaded, and the loaded session plays the same bits; a session saved before #196 (without them)
-/// opens with eight voices and no mapping.
+/// opens with eight voices and an empty matrix.
 #[test]
-fn voices_and_the_mapping_save_and_load_with_the_session() {
+fn voices_and_the_rows_save_and_load_with_the_session() {
     let (mut e, t) = engine();
-    let set = [("voices", 2.0), ("velocity_curve", 1.0), ("velocity_timbre", 70.0), ("key_curve", 2.0), ("key_morph", -35.0), ("key_decay", 20.0)];
+    let set = [
+        ("voices", 2.0),
+        ("mod1_source", 5.0),
+        ("mod1_dest", 3.0),
+        ("mod1_amount", 70.0),
+        ("mod1_curve", 1.0),
+        ("mod2_source", 6.0),
+        ("mod2_dest", 4.0),
+        ("mod2_amount", -35.0),
+    ];
     for (param, value) in set {
         e.execute("mix.instrument_param", &json!({"track": t.0, "param": param, "value": value})).unwrap();
     }
@@ -88,11 +98,12 @@ fn voices_and_the_mapping_save_and_load_with_the_session() {
     }
     assert!(bits(&render(&loaded)) == bits(&before), "the loaded session renders the same bits");
     let (plain, _) = engine();
-    assert!(bits(&render(plain.session())) != bits(&before), "voices and mapping change the render");
+    assert!(bits(&render(plain.session())) != bits(&before), "voices and rows change the render");
     // An older session: only the eleven parameters of #195.
     let mut old = plain.session().clone();
     let ins = old.track_mut(t).unwrap().instrument.as_mut().unwrap();
-    ins.params.retain(|k, _| !k.starts_with("velocity_") && !k.starts_with("key_") && k != "voices");
+    let base = ["model", "harmonics", "timbre", "morph", "decay", "lpg_color", "aux_mix", "level", "tune", "bend_range", "mod_wheel"];
+    ins.params.retain(|k, _| base.contains(&k.as_str()));
     assert_eq!(ins.params.len(), 11);
     assert!(bits(&render(&old)) == bits(&render(plain.session())), "the new parameters take their defaults");
 }

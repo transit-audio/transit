@@ -121,6 +121,7 @@ impl Lfo {
     }
 
     /// The phase now, 0..1 cycles.
+    #[cfg(test)]
     pub(crate) fn phase(&self) -> f64 {
         self.phase
     }

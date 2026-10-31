@@ -1,9 +1,20 @@
 //! The Macro Oscillator's voices (#196): the allocator, the release tails, the sum of independent
-//! voices, the note-to-macro mapping. Block-driven and deterministic: events land at 12-frame
+//! voices, the matrix rows that took over the note-to-macro mapping (#243). Block-driven and deterministic: events land at 12-frame
 //! boundaries and nothing reads a clock.
 
-use super::voice::{Mapping, Shared, shape, targets};
+use super::matrix::{CURVES, Matrix, NSRC, Row, curve, dst, src};
+use super::voice::targets;
 use super::*;
+
+/// The parameters of matrix row `n` (1-based): source, destination, amount (%), curve.
+pub(super) fn row(n: usize, source: usize, dest: usize, amount: f32, curve: usize) -> Vec<(String, f32)> {
+    vec![
+        (format!("mod{n}_source"), source as f32),
+        (format!("mod{n}_dest"), dest as f32),
+        (format!("mod{n}_amount"), amount),
+        (format!("mod{n}_curve"), curve as f32),
+    ]
+}
 
 const SR: f32 = 48_000.0;
 
@@ -179,18 +190,14 @@ fn n_voices_render_the_sum_of_n_mono_renders_bit_for_bit() {
         (420, 79, 0),
     ];
     for (model, harmonics) in [(0.0, 50.0), (18.0, 50.0), (15.0, 80.0)] {
-        let params = [
-            ("model", model),
-            ("harmonics", harmonics),
-            ("velocity_timbre", 60.0),
-            ("velocity_curve", 2.0),
-            ("key_morph", -40.0),
-            ("key_curve", 1.0),
-            ("velocity_decay", 25.0),
-        ];
+        let mut params = vec![("model".to_string(), model), ("harmonics".to_string(), harmonics)];
+        params.extend(row(1, src::VELOCITY, dst::TIMBRE, 60.0, 2));
+        params.extend(row(2, src::VELOCITY, dst::DECAY, 25.0, 2));
+        params.extend(row(3, src::KEY, dst::MORPH, -40.0, 1));
+        params.extend(row(4, src::RANDOM, dst::PAN, 50.0, 0));
         let mut m = poly(N);
-        for (id, v) in params {
-            m.set_param(id, v);
+        for (id, v) in &params {
+            assert!(m.set_param(id, *v), "{id}");
         }
         let blocks = 1200;
         let mut out = Vec::new();
@@ -199,19 +206,19 @@ fn n_voices_render_the_sum_of_n_mono_renders_bit_for_bit() {
             let held: Vec<Option<u8>> = m.slots.iter().take(N).map(|s| s.notes.top()).collect();
             let now: Vec<_> = script.iter().filter(|(at, ..)| *at == b).collect();
             for &&(_, key, vel) in &now {
-                m.push(0, if vel == 0 { Kind::Off(key) } else { Kind::On(key, vel) });
+                m.push(0, if vel == 0 { Kind::Off(key, 0) } else { Kind::On(key, vel) });
             }
             out.extend(run(&mut m, BLOCK));
             for &&(_, key, vel) in &now {
                 if vel == 0 {
                     if let Some(v) = held.iter().position(|h| *h == Some(key)) {
-                        per_voice[v].push((b, Kind::Off(key)));
+                        per_voice[v].push((b, Kind::Off(key, 0)));
                     }
                     continue;
                 }
                 let v = voice_of(&m, key).expect("the newest note sounds");
                 if let Some(old) = held[v] {
-                    per_voice[v].push((b, Kind::Off(old)));
+                    per_voice[v].push((b, Kind::Off(old, 0)));
                 }
                 per_voice[v].push((b, Kind::On(key, vel)));
             }
@@ -220,8 +227,8 @@ fn n_voices_render_the_sum_of_n_mono_renders_bit_for_bit() {
         let mut sum = vec![0.0f32; out.len()];
         for (v, events) in per_voice.iter().enumerate() {
             let mut mono = poly(1);
-            for (id, x) in params {
-                mono.set_param(id, x);
+            for (id, x) in &params {
+                mono.set_param(id, *x);
             }
             mono.set_seed(Random::DEFAULT_SEED + v as u32);
             for b in 0..blocks {
@@ -248,9 +255,9 @@ fn polyphonic_host_blocks_split_bit_for_bit() {
         (7, Kind::On(67, 80)),
         (700, Kind::On(71, 90)),
         (1013, Kind::Bend(0.5)),
-        (1500, Kind::Off(64)),
+        (1500, Kind::Off(64, 0)),
         (2049, Kind::On(72, 50)),
-        (3001, Kind::Off(60)),
+        (3001, Kind::Off(60, 0)),
         (6000, Kind::AllOff),
     ];
     let render = |block: usize| {
@@ -277,61 +284,62 @@ fn polyphonic_host_blocks_split_bit_for_bit() {
     }
 }
 
-/// Every curve maps 0 to 0 and 1 to 1 exactly; out-of-range and NaN sources clamp.
+/// The matrix's first three curves are the note-to-macro mapping's (the clip fades' Linear,
+/// Exponential and S-curve, in that order), so a migrated curve keeps its sound; every curve maps 0
+/// to 0 and 1 to 1 exactly; out-of-range and NaN sources clamp.
 #[test]
-fn mapping_curves_hold_their_extremes() {
-    for c in 0..voice::CURVES.len() {
-        assert_eq!(shape(c, 0.0), 0.0, "curve {c} at 0");
-        assert_eq!(shape(c, 1.0), 1.0, "curve {c} at 1");
-        assert_eq!(shape(c, -2.0), 0.0);
-        assert_eq!(shape(c, 7.0), 1.0);
-        assert_eq!(shape(c, f32::NAN), 0.0);
+fn matrix_curves_hold_their_extremes_and_keep_the_mapping_curves() {
+    for c in 0..CURVES.len() {
+        assert_eq!(curve(c, 0.0), 0.0, "curve {c} at 0");
+        assert!((curve(c, 1.0) - 1.0).abs() < 1e-6, "curve {c} at 1");
+        assert_eq!(curve(c, 7.0), curve(c, 1.0));
+        assert_eq!(curve(c, f32::NAN), 0.0);
     }
-    assert_eq!(shape(0, 0.5), 0.5);
+    assert_eq!(curve(0, 0.5), 0.5);
     for (c, fade) in [(0, crate::offline::FadeShape::Linear), (1, crate::offline::FadeShape::Exponential), (2, crate::offline::FadeShape::SCurve)] {
+        assert_eq!(curve(c, 1.0), 1.0, "curve {c} reaches 1 exactly");
         for t in [0.1, 0.25, 0.5, 0.9] {
-            assert_eq!(shape(c, t), fade.gain(t), "curve {c} is the clip fade's {fade:?}");
+            assert_eq!(curve(c, t), fade.gain(t), "curve {c} is the clip fade's {fade:?}");
+            assert_eq!(curve(c, -t), -fade.gain(t), "curve {c} mirrored");
         }
     }
-    assert!((shape(1, 0.5) - 0.1192).abs() < 1e-4, "exponential: (e^4t - 1) / (e^4 - 1)");
-    assert!((shape(2, 0.5) - 0.5).abs() < 1e-7, "the S-curve's midpoint");
-    assert!(shape(2, 0.1) < 0.1 && shape(2, 0.9) > 0.9, "the S-curve is flat at both ends");
+    assert!((curve(1, 0.5) - 0.1192).abs() < 1e-4, "exponential: (e^4t - 1) / (e^4 - 1)");
     assert_eq!(voice::key_source(60.0), 0.0);
     assert_eq!((voice::key_source(0.0), voice::key_source(120.0), voice::key_source(127.0)), (-1.0, 1.0, 1.0));
 }
 
-/// Full depths drive each target to the ends of its travel and clamp there; a negative depth
-/// inverts; no mapping leaves every knob exactly as set.
+/// The Harmonics, Timbre, Morph and Decay sums of `m` for a note at `note` played at `velocity`.
+fn macro_sums(m: &Matrix, note: f32, velocity: f32) -> [f32; 4] {
+    let mut v = [0.0; NSRC];
+    v[src::VELOCITY] = velocity;
+    v[src::KEY] = voice::key_source(note);
+    let out = m.evaluate(&v);
+    [out[dst::HARMONICS], out[dst::TIMBRE], out[dst::MORPH], out[dst::DECAY]]
+}
+
+/// Full amounts drive each target to the ends of its travel and clamp there; a negative amount
+/// inverts; no row leaves every knob exactly as set.
 #[test]
-fn mapping_depths_reach_and_clamp_at_the_ends_of_the_travel() {
-    let base = Shared {
-        knobs: [0.5, 0.5, 0.5, 0.5],
-        wheel: None,
-        offset: 0.0,
-        engine: 8,
-        lpg_color: 0.5,
-        aux_mix: 0.0,
-        mapping: Mapping::default(),
-        quiet_blocks: 200,
-    };
+fn macro_rows_reach_and_clamp_at_the_ends_of_the_travel() {
+    let knobs = [0.5, 0.5, 0.5, 0.5];
+    let empty = Matrix::default();
     for (note, vel) in [(0.0, 0.0), (60.0, 0.5), (127.0, 1.0)] {
-        assert_eq!(targets(&base, note, vel), base.knobs, "no mapping: the knobs exactly");
+        assert_eq!(targets(knobs, None, macro_sums(&empty, note, vel)), knobs, "no row: the knobs exactly");
     }
-    for curve in 0..3 {
-        let mut s = base;
-        s.mapping = Mapping { velocity_curve: curve, velocity: [1.0, -1.0, 0.5, 0.0], key_curve: curve, key: [0.0; 4] };
-        assert_eq!(targets(&s, 60.0, 1.0), [1.0, 0.0, 1.0, 0.5], "curve {curve}: velocity 127 at full depth, clamped");
-        assert_eq!(targets(&s, 60.0, 0.0), base.knobs, "velocity 0 adds nothing");
-        s.mapping = Mapping { velocity_curve: 0, velocity: [0.0; 4], key_curve: curve, key: [0.0, 1.0, -0.25, 1.0] };
-        assert_eq!(targets(&s, 120.0, 1.0), [0.5, 1.0, 0.25, 1.0], "curve {curve}: the top of the keyboard");
-        assert_eq!(targets(&s, 0.0, 1.0), [0.5, 0.0, 0.75, 0.0], "curve {curve}: the bottom, mirrored");
-        assert_eq!(targets(&s, 60.0, 1.0), base.knobs, "middle C is the center");
+    let r = |source, dest, amount, curve| Row { source, dest, amount, curve, via: src::OFF };
+    for c in 0..3 {
+        let vel =
+            Matrix::new([r(src::VELOCITY, dst::HARMONICS, 1.0, c), r(src::VELOCITY, dst::TIMBRE, -1.0, c), r(src::VELOCITY, dst::MORPH, 0.5, c)]);
+        assert_eq!(targets(knobs, None, macro_sums(&vel, 60.0, 1.0)), [1.0, 0.0, 1.0, 0.5], "curve {c}: velocity 127 at full amount, clamped");
+        assert_eq!(targets(knobs, None, macro_sums(&vel, 60.0, 0.0)), knobs, "velocity 0 adds nothing");
+        let key = Matrix::new([r(src::KEY, dst::TIMBRE, 1.0, c), r(src::KEY, dst::MORPH, -0.25, c), r(src::KEY, dst::DECAY, 1.0, c)]);
+        assert_eq!(targets(knobs, None, macro_sums(&key, 120.0, 1.0)), [0.5, 1.0, 0.25, 1.0], "curve {c}: the top of the keyboard");
+        assert_eq!(targets(knobs, None, macro_sums(&key, 0.0, 1.0)), [0.5, 0.0, 0.75, 0.0], "curve {c}: the bottom, mirrored");
+        assert_eq!(targets(knobs, None, macro_sums(&key, 60.0, 1.0)), knobs, "middle C is the center");
     }
-    // The wheel adds after the mapping, capped at 1.
-    let mut s = base;
-    s.mapping.velocity = [0.0, 0.3, 0.0, 0.0];
-    s.wheel = Some((1, 0.4));
-    let t = targets(&s, 60.0, 1.0);
+    // The wheel adds after the rows, capped at 1.
+    let m = Matrix::new([r(src::VELOCITY, dst::TIMBRE, 0.3, 0)]);
+    let t = targets(knobs, Some((1, 0.4)), macro_sums(&m, 60.0, 1.0));
     assert!((t[1] - 1.0).abs() < 1e-6 && t[1] <= 1.0, "{t:?}");
 }
 
@@ -342,7 +350,9 @@ fn key_tracking_leaves_middle_c_alone() {
     let play = |key: u8, depth: f32| {
         let mut m = poly(8);
         m.set_param("model", 10.0);
-        m.set_param("key_timbre", depth);
+        for (id, v) in row(1, src::KEY, dst::TIMBRE, depth, 0) {
+            m.set_param(&id, v);
+        }
         m.note_on(0, key, 100);
         run(&mut m, 4800)
     };

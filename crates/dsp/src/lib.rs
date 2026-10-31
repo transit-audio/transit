@@ -343,6 +343,16 @@ pub trait Plugin: Send {
     fn reads_track_notes(&self) -> bool {
         false
     }
+    /// Instruments: true when the instrument reads its rack's eight macros (ADR 0034) as
+    /// modulation sources (the Macro Oscillator's matrix, #243). The mix then calls
+    /// [`Plugin::set_rack_macros`] before each `process` while the track is a rack member. The
+    /// default (hosted plug-ins, every other built-in) is no.
+    fn reads_rack_macros(&self) -> bool {
+        false
+    }
+    /// The rack's eight macro values (0..1) for the next block: the knob, or its lane's value at
+    /// the block start while the lane rules it. Only called when [`Plugin::reads_rack_macros`].
+    fn set_rack_macros(&mut self, _values: &[f32; 8]) {}
     /// Instruments: one event at a sample offset within the next block, on a MIDI 1.0 channel
     /// and with the host's voice id (see [`event::PluginEvent`]). `false` only when the
     /// plug-in's own queue refused it (the mix counts it). The default maps the event onto

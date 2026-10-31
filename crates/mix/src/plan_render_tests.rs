@@ -42,8 +42,8 @@ fn applied_storage_grows_through_an_attachment() {
     rig.publish(&s);
     rig.render(1);
     let ins = s.track_mut(a).unwrap().mixer.inserts[0].as_mut().unwrap();
-    for i in 0..70 {
-        ins.params.insert(format!("extra{i:02}"), 0.5);
+    for i in 0..140 {
+        ins.params.insert(format!("extra{i:03}"), 0.5);
     }
     let n = ins.params.len();
     let env = rig.compile(&s);

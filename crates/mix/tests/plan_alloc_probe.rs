@@ -420,15 +420,15 @@ fn clip_effects_on_and_off_and_forty_chains_allocate_nothing() {
 }
 
 #[test]
-fn a_seventy_entry_parameter_map_grows_through_prepared_storage() {
+fn a_long_parameter_map_grows_through_prepared_storage() {
     let (mut s, t, _) = session_with_clip();
     s.track_mut(t).unwrap().mixer.inserts[0] = Some(builtin("gain"));
     let mut rig = Rig::new(&s);
     let ins = s.track_mut(t).unwrap().mixer.inserts[0].as_mut().unwrap();
-    for i in 0..70 {
-        ins.params.insert(format!("extra{i:02}"), 0.5);
+    for i in 0..140 {
+        ins.params.insert(format!("extra{i:03}"), 0.5);
     }
-    no_cost("grow the gain's map to 71 entries", &rig.edit(&s));
+    no_cost("grow the gain's map past the inline storage (141 entries)", &rig.edit(&s));
     assert_eq!(rig.mix.status().applied_mismatch, 0);
     s.track_mut(t).unwrap().mixer.inserts[0] = None;
     no_cost("remove it", &rig.edit(&s));

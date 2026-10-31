@@ -141,6 +141,26 @@ impl<'a> MacroLanes<'a> {
     }
 }
 
+/// The rack's eight macro values (0..1) for its member `t` at `pos`, for an instrument that reads
+/// them as modulation sources (`Plugin::reads_rack_macros`, the Macro Oscillator's matrix, #243):
+/// each macro's lane value while its lane has points and the rack reads automation, else its knob.
+/// Zeros for a track that is not a rack member. Allocation-free.
+pub(crate) fn macro_values(s: &Session, t: &Track, pos: Samples) -> [f32; 8] {
+    let mut v = [0.0f32; 8];
+    if t.folder.is_none() {
+        return v;
+    }
+    let Some((rack_track, _)) = s.rack_of(t) else { return v };
+    let Some(rack) = rack_track.rack.as_ref() else { return v };
+    let reads = rack_track.mixer.automation_mode.reads();
+    for (i, (out, m)) in v.iter_mut().zip(rack.macros.iter()).enumerate() {
+        let lane = if reads { macro_lane(&rack_track.automation, i) } else { None };
+        let x = lane.map_or(m.value, |l| l.value_at(pos, m.value));
+        *out = if x.is_finite() { x.clamp(0.0, 1.0) } else { 0.0 };
+    }
+    v
+}
+
 #[cfg(test)]
 mod tests {
     #![allow(clippy::unwrap_used)]

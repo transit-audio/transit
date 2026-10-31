@@ -102,6 +102,10 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                     apply_params(Some(s), inst, ins, t, &strip.touch, INSTRUMENT_SLOT, pos, timed_span(transport, frames));
                 }
                 inst.plugin.set_transport(transport);
+                // An instrument that reads its rack's macros as modulation sources (#243).
+                if inst.plugin.reads_rack_macros() {
+                    inst.plugin.set_rack_macros(&crate::rack::macro_values(s, t, pos));
+                }
                 if let Some(e) = inst.events.as_deref_mut() {
                     // The MIDI effects (#201) take the block's events from here to `flush`.
                     // A member of a rack runs the rack's MIDI effects ahead of its own (ADR 0036).
