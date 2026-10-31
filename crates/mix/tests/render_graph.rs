@@ -600,7 +600,46 @@ fn continuity_across_upstream_missed_skips() {
 // the other four strips never render while held, whichever were taken, and no assertion needs to know which
 #[test]
 fn skips_before_an_instrument_s_first_render_are_holes_too() {
-    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    let (_one, rig, f) = hold_the_first_strips();
+    // At most two strips are taken (one per worker, held); the other four never render while held.
+    assert!(f.overruns_unstarted + f.upstream_missed >= 4 * 16, "the strips no worker took were taken back or skipped: {f:?}");
+    let hole_samples: u64 = rig.shared.iter().map(|s| s.report().hole_samples).sum();
+    assert_eq!(
+        hole_samples,
+        (f.overruns_busy + f.overruns_unstarted + f.upstream_missed) * FRAMES as u64,
+        "every busy or unstarted overrun and every upstream-missed skip is a hole, before an instrument's first render too: {f:?}"
+    );
+    assert_time_covered(&rig);
+    drop(rig.mix.into_retired());
+}
+
+/// #256: the per-strip rows keep what a strip was counted before its first admission. With both
+/// workers held inside the first strips they take, the dependents are skipped for their missed
+/// key on every held block before any of them is ever sent to a worker; each of those skips is
+/// listed in its strip's row, with a key source as its origin, as are the overruns.
+// timing: held-worker both workers are held inside the first strip each takes;
+// the assertions compare the per-strip rows with the totals, whichever strips were taken
+#[test]
+fn skips_before_a_dependent_s_first_admission_are_listed_with_its_strip() {
+    let (_one, rig, f) = hold_the_first_strips();
+    assert!(f.upstream_missed > 0, "the held key sources skipped their dependents: {f:?}");
+    // Six strips, at most eight rows: every strip with a count has its row.
+    let rows = || f.top_strips.iter().flatten();
+    assert_eq!(rows().map(|s| s.upstream_missed).sum::<u64>(), f.upstream_missed, "every skip is listed with its strip: {:?}", f.top_strips);
+    assert!(rows().filter(|s| s.upstream_missed > 0).all(|s| [0, 3].contains(&s.upstream_origin)), "named with their origin, a key source: {:?}", f.top_strips);
+    assert_eq!(
+        (rows().map(|s| s.overruns_busy).sum::<u64>(), rows().map(|s| s.overruns_late).sum::<u64>(), rows().map(|s| s.overruns_unstarted).sum::<u64>()),
+        (f.overruns_busy, f.overruns_late, f.overruns_unstarted),
+        "every overrun is listed with its strip: {:?}",
+        f.top_strips
+    );
+    drop(rig.mix.into_retired());
+}
+
+/// The provocation of both tests above (E49 recurrence 2026-10-31): both workers held inside the
+/// first strip each takes for 16 blocks at a 500 us deadline, then a far deadline until settled.
+fn hold_the_first_strips() -> (std::sync::MutexGuard<'static, ()>, Rig, StripFaults) {
+    let one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     graph_on();
     let mut rig = keyed_rig(Some(2), Duration::from_micros(500)).expect("two workers");
     expect_from_the_start(&rig);
@@ -622,16 +661,7 @@ fn skips_before_an_instrument_s_first_render_are_holes_too() {
     graph_off();
     let f = rig.mix.strip_faults().unwrap().snapshot();
     println!("{f:?}");
-    // At most two strips are taken (one per worker, held); the other four never render while held.
-    assert!(f.overruns_unstarted + f.upstream_missed >= 4 * 16, "the strips no worker took were taken back or skipped: {f:?}");
-    let hole_samples: u64 = rig.shared.iter().map(|s| s.report().hole_samples).sum();
-    assert_eq!(
-        hole_samples,
-        (f.overruns_busy + f.overruns_unstarted + f.upstream_missed) * FRAMES as u64,
-        "every busy or unstarted overrun and every upstream-missed skip is a hole, before an instrument's first render too: {f:?}"
-    );
-    assert_time_covered(&rig);
-    drop(rig.mix.into_retired());
+    (one, rig, f)
 }
 
 /// Gate 3 through the graph: the callback allocates and frees nothing over a keyed plan with

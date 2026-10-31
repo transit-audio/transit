@@ -863,6 +863,7 @@ impl StripPool {
                     self.bring_home(i, st, events);
                 }
                 if !self.away[i] {
+                    self.name(i, st);
                     self.deliver(i, st, g, &clock, events, s);
                 }
             }
@@ -973,7 +974,7 @@ impl StripPool {
 
     /// Before strip `i` (home, its track live) is sent away: a suspect instance stays silent for
     /// the block (false, counted); a replaced one is cleared; a new chain on the index starts
-    /// with no cost history; the report's name follows the track on the index.
+    /// with no cost history.
     fn admit(&mut self, i: usize, st: &Strip) -> bool {
         if self.set.is_suspect(i) {
             // A late result that panicked made it suspect at `begin_block`: this instance.
@@ -996,14 +997,22 @@ impl StripPool {
             self.set.reset_history(i);
         }
         self.chain[i] = Some(id);
-        // The name the report gives this index's figures (#169): a store only on a change,
-        // and another track's counts start from zero, so a name's counts are its track's.
+        true
+    }
+
+    /// At the top of each block, for every home strip `i`, before anything of the block is
+    /// counted against it: the name the report gives this index's figures (#169) follows the
+    /// track the plan placed on it. A store only on a change, and another track's counts start
+    /// from zero, so a name's counts are its track's. Named here rather than at its first send
+    /// (#256): a dependent skipped for a missed key before it was ever sent has its skips counted
+    /// under its own name, and its first send no longer wipes them. An away strip was named when
+    /// it was sent, and a held strip refuses plan changes.
+    fn name(&mut self, i: usize, st: &Strip) {
         let track = u32::from(st.track);
-        if self.tracks[i].load(Ordering::Relaxed) != track {
+        if self.tracks.get(i).is_some_and(|t| t.load(Ordering::Relaxed) != track) {
             self.tracks[i].store(track, Ordering::Relaxed);
             self.set.reset_counts(i);
         }
-        true
     }
 
     /// The strips' deadline of block `b`. A test's budget override wins; then the callback's

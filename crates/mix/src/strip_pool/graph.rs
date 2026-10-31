@@ -262,6 +262,7 @@ impl StripPool {
                 self.take_keys_back(i, keys);
             }
             if !self.away[i] {
+                self.name(i, st);
                 self.deliver(i, st, g, &clock, events, s);
             }
         }
