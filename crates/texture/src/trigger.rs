@@ -150,7 +150,8 @@ impl TriggerGenerator {
                 self.pulse_count = (self.pulse_count + 1) % 48;
                 self.elapsed_since_last_pulse = 0;
             }
-            self.elapsed_since_last_pulse += 1;
+            // Wraps like the firmware's `int` counter (see `delay_controller.rs`).
+            self.elapsed_since_last_pulse = self.elapsed_since_last_pulse.wrapping_add(1);
             if self.audio_rate {
                 let mut t = F::ZERO;
                 let reset = self.phase >= 1.0;
@@ -222,7 +223,8 @@ impl TriggerGenerator {
                     self.frequency = 1.0 / F::from_i32(self.elapsed_since_last_pulse);
                     self.elapsed_since_last_pulse = 0;
                 }
-                self.elapsed_since_last_pulse += 1;
+                // Wraps like the firmware's `int` counter (see `delay_controller.rs`).
+                self.elapsed_since_last_pulse = self.elapsed_since_last_pulse.wrapping_add(1);
                 if self.phase >= 1.0 {
                     self.phase = F(1.0);
                 }

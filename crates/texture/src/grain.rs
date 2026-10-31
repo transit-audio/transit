@@ -319,7 +319,8 @@ impl<G: Voice> Scheduler<G> {
 
     /// `Tick()`: one sample since the last grain started.
     pub fn tick(&mut self) {
-        self.grain_interval += 1;
+        // Wraps like the firmware's `int` counter (see `delay_controller.rs`).
+        self.grain_interval = self.grain_interval.wrapping_add(1);
     }
 
     /// `SortGrainList(monophonic_mode)`: after a grain starts, the grains at the head of the list

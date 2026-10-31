@@ -75,7 +75,8 @@ impl DelayClock {
 
     /// `Process(tick, tap)`: one sample of the clock input and the SEED button's tap.
     pub fn process(&mut self, tick: bool, tap: bool) {
-        self.next_interval += 1;
+        // Wraps like the firmware's `int` counter; a debug build must not panic after 2^31 samples.
+        self.next_interval = self.next_interval.wrapping_add(1);
         self.fade += self.fade_increment;
         if self.fade >= 1.0 {
             self.fade = F(1.0);
