@@ -198,6 +198,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Built-in dynamics and EQ: Compressor/Limiter, Expander/Gate, De-Esser, Maximizer, Channel Strip, EQ 7-Band, EQ 1-Band.
 - Built-in effects: Room and Plate Reverb, Mod Delay, Chorus, Flanger, Phaser, Saturator, Lo-Fi, Rectifier, Pitch Shifter.
 - Filter insert: a resonant multimode filter (low, high, band, notch; 12 or 24 dB) whose envelope plays from the track's notes, paraphonically, with an LFO (free or tempo-synced), an envelope follower, key tracking and an optional amp envelope; presets Pluck, Wah and Paraphonic Brass.
+- Texture insert: a granular texture processor and tape delay ported from Émilie Gillet's texture synthesizer firmware (MIT) and checked bit for bit against it: grains with random time, size, shape and pitch, freeze, seed and trigger, four buffer qualities at the module's own rates (converted at the edges at any session rate, latency compensated), a 4 to 8 second buffer and the module's automatic input gain; presets Granular Cloud, Frozen Pad and Tape Delay.
 - Utilities: Gain, Trim, Invert, Time Shift, DC Offset Removal, Signal Generator, Dither.
 
 ### MIDI

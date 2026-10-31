@@ -256,3 +256,46 @@ MIDI controller. Presets:
 Pluck, Wah, Paraphonic Brass, and your own from the panel's preset menu. Ableton's Auto Filter
 and Logic's AutoFilter offer the follower and the LFO; the note-triggered envelope is transit's
 addition ([ADR 0038](adr/0038-inserts-read-the-tracks-note-stream.md)).
+
+## Texture
+
+The Texture is a built-in insert effect (the device chain's **+**, or the mixer strip's insert
+picker): a granular texture processor that records what comes into it and plays it back as clouds
+of overlapping grains, or, with **Size** at the top, as a tape delay. It is a port of Émilie
+Gillet's open-source texture synthesizer firmware (MIT), checked bit for bit against her code
+([ADR 0033](adr/0033-built-in-instruments-mutable-instruments-port.md)).
+
+- **Grains**: **Time** (where a grain starts, newest to oldest audio), **Size** (its length:
+  shortest a third of the way up, up to about four seconds toward the top, played backward below a
+  third), **Shape** (its envelope) and **Pitch** (two octaves either way). Each has a **Random**
+  knob under it, the module's attenuverter with nothing patched: right adds smooth random movement,
+  left occasional jumps, the center none.
+- **Density** starts grains at a steady rate left of center and at random right of it, faster
+  toward either end, with none at the center. **Feedback** sends the output back into the
+  recording, **Dry/Wet** balances the input and the grains, **Reverb** adds the module's reverb.
+- **Play**: **Freeze** stops recording, so the grains keep playing what the buffer holds.
+  **Seed** starts a grain while you press it (one per press with Density at the center) and keeps
+  them coming while you hold it; **Latch** holds it down for you, so grains flow at the rate
+  Density sets (on by default). **Trigger** is the seed input's gate for automation, heard when
+  **Trig In** is on: its rises start grains, or with Latch on clock them and the delay.
+- **The delay mode**: Size at the very top fades the grains out and a tape delay in. Time sets the
+  delay, Density divides the clock that Seed taps (twice or more) or Trigger sends, and Size's
+  Random sets the echoes' bandwidth. Frozen, the delay cuts the buffer into slices that Time picks.
+- **Buffer**: **Quality** picks how the buffer records, each at the module's own rate: Digital
+  (16-bit at 48 kHz), Vintage Digital (12-bit at 32 kHz), Clean Tape (12-bit grains at 24 kHz) and
+  Dirty Tape (8-bit at 24 kHz, with wow and flutter); the lower qualities hold longer recordings.
+  **Length** sizes the buffer from the module's 4 seconds (of Digital) up to 8. **Mono In** records
+  the left input only, doubling the time held; **Mono Grains** plays one grain at a time.
+- **Input**: **Gain** on Auto (the default) lets the module's input stage learn the input's level
+  over its first seconds and hold it where the processor expects it; Manual uses **Level** (0 to
+  32 dB) instead, for material that is already leveled.
+
+The firmware runs at its own rate in every session: the Texture converts from the session rate and
+back at its edges, so pitch, grain lengths and buffer times are the module's at 44.1, 88.2 or
+96 kHz too. In a 48 kHz session the Digital and Clean Tape qualities need no conversion. The
+conversion and the firmware's block delay the signal by a few milliseconds (11 samples at 48 kHz
+with Digital, about 3 ms with Dirty Tape), which delay compensation makes up for. Changing
+Quality, Mono In or Length restarts the firmware: the output fades out over 10 ms, the recording
+starts over, and it fades back in. Every control can be automated (for example
+`plugin:a:freeze`) and mapped to a MIDI controller. Presets: Granular Cloud, Frozen Pad (recall it
+while audio plays: it freezes what the buffer holds), Tape Delay, and your own.
