@@ -84,7 +84,10 @@ port reproduces the flush in its own code, where the reference's arithmetic prod
 `crates/resonator/src/float.rs`). It is proven for the sweep, not in general. In the granular
 port (`crates/granular`) it is not proven at all yet: the firmware's output is int16, a subnormal
 never moves a sample by one LSB, and every granular test passes with the flush off. TODO (#199
-slice 2): the float output path must bring a test that fails with the flush off.
+slice 2): the float output path must bring a test that fails with the flush off. The texture port
+(`crates/texture`) has such a test: its output is float, the oracle can render without the flush
+(an evidence switch), the two renders differ in hundreds of subnormal samples, and the port matches
+the flushed one; with the port's flush made the identity, the test and the long runs fail.
 
 ## Deviations we keep
 
@@ -116,3 +119,29 @@ found. The review added a third: "an index of exactly 1.0 reads one past the tab
 by bounding the parameter when the index is a ramp toward it (the dry/wet crossfade overshoots by
 rounding), so the oracle defines the firmware's past-the-end reads by padding the arrays on a
 build-time copy, and its memory sizes are capped where the firmware's fixed-point phase overflows.
+
+## A fourth port
+
+The texture synthesizer (`crates/texture`) was written from the firmware as well, and nulled bit
+for bit on its first full run at all eight qualities, its synth and its input stage. What it added:
+
+- **A firmware is not one sample rate.** Its codec runs at 48, 32 or 24 kHz depending on the
+  quality, so the port runs each quality at its own rate, and the device resamples per quality.
+- **What C++ leaves unspecified decides bits.** The grain players pass several random draws as
+  arguments of one call (the evaluation order differs between GCC on ARM, GCC on x86 and MSVC), and
+  `std::partial_sort` orders ties differently in every standard library (every finished grain ties
+  at 0, and the tie decides the summing order). The oracle pins both on a build-time copy (source
+  order; libstdc++'s heap selection, the module's) so the reference is one on every runner, and the
+  port follows the pin.
+- **One oracle build per configuration the port claims.** The buffer size is a template constant
+  in the firmware; to null the port's longest buffer the oracle compiles the chain a second time
+  with the size overridden and the namespace renamed (`-Dbeads=...`), rather than trusting a size
+  the C++ never ran at.
+- **Bound the fixed point, not just the knob.** The longest buffer is set by the 22.10 fixed-point
+  delay taps, and an input combination (a negative density CV with the SEED button latched) can
+  stretch the delay clock to 13 times the buffer: the firmware's frozen slices then start before
+  the buffer. The oracle defines that case (and a division by zero at audio-rate SEED clocks) on a
+  build-time copy, and the port follows it.
+- **Fresh buffers read silence.** A deep TIME position reads nothing until the recording reaches
+  it, so a sweep point lasts until its grains or taps read recorded audio; the few points silent by
+  design (taps-only density) are listed and asserted both ways.

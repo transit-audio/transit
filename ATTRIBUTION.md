@@ -40,12 +40,19 @@ and the stmlib helpers it uses, written by transit from her C++ with no third-pa
 between. Her MIT notices are in `crates/granular/LICENSE-THIRD-PARTY` (provenance in
 `crates/granular/VENDOR.md`).
 
+The texture processor (`crates/texture`, #241; not yet linked into the app) is a Rust port of Émilie
+Gillet's texture synthesizer firmware (`beads/dsp` and `beads/gain_control.cc` in `eurorack`) and
+the stmlib helpers it uses, written by transit from her C++ with no third-party Rust code in between.
+Her MIT notices are in `crates/texture/LICENSE-THIRD-PARTY` (provenance in
+`crates/texture/VENDOR.md`); the device that plays it credits her in the app (#241 slice 2).
+
 | Path | Author | Source | License |
 |---|---|---|---|
 | `crates/macro-osc/src/` | Émilie Gillet (firmware and stmlib); Oliver Rockstedt (Rust port); transit contributors (corrections) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c`, https://github.com/sourcebox/mi-plaits-dsp-rs `effe9864bb` | MIT (`crates/macro-osc/LICENSE-THIRD-PARTY`); transit's changes MIT OR Apache-2.0 |
 | `crates/resonator/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/resonator/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
 | `crates/granular/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/granular/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
-| `crates/macro-osc-oracle/vendor/` | Émilie Gillet | the firmware's C++ (the macro oscillator, the resonator and the granular texture processor), for the null tests only (never linked into the app) | MIT (`crates/macro-osc-oracle/LICENSE-THIRD-PARTY`) |
+| `crates/texture/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `f4cfa769`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/texture/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
+| `crates/macro-osc-oracle/vendor/` | Émilie Gillet | the firmware's C++ (the macro oscillator, the resonator, the granular texture processor and the texture synthesizer), for the null tests only (never linked into the app) | MIT (`crates/macro-osc-oracle/LICENSE-THIRD-PARTY`) |
 
 ## Fonts
 
