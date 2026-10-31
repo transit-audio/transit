@@ -26,7 +26,7 @@ text = "How bright the strike and the ringing are: the exciter's filter and how 
 [[entry]]
 id = "resonator.damping"
 name = "Damping"
-text = "How long a strike rings: short at 0%, nearly for ever at 100%. On String and Reverb it also sets the reverb's size and amount."
+text = "How long a strike rings: short at 0%, nearly forever at 100%. On String and Reverb it also sets the reverb's size and amount."
 
 [[entry]]
 id = "resonator.position"
@@ -41,7 +41,7 @@ text = "How much velocity matters: each strike darkens Brightness by Accent time
 [[entry]]
 id = "resonator.tonic"
 name = "Tonic"
-text = "The note the sympathetic strings drone on at low Structure (the module's frequency knob). It does not move the pitch you play: a note plays its own pitch, A3 (MIDI 69) at 440 Hz."
+text = "The note the sympathetic strings drone on at low Structure (the module's frequency knob). It does not move the pitch of a new note: a note plays its own pitch, A4 (MIDI 69) at 440 Hz. Voices still ringing shift with Tonic until they are struck again."
 
 [[entry]]
 id = "resonator.spread"
@@ -101,7 +101,7 @@ text = "What the row moves. At 100% and a full source: Pitch 24 semitones (every
 [[entry]]
 id = "resonator.strums"
 name = "Strums"
-text = "The resonator has no gate: a note-off or the sustain pedal does not stop a ringing voice; Damping decides how long it rings. Every note strikes with the module's internal exciter: an instrument cannot take a track's audio as its exciter yet."
+text = "The resonator has no gate: a note-off or the sustain pedal does not stop a ringing voice; Damping decides how long it rings. All Notes Off lets the ringing run down; All Sound Off (a host panic) silences the instrument at once. Every note strikes with the module's internal exciter: an instrument cannot take a track's audio as its exciter yet."
 
 [[entry]]
 id = "resonator.rate"

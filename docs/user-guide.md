@@ -235,7 +235,7 @@ open-source resonator firmware (MIT license), checked sample by sample against h
   sustain pedal does not stop a ringing voice; **Damping** decides how long it rings.
 - **Accent** is how much velocity matters: a soft note darkens **Brightness** from that note on (one
   control for every voice, as on the module). **Tonic** is the note the sympathetic strings drone on
-  at low Structure; the note you play keeps its own pitch (A3, MIDI 69, at 440 Hz).
+  at low Structure; a new note keeps its own pitch (A4, MIDI 69, at 440 Hz), while voices still ringing shift with Tonic until they are struck again.
 - **Tune**, **Bend Range** and the matrix's Pitch move every voice at once. The mod wheel and
   aftertouch work through the matrix.
 - **Spread**: at polyphony 2 and 4 the module puts odd voices on one output and even voices on the
