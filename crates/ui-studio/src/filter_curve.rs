@@ -77,7 +77,7 @@ pub fn show(app: &StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     p.line_segment([at(x_of(cutoff), 0.0), at(x_of(cutoff), 1.0)], Stroke::new(1.0, TOKENS.accent.gamma_multiply(0.5)));
     let cols = rect.width().max(2.0) as usize;
     let freqs: Vec<f32> = (0..cols).map(|i| freq_at(i as f32 / (cols - 1) as f32)).collect();
-    let db = transit_dsp::filter_response(&params, &freqs, 48_000.0);
+    let db = transit_dsp::filter_response(&params, &freqs, app.engine.session().sample_rate.as_f64() as f32);
     let line: Vec<Pos2> = db.iter().enumerate().map(|(i, d)| at(i as f32 / (cols - 1) as f32, y_of(*d))).collect();
     p.add(Shape::line(line, Stroke::new(1.5, TOKENS.accent)));
 }

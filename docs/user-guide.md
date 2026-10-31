@@ -177,10 +177,12 @@ instrument, built-in or hosted.
   middle C.
 - **Amp**: with **Amp Env** on, a second ADSR from the same notes shapes the level, like a
   synthesizer's amplifier, with its own velocity amount. The track is then silent between notes.
+  On an audio track or a rack strip, which has no notes, Amp Env on keeps the output silent.
 
 The Filter hears the notes the track's instrument plays: on an audio track, or a rack's own
 strip, the envelopes and key tracking do nothing (the LFO and the follower still work). A
-bypassed Filter lets go of the notes it held. Every control can be automated (lanes
+bypassed Filter lets go of the notes it held and forgets them until the next note; "bypass all
+EQ" also bypasses the Filter, since it is filed under EQ. Every control can be automated (lanes
 `plugin:<insert letter>:<id>`, for example `plugin:a:cutoff` for the first insert) and mapped to a
 MIDI controller. Presets:
 Pluck, Wah, Paraphonic Brass, and your own from the panel's preset menu. Ableton's Auto Filter
