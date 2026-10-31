@@ -116,6 +116,7 @@ mod plan_tests;
 mod rack;
 mod render_pool;
 mod routing;
+mod sample_tap;
 /// Test seams (issue #210): muted serial blocks, the deterministic deadline, block views.
 #[cfg(feature = "testing")]
 mod sched_seam;
@@ -175,6 +176,7 @@ pub use render_pool::{
 use routing::{
     MixOut, PdcWalk, is_aux, live, log_loops, path_need, pdc_visit, processing_order, receives_solo, route_into, strip_channels, strip_format,
 };
+pub use sample_tap::{SAMPLE_FRAMES, SampleTap};
 #[cfg(feature = "testing")]
 pub use sched_seam::Mute;
 pub use scope::{INSTRUMENT_UID, SCOPE_FRAMES, ScopeHub, ScopeTap};
@@ -398,6 +400,9 @@ struct PluginSlot {
     events: Option<Box<events::InstrumentEvents>>,
     /// Plan mode, inserts and instruments: the scope ring the panel reads (see [`ScopeTap`]).
     tap: Option<Arc<ScopeTap>>,
+    /// Plan mode, inserts whose plug-in asks for it (`Plugin::wants_sample_tap`): the input ring a
+    /// panel's analysis reads (see [`SampleTap`]).
+    sample_tap: Option<Arc<SampleTap>>,
 }
 
 impl PluginSlot {
@@ -422,6 +427,7 @@ impl PluginSlot {
             sample_wrapper: None,
             events: None,
             tap: None,
+            sample_tap: None,
         }
     }
 }

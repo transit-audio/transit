@@ -325,6 +325,9 @@ fn measure(
             let line = mul(mul(ch, add(key_cap_of(t, ch), block)?)?, size_of::<f32>())?;
             bytes = add(bytes, mul(mul(keyed, 2)?, line)?)?;
         }
+        // A sample ring for each Tuner.
+        let tuners = t.mixer.inserts.iter().flatten().filter(|i| i.plugin == transit_dsp::plugins::tuner::TUNER_INFO.id).count();
+        bytes = add(bytes, mul(tuners, SampleTap::BYTES)?)?;
         // A scope ring for each insert and the instrument.
         bytes = add(bytes, mul(add(t.mixer.inserts.iter().flatten().count(), usize::from(t.instrument.is_some()))?, ScopeTap::BYTES)?)?;
         for ins in t.mixer.inserts.iter().flatten().chain(t.instrument.iter()) {
@@ -908,6 +911,11 @@ impl PlanCompiler {
                         let tap = Arc::new(ScopeTap::new());
                         let uid = if p.kind == CellKind::Instrument { INSTRUMENT_UID } else { p.spec.uid };
                         self.scopes.register(p.key.0, uid, &tap);
+                        if s.plugin.wants_sample_tap() {
+                            let samples = Arc::new(SampleTap::new());
+                            self.scopes.register_samples(p.key.0, uid, &samples);
+                            s.sample_tap = Some(samples);
+                        }
                         s.tap = Some(tap);
                     }
                     s

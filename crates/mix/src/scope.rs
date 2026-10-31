@@ -10,6 +10,7 @@
 //! The ring is written with relaxed stores and published with a release store of the write index.
 //! A reader may see a block half written; it is a display, so that is accepted.
 
+use crate::sample_tap::SampleTap;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, Weak};
@@ -134,6 +135,8 @@ impl ScopeTap {
 #[derive(Default)]
 pub struct ScopeHub {
     taps: Mutex<HashMap<(TrackId, u64), Weak<ScopeTap>>>,
+    /// The sample taps of inserts whose plug-in analyzes its input (the Tuner, #266).
+    samples: Mutex<HashMap<(TrackId, u64), Weak<SampleTap>>>,
 }
 
 impl std::fmt::Debug for ScopeHub {
@@ -160,9 +163,36 @@ impl ScopeHub {
         self.taps.lock().ok()?.get(&(track, uid))?.upgrade()
     }
 
-    /// Switches the tap of an insert on or off; false when it has none.
+    /// Switches the tap of an insert on or off, and its sample tap if it has one; false when it has
+    /// no scope tap.
     pub fn set_enabled(&self, track: TrackId, uid: u64, on: bool) -> bool {
+        if let Some(s) = self.get_samples(track, uid) {
+            s.set_enabled(on);
+        }
         self.get(track, uid).map(|t| t.set_enabled(on)).is_some()
+    }
+
+    /// Records the sample tap `tap` for the insert `uid` of `track`; taps of retired instances are dropped.
+    pub fn register_samples(&self, track: TrackId, uid: u64, tap: &Arc<SampleTap>) {
+        if uid == 0 {
+            return;
+        }
+        if let Ok(mut m) = self.samples.lock() {
+            m.retain(|_, w| w.strong_count() > 0);
+            m.insert((track, uid), Arc::downgrade(tap));
+        }
+    }
+
+    /// The sample tap of insert `uid` of `track`, if an instance with one is alive.
+    #[must_use]
+    pub fn get_samples(&self, track: TrackId, uid: u64) -> Option<Arc<SampleTap>> {
+        self.samples.lock().ok()?.get(&(track, uid))?.upgrade()
+    }
+
+    /// Copies the last `out.len()` input frames of an insert's sample tap (see [`SampleTap::read`]);
+    /// 0 with no tap.
+    pub fn samples(&self, track: TrackId, uid: u64, out: &mut [f32]) -> usize {
+        self.get_samples(track, uid).map_or(0, |t| t.read(out))
     }
 
     /// Copies the last `out.len()` frames of an insert's tap (see [`ScopeTap::read`]); 0 with no tap.
@@ -228,6 +258,23 @@ mod tests {
         t.read(&mut big);
         assert_eq!(big[10 + SCOPE_FRAMES - 1], 4999.0);
         assert_eq!(big[0], 0.0);
+    }
+
+    #[test]
+    fn enabling_an_insert_switches_its_sample_tap_and_the_hub_forgets_a_dropped_one() {
+        let hub = ScopeHub::default();
+        let scope = Arc::new(ScopeTap::new());
+        let samples = Arc::new(SampleTap::new());
+        hub.register(TrackId(1), 7, &scope);
+        hub.register_samples(TrackId(1), 7, &samples);
+        assert!(hub.set_enabled(TrackId(1), 7, true));
+        assert!(samples.enabled() && scope.enabled());
+        assert!(hub.set_enabled(TrackId(1), 7, false));
+        assert!(!samples.enabled());
+        drop(samples);
+        assert!(hub.get_samples(TrackId(1), 7).is_none());
+        let mut out = [1.0f32; 4];
+        assert_eq!(hub.samples(TrackId(1), 7, &mut out), 0);
     }
 
     #[test]

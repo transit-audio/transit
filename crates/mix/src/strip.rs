@@ -244,6 +244,9 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
         if let Some(tap) = &slot.tap {
             tap.push(&strip.buf, frames, slot_gr);
         }
+        if let Some(tap) = &slot.sample_tap {
+            tap.push(&strip.buf, frames);
+        }
     }
     strip.key_in.iter_mut().filter(|k| !k.ran).for_each(|k| k.line.idle());
     if let Some(e) = strip.instrument.as_mut().and_then(|x| x.events.as_deref_mut()) {
@@ -329,6 +332,9 @@ pub(crate) fn process_master(
                 strip.failures.record(i);
             } else if let Some(tap) = &slot.tap {
                 tap.push(&strip.buf, frames, slot.plugin.gain_reduction_db());
+                if let Some(samples) = &slot.sample_tap {
+                    samples.push(&strip.buf, frames);
+                }
             }
         }
     }

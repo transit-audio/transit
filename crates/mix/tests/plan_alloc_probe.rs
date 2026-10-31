@@ -641,3 +641,32 @@ fn scope_taps_fill_and_report_gain_reduction_without_callback_allocation() {
     });
     assert_eq!(stats, AllocStats::default());
 }
+
+#[test]
+fn the_tuner_sample_tap_is_written_only_while_enabled_and_allocates_nothing() {
+    let (mut s, t, _) = session_with_clip();
+    let tuner = builtin("tuner");
+    let uid = tuner.uid.get();
+    s.track_mut(t).unwrap().mixer.inserts[0] = Some(tuner);
+    let mut rig = Rig::new(&s);
+    let hub = rig.compiler.scope_hub();
+    assert!(hub.get_samples(t, uid).is_some(), "the Tuner asked for a sample tap");
+    let mut frames = vec![0.0f32; 1024];
+    // Off: rendering writes nothing.
+    no_cost("tap disabled", &rig.edit(&s));
+    assert_eq!(hub.samples(t, uid, &mut frames), 0);
+    assert!(frames.iter().all(|x| *x == 0.0));
+    assert!(hub.set_enabled(t, uid, true));
+    // On: the write is part of the measured callback, with no allocation and no free.
+    no_cost("tap enabled", &rig.edit(&s));
+    assert!(hub.samples(t, uid, &mut frames) > 0);
+    assert!(frames.iter().any(|x| *x > 0.0) && frames.iter().any(|x| *x < 0.0), "the signed input, not a peak");
+    // The device passes the track through: the ring holds what the master heard, summed to mono.
+    assert!(rig.out.iter().any(|c| c.iter().any(|x| *x != 0.0)));
+    assert!(hub.set_enabled(t, uid, false));
+    let before = frames.clone();
+    rig.mix.render_active(rig.pos, BLOCK, &mut rig.out);
+    rig.pos += BLOCK as i64;
+    hub.samples(t, uid, &mut frames);
+    assert_eq!(frames, before, "a disabled tap keeps what it had");
+}
