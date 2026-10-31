@@ -2,7 +2,6 @@
   "plugin": "texture",
   "version": 1,
   "params": {
-    "freeze": 1.0,
     "time": 50.0,
     "time_random": 60.0,
     "size": 78.0,

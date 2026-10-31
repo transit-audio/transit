@@ -442,8 +442,10 @@ fn draw(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
             (r, clicked, p.format(v))
         }
         Item::Hold(..) => {
-            // On while the pointer holds it down, off when it lets go (wherever it is then).
-            let r = ui.selectable_label(v >= 0.5, label);
+            // On while the pointer holds it down, off when it lets go (wherever it is then). It
+            // senses drags as well: a click-only widget loses the press once the pointer moves
+            // off it with the button still down.
+            let r = ui.selectable_label(v >= 0.5, label).interact(egui::Sense::click_and_drag());
             let down = r.is_pointer_button_down_on();
             let changed = (down != (v >= 0.5)).then_some(if down { 1.0 } else { 0.0 });
             (r, changed, p.format(v))

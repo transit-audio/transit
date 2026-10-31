@@ -1,6 +1,6 @@
 //! The Texture insert's panel (#241), driven the way a user drives it: it is in the insert picker,
 //! its fixed window lists every parameter with the credit under it, Freeze latches on a click and
-//! Seed holds only while the pointer holds it down.
+//! Seed holds only while the pointer holds it down, wherever the pointer goes meanwhile.
 
 use crate::{Services, StudioApp};
 use serde_json::json;
@@ -59,6 +59,15 @@ impl T {
         self.frames_with(4, vec![egui::Event::PointerMoved(pos), button]);
     }
 
+    /// Moves the pointer to `at` in steps over a few frames (the button stays as it is).
+    fn drag_to(&mut self, from: (f32, f32), at: (f32, f32)) {
+        for k in 1..=6 {
+            let f = k as f32 / 6.0;
+            let pos = egui::pos2(from.0 + (at.0 - from.0) * f, from.1 + (at.1 - from.1) * f);
+            self.frames_with(2, vec![egui::Event::PointerMoved(pos)]);
+        }
+    }
+
     fn window(&self, t: TrackId) -> crate::builtin_editor::EditorLayout {
         self.app.builtin_editor.windows.iter().find(|w| w.key.0 == t).cloned().expect("an editor window is open")
     }
@@ -113,4 +122,48 @@ fn the_texture_panel_lists_every_control_credits_the_original_and_plays_freeze_a
     assert_eq!(t.param(tr, "seed"), 1.0, "held down");
     t.pointer(seed, false);
     assert_eq!(t.param(tr, "seed"), 0.0, "let go");
+    // Held, the pointer can wander off the button: the hold lasts until the button comes up.
+    let away = (seed.0 + 150.0, seed.1 + 90.0);
+    t.pointer(seed, true);
+    t.drag_to(seed, away);
+    assert_eq!(t.param(tr, "seed"), 1.0, "still held off the button");
+    t.pointer(away, false);
+    assert_eq!(t.param(tr, "seed"), 0.0, "let go off the button");
+}
+
+/// Every factory preset sounds on a fresh instance fed with input (recalled before the first
+/// block, as when it is inserted with the preset or a session reopens): none relies on a recording
+/// the instance does not have yet.
+#[test]
+fn every_texture_preset_sounds_on_a_fresh_instance() {
+    let info = transit_dsp::plugin_info("texture").unwrap();
+    let factory = crate::presets::factory_for("texture");
+    assert_eq!(factory.len(), 3);
+    for (name, preset) in factory {
+        let mut p = transit_dsp::create("texture").unwrap();
+        let sr = 48_000usize;
+        p.prepare(sr as f32, 512, 2);
+        for (id, v) in crate::presets::recall_values(info, &preset) {
+            assert!(p.set_param(&id, v), "{name}: {id}");
+        }
+        let mut io = vec![vec![0.0f32; 512]; 2];
+        let mut tail = 0.0f64;
+        let mut count = 0usize;
+        for k in 0..(4 * sr / 512) {
+            let (left, right) = io.split_at_mut(1);
+            for (n, (l, r)) in left[0].iter_mut().zip(right[0].iter_mut()).enumerate() {
+                let t = (k * 512 + n) as f32 / sr as f32;
+                *l = 0.3 * (std::f32::consts::TAU * 220.0 * t).sin();
+                *r = 0.3 * (std::f32::consts::TAU * 330.0 * t).sin();
+            }
+            p.process(&mut io, 512);
+            if k * 512 >= 2 * sr {
+                tail += io[0].iter().map(|v| f64::from(*v) * f64::from(*v)).sum::<f64>();
+                count += 512;
+            }
+        }
+        let rms = (tail / count as f64).sqrt();
+        println!("{name}: RMS {rms:.4} over the last 2 s");
+        assert!(rms > 0.01, "{name} is silent on a fresh instance (RMS {rms})");
+    }
 }
