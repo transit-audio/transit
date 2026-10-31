@@ -146,7 +146,7 @@ text = "Ties the LFO to the tempo: one cycle per division. A synced LFO that is 
 [[entry]]
 id = "macro_osc.lfo_division"
 name = "LFO Division"
-text = "The length of one cycle when the LFO is synced, from four bars to a 32nd note, with triplets and dotted values."
+text = "The length of one cycle when the LFO is synced, from four bars to a 32nd note, with triplets and dotted values. With Retrigger off and playback running, bar divisions count from bar lines even after a meter change."
 
 [[entry]]
 id = "macro_osc.lfo_retrigger"

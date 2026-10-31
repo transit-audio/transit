@@ -81,7 +81,7 @@ text = "Follows the project tempo: the LFO takes one Division per cycle, and whi
 [[entry]]
 id = "filter.lfo_division"
 name = "LFO Division"
-text = "One cycle per this note length when Sync is on: bars, straight notes, triplets (T) or dotted notes (D)."
+text = "One cycle per this note length when Sync is on: bars, straight notes, triplets (T) or dotted notes (D). With Retrigger off and playback running, bar divisions count from bar lines even after a meter change."
 
 [[entry]]
 id = "filter.lfo_retrigger"
