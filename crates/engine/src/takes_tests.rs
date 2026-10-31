@@ -213,6 +213,27 @@ fn a_frozen_track_refuses_a_take_change() {
     let before = e.session().clone();
     assert!(e.execute("takes.set_active", &json!({"track": t.0, "clip": ids[0].0})).is_err());
     assert_eq!(e.session(), &before);
+    // Deleting a take that does not play would leave the freeze valid; it is refused all the same.
+    let err = e.execute("takes.delete", &json!({"track": t.0, "take": 1})).unwrap_err();
+    assert!(matches!(err, crate::EngineError::TrackFrozen), "{err}");
+    assert_eq!(e.session(), &before);
+    assert!(e.undo_history().is_empty());
+}
+
+#[test]
+fn a_frozen_track_refuses_flatten_of_an_unnumbered_stack() {
+    let (mut e, t, _, _) = three_takes();
+    let tr = e.session_mut().track_mut(t).unwrap();
+    // An older session's takes: no numbers, so flatten would only remove other playlists' clips.
+    for p in &mut tr.playlists {
+        p.clips.iter_mut().for_each(|c| c.take = None);
+    }
+    tr.freeze = Some(transit_model::Frozen { source: SourceId(1), start: 0, length: 10, hash: tr.freeze_hash(), revision: 1, latency: 0 });
+    let before = e.session().clone();
+    let err = e.execute("takes.flatten", &json!({"track": t.0})).unwrap_err();
+    assert!(matches!(err, crate::EngineError::TrackFrozen), "{err}");
+    assert_eq!(e.session(), &before);
+    assert!(e.undo_history().is_empty());
 }
 
 #[test]

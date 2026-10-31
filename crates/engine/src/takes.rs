@@ -7,6 +7,10 @@
 //! clip's edges, onto the playlist the clip came from: no clip is copied or lost, and each keeps
 //! its take number, so the lanes stay where they were.
 //!
+//! Choosing a shorter take inside a take cuts the take at the shorter one's edges; choosing the
+//! take back joins its pieces into one clip again, so notes that crossed a cut and fades that
+//! were clamped come back whole (see `takes_join.rs`).
+//!
 //! Conventions: Logic's Take Folder and Ableton's Take Lanes (Live 11) agree that clicking a take
 //! makes it the one that plays and that Flatten keeps what plays and discards the other takes.
 
@@ -43,8 +47,8 @@ pub fn activate_clip(s: &mut Session, track: TrackId, clip: ClipId) -> Result<bo
         return Ok(false);
     }
     let range = t.playlists.get(from).and_then(|p| p.clip(clip)).map(transit_model::Clip::range).unwrap_or_default();
-    crate::edit::separate_at(s, track, range.start);
-    crate::edit::separate_at(s, track, range.end);
+    join::cut(s, track, range.start);
+    join::cut(s, track, range.end);
     let t = s.track_mut(track).ok_or_else(|| format!("no track {}", track.0))?;
     let Some(act) = t.playlists.get_mut(active) else { return Err("the track has no active playlist".into()) };
     let mut moved = Vec::new();
@@ -63,6 +67,12 @@ pub fn activate_clip(s: &mut Session, track: TrackId, clip: ClipId) -> Result<bo
     if let Some(act) = t.playlists.get_mut(active) {
         act.clips.push(taken);
         act.sort();
+    }
+    // A take chosen back over its own pieces is one clip again (notes and fades whole).
+    for pl in [active, from] {
+        for at in [range.start, range.end] {
+            join::rejoin(s, track, pl, at);
+        }
     }
     Ok(true)
 }
@@ -279,6 +289,9 @@ pub fn settle_new_takes(s: &mut Session, track: TrackId, base: usize, new: &[Cli
         let _ = activate_clip(s, track, *id);
     }
 }
+
+#[path = "takes_join.rs"]
+mod join;
 
 #[cfg(test)]
 #[path = "takes_tests.rs"]

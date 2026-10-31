@@ -43,6 +43,15 @@ fn index_param(p: &Value) -> Option<usize> {
     p.get("stack").and_then(Value::as_u64).and_then(|n| usize::try_from(n).ok())
 }
 
+/// Take commands change no frozen track at all, not even material that does not play: unfreeze
+/// first (checked before any change).
+fn refuse_frozen(e: &Engine, tracks: &[TrackId]) -> Result<()> {
+    if tracks.iter().any(|t| e.session().track(*t).is_some_and(|tr| tr.freeze.is_some())) {
+        return Err(EngineError::TrackFrozen);
+    }
+    Ok(())
+}
+
 /// Run `op` on a copy of the session and keep the copy only when it changed, so a take edit
 /// that changes nothing leaves no undo step.
 fn edit<T>(e: &mut Engine, id: &str, op: impl FnOnce(&mut Session) -> std::result::Result<T, String>) -> Result<T> {
@@ -79,6 +88,7 @@ fn list(e: &mut Engine, p: &Value) -> Result<Value> {
 fn set_active(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "takes.set_active";
     let t = the_track(e, id, p)?;
+    refuse_frozen(e, &[t])?;
     if let Some(clip) = p.get("clip").and_then(Value::as_u64).map(ClipId) {
         let tr = e.session().track(t).ok_or_else(|| bad(id, "no track"))?;
         let (_, stack) = tr.take_stack_of(clip).ok_or_else(|| bad(id, format!("clip {} is not in a take stack", clip.0)))?;
@@ -113,6 +123,7 @@ fn set_active(e: &mut Engine, p: &Value) -> Result<Value> {
 fn flatten(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "takes.flatten";
     let tracks = tracks_required(e, id, p)?;
+    refuse_frozen(e, &tracks)?;
     let index = index_param(p);
     let removed = edit(e, id, |s| {
         let mut n = 0;
@@ -135,6 +146,7 @@ fn flatten(e: &mut Engine, p: &Value) -> Result<Value> {
 fn delete(e: &mut Engine, p: &Value) -> Result<Value> {
     let id = "takes.delete";
     let t = the_track(e, id, p)?;
+    refuse_frozen(e, &[t])?;
     let number = u32_param(p, "take").ok_or_else(|| bad(id, "`take` required"))?;
     let index = index_param(p);
     let removed = edit(e, id, |s| crate::takes::delete_take(s, t, number, index))?;
