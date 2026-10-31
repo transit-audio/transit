@@ -378,6 +378,65 @@ fn a_reconfiguration_fades_out_restarts_and_fades_back_in() {
     assert!(ya[0][2 * change + 3 * fade..].iter().any(|v| v.abs() > 0.01));
 }
 
+/// A setting that comes back to the running value inside the fade cancels the restart: the output
+/// dips and returns, the recording stays, and once the fade is over the output is the untouched
+/// device's again, bit for bit.
+#[test]
+fn a_setting_returned_inside_the_fade_cancels_the_restart() {
+    let sr = 44_100;
+    let x = signal(sr, 49_152);
+    let change = 16_384;
+    let back = change + 192;
+    let fade = ms_to_samples(RESTART_FADE_MS, sr as f32) as usize;
+    assert!(back - change < fade);
+    let tail = |y: &[Vec<f32>; 2], from: usize, to: usize| [y[0][from..to].to_vec(), y[1][from..to].to_vec()];
+    for (id, away, home) in [("quality", 0.0, 3.0), ("buffer", 3.0, 0.0), ("mono_input", 1.0, 0.0)] {
+        let mut a = device(sr, &[("dry_wet", 40.0), ("feedback", 30.0)]);
+        let ya = render(&mut a, &x, 64, |_, _| {});
+        let mut b = device(sr, &[("dry_wet", 40.0), ("feedback", 30.0)]);
+        let yb = render(&mut b, &x, 64, |f, t| {
+            if f == change {
+                assert!(t.set_param(id, away));
+            } else if f == back {
+                assert!(t.set_param(id, home));
+            }
+        });
+        let end = x[0].len();
+        assert!(same_bits(&tail(&ya, 0, change), &tail(&yb, 0, change)), "{id}");
+        let dip = (change..change + 2 * fade).filter(|&n| ya[0][n].abs() > 0.01).map(|n| yb[0][n].abs() / ya[0][n].abs()).fold(1.0f32, f32::min);
+        assert!(dip < 0.9 && dip > 0.0, "{id}: the output dips ({dip}) and never reaches the restart's silence");
+        let after = change + 2 * fade;
+        assert!(same_bits(&tail(&ya, after, end), &tail(&yb, after, end)), "{id}: the chain restarted");
+        assert_eq!((b.setup, b.fade), (a.setup, Fade::Steady), "{id}");
+    }
+}
+
+/// Sixty seconds of silence after a loud run come out with no subnormal sample, through the
+/// converters (44.1 kHz digital and dirty tape, 96 kHz clean tape) and without them (48 kHz
+/// digital), and through a restart's fade over the quiet tail.
+#[test]
+fn silence_after_a_loud_run_has_no_subnormal_output() {
+    for (sr, quality) in [(44_100u32, 3.0), (44_100, 0.0), (96_000, 1.0), (48_000, 3.0)] {
+        let mut t = device(sr, &[("quality", quality), ("dry_wet", 60.0), ("feedback", 40.0), ("reverb", 50.0)]);
+        let loud = signal(sr, sr as usize);
+        let y = render(&mut t, &loud, 256, |_, _| {});
+        assert!(y[0].iter().any(|v| v.abs() > 0.05), "{sr} Hz quality {quality}: loud");
+        let mut io = vec![vec![0.0f32; 4096]; 2];
+        let mut subnormal = 0usize;
+        let blocks = 60 * sr as usize / 4096;
+        for k in 0..blocks {
+            if k == blocks / 2 {
+                // A restart's fade over the quiet tail.
+                assert!(t.set_param("buffer", 1.0));
+            }
+            io.iter_mut().for_each(|c| c.fill(0.0));
+            t.process(&mut io, 4096);
+            subnormal += io.iter().flatten().filter(|v| **v != 0.0 && !v.is_normal()).count();
+        }
+        assert_eq!(subnormal, 0, "{sr} Hz quality {quality}");
+    }
+}
+
 /// A session's stored values reach the device on its first block, after `prepare`: a new setup
 /// then applies at once, with no fade, and the render is the one of a device built with them.
 #[test]

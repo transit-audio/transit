@@ -21,7 +21,10 @@
 //! **Reconfiguration.** Quality, mono input and buffer length restart the firmware (its
 //! `Configure`, or for the buffer an in-place rebuild of the whole chain). The output fades to
 //! silence over 10 ms, the chain restarts, and the output fades back in (before the first block
-//! after a reset, where a session's stored values arrive, it restarts at once). The buffer memory is
+//! after a reset, where a session's stored values arrive, it restarts at once). A setting that
+//! returns to the running value before the bottom of the fade cancels the restart: the fade turns
+//! round and the recording stays. A fading output is flushed of subnormals; a steady one is the
+//! path's output untouched (at equal rates, the firmware's). The buffer memory is
 //! allocated once, at construction, for the longest buffer (8 s), so the rebuild allocates nothing:
 //! parameters reach a built-in only on the audio thread, and a rebuild there at a frame the
 //! parameter values fix keeps a render deterministic (offline and realtime alike).
@@ -32,7 +35,7 @@ mod resample;
 mod tests;
 
 use crate::params::{Params, choice, lin, toggle};
-use crate::util::{MAX_CHANNELS, frames_in, ms_to_samples, sane_channels, sane_sr};
+use crate::util::{MAX_CHANNELS, flush, frames_in, ms_to_samples, sane_channels, sane_sr};
 use crate::{Category, ParamInfo, Plugin, PluginInfo, Unit};
 use path::Path;
 use resample::Kernel;
@@ -119,7 +122,7 @@ impl Setup {
     const DEFAULT: Setup = Setup { media: Media::Digital, mono: false, buffer: BufferSize::FIRMWARE };
 }
 
-/// The restart fade.
+/// The restart fade. A setup that returns to the running one during `Out` cancels the restart.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Fade {
     Steady,
@@ -321,6 +324,12 @@ impl TextureFx {
                 self.fade = Fade::Out(self.fade_len);
                 1.0
             }
+            Fade::Out(k) if self.want == self.setup => {
+                // The setting came back to the running value before the restart: no restart (the
+                // recording stays), the fade turns round from its present level.
+                self.fade = Fade::In(self.fade_len - k.min(self.fade_len));
+                k as f32 / len
+            }
             Fade::Out(0) => {
                 self.restart();
                 self.fade = Fade::In(self.fade_len);
@@ -432,12 +441,15 @@ impl Plugin for TextureFx {
             };
             let Some(path) = self.paths.get_mut(self.active_path) else { return };
             let y = path.tick(&self.kernel, x, &mut |i, o| block.render(i, o));
+            // Steady, the output is the path's (a copy at equal rates); fading, it is flushed so a
+            // fade over a quiet tail hands nothing subnormal on.
+            let y = if gain < 1.0 { y.map(|v| flush(v * gain)) } else { y };
             match r {
                 Some(r) => {
-                    *l = y[0] * gain;
-                    *r = y[1] * gain;
+                    *l = y[0];
+                    *r = y[1];
                 }
-                None => *l = 0.5 * (y[0] + y[1]) * gain,
+                None => *l = 0.5 * (y[0] + y[1]),
             }
         }
     }
