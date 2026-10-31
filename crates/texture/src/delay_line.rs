@@ -85,35 +85,61 @@ pub struct DelayMemory {
     /// ([`DelayMemory::defer_clears`]).
     defer: bool,
     pending: Option<i16>,
+    /// The stored samples a line's reset fills: the layouts of the chain's buffer length use no
+    /// more ([`DelayMemory::set_span`]).
+    span: usize,
 }
 
 impl DelayMemory {
     /// Memory for `items` stored samples (the largest layout the processor will use).
     #[must_use]
     pub fn new(items: usize) -> Self {
-        Self { items: vec![0; items].into_boxed_slice(), freeze_tail: Box::new([[F::ZERO; 2]; FREEZE_TAIL]), defer: false, pending: None }
+        Self {
+            items: vec![0; items].into_boxed_slice(),
+            freeze_tail: Box::new([[F::ZERO; 2]; FREEZE_TAIL]),
+            defer: false,
+            pending: None,
+            span: items,
+        }
     }
 
-    /// Fills every stored sample with `silence` and the freeze tail with zeros (a line's reset), or
-    /// only records `silence` while clears are deferred.
+    /// Limits a line's reset to the first `items` stored samples (at most the capacity): the chain
+    /// sets it to what its buffer length's layouts use, so memory held for a longer buffer is not
+    /// filled for nothing. Nothing past the span is read until a longer buffer sets a longer span,
+    /// whose resets fill it.
+    pub fn set_span(&mut self, items: usize) {
+        self.span = items.min(self.items.len());
+    }
+
+    /// The stored samples a line's reset fills ([`DelayMemory::set_span`]).
+    #[cfg(test)]
+    #[must_use]
+    pub(crate) fn span(&self) -> usize {
+        self.span
+    }
+
+    /// Fills the stored samples of the span with `silence` and the freeze tail with zeros (a line's
+    /// reset), or only records `silence` while clears are deferred.
     fn clear(&mut self, silence: i16) {
         if self.defer {
             self.pending = Some(silence);
         } else {
-            self.items.fill(silence);
+            if let Some(items) = self.items.get_mut(..self.span) {
+                items.fill(silence);
+            }
             self.freeze_tail.fill([F::ZERO; 2]);
         }
     }
 
     /// Defers the lines' clears until [`DelayMemory::apply_deferred_clear`]: a run of resets that
-    /// reads nothing in between (the chain's in-place rebuild) then fills the memory once, with the
+    /// reads nothing in between (the chain's in-place rebuild) then fills the span once, with the
     /// last one's silence, and leaves it as filling it every time would.
     pub fn defer_clears(&mut self) {
         self.defer = true;
         self.pending = None;
     }
 
-    /// Ends [`DelayMemory::defer_clears`]: the last deferred clear, if any, fills the memory now.
+    /// Ends [`DelayMemory::defer_clears`]: the last deferred clear, if any, fills the span now.
     pub fn apply_deferred_clear(&mut self) {
         self.defer = false;
         if let Some(silence) = self.pending.take() {
@@ -121,7 +147,7 @@ impl DelayMemory {
         }
     }
 
-    /// The stored samples it holds (a line's reset fills every one of them and the freeze tail).
+    /// The stored samples it holds (a line's reset fills those of the span and the freeze tail).
     #[must_use]
     pub fn capacity(&self) -> usize {
         self.items.len()
@@ -175,8 +201,8 @@ impl DelayLine {
         self.max_delay
     }
 
-    /// `Reset(true)`: the state, and the whole memory cleared to this resolution's silence (the
-    /// freeze tail to zeros).
+    /// `Reset(true)`: the state, and the memory (its span: every sample any layout of the chain
+    /// reads) cleared to this resolution's silence (the freeze tail to zeros).
     pub fn reset(&mut self, memory: &mut DelayMemory) {
         self.write_ptr = 0;
         self.tail_write_ptr = 0;

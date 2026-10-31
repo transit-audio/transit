@@ -104,7 +104,7 @@ impl Texture {
     #[must_use]
     pub fn with_capacity(capacity: BufferSize, buffer_size: BufferSize, media: Media, mono: bool) -> Self {
         let capacity = if capacity.frames() > buffer_size.frames() { capacity } else { buffer_size };
-        let items = Self::processors_for(capacity).iter().map(GranularProcessor::items_needed).max().unwrap_or(0);
+        let items = Self::items_for(capacity);
         let mut texture = Self {
             rng: Random::default(),
             buffer_size,
@@ -122,6 +122,7 @@ impl Texture {
             pre_reverb_limiter: Limiter::default(),
             output_limiter: Limiter::default(),
         };
+        texture.memory.set_span(Self::items_for(buffer_size));
         texture.init(media, mono);
         texture
     }
@@ -132,7 +133,8 @@ impl Texture {
     /// when `buffer_size` needs more memory than the chain holds ([`Texture::with_capacity`]).
     pub fn rebuild(&mut self, buffer_size: BufferSize, media: Media, mono: bool) -> bool {
         let processors = Self::processors_for(buffer_size);
-        if processors.iter().map(GranularProcessor::items_needed).max().unwrap_or(0) > self.memory.capacity() {
+        let span = Self::items_for(buffer_size);
+        if span > self.memory.capacity() {
             return false;
         }
         self.rng = Random::default();
@@ -149,12 +151,20 @@ impl Texture {
         self.reverb.clear();
         self.pre_reverb_limiter = Limiter::default();
         self.output_limiter = Limiter::default();
-        // `init` resets every line of every quality, each clearing the whole memory; only the last
-        // clear is visible, so it alone fills the memory (the rebuild runs on the audio thread).
+        // `init` resets every line of every quality, each clearing the memory's span; only the last
+        // clear is visible, so it alone fills the span (the rebuild runs on the audio thread). The
+        // span is what the new length's layouts use, so a 4 s buffer fills half of an 8 s memory.
+        self.memory.set_span(span);
         self.memory.defer_clears();
         self.init(media, mono);
         self.memory.apply_deferred_clear();
         true
+    }
+
+    /// The stored samples the largest of `buffer_size`'s layouts uses (what [`Texture::new`]
+    /// allocates for it).
+    fn items_for(buffer_size: BufferSize) -> usize {
+        Self::processors_for(buffer_size).iter().map(GranularProcessor::items_needed).max().unwrap_or(0)
     }
 
     /// The four qualities' processors on `buffer_size`, in [`Media`] order.
@@ -167,7 +177,7 @@ impl Texture {
         ]
     }
 
-    /// `Processor::Init`, then `Configure`: every line's reset fills the whole memory (and the
+    /// `Processor::Init`, then `Configure`: every line's reset fills the memory's span (and the
     /// freeze tail) with its quality's silence, so what the memory held before does not matter.
     fn init(&mut self, media: Media, mono: bool) {
         // `Processor::Init`: digital, vintage digital, clean tape, dirty tape.
@@ -414,24 +424,43 @@ mod tests {
         out
     }
 
+    /// At 4, 6 and 8 s, from a running chain on another length (a longer one first, so stale
+    /// samples sit past the new span; at 8 s a shorter one, so the span grows): the rebuilt chain
+    /// renders what a new one does.
     #[test]
     fn a_rebuild_leaves_the_chain_as_new_would_build_it() {
-        let five = BufferSize::from_seconds(5.0).expect("5 s");
-        for media in Media::ALL {
-            for mono in [false, true] {
-                let mut fresh = Texture::new(five, media, mono);
-                let mut rebuilt = Texture::with_capacity(BufferSize::MAX, BufferSize::MIN, Media::DirtyTape, !mono);
-                rebuilt.seed(99);
-                let _ = render(&mut rebuilt, 48_000, 0);
-                assert!(rebuilt.rebuild(five, media, mono));
-                assert_eq!((rebuilt.buffer_size(), rebuilt.media(), rebuilt.mono()), (five, media, mono));
-                let a = render(&mut fresh, 96_000, 0);
-                let b = render(&mut rebuilt, 96_000, 0);
-                assert!(a.iter().zip(&b).all(|(x, y)| x[0].to_bits() == y[0].to_bits() && x[1].to_bits() == y[1].to_bits()), "{media:?} mono {mono}");
-                assert_eq!(fresh.rng_state(), rebuilt.rng_state(), "{media:?} mono {mono}");
-                assert!(a.iter().any(|f| f[0] != 0.0), "{media:?} mono {mono}: silent render");
+        for (seconds, from) in [(4.0, BufferSize::MAX), (6.0, BufferSize::MAX), (8.0, BufferSize::MIN)] {
+            let size = BufferSize::from_seconds(seconds).expect("a length");
+            for media in Media::ALL {
+                for mono in [false, true] {
+                    let label = format!("{seconds} s {media:?} mono {mono}");
+                    let mut fresh = Texture::new(size, media, mono);
+                    let mut rebuilt = Texture::with_capacity(BufferSize::MAX, from, Media::DirtyTape, !mono);
+                    rebuilt.seed(99);
+                    let _ = render(&mut rebuilt, 48_000, 0);
+                    assert!(rebuilt.rebuild(size, media, mono));
+                    assert_eq!((rebuilt.buffer_size(), rebuilt.media(), rebuilt.mono()), (size, media, mono));
+                    let a = render(&mut fresh, 96_000, 0);
+                    let b = render(&mut rebuilt, 96_000, 0);
+                    assert!(a.iter().zip(&b).all(|(x, y)| x[0].to_bits() == y[0].to_bits() && x[1].to_bits() == y[1].to_bits()), "{label}");
+                    assert_eq!(fresh.rng_state(), rebuilt.rng_state(), "{label}");
+                    assert!(a.iter().any(|f| f[0] != 0.0), "{label}: silent render");
+                }
             }
         }
+    }
+
+    /// A rebuild fills only the span its length's layouts use: at 4 s about half an 8 s memory.
+    #[test]
+    fn a_rebuild_fills_only_the_span_of_its_length() {
+        let mut t = Texture::with_capacity(BufferSize::MAX, BufferSize::MAX, Media::Digital, false);
+        let full = t.memory.capacity();
+        assert_eq!(t.memory.span(), full);
+        assert!(t.rebuild(BufferSize::MIN, Media::Digital, false));
+        assert_eq!(t.memory.span(), Texture::items_for(BufferSize::MIN));
+        assert!(t.memory.span() < full * 51 / 100 && t.memory.span() > full * 49 / 100, "{} of {full}", t.memory.span());
+        assert!(t.rebuild(BufferSize::MAX, Media::CleanTape, true));
+        assert_eq!(t.memory.span(), full);
     }
 
     #[test]
