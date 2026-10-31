@@ -1,4 +1,5 @@
-//! Shared by `render_workers.rs` (gates) and `render_headroom.rs` (the #124 measurement), as
+//! Shared by `render_workers.rs` and `render_graph.rs` (gates), `sched_equivalence.rs` and
+//! `render_headroom.rs` (the #124 measurement), as
 //! `common::workers` (the test binaries get `common`'s counting allocator with it): an
 //! instrument that feeds `transit_rt`'s continuity instrument from inside a real strip render,
 //! with a reentry guard, injected worker stalls and a configurable cost, and a rig that drives a
@@ -424,5 +425,26 @@ impl Player {
                 assert!(rig.pedal(k, 1, false).accepted());
             }
         }
+    }
+}
+
+/// Makes each continuity instrument expect its first block at the rig's position, so a block it
+/// missed before its first render (a strip `Unstarted` on the very first blocks while the workers
+/// are still waking: a slow host's normal start) is a hole like any later one. Without it the
+/// first render sets the instrument's start and those overruns leave no hole to match.
+pub fn expect_from_the_start(rig: &Rig) {
+    let from = u64::try_from(rig.pos).unwrap();
+    for s in &rig.shared {
+        s.inst.lock().unwrap().expect_from(from);
+    }
+}
+
+/// Every instrument's time is covered: the samples it processed and the samples in its holes add
+/// up to every block the rig rendered (no lead-in or tail is left out of the hole count).
+pub fn assert_time_covered(rig: &Rig) {
+    let total = u64::try_from(rig.pos).unwrap();
+    for (k, s) in rig.shared.iter().enumerate() {
+        let r = s.report();
+        assert_eq!(r.processed_samples + r.hole_samples, total, "instrument {k}: processed and holes cover the rig's time: {r:?}");
     }
 }

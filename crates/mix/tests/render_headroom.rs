@@ -40,7 +40,7 @@
 #[allow(dead_code)]
 mod common;
 
-use common::workers::{Player, Rig, become_callback};
+use common::workers::{Player, Rig, become_callback, expect_from_the_start};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
@@ -119,6 +119,8 @@ fn run(frames: usize, pool: bool, promote: bool, stall: bool) -> (Vec<Duration>,
     for s in &rig.shared {
         s.cost.store(cost(), Ordering::Relaxed);
     }
+    // Holes from the first block: a strip skipped before its instrument's first render is one too.
+    expect_from_the_start(&rig);
     let (times, rig) = std::thread::spawn(move || {
         let mut rig = rig;
         let p = if promote { transit_rt::promote_audio_thread() } else { transit_rt::Promotion::Unsupported("disabled") };

@@ -14,7 +14,8 @@
 //! - the allocation-armed callback over a keyed plan with worker stalls, upstream-missed skips and
 //!   inline renders;
 //! - continuity: zero stuck notes and every hole in an instrument's time a counted overrun or
-//!   upstream-missed skip, across skips; and, deterministically (a key source held on the one
+//!   upstream-missed skip, across skips, from the first block (two held workers make the skips
+//!   before an instrument's first render happen by construction); and, deterministically (a key source held on the one
 //!   worker, released by the test), a skipped dependent's MIDI held and delivered at its next
 //!   processed block.
 //!
@@ -26,7 +27,7 @@
 #[allow(dead_code)]
 mod common;
 
-use common::workers::{Player, Rig, Rng, become_callback};
+use common::workers::{Player, Rig, Rng, assert_time_covered, become_callback, expect_from_the_start};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -520,6 +521,9 @@ fn continuity_across_upstream_missed_skips() {
         graph_off();
         return;
     };
+    // A strip taken back unstarted, or skipped for a missed key, before its instrument's first
+    // render is a hole like any later one (E49 recurrence 2026-10-31, macOS: a slow first wake).
+    expect_from_the_start(&rig);
     let rig = std::thread::spawn(move || {
         let mut rig = rig;
         become_callback();
@@ -556,6 +560,7 @@ fn continuity_across_upstream_missed_skips() {
     let f = rig.mix.strip_faults().unwrap().snapshot();
     println!("{f:?}");
     let reports: Vec<_> = rig.shared.iter().map(|s| s.report()).collect();
+    assert_time_covered(&rig);
     for (k, (r, s)) in reports.iter().zip(&rig.shared).enumerate() {
         assert_eq!((r.stuck_notes, r.stuck_pedals), (0, 0), "instrument {k}: {r:?}");
         let x = r.faults;
@@ -584,6 +589,49 @@ fn continuity_across_upstream_missed_skips() {
     );
     let retired = rig.mix.into_retired();
     assert_eq!(retired.instances().len(), INSTRUMENTS + 3, "every strip came home (the instruments and the three compressors)");
+}
+
+/// The continuity accounting from the first block on the graph (E49 recurrence 2026-10-31, the
+/// render_workers twin of 2026-10-30): both workers are held inside the first strip each takes,
+/// so the other strips (no cost history, never admitted inline) are taken back unstarted, or
+/// skipped for a missed key, on every block until the holds end, before their instruments have
+/// rendered anything. Each of those blocks is a hole like any later one.
+// timing: held-worker both workers are held inside the first strip each takes;
+// the other four strips never render while held, whichever were taken, and no assertion needs to know which
+#[test]
+fn skips_before_an_instrument_s_first_render_are_holes_too() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    graph_on();
+    let mut rig = keyed_rig(Some(2), Duration::from_micros(500)).expect("two workers");
+    expect_from_the_start(&rig);
+    for s in &rig.shared {
+        s.hold.store(true, Ordering::Release);
+    }
+    become_callback();
+    for _ in 0..16 {
+        rig.block();
+    }
+    for s in &rig.shared {
+        s.hold.store(false, Ordering::Release);
+    }
+    // The closing blocks wait for every strip (a far deadline): every hole is closed by a later
+    // render and no worker still holds a block when the reports are read.
+    rig.mix.set_strip_deadline(Some(FAR));
+    settle(&mut rig);
+    transit_mix::unmark_audio_thread();
+    graph_off();
+    let f = rig.mix.strip_faults().unwrap().snapshot();
+    println!("{f:?}");
+    // At most two strips are taken (one per worker, held); the other four never render while held.
+    assert!(f.overruns_unstarted + f.upstream_missed >= 4 * 16, "the strips no worker took were taken back or skipped: {f:?}");
+    let hole_samples: u64 = rig.shared.iter().map(|s| s.report().hole_samples).sum();
+    assert_eq!(
+        hole_samples,
+        (f.overruns_busy + f.overruns_unstarted + f.upstream_missed) * FRAMES as u64,
+        "every busy or unstarted overrun and every upstream-missed skip is a hole, before an instrument's first render too: {f:?}"
+    );
+    assert_time_covered(&rig);
+    drop(rig.mix.into_retired());
 }
 
 /// Gate 3 through the graph: the callback allocates and frees nothing over a keyed plan with
@@ -734,6 +782,7 @@ fn a_skipped_dependent_s_midi_is_held_and_delivered() {
     });
     graph_on();
     let mut rig = rig;
+    expect_from_the_start(&rig);
     assert_eq!(rig.mix.start_render_workers_with(16, 1), 1);
     // Again after the first worker start, where `TRANSIT_RENDER_GRAPH` is read (#174 review).
     graph_on();
@@ -820,6 +869,7 @@ fn a_hung_worker_in_a_keyed_session_is_reported_held_on_the_graph_path() {
     });
     graph_on();
     let mut rig = rig;
+    expect_from_the_start(&rig);
     assert_eq!(rig.mix.start_render_workers_with(16, 1), 1);
     graph_on();
     let rig = std::thread::spawn(move || {

@@ -195,3 +195,36 @@ says when) so the open's own sweep ends the session, not the host's tend, and th
 window (1 ms and 5 ms), 0 of 60 at 0.2 ms and 2 ms, 0 of 100 unloaded. Rule added to `gates.md`.
 Recurrence 2026-10-30 (main b57efaac; rt.yml run 41052509463, linux): `editor_x11::create_resize_follow_and_destroy_with_a_fake_plugin` read a new X11 window's geometry from another connection before the server had processed the creation (`None`). It failed 20 of 20 under one spinning process per CPU in WSL. The cause was in the product: `EditorWindow::new` flushed and did not round-trip, and the server orders requests per connection only. Recorded as [E64](E64-an-x11-window-was-handed-out-before-the-server-made-it.md); fixed with a round trip after create, resize and destroy. One test change for the window-manager case: once the frame is mapped, a window manager applies its resize in its own time, so the test now waits for the frame's size with a failing 5 s stall bound (E64 point 4).
 Audit 2026-10-30 (#226): every test on the thread, worker, host-thread and backend paths has a row in [`docs/contributing/evidence/e49-audit-2026-10-30.md`](../contributing/evidence/e49-audit-2026-10-30.md). Phase 2 fixed its 15 FIX rows and added the gate class for the 2026-10-29 and 2026-10-30 recurrences: `cargo xtask timing` rule (e) (`xtask/src/timing_pool.rs`, rule text in `gates.md`), which flags both recurrences on the files as they were.
+
+Recurrence 2026-10-31 (#255; CI run 41187062941, macOS, main a01ee982; earlier rt.yml run 41017314492,
+macos-x86_64, 2026-10-30): `render_graph::continuity_across_upstream_missed_skips` failed its hole
+identity, holes 58240 against 59008 counted (768 samples, six 128-frame blocks; 30592 against 30976,
+three blocks, in the earlier run). The mechanism is the render_workers one of 2026-10-30 (1), on the
+graph path: the continuity instrument starts its time at its first processed block unless
+`expect_from` is called, so a strip taken back `Unstarted`, or skipped because its key source missed
+(upstream-missed), before its instrument's first render is counted with no hole. render_graph.rs
+never called `expect_from`, and the #226 audit row and note for this test said it asserted no hole
+equality, which was wrong (corrected in the audit doc). Provocation, by construction (both workers
+held inside the first strip each takes for 16 blocks at a 500 us deadline, then a far deadline):
+without the baseline the holes were 3840 against 12032 counted, short by 8192 samples, exactly the 64
+blocks before each instrument's first render (16 unstarted on instrument 5, 16 upstream-missed on
+each of 1, 2 and 4); with it, 12032 against 12032. Fixed: the test calls `expect_from_the_start`
+(moved with `assert_time_covered` into `tests/common/workers.rs`, shared with render_workers.rs) and
+asserts that processed plus hole samples cover the rig's time per instrument, every existing assertion
+kept; the provocation is kept as `skips_before_an_instrument_s_first_render_are_holes_too`;
+`a_skipped_dependent_s_midi_is_held_and_delivered` and the ignored render_headroom measurement take the
+baseline too. Ambient load on Windows (24 logical cores): the old test passed 20 of 20 unloaded and 20
+of 20 beside six spinning processes, and failed 2 of 20 beside 32 (holes 46464 against 58752 once; the
+other a zero-length note, below); the fixed test passed 20, 20 and 19 of 20 (the failure was the
+per-strip upstream-missed listing, below, not the hole identity). Gate: `cargo xtask timing` rule (e)
+refusal 6 refuses a pool test that reads `hole_samples` or `assert_time_covered` with no `expect_from`;
+on render_graph.rs as it was it flags this test and `a_skipped_dependent_s_midi_is_held_and_delivered`.
+Two product findings from the loaded runs, each a separate issue, not fixed here: (a) the per-strip
+figures lose upstream-missed skips taken before a strip's first admission (`StripPool::admit` calls
+`reset_counts` when an index's name changes, and the names start as the index while a keyed plan's
+phase-1 order is sources first), so `listed == upstream_missed` fails (263 against 266 locally; the
+macOS log of run 41187062941 already shows 197 against 200, so that run would have failed there next;
+the provocation lists none of its 48); (b) `EngineEvents::deliver` (`crates/mix/src/events.rs`) moves
+an off one sample past its note's on only when the off is overdue, so a live off that the floor of
+earlier moved offs raises onto its note-on's offset makes a zero-length note (deterministic: an overdue
+pair plus a live on at 0 and off at 1 in the next block lands both at offset 1).

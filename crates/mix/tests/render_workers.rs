@@ -10,7 +10,7 @@
 #[allow(dead_code)]
 mod common;
 
-use common::workers::{Player, Rig, Rng, become_callback};
+use common::workers::{Player, Rig, Rng, assert_time_covered, become_callback, expect_from_the_start};
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -35,27 +35,6 @@ fn rig(deadline: Duration) -> Option<Rig> {
     }
     rig.mix.set_strip_deadline(Some(deadline));
     Some(rig)
-}
-
-/// Makes each continuity instrument expect its first block at the rig's position, so a block it
-/// missed before its first render (a strip `Unstarted` on the very first blocks while the workers
-/// are still waking: a slow host's normal start) is a hole like any later one. Without it the
-/// first render sets the instrument's start and those overruns leave no hole to match.
-fn expect_from_the_start(rig: &Rig) {
-    let from = u64::try_from(rig.pos).unwrap();
-    for s in &rig.shared {
-        s.inst.lock().unwrap().expect_from(from);
-    }
-}
-
-/// Every instrument's time is covered: the samples it processed and the samples in its holes add
-/// up to every block the rig rendered (no lead-in or tail is left out of the hole count).
-fn assert_time_covered(rig: &Rig) {
-    let total = u64::try_from(rig.pos).unwrap();
-    for (k, s) in rig.shared.iter().enumerate() {
-        let r = s.report();
-        assert_eq!(r.processed_samples + r.hole_samples, total, "instrument {k}: processed and holes cover the rig's time: {r:?}");
-    }
 }
 
 /// Renders until every strip is home and has processed a few more blocks, paced so a stalled
