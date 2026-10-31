@@ -183,6 +183,21 @@ impl Default for Reverb {
 }
 
 impl Reverb {
+    /// Back to [`Reverb::default`] without reallocating its memory (the device's in-place rebuild).
+    pub fn clear(&mut self) {
+        self.buffer.fill(0);
+        self.write_ptr = 0;
+        self.lfo = [CosineOscillator::default(); 2];
+        self.mix = F::ZERO;
+        self.wet = F::ZERO;
+        self.dry = F::ZERO;
+        self.send = F::ZERO;
+        self.reverb_time = F::ZERO;
+        self.lp = F::ZERO;
+        self.lp_1 = F::ZERO;
+        self.lp_2 = F::ZERO;
+    }
+
     /// `Init(buffer, sample_rate)`: the memory cleared, then [`Reverb::reset`].
     pub fn init(&mut self, sample_rate: F) {
         self.buffer.fill(0);

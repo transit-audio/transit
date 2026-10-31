@@ -95,18 +95,21 @@ impl Texture {
     /// firmware's power-on state. Allocates its memory here; nothing allocates afterwards.
     #[must_use]
     pub fn new(buffer_size: BufferSize, media: Media, mono: bool) -> Self {
-        let processors = [
-            GranularProcessor::new(Resolution::Bits8, buffer_size.max_delay(Media::DirtyTape), 1),
-            GranularProcessor::new(Resolution::Bits12, buffer_size.max_delay(Media::CleanTape), 2),
-            GranularProcessor::new(Resolution::Bits12, buffer_size.max_delay(Media::VintageDigital), 1),
-            GranularProcessor::new(Resolution::Bits16, buffer_size.max_delay(Media::Digital), 1),
-        ];
-        let items = processors.iter().map(GranularProcessor::items_needed).max().unwrap_or(0);
+        Self::with_capacity(buffer_size, buffer_size, media, mono)
+    }
+
+    /// [`Texture::new`] on memory sized for `capacity` (the larger of the two), so that
+    /// [`Texture::rebuild`] can later switch to any buffer up to it without allocating. The extra
+    /// memory changes nothing: every line addresses its own length only.
+    #[must_use]
+    pub fn with_capacity(capacity: BufferSize, buffer_size: BufferSize, media: Media, mono: bool) -> Self {
+        let capacity = if capacity.frames() > buffer_size.frames() { capacity } else { buffer_size };
+        let items = Self::processors_for(capacity).iter().map(GranularProcessor::items_needed).max().unwrap_or(0);
         let mut texture = Self {
             rng: Random::default(),
             buffer_size,
             memory: DelayMemory::new(items),
-            processors,
+            processors: Self::processors_for(buffer_size),
             trigger_generator: TriggerGenerator::default(),
             delay_controller: DelayController::default(),
             media: Media::Digital,
@@ -119,19 +122,64 @@ impl Texture {
             pre_reverb_limiter: Limiter::default(),
             output_limiter: Limiter::default(),
         };
-        // `Processor::Init`: digital, vintage digital, clean tape, dirty tape.
-        for (media, rate) in
-            [(Media::Digital, 48_000.0), (Media::VintageDigital, 32_000.0), (Media::CleanTape, 24_000.0), (Media::DirtyTape, 24_000.0)]
-        {
-            texture.processors[media.index()].init(F(rate), &mut texture.memory);
-        }
-        texture.reverb.init(F(48_000.0));
-        texture.wow_and_flutter.init(F(24_000.0));
-        texture.wow_and_flutter.set_lp(F(0.95));
-        texture.configure(Media::Digital, false);
-        texture.delay_mode_transition = F(-DELAY_MODE_TRANSITION_TIME);
-        texture.configure(media, mono);
+        texture.init(media, mono);
         texture
+    }
+
+    /// Rebuilds the chain in place on `buffer_size`, at `media` and `mono`: afterwards it is in
+    /// the state [`Texture::new`] would build (the recording, the grains, the reverb's memory and
+    /// the random generator all start over), without allocating. `false`, and nothing changes,
+    /// when `buffer_size` needs more memory than the chain holds ([`Texture::with_capacity`]).
+    pub fn rebuild(&mut self, buffer_size: BufferSize, media: Media, mono: bool) -> bool {
+        let processors = Self::processors_for(buffer_size);
+        if processors.iter().map(GranularProcessor::items_needed).max().unwrap_or(0) > self.memory.capacity() {
+            return false;
+        }
+        self.rng = Random::default();
+        self.buffer_size = buffer_size;
+        self.processors = processors;
+        self.trigger_generator = TriggerGenerator::default();
+        self.delay_controller = DelayController::default();
+        self.media = Media::Digital;
+        self.mono = false;
+        self.delay_mode_transition = F::ZERO;
+        self.dry = F::ZERO;
+        self.wet = F::ZERO;
+        self.wow_and_flutter = WowAndFlutter::default();
+        self.reverb.clear();
+        self.pre_reverb_limiter = Limiter::default();
+        self.output_limiter = Limiter::default();
+        // `init` resets every line of every quality, each clearing the whole memory; only the last
+        // clear is visible, so it alone fills the memory (the rebuild runs on the audio thread).
+        self.memory.defer_clears();
+        self.init(media, mono);
+        self.memory.apply_deferred_clear();
+        true
+    }
+
+    /// The four qualities' processors on `buffer_size`, in [`Media`] order.
+    fn processors_for(buffer_size: BufferSize) -> [GranularProcessor; 4] {
+        [
+            GranularProcessor::new(Resolution::Bits8, buffer_size.max_delay(Media::DirtyTape), 1),
+            GranularProcessor::new(Resolution::Bits12, buffer_size.max_delay(Media::CleanTape), 2),
+            GranularProcessor::new(Resolution::Bits12, buffer_size.max_delay(Media::VintageDigital), 1),
+            GranularProcessor::new(Resolution::Bits16, buffer_size.max_delay(Media::Digital), 1),
+        ]
+    }
+
+    /// `Processor::Init`, then `Configure`: every line's reset fills the whole memory (and the
+    /// freeze tail) with its quality's silence, so what the memory held before does not matter.
+    fn init(&mut self, media: Media, mono: bool) {
+        // `Processor::Init`: digital, vintage digital, clean tape, dirty tape.
+        for (m, rate) in [(Media::Digital, 48_000.0), (Media::VintageDigital, 32_000.0), (Media::CleanTape, 24_000.0), (Media::DirtyTape, 24_000.0)] {
+            self.processors[m.index()].init(F(rate), &mut self.memory);
+        }
+        self.reverb.init(F(48_000.0));
+        self.wow_and_flutter.init(F(24_000.0));
+        self.wow_and_flutter.set_lp(F(0.95));
+        self.configure(Media::Digital, false);
+        self.delay_mode_transition = F(-DELAY_MODE_TRANSITION_TIME);
+        self.configure(media, mono);
     }
 
     /// Writes the random generator's state (the firmware's `Random::Seed`).
@@ -323,5 +371,80 @@ impl Texture {
                 o[1] = if g { F(-0.8) } else { F::ZERO };
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A deterministic test input: two detuned saws with a slow swell.
+    fn input(frames: usize, offset: usize) -> Vec<[f32; 2]> {
+        (offset..offset + frames)
+            .map(|i| {
+                let t = i as f32;
+                let swell = 0.5 + 0.4 * (t * 0.000_05).sin();
+                [swell * ((t * 0.011) % 2.0 - 1.0), swell * ((t * 0.0073) % 2.0 - 1.0)]
+            })
+            .collect()
+    }
+
+    /// Renders `frames` in 12-frame blocks with controls that move every block; the freeze holds
+    /// for a stretch and the SEED button latches.
+    fn render(t: &mut Texture, frames: usize, offset: usize) -> Vec<[f32; 2]> {
+        let x = input(frames, offset);
+        let mut out = vec![[0.0; 2]; frames];
+        for (b, (i, o)) in x.chunks(12).zip(out.chunks_mut(12)).enumerate() {
+            let k = (b + offset / 12) as f32;
+            let controls = Controls {
+                time: Parameter { base: 0.3 + 0.2 * (k * 0.01).sin(), attenuverter: 0.4, cv: 0.0, has_cv: false },
+                size: Parameter::knob(if (b / 2000) % 2 == 0 { 0.6 } else { 1.0 }),
+                shape: Parameter::knob(0.4),
+                pitch: Parameter { base: 7.0, attenuverter: -0.3, cv: 0.0, has_cv: false },
+                density: 0.8,
+                feedback: 0.4,
+                dry_wet: 0.7,
+                reverb: 0.3,
+                seed_button: SeedButton::Locked,
+                ..Controls::default()
+            };
+            let freeze = vec![(b / 700) % 3 == 2; i.len()];
+            t.process(&controls, &freeze, None, i, o);
+        }
+        out
+    }
+
+    #[test]
+    fn a_rebuild_leaves_the_chain_as_new_would_build_it() {
+        let five = BufferSize::from_seconds(5.0).expect("5 s");
+        for media in Media::ALL {
+            for mono in [false, true] {
+                let mut fresh = Texture::new(five, media, mono);
+                let mut rebuilt = Texture::with_capacity(BufferSize::MAX, BufferSize::MIN, Media::DirtyTape, !mono);
+                rebuilt.seed(99);
+                let _ = render(&mut rebuilt, 48_000, 0);
+                assert!(rebuilt.rebuild(five, media, mono));
+                assert_eq!((rebuilt.buffer_size(), rebuilt.media(), rebuilt.mono()), (five, media, mono));
+                let a = render(&mut fresh, 96_000, 0);
+                let b = render(&mut rebuilt, 96_000, 0);
+                assert!(a.iter().zip(&b).all(|(x, y)| x[0].to_bits() == y[0].to_bits() && x[1].to_bits() == y[1].to_bits()), "{media:?} mono {mono}");
+                assert_eq!(fresh.rng_state(), rebuilt.rng_state(), "{media:?} mono {mono}");
+                assert!(a.iter().any(|f| f[0] != 0.0), "{media:?} mono {mono}: silent render");
+            }
+        }
+    }
+
+    #[test]
+    fn extra_capacity_changes_nothing_and_a_rebuild_past_it_is_refused() {
+        let mut exact = Texture::new(BufferSize::MIN, Media::CleanTape, false);
+        let mut roomy = Texture::with_capacity(BufferSize::MAX, BufferSize::MIN, Media::CleanTape, false);
+        let a = render(&mut exact, 48_000, 0);
+        let b = render(&mut roomy, 48_000, 0);
+        assert!(a.iter().zip(&b).all(|(x, y)| x[0].to_bits() == y[0].to_bits() && x[1].to_bits() == y[1].to_bits()));
+        assert!(!exact.rebuild(BufferSize::MAX, Media::Digital, false), "4 s of memory cannot hold 8 s");
+        assert_eq!((exact.buffer_size(), exact.media()), (BufferSize::MIN, Media::CleanTape), "a refused rebuild changes nothing");
+        let c = render(&mut exact, 12_000, 48_000);
+        let d = render(&mut roomy, 12_000, 48_000);
+        assert!(c.iter().zip(&d).all(|(x, y)| x[0].to_bits() == y[0].to_bits() && x[1].to_bits() == y[1].to_bits()));
     }
 }

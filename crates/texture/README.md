@@ -2,8 +2,8 @@
 
 transit's texture processor ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md),
 #241 slice 1): ported to Rust from Émilie Gillet's MIT firmware. Pure Rust,
-`#![forbid(unsafe_code)]`, no allocation once built, one random generator per instance. Not played
-by the app yet: the insert effect (proposed name "Texture") is slice 2, the instrument form slice 3.
+`#![forbid(unsafe_code)]`, no allocation once built, one random generator per instance. The app
+plays it as the Texture insert effect (`transit-dsp`, slice 2); the instrument form is slice 3.
 
 - `Texture` is the firmware's effect chain: it records its stereo input (with feedback, soft-clipped
   at the lower resolutions) into a buffer at one of four qualities (`Media`), stereo or mono, and
@@ -15,7 +15,10 @@ by the app yet: the insert effect (proposed name "Texture") is slice 2, the inst
 - `InputStage` is the module's input stage: raw 32-bit codec frames to floats with the automatic
   gain (a 1-second wait, a 5-second learning phase, then peak protection) or a manual one, the tape
   qualities' soft clipping, and the copy of a patched input to an unpatched one. On the module it
-  shapes everything the chain hears; the device decides whether to use it.
+  shapes everything the chain hears; the Texture insert uses it (automatic gain by default).
+- `Texture::with_capacity` and `Texture::rebuild`: memory for a longer buffer than the one in use,
+  so the chain can be rebuilt in place on another buffer length without allocating (the device's
+  Length control); a rebuild leaves it exactly as `Texture::new` would.
 
 | Control | What it does |
 |---|---|
@@ -52,8 +55,8 @@ The module's codec does not run at one rate: each quality sets it (`Media::sampl
 firmware built with `ENABLE_HARDWARE_24K`): digital 48 kHz, vintage digital 32 kHz, clean tape
 48 kHz with the grains at 24 kHz behind the firmware's 2:1 converters, dirty tape 24 kHz. The
 filters, grain sizes, delay times, reverb and wow are tuned to those rates, so the port runs each
-quality at its own rate only; the null tests are meaningful there and nowhere else. The device
-(slice 2) resamples at its edges, for every quality but digital and clean tape in a 48 kHz session.
+quality at its own rate only; the null tests are meaningful there and nowhere else. The Texture
+insert resamples at its edges, for every quality but digital and clean tape in a 48 kHz session.
 The synth runs at 48 kHz.
 
 `BufferSize` is the delay memory, in seconds of 16-bit stereo at 48 kHz (every other layout divides

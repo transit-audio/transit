@@ -81,13 +81,50 @@ const INTERPOLATION_TAIL: i32 = 4;
 pub struct DelayMemory {
     items: Box<[i16]>,
     freeze_tail: Box<[Frame; FREEZE_TAIL]>,
+    /// While set, a line's reset records its silence here instead of filling the memory
+    /// ([`DelayMemory::defer_clears`]).
+    defer: bool,
+    pending: Option<i16>,
 }
 
 impl DelayMemory {
     /// Memory for `items` stored samples (the largest layout the processor will use).
     #[must_use]
     pub fn new(items: usize) -> Self {
-        Self { items: vec![0; items].into_boxed_slice(), freeze_tail: Box::new([[F::ZERO; 2]; FREEZE_TAIL]) }
+        Self { items: vec![0; items].into_boxed_slice(), freeze_tail: Box::new([[F::ZERO; 2]; FREEZE_TAIL]), defer: false, pending: None }
+    }
+
+    /// Fills every stored sample with `silence` and the freeze tail with zeros (a line's reset), or
+    /// only records `silence` while clears are deferred.
+    fn clear(&mut self, silence: i16) {
+        if self.defer {
+            self.pending = Some(silence);
+        } else {
+            self.items.fill(silence);
+            self.freeze_tail.fill([F::ZERO; 2]);
+        }
+    }
+
+    /// Defers the lines' clears until [`DelayMemory::apply_deferred_clear`]: a run of resets that
+    /// reads nothing in between (the chain's in-place rebuild) then fills the memory once, with the
+    /// last one's silence, and leaves it as filling it every time would.
+    pub fn defer_clears(&mut self) {
+        self.defer = true;
+        self.pending = None;
+    }
+
+    /// Ends [`DelayMemory::defer_clears`]: the last deferred clear, if any, fills the memory now.
+    pub fn apply_deferred_clear(&mut self) {
+        self.defer = false;
+        if let Some(silence) = self.pending.take() {
+            self.clear(silence);
+        }
+    }
+
+    /// The stored samples it holds (a line's reset fills every one of them and the freeze tail).
+    #[must_use]
+    pub fn capacity(&self) -> usize {
+        self.items.len()
     }
 }
 
@@ -147,8 +184,7 @@ impl DelayLine {
         self.frozen = false;
         self.written_since_last_frozen = 0;
         self.duration = self.max_delay;
-        memory.items.fill(self.resolution.zero());
-        memory.freeze_tail.fill([F::ZERO; 2]);
+        memory.clear(self.resolution.zero());
     }
 
     /// `Trim()`: the recording's length drops to zero.
