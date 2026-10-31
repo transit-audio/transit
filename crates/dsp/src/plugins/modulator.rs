@@ -57,7 +57,7 @@ pub const CARRIERS: [&str; 2] = ["Auto", "Oscillator"];
 /// The oscillator's shapes (for the vocoder: sawtooth, pulse and noise).
 pub const SHAPES: [&str; 3] = ["Sine", "Triangle", "Saw"];
 /// `Osc Frequency`'s range: C2 to C7, the module's knob (MIDI notes 36 to 96).
-pub const FREQUENCY_RANGE: (f32, f32) = (65.406_39, 2093.004_5);
+pub const FREQUENCY_RANGE: (f32, f32) = (65.406_39, 2_093.004_5);
 /// The random generators' seeds: the firmware's power-on state for the left (or only) channel,
 /// another for the right, so the two noise carriers are not one signal.
 pub const SEEDS: [u32; 2] = [0x21, 0x0200_0021];

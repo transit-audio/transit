@@ -44,7 +44,7 @@ impl<const K: usize, const N: usize> Up<K, N> {
     /// `Process(in, out, n)`: `out` takes `K` samples per input sample.
     pub(crate) fn process(&mut self, input: &[F], out: &mut [F]) {
         let len = K * N;
-        for (x, y) in input.iter().zip(out.chunks_exact_mut(K)) {
+        for (x, y) in input.iter().zip(out.as_chunks_mut::<K>().0) {
             self.x.copy_within(0..N - 1, 1);
             self.x[0] = *x;
             for (phase, o) in y.iter_mut().enumerate() {
@@ -93,7 +93,7 @@ impl<const K: usize, const N: usize> Down<K, N> {
         if !input.len().is_multiple_of(K) {
             return;
         }
-        for (group, y) in input.chunks_exact(K).zip(out.iter_mut()) {
+        for (group, y) in input.as_chunks::<K>().0.iter().zip(out.iter_mut()) {
             for x in group {
                 self.x[self.p] = *x;
                 self.p = if self.p == 0 { N - 1 } else { self.p - 1 };

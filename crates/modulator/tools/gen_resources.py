@@ -72,7 +72,7 @@ def table(doc, name, values, public_name, out):
     n = len(values)
     out.append(f"\n/// {doc}\n")
     out.append("#[rustfmt::skip]\n")
-    out.append(f"const {name}_LITERALS: [f64; {n}] = [\n")
+    out.append(f"static {name}_LITERALS: [f64; {n}] = [\n")
     for i in range(0, n, PER_LINE):
         out.append("    " + " ".join(v + "," for v in values[i : i + PER_LINE]) + "\n")
     out.append("];\n")

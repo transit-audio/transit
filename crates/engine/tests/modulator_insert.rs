@@ -74,8 +74,7 @@ const PARAMS: [(&str, f32); 4] = [("algorithm", 2.6), ("timbre", 65.0), ("carrie
 /// A key track outside the mix keying the Cross Modulator on a voice track; four quiet fillers
 /// outside the mix so phase 1 is wide enough for the render workers.
 fn session() -> (Session, Insert) {
-    let mut s = Session::default();
-    s.sample_rate = SampleRate::new(SR).unwrap();
+    let mut s = Session { sample_rate: SampleRate::new(SR).unwrap(), ..Session::default() };
     s.edit.delay_compensation = true;
     s.edit.click = false;
     for i in 0..4 {
