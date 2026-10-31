@@ -10,6 +10,8 @@
 //! - **Several clips in the way:** the track's playlist is duplicated first, so the old clips stay
 //!   as the previous take, as audio recording does.
 //! - **Loop record:** each pass is its own clip on its own playlist (a take lane), as audio does.
+//!   When the passes are placed, the track plays the playlist it played before, with the newest
+//!   pass on it and the earlier passes as the other takes of the stack (#25, `crate::takes`).
 //! - **Transport wrap:** a recording that started inside the cycle and ran past its end (Cycle on)
 //!   is cut at each wrap the same way: a clip per pass, never discarded.
 //!   A note held across the loop end is cut at each wrap and resumes at offset zero in the next
@@ -302,8 +304,13 @@ pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &
             _ => None,
         };
         if merge_into.is_none() && !covered.is_empty() {
-            let _ = e.execute("track.playlist_duplicate", &json!({"track": track.0}));
+            let previous = e.session().track(track).map_or(0, |t| t.active_playlist);
+            if e.execute("track.playlist_duplicate", &json!({"track": track.0})).is_ok() {
+                crate::takes::number_covered(e.session_mut(), track, span, previous);
+            }
         }
+        let base = e.session().track(track).map_or(0, |t| t.active_playlist);
+        let first = ids.len();
         for b in mine {
             if b.pass > 0
                 && let Some(t) = e.session_mut().track_mut(track)
@@ -323,6 +330,12 @@ pub fn place_midi_recording_wrapping(e: &mut Engine, plan: &Recording, events: &
                 crate::edit::place_clip(s, track, Clip::midi(cid, name, b.range.start, b.range.len(), b.sequence.clone()));
                 ids.push(cid);
             }
+        }
+        // The track plays what it played before the passes, with the newest pass on top (#25).
+        if merge_into.is_none()
+            && let Some(new) = ids.get(first..)
+        {
+            crate::takes::settle_new_takes(e.session_mut(), track, base, new);
         }
     }
     if !ids.is_empty() {
@@ -654,9 +667,13 @@ mod tests {
         assert_eq!(ids.len(), 2);
         let tr = e.session().track(t).unwrap();
         assert_eq!(tr.playlists.len(), 2);
-        assert_eq!(tr.active_playlist, 1);
+        // The newest pass plays, on the playlist the track played before (#25).
+        assert_eq!(tr.active_playlist, 0);
+        assert_eq!(tr.playlists[0].clips[0].id, ids[1]);
+        assert_eq!(tr.playlists[1].clips[0].id, ids[0]);
         assert_eq!(tr.playlists[0].clips[0].range(), Range::new(96_000, 144_000));
         assert_eq!(tr.playlists[1].clips[0].range(), Range::new(96_000, 144_000));
+        assert_eq!(tr.take_stacks()[0].active(), Some(2));
         assert_eq!(e.undo_history().len(), undo + 1);
         assert_eq!(notes_of(&e, ids[0]), vec![(60, 0, TICKS_PER_QUARTER / 2)]);
         assert_eq!(notes_of(&e, ids[1]), vec![(62, TICKS_PER_QUARTER, TICKS_PER_QUARTER / 2)]);
@@ -693,9 +710,11 @@ mod tests {
         assert_eq!(ids.len(), 3, "one take per pass, the partial last pass included");
         let tr = e.session().track(t).unwrap();
         assert_eq!(tr.playlists.len(), 3);
-        assert_eq!(tr.playlists[0].clips[0].range(), Range::new(120_000, 144_000));
-        assert_eq!(tr.playlists[1].clips[0].range(), Range::new(96_000, 144_000));
+        // The last pass plays; the partial first pass and the second are the other takes (#25).
+        assert_eq!(tr.playlists[0].clips[0].range(), Range::new(96_000, 144_000));
+        assert_eq!(tr.playlists[1].clips[0].range(), Range::new(120_000, 144_000));
         assert_eq!(tr.playlists[2].clips[0].range(), Range::new(96_000, 144_000));
+        assert_eq!(tr.playlists[0].clips[0].id, ids[2]);
         assert_eq!(notes_of(&e, ids[0]), vec![(60, 0, TICKS_PER_QUARTER / 2)]);
         assert_eq!(notes_of(&e, ids[1]), vec![(62, TICKS_PER_QUARTER / 2, TICKS_PER_QUARTER / 2)]);
         assert_eq!(notes_of(&e, ids[2]), vec![(64, TICKS_PER_QUARTER / 4, TICKS_PER_QUARTER / 4)]);
@@ -712,7 +731,10 @@ mod tests {
         let ids = place_midi_recording(&mut e, &plan(48_000, None), &events, 0);
         assert_eq!(ids.len(), 2, "the lap before the wrap and the lap after it");
         let tr = e.session().track(t).unwrap();
-        assert_eq!(tr.playlists[0].clips[0].range(), Range::new(48_000, 144_000));
+        // The second lap plays over the loop, the first lap before it; the first lap's part in
+        // the loop is the other take (#25, Live's main lane).
+        let played: Vec<(ClipId, Range)> = tr.playlists[0].clips.iter().map(|c| (c.id, c.range())).collect();
+        assert_eq!(played, vec![(ids[0], Range::new(48_000, 96_000)), (ids[1], Range::new(96_000, 144_000))]);
         assert_eq!(tr.playlists[1].clips[0].range(), Range::new(96_000, 144_000));
         let tick = |samples: Samples| e.session().tempo.samples_to_ticks(samples, e.session().sample_rate);
         assert_eq!(notes_of(&e, ids[1])[0].1, tick(96_000 + 12_000) - tick(96_000), "the second note sits 12,000 samples into the loop");

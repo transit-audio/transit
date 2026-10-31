@@ -73,7 +73,8 @@ pub fn place_recording(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, Pa
 /// `place_recording` that is always exactly one undo step labeled "Record", whatever it does:
 /// with `new_take`, a track that already has clips under the take (within the punch range)
 /// first gets a duplicate of its playlist, so the old clips stay as the previous take; the punch
-/// trim is folded in too. Loop recordings never duplicate.
+/// trim is folded in too. A loop recording over clips duplicates too, as MIDI does: the old
+/// clips stay as take 1 (#25).
 pub fn place_recording_take(e: &mut Engine, plan: &Recording, takes: Vec<(TrackId, PathBuf)>, new_take: bool) -> Vec<transit_model::ClipId> {
     let ids = add_recording_take(e, plan.start, takes, plan.pass, new_take, plan.punch);
     let n0 = e.undo_pushes();
@@ -120,16 +121,24 @@ pub fn add_recording_take(
                 continue;
             }
         };
-        if new_take && pass.is_none() {
+        if new_take {
+            // A loop's passes all lie over its first lap.
             let frames = i64::try_from(got.frames()).unwrap_or(0);
+            let frames = pass.map_or(frames, |p| frames.min(p.max(1)));
             let from = punch.map_or(start, |p| p.start.max(start));
             let to = punch.map_or(start + frames, |p| p.end.min(start + frames));
             let over = to > from && e.session().track(tid).is_some_and(|t| t.clips().iter().any(|c| c.start < to && c.end() > from));
+            let previous = e.session().track(tid).map_or(0, |t| t.active_playlist);
             if over && let Err(err) = e.execute("track.playlist_duplicate", &json!({"track": tid.0})) {
                 e.message(format!("Take kept at {} but not placed: {err}", path.display()));
                 continue;
             }
+            if over {
+                crate::takes::number_covered(e.session_mut(), tid, Range::new(from, to), previous);
+            }
         }
+        let base = e.session().track(tid).map_or(0, |t| t.active_playlist);
+        let first = out.len();
         let s = e.session_mut();
         if s.track(tid).is_none() {
             continue;
@@ -164,6 +173,10 @@ pub fn add_recording_take(
             let cid = s.new_clip_id();
             crate::edit::place_clip(s, tid, Clip::audio(cid, name, src, offset, start, n));
             out.push(cid);
+        }
+        // The track plays what it played before the passes, with the newest pass on top (#25).
+        if let Some(new) = out.get(first..) {
+            crate::takes::settle_new_takes(s, tid, base, new);
         }
     }
     if !out.is_empty() {
@@ -486,8 +499,13 @@ mod record_tests {
         assert_eq!(save_copy(&e, &dir.join("Untitled.transit").to_string_lossy()).unwrap(), 0);
         let t = e.session().track(vox).unwrap();
         let passes: Vec<_> = t.playlists.iter().flat_map(|p| p.clips.iter().map(|c| (c.source_offset(), c.start, c.length))).collect();
-        assert_eq!(passes, vec![(0, 1_000, 400), (400, 1_000, 400), (800, 1_000, 250)]);
-        assert_eq!((t.active_playlist, t.playlists[2].name.as_str()), (2, "Vox.03"));
+        // The track plays its first playlist again: the newest (partial) pass over its range and
+        // the rest of the pass before it, as Live's main lane does (#25). Pass 1 and the start of
+        // pass 2 are the other takes.
+        assert_eq!(passes, vec![(800, 1_000, 250), (650, 1_250, 150), (0, 1_000, 400), (400, 1_000, 250)]);
+        assert_eq!((t.active_playlist, t.playlists[2].name.as_str()), (0, "Vox.03"));
+        assert_eq!(t.take_numbers(), vec![3, 2, 1]);
+        assert_eq!(t.take_stacks()[0].active(), Some(3));
         e.execute("edit.undo", &json!({})).unwrap();
         assert_eq!(e.session().track(vox).unwrap().playlists.len(), 1);
         let _ = std::fs::remove_dir_all(&dir);
@@ -504,8 +522,51 @@ mod record_tests {
         let t = e.session().track(gtr).unwrap();
         assert_eq!(t.playlists.len(), 3, "a take per lap, stacked");
         let laps: Vec<_> = t.playlists.iter().flat_map(|p| p.clips.iter().map(|c| (c.source_offset(), c.start, c.length))).collect();
-        assert_eq!(laps, vec![(0, 1_000, 400), (400, 1_000, 400), (800, 1_000, 400)]);
+        // The last lap plays (on the playlist the track played before); laps 1 and 2 are takes.
+        assert_eq!(laps, vec![(800, 1_000, 400), (0, 1_000, 400), (400, 1_000, 400)]);
+        let stacks = t.take_stacks();
+        assert_eq!((stacks.len(), stacks[0].takes.len(), stacks[0].active(), t.active_playlist), (1, 3, Some(3), 0));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// #25: the passes of a cycle recording used to leave the track playing the last pass's
+    /// playlist, which held only that pass: every other clip on the track went silent, and a
+    /// clip under the loop was cut away. Now the track keeps playing its own playlist, the newest
+    /// pass on it, and a clip that was under the loop is take 1.
+    #[test]
+    fn cycle_recording_keeps_the_rest_of_the_track_playing_and_the_clip_under_the_loop_as_take_1() {
+        let dir = TempDir(std::env::temp_dir().join(format!("transit-cycle-rest-{}", std::process::id())));
+        let path = dir.0.join("Audio Files/Gtr_01.wav");
+        write_take(&path, 1_200);
+        let mut e = Engine::default();
+        let gtr = armed(&mut e, "Gtr", "mono", "In 1");
+        let s = e.session_mut();
+        let source = add_source(s, "Old", AudioBuffer { sample_rate: 48_000, channels: vec![vec![0.1; 4_000]] }, None, FileFormat::Wav);
+        let (under, later) = (s.new_clip_id(), s.new_clip_id());
+        crate::edit::place_clip(s, gtr, Clip::audio(under, "Under", source, 0, 900, 600));
+        crate::edit::place_clip(s, gtr, Clip::audio(later, "Later", source, 0, 3_000, 500));
+        let undo = e.undo_history().len();
+        let plan = Recording { start: 1_000, pass: Some(400), punch: None, rate: 48_000, takes: Vec::new(), midi_journal: None, midi_placed: false };
+        let ids = place_recording_take(&mut e, &plan, vec![(gtr, path)], true);
+        assert_eq!(ids.len(), 3);
+        assert_eq!(e.undo_history().len(), undo + 1, "one Record step");
+        let t = e.session().track(gtr).unwrap();
+        let playing: Vec<(transit_model::ClipId, i64, i64, Option<u32>)> = t.clips().iter().map(|c| (c.id, c.start, c.length, c.take)).collect();
+        assert_eq!(playing.first().map(|c| (c.1, c.2, c.3)), Some((900, 100, Some(1))), "the old clip before the loop still plays, as take 1");
+        assert!(playing.iter().any(|c| c.0 == ids[2] && c.3 == Some(4)), "the newest pass plays: {playing:?}");
+        assert!(playing.iter().any(|c| c.1 == 1_400 && c.2 == 100 && c.3 == Some(1)), "and the old clip after it: {playing:?}");
+        // (The duplicated playlist's copy of it: Duplicate Playlist gives each copy a new id.)
+        assert!(playing.iter().any(|c| (c.1, c.2) == (3_000, 500)), "the clip later on the track keeps playing");
+        assert!(t.playlists[0].clip(later).is_some());
+        let stacks = t.take_stacks();
+        assert_eq!(stacks.len(), 1);
+        assert_eq!(stacks[0].takes.iter().map(|k| k.number).collect::<Vec<_>>(), vec![1, 2, 3, 4], "the old clip, then a take per pass");
+        assert_eq!(stacks[0].active(), Some(4));
+        assert!(t.playlists.iter().any(|p| p.clip(under).is_some_and(|c| c.length == 600)), "the whole old clip is kept as take 1");
+        e.execute("edit.undo", &json!({})).unwrap();
+        let t = e.session().track(gtr).unwrap();
+        assert_eq!((t.playlists.len(), t.clips().len()), (1, 2));
+        assert!(t.clips().iter().all(|c| c.take.is_none()), "undo leaves no take numbers behind");
     }
 
     fn over_a_clip(tag: &str) -> (Engine, TrackId, PathBuf, PathBuf) {

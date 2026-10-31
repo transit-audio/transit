@@ -160,8 +160,10 @@ fn loop_recording_two_passes_makes_a_take_per_pass() {
         assert_eq!(p.clips.len(), 1);
         assert_eq!((p.clips[0].start, p.clips[0].length), (4 * BEAT, 2 * BEAT));
     }
-    assert_eq!(clip_notes(&app, tr.playlists[0].clips[0].id)[0].1, 0);
-    assert_eq!(clip_notes(&app, tr.playlists[1].clips[0].id)[0].1, TICKS);
+    // The newest pass plays, on the playlist the track played before; pass 1 is the other take (#25).
+    assert_eq!(tr.active_playlist, 0);
+    assert_eq!(clip_notes(&app, tr.playlists[0].clips[0].id)[0].1, TICKS);
+    assert_eq!(clip_notes(&app, tr.playlists[1].clips[0].id)[0].1, 0);
 }
 
 #[test]
