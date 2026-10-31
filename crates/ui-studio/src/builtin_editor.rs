@@ -64,6 +64,8 @@ pub struct EditorLayout {
     /// `R` releasing, `-` free (empty elsewhere), and their rect.
     pub lights: String,
     pub lights_rect: [f32; 4],
+    /// The Tuner's display as last drawn (empty elsewhere).
+    pub tuner: crate::tuner_panel::TunerLayout,
 }
 
 #[derive(Debug, Default)]
@@ -77,6 +79,8 @@ pub struct EditorState {
     pub(crate) frames: Vec<f32>,
     /// The insert taps this module switched on: (track, hub uid).
     scoped: Vec<(TrackId, u64)>,
+    /// The Tuner panels' detectors and readings, by hub uid.
+    pub(crate) tuners: std::collections::HashMap<u64, crate::tuner_panel::TunerState>,
 }
 
 fn rect4(r: egui::Rect) -> [f32; 4] {
@@ -168,6 +172,7 @@ pub fn windows(app: &mut StudioApp, ctx: &egui::Context) {
             addition_rect: [0.0; 4],
             lights: String::new(),
             lights_rect: [0.0; 4],
+            tuner: Default::default(),
         };
         let mut open = true;
         let shown = crate::theme::window(ctx, title)
@@ -230,7 +235,8 @@ fn body(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
                 let _ = app.toggle_bypass(t, slot);
             }
         }
-        if crate::panel::layout(&ins.plugin).is_some() {
+        // The Tuner has no presets: two controls, and a reference pitch is a setting, not a sound.
+        if crate::panel::layout(&ins.plugin).is_some() && ins.plugin != crate::tuner_panel::TUNER {
             crate::presets::control(app, ui, key, ins, info, &mut lay.preset);
         }
     });
@@ -353,6 +359,7 @@ fn sync_scopes(app: &mut StudioApp, active: Vec<(TrackId, u64)>) {
             hub.set_enabled(*t, *uid, false);
         }
     }
+    app.builtin_editor.tuners.retain(|uid, _| active.iter().any(|(_, u)| u == uid));
     app.builtin_editor.scoped = active;
 }
 

@@ -1,0 +1,39 @@
+# The Tuner's panel (the built-in insert, #266).
+area = "tuner"
+title = "Tuner"
+link = "user-guide.md#tuning-a-hardware-synth"
+
+[[entry]]
+id = "tuner.device"
+name = "Tuner"
+text = "A chromatic tuner for the audio that reaches this slot. The sound passes through untouched, with no latency, so it can stay on a track or on an External Instrument's return while you play."
+
+[[entry]]
+id = "tuner.note"
+name = "Note"
+text = "The note nearest the pitch it hears, with its octave (C4 is middle C, A4 is the reference). It turns green when the pitch is within 3 cents of the note."
+
+[[entry]]
+id = "tuner.meter"
+name = "Cents meter"
+text = "How far the pitch is from the note, from 50 cents flat on the left to 50 cents sharp on the right. The green zone in the middle is within 3 cents."
+
+[[entry]]
+id = "tuner.frequency"
+name = "Frequency"
+text = "The pitch it hears in hertz, the median of the last few readings so a sustained note holds steady."
+
+[[entry]]
+id = "tuner.no_signal"
+name = "No signal"
+text = "Shown when the input is quieter than -50 dBFS or has no clear pitch (noise, a chord, a note that has not started). It lets go of the last note after a few readings."
+
+[[entry]]
+id = "tuner.reference"
+name = "Reference"
+text = "The frequency of A4, 415 to 466 Hz (440 Hz is standard). Everything else is tuned from it; the Macro Oscillator's concert pitch uses the same range."
+
+[[entry]]
+id = "tuner.hold"
+name = "Hold"
+text = "Freezes the display on the last reading, so you can look away from the screen and back. The sound is not affected."

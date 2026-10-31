@@ -16,6 +16,7 @@ optional `key` (spelled as the shortcut table spells it) and an optional `link` 
 | [`texture.toml`](texture.toml) | The Texture insert's panel. |
 | [`time-stretcher.toml`](time-stretcher.toml) | The Time Stretcher insert's panel. |
 | [`cross-modulator.toml`](cross-modulator.toml) | The Cross Modulator insert's panel. |
+| [`tuner.toml`](tuner.toml) | The Tuner insert's panel. |
 | [`macro-osc.toml`](macro-osc.toml) | The Macro Oscillator's panel. |
 | [`telemetry.toml`](telemetry.toml) | The load readout and every figure of Callback Telemetry. |
 | [`audio-devices.toml`](audio-devices.toml) | The Audio Devices status card and its buttons. |

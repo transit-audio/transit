@@ -51,7 +51,8 @@ impl SampleTap {
 
     /// Audio thread: stores the mean of the channels for each of the first `frames` frames of
     /// `buf`. Does nothing while disabled. Bounded by the ring size whatever the block length.
-    pub(crate) fn push(&self, buf: &[Vec<f32>], frames: usize) {
+    /// Public so a headless tap (tests, `--no-audio`) can be fed the way the render feeds it.
+    pub fn push(&self, buf: &[Vec<f32>], frames: usize) {
         if !self.enabled() || buf.is_empty() {
             return;
         }

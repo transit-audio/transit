@@ -286,4 +286,12 @@ ids! {
     TransportMeter => "transport.meter",
     TransportMainMeter => "transport.main_meter",
     TransportMidiLed => "transport.midi_led",
+    // help\tuner.toml
+    TunerDevice => "tuner.device",
+    TunerNote => "tuner.note",
+    TunerMeter => "tuner.meter",
+    TunerFrequency => "tuner.frequency",
+    TunerNoSignal => "tuner.no_signal",
+    TunerReference => "tuner.reference",
+    TunerHold => "tuner.hold",
 }

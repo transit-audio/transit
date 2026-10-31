@@ -276,6 +276,9 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
     if plugin == FILTER {
         return filter_help(param);
     }
+    if plugin == crate::tuner_panel::TUNER {
+        return crate::tuner_panel::help(param);
+    }
     if plugin == crate::texture_panel::TEXTURE {
         return crate::texture_panel::help(param);
     }
@@ -358,6 +361,7 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         crate::texture_panel::TEXTURE => Some(&crate::texture_panel::LAYOUT),
         crate::time_stretcher_panel::TIME_STRETCHER => Some(&crate::time_stretcher_panel::LAYOUT),
         crate::modulator_panel::CROSS_MODULATOR => Some(&crate::modulator_panel::LAYOUT),
+        crate::tuner_panel::TUNER => Some(&crate::tuner_panel::LAYOUT),
         _ => None,
     }
 }
@@ -365,7 +369,11 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
 /// Draws a plug-in's panel into `ui`, one row of sections after another.
 pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, info: &'static PluginInfo, rows: &[Row], lay: &mut EditorLayout) {
     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-    crate::scope_strip::show(app, ui, key, ins, lay);
+    if info.id == crate::tuner_panel::TUNER {
+        crate::tuner_panel::show(app, ui, key, ins, lay);
+    } else {
+        crate::scope_strip::show(app, ui, key, ins, lay);
+    }
     if info.id == FILTER {
         crate::filter_curve::show(app, ui, key, ins, info, lay);
     }
@@ -631,6 +639,7 @@ mod tests {
             crate::texture_panel::TEXTURE,
             crate::time_stretcher_panel::TIME_STRETCHER,
             crate::modulator_panel::CROSS_MODULATOR,
+            crate::tuner_panel::TUNER,
         ] {
             let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
             let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).flat_map(|i| item_ids(*i)).collect();

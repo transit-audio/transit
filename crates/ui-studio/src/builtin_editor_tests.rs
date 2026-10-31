@@ -773,3 +773,123 @@ fn the_expanded_macro_oscillator_window_fits_1080p_at_125_percent() {
     let (width, height) = (w.rect[2] - w.rect[0], w.rect[3] - w.rect[1]);
     assert!(height <= 800.0 && width <= 1300.0, "expanded {width} x {height} pt");
 }
+
+/// A headless hub with a scope tap and a sample tap for the Tuner in slot 0 of `tr`.
+fn tuner_taps(t: &mut T, tr: TrackId) -> std::sync::Arc<transit_mix::SampleTap> {
+    let uid = t.app.engine.session().track(tr).unwrap().mixer.inserts[0].as_ref().unwrap().uid.get();
+    let hub = std::sync::Arc::new(transit_mix::ScopeHub::default());
+    let scope = std::sync::Arc::new(transit_mix::ScopeTap::new());
+    let samples = std::sync::Arc::new(transit_mix::SampleTap::new());
+    hub.register(tr, uid, &scope);
+    hub.register_samples(tr, uid, &samples);
+    t.app.builtin_editor.hub = Some(hub);
+    samples
+}
+
+fn feed_sine(t: &T, tap: &transit_mix::SampleTap, hz: f32) {
+    let sr = t.app.engine.session().sample_rate.as_f64();
+    let x: Vec<f32> = (0..8192).map(|i| 0.5 * (std::f64::consts::TAU * f64::from(hz) * i as f64 / sr).sin() as f32).collect();
+    tap.push(&[x], 8192);
+}
+
+#[test]
+fn the_tuner_is_in_the_picker_without_presets_and_its_window_fits_at_two_scales() {
+    let mut t = T::new();
+    let picker = t.app.builtin_plugins();
+    assert!(picker.iter().any(|p| p.id == "tuner" && p.name == "Tuner" && !p.instrument), "the Tuner is an insert effect");
+    for scale in [1.0_f32, 1.25] {
+        let mut t = T::new();
+        t.ctx.set_pixels_per_point(scale);
+        let (tr, _) = open_plugin(&mut t, "tuner");
+        t.frames(4);
+        let w = t.window(tr);
+        assert_eq!(w.title.rsplit(" · ").next(), Some("Tuner"));
+        let mut got: Vec<&str> = w.rows.iter().map(|r| r.param.as_str()).collect();
+        got.sort_unstable();
+        assert_eq!(got, ["hold", "reference_hz"], "a knob and a toggle, nothing else");
+        assert_eq!(w.preset, [0.0; 4], "no preset dropdown");
+        assert_eq!(w.scope, [0.0; 4], "no scope strip");
+        // The note, the meter, the frequency and the controls all sit inside the window.
+        let inside = |r: [f32; 4]| r[0] >= w.rect[0] && r[1] >= w.rect[1] && r[2] <= w.rect[2] && r[3] <= w.rect[3];
+        assert!(inside(w.tuner.note_rect) && inside(w.tuner.meter) && inside(w.tuner.freq_rect), "@{scale}: the display fits");
+        assert!(w.rows.iter().all(|r| inside(r.control)), "@{scale}: the controls fit");
+        let (ww, wh) = (w.rect[2] - w.rect[0], w.rect[3] - w.rect[1]);
+        println!("Tuner window @{scale}: {ww} x {wh}; note {:?} meter {:?}", w.tuner.note_rect, w.tuner.meter);
+        assert!(ww < 400.0 && wh < 320.0, "@{scale}: {ww} x {wh}");
+        // The note is above the meter, the meter above the frequency, the knob below all three.
+        assert!(w.tuner.note_rect[3] <= w.tuner.meter[1] + 3.0 && w.tuner.meter[3] <= w.tuner.freq_rect[1] + 3.0);
+        assert!(w.rows.iter().all(|r| r.control[1] >= w.tuner.freq_rect[3]));
+        // Fixed size: a corner drag changes nothing.
+        let corner = (w.rect[2] - 2.0, w.rect[3] - 2.0);
+        t.send("ui.drag", json!({"x": corner.0, "y": corner.1, "to_x": corner.0 + 100.0, "to_y": corner.1 + 80.0}));
+        t.frames(4);
+        assert_eq!(t.window(tr).rect, w.rect, "@{scale}: the size is fixed");
+    }
+}
+
+#[test]
+fn the_tuner_panel_reads_a_tone_from_its_tap_and_switches_the_tap_with_the_window() {
+    let mut t = T::new();
+    let tr = t.track("audio");
+    t.app.add_device(tr, "tuner").unwrap();
+    t.frames(4);
+    let tap = tuner_taps(&mut t, tr);
+    assert!(!tap.enabled(), "a closed panel leaves the tap off");
+    t.open_editor(0);
+    assert!(tap.enabled(), "opening the panel switches the tap on");
+    // Nothing heard yet.
+    t.frames(6);
+    let w = t.window(tr);
+    assert_eq!((w.tuner.text.as_str(), w.tuner.freq.as_str()), ("no signal", "No signal"));
+    assert_eq!(w.tuner.needle_x, None);
+    // A 440 Hz tone at the session rate.
+    feed_sine(&t, &tap, 440.0);
+    t.frames(6);
+    let w = t.window(tr);
+    assert_eq!(w.tuner.text, "A4 +0.0 cents");
+    assert_eq!(w.tuner.freq, "440.0 Hz");
+    assert!(w.tuner.in_tune);
+    let needle = w.tuner.needle_x.expect("a needle");
+    let center = (w.tuner.meter[0] + w.tuner.meter[2]) / 2.0;
+    assert!((needle - center).abs() < 1.0, "centered: {needle} vs {center}");
+    assert_eq!(t.painted("A4").0, 1, "the note is drawn once");
+    // A flat note moves the needle left and is not in tune.
+    feed_sine(&t, &tap, 440.0 * 2.0f32.powf(-25.0 / 1200.0));
+    t.frames(15);
+    let w = t.window(tr);
+    assert_eq!(w.tuner.note, "A4");
+    assert!(!w.tuner.in_tune && w.tuner.needle_x.unwrap() < center - 10.0, "{:?}", w.tuner);
+    // Closing the window switches the tap off.
+    t.open_editor(0);
+    t.frames(2);
+    assert!(!tap.enabled(), "closing the panel switches it off");
+}
+
+#[test]
+fn the_tuner_reference_moves_the_reading_and_hold_freezes_the_display() {
+    let mut t = T::new();
+    let tr = t.track("audio");
+    t.app.add_device(tr, "tuner").unwrap();
+    t.frames(4);
+    let tap = tuner_taps(&mut t, tr);
+    t.open_editor(0);
+    feed_sine(&t, &tap, 440.0);
+    t.frames(6);
+    assert_eq!(t.window(tr).tuner.text, "A4 +0.0 cents");
+    // Reference 432 Hz: the same 440 Hz is about 31 cents sharp (a hair under 32 for the A in 432).
+    t.app.run("mix.insert_param", json!({"track": tr.0, "slot": 0, "param": "reference_hz", "value": 432.0})).unwrap();
+    t.frames(6);
+    let w = t.window(tr);
+    assert!(w.tuner.cents.starts_with('+') && w.tuner.cents != "+0.0", "{:?}", w.tuner);
+    assert_eq!(w.rows.iter().find(|r| r.param == "reference_hz").unwrap().value, "432.0 Hz");
+    // Hold: the tone changes and the display stays.
+    let held = w.tuner.text.clone();
+    t.app.run("mix.insert_param", json!({"track": tr.0, "slot": 0, "param": "hold", "value": 1.0})).unwrap();
+    t.frames(2);
+    feed_sine(&t, &tap, 220.0);
+    t.frames(9);
+    assert_eq!(t.window(tr).tuner.text, held, "held");
+    t.app.run("mix.insert_param", json!({"track": tr.0, "slot": 0, "param": "hold", "value": 0.0})).unwrap();
+    t.frames(9);
+    assert_eq!(t.window(tr).tuner.note, "A3", "released");
+}

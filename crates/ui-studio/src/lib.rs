@@ -68,6 +68,7 @@ mod takes;
 pub mod telemetry;
 pub mod tempo_edit;
 pub mod texture_panel;
+pub mod tuner_panel;
 pub mod theme;
 pub mod time_stretcher_panel;
 pub mod title_bar;
