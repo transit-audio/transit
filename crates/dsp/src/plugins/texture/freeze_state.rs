@@ -18,8 +18,18 @@ const WAV_MAGIC: &[u8; 8] = b"TXWAV001";
 const HEADER: usize = 8 + 7 * 4 + 23 * 4 + 1;
 // Maximum codec-rate PCM is clean tape mono: 2,048,000 frames, plus continuation history.
 const CAPACITY: usize = 9 * 1024 * 1024;
-// At most 64 KiB of recording copied per callback, independent of quality and span.
+// A callback copies at least 64 KiB of recording. The chunk grows with the block's own budget
+// (a block of `frames` frames lasts `frames` / rate), so a capture finishes in a bounded number
+// of blocks at any block size: 24 up to 512 frames, then fewer, never below 4.
 const COPY_ITEMS: usize = 32 * 1024;
+const CAPTURE_BLOCKS: usize = 24;
+const MIN_CAPTURE_BLOCKS: usize = 4;
+
+/// Stored items copied by one callback of `frames` frames for a recording of `len` items.
+fn copy_chunk(len: usize, frames: usize) -> usize {
+    let blocks = (CAPTURE_BLOCKS * 512 / frames.max(1)).clamp(MIN_CAPTURE_BLOCKS, CAPTURE_BLOCKS);
+    COPY_ITEMS.max(len.div_ceil(blocks))
+}
 /// The host rates a frozen capture supports: one limit for `Recording::parse` and for the audio
 /// thread's decision to answer at all (a session may run at up to 768 kHz, and a capture at a
 /// rate that `parse` would refuse is never written).
@@ -308,7 +318,7 @@ impl TextureFx {
                 capture.pending = Some(loan);
             } else {
                 let raw = self.texture.raw_recording();
-                let end = (loan.copied + COPY_ITEMS).min(raw.len());
+                let end = (loan.copied + copy_chunk(raw.len(), self.block_frames)).min(raw.len());
                 loan.raw[loan.copied..end].copy_from_slice(&raw[loan.copied..end]);
                 loan.copied = end;
                 if end == raw.len() {

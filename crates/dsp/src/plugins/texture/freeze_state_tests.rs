@@ -115,11 +115,12 @@ fn bounded_capture(sr: f32, quality: u32, mono: bool) {
     let mut io = vec![vec![0.0; 250]; 2];
     let items = t.texture.raw_recording().len();
     let span = t.texture.recording_frames();
-    for block in 0..items.div_ceil(COPY_ITEMS) {
+    let chunk = copy_chunk(items, 250);
+    for block in 0..items.div_ceil(chunk) {
         let ((), stats) = measure(|| t.process(&mut io, 250));
         assert!(stats.is_zero(), "capture: {stats:?}");
         if let Some(loan) = t.capture.as_ref().unwrap().copying.as_ref() {
-            assert_eq!(loan.copied, (block + 1) * COPY_ITEMS);
+            assert_eq!(loan.copied, (block + 1) * chunk);
             assert!(reader.replies.is_empty());
         }
     }
@@ -169,7 +170,8 @@ fn idle_capture_keeps_the_frozen_recording_without_rendering_or_allocating() {
     let (capture, mut reader) = channel();
     t.capture = Some(capture);
     reader.requests.push(reader.buffer.take().unwrap()).unwrap();
-    for _ in 0..t.texture.raw_recording().len().div_ceil(COPY_ITEMS) {
+    let items = t.texture.raw_recording().len();
+    for _ in 0..items.div_ceil(copy_chunk(items, 250)) {
         let ((), stats) = measure(|| t.service_idle_state());
         assert!(stats.is_zero(), "idle capture: {stats:?}");
     }
@@ -183,7 +185,7 @@ fn freeze_off_cancels_a_partial_copy_without_allocating() {
     t.capture = Some(capture);
     reader.requests.push(reader.buffer.take().unwrap()).unwrap();
     t.service_idle_state();
-    assert_eq!(t.capture.as_ref().unwrap().copying.as_ref().unwrap().copied, COPY_ITEMS);
+    assert_eq!(t.capture.as_ref().unwrap().copying.as_ref().unwrap().copied, copy_chunk(t.texture.raw_recording().len(), 250));
     t.set_param("freeze", 0.0);
     let ((), stats) = measure(|| t.service_idle_state());
     assert!(stats.is_zero());
@@ -198,7 +200,8 @@ fn chunked_capture_matches_the_continuation_at_its_final_boundary() {
     let (capture, mut reader) = channel();
     t.capture = Some(capture);
     reader.requests.push(reader.buffer.take().unwrap()).unwrap();
-    let blocks = t.texture.raw_recording().len().div_ceil(COPY_ITEMS);
+    let items = t.texture.raw_recording().len();
+    let blocks = items.div_ceil(copy_chunk(items, 64));
     let mut io = vec![vec![0.0; 64]; 2];
     for _ in 1..blocks {
         t.process(&mut io, 64);
@@ -283,3 +286,17 @@ fn partial_host_input_does_not_claim_a_new_recording_before_a_codec_block() {
     assert!(Recording::parse(&packet).unwrap().has_recorded());
 }
 
+
+#[test]
+fn a_capture_finishes_in_a_bounded_number_of_blocks_at_any_block_size() {
+    for len in [768_000, 1_024_000, 1_536_000, 2 * BufferSize::MAX.max_delay(Media::DirtyTape) as usize + 8] {
+        let mut last = 0;
+        for frames in [16, 64, 128, 256, 512, 1024, 2048, 4096, 8192] {
+            let chunk = copy_chunk(len, frames);
+            assert!(len.div_ceil(chunk) <= CAPTURE_BLOCKS, "len {len} frames {frames}");
+            assert!(chunk >= last && chunk >= COPY_ITEMS, "the chunk never shrinks as the block grows");
+            last = chunk;
+        }
+        assert_eq!(copy_chunk(len, 64), copy_chunk(len, 512));
+    }
+}

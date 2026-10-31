@@ -213,6 +213,8 @@ pub struct TextureFx {
     restored: bool,
     recorded: bool,
     recording_generation: u64,
+    /// Frames of the latest block, to size a capture's copy chunk from the block's own budget.
+    block_frames: usize,
 }
 
 impl Default for TextureFx {
@@ -253,6 +255,7 @@ impl TextureFx {
             restored: false,
             recorded: false,
             recording_generation: 0,
+            block_frames: 512,
         };
         t.make_paths();
         t.update();
@@ -412,7 +415,8 @@ impl Plugin for TextureFx {
         self.p.get(id)
     }
 
-    fn prepare(&mut self, sample_rate: f32, _max_block: usize, channels: usize) {
+    fn prepare(&mut self, sample_rate: f32, max_block: usize, channels: usize) {
+        self.block_frames = max_block.max(1);
         if self.restored && self.sr == sane_sr(sample_rate) {
             self.ch = sane_channels(channels).min(MAX_CHANNELS);
             return;
@@ -456,6 +460,7 @@ impl Plugin for TextureFx {
     }
 
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+        self.block_frames = frames.max(1);
         self.answer_capture();
         self.restored = false;
         let ch = self.ch.min(io.len()).min(2);
