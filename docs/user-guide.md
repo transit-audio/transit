@@ -395,7 +395,7 @@ Saturator and Gain) follows each device's replacement, with the same rule for ol
 
 ## Tuning a hardware synth
 
-Add **Tuner** (an insert, under Utilities) to the track that carries the synth's audio: for an
+Add **Tuner** (an insert, listed under Other in the insert picker) to the track that carries the synth's audio: for an
 External Instrument, put it on the return track, the one that records the synth's input. Play one
 note and hold it. The panel shows the note with its octave, a meter from 50 cents flat to 50 cents
 sharp that turns green within 3 cents, and the frequency in hertz. Tune the synth until the needle
@@ -404,6 +404,8 @@ sits in the green zone.
 The audio passes through the Tuner unchanged and with no delay, so it can stay on the track while
 you play. **Reference** sets the pitch of A4 (415 to 466 Hz, 440 Hz by default; the Macro
 Oscillator's concert pitch uses the same range) and **Hold** freezes the display on the last
-reading. It shows "No signal" when the input is quieter than -50 dBFS or has no clear pitch (a chord,
+reading. The Tuner hears the track's channels summed to one, so a synth on one side of a stereo
+return reads at its full level, while a stereo pair in opposite phase cancels, as in any mono sum.
+It also shows "No signal" while bypassed. It shows "No signal" when the input is quieter than -50 dBFS or has no clear pitch (a chord,
 noise, a note that has not started); it follows one note at a time. The analysis runs only while the
 Tuner's window is open, and not in the audio callback, so the device costs the mix nothing.

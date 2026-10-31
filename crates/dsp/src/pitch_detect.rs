@@ -131,6 +131,11 @@ pub fn window_for(sample_rate: f32) -> usize {
 /// function of one window, computed through the FFT so a detection stays cheap, with the key
 /// maxima picked by the lowest-lag rule and a parabolic interpolation of the chosen peak.
 ///
+/// Known limit: a waveform that is not band-limited (a naive sawtooth or square) reads 3 to 5 cents
+/// flat near 887 and 1775 Hz at 44.1 kHz, where aliasing bends the short-lag peak; sines,
+/// band-limited sources and 48/96 kHz sessions are within about 1 cent. The parabolic fit has no
+/// one-line correction for it, so it is left as it is.
+///
 /// Everything it needs is allocated in [`PitchDetector::new`]; `detect` allocates nothing. It runs
 /// on the UI thread, never in the audio callback.
 pub struct PitchDetector {

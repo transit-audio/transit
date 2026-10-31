@@ -70,6 +70,21 @@ fn a_low_bass_note_is_within_three_cents_with_the_larger_window() {
 }
 
 #[test]
+fn the_real_bass_case_41_hz_at_48_khz_with_the_window_the_device_uses() {
+    for sr in [44_100.0f32, 48_000.0] {
+        let mut d = PitchDetector::new(sr);
+        assert_eq!(d.window(), 4096, "the device's window at {sr}");
+        for hz in [41.2f32, 41.0] {
+            let x = sine(hz, sr, d.window(), 0.5);
+            let e = d.detect(&x, DEFAULT_CLARITY).unwrap();
+            let c = cents(e.hz, hz);
+            println!("table bass {hz} Hz at {sr} (4096 window): {c:+.3} cents");
+            assert!(c.abs() < 3.0, "{hz} at {sr}: {c}");
+        }
+    }
+}
+
+#[test]
 fn a_detuned_sawtooth_and_square_have_no_octave_error() {
     let detune = 2.0f32.powf(15.0 / 1200.0);
     for sr in [44_100.0f32, 48_000.0, 96_000.0] {
