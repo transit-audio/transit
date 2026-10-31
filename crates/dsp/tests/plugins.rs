@@ -90,6 +90,7 @@ fn the_registry_lists_exactly_the_kept_built_ins() {
         "texture",
         "time_stretcher",
         "trim",
+        "tuner",
     ];
     kept.sort_unstable();
     assert_eq!(ids, kept);

@@ -311,6 +311,12 @@ pub trait Plugin: Send {
     fn params_pending(&self) -> bool {
         false
     }
+    /// Effect inserts that analyze their input on the UI thread (the Tuner, #266): the mix then
+    /// gives the instance a sample tap (`transit_mix::SampleTap`), a ring of its input the panel
+    /// reads while it is open. Asked once, when the instance is made. The default: no tap.
+    fn wants_sample_tap(&self) -> bool {
+        false
+    }
     /// Gain reduction in dB for metering (a non-negative amount); 0 for non-dynamics plugins.
     fn gain_reduction_db(&self) -> f32 {
         0.0

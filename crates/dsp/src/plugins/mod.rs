@@ -14,6 +14,7 @@ pub mod reverb;
 pub mod sampler;
 pub mod texture;
 pub mod time_stretcher;
+pub mod tuner;
 pub mod utility;
 
 use crate::{Plugin, PluginInfo};
@@ -50,6 +51,7 @@ registry! {
     utility::DC_INFO => utility::DcRemoval::new(),
     utility::GEN_INFO => utility::SignalGenerator::new(),
     utility::DITHER_INFO => utility::Dither::new(),
+    tuner::TUNER_INFO => tuner::Tuner::new(),
     sampler::SAMPLER_INFO => sampler::Sampler::new(),
     macro_osc::MACRO_OSC_INFO => macro_osc::MacroOscillator::new(),
 }
