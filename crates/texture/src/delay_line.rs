@@ -91,6 +91,15 @@ pub struct DelayMemory {
 }
 
 impl DelayMemory {
+    pub(crate) fn write_tail(&self, out: &mut Vec<u8>) {
+        use crate::checkpoint::State;
+        self.freeze_tail.write(out);
+    }
+
+    pub(crate) fn read_tail(&mut self, input: &mut &[u8]) -> Option<()> {
+        use crate::checkpoint::State;
+        self.freeze_tail.read(input)
+    }
     /// Memory for `items` stored samples (the largest layout the processor will use).
     #[must_use]
     pub fn new(items: usize) -> Self {
@@ -171,6 +180,52 @@ pub struct DelayLine {
 }
 
 impl DelayLine {
+    pub(crate) fn recording_frames(&self) -> usize {
+        usize::try_from(self.max_delay).unwrap_or(0)
+    }
+
+    pub(crate) fn write_recording(&self, memory: &DelayMemory, ratio: usize, out: &mut Vec<u8>) {
+        use crate::checkpoint::State;
+        for n in 0..self.max_delay {
+            let i = (self.write_ptr - n).rem_euclid(self.max_delay);
+            let frame = self.load(memory, i);
+            for _ in 0..ratio {
+                frame[0].0.write(out);
+                if self.stereo {
+                    frame[1].0.write(out);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn read_recording(&self, memory: &mut DelayMemory, ratio: usize, input: &mut &[u8]) -> Option<()> {
+        use crate::checkpoint::State;
+        for n in 0..self.max_delay {
+            let mut frame = [F::ZERO; 2];
+            for copy in 0..ratio {
+                let mut next = [F::ZERO; 2];
+                next[0].read(input)?;
+                if self.stereo {
+                    next[1].read(input)?;
+                } else {
+                    next[1] = next[0];
+                }
+                if next.iter().any(|s| s.abs() > 1.0) {
+                    return None;
+                }
+                if copy != 0 && next != frame {
+                    return None;
+                }
+                frame = next;
+            }
+            let i = (self.write_ptr - n).rem_euclid(self.max_delay);
+            self.store(memory, i, frame);
+            if i < INTERPOLATION_TAIL {
+                self.store(memory, i + self.max_delay, frame);
+            }
+        }
+        Some(())
+    }
     /// A line of `max_delay` frames (`MAX_DELAY`), `stereo` or mono. Call [`DelayLine::reset`]
     /// before use.
     #[must_use]
@@ -344,6 +399,18 @@ impl DelayLine {
         self.read_hermite(memory, delay >> 10, F::from_i32(delay & 1023) / 1024.0)
     }
 }
+
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(
+    DelayLine,
+    s,
+    [write_ptr, tail_write_ptr, tail_xfade_duration, written_since_last_frozen, duration, frozen],
+    (0..s.max_delay).contains(&s.write_ptr)
+        && (0..=256).contains(&s.tail_write_ptr)
+        && (0..=256).contains(&s.tail_xfade_duration)
+        && (0..=s.max_delay).contains(&s.duration)
+        && (0..=s.max_delay).contains(&s.written_since_last_frozen)
+);
 
 #[cfg(test)]
 mod tests {

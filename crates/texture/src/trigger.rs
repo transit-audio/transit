@@ -125,7 +125,7 @@ impl TriggerGenerator {
                     self.pulse_count = 0;
                     self.phase = F::ZERO;
                 }
-                self.divider_reset_interval = self.default_reset_interval.max(4 * self.elapsed_since_last_pulse);
+                self.divider_reset_interval = self.default_reset_interval.max(self.elapsed_since_last_pulse.wrapping_mul(4));
                 let threshold = self.audio_rate_interval + if self.audio_rate { 8 } else { 0 };
                 self.audio_rate = self.elapsed_since_last_pulse < threshold && probability >= 1.0;
                 self.accept_pulse = rng.get_float() < probability && self.pulse_count % division == 0;
@@ -239,3 +239,57 @@ impl TriggerGenerator {
         }
     }
 }
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+    use crate::checkpoint::State;
+
+    #[test]
+    fn a_restored_long_pulse_interval_keeps_wrapping_like_the_counter() {
+        let mut trigger = TriggerGenerator::default();
+        trigger.init(F(48_000.0));
+        trigger.elapsed_since_last_pulse = i32::MAX;
+        let mut data = Vec::new();
+        trigger.write(&mut data);
+        let mut restored = TriggerGenerator::default();
+        restored.init(F(48_000.0));
+        assert!(restored.read(&mut data.as_slice()).is_some());
+        let mut output = [TriggerOutput::default()];
+        restored.render_divider(&mut Random::default(), &[GATE_FLAG_RISING | GATE_FLAG_HIGH], F(0.25), &mut output);
+        assert_eq!(restored.divider_reset_interval, restored.default_reset_interval);
+    }
+
+    #[test]
+    fn a_saved_trigger_divider_cannot_change_the_table_size() {
+        let mut trigger = TriggerGenerator::default();
+        trigger.init(F(48_000.0));
+        let mut data = Vec::new();
+        trigger.write(&mut data);
+        // Five floats, division, audio_rate, then the quantizer's num_steps.
+        data[25..29].copy_from_slice(&100i32.to_le_bytes());
+        assert!(trigger.read(&mut data.as_slice()).is_none());
+    }
+}
+
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(
+    TriggerGenerator,
+    s,
+    [
+        phase,
+        frequency,
+        target_frequency,
+        frequency_lp_coefficient,
+        ratio,
+        division,
+        audio_rate,
+        divider_quantizer,
+        accept_pulse,
+        pulse_count,
+        elapsed_since_last_pulse,
+        divider_reset_interval,
+        previous_flags
+    ],
+    (1..=16).contains(&s.division) && s.previous_flags < 16 && (0..48).contains(&s.pulse_count) && s.divider_quantizer.num_steps() == 8
+);

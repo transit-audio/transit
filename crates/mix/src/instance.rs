@@ -32,7 +32,15 @@ pub fn instance_specs(s: &Session) -> Vec<InstanceSpec> {
 /// their render, [`Session::with_frozen_audio`]).
 pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
     let main_ch = main_channels(s);
-    let state = |ins: &transit_model::Insert| if is_third_party(&ins.plugin) { ins.state_bytes() } else { None };
+    let state = |ins: &transit_model::Insert| {
+        if is_third_party(&ins.plugin) {
+            ins.state_bytes()
+        } else if ins.plugin == "texture" && ins.params.get("freeze").is_some_and(|v| *v >= 0.5) {
+            ins.frozen_recording.as_ref().and_then(|r| r.data.as_deref()).map(<[u8]>::to_vec)
+        } else {
+            None
+        }
+    };
     let mut out = Vec::new();
     for t in s.tracks.iter().filter(|t| s.frozen_audio(t).is_none()) {
         let ch = strip_channels(t, main_ch);

@@ -90,6 +90,58 @@ pub struct Texture {
 }
 
 impl Texture {
+    /// Active recording length at the codec rate (clean tape repeats each 24 kHz sample twice).
+    #[must_use]
+    pub fn recording_frames(&self) -> usize {
+        let p = &self.processors[self.media.index()];
+        p.recording_line(self.mono).recording_frames() * p.ratio()
+    }
+
+    /// Append chronological interleaved float32 samples, without allocating if `out` has room.
+    pub fn write_recording(&self, out: &mut Vec<u8>) {
+        let p = &self.processors[self.media.index()];
+        p.recording_line(self.mono).write_recording(&self.memory, p.ratio(), out);
+    }
+
+    /// Restore validated PCM after the continuation checkpoint. Call only off the audio thread.
+    pub fn read_recording(&mut self, input: &mut &[u8]) -> Option<()> {
+        let p = &self.processors[self.media.index()];
+        p.recording_line(self.mono).read_recording(&mut self.memory, p.ratio(), input)
+    }
+
+    /// Append the continuation state, excluding the recording. The shape is version 1.
+    pub fn write_checkpoint(&self, out: &mut Vec<u8>) {
+        use crate::checkpoint::State;
+        self.rng.write(out);
+        self.processors[self.media.index()].write(out);
+        self.trigger_generator.write(out);
+        self.delay_controller.write(out);
+        self.delay_mode_transition.write(out);
+        self.dry.write(out);
+        self.wet.write(out);
+        self.wow_and_flutter.write(out);
+        self.reverb.write(out);
+        self.pre_reverb_limiter.write(out);
+        self.output_limiter.write(out);
+        self.memory.write_tail(out);
+    }
+
+    /// Read version 1 into a freshly rebuilt chain at the saved setup, off the audio thread.
+    pub fn read_checkpoint(&mut self, input: &mut &[u8]) -> Option<()> {
+        use crate::checkpoint::State;
+        self.rng.read(input)?;
+        self.processors[self.media.index()].read(input)?;
+        self.trigger_generator.read(input)?;
+        self.delay_controller.read(input)?;
+        self.delay_mode_transition.read(input)?;
+        self.dry.read(input)?;
+        self.wet.read(input)?;
+        self.wow_and_flutter.read(input)?;
+        self.reverb.read(input)?;
+        self.pre_reverb_limiter.read(input)?;
+        self.output_limiter.read(input)?;
+        self.memory.read_tail(input)
+    }
     /// A chain on `buffer_size` of delay memory, at `media` and `mono`, as the firmware leaves it
     /// before its first block (`Init`, then `Configure`), with its random generator at the
     /// firmware's power-on state. Allocates its memory here; nothing allocates afterwards.

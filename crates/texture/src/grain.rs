@@ -249,6 +249,20 @@ pub struct Scheduler<G: Voice> {
     grain_interval: i32,
 }
 
+impl<G: Voice + crate::checkpoint::State> crate::checkpoint::State for Scheduler<G> {
+    fn write(&self, out: &mut Vec<u8>) {
+        self.grains.write(out);
+        self.priority.write(out);
+        self.grain_interval.write(out);
+    }
+    fn read(&mut self, input: &mut &[u8]) -> Option<()> {
+        self.grains.read(input)?;
+        self.priority.read(input)?;
+        self.grain_interval.read(input)?;
+        (self.priority.iter().all(|&p| p < GRAINS) && self.grain_interval < i32::MAX).then_some(())
+    }
+}
+
 impl<G: Voice> Default for Scheduler<G> {
     fn default() -> Self {
         Self {
@@ -360,9 +374,36 @@ impl<G: Voice> Scheduler<G> {
     }
 }
 
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(GrainEnvelope, _s, [stage, phase, phase_increment, smoothness, min_attack, min_release], true);
+crate::state_fields!(VoiceStealingEnvelope, _s, [value, decrement], true);
+crate::state_fields!(GrainCore, s, [remaining_samples, envelope, stealing], (-2_097_152..=2_097_152).contains(&s.remaining_samples));
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_short_grain_checkpoint_keeps_its_minimum_release_after_the_requested_duration() {
+        use crate::checkpoint::State;
+        let mut core = GrainCore::default();
+        core.envelope.init(F(48_000.0));
+        core.envelope.start(F(375.0), F(0.5), F::ZERO);
+        core.stealing.reset_and_pause();
+        core.remaining_samples = 375;
+        for _ in 0..400 {
+            core.envelope.render();
+            core.remaining_samples -= 1;
+        }
+        assert!(!core.done() && core.remaining_samples < 0);
+        let mut data = Vec::new();
+        core.write(&mut data);
+        let mut restored = GrainCore::default();
+        assert!(restored.read(&mut data.as_slice()).is_some());
+        for _ in 0..300 {
+            assert_eq!(core.envelope.render(), restored.envelope.render());
+        }
+    }
 
     #[test]
     fn the_partial_sort_selects_the_smallest_in_order() {

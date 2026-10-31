@@ -359,6 +359,21 @@ impl WowAndFlutter {
     }
 }
 
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(Limiter, _s, [peak, peak_lp, decay, max_peak], true);
+crate::state_fields!(
+    Reverb,
+    s,
+    [buffer, write_ptr, lfo, mix, wet, dry, send, reverb_time, lp, lp_1, lp_2],
+    (0..REVERB_SIZE as i32).contains(&s.write_ptr)
+);
+crate::state_fields!(
+    WowAndFlutter,
+    _s,
+    [one_hertz, delay, amount, lp, random_frequency, lp_state, random_modulation, wow, flutter, delay_line],
+    true
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

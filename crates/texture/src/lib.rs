@@ -25,6 +25,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod checkpoint;
 mod delay_controller;
 mod delay_grain;
 mod delay_line;

@@ -60,6 +60,25 @@ fn insert_state(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     .ok_or_else(|| bad(CMD, "empty slot"))?;
     let n = state.as_ref().map_or(0, Vec::len);
+    if ins.plugin == "texture" {
+        ins.frozen_recording = match state.filter(|data| !data.is_empty()) {
+            Some(data) => {
+                let r = transit_dsp::plugins::texture::freeze_state::Recording::parse(&data).ok_or_else(|| bad(CMD, "invalid frozen recording"))?;
+                Some(transit_model::FrozenRecording {
+                    quality: r.quality,
+                    rate: r.rate,
+                    channels: r.channels,
+                    span: r.span,
+                    buffer_frames: r.buffer_frames,
+                    data: Some(data.into()),
+                    ..Default::default()
+                })
+            }
+            None => None,
+        };
+        ins.state = None;
+        return Ok(json!({"bytes": n}));
+    }
     match state {
         Some(bytes) => ins.set_state_bytes(&bytes),
         None => ins.state = None,

@@ -97,6 +97,7 @@ fn write_session(session: &Session, path: &str, overwrite: bool) -> Result<(Sess
         files.insert(Arc::as_ptr(audio), src.path.clone());
         written += usize::from(new);
     }
+    written += super::frozen_recording::save(&mut s, &dir)?;
     if written > 0 {
         sync_dir(&audio_dir);
     }
@@ -207,10 +208,15 @@ fn same_path(a: &Path, b: &Path) -> bool {
 /// holds exactly these bytes, so saving never replaces audio; returns the name and whether it was
 /// written.
 fn store_wav(dir: &Path, stem: &str, bytes: &[u8]) -> Result<(String, bool)> {
+    store_media(dir, stem, "wav", bytes)
+}
+
+pub(super) fn store_media(dir: &Path, stem: &str, extension: &str, bytes: &[u8]) -> Result<(String, bool)> {
     use std::io::Write;
     for k in 0..10_000u32 {
-        let name = if k == 0 { format!("{stem}.wav") } else { format!("{stem}_{k:02}.wav") };
+        let name = if k == 0 { format!("{stem}.{extension}") } else { format!("{stem}_{k:02}.{extension}") };
         let path = dir.join(&name);
+        crate::file_access::check_write(&path).map_err(EngineError::Io)?;
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&path) {
             Ok(mut f) => {
                 if let Err(err) = f.write_all(bytes).and_then(|()| f.sync_all()) {
@@ -244,6 +250,7 @@ pub(crate) fn open_session_linked(e: &mut Engine, path: &str, links: &Path) -> R
     let dir = Path::new(path).parent().map(Path::to_path_buf).unwrap_or_default();
     let mut missing = Vec::new();
     let mut files = DecodedFiles::new();
+    missing.extend(super::frozen_recording::load(&mut s, links));
     for src in &s.sources {
         let decoded = stored_path(&src.path, links)
             .map_err(|why| format!("{}: {why}", src.path))
@@ -440,6 +447,18 @@ pub fn session_bundle(session: &Session) -> Result<(Vec<u8>, Session)> {
         src.unsaved = false;
         src.format = FileFormat::Wav;
     }
+    super::frozen_recording::store(&mut s, &mut |stem, ext, data| {
+        let mut path = format!("Audio Files/{stem}.{ext}");
+        let mut n = 0u32;
+        while taken.contains(&path) {
+            n += 1;
+            path = format!("Audio Files/{stem}_{n:02}.{ext}");
+        }
+        w.start_file(&path, opts).map_err(zerr)?;
+        w.write_all(data).map_err(ioerr)?;
+        taken.insert(path.clone());
+        Ok(path)
+    })?;
     let text = s.to_json().map_err(|err| EngineError::Io(err.to_string()))?;
     w.start_file(format!("{}.{}", sanitize_name(&s.name), transit_model::SESSION_EXTENSION), opts).map_err(zerr)?;
     w.write_all(text.as_bytes()).map_err(ioerr)?;
@@ -467,6 +486,11 @@ pub fn open_session_bytes(e: &mut Engine, name: &str, bytes: &[u8]) -> Result<Ve
             None => missing.push(src.path.clone()),
         }
     }
+    missing.extend(super::frozen_recording::load_with(&mut s, &mut |saved| {
+        let audio = files.get(&saved.path).ok_or_else(|| format!("missing {}", saved.path))?;
+        let state = files.get(&saved.continuation).ok_or_else(|| format!("missing {}", saved.continuation))?;
+        super::frozen_recording::from_files(audio, state)
+    }));
     let stem = Path::new(name).file_stem().and_then(|x| x.to_str()).filter(|x| !x.is_empty()).unwrap_or("Untitled").to_string();
     let notes = std::mem::take(&mut s.load_notes);
     for line in unknown_param_lines(&s) {

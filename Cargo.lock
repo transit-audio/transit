@@ -4220,6 +4220,7 @@ version = "0.5.1"
 dependencies = [
  "log",
  "proptest",
+ "rtrb",
  "rustfft",
  "serde",
  "transit-granular",

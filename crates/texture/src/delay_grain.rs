@@ -254,3 +254,9 @@ impl MultitapDelay {
         }
     }
 }
+
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(DelayGrain, _s, [core, gain, delay, speed, initial_delay], true);
+crate::state_fields!(DelayGranularPlayer, _s, [scheduler], true);
+crate::state_fields!(Tap, s, [phase], (0..=2097152).contains(&s.phase));
+crate::state_fields!(MultitapDelay, _s, [tap, no_latency_tap, filter], true);

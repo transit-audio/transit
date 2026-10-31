@@ -144,3 +144,7 @@ impl Upsampler {
         }
     }
 }
+
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(Downsampler, s, [x, ptr], s.ptr < 48);
+crate::state_fields!(Upsampler, _s, [x], true);

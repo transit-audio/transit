@@ -39,6 +39,8 @@ pub(crate) struct Path {
     starved: u64,
 }
 
+transit_texture::state_fields!(Path, s, [down, up, frames, fill], s.fill < s.block);
+
 impl Path {
     /// The path of a firmware running at `rate` Hz in blocks of `block` frames (at most
     /// [`MAX_BLOCK_SIZE`]), in a session at `host` Hz.

@@ -49,3 +49,6 @@ impl Random {
         F::from_u32(self.get_word()) / 4_294_967_296.0
     }
 }
+
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(Random, _s, [state], true);

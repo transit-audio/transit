@@ -1,4 +1,18 @@
 use super::*;
+
+/// Bypassed/inactive Texture inserts still answer state-capture loans. Called only while this
+/// thread owns the strip, before workers can take it. Parameter changes made while bypassed are
+/// applied here too; third-party plug-ins retain their existing bypass parameter behavior.
+pub(crate) fn service_idle_states(s: &Session, t: &Track, strip: &mut Strip, pos: Samples) {
+    for (i, ins) in t.mixer.inserts.iter().enumerate() {
+        let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
+        if slot.failed || ins.plugin != "texture" || (!t.inactive && ins.active && !ins.bypass) {
+            continue;
+        }
+        apply_params(Some(s), slot, ins, t, &strip.touch, i, pos, 0);
+        slot.plugin.service_idle_state();
+    }
+}
 use transit_rt::phase_marker::Phase;
 
 /// Live input routed to monitored tracks.

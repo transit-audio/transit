@@ -146,6 +146,9 @@ pub struct Parameters {
     pub monophonic: bool,
 }
 
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(RandomWalkModulation, _s, [phase, frequency, from, to], true);
+
 #[cfg(test)]
 mod tests {
     use super::*;

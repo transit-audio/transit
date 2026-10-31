@@ -81,9 +81,33 @@ impl HysteresisQuantizer {
     }
 }
 
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(HysteresisFilter, _s, [value, threshold], true);
+crate::state_fields!(
+    HysteresisQuantizer,
+    s,
+    [num_steps, hysteresis, scale, offset, quantized_value],
+    (s.num_steps == 0 && (-1..=0).contains(&s.quantized_value))
+        || ((1..=2_097_152).contains(&s.num_steps) && (0..s.num_steps).contains(&s.quantized_value))
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_zero_slice_quantizer_round_trips_its_silent_state() {
+        use crate::checkpoint::State;
+        let mut q = HysteresisQuantizer::default();
+        q.init(0, F::ZERO, false);
+        q.process(F(0.8));
+        let mut data = Vec::new();
+        q.write(&mut data);
+        let mut restored = HysteresisQuantizer::default();
+        assert!(restored.read(&mut data.as_slice()).is_some());
+        assert_eq!(restored.num_steps(), 0);
+        assert_eq!(restored.process(F(0.8)), q.process(F(0.8)));
+    }
 
     #[test]
     fn the_quantizer_holds_near_a_boundary() {

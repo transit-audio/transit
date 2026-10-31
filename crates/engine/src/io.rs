@@ -8,6 +8,8 @@ use transit_audio_io::{AudioBuffer, EncodeOptions, FileFormat};
 use transit_model::{BusId, ChannelFormat, Clip, ClipContent, Session, Source, SourceAudio, SourceId, TrackId, TrackKind};
 use transit_time::{Range, Samples};
 
+mod frozen_recording;
+
 /// Largest import we accept (samples per channel × channels), ~4 GiB of f32.
 pub(crate) const MAX_IMPORT_SAMPLES: usize = 1 << 30;
 

@@ -52,6 +52,9 @@ pub struct GranularProcessor {
 }
 
 impl GranularProcessor {
+    pub(crate) fn recording_line(&self, mono: bool) -> &DelayLine {
+        if mono { &self.mono_line } else { &self.stereo_line }
+    }
     /// A processor at `resolution` on a stereo line of `max_delay` frames (the mono line holds
     /// twice as many), running at the codec rate divided by `ratio` (1 or 2).
     #[must_use]
@@ -284,3 +287,25 @@ impl GranularProcessor {
         self.speed = speed_modulation.value();
     }
 }
+
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(
+    GranularProcessor,
+    _s,
+    [
+        granular_player,
+        multitap_delay,
+        stereo_line,
+        mono_line,
+        src_down,
+        src_up,
+        feedback,
+        speed,
+        bandwidth,
+        previous_sample,
+        dc_blocker,
+        pitch_modulation,
+        input_limiter
+    ],
+    true
+);

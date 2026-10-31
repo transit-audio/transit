@@ -483,3 +483,43 @@ impl DelayController {
         o.gate = self.tap_envelope[loudest_index].phase < 0.5;
     }
 }
+
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(
+    DelayClock,
+    s,
+    [interval, average_interval, fade, fade_increment, jitter_sensitivity, schedule_change, next_interval, rotate],
+    s.rotate < i32::MAX
+);
+crate::state_fields!(
+    PlayHead,
+    s,
+    [start, remaining, mid_point, phase, phase_increment, gain],
+    s.start >= 0 && s.start < 2097152 && s.remaining >= 0 && s.remaining < 2097152 && s.mid_point >= 0 && s.mid_point < 2097152
+);
+crate::state_fields!(TapEnvelope, _s, [phase, phase_increment], true);
+crate::state_fields!(
+    DelayController,
+    _s,
+    [
+        clock,
+        play_head,
+        slave_play_head,
+        numerator_quantizer,
+        tap_envelope,
+        position_modulation,
+        shape_modulation,
+        tap_modulation,
+        density_filter,
+        fm_filter,
+        slice_index_filter,
+        multiplier_lp,
+        shape,
+        linear_fm,
+        fm,
+        density,
+        freeze,
+        seed_button
+    ],
+    true
+);

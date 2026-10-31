@@ -148,6 +148,49 @@ pub(crate) struct Converter {
     start: (i64, i64),
 }
 
+impl transit_texture::checkpoint::State for Converter {
+    fn write(&self, out: &mut Vec<u8>) {
+        for h in &self.hist {
+            h.as_slice().write(out);
+        }
+        self.n_in.write(out);
+        self.base.write(out);
+        self.rem.write(out);
+    }
+    fn read(&mut self, input: &mut &[u8]) -> Option<()> {
+        for h in &mut self.hist {
+            h.as_mut_slice().read(input)?;
+        }
+        self.n_in.read(input)?;
+        self.base.read(input)?;
+        self.rem.read(input)?;
+        (self.n_in >= 0
+            && self.n_in < i64::MAX / 2
+            && self.base >= -1_000_000
+            && self.base < i64::MAX / 2
+            && (0..self.lp).contains(&self.rem)
+            && self.n_in.abs_diff(self.base) <= (self.mask as u64 + 1) * 2
+            && self.hist.iter().flatten().all(|x| x.is_finite()))
+        .then_some(())
+    }
+}
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+    use transit_texture::checkpoint::State;
+
+    #[test]
+    fn a_saved_converter_cannot_request_an_unbounded_catch_up() {
+        let mut converter = Converter::new(&Kernel::new(), 48_000, 24_000, 0);
+        let mut data = Vec::new();
+        converter.write(&mut data);
+        let at = data.len() - 24;
+        data[at..at + 8].copy_from_slice(&(i64::MAX / 2 - 1).to_le_bytes());
+        assert!(converter.read(&mut data.as_slice()).is_none());
+    }
+}
+
 impl Converter {
     /// A converter `from` Hz to `to` Hz delayed by its half length plus `extra` ticks.
     pub(crate) fn new(kernel: &Kernel, from: u32, to: u32, extra: i64) -> Self {

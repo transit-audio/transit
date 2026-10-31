@@ -29,6 +29,7 @@
 //! parameters reach a built-in only on the audio thread, and a rebuild there at a frame the
 //! parameter values fix keeps a render deterministic (offline and realtime alike).
 
+pub mod freeze_state;
 #[cfg(test)]
 mod tests;
 
@@ -204,6 +205,8 @@ pub struct TextureFx {
     /// Nothing processed since the last reset: a new setup applies at once, with no fade (a
     /// session's stored values reach the device on its first block).
     idle: bool,
+    capture: Option<freeze_state::Capture>,
+    restored: bool,
 }
 
 impl Default for TextureFx {
@@ -240,6 +243,8 @@ impl TextureFx {
             fade: Fade::Steady,
             fade_len: 480,
             idle: true,
+            capture: None,
+            restored: false,
         };
         t.make_paths();
         t.update();
@@ -362,6 +367,26 @@ impl TextureFx {
 }
 
 impl Plugin for TextureFx {
+    fn service_idle_state(&mut self) {
+        if self.want != self.setup {
+            self.restored = false;
+            self.reset();
+        }
+        self.answer_capture();
+    }
+    fn save_state(&mut self) -> Option<Vec<u8>> {
+        self.snapshot()
+    }
+
+    fn load_state(&mut self, data: &[u8]) -> bool {
+        self.restore_snapshot(data)
+    }
+
+    fn state_reader(&mut self) -> Option<Box<dyn crate::PluginStateReader>> {
+        let (capture, reader) = freeze_state::channel();
+        self.capture = Some(capture);
+        Some(Box::new(reader))
+    }
     fn info(&self) -> &'static PluginInfo {
         &TEXTURE_INFO
     }
@@ -379,6 +404,11 @@ impl Plugin for TextureFx {
     }
 
     fn prepare(&mut self, sample_rate: f32, _max_block: usize, channels: usize) {
+        if self.restored && self.sr == sane_sr(sample_rate) {
+            self.ch = sane_channels(channels).min(MAX_CHANNELS);
+            return;
+        }
+        self.restored = false;
         self.sr = sane_sr(sample_rate);
         self.ch = sane_channels(channels).min(MAX_CHANNELS);
         self.fade_len = ms_to_samples(RESTART_FADE_MS, self.sr).max(1.0) as u32;
@@ -389,6 +419,9 @@ impl Plugin for TextureFx {
     /// Back to a freshly built chain at the wanted setup: the recording, the grains, the reverb,
     /// the learned input level and the random generator all start over (allocation-free).
     fn reset(&mut self) {
+        if self.restored {
+            return;
+        }
         let want = self.want;
         self.texture.rebuild(want.buffer, want.media, want.mono);
         self.stage = InputStage::new(want.media.sample_rate() as f32, clipping(want.media));
@@ -412,6 +445,8 @@ impl Plugin for TextureFx {
     }
 
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
+        self.answer_capture();
+        self.restored = false;
         let ch = self.ch.min(io.len()).min(2);
         let frames = frames_in(io, frames, ch);
         if ch == 0 {

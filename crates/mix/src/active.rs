@@ -433,6 +433,7 @@ impl MixEngine {
         for st in tables.strips.iter_mut() {
             if let Some(t) = s.tracks.get(usize::from(st.track)) {
                 st.touch.begin(t, frames, ramp);
+                strip::service_idle_states(s, t, st, pos);
             }
         }
         // A strip a render worker holds keeps the delays it went away with (its keys are lent).

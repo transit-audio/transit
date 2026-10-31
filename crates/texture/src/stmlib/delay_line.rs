@@ -13,6 +13,18 @@ pub struct DelayLine<const N: usize> {
     line: [F; N],
 }
 
+impl<const N: usize> crate::checkpoint::State for DelayLine<N> {
+    fn write(&self, out: &mut Vec<u8>) {
+        self.write_ptr.write(out);
+        self.line.write(out);
+    }
+    fn read(&mut self, input: &mut &[u8]) -> Option<()> {
+        self.write_ptr.read(input)?;
+        self.line.read(input)?;
+        (self.write_ptr < N).then_some(())
+    }
+}
+
 impl<const N: usize> Default for DelayLine<N> {
     fn default() -> Self {
         Self { write_ptr: 0, line: [F::ZERO; N] }

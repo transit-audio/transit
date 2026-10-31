@@ -159,6 +159,9 @@ impl Svf {
     }
 }
 
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(Svf, _s, [g, r, h, state_1, state_2], true);
+
 #[cfg(test)]
 mod tests {
     use super::*;

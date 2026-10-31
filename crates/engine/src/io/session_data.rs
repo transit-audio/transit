@@ -13,7 +13,10 @@ pub(crate) struct ImportedSessionData {
 pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<String>>) -> Result<ImportedSessionData> {
     let id = "file.import_session_data";
     let text = read_text(path)?;
-    let other = Session::from_json(&text).map_err(|err| bad(id, format!("{path}: {err}")))?;
+    let mut other = Session::from_json(&text).map_err(|err| bad(id, format!("{path}: {err}")))?;
+    let donor_rate = std::mem::replace(&mut other.sample_rate, e.session().sample_rate);
+    let frozen_notes = super::frozen_recording::load(&mut other, Path::new(path));
+    other.sample_rate = donor_rate;
     if other.load_notes.iter().any(|n| n == transit_model::legacy::VIDEO_REMOVED_NOTE) {
         e.message(transit_model::legacy::VIDEO_REMOVED_NOTE.to_string());
     }
@@ -40,7 +43,7 @@ pub(crate) fn import_session_data(e: &mut Engine, path: &str, names: Option<Vec<
     let s = e.session_mut();
     let mut files = crate::io::DecodedFiles::new();
     let mut map: std::collections::BTreeMap<u64, SourceId> = Default::default();
-    let mut missing = Vec::new();
+    let mut missing = frozen_notes;
     for src in needed.iter().filter_map(|sid| other.source(*sid)) {
         let mut ns = src.clone();
         ns.id = SourceId(s.alloc());

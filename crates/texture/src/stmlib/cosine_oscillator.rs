@@ -56,3 +56,6 @@ impl CosineOscillator {
         temp + 0.5
     }
 }
+
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(CosineOscillator, _s, [y1, y0, iir_coefficient, initial_amplitude], true);

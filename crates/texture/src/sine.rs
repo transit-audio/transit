@@ -43,3 +43,6 @@ impl SineOscillator {
         self.render()
     }
 }
+
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(SineOscillator, _s, [phase, frequency], true);

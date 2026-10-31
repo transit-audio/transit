@@ -183,3 +183,11 @@ impl InputStage {
         self.soft_clipping_amount = amount_modulation.value();
     }
 }
+
+// Continuation checkpoint, version 1. Configuration is reconstructed before reading.
+crate::state_fields!(
+    InputStage,
+    s,
+    [peak, agc_peak, stable_agc_peak, gain, soft_clipping_amount, auto_gain, manual_gain, time],
+    s.time <= s.active_time
+);

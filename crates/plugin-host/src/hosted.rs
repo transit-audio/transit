@@ -140,6 +140,11 @@ impl Drop for Hosted {
 }
 
 impl Plugin for Hosted {
+    fn service_idle_state(&mut self) {
+        if let Some(p) = &mut self.inner {
+            p.service_idle_state();
+        }
+    }
     fn info(&self) -> &'static PluginInfo {
         self.info
     }

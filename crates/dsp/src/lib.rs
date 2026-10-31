@@ -267,6 +267,9 @@ pub trait Plugin: Send {
     fn info(&self) -> &'static PluginInfo;
     fn prepare(&mut self, sample_rate: f32, max_block: usize, channels: usize);
     fn reset(&mut self);
+    /// Service a non-rendering insert at a block boundary (bypassed or inactive). Same realtime
+    /// contract as process: no allocation, deallocation, locks or waiting.
+    fn service_idle_state(&mut self) {}
     /// Sets a parameter (clamped into range; NaN becomes the default). `false` if `id` is unknown.
     fn set_param(&mut self, id: &str, value: f32) -> bool;
     fn param(&self, id: &str) -> Option<f32>;
