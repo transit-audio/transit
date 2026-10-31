@@ -13,8 +13,8 @@ use std::cell::RefCell;
 use windows_sys::Win32::Foundation::{HWND, LPARAM};
 use windows_sys::Win32::System::Threading::GetCurrentThreadId;
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumThreadWindows, GWL_EXSTYLE, GetWindowLongPtrW, HWND_TOP, IsIconic, IsWindowVisible, SW_HIDE, SW_SHOWNA, SWP_FRAMECHANGED, SWP_NOACTIVATE,
-    SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_TOOLWINDOW,
+    EnumThreadWindows, GWL_EXSTYLE, GetWindowLongPtrW, HWND_NOTOPMOST, HWND_TOPMOST, IsIconic, IsWindowVisible, SW_HIDE, SW_SHOWNA, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER, SWP_SHOWWINDOW, SetWindowLongPtrW, SetWindowPos, ShowWindow, WS_EX_TOOLWINDOW,
 };
 
 /// The extended style of an editor that follows the main window: no taskbar button, not in
@@ -71,11 +71,21 @@ fn visible(hwnd: HWND) -> bool {
 
 /// Brings a frame of this thread to the top of the z-order (and shows it if `show`) without
 /// activating it: the main window keeps the keyboard focus.
+///
+/// `HWND_TOP` is not enough (issue #265): Windows does not let a thread that is not the foreground
+/// thread place its window above the foreground window, and this thread never is (the main window,
+/// on the UI thread, was just activated). Such a call stops below the main window, where an editor
+/// that follows it (a tool window: no taskbar button, not in Alt-Tab) cannot be reached. Entering
+/// the topmost band and leaving it again at once is allowed from any thread, and leaving it puts the
+/// window above all windows that are not topmost, the main window included, still unactivated.
 fn to_front(hwnd: HWND, show: bool) {
-    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | if show { SWP_SHOWWINDOW } else { 0 };
+    let flags = SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE;
     // SAFETY: a live frame of this thread (callers checked it with `data`); only its z-order (and
-    // its visibility with `show`) changes.
-    unsafe { SetWindowPos(hwnd, HWND_TOP, 0, 0, 0, 0, flags) };
+    // its visibility with `show`) changes, and it ends where it started: not topmost.
+    unsafe {
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0, flags | if show { SWP_SHOWWINDOW } else { 0 });
+        SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+    }
 }
 
 /// Gives a frame of this thread the tool-window style (`tool`) or takes it away, keeping the

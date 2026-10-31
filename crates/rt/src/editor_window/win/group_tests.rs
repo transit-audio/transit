@@ -197,3 +197,49 @@ fn a_late_request_follows_what_the_ui_did_since_and_records_nothing() {
     assert_eq!(apply(Group::Unpark), 0);
     a.close();
 }
+
+/// Issue #265: the editors' thread is never the foreground thread (the main window, on the UI
+/// thread, was just activated), and Windows keeps a window that such a thread brings to the top
+/// below the foreground window. Front, the restore's front and a raise must still put the editor
+/// above it, unactivated and not left topmost. The foreground window of another thread or process
+/// (whatever the desktop has in front) stands in for the main window; the editor is off-screen.
+#[test]
+fn front_and_raise_bring_an_editor_above_the_foreground_window_of_another_thread() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowThreadProcessId, HWND_BOTTOM, WS_EX_TOPMOST};
+    let _g = Globals::follow(true);
+    // SAFETY: no arguments.
+    let main = unsafe { GetForegroundWindow() };
+    // SAFETY: accepts any handle; a null process id pointer is allowed.
+    let main_thread = unsafe { GetWindowThreadProcessId(main, std::ptr::null_mut()) };
+    // SAFETY: no arguments.
+    if main.is_null() || main_thread == unsafe { GetCurrentThreadId() } || ex_style(main) & WS_EX_TOPMOST != 0 {
+        eprintln!("no foreground window of another thread that is not topmost: nothing to stand in for the main window");
+        return;
+    }
+    let a = EditorWindow::new("A", 120.0, 80.0, None).unwrap();
+    let flags = SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE;
+    // SAFETY: a live window of this thread: moved off-screen and shown without activation.
+    unsafe {
+        SetWindowPos(a.raw(), std::ptr::null_mut(), -6000, -6000, 0, 0, flags);
+        ShowWindow(a.raw(), SW_SHOWNA);
+    }
+    let not_topmost = |a: &EditorWindow| ex_style(a.raw()) & WS_EX_TOPMOST == 0;
+    assert_eq!(group(Group::Front), 1);
+    assert!(above(a.raw(), main), "front: the editor comes above the main window");
+    assert!(not_topmost(&a), "and is not left topmost");
+    // SAFETY: no arguments.
+    assert_ne!(unsafe { GetForegroundWindow() }, a.raw(), "unactivated");
+    // Minimize and restore: the restore posts unpark, then front.
+    assert_eq!(group(Group::Park), 1);
+    assert_eq!(group(Group::Unpark), 1);
+    assert_eq!(group(Group::Front), 1);
+    assert!(above(a.raw(), main), "restore: the editor comes back above the main window");
+    // Selecting its plug-in raises it from wherever it is.
+    // SAFETY: a live window of this thread, sent to the bottom without activation.
+    unsafe { SetWindowPos(a.raw(), HWND_BOTTOM, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE) };
+    assert!(!above(a.raw(), main));
+    assert!(raise_window(a.raw() as usize));
+    assert!(above(a.raw(), main), "raise: above the main window");
+    assert!(not_topmost(&a));
+    a.close();
+}

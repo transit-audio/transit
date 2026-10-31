@@ -45,7 +45,7 @@ Grouping is done by hand, with no ownership link.
 | `crates/rt/src/editor_window/win/group.rs` | on the window's own thread only: `apply` (park, unpark, front, follow with the restyle, to the current process-wide state; what host threads run), `group` (records, then applies: inline mode and tests), `raise_window`, `window_state`, `take_created` |
 | `crates/dsp/src/lib.rs` | `EditorWindowRequest`, `EditorWindowState`, `PluginEditor::raise` and `window_state` (defaults: nothing) |
 
-The Win32 calls are all made by the thread that owns the window: `EnumThreadWindows` with the calling thread's id, `ShowWindow`, `SetWindowPos` (`HWND_TOP` with `SWP_NOACTIVATE`), `SetWindowLongPtrW` for the extended style, `IsIconic` and `IsWindowVisible`. None is made on another thread's window, so none can wait for a hung one; the UI's side is atomics and a channel send.
+The Win32 calls are all made by the thread that owns the window: `EnumThreadWindows` with the calling thread's id, `ShowWindow`, `SetWindowPos` (`HWND_TOPMOST` then `HWND_NOTOPMOST`, with `SWP_NOACTIVATE`: issue #265, a thread that is not the foreground thread cannot put its window above the foreground window with `HWND_TOP`, and the host thread never is), `SetWindowLongPtrW` for the extended style, `IsIconic` and `IsWindowVisible`. None is made on another thread's window, so none can wait for a hung one; the UI's side is atomics and a channel send.
 
 ## Implementation (Linux, 2026-10-30, #147 slice 1)
 
