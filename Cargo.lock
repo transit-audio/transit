@@ -4377,6 +4377,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-random-sequencer"
+version = "0.5.1"
+dependencies = [
+ "transit-macro-osc-oracle",
+]
+
+[[package]]
 name = "transit-resonator"
 version = "0.5.1"
 dependencies = [

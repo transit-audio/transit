@@ -28,6 +28,7 @@ transit-resonator = { path = "crates/resonator" }
 transit-granular = { path = "crates/granular" }
 transit-texture = { path = "crates/texture" }
 transit-modulator = { path = "crates/modulator" }
+transit-random-sequencer = { path = "crates/random-sequencer" }
 transit-clap-host = { path = "crates/clap-host" }
 transit-vst3-host = { path = "crates/vst3-host" }
 transit-au-host = { path = "crates/au-host" }
