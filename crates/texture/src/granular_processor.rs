@@ -291,7 +291,7 @@ impl GranularProcessor {
 // Continuation checkpoint, version 1. Configuration is reconstructed before reading.
 crate::state_fields!(
     GranularProcessor,
-    _s,
+    s,
     [
         granular_player,
         multitap_delay,
@@ -307,5 +307,23 @@ crate::state_fields!(
         pitch_modulation,
         input_limiter
     ],
-    true
+    // Pitch (including the supported CV and randomness range) is at most 128x.
+    // A larger finite speed could overflow the multitap's fixed-point phase sum.
+    (0.0..=256.0).contains(&s.speed.0) && (0.0..=1.01).contains(&s.feedback.0) && (0.0..=1.01).contains(&s.bandwidth.0)
 );
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+    use crate::checkpoint::State;
+
+    #[test]
+    fn checkpoint_rejects_a_speed_that_overflows_the_tap_phase() {
+        let mut source = GranularProcessor::new(Resolution::Bits16, 192_000, 1);
+        source.speed = F(f32::MAX);
+        let mut bytes = Vec::new();
+        source.write(&mut bytes);
+        let mut restored = GranularProcessor::new(Resolution::Bits16, 192_000, 1);
+        assert!(restored.read(&mut bytes.as_slice()).is_none());
+    }
+}

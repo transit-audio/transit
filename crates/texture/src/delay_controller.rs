@@ -117,7 +117,7 @@ impl DelayClock {
     }
 
     fn slot(&self, i: usize) -> usize {
-        usize::try_from((i32::try_from(i).unwrap_or(0) + self.rotate).rem_euclid(2)).unwrap_or(0)
+        usize::try_from(i32::try_from(i).unwrap_or(0).wrapping_add(self.rotate).rem_euclid(2)).unwrap_or(0)
     }
 
     /// `interval(i)`.
@@ -427,7 +427,9 @@ impl DelayController {
                 // stretch the interval far past it, and the play head would start before the buffer),
                 // and a slice shorter than a sample counts zero slices, the module's result for its
                 // division by zero (the play head stays silent).
-                let slice_duration = (self.clock.interval(interval) * tap_ratio[ratio]).trunc_i32().min(self.max_delay);
+                // Bound before converting: a hostile checkpoint or an overflowing clock must
+                // not turn a large float into i32::MIN and underflow a play head's countdown.
+                let slice_duration = constrain(self.clock.interval(interval) * tap_ratio[ratio], F::ZERO, F::from_i32(self.max_delay)).trunc_i32();
                 let num_slices = if slice_duration == 0 { 0 } else { self.max_delay / slice_duration };
                 let q = &mut self.numerator_quantizer[i];
                 if q.num_steps() != num_slices {
@@ -490,17 +492,31 @@ crate::state_fields!(
     s,
     [interval, average_interval, fade, fade_increment, jitter_sensitivity, schedule_change, next_interval, rotate],
     s.rotate < i32::MAX
+        && s.interval.iter().all(|v| (0.0..=1_000_000_000.0).contains(&v.0))
+        && (0.0..=s.max_interval as f32).contains(&s.average_interval.0)
+        && (0.0..=1.0).contains(&s.fade.0)
+        && (0.0..=1.0).contains(&s.fade_increment.0)
+        && (0.0..=1.0).contains(&s.jitter_sensitivity.0)
+        && s.next_interval >= 0
 );
 crate::state_fields!(
     PlayHead,
     s,
     [start, remaining, mid_point, phase, phase_increment, gain],
-    s.start >= 0 && s.start < 2097152 && s.remaining >= 0 && s.remaining < 2097152 && s.mid_point >= 0 && s.mid_point < 2097152
+    s.start >= 0
+        && s.start < 2097152
+        && s.remaining >= 0
+        && s.remaining < 2097152
+        && s.mid_point >= 0
+        && s.mid_point < 2097152
+        && (0.0..=2.0).contains(&s.phase.0)
+        && (0.0..=1.0).contains(&s.phase_increment.0)
+        && (0.0..=2.0).contains(&s.gain.0)
 );
-crate::state_fields!(TapEnvelope, _s, [phase, phase_increment], true);
+crate::state_fields!(TapEnvelope, s, [phase, phase_increment], (0.0..=2.0).contains(&s.phase.0) && (0.0..=1.0).contains(&s.phase_increment.0));
 crate::state_fields!(
     DelayController,
-    _s,
+    s,
     [
         clock,
         play_head,
@@ -521,5 +537,73 @@ crate::state_fields!(
         freeze,
         seed_button
     ],
-    true
+    (0.0..=1.0).contains(&s.shape.0)
+        && (0.0..=1.0).contains(&s.density.0)
+        && (0.0..=2.0).contains(&s.multiplier_lp.0)
+        && s.linear_fm.abs() <= 16.0
+        && (0.0..=2048.0).contains(&s.fm.0)
+        && s.clock.interval.iter().all(|v| v.0 * s.fm.0 < 2_147_483_648.0)
+        && s.play_head.iter().chain(s.slave_play_head.iter()).all(|h| h.start + h.remaining <= s.max_delay + MIN_DELAY)
 );
+
+#[cfg(test)]
+mod checkpoint_tests {
+    use super::*;
+    use crate::checkpoint::State;
+
+    #[test]
+    fn a_restored_clock_rotation_wraps_before_indexing() {
+        let mut clock = DelayClock::default();
+        clock.init(F(48_000.0));
+        clock.rotate = i32::MAX - 1;
+        clock.schedule_change = true;
+        let mut bytes = Vec::new();
+        clock.write(&mut bytes);
+        let mut restored = DelayClock::default();
+        restored.init(F(48_000.0));
+        assert!(restored.read(&mut bytes.as_slice()).is_some());
+        restored.process(false, false);
+        assert_eq!(restored.interval(1), F(12_000.0));
+        assert_eq!(restored.gain(1), F(1.0));
+    }
+
+    #[test]
+    fn checkpoint_rejects_heads_whose_combined_delay_exceeds_the_recording() {
+        let mut source = DelayController::default();
+        source.init(F(48_000.0), 2_048_000);
+        source.play_head[0].start(1_048_575, 1_048_576, F(1.0));
+        let mut bytes = Vec::new();
+        source.write(&mut bytes);
+        let mut restored = DelayController::default();
+        restored.init(F(48_000.0), 2_048_000);
+        assert!(restored.read(&mut bytes.as_slice()).is_none());
+    }
+
+    #[test]
+    fn checkpoint_rejects_negative_and_overflowing_slice_clocks() {
+        for interval in [-f32::MAX, -1.0, f32::MAX] {
+            let mut source = DelayController::default();
+            source.init(F(48_000.0), 192_000);
+            source.clock.interval[0] = F(interval);
+            let mut bytes = Vec::new();
+            source.write(&mut bytes);
+            let mut restored = DelayController::default();
+            restored.init(F(48_000.0), 192_000);
+            assert!(restored.read(&mut bytes.as_slice()).is_none());
+        }
+    }
+
+    #[test]
+    fn slice_clock_is_bounded_before_integer_conversion() {
+        for interval in [-f32::MAX, f32::MAX] {
+            let mut source = DelayController::default();
+            source.init(F(48_000.0), 192_000);
+            source.clock.interval = [F(interval); 2];
+            let mut out = DelayOutput::default();
+            source.render_frozen(&mut out, F(0.5), F(0.5), [F(1.0); 2], [F(1.0); 2]);
+            for tap in out.tap {
+                assert!((0..=(192_000 + MIN_DELAY) * 1024).contains(&tap.delay));
+            }
+        }
+    }
+}

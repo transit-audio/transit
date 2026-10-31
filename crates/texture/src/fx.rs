@@ -369,14 +369,29 @@ crate::state_fields!(
 );
 crate::state_fields!(
     WowAndFlutter,
-    _s,
+    s,
     [one_hertz, delay, amount, lp, random_frequency, lp_state, random_modulation, wow, flutter, delay_line],
-    true
+    (0.0..=1.0).contains(&s.one_hertz.0)
+        && (0.0..=128.0).contains(&s.delay.0)
+        && (0.0..=1.0).contains(&s.amount.0)
+        && (0.0..=1.0).contains(&s.lp.0)
+        && (0.0..=1.0).contains(&s.random_frequency.0)
 );
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checkpoint_rejects_a_huge_finite_tape_delay() {
+        use crate::checkpoint::State;
+        let mut source = WowAndFlutter::default();
+        source.init(F(24_000.0));
+        source.delay = F(f32::MAX);
+        let mut bytes = Vec::new();
+        source.write(&mut bytes);
+        assert!(WowAndFlutter::default().read(&mut bytes.as_slice()).is_none());
+    }
 
     #[test]
     fn the_reverb_lines_sit_where_the_firmware_reserves_them() {

@@ -147,7 +147,12 @@ pub struct Parameters {
 }
 
 // Continuation checkpoint, version 1. Configuration is reconstructed before reading.
-crate::state_fields!(RandomWalkModulation, _s, [phase, frequency, from, to], true);
+crate::state_fields!(
+    RandomWalkModulation,
+    s,
+    [phase, frequency, from, to],
+    (0.0..=1.0).contains(&s.phase.0) && (0.0..=0.01).contains(&s.frequency.0) && s.from.abs() <= 1.0 && s.to.abs() <= 1.0
+);
 
 #[cfg(test)]
 mod tests {

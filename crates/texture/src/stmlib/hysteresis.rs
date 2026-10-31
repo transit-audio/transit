@@ -82,7 +82,7 @@ impl HysteresisQuantizer {
 }
 
 // Continuation checkpoint, version 1. Configuration is reconstructed before reading.
-crate::state_fields!(HysteresisFilter, _s, [value, threshold], true);
+crate::state_fields!(HysteresisFilter, s, [value, threshold], s.value.abs() <= 16.0 && (0.0..=1.0).contains(&s.threshold.0));
 crate::state_fields!(
     HysteresisQuantizer,
     s,

@@ -375,13 +375,38 @@ impl<G: Voice> Scheduler<G> {
 }
 
 // Continuation checkpoint, version 1. Configuration is reconstructed before reading.
-crate::state_fields!(GrainEnvelope, _s, [stage, phase, phase_increment, smoothness, min_attack, min_release], true);
-crate::state_fields!(VoiceStealingEnvelope, _s, [value, decrement], true);
+crate::state_fields!(
+    GrainEnvelope,
+    s,
+    [stage, phase, phase_increment, smoothness, min_attack, min_release],
+    s.stage <= DONE
+        && (0.0..=2.0).contains(&s.phase.0)
+        && s.phase_increment.iter().all(|v| (0.0..=1.0).contains(&v.0))
+        && (0.0..=1.0).contains(&s.smoothness.0)
+        && (0.0..=3840.0).contains(&s.min_attack.0)
+        && (0.0..=3840.0).contains(&s.min_release.0)
+);
+crate::state_fields!(VoiceStealingEnvelope, s, [value, decrement], (-1.0..=1.0).contains(&s.value.0) && (0.0..=1.0).contains(&s.decrement.0));
 crate::state_fields!(GrainCore, s, [remaining_samples, envelope, stealing], (-2_097_152..=2_097_152).contains(&s.remaining_samples));
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn checkpoint_rejects_huge_envelope_phase_and_increments() {
+        use crate::checkpoint::State;
+        for field in 0..5 {
+            let mut source = GrainEnvelope::default();
+            source.init(F(48_000.0));
+            source.start(F(1000.0), F(0.5), F::ZERO);
+            let mut bytes = Vec::new();
+            source.write(&mut bytes);
+            let offset = 8 + field * 4; // stage is encoded as a u64, then phase and increments.
+            bytes[offset..offset + 4].copy_from_slice(&f32::MAX.to_le_bytes());
+            assert!(GrainEnvelope::default().read(&mut bytes.as_slice()).is_none());
+        }
+    }
 
     #[test]
     fn a_short_grain_checkpoint_keeps_its_minimum_release_after_the_requested_duration() {

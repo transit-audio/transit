@@ -58,4 +58,29 @@ impl CosineOscillator {
 }
 
 // Continuation checkpoint, version 1. Configuration is reconstructed before reading.
-crate::state_fields!(CosineOscillator, _s, [y1, y0, iir_coefficient, initial_amplitude], true);
+crate::state_fields!(
+    CosineOscillator,
+    s,
+    [y1, y0, iir_coefficient, initial_amplitude],
+    // The normal recursion is within +/-0.5; allow drift, but never a delay offset
+    // large enough to overflow the reverb's integer address arithmetic.
+    s.y1.abs() <= 4.0 && s.y0.abs() <= 4.0 && s.iir_coefficient.abs() < 2.0 && s.initial_amplitude.abs() <= 0.5
+);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::checkpoint::State;
+
+    #[test]
+    fn checkpoint_rejects_huge_finite_modulation_state() {
+        for field in 0..4 {
+            let mut source = CosineOscillator::default();
+            source.init_approximate(F(0.001));
+            let mut bytes = Vec::new();
+            source.write(&mut bytes);
+            bytes[field * 4..field * 4 + 4].copy_from_slice(&f32::MAX.to_le_bytes());
+            assert!(CosineOscillator::default().read(&mut bytes.as_slice()).is_none());
+        }
+    }
+}
