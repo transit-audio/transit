@@ -73,7 +73,9 @@ fn duplicate_and_early_releases() {
     assert_eq!(every_on_has_its_off(&heard), 1);
     assert_eq!(heard.len(), 2);
     assert_eq!(heard[0].0, now + limit);
-    assert_eq!(heard[1].0, now + limit, "advanced to the horizon, never before its on");
+    // Advanced to the horizon, onto its on's frame; delivered one sample after it (#257: no
+    // zero-length note, live or overdue).
+    assert_eq!(heard[1].0, now + limit + 1, "advanced to the horizon, never before its on, never on it");
     let st = rig.mix.event_status();
     assert_eq!((st.releases_advanced, st.coalesced, st.unmatched), (1, 1, 1));
 }
@@ -89,7 +91,8 @@ fn a_release_due_before_its_note_on_is_ordered_after_it() {
     let heard = rig.heard_by(1);
     assert_eq!(heard.len(), 2);
     assert!(matches!(heard[0].1.message, Message::NoteOn { .. }));
-    assert_eq!(heard[1].0, now + 100);
+    // Moved onto its on's frame at admission, delivered one sample after it (#257).
+    assert_eq!(heard[1].0, now + 101);
     assert_eq!(rig.mix.event_status().reordered, 1);
 }
 

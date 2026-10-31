@@ -702,3 +702,14 @@ fn a_silence_emits_untagged_events() {
     assert!(d.silenced);
     assert!(!out.is_empty() && out.iter().all(|e| e.tag == Event::NO_TAG), "the silence's events carry no caller tag");
 }
+
+/// The collapsed-pair rule both the ring and the engine's queue use (#257): an off on its note's
+/// on moves one sample later, waits past the last sample, and is untouched otherwise.
+#[test]
+fn past_its_note_on_splits_a_collapsed_pair_or_waits() {
+    assert_eq!(past_its_note_on(5, Some(5), 63), Some(6));
+    assert_eq!(past_its_note_on(5, Some(4), 63), Some(5));
+    assert_eq!(past_its_note_on(5, None, 63), Some(5));
+    assert_eq!(past_its_note_on(63, Some(63), 63), None);
+    assert_eq!(past_its_note_on(u32::MAX, Some(u32::MAX), u32::MAX), None);
+}

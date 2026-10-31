@@ -414,6 +414,20 @@ pub struct Drained {
     pub floor: u32,
 }
 
+/// The collapsed-pair rule, one rule for every place a block's events are laid out (the ring's
+/// [`Placer`] and the engine's per-instrument queue, #257): a note-off that would land on the offset
+/// its note-on landed on in the same block (`on`; `None` when its note-on is not in this block)
+/// moves one sample later, so no note is zero length. `None` when that is past the block's `last`
+/// offset: the off waits, with every event behind it, for the next block. `at` is the off's offset
+/// after the non-decreasing floor, so it is never below `on`.
+#[must_use]
+pub fn past_its_note_on(at: u32, on: Option<u32>, last: u32) -> Option<u32> {
+    if on != Some(at) {
+        return Some(at);
+    }
+    at.checked_add(1).filter(|&next| next <= last)
+}
+
 /// Places events in one block: the projection, the non-decreasing floor and the collapsed-pair
 /// rule.
 struct Placer<'a> {
@@ -430,11 +444,9 @@ impl Placer<'_> {
         let last = self.block_len.checked_sub(1)?;
         let mut at = landing(e.offset, e.block, self.now, self.block_len).max(self.floor);
         let slot = e.note_slot();
-        if e.is_note_off() && self.notes.get(slot).is_some_and(|&(s, on)| s == self.stamp && on == at) {
-            at += 1;
-            if at > last {
-                return None;
-            }
+        if e.is_note_off() {
+            let on = self.notes.get(slot).filter(|&&(s, _)| s == self.stamp).map(|&(_, on)| on);
+            at = past_its_note_on(at, on, last)?;
         }
         if e.is_note_on()
             && let Some(n) = self.notes.get_mut(slot)

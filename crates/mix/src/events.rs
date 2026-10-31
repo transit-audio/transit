@@ -56,6 +56,7 @@ use super::{INSTRUMENT_SLOT, MixEngine, Plugin, PluginSlot, SlotBinding, Strip};
 use transit_dsp::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_RESET_CONTROLLERS, CC_SOSTENUTO, CC_SUSTAIN, is_pedal};
 pub use transit_dsp::event::{Message, NoteId, PluginEvent};
 use transit_model::Session;
+use transit_rt::midi_defer::past_its_note_on;
 
 /// A position on the engine's render clock (annex R): the frame count rendered since the engine
 /// started, monotonic through same-rate plans and seeks.
@@ -961,9 +962,10 @@ impl InstrumentEvents {
     /// Delivers the entries due before `start + frames` at `due − start` (late ones at 0).
     ///
     /// Entries that are overdue (a block the instrument did not process: a render worker's
-    /// overrun, ADR 0029) all land on offset 0; an overdue off that would land on its note's on
-    /// in this call moves one sample later, offsets never decrease, and an off that cannot move within
-    /// the block waits, with every entry behind it, for the next block (no zero-length note).
+    /// overrun, ADR 0029) all land on offset 0; offsets never decrease; any off, overdue or live,
+    /// that would land on its note's on in this call moves one sample later, and an off that cannot
+    /// move within the block waits, with every entry behind it, for the next block (no zero-length
+    /// note; the ring's rule, [`past_its_note_on`]).
     pub(crate) fn deliver(&mut self, plugin: &mut dyn Plugin, start: u64, frames: usize) {
         let end = start.saturating_add(frames as u64);
         let mut k = self.queue.partition_point(|q| q.due < end);
@@ -973,15 +975,16 @@ impl InstrumentEvents {
         for i in 0..k {
             let Some(q) = self.queue.get(i).copied() else { break };
             let mut offset = u32::try_from(q.due.saturating_sub(start)).unwrap_or(u32::MAX).min(last).max(floor);
-            if q.due < start
-                && let Action::Off(n) = q.action
-                && on_at.get(usize::from(n)) == Some(&offset)
-            {
-                if offset >= last {
-                    k = i;
-                    break;
+            // Every off, overdue or live: the floor can raise a live off onto its note's on (#257).
+            if let Action::Off(n) = q.action {
+                let on = on_at.get(usize::from(n)).copied().filter(|&at| at != u32::MAX);
+                match past_its_note_on(offset, on, last) {
+                    Some(at) => offset = at,
+                    None => {
+                        k = i;
+                        break;
+                    }
                 }
-                offset += 1;
             }
             floor = offset;
             match (q.action, q.message) {

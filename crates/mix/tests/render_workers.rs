@@ -609,6 +609,51 @@ fn an_unstarted_strip_plays_its_overdue_notes_without_a_zero_length_one() {
     drop(rig.mix.into_retired());
 }
 
+/// #257: the one-sample rule holds for a live note-off too. The overdue pair of a forced
+/// `Unstarted` block lands at offsets 0 and 1, and that floor raises the next block's live note-on
+/// at 0 onto offset 1, where its live note-off at 1 would land as well (a zero-length note). The
+/// off moves one sample later, and the order of events is the order they were sent.
+#[test]
+fn a_live_note_off_raised_onto_its_note_on_moves_one_sample_later() {
+    let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    MixEngine::force_serial(false);
+    // Forced by construction, not by scheduling: no worker, and a block with no time left takes
+    // every published strip back unrendered; every other block has all the time it needs.
+    let mut rig = Rig::new(INSTRUMENTS, 0, FRAMES);
+    rig.mix.start_render_workers_with(64, 0);
+    rig.mix.seed_strip_costs(Duration::from_micros(1));
+    let ample = Duration::from_secs(30);
+    rig.mix.set_strip_deadline(Some(ample));
+    become_callback();
+    for _ in 0..4 {
+        rig.block();
+    }
+    for k in 0..INSTRUMENTS {
+        assert!(rig.note_on(k, 5, 60).accepted() && rig.note_off(k, 9, 60).accepted());
+    }
+    rig.mix.set_strip_deadline(Some(Duration::ZERO));
+    rig.block();
+    rig.mix.set_strip_deadline(Some(ample));
+    for k in 0..INSTRUMENTS {
+        assert!(rig.note_on(k, 0, 62).accepted() && rig.note_off(k, 1, 62).accepted());
+    }
+    for _ in 0..4 {
+        rig.block();
+    }
+    let f = rig.mix.strip_faults().unwrap().snapshot();
+    assert_eq!(f.overruns_unstarted, INSTRUMENTS as u64, "every strip of the forced block was unstarted: {f:?}");
+    for (k, s) in rig.shared.iter().enumerate() {
+        // The notes only (the instrument's start-up reset controllers is not under test).
+        let landed: Vec<_> = s.inst.lock().unwrap().trace().iter().map(|l| (l.event.status & 0xF0, l.event.data1, l.event.offset)).filter(|l| matches!(l.0, 0x80 | 0x90)).collect();
+        assert_eq!(landed, [(0x90, 60, 0), (0x80, 60, 1), (0x90, 62, 1), (0x80, 62, 2)], "instrument {k}");
+        let r = s.report();
+        assert_eq!((r.stuck_notes, r.faults.zero_length, r.faults.unsorted), (0, 0, 0), "instrument {k}: {r:?}");
+    }
+    transit_mix::unmark_audio_thread();
+    MixEngine::force_serial(true);
+    drop(rig.mix.into_retired());
+}
+
 /// #168: a strip's first render is where a plug-in does its one-time load, and the callback
 /// cannot bound an inline render once it has started, so a strip with no cost history is never
 /// rendered inline: with no worker it is taken back unrendered (`Unstarted`, counted as refused
@@ -860,12 +905,17 @@ fn a_carried_pair_is_delivered_when_the_next_blocks_render_serially() {
     carry_a_pair(&mut rig, 60);
     MixEngine::force_serial(true);
     rig.block();
-    assert!(heard(&rig, 2).contains(&(0x80, 60)), "the carried note-off was delivered on the first serial block: {:?}", heard(&rig, 2));
+    // The ring landed the note-on on the last sample and carried its note-off to the next
+    // processed block (ADR 0029, end of block): the first serial block plays the on, and the off,
+    // which may not land on its on's sample (#257), waits for the next block's first sample.
+    assert!(heard(&rig, 2).contains(&(0x90, 60)), "the parked note-on was delivered on the first serial block: {:?}", heard(&rig, 2));
     assert!(rig.note_on(2, 10, 61).accepted() && rig.note_off(2, 20, 61).accepted());
     rig.block();
     let h = heard(&rig, 2);
+    assert!(h.contains(&(0x80, 60)), "the carried note-off was delivered on the serial blocks: {h:?}");
     assert!(h.contains(&(0x90, 61)) && h.contains(&(0x80, 61)), "the instrument keeps receiving on the serial path: {h:?}");
-    assert_eq!(rig.shared[2].report().stuck_notes, 0);
+    let r = rig.shared[2].report();
+    assert_eq!((r.stuck_notes, r.faults.zero_length, r.faults.unsorted), (0, 0, 0), "{r:?}");
     transit_mix::unmark_audio_thread();
     drop(rig.mix.into_retired());
 }
