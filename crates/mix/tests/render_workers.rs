@@ -197,10 +197,18 @@ fn strips_unstarted_before_their_first_render_are_holes_too() {
 fn the_callback_allocates_nothing_with_render_workers() {
     let _one = ONE_AT_A_TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     MixEngine::force_serial(false);
-    let Some(rig) = rig(Duration::from_micros(800)) else {
+    let Some(mut rig) = rig(Duration::from_micros(800)) else {
         MixEngine::force_serial(true);
         return;
     };
+    // #254: both changes fall in the allocation-armed window, between host boundaries.
+    rig.session.tempo.set_tempo(1100, 150.0).unwrap();
+    rig.session.tempo.set_tempo(1301, 100.0).unwrap();
+    let mut none = |_: &InstanceSpec, _: SlotGen| None;
+    let mut env =
+        rig.comp.compile(std::sync::Arc::new(rig.session.clone()), rig.comp.active(), transit_mix::PlanGeneration::from_raw(2), &mut none).unwrap();
+    assert_eq!(rig.mix.adopt_plan(&mut env), Adoption::Adopted);
+    rig.comp.reclaim(env);
     let (stats, f) = std::thread::spawn(move || {
         let mut rig = rig;
         become_callback();

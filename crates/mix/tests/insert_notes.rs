@@ -311,12 +311,10 @@ fn a_synced_filter_lfo_follows_the_song_position_across_a_tempo_change() {
     let a = render_range(&s, range, 512);
     let b = render_range(&s, range, 64);
     assert!(a.iter().flatten().any(|v| v.abs() > 0.01), "the track sounds");
-    // The tempo takes effect at a host block start, so the two block sizes run the old tempo for
-    // different stretches after frame 1100; from the first block start at or after 1536 (both
-    // sizes use the new tempo and anchor to the same song position) the sweep is the same.
-    let from = 1536 + 2048;
-    let worst = a.iter().zip(&b).flat_map(|(x, y)| x[from..].iter().zip(&y[from..]).map(|(p, q)| (p - q).abs())).fold(0.0f32, f32::max);
+    // #254 splits both hosts at frame 1100: the old #245 floor now covers the entire render.
+    let worst = a.iter().zip(&b).flat_map(|(x, y)| x.iter().zip(y).map(|(p, q)| (p - q).abs())).fold(0.0f32, f32::max);
     assert!(worst < 1e-6, "max difference {worst}");
+    assert!(a.iter().flatten().zip(b.iter().flatten()).all(|(p, q)| p.to_bits() == q.to_bits()));
 }
 
 #[test]

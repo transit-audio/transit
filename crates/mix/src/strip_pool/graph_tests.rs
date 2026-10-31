@@ -168,6 +168,45 @@ fn rig(workers: usize) -> (PlanRig, Session, [TrackId; 4], Knobs) {
     (rig, s, ids, knobs)
 }
 
+#[test]
+fn tempo_sub_blocks_count_one_host_overrun_and_keep_the_keyed_graph() {
+    let _switch = SWITCH.lock().unwrap_or_else(PoisonError::into_inner);
+    let run = |split: bool, workers: usize| {
+        let (mut rig, mut s, ids, knobs) = rig(workers);
+        if split {
+            s.tempo.set_tempo(2, 150.0).unwrap(); // frame 50, inside the 128-frame host
+            s.tempo.set_tempo(4, 100.0).unwrap(); // frame 90
+            rig.publish(&s);
+        }
+        as_callback(move || {
+            rig.eng.set_strip_deadline(Some(STALL));
+            knobs.hold.store(workers > 0, Ordering::Release);
+            deadline_block(&mut rig, &knobs, &mut 0, ids[0], workers > 0);
+            assert_eq!(knobs.pad_renders.load(Ordering::Acquire), if split { 3 } else { 1 });
+            if workers > 0 {
+                assert!(knobs.entered.load(Ordering::Acquire));
+            }
+            let stats = rig.eng.strip_faults().unwrap().snapshot();
+            assert_eq!(rig.eng.block_overruns(), 1);
+            assert_eq!(outcome(&rig, ids[1]), Outcome::Overrun(OverrunCause::UpstreamMissed));
+            assert_eq!(outcome(&rig, ids[2]), Outcome::Overrun(OverrunCause::UpstreamMissed));
+            knobs.hold.store(false, Ordering::Release);
+            drop(rig.eng.into_retired());
+            stats
+        })
+    };
+    for workers in [0, 1] {
+        let a = run(false, workers);
+        let b = run(true, workers);
+        assert_eq!((a.blocks, a.overrun_blocks, a.overruns(), a.upstream_missed, a.conflicts), (1, 1, 1, 2, 0));
+        assert_eq!(
+            (b.blocks, b.overrun_blocks, b.overruns(), b.upstream_missed, b.conflicts),
+            (a.blocks, a.overrun_blocks, a.overruns(), a.upstream_missed, a.conflicts)
+        );
+        assert_eq!((b.overruns_late, b.overruns_busy, b.overruns_unstarted), (a.overruns_late, a.overruns_busy, a.overruns_unstarted));
+    }
+}
+
 /// One block on the calling thread (the test's callback).
 fn block(rig: &mut PlanRig, b: &mut i64) {
     let mut out = vec![vec![0.0f32; FRAMES]; 2];
