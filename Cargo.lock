@@ -4327,6 +4327,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-modulator"
+version = "0.5.1"
+dependencies = [
+ "transit-macro-osc-oracle",
+]
+
+[[package]]
 name = "transit-playback"
 version = "0.5.1"
 dependencies = [
