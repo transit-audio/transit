@@ -29,10 +29,12 @@ a Rust port of Émilie Gillet's macro oscillator firmware and the stmlib helpers
 All three MIT notices are in `crates/macro-osc/LICENSE-THIRD-PARTY` (provenance in
 `crates/macro-osc/VENDOR.md`), and the app shows them under Help > About transit.
 
-The resonator (`crates/resonator`, #198; not yet linked into the app) is a Rust port of Émilie
-Gillet's resonator firmware (`rings/dsp` in `eurorack`) and the stmlib helpers it uses, written by
-transit from her C++ with no third-party Rust code in between. Her MIT notices are in
-`crates/resonator/LICENSE-THIRD-PARTY` (provenance in `crates/resonator/VENDOR.md`).
+The resonator (`crates/resonator`, #198; linked into the app through `transit-dsp` as the
+Resonator instrument) is a Rust port of Émilie Gillet's resonator firmware (`rings/dsp` in
+`eurorack`) and the stmlib helpers it uses, written by transit from her C++ with no third-party Rust
+code in between. Her MIT notices are in `crates/resonator/LICENSE-THIRD-PARTY` (provenance in
+`crates/resonator/VENDOR.md`); the Resonator's panel, its help entry and Help > About transit credit
+her, and the About window shows the notices.
 
 The granular texture processor (`crates/granular`, #199) is a Rust port of Émilie Gillet's texture
 processor firmware (`clouds/dsp` in `eurorack`, its granular and its pitch shifter / time stretcher

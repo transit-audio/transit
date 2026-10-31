@@ -217,6 +217,40 @@ and mapped to a MIDI controller (right-click it). Presets: Init, Analog Bass (mo
 Plucked String, Key Tracked Timbre, and your own from the panel's preset menu. The panel opens in a
 window inside transit's main window, so it minimizes and returns with it.
 
+## Resonator
+
+The Resonator is a built-in instrument (choose it from a track's instrument slot, beside the Macro
+Oscillator): a physical-modeling resonator with six models. It is a port of Émilie Gillet's
+open-source resonator firmware (MIT license), checked sample by sample against her C++ code
+([ADR 0033](adr/0033-built-in-instruments-mutable-instruments-port.md)); the notices are in
+**Help > About transit**.
+
+- **Model**: Modal (a bank of tuned modes: bars, bells, plates), Sympathetic Strings, Inharmonic
+  String, FM Voice, Chord Strings (sympathetic strings tuned to a chord) and String and Reverb.
+  **Structure**, **Brightness**, **Damping** and **Position** shape each one; on Chord Strings,
+  Structure picks the chord.
+- **Playing**: every note strikes the next voice in turn with the module's internal exciter while
+  the others ring on (**Polyphony** 1, 2 or 4). The module takes one strike per 24-frame block, so
+  the notes of a chord strike 0.5 ms apart, like a fast strum. There is no gate: a note-off or the
+  sustain pedal does not stop a ringing voice; **Damping** decides how long it rings.
+- **Accent** is how much velocity matters: a soft note darkens **Brightness** from that note on (one
+  control for every voice, as on the module). **Tonic** is the note the sympathetic strings drone on
+  at low Structure; the note you play keeps its own pitch (A3, MIDI 69, at 440 Hz).
+- **Tune**, **Bend Range** and the matrix's Pitch move every voice at once. The mod wheel and
+  aftertouch work through the matrix.
+- **Spread**: at polyphony 2 and 4 the module puts odd voices on one output and even voices on the
+  other, so notes alternate between the sides at 100%; lower, each side takes in the other, down to
+  the module's mono mix at 0% (50% by default).
+- The shaper and the modulation matrix are the Macro Oscillator's (transit's addition, off by
+  default), on the instrument's output: the amp envelope opens at each note and closes when no key
+  is held (the pedal holds it).
+
+The firmware runs at 48 kHz; in a 48 kHz session nothing is converted, and at other rates its
+output is converted at the edge and the delay (35 samples at 44.1 kHz, 65 at 88.2 kHz, 70 at
+96 kHz) goes to delay compensation. An instrument cannot take a track's audio as its exciter yet.
+Presets: Struck Bell, Sympathetic Harp, Steel Pluck, FM Mallet, Strummed Chords, Ambient Pluck,
+and your own.
+
 ## Filter
 
 The Filter is a built-in insert effect (the device chain's **+**, or the mixer strip's insert

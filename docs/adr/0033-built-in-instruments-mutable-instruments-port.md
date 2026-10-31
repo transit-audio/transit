@@ -133,8 +133,65 @@ Convention: Ableton's Wavetable and Logic's ES2 and Alchemy route modulation thr
 - **Source: option (c), a port from the firmware.** No Rust port of this module exists to vendor (Oliver Rockstedt's repositories carry only the macro oscillator; crates.io and GitHub have none), so `transit-resonator` is transit's own port of `eurorack/rings/dsp` at `08460a69` and the stmlib helpers it uses, from her MIT C++ only (never from VCV's GPLv3 Audible Instruments). Its license chain is Émilie Gillet's MIT notices alone (`crates/resonator/LICENSE-THIRD-PARTY`, `VENDOR.md`). For the second module of this pair (slice 2), the one candidate for option (b) is `mutated-elements` (MIT, derived from the firmware, frozen upstream), pending a provenance and fidelity check.
 - **Crate names.** The port is `transit-resonator`: it holds six models, not only the modal one, so the amendment's example name `transit-modal-resonator` would undersell it. The oracle stays one crate, `transit-macro-osc-oracle`, with a module per family (`resonator`, `resonator_sweep`, `cpp/resonator_oracle.cc`) sharing the build, the session lock, the residual and the floor; its name is brand-free, and a family-neutral rename is left for a quiet gap, since it would touch the in-flight instrument branches.
 - **Gate.** All six models at polyphony 1 to 4 null bit-identical over the resonator sweep and the scenarios ([gates.md, Oracle null tests](../contributing/evidence/gates.md#oracle-null-tests)). The reference is the firmware's C++ as its desktop test harness builds it (flush-to-zero on, no fused multiply-adds), not the hardware's bits: the module runs with FZ off and its GCC build fuses multiply-adds. The oracle's flush-to-zero is reproduced by doing the port's arithmetic in an `f32` newtype that flushes every subnormal result, rather than at chosen spots; the sweep never reaches the subnormal range, the 20 s silences do.
-- **Rate and pitch.** The firmware computes pitch against a true 48 kHz (`a3 = 440 / 48000`), so it needs no tuning switch: MIDI note 69 plays 440 Hz. The port runs at 48 kHz only, like the firmware; supporting other host rates (resampling, or a rate parameter with E63 pitch tests at every rate) is the instrument's decision in slice 3.
-- **User-facing names (proposal).** The instrument over this port: "Resonator". Its models: Modal, Sympathetic Strings, Inharmonic String, FM Voice, Chord Strings (the quantized sympathetic strings), String and Reverb. The instrument over the second module of the pair: "Modal Voice". No module or brand name in a UI string or identifier.
+- **Rate and pitch.** The firmware computes pitch against a true 48 kHz (`a3 = 440 / 48000`), so it needs no tuning switch: MIDI note 69 plays 440 Hz. The port runs at 48 kHz only, like the firmware; supporting other host rates (resampling, or a rate parameter with E63 pitch tests at every rate) is the instrument's decision in slice 3. Decided in slice 3: resampling at the edge (the Resonator instrument note below).
+- **User-facing names (proposal; final for this port at slice 3).** The instrument over this port: "Resonator". Its models: Modal, Sympathetic Strings, Inharmonic String, FM Voice, Chord Strings (the quantized sympathetic strings), String and Reverb. The instrument over the second module of the pair: "Modal Voice". No module or brand name in a UI string or identifier.
+
+## Implementation note 2026-10-31: the Resonator instrument (#198, slice 3)
+
+- **Device.** `resonator` (`ResonatorInstrument` in `crates/dsp/src/plugins/resonator.rs`, with `resonator_params.rs` and `resonator_tests.rs`), "Resonator" (short "Reson"), in the instrument picker beside the Macro Oscillator, which stays the default. The models keep the names slice 1 proposed: Modal, Sympathetic Strings, Inharmonic String, FM Voice, Chord Strings, String and Reverb. Émilie Gillet is credited under the panel, in the help entry `resonator.credits`, in Help > About transit (the credit line and `crates/resonator/LICENSE-THIRD-PARTY`), in `NOTICE` and in `ATTRIBUTION.md`. The vendored file list is unchanged. The port gained one entry point, `Resonator::reset`, which rebuilds what `Resonator::new` builds without allocating (the instrument resets on the audio thread). No DSP changed, and the null tests are untouched.
+- **Voices and events.** The part's own rotation is the allocator. A note-on is a strum: the next voice takes the note and the internal exciter strikes it, at polyphony 1, 2 or 4 (the module's panel settings). Two firmware options are not offered. Polyphony 3 is reachable on the module only through the easter-egg path. The easter egg itself (the string synth) is not in the port and the oracle does not cover it. The chord of Chord Strings follows Structure as the module's CV scaler picks it, without its hysteresis (the oracle sweep's rule). The firmware takes one strum per 24-frame block, so notes that arrive in one block (a chord) queue and strum on consecutive blocks, 0.5 ms apart (at most 16 queued; more drops the oldest).
+- **Pitch.** The pitch is the key: `note = key - tonic` over the module's tonic (`tonic`, MIDI 12 to 72, default 36, where the sympathetic strings drone at low Structure), so MIDI 69 plays 440 Hz. Tune, the bend and the matrix's Pitch go through the FM input and move every voice at once.
+- **Gate, pedal and velocity.** The part has no gate: note-offs do nothing to it and it ignores the sustain pedal (documented in the help and the user guide). The pedal holds the shaper's envelopes, as a held key does. Velocity is the accent: from each strum on, Brightness is darkened by `accent · (1 − velocity)` of itself, as a velocity CV patched into the module's brightness input would act. Brightness is one control for every voice, so ringing voices darken too. At full velocity or Accent 0, Brightness is the knob.
+- **Spread.** `spread` mixes the two outputs. At 100% they stay apart, as the module's two jacks: odd and even voices at polyphony 2 and 4, so strums alternate between the sides. At 0% both sides carry the module's mono mix (the two summed, what its first jack carries alone). The default is 50%, so a single note is not hard-panned.
+- **Event placement.** The part renders 24-frame blocks (its control block) whatever the host's block, as the edge converter needs them, counted in output frames. An event takes effect at the first 24-frame block that starts at or after its offset (at most 0.5 ms late at 48 kHz). This is the Macro Oscillator's rule on its 12-frame grid, applied to the resonator's 24-frame block. The shaper and the matrix run per 12-frame half block (the shaper's own block, so its envelope and LFO timing is the Macro Oscillator's). The part's macros and its FM input take the matrix's sums once per 24 frames, at the block's start.
+- **Rate (the slice 1 question): resampling, not a rate parameter.** The part runs firmware-exact at 48 kHz only. Its output goes through the shared edge converter (`plugins/resample.rs`, the Texture's and the Time Stretcher's), the up converter only, since nothing enters the part. At 48 kHz the converter is an exact copy and the latency is 0. At other rates the latency is the converter's half length lined up on a whole session sample, reported every block:
+
+  | Session rate | Latency (samples) |
+  |---|---|
+  | 22.05 kHz | 35 |
+  | 32 kHz | 35 |
+  | 44.1 kHz | 35 |
+  | 48 kHz | 0 |
+  | 88.2 kHz | 65 |
+  | 96 kHz | 70 |
+  | 176.4 kHz | 129 |
+  | 192 kHz | 140 |
+
+  That is about 0.73 to 1.6 ms. A block is rendered when the converter first needs one of its frames, not when its last input frame arrives, so the latency is the converter's alone. A rate parameter would rescale the firmware's filters, delays and reverb, a variant the oracle cannot check.
+- **Audio input (exciter) path: MIDI only for now.** The module can excite the part with an external input, which needs the track's audio or a key at the instrument. Neither route reaches an instrument today:
+  - The sidechain key route (ADR 0015 section 4) lays out keys for insert slots only: `transit_mix::key` builds a `KeyEntry` per keyed insert from `t.mixer.inserts`, and `KeyBank::align` walks the inserts.
+  - The strip zeroes the instrument's buffer and calls its `Plugin::process`, never `process_with_key` (`crates/mix/src/strip.rs`, `process_strip_source`).
+  - The device card offers the key picker on inserts only.
+
+  The model already stores `Insert::key` on the instrument slot. The follow-up: a `KeyEntry` for `INSTRUMENT_SLOT` in the plan compiler and in `KeyBank::align`; `process_with_key` for a keyed instrument in the strip; the key picker on the instrument card; and, here, `internal_exciter: false` with the key as the part's input while a key is set.
+- **Shaper and matrix.** The Macro Oscillator's code is used as it is (`macro_osc::shaper` and `macro_osc::matrix` are already public modules, so no move was needed). The panel sections are the same (the shaper and matrix rows are now shared constants in `panel.rs`), and so are the parameter ids and the help entries where a control does the same thing. The part is one sound source, so there is one shaper, on its output: two `Shaper`s, one per output, driven alike. The matrix reads the newest strum (velocity, key, a random value per strum) and the controllers. Its destinations are the Macro Oscillator's with Structure, Brightness, Damping and Position in place of Harmonics, Timbre, Morph and Decay, and Pitch moves every voice. The disclosure line is the Macro Oscillator's.
+- **The held-note rule (#262) here.** Switching the shaper while a key (or the pedal) holds the sound takes effect at once, with a 12-frame linear crossfade. With nothing held it waits for the next strum, so a ringing tail is not faded into the filter. Before the first strum after a reset it applies at once. The filter always runs on its own copy, so it is warm whenever the path turns to it: after the crossfade the output is exactly what a render shaped from the start gives (tested). With the shaper off and no active row, the output is the part's, bit for bit.
+- **Tests.** `crates/dsp/src/plugins/resonator_tests.rs`:
+  - At 48 kHz the instrument, driven by notes in 64- and 500-frame host blocks, renders the crate driven directly with the same strums, bit for bit, for every model at polyphony 1, 2 and 4 (level 0 dB, spread 100%, Accent 0 and 50% at full velocity, tune through FM).
+  - The accent and two matrix rows against the crate.
+  - 64- and 512-frame host blocks bit-equal at 44.1, 48 and 96 kHz through model, polyphony, shaper, wheel and bend changes.
+  - The edge's impulse delay equals the reported latency at eight rates.
+  - A strummed A4 at 439.978 Hz (-0.087 cent, the firmware's own) at 44.1, 48, 88.2 and 96 kHz (E63, octave aliases refused).
+  - The shaper switch with and without a held key; reset against new.
+
+  `crates/dsp/tests/resonator_alloc.rs` counts no allocation or free in the callback through chords, every model and polyphony change, the shaper switch, matrix rows, controllers, all notes off and a reset. `crates/engine/tests/resonator.rs` covers the defaults, save and load to the same bits, and missing parameters at their defaults. The panel test holds the expanded window at 1221 x 783 pt at 100% and 125% (the #243 budget is 800).
+- **Cost** (`crates/dsp/tests/resonator_cost.rs`, ignored, release, Ryzen 9 5900X, informal; the slice 1 review asked for the cost of the port's flush-to-zero arithmetic). Per 256-frame block at 48 kHz (5333 us), polyphony 1 / 2 / 4:
+
+  | Model | 1 | 2 | 4 |
+  |---|---|---|---|
+  | Modal | 87 us | 132 us | 118 us |
+  | Sympathetic Strings | 123 us | 133 us | 148 us |
+  | Inharmonic String | 42 us | 71 us | 130 us |
+  | FM Voice | 32 us | 54 us | 95 us |
+  | Chord Strings | 121 us | 132 us | 146 us |
+  | String and Reverb | 65 us | 95 us | 152 us |
+
+  At 4 voices that is 1.8% to 2.9% of one core. At 44.1 kHz behind the converter, 2.1% to 3.2% (more firmware frames per host block, plus the converter). The shaper with two active rows is within run-to-run noise of these. The modal model is cheaper at 4 voices than at 2: the firmware gives each voice 64/polyphony − 4 modes (60 at 1, 2 × 28 at 2, 4 × 12 at 4). The part renders every voice every block, ringing or not, so these are also the idle cost. The Pi 5 figure waits for #237.
+- **Left for the other module of the pair (slice 2, "Modal Voice").**
+  - The #193-style provenance and fidelity check of `mutated-elements` (option b) against a port from the firmware (option c).
+  - Vendoring `elements/dsp/**` into the oracle as a third module. It runs at 32 kHz with its own block size and large exciter sample tables, so its sweep, floor and rate story differ.
+  - Null tests per model and exciter.
+  - Its instrument on this note's pattern: the edge converter, the event placement rule, the shared shaper and matrix, and the same missing input route.
 
 ## Implementation note 2026-10-30: the granular texture processor port (#199, slice 1)
 

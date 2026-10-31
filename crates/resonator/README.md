@@ -6,8 +6,9 @@ firmware. `Resonator` is the firmware's part: up to four voices, each a bank of 
 Karplus-Strong string with sympathetic strings or dispersion, or a two-operator FM voice; the
 excitation filters, the noise-burst plucker, the strummed note allocation, a reverb for the
 string-and-reverb model and the output limiter. Pure Rust, `#![forbid(unsafe_code)]`, no
-allocation once a `Resonator` is built, one random generator per resonator. Not yet played by the
-app: the instrument (voice allocation, MIDI, panel) is slice 3 of #198.
+allocation once a `Resonator` is built (`Resonator::reset` returns to the new state without
+allocating), one random generator per resonator. The app plays it as the Resonator instrument
+(`crates/dsp/src/plugins/resonator.rs`, #198 slice 3).
 
 | Model | What it is |
 |---|---|
@@ -48,8 +49,9 @@ FM paths within 0.2 cent; the strings within 0.8 cent at A2 and A4 (2.3 with the
 and 1.3 to 2.5 cents flat at A5 (5.9 with the reverb), 6 to 7 cents flat at A6, which is the
 firmware's own comb tuning (its delay compensation is approximate; the A6 figure is measured, not
 gated); held to 3 cents at A2 and A4 and 8 at A5. This is not a port error: do not correct or
-tighten the strings' tuning in the port without changing the oracle first. Other rates are the instrument's question (resampling, or a rate parameter with its
-own pitch tests).
+tighten the strings' tuning in the port without changing the oracle first. At other session rates
+the instrument runs the port at 48 kHz and converts its output at the edge (ADR 0033, the Resonator
+instrument note), with its own pitch test at every rate.
 
 ## The gate
 
