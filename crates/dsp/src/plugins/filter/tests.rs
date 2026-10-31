@@ -535,3 +535,83 @@ fn a_full_queue_still_takes_releases() {
     assert!(f.event(1, &ev(Message::Control { cc: CC_ALL_NOTES_OFF, value: 0 })));
     assert!(f.event(1, &ev(Message::PitchBend { value: 0 })), "what it does not read is accepted and ignored");
 }
+
+/// #253: after 4/4 -> 3/4 at bar 3, bar cycles count bars, including a mid-bar landing.
+#[test]
+fn bar_divisions_follow_meter_map_downbeats() {
+    for (division, bars) in [(2, 1.0), (1, 2.0), (0, 4.0)] {
+        for (quarters, bar, bar_start, expected_bars) in [(14.0, 4, 14.0, 4.0), (17.0, 5, 17.0, 5.0), (18.0, 5, 17.0, 5.0 + 1.0 / 3.0)] {
+            let mut f = filter(&[("lfo_sync", 1.0), ("lfo_retrigger", 0.0), ("lfo_division", division as f32)]);
+            f.set_transport(&Transport {
+                playing: true,
+                tempo: 120.0,
+                numerator: 3,
+                denominator: 4,
+                samples: (quarters * 24_000.0) as i64,
+                quarters,
+                bar,
+                bar_start,
+                ..Transport::default()
+            });
+            f.process(&mut [vec![], vec![]], 0);
+            let expected = (expected_bars / bars) % 1.0;
+            assert!((f.lfo.phase() - expected).abs() < 1e-12, "division {division}, quarter {quarters}: {} != {expected}", f.lfo.phase());
+        }
+    }
+}
+
+/// A four-bar cycle is halfway through at the bar-3 meter change. The last old-meter
+/// samples keep their phase; the new bar origin applies on the downbeat, without a restart.
+#[test]
+fn synced_divisions_cross_a_meter_change_during_playback() {
+    for division in 0..14 {
+        let mut f = filter(&[("lfo_sync", 1.0), ("lfo_retrigger", 0.0), ("lfo_division", division as f32)]);
+        for samples in (191_760..192_240).step_by(12) {
+            let quarters = samples as f64 / 24_000.0;
+            let changed = samples >= 192_000;
+            let (numerator, bar, bar_start) = if changed { (3, 2, 8.0) } else { (4, 1, 4.0) };
+            f.set_transport(&Transport {
+                playing: true,
+                tempo: 120.0,
+                numerator,
+                denominator: 4,
+                samples,
+                quarters,
+                bar,
+                bar_start,
+                ..Transport::default()
+            });
+            f.process(&mut [vec![], vec![]], 0);
+            let cycles = if division <= 2 {
+                (bar as f64 + (quarters - bar_start) / f64::from(numerator)) / [4.0, 2.0, 1.0][division]
+            } else {
+                quarters / division_quarters(division, 4.0)
+            };
+            assert!((f.lfo.phase() - (cycles - cycles.floor())).abs() < 1e-12, "division {division}, sample {samples}");
+            f.process(&mut [vec![0.0; 12], vec![0.0; 12]], 12);
+        }
+    }
+}
+
+/// The transport's bar lengths span the full TempoMap range, including 1/64 and 64/1.
+#[test]
+fn bar_divisions_use_the_full_valid_meter_range() {
+    for (numerator, denominator, length) in [(1, 64, 0.0625), (64, 1, 256.0)] {
+        for (division, bars) in [(0, 4.0), (1, 2.0), (2, 1.0)] {
+            let mut f = filter(&[("lfo_sync", 1.0), ("lfo_retrigger", 0.0), ("lfo_division", division as f32)]);
+            f.set_transport(&Transport {
+                playing: true,
+                tempo: 120.0,
+                numerator,
+                denominator,
+                bar: 1,
+                bar_start: length,
+                quarters: length * 1.5,
+                ..Transport::default()
+            });
+            f.process(&mut [vec![], vec![]], 0);
+            assert!((f.lfo.phase() - (1.5 / bars) % 1.0).abs() < 1e-12);
+            assert!((f.lfo_inc - 1.0 / (24_000.0 * length * bars)).abs() < 1e-15);
+        }
+    }
+}

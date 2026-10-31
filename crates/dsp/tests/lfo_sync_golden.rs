@@ -78,6 +78,6 @@ fn every_division_keeps_the_pre_253_bits_in_a_single_meter() {
             }
         }
     }
-    let expected: &[u64] = include!("fixtures/lfo_sync_pre_253.rs");
+    let expected: &[u64] = include!("fixtures/lfo_sync_pre_253.inc");
     assert_eq!(got, expected, "pre-#253 render bits");
 }

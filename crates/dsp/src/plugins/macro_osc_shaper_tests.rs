@@ -352,3 +352,120 @@ fn switching_the_shaper_off_keeps_a_shaped_release() {
     assert!(switched == reference, "the release plays out as if the shaper stayed on");
     assert!(idle_at.is_some() && idle_at == ref_idle);
 }
+
+/// #253: both matrix LFOs count bars after the meter change, wherever playback starts.
+#[test]
+fn bar_divisions_follow_meter_map_downbeats() {
+    for (division, bars) in [(2, 1.0), (1, 2.0), (0, 4.0)] {
+        for (quarters, bar, bar_start, expected_bars) in [(14.0, 4, 14.0, 4.0), (17.0, 5, 17.0, 5.0), (18.0, 5, 17.0, 5.0 + 1.0 / 3.0)] {
+            let mut m = inst(
+                1,
+                &[
+                    ("lfo1_sync", 1.0),
+                    ("lfo1_retrigger", 0.0),
+                    ("lfo1_division", division as f32),
+                    ("lfo2_sync", 1.0),
+                    ("lfo2_retrigger", 0.0),
+                    ("lfo2_division", division as f32),
+                ],
+            );
+            m.set_transport(&Transport {
+                playing: true,
+                tempo: 120.0,
+                numerator: 3,
+                denominator: 4,
+                samples: (quarters * 24_000.0) as i64,
+                quarters,
+                bar,
+                bar_start,
+                ..Transport::default()
+            });
+            m.note_on(0, 60, 100);
+            m.process(&mut [vec![0.0; 12], vec![0.0; 12]], 12);
+            let expected = (expected_bars / bars) % 1.0;
+            for lfo in &m.slots[0].shaper.lfo {
+                assert!((lfo.phase() - expected).abs() < 1e-12, "division {division}, quarter {quarters}: {} != {expected}", lfo.phase());
+            }
+        }
+    }
+}
+
+/// Continuous processing across bar 3: both matrix LFOs preserve the multi-bar count,
+/// and every beat division keeps its absolute-quarter phase after the meter change.
+#[test]
+fn synced_divisions_cross_a_meter_change_during_playback() {
+    for division in 0..14 {
+        let mut m = inst(
+            1,
+            &[
+                ("lfo1_sync", 1.0),
+                ("lfo1_retrigger", 0.0),
+                ("lfo1_division", division as f32),
+                ("lfo2_sync", 1.0),
+                ("lfo2_retrigger", 0.0),
+                ("lfo2_division", division as f32),
+            ],
+        );
+        m.note_on(0, 60, 100);
+        for samples in (191_760..192_240).step_by(12) {
+            let quarters = samples as f64 / 24_000.0;
+            let changed = samples >= 192_000;
+            let (numerator, bar, bar_start) = if changed { (3, 2, 8.0) } else { (4, 1, 4.0) };
+            m.set_transport(&Transport {
+                playing: true,
+                tempo: 120.0,
+                numerator,
+                denominator: 4,
+                samples,
+                quarters,
+                bar,
+                bar_start,
+                ..Transport::default()
+            });
+            m.process(&mut [vec![0.0; 12], vec![0.0; 12]], 12);
+            let cycles = if division <= 2 {
+                (bar as f64 + (quarters - bar_start) / f64::from(numerator)) / [4.0, 2.0, 1.0][division]
+            } else {
+                quarters / crate::plugins::lfo::division_quarters(division, 4.0)
+            };
+            for lfo in &m.slots[0].shaper.lfo {
+                assert!((lfo.phase() - (cycles - cycles.floor())).abs() < 1e-12, "division {division}, sample {samples}");
+            }
+        }
+    }
+}
+
+#[test]
+fn bar_divisions_use_the_full_valid_meter_range() {
+    for (numerator, denominator, length) in [(1, 64, 0.0625), (64, 1, 256.0)] {
+        for (division, bars) in [(0, 4.0), (1, 2.0), (2, 1.0)] {
+            let mut m = inst(
+                1,
+                &[
+                    ("lfo1_sync", 1.0),
+                    ("lfo1_retrigger", 0.0),
+                    ("lfo1_division", division as f32),
+                    ("lfo2_sync", 1.0),
+                    ("lfo2_retrigger", 0.0),
+                    ("lfo2_division", division as f32),
+                ],
+            );
+            m.set_transport(&Transport {
+                playing: true,
+                tempo: 120.0,
+                numerator,
+                denominator,
+                bar: 1,
+                bar_start: length,
+                quarters: length * 1.5,
+                ..Transport::default()
+            });
+            m.note_on(0, 60, 100);
+            m.process(&mut [vec![0.0; 12], vec![0.0; 12]], 12);
+            for (lfo, settings) in m.slots[0].shaper.lfo.iter().zip(&m.shaper.lfo) {
+                assert!((lfo.phase() - (1.5 / bars) % 1.0).abs() < 1e-12);
+                assert!((settings.increment(120.0, 0.0, SR) - 1.0 / (24_000.0 * length * bars)).abs() < 1e-15);
+            }
+        }
+    }
+}
