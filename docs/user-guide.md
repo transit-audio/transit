@@ -299,3 +299,36 @@ Quality, Mono In or Length restarts the firmware: the output fades out over 10 m
 starts over, and it fades back in. Every control can be automated (for example
 `plugin:a:freeze`) and mapped to a MIDI controller. Presets: Granular Cloud, Frozen Pad (a dense,
 slow cloud: press Freeze once it has heard what it should hold), Tape Delay, and your own.
+
+## Time Stretcher
+
+The Time Stretcher is a built-in insert effect (the device chain's **+**, or the mixer strip's
+insert picker, under Pitch Shift): the pitch shifter and time stretcher of Émilie Gillet's
+open-source texture processor firmware (MIT), checked bit for bit against her code
+([ADR 0033](adr/0033-built-in-instruments-mutable-instruments-port.md)). It records what comes into
+it; two overlapping windows read the recording back at the pitch you set, each new window placed
+where it lines up best with the one fading out, so the pitch moves without the speed and the read
+position moves without the pitch. (The simpler Pitch Shifter built-in stays as it was.)
+
+- **Shift**: **Pitch** (two octaves either way, in semitones; a big jump glides there an octave per
+  window), **Fine** (cents) and **Window** (the windows' length: short is grainy, long is smooth).
+- **Color**: **Diffusion** smears the output, **Tone** closes a low-pass to the left of center and
+  opens a high-pass to the right, **Feedback** sends the output back into the recording (an octave
+  up then climbs), **Reverb** adds the module's reverb.
+- **Stretch**: **Position** reads further back in the recording without changing the pitch.
+  **Freeze** stops recording, so the windows keep reading what the buffer holds: move Position to
+  scrub through it at its own pitch. **Trigger** restarts the read at the oldest audio, which then
+  glides back to Position over the time since the last press (steady presses make a repeating
+  stretch).
+- **Buffer**: **Quality** picks how the buffer records, as on the module: Stereo (16-bit, 1 s),
+  Mono (16-bit, 2 s), Lo-Fi Stereo and Lo-Fi Mono (8-bit at half the rate, 4 and 7 s). **Input**
+  sets the level going in (-18 to +18 dB); there is no automatic gain, as on the module.
+- **Dry/Wet** balances the input and the shifted signal; at 0 % the input passes at its level.
+
+The firmware runs at 32 kHz, its own rate, in every session: the device converts from the session
+rate and back at its edges, so the pitch and the buffer times are the module's at 44.1, 48 or
+96 kHz. The conversion and the firmware's 32-frame block delay the signal by about 3.1 ms (151
+samples at 48 kHz), the same for every quality, which delay compensation makes up for. Changing
+Quality restarts the firmware: the output fades out over 10 ms, the recording starts over, and it
+fades back in. The recording is not saved with the session. Every control can be automated and
+mapped to a MIDI controller. Presets: Octave Shimmer, Sub Doubler, Stretch Pad, and your own.

@@ -279,6 +279,9 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
     if plugin == crate::texture_panel::TEXTURE {
         return crate::texture_panel::help(param);
     }
+    if plugin == crate::time_stretcher_panel::TIME_STRETCHER {
+        return crate::time_stretcher_panel::help(param);
+    }
     if plugin != MACRO_OSC {
         return None;
     }
@@ -350,6 +353,7 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         MACRO_OSC => Some(&MACRO),
         FILTER => Some(&FILTER_LAYOUT),
         crate::texture_panel::TEXTURE => Some(&crate::texture_panel::LAYOUT),
+        crate::time_stretcher_panel::TIME_STRETCHER => Some(&crate::time_stretcher_panel::LAYOUT),
         _ => None,
     }
 }
@@ -380,6 +384,11 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
         let r = ui.label(RichText::new(crate::texture_panel::CREDIT).size(10.5).color(TOKENS.text_dim));
         crate::help::hover(ui, &r, crate::help::Id::TextureCredits);
         lay.credit = crate::texture_panel::CREDIT.to_string();
+    }
+    if info.id == crate::time_stretcher_panel::TIME_STRETCHER {
+        let r = ui.label(RichText::new(crate::time_stretcher_panel::CREDIT).size(10.5).color(TOKENS.text_dim));
+        crate::help::hover(ui, &r, crate::help::Id::TimeStretcherCredits);
+        lay.credit = crate::time_stretcher_panel::CREDIT.to_string();
     }
 }
 
@@ -599,7 +608,16 @@ mod tests {
 
     #[test]
     fn every_layout_places_each_parameter_of_its_plugin_exactly_once() {
-        for plugin in ["compressor", "expander_gate", "eq_7band", "plate_reverb", MACRO_OSC, FILTER, crate::texture_panel::TEXTURE] {
+        for plugin in [
+            "compressor",
+            "expander_gate",
+            "eq_7band",
+            "plate_reverb",
+            MACRO_OSC,
+            FILTER,
+            crate::texture_panel::TEXTURE,
+            crate::time_stretcher_panel::TIME_STRETCHER,
+        ] {
             let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
             let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).flat_map(|i| item_ids(*i)).collect();
             ids.sort_unstable();
@@ -621,6 +639,13 @@ mod tests {
     fn every_texture_control_has_a_help_entry() {
         for p in transit_dsp::plugin_info(crate::texture_panel::TEXTURE).unwrap().params {
             assert!(help(crate::texture_panel::TEXTURE, p.id).is_some(), "{}", p.id);
+        }
+    }
+
+    #[test]
+    fn every_time_stretcher_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::time_stretcher_panel::TIME_STRETCHER).unwrap().params {
+            assert!(help(crate::time_stretcher_panel::TIME_STRETCHER, p.id).is_some(), "{}", p.id);
         }
     }
 

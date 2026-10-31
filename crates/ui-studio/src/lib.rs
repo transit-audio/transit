@@ -68,6 +68,7 @@ pub mod telemetry;
 pub mod tempo_edit;
 pub mod texture_panel;
 pub mod theme;
+pub mod time_stretcher_panel;
 pub mod title_bar;
 pub mod transport;
 mod unresponsive;
@@ -1314,6 +1315,8 @@ mod slice5_tests;
 mod slice6_tests;
 #[cfg(test)]
 mod texture_panel_tests;
+#[cfg(test)]
+mod time_stretcher_panel_tests;
 /// Services what hosted plug-ins asked of the host (audit F08, ADR 0012 G7): CLAP restarts,
 /// callbacks and rescans, VST3 `restartComponent`. Main thread, every frame, also with no player
 /// and no editor open (the instances were created on this thread). Idempotent: the playback

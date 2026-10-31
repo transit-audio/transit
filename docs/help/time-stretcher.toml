@@ -1,0 +1,74 @@
+# The Time Stretcher's panel (the built-in insert effect, #199, ADR 0033).
+area = "time-stretcher"
+title = "Time Stretcher"
+link = "user-guide.md#time-stretcher"
+
+[[entry]]
+id = "time_stretcher.pitch"
+name = "Pitch"
+text = "Transposes the input up to two octaves either way, in semitones, without changing its speed. A large jump glides there an octave per window. The pitch holds at every session rate."
+
+[[entry]]
+id = "time_stretcher.fine"
+name = "Fine"
+text = "Adds up to a semitone either way to Pitch, in cents."
+
+[[entry]]
+id = "time_stretcher.window"
+name = "Window"
+text = "The length of the two overlapping windows that read the recording: about 128 samples at 0% (a grainy, buzzy shift) up to 4096 at 100% (smooth on pads, smeared on drums). Changes glide over a few windows."
+
+[[entry]]
+id = "time_stretcher.position"
+name = "Position"
+text = "How far back in the recording the windows read, from the newest audio at 0% to the oldest at 100%, without changing the pitch: with Freeze on, moving it scrubs through the frozen audio at its own pitch."
+
+[[entry]]
+id = "time_stretcher.diffusion"
+name = "Diffusion"
+text = "Smears the output through the module's diffuser, from none to a soft wash."
+
+[[entry]]
+id = "time_stretcher.tone"
+name = "Tone"
+text = "At 50% both filters are open; turning left closes a resonant low-pass, turning right opens a high-pass, as the module's texture knob does in this mode."
+
+[[entry]]
+id = "time_stretcher.feedback"
+name = "Feedback"
+text = "How much of the output goes back into the recording, so shifted copies build into cascades (an octave up repeats up and up)."
+
+[[entry]]
+id = "time_stretcher.dry_wet"
+name = "Dry/Wet"
+text = "The balance of the input and the shifted signal. At 0% only the input passes, at its level, delayed by the device's latency: the firmware runs at 32 kHz in 32-frame blocks, so 31 samples at 32 kHz, 138 at 44.1 kHz, 151 at 48 kHz, 276 at 88.2 kHz and 301 at 96 kHz (about 3.1 ms, the same for every quality), which delay compensation makes up for."
+
+[[entry]]
+id = "time_stretcher.reverb"
+name = "Reverb"
+text = "The module's reverb after everything else: more of it, and a longer tail, as it turns up. It is not fed back."
+
+[[entry]]
+id = "time_stretcher.freeze"
+name = "Freeze"
+text = "Stops recording, so the windows keep reading the audio already in the buffer: a held sound you can scrub with Position and shift with Pitch. The recording is not saved with the session: a session reopened with Freeze on plays silence until Freeze is released and the device hears its input again."
+
+[[entry]]
+id = "time_stretcher.trigger"
+name = "Trigger"
+text = "Press to restart the read at the oldest audio; it then glides back to Position, taking as long as the time since the last press (so steady presses make a repeating stretch). Holding it fires once."
+
+[[entry]]
+id = "time_stretcher.quality"
+name = "Quality"
+text = "How the buffer records, as on the module: Stereo (16-bit, 1 second), Mono (16-bit, 2 seconds), Lo-Fi Stereo and Lo-Fi Mono (8-bit at half the rate, 4 and 7 seconds). Changing it restarts the device with a short fade: the output dips for about 20 ms and the recording starts over, so automating it makes a stutter at every change."
+
+[[entry]]
+id = "time_stretcher.input_level"
+name = "Input Level"
+text = "The gain in front of the firmware, -18 to +18 dB; it records at full scale, so hot material clips (softly at the output). The module has no automatic input gain, so neither does this device."
+
+[[entry]]
+id = "time_stretcher.credits"
+name = "Credits"
+text = "The Time Stretcher is a port of the pitch shifter and time stretcher of Émilie Gillet's open-source texture processor firmware (MIT license), checked bit for bit against her code. The notices are in Help > About transit."

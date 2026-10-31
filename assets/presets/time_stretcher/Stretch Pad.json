@@ -1,0 +1,14 @@
+{
+  "plugin": "time_stretcher",
+  "version": 1,
+  "params": {
+    "window": 100.0,
+    "position": 40.0,
+    "diffusion": 70.0,
+    "tone": 40.0,
+    "feedback": 50.0,
+    "dry_wet": 85.0,
+    "reverb": 60.0,
+    "quality": 2.0
+  }
+}

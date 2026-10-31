@@ -1,0 +1,10 @@
+{
+  "plugin": "time_stretcher",
+  "version": 1,
+  "params": {
+    "pitch": -12.0,
+    "window": 90.0,
+    "tone": 35.0,
+    "dry_wet": 45.0
+  }
+}

@@ -57,6 +57,9 @@ pub static FACTORY: &[(&str, &str, &str)] = factory![
     "texture" / "Granular Cloud",
     "texture" / "Frozen Pad",
     "texture" / "Tape Delay",
+    "time_stretcher" / "Octave Shimmer",
+    "time_stretcher" / "Sub Doubler",
+    "time_stretcher" / "Stretch Pad",
 ];
 
 /// The factory presets of one plug-in, in table order.

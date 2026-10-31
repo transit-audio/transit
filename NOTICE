@@ -34,4 +34,14 @@ transit from her C++, under the MIT License:
 The full notices are in crates/texture/LICENSE-THIRD-PARTY and in the app under
 Help > About transit.
 
+transit's Time Stretcher insert effect is a Rust port of the pitch shifter and time stretcher of
+Emilie Gillet's texture processor firmware and stmlib (https://github.com/pichenettes/eurorack,
+https://github.com/pichenettes/stmlib), written by transit from her C++, under the MIT License:
+
+  Copyright 2014 Emilie Gillet (eurorack; the year varies by file)
+  Copyright 2012 Emilie Gillet (stmlib)
+
+The full notices are in crates/granular/LICENSE-THIRD-PARTY and in the app under
+Help > About transit.
+
 transit is based on SoundCraft by storytold (https://github.com/storytold/soundcraft), MIT OR Apache-2.0.

@@ -1,0 +1,13 @@
+{
+  "plugin": "time_stretcher",
+  "version": 1,
+  "params": {
+    "pitch": 12.0,
+    "window": 85.0,
+    "diffusion": 40.0,
+    "tone": 62.0,
+    "feedback": 35.0,
+    "dry_wet": 50.0,
+    "reverb": 70.0
+  }
+}

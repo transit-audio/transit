@@ -34,11 +34,14 @@ Gillet's resonator firmware (`rings/dsp` in `eurorack`) and the stmlib helpers i
 transit from her C++ with no third-party Rust code in between. Her MIT notices are in
 `crates/resonator/LICENSE-THIRD-PARTY` (provenance in `crates/resonator/VENDOR.md`).
 
-The granular texture processor (`crates/granular`, #199; not linked into the app) is a Rust port of
-Émilie Gillet's texture processor firmware (`clouds/dsp` in `eurorack`, its granular playback mode)
-and the stmlib helpers it uses, written by transit from her C++ with no third-party Rust code in
-between. Her MIT notices are in `crates/granular/LICENSE-THIRD-PARTY` (provenance in
-`crates/granular/VENDOR.md`).
+The granular texture processor (`crates/granular`, #199) is a Rust port of Émilie Gillet's texture
+processor firmware (`clouds/dsp` in `eurorack`, its granular and its pitch shifter / time stretcher
+playback modes) and the stmlib helpers it uses, written by transit from her C++ with no third-party
+Rust code in between. Its stretch mode is linked into the app through `transit-dsp` as the Time
+Stretcher insert effect (the granular mode is not played). Her MIT notices are in
+`crates/granular/LICENSE-THIRD-PARTY` (provenance in `crates/granular/VENDOR.md`); the Time
+Stretcher's panel, its help entry and Help > About transit credit her, and the About window shows
+the notices.
 
 The texture processor (`crates/texture`, #241; linked into the app through `transit-dsp` as the
 Texture insert effect) is a Rust port of Émilie Gillet's texture synthesizer firmware (`beads/dsp`
