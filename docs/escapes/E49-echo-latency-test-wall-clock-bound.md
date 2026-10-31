@@ -228,3 +228,9 @@ the provocation lists none of its 48); (b) `EngineEvents::deliver` (`crates/mix/
 an off one sample past its note's on only when the off is overdue, so a live off that the floor of
 earlier moved offs raises onto its note-on's offset makes a zero-length note (deterministic: an overdue
 pair plus a live on at 0 and off at 1 in the next block lands both at offset 1).
+Both are the hunt's product findings and are fixed on the same branch: #256 names an index's figures
+at the top of each block, before anything of the block is counted, so a dependent's first send no
+longer wipes its earlier skips (`skips_before_a_dependent_s_first_admission_are_listed_with_its_strip`
+lists all 48, none before); #257 applies the one-sample rule to every off, live or overdue, through one
+helper shared with the ring's placer (`midi_defer::past_its_note_on`;
+`a_live_note_off_raised_onto_its_note_on_moves_one_sample_later` hears off 62 at offset 2, not 1).
