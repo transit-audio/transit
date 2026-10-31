@@ -242,6 +242,7 @@ pub struct MacroOscillator {
     free_phase: [f64; 2],
     tempo: f64,
     bar_quarters: f64,
+    bar_origin: (i64, f64),
     /// While the transport plays: the sample and song position (quarter notes) the synced LFOs
     /// count from, set when playback starts, jumps or changes tempo (see [`MacroOscillator::position`]).
     anchor: Option<(i64, f64)>,
@@ -286,6 +287,7 @@ impl MacroOscillator {
             free_phase: [0.0; 2],
             tempo: 120.0,
             bar_quarters: 4.0,
+            bar_origin: (0, 0.0),
             anchor: None,
             host_pos: 0,
             next_pos: 0,
@@ -346,6 +348,7 @@ impl MacroOscillator {
                 p.v(first + LFO_FADE),
                 pct(first + LFO_AMOUNT),
                 self.bar_quarters,
+                self.bar_origin,
                 sr,
             )
         };
@@ -622,7 +625,8 @@ impl Plugin for MacroOscillator {
     fn set_transport(&mut self, t: &Transport) {
         let tempo = if t.tempo.is_finite() && t.tempo > 0.0 { t.tempo.clamp(1.0, 999.0) } else { 120.0 };
         let bar = if t.numerator > 0 && t.denominator > 0 { f64::from(t.numerator) * 4.0 / f64::from(t.denominator) } else { 4.0 };
-        let bar = bar.clamp(0.25, 64.0);
+        // TempoMap accepts 1/64 through 64/1: keep their actual bar lengths.
+        let bar = bar.clamp(0.0625, 256.0);
         let jumped = t.samples != self.next_pos || tempo != self.tempo;
         self.anchor = match self.anchor {
             _ if !t.playing || !t.quarters.is_finite() => None,
@@ -632,8 +636,9 @@ impl Plugin for MacroOscillator {
         self.host_pos = t.samples;
         self.next_pos = t.samples;
         self.tempo = tempo;
-        if bar != self.bar_quarters {
+        if bar != self.bar_quarters || self.bar_origin != (t.bar, t.bar_start) {
             self.bar_quarters = bar;
+            self.bar_origin = (t.bar, t.bar_start);
             self.shaper = self.settings();
         }
     }

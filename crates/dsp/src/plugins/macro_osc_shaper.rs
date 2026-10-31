@@ -25,13 +25,13 @@
 //! **LFO phase.** A retriggered LFO starts at phase 0 at each new note. A free-running one starts a
 //! note at the instrument's own running phase (one clock per LFO that never stops), so held notes
 //! sway together. A tempo-synced, free-running LFO follows the song position while the transport
-//! plays: its phase is the transport's quarter-note position over the division's length at each
+//! plays: its phase counts absolute quarters for beat divisions and bars for bar divisions at each
 //! block (the rule #245 asks of the Filter insert), so playback from bar 5 and an export from bar 1
 //! place it the same; with the transport stopped it runs at the tempo's rate.
 
 use crate::plugins::filter::svf::{Coefs, K_BUTTERWORTH, MIN_CUTOFF, Mode, Section, max_cutoff, q_of, soft_clip};
 use crate::plugins::instrument_queue::{Adsr, AdsrRates, Stage};
-use crate::plugins::lfo::{Lfo, Shape, division_quarters};
+use crate::plugins::lfo::{Lfo, Shape, SyncDivision};
 
 /// The LFO shapes, in the order of the `lfo<n>_shape` parameters' choices (the shared LFO's order).
 pub const LFO_SHAPES: [&str; 6] = ["Sine", "Triangle", "Saw", "Square", "Sample & hold", "Smooth random"];
@@ -58,8 +58,8 @@ pub(crate) struct LfoSettings {
     /// Hz (free rate).
     pub(crate) rate: f32,
     pub(crate) sync: bool,
-    /// One cycle in quarter notes (synced).
-    pub(crate) cycle_quarters: f64,
+    /// The shared synced phase rule and cycle length.
+    pub(crate) division: SyncDivision,
     pub(crate) retrigger: bool,
     /// Blocks to fade in over after a note (0: none).
     pub(crate) fade_blocks: f32,
@@ -69,7 +69,15 @@ pub(crate) struct LfoSettings {
 
 impl Default for LfoSettings {
     fn default() -> Self {
-        LfoSettings { shape: Shape::Sine, rate: 2.0, sync: false, cycle_quarters: 1.0, retrigger: true, fade_blocks: 0.0, amount: 1.0 }
+        LfoSettings {
+            shape: Shape::Sine,
+            rate: 2.0,
+            sync: false,
+            division: SyncDivision::new(4, 4.0, (0, 0.0)),
+            retrigger: true,
+            fade_blocks: 0.0,
+            amount: 1.0,
+        }
     }
 }
 
@@ -78,13 +86,24 @@ impl LfoSettings {
     /// for a meter of `bar` quarter notes, at `sr` frames per second.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub(crate) fn new(shape: usize, rate: f32, sync: bool, division: usize, retrigger: bool, fade_ms: f32, amount: f32, bar: f64, sr: f32) -> Self {
+    pub(crate) fn new(
+        shape: usize,
+        rate: f32,
+        sync: bool,
+        division: usize,
+        retrigger: bool,
+        fade_ms: f32,
+        amount: f32,
+        bar: f64,
+        bar_origin: (i64, f64),
+        sr: f32,
+    ) -> Self {
         let blocks = fade_ms * 0.001 * sr / super::BLOCK as f32;
         LfoSettings {
             shape: Shape::from_index(shape),
             rate,
             sync,
-            cycle_quarters: division_quarters(division, bar),
+            division: SyncDivision::new(division, bar, bar_origin),
             retrigger,
             fade_blocks: if blocks.is_finite() { blocks.max(0.0) } else { 0.0 },
             amount: amount.clamp(0.0, 1.0),
@@ -95,7 +114,7 @@ impl LfoSettings {
     #[must_use]
     pub(crate) fn increment(&self, tempo: f64, octaves: f32, sr: f32) -> f64 {
         if self.sync {
-            tempo / 60.0 / self.cycle_quarters.max(1e-6) / f64::from(sr)
+            tempo / 60.0 / self.division.quarters.max(1e-6) / f64::from(sr)
         } else {
             let hz = (self.rate * octaves.exp2()).clamp(0.001, 1000.0);
             f64::from(hz) / f64::from(sr)
@@ -308,7 +327,7 @@ impl Shaper {
     pub(crate) fn anchor(&mut self, s: &Settings, quarters: f64) {
         for (l, set) in self.lfo.iter_mut().zip(&s.lfo) {
             if set.sync && !set.retrigger {
-                l.set_phase(quarters / set.cycle_quarters.max(1e-6));
+                l.set_phase(set.division.phase(quarters));
             }
         }
     }
@@ -428,7 +447,7 @@ mod tests {
     #[test]
     fn an_anchored_lfo_follows_the_song_position() {
         let mut s = settings(false);
-        s.lfo[0] = LfoSettings { sync: true, retrigger: false, cycle_quarters: 1.0, ..LfoSettings::default() };
+        s.lfo[0] = LfoSettings { sync: true, retrigger: false, ..LfoSettings::default() };
         let mut a = Shaper::new(1);
         let mut b = Shaper::new(2);
         for _ in 0..37 {

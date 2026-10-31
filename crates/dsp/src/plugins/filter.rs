@@ -28,7 +28,7 @@ mod tests;
 use crate::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_SUSTAIN, Message, PluginEvent};
 use crate::params::{Params, choice, lin, log, toggle};
 use crate::plugins::instrument_queue::{Adsr, AdsrRates};
-use crate::plugins::lfo::{DIVISIONS, Lfo, Shape, division_quarters};
+use crate::plugins::lfo::{DIVISIONS, Lfo, Shape, SyncDivision, division_quarters};
 use crate::util::{MAX_CHANNELS, Smoother, frames_in, ms_to_samples, sane_channels, sane_sr};
 use crate::{Category, ParamInfo, Plugin, PluginInfo, Transport, Unit, db_to_gain};
 use mods::{Follower, Gate, Notes};
@@ -180,6 +180,7 @@ pub struct Filter {
     state: Vec<[Section; 2]>,
     tempo: f64,
     bar_quarters: f64,
+    bar_origin: (i64, f64),
     /// While the transport plays: the sample and song position (quarter notes) a synced LFO counts
     /// from, set when playback starts, jumps or changes tempo (the Macro Oscillator's rule, #243;
     /// see [`Filter::anchored_phase`]).
@@ -223,6 +224,7 @@ impl Filter {
             state: vec![[Section::default(); 2]; 2],
             tempo: 120.0,
             bar_quarters: 4.0,
+            bar_origin: (0, 0.0),
             anchor: None,
             host_pos: 0,
             next_pos: 0,
@@ -262,7 +264,7 @@ impl Filter {
         let (sample, quarters) = self.anchor?;
         let frames = self.host_pos.saturating_sub(sample);
         let at = quarters + frames as f64 * self.tempo / 60.0 / f64::from(self.sr);
-        Some(at / division_quarters(self.p.choice(P_LFO_DIV), self.bar_quarters))
+        Some(SyncDivision::new(self.p.choice(P_LFO_DIV), self.bar_quarters, self.bar_origin).phase(at))
     }
 
     fn push(&mut self, offset: usize, kind: Kind) -> bool {
@@ -404,9 +406,11 @@ impl Plugin for Filter {
         };
         self.host_pos = t.samples;
         self.next_pos = t.samples;
+        self.bar_origin = (t.bar, t.bar_start);
         if tempo != self.tempo || bar != self.bar_quarters {
             self.tempo = tempo;
-            self.bar_quarters = bar.clamp(0.25, 64.0);
+            // TempoMap accepts 1/64 through 64/1: keep their actual bar lengths.
+            self.bar_quarters = bar.clamp(0.0625, 256.0);
             self.update();
         }
     }

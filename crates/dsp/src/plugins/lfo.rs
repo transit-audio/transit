@@ -51,6 +51,30 @@ pub(crate) fn division_quarters(i: usize, bar: f64) -> f64 {
     }
 }
 
+/// A synced division's length and origin, shared by both devices (#253).
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct SyncDivision {
+    pub(crate) quarters: f64,
+    origin: f64,
+}
+
+impl SyncDivision {
+    /// `bar` is zero-based; `bar_start` is its absolute quarter-note position. Meter changes
+    /// occur on bar lines, and update this origin without resetting the count of bars.
+    pub(crate) fn new(i: usize, quarters_per_bar: f64, (bar, bar_start): (i64, f64)) -> Self {
+        let origin = if i <= 2 && bar_start.is_finite() { bar_start - bar as f64 * quarters_per_bar } else { 0.0 };
+        Self { quarters: division_quarters(i, quarters_per_bar), origin }
+    }
+
+    /// `(bar + (quarters - bar_start) / quarters_per_bar) / bars_per_cycle`, modulo one.
+    /// Subtracting the equivalent quarter origin preserves the old arithmetic bit for bit
+    /// when the meter never changed (origin zero). Beat divisions always use quarter zero.
+    pub(crate) fn phase(self, quarters: f64) -> f64 {
+        let cycles = (quarters - self.origin) / self.quarters.max(1e-6);
+        if cycles.is_finite() { cycles - cycles.floor() } else { 0.0 }
+    }
+}
+
 /// A free-running LFO: phase in cycles, advanced per sample; its value is read only when the
 /// filter's coefficients are worked out. The phase restarts on a note when its retrigger is on.
 #[derive(Debug, Clone, Copy)]
@@ -161,6 +185,10 @@ impl Lfo {
         (self.phase.to_bits(), self.step.to_bits(), self.rng)
     }
 }
+
+#[cfg(test)]
+#[path = "lfo_sync_tests.rs"]
+mod sync_tests;
 
 #[cfg(test)]
 mod tests {
