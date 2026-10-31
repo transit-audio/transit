@@ -28,9 +28,10 @@ mod tests;
 use crate::event::{CC_ALL_NOTES_OFF, CC_ALL_SOUND_OFF, CC_SUSTAIN, Message, PluginEvent};
 use crate::params::{Params, choice, lin, log, toggle};
 use crate::plugins::instrument_queue::{Adsr, AdsrRates};
+use crate::plugins::lfo::{DIVISIONS, Lfo, Shape, division_quarters};
 use crate::util::{MAX_CHANNELS, Smoother, frames_in, ms_to_samples, sane_channels, sane_sr};
 use crate::{Category, ParamInfo, Plugin, PluginInfo, Transport, Unit, db_to_gain};
-use mods::{DIVISIONS, Follower, Gate, Lfo, Notes, Shape, division_quarters};
+use mods::{Follower, Gate, Notes};
 use svf::{Coefs, K_BUTTERWORTH, MIN_CUTOFF, Mode, Section, max_cutoff, q_of, soft_clip};
 
 /// Samples between coefficient updates (aligned to the plug-in's sample clock, not to host blocks).

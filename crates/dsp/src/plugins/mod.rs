@@ -6,6 +6,7 @@ pub mod eq;
 pub mod filter;
 pub mod harmonic;
 pub mod instrument_queue;
+pub mod lfo;
 pub mod macro_osc;
 pub mod modulation;
 pub mod pitch;
