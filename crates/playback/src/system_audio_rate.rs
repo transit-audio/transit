@@ -38,7 +38,7 @@
 //! carried that delay at full leverage (the fourth, fifth and sixth reviews of #268); the envelope
 //! fit gives no point that leverage. Only an offset that lasts restarts the line, on the point
 //! that shows it: points that stay above the band for [`CONFIRM_NS`] and [`CONFIRM_POINTS`] (a
-//! device that lost frames), or a point more than [`BAND_NS`] below the envelope, which no delay
+//! device that lost frames), or a point more than [`BELOW_NS`] below the envelope, which no delay
 //! can put there (the older points carried a delay: a lasting offset that ended). After any
 //! restart the estimate is held until the refilled line's fit is as well conditioned as a long
 //! line's ([`HOLD_SE`]). A lasting offset within about the band (under 1 to 3 ms, with the jitter)
@@ -235,7 +235,7 @@ impl<const N: usize> Line<N> {
     /// weight. The point is judged against the envelope of the last fit ([`Self::judge`]) only to
     /// find a lasting offset, which restarts the line on the point: [`CONFIRM_POINTS`] points in a
     /// row over [`CONFIRM_NS`] above the band (an offset that began), or one point more than
-    /// [`BAND_NS`] below the envelope (the older points carried a delay: an offset that ended, or
+    /// [`BELOW_NS`] below the envelope (the older points carried a delay: an offset that ended, or
     /// a line that started on late points). The estimate is held after a restart until the
     /// refilled line is well conditioned ([`HOLD_SE`]).
     ///
@@ -264,8 +264,8 @@ impl<const N: usize> Line<N> {
     }
 
     /// Judge the stored point against the last envelope: restart the line on it when it lies
-    /// more than [`BAND_NS`] below the envelope (the older points carried a delay), or when it
-    /// confirms a lasting offset above it.
+    /// more than [`BELOW_NS`] (plus the envelope's slack) below it (the older points carried a
+    /// delay), or when it confirms a lasting offset above it.
     fn judge(&mut self, frame: u64, time_ns: i64) {
         let Some(envelope) = self.envelope else { return };
         let (above, slack) = envelope.judge(frame, time_ns);
