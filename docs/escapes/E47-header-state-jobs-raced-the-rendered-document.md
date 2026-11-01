@@ -26,5 +26,5 @@
    writes) can starve a job to the 10 s give-up. The #219 delivery limits are closed: bypassed
    inserts queue current values for their first active block, and state jobs wait for processed
    delivery after a skipped block. A job waiting on its own bypassed pending values can still
-   give up with the existing UI status message. Inactive own slots confirm stored values; failed
-   own slots refuse. Other inactive, failed or bypassed slots never hold the job.
+   give up with the existing UI status message. Inactive own slots confirm without a parameter pass
+   and are read live (the instance survives deactivation); failed own slots refuse. Other inactive, failed or bypassed slots never hold the job.

@@ -74,8 +74,9 @@ Issue #68. Read with [ADR 0018](../../adr/0018-plugin-host-thread.md) (the plug-
   host queue (#219); the first active block consumes them before rendering, with no further
   lane change needed. A job with a bypassed insert's pending values waits for reactivation;
   inactive own inserts/tracks confirm stored values after document adoption/render, without a new
-  parameter pass. Reads use the session's stored state bytes, refusing if absent; live loads/restores
-  still use the host. A failed own slot refuses with the existing invalid-audio failure status.
+  parameter pass. Reads go to the live instance (it survives deactivation and holds every edit), falling back
+  to the session's stored state bytes only when no live instance exists, refusing if neither
+  exists; live loads/restores use the host. A failed own slot refuses with the existing invalid-audio failure status.
   An unrelated inactive, failed or bypassed slot never gates the job. If its own bypassed values
   stay queued, the existing give-up says "The audio session is still updating; try again after it
   applies" and saves nothing.
