@@ -1,4 +1,9 @@
 //! Pre-#253 renders (bbd3721b): every division, both devices, three unchanged meters.
+//! The golden hashes were captured on Windows. The rendered path calls libm (sin, tan, powf, exp2),
+//! whose last bit differs between MSVC's CRT, glibc and Apple's libm, so the capture holds only on
+//! Windows; the Windows CI job enforces the regression. #277 makes the math platform-exact, after
+//! which this guard goes.
+#![cfg(windows)]
 #![allow(clippy::unwrap_used)]
 
 use transit_dsp::Transport;

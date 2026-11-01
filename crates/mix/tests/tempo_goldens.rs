@@ -1,11 +1,20 @@
 //! Captured on the unsplit renderer at bbd3721b, before #254.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+#[cfg(windows)]
 #[path = "common/tempo_scene.rs"]
 mod tempo_scene;
+#[cfg(windows)]
 use transit_mix::{MixEngine, render_range};
+#[cfg(windows)]
 use transit_model::AutoParam;
+#[cfg(windows)]
 use transit_time::Range;
 
+/// The golden hashes were captured on Windows. The rendered path calls libm (sin, tan, powf, exp2),
+/// whose last bit differs between MSVC's CRT, glibc and Apple's libm, so the capture holds only on
+/// Windows; the Windows CI job enforces the regression. #277 makes the math platform-exact, after
+/// which this guard goes.
+#[cfg(windows)]
 #[test]
 fn unchanged_tempo_render_goldens() {
     MixEngine::force_serial(true);
