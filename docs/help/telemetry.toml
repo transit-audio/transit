@@ -78,7 +78,7 @@ text = "Blocks in which no thread had started a strip by the deadline and the ti
 [[entry]]
 id = "telemetry.upstream_missed"
 name = "Strip skips, upstream missed"
-text = "Blocks in which a strip (or an aux) was skipped because the strip feeding its sidechain key had no result. The cause is counted once, at the strip that overran; a strip that failed, is suspect or was discarded is counted under its own rows, not here. Healthy is 0, and it stays 0 when started with TRANSIT_RENDER_GRAPH=0."
+text = "Blocks in which a strip (or an aux) was skipped because the strip feeding its sidechain key had no result. The cause is counted once, at the strip that overran; a strip that failed, is suspect or was discarded is counted under its own rows, not here. Healthy is 0, and it stays 0 when started with TRANSIT_RENDER_GRAPH=0, which also disables the opt-in TRANSIT_RENDER_TAIL=1 path. With the tail graph enabled, a missing direct strip key skips its dependent aux, while a missing bus contribution is omitted and the bus readers still render."
 
 [[entry]]
 id = "telemetry.overrun_blocks"
@@ -153,12 +153,12 @@ text = "Mix-ups between the audio thread and the workers about which block a str
 [[entry]]
 id = "telemetry.strip_top"
 name = "Strip overruns, top"
-text = "The three strips with the most overruns, each with its count, or none when nothing overran. A strip that was only skipped for its sidechain source reads upstream missed. Fix the first strip in the list first."
+text = "The three strips (including tail-graph auxes) with the most overruns, each with its count, or none when nothing overran. A strip that was only skipped for its sidechain source reads upstream missed. Fix the first strip in the list first."
 
 [[entry]]
 id = "telemetry.strip_row"
 name = "Strip row"
-text = "One row for each strip that overran, the most first and at most eight: its busy, late and unstarted overruns, its inline renders, its average render cost and its slowest recent render in µs, which fades over a few hundred renders. Compare cost and worst with the buffer length to see whether the plug-in is simply too heavy. An upstream missed part names the strip the miss came from, and the counts start over when another track moves into that place."
+text = "One row for each strip that overran, including auxes when TRANSIT_RENDER_TAIL=1 takes the tail graph, the most first and at most eight: its busy, late and unstarted overruns, its inline renders, its average render cost and its slowest recent render in µs, which fades over a few hundred renders. Compare cost and worst with the buffer length to see whether the plug-in is simply too heavy. An upstream missed part names the strip the miss came from, and the counts start over when another track moves into that place."
 
 [[entry]]
 id = "telemetry.strip_lateness"
@@ -219,6 +219,56 @@ text = "Frames of audio replaced by silence because rendering failed. Healthy is
 id = "telemetry.disk_underruns"
 name = "Disk underruns"
 text = "Blocks of a long take, played from its file, that were not read from disk in time and played as silence instead. Healthy is 0. A count after a jump of the playhead is a slow disk; a count while playing on means the disk cannot keep up: move the take to a faster disk."
+
+[[entry]]
+id = "telemetry.tail_callback_renders"
+name = "Tail renders on the callback"
+text = "Direct aux renders on the callback, including cold auxes and those that cannot fit before the deadline; these were never published. Nonzero is normal while the tail graph is on."
+
+[[entry]]
+id = "telemetry.tail_deadline_reclaims"
+name = "Tail deadline reclaims"
+text = "Published aux attempts reclaimed at the deadline and rendered by the callback. A subset of Published but unclaimed at deadline, never added to it."
+
+[[entry]]
+id = "telemetry.graph_forgone"
+name = "Graph tasks forgone (never published)"
+text = "Unpinned strip tasks that became ready only after the window closed and were skipped without being published. These are not unclaimed attempts."
+
+[[entry]]
+id = "telemetry.queue_published"
+name = "Published attempts"
+text = "Successful slot publications. It excludes refused publications, busy skips, forgone tasks and direct callback renders."
+
+[[entry]]
+id = "telemetry.queue_claims"
+name = "Worker claims / classified"
+text = "Attempts claimed by workers, then worker completions classified (runner faults included). A claim still executing has not yet been classified, so the two differ only while a render is running."
+
+[[entry]]
+id = "telemetry.queue_pre_deadline"
+name = "Pre-deadline reclaims"
+text = "Published attempts the callback took back before the deadline, whenever their render finishes."
+
+[[entry]]
+id = "telemetry.queue_unclaimed"
+name = "Published but unclaimed at deadline"
+text = "All deadline reclaims, whether retired without rendering or rendered as tail work, plus publications abandoned by a drive that never finished and reclaimed at the next boundary."
+
+[[entry]]
+id = "telemetry.queue_over"
+name = "Claims queued over quarter period"
+text = "Claimed attempts whose delay from publication to claim exceeded a quarter of the original block's period. It describes dispatch, not extra audio holes."
+
+[[entry]]
+id = "telemetry.queue_late"
+name = "Worker completions late / after long queue"
+text = "Worker completions that landed after their deadline, then the subset that had also queued over a quarter period. This is distinct from the callback's late-overrun count."
+
+[[entry]]
+id = "telemetry.measurement_mailbox"
+name = "Render measurement mailbox"
+text = "The state of the control-thread measurement reader: idle, requested, or a complete or incomplete response awaiting acknowledgment. It is informational; only complete start and end snapshots form a valid measurement row."
 
 [[entry]]
 id = "telemetry.reset_peak"

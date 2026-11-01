@@ -106,6 +106,24 @@ impl T {
         self.frames(30);
     }
 
+    /// The target of a row of the Callback Telemetry window, scrolling the row list down with the
+    /// pointer over it until the row is drawn (the render worker figures fill the first screen).
+    fn target_scrolled(&mut self, key: &str) -> egui::Pos2 {
+        for _ in 0..20 {
+            if self.app.help.layout.targets.contains_key(key) {
+                break;
+            }
+            self.app.synthetic.push(Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                delta: egui::vec2(0.0, -200.0),
+                modifiers: Modifiers::NONE,
+                phase: egui::TouchPhase::Move,
+            });
+            self.frames(3);
+        }
+        self.target(key)
+    }
+
     fn target(&self, key: &str) -> egui::Pos2 {
         let r = self.app.help.layout.targets.get(key).copied();
         mid(r.unwrap_or_else(|| panic!("no help target {key}: {:?}", self.app.help.layout.targets.keys().collect::<Vec<_>>())))
@@ -191,7 +209,7 @@ fn the_panel_shows_the_entry_of_the_hovered_telemetry_row() {
         "telemetry.strip_row",
         "telemetry.strip_lateness",
     ] {
-        let at = t.target(key);
+        let at = t.target_scrolled(key);
         t.point_at(at);
         let entry = Id::ALL.iter().find(|i| i.key() == key).and_then(|i| help::entry(*i)).expect("entry");
         assert_eq!(t.app.help.layout.id.as_deref(), Some(key), "hovering {key}");
