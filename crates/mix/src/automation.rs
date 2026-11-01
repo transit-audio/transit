@@ -81,7 +81,11 @@ pub(crate) fn apply_idle_freeze(
     i: usize,
     pos: Samples,
 ) {
-    let Ok(slot_u8) = u8::try_from(i) else { return };
+    // The instrument (`INSTRUMENT_SLOT`) has its own lane slot, as in `apply_params`.
+    let slot_u8 = if i == INSTRUMENT_SLOT { AutoParam::INSTRUMENT_SLOT } else { u8::try_from(i).unwrap_or(u8::MAX) };
+    if slot_u8 == u8::MAX {
+        return;
+    }
     let Some((index, (_, base))) = ins.params.iter().enumerate().find(|(_, (k, _))| k.as_str() == "freeze") else { return };
     let macros = crate::rack::MacroLanes::of(s, t, slot_u8);
     let value = macros.as_ref().and_then(|m| m.value("freeze", pos)).unwrap_or_else(|| {

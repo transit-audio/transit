@@ -283,6 +283,9 @@ pub struct TextureSynth {
     gate: bool,
     /// Nothing played since the last reset: the shaper's switch applies without a crossfade.
     fresh: bool,
+    /// All Sound Off (CC 120) holds the output at zero until the next note: the dry oscillator has
+    /// no gate, so the synth's reset alone would restart it at once.
+    muted: bool,
     free_phase: [f64; 2],
     tempo: f64,
     bar_quarters: f64,
@@ -341,6 +344,7 @@ impl TextureSynth {
             shaped: false,
             gate: false,
             fresh: true,
+            muted: false,
             free_phase: [0.0; 2],
             tempo: 120.0,
             bar_quarters: 4.0,
@@ -456,6 +460,7 @@ impl TextureSynth {
         }
         self.shaped = self.settings.on;
         self.gate = false;
+        self.muted = true;
     }
 
     fn apply(&mut self, kind: Kind) {
@@ -633,6 +638,7 @@ impl TextureSynth {
         let strike = self.strike.take();
         let set = self.settings;
         if let Some((_, velocity)) = strike {
+            self.muted = false;
             self.velocity = velocity;
             for sh in &mut self.shapers {
                 sh.note(&set, velocity, self.free_phase);
@@ -691,7 +697,7 @@ impl TextureSynth {
         for (k, f) in frames.iter_mut().enumerate() {
             // A velocity step ramps over the block; a steady one is exact.
             let v = if from == to { to } else { from + (to - from) * (k + 1) as f32 / BLOCK as f32 };
-            let g = self.level.next() * v;
+            let g = self.level.next() * v * if self.muted { 0.0 } else { 1.0 };
             *f = [chans[0][k] * g * gains.0, chans[1][k] * g * gains.1];
         }
         for (phase, lfo) in self.free_phase.iter_mut().zip(&set.lfo) {
@@ -777,6 +783,7 @@ impl Plugin for TextureSynth {
         self.shaped = self.settings.on;
         self.gate = false;
         self.fresh = true;
+        self.muted = false;
         self.free_phase = [0.0; 2];
         self.anchor = None;
     }

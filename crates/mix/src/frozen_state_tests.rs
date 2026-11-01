@@ -101,3 +101,46 @@ fn bypassed_freeze_follows_automation_and_macros_without_applying_other_edits() 
         assert_eq!(seen.load(Ordering::Relaxed), 1);
     }
 }
+
+/// An instrument that answers idle capture like the Texture Synth: Freeze must already be applied.
+struct IdleInstrument {
+    seen: Arc<AtomicU32>,
+    freeze: bool,
+}
+impl Plugin for IdleInstrument {
+    fn info(&self) -> &'static transit_dsp::PluginInfo {
+        &transit_dsp::plugins::texture_synth::TEXTURE_SYNTH_INFO
+    }
+    fn prepare(&mut self, _: f32, _: usize, _: usize) {}
+    fn reset(&mut self) {}
+    fn set_param(&mut self, id: &str, v: f32) -> bool {
+        assert_eq!(id, "freeze", "idle service must leave other pending edits alone");
+        self.freeze = v >= 0.5;
+        true
+    }
+    fn param(&self, _: &str) -> Option<f32> {
+        None
+    }
+    fn process(&mut self, _: &mut [Vec<f32>], _: usize) {}
+    fn service_idle_state(&mut self) {
+        assert!(self.freeze, "a Freeze toggled on an inactive track must reach the capture");
+        self.seen.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+#[test]
+fn an_inactive_tracks_instrument_follows_freeze_before_answering_state() {
+    let mut s = Session::default();
+    let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, None);
+    let tr = s.track_mut(t).unwrap();
+    tr.inactive = true;
+    let mut ins = Insert::new(transit_dsp::plugins::texture_synth::TEXTURE_SYNTH_INFO.id);
+    ins.params.insert("freeze".into(), 1.0);
+    ins.params.insert("quality".into(), 0.0);
+    tr.instrument = Some(ins);
+    let seen = Arc::new(AtomicU32::new(0));
+    let mut rig = PlanRig::new(64).fake(t, INSTRUMENT_SLOT, IdleInstrument { seen: seen.clone(), freeze: false });
+    rig.publish(&s);
+    rig.render(0);
+    assert_eq!(seen.load(Ordering::Relaxed), 1);
+}

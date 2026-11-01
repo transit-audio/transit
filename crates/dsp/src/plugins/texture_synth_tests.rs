@@ -509,6 +509,18 @@ fn all_sound_off_silences_at_once_and_all_notes_off_lets_the_grains_play_out() {
     assert!(rms(&notes_off[0][at..at + 9600]) > 0.001, "the grains and the reverb play out");
 }
 
+/// All Sound Off also silences the dry oscillator (Dry/Wet below 100% with the shaper off, which
+/// has no gate): the output stays zero until the next note.
+#[test]
+fn all_sound_off_silences_the_dry_oscillator_until_the_next_note() {
+    let mut t = instrument(48_000, &[("dry_wet", 50.0), ("shaper", 0.0), ("reverb", 0.0)]);
+    let at = 24_000;
+    let out = render(&mut t, 72_000, 256, &[(0, Ev::On(60, 127)), (at, Ev::Cc(120, 0)), (48_000, Ev::On(64, 100))]);
+    assert!(rms(&out[0][at - 4800..at]) > 0.001, "the dry oscillator sounds before");
+    assert!(out.iter().all(|c| c[at + 256 + 2 * BLOCK..48_000].iter().all(|v| *v == 0.0)), "zero after CC 120 until a note");
+    assert!(rms(&out[0][49_000..72_000]) > 0.001, "a note-on sounds again");
+}
+
 /// The frozen state: with Freeze on, a state taken between blocks restores into a new instance
 /// that renders on bit for bit at the same host rate (44.1 and 48 kHz, the shaper off), with no
 /// note held; with Freeze off there is none; an empty state is nothing and changes nothing; a

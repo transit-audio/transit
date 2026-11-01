@@ -18,6 +18,8 @@ pub(crate) fn service_idle_states(s: &Session, t: &Track, strip: &mut Strip, pos
         && !inst.failed
         && ins.plugin == transit_dsp::plugins::texture_synth::TEXTURE_SYNTH_INFO.id
     {
+        // Freeze first, as for an insert, so a toggle on an inactive track is what gets saved.
+        crate::automation::apply_idle_freeze(s, inst, ins, t, &strip.touch, INSTRUMENT_SLOT, pos);
         inst.plugin.service_idle_state();
     }
 }
