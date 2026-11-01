@@ -37,8 +37,7 @@ use super::*;
 use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Mutex, TryLockError};
 use std::time::{Duration, Instant};
-use transit_rt::midi_defer::{DeferSet, DeferStats, Event};
-use transit_rt::worker_set::figures::Figures;
+use transit_rt::midi_defer::{DeferSet, Event};
 use transit_rt::worker_set::{Config, Outcome, OverrunCause, Published, StripRunner, WorkerSet};
 
 /// The most strips a pool has cells for; strips past it render on the callback.
@@ -232,124 +231,9 @@ impl Cells {
     }
 }
 
-/// The counters the callback keeps (relaxed; read by [`StripFaultsReader`]).
-#[derive(Default)]
-struct Counters {
-    workers: AtomicU64,
-    blocks: AtomicU64,
-    overruns_busy: AtomicU64,
-    overruns_late: AtomicU64,
-    overruns_unstarted: AtomicU64,
-    refused_no_history: AtomicU64,
-    refused_worst_case: AtomicU64,
-    refused_recent_overrun: AtomicU64,
-    late_results: AtomicU64,
-    inline_renders: AtomicU64,
-    callback_renders: AtomicU64,
-    faulted: AtomicU64,
-    suspect: AtomicU64,
-    conflicts: AtomicU64,
-    stale: AtomicU64,
-    overrun_blocks: AtomicU64,
-    misuse: AtomicU64,
-    overshoot: AtomicU64,
-    deadline_percent: AtomicU64,
-    deadline_frames: AtomicU64,
-    deadline_rate: AtomicU64,
-    deadline_overridden: AtomicBool,
-    /// Strips skipped because a key source missed (#174): the worker set's count, mirrored.
-    upstream_missed: AtomicU64,
-    /// Auxes skipped because a phase-1 key source missed (#174).
-    upstream_tail: AtomicU64,
-}
-
-/// Reads an engine's [`StripFaults`] from any thread (relaxed loads; each figure exact on its own).
-#[derive(Clone)]
-pub struct StripFaultsReader {
-    counters: Arc<Counters>,
-    defer: Arc<DeferStats>,
-    /// The worker set's per-strip figures and histograms (#169; only the figures, never a strip).
-    figures: Arc<Figures>,
-    /// Per strip index: the track it last published (the phase marker's strip index).
-    tracks: Arc<[AtomicU32]>,
-    /// Per strip index: blocks in a row its strip has been away (#213).
-    held: Arc<[AtomicU32]>,
-    /// Per strip index: the id of the track it runs, stored while it is away (#213).
-    held_ids: Arc<[AtomicU64]>,
-}
-
 /// How long a strip stays away before it counts as held by a hung worker (#213, K89): a late
 /// result is back within a block or two, so this is a plug-in that does not return.
 pub const HELD_SECS: u32 = 2;
-
-impl StripFaultsReader {
-    /// The ids of the tracks whose strips a render worker has
-    /// held for [`HELD_SECS`] or more: the plug-in on it does not return from `process`. Relaxed
-    /// loads off the audio thread (#213).
-    #[must_use]
-    pub fn held_tracks(&self) -> Vec<u64> {
-        let (frames, rate) = (self.counters.deadline_frames.load(Ordering::Relaxed), self.counters.deadline_rate.load(Ordering::Relaxed));
-        if frames == 0 {
-            return Vec::new();
-        }
-        let limit = (u64::from(HELD_SECS) * rate).div_ceil(frames);
-        self.held
-            .iter()
-            .enumerate()
-            .filter(|(_, h)| u64::from(h.load(Ordering::Relaxed)) >= limit.max(1))
-            .filter_map(|(i, _)| self.held_ids.get(i).map(|t| t.load(Ordering::Relaxed)))
-            .collect()
-    }
-
-    /// The figures now.
-    #[must_use]
-    pub fn snapshot(&self) -> StripFaults {
-        let c = &self.counters;
-        let r = |a: &AtomicU64| a.load(Ordering::Relaxed);
-        let d = self.defer.total();
-        StripFaults {
-            workers: r(&c.workers),
-            deadline_percent: r(&c.deadline_percent),
-            deadline_frames: r(&c.deadline_frames),
-            deadline_rate: r(&c.deadline_rate),
-            deadline_overridden: c.deadline_overridden.load(Ordering::Relaxed),
-            blocks: r(&c.blocks),
-            overruns_busy: r(&c.overruns_busy),
-            overruns_late: r(&c.overruns_late),
-            overruns_unstarted: r(&c.overruns_unstarted),
-            late_results: r(&c.late_results),
-            inline_renders: r(&c.inline_renders),
-            inline_refused_no_history: r(&c.refused_no_history),
-            inline_refused_worst_case: r(&c.refused_worst_case),
-            inline_refused_recent_overrun: r(&c.refused_recent_overrun),
-            callback_renders: r(&c.callback_renders),
-            faulted: r(&c.faulted),
-            suspect: r(&c.suspect),
-            conflicts: r(&c.conflicts).saturating_add(r(&c.stale)).saturating_add(r(&c.misuse)),
-            overrun_blocks: r(&c.overrun_blocks),
-            deadline_overshoots: r(&c.overshoot),
-            midi_deferred: d.deferred,
-            midi_dropped: d.dropped,
-            midi_silences: d.silences,
-            upstream_missed: r(&c.upstream_missed).saturating_add(r(&c.upstream_tail)),
-            top_strips: self.figures.top_overruns::<TOP_STRIPS>().map(|t| {
-                t.map(|(i, f)| StripFigure {
-                    track: self.tracks.get(i).map_or(u32::MAX, |t| t.load(Ordering::Relaxed)),
-                    upstream_missed: f.upstream_missed,
-                    upstream_origin: f.upstream_origin.and_then(|o| self.tracks.get(o)).map_or(u32::MAX, |t| t.load(Ordering::Relaxed)),
-                    overruns_busy: f.overruns_busy,
-                    overruns_late: f.overruns_late,
-                    overruns_unstarted: f.overruns_unstarted,
-                    inline_renders: f.inline_renders,
-                    cost_ns: f.cost_ns,
-                    worst_ns: f.worst_ns,
-                })
-            }),
-            lateness: self.figures.lateness(),
-            wake: self.figures.wake(),
-        }
-    }
-}
 
 /// The worker side: renders a strip from its cell.
 struct Runner {
@@ -1202,6 +1086,10 @@ fn apply_pending(st: &mut Strip, flags: u8, events: &EngineEvents) {
         release_instrument(st);
     }
 }
+
+mod faults;
+use faults::Counters;
+pub use faults::StripFaultsReader;
 
 /// The graph path (issue #174): a keyed plan's phase-1 strips as a task graph.
 mod graph;
