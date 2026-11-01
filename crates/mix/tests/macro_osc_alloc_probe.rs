@@ -69,14 +69,18 @@ fn the_macro_oscillator_on_a_strip_allocates_nothing_on_the_audio_thread() {
     let mut mix = MixEngine::realtime_with_events(target, epoch, EventLimits::default());
     let mut comp = PlanCompiler::new(target, PlanLimits::default());
     let mut make = |spec: &InstanceSpec, _: SlotGen| transit_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
-    let (s, _) = session(&[]);
+    let (s, t) = session(&[]);
     let mut generation = PlanGeneration::EMPTY.checked_next().unwrap();
-    let mut env = comp.compile(Arc::new(s), PlanGeneration::EMPTY, generation, &mut make).unwrap();
+    let mut env = comp.compile(Arc::new(s.clone()), PlanGeneration::EMPTY, generation, &mut make).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
     comp.reclaim(env);
     let binding = comp.active_bindings().into_iter().find(|b| b.1 == INSTRUMENT_SLOT).unwrap();
     // The edited plan is compiled on the control thread before the measured region.
-    let (edited, _) = session(&[("model", 2.0), ("tune", 7.0), ("level", 0.0), ("aux_mix", 50.0), ("mod_wheel", 2.0)]);
+    let mut edited = s;
+    let ins = edited.track_mut(t).unwrap().instrument.as_mut().unwrap();
+    for (id, value) in [("model", 2.0), ("tune", 7.0), ("level", 0.0), ("aux_mix", 50.0), ("mod_wheel", 2.0)] {
+        ins.params.insert(id.into(), value);
+    }
     let next = generation.checked_next().unwrap();
     let mut edit = comp.compile(Arc::new(edited), generation, next, &mut make).unwrap();
     generation = next;
@@ -169,13 +173,18 @@ fn sixteen_voices_with_steals_the_shaper_and_a_full_matrix_allocate_nothing() {
     let mapping: Vec<(&str, f32)> = owned.iter().map(|(k, v)| (k.as_str(), *v)).collect();
     let (s, t) = session(&[&[("voices", 15.0), ("model", 15.0)][..], &mapping[..]].concat());
     let mut generation = PlanGeneration::EMPTY.checked_next().unwrap();
-    let mut env = comp.compile(Arc::new(s), PlanGeneration::EMPTY, generation, &mut make).unwrap();
+    let mut env = comp.compile(Arc::new(s.clone()), PlanGeneration::EMPTY, generation, &mut make).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
     comp.reclaim(env);
     let hub = comp.scope_hub();
     assert!(hub.set_enabled(t, transit_mix::INSTRUMENT_UID, true), "the instrument has a tap");
     let binding = comp.active_bindings().into_iter().find(|b| b.1 == INSTRUMENT_SLOT).unwrap();
-    let (edited, _) = session(&[&[("voices", 2.0), ("model", 18.0), ("mod16_amount", -50.0)][..], &mapping[..]].concat());
+    // A parameter edit keeps the instrument identity; a new Insert would replace the instance.
+    let mut edited = s;
+    let ins = edited.track_mut(t).unwrap().instrument.as_mut().unwrap();
+    for (id, value) in [("voices", 2.0), ("model", 18.0), ("mod16_amount", -50.0)] {
+        ins.params.insert(id.into(), value);
+    }
     let next = generation.checked_next().unwrap();
     let mut edit = comp.compile(Arc::new(edited), generation, next, &mut make).unwrap();
     generation = next;
