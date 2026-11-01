@@ -705,3 +705,7 @@ mod shaper_tests;
 #[cfg(test)]
 #[path = "macro_osc_retrigger_tests.rs"]
 mod retrigger_tests;
+
+#[cfg(test)]
+#[path = "macro_osc_release_tests.rs"]
+mod release_tests;
