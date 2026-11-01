@@ -2,7 +2,7 @@
 
 - **Status:** proposed 2026-10-30 (#201)
 - **Date:** 2026-10-30
-- **Reopen when:** hosted MIDI effects (CLAP note effects) are wanted, a generator needs more than the fixed carry, keyed plans move off the audio thread (#174) and change where an instrument's events are delivered, or before the generators of #202 land: an effect that writes more than one event per input can exceed the 512-event block buffer, whose tail is then dropped, releases included (enlarge the buffer, or apply the carry's release-first rule there).
+- **Reopen when:** hosted MIDI effects (CLAP note effects) are wanted, a generator needs more than the fixed carry, keyed plans move off the audio thread (#174) and change where an instrument's events are delivered.
 
 ## Context
 
@@ -57,8 +57,7 @@ Both run a chain of MIDI effects before the instrument, in order, each one bypas
     past that it is lost and counted) and given again at offset 0 of the next block;
   - a release a full carry cannot hold takes the place of a carried non-release (a carry of
     releases alone delivers it at the block's last offset);
-  - when an effect's output plus its carried events due in the block exceed 512, the tail is
-    dropped and counted, releases included.
+  - a full effect output or carry merge evicts pending note-ons for releases (the #278 rule below).
 
   Transpose and Velocity reach none of the last two: each writes one event per event it takes and
   carries nothing. Nothing allocates, locks or logs
@@ -132,8 +131,33 @@ The Reopen-when item "before the generators of #202 land" is answered for the Ra
 (`random_sequencer`): it keeps its own schedule in beats and writes only events due in the block
 (at most a few per tick: two gate channels' starts and ends, the clock's), never one at or past the
 block's end, so it uses no carry; it passes its input through one for one (note-ons dropped unless
-Thru). Its output therefore stays within the 512-event block buffer unless the input alone fills it.
+Thru). Dense patterns, large host blocks, high tempos, and low sample rates can exceed the 512-event output buffer; #278 below defines its overflow policy.
 It needs the session's sample rate to turn beats into offsets: `MidiEffect::set_sample_rate`, given
 with the transport at the start of every block. A chain edit or a Stop resets it with the other
 effects (its notes are ended by the host); its next playing block restarts it on the grid.
 
+
+## Amendment 2026-11-01: release priority (#278)
+
+The slot uses option (b): a full 512-event output, including the merge with due carried events,
+admits a release by evicting the newest pending note-on, counted as `evicted_ons` and never emitted;
+a new note-on is refused and counted as `refused_ons`. The existing `overflow` total counts both,
+plus discarded non-note events. Releases include note-offs, CC 120/121/123 and pedal-up messages
+(CC 64/66/67/69 below 64). After all pending note-ons are gone, a release evicts another non-release;
+if all 512 entries are releases, they coalesce into All Sound Off, All Notes Off, Reset All
+Controllers and all four pedal releases per affected channel, at the greatest release offset,
+and that buffer refuses further non-releases. The host then emits explicit note-offs for every
+accepted sounding voice and the safety controllers directly at the block's last offset, then resets
+the effects and carries: CLAP note-only
+ports and VST3 instruments without controller mappings may ignore the channel messages. An on
+that the 256-entry sounding-note table cannot track is refused before delivery and counted.
+This last resort is counted separately as
+`coalesced_releases`, never as refused offs: at most 112 channel messages represent any release
+flood, with individual release timing sacrificed. The invariant is that every note-on the slot
+emits is followed by its note-off within the same or a later block, overflow or not; on release-only
+saturation the host's explicit offs supply that termination (`released_on_overflow`). This assumes
+the effect keeps
+its pairing contract and the instrument accepts its releases (the existing downstream retry limit
+is unchanged). Two monotone victim cursors and index links make admission/eviction O(1) amortized
+per event and retain write order at equal offsets; traversal is O(512) per stage. Storage is made
+with the host, with no audio-thread allocation or lock. Non-overflowing event streams are unchanged.
