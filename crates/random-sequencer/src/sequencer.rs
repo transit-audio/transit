@@ -547,10 +547,10 @@ impl Sequencer {
     /// Ends the voice's scheduled note at `beat`. The key stays busy until its Off is scheduled
     /// (it is, unless the schedule is full, which the capacity rules out).
     fn end_voice(&mut self, voice: usize, beat: f64) {
-        if let Some(key) = self.scheduled[voice] {
-            if self.push(beat, Pending::Off { voice, key }) {
-                self.scheduled[voice] = None;
-            }
+        if let Some(key) = self.scheduled[voice]
+            && self.push(beat, Pending::Off { voice, key })
+        {
+            self.scheduled[voice] = None;
         }
     }
 
