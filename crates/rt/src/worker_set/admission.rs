@@ -15,6 +15,9 @@ impl WorkerSet {
     /// decaying maximum). Call exactly once while the callback owns the strip.
     pub fn record_callback_cost(&mut self, strip: usize, took: Duration) {
         self.shared.record_cost(strip, took);
+        if strip < self.strips() {
+            bump(&self.shared.queue.counts.tail_callback);
+        }
     }
 
     /// True when the strip is barred from inline renders in the open block, because it overran

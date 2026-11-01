@@ -116,6 +116,7 @@
 
 mod admission;
 pub mod figures;
+pub mod queue;
 /// Seeded stall schedules and their shrinker (feature `testing`, issue #210).
 #[cfg(any(test, feature = "testing"))]
 pub mod schedule;
@@ -342,6 +343,7 @@ struct Shared {
     workers: Box<[WorkerSlot]>,
     stop: AtomicBool,
     stats: Counters,
+    queue: queue::Queue,
 }
 
 impl Shared {
@@ -425,6 +427,11 @@ pub struct WorkerSet {
     /// Per strip: the deadline (nanoseconds since the figures' origin) of the block its
     /// outstanding `Late` result was late for (0: none).
     late_deadline_ns: Box<[u64]>,
+    queue_deadline_ns: u64,
+    queue_period_ns: u64,
+    mailbox: Arc<queue::Mailbox>,
+    reader_taken: bool,
+    capture_attempts: u32,
     shut: bool,
 }
 
@@ -458,6 +465,7 @@ impl WorkerSet {
             workers: (0..n).map(|_| WorkerSlot { woken: AtomicBool::new(false), current: AtomicUsize::new(0), promotion: OnceLock::new() }).collect(),
             stop: AtomicBool::new(false),
             stats: Counters::default(),
+            queue: queue::Queue::new(strips),
         });
         let mut set = WorkerSet {
             shared,
@@ -478,6 +486,11 @@ impl WorkerSet {
             wake_cursor: 0,
             publish_ns: 0,
             late_deadline_ns: vec![0; strips].into_boxed_slice(),
+            queue_deadline_ns: u64::MAX,
+            queue_period_ns: u64::MAX,
+            mailbox: Arc::new(queue::Mailbox::default()),
+            reader_taken: false,
+            capture_attempts: 0,
             shut: false,
         };
         for k in 0..n {
@@ -618,6 +631,8 @@ impl WorkerSet {
         self.forgone = 0;
         self.upstream = 0;
         self.publish_ns = 0;
+        self.queue_deadline_ns = u64::MAX;
+        self.queue_period_ns = u64::MAX;
         self.block_index += 1;
         bump(&self.shared.stats.blocks);
         for strip in 0..self.outcomes.len() {
@@ -660,6 +675,8 @@ impl WorkerSet {
             // `finish` was not called for the last block: take the job back.
             State::Published => {
                 if slot.reclaim() {
+                    // An abandoned block is resolved at the next block's boundary.
+                    bump(&shared.queue.counts.unclaimed_at_deadline);
                     slot.retire()
                 } else {
                     // A worker won it; settle what it left.
@@ -702,15 +719,27 @@ impl WorkerSet {
             self.bar(strip);
             return Ok(Published::Skipped);
         }
-        // The block's publish stamp: one clock read per block, at its first publish; written
-        // before the slot's Release publish, so the claiming worker sees it.
+        // Never overwrite a claimed attempt's stamps, even on a misused publish call.
+        if let Some(slot) = self.shared.jobs.slot(strip) {
+            let state = slot.state();
+            if state != State::Idle {
+                return refused(self, PublishRefused::Slot(PublishError::NotIdle(state)));
+            }
+            if self.generation <= slot.generation() {
+                return refused(self, PublishRefused::Slot(PublishError::GenerationNotNewer { last: slot.generation() }));
+            }
+        }
+        // One read per attempt. The legacy wake histogram retains its first-publish baseline.
+        let pub_ns = self.shared.figures.nanos(Instant::now()).max(1);
         if self.publish_ns == 0 {
-            self.publish_ns = self.shared.figures.nanos(Instant::now()).max(1);
+            self.publish_ns = pub_ns;
         }
         self.shared.figures.published(strip, self.publish_ns);
+        self.shared.queue.stamp(strip, pub_ns, self.queue_deadline_ns, self.queue_period_ns);
         if let Err(e) = self.shared.jobs.publish(strip) {
             return refused(self, PublishRefused::Slot(e));
         }
+        bump(&self.shared.queue.counts.published);
         self.outcomes[strip] = Outcome::Pending;
         self.published[self.published_len] = strip;
         self.published_len += 1;
@@ -823,6 +852,7 @@ impl WorkerSet {
                     // Admitted, and the reclaim won against the workers (a lost reclaim means a
                     // worker claimed it; it is waited for like any claimed slot).
                     State::Published if self.admits(strip, now, deadline) && slot.reclaim() => {
+                        bump(&shared.queue.counts.inline_pre);
                         let t0 = Instant::now();
                         inline(strip);
                         now = Instant::now();
@@ -900,7 +930,9 @@ impl WorkerSet {
         let shared = Arc::clone(&self.shared);
         let Some(slot) = shared.jobs.slot(strip) else { return Outcome::Pending };
         let cause = if slot.reclaim() {
+            bump(&shared.queue.counts.unclaimed_at_deadline);
             if self.inline_at_deadline[strip] {
+                bump(&shared.queue.counts.deadline_reclaimed_tail);
                 let start = Instant::now();
                 inline(strip);
                 shared.record_cost(strip, start.elapsed());
@@ -1013,6 +1045,7 @@ fn worker_main(shared: &Shared, index: usize, start: usize, promote: bool) {
             break;
         }
         while let Some((strip, token)) = shared.jobs.try_claim_next(next) {
+            shared.queue.claimed();
             me.current.store(strip + 1, Ordering::Relaxed);
             let generation = token.generation();
             // The two clock reads that time the render are also its claim and completion stamps
@@ -1023,6 +1056,7 @@ fn worker_main(shared: &Shared, index: usize, start: usize, promote: bool) {
             let end = Instant::now();
             shared.record_cost(strip, end.saturating_duration_since(t0));
             shared.figures.done(strip, shared.figures.nanos(end));
+            shared.queue.classify(strip, shared.figures.nanos(t0), shared.figures.nanos(end));
             if r.is_err() {
                 // Relaxed: published by the completing Release below.
                 shared.panicked[strip].store(true, Ordering::Relaxed);

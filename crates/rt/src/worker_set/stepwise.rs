@@ -78,6 +78,7 @@ impl WorkerSet {
                         }
                     }
                     State::Published if self.admits(strip, now, deadline) && slot.reclaim() => {
+                        bump(&shared.queue.counts.inline_pre);
                         let t0 = Instant::now();
                         inline(strip);
                         let end = Instant::now();
@@ -131,6 +132,7 @@ impl WorkerSet {
         }
         self.outcomes[strip] = Outcome::Overrun(OverrunCause::Unstarted);
         self.forgone += 1;
+        bump(&self.shared.queue.counts.forgone);
         bump(&self.shared.stats.overruns_unstarted);
         self.shared.figures.count(strip, Count::Unstarted);
         Ok(self.outcomes[strip])
