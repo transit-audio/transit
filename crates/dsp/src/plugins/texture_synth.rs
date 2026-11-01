@@ -750,6 +750,13 @@ impl Plugin for TextureSynth {
         self.reset();
     }
 
+    fn snap_initial_params(&mut self) {
+        // A restored cloud and its converter must survive initialization. Level's target is
+        // normally computed while rendering, so set it explicitly before snapping.
+        self.level.set(db_to_gain(self.p.v(LEVEL)));
+        self.level.snap();
+    }
+
     fn reset(&mut self) {
         if self.restored {
             return;

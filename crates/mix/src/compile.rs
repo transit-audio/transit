@@ -778,6 +778,7 @@ impl PlanCompiler {
     fn plan_slot(
         &mut self,
         p: &mut PlannedSlot,
+        session: &Session,
         layout: u16,
         mode: CompileMode,
         make: &mut dyn FnMut(&InstanceSpec, SlotGen) -> Option<NewInstance>,
@@ -851,6 +852,7 @@ impl PlanCompiler {
         // on finds it there and reports it.
         p.plan = SlotPlan::Fresh(Box::new(slot));
         let SlotPlan::Fresh(slot) = &mut p.plan else { return Ok(()) };
+        crate::instance::initialize_params(&mut *slot.plugin, session, &p.spec);
         slot.layout = layout;
         if slot.applied.heap.len() != long {
             slot.applied = Applied::prepared(if long > 0 { vec![f32::NAN; long] } else { Vec::new() });
@@ -910,7 +912,7 @@ impl PlanCompiler {
                 let Some((_, _, planned, _)) = out.last_mut() else { continue };
                 planned.push(p);
                 if let Some(p) = planned.last_mut() {
-                    self.plan_slot(p, layout, mode, make)?;
+                    self.plan_slot(p, s, layout, mode, make)?;
                 }
             }
             if let Some((_, _, _, c)) = out.last_mut() {

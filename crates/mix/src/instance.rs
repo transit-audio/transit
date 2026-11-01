@@ -118,6 +118,36 @@ pub struct NewInstance {
     pub refused_state: bool,
 }
 
+/// Completes a fresh built-in's preparation on the compiler thread. Kept out of the factory
+/// because the factory may return an instance staged before the latest session edit. Running
+/// slots take the move path and never come here; their changes remain smoothed automation.
+pub(crate) fn initialize_params(plugin: &mut dyn Plugin, s: &Session, spec: &InstanceSpec) {
+    if is_third_party(&spec.id) {
+        return;
+    }
+    let mut applied = false;
+    if let Some((clip, comp)) = clip_fx_of_slot(spec.slot) {
+        if let Some(params) = clip_fx_params(s, clip) {
+            let prefix = if comp { "comp." } else { "eq." };
+            for (key, value) in params {
+                if let Some(id) = key.strip_prefix(prefix) {
+                    applied |= plugin.set_param(id, value);
+                }
+            }
+        }
+    } else if let Some(t) = s.track(spec.track) {
+        let ins = if spec.slot == INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(spec.slot).and_then(Option::as_ref) };
+        if let Some(ins) = ins {
+            for (id, value) in &ins.params {
+                applied |= plugin.set_param(id, *value);
+            }
+        }
+    }
+    if applied {
+        plugin.snap_initial_params();
+    }
+}
+
 /// Creates a plugin (built-in or hosted), restores `state` (if any) and prepares it. Expensive
 /// for third-party plugins: in realtime use, call it on the control thread.
 pub fn create_instance(id: &str, state: Option<&[u8]>, sample_rate: f32, max_block: usize, ch: usize) -> Option<NewInstance> {

@@ -277,6 +277,13 @@ pub trait Plugin: Send {
     fn info(&self) -> &'static PluginInfo;
     fn prepare(&mut self, sample_rate: f32, max_block: usize, channels: usize);
     fn reset(&mut self);
+    /// Completes preparation after applying stored parameters, before the first block. Stored
+    /// values are initial state, not automation moves. The default uses reset's smoother snaps;
+    /// a processor whose reset preserves restored state must still snap its parameter targets.
+    /// Called only on a fresh built-in, on the control thread, never on a running instance.
+    fn snap_initial_params(&mut self) {
+        self.reset();
+    }
     /// Service a non-rendering insert at a block boundary (bypassed or inactive). Same realtime
     /// contract as process: no allocation, deallocation, locks or waiting.
     fn service_idle_state(&mut self) {}
