@@ -398,20 +398,9 @@ impl StudioApp {
     /// Begins a waiting op's job on the plug-in host thread.
     fn begin_live(&mut self, op: Op) {
         let Op { key, uid, plugin, instance, step: Step::Waiting { start, .. } } = op else { return };
-        let inactive = self.engine.session().track(key.0).is_some_and(|t| t.inactive) || self.hosted_insert(key).is_some_and(|ins| !ins.active);
-        // An inactive slot's live instance survives deactivation and holds every edit, so reads go
-        // to it. Only when no live instance exists do they fall back to the stored state.
-        let start = match start {
-            Start::Read(then) if inactive && instance.is_none() => match self.hosted_insert(key).and_then(|ins| ins.state_bytes()) {
-                Some(state) => {
-                    self.read_done(key, plugin, instance, Some(state), then);
-                    self.status.push_str(" (the plug-in is not loaded: from its stored state)");
-                    return;
-                }
-                None => Start::Read(then),
-            },
-            other => other,
-        };
+        // Reads and loads go to the live instance, inactive or not: it survives deactivation and holds every
+        // edit. With no live instance (not made yet, failed, moved and not adopted yet) the job refuses; a
+        // stored state we cannot prove current is never saved.
         let Some(p) = &self.player else { return };
         let step = match start {
             Start::Read(then) => p.begin_save_state(key.0, key.1).map(|job| Step::Read { job, then }),

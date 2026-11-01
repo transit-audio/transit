@@ -593,3 +593,68 @@ fn inactive_save_as_after_an_active_edit_saves_the_edited_state() {
     let saved = saved.unwrap_or_else(|e| panic!("no preset saved ({status}): {e}"));
     assert_eq!(saved, edited, "Save As on the inactive track wrote the stored state from before the edit (stale)");
 }
+
+/// An edit while active, Make Inactive, then the insert is moved to another slot and Save As
+/// runs before the moved plan is adopted (in the app: while another plug-in is being made and
+/// holds the plan). The new slot has no live instance bound yet, so the job refuses, as on main:
+/// the stored state predates the edit and is never saved in its place.
+#[test]
+fn inactive_save_as_on_a_moved_insert_before_adoption_refuses() {
+    if !in_child("inactive_save_as_on_a_moved_insert_before_adoption_refuses") {
+        return;
+    }
+    let Rig { mut app, ctx, t, gain, config, name, .. } = rig("moved");
+    frames_until(&mut app, &ctx, "both instances delivered", |a| a.player.as_ref().unwrap().plays_processed(&a.engine.session_arc()));
+    app.capture_plugin_states().unwrap();
+    let stored = app.engine.session().tracks[0].mixer.inserts[1].as_ref().unwrap().state_bytes().expect("stored state after a save");
+    app.run("mix.insert_param", serde_json::json!({"track": t.0, "slot": 1, "param": "7", "value": 0.4})).unwrap();
+    frames_until(&mut app, &ctx, "the edit delivered", |a| a.player.as_ref().unwrap().plays_processed(&a.engine.session_arc()));
+    let edited = finish_without_frames(app.player.as_ref().unwrap().begin_save_state(t, 1).unwrap());
+    app.run("track.make_inactive", serde_json::json!({"tracks": [t.0], "inactive": true})).unwrap();
+    until_plays(&mut app, &ctx);
+    app.run("mix.insert_move", serde_json::json!({"track": t.0, "from": 1, "to": 3})).unwrap();
+    assert!(app.player.as_ref().unwrap().instance(t, 3).is_none(), "the moved slot has no binding before adoption");
+    *name.lock().unwrap() = "Moved.vstpreset".into();
+    app.header_action(t, 3, HeaderAction::SaveAs);
+    let start = Instant::now();
+    while app.plugin_header.any_busy() && start.elapsed() < Duration::from_secs(15) {
+        frame(&mut app, &ctx);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let status = app.status.clone();
+    let file = transit_engine::presets::path(&config, &gain, "Moved").unwrap();
+    let written = file.exists();
+    quit(&mut app);
+    assert_ne!(edited, stored, "the edit changed the live state");
+    assert!(!written, "no preset was written from a state that cannot be proven current ({status})");
+    assert!(status.contains("not active"), "the refusal names the missing instance: {status}");
+    assert!(!status.contains("stored state"), "no stored-state fallback: {status}");
+}
+
+/// A plug-in just added (not made yet, no instance bound) has no live instance: Save As refuses and
+/// writes nothing.
+#[test]
+fn save_as_on_a_slot_with_no_instance_refuses_and_writes_nothing() {
+    if !in_child("save_as_on_a_slot_with_no_instance_refuses_and_writes_nothing") {
+        return;
+    }
+    let Rig { mut app, ctx, t, gain, config, name, .. } = rig("no-instance");
+    frames_until(&mut app, &ctx, "both instances delivered", |a| a.player.as_ref().unwrap().plays_processed(&a.engine.session_arc()));
+    app.capture_plugin_states().unwrap();
+    app.run("track.make_inactive", serde_json::json!({"tracks": [t.0], "inactive": true})).unwrap();
+    until_plays(&mut app, &ctx);
+    app.run("mix.insert", serde_json::json!({"track": t.0, "plugin": gain, "slot": 2})).unwrap();
+    assert!(app.player.as_ref().unwrap().instance(t, 2).is_none(), "a plug-in not made yet has no instance");
+    *name.lock().unwrap() = "Fresh.vstpreset".into();
+    app.header_action(t, 2, HeaderAction::SaveAs);
+    let start = Instant::now();
+    while app.plugin_header.any_busy() && start.elapsed() < Duration::from_secs(15) {
+        frame(&mut app, &ctx);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let status = app.status.clone();
+    let written = transit_engine::presets::path(&config, &gain, "Fresh").is_some_and(|f| f.exists());
+    quit(&mut app);
+    assert!(!written, "no preset was written ({status})");
+    assert!(!status.contains("stored state"), "no stored-state fallback: {status}");
+}
