@@ -73,10 +73,17 @@ route/plugin delay remain named components of the timing model.
 
 The drift open item for a second device has one implemented rule so far, for System Audio
 loopback capture (#268, `crates/playback/src/system_audio.rs` and `system_audio_rate.rs`): the
-rate ratio is estimated from frame counts against QPC time on both clocks (a least-squares fit
-over the last 10 s of loopback packets and input callbacks, from the backends' frame stamps where
-valid, else arrival times), fed forward as the trim of a linear interpolator and reported as the
-drift; a slow proportional-integral term on the ring fill (the integral held within 50 ppm) only
+rate ratio is estimated from frame counts against QPC time, with each side timed as follows: the
+loopback packets by the QPC of their first frame (WASAPI's `GetBuffer` position), the input
+callbacks by the stamp's host callback time (the QPC read when the block arrived) on every
+backend, never by `backend_frame_ns`, which on native ASIO is the driver's sample position at the
+nominal rate and would make the device side exactly nominal. An invalid stamp falls back to the
+reader's own arrival clock (QPC on Windows). Both sides carry a clock-domain tag; a pair on
+different domains holds the estimate. The fit is least squares over the last 10 s of points; a
+side whose time steps without frames (a loopback that paused and resumed with no discontinuity
+flag) restarts its line when the step exceeds its frames' time by 50 ms, and the estimate is held
+while the line refills. The ratio is fed forward as the trim of a linear interpolator and reported
+(as the clamped trim) as the drift; a slow proportional-integral term on the ring fill (the integral held within 50 ppm) only
 brings the fill back to its target of one input callback, one packet and 30 ms. Drifts up to
 1000 ppm are tested; the applied trim is limited to 2000 ppm. It does not yet cover a second
 hardware input; that still needs the controlled asynchronous resampler above.

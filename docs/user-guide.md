@@ -72,10 +72,10 @@ dropped, so a stereo output is the better pick), and the clip is not lined up wi
 session, so move it into place by ear. If transit (or another app) has that output open in
 exclusive mode, Windows refuses the capture and Audio Devices says so; pick another output or open
 the device shared. The input itself opens with the track's input, so System Audio needs an input
-device to ride on. On Linux the PipeWire or PulseAudio monitor
-of an output arrives as an input already and is listed as **System Audio (monitor of ...)** where
-transit can tell; if none is listed, route the monitor to transit's input in pavucontrol's
-Recording tab or in qpwgraph. macOS needs a virtual audio device for now.
+device to ride on. On Linux the PipeWire or PulseAudio monitor of an output arrives as an input
+already and is listed as **System Audio (monitor of ...)** where transit can tell; if none is
+listed, route the monitor to transit's input in pavucontrol's Recording tab or in qpwgraph. macOS
+needs a virtual audio device for now.
 
 System Audio records what the computer plays, as a loopback cable would. You are responsible for
 the rights to what you record.
