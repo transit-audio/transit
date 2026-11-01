@@ -315,6 +315,68 @@ impl Synth {
         synth
     }
 
+    /// Back to the state [`Synth::new`] builds (the grains, the oscillator, the reverb's memory and
+    /// the random generator all start over), in place and without allocating (the instrument's
+    /// reset and All Sound Off run on the audio thread).
+    pub fn reset(&mut self) {
+        let sr = F(48_000.0);
+        self.rng = Random::default();
+        self.trigger_generator = TriggerGenerator::default();
+        self.dry = F::ZERO;
+        self.wet = F::ZERO;
+        self.reverb.clear();
+        self.pre_reverb_limiter = Limiter::default();
+        self.output_limiter = Limiter::default();
+        self.grains = Scheduler::default();
+        self.voice = WavetableVoice::default();
+        self.bank_quantizer = HysteresisQuantizer::default();
+        self.reverb.init(sr);
+        self.trigger_generator.init(sr);
+        self.pre_reverb_limiter.init(1.0 / (sr * 4.0), F(0.9));
+        self.output_limiter.init(1.0 / (sr * 6.0), F(0.9));
+        self.grains.init(sr);
+        self.voice.init(sr);
+        self.bank_quantizer.init(i32::try_from(BANKS).unwrap_or(12), F(0.048), false);
+    }
+
+    /// Room for a checkpoint, bytes: every part has a fixed shape, about 68 KiB in all, 64 KiB of it
+    /// the reverb's memory.
+    pub const CHECKPOINT_BYTES: usize = 80 * 1024;
+
+    /// Appends the continuation state (version 1): everything the next render reads, the reverb's
+    /// memory included. Allocation-free when `out` has room ([`Synth::CHECKPOINT_BYTES`]).
+    pub fn write_checkpoint(&self, out: &mut Vec<u8>) {
+        use crate::checkpoint::State;
+        self.rng.write(out);
+        self.trigger_generator.write(out);
+        self.dry.write(out);
+        self.wet.write(out);
+        self.reverb.write(out);
+        self.pre_reverb_limiter.write(out);
+        self.output_limiter.write(out);
+        self.grains.write(out);
+        self.voice.write(out);
+        self.bank_quantizer.write(out);
+    }
+
+    /// Reads a [`Synth::write_checkpoint`] into this synth (built with [`Synth::new`], so its
+    /// configuration is the firmware's), rejecting anything outside the firmware's ranges. Call it
+    /// off the audio thread; after `None` the synth's state is unspecified: reset it.
+    pub fn read_checkpoint(&mut self, input: &mut &[u8]) -> Option<()> {
+        use crate::checkpoint::State;
+        self.rng.read(input)?;
+        self.trigger_generator.read(input)?;
+        self.dry.read(input)?;
+        self.wet.read(input)?;
+        self.reverb.read(input)?;
+        self.pre_reverb_limiter.read(input)?;
+        self.output_limiter.read(input)?;
+        self.grains.read(input)?;
+        self.voice.read(input)?;
+        self.bank_quantizer.read(input)?;
+        (self.bank_quantizer.num_steps() == i32::try_from(BANKS).unwrap_or(12)).then_some(())
+    }
+
     /// Writes the random generator's state (the firmware's `Random::Seed`).
     pub fn seed(&mut self, seed: u32) {
         self.rng = Random::new(seed);
@@ -433,5 +495,116 @@ impl Synth {
             grain.render(out, freeze);
         }
         self.grains.tick();
+    }
+}
+
+// Continuation checkpoint, version 1. Configuration (the sample rate's constants, the crossfade's
+// length) is reconstructed before reading.
+crate::state_fields!(Differentiator, _s, [previous, lp, lp_2, cutoff, scale], true);
+crate::state_fields!(
+    WavetableGrain,
+    s,
+    [core, phase, frequency, envelope_sample, scale_up, scale_down, gain_l, gain_r, wave_fractional, wave_start, differentiator],
+    (0.0..=1.0).contains(&s.phase.0)
+        && (0.0..=0.25).contains(&s.frequency.0)
+        && (0.0..=1.0).contains(&s.wave_fractional.0)
+        && [16.0, 64.0, 128.0, 256.0, 65_536.0].contains(&s.scale_up.0)
+        && s.scale_down.0.to_bits() == (1.0 / s.scale_up.0).to_bits()
+        && s.wave_start % WAVE_STRIDE == 0
+        && s.wave_start + WAVE_STRIDE <= crate::wavetables::UPSTREAM_LEN
+);
+crate::state_fields!(
+    WavetableVoice,
+    s,
+    [frequency, phase, lp, lp_2, previous, wave_lp, bank, next_bank, xfade_counter, position_random_walk],
+    (0.0..=0.25).contains(&s.frequency.0)
+        && (0.0..=1.0).contains(&s.phase.0)
+        && (0.0..=1.0).contains(&s.wave_lp.0)
+        && s.bank < BANKS
+        && s.next_bank < BANKS
+        && (0..=s.xfade_duration).contains(&s.xfade_counter)
+);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::SeedButton;
+    use crate::randomized::Parameter;
+
+    /// Notes on the SEED gate with the pitch CV moving, freeze over a stretch, the bank changing:
+    /// everything the instrument drives, from frame `from`.
+    fn render(s: &mut Synth, from: usize, frames: usize) -> Vec<[f32; 2]> {
+        let mut out = vec![[0.0; 2]; frames];
+        let mut flags = 0u8;
+        for (b, o) in out.chunks_mut(12).enumerate() {
+            let n = from + b * 12;
+            let c = Controls {
+                time: Parameter { base: 0.4, attenuverter: 0.3, cv: 0.0, has_cv: false },
+                size: Parameter { base: 0.6, attenuverter: 0.0, cv: 0.0, has_cv: false },
+                shape: Parameter { base: 0.5, attenuverter: 0.0, cv: 0.0, has_cv: false },
+                pitch: Parameter { base: 0.0, attenuverter: -0.2, cv: [21.0, -12.0, 7.0][(n / 24_000) % 3], has_cv: true },
+                density: 0.3,
+                feedback: [0.2, 0.7][(n / 30_000) % 2],
+                dry_wet: 0.6,
+                reverb: 0.5,
+                seed_button: SeedButton::Off,
+                ..Controls::default()
+            };
+            let mut seed = [0u8; 12];
+            for (k, f) in seed.iter_mut().enumerate() {
+                flags = crate::stmlib::extract_gate_flags(flags, (n + k) % 24_000 < 18_000);
+                *f = flags;
+            }
+            let freeze = [(40_000..70_000).contains(&n); 12];
+            s.render(&c, SynthResolution::Bits16, &freeze, Some(&seed), o);
+        }
+        out
+    }
+
+    fn same(a: &[[f32; 2]], b: &[[f32; 2]]) -> bool {
+        a.len() == b.len() && a.iter().zip(b).all(|(x, y)| x[0].to_bits() == y[0].to_bits() && x[1].to_bits() == y[1].to_bits())
+    }
+
+    #[test]
+    fn a_reset_leaves_the_synth_as_new_builds_it() {
+        let mut used = Synth::new();
+        used.seed(77);
+        let _ = render(&mut used, 0, 96_000);
+        used.reset();
+        let mut fresh = Synth::new();
+        let a = render(&mut fresh, 0, 96_000);
+        let b = render(&mut used, 0, 96_000);
+        assert!(same(&a, &b));
+        assert_eq!(fresh.rng_state(), used.rng_state());
+        assert!(a.iter().any(|f| f[0] != 0.0), "silent render");
+    }
+
+    /// A checkpoint taken mid-render (grains sounding and frozen, the reverb ringing) restores into
+    /// a new synth that renders on bit for bit; a short or damaged one is refused.
+    #[test]
+    fn a_checkpoint_continues_the_render_bit_for_bit() {
+        let mut live = Synth::new();
+        let _ = render(&mut live, 0, 50_004);
+        let mut data = Vec::with_capacity(Synth::CHECKPOINT_BYTES);
+        live.write_checkpoint(&mut data);
+        assert!(data.len() <= Synth::CHECKPOINT_BYTES, "{} bytes", data.len());
+        assert_eq!(data.capacity(), Synth::CHECKPOINT_BYTES, "written without growing");
+        let mut restored = Synth::new();
+        let mut input = data.as_slice();
+        assert!(restored.read_checkpoint(&mut input).is_some());
+        assert!(input.is_empty());
+        let a = render(&mut live, 50_004, 60_000);
+        let b = render(&mut restored, 50_004, 60_000);
+        assert!(same(&a, &b));
+        assert!(a.iter().any(|f| f[0] != 0.0));
+        assert!(Synth::new().read_checkpoint(&mut &data[..data.len() - 1]).is_none(), "a short checkpoint is refused");
+        // The voice's bank sits before its crossfade counter, the random walk (four floats) and
+        // the bank quantizer (five fields: 4 + 4 + 4 + 4 + 4 bytes).
+        let mut bad = data.clone();
+        let quantizer = 5 * 4;
+        let walk = 4 * 4;
+        let at = data.len() - quantizer - walk - 4 - 8 - 8;
+        bad[at..at + 8].copy_from_slice(&99u64.to_le_bytes());
+        assert!(Synth::new().read_checkpoint(&mut bad.as_slice()).is_none(), "a bank past the table is refused");
     }
 }

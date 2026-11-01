@@ -3,7 +3,8 @@
 transit's texture processor ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md),
 #241 slice 1): ported to Rust from Émilie Gillet's MIT firmware. Pure Rust,
 `#![forbid(unsafe_code)]`, no allocation once built, one random generator per instance. The app
-plays it as the Texture insert effect (`transit-dsp`, slice 2); the instrument form is slice 3.
+plays it as the Texture insert effect (`transit-dsp`, slice 2) and its synth as the Texture Synth
+instrument (slice 3).
 
 - `Texture` is the firmware's effect chain: it records its stereo input (with feedback, soft-clipped
   at the lower resolutions) into a buffer at one of four qualities (`Media`), stereo or mono, and
@@ -16,6 +17,10 @@ plays it as the Texture insert effect (`transit-dsp`, slice 2); the instrument f
   gain (a 1-second wait, a 5-second learning phase, then peak protection) or a manual one, the tape
   qualities' soft clipping, and the copy of a patched input to an unpatched one. On the module it
   shapes everything the chain hears; the Texture insert uses it (automatic gain by default).
+- `Synth::reset` puts the synth back to what `Synth::new` builds without allocating (the
+  instrument's reset and All Sound Off), and `Synth::write_checkpoint` / `read_checkpoint` carry its
+  whole state (grains, oscillator, reverb memory, random generator; about 68 KiB) so a frozen
+  instrument saved with a session plays on from where it was.
 - `Texture::with_capacity` and `Texture::rebuild`: memory for a longer buffer than the one in use,
   so the chain can be rebuilt in place on another buffer length without allocating (the device's
   Length control); a rebuild leaves it exactly as `Texture::new` would.
@@ -87,7 +92,9 @@ oracle's floor is `-inf`, the margin zero):
   build), the firmware's undefined slices (defined as the oracle's build defines them), and the
   flush to zero: the oracle rendered without it differs in its bits, and the port matches the
   flushed reference.
-- `tests/synth_vs_oracle.rs`: the synth at its four resolutions over its 147-point sweep, and the
+- `tests/synth_vs_oracle.rs`: the synth at its four resolutions over its 147-point sweep, the 18
+  note points (`texture_notes`: notes on the SEED gate and the PITCH CV, legato retriggers, the
+  button released, held and latched, freeze, as the Texture Synth instrument plays it), and the
   last wave of the last bank. `tests/input_vs_oracle.rs`: the input stage at each codec rate and
   soft-clipping mode.
 
