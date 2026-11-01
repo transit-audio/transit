@@ -328,8 +328,8 @@ impl BusTable {
 }
 
 /// Parameter maps up to this long are tracked inline in a [`PluginSlot`] (every built-in's is; the
-/// Macro Oscillator's, 123 with its matrix rows, #243, is the longest).
-const APPLIED_INLINE: usize = 128;
+/// Texture Synth's, 131 with its matrix rows, #241, is the longest, then the Macro Oscillator's 123).
+const APPLIED_INLINE: usize = 136;
 
 /// The parameter values last pushed to a plugin, in the insert's parameter-map order. Up to
 /// [`APPLIED_INLINE`] values live inline, so a slot filled on the audio thread allocates nothing
