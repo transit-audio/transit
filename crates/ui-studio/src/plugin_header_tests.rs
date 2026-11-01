@@ -403,6 +403,33 @@ fn a_save_as_right_after_a_parameter_change_saves_the_changed_value() {
     let _ = std::fs::remove_dir_all(&config);
 }
 
+/// #219: hold the SDK instance to force a skipped process call, then allow state jobs to
+/// finish without another audio block. Save As must still wait for actual parameter delivery.
+#[test]
+fn a_save_as_after_a_skipped_block_saves_the_processed_value() {
+    if !in_child("a_save_as_after_a_skipped_block_saves_the_processed_value") {
+        return;
+    }
+    let Rig { mut app, ctx, t, gain, config, name, .. } = rig("skipped");
+    until_plays(&mut app, &ctx);
+    *name.lock().unwrap() = "Processed.vstpreset".into();
+    app.run("mix.insert_param", serde_json::json!({"track": t.0, "slot": 0, "param": "7", "value": 0.5})).unwrap();
+    transit_vst3_host::while_instances_held(|| until_plays(&mut app, &ctx));
+    // No more audio until the state queue has drained. A read started using the old plays()
+    // semantics runs now and captures the old value. This sentinel waits on host completion.
+    app.header_action(t, 0, HeaderAction::SaveAs);
+    app.drive_plugin_headers();
+    let sentinel = app.player.as_ref().unwrap().begin_save_state(t, 0).unwrap();
+    let _ = finish_without_frames(sentinel);
+    app.drive_plugin_headers();
+    // The fixed job now receives a processed block and finishes normally.
+    settle(&mut app, &ctx);
+    let file = transit_engine::presets::path(&config, &gain, "Processed").unwrap();
+    let saved = transit_engine::io::presets::read(&file, &gain).unwrap();
+    assert_eq!(saved, state(0.25), "Save As must contain the value from the processed block");
+    quit(&mut app);
+}
+
 /// Issue #73: a preset loaded right after a parameter change. The change is still on its way to
 /// the plug-in when the preset is picked; the live read that becomes the load's undo state must
 /// wait for it (else it stores the older value), and the preset must then win and stay.

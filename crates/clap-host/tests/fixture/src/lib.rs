@@ -173,6 +173,8 @@ struct Fx {
     restart_at: Option<(u64, u32)>,
     /// `activate` fails (requests plugin, `CMD:restart-fail-now`).
     refuse_activate: bool,
+    /// Deterministic #219 seam: reject one processing start before accepting events.
+    refuse_start_once: bool,
     /// Every `process` calls `params.rescan(VALUES)` (requests plugin, `CMD:rescan-every-block`).
     rescan_every_block: bool,
     processes: u64,
@@ -344,6 +346,9 @@ unsafe extern "C" fn deactivate(p: *const clap_plugin) {
 unsafe extern "C" fn start_processing(p: *const clap_plugin) -> bool {
     let f = unsafe { fx(p) };
     assert!(f.active, "start_processing while inactive");
+    if std::mem::take(&mut f.refuse_start_once) {
+        return false;
+    }
     f.processing = true;
     note(f, "start_processing");
     true
@@ -786,6 +791,10 @@ unsafe extern "C" fn state_load(p: *const clap_plugin, stream: *const clap_istre
     }
     // And its GUI modes (issue #68): embedded too, embedded that fails, and a query.
     match std::str::from_utf8(&bytes[..got]).ok() {
+        Some("CMD:refuse-start-once") => {
+            f.refuse_start_once = true;
+            return true;
+        }
         Some("CMD:gui-embedded") => {
             f.gui_embed = 1;
             return true;
@@ -1009,6 +1018,7 @@ unsafe extern "C" fn factory_create(_f: *const clap_plugin_factory, host: *const
         next_latency: None,
         restart_at: None,
         refuse_activate: false,
+        refuse_start_once: false,
         rescan_every_block: false,
         processes: 0,
         log: std::sync::Mutex::new(Vec::new()),
