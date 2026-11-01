@@ -14,6 +14,7 @@
 //! per-block run state is allocated with it. The render is `StripPool::render_graph`.
 
 pub(crate) mod tail;
+pub(crate) mod snapshots;
 use super::*;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use transit_rt::task_graph::{GraphRun, TaskGraph, fnv};

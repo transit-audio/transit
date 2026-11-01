@@ -1064,6 +1064,7 @@ impl PlanCompiler {
         tables.keys = KeyBank::new(&desc.keys, block, |keyed| key_caps.get(usize::from(keyed)).copied().unwrap_or(0));
         tables.graph = crate::graph::strip_graph(phase1, aux_end.saturating_sub(phase1), &desc.layers, &desc.keys);
         tables.graph.tail = crate::graph::tail::build(&tables.graph, &desc.tail);
+        tables.inputs = crate::graph::snapshots::Snapshots::new(&desc.tail, phase1, block);
         moves.extend(strip_moves);
         for (si, (_, layout, planned, _)) in per_strip.into_iter().enumerate() {
             for p in planned {

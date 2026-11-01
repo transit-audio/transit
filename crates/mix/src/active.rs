@@ -243,7 +243,7 @@ impl MixEngine {
         // Every strip must be home: a strip a render worker holds cannot move (ADR 0029). Playback
         // defers adoption until then ([`MixEngine::render_workers_settled`]).
         if let Some(pool) = self.pool.as_mut() {
-            if !pool.settle(&mut active.tables.strips, &mut active.tables.keys, &mut self.events, &active.session, self.max_block) {
+            if !pool.settle(&mut active.tables.strips, &mut active.tables.keys, &mut active.tables.inputs, &mut self.events, &active.session, self.max_block) {
                 return reject(env, RejectReason::StripsInFlight, active);
             }
             // Deferred MIDI goes into the instances now, so it moves with them.
@@ -382,8 +382,8 @@ impl MixEngine {
         // The render workers stop here, off the audio thread, and every strip comes home.
         if let Some(pool) = self.pool.take() {
             match self.plan.as_deref_mut() {
-                Some(p) => pool.retire(&mut p.tables.strips, &p.session),
-                None => pool.retire(&mut [], &Session::default()),
+                Some(p) => pool.retire(&mut p.tables.strips, &mut p.tables.keys, &mut p.tables.inputs, &p.session),
+                None => pool.retire(&mut [], &mut KeyBank::default(), &mut crate::graph::snapshots::Snapshots::default(), &Session::default()),
             }
         }
         match self.plan.take() {
@@ -806,7 +806,7 @@ impl MixEngine {
     /// workers. Allocation-free and non-blocking.
     pub fn render_workers_settled(&mut self) -> bool {
         match (self.pool.as_mut(), self.plan.as_deref_mut()) {
-            (Some(pool), Some(p)) => pool.settle(&mut p.tables.strips, &mut p.tables.keys, &mut self.events, &p.session, self.max_block),
+            (Some(pool), Some(p)) => pool.settle(&mut p.tables.strips, &mut p.tables.keys, &mut p.tables.inputs, &mut self.events, &p.session, self.max_block),
             _ => true,
         }
     }

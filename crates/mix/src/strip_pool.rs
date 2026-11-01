@@ -118,7 +118,7 @@ impl Job {
             frame: 0,
             duplex: false,
             no_input: vec![Vec::new()],
-            busses: BusTable::default(),
+            busses: BusTable(Vec::with_capacity(1)),
             keys: KeyBank::with_room(transit_model::INSERT_SLOTS),
             graph: 0,
             task: 0,
@@ -683,7 +683,7 @@ impl StripPool {
     /// into its instrument at once, so an event that arrives next (admitted directly, the strip
     /// being home) lands behind the older ones: a note-off is never admitted ahead of its parked
     /// note-on. True when every strip is home.
-    pub(crate) fn settle(&mut self, strips: &mut [Strip], keys: &mut KeyBank, events: &mut EngineEvents, s: &Session, block_len: usize) -> bool {
+    pub(crate) fn settle(&mut self, strips: &mut [Strip], keys: &mut KeyBank, inputs: &mut crate::graph::snapshots::Snapshots, events: &mut EngineEvents, s: &Session, block_len: usize) -> bool {
         let clock = BlockClock { frame: events.next_frame, frames: block_len };
         let g = self.generation + 1;
         let mut home = true;
@@ -698,6 +698,7 @@ impl StripPool {
             }
             // Its keys too, when it went away on the graph path.
             self.take_keys_back(i, keys);
+            self.cells.with(i, |job| inputs.take_back(i, &mut job.busses));
             self.deliver(i, st, g, &clock, events, s);
         }
         home
@@ -983,7 +984,7 @@ impl StripPool {
     /// every strip home. A worker that does not return is quarantined: its strip stays in its
     /// cell, which is leaked with the worker's state and never freed or reused, and the fault is
     /// logged with the track and its plug-ins.
-    pub(crate) fn retire(mut self, strips: &mut [Strip], session: &Session) {
+    pub(crate) fn retire(mut self, strips: &mut [Strip], keys: &mut KeyBank, inputs: &mut crate::graph::snapshots::Snapshots, session: &Session) {
         let q = self.set.shutdown(RETIRE_BOUND);
         for (i, st) in strips.iter_mut().enumerate().take(self.away.len()) {
             if !self.away[i] {
@@ -999,6 +1000,8 @@ impl StripPool {
                 continue;
             }
             self.away[i] = false;
+            self.take_keys_back(i, keys);
+            self.cells.with(i, |job| inputs.take_back(i, &mut job.busses));
         }
     }
 }
