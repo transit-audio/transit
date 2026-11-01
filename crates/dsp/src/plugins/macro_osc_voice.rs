@@ -252,8 +252,6 @@ pub struct Slot {
     pub retrigger: bool,
     /// A new phrase started since the last block: the shaper's envelopes and LFOs start with it.
     started: bool,
-    /// A key held the voice in the last block (its envelopes are gated).
-    was_sounding: bool,
     /// The shaper shapes this voice: the shaper's switch while a key holds the voice, kept through
     /// its release until it is idle.
     shaped: bool,
@@ -286,7 +284,6 @@ impl Slot {
             last_trigger: false,
             retrigger: false,
             started: false,
-            was_sounding: false,
             shaped: false,
             age: 0,
             loudness: 0.0,
@@ -329,7 +326,6 @@ impl Slot {
         self.last_trigger = false;
         self.retrigger = false;
         self.started = false;
-        self.was_sounding = false;
         self.shaped = false;
         self.age = 0;
         self.loudness = 0.0;
@@ -431,14 +427,17 @@ impl Slot {
             self.started = false;
             self.shaped = sh.on;
             self.shaper.note(sh, self.velocity, s.free_phase);
-        } else if !sounding && self.was_sounding {
-            self.shaper.release();
         } else if sounding && sh.on != self.shaped {
             // The held-note rule (#262): a held voice follows the switch, crossfading this block.
             self.shaped = sh.on;
             fade = if sh.on { Fade::In } else { Fade::Out };
         }
-        self.was_sounding = sounding;
+        // A phrase can start and end between renders. Reconcile the envelopes with the
+        // current keys after starting it, even if no earlier render saw a held key (#290).
+        // Shaper::release is idempotent and keeps an existing release running.
+        if !sounding {
+            self.shaper.release();
+        }
         if let Some(q) = s.quarters {
             self.shaper.anchor(sh, q);
         }
@@ -499,7 +498,6 @@ impl Slot {
         }
         if self.idle {
             self.shaper.rest();
-            self.was_sounding = false;
         }
     }
 }
