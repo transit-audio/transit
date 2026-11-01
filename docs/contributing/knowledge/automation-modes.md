@@ -46,7 +46,7 @@ How it works:
   `Copy` data). `render_active` advances it once per block before anything reads automation; a
   parameter that was held and no longer is starts its return at that block's first sample. Its
   value is linear from the static value to the lane's value, the lane's weight going from 0 at the
-  release to 1 exactly `TOUCH_RETURN_S` of rendered samples later (9,600 at 48 kHz). The table moves
+  release to 1 after the session's configured return time (default 9,600 samples at 48 kHz). The table moves
   with the strip into new plan tables (`move_strip`). No allocation, no lock.
 - Faders read the ramp at each block's first and last sample, like every fader curve; pans on
   their 64-sample grid; sends at the block start. Plug-in parameters return in block steps (the
@@ -55,8 +55,14 @@ How it works:
 Switching a Touch track to Read or Latch while a control is held counts as a release: the
 parameter ramps back to its lane in the new mode. (Write leaves the Volume lane unread, as always.)
 
-The return length is the constant `TOUCH_RETURN_S` (200 ms, `crates/mix/src/touch.rs`). transit
-has no Ramp Time setting yet; exposing one is #223.
+File > Session Settings > Automation exposes **Touch return ramp**, Logic's **Ramp Time** (#223).
+It is saved with the project as `Session::touch_return_ms`, a `u16` integer in milliseconds:
+0 to 2000, default 200 (`TOUCH_RETURN_S` remains the default in seconds). Old session files
+default to 200 ms; loaded values above the range are clamped. Zero returns immediately.
+The immutable session snapshot reaches the mix through the existing plan publication path;
+changes take effect at the next plan swap. A release captures its duration, so a return already
+running finishes at its original duration. The duration is rounded to samples at the render
+target's rate; faders, pans, sends and plug-ins keep the read granularity described above.
 
 Not covered:
 
