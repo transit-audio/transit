@@ -55,6 +55,12 @@ pub(super) fn measure(
         let slots = add(add(t.mixer.inserts.iter().flatten().count(), usize::from(t.instrument.is_some()))?, mul(clips, 2)?)?;
         cells = add(add(cells, 1)?, slots)?;
         bytes = add(bytes, strip_bytes(ch, block, cap_of(t, ch), t.mixer.inserts.len(), clips)?)?;
+        if live(t) && is_aux(t) && let Route::Bus(id) = t.mixer.input
+            && let Some(bus) = s.busses.iter().find(|b| b.id == id) {
+            let channels = bus.format.channels().clamp(1, MAX_CHANNELS);
+            bytes = add(bytes, mul(mul(channels, block)?, size_of::<f32>())?)?;
+            bytes = add(bytes, add(size_of::<(usize, Option<(BusId, BusBuf)>)>(), mul(channels, size_of::<Vec<f32>>())?)?)?;
+        }
         bytes = add(bytes, mul(add(t.mixer.sends.len(), 1)?, size_of::<Option<usize>>())?)?;
         // Each keyed insert holds two delay lines (its signal's and the key's), as wide as the strip.
         let keyed = t.mixer.inserts.iter().flatten().filter(|i| i.key.is_some()).count();
@@ -85,6 +91,12 @@ pub(super) fn measure(
     bytes = add(bytes, mul(main_ch, size_of::<f32>())?)?;
     bytes = add(bytes, mul(cells, size_of::<CellLoc>() + 2 * size_of::<bool>())?)?;
     bytes = add(bytes, mul(s.tracks.len(), size_of::<(TrackId, u16)>() + size_of::<BusId>())?)?;
+    // Conservative tail table/run and edge storage bound, including deduplication scratch.
+    // Every pair of aux rows can contribute input, key and destination ordering edges.
+    let auxes = s.tracks.iter().filter(|t| is_aux(t)).count();
+    let tasks = add(add(s.tracks.len(), auxes)?, 1)?;
+    bytes = add(bytes, mul(tasks, 96)?)?;
+    bytes = add(bytes, mul(mul(auxes, auxes)?, 32)?)?;
     over("cells", cells, usize::from(u16::MAX))?;
     over("prepared_bytes", bytes, l.prepared_bytes)
 }

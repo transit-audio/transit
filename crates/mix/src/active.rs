@@ -247,6 +247,8 @@ impl MixEngine {
                 return reject(env, RejectReason::StripsInFlight, active);
             }
         }
+        #[cfg(feature = "testing")]
+        crate::sched_seam::observe_checkpoint(2);
         crate::render_pool::panic_checkpoint(&mut active.tables.strips, self.pool.as_ref());
         if let Some(pool) = self.pool.as_mut() {
             // Deferred MIDI goes into the instances now, so it moves with them.

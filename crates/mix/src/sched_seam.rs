@@ -21,6 +21,25 @@ use std::time::Duration;
 use transit_rt::worker_set::Outcome;
 use transit_rt::worker_set::figures::StripFigures;
 
+std::thread_local! {
+    static CHECKPOINTS: std::cell::RefCell<Option<([u8; 16], usize)>> = const { std::cell::RefCell::new(None) };
+}
+
+pub(crate) fn observe_checkpoint(mark: u8) {
+    CHECKPOINTS.with_borrow_mut(|state| {
+        if let Some((marks, len)) = state && *len < marks.len() { marks[*len] = mark; *len += 1; }
+    });
+}
+
+#[cfg(test)]
+pub(crate) fn checkpoint_observer(arm: bool) -> Vec<u8> {
+    CHECKPOINTS.with_borrow_mut(|state| {
+        let old = state.take().map_or_else(Vec::new, |(marks, len)| marks[..len].to_vec());
+        if arm { *state = Some(([0; 16], 0)); }
+        old
+    })
+}
+
 /// How a muted serial block leaves a strip out (see the module docs).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mute {

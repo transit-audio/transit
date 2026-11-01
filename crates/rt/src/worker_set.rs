@@ -652,6 +652,18 @@ impl WorkerSet {
         true
     }
 
+    /// Between host blocks, retire completed/abandoned attempts without opening a new block.
+    /// The host must still take back strip ownership and lent inputs before capturing counters.
+    /// Visits every slot once and never waits for a claimed worker.
+    pub fn settle_between_blocks(&mut self) -> bool {
+        let mut settled = true;
+        for strip in 0..self.strips() {
+            self.busy[strip] = !self.settle(strip);
+            settled &= !self.busy[strip];
+        }
+        settled
+    }
+
     /// The per-block rule for one slot: brings it to `Idle` when no worker holds it. False when
     /// a worker does (the slot is `Claimed`).
     fn settle(&mut self, strip: usize) -> bool {

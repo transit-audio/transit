@@ -293,6 +293,7 @@ pub(crate) struct StripPool {
     away: Box<[bool]>,
     /// Per strip: what to apply when it is back (`PENDING_*`).
     pending: Box<[u8]>,
+    returned: Box<[bool]>,
     /// Per strip, while away: its instrument's generation (`None`: no instrument).
     binding: Box<[Option<SlotGen>]>,
     /// Per strip: this block's live events while away ([`LIVE`] each), tagged into `side`.
@@ -351,6 +352,7 @@ impl StripPool {
             held_ids: (0..strips).map(|_| AtomicU64::new(u64::MAX)).collect(),
             away: vec![false; strips].into_boxed_slice(),
             pending: vec![0; strips].into_boxed_slice(),
+            returned: vec![false; strips].into_boxed_slice(),
             binding: vec![None; strips].into_boxed_slice(),
             live: vec![Event::default(); strips * LIVE].into_boxed_slice(),
             live_len: vec![0; strips].into_boxed_slice(),
@@ -622,6 +624,12 @@ impl StripPool {
     /// Takes strip `i` back from its cell into `table` and applies what happened while it was
     /// away. False when the cell's lock was not free (a counted fault; the strip stays away).
     fn bring_home(&mut self, i: usize, table: &mut Strip, events: &EngineEvents) -> bool {
+        if !self.bring_home_ownership(i, table) { return false; }
+        self.apply_home_pending(i, table, events);
+        true
+    }
+
+    fn bring_home_ownership(&mut self, i: usize, table: &mut Strip) -> bool {
         let mut session = None;
         let ok = self.cells.with(i, |job| {
             take_home(table, &mut job.strip);
@@ -645,13 +653,18 @@ impl StripPool {
         if let Some(b) = self.binding.get_mut(i) {
             *b = table.instrument.as_ref().map(|inst| inst.generation);
         }
-        let flags = self.pending.get_mut(i).map_or(0, std::mem::take);
         if table.panic.is_some() {
             self.silent[i] = true;
-        } else if flags != 0 && !self.set.is_suspect(i) {
-            apply_pending(table, flags, events);
+            self.pending[i] = 0;
         }
         true
+    }
+
+    fn apply_home_pending(&mut self, i: usize, table: &mut Strip, events: &EngineEvents) {
+        let flags = self.pending.get_mut(i).map_or(0, std::mem::take);
+        if flags != 0 && table.panic.is_none() && !self.set.is_suspect(i) {
+            apply_pending(table, flags, events);
+        }
     }
 
     /// Before a plan is adopted (every strip home): delivers every strip's deferred MIDI into its
@@ -659,6 +672,8 @@ impl StripPool {
     /// strip's index may change). Events the end-of-block rule still carries stay (a new strip
     /// at that index refuses them as a stale binding).
     pub(crate) fn flush_parked(&mut self, strips: &mut [Strip], events: &mut EngineEvents, s: &Session, block_len: usize) {
+        #[cfg(feature = "testing")]
+        crate::sched_seam::observe_checkpoint(3);
         let clock = BlockClock { frame: events.next_frame, frames: block_len };
         let g = self.generation + 1;
         for (i, st) in strips.iter_mut().enumerate().take(self.away.len()) {
@@ -694,23 +709,29 @@ impl StripPool {
     pub(crate) fn settle(&mut self, strips: &mut [Strip], keys: &mut KeyBank, inputs: &mut crate::graph::snapshots::Snapshots, events: &mut EngineEvents, s: &Session, block_len: usize) -> bool {
         let clock = BlockClock { frame: events.next_frame, frames: block_len };
         let g = self.generation + 1;
-        let mut home = true;
+        let mut home = self.set.settle_between_blocks();
+        self.returned.fill(false);
         for (i, st) in strips.iter_mut().enumerate().take(self.away.len()) {
             if !self.is_away(i) {
                 continue;
             }
-            let claimed = self.set.jobs().slot(i).is_some_and(|s| s.state() == transit_rt::strip_jobs::State::Claimed);
-            if claimed || !self.bring_home(i, st, events) {
+            if self.set.is_busy(i) || !self.bring_home_ownership(i, st) {
                 home = false;
                 continue;
             }
             // Its keys too, when it went away on the graph path.
             self.take_keys_back(i, keys);
             self.cells.with(i, |job| inputs.take_back(i, &mut job.busses));
+            self.returned[i] = true;
         }
+        #[cfg(feature = "testing")]
+        crate::sched_seam::observe_checkpoint(1);
         crate::render_pool::panic_checkpoint(strips, Some(self));
         for (i, st) in strips.iter_mut().enumerate().take(self.away.len()) {
-            if !self.is_away(i) { self.deliver(i, st, g, &clock, events, s); }
+            if self.returned[i] && !self.is_away(i) {
+                self.apply_home_pending(i, st, events);
+                self.deliver(i, st, g, &clock, events, s);
+            }
         }
         home
     }

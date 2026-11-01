@@ -11,7 +11,7 @@ impl Snapshots {
         Self { entries: rows.iter().enumerate().filter(|(_, r)| r.live).filter_map(|(k, r)| {
             let (id, fmt) = r.input?;
             Some((phase1 + k, Some((id, BusBuf {
-                fmt, buf: vec![vec![0.0; block]; fmt.channels()], host_buf: Vec::new(),
+                fmt, buf: vec![vec![0.0; block]; fmt.channels().clamp(1, MAX_CHANNELS)], host_buf: Vec::new(),
                 arrival: 0, reader: usize::MAX,
             }))))
         }).collect() }
