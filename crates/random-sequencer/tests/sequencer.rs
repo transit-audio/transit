@@ -377,14 +377,8 @@ fn jitter_toggled_block_by_block_never_doubles_a_note() {
                 let path = Path::constant(tempo);
                 let mut ev = Vec::new();
                 for i in 0..toggles {
-                    let s = Settings {
-                        rate,
-                        model,
-                        voices: Voices::All,
-                        spread: 0.0,
-                        jitter: if i % 2 == 0 { 1.0 } else { 0.0 },
-                        ..Settings::default()
-                    };
+                    let s =
+                        Settings { rate, model, voices: Voices::All, spread: 0.0, jitter: if i % 2 == 0 { 1.0 } else { 0.0 }, ..Settings::default() };
                     ev.extend(play(&mut seq, &s, &path, i * i64::from(block), i64::from(block), block));
                 }
                 ev.extend(stop(&mut seq, &Settings::default()).into_iter().map(|k| (i64::MAX, k)));
