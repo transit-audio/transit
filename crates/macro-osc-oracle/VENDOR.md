@@ -323,17 +323,21 @@ checked against `git ls-tree` of the upstream commit).
   it; its definition is removed. Within the module's control ranges, which its wrapper enforces,
   no vendored read leaves its table.
 - `patches/all/` holds one for the modal voice (#198 slice 2):
-  - `0012-modal-voice-fm-phase-offset-wraps.patch`: the easter-egg FM voice's `SineFm`
-    (`elements/dsp/ominous_voice.h`) adds `static_cast<uint32_t>(fm * 2147483648.0f)` to a phase,
-    where `fm` is a signed offset in half turns whose carrier value reaches 2 in magnitude, so the
-    product is often negative or above 2^32. That conversion is undefined behavior: x86-64
-    compilers (MSVC, GCC) emit a 64-bit truncating conversion and keep the low 32 bits, so the
-    offset wraps modulo one turn; AArch64 (`fcvtzu`) saturates it to `[0, 2^32 - 1]`, and so does
-    the module's Cortex-M4 (`vcvt.u32.f32`). The conversion now goes through `int64_t`, so every
-    host wraps, as x86-64 did (Windows and Linux are unchanged, bit for bit) and as the port does.
-    Found on macOS (Apple silicon), where the oracle saturated and the FM pair null failed at 20 of
-    its 21 strided points (#198). An upstream finding (the conversion, and that the hardware
-    saturates where the arithmetic means a wrap).
+  - `0012-modal-voice-fm-phase-offset-saturates-like-the-hardware.patch`: the easter-egg FM
+    voice's `SineFm` (`elements/dsp/ominous_voice.h`) adds `static_cast<uint32_t>(fm *
+    2147483648.0f)` to a phase, where `fm` is a signed offset in half turns whose carrier value
+    reaches 2 in magnitude, so the product is often negative or at least 2^32. That conversion is
+    undefined behavior. The module's Cortex-M4 (`vcvt.u32.f32`) saturates it, as AArch64
+    (`fcvtzu`) does: truncate toward zero, clamp to `[0, 2^32 - 1]`, NaN to 0; x86-64 compilers
+    (MSVC, GCC) wrap it modulo one turn instead. The patch writes the hardware rule as defined C++
+    (`!(v > 0.0f) ? 0u : (v >= 4294967296.0f ? 0xFFFFFFFFu : static_cast<uint32_t>(v))`; the upper
+    test is against 2^32 because 4294967295.0f rounds to it), so every host computes what the
+    module computes and what the port does (`F::sat_u32`, Derek's decision 2026-11-03). On ARM the
+    result equals the raw cast's bit for bit (in range the cast is the same truncation `fcvtzu`
+    performs, and the two branches are its saturation); on x86-64 the FM pair now differs from the
+    unpatched desktop build, whose wrap was the undefined behavior. Found on macOS (Apple silicon),
+    where the unpatched oracle saturated and the FM pair null, then against a wrapping port, failed
+    at 20 of its 21 strided points (#198). An upstream finding (the undefined conversion).
 - `cpp/modal_voice_oracle.cc` wraps the modal voice's `elements::Part` (#198 slice 2). The part and
   its 32768-word reverb memory live in one value-initialized (zeroed) allocation, as the module's
   globals: `Init` leaves the part's panic flag, the modal resonator's clock divider and LFO phase,

@@ -1,0 +1,21 @@
+--- elements/dsp/ominous_voice.h
++++ elements/dsp/ominous_voice.h
+@@ -154,2 +154,18 @@
+   inline float SineFm(uint32_t phase, float fm) const {
+-    phase += static_cast<uint32_t>(fm * 2147483648.0f);
++    // transit oracle: fm is a signed phase offset in half turns, and the
++    // carrier's reaches 2 in magnitude, so fm * 2^31 is often negative
++    // or at least 2^32. Converting such a float straight to uint32_t is
++    // undefined behavior. The module's Cortex-M4 (vcvt.u32.f32) saturates
++    // it, as AArch64 (fcvtzu) does: truncate toward zero, then clamp to
++    // [0, 2^32 - 1], NaN to 0; x86-64 compilers wrap it modulo one turn
++    // instead. This is the hardware rule written as defined C++, so every
++    // host matches the module and the port. 4294967295.0f rounds to 2^32,
++    // so the upper test is against 4294967296.0f; !(v > 0) also sends NaN
++    // to 0. Below 2^32 a positive v converts exactly as fcvtzu does, so
++    // on ARM the result is the raw cast's, bit for bit.
++    const float v = fm * 2147483648.0f;
++    const uint32_t offset = !(v > 0.0f) ? 0u
++        : (v >= 4294967296.0f ? 0xFFFFFFFFu : static_cast<uint32_t>(v));
++    phase += offset;
+     uint32_t integral = phase >> 20;

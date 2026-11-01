@@ -106,6 +106,19 @@ impl F {
         }
     }
 
+    /// `static_cast<uint32_t>(x)` as ARM computes it (the module's Cortex-M4 `vcvt.u32.f32`, AArch64
+    /// `fcvtzu`): truncate toward zero, then saturate to `[0, u32::MAX]`; NaN gives 0. That is Rust's
+    /// `as u32` from `f32`. Use it where the firmware converts a value that can be negative or out of
+    /// range and transit matches the hardware rather than an x86-64 desktop build (see
+    /// [`F::trunc_u32`]).
+    #[inline(always)]
+    #[must_use]
+    pub fn sat_u32(self) -> u32 {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let u = self.0 as u32;
+        u
+    }
+
     /// `static_cast<size_t>(x)` for a value the caller knows is small and non-negative.
     #[inline(always)]
     #[must_use]

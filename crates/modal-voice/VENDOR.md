@@ -94,9 +94,10 @@ For the maintainer's list (ADR 0033 note; nothing is filed by agents):
   (C2466; patched out for the oracle).
 - `elements/dsp/ominous_voice.h`'s `FmOscillator::SineFm` adds `static_cast<uint32_t>(fm *
   2147483648.0f)` to the phase, where `fm` is a signed offset in half turns (the carrier's reaches 2
-  in magnitude). For a negative or out-of-range product the conversion is undefined: x86-64
-  compilers wrap it modulo one turn, AArch64 (`fcvtzu`) and the module's Cortex-M4
-  (`vcvt.u32.f32`) saturate it, so on the hardware every negative modulation becomes 0 and the
-  FM is one-sided. The port wraps (`F::trunc_u32`, the x86-64 rule); the oracle converts through
-  `int64_t` on every host so it wraps too (`patches/all/0012` in the oracle crate). Found when
-  the FM pair null failed on macOS (Apple silicon) only (#198).
+  in magnitude). For a negative or out-of-range product the conversion is undefined behavior. The
+  module's Cortex-M4 (`vcvt.u32.f32`) saturates it, as AArch64 (`fcvtzu`) does, so on the hardware
+  every negative modulation becomes 0 and the FM is one-sided; x86-64 desktop builds wrap it modulo
+  one turn instead. The port matches the hardware (`F::sat_u32`, Rust's saturating `as u32`), and
+  the oracle writes the same saturation as defined C++ on every host (`patches/all/0012` in the
+  oracle crate); Derek's decision 2026-11-03. Found when the FM pair null failed on macOS (Apple
+  silicon) only (#198).

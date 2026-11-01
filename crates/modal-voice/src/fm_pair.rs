@@ -195,13 +195,16 @@ impl FmOscillator {
         increment.trunc_u32()
     }
 
-    /// `SineFm(phase, fm)`. The offset `fm * 2^31` is often negative or above 2^32; its conversion
-    /// wraps modulo one turn, as x86-64 compilers emit the firmware's `static_cast<uint32_t>` and as
-    /// the oracle's patch 0012 makes every host compute it (AArch64 and the module's Cortex-M4
-    /// saturate instead: the conversion is undefined in C++).
+    /// `SineFm(phase, fm)`. The offset `fm * 2^31` is often negative or at least 2^32, and the
+    /// firmware's `static_cast<uint32_t>` of it is undefined in C++. The module's Cortex-M4
+    /// (`vcvt.u32.f32`) saturates it: a negative offset becomes 0 (the FM is one-sided) and one past
+    /// the range `u32::MAX`. The port matches the hardware ([`F::sat_u32`]), and the oracle's patch
+    /// 0012 writes the same rule as defined C++ on every host. The firmware's x86-64 desktop build
+    /// wrapped the offset modulo one turn instead, which was the undefined behavior, not the
+    /// module's sound (Derek's decision 2026-11-03, #198).
     #[inline(always)]
     fn sine_fm(phase: u32, fm: F) -> F {
-        let phase = phase.wrapping_add((fm * 2_147_483_648.0).trunc_u32());
+        let phase = phase.wrapping_add((fm * 2_147_483_648.0).sat_u32());
         let integral = (phase >> 20) as usize;
         let fractional = F::from_u32(phase << 12) / 4_294_967_296.0;
         let a = F(LUT_SINE[integral]);
