@@ -566,7 +566,7 @@ fn card_body(
     // Open editor: the plug-in's own window, through the same path as `ui.set {plugin_windows}`.
     // A built-in's editor is our own window, so it needs no player and no loaded instance.
     let builtin = app.builtin_at((t, key_slot)).is_some();
-    let enabled = builtin || (!loading && !stuck && app.player.as_ref().is_some_and(|pl| hosted(&plugin) || pl.has_editor(t, key_slot)));
+    let enabled = builtin || (!loading && !stuck && app.player.as_ref().is_some_and(|pl| pl.has_gui(t, key_slot)));
     let open = app.ui.plugin_windows.contains(&(t, key_slot));
     let resp = ui.interact(eb.intersect(lane), ui.id().with(("editor", t.0, salt)), Sense::click());
     pc.rect_filled(eb, crate::theme::RADIUS, if resp.hovered() && enabled { TOKENS.button_hover } else { TOKENS.button });
@@ -593,6 +593,8 @@ fn card_body(
         "The plug-in is not responding; Retry (the circular arrow beside \"Not responding\") loads it again".to_string()
     } else if loading && !builtin {
         "The plug-in is still loading; its editor opens when it is ready".to_string()
+    } else if !enabled && app.player.is_some() {
+        "This plug-in has no editor".to_string()
     } else if !enabled {
         "No editor window (no audio device)".to_string()
     } else if open {

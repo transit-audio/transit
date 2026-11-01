@@ -24,6 +24,7 @@ pub mod devices;
 pub mod diagnostics;
 pub mod edit_tools;
 mod editor_group;
+mod editors;
 mod external_instrument;
 mod external_measure;
 pub mod fades;
@@ -313,12 +314,15 @@ pub enum Dialog {
 
 /// An editor asked for (by `ui.set` or a menu) and not open yet: retried until the plug-in is
 /// loaded, or given up at `deadline` (seconds of UI time).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct EditorWanted {
     key: (TrackId, usize),
+    name: String,
     deadline: f64,
     next_try: f64,
     opened: bool,
+    requested: bool,
+    waiting_logged: bool,
     /// After a reorder: the player binds the instance to its old slot until the new plan is
     /// adopted, so "not open" is not yet "closed by the user" before this time.
     settle_until: f64,
@@ -847,76 +851,15 @@ impl StudioApp {
         self.ui.plugin_windows.retain(|k| *k != key);
     }
 
-    /// Ask for a plug-in editor window; it opens as soon as the plug-in is loaded.
-    pub fn want_editor(&mut self, key: (TrackId, usize)) {
-        if !self.ui.plugin_windows.contains(&key) {
-            self.ui.plugin_windows.push(key);
-        }
-        if self.builtin_at(key).is_some() {
-            // Drawn by `builtin_editor::windows`; the player has no editor to wait for.
-            return;
-        }
-        if self.editors.iter().any(|e| e.key == key) {
-            return;
-        }
-        let now = self.last_frame.unwrap_or_default();
-        self.editors.push(EditorWanted { key, deadline: now + 30.0, next_try: now, opened: false, settle_until: 0.0 });
-    }
-
-    /// Open the editors asked for once their plug-ins are loaded; forget the ones the user closed.
-    fn drive_editors(&mut self) {
-        let now = self.last_frame.unwrap_or_default();
-        let p: &dyn audio_connection::Editors = if let Some(fake) = self.audio_devices.fake.as_ref().and_then(|f| f.connection.as_ref()) {
-            fake
-        } else if let Some(p) = &self.player {
-            p
-        } else {
-            self.editors.clear();
-            return;
-        };
-        let mut keep = Vec::new();
-        let mut closed = Vec::new();
-        for mut w in std::mem::take(&mut self.editors) {
-            let open = p.editor_open(w.key.0, w.key.1);
-            if open {
-                w.opened = true;
-                keep.push(w);
-                continue;
-            }
-            if w.opened && now < w.settle_until {
-                keep.push(w);
-                continue;
-            }
-            if w.opened {
-                // Closed by the user (or the instance was recreated): no longer wanted.
-                closed.push(w.key);
-                continue;
-            }
-            if now >= w.next_try {
-                match p.open_editor(w.key.0, w.key.1) {
-                    Ok(()) => w.opened = true,
-                    Err(e) if now > w.deadline => {
-                        self.status = format!("Plug-in editor: {e}");
-                        closed.push(w.key);
-                        continue;
-                    }
-                    Err(_) => w.next_try = now + 0.5,
-                }
-            }
-            keep.push(w);
-        }
-        self.editors = keep;
-        self.ui.plugin_windows.retain(|k| !closed.contains(k));
-        self.plugin_host_status();
-    }
-
     /// Puts what the plug-in host thread reports (ADR 0018) in the status line: an editor that
     /// failed after its open was accepted, and a plug-in that stopped responding.
     fn plugin_host_status(&mut self) {
         self.note_plugin_timings();
         let Some(p) = &self.player else { return };
-        for (_, _, e) in p.take_editor_errors() {
+        for (track, slot, e) in p.take_editor_errors() {
             self.status = format!("Plug-in editor: {e}");
+            self.editors.retain(|w| w.key != (track, slot));
+            self.ui.plugin_windows.retain(|k| *k != (track, slot));
         }
         let wedged = p.plugin_host_wedged();
         let stuck = p.stuck_slots();
@@ -1365,6 +1308,8 @@ mod devices_chain_tests;
 mod devices_sidechain_tests;
 #[cfg(test)]
 mod edit_tools_tests;
+#[cfg(test)]
+mod editor_diagnostics_tests;
 #[cfg(test)]
 mod emergency_tests;
 #[cfg(test)]

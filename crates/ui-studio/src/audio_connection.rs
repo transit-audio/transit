@@ -9,6 +9,9 @@ use transit_playback::{AudioConfig, Player, record::Recorder, telemetry::Callbac
 pub(crate) trait Editors {
     fn close_editors(&self) -> Result<(), String>;
     fn editor_open(&self, track: TrackId, slot: usize) -> bool;
+    fn editor_opening(&self, _track: TrackId, _slot: usize) -> bool {
+        false
+    }
     fn open_editor(&self, track: TrackId, slot: usize) -> Result<(), String>;
     /// Issue #173: posts a grouping request to the editors' threads; never waits.
     fn editor_windows(&self, _request: EditorWindowRequest) {}
@@ -38,6 +41,9 @@ impl Editors for Player {
     }
     fn editor_open(&self, track: TrackId, slot: usize) -> bool {
         self.editor_open(track, slot)
+    }
+    fn editor_opening(&self, track: TrackId, slot: usize) -> bool {
+        self.editor_opening(track, slot).is_some()
     }
     fn open_editor(&self, track: TrackId, slot: usize) -> Result<(), String> {
         self.open_editor(track, slot)
@@ -88,6 +94,9 @@ pub(crate) struct FakeConnection {
     pub telemetry: CallbackTelemetry,
     pub failed: bool,
     pub editors: RefCell<Vec<(TrackId, usize)>>,
+    /// Scripted editor replies for tests of the real UI retry path.
+    pub editor_error: Option<String>,
+    pub editor_pending: bool,
     /// The fake host thread's editor windows (issue #173).
     pub windows: RefCell<FakeWindows>,
     trace: Trace,
@@ -96,7 +105,16 @@ pub(crate) struct FakeConnection {
 impl FakeConnection {
     pub fn new(config: AudioConfig, trace: Trace) -> Self {
         trace.borrow_mut().push("open output");
-        Self { config, telemetry: CallbackTelemetry::default(), failed: false, editors: RefCell::default(), windows: RefCell::default(), trace }
+        Self {
+            config,
+            telemetry: CallbackTelemetry::default(),
+            failed: false,
+            editors: RefCell::default(),
+            editor_error: None,
+            editor_pending: false,
+            windows: RefCell::default(),
+            trace,
+        }
     }
 }
 
@@ -166,8 +184,14 @@ impl Editors for FakeConnection {
     fn editor_open(&self, track: TrackId, slot: usize) -> bool {
         self.editors.borrow().contains(&(track, slot))
     }
+    fn editor_opening(&self, track: TrackId, slot: usize) -> bool {
+        self.editor_pending && self.editor_open(track, slot)
+    }
     fn open_editor(&self, track: TrackId, slot: usize) -> Result<(), String> {
         self.trace.borrow_mut().push("open editor");
+        if let Some(error) = &self.editor_error {
+            return Err(error.clone());
+        }
         self.editors.borrow_mut().push((track, slot));
         Ok(())
     }
