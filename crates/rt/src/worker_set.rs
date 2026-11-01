@@ -98,8 +98,10 @@
 //!   [`WorkerSet::wake`], count the publisher's own time between the first publish and theirs.
 //!
 //! Stamps are nanoseconds since the set's construction in `AtomicU64`s; the job slot is not
-//! touched. The worker adds no clock read; the callback adds one per block. Read them from any
-//! thread through [`WorkerSet::figures`].
+//! touched. The legacy histogram retains its first-publish baseline. The callback now reads the
+//! clock once per attempt for [`queue`]'s publication stamp and reuses the first read for that
+//! baseline. Workers add no clock reads. Read legacy figures through [`WorkerSet::figures`];
+//! consistent measurement counters use [`WorkerSet::measurement_reader`].
 //!
 //! Never drop a [`WorkerSet`] on the audio thread: `Drop` runs [`WorkerSet::shutdown`], which
 //! sleeps while it waits (up to 1 s).
@@ -120,9 +122,9 @@ pub mod queue;
 /// Seeded stall schedules and their shrinker (feature `testing`, issue #210).
 #[cfg(any(test, feature = "testing"))]
 pub mod schedule;
-mod stepwise;
 #[cfg(any(test, feature = "testing"))]
 pub mod seams;
+mod stepwise;
 
 pub use stepwise::Poll;
 
@@ -701,6 +703,19 @@ impl WorkerSet {
     ///
     /// [`PublishRefused`]: a caller error, counted in [`Stats::misuse`]; nothing changes.
     pub fn publish(&mut self, strip: usize) -> Result<Published, PublishRefused> {
+        self.publish_stamped(strip, |set| set.shared.figures.nanos(Instant::now()).max(1))
+    }
+
+    fn publish_stamped(&mut self, strip: usize, stamp: impl FnOnce(&Self) -> u64) -> Result<Published, PublishRefused> {
+        self.publish_with(strip, stamp, JobSet::publish)
+    }
+
+    fn publish_with(
+        &mut self,
+        strip: usize,
+        stamp: impl FnOnce(&Self) -> u64,
+        publish_slot: impl FnOnce(&JobSet, usize) -> Result<(), PublishError>,
+    ) -> Result<Published, PublishRefused> {
         let refused = |set: &Self, why| {
             bump(&set.shared.stats.misuse);
             Err(why)
@@ -736,13 +751,13 @@ impl WorkerSet {
             }
         }
         // One read per attempt. The legacy wake histogram retains its first-publish baseline.
-        let pub_ns = self.shared.figures.nanos(Instant::now()).max(1);
+        let pub_ns = stamp(self);
         if self.publish_ns == 0 {
             self.publish_ns = pub_ns;
         }
         self.shared.figures.published(strip, self.publish_ns);
         self.shared.queue.stamp(strip, pub_ns, self.queue_deadline_ns, self.queue_period_ns);
-        if let Err(e) = self.shared.jobs.publish(strip) {
+        if let Err(e) = publish_slot(&self.shared.jobs, strip) {
             return refused(self, PublishRefused::Slot(e));
         }
         bump(&self.shared.queue.counts.published);
@@ -857,20 +872,8 @@ impl WorkerSet {
                     }
                     // Admitted, and the reclaim won against the workers (a lost reclaim means a
                     // worker claimed it; it is waited for like any claimed slot).
-                    State::Published if self.admits(strip, now, deadline) && slot.reclaim() => {
-                        bump(&shared.queue.counts.inline_pre);
-                        let t0 = Instant::now();
-                        inline(strip);
-                        now = Instant::now();
-                        shared.record_cost(strip, now.saturating_duration_since(t0));
-                        if now > deadline {
-                            // Ran past the deadline: longer than its worst case said.
-                            self.bar(strip);
-                        }
-                        slot.retire();
-                        bump(&self.shared.stats.inline_renders);
-                        shared.figures.count(strip, Count::Inline);
-                        self.outcomes[strip] = Outcome::Inline;
+                    State::Published if self.reclaim_before_deadline(strip, now, deadline) => {
+                        now = self.render_inline(strip, deadline, &mut inline, Instant::now);
                         open -= 1;
                         progressed = true;
                     }
@@ -1051,27 +1054,8 @@ fn worker_main(shared: &Shared, index: usize, start: usize, promote: bool) {
             break;
         }
         while let Some((strip, token)) = shared.jobs.try_claim_next(next) {
-            shared.queue.claimed();
             me.current.store(strip + 1, Ordering::Relaxed);
-            let generation = token.generation();
-            // The two clock reads that time the render are also its claim and completion stamps
-            // (#169): the wake latency now, the completion stamp before the Release complete.
-            let t0 = Instant::now();
-            shared.figures.claimed(strip, shared.figures.nanos(t0));
-            let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| shared.runner.run(strip, generation)));
-            let end = Instant::now();
-            shared.record_cost(strip, end.saturating_duration_since(t0));
-            shared.figures.done(strip, shared.figures.nanos(end));
-            shared.queue.classify(strip, shared.figures.nanos(t0), shared.figures.nanos(end));
-            if r.is_err() {
-                // Relaxed: published by the completing Release below.
-                shared.panicked[strip].store(true, Ordering::Relaxed);
-                bump(&shared.stats.runner_panics);
-            }
-            bump(&shared.stats.worker_runs);
-            // Drop the panic payload (if any) before completing, outside the strip's ownership.
-            drop(r);
-            token.complete();
+            shared.run_attempt(strip, token, Instant::now);
             me.current.store(0, Ordering::Relaxed);
             // The worker's half of the store-buffering pair (see `WorkerSet::wake`): `current = 0`
             // is ordered before the next sweep's loads of the slot states.
@@ -1110,3 +1094,9 @@ mod figures_tests;
 
 #[cfg(test)]
 mod graph_tests;
+
+#[cfg(test)]
+mod tail_graph_tests;
+
+#[cfg(test)]
+mod queue_tests;

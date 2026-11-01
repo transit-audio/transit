@@ -1,8 +1,42 @@
-use super::{InlineRefusal, OVERRUN_BAR_BLOCKS, WorkerSet, bump};
+use super::{Count, InlineRefusal, OVERRUN_BAR_BLOCKS, Outcome, WorkerSet, bump};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 impl WorkerSet {
+    /// The pre-deadline ownership transition, counted at reclaim rather than completion.
+    pub(super) fn reclaim_before_deadline(&mut self, strip: usize, now: Instant, deadline: Instant) -> bool {
+        if !self.admits(strip, now, deadline) || !self.shared.jobs.slot(strip).is_some_and(super::super::strip_jobs::JobSlot::reclaim) {
+            return false;
+        }
+        bump(&self.shared.queue.counts.inline_pre);
+        true
+    }
+
+    /// Renders an already reclaimed slot. The clock argument is the deterministic cost/readout
+    /// seam for rt unit tests; production passes `Instant::now`.
+    pub(super) fn render_inline(
+        &mut self,
+        strip: usize,
+        deadline: Instant,
+        inline: &mut impl FnMut(usize),
+        mut clock: impl FnMut() -> Instant,
+    ) -> Instant {
+        let start = clock();
+        inline(strip);
+        let end = clock();
+        self.shared.record_cost(strip, end.saturating_duration_since(start));
+        if end > deadline {
+            self.bar(strip);
+        }
+        if let Some(slot) = self.shared.jobs.slot(strip) {
+            slot.retire();
+        }
+        bump(&self.shared.stats.inline_renders);
+        self.shared.figures.count(strip, Count::Inline);
+        self.outcomes[strip] = Outcome::Inline;
+        end
+    }
+
     /// Allows a published tail task to render inline when reclaimed at the deadline.
     /// Call before publication. Every successful `begin_block` clears every slot's flag.
     pub fn set_inline_at_deadline(&mut self, strip: usize) {

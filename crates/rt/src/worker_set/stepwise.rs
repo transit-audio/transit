@@ -32,6 +32,7 @@ pub enum Poll {
 
 impl WorkerSet {
     /// Counts an invalid Closed-window publication; asserts in rt tests.
+    #[cfg_attr(test, allow(clippy::panic))]
     pub(crate) fn closed_publish(&self) {
         bump(&self.shared.stats.misuse);
         #[cfg(test)]
@@ -77,19 +78,8 @@ impl WorkerSet {
                             return Poll::Resolved { strip, outcome: o, late: now >= deadline };
                         }
                     }
-                    State::Published if self.admits(strip, now, deadline) && slot.reclaim() => {
-                        bump(&shared.queue.counts.inline_pre);
-                        let t0 = Instant::now();
-                        inline(strip);
-                        let end = Instant::now();
-                        shared.record_cost(strip, end.saturating_duration_since(t0));
-                        if end > deadline {
-                            self.bar(strip);
-                        }
-                        slot.retire();
-                        bump(&self.shared.stats.inline_renders);
-                        shared.figures.count(strip, Count::Inline);
-                        self.outcomes[strip] = Outcome::Inline;
+                    State::Published if self.reclaim_before_deadline(strip, now, deadline) => {
+                        let end = self.render_inline(strip, deadline, &mut inline, Instant::now);
                         return Poll::Resolved { strip, outcome: Outcome::Inline, late: end > deadline };
                     }
                     _ => {}

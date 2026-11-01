@@ -1,7 +1,8 @@
 //! Per-attempt accounting and an acknowledged, single-consumer measurement mailbox.
 //! Counters never participate in scheduling. See render-graph-measurement.md.
 
-use super::{WorkerSet, bump};
+use super::{Shared, WorkerSet, bump};
+use crate::strip_jobs::ClaimToken;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::time::{Duration, Instant};
@@ -57,6 +58,7 @@ impl QueueSnapshot {
 }
 
 #[derive(Default)]
+#[allow(clippy::struct_field_names)] // Units and names match the normative measurement document.
 struct Stamps {
     pub_ns: AtomicU64,
     deadline_ns: AtomicU64,
@@ -105,6 +107,28 @@ impl Queue {
     }
 }
 
+impl Shared {
+    /// Exactly one claimed executor. Production supplies the render's two existing clock reads;
+    /// rt tests inject both stamps to exercise the same completion and fault path.
+    pub(super) fn run_attempt(&self, strip: usize, token: ClaimToken<'_>, mut clock: impl FnMut() -> Instant) {
+        self.queue.claimed();
+        let start = clock();
+        self.figures.claimed(strip, self.figures.nanos(start));
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| self.runner.run(strip, token.generation())));
+        let end = clock();
+        self.record_cost(strip, end.saturating_duration_since(start));
+        self.figures.done(strip, self.figures.nanos(end));
+        self.queue.classify(strip, self.figures.nanos(start), self.figures.nanos(end));
+        if result.is_err() {
+            self.panicked[strip].store(true, Ordering::Relaxed);
+            bump(&self.stats.runner_panics);
+        }
+        bump(&self.stats.worker_runs);
+        drop(result);
+        token.complete();
+    }
+}
+
 const IDLE: u8 = 0;
 const REQUESTED: u8 = 1;
 const RESPONSE: u8 = 2;
@@ -117,6 +141,18 @@ pub(super) struct Mailbox {
     request: AtomicU64,
     complete: AtomicU8,
     payload: QueueCounters,
+}
+
+impl Mailbox {
+    // One consumer owns this operation. Kept separate for the paused-reader interleaving test.
+    pub(super) fn request(&self, identity: u64) -> bool {
+        if self.state.load(Ordering::Acquire) != IDLE {
+            return false;
+        }
+        self.request.store(identity, Ordering::Relaxed);
+        self.state.store(REQUESTED, Ordering::Release);
+        true
+    }
 }
 
 /// One response, copied in full before acknowledgment.
@@ -139,12 +175,7 @@ impl MeasurementReader {
     /// Posts a request only after the previous response has been copied and acknowledged.
     /// Refuses immediately while a request or response is outstanding.
     pub fn request(&mut self, identity: u64) -> bool {
-        if self.mailbox.state.load(Ordering::Acquire) != IDLE {
-            return false;
-        }
-        self.mailbox.request.store(identity, Ordering::Relaxed);
-        self.mailbox.state.store(REQUESTED, Ordering::Release);
-        true
+        self.mailbox.request(identity)
     }
 
     /// Copies a published response, then acknowledges it. Never waits for the callback.

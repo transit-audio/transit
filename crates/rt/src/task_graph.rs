@@ -1,7 +1,6 @@
-//! Dependency-aware strip scheduling (issue #174, ADR 0029 amendment, slice 1): a per-plan task
-//! table whose edges run from every sidechain key source to its keyed strip, the per-block run
-//! state that publishes a task only when every input it needs is ready, and the driver that runs
-//! one block of it through a [`WorkerSet`].
+//! Dependency-aware strip scheduling (issue #174, ADR 0029 section 11): hard strip-key edges,
+//! soft contribution/order edges, explicit worker slots and slotless control tasks. The driver
+//! starts each ready task with an Open or Closed window through its [`GraphHost`].
 //!
 //! **What the graph decides, and what it does not.** Only *when* a task is published. The slot
 //! protocol ([`crate::strip_jobs`]), the bounded wait to the deadline, the per-block busy skip
@@ -24,12 +23,11 @@
 //!
 //! **The failure rule.** A source that resolves without a usable result (an overrun of any cause,
 //! a fault, an identity mismatch, or unavailable when started) is the *origin* of a miss: every
-//! dependent still waiting, and theirs in turn, is skipped for the block
+//! hard dependent still waiting, and its hard dependents in turn, is skipped for the block
 //! ([`WorkerSet::skip_upstream`], [`OverrunCause::UpstreamMissed`](crate::worker_set::OverrunCause))
-//! with that origin, and never published; unrelated tasks keep rendering. A dependent that
-//! becomes ready only after the deadline (its source resolved in the deadline phase) is not
-//! published: [`WorkerSet::forgo`] counts it under its own cause (`Unstarted`). Nothing is
-//! retried.
+//! with that origin, and never published. Soft dependencies resolve even on failure. At the
+//! deadline the host can render callback-owned work, resolve control tasks, skip Busy or
+//! unavailable tasks, or forgo phase-1 work. Nothing is published in the Closed window.
 //!
 //! **Bounded storage.** The table is built once per plan off the audio path; the run state holds
 //! one counter, one state and at most one queued step per task, sized with the table. Nothing in
@@ -297,8 +295,7 @@ impl GraphRun {
         }
     }
 
-    /// `task` has no usable result for this block: every dependent still waiting misses, with
-    /// `origin` (and theirs in turn, as each is handed out).
+    /// `task` has no usable result: hard dependents miss with `origin`, soft inputs resolve.
     fn fail(&mut self, graph: &TaskGraph, task: usize, origin: usize) {
         let origin = u32::try_from(origin).unwrap_or(u32::MAX);
         for (&d, &kind) in graph.dependents(task).iter().zip(graph.dependent_kinds(task)) {
@@ -321,7 +318,7 @@ impl GraphRun {
         }
     }
 
-    /// The next step, if any. A missed task's own dependents miss with the same origin.
+    /// The next step, if any. A missed task propagates failure through its own edge kinds.
     fn next(&mut self, graph: &TaskGraph) -> Option<Step> {
         self.steps_len = self.steps_len.checked_sub(1)?;
         let step = self.steps[self.steps_len];
@@ -412,7 +409,7 @@ pub fn drive(host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, d
     // In task order; nothing is deferred outside the wave, so the list does not grow here.
     for k in 0..run.later_len {
         let t = run.later[k] as usize;
-        d.render(host, graph, run, t);
+        Driver::render(host, graph, run, t);
         // A pinned render that ran past the deadline leaves no time for its dependents.
         let phase = if Instant::now() >= deadline { Phase::Late } else { Phase::Sweep };
         d.steps(host, graph, run, phase);
@@ -484,19 +481,19 @@ impl Driver {
             Start::Publish if window == Window::Closed => {
                 host.set().closed_publish();
                 host.refused(t);
-                self.render(host, graph, run, t);
+                Self::render(host, graph, run, t);
             }
             Start::Publish => match host.set().publish(slot) {
                 Ok(Published::Published) => self.wake += 1,
                 Ok(Published::Skipped) => run.fail(graph, t, t),
                 Err(_) => {
                     host.refused(t);
-                    self.render(host, graph, run, t);
+                    Self::render(host, graph, run, t);
                 }
             },
             Start::Callback if phase == Phase::Wave => run.defer(t),
             Start::Callback => {
-                self.render(host, graph, run, t);
+                Self::render(host, graph, run, t);
             }
             Start::Ready => run.succeed(graph, t),
             Start::Busy => {
@@ -511,7 +508,7 @@ impl Driver {
         }
     }
 
-    fn render(&self, host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, task: usize) {
+    fn render(host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, task: usize) {
         let result = host.render_here(task);
         if graph.slot(task).is_none() || result == Rendered::Usable {
             run.succeed(graph, task);
