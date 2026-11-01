@@ -85,7 +85,7 @@ pub(crate) fn build(base: &StripGraph, rows: &[Row]) -> TailGraph {
     for (i, slot) in slots.iter_mut().enumerate().take(phase1) {
         *slot = Some(i);
         edges.push((i, phase1, EdgeKind::Soft));
-        for &to in base.graph.dependents(i) { edges.push((i, to, EdgeKind::Hard)); }
+        for &to in base.graph.dependents(i) { edges.push((i, to as usize, EdgeKind::Hard)); }
     }
     for (k, row) in rows.iter().enumerate() {
         let r = render_task(phase1, k);

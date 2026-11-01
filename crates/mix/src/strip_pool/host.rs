@@ -2,6 +2,14 @@
 use super::*;
 
 impl StripPool {
+    pub(crate) fn host_entry(&mut self, frames: usize, rate: u32) {
+        self.host_period = block_period(frames, rate);
+        #[cfg(feature = "testing")]
+        self.set.install_test_seams();
+    }
+
+    pub(crate) fn measurement_requested(&self) -> bool { self.set.measurement_requested() }
+    pub(crate) fn capture_measurement(&mut self, settled: bool) { self.set.capture_measurement(settled); }
     pub(crate) fn begin_host_block(&mut self) {
         self.host_seen.fill(0);
         self.host_counted = false;

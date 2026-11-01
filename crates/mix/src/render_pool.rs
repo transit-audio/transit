@@ -228,6 +228,15 @@ pub(crate) fn guarded(strip: &mut Strip, f: impl FnOnce(&mut Strip)) {
     }
 }
 
+/// Resume only legally home payloads, in the plan's phase-1, tail, master order.
+pub(crate) fn panic_checkpoint(strips: &mut [Strip], pool: Option<&strip_pool::StripPool>) {
+    for (i, st) in strips.iter_mut().enumerate() {
+        if !pool.is_some_and(|p| p.is_away(i)) && let Some(payload) = st.panic.take() {
+            std::panic::resume_unwind(payload);
+        }
+    }
+}
+
 /// Process strips: serially on the audio thread (its render workers are driven by
 /// `StripPool::render`, not here), in parallel on Rayon's global pool for an offline render when
 /// there are enough of them. The strips are independent and are summed afterwards in a fixed

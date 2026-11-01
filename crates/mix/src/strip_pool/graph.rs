@@ -35,6 +35,22 @@ use crate::graph::StripGraph;
 use transit_rt::task_graph::drive;
 
 impl StripPool {
+    /// A refused block opening or an oversized keyed plan never renders an away spare.
+    pub(crate) fn recover_phase1(&mut self, b: &PoolBlock<'_>, strips: &mut [Strip], keys: &mut KeyBank, graph: &StripGraph) {
+        for i in 0..strips.len() {
+            let unavailable = self.preparation_blocked(i) || strips[i].panic.is_some()
+                || keys.sources_of(i).any(|j| self.is_silent(j) || self.is_away(j));
+            if let Some(silent) = self.silent.get_mut(i) { *silent = unavailable; }
+            if unavailable { continue; }
+            let start = graph.layer_start(i);
+            let (before, rest) = strips.split_at_mut(i);
+            keys.fill(i..i + 1, |j| if j < start { before.get(j) } else { None }, b.busses, b.frames);
+            if let Some(st) = rest.first_mut() && let Some(t) = b.session.tracks.get(usize::from(st.track)).filter(|t| live(t) && !is_aux(t)) {
+                guarded(st, |st| process_strip(t, st, &StripRender { s: b.session, busses: b.busses, live: b.live,
+                    pos: b.pos, frames: b.frames, any_solo: b.any_solo, keys }));
+            }
+        }
+    }
     /// Takes back the keys strip `i`'s job holds (nothing when it holds none). Its cell must be
     /// free (the strip home or coming home).
     pub(crate) fn take_keys_back(&self, i: usize, keys: &mut KeyBank) {
@@ -68,23 +84,12 @@ impl StripPool {
             // Refused (a protocol fault): render what is home serially in table order (a source
             // renders before its keyed strips), leave the rest silent.
             self.counters.conflicts.fetch_add(1, Ordering::Relaxed);
-            for i in 0..p1.len() {
-                if self.is_away(i) {
-                    continue;
-                }
-                let start = graph.layer_start(i);
-                let (done, rest) = p1.split_at_mut(i);
-                keys.fill(i..i + 1, |j| if j < start { done.get(j) } else { None }, b.busses, b.frames);
-                let Some(st) = rest.first_mut() else { continue };
-                if let Some(t) = s.tracks.get(usize::from(st.track)).filter(|t| live(t) && !is_aux(t)) {
-                    let block = StripRender { s, busses: b.busses, live: b.live, pos: b.pos, frames: b.frames, any_solo: b.any_solo, keys: &*keys };
-                    guarded(st, |st| process_strip(t, st, &block));
-                }
-            }
+            self.recover_phase1(b, p1, keys, graph);
             self.note_held(s);
             return;
         }
         self.generation = g;
+        self.set.set_block_timing(self.deadline(b), self.host_period);
         for (i, st) in p1.iter_mut().enumerate().take(cells) {
             self.silent[i] = false;
             self.on_callback[i] = false;
@@ -101,7 +106,7 @@ impl StripPool {
         let StripGraph { graph: table, run, layer_start, .. } = graph;
         let (_report, callback) = {
             let mut host =
-                Host { pool: &mut *self, p1: &mut *p1, events: &mut *events, keys: &mut *keys, graph: table, layer_start, b, g, callback: 0 };
+                Host { pool: &mut *self, p1: &mut *p1, events: &mut *events, keys: &mut *keys, graph: table, layer_start, b, g, callback: 0, tail: None };
             let report = drive(&mut host, table, run, deadline);
             (report, host.callback)
         };

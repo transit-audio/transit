@@ -513,6 +513,7 @@ struct Strip {
     /// strip for the control side (a plan's returned tables, [`MixEngine::into_retired`]). While
     /// it holds one the strip does not render, so nothing overwrites (drops) it.
     panic: Option<Box<dyn std::any::Any + Send>>,
+    rendered: strip_pool::Stamp,
     /// Touch mode (#188): the parameters the track holds or returns to their lanes.
     touch: TouchRamps,
 }
@@ -760,6 +761,7 @@ impl Strip {
             hw: Vec::new(),
             ext: None,
             panic: None,
+            rendered: strip_pool::Stamp::default(),
             touch: TouchRamps::default(),
         }
     }
@@ -931,6 +933,9 @@ impl MixEngine {
     /// [`MixEngine::set_transport_epoch`] and the position jump in [`MixEngine::render_active`]
     /// instead, which release only what the clips play (see the `events` module).
     pub fn reset(&mut self) {
+        if let Some(plan) = self.plan.as_deref_mut() {
+            render_pool::panic_checkpoint(&mut plan.tables.strips, self.pool.as_ref());
+        }
         // A strip a render worker holds is reset when it is back, and nothing deferred for any
         // strip plays after the stop (ADR 0029).
         if let Some(pool) = self.pool.as_mut() {

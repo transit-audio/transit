@@ -308,6 +308,7 @@ pub(crate) struct StripPool {
     /// cell refused).
     on_callback: Box<[bool]>,
     generation: u64,
+    host_period: Duration,
     /// Strips silent by an overrun in the last block.
     last_overruns: u32,
     /// Host-block accounting, independent of the worker generation of each sub-block.
@@ -358,6 +359,7 @@ impl StripPool {
             suspect_gen: vec![SlotGen::VACANT; strips].into_boxed_slice(),
             on_callback: vec![false; strips].into_boxed_slice(),
             generation: 0,
+            host_period: block_period(frames as usize, rate),
             last_overruns: 0,
             host_seen: vec![0; strips].into_boxed_slice(),
             host_counted: false,
@@ -455,6 +457,10 @@ impl StripPool {
     /// Some strip is in its cell.
     pub(crate) fn any_away(&self) -> bool {
         self.away.iter().any(|&a| a)
+    }
+
+    pub(crate) fn preparation_blocked(&self, i: usize) -> bool {
+        self.is_away(i) || self.set.is_suspect(i)
     }
 
     /// Records `flag` for every strip that is away, to apply when it is back.
@@ -579,7 +585,7 @@ impl StripPool {
     /// event is admitted again with its identity, due no earlier than where the ring lands it;
     /// a silence releases everything the instrument holds.
     fn deliver(&mut self, i: usize, st: &mut Strip, now: u64, b: &BlockClock, events: &mut EngineEvents, s: &Session) {
-        if !self.has_parked(i) {
+        if st.panic.is_some() || self.preparation_blocked(i) || !self.has_parked(i) {
             return;
         }
         let n = self.live_len.get(i).copied().unwrap_or(0);
@@ -640,7 +646,9 @@ impl StripPool {
             *b = table.instrument.as_ref().map(|inst| inst.generation);
         }
         let flags = self.pending.get_mut(i).map_or(0, std::mem::take);
-        if flags != 0 {
+        if table.panic.is_some() {
+            self.silent[i] = true;
+        } else if flags != 0 && !self.set.is_suspect(i) {
             apply_pending(table, flags, events);
         }
         true
@@ -699,7 +707,10 @@ impl StripPool {
             // Its keys too, when it went away on the graph path.
             self.take_keys_back(i, keys);
             self.cells.with(i, |job| inputs.take_back(i, &mut job.busses));
-            self.deliver(i, st, g, &clock, events, s);
+        }
+        crate::render_pool::panic_checkpoint(strips, Some(self));
+        for (i, st) in strips.iter_mut().enumerate().take(self.away.len()) {
+            if !self.is_away(i) { self.deliver(i, st, g, &clock, events, s); }
         }
         home
     }
@@ -753,6 +764,7 @@ impl StripPool {
             return;
         }
         self.generation = g;
+        self.set.set_block_timing(self.deadline(b), self.host_period);
         let mut published = 0usize;
         for (i, st) in p1.iter_mut().enumerate() {
             if i < cells {
@@ -1097,6 +1109,7 @@ pub use faults::StripFaultsReader;
 /// The graph path (issue #174): a keyed plan's phase-1 strips as a task graph.
 mod graph;
 mod graph_host;
+mod tail;
 mod host;
 #[cfg(feature = "testing")]
 mod seam;

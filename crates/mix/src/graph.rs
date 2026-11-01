@@ -29,6 +29,7 @@ pub(crate) const RENDER_GRAPH_ENV: &str = "TRANSIT_RENDER_GRAPH";
 /// Keyed plans render through the task graph ([`MixEngine::force_graph`], [`RENDER_GRAPH_ENV`]).
 /// On by default; [`RENDER_GRAPH_ENV`]`=0` clears it at startup.
 static GRAPH: AtomicBool = AtomicBool::new(true);
+static TAIL: AtomicBool = AtomicBool::new(false);
 
 /// What a [`RENDER_GRAPH_ENV`] value asks for ([`render_graph_setting`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -60,6 +61,12 @@ pub(crate) fn init_graph_switch() {
         ONCE.call_once(|| {
             let value = std::env::var(RENDER_GRAPH_ENV).ok();
             apply_graph_setting(value.as_deref(), &GRAPH);
+            match std::env::var("TRANSIT_RENDER_TAIL").ok().as_deref().map(str::trim) {
+                Some("1") if GRAPH.load(Ordering::Relaxed) => TAIL.store(true, Ordering::Relaxed),
+                Some("1") => log::info!("mix: TRANSIT_RENDER_TAIL=1 ignored with TRANSIT_RENDER_GRAPH=0"),
+                None | Some("0") => {},
+                Some(value) => log::warn!("mix: TRANSIT_RENDER_TAIL={value:?} ignored; tail stays serial"),
+            }
         });
     }
 }
@@ -82,6 +89,12 @@ fn apply_graph_setting(value: Option<&str>, switch: &AtomicBool) {
 }
 
 impl MixEngine {
+    /// Test and measurement switch; the graph opt-out still wins.
+    #[doc(hidden)]
+    pub fn force_tail(on: bool) { TAIL.store(on, Ordering::Relaxed); }
+
+    /// Whether the opt-in tail graph is enabled.
+    pub fn tail_enabled() -> bool { Self::graph_enabled() && TAIL.load(Ordering::Relaxed) }
     /// Turns the task graph on or off for every engine in the process: on, a plan with sidechain
     /// keys renders its strips through the render workers (issue #174, the default); off
     /// ([`RENDER_GRAPH_ENV`]`=0`), it renders them serially on the audio thread. Takes effect at

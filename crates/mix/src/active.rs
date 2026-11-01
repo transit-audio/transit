@@ -246,6 +246,9 @@ impl MixEngine {
             if !pool.settle(&mut active.tables.strips, &mut active.tables.keys, &mut active.tables.inputs, &mut self.events, &active.session, self.max_block) {
                 return reject(env, RejectReason::StripsInFlight, active);
             }
+        }
+        crate::render_pool::panic_checkpoint(&mut active.tables.strips, self.pool.as_ref());
+        if let Some(pool) = self.pool.as_mut() {
             // Deferred MIDI goes into the instances now, so it moves with them.
             pool.flush_parked(&mut active.tables.strips, &mut self.events, &active.session, self.max_block);
         }
@@ -409,6 +412,7 @@ impl MixEngine {
             }
             return;
         };
+        crate::render_pool::panic_checkpoint(&mut plan.tables.strips, self.pool.as_ref());
         let ActivePlan { id, session, tables, status, .. } = plan;
         let sample_rate = id.target.sample_rate;
         let s: &Session = session;
@@ -437,7 +441,8 @@ impl MixEngine {
         tables.clear_block(frames);
         // Touch (#188): holds and return ramps advance before anything reads automation.
         let ramp = touch::configured_return_samples(sample_rate, s.touch_return_ms);
-        for st in tables.strips.iter_mut() {
+        for (i, st) in tables.strips.iter_mut().enumerate() {
+            if self.pool.as_ref().is_some_and(|p| p.preparation_blocked(i)) { continue; }
             if let Some(t) = s.tracks.get(usize::from(st.track)) {
                 st.touch.begin(t, frames, ramp);
                 strip::service_idle_states(s, t, st, pos);
@@ -445,10 +450,9 @@ impl MixEngine {
         }
         // A strip a render worker holds keeps the delays it went away with (its keys are lent).
         let pool_view = self.pool.as_ref();
-        tables.align_keys(s, pos, !self.input.is_empty(), status, &|i| pool_view.is_some_and(|p| p.is_away(i)));
-        let PlanTables { strips, phase1, aux_end, layers, keys, graph, busses, main, main_fmt, main_meter, sinks, io, .. } = tables;
-        let (phase1, aux_end) = (*phase1, *aux_end);
-        let main_fmt = *main_fmt;
+        tables.align_keys(s, pos, !self.input.is_empty(), status, &|i| pool_view.is_some_and(|p| p.preparation_blocked(i)));
+        let io = Arc::clone(&tables.io);
+
         let any_solo = s.tracks.iter().any(|t| t.mixer.solo && !t.inactive);
         let track = |st: &Strip| s.tracks.get(usize::from(st.track));
         let live_in = LiveInput {
@@ -458,7 +462,7 @@ impl MixEngine {
             recording: self.recording,
             no_suspend: self.no_suspend,
             frame,
-            io: Some(&**io),
+            io: Some(&*io),
             marker: self.marker.as_deref(),
         };
         let mark = |phase: Phase, strip: Option<u32>| {
@@ -466,6 +470,24 @@ impl MixEngine {
                 m.enter(phase, strip);
             }
         };
+        let tail_eligible = self.pool.as_ref().is_some_and(|pool| {
+            (tables.phase1..tables.aux_end).any(|i| pool.is_away(i))
+                || (on_audio_thread() && !self.serial && !MixEngine::serial_forced()
+                    && MixEngine::tail_enabled() && tables.aux_end <= pool.capacity()
+                    && tables.phase1 + tables.strips[tables.phase1..tables.aux_end].iter()
+                        .filter(|st| track(st).is_some_and(live)).count() >= PARALLEL_STRIPS)
+        });
+        let tail_latency = if tail_eligible {
+            let empty = BusTable::default();
+            let block = strip_pool::PoolBlock { session: &*session, busses: &empty, keys: &NO_KEYS,
+                live: &live_in, pos, frames, any_solo, sample_rate, start: start.unwrap_or_else(std::time::Instant::now),
+                budget: None, deadline: callback_deadline };
+            self.pool.as_mut().and_then(|pool| pool.render_tail(&block, tables, &mut self.events, status, self.pan_law, host_frame))
+        } else { None };
+        let tail_done = tail_latency.is_some();
+        let PlanTables { strips, phase1, aux_end, layers, keys, graph, busses, main, main_fmt, main_meter, sinks, .. } = tables;
+        let (phase1, aux_end) = (*phase1, *aux_end);
+        let main_fmt = *main_fmt;
         let n_strips = strips.len();
         let (p1, rest) = strips.split_at_mut(phase1.min(n_strips));
         let (auxes, others) = rest.split_at_mut(aux_end.saturating_sub(phase1).min(rest.len()));
@@ -480,9 +502,9 @@ impl MixEngine {
         // `TRANSIT_RENDER_GRAPH=0` turns it off) and no more phase-1 strips than the pool has
         // cells; else serially, as before.
         let keyed = !keys.is_empty();
-        let pooled = match (self.pool.as_mut(), start) {
+        let pooled = tail_done || match (self.pool.as_mut(), start) {
             (Some(pool), Some(start))
-                if on_audio_thread()
+                if !tail_eligible && on_audio_thread() && (!keyed || p1.len() <= pool.capacity())
                     && (pool.any_away()
                         || (!self.serial
                             && !MixEngine::serial_forced()
@@ -513,7 +535,13 @@ impl MixEngine {
             }
             _ => false,
         };
-        if !pooled {
+        let recovery = !pooled && self.pool.as_ref().is_some_and(|p| p.any_away() || tail_eligible);
+        if recovery && let Some(pool) = self.pool.as_mut() {
+            let block = strip_pool::PoolBlock { session: &*session, busses, keys: &NO_KEYS, live: &live_in,
+                pos, frames, any_solo, sample_rate, start: start.unwrap_or_else(std::time::Instant::now), budget: None, deadline: callback_deadline };
+            pool.recover_phase1(&block, p1, keys, graph);
+        }
+        if !pooled && !recovery {
             // Whatever is still parked for a home strip is delivered now, as the pool path does.
             if let Some(pool) = self.pool.as_mut() {
                 pool.deliver_home(p1, &mut self.events, s, frame, frames);
@@ -561,13 +589,17 @@ impl MixEngine {
             std::panic::resume_unwind(panic);
         }
         mark(Phase::Mixdown, None);
-        let DeviceLatency { main: main_arrival, device } =
-            fold_latency(s, RenderPhases { p1, auxes, others, phase1 }, busses, sinks, pos, !self.input.is_empty());
+        let DeviceLatency { main: main_arrival, device, .. } = tail_latency.unwrap_or_else(||
+            fold_latency(s, RenderPhases { p1, auxes, others, phase1 }, busses, sinks, pos, !self.input.is_empty(),
+                &|i| self.pool.as_ref().is_some_and(|p| p.preparation_blocked(i))));
+        for st in p1.iter_mut().chain(auxes.iter_mut()).chain(others.iter_mut()) {
+            if let Some(payload) = st.panic.take() { std::panic::resume_unwind(payload); }
+        }
         self.main_arrival = main_arrival;
         self.latency = device;
         let law = self.pan_law;
-        let pool = if pooled { self.pool.as_ref() } else { None };
-        TailCtx {
+        let pool = if pooled || recovery { self.pool.as_ref() } else { None };
+        if !tail_done { TailCtx {
             s,
             p1,
             auxes,
@@ -590,7 +622,7 @@ impl MixEngine {
             #[cfg(feature = "testing")]
             mutes: &self.mutes,
         }
-        .render();
+        .render(); }
         // Master faders process the main mix, in track order.
         let transport = transport_at(s, pos, !self.monitor_only, self.recording);
         for st in others.iter_mut() {

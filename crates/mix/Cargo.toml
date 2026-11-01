@@ -23,7 +23,7 @@ rayon.workspace = true
 [features]
 # Test seams (state fingerprints, muted serial blocks, the deterministic deadline; issue #210);
 # never enabled by the app.
-testing = ["transit-dsp/testing"]
+testing = ["transit-dsp/testing", "transit-rt/testing"]
 
 [dev-dependencies]
 transit-rt = { workspace = true, features = ["testing"] }

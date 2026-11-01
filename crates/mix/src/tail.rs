@@ -77,7 +77,7 @@ impl TailCtx<'_, '_> {
             // block it ran, so a later aux keyed from it must not run either.
             let skipped = pool.is_some_and(|p| {
                 let tail = &graph.tail_skipped;
-                keys.sources_of(at).any(|j| match j.checked_sub(phase1) {
+                p.preparation_blocked(at) || keys.sources_of(at).any(|j| match j.checked_sub(phase1) {
                     None => p.is_silent(j) || p.is_away(j),
                     Some(a) => a < k && tail.get(a).copied().unwrap_or(false),
                 })
@@ -85,6 +85,7 @@ impl TailCtx<'_, '_> {
             // Test seam (issue #210): a muted serial block applies the same rule to its mutes.
             #[cfg(feature = "testing")]
             let skipped = skipped
+                || self.mutes.skips(at)
                 || (self.mutes.any()
                     && keys.sources_of(at).any(|j| match j.checked_sub(phase1) {
                         None => self.mutes.silent(j),
@@ -104,7 +105,10 @@ impl TailCtx<'_, '_> {
                 Some(j) => before.get(j).filter(|b| track(b).is_some_and(live)),
             };
             keys.fill(at..at + 1, strip, busses, frames);
-            process_strip(t, st, &StripRender { s, busses, live: live_in, pos, frames, any_solo, keys });
+            guarded(st, |st| process_strip(t, st, &StripRender { s, busses, live: live_in, pos, frames, any_solo, keys }));
+            if let Some(payload) = st.panic.take() { std::panic::resume_unwind(payload); }
+            #[cfg(feature = "testing")]
+            if self.mutes.silent(at) { continue; }
             st.meter.measure(&st.buf, frames, st.gr, host_frame);
             st.meter.plugin_failures = st.failures;
             let need = route_into(t, st, pos, frames, MixOut { busses, main, main_fmt, sinks, law, main_arrival });
@@ -141,7 +145,7 @@ impl PlanTables {
                 if aux && let Route::Bus(b) = &t.mixer.input {
                     arrive = busses.bus(*b).map_or(0, |x| x.arrival);
                 }
-                if alive && !away(at) {
+                if alive && !away(at) && st.panic.is_none() {
                     let from = |sp: &KeySpec| match sp.from {
                         KeyEnd::Strip(j) => before.get(usize::from(j)).filter(|b| track(b).is_some_and(live)).map_or(0, |b| b.pdc_out),
                         KeyEnd::Bus(b) => {
@@ -152,7 +156,8 @@ impl PlanTables {
                             }
                         }
                     };
-                    let short = keys.align(s, t, st, key::KeyAlignment { at, arrive, pos, pdc, duplex }, &from);
+                    let mut short = 0;
+                    guarded(st, |st| short = keys.align(s, t, st, key::KeyAlignment { at, arrive, pos, pdc, duplex }, &from));
                     status.note_capacity(short, st);
                 }
                 pdc_visit(t, st, at, alive, PdcWalk { busses, sinks, main_arrival: &mut walked, pdc });
@@ -178,6 +183,7 @@ pub(super) struct RenderPhases<'a> {
 pub(super) struct DeviceLatency {
     pub(super) main: usize,
     pub(super) device: usize,
+    pub(super) aborted: bool,
 }
 
 /// Walk the rendered strips and pending aux/master inserts, then align every sink to the device.
@@ -188,14 +194,15 @@ pub(super) fn fold_latency(
     sinks: &mut [Sink],
     pos: Samples,
     duplex: bool,
+    blocked: &dyn Fn(usize) -> bool,
 ) -> DeviceLatency {
     let RenderPhases { p1, auxes, others, phase1 } = phases;
     let track = |st: &Strip| s.tracks.get(usize::from(st.track));
     let pdc = s.edit.delay_compensation;
     if pdc {
-        for st in auxes.iter_mut() {
-            if let Some(t) = track(st).filter(|t| !t.inactive) {
-                note_insert_latency(t, st, pos, duplex);
+        for (k, st) in auxes.iter_mut().enumerate() {
+            if !blocked(phase1 + k) && let Some(t) = track(st).filter(|t| !t.inactive) {
+                guarded(st, |st| note_insert_latency(t, st, pos, duplex));
             }
         }
     }
@@ -203,10 +210,13 @@ pub(super) fn fold_latency(
     if pdc {
         for st in others.iter_mut() {
             if let Some(t) = track(st).filter(|t| t.kind == TrackKind::Master && !t.inactive) {
-                note_insert_latency(t, st, pos, duplex);
+                guarded(st, |st| note_insert_latency(t, st, pos, duplex));
                 lmax_m = lmax_m.saturating_add(st.latency);
             }
         }
+    }
+    if auxes.iter().chain(others.iter()).any(|st| st.panic.is_some()) {
+        return DeviceLatency { main: 0, device: 0, aborted: true };
     }
     // Forward pass in render order (the table order): phase-1 strips, then the auxes.
     let mut main_arrival = 0usize;
@@ -230,5 +240,5 @@ pub(super) fn fold_latency(
     for k in sinks.iter_mut() {
         k.arrival = device;
     }
-    DeviceLatency { main: main_arrival, device }
+    DeviceLatency { main: main_arrival, device, aborted: false }
 }
