@@ -175,6 +175,23 @@ fn no_cost(what: &str, e: &Edit) {
 }
 
 #[test]
+fn a_non_default_touch_release_allocates_and_frees_nothing() {
+    use transit_model::{AutoParam, AutomationLane, AutomationMode};
+    let (mut s, t, _) = session_with_clip();
+    s.touch_return_ms = 50;
+    let tr = s.track_mut(t).unwrap();
+    tr.mixer.automation_mode = AutomationMode::Touch;
+    tr.mixer.volume_db = -6.0;
+    tr.mixer.touched.push(AutoParam::Volume);
+    let mut lane = AutomationLane::new(AutoParam::Volume);
+    lane.set_point(0, -20.0);
+    tr.automation.push(lane);
+    let mut rig = Rig::new(&s);
+    s.track_mut(t).unwrap().mixer.touched.clear();
+    no_cost("50 ms Touch release and its complete return", &rig.edit(&s));
+}
+
+#[test]
 fn new_document_replaces_every_slot_kind_without_callback_allocation() {
     let (mut s, t, clip) = session_with_clip();
     s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::new("clap:test.gain"));

@@ -6,6 +6,9 @@ use crate::tests::{PlanRig, session_with_dc};
 use crate::touch::{param_key, return_samples};
 use transit_model::{AutomationLane, AutomationMode, Insert};
 
+#[path = "touch_preference_tests.rs"]
+mod preference;
+
 /// 480 frames at 48 kHz: the 9600-sample return is exactly 20 blocks, so its end lands on a block's
 /// first sample, where the fader reads its curve exactly.
 const BLOCK: usize = 480;
