@@ -99,7 +99,7 @@ cargo xtask file-size
 (plus `cargo xtask rt-targets` when `crates/rt` or `crates/mix` changed), and the Linux job in
 `.github/workflows/ci.yml`, the Linux compile proof, which runs
 `cargo clippy --locked --workspace --all-targets -- -D warnings` and
-`cargo test --locked --workspace` on Ubuntu (it needs `libasound2-dev` and `pkg-config`).
+`cargo test --locked --workspace` on Ubuntu (it needs `libasound2-dev` and `pkg-config`); that job also runs the plug-in editor window tests under Xvfb (`xvfb-run`). Release chains run the workspace test with `TRANSIT_FULL_ORACLE=1`, the full oracle nulls; CI runs the strided subset ([gates](evidence/gates.md)).
 Area gates are in [`evidence/gates.md`](evidence/gates.md).
 
 ## A worked example
