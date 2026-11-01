@@ -715,3 +715,70 @@ mod tests {
             crate::resonator_panel::RESONATOR,
             crate::texture_synth_panel::TEXTURE_SYNTH,
             crate::modal_voice_panel::MODAL_VOICE,
+        ] {
+            let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
+            let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).flat_map(|i| item_ids(*i)).collect();
+            ids.sort_unstable();
+            let mut want: Vec<&str> = transit_dsp::plugin_info(plugin).unwrap().params.iter().map(|p| p.id).collect();
+            want.sort_unstable();
+            assert_eq!(ids, want, "{plugin}");
+        }
+    }
+
+    #[test]
+    fn every_macro_oscillator_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(MACRO_OSC).unwrap().params {
+            assert!(help(MACRO_OSC, p.id).is_some(), "{}", p.id);
+        }
+        assert!(help("compressor", "threshold").is_none());
+    }
+
+    #[test]
+    fn every_texture_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::texture_panel::TEXTURE).unwrap().params {
+            assert!(help(crate::texture_panel::TEXTURE, p.id).is_some(), "{}", p.id);
+        }
+    }
+
+    #[test]
+    fn every_time_stretcher_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::time_stretcher_panel::TIME_STRETCHER).unwrap().params {
+            assert!(help(crate::time_stretcher_panel::TIME_STRETCHER, p.id).is_some(), "{}", p.id);
+        }
+    }
+
+    #[test]
+    fn every_cross_modulator_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::modulator_panel::CROSS_MODULATOR).unwrap().params {
+            assert!(help(crate::modulator_panel::CROSS_MODULATOR, p.id).is_some(), "{}", p.id);
+        }
+    }
+
+    #[test]
+    fn every_texture_synth_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::texture_synth_panel::TEXTURE_SYNTH).unwrap().params {
+            assert!(help(crate::texture_synth_panel::TEXTURE_SYNTH, p.id).is_some(), "{}", p.id);
+        }
+    }
+
+    #[test]
+    fn every_resonator_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::resonator_panel::RESONATOR).unwrap().params {
+            assert!(help(crate::resonator_panel::RESONATOR, p.id).is_some(), "{}", p.id);
+        }
+    }
+
+    #[test]
+    fn every_modal_voice_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::modal_voice_panel::MODAL_VOICE).unwrap().params {
+            assert!(help(crate::modal_voice_panel::MODAL_VOICE, p.id).is_some(), "{}", p.id);
+        }
+    }
+
+    #[test]
+    fn every_filter_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(FILTER).unwrap().params {
+            assert!(help(FILTER, p.id).is_some(), "{}", p.id);
+        }
+    }
+}
