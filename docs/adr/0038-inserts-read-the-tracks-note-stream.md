@@ -4,6 +4,17 @@
 - **Date:** 2026-10-31
 - **Reopen when:** a hosted effect with a note input (a CLAP effect with a note port, a VST3 effect with an event bus) should get the stream too; an insert needs per-voice information the summed audio cannot give it (the per-voice filter of the Macro Oscillator, #243, is that case and stays inside the instrument); a rack strip's own inserts want the notes of the rack's members; or a block's note view overflows in practice (`EventStatus::midi_fx.note_view_dropped` above zero in a field report).
 
+## Stored parameters at preparation (#280)
+
+Parameter values already held by the session when a fresh built-in is prepared are its initial
+state, not a parameter move. Following the Ableton and Logic convention of bouncing from the
+stored state without a startup sweep, the shared plan compiler applies those values and snaps
+their smoothers before the first block, for both offline and live instances. The final snap uses
+the plug-in's reset behavior by default; a restored-state instrument must preserve its cloud
+while snapping parameter targets. Retained running instances are never snapped by a session
+edit. Automation, including a point or ramp starting at time zero, is applied after preparation
+and continues to use normal smoothing.
+
 ## Context
 
 The Macro Oscillator ([ADR 0033](0033-built-in-instruments-mutable-instruments-port.md)) is true to its source: it has no filter, amplifier or ADSR beyond the firmware's low-pass gate. Users who want a classic subtractive sweep on it, or on any instrument, need a filter whose cutoff follows the notes. An insert effect sees only audio: until now nothing gave an insert the notes its track plays.
