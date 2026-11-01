@@ -617,9 +617,28 @@ fn every_model_is_silent_before_any_note_and_after_a_reset() {
         let again = render(&mut r, 32_000, 256, &[]);
         assert_eq!(peak(&again[0]).max(peak(&again[1])), 0.0, "model {model}: sounds after reset");
     }
+    // The FM pair's raw (dry) path is its two oscillators, open at Space of 10% or less (C2): the
+    // test patch and the defaults, both channels, no note ever and after a reset.
+    for space in FM_SPACES {
+        let mut patch = params_of(3, &patch_of(0.6, 0.3, 0.8));
+        patch.push(("space", space));
+        for params in [patch, vec![("model", 3.0), ("space", space)]] {
+            let mut r = instrument(32_000, &params);
+            let fresh = render(&mut r, 64_000, 256, &[]);
+            assert_eq!(peak(&fresh[0]).max(peak(&fresh[1])), 0.0, "space {space}: the FM pair drones with no note");
+            render(&mut r, 8000, 256, &[(0, Ev::On(60, 127))]);
+            r.reset();
+            let again = render(&mut r, 64_000, 256, &[]);
+            assert_eq!(peak(&again[0]).max(peak(&again[1])), 0.0, "space {space}: the FM pair drones after a reset");
+        }
+    }
 }
 
-/// The FM pair is silent (decayed below -120 dB, the ring's own tail) after the key is released, at every velocity and at Velocity 0%, and
+/// The Space settings at which the part mixes the voice's raw signal into the left channel (it
+/// does at 5% and below fully, and fades out by 10%).
+const FM_SPACES: [f32; 3] = [0.0, 5.0, 9.9];
+
+/// The FM pair is silent (below 1e-6; what is left is the firmware's own residual of about 1.4e-38 at its flush-to-zero boundary) after the key is released, at every velocity and at Velocity 0%, and
 /// holds its sound while the key is down; CC 123 and CC 120 leave it silent too.
 #[test]
 fn the_fm_pair_is_silent_once_no_key_is_held() {
@@ -653,6 +672,28 @@ fn the_fm_pair_is_silent_once_no_key_is_held() {
         assert!(held > 0.01);
         assert!(late < 1e-6, "CC {cc}: the FM pair sounds with no key held ({late})");
     }
+    // Space at or under 10% opens the part's raw path (C2): both channels, after a release (8 to
+    // 10 s), after CC 123 and after CC 120 plus a second; the drone must not return.
+    for space in FM_SPACES {
+        let mut low = base.clone();
+        low.push(("space", space));
+        let held_peak = |out: &[Vec<f32>; 2]| peak(&out[0][3000..12_800]).max(peak(&out[1][3000..12_800]));
+        let out = note_then_silence(&low, 100, None, 32_000 * 10);
+        let late = peak(&out[0][32_000 * 8..]).max(peak(&out[1][32_000 * 8..]));
+        println!("fm pair space {space}: held {} late {late}", held_peak(&out));
+        assert!(held_peak(&out) > 0.01, "space {space}: the held FM pair sounds");
+        assert!(late < 1e-6, "space {space}: sounds after the release ({late})");
+        let out = render(&mut instrument(32_000, &low), 32_000 * 10, 256, &[(0, Ev::On(57, 127)), (12_800, Ev::Cc(123, 0))]);
+        let late = peak(&out[0][32_000 * 8..]).max(peak(&out[1][32_000 * 8..]));
+        assert!(late < 1e-6, "space {space}: CC 123 leaves a drone ({late})");
+        let out = render(&mut instrument(32_000, &low), 32_000 * 4, 256, &[(0, Ev::On(57, 127)), (12_800, Ev::Cc(120, 0))]);
+        let after = peak(&out[0][12_800 + 32..]).max(peak(&out[1][12_800 + 32..]));
+        assert_eq!(after, 0.0, "space {space}: CC 120 leaves a drone that returns ({after})");
+        // The next note plays again.
+        let out =
+            render(&mut instrument(32_000, &low), 32_000 * 4, 256, &[(0, Ev::On(57, 127)), (12_800, Ev::Cc(120, 0)), (64_000, Ev::On(57, 127))]);
+        assert!(peak(&out[0][64_000 + 3000..]) > 0.01, "space {space}: the key after a CC 120 sounds");
+    }
 }
 
 /// Closing the FM pair is a fade: releasing a full-velocity note moves no sample further than
@@ -665,6 +706,16 @@ fn closing_the_fm_pair_does_not_click() {
     let released = largest_step(&out[0], 12_800..32_000 * 3);
     println!("fm pair largest step: held {held} release {released}");
     assert!(released <= held * 4.0 + 1e-4, "the release steps {released} against {held} held");
+    // And with the dry path open (Space 0 and 5%), where the raw share fades with the strength.
+    for space in [0.0, 5.0] {
+        let mut low = params.clone();
+        low.push(("space", space));
+        let out = note_then_silence(&low, 127, None, 32_000 * 3);
+        let held = largest_step(&out[0], 3000..12_800);
+        let released = largest_step(&out[0], 12_800..32_000 * 3);
+        println!("fm pair space {space} largest step: held {held} release {released}");
+        assert!(released <= held * 4.0 + 1e-4, "space {space}: the release steps {released} against {held} held");
+    }
 }
 
 /// CC 120 silences every model, on both channels, at once.
@@ -677,6 +728,14 @@ fn all_sound_off_silences_every_model() {
         assert_eq!(peak(&out[0][4800 + 32..]), 0.0, "model {model}: left not silent");
         assert_eq!(peak(&out[1][4800 + 32..]), 0.0, "model {model}: right not silent");
     }
+    for space in FM_SPACES {
+        let mut params = params_of(3, &patch_of(0.6, 0.3, 0.8));
+        params.push(("space", space));
+        let out = render(&mut instrument(32_000, &params), 64_000, 256, &[(0, Ev::On(57, 100)), (4800, Ev::Cc(120, 0))]);
+        assert!(peak(&out[0][..4800]).max(peak(&out[1][..4800])) > 0.001, "space {space}: sounds before the CC");
+        assert_eq!(peak(&out[0][4800 + 32..]), 0.0, "space {space}: left not silent");
+        assert_eq!(peak(&out[1][4800 + 32..]), 0.0, "space {space}: right not silent");
+    }
 }
 
 /// A note shorter than one engine block (a note-on and its note-off in the same 16 frames) still
@@ -688,4 +747,70 @@ fn a_note_shorter_than_one_engine_block_sounds() {
     let p = peak(&out[0]).max(peak(&out[1]));
     println!("short note peak {p}");
     assert!(p > 0.001, "the short note was dropped");
+}
+
+/// The gate-down rules leave a held key alone (M1). The pure rules: with the gate up the strength
+/// and the dry share come back as sent, for every model; and the instrument, held, is the crate
+/// driven with the plain, un-gated strength (velocity 1, 64 and 127, with a matrix Strength offset)
+/// bit for bit, at Space 0, 5, 9.9 and 80% (the part's own raw-gain rule, no override).
+#[test]
+fn a_held_key_gets_the_ungated_strength_and_the_parts_own_dry_share() {
+    for fm_pair in [false, true] {
+        for strength in [0.0, 0.1, 0.37, 0.5, 0.9, 1.0] {
+            let (mut sent, mut raw) = (FM_SHUT, 0.0);
+            assert_eq!(gated_strength(&mut sent, true, fm_pair, strength).to_bits(), strength.to_bits());
+            assert_eq!(gated_raw(&mut raw, true, fm_pair).to_bits(), 1.0f32.to_bits());
+            assert_eq!(raw.to_bits(), 1.0f32.to_bits());
+        }
+    }
+    let base = as_stored(&patch_of(0.6, 0.3, 0.8));
+    for space in [0.0, 5.0, 9.9, 80.0] {
+        for vel in [1u8, 64, 127] {
+            let strength = (strength_of(f32::from(vel) / 127.0, 1.0) - 0.25).clamp(0.0, 1.0);
+            let patch = as_stored(&Patch { space: space / 100.0, ..base });
+            let mut params = params_of(3, &patch_of(0.6, 0.3, 0.8));
+            params.extend([
+                ("space", space),
+                ("velocity", 100.0),
+                ("mod3_source", src::AFTERTOUCH as f32),
+                ("mod3_dest", D_STRENGTH as f32),
+                ("mod3_amount", -25.0),
+            ]);
+            let mut r = instrument(32_000, &params);
+            r.midi(0, [0xD0, 127, 0]);
+            let blocks = 400;
+            let got = render(&mut r, blocks * BLOCK, 128, &[(0, Ev::On(60, vel))]);
+            assert_eq!(r.raw_sent.to_bits(), 1.0f32.to_bits(), "the dry share sent while held");
+            assert!((r.strength_sent - strength).abs() < 1e-6, "velocity {vel}: sent {} want {strength}", r.strength_sent);
+            let mut part = ModalVoice::new();
+            part.set_easter_egg(true);
+            *part.patch_mut() = patch;
+            let mut want = [Vec::new(), Vec::new()];
+            for _ in 0..blocks {
+                let performance = PerformanceState { gate: true, note: 60.0, modulation: 0.0, strength };
+                let (mut m, mut a) = ([0.0f32; BLOCK], [0.0f32; BLOCK]);
+                part.process(&performance, &[0.0; BLOCK], &[0.0; BLOCK], &mut m, &mut a);
+                want[0].extend_from_slice(&a);
+                want[1].extend_from_slice(&m);
+            }
+            assert!(peak(&want[0]) > 0.001 || strength == 0.0, "space {space} velocity {vel}: the reference is silent");
+            assert!(same_bits(&got, &want), "space {space} velocity {vel}: the held FM pair is not the un-gated crate");
+        }
+    }
+}
+
+/// With the gate down the dry share falls by one 200th a block to 0 and stays there until a gate-up;
+/// the models without the FM pair keep it at 1.
+#[test]
+fn the_dry_share_closes_in_100_ms_for_the_fm_pair_only() {
+    let mut raw = 1.0;
+    for n in 1..=200 {
+        let got = gated_raw(&mut raw, false, true);
+        assert!(got <= 1.0 - n as f32 / 200.0 + 1e-5, "block {n}: {got}");
+    }
+    assert_eq!(raw, 0.0);
+    assert_eq!(gated_raw(&mut raw, false, true), 0.0);
+    assert_eq!(gated_raw(&mut raw, true, true), 1.0);
+    let mut raw = 0.0;
+    assert_eq!(gated_raw(&mut raw, false, false), 1.0);
 }

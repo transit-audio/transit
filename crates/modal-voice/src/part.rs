@@ -186,6 +186,7 @@ pub struct ModalVoice {
     reverb: Reverb,
     resonator_model: ResonatorModel,
     random: Random,
+    raw_share: F,
 }
 
 impl Default for ModalVoice {
@@ -216,6 +217,7 @@ impl ModalVoice {
             reverb: Reverb::default(),
             resonator_model: ResonatorModel::Modal,
             random: Random::default(),
+            raw_share: F(1.0),
         };
         part.init();
         part
@@ -241,8 +243,16 @@ impl ModalVoice {
             reverb: self.reverb.take_zeroed(),
             resonator_model: ResonatorModel::Modal,
             random: Random::default(),
+            raw_share: F(1.0),
         };
         self.init();
+    }
+
+    /// The share (0..=1) of the dry raw path the left channel keeps, on top of the firmware's own
+    /// Space rule. It is 1 at power-on and after a reset, and 1 leaves the mix bit-exact; a host
+    /// that wants the raw path closed (the FM pair's oscillators are not gated) sets it each block.
+    pub fn set_raw_share(&mut self, share: f32) {
+        self.raw_share = F(share.clamp(0.0, 1.0));
     }
 
     /// `Init(reverb_buffer)`.
@@ -419,6 +429,7 @@ impl ModalVoice {
         } else {
             F::ZERO
         };
+        let raw_gain = raw_gain * self.raw_share;
         space = if space >= 0.1 { space - 0.1 } else { F::ZERO };
         let spread = if space <= 0.7 { space } else { F(0.7) };
         let reverb_amount = if space >= 0.5 { 1.0 * (space - 0.5) } else { F::ZERO };

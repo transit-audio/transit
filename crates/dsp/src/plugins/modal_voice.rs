@@ -19,6 +19,9 @@
 //!   note-on and held until the next one; the firmware ramps it over a block. One deviation: the
 //!   module's FM voice also opens its output from the strength, so with nothing patched it drones;
 //!   the instrument closes it when no key is held ([`gated_strength`]).
+//!   The same goes for its dry path: at low Space the part mixes the FM pair's two oscillators
+//!   (ungated) into the left channel, so the dry share is faded to 0 with the gate down
+//!   ([`gated_raw`]).
 //! - Pitch: the sounding key is the module's note (MIDI 69 plays 440 Hz, the firmware's own
 //!   tuning at 32 kHz); Tune, pitch bend (`bend_range`) and the matrix's Pitch move it through the
 //!   module's FM input (held to its ±60 semitones).
@@ -239,6 +242,29 @@ pub fn gated_strength(sent: &mut f32, gate: bool, fm_pair: bool, strength: f32) 
     sent.min(strength)
 }
 
+/// How far the FM pair's dry share falls per part block with the gate down: the whole share over
+/// 200 blocks (100 ms), the same fade as [`FM_CLOSE_STEP`].
+pub const RAW_CLOSE_STEP: f32 = 1.0 / 200.0;
+
+/// The share of the part's dry (raw) left-channel path, 0..=1. At Space of 10% or less the part
+/// mixes the voice's raw signal into the left output, and the FM pair's raw signal is its two
+/// oscillators, which no envelope gates. With a key held the share is 1 (the part's own Space rule,
+/// untouched); with the gate down and the FM pair selected it falls to 0 in `sent` over 100 ms and
+/// stays shut until the next gate-up. The other three models' raw signal is their exciter, which
+/// is silent without a key, so their share is always 1.
+pub fn gated_raw(sent: &mut f32, gate: bool, fm_pair: bool) -> f32 {
+    if !fm_pair || gate {
+        *sent = 1.0;
+        return 1.0;
+    }
+    // The 200 steps do not sum to exactly 1 in f32: what is left under half a step is the end.
+    *sent -= RAW_CLOSE_STEP;
+    if *sent < RAW_CLOSE_STEP * 0.5 {
+        *sent = 0.0;
+    }
+    *sent
+}
+
 /// A control (0..max) from its knob and its matrix sum: the knob exactly when no row moves it, else
 /// the sum added and clamped to `0..=max`.
 fn control(knob: f32, sum: f32, max: f32) -> f32 {
@@ -365,6 +391,8 @@ pub struct ModalVoiceInstrument {
     velocity: f32,
     /// The strength last sent to the FM pair ([`gated_strength`]).
     strength_sent: f32,
+    /// The dry share last sent to the part ([`gated_raw`]); shut until the first gate-up.
+    raw_sent: f32,
     /// A note-on since the last part block: the gate rises for one block even when its note-off
     /// arrived in the same engine block (a note shorter than 0.5 ms still plays).
     latch: bool,
@@ -432,6 +460,7 @@ impl ModalVoiceInstrument {
             key: 60,
             velocity: 1.0,
             strength_sent: FM_SHUT,
+            raw_sent: 0.0,
             latch: false,
             release_velocity: 0.0,
             bend: 0.0,
@@ -558,6 +587,7 @@ impl ModalVoiceInstrument {
         self.gate = false;
         self.shaper_gate = false;
         self.strength_sent = FM_SHUT;
+        self.raw_sent = 0.0;
         self.latch = false;
         for sh in &mut self.shapers {
             sh.reset();
@@ -741,6 +771,8 @@ impl ModalVoiceInstrument {
         let fm = self.p.v(TUNE) + self.bend * self.p.v(BEND_RANGE) + if pitch == 0.0 { 0.0 } else { PITCH_SEMITONES * pitch };
         let strength = control(strength_of(self.velocity, pct(VELOCITY)), sum(D_STRENGTH), 1.0);
         let strength = gated_strength(&mut self.strength_sent, gate, self.model == 3, strength);
+        let raw = gated_raw(&mut self.raw_sent, gate, self.model == 3);
+        self.part.set_raw_share(raw);
         let performance =
             PerformanceState { gate, note: f32::from(self.key), modulation: if fm.is_finite() { fm.clamp(-MAX_FM, MAX_FM) } else { 0.0 }, strength };
         let (mut main, mut aux) = ([0.0f32; BLOCK], [0.0f32; BLOCK]);
@@ -862,6 +894,7 @@ impl Plugin for ModalVoiceInstrument {
         self.key = 60;
         self.velocity = 1.0;
         self.strength_sent = FM_SHUT;
+        self.raw_sent = 0.0;
         self.latch = false;
         self.release_velocity = 0.0;
         self.bend = 0.0;
