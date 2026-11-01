@@ -144,7 +144,7 @@ The automation picker and the plug-in parameter lists name a hosted plug-in's pa
 host registry's cache, not from an instance (#58, #65).
 
 - **`cached_info(id)`** (`transit_clap_host`, `transit_vst3_host`; used by `device_info` in
-  `crates/ui-studio/src/automation.rs`) returns the description of a type already loaded, without
+  `crates/ui-studio/src/automation/lane.rs`) returns the description of a type already loaded, without
   instantiating anything and without loading a binary, so it is safe on the UI thread. It returns
   `None` for a type not loaded yet; the picker then shows the stored parameters as `param <id>`
   until a first instance has loaded. A project's plug-ins load on open, so the table is normally
@@ -159,6 +159,14 @@ host registry's cache, not from an instance (#58, #65).
   builds the grouped model once per cached table and keys it by the table's address. The host
   caches a table once per plug-in type, so a new table is the only invalidation.
 - Not covered: AU plug-ins on macOS.
+
+The picker also lists each track's MIDI effect parameters under **MIDI effects**, using the existing
+`midi_fx::info` tables (`ParamInfo`: id, name, range and default), and the rack track's eight knobs
+under **Macros**. Macro lanes belong to the rack, not its members (ADR 0034). The picker and lane
+header share their labels, including renamed macros; MIDI lanes keep slots 240–247 and macros
+keep slot 253. Selecting a new effect or macro lane writes its first breakpoint at the cursor's
+current value through `automation.set_point`, so undo removes the model lane; an existing curve
+is unchanged. Open lanes remain view state.
 
 ## First use allocates on macOS
 
