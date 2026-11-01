@@ -4320,6 +4320,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-modal-voice"
+version = "0.5.1"
+dependencies = [
+ "transit-macro-osc-oracle",
+ "transit-resonator",
+]
+
+[[package]]
 name = "transit-model"
 version = "0.5.1"
 dependencies = [

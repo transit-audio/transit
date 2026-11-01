@@ -25,6 +25,7 @@ transit-midi = { path = "crates/midi" }
 transit-dsp = { path = "crates/dsp" }
 transit-macro-osc = { path = "crates/macro-osc" }
 transit-resonator = { path = "crates/resonator" }
+transit-modal-voice = { path = "crates/modal-voice" }
 transit-granular = { path = "crates/granular" }
 transit-texture = { path = "crates/texture" }
 transit-modulator = { path = "crates/modulator" }

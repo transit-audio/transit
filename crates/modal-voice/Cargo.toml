@@ -1,0 +1,20 @@
+[package]
+name = "transit-modal-voice"
+description = "transit's modal voice: a gated exciter-and-resonator voice (bow, blow, strike; modal, string and chord-string resonators) ported to Rust from Émilie Gillet's MIT firmware, nulled against the C++ oracle (ADR 0033, #198)."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+# transit's own code is MIT OR Apache-2.0; the firmware it is ported from is MIT (LICENSE-THIRD-PARTY).
+license = "(MIT OR Apache-2.0) AND MIT"
+publish = false
+
+[dependencies]
+# The flush-to-zero float and the stmlib helpers the two firmwares share (the same stmlib commit).
+transit-resonator = { workspace = true }
+
+[dev-dependencies]
+transit-macro-osc-oracle = { path = "../macro-osc-oracle" }
+
+[lints]
+workspace = true

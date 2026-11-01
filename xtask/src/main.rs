@@ -66,6 +66,7 @@ const LAYERS: &[(&str, u8)] = &[
     ("transit-dsp", 1),
     ("transit-macro-osc", 1),
     ("transit-resonator", 1),
+    ("transit-modal-voice", 1),
     ("transit-granular", 1),
     ("transit-texture", 1),
     ("transit-modulator", 1),
