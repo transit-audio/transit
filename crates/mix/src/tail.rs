@@ -53,7 +53,7 @@ impl TailCtx<'_, '_> {
         for (i, st) in p1.iter_mut().enumerate() {
             let Some(t) = track(st).filter(|t| live(t) && !is_aux(t)) else { continue };
             // An overrun, a faulted or a suspect strip is silence for the block (ADR 0029).
-            if pool.is_some_and(|p| p.is_silent(i) || p.is_away(i)) {
+            if graph.recovery_skipped.get(i) == Some(&true) || pool.is_some_and(|p| p.is_silent(i) || p.is_away(i)) {
                 continue;
             }
             #[cfg(feature = "testing")]
@@ -77,10 +77,11 @@ impl TailCtx<'_, '_> {
             // block it ran, so a later aux keyed from it must not run either.
             let skipped = pool.is_some_and(|p| {
                 let tail = &graph.tail_skipped;
-                p.preparation_blocked(at) || keys.sources_of(at).any(|j| match j.checked_sub(phase1) {
-                    None => p.is_silent(j) || p.is_away(j),
-                    Some(a) => a < k && tail.get(a).copied().unwrap_or(false),
-                })
+                p.preparation_blocked(at)
+                    || keys.sources_of(at).any(|j| match j.checked_sub(phase1) {
+                        None => p.is_silent(j) || p.is_away(j) || graph.recovery_skipped.get(j) == Some(&true),
+                        Some(a) => a < k && tail.get(a).copied().unwrap_or(false),
+                    })
             });
             // Test seam (issue #210): a muted serial block applies the same rule to its mutes.
             #[cfg(feature = "testing")]
@@ -106,9 +107,13 @@ impl TailCtx<'_, '_> {
             };
             keys.fill(at..at + 1, strip, busses, frames);
             guarded(st, |st| process_strip(t, st, &StripRender { s, busses, live: live_in, pos, frames, any_solo, keys }));
-            if let Some(payload) = st.panic.take() { std::panic::resume_unwind(payload); }
+            if let Some(payload) = st.panic.take() {
+                std::panic::resume_unwind(payload);
+            }
             #[cfg(feature = "testing")]
-            if self.mutes.silent(at) { continue; }
+            if self.mutes.silent(at) {
+                continue;
+            }
             st.meter.measure(&st.buf, frames, st.gr, host_frame);
             st.meter.plugin_failures = st.failures;
             let need = route_into(t, st, pos, frames, MixOut { busses, main, main_fmt, sinks, law, main_arrival });
@@ -118,6 +123,31 @@ impl TailCtx<'_, '_> {
 }
 
 impl PlanTables {
+    /// Current-block preparation runs after completed tail owners are returned, never on a
+    /// placeholder or a suspect processor. Key alignment therefore sees the current chain.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn prepare_block(
+        &mut self,
+        s: &Session,
+        pos: Samples,
+        frames: usize,
+        rate: u32,
+        duplex: bool,
+        status: &mut PlanStatus,
+        pool: Option<&strip_pool::StripPool>,
+    ) {
+        let ramp = touch::configured_return_samples(rate, s.touch_return_ms);
+        for (i, st) in self.strips.iter_mut().enumerate() {
+            if pool.is_some_and(|p| p.preparation_blocked(i)) || st.panic.is_some() {
+                continue;
+            }
+            if let Some(t) = s.tracks.get(usize::from(st.track)) {
+                st.touch.begin(t, frames, ramp);
+                guarded(st, |st| strip::service_idle_states(s, t, st, pos));
+            }
+        }
+        self.align_keys(s, pos, duplex, status, &|i| pool.is_some_and(|p| p.preparation_blocked(i)));
+    }
     /// `away`: the strip at that table index is held by a render worker (its keys and its
     /// chain are in its cell): its delays stay as they were until it is home.
     pub(super) fn align_keys(&mut self, s: &Session, pos: Samples, duplex: bool, status: &mut PlanStatus, away: &dyn Fn(usize) -> bool) {
@@ -201,7 +231,9 @@ pub(super) fn fold_latency(
     let pdc = s.edit.delay_compensation;
     if pdc {
         for (k, st) in auxes.iter_mut().enumerate() {
-            if !blocked(phase1 + k) && let Some(t) = track(st).filter(|t| !t.inactive) {
+            if !blocked(phase1 + k)
+                && let Some(t) = track(st).filter(|t| !t.inactive)
+            {
                 guarded(st, |st| note_insert_latency(t, st, pos, duplex));
             }
         }

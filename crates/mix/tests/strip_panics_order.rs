@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering::Relaxed};
 use std::thread::ThreadId;
 use transit_dsp::Plugin;
 use transit_mix::{
-    Adoption, DeviceGeneration, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen,
+    Adoption, DeviceGeneration, EnvelopeState, InstanceSpec, MixEngine, NewInstance, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, SlotGen,
     mark_audio_thread,
 };
 use transit_model::{ChannelFormat, Insert, Session, TrackKind};
@@ -141,12 +141,17 @@ fn pending_panics_drain_in_render_order_and_recovery_is_not_permanently_silent()
     assert_eq!(first.downcast_ref::<Payload>().unwrap().0.id, 0);
     states.iter().for_each(|s| s.armed.store(false, Relaxed));
     drop(first);
-    mix.reset();
-    for id in 1..N {
+    // Section 11: reset must report the next retained payload before calling a processor.
+    let payload = catch_unwind(AssertUnwindSafe(|| mix.reset())).unwrap_err();
+    assert_eq!(payload.downcast_ref::<Payload>().unwrap().0.id, 1);
+    drop(payload);
+    for id in 2..N {
         let payload = render(&mut mix, (id * BLOCK) as i64).unwrap_err();
         assert_eq!(payload.downcast_ref::<Payload>().unwrap().0.id, id);
         drop(payload);
+        assert!(states.iter().all(|s| s.calls.load(Relaxed) == 1), "no processing while a payload remains");
     }
+    mix.reset();
     render(&mut mix, (N * BLOCK) as i64).unwrap();
     assert!(states.iter().all(|s| s.calls.load(Relaxed) >= 2));
     drop(mix.into_retired());
@@ -154,7 +159,7 @@ fn pending_panics_drain_in_render_order_and_recovery_is_not_permanently_silent()
 }
 
 #[test]
-fn a_second_fault_never_overwrites_an_unreported_payload() {
+fn a_pending_fault_prevents_a_second_render_from_overwriting_a_payload() {
     let (mut mix, _, _, states) = setup(&[TrackKind::Instrument; N]);
     states.iter().for_each(|s| s.armed.store(true, Relaxed));
     let worker = std::thread::spawn(move || {
@@ -165,15 +170,17 @@ fn a_second_fault_never_overwrites_an_unreported_payload() {
     });
     let (mix, first, second) = worker.join().unwrap();
     assert_retained(&states);
-    assert_eq!(states[0].raised.load(Relaxed), 2);
-    assert!(states.iter().skip(1).all(|s| s.raised.load(Relaxed) == 1));
+    assert_eq!(first.downcast_ref::<Payload>().unwrap().0.id, 0);
+    assert_eq!(second.downcast_ref::<Payload>().unwrap().0.id, 1);
+    assert!(states.iter().all(|s| s.raised.load(Relaxed) == 1));
+    assert!(states.iter().all(|s| s.calls.load(Relaxed) == 1));
     drop((first, second));
     drop(mix.into_retired());
     assert_reclaimed(&states);
 }
 
 #[test]
-fn table_replacement_and_track_deletion_return_pending_payloads_without_audio_heap_operations() {
+fn table_replacement_and_track_deletion_wait_for_payloads_then_adopt_without_audio_heap_operations() {
     for delete in [false, true] {
         let (mut mix, mut compiler, mut s, states) = setup(&[TrackKind::Instrument; N]);
         states.iter().for_each(|s| s.armed.store(true, Relaxed));
@@ -192,20 +199,32 @@ fn table_replacement_and_track_deletion_return_pending_payloads_without_audio_he
         let generation = compiler.active().checked_next().unwrap();
         let mut env =
             compiler.compile(Arc::new(s), compiler.active(), generation, &mut |_, _| panic!("existing instruments must be reused")).unwrap();
-        let (mix, env, stats) = std::thread::spawn(move || {
+        let (mix, env, stats, pending) = std::thread::spawn(move || {
+            let mut pending = Vec::with_capacity(N - 1);
             mark_audio_thread();
+            let old_generation = mix.active().generation;
+            // The prepared offer remains whole until every retained payload has been reported.
+            for id in 1..N {
+                let payload = catch_unwind(AssertUnwindSafe(|| mix.adopt_plan(&mut env))).unwrap_err();
+                assert_eq!(payload.downcast_ref::<Payload>().unwrap().0.id, id);
+                assert_eq!(env.state(), EnvelopeState::Pending);
+                assert_eq!(mix.active().generation, old_generation);
+                pending.push(payload);
+            }
             let (adoption, stats) = measure(|| mix.adopt_plan(&mut env));
             assert_eq!(adoption, Adoption::Adopted);
-            (mix, env, stats)
+            (mix, env, stats, pending)
         })
         .join()
         .unwrap();
-        assert!(stats.is_zero(), "adoption with pending payloads: {stats:?}");
+        assert!(stats.is_zero(), "adoption after reporting retained payloads: {stats:?}");
         assert_retained(&states);
+        assert!(states.iter().all(|s| s.calls.load(Relaxed) == 1));
         compiler.reclaim(env);
-        assert!(states.iter().skip(1).all(|s| s.dropped.load(Relaxed) == 1));
+        assert_retained(&states);
         let released = compiler.take_released();
         assert_eq!(released.len(), if delete { N } else { 0 });
+        drop(pending);
         drop(payload);
         drop(mix.into_retired());
         assert_reclaimed(&states);

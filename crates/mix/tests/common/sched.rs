@@ -211,6 +211,7 @@ pub(crate) fn corpus() -> Vec<(String, Session)> {
     let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../model/tests/corpus");
     let mut files: Vec<_> =
         std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().path()).filter(|p| p.extension().is_some_and(|x| x == "transit")).collect();
+    files.push(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus/returns-and-groups.transit"));
     files.sort();
     let mut out = Vec::new();
     for path in files {
@@ -347,7 +348,11 @@ const HOLD: &str = "hold";
 impl Topology {
     pub(crate) fn new(name: &str, mut session: Session, instruments: Vec<TrackId>) -> Topology {
         let mut knobs = HashMap::new();
-        for t in session.tracks.iter_mut().filter(|t| matches!(t.kind, TrackKind::Audio | TrackKind::Instrument) && !t.inactive) {
+        for t in session
+            .tracks
+            .iter_mut()
+            .filter(|t| matches!(t.kind, TrackKind::Audio | TrackKind::Instrument | TrackKind::Aux | TrackKind::Folder) && !t.inactive)
+        {
             let last = t.mixer.inserts.len() - 1;
             assert!(t.mixer.inserts[last].is_none(), "{name}: {} has a free last slot", t.name);
             let mut i = Insert::new("gain");
@@ -398,7 +403,8 @@ impl Topology {
 /// the keyed strips twice as often as the rest.
 pub(crate) fn shape(top: &Topology, workers: usize) -> (Shape, HashMap<usize, String>) {
     let rig = top.rig();
-    let (phase1, _) = rig.mix.strip_phases();
+    let (phase1, aux_end) = rig.mix.strip_phases();
+    let phase1 = if MixEngine::tail_enabled() { aux_end } else { phase1 };
     let keyed_or_source = |t: &transit_model::Track| {
         t.mixer.inserts.iter().flatten().any(|i| i.key.is_some())
             || top
@@ -479,7 +485,8 @@ fn wait_home(rig: &Rig, s: usize) {
 /// The phase-1 key edges of `session` as `rig`'s plan lays its strips out: (source, keyed),
 /// from the tracks' inserts, not from the plan's tables.
 fn key_edges(rig: &Rig, session: &Session) -> Vec<(usize, usize)> {
-    let (phase1, _) = rig.mix.strip_phases();
+    let (phase1, aux_end) = rig.mix.strip_phases();
+    let phase1 = if MixEngine::tail_enabled() { aux_end } else { phase1 };
     let index = |t: TrackId| rig.mix.strip_index(t).filter(|&i| i < phase1);
     let mut edges = Vec::new();
     for t in session.tracks.iter().filter(|t| !t.inactive) {
@@ -555,6 +562,15 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
             }
             let held: Vec<usize> = schedule.active(b).collect();
             rig.mix.hold_until_alone(&held);
+            if MixEngine::tail_enabled() {
+                let phase1 = rig.mix.strip_phases().0;
+                for &slot in held.iter().filter(|&&slot| slot >= phase1) {
+                    rig.mix.arm_tail_slot(
+                        slot,
+                        transit_rt::worker_set::seams::SlotOverrides { force_publish: true, no_reclaim: true, ..Default::default() },
+                    );
+                }
+            }
             if let Some(p) = player.as_mut() {
                 p.play(&mut rig, b as u64);
             }
@@ -598,7 +614,9 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
                         mutes.push((i, if cause == OverrunCause::Late { Mute::Discard } else { Mute::Skip }));
                         causes.push((i, cause));
                     }
-                    None if held.contains(&i) => why.push("held by the schedule, but rendered"),
+                    None if held.contains(&i) && !(workers == 0 && i >= rig.mix.strip_phases().0 && MixEngine::tail_enabled()) => {
+                        why.push("held by the schedule, but rendered")
+                    }
                     None if rig.mix.strip_keys_pending(i) => why.push("rendered, but a key's early delay is still pending"),
                     None => {}
                 }

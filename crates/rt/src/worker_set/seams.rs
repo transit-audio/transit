@@ -54,6 +54,18 @@ impl Seams {
 }
 
 impl WorkerSet {
+    /// Injects the block-opening observation of a still-claimed slot for host refusal tests.
+    pub fn mark_busy(&mut self, slot: usize) {
+        if let Some(busy) = self.busy.get_mut(slot) {
+            *busy = true;
+        }
+    }
+    /// Injects the retained suspect state of a completed runner fault, without a thread race.
+    pub fn mark_suspect(&mut self, slot: usize) {
+        if let Some(suspect) = self.shared.suspect.get(slot) {
+            suspect.store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+    }
     /// Arms next host block's slot overrides, between blocks. Does not alter the current block.
     pub fn arm_slot_overrides(&mut self, slot: usize, value: SlotOverrides) {
         if let Some(pending) = self.seams.pending.get_mut(slot) {

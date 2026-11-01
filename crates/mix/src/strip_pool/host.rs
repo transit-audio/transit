@@ -8,7 +8,9 @@ impl StripPool {
         self.set.install_test_seams();
     }
 
-    pub(crate) fn measurement_requested(&self) -> bool { self.set.measurement_requested() }
+    pub(crate) fn measurement_requested(&self) -> bool {
+        self.set.measurement_requested()
+    }
     pub(crate) fn capture_measurement(&mut self, settled: bool) {
         self.set.capture_measurement(settled);
         self.counters.measurement_status.store(self.set.measurement_status(), Ordering::Relaxed);

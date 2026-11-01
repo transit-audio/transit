@@ -267,9 +267,15 @@ pub fn strip_fault_rows(f: &transit_mix::StripFaults) -> Vec<String> {
         format!("Published but unclaimed at deadline: {}", f.queue.unclaimed_at_deadline),
         format!("Claims queued over quarter period: {}", f.queue.queue_over),
         format!("Worker completions late / after long queue: {} / {}", f.queue.late_w, f.queue.late_after_queue),
-        format!("Render measurement mailbox: {}", match f.measurement_status {
-            1 => "requested", 2 => "complete response awaiting acknowledgment", 3 => "incomplete response awaiting acknowledgment", _ => "idle",
-        }),
+        format!(
+            "Render measurement mailbox: {}",
+            match f.measurement_status {
+                1 => "requested",
+                2 => "complete response awaiting acknowledgment",
+                3 => "incomplete response awaiting acknowledgment",
+                _ => "idle",
+            }
+        ),
         format!("Faulted strip renders: {}", f.faulted),
         format!("Suspect strip blocks: {}", f.suspect),
         format!("Deferred MIDI events: {}", f.midi_deferred),

@@ -13,8 +13,8 @@
 //! another plan's graph never matches a task's completion identity ([`task_identity`]). The
 //! per-block run state is allocated with it. The render is `StripPool::render_graph`.
 
-pub(crate) mod tail;
 pub(crate) mod snapshots;
+pub(crate) mod tail;
 use super::*;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use transit_rt::task_graph::{GraphRun, TaskGraph, fnv};
@@ -64,7 +64,7 @@ pub(crate) fn init_graph_switch() {
             match std::env::var("TRANSIT_RENDER_TAIL").ok().as_deref().map(str::trim) {
                 Some("1") if GRAPH.load(Ordering::Relaxed) => TAIL.store(true, Ordering::Relaxed),
                 Some("1") => log::info!("mix: TRANSIT_RENDER_TAIL=1 ignored with TRANSIT_RENDER_GRAPH=0"),
-                None | Some("0") => {},
+                None | Some("0") => {}
                 Some(value) => log::warn!("mix: TRANSIT_RENDER_TAIL={value:?} ignored; tail stays serial"),
             }
         });
@@ -91,10 +91,14 @@ fn apply_graph_setting(value: Option<&str>, switch: &AtomicBool) {
 impl MixEngine {
     /// Test and measurement switch; the graph opt-out still wins.
     #[doc(hidden)]
-    pub fn force_tail(on: bool) { TAIL.store(on, Ordering::Relaxed); }
+    pub fn force_tail(on: bool) {
+        TAIL.store(on, Ordering::Relaxed);
+    }
 
     /// Whether the opt-in tail graph is enabled.
-    pub fn tail_enabled() -> bool { Self::graph_enabled() && TAIL.load(Ordering::Relaxed) }
+    pub fn tail_enabled() -> bool {
+        Self::graph_enabled() && TAIL.load(Ordering::Relaxed)
+    }
     /// Turns the task graph on or off for every engine in the process: on, a plan with sidechain
     /// keys renders its strips through the render workers (issue #174, the default); off
     /// ([`RENDER_GRAPH_ENV`]`=0`), it renders them serially on the audio thread. Takes effect at
@@ -125,6 +129,7 @@ pub(crate) struct StripGraph {
     /// Per aux (table index less `phase1`): skipped this block because a key source missed (a
     /// phase-1 strip or an earlier skipped aux). Set by the serial tail each block.
     pub(crate) tail_skipped: Box<[bool]>,
+    pub(crate) recovery_skipped: Box<[bool]>,
 }
 
 /// Graph generations: one per table built (0: none).
@@ -161,6 +166,7 @@ pub(crate) fn strip_graph(phase1: usize, auxes: usize, layers: &[u16], keys: &[K
         run: GraphRun::new(phase1),
         layer_start: layer_start.into(),
         tail_skipped: vec![false; auxes].into(),
+        recovery_skipped: vec![false; phase1].into(),
     }
 }
 

@@ -202,7 +202,9 @@ impl WorkerSet {
     /// Informational live counters. Individual fields are exact; use the mailbox for a
     /// settled, consistent measurement boundary.
     #[must_use]
-    pub fn queue_snapshot(&self) -> QueueSnapshot { self.shared.queue.counts.snapshot() }
+    pub fn queue_snapshot(&self) -> QueueSnapshot {
+        self.shared.queue.counts.snapshot()
+    }
 
     /// Diagnostic mailbox status: 0 idle, 1 requested, 2 complete response, 3 incomplete
     /// response. This never acknowledges or modifies the consumer's payload.

@@ -12,9 +12,9 @@ use transit_model::{Insert, SourceAudio, SourceId};
 /// other plug-in is built as playback builds it.
 pub(crate) struct PlanRig {
     pub(crate) eng: MixEngine,
-    comp: PlanCompiler,
+    pub(crate) comp: PlanCompiler,
     pub(crate) fakes: Vec<(TrackId, usize, Box<dyn Plugin>)>,
-    issued: u64,
+    pub(crate) issued: u64,
     block: usize,
 }
 

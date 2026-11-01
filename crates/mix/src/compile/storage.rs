@@ -55,8 +55,11 @@ pub(super) fn measure(
         let slots = add(add(t.mixer.inserts.iter().flatten().count(), usize::from(t.instrument.is_some()))?, mul(clips, 2)?)?;
         cells = add(add(cells, 1)?, slots)?;
         bytes = add(bytes, strip_bytes(ch, block, cap_of(t, ch), t.mixer.inserts.len(), clips)?)?;
-        if live(t) && is_aux(t) && let Route::Bus(id) = t.mixer.input
-            && let Some(bus) = s.busses.iter().find(|b| b.id == id) {
+        if live(t)
+            && is_aux(t)
+            && let Route::Bus(id) = t.mixer.input
+            && let Some(bus) = s.busses.iter().find(|b| b.id == id)
+        {
             let channels = bus.format.channels().clamp(1, MAX_CHANNELS);
             bytes = add(bytes, mul(mul(channels, block)?, size_of::<f32>())?)?;
             bytes = add(bytes, add(size_of::<(usize, Option<(BusId, BusBuf)>)>(), mul(channels, size_of::<Vec<f32>>())?)?)?;
@@ -95,8 +98,41 @@ pub(super) fn measure(
     // Every pair of aux rows can contribute input, key and destination ordering edges.
     let auxes = s.tracks.iter().filter(|t| is_aux(t)).count();
     let tasks = add(add(s.tracks.len(), auxes)?, 1)?;
-    bytes = add(bytes, mul(tasks, 96)?)?;
-    bytes = add(bytes, mul(mul(auxes, auxes)?, 32)?)?;
+    bytes = add(bytes, mul(tasks, 256)?)?;
+    let mut edge_bound = add(mul(auxes, auxes)?, tasks)?;
+    for t in &s.tracks {
+        edge_bound = add(edge_bound, add(mul(t.mixer.inserts.len(), 2)?, add(t.mixer.sends.len(), 2)?)?)?;
+    }
+    // Two edge Vecs coexist during construction, each with less than twice the final
+    // edge capacity (24 bytes/edge on 64-bit), plus the graph's compact output arrays.
+    bytes = add(bytes, mul(edge_bound, 128)?)?;
     over("cells", cells, usize::from(u16::MAX))?;
     over("prepared_bytes", bytes, l.prepared_bytes)
+}
+
+#[cfg(test)]
+mod tail_tests {
+    use super::*;
+    #[test]
+    fn every_live_reader_snapshot_is_charged_before_allocation() {
+        let mut s = Session::default();
+        let id = BusId(s.alloc());
+        s.busses.push(transit_model::Bus { id, name: "wide".into(), format: ChannelFormat::Stereo });
+        let t = s.add_track(TrackKind::Aux, ChannelFormat::Mono, None);
+        s.track_mut(t).unwrap().mixer.input = Route::Bus(id);
+        let limits = PlanLimits { prepared_bytes: 0, ..PlanLimits::default() };
+        let need = |s: &Session| match measure(s, &limits, 128, &|_, _| 0, &|_, _| 0) {
+            Err(CompileError::ResourceLimit { what: "prepared_bytes", need, .. }) => need,
+            other => panic!("{other:?}"),
+        };
+        let live_need = need(&s);
+        s.track_mut(t).unwrap().inactive = true;
+        let inactive_need = need(&s);
+        assert_eq!(live_need - inactive_need, 2 * 128 * size_of::<f32>() + size_of::<(usize, Option<(BusId, BusBuf)>)>() + 2 * size_of::<Vec<f32>>());
+        s.track_mut(t).unwrap().inactive = false;
+        let limits = PlanLimits { prepared_bytes: live_need - 1, ..limits };
+        assert!(measure(&s, &limits, 128, &|_, _| 0, &|_, _| 0).is_err());
+        let limits = PlanLimits { prepared_bytes: live_need, ..limits };
+        assert!(measure(&s, &limits, 128, &|_, _| 0, &|_, _| 0).is_ok());
+    }
 }

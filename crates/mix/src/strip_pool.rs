@@ -310,6 +310,7 @@ pub(crate) struct StripPool {
     on_callback: Box<[bool]>,
     generation: u64,
     host_period: Duration,
+    pub(crate) last_tail: bool,
     /// Strips silent by an overrun in the last block.
     last_overruns: u32,
     /// Host-block accounting, independent of the worker generation of each sub-block.
@@ -362,6 +363,7 @@ impl StripPool {
             on_callback: vec![false; strips].into_boxed_slice(),
             generation: 0,
             host_period: block_period(frames as usize, rate),
+            last_tail: false,
             last_overruns: 0,
             host_seen: vec![0; strips].into_boxed_slice(),
             host_counted: false,
@@ -624,7 +626,9 @@ impl StripPool {
     /// Takes strip `i` back from its cell into `table` and applies what happened while it was
     /// away. False when the cell's lock was not free (a counted fault; the strip stays away).
     fn bring_home(&mut self, i: usize, table: &mut Strip, events: &EngineEvents) -> bool {
-        if !self.bring_home_ownership(i, table) { return false; }
+        if !self.bring_home_ownership(i, table) {
+            return false;
+        }
         self.apply_home_pending(i, table, events);
         true
     }
@@ -706,7 +710,15 @@ impl StripPool {
     /// into its instrument at once, so an event that arrives next (admitted directly, the strip
     /// being home) lands behind the older ones: a note-off is never admitted ahead of its parked
     /// note-on. True when every strip is home.
-    pub(crate) fn settle(&mut self, strips: &mut [Strip], keys: &mut KeyBank, inputs: &mut crate::graph::snapshots::Snapshots, events: &mut EngineEvents, s: &Session, block_len: usize) -> bool {
+    pub(crate) fn settle(
+        &mut self,
+        strips: &mut [Strip],
+        keys: &mut KeyBank,
+        inputs: &mut crate::graph::snapshots::Snapshots,
+        events: &mut EngineEvents,
+        s: &Session,
+        block_len: usize,
+    ) -> bool {
         let clock = BlockClock { frame: events.next_frame, frames: block_len };
         let g = self.generation + 1;
         let mut home = self.set.settle_between_blocks();
@@ -767,6 +779,7 @@ impl StripPool {
     /// and mix only `Mixed` and `Inline`, silence and count the rest, defer the MIDI of `Busy`
     /// strips. Allocation-free; never waits on a worker past the deadline.
     pub(crate) fn render(&mut self, b: &PoolBlock<'_>, p1: &mut [Strip], events: &mut EngineEvents) {
+        self.last_tail = false;
         let s: &Session = b.session;
         let g = self.generation + 1;
         let clock = BlockClock { frame: b.live.frame, frames: b.frames };
@@ -786,16 +799,23 @@ impl StripPool {
         }
         self.generation = g;
         self.set.set_block_timing(self.deadline(b), self.host_period);
+        self.returned.fill(false);
+        for (i, st) in p1.iter_mut().enumerate().take(cells) {
+            if self.away[i] && !self.set.is_busy(i) {
+                self.returned[i] = self.bring_home_ownership(i, st);
+            }
+        }
+        crate::render_pool::panic_checkpoint(p1, Some(self));
         let mut published = 0usize;
         for (i, st) in p1.iter_mut().enumerate() {
             if i < cells {
                 self.silent[i] = false;
                 self.on_callback[i] = false;
                 // A worker finished since the last block: its (late) result was retired unread.
-                if self.away[i] && !self.set.is_busy(i) {
-                    self.bring_home(i, st, events);
-                }
                 if !self.away[i] {
+                    if self.returned[i] {
+                        self.apply_home_pending(i, st, events);
+                    }
                     self.name(i, st);
                     self.deliver(i, st, g, &clock, events, s);
                 }
@@ -1006,8 +1026,19 @@ impl StripPool {
         let st = self.set.stats();
         let c = &self.counters;
         let q = self.set.queue_snapshot();
-        for (cell, value) in c.queue.iter().zip([q.published, q.claimed, q.inline_pre, q.unclaimed_at_deadline,
-            q.deadline_reclaimed_tail, q.classified, q.queue_over, q.late_w, q.late_after_queue, q.forgone, q.tail_callback]) {
+        for (cell, value) in c.queue.iter().zip([
+            q.published,
+            q.claimed,
+            q.inline_pre,
+            q.unclaimed_at_deadline,
+            q.deadline_reclaimed_tail,
+            q.classified,
+            q.queue_over,
+            q.late_w,
+            q.late_after_queue,
+            q.forgone,
+            q.tail_callback,
+        ]) {
             cell.store(value, Ordering::Relaxed);
         }
         c.measurement_status.store(self.set.measurement_status(), Ordering::Relaxed);
@@ -1136,10 +1167,10 @@ pub use faults::StripFaultsReader;
 /// The graph path (issue #174): a keyed plan's phase-1 strips as a task graph.
 mod graph;
 mod graph_host;
-mod tail;
 mod host;
 #[cfg(feature = "testing")]
 mod seam;
+mod tail;
 #[cfg(feature = "testing")]
 pub(crate) use seam::pinned;
 
@@ -1150,3 +1181,6 @@ pub(crate) mod tests;
 mod graph_tests;
 #[cfg(test)]
 pub(crate) use tests::SWITCH;
+
+#[cfg(test)]
+mod tail_tests;

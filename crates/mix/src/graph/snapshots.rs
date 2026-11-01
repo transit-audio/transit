@@ -8,13 +8,29 @@ pub(crate) struct Snapshots {
 
 impl Snapshots {
     pub(crate) fn new(rows: &[tail::Row], phase1: usize, block: usize) -> Self {
-        Self { entries: rows.iter().enumerate().filter(|(_, r)| r.live).filter_map(|(k, r)| {
-            let (id, fmt) = r.input?;
-            Some((phase1 + k, Some((id, BusBuf {
-                fmt, buf: vec![vec![0.0; block]; fmt.channels().clamp(1, MAX_CHANNELS)], host_buf: Vec::new(),
-                arrival: 0, reader: usize::MAX,
-            }))))
-        }).collect() }
+        Self {
+            entries: rows
+                .iter()
+                .enumerate()
+                .filter(|(_, r)| r.live)
+                .filter_map(|(k, r)| {
+                    let (id, fmt) = r.input?;
+                    Some((
+                        phase1 + k,
+                        Some((
+                            id,
+                            BusBuf {
+                                fmt,
+                                buf: vec![vec![0.0; block]; fmt.channels().clamp(1, MAX_CHANNELS)],
+                                host_buf: Vec::new(),
+                                arrival: 0,
+                                reader: usize::MAX,
+                            },
+                        )),
+                    ))
+                })
+                .collect(),
+        }
     }
 
     pub(crate) fn copy(&mut self, slot: usize, busses: &BusTable, frames: usize) {
@@ -29,16 +45,22 @@ impl Snapshots {
     }
 
     pub(crate) fn lend(&mut self, slot: usize, to: &mut BusTable) -> bool {
-        if !to.0.is_empty() || to.0.capacity() == 0 { return false; }
+        if !to.0.is_empty() || to.0.capacity() == 0 {
+            return false;
+        }
         if let Some((_, entry)) = self.entries.iter_mut().find(|(i, _)| *i == slot) {
-            let Some(value) = entry.take() else { return false; };
+            let Some(value) = entry.take() else {
+                return false;
+            };
             to.0.push(value);
         }
         true
     }
 
     pub(crate) fn take_back(&mut self, slot: usize, from: &mut BusTable) {
-        if let Some((_, entry)) = self.entries.iter_mut().find(|(i, _)| *i == slot) && entry.is_none() {
+        if let Some((_, entry)) = self.entries.iter_mut().find(|(i, _)| *i == slot)
+            && entry.is_none()
+        {
             *entry = from.0.pop();
         }
     }

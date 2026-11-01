@@ -36,18 +36,41 @@ use transit_rt::task_graph::drive;
 
 impl StripPool {
     /// A refused block opening or an oversized keyed plan never renders an away spare.
-    pub(crate) fn recover_phase1(&mut self, b: &PoolBlock<'_>, strips: &mut [Strip], keys: &mut KeyBank, graph: &StripGraph) {
+    pub(crate) fn recover_phase1(&mut self, b: &PoolBlock<'_>, strips: &mut [Strip], keys: &mut KeyBank, graph: &mut StripGraph) {
         for i in 0..strips.len() {
-            let unavailable = self.preparation_blocked(i) || strips[i].panic.is_some()
-                || keys.sources_of(i).any(|j| self.is_silent(j) || self.is_away(j));
-            if let Some(silent) = self.silent.get_mut(i) { *silent = unavailable; }
-            if unavailable { continue; }
+            let unavailable = self.preparation_blocked(i)
+                || strips[i].panic.is_some()
+                || keys.sources_of(i).any(|j| self.is_silent(j) || self.is_away(j) || graph.recovery_skipped.get(j) == Some(&true));
+            if let Some(skipped) = graph.recovery_skipped.get_mut(i) {
+                *skipped = unavailable;
+            }
+            if let Some(silent) = self.silent.get_mut(i) {
+                *silent = unavailable;
+            }
+            if unavailable {
+                continue;
+            }
             let start = graph.layer_start(i);
             let (before, rest) = strips.split_at_mut(i);
             keys.fill(i..i + 1, |j| if j < start { before.get(j) } else { None }, b.busses, b.frames);
-            if let Some(st) = rest.first_mut() && let Some(t) = b.session.tracks.get(usize::from(st.track)).filter(|t| live(t) && !is_aux(t)) {
-                guarded(st, |st| process_strip(t, st, &StripRender { s: b.session, busses: b.busses, live: b.live,
-                    pos: b.pos, frames: b.frames, any_solo: b.any_solo, keys }));
+            if let Some(st) = rest.first_mut()
+                && let Some(t) = b.session.tracks.get(usize::from(st.track)).filter(|t| live(t) && !is_aux(t))
+            {
+                guarded(st, |st| {
+                    process_strip(
+                        t,
+                        st,
+                        &StripRender { s: b.session, busses: b.busses, live: b.live, pos: b.pos, frames: b.frames, any_solo: b.any_solo, keys },
+                    )
+                });
+                if st.panic.is_some() {
+                    if let Some(skipped) = graph.recovery_skipped.get_mut(i) {
+                        *skipped = true;
+                    }
+                    if let Some(silent) = self.silent.get_mut(i) {
+                        *silent = true;
+                    }
+                }
             }
         }
     }
@@ -76,6 +99,7 @@ impl StripPool {
         keys: &mut KeyBank,
         graph: &mut StripGraph,
     ) {
+        self.last_tail = false;
         let s: &Session = b.session;
         let g = self.generation + 1;
         let clock = BlockClock { frame: b.live.frame, frames: b.frames };
@@ -90,14 +114,22 @@ impl StripPool {
         }
         self.generation = g;
         self.set.set_block_timing(self.deadline(b), self.host_period);
+        self.returned.fill(false);
         for (i, st) in p1.iter_mut().enumerate().take(cells) {
             self.silent[i] = false;
             self.on_callback[i] = false;
             // A worker finished since the last block: its (late) result was retired unread.
-            if self.away[i] && !self.set.is_busy(i) && self.bring_home(i, st, events) {
+            if self.away[i] && !self.set.is_busy(i) && self.bring_home_ownership(i, st) {
                 self.take_keys_back(i, keys);
+                self.returned[i] = true;
             }
+        }
+        crate::render_pool::panic_checkpoint(p1, Some(self));
+        for (i, st) in p1.iter_mut().enumerate().take(cells) {
             if !self.away[i] {
+                if self.returned[i] {
+                    self.apply_home_pending(i, st, events);
+                }
                 self.name(i, st);
                 self.deliver(i, st, g, &clock, events, s);
             }
@@ -105,8 +137,18 @@ impl StripPool {
         let deadline = self.deadline(b);
         let StripGraph { graph: table, run, layer_start, .. } = graph;
         let (_report, callback) = {
-            let mut host =
-                Host { pool: &mut *self, p1: &mut *p1, events: &mut *events, keys: &mut *keys, graph: table, layer_start, b, g, callback: 0, tail: None };
+            let mut host = Host {
+                pool: &mut *self,
+                p1: &mut *p1,
+                events: &mut *events,
+                keys: &mut *keys,
+                graph: table,
+                layer_start,
+                b,
+                g,
+                callback: 0,
+                tail: None,
+            };
             let report = drive(&mut host, table, run, deadline);
             (report, host.callback)
         };

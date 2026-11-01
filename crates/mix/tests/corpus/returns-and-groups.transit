@@ -1,0 +1,1428 @@
+{
+  "format_version": 1,
+  "name": "returns-and-groups",
+  "sample_rate": 48000,
+  "bit_depth": "Int24",
+  "frame_rate": "Fps30",
+  "timecode_start": 0,
+  "tempo": {
+    "tempos": [
+      {
+        "tick": 0,
+        "bpm": 104.0
+      }
+    ],
+    "meters": [
+      {
+        "tick": 0,
+        "numerator": 4,
+        "denominator": 4
+      }
+    ]
+  },
+  "key_signatures": [],
+  "tracks": [
+    {
+      "id": 100,
+      "name": "Instrument 0",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        80,
+        190,
+        168
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Instrument 0",
+          "clips": [
+            {
+              "id": 200,
+              "name": "Keys",
+              "start": 0,
+              "length": 96000,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 48,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 920
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -9.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": {
+          "Bus": 302
+        },
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 300
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": true
+          },
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 301
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": true
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "macro_oscillator",
+        "params": {},
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 101,
+      "name": "Instrument 1",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        80,
+        190,
+        168
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Instrument 1",
+          "clips": [
+            {
+              "id": 201,
+              "name": "Keys",
+              "start": 0,
+              "length": 96000,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 51,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 920
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -9.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": {
+          "Bus": 303
+        },
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 300
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": false
+          },
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 301
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": false
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "macro_oscillator",
+        "params": {},
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 102,
+      "name": "Instrument 2",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        80,
+        190,
+        168
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Instrument 2",
+          "clips": [
+            {
+              "id": 202,
+              "name": "Keys",
+              "start": 0,
+              "length": 96000,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 54,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 920
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -9.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": {
+          "Bus": 303
+        },
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 300
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": false
+          },
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 301
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": false
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "macro_oscillator",
+        "params": {},
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 103,
+      "name": "Instrument 3",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        80,
+        190,
+        168
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Instrument 3",
+          "clips": [
+            {
+              "id": 203,
+              "name": "Keys",
+              "start": 0,
+              "length": 96000,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 57,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 920
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -9.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": {
+          "Bus": 303
+        },
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 300
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": false
+          },
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 301
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": false
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "macro_oscillator",
+        "params": {},
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 104,
+      "name": "Instrument 4",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        80,
+        190,
+        168
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Instrument 4",
+          "clips": [
+            {
+              "id": 204,
+              "name": "Keys",
+              "start": 0,
+              "length": 96000,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 60,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 920
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -9.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": {
+          "Bus": 303
+        },
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 300
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": false
+          },
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 301
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": false
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "macro_oscillator",
+        "params": {},
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 105,
+      "name": "Instrument 5",
+      "kind": "Instrument",
+      "format": "Stereo",
+      "color": [
+        80,
+        190,
+        168
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Instrument 5",
+          "clips": [
+            {
+              "id": 205,
+              "name": "Keys",
+              "start": 0,
+              "length": 96000,
+              "content": {
+                "Midi": {
+                  "sequence": {
+                    "notes": [
+                      {
+                        "pitch": 63,
+                        "velocity": 92,
+                        "release_velocity": 64,
+                        "channel": 0,
+                        "start": 0,
+                        "length": 920
+                      }
+                    ],
+                    "ctrls": []
+                  }
+                }
+              },
+              "scale_mode": {
+                "enabled": false,
+                "fold": false,
+                "key": {
+                  "root": 0,
+                  "scale": "major"
+                }
+              },
+              "gain_db": 0.0,
+              "gain_env": [],
+              "fade_in": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "fade_out": {
+                "len": 0,
+                "shape": "EqualPower",
+                "curvature": 0.0
+              },
+              "muted": false,
+              "edit_locked": false,
+              "time_locked": false,
+              "rating": 0,
+              "sync_point": 0,
+              "color": null,
+              "stretch": 1.0,
+              "group": null,
+              "loop_id": null,
+              "looping": null
+            }
+          ]
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -9.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": "None",
+        "output": {
+          "Bus": 303
+        },
+        "inserts": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 300
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": false
+          },
+          {
+            "mute": false,
+            "surround": null,
+            "pan": 0,
+            "target": {
+              "Bus": 301
+            },
+            "follow_main_pan": true,
+            "level_db": -15,
+            "pre_fader": false
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "notes",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": {
+        "plugin": "macro_oscillator",
+        "params": {},
+        "bypass": false,
+        "active": true,
+        "preset": "<factory default>"
+      },
+      "ticks_timebase": true,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 400,
+      "name": "Return A",
+      "kind": "Aux",
+      "format": "Stereo",
+      "color": [
+        130,
+        150,
+        170
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Verb",
+          "clips": []
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -4.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": {
+          "Bus": 300
+        },
+        "output": {
+          "Bus": 303
+        },
+        "inserts": [
+          {
+            "preset": "",
+            "active": true,
+            "params": {},
+            "plugin": "room_reverb",
+            "bypass": false
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "volume",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 401,
+      "name": "Return B",
+      "kind": "Aux",
+      "format": "Stereo",
+      "color": [
+        130,
+        150,
+        170
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Verb",
+          "clips": []
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -4.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": {
+          "Bus": 301
+        },
+        "output": {
+          "Bus": 303
+        },
+        "inserts": [
+          {
+            "preset": "",
+            "active": true,
+            "params": {},
+            "plugin": "gain",
+            "bypass": false
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "volume",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 402,
+      "name": "Drums",
+      "kind": "Aux",
+      "format": "Stereo",
+      "color": [
+        130,
+        150,
+        170
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Verb",
+          "clips": []
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -4.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": {
+          "Bus": 302
+        },
+        "output": {
+          "Bus": 303
+        },
+        "inserts": [
+          {
+            "preset": "",
+            "active": true,
+            "params": {},
+            "plugin": "gain",
+            "bypass": false
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "volume",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    },
+    {
+      "id": 403,
+      "name": "Music",
+      "kind": "Aux",
+      "format": "Stereo",
+      "color": [
+        130,
+        150,
+        170
+      ],
+      "height": "Medium",
+      "playlists": [
+        {
+          "name": "Verb",
+          "clips": []
+        }
+      ],
+      "active_playlist": 0,
+      "mixer": {
+        "volume_db": -4.0,
+        "pan": [
+          -1.0,
+          1.0
+        ],
+        "mute": false,
+        "solo": false,
+        "solo_safe": false,
+        "phase_invert": false,
+        "input": {
+          "Bus": 303
+        },
+        "output": "Main",
+        "inserts": [
+          {
+            "preset": "",
+            "active": true,
+            "params": {},
+            "plugin": "gain",
+            "bypass": false
+          },
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "sends": [
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          null
+        ],
+        "automation_mode": "Read",
+        "trim_db": 0.0,
+        "vca": null,
+        "surround": null
+      },
+      "midi_input": {
+        "port": "all",
+        "channel": null
+      },
+      "automation": [],
+      "view": "volume",
+      "hidden": false,
+      "inactive": false,
+      "comments": "",
+      "folder": null,
+      "folder_open": true,
+      "instrument": null,
+      "ticks_timebase": false,
+      "elastic": null,
+      "pinned": false
+    }
+  ],
+  "sources": [],
+  "busses": [
+    {
+      "format": "Stereo",
+      "name": "Return A",
+      "id": 300
+    },
+    {
+      "format": "Stereo",
+      "name": "Return B",
+      "id": 301
+    },
+    {
+      "format": "Stereo",
+      "name": "Drums",
+      "id": 302
+    },
+    {
+      "format": "Stereo",
+      "name": "Music",
+      "id": 303
+    }
+  ],
+  "outputs": [
+    {
+      "name": "Out 1-2",
+      "first_channel": 0,
+      "format": "Stereo"
+    }
+  ],
+  "markers": [],
+  "groups": [],
+  "edit": {
+    "tool": "Smart",
+    "edit_mode": "Slip",
+    "selection": {
+      "start": 443072,
+      "end": 443072
+    },
+    "selected_tracks": [
+      3
+    ],
+    "selected_clips": [],
+    "selected_sources": [],
+    "playhead": 0,
+    "grid": {
+      "Note": {
+        "value": "Sixteenth",
+        "dotted": false,
+        "triplet": false
+      }
+    },
+    "nudge": {
+      "Seconds": 1.0
+    },
+    "grid_lines": true,
+    "main_counter": "BarsBeats",
+    "sub_counter": "Samples",
+    "zoom": {
+      "samples_per_px": 1967.4514285714286,
+      "scroll": 0,
+      "waveform_zoom": 1.0,
+      "presets": [
+        64.0,
+        256.0,
+        1024.0,
+        4096.0,
+        16384.0
+      ]
+    },
+    "zoom_toggle": null,
+    "rulers": [
+      "bars_beats",
+      "min_secs",
+      "tempo",
+      "meter",
+      "markers"
+    ],
+    "link_timeline_edit": true,
+    "link_track_edit": false,
+    "insertion_follows_playback": false,
+    "loop_playback": false,
+    "loop_range": {
+      "start": 0,
+      "end": 0
+    },
+    "pre_post_roll": false,
+    "pre_roll": 96000,
+    "post_roll": 96000,
+    "tab_to_transient": false,
+    "automation_follows_edit": true,
+    "markers_follow_edit": false,
+    "layered_editing": false,
+    "mirrored_midi": false,
+    "click": false,
+    "countoff": false,
+    "countoff_bars": 2,
+    "midi_merge": false,
+    "record_mode": "normal",
+    "loop_record": false,
+    "quickpunch": false,
+    "scrolling": "page",
+    "solo_mode": "sip",
+    "pre_fader_metering": false,
+    "delay_compensation": true,
+    "keyboard_focus": "commands",
+    "timeline_selection": {
+      "start": 0,
+      "end": 0
+    },
+    "flags": [
+      "view.clip.gain_line",
+      "view.clip.name",
+      "view.clip.overlap_shadows",
+      "view.marker.ruler_lines",
+      "waveform.peak"
+    ],
+    "values": {}
+  },
+  "next_id": 1000,
+  "comments": "",
+  "midi_originals": {}
+}

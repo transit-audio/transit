@@ -1308,3 +1308,6 @@ impl SampleSource for PoolSample {
         self.0.channel(ch)
     }
 }
+
+#[cfg(test)]
+mod tail_tests;

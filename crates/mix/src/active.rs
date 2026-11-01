@@ -242,10 +242,17 @@ impl MixEngine {
         }
         // Every strip must be home: a strip a render worker holds cannot move (ADR 0029). Playback
         // defers adoption until then ([`MixEngine::render_workers_settled`]).
-        if let Some(pool) = self.pool.as_mut() {
-            if !pool.settle(&mut active.tables.strips, &mut active.tables.keys, &mut active.tables.inputs, &mut self.events, &active.session, self.max_block) {
-                return reject(env, RejectReason::StripsInFlight, active);
-            }
+        if let Some(pool) = self.pool.as_mut()
+            && !pool.settle(
+                &mut active.tables.strips,
+                &mut active.tables.keys,
+                &mut active.tables.inputs,
+                &mut self.events,
+                &active.session,
+                self.max_block,
+            )
+        {
+            return reject(env, RejectReason::StripsInFlight, active);
         }
         #[cfg(feature = "testing")]
         crate::sched_seam::observe_checkpoint(2);
@@ -270,6 +277,8 @@ impl MixEngine {
                     continue;
                 };
                 swap_cells(mv.kind, &mut active.tables, &src, new, &dst);
+                #[cfg(feature = "testing")]
+                crate::sched_seam::observe_checkpoint(4);
                 fault_point(1);
             }
             for a in plan.attach.iter_mut() {
@@ -290,6 +299,8 @@ impl MixEngine {
                     }
                 }
                 fault_point(2);
+                #[cfg(feature = "testing")]
+                crate::sched_seam::observe_checkpoint(5);
             }
             fault_point(3);
             std::mem::swap(&mut active.tables, new);
@@ -441,18 +452,24 @@ impl MixEngine {
             m.enter(Phase::Mixdown, None);
         }
         tables.clear_block(frames);
-        // Touch (#188): holds and return ramps advance before anything reads automation.
-        let ramp = touch::configured_return_samples(sample_rate, s.touch_return_ms);
-        for (i, st) in tables.strips.iter_mut().enumerate() {
-            if self.pool.as_ref().is_some_and(|p| p.preparation_blocked(i)) { continue; }
-            if let Some(t) = s.tracks.get(usize::from(st.track)) {
-                st.touch.begin(t, frames, ramp);
-                strip::service_idle_states(s, t, st, pos);
-            }
+        tables.graph.recovery_skipped.fill(false);
+        let tail_eligible = self.pool.as_ref().is_some_and(|pool| {
+            (tables.phase1..tables.aux_end).any(|i| pool.is_away(i))
+                || (on_audio_thread()
+                    && !self.serial
+                    && !MixEngine::serial_forced()
+                    && MixEngine::tail_enabled()
+                    && tables.aux_end <= pool.capacity()
+                    && tables.phase1
+                        + tables.strips[tables.phase1..tables.aux_end]
+                            .iter()
+                            .filter(|st| s.tracks.get(usize::from(st.track)).is_some_and(live))
+                            .count()
+                        >= PARALLEL_STRIPS)
+        });
+        if !tail_eligible {
+            tables.prepare_block(s, pos, frames, sample_rate, !self.input.is_empty(), status, self.pool.as_ref());
         }
-        // A strip a render worker holds keeps the delays it went away with (its keys are lent).
-        let pool_view = self.pool.as_ref();
-        tables.align_keys(s, pos, !self.input.is_empty(), status, &|i| pool_view.is_some_and(|p| p.preparation_blocked(i)));
         let io = Arc::clone(&tables.io);
 
         let any_solo = s.tracks.iter().any(|t| t.mixer.solo && !t.inactive);
@@ -472,21 +489,29 @@ impl MixEngine {
                 m.enter(phase, strip);
             }
         };
-        let tail_eligible = self.pool.as_ref().is_some_and(|pool| {
-            (tables.phase1..tables.aux_end).any(|i| pool.is_away(i))
-                || (on_audio_thread() && !self.serial && !MixEngine::serial_forced()
-                    && MixEngine::tail_enabled() && tables.aux_end <= pool.capacity()
-                    && tables.phase1 + tables.strips[tables.phase1..tables.aux_end].iter()
-                        .filter(|st| track(st).is_some_and(live)).count() >= PARALLEL_STRIPS)
-        });
         let tail_latency = if tail_eligible {
             let empty = BusTable::default();
-            let block = strip_pool::PoolBlock { session: &*session, busses: &empty, keys: &NO_KEYS,
-                live: &live_in, pos, frames, any_solo, sample_rate, start: start.unwrap_or_else(std::time::Instant::now),
-                budget: None, deadline: callback_deadline };
+            let block = strip_pool::PoolBlock {
+                session: &*session,
+                busses: &empty,
+                keys: &NO_KEYS,
+                live: &live_in,
+                pos,
+                frames,
+                any_solo,
+                sample_rate,
+                start: start.unwrap_or_else(std::time::Instant::now),
+                budget: None,
+                deadline: callback_deadline,
+            };
             self.pool.as_mut().and_then(|pool| pool.render_tail(&block, tables, &mut self.events, status, self.pan_law, host_frame))
-        } else { None };
+        } else {
+            None
+        };
         let tail_done = tail_latency.is_some();
+        if tail_eligible && !tail_done {
+            tables.prepare_block(s, pos, frames, sample_rate, !self.input.is_empty(), status, self.pool.as_ref());
+        }
         let PlanTables { strips, phase1, aux_end, layers, keys, graph, busses, main, main_fmt, main_meter, sinks, .. } = tables;
         let (phase1, aux_end) = (*phase1, *aux_end);
         let main_fmt = *main_fmt;
@@ -504,43 +529,58 @@ impl MixEngine {
         // `TRANSIT_RENDER_GRAPH=0` turns it off) and no more phase-1 strips than the pool has
         // cells; else serially, as before.
         let keyed = !keys.is_empty();
-        let pooled = tail_done || match (self.pool.as_mut(), start) {
-            (Some(pool), Some(start))
-                if !tail_eligible && on_audio_thread() && (!keyed || p1.len() <= pool.capacity())
-                    && (pool.any_away()
-                        || (!self.serial
-                            && !MixEngine::serial_forced()
-                            && (!keyed || (MixEngine::graph_enabled() && p1.len() <= pool.capacity()))
-                            && p1.len() >= PARALLEL_STRIPS)) =>
-            {
-                let block = strip_pool::PoolBlock {
-                    session: &*session,
-                    busses: &*busses,
-                    // The plain path runs only for a plan without keys; the graph path fills and
-                    // reads the plan's own.
-                    keys: &NO_KEYS,
-                    live: &live_in,
-                    pos,
-                    frames,
-                    any_solo,
-                    sample_rate,
-                    start,
-                    budget: None,
-                    deadline: callback_deadline,
-                };
-                if keyed {
-                    pool.render_graph(&block, p1, &mut self.events, keys, graph);
-                } else {
-                    pool.render(&block, p1, &mut self.events);
+        let pooled = tail_done
+            || match (self.pool.as_mut(), start) {
+                (Some(pool), Some(start))
+                    if !tail_eligible
+                        && on_audio_thread()
+                        && (!keyed || p1.len() <= pool.capacity())
+                        && (pool.any_away()
+                            || (!self.serial
+                                && !MixEngine::serial_forced()
+                                && (!keyed || (MixEngine::graph_enabled() && p1.len() <= pool.capacity()))
+                                && p1.len() >= PARALLEL_STRIPS)) =>
+                {
+                    let block = strip_pool::PoolBlock {
+                        session: &*session,
+                        busses: &*busses,
+                        // The plain path runs only for a plan without keys; the graph path fills and
+                        // reads the plan's own.
+                        keys: &NO_KEYS,
+                        live: &live_in,
+                        pos,
+                        frames,
+                        any_solo,
+                        sample_rate,
+                        start,
+                        budget: None,
+                        deadline: callback_deadline,
+                    };
+                    if keyed {
+                        pool.render_graph(&block, p1, &mut self.events, keys, graph);
+                    } else {
+                        pool.render(&block, p1, &mut self.events);
+                    }
+                    true
                 }
-                true
-            }
-            _ => false,
-        };
-        let recovery = !pooled && self.pool.as_ref().is_some_and(|p| p.any_away() || tail_eligible);
+                _ => false,
+            };
+        let recovery = !pooled && self.pool.as_ref().is_some_and(|p| p.any_away() || tail_eligible || (keyed && p1.len() > p.capacity()));
         if recovery && let Some(pool) = self.pool.as_mut() {
-            let block = strip_pool::PoolBlock { session: &*session, busses, keys: &NO_KEYS, live: &live_in,
-                pos, frames, any_solo, sample_rate, start: start.unwrap_or_else(std::time::Instant::now), budget: None, deadline: callback_deadline };
+            pool.deliver_home(p1, &mut self.events, s, frame, frames);
+            let block = strip_pool::PoolBlock {
+                session: &*session,
+                busses,
+                keys: &NO_KEYS,
+                live: &live_in,
+                pos,
+                frames,
+                any_solo,
+                sample_rate,
+                start: start.unwrap_or_else(std::time::Instant::now),
+                budget: None,
+                deadline: callback_deadline,
+            };
             pool.recover_phase1(&block, p1, keys, graph);
         }
         if !pooled && !recovery {
@@ -559,6 +599,7 @@ impl MixEngine {
                 if end <= from {
                     continue;
                 }
+                crate::render_pool::panic_checkpoint(p1, self.pool.as_ref());
                 let (done, cur) = p1.split_at_mut(from);
                 // Test seam (issue #210): a muted serial block, strip by strip; a skipped strip's
                 // keys are not filled and it does not render.
@@ -591,40 +632,46 @@ impl MixEngine {
             std::panic::resume_unwind(panic);
         }
         mark(Phase::Mixdown, None);
-        let DeviceLatency { main: main_arrival, device, .. } = tail_latency.unwrap_or_else(||
-            fold_latency(s, RenderPhases { p1, auxes, others, phase1 }, busses, sinks, pos, !self.input.is_empty(),
-                &|i| self.pool.as_ref().is_some_and(|p| p.preparation_blocked(i))));
+        let DeviceLatency { main: main_arrival, device, .. } = tail_latency.unwrap_or_else(|| {
+            fold_latency(s, RenderPhases { p1, auxes, others, phase1 }, busses, sinks, pos, !self.input.is_empty(), &|i| {
+                self.pool.as_ref().is_some_and(|p| p.preparation_blocked(i))
+            })
+        });
         for st in p1.iter_mut().chain(auxes.iter_mut()).chain(others.iter_mut()) {
-            if let Some(payload) = st.panic.take() { std::panic::resume_unwind(payload); }
+            if let Some(payload) = st.panic.take() {
+                std::panic::resume_unwind(payload);
+            }
         }
         self.main_arrival = main_arrival;
         self.latency = device;
         let law = self.pan_law;
         let pool = if pooled || recovery { self.pool.as_ref() } else { None };
-        if !tail_done { TailCtx {
-            s,
-            p1,
-            auxes,
-            phase1,
-            keys,
-            graph,
-            busses,
-            main,
-            main_fmt,
-            sinks,
-            pos,
-            frames,
-            host_frame,
-            any_solo,
-            live_in: &live_in,
-            law,
-            main_arrival,
-            status,
-            pool,
-            #[cfg(feature = "testing")]
-            mutes: &self.mutes,
+        if !tail_done {
+            TailCtx {
+                s,
+                p1,
+                auxes,
+                phase1,
+                keys,
+                graph,
+                busses,
+                main,
+                main_fmt,
+                sinks,
+                pos,
+                frames,
+                host_frame,
+                any_solo,
+                live_in: &live_in,
+                law,
+                main_arrival,
+                status,
+                pool,
+                #[cfg(feature = "testing")]
+                mutes: &self.mutes,
+            }
+            .render();
         }
-        .render(); }
         // Master faders process the main mix, in track order.
         let transport = transport_at(s, pos, !self.monitor_only, self.recording);
         for st in others.iter_mut() {
@@ -840,7 +887,9 @@ impl MixEngine {
     /// workers. Allocation-free and non-blocking.
     pub fn render_workers_settled(&mut self) -> bool {
         match (self.pool.as_mut(), self.plan.as_deref_mut()) {
-            (Some(pool), Some(p)) => pool.settle(&mut p.tables.strips, &mut p.tables.keys, &mut p.tables.inputs, &mut self.events, &p.session, self.max_block),
+            (Some(pool), Some(p)) => {
+                pool.settle(&mut p.tables.strips, &mut p.tables.keys, &mut p.tables.inputs, &mut self.events, &p.session, self.max_block)
+            }
             _ => true,
         }
     }

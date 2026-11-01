@@ -19,8 +19,7 @@ pub(super) struct Host<'a, 'b> {
 
 impl Host<'_, '_> {
     fn track(&self, slot: usize) -> Option<&Track> {
-        self.p1.get(slot).and_then(|st| self.b.session.tracks.get(usize::from(st.track)))
-            .filter(|t| live(t) && (self.tail.is_some() || !is_aux(t)))
+        self.p1.get(slot).and_then(|st| self.b.session.tracks.get(usize::from(st.track))).filter(|t| live(t) && (self.tail.is_some() || !is_aux(t)))
     }
 
     fn fill(&mut self, slot: usize, deferred: bool) {
@@ -28,8 +27,11 @@ impl Host<'_, '_> {
         let p1: &[Strip] = self.p1;
         let buses = self.tail.as_ref().map_or(self.b.busses, |tail| &*tail.busses);
         let source = |j| if j < start { p1.get(j) } else { None };
-        if deferred { self.keys.fill_deferred(slot..slot + 1, source, buses, self.b.frames); }
-        else { self.keys.fill(slot..slot + 1, source, buses, self.b.frames); }
+        if deferred {
+            self.keys.fill_deferred(slot..slot + 1, source, buses, self.b.frames);
+        } else {
+            self.keys.fill(slot..slot + 1, source, buses, self.b.frames);
+        }
     }
 
     fn identity(&self, task: usize, slot: usize) -> u64 {
@@ -39,7 +41,9 @@ impl Host<'_, '_> {
     fn home(&mut self, slot: usize) -> bool {
         if self.pool.is_away(slot) {
             let Some(st) = self.p1.get_mut(slot) else { return false };
-            if !self.pool.bring_home(slot, st, self.events) { return false; }
+            if !self.pool.bring_home(slot, st, self.events) {
+                return false;
+            }
         }
         self.pool.take_keys_back(slot, self.keys);
         if let Some(tail) = self.tail.as_mut() {
@@ -48,7 +52,9 @@ impl Host<'_, '_> {
         true
     }
 
-    fn aux(&self, slot: usize) -> bool { self.tail.is_some() && slot >= self.layer_start.len() }
+    fn aux(&self, slot: usize) -> bool {
+        self.tail.is_some() && slot >= self.layer_start.len()
+    }
 
     fn fits(&self, slot: usize, window: Window) -> bool {
         let left = self.pool.deadline(self.b).saturating_duration_since(Instant::now());
@@ -63,35 +69,50 @@ impl Host<'_, '_> {
 }
 
 impl GraphHost for Host<'_, '_> {
-    fn set(&mut self) -> &mut WorkerSet { &mut self.pool.set }
+    fn set(&mut self) -> &mut WorkerSet {
+        &mut self.pool.set
+    }
 
     fn start(&mut self, task: usize, window: Window) -> Start {
         let Some(slot) = self.graph.slot(task) else {
-            if let Some(tail) = self.tail.as_mut() { tail.control(task, self.p1, self.pool, self.b); }
+            if let Some(tail) = self.tail.as_mut() {
+                tail.control(task, self.p1, self.pool, self.b);
+            }
             return Start::Ready;
         };
         let Some(track) = self.track(slot) else { return Start::Ready };
         let pinned = reads_input(track, &self.p1[slot]);
-        if slot >= self.pool.capacity() { self.fill(slot, false); return Start::Callback; }
+        if slot >= self.pool.capacity() {
+            self.fill(slot, false);
+            return Start::Callback;
+        }
         if self.pool.is_away(slot) {
             self.pool.silent[slot] = true;
             return if self.pool.set.is_busy(slot) { Start::Busy } else { Start::Unavailable };
         }
-        if self.p1[slot].panic.is_some() || !self.pool.admit(slot, &self.p1[slot]) { return Start::Unavailable; }
+        if self.p1[slot].panic.is_some() || !self.pool.admit(slot, &self.p1[slot]) {
+            return Start::Unavailable;
+        }
         let aux = self.aux(slot);
-        if aux && self.tail.as_ref().is_some_and(|t| t.latency.aborted) { return Start::Unavailable; }
+        if aux && self.tail.as_ref().is_some_and(|t| t.latency.aborted) {
+            return Start::Unavailable;
+        }
         if pinned {
             self.fill(slot, false);
             self.pool.on_callback[slot] = true;
             return Start::Callback;
         }
-        if !aux && window == Window::Closed { return Start::Forgo; }
+        if !aux && window == Window::Closed {
+            return Start::Forgo;
+        }
         self.fill(slot, true);
         if aux && !self.fits(slot, window) {
             self.pool.on_callback[slot] = true;
             return Start::Callback;
         }
-        if let Some(tail) = self.tail.as_mut() { tail.inputs.copy(slot, tail.busses, self.b.frames); }
+        if let Some(tail) = self.tail.as_mut() {
+            tail.inputs.copy(slot, tail.busses, self.b.frames);
+        }
         let (graph, identity) = (self.graph.generation(), self.identity(task, slot));
         if !self.pool.send(slot, &mut self.p1[slot], self.b) {
             return if self.pool.is_away(slot) { Start::Unavailable } else { Start::Callback };
@@ -101,7 +122,9 @@ impl GraphHost for Host<'_, '_> {
         let tail = &mut self.tail;
         let borrowed = self.pool.cells.with(slot, |job| {
             lent = keys.lend(slot, &mut job.keys);
-            if let Some(tail) = tail { lent &= tail.inputs.lend(slot, &mut job.busses); }
+            if let Some(tail) = tail {
+                lent &= tail.inputs.lend(slot, &mut job.busses);
+            }
             job.graph = graph;
             job.task = identity;
         });
@@ -109,20 +132,26 @@ impl GraphHost for Host<'_, '_> {
             self.pool.counters.conflicts.fetch_add(1, Ordering::Relaxed);
             return if self.home(slot) { Start::Callback } else { Start::Unavailable };
         }
-        if aux { self.pool.set.set_inline_at_deadline(slot); }
+        if aux {
+            self.pool.set.set_inline_at_deadline(slot);
+        }
         Start::Publish
     }
 
     fn refused(&mut self, task: usize) {
         if let Some(slot) = self.graph.slot(task) {
             self.pool.counters.conflicts.fetch_add(1, Ordering::Relaxed);
-            if self.home(slot) { self.pool.on_callback[slot] = true; }
+            if self.home(slot) {
+                self.pool.on_callback[slot] = true;
+            }
         }
     }
 
     fn render_here(&mut self, task: usize) -> Rendered {
         let Some(slot) = self.graph.slot(task) else { return Rendered::Usable };
-        if self.pool.is_away(slot) || self.p1.get(slot).is_none_or(|s| s.panic.is_some()) { return Rendered::Unusable; }
+        if self.pool.is_away(slot) || self.p1.get(slot).is_none_or(|s| s.panic.is_some()) {
+            return Rendered::Unusable;
+        }
         let stamp = Stamp { graph: self.graph.generation(), task: self.identity(task, slot), block: self.g };
         let aux = self.aux(slot);
         let Some(st) = self.p1.get_mut(slot) else { return Rendered::Unusable };
@@ -144,9 +173,13 @@ impl GraphHost for Host<'_, '_> {
         }
         self.callback += 1;
         if !usable {
-            if let Some(silent) = self.pool.silent.get_mut(slot) { *silent = true; }
+            if let Some(silent) = self.pool.silent.get_mut(slot) {
+                *silent = true;
+            }
             Rendered::Unusable
-        } else { Rendered::Usable }
+        } else {
+            Rendered::Usable
+        }
     }
 
     fn poll(&mut self, deadline: Instant) -> Poll {
@@ -167,8 +200,14 @@ impl GraphHost for Host<'_, '_> {
         let Some(slot) = self.graph.slot(task) else { return true };
         let mut stamp = Stamp::default();
         self.pool.cells.with(slot, |job| stamp = job.rendered);
-        if !self.home(slot) { self.pool.silent[slot] = true; return false; }
-        if self.p1[slot].panic.is_some() { self.pool.silent[slot] = true; return false; }
+        if !self.home(slot) {
+            self.pool.silent[slot] = true;
+            return false;
+        }
+        if self.p1[slot].panic.is_some() {
+            self.pool.silent[slot] = true;
+            return false;
+        }
         if stamp != (Stamp { graph: self.graph.generation(), task: self.identity(task, slot), block: self.g }) {
             self.pool.counters.stale.fetch_add(1, Ordering::Relaxed);
             self.pool.silent[slot] = true;
@@ -179,6 +218,10 @@ impl GraphHost for Host<'_, '_> {
     }
 
     fn skipped(&mut self, task: usize, _origin: usize) {
-        if let Some(slot) = self.graph.slot(task) && let Some(s) = self.pool.silent.get_mut(slot) { *s = true; }
+        if let Some(slot) = self.graph.slot(task)
+            && let Some(s) = self.pool.silent.get_mut(slot)
+        {
+            *s = true;
+        }
     }
 }

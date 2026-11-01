@@ -27,7 +27,12 @@ std::thread_local! {
 
 pub(crate) fn observe_checkpoint(mark: u8) {
     CHECKPOINTS.with_borrow_mut(|state| {
-        if let Some((marks, len)) = state && *len < marks.len() { marks[*len] = mark; *len += 1; }
+        if let Some((marks, len)) = state
+            && *len < marks.len()
+        {
+            marks[*len] = mark;
+            *len += 1;
+        }
     });
 }
 
@@ -35,7 +40,9 @@ pub(crate) fn observe_checkpoint(mark: u8) {
 pub(crate) fn checkpoint_observer(arm: bool) -> Vec<u8> {
     CHECKPOINTS.with_borrow_mut(|state| {
         let old = state.take().map_or_else(Vec::new, |(marks, len)| marks[..len].to_vec());
-        if arm { *state = Some(([0; 16], 0)); }
+        if arm {
+            *state = Some(([0; 16], 0));
+        }
         old
     })
 }
@@ -77,12 +84,16 @@ impl Mutes {
 impl MixEngine {
     /// Arms the next host block's fit and reclaim overrides for one table slot.
     pub fn arm_tail_slot(&mut self, slot: usize, value: transit_rt::worker_set::seams::SlotOverrides) {
-        if let Some(pool) = self.pool.as_mut() { pool.arm_tail_slot(slot, value); }
+        if let Some(pool) = self.pool.as_mut() {
+            pool.arm_tail_slot(slot, value);
+        }
     }
 
     /// Arms the next host block's deterministic direct aux cost readout.
     pub fn arm_tail_cost(&mut self, clock: transit_rt::worker_set::seams::CostClock) {
-        if let Some(pool) = self.pool.as_mut() { pool.arm_tail_cost(clock); }
+        if let Some(pool) = self.pool.as_mut() {
+            pool.arm_tail_cost(clock);
+        }
     }
     /// Mutes phase-1 strips (by table index) in the next serial block (see the module docs).
     /// Off the audio path, between blocks.
@@ -129,7 +140,8 @@ impl MixEngine {
     /// Per phase-1 strip, the last block's outcome on the pool path (`None` without a pool).
     #[must_use]
     pub fn strip_outcomes(&self) -> Vec<Option<Outcome>> {
-        let n = self.strip_phases().0;
+        let (phase1, aux_end) = self.strip_phases();
+        let n = if self.pool.as_ref().is_some_and(|p| p.last_tail) { aux_end } else { phase1 };
         (0..n).map(|i| self.pool.as_ref().and_then(|p| p.outcome(i))).collect()
     }
 
@@ -137,14 +149,16 @@ impl MixEngine {
     /// a stale result) or away.
     #[must_use]
     pub fn strip_silence(&self) -> Vec<bool> {
-        let n = self.strip_phases().0;
+        let (phase1, aux_end) = self.strip_phases();
+        let n = if self.pool.as_ref().is_some_and(|p| p.last_tail) { aux_end } else { phase1 };
         (0..n).map(|i| self.pool.as_ref().is_some_and(|p| p.is_silent(i) || p.is_away(i))).collect()
     }
 
     /// Per phase-1 strip, its figures so far (counts by cause, cumulative; default without a pool).
     #[must_use]
     pub fn strip_counts(&self) -> Vec<StripFigures> {
-        let n = self.strip_phases().0;
+        let (phase1, aux_end) = self.strip_phases();
+        let n = if self.pool.as_ref().is_some_and(|p| p.last_tail) { aux_end } else { phase1 };
         (0..n).map(|i| self.pool.as_ref().and_then(|p| p.strip_figures(i)).unwrap_or_default()).collect()
     }
 

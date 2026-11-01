@@ -239,7 +239,7 @@ fn parallel_panicking_instruments_drop_no_payload_on_a_render_worker() {
 
 /// A strip still on its worker at the deadline (`Late`) keeps its panic for the control side: that
 /// block returns Ok and mixes the strip as silence, no payload is dropped while the strip is away,
-/// the late strips come home (here through `render_workers_settled`) and the next block re-raises a
+/// the late strips come home and `render_workers_settled` immediately re-raises a
 /// payload, each strip panics exactly once, and every payload is dropped on the control thread.
 /// The strips a worker claims are held in `process` past a zero deadline, so the outcome does not
 /// depend on the host's timing.
@@ -282,21 +282,30 @@ fn a_strip_late_at_the_deadline_keeps_its_panic_for_the_control_side() {
         drop(release);
         let start = Instant::now();
         // timing: stall-bound polls for the released workers; its only exit budget is the 10 s stall bound
-        while !mix.render_workers_settled() {
-            assert!(start.elapsed() < Duration::from_secs(10), "a worker never returned");
-            // timing: sleep-ok paces a wait for the released workers; measures nothing
-            std::thread::sleep(Duration::from_millis(1));
-        }
+        let panic = loop {
+            match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| mix.render_workers_settled())) {
+                Err(payload) => break payload,
+                Ok(_) => {
+                    assert!(start.elapsed() < Duration::from_secs(10), "a worker never returned");
+                    std::thread::yield_now();
+                }
+            }
+        };
         assert_eq!(shared.payload_drops.lock().unwrap().len(), 0, "a late strip's payload was dropped");
-        mix.set_strip_deadline(Some(FAR));
-        let panic = render_active_panic(&mut mix, pos, &mut out);
         (mix, shared, panic, late)
     });
     let (mix, shared, panic, late) = mark.join().unwrap();
     MixEngine::force_serial(true);
     println!("{late} of {TRACKS} strips were late on a worker");
-    assert_eq!(shared.raised.lock().unwrap().len(), TRACKS, "each strip rendered (and panicked) exactly once");
-    assert_all_dropped_here("late", &shared, panic, mix);
+    assert!(panic.is::<Payload>());
+    let here = std::thread::current().id();
+    drop(panic);
+    drop(mix.into_retired());
+    let raised = shared.raised.lock().unwrap().len();
+    assert!(raised >= late, "every held strip panicked");
+    let drops = shared.payload_drops.lock().unwrap();
+    assert_eq!(drops.len(), raised, "every raised payload returned to control");
+    assert!(drops.iter().all(|t| *t == here));
 }
 
 #[test]

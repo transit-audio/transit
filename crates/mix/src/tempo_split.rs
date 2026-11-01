@@ -14,10 +14,14 @@ impl MixEngine {
         let frames = frames.min(self.max_block);
         let callback_deadline = self.block_deadline.take();
         let rate = self.active().target.sample_rate;
-        if let Some(pool) = self.pool.as_mut() { pool.host_entry(frames, rate); }
+        if let Some(pool) = self.pool.as_mut() {
+            pool.host_entry(frames, rate);
+        }
         if self.pool.as_ref().is_some_and(|p| p.measurement_requested()) {
             let settled = self.render_workers_settled();
-            if let Some(pool) = self.pool.as_mut() { pool.capture_measurement(settled); }
+            if let Some(pool) = self.pool.as_mut() {
+                pool.capture_measurement(settled);
+            }
         }
         let deadline = self.pool.as_mut().map(|pool| {
             pool.begin_host_block();
