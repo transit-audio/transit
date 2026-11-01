@@ -416,6 +416,8 @@ pub struct WorkerSet {
     barred_until: Box<[u64]>,
     /// Per strip: a refused inline render was already counted this block.
     refused: Box<[bool]>,
+    /// Publisher-set permission to render a reclaimed tail slot at the deadline.
+    inline_at_deadline: Box<[bool]>,
     /// Where the next wake starts looking for an idle worker.
     wake_cursor: usize,
     /// The open block's publish stamp (nanoseconds since the figures' origin; 0: none yet).
@@ -472,6 +474,7 @@ impl WorkerSet {
             block_index: 0,
             barred_until: vec![0; strips].into_boxed_slice(),
             refused: vec![false; strips].into_boxed_slice(),
+            inline_at_deadline: vec![false; strips].into_boxed_slice(),
             wake_cursor: 0,
             publish_ns: 0,
             late_deadline_ns: vec![0; strips].into_boxed_slice(),
@@ -620,6 +623,7 @@ impl WorkerSet {
         for strip in 0..self.outcomes.len() {
             self.outcomes[strip] = Outcome::NotPublished;
             self.refused[strip] = false;
+            self.inline_at_deadline[strip] = false;
             self.busy[strip] = !self.settle(strip);
         }
         true
@@ -841,7 +845,7 @@ impl WorkerSet {
                 break;
             }
             if now >= deadline {
-                self.overrun_the_rest(g, deadline);
+                self.overrun_the_rest(g, deadline, &mut inline);
                 break;
             }
             // Spin, bounded by the deadline (checked once per sweep above): a worker sharing this
@@ -874,13 +878,13 @@ impl WorkerSet {
     }
 
     /// At the deadline: a last read of `Done`, then every unresolved strip is an overrun.
-    fn overrun_the_rest(&mut self, g: u64, deadline: Instant) {
+    fn overrun_the_rest(&mut self, g: u64, deadline: Instant, inline: &mut impl FnMut(usize)) {
         // For the lateness of the `Late` results, when they are retired (no clock read).
         let deadline_ns = self.shared.figures.nanos(deadline).max(1);
         for k in 0..self.published_len {
             let strip = self.published[k];
             if self.outcomes[strip] == Outcome::Pending {
-                self.overrun_strip(strip, g, deadline_ns);
+                self.overrun_strip(strip, g, deadline_ns, inline);
             }
         }
     }
@@ -888,7 +892,7 @@ impl WorkerSet {
     /// At the deadline, one strip still pending: a last read of `Done`, else an overrun
     /// (`Unstarted` when it is taken back unrendered, `Late` when a worker holds it). Sets and
     /// returns its outcome (`Pending` only for a strip with no slot).
-    fn overrun_strip(&mut self, strip: usize, g: u64, deadline_ns: u64) -> Outcome {
+    fn overrun_strip(&mut self, strip: usize, g: u64, deadline_ns: u64, inline: &mut impl FnMut(usize)) -> Outcome {
         if let Some(o) = self.take_done(strip, g) {
             self.outcomes[strip] = o;
             return o;
@@ -896,6 +900,16 @@ impl WorkerSet {
         let shared = Arc::clone(&self.shared);
         let Some(slot) = shared.jobs.slot(strip) else { return Outcome::Pending };
         let cause = if slot.reclaim() {
+            if self.inline_at_deadline[strip] {
+                let start = Instant::now();
+                inline(strip);
+                shared.record_cost(strip, start.elapsed());
+                slot.retire();
+                bump(&shared.stats.inline_renders);
+                shared.figures.count(strip, Count::Inline);
+                self.outcomes[strip] = Outcome::Inline;
+                return Outcome::Inline;
+            }
             // Taken back unrendered, so no worker starts it after the deadline.
             slot.retire();
             bump(&self.shared.stats.overruns_unstarted);

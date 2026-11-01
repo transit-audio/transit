@@ -102,7 +102,7 @@ impl WorkerSet {
                 for k in 0..self.published_len {
                     let strip = self.published[k];
                     if self.outcomes[strip] == Outcome::Pending {
-                        let outcome = self.overrun_strip(strip, g, deadline_ns);
+                        let outcome = self.overrun_strip(strip, g, deadline_ns, &mut inline);
                         if outcome != Outcome::Pending {
                             return Poll::Resolved { strip, outcome, late: true };
                         }

@@ -3,6 +3,20 @@ use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
 
 impl WorkerSet {
+    /// Allows a published tail task to render inline when reclaimed at the deadline.
+    /// Call before publication. Every successful `begin_block` clears every slot's flag.
+    pub fn set_inline_at_deadline(&mut self, strip: usize) {
+        if let Some(flag) = self.inline_at_deadline.get_mut(strip) {
+            *flag = true;
+        }
+    }
+
+    /// Records one direct callback aux render through the worker cost update (EWMA and
+    /// decaying maximum). Call exactly once while the callback owns the strip.
+    pub fn record_callback_cost(&mut self, strip: usize, took: Duration) {
+        self.shared.record_cost(strip, took);
+    }
+
     /// True when the strip is barred from inline renders in the open block, because it overran
     /// within the last [`OVERRUN_BAR_BLOCKS`] blocks.
     #[must_use]
