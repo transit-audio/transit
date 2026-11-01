@@ -61,15 +61,18 @@ To sample a browser video or another app, record it as you would a microphone. I
 **Audio > Audio Devices**, open **I/O paths**, tick **Record what the computer plays** under
 **System Audio**, choose the output to capture (the system default unless you pick one) and press
 **Apply**. Then set an audio track's input to **System Audio**, arm it and record while the sound
-plays. Dragging the recording into a sampler comes in a later slice (#268); until then the take is a file in the project's Audio Files folder.
+plays. Dragging the recording into a sampler comes in a later release; until then the take is a
+file in the project's Audio Files folder.
 
 On Windows transit captures the output itself (WASAPI loopback), whatever driver the session uses,
 at that output's own rate, converted to the session's. The capture follows that output's clock, not
-your interface's: Audio Devices shows the latency it adds and the small drift transit trims, a 5.1 or 7.1 output is folded to its front pair (the center channel, the dialogue, is dropped, so a stereo output is the better pick), and
-the clip is not lined up with the rest of the session, so move it into place by ear. If transit (or
-another app) has that output open in exclusive mode, Windows refuses the capture and Audio Devices
-says so; pick another output or open the device shared. The input itself opens with the track's
-input, so System Audio needs an input device to ride on. On Linux the PipeWire or PulseAudio monitor
+your interface's: Audio Devices shows the latency it adds and the small drift transit measures and
+corrects. A 5.1 or 7.1 output is folded to its front pair (the center channel, the dialogue, is
+dropped, so a stereo output is the better pick), and the clip is not lined up with the rest of the
+session, so move it into place by ear. If transit (or another app) has that output open in
+exclusive mode, Windows refuses the capture and Audio Devices says so; pick another output or open
+the device shared. The input itself opens with the track's input, so System Audio needs an input
+device to ride on. On Linux the PipeWire or PulseAudio monitor
 of an output arrives as an input already and is listed as **System Audio (monitor of ...)** where
 transit can tell; if none is listed, route the monitor to transit's input in pavucontrol's
 Recording tab or in qpwgraph. macOS needs a virtual audio device for now.

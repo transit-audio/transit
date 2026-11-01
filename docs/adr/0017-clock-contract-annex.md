@@ -72,9 +72,14 @@ periodic discard of queued audio is not drift correction. SRC filter delay and
 route/plugin delay remain named components of the timing model.
 
 The drift open item for a second device has one implemented rule so far, for System Audio
-loopback capture (#268, `crates/playback/src/system_audio.rs`): linear interpolation with a
-proportional-integral rate trim on the ring fill, within 1000 ppm, reported as drift. It does not
-yet cover a second hardware input; that still needs the controlled asynchronous resampler above.
+loopback capture (#268, `crates/playback/src/system_audio.rs` and `system_audio_rate.rs`): the
+rate ratio is estimated from frame counts against QPC time on both clocks (a least-squares fit
+over the last 10 s of loopback packets and input callbacks, from the backends' frame stamps where
+valid, else arrival times), fed forward as the trim of a linear interpolator and reported as the
+drift; a slow proportional-integral term on the ring fill (the integral held within 50 ppm) only
+brings the fill back to its target of one input callback, one packet and 30 ms. Drifts up to
+1000 ppm are tested; the applied trim is limited to 2000 ppm. It does not yet cover a second
+hardware input; that still needs the controlled asynchronous resampler above.
 
 ## Observation and publication contract
 
