@@ -313,6 +313,7 @@ fn dense_settings_at_fast_rates_and_large_blocks_never_drop_or_double() {
 
 /// The dead band of the deja vu knob (the firmware's main loop): 0.47 and 0.53 are its edges.
 #[test]
+#[allow(clippy::excessive_precision)] // The firmware's constant, as written.
 fn the_deja_vu_dead_band_has_its_edges_at_0_47_and_0_53() {
     use transit_random_sequencer::float::F;
     let k = 1.063_829_787_23_f32;
