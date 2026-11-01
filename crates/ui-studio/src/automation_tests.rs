@@ -6,6 +6,9 @@
 #[path = "automation/pass_tests.rs"]
 mod pass_tests;
 
+#[path = "automation/picker_lane_tests.rs"]
+mod picker_lanes;
+
 use crate::automation::{Lane, snap};
 use crate::{Services, StudioApp};
 use serde_json::{Value, json};
