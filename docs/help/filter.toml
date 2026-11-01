@@ -41,7 +41,7 @@ text = "The level after the filter and the amp envelope."
 [[entry]]
 id = "filter.env_amount"
 name = "Envelope Amount"
-text = "How far the note envelope moves the cutoff, up or down: 100% is six octaves at the envelope's peak. The envelope starts on the track's notes, at the note's exact sample."
+text = "How far the note envelope moves the cutoff, up or down: 100% is six octaves at the envelope's peak. The envelope starts when the track's note reaches the Filter, including the latency of the instrument and earlier inserts."
 
 [[entry]]
 id = "filter.env_adsr"
