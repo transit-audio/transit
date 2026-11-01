@@ -172,3 +172,61 @@ fn splitting_an_overdue_pair_preserves_every_subsequent_offset() {
     assert_eq!(reader.events.iter().map(|e| e.offset).collect::<Vec<_>>(), [0, 1, 1, 2]);
     assert!(!reader.held[60]);
 }
+
+#[test]
+fn out_of_order_views_leave_the_carry_sorted_like_a_full_sort() {
+    let mut delay = NoteDelay::new();
+    let mut reader = Reader::new();
+    let mut seed = 0x2545_f491_u32;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed
+    };
+    for _ in 0..40 {
+        let view: Vec<TimedEvent> = (0..(next() % 90) + 1).map(|_| note(next() % 64, next() % 2 == 0)).collect();
+        delay.deliver(&view, crate::MAX_LATENCY, 64, &mut reader);
+        let keys: Vec<_> = delay.carry[..delay.len].iter().map(|p| (p.source, p.order)).collect();
+        assert!(keys.windows(2).all(|w| w[0] < w[1]), "the carry stays strictly sorted by (source, order)");
+    }
+}
+
+#[test]
+fn starts_are_accepted_again_once_the_stand_in_has_left_the_carry() {
+    let mut delay = NoteDelay::new();
+    let mut reader = Reader::new();
+    // Overflow while the delay is at its maximum, with legal 400-event views.
+    let burst = vec![note(0, true); 400];
+    let mut dropped = 0;
+    for _ in 0..42 {
+        dropped += delay.deliver(&burst, crate::MAX_LATENCY, 64, &mut reader);
+    }
+    // The delay then drops to a short one: the flood drains at the per-block limit, and the sparse
+    // notes always leave something pending, so the carry is never empty (the old latch needed that).
+    let latency = 640;
+    assert!(dropped > 0 && delay.stand_in.is_some());
+    // Sparse playing while the flood drains: refused (and counted) until the stand-in goes out.
+    let (mut refused, mut accepted_after, mut stand_in_gone) = (0u64, 0, false);
+    for _ in 0..200 {
+        let before = delay.stand_in.is_some();
+        let lost = delay.deliver(&[note(3, true), note(9, false)], latency, 64, &mut reader);
+        if before && delay.stand_in.is_some() {
+            assert_eq!(lost, 1, "the start is refused and counted; its release is queued behind the stand-in");
+            refused += lost;
+        } else if !before {
+            assert_eq!(lost, 0, "no refusal after the stand-in left");
+            accepted_after += 1;
+        }
+        stand_in_gone |= delay.stand_in.is_none();
+    }
+    assert!(stand_in_gone && refused > 0 && accepted_after > 0);
+    // Drain: every sparse note after the stand-in sounds, and nothing is left held.
+    while delay.len > 0 {
+        delay.deliver(&[], 0, 64, &mut reader);
+    }
+    assert!(!reader.held[60], "nothing stays held");
+    let stand_in_at = reader.events.iter().position(|e| e.event == ALL_OFF).unwrap();
+    let ons_after = reader.events[stand_in_at..].iter().filter(|e| matches!(e.event.message, Message::NoteOn { .. })).count();
+    assert_eq!(ons_after, accepted_after, "every start accepted after the stand-in is delivered after it");
+}
