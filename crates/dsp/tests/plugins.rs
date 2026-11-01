@@ -90,6 +90,7 @@ fn the_registry_lists_exactly_the_kept_built_ins() {
         "saturator",
         "signal_generator",
         "texture",
+        "texture_synth",
         "time_stretcher",
         "trim",
         "tuner",

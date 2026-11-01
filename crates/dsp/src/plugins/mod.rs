@@ -14,6 +14,7 @@ pub mod resonator;
 pub mod reverb;
 pub mod sampler;
 pub mod texture;
+pub mod texture_synth;
 pub mod time_stretcher;
 pub mod tuner;
 pub mod utility;
@@ -56,4 +57,5 @@ registry! {
     sampler::SAMPLER_INFO => sampler::Sampler::new(),
     macro_osc::MACRO_OSC_INFO => macro_osc::MacroOscillator::new(),
     resonator::RESONATOR_INFO => resonator::ResonatorInstrument::new(),
+    texture_synth::TEXTURE_SYNTH_INFO => texture_synth::TextureSynth::new(),
 }

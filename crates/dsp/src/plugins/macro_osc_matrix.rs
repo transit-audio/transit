@@ -112,12 +112,19 @@ pub mod dst {
     pub const LFO1_AMOUNT: usize = 12;
     pub const LFO2_AMOUNT: usize = 13;
     pub const PAN: usize = 14;
+    /// Destinations past Pan for an instrument with more than four macros (the Texture Synth's
+    /// Feedback, Dry/Wet and Reverb, #241): the Macro Oscillator's and the Resonator's choices
+    /// stop at Pan, so their rows never reach these.
+    pub const EXTRA1: usize = 15;
+    pub const EXTRA2: usize = 16;
+    pub const EXTRA3: usize = 17;
 }
 
 /// Number of sources (Off included).
 pub const NSRC: usize = SOURCES.len();
-/// Number of destinations (Off included).
-pub const NDST: usize = DESTINATIONS.len();
+/// Number of destination slots (Off included): the Macro Oscillator's [`DESTINATIONS`] and the
+/// three extra ones past them ([`dst::EXTRA1`] to [`dst::EXTRA3`]).
+pub const NDST: usize = DESTINATIONS.len() + 3;
 
 /// Semitones Pitch moves at 100% and full swing.
 pub const PITCH_SEMITONES: f32 = 24.0;

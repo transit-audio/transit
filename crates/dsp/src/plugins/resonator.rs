@@ -77,7 +77,7 @@ pub const POLYPHONIES: [&str; 3] = ["1", "2", "4"];
 
 /// The matrix's destinations, in the order of the `mod<n>_dest` choices: the Macro Oscillator's
 /// list with the resonator's four macros in place of its four.
-pub const DESTINATIONS: [&str; NDST] = [
+pub const DESTINATIONS: [&str; matrix::DESTINATIONS.len()] = [
     "Off",
     "Pitch",
     "Structure",
@@ -229,7 +229,7 @@ fn macro_value(knob: f32, sum: f32, max: f32) -> f32 {
 
 /// The edge from the part's 48 kHz to the session rate and its delay, session samples (0 at 48 kHz:
 /// an exact copy). The delay is the converter's half length lined up on a whole session sample.
-fn edge(kernel: &Kernel, host: u32) -> (Converter, usize) {
+pub(crate) fn edge(kernel: &Kernel, host: u32) -> (Converter, usize) {
     if host == ENGINE_RATE {
         return (Converter::new(kernel, ENGINE_RATE, host, 0), 0);
     }
