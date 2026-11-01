@@ -338,6 +338,9 @@ pub struct Session {
     pub next_id: u64,
     #[serde(default)]
     pub comments: String,
+    /// Touch return time in milliseconds (0..=2000), saved with the project.
+    #[serde(default = "Session::default_touch_return_ms", skip_serializing_if = "Session::is_default_touch_return_ms")]
+    pub touch_return_ms: u16,
     /// Original MIDI performances keyed by clip id (Event › MIDI Operations › Restore/Flatten
     /// Performance). Independent of undo so a restore survives later edits.
     #[serde(default)]
@@ -378,6 +381,16 @@ impl Session {
 
     pub const FORMAT_VERSION: u32 = 1;
 
+    pub const MAX_TOUCH_RETURN_MS: u16 = 2000;
+
+    pub const fn default_touch_return_ms() -> u16 {
+        200
+    }
+
+    fn is_default_touch_return_ms(ms: &u16) -> bool {
+        *ms == Self::default_touch_return_ms()
+    }
+
     /// Features a file can list under `needs` (see [`Session::to_json`]) that this build understands.
     pub const KNOWN_NEEDS: [&'static str; 2] = ["clip_loop", "clip_scale_mode"];
 
@@ -411,6 +424,7 @@ impl Session {
             edit: EditState::default(),
             next_id: 1,
             comments: String::new(),
+            touch_return_ms: Self::default_touch_return_ms(),
             midi_originals: std::collections::BTreeMap::new(),
             midi_mappings: Default::default(),
             unplaced_takes: Vec::new(),
@@ -718,6 +732,7 @@ impl Session {
 
     /// Repair invariants after loading untrusted data.
     pub fn sanitize(&mut self) {
+        self.touch_return_ms = self.touch_return_ms.min(Self::MAX_TOUCH_RETURN_MS);
         let max_id = self
             .tracks
             .iter()
