@@ -545,8 +545,7 @@ impl Resampler {
         let max = MAX_TRIM_PPM * 1e-6;
         let fed = estimate.unwrap_or(0.0).clamp(-max, max);
         self.trim = (fed + error * KP_PPM * 1e-6 + self.integral).clamp(-max, max);
-        let reported = estimate.map_or(self.integral, |d| d.clamp(-max, max)) * 1e7;
-        status.drift_deci_ppm.store(reported.round().clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32, Ordering::Relaxed);
+        status.drift_deci_ppm.store(reported_deci_ppm(estimate, self.integral), Ordering::Relaxed);
         self.step = self.nominal * (1.0 + self.trim);
     }
 
@@ -583,6 +582,15 @@ impl Resampler {
             }
         }
     }
+}
+
+/// The drift Audio Devices shows, in tenths of a ppm: the rate estimate clamped to
+/// [`MAX_TRIM_PPM`] (the figure fed forward into the trim), or the fill's integral term before the
+/// estimate is valid.
+fn reported_deci_ppm(estimate: Option<f64>, integral: f64) -> i32 {
+    let max = MAX_TRIM_PPM * 1e-6;
+    let reported = estimate.map_or(integral, |d| d.clamp(-max, max)) * 1e7;
+    reported.round().clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
 }
 
 /// The reading end in the input stream's callback: appends the System Audio pair to each frame of
