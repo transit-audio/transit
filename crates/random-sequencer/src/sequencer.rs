@@ -213,7 +213,16 @@ pub struct Block {
 }
 
 const NUM_SCALE_SLOTS: usize = 7;
-const PENDING: usize = 128;
+/// The most events one tick pushes: at most `EDGES` (72) edges, each a start (its On plus the Offs
+/// of its voice and of up to two other voices on the same key: 4 pushes) or an end (1 push), so
+/// 72 x 4 = 288; the three voices' starts at the tick itself add 3 x 4 = 12 (300 in all). The
+/// schedule holds only the current tick's events (`process` emits what is due before each tick),
+/// so 384 leaves a margin of 84 over the worst tick.
+const PENDING: usize = 384;
+/// Slots only an Off may take: an On is refused once the schedule is this close to full, so every
+/// note the schedule has begun can still be ended (at most 3 voices, each with one Off, plus the
+/// at most 2 other-voice Offs one start pushes before its On).
+const OFF_RESERVE: usize = 8;
 /// Edges a tick schedules per gate channel at most (a 16-times divider: 16 starts and 16 ends).
 const EDGES: usize = 72;
 /// Beats closer than this many samples before a sample count as on it (the transport's beat
@@ -331,8 +340,9 @@ impl Sequencer {
         }
     }
 
-    /// The seed and the latch. A new seed is heard from the next start or locate (at once when
-    /// the sequencer has not played yet).
+    /// The seed and the latch. With the latch on, a new seed is heard from the next start, locate
+    /// or loop; with it off the sequence runs on across passes (the module's rule), so a new seed
+    /// is heard only while the sequencer has not played yet.
     pub fn set_seed(&mut self, seed: u32, latch: bool) {
         if seed != self.seed && !self.started {
             self.core = Core::new(seed);
@@ -347,7 +357,8 @@ impl Sequencer {
         self.seed
     }
 
-    /// Events a full schedule refused (never expected; counted).
+    /// Events a full schedule refused (never expected, see `PENDING`; counted, and shown in the
+    /// MIDI effect chain's diagnostics as part of its overflow figure).
     #[must_use]
     pub fn dropped(&self) -> u64 {
         self.dropped
@@ -400,18 +411,28 @@ impl Sequencer {
         let end = i64::from(block.frames);
         #[allow(clippy::cast_possible_truncation)] // Offsets within a block and a little before it.
         let offset_of = |beat: f64| -> i64 { ((beat - block.quarters) / bps - SAMPLE_EPSILON).ceil().clamp(0.0, 1e12) as i64 };
-        // The ticks due in this block, each scheduling its events up to the next tick.
+        // The ticks due in this block, each scheduling its events up to the next tick. Before a
+        // tick runs, the events due before its beat go out, so the schedule holds about one tick's
+        // events whatever the block size (events at the tick's own beat stay behind it, as they
+        // were inserted, so the order is the one of running every tick first).
         let mut guard = 0;
         while offset_of(self.tick_beat) < end && guard < 4096 {
+            self.emit_due(self.tick_beat, end, &offset_of, emit);
             self.tick(s, division(s.rate));
             guard += 1;
         }
         // Then the scheduled events due in this block, in time order.
+        self.emit_due(f64::INFINITY, end, &offset_of, emit);
+    }
+
+    /// Emits the scheduled events before `before` (a beat) that fall inside the block (offset
+    /// below `end`), in time order, and takes them off the schedule.
+    fn emit_due(&mut self, before: f64, end: i64, offset_of: &impl Fn(f64) -> i64, emit: &mut impl FnMut(Event)) {
         let mut taken = 0;
         while taken < self.pending_len {
             let e = self.pending[taken];
             let at = offset_of(e.beat);
-            if at >= end {
+            if e.beat >= before || at >= end {
                 break;
             }
             let offset = u32::try_from(at).unwrap_or(0);
@@ -504,10 +525,13 @@ impl Sequencer {
         seq.set_deja_vu(F::ZERO);
     }
 
-    fn push(&mut self, beat: f64, what: Pending) {
-        if self.pending_len >= PENDING {
+    /// Schedules `what` at `beat`; false (counted) when there is no room. An Off may use every
+    /// slot, an On leaves [`OFF_RESERVE`] of them for Offs.
+    fn push(&mut self, beat: f64, what: Pending) -> bool {
+        let limit = if matches!(what, Pending::On { .. }) { PENDING - OFF_RESERVE } else { PENDING };
+        if self.pending_len >= limit {
             self.dropped = self.dropped.saturating_add(1);
-            return;
+            return false;
         }
         // After every event at or before `beat`: events at one time keep the order they came in.
         let mut at = self.pending_len;
@@ -517,15 +541,26 @@ impl Sequencer {
         self.pending.copy_within(at..self.pending_len, at + 1);
         self.pending[at] = Scheduled { beat, what };
         self.pending_len += 1;
+        true
     }
 
+    /// Ends the voice's scheduled note at `beat`. The key stays busy until its Off is scheduled
+    /// (it is, unless the schedule is full, which the capacity rules out).
     fn end_voice(&mut self, voice: usize, beat: f64) {
-        if let Some(key) = self.scheduled[voice].take() {
-            self.push(beat, Pending::Off { voice, key });
+        if let Some(key) = self.scheduled[voice] {
+            if self.push(beat, Pending::Off { voice, key }) {
+                self.scheduled[voice] = None;
+            }
         }
     }
 
     fn start_voice(&mut self, voice: usize, beat: f64, key: u8) {
+        if self.pending_len >= PENDING - OFF_RESERVE {
+            // No room for a note: refused (counted), nothing else changes; a note the voice
+            // holds still gets its Off.
+            self.dropped = self.dropped.saturating_add(1);
+            return;
+        }
         self.end_voice(voice, beat);
         // Another voice on the same key ends first: the instrument cannot tell them apart.
         for other in 0..3 {
@@ -533,8 +568,12 @@ impl Sequencer {
                 self.end_voice(other, beat);
             }
         }
-        self.scheduled[voice] = Some(key);
-        self.push(beat, Pending::On { voice, key, velocity: velocity_of(self.y) });
+        if self.scheduled[voice].is_some() || (0..3).any(|o| o != voice && self.scheduled[o] == Some(key)) {
+            return; // A note that could not be ended: no second note-on for its key.
+        }
+        if self.push(beat, Pending::On { voice, key, velocity: velocity_of(self.y) }) {
+            self.scheduled[voice] = Some(key);
+        }
     }
 
     /// Channel `i`'s key from its last drawn voltage.

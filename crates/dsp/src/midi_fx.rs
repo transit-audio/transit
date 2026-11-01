@@ -93,6 +93,12 @@ impl<'a> MidiOut<'a> {
         self.len == 0
     }
 
+    /// Counts `n` events the effect itself refused for want of room (the Random Sequencer's full
+    /// schedule), so they show in the chain's overflow figure.
+    pub fn add_refused(&mut self, n: u32) {
+        self.refused = self.refused.saturating_add(n);
+    }
+
     /// Events refused for want of room.
     #[must_use]
     pub fn refused(&self) -> u32 {

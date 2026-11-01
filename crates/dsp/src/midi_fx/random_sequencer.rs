@@ -26,7 +26,7 @@
 //!   (`Deja Vu On`); `Freeze` locks the loop whatever the knob.
 //! - **Seed.** `Seed` picks the random sequence; with `Latch` on (the default) every play start,
 //!   locate and loop restarts it from the seed, so a passage plays the same notes each time, as
-//!   the Texture's latch holds its seed. With `Latch` off the sequence runs on across passes.
+//!   the Texture's latch holds its seed. With `Latch` off the sequence runs on across passes, so a new `Seed` is heard only before the first play.
 //! - **Input.** Incoming note-ons are swallowed unless `Thru` is on; releases and every other
 //!   message pass (the contract's unknown releases).
 //!
@@ -272,6 +272,7 @@ impl MidiEffect for RandomSequencer {
         let t = &self.transport;
         let block = Block { playing: t.playing, samples: t.samples, quarters: t.quarters, tempo: t.tempo, sample_rate: self.sample_rate, frames };
         let settings = self.settings();
+        let dropped_before = self.sequencer.dropped();
         self.sequencer.process(&settings, &block, &mut |e| {
             let message = match e.kind {
                 EventKind::NoteOn { key, velocity } => Message::NoteOn { key, velocity, id: NoteId::NONE },
@@ -279,6 +280,8 @@ impl MidiEffect for RandomSequencer {
             };
             out.push(TimedEvent { offset: e.offset, event: PluginEvent { channel: 0, note_id: PluginEvent::NO_ID, message } });
         });
+        // A full schedule (never expected) joins the chain's overflow count in the diagnostics.
+        out.add_refused(u32::try_from(self.sequencer.dropped() - dropped_before).unwrap_or(u32::MAX));
     }
 }
 
