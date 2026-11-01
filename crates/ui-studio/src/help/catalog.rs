@@ -12,6 +12,7 @@ pub const DOCS_URL: &str = "https://github.com/transit-audio/transit/blob/main/d
 /// The area files, in catalog order. `cargo xtask help` reads the same directory, so a new area
 /// is one file there and one line here.
 const FILES: &[&str] = &[
+    include_str!("../../../../docs/help/automation.toml"),
     include_str!("../../../../docs/help/transport.toml"),
     include_str!("../../../../docs/help/arrange-header.toml"),
     include_str!("../../../../docs/help/mixer-strip.toml"),

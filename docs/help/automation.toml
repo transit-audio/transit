@@ -1,0 +1,8 @@
+area = "automation"
+title = "Automation"
+link = "contributing/knowledge/automation-modes.md"
+
+[[entry]]
+id = "automation.touch_return"
+name = "Touch return ramp"
+text = "Time in milliseconds for a released Touch control to return to its recorded automation: 0 to 2000 ms, default 200 ms; 0 returns immediately. Saved with this session under File > Session Settings > Automation, this is Logic's Ramp Time. Changes reach the audio engine with the next plan swap; a return already running finishes at its original duration."

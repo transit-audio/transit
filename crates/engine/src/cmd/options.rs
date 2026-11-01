@@ -3,7 +3,7 @@
 use super::*;
 use crate::cmd;
 use serde_json::json;
-use transit_model::{BitDepthSetting, EditState};
+use transit_model::{BitDepthSetting, EditState, Session};
 use transit_time::FrameRate;
 
 macro_rules! toggle {
@@ -143,7 +143,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Session",
             ["Setup"],
             Some("Cmd+2"),
-            "{frame_rate?: '29.97 Drop'…, bit_depth?: 16|24|32f, timecode_start?: position, name?}",
+            "{frame_rate?: '29.97 Drop'…, bit_depth?: 16|24|32f, timecode_start?: position, name?, touch_return_ms?: 0..2000}",
             always,
             session_setup
         ),
@@ -180,8 +180,20 @@ fn session_setup(e: &mut Engine, p: &Value) -> Result<Value> {
         Some(_) => return Err(bad("setup.session", "bit_depth must be 16, 24 or 32f")),
         None => None,
     };
+    let ramp = p
+        .get("touch_return_ms")
+        .map(|v| {
+            v.as_u64()
+                .filter(|v| *v <= u64::from(Session::MAX_TOUCH_RETURN_MS))
+                .map(|v| v as u16)
+                .ok_or_else(|| bad("setup.session", "touch_return_ms must be an integer from 0 to 2000"))
+        })
+        .transpose()?;
     let tc = position_param(e, "setup.session", p, "timecode_start")?;
     let s = e.session_mut();
+    if let Some(ms) = ramp {
+        s.touch_return_ms = ms;
+    }
     if let Some(f) = fr {
         s.frame_rate = f;
     }
@@ -194,7 +206,7 @@ fn session_setup(e: &mut Engine, p: &Value) -> Result<Value> {
     if let Some(n) = p.get("name").and_then(Value::as_str) {
         s.name = n.to_string();
     }
-    Ok(json!({"frame_rate": s.frame_rate.label(), "bit_depth": s.bit_depth, "sample_rate": s.sample_rate.hz()}))
+    Ok(json!({"frame_rate": s.frame_rate.label(), "bit_depth": s.bit_depth, "sample_rate": s.sample_rate.hz(), "touch_return_ms": s.touch_return_ms}))
 }
 
 #[cfg(test)]

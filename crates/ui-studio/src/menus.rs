@@ -3,6 +3,9 @@
 //!
 //! Shortcuts come from one table, [`crate::shortcuts`] (Ableton where Ableton and Cubase differ).
 
+#[path = "session_settings.rs"]
+mod session_settings;
+
 use crate::shortcuts::{Action as A, label, pressed};
 use crate::theme::{STATUS_H, TOKENS};
 use crate::{Dialog, StudioApp};
@@ -60,6 +63,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         app.open_dialog();
                     }
                     crate::recent::menu(app, ui);
+                    session_settings::menu(ui);
                     if ui.button("Save").clicked() {
                         ui.close();
                         app.save();
@@ -580,6 +584,7 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
 
 /// The save-changes question.
 pub fn dialogs(app: &mut StudioApp, ctx: &egui::Context) {
+    session_settings::window(app, ctx);
     if let Some(Dialog::DeleteTracks { tracks, clips }) = app.dialog.clone() {
         return delete_tracks_dialog(app, ctx, &tracks, clips);
     }

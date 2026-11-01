@@ -25,6 +25,8 @@ macro_rules! ids {
 }
 
 ids! {
+    // help\automation.toml
+    AutomationTouchReturn => "automation.touch_return",
     // help\arrange-header.toml
     ArrangeHeaderName => "arrange_header.name",
     ArrangeHeaderMonitor => "arrange_header.monitor",
