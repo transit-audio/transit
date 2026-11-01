@@ -431,6 +431,7 @@ Rules that hold in every case:
 The measurement and its acceptance rule are in the linked document.
 
 **As-built deviations.**
+- B3 changes the default (tail off) deadline behavior for a pinned monitored dependent whose source finishes at the deadline: main forgoes it, while this slice renders it with its current key, the intended K88 fix.
 - `WorkerSet::settle_between_blocks` lets mix settle the measurement mailbox without opening a new block, so ownership, keys and snapshots return before capture.
 - Published work abandoned by a drive that never finished is counted as `unclaimed_at_deadline` when reclaimed at the next boundary, so every published attempt remains in the conservation partition.
 - Storage accounting includes input snapshots and a conservative tail graph bound, so it may reject a plan the old estimate admitted while the limits remain unchanged.
