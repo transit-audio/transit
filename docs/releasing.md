@@ -56,6 +56,7 @@ Releases are tag-driven. `.github/workflows/release.yml` does the building.
    The step uses the `DISCORD_WEBHOOK_URL` repository secret; with the secret missing it logs and
    skips, and a Discord failure never fails the release (`continue-on-error`). To test the webhook
    without a release, run the workflow by hand with `discord_test` set; only the test post runs.
+   A minor release (`vX.Y.0`) pings @everyone; a patch release (`vX.Y.Z`, Z above 0) never does, and the test run never does. Discord has no webhook permission for mentions, so `allowed_mentions` in the payload is the only control: patch releases and the test job set `parse: []` explicitly, and a stray "@everyone" in the release notes cannot ping.
 
 ## Released
 
