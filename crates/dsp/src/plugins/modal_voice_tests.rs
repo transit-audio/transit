@@ -807,10 +807,30 @@ fn the_dry_share_closes_in_100_ms_for_the_fm_pair_only() {
     for n in 1..=200 {
         let got = gated_raw(&mut raw, false, true);
         assert!(got <= 1.0 - n as f32 / 200.0 + 1e-5, "block {n}: {got}");
+        // The lower bound pins the fade: an instant close would fall below it (M4).
+        if n < 200 {
+            assert!(got >= 1.0 - n as f32 / 200.0 - 1e-5, "block {n}: {got} closed faster than 100 ms");
+        }
     }
     assert_eq!(raw, 0.0);
     assert_eq!(gated_raw(&mut raw, false, true), 0.0);
     assert_eq!(gated_raw(&mut raw, true, true), 1.0);
     let mut raw = 0.0;
     assert_eq!(gated_raw(&mut raw, false, false), 1.0);
+}
+
+/// Models 0 to 2 keep a dry share of 1 after a release, at Space 10% or less (M5): their raw signal
+/// is the exciter, silent without a key, so the FM pair's closing must not touch them.
+#[test]
+fn models_zero_to_two_keep_the_full_dry_share_after_a_release() {
+    for model in 0..3 {
+        for space in [0.0, 5.0] {
+            let mut params = params_of(model, &patch_of(0.6, 0.3, 0.8));
+            params.push(("space", space));
+            let mut r = instrument(32_000, &params);
+            let blocks = 400;
+            let _ = render(&mut r, blocks * BLOCK, 128, &[(0, Ev::On(60, 100)), (BLOCK * 20, Ev::Off(60))]);
+            assert_eq!(r.raw_sent.to_bits(), 1.0f32.to_bits(), "model {model} space {space}: the dry share after a release");
+        }
+    }
 }
