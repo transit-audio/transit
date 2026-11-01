@@ -318,6 +318,44 @@ and at other rates its output is converted at the edge and the delay (35 samples
 compensation. An instrument cannot take a track's audio yet. Presets: Grain Pad, Grain Pulse,
 Frozen Cloud, Tape Keys, and your own.
 
+## Modal Voice
+
+The Modal Voice is a built-in instrument (choose it from a track's instrument slot, after the
+Texture Synth): one exciter-and-resonator voice that you bow, blow or strike. It is a port of Émilie
+Gillet's open-source modal synthesizer firmware (MIT license), checked sample by sample against her
+C++ code ([ADR 0033](adr/0033-built-in-instruments-mutable-instruments-port.md)); the notices are in
+**Help > About transit**.
+
+- **Playing**: the voice has a real gate. A key strikes and holds it; while it is up the bow and the
+  blow keep sounding under **Contour** (percussive at the left, sustained at the right); the last
+  key up releases the voice. A new note while one is held strikes again at the new pitch; letting go
+  of it returns to the newest key still held without a new strike (mono legato, as in Ableton's and
+  Logic's mono modes). The sustain pedal holds the gate as a key does.
+- **Exciters**: **Bow** (a scratchy noise that also drives bowed waveguides on Modal) with its
+  **Timbre**; **Blow** (breath noise; past two thirds a reed-pipe model overblows) with **Flow** and
+  **Timbre**; **Strike** (past 80% the raw hit bleeds into the output) with **Mallet** (nine
+  percussion samples, a mallet, a plectrum or bouncing particles) and **Timbre**.
+- **Model**: Modal (52 tuned modes: membranes, bars, plates, bells), String (stiffness or a
+  buzzing bridge by Geometry) or Chord Strings (five strings, Geometry picking one of eleven chords).
+  **Geometry**, **Brightness**, **Damping** and **Position** shape the resonator.
+- **Space** opens the stereo spread and then a reverb, which freezes from 175%.
+- **Velocity** is the module's strength input: soft notes excite more gently, through the module's
+  own accent curve (100% by default; at 0% every note plays at full strength).
+- **Tune**, **Bend Range** and the matrix's Pitch move the voice. The mod wheel and aftertouch work
+  through the matrix; Aftertouch to Strength plays the module's pressure input.
+- **FM Pair** (the last model) is the module's hidden voice: two FM oscillators through a filter
+  swept by the envelope, slowly circling in the stereo field. The panel keeps its knobs: Blow's
+  Level, Flow and Timbre set the first oscillator's level, ratio and FM amount, Strike's the
+  second's, Bow Level its detune and Bow Timbre the feedback; Geometry sets the filter's shape and
+  resonance, Brightness its cutoff, Damping how much the envelope opens it, Position the rotation.
+- The shaper and the modulation matrix are the Macro Oscillator's (transit's addition, off by
+  default), on the instrument's output, following the gate.
+
+The firmware runs at 32 kHz; its output is converted to the session rate and the delay (49 samples
+at 44.1 kHz, 53 at 48 kHz, 97 at 88.2 kHz, 105 at 96 kHz) goes to delay compensation. An instrument
+cannot take a track's audio as its exciter yet. Presets: Bowed Glass, Breath Pipe, Struck Bar,
+Temple Bell, Plucked Wire, Noise Pad, and your own.
+
 ## Filter
 
 The Filter is a built-in insert effect (the device chain's **+**, or the mixer strip's insert

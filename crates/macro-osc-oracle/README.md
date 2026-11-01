@@ -1,9 +1,9 @@
 # transit-macro-osc-oracle
 
-The null-test oracle for transit's ported instruments ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md)): the macro oscillator (#194), the resonator (#198), the granular texture processor (#199), the texture synthesizer (#241), the meta-modulator (#200) and the random sequencer (#202).
+The null-test oracle for transit's ported instruments ([ADR 0033](../../docs/adr/0033-built-in-instruments-mutable-instruments-port.md)): the macro oscillator (#194), the resonator (#198), the modal voice (#198 slice 2), the granular texture processor (#199), the texture synthesizer (#241), the meta-modulator (#200) and the random sequencer (#202).
 
 It builds Émilie Gillet's original C++ DSP (MIT) and lets Rust tests render it sample by sample.
-The Rust ports (`transit-macro-osc`, #195; `transit-resonator`, #198; `transit-granular`, #199; `transit-texture`, #241; `transit-modulator`, #200; `transit-random-sequencer`, #202) are gated by comparing their
+The Rust ports (`transit-macro-osc`, #195; `transit-resonator`, #198; `transit-modal-voice`, #198 slice 2; `transit-granular`, #199; `transit-texture`, #241; `transit-modulator`, #200; `transit-random-sequencer`, #202) are gated by comparing their
 output against this crate, engine by engine and model by model, on the same runner. One crate holds
 every module family's oracle, a module per family, so they share the build, the session lock, the
 residual and the floor.
@@ -67,6 +67,17 @@ reaches a release build.
   each from fresh generators with the same seed: models, jitter, gate lengths, rates, deja vu, the
   X distribution, steps and scales, the Y channel, every clock routing, explicit resets, a loaded
   scale and motion). Gates and voltages are compared exactly.
+- `cpp/modal_voice_oracle.cc`, `src/modal_voice.rs` and `src/modal_voice_sweep.rs`: the modal voice
+  (#198 slice 2): its part (`elements::Part`: the gate envelope, the bow, blow and strike exciters,
+  the modal, string and five-string resonators and the easter-egg FM voice, the space control's
+  spread and reverb; float main/aux at 32 kHz in the module's 16-frame blocks), on zeroed memory as
+  the module's static storage, with the model, easter-egg, bypass and serial-seed settings; and its
+  fixed sweep (207 points of 250 ms per configuration, four configurations: the fourteen panel
+  controls and the strength at five levels around a center, each exciter alone, two FM offsets,
+  two serial seeds, both audio inputs patched, a gate pattern with a strike, a release and a
+  retrigger; a fresh part and the same seed per point). `tests/modal_voice_self_floor.rs` renders
+  it twice in one process and again in a second: bit-identical (Windows x86-64 MSVC, 2026-11-01;
+  GCC in WSL in the slice's run).
 - `src/resonator.rs` and `src/resonator_sweep.rs`: the resonator's safe wrapper and its fixed sweep
   (159 points per model and polyphony, 6 models, polyphony 1 to 4, 48 kHz, 24-frame blocks, a fresh
   part and the same seed per point).

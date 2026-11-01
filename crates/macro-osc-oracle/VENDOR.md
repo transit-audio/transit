@@ -1,6 +1,7 @@
 # Vendored sources
 
 `vendor/` holds Émilie Gillet's original C++ DSP (the macro oscillator, #194, the resonator, #198,
+the modal voice, #198 slice 2,
 the granular texture processor, #199, the texture synthesizer, #241, the meta-modulator, #200, and
 the random sequencer, #202),
 copied unchanged from two upstream repositories.
@@ -14,6 +15,7 @@ It is the oracle: never edit it. Licenses are in [`LICENSE-THIRD-PARTY`](LICENSE
 | `vendor/beads/` | https://github.com/pichenettes/eurorack | `f4cfa7697095a28d292bff758beb51deb49b5a86` (2026-10-12: the directory arrived in `d8f47391` the day before; this commit only adds the README footnote "builds on a Desktop platform but not verified to build and run on a module". Both pin the same stmlib, `e3bd7c9c`) |
 | `vendor/warps/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4`, the same commit as the first three (the vendored files last changed in `2a46873`, 2019-04-02, the author's name in the notices; the processing path last changed in `a78a2f7`, a fix to the vocoder's limiter, and `5115a25` regenerated the frequency shifter's waveform tables in `resources.cc`, which the oracle does not render) |
 | `vendor/marbles/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4`, the same commit as the first three (the vendored files last changed in `db1566f`, 2023-01-08, "latest update with reset input mode and bug fixes") |
+| `vendor/elements/` | https://github.com/pichenettes/eurorack | `08460a69a7e1f7a81c5a2abcc7189c9a6b7208d4`, the same commit as the first three (the vendored files last changed in `43b9c9f`, 2020-04-29, which initializes the modal resonator's `previous_position_`, as for the resonator) |
 | `vendor/stmlib/` | https://github.com/pichenettes/stmlib | `e3bd7c9cc00e4364166f9905c0509b6ffd0535ec` (the submodule commit the eurorack commit above pins) |
 
 ## File set
@@ -80,6 +82,17 @@ From eurorack, paths kept relative to the repository root:
   bootloader and `marbles/resources/` (the generators) are not vendored. The topographic drum
   sequencer of the same repository (`grids/`) is an AVR project under GPL 3.0 and is not vendored.
 
+- `elements/dsp/**/*.cc` and `elements/dsp/**/*.h` (the part, the voice with its chord table, the
+  exciters, the multistage envelope, the modal resonator, the string, the tube, the easter-egg FM
+  voice, and the diffuser and reverb on their FX engine), `elements/resources.cc` and
+  `elements/resources.h` (the lookup tables and the exciters' sample tables: `smp_sample_data`, the
+  strike's nine samples, 128013 int16 values, and `smp_noise_sample`, the blow's noise, 40963; the
+  file is 1.6 MB of source, compiled into the oracle only), and `elements/drivers/debug_pin.h`
+  (`resonator.cc` includes it; under `-DTEST` it is empty). 24 files, each carrying Émilie Gillet's
+  MIT notice (21 dated 2014, 2 dated 2015, 1 dated 2012). `elements/test/`, the other drivers, the
+  UI, the CV scaler, the meter, `elements.cc`, the samples' WAV sources and `elements/resources/`
+  (the generators) are not vendored. The stmlib helpers it uses are already vendored.
+
 From stmlib:
 
 - `stmlib.h`, `dsp/*.h`, `dsp/units.cc`, `dsp/atan.cc` (the phase vocoder's `fast_atan2r` table),
@@ -92,10 +105,11 @@ From stmlib:
 
 Nothing from `drivers/`, the UI, settings (but the random sequencer's `settings.cc`, for
 reference), the bootloader, `user_data_receiver`, `test/` or `resources/` (the table generators) is
-vendored. 277 files in all (134 for the macro oscillator,
+vendored. 301 files in all (134 for the macro oscillator,
 28 for the resonator, 28 for the granular processor, and `dsp/atan.cc` and `fft/shy_fft.h` added to
 stmlib for it, 38 for the texture synthesizer and `utils/gate_flags.h` for it, 17 for the
-meta-modulator, 28 for the random sequencer and `utils/ring_buffer.h` for it), every source file
+meta-modulator, 28 for the random sequencer and `utils/ring_buffer.h` for it, 24 for the modal
+voice), every source file
 carrying Emilie Gillet's MIT notice.
 
 ## Verification
@@ -112,7 +126,8 @@ git clone --filter=blob:none https://github.com/pichenettes/stmlib /tmp/stm
     clouds/dsp clouds/resources.cc clouds/resources.h clouds/drivers/debug_pin.h \
     warps/dsp warps/resources.cc warps/resources.h warps/drivers/debug_pin.h \
     marbles/random marbles/ramp marbles/resources.cc marbles/resources.h marbles/scale_recorder.h \
-    marbles/note_filter.h marbles/marbles.cc marbles/settings.cc | awk '{print $3, $4}'
+    marbles/note_filter.h marbles/marbles.cc marbles/settings.cc \
+    elements/dsp elements/resources.cc elements/resources.h elements/drivers/debug_pin.h | awk '{print $3, $4}'
   git -C /tmp/er ls-tree -r f4cfa769 beads/dsp beads/resources.cc beads/resources.h \
     beads/gain_control.cc beads/gain_control.h | awk '{print $3, $4}'
   git -C /tmp/stm ls-tree -r e3bd7c9c | awk '{print $3, "stmlib/"$4}' ) | sort -k2 > /tmp/upstream.txt
@@ -124,7 +139,8 @@ join -1 2 -2 2 /tmp/ours.txt /tmp/upstream.txt | awk '$2 != $3 {print "differs:"
 No output means every file matches (checked 2026-10-29: 134 of 134; with the resonator, 2026-10-30:
 162 of 162; with the granular processor, 2026-10-30: 192 of 192; with the texture synthesizer,
 2026-10-31: 231 of 231; with the meta-modulator, 2026-10-31: 248 of 248; with the random
-sequencer, 2026-10-31: 277 of 277).
+sequencer, 2026-10-31: 277 of 277; with the modal voice, 2026-11-01: 301 of 301, the 24 new files
+checked against `git ls-tree` of the upstream commit).
 
 ## Local changes (outside vendor/)
 
@@ -302,6 +318,23 @@ sequencer, 2026-10-31: 277 of 277).
   for the longest grain, and the large block may not exceed 131072 bytes: every layout then
   records fewer than 131072 samples, below which a grain's 16.16 phase in an `int32_t` cannot
   overflow (above it the phase wraps negative and the grain reads before the buffer).
+- `patches/msvc/0007-modal-voice-resources-empty-table.patch` (#198 slice 2): the same MSVC error
+  (C2466) on the empty `lookup_table_uint32_table` in `elements/resources.cc`; nothing references
+  it; its definition is removed. No `patches/all/` entry is needed for the modal voice: within the
+  module's control ranges, which its wrapper enforces, no vendored read leaves its table.
+- `cpp/modal_voice_oracle.cc` wraps the modal voice's `elements::Part` (#198 slice 2). The part and
+  its 32768-word reverb memory live in one value-initialized (zeroed) allocation, as the module's
+  globals: `Init` leaves the part's panic flag, the modal resonator's clock divider and LFO phase,
+  the exciters' sample phases and particle range, the whole tube (the voice's `Init` never calls
+  `Tube::Init`), the string's resampler phase, the envelopes' fifth level and the easter-egg voice's
+  smoothed damping and feedback and FM phases unwritten. Each block it writes the fourteen panel
+  fields of the patch, as the module's CV scaler does, and calls `Part::Process`; the other five
+  patch fields stay the part's (`Init`, or `Part::Seed` with three serial words through its own
+  entry point). Its Rust side range-checks every control at the CV scaler's caps (0.9995; 0.995 for
+  the strike timbre; space 0 to 2), the strength (0 to 1), the note and FM, and the audio inputs
+  (-1 to 1). The desktop harness (`elements/test/elements_test.cc`) sets no flush-to-zero; the
+  wrapper keeps the family's flush-to-zero scope, as for the random sequencer (crates/modal-voice
+  VENDOR.md says why).
 - `cpp/resonator_oracle.cc` wraps the resonator's `rings::Part` (#198). The part and its 32768-word
   reverb memory live in one value-initialized (zeroed) allocation, as the module's globals live in
   zeroed static storage: the part's `Init` leaves some members unwritten (the voice rotation

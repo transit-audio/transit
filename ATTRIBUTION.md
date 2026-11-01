@@ -36,6 +36,14 @@ code in between. Her MIT notices are in `crates/resonator/LICENSE-THIRD-PARTY` (
 `crates/resonator/VENDOR.md`); the Resonator's panel, its help entry and Help > About transit credit
 her, and the About window shows the notices.
 
+The modal voice (`crates/modal-voice`, #198 slice 2; linked into the app through `transit-dsp` as
+the Modal Voice instrument) is a Rust port of Émilie Gillet's modal synthesizer firmware
+(`elements/dsp` and `elements/resources.cc` in `eurorack`, its nine strike samples and its noise
+sample included as data) and the stmlib helpers it uses, written by transit from her C++ with no
+third-party Rust code in between. Her MIT notices are in `crates/modal-voice/LICENSE-THIRD-PARTY`
+(provenance in `crates/modal-voice/VENDOR.md`); the Modal Voice's panel, its help entry and Help >
+About transit credit her, and the About window shows the notices.
+
 The granular texture processor (`crates/granular`, #199) is a Rust port of Émilie Gillet's texture
 processor firmware (`clouds/dsp` in `eurorack`, its granular and its pitch shifter / time stretcher
 playback modes) and the stmlib helpers it uses, written by transit from her C++ with no third-party
@@ -73,11 +81,12 @@ the notices.
 |---|---|---|---|
 | `crates/macro-osc/src/` | Émilie Gillet (firmware and stmlib); Oliver Rockstedt (Rust port); transit contributors (corrections) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c`, https://github.com/sourcebox/mi-plaits-dsp-rs `effe9864bb` | MIT (`crates/macro-osc/LICENSE-THIRD-PARTY`); transit's changes MIT OR Apache-2.0 |
 | `crates/resonator/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/resonator/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
+| `crates/modal-voice/src/` | Émilie Gillet (firmware, its sample tables and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/modal-voice/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
 | `crates/granular/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/granular/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
 | `crates/texture/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `f4cfa769`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/texture/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
 | `crates/modulator/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/modulator/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
 | `crates/random-sequencer/src/` | Émilie Gillet (firmware and stmlib); transit contributors (the port) | https://github.com/pichenettes/eurorack `08460a69`, https://github.com/pichenettes/stmlib `e3bd7c9c` | MIT (`crates/random-sequencer/LICENSE-THIRD-PARTY`); transit's port MIT OR Apache-2.0 |
-| `crates/macro-osc-oracle/vendor/` | Émilie Gillet | the firmware's C++ (the macro oscillator, the resonator, the granular texture processor, the texture synthesizer, the meta-modulator and the random sampler), for the null tests only (never linked into the app) | MIT (`crates/macro-osc-oracle/LICENSE-THIRD-PARTY`) |
+| `crates/macro-osc-oracle/vendor/` | Émilie Gillet | the firmware's C++ (the macro oscillator, the resonator, the modal voice, the granular texture processor, the texture synthesizer, the meta-modulator and the random sampler), for the null tests only (never linked into the app) | MIT (`crates/macro-osc-oracle/LICENSE-THIRD-PARTY`) |
 
 ## Fonts
 
