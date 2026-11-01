@@ -28,6 +28,10 @@ pub mod plugins;
 pub mod spectrum;
 mod util;
 
+#[cfg(test)]
+#[path = "util/smoother_tests.rs"]
+mod smoother_tests;
+
 pub use editor_header::{EditorHeader, HeaderAction, JobPoll, LoadedValues, StateJob};
 pub use offline::FadeShape;
 pub use osc::Waveform;
