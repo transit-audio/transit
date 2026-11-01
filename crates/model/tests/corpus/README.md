@@ -20,6 +20,8 @@ v0.4.1 adds an optional `Session.unplaced_takes` (#192, recordings too long to d
 
 v0.5.0 adds optional fields (`Source::disk` for disk-backed takes, the Macro Oscillator's parameters and voice settings by id) that default on load. The v0.5.0 sessions do not carry a disk-backed source or a Macro Oscillator track: the generator builds neither without a file on disk or a hosted instrument, and the corpus test wants zero notes.
 
+v0.6.0 adds its two files plus the rack, MIDI effect and take-stack fixtures. The v0.6.0 features session carries a rack with a macro, a MIDI effect slot (Transpose and the Random Sequencer) ahead of the instrument, a Resonator and a Modal Voice track, a Filter, a Time Stretcher and a Tuner insert, and a Touch return ramp of 350 ms. System Audio is off (nothing saved). It carries no Texture insert or take lanes: the Texture's frozen recording is a WAV beside the session, and the take stacks are in `v0.6.0-takes.transit`.
+
 One file is hand-written, not saved by a build: `v0.3.2-video.transit` has an audio track, a Video
 track, a video clip and a `videos` entry. It pins the sanitize rule of ADR 0031 (it opens with the video
 dropped and one note) and is loaded by its own test, so the lossless round trip skips it (`SANITIZED`

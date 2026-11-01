@@ -110,8 +110,32 @@ fn features_session() -> Session {
     let mut m = Mapping::new(source, ControlTarget { strip: Strip::Track(audio[0]), control: Control::Volume });
     m.mode = MapMode::Scaled;
     s.midi_mappings.set(m).unwrap();
+    add_v060_features(&mut s, inst, audio[0]);
     add_rack(&mut s);
     s
+}
+
+/// What v0.6.0 serializes beyond the rack: a MIDI effect slot with a Random Sequencer ahead of the
+/// instrument, a Resonator and a Modal Voice track, a Filter, a Time Stretcher and a Tuner insert,
+/// and a Touch return ramp that is not the default. System Audio stays off (the default, nothing
+/// saved). A Texture insert is left out: its frozen recording is a WAV beside the session.
+fn add_v060_features(s: &mut Session, synth: transit_engine::model::TrackId, audio: transit_engine::model::TrackId) {
+    if let Some(t) = s.track_mut(synth) {
+        t.midi_effects.push(transit_engine::model::MidiEffectSlot::new("midi_transpose"));
+        t.midi_effects.push(transit_engine::model::MidiEffectSlot::new("random_sequencer"));
+    }
+    for (name, id) in [("Resonator", "resonator"), ("Modal Voice", "modal_voice")] {
+        let t = s.add_track(TrackKind::Instrument, ChannelFormat::Stereo, Some(name));
+        if let Some(tr) = s.track_mut(t) {
+            tr.instrument = Some(Insert::new(id));
+        }
+    }
+    if let Some(t) = s.track_mut(audio) {
+        t.mixer.inserts[1] = Some(Insert::new("filter"));
+        t.mixer.inserts[2] = Some(Insert::new("time_stretcher"));
+        t.mixer.inserts[3] = Some(Insert::new("tuner"));
+    }
+    s.touch_return_ms = 350;
 }
 
 /// A rack (ADR 0034, #197): two instruments in a routing folder with its bus, overlapping key
