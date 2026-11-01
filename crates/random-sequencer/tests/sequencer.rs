@@ -3,7 +3,8 @@
 
 #![forbid(unsafe_code)]
 
-use transit_random_sequencer::{Block, Event, EventKind, Model, RATES, Sequencer, Settings, Voices, division};
+use transit_random_sequencer::{Block, Event, EventKind, Model, RATES, Sequencer, Settings, Voices, deja_vu_dead_band, division};
+use transit_random_sequencer::VoltageRange;
 
 const SR: f64 = 48_000.0;
 
@@ -235,4 +236,125 @@ fn a_stopped_transport_plays_nothing() {
     let s = settings();
     let mut seq = Sequencer::new(1, true);
     assert!(stop(&mut seq, &s).is_empty());
+}
+
+/// Every note-on is followed by its off before the key starts again, and the stop ends the rest.
+fn assert_paired(label: &str, events: &[(i64, EventKind)]) {
+    let mut on = [false; 128];
+    for (t, k) in events {
+        match *k {
+            EventKind::NoteOn { key, .. } => {
+                assert!(!on[usize::from(key)], "{label}: key {key} started twice (at {t})");
+                on[usize::from(key)] = true;
+            }
+            EventKind::NoteOff { key } => on[usize::from(key)] = false,
+        }
+    }
+    assert!(on.iter().all(|x| !x), "{label}: a note hangs after the stop");
+}
+
+/// The review's stress (#202 C1): dense settings across all 7 models, short gates, keys folded at
+/// the top of the range, played forward, wrapped back to 0, located forward and stopped, at the
+/// fastest rates and large host blocks. Seeded; nothing depends on a clock.
+#[test]
+fn dense_settings_at_fast_rates_and_large_blocks_never_drop_or_double() {
+    let models = [Model::CoinToss, Model::Clusters, Model::Drums, Model::Independent, Model::Divider, Model::ThreeStates, Model::Markov];
+    let gates = [(0.02, 0.0), (0.05, 1.0), (1.0, 0.0)];
+    let rate_64 = RATES.len() - 1;
+    let rate_32t = RATES.iter().position(|r| r.0 == "1/32T").expect("1/32T is a rate");
+    assert_eq!(RATES[rate_64].0, "1/64");
+    let mut runs = 0u32;
+    let mut notes = 0usize;
+    for (rate, tempo, blocks) in [
+        (rate_64, 300.0, vec![1024, 4096, 8192, 16384]),
+        (rate_32t, 300.0, vec![1024, 4096, 8192, 16384]),
+        (rate_64, 140.0, vec![8192]),
+        (rate_32t, 174.0, vec![8192]),
+    ] {
+        for block in blocks {
+            for (mi, model) in models.iter().enumerate() {
+                for t_bias in [0.0, 0.5, 0.97, 1.0] {
+                    for (gi, &(gate_length, gate_random)) in gates.iter().enumerate() {
+                        let s = Settings {
+                            rate,
+                            model: *model,
+                            t_bias,
+                            gate_length,
+                            gate_random,
+                            voices: Voices::All,
+                            spread: 0.0,
+                            range: VoltageRange::Full,
+                            base_note: 125,
+                            jitter: 0.0,
+                            ..Settings::default()
+                        };
+                        let seed = 1 + mi as u32 * 31 + gi as u32 * 7 + runs;
+                        let mut seq = Sequencer::new(seed, false);
+                        let path = Path::constant(tempo);
+                        let label = format!("rate {rate} {tempo} bpm block {block} {model:?} bias {t_bias} gate {gate_length}/{gate_random}");
+                        let mut ev = play(&mut seq, &s, &path, 0, 4 * 48_000, block);
+                        // A loop wrap (back to 0), then a locate forward.
+                        ev.extend(play(&mut seq, &s, &path, 0, 2 * 48_000, block));
+                        ev.extend(play(&mut seq, &s, &path, 10 * 48_000, 3 * 48_000, block));
+                        ev.extend(stop(&mut seq, &s).into_iter().map(|k| (i64::MAX, k)));
+                        assert_eq!(seq.dropped(), 0, "{label}: the schedule refused events");
+                        assert_paired(&label, &ev);
+                        notes += ons(&ev).len();
+                        runs += 1;
+                    }
+                }
+            }
+        }
+    }
+    assert_eq!(runs, 840, "runs");
+    assert!(notes > 100_000, "the stress is dense: {notes} note-ons");
+    println!("stress: {runs} runs, {notes} note-ons");
+}
+
+/// The dead band of the deja vu knob (the firmware's main loop): 0.47 and 0.53 are its edges.
+#[test]
+fn the_deja_vu_dead_band_has_its_edges_at_0_47_and_0_53() {
+    use transit_random_sequencer::float::F;
+    let k = 1.063_829_787_23_f32;
+    let at = |x: f32| deja_vu_dead_band(F(x)).0;
+    assert_eq!(at(0.0), 0.0);
+    assert_eq!(at(0.46), 0.46 * k);
+    assert!(at(0.46) < 0.4895 && at(0.46) > 0.4893, "{}", at(0.46));
+    assert!(at(0.469) < 0.5, "just below the lower edge it still moves: {}", at(0.469));
+    assert_eq!(at(0.47), 0.5, "the lower edge is inside the band");
+    assert_eq!(at(0.5), 0.5);
+    assert_eq!(at(0.53), 0.5, "the upper edge is inside the band");
+    assert!(at(0.531) > 0.5, "just above the upper edge it moves: {}", at(0.531));
+    assert_eq!(at(0.54), 0.5 + (0.54 - 0.53) * k);
+    assert!((at(1.0) - 1.0).abs() < 1e-6);
+}
+
+/// With Latch off the sequence runs on across passes (the module's rule), so a new Seed is heard
+/// only if the sequencer has not played yet; latched, every start restarts from the current seed.
+#[test]
+fn a_new_seed_is_heard_unlatched_only_before_the_first_play() {
+    let s = settings();
+    let path = Path::constant(120.0);
+    // Unlatched, changed before playing: the new seed plays from the first pass.
+    let mut early = Sequencer::new(5, false);
+    early.set_seed(6, false);
+    let mut direct = Sequencer::new(6, false);
+    assert_eq!(play(&mut early, &s, &path, 0, 96_000, 128), play(&mut direct, &s, &path, 0, 96_000, 128));
+    // Unlatched, changed after the first play: the sequence runs on as if nothing changed.
+    let mut a = Sequencer::new(5, false);
+    let mut b = Sequencer::new(5, false);
+    let _ = play(&mut a, &s, &path, 0, 96_000, 128);
+    let _ = play(&mut b, &s, &path, 0, 96_000, 128);
+    let _ = (stop(&mut a, &s), stop(&mut b, &s));
+    a.set_seed(99, false);
+    assert_eq!(a.seed(), 99);
+    assert_eq!(play(&mut a, &s, &path, 0, 96_000, 128), play(&mut b, &s, &path, 0, 96_000, 128));
+    // Latched, a new seed after playing is heard at the next start.
+    let mut l = Sequencer::new(5, true);
+    let first = play(&mut l, &s, &path, 0, 96_000, 128);
+    let _ = stop(&mut l, &s);
+    l.set_seed(99, true);
+    let second = play(&mut l, &s, &path, 0, 96_000, 128);
+    assert_ne!(first, second);
+    assert_eq!(second, play(&mut Sequencer::new(99, true), &s, &path, 0, 96_000, 128));
 }
