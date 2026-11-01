@@ -78,12 +78,12 @@ fn sorted(mut v: Vec<&str>) -> Vec<&str> {
 }
 
 #[test]
-fn the_modal_voice_is_an_instrument_after_the_resonator_and_its_panel_lists_every_control() {
+fn the_modal_voice_is_an_instrument_after_the_texture_synth_and_its_panel_lists_every_control() {
     let mut t = T::new(1.0);
     let picker = t.app.builtin_plugins();
     let at = |id: &str| picker.iter().position(|p| p.id == id);
     assert!(picker.iter().any(|p| p.id == "modal_voice" && p.name == "Modal Voice" && p.instrument), "an instrument in the picker");
-    assert_eq!(at("modal_voice"), at("resonator").map(|i| i + 1), "listed after the Resonator");
+    assert_eq!(at("modal_voice"), at("texture_synth").map(|i| i + 1), "listed after the Texture Synth");
     assert_eq!(transit_model::DEFAULT_INSTRUMENT, "macro_oscillator", "the Macro Oscillator stays the default");
     let tr = t.open();
     let w = t.window(tr);
