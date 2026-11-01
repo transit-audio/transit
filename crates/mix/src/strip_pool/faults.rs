@@ -5,6 +5,8 @@ use transit_rt::worker_set::figures::Figures;
 /// The counters the callback keeps (relaxed; read by [`StripFaultsReader`]).
 #[derive(Default)]
 pub(super) struct Counters {
+    pub(super) queue: [AtomicU64; 11],
+    pub(super) measurement_status: AtomicU32,
     pub(super) workers: AtomicU64,
     pub(super) blocks: AtomicU64,
     pub(super) overruns_busy: AtomicU64,
@@ -74,6 +76,13 @@ impl StripFaultsReader {
         let r = |a: &AtomicU64| a.load(Ordering::Relaxed);
         let d = self.defer.total();
         StripFaults {
+            queue: transit_rt::worker_set::queue::QueueSnapshot {
+                published: r(&c.queue[0]), claimed: r(&c.queue[1]), inline_pre: r(&c.queue[2]),
+                unclaimed_at_deadline: r(&c.queue[3]), deadline_reclaimed_tail: r(&c.queue[4]),
+                classified: r(&c.queue[5]), queue_over: r(&c.queue[6]), late_w: r(&c.queue[7]),
+                late_after_queue: r(&c.queue[8]), forgone: r(&c.queue[9]), tail_callback: r(&c.queue[10]),
+            },
+            measurement_status: c.measurement_status.load(Ordering::Relaxed),
             workers: r(&c.workers),
             deadline_percent: r(&c.deadline_percent),
             deadline_frames: r(&c.deadline_frames),

@@ -199,6 +199,22 @@ impl MeasurementReader {
 }
 
 impl WorkerSet {
+    /// Informational live counters. Individual fields are exact; use the mailbox for a
+    /// settled, consistent measurement boundary.
+    #[must_use]
+    pub fn queue_snapshot(&self) -> QueueSnapshot { self.shared.queue.counts.snapshot() }
+
+    /// Diagnostic mailbox status: 0 idle, 1 requested, 2 complete response, 3 incomplete
+    /// response. This never acknowledges or modifies the consumer's payload.
+    #[must_use]
+    pub fn measurement_status(&self) -> u32 {
+        match self.mailbox.state.load(Ordering::Acquire) {
+            RESPONSE if self.mailbox.complete.load(Ordering::Relaxed) == 0 => 3,
+            RESPONSE => 2,
+            REQUESTED => 1,
+            _ => 0,
+        }
+    }
     /// Sets the publication stamps for this sub-block. `period` is always the original host
     /// block's period, never a tempo sub-block's. Call after `begin_block`, before any publish.
     pub fn set_block_timing(&mut self, deadline: Instant, period: Duration) {

@@ -286,6 +286,10 @@ pub(crate) fn release_instrument(st: &mut Strip) {
 /// with [`MixEngine::strip_faults`]; `docs/troubleshooting.md` defines each figure.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct StripFaults {
+    /// Informational attempt counters. Measurements use the acknowledged mailbox instead.
+    pub queue: transit_rt::worker_set::queue::QueueSnapshot,
+    /// Mailbox: 0 idle, 1 requested, 2 complete response, 3 incomplete response.
+    pub measurement_status: u32,
     /// Render worker threads (0: no pool, the strips render serially).
     pub workers: u64,
     /// The strips' deadline in effect, percent of the block period (#172): the

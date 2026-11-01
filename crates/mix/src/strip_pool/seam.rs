@@ -19,6 +19,12 @@ use transit_rt::strip_jobs::State;
 const CLAIM_BOUND: Duration = Duration::from_secs(60);
 
 impl StripPool {
+    pub(crate) fn arm_tail_slot(&mut self, slot: usize, value: transit_rt::worker_set::seams::SlotOverrides) {
+        self.set.arm_slot_overrides(slot, value);
+    }
+    pub(crate) fn arm_tail_cost(&mut self, clock: transit_rt::worker_set::seams::CostClock) {
+        self.set.arm_cost_clock(clock);
+    }
     /// The deadline a poll uses this block (see the module docs).
     pub(crate) fn gated_deadline(&self, deadline: Instant) -> Instant {
         if self.gate.is_empty() {

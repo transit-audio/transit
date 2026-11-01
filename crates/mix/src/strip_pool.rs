@@ -984,6 +984,12 @@ impl StripPool {
         self.note_host_outcomes();
         let st = self.set.stats();
         let c = &self.counters;
+        let q = self.set.queue_snapshot();
+        for (cell, value) in c.queue.iter().zip([q.published, q.claimed, q.inline_pre, q.unclaimed_at_deadline,
+            q.deadline_reclaimed_tail, q.classified, q.queue_over, q.late_w, q.late_after_queue, q.forgone, q.tail_callback]) {
+            cell.store(value, Ordering::Relaxed);
+        }
+        c.measurement_status.store(self.set.measurement_status(), Ordering::Relaxed);
         c.late_results.store(st.late_results, Ordering::Relaxed);
         c.inline_renders.store(st.inline_renders, Ordering::Relaxed);
         c.refused_no_history.store(st.inline_refused_no_history, Ordering::Relaxed);

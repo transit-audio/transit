@@ -56,6 +56,15 @@ impl Mutes {
 }
 
 impl MixEngine {
+    /// Arms the next host block's fit and reclaim overrides for one table slot.
+    pub fn arm_tail_slot(&mut self, slot: usize, value: transit_rt::worker_set::seams::SlotOverrides) {
+        if let Some(pool) = self.pool.as_mut() { pool.arm_tail_slot(slot, value); }
+    }
+
+    /// Arms the next host block's deterministic direct aux cost readout.
+    pub fn arm_tail_cost(&mut self, clock: transit_rt::worker_set::seams::CostClock) {
+        if let Some(pool) = self.pool.as_mut() { pool.arm_tail_cost(clock); }
+    }
     /// Mutes phase-1 strips (by table index) in the next serial block (see the module docs).
     /// Off the audio path, between blocks.
     pub fn mute_next_block(&mut self, mutes: &[(usize, Mute)]) {

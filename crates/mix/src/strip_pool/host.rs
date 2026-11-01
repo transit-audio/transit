@@ -9,7 +9,10 @@ impl StripPool {
     }
 
     pub(crate) fn measurement_requested(&self) -> bool { self.set.measurement_requested() }
-    pub(crate) fn capture_measurement(&mut self, settled: bool) { self.set.capture_measurement(settled); }
+    pub(crate) fn capture_measurement(&mut self, settled: bool) {
+        self.set.capture_measurement(settled);
+        self.counters.measurement_status.store(self.set.measurement_status(), Ordering::Relaxed);
+    }
     pub(crate) fn begin_host_block(&mut self) {
         self.host_seen.fill(0);
         self.host_counted = false;
@@ -55,5 +58,13 @@ impl StripPool {
                 self.last_overruns = self.last_overruns.saturating_add(1);
             }
         }
+    }
+}
+
+impl MixEngine {
+    /// Takes the pool's single measurement consumer, on the control thread before rendering.
+    /// Requests capture at a subsequent host boundary, before any new publication.
+    pub fn render_measurement_reader(&mut self) -> Option<transit_rt::worker_set::queue::MeasurementReader> {
+        self.pool.as_mut()?.set.measurement_reader()
     }
 }
