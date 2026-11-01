@@ -7,6 +7,9 @@ use serde_json::json;
 use std::process::Command;
 use transit_model::{AutoParam, Insert, Session, TrackId};
 
+#[path = "automation/picker_golden_tests.rs"]
+mod golden;
+
 fn app_with_track(kind: &str) -> (StudioApp, TrackId) {
     let mut app = StudioApp::new(transit_engine::Engine::default(), None, Services::default());
     let t = TrackId(app.run("track.new", json!({"kind": kind, "name": "T"})).unwrap()["tracks"][0].as_u64().unwrap());
