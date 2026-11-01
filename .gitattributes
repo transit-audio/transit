@@ -1,2 +1,4 @@
 # The vendored C++ is kept byte for byte as upstream committed it (LF), on every checkout.
 crates/macro-osc-oracle/vendor/** -text
+# Golden offline bounces are raw float bytes: never convert line endings.
+crates/mix/tests/golden/offline/*.f32 -text
