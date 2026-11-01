@@ -251,6 +251,48 @@ output is converted at the edge and the delay (35 samples at 44.1 kHz, 65 at 88.
 Presets: Struck Bell, Sympathetic Harp, Steel Pluck, FM Mallet, Strummed Chords, Ambient Pluck,
 and your own.
 
+## Texture Synth
+
+The Texture Synth is a built-in instrument (choose it from a track's instrument slot, after the
+Resonator): the synth of the [Texture](#texture) insert played from MIDI, what the module plays
+when nothing is patched into it. It is a port of Émilie Gillet's open-source texture synthesizer
+firmware (MIT license), checked sample by sample against her C++ code
+([ADR 0033](adr/0033-built-in-instruments-mutable-instruments-port.md)); the notices are in
+**Help > About transit**.
+
+- **What sounds**: a wavetable oscillator and grains of the same wavetables. **Time** picks where
+  in the bank's 16 waves they read, **Bank** one of 12 banks (the module's Feedback knob), **Size**,
+  **Shape** and **Pitch** the grains' length, envelope and transposition, each with a **Random**
+  amount. **Dry/Wet** balances the oscillator (dry) and the grains (wet); it is 100% wet by
+  default, because the oscillator has no gate on the module and plays on at the last note's pitch.
+  There is no recording buffer: the grains read the wavetables.
+- **Playing**: one pitch at a time, with up to 32 grains inside. A key sets the pitch (MIDI 69 at
+  440 Hz with **Pitch** at 0) and holds the module's seed gate while any key is held. **Density**
+  decides what the gate does: left of center a steady stream of grains while the key is held (the
+  first on the note), at the center one grain per note, right of center a random stream. With
+  **Latch** on, the notes become a clock that Density divides. A new key while one is held starts
+  again at its pitch; letting it go returns to the newest key still held without restarting. Grains
+  already started play out after the gate falls.
+- **Freeze** holds the cloud: no new grains, the sounding ones keep their level. Saving with Freeze
+  on stores the cloud with the session; it sounds again when the session opens (with the shaper on,
+  it waits for a note to open the amp envelope). **Seed** is the module's button: held, grains flow
+  whatever the keys do. Freeze and Seed are parameters: automate them or map them to a pedal or a
+  pad with MIDI Learn.
+- **Quality** sets the resolution of the oscillator and the grains (Dirty Tape 4-bit, Clean Tape a
+  16-bit oscillator with 6-bit grains, Vintage Digital 7-bit, Digital 16-bit). **Velocity** sets
+  the level from each note (the module has no level input). **Bend Range** and the matrix's Pitch
+  move the pitch; the mod wheel and aftertouch work through the matrix.
+- The shaper and the modulation matrix are the Macro Oscillator's (transit's addition, off by
+  default), on the instrument's output: the amp envelope opens at each note and closes when no key
+  is held (the pedal holds it), which also gates the oscillator. The matrix reaches the module's
+  controls: Time, Size, Shape, Density, Bank, Dry/Wet, Reverb and Pitch.
+
+The synth runs at 48 kHz in the module's 12-frame blocks; in a 48 kHz session nothing is converted,
+and at other rates its output is converted at the edge and the delay (35 samples at 22.05, 32 and
+44.1 kHz, 65 at 88.2 kHz, 70 at 96 kHz, 129 at 176.4 kHz, 140 at 192 kHz) goes to delay
+compensation. An instrument cannot take a track's audio yet. Presets: Grain Pad, Grain Pulse,
+Frozen Cloud, Tape Keys, and your own.
+
 ## Filter
 
 The Filter is a built-in insert effect (the device chain's **+**, or the mixer strip's insert
