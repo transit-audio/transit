@@ -129,6 +129,7 @@ mod scope;
 mod sink;
 mod strip;
 mod strip_pool;
+mod tail;
 mod tempo_split;
 #[cfg(test)]
 mod tests;
