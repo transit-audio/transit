@@ -280,7 +280,8 @@ impl MidiEffect for RandomSequencer {
             };
             out.push(TimedEvent { offset: e.offset, event: PluginEvent { channel: 0, note_id: PluginEvent::NO_ID, message } });
         });
-        // A full schedule (never expected) joins the chain's overflow count in the diagnostics.
+        // A full schedule (never expected) joins the chain's overflow count (`MidiFxCounts::overflow`, read through
+        // `MixEngine::event_status().midi_fx.overflow`; no UI reader shows it yet).
         out.add_refused(u32::try_from(self.sequencer.dropped() - dropped_before).unwrap_or(u32::MAX));
     }
 }
