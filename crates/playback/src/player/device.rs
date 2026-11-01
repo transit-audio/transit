@@ -619,13 +619,17 @@ impl Player {
     fn render_callback_runs(&self) -> bool {
         !(self.fault.failed.load(Ordering::Acquire) || self.fault.gone.load(Ordering::Acquire))
     }
-    /// Whether the exact document rendered. State jobs use [`Self::plays_processed`] for
+    /// Whether the exact document rendered. State jobs use [`Self::plays_instance_processed`] for
     /// processed parameter delivery, including after skipped blocks (#219).
     pub fn plays(&self, expected: &Arc<Session>) -> bool {
         self.owner().is_ok_and(|owner| owner.plays(expected))
     }
-    /// Whether this document's parameter values reached processed plug-in blocks. Poll from
-    /// the UI; never waits for the audio thread or a busy host.
+    /// Whether this instance's values are confirmed for the exact document. Inactive slots
+    /// confirm stored values; failed slots return an error. Never waits for audio or a host.
+    pub fn plays_instance_processed(&self, expected: &Arc<Session>, track: TrackId, slot: usize) -> Result<bool, transit_mix::ParameterDelivery> {
+        self.owner().map_or(Ok(false), |owner| owner.plays_instance_processed(expected, track, slot))
+    }
+    /// Aggregate parameter readiness, retained for diagnostics.
     pub fn plays_processed(&self, expected: &Arc<Session>) -> bool {
         self.owner().is_ok_and(|owner| owner.plays_processed(expected))
     }

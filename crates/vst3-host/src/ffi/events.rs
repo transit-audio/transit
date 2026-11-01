@@ -137,6 +137,11 @@ impl ParamChanges {
                 return Some((i32::try_from(i).ok()?, q));
             }
         }
+        self.add_queue(id)
+    }
+
+    fn add_queue(&self, id: u32) -> Option<(i32, &ParamQueue)> {
+        let n = self.count.load(Ordering::Relaxed).max(0);
         let q = self.queues.get(n as usize)?;
         q.id.store(id, Ordering::Relaxed);
         q.start.store(INLINE, Ordering::Relaxed);
@@ -161,7 +166,7 @@ impl ParamChanges {
             // The last point at each offset.
             let last_at = |k: usize| group.get(k + 1).is_none_or(|n| n.time != group.get(k).map_or(0, |p| p.time));
             let distinct = (0..group.len()).filter(|&k| last_at(k)).count();
-            let Some((_, q)) = self.queue_for(first.id) else {
+            let Some((_, q)) = self.add_queue(first.id) else {
                 dropped = dropped.saturating_add(distinct as u32);
                 continue;
             };

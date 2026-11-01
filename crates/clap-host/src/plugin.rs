@@ -788,7 +788,7 @@ impl ClapPlugin {
             let offset = u32::try_from(start).unwrap_or(u32::MAX);
             let events = self.queue.get(..k).unwrap_or(&[]);
             let r = core.inst.process(n, self.steady, &mut core.inputs, &mut core.outputs, events, offset, self.transport.as_ref());
-            if r.is_err() {
+            if r == Err(crate::ffi::ProcessError::BeforeCall) {
                 // A refused start or missing process entry never consumed these values.
                 collapse_params(&mut self.queue);
                 drop(guard);

@@ -17,9 +17,15 @@ pub(super) fn push(queue: &mut Vec<Event>, event: Event, release: bool) -> bool 
 }
 
 pub(super) fn has_room(queue: &Vec<Event>, event: &Event, release: bool) -> bool {
+    if queue.len() >= queue.capacity() {
+        return false;
+    }
+    if block_start(event) {
+        return true;
+    }
     let ordinary = queue.iter().filter(|e| !block_start(e)).count();
     let room = if release { EVENT_CAP } else { EVENT_CAP - RELEASE_RESERVE };
-    queue.len() < queue.capacity() && (block_start(event) || ordinary < room)
+    ordinary < room
 }
 
 #[cfg(test)]

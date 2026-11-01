@@ -102,6 +102,7 @@ mod note_delay;
 mod note_view;
 mod offline;
 mod parameter_delivery;
+pub use parameter_delivery::ParameterDelivery;
 #[cfg(test)]
 mod parameter_delivery_tests;
 mod plan;

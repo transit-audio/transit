@@ -162,7 +162,7 @@ pub fn feed_meter(d: &mut MeterDisplay, peak: [f32; 2], gr: f32, dt: f32) {
 }
 
 /// The status line naming the plugin in `slot` that the engine took out of the signal path.
-fn failed_plugin_status(s: &transit_model::Session, track: TrackId, slot: usize) -> Option<String> {
+pub(crate) fn failed_plugin_status(s: &transit_model::Session, track: TrackId, slot: usize) -> Option<String> {
     let t = s.track(track)?;
     let ins = if slot == transit_mix::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(slot)?.as_ref() }?;
     Some(format!("{} on {} put out invalid audio, so it is bypassed until playback stops or starts again.", ins.plugin, t.name))

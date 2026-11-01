@@ -2,6 +2,13 @@
 
 use super::*;
 
+/// Whether input events reached the plug-in, even when it rejected the block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ProcessError {
+    BeforeCall,
+    PluginReported,
+}
+
 impl Instance {
     /// Construction only: time-zero values have one reserved entry per supported parameter,
     /// in addition to the MIDI/timed-event budget. Conversion must not truncate that reserve.
@@ -297,12 +304,12 @@ impl Instance {
         events: &[Event],
         offset: u32,
         transport: Option<&Transport>,
-    ) -> Result<i32, &'static str> {
+    ) -> Result<i32, ProcessError> {
         if !self.active {
-            return Err("not active");
+            return Err(ProcessError::BeforeCall);
         }
         if frames == 0 || frames > self.max_frames || frames > inputs.frames || frames > outputs.frames {
-            return Err("block larger than the activated size");
+            return Err(ProcessError::BeforeCall);
         }
         if !self.processing {
             let ok = match self.vt().start_processing {
@@ -311,11 +318,11 @@ impl Instance {
                 None => true,
             };
             if !ok {
-                return Err("start_processing failed");
+                return Err(ProcessError::BeforeCall);
             }
             self.processing = true;
         }
-        let process = self.vt().process.ok_or("plugin has no process")?;
+        let process = self.vt().process.ok_or(ProcessError::BeforeCall)?;
         self.raw.clear();
         for e in events.iter().take(self.raw.capacity()) {
             self.raw.push(RawEvent::from_event(e, offset));
@@ -358,7 +365,7 @@ impl Instance {
             }
         }
         self.out_params.clear();
-        if status == CLAP_PROCESS_ERROR { Err("plugin reported a processing error") } else { Ok(status) }
+        if status == CLAP_PROCESS_ERROR { Err(ProcessError::PluginReported) } else { Ok(status) }
     }
 }
 

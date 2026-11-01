@@ -19,6 +19,8 @@ use transit_time::Samples;
 /// Playback-owned sample/meter storage cap per publication, in addition to PlanLimits.
 const PLAYBACK_BYTES: usize = 16 << 20;
 
+mod delivery;
+
 /// Independent meter fields may straddle a render block; meters are display diagnostics.
 /// No reader takes the callback's lock or asks it to allocate a snapshot.
 struct AtomicMeter {
@@ -77,18 +79,20 @@ impl AtomicMeter {
 }
 
 struct MeterBank {
+    delivery: delivery::Bank,
     tracks: Vec<(TrackId, AtomicMeter)>,
     main: AtomicMeter,
 }
 
 impl MeterBank {
-    fn new(session: &Session) -> Self {
+    fn new(session: &Session, generation: PlanGeneration) -> Self {
         let mut tracks: Vec<_> = session.tracks.iter().map(|t| (t.id, AtomicMeter::new())).collect();
         tracks.sort_unstable_by_key(|(id, _)| *id);
-        Self { tracks, main: AtomicMeter::new() }
+        Self { tracks, main: AtomicMeter::new(), delivery: delivery::Bank::new(session, generation) }
     }
 
     fn publish(&self, mix: &MixEngine) {
+        self.delivery.publish(mix);
         self.main.publish(mix.active_main_meter());
         for (id, meter) in mix.meters() {
             if let Ok(index) = self.tracks.binary_search_by_key(&id, |(id, _)| *id)
@@ -132,7 +136,14 @@ struct Buffers {
 }
 
 impl Buffers {
-    fn prepare(session: &Session, input: Option<Arc<InputRing>>, target: RenderTarget, io: &IoMap, limits: PlanLimits) -> Result<Self, CompileError> {
+    fn prepare(
+        session: &Session,
+        input: Option<Arc<InputRing>>,
+        target: RenderTarget,
+        io: &IoMap,
+        limits: PlanLimits,
+        generation: PlanGeneration,
+    ) -> Result<Self, CompileError> {
         let channels = main_channels(session);
         let sinks = transit_mix::plan_sinks(session, io, target.out_channels);
         let sink_channels = sinks.channels();
@@ -155,6 +166,7 @@ impl Buffers {
                     .and_then(|tracks| tracks.checked_mul(size_of::<(TrackId, AtomicMeter)>()))
                     .and_then(|meters| n.checked_add(meters))
             })
+            .and_then(|n| n.checked_add(delivery::Bank::bytes(session)))
             .and_then(|n| n.checked_add(size_of::<Buffers>() + size_of::<MeterBank>() + 2 * size_of::<usize>()))
             .unwrap_or(usize::MAX);
         if bytes > PLAYBACK_BYTES {
@@ -172,7 +184,7 @@ impl Buffers {
                 (t.mixer.input_monitor || t.mixer.record_arm) && (input.is_some() || matches!(t.kind, TrackKind::Instrument | TrackKind::Midi))
             }),
             input,
-            meters: Arc::new(MeterBank::new(session)),
+            meters: Arc::new(MeterBank::new(session, generation)),
             fold: fold_gains(session),
             hosted: session_has_hosted(session),
         })
@@ -226,8 +238,6 @@ pub(super) fn callback_scope() -> CallbackBudget {
 
 #[derive(Default)]
 struct Counters {
-    /// Exact plan generation whose parameter passes the hosts consumed; zero while pending.
-    parameters_processed: AtomicU64,
     faulted: AtomicBool,
     published: AtomicU64,
     admitted: AtomicU64,
@@ -307,7 +317,7 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
     let (port, audio_port) = publication::channel(NonZeroUsize::MIN);
     let (status_tx, status_rx) = rtrb::RingBuffer::new(1);
     let counters = Arc::new(Counters::default());
-    let meters = Arc::new(MeterBank { tracks: Vec::new(), main: AtomicMeter::new() });
+    let meters = Arc::new(MeterBank::new(&Session::default(), PlanGeneration::EMPTY));
     let buffers = Buffers {
         output: Vec::new(),
         main_dest: Vec::new(),
@@ -418,7 +428,7 @@ impl Control {
             return Err(CompileError::TargetMismatch { compiler: self.target });
         }
         let next = self.issued.checked_next().ok_or(CompileError::GenerationExhausted)?;
-        let buffers = Buffers::prepare(&request.session, request.input, self.target, &self.io, self.limits)?;
+        let buffers = Buffers::prepare(&request.session, request.input, self.target, &self.io, self.limits, next)?;
         // The compiler lays the sinks out from the same table, so the block layout agrees.
         self.compiler.set_io(Arc::clone(&self.io));
         self.compiler.set_external_unavailable(Arc::clone(&self.no_port));
@@ -482,8 +492,12 @@ impl Control {
     /// Processed parameter acknowledgment, published after rendering under the existing plan
     /// sequence. An older plan's completion cannot acknowledge a newer document.
     pub fn parameters_processed(&self) -> bool {
-        let generation = self.compiler.active();
-        generation != PlanGeneration::EMPTY && self.counters.parameters_processed.load(Ordering::Acquire) == generation.get()
+        self.meters.delivery.all(self.compiler.active())
+    }
+
+    /// This instance's delivery, from the bank belonging to the exact active plan.
+    pub fn parameter_delivery(&self, track: TrackId, slot: usize) -> transit_mix::ParameterDelivery {
+        self.meters.delivery.get(self.compiler.active(), track, slot)
     }
 
     /// The live engine's render-worker stream faults (`None`: no workers, the strips render
@@ -794,8 +808,6 @@ impl Audio {
         }
         self.mix.render_active(position, frames, &mut self.buffers.output);
         self.buffers.meters.publish(&self.mix);
-        let processed = if self.mix.parameters_processed() { self.mix.active().generation.get() } else { 0 };
-        self.counters.parameters_processed.store(processed, Ordering::Release);
         // Full means an older report still awaits control. The next render tries its current
         // cumulative status, not a queue of stale reports; no field is published separately.
         let _ = self.status_tx.push(StatusReport { generation: self.mix.active().generation, status: self.mix.status() });

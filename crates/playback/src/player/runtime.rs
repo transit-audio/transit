@@ -502,7 +502,7 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
         Ok(if audio { self.handles.capture_states() } else { self.handles.capture_states_with_audio(false) })
     }
     /// Whether the audio side rendered exactly `expected`. This is document readiness only;
-    /// state jobs use `plays_processed` to wait for host parameter delivery (#219).
+    /// state jobs use `plays_instance_processed` to wait for host parameter delivery (#219).
     pub fn plays(&self, expected: &Arc<Session>) -> bool {
         !self.faulted()
             && Arc::ptr_eq(expected, &self.requested)
@@ -514,6 +514,17 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     /// bypassed insert with queued values cannot acknowledge delivery (#219).
     pub fn plays_processed(&self, expected: &Arc<Session>) -> bool {
         self.plays(expected) && self.control.sessions.bridge.parameters_processed()
+    }
+    /// Confirm this instance only. Inactive slots confirm stored values; failed ones refuse.
+    pub fn plays_instance_processed(&self, expected: &Arc<Session>, track: TrackId, slot: usize) -> Result<bool, transit_mix::ParameterDelivery> {
+        if !self.plays(expected) {
+            return Ok(false);
+        }
+        match self.control.sessions.bridge.parameter_delivery(track, slot) {
+            transit_mix::ParameterDelivery::Ready => Ok(true),
+            transit_mix::ParameterDelivery::Pending => Ok(false),
+            transit_mix::ParameterDelivery::Failed => Err(transit_mix::ParameterDelivery::Failed),
+        }
     }
     /// Final Main-thread capture before recreating the device. Faults close audio
     /// admission but leave these handles owned until retirement. Never use them

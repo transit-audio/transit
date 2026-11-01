@@ -373,21 +373,43 @@ impl StudioApp {
     /// current document, else once it does (`Step::Waiting`).
     fn start_live(&mut self, key: (TrackId, usize), plugin: String, instance: Option<SlotGen>, start: Start) {
         let op = Op { key, uid: self.uid_at(key), plugin, instance, step: Step::Waiting { start, since: Instant::now() } };
-        if instance.is_some() && !self.plays_session() {
+        let ready = match self.plays_session(key) {
+            Ok(ready) => ready,
+            Err(e) => {
+                self.status = format!("Preset: {e}");
+                return;
+            }
+        };
+        if instance.is_some() && !ready {
             self.plugin_header.ops.push(op);
         } else {
             self.begin_live(op);
         }
     }
 
-    /// Whether the audio side plays the document as it is now (`Player::plays`).
-    fn plays_session(&self) -> bool {
-        self.player.as_ref().is_some_and(|p| p.plays_processed(&self.engine.session_arc()))
+    /// Whether this job's own instance has confirmed the current document's values.
+    fn plays_session(&self, key: (TrackId, usize)) -> Result<bool, String> {
+        self.player
+            .as_ref()
+            .map_or(Ok(false), |p| p.plays_instance_processed(&self.engine.session_arc(), key.0, key.1))
+            .map_err(|_| crate::host::failed_plugin_status(self.engine.session(), key.0, key.1).unwrap_or_else(|| SLOT_CHANGED.into()))
     }
 
     /// Begins a waiting op's job on the plug-in host thread.
     fn begin_live(&mut self, op: Op) {
         let Op { key, uid, plugin, instance, step: Step::Waiting { start, .. } } = op else { return };
+        let inactive = self.engine.session().track(key.0).is_some_and(|t| t.inactive) || self.hosted_insert(key).is_some_and(|ins| !ins.active);
+        if inactive
+            && instance.is_some()
+            && let Start::Read(then) = start
+        {
+            let Some(state) = self.hosted_insert(key).and_then(|ins| ins.state_bytes()) else {
+                self.status = "The inactive plug-in has no stored state; reactivate it before reading a preset".into();
+                return;
+            };
+            self.read_done(key, plugin, instance, Some(state), then);
+            return;
+        }
         let Some(p) = &self.player else { return };
         let step = match start {
             Start::Read(then) => p.begin_save_state(key.0, key.1).map(|job| Step::Read { job, then }),
@@ -506,18 +528,20 @@ impl StudioApp {
             let instance = self.instance_at(key);
             self.start_live(key, plugin, instance, Start::Restore { state });
         }
-        let plays = self.plays_session();
         for mut op in std::mem::take(&mut self.plugin_header.ops) {
             let key = op.key;
             match op.step {
                 Step::Waiting { ref start, since } => {
+                    let ready = self.plays_session(key);
                     if !self.still_holds(key, &op) {
                         if matches!(start, Start::Restore { .. }) {
                             log::debug!("a live restore was waiting when its slot changed; dropped");
                         } else {
                             self.status = SLOT_CHANGED.into();
                         }
-                    } else if plays {
+                    } else if let Err(e) = ready {
+                        self.status = format!("Preset: {e}");
+                    } else if ready == Ok(true) {
                         self.begin_live(op);
                     } else if since.elapsed() > PLAYS_WITHIN {
                         self.status = if matches!(start, Start::Restore { .. }) {

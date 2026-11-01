@@ -380,6 +380,9 @@ impl TextureFx {
 }
 
 impl Plugin for TextureFx {
+    fn idle_applies_all_parameters(&self) -> bool {
+        false
+    }
     fn service_idle_state(&mut self) {
         self.answer_capture();
     }

@@ -7,7 +7,7 @@ use super::*;
 pub(crate) fn service_idle_states(s: &Session, t: &Track, strip: &mut Strip, pos: Samples) {
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
         let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
-        if slot.failed || ins.plugin != "texture" || (!t.inactive && ins.active && !ins.bypass) {
+        if slot.failed || slot.plugin.idle_applies_all_parameters() || (!t.inactive && ins.active && !ins.bypass) {
             continue;
         }
         crate::automation::apply_idle_freeze(s, slot, ins, t, &strip.touch, i, pos);
@@ -225,7 +225,7 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
             continue;
         }
         let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
-        if ins.active && ins.bypass && !slot.failed && ins.plugin != "texture" {
+        if ins.active && ins.bypass && !slot.failed && slot.plugin.idle_applies_all_parameters() {
             // Keep block-start values flowing while dry. Hosts retain them until the first
             // active process call; no old timed breakpoint can follow the new value.
             apply_params(Some(block.s), slot, ins, t, &strip.touch, i, pos, 0);
@@ -349,7 +349,7 @@ pub(crate) fn process_master(
             && ins.active
             && !slot.failed
         {
-            if ins.bypass && ins.plugin == "texture" {
+            if ins.bypass && !slot.plugin.idle_applies_all_parameters() {
                 continue; // Its freeze-only idle hook preserves captured buffer contents.
             }
             let span = if ins.bypass { 0 } else { timed_span(transport, frames) };

@@ -287,6 +287,11 @@ pub trait Plugin: Send {
     /// Service a non-rendering insert at a block boundary (bypassed or inactive). Same realtime
     /// contract as process: no allocation, deallocation, locks or waiting.
     fn service_idle_state(&mut self) {}
+    /// Whether bypass may apply all block-start parameters. A state-capturing plug-in can
+    /// opt out to preserve its buffer; the idle hook then applies only Freeze.
+    fn idle_applies_all_parameters(&self) -> bool {
+        true
+    }
     /// Sets a parameter (clamped into range; NaN becomes the default). `false` if `id` is unknown.
     fn set_param(&mut self, id: &str, value: f32) -> bool;
     fn param(&self, id: &str) -> Option<f32>;
