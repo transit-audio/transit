@@ -402,7 +402,7 @@ fn lasting_offsets_over_the_band_that_begin_and_end_read_within_twenty_ppm() {
     // Every callback from 60 s to 100 s late by `ms` (2 ms and up without jitter, 5 ms and up
     // with 3 ms of it): the line restarts when the offset is confirmed and again on the first
     // callback back below the envelope, and the estimate is held while it refills. (Smaller
-    // offsets are K97.)
+    // offsets are K100.)
     for cb in [128, 480, 960, 8_192] {
         for (ms, jitter_ms) in [(2.0, 0.0), (5.0, 0.0), (19.0, 0.0), (5.0, 3.0), (10.0, 3.0), (19.0, 3.0)] {
             let seen = probe(cb, 0.0, 200.0, &move |t| if (60.0..100.0).contains(&t) { ms * 1e-3 } else { 0.0 }, jitter_ms, 11);

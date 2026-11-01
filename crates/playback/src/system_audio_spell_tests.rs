@@ -194,7 +194,7 @@ impl Pattern {
             t += length + 1.0 + 14.0 * next();
         }
         // Lasting offsets one after another, never overlapping: two that overlap and end apart
-        // leave a net step of their difference, which can be under the band (K97).
+        // leave a net step of their difference, which can be under the band (K100).
         let (mut offsets, mut at) = (Vec::new(), 40.0 + 80.0 * next());
         for _ in 0..(next() * 3.0) as usize {
             let length = 5.0 + 35.0 * next();
@@ -231,7 +231,7 @@ fn fifty_seeded_patterns_of_spells_jitter_and_lasting_offsets_neither_move_the_r
     // Per seed: the callback size (128, 480, 960 or 8192), the endpoint (0 or -1000 ppm), device
     // jitter of 0 to 3 ms, spells every 1 to 15 s of 0.1 to 2 s at 5 to 80 ms in four shapes, and
     // up to two lasting offsets of 5 to 25 ms for 5 to 40 s that start and end, one after the
-    // other; 300 s. Lasting offsets within the 1 ms band are K97; over 25 ms the ring itself
+    // other; 300 s. Lasting offsets within the 1 ms band are K100; over 25 ms the ring itself
     // resynchronizes when they start and runs dry when they end, which is not the estimate's
     // doing.
     let mut failures = Vec::new();

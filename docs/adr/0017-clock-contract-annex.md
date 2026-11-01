@@ -96,7 +96,7 @@ or one callback more than 0.25 ms below the envelope (plus how far the envelope'
 it), which no delay can put there (an offset that ended). After any restart the estimate is held
 until the refilled fit's slope has a standard error within 4 ppm, taking its points as spread
 over the 1 ms band. A lasting offset of 1 ms or less is neither and moves the reading for one
-window (K97). The ratio is fed forward as the trim of a linear interpolator and reported, as
+window (K100). The ratio is fed forward as the trim of a linear interpolator and reported, as
 the clamped estimate, as the drift; a slow proportional-integral term on the ring fill (the
 integral held within 50 ppm) only brings the fill back to its target of one input callback, one
 packet and 30 ms. Drifts up to 1000 ppm are tested; the applied trim is limited to 2000 ppm. It

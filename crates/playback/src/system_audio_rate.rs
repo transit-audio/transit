@@ -44,7 +44,7 @@
 //! can put there (the older points carried a delay: a lasting offset that ended). After any
 //! restart the estimate is held until the refilled line's fit is as well conditioned as a long
 //! line's ([`HOLD_SE`]). A lasting offset within about the band (under 1 to 3 ms, with the jitter)
-//! is neither: the fit spans it for one window (K97).
+//! is neither: the fit spans it for one window (K100).
 //!
 //! Arrival jitter is averaged by a longer window: every point of the [`ARRIVAL_POINTS`] ring, up to
 //! [`ARRIVAL_WINDOW_NS`] (20 s at 10 ms callbacks, 60 s at 8192-frame ones).
