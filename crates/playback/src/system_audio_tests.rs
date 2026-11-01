@@ -153,6 +153,10 @@ struct Run {
     /// The fill at callback start after the settling time, as a fraction of the target.
     fill_settled: (f64, f64),
     target: usize,
+    /// The reported drift's largest error after the settling time, in ppm, and the time it was
+    /// more than 20 ppm off.
+    worst_error: f64,
+    over_s: f64,
 }
 
 /// Run the reader for `seconds` of simulated device time against an endpoint whose clock runs
@@ -170,8 +174,8 @@ fn simulate(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f64) -
 }
 
 /// What [`simulate_with`] adds to the plain run.
-#[derive(Debug, Clone, Copy, Default)]
-struct Opts {
+#[derive(Clone, Copy, Default)]
+struct Opts<'a> {
     /// QPC runs this many ppm fast against the device.
     qpc_ppm: f64,
     /// An endpoint stall of `(start, length)` seconds: it delivers nothing, counts no frames and
@@ -187,6 +191,9 @@ struct Opts {
     /// Each device callback arrives 0 to this many ms after its first frame (uniform,
     /// deterministic, held in order).
     device_jitter_ms: f64,
+    /// The device callback whose first frame is at `t` arrives `delay(t)` seconds late as well (a
+    /// lag, a spell that eases off, a lasting offset), held in order like the rest.
+    delay: Option<&'a dyn Fn(f64) -> f64>,
 }
 
 fn simulate_with(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f64, opts: Opts) -> Run {
@@ -232,7 +239,7 @@ fn simulate_with(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f
             late_until = t + late_delay;
             next_late += late_every;
         }
-        let mut now = if t < late_until { late_until } else { t };
+        let mut now = (if t < late_until { late_until } else { t }) + opts.delay.map_or(0.0, |delay| delay(t));
         if opts.device_jitter_ms > 0.0 {
             device_seed = device_seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
             now += (device_seed >> 11) as f64 / (1u64 << 53) as f64 * opts.device_jitter_ms * 1e-3;
@@ -298,6 +305,11 @@ fn simulate_with(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f
             run.trim_excess = run.trim_excess.max(trim.abs() - (1.3 * true_ppm.abs() + 100.0));
             let reported = f64::from(status.drift_deci_ppm.load(Ordering::Relaxed)) / 10.0;
             run.reported_settled = (run.reported_settled.0.min(reported), run.reported_settled.1.max(reported));
+            let error = (reported - true_ppm).abs();
+            run.worst_error = run.worst_error.max(error);
+            if error > 20.0 {
+                run.over_s += cb as f64 / RATE;
+            }
             let f = fill as f64 / resampler.target as f64;
             run.fill_settled = (run.fill_settled.0.min(f), run.fill_settled.1.max(f));
         }
@@ -399,6 +411,10 @@ fn assert_qpc_skew_at(cb: usize) {
         for true_ppm in [0.0, 200.0, -200.0] {
             let label = format!("cb {cb}, QPC {qpc_ppm:+} ppm against the device, endpoint {true_ppm:+} ppm");
             let run = simulate_with(&|_| true_ppm, cb, 0.0, 300.0, Opts { qpc_ppm, ..Opts::default() });
+            println!(
+                "row | {label} | worst error {:.1} ppm | reported after 30 s {:.1}..{:.1} | max trim {:.0} | trim excess {:+.0} | dry {} zeros {} discarded {}",
+                run.worst_error, run.reported_settled.0, run.reported_settled.1, run.max_trim, run.trim_excess, run.dry, run.zeros, run.discarded
+            );
             assert_eq!((run.dry, run.zeros), (0, 0), "{label}: ran dry after priming: {run:?}");
             assert_eq!(run.discarded, 0, "{label}: resynchronized: {run:?}");
             assert!(run.late_fill.0 > 0.6 && run.late_fill.1 < 1.4, "{label}: the fill wanders: {run:?}");
@@ -434,6 +450,10 @@ fn a_stalled_endpoint_without_a_discontinuity_flag_neither_moves_the_reading_nor
             for true_ppm in [0.0, -200.0] {
                 let label = format!("cb {cb}, stall {stall_s} s, endpoint {true_ppm:+} ppm");
                 let run = simulate_with(&|_| true_ppm, cb, 0.0, 200.0, Opts { stall: Some((60.003, stall_s)), ..Opts::default() });
+                println!(
+                    "row | {label} | worst error {:.1} ppm | reported after 30 s {:.1}..{:.1} | max trim {:.0} | trim excess {:+.0} | dry {} zeros {} discarded {}",
+                    run.worst_error, run.reported_settled.0, run.reported_settled.1, run.max_trim, run.trim_excess, run.dry, run.zeros, run.discarded
+                );
                 // One dry event: the stall's own silence. Then audio again, nothing resynchronized
                 // beyond the priming that follows it.
                 assert_eq!(run.dry, 1, "{label}: more than the stall's own silence: {run:?}");
@@ -467,6 +487,10 @@ fn assert_late_callbacks_at(cb: usize) {
             for true_ppm in [0.0, -1_000.0] {
                 let label = format!("cb {cb}, {delay_ms} ms late {pattern}, endpoint {true_ppm:+} ppm");
                 let run = simulate_with(&|_| true_ppm, cb, 0.0, 200.0, Opts { late: Some((first, every, delay_ms * 1e-3)), ..Opts::default() });
+                println!(
+                    "row | {label} | worst error {:.1} ppm | reported after 30 s {:.1}..{:.1} | max trim {:.0} | trim excess {:+.0} | dry {} zeros {} discarded {}",
+                    run.worst_error, run.reported_settled.0, run.reported_settled.1, run.max_trim, run.trim_excess, run.dry, run.zeros, run.discarded
+                );
                 assert_eq!((run.dry, run.zeros), (0, 0), "{label}: ran dry after priming: {run:?}");
                 assert_eq!(run.discarded, 0, "{label}: resynchronized: {run:?}");
                 assert!(run.max_trim < MAX_TRIM_PPM, "{label}: the trim reached its clamp: {run:?}");
@@ -510,12 +534,10 @@ fn late_input_callbacks_at_8192_frames_neither_move_the_reading_nor_pin_the_trim
 /// -1000 ppm. At 128, 480 and 960 frames, "chained": from 60 s a late event of 45 ms every 50 ms
 /// for 0.5 s, or of 30 ms every 35 ms for 1 s, so no callback is back on time until the spell
 /// ends (a busy machine whose wakes all run late). At 8192 frames, two, three or four callbacks in
-/// a row 30 or 60 ms late. The spell confirms a lasting offset and restarts the device line on a
-/// late point; the first on-time point after it is more than 20 ms early and restarts it again on
-/// a point with no delay. The estimate is held from the first restart until the refilled line
-/// spans 2 s and 16 points, and that line's anchor is on time, so the bound needs no extra
-/// settling: the reported drift at every callback after 30 s, spell and refill included, within
-/// 5 % or 20 ppm (the jitter rows' tolerance). Also: no dry event, nothing discarded, the trim
+/// a row 30 or 60 ms late. The spell's points lie above the device line's lower envelope and have
+/// no weight in its fit, and the spell is too short to be a lasting offset, so nothing restarts
+/// and the bound needs no extra settling: the reported drift at every callback after 30 s, spell
+/// included, within 5 % or 20 ppm (the jitter rows' tolerance). Also: no dry event, nothing discarded, the trim
 /// never at its clamp and within 1.3 x the drift + 400 ppm after 30 s. The +400 is the fill loop
 /// again (see the late rows): four 60 ms-late 8192-frame callbacks in a row show it the ring a
 /// late block found four times running (at most 303 ppm at 0 ppm).
@@ -525,6 +547,10 @@ fn assert_spells_at(cb: usize, spells: &[(&str, f64, f64, f64)]) {
             let label = format!("cb {cb}, {pattern}, endpoint {true_ppm:+} ppm");
             let opts = Opts { late: Some((60.0, every, delay_ms * 1e-3)), late_stop: Some(60.0 + length), ..Opts::default() };
             let run = simulate_with(&|_| true_ppm, cb, 0.0, 200.0, opts);
+            println!(
+                "row | {label} | worst error {:.1} ppm | reported after 30 s {:.1}..{:.1} | max trim {:.0} | trim excess {:+.0} | dry {} zeros {} discarded {}",
+                run.worst_error, run.reported_settled.0, run.reported_settled.1, run.max_trim, run.trim_excess, run.dry, run.zeros, run.discarded
+            );
             assert_eq!((run.dry, run.zeros), (0, 0), "{label}: ran dry after priming: {run:?}");
             assert_eq!(run.discarded, 0, "{label}: resynchronized: {run:?}");
             assert!(run.max_trim < MAX_TRIM_PPM, "{label}: the trim reached its clamp: {run:?}");
@@ -579,6 +605,10 @@ fn assert_device_jitter_at(cb: usize, jitter_ms: f64, bound_ppm: f64) {
     for true_ppm in [0.0, 200.0, -1_000.0] {
         let label = format!("cb {cb}, device arrival jitter {jitter_ms} ms, endpoint {true_ppm:+} ppm");
         let run = simulate_with(&|_| true_ppm, cb, 3.0, 300.0, Opts { device_jitter_ms: jitter_ms, ..Opts::default() });
+        println!(
+            "row | {label} | worst error {:.1} ppm | reported after 30 s {:.1}..{:.1} | max trim {:.0} | trim excess {:+.0} | dry {} zeros {} discarded {}",
+            run.worst_error, run.reported_settled.0, run.reported_settled.1, run.max_trim, run.trim_excess, run.dry, run.zeros, run.discarded
+        );
         assert_eq!((run.dry, run.zeros), (0, 0), "{label}: ran dry after priming: {run:?}");
         assert_eq!(run.discarded, 0, "{label}: resynchronized: {run:?}");
         assert!(run.trim_excess <= 0.0, "{label}: the trim left its bound: {run:?}");
@@ -756,3 +786,6 @@ fn a_refused_loopback_leaves_the_pair_silent_and_the_input_running() {
     let plain = crate::record::Recorder::build(&fake, &plan.endpoint, &plan.attempts[0], None, None, false).unwrap();
     assert_eq!((plain.channels, plain.system_channel(), plain.system_audio_report().state), (2, None, "off"));
 }
+
+#[path = "system_audio_spell_tests.rs"]
+mod spells;
