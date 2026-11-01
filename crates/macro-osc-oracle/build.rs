@@ -1,6 +1,6 @@
-//! Builds the vendored C++ (vendor/: the macro oscillator, the resonator, the granular texture
-//! processor, the texture synthesizer, the meta-modulator and the random sequencer) and the C ABI
-//! wrappers (cpp/*.cc).
+//! Builds the vendored C++ (vendor/: the macro oscillator, the resonator, the modal voice, the
+//! granular texture processor, the texture synthesizer, the meta-modulator and the random
+//! sequencer) and the C ABI wrappers (cpp/*.cc).
 //!
 //! Floating point is kept strict so the oracle is a stable reference: `-DTEST` (the desktop branch
 //! of stmlib, as the firmware's own test makefile), `-O2` whatever the cargo profile, no
@@ -111,6 +111,8 @@ fn main() {
     let mut sources = Vec::new();
     collect(&vendor.join("plaits"), "cc", &mut sources);
     collect(&vendor.join("rings"), "cc", &mut sources);
+    // The modal voice (#198 slice 2): `elements/dsp/**` and `elements/resources.cc`.
+    collect(&vendor.join("elements"), "cc", &mut sources);
     collect(&vendor.join("clouds"), "cc", &mut sources);
     collect(&vendor.join("beads/dsp"), "cc", &mut sources);
     sources.push(vendor.join("beads/resources.cc"));
@@ -130,6 +132,7 @@ fn main() {
     sources.push(vendor.join("stmlib/utils/random.cc"));
     sources.push(cpp.join("oracle.cc"));
     sources.push(cpp.join("resonator_oracle.cc"));
+    sources.push(cpp.join("modal_voice_oracle.cc"));
     sources.push(cpp.join("granular_oracle.cc"));
     sources.push(cpp.join("texture_oracle.cc"));
     sources.push(cpp.join("texture_extras_oracle.cc"));

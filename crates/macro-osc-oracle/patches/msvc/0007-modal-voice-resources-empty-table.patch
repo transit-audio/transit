@@ -1,0 +1,9 @@
+--- elements/resources.cc
++++ elements/resources.cc
+@@ -174,5 +174,4 @@
+ 
+ 
+-const uint32_t* lookup_table_uint32_table[] = {
+-};
++// MSVC (C2466) rejects a zero-length array. This table is empty and nothing references it.
+ 

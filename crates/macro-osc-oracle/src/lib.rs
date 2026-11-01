@@ -1,6 +1,6 @@
 //! The null-test oracle for transit's ported instruments (ADR 0033): the macro oscillator (#194),
-//! the resonator (#198), the granular texture processor (#199), the texture effect chain (#241),
-//! the meta-modulator (#200) and the random sequencer (#202).
+//! the resonator (#198), the modal voice (#198 slice 2), the granular texture processor (#199), the
+//! texture effect chain (#241), the meta-modulator (#200) and the random sequencer (#202).
 //!
 //! This crate builds Émilie Gillet's original C++ DSP (MIT; vendored under `vendor/`, see
 //! `VENDOR.md` and `LICENSE-THIRD-PARTY`) with the `cc` crate and exposes it to Rust tests. It is
@@ -16,6 +16,9 @@
 //! - [`floor`]: the measured residual floor per CI runner family.
 //! - [`resonator`] and [`resonator_sweep`]: the resonator part (six models, polyphony 1 to 4, float
 //!   out/aux) and its fixed sweep, at 48 kHz in the firmware's 24-frame blocks (#198).
+//! - [`modal_voice`] and [`modal_voice_sweep`]: the modal voice part (the gate envelope, three
+//!   exciters, three resonator models and the easter-egg voice, the spread and the reverb; float
+//!   main/aux) and its fixed sweep, at 32 kHz in the firmware's 16-frame blocks (#198 slice 2).
 //! - [`granular`] and [`granular_sweep`]: the granular texture processor (its granular playback
 //!   mode at four buffer qualities, stereo int16 in and out) and its fixed sweep, at 32 kHz in the
 //!   firmware's 32-frame blocks (#199).
@@ -36,6 +39,8 @@ mod ffi;
 pub mod floor;
 pub mod granular;
 pub mod granular_sweep;
+pub mod modal_voice;
+pub mod modal_voice_sweep;
 mod model;
 pub mod modulator;
 pub mod modulator_sweep;

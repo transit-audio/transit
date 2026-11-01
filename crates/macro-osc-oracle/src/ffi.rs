@@ -1,5 +1,5 @@
 //! The only module with `unsafe`: the C ABI of the wrappers in `cpp/` (the macro oscillator, the
-//! resonator, the granular processor, the texture synthesizer, the meta-modulator and the random
+//! resonator, the modal voice, the granular processor, the texture synthesizer, the meta-modulator and the random
 //! sequencer), and the session lock that makes it sound to call.
 //!
 //! Soundness rests on three invariants, each enforced here:
@@ -9,13 +9,15 @@
 //!    C++) and would also make the noise sequence depend on scheduling. Every call goes through a
 //!    [`Session`], which holds a process-wide mutex and is neither `Send` nor `Sync`, so all calls of
 //!    one session stay on the thread that took the lock. Handles borrow their session.
-//! 2. **Valid handles.** [`RawVoice`], [`RawEngine`], [`RawResonator`] and [`RawGranular`] own a non-null pointer
+//! 2. **Valid handles.** [`RawVoice`], [`RawEngine`], [`RawResonator`], [`RawModalVoice`] and [`RawGranular`] own a
+//!    non-null pointer
 //!    returned by the matching `_new` function and free it exactly once, in `Drop`.
 //! 3. **Buffer bounds.** Every render checks the length is between 1 and the firmware's maximum block
 //!    size before the call, and passes buffers whose lengths match the size it passes.
 //! 4. **Table bounds.** Inputs the C++ indexes tables with are range-checked here before the call:
 //!    the resonator's tonic, note, FM, chord, macros and input samples (`crate::resonator::inputs_in_range`, which
-//!    derives its bounds from the C++), and the granular processor's parameters
+//!    derives its bounds from the C++), the modal voice's patch, note, modulation, strength and input
+//!    samples (`crate::modal_voice::inputs_in_range`), and the granular processor's parameters
 //!    (`crate::granular::parameters_in_range`). The granular processor's memory sizes, quality and
 //!    mode are checked by the C++ itself: it returns null for sizes that leave no room for its
 //!    workspace or its longest grain, or whose recording would reach 131072 samples, where a
@@ -118,6 +120,38 @@ pub struct CPerformanceState {
     pub(crate) internal_note: u8,
 }
 
+/// Mirrors `OracleModalVoicePatch` in `cpp/modal_voice_oracle.cc` (the panel fields of the modal
+/// voice's `Patch`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CModalVoicePatch {
+    pub(crate) exciter_envelope_shape: f32,
+    pub(crate) exciter_bow_level: f32,
+    pub(crate) exciter_bow_timbre: f32,
+    pub(crate) exciter_blow_level: f32,
+    pub(crate) exciter_blow_meta: f32,
+    pub(crate) exciter_blow_timbre: f32,
+    pub(crate) exciter_strike_level: f32,
+    pub(crate) exciter_strike_meta: f32,
+    pub(crate) exciter_strike_timbre: f32,
+    pub(crate) resonator_geometry: f32,
+    pub(crate) resonator_brightness: f32,
+    pub(crate) resonator_damping: f32,
+    pub(crate) resonator_position: f32,
+    pub(crate) space: f32,
+}
+
+/// Mirrors `OracleModalVoicePerformance` in `cpp/modal_voice_oracle.cc` (the gate as `u8`, after the
+/// floats).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CModalVoicePerformance {
+    pub(crate) note: f32,
+    pub(crate) modulation: f32,
+    pub(crate) strength: f32,
+    pub(crate) gate: u8,
+}
+
 /// Mirrors `OracleGranularParameters` in `cpp/granular_oracle.cc` (the granular processor's
 /// `Parameters`, bools as `u8` after the floats).
 #[repr(C)]
@@ -217,7 +251,7 @@ pub struct CSequencerControls {
 }
 
 // SAFETY: these declarations match the `extern "C"` definitions in cpp/oracle.cc,
-// cpp/resonator_oracle.cc, cpp/granular_oracle.cc, cpp/texture_oracle.cc (in both of its builds)
+// cpp/resonator_oracle.cc, cpp/modal_voice_oracle.cc, cpp/granular_oracle.cc, cpp/texture_oracle.cc (in both of its builds)
 // cpp/texture_extras_oracle.cc, cpp/modulator_oracle.cc and cpp/sequencer_oracle.cc one for one
 // (names, argument order, and C types: `size_t` is `usize`, `void*` is `*mut c_void`, the structs
 // are the `#[repr(C)]` mirrors above). The build script compiles that file into this crate.
@@ -260,6 +294,24 @@ unsafe extern "C" {
         patch: *const CResonatorPatch,
         input: *const f32,
         out: *mut f32,
+        aux: *mut f32,
+        size: usize,
+    ) -> i32;
+    fn oracle_modal_voice_max_block_size() -> usize;
+    fn oracle_modal_voice_sample_rate() -> f32;
+    fn oracle_modal_voice_new() -> *mut std::ffi::c_void;
+    fn oracle_modal_voice_free(part: *mut std::ffi::c_void);
+    fn oracle_modal_voice_seed(part: *mut std::ffi::c_void, words: *const u32);
+    fn oracle_modal_voice_set_model(part: *mut std::ffi::c_void, model: i32) -> i32;
+    fn oracle_modal_voice_set_easter_egg(part: *mut std::ffi::c_void, easter_egg: u8);
+    fn oracle_modal_voice_set_bypass(part: *mut std::ffi::c_void, bypass: u8);
+    fn oracle_modal_voice_process(
+        part: *mut std::ffi::c_void,
+        performance: *const CModalVoicePerformance,
+        patch: *const CModalVoicePatch,
+        blow_in: *const f32,
+        strike_in: *const f32,
+        main: *mut f32,
         aux: *mut f32,
         size: usize,
     ) -> i32;
@@ -464,6 +516,20 @@ impl Session {
     pub fn resonator_model_count(&self) -> usize {
         // SAFETY: returns a compile-time constant; no state is touched.
         usize::try_from(unsafe { oracle_resonator_model_count() }).unwrap_or(0)
+    }
+
+    /// The modal voice's block size, `kMaxBlockSize` in `elements/dsp/dsp.h` (16 frames).
+    #[must_use]
+    pub fn modal_voice_max_block_size(&self) -> usize {
+        // SAFETY: returns a compile-time constant; no state is touched.
+        unsafe { oracle_modal_voice_max_block_size() }
+    }
+
+    /// The modal voice's sample rate, `kSampleRate` in `elements/dsp/dsp.h` (32 kHz).
+    #[must_use]
+    pub fn modal_voice_sample_rate(&self) -> f32 {
+        // SAFETY: returns a compile-time constant; no state is touched.
+        unsafe { oracle_modal_voice_sample_rate() }
     }
 
     /// The granular processor's block size, `kMaxBlockSize` in `clouds/dsp/frame.h` (32 frames).
@@ -723,6 +789,95 @@ impl Drop for RawResonator<'_> {
         // SAFETY: `self.ptr` came from `oracle_resonator_new` and is freed only here (invariant 2).
         // Freeing touches no shared state.
         unsafe { oracle_resonator_free(self.ptr.as_ptr()) }
+    }
+}
+
+/// The modal voice's part (`elements::Part`) with its reverb memory, in zero-initialized storage as
+/// on the module.
+pub struct RawModalVoice<'s> {
+    ptr: std::ptr::NonNull<std::ffi::c_void>,
+    session: &'s Session,
+}
+
+impl<'s> RawModalVoice<'s> {
+    /// `None` when the allocation fails.
+    pub(crate) fn new(session: &'s Session) -> Option<Self> {
+        // SAFETY: the lock is held through `session` (invariant 1); the call allocates and
+        // initializes a part, or returns null.
+        let ptr = unsafe { oracle_modal_voice_new() };
+        std::ptr::NonNull::new(ptr).map(|ptr| Self { ptr, session })
+    }
+
+    pub(crate) fn seed(&mut self, words: [u32; 3]) {
+        // SAFETY: the lock is held through `self.session` (invariant 1); `self.ptr` is a live part
+        // (invariant 2) used by this thread only; `words` holds the three words the C++ reads.
+        unsafe { oracle_modal_voice_seed(self.ptr.as_ptr(), words.as_ptr()) }
+    }
+
+    /// `None` when `model` is not a model index (0 to 2).
+    pub(crate) fn set_model(&mut self, model: i32) -> Option<()> {
+        // SAFETY: as `seed`; the wrapper range-checks `model`.
+        let status = unsafe { oracle_modal_voice_set_model(self.ptr.as_ptr(), model) };
+        (status == 0).then_some(())
+    }
+
+    pub(crate) fn set_easter_egg(&mut self, easter_egg: bool) {
+        // SAFETY: as `seed`; the call writes one flag of the part.
+        unsafe { oracle_modal_voice_set_easter_egg(self.ptr.as_ptr(), u8::from(easter_egg)) }
+    }
+
+    pub(crate) fn set_bypass(&mut self, bypass: bool) {
+        // SAFETY: as `seed`; the call writes one flag of the part.
+        unsafe { oracle_modal_voice_set_bypass(self.ptr.as_ptr(), u8::from(bypass)) }
+    }
+
+    /// Processes `blow.len()` frames into `main` and `aux`. `None` when the lengths differ, are zero
+    /// or exceed the maximum block size, or an input is out of range (invariant 4).
+    pub(crate) fn process(
+        &mut self,
+        performance: &crate::modal_voice::Performance,
+        patch: &crate::modal_voice::ModalVoicePatch,
+        blow: &[f32],
+        strike: &[f32],
+        main: &mut [f32],
+        aux: &mut [f32],
+    ) -> Option<()> {
+        let size = blow.len();
+        let lengths_match = strike.len() == size && main.len() == size && aux.len() == size;
+        if !lengths_match || size == 0 || size > self.session.modal_voice_max_block_size() {
+            return None;
+        }
+        if !crate::modal_voice::inputs_in_range(performance, patch, blow, strike) {
+            return None;
+        }
+        let (performance, patch) = (performance.to_c(), patch.to_c());
+        // SAFETY: the lock is held through `self.session` (invariant 1); `self.ptr` is a live part
+        // (invariant 2) used by this thread only; `performance` and `patch` are valid for reads;
+        // `blow`, `strike`, `main` and `aux` each hold exactly `size <= kMaxBlockSize` floats
+        // (invariant 3), and the inputs do not alias the outputs (distinct borrows); every value the
+        // C++ indexes a table with or converts to an integer was range-checked just above
+        // (invariant 4).
+        let status = unsafe {
+            oracle_modal_voice_process(
+                self.ptr.as_ptr(),
+                std::ptr::from_ref(&performance),
+                std::ptr::from_ref(&patch),
+                blow.as_ptr(),
+                strike.as_ptr(),
+                main.as_mut_ptr(),
+                aux.as_mut_ptr(),
+                size,
+            )
+        };
+        (status == 0).then_some(())
+    }
+}
+
+impl Drop for RawModalVoice<'_> {
+    fn drop(&mut self) {
+        // SAFETY: `self.ptr` came from `oracle_modal_voice_new` and is freed only here (invariant 2).
+        // Freeing touches no shared state.
+        unsafe { oracle_modal_voice_free(self.ptr.as_ptr()) }
     }
 }
 
