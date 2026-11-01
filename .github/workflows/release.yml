@@ -336,8 +336,12 @@ jobs:
             desc="$(printf '%s\n' "$body" | awk -v max=1800 'BEGIN { RS = ""; ORS = "" } NR == 1 { print (length($0) > max ? substr($0, 1, max) "…" : $0); exit }')"
           fi
           desc="${desc}"$'\n\n'"Full notes and downloads: ${url}"
-          payload="$(jq -n --arg tag "$TAG" --arg url "$url" --arg desc "$desc" \
-            '{username: "transit releaser", content: ("**transit " + $tag + " is out**"), embeds: [{title: ("transit " + $tag + " is out"), url: $url, description: $desc}]}')"
+          # Minor releases (vX.Y.0) ping @everyone; patch releases and prereleases never do. Discord has no
+          # webhook permission for mentions: allowed_mentions in the payload is the only control, so it is
+          # always explicit and a stray "@everyone" in the notes cannot ping.
+          if [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.0$ ]]; then ping=true; else ping=false; fi
+          payload="$(jq -n --arg tag "$TAG" --arg url "$url" --arg desc "$desc" --argjson ping "$ping" \
+            '{username: "transit releaser", content: ((if $ping then "@everyone " else "" end) + "**transit " + $tag + " is out**"), allowed_mentions: {parse: (if $ping then ["everyone"] else [] end)}, embeds: [{title: ("transit " + $tag + " is out"), url: $url, description: $desc}]}')"
           curl --fail-with-body --silent --show-error --max-time 20 \
             -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"
           echo "posted to Discord"
@@ -355,7 +359,7 @@ jobs:
         run: |
           if [ -z "$DISCORD_WEBHOOK_URL" ]; then echo "no webhook, skipping"; exit 0; fi
           payload="$(jq -n --arg url "https://github.com/${GITHUB_REPOSITORY}/releases" \
-            '{username: "transit releaser", content: "Test post from the release workflow; ignore.", embeds: [{title: "transit release workflow test", url: $url, description: "Test post from the release workflow; ignore."}]}')"
+            '{username: "transit releaser", content: "Test post from the release workflow; ignore.", allowed_mentions: {parse: []}, embeds: [{title: "transit release workflow test", url: $url, description: "Test post from the release workflow; ignore."}]}')"
           curl --fail-with-body --silent --show-error --max-time 20 \
             -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK_URL"
           echo "posted to Discord"
