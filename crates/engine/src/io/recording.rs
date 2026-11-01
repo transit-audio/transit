@@ -6,6 +6,14 @@ use super::*;
 /// route names, "In 3" → 2, wrapped to the device's `input_channels`) and a new take file
 /// `<track>_<NN>.wav` in the `Audio Files` of the session's folder (`unsaved_dir` until it is saved).
 pub fn plan_takes(e: &Engine, unsaved_dir: &Path, input_channels: usize) -> Vec<(TrackId, Vec<usize>, PathBuf)> {
+    plan_takes_with(e, unsaved_dir, input_channels, e.io_map().system_audio.map(usize::from))
+}
+
+/// [`plan_takes`] for an input whose System Audio pair (#268) starts at `system_audio`, as the open
+/// recorder says (`None`: it does not run, and a track on it records silence).
+pub fn plan_takes_with(e: &Engine, unsaved_dir: &Path, input_channels: usize, system_audio: Option<usize>) -> Vec<(TrackId, Vec<usize>, PathBuf)> {
+    let mut io = e.io_map().clone();
+    io.system_audio = system_audio.and_then(|c| u16::try_from(c).ok());
     let dir = e.path.as_deref().and_then(|p| Path::new(p).parent()).unwrap_or(unsaved_dir);
     let s = e.session();
     let take_no = s.sources.len() + 1;
@@ -15,13 +23,11 @@ pub fn plan_takes(e: &Engine, unsaved_dir: &Path, input_channels: usize) -> Vec<
         .map(|t| {
             // The same resolution as the mix's input monitoring: a path by its name in this
             // machine's table, else the number in the label.
+            // System Audio (#268) that does not run records silence (a channel no frame has).
             let inputs = (0..t.channels())
-                .map(|k| {
-                    let channel = match &t.mixer.input {
-                        transit_model::Route::Hardware(h) => transit_model::input_channel(Some(e.io_map()), h, k),
-                        _ => k,
-                    };
-                    channel % input_channels.max(1)
+                .map(|k| match &t.mixer.input {
+                    transit_model::Route::Hardware(h) => transit_model::live_input_channel(Some(&io), h, k, input_channels).unwrap_or(usize::MAX),
+                    _ => k % input_channels.max(1),
                 })
                 .collect();
             let file = |n: usize| dir.join("Audio Files").join(format!("{}_{n:02}.wav", sanitize_name(&t.name)));
@@ -460,6 +466,21 @@ mod record_tests {
         assert_eq!(channels(old), [2, 3]);
         // The same names, resolved by the mix: one function (`transit_model::input_channel`).
         assert_eq!(transit_model::input_channel(Some(e.io_map()), "Guitar", 0), 4);
+    }
+
+    #[test]
+    fn a_system_audio_track_records_the_pair_after_the_device_inputs_or_silence() {
+        let dir = std::env::temp_dir().join(format!("soundcraft-takes-system-{}", std::process::id()));
+        let mut e = Engine::default();
+        e.set_io_map(transit_model::IoMap::for_device("WASAPI", "x", 2, 2));
+        let browser = armed(&mut e, "Browser", "stereo", "System Audio");
+        let vox = armed(&mut e, "Vox", "mono", "In 2");
+        let plan = plan_takes_with(&e, &dir, 4, Some(2));
+        let channels = |plan: &[(TrackId, Vec<usize>, PathBuf)], t: TrackId| plan.iter().find(|p| p.0 == t).map(|p| p.1.clone()).unwrap();
+        assert_eq!(channels(&plan, browser), [2, 3], "the pair after the interface's two inputs");
+        assert_eq!(channels(&plan, vox), [1]);
+        let off = plan_takes_with(&e, &dir, 2, None);
+        assert_eq!(channels(&off, browser), [usize::MAX, usize::MAX], "not running: silence, never In 1-2");
     }
 
     #[test]

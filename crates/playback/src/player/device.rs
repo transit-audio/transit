@@ -137,6 +137,9 @@ pub struct Player {
     pub calibration: Option<ab::Calibration>,
     /// A live input ring feeds the plan (`set_input`): the probe has something to read.
     plan_input: Cell<bool>,
+    /// The first live input channel of the System Audio pair (#268) the input carries, which every
+    /// table handed to the plan gets ([`IoMap::system_audio`]).
+    system_audio: Cell<Option<u16>>,
     pub device_buffer: Option<u32>,
     pub silent: bool,
 }
@@ -178,6 +181,8 @@ impl Player {
         // The buffer the device runs: part of an External Instrument measurement's key (ADR 0020
         // decision 5), so the plan picks the measurement made at this buffer.
         io.buffer = if self.silent { None } else { self.device_buffer };
+        // Where System Audio sits in the live input: a fact of the open input, not of the table.
+        io.system_audio = self.system_audio.get();
         let io = Arc::new(io);
         let id = self.owner()?.set_io(Arc::clone(&io))?;
         if let Ok(mut held) = self.io.try_borrow_mut() {
@@ -186,8 +191,13 @@ impl Player {
         Ok(id)
     }
     pub fn set_input(&self, input: Arc<record::InputRing>) -> Result<SessionRequestId, PlayerError> {
+        let system = input.system_channel().and_then(|c| u16::try_from(c).ok());
         let id = self.owner()?.set_input(Some(input))?;
         self.plan_input.set(true);
+        // An input with (or without) System Audio moves where its route reads: the table follows.
+        if self.system_audio.replace(system) != system {
+            return self.set_io((*self.io_map()).clone());
+        }
         Ok(id)
     }
 

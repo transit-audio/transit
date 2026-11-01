@@ -36,7 +36,7 @@ pub use clip::{Clip, ClipContent, ClipLoop, Fade, FadeShape, MIN_CYCLE, WholeFad
 pub use ids::{BusId, ClipId, GroupId, MarkerId, SourceId, TrackId};
 pub use io_map::{
     ExternalLatency, ExternalLookup, ExternalSource, HardwareLatency, IoDirection, IoError, IoMap, IoPath, MAX_DEVICE_CHANNELS, MAX_PATH_WIDTH,
-    input_channel,
+    SYSTEM_AUDIO_PATH, input_channel, is_system_audio, live_input_channel,
 };
 pub use markers::{Group, MarkerKind, MemoryLocation};
 pub use midi_effect::{MAX_MIDI_EFFECTS, MIDI_EFFECT_SLOT, MidiEffectSlot};

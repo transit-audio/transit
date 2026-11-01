@@ -197,3 +197,18 @@ fn a_duplex_input_failure_the_ladder_does_not_answer_keeps_the_output_exclusive(
     assert!(player.native_backend && player.device_exclusive, "an input failure the ladder does not answer leaves the output exclusive");
     assert_eq!(held.opens().len(), 2);
 }
+
+#[test]
+fn the_plan_table_follows_where_the_input_carries_system_audio() {
+    // System Audio (#268) is the pair after the device's inputs; the Player's table says where, a
+    // table the app hands back keeps it, and an input without the pair clears it.
+    let (player, _output) = super::prepared();
+    let wide = record::InputRing::new(4, 48_000);
+    wide.set_system_channel(2);
+    player.set_input(wide).unwrap();
+    assert_eq!(player.io_map().system_audio, Some(2));
+    player.set_io(transit_model::IoMap::for_device("WASAPI", "Speakers", 2, 2)).unwrap();
+    assert_eq!(player.io_map().system_audio, Some(2), "a saved table never carries it; the open input does");
+    player.set_input(record::InputRing::new(2, 48_000)).unwrap();
+    assert_eq!(player.io_map().system_audio, None);
+}

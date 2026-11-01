@@ -10,6 +10,9 @@ use crate::{ChannelFormat, MidiOutPort, MidiOutput, Track};
 pub const MAX_DEVICE_CHANNELS: usize = 32;
 /// Widest path (the mix's `MAX_CHANNELS`).
 pub const MAX_PATH_WIDTH: usize = 16;
+/// The input path of what the computer plays (#268): a stereo pair after the device's own input
+/// channels while it runs ([`IoMap::system_audio`]); not part of the saved table.
+pub const SYSTEM_AUDIO_PATH: &str = "System Audio";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum IoDirection {
@@ -39,6 +42,8 @@ pub enum IoError {
     Repeated(u16),
     /// Main plays on this path.
     MainPath,
+    /// The name belongs to a built-in input ("System Audio").
+    Reserved(String),
 }
 
 impl std::fmt::Display for IoError {
@@ -51,6 +56,7 @@ impl std::fmt::Display for IoError {
             IoError::Repeated(c) => write!(f, "channel {} is listed twice", c + 1),
             IoError::Missing(n) => write!(f, "no path named `{n}`"),
             IoError::MainPath => write!(f, "Main plays on this path; choose another for Main first"),
+            IoError::Reserved(n) => write!(f, "`{n}` is the built-in input of what the computer plays; choose another name"),
         }
     }
 }
@@ -173,6 +179,11 @@ pub struct IoMap {
     /// an External Instrument measurement's key the table cannot know by itself.
     #[serde(skip)]
     pub buffer: Option<u32>,
+    /// The first live input channel of the System Audio pair while it runs (the Player sets it;
+    /// not saved): the pair follows the device's own input channels. `None` when it is off or did
+    /// not open, and a route to it is then silent.
+    #[serde(skip)]
+    pub system_audio: Option<u16>,
 }
 
 impl Default for IoMap {
@@ -216,6 +227,25 @@ pub fn input_channel(io: Option<&IoMap>, name: &str, k: usize) -> usize {
     first.saturating_add(k)
 }
 
+/// Whether an input route named `name` is the System Audio path.
+pub fn is_system_audio(name: &str) -> bool {
+    name.trim().eq_ignore_ascii_case(SYSTEM_AUDIO_PATH)
+}
+
+/// The live input channel strip channel `k` of an input route named `name` reads, among the
+/// `live` channels the input delivers, or `None` for silence. The one resolution for the mix's
+/// monitoring and the recorder. A device path wraps to the live channels as it always has
+/// ([`input_channel`]); System Audio is its pair (a mono strip hears the left side), and silent
+/// while it does not run, never another input.
+pub fn live_input_channel(io: Option<&IoMap>, name: &str, k: usize, live: usize) -> Option<usize> {
+    if is_system_audio(name) {
+        let first = usize::from(io?.system_audio?);
+        let channel = first + k % 2;
+        return (channel < live).then_some(channel);
+    }
+    Some(input_channel(io, name, k) % live.max(1))
+}
+
 impl IoMap {
     /// The default table for an opened device (counts capped at [`MAX_DEVICE_CHANNELS`]): outputs
     /// "Out 1-2" (Main) and one stereo path per remaining pair, a lone trailing channel mono;
@@ -254,6 +284,7 @@ impl IoMap {
             hardware_latency: Vec::new(),
             external_latency: Vec::new(),
             buffer: None,
+            system_audio: None,
         }
     }
 
@@ -299,6 +330,9 @@ impl IoMap {
     pub fn add_path(&mut self, mut path: IoPath) -> Result<(), IoError> {
         path.name = path.name.trim().to_string();
         self.validate(&path)?;
+        if is_system_audio(&path.name) {
+            return Err(IoError::Reserved(path.name));
+        }
         if self.path(&path.name).is_some() {
             return Err(IoError::Duplicate(path.name));
         }
@@ -313,6 +347,9 @@ impl IoMap {
         let to = to.trim();
         if to.is_empty() {
             return Err(IoError::EmptyName);
+        }
+        if is_system_audio(to) {
+            return Err(IoError::Reserved(to.into()));
         }
         if self.path(to).is_some_and(|p| !p.name.eq_ignore_ascii_case(name)) {
             return Err(IoError::Duplicate(to.into()));
@@ -609,6 +646,23 @@ mod tests {
         assert_eq!(input_channel(None, "Guitar", 0), 0);
         // An output path is not an input.
         assert_eq!(input_channel(Some(&m), "Out 1-2", 0), 0);
+    }
+
+    #[test]
+    fn system_audio_resolves_to_its_pair_after_the_device_inputs_and_is_silent_when_off() {
+        let mut m = IoMap::for_device("ASIO", "x", 2, 2);
+        assert_eq!(live_input_channel(Some(&m), "System Audio", 0, 2), None, "off: silent, never In 1");
+        m.system_audio = Some(2);
+        assert_eq!((live_input_channel(Some(&m), "System Audio", 0, 4), live_input_channel(Some(&m), "system audio", 1, 4)), (Some(2), Some(3)));
+        assert_eq!(live_input_channel(Some(&m), "System Audio", 0, 2), None, "the live input lacks the pair (it did not open)");
+        assert_eq!(live_input_channel(None, "System Audio", 0, 4), None);
+        assert_eq!(live_input_channel(Some(&m), "In 2", 0, 4), Some(1), "device paths resolve as before");
+        assert_eq!(live_input_channel(Some(&m), "In 3", 0, 2), Some(0), "and wrap to the live channels as before");
+        let path = |name: &str| IoPath { name: name.into(), direction: IoDirection::Input, channels: vec![0, 1], format: ChannelFormat::Stereo };
+        assert_eq!(m.add_path(path(" system audio ")), Err(IoError::Reserved("system audio".into())));
+        assert_eq!(m.rename_path("In 1-2", "System Audio"), Err(IoError::Reserved("System Audio".into())));
+        let saved = serde_json::to_string(&m).unwrap();
+        assert!(!saved.contains("system_audio"), "a runtime fact, not part of the saved table");
     }
 
     #[test]

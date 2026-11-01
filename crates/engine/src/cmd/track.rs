@@ -838,6 +838,10 @@ pub(crate) fn parse_route(s: &transit_model::Session, io: &transit_model::IoMap,
             if let Some(b) = s.bus_by_name(v) {
                 return Route::Bus(b.id);
             }
+            // What the computer plays (#268): a built-in input, never a new bus.
+            if input && transit_model::is_system_audio(v) {
+                return Route::Hardware(transit_model::SYSTEM_AUDIO_PATH.into());
+            }
             let want = if input { transit_model::IoDirection::Input } else { transit_model::IoDirection::Output };
             match io.path(v).filter(|p| p.direction == want) {
                 Some(p) if !input && p.name.eq_ignore_ascii_case(&io.main) => Route::Main,
@@ -869,6 +873,7 @@ fn route(e: &mut Engine, p: &Value, input: bool) -> Result<Value> {
         && create_bus
         && named(name).is_none()
         && !name.to_ascii_lowercase().starts_with("in ")
+        && !(input && transit_model::is_system_audio(name))
     {
         let fmt = tracks
             .first()

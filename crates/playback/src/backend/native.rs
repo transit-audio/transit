@@ -173,6 +173,10 @@ pub fn jack_system() -> AudioSystem {
             let name = backend.server_name();
             let mut notes = vec![jack_note(&name, server.rate, server.buffer)];
             notes.extend(backend.library_note());
+            // A PipeWire sink's monitor ports carry what that output plays (#268): said under it.
+            notes.extend(server.devices.iter().filter_map(|d| {
+                crate::system_audio::monitor_label(&d.name, &d.channel_names(ab::Direction::Input)).map(|label| format!("{}: {label}", d.name))
+            }));
             let mut system = system_from_endpoints(
                 devices::JACK_SYSTEM,
                 &server.endpoints(ab::Direction::Output),

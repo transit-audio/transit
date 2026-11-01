@@ -35,6 +35,7 @@ pub mod realtime_render;
 pub mod record;
 pub mod reopen;
 pub mod scheduling;
+pub mod system_audio;
 pub mod telemetry;
 pub mod timeline_map;
 

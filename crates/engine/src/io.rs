@@ -628,7 +628,9 @@ pub(crate) use session::{DecodedFiles, decode_file_streamed, file_key, open_sess
 pub(crate) mod disk;
 pub use disk::{add_disk_source, copy_path};
 mod recording;
-pub use recording::{Recording, Take, add_recording, add_recording_take, live_span, place_recording, place_recording_take, plan_takes};
+pub use recording::{
+    Recording, Take, add_recording, add_recording_take, live_span, place_recording, place_recording_take, plan_takes, plan_takes_with,
+};
 
 #[cfg(test)]
 mod rate_tests {

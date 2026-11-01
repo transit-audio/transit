@@ -193,6 +193,9 @@ pub struct InputRing {
     /// One Relaxed store on the capture callback; read only by the aligning read.
     last_push_frames: AtomicUsize,
     counters: MonitorCounters,
+    /// The first channel of the System Audio pair (#268) the input carries after the device's
+    /// own, `usize::MAX` for none. Set once, before the ring is shared.
+    system_channel: AtomicUsize,
 }
 
 impl InputRing {
@@ -242,9 +245,21 @@ impl InputRing {
             clear_pending: std::sync::atomic::AtomicBool::new(false),
             align_pending: std::sync::atomic::AtomicBool::new(false),
             last_push_frames: AtomicUsize::new(0),
+            system_channel: AtomicUsize::new(usize::MAX),
             aligned_backlog_blocks: if paired { ALIGNED_BACKLOG_BLOCKS_PAIRED } else { ALIGNED_BACKLOG_BLOCKS_UNPAIRED },
             counters: MonitorCounters::default(),
         })
+    }
+
+    /// The first channel of the System Audio pair this input carries, if it does.
+    pub fn system_channel(&self) -> Option<usize> {
+        let c = self.system_channel.load(Ordering::Relaxed);
+        (c != usize::MAX).then_some(c)
+    }
+
+    /// Control thread, before the ring is shared: the input carries System Audio from `channel`.
+    pub(crate) fn set_system_channel(&self, channel: usize) {
+        self.system_channel.store(channel, Ordering::Relaxed);
     }
 
     /// Each call supplies complete interleaved frames. A trailing partial frame is

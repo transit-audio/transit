@@ -244,6 +244,7 @@ Issues labeled good first issue are scoped and documented enough to start with. 
 - Linux: native JACK/PipeWire backend (build with `--features native-jack`; `pw-jack transit` under PipeWire). It plays and records duplex in one server cycle at the server's rate and buffer size, counts the server's xruns, and reopens by itself when the server changes its buffer size or rate or comes back after stopping.
 - Linux packages: an `.AppImage`, a `.deb` and an `.rpm` come with the tarball.
 - Audio Devices shows "Requested 128 · running at 256" when the device runs a different buffer size or rate than you asked for.
+- System Audio input: record what the computer plays (a browser video, another app) on an audio track, with no cable. On Windows a WASAPI loopback capture of the output you choose, at its own rate and clock, with its latency and drift shown in Audio Devices; on Linux an output's PipeWire or PulseAudio monitor is named as System Audio.
 
 ### Sessions and rendering
 

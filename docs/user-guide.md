@@ -55,6 +55,28 @@ Swipe comping (picking a range from one take and the next range from another, wi
 renaming or coloring takes and auditioning a lane are not in this version. Logic's Take Folder and
 Live's Take Lanes work the same way for everything above.
 
+## Sampling what the computer plays
+
+To sample a browser video or another app, record it as you would a microphone. In
+**Audio > Audio Devices**, open **I/O paths**, tick **Record what the computer plays** under
+**System Audio**, choose the output to capture (the system default unless you pick one) and press
+**Apply**. Then set an audio track's input to **System Audio**, arm it and record while the sound
+plays. Load the clip into the sampler afterwards to play it as an instrument.
+
+On Windows transit captures the output itself (WASAPI loopback), whatever driver the session uses,
+at that output's own rate, converted to the session's. The capture follows that output's clock, not
+your interface's: Audio Devices shows the latency it adds and the small drift transit trims, and
+the clip is not lined up with the rest of the session, so move it into place by ear. If transit (or
+another app) has that output open in exclusive mode, Windows refuses the capture and Audio Devices
+says so; pick another output or open the device shared. The input itself opens with the track's
+input, so System Audio needs an input device to ride on. On Linux the PipeWire or PulseAudio monitor
+of an output arrives as an input already and is listed as **System Audio (monitor of ...)** where
+transit can tell; if none is listed, route the monitor to transit's input in pavucontrol's
+Recording tab or in qpwgraph. macOS needs a virtual audio device for now.
+
+System Audio records what the computer plays, as a loopback cable would. You are responsible for
+the rights to what you record.
+
 ## Plug-in windows
 
 On Windows, plug-in editor windows stay with transit's window: minimizing transit hides them and

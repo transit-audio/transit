@@ -433,7 +433,7 @@ fn strip(
     let in_r = Rect::from_min_size(pos2(x0, y), vec2(w, 16.0));
     if matches!(t.kind, TrackKind::Audio | TrackKind::Aux) {
         let cur = route_label(s, &m.input, true, if t.kind == TrackKind::Audio { t.channels() } else { 0 });
-        let mut choices = input_choices(s, t, app.device_inputs(), app.engine.io_map());
+        let mut choices = input_choices_with(s, t, app.device_inputs(), app.engine.io_map(), app.system_audio_on());
         push_unused_entry(s, &mut choices);
         if let Some(v) = dropdown(ui, clip, in_r, ui.id().with(("input", id.0)), &cur, None, &choices, menu) {
             if v == REMOVE_UNUSED {

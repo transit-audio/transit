@@ -146,6 +146,11 @@ name = "Calibration"
 text = "The measured round-trip latency of this device at this buffer size and rate, so recordings line up with what you heard. Not calibrated means recordings are placed by the driver's reported latency. Measure it with a cable from an output to an input."
 
 [[entry]]
+id = "audio_devices.system_audio"
+name = "System Audio"
+text = "Records what this computer plays (a browser video, another app) as a stereo input named System Audio, which audio tracks can pick like any input. On Windows it captures the output you choose, the system default unless you pick one, at that output's own rate, converted to the session's. It follows that output's clock, so the line shows the small drift transit trims and the latency it adds; the capture is not lined up with the session's timeline. If that output is open in exclusive mode (by transit or another app), Windows refuses and the line says so; the session's own input still opens. On Linux the monitor source of an output arrives as an input and is listed as System Audio (monitor of the output). System Audio records what the computer plays, as a loopback cable would; you are responsible for the rights to what you record."
+
+[[entry]]
 id = "audio_devices.apply"
 name = "Apply"
 text = "Reopens the devices with the choices in this window. Playback stops first, and it is refused while recording."

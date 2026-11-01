@@ -196,6 +196,12 @@ pub fn output_choices(s: &Session, t: &Track, io: &IoMap) -> Vec<RoutingChoice> 
 
 /// The inputs a track can pick: hardware inputs (`In 1`.. or `In 1-2`..) and busses.
 pub fn input_choices(s: &Session, t: &Track, device_inputs: usize, io: &IoMap) -> Vec<RoutingChoice> {
+    input_choices_with(s, t, device_inputs, io, false)
+}
+
+/// [`input_choices`], with "System Audio" (#268) after the hardware inputs of an audio track when
+/// `system_audio` (the build captures it and Audio Devices has it on).
+pub fn input_choices_with(s: &Session, t: &Track, device_inputs: usize, io: &IoMap, system_audio: bool) -> Vec<RoutingChoice> {
     let mut v = Vec::new();
     let n = device_inputs;
     if t.kind == TrackKind::Audio || t.kind == TrackKind::Aux {
@@ -211,6 +217,10 @@ pub fn input_choices(s: &Session, t: &Track, device_inputs: usize, io: &IoMap) -
         for i in (1..=n).step_by(width).filter(|&i| i + width - 1 <= n && !covered(i)) {
             let label = if width == 2 { format!("In {i}-{}", i + 1) } else { format!("In {i}") };
             v.push(RoutingChoice::Entry { label: label.clone(), value: label });
+        }
+        if system_audio && t.kind == TrackKind::Audio {
+            let name = transit_model::SYSTEM_AUDIO_PATH.to_owned();
+            v.push(RoutingChoice::Entry { label: name.clone(), value: name });
         }
     }
     for b in &s.busses {

@@ -121,6 +121,7 @@ impl Player {
             calibration_key: None,
             calibration: None,
             plan_input: Cell::new(false),
+            system_audio: Cell::new(None),
             device_buffer: None,
             silent: true,
         }
@@ -376,8 +377,15 @@ impl Player {
             let asio = system == devices::ASIO_SYSTEM;
             request.calibration = if duplex && !asio { cfg.calibration_for(&system, &name, paired.as_deref(), &request) } else { None };
             let (rate, channels) = (request.format.rate, request.format.channels);
-            let io = IoMap::for_device(&system, &name, inputs, channels);
+            let mut io = IoMap::for_device(&system, &name, inputs, channels);
+            // System Audio (#268) rides on the duplex input as the pair after its channels; the
+            // loopback itself opens once the output runs (below).
+            let system_audio = duplex && crate::system_audio::requested(cfg);
+            if system_audio {
+                io.system_audio = Some(inputs);
+            }
             let (mut player, access, clock) = Self::prepare(Arc::clone(&session), rate, io)?;
+            player.system_audio.set(player.io.get_mut().system_audio);
             *player.input.get_mut() = if duplex {
                 let progress = player.record_start.get_mut().as_ref().map(record::start::Control::input_progress);
                 let built = progress.ok_or_else(|| ab::OpenError::Other("the record start latch is missing".to_owned())).and_then(|progress| {
@@ -390,6 +398,7 @@ impl Player {
                         progress,
                         request.calibration,
                         player.loop_probe.clone(),
+                        system_audio,
                     )
                 });
                 match built {
@@ -452,6 +461,9 @@ impl Player {
                 error = failure.to_string();
                 typed.get_or_insert(failure);
                 continue;
+            }
+            if system_audio && let HeldInput::Held(Some(recorder)) = player.input.get_mut() {
+                recorder.attach_system_audio(crate::system_audio::open(cfg));
             }
             log::info!(
                 "{}",

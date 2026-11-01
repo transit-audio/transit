@@ -13,7 +13,7 @@ fn choose<T: Clone + PartialEq>(
 }
 
 /// [`choose`] with its own words for "no choice".
-fn choose_or<T: Clone + PartialEq>(
+pub(crate) fn choose_or<T: Clone + PartialEq>(
     ui: &mut egui::Ui,
     key: &str,
     enabled: bool,
@@ -182,6 +182,8 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     let cal_result = app.audio_devices.calibration_result.clone();
     let mut cal_action = None;
     let rate = app.engine.session().sample_rate.hz();
+    let system_view = app.system_audio_view();
+    let mut system_meter = app.audio_devices.system_meter;
     let mut open = true;
     // Ctrl+Tab and Ctrl+Shift+Tab (Cmd on macOS) cycle the sections.
     let mut section = Section::from_key(&app.ui.audio_devices_section);
@@ -425,7 +427,12 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                                     devices::native_asio_offered(draft.system.as_deref()) && draft.backend == Backend::NativeAsio;
                                                 label(ui, "Input");
                                                 let ins: Vec<(String, String)> = sys
-                                                    .map(|s| s.inputs.iter().map(|d| (d.name.clone(), device_label(d))).collect())
+                                                    .map(|s| {
+                                                        s.inputs
+                                                            .iter()
+                                                            .map(|d| (d.name.clone(), crate::audio_devices_system::input_label(d)))
+                                                            .collect()
+                                                    })
                                                     .unwrap_or_default();
                                                 let (rect, text) = choose(ui, "input", audio_on && !asio, &mut draft.input, &ins, &mut lay.items);
                                                 controls.push((text, "input", rect));
@@ -618,6 +625,13 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                         }
                                         Section::IoPaths => {
                                             io_edit = crate::audio_devices_io::section(ui, &io, wasapi, &channel_names, &mut editor, &mut io_items);
+                                            crate::audio_devices_system::section(
+                                                ui,
+                                                &mut draft,
+                                                &system_view,
+                                                &mut system_meter,
+                                                (&mut io_items, &mut lay.items),
+                                            );
                                         }
                                         Section::Hardware => {
                                             (hw_action, hw_layout) = crate::audio_devices_io::hardware_section(
@@ -650,6 +664,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
     lay.notes = app.audio_devices.notes.clone();
     app.audio_devices.draft = draft.clone();
     app.audio_devices.layout = lay;
+    app.audio_devices.system_meter = system_meter;
     if let Some(edit) = io_edit {
         match app.run("setup.io_map", edit.params()) {
             Ok(_) => editor.done(&edit),

@@ -188,7 +188,7 @@ impl StudioApp {
         if let Some(tr) = s.track(t) {
             let ch = if tr.kind == TrackKind::Audio { tr.channels() } else { 0 };
             let cur = route_label(&s, &tr.mixer.input, true, ch);
-            let label = input_choices(&s, tr, self.device_inputs(), self.engine.io_map())
+            let label = input_choices_with(&s, tr, self.device_inputs(), self.engine.io_map(), self.system_audio_on())
                 .into_iter()
                 .find_map(|choice| match choice {
                     RoutingChoice::Entry { label, value: v } if v == value => Some(label),
@@ -384,8 +384,11 @@ impl StudioApp {
         self.run("mix.send_level", json!({"track": t.0, "slot": slot, "pre_fader": pre}))
     }
 
-    /// The open input's channel count (or the stand-in device's). Offline editing offers 8.
+    /// The open input's own channel count, without the System Audio pair (or the stand-in device's).
+    /// Offline editing offers 8.
     pub(crate) fn device_inputs(&self) -> usize {
-        self.recorder.as_ref().map_or_else(|| self.audio_devices.fake.as_ref().map_or(8, |f| f.input_channels_for(&self.ui.audio)), |r| r.channels)
+        self.recorder
+            .as_ref()
+            .map_or_else(|| self.audio_devices.fake.as_ref().map_or(8, |f| f.input_channels_for(&self.ui.audio)), |r| r.device_channels())
     }
 }

@@ -67,6 +67,7 @@ ids! {
     AudioDevicesResets => "audio_devices.resets",
     AudioDevicesRecovery => "audio_devices.recovery",
     AudioDevicesCalibration => "audio_devices.calibration",
+    AudioDevicesSystemAudio => "audio_devices.system_audio",
     AudioDevicesApply => "audio_devices.apply",
     AudioDevicesRevert => "audio_devices.revert",
     AudioDevicesReconnect => "audio_devices.reconnect",

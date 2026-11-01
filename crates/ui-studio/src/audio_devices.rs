@@ -17,7 +17,7 @@
 //! logs it); the fallback is said on the status line and in the window.
 
 mod period;
-mod window;
+pub(crate) mod window;
 pub use window::{Section, window};
 
 use crate::StudioApp;
@@ -206,6 +206,10 @@ pub struct AudioDevicesState {
     /// the ASIO lister the worker runs.
     #[cfg(test)]
     pub(crate) machine: Option<(Vec<AudioSystem>, AsioLister)>,
+    /// The outputs System Audio can capture (#268), listed once per listing.
+    pub(crate) system_outputs: Option<Vec<String>>,
+    /// The System Audio level meter as shown (it falls back slowly between peaks).
+    pub(crate) system_meter: [f32; 2],
 }
 
 /// The device loop's wake counter at the last sample, and the rate it gave.
@@ -243,6 +247,7 @@ impl WakeRate {
 impl AudioDevicesState {
     pub(crate) fn set_fake(&mut self, fake: Option<FakeDevices>) {
         self.systems = fake.as_ref().map(|f| f.systems.clone());
+        self.system_outputs = None;
         self.fake = fake;
     }
     pub(crate) fn begin_verification(&mut self) {
@@ -262,6 +267,7 @@ impl AudioDevicesState {
             return;
         }
         self.systems = None;
+        self.system_outputs = None;
     }
 }
 

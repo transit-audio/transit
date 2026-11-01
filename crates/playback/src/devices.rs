@@ -155,6 +155,11 @@ pub struct AudioConfig {
     /// default; false asks for exclusive mode (ADR 0016, amendment 2 of 2026-10-22). Missing in a
     /// saved config reads as true: shared.
     pub share_device: bool,
+    /// System Audio (#268): what the computer plays, as a stereo input path ("System Audio")
+    /// beside the interface's inputs. Windows only (a WASAPI loopback capture); off by default.
+    pub system_audio: bool,
+    /// The output System Audio captures (its name or id); `None` is the system's default output.
+    pub system_audio_output: Option<String>,
 }
 
 impl Default for AudioConfig {
@@ -171,6 +176,8 @@ impl Default for AudioConfig {
             calibration_send: None,
             calibration_return: None,
             share_device: true,
+            system_audio: false,
+            system_audio_output: None,
         }
     }
 }
@@ -790,6 +797,8 @@ mod tests {
             calibration_send: Some("Out 3-4".into()),
             calibration_return: Some("In 2".into()),
             share_device: true,
+            system_audio: true,
+            system_audio_output: Some("Speakers".into()),
         };
         let s = serde_json::to_string(&c).unwrap();
         assert_eq!(serde_json::from_str::<AudioConfig>(&s).unwrap(), c);

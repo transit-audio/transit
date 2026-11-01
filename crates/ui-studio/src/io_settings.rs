@@ -17,6 +17,8 @@ pub fn adopt(saved: &[IoMap], opened: IoMap) -> IoMap {
     let Some(mut map) = saved.iter().find(|m| m.key() == opened.key()).cloned() else { return opened };
     let inputs = if opened.inputs > 0 { opened.inputs } else { map.inputs };
     map.reconcile(inputs, opened.outputs);
+    // Where System Audio sits in the live input is the open input's, never the saved table's.
+    map.system_audio = opened.system_audio;
     map
 }
 

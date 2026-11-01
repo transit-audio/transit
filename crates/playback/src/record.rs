@@ -221,7 +221,10 @@ pub struct Recorder {
     record_start: Option<start::Reader>,
     pub device_name: String,
     pub sample_rate: u32,
+    /// The live input's width: the device's channels, then the System Audio pair when it runs.
     pub channels: usize,
+    /// System Audio (#268), the loopback capture appended to this input.
+    pub system_audio: crate::system_audio::SystemAudio,
     /// What the input stream opened with, as the backend reported it: the buffer in frames, the
     /// latency (ASIO: `getLatencies`) and the device sample format (None where not reported).
     pub buffer_frames: Option<u32>,
@@ -242,6 +245,7 @@ fn capture_callbacks(
     mut clock: crate::device_clock::CallbackClock,
     progress: Option<start::InputProgress>,
     loop_probe: Option<Arc<crate::loop_probe::LoopProbe>>,
+    mut tap: Option<crate::system_audio::Tap>,
 ) -> (ab::CaptureCallback, ab::ErrorCallback) {
     let (sh, errors) = (Arc::clone(shared), Arc::clone(shared));
     let mon = Arc::clone(monitor);
@@ -257,15 +261,22 @@ fn capture_callbacks(
             // One admission covers the entire device callback, including its chunks.
             let capture = sh.begin_capture();
             block.chunks(&mut |offset, samples| {
-                mon.push(samples);
                 // The loopback calibration (native ASIO) records the return by sample position.
                 if let Some(probe) = &loop_probe {
                     probe.record(samples, channels, position.map(|p| p + offset as u64));
                 }
-                if capture.is_some()
-                    && let Some(frame) = first_frame.checked_add(offset as u64)
-                {
-                    sh.capture_at(frame, samples);
+                let feed = |at: usize, frames: &[f32]| {
+                    mon.push(frames);
+                    if capture.is_some()
+                        && let Some(frame) = first_frame.checked_add(at as u64)
+                    {
+                        sh.capture_at(frame, frames);
+                    }
+                };
+                // System Audio (#268): the pair appended to every frame, read from its ring.
+                match tap.as_mut() {
+                    Some(tap) => tap.widen(samples, &mut |piece, wide| feed(offset + piece, wide)),
+                    None => feed(offset, samples),
                 }
             });
         });
@@ -327,7 +338,7 @@ impl Recorder {
         let mut failure = "no usable input stream".to_string();
         let mut opened = None;
         for (index, request) in plan.attempts.iter().enumerate() {
-            match Recorder::build(&*backend, &plan.endpoint, request, None, None) {
+            match Recorder::build(&*backend, &plan.endpoint, request, None, None, crate::system_audio::requested(audio)) {
                 Ok(recorder) => {
                     opened = Some(recorder);
                     break;
@@ -340,8 +351,12 @@ impl Recorder {
                 }
             }
         }
-        let recorder = opened.ok_or(failure)?;
+        let mut recorder = opened.ok_or(failure)?;
         recorder.start()?;
+        // The session's output already runs: the loopback may open now (see `crate::system_audio`).
+        if crate::system_audio::requested(audio) {
+            recorder.attach_system_audio(crate::system_audio::open(audio));
+        }
         Ok(recorder)
     }
 
@@ -362,31 +377,45 @@ impl Recorder {
         progress: start::InputProgress,
         calibration: Option<ab::Calibration>,
         loop_probe: Option<Arc<crate::loop_probe::LoopProbe>>,
+        system_audio: bool,
     ) -> Result<Recorder, ab::OpenError> {
         let format = backend.capture_format(endpoint, Some(rate)).map_err(ab::OpenError::Other)?;
         if format.rate != rate {
             return Err(ab::OpenError::Other(format!("the input does not run at {rate} Hz")));
         }
         let request = ab::OpenRequest { format, period, mode, origin: ab::HostOrigin::default(), calibration };
-        Recorder::build(backend, endpoint, &request, Some(progress), loop_probe)
+        Recorder::build(backend, endpoint, &request, Some(progress), loop_probe, system_audio)
     }
 
     /// The recorder around a new, not yet started input stream on `endpoint`.
-    fn build(
+    pub(crate) fn build(
         backend: &dyn ab::Backend,
         endpoint: &ab::Endpoint,
         request: &ab::OpenRequest,
         progress: Option<start::InputProgress>,
         loop_probe: Option<Arc<crate::loop_probe::LoopProbe>>,
+        system_audio: bool,
     ) -> Result<Recorder, ab::OpenError> {
         let format = request.format;
-        let channels = usize::from(format.channels).max(1);
+        let device_channels = usize::from(format.channels).max(1);
+        // System Audio rides on this input as two more channels (see `crate::system_audio`): the
+        // pair is reserved now and filled once the loopback is attached.
+        let (system, tap) = if system_audio {
+            let (state, tap) = crate::system_audio::reserve(device_channels, format.rate);
+            (state, Some(tap))
+        } else {
+            (crate::system_audio::SystemAudio::Off, None)
+        };
+        let channels = tap.as_ref().map_or(device_channels, crate::system_audio::Tap::channels);
         let ring = CaptureRing::new((format.rate as usize).saturating_mul(channels * RING_SECONDS).min(1 << 25));
         let shared = Arc::new(Shared::new(ring));
-        let monitor = InputRing::with_pairing(usize::from(format.channels), format.rate, backend.capture_precedes_render(endpoint));
+        let monitor = InputRing::with_pairing(channels, format.rate, backend.capture_precedes_render(endpoint));
+        if tap.is_some() {
+            monitor.set_system_channel(device_channels);
+        }
         let (callback_clock, clock) = crate::device_clock::stream_clock(crate::device_clock::Direction::Input, format.rate)
             .map_err(|error| ab::OpenError::Other(error.into()))?;
-        let (capture, on_error) = capture_callbacks(&shared, &monitor, callback_clock, progress, loop_probe);
+        let (capture, on_error) = capture_callbacks(&shared, &monitor, callback_clock, progress, loop_probe, tap);
         let (stream, achieved) = backend.open_capture(endpoint, request, capture, on_error)?;
         let clock = crate::device_clock::MaintainedClock::start(clock)
             .map_err(|error| {
@@ -403,12 +432,35 @@ impl Recorder {
             device_name: endpoint.name.clone(),
             sample_rate: format.rate,
             channels,
+            system_audio: system,
             buffer_frames: achieved.period.frames(),
             latency: achieved.latency,
             sample_format: Some(achieved.format.sample),
             writer: None,
             seen,
         })
+    }
+
+    /// The first live input channel of the System Audio pair, when this input carries one (it is
+    /// silent until the loopback runs).
+    pub fn system_channel(&self) -> Option<usize> {
+        self.monitor.system_channel()
+    }
+
+    /// The device's own input channels (the live input without the System Audio pair).
+    pub fn device_channels(&self) -> usize {
+        self.system_channel().unwrap_or(self.channels)
+    }
+
+    /// Hand the loopback capture to this input's reserved pair (control thread, once, after the
+    /// session's output started).
+    pub fn attach_system_audio(&mut self, opened: crate::system_audio::Opened) {
+        self.system_audio.attach(opened);
+    }
+
+    /// What Audio Devices shows of System Audio (reading it resets the level meter's peaks).
+    pub fn system_audio_report(&self) -> crate::system_audio::Report {
+        self.system_audio.report(self.sample_rate)
     }
 
     /// Start the input stream.
@@ -431,6 +483,7 @@ impl Recorder {
             device_name: name.into(),
             sample_rate: 48_000,
             channels: 1,
+            system_audio: crate::system_audio::SystemAudio::Off,
             buffer_frames: None,
             latency: None,
             sample_format: None,
@@ -1075,6 +1128,7 @@ mod tests {
             device_name: "Mic In".into(),
             sample_rate: 48_000,
             channels: 1,
+            system_audio: crate::system_audio::SystemAudio::Off,
             buffer_frames: None,
             latency: None,
             sample_format: None,

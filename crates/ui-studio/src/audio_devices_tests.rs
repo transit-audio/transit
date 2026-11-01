@@ -4,6 +4,8 @@
 
 #[path = "audio_devices/calibration_tests.rs"]
 mod calibration_tests;
+#[path = "audio_devices/system_audio_tests.rs"]
+mod system_audio_tests;
 #[path = "audio_devices/window_tests.rs"]
 mod window_tests;
 
@@ -505,6 +507,8 @@ fn audio_patch_merges_fields_and_rejects_zero_atomically() {
             calibration_send: None,
             calibration_return: None,
             share_device: true,
+            system_audio: false,
+            system_audio_output: None,
         }
     );
     let before = t.app.ui.audio.clone();

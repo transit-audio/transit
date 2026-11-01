@@ -12,6 +12,7 @@ pub mod arrange;
 mod audio_connection;
 pub mod audio_devices;
 pub mod audio_devices_io;
+pub mod audio_devices_system;
 pub mod automation;
 mod automation_picker;
 pub mod browser;
