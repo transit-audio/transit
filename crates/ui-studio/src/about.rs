@@ -39,7 +39,6 @@ pub const THIRD_PARTY_NOTICES: &str = concat!(
     "
 
 ",
-    "\n\n",
     include_str!("../../random-sequencer/LICENSE-THIRD-PARTY")
 );
 /// Wordmark width in points.
