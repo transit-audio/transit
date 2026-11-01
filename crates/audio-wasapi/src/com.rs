@@ -884,7 +884,8 @@ impl CaptureDevice for LiveCapture {
         // client has no buffer event: it waits on the stop event alone and drains on the timeout.
         let both = [self.stop.0, self.event.0];
         let handles = if self.event_driven { &both[..] } else { &both[..1] };
-        // SAFETY: both handles are live events owned by this stream; `WaitForMultipleObjects`
+        // SAFETY: every handle in `handles` (the stop event, and the buffer event when the client is
+        // event driven: one or two) is a live event owned by this stream; `WaitForMultipleObjects`
         // with `bWaitAll` false returns the index of the first signaled handle, `WAIT_TIMEOUT`,
         // or `WAIT_FAILED`. It does not allocate.
         let woke = unsafe { WaitForMultipleObjects(handles, false, timeout_ms) };
