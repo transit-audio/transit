@@ -253,10 +253,15 @@ fn restarts_and_shaper_toggles_on_held_notes_allocate_nothing() {
     let mut comp = PlanCompiler::new(target, PlanLimits::default());
     let mut make = |spec: &InstanceSpec, _: SlotGen| transit_mix::create_instance(&spec.id, None, SR as f32, BLOCK, spec.ch);
     let base: &[(&str, f32)] = &[("voices", 7.0), ("model", 2.0), ("cutoff", 900.0), ("filter_env_amount", 50.0)];
-    let with_shaper = |on: f32| session(&[base, &[("shaper", on)][..]].concat());
-    let (s, _) = with_shaper(0.0);
+    let (s, t) = session(&[base, &[("shaper", 0.0)][..]].concat());
+    // A parameter edit keeps the instrument identity; a new Insert would replace the instance.
+    let with_shaper = |on: f32| {
+        let mut edited = s.clone();
+        edited.track_mut(t).unwrap().instrument.as_mut().unwrap().params.insert("shaper".into(), on);
+        edited
+    };
     let mut generation = PlanGeneration::EMPTY.checked_next().unwrap();
-    let mut env = comp.compile(Arc::new(s), PlanGeneration::EMPTY, generation, &mut make).unwrap();
+    let mut env = comp.compile(Arc::new(with_shaper(0.0)), PlanGeneration::EMPTY, generation, &mut make).unwrap();
     assert_eq!(mix.adopt_plan(&mut env), Adoption::Adopted);
     comp.reclaim(env);
     let binding = comp.active_bindings().into_iter().find(|b| b.1 == INSTRUMENT_SLOT).unwrap();
@@ -277,7 +282,7 @@ fn restarts_and_shaper_toggles_on_held_notes_allocate_nothing() {
     // through a plan compiled before its measured region, adopted in the middle of it.
     for phase in 0..3usize {
         let mut edit = (phase > 0).then(|| {
-            let (edited, _) = with_shaper(if phase == 1 { 1.0 } else { 0.0 });
+            let edited = with_shaper(if phase == 1 { 1.0 } else { 0.0 });
             let next = generation.checked_next().unwrap();
             let env = comp.compile(Arc::new(edited), generation, next, &mut make).unwrap();
             generation = next;
