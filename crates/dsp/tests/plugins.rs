@@ -59,6 +59,7 @@ fn registry_ids_unique_and_creatable() {
         let keyed = matches!(info.id, "compressor" | "expander_gate" | "cross_modulator");
         assert_eq!(transit_dsp::builtin_takes_key(info.id), keyed);
         assert_eq!(p.has_key_input(), keyed);
+        assert_eq!(transit_dsp::builtin_reads_track_notes(info.id), p.reads_track_notes(), "{}", info.id);
         assert_eq!(plugin_info(info.id).unwrap().id, info.id);
     }
     assert!(create("nope").is_none());

@@ -225,6 +225,12 @@ pub fn builtin_takes_key(id: &str) -> bool {
     id == plugins::dynamics::COMP_INFO.id || id == plugins::dynamics::GATE_INFO.id || id == plugins::modulator::MODULATOR_INFO.id
 }
 
+/// Whether the built-in plug-in `id` reads its track's note stream ([`Plugin::reads_track_notes`]):
+/// the Filter (#242). The compiler uses this to reserve a note carry only for readers.
+pub fn builtin_reads_track_notes(id: &str) -> bool {
+    id == plugins::filter::FILTER_INFO.id
+}
+
 /// Maps the key `src` onto the planar channels `dst` for `n` frames from frame `start` of `src`
 /// (into `dst[..n]`): the same channels when the counts match, a mono key onto every channel, a
 /// fold-down to the average when `dst` is mono, else channel k from `src[k % src.len()]`. An

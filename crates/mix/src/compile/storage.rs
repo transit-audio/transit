@@ -65,9 +65,11 @@ pub(super) fn measure(
         // A sample ring for each insert that asks for one (the Tuner).
         let tuners = t.mixer.inserts.iter().flatten().filter(|i| transit_dsp::wants_sample_tap(&i.plugin)).count();
         bytes = add(bytes, mul(tuners, SampleTap::BYTES)?)?;
+        // A note carry for each built-in insert that reads the track's notes (hosted and hardware
+        // inserts never do); the compiler makes one only for those (`PluginSlot::new`).
+        let readers = t.mixer.inserts.iter().flatten().filter(|i| transit_dsp::builtin_reads_track_notes(&i.plugin)).count();
+        bytes = add(bytes, mul(readers, crate::note_delay::NoteDelay::BYTES)?)?;
         // A scope ring for each insert and the instrument.
-        // Reserve conservatively for any insert factory that returns a note reader.
-        bytes = add(bytes, mul(t.mixer.inserts.iter().flatten().count(), crate::note_delay::NoteDelay::BYTES)?)?;
         bytes = add(bytes, mul(add(t.mixer.inserts.iter().flatten().count(), usize::from(t.instrument.is_some()))?, ScopeTap::BYTES)?)?;
         for ins in t.mixer.inserts.iter().flatten().chain(t.instrument.iter()) {
             if needs_storage(ins.params.len()) {

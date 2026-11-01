@@ -566,3 +566,26 @@ fn empty_and_shrinking_sessions_and_the_track_limit() {
         if n == 2 { assert!(r.is_ok()) } else { assert!(matches!(r, Err(CompileError::ResourceLimit { what: "tracks", .. }))) }
     }
 }
+
+/// The prepared-byte bound reserves a note carry for readers only (#247): a Filter takes one,
+/// a Gain next to it takes none.
+#[test]
+fn the_byte_bound_counts_a_note_carry_only_for_a_reader() {
+    let need = |ids: [&str; 2]| {
+        let (mut s, a, _) = audio_session();
+        for (i, id) in ids.into_iter().enumerate() {
+            s.track_mut(a).unwrap().mixer.inserts[i] = Some(builtin(id));
+        }
+        let mut comp = PlanCompiler::new(target(), PlanLimits { prepared_bytes: 1, ..PlanLimits::default() });
+        let mut make = factory(&SharedLog::default());
+        match comp.compile(Arc::new(s), PlanGeneration::EMPTY, PlanGeneration::from_raw(1), &mut make) {
+            Err(CompileError::ResourceLimit { what: "prepared_bytes", need, .. }) => need,
+            other => panic!("{other:?}"),
+        }
+    };
+    let carry = crate::note_delay::NoteDelay::BYTES;
+    let (plain, one, two) = (need(["gain", "gain"]), need(["filter", "gain"]), need(["filter", "filter"]));
+    let slack = carry / 8; // the Filter's own parameter table
+    assert!((carry..carry + slack).contains(&(one - plain)), "one reader adds one carry: {}", one - plain);
+    assert!((carry..carry + slack).contains(&(two - one)), "two readers add two: {}", two - one);
+}
