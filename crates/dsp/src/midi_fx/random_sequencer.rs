@@ -282,7 +282,7 @@ impl MidiEffect for RandomSequencer {
         });
         // A full schedule (never expected) joins the chain's overflow count (`MidiFxCounts::overflow`, read through
         // `MixEngine::event_status().midi_fx.overflow`; no UI reader shows it yet).
-        out.add_refused(u32::try_from(self.sequencer.dropped() - dropped_before).unwrap_or(u32::MAX));
+        out.add_refused_ons(u32::try_from(self.sequencer.dropped() - dropped_before).unwrap_or(u32::MAX));
     }
 }
 

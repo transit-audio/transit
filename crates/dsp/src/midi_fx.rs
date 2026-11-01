@@ -48,22 +48,39 @@ impl TimedEvent {
     };
 }
 
-/// Where a MIDI effect writes its events: a fixed-capacity buffer the host owns. A full buffer
-/// refuses the event ([`MidiOut::push`] returns false) and counts it.
+/// Where a MIDI effect writes its events: a fixed buffer or the host's bounded sink policy.
+/// Refusals ([`MidiOut::push`] returns false) are counted in either mode.
 pub struct MidiOut<'a> {
     buf: &'a mut [TimedEvent],
+    sink: Option<&'a mut dyn FnMut(TimedEvent) -> bool>,
     len: usize,
     refused: u32,
+    refused_ons: u32,
 }
 
 impl<'a> MidiOut<'a> {
     /// An empty output over `buf` (its capacity is `buf.len()`).
     pub fn new(buf: &'a mut [TimedEvent]) -> Self {
-        MidiOut { buf, len: 0, refused: 0 }
+        MidiOut { buf, sink: None, len: 0, refused: 0, refused_ons: 0 }
     }
 
-    /// Appends `event`; false (counted) when the buffer is full.
+    /// Host-owned bounded output policy. The sink must not allocate, lock, or block.
+    /// Its storage, rather than `events()`, holds accepted events.
+    pub fn with_sink(sink: &'a mut dyn FnMut(TimedEvent) -> bool) -> Self {
+        MidiOut { buf: &mut [], sink: Some(sink), len: 0, refused: 0, refused_ons: 0 }
+    }
+
+    /// Writes `event`; false (counted) when the buffer or sink refuses it.
     pub fn push(&mut self, event: TimedEvent) -> bool {
+        if let Some(sink) = self.sink.as_mut() {
+            let accepted = sink(event);
+            if accepted {
+                self.len = self.len.saturating_add(1);
+            } else {
+                self.refuse(event);
+            }
+            return accepted;
+        }
         match self.buf.get_mut(self.len) {
             Some(slot) => {
                 *slot = event;
@@ -71,13 +88,32 @@ impl<'a> MidiOut<'a> {
                 true
             }
             None => {
-                self.refused = self.refused.saturating_add(1);
+                self.refuse(event);
                 false
             }
         }
     }
 
-    /// The events written so far, in write order.
+    fn refuse(&mut self, event: TimedEvent) {
+        self.refused = self.refused.saturating_add(1);
+        if matches!(event.event.message, crate::event::Message::NoteOn { .. }) {
+            self.refused_ons = self.refused_ons.saturating_add(1);
+        }
+    }
+
+    /// Note-ons refused either by the output policy or the effect's own schedule.
+    #[must_use]
+    pub fn refused_ons(&self) -> u32 {
+        self.refused_ons
+    }
+
+    /// Counts note-ons refused by an effect's own bounded schedule.
+    pub fn add_refused_ons(&mut self, n: u32) {
+        self.add_refused(n);
+        self.refused_ons = self.refused_ons.saturating_add(n);
+    }
+
+    /// The events written to a slice so far, in write order; empty for a host-owned sink.
     #[must_use]
     pub fn events(&self) -> &[TimedEvent] {
         self.buf.get(..self.len).unwrap_or_default()

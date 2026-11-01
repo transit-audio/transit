@@ -32,9 +32,10 @@
 //! the chain could not take is retried by the mix at the next block; one the instrument's queue
 //! refuses is given again at offset 0 of the next block (up to [`MIDI_FX_RETRY`] at once); one a
 //! full carry cannot hold takes the place of a carried non-release (a carry of releases alone
-//! delivers it at the block's last offset). One path still drops: when an effect's output plus
-//! its carried events due in the block exceed [`MIDI_FX_BLOCK`], the tail is dropped, releases
-//! included. Transpose and Velocity never reach it (one event out per event in, no carry). Nothing here allocates, locks or logs: the
+//! delivers it at the block's last offset). Output and carry merging evict the newest pending
+//! note-on for a release. If only releases remain, channel safety releases represent them and
+//! the host ends its accepted notes explicitly before resetting the chain (ADR 0036, `output`).
+//! Nothing here allocates, locks or logs: the
 //! storage is made with the instrument's event state, off the audio thread, and a built-in effect
 //! is a value made in place ([`Builtin`]).
 
@@ -45,6 +46,9 @@ use transit_model::{AutoParam, MAX_MIDI_EFFECTS, MidiEffectSlot, Track};
 use transit_time::Samples;
 
 use crate::note_view::NoteView;
+
+mod output;
+use output::Output;
 
 /// Events one block takes into the chain, and each effect writes, at most.
 pub const MIDI_FX_BLOCK: usize = 512;
@@ -63,6 +67,14 @@ pub struct MidiFxCounts {
     /// Events a full block buffer refused: the chain's input (the mix retries a refused release)
     /// or an effect's output.
     pub overflow: u64,
+    /// Note-ons refused at admission to a full output or input buffer.
+    pub refused_ons: u64,
+    /// Pending note-ons evicted by a release before they reached the next stage.
+    pub evicted_ons: u64,
+    /// Releases represented by channel safety releases after an output filled with releases alone.
+    pub coalesced_releases: u64,
+    /// Accepted notes ended explicitly when release-only overflow resets the chain.
+    pub released_on_overflow: u64,
     /// Events due in a later block that a full carry could not hold, or that a release displaced
     /// from it (a release is never dropped for room).
     pub carry_overflow: u64,
@@ -87,6 +99,10 @@ impl MidiFxCounts {
     pub(crate) fn add(&mut self, o: &MidiFxCounts) {
         let add = |a: &mut u64, b: u64| *a = a.saturating_add(b);
         add(&mut self.overflow, o.overflow);
+        add(&mut self.refused_ons, o.refused_ons);
+        add(&mut self.evicted_ons, o.evicted_ons);
+        add(&mut self.coalesced_releases, o.coalesced_releases);
+        add(&mut self.released_on_overflow, o.released_on_overflow);
         add(&mut self.carry_overflow, o.carry_overflow);
         add(&mut self.released_on_edit, o.released_on_edit);
         add(&mut self.carry_dropped, o.carry_dropped);
@@ -158,7 +174,8 @@ pub(crate) struct MidiFxHost {
     clock: u64,
     a: [TimedEvent; MIDI_FX_BLOCK],
     a_len: usize,
-    b: [TimedEvent; MIDI_FX_BLOCK],
+    b: Output,
+    merged: Output,
     /// Notes the host started on the instrument.
     out: [Note; MIDI_FX_NOTES],
     /// Notes the chain was given and has not seen released.
@@ -225,7 +242,8 @@ impl MidiFxHost {
             clock: 0,
             a: [TimedEvent::EMPTY; MIDI_FX_BLOCK],
             a_len: 0,
-            b: [TimedEvent::EMPTY; MIDI_FX_BLOCK],
+            b: Output::new(),
+            merged: Output::new(),
             out: [NO_NOTE; MIDI_FX_NOTES],
             given: [NO_NOTE; MIDI_FX_NOTES],
             given_len: 0,
@@ -347,6 +365,9 @@ impl MidiFxHost {
         if self.capturing {
             let Some(slot) = self.a.get_mut(self.a_len) else {
                 self.counts.overflow = self.counts.overflow.saturating_add(1);
+                if matches!(ev.message, Message::NoteOn { .. }) {
+                    self.counts.refused_ons = self.counts.refused_ons.saturating_add(1);
+                }
                 return false;
             };
             *slot = TimedEvent { offset: offset.min(self.frames - 1), event: *ev };
@@ -419,26 +440,31 @@ impl MidiFxHost {
             sort_by_offset(a);
         }
         let end = self.clock.saturating_add(u64::from(frames));
+        let mut safety_reset = false;
         for stage in self.stages.iter_mut().take(self.len).flatten() {
             let Some(fx) = stage.fx.as_mut().filter(|_| !stage.bypass) else { continue };
             // The effect's output, then this block's carried events ahead of it at their offset.
-            let mut out = MidiOut::new(&mut self.b);
+            self.b.clear();
+            let mut sink = |e| self.b.push(e);
+            let mut out = MidiOut::with_sink(&mut sink);
             fx.effect().process(self.a.get(..self.a_len).unwrap_or_default(), &mut out, frames);
-            let (written, refused) = (out.len(), out.refused());
-            self.counts.overflow = self.counts.overflow.saturating_add(u64::from(refused));
-            let mut n = 0usize;
+            let (refused, refused_ons) = (out.refused(), out.refused_ons());
+            // MidiOut counts admission refusals, including the generator's own schedule;
+            // the sink additionally counts events evicted after admission.
+            self.counts.overflow = self.counts.overflow.saturating_add(u64::from(refused.saturating_sub(self.b.refused)));
+            self.counts.refused_ons = self.counts.refused_ons.saturating_add(u64::from(refused_ons).saturating_sub(self.b.counts.refused_ons));
+            self.counts.add(&self.b.counts);
+            safety_reset |= self.b.counts.coalesced_releases > 0;
+            self.merged.clear();
             if block {
                 let mut k = 0;
                 while k < stage.carry_len {
                     let Some(c) = stage.carry.get(k).copied() else { break };
                     if c.due < end {
-                        if let Some(slot) = self.a.get_mut(n) {
-                            *slot =
-                                TimedEvent { offset: u32::try_from(c.due.saturating_sub(self.clock)).unwrap_or(0).min(frames - 1), event: c.event };
-                            n += 1;
-                        } else {
-                            self.counts.overflow = self.counts.overflow.saturating_add(1);
-                        }
+                        self.merged.push(TimedEvent {
+                            offset: u32::try_from(c.due.saturating_sub(self.clock)).unwrap_or(0).min(frames - 1),
+                            event: c.event,
+                        });
                         stage.carry.copy_within(k + 1..stage.carry_len, k);
                         stage.carry_len -= 1;
                     } else {
@@ -446,8 +472,7 @@ impl MidiFxHost {
                     }
                 }
             }
-            for e in self.b.iter().take(written) {
-                let mut e = *e;
+            for mut e in self.b.events() {
                 if e.offset >= frames {
                     let due = self.clock.saturating_add(u64::from(e.offset));
                     if let Some(c) = stage.carry.get_mut(stage.carry_len) {
@@ -469,13 +494,14 @@ impl MidiFxHost {
                     // Every carried event is a release, so this one's note-on is not among them.
                     e.offset = frames - 1;
                 }
-                match self.a.get_mut(n) {
-                    Some(slot) => {
-                        *slot = e;
-                        n += 1;
-                    }
-                    None => self.counts.overflow = self.counts.overflow.saturating_add(1),
-                }
+                self.merged.push(e);
+            }
+            self.counts.add(&self.merged.counts);
+            safety_reset |= self.merged.counts.coalesced_releases > 0;
+            let mut n = 0;
+            for (slot, e) in self.a.iter_mut().zip(self.merged.events()) {
+                *slot = e;
+                n += 1;
             }
             self.a_len = n;
             if let Some(a) = self.a.get_mut(..n) {
@@ -487,6 +513,12 @@ impl MidiFxHost {
         for i in 0..n {
             let Some(e) = self.a.get(i).copied() else { break };
             self.deliver(plugin, e.offset, &e.event);
+        }
+        if safety_reset {
+            // CLAP note-only ports and VST3 instruments without CC mappings can ignore
+            // channel-mode messages. End the actual accepted voices with native note-offs,
+            // after this block's surviving events, and cancel future ons before restarting.
+            self.end_notes_at(plugin, frames - 1, true);
         }
     }
 
@@ -522,6 +554,13 @@ impl MidiFxHost {
 
     /// Gives one event to the instrument, keeping the table of the notes the chain started.
     fn deliver(&mut self, plugin: &mut dyn Plugin, offset: u32, ev: &PluginEvent) {
+        // Never emit an on we could not end explicitly after a release-only overflow or edit.
+        if matches!(ev.message, Message::NoteOn { .. }) && self.out.iter().all(|n| n.used) {
+            self.counts.overflow = self.counts.overflow.saturating_add(1);
+            self.counts.refused_ons = self.counts.refused_ons.saturating_add(1);
+            self.counts.untracked = self.counts.untracked.saturating_add(1);
+            return;
+        }
         if !self.give(plugin, offset, ev) {
             self.counts.refused = self.counts.refused.saturating_add(1);
             if ev.is_release() {
@@ -550,14 +589,33 @@ impl MidiFxHost {
     /// Ends the chain's notes at the instrument, forgets the carries and the effects' state, and
     /// starts a new edit epoch: the given notes' later releases are swallowed.
     fn end_notes(&mut self, plugin: &mut dyn Plugin) {
+        self.end_notes_at(plugin, 0, false);
+    }
+
+    fn end_notes_at(&mut self, plugin: &mut dyn Plugin, offset: u32, overflow: bool) {
         for i in 0..MIDI_FX_NOTES {
             let Some(n) = self.out.get_mut(i).filter(|n| n.used) else { continue };
             let off = PluginEvent { channel: n.channel, note_id: n.voice, message: Message::NoteOff { key: n.key, velocity: 0, id: NoteId::NONE } };
             *n = NO_NOTE;
-            self.counts.released_on_edit = self.counts.released_on_edit.saturating_add(1);
-            if !self.give(plugin, 0, &off) {
+            let count = if overflow { &mut self.counts.released_on_overflow } else { &mut self.counts.released_on_edit };
+            *count = count.saturating_add(1);
+            if !self.give(plugin, offset, &off) {
                 self.counts.refused = self.counts.refused.saturating_add(1);
                 self.hold_for_retry(&off);
+            }
+        }
+        if overflow {
+            // A downstream effect may have carried the coalesced pedal-ups beyond this
+            // block. Recovery cancels that carry, so deliver its safety controllers directly
+            // as well: native offs alone do not end sustained MIDI voices.
+            for channel in 0..16 {
+                for cc in [64, 66, 67, 69, 120, 121, 123] {
+                    let ev = PluginEvent { channel, note_id: PluginEvent::NO_ID, message: Message::Control { cc, value: 0 } };
+                    if !self.give(plugin, offset, &ev) {
+                        self.counts.refused = self.counts.refused.saturating_add(1);
+                        self.hold_for_retry(&ev);
+                    }
+                }
             }
         }
         for s in self.stages.iter_mut().flatten() {
