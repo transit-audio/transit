@@ -31,6 +31,24 @@ pub enum Poll {
 }
 
 impl WorkerSet {
+    /// Counts an invalid Closed-window publication; asserts in rt tests.
+    pub(crate) fn closed_publish(&self) {
+        bump(&self.shared.stats.misuse);
+        #[cfg(test)]
+        panic!("a task attempted to publish in the Closed window");
+    }
+
+    /// Records a Busy skip without ever publishing or waking a worker. Returns `None` for
+    /// invalid host input (counted as misuse).
+    pub fn skip_busy(&mut self, strip: usize) -> Option<Outcome> {
+        self.unpublished(strip).ok()?;
+        if !self.is_busy(strip) {
+            bump(&self.shared.stats.misuse);
+            return None;
+        }
+        self.publish(strip).ok().map(|_| self.outcomes[strip])
+    }
+
     /// Publisher: waits, as [`WorkerSet::finish`] does, until one strip published this block is
     /// resolved by `deadline`, and returns it (a `Done` consumed, an admitted strip rendered
     /// inline through `inline(strip)`, or at the deadline an overrun); [`Poll::Finished`] when

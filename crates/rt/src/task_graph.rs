@@ -301,7 +301,17 @@ impl GraphRun {
     /// `origin` (and theirs in turn, as each is handed out).
     fn fail(&mut self, graph: &TaskGraph, task: usize, origin: usize) {
         let origin = u32::try_from(origin).unwrap_or(u32::MAX);
-        for &d in graph.dependents(task) {
+        for (&d, &kind) in graph.dependents(task).iter().zip(graph.dependent_kinds(task)) {
+            if kind == EdgeKind::Soft {
+                let d = d as usize;
+                if self.state.get(d) == Some(&TaskState::Waiting) {
+                    self.remaining[d] = self.remaining[d].saturating_sub(1);
+                    if self.remaining[d] == 0 {
+                        self.ready(d);
+                    }
+                }
+                continue;
+            }
             if let Some(s) = self.state.get_mut(d as usize)
                 && *s == TaskState::Waiting
             {
@@ -345,6 +355,26 @@ pub enum Start {
     /// Unavailable for a reason of its own the host has counted (a suspect instance): its
     /// dependents miss.
     Unavailable,
+    /// Unpinned phase-1 render ready after the deadline; never prepare or publish it.
+    Forgo,
+}
+
+/// Whether new work may be published to workers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Window {
+    /// Before the shared deadline.
+    Open,
+    /// At or after the shared deadline: callback work and skips only.
+    Closed,
+}
+
+/// Whether a direct callback render produced a usable current-block result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Rendered {
+    /// Current identity, home strip, no retained panic.
+    Usable,
+    /// Failed render: hard dependents must miss.
+    Unusable,
 }
 
 /// What [`drive`] needs from its caller: the worker set, and the strips themselves.
@@ -353,12 +383,12 @@ pub trait GraphHost {
     fn set(&mut self) -> &mut WorkerSet;
     /// Every input of `task` is ready for this block: write its inputs (its keys, its cell) and
     /// say how it runs.
-    fn start(&mut self, task: usize) -> Start;
+    fn start(&mut self, task: usize, window: Window) -> Start;
     /// The set refused to publish `task` after [`Start::Publish`] (a protocol fault): take its
     /// inputs back; the driver renders it on the callback next.
     fn refused(&mut self, task: usize);
     /// Renders `task` on the callback now.
-    fn render_here(&mut self, task: usize);
+    fn render_here(&mut self, task: usize) -> Rendered;
     /// One step of the block's wait: [`WorkerSet::poll`] with the host's inline render.
     fn poll(&mut self, deadline: Instant) -> Poll;
     /// `task` resolved with a result for this block (`Mixed` or `Inline`): take it home and check
@@ -376,14 +406,13 @@ pub fn drive(host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, d
     if !run.begin(graph) {
         return host.set().block_report();
     }
-    let mut d = Driver { wake: 0 };
+    let mut d = Driver { wake: 0, deadline };
     d.steps(host, graph, run, Phase::Wave);
     d.wake(host, deadline);
     // In task order; nothing is deferred outside the wave, so the list does not grow here.
     for k in 0..run.later_len {
         let t = run.later[k] as usize;
-        host.render_here(t);
-        run.succeed(graph, t);
+        d.render(host, graph, run, t);
         // A pinned render that ran past the deadline leaves no time for its dependents.
         let phase = if Instant::now() >= deadline { Phase::Late } else { Phase::Sweep };
         d.steps(host, graph, run, phase);
@@ -394,10 +423,11 @@ pub fn drive(host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, d
         match host.poll(deadline) {
             Poll::Finished => break,
             Poll::Resolved { strip, outcome, late } => {
-                if matches!(outcome, Outcome::Mixed | Outcome::Inline) && host.take(strip, outcome) {
-                    run.succeed(graph, strip);
+                let Some(task) = graph.task_for_slot(strip) else { continue };
+                if matches!(outcome, Outcome::Mixed | Outcome::Inline) && host.take(task, outcome) {
+                    run.succeed(graph, task);
                 } else {
-                    run.fail(graph, strip, strip);
+                    run.fail(graph, task, task);
                 }
                 d.steps(host, graph, run, if late { Phase::Late } else { Phase::Sweep });
                 d.wake(host, deadline);
@@ -420,6 +450,7 @@ enum Phase {
 struct Driver {
     /// Tasks published since the last wake.
     wake: usize,
+    deadline: Instant,
 }
 
 impl Driver {
@@ -428,7 +459,9 @@ impl Driver {
             match step {
                 Step::Missed { task, origin } => {
                     let (task, origin) = (task as usize, origin as usize);
-                    let _ = host.set().skip_upstream(task, origin);
+                    if let (Some(slot), Some(origin_slot)) = (graph.slot(task), graph.slot(origin)) {
+                        let _ = host.set().skip_upstream(slot, origin_slot);
+                    }
                     host.skipped(task, origin);
                 }
                 Step::Ready(t) => self.start(host, graph, run, t as usize, phase),
@@ -437,33 +470,53 @@ impl Driver {
     }
 
     fn start(&mut self, host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, t: usize, phase: Phase) {
-        if phase == Phase::Late {
-            // Ready only in the deadline phase: no time is left, it is not published.
-            let _ = host.set().forgo(t);
-            run.fail(graph, t, t);
+        let window = if phase == Phase::Late || Instant::now() >= self.deadline { Window::Closed } else { Window::Open };
+        let start = host.start(t, window);
+        let Some(slot) = graph.slot(t) else {
+            // Control work is executed by start/Ready or by the callback, never the worker set.
+            if start == Start::Callback {
+                let _ = host.render_here(t);
+            }
+            run.succeed(graph, t);
             return;
-        }
-        match host.start(t) {
-            Start::Publish => match host.set().publish(t) {
+        };
+        match start {
+            Start::Publish if window == Window::Closed => {
+                host.set().closed_publish();
+                host.refused(t);
+                self.render(host, graph, run, t);
+            }
+            Start::Publish => match host.set().publish(slot) {
                 Ok(Published::Published) => self.wake += 1,
                 Ok(Published::Skipped) => run.fail(graph, t, t),
                 Err(_) => {
                     host.refused(t);
-                    host.render_here(t);
-                    run.succeed(graph, t);
+                    self.render(host, graph, run, t);
                 }
             },
             Start::Callback if phase == Phase::Wave => run.defer(t),
             Start::Callback => {
-                host.render_here(t);
-                run.succeed(graph, t);
+                self.render(host, graph, run, t);
             }
             Start::Ready => run.succeed(graph, t),
             Start::Busy => {
-                let _ = host.set().publish(t);
+                let _ = host.set().skip_busy(slot);
                 run.fail(graph, t, t);
             }
             Start::Unavailable => run.fail(graph, t, t),
+            Start::Forgo => {
+                let _ = host.set().forgo(slot);
+                run.fail(graph, t, t);
+            }
+        }
+    }
+
+    fn render(&self, host: &mut impl GraphHost, graph: &TaskGraph, run: &mut GraphRun, task: usize) {
+        let result = host.render_here(task);
+        if graph.slot(task).is_none() || result == Rendered::Usable {
+            run.succeed(graph, task);
+        } else {
+            run.fail(graph, task, task);
         }
     }
 

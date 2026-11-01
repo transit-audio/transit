@@ -1,6 +1,6 @@
 use super::*;
 use crate::graph::task_identity;
-use transit_rt::task_graph::{GraphHost, Start, TaskGraph};
+use transit_rt::task_graph::{GraphHost, Rendered, Start, TaskGraph, Window};
 use transit_rt::worker_set::Poll;
 
 /// The driver's view of the pool for one block.
@@ -63,7 +63,11 @@ impl GraphHost for Host<'_, '_> {
         &mut self.pool.set
     }
 
-    fn start(&mut self, t: usize) -> Start {
+    fn start(&mut self, t: usize, window: Window) -> Start {
+        // Slice-1 policy until the tail host installs the section 11 start order.
+        if window == Window::Closed {
+            return Start::Forgo;
+        }
         let Some(track) = self.track(t) else {
             // Not rendered by the plan (as the serial path, which still fills its keys).
             self.fill(t);
@@ -119,10 +123,10 @@ impl GraphHost for Host<'_, '_> {
         self.pool.on_callback[t] = true;
     }
 
-    fn render_here(&mut self, t: usize) {
+    fn render_here(&mut self, t: usize) -> Rendered {
         let s: &Session = self.b.session;
-        let Some(st) = self.p1.get_mut(t) else { return };
-        let Some(track) = s.tracks.get(usize::from(st.track)).filter(|t| live(t) && !is_aux(t)) else { return };
+        let Some(st) = self.p1.get_mut(t) else { return Rendered::Unusable };
+        let Some(track) = s.tracks.get(usize::from(st.track)).filter(|t| live(t) && !is_aux(t)) else { return Rendered::Usable };
         // A strip that fell back to the callback after its keys were filled for a worker: their
         // early-key delay runs now, as it renders.
         self.keys.apply_pending(Some(t));
@@ -130,6 +134,7 @@ impl GraphHost for Host<'_, '_> {
         let block = StripRender { s, busses: b.busses, live: b.live, pos: b.pos, frames: b.frames, any_solo: b.any_solo, keys: &*self.keys };
         guarded(st, |st| process_strip(track, st, &block));
         self.callback += 1;
+        Rendered::Usable
     }
 
     fn poll(&mut self, deadline: Instant) -> Poll {

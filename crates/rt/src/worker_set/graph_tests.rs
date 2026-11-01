@@ -13,7 +13,7 @@
 
 use super::tests::{Behavior, Fake, STALL, set_of, wait_until};
 use super::*;
-use crate::task_graph::{GraphHost, GraphRun, Start, TaskGraph, drive};
+use crate::task_graph::{GraphHost, GraphRun, Rendered, Start, TaskGraph, Window, drive};
 use crate::testing::measure;
 
 /// The test's side of the driver: the fake strips, the edges (to check the publication order),
@@ -107,7 +107,11 @@ impl GraphHost for Host {
         &mut self.set
     }
 
-    fn start(&mut self, t: usize) -> Start {
+    fn start(&mut self, t: usize, window: Window) -> Start {
+        // Preserve the slice-1 fixture policy and all existing test assertions.
+        if window == Window::Closed {
+            return Start::Forgo;
+        }
         for &(f, to) in &self.edges {
             if to == t {
                 assert!(self.done[f], "block {}: {t} started before its source {f} was ready", self.g);
@@ -128,13 +132,14 @@ impl GraphHost for Host {
         panic!("block {}: publish of {t} refused", self.g);
     }
 
-    fn render_here(&mut self, t: usize) {
+    fn render_here(&mut self, t: usize) -> Rendered {
         if let Some(gate) = self.here_gate {
             wait_until("the pinned render's gate", || gate(self));
         }
         self.fake.execute(t, self.g, false);
         self.here.push(t);
         self.done[t] = true;
+        Rendered::Usable
     }
 
     fn poll(&mut self, deadline: Instant) -> Poll {
