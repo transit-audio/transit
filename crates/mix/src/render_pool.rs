@@ -246,6 +246,9 @@ pub(crate) fn run_strips<T: Send>(work: &mut [T], parallel: bool, f: impl Fn(&mu
 /// sources released and the instrument reset ([`MixEngine::reset`] does the rest).
 pub(crate) fn reset_render_state(st: &mut Strip) {
     for p in st.plugins.iter_mut().flatten() {
+        if let Some(delay) = &mut p.note_delay {
+            delay.clear();
+        }
         p.plugin.reset();
         p.failed = false;
     }

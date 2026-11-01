@@ -98,6 +98,7 @@ mod key;
 mod matrix;
 mod midi;
 mod midi_fx;
+mod note_delay;
 mod note_view;
 mod offline;
 mod plan;
@@ -406,6 +407,8 @@ struct PluginSlot {
     /// Plan mode, instruments: the event queue and the open notes and pedals (F10), prepared by
     /// the compiler. They travel with the instance and retire with it.
     events: Option<Box<events::InstrumentEvents>>,
+    /// Fixed pending note storage for this reading insert, prepared on the control thread.
+    note_delay: Option<note_delay::NoteDelay>,
     /// Plan mode, inserts and instruments: the scope ring the panel reads (see [`ScopeTap`]).
     tap: Option<Arc<ScopeTap>>,
     /// Plan mode, inserts whose plug-in asks for it (`Plugin::wants_sample_tap`): the input ring a
@@ -418,6 +421,7 @@ impl PluginSlot {
     /// [`clip_fx_slot`]). Hosted plug-ins start `fresh`; hosted effect inserts are suspendable.
     fn new(plugin: Box<dyn Plugin>, id: String, ch: usize, slot: usize) -> Self {
         let third = is_third_party(&id);
+        let note_delay = (slot != INSTRUMENT_SLOT && plugin.reads_track_notes()).then(note_delay::NoteDelay::new);
         PluginSlot {
             id,
             ch,
@@ -434,6 +438,7 @@ impl PluginSlot {
             sample_audio: None,
             sample_wrapper: None,
             events: None,
+            note_delay,
             tap: None,
             sample_tap: None,
         }

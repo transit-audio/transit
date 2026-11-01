@@ -31,7 +31,8 @@ pub const NOTE_VIEW_CAP: usize = 512;
 pub const RELEASE_RESERVE: usize = 64;
 
 /// The all-notes-off that stands in for events a full view dropped.
-const ALL_OFF: PluginEvent = PluginEvent { channel: 0, note_id: PluginEvent::NO_ID, message: Message::Control { cc: CC_ALL_NOTES_OFF, value: 0 } };
+pub(super) const ALL_OFF: PluginEvent =
+    PluginEvent { channel: 0, note_id: PluginEvent::NO_ID, message: Message::Control { cc: CC_ALL_NOTES_OFF, value: 0 } };
 
 pub(crate) struct NoteView {
     events: [TimedEvent; NOTE_VIEW_CAP],
@@ -47,7 +48,7 @@ fn is_note_stream(m: &Message) -> bool {
 }
 
 /// Whether `m` lets go of something, so it may use the reserved slots.
-fn is_release(m: &Message) -> bool {
+pub(super) fn is_release(m: &Message) -> bool {
     match m {
         Message::NoteOff { .. } => true,
         Message::Control { cc: CC_ALL_NOTES_OFF | CC_ALL_SOUND_OFF, .. } => true,

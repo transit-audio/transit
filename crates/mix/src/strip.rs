@@ -194,8 +194,9 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
     strip.key_in.iter_mut().for_each(|k| k.ran = false);
     strip.hw.iter_mut().for_each(hardware::HwSlot::rest);
     // What the track's instrument accepted this block, for the inserts that read notes (#242,
-    // ADR 0038): a read-only view, the same events at the same offsets for each such insert.
+    // ADR 0038): each reader delays this view to meet its own input audio.
     let notes = strip.instrument.as_ref().and_then(|x| x.events.as_deref()).map_or(&[][..], |e| e.fx.notes.events());
+    let mut notes_lost = 0u64;
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
         // A hardware insert sends the signal out and takes the return up; with no live input, or
         // an unresolved path, it passes the signal through dry and adds no latency.
@@ -215,14 +216,12 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
             if slot.plugin.reads_track_notes() {
                 slot.plugin.all_notes_off();
             }
+            if let Some(delay) = &mut slot.note_delay {
+                delay.clear();
+            }
             continue;
         }
         apply_params(Some(block.s), slot, ins, t, &strip.touch, i, pos, timed_span(transport, frames));
-        if slot.plugin.reads_track_notes() {
-            for e in notes {
-                slot.plugin.event(e.offset, &e.event);
-            }
-        }
         // An insert with a key detects on it when the plan made one for the slot (else on its own input).
         let key = ins.key.and_then(|_| keys.get(t.id, i));
         // A key that arrives late holds the strip's signal back to meet it (`KeyBank::align`).
@@ -232,6 +231,9 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
             k.ran = true;
             k.line.apply(k.want, &mut strip.buf, &mut k.scratch, frames);
             latency = latency.saturating_add(k.want.min(k.line.cap()));
+        }
+        if let Some(delay) = &mut slot.note_delay {
+            notes_lost = notes_lost.saturating_add(delay.deliver(notes, latency, frames, &mut *slot.plugin));
         }
         if run_insert(slot, &mut strip.buf, key, frames, transport, live.no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
             strip.failures.record(i);
@@ -251,6 +253,7 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
     }
     strip.key_in.iter_mut().filter(|k| !k.ran).for_each(|k| k.line.idle());
     if let Some(e) = strip.instrument.as_mut().and_then(|x| x.events.as_deref_mut()) {
+        e.fx.note_view_lost(notes_lost);
         e.fx.notes.clear();
     }
     strip.gr = gr;

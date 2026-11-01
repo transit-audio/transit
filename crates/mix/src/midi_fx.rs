@@ -506,12 +506,16 @@ impl MidiFxHost {
         let ok = plugin.event(offset, ev);
         if ok {
             let lost = self.notes.record(offset, ev);
-            self.counts.note_view_dropped = self.counts.note_view_dropped.saturating_add(lost);
-            if lost > 0 {
-                NOTE_VIEW_DROPPED.fetch_add(lost, std::sync::atomic::Ordering::Relaxed);
-            }
+            self.note_view_lost(lost);
         }
         ok
+    }
+
+    pub(crate) fn note_view_lost(&mut self, lost: u64) {
+        self.counts.note_view_dropped = self.counts.note_view_dropped.saturating_add(lost);
+        if lost > 0 {
+            NOTE_VIEW_DROPPED.fetch_add(lost, std::sync::atomic::Ordering::Relaxed);
+        }
     }
 
     /// Gives one event to the instrument, keeping the table of the notes the chain started.
