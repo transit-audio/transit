@@ -46,13 +46,14 @@ reaches a release build.
   and its fixed sweep (each of nine parameters at five levels, three freeze and trigger patterns,
   both modes, every quality: 888 points, each the quality's whole recording plus 0.25 s long, a
   fresh processor and a fixed seed and input per point).
-- `cpp/texture_oracle.cc`, `cpp/texture_extras_oracle.cc`, `src/texture.rs` and
-  `src/texture_sweep.rs`: the texture synthesizer (#241): its effect chain (four buffer qualities,
+- `cpp/texture_oracle.cc`, `cpp/texture_extras_oracle.cc`, `src/texture.rs`,
+  `src/texture_sweep.rs` and `src/texture_notes.rs`: the texture synthesizer (#241): its effect chain (four buffer qualities,
   stereo or mono, each at its own codec rate, float stereo in and out, blocks of up to 24 frames),
   built twice (the module's 4-second memory and the port's longest, 8 seconds); its synth; its
   input stage; and the fixed sweeps (twelve controls at five levels around a granular and a
-  delay-mode center, free, frozen and SEED-pulsed: 2280 points; the synth's 588; nine input-stage
-  runs), each point long enough for its grains or taps to read recorded audio.
+  delay-mode center, free, frozen and SEED-pulsed: 2280 points; the synth's 588; the synth played
+  from notes on the SEED gate and the PITCH CV, as the Texture Synth instrument plays it, 72
+  (#241 slice 3); nine input-stage runs), each point long enough for its grains or taps to read recorded audio.
 - `cpp/modulator_oracle.cc`, `src/modulator.rs` and `src/modulator_sweep.rs`: the meta-modulator
   (#200): two saturating input amplifiers, the internal oscillator, six cross-modulation
   algorithms at 6x oversampling and the 20-band vocoder, stereo int16 in and out at 96 kHz in the
@@ -108,7 +109,8 @@ renders, 4 qualities, 2 modes) twice in one process and again in a second proces
 bit-identical on Windows x86-64 with MSVC (2026-10-30); Linux and macOS prove it on every CI run.
 
 `tests/texture_self_floor.rs` does the same for the texture synthesizer: the whole sweep (2280
-effect-chain renders over 8 qualities, 588 synth renders, 9 input-stage runs) twice in one process
+effect-chain renders over 8 qualities, 588 synth renders, 72 synth note renders, 9 input-stage
+runs) twice in one process
 and again in a second process. Measured: bit-identical on Windows x86-64 with MSVC (2026-10-31);
 Linux and macOS prove it on every CI run.
 

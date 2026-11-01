@@ -22,7 +22,8 @@
 //! - [`texture`] and [`texture_sweep`]: the texture effect chain (grain and wavetable-grain
 //!   players, the multitap delay, four buffer qualities, the reverb; float stereo in and out), its
 //!   synth and its input stage, and the chain's fixed sweep, at each quality's codec rate in the
-//!   module's blocks (#241).
+//!   module's blocks (#241); [`texture_notes`]: the synth played from notes as the Texture Synth
+//!   instrument plays it (#241 slice 3).
 //! - [`modulator`] and [`modulator_sweep`]: the meta-modulator (two input amplifiers, the internal
 //!   oscillator, six cross-modulation algorithms and the vocoder; stereo int16 in and out) and its
 //!   fixed sweep, at 96 kHz in the module's 60-frame blocks (#200).
@@ -47,6 +48,7 @@ pub mod sequencer_sweep;
 pub mod subset;
 pub mod sweep;
 pub mod texture;
+pub mod texture_notes;
 pub mod texture_sweep;
 
 pub use ffi::Session;

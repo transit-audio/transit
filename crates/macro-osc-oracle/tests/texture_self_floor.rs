@@ -11,6 +11,7 @@ use transit_macro_osc_oracle::residual::residual_f32;
 use transit_macro_osc_oracle::texture::{
     Controls, INPUT_LIMIT, Media, TEXTURE_FIRMWARE_BUFFER_BITS, TEXTURE_LONG_BUFFER_BITS, TEXTURE_MAX_BLOCK_SIZE,
 };
+use transit_macro_osc_oracle::texture_notes::{note_points, render_note_point};
 use transit_macro_osc_oracle::texture_sweep::{
     self, Gate, INPUT_RUNS, Point, Quality, center, delay_center, input_signal, longest_point_frames, points, render_input_run, render_point,
     render_synth_point, synth_center, synth_points,
@@ -61,13 +62,22 @@ fn same_seed_twice_is_bit_identical() {
             compared += 1;
         }
     }
+    for resolution in 0..4 {
+        for point in note_points() {
+            let a = render_note_point(&session, resolution, &point).unwrap();
+            let b = render_note_point(&session, resolution, &point).unwrap();
+            let r = residual_f32(&flat(&a), &flat(&b)).unwrap();
+            assert!(r.is_exact(), "synth {resolution} {}: {r}", point.label());
+            compared += 1;
+        }
+    }
     for (rate, mode) in INPUT_RUNS {
         let a = render_input_run(&session, rate, mode).unwrap();
         let b = render_input_run(&session, rate, mode).unwrap();
         assert!(residual_f32(&flat(&a), &flat(&b)).unwrap().is_exact(), "input {rate} {mode}");
         compared += 1;
     }
-    assert_eq!(compared, Quality::all().len() * sweep.len() + 4 * synth_points().len() + INPUT_RUNS.len());
+    assert_eq!(compared, Quality::all().len() * sweep.len() + 4 * synth_points().len() + 4 * note_points().len() + INPUT_RUNS.len());
 }
 
 #[test]
@@ -149,6 +159,14 @@ fn every_quality_sounds() {
         for point in synth_points().into_iter().filter(|p| p.base == synth_center()) {
             let out = render_synth_point(&session, resolution, &point).unwrap();
             let peak = out[out.len() / 8..].iter().flatten().fold(0.0_f32, |m, s| m.max(s.abs()));
+            println!("synth {resolution} {}: peak {:.1} dBFS", point.label(), 20.0 * f64::from(peak).log10());
+            assert!(peak > 0.01, "synth {resolution} {}: peak {peak}", point.label());
+        }
+    }
+    for resolution in 0..4 {
+        for point in note_points() {
+            let out = render_note_point(&session, resolution, &point).unwrap();
+            let peak = out.iter().flatten().fold(0.0_f32, |m, s| m.max(s.abs()));
             println!("synth {resolution} {}: peak {:.1} dBFS", point.label(), 20.0 * f64::from(peak).log10());
             assert!(peak > 0.01, "synth {resolution} {}: peak {peak}", point.label());
         }

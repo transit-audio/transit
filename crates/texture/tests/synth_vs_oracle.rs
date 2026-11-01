@@ -1,5 +1,6 @@
 //! The synth (what the module plays with nothing patched) against the oracle over its sweep, at
-//! each resolution, bit for bit (#241).
+//! each resolution, bit for bit (#241), and played from notes on the SEED gate and the PITCH CV as
+//! the Texture Synth instrument plays it (#241 slice 3: `texture_notes`).
 
 #![forbid(unsafe_code)]
 
@@ -7,6 +8,7 @@ mod common;
 
 use transit_macro_osc_oracle::Session;
 use transit_macro_osc_oracle::texture::Media;
+use transit_macro_osc_oracle::texture_notes::{NOTE_BLOCK, NOTE_POINT_FRAMES, NotePoint, note_points, render_note_point};
 use transit_macro_osc_oracle::texture_sweep::{Point, SEED, SYNTH_POINT_FRAMES, render_synth_point, synth_points};
 use transit_texture::{Synth, SynthResolution};
 
@@ -86,4 +88,59 @@ fn the_last_wave_of_the_last_bank() {
         assert!(r.is_exact(), "synth {resolution:?}: {r}");
         assert!(common::sounds(&expected, 24));
     }
+}
+
+/// The port played from notes exactly as `texture_notes::render_note_point` plays the oracle.
+fn render_port_notes(resolution: SynthResolution, point: &NotePoint) -> Vec<[f32; 2]> {
+    let mut synth = Synth::new();
+    synth.seed(SEED);
+    let mut out = vec![[0.0_f32; 2]; NOTE_POINT_FRAMES];
+    let mut freeze = [false; NOTE_BLOCK];
+    let mut seed = [0_u8; NOTE_BLOCK];
+    for (b, o) in out.chunks_mut(NOTE_BLOCK).enumerate() {
+        let start = b * NOTE_BLOCK;
+        for (k, f) in freeze.iter_mut().enumerate() {
+            *f = point.frozen(start + k);
+        }
+        NotePoint::seed(start, &mut seed);
+        synth.render(&common::controls(&point.controls(start)), resolution, &freeze, Some(&seed), o);
+    }
+    out
+}
+
+fn null_notes(resolution: SynthResolution) {
+    let mut failures = Vec::new();
+    for point in note_points() {
+        let expected = {
+            let session = Session::lock();
+            render_note_point(&session, resolution.index(), &point).unwrap()
+        };
+        let got = render_port_notes(resolution, &point);
+        let r = common::residual(&expected, &got);
+        if !r.is_exact() {
+            failures.push(format!("synth {resolution:?} {}: {r}", point.label()));
+        }
+        assert!(common::sounds(&expected, 24), "synth {resolution:?} {}: every note point sounds", point.label());
+    }
+    assert!(failures.is_empty(), "{} of {} note points differ:\n{}", failures.len(), note_points().len(), failures.join("\n"));
+}
+
+#[test]
+fn notes_at_four_bits() {
+    null_notes(SynthResolution::Bits4);
+}
+
+#[test]
+fn notes_at_sixteen_bits_with_six_bit_grains() {
+    null_notes(SynthResolution::Bits16Grains6);
+}
+
+#[test]
+fn notes_at_seven_bits() {
+    null_notes(SynthResolution::Bits7);
+}
+
+#[test]
+fn notes_at_sixteen_bits() {
+    null_notes(SynthResolution::Bits16);
 }

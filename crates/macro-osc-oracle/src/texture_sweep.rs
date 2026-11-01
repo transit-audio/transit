@@ -467,7 +467,8 @@ pub fn digest_frames(frames: &[[f32; 2]]) -> u64 {
 
 /// One line per quality and point, `<quality> <point> <digest>`, for the sweep ([`crate::subset`]:
 /// the strided subset unless `TRANSIT_FULL_ORACLE=1`), then one per
-/// synth resolution and point and one per input-stage run. Two runs with equal lines rendered
+/// synth resolution and point, one per synth resolution and note point
+/// ([`crate::texture_notes`]) and one per input-stage run. Two runs with equal lines rendered
 /// bit-identical output.
 ///
 /// # Errors
@@ -485,6 +486,12 @@ pub fn digest_lines(session: &Session) -> Result<Vec<String>, Error> {
     for resolution in 0..4 {
         for point in synth_points() {
             let out = render_synth_point(session, resolution, &point)?;
+            lines.push(format!("synth{resolution} {} {:016x}", point.label(), digest_frames(&out)));
+        }
+    }
+    for resolution in 0..4 {
+        for point in crate::texture_notes::note_points() {
+            let out = crate::texture_notes::render_note_point(session, resolution, &point)?;
             lines.push(format!("synth{resolution} {} {:016x}", point.label(), digest_frames(&out)));
         }
     }
