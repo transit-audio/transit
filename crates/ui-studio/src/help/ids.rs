@@ -178,7 +178,7 @@ ids! {
     ResonatorStrums => "resonator.strums",
     ResonatorRate => "resonator.rate",
     ResonatorCredits => "resonator.credits",
-    // help	exture-synth.toml
+    // help\texture-synth.toml
     TextureSynthTime => "texture_synth.time",
     TextureSynthSize => "texture_synth.size",
     TextureSynthShape => "texture_synth.shape",
