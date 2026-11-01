@@ -19,8 +19,8 @@
 //! device: it is a second clock. transit has no second-device input rule yet (an input on another
 //! device is converted at the nominal rate ratio and re-aligned, ADR 0017's open item), so this is
 //! the simplest safe one: the [`Tap`] resamples from the endpoint's rate to the input device's rate
-//! by linear interpolation, with the ratio trimmed (at most [`MAX_PPM`]) to hold the ring at a
-//! target fill, and reports the trim as the drift in the diagnostics. The input converter then
+//! by linear interpolation, with the ratio trimmed by a PI controller (at most [`MAX_PPM`]) to hold
+//! the ring at a target fill, and reports the integral term (the endpoint's drift) as the drift in the diagnostics. The input converter then
 //! takes the widened input to the session rate as it does any input. The callback never waits on
 //! the loopback client: an empty ring reads as zeros (a loopback stream sends nothing while nothing
 //! plays on some drivers), a full one drops and counts. The capture has no timeline relation to
@@ -44,8 +44,17 @@ pub const TARGET_MS: u32 = 30;
 const RING_MS: u32 = 500;
 /// The largest trim of the rate ratio, in parts per million (two crystals differ by well under 100).
 pub const MAX_PPM: f64 = 1_000.0;
-/// The trim per unit of relative fill error: a ring 10% over its target trims 100 ppm.
-const GAIN_PPM: f64 = 1_000.0;
+/// The proportional gain of the rate controller, in ppm of trim per unit of relative fill error
+/// (a ring 10% over its target adds 400 ppm). Together with the integral gain it is derived from
+/// the plant: the fill error changes at `rate / target` (about 33 per second at 48 kHz and 30 ms)
+/// times the ratio error, so the loop is `s^2 + 33 Kp s + 33 Ki = 0`. `Kp` = 4000 ppm gives
+/// `2 wn` = 0.133 per second and `Ki` = 150 ppm per second per unit error gives `wn^2` = 0.005,
+/// so `wn` = 0.071 per second and the damping is 0.94: a step of 900 ppm in the endpoint's rate
+/// moves the fill by 16% of the target at most and settles in about a minute.
+const KP_PPM: f64 = 4_000.0;
+/// The integral gain, in ppm per second per unit of relative fill error. The integral term holds
+/// the steady-state ratio, so the fill settles at its target at any drift inside `MAX_PPM`.
+const KI_PPM_PER_S: f64 = 150.0;
 /// A ring this many targets full is resynchronized (the excess discarded), not trimmed down.
 const RESYNC_TARGETS: usize = 4;
 /// The time constant of the fill average, in seconds.
@@ -353,8 +362,9 @@ fn push_frames(producer: &mut rtrb::Producer<f32>, status: &Status, samples: &[f
 pub(crate) struct Resampler {
     /// Endpoint frames per device frame at the nominal rates.
     nominal: f64,
-    /// The trim now, relative (`MAX_PPM` at most either way).
-    trim: f64,
+    /// The integral term: the ratio the endpoint's drift needs, relative (`MAX_PPM` at most
+    /// either way). It is the drift reported once settled.
+    integral: f64,
     phase: f64,
     a: [f32; 2],
     b: [f32; 2],
@@ -367,6 +377,8 @@ pub(crate) struct Resampler {
     fill: f64,
     /// The weight of one device frame in the fill average.
     per_frame: f64,
+    /// Seconds per device frame.
+    seconds: f64,
 }
 
 impl Resampler {
@@ -374,7 +386,7 @@ impl Resampler {
         let (src, dst) = (f64::from(source_rate.max(1)), f64::from(device_rate.max(1)));
         Self {
             nominal: src / dst,
-            trim: 0.0,
+            integral: 0.0,
             phase: 0.0,
             a: [0.0; 2],
             b: [0.0; 2],
@@ -383,6 +395,7 @@ impl Resampler {
             target: target_frames(source_rate),
             fill: 0.0,
             per_frame: 1.0 / (FILL_TAU_SECONDS * dst),
+            seconds: 1.0 / dst,
         }
     }
 
@@ -427,9 +440,17 @@ impl Resampler {
         let weight = (frames as f64 * self.per_frame).min(1.0);
         self.fill += weight * ((queue.slots() / 2) as f64 - self.fill);
         let error = (self.fill - self.target as f64) / self.target as f64;
-        self.trim = (error * GAIN_PPM).clamp(-MAX_PPM, MAX_PPM) * 1e-6;
-        status.drift_deci_ppm.store((self.trim * 1e7).round() as i32, Ordering::Relaxed);
-        let step = self.nominal * (1.0 + self.trim);
+        // PI controller. Anti-windup: the integral term itself is held inside the clamp, so it
+        // can never wind past what the output can use (the output is clamped the same way). It
+        // keeps integrating while the sum saturates, so a drift at the clamp is still reported.
+        let max = MAX_PPM * 1e-6;
+        let proportional = error * KP_PPM * 1e-6;
+        self.integral = (self.integral + error * KI_PPM_PER_S * 1e-6 * frames as f64 * self.seconds).clamp(-max, max);
+        // The sum may reach twice the clamp: at a drift of exactly MAX_PPM the integral term is
+        // spent, and the proportional term needs room beyond it to pull the fill back to target.
+        let trim = (self.integral + proportional).clamp(-2.0 * max, 2.0 * max);
+        status.drift_deci_ppm.store((self.integral * 1e7).round() as i32, Ordering::Relaxed);
+        let step = self.nominal * (1.0 + trim);
         for (n, frame) in out.as_chunks_mut::<2>().0.iter_mut().enumerate() {
             let p = self.phase as f32;
             frame[0] = self.a[0] + (self.b[0] - self.a[0]) * p;

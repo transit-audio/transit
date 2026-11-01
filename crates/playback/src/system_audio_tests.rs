@@ -148,6 +148,63 @@ fn a_drifting_endpoint_is_trimmed_and_the_drift_reported() {
     assert_eq!(status.underrun.load(Ordering::Relaxed), 0);
 }
 
+/// Run the reader against an endpoint whose clock runs `ppm(t)` fast (negative: slow) against the
+/// device's, for `seconds` of simulated device time: 480-frame packets, 128-frame device blocks,
+/// the producer ahead by the target at the start. Deterministic sample counts, no clocks. Returns
+/// the counters, the fills after each block and the reported drift in ppm at the end.
+fn simulate_drift(ppm: &dyn Fn(f64) -> f64, seconds: u64) -> (Arc<Status>, Vec<usize>, f64) {
+    let (mut producer, mut source) = ring(48_000);
+    let status = Arc::clone(&source.status);
+    let mut resampler = Resampler::new(48_000, 48_000);
+    let (mut produced, mut endpoint_clock, mut device_frames) = (0.0f64, 0.0f64, 0u64);
+    let mut block = vec![0.0; 2 * 128];
+    let mut fills = Vec::new();
+    for _ in 0..(seconds * 48_000 / 128) {
+        device_frames += 128;
+        endpoint_clock += 128.0 * (1.0 + ppm(device_frames as f64 / 48_000.0) * 1e-6);
+        while produced + 480.0 <= endpoint_clock + target_frames(48_000) as f64 {
+            for _ in 0..480 {
+                let _ = producer.push(0.25);
+                let _ = producer.push(0.25);
+            }
+            produced += 480.0;
+        }
+        resampler.pull(&mut source.queue, &mut block, &status);
+        fills.push(source.queue.slots() / 2);
+    }
+    let drift = f64::from(status.drift_deci_ppm.load(Ordering::Relaxed)) / 10.0;
+    (status, fills, drift)
+}
+
+#[test]
+fn the_controller_holds_the_ring_at_its_target_at_any_drift_inside_the_clamp() {
+    let target = target_frames(48_000) as f64;
+    for true_ppm in [1_000.0, -1_000.0, 800.0, -800.0, 500.0, -500.0, 200.0, -200.0] {
+        let (status, fills, drift) = simulate_drift(&|_| true_ppm, 600);
+        assert_eq!(status.underrun.load(Ordering::Relaxed), 0, "{true_ppm} ppm: frames of zeros");
+        assert_eq!(status.discarded.load(Ordering::Relaxed), 0, "{true_ppm} ppm: resynchronized");
+        let late = &fills[fills.len() / 2..];
+        let (lo, hi) = (late.iter().copied().min().unwrap_or(0) as f64, late.iter().copied().max().unwrap_or(0) as f64);
+        assert!(lo > target * 0.6 && hi < target * 1.4, "{true_ppm} ppm: the ring wanders {lo}..{hi} frames around {target}");
+        assert!((drift - true_ppm).abs() <= true_ppm.abs() * 0.05, "{true_ppm} ppm reported as {drift}");
+    }
+}
+
+#[test]
+fn a_step_in_the_endpoint_clock_is_followed_without_running_dry() {
+    // 0 ppm for two minutes, then the endpoint slows to -900 ppm for ten.
+    let target = target_frames(48_000) as f64;
+    let (status, fills, drift) = simulate_drift(&|t| if t < 120.0 { 0.0 } else { -900.0 }, 720);
+    assert_eq!(status.underrun.load(Ordering::Relaxed), 0, "frames of zeros after the step");
+    assert_eq!(status.discarded.load(Ordering::Relaxed), 0);
+    let lowest = fills.iter().copied().min().unwrap_or(0) as f64;
+    assert!(lowest > target * 0.4, "the fill dips to {lowest} frames around the step");
+    let late = &fills[fills.len() * 9 / 10..];
+    let mean = late.iter().sum::<usize>() as f64 / late.len() as f64;
+    assert!((mean - target).abs() < target * 0.2, "settled at {mean} frames");
+    assert!((drift + 900.0).abs() <= 45.0, "-900 ppm reported as {drift}");
+}
+
 #[test]
 fn the_feed_folds_the_mix_to_stereo_and_counts_a_full_ring_only_once_read() {
     assert_eq!(fold_to_stereo(&[]), (0.0, 0.0));
