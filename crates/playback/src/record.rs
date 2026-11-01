@@ -257,6 +257,10 @@ fn capture_callbacks(
         if let Some(progress) = &progress {
             progress.publish(clock.observer.next_frame(), block.frames as u64);
         }
+        // System Audio (#268): the callback's clock observation, target and trim, once per callback.
+        if let Some(tap) = tap.as_mut() {
+            tap.begin(block.frames, block.stamp);
+        }
         sh.guarded(|| {
             // One admission covers the entire device callback, including its chunks.
             let capture = sh.begin_capture();
