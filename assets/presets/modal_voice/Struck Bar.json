@@ -1,0 +1,15 @@
+{
+  "plugin": "modal_voice",
+  "version": 1,
+  "params": {
+    "model": 0.0,
+    "strike_level": 85.0,
+    "mallet": 50.0,
+    "strike_timbre": 60.0,
+    "geometry": 30.0,
+    "brightness": 60.0,
+    "damping": 55.0,
+    "position": 25.0,
+    "space": 50.0
+  }
+}

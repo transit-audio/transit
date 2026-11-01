@@ -53,6 +53,7 @@ pub mod midi_learn;
 pub mod midi_monitor;
 mod midi_output;
 pub mod mixer;
+pub mod modal_voice_panel;
 pub mod modulator_panel;
 pub mod panel;
 pub mod panel_matrix;
@@ -1313,6 +1314,8 @@ mod midi_mappings_window_tests;
 mod midi_output_header_tests;
 #[cfg(test)]
 mod midi_record_tests;
+#[cfg(test)]
+mod modal_voice_panel_tests;
 #[cfg(test)]
 mod modulator_panel_tests;
 #[cfg(test)]

@@ -1,0 +1,149 @@
+# The Modal Voice's panel (the built-in instrument, ADR 0033, #198 slice 2).
+area = "modal-voice"
+title = "Modal Voice"
+link = "user-guide.md#modal-voice"
+
+[[entry]]
+id = "modal_voice.model"
+name = "Model"
+text = "Chooses what rings: Modal (a bank of 52 tuned modes, like a bar, a plate or a bell), String (one string with stiffness or a buzzing bridge) or Chord Strings (five strings tuned to a chord). FM Pair is the module's hidden voice: two FM oscillators through a swept filter, which replace the exciters and the resonator, the panel's controls taking other roles (see the user guide)."
+
+[[entry]]
+id = "modal_voice.contour"
+name = "Contour"
+text = "The envelope the bow and the blow follow while a key is held. Up to 40% it is a short attack and decay, louder toward 0%; from 40% to 60% the sustain rises to full; above 60% the sound sustains, its attack and release shortening toward 100% (the default)."
+
+[[entry]]
+id = "modal_voice.bow_level"
+name = "Bow"
+text = "How much the bow drives the resonator while the gate is up: a scratchy noise that also feeds eight bowed waveguides in the Modal model, so it can sustain the modes as a bow does. 0% by default."
+
+[[entry]]
+id = "modal_voice.bow_timbre"
+name = "Bow Timbre"
+text = "The bow's tone: the cutoff of the filter on its noise, from dark to bright (Brightness opens it further)."
+
+[[entry]]
+id = "modal_voice.blow_level"
+name = "Blow"
+text = "How much breath reaches the resonator while the gate is up: the module's noise sample, played as grains and diffused. From two thirds of its travel a reed-and-pipe model joins in and overblows. 0% by default."
+
+[[entry]]
+id = "modal_voice.flow"
+name = "Flow"
+text = "Where in its noise sample the blow restarts its grains, which changes the breath's texture."
+
+[[entry]]
+id = "modal_voice.blow_timbre"
+name = "Blow Timbre"
+text = "How fast the blow plays its noise sample: from a low rumble to a bright hiss."
+
+[[entry]]
+id = "modal_voice.strike_level"
+name = "Strike"
+text = "How hard each note strikes (on the gate's rising edge). Up to 80% it gets louder; past that the raw strike also bleeds into the output, as a click or a thump. 80% by default."
+
+[[entry]]
+id = "modal_voice.mallet"
+name = "Mallet"
+text = "What strikes: up to 40% the module's nine percussion samples (blended between neighbors), 40% to 60% a mallet, 60% to 80% a plectrum (a short scrape, then the pluck), 80% to 100% bouncing particles that keep hitting while the key is held. Some of them mute the resonator when the key comes up."
+
+[[entry]]
+id = "modal_voice.strike_timbre"
+name = "Strike Timbre"
+text = "The strike's tone: the filter on the mallet, plectrum and particles, or the playback rate of the samples."
+
+[[entry]]
+id = "modal_voice.geometry"
+name = "Geometry"
+text = "The resonator's shape: on Modal the stiffness, from a soft membrane through a bar and a plate to a bell; on String its dispersion (a buzzing curved bridge below 24%, plain from 24% to 26%, then stiffness and finally a noisy, unstable string); on Chord Strings which of eleven chords the five strings play. It stops just short of 100%, as on the module."
+
+[[entry]]
+id = "modal_voice.brightness"
+name = "Brightness"
+text = "How bright the ringing is: how fast the high modes die away, and the bow's filter."
+
+[[entry]]
+id = "modal_voice.damping"
+name = "Damping"
+text = "How long the resonator rings: short at 0%, very long toward 100%. A released key can mute it sooner with some strikes."
+
+[[entry]]
+id = "modal_voice.position"
+name = "Position"
+text = "Where the resonator is excited and picked up, which brings out or hides partials (a comb across the modes)."
+
+[[entry]]
+id = "modal_voice.space"
+name = "Space"
+text = "Up to 5% the left output is the dry exciter, crossfading to the resonator by 10%; then the stereo spread opens up to 80%, and from 60% a reverb grows, at its largest at 100%. From 100% to 175% nothing more changes; from 175% the reverb freezes, holding what it heard. 50% by default."
+
+[[entry]]
+id = "modal_voice.velocity"
+name = "Velocity"
+text = "How much velocity matters. Velocity is the module's strength input: it scales the exciters through the module's own accent curve (about 3 dB per tenth of travel, unity near velocity 64). At 100% (the default) the strength is the velocity; at 0% every note plays at full strength."
+
+[[entry]]
+id = "modal_voice.level"
+name = "Level"
+text = "The instrument's output level; the -6 dB default leaves headroom. The module's own soft limiter keeps each output near full scale at 0 dB."
+
+[[entry]]
+id = "modal_voice.tune"
+name = "Tune"
+text = "Transposes the voice in semitones, through the module's FM input."
+
+[[entry]]
+id = "modal_voice.bend_range"
+name = "Bend Range"
+text = "How many semitones a full pitch bend moves the voice, up and down. The mod wheel and aftertouch do nothing until a matrix row uses them."
+
+[[entry]]
+id = "modal_voice.shaper"
+name = "Shaper"
+text = "Switches on the shaper on the instrument's output: the filter and the amp envelope, which open when the gate rises and close when it falls (the sustain pedal holds it, as a key does). Switched while the gate is up it takes over at once with a short crossfade; with the gate down it waits for the next note. Off by default; the envelopes and LFOs run either way, as matrix sources."
+
+[[entry]]
+id = "modal_voice.amp_adsr"
+name = "Amp Envelope"
+text = "The output's level envelope while the shaper is on: Attack (to full level, restarted from where it is at each new note), Decay (toward Sustain), Sustain (while the gate is up) and Release (after it falls). Decay and Release times are to -60 dB. Also the Amp envelope source of the matrix."
+
+[[entry]]
+id = "modal_voice.filter_mode"
+name = "Filter Mode"
+text = "The shaper's filter: low pass, band pass or high pass, the Filter effect's state-variable filter, one per output."
+
+[[entry]]
+id = "modal_voice.filter_adsr"
+name = "Filter Envelope"
+text = "The envelope for the cutoff: Attack, Decay, Sustain and Release, restarted at each new note like the amp envelope. Also the Filter envelope source of the matrix."
+
+[[entry]]
+id = "modal_voice.lfo_shape"
+name = "LFO Shape"
+text = "Sine, triangle, saw, square, sample and hold (a random step each cycle) or smooth random (random steps joined by a glide). The instrument has two LFOs."
+
+[[entry]]
+id = "modal_voice.matrix"
+name = "Modulation Matrix"
+text = "Sixteen rows, each routing a source to a destination: the row adds its amount times the source, shaped by its curve and scaled by its via source. The module's controls, the strength and the pitch are worked out once per 16-frame block, the shaper's destinations every 12 frames. A row whose source or destination is Off, or whose amount is 0%, does nothing."
+
+[[entry]]
+id = "modal_voice.matrix_dest"
+name = "Matrix Destination"
+text = "What the row moves. At 100% and a full source: Pitch 24 semitones; Geometry, Brightness, Damping, Position, Strength, Bow, Blow and Resonance their whole travel; Level from silence to double; Cutoff six octaves; Filter env amount its whole range; an LFO rate four octaves; an LFO amount its whole range; Pan from left to right. Aftertouch to Strength plays the module's pressure input."
+
+[[entry]]
+id = "modal_voice.gate"
+name = "Gate"
+text = "The module is one voice with a gate. A key raises it: the strike hits, the bow and the blow sound under Contour; the last key up lowers it and the voice releases. A new note while a key is held strikes again (the gate drops for 0.5 ms and rises at the new pitch); letting go of it returns to the newest key still held without a new strike. The sustain pedal holds the gate as a key does. All Notes Off lowers the gate; All Sound Off (a host panic) silences at once. An instrument cannot take a track's audio as its exciter yet."
+
+[[entry]]
+id = "modal_voice.rate"
+name = "Rate and Latency"
+text = "The voice runs at the module's 32 kHz in 16-frame blocks, and a note takes effect at the next block (at most 0.47 ms later). Its output is converted to the session rate and delay compensation takes the delay: 49 samples at 44.1 kHz, 53 at 48 kHz, 97 at 88.2 kHz, 105 at 96 kHz (none in a 32 kHz session)."
+
+[[entry]]
+id = "modal_voice.credits"
+name = "Credits"
+text = "The Modal Voice is a port of Émilie Gillet's open-source modal synthesizer firmware (MIT license), written by transit from her code and checked against it sample by sample. It ports the digital signal processing, not the hardware; the notices are in Help > About transit."

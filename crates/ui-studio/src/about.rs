@@ -20,6 +20,7 @@ Texture and Texture Synth: a port of Émilie Gillet's texture synthesizer firmwa
 Time Stretcher: a port of Émilie Gillet's texture processor firmware and stmlib (MIT)
 Cross Modulator: a port of Émilie Gillet's meta-modulator firmware and stmlib (MIT)
 Resonator: a port of Émilie Gillet's resonator firmware and stmlib (MIT)
+Modal Voice: a port of Émilie Gillet's modal synthesizer firmware and stmlib (MIT)
 Random Sequencer: a port of Émilie Gillet's random sampler firmware and stmlib (MIT)";
 /// Their license notices, verbatim.
 pub const THIRD_PARTY_NOTICES: &str = concat!(
@@ -36,6 +37,10 @@ pub const THIRD_PARTY_NOTICES: &str = concat!(
 
 ",
     include_str!("../../resonator/LICENSE-THIRD-PARTY"),
+    "
+
+",
+    include_str!("../../modal-voice/LICENSE-THIRD-PARTY"),
     "
 
 ",

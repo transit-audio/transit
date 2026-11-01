@@ -41,6 +41,8 @@ fn grid(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
         ("Each row adds amount × curve(source) × via to its destination", crate::help::Id::ResonatorMatrix)
     } else if info.id == crate::texture_synth_panel::TEXTURE_SYNTH {
         ("Each row adds amount × curve(source) × via to its destination", crate::help::Id::TextureSynthMatrix)
+    } else if info.id == crate::modal_voice_panel::MODAL_VOICE {
+        ("Each row adds amount × curve(source) × via to its destination", crate::help::Id::ModalVoiceMatrix)
     } else {
         ("Each row adds amount × curve(source) × via to its destination, per voice", crate::help::Id::MacroOscMatrix)
     };

@@ -101,6 +101,9 @@ fn the_help_menu_opens_about_with_wordmark_version_and_credit() {
     // #198: the Resonator's credit and notices.
     assert!(crate::about::THIRD_PARTY.contains("Resonator: a port of Émilie Gillet's resonator firmware"));
     assert!(notices.contains("Third-party licenses: transit-resonator") && notices.contains("Copyright 2015 Emilie Gillet"));
+    // #198 slice 2: the Modal Voice's credit and notices.
+    assert!(crate::about::THIRD_PARTY.contains("Modal Voice: a port of Émilie Gillet's modal synthesizer firmware"));
+    assert!(notices.contains("Third-party licenses: transit-modal-voice") && notices.contains("Copyright 2014 Emilie Gillet"));
     // #202: the Random Sequencer's credit and notices.
     assert!(crate::about::THIRD_PARTY.contains("Random Sequencer: a port of Émilie Gillet's random sampler firmware"));
     assert!(notices.contains("Third-party licenses: transit-random-sequencer") && notices.contains("Copyright 2015 Emilie Gillet"));

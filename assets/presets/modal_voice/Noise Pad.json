@@ -1,0 +1,17 @@
+{
+  "plugin": "modal_voice",
+  "version": 1,
+  "params": {
+    "model": 2.0,
+    "contour": 80.0,
+    "bow_level": 30.0,
+    "blow_level": 60.0,
+    "flow": 85.0,
+    "blow_timbre": 30.0,
+    "strike_level": 0.0,
+    "geometry": 50.0,
+    "brightness": 45.0,
+    "damping": 80.0,
+    "space": 150.0
+  }
+}

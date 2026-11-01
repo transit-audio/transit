@@ -300,6 +300,9 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
     if plugin == crate::texture_synth_panel::TEXTURE_SYNTH {
         return crate::texture_synth_panel::help(param);
     }
+    if plugin == crate::modal_voice_panel::MODAL_VOICE {
+        return crate::modal_voice_panel::help(param);
+    }
     if plugin != MACRO_OSC {
         return None;
     }
@@ -376,6 +379,7 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         crate::tuner_panel::TUNER => Some(&crate::tuner_panel::LAYOUT),
         crate::resonator_panel::RESONATOR => Some(&crate::resonator_panel::LAYOUT),
         crate::texture_synth_panel::TEXTURE_SYNTH => Some(&crate::texture_synth_panel::LAYOUT),
+        crate::modal_voice_panel::MODAL_VOICE => Some(&crate::modal_voice_panel::LAYOUT),
         _ => None,
     }
 }
@@ -445,6 +449,20 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
         crate::help::hover(ui, &r, crate::help::Id::TextureSynthCredits);
         lay.credit = crate::texture_synth_panel::CREDIT.to_string();
     }
+    if info.id == crate::modal_voice_panel::MODAL_VOICE {
+        // The gate and rate lines side by side, so the expanded window keeps within 800 pt.
+        ui.horizontal(|ui| {
+            for (text, id) in
+                [(crate::modal_voice_panel::GATE, crate::help::Id::ModalVoiceGate), (crate::modal_voice_panel::RATE, crate::help::Id::ModalVoiceRate)]
+            {
+                let r = ui.label(RichText::new(text).size(10.5).color(TOKENS.text_dim));
+                crate::help::hover(ui, &r, id);
+            }
+        });
+        let r = ui.label(RichText::new(crate::modal_voice_panel::CREDIT).size(10.5).color(TOKENS.text_dim));
+        crate::help::hover(ui, &r, crate::help::Id::ModalVoiceCredits);
+        lay.credit = crate::modal_voice_panel::CREDIT.to_string();
+    }
     if info.id == crate::modulator_panel::CROSS_MODULATOR {
         let v = app.followed_param(key, "algorithm").or_else(|| ins.params.get("algorithm").copied());
         let v = info.param("algorithm").map_or(0.0, |p| p.clamp(v.unwrap_or(p.default)));
@@ -462,6 +480,7 @@ fn addition_row(plugin: &str) -> Option<usize> {
         MACRO_OSC => Some(ADDITION_ROW),
         crate::resonator_panel::RESONATOR => Some(crate::resonator_panel::ADDITION_ROW),
         crate::texture_synth_panel::TEXTURE_SYNTH => Some(crate::texture_synth_panel::ADDITION_ROW),
+        crate::modal_voice_panel::MODAL_VOICE => Some(crate::modal_voice_panel::ADDITION_ROW),
         _ => None,
     }
 }
@@ -695,63 +714,4 @@ mod tests {
             crate::tuner_panel::TUNER,
             crate::resonator_panel::RESONATOR,
             crate::texture_synth_panel::TEXTURE_SYNTH,
-        ] {
-            let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
-            let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).flat_map(|i| item_ids(*i)).collect();
-            ids.sort_unstable();
-            let mut want: Vec<&str> = transit_dsp::plugin_info(plugin).unwrap().params.iter().map(|p| p.id).collect();
-            want.sort_unstable();
-            assert_eq!(ids, want, "{plugin}");
-        }
-    }
-
-    #[test]
-    fn every_macro_oscillator_control_has_a_help_entry() {
-        for p in transit_dsp::plugin_info(MACRO_OSC).unwrap().params {
-            assert!(help(MACRO_OSC, p.id).is_some(), "{}", p.id);
-        }
-        assert!(help("compressor", "threshold").is_none());
-    }
-
-    #[test]
-    fn every_texture_control_has_a_help_entry() {
-        for p in transit_dsp::plugin_info(crate::texture_panel::TEXTURE).unwrap().params {
-            assert!(help(crate::texture_panel::TEXTURE, p.id).is_some(), "{}", p.id);
-        }
-    }
-
-    #[test]
-    fn every_time_stretcher_control_has_a_help_entry() {
-        for p in transit_dsp::plugin_info(crate::time_stretcher_panel::TIME_STRETCHER).unwrap().params {
-            assert!(help(crate::time_stretcher_panel::TIME_STRETCHER, p.id).is_some(), "{}", p.id);
-        }
-    }
-
-    #[test]
-    fn every_cross_modulator_control_has_a_help_entry() {
-        for p in transit_dsp::plugin_info(crate::modulator_panel::CROSS_MODULATOR).unwrap().params {
-            assert!(help(crate::modulator_panel::CROSS_MODULATOR, p.id).is_some(), "{}", p.id);
-        }
-    }
-
-    #[test]
-    fn every_texture_synth_control_has_a_help_entry() {
-        for p in transit_dsp::plugin_info(crate::texture_synth_panel::TEXTURE_SYNTH).unwrap().params {
-            assert!(help(crate::texture_synth_panel::TEXTURE_SYNTH, p.id).is_some(), "{}", p.id);
-        }
-    }
-
-    #[test]
-    fn every_resonator_control_has_a_help_entry() {
-        for p in transit_dsp::plugin_info(crate::resonator_panel::RESONATOR).unwrap().params {
-            assert!(help(crate::resonator_panel::RESONATOR, p.id).is_some(), "{}", p.id);
-        }
-    }
-
-    #[test]
-    fn every_filter_control_has_a_help_entry() {
-        for p in transit_dsp::plugin_info(FILTER).unwrap().params {
-            assert!(help(FILTER, p.id).is_some(), "{}", p.id);
-        }
-    }
-}
+            crate::modal_voice_panel::MODAL_VOICE,
