@@ -307,6 +307,14 @@ Settings, autosaves and logs live in a per-user folder: `%APPDATA%\transit` on W
 `~/.config/transit`) elsewhere. Set `TRANSIT_CONFIG_DIR` to use another folder. An empty value
 disables saving settings.
 
+Render settings are read once at startup; restart transit after changing them.
+
+| Environment variable | Behavior |
+|---|---|
+| `TRANSIT_RENDER_POOL` | Unset or `1`: render workers on; `0`: render strips serially on the audio thread. |
+| `TRANSIT_RENDER_GRAPH` | Unset or `1`: keyed strips use the task graph; `0`: keyed plans render serially and the tail graph is disabled. |
+| `TRANSIT_RENDER_TAIL` | `1`: opt into the aux and bus tail graph; unset or `0`: keep the serial tail until the paired measurement. The graph opt-out wins. Eligibility counts live auxes toward the four-strip threshold; only an away tail strip forces the tail recovery path. See the [render-worker guide](docs/user-guide.md#multicore-mixer-render). |
+
 `transit --control <port>` (or `TRANSIT_CONTROL_PORT`; `0` picks a free port) starts a JSON-lines control server for scripts and the MCP server. It binds to `127.0.0.1` only. At start it writes a random per-run token to `control-token` in the settings folder (override the path with `TRANSIT_CONTROL_TOKEN_FILE`) and logs the path; each connection must send `auth <token>` as its first line or it is closed. `transit-cli mcp --connect <port>` reads the file itself. The MCP tools are `list_commands`, `execute`, `batch`, `inspect_session`, `new_session`, `open_session`, `save_session`, `import_audio`, `bounce_mix`, and, with the app, `screenshot`, `ui_inspect`, `ui_set`, `click`, `drag` and `key`. See `docs/control-protocol.md` and `docs/mcp.md`.
 
 ## Status and known issues

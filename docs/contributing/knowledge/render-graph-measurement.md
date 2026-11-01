@@ -9,7 +9,7 @@ A **published attempt** is one successful Idle-to-Published transition of a work
 Each published attempt ends in exactly one of three ways:
 - **claimed**: a worker won `Published -> Claimed`;
 - **pre-deadline reclaimed** (`inline_pre`): the callback won `Published -> Reclaimed` through the inline path before the deadline, whenever that render completes;
-- **deadline reclaimed** (`unclaimed_at_deadline`): the callback won `Published -> Reclaimed` during deadline resolution, whether the attempt was retired unrendered or rendered as a tail task. `deadline_reclaimed_tail` counts the tail-rendered subset; it is reported and never added.
+- **deadline reclaimed** (`unclaimed_at_deadline`): the callback won `Published -> Reclaimed` during deadline resolution, whether the attempt was retired unrendered or rendered as a tail task; this also includes abandoned publications reclaimed at the next boundary when the previous drive never finished. `deadline_reclaimed_tail` counts the tail-rendered subset; it is reported and never added.
 
 ## Stamps
 

@@ -144,6 +144,17 @@ and restart transit. If only sessions with sidechain keys misbehave, set `TRANSI
 same way instead: those sessions then render on the audio thread, and sessions without keys keep the
 workers.
 
+Set `TRANSIT_RENDER_TAIL=1` the same way to opt into rendering the aux and bus tail through the
+graph (#174 slice 2). Unset or `0` keeps the serial tail, the default until the paired measurement;
+other values are logged once and treated as unset. `TRANSIT_RENDER_GRAPH=0` disables the tail graph
+even with this opt-in. Masters still render on the audio thread after the tail.
+
+The tail graph requires a render pool, an audio-thread block without forced serial rendering,
+both graph switches on, a worker slot for every task strip, and at least four phase-1 strips plus
+live auxes combined. Live auxes count toward that threshold. Only an away tail strip forces the
+tail recovery path regardless of the switches or counts; away phase-1 strips alone use the
+existing recovery path.
+
 ## Macro Oscillator
 
 The Macro Oscillator is a built-in instrument (choose it from a track's instrument slot): up to 16

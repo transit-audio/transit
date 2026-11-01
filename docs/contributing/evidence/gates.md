@@ -75,6 +75,13 @@ It runs in the Windows job of `.github/workflows/ci.yml` next to `layers`, `asse
 
 The suite needs the `testing` cargo feature of `transit-mix` (which turns on `transit-dsp`'s): it compiles the seams the gate uses, `Plugin::fingerprint` and the strip state fingerprints, the muted serial blocks, the deterministic deadline and the per-block views (`crates/mix/src/fingerprint.rs`, `sched_seam.rs`, `strip_pool/seam.rs`), and `transit-rt`'s `testing` feature compiles the schedule and its shrinker (`worker_set::schedule`). Each is enabled only by a `[dev-dependencies]` entry (`transit-mix` names itself there), so tests and `--all-targets` lints get it and a release build (`cargo build --release`, `release.yml`) never compiles it; nothing has to be passed by hand. More seeds: `TRANSIT_SCHED_SEEDS=256 cargo test -p transit-mix --test sched_equivalence -- --nocapture`; one seed: `TRANSIT_SCHED_SEED=<n>` (the same command).
 
+The tail graph extends this gate to aux holds, returns and nested groups, including the serial
+Skip/Discard reference, snapshots, deadline reclaims and zero callback allocations (#174 slice 2):
+
+```sh
+TRANSIT_RENDER_TAIL=1 cargo test --locked -p transit-mix --test render_tail --test sched_equivalence_tail --test render_graph --test sched_equivalence
+```
+
 ## Oracle null tests
 
 How the technique works, start to finish: [`knowledge/oracle-null-testing.md`](../knowledge/oracle-null-testing.md).
