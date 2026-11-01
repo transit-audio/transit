@@ -90,7 +90,7 @@ fn the_help_menu_opens_about_with_wordmark_version_and_credit() {
     assert!(notices.contains("Copyright (c) 2022 Oliver Rockstedt") && notices.contains("Copyright 2016 Emilie Gillet"));
     assert!(notices.contains("Copyright 2012 Emilie Gillet"), "the stmlib notice");
     // #241: the Texture insert's credit and notices.
-    assert!(crate::about::THIRD_PARTY.contains("Texture: a port of Émilie Gillet's texture synthesizer firmware"));
+    assert!(crate::about::THIRD_PARTY.contains("Texture and Texture Synth: a port of Émilie Gillet's texture synthesizer firmware"));
     assert!(notices.contains("Third-party licenses: transit-texture") && notices.contains("Copyright 2017 Emilie Gillet"));
     // #199: the Time Stretcher insert's credit and notices.
     assert!(crate::about::THIRD_PARTY.contains("Time Stretcher: a port of Émilie Gillet's texture processor firmware"));

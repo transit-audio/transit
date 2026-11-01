@@ -73,6 +73,10 @@ pub static FACTORY: &[(&str, &str, &str)] = factory![
     "random_sequencer" / "Drifting Melody",
     "random_sequencer" / "Locked Loop",
     "random_sequencer" / "Sparse Random Bass",
+    "texture_synth" / "Grain Pad",
+    "texture_synth" / "Grain Pulse",
+    "texture_synth" / "Frozen Cloud",
+    "texture_synth" / "Tape Keys",
 ];
 
 /// The factory presets of one plug-in, in table order.

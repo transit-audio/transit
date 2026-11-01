@@ -297,6 +297,9 @@ fn help(plugin: &str, param: &str) -> Option<crate::help::Id> {
     if plugin == crate::resonator_panel::RESONATOR {
         return crate::resonator_panel::help(param);
     }
+    if plugin == crate::texture_synth_panel::TEXTURE_SYNTH {
+        return crate::texture_synth_panel::help(param);
+    }
     if plugin != MACRO_OSC {
         return None;
     }
@@ -372,6 +375,7 @@ pub fn layout(plugin: &str) -> Option<&'static [Row]> {
         crate::modulator_panel::CROSS_MODULATOR => Some(&crate::modulator_panel::LAYOUT),
         crate::tuner_panel::TUNER => Some(&crate::tuner_panel::LAYOUT),
         crate::resonator_panel::RESONATOR => Some(&crate::resonator_panel::LAYOUT),
+        crate::texture_synth_panel::TEXTURE_SYNTH => Some(&crate::texture_synth_panel::LAYOUT),
         _ => None,
     }
 }
@@ -426,6 +430,21 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Inser
         crate::help::hover(ui, &r, crate::help::Id::ResonatorCredits);
         lay.credit = crate::resonator_panel::CREDIT.to_string();
     }
+    if info.id == crate::texture_synth_panel::TEXTURE_SYNTH {
+        // The notes and rate lines side by side, so the expanded window keeps within 800 pt.
+        ui.horizontal(|ui| {
+            for (text, id) in [
+                (crate::texture_synth_panel::NOTES, crate::help::Id::TextureSynthNotes),
+                (crate::texture_synth_panel::RATE, crate::help::Id::TextureSynthRate),
+            ] {
+                let r = ui.label(RichText::new(text).size(10.5).color(TOKENS.text_dim));
+                crate::help::hover(ui, &r, id);
+            }
+        });
+        let r = ui.label(RichText::new(crate::texture_synth_panel::CREDIT).size(10.5).color(TOKENS.text_dim));
+        crate::help::hover(ui, &r, crate::help::Id::TextureSynthCredits);
+        lay.credit = crate::texture_synth_panel::CREDIT.to_string();
+    }
     if info.id == crate::modulator_panel::CROSS_MODULATOR {
         let v = app.followed_param(key, "algorithm").or_else(|| ins.params.get("algorithm").copied());
         let v = info.param("algorithm").map_or(0.0, |p| p.clamp(v.unwrap_or(p.default)));
@@ -442,6 +461,7 @@ fn addition_row(plugin: &str) -> Option<usize> {
     match plugin {
         MACRO_OSC => Some(ADDITION_ROW),
         crate::resonator_panel::RESONATOR => Some(crate::resonator_panel::ADDITION_ROW),
+        crate::texture_synth_panel::TEXTURE_SYNTH => Some(crate::texture_synth_panel::ADDITION_ROW),
         _ => None,
     }
 }
@@ -674,6 +694,7 @@ mod tests {
             crate::modulator_panel::CROSS_MODULATOR,
             crate::tuner_panel::TUNER,
             crate::resonator_panel::RESONATOR,
+            crate::texture_synth_panel::TEXTURE_SYNTH,
         ] {
             let rows = layout(plugin).unwrap_or_else(|| panic!("a layout for {plugin}"));
             let mut ids: Vec<&str> = rows.iter().flat_map(|r| r.iter()).flat_map(|s| s.items.iter()).flat_map(|i| item_ids(*i)).collect();
@@ -710,6 +731,13 @@ mod tests {
     fn every_cross_modulator_control_has_a_help_entry() {
         for p in transit_dsp::plugin_info(crate::modulator_panel::CROSS_MODULATOR).unwrap().params {
             assert!(help(crate::modulator_panel::CROSS_MODULATOR, p.id).is_some(), "{}", p.id);
+        }
+    }
+
+    #[test]
+    fn every_texture_synth_control_has_a_help_entry() {
+        for p in transit_dsp::plugin_info(crate::texture_synth_panel::TEXTURE_SYNTH).unwrap().params {
+            assert!(help(crate::texture_synth_panel::TEXTURE_SYNTH, p.id).is_some(), "{}", p.id);
         }
     }
 

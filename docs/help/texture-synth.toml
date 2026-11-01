@@ -1,0 +1,140 @@
+# The Texture Synth's panel (the built-in instrument, the Texture insert's synth played from MIDI,
+# ADR 0033, #241 slice 3).
+area = "texture-synth"
+title = "Texture Synth"
+link = "user-guide.md#texture-synth"
+
+[[entry]]
+id = "texture_synth.time"
+name = "Time"
+text = "Where in the bank's 16 waves the oscillator and each new grain read, from the first wave to the last. Its Random knob wanders the position (right of center smoothly, left of center in jumps)."
+
+[[entry]]
+id = "texture_synth.size"
+name = "Size"
+text = "How long each grain lasts: from about 4 seconds at the top down nine octaves, with grains played backward below a third. 75% gives grains of about a third of a second."
+
+[[entry]]
+id = "texture_synth.shape"
+name = "Shape"
+text = "Each grain's envelope: square, decaying, bell-shaped or reversed decay across its travel."
+
+[[entry]]
+id = "texture_synth.pitch"
+name = "Pitch"
+text = "Transposes the instrument by up to two octaves either way, the module's Pitch knob. Notes add to it: MIDI 69 plays 440 Hz with the knob at 0."
+
+[[entry]]
+id = "texture_synth.random"
+name = "Random"
+text = "The module's attenuverters: how much each grain's Time, Size, Shape or Pitch wanders. Right of center the value drifts smoothly; left of center it jumps now and then. At the center nothing wanders."
+
+[[entry]]
+id = "texture_synth.density"
+name = "Density"
+text = "How the notes start grains. Left of center a steady stream runs while a key is held, the first grain at the note and faster toward the left; at the center each note starts one grain; right of center grains come at random while a key is held, denser toward the right. With Latch on, the notes clock grains that Density divides."
+
+[[entry]]
+id = "texture_synth.bank"
+name = "Bank"
+text = "Picks one of 12 wavetable banks for the oscillator and the grains (the module's Feedback knob, which chooses the bank when it plays its synth). A change crossfades over 25 ms."
+
+[[entry]]
+id = "texture_synth.dry_wet"
+name = "Dry/Wet"
+text = "The balance between the oscillator (dry) and the grains (wet). The oscillator has no gate on the module: it keeps playing the last note's pitch for as long as Dry lets it through, unless the shaper's amp envelope closes it. 100% by default, so only grains sound."
+
+[[entry]]
+id = "texture_synth.reverb"
+name = "Reverb"
+text = "The module's reverb: its amount and, with it, its length."
+
+[[entry]]
+id = "texture_synth.freeze"
+name = "Freeze"
+text = "Holds the cloud: new grains stop and the grains sounding keep their level, and the oscillator stops wandering. Saving with Freeze on stores the frozen cloud with the session, so it sounds again on reopen (the shaper restarts at rest, so with the shaper on it waits for a note). Map it to a pedal or a button with MIDI Learn."
+
+[[entry]]
+id = "texture_synth.seed"
+name = "Seed"
+text = "The module's Seed button: held, it raises the gate as a held key would, so grains flow whatever the keys do. Map it with MIDI Learn to play grains from a button."
+
+[[entry]]
+id = "texture_synth.seed_latch"
+name = "Latch"
+text = "Latches the Seed button: the notes then become a clock, and Density divides it (left of center every second, third, fourth note and so on, right of center at random). Off by default."
+
+[[entry]]
+id = "texture_synth.quality"
+name = "Quality"
+text = "The module's quality setting, which on its synth sets the resolution: Dirty Tape 4-bit, Clean Tape a 16-bit oscillator with 6-bit grains, Vintage Digital 7-bit, Digital 16-bit. A change takes effect at once; nothing restarts."
+
+[[entry]]
+id = "texture_synth.mono_grains"
+name = "Mono Grains"
+text = "Each new grain cuts the ones before it short, so one grain sounds at a time (an advanced setting of the module)."
+
+[[entry]]
+id = "texture_synth.velocity"
+name = "Velocity"
+text = "How much velocity sets the level: a note plays Level times (1 minus Velocity times how far its velocity is below full), from that note on. At 0%, or at full velocity, the level is the knob. The module has no level input of its own. 50% by default."
+
+[[entry]]
+id = "texture_synth.level"
+name = "Level"
+text = "The instrument's output level; the module's own limiter keeps the output near full scale at 0 dB."
+
+[[entry]]
+id = "texture_synth.bend_range"
+name = "Bend Range"
+text = "How many semitones a full pitch bend moves the pitch, up and down. The mod wheel and aftertouch do nothing until a matrix row uses them."
+
+[[entry]]
+id = "texture_synth.shaper"
+name = "Shaper"
+text = "Switches on the shaper on the instrument's output: the filter and the amp envelope, which opens at each note and closes when no key is held (the sustain pedal holds it). Switched while a key is held it takes over at once with a short crossfade; with no key held it waits for the next note. Off by default."
+
+[[entry]]
+id = "texture_synth.amp_adsr"
+name = "Amp Envelope"
+text = "The output's level envelope while the shaper is on: Attack, Decay, Sustain and Release. It gates the oscillator, which the module itself never closes. Also the Amp envelope source of the matrix."
+
+[[entry]]
+id = "texture_synth.filter_mode"
+name = "Filter Mode"
+text = "The shaper's filter: low pass, band pass or high pass, the Filter effect's state-variable filter, one per output side."
+
+[[entry]]
+id = "texture_synth.filter_adsr"
+name = "Filter Envelope"
+text = "The envelope for the cutoff: Attack, Decay, Sustain and Release, restarted at each note like the amp envelope. Also the Filter envelope source of the matrix."
+
+[[entry]]
+id = "texture_synth.lfo_shape"
+name = "LFO Shape"
+text = "Sine, triangle, saw, square, sample and hold (a random step each cycle) or smooth random (random steps joined by a glide). The instrument has two LFOs."
+
+[[entry]]
+id = "texture_synth.matrix"
+name = "Modulation Matrix"
+text = "Sixteen rows, each routing a source to a destination: the row adds its amount times the source, shaped by its curve and scaled by its via source, once per 12-frame block. A row whose source or destination is Off, or whose amount is 0%, does nothing."
+
+[[entry]]
+id = "texture_synth.matrix_dest"
+name = "Matrix Destination"
+text = "What the row moves. At 100% and a full source: Pitch 24 semitones; Time, Size, Shape, Density, Bank, Dry/Wet, Reverb and Resonance their whole travel; Level from silence to double; Cutoff six octaves; Filter env amount its whole range; an LFO rate four octaves; an LFO amount its whole range; Pan from left to right."
+
+[[entry]]
+id = "texture_synth.notes"
+name = "Notes"
+text = "One voice with up to 32 grains inside: the instrument plays one pitch at a time. A key raises the module's seed gate and sets its pitch; the gate stays up while any key is held and grains already started play out after it falls. A new key while one is held starts again at its pitch; letting it go returns to the newest key still held, without restarting. All Notes Off lets the grains play out; All Sound Off silences at once. The instrument has no audio input yet."
+
+[[entry]]
+id = "texture_synth.rate"
+name = "Rate and Latency"
+text = "The synth runs at the module's 48 kHz in 12-frame blocks, and a note takes effect at the next block (at most 0.23 ms later at 48 kHz). In a 48 kHz session nothing is converted or delayed. At other rates its output is converted to the session rate and delay compensation takes the delay: 35 samples at 22.05, 32 and 44.1 kHz, 65 at 88.2 kHz, 70 at 96 kHz, 129 at 176.4 kHz, 140 at 192 kHz."
+
+[[entry]]
+id = "texture_synth.credits"
+name = "Credits"
+text = "The Texture Synth is a port of the synth in Émilie Gillet's open-source texture synthesizer firmware (MIT license), written by transit from her code and checked against it sample by sample. It ports the digital signal processing, not the hardware; the notices are in Help > About transit."

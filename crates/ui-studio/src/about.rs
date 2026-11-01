@@ -16,7 +16,7 @@ const LICENSES: &str = "MIT OR Apache-2.0";
 /// The ported DSP the app ships, credited by name (ADR 0033).
 pub const THIRD_PARTY: &str =
     "Macro Oscillator: a port of Émilie Gillet's macro oscillator firmware and stmlib (MIT), by way of Oliver Rockstedt's Rust port (MIT)
-Texture: a port of Émilie Gillet's texture synthesizer firmware and stmlib (MIT)
+Texture and Texture Synth: a port of Émilie Gillet's texture synthesizer firmware and stmlib (MIT)
 Time Stretcher: a port of Émilie Gillet's texture processor firmware and stmlib (MIT)
 Cross Modulator: a port of Émilie Gillet's meta-modulator firmware and stmlib (MIT)
 Resonator: a port of Émilie Gillet's resonator firmware and stmlib (MIT)

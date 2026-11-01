@@ -39,6 +39,8 @@ fn grid(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &Insert, i
     // The Resonator (#198) is one sound source: its matrix runs once for the instrument.
     let (text, help) = if info.id == crate::resonator_panel::RESONATOR {
         ("Each row adds amount × curve(source) × via to its destination", crate::help::Id::ResonatorMatrix)
+    } else if info.id == crate::texture_synth_panel::TEXTURE_SYNTH {
+        ("Each row adds amount × curve(source) × via to its destination", crate::help::Id::TextureSynthMatrix)
     } else {
         ("Each row adds amount × curve(source) × via to its destination, per voice", crate::help::Id::MacroOscMatrix)
     };

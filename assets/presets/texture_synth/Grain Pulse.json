@@ -1,0 +1,14 @@
+{
+  "plugin": "texture_synth",
+  "version": 1,
+  "params": {
+    "time": 60.0,
+    "time_random": -40.0,
+    "size": 55.0,
+    "shape": 15.0,
+    "density": 28.0,
+    "feedback": 58.0,
+    "reverb": 20.0,
+    "velocity": 70.0
+  }
+}

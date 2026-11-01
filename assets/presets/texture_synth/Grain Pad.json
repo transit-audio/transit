@@ -1,0 +1,21 @@
+{
+  "plugin": "texture_synth",
+  "version": 1,
+  "params": {
+    "time": 40.0,
+    "time_random": 30.0,
+    "size": 85.0,
+    "shape": 60.0,
+    "pitch_random": 10.0,
+    "density": 20.0,
+    "dry_wet": 85.0,
+    "reverb": 55.0,
+    "velocity": 30.0,
+    "shaper": 1.0,
+    "amp_attack": 250.0,
+    "amp_decay": 1500.0,
+    "amp_sustain": 80.0,
+    "amp_release": 1800.0,
+    "cutoff": 6000.0
+  }
+}

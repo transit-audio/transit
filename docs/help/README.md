@@ -20,6 +20,7 @@ optional `key` (spelled as the shortcut table spells it) and an optional `link` 
 | [`random-sequencer.toml`](random-sequencer.toml) | The Random Sequencer MIDI effect's controls. |
 | [`macro-osc.toml`](macro-osc.toml) | The Macro Oscillator's panel. |
 | [`resonator.toml`](resonator.toml) | The Resonator's panel. |
+| [`texture-synth.toml`](texture-synth.toml) | The Texture Synth's panel. |
 | [`telemetry.toml`](telemetry.toml) | The load readout and every figure of Callback Telemetry. |
 | [`audio-devices.toml`](audio-devices.toml) | The Audio Devices status card and its buttons. |
 | [`midi-monitor.toml`](midi-monitor.toml) | The MIDI Monitor window. |

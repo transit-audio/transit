@@ -70,6 +70,7 @@ mod takes;
 pub mod telemetry;
 pub mod tempo_edit;
 pub mod texture_panel;
+pub mod texture_synth_panel;
 pub mod theme;
 pub mod time_stretcher_panel;
 pub mod title_bar;
@@ -1329,6 +1330,8 @@ mod slice5_tests;
 mod slice6_tests;
 #[cfg(test)]
 mod texture_panel_tests;
+#[cfg(test)]
+mod texture_synth_panel_tests;
 #[cfg(test)]
 mod time_stretcher_panel_tests;
 /// Services what hosted plug-ins asked of the host (audit F08, ADR 0012 G7): CLAP restarts,
