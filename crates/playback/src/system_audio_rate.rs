@@ -3,9 +3,9 @@
 //!
 //! Each side keeps a line of (time, frame) points: the loopback stream's packets (the frame index
 //! of a packet's first frame and the QPC time WASAPI gives for it) and the input stream's callbacks
-//! (the frames read so far and the callback's frame time). A least-squares fit over the last
-//! [`WINDOW_NS`] of points gives each side's frames per second of the shared clock, and their
-//! ratio over the nominal one is the drift. It depends only on the counts and the times, never on
+//! (the frames read so far and the callback's arrival time). A least-squares fit over each line's
+//! window gives each side's frames per second of the shared clock, and their ratio over the
+//! nominal one is the drift. It depends only on the counts and the times, never on
 //! how the packets and the callbacks line up, so a 480-frame callback beside 480-frame packets
 //! reads the same as any other.
 //!
@@ -20,12 +20,27 @@
 //! estimate instead of computing a ratio between two clocks that share no base. The estimate is
 //! held while a restarted line refills.
 //!
-//! A side that stalls (a loopback that pauses and resumes without a discontinuity flag) leaves a
-//! step in time with no frames; a point whose time step exceeds its frame step by more than
-//! [`STALL_SLACK_NS`] restarts the line, so the fit never spans the step.
+//! **The two kinds of time behave differently, and each line follows its kind.** A position time
+//! is exact: when a point's time step exceeds the time its frames take by more than
+//! [`STALL_SLACK_NS`] (a loopback that paused and resumed without a discontinuity flag), the
+//! offset is permanent, so the line restarts on that point at once and the fit never spans the
+//! step. An arrival time (a host callback time or the reader's own clock) is the true time plus a
+//! delay that is never negative: a few milliseconds of jitter, and now and then one block that is
+//! tens of milliseconds late before the next ones catch up, which leaves no lasting offset.
+//! Anchoring a restarted line on that one late point would carry it at full weight for seconds
+//! (the fourth review of #268: the trim at its clamp, the reading 1400 ppm off). So an
+//! arrival-timed line never restarts on a single point: a point more than [`OUTLIER_NS`] later
+//! than the newest stored point predicts is an outlier and is not stored; only when outliers
+//! follow one another without a point back on the line for [`CONFIRM_NS`] of arrival time (and at
+//! least [`CONFIRM_POINTS`] of them) is the offset real (a device that lost frames), and the line
+//! restarts on the point that confirms it. The blocks that catch up behind a late one arrive with
+//! it and carry no new time, so they are skipped, and the run spans no time and never confirms.
+//! Arrival jitter is the other noise of an arrival-timed line, and its fit uses a longer window
+//! to average it: every point of its [`ARRIVAL_POINTS`] ring, up to [`ARRIVAL_WINDOW_NS`] (20 s at
+//! 10 ms callbacks, 60 s at 8192-frame ones), against [`WINDOW_NS`] for a position-timed line.
 //!
 //! Audio-thread code: the points live in fixed arrays inside the struct (no allocation, no lock,
-//! no wait); a fit is O([`POINTS`]) and runs at most once per callback.
+//! no wait); a fit is one pass over a line's ring and runs at most once per callback.
 
 /// Where a time comes from. One line never mixes kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,75 +75,128 @@ pub(crate) struct Obs {
     pub domain: Domain,
 }
 
-/// The points one line holds: at [`SPACING_NS`] apart they cover a little more than the window.
+/// The points the endpoint's line holds: at [`SPACING_NS`] apart they cover a little more than
+/// [`WINDOW_NS`].
 pub(crate) const POINTS: usize = 1024;
+/// The points the device's line holds (it is arrival-timed): 20 s at [`SPACING_NS`].
+pub(crate) const ARRIVAL_POINTS: usize = 2048;
 /// The least time between two stored points (closer observations are skipped, their frames still
 /// count through the next point's index).
 pub(crate) const SPACING_NS: i64 = 10_000_000;
-/// The span of the fit: the points of the last 10 s. With position stamps (microsecond jitter)
-/// the slope is good to a fraction of a ppm; with arrival times jittered by a millisecond it is
-/// good to about 10 ppm.
+/// The span of a position-timed line's fit: the points of the last 10 s. With position stamps
+/// (microsecond jitter) the slope is good to a fraction of a ppm.
 pub(crate) const WINDOW_NS: i64 = 10_000_000_000;
-/// A point whose time step exceeds the time its frames take at the nominal rate by more than this
-/// restarts the line: a side that stopped delivering and resumed. 50 ms is far above the jitter of
-/// a stamp (a few ms) and the drift over a step (1000 ppm of 10 s is 10 ms), and far below the
-/// shortest pause (hundreds of ms) that would bias the fit.
+/// The longest span of an arrival-timed line's fit; within it the fit takes every point the ring
+/// holds. The slope's noise goes as the jitter over (the square root of the points x the span), so
+/// a full ring of 10 ms callbacks (20 s) and 60 s of 8192-frame callbacks (350 points) average it
+/// about equally well.
+pub(crate) const ARRIVAL_WINDOW_NS: i64 = 60_000_000_000;
+/// A point of a position-timed line whose time step exceeds the time its frames take at the
+/// nominal rate by more than this restarts the line: a side that stopped delivering and resumed.
+/// 50 ms is far above the jitter of a stamp (microseconds) and the drift over a step (1000 ppm of
+/// 10 s is 10 ms), and far below the shortest pause (hundreds of ms) that would bias the fit.
 pub(crate) const STALL_SLACK_NS: i64 = 50_000_000;
+/// A point of an arrival-timed line more than this later than the newest stored point predicts
+/// (its time step less the time its frames take) is an outlier and is not stored. 20 ms is several
+/// times the arrival jitter of a callback (1 to 3 ms in the tests; a timer-driven shared-mode
+/// period of 10 ms at worst), and a delay just under it costs the 20 s fit a few ppm.
+pub(crate) const OUTLIER_NS: i64 = 20_000_000;
+/// Outliers that follow one another for this long of arrival time, with no point back on the line
+/// between them, are a lasting offset: the line restarts on the point that confirms it.
+pub(crate) const CONFIRM_NS: i64 = 300_000_000;
+/// ... and there are at least this many of them (a run of 8192-frame callbacks is three in 340 ms).
+pub(crate) const CONFIRM_POINTS: u32 = 3;
 /// A line gives a slope once its points span this long.
 pub(crate) const MIN_SPAN_NS: i64 = 2_000_000_000;
 /// ... and hold at least this many points.
 const MIN_POINTS: usize = 16;
 
-/// One clock's (time, frame) points in a fixed ring.
-pub(crate) struct Line {
-    time: [i64; POINTS],
-    frame: [u64; POINTS],
+/// One clock's (time, frame) points in a fixed ring of `N`.
+pub(crate) struct Line<const N: usize> {
+    time: [i64; N],
+    frame: [u64; N],
     /// The next slot to write.
     head: usize,
     len: usize,
     kind: Option<(Kind, Domain)>,
-    /// The side's nominal frames per second, for the stall rule.
+    /// The side's nominal frames per second, for the stall and outlier rules.
     hz: f64,
+    /// Outliers in a row (an arrival-timed line), and the arrival times of the first and the last.
+    outliers: u32,
+    outlier_since: i64,
+    outlier_last: i64,
 }
 
-impl Line {
+impl<const N: usize> Line<N> {
     fn new(hz: f64) -> Self {
-        Self { time: [0; POINTS], frame: [0; POINTS], head: 0, len: 0, kind: None, hz }
+        Self { time: [0; N], frame: [0; N], head: 0, len: 0, kind: None, hz, outliers: 0, outlier_since: 0, outlier_last: 0 }
     }
 
     fn reset(&mut self) {
-        (self.head, self.len, self.kind) = (0, 0, None);
+        (self.head, self.len, self.kind, self.outliers) = (0, 0, None, 0);
+    }
+
+    /// Start again on a line of `kind` and `domain` (the next stored point is its first).
+    fn restart(&mut self, kind: Kind, domain: Domain) {
+        self.reset();
+        self.kind = Some((kind, domain));
     }
 
     fn newest(&self) -> Option<(i64, u64)> {
         (self.len > 0).then(|| {
-            let i = (self.head + POINTS - 1) % POINTS;
+            let i = (self.head + N - 1) % N;
             (self.time[i], self.frame[i])
         })
     }
 
     /// Store the point (`frame`, `time_ns`) unless it is closer than [`SPACING_NS`] to the last
-    /// one. A change of kind or domain, a time going backward, a frame index going backward or a
-    /// stall (the time step exceeds the frames' time by more than [`STALL_SLACK_NS`]) starts the
-    /// line again. Returns whether the point was stored.
+    /// one. A change of kind or domain, a time going backward or a frame index going backward
+    /// starts the line again. A point whose time step exceeds its frames' time (`late`): on a
+    /// position-timed line, by more than [`STALL_SLACK_NS`], restarts the line on it; on an
+    /// arrival-timed line, by more than [`OUTLIER_NS`], is an outlier, not stored, and restarts the
+    /// line only when it confirms a run of outliers ([`CONFIRM_NS`], [`CONFIRM_POINTS`]); a point
+    /// within [`SPACING_NS`] of the last outlier's arrival (a block that caught up with it) is
+    /// skipped. Returns whether the point was stored.
     fn add(&mut self, frame: u64, time_ns: i64, kind: Kind, domain: Domain) -> bool {
         if self.kind != Some((kind, domain)) {
-            self.reset();
-            self.kind = Some((kind, domain));
+            self.restart(kind, domain);
         }
         if let Some((t, f)) = self.newest() {
-            let frames_ns = frame.saturating_sub(f) as f64 / self.hz * 1e9;
-            if time_ns < t || frame < f || (time_ns - t) as f64 - frames_ns > STALL_SLACK_NS as f64 {
-                self.reset();
-                self.kind = Some((kind, domain));
-            } else if time_ns - t < SPACING_NS {
-                return false;
+            if time_ns < t || frame < f {
+                self.restart(kind, domain);
+            } else {
+                let late = (time_ns - t) as f64 - (frame - f) as f64 / self.hz * 1e9;
+                if kind == Kind::Position {
+                    if late > STALL_SLACK_NS as f64 {
+                        self.restart(kind, domain);
+                    } else if time_ns - t < SPACING_NS {
+                        return false;
+                    }
+                } else if self.outliers > 0 && time_ns - self.outlier_last < SPACING_NS {
+                    // The blocks that arrive with a late one carry no new time: neither judged nor
+                    // stored.
+                    return false;
+                } else if late > OUTLIER_NS as f64 {
+                    if self.outliers == 0 {
+                        self.outlier_since = time_ns;
+                    }
+                    (self.outliers, self.outlier_last) = (self.outliers + 1, time_ns);
+                    if self.outliers < CONFIRM_POINTS || time_ns - self.outlier_since < CONFIRM_NS {
+                        return false;
+                    }
+                    self.restart(kind, domain);
+                } else {
+                    self.outliers = 0;
+                    if time_ns - t < SPACING_NS {
+                        return false;
+                    }
+                }
             }
         }
         self.time[self.head] = time_ns;
         self.frame[self.head] = frame;
-        self.head = (self.head + 1) % POINTS;
-        self.len = (self.len + 1).min(POINTS);
+        self.head = (self.head + 1) % N;
+        self.len = (self.len + 1).min(N);
         true
     }
 
@@ -136,16 +204,26 @@ impl Line {
         self.kind.map(|(_, domain)| domain)
     }
 
-    /// Frames per second of the time base: the least-squares slope over the points of the last
-    /// [`WINDOW_NS`], once they span [`MIN_SPAN_NS`]. Centered on the newest point, in f64.
+    /// The span of the fit: [`WINDOW_NS`] for a position-timed line, every point the ring holds up
+    /// to [`ARRIVAL_WINDOW_NS`] for an arrival-timed one.
+    fn window_ns(&self) -> i64 {
+        match self.kind {
+            Some((Kind::Position, _)) => WINDOW_NS,
+            _ => ARRIVAL_WINDOW_NS,
+        }
+    }
+
+    /// Frames per second of the time base: the least-squares slope over the points of the line's
+    /// window, once they span [`MIN_SPAN_NS`]. Centered on the newest point, in f64.
     fn slope(&self) -> Option<f64> {
         let (t0, f0) = self.newest()?;
+        let window = self.window_ns();
         let (mut n, mut sx, mut sy, mut sxx, mut sxy, mut span) = (0.0f64, 0.0f64, 0.0f64, 0.0f64, 0.0f64, 0i64);
         let mut count = 0usize;
         for k in 0..self.len {
-            let i = (self.head + POINTS - 1 - k) % POINTS;
+            let i = (self.head + N - 1 - k) % N;
             let age = t0 - self.time[i];
-            if age > WINDOW_NS {
+            if age > window {
                 break;
             }
             let x = -(age as f64) * 1e-9;
@@ -164,8 +242,8 @@ impl Line {
 /// The drift of the endpoint's clock against the device's: `(endpoint rate / device rate) /
 /// nominal - 1`, relative (positive when the endpoint runs fast).
 pub(crate) struct RateEstimate {
-    endpoint: Line,
-    device: Line,
+    endpoint: Line<POINTS>,
+    device: Line<ARRIVAL_POINTS>,
     /// Endpoint frames per device frame at the nominal rates.
     nominal: f64,
     /// A point was stored since the last fit.
@@ -315,5 +393,56 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// Both sides on exact time, 480 frames per 10 ms, for `points` points; `device_late(k)` is how
+    /// late the device's point `k` arrives, in ns. Returns the estimate after each point and the
+    /// device line's length.
+    fn run_device_late(points: u64, device_late: &dyn Fn(u64) -> i64) -> (Box<RateEstimate>, Vec<(Option<f64>, usize)>) {
+        let mut est = Box::new(RateEstimate::new(48_000.0, 48_000.0));
+        let mut seen = Vec::new();
+        for k in 0..points {
+            let t = (k * 10_000_000) as i64;
+            est.endpoint(Obs { first_frame: k * 480, frames: 480, time_ns: t, kind: Kind::Position, domain: Domain::Qpc });
+            est.device(k * 480, t + device_late(k), Kind::Host, Domain::Qpc);
+            seen.push((est.drift(), est.device.len));
+        }
+        (est, seen)
+    }
+
+    #[test]
+    fn a_late_arrival_that_the_next_blocks_catch_up_is_ignored_and_the_reading_holds() {
+        for late_ms in [21, 45, 60, 120, 500] {
+            // Point 1000 arrives late; the points due inside the delay arrive with it.
+            let late = late_ms * 1_000_000;
+            let (_, seen) = run_device_late(2000, &|k| {
+                let behind = (k as i64 - 1000) * 10_000_000;
+                if (0..late).contains(&behind) { late - behind } else { 0 }
+            });
+            for (k, (drift, len)) in seen.iter().enumerate() {
+                if let Some(d) = drift {
+                    assert!(d.abs() < 1e-6, "{late_ms} ms late: the reading left its bound ({d}) at point {k}");
+                }
+                if k > 0 && k < 2000 {
+                    assert!(*len >= seen[k - 1].1, "{late_ms} ms late: the device line restarted at point {k}");
+                }
+            }
+            assert!(seen[1999].0.is_some());
+        }
+    }
+
+    #[test]
+    fn a_lasting_offset_on_an_arrival_timed_line_restarts_it_once_confirmed() {
+        // From point 1000 on, every device point is 200 ms late: the device lost frames.
+        let (est, seen) = run_device_late(2000, &|k| if k >= 1000 { 200_000_000 } else { 0 });
+        let first = 1000 + seen[1000..].iter().position(|(_, len)| *len == 1).expect("the line restarted");
+        assert_eq!(first, 1030, "outliers from point 1000 confirm the offset once they span 300 ms");
+        assert!(seen[1000..1030].iter().all(|(_, len)| *len == 1000), "the outliers are not stored");
+        for (k, (drift, _)) in seen.iter().enumerate() {
+            if let Some(d) = drift {
+                assert!(d.abs() < 1e-6, "the reading left its bound ({d}) at point {k}: held while the line refills");
+            }
+        }
+        assert_eq!(est.device.len, 970);
     }
 }
