@@ -38,6 +38,9 @@ impl Plugin for IdleProbe {
     fn process(&mut self, _: &mut [Vec<f32>], _: usize) {
         panic!("idle insert must not process");
     }
+    fn idle_applies_all_parameters(&self) -> bool {
+        false
+    }
     fn service_idle_state(&mut self) {
         assert!(!self.initializing, "preparation must finish before idle service");
         assert!(self.freeze, "bypassed edits must reach the capture");

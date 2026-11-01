@@ -175,6 +175,8 @@ struct Fx {
     refuse_activate: bool,
     /// Deterministic #219 seam: reject one processing start before accepting events.
     refuse_start_once: bool,
+    events_errored: bool,
+    events_error_armed: bool,
     /// Every `process` calls `params.rescan(VALUES)` (requests plugin, `CMD:rescan-every-block`).
     rescan_every_block: bool,
     processes: u64,
@@ -478,6 +480,8 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
         first.fill(0.0);
         let mut w = 0;
         let mut last_time = 0u32;
+        let mut error_once = false;
+        let mut note_ons = 0u32;
         for k in 0..count {
             // SAFETY: k is below size(); SDK input_events.get returns a live header for this process call.
             let h = unsafe { &*(ev.get.unwrap())(pr.in_events, k) };
@@ -491,6 +495,9 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
                 CLAP_EVENT_NOTE_ON | CLAP_EVENT_NOTE_OFF => {
                     // SAFETY: The CLAP core NOTE_ON/OFF tag selects this aligned event payload.
                     let e = unsafe { &*(h as *const clap_event_header as *const clap_event_note) };
+                    if h.type_ == CLAP_EVENT_NOTE_ON {
+                        note_ons += 1;
+                    }
                     (if h.type_ == CLAP_EVENT_NOTE_ON { 1.0 } else { 2.0 }, f32::from(e.channel) * 1000.0 + f32::from(e.key), e.note_id as f32)
                 }
                 CLAP_EVENT_NOTE_EXPRESSION => {
@@ -502,6 +509,7 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
                 CLAP_EVENT_PARAM_VALUE => {
                     // SAFETY: The CLAP core PARAM_VALUE tag selects this aligned event payload.
                     let e = unsafe { &*(h as *const clap_event_header as *const clap_event_param_value) };
+                    error_once |= f.events_error_armed && e.param_id == 5 && e.value == 0.5 && !f.events_errored;
                     (4.0, e.param_id as f32, (e.value * 1e6).round() as f32)
                 }
                 CLAP_EVENT_MIDI => {
@@ -517,6 +525,15 @@ unsafe extern "C" fn process(p: *const clap_plugin, pr: *const clap_process) -> 
                 }
                 w += 1;
             }
+        }
+        if f.events_errored
+            && let Some(last) = first.last_mut()
+        {
+            *last = note_ons as f32;
+        }
+        if error_once {
+            f.events_errored = true;
+            return CLAP_PROCESS_ERROR;
         }
         for c in 1..out.channel_count as usize {
             // SAFETY: c is within the SDK output table; its n writable samples are distinct from first (no input buses).
@@ -791,6 +808,11 @@ unsafe extern "C" fn state_load(p: *const clap_plugin, stream: *const clap_istre
     }
     // And its GUI modes (issue #68): embedded too, embedded that fails, and a query.
     match std::str::from_utf8(&bytes[..got]).ok() {
+        Some("CMD:process-error-once") => {
+            f.events_error_armed = true;
+            f.events_errored = false;
+            return true;
+        }
         Some("CMD:refuse-start-once") => {
             f.refuse_start_once = true;
             return true;
@@ -941,7 +963,7 @@ unsafe extern "C" fn get_extension(p: *const clap_plugin, id: *const c_char) -> 
         &LATENCY as *const _ as *const c_void
     } else if id == CLAP_EXT_NOTE_PORTS && synth {
         &NOTES as *const _ as *const c_void
-    } else if id == CLAP_EXT_STATE && !synth {
+    } else if id == CLAP_EXT_STATE && (!synth || cfg!(feature = "events")) {
         &STATE as *const _ as *const c_void
     } else if id == CLAP_EXT_GUI && !synth {
         &GUI as *const _ as *const c_void
@@ -1019,6 +1041,8 @@ unsafe extern "C" fn factory_create(_f: *const clap_plugin_factory, host: *const
         restart_at: None,
         refuse_activate: false,
         refuse_start_once: false,
+        events_errored: false,
+        events_error_armed: false,
         rescan_every_block: false,
         processes: 0,
         log: std::sync::Mutex::new(Vec::new()),

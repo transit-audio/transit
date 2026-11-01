@@ -85,3 +85,77 @@ fn bypass_receives_automation_and_first_active_block_uses_it_without_another_lan
         assert!(out.iter().flatten().zip(first.iter().flatten()).all(|(v, before)| *v == before * 4.0), "no stale first sample");
     }
 }
+
+fn review_session() -> (Session, TrackId, TrackId) {
+    let mut s = Session::default();
+    let a = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+    let b = s.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+    s.track_mut(a).unwrap().mixer.inserts[0] = Some(Insert::new("gain"));
+    s.track_mut(b).unwrap().mixer.inserts[0] = Some(Insert::new("gain"));
+    (s, a, b)
+}
+
+fn review_confirms_first(s: &Session, a: TrackId) -> bool {
+    let mut rig = PlanRig::new(64);
+    rig.publish(s);
+    for k in 0..8 {
+        let _ = rig.render(k * 64);
+    }
+    rig.eng.parameter_delivery(a, 0) == ParameterDelivery::Ready
+}
+
+#[test]
+fn review_a_deactivated_insert_on_another_track_does_not_block_confirmation() {
+    let (mut s, a, b) = review_session();
+    s.track_mut(b).unwrap().mixer.inserts[0].as_mut().unwrap().active = false;
+    assert!(review_confirms_first(&s, a), "one deactivated insert blocks every header job in the session");
+}
+
+#[test]
+fn review_an_inactive_track_does_not_block_confirmation() {
+    let (mut s, a, b) = review_session();
+    s.track_mut(b).unwrap().inactive = true;
+    assert!(review_confirms_first(&s, a), "one inactive track blocks every header job in the session");
+}
+
+#[test]
+fn own_inactive_slot_confirms_stored_values_but_failed_slot_refuses() {
+    for inactive_track in [false, true] {
+        let (mut s, a, b) = review_session();
+        if inactive_track {
+            s.track_mut(b).unwrap().inactive = true;
+        } else {
+            s.track_mut(b).unwrap().mixer.inserts[0].as_mut().unwrap().active = false;
+        }
+        let mut rig = PlanRig::new(64);
+        rig.publish(&s);
+        let _ = rig.render(0);
+        assert_eq!(rig.eng.parameter_delivery(b, 0), ParameterDelivery::Ready);
+        let p = rig.eng.plan.as_mut().unwrap();
+        let i = p.tables.strip_of(b).unwrap();
+        p.tables.strips[i].plugins[0].as_mut().unwrap().failed = true;
+        assert_eq!(rig.eng.parameter_delivery(b, 0), ParameterDelivery::Failed);
+        assert_eq!(rig.eng.parameter_delivery(a, 0), ParameterDelivery::Ready);
+    }
+}
+
+#[test]
+fn own_bypassed_edits_wait_while_other_instance_confirms_without_allocation() {
+    let (mut s, a, b) = review_session();
+    let mut rig = PlanRig::new(64).fake(
+        b,
+        0,
+        Queued { queued: Arc::new(AtomicU32::new(0)), seen: Arc::new(AtomicU32::new(0)), calls: Arc::new(AtomicUsize::new(0)), pending: None },
+    );
+    rig.publish(&s);
+    let _ = rig.render(0);
+    let ins = s.track_mut(b).unwrap().mixer.inserts[0].as_mut().unwrap();
+    ins.bypass = true;
+    ins.params.insert("gain".into(), -12.0);
+    rig.publish(&s);
+    let _ = rig.render(64);
+    let ((first, second), heap) = measure(|| (rig.eng.parameter_delivery(a, 0), rig.eng.parameter_delivery(b, 0)));
+    assert_eq!(first, ParameterDelivery::Ready);
+    assert_eq!(second, ParameterDelivery::Pending);
+    assert!(heap.is_zero(), "per-instance acknowledgment: {heap:?}");
+}

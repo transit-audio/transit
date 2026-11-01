@@ -534,3 +534,60 @@ fn an_older_ui_json_has_no_remembered_load_times_and_newer_ones_round_trip() {
     let back: crate::UiState = serde_json::from_value(serde_json::to_value(&ui).unwrap()).unwrap();
     assert_eq!(back.plugin_load_ms.get("vst3:abc"), Some(&14_100));
 }
+
+/// #219 C1: another bypassed instance with a queued edit cannot hold this Save As.
+#[test]
+fn a_bypassed_other_plugin_does_not_block_save_as() {
+    if !in_child("a_bypassed_other_plugin_does_not_block_save_as") {
+        return;
+    }
+    let Rig { mut app, ctx, t, gain, config, name, .. } = rig("other-bypassed");
+    frames_until(&mut app, &ctx, "both instances delivered", |a| a.player.as_ref().unwrap().plays_processed(&a.engine.session_arc()));
+    app.header_action(t, 1, HeaderAction::Bypass);
+    app.run("mix.insert_param", serde_json::json!({"track": t.0, "slot": 1, "param": "7", "value": 0.4})).unwrap();
+    until_plays(&mut app, &ctx);
+    *name.lock().unwrap() = "Independent.vstpreset".into();
+    app.header_action(t, 0, HeaderAction::SaveAs);
+    app.drive_plugin_headers();
+    let sentinel = app.player.as_ref().unwrap().begin_save_state(t, 0).unwrap();
+    let _ = finish_without_frames(sentinel);
+    app.drive_plugin_headers();
+    let file = transit_engine::presets::path(&config, &gain, "Independent").unwrap();
+    let saved = transit_engine::io::presets::read(&file, &gain);
+    let busy = app.plugin_header.any_busy();
+    quit(&mut app);
+    assert!(!busy, "another bypassed plug-in held this Save As");
+    assert!(saved.is_ok(), "the active instance's preset was saved: {saved:?}");
+}
+
+/// Inactive confirmation means stored state, even when the live instance disagrees.
+#[test]
+fn an_inactive_own_slot_saves_stored_state_instead_of_live_state() {
+    if !in_child("an_inactive_own_slot_saves_stored_state_instead_of_live_state") {
+        return;
+    }
+    let Rig { mut app, ctx, t, gain, config, name, .. } = rig("own-inactive");
+    frames_until(&mut app, &ctx, "both instances delivered", |a| a.player.as_ref().unwrap().plays_processed(&a.engine.session_arc()));
+    app.run("mix.insert_state", serde_json::json!({"track": t.0, "slot": 0, "state": transit_model::b64::encode(&state(0.75))})).unwrap();
+    app.run("track.make_inactive", serde_json::json!({"tracks": [t.0], "inactive": true})).unwrap();
+    until_plays(&mut app, &ctx);
+    let mut load = app.player.as_ref().unwrap().begin_load_state(t, 0, state(0.25)).unwrap();
+    loop {
+        match load.poll() {
+            JobPoll::Ready(_) => break,
+            JobPoll::Failed(e) => panic!("state job failed: {e}"),
+            JobPoll::Waiting => {
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        }
+    }
+    let live = finish_without_frames(app.player.as_ref().unwrap().begin_save_state(t, 0).unwrap());
+    *name.lock().unwrap() = "Stored.vstpreset".into();
+    app.header_action(t, 0, HeaderAction::SaveAs);
+    app.drive_plugin_headers();
+    let file = transit_engine::presets::path(&config, &gain, "Stored").unwrap();
+    let saved = transit_engine::io::presets::read(&file, &gain);
+    quit(&mut app);
+    assert_eq!(live, state(0.25), "the live instance deliberately differs from the document");
+    assert_eq!(saved.unwrap(), state(0.75), "inactive Save As uses stored state immediately");
+}

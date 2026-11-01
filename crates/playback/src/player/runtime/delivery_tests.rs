@@ -91,3 +91,52 @@ fn confirmation_waits_for_the_host_to_process_the_value_without_blocking() {
     assert!(matches!(save.poll(), JobPoll::Ready(Some(data)) if data == (-12.0f32).to_bits().to_le_bytes()));
     runtime.retire(ports);
 }
+
+#[test]
+fn per_instance_confirmation_ignores_other_slots_and_rejects_old_generations() {
+    let mut session = Session::default();
+    let a = session.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+    let b = session.add_track(TrackKind::Audio, ChannelFormat::Stereo, None);
+    session.track_mut(a).unwrap().mixer.inserts[0] = Some(Insert::new("gain"));
+    let mut other = Insert::new("gain");
+    other.bypass = true;
+    other.params.insert("gain".into(), -12.0);
+    session.track_mut(b).unwrap().mixer.inserts[0] = Some(other);
+    let session = Arc::new(session);
+    let target = RenderTarget { device: transit_mix::DeviceGeneration(1), sample_rate: 48_000, max_block: 64, out_channels: 0, in_channels: 0 };
+    let (mut runtime, mut ports) = RuntimeControl::<u8, u8>::new(Arc::clone(&session), None, target, PlanLimits::default()).unwrap();
+    runtime.control.service(&mut |_, _| {
+        Some(NewInstance {
+            plugin: Box::new(Host {
+                reject: Arc::new(AtomicBool::new(false)),
+                skip: Arc::new(AtomicBool::new(false)),
+                value: Arc::new(AtomicU32::new(0)),
+                queued: None,
+            }),
+            refused_state: false,
+        })
+    });
+    ports.plans.service(&mut plan_bridge::callback_scope(), true);
+    runtime.service();
+    let (_, heap) = measure(|| ports.plans.render(0, 64));
+    assert!(heap.is_zero(), "publishing per-instance acknowledgments: {heap:?}");
+    runtime.service();
+    assert_eq!(runtime.plays_instance_processed(&session, a, 0), Ok(true));
+    assert_eq!(runtime.plays_instance_processed(&session, b, 0), Ok(false));
+    let mut next = (*session).clone();
+    next.track_mut(b).unwrap().inactive = true;
+    next.track_mut(a).unwrap().mixer.inserts[0].as_mut().unwrap().params.insert("gain".into(), -6.0);
+    let next = Arc::new(next);
+    runtime.update_session(Arc::clone(&next)).unwrap();
+    assert_eq!(runtime.plays_instance_processed(&next, a, 0), Ok(false), "old acknowledgment cannot confirm the new request");
+    runtime.service();
+    ports.plans.service(&mut plan_bridge::callback_scope(), true);
+    runtime.service();
+    assert_eq!(runtime.plays_instance_processed(&next, a, 0), Ok(false), "adoption alone cannot acknowledge a parameter pass");
+    ports.plans.render(64, 64);
+    runtime.service();
+    assert_eq!(runtime.plays_instance_processed(&next, a, 0), Ok(true));
+    assert_eq!(runtime.plays_instance_processed(&next, b, 0), Ok(true), "inactive own slot confirms stored values");
+    assert_eq!(runtime.plays_instance_processed(&session, a, 0), Ok(false), "old document is never current");
+    runtime.retire(ports);
+}
