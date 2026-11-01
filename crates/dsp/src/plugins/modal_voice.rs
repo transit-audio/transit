@@ -15,9 +15,10 @@
 //! - Velocity is the module's strength input (its pressure CV, `1 - CV`, 0 to 1), which the
 //!   firmware turns into a gain on the exciters through its 3 dB/V accent tables: strength =
 //!   `1 - velocity_amount · (1 - velocity/127)`, so at Velocity 100% (the default) a note's strength
-//!   is its velocity over 127 and at 0% every note plays at full strength (the module with nothing
-//!   patched). It is set at the note-on and held until the next one; the firmware ramps it over a
-//!   block.
+//!   is its velocity over 127 and at 0% every note plays at full strength (1.0). It is set at the
+//!   note-on and held until the next one; the firmware ramps it over a block. One deviation: the
+//!   module's FM voice also opens its output from the strength, so with nothing patched it drones;
+//!   the instrument closes it when no key is held ([`gated_strength`]).
 //! - Pitch: the sounding key is the module's note (MIDI 69 plays 440 Hz, the firmware's own
 //!   tuning at 32 kHz); Tune, pitch bend (`bend_range`) and the matrix's Pitch move it through the
 //!   module's FM input (held to its ±60 semitones).
@@ -206,10 +207,36 @@ struct Event {
 }
 
 /// The strength a note plays at: `1 - amount · (1 - velocity)`, so velocity itself at 100% and
-/// full strength (the module's unpatched input) at 0%.
+/// full strength (1.0) at 0%.
 #[must_use]
 pub fn strength_of(velocity: f32, amount: f32) -> f32 {
     (1.0 - amount.clamp(0.0, 1.0) * (1.0 - velocity.clamp(0.0, 1.0))).clamp(0.0, 1.0)
+}
+
+/// The strength just under which the FM pair's output stays shut: its voice adds `2 · strength - 1`
+/// to its level at 0.5 and above (the firmware's `ominous_voice.cc`, `level += strength >= 0.5f ? ...`).
+pub const FM_SHUT: f32 = 0.5;
+
+/// How far the FM pair's strength falls per part block with the gate down: 0.5 over 200 blocks
+/// (100 ms at the engine rate), so closing the voice is a fade and not a step.
+pub const FM_CLOSE_STEP: f32 = 0.5 / 200.0;
+
+/// The strength the part is sent. With the gate up it is `strength`. The module's FM voice opens
+/// its output from the strength input as well as its envelope, so with nothing patched it drones;
+/// the instrument closes it when no key is held: with the gate down (and the FM pair selected) the
+/// strength in `sent` falls from where it was to [`FM_SHUT`] and never above `strength`. The other
+/// three models pass `strength` through.
+pub fn gated_strength(sent: &mut f32, gate: bool, fm_pair: bool, strength: f32) -> f32 {
+    if !fm_pair {
+        *sent = FM_SHUT;
+        return strength;
+    }
+    if gate {
+        *sent = strength;
+        return strength;
+    }
+    *sent = (*sent - FM_CLOSE_STEP).max(FM_SHUT);
+    sent.min(strength)
 }
 
 /// A control (0..max) from its knob and its matrix sum: the knob exactly when no row moves it, else
@@ -336,6 +363,11 @@ pub struct ModalVoiceInstrument {
     /// and the last note-off's.
     key: u8,
     velocity: f32,
+    /// The strength last sent to the FM pair ([`gated_strength`]).
+    strength_sent: f32,
+    /// A note-on since the last part block: the gate rises for one block even when its note-off
+    /// arrived in the same engine block (a note shorter than 0.5 ms still plays).
+    latch: bool,
     release_velocity: f32,
     bend: f32,
     wheel: f32,
@@ -399,6 +431,8 @@ impl ModalVoiceInstrument {
             shaper_gate: false,
             key: 60,
             velocity: 1.0,
+            strength_sent: FM_SHUT,
+            latch: false,
             release_velocity: 0.0,
             bend: 0.0,
             wheel: 0.0,
@@ -523,6 +557,8 @@ impl ModalVoiceInstrument {
         self.retrigger = false;
         self.gate = false;
         self.shaper_gate = false;
+        self.strength_sent = FM_SHUT;
+        self.latch = false;
         for sh in &mut self.shapers {
             sh.reset();
         }
@@ -540,6 +576,7 @@ impl ModalVoiceInstrument {
                     self.retrigger = true;
                 }
                 self.keys.press(key);
+                self.latch = true;
                 self.key = key;
                 self.velocity = f32::from(vel) / 127.0;
             }
@@ -552,6 +589,7 @@ impl ModalVoiceInstrument {
                 }
             }
             Kind::AllOff => {
+                self.latch = false;
                 self.keys.clear();
                 self.sustain = false;
                 self.retrigger = false;
@@ -641,7 +679,8 @@ impl ModalVoiceInstrument {
     /// The gate for the next part block, the shapers following it: up while a key is down, except
     /// for the one block a retrigger drops it.
     fn next_gate(&mut self) -> bool {
-        let down = self.keys.top().is_some();
+        let latched = std::mem::take(&mut self.latch);
+        let down = self.keys.top().is_some() || latched;
         let gate = if self.retrigger && self.gate {
             self.retrigger = false;
             false
@@ -701,6 +740,7 @@ impl ModalVoiceInstrument {
         let pitch = sum(dst::PITCH);
         let fm = self.p.v(TUNE) + self.bend * self.p.v(BEND_RANGE) + if pitch == 0.0 { 0.0 } else { PITCH_SEMITONES * pitch };
         let strength = control(strength_of(self.velocity, pct(VELOCITY)), sum(D_STRENGTH), 1.0);
+        let strength = gated_strength(&mut self.strength_sent, gate, self.model == 3, strength);
         let performance =
             PerformanceState { gate, note: f32::from(self.key), modulation: if fm.is_finite() { fm.clamp(-MAX_FM, MAX_FM) } else { 0.0 }, strength };
         let (mut main, mut aux) = ([0.0f32; BLOCK], [0.0f32; BLOCK]);
@@ -821,6 +861,8 @@ impl Plugin for ModalVoiceInstrument {
         self.shaper_gate = false;
         self.key = 60;
         self.velocity = 1.0;
+        self.strength_sent = FM_SHUT;
+        self.latch = false;
         self.release_velocity = 0.0;
         self.bend = 0.0;
         self.wheel = 0.0;

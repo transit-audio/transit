@@ -106,13 +106,18 @@ fn crate_render(model: usize, patch: Patch, fm: f32, velocity_amount: f32, sched
     }
     *part.patch_mut() = patch;
     let (mut gate, mut key, mut vel) = (false, 60u8, 127u8);
+    let mut sent = FM_SHUT;
     let mut out = [Vec::new(), Vec::new()];
     for b in 0..blocks {
         if let Some((_, g, k, v)) = schedule.iter().find(|(at, ..)| *at == b) {
             (gate, key, vel) = (*g, *k, *v);
         }
-        let performance =
-            PerformanceState { gate, note: f32::from(key), modulation: fm, strength: strength_of(f32::from(vel) / 127.0, velocity_amount) };
+        let performance = PerformanceState {
+            gate,
+            note: f32::from(key),
+            modulation: fm,
+            strength: gated_strength(&mut sent, gate, model == 3, strength_of(f32::from(vel) / 127.0, velocity_amount)),
+        };
         let (mut m, mut a) = ([0.0f32; BLOCK], [0.0f32; BLOCK]);
         part.process(&performance, &[0.0; BLOCK], &[0.0; BLOCK], &mut m, &mut a);
         out[0].extend_from_slice(&a);
@@ -587,4 +592,100 @@ fn a_mono_strip_and_hostile_values() {
     let script = [(0, Ev::On(127, 127)), (10, Ev::On(0, 127)), (20, Ev::Bend(16_383)), (5000, Ev::Bend(0))];
     let y = render(&mut h, 48_000, 512, &script);
     assert!(y.iter().flatten().all(|v| v.is_finite()), "finite");
+}
+
+/// A note of 0.4 s on `key` at velocity `vel`, then `tail` frames; returns the stereo render at
+/// 32 kHz in 256-frame blocks.
+fn note_then_silence(params: &[(&str, f32)], vel: u8, extra: Option<(usize, Ev)>, frames: usize) -> [Vec<f32>; 2] {
+    let mut script = vec![(0, Ev::On(57, vel)), (12_800, Ev::Off(57))];
+    script.extend(extra);
+    render(&mut instrument(32_000, params), frames, 256, &script)
+}
+
+/// With nothing held no model sounds: not at creation, not after a reset (the FM pair's voice
+/// opens from the strength input as well as its envelope; the module drones, the instrument closes
+/// it).
+#[test]
+fn every_model_is_silent_before_any_note_and_after_a_reset() {
+    for model in 0..4 {
+        let params = params_of(model, &patch_of(0.6, 0.3, 0.8));
+        let mut r = instrument(32_000, &params);
+        let fresh = render(&mut r, 32_000, 256, &[]);
+        assert_eq!(peak(&fresh[0]).max(peak(&fresh[1])), 0.0, "model {model}: sounds at creation");
+        render(&mut r, 8000, 256, &[(0, Ev::On(60, 127))]);
+        r.reset();
+        let again = render(&mut r, 32_000, 256, &[]);
+        assert_eq!(peak(&again[0]).max(peak(&again[1])), 0.0, "model {model}: sounds after reset");
+    }
+}
+
+/// The FM pair is silent (decayed below -120 dB, the ring's own tail) after the key is released, at every velocity and at Velocity 0%, and
+/// holds its sound while the key is down; CC 123 and CC 120 leave it silent too.
+#[test]
+fn the_fm_pair_is_silent_once_no_key_is_held() {
+    let base = params_of(3, &patch_of(0.6, 0.3, 0.8));
+    for (vel, amount) in [(40u8, 100.0), (64, 100.0), (127, 100.0), (100, 0.0), (127, 0.0)] {
+        let mut params = base.clone();
+        params.push(("velocity", amount));
+        let out = note_then_silence(&params, vel, None, 32_000 * 10);
+        let held = peak(&out[0][3000..12_800]).max(peak(&out[1][3000..12_800]));
+        let late = peak(&out[0][32_000 * 8..]).max(peak(&out[1][32_000 * 8..]));
+        let at = |s: usize| peak(&out[0][32_000 * s..32_000 * (s + 1)]);
+        println!(
+            "fm pair velocity {vel} amount {amount}: held {held} late {late}; per second after the key {} {} {} {} {} {} {} {}",
+            at(0),
+            at(1),
+            at(2),
+            at(3),
+            at(4),
+            at(5),
+            at(6),
+            at(7)
+        );
+        assert!(held > 0.01, "velocity {vel} amount {amount}: the held FM pair sounds");
+        assert!(late < 1e-6, "velocity {vel} amount {amount}: sounds after the release ({late})");
+    }
+    for cc in [123u8, 120] {
+        let out = render(&mut instrument(32_000, &base), 32_000 * 10, 256, &[(0, Ev::On(57, 127)), (12_800, Ev::Cc(cc, 0))]);
+        let held = peak(&out[0][3000..12_800]);
+        let late = peak(&out[0][32_000 * 8..]).max(peak(&out[1][32_000 * 8..]));
+        println!("fm pair cc {cc}: held {held} late {late}");
+        assert!(held > 0.01);
+        assert!(late < 1e-6, "CC {cc}: the FM pair sounds with no key held ({late})");
+    }
+}
+
+/// Closing the FM pair is a fade: releasing a full-velocity note moves no sample further than
+/// the held voice's own largest step times four.
+#[test]
+fn closing_the_fm_pair_does_not_click() {
+    let params = params_of(3, &patch_of(0.6, 0.3, 0.8));
+    let out = note_then_silence(&params, 127, None, 32_000 * 3);
+    let held = largest_step(&out[0], 3000..12_800);
+    let released = largest_step(&out[0], 12_800..32_000 * 3);
+    println!("fm pair largest step: held {held} release {released}");
+    assert!(released <= held * 4.0 + 1e-4, "the release steps {released} against {held} held");
+}
+
+/// CC 120 silences every model, on both channels, at once.
+#[test]
+fn all_sound_off_silences_every_model() {
+    for model in 0..4 {
+        let params = params_of(model, &patch_of(0.6, 0.3, 0.8));
+        let out = render(&mut instrument(32_000, &params), 16_000, 256, &[(0, Ev::On(57, 100)), (4800, Ev::Cc(120, 0))]);
+        assert!(peak(&out[0][..4800]).max(peak(&out[1][..4800])) > 0.001, "model {model}: sounds before the CC");
+        assert_eq!(peak(&out[0][4800 + 32..]), 0.0, "model {model}: left not silent");
+        assert_eq!(peak(&out[1][4800 + 32..]), 0.0, "model {model}: right not silent");
+    }
+}
+
+/// A note shorter than one engine block (a note-on and its note-off in the same 16 frames) still
+/// plays: the gate rises for one block.
+#[test]
+fn a_note_shorter_than_one_engine_block_sounds() {
+    let params = params_of(0, &patch_of(0.0, 0.0, 0.9));
+    let out = render(&mut instrument(32_000, &params), 8000, 256, &[(100, Ev::On(60, 127)), (104, Ev::Off(60))]);
+    let p = peak(&out[0]).max(peak(&out[1]));
+    println!("short note peak {p}");
+    assert!(p > 0.001, "the short note was dropped");
 }
