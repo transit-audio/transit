@@ -81,7 +81,7 @@ text = "Up to 5% the left output is the dry exciter, crossfading to the resonato
 [[entry]]
 id = "modal_voice.velocity"
 name = "Velocity"
-text = "How much velocity matters. Velocity is the module's strength input: it scales the exciters through the module's own accent curve (about 3 dB per tenth of travel, unity near velocity 64). At 100% (the default) the strength is the velocity; at 0% every note plays at full strength."
+text = "How much velocity matters. Velocity is the module's strength input: it scales the exciters through the module's own accent curve (about 3 dB per tenth of travel, unity near velocity 64). At 100% (the default) the strength is the velocity; at 0% every note plays at full strength. With the FM Pair model the instrument fades the strength down to the point where that voice stays shut once no key is held (the module's own FM voice drones with nothing patched), so it is silent between notes at any Velocity setting."
 
 [[entry]]
 id = "modal_voice.level"
