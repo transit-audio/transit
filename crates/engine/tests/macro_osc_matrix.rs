@@ -37,9 +37,10 @@ fn fixture(name: &str) -> String {
 
 /// The note-to-macro fixture: two Macro Oscillators (a three-voice one with eight depths and both
 /// curves, and a mono legato one), lanes on two depths and a curve's neighbor, rendered at 512 and
-/// at 64 frames per block by the build before #243.
-const MAPPING_GOLDEN_512: u64 = 0x0369_c012_d361_e065;
-const MAPPING_GOLDEN_64: u64 = 0xbe79_399a_b815_d989;
+/// at 64 frames per block by the build before #243. Re-captured for the #279 smoother snap fix
+/// (the level smoother settles on its target where the old recurrence stalled; max difference 2e-5).
+const MAPPING_GOLDEN_512: u64 = 0x2d34_2c2a_d6a5_dfc1;
+const MAPPING_GOLDEN_64: u64 = 0x084f_dab2_7d03_b5cd;
 /// The plain fixture (defaults, a poly and a mono track), at 512 and 37 frames per block.
 const PLAIN_GOLDEN: u64 = 0x6b24_dd39_e004_0ab9;
 /// The "Key Tracked Timbre" factory preset as it was (`key_timbre` 50) through [`preset_render`].
