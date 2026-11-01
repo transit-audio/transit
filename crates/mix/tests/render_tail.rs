@@ -77,7 +77,7 @@ pub fn returns_and_groups() -> Session {
     s
 }
 
-/// T1: bit-exact samples and DSP fingerprints, with a pool-path vacuity check.
+/// T1: bit-exact samples and available DSP fingerprints, with a pool path-entry check.
 /// timing: far-deadline the helper's explicit 60-second deadline waits for every render.
 #[test]
 fn t1_tail_topologies_and_corpus_are_bit_exact() {
@@ -94,15 +94,25 @@ fn t1_tail_topologies_and_corpus_are_bit_exact() {
             graph.mix.set_strip_deadline(Some(Duration::from_secs(60)));
             graph.mix.seed_strip_costs(Duration::from_nanos(1));
             common::workers::become_callback();
-            for _ in 0..24 {
+            for block in 0..24 {
                 graph.block();
                 serial.block();
-                assert_eq!(graph.out, serial.out, "{name}, workers {workers}");
+                assert_eq!(graph.out.len(), serial.out.len());
+                for (channel, (actual, expected)) in graph.out.iter().zip(&serial.out).enumerate() {
+                    assert_eq!(actual.len(), expected.len());
+                    for (sample, (actual, expected)) in actual.iter().zip(expected).enumerate() {
+                        assert_eq!(
+                            actual.to_bits(),
+                            expected.to_bits(),
+                            "{name}, workers {workers}, block {block}, channel {channel}, sample {sample}"
+                        );
+                    }
+                }
                 assert_eq!(graph.mix.strip_prints(), serial.mix.strip_prints(), "state: {name}, workers {workers}");
             }
             transit_mix::unmark_audio_thread();
             let faults = graph.mix.strip_faults().unwrap().snapshot();
-            assert!(faults.blocks > 0, "{name}: graph reached the pool");
+            assert!(faults.blocks > 0, "{name}: graph must enter the pool path");
             let (p1, end) = graph.mix.strip_phases();
             if end > p1 {
                 assert_eq!(graph.mix.strip_counts().len(), end, "aux tasks reached the tail host");

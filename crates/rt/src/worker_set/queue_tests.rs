@@ -17,6 +17,24 @@ fn two_reads(start: Instant, end: Instant) -> impl FnMut() -> Instant {
     move || next.take().unwrap_or(end)
 }
 
+/// Abandoned Published work belongs to the deadline partition at the next boundary.
+#[test]
+fn r5_abandoned_publication_is_counted_in_complete_mailbox_response() {
+    let mut set = set_of(&Fake::new(1, Duration::ZERO), 0);
+    let mut reader = set.measurement_reader().unwrap();
+    assert!(set.begin_block(1));
+    publish(&mut set, 0, 10, 100, 80);
+    assert!(set.begin_block(2)); // Deliberately no finish for block 1.
+    assert!(reader.request(174));
+    set.capture_measurement(true);
+    let response = reader.read().unwrap();
+    assert_eq!(response.request, 174);
+    assert!(response.complete);
+    assert_eq!(response.counters.published, 1);
+    assert_eq!(response.counters.unclaimed_at_deadline, 1, "abandoned Published work must be counted at the next boundary");
+    assert!(response.counters.conserves(), "complete mailbox response must conserve every published attempt");
+}
+
 /// Mutation: counting refused/Busy/forgone calls as attempts or classifying reclaim by its end
 /// time violates these exact totals. Exercises both callback completion times and slot reuse.
 #[test]

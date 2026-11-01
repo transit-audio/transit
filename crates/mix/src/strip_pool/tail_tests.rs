@@ -16,6 +16,47 @@ static NO_KEYS: KeyBank = KeyBank::EMPTY;
 
 mod forgo;
 
+/// A Claim owns its snapshot even before the reader enters the job cell.
+/// timing: expired-deadline the next drive cannot wait for the deliberately paused claim.
+#[test]
+fn claimed_aux_before_cell_entry_keeps_snapshot_across_render_boundary() {
+    let (mut rig, ..) = fixture(false);
+    let slot = host(&mut rig, |h, slot, task| {
+        override_slot(h, slot, 1, 1, true, true);
+        assert_eq!(h.start(task, Window::Open), Start::Publish);
+        assert_eq!(h.pool.set.publish(slot), Ok(transit_rt::worker_set::Published::Published));
+        let claim = h.pool.set.jobs().slot(slot).unwrap().try_claim().unwrap();
+        assert_eq!(claim.generation(), h.g);
+        // Leaving this scope does not complete the ClaimToken: model a reader paused indefinitely
+        // before cell entry, without a worker thread or a held mutex hiding early reuse.
+        slot
+    });
+    let pool = rig.eng.pool.as_mut().unwrap();
+    assert!(pool.cells.with(slot, |job| assert_eq!(job.busses.0.len(), 1)), "cell is free while Claimed");
+    let plan = rig.eng.plan.as_deref_mut().unwrap();
+    let empty = BusTable::default();
+    let live =
+        LiveInput { input: &[], input_offset: 0, monitor_only: false, recording: false, no_suspend: true, frame: N as u64, io: None, marker: None };
+    let b = PoolBlock {
+        session: &plan.session,
+        busses: &empty,
+        keys: &NO_KEYS,
+        live: &live,
+        pos: N as i64,
+        frames: N,
+        any_solo: false,
+        sample_rate: 48_000,
+        start: Instant::now(),
+        budget: None,
+        deadline: Some(Instant::now()),
+    };
+    assert!(pool.render_tail(&b, &mut plan.tables, &mut rig.eng.events, &mut plan.status, PanLaw::default(), N as u64).is_some());
+    assert_eq!(pool.set.outcome(slot), Some(Outcome::Overrun(OverrunCause::Busy)));
+    assert!(pool.is_away(slot));
+    let mut input = BusTable(Vec::with_capacity(1));
+    assert!(!plan.tables.inputs.lend(slot, &mut input), "snapshot became reusable while its reader still owns Claimed");
+}
+
 #[derive(Default)]
 struct Probe {
     process: AtomicUsize,
