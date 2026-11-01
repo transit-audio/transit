@@ -48,6 +48,9 @@ use clap_sys::stream::*;
 use clap_sys::version::CLAP_VERSION;
 use std::ffi::{CStr, c_char, c_void};
 
+mod editor_modes;
+use editor_modes::{Mode, NEXT_NO_GUI};
+
 struct Features<const N: usize>([*const c_char; N]);
 unsafe impl<const N: usize> Sync for Features<N> {}
 
@@ -200,6 +203,9 @@ struct Fx {
     /// `CMD:gui-self-scaling`: the GUI ignores `set_scale` (returns false) and always reports
     /// 400×300, like a plug-in that reads its monitor's scale itself.
     gui_self_scaling: bool,
+    gui_mode: Mode,
+    gui_painted: bool,
+    gui_timer: Option<clap_id>,
 }
 
 unsafe fn fx<'a>(p: *const clap_plugin) -> &'a mut Fx {
@@ -807,6 +813,22 @@ unsafe extern "C" fn state_load(p: *const clap_plugin, stream: *const clap_istre
         return requests_command(f, &cmd.to_string());
     }
     // And its GUI modes (issue #68): embedded too, embedded that fails, and a query.
+    if let Some(cmd) = std::str::from_utf8(&bytes[..got]).ok().and_then(|s| s.strip_prefix("CMD:")) {
+        if cmd == "gui-painted" {
+            return f.gui_painted;
+        }
+        if let Some(mode) = Mode::parse(cmd) {
+            if mode == Mode::NoGui {
+                // Extension availability is fixed at init. This command configures the next
+                // instance on this thread, so tests exercise the actual load-time query.
+                NEXT_NO_GUI.set(true);
+            } else {
+                f.gui_mode = mode;
+                f.gui_embed = 1;
+            }
+            return true;
+        }
+    }
     match std::str::from_utf8(&bytes[..got]).ok() {
         Some("CMD:process-error-once") => {
             f.events_error_armed = true;
@@ -849,14 +871,24 @@ static STATE: clap_plugin_state = clap_plugin_state { save: Some(state_save), lo
 
 unsafe extern "C" fn gui_is_api_supported(p: *const clap_plugin, api: *const c_char, floating: bool) -> bool {
     assert!(!api.is_null());
-    floating || unsafe { fx(p) }.gui_embed > 0
+    // SAFETY: the host passes this live fixture instance on its main thread.
+    let f = unsafe { fx(p) };
+    match f.gui_mode {
+        Mode::NoX11 => floating,
+        Mode::Neither => false,
+        Mode::Normal => floating || f.gui_embed > 0,
+        _ => !floating,
+    }
 }
 
 unsafe extern "C" fn gui_create(p: *const clap_plugin, _api: *const c_char, floating: bool) -> bool {
     let f = unsafe { fx(p) };
     assert!(!f.gui_created, "create");
     assert!(floating || f.gui_embed > 0, "embedded create without embedded support");
-    if !floating && f.gui_embed == 2 {
+    if (!floating && f.gui_embed == 2) || f.gui_mode == Mode::CreateFalse {
+        return false;
+    }
+    if f.gui_mode == Mode::TimerRequired && !editor_modes::register_timer(f) {
         return false;
     }
     f.gui_created = true;
@@ -868,7 +900,7 @@ unsafe extern "C" fn gui_create(p: *const clap_plugin, _api: *const c_char, floa
 unsafe extern "C" fn gui_set_parent(p: *const clap_plugin, window: *const clap_window) -> bool {
     let f = unsafe { fx(p) };
     assert!(f.gui_created && !f.gui_floating && !window.is_null(), "set_parent");
-    true
+    f.gui_mode != Mode::SetParentFalse
 }
 
 unsafe extern "C" fn gui_destroy(p: *const clap_plugin) {
@@ -876,6 +908,7 @@ unsafe extern "C" fn gui_destroy(p: *const clap_plugin) {
     assert!(f.gui_created, "destroy without create");
     f.gui_created = false;
     f.gui_visible = false;
+    editor_modes::unregister_timer(f);
 }
 
 unsafe extern "C" fn gui_set_scale(p: *const clap_plugin, scale: f64) -> bool {
@@ -891,9 +924,11 @@ unsafe extern "C" fn gui_set_scale(p: *const clap_plugin, scale: f64) -> bool {
 unsafe extern "C" fn gui_get_size(p: *const clap_plugin, width: *mut u32, height: *mut u32) -> bool {
     let f = unsafe { fx(p) };
     assert!(f.gui_created, "get_size before create");
+    let factor = if f.gui_mode == Mode::ZeroSize { 0.0 } else { f.gui_scale };
+    // SAFETY: CLAP get_size supplies distinct, writable output pointers for this call.
     unsafe {
-        *width = (400.0 * f.gui_scale).round() as u32;
-        *height = (300.0 * f.gui_scale).round() as u32;
+        *width = (400.0 * factor).round() as u32;
+        *height = (300.0 * factor).round() as u32;
     }
     true
 }
@@ -906,6 +941,9 @@ unsafe extern "C" fn gui_suggest_title(p: *const clap_plugin, title: *const c_ch
 unsafe extern "C" fn gui_show(p: *const clap_plugin) -> bool {
     let f = unsafe { fx(p) };
     assert!(f.gui_created, "show without create");
+    if f.gui_mode == Mode::ShowFalse {
+        return false;
+    }
     f.gui_visible = true;
     f.gui_edit_pending = true;
     // Exercise the host GUI extension.
@@ -941,8 +979,13 @@ static GUI: clap_plugin_gui = clap_plugin_gui {
 
 unsafe extern "C" fn get_extension(p: *const clap_plugin, id: *const c_char) -> *const c_void {
     let id = unsafe { CStr::from_ptr(id) };
-    let synth = unsafe { fx(p) }.synth;
-    if unsafe { fx(p) }.requests {
+    // SAFETY: the host passes this live fixture; this is the sole Fx borrow in this call.
+    let f = unsafe { fx(p) };
+    let synth = f.synth;
+    if id == clap_sys::ext::timer_support::CLAP_EXT_TIMER_SUPPORT && f.gui_mode == Mode::TimerRequired {
+        return &editor_modes::TIMER as *const _ as *const c_void;
+    }
+    if f.requests {
         return if id == CLAP_EXT_PARAMS {
             &PARAMS as *const _ as *const c_void
         } else if id == CLAP_EXT_AUDIO_PORTS {
@@ -965,7 +1008,7 @@ unsafe extern "C" fn get_extension(p: *const clap_plugin, id: *const c_char) -> 
         &NOTES as *const _ as *const c_void
     } else if id == CLAP_EXT_STATE && (!synth || cfg!(feature = "events")) {
         &STATE as *const _ as *const c_void
-    } else if id == CLAP_EXT_GUI && !synth {
+    } else if id == CLAP_EXT_GUI && !synth && f.gui_mode != Mode::NoGui {
         &GUI as *const _ as *const c_void
     } else {
         std::ptr::null()
@@ -1058,6 +1101,9 @@ unsafe extern "C" fn factory_create(_f: *const clap_plugin_factory, host: *const
         gui_floating: false,
         gui_scale: 1.0,
         gui_self_scaling: false,
+        gui_mode: if NEXT_NO_GUI.replace(false) { Mode::NoGui } else { Mode::Normal },
+        gui_painted: false,
+        gui_timer: None,
     });
     let raw = Box::into_raw(b);
     unsafe {
