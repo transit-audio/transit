@@ -58,6 +58,20 @@ pub(super) fn is_release(m: &Message) -> bool {
 }
 
 impl NoteView {
+    /// Ends a reader's old source without cutting its release tail. The direct release cannot
+    /// overflow a held-note list or event queue. Pedal-up events use this view's fixed storage and
+    /// precede the new source's events; MIDI all-notes-off alone leaves the pedal down.
+    pub(crate) fn release_reader(plugin: &mut dyn transit_dsp::Plugin) {
+        plugin.all_notes_off();
+        let mut releases = Self::new();
+        for channel in 0..16 {
+            releases.record(0, &PluginEvent { channel, note_id: PluginEvent::NO_ID, message: Message::Control { cc: CC_SUSTAIN, value: 0 } });
+        }
+        for e in releases.events() {
+            plugin.event(e.offset, &e.event);
+        }
+    }
+
     pub(crate) fn new() -> Self {
         NoteView { events: [TimedEvent::EMPTY; NOTE_VIEW_CAP], len: 0, full: false }
     }

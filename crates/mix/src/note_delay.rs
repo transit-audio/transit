@@ -17,6 +17,8 @@ struct Pending {
 }
 
 pub(crate) struct NoteDelay {
+    /// The instrument instance whose stream this reader follows, not the plan generation.
+    source: Option<crate::SlotGen>,
     carry: Box<[Pending]>,
     len: usize,
     clock: u64,
@@ -28,7 +30,28 @@ impl NoteDelay {
     pub(crate) const BYTES: usize = CARRY_CAP * size_of::<Pending>() + size_of::<Self>();
 
     pub(crate) fn new() -> Self {
-        Self { carry: vec![Pending { source: 0, order: 0, event: ALL_OFF }; CARRY_CAP].into_boxed_slice(), len: 0, clock: 0, order: 0, full: false }
+        Self {
+            source: None,
+            carry: vec![Pending { source: 0, order: 0, event: ALL_OFF }; CARRY_CAP].into_boxed_slice(),
+            len: 0,
+            clock: 0,
+            order: 0,
+            full: false,
+        }
+    }
+
+    /// Before the reader's first block from a different instrument, release the old stream and
+    /// discard its delayed events. The reader contract already requires `all_notes_off` to release
+    /// everything; the Filter keeps its envelope tail. Pedals are lifted through the fixed note
+    /// view. Intentional discards, like reset/bypass, are not overflow losses.
+    pub(crate) fn follow_source(&mut self, source: Option<crate::SlotGen>, plugin: &mut dyn Plugin) {
+        if self.source != source {
+            if self.source.is_some() {
+                crate::note_view::NoteView::release_reader(plugin);
+                self.clear();
+            }
+            self.source = source;
+        }
     }
 
     pub(crate) fn clear(&mut self) {

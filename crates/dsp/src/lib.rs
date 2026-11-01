@@ -347,7 +347,9 @@ pub trait Plugin: Send {
     /// mix then gives it, through [`Plugin::event`] before each `process`, every note-on, note-off,
     /// sustain pedal and all-notes-off its track's instrument accepted in the block, at the same
     /// offsets (after the MIDI effect slot, ADR 0036), and calls [`Plugin::all_notes_off`] for each
-    /// block it skips the insert (bypassed, inactive, failed). A read-only view: nothing the insert
+    /// block it skips the insert (bypassed, inactive, failed), and before its first block after the
+    /// instrument instance changes or is removed. Readers must release every held or sustained
+    /// note on that call, preserving release tails. A read-only view: nothing the insert
     /// does reaches the instrument. Inserts on a track without an instrument get nothing. The
     /// default (hosted plug-ins, every other built-in) is no.
     fn reads_track_notes(&self) -> bool {

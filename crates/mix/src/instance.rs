@@ -13,7 +13,8 @@ pub struct InstanceSpec {
     /// Decoded [`Insert::state`](transit_model::Insert::state).
     pub state: Option<Arc<[u8]>>,
     /// The insert's [`InsertUid`](transit_model::InsertUid): the instance follows it when the
-    /// insert moves to another slot (0 for an instrument or a clip effect).
+    /// insert moves to another slot, and a fresh instrument of the same kind replaces its instance
+    /// (0 for a clip effect).
     pub uid: u64,
 }
 
@@ -57,7 +58,14 @@ pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
         }
         // An External Instrument has no plug-in instance (the plan reads its return, `external.rs`).
         if let Some(ins) = t.instrument.as_ref().filter(|i| i.plugin != transit_model::EXTERNAL_INSTRUMENT_PLUGIN) {
-            out.push(InstanceSpec { track: t.id, slot: INSTRUMENT_SLOT, id: ins.plugin.clone(), ch: ch.max(2), state: state(ins), uid: 0 });
+            out.push(InstanceSpec {
+                track: t.id,
+                slot: INSTRUMENT_SLOT,
+                id: ins.plugin.clone(),
+                ch: ch.max(2),
+                state: state(ins),
+                uid: ins.uid.get(),
+            });
         }
         if t.kind == TrackKind::Audio {
             for clip in t.clips().iter().filter(|c| c.is_audio()) {

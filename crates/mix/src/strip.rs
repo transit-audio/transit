@@ -196,6 +196,7 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
     // What the track's instrument accepted this block, for the inserts that read notes (#242,
     // ADR 0038): each reader delays this view to meet its own input audio.
     let notes = strip.instrument.as_ref().and_then(|x| x.events.as_deref()).map_or(&[][..], |e| e.fx.notes.events());
+    let note_source = strip.instrument.as_ref().map(|x| x.generation);
     let mut notes_lost = 0u64;
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
         // A hardware insert sends the signal out and takes the return up; with no live input, or
@@ -220,6 +221,9 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
                 delay.clear();
             }
             continue;
+        }
+        if let Some(delay) = &mut slot.note_delay {
+            delay.follow_source(note_source, &mut *slot.plugin);
         }
         apply_params(Some(block.s), slot, ins, t, &strip.touch, i, pos, timed_span(transport, frames));
         // An insert with a key detects on it when the plan made one for the slot (else on its own input).
