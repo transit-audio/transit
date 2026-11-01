@@ -1,9 +1,9 @@
 //! Inserts that read the track's note stream (#242, ADR 0038) through a realtime engine: an insert
 //! whose `reads_track_notes` is true hears exactly what the track's instrument accepted, after the
 //! MIDI effect slot, at the same frames; one that does not hears nothing; a skipped reader is told
-//! to let go every block. Then the Filter itself on a Macro Oscillator track: the same output bit
-//! for bit in 64- and 512-frame blocks with notes at odd frames, and no allocation on the audio
-//! thread.
+//! to let go once per run of skipped blocks. Then the Filter itself on a Macro Oscillator track:
+//! the same output bit for bit in 64- and 512-frame blocks with notes at odd frames, and no
+//! allocation on the audio thread.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::sync::{Arc, Mutex};
@@ -229,12 +229,12 @@ fn without_midi_effects_the_reader_hears_the_note_tables_deliveries() {
 }
 
 #[test]
-fn a_bypassed_reader_hears_no_notes_and_lets_go_each_block() {
+fn a_bypassed_reader_hears_no_notes_and_lets_go_once_until_reset() {
     let (s, t) = session(&[(READER, true)], &[]);
     let mut rig = Rig::new(&s, t);
     play(&mut rig);
     let heard = rig.heard_by(READER);
-    assert!(heard.len() >= 4, "{heard:?}");
+    assert_eq!(heard.len(), 2, "one release before reset and one after: {heard:?}");
     assert!(heard.iter().all(|(_, e)| e.is_none()), "only all-notes-off: {heard:?}");
 }
 
