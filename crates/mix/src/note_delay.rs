@@ -26,6 +26,8 @@ pub(crate) struct NoteDelay {
     /// While an overflow's all-notes-off stand-in has not left the carry: its `order`. Non-releases
     /// are refused for exactly that long.
     stand_in: Option<u64>,
+    /// A bypassed, inactive or failed reader has already released this run of skipped blocks.
+    skipped: bool,
 }
 
 impl NoteDelay {
@@ -39,6 +41,7 @@ impl NoteDelay {
             clock: 0,
             order: 0,
             stand_in: None,
+            skipped: false,
         }
     }
 
@@ -47,6 +50,7 @@ impl NoteDelay {
     /// everything; the Filter keeps its envelope tail. Pedals are lifted through the fixed note
     /// view. Intentional discards, like reset/bypass, are not overflow losses.
     pub(crate) fn follow_source(&mut self, source: Option<crate::SlotGen>, plugin: &mut dyn Plugin) {
+        self.skipped = false;
         if self.source != source {
             if self.source.is_some() {
                 crate::note_view::NoteView::release_reader(plugin);
@@ -61,6 +65,18 @@ impl NoteDelay {
         self.clock = 0;
         self.order = 0;
         self.stand_in = None;
+        self.skipped = false;
+    }
+
+    /// Release once per run of skipped insert blocks. Discard the carry: a pending pedal-down
+    /// would undo the release, and a pending start may have its note-off missed during bypass.
+    /// Whole-strip pool skips do not enter here; their undelivered stream still arrives late.
+    pub(crate) fn skip(&mut self, plugin: &mut dyn Plugin) {
+        if !self.skipped {
+            crate::note_view::NoteView::release_reader(plugin);
+            self.clear();
+            self.skipped = true;
+        }
     }
 
     fn record(&mut self, e: &TimedEvent) -> u64 {

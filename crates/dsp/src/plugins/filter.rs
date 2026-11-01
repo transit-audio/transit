@@ -431,7 +431,7 @@ impl Plugin for Filter {
         self.push(offset, Kind::Off { channel: 0, key: note.min(127), voice: -1 });
     }
 
-    /// Lets go of every note now (the mix calls it for each block it skips this insert).
+    /// Lets go of every note now; MIDI all-notes-off leaves the pedal state unchanged.
     fn all_notes_off(&mut self) {
         self.queued = 0;
         let g = self.notes.all_off();

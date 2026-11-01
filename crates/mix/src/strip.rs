@@ -213,12 +213,9 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
         }
         let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
         if !ins.active || ins.bypass || slot.failed {
-            // A skipped insert misses the block's notes: it lets go of what it held.
-            if slot.plugin.reads_track_notes() {
-                slot.plugin.all_notes_off();
-            }
+            // A skipped reader misses releases: let go of its notes and pedals once.
             if let Some(delay) = &mut slot.note_delay {
-                delay.clear();
+                delay.skip(&mut *slot.plugin);
             }
             continue;
         }
