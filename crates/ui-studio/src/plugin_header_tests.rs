@@ -560,34 +560,36 @@ fn a_bypassed_other_plugin_does_not_block_save_as() {
     assert!(saved.is_ok(), "the active instance's preset was saved: {saved:?}");
 }
 
-/// Inactive confirmation means stored state, even when the live instance disagrees.
+/// A knob edit made while active, then Make Inactive, then Save As. The stored
+/// state predates the edit (it is refreshed only by a session save); the live instance has it.
 #[test]
-fn an_inactive_own_slot_saves_stored_state_instead_of_live_state() {
-    if !in_child("an_inactive_own_slot_saves_stored_state_instead_of_live_state") {
+fn inactive_save_as_after_an_active_edit_saves_the_edited_state() {
+    if !in_child("inactive_save_as_after_an_active_edit_saves_the_edited_state") {
         return;
     }
-    let Rig { mut app, ctx, t, gain, config, name, .. } = rig("own-inactive");
+    let Rig { mut app, ctx, t, gain, config, name, .. } = rig("inactive-edit");
     frames_until(&mut app, &ctx, "both instances delivered", |a| a.player.as_ref().unwrap().plays_processed(&a.engine.session_arc()));
-    app.run("mix.insert_state", serde_json::json!({"track": t.0, "slot": 0, "state": transit_model::b64::encode(&state(0.75))})).unwrap();
+    app.capture_plugin_states().unwrap();
+    let stored = app.engine.session().tracks[0].mixer.inserts[0].as_ref().unwrap().state_bytes().expect("stored state after a save");
+    app.run("mix.insert_param", serde_json::json!({"track": t.0, "slot": 0, "param": "7", "value": 0.4})).unwrap();
+    frames_until(&mut app, &ctx, "the edit delivered", |a| a.player.as_ref().unwrap().plays_processed(&a.engine.session_arc()));
+    let edited = finish_without_frames(app.player.as_ref().unwrap().begin_save_state(t, 0).unwrap());
     app.run("track.make_inactive", serde_json::json!({"tracks": [t.0], "inactive": true})).unwrap();
     until_plays(&mut app, &ctx);
-    let mut load = app.player.as_ref().unwrap().begin_load_state(t, 0, state(0.25)).unwrap();
-    loop {
-        match load.poll() {
-            JobPoll::Ready(_) => break,
-            JobPoll::Failed(e) => panic!("state job failed: {e}"),
-            JobPoll::Waiting => {
-                std::thread::sleep(Duration::from_millis(2));
-            }
-        }
+    *name.lock().unwrap() = "Edited.vstpreset".into();
+    app.header_action(t, 0, HeaderAction::SaveAs);
+    let start = Instant::now();
+    while app.plugin_header.any_busy() && start.elapsed() < Duration::from_secs(15) {
+        frame(&mut app, &ctx);
+        std::thread::sleep(Duration::from_millis(5));
     }
     let live = finish_without_frames(app.player.as_ref().unwrap().begin_save_state(t, 0).unwrap());
-    *name.lock().unwrap() = "Stored.vstpreset".into();
-    app.header_action(t, 0, HeaderAction::SaveAs);
-    app.drive_plugin_headers();
-    let file = transit_engine::presets::path(&config, &gain, "Stored").unwrap();
+    let file = transit_engine::presets::path(&config, &gain, "Edited").unwrap();
     let saved = transit_engine::io::presets::read(&file, &gain);
+    let status = app.status.clone();
     quit(&mut app);
-    assert_eq!(live, state(0.25), "the live instance deliberately differs from the document");
-    assert_eq!(saved.unwrap(), state(0.75), "inactive Save As uses stored state immediately");
+    assert_ne!(edited, stored, "the edit changed the live state");
+    assert_eq!(live, edited, "the inactive live instance still holds the edit");
+    let saved = saved.unwrap_or_else(|e| panic!("no preset saved ({status}): {e}"));
+    assert_eq!(saved, edited, "Save As on the inactive track wrote the stored state from before the edit (stale)");
 }

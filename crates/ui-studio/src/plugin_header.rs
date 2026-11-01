@@ -399,15 +399,15 @@ impl StudioApp {
     fn begin_live(&mut self, op: Op) {
         let Op { key, uid, plugin, instance, step: Step::Waiting { start, .. } } = op else { return };
         let inactive = self.engine.session().track(key.0).is_some_and(|t| t.inactive) || self.hosted_insert(key).is_some_and(|ins| !ins.active);
+        // An inactive slot's live instance survives deactivation and holds every edit, so reads go
+        // to it. Only when no live instance exists do they fall back to the stored state.
         if inactive
-            && instance.is_some()
+            && instance.is_none()
             && let Start::Read(then) = start
+            && let Some(state) = self.hosted_insert(key).and_then(|ins| ins.state_bytes())
         {
-            let Some(state) = self.hosted_insert(key).and_then(|ins| ins.state_bytes()) else {
-                self.status = "The inactive plug-in has no stored state; reactivate it before reading a preset".into();
-                return;
-            };
             self.read_done(key, plugin, instance, Some(state), then);
+            self.status.push_str(" (the plug-in is not loaded: from its stored state)");
             return;
         }
         let Some(p) = &self.player else { return };
