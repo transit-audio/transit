@@ -71,6 +71,11 @@ estimated input/output rate ratio and a controlled asynchronous resampler; a
 periodic discard of queued audio is not drift correction. SRC filter delay and
 route/plugin delay remain named components of the timing model.
 
+The drift open item for a second device has one implemented rule so far, for System Audio
+loopback capture (#268, `crates/playback/src/system_audio.rs`): linear interpolation with a
+proportional-integral rate trim on the ring fill, within 1000 ppm, reported as drift. It does not
+yet cover a second hardware input; that still needs the controlled asynchronous resampler above.
+
 ## Observation and publication contract
 
 A device observation carries direction, device generation, backend clock-domain
