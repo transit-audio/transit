@@ -51,6 +51,10 @@ impl Lane {
             Lane::SendPan(i) => format!("send_{}_pan", letter(*i)),
             Lane::SendMute(i) => format!("send_{}_mute", letter(*i)),
             Lane::Plugin { slot, param } if *slot == AutoParam::INSTRUMENT_SLOT => format!("plugin:instrument:{param}"),
+            Lane::Plugin { slot, param } if *slot == transit_model::MACRO_SLOT => format!("plugin:{slot}:{param}"),
+            Lane::Plugin { slot, param } if AutoParam::midi_effect_index(*slot).is_some() => {
+                format!("plugin:midi{}:{param}", usize::from(*slot - transit_model::MIDI_EFFECT_SLOT) + 1)
+            }
             Lane::Plugin { slot, param } => format!("plugin:{}:{param}", letter(*slot)),
         }
     }
@@ -68,6 +72,16 @@ impl Lane {
     pub(crate) fn device<'a>(&self, t: &'a Track) -> Option<&'a transit_model::Insert> {
         let Lane::Plugin { slot, .. } = self else { return None };
         if *slot == AutoParam::INSTRUMENT_SLOT { t.instrument.as_ref() } else { t.mixer.inserts.get(usize::from(*slot))?.as_ref() }
+    }
+
+    fn midi_effect<'a>(&self, t: &'a Track) -> Option<&'a transit_model::MidiEffectSlot> {
+        let Lane::Plugin { slot, .. } = self else { return None };
+        t.midi_effects.get(AutoParam::midi_effect_index(*slot)?)
+    }
+
+    fn rack_macro<'a>(&self, t: &'a Track) -> Option<&'a transit_model::Macro> {
+        let Lane::Plugin { slot: transit_model::MACRO_SLOT, param } = self else { return None };
+        t.rack.as_ref()?.macros.get(transit_model::macro_index(param)?)
     }
 
     /// The control a lane belongs to, for the write pass and the mixer link.
@@ -96,6 +110,8 @@ impl Lane {
     pub fn valid(&self, t: &Track) -> bool {
         match self {
             Lane::SendLevel(i) | Lane::SendPan(i) | Lane::SendMute(i) => t.mixer.sends.get(usize::from(*i)).is_some_and(Option::is_some),
+            Lane::Plugin { slot: transit_model::MACRO_SLOT, .. } => self.rack_macro(t).is_some(),
+            Lane::Plugin { slot, .. } if AutoParam::midi_effect_index(*slot).is_some() => self.midi_effect(t).is_some(),
             Lane::Plugin { .. } => self.device(t).is_some(),
             _ => true,
         }
@@ -107,6 +123,9 @@ impl Lane {
 
     pub(crate) fn info(&self, t: &Track) -> Option<&'static transit_dsp::ParamInfo> {
         let Lane::Plugin { param, .. } = self else { return None };
+        if let Some(effect) = self.midi_effect(t) {
+            return transit_dsp::midi_fx::info(&effect.plugin)?.param(param);
+        }
         device_info(&self.device(t)?.plugin)?.params.iter().find(|p| p.id == param)
     }
 
@@ -120,6 +139,12 @@ impl Lane {
             Lane::SendLevel(i) => send(i).map_or(fine::DB_MIN, |s| s.level_db),
             Lane::SendPan(i) => send(i).map_or(0.0, |s| s.pan),
             Lane::SendMute(i) => send(i).map_or(0.0, |s| f32::from(u8::from(s.mute))),
+            Lane::Plugin { slot: transit_model::MACRO_SLOT, .. } => self.rack_macro(t).map_or(0.0, |m| m.value),
+            Lane::Plugin { slot, param } if AutoParam::midi_effect_index(*slot).is_some() => self
+                .midi_effect(t)
+                .and_then(|effect| effect.params.get(param).copied())
+                .or_else(|| self.info(t).map(|info| info.default))
+                .unwrap_or(0.0),
             Lane::Plugin { param, .. } => {
                 self.device(t).and_then(|i| i.params.get(param).copied()).or_else(|| self.info(t).map(|i| i.default)).unwrap_or(0.0)
             }
@@ -200,6 +225,16 @@ impl Lane {
             Lane::SendLevel(i) => format!("{} level", send(i)),
             Lane::SendPan(i) => format!("{} pan", send(i)),
             Lane::SendMute(i) => format!("{} mute", send(i)),
+            Lane::Plugin { slot: transit_model::MACRO_SLOT, param } => {
+                t.rack.as_ref().zip(transit_model::macro_index(param)).map_or_else(|| param.clone(), |(rack, i)| rack.macro_name(i))
+            }
+            Lane::Plugin { slot, param } if AutoParam::midi_effect_index(*slot).is_some() => {
+                let effect = self.midi_effect(t);
+                let info = effect.and_then(|effect| transit_dsp::midi_fx::info(&effect.plugin));
+                let name = info.map_or_else(|| effect.map_or("MIDI effect", |effect| effect.plugin.as_str()), |info| info.name);
+                let parameter = self.info(t).map_or(param.as_str(), |info| info.name);
+                format!("{name} · {parameter}")
+            }
             Lane::Plugin { param, .. } => {
                 let dev = self.device(t).map(|i| i.plugin.clone()).unwrap_or_default();
                 let name = self.info(t).map_or_else(|| param.clone(), |i| i.name.to_string());
@@ -242,4 +277,3 @@ pub fn device_info(plugin: &str) -> Option<&'static transit_dsp::PluginInfo> {
         .or_else(|| plugin.starts_with(transit_clap_host::ID_PREFIX).then(|| transit_clap_host::cached_info(plugin)).flatten())
         .or_else(|| plugin.starts_with(transit_vst3_host::ID_PREFIX).then(|| transit_vst3_host::cached_info(plugin)).flatten())
 }
-

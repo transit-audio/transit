@@ -23,6 +23,7 @@
 //! document already holds (no Player query for a plug-in's parameters, L40). Stereo pan is two
 //! panners (L10): the Pan lane is a balance lane that writes both panners' lanes.
 
+mod identity;
 mod lane;
 pub use lane::{Lane, device_info};
 
@@ -70,7 +71,7 @@ pub struct LaneView {
     pub height: f32,
 }
 
-/// The mixer's and the sends' lanes of `t`, as (section, label, lane id).
+/// The flat groups of `t`, as (section, label, lane id). Both the popup and the query use this list.
 fn base_choices(app: &mut StudioApp, s: &Session, t: &Track) -> Vec<(String, String, String)> {
     let mut v = Vec::new();
     for l in [Lane::Volume, Lane::Pan, Lane::Mute] {
@@ -83,6 +84,25 @@ fn base_choices(app: &mut StudioApp, s: &Session, t: &Track) -> Vec<(String, Str
         let i = u8::try_from(i).unwrap_or(0);
         for l in [Lane::SendLevel(i), Lane::SendPan(i), Lane::SendMute(i)] {
             v.push(("Sends".to_string(), l.label(app, s, t), l.id()));
+        }
+    }
+    for (index, effect) in t.midi_effects.iter().enumerate() {
+        let Some(slot) = AutoParam::midi_effect_slot(index) else { break };
+        // The same ParamInfo table the effect and its command use, including future registry entries.
+        let params: Vec<&str> = match transit_dsp::midi_fx::info(&effect.plugin) {
+            Some(info) => info.params.iter().map(|p| p.id).collect(),
+            None => effect.params.keys().map(String::as_str).collect(),
+        };
+        for param in params {
+            let lane = Lane::Plugin { slot, param: param.to_string() };
+            v.push(("MIDI effects".into(), lane.label(app, s, t), lane.id()));
+        }
+    }
+    // ADR 0034: a macro lane belongs to the rack, never to its member tracks.
+    if let Some(rack) = &t.rack {
+        for index in 0..rack.macros.len() {
+            let lane = Lane::Plugin { slot: transit_model::MACRO_SLOT, param: transit_model::macro_param(index) };
+            v.push(("Macros".into(), lane.label(app, s, t), lane.id()));
         }
     }
     v
@@ -157,7 +177,7 @@ fn picker_body(app: &mut StudioApp, ui: &mut Ui, s: &Session, t: &Track, current
             }
             let b = crate::menus::check_button(ui, id == current, label.as_str());
             menu.push(MenuItem::at(ui, label.clone(), id.clone(), b.rect));
-            if b.clicked() {
+            if b.clicked() || (enter && searching && picked.is_none()) {
                 picked = Some(id);
             }
         }
@@ -325,6 +345,8 @@ pub struct AutoState {
     pub(crate) touches: Vec<ParamTouch>,
     /// The picker's grouped models, search text and recently touched parameters (#65).
     pub(crate) picker: crate::automation_picker::PickerState,
+    /// Slot identities from the last UI access, for lane/point remapping after chain edits.
+    midi_chains: HashMap<TrackId, Vec<u64>>,
     pub selection: Vec<PointRef>,
     /// The lane of the mixer control last clicked (the mixer link).
     pub highlight: Option<(TrackId, String)>,
@@ -420,6 +442,7 @@ impl StudioApp {
 
     /// "+" on a lane: another lane under it, for the first parameter not open yet.
     pub fn add_lane(&mut self, t: TrackId, after: &str) {
+        self.sync_midi_lanes();
         let s = self.engine.session_arc();
         let Some(tr) = s.track(t) else { return };
         let open: Vec<String> = self.ui.auto_lanes.iter().filter(|v| v.track == t).map(|v| v.lane.clone()).collect();
@@ -427,6 +450,10 @@ impl StudioApp {
             self.status = "Every parameter of this track has a lane".into();
             return;
         };
+        if let Err(error) = self.initialize_picked_lane(t, &id) {
+            self.status = error;
+            return;
+        }
         let at = self.ui.auto_lanes.iter().position(|v| v.track == t && v.lane == after).map_or(self.ui.auto_lanes.len(), |i| i + 1);
         self.ui.auto_lanes.insert(at, LaneView { track: t, lane: id, height: LANE_H });
     }
@@ -443,6 +470,11 @@ impl StudioApp {
 
     /// The picker: show `to` in place of `from` (or bring an open `to` here).
     pub fn pick_lane(&mut self, t: TrackId, from: &str, to: &str) {
+        self.sync_midi_lanes();
+        if let Err(error) = self.initialize_picked_lane(t, to) {
+            self.status = error;
+            return;
+        }
         if from == to {
             return;
         }
@@ -451,6 +483,23 @@ impl StudioApp {
             v.lane = to.to_string();
         }
         self.auto.selection.retain(|p| !(p.track == t.0 && p.lane == from));
+    }
+
+    fn initialize_picked_lane(&mut self, t: TrackId, to: &str) -> Result<(), String> {
+        let s = self.engine.session_arc();
+        if let (Some(tr), Some(lane @ Lane::Plugin { slot, .. })) = (s.track(t), Lane::parse(to))
+            && (slot == transit_model::MACRO_SLOT || AutoParam::midi_effect_index(slot).is_some())
+        {
+            if !lane.valid(tr) {
+                return Err("no such lane".into());
+            }
+            // Opening a new effect or macro lane creates its first breakpoint through the
+            // ordinary command path, so undo removes it. Never overwrite an existing curve.
+            if lane.params(tr).first().is_some_and(|param| tr.lane(param).is_none()) {
+                self.add_point(t, to, self.position(), lane.static_value(tr))?;
+            }
+        }
+        Ok(())
     }
 
     /// The track's automation mode (`mix.automation_mode`: a document change, one undo step).
@@ -496,6 +545,7 @@ impl StudioApp {
 
     /// Add a point (double-click on a lane): one undo step.
     pub fn add_point(&mut self, t: TrackId, lane: &str, at: Samples, v: f32) -> Result<(), String> {
+        self.sync_midi_lanes();
         let s = self.engine.session_arc();
         let (Some(tr), Some(l)) = (s.track(t), Lane::parse(lane)) else { return Err("no such lane".into()) };
         let r = self.auto_exec(l.set_cmds(tr, at.max(0), v, None), None);
@@ -507,6 +557,7 @@ impl StudioApp {
 
     /// Delete the selected points: one undo step. Nothing selected: nothing happens.
     pub fn delete_points(&mut self) -> Result<usize, String> {
+        self.sync_midi_lanes();
         let sel = std::mem::take(&mut self.auto.selection);
         let s = self.engine.session_arc();
         let mut cmds = Vec::new();
@@ -530,6 +581,7 @@ impl StudioApp {
 
     /// Drop selected points the document no longer has (after an undo, say).
     fn prune_selection(&mut self) {
+        self.sync_midi_lanes();
         let s = self.engine.session_arc();
         self.auto
             .selection
@@ -541,6 +593,7 @@ impl StudioApp {
 /// them and Escape deselects them (before the arrangement's Delete takes clips).
 pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     use crate::shortcuts::{Action as A, pressed};
+    app.sync_midi_lanes();
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() {
         return;
     }
