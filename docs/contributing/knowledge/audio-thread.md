@@ -164,9 +164,10 @@ The picker also lists each track's MIDI effect parameters under **MIDI effects**
 `midi_fx::info` tables (`ParamInfo`: id, name, range and default), and the rack track's eight knobs
 under **Macros**. Macro lanes belong to the rack, not its members (ADR 0034). The picker and lane
 header share their labels, including renamed macros; MIDI lanes keep slots 240–247 and macros
-keep slot 253. Selecting a new effect or macro lane writes its first breakpoint at the cursor's
-current value through `automation.set_point`, so undo removes the model lane; an existing curve
-is unchanged. Open lanes remain view state.
+keep slot 253. Selecting an effect or macro lane only opens the lane view, like a mixer, send
+or device lane: it writes no breakpoint and creates no model lane (nothing for undo), and an
+existing curve is unchanged. Drawing the first point goes through the ordinary command path.
+Open lanes remain view state.
 
 ## First use allocates on macOS
 
