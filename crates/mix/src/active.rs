@@ -435,7 +435,7 @@ impl MixEngine {
         }
         tables.clear_block(frames);
         // Touch (#188): holds and return ramps advance before anything reads automation.
-        let ramp = touch::return_samples(sample_rate);
+        let ramp = touch::configured_return_samples(sample_rate, s.touch_return_ms);
         for st in tables.strips.iter_mut() {
             if let Some(t) = s.tracks.get(usize::from(st.track)) {
                 st.touch.begin(t, frames, ramp);

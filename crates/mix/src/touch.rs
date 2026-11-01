@@ -1,5 +1,5 @@
 //! Touch mode (#188): a held control's lane is not read, and on release the parameter returns to
-//! its lane over [`TOUCH_RETURN_S`].
+//! its lane over the session's Touch return ramp (default [`TOUCH_RETURN_S`]).
 //!
 //! Logic and Ableton agree: in Touch, while the user holds a control the lane for that parameter is
 //! not read (the held value wins), and on release the parameter goes back to the lane, Logic over
@@ -11,21 +11,27 @@
 //! per block on the audio thread before anything reads automation ([`TouchRamps::begin`]). A
 //! release seen at a block's start ramps from that block's first sample: linear from the held
 //! value (the control's static value, which the hold left there) to the lane's value, weight 0 at
-//! the first sample and the lane's own value [`TOUCH_RETURN_S`] of rendered samples later.
+//! the first sample and the lane's own value after the configured number of rendered samples.
 //! Allocation-free and lock-free: plain `Copy` slots, string compares and a hash of the parameter.
 
 use transit_model::{AutoParam, AutomationLane, AutomationMode, Track};
 use transit_time::Samples;
 
-/// How long a released control takes to return to its lane in Touch, in seconds. Logic's
-/// Automation settings call it Ramp Time; transit has no setting for it yet, so this is the
-/// constant (#223 exposes it as an Automation preference). 200 ms: long enough that the
-/// return does not click, short enough that the lane is back before the next phrase.
-pub const TOUCH_RETURN_S: f64 = 0.2;
+/// Default Touch return time in seconds (Logic calls it Ramp Time).
+pub const TOUCH_RETURN_S: f64 = transit_model::Session::default_touch_return_ms() as f64 / 1000.0;
 
 /// The return ramp's length in rendered samples at `rate` Hz.
 pub(crate) fn return_samples(rate: u32) -> u32 {
     (TOUCH_RETURN_S * f64::from(rate)).round() as u32
+}
+
+/// Read the immutable active plan's session setting; no shared mutable preference.
+pub(crate) fn configured_return_samples(rate: u32, ms: u16) -> u32 {
+    if ms == transit_model::Session::default_touch_return_ms() {
+        return_samples(rate)
+    } else {
+        (f64::from(ms.min(transit_model::Session::MAX_TOUCH_RETURN_MS)) / 1000.0 * f64::from(rate)).round() as u32
+    }
 }
 
 /// Most parameters of one track held or returning at once. Past it a parameter is still not read
@@ -39,14 +45,14 @@ struct Slot {
     held: bool,
     /// Ramp samples left at the current block's first sample (0 while held).
     left: u32,
+    /// Capture the duration on release; later settings changes affect new releases.
+    len: u32,
 }
 
 /// One strip's held and returning parameters (see the module docs).
 #[derive(Debug, Clone, Copy, Default)]
 pub(crate) struct TouchRamps {
     slots: [Slot; TOUCH_SLOTS],
-    /// The ramp length of the current block, in samples.
-    len: u32,
     /// The frames of the block `begin` last started (what the next one advances by).
     last: u32,
 }
@@ -58,13 +64,12 @@ impl TouchRamps {
     /// while it returns is held at once.
     pub(crate) fn begin(&mut self, t: &Track, frames: usize, len: u32) {
         let last = std::mem::replace(&mut self.last, u32::try_from(frames).unwrap_or(u32::MAX));
-        self.len = len;
         let touch = t.mixer.automation_mode == AutomationMode::Touch;
         let holds = |key: u64| touch && t.mixer.touched.iter().any(|p| param_key(p) == key);
         for s in self.slots.iter_mut().filter(|s| s.key != 0) {
             if s.held {
                 if !holds(s.key) {
-                    *s = Slot { key: s.key, held: false, left: len };
+                    *s = Slot { key: s.key, held: false, left: len, len };
                 }
             } else {
                 s.left = s.left.saturating_sub(last);
@@ -79,9 +84,9 @@ impl TouchRamps {
         for p in &t.mixer.touched {
             let key = param_key(p);
             if let Some(s) = self.slots.iter_mut().find(|s| s.key == key) {
-                *s = Slot { key, held: true, left: 0 };
+                *s = Slot { key, held: true, left: 0, len: 0 };
             } else if let Some(s) = self.slots.iter_mut().find(|s| s.key == 0) {
-                *s = Slot { key, held: true, left: 0 };
+                *s = Slot { key, held: true, left: 0, len: 0 };
             }
         }
     }
@@ -92,7 +97,7 @@ impl TouchRamps {
     fn weight(&self, key: u64, offset: usize) -> Option<f32> {
         let s = self.slots.iter().find(|s| s.key == key && !s.held)?;
         let left = s.left.saturating_sub(u32::try_from(offset).unwrap_or(u32::MAX));
-        (left > 0 && self.len > 0).then(|| (1.0 - f64::from(left) / f64::from(self.len)) as f32)
+        (left > 0 && s.len > 0).then(|| (1.0 - f64::from(left) / f64::from(s.len)) as f32)
     }
 
     /// Ramp samples left at `offset` frames into the block for `key` (0: not returning).
