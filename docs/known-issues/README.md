@@ -6,6 +6,8 @@ A new issue is a new row; give it its own file only if the row cannot hold what 
 
 | Id | Issue | Status | Gate or follow-up |
 |---|---|---|---|
+| #289 | A plug-in whose Linux build has no embeddable X11 editor shows a disabled Edit button (no GUI extension) or logs why the open was refused. Floating-only CLAP editors keep their floating path. | Fixed in working tree | Fixture refusal and one-WARN tests, load-time VST3 view probe, and device-card disabled-button/tooltip test; X11 cases run under Xvfb. |
+| #289 follow-up | An accepted editor open cannot cancel a plug-in call already running. If it completes after the 30 s UI timeout, a late success can open an untracked window; a late failure logs its specific reason after the timeout warning. | Open | Add cancellation/generation tracking across the UI request and host completion; found in the #289 refutation review. |
 | K1 | `crates/mix/src/compile.rs`: when a plug-in factory panics while another prepared instance's destructor is blocked, one queued action can dispatch before the fault publishes. | Open, rare | Reproduce with a blocking-destructor fixture, then order the publish before dispatch. |
 | K2 | The retired playback path held a panic payload whose destructor and field destructor both panic, which aborts the process. | Likely gone with the removal of the old renderer (done); re-verify | Confirm no retained payload path remains in `crates/playback`; add a test if one does. |
 | K3 | `crates/mix/src/lib.rs` `Strip::panic`: extra retained strip payloads whose destructors panic run through ordinary teardown without containment. | Open | Contain payload drops the way the first one is; extend `crates/mix/tests/strip_panics*.rs`. |

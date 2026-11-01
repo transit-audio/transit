@@ -17,6 +17,15 @@ previous runs. `TRANSIT_CONFIG_DIR` moves the whole settings folder.
 
 ## What the log holds by default
 
+A refused or failed CLAP or VST3 editor open writes a WARN line:
+`plug-in editor not opened: <plug-in name>: <reason>`. The status line shows the same reason.
+An INFO `plug-in editor probe` line records the window API support and the available size, scale,
+resize and run-loop facts; `unknown` or `n/a` means that stage was not reached or the format does
+not offer that query. While the host thread is busy, one INFO says `waiting for <reason>`; after
+30 seconds one WARN reports `timed out waiting for the plug-in host thread after 30 s`.
+Find these in the log paths above. A loaded plug-in with no GUI extension has a disabled **Edit**
+button with the tooltip **This plug-in has no editor**. A floating-only CLAP editor stays enabled.
+
 Without any setting the log has one line for each of these:
 
 - the audio device that opened: backend (`native` or `cpal`), host (`WASAPI`, `ASIO`, `ALSA`, ...),
