@@ -373,8 +373,8 @@ impl Feed {
     /// carries the index on), then its samples.
     fn packet(&mut self, block: &mut ab::CaptureBlock<'_>) {
         let frames = u32::try_from(block.frames).unwrap_or(u32::MAX);
-        if let Some((kind, time_ns)) = time_of(block.stamp, self.origin) {
-            let _ = self.stamps.push(rate::Obs { first_frame: self.next_frame, frames, time_ns, kind });
+        if let Some((kind, domain, time_ns)) = packet_time(block.stamp, self.origin) {
+            let _ = self.stamps.push(rate::Obs { first_frame: self.next_frame, frames, time_ns, kind, domain });
         }
         self.next_frame += u64::from(frames);
         let channels = usize::from(block.channels).max(1);
@@ -470,7 +470,7 @@ impl Resampler {
             trim: 0.0,
             step: 1.0,
             device_frames: 0,
-            rate: rate::RateEstimate::new(1.0),
+            rate: rate::RateEstimate::new(1.0, 1.0),
         };
         r.retune(source_rate, device_rate);
         r
@@ -485,7 +485,7 @@ impl Resampler {
         (self.base, self.packet, self.callback) = (target_frames(source_rate), packet_frames(source_rate), 0);
         self.target = self.base + self.packet;
         (self.fill, self.integral, self.trim, self.step, self.device_frames) = (0.0, 0.0, 0.0, self.nominal, 0);
-        self.rate.restart(self.nominal);
+        self.rate.restart(src, dst);
     }
 
     fn pop(queue: &mut rtrb::Consumer<f32>) -> Option<[f32; 2]> {
@@ -510,14 +510,14 @@ impl Resampler {
     /// and time; `None` when no time could be read): take the loopback's packet observations and
     /// the callback's into the rate estimate, size the target, prime or resynchronize, and set the
     /// trim for the callback's pieces. Never waits.
-    pub(crate) fn begin(&mut self, source: &mut Source, frames: usize, now: Option<(rate::Kind, i64)>) {
+    pub(crate) fn begin(&mut self, source: &mut Source, frames: usize, now: Option<(rate::Kind, rate::Domain, i64)>) {
         let max_packet = self.base * 100 / TARGET_MS as usize;
         while let Ok(obs) = source.stamps.pop() {
             self.packet = self.packet.max((obs.frames as usize).min(max_packet));
             self.rate.endpoint(obs);
         }
-        if let Some((kind, time)) = now {
-            self.rate.device(self.device_frames, time, kind);
+        if let Some((kind, domain, time)) = now {
+            self.rate.device(self.device_frames, time, kind, domain);
         }
         self.device_frames += frames as u64;
         self.callback = self.callback.max((frames as f64 * self.nominal).ceil() as usize);
@@ -545,7 +545,7 @@ impl Resampler {
         let max = MAX_TRIM_PPM * 1e-6;
         let fed = estimate.unwrap_or(0.0).clamp(-max, max);
         self.trim = (fed + error * KP_PPM * 1e-6 + self.integral).clamp(-max, max);
-        let reported = estimate.unwrap_or(self.integral) * 1e7;
+        let reported = estimate.map_or(self.integral, |d| d.clamp(-max, max)) * 1e7;
         status.drift_deci_ppm.store(reported.round().clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32, Ordering::Relaxed);
         self.step = self.nominal * (1.0 + self.trim);
     }
@@ -611,8 +611,8 @@ impl Tap {
     }
 
     /// Once per input callback, before [`Self::widen`]: the callback's frame count and stamp. Its
-    /// frame time (a device position in QPC time where the backend gives one, else the arrival
-    /// now) feeds the rate estimate; then the target, priming and the trim are set.
+    /// host callback time (the QPC when the block arrived on any backend, else the reader's own
+    /// arrival clock) feeds the rate estimate; then the target, priming and the trim are set.
     pub fn begin(&mut self, frames: usize, stamp: ab::Stamp) {
         if self.source.is_none()
             && let Ok(source) = self.incoming.pop()
@@ -622,7 +622,7 @@ impl Tap {
             self.source = Some(source);
         }
         let Some(source) = self.source.as_mut() else { return };
-        let now = time_of(stamp, self.origin);
+        let now = callback_time(stamp, self.origin);
         self.resampler.begin(source, frames, now);
     }
 
@@ -650,13 +650,31 @@ impl Tap {
     }
 }
 
-/// The time of a block's first frame for the rate estimate: the backend's frame stamp where it is
-/// valid, else the arrival now on `origin` (one `Instant::now`, QPC on Windows: no allocation).
-fn time_of(stamp: ab::Stamp, origin: std::time::Instant) -> Option<(rate::Kind, i64)> {
+/// The time of a loopback packet's first frame for the rate estimate: the stamp's frame time where
+/// it is valid (on native WASAPI the QPC `GetBuffer` returns for it), else the arrival now on
+/// `origin` (one `Instant::now`, QPC on Windows: no allocation). Both are QPC time.
+fn packet_time(stamp: ab::Stamp, origin: std::time::Instant) -> Option<(rate::Kind, rate::Domain, i64)> {
     if stamp.quality != ab::Quality::Invalid {
-        return Some((rate::Kind::Position, stamp.backend_frame_ns));
+        return Some((rate::Kind::Position, rate::Domain::Qpc, stamp.backend_frame_ns));
     }
-    i64::try_from(origin.elapsed().as_nanos()).ok().map(|t| (rate::Kind::Arrival, t))
+    arrival(origin)
+}
+
+/// The time of an input callback for the rate estimate: the stamp's host callback time on every
+/// backend, which is the QPC read when the block arrived. Not `backend_frame_ns`: on native ASIO
+/// that is the driver's sample position at the nominal rate, so its slope is always nominal and
+/// says nothing about the interface's clock. Else the arrival now on `origin` (QPC on Windows).
+fn callback_time(stamp: ab::Stamp, origin: std::time::Instant) -> Option<(rate::Kind, rate::Domain, i64)> {
+    if stamp.quality != ab::Quality::Invalid
+        && let Ok(host) = i64::try_from(stamp.host_callback_ns)
+    {
+        return Some((rate::Kind::Host, rate::Domain::Qpc, host));
+    }
+    arrival(origin)
+}
+
+fn arrival(origin: std::time::Instant) -> Option<(rate::Kind, rate::Domain, i64)> {
+    i64::try_from(origin.elapsed().as_nanos()).ok().map(|t| (rate::Kind::Arrival, rate::Domain::Qpc, t))
 }
 
 /// The name Audio Devices gives a Linux input that is the monitor source of an output (what that

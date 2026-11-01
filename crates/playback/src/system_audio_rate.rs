@@ -9,20 +9,43 @@
 //! how the packets and the callbacks line up, so a 480-frame callback beside 480-frame packets
 //! reads the same as any other.
 //!
-//! Times come from the backends' frame stamps where they are valid (QPC positions on WASAPI and
-//! ASIO) and from the reader's own monotonic clock on arrival otherwise ([`Kind`]); a side that
-//! changes kind starts its line again, which also restarts it at a discontinuity (an invalid
-//! stamp). The estimate is held while a restarted line refills.
+//! Both sides are timed on one clock domain, QPC ([`Domain::Qpc`]). The loopback packets carry the
+//! QPC time WASAPI gives for their first frame ([`Kind::Position`]). The input callbacks carry the
+//! stamp's host callback time on every backend ([`Kind::Host`]): the QPC read when the device's
+//! block arrived, never the backend's own frame time, which on native ASIO is the driver's sample
+//! position at the nominal rate and so always runs exactly at nominal against the interface's real
+//! clock. An invalid stamp falls back to the reader's own monotonic clock ([`Kind::Arrival`], QPC
+//! on Windows). Each line carries its kind and domain; a change of either starts the line again
+//! (which also restarts it at a discontinuity), and a pair whose domains differ holds the
+//! estimate instead of computing a ratio between two clocks that share no base. The estimate is
+//! held while a restarted line refills.
+//!
+//! A side that stalls (a loopback that pauses and resumes without a discontinuity flag) leaves a
+//! step in time with no frames; a point whose time step exceeds its frame step by more than
+//! [`STALL_SLACK_NS`] restarts the line, so the fit never spans the step.
 //!
 //! Audio-thread code: the points live in fixed arrays inside the struct (no allocation, no lock,
 //! no wait); a fit is O([`POINTS`]) and runs at most once per callback.
 
-/// Where a time comes from: the backend's frame stamp (a device position in QPC time) or the
-/// reader's own clock when the block arrived. One line never mixes the two.
+/// Where a time comes from. One line never mixes kinds.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Kind {
+    /// A stream's frame time: the QPC of the packet's first frame (the loopback side).
     Position,
+    /// The stamp's host callback time: the QPC read when the block arrived (the input side).
+    Host,
+    /// The reader's own monotonic clock when the block arrived (an invalid stamp).
     Arrival,
+}
+
+/// The clock a time is read on. Two lines are only compared when they share one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Domain {
+    /// QPC (the host monotonic clock), which every time this crate takes is on.
+    Qpc,
+    /// A backend's own frame clock, such as a driver's sample position: not comparable.
+    #[allow(dead_code)]
+    Driver,
 }
 
 /// One observation of a clock: `frames` frames starting at frame index `first_frame` (counted
@@ -34,6 +57,7 @@ pub(crate) struct Obs {
     pub frames: u32,
     pub time_ns: i64,
     pub kind: Kind,
+    pub domain: Domain,
 }
 
 /// The points one line holds: at [`SPACING_NS`] apart they cover a little more than the window.
@@ -45,6 +69,11 @@ pub(crate) const SPACING_NS: i64 = 10_000_000;
 /// the slope is good to a fraction of a ppm; with arrival times jittered by a millisecond it is
 /// good to about 10 ppm.
 pub(crate) const WINDOW_NS: i64 = 10_000_000_000;
+/// A point whose time step exceeds the time its frames take at the nominal rate by more than this
+/// restarts the line: a side that stopped delivering and resumed. 50 ms is far above the jitter of
+/// a stamp (a few ms) and the drift over a step (1000 ppm of 10 s is 10 ms), and far below the
+/// shortest pause (hundreds of ms) that would bias the fit.
+pub(crate) const STALL_SLACK_NS: i64 = 50_000_000;
 /// A line gives a slope once its points span this long.
 pub(crate) const MIN_SPAN_NS: i64 = 2_000_000_000;
 /// ... and hold at least this many points.
@@ -57,12 +86,14 @@ pub(crate) struct Line {
     /// The next slot to write.
     head: usize,
     len: usize,
-    kind: Option<Kind>,
+    kind: Option<(Kind, Domain)>,
+    /// The side's nominal frames per second, for the stall rule.
+    hz: f64,
 }
 
 impl Line {
-    fn new() -> Self {
-        Self { time: [0; POINTS], frame: [0; POINTS], head: 0, len: 0, kind: None }
+    fn new(hz: f64) -> Self {
+        Self { time: [0; POINTS], frame: [0; POINTS], head: 0, len: 0, kind: None, hz }
     }
 
     fn reset(&mut self) {
@@ -77,17 +108,19 @@ impl Line {
     }
 
     /// Store the point (`frame`, `time_ns`) unless it is closer than [`SPACING_NS`] to the last
-    /// one. A change of kind, a time going backward or a frame index going backward starts the
+    /// one. A change of kind or domain, a time going backward, a frame index going backward or a
+    /// stall (the time step exceeds the frames' time by more than [`STALL_SLACK_NS`]) starts the
     /// line again. Returns whether the point was stored.
-    fn add(&mut self, frame: u64, time_ns: i64, kind: Kind) -> bool {
-        if self.kind != Some(kind) {
+    fn add(&mut self, frame: u64, time_ns: i64, kind: Kind, domain: Domain) -> bool {
+        if self.kind != Some((kind, domain)) {
             self.reset();
-            self.kind = Some(kind);
+            self.kind = Some((kind, domain));
         }
         if let Some((t, f)) = self.newest() {
-            if time_ns < t || frame < f {
+            let frames_ns = frame.saturating_sub(f) as f64 / self.hz * 1e9;
+            if time_ns < t || frame < f || (time_ns - t) as f64 - frames_ns > STALL_SLACK_NS as f64 {
                 self.reset();
-                self.kind = Some(kind);
+                self.kind = Some((kind, domain));
             } else if time_ns - t < SPACING_NS {
                 return false;
             }
@@ -97,6 +130,10 @@ impl Line {
         self.head = (self.head + 1) % POINTS;
         self.len = (self.len + 1).min(POINTS);
         true
+    }
+
+    fn domain(&self) -> Option<Domain> {
+        self.kind.map(|(_, domain)| domain)
     }
 
     /// Frames per second of the time base: the least-squares slope over the points of the last
@@ -138,25 +175,27 @@ pub(crate) struct RateEstimate {
 }
 
 impl RateEstimate {
-    pub(crate) fn new(nominal: f64) -> Self {
-        Self { endpoint: Line::new(), device: Line::new(), nominal, dirty: false, drift: None }
+    /// For an endpoint at `endpoint_hz` and a device at `device_hz` frames per second.
+    pub(crate) fn new(endpoint_hz: f64, device_hz: f64) -> Self {
+        Self { endpoint: Line::new(endpoint_hz), device: Line::new(device_hz), nominal: endpoint_hz / device_hz, dirty: false, drift: None }
     }
 
     /// Start again for another stream pair, in place (no large temporary on the audio thread).
-    pub(crate) fn restart(&mut self, nominal: f64) {
+    pub(crate) fn restart(&mut self, endpoint_hz: f64, device_hz: f64) {
         self.endpoint.reset();
         self.device.reset();
-        (self.nominal, self.dirty, self.drift) = (nominal, false, None);
+        (self.endpoint.hz, self.device.hz) = (endpoint_hz, device_hz);
+        (self.nominal, self.dirty, self.drift) = (endpoint_hz / device_hz, false, None);
     }
 
     /// A loopback packet.
     pub(crate) fn endpoint(&mut self, obs: Obs) {
-        self.dirty |= self.endpoint.add(obs.first_frame, obs.time_ns, obs.kind);
+        self.dirty |= self.endpoint.add(obs.first_frame, obs.time_ns, obs.kind, obs.domain);
     }
 
     /// An input callback starting at device frame `first_frame`.
-    pub(crate) fn device(&mut self, first_frame: u64, time_ns: i64, kind: Kind) {
-        self.dirty |= self.device.add(first_frame, time_ns, kind);
+    pub(crate) fn device(&mut self, first_frame: u64, time_ns: i64, kind: Kind, domain: Domain) {
+        self.dirty |= self.device.add(first_frame, time_ns, kind, domain);
     }
 
     /// The drift estimate, refitted when a point was stored; `None` until both lines span
@@ -166,6 +205,7 @@ impl RateEstimate {
             && let (Some(e), Some(d)) = (self.endpoint.slope(), self.device.slope())
             && d > 0.0
             && e > 0.0
+            && self.endpoint.domain() == self.device.domain()
         {
             self.drift = Some(e / d / self.nominal - 1.0);
         }
@@ -180,7 +220,7 @@ mod tests {
     /// Feed `seconds` of a 48 kHz device in `cb`-frame callbacks and an endpoint `ppm` fast in
     /// 480-frame packets, both on exact times, and return the estimate in ppm.
     fn run(ppm: f64, cb: u64, seconds: f64, arrival_jitter_ns: i64) -> Option<f64> {
-        let mut est = Box::new(RateEstimate::new(1.0));
+        let mut est = Box::new(RateEstimate::new(48_000.0, 48_000.0));
         let (mut device, mut packet, mut seed) = (0u64, 0u64, 7u64);
         let ep_rate = 48_000.0 * (1.0 + ppm * 1e-6);
         while (device as f64) < seconds * 48_000.0 {
@@ -189,10 +229,10 @@ mod tests {
                 seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
                 let jitter = if arrival_jitter_ns > 0 { (seed >> 33) as i64 % arrival_jitter_ns } else { 0 };
                 let time_ns = ((packet * 480) as f64 / ep_rate * 1e9) as i64 + jitter;
-                est.endpoint(Obs { first_frame: packet * 480, frames: 480, time_ns, kind: Kind::Position });
+                est.endpoint(Obs { first_frame: packet * 480, frames: 480, time_ns, kind: Kind::Position, domain: Domain::Qpc });
                 packet += 1;
             }
-            est.device(device, (t * 1e9) as i64, Kind::Position);
+            est.device(device, (t * 1e9) as i64, Kind::Host, Domain::Qpc);
             device += cb;
         }
         est.drift().map(|d| d * 1e6)
@@ -219,16 +259,61 @@ mod tests {
     #[test]
     fn no_estimate_before_two_seconds_and_a_change_of_kind_restarts_the_line_but_holds_the_estimate() {
         assert_eq!(run(100.0, 480, 1.5, 0), None);
-        let mut est = Box::new(RateEstimate::new(1.0));
+        let mut est = Box::new(RateEstimate::new(48_000.0, 48_000.0));
         for k in 0..400u64 {
             let t = (k * 10_000_000) as i64;
-            est.endpoint(Obs { first_frame: k * 480, frames: 480, time_ns: t, kind: Kind::Position });
-            est.device(k * 480, t, Kind::Position);
+            est.endpoint(Obs { first_frame: k * 480, frames: 480, time_ns: t, kind: Kind::Position, domain: Domain::Qpc });
+            est.device(k * 480, t, Kind::Host, Domain::Qpc);
         }
         let held = est.drift().expect("4 s of points");
         assert!(held.abs() < 1e-9);
-        est.device(400 * 480, 4_000_000_000, Kind::Arrival);
+        est.device(400 * 480, 4_000_000_000, Kind::Arrival, Domain::Qpc);
         assert_eq!(est.drift(), Some(held), "the restarted device line is short: the estimate is held");
         assert_eq!(est.device.len, 1);
+    }
+
+    #[test]
+    fn a_pair_on_different_clock_domains_holds_the_estimate_instead_of_computing_one() {
+        let mut est = Box::new(RateEstimate::new(48_000.0, 48_000.0));
+        for k in 0..600u64 {
+            let t = (k * 10_000_000) as i64;
+            est.endpoint(Obs { first_frame: k * 480, frames: 480, time_ns: t, kind: Kind::Position, domain: Domain::Qpc });
+            est.device(k * 480, t, Kind::Host, Domain::Driver);
+        }
+        assert_eq!(est.drift(), None, "no estimate from a pair that shares no clock");
+        for k in 600..1200u64 {
+            let t = (k * 10_000_000) as i64;
+            est.endpoint(Obs { first_frame: k * 480, frames: 480, time_ns: t, kind: Kind::Position, domain: Domain::Qpc });
+            est.device(k * 480, t, Kind::Host, Domain::Qpc);
+        }
+        let held = est.drift().expect("the device line is on QPC again and has refilled");
+        assert!(held.abs() < 1e-9);
+        for k in 1200..1800u64 {
+            let t = (k * 10_000_000) as i64;
+            est.endpoint(Obs { first_frame: k * 480, frames: 480, time_ns: t, kind: Kind::Position, domain: Domain::Qpc });
+            est.device(k * 480, t, Kind::Host, Domain::Driver);
+        }
+        assert_eq!(est.drift(), Some(held), "mixed again: the last estimate is held");
+    }
+
+    #[test]
+    fn a_step_in_time_with_no_frames_restarts_the_line_and_the_reading_holds() {
+        for stall_s in [0.5, 2.0, 8.0] {
+            let mut est = Box::new(RateEstimate::new(48_000.0, 48_000.0));
+            let step = (stall_s * 1e9) as i64;
+            for k in 0..2000u64 {
+                // 20 s of both sides on exact time; at 10 s the endpoint's time steps and its frames do not.
+                let t = (k * 10_000_000) as i64;
+                let endpoint_t = if k < 1000 { t } else { t + step };
+                est.endpoint(Obs { first_frame: k * 480, frames: 480, time_ns: endpoint_t, kind: Kind::Position, domain: Domain::Qpc });
+                est.device(k * 480, t, Kind::Host, Domain::Qpc);
+                if let Some(d) = est.drift() {
+                    assert!(d.abs() < 1e-6, "{stall_s} s stall: the reading left its bound ({d}) at point {k}");
+                }
+                if k == 1000 {
+                    assert_eq!(est.endpoint.len, 1, "{stall_s} s stall: the endpoint line restarted at the step");
+                }
+            }
+        }
     }
 }

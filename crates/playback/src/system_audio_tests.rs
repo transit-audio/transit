@@ -148,6 +148,8 @@ struct Run {
     max_trim: f64,
     /// The reported drift over the late half, in ppm (lowest, highest).
     reported: (f64, f64),
+    /// The reported drift at every callback after the settling time, in ppm (lowest, highest).
+    reported_settled: (f64, f64),
     target: usize,
 }
 
@@ -155,10 +157,18 @@ struct Run {
 /// `ppm(t)` fast (negative: slow) against the device's: both at 48 kHz, the device's input in
 /// `cb`-frame callbacks, the endpoint's capture in 480-frame packets, each delivered up to
 /// `jitter_ms` (deterministic pseudo-random, in order) after its last frame was captured. The
-/// packets carry the QPC time of their first frame and the callbacks the time of theirs, as the
-/// WASAPI stamps do; the device is the time base. Deterministic sample counts and synthetic
-/// timestamps, no clocks, no threads; the reader starts from an empty ring.
+/// packets carry the QPC time of their first frame; the callbacks are stamped as an ASIO driver
+/// stamps them: `backend_frame_ns` is the device's own sample position at the nominal rate
+/// (exactly nominal whatever the interface's clock does) and `host_callback_ns` is the QPC when the
+/// block arrived. The device is the time base and QPC runs `qpc_ppm` fast against it. An endpoint
+/// `stall` of `(start, length)` seconds delivers nothing, counts no frames and sets no
+/// discontinuity flag. Deterministic sample counts and synthetic timestamps, no clocks, no
+/// threads; the reader starts from an empty ring.
 fn simulate(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f64) -> Run {
+    simulate_with(ppm, cb, jitter_ms, seconds, 0.0, None)
+}
+
+fn simulate_with(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f64, qpc_ppm: f64, stall: Option<(f64, f64)>) -> Run {
     const RATE: f64 = 48_000.0;
     const PACKET: u64 = 480;
     const SETTLE_S: f64 = 30.0;
@@ -166,29 +176,50 @@ fn simulate(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f64) -
     let status = Arc::clone(&source.status);
     let mut resampler = Resampler::new(48_000, 48_000);
     let mut out = vec![0.0f32; 2 * PIECE];
-    // The endpoint's frame position at the last callback instant, and that instant.
-    let (mut ep_at, mut t_at) = (0.0f64, 0.0f64);
-    // The next packet to complete, the capture time of its first frame, the pending deliveries.
-    let (mut next, mut first_time, mut last_delivery, mut seed) = (0u64, 0.0f64, 0.0f64, 0x2680_u64);
+    let qpc = |t: f64| t * (1.0 + qpc_ppm * 1e-6);
+    // The endpoint's own time: device time less the stall so far, and the way back.
+    let (stall_at, stall_len) = stall.unwrap_or((f64::MAX, 0.0));
+    let alive = |t: f64| t - (t - stall_at).clamp(0.0, stall_len);
+    let device_time = |a: f64| if a < stall_at { a } else { a + stall_len };
+    let origin = std::time::Instant::now();
+    // The endpoint's frame position at the last callback instant, and that instant (device time
+    // and the endpoint's own).
+    let (mut ep_at, mut t_at, mut a_at) = (0.0f64, 0.0f64, 0.0f64);
+    // The next packet to complete, its first frame's endpoint time, the pending deliveries.
+    let (mut next, mut first_a, mut last_delivery, mut seed) = (0u64, 0.0f64, 0.0f64, 0x2680_u64);
     let mut pending: VecDeque<(f64, rate::Obs)> = VecDeque::new();
-    let mut run = Run { late_fill: (f64::MAX, 0.0), trim_excess: f64::MIN, reported: (f64::MAX, f64::MIN), ..Run::default() };
+    let mut run = Run {
+        late_fill: (f64::MAX, 0.0),
+        trim_excess: f64::MIN,
+        reported: (f64::MAX, f64::MIN),
+        reported_settled: (f64::MAX, f64::MIN),
+        ..Run::default()
+    };
     let callbacks = (seconds * RATE / cb as f64) as u64;
     let mut primed_discard = None;
     for k in 0..callbacks {
         let t = (k * cb as u64) as f64 / RATE;
         // The endpoint's clock from the previous instant to this one, at the drift of the interval.
-        let ep = ep_at + (t - t_at) * RATE * (1.0 + ppm(t_at) * 1e-6);
+        let a_now = alive(t);
+        let ep = ep_at + (a_now - a_at) * RATE * (1.0 + ppm(t_at) * 1e-6);
         // Packets completed by now: their completion time by interpolation, then their delivery.
         while ((next + 1) * PACKET) as f64 <= ep {
-            let done = t_at + (((next + 1) * PACKET) as f64 - ep_at) / (ep - ep_at) * (t - t_at);
+            let done_a = a_at + (((next + 1) * PACKET) as f64 - ep_at) / (ep - ep_at) * (a_now - a_at);
+            let done = device_time(done_a);
             seed = seed.wrapping_mul(6_364_136_223_846_793_005).wrapping_add(1_442_695_040_888_963_407);
             let jitter = (seed >> 11) as f64 / (1u64 << 53) as f64 * jitter_ms * 1e-3;
             last_delivery = (done + jitter).max(last_delivery);
-            let obs = rate::Obs { first_frame: next * PACKET, frames: PACKET as u32, time_ns: (first_time * 1e9) as i64, kind: rate::Kind::Position };
+            let obs = rate::Obs {
+                first_frame: next * PACKET,
+                frames: PACKET as u32,
+                time_ns: (qpc(device_time(first_a)) * 1e9) as i64,
+                kind: rate::Kind::Position,
+                domain: rate::Domain::Qpc,
+            };
             pending.push_back((last_delivery, obs));
-            (next, first_time) = (next + 1, done);
+            (next, first_a) = (next + 1, done_a);
         }
-        (ep_at, t_at) = (ep, t);
+        (ep_at, t_at, a_at) = (ep, t, a_now);
         while pending.front().is_some_and(|(due, _)| *due <= t) {
             let Some((_, obs)) = pending.pop_front() else { break };
             for _ in 0..PACKET {
@@ -199,7 +230,14 @@ fn simulate(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f64) -
         }
         let fill = source.queue.slots() / 2;
         let was_primed = resampler.primed;
-        resampler.begin(&mut source, cb, Some((rate::Kind::Position, (t * 1e9) as i64)));
+        let stamp = ab::Stamp {
+            host_callback_ns: (qpc(t) * 1e9) as u64,
+            backend_callback_ns: (t * 1e9) as i64,
+            backend_frame_ns: (t * 1e9) as i64,
+            quality: ab::Quality::BackendEstimate,
+            offset_uncertainty_ns: None,
+        };
+        resampler.begin(&mut source, cb, callback_time(stamp, origin));
         let primed_now = resampler.primed;
         if primed_now && primed_discard.is_none() {
             primed_discard = Some(status.discarded.load(Ordering::Relaxed));
@@ -218,6 +256,8 @@ fn simulate(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f64) -
         run.max_trim = run.max_trim.max(trim.abs());
         if t >= SETTLE_S {
             run.trim_excess = run.trim_excess.max(trim.abs() - (1.3 * true_ppm.abs() + 100.0));
+            let reported = f64::from(status.drift_deci_ppm.load(Ordering::Relaxed)) / 10.0;
+            run.reported_settled = (run.reported_settled.0.min(reported), run.reported_settled.1.max(reported));
         }
         if t >= seconds / 2.0 {
             let f = fill as f64 / resampler.target as f64;
@@ -306,6 +346,68 @@ fn drift_at_2048_frame_callbacks() {
 #[test]
 fn drift_at_4096_frame_callbacks() {
     assert_drifts_at(4_096);
+}
+
+/// ASIO-style device stamps (the position at the nominal rate, exactly) while QPC runs against the
+/// interface by `qpc_ppm`: the estimate must time the input by QPC (the host callback time), the
+/// clock the loopback packets are on, so the endpoint's true drift reads whatever QPC does. The
+/// true drifts here are 0 and +-200 ppm; each runs five simulated minutes.
+fn assert_qpc_skew_at(cb: usize) {
+    for qpc_ppm in [50.0, -50.0, 300.0, -300.0, 1_000.0, -1_000.0] {
+        for true_ppm in [0.0, 200.0, -200.0] {
+            let label = format!("cb {cb}, QPC {qpc_ppm:+} ppm against the device, endpoint {true_ppm:+} ppm");
+            let run = simulate_with(&|_| true_ppm, cb, 0.0, 300.0, qpc_ppm, None);
+            assert_eq!((run.dry, run.zeros), (0, 0), "{label}: ran dry after priming: {run:?}");
+            assert_eq!(run.discarded, 0, "{label}: resynchronized: {run:?}");
+            assert!(run.late_fill.0 > 0.6 && run.late_fill.1 < 1.4, "{label}: the fill wanders: {run:?}");
+            assert!(run.trim_excess <= 0.0, "{label}: the trim exceeds 1.3 x the drift + 100 ppm: {run:?}");
+            let tolerance = (true_ppm.abs() * 0.05).max(20.0);
+            assert!(run.reported.0 >= true_ppm - tolerance && run.reported.1 <= true_ppm + tolerance, "{label}: reported drift off: {run:?}");
+        }
+    }
+}
+
+#[test]
+fn asio_position_stamps_with_qpc_skewed_against_the_device_at_128_frame_callbacks() {
+    assert_qpc_skew_at(128);
+}
+
+#[test]
+fn asio_position_stamps_with_qpc_skewed_against_the_device_at_512_frame_callbacks() {
+    assert_qpc_skew_at(512);
+}
+
+#[test]
+fn asio_position_stamps_with_qpc_skewed_against_the_device_at_2048_frame_callbacks() {
+    assert_qpc_skew_at(2_048);
+}
+
+/// A loopback that pauses and resumes without a discontinuity flag: a step in time with no frames
+/// inside the estimate's window. The line restarts at the step and the estimate is held, so the
+/// reported drift stays inside its bound and the trim never leaves its own, whatever the stall.
+#[test]
+fn a_stalled_endpoint_without_a_discontinuity_flag_neither_moves_the_reading_nor_pins_the_trim() {
+    for cb in [480, 2_048] {
+        for stall_s in [0.5, 2.0, 8.0] {
+            for true_ppm in [0.0, -200.0] {
+                let label = format!("cb {cb}, stall {stall_s} s, endpoint {true_ppm:+} ppm");
+                let run = simulate_with(&|_| true_ppm, cb, 0.0, 200.0, 0.0, Some((60.003, stall_s)));
+                // One dry event: the stall's own silence. Then audio again, nothing resynchronized
+                // beyond the priming that follows it.
+                assert_eq!(run.dry, 1, "{label}: more than the stall's own silence: {run:?}");
+                let silence = (stall_s * 48_000.0) as u64 + 2 * run.target as u64 + 2 * cb as u64;
+                assert!(run.zeros <= silence, "{label}: more silence than the stall and one priming: {run:?}");
+                assert!(run.discarded <= cb as u64 + 2 * 480, "{label}: resynchronized: {run:?}");
+                assert!(run.late_fill.0 > 0.6 && run.late_fill.1 < 1.4, "{label}: the fill wanders after the stall: {run:?}");
+                assert!(run.trim_excess <= 0.0, "{label}: the trim left its bound: {run:?}");
+                let tolerance = (true_ppm.abs() * 0.05).max(20.0);
+                assert!(
+                    run.reported_settled.0 >= true_ppm - tolerance && run.reported_settled.1 <= true_ppm + tolerance,
+                    "{label}: the reading moved: {run:?}"
+                );
+            }
+        }
+    }
 }
 
 #[test]
