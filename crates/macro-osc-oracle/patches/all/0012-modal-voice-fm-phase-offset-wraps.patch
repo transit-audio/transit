@@ -1,0 +1,17 @@
+--- elements/dsp/ominous_voice.h
++++ elements/dsp/ominous_voice.h
+@@ -154,2 +154,13 @@
+   inline float SineFm(uint32_t phase, float fm) const {
+-    phase += static_cast<uint32_t>(fm * 2147483648.0f);
++    // transit oracle: fm is a signed phase offset in half turns, and the
++    // carrier's reaches 2 in magnitude, so fm * 2^31 is often negative
++    // or above 2^32. Converting such a float straight to uint32_t is undefined
++    // behavior: x86-64 compilers (MSVC, GCC, clang) emit a 64-bit truncating
++    // conversion and keep the low 32 bits, so the offset wraps modulo one
++    // turn; AArch64 (fcvtzu) and the module's Cortex-M4 (vcvt.u32.f32)
++    // saturate it to [0, 2^32 - 1] instead. The conversion now goes through
++    // int64_t (defined for |fm| < 2^32), so every host wraps, as x86-64 did
++    // and as the port does.
++    phase += static_cast<uint32_t>(
++        static_cast<int64_t>(fm * 2147483648.0f));
+     uint32_t integral = phase >> 20;

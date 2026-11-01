@@ -92,3 +92,11 @@ For the maintainer's list (ADR 0033 note; nothing is filed by agents):
   non-static instance (same class as the resonator's and meta-modulator's findings).
 - `elements/resources.cc` has a zero-length `lookup_table_uint32_table[]`, which MSVC rejects
   (C2466; patched out for the oracle).
+- `elements/dsp/ominous_voice.h`'s `FmOscillator::SineFm` adds `static_cast<uint32_t>(fm *
+  2147483648.0f)` to the phase, where `fm` is a signed offset in half turns (the carrier's reaches 2
+  in magnitude). For a negative or out-of-range product the conversion is undefined: x86-64
+  compilers wrap it modulo one turn, AArch64 (`fcvtzu`) and the module's Cortex-M4
+  (`vcvt.u32.f32`) saturate it, so on the hardware every negative modulation becomes 0 and the
+  FM is one-sided. The port wraps (`F::trunc_u32`, the x86-64 rule); the oracle converts through
+  `int64_t` on every host so it wraps too (`patches/all/0012` in the oracle crate). Found when
+  the FM pair null failed on macOS (Apple silicon) only (#198).

@@ -28,7 +28,8 @@ reaches a release build.
   synthesizer the unspecified argument order and sort ties pinned, its undefined frozen-delay slices
   and last-wave read defined, its buffer size made overridable for a second build, and a desktop
   diagnostic silenced; for the meta-modulator, its crossfade and fold table reads kept inside
-  their tables; for the random sequencer, four reads past an array made defined. They are applied to copies at
+  their tables; for the random sequencer, four reads past an array made defined; for the modal voice, the FM
+  voice's float-to-unsigned phase offset made to wrap on every host. They are applied to copies at
   build time (VENDOR.md lists them); every other file builds as fetched.
 - `cpp/oracle.cc`: a C ABI over one voice (`Patch` and `Modulations` in, int16 out/aux frames, as
   the firmware) and over each engine on its own (float out/aux before the voice's gain, limiter and

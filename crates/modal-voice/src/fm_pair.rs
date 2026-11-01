@@ -195,7 +195,10 @@ impl FmOscillator {
         increment.trunc_u32()
     }
 
-    /// `SineFm(phase, fm)`.
+    /// `SineFm(phase, fm)`. The offset `fm * 2^31` is often negative or above 2^32; its conversion
+    /// wraps modulo one turn, as x86-64 compilers emit the firmware's `static_cast<uint32_t>` and as
+    /// the oracle's patch 0012 makes every host compute it (AArch64 and the module's Cortex-M4
+    /// saturate instead: the conversion is undefined in C++).
     #[inline(always)]
     fn sine_fm(phase: u32, fm: F) -> F {
         let phase = phase.wrapping_add((fm * 2_147_483_648.0).trunc_u32());
