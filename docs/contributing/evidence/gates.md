@@ -105,6 +105,11 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
 
 ## Rules
 
+- A deferred instrument gate is tested with both note event orders inside one render quantum,
+  including a phrase that starts and ends before any render sees it held. Assert the envelope
+  stage as well as the eventual silence, with the shaper on, off, and switching around the
+  release ([E67](../../escapes/E67-a-pending-note-start-masked-its-release.md), #290).
+
 - A gate that is not run is not a gate. If one cannot run on your machine, say so in the pull request.
 - Do not weaken or delete a gate to make a change pass. Fix the cause (see `escape-record.md`).
 - Tests must not load third-party plug-ins. Use the fixtures.

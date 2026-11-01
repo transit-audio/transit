@@ -25,3 +25,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E64: an X11 editor window was handed out before the server made it (#147)](E64-an-x11-window-was-handed-out-before-the-server-made-it.md)
 - [E65: a hosted plug-in test ended its process before plug-in hosting shut down](E65-a-hosted-plug-in-test-ended-its-process-before-hosting-shut-down.md)
 - [E66: a held-source test let its deadline pass before the worker wake](E66-a-held-source-test-let-its-deadline-pass-before-the-worker-wake.md)
+- [E67: a pending note start masked its release (#290)](E67-a-pending-note-start-masked-its-release.md)
