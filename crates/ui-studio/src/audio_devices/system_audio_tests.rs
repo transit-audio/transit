@@ -1,7 +1,7 @@
 //! The System Audio block of the I/O paths section (#268), driven like a user over the stand-in
 //! devices: no loopback is opened (the stand-in run has no player).
 use super::*;
-use crate::audio_devices_system::{DEFAULT_OUTPUT, ELSEWHERE_NOTE, RIGHTS_NOTE};
+use crate::audio_devices_system::{DEFAULT_OUTPUT, ELSEWHERE_NOTE, SWITCH_NOTE};
 
 fn labels_of(t: &T, key: &str) -> Vec<String> {
     t.layout()["items"].as_array().unwrap().iter().filter(|i| i["value"] == key).map(|i| i["label"].as_str().unwrap().to_owned()).collect()
@@ -17,7 +17,7 @@ fn the_switch_and_the_output_wait_for_apply_and_the_rights_note_is_shown() {
         T::rect(&t.layout()["controls"], Some(ELSEWHERE_NOTE), "system_audio_note");
         return;
     }
-    T::rect(&t.layout()["controls"], Some(RIGHTS_NOTE), "system_audio_rights");
+    T::rect(&t.layout()["controls"], Some(SWITCH_NOTE), "system_audio_note");
     T::rect(&t.layout()["controls"], Some("Off."), "system_audio_status");
     t.click(mid(t.control_rect("system_audio")));
     assert!(t.app.audio_devices.draft.system_audio && !t.app.ui.audio.system_audio, "a draft choice until Apply");

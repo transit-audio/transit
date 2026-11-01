@@ -9,8 +9,8 @@ use crate::theme::TOKENS;
 use transit_playback::devices::{AudioConfig, DeviceInfo};
 use transit_playback::system_audio::{self, Report};
 
-/// The help's rights sentence, said under the switch.
-pub const RIGHTS_NOTE: &str = "A 5.1 or 7.1 output is folded to its front pair and the center channel (the dialogue) is dropped, so a stereo output is the better pick. System Audio records what this computer plays, as a loopback cable would. You are responsible for the rights to what you record.";
+/// The note under the switch: the help's rights sentence, then what happens to a surround output.
+pub const SWITCH_NOTE: &str = "System Audio records what this computer plays, as a loopback cable would. You are responsible for the rights to what you record. A 5.1 or 7.1 output is folded to its front pair and the center channel (the dialogue) is dropped, so a stereo output is the better pick.";
 /// What the block says where transit has no capture of its own (Linux, macOS).
 pub const ELSEWHERE_NOTE: &str = if cfg!(target_os = "linux") {
     "On Linux what an output plays arrives as an input already: the PipeWire or PulseAudio monitor source of that output, listed as System Audio (monitor of <output>) where transit can tell. If none is listed, route the monitor to transit's input in pavucontrol (Recording tab) or qpwgraph."
@@ -134,8 +134,8 @@ pub fn section(
             }
         });
     }
-    let r = ui.add(egui::Label::new(egui::RichText::new(RIGHTS_NOTE).color(TOKENS.text_dim).size(11.0)).wrap());
-    controls.push(MenuItem::at(ui, RIGHTS_NOTE.into(), "system_audio_rights".into(), r.rect));
+    let r = ui.add(egui::Label::new(egui::RichText::new(SWITCH_NOTE).color(TOKENS.text_dim).size(11.0)).wrap());
+    controls.push(MenuItem::at(ui, SWITCH_NOTE.into(), "system_audio_note".into(), r.rect));
 }
 
 impl crate::StudioApp {
