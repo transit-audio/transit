@@ -323,7 +323,9 @@ fn the_deja_vu_dead_band_has_its_edges_at_0_47_and_0_53() {
     assert!(at(0.46) < 0.4895 && at(0.46) > 0.4893, "{}", at(0.46));
     assert!(at(0.469) < 0.5, "just below the lower edge it still moves: {}", at(0.469));
     assert_eq!(at(0.47), 0.5, "the lower edge is inside the band");
+    assert_eq!(at(0.48), 0.5, "inside the band, away from the edge");
     assert_eq!(at(0.5), 0.5);
+    assert_eq!(at(0.52), 0.5, "inside the band, away from the edge");
     assert_eq!(at(0.53), 0.5, "the upper edge is inside the band");
     assert!(at(0.531) > 0.5, "just above the upper edge it moves: {}", at(0.531));
     assert_eq!(at(0.54), 0.5 + (0.54 - 0.53) * k);
@@ -358,4 +360,39 @@ fn a_new_seed_is_heard_unlatched_only_before_the_first_play() {
     let second = play(&mut l, &s, &path, 0, 96_000, 128);
     assert_ne!(first, second);
     assert_eq!(second, play(&mut Sequencer::new(99, true), &s, &path, 0, 96_000, 128));
+}
+
+/// #202 C2: Jitter toggled between 1.0 and 0 block by block leaves a tick just before a grid point;
+/// the next tick must not come before this tick's events have ended (no double note-on).
+#[test]
+fn jitter_toggled_block_by_block_never_doubles_a_note() {
+    let models = [Model::CoinToss, Model::Divider, Model::Clusters];
+    let rate_64 = RATES.len() - 1;
+    let rate_16 = RATES.iter().position(|r| r.0 == "1/16").expect("1/16 is a rate");
+    let mut runs = 0u32;
+    for (rate, tempo, block, toggles) in [(rate_64, 300.0, 600u32, 10_000i64), (rate_16, 120.0, 6000, 1_500)] {
+        for seed in 1..=20u32 {
+            for model in models {
+                let mut seq = Sequencer::new(seed, false);
+                let path = Path::constant(tempo);
+                let mut ev = Vec::new();
+                for i in 0..toggles {
+                    let s = Settings {
+                        rate,
+                        model,
+                        voices: Voices::All,
+                        spread: 0.0,
+                        jitter: if i % 2 == 0 { 1.0 } else { 0.0 },
+                        ..Settings::default()
+                    };
+                    ev.extend(play(&mut seq, &s, &path, i * i64::from(block), i64::from(block), block));
+                }
+                ev.extend(stop(&mut seq, &Settings::default()).into_iter().map(|k| (i64::MAX, k)));
+                assert_eq!(seq.dropped(), 0, "rate {rate} seed {seed} {model:?}: the schedule refused events");
+                assert_paired(&format!("rate {rate} {tempo} bpm seed {seed} {model:?}"), &ev);
+                runs += 1;
+            }
+        }
+    }
+    assert_eq!(runs, 120);
 }
