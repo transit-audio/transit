@@ -64,12 +64,24 @@ impl StudioApp {
                 .tracks
                 .iter()
                 .flat_map(|t| {
-                    t.mixer.inserts.iter().enumerate().filter_map(move |(i, ins)| {
-                        ins.as_ref()
-                            // Only a frozen Texture has a recording to refresh; the rest has no state to keep.
-                            .filter(|ins| ins.plugin == "texture" && ins.params.get("freeze").is_some_and(|v| *v >= 0.5))
-                            .map(|_| format!("{}: Texture insert {} (no audio callback)", t.name, i + 1))
-                    })
+                    let frozen = |ins: &transit_model::Insert| ins.params.get("freeze").is_some_and(|v| *v >= 0.5);
+                    t.mixer
+                        .inserts
+                        .iter()
+                        .enumerate()
+                        .filter_map(move |(i, ins)| {
+                            ins.as_ref()
+                                // Only a frozen Texture has a recording to refresh; the rest has no state to keep.
+                                .filter(|ins| ins.plugin == "texture" && frozen(ins))
+                                .map(|_| format!("{}: Texture insert {} (no audio callback)", t.name, i + 1))
+                        })
+                        // A frozen Texture Synth's cloud (#241 slice 3) is kept as stored too.
+                        .chain(
+                            t.instrument
+                                .as_ref()
+                                .filter(|ins| ins.plugin == "texture_synth" && frozen(ins))
+                                .map(|_| format!("{}: Texture Synth (no audio callback)", t.name)),
+                        )
                 })
                 .collect();
             self.note_unrefreshed(skipped);

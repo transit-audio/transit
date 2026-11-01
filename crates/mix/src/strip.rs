@@ -1,6 +1,6 @@
 use super::*;
 
-/// Bypassed/inactive Texture inserts still answer state-capture loans. Called only while this
+/// Bypassed/inactive Texture inserts, and Texture Synth instruments, still answer state-capture loans. Called only while this
 /// thread owns the strip, before workers can take it. Only Freeze is applied here; other edits
 /// retain their existing bypass behavior.
 pub(crate) fn service_idle_states(s: &Session, t: &Track, strip: &mut Strip, pos: Samples) {
@@ -11,6 +11,14 @@ pub(crate) fn service_idle_states(s: &Session, t: &Track, strip: &mut Strip, pos
         }
         crate::automation::apply_idle_freeze(s, slot, ins, t, &strip.touch, i, pos);
         slot.plugin.service_idle_state();
+    }
+    // A Texture Synth (#241 slice 3) answers its frozen-state loans whether or not its strip
+    // renders this block (an inactive track's instrument does not process).
+    if let (Some(ins), Some(inst)) = (&t.instrument, strip.instrument.as_mut())
+        && !inst.failed
+        && ins.plugin == transit_dsp::plugins::texture_synth::TEXTURE_SYNTH_INFO.id
+    {
+        inst.plugin.service_idle_state();
     }
 }
 use transit_rt::phase_marker::Phase;

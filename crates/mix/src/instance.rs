@@ -28,7 +28,8 @@ pub fn instance_specs(s: &Session) -> Vec<InstanceSpec> {
 
 /// Every plugin instance a realtime engine takes from its host: each insert and instrument, built-in or third-party, and each clip-effect module
 /// (an EQ or compressor per clip, [`clip_fx_slot`]) of an audio track, with the channel count
-/// a plan prepares it for. Third-party plugins and frozen Texture inserts carry state to restore.
+/// a plan prepares it for. Third-party plugins, frozen Texture inserts and frozen Texture Synths
+/// carry state to restore.
 /// Inactive and master tracks are included (they have strips); frozen tracks are not (they play
 /// their render, [`Session::with_frozen_audio`]).
 pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
@@ -38,6 +39,9 @@ pub fn realtime_instance_specs(s: &Session) -> Vec<InstanceSpec> {
             ins.state_bytes().map(Into::into)
         } else if ins.plugin == "texture" {
             ins.frozen_recording.as_ref().and_then(|r| r.data.clone())
+        } else if ins.plugin == transit_dsp::plugins::texture_synth::TEXTURE_SYNTH_INFO.id {
+            // A frozen Texture Synth's cloud (#241 slice 3), stored on its slot like a hosted state.
+            ins.state_bytes().map(Into::into)
         } else {
             None
         }

@@ -714,7 +714,8 @@ impl Handles {
         let state = made.plugin.state_reader();
         let key_input = made.plugin.has_key_input();
         let name = made.plugin.info().name;
-        let needs_callback = made.plugin.info().id == "texture";
+        // Frozen state the audio callback answers (the Texture insert, the Texture Synth, #241).
+        let needs_callback = matches!(made.plugin.info().id, "texture" | "texture_synth");
         self.entries.insert(key, Entry { editor, state, refused: made.refused_state, key_input, name, stored, needs_callback });
         Some(made)
     }
