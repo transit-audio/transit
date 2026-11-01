@@ -14,6 +14,8 @@ const N: usize = 64;
 const FAR: Duration = Duration::from_secs(60);
 static NO_KEYS: KeyBank = KeyBank::EMPTY;
 
+mod forgo;
+
 #[derive(Default)]
 struct Probe {
     process: AtomicUsize,

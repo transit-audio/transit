@@ -392,7 +392,7 @@ pub trait GraphHost {
     /// its completion identity. False when the result is not this task's for this graph and
     /// block (retired unread, counted by the host): its dependents miss.
     fn take(&mut self, task: usize, outcome: Outcome) -> bool;
-    /// `task` is skipped for the block because `origin` missed.
+    /// `task` is skipped for the block because `origin` missed (itself for a forgone source).
     fn skipped(&mut self, task: usize, origin: usize);
 }
 
@@ -503,6 +503,8 @@ impl Driver {
             Start::Unavailable => run.fail(graph, t, t),
             Start::Forgo => {
                 let _ = host.set().forgo(slot);
+                // Soft dependents can commit immediately: silence the source before releasing them.
+                host.skipped(t, t);
                 run.fail(graph, t, t);
             }
         }
