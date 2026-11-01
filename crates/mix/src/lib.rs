@@ -328,7 +328,8 @@ impl BusTable {
 }
 
 /// Parameter maps up to this long are tracked inline in a [`PluginSlot`] (every built-in's is; the
-/// Texture Synth's, 131 with its matrix rows, #241, is the longest, then the Macro Oscillator's 123).
+/// Texture Synth's, 131 with its matrix rows, #241, is the longest, then the Modal Voice's, 130 with
+/// its matrix rows, #198, then the Macro Oscillator's 123).
 const APPLIED_INLINE: usize = 136;
 
 /// The parameter values last pushed to a plugin, in the insert's parameter-map order. Up to

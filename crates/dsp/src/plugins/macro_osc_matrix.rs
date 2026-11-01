@@ -113,8 +113,8 @@ pub mod dst {
     pub const LFO2_AMOUNT: usize = 13;
     pub const PAN: usize = 14;
     /// Destinations past Pan for an instrument with more than four macros (the Texture Synth's
-    /// Feedback, Dry/Wet and Reverb, #241): the Macro Oscillator's and the Resonator's choices
-    /// stop at Pan, so their rows never reach these.
+    /// Feedback, Dry/Wet and Reverb, #241, and the Modal Voice's Strength, Bow and Blow, #198): the
+    /// Macro Oscillator's and the Resonator's choices stop at Pan, so their rows never reach these.
     pub const EXTRA1: usize = 15;
     pub const EXTRA2: usize = 16;
     pub const EXTRA3: usize = 17;
