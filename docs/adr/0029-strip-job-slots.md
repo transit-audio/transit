@@ -1,6 +1,6 @@
 # ADR 0029: Per-strip job slots for the multicore strip render
 
-- **Status:** accepted 2026-10-29 (issue #124; proposed 2026-10-27). Slice 1, the slot protocol, is implemented in `transit-rt` `strip_jobs`; slice 2, the worker set and the deadline policy, in `transit-rt` `worker_set`; slice 3, the deferred-MIDI ring and the continuity test instrument, in `transit-rt` `midi_defer`; slice 4, the wiring into the live render path, in `crates/mix` `strip_pool`. The render workers are the default since 2026-10-29; `TRANSIT_RENDER_POOL=0` renders serially (deviation 18). Evidence: the gate 6 measurement on the reference hardware, 2026-10-28 ([benchmark](../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md)), with #168 and #169 fixed after it, and the #130 endurance run, 2026-10-29 (eight hours at 64 frames with the workers on: the click sample-stable, no drift, no backend errors). Amended 2026-10-29 for #174: dependency-aware scheduling, see the amendment at the end; its slice 1 is implemented (section 10) and, since 2026-10-29, the default for keyed plans: they render through the task graph, `TRANSIT_RENDER_GRAPH=0` renders them serially (deviation 19; evidence: the section 8 measurement on the reference hardware, [benchmark](../benchmarks/2026-10-29-scarlett-keyed-session-graph-vs-serial.md), the gain-reduction regression of #179 and the scheduling-condition equivalence of #210). Slices 2 to 4 of the amendment remain proposed.
+- **Status:** accepted 2026-10-29 (issue #124; proposed 2026-10-27). Slice 1, the slot protocol, is implemented in `transit-rt` `strip_jobs`; slice 2, the worker set and the deadline policy, in `transit-rt` `worker_set`; slice 3, the deferred-MIDI ring and the continuity test instrument, in `transit-rt` `midi_defer`; slice 4, the wiring into the live render path, in `crates/mix` `strip_pool`. The render workers are the default since 2026-10-29; `TRANSIT_RENDER_POOL=0` renders serially (deviation 18). Evidence: the gate 6 measurement on the reference hardware, 2026-10-28 ([benchmark](../benchmarks/2026-10-28-scarlett-render-workers-gate-6.md)), with #168 and #169 fixed after it, and the #130 endurance run, 2026-10-29 (eight hours at 64 frames with the workers on: the click sample-stable, no drift, no backend errors). Amended 2026-10-29 for #174: dependency-aware scheduling, see the amendment at the end; its slice 1 is implemented (section 10) and, since 2026-10-29, the default for keyed plans: they render through the task graph, `TRANSIT_RENDER_GRAPH=0` renders them serially (deviation 19; evidence: the section 8 measurement on the reference hardware, [benchmark](../benchmarks/2026-10-29-scarlett-keyed-session-graph-vs-serial.md), the gain-reduction regression of #179 and the scheduling-condition equivalence of #210). Slices 2 to 4 of the amendment remain proposed. Section 11 (slice 2, the tail): proposed; implemented behind `TRANSIT_RENDER_TAIL=1` once built.
 - **Date:** 2026-10-27
 - **Amends:** [ADR 0012](0012-midi-device-layer.md) gate G1 and [ADR 0013](0013-unsafe-only-in-soundcraft-rt.md) (the lock-free fan-out it names as a `transit-rt` residual)
 - **Reopen when:** the slot needs a field written outside its transitions, a second publisher appears, or a later slice cannot keep the callback's bound with this state machine.
@@ -248,7 +248,7 @@ The compared scheduler waits for every job. transit does not: the bounded wait t
 Each slice ships on its own, behind the gates in section 8.
 
 1. **Sidechain-aware strip scheduling.** One task per phase-1 strip, with an edge from every key source. The current routing restrictions stay (no key from a bus or an aux onto a phase-1 track; auxes, busses and masters remain the serial tail). The graph path replaces the `keys.is_empty()` condition in `render_active`, behind a process-wide opt-in read once like `TRANSIT_RENDER_POOL` until section 8's measurement, then by default. At the end of slice 1, K88's "a session with sidechain keys renders serially" is retired, and the matching sentence of deviation 18 with it.
-2. **Aux and bus scheduling.** The serial tail becomes graph nodes, with edges from every send and bus input.
+2. Aux and bus scheduling: section 11.
 3. **Generalized routing.** The bus/aux-to-audio-track key restriction is lifted.
 4. **Critical-path prioritization** and splitting at expensive inserts, only if measured to matter. With one task per strip and at least as many workers as strips it does not; dependencies and pinned tasks can make it matter with fewer strips, so measure first.
 
@@ -297,5 +297,135 @@ Deviations from sections 1 to 8:
 | A6 | (not stated) | the graph path is taken only when phase 1 has no more strips than the pool has cells (256), else serial; `align_keys` leaves a strip a worker holds as it went away (its keys and chain are in its cell) | strips past the cells have no slot to skip; a keyed strip's delays must not be recomputed from the spare the table holds while it is away |
 | A7 | gate: the allocation-armed callback test extended to the graph path | new tests on the graph path (`crates/mix/tests/render_graph.rs`, `transit-rt` `worker_set::graph_tests`), the existing pool test unchanged | the graph needs a keyed plan; the existing test keeps guarding the keyless path |
 | A8 | an aux keyed from a strip that missed is skipped (slice 1) | also an aux keyed from an aux skipped by that rule, in tail order (a per-aux flag of the plan, set each block; refutation review, finding 1: a skipped aux keeps its last block's buffer, so the aux keyed from it ran on a stale key) | a compressor is never fed last block's key |
+| B1 | (#174) a task whose required dependency missed is skipped, and the miss propagates | Direct strip-key dependencies are hard. Contributions to audio buses and key buses are soft: a missing contribution is omitted from the current-block sum. A consumer waits until every contribution visible in serial order has resolved, then reads that sum, including an all-zero sum. Missing contributions do not make the bus unavailable. | The serial render with the missed source muted is the reference (#210). Skipping a whole group for one source would be strictly worse than the serial path and interrupt the group's state. |
+| B2 | Admission (deviation 16): no inline render without history or after a recent overrun | For aux tasks only, a home task may render directly on the callback without history, and an unclaimed published task is reclaimed at the deadline regardless of the ordinary history and recent-overrun restrictions. | Tail progress: the serial tail always rendered every aux. A claimed slot is never touched, and phase-1 admission is unchanged. |
+| B3 | A3: a dependent ready only at or past the deadline is forgone, pinned ones too | A pinned (callback, input-reading) phase-1 strip ready at or past the deadline passes the same ownership, panic and suspect checks and renders on the callback; an unpinned one is still forgone. | A3's reason (a worker would hold the strip into the next block) does not apply to a strip that holds no worker. This removes K88's silent monitored-track case. |
 
 Gates (section 8) as tested: equivalence, serial against the graph through two workers and through none (inline only), bit-exact, on nine keyed sessions of `sidechain.rs`'s kind (post and pre-fader keys, either declaration order, a chain of two keys, a bus key onto an aux, latency on either side of a key) and on the five corpus sessions as saved and with a key edge added (`render_graph.rs`); the duck's onset on the same sample with an early key, a late key and latency on either side; zero allocations on the callback (`render_graph.rs` with worker stalls, upstream-missed skips and inline renders; the rt driver with the fake executor); deterministic late workers: with the fake executor a source late, busy and unstarted, a stale result, a graph change while a worker holds an old task (`worker_set::graph_tests`), and through the real strips a source held inside its plug-in on the one worker while a pinned strip waits on observable state (`strip_pool::graph_tests`: late, busy, unstarted, a forced identity mismatch, a plan refused while the task is away and adopted once it is home, the dependents' own and key-entry delay lines neither written nor idled across the skip and continuing after), a skipped dependent's MIDI held and delivered at offset 0 with the off one sample later (`render_graph.rs`); continuity through the continuity instrument with stalls on the key sources: zero stuck notes and every hole a counted busy or unstarted overrun or upstream-missed skip. The parse of the switch is a pure function (`graph::tests`). After the refutation review: the transitive tail skip (`strip_pool::graph_tests::an_aux_keyed_from_a_skipped_aux_is_skipped_too`, a probe on the second aux's keyed insert sees no key in the skipped block) and the deadline phase through `drive` (`worker_set::graph_tests::dependents_ready_after_the_deadline_are_forgone_unpublished`). The measurement on the reference hardware was made 2026-10-29 (section 8); the graph path is the default for keyed plans since. The opt-out (`TRANSIT_RENDER_GRAPH=0` with the workers on) renders the keyed sessions bit-exact to the serial path with no block through the pool (`render_graph.rs`, `the_opt_out_renders_the_keyed_sessions_serially_with_the_workers_on`).
+
+### 11. Slice 2: the aux and bus tail as graph nodes (proposed 2026-11-02)
+
+**Tasks.**
+- Besides one task per phase-1 strip (slice 1), a plan's graph has a barrier task MIX, and a render task and a commit task for every row of the aux region `strips[phase1..aux_end]`.
+- MIX, commits and the tasks of inactive aux rows are control tasks: no worker slot, never published, never forgone, and no strip result. Inactive rows resolve as no-op tasks, and their bus-reader markers stay part of routing analysis.
+- MIX runs the phase-1 delay-compensation walk (`fold_latency`) and the phase-1 mixdown in table order, as the serial path does.
+- A commit meters one aux and routes it (`route_into`).
+- A live aux's render task owns the worker slot of its table index.
+- Masters remain callback work after the graph's block, in track order.
+- Tasks are numbered in topological order: phase-1 strips, MIX, then each aux row's render followed by its commit. Every edge goes from a lower number to a higher one.
+- The task table maps tasks to worker slots, and the driver calls the worker set only for tasks with a slot.
+- Duplicate edges are merged; a merged edge is hard if any part is hard.
+
+**Edges.**
+- A hard edge (a direct strip key) works as in sections 1 and 3: the dependent waits for a usable result, and a miss skips the dependent and propagates.
+- A soft edge (a contribution or an order) is satisfied by any resolution of its source.
+- Every phase-1 task feeds MIX softly. MIX feeds every aux render softly. A strip key source feeds its keyed aux hard.
+- For reader k, commit(w) feeds render(k) softly only for retained writers w < k of k's input bus or key bus.
+- For a key bus, render(k) feeds commit(w) softly for retained writers w > k.
+- An aux's render feeds its own commit softly.
+- For each actual destination (a bus, Main, an output path or a hardware-insert send sink), each aux commit depends softly on the commit of the previous aux writer of that destination in table order.
+- Routing edges the walk drops (feedback into a bus already read) create no dependency.
+
+So every sum is added in table order, every bus read sees exactly the contributions the serial order gives it, and the mixdown's order does not change (section 8, no tolerance). Only render tasks can fail, so the origin of an upstream-missed skip is always a render task with a slot.
+
+**Starting a task: the open and the closed window.** The driver starts each ready task through the host with a window: Open before the deadline, Closed at or after it. In both windows the host checks these in order, before mutating any input:
+1. A task that does not render is ready.
+2. An away strip is Busy while a worker holds it, otherwise unavailable. A failed return home is unavailable and never becomes a callback render.
+3. A home strip carrying a retained panic is unavailable.
+4. A suspect strip is unavailable.
+5. After a block abort, a tail render is unavailable.
+6. A pinned strip (one that reads the live input or the hardware) fills its keys and renders on the callback.
+
+Then the window decides:
+- **Closed, unpinned phase-1 strip:** forgone (A3), with no key filled and no line advanced.
+- **Every aux that will execute** prepares its current-block keys, whatever the fit decision, once the checks succeed.
+- **Aux in the Closed window, or in the Open window without a fit:** prepares and renders on the callback. That render applies the pending key delays exactly once before processing, and reads its input bus from the plan synchronously, with no snapshot.
+- **Aux that fits (Open window only):** makes the same preparation, then copies its input snapshot, is sent, has its keys and snapshot lent, is stamped and is published.
+
+Rules that hold in every case:
+- No forgone or unavailable task prepares or advances keys.
+- Nothing is published in the Closed window. An attempt asserts in rt tests and is counted as misuse elsewhere (deviation 3).
+- In the Closed window, Busy is recorded as a skip without a wake.
+- A claimed strip is never touched or rerun.
+- An already published aux renders inline only after a successful Published-to-Reclaimed transition. The deadline admits that transition through a per-slot flag, which the publisher sets before each tail publish and which is cleared at every block start.
+- An aux claimed and unfinished at the deadline is Late, silent for the block, and Busy for as long as its worker holds it.
+
+**Publication and cost history.**
+- An aux is published only in the Open window, and only when `worst > 0 && worst <= left`. `worst` is its recorded worst case; `left` is the time to the deadline at the decision. Equality publishes.
+- Every direct callback render of an aux records its cost exactly once, while the callback owns the strip, through the same update that worker and reclaimed-inline renders use (the estimate and the decaying maximum). A cold aux therefore acquires history.
+- A chain change resets that history before the decision (#168).
+- The fit guard is a scheduling heuristic based on measured render cost, not a completion guarantee. Queueing between publication and claim, preemption, render-cost variation and failures can still silence an aux.
+- The callback never waits for a claimed worker beyond the shared deadline. Callback-owned tail work may continue after that deadline and may make the callback later than the serial-tail baseline. The comparison is established by measurement, not by this contract.
+
+**Usable result.**
+- A published render's result is usable when all of these hold: the job stamp matches (graph generation; task identity, which is the slot, the chain identity and the hash of its input edges and their kinds; block); its outcome is a consumed Mixed or a reclaimed Inline; and its strip, once home, holds no retained panic.
+- A direct callback render records the current graph, task and block identity after it runs, and is usable under the same panic condition.
+- Only a usable result resolves hard dependents successfully.
+- MIX, commits and inactive-row tasks resolve as control tasks.
+
+**Panics.** In this section, the *checkpoint* means: resume any retained home-strip panic in phase-1, then tail, then master order, without touching worker-owned strips.
+- **Usability.** A strip carrying a captured panic has no usable result, even if its job stamp matches and its outcome is Mixed or Inline. It is neither committed nor used as a key source. Its hard dependents fail and its soft dependents resolve normally.
+- **Return.** Returning a strip transfers ownership before any pending processor operation is applied. If it carries a retained panic, the return applies no reset, delivers no event and makes no other processor call on it.
+- **Settlement outside a drive.** Settlement that brings home a strip carrying a retained panic completes its ownership, key and snapshot cleanup, then runs the checkpoint before returning to its caller. No deferred delivery, processor operation or plan adoption may intervene.
+- **Adoption and reset.** Plan adoption runs the checkpoint after its own settlement and before parked delivery, processor moves or attachment work. A reset runs it before resetting any processor. A retained panic must never be separated from a processor that remains eligible for reuse.
+- **Render block entry.** The checkpoint also runs at the entry of every render block, on every path, before any processor call, as a defensive check.
+- **MIX.** No plug-in call made by MIX may unwind through the driver. MIX guards the latency preparation of each aux and each master, keeping any payload in that strip and never replacing an existing one. A retained panic prevents any further processor call on that strip. If latency preparation captures a panic, MIX latches a block abort and stops before routing; the remaining tail renders resolve as unavailable and their commits as no-ops; and the driver finishes normally.
+- **Panics captured during a drive** stay retained until that drive and its ownership cleanup finish, then resume at the checkpoint before master processing or output publication.
+- **Ownership of payloads.** Other payloads stay owned until their established transfer or retirement path handles them. A late worker's panic is inspected only after its strip is legally home.
+- **Suspect instances.** Preparation never calls a suspect instance awaiting replacement; its latency walk uses the strip's retained latency.
+- **Faults.** A captured strip panic is distinct from a worker-set runner fault (Faulted, suspect). Neither permits further processing of the damaged result.
+- **One executor.** Claim and reclaim exclude each other for one publication, so one attempt never has two executors.
+
+**Commit.** A commit always resolves, but meters and routes only a live, home strip with a usable current-block result. Otherwise it does no metering, routing, delay-tap write or delay-tap idle. A skipped strip's meter stays unchanged (A5).
+
+**Buffer ownership.**
+- No worker writes a bus, Main or an output path. Sums are written only by the callback, in MIX and in commits.
+- A worker reads only its strip, its job, its lent keys and its lent input snapshot.
+- A snapshot keeps its source bus's format and every one of its channels, has capacity for the plan's largest block, and holds no host-export buffer.
+- Snapshots are allocated per live aux reader with the plan, not per pool cell or per bus. Active and prepared plans hold their own.
+- A snapshot comes back on every path a lent key comes back on. A quarantined job keeps its lent snapshot with its strip for the worker's lifetime.
+- A callback render of an aux reads the plan's bus directly.
+
+**Skipped and prepared state.**
+- A skipped render (upstream miss, Busy, unavailable, forgone) gets no processing, delay-line advance, metering or routing.
+- Block-start preparation (parameter application and latency queries for key alignment and for MIX) is allowed only on home instances that are neither suspect nor panicked, and may happen before a later upstream miss is known.
+- A Late render advances its DSP state; only its output is discarded (section 5).
+- A source with no usable result contributes nothing to the sums it feeds, and those sums' readers still render (B1).
+- A strip-key miss skips its dependents.
+- A skipped aux contributes zero, never its last block's buffer. A block of zeros can click.
+
+**Delay compensation while an aux is away.** The walk keeps the latency an away strip carried when it left; it does not recompute an away aux's insert latency from the table's spare. A home aux's latency is recomputed by the walk at every MIX, including the first block after an adoption.
+
+**Identity and plan changes.**
+- A plan is adopted only when every task's strip is home, and after the checkpoint.
+- An aux held by a worker keeps its old graph until it completes. The next `begin_block` retires its result unread, and its first block under the new graph renders with a fresh snapshot and the new latency.
+- A changed edge set changes the edge hash and makes an in-flight result stale, without discarding the cost history of an unchanged chain.
+- The plan description covers the tail topology (per aux-region row: liveness, input bus and format, key sources, actual destinations). Actual destinations are configured, resolved, retained routes, independent of current send level, mute, solo or automation values. A routing change that alters the tail graph therefore always builds new tables, and the compiler never keeps tables whose tail dependencies or snapshot associations are obsolete.
+
+**Switches and eligibility.**
+- `TRANSIT_RENDER_TAIL` is read once, like `TRANSIT_RENDER_GRAPH`. Unset means off until the default flip (a separately reviewed commit after the measurement) and on after it; `1` is on; `0` is off; any other value is logged once and treated as unset.
+- A block takes the tail graph when all of these hold: a pool exists (zero workers included), the block renders on the audio thread, the strips are not forced serial, both the graph and the tail switch are on, every task strip has a worker slot, and phase 1 plus the live auxes number at least `PARALLEL_STRIPS`.
+- `TRANSIT_RENDER_GRAPH=0` turns the tail graph off too; a `TRANSIT_RENDER_TAIL=1` beside it is logged once and ignored.
+- A block also takes the tail graph whenever a tail strip is away, whatever the switches and counts say.
+- When only phase-1 strips are away, the existing recovery path and its capacity rules apply.
+- No out-of-range slot reaches the worker set, and a refused block opening never processes or routes an away placeholder.
+
+**Attribution and queue accounting.**
+- An aux's own overruns (late, busy) and its upstream-missed skips are counted per task, with its track name and the origin.
+- Tail renders on the callback, and deadline reclaims of published auxes, are counted apart.
+- Slice 1's separate count of skipped tail auxes is folded into the upstream-missed count.
+- Per-attempt queue accounting is informational: no scheduling or ownership decision reads it.
+- The counter definitions, snapshot protocol and measurement acceptance rule are maintained in [docs/contributing/knowledge/render-graph-measurement.md](../contributing/knowledge/render-graph-measurement.md), linked here and committed with this amendment.
+
+**Gates.** Section 8's gates, extended to tail topologies, plus the slice 2 regressions:
+- bit-exact serial and graph renders through two workers and through none;
+- send/return impulse alignment, with an aux held by a worker leaving every other path's arrival unchanged;
+- zero callback allocations through the tail;
+- deterministic late workers on aux tasks, including deadline-ready auxes that are busy, suspect or keyed;
+- key preparation in every branch;
+- the fit predicate tested directly with injected budgets;
+- the scheduling-condition gate with aux holds, against the serial render with the same strips muted and the B1 rule;
+- aux panic paths, including MIX's latency preparation, panics returned through settlement, and settlement followed by adoption or reset;
+- the measurement mailbox under a slow reader.
+
+The measurement and its acceptance rule are in the linked document.
