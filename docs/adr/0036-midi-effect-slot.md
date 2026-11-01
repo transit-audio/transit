@@ -152,12 +152,21 @@ the effects and carries: CLAP note-only
 ports and VST3 instruments without controller mappings may ignore the channel messages. An on
 that the 256-entry sounding-note table cannot track is refused before delivery and counted.
 This last resort is counted separately as
-`coalesced_releases`, never as refused offs: at most 112 channel messages represent any release
-flood, with individual release timing sacrificed. The invariant is that every note-on the slot
-emits is followed by its note-off within the same or a later block, overflow or not; on release-only
+`coalesced_releases`, never as refused offs: at most 112 channel messages (16 channels times seven
+controllers) represent any release flood in the slot's output buffer, with individual release timing
+sacrificed. The recovery then adds its own direct events, so the worst case per instrument per block
+is 64 retried releases + 512 delivered events + 256 explicit note-offs + 112 safety controllers = 944
+events, which fits the instrument's 1,024-event queues. Within the slot's output buffer the invariant
+is that every note-on it emits is followed by its note-off within the same or a later block, overflow
+or not (the carry path has a narrower guarantee, see #281); on release-only
 saturation the host's explicit offs supply that termination (`released_on_overflow`). This assumes
 the effect keeps
 its pairing contract and the instrument accepts its releases (the existing downstream retry limit
 is unchanged). Two monotone victim cursors and index links make admission/eviction O(1) amortized
 per event and retain write order at equal offsets; traversal is O(512) per stage. Storage is made
 with the host, with no audio-thread allocation or lock. Non-overflowing event streams are unchanged.
+
+Known limits: a stray release (one whose On was already evicted) still evicts an unrelated pending On,
+and the 256-entry table admission guard turns any leak in the sounding-note table into refused
+Ons (silence until an edit or Stop). No leak path is known: the mix converts CC 120 and 123 into
+per-note offs, and offs are never refused.
