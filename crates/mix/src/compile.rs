@@ -107,6 +107,7 @@ type StripDesc = (TrackId, u16, u8, u16, u16, usize, usize, Vec<(u64, bool, bool
 /// The structure a plan has, compared to decide whether a new plan needs tables at all.
 #[derive(Clone, Default, PartialEq)]
 struct Desc {
+    tail: Vec<crate::graph::tail::Row>,
     strips: Vec<StripDesc>,
     /// Per slot: key, kind, plugin id, channels, layout, long map length (0 inline), sample, insert
     /// identity (a reordered chain is a new structure).
@@ -771,6 +772,7 @@ impl PlanCompiler {
                 desc.external.push((t.id, spec));
             }
         }
+        desc.tail = crate::graph::tail::describe(s, rows, phase1, aux_end, &desc.keys, &desc.sink_routes, &desc.hardware);
         Description { desc, order, specs }
     }
 
@@ -1061,6 +1063,7 @@ impl PlanCompiler {
         }
         tables.keys = KeyBank::new(&desc.keys, block, |keyed| key_caps.get(usize::from(keyed)).copied().unwrap_or(0));
         tables.graph = crate::graph::strip_graph(phase1, aux_end.saturating_sub(phase1), &desc.layers, &desc.keys);
+        tables.graph.tail = crate::graph::tail::build(&tables.graph, &desc.tail);
         moves.extend(strip_moves);
         for (si, (_, layout, planned, _)) in per_strip.into_iter().enumerate() {
             for p in planned {

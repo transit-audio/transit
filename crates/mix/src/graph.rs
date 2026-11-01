@@ -13,6 +13,7 @@
 //! another plan's graph never matches a task's completion identity ([`task_identity`]). The
 //! per-block run state is allocated with it. The render is `StripPool::render_graph`.
 
+pub(crate) mod tail;
 use super::*;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use transit_rt::task_graph::{GraphRun, TaskGraph, fnv};
@@ -102,6 +103,7 @@ impl MixEngine {
 #[derive(Default)]
 pub(crate) struct StripGraph {
     pub(crate) graph: TaskGraph,
+    pub(crate) tail: tail::TailGraph,
     pub(crate) run: GraphRun,
     /// Per phase-1 strip: the first table index of its layer. A key from a strip at or past it
     /// fills silence, as on the serial path (which fills a layer's keys before the layer runs).
@@ -141,6 +143,7 @@ pub(crate) fn strip_graph(phase1: usize, auxes: usize, layers: &[u16], keys: &[K
     let generation = NEXT_GRAPH.fetch_add(1, Ordering::Relaxed);
     StripGraph {
         graph: TaskGraph::new(generation, phase1, &edges),
+        tail: tail::TailGraph::default(),
         run: GraphRun::new(phase1),
         layer_start: layer_start.into(),
         tail_skipped: vec![false; auxes].into(),
