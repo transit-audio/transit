@@ -3,8 +3,8 @@
 
 #![forbid(unsafe_code)]
 
-use transit_random_sequencer::{Block, Event, EventKind, Model, RATES, Sequencer, Settings, Voices, deja_vu_dead_band, division};
 use transit_random_sequencer::VoltageRange;
+use transit_random_sequencer::{Block, Event, EventKind, Model, RATES, Sequencer, Settings, Voices, deja_vu_dead_band, division};
 
 const SR: f64 = 48_000.0;
 
