@@ -66,6 +66,10 @@ A good brief is the biggest token saver. Include:
 - One cargo target directory per checkout class. Agents working in different worktrees must not share
   a target directory at the same time: cargo then reuses another checkout's stale binaries or loses
   artifacts (E0463, #159). Give each concurrent worktree its own.
+- The dev and test profiles use `debug = "line-tables-only"` (workspace `Cargo.toml`, #282): panic messages and
+  backtraces keep file and line, and a private target is about half the size (12.0 GiB to 5.3 GiB for the
+  mix, dsp and engine test binaries), which matters with several agents sharing one disk. For a debugging
+  session that needs variable-level debuginfo, run `CARGO_PROFILE_DEV_DEBUG=2 cargo test ...` in a private target.
 - A default changes only on a measurement on the reference hardware. Benchmarks live in
   [`../benchmarks/`](../benchmarks/README.md); the escapes behind the rules are in [`../escapes/`](../escapes/).
 - Non-blocking review notes become known issues or follow-up issues. Do not drop them silently.

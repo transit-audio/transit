@@ -93,6 +93,8 @@ type_complexity = "allow"
 opt-level = 2
 
 [profile.dev]
+# Line tables only: panic and backtrace frames keep file and line, variable-level debuginfo is dropped (#282).
+debug = "line-tables-only"
 opt-level = 1
 
 [profile.release]
