@@ -401,15 +401,17 @@ impl StudioApp {
         let inactive = self.engine.session().track(key.0).is_some_and(|t| t.inactive) || self.hosted_insert(key).is_some_and(|ins| !ins.active);
         // An inactive slot's live instance survives deactivation and holds every edit, so reads go
         // to it. Only when no live instance exists do they fall back to the stored state.
-        if inactive
-            && instance.is_none()
-            && let Start::Read(then) = start
-            && let Some(state) = self.hosted_insert(key).and_then(|ins| ins.state_bytes())
-        {
-            self.read_done(key, plugin, instance, Some(state), then);
-            self.status.push_str(" (the plug-in is not loaded: from its stored state)");
-            return;
-        }
+        let start = match start {
+            Start::Read(then) if inactive && instance.is_none() => match self.hosted_insert(key).and_then(|ins| ins.state_bytes()) {
+                Some(state) => {
+                    self.read_done(key, plugin, instance, Some(state), then);
+                    self.status.push_str(" (the plug-in is not loaded: from its stored state)");
+                    return;
+                }
+                None => Start::Read(then),
+            },
+            other => other,
+        };
         let Some(p) = &self.player else { return };
         let step = match start {
             Start::Read(then) => p.begin_save_state(key.0, key.1).map(|job| Step::Read { job, then }),
