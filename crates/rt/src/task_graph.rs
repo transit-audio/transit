@@ -49,6 +49,15 @@ pub const fn fnv(h: u64, v: u64) -> u64 {
     (h ^ v).wrapping_mul(FNV_PRIME)
 }
 
+/// Whether a dependency requires usable audio or just resolution of its source.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum EdgeKind {
+    /// Ordering or contribution: a failed source still satisfies this edge.
+    Soft,
+    /// A strip key: a failed source skips the dependent.
+    Hard,
+}
+
 /// A plan's task table: per task its input count, its dependents and a hash of its input edges,
 /// with the graph generation the compiler stamped on it. Built once off the audio path; read
 /// only afterwards.
@@ -61,6 +70,8 @@ pub struct TaskGraph {
     first: Box<[u32]>,
     /// The dependents of every task, task by task.
     deps: Box<[u32]>,
+    kinds: Box<[EdgeKind]>,
+    slots: Box<[Option<usize>]>,
     /// Per task: a hash of its input edges (its sources, in order).
     edge_hash: Box<[u64]>,
 }
@@ -71,23 +82,58 @@ impl TaskGraph {
     /// source always comes first; anything else could not be scheduled), each once. Allocates.
     #[must_use]
     pub fn new(generation: u64, tasks: usize, edges: &[(usize, usize)]) -> Self {
-        let mut e: Vec<(usize, usize)> = edges.iter().copied().filter(|&(f, t)| f < t && t < tasks).collect();
+        let edges: Vec<_> = edges.iter().map(|&(f, t)| (f, t, EdgeKind::Hard)).collect();
+        let slots: Vec<_> = (0..tasks).map(Some).collect();
+        Self::with_slots(generation, &slots, &edges)
+    }
+
+    /// Builds a graph with explicit worker slots (`None` for control tasks) and edge kinds.
+    /// Slots must be unique. Keeps forward edges only; duplicate edges merge, hard winning.
+    /// Allocates off the audio path.
+    #[must_use]
+    pub fn with_slots(generation: u64, slots: &[Option<usize>], edges: &[(usize, usize, EdgeKind)]) -> Self {
+        let tasks = slots.len();
+        let mut e: Vec<_> = edges.iter().copied().filter(|&(f, t, _)| f < t && t < tasks).collect();
         e.sort_unstable();
-        e.dedup();
+        // Hard sorts last; retain it when two kinds name the same edge.
+        e.reverse();
+        e.dedup_by_key(|e| (e.0, e.1));
+        e.reverse();
         let mut inputs = vec![0u32; tasks];
         let mut first = vec![0u32; tasks + 1];
         let mut edge_hash = vec![FNV_OFFSET; tasks];
-        for &(f, t) in &e {
+        for &(f, t, kind) in &e {
             inputs[t] = inputs[t].saturating_add(1);
             first[f + 1] = first[f + 1].saturating_add(1);
             // Sorted by source: each task's sources are hashed in ascending order.
             edge_hash[t] = fnv(edge_hash[t], u64::try_from(f).unwrap_or(u64::MAX).wrapping_add(1));
+            edge_hash[t] = fnv(edge_hash[t], u64::from(kind == EdgeKind::Hard));
         }
         for i in 0..tasks {
             first[i + 1] = first[i + 1].saturating_add(first[i]);
         }
-        let deps = e.iter().map(|&(_, t)| u32::try_from(t).unwrap_or(u32::MAX)).collect();
-        TaskGraph { generation, inputs: inputs.into(), first: first.into(), deps, edge_hash: edge_hash.into() }
+        let deps = e.iter().map(|&(_, t, _)| u32::try_from(t).unwrap_or(u32::MAX)).collect();
+        let kinds = e.iter().map(|e| e.2).collect();
+        TaskGraph { generation, inputs: inputs.into(), first: first.into(), deps, kinds, slots: slots.into(), edge_hash: edge_hash.into() }
+    }
+
+    /// The worker slot of a render task; control tasks have none.
+    #[must_use]
+    pub fn slot(&self, task: usize) -> Option<usize> {
+        self.slots.get(task).copied().flatten()
+    }
+
+    /// The task owning `slot` in this graph. Bounded by the task count.
+    #[must_use]
+    pub fn task_for_slot(&self, slot: usize) -> Option<usize> {
+        self.slots.iter().position(|&s| s == Some(slot))
+    }
+
+    /// Edge kinds in the same order as [`Self::dependents`].
+    #[must_use]
+    pub fn dependent_kinds(&self, task: usize) -> &[EdgeKind] {
+        let (Some(&a), Some(&b)) = (self.first.get(task), self.first.get(task + 1)) else { return &[] };
+        self.kinds.get(a as usize..b as usize).unwrap_or(&[])
     }
 
     /// The graph generation the compiler stamped (new with every plan's table).
