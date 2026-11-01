@@ -35,6 +35,11 @@
 //! least [`CONFIRM_POINTS`] of them) is the offset real (a device that lost frames), and the line
 //! restarts on the point that confirms it. The blocks that catch up behind a late one arrive with
 //! it and carry no new time, so they are skipped, and the run spans no time and never confirms.
+//! A spell of lateness that lasts that long confirms on a late point; when it ends, the first
+//! point back on time is more than [`OUTLIER_NS`] earlier than the restarted line predicts, which
+//! no delay can make it, so the line restarts again on that point (the fifth review of #268: the
+//! trim at its clamp for 20 to 60 s), and a restarted line's anchor gives way to a block with less
+//! delay that arrives with it or right after it.
 //! Arrival jitter is the other noise of an arrival-timed line, and its fit uses a longer window
 //! to average it: every point of its [`ARRIVAL_POINTS`] ring, up to [`ARRIVAL_WINDOW_NS`] (20 s at
 //! 10 ms callbacks, 60 s at 8192-frame ones), against [`WINDOW_NS`] for a position-timed line.
@@ -78,7 +83,9 @@ pub(crate) struct Obs {
 /// The points the endpoint's line holds: at [`SPACING_NS`] apart they cover a little more than
 /// [`WINDOW_NS`].
 pub(crate) const POINTS: usize = 1024;
-/// The points the device's line holds (it is arrival-timed): 20 s at [`SPACING_NS`].
+/// The points the device's line holds (it is arrival-timed): 20 s at callbacks of 10 ms or less
+/// (one point per [`SPACING_NS`]), more at larger ones (41 s at 960 frames), up to
+/// [`ARRIVAL_WINDOW_NS`] (60 s, 350 points at 8192 frames).
 pub(crate) const ARRIVAL_POINTS: usize = 2048;
 /// The least time between two stored points (closer observations are skipped, their frames still
 /// count through the next point's index).
@@ -125,11 +132,28 @@ pub(crate) struct Line<const N: usize> {
     outliers: u32,
     outlier_since: i64,
     outlier_last: i64,
+    /// The line holds one point, its anchor, which a point with less delay may still replace
+    /// (an arrival-timed line): the points within [`SPACING_NS`] of the first anchor's arrival,
+    /// then one more, so a device a little fast against the time base still grows its line.
+    provisional: bool,
+    anchor_at: i64,
 }
 
 impl<const N: usize> Line<N> {
     fn new(hz: f64) -> Self {
-        Self { time: [0; N], frame: [0; N], head: 0, len: 0, kind: None, hz, outliers: 0, outlier_since: 0, outlier_last: 0 }
+        Self {
+            time: [0; N],
+            frame: [0; N],
+            head: 0,
+            len: 0,
+            kind: None,
+            hz,
+            outliers: 0,
+            outlier_since: 0,
+            outlier_last: 0,
+            provisional: false,
+            anchor_at: 0,
+        }
     }
 
     fn reset(&mut self) {
@@ -139,7 +163,7 @@ impl<const N: usize> Line<N> {
     /// Start again on a line of `kind` and `domain` (the next stored point is its first).
     fn restart(&mut self, kind: Kind, domain: Domain) {
         self.reset();
-        self.kind = Some((kind, domain));
+        (self.kind, self.provisional) = (Some((kind, domain)), true);
     }
 
     fn newest(&self) -> Option<(i64, u64)> {
@@ -151,12 +175,31 @@ impl<const N: usize> Line<N> {
 
     /// Store the point (`frame`, `time_ns`) unless it is closer than [`SPACING_NS`] to the last
     /// one. A change of kind or domain, a time going backward or a frame index going backward
-    /// starts the line again. A point whose time step exceeds its frames' time (`late`): on a
-    /// position-timed line, by more than [`STALL_SLACK_NS`], restarts the line on it; on an
-    /// arrival-timed line, by more than [`OUTLIER_NS`], is an outlier, not stored, and restarts the
-    /// line only when it confirms a run of outliers ([`CONFIRM_NS`], [`CONFIRM_POINTS`]); a point
-    /// within [`SPACING_NS`] of the last outlier's arrival (a block that caught up with it) is
-    /// skipped. Returns whether the point was stored.
+    /// starts the line again. `late` is the point's time step less its frames' time at the
+    /// nominal rate, against the newest stored point.
+    ///
+    /// On a position-timed line, `late` over [`STALL_SLACK_NS`] restarts the line on the point.
+    ///
+    /// On an arrival-timed line (arrival = true time + a delay that is never negative):
+    /// - `late` over [`OUTLIER_NS`]: an outlier, not stored. It restarts the line only when it
+    ///   confirms a run of outliers, at least [`CONFIRM_POINTS`] of them over [`CONFIRM_NS`] with
+    ///   no point back on the line between them (a lasting offset). A point within [`SPACING_NS`]
+    ///   of the last outlier's arrival (a block that caught up with it) is skipped.
+    /// - `late` under -[`OUTLIER_NS`]: the point arrived earlier than the line predicts, which a
+    ///   delay can never make it, so the newest stored point was late. The line restarts on this
+    ///   point. This ends a spell of lateness that confirmed a "lasting offset" on a late point
+    ///   (the first on-time point after the spell), and it is also the right answer when a real
+    ///   lasting offset ends (the device goes back to normal): the first point after it restarts
+    ///   the line.
+    /// - A restarted line's only point is provisional: a point within [`SPACING_NS`] of its
+    ///   arrival, or the first point after that, which is earlier than it predicts carries less
+    ///   delay and replaces it. A restart lands on a late point or on the first of a burst of
+    ///   blocks that arrived together; the last of them, or the first block after them, is the
+    ///   anchor with the least delay, and a refilled line anchored on a delayed point would carry
+    ///   that delay at full leverage.
+    ///
+    /// Every restart holds the estimate while the line refills. Each case is O(1) and touches
+    /// only the inline ring. Returns whether the point was stored.
     fn add(&mut self, frame: u64, time_ns: i64, kind: Kind, domain: Domain) -> bool {
         if self.kind != Some((kind, domain)) {
             self.restart(kind, domain);
@@ -176,6 +219,10 @@ impl<const N: usize> Line<N> {
                     // The blocks that arrive with a late one carry no new time: neither judged nor
                     // stored.
                     return false;
+                } else if late < -(OUTLIER_NS as f64) {
+                    // An arrival delay is never negative: a point this early proves the newest
+                    // stored point arrived late. Start again on this one.
+                    self.restart(kind, domain);
                 } else if late > OUTLIER_NS as f64 {
                     if self.outliers == 0 {
                         self.outlier_since = time_ns;
@@ -187,11 +234,24 @@ impl<const N: usize> Line<N> {
                     self.restart(kind, domain);
                 } else {
                     self.outliers = 0;
+                    if self.provisional && late < 0.0 {
+                        // A point earlier than the line's only point predicts carries less delay:
+                        // it becomes the anchor (a block that arrived with the anchor, or the first
+                        // one after it).
+                        let i = (self.head + N - 1) % N;
+                        (self.time[i], self.frame[i]) = (time_ns, frame);
+                        self.provisional = time_ns - self.anchor_at < SPACING_NS;
+                        return true;
+                    }
                     if time_ns - t < SPACING_NS {
                         return false;
                     }
+                    self.provisional = false;
                 }
             }
+        }
+        if self.len == 0 {
+            self.anchor_at = time_ns;
         }
         self.time[self.head] = time_ns;
         self.frame[self.head] = frame;
@@ -444,5 +504,83 @@ mod tests {
             }
         }
         assert_eq!(est.device.len, 970);
+    }
+
+    #[test]
+    fn a_lasting_offset_that_ends_restarts_the_line_again_on_the_first_point_back_on_time() {
+        // 8192-frame callbacks (170.7 ms apart): callbacks 400 to 699 are 60 ms late (a lasting
+        // offset), then the device is on time again. Callback 700 arrives 110.7 ms after 699, 60 ms
+        // earlier than the line predicts but later in time, so only the early-point rule can catch
+        // it. (At 10 ms callbacks the end of an offset over 10 ms steps the time backward, which
+        // restarted the line already.)
+        let mut est = Box::new(RateEstimate::new(48_000.0, 48_000.0));
+        let (mut restarts, mut prev_len, mut last_estimate) = (Vec::new(), 0usize, None);
+        for k in 0..1400u64 {
+            let t = (k * 8192) as f64 / 48_000.0;
+            let late = if (400..700).contains(&k) { 0.06 } else { 0.0 };
+            est.device(k * 8192, ((t + late) * 1e9) as i64, Kind::Host, Domain::Qpc);
+            let packets = ((k * 8192) / 480)..(((k + 1) * 8192) / 480);
+            for p in packets {
+                est.endpoint(Obs { first_frame: p * 480, frames: 480, time_ns: (p * 10_000_000) as i64, kind: Kind::Position, domain: Domain::Qpc });
+            }
+            if est.device.len < prev_len {
+                restarts.push(k);
+            }
+            prev_len = est.device.len;
+            if let Some(d) = est.drift() {
+                assert!(d.abs() < 1e-6, "the reading left its bound ({d}) at callback {k}: held while the line refills");
+                last_estimate = Some(k);
+            }
+        }
+        assert_eq!(restarts, [402, 700], "confirmed on the third outlier (341 ms), then on the first callback 60 ms early");
+        assert_eq!(last_estimate, Some(1399));
+        // From callback 700 (701 if a nanosecond of rounding put it a hair early: it then replaced
+        // the anchor).
+        assert!((699..=700).contains(&est.device.len), "the line refilled from callback 700: {}", est.device.len);
+    }
+
+    #[test]
+    fn a_restarted_line_takes_the_block_with_the_least_delay_as_its_anchor() {
+        // A 200 ms offset confirms at point 1030, which restarts the line on it; point 1031
+        // arrives 2 ms after it, 8 ms earlier than it predicts, and so does every later point (the
+        // offset is 192 ms). Point 1031 replaces the anchor instead of being skipped, so the
+        // refilled line carries no 8 ms step at its oldest end.
+        let (est, seen) = run_device_late(2000, &|k| match k {
+            1000..=1030 => 200_000_000,
+            1031.. => 192_000_000,
+            _ => 0,
+        });
+        assert_eq!(seen[1030].1, 1, "the line restarted on the confirming point");
+        assert_eq!(seen[1031].1, 1, "the point with less delay replaced the anchor");
+        assert_eq!(est.device.len, 2000 - 1031);
+        for (k, (drift, _)) in seen.iter().enumerate() {
+            if let Some(d) = drift {
+                assert!(d.abs() < 1e-6, "the reading left its bound ({d}) at point {k}");
+            }
+        }
+        assert!(seen[1999].0.is_some());
+    }
+
+    #[test]
+    fn a_device_a_little_fast_against_the_time_base_still_grows_its_line() {
+        // 128-frame callbacks whose times run 50 ppm short: every point is a little earlier than
+        // the newest one predicts. The anchor is replaced only within 10 ms of the first one (and
+        // once more), so the line grows and reads the drift.
+        let mut est = Box::new(RateEstimate::new(48_000.0, 48_000.0));
+        for k in 0..11_250u64 {
+            let t = (k * 128) as f64 / 48_000.0;
+            est.device(k * 128, (t * (1.0 - 50e-6) * 1e9) as i64, Kind::Host, Domain::Qpc);
+            let packet = (t * 100.0) as u64;
+            est.endpoint(Obs {
+                first_frame: packet * 480,
+                frames: 480,
+                time_ns: (packet * 10_000_000) as i64,
+                kind: Kind::Position,
+                domain: Domain::Qpc,
+            });
+        }
+        assert!(est.device.len >= 2000, "the device line grew: {}", est.device.len);
+        let got = est.drift().expect("an estimate after 30 s") * 1e6;
+        assert!((got + 50.0).abs() < 1.0, "the device timed 50 ppm fast reads the endpoint 50 ppm slow: {got}");
     }
 }

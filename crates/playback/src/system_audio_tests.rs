@@ -182,6 +182,8 @@ struct Opts {
     /// delay arrive with it, back to back (an ASIO buffer switch or a WASAPI wake that ran late
     /// and caught up). The frames are not lost: the device's clock ran on.
     late: Option<(f64, f64, f64)>,
+    /// No late event is scheduled at or after this time (seconds): a spell of lateness that ends.
+    late_stop: Option<f64>,
     /// Each device callback arrives 0 to this many ms after its first frame (uniform,
     /// deterministic, held in order).
     device_jitter_ms: f64,
@@ -210,6 +212,7 @@ fn simulate_with(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f
     // The next late event, the end of the current one, the device's arrival jitter and the last
     // arrival (arrivals stay in order).
     let (mut next_late, late_every, late_delay) = opts.late.unwrap_or((f64::MAX, f64::MAX, 0.0));
+    let late_stop = opts.late_stop.unwrap_or(f64::MAX);
     let (mut late_until, mut device_seed, mut arrived) = (f64::MIN, 0x5eed_u64, 0.0f64);
     let mut run = Run {
         late_fill: (f64::MAX, 0.0),
@@ -225,7 +228,7 @@ fn simulate_with(ppm: &dyn Fn(f64) -> f64, cb: usize, jitter_ms: f64, seconds: f
         let t = (k * cb as u64) as f64 / RATE;
         // When the callback whose first frame is at `t` arrives: late inside a late event, plus
         // jitter, never before the previous one. The endpoint runs and delivers up to then.
-        if t >= next_late {
+        if t >= next_late && next_late < late_stop {
             late_until = t + late_delay;
             next_late += late_every;
         }
@@ -501,6 +504,71 @@ fn late_input_callbacks_at_2048_frames_neither_move_the_reading_nor_pin_the_trim
 #[test]
 fn late_input_callbacks_at_8192_frames_neither_move_the_reading_nor_pin_the_trim() {
     assert_late_callbacks_at(8_192);
+}
+
+/// Spells of lateness that last 300 ms or more and then end, 200 simulated seconds, endpoint 0 and
+/// -1000 ppm. At 128, 480 and 960 frames, "chained": from 60 s a late event of 45 ms every 50 ms
+/// for 0.5 s, or of 30 ms every 35 ms for 1 s, so no callback is back on time until the spell
+/// ends (a busy machine whose wakes all run late). At 8192 frames, two, three or four callbacks in
+/// a row 30 or 60 ms late. The spell confirms a lasting offset and restarts the device line on a
+/// late point; the first on-time point after it is more than 20 ms early and restarts it again on
+/// a point with no delay. The estimate is held from the first restart until the refilled line
+/// spans 2 s and 16 points, and that line's anchor is on time, so the bound needs no extra
+/// settling: the reported drift at every callback after 30 s, spell and refill included, within
+/// 5 % or 20 ppm (the jitter rows' tolerance). Also: no dry event, nothing discarded, the trim
+/// never at its clamp and within 1.3 x the drift + 400 ppm after 30 s. The +400 is the fill loop
+/// again (see the late rows): four 60 ms-late 8192-frame callbacks in a row show it the ring a
+/// late block found four times running (at most 303 ppm at 0 ppm).
+fn assert_spells_at(cb: usize, spells: &[(&str, f64, f64, f64)]) {
+    for &(pattern, every, delay_ms, length) in spells {
+        for true_ppm in [0.0, -1_000.0] {
+            let label = format!("cb {cb}, {pattern}, endpoint {true_ppm:+} ppm");
+            let opts = Opts { late: Some((60.0, every, delay_ms * 1e-3)), late_stop: Some(60.0 + length), ..Opts::default() };
+            let run = simulate_with(&|_| true_ppm, cb, 0.0, 200.0, opts);
+            assert_eq!((run.dry, run.zeros), (0, 0), "{label}: ran dry after priming: {run:?}");
+            assert_eq!(run.discarded, 0, "{label}: resynchronized: {run:?}");
+            assert!(run.max_trim < MAX_TRIM_PPM, "{label}: the trim reached its clamp: {run:?}");
+            assert!(run.trim_excess <= 300.0, "{label}: the trim exceeds 1.3 x the drift + 400 ppm: {run:?}");
+            let tolerance = (true_ppm.abs() * 0.05).max(20.0);
+            assert!(
+                run.reported_settled.0 >= true_ppm - tolerance && run.reported_settled.1 <= true_ppm + tolerance,
+                "{label}: the reading moved: {run:?}"
+            );
+        }
+    }
+}
+
+/// The chained spells at 10 to 20 ms callbacks: `(label, every, delay ms, length s)`.
+const CHAINED: [(&str, f64, f64, f64); 2] =
+    [("45 ms late every 50 ms for 0.5 s", 0.05, 45.0, 0.5), ("30 ms late every 35 ms for 1 s", 0.035, 30.0, 1.0)];
+
+#[test]
+fn a_chained_spell_of_lateness_that_ends_at_128_frames_neither_moves_the_reading_nor_pins_the_trim() {
+    assert_spells_at(128, &CHAINED);
+}
+
+#[test]
+fn a_chained_spell_of_lateness_that_ends_at_480_frames_neither_moves_the_reading_nor_pins_the_trim() {
+    assert_spells_at(480, &CHAINED);
+}
+
+#[test]
+fn a_chained_spell_of_lateness_that_ends_at_960_frames_neither_moves_the_reading_nor_pins_the_trim() {
+    assert_spells_at(960, &CHAINED);
+}
+
+#[test]
+fn late_8192_frame_callbacks_in_a_row_neither_move_the_reading_nor_pin_the_trim() {
+    // One late event per callback period, stopped just before the (n + 1)th.
+    let period = 8_192.0 / 48_000.0;
+    let mut spells = Vec::new();
+    for (n, name) in [(2.0, "two"), (3.0, "three"), (4.0, "four")] {
+        for delay_ms in [30.0, 60.0] {
+            spells.push((format!("{name} callbacks in a row {delay_ms} ms late"), delay_ms, n * period - 1e-6));
+        }
+    }
+    let spells: Vec<(&str, f64, f64, f64)> = spells.iter().map(|(label, delay_ms, length)| (label.as_str(), period, *delay_ms, *length)).collect();
+    assert_spells_at(8_192, &spells);
 }
 
 /// Input callbacks that arrive 0 to `jitter_ms` after their first frame (uniform), with 0 to 3 ms
