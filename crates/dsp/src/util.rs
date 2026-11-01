@@ -46,6 +46,8 @@ pub(crate) fn frames_in(io: &[Vec<f32>], frames: usize, channels: usize) -> usiz
 /// Snaps at the existing relative tolerance or when rounding leaves a step unchanged:
 /// the latter catches f32 stalls whose distance exceeds a few target ULPs at long
 /// time constants. The one-pole arithmetic stays unchanged until the snap.
+/// With variable block sizes, `advance` can snap early on a very short block
+/// (known issue K97, #279).
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Smoother {
     cur: f32,
