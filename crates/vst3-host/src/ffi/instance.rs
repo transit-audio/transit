@@ -96,7 +96,8 @@ impl Instance {
         self.host.clone()
     }
 
-    /// The editor link shared with editor handles (`None` without an edit controller).
+    /// The controller service/editor link (`None` without a controller). GUI capability is
+    /// separate: even a controller without an `IPlugView` needs main-thread service.
     pub fn editor(&self) -> Option<Arc<EditorLink>> {
         self.editor.has_controller().then(|| Arc::clone(&self.editor))
     }

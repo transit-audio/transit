@@ -1047,7 +1047,7 @@ impl Plugin for ClapPlugin {
     }
 
     fn open_editor(&mut self) -> Result<(), String> {
-        let link = lock(&self.shared.core).inst.gui().ok_or_else(|| "this plugin has no editor".to_string())?;
+        let link = lock(&self.shared.core).inst.link();
         link.open(self.info.name)
     }
 

@@ -138,15 +138,40 @@ impl GuiLink {
     /// [`GuiLink::open`] without raising a new host window; `prepare` sees an embedded editor's
     /// window before the plug-in is scaled and parented (tests change its DPI there).
     pub(super) fn open_with(&self, title: &str, prepare: impl FnOnce(&hostwin::HostWindow)) -> Result<(), String> {
+        let mut probe = super::gui_probe::Probe::default();
+        let result = self.try_open(title, prepare, &mut probe);
+        probe.log(title);
+        if let Err(reason) = &result {
+            log::warn!("plug-in editor not opened: {title}: {reason}");
+        } else {
+            log::info!("plug-in editor opened: {title}");
+        }
+        result
+    }
+
+    fn try_open(&self, title: &str, prepare: impl FnOnce(&hostwin::HostWindow), probe: &mut super::gui_probe::Probe) -> Result<(), String> {
         if !self.on_main_thread() {
             return Err("plugin editors must be opened on the main thread".into());
         }
         let mut g = self.lock();
-        let vt = GuiLink::vt(&g).ok_or_else(|| "this plugin has no editor".to_string())?;
+        let vt = GuiLink::vt(&g).ok_or_else(|| "no gui extension".to_string())?;
+        let api = window_api().ok_or_else(|| "plugin editors are not supported on this platform".to_string())?;
+        let (Some(supported), Some(create)) = (vt.is_api_supported, vt.create) else { return Err("create failed".into()) };
+        // Embedded where this host has its own window (Windows; Linux on X11, issue #147): the
+        // Windows window carries the header strip (issue #68). Floating otherwise, when the plug-in offers nothing else, or when
+        // embedding fails and the plug-in also offers a floating editor (as before #68).
+        // SAFETY: live plugin; `api` is a static NUL-terminated string; main thread.
+        let floating = unsafe { supported(g.plugin, api.as_ptr(), true) };
+        // SAFETY: as above.
+        let embedded = unsafe { supported(g.plugin, api.as_ptr(), false) };
+        probe.support(&g, vt, api, embedded, floating);
         if g.created {
+            probe.created(&g, vt, g.window.as_ref().and_then(hostwin::content_scale), g.window.is_none());
             if let Some(show) = vt.show {
                 // SAFETY: live plugin with a created GUI; main thread (checked).
-                unsafe { show(g.plugin) };
+                if !unsafe { show(g.plugin) } {
+                    return Err("show failed".into());
+                }
             }
             if let Some(w) = &g.window {
                 w.raise();
@@ -154,31 +179,24 @@ impl GuiLink {
             g.visible = true;
             return Ok(());
         }
-        let api = window_api().ok_or_else(|| "plugin editors are not supported on this platform".to_string())?;
-        let (Some(supported), Some(create)) = (vt.is_api_supported, vt.create) else { return Err("incomplete clap.gui extension".into()) };
-        // Embedded where this host has its own window (Windows; Linux on X11, issue #147): the
-        // Windows window carries the header strip (issue #68). Floating otherwise, when the plug-in offers nothing else, or when
-        // embedding fails and the plug-in also offers a floating editor (as before #68).
-        // SAFETY: live plugin; `api` is a static NUL-terminated string; main thread.
-        let floating = unsafe { supported(g.plugin, api.as_ptr(), true) };
-        // SAFETY: as above.
-        if hostwin::SUPPORTED && unsafe { supported(g.plugin, api.as_ptr(), false) } {
-            match self.open_embedded(&mut g, vt, api, title, prepare) {
+        if hostwin::SUPPORTED && embedded {
+            match self.open_embedded(&mut g, vt, api, title, prepare, probe) {
                 Ok(()) => return Ok(()),
-                Err(e) if floating => log::warn!("clap: the embedded editor failed ({e}); opening the floating one"),
+                Err(e) if floating => log::info!("clap: the embedded editor failed ({e}); opening the floating one"),
                 Err(e) => return Err(e),
             }
         }
         if !floating {
-            return Err("this plugin offers only an embedded editor, which transit hosts on Windows and Linux only".into());
+            return Err(format!("{} embedding not supported (neither)", api.to_string_lossy()));
         }
         self.host.gui_closed.store(false, Ordering::Relaxed);
         self.host.gui_destroyed.store(false, Ordering::Relaxed);
         // SAFETY: as above; no GUI exists yet.
         if !unsafe { create(g.plugin, api.as_ptr(), true) } {
-            return Err("the plugin could not create its editor".into());
+            return Err("create failed".into());
         }
         g.created = true;
+        probe.created(&g, vt, None, true);
         // No `set_scale` for a floating window (issue #101): the plug-in owns it and reads its
         // monitor's scale; the call "overrides any OS info" (clap gui.h), and 1.0 drew it at 100%.
         if let (Some(f), Ok(t)) = (vt.suggest_title, CString::new(title)) {
@@ -192,7 +210,7 @@ impl GuiLink {
         };
         if !shown {
             GuiLink::destroy(&mut g);
-            return Err("the plugin could not show its editor".into());
+            return Err("show failed".into());
         }
         g.visible = true;
         Ok(())
@@ -215,14 +233,16 @@ impl GuiLink {
         api: &CStr,
         title: &str,
         prepare: impl FnOnce(&hostwin::HostWindow),
+        probe: &mut super::gui_probe::Probe,
     ) -> Result<(), String> {
-        let (Some(create), Some(set_parent)) = (vt.create, vt.set_parent) else { return Err("incomplete clap.gui extension".into()) };
+        let Some(create) = vt.create else { return Err("create failed".into()) };
+        let Some(set_parent) = vt.set_parent else { return Err("set_parent failed".into()) };
         self.host.gui_closed.store(false, Ordering::Relaxed);
         self.host.gui_destroyed.store(false, Ordering::Relaxed);
         self.host.gui_resize.store(0, Ordering::Relaxed);
         // SAFETY: live plugin; `api` is a static NUL-terminated string; main thread; no GUI yet.
         if !unsafe { create(g.plugin, api.as_ptr(), false) } {
-            return Err("the plugin could not create its editor".into());
+            return Err("create failed".into());
         }
         g.created = true;
         let shown = self.header.view().title;
@@ -231,14 +251,19 @@ impl GuiLink {
             Ok(win) => win,
             Err(e) => {
                 GuiLink::destroy(g);
-                return Err(e);
+                return Err(format!("host window failed: {e}"));
             }
         };
         prepare(&win);
         if let Some(scale) = hostwin::content_scale(&win) {
             GuiLink::set_scale(g, vt, scale);
         }
-        let (w, h) = GuiLink::size(g, vt).unwrap_or((640, 480));
+        probe.created(g, vt, hostwin::content_scale(&win), false);
+        let Some((w, h)) = probe.size else {
+            win.close();
+            GuiLink::destroy(g);
+            return Err("zero size".into());
+        };
         hostwin::resize(win.raw(), f64::from(w), f64::from(h));
         let parent = clap_window { api: api.as_ptr(), specific: window_handle(&win) };
         // SAFETY: live plugin with a created embedded GUI; `parent` names our live window and
@@ -246,17 +271,17 @@ impl GuiLink {
         if !unsafe { set_parent(g.plugin, &parent) } {
             win.close();
             GuiLink::destroy(g);
-            return Err("the editor could not attach to its window".into());
+            return Err("set_parent failed".into());
         }
         g.window = Some(win);
         let shown = match vt.show {
             // SAFETY: live plugin with a created, parented GUI.
             Some(f) => unsafe { f(g.plugin) },
-            None => true,
+            None => false,
         };
         if !shown {
             GuiLink::destroy(g);
-            return Err("the plugin could not show its editor".into());
+            return Err("show failed".into());
         }
         g.visible = true;
         Ok(())

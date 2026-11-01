@@ -10,6 +10,8 @@ use super::*;
 /// the instance's main thread (`plugin::Shared::service`); `latency_changed` is only legal during
 /// `activate`, after which the host reads the latency anyway.
 pub(crate) struct HostState {
+    /// Captured at load without taking the GUI lock in reentrant registration callbacks.
+    pub name: OnceLock<String>,
     pub restart: AtomicBool,
     pub process: AtomicBool,
     pub callback: AtomicBool,
@@ -60,6 +62,7 @@ impl HostState {
 impl Default for HostState {
     fn default() -> Self {
         HostState {
+            name: OnceLock::new(),
             restart: AtomicBool::new(false),
             process: AtomicBool::new(false),
             callback: AtomicBool::new(false),

@@ -95,6 +95,8 @@ fn ok(r: sb::tresult) -> bool {
 pub(crate) const AFTERTOUCH: usize = sv::ControllerNumbers_::kAfterTouch as usize;
 pub(crate) const PITCH_BEND: usize = sv::ControllerNumbers_::kPitchBend as usize;
 
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod editor_diagnostics_tests;
 mod events;
 mod host_context;
 mod host_objects;

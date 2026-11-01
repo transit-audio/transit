@@ -185,6 +185,9 @@ impl Bundle {
         };
         // SAFETY: `plugin` is a fresh non-null instance; we copy its vtable struct.
         let vt = unsafe { *plugin };
+        // SAFETY: the live plug-in's descriptor and its name remain valid until destroy.
+        let name = unsafe { vt.desc.as_ref().and_then(|d| read_cstr(d.name)) }.unwrap_or_else(|| plugin_id.to_owned());
+        let _ = inst.state.name.set(name);
         let ok = match vt.init {
             // SAFETY: `init` is called exactly once, right after creation, as CLAP requires.
             Some(init) => unsafe { init(plugin) },

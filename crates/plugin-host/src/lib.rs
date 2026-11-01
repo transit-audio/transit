@@ -562,7 +562,7 @@ impl Ctx {
         let Some(worker) = self.worker.clone() else { return plugin };
         let editor = plugin.editor();
         let state = plugin.state_reader();
-        let shared = Arc::new(EditorShared::default());
+        let shared = Arc::new(EditorShared::new(editor.as_ref().is_some_and(|e| e.has_gui())));
         let name: Arc<str> = Arc::from(plugin.info().name);
         let key = self.next_key;
         self.next_key += 1;
@@ -1046,6 +1046,9 @@ fn shared_cell() -> &'static OnceLock<Host> {
 pub fn shutdown_shared(timeout: Duration) -> bool {
     shared_cell().get().is_none_or(|h| h.shutdown(timeout))
 }
+
+#[cfg(test)]
+mod editor_capability_tests;
 
 #[cfg(test)]
 mod tests {

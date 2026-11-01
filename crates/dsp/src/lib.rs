@@ -458,6 +458,11 @@ pub trait Plugin: Send {
 /// [`Plugin::editor`]; the plugin instance may meanwhile run on the audio thread (plugin formats
 /// allow GUI calls on the main thread concurrently with processing on the audio thread).
 pub trait PluginEditor: Send {
+    /// Whether this handle offers a GUI. A controller-only handle still needs `idle` and
+    /// parameter servicing; hosts must not discard it just because it has no window.
+    fn has_gui(&self) -> bool {
+        true
+    }
     /// Opens (or raises) the editor window. Main thread only; an error says why it can't.
     fn open(&mut self) -> Result<(), String>;
     /// Closes the editor window.

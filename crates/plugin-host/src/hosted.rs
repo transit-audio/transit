@@ -17,6 +17,8 @@ pub(crate) const NOT_RESPONDING: &str = "the plug-in is not responding (its host
 /// Editor state the host thread publishes and the UI's proxy reads.
 #[derive(Default)]
 pub(crate) struct EditorShared {
+    /// Load-time capability, separate from the controller's service handle.
+    has_gui: bool,
     open: AtomicBool,
     /// An open request is on its way: the proxy reports the editor open meanwhile.
     opening: AtomicBool,
@@ -44,6 +46,10 @@ struct OpenTiming {
 }
 
 impl EditorShared {
+    pub(crate) fn new(has_gui: bool) -> Self {
+        Self { has_gui, ..Self::default() }
+    }
+
     /// From the host thread's tick: the editor's edits, its header actions and whether its window
     /// is open.
     pub(crate) fn publish(&self, edits: Vec<(String, f32)>, actions: Vec<HeaderAction>, open: bool) {
@@ -267,6 +273,9 @@ struct RemoteEditor {
 }
 
 impl PluginEditor for RemoteEditor {
+    fn has_gui(&self) -> bool {
+        self.token.shared.has_gui
+    }
     fn open(&mut self) -> Result<(), String> {
         if !self.token.worker.responsive() {
             return Err(NOT_RESPONDING.into());

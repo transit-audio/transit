@@ -114,6 +114,15 @@ fn flags_of(ready: Ready) -> clap_posix_fd_flags {
         | (if ready.error { CLAP_POSIX_FD_ERROR } else { 0 })
 }
 
+/// Inject the timer delivery, independent of scheduling (the run loop's clock has its own tests).
+#[cfg(test)]
+pub(super) fn deliver_registered_timers_for_test(link: &GuiLink) {
+    let ids: Vec<_> = link.host.regs().timers.iter().map(|(id, _)| *id).collect();
+    for id in ids {
+        assert!(link.on_timer(id));
+    }
+}
+
 unsafe extern "C" fn host_register_timer(host: *const clap_host, period_ms: u32, timer_id: *mut clap_id) -> bool {
     // SAFETY: the plugin passes back the host pointer we gave it.
     let Some(s) = (unsafe { state(host) }) else { return false };
@@ -129,7 +138,10 @@ unsafe extern "C" fn host_register_timer(host: *const clap_host, period_ms: u32,
     let id = r.next_timer;
     let me = s.me.clone();
     let token = host_loop::add_timer(Duration::from_millis(u64::from(period_ms)), Rc::new(move || link_of(&me).is_some_and(|l| l.on_timer(id))));
-    let Some(token) = token else { return false };
+    let Some(token) = token else {
+        log::warn!("clap: register_timer refused: {}: registry full", s.name.get().map_or("unknown", String::as_str));
+        return false;
+    };
     r.timers.push((id, token));
     // SAFETY: a writable out-pointer from the plugin (non-null, checked).
     unsafe { *timer_id = id };
@@ -158,11 +170,15 @@ unsafe extern "C" fn host_register_fd(host: *const clap_host, fd: i32, flags: cl
     }
     let mut r = s.regs();
     if r.fds.iter().any(|&(f, _)| f == fd) {
+        log::warn!("clap: register_fd refused: {}: duplicate fd", s.name.get().map_or("unknown", String::as_str));
         return false;
     }
     let me = s.me.clone();
     let token = host_loop::add_fd(fd, interest(flags), Rc::new(move |fd, ready| link_of(&me).is_some_and(|l| l.on_fd(fd, flags_of(ready)))));
-    let Some(token) = token else { return false };
+    let Some(token) = token else {
+        log::warn!("clap: register_fd refused: {}: registry full", s.name.get().map_or("unknown", String::as_str));
+        return false;
+    };
     r.fds.push((fd, token));
     log::debug!("clap: register_fd {fd} flags {flags}");
     true

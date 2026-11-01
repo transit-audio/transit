@@ -89,6 +89,9 @@ fn read_name(buf: &[c_char]) -> String {
 mod audio;
 mod events;
 mod gui;
+#[cfg(all(test, any(windows, target_os = "linux")))]
+mod gui_diagnostics_tests;
+mod gui_probe;
 mod host;
 mod instance;
 mod module;

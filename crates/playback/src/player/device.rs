@@ -756,6 +756,11 @@ impl Player {
     pub fn has_editor(&self, track: TrackId, slot: usize) -> bool {
         self.owner().is_ok_and(|owner| owner.has_editor(track, slot))
     }
+    /// Whether the loaded editor/controller offers a GUI window. Controller servicing
+    /// remains available through `has_editor` for plug-ins without a GUI.
+    pub fn has_gui(&self, track: TrackId, slot: usize) -> bool {
+        self.owner().is_ok_and(|owner| owner.has_gui(track, slot))
+    }
     /// Whether the live plug-in in this insert slot has a sidechain input (the device card's key
     /// control is offered for it).
     pub fn has_key_input(&self, track: TrackId, slot: usize) -> bool {

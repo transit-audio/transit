@@ -574,6 +574,7 @@ impl Bundle {
             inner: Mutex::new(EditorInner { component: Some(inst.component.clone()), controller: inst.controller.clone(), ..EditorInner::default() }),
             header: transit_rt::editor_window::HeaderCell::new(),
         });
+        inst.editor.detect_editor();
         Ok(inst)
     }
 }

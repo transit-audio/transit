@@ -426,6 +426,9 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     pub fn has_editor(&self, track: TrackId, slot: usize) -> bool {
         self.handles.has_editor(track, slot)
     }
+    pub fn has_gui(&self, track: TrackId, slot: usize) -> bool {
+        self.handles.has_gui(track, slot)
+    }
     pub fn has_key_input(&self, track: TrackId, slot: usize) -> bool {
         self.handles.has_key_input(track, slot)
     }

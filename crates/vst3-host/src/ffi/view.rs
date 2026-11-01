@@ -213,7 +213,7 @@ fn follow_view_size(view: &ComPtr<sb::IPlugView>, win: &window::HostWindow, name
 pub(super) fn view_size(view: &ComPtr<sb::IPlugView>) -> Option<(f64, f64)> {
     let mut r = sb::ViewRect { left: 0, top: 0, right: 0, bottom: 0 };
     // SAFETY: valid view; `r` is writable.
-    ok(unsafe { view.getSize(&mut r) }).then(|| rect_size(&r))
+    (ok(unsafe { view.getSize(&mut r) }) && r.right > r.left && r.bottom > r.top).then(|| rect_size(&r))
 }
 
 /// Makes the host window for `view` (`prepare` sees it first; tests change its DPI there), sets
@@ -226,9 +226,8 @@ pub(super) fn attach_view(
     header: Option<Arc<transit_rt::editor_window::HeaderCell>>,
     prepare: impl FnOnce(&window::HostWindow),
 ) -> Result<(ComWrapper<PlugFrame>, window::HostWindow), String> {
-    // On failure the default size stays.
-    let (w, h) = view_size(view).unwrap_or((400.0, 300.0));
-    let win = window::HostWindow::new(title, w, h, header)?;
+    let (w, h) = view_size(view).ok_or_else(|| "zero size".to_string())?;
+    let win = window::HostWindow::new(title, w, h, header).map_err(|e| format!("host window failed: {e}"))?;
     prepare(&win);
     let frame = ComWrapper::new(PlugFrame::new(win.raw(), title));
     if let Some(f) = frame.as_com_ref::<sb::IPlugFrame>() {
@@ -250,7 +249,8 @@ pub(super) fn attach_view(
         // SAFETY: valid view; detach our frame again.
         unsafe { view.setFrame(std::ptr::null_mut()) };
         win.close();
-        return Err("the editor could not attach to its window".into());
+        frame.close_run_loop();
+        return Err("set_parent failed".into());
     }
     frame.attach(view);
     // Issue #105: the same factor again once attached (the SDK allows "before or after"; some
@@ -273,6 +273,8 @@ fn rect_size(r: &sb::ViewRect) -> (f64, f64) {
 
 #[derive(Default)]
 pub(super) struct EditorInner {
+    /// Probed on the plug-in host thread at load, never on the audio thread.
+    pub(super) has_view: Option<bool>,
     /// `None` once the instance is gone.
     pub(super) component: Option<ComPtr<sv::IComponent>>,
     /// `None` once the instance is gone, or without an edit controller.
@@ -311,8 +313,23 @@ impl EditorLink {
         self.inner.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
+    pub(crate) fn has_view(&self) -> bool {
+        let g = self.lock();
+        g.has_view.unwrap_or(g.controller.is_some())
+    }
+
     pub(super) fn has_controller(&self) -> bool {
         self.lock().controller.is_some()
+    }
+
+    pub(super) fn detect_editor(&self) {
+        // Offline rendering can construct instances off the process main thread. In
+        // particular, never construct or release an AppKit view from that worker.
+        if !self.on_main_thread() {
+            return;
+        }
+        let mut g = self.lock();
+        g.has_view = Some(Self::create_view(&g).is_ok());
     }
 
     /// The header strip's model (any thread).
@@ -321,11 +338,11 @@ impl EditorLink {
     }
 
     fn create_view(g: &EditorInner) -> Result<ComPtr<sb::IPlugView>, String> {
-        let c = g.controller.as_ref().ok_or_else(|| "the plugin is gone".to_string())?;
+        let c = g.controller.as_ref().ok_or_else(|| "no gui extension".to_string())?;
         // SAFETY: valid controller; the name is a static NUL-terminated string.
         let raw = unsafe { c.createView(c"editor".as_ptr()) };
         // SAFETY: a non-null view comes with one reference owned by the caller.
-        unsafe { ComPtr::from_raw(raw) }.ok_or_else(|| "this plugin has no editor".to_string())
+        unsafe { ComPtr::from_raw(raw) }.ok_or_else(|| "no gui extension".to_string())
     }
 
     /// Creates the view, checks it supports this platform's window type and reads its size,
@@ -362,6 +379,20 @@ impl EditorLink {
     /// [`EditorLink::open`] without showing a new window; `prepare` sees the window before the
     /// view is scaled and attached (tests change its DPI there).
     pub(super) fn open_with(&self, title: &str, prepare: impl FnOnce(&window::HostWindow)) -> Result<(), String> {
+        let mut facts = String::from(
+            "embedded=unknown floating=n/a preferred_api=n/a size=unknown resizable=unknown timer-support=n/a posix-fd-support=n/a scale=unknown",
+        );
+        let result = self.try_open(title, prepare, &mut facts);
+        log::info!("plug-in editor probe: {title}: format=VST3 api={} {facts}", if cfg!(target_os = "linux") { "x11" } else { "native" });
+        if let Err(reason) = &result {
+            log::warn!("plug-in editor not opened: {title}: {reason}");
+        } else {
+            log::info!("plug-in editor opened: {title}");
+        }
+        result
+    }
+
+    fn try_open(&self, title: &str, prepare: impl FnOnce(&window::HostWindow), facts: &mut String) -> Result<(), String> {
         if !self.on_main_thread() {
             return Err("plugin editors must be opened on the main thread".into());
         }
@@ -377,12 +408,30 @@ impl EditorLink {
         }
         let view = EditorLink::create_view(&g)?;
         // SAFETY: valid view; `platform` is a static NUL-terminated string.
-        if unsafe { view.isPlatformTypeSupported(platform) } != sb::kResultTrue {
-            return Err("the editor does not support this platform's windows".into());
+        let embedded = unsafe { view.isPlatformTypeSupported(platform) } == sb::kResultTrue;
+        // SAFETY: a counted reference to the live view, on its creating thread.
+        let resizable = unsafe { view.canResize() } == sb::kResultTrue;
+        *facts = format!(
+            "embedded={embedded} floating=n/a preferred_api=n/a size={} resizable={resizable} timer-support=n/a posix-fd-support=n/a scale=unknown",
+            size_text(view_size(&view))
+        );
+        if !embedded {
+            return Err(format!("{} embedding not supported (neither)", if cfg!(target_os = "linux") { "x11" } else { "native" }));
         }
         let shown = self.header.view().title;
         let title = if shown.is_empty() { title } else { shown.as_str() };
-        let (frame, win) = attach_view(&view, platform, title, Some(Arc::clone(&self.header)), prepare)?;
+        let mut scale = None;
+        let attached = attach_view(&view, platform, title, Some(Arc::clone(&self.header)), |win| {
+            prepare(win);
+            scale = window::content_scale(win);
+        });
+        *facts = format!(
+            "embedded={embedded} floating=n/a preferred_api=n/a size={} resizable={resizable} timer-support=n/a posix-fd-support=n/a host_run_loop={} scale={}",
+            size_text(view_size(&view)),
+            cfg!(target_os = "linux"),
+            scale.map_or_else(|| "unknown".into(), |s| s.to_string())
+        );
+        let (frame, win) = attached?;
         g.view = Some(view);
         g.frame = Some(frame);
         g.window = Some(win);

@@ -757,13 +757,19 @@ impl Handles {
     pub fn has_editor(&self, track: TrackId, slot: usize) -> bool {
         self.entry(track, slot).is_some_and(|entry| entry.editor.is_some())
     }
+    pub fn has_gui(&self, track: TrackId, slot: usize) -> bool {
+        self.entry(track, slot).and_then(|entry| entry.editor.as_ref()).is_some_and(|e| e.has_gui())
+    }
     /// Whether the live plug-in in this slot has a sidechain input.
     pub fn has_key_input(&self, track: TrackId, slot: usize) -> bool {
         self.entry(track, slot).is_some_and(|entry| entry.key_input)
     }
     pub fn open_editor(&mut self, track: TrackId, slot: usize) -> Result<(), String> {
         let entry = self.entry_mut(track, slot).ok_or_else(|| "this plugin instance is not active".to_owned())?;
-        let editor = entry.editor.as_mut().ok_or_else(|| "this plugin has no editor".to_owned())?;
+        let editor = entry.editor.as_mut().filter(|e| e.has_gui()).ok_or_else(|| {
+            log::warn!("plug-in editor not opened: {}: no gui extension", entry.name);
+            "no gui extension".to_owned()
+        })?;
         editor.open()?;
         entry.refused = false;
         Ok(())
