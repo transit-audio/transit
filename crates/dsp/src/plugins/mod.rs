@@ -8,6 +8,7 @@ pub mod harmonic;
 pub mod instrument_queue;
 pub mod lfo;
 pub mod macro_osc;
+pub mod modal_voice;
 pub mod modulator;
 mod resample;
 pub mod resonator;
@@ -58,4 +59,5 @@ registry! {
     macro_osc::MACRO_OSC_INFO => macro_osc::MacroOscillator::new(),
     resonator::RESONATOR_INFO => resonator::ResonatorInstrument::new(),
     texture_synth::TEXTURE_SYNTH_INFO => texture_synth::TextureSynth::new(),
+    modal_voice::MODAL_VOICE_INFO => modal_voice::ModalVoiceInstrument::new(),
 }
