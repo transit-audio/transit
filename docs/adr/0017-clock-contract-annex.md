@@ -79,26 +79,28 @@ callbacks by the stamp's host callback time (the QPC read when the block arrived
 backend, never by `backend_frame_ns`, which on native ASIO is the driver's sample position at the
 nominal rate and would make the device side exactly nominal. An invalid stamp falls back to the
 reader's own arrival clock (QPC on Windows). Both sides carry a clock-domain tag; a pair on
-different domains holds the estimate. Each side's fit is least squares over its own window: the
-packets, timed by exact positions, over the last 10 s; the callbacks, timed by arrival, over every
-point of a 2048-point ring up to 60 s (20 s at callbacks of 10 ms or less, 41 s at 960 frames),
-which averages arrival jitter (3 ms of it reads within 20 ppm in the tests). The two kinds of time
-take different stall rules. A position-timed side whose time steps without frames (a loopback that
-paused and resumed with no discontinuity flag) restarts its line on that point when the step
-exceeds its frames' time by 50 ms: the offset is permanent. An arrival-timed side never restarts on
-one late point: a callback more than 20 ms later than its line predicts is an outlier and is not
-stored (a late block that the next blocks catch up leaves no offset), and only outliers that
-persist for 300 ms, at least three of them with no callback back on the line between them, restart
-the line. A callback more than 20 ms earlier than its line predicts proves the stored point was
-late (an arrival delay is never negative) and restarts the line on it, which ends a spell of
-lateness and a lasting offset alike; a restarted line's first point gives way to a callback with
-less delay that arrives with it or right after it. A lasting offset under 20 ms is stored and
-moves the reading for one window (K97). The estimate is held while a line refills. The ratio is
-fed forward as the trim of a linear interpolator and reported, as the clamped estimate, as the
-drift; a slow proportional-integral term on the ring fill (the integral held within 50 ppm) only
-brings the fill back to its target of one input callback, one packet and 30 ms. Drifts up to
-1000 ppm are tested; the applied trim is limited to 2000 ppm. It does not yet cover a second
-hardware input; that still needs the controlled asynchronous resampler above.
+different domains holds the estimate. The packets, timed by exact positions, are fitted by least
+squares over the last 10 s, and a packet whose time steps more than 50 ms past its frames' time
+(a loopback that paused and resumed with no discontinuity flag) restarts that line on itself: the
+offset is permanent. The callbacks are timed by arrival, which is the true time plus a delay that
+is never negative, so the device clock is the lower envelope of the arrival times and that side
+is fitted to it: over every point of a 2048-point ring up to 60 s (20 s at callbacks of 10 ms or
+less, 41 s at 960 frames), the lower convex hull of the points, the hull edge with the most points
+within 1 ms above it, and least squares over those points only. A late callback, whatever its
+delay, lies more than 1 ms above that line and has no weight, so no late callback or spell of
+them, however it eases off, restarts the line or moves the reading; 3 ms of arrival jitter reads
+within 20 ppm in the tests. Only a lasting offset restarts the device line, on the callback that
+shows it: callbacks above the band for 3 s and at least 32 of them (a device that lost frames),
+or one callback more than 0.25 ms below the envelope (plus how far the envelope's slope can miss
+it), which no delay can put there (an offset that ended). After any restart the estimate is held
+until the refilled fit's slope has a standard error within 4 ppm, taking its points as spread
+over the 1 ms band. A lasting offset of 1 ms or less is neither and moves the reading for one
+window (K97). The ratio is fed forward as the trim of a linear interpolator and reported, as
+the clamped estimate, as the drift; a slow proportional-integral term on the ring fill (the
+integral held within 50 ppm) only brings the fill back to its target of one input callback, one
+packet and 30 ms. Drifts up to 1000 ppm are tested; the applied trim is limited to 2000 ppm. It
+does not yet cover a second hardware input; that still needs the controlled asynchronous
+resampler above.
 
 ## Observation and publication contract
 
