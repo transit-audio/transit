@@ -1,4 +1,4 @@
-//! Fixed output storage. Eviction uses an index stack; links preserve write order at equal offsets.
+//! Fixed output storage. Eviction walks two monotone cursors (pending Ons, then other non-releases); links preserve write order at equal offsets.
 use super::{MIDI_FX_BLOCK, Message, MidiFxCounts, PluginEvent, TimedEvent};
 
 const END: usize = MIDI_FX_BLOCK;

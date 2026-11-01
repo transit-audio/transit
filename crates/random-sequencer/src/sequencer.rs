@@ -312,6 +312,7 @@ pub struct Sequencer {
     pending: [Scheduled; PENDING],
     pending_len: usize,
     dropped: u64,
+    dropped_ons: u64,
 }
 
 impl Sequencer {
@@ -337,6 +338,7 @@ impl Sequencer {
             pending: [NO_EVENT; PENDING],
             pending_len: 0,
             dropped: 0,
+            dropped_ons: 0,
         }
     }
 
@@ -363,6 +365,13 @@ impl Sequencer {
     #[must_use]
     pub fn dropped(&self) -> u64 {
         self.dropped
+    }
+
+    /// The note-ons among [`Self::dropped`]. A refused Off is retried by `end_voice` (the key stays
+    /// busy), so only these are notes that never sound.
+    #[must_use]
+    pub fn dropped_ons(&self) -> u64 {
+        self.dropped_ons
     }
 
     /// Whether a note sounds.
@@ -532,6 +541,7 @@ impl Sequencer {
         let limit = if matches!(what, Pending::On { .. }) { PENDING - OFF_RESERVE } else { PENDING };
         if self.pending_len >= limit {
             self.dropped = self.dropped.saturating_add(1);
+            self.dropped_ons = self.dropped_ons.saturating_add(u64::from(matches!(what, Pending::On { .. })));
             return false;
         }
         // After every event at or before `beat`: events at one time keep the order they came in.
@@ -560,6 +570,7 @@ impl Sequencer {
             // No room for a note: refused (counted), nothing else changes; a note the voice
             // holds still gets its Off.
             self.dropped = self.dropped.saturating_add(1);
+            self.dropped_ons = self.dropped_ons.saturating_add(1);
             return;
         }
         self.end_voice(voice, beat);

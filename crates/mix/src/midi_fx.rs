@@ -557,8 +557,8 @@ impl MidiFxHost {
         // Never emit an on we could not end explicitly after a release-only overflow or edit.
         if matches!(ev.message, Message::NoteOn { .. }) && self.out.iter().all(|n| n.used) {
             self.counts.overflow = self.counts.overflow.saturating_add(1);
+            // `take` already counted the untracked note when the given table was full too.
             self.counts.refused_ons = self.counts.refused_ons.saturating_add(1);
-            self.counts.untracked = self.counts.untracked.saturating_add(1);
             return;
         }
         if !self.give(plugin, offset, ev) {

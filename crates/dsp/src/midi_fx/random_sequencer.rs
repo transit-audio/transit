@@ -272,7 +272,7 @@ impl MidiEffect for RandomSequencer {
         let t = &self.transport;
         let block = Block { playing: t.playing, samples: t.samples, quarters: t.quarters, tempo: t.tempo, sample_rate: self.sample_rate, frames };
         let settings = self.settings();
-        let dropped_before = self.sequencer.dropped();
+        let (dropped_before, ons_before) = (self.sequencer.dropped(), self.sequencer.dropped_ons());
         self.sequencer.process(&settings, &block, &mut |e| {
             let message = match e.kind {
                 EventKind::NoteOn { key, velocity } => Message::NoteOn { key, velocity, id: NoteId::NONE },
@@ -282,7 +282,12 @@ impl MidiEffect for RandomSequencer {
         });
         // A full schedule (never expected) joins the chain's overflow count (`MidiFxCounts::overflow`, read through
         // `MixEngine::event_status().midi_fx.overflow`; no UI reader shows it yet).
-        out.add_refused_ons(u32::try_from(self.sequencer.dropped() - dropped_before).unwrap_or(u32::MAX));
+        // Only refused note-ons are lost notes; a refused Off is retried by the sequencer, so it counts in the
+        // overflow total alone.
+        let ons = self.sequencer.dropped_ons() - ons_before;
+        let others = (self.sequencer.dropped() - dropped_before).saturating_sub(ons);
+        out.add_refused(u32::try_from(others).unwrap_or(u32::MAX));
+        out.add_refused_ons(u32::try_from(ons).unwrap_or(u32::MAX));
     }
 }
 

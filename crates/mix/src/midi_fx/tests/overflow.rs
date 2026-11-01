@@ -216,7 +216,7 @@ fn an_on_that_cannot_be_tracked_is_never_emitted() {
     block(&mut host, &mut rec, &t, &input);
     assert_eq!(rec.heard.len(), MIDI_FX_NOTES);
     assert!(rec.heard.iter().all(|(_, _, e)| e.note_id != MIDI_FX_NOTES as i32));
-    assert_eq!((host.counts.overflow, host.counts.refused_ons), (1, 1));
+    assert_eq!((host.counts.overflow, host.counts.refused_ons, host.counts.untracked), (1, 1, 1));
     host.panic(&mut rec);
     assert_eq!(rec.heard.iter().filter(|(_, _, e)| matches!(e.message, Message::NoteOff { .. })).count(), MIDI_FX_NOTES);
 }
