@@ -80,13 +80,12 @@ impl GraphHost for Host<'_, '_> {
         if self.p1[slot].panic.is_some() || !self.pool.admit(slot, &self.p1[slot]) { return Start::Unavailable; }
         let aux = self.aux(slot);
         if aux && self.tail.as_ref().is_some_and(|t| t.latency.aborted) { return Start::Unavailable; }
-        // B3 is applied as a separate proposed commit after the tail host is complete.
-        if !aux && window == Window::Closed { return Start::Forgo; }
         if pinned {
             self.fill(slot, false);
             self.pool.on_callback[slot] = true;
             return Start::Callback;
         }
+        if !aux && window == Window::Closed { return Start::Forgo; }
         self.fill(slot, true);
         if aux && !self.fits(slot, window) {
             self.pool.on_callback[slot] = true;
