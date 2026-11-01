@@ -49,9 +49,9 @@ Issue #68. Read with [ADR 0018](../../adr/0018-plugin-host-thread.md) (the plug-
 - State reads and live loads are `StateJob`s on the host thread, polled once per frame
   (`PluginStateReader::begin_save`/`begin_load`); the UI side is `ui-studio/src/plugin_header.rs`.
 - Each job (and each restore after an undo or redo) starts only once the audio side plays the
-  current document and confirms processed parameter delivery (`Player::plays_processed`). The
-  callback acknowledges the exact plan generation only after its parameter passes and after
-  the hosts' pending queues drain through processing; skipped blocks and strips still on workers
+  current document and confirms that job's own instance (`Player::plays_instance_processed`). The
+  callback acknowledges each slot in a bank belonging to the exact plan generation, after its
+  parameter pass and pending queue drain; skipped blocks and that slot's strip still on a worker
   cannot acknowledge it. `plays` retains its earlier rendered-document meaning. Earlier, a read missed a value still on its way and a value
   that arrived after a load overwrote the loaded state (issue #73). Tests that change a live state
   directly also store the values the plug-in reports (`plugin.state_values`), or the session sends
@@ -59,21 +59,26 @@ Issue #68. Read with [ADR 0018](../../adr/0018-plugin-host-thread.md) (the plug-
 - Delivery bounds (#219): CLAP reserves one block-start value per supported parameter beside
   its existing MIDI/timed budget, including in the FFI input buffer. VST3 reserves enough
   parameter queues and points for all stored values plus its timed and controller budgets in
-  one block. A refused CLAP processing start retains its queue. A rejected setter leaves the
+  one block. A refused CLAP processing start retains its queue. An error returned by the plug-in after
+  receiving the events drains that slice, preventing duplicate note-ons; status and tail recompute. A rejected setter leaves the
   mix cache unchanged for retry and prevents acknowledgment.
 - Texture keeps its existing freeze-only idle hook while bypassed: applying a quality or buffer
   edit there would destroy the frozen state being captured. Those edits are applied by its
-  normal parameter pass before the first active block. Because confirmation covers the whole
-  session, a bypassed Texture also holds header jobs on other plug-ins until reactivation or
-  the existing timeout.
+  normal parameter pass before the first active block. The capability is expressed by
+  `Plugin::idle_applies_all_parameters` (true by default, false for Texture), not a name check.
+  Only its own state job waits: other instances confirm independently.
 - Known issue: continuous document edits (automation writes, a plug-in streaming parameter
   changes) can keep a header job waiting until the 10 s give-up, because `plays` needs the
   document to stay unchanged for a rendered block. The job then drops with a status line and
   stores nothing. Bypassed inserts receive the latest block-start values through the normal
   host queue (#219); the first active block consumes them before rendering, with no further
   lane change needed. A job with a bypassed insert's pending values waits for reactivation;
-  inactive inserts/tracks also wait. If they stay that way, the existing give-up says "The audio
-  session is still updating; try again after it applies" and saves nothing.
+  inactive own inserts/tracks confirm stored values after document adoption/render, without a new
+  parameter pass. Reads use the session's stored state bytes, refusing if absent; live loads/restores
+  still use the host. A failed own slot refuses with the existing invalid-audio failure status.
+  An unrelated inactive, failed or bypassed slot never gates the job. If its own bypassed values
+  stay queued, the existing give-up says "The audio session is still updating; try again after it
+  applies" and saves nothing.
 - Commands: `plugin.preset_save` (not undoable), `plugin.preset_load` and `plugin.state_load` (one
   undo step each, recorded after the plug-in took the state), `plugin.preset_list`,
   `plugin.preset_delete`. Undoing or redoing a load asks the UI to load the stored state live

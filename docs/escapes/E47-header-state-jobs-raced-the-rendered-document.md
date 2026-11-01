@@ -17,13 +17,14 @@
    fails with the wait removed, on both host paths. The helpers now use real readiness
    (`plugin.state_values` plus a wait for the rendered document).
 5. **Gate class.** Any UI job that reads live plug-in state after a document change must wait
-   for `Player::plays_processed(&session)` (the rendered document plus processed parameter
-   delivery, #219). A test failure never passes a merge as a flake without a tracked issue and a
+   for `Player::plays_instance_processed(&session, track, slot)` (the rendered document plus
+   that instance's processed parameter delivery, #219). A test failure never passes a merge as a flake without a tracked issue and a
    green re-run on the failing platform. The CI conclusion is checked after every push.
 6. **Protocol change, owner, blind spot.** The merge chain reports the CI run result, and the
    hourly watch checks CI first. Owner: the coordinator. Blind spots: preset load and restore
    after undo have no guard test yet (Save As only); continuous document edits (automation
    writes) can starve a job to the 10 s give-up. The #219 delivery limits are closed: bypassed
    inserts queue current values for their first active block, and state jobs wait for processed
-   delivery after a skipped block. Jobs waiting on bypassed pending values or inactive inserts
-   can still give up with the existing UI status message; they never save the older state.
+   delivery after a skipped block. A job waiting on its own bypassed pending values can still
+   give up with the existing UI status message. Inactive own slots confirm stored values; failed
+   own slots refuse. Other inactive, failed or bypassed slots never hold the job.
