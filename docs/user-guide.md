@@ -340,7 +340,10 @@ C++ code ([ADR 0033](adr/0033-built-in-instruments-mutable-instruments-port.md))
   **Geometry**, **Brightness**, **Damping** and **Position** shape the resonator.
 - **Space** opens the stereo spread and then a reverb, which freezes from 175%.
 - **Velocity** is the module's strength input: soft notes excite more gently, through the module's
-  own accent curve (100% by default; at 0% every note plays at full strength).
+  own accent curve (100% by default; at 0% every note plays at full strength). With the FM Pair the
+  instrument fades the strength, and at Space of 10% or less the dry oscillator mix, down over
+  100 ms once no key is held, so that voice is silent between notes (the module's own FM voice
+  drones with nothing patched).
 - **Tune**, **Bend Range** and the matrix's Pitch move the voice. The mod wheel and aftertouch work
   through the matrix; Aftertouch to Strength plays the module's pressure input.
 - **FM Pair** (the last model) is the module's hidden voice: two FM oscillators through a filter

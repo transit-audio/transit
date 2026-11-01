@@ -76,12 +76,12 @@ text = "Where the resonator is excited and picked up, which brings out or hides 
 [[entry]]
 id = "modal_voice.space"
 name = "Space"
-text = "Up to 5% the left output is the dry exciter, crossfading to the resonator by 10%; then the stereo spread opens up to 80%, and from 60% a reverb grows, at its largest at 100%. From 100% to 175% nothing more changes; from 175% the reverb freezes, holding what it heard. 50% by default."
+text = "Up to 5% the left output is the dry exciter, crossfading to the resonator by 10%; then the stereo spread opens up to 80%, and from 60% a reverb grows, at its largest at 100%. From 100% to 175% nothing more changes; from 175% the reverb freezes, holding what it heard. 50% by default. With the FM Pair model the dry sound is its two oscillators, which nothing gates, so the instrument closes that dry share (over 100 ms) once no key is held; the Space setting itself is untouched and a held key sounds as on the module."
 
 [[entry]]
 id = "modal_voice.velocity"
 name = "Velocity"
-text = "How much velocity matters. Velocity is the module's strength input: it scales the exciters through the module's own accent curve (about 3 dB per tenth of travel, unity near velocity 64). At 100% (the default) the strength is the velocity; at 0% every note plays at full strength. With the FM Pair model the instrument fades the strength down to the point where that voice stays shut once no key is held (the module's own FM voice drones with nothing patched), so it is silent between notes at any Velocity setting."
+text = "How much velocity matters. Velocity is the module's strength input: it scales the exciters through the module's own accent curve (about 3 dB per tenth of travel, unity near velocity 64). At 100% (the default) the strength is the velocity; at 0% every note plays at full strength. With the FM Pair model the instrument fades the strength down to the point where that voice stays shut once no key is held (the module's own FM voice drones with nothing patched), so it is silent between notes at any Velocity setting. The same happens to the dry share at low Space (see Space); the strength and the dry share are open again at the next key."
 
 [[entry]]
 id = "modal_voice.level"
