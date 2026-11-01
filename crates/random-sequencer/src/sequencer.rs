@@ -357,8 +357,9 @@ impl Sequencer {
         self.seed
     }
 
-    /// Events a full schedule refused (never expected, see `PENDING`; counted, and shown in the
-    /// MIDI effect chain's diagnostics as part of its overflow figure).
+    /// Events a full schedule refused (never expected, see `PENDING`; counted). The MIDI effect
+    /// adds them to the chain's overflow count, which reaches
+    /// `MixEngine::event_status().midi_fx.overflow` (no UI reader shows it yet).
     #[must_use]
     pub fn dropped(&self) -> u64 {
         self.dropped
@@ -682,10 +683,11 @@ impl Sequencer {
         if self.core.t.pattern_started {
             self.pattern_tick = 0;
         }
-        // The next tick: on the grid without jitter, else where the jittery clock reaches it.
+        // The next tick: on the grid without jitter (the first grid point at least 1e-3 of a division
+        // ahead, so `period` is never clamped after jittered ticks), else where the jittery clock reaches it.
         let jitter = s.jitter > 0.0;
         #[allow(clippy::cast_possible_truncation)]
-        let next_k = if jitter { self.k + 1 } else { (t_beat / div + 1e-9).floor() as i64 + 1 };
+        let next_k = if jitter { self.k + 1 } else { (t_beat / div + 1e-3).floor() as i64 + 1 };
         let next_beat = if jitter { t_beat + div / f64::from(multiplier.0).max(1e-3) } else { next_k as f64 * div };
         let period = (next_beat - t_beat).max(div * 1e-3);
         let at = |tau: f64| t_beat + tau * period;
