@@ -382,7 +382,7 @@ impl StudioApp {
 
     /// Whether the audio side plays the document as it is now (`Player::plays`).
     fn plays_session(&self) -> bool {
-        self.player.as_ref().is_some_and(|p| p.plays(&self.engine.session_arc()))
+        self.player.as_ref().is_some_and(|p| p.plays_processed(&self.engine.session_arc()))
     }
 
     /// Begins a waiting op's job on the plug-in host thread.

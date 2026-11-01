@@ -67,7 +67,7 @@ const MAP_LEN: usize = PITCH_BEND + 1;
 /// Entries of the whole table: 16 channels.
 const MAP_ENTRIES: usize = MIDI_CHANNELS * MAP_LEN;
 /// Timed parameter points (`set_param_at`) one block holds; more fall back to the block start.
-const TIMED_CAP: usize = 1024;
+const TIMED_CAP: usize = EVENT_CAP;
 /// VST3's `kNoParamId`: no parameter.
 const NO_PARAM: u32 = u32::MAX;
 /// Host values one service call hands to the controller.

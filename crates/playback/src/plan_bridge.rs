@@ -226,6 +226,8 @@ pub(super) fn callback_scope() -> CallbackBudget {
 
 #[derive(Default)]
 struct Counters {
+    /// Exact plan generation whose parameter passes the hosts consumed; zero while pending.
+    parameters_processed: AtomicU64,
     faulted: AtomicBool,
     published: AtomicU64,
     admitted: AtomicU64,
@@ -475,6 +477,13 @@ impl Control {
     }
     pub fn status(&self) -> Option<StatusReport> {
         self.status.filter(|s| s.generation == self.compiler.active())
+    }
+
+    /// Processed parameter acknowledgment, published after rendering under the existing plan
+    /// sequence. An older plan's completion cannot acknowledge a newer document.
+    pub fn parameters_processed(&self) -> bool {
+        let generation = self.compiler.active();
+        generation != PlanGeneration::EMPTY && self.counters.parameters_processed.load(Ordering::Acquire) == generation.get()
     }
 
     /// The live engine's render-worker stream faults (`None`: no workers, the strips render
@@ -785,6 +794,8 @@ impl Audio {
         }
         self.mix.render_active(position, frames, &mut self.buffers.output);
         self.buffers.meters.publish(&self.mix);
+        let processed = if self.mix.parameters_processed() { self.mix.active().generation.get() } else { 0 };
+        self.counters.parameters_processed.store(processed, Ordering::Release);
         // Full means an older report still awaits control. The next render tries its current
         // cumulative status, not a queue of stale reports; no field is published separately.
         let _ = self.status_tx.push(StatusReport { generation: self.mix.active().generation, status: self.mix.status() });

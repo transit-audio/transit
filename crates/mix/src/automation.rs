@@ -117,13 +117,17 @@ fn apply_values<'a>(
     // the default it reports is not a choice and is left alone. Older sessions store every parameter
     // at that default, often 0, and pushing them over a restored plugin silenced Rhapsody (volume and
     // pan at minimum). Values that differ from the default, and every later change, are pushed.
+    slot.parameter_pass = true;
     let first = std::mem::take(&mut slot.fresh);
     for ((k, v), last) in ins.params.iter().zip(slot.applied.values(ins.params.len()).iter_mut()) {
         let val = value(k, *v);
         if val.to_bits() != last.to_bits() {
             let untouched = first && slot.plugin.info().param(k).is_some_and(|pi| pi.default.to_bits() == val.to_bits());
-            if !untouched {
-                slot.plugin.set_param(k, val);
+            if !untouched && !slot.plugin.set_param(k, val) {
+                // Admission failure is not delivery. Retain the old cache entry so the next
+                // pass retries, and do not acknowledge this document in the meantime.
+                slot.parameter_pass = false;
+                continue;
             }
             *last = val;
             slot.woken = true;
@@ -132,9 +136,12 @@ fn apply_values<'a>(
         // (past them the last point wins and the host counts the miss).
         for p in points(k) {
             let offset = u32::try_from(p.at.saturating_sub(pos)).unwrap_or(u32::MAX);
-            slot.plugin.set_param_at(offset, k, p.value);
-            *last = p.value;
-            slot.woken = true;
+            if slot.plugin.set_param_at(offset, k, p.value) {
+                *last = p.value;
+                slot.woken = true;
+            } else {
+                slot.parameter_pass = false;
+            }
         }
     }
 }

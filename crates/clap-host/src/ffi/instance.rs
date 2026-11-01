@@ -2,6 +2,14 @@
 
 use super::*;
 
+impl Instance {
+    /// Construction only: time-zero values have one reserved entry per supported parameter,
+    /// in addition to the MIDI/timed-event budget. Conversion must not truncate that reserve.
+    pub(crate) fn reserve_parameter_events(&mut self, parameters: usize) {
+        self.raw.reserve(EVENT_CAP.saturating_add(parameters).saturating_sub(self.raw.len()));
+    }
+}
+
 // ---- instances -----------------------------------------------------------------------------
 
 /// What one audio port looks like.

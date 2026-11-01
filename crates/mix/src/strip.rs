@@ -1,8 +1,9 @@
 use super::*;
 
 /// Bypassed/inactive Texture inserts, and Texture Synth instruments, still answer state-capture loans. Called only while this
-/// thread owns the strip, before workers can take it. Only Freeze is applied here; other edits
-/// retain their existing bypass behavior.
+/// thread owns the strip, before workers can take it. Only Freeze is applied by this idle hook;
+/// other bypassed inserts receive their full parameter pass later in the block. Texture's
+/// destructive buffer/quality edits stay deferred until reactivation to preserve frozen state.
 pub(crate) fn service_idle_states(s: &Session, t: &Track, strip: &mut Strip, pos: Samples) {
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
         let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
@@ -170,6 +171,7 @@ fn process_strip_source(t: &Track, strip: &mut Strip, block: &StripRender<'_>, t
                         *x = 0.5 * (*x + *y);
                     }
                 }
+                inst.woken = inst.plugin.params_pending();
                 if let Some(tap) = &inst.tap {
                     tap.push(&strip.buf, frames, 0.0);
                     if tap.enabled() {
@@ -223,6 +225,11 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
             continue;
         }
         let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
+        if ins.active && ins.bypass && !slot.failed && ins.plugin != "texture" {
+            // Keep block-start values flowing while dry. Hosts retain them until the first
+            // active process call; no old timed breakpoint can follow the new value.
+            apply_params(Some(block.s), slot, ins, t, &strip.touch, i, pos, 0);
+        }
         if !ins.active || ins.bypass || slot.failed {
             // A skipped reader misses releases: let go of its notes and pedals once.
             if let Some(delay) = &mut slot.note_delay {
@@ -340,10 +347,16 @@ pub(crate) fn process_master(
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
         if let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i))
             && ins.active
-            && !ins.bypass
             && !slot.failed
         {
-            apply_params(None, slot, ins, t, &strip.touch, i, pos, timed_span(transport, frames));
+            if ins.bypass && ins.plugin == "texture" {
+                continue; // Its freeze-only idle hook preserves captured buffer contents.
+            }
+            let span = if ins.bypass { 0 } else { timed_span(transport, frames) };
+            apply_params(None, slot, ins, t, &strip.touch, i, pos, span);
+            if ins.bypass {
+                continue;
+            }
             if run_insert(slot, &mut strip.buf, None, frames, transport, no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
                 strip.failures.record(i);
             } else if let Some(tap) = &slot.tap {

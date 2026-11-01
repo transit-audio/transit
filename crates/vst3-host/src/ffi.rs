@@ -41,10 +41,11 @@ const MAX_BUSES: i32 = 16;
 const MAX_BUS_CHANNELS: u32 = 64;
 /// Capacity of the per-block event lists (preallocated: `process` never allocates).
 pub(crate) const EVENT_CAP: usize = 1024;
-/// Most parameter queues per block (preallocated).
-pub(crate) const PARAM_QUEUE_CAP: usize = 1024;
+/// Every stored value plus the separate timed and mapped-controller budgets can land in one
+/// block. Reserving all their queues prevents a processed block from silently losing an ID.
+pub(crate) const PARAM_QUEUE_CAP: usize = MAX_PARAMS as usize + 2 * EVENT_CAP;
 /// Parameter points one block carries across all its queues (a preallocated slab).
-pub(crate) const PARAM_POINTS: usize = 4096;
+pub(crate) const PARAM_POINTS: usize = PARAM_QUEUE_CAP;
 /// Event entries kept for releases (F10): one per note and pedal the mix holds open (224 + 32),
 /// plus one reset. Other events are refused once only these remain.
 pub(crate) const RELEASE_RESERVE: usize = 257;
@@ -685,3 +686,6 @@ static TEST_ALLOC: allocation_probe::CountingAlloc = allocation_probe::CountingA
 #[cfg(test)]
 #[path = "../tests/common/mod.rs"]
 mod fixture;
+
+#[cfg(test)]
+mod parameter_delivery_tests;

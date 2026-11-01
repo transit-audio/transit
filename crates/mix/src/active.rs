@@ -305,6 +305,11 @@ impl MixEngine {
                 slot.plugin.set_sample(slot.sample_wrapper.clone());
             }
         }
+        for st in &mut active.tables.strips {
+            for slot in st.plugins.iter_mut().flatten().chain(st.instrument.iter_mut()) {
+                slot.parameter_pass = false;
+            }
+        }
         active.id = plan.id;
         active.status = PlanStatus::default();
         active.faulted = false;

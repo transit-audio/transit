@@ -619,13 +619,15 @@ impl Player {
     fn render_callback_runs(&self) -> bool {
         !(self.fault.failed.load(Ordering::Acquire) || self.fault.gone.load(Ordering::Acquire))
     }
-    /// Whether the audio side plays exactly `expected` (its plan confirmed and rendered). Live
-    /// state reads and loads wait for it. It guarantees that the values the document stores were
-    /// sent to each plug-in's parameter queue after that document was rendered, not that the
-    /// plug-in processed them, and a bypassed (or inactive) insert's values are not applied at
-    /// all. See issue #219.
+    /// Whether the exact document rendered. State jobs use [`Self::plays_processed`] for
+    /// processed parameter delivery, including after skipped blocks (#219).
     pub fn plays(&self, expected: &Arc<Session>) -> bool {
         self.owner().is_ok_and(|owner| owner.plays(expected))
+    }
+    /// Whether this document's parameter values reached processed plug-in blocks. Poll from
+    /// the UI; never waits for the audio thread or a busy host.
+    pub fn plays_processed(&self, expected: &Arc<Session>) -> bool {
+        self.owner().is_ok_and(|owner| owner.plays_processed(expected))
     }
     /// Preserve confirmed live state before a device reopen, including after a
     /// fault. None requires an explicit document-only recovery notice to the user.

@@ -501,17 +501,19 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
         }
         Ok(if audio { self.handles.capture_states() } else { self.handles.capture_states_with_audio(false) })
     }
-    /// Whether the audio side plays exactly `expected`: its plan is confirmed active and a block
-    /// of it has been rendered. That guarantees the values the document stores were sent to each
-    /// plug-in's parameter queue after the rendered document, not that the plug-in processed
-    /// them; a bypassed (or inactive) insert's values are not applied at all (issue #219).
-    /// A live state read or load (a user preset, issue #68) waits for this; before it, a read can miss a value still on its way, and a value that arrives after a load overwrites
-    /// the loaded state (issue #73).
+    /// Whether the audio side rendered exactly `expected`. This is document readiness only;
+    /// state jobs use `plays_processed` to wait for host parameter delivery (#219).
     pub fn plays(&self, expected: &Arc<Session>) -> bool {
         !self.faulted()
             && Arc::ptr_eq(expected, &self.requested)
             && self.confirmed == Some(self.control.sessions.bridge.active())
             && self.control.sessions.bridge.status().is_some()
+    }
+    /// Nonblocking confirmation for live state jobs: this exact plan made its parameter
+    /// passes and the hosts consumed the values in processed blocks. A skipped block or a
+    /// bypassed insert with queued values cannot acknowledge delivery (#219).
+    pub fn plays_processed(&self, expected: &Arc<Session>) -> bool {
+        self.plays(expected) && self.control.sessions.bridge.parameters_processed()
     }
     /// Final Main-thread capture before recreating the device. Faults close audio
     /// admission but leave these handles owned until retirement. Never use them
@@ -555,6 +557,8 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
     }
 }
 
+#[cfg(test)]
+mod delivery_tests;
 #[cfg(test)]
 mod late_tests;
 #[cfg(test)]

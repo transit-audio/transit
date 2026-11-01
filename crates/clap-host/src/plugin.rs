@@ -40,6 +40,10 @@
 //! editor handle's `idle`, only on the thread that created the instance (CLAP creates plug-ins
 //! on the main thread); other threads leave the requests alone.
 
+mod midi_events;
+use midi_events::midi_events;
+mod parameter_queue;
+
 use crate::ffi::{EVENT_CAP, Event, GuiLink, HostState, Instance, NotePort, PortBuffers, RELEASE_RESERVE};
 use crate::gate::{Gate, MAX_CHANNELS};
 use clap_sys::ext::note_ports::{CLAP_NOTE_DIALECT_CLAP, CLAP_NOTE_DIALECT_MIDI};
@@ -400,8 +404,8 @@ pub struct ClapPlugin {
     /// CLAP id of each `info.params` entry (same order).
     ids: Vec<u32>,
     values: Vec<f32>,
-    /// Pending events, kept sorted by time (stable for equal times). Never grows past `EVENT_CAP`;
-    /// the last `RELEASE_RESERVE` entries only take releases.
+    /// Pending events, sorted by time. One reserved time-zero value per parameter plus
+    /// `EVENT_CAP` MIDI/timed events, whose last `RELEASE_RESERVE` entries only take releases.
     queue: Vec<Event>,
     notes: NoteMode,
     /// The note port takes raw MIDI (controllers, pitch bend, program changes).
@@ -445,56 +449,6 @@ impl MidiVoice {
     }
 }
 
-/// Convert in stable sample order, absorbing an off while another identity holds the key.
-/// Entries are reserved at admission, including future ons, and reclaimed after this pass.
-/// EVENT_CAP bounds storage; F10 has at most 224 sounding notes + 767 queued non-releases.
-fn midi_events(queue: &mut Vec<Event>, voices: &mut [Option<MidiVoice>; EVENT_CAP], held: &mut [[bool; 128]; 16], deferred: &mut u64) {
-    queue.retain_mut(|event| {
-        match *event {
-            Event::NoteOn { time, key, velocity, channel, id } => {
-                if let Some(v) = voices.iter_mut().flatten().find(|v| v.matches(channel, key, id)) {
-                    v.sounding = true;
-                }
-                *event = Event::Midi { time, data: [0x90 | channel, key, (velocity * 127.0).round().clamp(1.0, 127.0) as u8] };
-            }
-            Event::NoteOff { time, key, velocity, channel, id } => {
-                if let Some(v) = voices.iter_mut().flatten().find(|v| v.matches(channel, key, id)) {
-                    v.sounding = false;
-                }
-                if voices.iter().flatten().any(|v| v.sounding && v.channel == channel && v.key == key) {
-                    *deferred = deferred.saturating_add(1);
-                    return false;
-                }
-                *event = Event::Midi { time, data: [0x80 | channel, key, (velocity * 127.0).round().clamp(0.0, 127.0) as u8] };
-            }
-            Event::Midi { data: [status, key, value], .. } => {
-                // Global/raw releases, including all_notes_off and reset, retire their keys.
-                let off = status & 0xF0 == 0x80 || (status & 0xF0 == 0x90 && value == 0);
-                let all = status & 0xF0 == 0xB0 && matches!(key, 120 | 123);
-                if off || all {
-                    for v in voices.iter_mut().flatten().filter(|v| v.channel == status & 0x0F && (all || v.key == key)) {
-                        v.sounding = false;
-                    }
-                }
-            }
-            _ => {}
-        }
-        true
-    });
-    *held = [[false; 128]; 16];
-    for entry in voices {
-        if let Some(v) = entry {
-            if v.sounding {
-                if let Some(h) = held.get_mut(usize::from(v.channel)).and_then(|h| h.get_mut(usize::from(v.key))) {
-                    *h = true;
-                }
-            } else {
-                *entry = None;
-            }
-        }
-    }
-}
-
 impl ClapPlugin {
     fn prepare_midi_events(&mut self) {
         if self.notes == NoteMode::Midi {
@@ -502,8 +456,9 @@ impl ClapPlugin {
         }
     }
 
-    pub(crate) fn new(inst: Instance, info: &'static PluginInfo) -> ClapPlugin {
+    pub(crate) fn new(mut inst: Instance, info: &'static PluginInfo) -> ClapPlugin {
         let ids: Vec<u32> = info.params.iter().map(|p| p.id.parse::<u32>().unwrap_or(u32::MAX)).collect();
+        inst.reserve_parameter_events(ids.len());
         let values = info.params.iter().zip(&ids).map(|(p, id)| inst.param_value(*id).map_or(p.default, |v| p.clamp(v as f32))).collect();
         let host = inst.host_state();
         let link = inst.link();
@@ -549,7 +504,7 @@ impl ClapPlugin {
             param_index: info.params.iter().enumerate().rev().map(|(i, p)| (p.id, i)).collect(),
             ids,
             values,
-            queue: Vec::with_capacity(EVENT_CAP),
+            queue: Vec::with_capacity(EVENT_CAP + info.params.len()),
             notes: NoteMode::None,
             midi_in: false,
             held: [[false; 128]; 16],
@@ -592,13 +547,7 @@ impl ClapPlugin {
     /// queue is full, or for a non-release when only the release reserve is left. Never allocates
     /// on the audio thread.
     fn push(&mut self, e: Event, release: bool) -> bool {
-        let room = if release { self.queue.capacity() } else { self.queue.capacity().saturating_sub(RELEASE_RESERVE) };
-        if self.queue.len() >= room {
-            return false;
-        }
-        let pos = self.queue.iter().rposition(|q| q.time() <= e.time()).map_or(0, |i| i + 1);
-        self.queue.insert(pos, e);
-        true
+        parameter_queue::push(&mut self.queue, e, release)
     }
 
     /// An event as MIDI 1.0 bytes on `channel` (two messages for a 14-bit controller).
@@ -839,6 +788,13 @@ impl ClapPlugin {
             let offset = u32::try_from(start).unwrap_or(u32::MAX);
             let events = self.queue.get(..k).unwrap_or(&[]);
             let r = core.inst.process(n, self.steady, &mut core.inputs, &mut core.outputs, events, offset, self.transport.as_ref());
+            if r.is_err() {
+                // A refused start or missing process entry never consumed these values.
+                collapse_params(&mut self.queue);
+                drop(guard);
+                self.gate.skip(io, ch, frames);
+                return;
+            }
             self.queue.drain(..k);
             let tail = core.inst.tail();
             self.tail = tail_samples_from(tail);
@@ -913,8 +869,7 @@ impl Plugin for ClapPlugin {
         drop_before_load(&mut self.queue, &self.shared.loads, &mut self.loads_seen);
         let Some((cid, v)) = self.host_value(id, value) else { return false };
         // Coalesce with a pending change of the same parameter at the block start.
-        self.param_at(0, cid, v);
-        true
+        self.param_at(0, cid, v)
     }
 
     /// One `Event::Param` per offset: points of one parameter coalesce only at an equal time.
@@ -1269,12 +1224,14 @@ fn keep_releases_on_reset(queue: &mut Vec<Event>, held: &mut [[bool; 128]; 16], 
     });
     for (channel, keys) in (0u8..).zip(held.iter_mut()) {
         for (key, h) in (0u8..).zip(keys.iter_mut()) {
-            if std::mem::take(h) && queue.len() < queue.capacity() {
+            if std::mem::take(h) {
                 let off = match notes {
                     NoteMode::Midi => Event::Midi { time: 0, data: [0x80 | channel, key, 0] },
                     NoteMode::Clap | NoteMode::None => Event::NoteOff { time: 0, key, velocity: 0.0, channel, id: -1 },
                 };
-                queue.insert(0, off);
+                if parameter_queue::has_room(queue, &off, true) {
+                    queue.insert(0, off);
+                }
             }
         }
     }

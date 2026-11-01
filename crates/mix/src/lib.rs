@@ -101,6 +101,9 @@ mod midi_fx;
 mod note_delay;
 mod note_view;
 mod offline;
+mod parameter_delivery;
+#[cfg(test)]
+mod parameter_delivery_tests;
 mod plan;
 #[cfg(test)]
 mod plan_fault_tests;
@@ -397,6 +400,8 @@ struct PluginSlot {
     /// ran with nothing left queued ([`Plugin::params_pending`], #78), not by a block its host
     /// skipped.
     woken: bool,
+    /// This document has made its parameter pass (reset at every plan adoption).
+    parameter_pass: bool,
     /// The slot's identity across plans.
     generation: SlotGen,
     /// Plan mode: channel-format code of the strip it was prepared for.
@@ -434,6 +439,7 @@ impl PluginSlot {
             quiet: 0,
             output_silent: true,
             woken: false,
+            parameter_pass: false,
             generation: SlotGen::VACANT,
             layout: 0,
             sample_audio: None,
