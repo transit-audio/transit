@@ -56,6 +56,10 @@ impl WorkerSet {
 
     /// Admission at `now`; a refusal is counted once per strip per block.
     pub(super) fn admits(&mut self, strip: usize, now: Instant, deadline: Instant) -> bool {
+        #[cfg(any(test, feature = "testing"))]
+        if self.slot_overrides(strip).no_reclaim {
+            return false;
+        }
         match self.admission(strip, deadline.saturating_duration_since(now)) {
             Ok(()) => true,
             Err(None) => false,

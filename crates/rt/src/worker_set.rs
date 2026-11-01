@@ -121,6 +121,8 @@ pub mod queue;
 #[cfg(any(test, feature = "testing"))]
 pub mod schedule;
 mod stepwise;
+#[cfg(any(test, feature = "testing"))]
+pub mod seams;
 
 pub use stepwise::Poll;
 
@@ -432,6 +434,8 @@ pub struct WorkerSet {
     mailbox: Arc<queue::Mailbox>,
     reader_taken: bool,
     capture_attempts: u32,
+    #[cfg(any(test, feature = "testing"))]
+    seams: seams::Seams,
     shut: bool,
 }
 
@@ -491,6 +495,8 @@ impl WorkerSet {
             mailbox: Arc::new(queue::Mailbox::default()),
             reader_taken: false,
             capture_attempts: 0,
+            #[cfg(any(test, feature = "testing"))]
+            seams: seams::Seams::new(strips),
             shut: false,
         };
         for k in 0..n {
