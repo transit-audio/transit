@@ -510,7 +510,7 @@ crate::state_fields!(
         && (0.0..=1.0).contains(&s.wave_fractional.0)
         && [16.0, 64.0, 128.0, 256.0, 65_536.0].contains(&s.scale_up.0)
         && s.scale_down.0.to_bits() == (1.0 / s.scale_up.0).to_bits()
-        && s.wave_start % WAVE_STRIDE == 0
+        && s.wave_start.is_multiple_of(WAVE_STRIDE)
         && s.wave_start + WAVE_STRIDE <= crate::wavetables::UPSTREAM_LEN
 );
 crate::state_fields!(

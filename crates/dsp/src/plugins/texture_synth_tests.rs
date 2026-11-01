@@ -109,14 +109,12 @@ fn crate_render(controls: Controls, resolution: SynthResolution, freeze_from: Op
                     key = k;
                     strike = true;
                 }
-                Ev::Off(k) => {
-                    if held.contains(&k) {
-                        held.retain(|h| *h != k);
-                        if k == key
-                            && let Some(back) = held.last()
-                        {
-                            key = *back;
-                        }
+                Ev::Off(k) if held.contains(&k) => {
+                    held.retain(|h| *h != k);
+                    if k == key
+                        && let Some(back) = held.last()
+                    {
+                        key = *back;
                     }
                 }
                 _ => {}
