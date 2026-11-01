@@ -79,32 +79,51 @@ fn issue_279_reaches_point_45_exactly() {
     }
 }
 
+/// Replays `chunks` (cycled) against an independent copy of the old recurrence.
+/// Until the smoother snaps, every value must match it bit for bit.
+fn check_original_bits(start: f32, target: f32, ms: f32, sr: f32, chunks: &[usize]) {
+    let mut smoother = Smoother::new(start);
+    smoother.set_time(ms, sr);
+    smoother.set(target);
+    let coef = time_coef(ms, sr);
+    let mut original = start;
+    let mut snapped = false;
+    let mut elapsed = 0usize;
+    let mut index = 0usize;
+    while elapsed < 1_536_000 {
+        let block = chunks[index % chunks.len()];
+        index += 1;
+        elapsed += block;
+        let k = if block == 1 { coef } else { coef.powi(block as i32) };
+        let previous = original;
+        original = target + (original - target) * k;
+        let within_tolerance = (original - target).abs() <= 1.0e-6 * (1.0 + target.abs());
+        let value = if block == 1 { smoother.next() } else { smoother.advance(block) };
+        if !smoother.settling() {
+            assert_eq!(value.to_bits(), target.to_bits());
+            assert!(within_tolerance || original == previous, "only a tolerance or no-progress snap may change bits");
+            snapped = true;
+            break;
+        }
+        assert!(!within_tolerance);
+        assert_eq!(value.to_bits(), original.to_bits(), "{start}->{target}, {ms} ms / {sr} Hz, chunks {chunks:?}");
+    }
+    assert!(snapped, "{start}->{target}, {ms} ms / {sr} Hz, chunks {chunks:?}");
+}
+
 #[test]
 fn every_step_before_the_snap_keeps_the_original_bits() {
     for (start, target) in [(0.0, 0.45), (1.0, 0.01), (-1.0, -0.45), (1000.0, 440.0)] {
-        for block in [1usize, 32, 256] {
-            let mut smoother = Smoother::new(start);
-            smoother.set_time(1000.0, 96_000.0);
-            smoother.set(target);
-            let coef = time_coef(1000.0, 96_000.0);
-            let k = if block == 1 { coef } else { coef.powi(block as i32) };
-            let mut original = start;
-            let mut snapped = false;
-            for _ in 0..1_536_000 / block {
-                let previous = original;
-                original = target + (original - target) * k;
-                let within_tolerance = (original - target).abs() <= 1.0e-6 * (1.0 + target.abs());
-                let value = if block == 1 { smoother.next() } else { smoother.advance(block) };
-                if !smoother.settling() {
-                    assert_eq!(value.to_bits(), target.to_bits());
-                    assert!(within_tolerance || original == previous, "only a tolerance or no-progress snap may change bits");
-                    snapped = true;
-                    break;
-                }
-                assert!(!within_tolerance);
-                assert_eq!(value.to_bits(), original.to_bits(), "{start}->{target}, block {block}");
+        // Uniform blocks at 1 s / 96 kHz and at 20 ms / 48 kHz.
+        for (ms, sr) in [(1000.0, 96_000.0), (20.0, 48_000.0)] {
+            for block in [1usize, 32, 256] {
+                check_original_bits(start, target, ms, sr, &[block]);
             }
-            assert!(snapped, "{start}->{target}, block {block}");
+        }
+        // The EQ's pattern: 32-frame chunks closed by a short tail of 1 to 8 frames.
+        for tail in 1..=8usize {
+            check_original_bits(start, target, 20.0, 48_000.0, &[32, 32, 32, tail]);
+            check_original_bits(start, target, 20.0, 48_000.0, &[32, tail]);
         }
     }
 }
