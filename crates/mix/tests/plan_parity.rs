@@ -280,6 +280,8 @@ fn aux_chains_folders_inactive_tracks_and_two_masters_match_the_golden() {
 /// The Filter insert (#242) reading the track's notes: envelope, LFO, key tracking and the amp
 /// stage on a Macro Oscillator, then the same with a MIDI effect ahead of the instrument (the
 /// Filter follows the transposed notes) and with the Filter's mode and slope changed.
+/// Re-captured for #280: cutoff 250 Hz and resonance 55 are initial state. Full renders differ
+/// only at frames 84..=12312 (max 0.26759103685617447), then match through frame 18431.
 #[test]
 fn a_filter_reading_the_tracks_notes_matches_the_golden() {
     let mut s = Session::default();

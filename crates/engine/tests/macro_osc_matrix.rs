@@ -1,11 +1,14 @@
 //! The Macro Oscillator's shaper and modulation matrix in a session (#243): off by default and the
 //! same bits as before them; an old session's note-to-macro mapping migrates to matrix rows and
-//! renders the same bits as the build that saved it; the rewritten factory preset too; the shaper
+//! renders the attributed golden bits; the rewritten factory preset too; the shaper
 //! and rows save, load and render the same at any host block size; a rack member's matrix reads
 //! the rack's macros.
 //!
 //! The golden hashes were taken from the build before #243 (main f2feabf0): the fixtures in
-//! `tests/fixtures` are sessions that build saved, rendered by it over 120 000 frames.
+//! `tests/fixtures` are sessions that build saved, rendered by it over 120 000 frames. The mapping
+//! hashes include the intended #279 and #280 smoother fixes documented below. To print candidate
+//! mapping hashes: `TRANSIT_CAPTURE_MAPPING_GOLDENS=1 cargo test -p transit-engine --test
+//! macro_osc_matrix an_old_session_migrates -- --nocapture`. Replacing them requires attribution.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use serde_json::json;
@@ -39,8 +42,11 @@ fn fixture(name: &str) -> String {
 /// curves, and a mono legato one), lanes on two depths and a curve's neighbor, rendered at 512 and
 /// at 64 frames per block by the build before #243. Re-captured for the #279 smoother snap fix
 /// (the level smoother settles on its target where the old recurrence stalled; max difference 2e-5).
-const MAPPING_GOLDEN_512: u64 = 0x2d34_2c2a_d6a5_dfc1;
-const MAPPING_GOLDEN_64: u64 = 0x084f_dab2_7d03_b5cd;
+/// Re-captured for #280: the stored -12 dB level is initial state. Both block sizes differ only
+/// at frames 0..=9265 (max 0.06659208238124847); the base level settles at frame 9266, and every
+/// remaining sample through frame 119999 is identical. The plain default fixture is unchanged.
+const MAPPING_GOLDEN_512: u64 = 0x32ab_5992_78f2_4569;
+const MAPPING_GOLDEN_64: u64 = 0xcbb9_37fd_deab_a5cd;
 /// The plain fixture (defaults, a poly and a mono track), at 512 and 37 frames per block.
 const PLAIN_GOLDEN: u64 = 0x6b24_dd39_e004_0ab9;
 /// The "Key Tracked Timbre" factory preset as it was (`key_timbre` 50) through [`preset_render`].
@@ -62,11 +68,17 @@ fn an_old_session_migrates_its_mapping_to_rows_and_renders_the_same_bits() {
         }
     }
     assert!(s.load_notes.iter().any(|n| n.contains(transit_model::legacy_mapping::MIGRATED_NOTE)), "{:?}", s.load_notes);
-    assert_eq!(fnv(&render(&s, 512)), MAPPING_GOLDEN_512, "512-frame blocks: the bits of the build before #243");
-    assert_eq!(fnv(&render(&s, 64)), MAPPING_GOLDEN_64, "64-frame blocks: the bits of the build before #243");
+    let at_512 = fnv(&render(&s, 512));
+    let at_64 = fnv(&render(&s, 64));
+    if std::env::var_os("TRANSIT_CAPTURE_MAPPING_GOLDENS").is_some() {
+        eprintln!("MAPPING_GOLDEN_512: {at_512:#018x}; MAPPING_GOLDEN_64: {at_64:#018x}");
+    } else {
+        assert_eq!(at_512, MAPPING_GOLDEN_512, "512-frame blocks: attributed mapping golden");
+        assert_eq!(at_64, MAPPING_GOLDEN_64, "64-frame blocks: attributed mapping golden");
+    }
     // Saved again and reloaded: the rows are ordinary parameters now.
     let again = Session::from_json(&s.to_json().unwrap()).unwrap();
-    assert_eq!(fnv(&render(&again, 512)), MAPPING_GOLDEN_512);
+    assert_eq!(fnv(&render(&again, 512)), at_512);
 }
 
 /// Off by default: a session of defaults plays the bits of the build before #243, whether the
