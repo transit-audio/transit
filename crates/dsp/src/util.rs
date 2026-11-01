@@ -43,6 +43,9 @@ pub(crate) fn frames_in(io: &[Vec<f32>], frames: usize, channels: usize) -> usiz
 }
 
 /// One-pole exponential parameter smoother (no zipper noise).
+/// Snaps at the existing relative tolerance or when rounding leaves a step unchanged:
+/// the latter catches f32 stalls whose distance exceeds a few target ULPs at long
+/// time constants. The one-pole arithmetic stays unchanged until the snap.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Smoother {
     cur: f32,
@@ -81,8 +84,9 @@ impl Smoother {
     #[inline]
     pub(crate) fn next(&mut self) -> f32 {
         if self.cur != self.target {
+            let previous = self.cur;
             self.cur = self.target + (self.cur - self.target) * self.coef;
-            if (self.cur - self.target).abs() <= 1.0e-6 * (1.0 + self.target.abs()) {
+            if ((self.cur - self.target).abs() <= 1.0e-6 * (1.0 + self.target.abs())) | (self.cur == previous) {
                 self.cur = self.target;
             }
         }
@@ -92,9 +96,10 @@ impl Smoother {
     /// Advances `n` samples at once (used for block-rate coefficient updates).
     pub(crate) fn advance(&mut self, n: usize) -> f32 {
         if self.cur != self.target {
+            let previous = self.cur;
             let k = self.coef.powi(n.min(i32::MAX as usize) as i32);
             self.cur = self.target + (self.cur - self.target) * k;
-            if (self.cur - self.target).abs() <= 1.0e-6 * (1.0 + self.target.abs()) {
+            if ((self.cur - self.target).abs() <= 1.0e-6 * (1.0 + self.target.abs())) | ((self.cur == previous) & (n != 0)) {
                 self.cur = self.target;
             }
         }
