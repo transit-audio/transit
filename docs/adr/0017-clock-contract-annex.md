@@ -88,8 +88,9 @@ is fitted to it: over every point of a 2048-point ring up to 60 s (20 s at callb
 less, 41 s at 960 frames), the lower convex hull of the points, the hull edge with the most points
 within 1 ms above it, and least squares over those points only. A late callback, whatever its
 delay, lies more than 1 ms above that line and has no weight, so no late callback or spell of
-them, however it eases off, restarts the line or moves the reading; 3 ms of arrival jitter reads
-within 20 ppm in the tests. Only a lasting offset restarts the device line, on the callback that
+them that eases off within a few seconds restarts the line or moves the reading (an easing over
+8 to 20 s reads 100 to 379 ppm off at 128 frames and up to 74 ppm at 8192, the class of a plain fit);
+3 ms of arrival jitter reads within 20 ppm in the tests. Only a lasting offset restarts the device line, on the callback that
 shows it: callbacks above the band for 3 s and at least 32 of them (a device that lost frames),
 or one callback more than 0.25 ms below the envelope (plus how far the envelope's slope can miss
 it), which no delay can put there (an offset that ended). After any restart the estimate is held

@@ -26,7 +26,9 @@
 //!
 //! An arrival time (a host callback time or the reader's own clock) is the true time plus a delay
 //! that is never negative: a few milliseconds of jitter, and now and then one block or a spell of
-//! blocks tens of milliseconds late, easing off at any pace. So the device's clock is the *lower
+//! blocks tens of milliseconds late, easing off within a few seconds (a lateness that eases off over
+//! 8 to 20 s reads 100 to 379 ppm off at 128 frames and up to 74 ppm at 8192, the class of a plain
+//! fit). So the device's clock is the *lower
 //! envelope* of the arrival times, and an arrival-timed line is fitted to that envelope, not to
 //! every point ([`Line::add`] stores every point; [`Line::envelope_fit`] chooses): the lower convex
 //! hull of the window's points (time over frame), the hull edge whose line has the most points
@@ -346,6 +348,10 @@ impl<const N: usize> Line<N> {
     /// span [`MIN_SPAN_NS`] and number [`MIN_POINTS`], and keeps the chosen edge's line for
     /// [`Self::judge`]. A few passes over the window (the hull pass, the edges' counts, which
     /// cover the points near each edge's line only, and the band's least squares), no allocation.
+    ///
+    /// Cost (release, a full 2048-point ring at 10 ms): 16 to 28 us for ordinary arrival patterns;
+    /// the worst I could construct (repeated convex arcs of 8 to 128 points) is 52 us. It runs once
+    /// per stored point and at most once per callback, so 52 us is 2 % of a 128-frame callback.
     fn envelope_fit(&mut self) -> Option<(f64, f64)> {
         let (t0, f0) = self.newest()?;
         let k0 = 1e9 / self.hz;
