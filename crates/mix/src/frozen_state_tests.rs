@@ -10,6 +10,7 @@ use transit_model::Insert;
 struct IdleProbe {
     seen: Arc<AtomicU32>,
     freeze: bool,
+    initializing: bool,
 }
 impl Plugin for IdleProbe {
     fn info(&self) -> &'static transit_dsp::PluginInfo {
@@ -17,8 +18,15 @@ impl Plugin for IdleProbe {
     }
     fn prepare(&mut self, _: f32, _: usize, _: usize) {}
     fn reset(&mut self) {}
+    fn snap_initial_params(&mut self) {
+        self.initializing = false;
+    }
     fn set_param(&mut self, id: &str, v: f32) -> bool {
-        assert_eq!(id, "freeze", "idle service must leave other pending edits alone");
+        // Stored values are initial state on the compiler thread (#280). Once preparation ends,
+        // the idle audio-thread hook must still leave every pending edit except Freeze alone.
+        if !self.initializing {
+            assert_eq!(id, "freeze", "idle service must leave other pending edits alone");
+        }
         if id == "freeze" {
             self.freeze = v >= 0.5;
         }
@@ -31,6 +39,7 @@ impl Plugin for IdleProbe {
         panic!("idle insert must not process");
     }
     fn service_idle_state(&mut self) {
+        assert!(!self.initializing, "preparation must finish before idle service");
         assert!(self.freeze, "bypassed edits must reach the capture");
         self.seen.fetch_add(1, Ordering::Relaxed);
     }
@@ -51,7 +60,7 @@ fn bypassed_and_inactive_inserts_and_tracks_service_state_at_the_block_boundary(
         ins.params.insert("buffer".into(), 4.0);
         tr.mixer.inserts[0] = Some(ins);
         let seen = Arc::new(AtomicU32::new(0));
-        let mut rig = PlanRig::new(64).fake(t, 0, IdleProbe { seen: seen.clone(), freeze: false });
+        let mut rig = PlanRig::new(64).fake(t, 0, IdleProbe { seen: seen.clone(), freeze: false, initializing: true });
         rig.publish(&s);
         rig.render(0);
         assert_eq!(seen.load(Ordering::Relaxed), 1, "mode {mode}");
@@ -95,7 +104,7 @@ fn bypassed_freeze_follows_automation_and_macros_without_applying_other_edits() 
             assert_eq!(crate::rack::MacroLanes::of(&s, member, 0).unwrap().value("freeze", 0), Some(1.0));
         }
         let seen = Arc::new(AtomicU32::new(0));
-        let mut rig = PlanRig::new(64).fake(t, 0, IdleProbe { seen: seen.clone(), freeze: false });
+        let mut rig = PlanRig::new(64).fake(t, 0, IdleProbe { seen: seen.clone(), freeze: false, initializing: true });
         rig.publish(&s);
         rig.render(0);
         assert_eq!(seen.load(Ordering::Relaxed), 1);
@@ -106,6 +115,7 @@ fn bypassed_freeze_follows_automation_and_macros_without_applying_other_edits() 
 struct IdleInstrument {
     seen: Arc<AtomicU32>,
     freeze: bool,
+    initializing: bool,
 }
 impl Plugin for IdleInstrument {
     fn info(&self) -> &'static transit_dsp::PluginInfo {
@@ -113,9 +123,16 @@ impl Plugin for IdleInstrument {
     }
     fn prepare(&mut self, _: f32, _: usize, _: usize) {}
     fn reset(&mut self) {}
+    fn snap_initial_params(&mut self) {
+        self.initializing = false;
+    }
     fn set_param(&mut self, id: &str, v: f32) -> bool {
-        assert_eq!(id, "freeze", "idle service must leave other pending edits alone");
-        self.freeze = v >= 0.5;
+        if !self.initializing {
+            assert_eq!(id, "freeze", "idle service must leave other pending edits alone");
+        }
+        if id == "freeze" {
+            self.freeze = v >= 0.5;
+        }
         true
     }
     fn param(&self, _: &str) -> Option<f32> {
@@ -123,6 +140,7 @@ impl Plugin for IdleInstrument {
     }
     fn process(&mut self, _: &mut [Vec<f32>], _: usize) {}
     fn service_idle_state(&mut self) {
+        assert!(!self.initializing, "preparation must finish before idle service");
         assert!(self.freeze, "a Freeze toggled on an inactive track must reach the capture");
         self.seen.fetch_add(1, Ordering::Relaxed);
     }
@@ -139,7 +157,7 @@ fn an_inactive_tracks_instrument_follows_freeze_before_answering_state() {
     ins.params.insert("quality".into(), 0.0);
     tr.instrument = Some(ins);
     let seen = Arc::new(AtomicU32::new(0));
-    let mut rig = PlanRig::new(64).fake(t, INSTRUMENT_SLOT, IdleInstrument { seen: seen.clone(), freeze: false });
+    let mut rig = PlanRig::new(64).fake(t, INSTRUMENT_SLOT, IdleInstrument { seen: seen.clone(), freeze: false, initializing: true });
     rig.publish(&s);
     rig.render(0);
     assert_eq!(seen.load(Ordering::Relaxed), 1);

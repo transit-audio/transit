@@ -564,6 +564,33 @@ fn a_frozen_cloud_saves_and_restores_bit_for_bit() {
     }
 }
 
+#[test]
+fn initial_params_snap_level_without_resetting_a_restored_cloud() {
+    for sr in [48_000u32, 44_100] {
+        let mut live = instrument(sr, &[("density", 20.0), ("size", 95.0), ("dry_wet", 80.0), ("reverb", 40.0)]);
+        let _ = render(&mut live, 30_000, 500, &[(0, Ev::On(57, 100)), (12_000, Ev::Param("freeze", 1.0)), (20_000, Ev::Off(57))]);
+        let state = live.save_state().expect("frozen cloud");
+        let mut restored = TextureSynth::new();
+        assert!(restored.load_state(&state));
+        restored.prepare(sr as f32, 333, 2);
+        assert!(restored.set_param("level", -18.0));
+        assert_ne!(restored.level.value(), db_to_gain(-18.0), "the restored level is the old one");
+        restored.snap_initial_params();
+        assert_eq!(restored.level.value(), db_to_gain(-18.0), "the first sample starts at the stored level");
+        assert!(!restored.level.settling());
+
+        // The continuing instance is the independent cloud/converter reference. Change only its
+        // level, bypassing the hook under test; a reset of the restored cloud would fail the audio.
+        live.set_param("level", -18.0);
+        live.level.set(db_to_gain(-18.0));
+        live.level.snap();
+        let expected = render(&mut live, 12_000, 500, &[]);
+        let actual = render(&mut restored, 12_000, 333, &[]);
+        assert!(peak(&expected[0]) > 0.001, "the cloud remains audible at {sr} Hz");
+        assert!(same_bits(&actual, &expected), "the cloud and converter survive at {sr} Hz");
+    }
+}
+
 /// A mono strip hears the mean of the two outputs; hostile parameter values clamp; NaN controller
 /// values are not reachable (MIDI bytes), and every output is finite.
 #[test]
