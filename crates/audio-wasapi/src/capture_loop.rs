@@ -98,6 +98,10 @@ pub(crate) struct CaptureConfig {
     pub(crate) stamper: CaptureStamper,
     pub(crate) origin: HostOrigin,
     pub(crate) timeout_ms: u32,
+    /// A wait that times out is an idle endpoint, not a lost device: the loop drains what is
+    /// there and waits again (the System Audio loopback capture, which may deliver nothing while
+    /// nothing plays, or is polled on a timer).
+    pub(crate) idle_ok: bool,
     /// Frames of zeros delivered in place of lost packets since the stream started. Shared so the
     /// owner can read the total after (or while) the loop runs.
     pub(crate) filled: Arc<AtomicU64>,
@@ -167,6 +171,7 @@ pub(crate) fn run(
         match device.wait(config.timeout_ms) {
             Wake::Event => live.wake(),
             Wake::Stop => return Exit::Stopped,
+            Wake::Timeout if config.idle_ok => {}
             Wake::Timeout => {
                 live.timeout();
                 error(StreamError::DeviceNotAvailable);
@@ -432,6 +437,7 @@ mod tests {
             stamper: CaptureStamper::new(ORIGIN_QPC, 0, calibration),
             origin: HostOrigin::default(),
             timeout_ms: 250,
+            idle_ok: false,
             filled: Arc::new(AtomicU64::new(0)),
             live: Arc::new(LoopStats::new()),
         }
@@ -726,6 +732,17 @@ mod tests {
         let mut device = Fake::new([Step::Wake(vec![normal()]), Step::Wait(Wake::Timeout), Step::Wake(vec![normal()])]);
         let run = drive(&mut device, &config(None));
         assert_eq!((run.exit, run.seen.len(), run.errors), (Exit::Timeout, 1, vec![StreamError::DeviceNotAvailable]));
+    }
+
+    #[test]
+    fn an_idle_loopback_endpoint_times_out_without_a_fault_and_goes_on() {
+        // System Audio (#268): a loopback stream may deliver nothing while nothing plays; the
+        // timeouts between packets are not a lost device.
+        let steps = [Step::Wake(vec![normal()]), Step::Wait(Wake::Timeout), Step::Wait(Wake::Timeout), Step::Wake(vec![normal()])];
+        let mut device = Fake::new(steps);
+        let run = drive(&mut device, &CaptureConfig { idle_ok: true, ..config(None) });
+        assert_eq!((run.exit, run.seen.len()), (Exit::Stopped, 2));
+        assert!(run.errors.is_empty(), "{:?}", run.errors);
     }
 
     #[test]

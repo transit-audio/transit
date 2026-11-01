@@ -18,13 +18,17 @@ mod com;
 mod convert;
 mod exclusive;
 mod lifecycle;
+mod loopback;
+mod loopback_com;
 mod pairing;
 mod render_loop;
 mod stats;
+mod watcher;
 
-use com::{EndpointInfo, NativeStream, OpenParams, Watcher};
+use com::{EndpointInfo, NativeStream, OpenParams};
 use std::sync::{Mutex, PoisonError};
 use transit_audio_backend as ab;
+use watcher::Watcher;
 
 /// The system name every endpoint of this backend carries.
 pub const SYSTEM: &str = "WASAPI";
@@ -185,7 +189,7 @@ impl ab::Backend for WasapiBackend {
         error: ab::ErrorCallback,
     ) -> Result<(Box<dyn ab::Stream>, ab::Achieved), ab::OpenError> {
         let device = endpoint.handle::<WasapiEndpoint>().ok_or_else(|| ab::OpenError::Other("the endpoint is not a WASAPI device".into()))?;
-        let (stream, achieved) = NativeStream::open_render(OpenParams { id: device.id.clone(), request: *request }, render, error)?;
+        let (stream, achieved) = NativeStream::open_render(OpenParams { id: device.id.clone(), request: *request, loopback: None }, render, error)?;
         Ok((Box::new(stream), achieved))
     }
 
@@ -200,7 +204,35 @@ impl ab::Backend for WasapiBackend {
     ) -> Result<(Box<dyn ab::Stream>, ab::Achieved), ab::OpenError> {
         let device = endpoint.handle::<WasapiEndpoint>().ok_or_else(|| ab::OpenError::Other("the endpoint is not a WASAPI device".into()))?;
         let id = if device.output { self.paired_input(endpoint)?.id } else { device.id.clone() };
-        let (stream, achieved) = NativeStream::open_capture(OpenParams { id, request: *request }, capture, error)?;
+        let (stream, achieved) = NativeStream::open_capture(OpenParams { id, request: *request, loopback: None }, capture, error)?;
+        Ok((Box::new(stream), achieved))
+    }
+
+    /// Every active render endpoint, the default first: what System Audio can capture (#268).
+    fn loopback_endpoints(&self) -> Result<Vec<ab::Endpoint>, ab::OpenError> {
+        self.endpoints(ab::Direction::Output)
+    }
+
+    /// A loopback capture of the render endpoint `endpoint` names (else the default output): a
+    /// separate shared-mode client at the endpoint's mix format, whatever mode the session's device
+    /// runs in (see [`loopback`]). An endpoint the session holds exclusively refuses
+    /// ([`ab::OpenError::InUse`], worded for Audio Devices).
+    fn open_loopback(
+        &self,
+        endpoint: Option<&str>,
+        capture: ab::CaptureCallback,
+        error: ab::ErrorCallback,
+    ) -> Result<(Box<dyn ab::Stream>, ab::Achieved), ab::OpenError> {
+        let wanted = endpoint.map(str::to_owned);
+        let (id, name) = com::on_mta(move || loopback_com::resolve(wanted.as_deref()))?;
+        let request = ab::OpenRequest {
+            format: ab::Format::new(48_000, 2, ab::SampleFormat::F32),
+            period: ab::Period::Default,
+            mode: ab::Mode::Shared,
+            origin: ab::HostOrigin::default(),
+            calibration: None,
+        };
+        let (stream, achieved) = NativeStream::open_loopback(OpenParams { id, request, loopback: Some(name) }, capture, error)?;
         Ok((Box::new(stream), achieved))
     }
 

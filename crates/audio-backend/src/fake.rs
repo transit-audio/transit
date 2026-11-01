@@ -27,6 +27,12 @@ struct State {
     stats: [StreamStats; 2],
     /// Every [`Stream::set_calibration`] so far, in order, with the direction of its stream.
     calibrations: Vec<(Direction, Option<Calibration>)>,
+    /// The loopback capture (System Audio): its callback, whether it runs, the endpoint each open
+    /// asked for, and the failure the next open meets.
+    loopback: Option<CaptureCallback>,
+    loopback_started: bool,
+    loopback_opens: Vec<Option<String>>,
+    fail_loopback: Option<OpenError>,
 }
 
 /// The scripted backend. Clones share one script and one set of streams.
@@ -47,6 +53,8 @@ pub struct FakeBackend {
     /// The buffer every stream opens with whatever was asked, as a fixed-size ASIO driver (or its
     /// panel's size for the default period); `None` grants the request.
     fixed_buffer: Option<Arc<Mutex<u32>>>,
+    /// The mix format of the render endpoint a loopback capture records; `None` refuses loopback.
+    loopback_format: Option<Format>,
 }
 
 impl FakeBackend {
@@ -64,7 +72,30 @@ impl FakeBackend {
             latency: None,
             strict: false,
             fixed_buffer: None,
+            loopback_format: None,
         }
+    }
+    /// Loopback captures open at `format` (the render endpoint's mix format).
+    pub fn with_loopback(mut self, format: Format) -> Self {
+        self.loopback_format = Some(format);
+        self
+    }
+    /// The next loopback open fails with `error`.
+    pub fn fail_next_loopback(&self, error: OpenError) {
+        self.lock().fail_loopback = Some(error);
+    }
+    /// The endpoint every loopback open asked for, in order.
+    pub fn loopback_opens(&self) -> Vec<Option<String>> {
+        self.lock().loopback_opens.clone()
+    }
+    /// Run one loopback callback. False when no started loopback stream exists.
+    pub fn pump_loopback(&self, frames: usize, source: &mut dyn CaptureSource) -> bool {
+        let mut state = self.lock();
+        let (Some(format), true) = (self.loopback_format, state.loopback_started) else { return false };
+        let Some(capture) = state.loopback.as_mut() else { return false };
+        let mut block = CaptureBlock::new(frames, Stamp::INVALID, format, source);
+        capture(&mut block);
+        true
     }
     /// Every stream opens with a buffer of `frames` whatever it asked for, until
     /// [`Self::set_fixed_buffer`] changes it (a driver whose panel sets the size).
@@ -195,7 +226,7 @@ impl FakeBackend {
             None => request.period,
         };
         Ok((
-            Box::new(FakeStream { state: Arc::clone(&self.state), direction, latency: self.latency }),
+            Box::new(FakeStream { state: Arc::clone(&self.state), direction, latency: self.latency, loopback: false }),
             Achieved { buffer_frames: period.frames(), latency: self.latency, ..Achieved::requested(request.format, period) },
         ))
     }
@@ -271,6 +302,25 @@ impl Backend for FakeBackend {
         (state.capture, state.capture_error) = (Some(capture), Some(error));
         Ok(opened)
     }
+    fn loopback_endpoints(&self) -> Result<Vec<Endpoint>, OpenError> {
+        Ok(if self.loopback_format.is_some() { vec![self.endpoint(Direction::Output)] } else { Vec::new() })
+    }
+    fn open_loopback(
+        &self,
+        endpoint: Option<&str>,
+        capture: CaptureCallback,
+        _error: ErrorCallback,
+    ) -> Result<(Box<dyn Stream>, Achieved), OpenError> {
+        let mut state = self.lock();
+        state.loopback_opens.push(endpoint.map(str::to_owned));
+        if let Some(error) = state.fail_loopback.take() {
+            return Err(error);
+        }
+        let format = self.loopback_format.ok_or_else(|| OpenError::Other("the fake device has no loopback".into()))?;
+        state.loopback = Some(capture);
+        let stream = FakeStream { state: Arc::clone(&self.state), direction: Direction::Input, latency: self.latency, loopback: true };
+        Ok((Box::new(stream), Achieved { latency: self.latency, ..Achieved::requested(format, Period::Default) }))
+    }
 }
 
 impl BackendFactory for FakeBackend {
@@ -283,6 +333,8 @@ struct FakeStream {
     state: Arc<Mutex<State>>,
     direction: Direction,
     latency: Option<Duration>,
+    /// A loopback capture's stream (its own slot, apart from the device's two directions).
+    loopback: bool,
 }
 
 impl FakeStream {
@@ -297,10 +349,18 @@ impl Stream for FakeStream {
         if let Some(error) = state.fail_start.take() {
             return Err(error);
         }
+        if self.loopback {
+            state.loopback_started = true;
+            return Ok(());
+        }
         state.started[slot(self.direction)] = true;
         Ok(())
     }
     fn stop(&self) -> Result<(), OpenError> {
+        if self.loopback {
+            self.lock().loopback_started = false;
+            return Ok(());
+        }
         self.lock().started[slot(self.direction)] = false;
         Ok(())
     }
@@ -322,6 +382,10 @@ impl Stream for FakeStream {
 impl Drop for FakeStream {
     fn drop(&mut self) {
         let mut state = self.lock();
+        if self.loopback {
+            (state.loopback, state.loopback_started) = (None, false);
+            return;
+        }
         state.started[slot(self.direction)] = false;
         if self.direction == Direction::Output {
             (state.render, state.render_error) = (None, None);

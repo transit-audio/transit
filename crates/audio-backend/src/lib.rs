@@ -661,6 +661,24 @@ pub trait Backend {
         capture: CaptureCallback,
         error: ErrorCallback,
     ) -> Result<(Box<dyn Stream>, Achieved), OpenError>;
+    /// The render endpoints a loopback capture can record (System Audio, #268): native WASAPI
+    /// lists every active render endpoint; a backend without loopback capture lists none.
+    fn loopback_endpoints(&self) -> Result<Vec<Endpoint>, OpenError> {
+        Ok(Vec::new())
+    }
+    /// Open, not started, a loopback capture of the render endpoint `endpoint` names (its id or
+    /// name; `None` is the system's default output): what the computer plays there, in shared
+    /// mode at the endpoint's mix format, on a client separate from any stream of the session. The
+    /// stream is clocked by that endpoint, not by the session's device. A backend without
+    /// loopback capture refuses.
+    fn open_loopback(
+        &self,
+        _endpoint: Option<&str>,
+        _capture: CaptureCallback,
+        _error: ErrorCallback,
+    ) -> Result<(Box<dyn Stream>, Achieved), OpenError> {
+        Err(OpenError::Other(format!("{} cannot capture what the computer plays", self.system())))
+    }
     /// Report device changes to `handler`. Returns false when the backend cannot.
     fn on_device_change(&self, _handler: Box<dyn FnMut(DeviceEvent) + Send>) -> bool {
         false

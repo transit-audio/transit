@@ -13,7 +13,7 @@ use crate::pairing::{self, Candidate};
 use crate::render_loop::{self, E_DEVICE_IN_USE, Fault, Fill, LoopConfig, Position, RenderDevice, RenderStats, Stamper, UnwindGuard, Wake};
 use crate::stats::LoopStats;
 use std::mem::size_of;
-use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU8, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::thread::JoinHandle;
@@ -23,15 +23,14 @@ use windows::Win32::Devices::FunctionDiscovery::PKEY_Device_FriendlyName;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, PROPERTYKEY};
 use windows::Win32::Media::Audio::{
     AUDCLNT_SHAREMODE_EXCLUSIVE, AUDCLNT_SHAREMODE_SHARED, AUDCLNT_STREAMFLAGS_AUTOCONVERTPCM, AUDCLNT_STREAMFLAGS_EVENTCALLBACK,
-    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDCLNT_STREAMOPTIONS_RAW, AudioCategory_Media, AudioClientProperties, DEVICE_STATE,
-    DEVICE_STATE_ACTIVE, EDataFlow, ERole, IAudioCaptureClient, IAudioClient, IAudioClient2, IAudioClient3, IAudioClock, IAudioClock2,
-    IAudioRenderClient, IMMDevice, IMMDeviceEnumerator, IMMNotificationClient, IMMNotificationClient_Impl, MMDeviceEnumerator, WAVEFORMATEX,
-    WAVEFORMATEXTENSIBLE, eCapture, eConsole, eRender,
+    AUDCLNT_STREAMFLAGS_SRC_DEFAULT_QUALITY, AUDCLNT_STREAMOPTIONS_RAW, AudioCategory_Media, AudioClientProperties, DEVICE_STATE_ACTIVE, EDataFlow,
+    IAudioCaptureClient, IAudioClient, IAudioClient2, IAudioClient3, IAudioClock, IAudioClock2, IAudioRenderClient, IMMDevice, IMMDeviceEnumerator,
+    MMDeviceEnumerator, WAVEFORMATEX, WAVEFORMATEXTENSIBLE, eCapture, eConsole, eRender,
 };
 use windows::Win32::System::Com::{CLSCTX_ALL, COINIT_MULTITHREADED, CoCreateInstance, CoInitializeEx, CoTaskMemFree, CoUninitialize, STGM_READ};
 use windows::Win32::System::Performance::{QueryPerformanceCounter, QueryPerformanceFrequency};
 use windows::Win32::System::Threading::{CreateEventW, SetEvent, WaitForMultipleObjects};
-use windows::core::{GUID, Interface, PCWSTR, PWSTR, implement};
+use windows::core::{GUID, Interface, PCWSTR, PWSTR};
 
 const WAVE_FORMAT_EXTENSIBLE: u16 = 0xFFFE;
 const WAVE_FORMAT_PCM: u16 = 1;
@@ -49,9 +48,9 @@ const MAX_CHANNELS: u16 = 64;
 /// `ERROR_NOT_FOUND` / `E_NOTFOUND`-style "no such endpoint" codes that mean the device is gone.
 const E_ELEMENT_NOT_FOUND: i32 = 0x8007_0490_u32 as i32;
 /// How long the control thread waits for the stream thread to open or start.
-const CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
+pub(crate) const CONTROL_TIMEOUT: Duration = Duration::from_secs(10);
 
-fn open_error(what: &str, error: &windows::core::Error) -> ab::OpenError {
+pub(crate) fn open_error(what: &str, error: &windows::core::Error) -> ab::OpenError {
     let text = format!("{what}: {error}");
     match error.code().0 {
         E_DEVICE_IN_USE => ab::OpenError::InUse(text),
@@ -70,10 +69,10 @@ fn wide(text: &str) -> Vec<u16> {
 /// Initializes COM as MTA on the calling thread and uninitializes it on drop. Fails with
 /// `RPC_E_CHANGED_MODE` on a thread that is already STA (winit's UI thread), so only threads
 /// this crate spawns create COM objects.
-struct ComGuard;
+pub(crate) struct ComGuard;
 
 impl ComGuard {
-    fn mta() -> Result<Self, ab::OpenError> {
+    pub(crate) fn mta() -> Result<Self, ab::OpenError> {
         // SAFETY: `CoInitializeEx` must be called once per thread before any other COM call and
         // paired with `CoUninitialize` on that thread; a success code (`S_OK` or `S_FALSE`) is
         // balanced by the `Drop` below, and a failure code is not (checked here).
@@ -205,7 +204,7 @@ fn parse_format(raw: &WAVEFORMATEXTENSIBLE) -> Result<Fmt, ab::OpenError> {
 }
 
 /// `IAudioClient::GetMixFormat`, copied out and freed.
-fn mix_format(client: &IAudioClient) -> Result<(WAVEFORMATEXTENSIBLE, Fmt), ab::OpenError> {
+pub(crate) fn mix_format(client: &IAudioClient) -> Result<(WAVEFORMATEXTENSIBLE, Fmt), ab::OpenError> {
     // SAFETY: `GetMixFormat` returns a `CoTaskMemAlloc`ed `WAVEFORMATEX` (followed by `cbSize`
     // extra bytes) that the caller must free with `CoTaskMemFree`. We read at most
     // `size_of::<WAVEFORMATEX>() + cbSize` bytes, capped at the size of our copy, and free the
@@ -283,13 +282,13 @@ fn id_of(device: &IMMDevice) -> Result<String, ab::OpenError> {
     }
 }
 
-fn enumerator() -> Result<IMMDeviceEnumerator, ab::OpenError> {
+pub(crate) fn enumerator() -> Result<IMMDeviceEnumerator, ab::OpenError> {
     // SAFETY: COM is initialized on this thread (`ComGuard`), and `MMDeviceEnumerator` is the
     // documented CLSID of `IMMDeviceEnumerator`.
     unsafe { CoCreateInstance(&MMDeviceEnumerator, None, CLSCTX_ALL) }.map_err(|e| open_error("IMMDeviceEnumerator", &e))
 }
 
-fn activate_client(device: &IMMDevice) -> windows::core::Result<IAudioClient> {
+pub(crate) fn activate_client(device: &IMMDevice) -> windows::core::Result<IAudioClient> {
     // SAFETY: `Activate` creates an interface of the requested type from a live `IMMDevice`;
     // no activation parameters are needed for `IAudioClient`.
     unsafe { device.Activate::<IAudioClient>(CLSCTX_ALL, None) }
@@ -300,7 +299,7 @@ fn activate(device: &IMMDevice) -> Result<IAudioClient, ab::OpenError> {
 }
 
 /// The endpoint with this id, resolved on the calling (MTA) thread.
-fn device_by_id(id: &str) -> Result<IMMDevice, ab::OpenError> {
+pub(crate) fn device_by_id(id: &str) -> Result<IMMDevice, ab::OpenError> {
     let wide = wide(id);
     // SAFETY: `GetDevice` reads the NUL-terminated UTF-16 id in `wide`, valid for the call.
     unsafe { enumerator()?.GetDevice(PCWSTR(wide.as_ptr())) }.map_err(|e| open_error("GetDevice", &e))
@@ -366,6 +365,9 @@ pub(crate) fn list_endpoints(output: bool) -> Result<Vec<EndpointInfo>, ab::Open
 pub(crate) struct OpenParams {
     pub(crate) id: String,
     pub(crate) request: ab::OpenRequest,
+    /// A System Audio loopback capture of the render endpoint `id`, with its friendly name for the
+    /// messages (see [`crate::loopback`]); the request's format and mode are then not used.
+    pub(crate) loopback: Option<String>,
 }
 
 /// Resolve the endpoint and initialize an event-driven shared-mode client on it: raw where
@@ -813,17 +815,31 @@ struct LiveCapture {
     min_period: Option<u32>,
     /// `GetBufferSize` after `Initialize`, for `Achieved::buffer_frames`.
     buffer_frames: u32,
+    /// The client signals `event` per buffer; false for a loopback client polled on a timer.
+    event_driven: bool,
 }
 
 impl LiveCapture {
     fn open(params: &OpenParams, stop: Arc<Event>) -> Result<Self, ab::OpenError> {
-        let (client, period_frames, fmt, min_period) = open_client(params)?;
+        let (client, period_frames, fmt, min_period, event_driven) = match &params.loopback {
+            Some(name) => {
+                let (client, period, fmt, event) = crate::loopback_com::open_client(&params.id, name)?;
+                (client, period, fmt, None, event)
+            }
+            None => {
+                let (client, period, fmt, min) = open_client(params)?;
+                (client, period, fmt, min, true)
+            }
+        };
         let event = Event::new(false)?;
-        // SAFETY: the client is initialized (event-driven); `SetEventHandle` takes a live event
-        // handle that outlives the client (`event` is a field of `LiveCapture`); `GetService` asks
-        // the initialized client for its services.
+        // SAFETY: the client is initialized (event-driven when `event_driven`, the only case that
+        // sets a handle); `SetEventHandle` takes a live event handle that outlives the client
+        // (`event` is a field of `LiveCapture`); `GetService` asks the initialized client for its
+        // services.
         let (capture, latency, buffer_frames) = unsafe {
-            client.SetEventHandle(event.0).map_err(|e| open_error("SetEventHandle", &e))?;
+            if event_driven {
+                client.SetEventHandle(event.0).map_err(|e| open_error("SetEventHandle", &e))?;
+            }
             let capture = client.GetService::<IAudioCaptureClient>().map_err(|e| open_error("IAudioCaptureClient", &e))?;
             let buffer_frames = client.GetBufferSize().map_err(|e| open_error("GetBufferSize", &e))?;
             (capture, client.GetStreamLatency().unwrap_or(0), buffer_frames)
@@ -839,6 +855,7 @@ impl LiveCapture {
             calibration: params.request.calibration,
             min_period,
             buffer_frames,
+            event_driven,
         })
     }
 
@@ -863,12 +880,14 @@ impl CaptureDevice for LiveCapture {
     }
 
     fn wait(&mut self, timeout_ms: u32) -> Wake {
-        // The stop event is first so that it wins when both are signaled.
-        let handles = [self.stop.0, self.event.0];
+        // The stop event is first so that it wins when both are signaled. A timer-driven loopback
+        // client has no buffer event: it waits on the stop event alone and drains on the timeout.
+        let both = [self.stop.0, self.event.0];
+        let handles = if self.event_driven { &both[..] } else { &both[..1] };
         // SAFETY: both handles are live events owned by this stream; `WaitForMultipleObjects`
         // with `bWaitAll` false returns the index of the first signaled handle, `WAIT_TIMEOUT`,
         // or `WAIT_FAILED`. It does not allocate.
-        let woke = unsafe { WaitForMultipleObjects(&handles, false, timeout_ms) };
+        let woke = unsafe { WaitForMultipleObjects(handles, false, timeout_ms) };
         match woke.0 {
             0 => Wake::Stop,
             1 => Wake::Event,
@@ -997,6 +1016,16 @@ impl NativeStream {
         error: ab::ErrorCallback,
     ) -> Result<(Self, ab::Achieved), ab::OpenError> {
         Self::spawn("transit-wasapi-capture", move |ctx| capture_thread(params, ctx, capture, error))
+    }
+
+    /// A System Audio loopback capture (`params.loopback` set): the capture thread and loop, with
+    /// a wait that times out treated as an idle endpoint.
+    pub(crate) fn open_loopback(
+        params: OpenParams,
+        capture: ab::CaptureCallback,
+        error: ab::ErrorCallback,
+    ) -> Result<(Self, ab::Achieved), ab::OpenError> {
+        Self::spawn("transit-wasapi-loopback", move |ctx| capture_thread(params, ctx, capture, error))
     }
 
     fn spawn(name: &str, body: impl FnOnce(Ctx) + Send + 'static) -> Result<(Self, ab::Achieved), ab::OpenError> {
@@ -1227,12 +1256,18 @@ fn capture_thread(params: OpenParams, ctx: Ctx, mut capture: ab::CaptureCallback
         match live.start(origin) {
             Ok(stamper) => {
                 let _ = reply.send(Ok(()));
+                let idle_ok = params.loopback.is_some();
                 let config = CaptureConfig {
                     format: live.fmt.format(),
                     wire: live.fmt.wire,
                     stamper,
                     origin,
-                    timeout_ms: timeout_ms(live.period_frames, live.fmt.rate),
+                    timeout_ms: if idle_ok {
+                        crate::loopback::wait_ms(live.period_frames, live.fmt.rate)
+                    } else {
+                        timeout_ms(live.period_frames, live.fmt.rate)
+                    },
+                    idle_ok,
                     filled: Arc::new(AtomicU64::new(0)),
                     live: Arc::clone(&shared),
                 };
@@ -1257,116 +1292,6 @@ fn capture_thread(params: OpenParams, ctx: Ctx, mut capture: ab::CaptureCallback
     drop(live);
     demote(promotion, &priority);
     drop(com);
-}
-
-/// The notification client: callbacks arrive on COM's threads and only post events.
-#[implement(IMMNotificationClient)]
-struct Notifier {
-    events: Sender<ab::DeviceEvent>,
-}
-
-impl IMMNotificationClient_Impl for Notifier_Impl {
-    fn OnDeviceStateChanged(&self, id: &PCWSTR, state: DEVICE_STATE) -> windows::core::Result<()> {
-        if state != DEVICE_STATE_ACTIVE {
-            // SAFETY: the callback's id is a NUL-terminated UTF-16 string valid for the call.
-            let _ = self.events.send(ab::DeviceEvent::Unplugged(unsafe { id.to_string() }.unwrap_or_default()));
-        }
-        Ok(())
-    }
-    fn OnDeviceAdded(&self, _id: &PCWSTR) -> windows::core::Result<()> {
-        Ok(())
-    }
-    fn OnDeviceRemoved(&self, id: &PCWSTR) -> windows::core::Result<()> {
-        // SAFETY: as in `OnDeviceStateChanged`.
-        let _ = self.events.send(ab::DeviceEvent::Unplugged(unsafe { id.to_string() }.unwrap_or_default()));
-        Ok(())
-    }
-    fn OnDefaultDeviceChanged(&self, flow: EDataFlow, role: ERole, _id: &PCWSTR) -> windows::core::Result<()> {
-        if role == eConsole {
-            let direction = if flow == eRender { ab::Direction::Output } else { ab::Direction::Input };
-            let _ = self.events.send(ab::DeviceEvent::DefaultChanged(direction));
-        }
-        Ok(())
-    }
-    fn OnPropertyValueChanged(&self, _id: &PCWSTR, _key: &PROPERTYKEY) -> windows::core::Result<()> {
-        Ok(())
-    }
-}
-
-/// A registered `IMMNotificationClient` on its own MTA thread; dropping unregisters it (on that
-/// thread, outside any handler) before the client is released.
-pub(crate) struct Watcher {
-    done: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
-}
-
-impl Watcher {
-    pub(crate) fn start(mut handler: Box<dyn FnMut(ab::DeviceEvent) + Send>) -> Result<Self, ab::OpenError> {
-        let done = Arc::new(AtomicBool::new(false));
-        let (ready_tx, ready_rx) = mpsc::sync_channel::<Result<(), ab::OpenError>>(1);
-        let flag = Arc::clone(&done);
-        let thread = std::thread::Builder::new()
-            .name("transit-wasapi-watch".into())
-            .spawn(move || {
-                let setup = (|| {
-                    let com = ComGuard::mta()?;
-                    let enumerator = enumerator()?;
-                    let (events, inbox) = mpsc::channel();
-                    let client: IMMNotificationClient = Notifier { events }.into();
-                    // SAFETY: registers a live notification client on a live enumerator, on the
-                    // MTA thread that owns both; it is unregistered below, on this thread, before
-                    // either is released.
-                    unsafe { enumerator.RegisterEndpointNotificationCallback(&client) }
-                        .map_err(|e| open_error("RegisterEndpointNotificationCallback", &e))?;
-                    Ok::<_, ab::OpenError>((com, enumerator, client, inbox))
-                })();
-                let (com, enumerator, client, inbox) = match setup {
-                    Ok(parts) => parts,
-                    Err(e) => {
-                        let _ = ready_tx.send(Err(e));
-                        return;
-                    }
-                };
-                let _ = ready_tx.send(Ok(()));
-                while !flag.load(Ordering::Acquire) {
-                    if let Ok(event) = inbox.recv_timeout(Duration::from_millis(100)) {
-                        handler(event);
-                    }
-                }
-                // SAFETY: unregisters the client registered above, on the same enumerator and
-                // thread, outside any notification handler.
-                let _ = unsafe { enumerator.UnregisterEndpointNotificationCallback(&client) };
-                drop((client, enumerator));
-                drop(com);
-            })
-            .map_err(|e| ab::OpenError::Other(format!("could not start the device watcher: {e}")))?;
-        match ready_rx.recv_timeout(CONTROL_TIMEOUT) {
-            Ok(Ok(())) => Ok(Self { done, thread: Some(thread) }),
-            Ok(Err(e)) => {
-                let _ = thread.join();
-                Err(e)
-            }
-            Err(failure) => {
-                // Timed out or the thread died: ask it to finish (it checks `done` once set up) and
-                // join it, so no thread outlives the failed start.
-                done.store(true, Ordering::Release);
-                let _ = thread.join();
-                Err(ab::OpenError::Other(match failure {
-                    mpsc::RecvTimeoutError::Timeout => "starting the device watcher timed out".into(),
-                    mpsc::RecvTimeoutError::Disconnected => "the device watcher thread exited while starting".into(),
-                }))
-            }
-        }
-    }
-}
-
-impl Drop for Watcher {
-    fn drop(&mut self) {
-        self.done.store(true, Ordering::Release);
-        if let Some(thread) = self.thread.take() {
-            let _ = thread.join();
-        }
-    }
 }
 
 /// `IAudioClient2::SetClientProperties(RAW)`; must precede `Initialize` and the mix-format query.
