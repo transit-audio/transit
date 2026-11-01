@@ -450,10 +450,6 @@ impl StudioApp {
             self.status = "Every parameter of this track has a lane".into();
             return;
         };
-        if let Err(error) = self.initialize_picked_lane(t, &id) {
-            self.status = error;
-            return;
-        }
         let at = self.ui.auto_lanes.iter().position(|v| v.track == t && v.lane == after).map_or(self.ui.auto_lanes.len(), |i| i + 1);
         self.ui.auto_lanes.insert(at, LaneView { track: t, lane: id, height: LANE_H });
     }
@@ -471,10 +467,6 @@ impl StudioApp {
     /// The picker: show `to` in place of `from` (or bring an open `to` here).
     pub fn pick_lane(&mut self, t: TrackId, from: &str, to: &str) {
         self.sync_midi_lanes();
-        if let Err(error) = self.initialize_picked_lane(t, to) {
-            self.status = error;
-            return;
-        }
         if from == to {
             return;
         }
@@ -483,23 +475,6 @@ impl StudioApp {
             v.lane = to.to_string();
         }
         self.auto.selection.retain(|p| !(p.track == t.0 && p.lane == from));
-    }
-
-    fn initialize_picked_lane(&mut self, t: TrackId, to: &str) -> Result<(), String> {
-        let s = self.engine.session_arc();
-        if let (Some(tr), Some(lane @ Lane::Plugin { slot, .. })) = (s.track(t), Lane::parse(to))
-            && (slot == transit_model::MACRO_SLOT || AutoParam::midi_effect_index(slot).is_some())
-        {
-            if !lane.valid(tr) {
-                return Err("no such lane".into());
-            }
-            // Opening a new effect or macro lane creates its first breakpoint through the
-            // ordinary command path, so undo removes it. Never overwrite an existing curve.
-            if lane.params(tr).first().is_some_and(|param| tr.lane(param).is_none()) {
-                self.add_point(t, to, self.position(), lane.static_value(tr))?;
-            }
-        }
-        Ok(())
     }
 
     /// The track's automation mode (`mix.automation_mode`: a document change, one undo step).

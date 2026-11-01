@@ -22,7 +22,13 @@ fn pick_and_undo(t: &mut T, track: TrackId, label: &str, id: &str, value: f32) {
     assert_eq!(row.label, label, "the header and picker share the label");
     assert_eq!(row.value, value);
     let param = AutoParam::parse(id).unwrap();
-    assert_eq!(t.points(track, &param), [(0, value)]);
+    // Picking only opens the lane view: no model lane, no breakpoint, no undo entry.
+    assert!(t.points(track, &param).is_empty());
+    assert!(t.app.engine.session().track(track).unwrap().lane(&param).is_none());
+    assert_eq!(t.undo_len(), before);
+    // Drawing a point afterwards goes through the command path: one undo step.
+    t.app.add_point(track, id, 480, value).unwrap();
+    assert_eq!(t.points(track, &param), [(480, value)]);
     assert_eq!(t.undo_len(), before + 1);
     t.app.run("edit.undo", json!({})).unwrap();
     assert!(t.app.engine.session().track(track).unwrap().lane(&param).is_none());
@@ -194,13 +200,13 @@ fn search_enter_picks_midi_effect_and_macro_entries() {
         let before = t.undo_len();
         t.key("Enter");
         assert_eq!(t.lane(track, id).label, label);
-        assert_eq!(t.undo_len(), before + 1);
-        assert_eq!(t.points(track, &AutoParam::parse(id).unwrap()), [(0, 0.0)]);
+        assert_eq!(t.undo_len(), before);
+        assert!(t.points(track, &AutoParam::parse(id).unwrap()).is_empty());
     }
 }
 
 #[test]
-fn the_plus_button_initializes_a_new_effect_lane_like_the_picker() {
+fn the_plus_button_opens_a_new_effect_lane_view_like_the_picker() {
     let mut t = T::new();
     let track = t.track("instrument", "Keys");
     t.app.run("mix.midi_effect", json!({"track": track.0, "plugin": "midi_transpose"})).unwrap();
@@ -212,8 +218,7 @@ fn the_plus_button_initializes_a_new_effect_lane_like_the_picker() {
     t.click(mid(t.lane(track, "mute").add));
     let id = "plugin:midi1:semitones";
     assert_eq!(t.lane(track, id).label, "Transpose · Semitones");
-    assert_eq!(t.points(track, &AutoParam::parse(id).unwrap()), [(0, 0.0)]);
-    assert_eq!(t.undo_len(), before + 1);
-    t.app.run("edit.undo", json!({})).unwrap();
+    assert!(t.points(track, &AutoParam::parse(id).unwrap()).is_empty());
     assert!(t.app.engine.session().track(track).unwrap().lane(&AutoParam::parse(id).unwrap()).is_none());
+    assert_eq!(t.undo_len(), before);
 }
