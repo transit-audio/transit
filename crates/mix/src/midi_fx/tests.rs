@@ -3,6 +3,8 @@
 use super::*;
 use transit_model::{ChannelFormat, TRACK_COLORS, TrackId, TrackKind};
 
+mod overflow;
+
 /// An instrument that writes down every event it is given, with its block number.
 #[derive(Default)]
 struct Rec {
