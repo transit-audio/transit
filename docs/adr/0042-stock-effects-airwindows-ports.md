@@ -1,8 +1,8 @@
-# ADR 0042: Stock effects from the Airwindows catalog, ported bit-exact with transit interfaces
+# ADR 0042: Stock effects from the Airwindows catalog, with stability bounds and bit-exact Rust ports
 
 - **Status:** proposed 2026-11-02
 - **Date:** 2026-11-02
-- **Reopen when:** a selected effect cannot pass the three-platform null or realtime gate without changing defined DSP behavior; its rate or block behavior cannot fit the insert contract; the upstream license changes; or a demonstrated mixing gap calls for a different selection.
+- **Reopen when:** a selected effect cannot pass the three-platform null or realtime gate within the stability-patch contract below; its rate or block behavior cannot fit the insert contract; the upstream license changes; or a demonstrated mixing gap calls for a different selection.
 
 ## Context
 
@@ -37,10 +37,11 @@ Do not import the whole catalog or fill the browser with neighboring versions. T
 jobs are intentional: one moving tap and a multi-tap ensemble. The console encoder and decoder
 are one paired system, not two competing colors.
 
-The first set is **10 inserts**, implemented in the following three slices after an oracle-only
-foundation. Tape, saturation and plate replacements are deferred on source-level safety evidence
-below; the tape gap remains open and the inherited Saturator and Plate Reverb stay. All source
-names in this table are Johnson's.
+The first set is **13 inserts**, implemented in the following three slices after an oracle-only
+foundation. The amendment below admits stability patches and returns Tape Color and Wave Saturator
+to slice 1 and Large Plate to slice 3. Selection is not a claim that the implementation gates have
+passed: each replacement lands only with its patched-reference and normal-domain null evidence.
+All source names in this table are Johnson's.
 
 | Slice / gap | Exact source name and revision | Parameters in source order | Transit name / stable id | Reason |
 |---|---|---|---|---|
@@ -48,74 +49,59 @@ names in this table are Johnson's.
 | 1: ensemble | "ChorusEnsemble" (unnumbered) | 3: Speed, Range, Dry/Wet | Ensemble Delay / `ensemble_delay` | Four taps provide the richer pad treatment the single tap cannot. |
 | 1: character compression | "Pressure6" (6) | 2: Compres, Ratio | Character Compressor / `character_compressor` | Latest compact, stereo-linked character compressor, aimed at bus compression in the author's notes. |
 | 1: de-essing | "DeBess" (unnumbered successor to "DeEss") | 5: Intense, Sharp, Depth, Filter, Sense | Sibilance Control / `sibilance_control` | The author recommends its longer adjustable detection window and improved rejection of non-sibilant material. |
+| 1: tape | "ToTape9" (9) | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | Tape Color / `tape_color` | Latest tape core, brightness compression and output clipper; stability patch bounds both companding coefficients. |
+| 1: saturation | "Density3" (3) | 4: Density, Highpas, Output, Dry/Wet | Wave Saturator / `wave_saturator` | Preferred general saturation revision; stability patch bounds the high-pass coefficient. |
 | 2: console channel | "Console9Channel" (9) | 2: Pan, Fader | Console Encode / `console_encode` | Latest numbered standalone summing encoder, without a whole channel-strip processing chain. |
 | 2: console buss | "Console9Buss" (9) | 2: Pan, Fader | Console Decode / `console_decode` | The matching decoder is required after the encoded channels sum. |
 | 2: clipper | "ADClip9" (9) | 5: Boost, Match, Noise, Ceiling, Mode | Peak Clipper / `peak_clipper` | Latest line, with level matching and a clipped-signal audition mode. |
 | 2: dither | "TPDFDither" (unnumbered, two-control Redux source) | 2: Quant, DeRez | Output Dither / `output_dither` | A general output word-length reducer; the author recommends this simple option when special noise shaping is unnecessary. |
 | 2: slew | "Slew4" (4) | 1: Compres | Treble Tamer / `treble_tamer` | Latest dedicated brightness compression, without the tape stage. |
 | 3: hall | "kGuitarHall2" (2) | 6: Regen, Derez, Filter, EarlyRF, Positin, Dry/Wet | Small Hall / `small_hall` | A hall with early-reflection positioning, rather than an ambient infinite-space substitute. |
+| 3: plate | "kPlate140" (unnumbered model 140) | 5: Input, Regen, DeRez, Predlay, Wetness | Large Plate / `large_plate` | The larger, prominent plate model; stability patch bounds the six SubTight histories. |
 
 The named sections of [Johnson's notes at the pin](https://github.com/airwindows/airwindows/blob/7fd5f5cae262a41e6dd7d9a83d60c46e84d3092a/Airwindopedia.txt)
 support these version choices: "DeBess", "Console9Channel", "ADClip9",
 "Slew4", "kGuitarHall2" and "TPDFDither". The last includes its Redux update;
 its earlier no-controls description is historical. "kPlate140" and "kPlate240" are different
 plate models, not revisions 140 and 240. The former's notes explicitly describe the larger, more
-prominent character; it remains the preferred plate candidate, but is deferred below. The later
+prominent character; it joins the hall with the stability patch below. The later
 stereo modulation variants are different designs, not numbered updates to "Chorus": the first
 set deliberately keeps the single-tap and four-tap designs with
 independent speed, range and mix controls.
 
-**Tape is deferred.** "ToTape9" (revision 9; nine controls: Input, Tilt, Shape, Flutter,
-FlutSpd, Bias, HeadBmp, HeadFrq, Output) was the preferred tape candidate: Johnson's "ToTape9"
-notes describe the revised core, brightness compression and output clipper. Its encoder/decoder
-recurrences can become unstable at admitted low rates. In
-`plugins/LinuxVST/src/ToTape9/ToTape9Proc.cpp`, at 8 kHz and Shape = 1,
-`iirDecFreq = C / (rate/44100) = 5.5125`; the decoder history multiplier is -4.5125.
-Clamping `highPart` does not clamp the `compDecL/R` histories. With fresh constructor state,
-constant stereo input `0.1f` and normalized controls `[.5, 0, 1, 0, .5, .5, 0, .5, 0]`,
-the review's source-derived binary64 trace reaches infinite decoder output on sample 472;
-zero output gain then produces NaN, which the delayed clipper emits on the next sample.
-This is a numerical source counterexample, not a compiled oracle result. "ToTape9" / Tape Color
-is outside the first shippable set. Admission requires a separately reviewed supported rate/control
-domain with explicit refusal/bypass behavior, or an approved DSP/reference change. Neither is
-approved here. Stabilizing coefficients is not an initialization patch, and silencing NaN only
-in the adapter cannot satisfy the raw-reference finite-output gate. Do not substitute "ToTape8"
-or promote a standalone flutter processor as a full tape replacement without admission evidence.
+**Three stability counterexamples are retained as regressions.** These are source-derived
+analytical/binary64 traces, not compiled C++ oracle results. The amendment changes the reference
+contract deliberately; it does not dismiss the findings or relabel them initialization defects.
 
-**Saturation is deferred.** "Density3" (revision 3; four controls: Density, Highpas, Output,
-Dry/Wet) was the preferred general saturation candidate under the author's "Density3" notes.
-Its original high-pass recurrence is unstable within transit's admitted low-rate domain:
-in `plugins/LinuxVST/src/Density3/Density3Proc.cpp`, at 8 kHz and Highpas = 1,
-`iirAmount = B^3 / (rate/44100) = 5.5125`, so the history multiplier is -4.5125.
-With constant input 1, zero history, Density = 0.25 and Output = Dry/Wet = 1, the internal
-density is 1.25 and the blend retains 75% of that growing high-pass signal. Its magnitude
-exceeds the finite f32 range within 60 samples. This is an analytical counterexample, not a
-compiled oracle result. A seed or initialization patch cannot fix it; stabilizing the coefficient
-changes defined DSP. "Density3" / Wave Saturator is outside the first shippable set. Admission
-requires an explicit supported-domain and refusal/bypass policy, or a separately approved DSP
-change with a revised reference contract. Neither is approved here. Do not silently substitute
-an older revision or another saturation algorithm without its own admission evidence.
+- **Tape:** in `ToTape9/ToTape9Proc.cpp`, at 8 kHz and Shape = 1,
+  `iirDecFreq = C / (rate/44100) = 5.5125`, giving history multiplier -4.5125.
+  Fresh state, constant stereo `0.1f` and controls `[.5, 0, 1, 0, .5, .5, 0, .5, 0]`
+  reach infinite decoder output on sample 472; zero output gain makes NaN and the delayed
+  clipper emits it on the next sample. Bounding `iirEncFreq` and `iirDecFreq` above by **1.0**
+  makes the IIR and companding history updates convex combinations; at this corner the decoder
+  multiplier becomes zero. The `highPart` clamp alone never bounded `compDecL/R`.
+- **Saturation:** in `Density3/Density3Proc.cpp`, at 8 kHz and Highpas = 1,
+  `iirAmount = B^3 / (rate/44100) = 5.5125` gives the same multiplier. Constant input 1,
+  zero history and controls `[.25, 1, 1, 1]` leave 75% of the growing high-pass residual;
+  its contribution is about `1.38e39` by sample 60, outside f32. Bounding `iirAmount` above
+  by **1.0** makes `iirSampleL/R` convex histories; at this corner each becomes the current
+  input and the high-pass residual is zero. Keep the original zero-coefficient reset.
+- **Plate:** in `kPlate140/kPlate140Proc.cpp`, each of three SubTight stages per channel
+  computes `s = .5 + abs(u*.5)`, `v = h + sin(h-u)*s`, then `h = v*s`.
+  The downstream temporary-output clamp does not bound `h`. Fresh state, 44.1 kHz, constant
+  stereo `2000.0f` and controls `[1, .5, 1, 0, 1]` produce infinite `subCL` at sample 51
+  and NaN `outSampleL` at sample 53 in the recorded trace, including Bezier accumulation
+  and zero-predelay startup; exact timing may vary by math library. Clamp each newly computed
+  `subAL/AR`, `subBL/BR`, `subCL/CR` to **[-1.0, 1.0]** immediately at its history write.
+  Retain the original `v` passed to the next stage. Then `abs(v) <= 1+s`, so history cannot
+  grow across updates; for finite f32 input, the three stages' products fit binary64 before
+  the clamps. This closes the recorded SubTight runaway without moving the output clamp.
 
-**Plate is deferred.** "kPlate140" (unnumbered model 140; five controls: Input, Regen, DeRez,
-Predlay, Wetness) / Large Plate was the preferred plate candidate under Johnson's "kPlate140"
-notes. Its SubTight histories can become nonfinite on hot finite input. In
-`plugins/LinuxVST/src/kPlate140/kPlate140Proc.cpp:78`–97, each of three stages computes
-`scale = .5 + abs(out*.5)`, then `out = history + sin(history-out)*scale` and
-`history = out*scale`. The clamps at lines 99–100 bound only the temporary output, not those
-histories. From fresh constructor state at 44.1 kHz, constant stereo input `2000.0f` and
-normalized controls `[1, .5, 1, 0, 1]`, the source-derived binary64 trace reaches infinite
-`subCL` at input sample 51 and NaN `outSampleL` at sample 53 (one-based). That trace includes
-the Bezier accumulation and zero-predelay startup; it is not a compiled C++ oracle result, and
-exact failure timing may depend on the math library. No seed choice fixes this nonzero-input
-recurrence. Comparison clamps do not reject the NaN, which enters the delay network.
-
-The inherited Plate Reverb remains under ADR 0040. Admission of "kPlate140" requires a
-separately reviewed input-amplitude domain, enforcement before the core, explicit boundary and
-out-of-domain behavior, and matching raw-reference/adapter coverage, or an approved DSP/reference
-change. Neither is approved here. Clamping histories is not an initialization patch, and transit's
-post-process nonfinite containment does not establish an input bound or satisfy the raw-reference
-gate. Do not quietly narrow hot-input fixtures or substitute "kPlateA" or "kPlate240" without
-their own admission evidence.
+For both coefficient patches, values already lie in [0, 1] at every normal-domain rate, for
+all normalized controls; only a value above 1 is replaced, without recomputing values inside
+the interval. The plate's normal-domain invariant and the required dual nulls are below.
+These local recurrence arguments do not replace the whole-effect finite-state/output audit.
+Do not substitute an older tape, saturation or plate revision without its own analysis.
 
 Other deferred candidates, with source details and reasons in the survey: "Vibrato", "Flutter2", "PhaseNudge",
 "StereoChorus", "StereoEnsemble", "Capacitor2", "PurestGain", "BitShiftGain", "PurestDrive",
@@ -129,10 +115,11 @@ this ADR does not claim those gaps are fully closed.
 ### Relationship to retirement and routing
 
 New inserts use new ids. No removed id is revived, and no old slot is silently substituted.
-The inherited Saturator and Plate Reverb remain under ADR 0040 because this first set has no
-admitted replacements for them; the separate tape gap also remains open. Small Hall supplies the
-Room Reverb replacement. Slice 3 retires only that reverb using ADR 0040's load report, dropped
-parameter targets, emptied slot and modified-session rule, with corpus coverage. The
+Slice 1 retires the inherited Saturator when Wave Saturator passes its gates and lands; Tape
+Color fills the separate tape gap. Slice 3 retires Room Reverb and Plate Reverb when Small Hall
+and Large Plate respectively pass and land. Each retirement uses ADR 0040's load report,
+dropped parameter targets, emptied slot and modified-session rule, with corpus coverage.
+A delayed replacement leaves its inherited device available until that replacement lands. The
 character compressor has no external key, gate or conventional full dynamics section: the existing
 Compressor/Limiter and Expander/Gate stay. EQ and Gain also stay; the deferred gain utility is not
 permission to remove the pass-through used by tests.
@@ -144,6 +131,134 @@ the pair's controls for those adjustments. For a processed return, decode before
 encode again before the next encoded sum. Nested sums need matching decode/encode boundaries.
 Test an actual routed session against that same ordered sum of oracle instances; do not imply that
 placing only the decoder on Main reproduces the system.
+
+## Amendment 2026-11-02: stability patches
+
+Derek admits minimal stability patches to the vendored originals: "I'm OK with patches to fix
+things like overflows/infinity issues." This supersedes the three deferrals and the blanket ban
+on changing defined DSP for numerical stability. Earlier judging responses remain the historical
+record; their counterexamples stand. Console initialization, noise, stereo coupling and counter
+preservation findings remain closed and unchanged.
+
+**Form and limits.** Follow ADR 0033's existing build-overlay mechanism: a unified diff under
+`crates/airwindows-oracle/patches/`, listed with its reason in that crate's `VENDOR.md`, applied
+by the build to copies of the byte-identical vendor files. The concrete precedent is
+[`patches/all/0012-modal-voice-fm-phase-offset-saturates-like-the-hardware.patch`](../../crates/macro-osc-oracle/patches/all/0012-modal-voice-fm-phase-offset-saturates-like-the-hardware.patch)
+and its entry in [`VENDOR.md`](../../crates/macro-osc-oracle/VENDOR.md), recorded under ADR 0033's
+2026-11-01 modal-voice implementation note: the FM phase-offset saturation changed the port and
+reference together. That precedent defines an undefined conversion; this amendment additionally
+allows bounds on unstable defined arithmetic. It does not imply that every DSP change is allowed.
+
+A stability patch is only the minimal coefficient clamp, history clamp or divisor guard needed
+to keep **every state variable finite for every admitted rate and any finite input**, with finite
+output too. Every changed variable, numeric bound, placement and reason must appear in a comment
+in the patch, in `VENDOR.md` and in the catalog's patch table. Preserve operation order inside the
+bound, signed zero, noise and seed advances. Apply the definition in the Rust port at the same
+point. A patch for taste, retuning, oversampling, latency, CPU or general cleanup remains forbidden.
+So does substituting a different revision without its own analysis or silencing NaN in the adapter
+instead of fixing the reference. No narrower per-effect rate or input admission is introduced.
+
+**One admitted domain for the entire set.** All normalized controls in [0, 1], arbitrary valid
+parameter schedules, and **any finite f32 input**, including both signs of `f32::MAX`, are in scope
+for the selected `processReplacing` path. Internal binary64 arithmetic and the final conversion
+to f32 must remain finite. NaN/infinite caller input belongs to the separate adapter containment
+contract; a future f64 audio path needs a new domain proof and f64 nulls.
+
+The engine-rate assumption is every integer rate **8,000 through 768,000 Hz**, inclusive:
+`crates/engine/src/cmd/file.rs` constructs sessions through `SampleRate::new`, whose interval is
+in `crates/time/src/lib.rs`; `crates/playback/src/device_clock.rs` checks that same interval.
+`crates/playback/src/devices.rs::STANDARD_RATES` lists 44.1, 48, 88.2, 96, 176.4 and 192 kHz
+as device choices, not a restriction on the engine. `SampleRate::COMMON` also lists 352.8 and
+384 kHz; **705.6 and 768 kHz are admitted now** even though not in those menus.
+The implementer must confirm every prepare/render entry point against this assumption before
+admission, including offline renders and loaded sessions, and extend the audit if any admits
+more. The earlier text called 1 kHz an export lower edge: the directly verified engine command
+is `file.prepare_import` (1–768 kHz), whose comment says mismatched prepared rates cannot be
+committed. `crates/dsp/src/util.rs::sane_sr` independently accepts 1 kHz–1.536 MHz; it is not a
+session-rate validator. Keep the existing 1 kHz robustness probe; do not infer a narrower engine
+domain from a menu or silently clamp/convert a rate. A patched effect must pass at every admitted
+rate; an unpatched effect can land only with its own finite-state/output analysis and the same gate.
+
+**Normal-domain transparency.** For each effect the normal rates are exactly 44.1, 48, 88.2,
+96, 176.4 and 192 kHz. The normal input domain is per-channel peak magnitude at most 1.0
+(0 dBFS) for Modulated Delay, Ensemble Delay, Sibilance Control, Tape Color, Wave Saturator and
+Small Hall. Character Compressor, Console Encode/Decode, Peak Clipper, Output Dither, Treble
+Tamer and Large Plate additionally cover bus headroom through **+12 dBFS** (magnitude
+`10^(12/20)`, approximately 3.981072). Full normalized control travel remains normal, including
+maximum drive, regeneration and wet/dry settings. Start from the documented fresh/reset state;
+all preceding samples and parameter events in a normal-domain render obey those bounds.
+Returning from an extreme-input history must stay finite, but is not a promise to erase the
+different history and immediately null against an original that overflowed.
+
+The following three patch specifications close the recorded recurrences. These are source
+arguments and required proof obligations, **not completed null measurements**.
+
+| Effect | Variable and bound, applied after the original expression | Counterexample closed | Normal-domain proof required |
+|---|---|---|---|
+| "ToTape9" / Tape Color | Cap `iirEncFreq` and `iirDecFreq` at 1.0 before either drives the IIR or companding histories. Leave 0 unchanged. | At 8 kHz, Shape = 1: 5.5125 becomes 1, so decoder history multiplier -4.5125 becomes 0; mirror coverage at Shape = 0 tests the encoder. | At every normal rate both coefficients are already in [0, 1] across the full Shape range. N1–N3 below must show unchanged coefficient bits and zero clamp activations, plus exact output/state/seed bits against the reference without stability patches. |
+| "Density3" / Wave Saturator | Cap `iirAmount` at 1.0 before the zero-coefficient reset and L/R high-pass updates. | At 8 kHz, Highpas = 1: the history becomes current input, eliminating the `4.5125^n` residual and the sample-60 overflow on the recorded controls. | `B^3/r <= 1` at all normal rates for every B in [0, 1]. N1–N3 must show zero activations and exact output/state/seed bits, including density below, at and above 1 and 2 internally. |
+| "kPlate140" / Large Plate | Clamp `subAL`, `subAR`, `subBL`, `subBR`, `subCL`, `subCR` to [-1.0, 1.0] at each `outSample*scale` history write; do not change the outgoing temporary. | The 2000.0-input trace cannot accumulate an unbounded history; each stage starts its next update with magnitude at most 1. Its final temporary still follows the original clamp. | The invariant below places the six normal histories well inside 1, including +12 dBFS. N1–N3 must compare every history, output and seed bit and record zero history-clamp activations through maximum Regen, all DeRez/predelay settings and tails. |
+
+For the plate invariant, bound the normal bus input conservatively by 4. The positive Bezier
+accumulation weights total at most 2 per internal update (the cycle exceeds 1 before reset), so
+`bez_Samp` is at most 16 and the two-value average times .125 is at most 4. Predelay only selects
+stored values. For `abs(u) <= U`, `abs(h) <= H`, use `abs(sin(h-u)) <= H+U`:
+`abs(v) <= H + (.5+.5*U)*(H+U)` and `abs(h_next) <= (.5+.5*U)*abs(v)`.
+Starting with `U = .00187*4 = .00748`, conservative invariant history bounds **.01, .022, .06**
+for stages A, B, C respectively give outgoing magnitudes below .01881, .04280, .11361 and
+next-history magnitudes below their respective bounds. They leave ample rounding margin to 1.
+Controls cannot amplify the input pad above 1; Regen and the feedback network are downstream
+of SubTight. The implementation must check the accumulation bound under DeRez changes and
+compiler rounding as well as fixed controls; the invariant is not a substitute for N1–N3.
+
+**Two references and two nulls per patched effect.** Build isolated reference variants from the
+same pin, compiler, flags, deterministic seeds and necessary initialization/UB definitions:
+one with stability patches, one without them ("unpatched" here means no stability patches,
+not different seeds or undefined initialization). The Rust port must null against the patched
+reference over the admitted-domain fixtures, and separately against the unpatched reference
+over **all** of these normal-domain fixtures, on each of the three compiler families:
+
+- **N1, `normal_full_sweep`:** the complete Gate 3 parameter sweep, defaults, interaction
+  endpoints, list choices, branch-adjacent f32 values, ramps and jumps, at all six normal rates;
+  silence/subnormals, signed impulses, positive/negative DC, alternating signs, unequal stereo,
+  tones and seeded broadband input up to each effect's stated normal limit. Include both 0 dBFS
+  and +12 dBFS limits for bus tools. The full sweep uses no stride for initial admission/release.
+- **N2, `normal_long_floor_and_null`:** Gate 4's at-least-60-second render with at least 10
+  seconds of silence, motion and excitation, extended until enabled delay paths fill and wrap
+  twice, at each normal rate. Both C++ variants get the in-process/cross-process floor, then
+  both port comparisons; capture internal state and clamp activation counts, not just output.
+- **N3, `normal_lifecycle_and_schedules`:** Gate 3/7's raw and adapter construction/reset,
+  interleaving, bypass and prepare scenarios, every listed block schedule with matched event
+  boundaries and normal inputs throughout. The plate includes the slowest DeRez and longest
+  predelay, control jumps during accumulation, and a fully excited maximum-Regen tail.
+
+These are required fixture names/specifications for implementation, not files that exist yet.
+All three compare output bits (signed zero included), every initialized processing-state value
+and RNG words; exclude padding and never-read spare storage. Require zero stability-clamp
+activations on normal renders and zero differing bits. Also compare patched and unpatched C++
+directly on those renders. Turning off a stability patch must fail its extreme regression;
+deliberately changing an in-domain coefficient/history operation must fail the normal null.
+
+**Whole-domain admission still needs proof.** The three local fixes do not certify every other
+operation. Audit all state writes, intermediates, feedback, casts and output dither across the
+whole admitted domain and arbitrary-length input streams, with analytic bounds plus fixtures.
+In particular, the Density3 branch below internal density 1 uses an input-dependent fifth-degree
+polynomial: with controls `[0, 0, 1, 1]`, finite input `1.0e10f` produces about `2.7557e43`
+before dither, beyond f32's approximately `3.4028e38` maximum, even with the coefficient cap.
+This source-derived calculation is a separate required regression, not a compiled oracle result.
+A maximum-f32 dry path plus output dither also needs
+explicit scrutiny, including in the plate. Record any further required bound with the same
+variable/bound/reason and normal-domain proof before admission; a repair beyond coefficient,
+history or divisor bounds requires another decision. Do not call the three regressions a proof
+for all finite inputs or reduce that domain to make a test pass. An unresolved case blocks the
+affected implementation, not the safety gate or the selection of its revision.
+
+**User documentation.** Each patched effect's help carries this sentence, substituting the
+actual variable names (and including any further admitted bounds): "transit bounds `<variable>`
+so the effect stays finite at extreme settings; within normal use it is sample-identical to
+Chris Johnson's original." Define normal use there by the effect's rates and input/headroom
+limit above. The catalog carries the patch table and the proof results when implemented;
+release notes distinguish stability patches from deterministic initialization fixes.
 
 ## Implementation
 
@@ -164,9 +279,11 @@ Follow [oracle-null-testing.md](../contributing/knowledge/oracle-null-testing.md
   file set and blob ids in `VENDOR.md`. Mark vendored paths `-text` and verify their committed
   blob ids against the pin. No community port, binary extraction or alternate catalog is a source.
 - `cpp/` supplies a minimal test-only host facade for the original classes, sample rate and parameter
-  access, and a C ABI per family. Compile the original processing functions, not a copied second
-  implementation. Isolate duplicate entry points, global enum names and header guards per translation
-  unit using wrapper/build symbol isolation. Record the mechanism; it must not change arithmetic.
+  access, and a C ABI per family. Compile the original processing functions with the recorded
+  patch overlays, plus the separate no-stability-patch variant for normal-domain comparisons;
+  never copy a second implementation. Isolate duplicate entry points, global enum names and header
+  guards per translation unit using wrapper/build symbol isolation. Record the mechanism; it must
+  not change arithmetic.
   Do not pull a proprietary host SDK into the oracle or ship host wrappers.
 - `src/` contains descriptive family wrappers, sweep definitions, floor and residual helpers;
   `tests/` holds floors, isolation and scenario checks. Add the crate to `DEV_ONLY` in the layer
@@ -180,9 +297,10 @@ Follow [oracle-null-testing.md](../contributing/knowledge/oracle-null-testing.md
   define demonstrated UB or unspecified evaluation that the three compilers expose. Each patch
   has the original expression, counterexample, chosen definition, rationale and a discriminating
   regression in `VENDOR.md`; application fails if the expected source does not match. Reproduce
-  the same definition in Rust. No tone correction, coefficient change, reordered accumulation,
-  removed noise, added oversampling or general cleanup. A desired change to defined DSP reopens
-  this ADR instead of hiding in an oracle patch.
+  the same definition in Rust. Stability patches additionally follow the amendment's scope,
+  comments, catalog table and dual references. No tone correction, coefficient change outside
+  that scope, reordered accumulation, removed noise, added oversampling or general cleanup.
+  Other desired changes to defined DSP reopen this ADR instead of hiding in an oracle patch.
 
 One concrete initialization defect is already visible: "ADClip9" declares `lastDryL/R`, reads
 them into `overshootL/R` before writing them in `Proc.cpp`, and its constructor never initializes
@@ -217,9 +335,11 @@ transcendentals or accepting a small residual is not a determinism fix.
 |---|---|
 | `transit-modulated-delay` | Modulated Delay, Ensemble Delay |
 | `transit-character-dynamics` | Character Compressor, Sibilance Control |
+| `transit-tape-color` | Tape Color |
+| `transit-wave-saturation` | Wave Saturator |
 | `transit-console-summing` | Console Encode, Console Decode |
 | `transit-output-tools` | Peak Clipper, Output Dither, Treble Tamer |
-| `transit-space-reverb` | Small Hall |
+| `transit-space-reverb` | Small Hall, Large Plate |
 
 Production crate names, Rust identifiers, stable ids, parameter ids, preset ids and device titles
 are descriptive, without upstream brand-like effect names. Original names remain in unchanged
@@ -227,7 +347,8 @@ vendor files and provenance/credit text. The explicitly named dev-only oracle is
 exception, not a naming pattern for production crates.
 
 The shipped app is Rust. Keep the original operation order, literals, casts, precision, integer
-wrapping where defined, state update order and per-sample loop. The transit f32 audio path ports
+wrapping where defined, state update order and per-sample loop, with only the recorded stability
+bounds and deterministic definitions. The transit f32 audio path ports
 **`processReplacing`**, including its actual noise operations and double intermediates; it must not
 call the double path and cast at the end. In particular, "ADClip9" comments out float-output dither
 additions but retains RNG advances, the conditional extra right-channel advance and clipping noise;
@@ -313,6 +434,11 @@ Concrete exceptions to the percentage rule:
   for indices 0–26 and 1 for index 27, with tested boundary mappings. Its Derez is one continuous
   control with labeled halves (stepped left, full at center, continuous right); do not quantize
   it to a list because the right half is continuous.
+- Tape Head Frequency displays `25 + 175*h*h` Hz using the source control arithmetic. Its
+  other controls retain percentage travel; Input and Output are not assumed to share a gain law.
+  Saturation Density may display the source's `5*a-1` amount, explicitly not dB. Plate Wetness
+  retains unity dry and wet at its midpoint and squared wet gain below it; Predelay retains
+  percentage travel with the internal-rate dependency explained, not an invented fixed time.
 
 Each slice provides `docs/help/<descriptive-id>.toml`, registered help ids and hovered widgets,
 a row in `docs/help/README.md`, and device documentation. Every control has its range, default,
@@ -342,9 +468,10 @@ MIT)"**, substituting the exact name from the table. About makes the full notice
 as it does for Émilie Gillet's ports. Credit is the explicit exception to brand-free UI titles;
 it is not an endorsement claim. Release notes say: "New stock effects with transit interfaces,
 ported from Chris Johnson's Airwindows algorithms (MIT)." List transit names with their original
-source names and revisions, link notices, describe any recorded deterministic patches, and call
+source names and revisions, link notices, describe deterministic and stability patches, and call
 out ADR 0040 removals as breaking changes. Claim bit-exactness only for effects that passed the
-gate, and name the pinned, deterministically patched desktop reference and matched schedules.
+gate, and name the pinned patched desktop reference and matched schedules. State the separate
+normal-domain sample identity to the original only after N1–N3 pass.
 
 ## Gate
 
@@ -355,21 +482,19 @@ These are implementation gates, not claims that this documentation change has ru
    and complete render/state digests across processes. Required floor: zero differing samples,
    peak and RMS residual `-inf` dBFS. Repeat with different initialization memory patterns to
    expose unwritten reads. A failing floor blocks all port claims; identify and define the
-   uninitialized/undefined behavior before proceeding. Compare the port against that original
-   C++ reference on the same runner, not a Rust-generated golden.
+   uninitialized/undefined behavior before proceeding. Compare the port against the recorded
+   C++ reference on the same runner, not a Rust-generated golden. For stability-patched effects,
+   run both reference variants and both nulls as specified by N1–N3 in the amendment.
 2. **Rates.** Every effect runs the sweep and floor at 44.1, 48, 88.2, 96, 176.4, 192, 352.8,
-   384, **705.6 and 768 kHz**. The last class is required now: `crates/time/src/lib.rs`
-   accepts 8,000–768,000 Hz, not just its eight `COMMON` rates. Include 8, 11.025, 16, 22.05,
-   24 and 32 kHz, and the 1 kHz lower edge admitted by the export command and DSP sanitizer.
+   384, **705.6 and 768 kHz**. Include 8, 11.025, 16, 22.05, 24 and 32 kHz, plus the
+   retained 1 kHz robustness probe. The common admitted domain and the entry-point confirmation
+   obligation are defined once in the amendment, not separately for each effect.
    Bounds audits cover the entire admitted rate interval; add probes immediately on either
    side of every integer-divider/clamp transition and any newly supported rate. Do not silently
-   clamp an admitted high rate to 192 kHz or add conversion to make the null pass. A source
-   unsafe at an admitted rate must distinguish actual UB from unstable defined arithmetic. Only
-   the former can use a justified deterministic patch; the latter needs deferral or an explicitly
-   approved domain/DSP decision. The known "Density3" and "ToTape9" recurrences are deferred
-   above, not left as first-set implementation blockers or treated as initialization defects.
-   The separate hot-input recurrence in "kPlate140" is likewise deferred, with no new input
-   bound or history clamp authorized by this ADR.
+   clamp an admitted high rate to 192 kHz or add conversion to make the null pass. Distinguish
+   UB/initialization definitions from the amendment's stability bounds in the patch manifest.
+   Every selected effect requires a finite-state/output argument over the whole domain, including
+   intermediate operations and output conversion; sampled nulls alone cannot establish it.
 3. **Sweep and scenarios.** For each continuous parameter use 0, 0.25, 0.5, 0.75, 1 around
    source defaults, both endpoints of interactions, all list choices and adjacent f32 values
    around branch boundaries. Include all-controls-low/high, paired drive/output and rate/depth
@@ -378,14 +503,23 @@ These are implementation gates, not claims that this documentation change has ru
    mode's wet/nontrivial path after its delays fill; enumerate intentional silence separately.
    Compare f32 `to_bits()` including signed zero, and both RNG words; no epsilon, ULP allowance
    or noise-floor tolerance. Nonfinite output on valid finite input is a blocker, not an exact
-   NaN match. Test raw reset versus raw fresh construction, adapter reset versus prepared and
+   NaN match. Check internal state after every update in instrumented safety fixtures, not only
+   output. Mandatory unstrided regressions are the three counterexamples above (both channels),
+   the tape's mirror encoder corner, clamp-boundary neighbors and sign-reversed/alternating
+   variants; run at least 4096 samples and extend through delayed emission and the long floor.
+   Include positive/negative `f32::MAX`, adjacent finite values, large finite powers of two,
+   `2000.0f`, sustained DC and hot-to-quiet recovery across every admitted-rate fixture. Never
+   shrink hot-input levels to pass. Show patch activation and finite state/output in the patched
+   reference and port, and the discriminating failure without the relevant patch. Test raw reset
+   versus raw fresh construction, adapter reset versus prepared and
    snapped fresh construction, interleaved instances, bypass/unbypass and
    rates reconfigured through prepare. Use process sizes 1, 2, 7, 32, 64, 127, 256, 1024 and an
    irregular sequence, with the same schedule on both sides. Preserve upstream block dependence.
 4. **Long floor and null.** At every listed rate render at least 60 seconds of sample time per
    effect, with parameter motion, an impulse/noise excitation and at least 10 seconds of silence.
-   Run this for oracle self-comparison and port comparison. Extend slowest-delay/resolution cases
-   until all enabled paths have emitted processed input and wrapped their longest advancing memory
+   Run this for oracle self-comparison and port comparison; N2 repeats it against the unpatched
+   reference at every normal rate within that effect's normal input domain. Extend slowest-delay/
+   resolution cases until all enabled paths have emitted processed input and wrapped their longest advancing memory
    at least twice. Exercise stationary-index paths at their source-reachable indices without
    changing their counters; 60 seconds of an unfilled wet buffer is not evidence. Record frame
    counts and final state. No assertion depends on elapsed wall time or scheduling luck.
@@ -403,7 +537,9 @@ These are implementation gates, not claims that this documentation change has ru
    new effect's first review on the three compiler families; ordinary CI runs fixed indices
    0, 10, 20, ... per effect/rate plus mandatory defaults, endpoints, modes and regressions.
    Print selected and total counts. Never stride away an effect, rate, long-run floor, long null,
-   initialization check or scenario. Set the variable for the release workspace test. Measure
+   initialization check or scenario, either reference variant, or either kind of null. N1 follows
+   the same full/strided policy; N2, N3 and every stability regression are mandatory in ordinary CI.
+   Set the variable for the release workspace test. Measure
    build and test cost before changing this policy, not by dropping a slow test silently.
 7. **Integration.** Adapter tests cover normalized/plain mappings, presets, save/load/reset,
    invalid parameters and input containment, no allocations on process/reset, reported latency,
@@ -411,8 +547,9 @@ These are implementation gates, not claims that this documentation change has ru
    workspace test**, not only the new family, with full oracles; ordinary integration also
    follows CONTRIBUTING.md. Run `cargo xtask layers`, `assets`, `timing`, `help` and `file-size`;
    generate help with `cargo xtask help --write` before checking it. Refutation review under
-   ADR 0009 includes each deterministic patch, FFI safety invariant and a deliberate perturbation
-   that makes each new null suite fail. Fidelity does not replace the audio-thread safety gate.
+   ADR 0009 includes each deterministic or stability patch, its normal-domain proof, FFI safety
+   invariant and a deliberate perturbation that makes each new null suite fail. Fidelity does not
+   replace the audio-thread safety gate.
    Console regressions cover restored Fader = 0, default and off-center Pan, prepare with no
    stored controls, and reset after restoration, at 1- and 64-frame first calls and irregular
    schedules. Check endpoint bits before rendering and output/seed bits against the explicitly
@@ -425,16 +562,17 @@ These are implementation gates, not claims that this documentation change has ru
 ## Consequences
 
 The stock collection fills distinct mixing jobs with small interfaces and a reproducible reference.
-Tape, saturation and plate replacements remain open. The inherited Saturator and
-Plate Reverb stay until safe replacements are admitted; this first set does not close every gap
-in #305.
+Tape, saturation and plate return to the selected first set through explicit stability bounds
+and two reference comparisons. Their replacements retire inherited devices only when they land;
+the dedicated phaser and feedback flanger remain outside this set.
 Users get the author's algorithms and quirks, including sample-rate coloration, seeded noise,
 nonlinear mix laws and block-length-dependent ramps. Gain staging and console placement need help
 text; a famous algorithm name is not a substitute for it.
 
 Maintainers carry C++ only in development, a compiler-dependent numerical reference, deterministic
-patches and three-platform test cost. A bit-exact claim is bounded by the pinned reference, runner
-and tested schedules; it is not a claim about every released binary or every imaginable input.
+and stability patches, dual reference variants and three-platform test cost. A bit-exact claim is
+bounded by the pinned reference, runner and tested schedules; it is not a claim about every
+released binary or every imaginable input.
 The long-run and full-sweep gates can be expensive at high rates. A failed fidelity or safety gate
 delays that insert rather than weakening the claim. No port is implemented or retired by this ADR.
 
