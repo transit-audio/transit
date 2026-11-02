@@ -187,6 +187,7 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   is required. Prefer the deterministic signal, or "at least 2" progress plus a stall bound, over a marker.
   There is no `median` tag: a median over samples is a latency claim, so it lives in an `#[ignore]`
   measurement test, never a gated one (E49 amendment 2026-10-25, #110).
+- A test fixture that holds a worker while the test thread or callback keeps working must not expire by total elapsed hold time: renew the watchdog on the test's own progress (a block counter) and keep only a generous no-progress ceiling as the hang bound (E49 recurrence 2026-11-02, `crates/mix/tests/common/stall.rs`).
 - The timing gate also checks sleep/park/yield polling loops (rule d, #120): a `for`, `while` or
   `loop` with `sleep`, `park_timeout` or `yield_now` must not exit against a short wall-clock
   duration (`Duration::from_millis(N)` with N < 250, or `from_micros`/`from_nanos`). The check
