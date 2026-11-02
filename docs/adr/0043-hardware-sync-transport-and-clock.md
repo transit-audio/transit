@@ -91,7 +91,11 @@ Locked, Freewheel or Missing; position uncertainty is an additional explicit war
 | Song Position Pointer, F2 low high | `p = low + 128*high`, `q = p/4`, model tick `240*p`. Locate to that absolute sixteenth using the active map; do not wrap it into the cycle. Seeking at/past the cycle end follows today's play-through rule. |
 
 Ignore Start or Continue when already playing (including recording or a start already pending),
-Stop when stopped with no pending start, and SPP that is the current pending/applied target.
+Stop when stopped with no pending start, and an SPP equivalent to a pending locate in the current
+transport epoch or to the current position with certain phase. Do not deduplicate against a
+last-SPP value remembered after playback has advanced: SPP p, advance, SPP p locates back to p.
+Count uncertainty always makes SPP an explicit phase reset, even at the same numerical position;
+it must clear uncertainty and restart acquisition rather than disappear as a duplicate.
 Do not implement these as toggles. An SPP does not itself start playback. Malformed or incomplete
 F2 is counted and ignored; a real-time byte between its two data bytes remains independent.
 An SPP received while playing is tolerated as an explicit locate, even though transit never
@@ -105,7 +109,7 @@ apply at the earliest unrendered boundary, report late frames, and slew toward t
 backdate captured data. Clocks while stopped may acquire tempo but do not advance song position.
 
 **Recording:** external Start/Continue records only when at least one track is armed **and**
-the user has engaged Record. Record in external mode prepares the ticket and displays
+the user has engaged Record. Record in Transport and Clock mode prepares the ticket and displays
 **Waiting for external start**; arming alone never records. This is the requested Logic/Ableton
 armed-plus-record workflow, not a claim that MIDI Start carries a record bit. External starts
 bypass the local count-in. A duplicate Start during a take is ignored, not a restart or a
@@ -146,6 +150,16 @@ D_n = host_to_frame(A_n + input_delay_ms*1e6)
 q_n = q_start + n/24                            # unwrapped quarter position
 q_target(D) = q_n + (D-D_n) * B_hat/(60*Fd)
 ```
+
+Evaluate the estimate after every tick with a full window; complete-beat boundaries below govern
+lock evaluation, not estimate updates. For an even-sized set, median is the mean of the two
+middle values. The interval filter is not a guarantee that every delayed arrival is rejected:
+the 2 ms perturbation in the gate remains inside J. Accept up to 0.5 BPM transient error for
+ticks 120 through 144 of that exact fixture, returning to the 0.2 BPM steady-state envelope
+at tick 145 (25 ticks after the perturbation). The paired long/short intervals cancel while
+both remain in the window, but each window edge exposes one of them. This finite window
+response is preferable here to treating a plausible arrival delay as a lost pulse. Neither
+the independent source-phase bound nor the continuous-phase rule gets a transient exception.
 
 With fewer than 18 accepted intervals retain the last valid estimate and show Acquiring;
 before the first full window, a median of available positive intervals is provisional only.
@@ -206,13 +220,13 @@ See [Logic's synchronization settings](https://help.apple.com/logicpro/mac/9.1.6
 
 ### 4. Active tempo, rendering and recording
 
-External mode disables saved tempo events and tempo editing from acquisition through freewheel;
+Transport and Clock mode disables saved tempo events and tempo editing from acquisition through freewheel;
 Locked displays **External <bpm>**. Keep the saved tempo map intact. Use a runtime piecewise map
 of `(D, S, q, rate, transport epoch, loop iteration)`; each adopted block extends the last
 segment continuously with `v_block`. Device frames still advance audio at Fs/Fd; the rate
 correction changes musical phase and the beat grid, not the hardware sample rate or the pitch
 of every audio clip. S remains the elapsed session-sample coordinate between locates/wraps;
-q is read through the runtime map, not by applying the saved map to S while external is active.
+q is read through the runtime map, not by applying the saved map to S in Transport and Clock mode.
 For a locate outside retained history, extrapolate from the current pass's latest tempo segment
 to obtain S, then establish a new epoch at the requested q. Before any external segment exists,
 use the saved map for this initial coordinate only. Cycle boundaries are musical addresses:
@@ -253,12 +267,12 @@ take and an explicit fault, rather than guessing beats or dropping captured audi
 slice-3 gate, not a later recording follow-up. No audio FIFO backlog is used to infer phase:
 K22 concerns monitoring; the device placement contract concerns recording.
 
-External tempo history is runtime state, not a newly saved session tempo track. Leaving external
-mode while stopped restores the saved map: MIDI retains its recorded beats, raw audio retains
+External tempo history is runtime state, not a newly saved session tempo track. Leaving Transport
+and Clock mode while stopped restores the saved map: MIDI retains its recorded beats, raw audio retains
 its duration, and playback at a different saved tempo need not reproduce the original live
 performance. Show that limitation in help. Capturing a reusable external tempo map is later
-work. Offline render uses the saved map and sends no sync; refuse it while external mode is
-active with an explanation to leave external mode first. ADR 0027 real-time bounce also requires
+work. Offline render uses the saved map and sends no sync; refuse it while Transport and Clock
+mode is active with an explanation to leave that mode first. ADR 0027 real-time bounce also requires
 internal mode in this scope, so an external Stop/SPP cannot invalidate its fixed-range capture.
 
 ### 5. Sending clock and transport
@@ -286,6 +300,38 @@ compensate a particular hardware chain; it never borrows a track's offset or cha
 If a deadline has already passed, send once as late and count it; do not claim the requested
 negative offset was achieved. Loss of a valid presentation map is labeled approximate and
 disqualifies a timing benchmark, as it does for note output.
+
+**Deadline changes and port faults:** clock ticks never use the note path's `Track::last`
+deadline clamp. Each port retains a sync generation, the last successfully sent tick ordinal,
+and the last admitted tick's immutable deadline and local period. Check crossings in tick order
+before inserting them into the deadline-sorted queue. Never retime already queued ticks when
+a later span changes its map. A change of A in any applied span while sending faults that port's
+sync, even if its next deadline would still be increasing. A continuous map revision is allowed
+only if each new deadline exceeds the previous admitted deadline by at least half the smaller
+of their two local tick periods, converted through their respective presentation maps. Equal,
+reversed or more closely spaced deadlines fault; a clock-key reset or a missing span also faults.
+This permits continuous tempo ramps while refusing a discontinuous compensation or mapping change.
+
+The output worker serializes admission, fault handling and dispatch. On detecting a fault,
+advance that port's sync generation before any further dispatch, cancel **all unsent sync
+events** of the old generation (including earlier pending ticks), and reject later-arriving
+old-generation spans. This observation is the cancellation boundary; it cannot undo bytes
+already handed to the MIDI driver. Keep their successful-send count and ordinal, never replay
+them, and record the canceled ordinal range/count and the triggering span/map/A in diagnostics.
+Send Stop as the next sync message when Transport is enabled; a sticky pending Stop survives
+queue saturation and precedes any resync. Show **Sync fault: timing changed; resync required**.
+There is no claim of continuous receiver position across the missing ticks. Local playback and
+recording continue; this fault affects only that port's sync, not the take or note-release reserve.
+
+Recovery requires a fresh transport start or explicit per-port **Resync** request after the
+worker acknowledges the fault. Use a new generation and the current applied position, never
+the canceled tick count: with Transport and Song Position enabled send Stop (unless already
+successfully sent), SPP, Continue, then Clock, using the preparation lead and representable
+sixteenth rules below. With Song Position disabled use Stop/Start and show Pattern restart.
+Clock-only output emits no transport bytes: it stays faulted until an explicit Resync or fresh
+start, resumes at a newly prepared crossing, and warns that the receiver's song position must
+be reset externally. Do not automatically recover on the next good span. Already-sent ticks
+remain historical facts; only the new ordered position sequence establishes receiver phase.
 
 Wire ordering is explicit (F2 is a three-byte System Common message, not a real-time byte):
 
@@ -322,8 +368,9 @@ quarter, six clocks per SPP unit, and Start followed by clocks. The chosen prepa
 sub-sixteenth waiting rule are transit policies. Equal-deadline sync events retain the ordering
 above and precede new note-ons, while note releases retain their safety reserve. Sync traffic
 must not consume that reserve. A late backlog never bursts an unbounded train of catch-up ticks:
-if a tick is a whole tick period late, fault that port's sync, cancel queued ticks, issue Stop
-when Transport is on, and require a fresh start/resync; report missed ticks.
+if a tick is a whole tick period late, enter the port-fault procedure above and report missed
+ticks. Also fault rather than dispatch two F8s less than half the smaller local tick period
+apart by actual-send stamps; minor lateness must not bunch otherwise ordered deadlines.
 
 **Feedback:** never enable sync sending to the same physical device as the active sync input
 (`same_midi_device`, including aliases); keep the requested switches but show them suspended.
@@ -380,7 +427,7 @@ concern before implementation; this document authorizes no file-size exception.
 | Slice | Work | Gate before merge |
 |---|---|---|
 | 1. Transport follow and send | Typed sync ingress, single-source preferences, minimal source indicator, Start/Stop/Continue/SPP state machine, recording tickets, output serialization and feedback guard. Clock follow choice remains unavailable until slice 3. | Parser interleaving and generation tests; state matrix including armed/unarmed and engaged/not-engaged recording; duplicate requests, SPP at bounds, full queues, unplug and local Stop; fake output asserts byte order and no audio-thread sends. |
-| 2. Clock send | Applied transport spans to output worker, 24-ppqn deadlines, tempo-map changes, per-port Clock and delay. | Scripted device/map verifies crossings within one device sample, no accumulated rounding, tempo change mid-bar, rate conversion, cycle/locate invalidation, delayed worker, PDC and offset sign; strict callback allocation gate; reference hardware send diagnostic before claiming #183's jitter target. |
+| 2. Clock send | Applied transport spans to output worker, 24-ppqn deadlines, tempo-map changes, per-port Clock and delay. | Scripted device/map verifies crossings within one device sample, no accumulated rounding, tempo change mid-bar, rate conversion, cycle/locate invalidation, delayed worker, PDC and offset sign; compensation/map fault, generation cancellation and ordered resync cases below; strict callback allocation gate; reference hardware send diagnostic before claiming #183's jitter target. |
 | 3. Clock follow | N=24 estimator, M=4 lock, bounded phase controller, runtime beat-map render integration and recording/recovery history. Enable Transport and Clock. | Synthetic jitter/ramp/drift and loss fixtures; exact state transitions and sample-error bounds; MIDI/audio take alignment and journal recovery across map changes, short notes and held notes at cycle seams; block-partition and no-allocation checks; source loss never discards a take. |
 | 4. UI and diagnostics | Complete source/lock/quality presentation, preference help, counts, loopback page and benchmark export. | UI state/default/persistence tests with injected stamps; diagnostics arithmetic with scripted samples; real USB loopback report and reference rig signoff, including reconnect and loaded runs. |
 
@@ -402,13 +449,33 @@ and [gates.md](../contributing/evidence/gates.md), [CONTRIBUTING.md](../../CONTR
 fresh-context [ADR 0009](0009-refutation-review-before-every-push.md) review apply to implementation.
 This docs-only proposal runs no Cargo commands and claims no implemented or hardware gate pass.
 
-- At 48 kHz, generate ideal 120 BPM stamps with a fixed zero-mean +/-250 microsecond arrival
-  sequence (12 device samples), a single 2 ms outlier, then a 120-to-132 BPM linear ramp over
-  60 synthetic seconds and +/-500 ppm source/device rate mismatch. After acquisition, assert
-  `abs(B_hat-B_true) <= 0.2 BPM` and `abs(phase_error_samples) <= 96` on these fixtures; assert
-  every discontinuity-free boundary preserves phase and the correction term stays within 1%.
-  These are proposed acceptance bounds, not measured results. At constant exact tempo expect
-  the exact 24-tick estimate and no accumulated drift over one synthetic hour.
+- Use these separate exact fixtures at 48 kHz, with a perfect supplied H-to-D map, zero offset,
+  and all arrivals/readouts injected. Let H0 = 1e9 ns; round each supplied stamp once to integer
+  nanoseconds. Constant-tempo truth is `h_i = H0 + i*60e9/(120*24)`, for i=0..192. Set
+  `H_i = h_i + (-250000 ns if i is even, +250000 ns otherwise)` and add exactly 2000000 ns
+  to H_120. After four consistent beats (n=96), require `abs(B_hat-120) <= 0.2 BPM` except
+  n=120..144 inclusive, where the bound is 0.5 BPM. Check **every tick**, including both
+  boundaries: B_120 = 119.5219123506 and B_144 = 120.4819277108 BPM (within 0.00001 BPM
+  for stamp rounding); B_145 returns to 120 within that tolerance. All 24 intervals are
+  accepted at those two failing boundaries from round 1. Recovery is mandatory by tick 145,
+  not a new acquisition grace period. Include an unperturbed counterpart with no exception.
+- For the ramp fixture, source time t is seconds, with B(t)=120 for 0..8, then
+  `120 + 0.2*(t-8)` for 8..68, then 132 through t=76. Its integrated truth is q(t)=2*t
+  through 8; `16 + 2*u + u*u/600`, u=t-8, through 68; then `142 + 2.2*(t-68)`.
+  Solve q(t_i)=i/24 for ideal source pulses. Run epsilon in {-0.0005, 0, +0.0005}, set
+  `h_i = H0 + t_i*1e9/(1+epsilon)`, and add the same alternating +/-250000 ns jitter,
+  with no 2 ms perturbation in these separate ramp runs. True BPM in host/device time is
+  `B(t)*(1+epsilon)`. Require error <=0.2 BPM at every post-acquisition tick; there is no
+  transient allowance for the ramp or source/device mismatch.
+- For both fixtures check `abs(phase_error_samples) <= 96` at every post-acquisition block
+  boundary, including ticks 120 and 144 and their following blocks. Independently compare
+  q_play with the ideal source q at that device frame, **not** q_target reconstructed by the
+  estimator; divide that quarter error by the true quarters/device-sample rate and require
+  <=96 samples too. Feed snapshots causally (only arrived ticks) and test the block partitions
+  below; neither oracle may hide an extra/missing pulse behind smooth BPM. Require zero
+  drift-induced phase jumps and a correction term within 1%. These remain implementation
+  acceptance bounds, not claimed gate passes. At constant exact tempo expect the exact
+  24-tick estimate and no accumulated drift over one synthetic hour.
 - Lock transitions use the four complete consistent beats, including exactly-at/just-past
   one-beat expiry; supply zero/backward stamps, duplicate/dropped F8, a burst sharing a stamp,
   an out-of-range BPM, a tempo step, old generations and invalid/stale clock maps. Verify
@@ -416,7 +483,8 @@ This docs-only proposal runs no Cargo commands and claims no implemented or hard
 - Run full transport sequences with cycle on/off, FA/FB/FC repeated, SPP 0 and 16383, malformed
   F2, realtime bytes inside notes/F2/SysEx, notes and clock on the same port, no note routes,
   Monitor closed and Learn active. Check recording ticket cancellation, pending Start then
-  Stop, locate while recording, controller-only takes and recovery; compare delayed versus
+  Stop, SPP p then advance then SPP p, same-position SPP after count uncertainty, locate while
+  recording, controller-only takes and recovery; compare delayed versus
   immediate event drain. Negative controls must fail when arrival is replaced by drain time,
   when the saved map is used under external follow, or when raw ticks are integrated as BPM only.
 - At session/device rates 44.1/48/96 kHz and block partitions 1, 17, 64, 128 and 512, use a map
@@ -425,6 +493,18 @@ This docs-only proposal runs no Cargo commands and claims no implemented or hard
   send, Clock-only send, disabled SPP, same-device suppression and loopback isolation. Inject
   A changes and +/-offsets; prove Start precedes first F8, no obsolete tick survives Stop,
   and a stalled sender cannot burst catch-up clocks or exhaust note-release reserve.
+- Script the compensation reversal at Fs=Fd=48000 and 120 BPM: tick k has uncompensated
+  frame 48000 and A=4800, so it is queued for frame 52800; the next span has A=0 and
+  tick k+1 at frame 49000. Present both spans before either deadline. Expect a port fault
+  on the A change, both ticks canceled/accounted for (k+1 refused before admission), no F8
+  at 49000 or 52800, and Stop when Transport is enabled. A fresh acknowledged Resync must
+  send the ordered position sequence in a new generation; a delayed old span cannot escape.
+  Repeat with k already successfully sent: keep exactly that one send, suppress k+1 and
+  require the same fault/resync. Also inject an A increase, unchanged-A map reversal,
+  equal/too-close future deadlines, and a map update that preserves the spacing bound;
+  only the last continues without a fault. Exercise Transport off and Song Position off.
+  Check canceled/refused ordinals, last successful ordinal, fault visibility, and the new
+  phase reset; no reordered/bunched F8s or silent loss of clock count is an acceptable result.
 - Count allocations/frees and MIDI sends over the actual callback path, including adoption,
   loss, overflow, wrap and recovery. Assert coherent tempo/anchor snapshots under a scripted
   publication race, never a timing-based race. With four or more rendered strips force serial
@@ -478,6 +558,9 @@ limitations under `docs/benchmarks/` with an index row. No hardware result is as
   separate measurement mode. Devices without SPP use the explicit pattern-restart limitation.
 - Offset and PDC choices affect measured alignment; USB delivery accuracy remains hardware
   evidence. The proposed 24-sample bound is a signoff target, not a new default justified by tests.
+- A compensation change interrupts outgoing sync and needs explicit resynchronization; notes
+  retain their existing safety policy. A one-beat interval window permits the specified brief
+  BPM excursion on a delayed arrival while phase remains continuously controlled.
 
 ## Alternatives considered
 
@@ -497,3 +580,10 @@ limitations under `docs/benchmarks/` with an index row. No hardware result is as
 - **A plug-in sync bridge.** Rejected: it cannot own global stopped transport, source selection,
   record tickets, device-clock history and per-port lifetime reliably; bypass/unload would change
   synchronization. The engine already owns the necessary boundaries.
+
+## Judging round 1: responses
+
+- C1 accepted: compensation changes and nonmonotonic/too-close map deadlines now fault per-port sync, cancel old-generation pending events without the note clamp, preserve already-sent counts, expose losses, and require ordered resync; the 52800-to-49000-frame regression specifies outcomes for pending and already-sent ticks.
+- C2 accepted: retained the estimator and exact alternating-jitter/2 ms fixture, specified a 0.5 BPM transient envelope at ticks 120..144 and recovery at 145, kept the 0.2 BPM steady-state/ramp bound, and required independent source-phase and controller-error checks within 96 samples without a transient exception.
+- M1 accepted: SPP deduplication is scoped to the current position/epoch or equivalent pending operation; returning to an earlier SPP target locates again, and count uncertainty always permits an explicit same-position phase reset.
+- M2 accepted: tempo-map suppression, restoration and offline-render restrictions explicitly name Transport and Clock mode in this ADR and the clocks knowledge page; Transport-only mode retains the saved map.

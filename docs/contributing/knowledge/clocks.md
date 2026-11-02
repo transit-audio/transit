@@ -155,18 +155,23 @@ tempo until Stop, including during recording. A missing count requires an explic
 reset before phase lock can return. Source lock and device-map quality are separate readouts.
 Equations, thresholds, startup and discontinuity rules are in the ADR.
 
-External mode disables saved tempo events without editing the document. The runtime map drives
+Transport and Clock mode disables saved tempo events without editing the document. The runtime map drives
 the beat grid, tick-based scheduling, automation and plug-in tempo/phase. Audio keeps its sample
 rate and unwarped duration. Recording retains the original device frame and uses the applied
 historical map to derive beats, including across ramps, seeks and cycle wraps; recovery must
 retain that history. K22's live-input FIFO alignment is not a source of phase or take placement.
-Leaving external mode restores the saved tempo map; external performance tempo is not saved
+Leaving Transport and Clock mode restores the saved tempo map; external performance tempo is not saved
 automatically, so later internal playback can differ.
 
 Outgoing deadlines follow the existing presentation map and default to Main's compensated
 reference (the bare-output `+A` convention of ADR 0020), plus a separate per-port delay.
 Start precedes the first tick; a playing locate uses Stop/SPP/Continue. Same-device send/follow
 is suspended to avoid feedback; diagnostics loopback detaches the returned input from control.
+An A change, or a map change that reverses or bunches clock deadlines, faults that output's
+sync: cancel unsent events by generation, retain already-sent counts, send Stop if Transport is
+enabled, and require a fresh ordered resync. Clock ticks never use the note deadline clamp.
+The ADR specifies the exact transient BPM envelope and recovery deadline for its delayed-arrival
+fixture; the sample-domain phase bound still applies throughout that transient.
 Sample-resolution deadlines do not certify USB jitter. The proposed hardware target is a
 maximum residual of 24 device samples at 48 kHz after removing one fixed median round-trip
 delay, measured on the diagnostics page and recorded under `docs/benchmarks/`. Deterministic
