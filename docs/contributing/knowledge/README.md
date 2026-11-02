@@ -28,6 +28,7 @@ the ADRs. A new topic gets a new file and a row here.
 | [`plugin-presets.md`](plugin-presets.md) | Hosted plug-in editor windows, their header strip, user presets. |
 | [`oracle-null-testing.md`](oracle-null-testing.md) | A ported DSP engine, the oracle crate, a null test or a pitch test. |
 | [`airwindows-catalog.md`](airwindows-catalog.md) | The 12 stock-effect selections, exact parameters, rate behavior, state and seeding behind ADR 0042, including tape, saturation and plate stability bounds and dual-reference proof requirements, deferred de-essing, console initialization, slew stereo coupling, hall counters and descending clipper/tape copies. |
+| [`de-esser-options.md`](de-esser-options.md) | Stock de-esser choices after DeBess's deferral: corrected-reference scope, alternative source audits, a native design, ranking and maintainer decisions. |
 | [`unsafe.md`](unsafe.md) | Any `unsafe`, FFI or OS call. |
 
 Decisions live in [`../../adr/README.md`](../../adr/README.md); the overview is
