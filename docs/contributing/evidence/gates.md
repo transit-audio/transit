@@ -46,6 +46,8 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 
 | You touch | Also run or extend | What it proves |
 |---|---|---|
+| Tier A core or its feature graph | Headless build and tests (#236): `headless-core`, default `hosting`/`devices` off and Tier B `std` on; exact commands below | Core and built-in slots work with no UI or host crates, including in the test dependency graph. Required, not implemented by the ADR amendment. |
+| Tier B DSP/instrument code or dependencies | Bare-metal compile: `dsp-bare-metal`, `cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p <crate>` for each enrolled crate, plus existing host tests under `std` | No target dependency on std; compile only, no hardware or firmware. New DSP crates enter immediately; existing candidates enter one per retrofit slice. |
 | Anything the audio callback runs (`crates/mix`, `crates/playback`) | `crates/mix/tests/plan_alloc_probe.rs`, `alloc_probe.rs`, `event_alloc_probe.rs`; `measure` in `crates/rt/src/testing.rs` | Zero allocations per block, counted by a counting allocator. |
 | Rendering, routing, PDC, sinks | `crates/mix/tests/plan_parity.rs` against `crates/mix/tests/golden/plan_parity`; `path_pdc.rs`, `output_sinks.rs` | The plan renderer matches the goldens. Offline against realtime is checked only for one session in `output_sinks.rs` (`only_main_falls_back_and_a_path_table_without_routes_adds_nothing`, bit for bit) and one arrival in `path_pdc.rs`; a general parity test is planned. |
 | Sidechain keys | `crates/mix/tests/sidechain.rs`, `sidechain_hosted.rs` | Key tap, alignment, hosted keyed plug-ins. |
@@ -57,6 +59,37 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 | Session format | Load tests with old fixtures; `crates/engine/tests/hostile_sessions.rs` | Old sessions load; hostile input does not panic. |
 | `crates/rt` (unsafe) | `cargo xtask rt-targets`, the platform legs of `.github/workflows/rt.yml`, a refutation review quoting every `unsafe` block | See `../knowledge/unsafe.md`. |
 | UI | `crates/ui-studio/src/*_tests.rs`, the shortcut and icon guards | See `../knowledge/ui.md`. |
+
+## Portability gates (ADR 0037)
+
+The [2026-11-03 amendment](../../adr/0037-adaptable-core-small-hardware.md#amendment-2026-11-03-two-tiers-of-portability)
+specifies two independent jobs to add alongside the platform jobs in `.github/workflows/ci.yml`.
+These are required future gates, not checks already implemented by this documentation change:
+
+- **Headless build (#236):** the ADR's bash package list and explicit feature set run
+  `cargo build --locked --no-default-features` and `cargo test --locked --no-default-features`
+  on `transit-engine`, `transit-mix`, `transit-rt`, `transit-model`, `transit-midi`,
+  `transit-playback` and the eight Tier B packages below, with each Tier B package's `std`
+  enabled. `hosting`, `hosting-tests` and playback `devices` stay off. The job rejects all
+  four host crates and UI dependencies in normal/build/dev graphs, and exercises built-in
+  slots plus unavailable-hosted-slot session preservation. Default features on transitive
+  or self-dev edges must not restore hosting. Host fixture tests stay in the desktop jobs.
+- **Bare-metal compile:** install the stable minimal toolchain and run
+  `rustup target add thumbv7em-none-eabihf`. Run
+  `cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p <crate>`
+  separately for `transit-dsp`, `transit-macro-osc`, `transit-resonator`,
+  `transit-modal-voice`, `transit-texture`, `transit-granular`, `transit-modulator` and
+  `transit-random-sequencer` as they are retrofitted, then for every new DSP/effect crate.
+  The ADR contains all eight expanded commands and the enrollment order. No `--workspace`,
+  `--all-targets`, C++ oracle, test executable, linker script or hardware run in this job.
+  Existing tests and oracle floors under default `std` remain required. A successful check
+  does not prove MCU memory fit, timing or numerical equivalence of the `libm` path.
+
+Each retrofit adds its package to the enforced list in the same slice; failures are not allowed
+and already enrolled packages are never silently removed. Keep the unconverted list explicit
+until all eight candidates pass. `cargo xtask layers` continues to enforce dependency direction
+and dev-only oracle isolation; it does not replace either feature-specific gate. No Rust changes
+or cargo builds were part of the amendment's source survey.
 
 ## Help catalog (#178)
 
