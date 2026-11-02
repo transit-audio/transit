@@ -298,3 +298,37 @@ fn root_prefers_the_manifest_dir_env_over_the_walk() -> Result<(), Box<dyn std::
     std::fs::remove_dir_all(&other)?;
     Ok(())
 }
+
+/// E68: an X server that resets when its last client leaves (Xvfb's default; `xvfb-run` passes no
+/// `-noreset`) drops every connection that arrives during the reset ("Broken pipe", "Connection
+/// reset by peer"), and test threads that each open and close a connection make the count reach
+/// zero at any moment. Every Xvfb the tests run on is started with `-noreset`: the CI steps that
+/// wrap tests in `xvfb-run`, and every test that starts its own `Xvfb`.
+#[test]
+fn every_xvfb_the_tests_run_on_keeps_running_when_its_last_client_leaves() -> Result<(), Box<dyn std::error::Error>> {
+    let root = root();
+    let mut servers = Vec::new();
+    for entry in std::fs::read_dir(root.join(".github/workflows"))? {
+        let path = entry?.path();
+        let text = std::fs::read_to_string(&path)?;
+        for (n, line) in text.lines().enumerate() {
+            if line.contains("xvfb-run") && !line.trim_start().starts_with('#') {
+                servers.push((format!("{}:{}", path.display(), n + 1), line.contains("-noreset")));
+            }
+        }
+    }
+    let mut files = Vec::new();
+    for top in ["crates", "apps", "tools"] {
+        timing::walk(&root.join(top), &mut files)?;
+    }
+    for path in files {
+        let text = std::fs::read_to_string(&path)?;
+        if text.contains("Command::new(\"Xvfb\")") {
+            servers.push((path.display().to_string(), text.contains("\"-noreset\"")));
+        }
+    }
+    assert!(servers.len() >= 2, "found the CI step and the private Xvfb of editor_x11: {servers:?}");
+    let resetting: Vec<_> = servers.iter().filter(|(_, noreset)| !noreset).map(|(at, _)| at.as_str()).collect();
+    assert!(resetting.is_empty(), "an Xvfb without -noreset (E68): {resetting:?}");
+    Ok(())
+}

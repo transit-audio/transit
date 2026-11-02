@@ -355,7 +355,7 @@ fn is_test_file(rel: &str) -> bool {
     dirs.contains(&"tests") || stem == "tests" || stem.ends_with("_tests")
 }
 
-fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) -> Result<(), String> {
+pub(crate) fn walk(dir: &Path, out: &mut Vec<std::path::PathBuf>) -> Result<(), String> {
     let Ok(entries) = std::fs::read_dir(dir) else { return Ok(()) };
     for e in entries {
         let path = e.map_err(|e| e.to_string())?.path();
