@@ -121,3 +121,53 @@ Tests: `crates/playback/src/device_clock/tests.rs`, `crates/playback/tests/backe
 ## Capture gaps
 
 A native WASAPI capture packet flagged `DATA_DISCONTINUITY` has frames missing before it (the first packet after Start carries the flag without a loss and is ignored); the loop sizes the gap from the clock-position jump (QPC delta if unreadable), clamps it to one second, and delivers that many zero frames first (`crates/audio-wasapi/src/capture_loop.rs`, K16).
+
+## Proposed MIDI hardware sync (ADR 0043)
+
+[ADR 0043](../../adr/0043-hardware-sync-transport-and-clock.md) proposes transport follow,
+24-ppqn clock follow and per-output clock/transport send. This section describes that decision,
+not shipped behavior. The existing domains above remain; MIDI adds two musical clock streams:
+
+| Coordinate | Meaning and conversion |
+|---|---|
+| Incoming MIDI clock `C_in` | F8 count, 24 pulses per quarter. Each tick carries the MIDI input callback's monotonic `host_arrival_ns` from the same host origin as recording. H maps to D through the output clock fit; retain arrival quality and uncertainty. |
+| Outgoing MIDI clock `C_out` | Quarter-note crossings at `k/24`, or `40*k` model ticks (960 per quarter), mapped through the applied transport to D and then to host deadlines on the output thread. |
+| Runtime external beat map | Applied historical `(D, S, quarter position, rate, epoch, loop iteration)` segments. Incoming count anchors musical position; filtered tempo interpolates it. Device samples still clock audio. |
+
+| Mode | Transport authority | Tempo and musical phase authority | Audio scheduling and recording |
+|---|---|---|---|
+| Internal (all inputs Off) | Local transport | Saved session tempo map: S to q | Device D; existing rate conversion and historical D to S mapping |
+| External transport only (Transport) | Chosen input's Start/Stop/Continue/SPP; local Stop always works | Saved session tempo map; F8 has no effect | Device D, as internal |
+| External clock (Transport and Clock) | Chosen input's transport; local Stop always works | Incoming tick count anchors q; filtered tempo interpolates between ticks; runtime external map replaces saved tempo events | Device D remains the sample clock; historical D/S/q segments place events |
+
+Only one input is active. Modes and input/output sync delays are per-port machine preferences,
+off/zero by default; no new required session field. Positive input delay moves the tick anchor
+later, positive output delay sends later. Neither changes captured note timestamps. A port
+carrying notes still carries them normally. On this base `midi-io/src/ring.rs` already parses
+and offers F8/FA/FB/FC and F2; the Monitor sees them, while playback ignores them. The proposed
+consumer must work with the Monitor closed and without any note route or learned mapping.
+
+The proposed filter estimates one beat from 24 intervals with median/MAD outlier rejection;
+four consistent beats acquire lock. Tick count, not integrated displayed BPM, supplies phase.
+The phase controller slews the musical rate by at most +/-1% around the estimated tempo;
+it never hard-seeks for drift. Clock loss beyond one beat shows Freewheel and keeps the last
+tempo until Stop, including during recording. A missing count requires an explicit position
+reset before phase lock can return. Source lock and device-map quality are separate readouts.
+Equations, thresholds, startup and discontinuity rules are in the ADR.
+
+External mode disables saved tempo events without editing the document. The runtime map drives
+the beat grid, tick-based scheduling, automation and plug-in tempo/phase. Audio keeps its sample
+rate and unwarped duration. Recording retains the original device frame and uses the applied
+historical map to derive beats, including across ramps, seeks and cycle wraps; recovery must
+retain that history. K22's live-input FIFO alignment is not a source of phase or take placement.
+Leaving external mode restores the saved tempo map; external performance tempo is not saved
+automatically, so later internal playback can differ.
+
+Outgoing deadlines follow the existing presentation map and default to Main's compensated
+reference (the bare-output `+A` convention of ADR 0020), plus a separate per-port delay.
+Start precedes the first tick; a playing locate uses Stop/SPP/Continue. Same-device send/follow
+is suspended to avoid feedback; diagnostics loopback detaches the returned input from control.
+Sample-resolution deadlines do not certify USB jitter. The proposed hardware target is a
+maximum residual of 24 device samples at 48 kHz after removing one fixed median round-trip
+delay, measured on the diagnostics page and recorded under `docs/benchmarks/`. Deterministic
+tests inject stamps and device frames; they never assert wall-clock scheduling outcomes.
