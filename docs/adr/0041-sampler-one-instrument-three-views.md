@@ -57,7 +57,7 @@ The maintainer made the Sampler mandatory for the composition release before the
 | Pad voice model | Monophonic per pad; retrigger cuts the previous voice at the event frame and starts at the region entry with a fresh envelope. No layered retrigger option in #269. This keeps drums predictable and expansion reproducible. The short attack/declick can soften the new attack but does not promise a click-free hard cut. |
 | Dragging slices | Allowed between pads, including banks. Move source/region/slice-id/name into an empty pad's zone; swap those contents for an occupied target. Pad identity, zone identity, trigger note, automation address and all playback/mixer settings stay at the destination. This is an explicit remap, one undo step, with no change to existing MIDI. Marker order stays chronological. No silent overwrite and no two sources on a pad. |
 | Expand naming | Explicit pad name, else slice label, else sample stem, else `Pad A1` (bank and slot). Duplicate names get ` (2)`, ` (3)` in pad order. Names are labels, never event identities. |
-| Choke after expansion | Add the narrowly scoped rack choke contract below in #272, an amendment to ADR 0034's member model. Never drop choke with a warning: that would change an open/closed hi-hat pattern. |
+| Choke after expansion | Add the narrowly scoped rack choke contract below in #272, an amendment to ADR 0034's member model. Parent events, members' own clips, direct live input and pad/audition hooks all enter one choke/solo admission stage. Members keep their ordinary composition inputs; none may bypass choke. Never drop choke with a warning: that would change an open/closed hi-hat pattern. |
 | Velocity to slice start | Deferred to #273, including indirect matrix routes through Via. No Sample Start destination in the first four slices; start/end remain explicit editing controls. This avoids changing attacks on streamed notes and makes the deferral enforceable. |
 | Pitch and different sample rates | Retain native-rate PCM and resample in process with the existing four-point cubic arithmetic. Playback step is `source_rate / session_rate * 2^(semitones/12)`, bounded to the existing maximum 256 source frames/output frame. Pads default to key tracking off, zones on. Rate conversion and pitch share one interpolator; no per-slice time stretch. Already converted legacy sources keep their stored PCM. |
 | Zone/layer/round-robin bounds | 256 sample-bearing zones total, including pad zones and every round-robin alternative; at most 8 velocity layers per key-map group and 8 alternatives per layer. These are nested limits, not 256 × 8 × 8 sample slots. At most 8 layer voices start for one note; reject maps that could exceed that, before publication. |
@@ -256,6 +256,7 @@ freeze capture of mutable audio: Sampler audio is immutable and needs no callbac
 | Slices / markers | 64 / 65, one loop; duplicate or invalid boundaries rejected. |
 | Shaper / matrix | 64 voice states, two LFOs per voice, 16 rows per zone; settings for 256 zones allocated in prepare. |
 | Events | 1024 per instance, existing 257-entry release reserve. Preserve stable sorting and the host's retry on refusal; no fresh Vec or sort allocation in processing. |
+| Expanded-pad rack events (#272) | 1024 merged candidates per rack per block, 257 entries reserved for releases; 1024 delivery envelopes per member shared by ready and deferred work, also with 257 release entries. At most 16 envelopes per trigger (one on plus up to 15 peer chokes), 16,384 envelopes per rack. Separate fixed reset flags cannot be crowded out. Parent MIDI-effect storage retains ADR 0036's bounds. |
 | Patch handoff | Two publication slots and two retirement slots, at most one pending publication, four bank-generation credits total. Adopt only if the old generation can be retired. Coalesce pending edits on the control side; a full retirement channel keeps the old patch playing. |
 | In-memory sample | At most 30 seconds **and** 32 MiB decoded f32 per source; at most 128 MiB of distinct full PCM per patch. Reused slices do not duplicate PCM. Exceeding any bound uses disk in #271; before that, refuse visibly and retain the old patch/file. |
 | Streamed attacks | First and last 4096 source frames of each zone region, including cubic guard taps, at most 256 × 2 × 4100 × 2 × 4 bytes (about 16 MiB); a short region shares its one cache. Prepared off-thread after edits. |
@@ -322,11 +323,17 @@ new caches before publication. Peaks reuse `DiskSource::peaks` and its validated
 Sampler references must use the new reader even when a timeline clip shares the file: never
 read the empty `SourceAudio::buffer` of a disk source (the existing ADR 0035 Sampler limitation).
 
-Offline bounce obtains raw samples through `DiskSource::with_sync` on the offline thread and
-passes them through **the same core region/interpolation/loop function** as memory and live
-windows. No second resampling or `StreamMap::sample` interpolation is inserted. IO errors fail
-the export with the media named, rather than claiming a successful silent render. A fully fed
-stream equals memory sample for sample; an underrun intentionally does not.
+Offline bounce uses a **new fallible synchronous raw-reader seam** in #271, alongside
+`DiskSource::with_sync`, on the offline thread. Today's `with_sync`/`Cache::get` logs open/read
+errors and returns `None`, conflating failure with absent samples; it cannot supply this
+contract unchanged. The new reader distinguishes out-of-region taps (zero) from open/read
+errors and unexpected EOF inside the declared source. Latch the first error in the reader;
+the offline driver checks that status after each render block and checks finish before
+publishing the export. An error fails export with the media named and publishes no successful
+output. Preserve the existing timeline-clip
+API and behavior. Feed raw samples through **the same core region/interpolation/loop function**
+as memory and live windows. No second resampling or `StreamMap::sample` interpolation is
+inserted. A fully fed stream equals memory sample for sample; an underrun intentionally does not.
 
 Native PCM WAV/AIFF can stream at their own rate through this reader; the Sampler's cubic step
 does the rate conversion. This amends ADR 0035's session-rate-only restriction for Sampler reads,
@@ -426,24 +433,83 @@ transport stopped and release live held notes; no claim of seamless voice contin
 
 **Rack choke amendment required in this slice:** add default-Off choke group (1–16) and stable
 pad identity to `RackMember`, plus a default-disabled Sampler-pad mode on `Rack`. Implement the
-single rack event stage described by ADR 0036 before using choke: process the parent's MIDI
-effects once, then zones and choke, then deliver each member's events before any worker renders.
-Apply the saved pad mute/solo eligibility before choke, as the unexpanded Sampler does.
-Do not use the current per-member copy of the parent's MIDI effects for this mode. Reserve
-16 choke-control entries per admitted trigger in prepared storage and integrate them with
-bounded event delivery. A trigger is committed together with its choke actions, or all are
-refused for host retry; a full queue cannot start the new hat while leaving the old one open.
-Members receive a private, offset-stamped `choke_pad` control that invokes the identical
-32-frame post-shaper fade, including one-shot voices. Ordinary MIDI note-off is insufficient.
-Stable same-offset order, source/generation matching, deferred worker delivery and Stop/seek
-must be tested. No extra cross-thread mutable group state or lock in the instrument.
+single rack event stage described by ADR 0036, extended to **every ingress to these members**,
+on the thread that publishes strip jobs, before any member's new block is dispatched:
+
+- Collect the parent's clips, chase and live input once; run the parent's MIDI effects once,
+  then select destinations by the rack zones. Remove the existing per-member replay of the
+  parent's clips and MIDI effects for this mode.
+- Collect each member's own clips/chase, directly targeted live MIDI, and UI/controller pad
+  presses and releases into the same stage. These bypass the **parent's effects and zone
+  fan-out**, not choke/solo admission: a member-targeted on can trigger only that member's
+  stored pad note. Other keys are unmatched and cannot choke. Route `MixEngine::live_note`
+  audition through this stage with a UI source and matched press/release identity in this mode;
+  its existing direct `Plugin::event` path is forbidden here. No pad hook calls a member
+  instrument directly. Parent and direct inputs still obey their own arm/monitor rules.
+- Preserve the original port/generation, channel, note id, transport epoch and destination
+  slot generation. Add an origin discriminator (parent, or member id, including distinct clip
+  and UI sources) so a parent's note-off cannot release a member's same-key note. The admission
+  tables and rack-port bookkeeping live with the stage, even when a worker holds a member;
+  never inspect or mutate that worker's instrument to decide admission. Keep the existing
+  bounded note/pedal tables and refusal limits, with commit/rollback for prospective ons.
+- Merge by absolute due frame. At a shared frame take member clip/chase streams in original
+  pad order, then the parent's post-effect stream, then direct live/UI events in ingress
+  sequence order. Preserve each stream's internal order, including clip off-before-on and
+  MIDI-effect carry order; do not globally sort offs ahead of ons. Already committed deferred
+  envelopes precede new work at an equal effective offset. Sample-stamped pad mute/solo
+  changes apply before triggers at that frame. Eligibility uses the rack's saved solo mask
+  and pad mute, consistently for every origin; an ineligible on starts nothing and chokes
+  nothing. Releases of already admitted notes still pass. Last admitted same-offset trigger
+  wins; its peer chokes precede any later retrigger in those peers' ordered streams.
+
+**Atomic delivery and bounded refusal.** Prepare the capacities in the table above, including
+scratch for the merge; parent effects keep their own ADR 0036 overflow policy. The merged
+1024-entry budget includes parent output and all direct sources, not 1024 per source. At most
+767 entries are non-releases. Overflow refuses/counts new ons and other non-releases before
+they can affect a member, and retains releases in the reserve. A release that still cannot fit
+sets fixed rack/member reset flags: cancel pending starts, clear the stage's held-note/pedal
+state and reset every member at its next available block before any new on. Refuse starts
+until that reset is acknowledged; count this safety recovery. No release is silently lost.
+
+For each eligible trigger, reserve one delivery envelope for its destination and one for every
+other member of its choke group, whether that peer currently sounds or is away. A choke
+envelope is a private `choke_pad` control invoking the identical 32-frame post-shaper fade,
+including one-shots; ordinary MIDI note-off is insufficient. Chokes use non-release credits
+as part of the trigger, never the reserve needed for real releases. Check all destination
+credits and note-table capacity before committing any envelope or source identity. If any
+check fails, refuse/count the whole on with no choke or table mutation; do not auto-retry a
+refused on later and create an unexpected hit. Paired releases for refused ons are unmatched.
+Live ingress may report queued before this later admission decision; expose final refusals in
+diagnostics and the admission/capture result, not as a successfully started voice.
+
+Each member's 1024-envelope pool covers both ready and deferred deliveries; a worker holding
+the member consumes no extra pool. Envelopes carry absolute frame, rack transaction order,
+source identity and slot generation. Preserve FIFO order for that member; overdue envelopes
+land at offset 0 before new work. Defer the entire envelope, including private choke controls,
+never just its MIDI portion. Do not apply choke a second time on replay. Reserve downstream
+Sampler event capacity under the same credits so a committed on/choke cannot be partially
+refused after publication. These reservations and shadow note tables are new #272 work,
+not a property of today's per-strip queue. Exhaustion backpressures subsequent whole triggers;
+it never evicts a committed choke to admit an on. There is no cross-thread mutable choke state
+or lock in an instrument. A missed worker block is silent under ADR 0029; this does not promise
+audio equality across an overrun, only ordered, paired recovery without a missed choke.
+
+Stop/seek/reset cancels undelivered starts and chokes, clears the stage's note/pedal state,
+and ends member one-shots too, using fixed pending flags for away members. Port revocation
+releases that origin's held notes and cancels its pending starts without releasing another
+origin. Membership/slot-generation changes invalidate pending deliveries and reset the departing
+member before reuse; require stopped transport for these topology edits in Sampler-pad mode.
+Record parent and member live events to their respective tracks, preserving ADR 0039's takes;
+the choke envelopes are runtime controls, not extra recorded MIDI notes.
 
 ADR 0038 currently sends no note view to a rack's own inserts. Expansion therefore refuses a
 track with any original note-reading insert, with a message explaining that it cannot retain
 that insert's note input yet; it does not silently change its envelope. Members' new inserts
-follow ADR 0038 normally. An expanded pad rack's member MIDI effects that remap/delay triggers
-are disabled in this first form: reject adding them while rack pad/choke mode is active, rather
-than letting them bypass choke ordering. Ordinary racks remain unchanged. Save these additive
+follow ADR 0038 normally. An expanded pad rack's member MIDI effect slots must be empty in this
+first form: reject adding a member MIDI effect while rack pad/choke mode is active, and reject
+an invalid loaded combination by marking that rack unavailable/silent, preserving its data
+and reporting a load note. This enforces admission before any trigger transformation;
+ordinary audio inserts remain available. Ordinary racks remain unchanged. Save these additive
 fields with defaults; #272 updates ADR 0034/0036 alongside its implementation, not in this
 documentation revision. Playback/recording and arrangement editing of the folder's existing
 clips must work before #272 ships; ADR 0034 lists that as unfinished, so it is a prerequisite
@@ -524,19 +590,45 @@ output verbatim; investigate before a rerun or test change, per the contributor 
    retrigger generations, long FLAC working PCM, session reopen and changed source fingerprints.
    Withhold pump progress deliberately: only missing frames of affected voices are zero,
    phase still advances, counters change by the specified voice-call count, and resuming never
-   emits stale data. Test failed read/export, cancellation/disk full, no partial patch, peaks
-   mismatch with injected stamps, threshold boundaries, aggregate RAM admission and recovery
+   emits stale data. Through the new fallible synchronous seam inject open failure, a read
+   error after a successful page, and EOF before the declared source end: each aborts export
+   with the media named and no successful output. Legitimate out-of-region cubic taps remain
+   zero without failure; existing timeline `with_sync` callers keep their behavior. Test
+   cancellation/disk full, no partial patch, peaks mismatch with injected stamps, threshold
+   boundaries, aggregate RAM admission and recovery
    with missing external media. No test waits for the real streaming thread to win a race.
 5. **#272 expansion.** Compare original pads and expanded members through the real rack/mix
    paths, no member inserts, using the identical event schedule and sum order: sample-for-sample
    equality, not an unspecified floor. Test 16 pads across banks, duplicate naming, envelopes,
    reverse, solo/mute, per-note random identity, global level and automation, parent
    MIDI effects evaluated once, choke at offsets inside blocks and deferred worker events.
-   Exercise saturated queues with a new trigger and choke as one admission, and verify note
-   release matching after replacement. Assert 17 pads, unbound zones, full insert chains and
+   In particular, expand open/closed hats in group 1 and put an on in the open member's own
+   clip at frame 0 and the closed member's own clip at 16. With Gate 1's constant source and
+   controls, isolate the open contribution: frames 16–47 have gains 31/32 through 0 and it
+   stays zero afterward. Repeat through directly targeted `queue_event`, the pad hook and
+   `live_note` audition, then mix parent and member origins in both directions. Muted or
+   excluded-by-solo triggers must cause neither sound nor choke through every path.
+   At equal offsets combine member clips, parent post-effect events and direct UI/live ons:
+   assert the specified order and final winner, with an independently constructed reference
+   schedule. A parent Transpose/Velocity fixture changes only parent-origin notes, runs once,
+   and selects zones after transformation. Same key/id/channel on a parent and member stays
+   separately owned; an older origin's off cannot release a replacement voice.
+   Saturate merged scratch, one peer's ready/deferred pool and downstream event credits in
+   turn, for each ingress: no on or choke is committed on a failed reservation, no note-table
+   entry leaks, and freeing capacity admits the next distinct on exactly once. Saturate
+   releases and verify counted reset recovery clears one-shots/pedals before accepting new
+   starts. Use an injected worker-held state (no sleeps) for the open member, closed member
+   and both; assert complete envelopes survive, replay in transaction order at offset 0,
+   apply choke once and cannot choke a later replacement out of order. Stop, seek, revocation
+   and member removal while work is deferred must cancel or release the correct origins,
+   reject stale generations and leave no stuck voice. The no-overrun cases compare every
+   output bit; held-worker cases assert silent missed blocks and the specified recovery,
+   not a scheduling deadline. Assert 17 pads, unbound zones, full insert chains and
    note-reading insert refusals make no changes. All playlists/takes and folder clip playback,
-   capture, editing, save/load, undo and redo must survive. Defaults leave ordinary racks
-   unchanged; additive fields generate `rack_choke` compatibility warnings on previous builds.
+   capture (parent and directly targeted members), editing, save/load, undo and redo must survive.
+   Member MIDI effect additions are refused and invalid loaded combinations are retained,
+   silent and reported. Defaults leave ordinary racks unchanged; additive fields generate
+   `rack_choke` compatibility warnings on previous builds.
 6. **Every slice: realtime, storage and UI.** Probe allocations **and frees**, including first
    process, events, parameter changes, reset, 64 voices, all 16 matrix rows, max queues,
    patch adoption/retirement backpressure and stale stream replies. Preallocate outside the
@@ -577,8 +669,8 @@ capacity, no-allocation and compatibility gate, not a later cleanup slice.
 |---|---|---|
 | #269 Pads and Slices | Tier B sampler core and shared-primitive extraction, compatibility path, full bounded patch/save model, pad controls/choke, four banks, cue metadata/existing detector/grid, Slice to MIDI/takes placement and controller hook. Basic one-zone Instrument panel remains usable. Move the shared extraction from #270 here so the dependency direction is valid from the first slice; activation of the shaper/matrix UI stays #270. No new AIFF/FLAC decoder task: preserve what loads today. Oversized new media is refused until #271. | Gates 1, 2, 6, both bare-metal checks and full workspace/oracles for extraction. |
 | #270 Instrument | Zone editor, layers/RR, loop/crossfade rules, per-zone shaper/matrix behavior and panel. Legacy migration is already in #269; this slice extends its tests. SFZ stays #271, correcting the original Decision's claim that it arrives with this view. | Gates 3 and 6, both bare-metal checks, full workspace/oracles for shared changes. |
-| #271 Long media and SFZ | ADR 0035 raw-source reader extension and explicit pools, attack caches, native-rate streaming, bounded conversion of long compressed files, peaks, shared-file fix, format integration and SFZ subset. AIFF/FLAC decode already exists; test/extend the bounded path. No realtime compressed stream or fix claim for K91 take placement. | Gates 4 and 6, exact disk/memory/offline equality and fault injection, bare-metal and full workspace integration. |
-| #272 Expand to rack | Atomic conversion to at most 16 ordinary member tracks, exact choke and solo-mask support, single parent MIDI stage, folder clip playback/record/edit prerequisites, mappings/global gain, compatibility fields and explicit refusals. No discarded excess pads or choke. Implement the scoped ADR 0034/0036 amendments with the code. | Gates 5 and 6 through the real rack, including worker/queue probes, saved sessions and full workspace. |
+| #271 Long media and SFZ | ADR 0035 raw-source reader extension, fallible synchronous raw reads and explicit pools, attack caches, native-rate streaming, bounded conversion of long compressed files, peaks, shared-file fix, format integration and SFZ subset. AIFF/FLAC decode already exists; test/extend the bounded path. No realtime compressed stream or fix claim for K91 take placement. | Gates 4 and 6, exact disk/memory/offline equality and injected open/read/early-EOF export failures, bare-metal and full workspace integration. |
+| #272 Expand to rack | Atomic conversion to at most 16 ordinary member tracks, exact choke and solo-mask support through one bounded stage for parent and every direct member ingress, parent-only MIDI effects evaluated once, atomic on/choke reservations and deferred delivery, folder clip playback/record/edit prerequisites, mappings/global gain, compatibility fields and explicit refusals. No discarded excess pads or choke. Implement the scoped ADR 0034/0036 amendments with the code. | Gates 5 and 6 through the real rack: member-clip hats, direct live/audition, mixed origins, worker/queue saturation and release recovery, saved sessions and full workspace. |
 | #273 Later ideas | Per-slice time stretching, velocity-to-start, SF2, release triggers and layered retrigger remain unscheduled. General MIDI banks and proprietary formats remain non-goals. No first-release gate depends on these. | A separate decision and deterministic tests when each idea is scheduled. |
 
 ## Consequences
@@ -608,3 +700,13 @@ costs; neither weakens the callback contract, layer rules, file-size ratchet or 
 - **Import REX (`.rx2`) files.** Proprietary format with its own SDK license; WAV with cue points is the interchange.
 - **Stretch each slice to the session tempo from the start.** It sounds smoother at big tempo changes but needs the stretching engine (#199 slice 2); pitched playback first, stretching as a later option.
 - **SoundFont as the multisample format.** SF2 is an old container built around a General MIDI payload; SFZ is open text, maps to zones directly and is what sample libraries ship. SF2 may be added later.
+
+## Judging round 1: responses
+
+| Finding | Response and revision | Required evidence |
+|---|---|---|
+| C1 — Expanded members' own triggers have no decided choke path | Accepted. Expand to rack now requires every ingress (parent, member clips/chase, direct live input, pad hooks and legacy audition) to enter one rack-owned choke/solo stage. Only parent-origin events traverse the parent's MIDI effects and zone distribution. Original source/note identities remain distinct; the merged tie order, numeric storage bounds, atomic reservations, refusal/reset policy and complete deferred envelopes are specified. Member MIDI effects are refused in this first form. #272 owns all of these changes. | Gate 5 adds the two-member-clip open/closed-hat counterexample with exact 32-frame gains, direct-live/pad/audition and mixed-parent/member variants, same-offset ownership, saturated queues and injected held workers. Gate 6 covers the added storage and recovery paths with allocation/free probes. |
+| M1 — Name the required fallible synchronous-reader extension | Accepted. #271 must add a fallible synchronous raw-reader/error-status seam alongside the existing `with_sync`; the present API's logged `None` cannot prove export success. Open/read errors and early EOF fail the export without publishing output; valid boundary taps read zero. Existing timeline callers retain their behavior. | Gate 4 injects each failure through the new seam, tests legitimate boundary zeros, and keeps bit-exact memory/live/offline comparisons and existing timeline behavior checks. |
+
+These are documentation changes and required implementation evidence, not claims that the
+implementation gates have run. No product question remains open for the maintainer in this round.
