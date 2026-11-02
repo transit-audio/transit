@@ -37,7 +37,7 @@ Do not import the whole catalog or fill the browser with neighboring versions. T
 jobs are intentional: one moving tap and a multi-tap ensemble. The console encoder and decoder
 are one paired system, not two competing colors.
 
-The first set is **13 inserts**, implemented in the following three slices after an oracle-only
+The first set is **12 inserts**, implemented in the following three slices after an oracle-only
 foundation. The amendment below admits stability patches and returns Tape Color and Wave Saturator
 to slice 1 and Large Plate to slice 3. Selection is not a claim that the implementation gates have
 passed: each replacement lands only with its patched-reference and normal-domain null evidence.
@@ -48,7 +48,6 @@ All source names in this table are Johnson's.
 | 1: chorus | "Chorus" (unnumbered) | 3: Speed, Range, Dry/Wet | Modulated Delay / `modulated_delay` | One moving tap, with a wet vibrato setting; distinct from an ensemble. |
 | 1: ensemble | "ChorusEnsemble" (unnumbered) | 3: Speed, Range, Dry/Wet | Ensemble Delay / `ensemble_delay` | Four taps provide the richer pad treatment the single tap cannot. |
 | 1: character compression | "Pressure6" (6) | 2: Compres, Ratio | Character Compressor / `character_compressor` | Latest compact, stereo-linked character compressor, aimed at bus compression in the author's notes. |
-| 1: de-essing | "DeBess" (unnumbered successor to "DeEss") | 5: Intense, Sharp, Depth, Filter, Sense | Sibilance Control / `sibilance_control` | The author recommends its longer adjustable detection window and improved rejection of non-sibilant material. |
 | 1: tape | "ToTape9" (9) | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | Tape Color / `tape_color` | Latest tape core, brightness compression and output clipper; stability patch bounds both companding coefficients. |
 | 1: saturation | "Density3" (3) | 4: Density, Highpas, Output, Dry/Wet | Wave Saturator / `wave_saturator` | Preferred general saturation revision; stability patch bounds the high-pass coefficient. |
 | 2: console channel | "Console9Channel" (9) | 2: Pan, Fader | Console Encode / `console_encode` | Latest numbered standalone summing encoder, without a whole channel-strip processing chain. |
@@ -60,7 +59,7 @@ All source names in this table are Johnson's.
 | 3: plate | "kPlate140" (unnumbered model 140) | 5: Input, Regen, DeRez, Predlay, Wetness | Large Plate / `large_plate` | The larger, prominent plate model; stability patch bounds the six SubTight histories. |
 
 The named sections of [Johnson's notes at the pin](https://github.com/airwindows/airwindows/blob/7fd5f5cae262a41e6dd7d9a83d60c46e84d3092a/Airwindopedia.txt)
-support these version choices: "DeBess", "Console9Channel", "ADClip9",
+support these version choices: "Console9Channel", "ADClip9",
 "Slew4", "kGuitarHall2" and "TPDFDither". The last includes its Redux update;
 its earlier no-controls description is historical. "kPlate140" and "kPlate240" are different
 plate models, not revisions 140 and 240. The former's notes explicitly describe the larger, more
@@ -103,6 +102,24 @@ the interval. The plate's normal-domain invariant and the required dual nulls ar
 These local recurrence arguments do not replace the whole-effect finite-state/output audit.
 Do not substitute an older tape, saturation or plate revision without its own analysis.
 
+**Sibilance Control ("DeBess") is deferred from the first set.** Its gap remains open pending
+a decision defining bounded B-phase division and the corresponding exception to normal-domain
+transparency. At 44.1 kHz, fresh state and one frame per call, hold B=C=D=E=0; on odd frames
+set A=0 and feed +1, and on even frames set A=1 and feed -1, identically on both channels.
+Sharpness is 2, speed .05, depth 10000 and the IIR coefficient zero. Sense alternates between
+0 and 8192. Starting with all ratios at 1 and `flip=false`, the B ratios decay by .95 on odd
+frames while the A ratios exceed 1 from frame 2 onward. The B branch tests `ratioAL/AR > 1`
+but divides by `ratioBL/BR`, so odd frame `2k-1` after the first emits `1/(.95^k)` before
+dither. A source-derived binary64 evaluation gives `ratioBL=2.8962573551544587e-39` and
+output `3.452731844496842e38` at frame 3459, beyond finite f32 before the `frexpf` cast.
+The right channel follows the same recurrence; denormal injection does not apply and dither
+does not feed the detector. This is not a compiled oracle measurement. It occurs inside the
+otherwise normal rates, input and control ranges, so an additional bound cannot both close it
+and remain inactive throughout normal use. The stability amendment does not authorize that
+exception. Retain this schedule for any future admission decision; do not silently change the
+branch condition, narrow valid automation, mute the adapter or substitute "DeEss". ADR 0040's
+already-retired de-esser is not restored.
+
 Other deferred candidates, with source details and reasons in the survey: "Vibrato", "Flutter2", "PhaseNudge",
 "StereoChorus", "StereoEnsemble", "Capacitor2", "PurestGain", "BitShiftGain", "PurestDrive",
 "NotJustAnotherDither", "Galactic3", "Verbity2" and "kPlate240". Historical candidates
@@ -139,6 +156,9 @@ things like overflows/infinity issues." This supersedes the three deferrals and 
 on changing defined DSP for numerical stability. Earlier judging responses remain the historical
 record; their counterexamples stand. Console initialization, noise, stereo coupling and counter
 preservation findings remain closed and unchanged.
+
+The separate normal-domain "DeBess" counterexample above defers Sibilance Control; it does not
+weaken this amendment's transparency requirement or change the three restored selections.
 
 **Form and limits.** Follow ADR 0033's existing build-overlay mechanism: a unified diff under
 `crates/airwindows-oracle/patches/`, listed with its reason in that crate's `VENDOR.md`, applied
@@ -181,7 +201,7 @@ rate; an unpatched effect can land only with its own finite-state/output analysi
 
 **Normal-domain transparency.** For each effect the normal rates are exactly 44.1, 48, 88.2,
 96, 176.4 and 192 kHz. The normal input domain is per-channel peak magnitude at most 1.0
-(0 dBFS) for Modulated Delay, Ensemble Delay, Sibilance Control, Tape Color, Wave Saturator and
+(0 dBFS) for Modulated Delay, Ensemble Delay, Tape Color, Wave Saturator and
 Small Hall. Character Compressor, Console Encode/Decode, Peak Clipper, Output Dither, Treble
 Tamer and Large Plate additionally cover bus headroom through **+12 dBFS** (magnitude
 `10^(12/20)`, approximately 3.981072). Full normalized control travel remains normal, including
@@ -334,7 +354,7 @@ transcendentals or accepting a small residual is not a determinism fix.
 | Rust crate | Inserts |
 |---|---|
 | `transit-modulated-delay` | Modulated Delay, Ensemble Delay |
-| `transit-character-dynamics` | Character Compressor, Sibilance Control |
+| `transit-character-dynamics` | Character Compressor |
 | `transit-tape-color` | Tape Color |
 | `transit-wave-saturation` | Wave Saturator |
 | `transit-console-summing` | Console Encode, Console Decode |
@@ -361,6 +381,13 @@ Preserve the specific quirks recorded in the survey: "Slew4" uses the right chan
 `depthTrim` in both final fractional-depth blends; "kGuitarHall2" leaves `c6ZAR` at its
 initialized index while advancing `c6ZBR` twice per internal update. Both precision paths do
 this. These are defined processing behaviors, not initialization defects eligible for patches.
+
+"ADClip9" and "ToTape9" copy their intermediate and slew arrays downward in descending index
+order, propagating the just-written value through the array. Preserve those copies in both
+precision paths; replacing them with an ordinary delay-line shift changes the algorithm. On the
+unclipped clipper-stage path, `lastSampleL/R` becomes the current sample and is emitted on the
+next frame even when `spacing > 1`. Establish each insert's latency from output, not the spacing
+comment; the tape's other stages still need their own latency analysis.
 
 Keep block-entry work at block entry. In particular, the console pair interpolates `panA/B` and
 `inTrimA/B` using remaining frames divided by the original call length. Preserve its constructor
@@ -427,9 +454,6 @@ Concrete exceptions to the percentage rule:
   Signal; normalized anchors 0, 0.5, 1 select the source's three modes, including "ClipOnly".
 - Dither Quant is the list 16-bit / 24-bit (normalized 0 / 1); DeRez remains 0–100% travel and
   is not a linear bit-depth readout. The original quantizer's offset and floor operation stay.
-- De-esser Sense becomes Listen: Processed / Removed (0 / 1). The DSP uses `E > 0.49999` for
-  input minus processed audio; its "Vox"/"Ess" label strings are not a reliable description.
-  Sharp remains continuous: integer window length changes coexist with continuous speed scaling.
 - Hall Position is a list of positions 1–28: the source uses `int(E*27)`. Use interval midpoints
   for indices 0–26 and 1 for index 27, with tested boundary mappings. Its Derez is one continuous
   control with labeled halves (stepped left, full at center, continuous right); do not quantize
@@ -558,13 +582,15 @@ These are implementation gates, not claims that this documentation change has ru
    raw-constructor case must still null against their original ramps.
    Unequal-channel slew scenarios must exercise the shared final `depthTrim`; hall wet-path
    scenarios must exercise the stationary and twice-advanced counters recorded in the survey.
+   Clipper and tape scenarios must distinguish descending propagation from an ordinary delay-line
+   shift at `spacing > 1`, compare intermediate/slew state and verify reported latency from output.
 
 ## Consequences
 
 The stock collection fills distinct mixing jobs with small interfaces and a reproducible reference.
 Tape, saturation and plate return to the selected first set through explicit stability bounds
 and two reference comparisons. Their replacements retire inherited devices only when they land;
-the dedicated phaser and feedback flanger remain outside this set.
+the de-essing, dedicated phaser and feedback flanger gaps remain outside this set.
 Users get the author's algorithms and quirks, including sample-rate coloration, seeded noise,
 nonlinear mix laws and block-length-dependent ramps. Gain staging and console placement need help
 text; a famous algorithm name is not a substitute for it.
@@ -613,3 +639,21 @@ C1 accepted: Deferred "kPlate140" / Large Plate for nonfinite SubTight histories
 M1 accepted: Recorded "Slew4"'s use of the right channel's `depthTrim` in both final fractional-depth blends in the catalog and port contract; preserve this coupling in both precision paths.
 
 M2 accepted: Recorded "kGuitarHall2"'s stationary `c6ZAR` and twice-advanced `c6ZBR` in the catalog and port contract; preserve the initialized, bounded counter behavior in both precision paths.
+
+## Judging round 5: responses
+
+C1 accepted: Deferred "DeBess" / Sibilance Control, reducing the first set to 12 inserts. Its
+one-frame alternating input/control schedule overflows f32 within normal use because the B phase
+tests the A ratio while dividing by its decaying B ratio. Recorded the schedule, source-derived
+frame-3459 result and required later division/transparency decision in the ADR and catalog;
+removed the first-set row, family assignment, normal-domain entry and implementation control
+mapping. The de-essing gap stays open, with no restored inherited device or substitute revision.
+The three stability-patched selections and the normal-domain transparency gate remain unchanged.
+Round 4's branch-asymmetry observation is preserved; its newly demonstrated overflow consequence
+is accepted rather than treated as a previously refuted finding.
+
+M1 accepted: Carried forward round 4's "ADClip9" descending-copy preservation note and extended
+it to restored "ToTape9" in the catalog and implementation contract. Both intermediate and slew
+copies propagate newly written values; they must not become ordinary delay-line shifts. Added
+discriminating state/output scenarios at `spacing > 1` and retained measured insert latency,
+distinguishing the clipper stage's one-frame delay from the whole tape processor's behavior.

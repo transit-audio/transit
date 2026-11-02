@@ -65,8 +65,10 @@ noise-shaping algorithm available anywhere in the catalog.
 
 ## First set
 
-These are the 13 selected inserts, in slice order. The 2026-11-02 amendment admits stability
+These are the 12 selected inserts, in slice order. The 2026-11-02 amendment admits stability
 patches: Tape Color and Wave Saturator join slice 1, and Large Plate joins Small Hall in slice 3.
+Sibilance Control is deferred because its overflow occurs inside normal use; see the DeBess
+row and counterexample below. The de-essing gap remains open.
 When the replacements pass their gates and land, slice 1 retires Saturator and slice 3 retires
 Room Reverb and Plate Reverb under ADR 0040. No retirement happens in this documentation change.
 Each row gives the state that the port's reset,
@@ -77,12 +79,11 @@ floor and scheduling fingerprint must cover, in addition to its parameters and r
 | "Chorus" / U | 3: Speed, Range, Dry/Wet | **Yes:** phase increment `A^4 * .001 * r`; range is a fixed sample-buffer fraction `B^4 * loopLimit * .499`. Speed in Hz therefore also changes with rate; treble processing is sample-based. | F; two float delay arrays of 16386, shared sweep/count, separate L/R treble histories and flip flag. Same modulation on both sides; no invented stereo spread. | Single moving-tap modulation; notes call it mono chorus that can serve as vibrato. |
 | "ChorusEnsemble" / U | 3: Speed, Range, Dry/Wet | **Yes:** phase increment `A^3 * .001 * r`; range `B^3 * loopLimit * .12` in samples; four related tap offsets. | F; two 16386-float buffers, sweep/count, treble histories and flip flag. | Four-tap ensemble for pads, not a second single-tap flavor. The author's section explicitly distinguishes the bank of taps. |
 | "Pressure6" / 6 | 2: Compres, Ratio | **Yes:** detector speed target `((A*92)+92)*r`; threshold `1-(.9*A)^3`. | F; shared stereo-linked `muComp` and `muSpd`, initialized 1 and 100. Ratio maps to `wet=.9*B`, used inside a nonlinear blend, not an ordinary ratio in x:1. | Character bus compression; latest Pressure line and explicitly aimed at that job in its notes. |
-| "DeBess" / U | 5: Intense, Sharp, Depth, Filter, Sense | **Yes:** intensity `A^5*8192/r`; sharpness `max(2,40*B)` samples, speed `.1/sharpness`; Filter itself is not rate-scaled. | F; 41-element sample/comparison arrays per side, alternating ratios/IIRs and flip. No legacy static noise counters. Sense above `.49999` outputs input minus processed. | Author explicitly calls it improved "DeEss" with a longer adjustable comparison window. High-rate, bandwidth-limited material can trigger it less; document this limitation. |
-| "ToTape9" / 9 | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | **Yes:** encoder/decoder coefficients `(1-C)/r` and `C/r`, now capped at 1 by the stability patch; bias, head-bump and flutter formulas use `r`; depth capped at 498 samples; clip spacing `clamp(floor(r),1,16)`, slew span `clamp(floor(2*r),2,32)`. Head frequency `(H*H*175+25)/rate`. | F also drives flutter and clipping noise; encoder/decoder envelopes, IIR/biquads, two 1002-double flutter buffers, phases/targets, bias stages, hysteresis, averaging histories and clip/lookahead state. | Slice 1, Tape Color in `transit-tape-color`. Latest tape revision; notes describe the replaced core, brightness compression and new output clipper. Both companding coefficients are bounded to close the low-rate runaway; patch/proof table below. |
+| "ToTape9" / 9 | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | **Yes:** encoder/decoder coefficients `(1-C)/r` and `C/r`, now capped at 1 by the stability patch; bias, head-bump and flutter formulas use `r`; depth capped at 498 samples; clip spacing `clamp(floor(r),1,16)`, slew span `clamp(floor(2*r),2,32)`. Head frequency `(H*H*175+25)/rate`. | F also drives flutter and clipping noise; encoder/decoder envelopes, IIR/biquads, two 1002-double flutter buffers, phases/targets, bias stages, hysteresis, averaging histories and clip/lookahead state. Preserve the descending intermediate/slew copies; establish latency from output, not the spacing comment. | Slice 1, Tape Color in `transit-tape-color`. Latest tape revision; notes describe the replaced core, brightness compression and new output clipper. Both companding coefficients are bounded to close the low-rate runaway; patch/proof table below. |
 | "Density3" / 3 | 4: Density, Highpas, Output, Dry/Wet | **Yes:** high-pass amount `B^3/r`, now capped at 1 by the stability patch; zero high-pass still clears its histories at block entry. | F **exception:** float dither uses `3.553e-44l`, not `5.5e-36l`; right RNG advances a second time when either unsigned L-minus-R or R-minus-L is below 1073741824. L/R IIR memories; internal `density=A*5`, display `A*5-1`. | Slice 1, Wave Saturator in `transit-wave-saturation`. Preferred saturation revision in the author's notes; coefficient patch closes the low-rate recurrence. Its separate extreme-input polynomial/output-conversion audit remains an admission gate; see below. |
 | "Console9Channel" / 9 | 2: Pan, Fader | **No** `getSampleRate`; **block-dependent** pan/fader interpolation using remaining frames / original call length, including first call. | F; `panA/B`, `inTrimA/B`. Encode curves use `log1p`/`expm1`; raw constructor endpoints stay 0.5. The Plugin adapter snaps both pan endpoints to `A*1.57079633` and both trim endpoints to `B*2.0` on initialization/reset, separately nulled with the same harness operation. | Latest numbered standalone summing encoder. Notes distinguish the summing core from full processing strips. |
 | "Console9Buss" / 9 | 2: Pan, Fader | **No** rate query; same block-based control ramps. | F; pan/trim endpoint memories; complementary decode curve. Same raw constructor and explicit adapter snap/reset rule as the channel. | Must pair with the selected channel algorithm after the sum; no cross-generation pair. |
-| "ADClip9" / 9 | 5: Boost, Match, Noise, Ceiling, Mode | **Yes:** sample spacing `clamp(floor(r),1,16)`; delayed clip history and slew tests follow that spacing. | F **exception:** float-output dither additions are commented out; both RNGs still advance, with a second right advance when either unsigned L-minus-R or R-minus-L is below 1073741824. RNG also supplies clipping noise and denormal injection. Last output/dry sample, 18-element intermediate and 34-element slew arrays per side, clip flags. **Constructor omits `lastDryL/R` initialization; deterministic patch required.** | Latest clipper revision. Source has three modes, not the predecessor's eight. Noise/Ceiling are nonlinear thresholds, not dB labels. |
+| "ADClip9" / 9 | 5: Boost, Match, Noise, Ceiling, Mode | **Yes:** sample spacing `clamp(floor(r),1,16)` enters clip processing and slew tests; it is not the measured latency. | F **exception:** float-output dither additions are commented out; both RNGs still advance, with a second right advance when either unsigned L-minus-R or R-minus-L is below 1073741824. RNG also supplies clipping noise and denormal injection. Last output/dry sample, 18-element intermediate and 34-element slew arrays per side, clip flags. Preserve the descending intermediate/slew copies; establish latency from output, not the spacing comment. **Constructor omits `lastDryL/R` initialization; deterministic patch required.** | Latest clipper revision. Source has three modes, not the predecessor's eight. Noise/Ceiling are nonlinear thresholds, not dB labels. |
 | "TPDFDither" / U, Redux | 2: Quant, DeRez | **No:** fixed word-length scaling, independent of sample rate. | T; only parameters and RNG words persist. Quant selects scale 32768 or 8388608; DeRez multiplies by `(1-B)^6`, scale floor `.0001`, output divisor floor 8. | One general output dither. Notes recommend it when no special shaping is needed and acknowledge its half-LSB offset; preserve the actual floor/addition sequence. |
 | "Slew4" / 4 | 1: Compres | **Yes:** `compresity=(.95*A)^2*8*r`; filter banks and lookahead remain in samples. | F; L/R 24-by-12 averaging storage, slew sustain, second/third samples, shared count; explicit two-sample lookahead. The final fractional-depth blend uses the right channel's `depthTrim` for both channels; preserve this coupling. | Latest brightness compression without saturation; distinct standalone use even though tape includes related processing. |
 | "kGuitarHall2" / 2 | 6: Regen, Derez, Filter, EarlyRF, Positin, Dry/Wet | **Yes:** revised Bezier undersampling: `B*2` folds about center, divides by `r`, clamps, then left half locks to reciprocal integer subdivisions while right half stays continuous with rate correction. | F; 3-by-3 early and 6-by-6 main delay networks, counts, feedback, Pear-filter and Bezier histories. Immutable `early[36]`; `int(E*27)` chooses 28 starting positions over nine entries. `c6ZAR` remains at its initialized index, while `c6ZBR` advances twice per internal update; preserve the source's counter behavior. | A small hall with source positioning; author's notes describe its hall/arena goal and the new Position control. |
@@ -96,6 +97,7 @@ even where the selection moved to a later version. F/N meanings are defined abov
 
 | Source / version | Count and exact parameter names | Sample-rate dependence | State and seed notes | Gap / why deferred |
 |---|---|---|---|---|
+| "DeBess" / U | 5: Intense, Sharp, Depth, Filter, Sense | **Yes:** intensity `A^5*8192/r`; sharpness `max(2,40*B)` samples, speed `.1/sharpness`; Filter itself is not rate-scaled. | F; 41-element sample/comparison arrays per side, alternating ratios/IIRs and flip. No legacy static noise counters. On the B phase, the condition tests `ratioAL/AR` but divides by `ratioBL/BR` in both precision paths. Sense above `.49999` outputs input minus processed. | Sibilance Control deferred: valid one-frame control changes with +/-1 input at 44.1 kHz overflow f32 at frame 3459 in the source recurrence below. A bound would activate inside normal use, contradicting this amendment's transparency contract. Admission needs a later decision on bounded B-phase division and an explicit transparency exception. The author's recommendation over "DeEss" and longer detection window do not resolve this defect; high-rate, bandwidth-limited material can also trigger it less. |
 | "Console7Channel" / 7 | 1: Fader | **Yes:** 20 kHz biquad normalized by rate; gain chase capped by `sampleFrames`. | F; gain chase/speed and one stereo biquad. Block-length dependent. | Earlier console encoder; selected 9 gives the latest standalone pair. |
 | "Console7Buss" / 7 | 1: Master | **Yes:** two 20 kHz biquads; chase capped by call length. | F; gain chase/speed, two stereo biquads. | Earlier matching decoder, not an alternative for the selected encoder. |
 | "ToTape8" / 8 | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | **Yes:** `r` scales flutter, bias and filters; clip spacing capped at 16; depth capped at 498. | F; 1002-sample flutter buffers, companding/bias/head-bump filter state, 16-element clip intermediates. Boundary access needs audit if ever ported. | Tape predecessor; "ToTape9" notes explicitly describe the improved replacement core. |
@@ -197,10 +199,11 @@ call sizes; scheduling equivalence uses the same schedule. Test a restored Fader
 without the snap, the first interpolated trim is 0.4921875 instead of 0 (output dither still stays).
 
 **Physical units must be earned.** "Pressure6" Ratio is a nonlinear blend amount, not a measured
-compression ratio. "DeBess" Sense's display labels disagree with the intuitive meaning of its
-delta-monitoring branch; transit labels the actual output. Hall Position really selects 28
-positions, while De-esser Sharp is not purely stepped because fractional sharpness also affects
-speed. The selected plate's Wetness has unity dry and wet at the midpoint. Predelay's exact seconds
+compression ratio. For any later admission of deferred "DeBess", Sense's display labels disagree
+with its delta-monitoring branch: `E > .49999` emits input minus processed, so label Listen as
+Processed / Removed (0 / 1). Sharp is not purely stepped because fractional sharpness also affects
+speed. These are survey notes, not a scheduled implementation. Hall Position really selects 28
+positions. The selected plate's Wetness has unity dry and wet at the midpoint. Predelay's exact seconds
 depend on integer truncation and the internal clock. Percentage travel is an honest display for uncalibrated
 controls; the ADR's specified dB/list mappings are exceptions backed by source formulas.
 
@@ -213,6 +216,36 @@ In `kGuitarHall2/kGuitarHall2.cpp:76`, `c6ZAR` and `c6ZBR` both start at 1. In i
 advances twice (lines 339 and 383). The double path repeats this (lines 832, 869, 876 and 883).
 These are initialized, bounded accesses; preserve them and exercise the affected wet paths in
 the nulls. They are not permission for an oracle cleanup patch.
+
+In `ADClip9/ADClip9Proc.cpp` and `ToTape9/ToTape9Proc.cpp`, both precision paths write
+`intermediate[spacing]` and copy downward in descending index order. Each iteration propagates
+the just-written value instead of shifting an ordinary delay line. The slew arrays use the same
+descending propagation. On the unclipped clipper-stage path, `lastSampleL/R` becomes the current
+sample and is emitted on the next frame, even when `spacing > 1`. Preserve the copies; establish
+latency from output, not the spacing comment. Gate scenarios compare the intermediate/slew state
+at `spacing > 1` to distinguish these operations from a conventional shift. The tape's complete
+latency still includes analysis of its other stages, separately from this clipper-stage behavior.
+
+**Normal-domain overflow blocks DeBess.** `DeBess/DeBess.cpp` initializes all four ratios to 1,
+the IIR/detector histories to zero and `flip=false`. In both `DeBess/DeBessProc.cpp` paths, the
+B branch tests the A ratios but divides by the B ratios. Round 4 recorded this asymmetry as a
+preservation note; round 5 demonstrates that it prevents admission under the stability amendment.
+At 44,100 Hz, set B=C=D=E=0 and use one frame per call: odd frames A=0, input +1; even frames
+A=1, input -1, on both channels. Sharpness=2, speed=.05, depth=10000, IIR amount=0. Sense is 0
+on odd frames and 8192 on even frames. The A ratios exceed 1 from frame 2 onward; on odd frame
+`2k-1` the B ratios are `.95^k`, so after the first frame pre-dither output is `1/(.95^k)`.
+At frame 3459, a binary64 evaluation yields `ratioBL=2.8962573551544587e-39` and
+`3.452731844496842e38` output, exceeding finite f32 before the cast passed to `frexpf`. The
+right channel is identical. Denormal injection never applies to these inputs and output dither
+does not enter the detector. This is a source-derived result, not a compiled oracle measurement.
+
+Sibilance Control remains deferred pending a decision defining bounded B-phase division and
+the corresponding exception to normal-domain transparency. Keep this exact schedule for any
+future admission regression on both channels; no silent branch correction, restriction on valid
+automation, adapter mute or substitution of "DeEss" is authorized. Its prospective transit id
+`sibilance_control` is not scheduled for registration, and the inherited de-esser remains retired
+under ADR 0040. The three selected stability patches remain subject to the unchanged dual-null
+contract and may only change results outside normal use.
 
 **High rates are in scope now.** The ADR's single admitted-domain definition traces the engine
 interval, common session rates and playback device choices, and requires implementer confirmation
