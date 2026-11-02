@@ -8,7 +8,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic, dead_code)]
 
 use std::cell::Cell;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use transit_dsp::Plugin;
@@ -51,6 +51,8 @@ pub struct Shared {
     /// Set by a worker while it waits inside `process` on `hold`, cleared when it leaves: the
     /// completion signal a test waits on before it asserts that a worker holds this strip.
     pub holding: AtomicBool,
+    /// Completed callback blocks renew a held worker's last-resort hang budget.
+    progress: AtomicUsize,
     /// Nanoseconds the next render sleeps on any thread, the callback included (taken by that
     /// render): a plug-in's one-time load on its first real render.
     pub load_ns: AtomicU64,
@@ -70,6 +72,7 @@ impl Shared {
             stall_ns: AtomicU64::new(0),
             hold: AtomicBool::new(false),
             holding: AtomicBool::new(false),
+            progress: AtomicUsize::new(0),
             load_ns: AtomicU64::new(0),
             on_worker: AtomicU64::new(0),
             on_callback: AtomicU64::new(0),
@@ -147,15 +150,12 @@ impl Plugin for ContinuityPlugin {
             if ns > 0 {
                 std::thread::sleep(Duration::from_nanos(ns));
             }
-            // Bounded (60 s of polls) like a gate plug-in: a test that failed before releasing it
-            // cannot leave the worker inside `process` for the rest of the binary.
-            let mut polls = 0u32;
-            while sh.hold.load(Ordering::Acquire) {
+            if sh.hold.load(Ordering::Acquire) {
                 sh.holding.store(true, Ordering::Release);
-                polls += 1;
-                assert!(polls < 60_000, "the hold was never released");
-                // timing: sleep-ok paces a wait for a release flag, measures nothing
-                std::thread::sleep(Duration::from_millis(1));
+                super::stall::wait_for_release(&sh.hold, &sh.progress, || {
+                    // timing: sleep-ok paces a release handshake, measures nothing
+                    std::thread::sleep(Duration::from_millis(1));
+                });
             }
             sh.holding.store(false, Ordering::Release);
         }
@@ -275,6 +275,9 @@ impl Rig {
     /// Renders one block (on the calling thread, which should be the callback).
     pub fn block(&mut self) {
         self.mix.render_active(self.pos, self.frames, &mut self.out);
+        for sh in &self.shared {
+            sh.progress.fetch_add(1, Ordering::Release);
+        }
         self.pos += self.frames as i64;
         self.marked += u64::from(self.mix.block_overruns() > 0);
     }

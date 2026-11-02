@@ -2,7 +2,7 @@ use crate::common;
 use common::workers::{Player, Rig};
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use transit_audio_io::AudioBuffer;
@@ -33,8 +33,6 @@ const FAR: Duration = Duration::from_secs(60);
 const HOUR: Duration = Duration::from_secs(3600);
 /// Everyone else's: the callback may render any of them inline.
 const TINY: Duration = Duration::from_nanos(1);
-/// A stall bound, not a latency claim: only turns a hang into a failure.
-const STALL: Duration = Duration::from_secs(60);
 
 // ---- Sessions (as in `sidechain.rs` and `render_graph.rs`) ----
 
@@ -236,6 +234,7 @@ pub(crate) fn corpus() -> Vec<(String, Session)> {
 #[derive(Default)]
 struct Knob {
     hold: AtomicBool,
+    progress: AtomicUsize,
 }
 
 std::thread_local! {
@@ -267,11 +266,7 @@ impl Plugin for Hold {
     }
     fn process(&mut self, io: &mut [Vec<f32>], frames: usize) {
         if !ON_CALLBACK.get() {
-            let t0 = Instant::now();
-            while self.knob.hold.load(Ordering::Acquire) {
-                assert!(t0.elapsed() < STALL, "never released");
-                std::thread::yield_now();
-            }
+            common::stall::wait_for_release(&self.knob.hold, &self.knob.progress, std::thread::yield_now);
         }
         self.inner.process(io, frames);
     }
@@ -477,7 +472,7 @@ fn as_callback<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
 fn wait_home(rig: &Rig, s: usize) {
     let t0 = Instant::now();
     while rig.mix.strip_claimed(s) {
-        assert!(t0.elapsed() < STALL, "strip {s}: the worker never returned");
+        assert!(t0.elapsed() < common::stall::HANG, "strip {s}: the worker never returned");
         std::thread::yield_now();
     }
 }
@@ -506,7 +501,7 @@ fn key_edges(rig: &Rig, session: &Session) -> Vec<(usize, usize)> {
 fn settle(rig: &mut Rig) {
     let t0 = Instant::now();
     while !rig.mix.render_workers_settled() {
-        assert!(t0.elapsed() < STALL, "a worker never returned");
+        assert!(t0.elapsed() < common::stall::HANG, "a worker never returned");
         std::thread::yield_now();
     }
 }
@@ -648,6 +643,9 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
             run.mutes.push(mutes);
             run.causes.push(causes);
             record(&mut run, &rig);
+            for k in knobs.values() {
+                k.progress.fetch_add(1, Ordering::Release);
+            }
         }
         for k in knobs.values() {
             k.hold.store(false, Ordering::Release);

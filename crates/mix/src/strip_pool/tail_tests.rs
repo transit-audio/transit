@@ -15,6 +15,8 @@ const FAR: Duration = Duration::from_secs(60);
 static NO_KEYS: KeyBank = KeyBank::EMPTY;
 
 mod forgo;
+#[path = "../../tests/common/stall.rs"]
+mod stall;
 
 /// A Claim owns its snapshot even before the reader enters the job cell.
 /// timing: expired-deadline the next drive cannot wait for the deliberately paused claim.
@@ -106,12 +108,7 @@ impl Plugin for Echo {
         self.probe.process.fetch_add(1, Ordering::Relaxed);
         if self.probe.hold.load(Ordering::Acquire) {
             self.probe.entered.store(true, Ordering::Release);
-            let started = Instant::now();
-            // timing: stall-bound waits for an explicitly held worker; this is only a deadlock watchdog
-            while self.probe.hold.load(Ordering::Acquire) {
-                assert!(started.elapsed() < FAR, "held fixture was not released");
-                std::thread::yield_now();
-            }
+            stall::wait_for_release(&self.probe.hold, &self.probe.process, std::thread::yield_now);
         }
         assert_ne!(self.probe.panic.load(Ordering::Relaxed), 1, "render payload");
     }
@@ -604,7 +601,7 @@ fn t5_held_worker_panic_settlement_adoption_and_reset() {
             let entered = Instant::now();
             // timing: stall-bound waits for an explicitly held worker; this is only a deadlock watchdog
             while !probe.entered.load(Ordering::Acquire) {
-                assert!(entered.elapsed() < FAR, "claimed worker never entered its hold");
+                assert!(entered.elapsed() < stall::HANG, "claimed worker never entered its hold");
                 std::thread::yield_now();
             }
             assert!(probe.entered.load(Ordering::Acquire));
@@ -616,7 +613,7 @@ fn t5_held_worker_panic_settlement_adoption_and_reset() {
             let wait = Instant::now();
             // timing: stall-bound waits for an explicitly held worker; this is only a deadlock watchdog
             while rig.eng.strip_claimed(slot) {
-                assert!(wait.elapsed() < FAR);
+                assert!(wait.elapsed() < stall::HANG);
                 std::thread::yield_now();
             }
             let before = (probe.reset.load(Ordering::Relaxed), probe.latency.load(Ordering::Relaxed), probe.params.load(Ordering::Relaxed));
@@ -1000,7 +997,7 @@ fn t19_held_aux_chain_adoption_uses_fresh_input_and_latency() {
         let wait = Instant::now();
         // timing: stall-bound waits for an explicitly held worker; this is only a deadlock watchdog
         while !old.entered.load(Ordering::Acquire) {
-            assert!(wait.elapsed() < FAR);
+            assert!(wait.elapsed() < stall::HANG);
             std::thread::yield_now();
         }
         assert_eq!(rig.eng.adopt_plan(&mut env), Adoption::Rejected(RejectReason::StripsInFlight));
@@ -1008,7 +1005,7 @@ fn t19_held_aux_chain_adoption_uses_fresh_input_and_latency() {
         let wait = Instant::now();
         // timing: stall-bound waits for an explicitly held worker; this is only a deadlock watchdog
         while rig.eng.strip_claimed(slot) {
-            assert!(wait.elapsed() < FAR);
+            assert!(wait.elapsed() < stall::HANG);
             std::thread::yield_now();
         }
         assert!(rig.eng.render_workers_settled());
