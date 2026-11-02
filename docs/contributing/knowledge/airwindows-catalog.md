@@ -65,8 +65,9 @@ noise-shaping algorithm available anywhere in the catalog.
 
 ## First set
 
-These are the 12 selected inserts, in slice order. "Density3" is deferred below because its
-high-pass recurrence is unstable in the admitted low-rate domain; the inherited Saturator stays.
+These are the 11 selected inserts, in slice order. "Density3" and "ToTape9" are deferred below
+because their recurrences can become unstable in the admitted low-rate domain; the inherited
+Saturator stays and the tape gap remains open.
 Each row gives the state that the port's reset,
 floor and scheduling fingerprint must cover, in addition to its parameters and rate.
 
@@ -74,7 +75,6 @@ floor and scheduling fingerprint must cover, in addition to its parameters and r
 |---|---|---|---|---|
 | "Chorus" / U | 3: Speed, Range, Dry/Wet | **Yes:** phase increment `A^4 * .001 * r`; range is a fixed sample-buffer fraction `B^4 * loopLimit * .499`. Speed in Hz therefore also changes with rate; treble processing is sample-based. | F; two float delay arrays of 16386, shared sweep/count, separate L/R treble histories and flip flag. Same modulation on both sides; no invented stereo spread. | Single moving-tap modulation; notes call it mono chorus that can serve as vibrato. |
 | "ChorusEnsemble" / U | 3: Speed, Range, Dry/Wet | **Yes:** phase increment `A^3 * .001 * r`; range `B^3 * loopLimit * .12` in samples; four related tap offsets. | F; two 16386-float buffers, sweep/count, treble histories and flip flag. | Four-tap ensemble for pads, not a second single-tap flavor. The author's section explicitly distinguishes the bank of taps. |
-| "ToTape9" / 9 | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | **Yes:** filter, bias, head-bump and flutter formulas use `r`; depth capped at 498 samples; clip spacing `clamp(floor(r),1,16)`, slew span `clamp(floor(2*r),2,32)`. Head frequency `(H*H*175+25)/rate`. | F also drives flutter and clipping noise; encoder/decoder envelopes, IIR/biquads, two 1002-double flutter buffers, phases/targets, bias stages, hysteresis, averaging histories and clip/lookahead state. | Latest tape revision; notes describe the replaced core, brightness compression and new output clipper. Internal processing is retained, not factored into shared algorithms that change its rounding. |
 | "Pressure6" / 6 | 2: Compres, Ratio | **Yes:** detector speed target `((A*92)+92)*r`; threshold `1-(.9*A)^3`. | F; shared stereo-linked `muComp` and `muSpd`, initialized 1 and 100. Ratio maps to `wet=.9*B`, used inside a nonlinear blend, not an ordinary ratio in x:1. | Character bus compression; latest Pressure line and explicitly aimed at that job in its notes. |
 | "DeBess" / U | 5: Intense, Sharp, Depth, Filter, Sense | **Yes:** intensity `A^5*8192/r`; sharpness `max(2,40*B)` samples, speed `.1/sharpness`; Filter itself is not rate-scaled. | F; 41-element sample/comparison arrays per side, alternating ratios/IIRs and flip. No legacy static noise counters. Sense above `.49999` outputs input minus processed. | Author explicitly calls it improved "DeEss" with a longer adjustable comparison window. High-rate, bandwidth-limited material can trigger it less; document this limitation. |
 | "Console9Channel" / 9 | 2: Pan, Fader | **No** `getSampleRate`; **block-dependent** pan/fader interpolation using remaining frames / original call length, including first call. | F; `panA/B`, `inTrimA/B`. Encode curves use `log1p`/`expm1`; raw constructor endpoints stay 0.5. The Plugin adapter snaps both pan endpoints to `A*1.57079633` and both trim endpoints to `B*2.0` on initialization/reset, separately nulled with the same harness operation. | Latest numbered standalone summing encoder. Notes distinguish the summing core from full processing strips. |
@@ -83,7 +83,7 @@ floor and scheduling fingerprint must cover, in addition to its parameters and r
 | "TPDFDither" / U, Redux | 2: Quant, DeRez | **No:** fixed word-length scaling, independent of sample rate. | T; only parameters and RNG words persist. Quant selects scale 32768 or 8388608; DeRez multiplies by `(1-B)^6`, scale floor `.0001`, output divisor floor 8. | One general output dither. Notes recommend it when no special shaping is needed and acknowledge its half-LSB offset; preserve the actual floor/addition sequence. |
 | "Slew4" / 4 | 1: Compres | **Yes:** `compresity=(.95*A)^2*8*r`; filter banks and lookahead remain in samples. | F; L/R 24-by-12 averaging storage, slew sustain, second/third samples, shared count; explicit two-sample lookahead. | Latest brightness compression without saturation; distinct standalone use even though tape includes related processing. |
 | "kGuitarHall2" / 2 | 6: Regen, Derez, Filter, EarlyRF, Positin, Dry/Wet | **Yes:** revised Bezier undersampling: `B*2` folds about center, divides by `r`, clamps, then left half locks to reciprocal integer subdivisions while right half stays continuous with rate correction. | F; 3-by-3 early and 6-by-6 main delay networks, counts, feedback, Pear-filter and Bezier histories. Immutable `early[36]`; `int(E*27)` chooses 28 starting positions over nine entries. | A small hall with source positioning; author's notes describe its hall/arena goal and the new Position control. |
-| "kPlate140" / U, model 140 | 5: Input, Regen, DeRez, Predlay, Wetness | **Yes:** `derez=C/r`, clamped `.0005..1`, then reciprocal-integer locked; predelay `int(16000*D*derez)` at the internal update rate. Filter/size behavior follows that clock. | F; 5-by-5 matrix delays/counts, low-frequency damping state, gain stages, Pear filters, vibrato, predelay/subdelay and Bezier histories. | Author's next-generation large plate. At Wetness .5 both dry and wet gains are 1; below .5 wet gain is squared. Not a constant-power crossfade. |
+| "kPlate140" / U, model 140 | 5: Input, Regen, DeRez, Predlay, Wetness | **Yes:** `derez=C/r`, clamped `.0005..1`, then reciprocal-integer locked; predelay `int(16000*D*derez)` at the internal update rate. Filter/size behavior follows that clock. | F; active state includes 5-by-5 matrix delays/counts, feedback, low-frequency damping, vibrato, predelay/subdelay and Bezier histories. `gainIn`, `gainOutL/R` and `pearA`–`pearF` are declared in the header and initialized in the constructor but unused in both processing paths; they are not active gain/Pear stages. | Author's next-generation large plate. At Wetness .5 both dry and wet gains are 1; below .5 wet gain is squared. Not a constant-power crossfade. |
 
 ## Deferred candidates and predecessors
 
@@ -93,6 +93,7 @@ even where the selection moved to a later version. F/N meanings are defined abov
 
 | Source / version | Count and exact parameter names | Sample-rate dependence | State and seed notes | Gap / why deferred |
 |---|---|---|---|---|
+| "ToTape9" / 9 | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | **Yes:** encoder/decoder coefficients `(1-C)/r` and `C/r`; bias, head-bump and flutter formulas use `r`; depth capped at 498 samples; clip spacing `clamp(floor(r),1,16)`, slew span `clamp(floor(2*r),2,32)`. Head frequency `(H*H*175+25)/rate`. **Unstable low-rate decoder:** 8 kHz, Shape = 1 gives a history multiplier of -4.5125; counterexample below. | F also drives flutter and clipping noise; encoder/decoder envelopes, IIR/biquads, two 1002-double flutter buffers, phases/targets, bias stages, hysteresis, averaging histories and clip/lookahead state. | Latest tape revision; notes describe the replaced core, brightness compression and new output clipper. Deferred for nonfinite output at admitted settings. Tape gap remains open; admission requires a reviewed rate/control domain and refusal/bypass policy or an approved DSP/reference change, not a stabilizing initialization patch. |
 | "Density3" / 3 | 4: Density, Highpas, Output, Dry/Wet | **Yes:** high-pass amount `B^3/r`; zero high-pass clears its histories at block entry. **Unstable at admitted low rates:** at 8 kHz, B = 1 gives a history multiplier of -4.5125. | F **exception:** float dither uses `3.553e-44l`, not `5.5e-36l`; right RNG advances a second time when either unsigned L-minus-R or R-minus-L is below 1073741824. L/R IIR memories; internal `density=A*5`, display `A*5-1`. | Preferred saturation revision in the author's notes, but deferred from the first set on safety evidence. Inherited Saturator remains. Admission requires a supported-domain and refusal/bypass decision or separately approved DSP/reference change; no stabilizing initialization patch. |
 | "Console7Channel" / 7 | 1: Fader | **Yes:** 20 kHz biquad normalized by rate; gain chase capped by `sampleFrames`. | F; gain chase/speed and one stereo biquad. Block-length dependent. | Earlier console encoder; selected 9 gives the latest standalone pair. |
 | "Console7Buss" / 7 | 1: Master | **Yes:** two 20 kHz biquads; chase capped by call length. | F; gain chase/speed, two stereo biquads. | Earlier matching decoder, not an alternative for the selected encoder. |
@@ -103,7 +104,7 @@ even where the selection moved to a later version. F/N meanings are defined abov
 | "StereoChorus" / U | 2: Speed, Depth | **Yes:** processing every `cycle` frames with reconstruction between; different control laws from "Chorus". | F; stereo delay/phase and air-compensation histories, cycle and output references. | Stereo widening variant; first set chooses a simpler independent speed/range/mix design, not a claim that this variant is obsolete. |
 | "StereoEnsemble" / U | 2: Depth, FXlevel | **Yes:** `cycle` division and reconstructed output; delay factor `.66+A/3` changes fixed sample lengths. | F; many paired delay banks, maxima/counts, feedback and reconstruction state. | Another ensemble topology; avoid a second ensemble in slice 1. |
 | "Vibrato" / U | 5: Speed, Depth, FMSpeed, FMDepth, Inv/Wet | **No:** increments `(0.1+A)^6` and `(0.1+C)^6` per sample; depths derive from their square roots; fixed sample buffers. | F; two 16386-double buffers, two sweeps, shared position, treble histories and flip. Wet spans -1..1. | Dedicated FM vibrato later; the first chorus already has a wet pitch-modulation use. |
-| "Flutter2" / 2 | 3: Flutter, Speed, Dry/Wet | **Yes:** depth `A^4*r*90`, capped 498; rate `.02*B^3/r`. | F also updates random flutter targets; two 1002-double buffers, L/R phases/targets and shared count. | Standalone tape instability; selected tape already includes flutter. |
+| "Flutter2" / 2 | 3: Flutter, Speed, Dry/Wet | **Yes:** depth `A^4*r*90`, capped 498; rate `.02*B^3/r`. | F also updates random flutter targets; two 1002-double buffers, L/R phases/targets and shared count. | Standalone tape pitch variation, not a complete tape coloration stage. Remains a later modulation candidate after "ToTape9" is deferred; not automatically promoted to fill the tape gap. |
 | "PhaseNudge" / U | 2: Phase Nudge, Dry/Wet | **No:** target allpass delay `int(A^3*1501)` samples; per-sample chase. | F; two 1503-double allpass buffers, position and current maximum delay. | Phase rotation/diffusion, not a self-modulating phaser. Keep the dedicated phaser gap explicit. |
 | "Capacitor2" / 2 | 4: Lowpass, Highpass, NonLin, Dry/Wet | **No:** source explicitly avoids scaling so coefficient 1 can bypass; cutoff and chase times therefore vary with rate. | F; six high-pass and six low-pass histories per side, cycle count, chase targets/current values and prior controls. | Nonlinear tone filter; existing Filter and planned EQ make it lower priority. |
 | "PurestGain" / U | 2: Gain, Slow Fade | **No effective dependence:** computes `overallscale` but never uses it. Gain chase and 4000/4001 fade smoothing are sample-based. | F; gain/setting/fade chase and speed. At exactly unity gain copies original input and does not advance dither state. | Gain utility later; retain existing Gain and its test role until separately replaced. Source Gain display is -40..40 dB. |
@@ -176,6 +177,26 @@ contribution is about `1.38e39`, beyond finite f32 output. This analytical sourc
 requires no wall-clock assertion or compiled oracle claim. A coefficient clamp would alter
 defined DSP, not repair an unwritten read. The ADR defers Wave Saturator and retains the inherited
 Saturator; any future supported-domain or DSP-change decision must address this case explicitly.
+
+"ToTape9" provides a second exclusion. In `ToTape9/ToTape9Proc.cpp`, the encoder and decoder
+coefficients are `(1-C)/r` and `C/r`. At 8 kHz and Shape = 1, the decoder's
+`iirDecL/R` and `compDecL/R` updates multiply their old histories by -4.5125. The clamp on
+`highPart` bounds the input to the companding envelope, not its accumulated history. The
+constructor in `ToTape9/ToTape9.cpp` initializes IIR/average histories to zero and companding
+histories to one, so this is not an unwritten-state defect.
+
+The judging round 2 source-derived binary64 trace used fresh state, constant stereo `0.1f`
+input, 8,000 Hz and source-order controls `[.5, 0, 1, 0, .5, .5, 0, .5, 0]` (Input through
+Output). Flutter, bias processing and head bump are disabled by their source branches, and the
+encoder coefficient is zero. On sample 472, `iirDecL = -7.625997560091027e307`, `highPart = 1`
+and `compDecL = +Infinity`, producing negative infinite decoder output. Output = 0 multiplies
+that by zero, producing NaN; the clipper comparisons do not reject it and its delayed history
+emits it on the next sample. The right channel follows the same recurrence. This is a numerical
+source counterexample, not a compiled upstream-oracle test result. A stabilizing coefficient
+change alters defined DSP, and an adapter-only NaN mute would leave the raw-reference gate
+unsatisfied. The ADR defers Tape Color; its later admission must explicitly decide the supported
+rate/control domain and refusal/bypass behavior or approve a DSP/reference change. The current
+decision approves neither and does not claim a full tape replacement.
 
 **No blanket transparency claims.** The float path ordinarily adds dither even at nominally neutral
 settings. The explicit unity bypass in "PurestGain" and RNG-free "BitShiftGain" are exceptions,

@@ -37,15 +37,15 @@ Do not import the whole catalog or fill the browser with neighboring versions. T
 jobs are intentional: one moving tap and a multi-tap ensemble. The console encoder and decoder
 are one paired system, not two competing colors.
 
-The first set is **12 inserts**, implemented in the following three slices after an oracle-only
-foundation. The saturation replacement is deferred on source-level safety evidence below; the
-inherited Saturator stays. All source names in this table are Johnson's.
+The first set is **11 inserts**, implemented in the following three slices after an oracle-only
+foundation. Tape and the saturation replacement are deferred on source-level safety evidence
+below; the tape gap remains open and the inherited Saturator stays. All source names in this
+table are Johnson's.
 
 | Slice / gap | Exact source name and revision | Parameters in source order | Transit name / stable id | Reason |
 |---|---|---|---|---|
 | 1: chorus | "Chorus" (unnumbered) | 3: Speed, Range, Dry/Wet | Modulated Delay / `modulated_delay` | One moving tap, with a wet vibrato setting; distinct from an ensemble. |
 | 1: ensemble | "ChorusEnsemble" (unnumbered) | 3: Speed, Range, Dry/Wet | Ensemble Delay / `ensemble_delay` | Four taps provide the richer pad treatment the single tap cannot. |
-| 1: tape | "ToTape9" (9) | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | Tape Color / `tape_color` | Latest tape line, with the author's revised brightness compression and output clipping. |
 | 1: character compression | "Pressure6" (6) | 2: Compres, Ratio | Character Compressor / `character_compressor` | Latest compact, stereo-linked character compressor, aimed at bus compression in the author's notes. |
 | 1: de-essing | "DeBess" (unnumbered successor to "DeEss") | 5: Intense, Sharp, Depth, Filter, Sense | Sibilance Control / `sibilance_control` | The author recommends its longer adjustable detection window and improved rejection of non-sibilant material. |
 | 2: console channel | "Console9Channel" (9) | 2: Pan, Fader | Console Encode / `console_encode` | Latest numbered standalone summing encoder, without a whole channel-strip processing chain. |
@@ -57,13 +57,30 @@ inherited Saturator stays. All source names in this table are Johnson's.
 | 3: plate | "kPlate140" (unnumbered model 140) | 5: Input, Regen, DeRez, Predlay, Wetness | Large Plate / `large_plate` | The author's next-generation large plate; one plate character in the first set. |
 
 The named sections of [Johnson's notes at the pin](https://github.com/airwindows/airwindows/blob/7fd5f5cae262a41e6dd7d9a83d60c46e84d3092a/Airwindopedia.txt)
-support these version choices: "ToTape9", "DeBess", "Console9Channel", "ADClip9",
+support these version choices: "DeBess", "Console9Channel", "ADClip9",
 "Slew4", "kGuitarHall2", "kPlate140" and "TPDFDither". The last includes its Redux update;
 its earlier no-controls description is historical. "kPlate140" and "kPlate240" are different
 plate models, not revisions 140 and 240. The former's notes explicitly describe the larger, more
 prominent character. The later stereo modulation variants are different designs, not numbered
 updates to "Chorus": the first set deliberately keeps the single-tap and four-tap designs with
 independent speed, range and mix controls.
+
+**Tape is deferred.** "ToTape9" (revision 9; nine controls: Input, Tilt, Shape, Flutter,
+FlutSpd, Bias, HeadBmp, HeadFrq, Output) was the preferred tape candidate: Johnson's "ToTape9"
+notes describe the revised core, brightness compression and output clipper. Its encoder/decoder
+recurrences can become unstable at admitted low rates. In
+`plugins/LinuxVST/src/ToTape9/ToTape9Proc.cpp`, at 8 kHz and Shape = 1,
+`iirDecFreq = C / (rate/44100) = 5.5125`; the decoder history multiplier is -4.5125.
+Clamping `highPart` does not clamp the `compDecL/R` histories. With fresh constructor state,
+constant stereo input `0.1f` and normalized controls `[.5, 0, 1, 0, .5, .5, 0, .5, 0]`,
+the review's source-derived binary64 trace reaches infinite decoder output on sample 472;
+zero output gain then produces NaN, which the delayed clipper emits on the next sample.
+This is a numerical source counterexample, not a compiled oracle result. "ToTape9" / Tape Color
+is outside the first shippable set. Admission requires a separately reviewed supported rate/control
+domain with explicit refusal/bypass behavior, or an approved DSP/reference change. Neither is
+approved here. Stabilizing coefficients is not an initialization patch, and silencing NaN only
+in the adapter cannot satisfy the raw-reference finite-output gate. Do not substitute "ToTape8"
+or promote a standalone flutter processor as a full tape replacement without admission evidence.
 
 **Saturation is deferred.** "Density3" (revision 3; four controls: Density, Highpas, Output,
 Dry/Wet) was the preferred general saturation candidate under the author's "Density3" notes.
@@ -92,7 +109,7 @@ this ADR does not claim those gaps are fully closed.
 
 New inserts use new ids. No removed id is revived, and no old slot is silently substituted.
 The inherited Saturator remains under ADR 0040 because this first set has no admitted saturation
-replacement; Tape Color does not authorize its retirement. The hall and plate supply the reverb
+replacement; the separate tape gap also remains open. The hall and plate supply the reverb
 replacements. Their implementation slices retire the corresponding stage 2 devices using ADR 0040's load report,
 dropped parameter targets, emptied slot and modified-session rule, with corpus coverage. The
 character compressor has no external key, gate or conventional full dynamics section: the existing
@@ -178,7 +195,6 @@ transcendentals or accepting a small residual is not a determinism fix.
 | Rust crate | Inserts |
 |---|---|
 | `transit-modulated-delay` | Modulated Delay, Ensemble Delay |
-| `transit-tape-color` | Tape Color |
 | `transit-character-dynamics` | Character Compressor, Sibilance Control |
 | `transit-console-summing` | Console Encode, Console Decode |
 | `transit-output-tools` | Peak Clipper, Output Dither, Treble Tamer |
@@ -252,14 +268,11 @@ Transit adds readable names, display units/ranges and editors, not a new transfe
 For controls without a defensible physical calibration, show **0–100% control travel**, explicitly
 described as such. Never invent milliseconds for compressor recovery or an input/output ratio
 for the source's `Ratio` control. That control actually governs a nonlinear wet contribution.
-Rename abbreviations in the UI (Compression, High-pass, Flutter Speed, Head Bump, Early Reflections,
-Position, Predelay); the survey keeps the exact source names.
+Rename abbreviations in the UI (Compression, Early Reflections, Position, Predelay); the survey
+keeps the exact source names.
 
 Concrete exceptions to the percentage rule:
 
-- Tape Head Frequency displays `25 + 175*h*h` Hz, 25–200 Hz, as the source does. Input, Output,
-  Tilt and Bias retain normalized travel; the help describes their nonlinear gain and bipolar
-  behavior rather than claiming a calibrated tape-machine measurement.
 - Console Pan displays -100% left to +100% right (`200*a - 100`); Fader remains 0–100% travel,
   since its shaped gain is not an ordinary linear level control.
 - Clipper Boost and Match display 0–18 dB (`18*a`, `18*b`). Noise and Ceiling remain percentages
@@ -327,8 +340,8 @@ These are implementation gates, not claims that this documentation change has ru
    clamp an admitted high rate to 192 kHz or add conversion to make the null pass. A source
    unsafe at an admitted rate must distinguish actual UB from unstable defined arithmetic. Only
    the former can use a justified deterministic patch; the latter needs deferral or an explicitly
-   approved domain/DSP decision. The known "Density3" recurrence is deferred above, not left as
-   a first-set implementation blocker or treated as an initialization defect.
+   approved domain/DSP decision. The known "Density3" and "ToTape9" recurrences are deferred
+   above, not left as first-set implementation blockers or treated as initialization defects.
 3. **Sweep and scenarios.** For each continuous parameter use 0, 0.25, 0.5, 0.75, 1 around
    source defaults, both endpoints of interactions, all list choices and adjacent f32 values
    around branch boundaries. Include all-controls-low/high, paired drive/output and rate/depth
@@ -381,8 +394,8 @@ These are implementation gates, not claims that this documentation change has ru
 ## Consequences
 
 The stock collection fills distinct mixing jobs with small interfaces and a reproducible reference.
-The saturation replacement remains open and the inherited Saturator stays until a safe replacement
-is admitted; this first set does not close every gap in #305.
+The tape gap and saturation replacement remain open, and the inherited Saturator stays until a
+safe replacement is admitted; this first set does not close every gap in #305.
 Users get the author's algorithms and quirks, including sample-rate coloration, seeded noise,
 nonlinear mix laws and block-length-dependent ramps. Gain staging and console placement need help
 text; a famous algorithm name is not a substitute for it.
@@ -416,3 +429,9 @@ C1 accepted: Deferred "Density3" / Wave Saturator from the first shippable set (
 C2 accepted: Preserved raw console constructor nulls while specifying `snap_initial_params`, prepare and reset endpoint initialization at the Plugin boundary, the identical reference-harness operation, and discriminating restoration/reset/automation nulls.
 
 M1 accepted: Qualified the catalog's common F convention, recorded "Density3"'s `3.553e-44l` dither and conditional extra right RNG advance, and recorded "ADClip9"'s disabled float-output dither, retained RNG advances and clipping noise in the catalog and port contract.
+
+## Judging round 2: responses
+
+C1 accepted: Deferred "ToTape9" / Tape Color from the first shippable set (now 11 inserts), documented the 8 kHz decoder counterexample and required later domain or DSP/reference decision, removed its slice, crate and control entries, and updated the catalog and indexes; the tape gap remains open.
+
+M1 accepted: Corrected the "kPlate140" catalog state summary to identify `gainIn`, `gainOutL/R` and `pearA`–`pearF` as declared and initialized but unused in both processing paths, rather than active gain/Pear stages.
