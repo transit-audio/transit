@@ -37,10 +37,10 @@ Do not import the whole catalog or fill the browser with neighboring versions. T
 jobs are intentional: one moving tap and a multi-tap ensemble. The console encoder and decoder
 are one paired system, not two competing colors.
 
-The first set is **11 inserts**, implemented in the following three slices after an oracle-only
-foundation. Tape and the saturation replacement are deferred on source-level safety evidence
-below; the tape gap remains open and the inherited Saturator stays. All source names in this
-table are Johnson's.
+The first set is **10 inserts**, implemented in the following three slices after an oracle-only
+foundation. Tape, saturation and plate replacements are deferred on source-level safety evidence
+below; the tape gap remains open and the inherited Saturator and Plate Reverb stay. All source
+names in this table are Johnson's.
 
 | Slice / gap | Exact source name and revision | Parameters in source order | Transit name / stable id | Reason |
 |---|---|---|---|---|
@@ -54,15 +54,15 @@ table are Johnson's.
 | 2: dither | "TPDFDither" (unnumbered, two-control Redux source) | 2: Quant, DeRez | Output Dither / `output_dither` | A general output word-length reducer; the author recommends this simple option when special noise shaping is unnecessary. |
 | 2: slew | "Slew4" (4) | 1: Compres | Treble Tamer / `treble_tamer` | Latest dedicated brightness compression, without the tape stage. |
 | 3: hall | "kGuitarHall2" (2) | 6: Regen, Derez, Filter, EarlyRF, Positin, Dry/Wet | Small Hall / `small_hall` | A hall with early-reflection positioning, rather than an ambient infinite-space substitute. |
-| 3: plate | "kPlate140" (unnumbered model 140) | 5: Input, Regen, DeRez, Predlay, Wetness | Large Plate / `large_plate` | The author's next-generation large plate; one plate character in the first set. |
 
 The named sections of [Johnson's notes at the pin](https://github.com/airwindows/airwindows/blob/7fd5f5cae262a41e6dd7d9a83d60c46e84d3092a/Airwindopedia.txt)
 support these version choices: "DeBess", "Console9Channel", "ADClip9",
-"Slew4", "kGuitarHall2", "kPlate140" and "TPDFDither". The last includes its Redux update;
+"Slew4", "kGuitarHall2" and "TPDFDither". The last includes its Redux update;
 its earlier no-controls description is historical. "kPlate140" and "kPlate240" are different
 plate models, not revisions 140 and 240. The former's notes explicitly describe the larger, more
-prominent character. The later stereo modulation variants are different designs, not numbered
-updates to "Chorus": the first set deliberately keeps the single-tap and four-tap designs with
+prominent character; it remains the preferred plate candidate, but is deferred below. The later
+stereo modulation variants are different designs, not numbered updates to "Chorus": the first
+set deliberately keeps the single-tap and four-tap designs with
 independent speed, range and mix controls.
 
 **Tape is deferred.** "ToTape9" (revision 9; nine controls: Input, Tilt, Shape, Flutter,
@@ -96,6 +96,27 @@ requires an explicit supported-domain and refusal/bypass policy, or a separately
 change with a revised reference contract. Neither is approved here. Do not silently substitute
 an older revision or another saturation algorithm without its own admission evidence.
 
+**Plate is deferred.** "kPlate140" (unnumbered model 140; five controls: Input, Regen, DeRez,
+Predlay, Wetness) / Large Plate was the preferred plate candidate under Johnson's "kPlate140"
+notes. Its SubTight histories can become nonfinite on hot finite input. In
+`plugins/LinuxVST/src/kPlate140/kPlate140Proc.cpp:78`–97, each of three stages computes
+`scale = .5 + abs(out*.5)`, then `out = history + sin(history-out)*scale` and
+`history = out*scale`. The clamps at lines 99–100 bound only the temporary output, not those
+histories. From fresh constructor state at 44.1 kHz, constant stereo input `2000.0f` and
+normalized controls `[1, .5, 1, 0, 1]`, the source-derived binary64 trace reaches infinite
+`subCL` at input sample 51 and NaN `outSampleL` at sample 53 (one-based). That trace includes
+the Bezier accumulation and zero-predelay startup; it is not a compiled C++ oracle result, and
+exact failure timing may depend on the math library. No seed choice fixes this nonzero-input
+recurrence. Comparison clamps do not reject the NaN, which enters the delay network.
+
+The inherited Plate Reverb remains under ADR 0040. Admission of "kPlate140" requires a
+separately reviewed input-amplitude domain, enforcement before the core, explicit boundary and
+out-of-domain behavior, and matching raw-reference/adapter coverage, or an approved DSP/reference
+change. Neither is approved here. Clamping histories is not an initialization patch, and transit's
+post-process nonfinite containment does not establish an input bound or satisfy the raw-reference
+gate. Do not quietly narrow hot-input fixtures or substitute "kPlateA" or "kPlate240" without
+their own admission evidence.
+
 Other deferred candidates, with source details and reasons in the survey: "Vibrato", "Flutter2", "PhaseNudge",
 "StereoChorus", "StereoEnsemble", "Capacitor2", "PurestGain", "BitShiftGain", "PurestDrive",
 "NotJustAnotherDither", "Galactic3", "Verbity2" and "kPlate240". Historical candidates
@@ -108,10 +129,10 @@ this ADR does not claim those gaps are fully closed.
 ### Relationship to retirement and routing
 
 New inserts use new ids. No removed id is revived, and no old slot is silently substituted.
-The inherited Saturator remains under ADR 0040 because this first set has no admitted saturation
-replacement; the separate tape gap also remains open. The hall and plate supply the reverb
-replacements. Their implementation slices retire the corresponding stage 2 devices using ADR 0040's load report,
-dropped parameter targets, emptied slot and modified-session rule, with corpus coverage. The
+The inherited Saturator and Plate Reverb remain under ADR 0040 because this first set has no
+admitted replacements for them; the separate tape gap also remains open. Small Hall supplies the
+Room Reverb replacement. Slice 3 retires only that reverb using ADR 0040's load report, dropped
+parameter targets, emptied slot and modified-session rule, with corpus coverage. The
 character compressor has no external key, gate or conventional full dynamics section: the existing
 Compressor/Limiter and Expander/Gate stay. EQ and Gain also stay; the deferred gain utility is not
 permission to remove the pass-through used by tests.
@@ -198,7 +219,7 @@ transcendentals or accepting a small residual is not a determinism fix.
 | `transit-character-dynamics` | Character Compressor, Sibilance Control |
 | `transit-console-summing` | Console Encode, Console Decode |
 | `transit-output-tools` | Peak Clipper, Output Dither, Treble Tamer |
-| `transit-space-reverb` | Small Hall, Large Plate |
+| `transit-space-reverb` | Small Hall |
 
 Production crate names, Rust identifiers, stable ids, parameter ids, preset ids and device titles
 are descriptive, without upstream brand-like effect names. Original names remain in unchanged
@@ -214,6 +235,11 @@ do not add ordinary float dither to it. `processDoubleReplacing` remains vendore
 claiming a future f64 path requires separate f64 nulls. No SIMD regrouping, generic smoother,
 oversampling, resampling, mix-law correction or latency removal is added. Preserve any rate
 division, interpolation or filtering already inside the original.
+
+Preserve the specific quirks recorded in the survey: "Slew4" uses the right channel's
+`depthTrim` in both final fractional-depth blends; "kGuitarHall2" leaves `c6ZAR` at its
+initialized index while advancing `c6ZBR` twice per internal update. Both precision paths do
+this. These are defined processing behaviors, not initialization defects eligible for patches.
 
 Keep block-entry work at block entry. In particular, the console pair interpolates `panA/B` and
 `inTrimA/B` using remaining frames divided by the original call length. Preserve its constructor
@@ -293,7 +319,7 @@ a row in `docs/help/README.md`, and device documentation. Every control has its 
 meaning and dependencies. Each effect's help describes its own sample-rate behavior from the
 survey: sample-based delays and modulation, rate-scaled detectors, discrete internal-rate changes,
 or the absence of compensation. No promise of identical sound at different rates. Explain the
-plate's 50% full-dry-plus-full-wet law and the hall's resolution/position changes. Dither belongs
+hall's resolution/position changes and preserved counter behavior. Dither belongs
 last after gain, fades and sample-rate conversion; an insert before an export resampler does not
 guarantee dithered final integer output. Do not silently enable or double up export dither.
 
@@ -342,6 +368,8 @@ These are implementation gates, not claims that this documentation change has ru
    the former can use a justified deterministic patch; the latter needs deferral or an explicitly
    approved domain/DSP decision. The known "Density3" and "ToTape9" recurrences are deferred
    above, not left as first-set implementation blockers or treated as initialization defects.
+   The separate hot-input recurrence in "kPlate140" is likewise deferred, with no new input
+   bound or history clamp authorized by this ADR.
 3. **Sweep and scenarios.** For each continuous parameter use 0, 0.25, 0.5, 0.75, 1 around
    source defaults, both endpoints of interactions, all list choices and adjacent f32 values
    around branch boundaries. Include all-controls-low/high, paired drive/output and rate/depth
@@ -357,9 +385,10 @@ These are implementation gates, not claims that this documentation change has ru
 4. **Long floor and null.** At every listed rate render at least 60 seconds of sample time per
    effect, with parameter motion, an impulse/noise excitation and at least 10 seconds of silence.
    Run this for oracle self-comparison and port comparison. Extend slowest-delay/resolution cases
-   until all enabled paths have emitted processed input and wrapped their longest active memory
-   at least twice; 60 seconds of an unfilled wet buffer is not evidence. Record frame counts and
-   final state. No assertion depends on elapsed wall time or scheduling luck.
+   until all enabled paths have emitted processed input and wrapped their longest advancing memory
+   at least twice. Exercise stationary-index paths at their source-reachable indices without
+   changing their counters; 60 seconds of an unfilled wet buffer is not evidence. Record frame
+   counts and final state. No assertion depends on elapsed wall time or scheduling luck.
 5. **Three compilers, feedback before review.** Windows x86-64 MSVC, Linux x86-64 GCC and macOS
    Apple silicon/Apple Clang each run floors, nulls and scenarios in CI's workspace tests. Require
    an AArch64 runner explicitly rather than assuming a moving `macos-latest` label supplies one.
@@ -390,12 +419,15 @@ These are implementation gates, not claims that this documentation change has ru
    snapped reference, retaining source dither rather than asserting exact silence at Fader = 0.
    A missing snap must fail the 64-frame restoration case. Subsequent automation and the separate
    raw-constructor case must still null against their original ramps.
+   Unequal-channel slew scenarios must exercise the shared final `depthTrim`; hall wet-path
+   scenarios must exercise the stationary and twice-advanced counters recorded in the survey.
 
 ## Consequences
 
 The stock collection fills distinct mixing jobs with small interfaces and a reproducible reference.
-The tape gap and saturation replacement remain open, and the inherited Saturator stays until a
-safe replacement is admitted; this first set does not close every gap in #305.
+Tape, saturation and plate replacements remain open. The inherited Saturator and
+Plate Reverb stay until safe replacements are admitted; this first set does not close every gap
+in #305.
 Users get the author's algorithms and quirks, including sample-rate coloration, seeded noise,
 nonlinear mix laws and block-length-dependent ramps. Gain staging and console placement need help
 text; a famous algorithm name is not a substitute for it.
@@ -435,3 +467,11 @@ M1 accepted: Qualified the catalog's common F convention, recorded "Density3"'s 
 C1 accepted: Deferred "ToTape9" / Tape Color from the first shippable set (now 11 inserts), documented the 8 kHz decoder counterexample and required later domain or DSP/reference decision, removed its slice, crate and control entries, and updated the catalog and indexes; the tape gap remains open.
 
 M1 accepted: Corrected the "kPlate140" catalog state summary to identify `gainIn`, `gainOutL/R` and `pearA`–`pearF` as declared and initialized but unused in both processing paths, rather than active gain/Pear stages.
+
+## Judging round 3: responses
+
+C1 accepted: Deferred "kPlate140" / Large Plate for nonfinite SubTight histories on hot finite input, reduced the first set to 10 inserts, retained the inherited Plate Reverb, removed the plate from slice 3 and its family insert list, and documented the counterexample and required later input-domain/enforcement or DSP/reference decision in the ADR and catalog; updated both indexes.
+
+M1 accepted: Recorded "Slew4"'s use of the right channel's `depthTrim` in both final fractional-depth blends in the catalog and port contract; preserve this coupling in both precision paths.
+
+M2 accepted: Recorded "kGuitarHall2"'s stationary `c6ZAR` and twice-advanced `c6ZBR` in the catalog and port contract; preserve the initialized, bounded counter behavior in both precision paths.

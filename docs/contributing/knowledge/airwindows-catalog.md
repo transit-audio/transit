@@ -65,9 +65,10 @@ noise-shaping algorithm available anywhere in the catalog.
 
 ## First set
 
-These are the 11 selected inserts, in slice order. "Density3" and "ToTape9" are deferred below
-because their recurrences can become unstable in the admitted low-rate domain; the inherited
-Saturator stays and the tape gap remains open.
+These are the 10 selected inserts, in slice order. "Density3" and "ToTape9" are deferred below
+because their recurrences can become unstable in the admitted low-rate domain; "kPlate140" is
+deferred for nonfinite histories on hot finite input. The inherited Saturator and Plate Reverb
+stay, and the tape gap remains open. Small Hall replaces only Room Reverb in slice 3.
 Each row gives the state that the port's reset,
 floor and scheduling fingerprint must cover, in addition to its parameters and rate.
 
@@ -81,9 +82,8 @@ floor and scheduling fingerprint must cover, in addition to its parameters and r
 | "Console9Buss" / 9 | 2: Pan, Fader | **No** rate query; same block-based control ramps. | F; pan/trim endpoint memories; complementary decode curve. Same raw constructor and explicit adapter snap/reset rule as the channel. | Must pair with the selected channel algorithm after the sum; no cross-generation pair. |
 | "ADClip9" / 9 | 5: Boost, Match, Noise, Ceiling, Mode | **Yes:** sample spacing `clamp(floor(r),1,16)`; delayed clip history and slew tests follow that spacing. | F **exception:** float-output dither additions are commented out; both RNGs still advance, with a second right advance when either unsigned L-minus-R or R-minus-L is below 1073741824. RNG also supplies clipping noise and denormal injection. Last output/dry sample, 18-element intermediate and 34-element slew arrays per side, clip flags. **Constructor omits `lastDryL/R` initialization; deterministic patch required.** | Latest clipper revision. Source has three modes, not the predecessor's eight. Noise/Ceiling are nonlinear thresholds, not dB labels. |
 | "TPDFDither" / U, Redux | 2: Quant, DeRez | **No:** fixed word-length scaling, independent of sample rate. | T; only parameters and RNG words persist. Quant selects scale 32768 or 8388608; DeRez multiplies by `(1-B)^6`, scale floor `.0001`, output divisor floor 8. | One general output dither. Notes recommend it when no special shaping is needed and acknowledge its half-LSB offset; preserve the actual floor/addition sequence. |
-| "Slew4" / 4 | 1: Compres | **Yes:** `compresity=(.95*A)^2*8*r`; filter banks and lookahead remain in samples. | F; L/R 24-by-12 averaging storage, slew sustain, second/third samples, shared count; explicit two-sample lookahead. | Latest brightness compression without saturation; distinct standalone use even though tape includes related processing. |
-| "kGuitarHall2" / 2 | 6: Regen, Derez, Filter, EarlyRF, Positin, Dry/Wet | **Yes:** revised Bezier undersampling: `B*2` folds about center, divides by `r`, clamps, then left half locks to reciprocal integer subdivisions while right half stays continuous with rate correction. | F; 3-by-3 early and 6-by-6 main delay networks, counts, feedback, Pear-filter and Bezier histories. Immutable `early[36]`; `int(E*27)` chooses 28 starting positions over nine entries. | A small hall with source positioning; author's notes describe its hall/arena goal and the new Position control. |
-| "kPlate140" / U, model 140 | 5: Input, Regen, DeRez, Predlay, Wetness | **Yes:** `derez=C/r`, clamped `.0005..1`, then reciprocal-integer locked; predelay `int(16000*D*derez)` at the internal update rate. Filter/size behavior follows that clock. | F; active state includes 5-by-5 matrix delays/counts, feedback, low-frequency damping, vibrato, predelay/subdelay and Bezier histories. `gainIn`, `gainOutL/R` and `pearA`–`pearF` are declared in the header and initialized in the constructor but unused in both processing paths; they are not active gain/Pear stages. | Author's next-generation large plate. At Wetness .5 both dry and wet gains are 1; below .5 wet gain is squared. Not a constant-power crossfade. |
+| "Slew4" / 4 | 1: Compres | **Yes:** `compresity=(.95*A)^2*8*r`; filter banks and lookahead remain in samples. | F; L/R 24-by-12 averaging storage, slew sustain, second/third samples, shared count; explicit two-sample lookahead. The final fractional-depth blend uses the right channel's `depthTrim` for both channels; preserve this coupling. | Latest brightness compression without saturation; distinct standalone use even though tape includes related processing. |
+| "kGuitarHall2" / 2 | 6: Regen, Derez, Filter, EarlyRF, Positin, Dry/Wet | **Yes:** revised Bezier undersampling: `B*2` folds about center, divides by `r`, clamps, then left half locks to reciprocal integer subdivisions while right half stays continuous with rate correction. | F; 3-by-3 early and 6-by-6 main delay networks, counts, feedback, Pear-filter and Bezier histories. Immutable `early[36]`; `int(E*27)` chooses 28 starting positions over nine entries. `c6ZAR` remains at its initialized index, while `c6ZBR` advances twice per internal update; preserve the source's counter behavior. | A small hall with source positioning; author's notes describe its hall/arena goal and the new Position control. |
 
 ## Deferred candidates and predecessors
 
@@ -95,6 +95,7 @@ even where the selection moved to a later version. F/N meanings are defined abov
 |---|---|---|---|---|
 | "ToTape9" / 9 | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | **Yes:** encoder/decoder coefficients `(1-C)/r` and `C/r`; bias, head-bump and flutter formulas use `r`; depth capped at 498 samples; clip spacing `clamp(floor(r),1,16)`, slew span `clamp(floor(2*r),2,32)`. Head frequency `(H*H*175+25)/rate`. **Unstable low-rate decoder:** 8 kHz, Shape = 1 gives a history multiplier of -4.5125; counterexample below. | F also drives flutter and clipping noise; encoder/decoder envelopes, IIR/biquads, two 1002-double flutter buffers, phases/targets, bias stages, hysteresis, averaging histories and clip/lookahead state. | Latest tape revision; notes describe the replaced core, brightness compression and new output clipper. Deferred for nonfinite output at admitted settings. Tape gap remains open; admission requires a reviewed rate/control domain and refusal/bypass policy or an approved DSP/reference change, not a stabilizing initialization patch. |
 | "Density3" / 3 | 4: Density, Highpas, Output, Dry/Wet | **Yes:** high-pass amount `B^3/r`; zero high-pass clears its histories at block entry. **Unstable at admitted low rates:** at 8 kHz, B = 1 gives a history multiplier of -4.5125. | F **exception:** float dither uses `3.553e-44l`, not `5.5e-36l`; right RNG advances a second time when either unsigned L-minus-R or R-minus-L is below 1073741824. L/R IIR memories; internal `density=A*5`, display `A*5-1`. | Preferred saturation revision in the author's notes, but deferred from the first set on safety evidence. Inherited Saturator remains. Admission requires a supported-domain and refusal/bypass decision or separately approved DSP/reference change; no stabilizing initialization patch. |
+| "kPlate140" / U, model 140 | 5: Input, Regen, DeRez, Predlay, Wetness | **Yes:** `derez=C/r`, clamped `.0005..1`, then reciprocal-integer locked; predelay `int(16000*D*derez)` at the internal update rate. Filter/size behavior follows that clock. | F; active state includes 5-by-5 matrix delays/counts, feedback, low-frequency damping, vibrato, predelay/subdelay and Bezier histories. **SubTight histories can become nonfinite on hot finite input; counterexample below.** `gainIn`, `gainOutL/R` and `pearA`–`pearF` are declared and initialized but unused in both processing paths, not active gain/Pear stages. | Preferred next-generation large plate in the author's notes, but deferred; inherited Plate Reverb remains. Admission requires a reviewed input-amplitude domain with enforcement and explicit boundary behavior plus oracle/adapter coverage, or an approved DSP/reference change. At Wetness .5 both dry and wet gains are 1; below .5 wet gain is squared. |
 | "Console7Channel" / 7 | 1: Fader | **Yes:** 20 kHz biquad normalized by rate; gain chase capped by `sampleFrames`. | F; gain chase/speed and one stereo biquad. Block-length dependent. | Earlier console encoder; selected 9 gives the latest standalone pair. |
 | "Console7Buss" / 7 | 1: Master | **Yes:** two 20 kHz biquads; chase capped by call length. | F; gain chase/speed, two stereo biquads. | Earlier matching decoder, not an alternative for the selected encoder. |
 | "ToTape8" / 8 | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | **Yes:** `r` scales flutter, bias and filters; clip spacing capped at 16; depth capped at 498. | F; 1002-sample flutter buffers, companding/bias/head-bump filter state, 16-element clip intermediates. Boundary access needs audit if ever ported. | Tape predecessor; "ToTape9" notes explicitly describe the improved replacement core. |
@@ -117,8 +118,8 @@ even where the selection moved to a later version. F/N meanings are defined abov
 | "Galactic3" / 3 | 6: Replace, Brightns, Detune, Derez, Bigness, Dry/Wet | **Yes:** Derez `D/r`, clamped and reciprocal-integer locked; Bezier reconstruction, low-pass `/sqrt(r)`, sample-based detune. | F plus modulation's `oldfpd` history; matrices, indices, feedback, IIRs, variable delay lengths and Bezier state. | Preferred later ambient space. Notes recommend 3 over the original for undersampling; room-size motion can make abrupt sounds. It is not selected as a natural hall. |
 | "Verbity" / U | 4: Bigness, Longness, Darkness, Wetness | **Yes:** `cycle` division; low-pass `/sqrt(r)`, fixed buffer lengths times size. | F; dual-mono delay networks, feedback, IIR/thunder and reconstruction history. | Earlier compact room/ambience candidate; survey successor before a later room slice. |
 | "Verbity2" / 2 | 4: RmSize, Sustain, Mulch, Wetness | **Yes:** `cycle` division; high/low-pass `/sqrt(r)` and fixed-delay size control. | F; 25-delay network per side, counters, feedback crossfeed, IIR/interpolation histories. | Larger ambience topology, dual-mono at no feedback and crossfeeding as sustain rises per notes; not a second first-set hall. |
-| "kPlateA" / U, model A | 5: InputPad, Damping, Low Cut, Predelay, Wetness | **Yes:** `cycle` division; `downRate=rate/cycle` sets filters and `int(downRate*D^2*.5)` predelay. Cycle cap makes very high rates require a predelay bounds audit. | F; early reflections, 5-by-5 delays/counters, feedback, gain/IIR/biquad and reconstruction histories. | Earlier plate candidate. Next-generation large plate chosen; lettered variants would duplicate the first job. |
-| "kPlate240" / U, model 240 | 5: Input, Regen, DeRez, Predlay, Wetness | **Yes:** rate-divided reciprocal-integer DeRez clock and scaled predelay, like model 140, with different feedback/blur coefficients. | F; its own 5-by-5 delays and feedback, damping/gain, Pear filters, modulation, predelay/subdelay and Bezier state. | Author describes a smaller, cloudier plate. Different model, not newer because 240 exceeds 140; defer a second plate color. |
+| "kPlateA" / U, model A | 5: InputPad, Damping, Low Cut, Predelay, Wetness | **Yes:** `cycle` division; `downRate=rate/cycle` sets filters and `int(downRate*D^2*.5)` predelay. Cycle cap makes very high rates require a predelay bounds audit. | F; early reflections, 5-by-5 delays/counters, feedback, gain/IIR/biquad and reconstruction histories. | Earlier plate candidate. Not automatically promoted after deferring "kPlate140"; needs its own admission evidence before replacing Plate Reverb. |
+| "kPlate240" / U, model 240 | 5: Input, Regen, DeRez, Predlay, Wetness | **Yes:** rate-divided reciprocal-integer DeRez clock and scaled predelay, like model 140, with different feedback/blur coefficients. | F; its own 5-by-5 delays and feedback, damping/gain, Pear filters, modulation, predelay/subdelay and Bezier state. | Author describes a smaller, cloudier plate. Different model, not newer because 240 exceeds 140; remains deferred and needs its own admission evidence, not an automatic substitute for model 140. |
 
 ## What the survey changes about the implementation
 
@@ -157,9 +158,19 @@ without the snap, the first interpolated trim is 0.4921875 instead of 0 (output 
 compression ratio. "DeBess" Sense's display labels disagree with the intuitive meaning of its
 delta-monitoring branch; transit labels the actual output. Hall Position really selects 28
 positions, while De-esser Sharp is not purely stepped because fractional sharpness also affects
-speed. Plate Wetness has unity dry and wet at the midpoint. Predelay's exact seconds depend on
-integer truncation and the internal clock. Percentage travel is an honest display for uncalibrated
-controls; the ADR's specified Hz/dB/list mappings are exceptions backed by source formulas.
+speed. The deferred plate's Wetness has unity dry and wet at the midpoint. Predelay's exact seconds
+depend on integer truncation and the internal clock. Percentage travel is an honest display for uncalibrated
+controls; the ADR's specified dB/list mappings are exceptions backed by source formulas.
+
+**Defined quirks stay.** In `Slew4/Slew4Proc.cpp`, the left channel computes `depthTrim` at
+line 37, the right overwrites it at line 191, and both final blends use that right-derived value
+at lines 345–346. The double path repeats this at lines 394, 548 and 702–703. Separate variables
+would change stereo coupling and fail fidelity; unequal-channel null scenarios must exercise it.
+In `kGuitarHall2/kGuitarHall2.cpp:76`, `c6ZAR` and `c6ZBR` both start at 1. In its `Proc.cpp`,
+`a6ZAR` is written/read at the unchanged `c6ZAR` index (lines 376 and 390), while `c6ZBR`
+advances twice (lines 339 and 383). The double path repeats this (lines 832, 869, 876 and 883).
+These are initialized, bounded accesses; preserve them and exercise the affected wet paths in
+the nulls. They are not permission for an oracle cleanup patch.
 
 **High rates are in scope now.** `crates/time/src/lib.rs` admits up to 768 kHz, with 352.8/384 kHz
 already in `SampleRate::COMMON`; the export command also admits down to 1 kHz. The selected
@@ -197,6 +208,31 @@ change alters defined DSP, and an adapter-only NaN mute would leave the raw-refe
 unsatisfied. The ADR defers Tape Color; its later admission must explicitly decide the supported
 rate/control domain and refusal/bypass behavior or approve a DSP/reference change. The current
 decision approves neither and does not claim a full tape replacement.
+
+**Finite input alone does not prove stability.** "kPlate140" has a separate amplitude problem,
+even at 44.1 kHz. In `kPlate140/kPlate140Proc.cpp:78`–97, the SubTight section starts from
+`out = avgSamp * .00187`. Three stages per channel each compute `scale = .5 + abs(out*.5)`,
+`out = history + sin(history-out)*scale`, then `history = out*scale`. Lines 99–100 clamp only
+the temporary output after those history writes. No amplitude bound is enforced before them.
+
+The judging round 3 binary64 trace, independently reproduced as a source-derived recurrence in
+this revision, uses fresh constructor state, 44,100 Hz, constant stereo `2000.0f` input and
+source-order controls `[1, .5, 1, 0, 1]`. It includes Bezier accumulation and zero-predelay startup
+(processing lines 57–74; constructor lines 152 and 161–165). The internal average reaches 2000;
+at input sample 49, `subCL` is approximately `9.01785351125649e276`, at sample 51 it becomes
+infinity, and at sample 53 `outSampleL` becomes NaN. Sample numbers are one-based. This is a
+numerical source counterexample, not a compiled C++ oracle result; math libraries may change
+the exact timing. Nonzero input makes denormal seeding irrelevant to this recurrence. The NaN
+passes the comparison clamps, contaminates the delay network (lines 103 and 118–127), and is
+not removed by the final comparison clamps either (lines 423–426).
+
+`crates/mix/src/strip.rs` silences and fails an insert after nonfinite output; it does not limit
+input amplitude or establish a finite raw-reference floor. The ADR therefore defers Large Plate
+and keeps the inherited Plate Reverb. Future admission needs a separately reviewed amplitude
+domain, enforcement before the core, explicit boundary/out-of-domain behavior and matching
+oracle/adapter coverage, or an approved DSP/reference change. Neither is approved here; clamping
+these initialized histories would change defined DSP. A milder unspecified hot-input fixture
+does not resolve the admission conflict.
 
 **No blanket transparency claims.** The float path ordinarily adds dither even at nominally neutral
 settings. The explicit unity bypass in "PurestGain" and RNG-free "BitShiftGain" are exceptions,
