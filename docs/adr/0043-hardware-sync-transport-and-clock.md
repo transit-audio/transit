@@ -2,7 +2,7 @@
 
 - **Status:** proposed 2026-11-03
 - **Date:** 2026-11-03
-- **Scope:** maintainer decision, issues [#93](https://github.com/derekmwright/transit/issues/93) and [#183](https://github.com/derekmwright/transit/issues/183); transport follow, clock follow and clock/transport send.
+- **Scope:** maintainer decision, issues [#93](https://github.com/transit-audio/transit/issues/93) and [#183](https://github.com/transit-audio/transit/issues/183); transport follow, clock follow and clock/transport send.
 - **Reopen when:** the reference rig cannot meet the measured jitter budget; the filter cannot follow the admitted tempo ramps without audible corrections; recorded material cannot retain its musical placement under the runtime map; or a second synchronization protocol needs to arbitrate the source.
 
 ## Context
