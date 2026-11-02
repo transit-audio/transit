@@ -131,7 +131,7 @@ not shipped behavior. The existing domains above remain; MIDI adds two musical c
 | Coordinate | Meaning and conversion |
 |---|---|
 | Incoming MIDI clock `C_in` | F8 count, 24 pulses per quarter. Each tick carries the MIDI input callback's monotonic `host_arrival_ns` from the same host origin as recording. H maps to D through the output clock fit; retain arrival quality and uncertainty. |
-| Outgoing MIDI clock `C_out` | Quarter-note crossings at `k/24`, or `40*k` model ticks (960 per quarter), mapped through the applied transport to D and then to host deadlines on the output thread. |
+| Outgoing MIDI clock `C_out` | While playing, quarter-note crossings at `k/24`, or `40*k` model ticks (960 per quarter), mapped through the applied transport to D and then to host deadlines on the output thread. While stopped, a tempo-only idle grid anchored to D with an open audio stream, otherwise H; idle ordinals are not song position. |
 | Runtime external beat map | Applied historical `(D, S, quarter position, rate, epoch, loop iteration)` segments. Incoming count anchors musical position; filtered tempo interpolates it. Device samples still clock audio. |
 
 | Mode | Transport authority | Tempo and musical phase authority | Audio scheduling and recording |
@@ -140,8 +140,14 @@ not shipped behavior. The existing domains above remain; MIDI adds two musical c
 | External transport only (Transport) | Chosen input's Start/Stop/Continue/SPP; local Stop always works | Saved session tempo map; F8 has no effect | Device D, as internal |
 | External clock (Transport and Clock) | Chosen input's transport; local Stop always works | Incoming tick count anchors q; filtered tempo interpolates between ticks; runtime external map replaces saved tempo events | Device D remains the sample clock; historical D/S/q segments place events |
 
+In all three modes, idle output uses the active tempo without advancing S or song q; it adds
+no transport authority. Its scheduler runs on control or the MIDI output thread, never the
+audio callback, and uses the existing output deadline path and per-port delay.
+
 Only one input is active. Modes and input/output sync delays are per-port machine preferences,
-off/zero by default; no new required session field. Positive input delay moves the tick anchor
+off/zero by default; per-output **Idle clock** defaults on, effective only with Clock on. An
+explicit Idle clock off persists across Clock off/on. There is no new required session field.
+Positive input delay moves the tick anchor
 later, positive output delay sends later. Neither changes captured note timestamps. A port
 carrying notes still carries them normally. On this base `midi-io/src/ring.rs` already parses
 and offers F8/FA/FB/FC and F2; the Monitor sees them, while playback ignores them. The proposed
@@ -163,16 +169,53 @@ retain that history. K22's live-input FIFO alignment is not a source of phase or
 Leaving Transport and Clock mode restores the saved tempo map; external performance tempo is not saved
 automatically, so later internal playback can differ.
 
-Outgoing deadlines follow the existing presentation map and default to Main's compensated
+While stopped, Internal and Transport-only idle output uses the tempo map at the playhead.
+Transport and Clock uses the followed tempo when Locked and the last valid tempo while
+Freewheel/Missing; acquisition uses the latest valid estimate or the labeled saved-tempo
+fallback before one exists. A tempo edit, followed-tempo update or stopped move into another
+tempo latches at the next tick: keep that deadline and change the interval starting there.
+
+The idle grid accumulates exact fractional periods `60*Fd/(24*B)` in D or `60e9/(24*B)` in H,
+rounding once per deadline within one sample or one ns. All ports join the same underlying
+grid with independent delays. H belongs to the sync service across Player replacement, with
+explicit origin bridges. Audio close converts the next exact crossing to H through the last
+valid fit; audio open retains H until a valid new device fit converts it to D. Serialize with
+dispatch, cancel the old generation entry and enqueue the same ordinal once, preserving its
+deadline and phase within one destination unit. A bad bridge or unsafe spacing faults sync;
+an orderly handover is the explicit clock-key-change exception. Closing the MIDI output port
+itself cancels idle ticks. Reconnection awaits fresh start/Resync and never drains old ticks.
+
+Running deadlines follow the existing presentation map and default to Main's compensated
 reference (the bare-output `+A` convention of ADR 0020), plus a separate per-port delay.
-Start precedes the first tick; a playing locate uses Stop/SPP/Continue. Same-device send/follow
+Idle uses D-to-H (or H directly) plus that delay; it has no render reference to which to add A.
+At Stop it inherits the compensated running crossing's time and fractional phase, so A is not
+subtracted from the next deadline. Stop releases notes/destinations and sends FC when Transport
+is on, while eligible idle F8 continues. Idle F8 implies no transport state or song position
+in either Song or Pattern mode, and none of these ticks counts toward a later song position.
+Start resets the receiver to song start on the next Clock. Keep the idle time grid, prepare
+local playback's compensated q=0 reference at a future crossing, send FA then that crossing's
+F8 as q=0, and let running spans take over. Keep the preparation lead and one owner per tick.
+If the 5 ms minimum needs intervening grid slots suppressed, report a preparation gap without
+resetting phase or catching up. Continue retains musical phase, unaffected by idle tick count.
+A playing locate uses Stop/SPP/Continue with no idle F8 inserted in the sequence. Same-device send/follow
 is suspended to avoid feedback; diagnostics loopback detaches the returned input from control.
 An A change, or a map change that reverses or bunches clock deadlines, faults that output's
 sync: cancel unsent events by generation, retain already-sent counts, send Stop if Transport is
-enabled, and require a fresh ordered resync. Clock ticks never use the note deadline clamp.
+enabled, and require a fresh ordered resync. This cancellation includes idle output: a good
+span/fit alone cannot resume it. A stopped Resync discharges the sticky Stop and resumes only
+idle ticks, with no FA/FB; the later start supplies the ordered position sequence. Clock off,
+Idle clock off while stopped, port closure and feedback suspension also cancel idle ticks.
+Clock ticks never use the note deadline clamp.
 The ADR specifies the exact transient BPM envelope and recovery deadline for its delayed-arrival
 fixture; the sample-domain phase bound still applies throughout that transient.
 Sample-resolution deadlines do not certify USB jitter. The proposed hardware target is a
 maximum residual of 24 device samples at 48 kHz after removing one fixed median round-trip
-delay, measured on the diagnostics page and recorded under `docs/benchmarks/`. Deterministic
-tests inject stamps and device frames; they never assert wall-clock scheduling outcomes.
+delay, measured separately for running and idle ticks on the diagnostics page and recorded
+under `docs/benchmarks/`. Without an audio device the idle target is 500000 ns, using intended
+and returned H stamps with one fixed median latency removed; report it separately from device
+evidence. Both show percentiles, maximum, drift and lost/extra counts. Handover gaps are reported
+separately. These hardware targets differ from the one-sample/one-ns deadline rounding bound.
+Deterministic tests inject idle trains, next-tick tempo edits, Start after N idle ticks (order,
+q=0 and grid continuity), both handovers and cancellation/recovery in samples or scheduler ns;
+they never assert wall-clock scheduling outcomes. Full rules are in ADR 0043 section 5 and its
+2026-11-03 amendment; the earlier judging decisions and follower bounds remain in force.

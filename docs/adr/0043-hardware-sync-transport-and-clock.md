@@ -63,13 +63,17 @@ arrival on the MIDI input thread as `H_n`, before worker or UI delay. Convert ar
 the same `ClockMap::host_to_frame` and historical placement machinery as recording. Do not
 reinterpret a WinMM timestamp as H or as D. Arrival stamps retain `Arrival` quality and USB/driver
 uncertainty even with a good audio map. Outgoing `C_out` is a series of quarter-note crossings,
-mapped to D and then through `ClockMap::frame_to_host` to output-thread deadlines.
+mapped to D and then through `ClockMap::frame_to_host` to output-thread deadlines. While stopped,
+the idle grid in section 5 supplies tempo-only crossings; it does not advance S or song q.
 
 | Mode | Transport authority | Tempo and musical phase authority | Audio scheduling and recording |
 |---|---|---|---|
 | Internal (all inputs Off) | Local transport | Saved session tempo map: S to q | Device D; existing rate conversion and historical D to S mapping |
 | External transport only (Transport) | Chosen input's Start/Stop/Continue/SPP; local Stop always works | Saved session tempo map; F8 has no effect | Device D, as internal |
 | External clock (Transport and Clock) | Chosen input's transport; local Stop always works | Incoming tick count anchors q; filtered tempo interpolates between ticks; runtime external map replaces saved tempo events | Device D remains the sample clock; historical D/S/q segments place events |
+
+In every mode, enabled idle output uses the active tempo without advancing song position.
+Its time anchor is D with an open audio stream, otherwise H; this adds no transport authority.
 
 Only one input is the active source. Setting a second port to a non-Off mode turns the former
 one Off in the same preferences transaction. There is no first-message-wins arbitration.
@@ -278,12 +282,13 @@ internal mode in this scope, so an external Stop/SPP cannot invalidate its fixed
 ### 5. Sending clock and transport
 
 Each output port has **Clock** and **Transport** switches, both off by default, and **Song
-Position on locate**, default on when Transport is enabled (inactive otherwise). Clock alone
-serves devices whose LFOs need tempo without transport. Transport alone sends state and position
-without F8. Send no ticks while stopped in this scope; free-running stopped clock from #183 is
-deferred. Ports used only for sync are opened by the output worker independently of tracks.
+Position on locate**, default on when Transport is enabled (inactive otherwise). **Idle clock**
+defaults on and is effective only when that port's Clock is on. It sends F8 while stopped so
+hardware can display tempo and run an arpeggiator at that tempo. Clock alone serves devices
+whose LFOs need tempo without transport. Transport alone sends state and position without F8.
+Ports used only for sync are opened by the output worker independently of tracks.
 
-Generate ticks from actual applied transport spans, not a sleeping BPM timer. In internal or
+While playing, generate ticks from actual applied transport spans, not a sleeping BPM timer. In internal or
 transport-only mode the crossings are `q_k = k/24`, model tick `40*k`, converted through the
 session tempo map including changes mid-bar. Use exact fractional crossings and round once to
 the first device frame at or after the crossing; never sum rounded tick intervals. Under
@@ -301,6 +306,54 @@ If a deadline has already passed, send once as late and count it; do not claim t
 negative offset was achieved. Loss of a valid presentation map is labeled approximate and
 disqualifies a timing benchmark, as it does for note output.
 
+**Idle grid:** the control or MIDI output scheduler thread generates idle ticks, never the audio
+callback. Use the same sample-resolution deadline queue and per-port output delay as running
+sync. The grid is a tempo oscillator, not a rendered span or a song-position counter. Internal
+and Transport-only modes use the saved map's tempo at the stopped playhead; Transport and Clock
+uses the followed tempo when Locked and the last valid tempo in Freewheel/Missing. During
+Acquiring use the latest valid estimate, retaining the last valid tempo if no new estimate is
+valid; before any valid estimate use the labeled saved-tempo fallback from section 3.
+
+With an open, advancing audio stream anchor the grid to consumed device frames D, using its
+clock key and D-to-H fit even though transport render time is stopped. With no audio stream use
+monotonic H in integer nanoseconds, from an origin owned by the sync service that survives
+Player replacement. Bridge a Player's H origin explicitly; never reinterpret a new origin.
+At first activation seed an exact fractional grid origin at the supplied D or H readout; its
+first tick is one period later. All ports share the underlying grid and apply their own delay;
+enabling another port joins its next future crossing without resetting other ports.
+Periods are `60*Fd/(24*B)` samples or `60e9/(24*B)` ns. Accumulate exact fractional crossings,
+round each deadline up once (at most one sample or one ns), and retain the fractional remainder.
+Use D-to-H plus output delay while device-anchored and H plus output delay otherwise. There is
+no rendered Main reference to add A to while idle; the running handoff below aligns to Main.
+On running-to-idle handoff, seed from the last running crossing's compensated presentation
+instant and exact fractional phase, so dropping the render reference does not subtract A or
+move the next deadline. Keep the current A revision for fault detection while sending.
+
+A tempo edit, stopped locate into another tempo, or adopted followed-tempo update takes effect
+at the next tick: keep that next deadline, latch the latest valid B there, and use its period
+for the interval starting at that tick. Admit only that one future idle tick, so no train of
+old-tempo ticks is queued. This also makes a stopped tempo change deterministic and continuous.
+
+**Audio-device handover:** serialize open/close with dispatch. At an orderly close convert the
+exact next D crossing through the last valid fit into H before retiring that clock, cancel its
+unsent device-generation entry, and requeue that same ordinal once in H. At open keep H until
+the new D-to-H fit is valid, then convert that same next crossing into the new D domain. Preserve
+its host deadline, fractional phase and per-port delay (applied exactly once), within one new
+domain unit of rounding; never reset the grid, duplicate a tick or catch up skipped ticks.
+These explicit, continuous handovers are the only clock-key-change exception to the fault rule
+below. An unexpected reset, missing bridge, expired fit or spacing violation uses that fault
+rule; an open but invalid device map is approximate and cannot pass device-timing signoff.
+Closing the MIDI output device/port itself stops idle output and cancels its queued generation;
+closing only the audio stream hands the still-open MIDI port to H.
+
+Idle F8 carries no song position and implies no transport state. No ticks between Stop and a
+later Start/Continue count toward song position, with Song Position either on (Song) or off
+(Pattern). The receiver contract is Start resetting to song start on the next Clock, regardless
+of the number of prior idle ticks. Stop still releases external destinations and sends FC when
+Transport is on; eligible idle ticks continue after FC under the idle generation, with no replay
+of canceled running ticks. Clock off, Idle clock off while stopped, port closure, feedback
+suspension and the fault cancellation window suppress idle ticks. Transport off alone does not.
+
 **Deadline changes and port faults:** clock ticks never use the note path's `Track::last`
 deadline clamp. Each port retains a sync generation, the last successfully sent tick ordinal,
 and the last admitted tick's immutable deadline and local period. Check crossings in tick order
@@ -309,8 +362,12 @@ a later span changes its map. A change of A in any applied span while sending fa
 sync, even if its next deadline would still be increasing. A continuous map revision is allowed
 only if each new deadline exceeds the previous admitted deadline by at least half the smaller
 of their two local tick periods, converted through their respective presentation maps. Equal,
-reversed or more closely spaced deadlines fault; a clock-key reset or a missing span also faults.
+reversed or more closely spaced deadlines fault; an unexpected clock-key reset or a missing
+required running span also faults. Stopped idle generation requires clock observations, not
+transport render spans.
 This permits continuous tempo ramps while refusing a discontinuous compensation or mapping change.
+These checks, successful-send accounting and late/bunched-tick faults also cover idle ticks;
+ordinary tempo edits use the next-tick rule above, never the note deadline clamp.
 
 The output worker serializes admission, fault handling and dispatch. On detecting a fault,
 advance that port's sync generation before any further dispatch, cancel **all unsent sync
@@ -332,6 +389,12 @@ Clock-only output emits no transport bytes: it stays faulted until an explicit R
 start, resumes at a newly prepared crossing, and warns that the receiver's song position must
 be reset externally. Do not automatically recover on the next good span. Already-sent ticks
 remain historical facts; only the new ordered position sequence establishes receiver phase.
+Idle output is canceled at the same fault boundary and stays silent until this explicit recovery;
+a good clock fit alone cannot restart it. If Resync is requested while locally stopped, discharge
+the sticky Stop first, acknowledge recovery in a new generation, and resume only tempo-only idle
+ticks at a newly prepared future crossing of the shared grid, without resetting other ports.
+Retain the locate for a later ordered start; do not
+send FA/FB and start the receiver while transit is stopped. Clock-only recovery keeps its warning.
 
 Wire ordering is explicit (F2 is a three-byte System Common message, not a real-time byte):
 
@@ -339,8 +402,21 @@ Wire ordering is explicit (F2 is a three-byte System Common message, not a real-
   Reserve a preparation lead of `max(one tick period, 5 ms)` before that tick. It is lead time,
   not an extra counted tick. Prepare playback far enough ahead on a local start; an external
   start that arrives too late is sent in order and reported late, not silently backdated.
+  From idle, choose a future crossing on the existing grid with this preparation lead, send
+  FA, then the next emitted F8 at that crossing as q=0. Reassign musical phase there without
+  resetting the time grid or treating its idle ordinal as song position. Prepare local playback
+  so its compensated Main q=0 reference is that crossing before per-port delay; running spans
+  then take over the same grid. Preserve already-sent idle ticks and cancel only superseded
+  queued entries, with one producer owning each boundary tick. No idle F8 may slip between FA
+  and the designated first running F8. If the 5 ms minimum exceeds a tick period, suppress
+  intervening grid slots during preparation and report that intentional preparation gap;
+  the underlying grid stays continuous, with no phase reset or catch-up burst. Late external
+  starts retain the existing late-report rule; any unsafe spacing takes the port-fault path.
 - Resume without a locate sends **Continue, then Clock**, retaining the next unsent tick and
-  fractional phase. Stop sends **Stop** and cancels all future ticks for that transport generation.
+  fractional musical phase, unaffected by idle tick count. Align the first running crossing to
+  the idle grid with the same preparation/handoff rule; do not advance retained song position.
+  Stop sends **Stop** and cancels all future ticks for that transport generation, while eligible
+  idle output takes over the next crossing without resetting the time grid.
   A duplicate local request that changes no state emits nothing.
 - A representable stopped locate sends **SPP** if enabled; nonzero initial play sends **SPP,
   Continue, Clock**. An unaligned stopped locate retains a pending target until the
@@ -350,6 +426,8 @@ Wire ordering is explicit (F2 is a three-byte System Common message, not a real-
   truncate the old lap. The first new-position F8 follows the ordered preparation sequence;
   report any resulting resync gap rather than advancing a hardware song before the local
   jump. Old-generation ticks at/after the jump are invalidated.
+  Idle output is also suppressed for this ordered resync sequence, including its preparation
+  gap; it cannot insert F8 between Stop and Continue (or Stop and Start in Pattern mode).
   This is Logic's documented [Stop/SPP/Continue cycle-jump mode](https://support.apple.com/en-au/102005).
   SPP while the receiver is running is forbidden by this sender's MIDI compatibility contract.
 - SPP represents only `0..16383` sixteenths. For an unaligned locate, leave transit's local
@@ -382,7 +460,8 @@ send guard while disconnecting the returned input from transport control and the
 
 ### 6. Preferences and bounded publication
 
-Store per-input mode and `input_delay_ms`, per-output switches and `output_delay_ms`, in
+Store per-input mode and `input_delay_ms`, per-output Clock, Transport, Song Position and
+`idle_clock` switches and `output_delay_ms`, in
 machine preferences (`ui.json`), keyed by backend, stable port id when available, otherwise
 name plus ordinal. Delay defaults to zero, finite range -500..500 ms. Positive input delay adds
 to the tick's phase-anchor time (transit plays later); positive output delay sends later.
@@ -390,11 +469,15 @@ Neither changes raw note/capture stamps. All sync-setting changes apply while st
 their preferences and show Missing; never bind a different device merely because its enumeration
 index matches. Reconnection starts a new generation, acquires clock afresh and never starts
 playback by itself. An output reconnect cancels old ticks and remains stopped until a fresh
-transport start/resync; it never drains the old backlog. Uncertain aliases stay unbound until
+transport start/resync, including idle output; it never drains the old backlog. An initial open
+of an enabled port may start idle ticks without starting playback. Uncertain aliases stay unbound until
 selected explicitly.
 
 All new preference fields have defaults; there are no new required session fields, format bump
-or `needs` marker. Absent sync preferences default to Off; an older session needs no migration
+or `needs` marker. Absent Clock/Transport preferences default to Off; absent `idle_clock`
+defaults to true, inactive when Clock is off. Preserve an explicit false across Clock off/on.
+Help says "Send tempo while stopped; does not start or locate the receiver." Song Position
+does not change idle behavior. An older session needs no migration
 and does not override existing machine sync preferences. Existing arm and monitor persistence
 rules stand. Saving a session does not silently turn an arrival estimate
 into a permanent tempo edit.
@@ -427,7 +510,7 @@ concern before implementation; this document authorizes no file-size exception.
 | Slice | Work | Gate before merge |
 |---|---|---|
 | 1. Transport follow and send | Typed sync ingress, single-source preferences, minimal source indicator, Start/Stop/Continue/SPP state machine, recording tickets, output serialization and feedback guard. Clock follow choice remains unavailable until slice 3. | Parser interleaving and generation tests; state matrix including armed/unarmed and engaged/not-engaged recording; duplicate requests, SPP at bounds, full queues, unplug and local Stop; fake output asserts byte order and no audio-thread sends. |
-| 2. Clock send | Applied transport spans to output worker, 24-ppqn deadlines, tempo-map changes, per-port Clock and delay. | Scripted device/map verifies crossings within one device sample, no accumulated rounding, tempo change mid-bar, rate conversion, cycle/locate invalidation, delayed worker, PDC and offset sign; compensation/map fault, generation cancellation and ordered resync cases below; strict callback allocation gate; reference hardware send diagnostic before claiming #183's jitter target. |
+| 2. Clock send | Applied transport spans to output worker, 24-ppqn deadlines, tempo-map changes, per-port Clock, Idle clock and delay; stopped D/H grid and device handover. | Scripted device/map verifies crossings within one device sample (one ns without a device), no accumulated rounding, running and stopped tempo changes, idle-to-Start continuity, device open/close handover, rate conversion, cycle/locate invalidation, delayed worker, PDC and offset sign; compensation/map fault, generation cancellation and ordered resync cases below; strict callback allocation gate; running and idle reference hardware diagnostics before claiming #183's jitter target. |
 | 3. Clock follow | N=24 estimator, M=4 lock, bounded phase controller, runtime beat-map render integration and recording/recovery history. Enable Transport and Clock. | Synthetic jitter/ramp/drift and loss fixtures; exact state transitions and sample-error bounds; MIDI/audio take alignment and journal recovery across map changes, short notes and held notes at cycle seams; block-partition and no-allocation checks; source loss never discards a take. |
 | 4. UI and diagnostics | Complete source/lock/quality presentation, preference help, counts, loopback page and benchmark export. | UI state/default/persistence tests with injected stamps; diagnostics arithmetic with scripted samples; real USB loopback report and reference rig signoff, including reconnect and loaded runs. |
 
@@ -493,6 +576,30 @@ This docs-only proposal runs no Cargo commands and claims no implemented or hard
   send, Clock-only send, disabled SPP, same-device suppression and loopback isolation. Inject
   A changes and +/-offsets; prove Start precedes first F8, no obsolete tick survives Stop,
   and a stalled sender cannot burst catch-up clocks or exhaust note-release reserve.
+- Drive stopped idle output at 120 BPM from exact D=0 at 48 kHz: ticks fall at 1000, 2000,
+  3000, ... samples, independent of callback partitions or control drain delays. Repeat in H
+  with exact period `1e9/48` ns, rounding each crossing once, and at 44.1/96 kHz and fractional
+  tempos for one synthetic hour; error is at most one sample or one ns, without accumulation.
+  Adopt 60 BPM between ticks at 2000 and 3000: the next tick remains 3000 and latches the new
+  rate; subsequent ticks are 5000, 7000, ... . Repeat with followed-tempo updates, a stopped
+  playhead move into a new tempo, last-valid freewheel and pre-acquisition fallback.
+- After N idle ticks, for N in {0, 1, 37, 192}, prepare Start on the unchanged 120 BPM grid.
+  Inject FA at crossing N after that idle F8 (at the origin for N=0), then the first running
+  F8 at crossing N+1, exactly 1000 samples later: assert FA-before-F8, the full preparation
+  lead, q=0 for that F8 for every N, and q=1/24 at the following crossing. No idle count becomes
+  a song offset. Assert compensated local q=0 alignment, one owner per boundary tick, +/-port
+  delays and multiple ports joining one grid. Repeat Stop-to-idle, Continue with retained
+  fractional position, Song/Pattern modes and Clock-only output. At 1000 BPM assert the 5 ms
+  preparation gap suppresses intermediate slots without changing grid phase or bursting later.
+- Hand over D-to-H and H-to-a-new-D with injected clock keys, origins, fit observations and
+  readouts, including before/at/after a due tick and while a tempo update is pending. A normal
+  handover keeps the same next ordinal/deadline within one destination unit, applies delay
+  once and emits it once; cover a changed device rate. An invalid bridge or overdue/bunched
+  tick faults and stays silent until acknowledged Resync. Closing the MIDI port, disabling
+  Clock/Idle clock, reconnecting, feedback suppression and fault cancellation must invalidate
+  queued idle entries; delayed old entries cannot escape. Stopped Resync sends no FA/FB and
+  resumes idle only after the sticky FC. A playing locate/resync admits no idle F8 inside its
+  Stop/SPP/Continue or Stop/Start sequence. Test default-true and persisted-false preferences.
 - Script the compensation reversal at Fs=Fd=48000 and 120 BPM: tick k has uncompensated
   frame 48000 and A=4800, so it is queued for frame 52800; the next span has A=0 and
   tick k+1 at frame 49000. Present both spans before either deadline. Expect a port fault
@@ -506,7 +613,8 @@ This docs-only proposal runs no Cargo commands and claims no implemented or hard
   Check canceled/refused ordinals, last successful ordinal, fault visibility, and the new
   phase reset; no reordered/bunched F8s or silent loss of clock count is an acceptable result.
 - Count allocations/frees and MIDI sends over the actual callback path, including adoption,
-  loss, overflow, wrap and recovery. Assert coherent tempo/anchor snapshots under a scripted
+  loss, overflow, wrap, recovery and idle handoff. Idle ticks and device handovers perform no
+  tick generation or sends on the callback. Assert coherent tempo/anchor snapshots under a scripted
   publication race, never a timing-based race. With four or more rendered strips force serial
   unless explicitly testing workers, per the existing gate rule.
 
@@ -521,7 +629,10 @@ separately, with transit's send to that device suspended. Never use a closed clo
 as evidence of follower stability.
 
 At 48 kHz and buffers 64 and 128, collect one hour at 120 BPM, then a programmed tempo change
-and ramp, both idle and with the reference loaded session. Log tick sequence, intended device
+and ramp, both with an unloaded and with the reference loaded session. Measure playing and
+transport-stopped Idle clock separately under both loads; the page shows idle-tick jitter,
+late/lost counts and drift alongside running-tick results using the same calculations and bound.
+Log tick sequence, idle/running classification, anchor domain/generation, intended device
 frame `d_k`, returned arrival converted to device frame `r_k`, actual-send stamp, map quality,
 late/lost counts, source settings, firmware, backend, rate, buffer and load. Require a valid
 audio map throughout; arrival-derived return timing is explicitly an end-to-end USB/driver
@@ -541,10 +652,19 @@ this target: a failure is evidence to reopen the budget or improve the path, nev
 to claim success from the filter's smooth BPM. Retain the raw trace and record the run and
 limitations under `docs/benchmarks/` with an index row. No hardware result is asserted here.
 
+Without an audio device, run the stopped diagnostic in H: substitute intended deadline `h_k`
+and returned monotonic arrival `a_k` for d_k/r_k, and compute one median latency and residual
+`j_k = (a_k-h_k) - median(a_k-h_k)` in ns. The target is `max(abs(j_k)) <= 500000 ns`, zero
+lost/extra ticks and first/last minute median difference <=500000 ns; report percentiles and
+drift in ns/hour. This is a separate monotonic-domain measurement, not device-sample evidence.
+Split results at anchor handovers and report their gap/rounding separately. The deterministic
+deadline bound (one sample or one ns) is distinct from these measured USB/driver jitter targets.
+
 ## Consequences
 
 - A single selected controller can drive transit while notes on that port keep working. Ports
-  can independently receive regenerated clock or transport. The defaults preserve today's behavior.
+  can independently receive regenerated clock or transport. Clock and Transport remain off by
+  default; enabling Clock also enables stopped tempo output unless Idle clock is explicitly off.
 - Tick count determines musical position, but 24 ppqn and arrival jitter limit phase evidence.
   Filtering trades response time for stability; losing ticks cannot be repaired with confidence
   from tempo alone. Freewheel protects a take and visibly relinquishes phase lock.
@@ -587,3 +707,26 @@ limitations under `docs/benchmarks/` with an index row. No hardware result is as
 - C2 accepted: retained the estimator and exact alternating-jitter/2 ms fixture, specified a 0.5 BPM transient envelope at ticks 120..144 and recovery at 145, kept the 0.2 BPM steady-state/ramp bound, and required independent source-phase and controller-error checks within 96 samples without a transient exception.
 - M1 accepted: SPP deduplication is scoped to the current position/epoch or equivalent pending operation; returning to an earlier SPP target locates again, and count uncertainty always permits an explicit same-position phase reset.
 - M2 accepted: tempo-map suppression, restoration and offline-render restrictions explicitly name Transport and Clock mode in this ADR and the clocks knowledge page; Transport-only mode retains the saved map.
+
+## Amendment 2026-11-03: idle clock while stopped
+
+Approved 2026-11-03. Replace the stopped-clock deferral in section 5 with per-output **Idle
+clock**, on by default when Clock is on. The requested Live-style behavior is continuous tempo
+for a hardware display or arpeggiator even when transit is stopped. Song and Pattern receivers
+get the same idle F8 stream; it conveys neither song position nor a transport command.
+
+Section 5 now specifies the active-tempo source, off-callback generation, exact fractional D
+grid with an open stream and H grid without one, and phase-preserving device open/close handover.
+Tempo changes latch at the next tick. Stop sends FC and releases external destinations while
+idle ticks continue; Clock off or MIDI-port closure cancels them. The existing resync fault
+cancels idle ticks too and requires explicit recovery before they resume.
+
+Start resets receiver position on the next Clock. A prepared Start therefore precedes the next
+emitted tick on the existing time grid, whose musical position becomes zero regardless of N
+prior idle ticks. The preparation lead, ordered locate/resync sequences, already-sent accounting
+and exclusion from the note-deadline clamp remain in force. A required preparation gap suppresses
+grid slots without moving the grid. The gate now covers idle trains, next-tick tempo edits,
+Start after N idle ticks and both device handovers in injected samples or scheduler ns, plus
+stopped jitter diagnostics with the same 0.5 ms hardware target expressed in the active domain.
+Section 6 and the clocks knowledge page carry the preference, lifetime and clock-domain rules.
+Earlier judging responses remain intact; this amendment changes no follower or recording gate.
