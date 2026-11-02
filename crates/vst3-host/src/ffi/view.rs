@@ -226,7 +226,10 @@ pub(super) fn attach_view(
     header: Option<Arc<transit_rt::editor_window::HeaderCell>>,
     prepare: impl FnOnce(&window::HostWindow),
 ) -> Result<(ComWrapper<PlugFrame>, window::HostWindow), String> {
-    let (w, h) = view_size(view).ok_or_else(|| "zero size".to_string())?;
+    let (w, h) = view_size(view).unwrap_or_else(|| {
+        log::info!("vst3 editor \"{title}\": size unknown before attached: default window 400×300, following the view's size after attached");
+        (400.0, 300.0)
+    });
     let win = window::HostWindow::new(title, w, h, header).map_err(|e| format!("host window failed: {e}"))?;
     prepare(&win);
     let frame = ComWrapper::new(PlugFrame::new(win.raw(), title));
@@ -256,11 +259,10 @@ pub(super) fn attach_view(
     // Issue #105: the same factor again once attached (the SDK allows "before or after"; some
     // plug-ins apply it only to an attached view). A view that scales asks through `resizeView`
     // (honored now); one that only reports its new size gets the window at that size.
-    if let Some(scale) = scale
-        && set_content_scale(view, scale, title, "after attached")
-    {
-        follow_view_size(view, &win, title, "after attached");
+    if let Some(scale) = scale {
+        set_content_scale(view, scale, title, "after attached");
     }
+    follow_view_size(view, &win, title, "after attached");
     Ok((frame, win))
 }
 
@@ -411,9 +413,9 @@ impl EditorLink {
         let embedded = unsafe { view.isPlatformTypeSupported(platform) } == sb::kResultTrue;
         // SAFETY: a counted reference to the live view, on its creating thread.
         let resizable = unsafe { view.canResize() } == sb::kResultTrue;
+        let probed_size = size_text(view_size(&view));
         *facts = format!(
-            "embedded={embedded} floating=n/a preferred_api=n/a size={} resizable={resizable} timer-support=n/a posix-fd-support=n/a scale=unknown",
-            size_text(view_size(&view))
+            "embedded={embedded} floating=n/a preferred_api=n/a size={probed_size} resizable={resizable} timer-support=n/a posix-fd-support=n/a scale=unknown"
         );
         if !embedded {
             return Err(format!("{} embedding not supported (neither)", if cfg!(target_os = "linux") { "x11" } else { "native" }));
@@ -426,8 +428,7 @@ impl EditorLink {
             scale = window::content_scale(win);
         });
         *facts = format!(
-            "embedded={embedded} floating=n/a preferred_api=n/a size={} resizable={resizable} timer-support=n/a posix-fd-support=n/a host_run_loop={} scale={}",
-            size_text(view_size(&view)),
+            "embedded={embedded} floating=n/a preferred_api=n/a size={probed_size} resizable={resizable} timer-support=n/a posix-fd-support=n/a host_run_loop={} scale={}",
             cfg!(target_os = "linux"),
             scale.map_or_else(|| "unknown".into(), |s| s.to_string())
         );

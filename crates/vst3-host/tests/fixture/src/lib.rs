@@ -258,6 +258,10 @@ enum ScaleMode {
     AfterAttach,
     /// `refuse`: returns kResultFalse and keeps its size.
     Refuse,
+    /// `size-error-before-attach`: refuses scale; getSize fails until attached.
+    SizeErrorBeforeAttach,
+    /// `size-empty-before-attach`: refuses scale and reports an empty rect until attached.
+    SizeEmptyBeforeAttach,
 }
 
 impl ScaleMode {
@@ -266,6 +270,8 @@ impl ScaleMode {
         match std::env::var("VST3_FIXTURE_SCALE").as_deref() {
             Ok("after-attach") => ScaleMode::AfterAttach,
             Ok("refuse") => ScaleMode::Refuse,
+            Ok("size-error-before-attach") => ScaleMode::SizeErrorBeforeAttach,
+            Ok("size-empty-before-attach") => ScaleMode::SizeEmptyBeforeAttach,
             _ => ScaleMode::Always,
         }
     }
@@ -293,6 +299,9 @@ impl View {
 
     /// 320×240 at the content scale.
     fn rect(&self) -> ViewRect {
+        if matches!(self.mode, ScaleMode::SizeErrorBeforeAttach | ScaleMode::SizeEmptyBeforeAttach) {
+            return ViewRect { left: 0, top: 0, right: 640, bottom: 400 };
+        }
         let s = f32::from_bits(self.scale.load(Ordering::Relaxed));
         ViewRect { left: 0, top: 0, right: (320.0 * s).round() as i32, bottom: (240.0 * s).round() as i32 }
     }

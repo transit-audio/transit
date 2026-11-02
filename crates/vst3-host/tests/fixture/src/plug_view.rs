@@ -10,7 +10,7 @@ impl IPlugViewContentScaleSupportTrait for View {
         }
         let attached = self.attached.load(Ordering::Relaxed);
         match self.mode {
-            ScaleMode::Refuse => return kResultFalse,
+            ScaleMode::Refuse | ScaleMode::SizeErrorBeforeAttach | ScaleMode::SizeEmptyBeforeAttach => return kResultFalse,
             ScaleMode::AfterAttach if !attached => return kResultTrue,
             _ => {}
         }
@@ -51,6 +51,16 @@ impl IPlugViewTrait for View {
     }
     unsafe fn getSize(&self, size: *mut ViewRect) -> tresult {
         let r = unsafe { &mut *size };
+        if !self.attached.load(Ordering::Relaxed) {
+            match self.mode {
+                ScaleMode::SizeErrorBeforeAttach => return kResultFalse,
+                ScaleMode::SizeEmptyBeforeAttach => {
+                    *r = ViewRect { left: 0, top: 0, right: 0, bottom: 0 };
+                    return kResultOk;
+                }
+                _ => {}
+            }
+        }
         *r = self.rect();
         kResultOk
     }
