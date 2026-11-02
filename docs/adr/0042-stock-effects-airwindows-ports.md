@@ -37,15 +37,15 @@ Do not import the whole catalog or fill the browser with neighboring versions. T
 jobs are intentional: one moving tap and a multi-tap ensemble. The console encoder and decoder
 are one paired system, not two competing colors.
 
-The first set is **13 inserts**, implemented in the following three slices after an oracle-only
-foundation. All source names in this table are Johnson's.
+The first set is **12 inserts**, implemented in the following three slices after an oracle-only
+foundation. The saturation replacement is deferred on source-level safety evidence below; the
+inherited Saturator stays. All source names in this table are Johnson's.
 
 | Slice / gap | Exact source name and revision | Parameters in source order | Transit name / stable id | Reason |
 |---|---|---|---|---|
 | 1: chorus | "Chorus" (unnumbered) | 3: Speed, Range, Dry/Wet | Modulated Delay / `modulated_delay` | One moving tap, with a wet vibrato setting; distinct from an ensemble. |
 | 1: ensemble | "ChorusEnsemble" (unnumbered) | 3: Speed, Range, Dry/Wet | Ensemble Delay / `ensemble_delay` | Four taps provide the richer pad treatment the single tap cannot. |
 | 1: tape | "ToTape9" (9) | 9: Input, Tilt, Shape, Flutter, FlutSpd, Bias, HeadBmp, HeadFrq, Output | Tape Color / `tape_color` | Latest tape line, with the author's revised brightness compression and output clipping. |
-| 1: saturation | "Density3" (3) | 4: Density, Highpas, Output, Dry/Wet | Wave Saturator / `wave_saturator` | General drive and inverse saturation with a bass-cut control, beyond tape coloration. |
 | 1: character compression | "Pressure6" (6) | 2: Compres, Ratio | Character Compressor / `character_compressor` | Latest compact, stereo-linked character compressor, aimed at bus compression in the author's notes. |
 | 1: de-essing | "DeBess" (unnumbered successor to "DeEss") | 5: Intense, Sharp, Depth, Filter, Sense | Sibilance Control / `sibilance_control` | The author recommends its longer adjustable detection window and improved rejection of non-sibilant material. |
 | 2: console channel | "Console9Channel" (9) | 2: Pan, Fader | Console Encode / `console_encode` | Latest numbered standalone summing encoder, without a whole channel-strip processing chain. |
@@ -57,7 +57,7 @@ foundation. All source names in this table are Johnson's.
 | 3: plate | "kPlate140" (unnumbered model 140) | 5: Input, Regen, DeRez, Predlay, Wetness | Large Plate / `large_plate` | The author's next-generation large plate; one plate character in the first set. |
 
 The named sections of [Johnson's notes at the pin](https://github.com/airwindows/airwindows/blob/7fd5f5cae262a41e6dd7d9a83d60c46e84d3092a/Airwindopedia.txt)
-support these version choices: "ToTape9", "Density3", "DeBess", "Console9Channel", "ADClip9",
+support these version choices: "ToTape9", "DeBess", "Console9Channel", "ADClip9",
 "Slew4", "kGuitarHall2", "kPlate140" and "TPDFDither". The last includes its Redux update;
 its earlier no-controls description is historical. "kPlate140" and "kPlate240" are different
 plate models, not revisions 140 and 240. The former's notes explicitly describe the larger, more
@@ -65,7 +65,21 @@ prominent character. The later stereo modulation variants are different designs,
 updates to "Chorus": the first set deliberately keeps the single-tap and four-tap designs with
 independent speed, range and mix controls.
 
-Deferred, with source details and reasons in the survey: "Vibrato", "Flutter2", "PhaseNudge",
+**Saturation is deferred.** "Density3" (revision 3; four controls: Density, Highpas, Output,
+Dry/Wet) was the preferred general saturation candidate under the author's "Density3" notes.
+Its original high-pass recurrence is unstable within transit's admitted low-rate domain:
+in `plugins/LinuxVST/src/Density3/Density3Proc.cpp`, at 8 kHz and Highpas = 1,
+`iirAmount = B^3 / (rate/44100) = 5.5125`, so the history multiplier is -4.5125.
+With constant input 1, zero history, Density = 0.25 and Output = Dry/Wet = 1, the internal
+density is 1.25 and the blend retains 75% of that growing high-pass signal. Its magnitude
+exceeds the finite f32 range within 60 samples. This is an analytical counterexample, not a
+compiled oracle result. A seed or initialization patch cannot fix it; stabilizing the coefficient
+changes defined DSP. "Density3" / Wave Saturator is outside the first shippable set. Admission
+requires an explicit supported-domain and refusal/bypass policy, or a separately approved DSP
+change with a revised reference contract. Neither is approved here. Do not silently substitute
+an older revision or another saturation algorithm without its own admission evidence.
+
+Other deferred candidates, with source details and reasons in the survey: "Vibrato", "Flutter2", "PhaseNudge",
 "StereoChorus", "StereoEnsemble", "Capacitor2", "PurestGain", "BitShiftGain", "PurestDrive",
 "NotJustAnotherDither", "Galactic3", "Verbity2" and "kPlate240". Historical candidates
 "Console7Channel"/"Console7Buss", "ToTape8", "Density2", "DeEss", "ADClip8", "Slew3",
@@ -77,8 +91,9 @@ this ADR does not claim those gaps are fully closed.
 ### Relationship to retirement and routing
 
 New inserts use new ids. No removed id is revived, and no old slot is silently substituted.
-"Density3" supplies the saturation replacement; the hall and plate supply the reverb replacements.
-Their implementation slices retire the corresponding stage 2 devices using ADR 0040's load report,
+The inherited Saturator remains under ADR 0040 because this first set has no admitted saturation
+replacement; Tape Color does not authorize its retirement. The hall and plate supply the reverb
+replacements. Their implementation slices retire the corresponding stage 2 devices using ADR 0040's load report,
 dropped parameter targets, emptied slot and modified-session rule, with corpus coverage. The
 character compressor has no external key, gate or conventional full dynamics section: the existing
 Compressor/Limiter and Expander/Gate stay. EQ and Gain also stay; the deferred gain utility is not
@@ -164,7 +179,6 @@ transcendentals or accepting a small residual is not a determinism fix.
 |---|---|
 | `transit-modulated-delay` | Modulated Delay, Ensemble Delay |
 | `transit-tape-color` | Tape Color |
-| `transit-wave-shaper` | Wave Saturator |
 | `transit-character-dynamics` | Character Compressor, Sibilance Control |
 | `transit-console-summing` | Console Encode, Console Decode |
 | `transit-output-tools` | Peak Clipper, Output Dither, Treble Tamer |
@@ -177,20 +191,43 @@ exception, not a naming pattern for production crates.
 
 The shipped app is Rust. Keep the original operation order, literals, casts, precision, integer
 wrapping where defined, state update order and per-sample loop. The transit f32 audio path ports
-**`processReplacing`**, including its output dither and double intermediates; it must not call the
-undithered double path and cast at the end. `processDoubleReplacing` remains vendored for reference;
+**`processReplacing`**, including its actual noise operations and double intermediates; it must not
+call the double path and cast at the end. In particular, "ADClip9" comments out float-output dither
+additions but retains RNG advances, the conditional extra right-channel advance and clipping noise;
+do not add ordinary float dither to it. `processDoubleReplacing` remains vendored for reference;
 claiming a future f64 path requires separate f64 nulls. No SIMD regrouping, generic smoother,
 oversampling, resampling, mix-law correction or latency removal is added. Preserve any rate
 division, interpolation or filtering already inside the original.
 
 Keep block-entry work at block entry. In particular, the console pair interpolates `panA/B` and
-`inTrimA/B` using remaining frames divided by the original call length, including its constructor
-transient. The adapter passes each transit process span and parameter event boundary through
-unchanged. Null each such schedule against C++ with identical boundaries; do not reblock into
+`inTrimA/B` using remaining frames divided by the original call length. Preserve its constructor
+endpoints (all 0.5) and resulting transient in the **raw core and constructor nulls**. The adapter
+initialization below is a separate contract. The adapter passes each transit process span and
+parameter event boundary through unchanged. Null each such schedule against C++ with identical boundaries; do not reblock into
 single samples or assert equality across different block schedules where the original differs.
 The scheduling oracle compares serial and worker runs of the **same** schedule. Help must disclose
 that changing the audio block size can change these ramps. A later demand for block-independent
 automation is an explicit algorithm change and reopens this decision.
+
+**Console initialization at the Plugin boundary.** `Plugin::snap_initial_params` in
+`crates/dsp/src/lib.rs` requires stored values to be initial state, not automation moves;
+`crates/mix/src/instance.rs` applies the stored controls before calling it. For both console
+adapters, implement that hook by setting **both pan endpoints to `A*1.57079633` and both trim
+endpoints to `B*2.0`**, using the source's f32 controls promoted to double and its exact literals,
+before the first sample. Expose the same explicit state-initialization operation in the reference
+harness, outside the original processing function, and null this adapter setup separately from
+raw construction. This is a documented host initialization rule, not a deterministic repair to
+the vendored constructor. It changes no processing-loop operation or subsequent automation ramp.
+
+**Console reset and prepare.** At the Plugin boundary, reset preserves the current controls,
+restores the fixed default seeds and clears processing history, then snaps the endpoints to those
+controls with the same operation. Prepare establishes this state too, including for a new default
+insert when no stored parameters trigger the hook. `snap_initial_params` updates the endpoints
+after restoration without resetting seeds or other state again. A reset after that hook must
+therefore keep the snapped targets, never leave the constructor's 0.5 endpoints behind. Raw-core
+reset tests use raw constructor state; adapter reset tests compare with a fresh, prepared and
+snapped reference at the same current controls. Regular parameter events on a running instance
+only update the controls; the original block-length-dependent ramps still apply.
 
 Wrap each processor in `crates/dsp/src/plugins/` using `Plugin`, `PluginInfo`, `ParamInfo` and the
 registry, as Texture does. Allocate state and scratch buffers in construction/prepare off the
@@ -223,8 +260,6 @@ Concrete exceptions to the percentage rule:
 - Tape Head Frequency displays `25 + 175*h*h` Hz, 25–200 Hz, as the source does. Input, Output,
   Tilt and Bias retain normalized travel; the help describes their nonlinear gain and bipolar
   behavior rather than claiming a calibrated tape-machine measurement.
-- Saturation Amount displays `5*a - 1`, range -1 to 4, dimensionless, following the source
-  display (the processor's internal expression differs). Its high-pass remains a percentage.
 - Console Pan displays -100% left to +100% right (`200*a - 100`); Fader remains 0–100% travel,
   since its shaped gain is not an ordinary linear level control.
 - Clipper Boost and Match display 0–18 dB (`18*a`, `18*b`). Noise and Ceiling remain percentages
@@ -290,7 +325,10 @@ These are implementation gates, not claims that this documentation change has ru
    Bounds audits cover the entire admitted rate interval; add probes immediately on either
    side of every integer-divider/clamp transition and any newly supported rate. Do not silently
    clamp an admitted high rate to 192 kHz or add conversion to make the null pass. A source
-   unsafe at an admitted rate needs a recorded definition of its UB, or its slice remains blocked.
+   unsafe at an admitted rate must distinguish actual UB from unstable defined arithmetic. Only
+   the former can use a justified deterministic patch; the latter needs deferral or an explicitly
+   approved domain/DSP decision. The known "Density3" recurrence is deferred above, not left as
+   a first-set implementation blocker or treated as an initialization defect.
 3. **Sweep and scenarios.** For each continuous parameter use 0, 0.25, 0.5, 0.75, 1 around
    source defaults, both endpoints of interactions, all list choices and adjacent f32 values
    around branch boundaries. Include all-controls-low/high, paired drive/output and rate/depth
@@ -299,7 +337,8 @@ These are implementation gates, not claims that this documentation change has ru
    mode's wet/nontrivial path after its delays fill; enumerate intentional silence separately.
    Compare f32 `to_bits()` including signed zero, and both RNG words; no epsilon, ULP allowance
    or noise-floor tolerance. Nonfinite output on valid finite input is a blocker, not an exact
-   NaN match. Test reset versus fresh construction, interleaved instances, bypass/unbypass and
+   NaN match. Test raw reset versus raw fresh construction, adapter reset versus prepared and
+   snapped fresh construction, interleaved instances, bypass/unbypass and
    rates reconfigured through prepare. Use process sizes 1, 2, 7, 32, 64, 127, 256, 1024 and an
    irregular sequence, with the same schedule on both sides. Preserve upstream block dependence.
 4. **Long floor and null.** At every listed rate render at least 60 seconds of sample time per
@@ -332,10 +371,18 @@ These are implementation gates, not claims that this documentation change has ru
    generate help with `cargo xtask help --write` before checking it. Refutation review under
    ADR 0009 includes each deterministic patch, FFI safety invariant and a deliberate perturbation
    that makes each new null suite fail. Fidelity does not replace the audio-thread safety gate.
+   Console regressions cover restored Fader = 0, default and off-center Pan, prepare with no
+   stored controls, and reset after restoration, at 1- and 64-frame first calls and irregular
+   schedules. Check endpoint bits before rendering and output/seed bits against the explicitly
+   snapped reference, retaining source dither rather than asserting exact silence at Fader = 0.
+   A missing snap must fail the 64-frame restoration case. Subsequent automation and the separate
+   raw-constructor case must still null against their original ramps.
 
 ## Consequences
 
 The stock collection fills distinct mixing jobs with small interfaces and a reproducible reference.
+The saturation replacement remains open and the inherited Saturator stays until a safe replacement
+is admitted; this first set does not close every gap in #305.
 Users get the author's algorithms and quirks, including sample-rate coloration, seeded noise,
 nonlinear mix laws and block-length-dependent ramps. Gain staging and console placement need help
 text; a famous algorithm name is not a substitute for it.
@@ -361,3 +408,11 @@ delays that insert rather than weakening the claim. No port is implemented or re
   floor and subset policy. One crate with family modules fits the selected set and existing practice.
 - **Ship the C++ or accept perceptual equivalence.** The former expands the production unsafe
   surface; the latter cannot enforce faithful translation. Keep the app Rust and the residual zero.
+
+## Judging round 1: responses
+
+C1 accepted: Deferred "Density3" / Wave Saturator from the first shippable set (now 12 inserts), retained the inherited Saturator under ADR 0040, documented the 8 kHz unstable recurrence and the required later domain or DSP decision, and removed its first-set crate and control mapping.
+
+C2 accepted: Preserved raw console constructor nulls while specifying `snap_initial_params`, prepare and reset endpoint initialization at the Plugin boundary, the identical reference-harness operation, and discriminating restoration/reset/automation nulls.
+
+M1 accepted: Qualified the catalog's common F convention, recorded "Density3"'s `3.553e-44l` dither and conditional extra right RNG advance, and recorded "ADClip9"'s disabled float-output dither, retained RNG advances and clipping noise in the catalog and port contract.
