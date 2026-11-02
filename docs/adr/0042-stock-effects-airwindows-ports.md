@@ -180,8 +180,10 @@ instead of fixing the reference. No narrower per-effect rate or input admission 
 
 **One admitted domain for the entire set.** All normalized controls in [0, 1], arbitrary valid
 parameter schedules, and **any finite f32 input**, including both signs of `f32::MAX`, are in scope
-for the selected `processReplacing` path. Internal binary64 arithmetic and the final conversion
-to f32 must remain finite. NaN/infinite caller input belongs to the separate adapter containment
+for the selected `processReplacing` path. All persistent DSP state and final f32 outputs must remain finite. Defined transient extended-real
+evaluations are preserved when the completed expression is finite (the console curves'
+`log1p(-1)`/`expm1` endpoint composition at an exact +1 or -1 input, for example); no NaN and no
+unbounded recurrence is permitted, and the null corpus includes those exact endpoints. NaN/infinite caller input belongs to the separate adapter containment
 contract; a future f64 audio path needs a new domain proof and f64 nulls.
 
 The engine-rate assumption is every integer rate **8,000 through 768,000 Hz**, inclusive:

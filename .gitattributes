@@ -2,3 +2,5 @@
 crates/macro-osc-oracle/vendor/** -text
 # Golden offline bounces are raw float bytes: never convert line endings.
 crates/mix/tests/golden/offline/*.f32 -text
+# Vendored firmware sources: excluded from the language statistics (they are not transit code).
+crates/macro-osc-oracle/vendor/** linguist-vendored
