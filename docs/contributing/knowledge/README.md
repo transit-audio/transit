@@ -27,6 +27,7 @@ the ADRs. A new topic gets a new file and a row here.
 | [`ui.md`](ui.md) | `crates/ui-studio`: shortcuts, icons, theme, tests. |
 | [`plugin-presets.md`](plugin-presets.md) | Hosted plug-in editor windows, their header strip, user presets. |
 | [`oracle-null-testing.md`](oracle-null-testing.md) | A ported DSP engine, the oracle crate, a null test or a pitch test. |
+| [`airwindows-catalog.md`](airwindows-catalog.md) | The stock-effect source selection, exact parameters, rate behavior, state and seeding behind ADR 0042. |
 | [`unsafe.md`](unsafe.md) | Any `unsafe`, FFI or OS call. |
 
 Decisions live in [`../../adr/README.md`](../../adr/README.md); the overview is
