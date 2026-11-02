@@ -16,6 +16,7 @@ use transit_rt::testing::CountingAlloc;
 #[global_allocator]
 static ALLOC: CountingAlloc = CountingAlloc;
 
+pub mod stall;
 /// The render workers' helpers (#124, ADR 0029): the continuity instrument plug-in and its rig.
 pub mod workers;
 
