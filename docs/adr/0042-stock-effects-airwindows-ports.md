@@ -1,6 +1,6 @@
 # ADR 0042: Stock effects from the Airwindows catalog, with stability bounds and bit-exact Rust ports
 
-- **Status:** proposed 2026-11-02
+- **Status:** accepted 2026-11-03 (maintainer decision; proposed 2026-11-02, six judging rounds)
 - **Date:** 2026-11-02
 - **Reopen when:** a selected effect cannot pass the three-platform null or realtime gate within the stability-patch contract below; its rate or block behavior cannot fit the insert contract; the upstream license changes; or a demonstrated mixing gap calls for a different selection.
 
