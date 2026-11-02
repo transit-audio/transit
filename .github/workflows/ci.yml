@@ -103,7 +103,9 @@ jobs:
       # real-window tests skip without a DISPLAY in the step above. (transit-rt's editor_x11 starts
       # its own Xvfb there already.)
       - name: Test editor windows (Xvfb)
-        run: xvfb-run -a cargo test --locked -p transit-rt -p transit-vst3-host -p transit-clap-host -p transit-plugin-host
+        # -noreset (E68): by default Xvfb resets when its last client leaves and drops the connections
+        # that arrive meanwhile; test threads each open and close one, so the count reaches zero at any time.
+        run: xvfb-run -a -s "-screen 0 1280x1024x24 -noreset" cargo test --locked -p transit-rt -p transit-vst3-host -p transit-clap-host -p transit-plugin-host
 
   # crates/au-host and the objc2 code in crates/vst3-host compile only here.
   macos:
