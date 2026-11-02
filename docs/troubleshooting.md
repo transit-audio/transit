@@ -26,6 +26,13 @@ not offer that query. While the host thread is busy, one INFO says `waiting for 
 Find these in the log paths above. A loaded plug-in with no GUI extension has a disabled **Edit**
 button with the tooltip **This plug-in has no editor**. A floating-only CLAP editor stays enabled.
 
+VST3 refusal reasons include `no gui extension` (no view), `native embedding not supported
+(neither)` or `x11 embedding not supported (neither)`, `host window failed`, and `set_parent
+failed` (the view could not attach). An unknown or empty VST3 size before attachment is not a
+refusal: transit starts with a 400×300 window, logs the fallback, and follows the view's size
+after attachment. The probe keeps the pre-attach size fact. CLAP can still report `zero size`:
+its embedded GUI must report a size after creation, before parenting and showing it.
+
 Without any setting the log has one line for each of these:
 
 - the audio device that opened: backend (`native` or `cpal`), host (`WASAPI`, `ASIO`, `ALSA`, ...),

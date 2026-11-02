@@ -27,3 +27,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E66: a held-source test let its deadline pass before the worker wake](E66-a-held-source-test-let-its-deadline-pass-before-the-worker-wake.md)
 - [E67: a pending note start masked its release (#290)](E67-a-pending-note-start-masked-its-release.md)
 - [E68: an Xvfb reset dropped a test's X11 connection](E68-an-xvfb-reset-dropped-a-test-connection.md)
+- [E69: a VST3 editor was refused before it could report its size (#295)](E69-a-vst3-editor-was-refused-before-it-could-report-its-size.md)
