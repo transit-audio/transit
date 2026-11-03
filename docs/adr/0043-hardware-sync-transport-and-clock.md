@@ -2,13 +2,13 @@
 
 - **Status:** accepted 2026-11-03 (maintainer decision; proposed 2026-11-03, two judging rounds plus one amendment round for the idle clock)
 - **Date:** 2026-11-03
-- **Scope:** maintainer decision, issues [#93](https://github.com/transit-audio/transit/issues/93) and [#183](https://github.com/transit-audio/transit/issues/183); transport follow, clock follow and clock/transport send.
+- **Scope:** maintainer decision, issues [#93](https://github.com/transit-audio/transit/issues/93), [#183](https://github.com/transit-audio/transit/issues/183) and #320; transport buttons, transport follow, clock follow and clock/transport send.
 - **Reopen when:** the reference rig cannot meet the measured jitter budget; the filter cannot follow the admitted tempo ramps without audible corrections; recorded material cannot retain its musical placement under the runtime map; or a second synchronization protocol needs to arbitrate the source.
 
 ## Context
 
 Hardware sequencers must be able to start transit, set its tempo, and follow its transport.
-The compatibility rig is an Arturia KeyStep Pro over USB, which can send and receive clock and
+The compatibility rig is a keyboard controller over USB, which can send and receive clock and
 transport. A loop through its own ports exercises both directions. This is synchronization of
 musical time, not a replacement for the audio interface's sample clock.
 
@@ -40,7 +40,7 @@ regressions rather than inventing a closed status for either.
 
 The convention references need a qualification. [Ableton's MIDI sync guide](https://help.ableton.com/hc/en-us/articles/209071149-Synchronizing-Live-via-MIDI)
 describes external tempo and transport, a source indicator and sync delay. Its separate
-Link Start Stop Sync switch is not the MIDI input switch. Apple's current
+Link Start Stop Sync switch is not the MIDI input switch. The current Logic Pro
 [synchronization overview](https://support.apple.com/guide/logicpro/synchronization-overview-lgcpfffd9371/mac)
 explicitly says Logic sends MIDI Clock but cannot receive it. Logic's Tempo Interpreter is
 another mechanism. Thus the requested disabled tempo track and incoming BPM display are transit's
@@ -68,19 +68,34 @@ the idle grid in section 5 supplies tempo-only crossings; it does not advance S 
 
 | Mode | Transport authority | Tempo and musical phase authority | Audio scheduling and recording |
 |---|---|---|---|
-| Internal (all inputs Off) | Local transport | Saved session tempo map: S to q | Device D; existing rate conversion and historical D to S mapping |
+| Internal (all sync inputs Off) | Local transport, including enabled MIDI transport buttons | Saved session tempo map: S to q | Device D; existing rate conversion and historical D to S mapping |
 | External transport only (Transport) | Chosen input's Start/Stop/Continue/SPP; local Stop always works | Saved session tempo map; F8 has no effect | Device D, as internal |
 | External clock (Transport and Clock) | Chosen input's transport; local Stop always works | Incoming tick count anchors q; filtered tempo interpolates between ticks; runtime external map replaces saved tempo events | Device D remains the sample clock; historical D/S/q segments place events |
 
 In every mode, enabled idle output uses the active tempo without advancing song position.
 Its time anchor is D with an open audio stream, otherwise H; this adds no transport authority.
 
-Only one input is the active source. Setting a second port to a non-Off mode turns the former
-one Off in the same preferences transaction. There is no first-message-wins arbitration.
+Only one input is the active sync source; transport buttons do not select a source. Setting a
+second port to a non-Off mode turns the former one Off in the same preferences transaction.
+There is no first-message-wins arbitration.
 Source/mode/offset changes are accepted only while stopped and after a take has finalized.
 Opening a session always starts stopped; record engagement is never persisted (ADR 0011).
 
 ### 2. Following transport
+
+**Transport buttons** are on by default for every connected input, including inputs with no
+note route or learned mapping. Slice 0 opens these inputs and handles MMC, FA/FB/FC and SPP
+before clock follow exists. The [2026-11-04 amendment](#amendment-2026-11-04-transport-buttons-from-midi-devices)
+defines the button state table: Start plays from the cursor, Continue from retained position,
+Stop stops, and SPP locates without starting. F8 has no effect on tempo until slice 3.
+The per-device switch and learned targets live in section 6's machine store.
+
+The following **sync-follow** modes are separate from that switch. Off means no sync source,
+not disabled buttons. Once explicitly selected, a port's enabled FA/FB/FC/SPP goes through this
+section's slice-1 state machine exactly once, instead of the button path. Transport buttons off
+ignores that port's transport messages in either path; it does not disable F8 clock reception.
+Other devices' enabled buttons act as local controls; in clock-follow mode their Play/Record
+waits for the selected source just like the UI. MMC remains a button protocol, not a clock source.
 
 Audio/MIDI settings show **Off / Transport / Transport and Clock** per input port, default Off.
 A selected port is opened even without a note route. The transport bar shows **Internal**,
@@ -458,7 +473,31 @@ MIDI thru disabled on return paths. Generation checks prevent software replay, n
 multi-device cabling loops. The diagnostic loopback below explicitly bypasses the same-device
 send guard while disconnecting the returned input from transport control and the follower.
 
+For default transport buttons, suppress incoming FA/FB/FC/SPP, MMC and learned transport
+actions from any input matched by `same_midi_device` to an output with effective Transport send
+enabled, including while stopped. Keep the button preference but show **Transport buttons
+suspended: sending transport to this device**. This covers delayed echoes without a guessed
+send window; intentional control from that device requires disabling Transport send or selecting
+it as the sync source (which suspends send). On guard changes capture the input sequence cutoff
+and discard older button events, so queued echoes cannot escape after send is disabled.
+Clock-only output does not suppress buttons. The amendment defines cross-protocol coalescing.
+
 ### 6. Preferences and bounded publication
+
+Add `UiState.midi_transport` in `crates/ui-studio/src/lib.rs`, persisted in **ui.json**, alongside
+the existing `midi_profile`. It is an object keyed by exact input device name, with entries
+`{"transport_buttons": true, "mmc_device_id": 0, "mappings": []}`. Thus the switch key is
+`midi_transport[device_name].transport_buttons`; absent entries/fields default to true, id 0,
+and an empty list. The id accepts integers 0..126; broadcast 127 is always accepted. The MIDI
+settings UI exposes **Transport buttons** and **MMC device ID**. These are new preferences:
+today `midi_input.rs` selects track routes, and `UiState.midi_profile` stores machine mappings;
+there is no existing transport-button switch. Learned transport mappings use this same new
+machine store, never the session or rack macros. Preserve disabled and disconnected entries
+across restart/session load. Same-name devices share this profile; no enumeration-index fallback.
+Button-switch changes apply immediately, cancel queued button actions and held-edge state, and
+never stop an existing take themselves; re-enabling admits only fresh events. Sync-mode changes
+below still require stopped transport. The switch gates standard transport (also from a selected
+sync source) and learned buttons, not notes, CC routing or tempo reception.
 
 Store per-input mode and `input_delay_ms`, per-output Clock, Transport, Song Position and
 `idle_clock` switches and `output_delay_ms`, in
@@ -474,7 +513,7 @@ of an enabled port may start idle ticks without starting playback. Uncertain ali
 selected explicitly.
 
 All new preference fields have defaults; there are no new required session fields, format bump
-or `needs` marker. Absent Clock/Transport preferences default to Off; absent `idle_clock`
+or `needs` marker. Absent output Clock/Transport preferences default to Off; absent `idle_clock`
 defaults to true, inactive when Clock is off. Preserve an explicit false across Clock off/on.
 Help says "Send tempo while stopped; does not start or locate the receiver." Song Position
 does not change idle behavior. An older session needs no migration
@@ -504,11 +543,13 @@ unsafe stays within [ADR 0013](0013-unsafe-only-in-soundcraft-rt.md)'s allowlist
 
 ## Implementation
 
-Land four slices, each useful and independently gated. Split near-budget Rust modules by
-concern before implementation; this document authorizes no file-size exception.
+Land slice 0 before the four settled slices; slices 1 to 4 are unchanged. Each is independently
+gated. Split near-budget Rust modules by concern before implementation; this document
+authorizes no file-size exception.
 
 | Slice | Work | Gate before merge |
 |---|---|---|
+| 0. Transport buttons | Default-on MMC and real-time buttons, per-device switch, global MIDI Learn transport targets in machine preferences, device-named hint/status, bounded control delivery and feedback suppression. Reuse section 2's slice-1 state machine with the amendment's cursor-start rule when not following sync. | Deterministic MMC bytes (all commands, ids, truncated SysEx), real-time state sequences, switch/default persistence, learned targets round trip in ui.json and refusal in session MappingSet, hint/status texts and throttling, coalescing and feedback guard; injected stamps only, no scheduling or wall-clock assertions. |
 | 1. Transport follow and send | Typed sync ingress, single-source preferences, minimal source indicator, Start/Stop/Continue/SPP state machine, recording tickets, output serialization and feedback guard. Clock follow choice remains unavailable until slice 3. | Parser interleaving and generation tests; state matrix including armed/unarmed and engaged/not-engaged recording; duplicate requests, SPP at bounds, full queues, unplug and local Stop; fake output asserts byte order and no audio-thread sends. |
 | 2. Clock send | Applied transport spans to output worker, 24-ppqn deadlines, tempo-map changes, per-port Clock, Idle clock and delay; stopped D/H grid and device handover. | Scripted device/map verifies crossings within one device sample (one ns without a device), no accumulated rounding, running and stopped tempo changes, idle-to-Start continuity, device open/close handover, rate conversion, cycle/locate invalidation, delayed worker, PDC and offset sign; compensation/map fault, generation cancellation and ordered resync cases below; strict callback allocation gate; running and idle reference hardware diagnostics before claiming #183's jitter target. |
 | 3. Clock follow | N=24 estimator, M=4 lock, bounded phase controller, runtime beat-map render integration and recording/recovery history. Enable Transport and Clock. | Synthetic jitter/ramp/drift and loss fixtures; exact state transitions and sample-error bounds; MIDI/audio take alignment and journal recovery across map changes, short notes and held notes at cycle seams; block-partition and no-allocation checks; source loss never discards a take. |
@@ -532,6 +573,20 @@ and [gates.md](../contributing/evidence/gates.md), [CONTRIBUTING.md](../../CONTR
 fresh-context [ADR 0009](0009-refutation-review-before-every-push.md) review apply to implementation.
 This docs-only proposal runs no Cargo commands and claims no implemented or hardware gate pass.
 
+- Slice 0: feed complete MMC envelopes for 01/02/03/04/05/06/07/09/44, configured and 7F ids,
+  a different id, malformed lengths and a truncated SysEx (including missing F7/subframe),
+  split callbacks and interleaved F8. Test Locate against session frame rates, drop labels and
+  timecode offset. With no mappings/routes and Monitor closed, exercise the amendment's whole
+  state table, pending starts/count-in, repeated Start/Stop, SPP then Continue, and ignored F8.
+  Test default-on/persisted-off per device, reconnect and switch cutoffs; all six learned targets
+  survive machine-store round trips/session changes, while session mapping attempts are refused
+  without mutation. Check note/CC press-release-held edges, source conflicts, exact device-named
+  Record hint/status texts, count-in/pre-roll/arming parity, and status limits at injected stamps
+  0, 999999999 and 1000000000 ns. Coalesce paired MMC/real-time Play and Stop in both orders;
+  retain Stop-then-Start ordering. With a paired Transport output enabled, reject echoed actions
+  while running/stopped and after a delayed drain; Clock-only output still permits buttons.
+  Prove overflow cannot lose Stop or resurrect an old start, and no audio callback decodes,
+  allocates or sends. These extend, rather than replace, the slice-1 recording/feedback gates.
 - Use these separate exact fixtures at 48 kHz, with a perfect supplied H-to-D map, zero offset,
   and all arrivals/readouts injected. Let H0 = 1e9 ns; round each supplied stamp once to integer
   nanoseconds. Constant-tempo truth is `h_i = H0 + i*60e9/(120*24)`, for i=0..192. Set
@@ -620,7 +675,7 @@ This docs-only proposal runs no Cargo commands and claims no implemented or hard
 
 ### Hardware diagnostics, not a unit test
 
-On the diagnostics page select the KeyStep Pro's USB output and returned USB input. Configure
+On the diagnostics page select a keyboard controller's USB output and returned USB input. Configure
 one clock source: transit sends, the hardware receives/returns, and the diagnostic input is
 measurement-only (follower, transport follow and note echo detached). If the device does not
 return USB sync directly, use its own MIDI Out-to-In cable with USB routing configured and
@@ -662,8 +717,9 @@ deadline bound (one sample or one ns) is distinct from these measured USB/driver
 
 ## Consequences
 
-- A single selected controller can drive transit while notes on that port keep working. Ports
-  can independently receive regenerated clock or transport. Clock and Transport remain off by
+- Every connected input can supply default transport buttons; one selected sync source can drive
+  transport/tempo follow while notes on that port keep working. Ports
+  can independently receive regenerated clock or transport. Output Clock and Transport remain off by
   default; enabling Clock also enables stopped tempo output unless Idle clock is explicitly off.
 - Tick count determines musical position, but 24 ppqn and arrival jitter limit phase evidence.
   Filtering trades response time for stability; losing ticks cannot be repaired with confidence
@@ -693,10 +749,13 @@ deadline bound (one sample or one ns) is distinct from these measured USB/driver
   recording and K22 contracts. Nominally equal sample rates are not a shared clock.
 - **Stop or restore session tempo when ticks disappear.** Rejected for this scope: a cable or
   clock dropout must not abruptly change a recording's tempo or finalize it without Stop.
-- **Ableton Link now.** Out of scope: network peers, shared phase and source arbitration need
+- **Link now.** Out of scope: network peers, shared phase and source arbitration need
   their own decision, and Link does not supply these MIDI-only devices' wire transport/SPP.
-- **MTC or MMC now.** Out of scope: MTC conveys absolute time rather than 24-ppqn tempo; MMC is
-  a different transport protocol. Neither is required for this rig's Clock/Start/Stop contract.
+- **MTC or MMC now.** MTC remains out of scope: it conveys absolute time rather than 24-ppqn
+  tempo. MMC was excluded as a different transport protocol unnecessary for the original
+  Clock/Start/Stop rig. The 2026-11-04 decision brings MMC transport buttons into slice 0 so a
+  standard controller works in an unmapped session without enabling a checkbox; other
+  machine-control commands remain outside this amendment.
 - **A plug-in sync bridge.** Rejected: it cannot own global stopped transport, source selection,
   record tickets, device-clock history and per-port lifetime reliably; bypass/unload would change
   synchronization. The engine already owns the necessary boundaries.
@@ -730,3 +789,123 @@ Start after N idle ticks and both device handovers in injected samples or schedu
 stopped jitter diagnostics with the same 0.5 ms hardware target expressed in the active domain.
 Section 6 and the clocks knowledge page carry the preference, lifetime and clock-domain rules.
 Earlier judging responses remain intact; this amendment changes no follower or recording gate.
+
+## Amendment 2026-11-04: transport buttons from MIDI devices
+
+Maintainer decision (#320): a keyboard controller speaking MMC or real-time transport works
+in a session with no mappings, with no checkbox to enable. Every connected input starts with
+**Transport buttons** on; section 6 specifies the per-machine key and off switch. Logic Pro
+ships **Listen to MMC input** off ([MMC settings](https://support.apple.com/en-za/guide/logicpro/lgcp72142361/10.7/mac/11.0));
+Ableton Live has no native MMC support. transit chooses on by default: the per-device off switch,
+feedback guard and device-named status line make the surprise small and the benefit large.
+
+### Button dispatch and state table
+
+Decode on the UI/control thread and invoke the existing commands in
+`crates/engine/src/cmd/transport.rs`. Reuse section 2's slice-1 duplicate, pending-start,
+SPP and take-finalization rules, with **cursor start** when no sync-follow mode is selected
+(including slice 0, before the clock-follow choice exists). The selected sync port instead
+uses section 2's cycle-start/zero rule, never both paths. A pending Play, count-in or recording
+start counts as running for duplicate Play/Continue and as stoppable for Stop/Pause.
+
+| Input / target | Stopped, no pending start | Running or pending |
+|---|---|---|
+| FA Start; MMC 02 Play / 03 Deferred Play; learned Play | `transport.play` from the edit cursor; Deferred Play has the same admitted action boundary, no F8 wait. | Ignore; never toggle or cancel a count-in. |
+| FB Continue | `transport.play` with `from` equal to the retained transport position (including SPP), not the cursor. | Ignore. |
+| FC Stop; MMC 01 Stop; learned Stop | Ignore; never invoke the host's second-Stop Return to Zero behavior. | `transport.stop`: cancel pending start/count-in, finalize the take, retain position for Continue. |
+| MMC 04 Fast Forward / 05 Rewind | `transport.fast_forward` / `transport.rewind`, `seconds: 1`. | Same one-second locate; use section 2's take-safe locate sequence if recording. No held-repeat timer. |
+| MMC 06 Record Strobe | `transport.record`, through the UI Record path. | Record if playing without recording; ignore if Record is already engaged/pending. |
+| MMC 07 Record Exit | Ignore. | If recording or Record pending, `transport.record` to end/cancel it through the existing Record-button stop/finalization path; otherwise ignore. This scope stops playback too, not punch-out-and-keep-playing. |
+| MMC 09 Pause; learned Pause | Ignore. | `transport.pause`, cancel/finalize and retain position; never toggle. |
+| MMC 44 Locate; F2 SPP | `transport.locate` at the decoded position; remain stopped. | Locate without adding a Play; retain running state, finalize/resume passes by section 2 when recording. |
+| Learned Record | `transport.record`. | `transport.record`, same toggle/end behavior as the UI Record button. |
+| Learned Cycle | UI Cycle's `options.loop_playback` with `value: !session.edit.loop_playback` (creates a region if empty). | Same; preserve the current take's cycle until finalization. |
+| Learned Return to Zero | `transport.rtz`. | Same locate through section 2's take-safe path. |
+| F8 Clock | Ignore for buttons; never change tempo. | Same. Only slice 3's explicitly selected clock follower may consume it for tempo. |
+
+Retain position before stopping: the UI cursor and current transport position can differ.
+Within a dispatch update logical pending state immediately, so two queued Play/Record messages
+cannot both see an old stopped state. SPP uses section 2's `240*(low + 128*high)` model ticks
+and the active map, including its duplicate/reset rules. It never implicitly starts playback.
+
+**MMC bytes:** accept `F0 7F id 06 command F7` for the simple commands above, only for id 7F
+(all) or `midi_transport[device_name].mmc_device_id`. Ignore other ids and unsupported commands.
+Locate's `44 06 01 hh mm ss ff` time fields are followed by the required subframe byte `sf`
+and F7: `F0 7F id 06 44 06 01 hh mm ss ff sf F7`. The count 06 includes 01 and five time bytes;
+do not accept the shorthand without `sf` as a complete message. Ignore valid subframes
+(0..99) in this slice. Require complete lengths/EOX and seven-bit data, hours `(hh & 1F)`
+0..23, minutes/seconds 0..59 and a valid frame label; reject truncated/overlong/aborted SysEx.
+Strip interleaved real-time bytes before this validation and dispatch them independently.
+
+`Session::frame_rate` and `timecode_start` already exist (`crates/model/src/session.rs`);
+new sessions use `FrameRate::Fps30`. Interpret the label with the **session's frame rate**,
+including its rational rate and drop-frame label rules, then compute
+`at = max(0, Timecode::to_samples(frame_rate, sample_rate) - timecode_start)` using
+`crates/time/src/timecode.rs`. The high rate bits of hh do not change the session rate;
+mask them off for hours. Reject nonexistent drop-frame labels before conversion. If a future
+session source supplies no rate, assume **30 fps non-drop**; a separate fallback-rate preference
+is later work. Locate does not follow MTC or change tempo.
+
+**Record and feedback text:** MMC Strobe and learned Record use the UI's arming, count-in,
+pre-roll, measurement interlock and error handling; never arm a track implicitly. Section 2's
+external-start count-in bypass applies only to the selected sync source. Extend `record_hint`
+in `crates/ui-studio/src/lib.rs` to carry device text (it is currently a static string): failed
+unarmed Record shows **Record from <device>: no armed track**, in both hint and status. Keep
+the hint's current lifetime and clear-on-arm behavior, with injected stamps/readout in tests.
+For an honored action set **Transport from <device>: <action>**, using the table's action name
+(Play for Deferred Play, Locate for SPP), once per action, at most one status line per second
+per device. Emit the first eligible line, suppress further lines until the event's arrival
+stamp is at least 1,000,000,000 ns after the last emitted line; never delay or throttle actions.
+The Record refusal replaces its success text and uses the same line limit; its hint still
+appears. Ignored bytes and no-op duplicates produce no success text.
+
+**Conflicts:** section 5's same-device send guard applies before dispatch. Coalesce an MMC
+Play/Deferred Play plus FA (or MMC Stop plus FC) from the same device in one control dispatch
+to one action/status, in either order. Normalize them to Play/Stop before state checks. Collapse
+only equivalent adjacent actions in that device's ordered stream (F8 is immaterial); never
+collapse across an intervening Stop, Start or locate. Other commands keep arrival order.
+Selected sync-source semantics win over an accompanying equivalent MMC button. This must
+not turn Stop-Start-Stop into one Stop or duplicate a recording ticket.
+
+### Learn and delivery
+
+Extend `Control` in `crates/model/src/midi_map.rs` with global transport targets **Play, Stop,
+Record, Cycle, Return to Zero, Pause**, with target text `transport:play`, `transport:stop`,
+`transport:record`, `transport:cycle`, `transport:rtz`, `transport:pause`. These have no strip
+or track dependency and work in an empty session. Extend the learn/candidate/press flow in
+`crates/ui-studio/src/midi_learn.rs`; selecting one always offers machine scope. Store source
+kind, channel, note/CC number and target under `ui.json`'s
+`midi_transport[device_name].mappings`, keyed by the source's exact device name. This follows
+[Logic Pro's machine controller assignments](https://support.apple.com/en-mk/guide/logicpro/ctls71c31487/10.7/mac/11.0),
+rather than [Ableton Live's per-Set mappings](https://help.ableton.com/hc/en-us/articles/360000038859-Making-custom-MIDI-Mappings).
+
+Today ordinary session targets live in `Session::midi_mappings: MappingSet`, machine strip
+targets in `UiState.midi_profile`, and rack macro sources in `Macro::midi`, merged by
+`MappingSet::with_racks`. None is repurposed for transport. Refuse a transport target in
+session-scope `midi.learn` or `midi.map`, before mutation, with **Transport mappings are
+per-machine; choose Controller scope**. Enforce this at session-store validation/load/save too:
+an invalid imported transport row is ignored with that warning, never retained in the session's
+MappingSet or silently migrated into machine preferences. Saving/loading a session never
+changes transport mappings. No required session field or format bump.
+
+Buttons fire once on a note-on with velocity > 0 or a CC transition from below 64 to >= 64.
+Note-off/velocity-zero and CC < 64 only release the latch; repeated high values/held notes do
+nothing. Track the latch per device generation, channel and source; reset on disconnect,
+remap or disable, without firing. Takeover scaling and toggle/follow modes do not apply.
+Consume mapped presses and their releases (no instrument note or recording); an active
+machine transport mapping takes priority over an overlapping session/strip/rack mapping,
+which remains stored but is shown overridden. Learning captures without firing. Standard
+MMC/real-time messages remain independent of Learn and are never learn candidates.
+
+`ring.rs::real_time` already offers FA/FB/FC/F8 to the input ring. SysEx is **not delivered to
+transport today**: `set_sysex_capture`/`pop_sysex` retain a 64-byte diagnostic prefix, and
+`player/ingress.rs::Mon` gates/drains it for Monitor. Slice 0 must add bounded complete MMC
+envelopes independent of Monitor, tagged with port generation, arrival stamp and ordering
+sequence shared with real-time input. Assemble framing in `midi-io/src/ring.rs` without
+allocation; truncated prefixes can never execute. The ingress worker forwards the envelopes
+and real-time messages over a dedicated bounded control lane; decode MMC commands, ids,
+SMPTE and button actions on UI/control beside the existing MIDI Learn drain, then run engine
+commands there. Open eligible ports independently of note routes, with Monitor/Learn closed.
+Use section 6's sticky Stop, cancellation cutoffs and overflow finalization for this lane too,
+from slice 0. Monitor must not consume transport's copy. No decoding, allocation, locking or
+MIDI sends on the audio callback. Slice 0's gate is above; slices 1 to 4 remain unchanged.

@@ -136,7 +136,7 @@ not shipped behavior. The existing domains above remain; MIDI adds two musical c
 
 | Mode | Transport authority | Tempo and musical phase authority | Audio scheduling and recording |
 |---|---|---|---|
-| Internal (all inputs Off) | Local transport | Saved session tempo map: S to q | Device D; existing rate conversion and historical D to S mapping |
+| Internal (all sync inputs Off) | Local transport, including enabled MIDI transport buttons | Saved session tempo map: S to q | Device D; existing rate conversion and historical D to S mapping |
 | External transport only (Transport) | Chosen input's Start/Stop/Continue/SPP; local Stop always works | Saved session tempo map; F8 has no effect | Device D, as internal |
 | External clock (Transport and Clock) | Chosen input's transport; local Stop always works | Incoming tick count anchors q; filtered tempo interpolates between ticks; runtime external map replaces saved tempo events | Device D remains the sample clock; historical D/S/q segments place events |
 
@@ -144,7 +144,7 @@ In all three modes, idle output uses the active tempo without advancing S or son
 no transport authority. Its scheduler runs on control or the MIDI output thread, never the
 audio callback, and uses the existing output deadline path and per-port delay.
 
-Only one input is active. Modes and input/output sync delays are per-port machine preferences,
+Only one sync input is active. Modes and input/output sync delays are per-port machine preferences,
 off/zero by default; per-output **Idle clock** defaults on, effective only with Clock on. An
 explicit Idle clock off persists across Clock off/on. There is no new required session field.
 Positive input delay moves the tick anchor
@@ -152,6 +152,21 @@ later, positive output delay sends later. Neither changes captured note timestam
 carrying notes still carries them normally. On this base `midi-io/src/ring.rs` already parses
 and offers F8/FA/FB/FC and F2; the Monitor sees them, while playback ignores them. The proposed
 consumer must work with the Monitor closed and without any note route or learned mapping.
+
+The [2026-11-04 transport-button amendment](../../adr/0043-hardware-sync-transport-and-clock.md#amendment-2026-11-04-transport-buttons-from-midi-devices)
+adds slice 0 before clock follow: every connected input honors MMC and FA/FB/FC/SPP by default.
+Without a selected sync mode, Start plays from the cursor, Continue resumes the retained
+position, Stop stops and SPP locates without starting; F8 never changes tempo. The selected
+sync source uses section 2's cycle-start/zero rule exactly once instead. The per-device
+**Transport buttons** switch gates both paths, independently of F8 reception.
+`UiState.midi_transport` in `ui.json` is keyed by exact device name: `transport_buttons` defaults
+true, `mmc_device_id` to 0 (7F broadcast also accepted), and `mappings` to an empty list.
+Learned Play/Stop/Record/Cycle/Return to Zero/Pause are machine preferences, never session
+MappingSet entries or rack macros. A device receiving transit's Transport output has its
+incoming transport buttons suspended, including while stopped; Clock-only output does not
+suspend them. The ADR specifies command/state, Record hint, rate-limited status, complete MMC
+delivery on control independent of Monitor, and deterministic gates. These are decisions,
+not shipped behavior; slices 1 to 4 retain their existing gates.
 
 The proposed filter estimates one beat from 24 intervals with median/MAD outlier rejection;
 four consistent beats acquire lock. Tick count, not integrated displayed BPM, supplies phase.
