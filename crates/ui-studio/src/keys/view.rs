@@ -159,6 +159,12 @@ fn editor(app: &mut StudioApp, ui: &mut Ui) {
     let to_rel = |at: Samples| s.tempo.samples_to_ticks(at, s.sample_rate) - cv.c0;
     let cx = map.x(to_rel(app.cursor()));
     p.line_segment([pos2(cx, ruler.min.y), pos2(cx, vel.max.y)], Stroke::new(1.0, TOKENS.cursor.gamma_multiply(0.6)));
+    if !app.keys.step.on
+        && let Some(at) = app.keys.click_tick
+    {
+        let x = map.x(at.max(0));
+        p.line_segment([pos2(x, grid.min.y), pos2(x, grid.max.y)], Stroke::new(1.0, TOKENS.accent.gamma_multiply(0.35)));
+    }
     if let Some((at, len)) = step_cur {
         let (x0, x1) = (map.x(at), map.x(at + len));
         let band = Rect::from_min_max(pos2(x0, ruler.min.y), pos2(x1.max(x0 + 2.0), vel.max.y));
@@ -846,4 +852,36 @@ fn paint_keyboard(app: &StudioApp, ui: &Ui, map: &Map, kb: Rect) {
         }
     }
     p.line_segment([pos2(kb.max.x - 0.5, kb.min.y), pos2(kb.max.x - 0.5, kb.max.y)], Stroke::new(1.0, TOKENS.line));
+}
+
+/// The ruler: a click sets the cursor; a drag up or down zooms time around the pointer, sideways scrolls.
+fn ruler_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, ruler: Rect, s: &Session) {
+    let resp = ui.interact(ruler, ui.id().with("keys_ruler"), Sense::click_and_drag());
+    if resp.dragged() {
+        ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
+    } else if resp.hovered() {
+        ui.ctx().set_cursor_icon(CursorIcon::PointingHand);
+    }
+    if resp.clicked()
+        && let Some(pos) = resp.interact_pointer_pos()
+    {
+        let abs = (map.c0 as f64 + map.tick(pos.x)).max(0.0) as i64;
+        app.click_ruler(s.tempo.tick_to_samples(abs, s.sample_rate));
+    }
+    if resp.drag_started()
+        && let Some(press) = ui.input(|i| i.pointer.press_origin())
+    {
+        app.keys.gesture = Some(KeysGesture::Ruler { ppq: app.ui.keys.px_per_quarter, anchor: map.tick(press.x), press });
+    }
+    if resp.dragged()
+        && let Some(KeysGesture::Ruler { ppq, anchor, press }) = app.keys.gesture.clone()
+        && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
+    {
+        let z = (ppq * ((pos.y - press.y) * 0.01).exp()).clamp(8.0, 800.0);
+        app.ui.keys.px_per_quarter = z;
+        app.keys.scroll = anchor - f64::from(pos.x - map.gx0) / (f64::from(z) / PPQ as f64);
+    }
+    if resp.drag_stopped() {
+        app.keys.gesture = None;
+    }
 }

@@ -337,6 +337,8 @@ pub struct KeysState {
     pub quantize_open: bool,
     /// The clip being edited.
     pub clip: Option<ClipId>,
+    /// Last empty-grid click in clip-relative ticks; the next Step entry start, never the playhead.
+    pub click_tick: Option<i64>,
     /// Selected notes, by value (indices shift after every edit).
     pub selection: Vec<Note>,
     pub gesture: Option<KeysGesture>,
@@ -374,6 +376,7 @@ impl Default for KeysState {
             cc: cc::State::default(),
             quantize_open: false,
             clip: None,
+            click_tick: None,
             selection: Vec::new(),
             gesture: None,
             scroll: 0.0,
@@ -587,6 +590,7 @@ impl StudioApp {
             return false;
         }
         if self.keys.clip != Some(clip) {
+            self.keys.click_tick = None;
             self.keys.quantize_open = false;
             self.keys.selection.clear();
             self.keys.fit = true;
@@ -1071,10 +1075,8 @@ fn grid_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, grid: Rect, vel: Rect
                 if !mods.shift {
                     app.keys.selection.clear();
                 }
-                // The cursor (where Play starts), as in the arrangement.
-                let s = app.engine.session();
-                let at = s.tempo.tick_to_samples(cv.c0 + map.tick(pos.x).round().max(-(cv.c0 as f64)) as i64, s.sample_rate);
-                app.set_cursor(at, None);
+                // Remember the Step entry start without moving the cursor or transport.
+                app.keys.click_tick = Some(map.tick(pos.x).round().max(-(cv.c0 as f64)) as i64);
             }
         }
     }
@@ -1266,36 +1268,6 @@ fn keyboard_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, kb: Rect, now: f6
         app.ui.keys.key_h = kh;
         // The pitch grabbed stays under the pointer.
         app.keys.top = map.rows.pitch(anchor + (pos.y - map.gy0) / kh);
-    }
-    if resp.drag_stopped() {
-        app.keys.gesture = None;
-    }
-}
-
-/// The ruler: a click sets the cursor; a drag up or down zooms time around the pointer, sideways scrolls.
-fn ruler_input(app: &mut StudioApp, ui: &mut Ui, map: &Map, ruler: Rect, s: &Session) {
-    let resp = ui.interact(ruler, ui.id().with("keys_ruler"), Sense::click_and_drag());
-    if resp.hovered() {
-        ui.ctx().set_cursor_icon(CursorIcon::ResizeVertical);
-    }
-    if resp.clicked()
-        && let Some(pos) = resp.interact_pointer_pos()
-    {
-        let abs = (map.c0 as f64 + map.tick(pos.x)).max(0.0) as i64;
-        app.click_ruler(s.tempo.tick_to_samples(abs, s.sample_rate));
-    }
-    if resp.drag_started()
-        && let Some(press) = ui.input(|i| i.pointer.press_origin())
-    {
-        app.keys.gesture = Some(KeysGesture::Ruler { ppq: app.ui.keys.px_per_quarter, anchor: map.tick(press.x), press });
-    }
-    if resp.dragged()
-        && let Some(KeysGesture::Ruler { ppq, anchor, press }) = app.keys.gesture.clone()
-        && let Some(pos) = ui.input(|i| i.pointer.latest_pos())
-    {
-        let z = (ppq * ((pos.y - press.y) * 0.01).exp()).clamp(8.0, 800.0);
-        app.ui.keys.px_per_quarter = z;
-        app.keys.scroll = anchor - f64::from(pos.x - map.gx0) / (f64::from(z) / PPQ as f64);
     }
     if resp.drag_stopped() {
         app.keys.gesture = None;

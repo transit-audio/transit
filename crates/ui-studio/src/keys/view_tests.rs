@@ -1,6 +1,169 @@
 use super::*;
 
 #[test]
+fn an_empty_grid_click_preserves_where_play_starts_and_clears_note_selection() {
+    let mut t = T::open();
+    t.add(60, 0, 480);
+    t.click(mid(t.note_rect(60, 0)));
+    assert_eq!(t.selected(), 1);
+    t.app.set_cursor(12_000, Some(t.track));
+    t.app.engine.transport.position = 6_000;
+    assert!(!t.app.is_playing());
+    let undo = t.undo_len();
+
+    t.click(t.at(960.0, 64));
+
+    assert_eq!(t.app.cursor(), 12_000, "empty grid must not change where Play starts");
+    assert_eq!(t.app.engine.transport.position, 6_000);
+    assert_eq!(t.app.position(), 12_000, "the stopped transport readout stays at the cursor");
+    assert_eq!(t.app.keys.click_tick, Some(960));
+    assert_eq!(t.app.cursor_track(), Some(t.track));
+    assert!(t.app.keys.selection.is_empty());
+    assert_eq!(t.selected(), 0);
+    assert_eq!(t.undo_len(), undo);
+}
+
+#[test]
+fn a_piano_roll_ruler_click_moves_the_edit_cursor_and_stopped_playhead() {
+    let mut t = T::open();
+    t.add(60, 0, 480);
+    t.click(mid(t.note_rect(60, 0)));
+    t.app.set_cursor(12_000, Some(t.track));
+    t.app.engine.transport.position = 6_000;
+    assert!(!t.app.is_playing());
+    let ruler = t.app.keys.layout.ruler;
+    let x = t.at(960.0, 64).0;
+
+    t.click((x, mid(ruler).1));
+
+    let s = t.app.engine.session();
+    let wanted = s.tempo.tick_to_samples(960, s.sample_rate);
+    assert_eq!(t.app.cursor(), wanted);
+    assert_eq!(t.app.engine.transport.position, wanted);
+    assert_eq!(t.selected(), 1, "ruler clicks preserve the note selection");
+}
+
+#[test]
+fn step_entry_after_an_empty_grid_click_starts_at_the_clicked_tick() {
+    let mut t = T::open();
+    t.app.set_cursor(12_000, Some(t.track));
+    t.app.engine.transport.position = 6_000;
+    t.click(t.at(960.0, 64));
+    assert_eq!(t.app.cursor(), 12_000);
+    assert_eq!(t.app.engine.transport.position, 6_000);
+    t.step_on();
+
+    assert_eq!(t.app.keys.layout.step_cursor, 960);
+    t.app.step_midi_at(transit_playback::PlayedNote { pitch: 64, velocity: 90, on: true }, 0);
+    t.app.step_midi_at(transit_playback::PlayedNote { pitch: 64, velocity: 0, on: false }, 100);
+
+    let notes = t.notes();
+    assert_eq!(notes.len(), 1);
+    assert_eq!((notes[0].start, notes[0].pitch), (960, 64));
+    assert_eq!(t.app.engine.transport.position, 6_000);
+    assert_eq!(t.app.cursor(), 12_000);
+}
+
+#[test]
+fn step_entry_without_a_grid_click_starts_at_the_playhead_inside_the_clip() {
+    let mut t = T::open();
+    t.app.set_cursor(12_000, Some(t.track));
+    assert_eq!(t.app.keys.click_tick, None);
+    assert_eq!(t.app.engine.session().edit.selection.start, 0);
+
+    t.step_on();
+
+    assert_eq!(t.app.keys.layout.step_cursor, 480);
+}
+
+#[test]
+fn switching_the_open_clip_clears_the_grid_click() {
+    let mut t = T::open();
+    let other = t.app.run("midi.new_clip", json!({"tracks": [t.track.0], "start": 96_000, "end": 192_000})).unwrap();
+    let other = ClipId(other["clip"].as_u64().unwrap());
+    assert_ne!(other, t.clip);
+    t.click(t.at(960.0, 64));
+    assert_eq!(t.app.keys.click_tick, Some(960));
+    assert!(t.app.open_keys(t.clip));
+    assert_eq!(t.app.keys.click_tick, Some(960), "reopening the same clip keeps its marker");
+
+    assert!(t.app.open_keys(other));
+
+    assert_eq!(t.app.keys.clip, Some(other));
+    assert_eq!(t.app.keys.click_tick, None);
+}
+
+#[test]
+fn turning_step_off_forgets_the_grid_click() {
+    let mut t = T::open();
+    t.app.set_cursor(12_000, Some(t.track));
+    t.click(t.at(960.0, 64));
+    t.step_on();
+    assert_eq!(t.app.keys.layout.step_cursor, 960);
+
+    t.key("S", json!({}));
+
+    assert!(!t.app.keys.step.on);
+    assert_eq!(t.app.keys.click_tick, None);
+    t.step_on();
+    assert_eq!(t.app.keys.layout.step_cursor, 480, "the cleared click no longer overrides the playhead");
+}
+
+#[test]
+fn the_arrangement_selection_takes_precedence_over_the_grid_click_for_step_entry() {
+    let mut t = T::open();
+    t.app.run("edit.select", json!({"tracks": [t.track.0], "start": 36_000, "end": 48_000})).unwrap();
+    t.click(t.at(960.0, 64));
+
+    t.step_on();
+
+    assert_eq!(t.app.keys.layout.step_cursor, 1440);
+}
+
+#[test]
+fn a_grid_click_before_a_later_clip_starts_step_entry_at_the_clip_start() {
+    let mut t = T::open();
+    let other = t.app.run("midi.new_clip", json!({"tracks": [t.track.0], "start": 96_000, "end": 192_000})).unwrap();
+    t.clip = ClipId(other["clip"].as_u64().unwrap());
+    assert!(t.app.open_keys(t.clip));
+    t.frames(2);
+    t.app.keys.scroll = -960.0;
+    t.frames(2);
+    t.app.set_cursor(120_000, Some(t.track));
+    t.app.engine.transport.position = 108_000;
+
+    t.click(t.at(-480.0, 64));
+
+    assert_eq!(t.app.keys.click_tick, Some(-480));
+    assert_eq!(t.app.cursor(), 120_000);
+    assert_eq!(t.app.engine.transport.position, 108_000);
+    t.step_on();
+    assert_eq!(t.app.keys.layout.step_cursor, 0);
+    t.app.step_midi_at(transit_playback::PlayedNote { pitch: 64, velocity: 90, on: true }, 0);
+    t.app.step_midi_at(transit_playback::PlayedNote { pitch: 64, velocity: 0, on: false }, 100);
+    assert_eq!(t.notes().len(), 1);
+    assert_eq!(t.notes()[0].start, 0);
+}
+
+#[test]
+fn a_shift_grid_click_keeps_the_note_selection_and_marks_step_entry() {
+    let mut t = T::open();
+    t.add(60, 0, 480);
+    t.click(mid(t.note_rect(60, 0)));
+    t.app.set_cursor(12_000, Some(t.track));
+    t.app.engine.transport.position = 6_000;
+    let undo = t.undo_len();
+
+    t.click_n(t.at(960.0, 64), 1, json!({"shift": true}));
+
+    assert_eq!(t.selected(), 1);
+    assert_eq!(t.app.keys.click_tick, Some(960));
+    assert_eq!(t.app.cursor(), 12_000);
+    assert_eq!(t.app.engine.transport.position, 6_000);
+    assert_eq!(t.undo_len(), undo);
+}
+
+#[test]
 fn the_view_switcher_shows_in_the_piano_roll_the_mixer_and_the_devices() {
     let mut t = T::new();
     let have = |r: [f32; 4]| r[2] > r[0] && r[3] > r[1];

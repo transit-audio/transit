@@ -96,11 +96,13 @@ impl StudioApp {
         self.keys.step.len.unwrap_or_else(|| self.keys_step())
     }
 
-    /// Turn Step on or off. On: the cursor starts at the selection or the playhead when either is
-    /// inside the clip, else at the clip start.
+    /// Turn Step on or off. On: start at the arrangement selection inside the clip, else the last
+    /// empty-grid click (at least the clip start), else the playhead inside the clip, else the clip
+    /// start. Off: forget the click.
     pub fn step_toggle(&mut self) {
         if self.keys.step.on {
             self.keys.step = StepState::default();
+            self.keys.click_tick = None;
             return;
         }
         let Some(clip) = self.keys.clip else { return };
@@ -109,7 +111,7 @@ impl StudioApp {
         let inside = |abs: i64| (abs >= cv.c0 && abs < cv.c0 + cv.len).then_some(abs - cv.c0);
         let sel = inside(s.tempo.samples_to_ticks(s.edit.selection.start.max(0), s.sample_rate));
         let head = inside(s.tempo.samples_to_ticks(self.position().max(0), s.sample_rate));
-        let cursor = sel.filter(|t| *t > 0).or(head.filter(|t| *t > 0)).unwrap_or(0);
+        let cursor = sel.filter(|t| *t > 0).or(self.keys.click_tick.map(|t| t.max(0))).or(head.filter(|t| *t > 0)).unwrap_or(0);
         self.keys.step = StepState { on: true, cursor, follow: true, ..StepState::default() };
     }
 
