@@ -15,6 +15,7 @@
 
 use super::*;
 use std::rc::Rc;
+use std::sync::atomic::AtomicU64;
 use transit_rt::run_loop::{self as host_loop, Ready, Token};
 use vst3::Steinberg::Linux::{FileDescriptor, IEventHandler, IEventHandlerTrait, IRunLoopTrait, ITimerHandler, ITimerHandlerTrait, TimerInterval};
 
@@ -23,7 +24,8 @@ pub(crate) struct RunLoop {
     /// The thread whose run loop takes the registrations (the editor's).
     owner: std::thread::ThreadId,
     /// The plug-in's handlers (by address) and their registrations.
-    regs: Mutex<Vec<(usize, Token)>>,
+    regs: Mutex<Vec<(usize, Token, Option<u64>)>>,
+    callbacks: Arc<AtomicU64>,
     /// The view was torn down: nothing more is registered, and the registrations still in the
     /// run loop (an instance destroyed off the editor's thread, whose teardown cannot reach them)
     /// remove themselves at their next call instead of calling the plug-in.
@@ -31,8 +33,24 @@ pub(crate) struct RunLoop {
 }
 
 impl RunLoop {
+    pub(super) fn timer_callbacks(&self) -> u64 {
+        self.callbacks.load(Ordering::Relaxed)
+    }
+
+    pub(super) fn surface_registrations(&self) -> String {
+        let r = self.lock();
+        let periods: Vec<_> = r.iter().filter(|(_, t, _)| host_loop::is_registered(*t)).filter_map(|(_, _, ms)| *ms).collect();
+        let fds = r.iter().filter(|(_, t, ms)| ms.is_none() && host_loop::is_registered(*t)).count();
+        format!("format=VST3 IRunLoop_timers={} timer_period_ms={periods:?} IRunLoop_event_handlers={fds}", periods.len())
+    }
+
     pub(super) fn new() -> RunLoop {
-        RunLoop { owner: std::thread::current().id(), regs: Mutex::new(Vec::new()), closed: Arc::new(AtomicBool::new(false)) }
+        RunLoop {
+            owner: std::thread::current().id(),
+            regs: Mutex::new(Vec::new()),
+            callbacks: Arc::new(AtomicU64::new(0)),
+            closed: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     /// Marks the view gone without touching the run loop (any thread): the registrations stop
@@ -41,7 +59,7 @@ impl RunLoop {
         self.closed.store(true, Ordering::Release);
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<(usize, Token)>> {
+    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<(usize, Token, Option<u64>)>> {
         self.regs.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -56,12 +74,12 @@ impl RunLoop {
         }
     }
 
-    fn add(&self, name: &str, what: &str, handler: usize, token: Option<Token>) -> sb::tresult {
+    fn add(&self, name: &str, what: &str, handler: usize, token: Option<Token>, period: Option<u64>) -> sb::tresult {
         let Some(token) = token else {
             log::warn!("vst3 editor \"{name}\": IRunLoop {what}: refused (the run loop is full or the descriptor is invalid)");
             return sb::kResultFalse;
         };
-        self.lock().push((handler, token));
+        self.lock().push((handler, token, period));
         log::debug!("vst3 editor \"{name}\": IRunLoop {what}");
         sb::kResultTrue
     }
@@ -70,9 +88,9 @@ impl RunLoop {
     fn remove(&self, handler: usize) -> sb::tresult {
         let tokens: Vec<Token> = {
             let mut regs = self.lock();
-            let (gone, keep): (Vec<_>, Vec<_>) = regs.drain(..).partition(|&(h, _)| h == handler);
+            let (gone, keep): (Vec<_>, Vec<_>) = regs.drain(..).partition(|&(h, _, _)| h == handler);
             *regs = keep;
-            gone.into_iter().map(|(_, t)| t).collect()
+            gone.into_iter().map(|(_, t, _)| t).collect()
         };
         // Outside the lock: dropping a registration releases the plug-in's handler, whose last
         // `release` may call back in.
@@ -88,7 +106,7 @@ impl RunLoop {
     /// registrations stay until that thread exits).
     pub(super) fn close(&self, name: &str) {
         self.closed.store(true, Ordering::Release);
-        let left: Vec<Token> = std::mem::take(&mut *self.lock()).into_iter().map(|(_, t)| t).collect();
+        let left: Vec<Token> = std::mem::take(&mut *self.lock()).into_iter().map(|(_, t, _)| t).collect();
         if !left.is_empty() {
             log::debug!("vst3 editor \"{name}\": {} run-loop registrations left at teardown; removed", left.len());
         }
@@ -122,7 +140,7 @@ impl IRunLoopTrait for PlugFrame {
                 true
             }),
         );
-        self.run_loop.add(&self.name, &format!("registerEventHandler fd {fd}"), handler.addr(), token)
+        self.run_loop.add(&self.name, &format!("registerEventHandler fd {fd}"), handler.addr(), token, None)
     }
 
     unsafe fn unregisterEventHandler(&self, handler: *mut IEventHandler) -> sb::tresult {
@@ -140,6 +158,7 @@ impl IRunLoopTrait for PlugFrame {
         // SAFETY: as in `registerEventHandler`.
         let Some(h) = (unsafe { vst3::ComRef::from_raw(handler) }).map(|r| r.to_com_ptr()) else { return sb::kInvalidArgument };
         let closed = Arc::clone(&self.run_loop.closed);
+        let callbacks = Arc::clone(&self.run_loop.callbacks);
         let token = host_loop::add_timer(
             Duration::from_millis(milliseconds),
             Rc::new(move || {
@@ -148,10 +167,11 @@ impl IRunLoopTrait for PlugFrame {
                 }
                 // SAFETY: as in `registerEventHandler`.
                 unsafe { h.onTimer() };
+                callbacks.fetch_add(1, Ordering::Relaxed);
                 true
             }),
         );
-        self.run_loop.add(&self.name, &format!("registerTimer {milliseconds} ms"), handler.addr(), token)
+        self.run_loop.add(&self.name, &format!("registerTimer {milliseconds} ms"), handler.addr(), token, Some(milliseconds))
     }
 
     unsafe fn unregisterTimer(&self, handler: *mut ITimerHandler) -> sb::tresult {
@@ -171,6 +191,17 @@ mod tests {
     use std::time::Instant;
     use transit_rt::gui_thread::MessageQueue;
     use vst3::Steinberg::Linux::IRunLoop;
+
+    #[test]
+    fn surface_registrations_exclude_tokens_removed_by_the_run_loop() {
+        let r = RunLoop::new();
+        let timer = host_loop::add_timer(Duration::from_millis(30), Rc::new(|| true)).unwrap();
+        assert_eq!(r.add("test", "timer", 0, Some(timer), Some(30)), sb::kResultTrue);
+        assert_eq!(r.surface_registrations(), "format=VST3 IRunLoop_timers=1 timer_period_ms=[30] IRunLoop_event_handlers=0");
+        assert!(host_loop::remove(timer));
+        assert_eq!(r.lock().len(), 1, "format bookkeeping still holds the removed token");
+        assert_eq!(r.surface_registrations(), "format=VST3 IRunLoop_timers=0 timer_period_ms=[] IRunLoop_event_handlers=0");
+    }
 
     struct Counter(AtomicU32);
 
@@ -220,8 +251,11 @@ mod tests {
             assert_eq!(run_loop.registerTimer(timer, 5), sb::kResultTrue);
             assert_eq!(run_loop.registerEventHandler(events, rx.as_raw_fd()), sb::kResultTrue);
         }
+        assert_eq!(frame.run_loop.timer_callbacks(), 0);
+        assert_eq!(frame.run_loop.surface_registrations(), "format=VST3 IRunLoop_timers=1 timer_period_ms=[5] IRunLoop_event_handlers=1");
         assert!(pump(&q, || counter.0.load(Ordering::Relaxed) >= 3), "the timer fired");
         assert!(counter.0.load(Ordering::Relaxed) < 1000, "nothing to read yet");
+        assert_eq!(frame.run_loop.timer_callbacks(), u64::from(counter.0.load(Ordering::Relaxed)), "count actual deliveries to this frame");
         tx.write_all(b"x").unwrap();
         assert!(pump(&q, || counter.0.load(Ordering::Relaxed) >= 1000), "the descriptor's handler ran");
         // SAFETY: as above.

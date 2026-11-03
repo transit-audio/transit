@@ -27,13 +27,25 @@ use transit_rt::run_loop::{self as host_loop, Ready, Token};
 #[derive(Default)]
 pub(crate) struct Registrations {
     next_timer: clap_id,
-    timers: Vec<(clap_id, Token)>,
+    timers: Vec<(clap_id, Token, u32)>,
+    callbacks: u64,
     fds: Vec<(i32, Token)>,
     /// The instance was destroyed: nothing more is registered.
     closed: bool,
 }
 
 impl HostState {
+    pub(super) fn timer_callbacks(&self) -> u64 {
+        self.regs().callbacks
+    }
+
+    pub(super) fn surface_registrations(&self) -> String {
+        let r = self.regs();
+        let periods: Vec<_> = r.timers.iter().filter(|(_, t, _)| host_loop::is_registered(*t)).map(|(id, _, ms)| (*id, *ms)).collect();
+        let fds = r.fds.iter().filter(|(_, t)| host_loop::is_registered(*t)).count();
+        format!("format=CLAP timers={} timer_id_period_ms={periods:?} fds={fds}", periods.len())
+    }
+
     fn regs(&self) -> std::sync::MutexGuard<'_, Registrations> {
         self.run_loop.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -57,7 +69,7 @@ impl HostState {
             r.closed = true;
             (std::mem::take(&mut r.timers), std::mem::take(&mut r.fds))
         };
-        for t in timers.into_iter().map(|(_, t)| t).chain(fds.into_iter().map(|(_, t)| t)) {
+        for t in timers.into_iter().map(|(_, t, _)| t).chain(fds.into_iter().map(|(_, t)| t)) {
             let _ = host_loop::remove(t);
         }
     }
@@ -78,6 +90,8 @@ impl GuiLink {
         };
         // SAFETY: live plug-in, on its main thread (the run loop of the thread that registered).
         unsafe { on_timer(g.plugin, id) };
+        let mut r = self.host.regs();
+        r.callbacks = r.callbacks.saturating_add(1);
         true
     }
 
@@ -117,7 +131,7 @@ fn flags_of(ready: Ready) -> clap_posix_fd_flags {
 /// Inject the timer delivery, independent of scheduling (the run loop's clock has its own tests).
 #[cfg(test)]
 pub(super) fn deliver_registered_timers_for_test(link: &GuiLink) {
-    let ids: Vec<_> = link.host.regs().timers.iter().map(|(id, _)| *id).collect();
+    let ids: Vec<_> = link.host.regs().timers.iter().map(|(id, _, _)| *id).collect();
     for id in ids {
         assert!(link.on_timer(id));
     }
@@ -142,7 +156,7 @@ unsafe extern "C" fn host_register_timer(host: *const clap_host, period_ms: u32,
         log::warn!("clap: register_timer refused: {}: registry full", s.name.get().map_or("unknown", String::as_str));
         return false;
     };
-    r.timers.push((id, token));
+    r.timers.push((id, token, period_ms));
     // SAFETY: a writable out-pointer from the plugin (non-null, checked).
     unsafe { *timer_id = id };
     log::debug!("clap: register_timer {period_ms} ms -> {id}");
@@ -154,7 +168,7 @@ unsafe extern "C" fn host_unregister_timer(host: *const clap_host, timer_id: cla
     let Some(s) = (unsafe { state(host) }) else { return false };
     let token = {
         let mut r = s.regs();
-        let Some(i) = r.timers.iter().position(|&(id, _)| id == timer_id) else { return false };
+        let Some(i) = r.timers.iter().position(|&(id, _, _)| id == timer_id) else { return false };
         r.timers.remove(i).1
     };
     // Outside the lock: the run loop drops the registration, which may run plug-in code.
@@ -226,6 +240,17 @@ mod tests {
     use std::os::unix::net::UnixStream;
     use std::time::Instant;
     use transit_rt::gui_thread::MessageQueue;
+
+    #[test]
+    fn surface_registrations_exclude_tokens_removed_by_the_run_loop() {
+        let host = HostState::default();
+        let timer = host_loop::add_timer(Duration::from_millis(30), Rc::new(|| true)).unwrap();
+        host.regs().timers.push((7, timer, 30));
+        assert_eq!(host.surface_registrations(), "format=CLAP timers=1 timer_id_period_ms=[(7, 30)] fds=0");
+        assert!(host_loop::remove(timer));
+        assert_eq!(host.regs().timers.len(), 1, "format bookkeeping still holds the removed token");
+        assert_eq!(host.surface_registrations(), "format=CLAP timers=0 timer_id_period_ms=[] fds=0");
+    }
 
     /// What the fake plug-in's calls saw: timer calls, and the last descriptor call's flags.
     static TIMER_CALLS: AtomicU32 = AtomicU32::new(0);

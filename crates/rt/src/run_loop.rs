@@ -170,6 +170,13 @@ pub fn counts() -> (usize, usize) {
     with(|r| (r.fds.len(), r.timers.len()))
 }
 
+/// Whether a token is still registered on the calling thread. Format bookkeeping may outlive
+/// a token removed by the run loop itself (a closed descriptor or a callback returning false).
+#[must_use]
+pub fn is_registered(token: Token) -> bool {
+    with(|r| r.fds.iter().any(|e| e.token == token) || r.timers.iter().any(|e| e.token == token))
+}
+
 fn events(interest: Ready) -> i16 {
     (if interest.read { sys::POLLIN } else { 0 }) | (if interest.write { sys::POLLOUT } else { 0 })
 }

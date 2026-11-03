@@ -43,6 +43,9 @@ use x11rb::protocol::xproto::{
 use x11rb::rust_connection::RustConnection;
 use x11rb::wrapper::ConnectionExt as _;
 
+#[path = "x11_surface.rs"]
+mod surface;
+
 x11rb::atom_manager! {
     Atoms: AtomsCookie {
         WM_PROTOCOLS,
@@ -72,6 +75,7 @@ struct Conn {
     atoms: Atoms,
     /// The display's DPI ([`read_dpi`]), followed while windows are open.
     dpi: Cell<u32>,
+    events: Cell<u64>,
 }
 
 /// An editor window's state, on its thread.
@@ -104,6 +108,7 @@ struct Frame {
     child: Cell<Option<(Window, (i32, i32))>>,
     /// The tool style (no taskbar entry) is applied.
     tool: Cell<bool>,
+    surface: RefCell<Option<surface::Probe>>,
 }
 
 thread_local! {
@@ -143,7 +148,7 @@ fn conn() -> Result<Rc<Conn>, String> {
     let _ = c.change_window_attributes(root, &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE));
     let _ = c.flush();
     log::info!("editor windows: X11 display opened on this thread ({dpi} dpi)");
-    let conn = Rc::new(Conn { c, root, black, atoms, dpi: Cell::new(dpi) });
+    let conn = Rc::new(Conn { c, root, black, atoms, dpi: Cell::new(dpi), events: Cell::new(0) });
     CONN.with(|c| *c.borrow_mut() = Some(Rc::clone(&conn)));
     Ok(conn)
 }
@@ -343,6 +348,7 @@ impl EditorWindow {
             scale_changed: Cell::new(false),
             child: Cell::new(None),
             tool: Cell::new(false),
+            surface: RefCell::new(None),
         });
         set_title(&c, &frame, shown.as_deref().unwrap_or(title));
         // Editors that follow the main window (issue #173) have no taskbar entry.
@@ -490,6 +496,7 @@ pub(crate) fn pump(max: usize) -> usize {
         match c.c.poll_for_event() {
             Ok(Some(ev)) => {
                 done += 1;
+                c.events.set(c.events.get().saturating_add(1));
                 handle(&c, ev);
             }
             Ok(None) => break,

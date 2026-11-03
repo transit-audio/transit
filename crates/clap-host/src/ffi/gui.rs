@@ -145,6 +145,10 @@ impl GuiLink {
             log::warn!("plug-in editor not opened: {title}: {reason}");
         } else {
             log::info!("plug-in editor opened: {title}");
+            #[cfg(target_os = "linux")]
+            if let Some(w) = &self.lock().window {
+                w.start_surface_probe(title, self.host.timer_callbacks());
+            }
         }
         result
     }
@@ -408,6 +412,8 @@ impl GuiLink {
                 GuiLink::follow_scale(&g);
                 // The strip's changes and the size follow (issue #68).
                 w.sync();
+                #[cfg(target_os = "linux")]
+                w.sample_surface(self.host.timer_callbacks(), || self.host.surface_registrations());
             }
             if g.window.as_ref().is_some_and(|w| !w.is_visible()) {
                 // The user closed the embedded editor's host window: free the editor.

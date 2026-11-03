@@ -112,8 +112,10 @@ fn timer_required_paints_only_after_the_host_delivers_its_registered_timer() {
     inst.link().open("Fixture Gain").unwrap();
     assert_eq!(transit_rt::run_loop::counts(), (before.0, before.1 + 1));
     assert!(!inst.load_state(b"CMD:gui-painted"));
+    let callbacks = inst.link().host().timer_callbacks();
     super::run_loop::deliver_registered_timers_for_test(&inst.link());
     assert!(inst.load_state(b"CMD:gui-painted"));
+    assert_eq!(inst.link().host().timer_callbacks(), callbacks + 1, "count the delivered callback, not the advertised extension");
     inst.link().close();
     assert_eq!(transit_rt::run_loop::counts(), before);
 }

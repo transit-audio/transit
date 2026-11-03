@@ -390,6 +390,13 @@ impl EditorLink {
             log::warn!("plug-in editor not opened: {title}: {reason}");
         } else {
             log::info!("plug-in editor opened: {title}");
+            #[cfg(target_os = "linux")]
+            {
+                let g = self.lock();
+                if let (Some(w), Some(f)) = (&g.window, &g.frame) {
+                    w.start_surface_probe(title, f.run_loop.timer_callbacks());
+                }
+            }
         }
         result
     }
@@ -517,6 +524,10 @@ impl EditorLink {
                 EditorLink::follow_scale(&g);
                 // The strip's changes and the size follow (issue #68).
                 w.sync();
+                #[cfg(target_os = "linux")]
+                if let Some(f) = &g.frame {
+                    w.sample_surface(f.run_loop.timer_callbacks(), || f.run_loop.surface_registrations());
+                }
             }
             None => {}
         }
