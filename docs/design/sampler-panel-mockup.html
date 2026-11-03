@@ -1,0 +1,370 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<!-- The Sampler panel mockup for ADR 0041 slice 1 (#269): Pads, Slices (Auto and Manual) and Instrument views. Static HTML, no sound; open in a browser. Kept as the design note the implementer builds to until real screenshots replace it. -->
+</head>
+<body>
+<title>Sampler Panel Mockup</title>
+<style>
+/* Layout: the instrument panel as it sits in transit's bottom area: a view tab row, a left column
+   (pad grid / waveform / key map) and a right strip for the selected item's controls. Dark only,
+   matching transit's device panels (ADR 0041 behavior, controls named exactly as the ADR names them). */
+:root {
+  --bg: #1b1c1f; --panel: #232428; --panel2: #2a2b30; --line: #3a3b41; --fg: #e6e6e8; --muted: #9a9ca3;
+  --accent: #3f8cff; --accent2: #2f6ad1; --pad: #2e2f35; --pad-on: #3f8cff; --pad-slice: #3a4a66;
+  --wave: #6f9bff; --marker: #ffb84d; --good: #5fcf80; --warn: #ffb84d;
+  --font: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif; --mono: ui-monospace, Consolas, Menlo, monospace;
+  color-scheme: dark;
+}
+body { background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 13px; padding-inline: 16px; padding-block: 12px; }
+h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+.sub { color: var(--muted); margin: 0 0 12px; max-width: 70ch; }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; background: var(--panel2); border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+.head .name { font-weight: 600; margin-right: 8px; }
+.tabs { display: flex; gap: 2px; }
+.tab { background: transparent; color: var(--muted); border: 1px solid transparent; border-radius: 4px; padding: 4px 10px; font: inherit; cursor: pointer; }
+.tab[aria-selected="true"] { background: var(--panel); color: var(--fg); border-color: var(--line); }
+.tab:focus-visible, .pad:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.spacer { flex: 1; }
+.preset { background: var(--pad); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; color: var(--fg); font: inherit; }
+/* Pads: the grid column is fixed (square pads never stretch) and the control strip takes the rest.
+   Slices and Instrument: the waveform and the key map want width, so their left column flexes. */
+.view { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 0; }
+.view > * { min-width: 0; }
+#v-pads { grid-template-columns: 440px minmax(0, 1fr); }
+.left { padding: 12px; border-right: 1px solid var(--line); box-sizing: border-box; }
+#v-pads .left { width: 440px; }
+.right { padding: 12px; display: grid; gap: 12px; align-content: start; }
+@media (max-width: 720px) { .view, #v-pads { grid-template-columns: 1fr; } .left, #v-pads .left { border-right: 0; border-bottom: 1px solid var(--line); width: auto; } }
+.rowlabel { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+/* pads */
+.banks { display: flex; gap: 4px; margin-bottom: 8px; }
+.bank { background: var(--pad); border: 1px solid var(--line); color: var(--muted); border-radius: 4px; padding: 2px 10px; font: inherit; cursor: pointer; }
+.bank[aria-pressed="true"] { color: var(--fg); border-color: var(--accent); }
+.grid { display: grid; grid-template-columns: repeat(4, 96px); gap: 6px; width: 402px; max-width: 100%; }
+@media (max-width: 720px) { .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); width: auto; } }
+.pad { aspect-ratio: 1; background: var(--pad); border: 1px solid var(--line); border-radius: 5px; color: var(--fg); font: inherit; text-align: left; padding: 6px; display: flex; flex-direction: column; justify-content: space-between; cursor: pointer; position: relative; }
+.pad .n { font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.pad .nm { font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pad .ch { position: absolute; top: 6px; right: 6px; font-size: 10px; background: var(--panel2); border: 1px solid var(--line); border-radius: 3px; padding: 0 4px; color: var(--muted); }
+.pad[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.pad.empty { color: var(--muted); border-style: dashed; }
+.pad.slice { background: var(--pad-slice); }
+/* knobs */
+.knobs { display: grid; grid-template-columns: repeat(auto-fill, minmax(64px, 1fr)); gap: 10px 6px; }
+.knob { display: grid; justify-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.knob svg { width: 40px; height: 40px; }
+.knob .v { font-family: var(--mono); color: var(--fg); font-size: 11px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { background: var(--pad); color: var(--muted); border: 0; padding: 4px 10px; font: inherit; cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--accent2); color: #fff; }
+.field { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.field label { color: var(--muted); min-width: 72px; }
+select, input[type=number] { background: var(--pad); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 3px 6px; font: inherit; }
+/* waveform */
+.wave { background: #15161a; border: 1px solid var(--line); border-radius: 4px; height: 150px; position: relative; overflow: hidden; }
+.wave canvas { width: 100%; height: 100%; display: block; }
+.markers { position: absolute; inset: 0; pointer-events: none; }
+.mk { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--marker); }
+.mk span { position: absolute; top: 2px; left: 3px; font-family: var(--mono); font-size: 10px; color: var(--marker); }
+/* Slices bench: markers are live. Click the waveform to add one, click a marker to remove it. */
+#smarks .mk { pointer-events: auto; cursor: pointer; width: 9px; margin-left: -4px; background: transparent; }
+#smarks .mk::before { content: ""; position: absolute; left: 4px; top: 0; bottom: 0; width: 1px; background: var(--marker); }
+#smarks .mk:hover::before { width: 3px; left: 3px; background: #ff6b6b; }
+#smarks .mk.user::before { background: var(--good); }
+#smarks .mk.user span { color: var(--good); }
+#sw { cursor: copy; }
+#smarks .mk.drag::before { background: #fff; width: 3px; left: 3px; }
+.badge { font-size: 10px; border: 1px solid var(--line); border-radius: 3px; padding: 0 5px; color: var(--muted); margin-left: 6px; }
+/* zoom: the bench scrolls sideways; the inner strip is zoom × the visible width */
+.benchwrap { overflow-x: auto; overflow-y: hidden; border: 1px solid var(--line); border-radius: 4px; background: #15161a; }
+.benchwrap .wave { border: 0; border-radius: 0; width: 100%; }
+.zoombar { display: flex; align-items: center; gap: 6px; margin-top: 6px; flex-wrap: wrap; color: var(--muted); }
+.zoombar .seg button { padding: 2px 8px; }
+.mk.se { background: var(--accent); }
+.wave .hint { position: absolute; right: 6px; bottom: 4px; font-size: 10px; color: var(--muted); }
+.btn { background: var(--pad); color: var(--fg); border: 1px solid var(--line); border-radius: 4px; padding: 4px 10px; font: inherit; cursor: pointer; }
+.btn.primary { background: var(--accent2); border-color: var(--accent2); color: #fff; }
+.actions { display: flex; gap: 6px; flex-wrap: wrap; }
+/* key map */
+/* Key map: a velocity axis on the left (127 at the top, 1 at the bottom), zones as boxes over the
+   keys they cover with a 3 px gap between neighbors, and a real keyboard underneath (C1 to C5). */
+.keymap { background: #15161a; border: 1px solid var(--line); border-radius: 4px; height: 200px; position: relative; overflow: hidden; display: grid; grid-template-columns: 30px 1fr; grid-template-rows: 1fr 40px; }
+.velaxis { grid-row: 1; grid-column: 1; border-right: 1px solid var(--line); position: relative; font-family: var(--mono); font-size: 10px; color: var(--muted); }
+.velaxis span { position: absolute; right: 4px; }
+.zones { grid-row: 1; grid-column: 2; position: relative; margin: 4px 4px 2px; }
+.zone { position: absolute; box-sizing: border-box; border: 1px solid var(--accent); background: rgba(63,140,255,.16); border-radius: 3px; font-size: 10px; padding: 3px 5px; color: var(--fg); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.zone.sel { background: rgba(63,140,255,.4); box-shadow: inset 0 0 0 1px var(--accent); }
+.zone small { display: block; color: var(--muted); font-size: 9px; }
+.keys { grid-row: 2; grid-column: 2; position: relative; border-top: 1px solid var(--line); }
+.keys .w { position: absolute; top: 0; bottom: 0; background: #e2e2e6; border-right: 1px solid #8a8a90; box-sizing: border-box; }
+.keys .w.c::after { content: attr(data-n); position: absolute; left: 2px; bottom: 1px; font-family: var(--mono); font-size: 9px; color: #55565c; }
+.keys .b { position: absolute; top: 0; height: 60%; background: #1b1c1f; border: 1px solid #000; border-top: 0; box-sizing: border-box; z-index: 1; }
+.keys .corner { grid-row: 2; grid-column: 1; }
+.status { padding: 6px 10px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; display: flex; gap: 14px; flex-wrap: wrap; }
+.status b { color: var(--fg); font-weight: 500; }
+.notes { margin-top: 14px; color: var(--muted); max-width: 72ch; }
+.notes li { margin: 3px 0; }
+[hidden] { display: none !important; }
+</style>
+
+<h1>Sampler, three views in one panel</h1>
+<p class="sub">A mockup of the ADR 0041 panel in transit's device-panel style. One instrument, three views; Pads is the chopping workflow, Slices is the loop on the bench, Instrument is the key map. Click around; nothing here makes sound.</p>
+
+<div class="panel" role="region" aria-label="Sampler panel">
+  <div class="head">
+    <span class="name">Inst 2 · Sampler</span>
+    <div class="tabs" role="tablist" aria-label="Views">
+      <button class="tab" role="tab" id="t-pads" aria-selected="true" aria-controls="v-pads">Pads</button>
+      <button class="tab" role="tab" id="t-slices" aria-selected="false" aria-controls="v-slices">Slices</button>
+      <button class="tab" role="tab" id="t-inst" aria-selected="false" aria-controls="v-inst">Instrument</button>
+    </div>
+    <span class="spacer"></span>
+    <select class="preset" id="kit" aria-label="Kit"><option>Kit: 909 folder</option><option>Kit: (empty Sampler)</option></select>
+    <button class="btn" id="load">Load folder…</button>
+  </div>
+
+  <!-- PADS -->
+  <section id="v-pads" class="view" role="tabpanel" aria-labelledby="t-pads">
+    <div class="left">
+      <div class="banks" role="group" aria-label="Bank">
+        <button class="bank" aria-pressed="true">A</button><button class="bank" aria-pressed="false">B</button><button class="bank" aria-pressed="false">C</button><button class="bank" aria-pressed="false">D</button>
+        <span class="spacer"></span><span class="rowlabel" style="margin:0;align-self:center">pads 1–16 · notes 60–75</span>
+      </div>
+      <div class="grid" id="pads" role="group" aria-label="Pads, bank A"></div>
+    </div>
+    <div class="right" id="padstrip">
+      <div>
+        <p class="rowlabel">Pad <span id="ps-n">A5</span> · <span id="ps-name">Hat Closed</span></p>
+        <div class="wave"><canvas id="pw" width="600" height="150"></canvas><div class="markers"><div class="mk se" style="left:4%"><span>start</span></div><div class="mk se" style="left:62%"><span>end</span></div></div><span class="hint">drag start / end</span></div>
+      </div>
+      <div class="knobs" id="padknobs"></div>
+      <div class="field"><label>Trigger</label><span class="seg"><button aria-pressed="true">One-shot</button><button aria-pressed="false">Gate</button></span><span class="seg" style="margin-left:6px"><button aria-pressed="false">Reverse</button></span></div>
+      <div class="field"><label>Choke</label><select id="choke" aria-label="Choke group"><option>Off</option><option selected>Group 1</option><option>Group 2</option><option>Group 3</option></select><span style="color:var(--muted)">A6 Hat Open is in group 1</span></div>
+      <div class="field"><label>Note</label><span style="font-family:var(--mono)">F#3 · 66</span><label style="min-width:auto;margin-left:10px">Key track</label><span class="seg"><button aria-pressed="false">On</button><button aria-pressed="true">Off</button></span></div>
+      <div class="actions"><button class="btn">Shaper &amp; matrix…</button><button class="btn">Expand to rack…</button></div>
+    </div>
+  </section>
+
+  <!-- SLICES -->
+  <section id="v-slices" class="view" role="tabpanel" aria-labelledby="t-slices" hidden>
+    <div class="left">
+      <p class="rowlabel">Loop · amen_174.wav · 2.76 s · 48 kHz · 8 cue points in file</p>
+      <div class="benchwrap" id="benchwrap"><div class="wave" id="bench"><canvas id="sw" width="800" height="150"></canvas><div class="markers" id="smarks"></div><span class="hint">click adds · drag moves · click a marker removes</span></div></div>
+      <div class="zoombar"><span>Zoom</span><span class="seg" id="zoom"><button aria-pressed="true">1×</button><button aria-pressed="false">2×</button><button aria-pressed="false">4×</button><button aria-pressed="false">8×</button></span><span class="seg" style="margin-left:8px"><button id="zc" aria-pressed="true">Snap to zero crossing</button></span><span id="pos" style="font-family:var(--mono);margin-left:auto"></span></div>
+      <div class="field" style="margin-top:10px"><label>Slicing</label><span class="seg" id="slmode"><button aria-pressed="true" data-m="auto">Auto</button><button aria-pressed="false" data-m="manual">Manual</button></span><span id="modehint" style="color:var(--muted)">detected markers; touch one to switch to Manual with this set</span></div>
+      <div id="autoctl">
+        <div class="field"><label>Detect by</label><span class="seg" id="src"><button aria-pressed="true" data-k="cues">Cue points</button><button aria-pressed="false" data-k="trans">Transients</button><button aria-pressed="false" data-k="grid">Grid</button></span></div>
+        <div class="field" id="f-trans" hidden><label>Sensitivity</label><input type="range" id="sens" min="0" max="100" value="55" style="width:160px"><span id="sensv" style="font-family:var(--mono)">55</span></div>
+        <div class="field" id="f-grid" hidden><label>Division</label><span class="seg" id="div"><button aria-pressed="false">1/4</button><button aria-pressed="true">1/8</button><button aria-pressed="false">1/16</button></span><label style="min-width:auto;margin-left:8px">Bars</label><input type="number" id="bars" value="2" min="1" max="16" style="width:56px"></div>
+      </div>
+      <div id="manualctl" class="actions" hidden><button class="btn" id="fromauto">Start from Auto's markers</button><button class="btn" id="clearall">Clear</button><span style="color:var(--muted);align-self:center">click adds · drag moves · click a marker removes · zero-crossing snap applies</span></div>
+    </div>
+    <div class="right">
+      <p class="rowlabel"><span id="scount">8</span> slices <span class="badge" id="edited">auto</span></p>
+      <div class="actions"><button class="btn primary" id="topads">Slices to pads</button><button class="btn" id="tomidi">Slice to MIDI</button><button class="btn" id="audition">Audition</button></div>
+      <p style="color:var(--muted);margin:0">Slices to pads fills bank <b style="color:var(--fg)">B</b> from pad B1 in order. Slice to MIDI writes one note per slice from C3 as a clip on this track, at the loop's position.</p>
+      <div class="knobs" id="sliceknobs"></div>
+      <div class="field"><label>Tempo</label><span style="font-family:var(--mono)">174.0 BPM</span><span style="color:var(--muted)">(from file length and bars; the clip follows session tempo by repitch, no stretch)</span></div>
+    </div>
+  </section>
+
+  <!-- INSTRUMENT -->
+  <section id="v-inst" class="view" role="tabpanel" aria-labelledby="t-inst" hidden>
+    <div class="left">
+      <p class="rowlabel">Key map · 7 zones · 2 velocity layers · C1–C5</p>
+      <div class="keymap">
+        <div class="velaxis" aria-hidden="true"><span style="top:4px">127</span><span style="top:calc(50% - 6px)">64</span><span style="bottom:4px">1</span></div>
+        <div class="zones" id="zones"></div>
+        <div class="corner"></div>
+        <div class="keys" id="keys" aria-hidden="true"></div>
+      </div>
+      <p style="color:var(--muted);margin:8px 0 0">Drag a zone's edges for key range, its top for the velocity split. Drop a WAV folder to map by file name. Import SFZ… for an existing instrument.</p>
+    </div>
+    <div class="right">
+      <p class="rowlabel">Zone · Piano E2 ff · root E2 · 44.1 kHz source</p>
+      <div class="knobs" id="zoneknobs"></div>
+      <div class="field"><label>Loop</label><span class="seg"><button aria-pressed="false">Off</button><button aria-pressed="true">Forward</button><button aria-pressed="false">Ping-pong</button></span></div>
+      <div class="field"><label>Crossfade</label><input type="number" value="12" min="0" style="width:64px"> <span style="color:var(--muted)">ms · forward loops only</span></div>
+      <div class="field"><label>Round robin</label><span style="font-family:var(--mono)">1 of 1</span><button class="btn">Add alternative</button></div>
+      <div class="actions"><button class="btn">Shaper &amp; matrix…</button><button class="btn">Import SFZ…</button></div>
+    </div>
+  </section>
+
+  <div class="status"><span>Voices <b>6 / 64</b></span><span>Memory <b>41 MiB / 128 MiB</b></span><span>Streaming <b>off</b></span><span>Bank A · 12 of 16 pads loaded</span></div>
+</div>
+
+<ul class="notes">
+  <li><b>Pads</b> is where most people will live: a 4×4 grid per bank, the selected pad's waveform and six controls beside it. The right strip is the whole per-pad surface; anything deeper opens the shaper and matrix the Macro Oscillator already has.</li>
+  <li><b>Slices</b> keeps the loop on a bench: the source picker is the only new concept (file cue points first, then transients, then grid), and two buttons move the result to pads or to a MIDI clip.</li>
+  <li><b>Instrument</b> is the key map: zones with velocity splits and round robins, one zone strip, loop rules as the ADR fixed them. SFZ import lands here.</li>
+  <li>Not in the panel on purpose: per-pad effects or outputs, a mixer page, modulation pages. Expand to Rack is the door for anyone who needs that.</li>
+</ul>
+
+<script>
+(function () {
+  // tabs
+  var tabs = document.querySelectorAll('.tab');
+  tabs.forEach(function (t) { t.addEventListener('click', function () {
+    tabs.forEach(function (o) { o.setAttribute('aria-selected', String(o === t)); document.getElementById(o.getAttribute('aria-controls')).hidden = (o !== t); });
+  }); });
+  // knobs
+  function knob(label, value, text, frac) {
+    var r = 15, c = 2 * Math.PI * r, dash = Math.max(0, Math.min(1, frac)) * c * 0.75;
+    return '<div class="knob"><svg viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="' + r + '" fill="none" stroke="#3a3b41" stroke-width="4" stroke-dasharray="' + (c * 0.75) + ' ' + c + '" transform="rotate(135 20 20)"/><circle cx="20" cy="20" r="' + r + '" fill="none" stroke="#3f8cff" stroke-width="4" stroke-linecap="round" stroke-dasharray="' + dash + ' ' + c + '" transform="rotate(135 20 20)"/></svg><span class="v">' + text + '</span><span>' + label + '</span></div>';
+  }
+  document.getElementById('padknobs').innerHTML = knob('Level', 0, '-3.0 dB', .7) + knob('Pan', 0, 'C', .5) + knob('Tune', 0, '+0 st', .5) + knob('Attack', 0, '1 ms', .05) + knob('Decay', 0, '420 ms', .45) + knob('Release', 0, '60 ms', .2);
+  document.getElementById('sliceknobs').innerHTML = knob('Level', 0, '0.0 dB', .8) + knob('Tune', 0, '+0 st', .5) + knob('Decay', 0, 'full', 1) + knob('Fade', 0, '2 ms', .1);
+  document.getElementById('zoneknobs').innerHTML = knob('Level', 0, '0.0 dB', .8) + knob('Pan', 0, 'L12', .4) + knob('Tune', 0, '-0.08 st', .49) + knob('Attack', 0, '4 ms', .08) + knob('Release', 0, '340 ms', .4) + knob('Start', 0, '0', 0);
+  // pads
+  var names = ['Kick', 'Snare', 'Clap', 'Rim', 'Hat Closed', 'Hat Open', 'Tom Lo', 'Tom Hi', 'Ride', 'Crash', 'Perc 1', 'Perc 2', '', '', '', ''];
+  var choke = { 5: '1', 6: '1' };
+  var grid = document.getElementById('pads'), html = '';
+  // bottom-left numbering: rows from the bottom
+  for (var row = 3; row >= 0; row--) for (var col = 0; col < 4; col++) {
+    var n = row * 4 + col + 1, nm = names[n - 1], empty = !nm;
+    html += '<button class="pad' + (empty ? ' empty' : '') + '" aria-pressed="' + (n === 5) + '" data-n="' + n + '"><span class="n">A' + n + '</span>' + (choke[n] ? '<span class="ch">ch ' + choke[n] + '</span>' : '') + '<span class="nm">' + (empty ? 'drop a sample' : nm) + '</span></button>';
+  }
+  grid.innerHTML = html;
+  grid.querySelectorAll('.pad').forEach(function (p) { p.addEventListener('click', function () {
+    grid.querySelectorAll('.pad').forEach(function (o) { o.setAttribute('aria-pressed', 'false'); });
+    p.setAttribute('aria-pressed', 'true');
+    var n = +p.dataset.n; document.getElementById('ps-n').textContent = 'A' + n; document.getElementById('ps-name').textContent = names[n - 1] || 'empty';
+    drawWave(document.getElementById('pw'), n * 7919, names[n - 1] ? 0.9 : 0);
+  }); });
+  // waveforms
+  function drawWave(cv, seed, amp) {
+    var ctx = cv.getContext('2d'), w = cv.width, h = cv.height; ctx.clearRect(0, 0, w, h);
+    ctx.strokeStyle = '#2a2b30'; ctx.beginPath(); ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2); ctx.stroke();
+    if (!amp) return;
+    var s = seed; function rnd() { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }
+    ctx.fillStyle = '#6f9bff';
+    for (var x = 0; x < w; x += 2) {
+      var t = x / w, env = Math.exp(-t * 3.2) * (0.3 + 0.7 * Math.abs(Math.sin(t * 40))) + (seed % 3 === 0 ? 0.15 * Math.exp(-((t - 0.5) * (t - 0.5)) * 60) : 0);
+      var a = amp * env * (0.5 + 0.5 * rnd()) * h * 0.46;
+      ctx.fillRect(x, h / 2 - a, 1.5, 2 * a);
+    }
+  }
+  drawWave(document.getElementById('pw'), 5 * 7919, 0.9);
+  // slices view
+  var sw = document.getElementById('sw');
+  (function () {
+    var ctx = sw.getContext('2d'), w = sw.width, h = sw.height, s = 99;
+    function rnd() { s = (s * 1103515245 + 12345) & 0x7fffffff; return s / 0x7fffffff; }
+    ctx.fillStyle = '#6f9bff';
+    for (var x = 0; x < w; x += 2) { var t = x / w; var hit = Math.pow(1 - ((t * 8) % 1), 4); var a = (0.15 + 0.85 * hit) * (0.5 + 0.5 * rnd()) * h * 0.45; ctx.fillRect(x, h / 2 - a, 1.5, 2 * a); }
+  })();
+  var marks = document.getElementById('smarks'), count = document.getElementById('scount');
+  var edited = document.getElementById('edited');
+  // Two sets. Auto's markers come from the detector and are read-only; Manual's are the user's.
+  // Touching a marker in Auto copies the set into Manual and switches there.
+  var autoSet = [], manualSet = [], labelFn = null, slmode = 'auto';
+  function current() { return slmode === 'auto' ? autoSet : manualSet; }
+  function render() {
+    var set = current(); set.sort(function (a, b) { return a.p - b.p; });
+    marks.innerHTML = set.map(function (m, i) { return '<div class="mk' + (m.user ? ' user' : '') + '" data-i="' + i + '" style="left:' + (m.p * 100).toFixed(2) + '%" title="' + (slmode === 'auto' ? 'switch to Manual and edit' : 'remove slice ' + (i + 1)) + '"><span>' + (labelFn && slmode === 'auto' ? labelFn(i) : (i + 1)) + '</span></div>'; }).join('');
+    count.textContent = set.length; edited.textContent = slmode;
+    document.getElementById('autoctl').hidden = slmode !== 'auto'; document.getElementById('manualctl').hidden = slmode !== 'manual';
+    document.getElementById('modehint').textContent = slmode === 'auto' ? 'detected markers; touch one to switch to Manual with this set' : 'your markers; Auto keeps its own set';
+    document.querySelectorAll('#slmode button').forEach(function (b) { b.setAttribute('aria-pressed', String(b.dataset.m === slmode)); });
+  }
+  function setMarks(positions, label) { autoSet = positions.map(function (p) { return { p: p, user: false }; }); labelFn = label || null; render(); }
+  function toManual(copy) { if (copy) manualSet = autoSet.map(function (m) { return { p: m.p, user: false }; }); slmode = 'manual'; render(); }
+  document.querySelectorAll('#slmode button').forEach(function (b) { b.addEventListener('click', function () {
+    if (b.dataset.m === 'manual') { if (!manualSet.length) manualSet = [{ p: 0, user: false }]; slmode = 'manual'; } else slmode = 'auto';
+    render();
+  }); });
+  document.getElementById('fromauto').addEventListener('click', function () { toManual(true); });
+  document.getElementById('clearall').addEventListener('click', function () { manualSet = [{ p: 0, user: false }]; render(); });
+  // zero-crossing snap: the mock snaps to the nearest 1/480 of the loop (about 5.8 ms at 174 BPM
+  // over two bars); the real one snaps to the nearest sign change of the source
+  var zc = document.getElementById('zc'), pos = document.getElementById('pos');
+  function snap(p) { return zc.getAttribute('aria-pressed') === 'true' ? Math.round(p * 480) / 480 : p; }
+  zc.addEventListener('click', function () { zc.setAttribute('aria-pressed', String(zc.getAttribute('aria-pressed') !== 'true')); });
+  function ms(p) { return (p * 2760).toFixed(1) + ' ms'; }
+  var bench = document.getElementById('bench'), dragging = null, moved = false;
+  marks.addEventListener('pointerdown', function (e) {
+    var el = e.target.closest('.mk'); if (!el) return;
+    if (slmode === 'auto') { toManual(true); el = marks.querySelector('[data-i="' + el.dataset.i + '"]'); if (!el) return; }
+    dragging = +el.dataset.i; moved = false; el.classList.add('drag'); el.setPointerCapture && el.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  bench.addEventListener('pointermove', function (e) {
+    var r = bench.getBoundingClientRect(); var p = Math.max(0, Math.min(1, (e.clientX - r.left) / r.width));
+    pos.textContent = ms(p);
+    if (dragging === null) return;
+    moved = true; manualSet[dragging].p = snap(p); manualSet[dragging].user = true;
+    var el = marks.querySelector('[data-i="' + dragging + '"]'); if (el) el.style.left = (manualSet[dragging].p * 100).toFixed(2) + '%';
+  });
+  function endDrag() { if (dragging === null) return; dragging = null; render(); }
+  bench.addEventListener('pointerup', endDrag); bench.addEventListener('pointercancel', endDrag);
+  marks.addEventListener('click', function (e) {
+    var el = e.target.closest('.mk'); if (!el) return;
+    e.stopPropagation(); if (moved) { moved = false; return; }
+    if (slmode !== 'manual') return;
+    var i = +el.dataset.i; if (manualSet.length <= 1) return; // the loop keeps at least its first slice
+    manualSet.splice(i, 1); render();
+  });
+  bench.addEventListener('click', function (e) {
+    if (e.target.closest('.mk') || moved) return;
+    if (slmode === 'auto') { toManual(true); }
+    var r = bench.getBoundingClientRect(); var p = snap((e.clientX - r.left) / r.width);
+    if (p <= 0.002 || p >= 0.998) return;
+    if (manualSet.some(function (m) { return Math.abs(m.p - p) < 0.003; })) return; // too close to an existing marker
+    manualSet.push({ p: p, user: true }); render();
+  });
+  // zoom: widen the bench inside its scrolling wrapper; markers are percentages so they follow
+  var zoom = document.getElementById('zoom'), wrap = document.getElementById('benchwrap');
+  zoom.querySelectorAll('button').forEach(function (b, i) { b.addEventListener('click', function () {
+    zoom.querySelectorAll('button').forEach(function (o) { o.setAttribute('aria-pressed', 'false'); }); b.setAttribute('aria-pressed', 'true');
+    var z = [1, 2, 4, 8][i]; var keep = wrap.scrollWidth ? (wrap.scrollLeft + wrap.clientWidth / 2) / wrap.scrollWidth : 0.5;
+    bench.style.width = (z * 100) + '%'; wrap.scrollLeft = keep * wrap.scrollWidth - wrap.clientWidth / 2;
+  }); });
+  var cues = [0, .128, .252, .374, .5, .627, .748, .874];
+  function transients(sens) { var n = 4 + Math.round(sens / 100 * 12), out = []; for (var i = 0; i < n; i++) out.push(i / n + (i ? 0.004 * ((i * 7) % 3 - 1) : 0)); return out; }
+  function gridMarks(divisionIdx, bars) { var per = [4, 8, 16][divisionIdx]; var n = per * bars / 2; var out = []; for (var i = 0; i < n; i++) out.push(i / n); return out; }
+  setMarks(cues, function (i) { return ['K', 'S', 'K', 'S', 'K', 'S', 'K', 'S'][i] || i + 1; });
+  var src = document.getElementById('src'), sens = document.getElementById('sens'), divs = document.getElementById('div'), bars = document.getElementById('bars');
+  var mode = 'cues';
+  function refresh() {
+    document.getElementById('f-trans').hidden = mode !== 'trans'; document.getElementById('f-grid').hidden = mode !== 'grid';
+    if (mode === 'cues') setMarks(cues, function (i) { return ['K', 'S', 'K', 'S', 'K', 'S', 'K', 'S'][i]; });
+    else if (mode === 'manual') { setMarks([0]); }
+    else if (mode === 'trans') setMarks(transients(+sens.value));
+    else { var di = 1; divs.querySelectorAll('button').forEach(function (b, i) { if (b.getAttribute('aria-pressed') === 'true') di = i; }); setMarks(gridMarks(di, +bars.value || 1)); }
+  }
+  src.querySelectorAll('button').forEach(function (b) { b.addEventListener('click', function () { src.querySelectorAll('button').forEach(function (o) { o.setAttribute('aria-pressed', 'false'); }); b.setAttribute('aria-pressed', 'true'); mode = b.dataset.k; refresh(); }); });
+  divs.querySelectorAll('button').forEach(function (b) { b.addEventListener('click', function () { divs.querySelectorAll('button').forEach(function (o) { o.setAttribute('aria-pressed', 'false'); }); b.setAttribute('aria-pressed', 'true'); refresh(); }); });
+  sens.addEventListener('input', function () { document.getElementById('sensv').textContent = sens.value; refresh(); });
+  bars.addEventListener('input', refresh);
+  // generic segmented buttons elsewhere
+  document.querySelectorAll('.seg').forEach(function (seg) { if (seg.id === 'src' || seg.id === 'div') return; seg.querySelectorAll('button').forEach(function (b) { b.addEventListener('click', function () { if (seg.querySelectorAll('button').length === 1) { b.setAttribute('aria-pressed', String(b.getAttribute('aria-pressed') !== 'true')); return; } seg.querySelectorAll('button').forEach(function (o) { o.setAttribute('aria-pressed', 'false'); }); b.setAttribute('aria-pressed', 'true'); }); }); });
+  document.querySelectorAll('.bank').forEach(function (b) { b.addEventListener('click', function () { document.querySelectorAll('.bank').forEach(function (o) { o.setAttribute('aria-pressed', 'false'); }); b.setAttribute('aria-pressed', 'true'); }); });
+  // key map: C1 (MIDI 24) to C5 (MIDI 72), 49 keys, 29 white keys; x is in white-key units
+  var LOW = 24, HIGH = 72, whites = 0, isBlack = [0, 1, 0, 1, 0, 0, 1, 0, 1, 0, 1, 0];
+  var wx = {}; // midi note -> white-key index (left edge in white units; black keys sit at .65 of the previous white)
+  for (var m = LOW; m <= HIGH; m++) { if (isBlack[m % 12]) { wx[m] = whites - 0.35; } else { wx[m] = whites; whites++; } }
+  function pct(note) { return (wx[note] / whites * 100); }
+  var keys = document.getElementById('keys'), kh = '';
+  for (var m2 = LOW; m2 <= HIGH; m2++) {
+    if (isBlack[m2 % 12]) kh += '<span class="b" style="left:' + pct(m2).toFixed(3) + '%;width:' + (0.6 / whites * 100).toFixed(3) + '%"></span>';
+    else kh += '<span class="w' + (m2 % 12 === 0 ? ' c' : '') + '" data-n="C' + (Math.floor(m2 / 12) - 1) + '" style="left:' + pct(m2).toFixed(3) + '%;width:' + (1 / whites * 100).toFixed(3) + '%"></span>';
+  }
+  keys.innerHTML = kh;
+  // zones: {lo, hi (inclusive midi), vlo, vhi, name, root, sel}; drawn over the white-key span with a 3 px gap
+  var zoneDefs = [
+    { lo: 24, hi: 31, vlo: 64, vhi: 127, name: 'Piano C2 ff', root: 'C2' }, { lo: 24, hi: 31, vlo: 1, vhi: 63, name: 'Piano C2 p', root: 'C2' },
+    { lo: 32, hi: 39, vlo: 64, vhi: 127, name: 'Piano E2 ff', root: 'E2', sel: true }, { lo: 32, hi: 39, vlo: 1, vhi: 63, name: 'Piano E2 p', root: 'E2' },
+    { lo: 40, hi: 47, vlo: 1, vhi: 127, name: 'Piano A2', root: 'A2', rr: '3 alternatives' }, { lo: 48, hi: 59, vlo: 1, vhi: 127, name: 'Piano C3', root: 'C3' }, { lo: 60, hi: 72, vlo: 1, vhi: 127, name: 'Piano E3', root: 'E3' }
+  ];
+  document.getElementById('zones').innerHTML = zoneDefs.map(function (z) {
+    var left = pct(z.lo), right = pct(z.hi) + (isBlack[z.hi % 12] ? 0.6 : 1) / whites * 100;
+    var top = (127 - z.vhi) / 126 * 100, bottom = (127 - z.vlo) / 126 * 100;
+    return '<div class="zone' + (z.sel ? ' sel' : '') + '" style="left:calc(' + left.toFixed(3) + '% + 1px);width:calc(' + (right - left).toFixed(3) + '% - 3px);top:calc(' + top.toFixed(2) + '% + 1px);height:calc(' + (bottom - top).toFixed(2) + '% - 3px)" title="' + z.name + ', root ' + z.root + ', keys ' + z.lo + '–' + z.hi + ', vel ' + z.vlo + '–' + z.vhi + '">' + z.name + '<small>root ' + z.root + (z.rr ? ' · RR ' + z.rr : '') + (z.vhi < 127 || z.vlo > 1 ? ' · vel ' + z.vlo + '–' + z.vhi : '') + '</small></div>';
+  }).join('');
+})();
+</script>
+</body>
+</html>
