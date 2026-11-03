@@ -20,6 +20,11 @@ Plug-in editor windows follow the display scale, not this zoom.
 
 See the [shortcuts reference](shortcuts.md) and **Help > Keyboard Shortcuts** for key bindings.
 
+## Piano roll
+
+Click the ruler above the notes to set the playhead; drag it up or down to zoom.
+Clicking empty grid clears the selection and marks where step entry begins; it never moves the playhead or where Play starts.
+
 ## Cycle
 
 Cycle (C, the transport button or Transport > Cycle On) only turns looping on and off; it never
