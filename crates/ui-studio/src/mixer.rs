@@ -129,6 +129,8 @@ pub struct StripLayout {
     pub kind: Option<TrackKind>,
     pub rect: R4,
     pub name_rect: R4,
+    /// The painted "inactive" tag; zero when active.
+    pub inactive_tag: R4,
     pub input: R4,
     pub output: R4,
     pub input_label: String,

@@ -34,7 +34,13 @@ pub(super) fn track_header(
     }
     let name_rect = Rect::from_min_max(pos2(tx + 12.0, r.min.y + 4.0), pos2(r.max.x - 114.0, r.min.y + 20.0));
     row.name_rect = r4(Rect::from_min_max(pos2(name_rect.min.x - 4.0, name_rect.min.y - 2.0), pos2(name_rect.max.x, name_rect.max.y + 2.0)));
-    p.with_clip_rect(name_rect.intersect(list)).text(name_rect.left_center(), Align2::LEFT_CENTER, &t.name, FontId::proportional(13.0), TOKENS.text);
+    p.with_clip_rect(name_rect.intersect(list)).text(
+        name_rect.left_center(),
+        Align2::LEFT_CENTER,
+        &t.name,
+        FontId::proportional(13.0),
+        if t.inactive { TOKENS.text_dim } else { TOKENS.text },
+    );
     let kind = match t.kind {
         TrackKind::Instrument => t.instrument.as_ref().map_or("Instrument".to_string(), |i| short_plugin(&app.plugin_name(&i.plugin, true))),
         TrackKind::Audio => format!("Audio · {}", t.format.label()),
@@ -50,8 +56,16 @@ pub(super) fn track_header(
     };
     row.subtitle = kind.clone();
     // A rack (ADR 0034) wears a badge where a group's subtitle starts.
+    let mut sub_x = tx + 12.0;
+    if t.inactive {
+        let tag = Rect::from_min_size(pos2(sub_x, r.min.y + 24.0), vec2(40.0, 13.0));
+        p.rect_filled(tag, crate::theme::RADIUS_SM, TOKENS.button);
+        p.text(tag.center(), Align2::CENTER_CENTER, "inactive", FontId::proportional(9.5), TOKENS.text_dim);
+        row.inactive_tag = r4(tag);
+        sub_x = tag.max.x + 5.0;
+    }
     let sub_x = if t.is_rack() {
-        let badge = Rect::from_min_size(pos2(tx + 12.0, r.min.y + 24.0), vec2(30.0, 13.0));
+        let badge = Rect::from_min_size(pos2(sub_x, r.min.y + 24.0), vec2(30.0, 13.0));
         p.rect_filled(badge, crate::theme::RADIUS_SM, TOKENS.accent);
         p.text(badge.center(), Align2::CENTER_CENTER, "Rack", FontId::proportional(9.5), theme::text_on(TOKENS.accent));
         let resp = ui.interact(badge.intersect(list), ui.id().with(("rack_badge", t.id.0)), Sense::hover());
@@ -59,7 +73,7 @@ pub(super) fn track_header(
         row.rack_badge = r4(badge);
         badge.max.x + 5.0
     } else {
-        tx + 12.0
+        sub_x
     };
     let kind = if t.is_rack() { kind.trim_start_matches("Rack · ").to_string() } else { kind };
     let subtitle = p.text(pos2(sub_x, r.min.y + 30.0), Align2::LEFT_CENTER, kind, FontId::proportional(10.5), TOKENS.text_dim);
@@ -448,6 +462,8 @@ fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: TrackKind, ha
         }
     });
     ui.separator();
+    let activity = crate::menus::activity_item(app, ui, Some(id));
+    app.arrange.menu.push(activity);
     let del = ui.button("Delete Track");
     app.arrange.menu.push(crate::mixer::MenuItem::at(ui, "Delete Track".into(), String::new(), del.rect));
     if del.clicked() {

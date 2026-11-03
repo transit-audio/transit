@@ -15,6 +15,7 @@ pub mod audio_devices_io;
 pub mod audio_devices_system;
 pub mod automation;
 mod automation_picker;
+pub mod bounce_in_place;
 pub mod browser;
 pub mod builtin_editor;
 pub mod clip_inspector;
@@ -308,6 +309,10 @@ pub enum Dialog {
     DeleteTracks { tracks: Vec<TrackId>, clips: bool },
     /// File > Bounce: its form, then its progress (slice 6, `finish`).
     Bounce,
+    /// Track > Bounce in Place.
+    BounceInPlace,
+    /// Track > Show Hidden Tracks.
+    HiddenTracks,
     /// Delete a take (#25): the take lane menu's Delete Take asks first.
     DeleteTake { track: TrackId, take: u32 },
 }
@@ -472,6 +477,7 @@ pub struct StudioApp {
     pub help: help::HelpState,
     /// Slice 6: the name being typed, the bounce dialog and job, take lanes, the undo history.
     pub finish: finish::FinishState,
+    pub bounce_place: bounce_in_place::State,
     /// Slice 7: the automation lanes' gesture, point selection, write pass and last layout.
     pub auto: automation::AutoState,
     /// Audio › Audio Devices: the window, its draft choices and the device listing.
@@ -583,6 +589,7 @@ impl StudioApp {
             telemetry: telemetry::TelemetryState::default(),
             help: help::HelpState::default(),
             finish: finish::FinishState::default(),
+            bounce_place: bounce_in_place::State::default(),
             auto: automation::AutoState::default(),
             audio_devices: audio_devices::AudioDevicesState::default(),
             midi_monitor: midi_monitor::State::default(),
@@ -743,6 +750,10 @@ impl StudioApp {
                     self.auto.selection.clear();
                     self.auto.highlight = None;
                     self.finish.rename = None;
+                    self.bounce_place = bounce_in_place::State::default();
+                    if matches!(self.dialog, Some(Dialog::BounceInPlace | Dialog::HiddenTracks)) {
+                        self.dialog = None;
+                    }
                 }
                 if replacing || (id.starts_with("session.save") && !self.engine.is_dirty()) {
                     self.release_autosave(false);
@@ -1139,6 +1150,7 @@ impl StudioApp {
         finish::rename_field(self, &ctx);
         menus::dialogs(self, &ctx);
         finish::bounce_dialog(self, &ctx);
+        bounce_in_place::dialog(self, &ctx);
         finish::history_window(self, &ctx);
         menus::recovery(self, &ctx);
         host_hang::window(self, &ctx);
@@ -1177,6 +1189,8 @@ impl StudioApp {
                 Dialog::SaveChanges { .. } => "save_changes",
                 Dialog::DeleteTracks { .. } => "delete_tracks",
                 Dialog::Bounce => "bounce",
+                Dialog::BounceInPlace => "bounce_in_place",
+                Dialog::HiddenTracks => "hidden_tracks",
                 Dialog::DeleteTake { .. } => "delete_take",
             }),
             "frame_ms": self.frame_ms,
@@ -1215,6 +1229,7 @@ impl StudioApp {
             "recent_menu": self.recent_menu,
             "theme": if theme::current() == egui::Theme::Light { "light" } else { "dark" },
         });
+        v["bounce_in_place"] = json!(self.bounce_place.layout);
         // Added apart from the literal: it is at the macro's recursion limit.
         v["midi_learn"] = midi_learn::inspect(self);
         v["help"] = json!(self.help.layout);
@@ -1353,3 +1368,6 @@ mod about_splash_tests;
 
 #[cfg(test)]
 mod window_title_tests;
+
+#[cfg(test)]
+mod bounce_in_place_tests;

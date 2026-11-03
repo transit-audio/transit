@@ -1,0 +1,19 @@
+area = "hidden-tracks"
+title = "Show Hidden Tracks"
+link = "user-guide.md#bounce-in-place"
+
+[[entry]]
+id = "hidden_tracks.show"
+name = "Show track"
+text = "Bring this hidden track back into the arrangement and mixer. Its mute and inactive settings stay as they were."
+
+[[entry]]
+id = "hidden_tracks.show_all"
+name = "Show all hidden tracks"
+text = "Bring every hidden track back into view in one undo step."
+
+[[entry]]
+id = "hidden_tracks.close"
+name = "Close hidden tracks"
+text = "Close the hidden-track list."
+key = "Escape"

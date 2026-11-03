@@ -1,0 +1,13 @@
+area = "track-menu"
+title = "Track menu"
+link = "user-guide.md#bounce-in-place"
+
+[[entry]]
+id = "track_menu.make_active"
+name = "Make Active"
+text = "Resume processing on the selected tracks, or this track in a context menu. Mute stays as it was: unmute a bounced source to hear it again."
+
+[[entry]]
+id = "track_menu.make_inactive"
+name = "Make Inactive"
+text = "Stop processing on the selected tracks, or this track in a context menu, while keeping them visible. Make Active resumes processing; clips and mute settings stay as they were."

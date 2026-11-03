@@ -149,6 +149,8 @@ pub struct TrackRow {
     pub header: R4,
     /// The name in the header (double-click renames, slice 6).
     pub name_rect: R4,
+    /// The painted "inactive" tag; zero when active.
+    pub inactive_tag: R4,
     pub lane: R4,
     pub mute: R4,
     pub solo: R4,

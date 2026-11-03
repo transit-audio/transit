@@ -151,11 +151,21 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         ui.close();
                         app.rename_selected();
                     }
-                    let b = ui.button("Bounce in Place");
+                    let b = ui.add(egui::Button::new("Bounce in Place").shortcut_text(label(A::BounceInPlace)));
                     app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Bounce in Place".into(), String::new(), b.rect));
                     if b.clicked() {
                         ui.close();
-                        let _ = app.bounce_in_place();
+                        app.open_bounce_in_place();
+                    }
+                    ui.separator();
+                    let activity = activity_item(app, ui, None);
+                    app.arrange.bar_menu.push(activity);
+                    let hidden = app.engine.session().tracks.iter().any(|t| t.hidden);
+                    let b = ui.add_enabled(hidden, egui::Button::new("Show Hidden Tracks…")).on_disabled_hover_text("No hidden tracks");
+                    app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Show Hidden Tracks…".into(), String::new(), b.rect));
+                    if b.clicked() {
+                        ui.close();
+                        app.open_hidden_tracks();
                     }
                     ui.separator();
                     crate::groups::menu_items(app, ui, None);
@@ -376,6 +386,29 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
         });
 }
 
+/// The Track menu acts on the selection (or focus); a context menu acts on its own track.
+pub(crate) fn activity_item(app: &mut StudioApp, ui: &mut egui::Ui, on: Option<TrackId>) -> crate::mixer::MenuItem {
+    let tracks = on.map_or_else(
+        || {
+            let selected = &app.engine.session().edit.selected_tracks;
+            if selected.is_empty() { app.focus_track().into_iter().collect() } else { selected.clone() }
+        },
+        |id| vec![id],
+    );
+    // Recover every inactive member of a mixed selection with one explicit action.
+    let inactive = !tracks.iter().any(|id| app.engine.session().track(*id).is_some_and(|t| t.inactive));
+    let (label, help) =
+        if inactive { ("Make Inactive", crate::help::Id::TrackMenuMakeInactive) } else { ("Make Active", crate::help::Id::TrackMenuMakeActive) };
+    let b = ui.add_enabled(!tracks.is_empty(), egui::Button::new(label));
+    crate::help::hover(ui, &b, help);
+    let item = crate::mixer::MenuItem::at(ui, label.into(), String::new(), b.rect);
+    if b.clicked() {
+        let _ = app.run("track.make_inactive", json!({"tracks": tracks, "inactive": inactive}));
+        ui.close();
+    }
+    item
+}
+
 pub fn status_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
     let now = ui.ctx().input(|i| i.time);
     if let Some(left) = app.status_age.tick(&mut app.status, now, crate::diagnostics::now_secs()) {
@@ -442,6 +475,10 @@ pub(crate) fn history_item(app: &mut StudioApp, ui: &mut egui::Ui, redo: bool) -
 /// Keyboard shortcuts, unless a text field has the keyboard. Keys come from [`crate::shortcuts`].
 pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     if ctx.egui_wants_keyboard_input() || app.dialog.is_some() {
+        return;
+    }
+    if pressed(ctx, A::BounceInPlace) {
+        app.open_bounce_in_place();
         return;
     }
     // Alt+C before C: clear every clip latch (`track.clear_clip_indicators`).

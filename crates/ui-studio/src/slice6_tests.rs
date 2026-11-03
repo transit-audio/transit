@@ -684,9 +684,12 @@ fn bounce_in_place_is_one_undo_step() {
     let before = (t.undo_len(), t.app.engine.session().tracks.len());
     t.menu("Track");
     t.menu("Bounce in Place");
+    assert!(matches!(t.app.dialog, Some(crate::Dialog::BounceInPlace)));
+    assert_eq!(t.app.engine.session().tracks.len(), before.1, "opening the form does not print");
+    t.key("Enter", json!({}));
     let s = t.app.engine.session();
     assert_eq!(s.tracks.len(), before.1 + 1, "{}", t.app.status);
-    assert!(s.track(tr).unwrap().hidden && s.track(tr).unwrap().inactive);
+    assert!(!s.track(tr).unwrap().hidden && s.track(tr).unwrap().inactive && s.track(tr).unwrap().mixer.mute);
     assert_eq!(t.undo_len(), before.0 + 1);
     assert!(t.app.status.starts_with("Bounced"), "{}", t.app.status);
     t.app.run("edit.undo", json!({})).unwrap();

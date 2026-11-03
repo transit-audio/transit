@@ -382,6 +382,13 @@ fn strip(
     let name_r = Rect::from_min_size(pos2(r.min.x, r.min.y), vec2(r.width(), 22.0));
     p.rect_filled(Rect::from_min_size(name_r.min, vec2(r.width(), 4.0)), crate::theme::top_corners(), theme::rgb(t.color));
     let mut tr = name_r.shrink2(vec2(5.0, 0.0));
+    if t.inactive {
+        let tag = Rect::from_min_size(pos2(tr.max.x - 40.0, tr.center().y - 5.0), vec2(40.0, 13.0));
+        p.rect_filled(tag, crate::theme::RADIUS_SM, TOKENS.button);
+        p.text(tag.center(), Align2::CENTER_CENTER, "inactive", FontId::proportional(9.5), TOKENS.text_dim);
+        sl.inactive_tag = r4(tag);
+        tr.max.x = tag.min.x - 3.0;
+    }
     if t.is_rack() {
         // A rack (ADR 0034): a "Rack" tag in the accent color.
         let tag = Rect::from_min_size(pos2(tr.max.x - 28.0, tr.center().y - 5.0), vec2(28.0, 13.0));
@@ -403,7 +410,9 @@ fn strip(
         Align2::LEFT_CENTER,
         &t.name,
         FontId::proportional(13.0),
-        if focused {
+        if t.inactive {
+            TOKENS.text_dim
+        } else if focused {
             TOKENS.accent
         } else if sl.fx {
             TOKENS.text_dim
@@ -423,11 +432,12 @@ fn strip(
     if resp.double_clicked() && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| name_r.contains(p)) {
         app.start_rename(crate::finish::RenameTarget::Track(id), r4(name_r));
     }
-    if t.kind == TrackKind::Audio {
-        resp.context_menu(|ui| {
+    resp.context_menu(|ui| {
+        if t.kind == TrackKind::Audio {
             crate::arrange::width_item(app, ui, id);
-        });
-    }
+        }
+        menu.push(crate::menus::activity_item(app, ui, Some(id)));
+    });
     let mut y = r.min.y + 26.0;
     // Hardware/bus input for audio tracks; device/channel input for MIDI and instruments.
     let in_r = Rect::from_min_size(pos2(x0, y), vec2(w, 16.0));

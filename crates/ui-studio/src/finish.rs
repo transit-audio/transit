@@ -606,27 +606,6 @@ impl StudioApp {
         }
     }
 
-    /// Track > Bounce in Place: the focused track rendered to a new audio track (`track.bounce`);
-    /// the original is hidden and inactive. One undo step.
-    pub fn bounce_in_place(&mut self) -> Result<Value, String> {
-        let Some(t) = self.focus_track() else {
-            self.status = "Select a track to bounce in place.".into();
-            return Err(self.status.clone());
-        };
-        let name = self.track_name(t);
-        let r = self.run("track.bounce", json!({"tracks": [t.0]}))?;
-        let made: Vec<u64> = r["tracks"].as_array().map(|a| a.iter().filter_map(Value::as_u64).collect()).unwrap_or_default();
-        match made.first() {
-            Some(n) => {
-                let new = self.track_name(TrackId(*n));
-                self.focus(TrackId(*n));
-                self.status = format!("Bounced {name} in place to {new}; the original is hidden and inactive (Undo brings it back)");
-            }
-            None => self.status = format!("Nothing to bounce on {name}: it has no clips"),
-        }
-        Ok(r)
-    }
-
     /// Track > Freeze / Unfreeze (`track.freeze`, `track.unfreeze`): one undo step each.
     pub fn toggle_freeze(&mut self, t: TrackId) -> Result<Value, String> {
         let name = self.track_name(t);

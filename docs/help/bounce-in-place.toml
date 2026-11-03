@@ -1,0 +1,25 @@
+area = "bounce-in-place"
+title = "Bounce in Place"
+link = "user-guide.md#bounce-in-place"
+
+[[entry]]
+id = "bounce_in_place.destination"
+name = "Bounce destination"
+text = "Print to a new audio track under the source, or to an existing visible, unfrozen audio track. Existing material under the printed range is overwritten, with the material outside it preserved. Undo restores the whole bounce."
+
+[[entry]]
+id = "bounce_in_place.source"
+name = "Bounce source"
+text = "Leave keeps the source unchanged. Mute silences and deactivates it, stopping its plug-ins while keeping it visible. Hide deactivates and hides it; Show Hidden Tracks brings it back into view. All choices preserve its clips and takes."
+
+[[entry]]
+id = "bounce_in_place.apply"
+name = "Bounce in Place"
+text = "Print the source through its inserts, before its fader, from the session start through its last clip plus a two-second tail. Focus the destination after printing."
+key = "Enter"
+
+[[entry]]
+id = "bounce_in_place.cancel"
+name = "Cancel Bounce in Place"
+text = "Close the form without printing or changing the session."
+key = "Escape"

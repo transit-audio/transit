@@ -25,6 +25,18 @@ macro_rules! ids {
 }
 
 ids! {
+    // help\track-menu.toml
+    TrackMenuMakeActive => "track_menu.make_active",
+    TrackMenuMakeInactive => "track_menu.make_inactive",
+    // help\bounce-in-place.toml
+    BouncePlaceDestination => "bounce_in_place.destination",
+    BouncePlaceSource => "bounce_in_place.source",
+    BouncePlaceApply => "bounce_in_place.apply",
+    BouncePlaceCancel => "bounce_in_place.cancel",
+    // help\hidden-tracks.toml
+    HiddenTracksShow => "hidden_tracks.show",
+    HiddenTracksShowAll => "hidden_tracks.show_all",
+    HiddenTracksClose => "hidden_tracks.close",
     // help\automation.toml
     AutomationTouchReturn => "automation.touch_return",
     // help\arrange-header.toml

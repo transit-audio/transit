@@ -73,6 +73,7 @@ pub enum Action {
     RenameApply,
     RenameCancel,
     Bounce,
+    BounceInPlace,
     UndoHistory,
     NewAudioTrack,
     NewInstrumentTrack,
@@ -241,6 +242,7 @@ pub const TABLE: &[Shortcut] = &[
     row(A::OpenRecent, "Open Most Recent", CMD_SHIFT, Key::O, S::Global, "Ours. Opens the first Open Recent entry."),
     row(A::SaveAs, "Save As…", CMD_SHIFT, Key::S, S::Global, "All DAWs. Checked before Save."),
     row(A::Save, "Save", CMD, Key::S, S::Global, "All DAWs."),
+    row(A::BounceInPlace, "Commit… / Bounce in Place", ALT_SHIFT, Key::C, S::Global, "Track Commit opens the Bounce in Place form."),
     row(A::Bounce, "Bounce…", CMD_SHIFT, Key::R, S::Global, "Ableton (Export Audio/Video). Checked before Rename."),
     // Undo.
     row(A::Redo, "Redo", CMD_SHIFT, Key::Z, S::Global, "Cubase and Logic. Checked before Undo."),
