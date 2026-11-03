@@ -7,10 +7,13 @@ tester's v0.6.1 system. Whether that means an empty frame or no visible frame is
 The leading candidate is an unmapped XEmbed child. The [vendor's Linux download page](https://morphor.io/plugins/aetheriae/)
 lists GTK 3 and WebKitGTK 4.1. [GTK's plug implementation](https://raw.githubusercontent.com/GNOME/gtk/gtk-3-24/gtk/gtkplug.c)
 sets `_XEMBED_INFO`'s mapped flag from `gtk_plug_map`; the embedder must map that window.
-Transit currently observes child creation but does not implement XEmbed mapping or its handshake
-(K92 also records missing focus support). This is a concrete compatibility gap, but the exact
-toolkit path in the tester's plug-in binary has not been established. No mapping, visual, timer,
-or floating-fallback behavior is changed by this diagnostic patch.
+Transit now recognizes valid `_XEMBED_INFO` on direct children, including properties set after
+creation and windows reparented into the content window. It honors the mapped flag, mirrors
+content size, and sends `XEMBED_EMBEDDED_NOTIFY` with protocol version 0. Non-XEmbed children
+still control their own mapping. Activation, logical focus and keyboard delivery are supported;
+accelerators, tab traversal, modality and drag-and-drop remain outside this subset (K92).
+The exact toolkit path in the tester's binary remains unconfirmed, and mapping a window does
+not prove that GTK/WebKit painted it. Visual selection, timers and floating fallback are unchanged.
 
 ## What to collect
 
@@ -21,14 +24,17 @@ delay or prevent them; `elapsed_ms` records the actual sample time. Closing earl
 
 The lines include the frame and content IDs, sizes, depth, visual ID/class, colormap, map state,
 root coordinates, screen size, parked/shown state, session hints, and every immediate child's
-attributes and `_XEMBED_INFO`. They also include this instance's delivered timer callbacks since
+attributes and `_XEMBED_INFO`, plus `xembed=[version, flags, mapped_by_host=true/false,
+notify_sent=true/false]` (or `xembed=none` when no valid client is tracked). `mapped_by_host`
+records a successful host map request during this embedding lifetime, not current visibility;
+`notify_sent` records a server-accepted handshake, not toolkit receipt. They also include this instance's delivered timer callbacks since
 open, its current timer periods/registrations (VST3: IRunLoop timers and event handlers), and
 events dispatched on transit's host X11 connection since open. The latter is **not** the count on
 the plug-in's separate X11 connection. Timer counts record returned callbacks, not pixel updates.
 
 | Observation | Next investigation |
 |---|---|
-| Child `map=UNMAPPED`, `_XEMBED_INFO=[0, 1]`, viewable parent | XEmbed map request is unhandled; reproduce with a GtkPlug-style fixture before implementing the embedding lifecycle. |
+| Child `map=UNMAPPED`, `_XEMBED_INFO=[0, 1]`, viewable parent | Compare `xembed`, `mapped_by_host` and `notify_sent`. Missing state suggests detection/property failure; a successful host map followed by UNMAPPED suggests a later client unmap. Paste both samples and any X11 errors. |
 | No child, no timer callbacks | Check timer registrations/periods, deferred initialization, and toolkit errors. A GUI drawn directly into the parent can also have no child. |
 | Callbacks increase, child remains unmapped | Timer delivery works; inspect the plug-in's mapping/embedding path. |
 | Child `UNVIEWABLE` | It is mapped, but an ancestor is hidden; inspect frame map state and `parked`. |
@@ -58,7 +64,7 @@ Both format hosts register timers on the plug-in host thread. `gui_thread` polls
 of X events, with its timeout shortened to the next timer. E64 already synchronizes host creation
 and resize before passing the parent to another connection; raising explicitly flushes. Neither
 the header strip (absent on Linux) nor settle reparents a child. The next tester log must decide
-which path merits a behavior fix.
+whether the XEmbed fix resolves the editor or toolkit/renderer investigation is still needed.
 
 The existing VST3 `the_frame_is_the_views_run_loop` test uses a real-clock stall bound before
 checking callback counts. Its scheduling dependence predates this hunt; the new diagnostic
@@ -67,3 +73,28 @@ should inject timer delivery into that older run-loop test. Also, the shared run
 X events and descriptors within a 256-call dispatch budget: sustained event traffic or a queued
 job stream can delay timers. That is a separate candidate if registrations persist but callback
 counts stop; no evidence currently ties it to this instance.
+
+## Linux regression gate
+
+Under Xvfb, `editor_x11` covers mapping and one handshake for a plug that never maps itself,
+flag clearing/remapping, content resize, absent/malformed/late properties, reparenting, teardown,
+activation, click focus requests and key forwarding. The CLAP `xembed_plug` fixture makes a real
+child and records the received ClientMessage; its host test reads viewability, handshake and size,
+then clears the flag and checks UNMAPPED. These tests use bounded host idle passes with explicit
+server readouts, not elapsed-time assertions. On the pre-fix host the first VIEWABLE assertion
+fails because the child remains UNMAPPED. Runtime execution is required in the Linux merge/CI
+job; Windows cross-target checking alone is not runtime evidence.
+
+Top-level activation and logical focus are independent under
+[XEmbed section 5.2](https://specifications.freedesktop.org/xembed/latest-single/).
+Deactivation sends WINDOW_DEACTIVATE; logical focus survives so returning restores the same
+field. Unmapping, hiding, or leaving the embedding site sends FOCUS_OUT. Toolkit clicks use
+REQUEST_FOCUS and receive FOCUS_IN/CURRENT without activating an inactive frame. A mapped,
+off-screen sibling of the content window holds X focus and forwards key press/release events
+to the focused plug. It has no embedded descendants, so pointer position cannot bypass the
+host's keyboard routing; selecting mouse events on the foreign window would interfere with
+its toolkit.
+
+Focus transfers still use CurrentTime. A server-focus check rejects already-stale activation
+events, but another client can change focus between that query and SetInputFocus. Timestamped
+WM_TAKE_FOCUS handling remains a follow-up (K92); this patch does not claim to resolve that race.
