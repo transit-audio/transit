@@ -57,11 +57,21 @@ fn xembed_passes(q: &MessageQueue, win: &EditorWindow, plug: &mut Plug) {
 fn xembed_maps_notifies_unmaps_and_resizes() {
     let q = MessageQueue::attach();
     let win = EditorWindow::new("XEmbed", 300.0, 200.0, None).unwrap();
+    let idle_time = Instant::now();
     let content = id(win.parent());
     let mut plug = Plug::new(content);
     plug.flags(1); // Deliberately no MapWindow: GtkPlug asks the embedder to map it.
     assert_eq!(plug.state(), MapState::UNMAPPED);
     win.raise();
+    // Round-trip the host connection so CreateNotify is queued before dispatch.
+    assert!(win.surface_readout().is_some());
+    q.dispatch(256);
+    win.sync_at(idle_time);
+    assert_eq!(plug.state(), MapState::UNMAPPED, "detection defers the host map");
+    q.dispatch(256);
+    win.sync_at(idle_time);
+    assert_eq!(plug.state(), MapState::VIEWABLE, "the second dispatch's idle maps the GTK-shaped child");
+    assert!(win.surface_readout().unwrap().contains("mapped_by_host=true"));
     xembed_passes(&q, &win, &mut plug);
     assert_eq!(plug.state(), MapState::VIEWABLE, "XEMBED_MAPPED must be honored by the host");
     assert_eq!(plug.messages.iter().filter(|m| m[1] == 0).copied().collect::<Vec<_>>(), vec![[0, 0, 0, content, 0]]);
@@ -106,7 +116,15 @@ fn xembed_requires_valid_info_and_tracks_reparenting() {
         xembed_passes(&q, &win, &mut plug);
         assert_eq!(plug.state(), MapState::UNMAPPED);
     }
+    let idle_time = Instant::now();
     plug.flags(1); // Added after CreateNotify was consumed: PropertyChange must be selected.
+    assert!(win.surface_readout().is_some());
+    q.dispatch(256);
+    win.sync_at(idle_time);
+    assert_eq!(plug.state(), MapState::UNMAPPED, "late info starts the same deferral");
+    q.dispatch(256);
+    win.sync_at(idle_time);
+    assert_eq!(plug.state(), MapState::VIEWABLE, "the second dispatch after late info maps it");
     xembed_passes(&q, &win, &mut plug);
     assert_eq!(plug.state(), MapState::VIEWABLE);
     let root = plug.c.setup().roots[0].root;
@@ -212,7 +230,7 @@ fn xembed_self_mapped_child_keeps_direct_focus_and_size() {
     let content = id(win.parent());
     let mut plug = Plug::new(content);
     plug.flags(1);
-    // JUCE and Qt advertise XEmbed but map themselves before the host detects them.
+    // Already mapped when detected (the deferred-flush case has its own test below).
     plug.c.map_window(plug.window).unwrap();
     plug.c.sync().unwrap();
     assert_ne!(plug.state(), MapState::UNMAPPED);
@@ -238,6 +256,54 @@ fn xembed_self_mapped_child_keeps_direct_focus_and_size() {
     assert_eq!(geometry(&plug.c, plug.window), Some((123, 45)));
     assert_eq!(plug.messages, vec![[0, 0, 0, content, 0]]);
     assert!(plug.keys.is_empty());
+    win.close();
+    q.dispatch(256);
+}
+
+fn xembed_juce_deferred_flush_keeps_direct_focus_and_size() {
+    use x11rb::protocol::xproto::InputFocus;
+    let q = MessageQueue::attach();
+    let win = EditorWindow::new("JUCE-shaped XEmbed", 300.0, 200.0, None).unwrap();
+    let idle_time = Instant::now();
+    let content = id(win.parent());
+    win.raise();
+    let mut plug = Plug::new(content);
+    // JUCE creates + advertises + flushes, but its MapWindow reaches the server only
+    // when a later fd/timer handler flushes. Detection must leave that opportunity open.
+    plug.flags(1);
+    assert!(win.surface_readout().is_some()); // Host round trip queues CreateNotify.
+    q.dispatch(256);
+    win.sync_at(idle_time);
+    let after_detection = plug.state();
+    // A dispatch without any toolkit budget is not a toolkit turn. Freeze the idle
+    // readout before detection so neither these passes nor a loaded host can expire
+    // the product's fallback and mask a broken dispatch counter.
+    for _ in 0..2 {
+        q.dispatch(0);
+        win.sync_at(idle_time);
+    }
+    let after_empty_dispatches = plug.state();
+    plug.c.map_window(plug.window).unwrap();
+    plug.c.set_input_focus(InputFocus::PARENT, id(win.raw()), x11rb::CURRENT_TIME).unwrap();
+    plug.c.sync().unwrap();
+    assert!(win.surface_readout().is_some()); // Queue the explicit frame activation.
+    q.dispatch(256);
+    win.sync_at(idle_time);
+    plug.read();
+    // Keep focus first: on 935d0001 the first dispatch already claimed the child,
+    // so this assertion sees the proxy, even though the client's MapWindow succeeds.
+    assert_eq!(plug.c.get_input_focus().unwrap().reply().unwrap().focus, plug.window, "a deferred self-map keeps direct X focus");
+    assert_eq!(after_detection, MapState::UNMAPPED, "the detection dispatch must not map");
+    assert_eq!(after_empty_dispatches, MapState::UNMAPPED, "zero toolkit budget does not advance the deferral");
+    assert_eq!(geometry(&plug.c, plug.window), Some((123, 45)), "the toolkit owns its size");
+    let readout = win.surface_readout().unwrap();
+    assert!(readout.contains("xembed=[0, 1, mapped_by_host=false, notify_sent=true]"), "{readout}");
+    assert_eq!(plug.messages, vec![[0, 0, 0, content, 0]], "only one EMBEDDED_NOTIFY");
+    xembed_passes(&q, &win, &mut plug);
+    assert_eq!(plug.c.get_input_focus().unwrap().reply().unwrap().focus, plug.window);
+    assert_eq!(geometry(&plug.c, plug.window), Some((123, 45)));
+    assert_eq!(plug.messages, vec![[0, 0, 0, content, 0]]);
+    assert!(win.surface_readout().unwrap().contains("mapped_by_host=false"));
     win.close();
     q.dispatch(256);
 }

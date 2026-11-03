@@ -3,6 +3,7 @@
 //! No accelerator, tab traversal, modality, or drag-and-drop protocol is implemented here.
 
 use super::*;
+use std::time::Duration;
 use x11rb::protocol::xproto::{KeyPressEvent, MapState};
 
 const EMBEDDED_NOTIFY: u32 = 0;
@@ -13,12 +14,28 @@ const FOCUS_IN: u32 = 4;
 const FOCUS_OUT: u32 = 5;
 
 #[derive(Clone, Copy)]
+struct PendingMap {
+    dispatch: u64,
+    since: Instant,
+}
+
+impl PendingMap {
+    fn due(self, completed: u64, now: Instant) -> bool {
+        // Exclude the dispatch that detected the child. The next full dispatch lets
+        // toolkit fd/timer handlers flush their own MapWindow before idle claims it.
+        // 100 ms is only a fallback for idle callers without further dispatch progress.
+        completed.wrapping_sub(self.dispatch) >= 2 || now.saturating_duration_since(self.since) >= Duration::from_millis(100)
+    }
+}
+
+#[derive(Clone, Copy)]
 pub(super) struct Plug {
     pub window: Window,
     pub version: u32,
     pub flags: u32,
     pub mapped_by_host: bool,
     pub notify_sent: bool,
+    pending_map: Option<PendingMap>,
 }
 
 #[derive(Default)]
@@ -45,24 +62,50 @@ fn info(c: &Conn, window: Window) -> Option<(u32, u32)> {
     Some((values.next()?, values.next()?))
 }
 
+struct ServerGrab<'a>(&'a Conn);
+
+impl Drop for ServerGrab<'_> {
+    fn drop(&mut self) {
+        let _ = self.0.c.ungrab_server();
+        let _ = self.0.c.flush();
+    }
+}
+
 fn map_unmapped(c: &Conn, window: Window) -> bool {
     // MapWindow succeeds even when another client already mapped the window. Serialize
     // this final read and map so that only a map we actually performed opts into XEmbed.
     // Keep the server grab limited to these requests, on the owning host thread.
+    // Arm before issuing the request: even a panic while checking the grab must release it.
+    let _grab = ServerGrab(c);
     if !c.c.grab_server().is_ok_and(|cookie| cookie.check().is_ok()) {
         return false;
     }
-    let mapped =
-        c.c.get_window_attributes(window)
-            .ok()
-            .and_then(|r| r.reply().ok())
-            .is_some_and(|attrs| attrs.map_state == MapState::UNMAPPED && c.c.map_window(window).is_ok_and(|cookie| cookie.check().is_ok()));
-    let _ = c.c.ungrab_server();
-    let _ = c.c.flush();
-    mapped
+    c.c.get_window_attributes(window)
+        .ok()
+        .and_then(|r| r.reply().ok())
+        .is_some_and(|attrs| attrs.map_state == MapState::UNMAPPED && c.c.map_window(window).is_ok_and(|cookie| cookie.check().is_ok()))
 }
 
 pub(super) fn detect(c: &Conn, f: &Frame, window: Window) {
+    update(c, f, window, false);
+}
+
+pub(super) fn idle(c: &Conn, f: &Frame, now: Instant) {
+    let due: Vec<Window> = f
+        .xembed
+        .borrow()
+        .plugs
+        .iter()
+        .filter(|p| p.pending_map.is_some_and(|pending| pending.due(c.dispatches.get(), now)))
+        .map(|p| p.window)
+        .collect();
+    for window in due {
+        // Revalidate parent, property and map state: events can still be queued or stale.
+        update(c, f, window, true);
+    }
+}
+
+fn update(c: &Conn, f: &Frame, window: Window, mapping_due: bool) {
     // Create/property/reparent events may already be stale. Never operate on a child that
     // has left this content window. Select before reading so a late property cannot be lost.
     if c.c.query_tree(window).ok().and_then(|r| r.reply().ok()).is_none_or(|r| r.parent != f.content) {
@@ -76,7 +119,7 @@ pub(super) fn detect(c: &Conn, f: &Frame, window: Window) {
     };
     let mut state = f.xembed.borrow_mut();
     let index = state.plugs.iter().position(|p| p.window == window).unwrap_or_else(|| {
-        state.plugs.push(Plug { window, version, flags, mapped_by_host: false, notify_sent: false });
+        state.plugs.push(Plug { window, version, flags, mapped_by_host: false, notify_sent: false, pending_map: None });
         state.plugs.len() - 1
     });
     let plug = &mut state.plugs[index];
@@ -85,9 +128,17 @@ pub(super) fn detect(c: &Conn, f: &Frame, window: Window) {
     plug.flags = flags;
     if let Some(attrs) = c.c.get_window_attributes(window).ok().and_then(|r| r.reply().ok()) {
         if flags & 1 != 0 && attrs.map_state == MapState::UNMAPPED {
-            plug.mapped_by_host |= map_unmapped(c, window);
-        } else if plug.mapped_by_host && flags & 1 == 0 && attrs.map_state != MapState::UNMAPPED {
-            let _ = c.c.unmap_window(window);
+            if mapping_due || plug.mapped_by_host {
+                plug.mapped_by_host |= map_unmapped(c, window);
+                plug.pending_map = None;
+            } else {
+                plug.pending_map.get_or_insert_with(|| PendingMap { dispatch: c.dispatches.get(), since: Instant::now() });
+            }
+        } else {
+            plug.pending_map = None;
+            if plug.mapped_by_host && flags & 1 == 0 && attrs.map_state != MapState::UNMAPPED {
+                let _ = c.c.unmap_window(window);
+            }
         }
     }
     let newly_notified = !plug.notify_sent && send(c, window, EMBEDDED_NOTIFY, f.content);
@@ -230,5 +281,24 @@ pub(super) fn key(c: &Conn, mut event: KeyPressEvent) {
         event.event_y = 0;
         let _ = c.c.send_event(false, window, EventMask::NO_EVENT, event);
         let _ = c.c.flush();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pending_map_waits_for_a_full_dispatch_or_injected_fallback() {
+        let since = Instant::now();
+        let pending = PendingMap { dispatch: 10, since };
+        assert!(!pending.due(10, since));
+        assert!(!pending.due(11, since), "the detection dispatch alone is insufficient");
+        assert!(pending.due(12, since), "one full following dispatch, without advancing time");
+        assert!(!pending.due(10, since + Duration::from_millis(99)));
+        assert!(pending.due(10, since + Duration::from_millis(100)), "idle without dispatch progress has a bounded fallback");
+        let wrapping = PendingMap { dispatch: u64::MAX, since };
+        assert!(!wrapping.due(0, since));
+        assert!(wrapping.due(1, since));
     }
 }

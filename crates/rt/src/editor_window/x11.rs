@@ -80,6 +80,8 @@ struct Conn {
     /// The display's DPI ([`read_dpi`]), followed while windows are open.
     dpi: Cell<u32>,
     events: Cell<u64>,
+    /// Completed dispatches that gave the toolkit run loop a nonzero callback budget.
+    dispatches: Cell<u64>,
 }
 
 /// An editor window's state, on its thread.
@@ -154,7 +156,7 @@ fn conn() -> Result<Rc<Conn>, String> {
     let _ = c.change_window_attributes(root, &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE));
     let _ = c.flush();
     log::info!("editor windows: X11 display opened on this thread ({dpi} dpi)");
-    let conn = Rc::new(Conn { c, root, black, atoms, dpi: Cell::new(dpi), events: Cell::new(0) });
+    let conn = Rc::new(Conn { c, root, black, atoms, dpi: Cell::new(dpi), events: Cell::new(0), dispatches: Cell::new(0) });
     CONN.with(|c| *c.borrow_mut() = Some(Rc::clone(&conn)));
     Ok(conn)
 }
@@ -461,7 +463,14 @@ impl EditorWindow {
     /// Housekeeping on the window's thread, from the editor's `idle`: shows the header's title
     /// and follows the size of the plug-in's own window ([`Follow`]).
     pub fn sync(&self) {
+        self.sync_at(Instant::now());
+    }
+
+    /// Linux editor housekeeping with an explicit clock readout, for deterministic idle
+    /// driving. `now` judges deferred mapping and size following; ordinary callers use `sync`.
+    pub fn sync_at(&self, now: Instant) {
         let Some((c, f)) = self.live() else { return };
+        xembed::idle(&c, &f, now);
         if let Some(cell) = &f.cell {
             let generation = cell.generation();
             if generation != f.shown_gen.replace(generation) {
@@ -475,7 +484,8 @@ impl EditorWindow {
         let child = f.child.get().map(|(_, size)| size);
         let (seen, count) = f.follow.get();
         let mut follow = Follow { seen, count };
-        let to = follow.observe(child, f.size.get(), super::since(f.resized.get()));
+        let elapsed = f.resized.get().map_or(std::time::Duration::MAX, |t| now.saturating_duration_since(t));
+        let to = follow.observe(child, f.size.get(), elapsed);
         f.follow.set((follow.seen, follow.count));
         if let Some((w, h)) = to {
             log::debug!("editor window: the plug-in's view is {w}×{h}, not {:?}; the window follows it", f.size.get());
@@ -530,6 +540,13 @@ pub(crate) fn pump(max: usize) -> usize {
         }
     }
     done
+}
+
+#[cfg_attr(feature = "force-fallback", allow(dead_code))]
+pub(crate) fn dispatch_complete() {
+    if let Some(c) = current() {
+        c.dispatches.set(c.dispatches.get().wrapping_add(1));
+    }
 }
 
 fn handle(c: &Conn, ev: Event) {

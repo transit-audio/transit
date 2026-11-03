@@ -27,6 +27,14 @@ impl Probe {
 }
 
 impl EditorWindow {
+    /// Reads the current Linux surface diagnostics on the owning host thread, without
+    /// waiting for a scheduled probe or changing its deadlines. None on another thread.
+    #[must_use]
+    pub fn surface_readout(&self) -> Option<String> {
+        let (c, f) = self.live()?;
+        Some(snapshot(&c, &f).text)
+    }
+
     /// Starts the Linux surface observations at a successful editor open. Repeated raises of
     /// the same editor do not restart them. `timers` is this instance's delivered callback count.
     pub fn start_surface_probe(&self, name: &str, timers: u64) {

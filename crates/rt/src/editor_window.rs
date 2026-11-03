@@ -531,7 +531,7 @@ pub fn parked() -> bool {
 }
 
 /// When the host last resized a window (for [`Follow`]).
-#[cfg(any(windows, target_os = "linux", test))]
+#[cfg(any(windows, test))]
 fn since(at: Option<std::time::Instant>) -> Duration {
     at.map_or(Duration::MAX, |t| t.elapsed())
 }
@@ -546,7 +546,7 @@ mod x11;
 #[cfg(target_os = "linux")]
 pub use x11::{EditorWindow, apply, current_thread_id, group, hide_thread_windows, raise_window, resize_content, take_created, window_state};
 #[cfg(all(target_os = "linux", not(feature = "force-fallback")))]
-pub(crate) use x11::{connection_fd, pump};
+pub(crate) use x11::{connection_fd, dispatch_complete, pump};
 
 #[cfg(not(any(windows, target_os = "linux")))]
 mod other {

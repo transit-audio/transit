@@ -293,7 +293,13 @@ mod imp {
     /// The X11 events of this thread's editor windows, then the plug-ins' handlers and timers.
     pub(super) fn dispatch(max: usize) -> usize {
         let done = crate::editor_window::pump(max);
-        done + crate::run_loop::run(max.saturating_sub(done))
+        let remaining = max.saturating_sub(done);
+        let done = done + crate::run_loop::run(remaining);
+        // A pump that exhausts the budget gives toolkit handlers no turn at all.
+        if remaining != 0 {
+            crate::editor_window::dispatch_complete();
+        }
+        done
     }
 
     pub(super) fn wait(shared: &Shared, timeout: Duration) {
