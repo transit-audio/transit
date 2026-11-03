@@ -96,6 +96,9 @@ section's slice-1 state machine exactly once, instead of the button path. Transp
 ignores that port's transport messages in either path; it does not disable F8 clock reception.
 Other devices' enabled buttons act as local controls; in clock-follow mode their Play/Record
 waits for the selected source just like the UI. MMC remains a button protocol, not a clock source.
+Standalone MMC Play/Deferred Play and learned Play wait in that mode even from the selected
+source's port; F8 alone cannot release them. Equivalent paired MMC/FA uses the selected-source
+FA path exactly once, including its first-following-F8 rule.
 
 Audio/MIDI settings show **Off / Transport / Transport and Clock** per input port, default Off.
 A selected port is opened even without a note route. The transport bar shows **Internal**,
@@ -557,9 +560,10 @@ authorizes no file-size exception.
 
 Implementation touch points are `midi-io` parsing, new focused playback sync modules beside
 `player/ingress.rs` and `player/midi_out.rs`, `action_lane`, `timeline_map`, `record/start`,
-`midi_capture`, plan preparation/render transport, the engine's transport/take builders and
-Audio/MIDI settings. Extend `TransportStatus` with runtime sync readout rather than storing
-it in `Session`. Do not recompile a document on every tick. Keep #185's historical device
+`midi_capture`, plan preparation/render transport, the engine's transport/take builders,
+`crates/ui-studio/src/host/transport.rs` (exact-position starts and independent retained
+position), and Audio/MIDI settings. Extend `TransportStatus` with runtime sync readout rather
+than storing it in `Session`. Do not recompile a document on every tick. Keep #185's historical device
 placement invariant and ADR 0038's block-split contract in the integration gate.
 
 ## Gate
@@ -578,11 +582,19 @@ This docs-only proposal runs no Cargo commands and claims no implemented or hard
   split callbacks and interleaved F8. Test Locate against session frame rates, drop labels and
   timecode offset. With no mappings/routes and Monitor closed, exercise the amendment's whole
   state table, pending starts/count-in, repeated Start/Stop, SPP then Continue, and ignored F8.
+  With cycle on/off and pre-roll enabled/disabled, verify cursor-start Play and exact retained
+  Continue after SPP and after Stop/Pause, even when the edit cursor differs from that position.
   Test default-on/persisted-off per device, reconnect and switch cutoffs; all six learned targets
   survive machine-store round trips/session changes, while session mapping attempts are refused
   without mutation. Check note/CC press-release-held edges, source conflicts, exact device-named
   Record hint/status texts, count-in/pre-roll/arming parity, and status limits at injected stamps
-  0, 999999999 and 1000000000 ns. Coalesce paired MMC/real-time Play and Stop in both orders;
+  0, 999999999 and 1000000000 ns; verify the Record Exit help text below.
+  In Transport and Clock mode, test MMC 02 and 03 separately from both the selected and another
+  input, and learned Play: drain control with no source start, then inject F8 without source
+  Start/Continue; each request stays waiting without playing. Inject source Start/Continue
+  (separate cases), then its following F8: exactly one start is admitted at section 2's boundary.
+  In Internal and Transport-only modes, MMC 02/03 start at the local action boundary without F8.
+  Coalesce paired MMC 02/03 and FA, and MMC 01 and FC, in both orders and all three modes;
   retain Stop-then-Start ordering. With a paired Transport output enabled, reject echoed actions
   while running/stopped and after a delayed drain; Clock-only output still permits buttons.
   Prove overflow cannot lose Stop or resurrect an old start, and no audio callback decodes,
@@ -804,13 +816,20 @@ feedback guard and device-named status line make the surprise small and the bene
 Decode on the UI/control thread and invoke the existing commands in
 `crates/engine/src/cmd/transport.rs`. Reuse section 2's slice-1 duplicate, pending-start,
 SPP and take-finalization rules, with **cursor start** when no sync-follow mode is selected
-(including slice 0, before the clock-follow choice exists). The selected sync port instead
-uses section 2's cycle-start/zero rule, never both paths. A pending Play, count-in or recording
+(including slice 0, before the clock-follow choice exists). Selected-source FA/FB/FC/SPP instead
+use section 2's sync state machine (FA uses cycle start/zero), never both paths. MMC and learned
+buttons are local requests on every port. A pending Play, count-in or recording
 start counts as running for duplicate Play/Continue and as stoppable for Stop/Pause.
+
+In Internal and Transport-only modes, MMC Play and Deferred Play use the same admitted local
+action boundary and do not wait for F8. In Transport and Clock mode, standalone MMC Play/Deferred
+Play and learned Play are local requests and wait for the selected source under section 2,
+whether received from that source's port or another port. An accompanying equivalent
+selected-source FA follows section 2 exactly once, including its first-following-F8 rule.
 
 | Input / target | Stopped, no pending start | Running or pending |
 |---|---|---|
-| FA Start; MMC 02 Play / 03 Deferred Play; learned Play | `transport.play` from the edit cursor; Deferred Play has the same admitted action boundary, no F8 wait. | Ignore; never toggle or cancel a count-in. |
+| FA Start; MMC 02 Play / 03 Deferred Play; learned Play | `transport.play` from the edit cursor, subject to the mode and selected-source rules above. | Ignore; never toggle or cancel a count-in. |
 | FB Continue | `transport.play` with `from` equal to the retained transport position (including SPP), not the cursor. | Ignore. |
 | FC Stop; MMC 01 Stop; learned Stop | Ignore; never invoke the host's second-Stop Return to Zero behavior. | `transport.stop`: cancel pending start/count-in, finalize the take, retain position for Continue. |
 | MMC 04 Fast Forward / 05 Rewind | `transport.fast_forward` / `transport.rewind`, `seconds: 1`. | Same one-second locate; use section 2's take-safe locate sequence if recording. No held-repeat timer. |
@@ -823,7 +842,13 @@ start counts as running for duplicate Play/Continue and as stoppable for Stop/Pa
 | Learned Return to Zero | `transport.rtz`. | Same locate through section 2's take-safe path. |
 | F8 Clock | Ignore for buttons; never change tempo. | Same. Only slice 3's explicitly selected clock follower may consume it for tempo. |
 
-Retain position before stopping: the UI cursor and current transport position can differ.
+Slice 0 must adapt `crates/ui-studio/src/host/transport.rs`: today's `transport.play {from}`
+queues Locate then Play, but `play_from_cursor` substitutes cycle start or subtracts pre-roll,
+and `complete_stop` restores position to the cursor. Add an exact-position start path for the
+table's Play/Continue requests: retain the cycle range without substituting its start or
+subtracting pre-roll. Keep independent retained-position state, updated from the applied
+Stop/Pause position and explicit locates (including SPP), never overwritten by cursor restoration
+or stopped UI readback. Continue uses that state. Record still uses the UI Record path below.
 Within a dispatch update logical pending state immediately, so two queued Play/Record messages
 cannot both see an old stopped state. SPP uses section 2's `240*(low + 128*high)` model ticks
 and the active map, including its duplicate/reset rules. It never implicitly starts playback.
@@ -858,6 +883,8 @@ per device. Emit the first eligible line, suppress further lines until the event
 stamp is at least 1,000,000,000 ns after the last emitted line; never delay or throttle actions.
 The Record refusal replaces its success text and uses the same line limit; its hint still
 appears. Ignored bytes and no-op duplicates produce no success text.
+Controller-facing help says **MMC Record Exit ends recording and stops playback; it does not
+punch out and continue playing.** This exposes the table's Record-button compatibility choice.
 
 **Conflicts:** section 5's same-device send guard applies before dispatch. Coalesce an MMC
 Play/Deferred Play plus FA (or MMC Stop plus FC) from the same device in one control dispatch
@@ -909,3 +936,11 @@ commands there. Open eligible ports independently of note routes, with Monitor/L
 Use section 6's sticky Stop, cancellation cutoffs and overflow finalization for this lane too,
 from slice 0. Monitor must not consume transport's copy. No decoding, allocation, locking or
 MIDI sends on the audio callback. Slice 0's gate is above; slices 1 to 4 remain unchanged.
+
+## Judging round 5: responses
+
+| Finding | Accepted or refuted with evidence | What changed |
+|---|---|---|
+| C1: Deferred Play contradicts clock-follow waiting | Accepted. Section 2 requires local Play to wait for the selected source; the table's unqualified "no F8 wait" contradicted it. | Qualified MMC 02/03 by mode in section 2 and the amendment; standalone MMC on either port and learned Play wait in Transport and Clock, while paired selected-source FA retains section 2's first-following-F8 rule. Gate covers standalone commands on both ports, F8 without a source start, source Start/Continue then F8, one admitted start, and paired messages in both orders. |
+| M1: Command forwarding does not preserve the requested position | Accepted. `cmd/transport.rs` queues Locate then Play; `ui-studio/src/host/transport.rs::play_from_cursor` substitutes cycle start/pre-roll and `complete_stop` restores the cursor. | Named the host touch point, exact-position start path and independent retained-position state; added cycle/pre-roll and differing-cursor fixtures. Record keeps its existing UI path. |
+| M2: Record Exit limitation needs controller-facing help | Accepted. The table deliberately routes 07 through the existing Record toggle, whose host handler stops playback and finalizes recording. | Required help to state that Record Exit stops playback rather than punching out and continuing; added its text to the deterministic gate. |

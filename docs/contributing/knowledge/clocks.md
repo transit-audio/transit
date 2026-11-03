@@ -159,6 +159,9 @@ Without a selected sync mode, Start plays from the cursor, Continue resumes the 
 position, Stop stops and SPP locates without starting; F8 never changes tempo. The selected
 sync source uses section 2's cycle-start/zero rule exactly once instead. The per-device
 **Transport buttons** switch gates both paths, independently of F8 reception.
+Standalone MMC Play/Deferred Play and learned Play remain local requests even on the selected
+source's port: in Transport and Clock mode they wait for that source's Start/Continue and
+following F8. A paired equivalent selected-source FA uses section 2 exactly once.
 `UiState.midi_transport` in `ui.json` is keyed by exact device name: `transport_buttons` defaults
 true, `mmc_device_id` to 0 (7F broadcast also accepted), and `mappings` to an empty list.
 Learned Play/Stop/Record/Cycle/Return to Zero/Pause are machine preferences, never session
