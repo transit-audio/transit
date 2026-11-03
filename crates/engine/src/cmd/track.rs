@@ -84,9 +84,26 @@ pub fn specs() -> Vec<CommandSpec> {
             |t| t.hidden
         )),
         cmd!("track.pin", "Pin Track", [], None, "{tracks?}", has_selection, |e, p| flag(e, p, "track.pin", |t, v| t.pinned = v, |t| t.pinned)),
+        cmd!("track.show_hidden", "Show Hidden Tracks", [], None, "{tracks?} — default all hidden", always, show_hidden),
         cmd!("track.move", "Move Track", [], None, "{track, to: index}", has_tracks, move_track),
-        cmd!("track.commit", "Commit...", ["Track"], Some("Alt+Shift+C"), "{tracks?}", has_selection, commit),
-        cmd!("track.bounce", "Bounce...", ["Track"], Some("Cmd+Alt+Shift+B"), "{tracks?}", has_selection, commit),
+        cmd!(
+            "track.commit",
+            "Commit...",
+            ["Track"],
+            Some("Alt+Shift+C"),
+            "{tracks?, destination?: new|track id, source?: leave|mute|hide} — defaults new, mute",
+            has_selection,
+            commit
+        ),
+        cmd!(
+            "track.bounce",
+            "Bounce...",
+            ["Track"],
+            Some("Cmd+Alt+Shift+B"),
+            "{tracks?, destination?: new|track id, source?: leave|mute|hide} — defaults new, mute",
+            has_selection,
+            commit
+        ),
         cmd!("track.bypass_inserts", "All", ["Track", "Bypass Inserts"], None, "{tracks?, bypass?: bool}", has_selection, bypass_inserts),
         cmd!("track.mute_sends", "All", ["Track", "Mute Sends"], None, "{tracks?, mute?: bool}", has_selection, mute_sends),
         cmd!("track.set_record_to_input_only", "Set Record Tracks to Input Only", ["Track"], Some("Alt+K"), "{}", always, |e, _| {
@@ -731,6 +748,19 @@ fn move_track(e: &mut Engine, p: &Value) -> Result<Value> {
 
 fn commit(e: &mut Engine, p: &Value) -> Result<Value> {
     let tracks = tracks_required(e, "track.commit", p)?;
+    let destination = match p.get("destination") {
+        None => None,
+        Some(Value::String(s)) if s == "new" => None,
+        Some(v) => Some(TrackId(v.as_u64().ok_or_else(|| bad("track.bounce", "destination must be `new` or a track id"))?)),
+    };
+    let source = match p.get("source") {
+        None => crate::io::BounceSource::Mute,
+        Some(Value::String(s)) if s == "mute" => crate::io::BounceSource::Mute,
+        Some(Value::String(s)) if s == "leave" => crate::io::BounceSource::Leave,
+        Some(Value::String(s)) if s == "hide" => crate::io::BounceSource::Hide,
+        Some(_) => return Err(bad("track.bounce", "source must be `leave`, `mute`, or `hide`")),
+    };
+    crate::io::validate_bounce_destination(e.session(), &tracks, destination)?;
     // Refused before anything renders, so a refusal leaves every track as it was.
     for t in &tracks {
         if let Some(tr) = e.session().track(*t) {
@@ -739,11 +769,23 @@ fn commit(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     let mut out = Vec::new();
     for t in tracks {
-        if let Some(id) = crate::io::commit_track(e, t)? {
+        if let Some(id) = crate::io::bounce_track(e, t, destination, source)? {
             out.push(id);
         }
     }
     Ok(json!({"tracks": out}))
+}
+
+fn show_hidden(e: &mut Engine, p: &Value) -> Result<Value> {
+    let tracks = if p.get("tracks").is_some() || p.get("track").is_some() {
+        tracks_param(e, "track.show_hidden", p)?
+    } else {
+        e.session().tracks.iter().filter(|t| t.hidden).map(|t| t.id).collect()
+    };
+    if tracks.is_empty() {
+        return Ok(json!({"value": false, "tracks": []}));
+    }
+    flag(e, &json!({"tracks": tracks, "hidden": false}), "track.show_hidden", |t, v| t.hidden = v, |t| t.hidden)
 }
 
 fn bypass_inserts(e: &mut Engine, p: &Value) -> Result<Value> {

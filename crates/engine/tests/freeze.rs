@@ -58,6 +58,9 @@ fn a_freeze_is_the_pre_fader_render_a_bounce_in_place_makes() {
     let (mut e, t) = engine();
     let (mut b, _) = engine();
     let made = transit_engine::io::commit_track(&mut b, t).unwrap().unwrap();
+    assert!(!keys(&b, t).hidden);
+    assert!(keys(&b, t).inactive && keys(&b, t).mixer.mute);
+    assert_eq!(keys(&b, made).name, "Keys bounce");
     let ClipContent::Audio { source, .. } = b.session().track(made).unwrap().clips()[0].content else { panic!("an audio clip") };
     let bounced = source_audio(&b, source);
     assert!(peak(&bounced) > 1e-4, "the fixture makes sound");

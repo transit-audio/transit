@@ -542,8 +542,23 @@ pub fn render_clip_gain(e: &mut Engine, cmd: &str, id: transit_model::ClipId) ->
     Ok(true)
 }
 
-/// Commit a track's inserts into a new audio track (Track › Commit).
+/// Bounce a track to a new audio track, muting and deactivating its source.
 pub fn commit_track(e: &mut Engine, t: TrackId) -> Result<Option<TrackId>> {
+    bounce_track(e, t, None, BounceSource::Mute)
+}
+
+/// What happens to the source after a successful bounce. Its playlists are always preserved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BounceSource {
+    Leave,
+    Mute,
+    Hide,
+}
+
+/// Print through inserts, before the fader. Command callers validate every destination before
+/// rendering the first source; direct callers get the same validation here.
+pub fn bounce_track(e: &mut Engine, t: TrackId, destination: Option<TrackId>, source: BounceSource) -> Result<Option<TrackId>> {
+    validate_bounce_destination(e.session(), &[t], destination)?;
     let s = e.session();
     let Some(tr) = s.track(t) else { return Ok(None) };
     if !tr.kind.is_audio_path() || tr.kind == TrackKind::Master {
@@ -558,31 +573,68 @@ pub fn commit_track(e: &mut Engine, t: TrackId) -> Result<Option<TrackId>> {
     refuse_longer(s, "track.commit", &tr.name, "commit", range.len(), render_limit(tr.channels().max(2)))?;
     let _offline = offline();
     let audio = transit_mix::render_track_pre_fader(s, t, range);
-    let name = format!("{}.cm", tr.name);
+    let name = format!("{} bounce", tr.name);
     let fmt = ChannelFormat::for_channels(audio.len().clamp(1, 2));
     let mixer = tr.mixer.clone();
     let buf = AudioBuffer { sample_rate: s.sample_rate.hz(), channels: audio };
     let s = e.session_mut();
     let src = add_source(s, &name, buf, None, FileFormat::Wav);
-    let nt = s.add_track(TrackKind::Audio, fmt, Some(&name));
-    if let (Some(idx), Some(new_idx)) = (s.track_index(t), s.track_index(nt)) {
+    let nt = destination.unwrap_or_else(|| s.add_track(TrackKind::Audio, fmt, Some(&name)));
+    if destination.is_none()
+        && let (Some(idx), Some(new_idx)) = (s.track_index(t), s.track_index(nt))
+    {
         let tr = s.tracks.remove(new_idx);
         s.tracks.insert((idx + 1).min(s.tracks.len()), tr);
     }
     let cid = s.new_clip_id();
-    if let Some(ntr) = s.track_mut(nt) {
+    if destination.is_none()
+        && let Some(ntr) = s.track_mut(nt)
+    {
         ntr.mixer.volume_db = mixer.volume_db;
         ntr.mixer.output = mixer.output.clone();
         ntr.mixer.sends = mixer.sends.clone();
-        if let Some(pl) = ntr.playlist_mut() {
-            pl.clips.push(Clip::audio(cid, name, src, 0, 0, range.len()));
+    }
+    // The same overwrite operation as edit.paste in Slip mode: retain the material outside
+    // the printed range. A bounce stays on the timeline regardless of the current edit mode.
+    crate::edit::place_clip(s, nt, Clip::audio(cid, name, src, 0, range.start, range.len()));
+    if let Some(old) = s.track_mut(t) {
+        match source {
+            BounceSource::Leave => {}
+            BounceSource::Mute => {
+                old.mixer.mute = true;
+                // Unlike mute or insert bypass alone, inactive stops the instrument too.
+                old.inactive = true;
+            }
+            BounceSource::Hide => {
+                old.inactive = true;
+                old.hidden = true;
+            }
         }
     }
-    if let Some(old) = s.track_mut(t) {
-        old.inactive = true;
-        old.hidden = true;
-    }
     Ok(Some(nt))
+}
+
+/// Refuse unusable destinations before an offline render can allocate audio or add a source.
+pub(crate) fn validate_bounce_destination(s: &Session, sources: &[TrackId], destination: Option<TrackId>) -> Result<()> {
+    let Some(id) = destination else { return Ok(()) };
+    let bad = |why| crate::cmd::bad("track.bounce", why);
+    if sources.contains(&id) {
+        return Err(bad("destination cannot be a source track"));
+    }
+    let tr = s.track(id).ok_or_else(|| bad("destination track does not exist"))?;
+    if tr.kind != TrackKind::Audio {
+        return Err(bad("destination must be an audio track"));
+    }
+    if tr.freeze.is_some() {
+        return Err(bad("destination is frozen; unfreeze it first"));
+    }
+    if tr.hidden {
+        return Err(bad("destination is hidden; show it first"));
+    }
+    if tr.playlist().is_none() {
+        return Err(bad("destination has no active playlist"));
+    }
+    Ok(())
 }
 
 pub fn export_clips(e: &Engine, ids: &[transit_model::ClipId], dir: &str) -> Result<usize> {
