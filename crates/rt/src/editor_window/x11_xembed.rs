@@ -4,6 +4,8 @@
 
 use super::*;
 use std::time::Duration;
+use x11rb::errors::ReplyError;
+use x11rb::protocol::ErrorKind;
 use x11rb::protocol::xproto::{KeyPressEvent, MapState};
 
 const EMBEDDED_NOTIFY: u32 = 0;
@@ -17,14 +19,16 @@ const FOCUS_OUT: u32 = 5;
 struct PendingMap {
     dispatch: u64,
     since: Instant,
+    retried: bool,
 }
 
 impl PendingMap {
-    fn due(self, completed: u64, now: Instant) -> bool {
+    fn due(self, completed: u64, last_completion: Option<Instant>, now: Instant) -> bool {
         // Exclude the dispatch that detected the child. The next full dispatch lets
         // toolkit fd/timer handlers flush their own MapWindow before idle claims it.
-        // 100 ms is only a fallback for idle callers without further dispatch progress.
-        completed.wrapping_sub(self.dispatch) >= 2 || now.saturating_duration_since(self.since) >= Duration::from_millis(100)
+        // Restart the 100 ms fallback whenever a dispatch completes after detection.
+        let since = self.since.max(last_completion.unwrap_or(self.since));
+        completed.wrapping_sub(self.dispatch) >= 2 || now.saturating_duration_since(since) >= Duration::from_millis(100)
     }
 }
 
@@ -36,6 +40,24 @@ pub(super) struct Plug {
     pub mapped_by_host: bool,
     pub notify_sent: bool,
     pending_map: Option<PendingMap>,
+}
+
+impl Plug {
+    fn finish_map(&mut self, result: Result<bool, ReplyError>) {
+        let pending = self.pending_map.take();
+        match result {
+            Ok(mapped) => self.mapped_by_host |= mapped,
+            Err(ReplyError::X11Error(e)) if e.error_kind == ErrorKind::Window => {}
+            Err(e) => {
+                if let Some(mut pending) = pending.filter(|p| !p.retried) {
+                    pending.retried = true;
+                    self.pending_map = Some(pending);
+                } else {
+                    log::debug!("editor windows: XEmbed map failed after one retry for window {}: {e}", self.window);
+                }
+            }
+        }
+    }
 }
 
 #[derive(Default)]
@@ -71,19 +93,18 @@ impl Drop for ServerGrab<'_> {
     }
 }
 
-fn map_unmapped(c: &Conn, window: Window) -> bool {
+fn map_unmapped(c: &Conn, window: Window) -> Result<bool, ReplyError> {
     // MapWindow succeeds even when another client already mapped the window. Serialize
     // this final read and map so that only a map we actually performed opts into XEmbed.
     // Keep the server grab limited to these requests, on the owning host thread.
     // Arm before issuing the request: even a panic while checking the grab must release it.
     let _grab = ServerGrab(c);
-    if !c.c.grab_server().is_ok_and(|cookie| cookie.check().is_ok()) {
-        return false;
+    c.c.grab_server()?.check()?;
+    if c.c.get_window_attributes(window)?.reply()?.map_state != MapState::UNMAPPED {
+        return Ok(false);
     }
-    c.c.get_window_attributes(window)
-        .ok()
-        .and_then(|r| r.reply().ok())
-        .is_some_and(|attrs| attrs.map_state == MapState::UNMAPPED && c.c.map_window(window).is_ok_and(|cookie| cookie.check().is_ok()))
+    c.c.map_window(window)?.check()?;
+    Ok(true)
 }
 
 pub(super) fn detect(c: &Conn, f: &Frame, window: Window) {
@@ -96,7 +117,7 @@ pub(super) fn idle(c: &Conn, f: &Frame, now: Instant) {
         .borrow()
         .plugs
         .iter()
-        .filter(|p| p.pending_map.is_some_and(|pending| pending.due(c.dispatches.get(), now)))
+        .filter(|p| p.pending_map.is_some_and(|pending| pending.due(c.dispatches.get(), c.last_completion.get(), now)))
         .map(|p| p.window)
         .collect();
     for window in due {
@@ -128,11 +149,11 @@ fn update(c: &Conn, f: &Frame, window: Window, mapping_due: bool) {
     plug.flags = flags;
     if let Some(attrs) = c.c.get_window_attributes(window).ok().and_then(|r| r.reply().ok()) {
         if flags & 1 != 0 && attrs.map_state == MapState::UNMAPPED {
-            if mapping_due || plug.mapped_by_host {
-                plug.mapped_by_host |= map_unmapped(c, window);
-                plug.pending_map = None;
-            } else {
-                plug.pending_map.get_or_insert_with(|| PendingMap { dispatch: c.dispatches.get(), since: Instant::now() });
+            // Even a previously managed child retries only on the next due idle pass.
+            let map_now = mapping_due || (plug.mapped_by_host && plug.pending_map.is_none());
+            plug.pending_map.get_or_insert_with(|| PendingMap { dispatch: c.dispatches.get(), since: Instant::now(), retried: false });
+            if map_now {
+                plug.finish_map(map_unmapped(c, window));
             }
         } else {
             plug.pending_map = None;
@@ -291,14 +312,88 @@ mod tests {
     #[test]
     fn pending_map_waits_for_a_full_dispatch_or_injected_fallback() {
         let since = Instant::now();
-        let pending = PendingMap { dispatch: 10, since };
-        assert!(!pending.due(10, since));
-        assert!(!pending.due(11, since), "the detection dispatch alone is insufficient");
-        assert!(pending.due(12, since), "one full following dispatch, without advancing time");
-        assert!(!pending.due(10, since + Duration::from_millis(99)));
-        assert!(pending.due(10, since + Duration::from_millis(100)), "idle without dispatch progress has a bounded fallback");
-        let wrapping = PendingMap { dispatch: u64::MAX, since };
-        assert!(!wrapping.due(0, since));
-        assert!(wrapping.due(1, since));
+        let pending = PendingMap { dispatch: 10, since, retried: false };
+        assert!(!pending.due(10, None, since));
+        assert!(!pending.due(11, Some(since), since), "the detection dispatch alone is insufficient");
+        assert!(pending.due(12, Some(since), since), "one full following dispatch, without advancing time");
+        assert!(!pending.due(10, None, since + Duration::from_millis(99)));
+        assert!(pending.due(10, None, since + Duration::from_millis(100)), "idle without dispatch progress has a bounded fallback");
+        let wrapping = PendingMap { dispatch: u64::MAX, ..pending };
+        assert!(!wrapping.due(0, Some(since), since));
+        assert!(wrapping.due(1, Some(since), since));
+    }
+
+    #[test]
+    fn pending_map_fallback_restarts_on_dispatch_completion() {
+        let before_detection = Instant::now();
+        let since = before_detection + Duration::from_millis(50);
+        let pending = PendingMap { dispatch: 10, since, retried: false };
+        let completion = since + Duration::from_millis(140);
+        let now = since + Duration::from_millis(150);
+        assert!(!pending.due(11, Some(completion), now));
+        assert!(pending.due(11, None, now));
+        assert!(pending.due(12, Some(completion), now));
+        assert!(!pending.due(11, Some(completion), completion + Duration::from_millis(99)));
+        assert!(pending.due(11, Some(completion), completion + Duration::from_millis(100)));
+        assert!(!pending.due(10, Some(before_detection), since + Duration::from_millis(99)));
+    }
+
+    fn pending_plug(since: Instant) -> Plug {
+        Plug {
+            window: 1,
+            version: 0,
+            flags: 1,
+            mapped_by_host: false,
+            notify_sent: true,
+            pending_map: Some(PendingMap { dispatch: 10, since, retried: false }),
+        }
+    }
+
+    fn map_error(kind: ErrorKind) -> ReplyError {
+        let error_code = match kind {
+            ErrorKind::Window => x11rb::protocol::xproto::WINDOW_ERROR,
+            ErrorKind::Match => x11rb::protocol::xproto::MATCH_ERROR,
+            _ => panic!("unsupported test error"),
+        };
+        ReplyError::X11Error(x11rb::x11_utils::X11Error {
+            error_kind: kind,
+            error_code,
+            sequence: 0,
+            bad_value: 1,
+            minor_opcode: 0,
+            major_opcode: 8,
+            extension_name: None,
+            request_name: Some("MapWindow"),
+        })
+    }
+
+    #[test]
+    fn failed_map_keeps_one_retry_then_gives_up() {
+        let since = Instant::now();
+        let mut plug = pending_plug(since);
+        plug.finish_map(Err(map_error(ErrorKind::Match)));
+        let retry = plug.pending_map.expect("first failure stays pending");
+        assert!(retry.retried);
+        assert!(retry.due(12, Some(since), since), "retry is eligible on the next due pass");
+        assert!(!plug.mapped_by_host);
+        plug.finish_map(Err(map_error(ErrorKind::Match)));
+        assert!(plug.pending_map.is_none());
+        assert!(!plug.mapped_by_host);
+    }
+
+    #[test]
+    fn retry_success_self_map_and_departure_clear_pending() {
+        let since = Instant::now();
+        for result in [Ok(true), Ok(false), Err(map_error(ErrorKind::Window))] {
+            let host_mapped = matches!(result, Ok(true));
+            let mut plug = pending_plug(since);
+            plug.finish_map(Err(map_error(ErrorKind::Match)));
+            plug.finish_map(result);
+            assert!(plug.pending_map.is_none());
+            assert_eq!(plug.mapped_by_host, host_mapped);
+        }
+        let mut departed = pending_plug(since);
+        departed.finish_map(Err(map_error(ErrorKind::Window)));
+        assert!(departed.pending_map.is_none(), "a departed child does not get a retry");
     }
 }

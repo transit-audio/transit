@@ -12,12 +12,17 @@ creation and windows reparented into the content window. It sends one `XEMBED_EM
 with protocol version 0. Only children the host had to map enter the XEmbed path: the host
 honors their mapped flag, mirrors content size, and supports activation, logical focus and key
 forwarding. Editors that map their own window keep direct keyboard focus, their chosen size
-and control of their mapping even when they advertise `_XEMBED_INFO`. JUCE and Qt advertise
-the property and map themselves. JUCE may flush its map only from a later fd/timer callback,
-so first detection of an unmapped child with bit 0 set now defers the host map. Editor idle
+and control of their mapping even when they advertise `_XEMBED_INFO`. JUCE advertises
+the property and maps itself; Qt's self-mapping behavior is unverified. JUCE may flush its map
+only from a later fd/timer callback, so first detection of an unmapped child with bit 0 set
+now defers the host map. Editor idle
 rechecks after one full following dispatch, giving the toolkit run loop a turn, or after a
-100 ms fallback for idle callers without further dispatch progress. Only a still-unmapped
-child is then mapped under the server grab. The completed-dispatch counter increments after
+100 ms fallback measured from the later of detection and the latest dispatch completion.
+Each dispatch completion restarts that fallback clock. Only a still-unmapped
+child is then mapped under the server grab. A failed grabbed map other than a departed-child
+error stays pending for one retry on the next due idle pass; a second failure clears pending
+and logs at debug level. Each pass revalidates the child before trying again.
+The completed-dispatch counter increments after
 `run_loop::run` returns with a nonzero input callback budget in `crates/rt/src/gui_thread.rs`;
 passes whose budget is exhausted by X11 events do not count. The detection dispatch does not count
 as the full following dispatch. Late `_XEMBED_INFO` starts the same deferral.

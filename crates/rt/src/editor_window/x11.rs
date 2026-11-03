@@ -82,6 +82,7 @@ struct Conn {
     events: Cell<u64>,
     /// Completed dispatches that gave the toolkit run loop a nonzero callback budget.
     dispatches: Cell<u64>,
+    last_completion: Cell<Option<Instant>>,
 }
 
 /// An editor window's state, on its thread.
@@ -156,7 +157,16 @@ fn conn() -> Result<Rc<Conn>, String> {
     let _ = c.change_window_attributes(root, &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE));
     let _ = c.flush();
     log::info!("editor windows: X11 display opened on this thread ({dpi} dpi)");
-    let conn = Rc::new(Conn { c, root, black, atoms, dpi: Cell::new(dpi), events: Cell::new(0), dispatches: Cell::new(0) });
+    let conn = Rc::new(Conn {
+        c,
+        root,
+        black,
+        atoms,
+        dpi: Cell::new(dpi),
+        events: Cell::new(0),
+        dispatches: Cell::new(0),
+        last_completion: Cell::new(None),
+    });
     CONN.with(|c| *c.borrow_mut() = Some(Rc::clone(&conn)));
     Ok(conn)
 }
@@ -546,6 +556,7 @@ pub(crate) fn pump(max: usize) -> usize {
 pub(crate) fn dispatch_complete() {
     if let Some(c) = current() {
         c.dispatches.set(c.dispatches.get().wrapping_add(1));
+        c.last_completion.set(Some(Instant::now()));
     }
 }
 
