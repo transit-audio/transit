@@ -45,6 +45,23 @@ fn info(c: &Conn, window: Window) -> Option<(u32, u32)> {
     Some((values.next()?, values.next()?))
 }
 
+fn map_unmapped(c: &Conn, window: Window) -> bool {
+    // MapWindow succeeds even when another client already mapped the window. Serialize
+    // this final read and map so that only a map we actually performed opts into XEmbed.
+    // Keep the server grab limited to these requests, on the owning host thread.
+    if !c.c.grab_server().is_ok_and(|cookie| cookie.check().is_ok()) {
+        return false;
+    }
+    let mapped =
+        c.c.get_window_attributes(window)
+            .ok()
+            .and_then(|r| r.reply().ok())
+            .is_some_and(|attrs| attrs.map_state == MapState::UNMAPPED && c.c.map_window(window).is_ok_and(|cookie| cookie.check().is_ok()));
+    let _ = c.c.ungrab_server();
+    let _ = c.c.flush();
+    mapped
+}
+
 pub(super) fn detect(c: &Conn, f: &Frame, window: Window) {
     // Create/property/reparent events may already be stale. Never operate on a child that
     // has left this content window. Select before reading so a late property cannot be lost.
@@ -63,23 +80,23 @@ pub(super) fn detect(c: &Conn, f: &Frame, window: Window) {
         state.plugs.len() - 1
     });
     let plug = &mut state.plugs[index];
+    let was_mapped_by_host = plug.mapped_by_host;
     plug.version = version;
     plug.flags = flags;
     if let Some(attrs) = c.c.get_window_attributes(window).ok().and_then(|r| r.reply().ok()) {
         if flags & 1 != 0 && attrs.map_state == MapState::UNMAPPED {
-            if c.c.map_window(window).is_ok_and(|cookie| cookie.check().is_ok()) {
-                plug.mapped_by_host = true;
-            }
-        } else if flags & 1 == 0 && attrs.map_state != MapState::UNMAPPED {
+            plug.mapped_by_host |= map_unmapped(c, window);
+        } else if plug.mapped_by_host && flags & 1 == 0 && attrs.map_state != MapState::UNMAPPED {
             let _ = c.c.unmap_window(window);
         }
     }
     let newly_notified = !plug.notify_sent && send(c, window, EMBEDDED_NOTIFY, f.content);
     plug.notify_sent |= newly_notified;
-    if newly_notified && state.active {
+    let managed = plug.mapped_by_host;
+    if managed && (newly_notified || !was_mapped_by_host) && state.active {
         send(c, window, WINDOW_ACTIVATE, 0);
     }
-    let focus = state.active && state.focused.is_none() && flags & 1 != 0;
+    let focus = managed && state.active && state.focused.is_none() && flags & 1 != 0;
     let unfocus = state.focused == Some(window) && flags & 1 == 0;
     drop(state);
     resize(c, f);
@@ -109,13 +126,13 @@ pub(super) fn forget(c: &Conn, f: &Frame, window: Window) {
 }
 
 pub(super) fn resize(c: &Conn, f: &Frame) {
-    if f.xembed.borrow().plugs.is_empty() {
+    if !f.xembed.borrow().plugs.iter().any(|p| p.mapped_by_host) {
         return;
     }
     // Read the current content geometry, not a possibly old ConfigureNotify still in the
     // queue. This also covers a window manager forcing a size and the follow-size path.
     let Some(g) = c.c.get_geometry(f.content).ok().and_then(|r| r.reply().ok()) else { return };
-    for plug in &f.xembed.borrow().plugs {
+    for plug in f.xembed.borrow().plugs.iter().filter(|p| p.mapped_by_host) {
         let _ = c.c.configure_window(plug.window, &ConfigureWindowAux::new().x(0).y(0).width(u32::from(g.width)).height(u32::from(g.height)));
     }
     let _ = c.c.flush();
@@ -143,6 +160,9 @@ fn focus_on(c: &Conn, f: &Frame, window: Option<Window>) {
 }
 
 fn focus_proxy(c: &Conn, f: &Frame) {
+    if f.xembed.borrow().focused.is_none() {
+        return;
+    }
     // A queued FocusIn can already be stale. Avoid taking focus back when the server already
     // reports another window; a race between this query and SetInputFocus still needs
     // timestamped WM_TAKE_FOCUS support (K92).
@@ -156,12 +176,13 @@ pub(super) fn activate(c: &Conn, f: &Frame, active: bool) -> bool {
     let mut state = f.xembed.borrow_mut();
     if state.active != active {
         state.active = active;
-        for plug in &state.plugs {
+        for plug in state.plugs.iter().filter(|p| p.mapped_by_host) {
             send(c, plug.window, if active { WINDOW_ACTIVATE } else { WINDOW_DEACTIVATE }, 0);
         }
     }
-    let has_plug = !state.plugs.is_empty();
-    let target = state.plugs.iter().find(|p| p.flags & 1 != 0).map(|p| p.window);
+    // Self-mapped toolkits (including those advertising XEmbed) keep direct X focus.
+    let has_plug = state.plugs.iter().any(|p| p.mapped_by_host);
+    let target = state.plugs.iter().find(|p| p.mapped_by_host && p.flags & 1 != 0).map(|p| p.window);
     let focused = state.focused;
     drop(state);
     if active {
@@ -188,7 +209,7 @@ pub(super) fn request_focus(c: &Conn, event: &ClientMessageEvent) {
     }
     if let Some(f) = frame_of_content(event.window) {
         // The protocol carries no sender ID. This editor has a single logical focus site.
-        let target = f.xembed.borrow().plugs.iter().find(|p| p.flags & 1 != 0).map(|p| p.window);
+        let target = f.xembed.borrow().plugs.iter().find(|p| p.mapped_by_host && p.flags & 1 != 0).map(|p| p.window);
         if target.is_some() {
             focus_on(c, &f, target);
         }
@@ -200,6 +221,13 @@ pub(super) fn key(c: &Conn, mut event: KeyPressEvent) {
         && let Some(window) = f.xembed.borrow().focused
     {
         event.event = window;
+        // Match GtkSocket: pointer coordinates and the source's child are not meaningful
+        // in a key event forwarded to a different window.
+        event.child = 0;
+        event.root_x = 0;
+        event.root_y = 0;
+        event.event_x = 0;
+        event.event_y = 0;
         let _ = c.c.send_event(false, window, EventMask::NO_EVENT, event);
         let _ = c.c.flush();
     }

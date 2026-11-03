@@ -69,6 +69,7 @@ mod linux {
             ("xembed_maps_notifies_unmaps_and_resizes", xembed_maps_notifies_unmaps_and_resizes),
             ("xembed_requires_valid_info_and_tracks_reparenting", xembed_requires_valid_info_and_tracks_reparenting),
             ("xembed_focus_and_keys_are_symmetric", xembed_focus_and_keys_are_symmetric),
+            ("xembed_self_mapped_child_keeps_direct_focus_and_size", xembed_self_mapped_child_keeps_direct_focus_and_size),
         ];
         let filter: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
         let mut ran = 0;

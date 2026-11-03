@@ -6,7 +6,7 @@ struct Plug {
     info: u32,
     xembed: u32,
     messages: Vec<[u32; 5]>,
-    keys: Vec<u8>,
+    keys: Vec<x11rb::protocol::xproto::KeyPressEvent>,
 }
 
 impl Plug {
@@ -31,7 +31,7 @@ impl Plug {
                 x11rb::protocol::Event::ClientMessage(e) if e.window == self.window && e.type_ == self.xembed && e.format == 32 => {
                     self.messages.push(e.data.as_data32());
                 }
-                x11rb::protocol::Event::KeyPress(e) | x11rb::protocol::Event::KeyRelease(e) => self.keys.push(e.response_type & 0x7f),
+                x11rb::protocol::Event::KeyPress(e) | x11rb::protocol::Event::KeyRelease(e) => self.keys.push(e),
                 _ => {}
             }
         }
@@ -159,11 +159,11 @@ fn xembed_focus_and_keys_are_symmetric() {
             time: 0,
             root,
             event: proxy,
-            child: 0,
-            root_x: 0,
-            root_y: 0,
-            event_x: 0,
-            event_y: 0,
+            child: content,
+            root_x: 101,
+            root_y: 202,
+            event_x: -3,
+            event_y: 4,
             state: KeyButMask::default(),
             same_screen: true,
         };
@@ -173,7 +173,12 @@ fn xembed_focus_and_keys_are_symmetric() {
         plug.c.send_event(false, proxy, mask, event).unwrap();
     }
     xembed_passes(&q, &win, &mut plug);
-    assert_eq!(plug.keys, vec![KEY_PRESS_EVENT, KEY_RELEASE_EVENT]);
+    assert_eq!(plug.keys.iter().map(|e| e.response_type & 0x7f).collect::<Vec<_>>(), vec![KEY_PRESS_EVENT, KEY_RELEASE_EVENT]);
+    for event in &plug.keys {
+        assert_eq!(event.event, plug.window);
+        assert_eq!((event.child, event.root_x, event.root_y, event.event_x, event.event_y), (0, 0, 0, 0, 0));
+        assert_eq!(event.detail, 38);
+    }
     plug.messages.clear();
     plug.c.set_input_focus(InputFocus::POINTER_ROOT, root, x11rb::CURRENT_TIME).unwrap();
     xembed_passes(&q, &win, &mut plug);
@@ -197,5 +202,42 @@ fn xembed_focus_and_keys_are_symmetric() {
     assert!(plug.messages.contains(&[0, 5, 0, 0, 0]), "hiding sends FOCUS_OUT");
     win.close();
     let _ = ew::group(Group::Unpark);
+    q.dispatch(256);
+}
+
+fn xembed_self_mapped_child_keeps_direct_focus_and_size() {
+    use x11rb::protocol::xproto::InputFocus;
+    let q = MessageQueue::attach();
+    let win = EditorWindow::new("Self-mapped XEmbed", 300.0, 200.0, None).unwrap();
+    let content = id(win.parent());
+    let mut plug = Plug::new(content);
+    plug.flags(1);
+    // JUCE and Qt advertise XEmbed but map themselves before the host detects them.
+    plug.c.map_window(plug.window).unwrap();
+    plug.c.sync().unwrap();
+    assert_ne!(plug.state(), MapState::UNMAPPED);
+    win.raise();
+    xembed_passes(&q, &win, &mut plug);
+    let root = plug.c.setup().roots[0].root;
+    for _ in 0..2 {
+        plug.c.set_input_focus(InputFocus::PARENT, id(win.raw()), x11rb::CURRENT_TIME).unwrap();
+        plug.c.sync().unwrap();
+        xembed_passes(&q, &win, &mut plug);
+        assert_eq!(plug.c.get_input_focus().unwrap().reply().unwrap().focus, plug.window, "self-mapped children keep direct X focus");
+        assert_eq!(geometry(&plug.c, plug.window), Some((123, 45)), "the toolkit owns its size");
+        assert_eq!(plug.messages, vec![[0, 0, 0, content, 0]], "only one EMBEDDED_NOTIFY, no activation or logical focus messages");
+        plug.c.set_input_focus(InputFocus::POINTER_ROOT, root, x11rb::CURRENT_TIME).unwrap();
+        plug.c.sync().unwrap();
+        xembed_passes(&q, &win, &mut plug);
+    }
+    assert!(ew::resize_content(win.raw(), 510.0, 270.0));
+    plug.flags(0);
+    plug.c.send_event(false, content, EventMask::NO_EVENT, ClientMessageEvent::new(32, content, plug.xembed, [0, 3, 0, 0, 0])).unwrap();
+    xembed_passes(&q, &win, &mut plug);
+    assert_eq!(plug.state(), MapState::VIEWABLE, "self-mapped children own their mapping even when the flag clears");
+    assert_eq!(geometry(&plug.c, plug.window), Some((123, 45)));
+    assert_eq!(plug.messages, vec![[0, 0, 0, content, 0]]);
+    assert!(plug.keys.is_empty());
+    win.close();
     q.dispatch(256);
 }
