@@ -139,15 +139,61 @@ note-off to a paraphonic insert.
 
 ### Slice sources and Slice to MIDI
 
-Source order is valid WAV cue points/labels, then **the existing**
+Slicing has two modes inside the Slices view: **Auto** and **Manual**, each owning a separate
+marker set for the same loop. Auto owns the detectors and its markers are read-only. Source
+order is valid WAV cue points/labels, then **the existing**
 `transit_dsp::offline::detect_transients`, then beat-grid division. Auto chooses the first
-nonempty usable result; the user can explicitly choose any source or edit manually. Cue
+nonempty usable result; the user can explicitly choose any of those three sources. Cue
 positions are source-frame indices: bound-check RIFF chunk sizes, sort, deduplicate, discard
 out-of-range positions with a load note, retain labels by cue id, add region start and end.
-Use `cue ` and `LIST/adtl/labl`; end is a boundary, not a zero-length slice. Marker moves keep
-stable slice ids and strict order. Removing a marker merges into the preceding slice and frees
-the following binding; references to the removed slice are reported. Regeneration requires an
-explicit Replace markers action and is undoable. Never overwrite manual edits on reopening.
+Use `cue ` and `LIST/adtl/labl`; end is a boundary, not a zero-length slice. Source/sensitivity/
+grid changes prepare a candidate Auto result off-thread; **Replace markers** explicitly accepts
+regeneration of Auto only, as one undo step. Until accepted, the bench and its actions keep
+using the current Auto set. Reopening restores the saved sets without rerunning detection.
+
+Manual owns the user's markers, for placing every breakbeat chop by hand. Clicking empty bench
+space adds a marker, dragging a marker moves it, and clicking a marker without dragging removes
+it. The first marker is fixed at loop start S: it cannot move or be removed; loop end E is a
+fixed boundary, not an editable slice start. **Start from Auto's markers** replaces Manual
+with a copy of Auto's current accepted set, including labels; **Clear** leaves only S (and the
+implicit end E), one full-loop slice. Selecting Manual for the first time starts with S only.
+Switching Auto/Manual restores that mode's own set without changing either set. Touching a
+marker in Auto copies Auto into Manual and switches to Manual before applying the gesture;
+an empty-bench add in Auto does the same. This explicit edit replaces any previous Manual set,
+with the copy, switch and gesture in one undo step. Touching S still switches/copies but cannot
+move or remove S. Copy, Clear and each add/remove/complete drag are undoable; canceling a drag
+restores its pre-gesture state, including any copy and switch.
+
+The bench offers horizontal zoom at **1×, 2×, 4× and 8×** with horizontal scrolling, preserving
+the center source position when zoom changes where the scroll bounds allow. The pointer/drag
+position readout is in milliseconds relative to S, computed from native source frames and rate;
+zoom and scrolling never change stored positions. **Snap to zero crossing** is a toggle,
+default on, for Manual adds and moves. Round the requested position to the nearest source frame
+(ties upward), then search within **±5 ms**, `floor(source_rate * .005)` frames on either side,
+clipped to the loop and legal neighbor interval. A crossing is frame n where adjacent samples
+n-1 and n change sign in any source channel (zero counts as nonnegative); do not sum stereo
+channels. Choose the nearest crossing to the requested frame, ties to the earlier frame. If
+none exists, use the requested frame; with snap off, use it directly. Missing source data
+refuses a snapped edit with a status message rather than pretending to snap. Searches and any
+source reads run off the audio thread.
+
+Minimum spacing is **one native source frame** between adjacent boundaries, including S/E,
+so close cue points and hand-placed flams remain possible. A move stays between its existing
+neighbors; clamp its requested frame to that legal interval before searching. An add outside
+(S,E) or on an existing marker is refused, never merged or silently relocated. The accepted
+position must satisfy spacing after snapping. Moves keep stable slice ids and strict order.
+Removing a marker merges into the preceding slice and frees the following binding; references
+to the removed slice are reported. References distinguish the two sets, so an edit or replacement
+of one set cannot mutate the other's identities or bindings. Copying preserves positions and
+labels but creates Manual identities; replacing Manual reports/frees its removed bindings by
+the same rule. Never overwrite Manual on detection or reopening.
+
+**Slices to pads** and **Slice to MIDI** consume the set in the mode currently showing, never
+a hidden set or an unaccepted detector preview. Switching modes alone does not remap pads or
+rewrite existing MIDI. Slice to MIDI requires the shown set's current regions to have the
+ascending pad/key mapping below; if absent or stale, it refuses and offers **Map slices to keys**
+as a separate edit. Applying a set to pads previews any replaced slice bindings and preserves
+the existing collision, capacity and undo rules.
 
 The existing detector is transit code, a vibrato-suppressed spectral flux detector, not the
 tentative 5 ms energy detector in the original proposal. Reuse its sanitized channel power
@@ -167,7 +213,21 @@ steps. Clamp to the region, deduplicate, append end. All analysis runs off-threa
 the same media admission rules; long sources in #271 are read in overlapping analysis chunks
 with sufficient detector neighborhoods and deterministic merge, not decoded wholesale.
 
-One loop per patch, at most 64 slices and 65 boundaries. It may coexist with loose sample pads,
+Auto's Grid controls include **Division** and **Bars**. Bars defaults to **From tempo**, keeping
+the metadata/insertion-BPM rule above. An explicit integer bar count 1–16 overrides the grid's
+tempo: with insertion meter numerator u and denominator v, B = bars * u * 4/v quarter notes
+span [S,E), and grid BPM = `60 * B * source_rate / (E-S)`. Show this derived BPM. Returning to
+From tempo restores the BPM rule; neither control estimates tempo from audio or alters the
+Manual set. Keep the rational boundary calculation, including partial final divisions, and
+refuse a result over capacity instead of dropping markers. This grid override does not silently
+change Slice to MIDI's separately chosen beat length or either clip timing mode below.
+
+One loop per patch, at most **64 slices and 65 boundaries per set**, for both Auto and Manual.
+Each set contains at most 64 slice starts including S, plus the end boundary E. The two saved
+sets are alternatives, not 128 playable slices or extra pads. In Manual, an add that would
+create the 65th slice leaves the set unchanged and says **Cannot add slice: 64 slices per loop**
+in the status line. Auto regeneration and copy-from-Auto obey the same bound; no truncation.
+The loop may coexist with loose sample pads,
 but total occupied pads cannot exceed 64. Slicing previews any shortage before applying and
 refuses excess instead of truncating. Defaults map chronological slice i to root+i, root 60;
 root is selectable in 0..(128-count). A mapping edit may relocate the entire ascending run,
@@ -224,6 +284,16 @@ substitute for sample equality. Legacy loop arithmetic remains in the legacy pat
 
 ## Implementation
 
+The maintainer-reviewed [Sampler panel mockup](../design/sampler-panel-mockup.html) is the
+design note for slice 1 (#269): Pads has a fixed 4×4 grid column and a selected-pad strip;
+Slices has the scrolling Auto/Manual bench; Instrument has a velocity axis and zones above
+the keys they cover, with round-robin and velocity-split labels. Build to that layout, with
+this ADR's text taking precedence wherever they differ. The mockup's simulated detection,
+fractional-loop snap, first-marker handling and example clip position are not implementation
+rules. Keep the specified detector/defaults, real sign-change snap, fixed S and ADR 0039
+placement above. The full Instrument editor still belongs to #270 and SFZ to #271; the mockup
+does not pull those features into #269. Replace it with real screenshots after slice 1 lands.
+
 ### Crates and integration seams
 
 | Owner | Work |
@@ -253,7 +323,7 @@ freeze capture of mutable audio: Sampler audio is immutable and needs no callbac
 | Pads / banks | 64 / 4, 16 visible; unique trigger notes; no pad layering. |
 | Zones / layers / round robins | 256 leaves / 8 layers per group / 8 alternatives per layer, all leaves counted in 256; up to 256 distinct sources. |
 | Voices | 64 total across pads and unbound zones, including release/choke tails. At most one per pad; new Instrument patches use up to 64, legacy remains 32. No hidden extra tail voices. |
-| Slices / markers | 64 / 65, one loop; duplicate or invalid boundaries rejected. |
+| Slices / markers | 64 / 65 per Auto or Manual set, one shared loop; both sets stored, only the shown set used by slicing commands. Manual has at most 64 starts including fixed loop start, plus end; refuse the 65th slice with a status line. Duplicate or invalid boundaries rejected; no extra playable-pad capacity. |
 | Shaper / matrix | 64 voice states, two LFOs per voice, 16 rows per zone; settings for 256 zones allocated in prepare. |
 | Events | 1024 per instance, existing 257-entry release reserve. Preserve stable sorting and the host's retry on refusal; no fresh Vec or sort allocation in processing. |
 | Expanded-pad rack events (#272) | 1024 merged candidates per rack per block, 257 entries reserved for releases; 1024 delivery envelopes per member shared by ready and deferred work, also with 257 release entries. At most 16 envelopes per trigger (one on plus up to 15 peer chokes), 16,384 envelopes per rack. Separate fixed reset flags cannot be crowded out. Parent MIDI-effect storage retains ADR 0036's bounds. |
@@ -351,15 +421,30 @@ keep their rate policy. All slice/loop/cue positions refer to the admitted sourc
 ### Session format, media and SFZ
 
 Add optional `Insert::sampler_patch` with schema version 1, 256 fixed logical zone ids, pad
-bindings, source references, choke groups, layer/RR groups and seed, slice ids/markers/labels,
-detector settings, root and beat length. Physically serialize only populated entries and
-nondefault controls. Every field has `serde(default)` (optionals default None, arrays/maps
+bindings, source references, choke groups, layer/RR groups and seed, the loop's separate Auto
+and Manual slice ids/markers/labels, selected slicing mode, snap toggle, detector settings,
+grid division/bar override, root and beat length. Both sets persist with the same source and
+loop region, including the hidden set, through Save, Save As and autosave. Physically serialize
+only populated entries and nondefault controls. Every field has `serde(default)` (optionals default None, arrays/maps
 empty, seed 1, root 60, controls as above); unknown fields are accepted and retained by the new
 patch codec. Unknown schema versions retain their raw object and media references, report
 unavailable and play silence; never rewrite them into an empty patch. Missing/invalid source
 references stay in the patch, report silence per zone and can be relinked. Validate all counts,
 ids, lengths, finite values and ranges before allocating render data. Reject an invalid new
 edit; on load preserve an invalid patch opaquely with a load note instead of discarding it.
+
+Default the new mode to Auto, snap to on, division to 1/16 and bar override to absent (From
+tempo). Missing sets default to empty serialized storage, resolved to S plus implicit E when
+a loop exists; no loop means no markers. For a patch from a build with a single marker set,
+load that set as Manual, select Manual and preserve its ids/labels/bindings exactly; initialize
+Auto to S only and do not redetect. This migration preserves edits without guessing whether
+the old set came from a detector. Explicitly saved two-set state wins over legacy single-set
+fields. New fields use `serde(default)` and never `deny_unknown_fields`, per the
+[session-format rules](../contributing/knowledge/session-format.md). Register and emit
+`sampler_slicing_modes` in `Session::needs`/`KNOWN_NEEDS` when this loop state is used, alongside
+`sampler_patch`, so an older marker-aware reader that lacks the two-set extension warns.
+Such a reader may lose the hidden set/mode on resave; pre-marker builds cannot warn. Neither
+this migration nor these defaults create a patch for a legacy `Insert::sample` instrument.
 
 No patch field means legacy behavior from `Insert::sample` and the existing 19 parameter ids.
 Do not write a new patch merely by opening an old session. New patches leave `Insert::sample`
@@ -525,6 +610,7 @@ this hook; no hardware driver or proprietary controller protocol belongs in samp
 Each slice adds entries to `docs/help/sampler.toml`, registers ids and hovered controls per
 `docs/help/README.md`, and updates the Sampler user guide. Cover views, bank/controller mapping,
 voice/retrigger/choke, ranges/defaults, loop period under crossfade, detector limitations,
+Auto/Manual ownership and copy-on-touch, Clear, zoom/scroll/readout, snap window and spacing,
 pitch-versus-duration, both clip timing modes, takes placement, media collection/missing files,
 stream underruns, import subset, expansion refusals and older-build warnings. Reuse existing
 shaper/matrix help where semantics match. Keep brand names out of device/parameter ids.
@@ -560,6 +646,26 @@ output verbatim; investigate before a rerun or test change, per the contributor 
    A hand-built WAV contains unsorted/duplicate/end/out-of-range cue points and labels, plus
    valid/invalid tempo chunks; assert exact retained frame indices and labels, source priority
    and no regeneration of manual edits. Beat grids use hand-computed boundaries at two rates.
+   Include Division/Bars overrides in 4/4 and 3/4, From tempo restoration and over-capacity
+   refusal without changing either stored set.
+   **Manual bench:** inject source frames and gestures, not clock or pointer timing. For a
+   48,000-frame/48 kHz mono loop, set samples 0..11,999 to -1 and 12,000..47,999 to +1.
+   Starting from S=0, add at 6000 with snap off, then drag it to requested frame 12,100 with
+   snap on: the result must be exactly 12,000 (within the 240-frame search radius), with the
+   same slice id. Snap off gives 12,100; a request at 12,241 has no crossing in range and
+   stays 12,241. Also test the exact window edge, equal-distance crossings choosing the earlier,
+   zero samples, opposite-phase stereo, missing source refusal and neighbor-constrained moves.
+   A one-frame gap is admitted; duplicate/add-at-end and crossing a neighbor cannot break order.
+   Remove the moved marker: it merges into its predecessor, reports references and frees only
+   its binding. Drag/click S never changes S. Copy Auto's known set into Manual, edit Manual,
+   switch Auto then Manual and compare both full sets/ids/labels to independent expectations.
+   Change/accept Auto's detector result while Manual exists: Manual is unchanged. Test Auto
+   marker-touch and empty-bench add copy/switch before editing, including an existing Manual
+   set, one undo/redo and canceled drag rollback. Clear retains S and end, with Auto unchanged.
+   Admit exactly 64 Manual slices; the next add leaves data unchanged and emits the specified
+   status line. Test both actions with deliberately different Auto/Manual sets, stale mapping
+   refusal and the separate remap; neither action may use the hidden set. Zoom/scroll input
+   maps to the same native frames and millisecond readout at 1× and 8× without changing markers.
    For a 48,000-frame/48 kHz loop with markers 0, 12,000, 36,000, end 48,000, fit to four
    quarter notes gives 0, 1, 3 and end 4 beats; keep duration at 120 BPM gives 0, .5, 1.5,
    end 2 beats, at 60 BPM gives 0, .25, .75, end 1. Verify keys root..root+2, note lengths,
@@ -637,9 +743,14 @@ output verbatim; investigate before a rerun or test change, per the contributor 
    the same absolute schedules: compare audio bits and state fingerprints from fresh reset
    and save/load. Check the model corpus/serde defaults, new session round trips, unknown
    schema retention, autosave recovery, collected media, old-reader warnings and unchanged
-   old sampler ids/mappings. UI tests cover all views without a sound/mapping edit, pad drag,
+   old sampler ids/mappings. Round-trip distinct Auto/Manual sets, mode, snap and grid settings
+   with either mode showing through Save/Save As/autosave; load absent fields and a legacy
+   single-set fixture without detection, retaining old ids/bindings. Verify the additional
+   `sampler_slicing_modes` warning with a reader that knows `sampler_patch` but not this extension.
+   UI tests cover all views without a sound/mapping edit, pad drag,
    controller press/bank/release, capacity errors and every help id. Negative mutations
-   (wrong choke length, doubled amp, bad loop wrap, stale page generation or dropped take)
+   (wrong choke length, doubled amp, bad loop wrap, stale page generation, dropped take,
+   bypassed snap or an edit leaking into the hidden marker set)
    must fail the corresponding tests; green tests that do not reach those paths are no gate.
 
 Add both new cores to ADR 0037's enforced bare-metal job in their first slice:
@@ -667,7 +778,7 @@ capacity, no-allocation and compatibility gate, not a later cleanup slice.
 
 | Issue | Deliverable and scope changes | Blocking gate |
 |---|---|---|
-| #269 Pads and Slices | Tier B sampler core and shared-primitive extraction, compatibility path, full bounded patch/save model, pad controls/choke, four banks, cue metadata/existing detector/grid, Slice to MIDI/takes placement and controller hook. Basic one-zone Instrument panel remains usable. Move the shared extraction from #270 here so the dependency direction is valid from the first slice; activation of the shaper/matrix UI stays #270. No new AIFF/FLAC decoder task: preserve what loads today. Oversized new media is refused until #271. | Gates 1, 2, 6, both bare-metal checks and full workspace/oracles for extraction. |
+| #269 Pads and Slices | Tier B sampler core and shared-primitive extraction, compatibility path, full bounded patch/save model, pad controls/choke, four banks, Auto cue metadata/existing detector/grid with division and bars, Manual add/move/remove/copy/Clear, two persisted marker sets and copy-on-touch, zoom/scroll/ms readout/snap/fixed start, Slice to MIDI/takes placement and controller hook. Build slice 1 to the [panel mockup](../design/sampler-panel-mockup.html), with ADR text authoritative and real screenshots replacing it after landing. Basic one-zone Instrument panel remains usable. Move the shared extraction from #270 here so the dependency direction is valid from the first slice; activation of the shaper/matrix UI stays #270. No new AIFF/FLAC decoder task: preserve what loads today. Oversized new media is refused until #271. | Gates 1, 2 (including deterministic Manual edits, known-crossing snap, both-set preservation and 65th-slice refusal), 6 (two-set persistence/defaults), both bare-metal checks and full workspace/oracles for extraction. |
 | #270 Instrument | Zone editor, layers/RR, loop/crossfade rules, per-zone shaper/matrix behavior and panel. Legacy migration is already in #269; this slice extends its tests. SFZ stays #271, correcting the original Decision's claim that it arrives with this view. | Gates 3 and 6, both bare-metal checks, full workspace/oracles for shared changes. |
 | #271 Long media and SFZ | ADR 0035 raw-source reader extension, fallible synchronous raw reads and explicit pools, attack caches, native-rate streaming, bounded conversion of long compressed files, peaks, shared-file fix, format integration and SFZ subset. AIFF/FLAC decode already exists; test/extend the bounded path. No realtime compressed stream or fix claim for K91 take placement. | Gates 4 and 6, exact disk/memory/offline equality and injected open/read/early-EOF export failures, bare-metal and full workspace integration. |
 | #272 Expand to rack | Atomic conversion to at most 16 ordinary member tracks, exact choke and solo-mask support through one bounded stage for parent and every direct member ingress, parent-only MIDI effects evaluated once, atomic on/choke reservations and deferred delivery, folder clip playback/record/edit prerequisites, mappings/global gain, compatibility fields and explicit refusals. No discarded excess pads or choke. Implement the scoped ADR 0034/0036 amendments with the code. | Gates 5 and 6 through the real rack: member-clip hats, direct live/audition, mixed origins, worker/queue saturation and release recovery, saved sessions and full workspace. |
@@ -710,3 +821,43 @@ costs; neither weakens the callback contract, layer rules, file-size ratchet or 
 
 These are documentation changes and required implementation evidence, not claims that the
 implementation gates have run. No product question remains open for the maintainer in this round.
+
+## Amendment 2026-11-03: Auto and Manual slicing, and the panel mockup
+
+The panel review settled two slicing modes within the Slices view. **Auto** owns a read-only
+detected marker set: file cue points first, then the existing transient detector with sensitivity,
+then grid division with Division and Bars. **Manual** owns a separate user marker set, so a
+breakbeat can be chopped entirely by hand: click to add, drag to move, click a marker to remove.
+**Start from Auto's markers** copies Auto's accepted set into Manual; **Clear** leaves the fixed
+loop-start marker and the implicit loop end. Touching an Auto marker (or adding on its bench)
+copies the set and switches to Manual before the edit, as one undoable action. A plain mode
+switch preserves both sets. Returning to Auto shows its detected set again; detection never
+overwrites Manual. Slices to pads and Slice to MIDI use the mode currently showing, with the
+existing explicit mapping and ADR 0039 clip-placement rules.
+
+The bench has 1×–8× horizontal zoom, scrolling and a millisecond position readout. Zero-crossing
+snap is a toggle, on by default: search the actual source within ±5 ms for the nearest sign
+change, ties earlier, falling back to the requested frame if none exists. The body specifies
+channel/zero handling and legal-neighbor bounds. Minimum spacing is one native source frame;
+the first marker stays at loop start and cannot be moved or removed. The 64-slice limit applies
+independently to each stored set: at most 64 starts including loop start, plus loop end, never
+extra playable pads. Refuse a 65th Manual slice without changing its set and show **Cannot add
+slice: 64 slices per loop** in the status line. Existing pad, zone, voice and media bounds stand.
+
+Both sets, their ids/labels and the selected mode persist with the loop, along with snap and
+Auto settings. Additive fields have defaults; a previous single marker set loads as Manual
+with its identities/bindings intact, without redetection. The session-format section specifies
+absent-field behavior and the older-reader warning. Gate 2 requires deterministic Manual
+add/move/remove/copy/Clear and mode-switch tests, a loop with a known zero crossing proving
+snap, fixed-start/spacing/capacity refusals and shown-set command behavior. Gate 6 requires
+both-set save/load/autosave and compatibility evidence. These are requirements for #269,
+not implementation or test-pass claims in this amendment.
+
+The maintainer-reviewed [Sampler panel mockup](../design/sampler-panel-mockup.html) is the
+design note for slice 1 (#269): the fixed 4×4 Pads column and selected-pad strip, the Auto/Manual
+Slices bench, and the Instrument key map with its velocity axis, zones over their keys,
+round-robin and velocity-split labels. The ADR's text wins where the mockup differs. Real
+screenshots replace the mockup after slice 1 lands; the existing #270/#271 scope still governs
+the full Instrument editor and SFZ. The Implementation section and #269 row carry this pointer.
+All earlier decisions and judging responses remain in force except where this amendment
+explicitly replaces the single-set slicing workflow.
