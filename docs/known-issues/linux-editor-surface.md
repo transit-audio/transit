@@ -12,7 +12,18 @@ creation and windows reparented into the content window. It sends one `XEMBED_EM
 with protocol version 0. Only children the host had to map enter the XEmbed path: the host
 honors their mapped flag, mirrors content size, and supports activation, logical focus and key
 forwarding. Editors that map their own window keep direct keyboard focus, their chosen size
-and control of their mapping even when they advertise `_XEMBED_INFO` (as JUCE and Qt do).
+and control of their mapping even when they advertise `_XEMBED_INFO`. JUCE and Qt advertise
+the property and map themselves. JUCE may flush its map only from a later fd/timer callback,
+so first detection of an unmapped child with bit 0 set now defers the host map. Editor idle
+rechecks after one full following dispatch, giving the toolkit run loop a turn, or after a
+100 ms fallback for idle callers without further dispatch progress. Only a still-unmapped
+child is then mapped under the server grab. The completed-dispatch counter increments after
+`run_loop::run` returns with a nonzero input callback budget in `crates/rt/src/gui_thread.rs`;
+passes whose budget is exhausted by X11 events do not count. The detection dispatch does not count
+as the full following dispatch. Late `_XEMBED_INFO` starts the same deferral.
+This counter records an opportunity to run callbacks, not proof that a particular toolkit
+callback ran. A later timer or a callback starved by other handlers can still miss the grace;
+the run-loop budget limitation described below remains a follow-up.
 They receive only EMBEDDED_NOTIFY, with no activation or logical focus messages. Non-XEmbed
 children still control their own mapping. For host-mapped children,
 accelerators, tab traversal, modality and drag-and-drop remain outside this subset (K92).
@@ -61,6 +72,8 @@ Also report: empty frame versus no frame; exact plug-in version and format; X11 
 desktop/compositor and resolution; whether the same build works in another host; GPU driver and
 `glxinfo -B` if installed. Compare the same format/build on the same machine. A vendor dependency
 list does not establish that a different release uses the same renderer.
+For a JUCE editor, also paste its `mapped_by_host` reading: it should be `false` when the
+toolkit maps itself during the deferral, with direct focus and its chosen size preserved.
 
 ## Why the visual has not changed
 
@@ -102,6 +115,16 @@ its size unchanged, and deliver only one EMBEDDED_NOTIFY. Content resizing, flag
 REQUEST_FOCUS must not opt it into host management. On 28f0d516, the focus assertion fails
 because focus moves to the proxy; independently, its size becomes 300x200. The host-mapped
 key test also checks that forwarded child and coordinate fields are zero.
+
+The JUCE-shaped deferred-flush regression first creates the child, advertises `{0, 1}` and
+flushes, then runs one host dispatch before the client maps itself. After the next dispatch,
+X focus must be on the child, size must remain 123x45, the surface readout must report
+`mapped_by_host=false`, and only one EMBEDDED_NOTIFY may arrive. On 935d0001 its first focus
+assertion sees the proxy: detection already mapped and claimed the child. The GTK-shaped
+test instead leaves the child unmapped and checks the host map at the second dispatch's idle;
+late property arrival follows the same sequence. Idle uses a frozen readout so these checks
+have no fallback-time dependency, including two intervening zero-budget passes that must
+not advance the deferral. A separate unit test injects the fallback's stamp and readout.
 
 For children the host had to map, top-level activation and logical focus are independent under
 [XEmbed section 5.2](https://specifications.freedesktop.org/xembed/latest-single/).
