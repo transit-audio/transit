@@ -60,6 +60,34 @@ Swipe comping (picking a range from one take and the next range from another, wi
 renaming or coloring takes and auditioning a lane are not in this version. Logic's Take Folder and
 Live's Take Lanes work the same way for everything above.
 
+## Bounce in Place
+
+Choose **Track > Bounce in Place** (Commit, **Alt+Shift+C**) to print the focused track through
+its inserts, before its fader. The print starts at the session start and ends two seconds after
+the last clip on the active playlist. The source's clips and take stacks are always preserved.
+
+- **Destination:** **New track** creates **<name> bounce** directly under the source and copies its
+  volume, output and sends. **Existing track** adds the print to the active playlist of a visible,
+  unfrozen audio track other than the source. It overwrites material inside the printed range,
+  preserving material outside it, just like pasting over clips in Slip mode.
+- **Source:** **Leave** keeps it unchanged. **Mute** (the default) mutes and deactivates it, stopping
+  its plug-ins while keeping it visible. **Hide** deactivates and hides it. To play a deactivated
+  source again, choose **Track > Make Active**, or **Make Active** in the track's header menu,
+  and unmute it if needed. The mixer strip's menu offers the same toggle. Inactive tracks have
+  dimmed names and an **inactive** tag in both views.
+
+**Enter** bounces; **Esc** cancels. Choices are remembered for the current session. The destination
+is focused after the bounce; one Undo restores the whole operation.
+
+**Track > Show Hidden Tracks…** lists hidden tracks with **Show** beside each and **Show All**.
+Showing restores visibility, including access to the takes, without changing mute or inactive
+settings. The entry is disabled when no tracks are hidden.
+
+The control channel offers `track.bounce` (alias `track.commit`) with
+`{tracks?, destination?: "new" | <track id>, source?: "leave" | "mute" | "hide"}`; defaults are
+`"new"` and `"mute"`. `track.show_hidden {tracks?}` shows the given tracks, or all hidden tracks
+when omitted. `track.hide {tracks, hidden: false}` also shows them.
+
 ## Sampling what the computer plays
 
 To sample a browser video or another app, record it as you would a microphone. In
