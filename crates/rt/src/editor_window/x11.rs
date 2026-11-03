@@ -45,6 +45,8 @@ use x11rb::wrapper::ConnectionExt as _;
 
 #[path = "x11_surface.rs"]
 mod surface;
+#[path = "x11_xembed.rs"]
+mod xembed;
 
 x11rb::atom_manager! {
     Atoms: AtomsCookie {
@@ -60,6 +62,8 @@ x11rb::atom_manager! {
         _NET_WM_STATE_SKIP_PAGER,
         _NET_WM_USER_TIME,
         _NET_ACTIVE_WINDOW,
+        _XEMBED,
+        _XEMBED_INFO,
     }
 }
 
@@ -82,6 +86,7 @@ struct Conn {
 struct Frame {
     id: Window,
     content: Window,
+    focus_proxy: Window,
     cell: Option<Arc<HeaderCell>>,
     /// The plug-in content's size in pixels (what the plug-in reported or its window measures).
     size: Cell<(i32, i32)>,
@@ -109,6 +114,7 @@ struct Frame {
     /// The tool style (no taskbar entry) is applied.
     tool: Cell<bool>,
     surface: RefCell<Option<surface::Probe>>,
+    xembed: RefCell<xembed::State>,
 }
 
 thread_local! {
@@ -223,6 +229,7 @@ fn set_content(c: &Conn, f: &Frame, w: i32, h: i32) {
     let _ = hints.set_normal_hints(&c.c, f.id);
     let _ = c.c.configure_window(f.id, &ConfigureWindowAux::new().width(dim(cw)).height(dim(ch)));
     let _ = c.c.configure_window(f.content, &ConfigureWindowAux::new().x(0).y(0).width(dim(cw)).height(dim(ch)));
+    xembed::resize(c, f);
     // The plug-in may read its parent's size as soon as this returns (after `resizeView`).
     settle(c);
 }
@@ -283,6 +290,7 @@ fn show(c: &Conn, f: &Frame, activate: bool) {
 }
 
 fn hide(c: &Conn, f: &Frame) {
+    xembed::hide(c, f);
     f.minimized.set(false);
     if f.requested.replace(false) {
         f.own_unmaps.set(f.own_unmaps.get().saturating_add(1));
@@ -310,16 +318,25 @@ impl EditorWindow {
         let fail = |e: &dyn std::fmt::Display| format!("cannot create the editor window: {e}");
         let id = c.c.generate_id().map_err(|e| fail(&e))?;
         let content = c.c.generate_id().map_err(|e| fail(&e))?;
+        let focus_proxy = c.c.generate_id().map_err(|e| fail(&e))?;
         let (cw, ch) = client_size(w as i32, h as i32, 0);
         let frame_aux = CreateWindowAux::new().background_pixel(c.black).event_mask(EventMask::STRUCTURE_NOTIFY | EventMask::FOCUS_CHANGE);
         // A top-level window (the root is its parent) with no owner and no transient-for link
         // (ADR 0018 section 7), created unmapped.
         c.c.create_window(0, id, c.root, 0, 0, px(cw), px(ch), 0, WindowClass::INPUT_OUTPUT, 0, &frame_aux).map_err(|e| fail(&e))?;
-        let content_aux = CreateWindowAux::new().background_pixel(c.black).event_mask(EventMask::SUBSTRUCTURE_NOTIFY);
+        let content_aux = CreateWindowAux::new().background_pixel(c.black).event_mask(EventMask::SUBSTRUCTURE_NOTIFY | EventMask::STRUCTURE_NOTIFY);
         if let Err(e) = c.c.create_window(0, content, id, 0, 0, px(cw), px(ch), 0, WindowClass::INPUT_OUTPUT, 0, &content_aux) {
             let _ = c.c.destroy_window(id);
             return Err(fail(&e));
         }
+        // XEmbed section 3.2: a mapped, invisible sibling, never an ancestor of the plug.
+        // Otherwise X11 routes keys straight to a foreign descendant under the pointer.
+        let proxy_aux = CreateWindowAux::new().event_mask(EventMask::KEY_PRESS | EventMask::KEY_RELEASE);
+        if let Err(e) = c.c.create_window(0, focus_proxy, id, -1, -1, 1, 1, 0, WindowClass::INPUT_ONLY, 0, &proxy_aux) {
+            let _ = c.c.destroy_window(id);
+            return Err(fail(&e));
+        }
+        let _ = c.c.map_window(focus_proxy);
         let _ = c.c.map_window(content);
         let atoms = &c.atoms;
         let _ = c.c.change_property32(PropMode::REPLACE, id, atoms.WM_PROTOCOLS, AtomEnum::ATOM, &[atoms.WM_DELETE_WINDOW]);
@@ -334,6 +351,7 @@ impl EditorWindow {
         let frame = Rc::new(Frame {
             id,
             content,
+            focus_proxy,
             cell: header,
             size: Cell::new((cw, ch)),
             resized: Cell::new(None),
@@ -349,6 +367,7 @@ impl EditorWindow {
             child: Cell::new(None),
             tool: Cell::new(false),
             surface: RefCell::new(None),
+            xembed: RefCell::new(xembed::State::default()),
         });
         set_title(&c, &frame, shown.as_deref().unwrap_or(title));
         // Editors that follow the main window (issue #173) have no taskbar entry.
@@ -515,6 +534,8 @@ pub(crate) fn pump(max: usize) -> usize {
 
 fn handle(c: &Conn, ev: Event) {
     match ev {
+        Event::ClientMessage(e) if e.type_ == c.atoms._XEMBED => xembed::request_focus(c, &e),
+        Event::KeyPress(e) | Event::KeyRelease(e) => xembed::key(c, e),
         Event::ClientMessage(e) if e.format == 32 && e.type_ == c.atoms.WM_PROTOCOLS && e.data.as_data32()[0] == c.atoms.WM_DELETE_WINDOW => {
             // Closing only hides: the editor link notices in `idle` and tears the view down first.
             if let Some(f) = frame_of(e.window) {
@@ -548,6 +569,9 @@ fn handle(c: &Conn, ev: Event) {
                 // out in it; the plug-in's size is unchanged.
                 let _ =
                     c.c.configure_window(f.content, &ConfigureWindowAux::new().width(u32::from(e.width.max(1))).height(u32::from(e.height.max(1))));
+                let _ = c.c.flush();
+            } else if let Some(f) = frame_of_content(e.window) {
+                xembed::resize(c, &f);
             } else if let Some(f) = frame_of_content(e.event)
                 && f.child.get().is_some_and(|(w, _)| w == e.window)
             {
@@ -557,35 +581,48 @@ fn handle(c: &Conn, ev: Event) {
         Event::CreateNotify(e) => {
             if let Some(f) = frame_of_content(e.parent) {
                 f.child.set(Some((e.window, (i32::from(e.width), i32::from(e.height)))));
+                xembed::detect(c, &f, e.window);
             }
         }
         Event::ReparentNotify(e) => {
-            if let Some(f) = frame_of_content(e.event) {
+            if let Some(f) = frame_of_content(e.event).or_else(|| frame_of_content(e.parent)) {
                 if e.parent == f.content {
                     // A plug-in that made its window elsewhere and moved it in: measure it once.
                     let size = c.c.get_geometry(e.window).ok().and_then(|g| g.reply().ok()).map(|g| (i32::from(g.width), i32::from(g.height)));
                     f.child.set(size.map(|s| (e.window, s)));
-                } else if f.child.get().is_some_and(|(w, _)| w == e.window) {
-                    f.child.set(None);
+                    xembed::detect(c, &f, e.window);
+                } else {
+                    xembed::forget(c, &f, e.window);
+                    if f.child.get().is_some_and(|(w, _)| w == e.window) {
+                        f.child.set(None);
+                    }
                 }
             }
         }
         Event::DestroyNotify(e) => {
-            if let Some(f) = frame_of_content(e.event)
-                && f.child.get().is_some_and(|(w, _)| w == e.window)
-            {
-                f.child.set(None);
+            if let Some(f) = frame_of_content(e.event) {
+                xembed::forget(c, &f, e.window);
+                if f.child.get().is_some_and(|(w, _)| w == e.window) {
+                    f.child.set(None);
+                }
             }
         }
         Event::FocusIn(e) if e.mode == NotifyMode::NORMAL && e.detail != NotifyDetail::INFERIOR => {
             // The window manager focused the frame: the keyboard goes to the plug-in's window.
             if let Some(f) = frame_of(e.event)
+                && !xembed::activate(c, &f, true)
                 && let Some((child, _)) = f.child.get()
             {
                 let _ = c.c.set_input_focus(InputFocus::PARENT, child, x11rb::CURRENT_TIME);
                 let _ = c.c.flush();
             }
         }
+        Event::FocusOut(e) if e.mode == NotifyMode::NORMAL && e.detail != NotifyDetail::INFERIOR => {
+            if let Some(f) = frame_of(e.event) {
+                xembed::activate(c, &f, false);
+            }
+        }
+        Event::PropertyNotify(e) if e.atom == c.atoms._XEMBED_INFO => xembed::property(c, e.window),
         Event::PropertyNotify(e) if e.window == c.root && e.atom == u32::from(AtomEnum::RESOURCE_MANAGER) => {
             if let Some(dpi) = read_dpi(&c.c, c.root)
                 && c.dpi.replace(dpi) != dpi

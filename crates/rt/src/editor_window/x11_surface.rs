@@ -136,7 +136,11 @@ fn snapshot(c: &Conn, f: &Frame) -> Snapshot {
     let mut no_mapped_child = Some(true);
     for child in tree.children {
         if let Some((description, mapped)) = describe(c, child) {
-            let _ = write!(text, " child=[{description} _XEMBED_INFO={}]", xembed_info(c, child));
+            let xembed = f.xembed.borrow().plugs.iter().find(|p| p.window == child).map_or_else(
+                || "none".into(),
+                |p| format!("[{}, {}, mapped_by_host={}, notify_sent={}]", p.version, p.flags, p.mapped_by_host, p.notify_sent),
+            );
+            let _ = write!(text, " child=[{description} _XEMBED_INFO={} xembed={xembed}]", xembed_info(c, child));
             if mapped {
                 no_mapped_child = Some(false);
             }
