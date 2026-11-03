@@ -108,10 +108,14 @@ counts stop; no evidence currently ties it to this instance.
 Under Xvfb, `editor_x11` covers mapping and one handshake for a plug that never maps itself,
 flag clearing/remapping, content resize, absent/malformed/late properties, reparenting, teardown,
 activation, click focus requests and key forwarding. The CLAP `xembed_plug` fixture makes a real
-child and records the received ClientMessage; its host test reads viewability, handshake and size,
-then clears the flag and checks UNMAPPED. These tests use bounded host idle passes with explicit
-server readouts, not elapsed-time assertions. On the pre-fix host the first VIEWABLE assertion
-fails because the child remains UNMAPPED. Runtime execution is required in the Linux merge/CI
+child and records the received ClientMessage; its host test reads the child's map state, handshake
+and size, then clears the flag and checks UNMAPPED. These tests use bounded host idle passes with
+explicit server readouts, not elapsed-time assertions. On the pre-fix host the first mapped
+assertion fails because the child remains UNMAPPED. The CLAP test runs on the ambient display
+(WSLg in the WSL gate), where a window manager maps the editor's top-level on its own schedule, so
+it asserts mapped (VIEWABLE or UNVIEWABLE), not VIEWABLE. `editor_x11` models that window manager
+with a client holding SubstructureRedirect on the root: the host maps the child while the frame's
+MapRequest is held (UNVIEWABLE), and it turns VIEWABLE once the frame is mapped. Runtime execution is required in the Linux merge/CI
 job; Windows cross-target checking alone is not runtime evidence.
 
 The self-mapped regression child advertises `_XEMBED_INFO = {0, 1}` and maps itself at 123x45
