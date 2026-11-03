@@ -1,10 +1,13 @@
 # Linux editor opens but has no visible content (#289)
 
-An accepted CLAP `show` or VST3 `attached` proves the call succeeded, not that a child is mapped
-or pixels were painted. Aetheriae by Morphor reports successful opens in both formats on the
-tester's v0.6.1 system. Whether that means an empty frame or no visible frame is still unconfirmed.
+Resolved in v0.6.2: the tester confirmed the editor shows (#289 closed). The cause was an unmapped
+XEmbed child, and this page stays as the diagnostic checklist for the next blank-editor report.
 
-The leading candidate is an unmapped XEmbed child. The [vendor's Linux download page](https://morphor.io/plugins/aetheriae/)
+An accepted CLAP `show` or VST3 `attached` proves the call succeeded, not that a child is mapped
+or pixels were painted. Aetheriae by Morphor reported successful opens in both formats on the
+tester's v0.6.1 system while the window stayed blank.
+
+The cause was an unmapped XEmbed child. The [vendor's Linux download page](https://morphor.io/plugins/aetheriae/)
 lists GTK 3 and WebKitGTK 4.1. [GTK's plug implementation](https://raw.githubusercontent.com/GNOME/gtk/gtk-3-24/gtk/gtkplug.c)
 sets `_XEMBED_INFO`'s mapped flag from `gtk_plug_map`; the embedder must map that window.
 Transit now recognizes valid `_XEMBED_INFO` on direct children, including properties set after
