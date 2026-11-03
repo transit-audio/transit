@@ -8,10 +8,19 @@ The leading candidate is an unmapped XEmbed child. The [vendor's Linux download 
 lists GTK 3 and WebKitGTK 4.1. [GTK's plug implementation](https://raw.githubusercontent.com/GNOME/gtk/gtk-3-24/gtk/gtkplug.c)
 sets `_XEMBED_INFO`'s mapped flag from `gtk_plug_map`; the embedder must map that window.
 Transit now recognizes valid `_XEMBED_INFO` on direct children, including properties set after
-creation and windows reparented into the content window. It honors the mapped flag, mirrors
-content size, and sends `XEMBED_EMBEDDED_NOTIFY` with protocol version 0. Non-XEmbed children
-still control their own mapping. Activation, logical focus and keyboard delivery are supported;
+creation and windows reparented into the content window. It sends one `XEMBED_EMBEDDED_NOTIFY`
+with protocol version 0. Only children the host had to map enter the XEmbed path: the host
+honors their mapped flag, mirrors content size, and supports activation, logical focus and key
+forwarding. Editors that map their own window keep direct keyboard focus, their chosen size
+and control of their mapping even when they advertise `_XEMBED_INFO` (as JUCE and Qt do).
+They receive only EMBEDDED_NOTIFY, with no activation or logical focus messages. Non-XEmbed
+children still control their own mapping. For host-mapped children,
 accelerators, tab traversal, modality and drag-and-drop remain outside this subset (K92).
+Ownership is based on actual mapping during this embedding lifetime, not toolkit identity.
+If a previously self-mapped child later becomes UNMAPPED with bit 0 set and the host maps it
+before the toolkit does, it enters the host-managed XEmbed path from then on. Preserving a
+self-mapped classification across that later show cycle is a possible K92 compatibility
+follow-up; the current rule deliberately follows which client performed the map.
 The exact toolkit path in the tester's binary remains unconfirmed, and mapping a window does
 not prove that GTK/WebKit painted it. Visual selection, timers and floating fallback are unchanged.
 
@@ -26,7 +35,9 @@ The lines include the frame and content IDs, sizes, depth, visual ID/class, colo
 root coordinates, screen size, parked/shown state, session hints, and every immediate child's
 attributes and `_XEMBED_INFO`, plus `xembed=[version, flags, mapped_by_host=true/false,
 notify_sent=true/false]` (or `xembed=none` when no valid client is tracked). `mapped_by_host`
-records a successful host map request during this embedding lifetime, not current visibility;
+records a successful host map of an UNMAPPED child with bit 0 set during this embedding
+lifetime, not current visibility. A final map-state check and map under a short X server grab
+exclude a child that maps itself before the host's map;
 `notify_sent` records a server-accepted handshake, not toolkit receipt. They also include this instance's delivered timer callbacks since
 open, its current timer periods/registrations (VST3: IRunLoop timers and event handlers), and
 events dispatched on transit's host X11 connection since open. The latter is **not** the count on
@@ -85,7 +96,14 @@ server readouts, not elapsed-time assertions. On the pre-fix host the first VIEW
 fails because the child remains UNMAPPED. Runtime execution is required in the Linux merge/CI
 job; Windows cross-target checking alone is not runtime evidence.
 
-Top-level activation and logical focus are independent under
+The self-mapped regression child advertises `_XEMBED_INFO = {0, 1}` and maps itself at 123x45
+inside 300x200 content. Frame activation and reactivation must leave X focus on the child,
+its size unchanged, and deliver only one EMBEDDED_NOTIFY. Content resizing, flag clearing and
+REQUEST_FOCUS must not opt it into host management. On 28f0d516, the focus assertion fails
+because focus moves to the proxy; independently, its size becomes 300x200. The host-mapped
+key test also checks that forwarded child and coordinate fields are zero.
+
+For children the host had to map, top-level activation and logical focus are independent under
 [XEmbed section 5.2](https://specifications.freedesktop.org/xembed/latest-single/).
 Deactivation sends WINDOW_DEACTIVATE; logical focus survives so returning restores the same
 field. Unmapping, hiding, or leaving the embedding site sends FOCUS_OUT. Toolkit clicks use
