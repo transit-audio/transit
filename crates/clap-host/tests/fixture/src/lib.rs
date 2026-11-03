@@ -49,6 +49,8 @@ use clap_sys::version::CLAP_VERSION;
 use std::ffi::{CStr, c_char, c_void};
 
 mod editor_modes;
+#[cfg(target_os = "linux")]
+mod xembed_plug;
 use editor_modes::{Mode, NEXT_NO_GUI};
 
 struct Features<const N: usize>([*const c_char; N]);
@@ -206,6 +208,8 @@ struct Fx {
     gui_mode: Mode,
     gui_painted: bool,
     gui_timer: Option<clap_id>,
+    #[cfg(target_os = "linux")]
+    xembed_plug: Option<xembed_plug::Plug>,
 }
 
 unsafe fn fx<'a>(p: *const clap_plugin) -> &'a mut Fx {
@@ -814,6 +818,12 @@ unsafe extern "C" fn state_load(p: *const clap_plugin, stream: *const clap_istre
     }
     // And its GUI modes (issue #68): embedded too, embedded that fails, and a query.
     if let Some(cmd) = std::str::from_utf8(&bytes[..got]).ok().and_then(|s| s.strip_prefix("CMD:")) {
+        #[cfg(target_os = "linux")]
+        if let Some(plug) = &mut f.xembed_plug
+            && let Some(result) = plug.command(cmd)
+        {
+            return result;
+        }
         if cmd == "gui-painted" {
             return f.gui_painted;
         }
@@ -896,19 +906,33 @@ unsafe extern "C" fn gui_create(p: *const clap_plugin, _api: *const c_char, floa
     true
 }
 
-/// Embedded GUIs (issue #68 modes): any parent is taken; the "GUI" has no real window.
+/// Embedded GUI modes; `xembed_plug` creates a real, initially unmapped Linux child.
 unsafe extern "C" fn gui_set_parent(p: *const clap_plugin, window: *const clap_window) -> bool {
+    // SAFETY: the host passes this live fixture instance on its main thread.
     let f = unsafe { fx(p) };
     assert!(f.gui_created && !f.gui_floating && !window.is_null(), "set_parent");
+    #[cfg(target_os = "linux")]
+    if f.gui_mode == Mode::XembedPlug {
+        // SAFETY: set_parent supplies a valid clap_window for this call. The Linux host chose
+        // CLAP_WINDOW_API_X11, whose union member is x11; the pointer was checked above.
+        let parent = unsafe { (*window).specific.x11 };
+        f.xembed_plug = xembed_plug::Plug::new(parent);
+        return f.xembed_plug.is_some();
+    }
     f.gui_mode != Mode::SetParentFalse
 }
 
 unsafe extern "C" fn gui_destroy(p: *const clap_plugin) {
+    // SAFETY: the host passes this live fixture instance on its main thread.
     let f = unsafe { fx(p) };
     assert!(f.gui_created, "destroy without create");
     f.gui_created = false;
     f.gui_visible = false;
     editor_modes::unregister_timer(f);
+    #[cfg(target_os = "linux")]
+    if let Some(plug) = f.xembed_plug.take() {
+        plug.close();
+    }
 }
 
 unsafe extern "C" fn gui_set_scale(p: *const clap_plugin, scale: f64) -> bool {
@@ -1104,6 +1128,8 @@ unsafe extern "C" fn factory_create(_f: *const clap_plugin_factory, host: *const
         gui_mode: if NEXT_NO_GUI.replace(false) { Mode::NoGui } else { Mode::Normal },
         gui_painted: false,
         gui_timer: None,
+        #[cfg(target_os = "linux")]
+        xembed_plug: None,
     });
     let raw = Box::into_raw(b);
     unsafe {

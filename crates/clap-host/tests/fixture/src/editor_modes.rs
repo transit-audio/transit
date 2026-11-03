@@ -18,6 +18,7 @@ pub enum Mode {
     ShowFalse,
     ZeroSize,
     TimerRequired,
+    XembedPlug,
 }
 
 impl Mode {
@@ -31,6 +32,7 @@ impl Mode {
             "show_false" => Self::ShowFalse,
             "zero_size" => Self::ZeroSize,
             "timer_required" => Self::TimerRequired,
+            "xembed_plug" => Self::XembedPlug,
             _ => return None,
         })
     }

@@ -66,6 +66,9 @@ mod linux {
             ("park_and_unpark_follow_the_main_window", park_and_unpark_follow_the_main_window),
             ("a_stuck_threads_windows_hide_without_it", a_stuck_threads_windows_hide_without_it),
             ("a_dpi_change_reaches_the_window", a_dpi_change_reaches_the_window),
+            ("xembed_maps_notifies_unmaps_and_resizes", xembed_maps_notifies_unmaps_and_resizes),
+            ("xembed_requires_valid_info_and_tracks_reparenting", xembed_requires_valid_info_and_tracks_reparenting),
+            ("xembed_focus_and_keys_are_symmetric", xembed_focus_and_keys_are_symmetric),
         ];
         let filter: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
         let mut ran = 0;
@@ -116,6 +119,8 @@ mod linux {
     fn observer() -> RustConnection {
         x11rb::connect(None).expect("the X server").0
     }
+
+    include!("editor_x11/xembed.rs");
 
     fn id(raw: *mut std::ffi::c_void) -> Window {
         Window::try_from(raw.addr()).unwrap()

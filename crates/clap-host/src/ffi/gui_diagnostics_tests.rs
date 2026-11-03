@@ -119,3 +119,37 @@ fn timer_required_paints_only_after_the_host_delivers_its_registered_timer() {
     inst.link().close();
     assert_eq!(transit_rt::run_loop::counts(), before);
 }
+
+#[cfg(target_os = "linux")]
+#[test]
+fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
+    if !window_available() {
+        return;
+    }
+    let q = transit_rt::gui_thread::MessageQueue::attach();
+    let inst = gain("xembed_plug");
+    inst.link().open("XEmbed Fixture").unwrap();
+    // Explicit readouts on the fixture's separate X connection. Each load_state round-trips
+    // that connection and records ClientMessages. 64 bounded idle passes allow the finite
+    // create/property/notify exchanges to drain, without asserting elapsed time or timers.
+    for _ in 0..64 {
+        q.dispatch(256);
+        inst.link().idle();
+        if inst.load_state(b"CMD:xembed-viewable") && inst.load_state(b"CMD:xembed-notified") {
+            break;
+        }
+    }
+    assert!(inst.load_state(b"CMD:xembed-viewable"), "the fixture never maps itself; the host must honor XEMBED_MAPPED");
+    assert!(inst.load_state(b"CMD:xembed-notified"), "the actual EMBEDDED_NOTIFY has the content ID and negotiated version 0");
+    assert!(inst.load_state(b"CMD:xembed-sized"), "the child's initial 123x45 size follows the resized content");
+    assert!(inst.load_state(b"CMD:xembed-unmap"));
+    for _ in 0..64 {
+        q.dispatch(256);
+        inst.link().idle();
+        if inst.load_state(b"CMD:xembed-unmapped") {
+            break;
+        }
+    }
+    assert!(inst.load_state(b"CMD:xembed-unmapped"));
+    inst.link().close();
+}
