@@ -44,6 +44,7 @@ transit changes a default only after a measurement on the reference hardware. Th
 - Every defect that gets past a gate becomes an [escape record](docs/escapes) (26 so far) naming the gate that now catches it.
 - Every design change is an [ADR](docs/adr) that cites its evidence, for example [ADR 0029](docs/adr/0029-strip-job-slots.md).
 - Every merge gets a [refutation review](docs/contributing/evidence/refutation-review.md) that tries to break it.
+- Design rounds come before code: the [judging-first record](docs/contributing/evidence/judging-first.md) counts what they bought.
 - What we know is broken is public: the [known issues](docs/known-issues/README.md).
 
 Send us a measurement with the [measurement issue template](https://github.com/transit-audio/transit/issues/new?template=measurement.md), and it can decide something too.

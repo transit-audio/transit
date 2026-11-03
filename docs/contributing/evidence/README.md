@@ -9,6 +9,7 @@ a new gate only fixes one instance.
 |---|---|
 | [`gates.md`](gates.md) | The commands every change runs, plus the crate-specific gates and the target-directory rule. |
 | [`refutation-review.md`](refutation-review.md) | A second reviewer tries to break the change; verdict shape; the merge bar. |
+| [`judging-first.md`](judging-first.md) | Whether judging a design on paper first reduces review and fix-up rounds: three slices, the counts, the decision. |
 | [`escape-record.md`](escape-record.md) | Recording an escaped defect and the gate it produced. |
 | [`tests-as-evidence.md`](tests-as-evidence.md) | Writing a test that proves something. |
 | [`hardware-and-ci.md`](hardware-and-ci.md) | What counts as hardware evidence; CI gates every pull request and push to `main`. |
