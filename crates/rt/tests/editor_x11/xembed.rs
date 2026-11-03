@@ -307,3 +307,40 @@ fn xembed_juce_deferred_flush_keeps_direct_focus_and_size() {
     win.close();
     q.dispatch(256);
 }
+
+// A window manager maps the editor's top-level on its own schedule; WSLg's XWM can take seconds
+// after an idle wake (#289). Model it with a client that holds SubstructureRedirect on the root
+// and answers the frame's MapRequest only when told. The host maps the child regardless: it is
+// UNVIEWABLE until the frame is mapped, then VIEWABLE without further host action.
+fn xembed_maps_before_the_window_manager_maps_the_frame() {
+    use x11rb::protocol::xproto::ChangeWindowAttributesAux;
+    let wm = observer();
+    let root = wm.setup().roots[0].root;
+    let redirect = ChangeWindowAttributesAux::new().event_mask(EventMask::SUBSTRUCTURE_REDIRECT);
+    if wm.change_window_attributes(root, &redirect).unwrap().check().is_err() {
+        println!("editor_x11: xembed_maps_before_the_window_manager_maps_the_frame: skipped: a window manager owns the root");
+        return;
+    }
+    let q = MessageQueue::attach();
+    let win = EditorWindow::new("XEmbed before the WM", 300.0, 200.0, None).unwrap();
+    let frame = id(win.raw());
+    let content = id(win.parent());
+    let mut plug = Plug::new(content);
+    plug.flags(1);
+    win.raise();
+    xembed_passes(&q, &win, &mut plug);
+    assert_eq!(wm.get_window_attributes(frame).unwrap().reply().unwrap().map_state, MapState::UNMAPPED, "the WM holds the frame's MapRequest");
+    assert_eq!(plug.state(), MapState::UNVIEWABLE, "the host maps the child before the frame is mapped");
+    assert!(win.surface_readout().unwrap().contains("mapped_by_host=true"));
+    assert_eq!(plug.messages.iter().filter(|m| m[1] == 0).copied().collect::<Vec<_>>(), vec![[0, 0, 0, content, 0]]);
+    assert_eq!(geometry(&plug.c, plug.window), geometry(&plug.c, content));
+    // The redirecting client's own MapWindow is not redirected: the WM maps the frame now.
+    wm.map_window(frame).unwrap();
+    wm.sync().unwrap();
+    xembed_passes(&q, &win, &mut plug);
+    assert_eq!(plug.state(), MapState::VIEWABLE);
+    assert_eq!(plug.messages.iter().filter(|m| m[1] == 0).count(), 1);
+    drop(wm); // Releases the redirect before any later scenario.
+    win.close();
+    q.dispatch(256);
+}

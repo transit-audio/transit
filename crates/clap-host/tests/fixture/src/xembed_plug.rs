@@ -39,7 +39,9 @@ impl Plug {
             }
         }
         Some(match command {
-            "xembed-viewable" => self.c.get_window_attributes(self.window).unwrap().reply().unwrap().map_state == MapState::VIEWABLE,
+            // Mapped by the host: VIEWABLE, or UNVIEWABLE while a window manager has not yet
+            // mapped the editor's top-level (a compositor's XWM maps it asynchronously).
+            "xembed-mapped" => self.c.get_window_attributes(self.window).unwrap().reply().unwrap().map_state != MapState::UNMAPPED,
             "xembed-unmapped" => self.c.get_window_attributes(self.window).unwrap().reply().unwrap().map_state == MapState::UNMAPPED,
             "xembed-notified" => self.messages.iter().filter(|m| m[1] == 0).copied().collect::<Vec<_>>() == vec![[0, 0, 0, self.parent, 0]],
             "xembed-sized" => {

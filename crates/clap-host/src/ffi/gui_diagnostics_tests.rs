@@ -135,11 +135,13 @@ fn xembed_plug_is_mapped_notified_resized_and_unmapped_by_the_host() {
     for _ in 0..64 {
         q.dispatch(256);
         inst.link().idle();
-        if inst.load_state(b"CMD:xembed-viewable") && inst.load_state(b"CMD:xembed-notified") {
+        if inst.load_state(b"CMD:xembed-mapped") && inst.load_state(b"CMD:xembed-notified") {
             break;
         }
     }
-    assert!(inst.load_state(b"CMD:xembed-viewable"), "the fixture never maps itself; the host must honor XEMBED_MAPPED");
+    // Mapped, not VIEWABLE: on the ambient display a window manager maps the top-level on its
+    // own schedule (WSLg's XWM after an idle wake, #289), outside these bounded passes.
+    assert!(inst.load_state(b"CMD:xembed-mapped"), "the fixture never maps itself; the host must honor XEMBED_MAPPED");
     assert!(inst.load_state(b"CMD:xembed-notified"), "the actual EMBEDDED_NOTIFY has the content ID and negotiated version 0");
     assert!(inst.load_state(b"CMD:xembed-sized"), "the child's initial 123x45 size follows the resized content");
     assert!(inst.load_state(b"CMD:xembed-unmap"));

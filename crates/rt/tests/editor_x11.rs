@@ -71,6 +71,7 @@ mod linux {
             ("xembed_focus_and_keys_are_symmetric", xembed_focus_and_keys_are_symmetric),
             ("xembed_self_mapped_child_keeps_direct_focus_and_size", xembed_self_mapped_child_keeps_direct_focus_and_size),
             ("xembed_juce_deferred_flush_keeps_direct_focus_and_size", xembed_juce_deferred_flush_keeps_direct_focus_and_size),
+            ("xembed_maps_before_the_window_manager_maps_the_frame", xembed_maps_before_the_window_manager_maps_the_frame),
         ];
         let filter: Vec<String> = std::env::args().skip(1).filter(|a| !a.starts_with('-')).collect();
         let mut ran = 0;
