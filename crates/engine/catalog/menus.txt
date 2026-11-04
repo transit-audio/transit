@@ -141,9 +141,6 @@ View > Mix Window Views > Track Color
 View > Mix Window Views > Comments
 View > Mix Window Views > All
 View > Mix Window Views > Minimal
-View > Track Height > Increase All
-View > Track Height > Decrease All
-View > Track Height > Reset Track Heights
 View > Narrow Mix
 View > Edit Window Views > Comments
 View > Edit Window Views > Mic Preamps

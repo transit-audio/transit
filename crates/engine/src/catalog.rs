@@ -12,9 +12,6 @@ pub const MENUS: &str = include_str!("../catalog/menus.txt");
 
 /// Catalog path → command id, for entries whose label or menu differs from ours.
 pub const ALIASES: &[(&str, &str)] = &[
-    ("View > Track Height > Increase All", "track.height_zoom"),
-    ("View > Track Height > Decrease All", "track.height_zoom"),
-    ("View > Track Height > Reset Track Heights", "track.height_reset"),
     ("File > Open > Session...", "session.open"),
     ("Edit > Can't Undo", "edit.undo"),
     ("Edit > Can't Redo", "edit.redo"),
