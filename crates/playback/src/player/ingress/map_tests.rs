@@ -48,9 +48,18 @@ fn build(routed: bool) -> Rig {
     } else {
         Vec::new()
     };
-    send.send(Update::Input(Box::new(Input { id: PORT, mon: Mon::default(), guard: storm::Guard::default(), live: false, consumer, routes })))
-        .ok()
-        .unwrap();
+    send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
+        id: PORT,
+        mon: Mon::default(),
+        guard: storm::Guard::default(),
+        live: false,
+        consumer,
+        routes,
+    })))
+    .ok()
+    .unwrap();
     worker.step();
     let port = fake.input_port(&key).unwrap();
     Rig { worker, send, events, port, wanted: Wanted::new(), fake, key, _handle: handle, _keep: Box::new((registry, sources, control, audio, plans)) }
@@ -247,6 +256,19 @@ fn learn_forwards_exactly_the_next_candidate_once() {
     assert!(matches!(rig.drain()[..], [MapEvent::Candidate { .. }]));
 }
 
+#[test]
+fn ordinary_learn_keeps_the_candidate_note_for_routing_but_transport_learn_consumes_it() {
+    for transport in [false, true] {
+        let mut rig = build(true);
+        rig.worker.shared.learn_transport.store(transport, Ordering::Release);
+        rig.worker.shared.learn.store(true, Ordering::Release);
+        rig.port.deliver_at(0, 0, &[0x90, 60, 100, 0x80, 60, 0]);
+        rig.worker.step();
+        assert_eq!(rig.drain(), [MapEvent::Candidate { port: PORT, channel: 0, kind: SourceKind::Note, number: 60 }]);
+        assert_eq!(rig.admitted(), if transport { 0 } else { 2 }, "ordinary learning must preserve a played/recorded note");
+    }
+}
+
 /// #160: Main arms the learn, the learn opens the port, and the port's first message lands before
 /// the worker steps once. The worker then sees the attach, the armed learn and the message in one
 /// step; the first-step skip of "what was already pending" must not swallow a port it never had
@@ -262,6 +284,8 @@ fn a_port_the_armed_learn_opens_keeps_its_first_message_when_the_worker_sees_bot
     let (_pads_handle, consumer) = rig.fake.io().open_input(&pads, InputConfig::default()).unwrap();
     rig.send
         .send(Update::Input(Box::new(Input {
+            buttons: Vec::new(),
+            buttons_enabled: true,
             id: PORT + 1,
             mon: Mon::default(),
             guard: storm::Guard::default(),
@@ -341,8 +365,8 @@ fn a_mapping_removed_while_its_note_is_held_still_consumes_that_note_off() {
 
 #[test]
 fn a_mapped_message_arriving_between_the_scan_and_the_pop_is_still_matched() {
-    // S1: on a routed port the match happens where the event is popped. CC 74 is unmapped and
-    // routed; while the worker handles it, CC 7 (mapped) arrives, after the scan at the step's start.
+    // CC 74 is unmapped and routed; CC 7 arrives after this step's completed-publication scan.
+    // It must remain queued until the next scan considers its Learn/transport disposition.
     let mut rig = build(true);
     rig.map(vec![spec(SourceKind::Cc, 7, MapMode::Jump, false)]);
     let late = rig.fake.input_port(&rig.key).unwrap();
@@ -353,6 +377,8 @@ fn a_mapped_message_arriving_between_the_scan_and_the_pop_is_still_matched() {
         }
     }));
     rig.port.deliver(0, &[0xB0, 74, 1]);
+    rig.worker.step();
+    assert!(rig.moves().is_empty(), "a message newer than the scan stays queued");
     rig.worker.step();
     assert_eq!(rig.moves(), vec![99.0 / 127.0], "the late message moved the fader");
     assert_eq!(rig.admitted(), 1, "only CC 74 reached the track");
@@ -368,6 +394,8 @@ fn a_thousand_ccs_a_second_on_two_ports_against_a_sixty_hertz_apply_loop_lose_no
     let (_h2, consumer2) = fake2.io().open_input(&key2, InputConfig::default()).unwrap();
     rig.send
         .send(Update::Input(Box::new(Input {
+            buttons: Vec::new(),
+            buttons_enabled: true,
             id: PORT + 1,
             mon: Mon::default(),
             guard: storm::Guard::default(),

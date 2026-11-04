@@ -67,6 +67,7 @@ pub mod midi_out;
 pub use midi_map::{Heard as MapHeard, MapSpec};
 pub mod monitor;
 mod native;
+pub use native::ButtonEvent;
 pub use native::{MutedInput as MutedMidiInput, Status as MidiStatus};
 pub mod sources;
 

@@ -1,6 +1,12 @@
 use super::*;
 
 impl StudioApp {
+    pub(crate) fn midi_stop_pending(&self) -> bool {
+        self.player_requests.stop.is_some()
+    }
+    pub(crate) fn midi_locate_pending(&self, at: Samples) -> bool {
+        self.midi_transport.take_locate == Some(at) || (self.player_requests.locate.is_some() && self.midi_transport.retained == at)
+    }
     pub(crate) fn start_play(&mut self, from: Samples, end: Option<Samples>, looped: Option<Range>) {
         self.clear_clip_latches();
         if self.refuse_for_reopen() {
@@ -43,6 +49,7 @@ impl StudioApp {
     }
 
     pub(super) fn complete_stop(&mut self) {
+        self.midi_transport.retained = self.engine.transport.position;
         if self.recording_active() {
             self.finish_recording();
         }
@@ -123,6 +130,21 @@ impl StudioApp {
     }
 
     pub(crate) fn handle_transport(&mut self, dt: f32) {
+        if let Some(at) = self.midi_transport.take_locate {
+            if self.player_requests.stop.is_some() || self.player_requests.recording.is_some() || self.recording_active() {
+                return;
+            }
+            self.midi_transport.take_locate = None;
+            self.midi_transport.retained = at;
+            self.set_cursor(at, None);
+            self.engine.transport.position = at;
+            self.midi_transport.resume_record_at = Some(at);
+            self.start_recording();
+            self.midi_transport.resume_record_at = None;
+            let mut later = std::mem::take(&mut self.midi_transport.deferred);
+            later.append(&mut self.engine.transport_requests);
+            self.engine.transport_requests = later;
+        }
         self.push_metronome_level();
         // The count-in is over (or was cancelled): the status line says what happens next.
         if let Some(failure) = self.player.as_ref().and_then(Player::take_start_failure)
@@ -140,6 +162,9 @@ impl StudioApp {
         while let Some(r) = reqs.pop_front() {
             match r {
                 TransportRequest::ResetSession => {
+                    self.midi_transport.retained = 0;
+                    self.midi_transport.take_locate = None;
+                    self.midi_transport.deferred.clear();
                     self.restore_pending = true;
                     if let Some(p) = &self.player {
                         if let Some(sequence) = self.player_requests.result(&mut self.status, p.stop()) {
@@ -183,9 +208,17 @@ impl StudioApp {
                         self.play_from_cursor();
                     }
                 }
+                TransportRequest::PlayExact(at) => {
+                    self.midi_transport.retained = at;
+                    self.start_play(at, None, self.wanted_loop());
+                }
                 TransportRequest::Stop => {
                     // Stop during a count-in only cancels it; the cursor stays where it was.
-                    let was_stopped = !self.is_playing() && !self.engine.transport.recording && self.count_in_state().is_none();
+                    let was_stopped = !self.is_playing()
+                        && !self.engine.transport.recording
+                        && self.count_in_state().is_none()
+                        && self.player_requests.play.is_none()
+                        && self.sim_count_in.is_none();
                     self.stop_play();
                     if was_stopped {
                         // First Stop keeps the play-start cursor and finishes the take. A second
@@ -213,6 +246,13 @@ impl StudioApp {
                     }
                 }
                 TransportRequest::Locate(at) => {
+                    self.midi_transport.retained = at;
+                    if self.recording_active() {
+                        self.midi_transport.take_locate = Some(at);
+                        self.stop_play();
+                        self.midi_transport.deferred.extend(reqs);
+                        break;
+                    }
                     // Adapted: a locate command (Return to Zero, `transport.locate`) also moves the cursor.
                     self.set_cursor(at, None);
                     self.locate_playing(at);

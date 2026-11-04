@@ -42,6 +42,7 @@ pub mod timeline_map;
 #[cfg(test)]
 pub(crate) use backend::cpal::OutputCallback;
 pub use devices::{AudioConfig, Backend, LoopbackCalibration};
+pub use player::ButtonEvent;
 pub use player::{
     ActionResult, CountIn, MapMsg, MidiTake, PlayedMidi, PlayedNote, Player, PlayerCommand, PlayerError, PlayerNotice, SlotLoad, StartFailure,
 };
@@ -49,6 +50,7 @@ pub use player::{
 pub use player::{Clock, Deferred, Factory, PluginTestHooks};
 pub use player::{EditorOpened, LoadedIn};
 pub use player::{MapHeard, MapSpec};
+pub use transit_midi_io::TRANSPORT_CAPACITY;
 pub use transit_plugin_host::{GaveUp, LoadPhase, Quarantined, RELOG_EVERY, StuckCall, loading_text, seconds_text};
 
 use std::collections::HashMap;

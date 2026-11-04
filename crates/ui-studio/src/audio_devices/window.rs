@@ -80,16 +80,18 @@ pub enum Section {
     IoPaths,
     /// Hardware inserts and their measured latency.
     Hardware,
+    Midi,
 }
 
 impl Section {
-    pub const ALL: [Section; 3] = [Section::System, Section::IoPaths, Section::Hardware];
+    pub const ALL: [Section; 4] = [Section::System, Section::IoPaths, Section::Hardware, Section::Midi];
 
     pub const fn label(self) -> &'static str {
         match self {
             Section::System => "System",
             Section::IoPaths => "I/O paths",
             Section::Hardware => "Hardware inserts",
+            Section::Midi => "MIDI",
         }
     }
 
@@ -99,6 +101,7 @@ impl Section {
             Section::System => "section_system",
             Section::IoPaths => "section_io",
             Section::Hardware => "section_hardware",
+            Section::Midi => "section_midi",
         }
     }
 
@@ -320,6 +323,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                 ui.with_layout(egui::Layout::top_down(egui::Align::Min), |ui| {
                                     ui.set_width(size.x - SIDEBAR_WIDTH - 32.0);
                                     match section {
+                                        Section::Midi => crate::midi_transport::settings(app, ui),
                                         Section::System => {
                                             egui::Grid::new("audio_devices_grid").num_columns(2).spacing([2.0 * SPACE, SPACE]).show(ui, |ui| {
                                                 let label = |ui: &mut egui::Ui, t: &str| ui.label(egui::RichText::new(t).color(TOKENS.text_dim));

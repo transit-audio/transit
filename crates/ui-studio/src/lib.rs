@@ -54,6 +54,7 @@ mod midi_input;
 pub mod midi_learn;
 pub mod midi_monitor;
 mod midi_output;
+mod midi_transport;
 pub mod mixer;
 pub mod modal_voice_panel;
 pub mod modulator_panel;
@@ -98,173 +99,8 @@ pub use control::ControlRequest;
 /// The most frames `ui.set imports_pace` may stretch a fake prepare over.
 const MAX_IMPORTS_PACE: u32 = 600;
 
-/// Our own UI state (serde, so agents can read and set it; saved as `ui.json` in the transit
-/// settings folder). Not `transit-ui-egui`'s `UiState` (plan 06, L13).
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-#[serde(default)]
-pub struct UiState {
-    /// The audio device choice, kept with the preferences: per machine.
-    pub audio: transit_playback::AudioConfig,
-    /// The Audio Devices window's last section (`audio_devices::Section::key`): per machine, in
-    /// `ui.json`, never in the session.
-    pub audio_devices_section: String,
-    /// This machine's I/O paths, one table per audio system plus device (ADR 0015).
-    pub io_maps: Vec<transit_model::IoMap>,
-    /// File > Open Recent: sessions last opened or saved here, most recent first (at most 10).
-    /// A per-machine preference; never part of the document or its undo history.
-    pub recent_files: Vec<recent::RecentFile>,
-    /// The user's own VST3 and CLAP folders.
-    pub plugin_dirs: plugin_scan::PluginDirs,
-    /// Window > Plug-in Windows Follow transit (issue #173): editors hide, return and come to the
-    /// front with the main window and have no taskbar button. Off: the behavior before #173.
-    pub editors_follow: bool,
-    /// Plug-in editors to have open, as (track, slot); the instrument is
-    /// `transit_mix::INSTRUMENT_SLOT`. `ui.set` opens and closes editors through this list
-    /// (the same field `tools/exp-quit.ps1` sets in SoundCraft).
-    pub plugin_windows: Vec<(TrackId, usize)>,
-    /// How long each plug-in type took to load the last time, in milliseconds by plug-in id (issue
-    /// #67): "last time 12 s" beside the loading readout. A per-machine preference, updated on
-    /// every successful load; older files have none.
-    pub plugin_load_ms: std::collections::BTreeMap<String, u64>,
-    /// Track row height in points (plan 06, L9: ours, not the model's seven sizes).
-    pub track_height: f32,
-    /// Width of the track list.
-    pub header_width: f32,
-    /// The main window's size (logical points) and maximized state.
-    pub window_size: [f32; 2],
-    pub window_maximized: bool,
-    /// The mixer as a pane under the arrangement (Ableton's Ctrl+Alt+M).
-    pub show_mixer: bool,
-    /// The device chain of the focused track under the arrangement (Ableton's detail view, Ctrl+Alt+L).
-    pub show_devices: bool,
-    /// Window > MIDI Monitor: open, filters, size (#91).
-    pub midi_monitor: midi_monitor::Prefs,
-    /// Window > MIDI Mappings: open, size (#97).
-    pub midi_mappings: midi_learn::Prefs,
-    /// The controller profile: this machine's MIDI Learn mappings, keyed by port name (ADR 0028).
-    /// Per machine; never part of a session.
-    pub midi_profile: transit_model::MappingSet,
-    /// How a mapped knob takes over a control it is not at: scaled, jump or pickup (ADR 0028,
-    /// amendment 2026-10-25). Per machine, with the profile; one setting for every mapping.
-    #[serde(default = "transit_model::MapMode::takeover_default")]
-    pub midi_takeover: transit_model::MapMode,
-    /// The mixer fills the window instead of the arrangement (Cubase's F3).
-    pub mixer_full: bool,
-    /// Height of the mixer pane in points.
-    pub mixer_height: f32,
-    /// The edit cursor: where Play starts and Paste lands. View state of the open session, not
-    /// part of the document (setting it never dirties it) and not saved with the preferences.
-    #[serde(skip)]
-    pub cursor: Samples,
-    /// The track the cursor was last set on (paste target).
-    #[serde(skip)]
-    pub cursor_track: Option<TrackId>,
-    /// The focused track: the one the device chain shows and the mixer and track list highlight.
-    /// Follows clicks in both views. View state, never in the document.
-    #[serde(skip)]
-    pub focus_track: Option<TrackId>,
-    /// The piano roll's view preferences (slice 3).
-    pub keys: keys::KeysPrefs,
-    /// Collapsed groups (slice 2c): their members are out of the track list and the mixer. View
-    /// state of the open session, never in the document; shown by `ui.inspect`, never loaded.
-    #[serde(skip_deserializing)]
-    pub collapsed: Vec<TrackId>,
-    /// The browser's view preferences (slice 4): shown, width, tab, locations, favorites.
-    pub browser: browser::BrowserPrefs,
-    /// View > Appearance (slice 5): System follows the OS; Dark and Light pin the theme.
-    pub appearance: theme::Appearance,
-    /// Whole-interface zoom, composed with the OS display scale and saved per machine.
-    #[serde(deserialize_with = "interface_zoom::deserialize")]
-    pub ui_zoom: f32,
-    /// Help > Keyboard Shortcuts is open, and its filter (view state, not saved).
-    #[serde(skip)]
-    pub show_shortcuts: bool,
-    #[serde(skip)]
-    pub shortcuts_filter: String,
-    /// Transport > Count-in: Record clicks `count_in_bars` bars before it starts recording, with
-    /// the playhead parked at the start (no room before bar 1 needed). A preference, not part of
-    /// the document.
-    pub count_in: bool,
-    /// How many bars the count-in lasts when it is on: 1, 2 or 4 (the metronome popup).
-    pub count_in_bars: u8,
-    /// The click's level in dB on top of Setup > Click/Countoff, from the metronome popup. A
-    /// preference: it reaches the mixer without touching the document or its undo history.
-    pub metronome_db: f32,
-    /// Automation > Thin after write (follow-ups): when a write pass ends, `automation.thin`
-    /// runs on the tracks it wrote, as part of the pass's undo step. A preference.
-    pub thin_after_write: bool,
-    /// Help > Check for New Versions on Launch: at most once a day, one anonymous request to
-    /// GitHub's public API (see [`update`]). A preference.
-    pub check_for_updates: bool,
-    /// When the last update check started (seconds since the Unix epoch; 0: never).
-    pub last_update_check: u64,
-    /// Tracks whose take lanes are shown (slice 6). View state of the open session, never in the
-    /// document; the lanes it opens are in `ui.inspect`'s slice 6 layout.
-    #[serde(skip)]
-    pub takes_open: Vec<TrackId>,
-    /// MIDI effect parameter sections opened or closed from their default (the first open): track,
-    /// effect index, section (view state, not saved).
-    #[serde(skip)]
-    pub midi_fx_sections: Vec<(TrackId, usize, String)>,
-    /// Edit > Undo History is open (view state, not saved).
-    #[serde(skip)]
-    pub show_history: bool,
-    /// Tracks whose automation lanes are shown (slice 7, the A toggle), and the lanes open on
-    /// them with their heights. View state of the open session, never in the document; the lanes
-    /// as drawn are in `ui.inspect`'s `automation`.
-    #[serde(skip)]
-    pub auto_shown: Vec<TrackId>,
-    #[serde(skip)]
-    pub auto_lanes: Vec<automation::LaneView>,
-}
-
-impl Default for UiState {
-    fn default() -> Self {
-        UiState {
-            audio: transit_playback::AudioConfig::default(),
-            audio_devices_section: String::new(),
-            io_maps: Vec::new(),
-            recent_files: Vec::new(),
-            plugin_dirs: plugin_scan::PluginDirs::default(),
-            editors_follow: true,
-            plugin_windows: Vec::new(),
-            plugin_load_ms: std::collections::BTreeMap::new(),
-            track_height: 46.0,
-            header_width: 236.0,
-            window_size: [1600.0, 1000.0],
-            window_maximized: false,
-            show_mixer: false,
-            show_devices: true,
-            midi_monitor: midi_monitor::Prefs::default(),
-            midi_mappings: midi_learn::Prefs::default(),
-            midi_profile: Default::default(),
-            midi_takeover: transit_model::MapMode::takeover_default(),
-            mixer_full: false,
-            mixer_height: 420.0,
-            cursor: 0,
-            cursor_track: None,
-            focus_track: None,
-            keys: keys::KeysPrefs::default(),
-            collapsed: Vec::new(),
-            browser: browser::BrowserPrefs::default(),
-            appearance: theme::Appearance::System,
-            ui_zoom: 1.0,
-            show_shortcuts: false,
-            shortcuts_filter: String::new(),
-            count_in: false,
-            count_in_bars: 1,
-            metronome_db: 0.0,
-            thin_after_write: true,
-            check_for_updates: true,
-            last_update_check: 0,
-            takes_open: Vec::new(),
-            midi_fx_sections: Vec::new(),
-            show_history: false,
-            auto_shown: Vec::new(),
-            auto_lanes: Vec::new(),
-        }
-    }
-}
+mod ui_state;
+pub use ui_state::UiState;
 
 /// Host services (file dialogs) injected by the app; absent in tests.
 #[derive(Default)]
@@ -404,7 +240,8 @@ pub struct StudioApp {
     pub(crate) metro_popup: bool,
     /// The loop the session asked for at the last frame, so a change while playing retargets the running loop.
     loop_seen: Option<Range>,
-    record_hint: Option<(f64, &'static str)>,
+    record_hint: Option<(f64, String)>,
+    midi_transport: midi_transport::State,
     pub quit_requested: bool,
     pub frame_ms: f32,
     last_frame: Option<f64>,
@@ -548,6 +385,7 @@ impl StudioApp {
             metro_popup: false,
             loop_seen: None,
             record_hint: None,
+            midi_transport: midi_transport::State::default(),
             quit_requested: false,
             frame_ms: 0.0,
             last_frame: None,
@@ -640,11 +478,29 @@ impl StudioApp {
 
     /// Run a command; errors go to the status line. Plug-in state is captured before saves.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        if matches!(id, "transport.stop" | "transport.pause") {
+            if !self.midi_transport.dispatching
+                && let Some(player) = &self.player
+            {
+                player.cancel_midi_buttons();
+            }
+            self.midi_transport.take_locate = None;
+            self.midi_transport.deferred.clear();
+            self.midi_transport.waiting.clear();
+        }
+        if id == "transport.record" && self.midi_transport.take_locate.take().is_some() {
+            self.midi_transport.deferred.clear();
+            self.midi_transport.waiting.clear();
+            return Ok(json!({}));
+        }
         if matches!(id, "edit.undo" | "edit.redo")
             && let Some(reason) = self.history_disabled_reason()
         {
             self.status = reason.into();
             return Err(reason.into());
+        }
+        if matches!(id, "edit.undo" | "edit.redo") {
+            self.midi_transport.record_pass_pushes = None;
         }
         // A real-time render (ADR 0027) owns the transport while it plays, and runs on the Player.
         if let Some(r) = self.realtime_intercept(id, &params) {
@@ -818,6 +674,12 @@ impl StudioApp {
         ns.auto_shown = std::mem::take(&mut self.ui.auto_shown);
         ns.auto_lanes = std::mem::take(&mut self.ui.auto_lanes);
         let before = std::mem::replace(&mut self.ui, ns);
+        if before.midi_transport != self.ui.midi_transport {
+            self.engine.set_midi_transport(self.ui.midi_transport.clone());
+            if let Some(player) = &self.player {
+                player.cancel_midi_buttons();
+            }
+        }
         // Editors no longer listed close; newly listed ones open (retried until loaded).
         for key in before.plugin_windows.iter().filter(|k| !self.ui.plugin_windows.contains(k)) {
             if let Some(p) = &self.player {
@@ -946,8 +808,8 @@ impl StudioApp {
     }
 
     /// Why the last Record press did nothing, for a few seconds and while it still holds.
-    pub fn record_hint(&self) -> Option<&'static str> {
-        let (at, why) = self.record_hint?;
+    pub fn record_hint(&self) -> Option<&str> {
+        let (at, why) = self.record_hint.as_ref()?;
         let fresh = self.last_frame.unwrap_or_default() - at < 4.0;
         (fresh && !self.engine.session().tracks.iter().any(|t| t.mixer.record_arm)).then_some(why)
     }
@@ -1113,6 +975,10 @@ impl StudioApp {
         midi_learn::keys(self, &ctx); // an armed MIDI Learn takes Escape first
         if let Some(delay) = self.midi_learn_feed(ctx.input(|i| i.time)) {
             ctx.request_repaint_after(delay);
+        }
+        self.midi_transport_feed();
+        if self.player.is_some() {
+            ctx.request_repaint_after(midi_learn::IDLE_POLL);
         }
         finish::rename_keys(self, &ctx); // slice 6: a name being typed owns Escape and Enter
         tempo_edit::keys(self, &ctx); // the tempo and meter fields own Escape and Enter

@@ -6,6 +6,9 @@ impl StudioApp {
     /// which in this UI is usually a clicked clip. With Cycle on, it loop-records
     /// the cycle range, one take per lap, until Stop.
     pub(crate) fn start_recording(&mut self) {
+        if self.midi_transport.resume_record_at.is_none() {
+            self.midi_transport.record_pass_pushes = None;
+        }
         let armed = self.engine.session().tracks.iter().any(|t| t.mixer.record_arm);
         if !armed {
             let why = if self.engine.session().tracks.is_empty() {
@@ -14,7 +17,7 @@ impl StudioApp {
                 "No track is record-enabled: click the R button on the track to record."
             };
             self.status = why.into();
-            self.record_hint = Some((self.last_frame.unwrap_or_default(), why));
+            self.record_hint = Some((self.last_frame.unwrap_or_default(), why.into()));
             return;
         }
         if self.audio_armed() {
@@ -35,6 +38,12 @@ impl StudioApp {
     /// Start the recording pass for `takes`: on the fly at the playhead when already playing, else
     /// from the count-in or pre-roll, or the cycle range.
     pub(crate) fn begin_pass(&mut self, takes: Vec<transit_engine::io::Take>) {
+        if let Some(at) = self.midi_transport.resume_record_at.take() {
+            self.record_start = at;
+            self.punch = None;
+            self.plan_recording(takes, None, Some((at, None, self.wanted_loop())), None);
+            return;
+        }
         let already_playing = self.is_playing();
         if already_playing {
             // Punch in on the fly at the current playhead.
@@ -387,6 +396,14 @@ impl StudioApp {
             && added > 1
         {
             let _ = self.engine.squash_undo(added, "Record");
+        }
+        // Adjacent locate-separated passes belong to the same Record operation. Never fold
+        // unrelated edits made between passes into that operation.
+        if self.engine.undo_pushes() > pushes {
+            if self.midi_transport.record_pass_pushes == Some(pushes) {
+                let _ = self.engine.squash_undo(2, "Record");
+            }
+            self.midi_transport.record_pass_pushes = self.midi_transport.take_locate.map(|_| self.engine.undo_pushes());
         }
         if audio && approximate {
             self.telemetry.approximate_takes += 1;

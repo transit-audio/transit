@@ -19,6 +19,8 @@ fn monitor_sysex_capture_reaches_unrouted_monitor_with_loss_counts_and_no_ingres
     let key = fake.add_input("SysEx capture");
     let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
     send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
         id: 3,
         mon: Mon::default(),
         guard: storm::Guard::default(),
@@ -77,6 +79,8 @@ fn monitored_with(enabled: bool, config: InputConfig) -> (monitor::Hub, Pump, Fa
     let key = fake.add_input("Zero cost");
     let (handle, consumer) = fake.io().open_input(&key, config).unwrap();
     send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
         id: 3,
         mon: Mon::default(),
         guard: storm::Guard::default(),
@@ -196,7 +200,7 @@ pub(super) fn route() -> Route {
         self_echo: false,
     }
 }
-fn bridge() -> (plan_bridge::Control, plan_bridge::Audio) {
+pub(super) fn bridge() -> (plan_bridge::Control, plan_bridge::Audio) {
     plan_bridge::pair(
         RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 },
         PlanLimits::default(),
@@ -208,6 +212,7 @@ pub(super) fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSen
     (
         send,
         Pump {
+            transport_out: transport::pair().0,
             lane,
             receive,
             inputs: Vec::with_capacity(sources::PORTS),
@@ -225,6 +230,8 @@ pub(super) fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSen
 }
 fn input(consumer: InputConsumer, permit: sources::Permit) -> Update {
     Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
         id: 1,
         mon: Mon::default(),
         guard: storm::Guard::default(),
@@ -668,6 +675,8 @@ fn one_raw_consumer_fans_out_with_independent_channels_and_identical_timestamps(
     let a = route();
     let b = Route { target: (TrackId(8), transit_mix::INSTRUMENT_SLOT, SlotGen::VACANT), channels: 1 << 1, ..a };
     send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
         id: 1,
         mon: Mon::default(),
         guard: storm::Guard::default(),
@@ -717,6 +726,8 @@ fn reconfiguration_retires_only_removed_routes_and_new_routes_skip_old_raw_offer
     let (handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
     let target = route();
     send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
         id: 1,
         mon: Mon::default(),
         guard: storm::Guard::default(),
@@ -770,6 +781,8 @@ fn pending_initial_route_preserves_post_boundary_input_until_acknowledged() {
     let key = fake.add_input("Initial route pending");
     let (handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
     send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
         id: 1,
         mon: Mon::default(),
         guard: storm::Guard::default(),
@@ -815,6 +828,8 @@ fn monitor_on_a_route_attached_later_keeps_its_backlog_and_the_monitor_sees_each
     let key = fake.add_input("Monitored, route pending");
     let (handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
     send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
         id: 1,
         mon: Mon::default(),
         guard: storm::Guard::default(),
@@ -864,6 +879,8 @@ fn monitor_on_a_port_without_an_admitting_route_is_trimmed_past_512_pending() {
     let key = fake.add_input("Unrouted flood");
     let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
     send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
         id: 1,
         mon: Mon::default(),
         guard: storm::Guard::default(),
@@ -948,6 +965,8 @@ fn a_preempted_echo_push_after_a_revocation_is_dropped_by_route_generation() {
     let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
     let echoing = Route { echo: true, ..route() };
     send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
         id: 1,
         mon: Mon::default(),
         guard: storm::Guard::default(),

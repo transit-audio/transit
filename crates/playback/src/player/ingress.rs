@@ -14,6 +14,7 @@ use transit_midi_io::{InputBoundary, InputConsumer, InputEvent};
 use transit_mix::{EngineEpoch, EventOutcome, Message, NoteId, SlotBinding, Source};
 
 const BATCH: usize = 256;
+mod transport;
 /// A port with no admitting route that holds more than this many events (all already shown by the
 /// MIDI Monitor) is trimmed to half of it.
 const MONITOR_TRIM: usize = 512;
@@ -82,6 +83,7 @@ struct Shared {
     finished: AtomicBool,
     /// MIDI Learn is armed (Main sets it; the worker clears it when it forwards the candidate).
     learn: AtomicBool,
+    learn_transport: AtomicBool,
     /// Map events the full ring refused.
     map_dropped: AtomicU64,
     /// Button presses and candidates pushed to the ring, ever.
@@ -164,6 +166,8 @@ struct Input {
     guard: storm::Guard,
     /// Whether a route admitted at the last pass: the edge to none is a revocation (#134).
     live: bool,
+    buttons: Vec<transit_model::MidiSource>,
+    buttons_enabled: bool,
 }
 
 /// Per-input state of the MIDI Monitor tap. Only the ingress worker touches it.
@@ -186,6 +190,9 @@ struct Mon {
     /// Notes whose note-on a mapping consumed (channel x key), so exactly their note-off is
     /// consumed too, and a note held while a mapping is added still gets its note-off through.
     held: Box<[u128; 16]>,
+    /// Captured transport candidates stay released until a real release arrives.
+    captured: [u128; 32],
+    capture: transport::CaptureHistory,
 }
 impl Drop for Mon {
     fn drop(&mut self) {
@@ -291,6 +298,7 @@ impl Drop for Input {
 }
 
 enum Update {
+    Buttons(Vec<(u64, bool, Vec<transit_model::MidiSource>)>),
     Input(Box<Input>),
     Echo(super::midi_out::Producer),
     Monitor(Tap),
@@ -306,6 +314,7 @@ enum Update {
 /// Control-side handle. Drop closes admission immediately and wakes the worker;
 /// it does not join or move an input-device destructor onto the audio thread.
 pub struct Worker {
+    transport: transport::Receiver,
     attach: SyncSender<Update>,
     permits: Vec<sources::Permit>,
     next_input: u64,
@@ -327,7 +336,9 @@ impl Worker {
         let shared = Arc::new(Shared::default());
         let (tap, tap_receive) = rtrb::RingBuffer::new(TAP_CAPACITY);
         let (map_out, map_receive) = rtrb::RingBuffer::new(MAP_CAPACITY);
+        let (transport_out, transport) = transport::pair();
         let mut pump = Pump {
+            transport_out,
             lane,
             receive,
             inputs: Vec::with_capacity(sources::PORTS),
@@ -358,6 +369,7 @@ impl Worker {
             }
         })?;
         Ok(Self {
+            transport,
             attach,
             permits: Vec::with_capacity(sources::PORTS),
             next_input: 0,
@@ -395,6 +407,8 @@ impl Worker {
                 mon: Mon::default(),
                 guard: storm::Guard::default(),
                 live: false,
+                buttons: Vec::new(),
+                buttons_enabled: false,
             })))
             .map_err(|_| "MIDI worker attachment queue unavailable")?;
         self.permits.push(permit);
@@ -420,6 +434,8 @@ impl Worker {
                 mon: Mon::default(),
                 guard: storm::Guard::new(muted),
                 live: false,
+                buttons: Vec::new(),
+                buttons_enabled: false,
             })))
             .map_err(|_| "MIDI attachment queue unavailable")?;
         self.thread.thread().unpark();
@@ -469,7 +485,17 @@ impl Worker {
         Ok(())
     }
 
+    pub(super) fn set_buttons(&self, buttons: Vec<(u64, bool, Vec<transit_model::MidiSource>)>) -> Result<(), &'static str> {
+        self.attach.try_send(Update::Buttons(buttons)).map_err(|_| "MIDI transport configuration queue unavailable")?;
+        self.thread.thread().unpark();
+        Ok(())
+    }
+
     /// Arms or disarms MIDI Learn: while armed, the worker forwards the next CC or note-on once.
+    pub(super) fn set_transport_learn(&self, on: bool) {
+        self.shared.learn_transport.store(on, Ordering::Release);
+    }
+
     pub(super) fn arm_learn(&self, armed: bool) {
         self.shared.learn.store(armed, Ordering::Release);
         if armed {
@@ -486,6 +512,10 @@ impl Worker {
             events.push(event);
         }
         events
+    }
+
+    pub(super) fn take_transport(&self) -> (bool, Vec<(u64, transit_midi_io::TransportEnvelope)>) {
+        self.transport.take()
     }
 
     pub(super) fn learn_armed(&self) -> bool {
@@ -570,6 +600,7 @@ impl Drop for Worker {
 }
 
 struct Pump {
+    transport_out: transport::Sender,
     lane: action_lane::Control<Packet, ActionResult>,
     receive: Receiver<Update>,
     inputs: Vec<Input>,
@@ -622,6 +653,13 @@ impl Pump {
         let known = self.inputs.len();
         for _ in 0..sources::PORTS {
             match self.receive.try_recv() {
+                Ok(Update::Buttons(buttons)) => {
+                    for input in &mut self.inputs {
+                        let config = buttons.iter().find(|(id, _, _)| *id == input.id);
+                        input.buttons_enabled = config.is_some_and(|(_, enabled, _)| *enabled);
+                        input.buttons = config.map(|(_, _, sources)| sources.clone()).unwrap_or_default();
+                    }
+                }
                 Ok(Update::Input(input)) => {
                     if self.inputs.len() < sources::PORTS && input.healthy() {
                         let mut input = input;
@@ -752,7 +790,37 @@ impl Pump {
         // turned the matcher on (an armed learn opens every port), so its backlog is all news and
         // its first message may be the learn's candidate (#160).
         let learning = self.shared.learn.load(Ordering::Acquire);
-        let pass_on = learning || self.maps.as_deref().is_some_and(|maps| !maps.is_empty());
+        for input in &mut self.inputs {
+            let Input { id, consumer, mon, buttons_enabled, .. } = input;
+            consumer.scan_transport(|raw, independent| {
+                let short = InputEvent {
+                    bytes: [raw.bytes[0], raw.bytes[1], raw.bytes[2]],
+                    len: raw.len,
+                    seq: raw.seq,
+                    host_arrival_ns: raw.host_arrival_ns,
+                    backend_time_us: 0,
+                };
+                let captured = if raw.seq >= mon.capture.next {
+                    mon.capture.next = raw.seq.saturating_add(1);
+                    let captured = transport::capture(mon, *id, short, &mut self.map_out, &self.shared);
+                    if let Some(consume) = captured
+                        && !mon.capture.remember(raw.seq, consume)
+                    {
+                        self.transport_out.fail();
+                    }
+                    captured
+                } else {
+                    mon.capture.disposition(raw.seq)
+                };
+                if independent && raw.bytes[0] != 0xf8 && *buttons_enabled && captured.is_none() {
+                    self.transport_out.push(*id, raw);
+                    worked = true;
+                }
+            });
+        }
+        let pass_on = learning
+            || self.maps.as_deref().is_some_and(|maps| !maps.is_empty())
+            || self.inputs.iter().any(|i| !i.buttons.is_empty() || i.mon.capture.pending() || i.mon.captured.iter().any(|bits| *bits != 0));
         if pass_on {
             let first = !self.map_pass_on;
             for (index, input) in self.inputs.iter_mut().enumerate() {
@@ -789,17 +857,24 @@ impl Pump {
                 // The MIDI Monitor still sees what this port receives, without taking it from the
                 // ring (a route attached later keeps its backlog); a ring more than half full of
                 // events already shown is trimmed so the port keeps accepting.
-                let mut watched = pass_on;
+                let watched = true;
                 if let Some(tap) = self.monitor.as_mut().filter(|tap| tap.enabled()) {
                     let Input { id, consumer, mon, .. } = input;
                     consumer.for_each_pending(|raw| mon.tap(tap, *id, raw));
-                    watched = true;
                 }
                 // MIDI Learn has seen everything pending too (above), so the trim loses nothing.
                 if watched && input.consumer.len() > MONITOR_TRIM {
-                    let n = input.consumer.len() - MONITOR_TRIM / 2;
-                    input.consumer.discard(n);
+                    let mut seen: usize = 0;
+                    input.consumer.for_each_pending(|raw| {
+                        if raw.seq < input.mon.capture.next {
+                            seen += 1;
+                        }
+                    });
+                    input.consumer.discard(seen.saturating_sub(MONITOR_TRIM / 2));
                 }
+                continue;
+            }
+            if input.consumer.peek().is_some_and(|raw| raw.seq >= input.mon.capture.next) {
                 continue;
             }
             let Some(raw) = input.consumer.pop() else { continue };
@@ -838,9 +913,17 @@ impl Pump {
             if pass_on {
                 if raw.seq >= input.mon.map_next {
                     input.mon.map_next = raw.seq.saturating_add(1);
-                    consumed = match_one(input.id, channel, message, self.maps.as_deref(), &mut self.map_out, &self.shared);
+                    if let Some(consume) = input.mon.capture.consume(raw.seq) {
+                        consumed = consume || transport::mapped(&input.buttons, &raw);
+                    } else if transport::mapped(&input.buttons, &raw) {
+                        consumed = true;
+                    } else {
+                        consumed = match_one(input.id, channel, message, self.maps.as_deref(), &mut self.map_out, &self.shared);
+                    }
                 } else if let Some(maps) = self.maps.as_deref() {
-                    consumed = midi_map::consumes(maps, input.id, channel, message);
+                    consumed = transport::mapped(&input.buttons, &raw) || midi_map::consumes(maps, input.id, channel, message);
+                } else {
+                    consumed = transport::mapped(&input.buttons, &raw);
                 }
             }
             if consume_notes(&mut input.mon, channel, message, consumed) {
@@ -942,6 +1025,7 @@ impl Drop for Pump {
                 Ok(Update::Echo(echo)) => drop(echo),
                 Ok(Update::Monitor(tap)) => drop(tap),
                 Ok(Update::Maps(maps)) => drop(maps),
+                Ok(Update::Buttons(buttons)) => drop(buttons),
                 Ok(Update::Routes { routes, .. }) => {
                     for (permit, _) in routes {
                         permit.invalidate();
@@ -961,20 +1045,22 @@ fn channel_mode(message: Message) -> bool {
 /// One input's pending messages for the MIDI Learn matcher: the armed learn takes the next
 /// candidate (once), everything else is matched against the snapshot.
 fn map_pass(input: &mut Input, maps: Option<&Snapshot>, out: &mut rtrb::Producer<MapEvent>, shared: &Shared) {
-    let Input { id, consumer, mon, .. } = input;
+    let Input { id, consumer, mon, buttons, .. } = input;
     let id = *id;
     consumer.for_each_pending(|raw| {
-        if raw.seq < mon.map_next {
+        if raw.seq < mon.map_next || raw.seq >= mon.capture.next {
             return;
         }
         mon.map_next = raw.seq.saturating_add(1);
         let Some((channel, message)) = decode(*raw) else { return };
-        match_one(id, channel, message, maps, out, shared);
+        if mon.capture.consume(raw.seq).is_none() && !transport::mapped(buttons, raw) {
+            match_one(id, channel, message, maps, out, shared);
+        }
     });
 }
 
 /// One message for the MIDI Learn matcher: the armed learn takes it as the candidate, otherwise it
-/// is matched against the snapshot. Returns whether a mapping consumes it (a candidate is not).
+/// is matched against the snapshot. Returns whether a mapping or candidate consumes it.
 fn match_one(id: u64, channel: u8, message: Message, maps: Option<&Snapshot>, out: &mut rtrb::Producer<MapEvent>, shared: &Shared) -> bool {
     let mut push = |event: MapEvent| {
         let sent = out.push(event).is_ok();
@@ -985,13 +1071,6 @@ fn match_one(id: u64, channel: u8, message: Message, maps: Option<&Snapshot>, ou
         }
         sent
     };
-    if shared.learn.load(Ordering::Acquire)
-        && let Some(candidate) = midi_map::candidate(id, channel, message)
-        && shared.learn.swap(false, Ordering::AcqRel)
-    {
-        push(candidate);
-        return false;
-    }
     maps.is_some_and(|maps| midi_map::handle(maps, id, channel, message, &mut push))
 }
 
@@ -1044,3 +1123,5 @@ pub use storm::{RATE as STORM_RATE, REPEAT as STORM_REPEAT, WINDOW_NS as STORM_W
 mod map_tests;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod transport_tests;

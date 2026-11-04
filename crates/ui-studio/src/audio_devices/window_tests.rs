@@ -334,7 +334,7 @@ fn a_driver_that_must_be_open_to_be_described_marks_its_lists_stale() {
 }
 
 /// The sidebar sections and what each must show (#107).
-const SECTIONS: [&str; 3] = ["section_system", "section_io", "section_hardware"];
+const SECTIONS: [&str; 4] = ["section_system", "section_io", "section_hardware", "section_midi"];
 
 fn inside(outer: [f32; 4], inner: [f32; 4]) -> bool {
     inner[0] >= outer[0] - 0.5 && inner[1] >= outer[1] - 0.5 && inner[2] <= outer[2] + 0.5 && inner[3] <= outer[3] + 0.5
@@ -439,8 +439,10 @@ fn ctrl_tab_and_ctrl_shift_tab_cycle_the_sections() {
     };
     assert_eq!(chord(&mut t, false), "section_io");
     assert_eq!(chord(&mut t, false), "section_hardware");
+    assert_eq!(chord(&mut t, false), "section_midi");
     assert_eq!(chord(&mut t, false), "section_system", "wraps around");
-    assert_eq!(chord(&mut t, true), "section_hardware", "Shift goes back");
+    assert_eq!(chord(&mut t, true), "section_midi", "Shift goes back");
+    assert_eq!(chord(&mut t, true), "section_hardware");
     assert_eq!(chord(&mut t, true), "section_io");
 }
 

@@ -5,6 +5,49 @@ use super::Player;
 use crate::player::{MapHeard, MapMsg, MapSpec};
 
 impl Player {
+    /// Transport learning captures a held button until release; continuous learn keeps its behavior.
+    pub fn set_transport_learn(&self, on: bool) {
+        if let Ok(midi) = self.midi.try_borrow()
+            && let Some(m) = midi.as_ref()
+        {
+            m.set_transport_learn(on);
+        }
+    }
+    /// Revalidate deferred control messages after Stop acknowledgment or a port/configuration change.
+    pub fn retain_midi_buttons(&self, events: &mut Vec<crate::ButtonEvent>) {
+        if let Ok(midi) = self.midi.try_borrow()
+            && let Some(m) = midi.as_ref()
+        {
+            m.retain_buttons(events);
+        } else {
+            events.clear();
+        }
+    }
+
+    /// Machine transport preferences and effective Transport outputs (clock-only outputs excluded).
+    pub fn configure_midi_buttons(&self, profiles: transit_model::TransportProfiles, sending: Vec<transit_model::MidiOutPort>) {
+        if let Ok(mut midi) = self.midi.try_borrow_mut()
+            && let Some(m) = midi.as_mut()
+        {
+            m.configure_buttons(profiles, sending);
+            m.sync_buttons();
+        }
+    }
+
+    /// Cancel already offered button traffic before a local Stop or preference change.
+    pub fn cancel_midi_buttons(&self) {
+        if let Ok(mut midi) = self.midi.try_borrow_mut()
+            && let Some(m) = midi.as_mut()
+        {
+            m.cancel_buttons();
+        }
+    }
+
+    /// Loss requires safe Stop/finalization; queued starts have already been invalidated.
+    pub fn take_midi_buttons(&self) -> (bool, Vec<crate::player::native::ButtonEvent>) {
+        self.midi.try_borrow_mut().ok().and_then(|mut m| m.as_mut().map(|m| m.take_buttons())).unwrap_or_default()
+    }
+
     /// Replaces the MIDI Learn mappings the ingress worker matches. The ports they name are
     /// opened. An equal list changes nothing, so a frame-by-frame caller costs a comparison.
     pub fn set_midi_mappings(&self, specs: Vec<MapSpec>) {

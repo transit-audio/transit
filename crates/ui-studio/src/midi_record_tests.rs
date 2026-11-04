@@ -18,6 +18,52 @@ const TICKS: i64 = transit_time::TICKS_PER_QUARTER;
 /// The device frame the synthetic latch sits at.
 const LATCH: u64 = 10_000;
 
+#[test]
+fn transport_locate_finalizes_the_pass_before_restart_failure_and_keeps_the_take() {
+    let (mut app, track) = app();
+    app.record_start = 0;
+    app.engine.transport.recording = true;
+    app.start_play(BEAT, None, None);
+    app.finished_test_midi = Some(pass(track, Some(0), vec![on(LATCH, track, 60), off(LATCH + 12_000, track, 60)]));
+    app.run("transport.locate", json!({"at": 4 * BEAT})).unwrap();
+    app.handle_transport(0.0);
+    assert_eq!(app.engine.session().track(track).unwrap().clips().len(), 1);
+    assert_eq!(app.midi_transport.take_locate, Some(4 * BEAT));
+    app.handle_transport(0.0);
+    assert!(!app.recording_active() && !app.is_playing());
+    assert_eq!(app.status, "Cannot record: no audio device is open to record MIDI");
+    assert_eq!(app.engine.session().track(track).unwrap().clips().len(), 1);
+}
+
+#[test]
+fn transport_locate_passes_remain_one_record_undo_operation() {
+    let (mut app, track) = app();
+    let before = app.engine.undo_history().len();
+    // Substitute finished device captures for two adjacent passes, preserving host finalization.
+    app.midi_transport.take_locate = Some(4 * BEAT);
+    record(&mut app, 0, None, BEAT, pass(track, Some(0), vec![on(LATCH, track, 60), off(LATCH + 12_000, track, 60)]));
+    app.midi_transport.take_locate = None;
+    record(&mut app, 4 * BEAT, None, 5 * BEAT, pass(track, Some(4 * BEAT), vec![on(LATCH, track, 64), off(LATCH + 12_000, track, 64)]));
+    assert_eq!(app.engine.session().track(track).unwrap().clips().len(), 2);
+    assert_eq!(app.engine.undo_history().len(), before + 1);
+    app.run("edit.undo", json!({})).unwrap();
+    assert!(app.engine.session().track(track).unwrap().clips().is_empty());
+}
+
+#[test]
+fn undo_between_transport_locate_passes_does_not_fold_an_unrelated_edit() {
+    let (mut app, track) = app();
+    let before = app.engine.undo_history().len();
+    app.midi_transport.take_locate = Some(4 * BEAT);
+    record(&mut app, 0, None, BEAT, pass(track, Some(0), vec![on(LATCH, track, 60), off(LATCH + 12_000, track, 60)]));
+    app.midi_transport.take_locate = None;
+    app.run("edit.undo", json!({})).unwrap();
+    record(&mut app, 4 * BEAT, None, 5 * BEAT, pass(track, Some(4 * BEAT), vec![on(LATCH, track, 64), off(LATCH + 12_000, track, 64)]));
+    assert_eq!(app.engine.undo_history().len(), before + 1);
+    app.run("edit.undo", json!({})).unwrap();
+    assert!(app.engine.session().track(track).is_some(), "undoing Record must preserve the earlier track edit");
+}
+
 fn app() -> (StudioApp, TrackId) {
     let mut app = StudioApp::new(Engine::default(), None, Services::default());
     let t = TrackId(app.run("track.new", json!({"kind": "midi"})).unwrap()["tracks"][0].as_u64().unwrap());

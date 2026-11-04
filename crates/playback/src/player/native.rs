@@ -14,6 +14,8 @@ use transit_model::{MidiInput, MidiOutPort, MidiPort};
 type Owner = RuntimeControl<Command, ActionResult>;
 const POLL: Duration = Duration::from_millis(100);
 const LOOKAHEAD: u32 = 128;
+mod transport;
+pub use transport::ButtonEvent;
 
 #[derive(Default, Clone, Debug)]
 pub struct Status {
@@ -223,6 +225,7 @@ struct Muted {
 }
 
 pub(super) struct Native {
+    buttons: transport::Buttons,
     worker: ingress::Worker,
     /// The MIDI output thread (#61) and, until the audio side takes it, its playback producer.
     out: midi_out::Out,
@@ -258,6 +261,7 @@ impl Native {
         worker.set_monitor(tap_in).map_err(std::io::Error::other)?;
         out.set_monitor(tap_out);
         Ok(Self {
+            buttons: transport::Buttons::default(),
             worker,
             out,
             playback: Some(playback),
@@ -597,7 +601,10 @@ impl Native {
             if (!present
                 || input.failed
                 || input.lost
-                || (routes.is_empty() && !self.monitor.enabled() && !self.wanted.wants_port(&input.key.to_string())))
+                || (routes.is_empty()
+                    && !self.monitor.enabled()
+                    && !self.wanted.wants_port(&input.key.to_string())
+                    && !self.buttons.enabled(&input.key)))
                 && !input.closed
                 && io.request(Request::Close(input.id)).is_ok()
             {
@@ -613,10 +620,11 @@ impl Native {
         self.inputs
             .retain(|input| !input.closed || (input.failed && !input.lost && self.status.inputs.iter().any(|port| same_port(&port.key, &input.key))));
         let monitoring = self.monitor.enabled();
-        if !routes.is_empty() || monitoring || self.wanted.wants_any() {
+        if !routes.is_empty() || monitoring || self.wanted.wants_any() || self.status.inputs.iter().any(|p| self.buttons.enabled(&p.key)) {
             for port in &self.status.inputs {
                 if self.inputs.len() == sources::PORTS
                     || !(monitoring
+                        || self.buttons.enabled(&port.key)
                         || self.wanted.wants_port(&port.key.to_string())
                         || !port_routes(&routes, &port.key, &self.status.inputs, &self.muted).is_empty())
                     || self.inputs.iter().any(|input| same_port(&input.key, &port.key))
