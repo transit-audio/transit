@@ -31,7 +31,8 @@ transit-modal-voice.workspace = true
 # The Random Sequencer MIDI effect (ADR 0033, #202): a same-layer (L1) dependency.
 transit-random-sequencer.workspace = true
 # The shared instrument primitives (shaper, matrix, SVF, LFO, ADSR; ADR 0041): a same-layer (L1) dependency.
-transit-instrument-core.workspace = true
+# `std` named explicitly (ADR 0037): a future minimal dsp configuration cannot turn it on by accident.
+transit-instrument-core = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 proptest.workspace = true

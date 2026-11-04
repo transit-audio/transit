@@ -1,6 +1,7 @@
 //! The ADSR the built-in instruments, the shaper and the Filter insert share (moved from dsp's
 //! instrument plumbing, ADR 0041).
 
+use crate::math;
 use crate::util::ms_to_samples;
 
 const SILENT: f32 = 1.0e-5;
@@ -31,7 +32,7 @@ pub struct AdsrRates {
 
 impl AdsrRates {
     pub fn new(a_ms: f32, d_ms: f32, s: f32, r_ms: f32, sr: f32) -> Self {
-        let exp60 = |ms: f32| (0.001f32.ln() / ms_to_samples(ms, sr).max(1.0)).exp();
+        let exp60 = |ms: f32| math::expf(math::lnf(0.001) / ms_to_samples(ms, sr).max(1.0));
         Self { attack: 1.0 / ms_to_samples(a_ms, sr).max(1.0), decay: exp60(d_ms), sustain: s.clamp(0.0, 1.0), release: exp60(r_ms) }
     }
 }

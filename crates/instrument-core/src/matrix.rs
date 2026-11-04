@@ -23,6 +23,8 @@
 //!   the depth as the amount, the curve as the curve. `transit_model::legacy_mapping` rewrites an
 //!   old session's or preset's parameters that way, and the render is the same bits.
 
+use crate::math;
+
 /// Rows in the matrix.
 pub const ROWS: usize = 16;
 
@@ -145,10 +147,10 @@ pub fn fade_gain(curve: usize, t: f32) -> f32 {
     let t = if t.is_nan() { 0.0 } else { t.clamp(0.0, 1.0) };
     const K: f32 = 4.0;
     match curve {
-        1 => ((K * t).exp() - 1.0) / (K.exp() - 1.0),
-        2 => 0.5 - 0.5 * (t * std::f32::consts::PI).cos(),
-        3 => (t * std::f32::consts::FRAC_PI_2).sin(),
-        4 => (1.0 + (K.exp() - 1.0) * t).ln() / K,
+        1 => (math::expf(K * t) - 1.0) / (math::expf(K) - 1.0),
+        2 => 0.5 - 0.5 * math::cosf(t * core::f32::consts::PI),
+        3 => math::sinf(t * core::f32::consts::FRAC_PI_2),
+        4 => math::lnf(1.0 + (math::expf(K) - 1.0) * t) / K,
         _ => t,
     }
 }

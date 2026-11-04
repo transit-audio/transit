@@ -1,6 +1,8 @@
 //! Modulation sources the built-in plug-ins share: the LFO and its tempo-synced divisions (moved
 //! from the Filter, #242; from dsp to the shared instrument primitives, ADR 0041).
 
+use crate::math;
+
 /// The LFO's shapes, in the order of the `lfo_shape` parameter's choices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Shape {
@@ -71,7 +73,7 @@ impl SyncDivision {
     /// when the meter never changed (origin zero). Beat divisions always use quarter zero.
     pub fn phase(self, quarters: f64) -> f64 {
         let cycles = (quarters - self.origin) / self.quarters.max(1e-6);
-        if cycles.is_finite() { cycles - cycles.floor() } else { 0.0 }
+        if cycles.is_finite() { cycles - math::floor(cycles) } else { 0.0 }
     }
 }
 
@@ -124,7 +126,7 @@ impl Lfo {
     pub fn advance(&mut self, inc: f64) {
         self.phase += inc;
         if self.phase >= 1.0 {
-            self.phase -= self.phase.floor();
+            self.phase -= math::floor(self.phase);
             self.next_step();
         }
     }
@@ -143,7 +145,7 @@ impl Lfo {
     /// position does at each block (#245's rule, #243): a phase that went backwards (a new cycle,
     /// or a jump) starts a new random step.
     pub fn set_phase(&mut self, phase: f64) {
-        let p = if phase.is_finite() { phase - phase.floor() } else { 0.0 };
+        let p = if phase.is_finite() { phase - math::floor(phase) } else { 0.0 };
         if p < self.phase {
             self.next_step();
         }
@@ -160,7 +162,7 @@ impl Lfo {
     pub fn value(&self, shape: Shape) -> f32 {
         let p = self.phase as f32;
         match shape {
-            Shape::Sine => (std::f32::consts::TAU * p).sin(),
+            Shape::Sine => math::sinf(core::f32::consts::TAU * p),
             Shape::Triangle => {
                 if p < 0.25 {
                     4.0 * p

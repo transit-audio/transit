@@ -31,6 +31,7 @@
 
 use crate::adsr::{Adsr, AdsrRates, Stage};
 use crate::lfo::{Lfo, Shape, SyncDivision};
+use crate::math;
 use crate::svf::{Coefs, K_BUTTERWORTH, MIN_CUTOFF, Mode, Section, max_cutoff, q_of, soft_clip};
 
 /// The shaper's block in frames: the filter's coefficients and every modulation are worked out
@@ -120,7 +121,7 @@ impl LfoSettings {
         if self.sync {
             tempo / 60.0 / self.division.quarters.max(1e-6) / f64::from(sr)
         } else {
-            let hz = (self.rate * octaves.exp2()).clamp(0.001, 1000.0);
+            let hz = (self.rate * math::exp2f(octaves)).clamp(0.001, 1000.0);
             f64::from(hz) / f64::from(sr)
         }
     }
@@ -161,7 +162,7 @@ impl Default for Settings {
             filter_env: AdsrRates::default(),
             mode: Mode::Low,
             slope24: false,
-            cutoff_log2: 20_000f32.log2(),
+            cutoff_log2: math::log2f(20_000.0),
             resonance: 0.0,
             drive: 1.0,
             key_track: 0.0,
@@ -353,7 +354,7 @@ impl Shaper {
     pub fn design(&mut self, s: &Settings, note: f32, m: FilterMods) {
         let amount = (s.env_amount + m.env_amount).clamp(-1.0, 1.0);
         let oct = MOD_OCTAVES * (amount * self.filter_env.level + m.cutoff) + s.key_track * (note - 60.0) / 12.0;
-        let hz = (s.cutoff_log2 + oct).exp2();
+        let hz = math::exp2f(s.cutoff_log2 + oct);
         let hz = if hz.is_finite() { hz.clamp(MIN_CUTOFF, max_cutoff(s.sr)) } else { MIN_CUTOFF };
         let g = Coefs::g_of(hz, s.sr);
         let k = 1.0 / q_of(100.0 * (s.resonance + m.resonance));

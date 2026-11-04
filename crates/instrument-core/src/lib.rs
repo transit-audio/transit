@@ -4,9 +4,16 @@
 //! sampler core will; they moved here from dsp unchanged (dsp re-exports them at their old paths).
 //!
 //! Everything is fixed-size: no allocation, clock, thread or logger; seeds and rates are inputs.
+//!
+//! ADR 0037 Tier B: the default `std` feature keeps the desktop arithmetic (the inherent float
+//! methods); with default features off the crate is `no_std` (no `alloc` either) and its float
+//! functions come from `libm` ([`math`]). CI checks that configuration for a bare-metal ARM target.
+
+#![cfg_attr(all(not(feature = "std"), not(test)), no_std)]
 
 pub mod adsr;
 pub mod lfo;
+mod math;
 pub mod matrix;
 pub mod shaper;
 pub mod svf;

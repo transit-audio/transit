@@ -9,7 +9,9 @@
 //! sections at the same cutoff: the first with the resonance's Q, the second a Butterworth section
 //! (Q = 1/√2), so the resonance peak keeps its height instead of doubling in dB.
 
-use std::f64::consts::PI;
+use core::f64::consts::PI;
+
+use crate::math;
 
 /// The four modes, in the order of the `mode` parameter's choices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -32,17 +34,17 @@ impl Mode {
 }
 
 /// Q at 0% resonance (Butterworth: no peak) and at 100%.
-pub const Q_MIN: f32 = std::f32::consts::FRAC_1_SQRT_2;
+pub const Q_MIN: f32 = core::f32::consts::FRAC_1_SQRT_2;
 pub const Q_MAX: f32 = 25.0;
 /// `k = 1/Q` of the 24 dB slope's second, Butterworth section.
-pub const K_BUTTERWORTH: f32 = std::f32::consts::SQRT_2;
+pub const K_BUTTERWORTH: f32 = core::f32::consts::SQRT_2;
 /// The lowest cutoff the modulation can reach; the highest is [`max_cutoff`].
 pub const MIN_CUTOFF: f32 = 16.0;
 
 /// The resonance knob (0..100 %) as Q: exponential from [`Q_MIN`] to [`Q_MAX`].
 pub fn q_of(resonance_pct: f32) -> f32 {
     let r = if resonance_pct.is_finite() { (resonance_pct / 100.0).clamp(0.0, 1.0) } else { 0.0 };
-    Q_MIN * (Q_MAX / Q_MIN).powf(r)
+    Q_MIN * math::powf(Q_MAX / Q_MIN, r)
 }
 
 /// The highest cutoff at `sr`: just under Nyquist, where `tan` stays finite.
@@ -70,7 +72,7 @@ impl Coefs {
     /// The prewarped integrator gain of a cutoff, clamped to the usable range.
     pub fn g_of(cutoff: f32, sr: f32) -> f32 {
         let f = cutoff.clamp(MIN_CUTOFF, max_cutoff(sr));
-        (std::f32::consts::PI * f / sr).tan()
+        math::tanf(core::f32::consts::PI * f / sr)
     }
 }
 
@@ -125,10 +127,10 @@ pub fn soft_clip(x: f32) -> f32 {
 
 /// The analytic magnitude (linear) of one section at `freq`, in f64.
 fn section_magnitude(mode: Mode, g: f64, k: f64, sr: f64, freq: f64) -> f64 {
-    let w = (PI * freq / sr).tan() / g;
+    let w = math::tan(PI * freq / sr) / g;
     // s = j·w: s² = -w², so D = (1 - w²) + j·k·w.
     let (dr, di) = (1.0 - w * w, k * w);
-    let d = (dr * dr + di * di).sqrt();
+    let d = math::sqrt(dr * dr + di * di);
     let n = match mode {
         Mode::Low => 1.0,
         Mode::High => w * w,
@@ -142,7 +144,7 @@ fn section_magnitude(mode: Mode, g: f64, k: f64, sr: f64, freq: f64) -> f64 {
 /// cutoff and Q, at sample rate `sr` (the cutoff clamped as the filter clamps it).
 pub fn magnitude(mode: Mode, slope24: bool, cutoff: f64, q: f64, sr: f64, freq: f64) -> f64 {
     let f = cutoff.clamp(f64::from(MIN_CUTOFF), 0.49 * sr);
-    let g = (PI * f / sr).tan();
+    let g = math::tan(PI * f / sr);
     let one = section_magnitude(mode, g, 1.0 / q, sr, freq);
     if slope24 { one * section_magnitude(mode, g, f64::from(K_BUTTERWORTH), sr, freq) } else { one }
 }

@@ -4270,6 +4270,9 @@ dependencies = [
 [[package]]
 name = "transit-instrument-core"
 version = "0.6.2"
+dependencies = [
+ "libm",
+]
 
 [[package]]
 name = "transit-macro-osc"
