@@ -13,6 +13,10 @@ Machine-readable tokens: [`tokens.json`](tokens.json). Mockup sources: [`mockups
 3. **Values are always readable.** Every control prints its value in mono, in real units (`1.20 kHz`, `320 ms`, `−3.2 dB`). No hover needed to know a setting.
 4. **Panels, not chrome.** Flat raised panels on a graphite ground. No skeuomorphic metal, glow or gradients.
 
+### Arrangement grid
+
+The grid is the arrangement's backbone: one structure that carries tempo, meter and triplets, computed and painted once. Clips are elements sitting on it. View > Grid Over Clips changes only its layer, above the clips instead of beneath them, so the grid reads as one continuous structure across empty lane space and clips alike; nothing re-draws it.
+
 ## Colour
 
 | Token | Hex | Use |

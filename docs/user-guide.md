@@ -42,10 +42,12 @@ height open at **88 points per track**; **Reset Track Heights** returns them to 
 
 ## Arrangement: grid over clips
 
-**View > Grid Over Clips** strokes the bar and beat lines again over clip bodies, over the
-waveform, at reduced strength, so timing edits can be judged by eye. It is off by default, which
-keeps the lines in empty lane space only. Ableton Live draws its grid through clips while Logic
-Pro draws it behind regions, so transit offers both. The setting is saved in the session.
+**View > Grid Over Clips** moves the grid above the clips instead of beneath them. The grid is one
+structure, drawn once, carrying the tempo, meter and triplets of the project, so it reads the same
+over empty lane space and over clips: the same lines at every zoom, with the clips sitting on it, so
+timing edits can be judged by eye. It is off by default, which keeps the grid beneath the clips.
+Ableton Live draws its grid through clips while Logic Pro draws it behind regions, so transit offers
+both. The setting is saved in the session.
 
 ## Piano roll
 

@@ -1,15 +1,10 @@
-//! The arrangement's grid lines: one computation of where they fall, shared by the lane grid and
-//! the optional overlay that strokes them again over clip bodies (#302).
+//! The arrangement's grid lines: one computation of where they fall and one painting of them, in
+//! the layer View > Grid Over Clips picks (#302).
 //!
 //! Ableton Live keeps the grid visible through clips; Logic Pro draws it behind regions and the
 //! regions cover it. They disagree, so transit offers both: View > Grid Over Clips, default off.
 
 use super::*;
-
-/// Alpha of a bar line stroked over a clip body.
-pub(super) const BAR_ALPHA: f32 = 0.45;
-/// Alpha of a beat line stroked over a clip body.
-pub(super) const BEAT_ALPHA: f32 = 0.25;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Kind {
@@ -20,6 +15,15 @@ pub(super) enum Kind {
     Beat,
     /// A line at the grid step finer than the beat.
     Sub,
+}
+
+/// The stroke color of a line of `kind`.
+pub(super) fn color(kind: Kind) -> Color32 {
+    match kind {
+        Kind::Bar { labeled: true } => TOKENS.grid_bar,
+        Kind::Bar { labeled: false } | Kind::Beat => TOKENS.grid_beat,
+        Kind::Sub => TOKENS.grid_sub,
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -78,26 +82,12 @@ pub(super) fn lines(s: &Session, map: Map, x_min: f32, x_max: f32) -> Vec<Line> 
     out
 }
 
-/// The bar and beat lines again over a clip body (`body`: below the name strip), in `ink`, at
-/// reduced alpha. Off unless grid lines are shown and View > Grid Over Clips is on. `p` is
-/// already clipped to the clip and the timeline.
-pub(super) fn draw(p: &egui::Painter, s: &Session, map: Map, tl: Rect, body: Rect, ink: Color32) {
-    if !(s.edit.grid_lines && s.edit.grid_over_clips) || body.height() <= 4.0 {
-        return;
-    }
-    let vis = body.intersect(tl);
-    if vis.min.x > vis.max.x {
-        return;
-    }
-    for l in lines(s, map, vis.min.x, vis.max.x) {
-        let alpha = match l.kind {
-            Kind::Bar { .. } => BAR_ALPHA,
-            Kind::Beat => BEAT_ALPHA,
-            Kind::Sub => continue,
-        };
-        if l.x >= vis.min.x && l.x <= vis.max.x {
-            p.line_segment([pos2(l.x, body.min.y), pos2(l.x, body.max.y)], Stroke::new(1.0, ink.gamma_multiply(alpha)));
-        }
+/// Paints the grid across the timeline `tl`, once per frame: beneath the clips by default, above
+/// them with View > Grid Over Clips. The lane and the overlay are this one pass, never two.
+pub(super) fn paint(p: &egui::Painter, tl: Rect, lines: &[Line]) {
+    let gp = p.with_clip_rect(tl);
+    for l in lines {
+        gp.line_segment([pos2(l.x, tl.min.y), pos2(l.x, tl.max.y)], Stroke::new(1.0, color(l.kind)));
     }
 }
 

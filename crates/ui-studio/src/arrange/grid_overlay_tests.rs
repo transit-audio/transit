@@ -2,30 +2,6 @@ use super::*;
 use crate::tests::{app, json};
 use egui::epaint::ClippedShape;
 
-/// One audio clip of four bars on an audio track at 1000 samples per point (a bar is 96 points at
-/// 120 BPM in 4/4, a beat 24), and the map and rect it is drawn with.
-struct Scene {
-    app: StudioApp,
-    track: TrackId,
-    clip: Clip,
-    map: Map,
-    rect: Rect,
-}
-
-fn scene() -> Scene {
-    let mut app = app();
-    let v = app.run("track.new", json!({"kind": "audio"})).unwrap();
-    let track = TrackId(v["tracks"][0].as_u64().unwrap());
-    transit_engine::io::import_audio_bytes(&mut app.engine, "grid.wav", &wav(), None, Some(track), 0).unwrap();
-    let mut clip = app.engine.session().track(track).unwrap().clips()[0].clone();
-    let bar = bar_at(app.engine.session(), 2);
-    clip.start = 0;
-    clip.length = 4 * bar;
-    let map = Map { x0: 20.0, scroll: 0, spp: 1000.0, grid: Default::default() };
-    let rect = Rect::from_min_max(pos2(map.x(0), 20.0), pos2(map.x(4 * bar), 20.0 + 88.0));
-    Scene { app, track, clip, map, rect }
-}
-
 fn wav() -> Vec<u8> {
     let frames = 4096u32;
     let size = frames * 2;
@@ -48,17 +24,15 @@ fn wav() -> Vec<u8> {
     b
 }
 
-/// The shapes `draw_clip` paints for the scene's clip with the current session state.
-fn paint(sc: &Scene) -> Vec<ClippedShape> {
-    let s = sc.app.engine.session();
-    let track = s.track(sc.track).unwrap();
-    let tl = Rect::from_min_max(pos2(20.0, 0.0), pos2(1000.0, 400.0));
-    let ctx = egui::Context::default();
-    let mut out = ctx.run_ui(egui::RawInput { time: Some(0.02), ..Default::default() }, |ui| {
-        super::super::clips::draw_clip(ui.painter(), s, sc.map, tl, track, &sc.clip, &[], sc.rect, false, 1.0, false);
-    });
-    out.textures_delta.clear();
-    out.shapes
+fn grid_colors() -> [Color32; 3] {
+    [TOKENS.grid_bar, TOKENS.grid_beat, TOKENS.grid_sub]
+}
+
+/// One frame's shapes, in paint order, flattened.
+fn flat(shapes: &[ClippedShape]) -> Vec<Shape> {
+    let mut out = Vec::new();
+    shapes.iter().for_each(|s| flatten(&s.shape, &mut out));
+    out.into_iter().cloned().collect()
 }
 
 fn flatten<'a>(shape: &'a Shape, out: &mut Vec<&'a Shape>) {
@@ -69,39 +43,114 @@ fn flatten<'a>(shape: &'a Shape, out: &mut Vec<&'a Shape>) {
     }
 }
 
-fn is_vertical(s: &Shape) -> bool {
-    matches!(s, Shape::LineSegment { points, .. } if points[0].x == points[1].x)
+/// A studio with one four-bar audio clip, framed.
+fn with_clip() -> Ui {
+    let mut ui = Ui::new();
+    let v = ui.app.run("track.new", json!({"kind": "audio"})).unwrap();
+    let track = TrackId(v["tracks"][0].as_u64().unwrap());
+    transit_engine::io::import_audio_bytes(&mut ui.app.engine, "grid.wav", &wav(), None, Some(track), 0).unwrap();
+    ui.frames(3);
+    ui
 }
 
-/// Every vertical line segment: (x, top, bottom, stroke alpha).
-fn verticals(shapes: &[ClippedShape]) -> Vec<(f32, f32, f32, u8)> {
-    let mut flat = Vec::new();
-    shapes.iter().for_each(|s| flatten(&s.shape, &mut flat));
-    flat.into_iter()
-        .filter_map(|s| match s {
-            Shape::LineSegment { points, stroke } if is_vertical(s) => Some((points[0].x, points[0].y, points[1].y, stroke.color.a())),
-            _ => None,
-        })
-        .collect()
+/// What a frame painted: the lane grid segments (index in paint order, x) and the clip's rect
+/// shapes (indexes in paint order).
+struct Painted {
+    grid: Vec<(usize, f32)>,
+    clip: Vec<usize>,
+    all: Vec<String>,
 }
 
-/// Where the lane grid puts the bar and beat lines inside the clip, computed from the tempo map
-/// directly: (x, is a bar line).
-fn expected(sc: &Scene) -> Vec<(f32, bool)> {
-    let s = sc.app.engine.session();
-    let mut xs = Vec::new();
-    for bar in 1..=5 {
-        for beat in 1..=4 {
-            let at = s.tempo.samples_at_bar_beat(BarBeat { bar, beat, tick: 0 }, s.sample_rate);
-            xs.push((sc.map.x(at), beat == 1));
+fn painted(ui: &mut Ui) -> Painted {
+    ui.frames(2);
+    let l = &ui.app.arrange.layout;
+    let tl = l.timeline;
+    let clip = l.clips[0].rect;
+    let shapes = flat(&ui.shapes);
+    let mut grid = Vec::new();
+    let mut clip_ix = Vec::new();
+    for (i, s) in shapes.iter().enumerate() {
+        match s {
+            Shape::LineSegment { points, stroke }
+                if points[0].x == points[1].x
+                    && grid_colors().contains(&stroke.color)
+                    && (points[0].y - tl[1]).abs() < 0.5
+                    && (points[1].y - tl[3]).abs() < 0.5 =>
+            {
+                grid.push((i, points[0].x));
+            }
+            Shape::Rect(r)
+                if (r.rect.min.x - clip[0]).abs() < 0.5 && (r.rect.max.x - clip[2]).abs() < 0.5 && (r.rect.min.y - clip[1]).abs() < 0.5 =>
+            {
+                clip_ix.push(i)
+            }
+            _ => {}
         }
     }
-    xs.retain(|(x, _)| *x >= sc.rect.min.x && *x <= sc.rect.max.x);
-    xs
+    Painted { grid, clip: clip_ix, all: shapes.iter().map(|s| format!("{s:?}")).collect() }
 }
 
-fn set(sc: &mut Scene, command: &str, value: bool) {
-    sc.app.run(command, json!({"value": value})).unwrap();
+fn xs(p: &Painted) -> Vec<f32> {
+    let mut x: Vec<f32> = p.grid.iter().map(|g| g.1).collect();
+    x.sort_by(f32::total_cmp);
+    x
+}
+
+#[test]
+fn off_paints_the_grid_once_beneath_every_clip_shape_and_the_frame_is_stable() {
+    let mut ui = with_clip();
+    let off = painted(&mut ui);
+    assert!(!off.clip.is_empty(), "the clip's shapes were found");
+    assert!(off.grid.len() >= 8, "the lane grid is painted: {}", off.grid.len());
+    let last_grid = off.grid.iter().map(|g| g.0).max().unwrap();
+    assert!(last_grid < *off.clip.iter().min().unwrap(), "grid index {last_grid} before clip index {:?}", off.clip);
+    // On and back off: the paint is the same as it was.
+    ui.app.run("view.grid_over_clips", json!({"value": true})).unwrap();
+    let _ = painted(&mut ui);
+    ui.app.run("view.grid_over_clips", json!({"value": false})).unwrap();
+    assert_eq!(painted(&mut ui).all, off.all, "option off paints byte-identically");
+}
+
+#[test]
+fn on_paints_the_same_single_grid_above_every_clip_shape() {
+    let mut ui = with_clip();
+    let off = painted(&mut ui);
+    ui.app.run("view.grid_over_clips", json!({"value": true})).unwrap();
+    let on = painted(&mut ui);
+    let first_grid = on.grid.iter().map(|g| g.0).min().unwrap();
+    let last_clip = *on.clip.iter().max().unwrap();
+    assert!(first_grid > last_clip, "first grid segment index {first_grid} after the last clip shape {last_clip}");
+    assert_eq!(on.grid.len(), off.grid.len(), "no second stroking: the same segment count");
+    assert_eq!(xs(&on), xs(&off), "the same x positions");
+    assert_eq!(on.all.len(), off.all.len(), "nothing else was added or dropped");
+}
+
+#[test]
+fn toggling_the_command_flips_the_layer_and_leaves_the_segment_set() {
+    let mut ui = with_clip();
+    let before = painted(&mut ui);
+    for _ in 0..2 {
+        ui.app.run("view.grid_over_clips", json!({})).unwrap();
+        let on = painted(&mut ui);
+        assert!(on.grid.iter().all(|g| g.0 > *on.clip.iter().max().unwrap()), "above the clip when on");
+        ui.app.run("view.grid_over_clips", json!({})).unwrap();
+        let off = painted(&mut ui);
+        assert!(off.grid.iter().all(|g| g.0 < *off.clip.iter().min().unwrap()), "beneath the clip when off");
+        assert_eq!(xs(&on), xs(&off));
+        assert_eq!(xs(&off), xs(&before));
+    }
+}
+
+#[test]
+fn hidden_grid_lines_keep_the_grid_beneath_the_clips_even_when_the_option_is_on() {
+    let mut ui = with_clip();
+    ui.app.run("view.grid_over_clips", json!({"value": true})).unwrap();
+    ui.app.run("view.grid_lines", json!({"value": false})).unwrap();
+    let p = painted(&mut ui);
+    assert!(p.grid.iter().all(|g| g.0 < *p.clip.iter().min().unwrap()), "beneath, as with the option off");
+    ui.app.run("view.grid_lines", json!({"value": true})).unwrap();
+    let p = painted(&mut ui);
+    assert!(p.grid.iter().all(|g| g.0 > *p.clip.iter().max().unwrap()), "above once lines are shown");
 }
 
 #[test]
@@ -132,70 +181,17 @@ fn the_flag_survives_a_session_round_trip_and_an_absent_field_loads_false() {
     assert!(old.edit.grid_lines, "its neighbor keeps its own default");
 }
 
-#[test]
-fn off_draws_no_grid_line_through_the_clip_and_on_draws_the_lane_grid_x_positions() {
-    let mut sc = scene();
-    assert!(sc.app.engine.session().edit.grid_lines);
-    let off = paint(&sc);
-    assert!(verticals(&off).is_empty(), "no vertical line over the clip with the option off: {:?}", verticals(&off));
-    set(&mut sc, "view.grid_over_clips", true);
-    let on = paint(&sc);
-    let mut lines = verticals(&on);
-    lines.sort_by(|a, b| a.0.total_cmp(&b.0));
-    let body_top = sc.rect.min.y + CLIP_NAME_H;
-    let want = expected(&sc);
-    assert_eq!(lines.len(), want.len(), "{lines:?} vs {want:?}");
-    let s = sc.app.engine.session();
-    let ink = theme::text_on(theme::clip_colors(super::super::clips::clip_base_color(&sc.clip, s.track(sc.track).unwrap()), false).0);
-    for ((x, top, bottom, alpha), (wx, bar)) in lines.iter().zip(&want) {
-        assert!((x - wx).abs() < 0.01, "{x} vs {wx}");
-        assert!(*x >= sc.rect.min.x && *x <= sc.rect.max.x, "inside the clip: {x}");
-        assert!(*top >= body_top && *bottom <= sc.rect.max.y, "inside the body, not the name strip: {top}..{bottom}");
-        let nominal = if *bar { BAR_ALPHA } else { BEAT_ALPHA };
-        assert_eq!(*alpha, ink.gamma_multiply(nominal).a(), "x={x} bar={bar}");
-    }
-    // Everything else painted is exactly what the option-off paint drew.
-    let mut flat = Vec::new();
-    on.iter().for_each(|s| flatten(&s.shape, &mut flat));
-    let rest: Vec<String> = flat.iter().filter(|s| !is_vertical(s)).map(|s| format!("{s:?}")).collect();
-    let mut base = Vec::new();
-    off.iter().for_each(|s| flatten(&s.shape, &mut base));
-    assert_eq!(rest, base.iter().map(|s| format!("{s:?}")).collect::<Vec<_>>(), "the paint with the option off is unchanged");
-}
-
-#[test]
-fn hidden_grid_lines_hide_the_overlay_even_when_the_option_is_on() {
-    let mut sc = scene();
-    set(&mut sc, "view.grid_over_clips", true);
-    sc.app.run("view.grid_lines", json!({"value": false})).unwrap();
-    assert!(verticals(&paint(&sc)).is_empty());
-    sc.app.run("view.grid_lines", json!({"value": true})).unwrap();
-    assert!(!verticals(&paint(&sc)).is_empty());
-}
-
-#[test]
-fn the_overlay_stays_inside_a_clip_that_is_scrolled_partly_off_screen() {
-    let mut sc = scene();
-    set(&mut sc, "view.grid_over_clips", true);
-    // The timeline begins two bars in: only the part of the clip inside it is stroked.
-    let bar = bar_at(sc.app.engine.session(), 2);
-    sc.map.scroll = 2 * bar;
-    sc.rect = Rect::from_min_max(pos2(sc.map.x(0), 20.0), pos2(sc.map.x(4 * bar), 108.0));
-    let lines = verticals(&paint(&sc));
-    assert!(!lines.is_empty());
-    assert!(lines.iter().all(|l| l.0 >= 20.0 && l.0 <= sc.rect.max.x), "{lines:?}");
-}
-
 /// A frame-stepped UI harness for the menu: synthetic clicks through the control channel.
 struct Ui {
     app: StudioApp,
     ctx: egui::Context,
     time: f64,
+    shapes: Vec<ClippedShape>,
 }
 
 impl Ui {
     fn new() -> Ui {
-        let mut ui = Ui { app: app(), ctx: egui::Context::default(), time: 0.0 };
+        let mut ui = Ui { app: app(), ctx: egui::Context::default(), time: 0.0, shapes: Vec::new() };
         ui.frames(3);
         ui
     }
@@ -215,6 +211,7 @@ impl Ui {
                 app.ui(ui);
             });
             out.textures_delta.clear();
+            self.shapes = out.shapes;
         }
     }
 

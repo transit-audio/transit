@@ -227,7 +227,7 @@ pub struct Layout {
     pub samples_per_px: f64,
     /// The grid as the ruler corner reads it ("Grid: 1/16", "Adaptive 1/32", "Snap off").
     pub grid_text: String,
-    /// View > Grid Over Clips (#302): the bar and beat lines also stroke over clip bodies.
+    /// View > Grid Over Clips (#302): the one lane grid is painted above the clips instead of beneath them.
     pub grid_over_clips: bool,
     pub scroll: Samples,
     pub tracks: Vec<TrackRow>,
@@ -457,8 +457,15 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     layout.add_more = r4(add_more);
     ui.painter().line_segment([pos2(list.max.x, full.min.y), pos2(list.max.x, full.max.y)], Stroke::new(1.0, TOKENS.line));
 
-    grid_and_ruler(app, ui, &s, map, ruler, tl);
+    // The grid is computed and painted once. View > Grid Over Clips only moves its layer: above the
+    // clips instead of beneath them (#302).
+    let grid = grid_overlay::lines(&s, map, tl.min.x, tl.max.x);
+    let over = s.edit.grid_lines && s.edit.grid_over_clips;
+    grid_and_ruler(ui, &grid, ruler, tl, !over);
     clips(app, ui, &s, map, tl, &rows, &geo, &mut layout);
+    if over {
+        grid_overlay::paint(ui.painter(), tl, &grid);
+    }
     group_summaries(app, ui, &s, map, tl, &mut layout);
     header_drag(app, ui, &s, &mut layout);
     crate::keys::lane_hints(app, ui, tl, &layout.tracks);
@@ -481,25 +488,24 @@ fn bar_at(s: &Session, bar: i64) -> Samples {
     s.tempo.samples_at_bar_beat(BarBeat { bar, beat: 1, tick: 0 }, s.sample_rate)
 }
 
-/// Bar and beat lines across the timeline, and the ruler with bar numbers.
-fn grid_and_ruler(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, tl: Rect) {
+/// The ruler with bar numbers and, when `lane` is set, the grid lines across the timeline. With
+/// Grid Over Clips on, the caller paints the lane lines itself after the clips.
+fn grid_and_ruler(ui: &Ui, grid: &[grid_overlay::Line], ruler: Rect, tl: Rect, lane: bool) {
     let p = ui.painter();
     p.rect_filled(ruler, 0.0, TOKENS.ruler);
     p.line_segment([pos2(ruler.min.x, ruler.max.y), pos2(ruler.max.x, ruler.max.y)], Stroke::new(1.0, TOKENS.line));
-    let gp = p.with_clip_rect(tl);
+    if lane {
+        grid_overlay::paint(p, tl, grid);
+    }
     let rp = p.with_clip_rect(ruler);
-    for l in grid_overlay::lines(s, map, tl.min.x, tl.max.x) {
+    for l in grid {
         let x = l.x;
         match l.kind {
             grid_overlay::Kind::Beat => {
-                gp.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, TOKENS.grid_beat));
                 rp.line_segment([pos2(x, ruler.max.y - 5.0), pos2(x, ruler.max.y)], Stroke::new(1.0, TOKENS.text_dim.gamma_multiply(0.5)));
             }
-            grid_overlay::Kind::Sub => {
-                gp.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, TOKENS.grid_sub));
-            }
+            grid_overlay::Kind::Sub | grid_overlay::Kind::Bar { labeled: false } => {}
             grid_overlay::Kind::Bar { labeled: true } => {
-                gp.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, TOKENS.grid_bar));
                 rp.line_segment([pos2(x, ruler.min.y + crate::loopbar::STRIP_H + 10.0), pos2(x, ruler.max.y)], Stroke::new(1.0, TOKENS.text_dim));
                 rp.text(
                     pos2(x + 4.0, ruler.min.y + crate::loopbar::STRIP_H + 9.0),
@@ -509,12 +515,8 @@ fn grid_and_ruler(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, 
                     TOKENS.text,
                 );
             }
-            grid_overlay::Kind::Bar { labeled: false } => {
-                gp.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, TOKENS.grid_beat));
-            }
         }
     }
-    let _ = app;
 }
 
 /// Does a clip drag with these modifiers copy instead of move? Ctrl (Cmd on a Mac; egui's
@@ -964,8 +966,6 @@ fn overlays(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, tl: Re
                 layout.recording.push(RecordingLane { track: t.id.0, rect: r4(r), notes: Vec::new() });
                 rp.rect_filled(r, crate::theme::RADIUS, TOKENS.record.gamma_multiply(0.45));
                 recording_preview::draw(app, ui, s, tl, t.id, r, origin);
-                let body = Rect::from_min_max(pos2(r.min.x, (r.min.y + CLIP_NAME_H).min(r.max.y)), r.max);
-                grid_overlay::draw(&rp.with_clip_rect(r.intersect(tl)), s, map, tl, body, theme::text_on(TOKENS.record));
                 let strip = Rect::from_min_max(r.min, pos2(r.max.x, (r.min.y + CLIP_NAME_H).min(r.max.y)));
                 rp.rect_filled(strip, crate::theme::top_corners(), TOKENS.record);
                 let tp = rp.with_clip_rect(strip.intersect(tl));
