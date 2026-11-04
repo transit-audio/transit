@@ -220,3 +220,86 @@ fn an_on_that_cannot_be_tracked_is_never_emitted() {
     host.panic(&mut rec);
     assert_eq!(rec.heard.iter().filter(|(_, _, e)| matches!(e.message, Message::NoteOff { .. })).count(), MIDI_FX_NOTES);
 }
+
+#[test]
+fn a_release_in_a_full_carry_never_puts_its_off_before_its_on() {
+    let t = track(&[("midi_test_delay", &[("samples", 1000.0)])]);
+    let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
+    host.begin(&mut rec, &t, None, 0, &Transport::default(), 48_000.0, 0, FRAMES);
+    let stage = host.stages[0].as_mut().unwrap();
+    for (i, c) in stage.carry.iter_mut().enumerate() {
+        let event = match i {
+            0 => on(9, 62, 100),
+            i if i == MIDI_FX_CARRY - 1 => on(7, 60, 100),
+            _ => ev(-1, Message::Control { cc: 1, value: 1 }),
+        };
+        *c = Carried { due: 1000, event };
+    }
+    stage.carry_len = MIDI_FX_CARRY;
+    assert!(host.take(&mut rec, 0, &off(7, 60)));
+    host.flush(&mut rec);
+    rec.process(&mut [], FRAMES);
+    for _ in 0..3 {
+        block(&mut host, &mut rec, &t, &[]);
+    }
+    // The release evicts its own on, which never sounded: nothing for note 60 reaches the instrument.
+    let heard: Vec<_> = rec
+        .heard
+        .iter()
+        .filter_map(|(_, _, e)| match e.message {
+            Message::NoteOn { key: 60, .. } => Some("on"),
+            Message::NoteOff { key: 60, .. } => Some("off"),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(heard, Vec::<&str>::new());
+    assert_eq!(host.counts.carry_overflow, 1);
+}
+
+#[test]
+fn the_fuzz_seed_71271_through_two_delays_never_delivers_an_off_before_its_on() {
+    // #281: zero-length notes through [Delay 64, Delay 37] fill the carry with releases and ons of
+    // other notes, so a release that evicts from a full carry meets its own on still pending.
+    let t = track(&[("midi_test_delay", &[("samples", 64.0)]), ("midi_test_delay", &[("samples", 37.0)])]);
+    let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
+    let mut state: u32 = 71271;
+    let mut next = move || {
+        state ^= state << 13;
+        state ^= state >> 17;
+        state ^= state << 5;
+        state
+    };
+    let mut voice = 0;
+    for _ in 0..200 {
+        let mut events = Vec::new();
+        for _ in 0..next() % 160 {
+            voice += 1;
+            let key = 60 + (next() % 6) as u8;
+            let at = next() % FRAMES as u32;
+            let off_at = if next() % 2 == 0 { at } else { (at + next() % 40).min(FRAMES as u32 - 1) };
+            events.push((at, on(voice, key, 100)));
+            events.push((off_at, off(voice, key)));
+        }
+        block(&mut host, &mut rec, &t, &events);
+    }
+    for _ in 0..3 {
+        block(&mut host, &mut rec, &t, &[]);
+    }
+    // A voice whose off reaches the instrument before any on for it: the instrument would hang it.
+    let mut off_first = std::collections::HashSet::new();
+    let mut sounded = std::collections::HashSet::new();
+    for (_, _, e) in &rec.heard {
+        match e.message {
+            Message::NoteOn { .. } => {
+                assert!(!off_first.contains(&e.note_id), "voice {} got its off before its on", e.note_id);
+                sounded.insert(e.note_id);
+            }
+            Message::NoteOff { .. } if !sounded.contains(&e.note_id) => {
+                off_first.insert(e.note_id);
+            }
+            _ => {}
+        }
+    }
+    assert!(!host.pending());
+    assert!(rec.heard.iter().any(|(_, _, e)| matches!(e.message, Message::NoteOn { .. })));
+}
