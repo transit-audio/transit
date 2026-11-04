@@ -15,7 +15,7 @@ Machine-readable tokens: [`tokens.json`](tokens.json). Mockup sources: [`mockups
 
 ### Arrangement grid
 
-The grid is the arrangement's backbone: one structure that carries tempo, meter and triplets, computed and painted once. Clips are elements sitting on it. View > Grid Over Clips changes only its layer, above the clips instead of beneath them, so the grid reads as one continuous structure across empty lane space and clips alike; nothing re-draws it.
+The grid is the arrangement's backbone: one structure that carries tempo, meter and triplets, computed and painted once. Clips are elements sitting on it. View > Grid Over Clips changes only its layer, above the clips instead of beneath them, so the grid reads as one continuous structure across empty lane space and clips alike; nothing re-draws it. Above the clips the lines are translucent, never opaque: each is the lane's own grid contrast applied as a tint (white or black at the alpha that reproduces the lane's grid token over an empty lane), so the empty lane looks the same with the option on or off. Over a clip body they behave like an Overlay blend: black at that alpha over a bright body (luma above 0.5), white over a dark one, split per segment at the body's edges. Over a body the alpha is boosted (3x the lane's) so the finest lines stay findable. The overlay strength is a single named constant (`OVERLAY_GAIN`) and a candidate for a per-machine accessibility preference in the v0.7.0 design pass.
 
 ## Colour
 
