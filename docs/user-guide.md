@@ -239,7 +239,8 @@ strip at -12 dB, in one undo step, the way Logic and Live do it. Escape in the a
 click on empty space below the tracks or in the mixer, deselects the clips and tracks: no mixer
 strip or track header is highlighted. The edit cursor keeps its track, which stays the target of
 cursor commands (Paste, Split, New MIDI Clip) and of the Devices pane until you click a track
-again.
+again. Clicking a track header selects the track and clears the clip selection; the last click
+decides what Delete removes.
 
 ## A plug-in that stops responding
 
