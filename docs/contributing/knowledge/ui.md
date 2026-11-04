@@ -65,7 +65,9 @@ Issue #63; code in `crates/ui-studio/src/fades.rs` (gestures) and `crates/model/
 today `arrange.rs` still draws the machine preference, default 46, clamped to 24..200. The proposal
 uses header-bottom drag for one track, Alt-drag for all, Alt-wheel for the hovered main row,
 Alt+=/- for all-track preset steps, and a View menu reset to 46. Selection does not narrow bulk
-scope. Each gesture is one undo step; wheel merging ends on input boundaries, never a timer.
+scope. Drag/wheel heights preview in transient UI state and commit one ordinary `track.height`
+command at the input boundary, never on a timer. Session heights remain unchanged until commit;
+session replacement/reset/reopen discards the preview. Each changed gesture is one undo step.
 
 Automation lane bases stay in transient open-session view state (`auto_shown` and `auto_lanes`
 retain `#[serde(skip)]`, so neither is in ui.json): displayed height becomes
@@ -76,11 +78,10 @@ The ADR specifies old-session behavior, toggle interaction, gestures,
 inspect fields and deterministic handler/paint tests. Implementation goes in new arrangement
 modules, with pure moves before extending the large arrangement and app-root files.
 
-Before those gestures ship, the proposal requires control-side verification and rebinding of
-layout-only document snapshots to the existing player request. Height edits and their undo/redo
-remain persistent and capture/save eligible without requesting, compiling or publishing an audio
-plan. Real audio edits, document replacement and device/settings changes retain normal synchronization;
-the gate exercises actual UI/player synchronization, pending adoption and live plug-in state saving.
+Preview geometry also drives lanes and waveforms. The gate observes command history and stored
+heights during real UI gestures, proving zero height commands during preview and one at commit.
+Playback synchronization stays unchanged: the final edit has the same plan-compilation cost as
+a track rename. No height merge key or playback-runtime mechanism is proposed.
 
 ## Tests
 
