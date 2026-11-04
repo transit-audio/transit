@@ -179,20 +179,12 @@ pub(super) fn bright(c: Color32) -> bool {
 /// at [`body_alpha`] (darkening, where the lane lightens); over a body at 0.5 or below it is
 /// white at [`body_alpha`]. A line is split at the top and bottom edge of each body it crosses;
 /// neighbors of one color are merged.
-pub(super) fn segments(l: &Line, tl: Rect, bodies: &[Body]) -> Vec<(f32, f32, Color32)> {
-    let mut sorted = bodies.to_vec();
-    sorted.sort_by(|a, b| a.rect.min.y.total_cmp(&b.rect.min.y));
-    let mut out = Vec::new();
-    segments_into(l, tl, &sorted, &mut out);
-    out
-}
-
-/// [`segments`] into a reused buffer; `bodies` must be sorted by top edge.
+/// `bodies` must be sorted by top edge.
 pub(super) fn segments_into(l: &Line, tl: Rect, bodies: &[Body], out: &mut Vec<(f32, f32, Color32)>) {
     out.clear();
     let lane = overlay_color(l.kind);
     let a = body_alpha(lane.a());
-    let mut push = |out: &mut Vec<(f32, f32, Color32)>, y0: f32, y1: f32, c: Color32| match out.last_mut() {
+    let push = |out: &mut Vec<(f32, f32, Color32)>, y0: f32, y1: f32, c: Color32| match out.last_mut() {
         Some(last) if last.2 == c && last.1 >= y0 => last.1 = y1,
         _ => out.push((y0, y1, c)),
     };

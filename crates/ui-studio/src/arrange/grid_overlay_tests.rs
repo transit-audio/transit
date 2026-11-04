@@ -448,3 +448,12 @@ fn a_clips_strip_and_body_are_stroked_by_their_own_colors() {
     let same = [body(0.0, 20.0, 100.0, 34.0, Color32::BLACK), body(0.0, 34.0, 100.0, 60.0, Color32::BLACK)];
     assert_eq!(segments(&line, tl, &same).len(), 3, "strip and body merge");
 }
+
+/// [`segments_into`] on a sorted copy of `bodies`.
+fn segments(l: &Line, tl: Rect, bodies: &[Body]) -> Vec<(f32, f32, Color32)> {
+    let mut sorted = bodies.to_vec();
+    sorted.sort_by(|a, b| a.rect.min.y.total_cmp(&b.rect.min.y));
+    let mut out = Vec::new();
+    segments_into(l, tl, &sorted, &mut out);
+    out
+}
