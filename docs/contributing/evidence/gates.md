@@ -65,8 +65,9 @@ To split a file: cut it by concern (one module per responsibility, not per size)
 The [2026-11-03 amendment](../../adr/0037-adaptable-core-small-hardware.md#amendment-2026-11-03-two-tiers-of-portability)
 specifies two independent jobs to add alongside the platform jobs in `.github/workflows/ci.yml`.
 The headless build is a required future gate. The bare-metal check runs today, as a step of the
-linux job ("Bare-metal library check (ADR 0037 Tier B)"), for the one enrolled crate,
-`transit-instrument-core` (ADR 0041, #269); the other packages below are candidates:
+linux job ("Bare-metal library check (ADR 0037 Tier B)"), for the two enrolled crates,
+`transit-instrument-core` and `transit-sampler-core` (ADR 0041, #269); the other packages below
+are candidates:
 
 - **Headless build (#236):** the ADR's bash package list and explicit feature set run
   `cargo build --locked --no-default-features` and `cargo test --locked --no-default-features`

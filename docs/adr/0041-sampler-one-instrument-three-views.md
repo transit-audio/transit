@@ -298,12 +298,18 @@ Progress (2026-11-04): the first #269 step has landed, the `crates/instrument-co
 below (a pure move with re-exports at the old dsp paths, then its Tier B configuration and
 bare-metal check in the linux CI job). The external amp-gain seam arrives with sampler-core.
 
+Progress (2026-11-04, second step): `crates/sampler-core` has landed as a portable core (region
+reader, cubic, loops, zones and pads, voices, envelopes, choke, the processing over borrowed
+spans; Gate 1 at the core level and Gate 6's probes), with the shaper's external amp-gain seam in
+`instrument-core` (a parallel entry point; `process` and every existing instrument's bits are
+unchanged). The desktop adapter, model patch and compatibility path follow in job C.
+
 ### Crates and integration seams
 
 | Owner | Work |
 |---|---|
-| `crates/sampler-core`, package `transit-sampler-core` (L1, Tier B) | Region reader, cubic interpolation, voices, selection, envelopes, loops, choke and processing trait over borrowed audio/event spans. Descriptive name, no vendor branding. `default = ["std"]`, no-default `no_std + alloc`, no model, file IO, egui or desktop Plugin dependency. |
-| `crates/instrument-core`, package `transit-instrument-core` (L1, Tier B) | Pure move of shared shaper/matrix, required SVF/LFO/envelope/curve primitives out of dsp; then add the external amp-gain seam separately. Both dsp and sampler-core depend on it, never sampler-core on dsp. Preserve old module re-exports and numeric behavior. Register layers and the primitive crate's standalone status; sampler-core has this explicit L1 dependency. **Landed: extraction; the external amp-gain seam arrives with sampler-core.** |
+| `crates/sampler-core`, package `transit-sampler-core` (L1, Tier B) | Region reader, cubic interpolation, voices, selection, envelopes, loops, choke and processing trait over borrowed audio/event spans. Descriptive name, no vendor branding. `default = ["std"]`, no-default `no_std + alloc`, no model, file IO, egui or desktop Plugin dependency. **Landed: core; the desktop adapter follows in job C.** |
+| `crates/instrument-core`, package `transit-instrument-core` (L1, Tier B) | Pure move of shared shaper/matrix, required SVF/LFO/envelope/curve primitives out of dsp; then add the external amp-gain seam separately. Both dsp and sampler-core depend on it, never sampler-core on dsp. Preserve old module re-exports and numeric behavior. Register layers and the primitive crate's standalone status; sampler-core has this explicit L1 dependency. **Landed: extraction; the external amp-gain seam (`amp_frame`, `filter_frame`, `amp_scale`, `rest_filter` beside an unchanged `process`).** |
 | `crates/dsp/src/plugins/sampler/` and registry | Desktop adapter retains `SAMPLER_INFO`/`sampler`, Category Instrument, `is_instrument: true`, `audiosuite: false`; typed parameters, events, transport, rack macros, legacy compatibility and prepared sample-bank handoff. Split the existing file by concern as pure moves before adding code. |
 | `crates/model` / `crates/mix` | Serialized patch and source references; prepare the L2 disk-reader implementation behind an L1 borrowed reader interface and pass it down through the adapter. Model may depend on the L1 trait; L1 must not import `DiskSource`. Compile patch/mappings off-thread and retain instance generations, fingerprints, note-view and worker-retirement rules. |
 | `crates/engine` / `crates/audio-io` | Atomic load/edit commands, checked filesystem access, cue/tempo metadata, existing decoder reuse, off-thread detector, Slice to MIDI, media collection, SFZ and expansion. Extend the current `cmd/sampler.rs` path as well as `cmd/file.rs` imports. |

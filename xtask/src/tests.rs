@@ -136,6 +136,10 @@ fn upward_and_app_edges_fail_while_documented_same_layer_edges_remain_valid() {
         ("transit-dsp", "transit-macro-osc", true),
         ("transit-macro-osc", "transit-dsp", false),
         ("transit-audio-wasapi", "transit-rt", true),
+        // The sampler core shares the instrument primitives (ADR 0041), a same-layer edge; the
+        // primitives stay standalone, so the reverse edge fails.
+        ("transit-sampler-core", "transit-instrument-core", true),
+        ("transit-instrument-core", "transit-sampler-core", false),
     ] {
         let metadata = Metadata { packages: vec![package(source, &[(dest, None)]), package(dest, &[])] };
         assert_eq!(check_layers(&metadata, |_| Ok(INHERIT.into())).is_ok(), valid, "{source} -> {dest}");

@@ -23,6 +23,7 @@ cargo xtask assets
 cargo xtask timing
 cargo xtask file-size
 cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-instrument-core   # Tier B bare-metal check (ADR 0037); `rustup target add thumbv7em-none-eabihf` once
+cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-sampler-core      # Tier B bare-metal check (ADR 0041)
 cargo xtask rt-targets   # only when crates/rt or crates/mix changed
 ```
 

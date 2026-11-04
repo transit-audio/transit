@@ -204,6 +204,8 @@ the remaining candidates explicitly while the job's enrolled package list grows.
 (implementation note, 2026-11-04): `transit-instrument-core`, the shared instrument primitives
 [ADR 0041](0041-sampler-one-instrument-three-views.md) moved out of dsp (#269), a new crate that
 started in Tier B; its check runs as a step of the linux job until the separate job lands.
+`transit-sampler-core`, the portable Sampler core (ADR 0041, #269), joined it in its first
+slice, also as a new crate that started in Tier B.
 Candidates, in order:
 
 1. `resonator` — **small**: no production dependencies; core imports, alloc imports and two math wrappers.
