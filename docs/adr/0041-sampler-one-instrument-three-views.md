@@ -1,6 +1,6 @@
 # ADR 0041: One Sampler instrument with three views (Instrument, Pads, Slices)
 
-- **Status:** proposed 2026-11-01 (decided by the maintainer with the coordinator; slices filed)
+- **Status:** accepted 2026-11-04 (proposed 2026-11-01; decided by the maintainer with the coordinator; slices filed)
 - **Date:** 2026-11-01
 - **Reopen when:** a pad needs its own insert chain or output often enough that "Expand to rack" is the common path rather than the exception; the shaper and matrix cannot serve per-pad or per-zone modulation; streaming long samples ([ADR 0035](0035-disk-backed-audio-sources.md)) cannot meet the voice count on the reference hardware; or a rack-native sampler ([ADR 0034](0034-racks-layering-instruments-through-track-groups.md)) makes the Pads view redundant.
 
