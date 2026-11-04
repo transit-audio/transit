@@ -278,8 +278,10 @@ pub fn render_track_pre_fader_timed(s: &Session, track: TrackId, range: Range) -
             t.mixer.mute = false;
             t.mixer.solo = false;
             t.mixer.output = Route::Main;
+            // Hard left for a mono track: the pan law gives exactly unity there, so the left
+            // channel is the strip's output unchanged (#332).
             t.mixer.pan = match t.channels() {
-                1 => vec![0.0],
+                1 => vec![-1.0],
                 _ => vec![-1.0, 1.0],
             };
             t.automation.retain(|l| matches!(l.param, AutoParam::Plugin { .. }));
@@ -300,12 +302,9 @@ pub fn render_track_pre_fader_timed(s: &Session, track: TrackId, range: Range) -
         }
     }
     let (mut out, latency) = render_in_memory_timed(&solo, None, range, 1024);
-    // Mono tracks: fold back to one channel (undo the centre pan law).
-    if s.track(track).is_some_and(|t| t.channels() == 1)
-        && let Some(l) = out.first().cloned()
-    {
-        let g = std::f32::consts::SQRT_2;
-        out = vec![l.iter().map(|x| x * g).collect()];
+    // Mono tracks: the left channel is the print (panned hard left above).
+    if s.track(track).is_some_and(|t| t.channels() == 1) {
+        out.truncate(1);
     }
     (out, latency)
 }
