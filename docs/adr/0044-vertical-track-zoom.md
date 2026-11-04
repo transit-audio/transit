@@ -27,11 +27,20 @@ Evidence below is against `fb1aa595`; line numbers identify the inspected implem
   total row heights and cumulative tops. Take lanes use `TAKE_H = 22` at line 291.
 - `crates/ui-studio/src/automation.rs:47` defines 56-point automation lanes, bounded to 40..240;
   `LaneView.height` at 71 is view state. Layout at 637 and 673 and the bottom handle at 1051
-  use that unscaled height; `AutoGesture::Height` at 259 owns the lane drag.
+  use that unscaled height; `AutoGesture::Height` at 259 owns the lane drag. `auto_shown` and
+  `auto_lanes` have `#[serde(skip)]` at `ui_state.rs:124`: their bases are transient, not in ui.json.
 - `crates/ui-studio/src/arrange/clips.rs:162` already bounds the name strip by the clip rect and
   passes the remaining body to `waveform::draw` at 191. `waveform.rs:50` divides that body's height
   by channel count; line 155 derives peak amplitude from the band height. Peaks do not assume 46
   points. The fixed parent row geometry and header controls are the missing connection.
+- Height commands currently also trigger audio-plan work: `crates/engine/src/lib.rs:391` advances
+  the revision and changes the document Arc; `crates/ui-studio/src/host/plugin_state.rs:21` checks
+  both and calls `Player::update_session` at line 36. `crates/playback/src/player/runtime.rs:124`
+  requests a plan, `crates/playback/src/player/mod.rs:263` takes that request, and
+  `crates/playback/src/plan_bridge.rs:450` calls `compile_with_mode`. Undo merging alone does not
+  prevent this. Capture and readiness require the requested Arc plus confirmed plan generation
+  (`crates/playback/src/player/runtime.rs:534`, 545, 575);
+  merely skipping synchronization would make the latest heights ineligible for live-state capture.
 
 ## Convention
 
@@ -63,7 +72,9 @@ bindings differ; these are the concrete references, checked 2026-11-04:
    points, independent of display DPI and interface zoom. Retire `UiState.track_height`, including
    its serialization. An old `ui.json` key is ignored by serde, never imported into a session,
    and disappears on the next settings save. The same session opens identically with that key
-   absent, 46, 200 or any other value. Lane view state remains machine-local.
+   absent, 46, 200 or any other value. Automation lane bases remain transient view state of the
+   open session: retain `auto_shown`/`auto_lanes`' skip attributes; save neither in ui.json nor in
+   the session. Closing and reopening the session resets those bases to 56 when lanes are opened.
 
    New tracks and **Reset Track Heights** use `Small` (46 points), preserving today's new-project
    density. Keep the existing meaning of `Medium`: **88 points**. A session from a build that
@@ -172,7 +183,7 @@ bindings differ; these are the concrete references, checked 2026-11-04:
    The existing automation bottom handle stays: if its displayed height at press is `L`, dragging
    by `dy` computes `Lnew = clamp(L + dy, 40, 240)` and stores `B = Lnew * D / H` as view state.
    Thus the dragged lane follows later parent changes from the user's new proportion. Do not
-   clamp that base back to 40..240: at H=16 a 240-point lane needs B=690. Validate stored bases
+   clamp that base back to 40..240: at H=16 a 240-point lane needs B=690. Validate in-memory bases
    as finite positive numbers bounded to `40*46/440 .. 240*46/16`, substituting 56 for invalid
    nonpositive/nonfinite values. Existing 40..240 bases remain valid. Lane dragging still makes
    no session undo entry and never invokes `track.height`. Take lanes gain no separate handle.
@@ -238,18 +249,83 @@ bindings differ; these are the concrete references, checked 2026-11-04:
    command state together: a correct query alone cannot prove the arrangement stopped using
    the global preference.
 
+9. **Persist layout edits without an audio-plan request.** Keep ordinary document revision,
+   dirty/save and undo/redo behavior for heights and toggle bookkeeping. Before the normal player
+   update, the control thread may rebind the latest document Arc to the existing audio request,
+   but only after proving the documents differ exclusively in the fields below. No callback,
+   DSP or mix-compiler changes are required; this control-side prerequisite lands in slice 1.
+
+   Add `Session::same_except_track_layout(&self, other: &Session) -> bool` in a new model module.
+   It compares every field except `Track.height`, `EditState.zoom_toggle`, and the two
+   `ZoomState` fields `samples_per_px` and `scroll`. Track count, IDs and order must match.
+   Compare all remaining fields, including selection/cycle state, runtime arm/monitor/touched
+   state, plug-in state bytes, source-pool identities and `SourcePool::has_disk()`. Do not use
+   serialized JSON (it omits runtime fields), command names, revision equality, a hash alone,
+   or topology equality as the proof. Use exhaustive field destructuring without `..` for
+   Session, Track, EditState and ZoomState, with borrowed comparisons of the remaining data;
+   a new field must cause a compile error until classified. Do not clone clips or audio to
+   compare them. This deliberately narrow exemption does not classify other edits as harmless.
+
+   Add control-only `Player::try_rebind_track_layout(Arc<Session>) -> Result<bool, PlayerError>`
+   and its RuntimeControl implementation. Return false without mutation when that comparison
+   against `RuntimeControl.requested` fails; return an error without mutation if busy or faulted.
+   On success replace only `RuntimeControl.requested` with the new Arc. Retain the request ID,
+   request state, confirmed generation, parameter-delivery checks, pending actions, input,
+   handles and latency/republish bookkeeping. Allocate no session-request credit, supersede no
+   request, call neither `SessionControl::request` nor `replace_session`, and prepare/publish no
+   plan. The queued or adopted plan can retain its older, proven-equivalent snapshot; subsequent
+   genuine refreshes use the latest requested Arc. Repeated rebinds need no list of old Arcs.
+
+   In `StudioApp::sync_player_session`, attempt this before `update_session` when this is the
+   same open document, with no ResetSession/restore/reopen boundary and no changed Low Latency
+   setting. Success acknowledges `last_rev` without setting Low Latency pending or publishing.
+   False takes the existing update path; errors retain the existing retry/status behavior and
+   do not acknowledge synchronization. Explicit replacement, input/I/O/device changes, and
+   Low Latency/full-chain changes always retain their existing request paths, even if the
+   session contents compare equal. Fault recovery must not manufacture a new confirmed lineage.
+
+   A rebind while the original request is Preparing/Published retains that request and its
+   adoption prerequisite; it never marks the new document ready early. Once adopted and confirmed,
+   `has_requested_session`, `plays`, `plays_processed`, `plays_instance_processed`, capture and
+   reopen capture apply their existing identity/generation/delivery checks to the new requested
+   Arc. Old Arcs are no longer eligible. Before `capture_plugin_states`' pending-action/changed
+   check (`host/plugin_state.rs:67`), attempt the same guarded rebind, without admitting a new
+   audio request; a layout-only edit must not falsely supersede a pending Play/Locate/Record.
+   Save/autosave still capture through the normal slot-generation checks and serialize the current
+   engine document with its new heights. Never substitute the plan's older snapshot for saving.
+   A changed captured plug-in state remains a genuine non-layout change on the next synchronization.
+
+   Apply this comparison on synchronization after commands, merged gestures, toggle, undo and
+   redo alike; no separate unchecked undo exemption. A subsequent audio edit compares against
+   the latest rebound document and requests a plan normally. An undo that also changes audio
+   data likewise compiles. Existing automatic plug-in-readiness/latency refreshes remain valid;
+   a height edit itself must cause zero extra requests, compilations or publications.
+
 ## Implementation / slices
 
 Two jobs; acceptance of this ADR does not mean either is implemented.
 
-1. **Model, commands and format.** Touch `crates/model/src/track.rs`, new model height tests,
+1. **Model, commands, format and player synchronization.** Touch `crates/model/src/track.rs`, new model height tests,
    `crates/model/tests/corpus.rs` and `serde_defaults.rs` as needed for missing-field coverage;
    add a separate fixture only if existing corpus coverage lacks a named preset. Preserve old
    corpus bytes. Pure-move height specs/handlers/tests out of `crates/engine/src/cmd/track.rs`
    into new `cmd/track_height.rs` first; register it in `cmd/mod.rs`. Put the new commands and
    query there, with tests in a separate height test file. Update `cmd/zoom_toggle.rs` for the
    bounded, undoable toggle and invalidation contract. Gate: model round-trip/corpus/defaults,
-   engine height/clamp/atomic-refusal/no-op/toggle tests, plus merge-owner refusal tests. The UI
+   engine height/clamp/atomic-refusal/no-op/toggle tests, plus merge-owner refusal tests.
+   Include rule 9 before enabling any new height command: put the exhaustive comparison in new
+   `crates/model/src/track_layout.rs`, with separate comparison tests and module wiring in
+   `model/src/lib.rs`. Put player rebinding in new `playback/src/player/runtime/layout_sync.rs`
+   and tests in `runtime/layout_sync_tests.rs`. Pure-move the session API wrappers out of
+   `player/device.rs` (1296 lines) into new `player/device/session_sync.rs` before extending them;
+   the old file must shrink. Update `ui-studio/src/host/plugin_state.rs` and put synchronization/
+   save tests in new `host/track_layout_sync_tests.rs`. Add test-only request/compile/publication
+   counters at the actual operations in `playback/src/player/mod.rs` (392 lines) and
+   `playback/src/plan_bridge.rs` (842), not in the bypass helper. Counter storage/accessors go in
+   new `playback/src/player/test_counters.rs`; tests stay in the new test modules. These roots
+   need only bounded counter hooks and module wiring. Gate: the control-side synchronization cases
+   below through real commands, save and player service/adoption; existing state-lineage,
+   parameter-delivery, document replacement and pending-action tests must still hold. The UI
    still draws its old height until slice 2; do not claim #314 complete at this boundary.
 2. **Geometry, gestures and drawing.** Pure-move `RowGeo` and related layout helpers from
    `crates/ui-studio/src/arrange.rs` to new `arrange/geometry.rs` before changing behavior. New
@@ -263,7 +339,9 @@ Two jobs; acceptance of this ADR does not mean either is implemented.
    dispatch and inspect wiring as needed. Add menu entries in `crates/engine/catalog/menus.txt`
    and command registration for those entries; add resize help through the existing help catalog.
    Keep new behavior out of the large root files and keep every new file below 1500 lines.
-   Gate: the complete UI gate below, shortcut reachability/shadowing guards, and settings-load tests.
+   Gate: the complete UI gate below, including each gesture through the player synchronization
+   path, shortcut reachability/shadowing guards, and settings-load tests. Slice 2 depends on the
+   verified rebind path from slice 1; it cannot ship gestures that still request plans for heights.
 
 For implementation, each slice runs its affected crate tests and the format/layer/timing/file-size
 gates; the final chain runs CONTRIBUTING.md's full local gate and Linux compile proof, with the
@@ -277,6 +355,30 @@ wall-clock, scheduling, sleeps or frame-rate assertions. Tests fail on the old u
 Follow [gates.md](../contributing/evidence/gates.md); any fixture rendering four or more strips uses
 `MixEngine::force_serial(true)` unless it is testing workers. Required cases:
 
+- **Audio-plan isolation and save lineage (both slices).** Start with an attached fake-device
+  player and an adopted, confirmed session containing a fixture plug-in. Establish baseline
+  request/compile/publication counters at their actual operations. For drag, Alt-drag, wheel,
+  both keys, Reset, toggle on/off and each action's undo/redo, run normal UI synchronization and
+  explicit control-service/audio-adoption/acknowledgment steps. Require zero additional requests,
+  compilations and publications attributable to those edits, unchanged plan generation, the
+  current requested Arc, and correct command/paint heights. Slice 1 drives the commands; slice 2
+  drives real UI handlers. Do not replace synchronization with a mock or test only the comparator.
+  Use a settled fixture with no autonomous latency/load refresh; separately show a deliberate
+  refresh still works after rebinding. Capture known live fixture state and save/reload after a
+  resize and after undo/redo: both the live state bytes and current heights must survive. An
+  unsubmitted Arc and the previous Arc must fail capture/readiness; slot-generation and processed
+  parameter checks still apply. Give the fixture matching stored/live bytes for the zero-compile
+  save case; changed captured bytes must follow the ordinary non-layout synchronization path.
+- **Pending work and positive controls (slice 1).** Rebind while a real audio edit's request is
+  Preparing, then Published, with Play/Locate/Record prerequisites pending. No extra request or
+  cancellation; capture/readiness stays pending until explicit adoption/confirmation, then the
+  latest layout Arc becomes eligible. Reject/fault the original request and verify rebinding
+  cannot turn it into success. After a settled height edit, change a clip or plug-in parameter:
+  explicit service must increment compile/publication counters and adoption must reflect that
+  audio edit; undo/redo of it also takes the normal path. Include mixed audio-plus-height changes
+  between two syncs, changed arm/monitor/touched/source pool, same-content session replacement,
+  and Low Latency/input/I/O changes. None may disappear through the layout exemption. Test the
+  comparator's allowed-field list directly as well; runtime state omitted by serde must matter.
 - Drag one of three unequal tracks over multiple frames: only its queried height and painted
   row change, one undo restores the exact variant, redo restores the result. No movement is a
   no-op; release outside, focus loss and an intervening command close the merge.
@@ -297,6 +399,8 @@ Follow [gates.md](../contributing/evidence/gates.md); any fixture rendering four
 - At H=46, default automation/take lanes are 56/22; at H=92 they are 112/44. Test both lane clamps
   and a hand-resized automation lane followed by parent resize, collapse/reopen and parent undo.
   Compare cumulative tops, lane rects, drop targeting and scroll bounds, not only a formula helper.
+  Lane collapse/reopen within the open session retains bases; session close/reopen resets them.
+  Verify neither settings nor session serialization contains the transient lane bases.
 - Save/reload unequal presets, Custom and Fit through file, bytes and bundle open paths. Load an
   existing named-preset corpus session and assert both its retained variant and its rendered points
   (Medium=88); test a missing height. No new `needs`, migration note or dirty flag solely for heights.
@@ -309,8 +413,9 @@ Follow [gates.md](../contributing/evidence/gates.md); any fixture rendering four
 
 ## Alternatives considered
 
-- **Per-track heights in `ui.json`, like automation lanes.** Loses the editing layout when a
-  project moves machines and duplicates the existing session field. Retain only lane bases there.
+- **Per-track heights as view state or in `ui.json`.** Loses the editing layout when a project
+  closes or moves machines and duplicates the existing session field. Automation lane bases
+  remain transient open-session view state with `#[serde(skip)]`; they are not saved in ui.json.
 - **One global row height.** Cannot enlarge a timing-critical track while keeping others compact.
 - **Live-style per-track fold toggle only.** Useful for overview, but cannot provide the requested
   continuous resize or lane detail. Micro supplies compact rows without another fold state.
@@ -321,3 +426,11 @@ Follow [gates.md](../contributing/evidence/gates.md); any fixture rendering four
   pre-pass and loses existing scripting/toggle behavior without helping the resize implementation.
 - **Timer-based wheel merging.** Makes undo depend on pauses and test scheduling. Explicit input
   boundaries are predictable and deterministic.
+- **Suppress revisions or skip player synchronization for height commands.** Loses capture/save
+  lineage or lets a mixed audio edit go unsynchronized. Verify the complete snapshots and rebind
+  only the proven layout difference; preserve all audio request and adoption checks.
+
+## Judging round 1 responses
+
+- **C1 — Accepted (revised).** Rule 9 specifies verified control-side snapshot rebinding, save/capture and pending-request lineage, with module allocation in slice 1 and deterministic request/compile/publication gates through commands and UI gestures in both slices.
+- **M1 — Accepted (revised).** Context, rules 1/6, alternatives and the gate now state that automation lane bases are transient open-session state; retain the serde skips and test close/reopen and serialization behavior.

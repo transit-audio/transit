@@ -63,6 +63,11 @@ meaning. Existing corpus files remain unchanged and must load, round-trip and dr
 The retired `ui.json` track-height key will be ignored, never migrated into the session. These are
 proposed rules, not a description of the current uniform-row arrangement.
 
+The proposed player snapshot rebind is control-side runtime behavior, with no serialized marker:
+saving still captures live plug-in state and writes the current engine document, including its
+heights. Automation lane bases remain transient open-session state, skipped by serde, and are
+not saved in ui.json or the session.
+
 ## Retired features
 
 A feature that is removed leaves old files that still carry it. Its serde variants are gone, so

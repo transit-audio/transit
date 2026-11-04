@@ -67,12 +67,20 @@ uses header-bottom drag for one track, Alt-drag for all, Alt-wheel for the hover
 Alt+=/- for all-track preset steps, and a View menu reset to 46. Selection does not narrow bulk
 scope. Each gesture is one undo step; wheel merging ends on input boundaries, never a timer.
 
-Automation lane bases stay in view state: displayed height becomes `clamp(base * H / 46, 40, 240)`;
-take lanes become `clamp(22 * H / 46, 22, 220)`. The automation handle adjusts its base through
-the inverse formula. One geometry supplies painting and hit tests; compact headers hide controls
-below 46 and 24 points. The ADR specifies old-session behavior, toggle interaction, gestures,
+Automation lane bases stay in transient open-session view state (`auto_shown` and `auto_lanes`
+retain `#[serde(skip)]`, so neither is in ui.json): displayed height becomes
+`clamp(base * H / 46, 40, 240)`; take lanes become `clamp(22 * H / 46, 22, 220)`. The automation
+handle adjusts its base through the inverse formula; session close/reopen resets bases. One geometry
+supplies painting and hit tests; compact headers hide controls below 46 and 24 points.
+The ADR specifies old-session behavior, toggle interaction, gestures,
 inspect fields and deterministic handler/paint tests. Implementation goes in new arrangement
 modules, with pure moves before extending the large arrangement and app-root files.
+
+Before those gestures ship, the proposal requires control-side verification and rebinding of
+layout-only document snapshots to the existing player request. Height edits and their undo/redo
+remain persistent and capture/save eligible without requesting, compiling or publishing an audio
+plan. Real audio edits, document replacement and device/settings changes retain normal synchronization;
+the gate exercises actual UI/player synchronization, pending adoption and live plug-in state saving.
 
 ## Tests
 

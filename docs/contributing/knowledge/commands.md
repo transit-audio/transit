@@ -28,6 +28,12 @@ both returning `{"changed": n}`, and read-only `query.track_heights {}` returnin
 `execute_merged`; keys/reset use one ordinary undoable command. The proposal makes `view.zoom_toggle`
 undoable, caps Fit at 440, and clears its pending restore record on an actual explicit height change.
 The ADR defines input-based merge boundaries, no-op/atomic-refusal behavior and UI reachability.
+Height/toggle commands and their undo/redo retain ordinary revision, dirty and history behavior.
+Before a player update, the proposed control-side layout comparison verifies every field except
+track heights, toggle bookkeeping and horizontal zoom/scroll; a matching snapshot rebinds to the
+existing request without audio-plan compilation/publication. Capture/save still checks document
+identity and confirmed generation. Mixed audio edits and explicit session replacement keep the
+normal request path; neither command names nor suppressed revisions are the bypass criterion.
 These additions and behavior changes are not implemented yet.
 
 Low Latency adds UI-owned options.low_latency {value?: bool, limit_ms?: number}, returning {value, limit_ms}. Omitting value toggles unless only limit_ms is supplied. Invalid limits are refused, and an engine-only host reports unavailable rather than editing the session. query.path_latency {} is a read-only runtime query with adopted plan/device generations and shared/Main latency components; see routing.md.
