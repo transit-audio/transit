@@ -170,3 +170,18 @@ Track 4 px `line`; fill 7 px `mod` from the centre tick (`text.faint`) towards t
 | EQ 7-Band | Response curve with band handles over a live spectrum | Selected-band controls, band list |
 | Drum Synth | 4 × 4 pad grid + selected pad's waveform/envelope | Per-pad voice, Amp env, Filter · Modulation |
 | Mixer | — (channel strips) | Channel strip, short and full height |
+
+## Keeping this document current
+
+This README, `tokens.json` and the mockups are the canonical design source: the repo copy, not any
+export. Whenever styling work settles a new component, token, pattern or rule on this framework,
+it is added here in the same landing, never later:
+
+- a new component gets a row or subsection under Components (anatomy, states, sizes, the tokens it uses);
+- a new or changed token goes into `tokens.json` and the matching table above;
+- a new rule or pattern (a layout, an interaction, a readout format) goes under the section it belongs to;
+- a device panel built from these parts adds its row to the device table, with a screenshot once it lands.
+
+Review before a panel lands checks that its entry exists. The point is reuse: the sampler, the
+stock effects and every later instrument, effect or panel are built from what is documented here,
+so an undocumented component gets reinvented.
