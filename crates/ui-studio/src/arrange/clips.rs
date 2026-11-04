@@ -226,6 +226,7 @@ pub(super) fn draw_clip(
     if rect.height() >= 22.0 && body.height() > 4.0 {
         crate::fades::draw(&p, c, map, rect, body, ink, body_col.gamma_multiply(alpha), selected);
     }
+    super::grid_overlay::draw(&p, s, map, tl, Rect::from_min_max(pos2(rect.min.x, strip.max.y), rect.max), theme::text_on(body_col));
     let stroke = if selected { Stroke::new(2.0, TOKENS.selection_outline) } else { Stroke::new(1.0, theme::darken(base, 0.45)) };
     p.rect_stroke(rect, crate::theme::RADIUS, stroke, StrokeKind::Inside);
 }
@@ -315,7 +316,7 @@ fn draw_cycles(
 }
 
 /// A clip's base color: its own or the track's, darkened when muted.
-fn clip_base_color(c: &Clip, t: &Track) -> Color32 {
+pub(super) fn clip_base_color(c: &Clip, t: &Track) -> Color32 {
     let base = theme::rgb(c.color.unwrap_or(t.color));
     if c.muted { theme::darken(base, 0.5) } else { base }
 }

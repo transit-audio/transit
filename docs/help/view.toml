@@ -7,3 +7,8 @@ id = "view.track_height"
 name = "Track Height"
 text = "Increase All and Decrease All step every track independently. Reset Track Heights returns every track to 46 points. Automation and take lanes follow their parent."
 key = "Alt+= or Alt+-"
+
+[[entry]]
+id = "view.grid_over_clips"
+name = "Grid Over Clips"
+text = "Strokes the bar and beat lines again over clip bodies, over the waveform, at reduced strength, so timing edits can be judged by eye. Off by default, which keeps the lines in empty lane space only. Ableton Live draws its grid through clips; Logic Pro draws it behind regions. This option gives you either."

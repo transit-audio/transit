@@ -7,6 +7,7 @@ mod clips;
 mod copy_drag;
 mod drag_ghosts;
 mod geometry;
+mod grid_overlay;
 pub use geometry::TAKE_H;
 use geometry::shown;
 pub(crate) use geometry::{Map, RowGeo};
@@ -226,6 +227,8 @@ pub struct Layout {
     pub samples_per_px: f64,
     /// The grid as the ruler corner reads it ("Grid: 1/16", "Adaptive 1/32", "Snap off").
     pub grid_text: String,
+    /// View > Grid Over Clips (#302): the bar and beat lines also stroke over clip bodies.
+    pub grid_over_clips: bool,
     pub scroll: Samples,
     pub tracks: Vec<TrackRow>,
     pub clips: Vec<ClipRect>,
@@ -328,6 +331,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         timeline: r4(tl),
         samples_per_px: map.spp,
         grid_text: crate::grid::label(&s, map.spp, &map.grid),
+        grid_over_clips: s.edit.grid_over_clips,
         scroll: map.scroll,
         transport: std::mem::take(&mut app.arrange.layout.transport),
         transport_icons: std::mem::take(&mut app.arrange.layout.transport_icons),
@@ -482,57 +486,32 @@ fn grid_and_ruler(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, 
     let p = ui.painter();
     p.rect_filled(ruler, 0.0, TOKENS.ruler);
     p.line_segment([pos2(ruler.min.x, ruler.max.y), pos2(ruler.max.x, ruler.max.y)], Stroke::new(1.0, TOKENS.line));
-    let first = s.tempo.bar_beat_at(map.at(tl.min.x).max(0), s.sample_rate).bar.max(1);
-    let bar_px = (map.x(bar_at(s, first + 1)) - map.x(bar_at(s, first))).max(0.01);
-    // Label every n bars so labels keep about 40 points apart.
-    let every = [1, 2, 4, 8, 16, 32, 64, 128].into_iter().find(|n| bar_px * *n as f32 >= 40.0).unwrap_or(256);
     let gp = p.with_clip_rect(tl);
     let rp = p.with_clip_rect(ruler);
-    let ppt = crate::grid::px_per_tick(s, map.spp);
-    let step = crate::grid::ticks(ppt, crate::grid::bar_ticks(s), &map.grid);
-    let sub_step = crate::grid::sub_line_step(step, ppt, transit_time::TICKS_PER_QUARTER);
-    for bar in (first..).take(4000) {
-        let x = map.x(bar_at(s, bar));
-        if x > tl.max.x {
-            break;
-        }
-        let beats = s.tempo.meter_at_tick(s.tempo.bar_start_tick(bar)).numerator.max(1);
-        let next = map.x(bar_at(s, bar + 1));
-        if (next - x) / beats as f32 >= 10.0 {
-            for b in 1..beats {
-                let bx = map.x(s.tempo.samples_at_bar_beat(BarBeat { bar, beat: i64::from(b) + 1, tick: 0 }, s.sample_rate));
-                gp.line_segment([pos2(bx, tl.min.y), pos2(bx, tl.max.y)], Stroke::new(1.0, TOKENS.grid_beat));
-                rp.line_segment([pos2(bx, ruler.max.y - 5.0), pos2(bx, ruler.max.y)], Stroke::new(1.0, TOKENS.text_dim.gamma_multiply(0.5)));
+    for l in grid_overlay::lines(s, map, tl.min.x, tl.max.x) {
+        let x = l.x;
+        match l.kind {
+            grid_overlay::Kind::Beat => {
+                gp.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, TOKENS.grid_beat));
+                rp.line_segment([pos2(x, ruler.max.y - 5.0), pos2(x, ruler.max.y)], Stroke::new(1.0, TOKENS.text_dim.gamma_multiply(0.5)));
             }
-        }
-        // Sub-beat lines at the grid step, fainter than the beats; skipped where they would be
-        // denser than `MIN_DRAW_PX` (the snap still uses the step).
-        if let Some(step) = sub_step {
-            let (t0, t1) = (s.tempo.bar_start_tick(bar), s.tempo.bar_start_tick(bar + 1));
-            let beat = s.tempo.meter_at_tick(t0).ticks_per_beat().max(1);
-            // Multiples of the step from tick 0, as `snap` rounds to them.
-            for tick in ((t0 + step - 1).div_euclid(step) * step..t1).step_by(step as usize) {
-                if (tick - t0) % beat == 0 {
-                    continue;
-                }
-                let sx = map.x(s.tempo.tick_to_samples(tick, s.sample_rate));
-                if sx >= tl.min.x - 1.0 && sx <= tl.max.x {
-                    gp.line_segment([pos2(sx, tl.min.y), pos2(sx, tl.max.y)], Stroke::new(1.0, TOKENS.grid_sub));
-                }
+            grid_overlay::Kind::Sub => {
+                gp.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, TOKENS.grid_sub));
             }
-        }
-        if (bar - 1) % every == 0 {
-            gp.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, TOKENS.grid_bar));
-            rp.line_segment([pos2(x, ruler.min.y + crate::loopbar::STRIP_H + 10.0), pos2(x, ruler.max.y)], Stroke::new(1.0, TOKENS.text_dim));
-            rp.text(
-                pos2(x + 4.0, ruler.min.y + crate::loopbar::STRIP_H + 9.0),
-                Align2::LEFT_CENTER,
-                bar.to_string(),
-                FontId::proportional(11.0),
-                TOKENS.text,
-            );
-        } else if bar_px >= 6.0 {
-            gp.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, TOKENS.grid_beat));
+            grid_overlay::Kind::Bar { labeled: true } => {
+                gp.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, TOKENS.grid_bar));
+                rp.line_segment([pos2(x, ruler.min.y + crate::loopbar::STRIP_H + 10.0), pos2(x, ruler.max.y)], Stroke::new(1.0, TOKENS.text_dim));
+                rp.text(
+                    pos2(x + 4.0, ruler.min.y + crate::loopbar::STRIP_H + 9.0),
+                    Align2::LEFT_CENTER,
+                    l.bar.to_string(),
+                    FontId::proportional(11.0),
+                    TOKENS.text,
+                );
+            }
+            grid_overlay::Kind::Bar { labeled: false } => {
+                gp.line_segment([pos2(x, tl.min.y), pos2(x, tl.max.y)], Stroke::new(1.0, TOKENS.grid_beat));
+            }
         }
     }
     let _ = app;
@@ -985,6 +964,8 @@ fn overlays(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, tl: Re
                 layout.recording.push(RecordingLane { track: t.id.0, rect: r4(r), notes: Vec::new() });
                 rp.rect_filled(r, crate::theme::RADIUS, TOKENS.record.gamma_multiply(0.45));
                 recording_preview::draw(app, ui, s, tl, t.id, r, origin);
+                let body = Rect::from_min_max(pos2(r.min.x, (r.min.y + CLIP_NAME_H).min(r.max.y)), r.max);
+                grid_overlay::draw(&rp.with_clip_rect(r.intersect(tl)), s, map, tl, body, theme::text_on(TOKENS.record));
                 let strip = Rect::from_min_max(r.min, pos2(r.max.x, (r.min.y + CLIP_NAME_H).min(r.max.y)));
                 rp.rect_filled(strip, crate::theme::top_corners(), TOKENS.record);
                 let tp = rp.with_clip_rect(strip.intersect(tl));

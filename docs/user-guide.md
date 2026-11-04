@@ -40,6 +40,13 @@ and horizontal zoom, and can be undone. Each drag or wheel gesture makes one und
 Track heights are saved in the session. Sessions from older builds that used the default
 height open at **88 points per track**; **Reset Track Heights** returns them to **46**.
 
+## Arrangement: grid over clips
+
+**View > Grid Over Clips** strokes the bar and beat lines again over clip bodies, over the
+waveform, at reduced strength, so timing edits can be judged by eye. It is off by default, which
+keeps the lines in empty lane space only. Ableton Live draws its grid through clips while Logic
+Pro draws it behind regions, so transit offers both. The setting is saved in the session.
+
 ## Piano roll
 
 Click the ruler above the notes to set the playhead; drag it up or down to zoom.

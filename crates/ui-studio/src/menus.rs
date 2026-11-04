@@ -208,6 +208,14 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                     }
                     ui.separator();
                     crate::arrange::track_height::menu(app, ui, &mut view_items);
+                    // Grid lines through clips (#302): Ableton draws them over clips, Logic behind regions.
+                    let b = check_button(ui, app.engine.session().edit.grid_over_clips, "Grid Over Clips");
+                    crate::help::hover(ui, &b, crate::help::Id::ViewGridOverClips);
+                    view_items.push(crate::mixer::MenuItem::at(ui, "Grid Over Clips".into(), "view.grid_over_clips".into(), b.rect));
+                    if b.clicked() {
+                        let _ = app.run("view.grid_over_clips", json!({}));
+                        ui.close();
+                    }
                     // Appearance: System follows the OS; kept in `UiState` (slice 5).
                     let sub = ui.menu_button(menu_contents("Appearance"), |ui| {
                         for a in crate::theme::Appearance::ALL {

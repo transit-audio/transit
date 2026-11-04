@@ -179,6 +179,11 @@ pub struct EditState {
     pub nudge: GridValue,
     #[serde(default = "yes")]
     pub grid_lines: bool,
+    /// Draw the bar and beat lines over audio and MIDI clip bodies too (#302). View state; an
+    /// older build ignores it. Off is not written, so a session that never used it saves byte for
+    /// byte as before; off keeps the lines in empty lane space only.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub grid_over_clips: bool,
     pub main_counter: TimeFormat,
     pub sub_counter: Option<TimeFormat>,
     pub zoom: ZoomState,
@@ -262,6 +267,10 @@ fn yes() -> bool {
     true
 }
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 impl Default for EditState {
     fn default() -> Self {
         EditState {
@@ -275,6 +284,7 @@ impl Default for EditState {
             grid: GridValue::default(),
             nudge: GridValue::Seconds(1.0),
             grid_lines: true,
+            grid_over_clips: false,
             main_counter: TimeFormat::MinSecs,
             sub_counter: Some(TimeFormat::Samples),
             zoom: ZoomState::default(),

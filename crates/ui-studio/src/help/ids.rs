@@ -47,6 +47,7 @@ ids! {
     // help\arrange-header.toml
     ArrangeHeaderHeight => "arrange_header.height",
     ViewTrackHeight => "view.track_height",
+    ViewGridOverClips => "view.grid_over_clips",
     ArrangeHeaderName => "arrange_header.name",
     ArrangeHeaderMonitor => "arrange_header.monitor",
     ArrangeHeaderArm => "arrange_header.arm",

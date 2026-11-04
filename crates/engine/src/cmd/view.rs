@@ -94,6 +94,11 @@ pub fn specs() -> Vec<CommandSpec> {
             s.edit.grid_lines = p.get("value").and_then(Value::as_bool).unwrap_or(!s.edit.grid_lines);
             Ok(json!({"value": s.edit.grid_lines}))
         }),
+        cmd!(noundo "view.grid_over_clips", "Grid Over Clips", [], None, "{value?: bool}", always, |e, p| {
+            let s = e.session_mut();
+            s.edit.grid_over_clips = p.get("value").and_then(Value::as_bool).unwrap_or(!s.edit.grid_over_clips);
+            Ok(json!({"value": s.edit.grid_over_clips}))
+        }),
         cmd!(noundo "view.nudge", "Nudge Value", [], Some("Alt+Shift+=/-"), "{value or step: like grid}", always, |e, p| {
             let g = value_or_step(p, e.session().edit.nudge).ok_or_else(|| bad("view.nudge", "unknown nudge value"))?;
             e.session_mut().edit.nudge = g;
