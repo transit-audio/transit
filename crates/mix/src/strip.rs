@@ -212,16 +212,8 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
     let note_source = strip.instrument.as_ref().map(|x| x.generation);
     let mut notes_lost = 0u64;
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
-        // A hardware insert sends the signal out and takes the return up; with no live input, or
-        // an unresolved path, it passes the signal through dry and adds no latency.
-        if let Some(ins) = ins.as_ref().filter(|x| x.hardware.is_some()) {
-            if ins.active
-                && !ins.bypass
-                && let Some(h) = strip.hw.iter_mut().find(|h| usize::from(h.spec.slot) == i)
-                && h.run(&mut strip.buf, live.input, frames, live.input_offset)
-            {
-                latency = latency.saturating_add(h.round_trip());
-            }
+        if let Some(round_trip) = hardware::run_slot(ins, &mut strip.hw, i, &mut strip.buf, live, frames) {
+            latency = latency.saturating_add(round_trip);
             continue;
         }
         let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
@@ -337,14 +329,18 @@ pub(crate) fn process_master(
     pos: Samples,
     frames: usize,
     transport: &Transport,
-    no_suspend: bool,
+    live: &LiveInput<'_>,
 ) {
     for (dst, src) in strip.buf.iter_mut().zip(main.iter()) {
         if let (Some(d), Some(sr)) = (dst.get_mut(..frames), src.get(..frames)) {
             d.copy_from_slice(sr);
         }
     }
+    strip.hw.iter_mut().for_each(hardware::HwSlot::rest);
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
+        if hardware::run_slot(ins, &mut strip.hw, i, &mut strip.buf, live, frames).is_some() {
+            continue;
+        }
         if let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i))
             && ins.active
             && !slot.failed
@@ -357,7 +353,7 @@ pub(crate) fn process_master(
             if ins.bypass {
                 continue;
             }
-            if run_insert(slot, &mut strip.buf, None, frames, transport, no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
+            if run_insert(slot, &mut strip.buf, None, frames, transport, live.no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
                 strip.failures.record(i);
             } else if let Some(tap) = &slot.tap {
                 tap.push(&strip.buf, frames, slot.plugin.gain_reduction_db());

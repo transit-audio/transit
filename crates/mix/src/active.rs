@@ -677,7 +677,10 @@ impl MixEngine {
         for st in others.iter_mut() {
             let Some(t) = track(st).filter(|t| t.kind == TrackKind::Master && !t.inactive) else { continue };
             mark(Phase::Masters, Some(u32::from(st.track)));
-            process_master(t, st, main, pos, frames, &transport, self.no_suspend);
+            process_master(t, st, main, pos, frames, &transport, &live_in);
+            for h in &st.hw {
+                h.flush(sinks, frames);
+            }
             st.meter.measure(main, frames, 0.0, host_frame);
             st.meter.plugin_failures = st.failures;
         }

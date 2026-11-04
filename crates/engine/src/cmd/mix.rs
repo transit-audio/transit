@@ -363,8 +363,8 @@ fn insert_hardware(e: &mut Engine, p: &Value, h: &Value) -> Result<Value> {
     let t = tracks_required(e, "mix.insert", p)?.first().copied().ok_or_else(|| bad("mix.insert", "no track"))?;
     let explicit = slot_of(p, "slot", INSERT_SLOTS);
     let tr = e.session_mut().track_mut(t).ok_or_else(|| bad("mix.insert", "no track"))?;
-    if matches!(tr.kind, transit_model::TrackKind::Master | transit_model::TrackKind::Vca) {
-        return Err(bad("mix.insert", "a hardware insert goes on a track, aux or folder strip, not a master or VCA"));
+    if tr.kind == transit_model::TrackKind::Vca {
+        return Err(bad("mix.insert", "a hardware insert needs an audio strip, not a VCA"));
     }
     let slot =
         explicit.or_else(|| tr.mixer.inserts.iter().position(Option::is_none)).ok_or_else(|| bad("mix.insert", "all insert slots are in use"))?;

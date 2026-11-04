@@ -93,6 +93,27 @@ pub(crate) fn slot_latency(ins: &Option<Insert>, hw: &[HwSlot], slot: usize, dup
     Some(h.filter(|_| duplex && ins.active && !ins.bypass).map_or(0, HwSlot::round_trip))
 }
 
+/// The shared ordinary-track/master hardware branch. Hardware slots return their added latency
+/// (zero for dry bypass); software slots return `None`.
+pub(crate) fn run_slot(
+    ins: &Option<Insert>,
+    hw: &mut [HwSlot],
+    slot: usize,
+    buf: &mut [Vec<f32>],
+    live: &super::LiveInput<'_>,
+    frames: usize,
+) -> Option<usize> {
+    let ins = ins.as_ref().filter(|x| x.hardware.is_some())?;
+    if ins.active
+        && !ins.bypass
+        && let Some(h) = hw.iter_mut().find(|h| usize::from(h.spec.slot) == slot)
+        && h.run(buf, live.input, frames, live.input_offset)
+    {
+        return Some(h.round_trip());
+    }
+    Some(0)
+}
+
 /// The hardware inserts of `t` for a plan with `sinks`, an `in_channels`-wide device input, at `rate`.
 pub(crate) fn specs_of(t: &Track, io: &IoMap, sinks: &[SinkSpec], in_channels: u16, rate: u32) -> Vec<HwSpec> {
     let mut out = Vec::new();
@@ -125,7 +146,7 @@ pub(crate) fn specs_of(t: &Track, io: &IoMap, sinks: &[SinkSpec], in_channels: u
 pub fn hardware_report(s: &Session, io: &IoMap, out_channels: u16, in_channels: u16, duplex: bool, rate: u32) -> Vec<HardwareReport> {
     let sinks = super::plan_sinks(s, io, out_channels).sinks;
     let mut out = Vec::new();
-    for t in s.tracks.iter().filter(|t| !matches!(t.kind, TrackKind::Master | TrackKind::Vca)) {
+    for t in s.tracks.iter().filter(|t| t.kind != TrackKind::Vca) {
         let specs = specs_of(t, io, &sinks, in_channels, rate);
         for (slot, ins) in t.mixer.inserts.iter().enumerate() {
             let Some(h) = ins.as_ref().and_then(|i| i.hardware.as_ref()) else { continue };

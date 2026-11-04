@@ -13,6 +13,10 @@ use transit_mix::{
     plan_sinks, unresolved_routes,
 };
 use transit_model::{ChannelFormat, Clip, HardwareLatency, Insert, IoMap, Session, SourceAudio, SourceId, TrackId, TrackKind};
+use transit_rt::testing::{AllocStats, CountingAlloc, measure};
+
+#[global_allocator]
+static ALLOC: CountingAlloc = CountingAlloc;
 
 const SR: u32 = 48_000;
 const BLOCK: usize = 256;
@@ -100,7 +104,8 @@ fn render_on(s: &Session, io: &IoMap, duplex: bool, delay: usize, sent: usize, c
         } else {
             Vec::new()
         };
-        mix.render_active(pos as i64, BLOCK, &mut out);
+        let (_, allocations) = measure(|| mix.render_active(pos as i64, BLOCK, &mut out));
+        assert_eq!(allocations, AllocStats::default(), "hardware rendering allocates and frees nothing");
         latency = mix.latency;
         main.extend_from_slice(&out[0]);
         for c in &mut device {
@@ -264,4 +269,76 @@ fn an_insert_on_the_last_channels_of_a_12_in_10_out_device_sends_and_returns_the
     s.track_mut(t).unwrap().mixer.inserts[0] = None;
     s.track_mut(dry).unwrap().mixer.output = transit_model::Route::Hardware("Out 9-10".into());
     assert_eq!(plan_sinks(&s, &io, 10).destinations(), [8, 9]);
+}
+
+/// Master hardware uses the same fake duplex cable as the ordinary-track regressions above.
+#[test]
+fn master_hardware_sends_returns_and_counts_in_shared_latency_without_editing_the_session() {
+    let mut s = session();
+    impulse_track(&mut s, "Main source");
+    let master = s.add_track(TrackKind::Master, ChannelFormat::Stereo, Some("Master"));
+    s.track_mut(master).unwrap().mixer.inserts[0] = Some(Insert::hardware(SEND, RET));
+    let before = s.to_json().unwrap();
+    let r = render(&s, &io(Some(D)), true, D);
+    assert_eq!(hits(&r.sent), [AT], "the master's hardware send leaves at Main's arrival");
+    assert_eq!(hits(&r.main), [AT + D], "Main is the actual hardware return");
+    assert_eq!(r.main[AT + D], r.sent[AT], "unity round trip");
+    assert_eq!(r.latency, D, "M includes the master hardware round trip");
+    let report = hardware_report(&s, &io(Some(D)), 4, 4, true, SR);
+    assert_eq!(report.len(), 1);
+    assert_eq!((report[0].track, report[0].state.clone(), report[0].latency), (master, HardwareState::Ready, Some(D as u32)));
+    assert_eq!(s.to_json().unwrap(), before);
+    let loaded = Session::from_json(&before).unwrap();
+    assert_eq!(loaded.to_json().unwrap(), before, "the complete saved session survives load unchanged");
+
+    // A direct output skips the master but waits for its round trip: proves the M term in L.
+    let direct = impulse_track(&mut s, "Direct");
+    s.track_mut(direct).unwrap().mixer.output = transit_model::Route::Hardware("Out 5-6".into());
+    let mut map = IoMap::for_device("test", "fake duplex", 4, 6);
+    map.hardware_latency = io(Some(D)).hardware_latency;
+    let direct = render_on(&s, &map, true, D, 4, Some);
+    assert_eq!(hits(&direct.sent), [AT + D]);
+    assert_eq!(hits(&direct.main), [AT + D]);
+    assert_eq!(direct.latency, D);
+}
+
+#[test]
+fn master_hardware_missing_paths_and_no_input_are_reported_and_dry() {
+    let mut s = session();
+    impulse_track(&mut s, "Source");
+    let master = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
+    for (send, ret, duplex, state) in [
+        ("Nowhere", RET, true, HardwareState::MissingSend),
+        (SEND, "In 9", true, HardwareState::MissingReturn),
+        (SEND, RET, false, HardwareState::NoInput),
+    ] {
+        s.track_mut(master).unwrap().mixer.inserts[0] = Some(Insert::hardware(send, ret));
+        let report = hardware_report(&s, &io(Some(D)), 4, 4, duplex, SR);
+        assert_eq!(report.len(), 1, "master hardware has a report even when unavailable");
+        assert_eq!(report[0].state, state);
+        let r = render(&s, &io(Some(D)), duplex, D);
+        assert_eq!((hits(&r.main), r.latency), (vec![AT], 0));
+        assert!(hits(&r.sent).is_empty());
+        if send == "Nowhere" {
+            assert_eq!(unresolved_routes(&s, &io(Some(D)), 4), ["Nowhere"]);
+        }
+    }
+}
+
+#[test]
+fn master_hardware_is_dry_in_offline_deliverables() {
+    let mut s = session();
+    impulse_track(&mut s, "Source");
+    let master = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
+    s.track_mut(master).unwrap().mixer.inserts[0] = Some(Insert::hardware(SEND, RET));
+    let map = io(Some(D));
+    assert_eq!(hits(&render(&s, &map, true, D).main), [AT + D], "first establish a working live loop");
+    let mut offline = transit_mix::RangeRender::try_new_paths(&s, transit_time::Range { start: 0, end: LEN as i64 }, BLOCK, &map).unwrap();
+    let (mut main, mut sent) = (Vec::new(), Vec::new());
+    while let Some((out, n)) = offline.next_block() {
+        main.extend_from_slice(&out[0][..n]);
+        sent.extend_from_slice(&out[2][..n]);
+    }
+    assert_eq!(hits(&main), [AT]);
+    assert!(hits(&sent).is_empty());
 }

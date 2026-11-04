@@ -764,7 +764,7 @@ impl PlanCompiler {
         desc.sinks = plan_sinks(s, &self.io, self.target.out_channels).sinks;
         desc.sink_routes = rows.iter().filter_map(|&ti| s.tracks.get(ti)).map(|t| sink::sink_routes(t, &desc.sinks)).collect();
         desc.inputs = self.io.paths_of(IoDirection::Input).cloned().collect();
-        for t in rows.iter().filter_map(|&ti| s.tracks.get(ti)).filter(|t| !matches!(t.kind, TrackKind::Master | TrackKind::Vca)) {
+        for t in rows.iter().filter_map(|&ti| s.tracks.get(ti)).filter(|t| t.kind != TrackKind::Vca) {
             for spec in crate::hardware::specs_of(t, &self.io, &desc.sinks, self.target.in_channels, self.target.sample_rate) {
                 desc.hardware.push((t.id, spec));
             }

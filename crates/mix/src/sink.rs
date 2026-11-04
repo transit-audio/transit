@@ -51,12 +51,12 @@ pub fn plan_sinks(s: &Session, io: &IoMap, out_channels: u16) -> SinkPlan {
     let mut plan = SinkPlan::default();
     let mut seen: Vec<&str> = Vec::new();
     let mut room = MAX_SINK_CHANNELS;
-    let tracks = s.tracks.iter().filter(|t| !matches!(t.kind, TrackKind::Master | TrackKind::Vca));
+    let tracks = s.tracks.iter().filter(|t| t.kind != TrackKind::Vca);
     for t in tracks {
         // A hardware insert's send path is a sink of the plan too (ADR 0015 section 5).
         let sends = t.mixer.inserts.iter().flatten().filter_map(|i| i.hardware.as_ref()).filter(|h| h.disabled.is_none()).map(|h| h.send.as_str());
         let names = std::iter::once(&t.mixer.output).chain(t.mixer.sends.iter().flatten().map(|x| &x.target)).filter_map(|r| match r {
-            Route::Hardware(name) => Some(name.as_str()),
+            Route::Hardware(name) if t.kind != TrackKind::Master => Some(name.as_str()),
             _ => None,
         });
         for name in names.chain(sends) {

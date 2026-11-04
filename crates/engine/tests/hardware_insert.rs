@@ -181,3 +181,18 @@ fn a_stored_measurement_is_per_machine_clears_by_command_and_leaves_the_session_
     assert_eq!(e.execute("io.clear_hardware_latency", &json!({"send": "Out 3-4", "ret": "In 3-4"})).unwrap()["cleared"], false);
     assert!(e.io_map().hardware_latency.is_empty());
 }
+
+#[test]
+fn master_hardware_can_be_inserted_and_keeps_the_existing_send_conflict_rules() {
+    let mut e = engine(&[("master", "Master loop"), ("audio", "Source"), ("vca", "Control")]);
+    let added = hardware(&mut e, "Master loop", 0, "Out 3-4");
+    assert!(added.is_ok(), "master hardware is an available insert: {added:?}");
+    let master = e.session().tracks.iter().find(|t| t.name == "Master loop").unwrap().id;
+    let report = transit_mix::hardware_report(e.session(), e.io_map(), 6, 4, true, 48_000);
+    assert_eq!(report.len(), 1);
+    assert_eq!((report[0].track, report[0].state.clone()), (master, transit_mix::HardwareState::Unmeasured));
+    refused(hardware(&mut e, "Source", 0, "Out 3-4"), "send");
+    refused(e.execute("track.output", &json!({"tracks":["Source"], "output":"Out 3-4"})), "send path");
+    refused(hardware(&mut e, "Control", 0, "Out 5-6"), "VCA");
+    assert!(e.session().tracks.iter().filter(|t| t.id != master).all(|t| t.mixer.inserts[0].is_none()));
+}
