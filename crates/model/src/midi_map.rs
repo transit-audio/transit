@@ -19,6 +19,8 @@ pub enum Strip {
 /// What a mapping moves.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Control {
+    /// Global machine transport button, independent of tracks and strips.
+    Transport(crate::TransportControl),
     Volume,
     Pan,
     Mute,
@@ -42,11 +44,12 @@ pub enum Control {
 impl Control {
     /// Mute, solo and arm are on/off; the rest are continuous.
     pub fn is_button(&self) -> bool {
-        matches!(self, Control::Mute | Control::Solo | Control::Arm)
+        matches!(self, Control::Mute | Control::Solo | Control::Arm | Control::Transport(_))
     }
 
     pub fn label(&self) -> String {
         match self {
+            Control::Transport(t) => t.label().into(),
             Control::Volume => "Volume".into(),
             Control::Pan => "Pan".into(),
             Control::Mute => "Mute".into(),
@@ -71,11 +74,15 @@ pub struct ControlTarget {
 
 impl fmt::Display for ControlTarget {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Control::Transport(t) = self.control {
+            return write!(f, "transport:{}", t.key());
+        }
         match self.strip {
             Strip::Track(t) => write!(f, "track:{}:", t.0)?,
             Strip::Position(n) => write!(f, "strip:{n}:")?,
         }
         match &self.control {
+            Control::Transport(t) => f.write_str(t.key()),
             Control::Volume => f.write_str("volume"),
             Control::Pan => f.write_str("pan"),
             Control::Mute => f.write_str("mute"),
@@ -92,6 +99,13 @@ impl fmt::Display for ControlTarget {
 impl FromStr for ControlTarget {
     type Err = String;
     fn from_str(s: &str) -> Result<Self, String> {
+        if let Some(key) = s.strip_prefix("transport:") {
+            return crate::TransportControl::ALL
+                .into_iter()
+                .find(|t| t.key() == key)
+                .map(crate::TransportControl::target)
+                .ok_or_else(|| format!("Unknown transport target: {s}"));
+        }
         let bad = || format!("`{s}` is not a control (track:<id>:volume|pan|mute|solo|arm|send:<slot>|plugin:<slot>:<param id>)");
         // kind, id, control, and the rest (a send slot, or a plug-in's slot and parameter id).
         let mut it = s.splitn(4, ':');
@@ -273,8 +287,7 @@ impl Mapping {
 }
 
 /// One store of mappings. A target has at most one source and a source at most one target.
-#[derive(Debug, Clone, PartialEq, Default, serde::Serialize, serde::Deserialize)]
-#[serde(transparent)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub struct MappingSet {
     items: Vec<Mapping>,
 }
@@ -295,6 +308,9 @@ impl MappingSet {
 
     /// Add `m`, replacing the mapping of the same target and any that the same source drives.
     pub fn set(&mut self, m: Mapping) -> Result<(), String> {
+        if matches!(m.target.control, Control::Transport(_)) {
+            return Err(crate::midi_transport::MACHINE_ONLY.into());
+        }
         m.validate()?;
         self.items.retain(|old| old.target != m.target && !old.source.overlaps(&m.source));
         self.items.push(m);
@@ -314,12 +330,14 @@ impl MappingSet {
         for m in &mut self.items {
             f(&mut m.target);
         }
+        self.items.retain(|m| !matches!(m.target.control, Control::Transport(_)));
     }
 
     /// Edit every mapping in place (a migration that moves a target and rescales its range).
     /// The caller keeps each one valid.
     pub fn edit(&mut self, f: impl FnMut(&mut Mapping)) {
         self.items.iter_mut().for_each(f);
+        self.items.retain(|m| !matches!(m.target.control, Control::Transport(_)));
     }
 
     /// Remove the mapping of `target`; whether there was one.
@@ -349,6 +367,27 @@ impl MappingSet {
             }
         }
         out
+    }
+}
+
+impl serde::Serialize for MappingSet {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.items.iter().filter(|m| !matches!(m.target.control, Control::Transport(_))).collect::<Vec<_>>().serialize(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for MappingSet {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let mut items = <Vec<Mapping> as serde::Deserialize>::deserialize(d)?;
+        items.retain(|m| {
+            if matches!(m.target.control, Control::Transport(_)) {
+                log::warn!("{}", crate::midi_transport::MACHINE_ONLY);
+                false
+            } else {
+                true
+            }
+        });
+        Ok(Self { items })
     }
 }
 

@@ -82,6 +82,8 @@ pub enum TransportRequest {
     /// Stop the old session's transport without applying stop-time edits to the new document.
     ResetSession,
     Play,
+    /// Play at exactly this position, preserving Cycle without pre-roll or cursor substitution.
+    PlayExact(Samples),
     Stop,
     TogglePlay,
     Record,
@@ -199,6 +201,7 @@ pub struct Engine {
     /// in its preferences. Not part of the document: editing it neither dirties the session nor
     /// makes an undo step.
     midi_profile: transit_model::MappingSet,
+    midi_transport: transit_model::TransportProfiles,
     midi_profile_revision: u64,
     /// The control a MIDI Learn is waiting to map (the host arms the ingress worker and answers
     /// the next candidate with `midi.map`). Not part of the document.
@@ -260,6 +263,7 @@ impl Engine {
             io: transit_model::IoMap::default(),
             io_revision: 0,
             midi_profile: Default::default(),
+            midi_transport: Default::default(),
             midi_profile_revision: 0,
             learn: None,
             command_targets: cmd::CommandTargets::default(),
@@ -298,6 +302,15 @@ impl Engine {
     /// The controller profile (per machine MIDI Learn mappings).
     pub fn midi_profile(&self) -> &transit_model::MappingSet {
         &self.midi_profile
+    }
+
+    pub fn midi_transport(&self) -> &transit_model::TransportProfiles {
+        &self.midi_transport
+    }
+
+    pub fn set_midi_transport(&mut self, profiles: transit_model::TransportProfiles) {
+        self.midi_transport = profiles;
+        self.midi_profile_revision = self.midi_profile_revision.wrapping_add(1);
     }
 
     /// Counts every change to the controller profile or the armed learn, so a host can pass the

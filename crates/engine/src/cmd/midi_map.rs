@@ -60,6 +60,9 @@ fn scope_of(p: &Value, id: &str) -> Result<Option<Scope>> {
 
 /// The target as the scope stores it: a session mapping names a track by id, the profile by position.
 fn normalize(e: &Engine, id: &str, target: ControlTarget, scope: Scope) -> Result<ControlTarget> {
+    if let Control::Transport(t) = target.control {
+        return if scope == Scope::Profile { Ok(t.target()) } else { Err(bad(id, transit_model::midi_transport::MACHINE_ONLY)) };
+    }
     let tracks = &e.session().tracks;
     let strip = match (scope, target.strip) {
         (Scope::Session, Strip::Position(n)) => {
@@ -163,6 +166,12 @@ fn map(e: &mut Engine, p: &Value) -> Result<Value> {
         m.pass_through = t.as_bool().ok_or_else(|| bad(id, "`pass_through` must be a boolean"))?;
     }
     m.validate().map_err(|why| bad(id, why))?;
+    if matches!(target.control, Control::Transport(_)) {
+        let replaced = e.midi_transport.entry(m.source.port.clone()).or_default().set(m).map_err(|why| bad(id, why))?;
+        e.learn = None;
+        e.midi_profile_revision = e.midi_profile_revision.wrapping_add(1);
+        return Ok(json!({"target": target.to_string(), "scope": scope, "replaced": replaced}));
+    }
     if let Control::Macro(n) = target.control {
         return map_macro(e, id, scope, &target, usize::from(n), m.source);
     }
@@ -230,6 +239,16 @@ fn unmap(e: &mut Engine, p: &Value) -> Result<Value> {
     };
     for scope in scopes {
         let t = normalize(e, id, target.clone(), scope)?;
+        if matches!(t.control, Control::Transport(_)) {
+            let mut removed = false;
+            for profile in e.midi_transport.values_mut() {
+                let before = profile.mappings.len();
+                profile.mappings.retain(|m| m.target != t);
+                removed |= before != profile.mappings.len();
+            }
+            e.midi_profile_revision = e.midi_profile_revision.wrapping_add(1);
+            return Ok(json!({"removed": removed}));
+        }
         let removed = match scope {
             Scope::Session if matches!(t.control, Control::Macro(_)) => {
                 let (Strip::Track(rack), Control::Macro(n)) = (t.strip, &t.control) else { continue };

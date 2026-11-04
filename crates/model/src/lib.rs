@@ -22,6 +22,8 @@ mod markers;
 mod midi_effect;
 mod midi_input;
 mod midi_map;
+pub mod midi_transport;
+pub use midi_transport::{TransportControl, TransportPrefs, TransportProfiles};
 mod midi_output;
 mod mixer;
 mod rack;

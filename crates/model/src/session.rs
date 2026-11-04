@@ -706,8 +706,12 @@ impl Session {
             })
             .unwrap_or_default();
         let had_video = crate::legacy::drop_video(&mut v);
+        let had_transport = crate::midi_transport::strip_session_rows(&mut v);
         let mut s: Session = serde_json::from_value(v).map_err(|e| SessionError::Format(e.to_string()))?;
         s.sanitize();
+        if had_transport {
+            s.load_notes.push(crate::midi_transport::MACHINE_ONLY.into());
+        }
         if had_video {
             s.load_notes.push(crate::legacy::VIDEO_REMOVED_NOTE.to_string());
         }
