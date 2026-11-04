@@ -14,6 +14,8 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use transit_model::{ClipId, TakeStack, Track, TrackId};
 
+pub(crate) mod labels;
+
 /// A track's take stacks and its lane numbers (newest first), as the arrange view draws them.
 #[derive(Debug, Default)]
 pub(crate) struct TrackTakes {

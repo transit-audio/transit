@@ -19,6 +19,7 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
     let row_y = |t: TrackId| rows.iter().position(|r| r.id == t).map(|i| tl.min.y + geo.tops[i] - app.arrange.vscroll);
     for t in rows {
         let Some(y0) = row_y(t.id) else { continue };
+        let takes = app.takes_of(t);
         for c in t.clips() {
             let rect = Rect::from_min_max(pos2(map.x(c.start), y0 + 1.0), pos2(map.x(c.end()).max(map.x(c.start) + 2.0), y0 + rh - 1.0));
             layout.clips.push(ClipRect {
@@ -50,11 +51,11 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
                         crate::fades::Side::In => live.fade_in = f.fade,
                         crate::fades::Side::Out => live.fade_out = f.fade,
                     }
-                    draw_clip(&p, s, map, tl, t, &live, rect, sel.contains(&c.id), alpha, hot(c.id.0, rect));
+                    draw_clip(&p, s, map, tl, t, &live, &takes.stacks, rect, sel.contains(&c.id), alpha, hot(c.id.0, rect));
                     crate::fades::overlay(&p, layout, &live, map, rect, hot_fade);
                 }
                 _ => {
-                    draw_clip(&p, s, map, tl, t, c, rect, sel.contains(&c.id), alpha, hot(c.id.0, rect));
+                    draw_clip(&p, s, map, tl, t, c, &takes.stacks, rect, sel.contains(&c.id), alpha, hot(c.id.0, rect));
                     crate::fades::overlay(&p, layout, c, map, rect, hot_fade);
                 }
             }
@@ -102,7 +103,7 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
             g.fade_out = Default::default();
             let rect = span(a, b);
             if rect.max.x >= tl.min.x && rect.min.x <= tl.max.x {
-                draw_clip(&p, s, map, tl, t, &g, rect, false, GHOST_ALPHA, false);
+                draw_clip(&p, s, map, tl, t, &g, &app.takes_of(t).stacks, rect, false, GHOST_ALPHA, false);
                 // MIDI notes of the cycle the ghost plays, dimmed like the ghost body.
                 if let ClipContent::Midi { sequence } = &base.content
                     && let Some((lo, span)) = pitch_span(&sequence.notes)
@@ -135,13 +136,25 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
     for g in carried {
         let (Some((_, c)), Some(y0), Some(t)) = (s.find_clip(ClipId(g.clip)), row_y(TrackId(g.track)), s.track(TrackId(g.track))) else { continue };
         let rect = Rect::from_min_max(pos2(map.x(g.start), y0 + 1.0), pos2(map.x(g.end).max(map.x(g.start) + 2.0), y0 + rh - 1.0));
-        draw_clip(&p, s, map, tl, t, c, rect, true, 0.85, false);
+        draw_clip(&p, s, map, tl, t, c, &app.takes_of(t).stacks, rect, true, 0.85, false);
         layout.drag_ghosts.push(drag_ghosts::DragGhost { rect: r4(rect), ..g });
     }
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_clip(p: &egui::Painter, s: &Session, map: Map, tl: Rect, t: &Track, c: &Clip, rect: Rect, selected: bool, alpha: f32, hot: bool) {
+fn draw_clip(
+    p: &egui::Painter,
+    s: &Session,
+    map: Map,
+    tl: Rect,
+    t: &Track,
+    c: &Clip,
+    stacks: &[transit_model::TakeStack],
+    rect: Rect,
+    selected: bool,
+    alpha: f32,
+    hot: bool,
+) {
     let base = clip_base_color(c, t);
     let (body_col, strip_col, name_col) = theme::clip_colors(base, selected);
     let p = p.with_clip_rect(rect.intersect(tl));
@@ -156,7 +169,13 @@ fn draw_clip(p: &egui::Painter, s: &Session, map: Map, tl: Rect, t: &Track, c: &
     if let Some((r, _)) = corner {
         name_clip.max.x = name_clip.max.x.min(r.min.x - 2.0);
     }
-    p.with_clip_rect(name_clip).text(pos2(name_x, strip.center().y), Align2::LEFT_CENTER, &c.name, FontId::proportional(11.0), name_col);
+    p.with_clip_rect(name_clip).text(
+        pos2(name_x, strip.center().y),
+        Align2::LEFT_CENTER,
+        crate::takes::labels::clip_label(c, stacks),
+        FontId::proportional(11.0),
+        name_col,
+    );
     if let Some((r, a)) = corner {
         draw_loop_corner(&p, r, name_col.gamma_multiply(a * alpha));
     }

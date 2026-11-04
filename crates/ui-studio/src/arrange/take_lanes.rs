@@ -2,7 +2,7 @@
 //! newest on top, at [`TAKE_H`] each. In a lane, a take's clips are dimmed where another take
 //! plays and highlighted where it plays; a click on a dimmed clip makes its take play over the
 //! clip's range (`takes.set_active`, one undo step). The lane's label in the track list says
-//! "Take n" (and "playing" when some of it plays); a click on it makes that take play in every
+//! "Take n" and the span it plays; a click on it makes that take play in every
 //! stack it is in, and its menu button offers Flatten Takes and Delete Take. A clip of the
 //! playing take carries an "n takes" chip that shows or hides the lanes.
 //!
@@ -136,15 +136,15 @@ fn lane(app: &mut StudioApp, ui: &mut Ui, t: &Track, stacks: &[TakeStack], numbe
     if active {
         lp.rect_filled(label, crate::theme::RADIUS_SM, TOKENS.accent.gamma_multiply(0.2));
     }
-    let text = if active { format!("Take {number} · playing") } else { format!("Take {number}") };
-    lp.text(
+    let text = crate::takes::labels::lane_label(t, stacks, number, |at| crate::transport::bars_beats(app, at));
+    lp.with_clip_rect(label.intersect(list)).text(
         pos2(label.min.x + 6.0, label.center().y),
         Align2::LEFT_CENTER,
-        text,
+        text.text,
         FontId::proportional(11.0),
         if active { TOKENS.text } else { TOKENS.text_dim },
     );
-    if hresp.on_hover_text(format!("Play take {number} wherever it was recorded")).clicked() {
+    if hresp.on_hover_text(text.hover).clicked() {
         let _ = app.choose_take(t.id, number);
     }
     let mresp = ui.interact(menu.intersect(list), ui.id().with(("take_menu", t.id.0, number)), Sense::click());

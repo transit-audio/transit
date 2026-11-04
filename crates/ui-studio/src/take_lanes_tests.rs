@@ -5,6 +5,9 @@
 use super::*;
 use crate::arrange::TAKE_H;
 
+#[path = "take_labels_tests.rs"]
+mod labels;
+
 fn assert_lane_geometry(t: &T, track: TrackId) {
     let header = t.row(track).header;
     let rows = t.rows_of(track);
