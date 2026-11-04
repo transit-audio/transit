@@ -1,0 +1,33 @@
+[package]
+name = "transit-sampler-core"
+description = "transit's portable sampler core: region readers over borrowed audio, four-point cubic interpolation, zones and pads, voices, envelopes, loops, choke groups and the processing over borrowed event spans (ADR 0041)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+default = ["std"]
+# The desktop arithmetic: the inherent float methods. Off, the crate is `no_std` + `alloc` and `libm`
+# supplies them (ADR 0037 Tier B; CI checks that configuration for thumbv7em-none-eabihf). Forwarded
+# explicitly to the shared primitives, whose workspace edge has default features off.
+std = ["transit-instrument-core/std"]
+# Test seams (the state fingerprint, issue #210); never enabled by the app.
+testing = ["transit-instrument-core/testing"]
+
+[dependencies]
+# The shared instrument primitives (shaper, matrix; ADR 0041): the one workspace dependency, L1.
+transit-instrument-core.workspace = true
+# The float functions of the no-default (`no_std`) configuration only; unused with `std`.
+libm.workspace = true
+
+[dev-dependencies]
+# The shaper's filter-memory fingerprint seam for the crate's own state fingerprint tests.
+transit-instrument-core = { workspace = true, features = ["testing"] }
+# The allocation probe (`tests/realtime.rs`) counts heap use on the test thread.
+transit-rt = { workspace = true, features = ["testing"] }
+
+[lints]
+workspace = true

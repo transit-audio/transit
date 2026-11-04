@@ -4419,6 +4419,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "transit-sampler-core"
+version = "0.6.2"
+dependencies = [
+ "libm",
+ "transit-instrument-core",
+ "transit-rt",
+]
+
+[[package]]
 name = "transit-texture"
 version = "0.6.2"
 dependencies = [
