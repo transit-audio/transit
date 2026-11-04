@@ -161,6 +161,37 @@ fn map(app: &mut StudioApp, t: TrackId, control: &str, cc: u8, extra: Value) {
 }
 
 #[test]
+fn height_commands_split_a_midi_sweep_only_when_changed() {
+    let (mut app, ctx, mut time, t) = new_app();
+    map(&mut app, t, "volume", 7, json!({"mode":"jump"}));
+    frames(&mut app, &ctx, 2, &mut time);
+    let depth = app.engine.undo_history().len();
+    let move_to = |app: &mut StudioApp, value, now| {
+        app.midi_learn_apply((0, vec![MapMsg::Move { epoch: 0, index: 0, value, seq: 1 }]), now);
+    };
+    move_to(&mut app, 0.2, 10.0);
+    let points = app.engine.session().track(t).unwrap().height.points();
+    app.engine.execute("track.height", &json!({"tracks":[t.0],"height":points})).unwrap();
+    assert_eq!(app.engine.undo_history().len(), depth + 1);
+    move_to(&mut app, 0.4, 10.1);
+    assert_eq!(app.engine.undo_history().len(), depth + 1);
+    let volume = app.engine.session().track(t).unwrap().mixer.volume_db;
+    app.engine.execute("track.height", &json!({"tracks":[t.0],"height":57})).unwrap();
+    assert_eq!(app.engine.undo_history().len(), depth + 2);
+    assert!(app.midi_learn.sweeping());
+    move_to(&mut app, 0.6, 10.2);
+    move_to(&mut app, 0.8, 10.3);
+    assert_eq!(app.engine.undo_history().len(), depth + 3);
+    assert!(app.midi_learn.sweeping());
+    assert!((app.engine.session().track(t).unwrap().mixer.volume_db - crate::mixer::k_to_db(0.8)).abs() < 1e-3);
+    assert!(app.engine.undo());
+    assert_eq!(app.engine.session().track(t).unwrap().mixer.volume_db, volume);
+    assert_eq!(app.engine.session().track(t).unwrap().height, transit_model::TrackHeight::Custom(57));
+    assert!(app.engine.undo());
+    assert_eq!(app.engine.session().track(t).unwrap().height.points(), points);
+}
+
+#[test]
 fn a_mapped_sweep_moves_the_fader_as_one_undo_step_and_ends_when_the_controller_is_still() {
     let (mut app, ctx, mut time, t) = new_app();
     map(&mut app, t, "volume", 7, json!({"mode": "jump"}));

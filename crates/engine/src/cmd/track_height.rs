@@ -1,4 +1,4 @@
-//! Track height commands.
+//! Track height commands (ADR 0044).
 
 use super::*;
 use crate::cmd;
@@ -22,61 +22,94 @@ pub fn specs() -> Vec<CommandSpec> {
         cmd!("track.height_down", "Decrease Track Height", [], Some("Ctrl+Down"), "{tracks?} — one preset shorter", has_selection, |e, p| {
             height_step(e, p, false)
         }),
+        cmd!("track.height_zoom", "Zoom All Track Heights", [], None, "{direction: in|out}", always, height_zoom),
+        cmd!("track.height_reset", "Reset Track Heights", [], None, "{}", always, |e, _| {
+            let changes = e.session().tracks.iter().filter(|t| t.height != TrackHeight::Small).map(|t| (t.id, TrackHeight::Small)).collect();
+            Ok(json!({"changed": apply(e, changes)}))
+        }),
+        cmd!(query "query.track_heights", "Track Heights", [], None, "{}", always, |e, _| {
+            let tracks: Vec<_> = e.session().tracks.iter().map(|t| json!({"id": t.id, "height": t.height, "points": t.height.points() as u16})).collect();
+            Ok(json!({"tracks": tracks}))
+        }),
     ]
 }
 
 fn height(e: &mut Engine, p: &Value) -> Result<Value> {
-    let tracks = tracks_required(e, "track.height", p)?;
-    let h = match p.get("height").and_then(Value::as_f64) {
-        Some(points) => TrackHeight::from_points(points as f32),
-        None => str_param(p, "height").and_then(TrackHeight::from_id).ok_or_else(|| bad("track.height", "unknown height"))?,
-    };
-    let s = e.session_mut();
-    for t in &tracks {
-        if let Some(tr) = s.track_mut(*t) {
-            tr.height = h;
+    let tracks = targets(e, "track.height", p)?;
+    let (h, numeric) = match p.get("height") {
+        Some(Value::Number(n)) => {
+            let points = n.as_f64().filter(|v| v.is_finite()).ok_or_else(|| bad("track.height", "height must be finite"))?;
+            // Round before narrowing: an f64 just below a half point must not round up as f32.
+            (TrackHeight::from_points(points.clamp(16.0, 440.0).round() as f32), true)
         }
-    }
+        Some(Value::String(name)) => (TrackHeight::from_id(name).ok_or_else(|| bad("track.height", "unknown height"))?, false),
+        _ => return Err(bad("track.height", "height must be a finite number or preset name")),
+    };
+    let changes = tracks
+        .iter()
+        .filter_map(|id| e.session().track(*id))
+        .filter(|t| if numeric { t.height.points() != h.points() } else { t.height != h })
+        .map(|t| (t.id, h))
+        .collect();
+    apply(e, changes);
     Ok(json!({"height": h}))
 }
 
 fn height_step(e: &mut Engine, p: &Value, taller: bool) -> Result<Value> {
-    let tracks = tracks_required(e, if taller { "track.height_up" } else { "track.height_down" }, p)?;
-    let mut steps = Vec::new();
-    for tr in tracks.iter().filter_map(|t| e.session().track(*t)) {
-        let h = tr.height.step(taller);
-        if h != tr.height {
-            steps.push((tr.id, h));
+    let tracks = targets(e, if taller { "track.height_up" } else { "track.height_down" }, p)?;
+    let changes = steps(e.session().tracks.iter().filter(|t| tracks.contains(&t.id)), taller);
+    Ok(json!({"changed": apply(e, changes)}))
+}
+
+fn height_zoom(e: &mut Engine, p: &Value) -> Result<Value> {
+    let taller = match str_param(p, "direction") {
+        Some("in") => true,
+        Some("out") => false,
+        _ => return Err(bad("track.height_zoom", "direction must be `in` or `out`")),
+    };
+    let changes = steps(e.session().tracks.iter(), taller);
+    Ok(json!({"changed": apply(e, changes)}))
+}
+
+fn targets(e: &Engine, cmd: &str, p: &Value) -> Result<Vec<TrackId>> {
+    if p.get("tracks").is_some_and(|v| !v.is_array()) {
+        return Err(bad(cmd, "tracks must be an array of track ids or names"));
+    }
+    let mut tracks = tracks_required(e, cmd, p)?;
+    tracks.sort_unstable_by_key(|id| id.0);
+    tracks.dedup();
+    for id in &tracks {
+        if e.session().track(*id).is_none() {
+            return Err(bad(cmd, format!("no track with id {}", id.0)));
         }
     }
-    if !steps.is_empty() {
+    Ok(tracks)
+}
+
+fn steps<'a>(tracks: impl Iterator<Item = &'a transit_model::Track>, taller: bool) -> Vec<(TrackId, TrackHeight)> {
+    tracks
+        .filter_map(|t| {
+            let h = t.height.step(taller);
+            (h != t.height).then_some((t.id, h))
+        })
+        .collect()
+}
+
+/// One borrow and one undo snapshot, including the entire pending toggle restore record.
+/// A no-op must leave the document Arc and an active merge group untouched.
+fn apply(e: &mut Engine, changes: Vec<(TrackId, TrackHeight)>) -> usize {
+    if !changes.is_empty() {
         let s = e.session_mut();
-        for (t, h) in &steps {
-            if let Some(tr) = s.track_mut(*t) {
-                tr.height = *h;
+        s.edit.zoom_toggle = None;
+        for (id, h) in &changes {
+            if let Some(t) = s.track_mut(*id) {
+                t.height = *h;
             }
         }
     }
-    Ok(json!({"changed": steps.len()}))
+    changes.len()
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn heights_take_points_and_step_through_the_presets() {
-        let mut e = crate::demo::demo_engine();
-        let height = |e: &Engine, name: &str| e.session().track_by_name(name).map(|t| t.height);
-        e.execute("track.height", &json!({"tracks": ["Kick"], "height": 57})).unwrap();
-        assert_eq!(height(&e, "Kick"), Some(TrackHeight::Custom(57)));
-        e.execute("track.height_up", &json!({"tracks": ["Kick", "Snare"]})).unwrap();
-        assert_eq!((height(&e, "Kick"), height(&e, "Snare")), (Some(TrackHeight::Medium), Some(TrackHeight::Medium)));
-        e.execute("track.height", &json!({"tracks": ["Kick"], "height": "extreme"})).unwrap();
-        let steps = e.undo_history().len();
-        assert_eq!(e.execute("track.height_up", &json!({"tracks": ["Kick"]})).unwrap()["changed"], 0);
-        assert_eq!(e.undo_history().len(), steps);
-        e.execute("track.height_down", &json!({"tracks": ["Kick"]})).unwrap();
-        assert_eq!(height(&e, "Kick"), Some(TrackHeight::Jumbo));
-    }
-}
+#[path = "track_height_tests.rs"]
+mod tests;

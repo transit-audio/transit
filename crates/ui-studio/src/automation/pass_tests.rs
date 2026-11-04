@@ -1,6 +1,37 @@
 use super::*;
 
 #[test]
+fn height_commands_split_a_write_pass_only_when_changed() {
+    let mut t = T::new();
+    t.app.ui.thin_after_write = false;
+    let a = write_mode(&mut t);
+    let before = t.undo_len();
+    t.key("Space");
+    ramp(&mut t, a, 4);
+    assert!(t.app.pass_on(a));
+    assert_eq!(t.undo_len(), before + 1);
+    let points = t.app.engine.session().track(a).unwrap().height.points();
+    t.app.engine.execute("track.height", &json!({"tracks":[a.0],"height":points})).unwrap();
+    assert_eq!(t.undo_len(), before + 1, "a height no-op must not split the pass");
+    ramp(&mut t, a, 4);
+    assert_eq!(t.undo_len(), before + 1);
+    t.app.engine.execute("track.height", &json!({"tracks":[a.0],"height":57})).unwrap();
+    assert_eq!(t.undo_len(), before + 2);
+    assert!(t.app.pass_on(a));
+    let prior_points = t.points(a, &AutoParam::Volume);
+    ramp(&mut t, a, 4);
+    assert!(t.app.pass_on(a));
+    assert!(t.points(a, &AutoParam::Volume).len() > prior_points.len());
+    assert_eq!(t.undo_len(), before + 3, "the continued pass retains its hold across fader and automation keys");
+    t.key("Space");
+    assert!(t.app.engine.undo());
+    assert_eq!(t.points(a, &AutoParam::Volume), prior_points);
+    assert_eq!(t.app.engine.session().track(a).unwrap().height, transit_model::TrackHeight::Custom(57));
+    assert!(t.app.engine.undo());
+    assert_eq!(t.app.engine.session().track(a).unwrap().height.points(), points);
+}
+
+#[test]
 fn write_records_the_fader_while_playing_as_one_undo_step() {
     let mut t = T::new();
     t.app.ui.thin_after_write = false;
