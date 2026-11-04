@@ -453,8 +453,16 @@ mod record_tests {
         let dir = std::env::temp_dir().join(format!("soundcraft-takes-path-{}", std::process::id()));
         let mut e = Engine::default();
         let mut io = IoMap::for_device("ASIO", "x", 8, 2);
-        io.add_path(IoPath { name: "Guitar".into(), direction: IoDirection::Input, channels: vec![4], format: ChannelFormat::Mono }).unwrap();
-        io.add_path(IoPath { name: "Drum pair".into(), direction: IoDirection::Input, channels: vec![6, 7], format: ChannelFormat::Stereo }).unwrap();
+        io.add_path(IoPath { live: false, name: "Guitar".into(), direction: IoDirection::Input, channels: vec![4], format: ChannelFormat::Mono })
+            .unwrap();
+        io.add_path(IoPath {
+            live: false,
+            name: "Drum pair".into(),
+            direction: IoDirection::Input,
+            channels: vec![6, 7],
+            format: ChannelFormat::Stereo,
+        })
+        .unwrap();
         e.set_io_map(io);
         let gtr = armed(&mut e, "Gtr", "mono", "Guitar");
         let drums = armed(&mut e, "Drums", "stereo", "Drum pair");

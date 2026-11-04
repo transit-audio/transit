@@ -62,7 +62,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "I/O Paths...",
             ["Setup"],
             None,
-            "{action?: list|set|add_path|rename_path|remove_path|set_channels|set_main, name?, new_name?, direction?: input|output, channels?: [0-based device channels], map?: IoMap} — this machine's device paths (per machine: no undo step, session untouched)",
+            "{action?: list|set|add_path|rename_path|remove_path|set_channels|set_main|set_live, name?, new_name?, direction?: input|output, channels?: [0-based device channels], live?: bool, map?: IoMap} — this machine's device paths (per machine: no undo step, session untouched)",
             always,
             io_map_setup
         ),
@@ -264,6 +264,7 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
         list.iter().map(|c| c.as_u64().and_then(|c| u16::try_from(c).ok()).ok_or_else(|| bad(id, "channels are small whole numbers"))).collect()
     };
     let mut io = e.io_map().clone();
+    let live = || p.get("live").and_then(Value::as_bool).ok_or_else(|| bad(id, "`live` must be a boolean"));
     match action {
         "list" => return Ok(io_map_state(e)),
         "set" => {
@@ -286,7 +287,8 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
             };
             let channels = channels()?;
             let format = transit_model::ChannelFormat::for_channels(channels.len());
-            io.add_path(IoPath { name: name()?, direction, channels, format }).map_err(refuse)?;
+            io.add_path(IoPath { live: if p.get("live").is_some() { live()? } else { false }, name: name()?, direction, channels, format })
+                .map_err(refuse)?;
         }
         "rename_path" => {
             let to = str_param(p, "new_name").ok_or_else(|| bad(id, "`new_name` required"))?;
@@ -294,6 +296,7 @@ fn io_map_setup(e: &mut Engine, p: &Value) -> Result<Value> {
         }
         "remove_path" => io.remove_path(&name()?).map_err(refuse)?,
         "set_channels" => io.set_channels(&name()?, channels()?).map_err(refuse)?,
+        "set_live" => io.set_live(&name()?, live()?).map_err(refuse)?,
         "set_main" => io.set_main(&name()?).map_err(refuse)?,
         other => return Err(bad(id, format!("unknown action `{other}`"))),
     }
@@ -581,6 +584,7 @@ mod tests {
         assert_eq!((e.io_map().inputs, e.io_map().outputs), (32, 32));
         // A path on a channel past the cap is still refused.
         map.paths.push(transit_model::IoPath {
+            live: false,
             name: "Far".into(),
             direction: transit_model::IoDirection::Output,
             channels: vec![33],

@@ -266,10 +266,11 @@ pub(super) fn fold_latency(
     // One device latency for every sink (ADR 0015 section 6): Main's (its sources' arrival plus
     // the master inserts') or the slowest path's, whichever is longer. Each sink is padded to
     // it, Main to it less its inserts, so stems and cue mixes leave the device with Main. With
-    // no sinks this is Main's own arrival, as before.
+    // no sinks this is Main's own arrival, as before. Live cues retain their local maximum,
+    // but participate in the maximum above the padding step just like every other sink.
     let device = sinks.iter().fold(main_arrival.saturating_add(lmax_m), |l, k| l.max(k.arrival));
     main_arrival = device.saturating_sub(lmax_m);
-    for k in sinks.iter_mut() {
+    for k in sinks.iter_mut().filter(|k| !k.live) {
         k.arrival = device;
     }
     DeviceLatency { main: main_arrival, device, aborted: false }

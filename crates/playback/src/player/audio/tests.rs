@@ -1161,7 +1161,8 @@ fn paths_that_share_a_device_channel_sum_there_and_clip_once() {
     use transit_model::{ChannelFormat, IoDirection, IoPath, Route};
     let mut io = transit_model::IoMap::for_device("test", "test", 0, 10);
     // "Phones" is device channels 5 and 3: it shares channel 3 with "Out 3-4" (channels 2 and 3).
-    io.add_path(IoPath { name: "Phones".into(), direction: IoDirection::Output, channels: vec![5, 3], format: ChannelFormat::Stereo }).unwrap();
+    io.add_path(IoPath { live: false, name: "Phones".into(), direction: IoDirection::Output, channels: vec![5, 3], format: ChannelFormat::Stereo })
+        .unwrap();
     let a = tone_session(&[(0.25, Route::Hardware("Out 3-4".into()))]);
     let b = tone_session(&[(0.125, Route::Hardware("Phones".into()))]);
     let both = tone_session(&[(0.25, Route::Hardware("Out 3-4".into())), (0.125, Route::Hardware("Phones".into()))]);

@@ -246,11 +246,12 @@ fn a_route_to_a_missing_path_is_silent_and_listed() {
     assert_eq!(unresolved_routes(&s, &wide_io(), 10), ["Headphones"]);
     // A path whose channels the device did not open is unresolved too, not played on another channel.
     let mut io = wide_io();
-    io.add_path(IoPath { name: "Headphones".into(), direction: IoDirection::Output, channels: vec![8], format: ChannelFormat::Mono }).unwrap();
+    io.add_path(IoPath { live: false, name: "Headphones".into(), direction: IoDirection::Output, channels: vec![8], format: ChannelFormat::Mono })
+        .unwrap();
     assert!(unresolved_routes(&s, &io, 10).is_empty());
     assert_eq!(unresolved_routes(&s, &io, 4), ["Headphones", "Out 9-10"]);
     // An input path is not an output.
-    io.add_path(IoPath { name: "Mic".into(), direction: IoDirection::Input, channels: vec![0], format: ChannelFormat::Mono }).unwrap();
+    io.add_path(IoPath { live: false, name: "Mic".into(), direction: IoDirection::Input, channels: vec![0], format: ChannelFormat::Mono }).unwrap();
     let mut s2 = s.clone();
     s2.tracks[0].mixer.output = Route::Hardware("Mic".into());
     assert!(unresolved_routes(&s2, &io, 10).contains(&"Mic".to_string()));
@@ -301,7 +302,8 @@ fn an_input_path_by_name_monitors_its_channel() {
     // Eight inputs, each channel a distinct constant: channel c carries (c + 1) / 10.
     let input: Vec<Vec<f32>> = (0..8).map(|c| vec![(c + 1) as f32 / 10.0; BLOCK]).collect();
     let mut io = IoMap::for_device("test", "test", 8, 2);
-    io.add_path(IoPath { name: "Guitar".into(), direction: IoDirection::Input, channels: vec![4], format: ChannelFormat::Mono }).unwrap();
+    io.add_path(IoPath { live: false, name: "Guitar".into(), direction: IoDirection::Input, channels: vec![4], format: ChannelFormat::Mono })
+        .unwrap();
     let heard = |name: &str| {
         let mut s = session();
         monitored(&mut s, "Mon", Route::Hardware(name.into()));
@@ -346,4 +348,64 @@ fn a_key_edge_keeps_main_and_a_stem_aligned() {
     assert_eq!(r.latency, 200);
     assert_eq!(hits(&r.channels[0]), [AT + 200]);
     assert_eq!(hits(&r.channels[r.main]), [AT + 200]);
+}
+
+#[test]
+fn live_cue_aligns_its_feeders_locally_and_still_sets_shared_latency() {
+    let mut io = wide_io();
+    io.set_live("Out 3-4", true).unwrap();
+    for main_delay in [512, 32] {
+        let mut s = session();
+        let main = impulse_track(&mut s, "Main delayed", Route::Main);
+        s.track_mut(main).unwrap().mixer.inserts[0] = Some(delay(main_delay));
+        impulse_track(&mut s, "Main dry", Route::Main);
+        let cue = Route::Hardware("Out 3-4".into());
+        let slow = impulse_track(&mut s, "Cue delayed", cue.clone());
+        s.track_mut(slow).unwrap().mixer.inserts[0] = Some(delay(128));
+        impulse_track(&mut s, "Cue dry", cue);
+        let r = render(&s, &io, None);
+        assert_eq!(hits(&r.channels[r.main]), [AT + 128], "the cue keeps its own arrival");
+        assert!((r.channels[r.main][AT + 128] - 1.0).abs() < 1e-6, "both cue feeders align");
+        let shared = main_delay.max(128);
+        assert_eq!(r.latency, shared, "a live cue still raises L for other sinks");
+        assert_eq!(hits(&r.channels[0]), [AT + shared]);
+        assert!((r.channels[0][AT + shared] - 1.0).abs() < 1e-6, "Main's feeders align");
+        let mut compensated = io.clone();
+        compensated.set_live("Out 3-4", false).unwrap();
+        let full = render(&s, &compensated, None);
+        assert_eq!(hits(&full.channels[full.main]), [AT + shared]);
+        assert_eq!(full.channels[0], r.channels[0], "the opt-out changes only the cue's final padding");
+    }
+}
+
+#[test]
+fn offline_paths_ignore_live_cue_padding_preferences() {
+    let mut s = session();
+    let main = impulse_track(&mut s, "Main", Route::Main);
+    let mut comp = Insert::new("compressor");
+    comp.params.insert("lookahead".into(), 5.0);
+    comp.params.insert("ratio".into(), 1.0);
+    s.track_mut(main).unwrap().mixer.inserts[0] = Some(comp);
+    impulse_track(&mut s, "Cue", Route::Hardware("Out 3-4".into()));
+    let mut io = wide_io();
+    io.set_live("Out 3-4", true).unwrap();
+    let live = render(&s, &io, None);
+    assert_eq!(hits(&live.channels[live.main]), [AT], "the live opt-out is active before rendering offline");
+    assert_eq!(live.latency, 240);
+    let offline = |map: &IoMap| {
+        let mut r = transit_mix::RangeRender::try_new_paths(&s, Range { start: 0, end: LEN as i64 }, BLOCK, map).unwrap();
+        assert!(r.sinks().iter().all(|sink| !sink.live));
+        let mut channels = vec![Vec::new(); 4];
+        while let Some((out, n)) = r.next_block() {
+            for (dst, src) in channels.iter_mut().zip(out) {
+                dst.extend_from_slice(&src[..n]);
+            }
+        }
+        channels
+    };
+    let on = offline(&io);
+    io.set_live("Out 3-4", false).unwrap();
+    assert_eq!(on, offline(&io));
+    assert_eq!(hits(&on[0]), [AT]);
+    assert_eq!(hits(&on[2]), [AT], "common latency removal preserves cue/Main alignment");
 }

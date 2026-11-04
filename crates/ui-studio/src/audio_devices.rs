@@ -16,6 +16,8 @@
 //! the same path. A choice that cannot be honored falls back to the default (the playback crate
 //! logs it); the fallback is said on the status line and in the window.
 
+#[cfg(test)]
+mod live_tests;
 mod period;
 pub(crate) mod window;
 pub use window::{Section, window};

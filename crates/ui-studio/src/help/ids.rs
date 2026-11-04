@@ -54,6 +54,7 @@ ids! {
     ArrangeHeaderTakeLaneMenu => "arrange_header.take_lane_menu",
     // help\audio-devices.toml
     AudioDevicesWindow => "audio_devices.window",
+    AudioDevicesPathLive => "audio_devices.path_live",
     AudioDevicesOutputOpen => "audio_devices.output_open",
     AudioDevicesInputOpen => "audio_devices.input_open",
     AudioDevicesDevice => "audio_devices.device",

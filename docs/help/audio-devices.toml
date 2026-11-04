@@ -6,6 +6,11 @@ page = "troubleshooting.md"
 link = "troubleshooting.md#audio-devices-figures"
 
 [[entry]]
+id = "audio_devices.path_live"
+name = "Live (no shared padding)"
+text = "Let this cue play as soon as its own sources align, without waiting for other outputs; saved on this machine, ignored by offline renders."
+
+[[entry]]
 id = "audio_devices.window"
 name = "Audio Devices"
 text = "Choose the audio system, devices, sample rate and buffer size, and read what is actually open and how the driver is keeping up. The lines in the card above the settings are live; the settings change only when you press Apply."

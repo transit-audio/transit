@@ -18,6 +18,8 @@ pub struct SinkSpec {
     pub name: String,
     pub dest: Vec<u16>,
     pub format: ChannelFormat,
+    /// Align feeders locally, without the shared device padding (live playback only).
+    pub live: bool,
 }
 
 /// The sinks a session needs on a machine, and the output route names that have none here.
@@ -70,7 +72,12 @@ pub fn plan_sinks(s: &Session, io: &IoMap, out_channels: u16) -> SinkPlan {
                 Some(p) => {
                     room -= p.channels.len();
                     let format = if p.format.channels() == p.channels.len() { p.format } else { ChannelFormat::for_channels(p.channels.len()) };
-                    plan.sinks.push(SinkSpec { name: p.name.clone(), dest: p.channels.clone(), format });
+                    plan.sinks.push(SinkSpec {
+                        name: p.name.clone(),
+                        dest: p.channels.clone(),
+                        format,
+                        live: p.live && !p.name.eq_ignore_ascii_case(&io.main),
+                    });
                 }
                 None => plan.unresolved.push(name.to_string()),
             }
@@ -87,6 +94,7 @@ pub fn unresolved_routes(s: &Session, io: &IoMap, out_channels: u16) -> Vec<Stri
 
 /// A sink's buffers in a running plan.
 pub(crate) struct Sink {
+    pub(crate) live: bool,
     pub(crate) fmt: ChannelFormat,
     pub(crate) buf: Vec<Vec<f32>>,
     /// The device latency every signal summed here is aligned to this block (see `pdc_visit`).
@@ -95,7 +103,7 @@ pub(crate) struct Sink {
 
 impl Sink {
     pub(crate) fn new(spec: &SinkSpec, block: usize) -> Self {
-        Sink { fmt: spec.format, buf: vec![vec![0.0; block]; spec.dest.len()], arrival: 0 }
+        Sink { live: spec.live, fmt: spec.format, buf: vec![vec![0.0; block]; spec.dest.len()], arrival: 0 }
     }
 
     pub(crate) fn clear(&mut self, frames: usize) {

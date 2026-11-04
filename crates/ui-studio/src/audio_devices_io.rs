@@ -19,6 +19,7 @@ pub enum IoEdit {
     Remove { name: String },
     SetChannels { name: String, channels: Vec<u16> },
     SetMain { name: String },
+    SetLive { name: String, live: bool },
 }
 
 impl IoEdit {
@@ -33,6 +34,7 @@ impl IoEdit {
             IoEdit::Remove { name } => json!({"action": "remove_path", "name": name}),
             IoEdit::SetChannels { name, channels } => json!({"action": "set_channels", "name": name, "channels": channels}),
             IoEdit::SetMain { name } => json!({"action": "set_main", "name": name}),
+            IoEdit::SetLive { name, live } => json!({"action": "set_live", "name": name, "live": live}),
         }
     }
 }
@@ -401,22 +403,33 @@ fn path_row(ui: &mut egui::Ui, io: &IoMap, p: &IoPath, ed: &mut IoEditor, items:
     }
     ui.label(channel_label(&p.channels));
     ui.label(format!("{} ch", p.channels.len()));
-    ui.horizontal(|ui| {
-        let b = ui.small_button("Channels");
-        items.push(MenuItem::at(ui, "Channels".into(), format!("io_channels:{}", p.name), b.rect));
-        if b.clicked() {
-            ed.editing = if ed.editing.as_deref() == Some(p.name.as_str()) { None } else { Some(p.name.clone()) };
-        }
-        let b = ui.small_button("Rename");
-        items.push(MenuItem::at(ui, "Rename".into(), format!("io_rename:{}", p.name), b.rect));
-        if b.clicked() {
-            ed.rename = Some((p.name.clone(), p.name.clone()));
-        }
-        let can = !p.name.eq_ignore_ascii_case(&io.main);
-        let b = ui.add_enabled(can, egui::Button::new("Remove").small());
-        items.push(MenuItem::at(ui, "Remove".into(), format!("io_remove:{}", p.name), b.rect));
-        if b.on_disabled_hover_text("Main plays here: choose another path for Main first.").clicked() {
-            *edit = Some(IoEdit::Remove { name: p.name.clone() });
+    let can = !p.name.eq_ignore_ascii_case(&io.main);
+    ui.vertical(|ui| {
+        ui.horizontal(|ui| {
+            let b = ui.small_button("Channels");
+            items.push(MenuItem::at(ui, "Channels".into(), format!("io_channels:{}", p.name), b.rect));
+            if b.clicked() {
+                ed.editing = if ed.editing.as_deref() == Some(p.name.as_str()) { None } else { Some(p.name.clone()) };
+            }
+            let b = ui.small_button("Rename");
+            items.push(MenuItem::at(ui, "Rename".into(), format!("io_rename:{}", p.name), b.rect));
+            if b.clicked() {
+                ed.rename = Some((p.name.clone(), p.name.clone()));
+            }
+            let b = ui.add_enabled(can, egui::Button::new("Remove").small());
+            items.push(MenuItem::at(ui, "Remove".into(), format!("io_remove:{}", p.name), b.rect));
+            if b.on_disabled_hover_text("Main plays here: choose another path for Main first.").clicked() {
+                *edit = Some(IoEdit::Remove { name: p.name.clone() });
+            }
+        });
+        if can && p.direction == IoDirection::Output {
+            let mut live = p.live;
+            let b = ui.checkbox(&mut live, "Live (no shared padding)");
+            crate::help::hover(ui, &b, crate::help::Id::AudioDevicesPathLive);
+            items.push(MenuItem::at(ui, "Live (no shared padding)".into(), format!("io_live:{}", p.name), b.rect));
+            if b.changed() {
+                *edit = Some(IoEdit::SetLive { name: p.name.clone(), live });
+            }
         }
     });
 }
@@ -457,8 +470,14 @@ mod tests {
         io.remove_path("Out 3-4").unwrap();
         assert_eq!(first_free(&io, IoDirection::Output), 2);
         assert!(overlap_lines(&io).is_empty());
-        io.add_path(IoPath { name: "Cue".into(), direction: IoDirection::Output, channels: vec![1], format: transit_model::ChannelFormat::Mono })
-            .unwrap();
+        io.add_path(IoPath {
+            live: false,
+            name: "Cue".into(),
+            direction: IoDirection::Output,
+            channels: vec![1],
+            format: transit_model::ChannelFormat::Mono,
+        })
+        .unwrap();
         assert_eq!(overlap_lines(&io), ["Out 1-2 and Cue share channel 2 and add together there."]);
         assert!(is_wasapi("wasapi") && !is_wasapi("ASIO"));
     }

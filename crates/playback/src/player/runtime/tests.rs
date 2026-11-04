@@ -632,6 +632,7 @@ fn a_path_table_edit_is_a_plan_on_the_same_engine_and_the_callback_allocates_not
     let first = ports.plans.engine().active().generation;
     let mut io = transit_model::IoMap::for_device("test", "test", 0, 2);
     io.add_path(transit_model::IoPath {
+        live: false,
         name: "Cue".into(),
         direction: transit_model::IoDirection::Output,
         channels: vec![0],

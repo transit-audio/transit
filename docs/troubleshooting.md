@@ -160,6 +160,7 @@ Every figure of the Callback Telemetry window, in plain words. The same text app
 Every status line and figure of the Audio Devices window, in plain words. The same text appears in the app's Info panel. This section is generated from `docs/help/audio-devices.toml`; edit the entries there and run `cargo xtask help --write`.
 
 <!-- help:audio-devices -->
+- **Live (no shared padding).** Let this cue play as soon as its own sources align, without waiting for other outputs; saved on this machine, ignored by offline renders.
 - **Audio Devices.** Choose the audio system, devices, sample rate and buffer size, and read what is actually open and how the driver is keeping up. The lines in the card above the settings are live; the settings change only when you press Apply.
 - **Output open.** The output device that is running, then its sample rate, channels and buffer, and what the backend reported at open. If it says none, no audio device is open: pick one and press Apply, or press Reconnect.
 - **Input open.** The input device that is running, in the same terms as the output. It opens when a track is armed or monitored, so none yet is normal on a fresh start. For ASIO the input is the output driver's own.

@@ -216,8 +216,8 @@ fn changed_sink_edges_refresh_cached_indices_even_when_sink_order_stays_the_same
     let io = IoMap {
         outputs: 4,
         paths: vec![
-            IoPath { name: "A".into(), direction: IoDirection::Output, channels: vec![0, 1], format: ChannelFormat::Stereo },
-            IoPath { name: "B".into(), direction: IoDirection::Output, channels: vec![2, 3], format: ChannelFormat::Stereo },
+            IoPath { live: false, name: "A".into(), direction: IoDirection::Output, channels: vec![0, 1], format: ChannelFormat::Stereo },
+            IoPath { live: false, name: "B".into(), direction: IoDirection::Output, channels: vec![2, 3], format: ChannelFormat::Stereo },
         ],
         ..IoMap::default()
     };

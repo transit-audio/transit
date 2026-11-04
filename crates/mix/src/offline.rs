@@ -138,6 +138,12 @@ impl RangeRender {
     }
 
     fn build(s: &Session, bus: Option<BusId>, range: Range, block: usize, io: Option<&IoMap>) -> Result<Self, CompileError> {
+        // Machine cue opt-outs never change rendered deliverables or their common alignment.
+        let offline_io = io.cloned().map(|mut m| {
+            m.paths.iter_mut().for_each(|p| p.live = false);
+            m
+        });
+        let io = offline_io.as_ref();
         let target = Self::target_for(s, block, io.map_or(0, |m| m.outputs));
         let mut eng = MixEngine::realtime(target);
         let mut compiler = PlanCompiler::new(target, Self::limits()).skipping_inactive_instances();

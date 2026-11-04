@@ -496,3 +496,23 @@ fn copy_diagnostics_is_in_every_section_and_copies_the_report() {
     t.frames(150);
     assert!(!t.app.diagnostics_copied(t.time), "and goes after two seconds");
 }
+
+#[test]
+fn the_live_cue_checkbox_edits_only_named_outputs_and_leaves_the_session_clean() {
+    use super::io_paths::{item, with_window};
+    let mut t = with_window();
+    let before = t.app.engine.session().to_json().unwrap();
+    let (revision, undo, io_revision) = (t.app.engine.revision, t.app.engine.can_undo(), t.app.engine.io_revision());
+    let controls = t.layout()["controls"].as_array().unwrap().clone();
+    let live: Vec<_> = controls.iter().filter(|c| c["value"].as_str().is_some_and(|v| v.starts_with("io_live:"))).collect();
+    assert_eq!(live.len(), 1, "only the non-Main output has the control");
+    assert_eq!(live[0]["value"], "io_live:Out 3-4");
+    assert_eq!(live[0]["visible"], true);
+    t.click(mid(item(&t, "io_live:Out 3-4", "Live (no shared padding)")));
+    assert!(t.app.engine.io_map().path("Out 3-4").unwrap().live);
+    assert_eq!(t.app.engine.io_revision(), io_revision + 1);
+    assert_eq!((t.app.engine.revision, t.app.engine.can_undo()), (revision, undo));
+    assert_eq!(t.app.engine.session().to_json().unwrap(), before);
+    t.click(mid(item(&t, "io_live:Out 3-4", "Live (no shared padding)")));
+    assert!(!t.app.engine.io_map().path("Out 3-4").unwrap().live);
+}

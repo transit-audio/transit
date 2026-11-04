@@ -66,7 +66,14 @@ mod tests {
         let mut saved = Vec::new();
         assert_eq!(adopt(&saved, tascam()), tascam());
         let mut mine = tascam();
-        mine.add_path(IoPath { name: "Cue".into(), direction: IoDirection::Output, channels: vec![8, 9], format: ChannelFormat::Stereo }).unwrap();
+        mine.add_path(IoPath {
+            live: false,
+            name: "Cue".into(),
+            direction: IoDirection::Output,
+            channels: vec![8, 9],
+            format: ChannelFormat::Stereo,
+        })
+        .unwrap();
         remember(&mut saved, &mine);
         assert_eq!(adopt(&saved, tascam()), mine);
         assert_eq!(
@@ -78,8 +85,22 @@ mod tests {
     #[test]
     fn one_device_in_another_usb_mode_adapts_its_saved_table() {
         let mut mine = tascam();
-        mine.add_path(IoPath { name: "Cue".into(), direction: IoDirection::Output, channels: vec![8, 9], format: ChannelFormat::Stereo }).unwrap();
-        mine.add_path(IoPath { name: "Pair".into(), direction: IoDirection::Output, channels: vec![2, 3], format: ChannelFormat::Stereo }).unwrap();
+        mine.add_path(IoPath {
+            live: false,
+            name: "Cue".into(),
+            direction: IoDirection::Output,
+            channels: vec![8, 9],
+            format: ChannelFormat::Stereo,
+        })
+        .unwrap();
+        mine.add_path(IoPath {
+            live: false,
+            name: "Pair".into(),
+            direction: IoDirection::Output,
+            channels: vec![2, 3],
+            format: ChannelFormat::Stereo,
+        })
+        .unwrap();
         let mut saved = Vec::new();
         remember(&mut saved, &mine);
         let two = adopt(&saved, IoMap::for_device("ASIO", "TASCAM Model 12", 2, 2));

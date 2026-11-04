@@ -27,6 +27,9 @@ pub struct IoPath {
     pub direction: IoDirection,
     pub channels: Vec<u16>,
     pub format: ChannelFormat,
+    /// Keep this output's own arrival instead of shared device padding. Per machine only.
+    #[serde(default)]
+    pub live: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +45,8 @@ pub enum IoError {
     Repeated(u16),
     /// Main plays on this path.
     MainPath,
+    LiveMain,
+    LiveInput,
     /// The name belongs to a built-in input ("System Audio").
     Reserved(String),
 }
@@ -56,6 +61,8 @@ impl std::fmt::Display for IoError {
             IoError::Repeated(c) => write!(f, "channel {} is listed twice", c + 1),
             IoError::Missing(n) => write!(f, "no path named `{n}`"),
             IoError::MainPath => write!(f, "Main plays on this path; choose another for Main first"),
+            IoError::LiveMain => write!(f, "Main cannot be a live path; turn off Live first"),
+            IoError::LiveInput => write!(f, "Live is only available on output paths"),
             IoError::Reserved(n) => write!(f, "`{n}` is the built-in input of what the computer plays; choose another name"),
         }
     }
@@ -258,6 +265,7 @@ impl IoMap {
         while c < outputs {
             let width = (outputs - c).min(2);
             paths.push(IoPath {
+                live: false,
                 name: label("Out", c, width),
                 direction: IoDirection::Output,
                 channels: (c..c + width).collect(),
@@ -266,11 +274,23 @@ impl IoMap {
             c += width;
         }
         for c in 0..inputs {
-            paths.push(IoPath { name: label("In", c, 1), direction: IoDirection::Input, channels: vec![c], format: ChannelFormat::Mono });
+            paths.push(IoPath {
+                live: false,
+                name: label("In", c, 1),
+                direction: IoDirection::Input,
+                channels: vec![c],
+                format: ChannelFormat::Mono,
+            });
         }
         let mut c = 0;
         while c + 1 < inputs {
-            paths.push(IoPath { name: label("In", c, 2), direction: IoDirection::Input, channels: vec![c, c + 1], format: ChannelFormat::Stereo });
+            paths.push(IoPath {
+                live: false,
+                name: label("In", c, 2),
+                direction: IoDirection::Input,
+                channels: vec![c, c + 1],
+                format: ChannelFormat::Stereo,
+            });
             c += 2;
         }
         let main = paths.iter().find(|p| p.direction == IoDirection::Output).map_or_else(|| "Out 1-2".to_string(), |p| p.name.clone());
@@ -310,6 +330,14 @@ impl IoMap {
 
     /// A name, width 1..=16, every channel open. Name clashes are the editing methods' check.
     pub fn validate(&self, path: &IoPath) -> Result<(), IoError> {
+        if path.live {
+            if path.direction == IoDirection::Input {
+                return Err(IoError::LiveInput);
+            }
+            if path.name.eq_ignore_ascii_case(&self.main) {
+                return Err(IoError::LiveMain);
+            }
+        }
         if path.name.trim().is_empty() {
             return Err(IoError::EmptyName);
         }
@@ -359,6 +387,16 @@ impl IoMap {
             self.main = to.into();
         }
         p.name = to.into();
+        Ok(())
+    }
+
+    /// Set the per-machine cue padding opt-out, only on a non-Main output.
+    pub fn set_live(&mut self, name: &str, live: bool) -> Result<(), IoError> {
+        let i = self.paths.iter().position(|p| p.name.eq_ignore_ascii_case(name)).ok_or_else(|| IoError::Missing(name.into()))?;
+        let mut next = self.paths[i].clone();
+        next.live = live;
+        self.validate(&next)?;
+        self.paths[i] = next;
         Ok(())
     }
 
@@ -463,6 +501,9 @@ impl IoMap {
     /// Choose the output path Main plays on.
     pub fn set_main(&mut self, name: &str) -> Result<(), IoError> {
         let p = self.path(name).filter(|p| p.direction == IoDirection::Output).ok_or_else(|| IoError::Missing(name.into()))?;
+        if p.live {
+            return Err(IoError::LiveMain);
+        }
         self.main = p.name.clone();
         Ok(())
     }
@@ -496,6 +537,8 @@ impl IoMap {
                 }
             }
             self.main = fresh.main;
+            // A former cue can become the fallback Main when the device loses output channels.
+            self.paths.iter_mut().filter(|p| p.name.eq_ignore_ascii_case(&self.main)).for_each(|p| p.live = false);
         }
         true
     }
@@ -528,7 +571,7 @@ mod tests {
     }
 
     fn out(name: &str, channels: Vec<u16>) -> IoPath {
-        IoPath { name: name.into(), direction: IoDirection::Output, channels, format: ChannelFormat::Stereo }
+        IoPath { live: false, name: name.into(), direction: IoDirection::Output, channels, format: ChannelFormat::Stereo }
     }
 
     #[test]
@@ -633,8 +676,10 @@ mod tests {
     #[test]
     fn input_names_resolve_through_the_table_and_fall_back_to_the_label() {
         let mut m = IoMap::for_device("ASIO", "x", 8, 2);
-        m.add_path(IoPath { name: "Guitar".into(), direction: IoDirection::Input, channels: vec![4], format: ChannelFormat::Mono }).unwrap();
-        m.add_path(IoPath { name: "Pair".into(), direction: IoDirection::Input, channels: vec![6, 1], format: ChannelFormat::Stereo }).unwrap();
+        m.add_path(IoPath { live: false, name: "Guitar".into(), direction: IoDirection::Input, channels: vec![4], format: ChannelFormat::Mono })
+            .unwrap();
+        m.add_path(IoPath { live: false, name: "Pair".into(), direction: IoDirection::Input, channels: vec![6, 1], format: ChannelFormat::Stereo })
+            .unwrap();
         assert_eq!(input_channel(Some(&m), "Guitar", 0), 4);
         assert_eq!(input_channel(Some(&m), "guitar", 1), 5, "a stereo strip on a mono path continues after it, as In 3 always did");
         assert_eq!((input_channel(Some(&m), "Pair", 0), input_channel(Some(&m), "Pair", 1)), (6, 1));
@@ -658,7 +703,13 @@ mod tests {
         assert_eq!(live_input_channel(None, "System Audio", 0, 4), None);
         assert_eq!(live_input_channel(Some(&m), "In 2", 0, 4), Some(1), "device paths resolve as before");
         assert_eq!(live_input_channel(Some(&m), "In 3", 0, 2), Some(0), "and wrap to the live channels as before");
-        let path = |name: &str| IoPath { name: name.into(), direction: IoDirection::Input, channels: vec![0, 1], format: ChannelFormat::Stereo };
+        let path = |name: &str| IoPath {
+            live: false,
+            name: name.into(),
+            direction: IoDirection::Input,
+            channels: vec![0, 1],
+            format: ChannelFormat::Stereo,
+        };
         assert_eq!(m.add_path(path(" system audio ")), Err(IoError::Reserved("system audio".into())));
         assert_eq!(m.rename_path("In 1-2", "System Audio"), Err(IoError::Reserved("System Audio".into())));
         let saved = serde_json::to_string(&m).unwrap();
