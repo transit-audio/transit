@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Mixer — full height</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+</style>
+</helmet>
+<div style="width: 1012px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 12px; display: flex; gap: 4px; align-items: flex-start">
+<sc-for list="{{strips}}" as="s" hint-placeholder-count="7">
+<section aria-label="{{s.name}} channel" style="width: {{s.w}}px; flex: none; box-sizing: border-box; background: #1A1D21; border: 1px solid {{s.border}}; border-radius: 8px; display: flex; flex-direction: column; overflow: hidden; margin-left: {{s.ml}}px">
+<div style="height: 3px; background: {{s.color}}"></div>
+<div style="padding: 7px 8px 8px; display: flex; flex-direction: column; gap: 6px">
+
+<!-- name -->
+<div style="display: flex; align-items: baseline; justify-content: space-between; gap: 6px; height: 18px">
+<span style="font: 600 13px 'IBM Plex Sans', sans-serif; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: {{s.nameCol}}">{{s.name}}</span>
+<span style="font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D">{{s.num}}</span>
+</div>
+
+<!-- input -->
+<div style="display: flex; gap: 4px; height: 24px">
+<sc-if value="{{s.isTrack}}" hint-placeholder-val="{{ true }}">
+<button type="button" aria-label="Input" style="flex: 1; min-width: 0; height: 24px; border-radius: 5px; border: 1px solid #2B3036; background: #0D0F11; color: #E7E9EC; display: flex; align-items: center; justify-content: space-between; gap: 4px; padding: 0 6px; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer"><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{s.input}}</span><svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="#8C939D" stroke-width="1.8" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+<sc-if value="{{s.midi}}" hint-placeholder-val="{{ true }}">
+<button type="button" aria-label="MIDI out" style="width: 32px; height: 24px; border-radius: 5px; border: 1px solid #2B3036; background: #22262B; color: #A7ADB6; font: 500 10px 'IBM Plex Mono', monospace; cursor: pointer">OUT</button>
+</sc-if>
+</sc-if>
+<sc-if value="{{s.isMaster}}" hint-placeholder-val="{{ false }}">
+<span style="flex: 1; height: 24px; display: flex; align-items: center; font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">Out 1–2 · Speakers</span>
+</sc-if>
+</div>
+
+<!-- inserts + sends: full -->
+<sc-if value="{{full}}" hint-placeholder-val="{{ true }}">
+<div style="height: 112px; display: flex; flex-direction: column; gap: 3px; border-top: 1px solid #23272C; padding-top: 6px">
+<span style="font: 600 10px 'IBM Plex Sans', sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: #8C939D">Inserts</span>
+<sc-for list="{{s.inserts}}" as="i" hint-placeholder-count="1">
+<button type="button" style="height: 22px; flex: none; border-radius: 4px; border: 1px solid #2B3036; background: #22262B; color: {{i.col}}; display: flex; align-items: center; gap: 6px; padding: 0 6px; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer; text-align: left"><svg width="7" height="7" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3.5" fill="{{i.dot}}"></circle></svg><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{i.name}}</span></button>
+</sc-for>
+<button type="button" style="height: 22px; flex: none; border-radius: 4px; border: 1px dashed #383E46; background: transparent; color: #8C939D; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer">+ Insert</button>
+</div>
+<div style="height: 86px; display: flex; flex-direction: column; gap: 3px; border-top: 1px solid #23272C; padding-top: 6px">
+<span style="font: 600 10px 'IBM Plex Sans', sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: #8C939D">Sends</span>
+<sc-for list="{{s.sends}}" as="d" hint-placeholder-count="1">
+<button type="button" aria-label="{{d.aria}}" style="height: 22px; flex: none; border-radius: 4px; border: 1px solid #2B3036; background: #16181B; color: #E7E9EC; display: flex; align-items: center; gap: 6px; padding: 0 6px; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: ew-resize"><span style="flex: 1; min-width: 0; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{d.n}}</span><svg width="28" height="6" viewBox="0 0 100 6" preserveAspectRatio="none" aria-hidden="true"><rect x="0" y="1" width="100" height="4" rx="2" fill="#2B3036"></rect><rect x="0" y="0" width="{{d.w}}" height="6" rx="2" fill="{{signal}}"></rect></svg><span style="font: 500 10px 'IBM Plex Mono', monospace; color: #A7ADB6; width: 22px; text-align: right">{{d.txt}}</span></button>
+</sc-for>
+<button type="button" style="height: 22px; flex: none; border-radius: 4px; border: 1px dashed #383E46; background: transparent; color: #8C939D; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer">+ Send</button>
+</div>
+</sc-if>
+
+<!-- inserts + sends: short -->
+<sc-if value="{{short}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; gap: 4px; height: 22px">
+<button type="button" aria-label="{{s.fxAria}}" style="flex: 1; height: 22px; border-radius: 4px; border: 1px solid #2B3036; background: #22262B; color: #E7E9EC; display: flex; align-items: center; justify-content: center; gap: 5px; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer">FX<span style="font: 500 10px 'IBM Plex Mono', monospace; color: {{s.fxCol}}">{{s.fxTxt}}</span></button>
+<button type="button" aria-label="{{s.sndAria}}" style="flex: 1; height: 22px; border-radius: 4px; border: 1px solid #2B3036; background: #22262B; color: #E7E9EC; display: flex; align-items: center; justify-content: center; gap: 5px; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer">Snd<span style="font: 500 10px 'IBM Plex Mono', monospace; color: {{s.sndCol}}">{{s.sndTxt}}</span></button>
+</div>
+</sc-if>
+
+<!-- output -->
+<button type="button" aria-label="Output" style="height: 24px; border-radius: 5px; border: 1px solid #2B3036; background: #0D0F11; color: #E7E9EC; display: flex; align-items: center; gap: 5px; padding: 0 6px; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer"><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#8C939D" stroke-width="1.6" aria-hidden="true"><path d="M2 8 H12 M9 4.5 L12.5 8 L9 11.5"></path></svg><span style="flex: 1; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{s.out}}</span><svg width="9" height="9" viewBox="0 0 16 16" fill="none" stroke="#8C939D" stroke-width="1.8" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+
+<!-- pan -->
+<div style="display: flex; align-items: center; justify-content: center; gap: 8px; height: 40px">
+<button type="button" aria-label="{{s.pan.aria}}" style="all: unset; cursor: ns-resize; display: flex">
+<svg width="36" height="36" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{s.pan.track}}" fill="none" stroke="#2B3036" stroke-width="7" stroke-linecap="round"></path>
+<path d="{{s.pan.val}}" fill="none" stroke="{{signal}}" stroke-width="7" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="#262A30" stroke="#383E46" stroke-width="2"></circle>
+<line x1="{{s.pan.x1}}" y1="{{s.pan.y1}}" x2="{{s.pan.x2}}" y2="{{s.pan.y2}}" stroke="#E7E9EC" stroke-width="5" stroke-linecap="round"></line>
+</svg>
+</button>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #E7E9EC; width: 30px">{{s.pan.txt}}</span>
+</div>
+
+<!-- M S R I -->
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px">
+<sc-for list="{{s.btns}}" as="b" hint-placeholder-count="4">
+<button type="button" aria-label="{{b.aria}}" aria-pressed="{{b.pressed}}" disabled="{{b.disabled}}" style="height: 24px; border-radius: 4px; border: 1px solid {{b.bd}}; background: {{b.bg}}; color: {{b.fg}}; font: 600 11px 'IBM Plex Sans', sans-serif; cursor: pointer">{{b.t}}</button>
+</sc-for>
+</div>
+
+<!-- fader + shared scale + meter -->
+<div style="display: flex; justify-content: center; padding-top: 2px">
+<svg width="{{s.svgW}}" height="{{fh}}" viewBox="{{s.vb}}" role="img" aria-label="{{s.faderAria}}" style="display: block; cursor: ns-resize">
+<sc-for list="{{s.grid}}" as="g" hint-placeholder-count="8">
+<line x1="{{s.mx0}}" y1="{{g.y}}" x2="{{s.mx1}}" y2="{{g.y}}" stroke="#2B3036" stroke-width="1"></line>
+<line x1="38" y1="{{g.y}}" x2="44" y2="{{g.y}}" stroke="{{g.tick}}" stroke-width="1"></line>
+<text x="{{s.lx}}" y="{{g.ty}}" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="{{g.col}}">{{g.t}}</text>
+</sc-for>
+<rect x="18" y="10" width="4" height="{{s.trackH}}" rx="2" fill="#2B3036"></rect>
+<rect x="18" y="{{s.capY}}" width="4" height="{{s.fillH}}" rx="2" fill="{{s.fillCol}}"></rect>
+<sc-for list="{{s.meters}}" as="m" hint-placeholder-count="2">
+<rect x="{{m.x}}" y="10" width="{{m.w}}" height="{{s.trackH}}" rx="1.5" fill="#0D0F11" stroke="#23272C" stroke-width="1"></rect>
+<rect x="{{m.x}}" y="{{m.yPk}}" width="{{m.w}}" height="{{m.hPk}}" rx="1.5" fill="#5FCB8E" fill-opacity="0.35"></rect>
+<rect x="{{m.x}}" y="{{m.yRms}}" width="{{m.w}}" height="{{m.hRms}}" rx="1.5" fill="#5FCB8E"></rect>
+<rect x="{{m.x}}" y="{{m.yHold}}" width="{{m.w}}" height="2" fill="#E7E9EC" fill-opacity="{{m.holdOp}}"></rect>
+<rect x="{{m.x}}" y="2" width="{{m.w}}" height="4" rx="1" fill="#2B3036"></rect>
+</sc-for>
+<rect x="4" y="{{s.capTop}}" width="32" height="16" rx="3" fill="#2E333A" stroke="#585F69" stroke-width="1"></rect>
+<line x1="8" y1="{{s.capY}}" x2="32" y2="{{s.capY}}" stroke="#E7E9EC" stroke-width="2"></line>
+</svg>
+</div>
+
+<!-- readouts -->
+<div style="display: flex; gap: 4px; align-items: center">
+<button type="button" aria-label="{{s.gainAria}}" style="flex: 1; min-width: 0; height: 26px; border-radius: 5px; border: 1px solid #2B3036; background: #0D0F11; color: #E7E9EC; font: 500 12px 'IBM Plex Mono', monospace; cursor: text">{{s.gainTxt}}</button>
+<button type="button" aria-label="{{s.peakAria}}" style="width: {{s.peakW}}px; height: 26px; border-radius: 5px; border: 1px solid #23272C; background: transparent; color: {{s.peakCol}}; font: 500 11px 'IBM Plex Mono', monospace; cursor: pointer">{{s.peakTxt}}</button>
+</div>
+<sc-if value="{{s.isMaster}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; justify-content: space-between; font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D"><span>INT</span><span style="color: #E7E9EC">−14.2 LUFS</span></div>
+</sc-if>
+</div>
+</section>
+</sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"variant":{"editor":"enum","options":["full","short"],"default":"full"},"$preview":{"width":1012,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const variant = this.props.variant ?? 'full';
+    const full = variant !== 'short';
+    const fh = full ? 760 : 196;
+    const signal = '#4C9EFF';
+    const f = (n) => n.toFixed(1);
+    const NEG = -Infinity;
+
+    // one dB scale shared by fader and meter
+    const marks = [[6, 0], [0, 0.14], [-6, 0.28], [-12, 0.42], [-24, 0.6], [-36, 0.74], [-48, 0.86], [-60, 0.94]];
+    const pos = (db) => {
+      if (db === NEG || db <= -90) return 1;
+      if (db >= 6) return 0;
+      if (db < -60) return 0.94 + Math.min(1, (-60 - db) / 30) * 0.06;
+      for (let i = 0; i < marks.length - 1; i++) {
+        const a = marks[i], b = marks[i + 1];
+        if (db <= a[0] && db >= b[0]) return a[1] + (a[0] - db) / (a[0] - b[0]) * (b[1] - a[1]);
+      }
+      return 1;
+    };
+    const top = 10, span = fh - 20;
+    const y = (db) => top + pos(db) * span;
+    const dbTxt = (v) => v === NEG ? '−inf' : (v > 0 ? '+' : v < 0 ? '−' : '+') + Math.abs(v).toFixed(1);
+
+    const pt = (a, r) => { const t = a * Math.PI / 180; return [50 + r * Math.sin(t), 50 - r * Math.cos(t)]; };
+    const arc = (r, a0, a1) => {
+      if (a1 - a0 < 0.6) return '';
+      const p0 = pt(a0, r), p1 = pt(a1, r);
+      return 'M' + f(p0[0]) + ' ' + f(p0[1]) + ' A' + r + ' ' + r + ' 0 ' + (a1 - a0 > 180 ? 1 : 0) + ' 1 ' + f(p1[0]) + ' ' + f(p1[1]);
+    };
+    const panKnob = (p) => {
+      const ang = 135 * p;
+      const a = pt(ang, 9), b = pt(ang, 24);
+      const txt = p === 0 ? 'C' : (p < 0 ? 'L' : 'R') + Math.round(Math.abs(p) * 100);
+      return { txt: txt, aria: 'Pan ' + txt, track: arc(40, -135, 135), val: arc(40, Math.min(0, ang), Math.max(0, ang)), x1: f(a[0]), y1: f(a[1]), x2: f(b[0]), y2: f(b[1]) };
+    };
+
+    const btn = (t, label, on, kind, disabled) => {
+      const base = { t: t, aria: label, pressed: on ? 'true' : 'false', disabled: disabled ? true : false, bg: '#22262B', fg: '#A7ADB6', bd: '#2B3036' };
+      if (disabled) return Object.assign(base, { fg: '#585F69', bg: '#1E2125' });
+      if (!on) return base;
+      if (kind === 'm') return Object.assign(base, { bg: '#E7E9EC', fg: '#131518', bd: '#E7E9EC' });
+      if (kind === 's') return Object.assign(base, { bg: signal, fg: '#0D0F11', bd: signal });
+      if (kind === 'r') return Object.assign(base, { bg: '#FF6B5B', fg: '#131518', bd: '#FF6B5B' });
+      return Object.assign(base, { bg: '#1E2A38', fg: signal, bd: signal });
+    };
+
+    const tracks = [
+      { name: 'Drums', num: '1', color: '#5AA9E6', input: 'All MIDI', midi: true, inserts: [], sends: [['Reverb', -12]], out: 'Main', pan: 0, gain: 0, peak: -6.3, lvl: [-9, -10], hold: [-6.3, -7.0], sel: true },
+      { name: 'Bass', num: '2', color: '#5B7CE6', input: 'All MIDI', midi: true, inserts: [['Solid Bus Comp', true]], sends: [], out: 'Main', pan: 0, gain: -6.3, peak: -7.1, lvl: [-11, -11.5], hold: [-7.1, -7.4] },
+      { name: 'Pads', num: '3', color: '#4CC1A8', input: 'All MIDI', midi: true, inserts: [['Solid Bus Comp', true]], sends: [['Reverb', -6], ['Delay', -18]], out: 'Main', pan: -0.25, gain: -8.5, peak: -11.4, lvl: [NEG, NEG], hold: [NEG, NEG], muted: true },
+      { name: 'Percussion Loop', num: '4', color: '#6CC46A', input: 'In 1', midi: false, inserts: [['Bite', true]], sends: [['Reverb', -20]], out: 'Main', pan: 0.2, gain: 0, peak: -4.7, lvl: [-8, -7.2], hold: [-4.7, -5.2], arm: true, mon: true },
+      { name: 'More Percussion', num: '5', color: '#B5CF4A', input: 'In 1', midi: false, inserts: [['Ozone 11 Equalizer', true], ['Bite', false], ['Raum', true]], sends: [], out: 'Main', pan: 0, gain: -2.9, peak: -11.2, lvl: [-14, -15], hold: [-11.2, -11.9], mon: true },
+      { name: 'Inst 1', num: '6', color: '#E6C84A', input: 'All MIDI', midi: true, inserts: [], sends: [], out: 'Main', pan: 0, gain: 0, peak: NEG, lvl: [NEG, NEG], hold: [NEG, NEG] }
+    ];
+    const master = { name: 'Main', num: 'M', color: '#585F69', inserts: [['Maximizer', true]], sends: [], out: 'Out 1–2', pan: 0, gain: 0, peak: -3.1, lvl: [-6, -6.6], hold: [-3.1, -3.5], master: true };
+
+    const build = (t) => {
+      const isMaster = !!t.master;
+      const w = isMaster ? 160 : 132;
+      const svgW = w - 16;
+      // fader at x 0..40, labels end at lx, meters after
+      const lx = 68;
+      const mw = isMaster ? 14 : 10;
+      const mx0 = 74, gap = 3;
+      const mx1 = mx0 + mw * 2 + gap;
+      const capY = y(t.gain);
+      const gridMarks = [[6, '+6'], [0, '0'], [-6, '−6'], [-12, '−12'], [-24, '−24'], [-36, '−36'], [-48, '−48'], [NEG, '−∞']];
+      const grid = gridMarks.map((m) => ({ y: f(y(m[0])), ty: f(y(m[0]) + 3.5), t: m[1], col: m[0] === 0 ? '#E7E9EC' : '#8C939D', tick: m[0] === 0 ? '#A7ADB6' : '#383E46' }));
+      const meters = [0, 1].map((c) => {
+        const lv = t.muted ? NEG : t.lvl[c];
+        const rms = lv === NEG ? NEG : lv - 7;
+        const yPk = y(lv), yR = y(rms), yH = y(t.muted ? NEG : t.hold[c]);
+        return { x: mx0 + c * (mw + gap), w: mw, yPk: f(yPk), hPk: f(top + span - yPk), yRms: f(yR), hRms: f(top + span - yR), yHold: f(yH - 1), holdOp: (t.hold[c] === NEG || t.muted) ? 0 : 1 };
+      });
+      const ins = (t.inserts || []);
+      const shown = ins.slice(0, 3).map((i) => ({ name: i[0], dot: i[1] ? signal : '#585F69', col: i[1] ? '#E7E9EC' : '#8C939D' }));
+      const sends = (t.sends || []).slice(0, 2).map((d) => ({ n: d[0], txt: String(d[1]).replace('-', '−'), w: f((1 - pos(d[1])) * 100), aria: d[0] + ' send ' + d[1] + ' dB' }));
+      const btns = isMaster
+        ? [btn('M', 'Mute', false, 'm'), btn('Mono', 'Mono', false, 'i'), btn('Dim', 'Dim', false, 'm'), btn('Ref', 'Reference', false, 'i')]
+        : [btn('M', 'Mute', !!t.muted, 'm'), btn('S', 'Solo', !!t.solo, 's'), btn('R', 'Record arm', !!t.arm, 'r'), btn('I', 'Input monitor', !!t.mon, 'i', t.midi)];
+      return {
+        name: t.name, num: t.num, color: t.color, input: t.input, midi: !!t.midi, out: t.out,
+        isTrack: !isMaster, isMaster: isMaster, w: w, ml: isMaster ? 8 : 0,
+        border: t.sel ? signal : '#2B3036', nameCol: t.muted ? '#8C939D' : '#E7E9EC',
+        inserts: shown, sends: sends,
+        fxTxt: ins.length ? String(ins.length) : '+', fxCol: ins.length ? signal : '#8C939D', fxAria: ins.length + ' inserts',
+        sndTxt: sends.length ? String((t.sends || []).length) : '+', sndCol: sends.length ? signal : '#8C939D', sndAria: (t.sends || []).length + ' sends',
+        pan: panKnob(t.pan), btns: btns,
+        svgW: svgW, vb: '0 0 ' + svgW + ' ' + fh, lx: lx, mx0: mx0, mx1: mx1, grid: grid, meters: meters,
+        trackH: span, capY: f(capY), capTop: f(capY - 8), fillH: f(top + span - capY), fillCol: t.muted ? '#4A5260' : signal,
+        faderAria: t.name + ' volume ' + dbTxt(t.gain) + ' dB',
+        gainTxt: dbTxt(t.gain), gainAria: 'Volume ' + dbTxt(t.gain) + ' dB, click to type',
+        peakTxt: dbTxt(t.peak), peakCol: t.peak > 0 ? '#FF6B5B' : '#A7ADB6', peakW: isMaster ? 56 : 46, peakAria: 'Peak ' + dbTxt(t.peak) + ', click to reset'
+      };
+    };
+
+    return { full: full, short: !full, fh: fh, signal: signal, strips: tracks.map(build).concat([build(master)]) };
+  }
+}
+</script>
+</body>
+</html>

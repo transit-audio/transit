@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Macro Oscillator</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+a{color:#A7ADB6}a:hover{color:#E7E9EC}
+</style>
+</helmet>
+<div style="width: 1440px; min-height: 1320px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; display: flex; flex-direction: column">
+
+<!-- Title bar -->
+<header style="height: 52px; box-sizing: border-box; padding: 0 16px; display: flex; align-items: center; gap: 16px; border-bottom: 1px solid #2B3036; background: #16181B">
+<div style="display: flex; align-items: center; gap: 12px; min-width: 360px">
+<span style="font-weight: 600; font-size: 15px; letter-spacing: -0.01em">transit</span>
+<span style="width: 1px; height: 18px; background: #383E46"></span>
+<span style="font-size: 13px; color: #8C939D">Inst 1</span>
+<span style="font-size: 13px; color: #8C939D">/</span>
+<span style="font-size: 14px; font-weight: 500">Macro Oscillator</span>
+</div>
+<div style="flex: 1; display: flex; justify-content: center; align-items: center; gap: 4px">
+<button type="button" aria-label="Previous preset" style="width: 32px; height: 32px; border-radius: 6px; border: 1px solid #2B3036; background: #1A1D21; color: #A7ADB6; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M10 3 L5 8 L10 13"></path></svg></button>
+<button type="button" style="width: 300px; height: 32px; border-radius: 6px; border: 1px solid #2B3036; background: #0D0F11; color: #E7E9EC; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; font: 500 13px 'IBM Plex Sans', sans-serif; cursor: pointer"><span><span style="color: #8C939D; font-weight: 400">Factory · </span>Default</span><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="#8C939D" stroke-width="1.6" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+<button type="button" aria-label="Next preset" style="width: 32px; height: 32px; border-radius: 6px; border: 1px solid #2B3036; background: #1A1D21; color: #A7ADB6; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><path d="M6 3 L11 8 L6 13"></path></svg></button>
+<button type="button" aria-label="Save preset" style="width: 32px; height: 32px; border-radius: 6px; border: 1px solid #2B3036; background: #1A1D21; color: #A7ADB6; display: flex; align-items: center; justify-content: center; cursor: pointer; margin-left: 4px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 2.5 H11 L13.5 5 V13.5 H2.5 V2.5 Z M5 2.5 V6 H10 V2.5 M5 13.5 V9.5 H11 V13.5"></path></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; min-width: 360px; justify-content: flex-end">
+<div style="display: flex; flex-direction: column; gap: 3px" aria-label="Output level">
+<div style="width: 140px; height: 4px; border-radius: 2px; background: #2B3036; overflow: hidden"><div style="width: 64%; height: 4px; background: #5FCB8E"></div></div>
+<div style="width: 140px; height: 4px; border-radius: 2px; background: #2B3036; overflow: hidden"><div style="width: 59%; height: 4px; background: #5FCB8E"></div></div>
+</div>
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #A7ADB6; width: 64px">−8.4 dB</span>
+<button type="button" aria-label="Bypass" aria-pressed="false" style="width: 32px; height: 32px; border-radius: 6px; border: 1px solid #2B3036; background: #1A1D21; color: {{accent}}; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 1.5 V7.5 M4.3 3.8 A5.5 5.5 0 1 0 11.7 3.8"></path></svg></button>
+<button type="button" aria-label="Device menu" style="width: 32px; height: 32px; border-radius: 6px; border: 1px solid #2B3036; background: #1A1D21; color: #A7ADB6; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><circle cx="3.5" cy="8" r="1.3"></circle><circle cx="8" cy="8" r="1.3"></circle><circle cx="12.5" cy="8" r="1.3"></circle></svg></button>
+<button type="button" aria-label="Close" style="width: 32px; height: 32px; border-radius: 6px; border: 0; background: transparent; color: #A7ADB6; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5 L12.5 12.5 M12.5 3.5 L3.5 12.5"></path></svg></button>
+</div>
+</header>
+
+<main style="flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+
+<!-- Row B: generator -->
+<div style="display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 12px">
+
+<!-- Oscillator panel -->
+<section style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: center; justify-content: space-between">
+<div style="display: flex; align-items: baseline; gap: 10px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Oscillator</h2>
+<span style="font-size: 13px; font-weight: 500">Virtual analog</span>
+<span style="font-size: 12px; color: #8C939D">Two detuned waves, variable square + variable saw</span>
+</div>
+<div style="display: flex; gap: 2px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 6px; padding: 2px">
+<button type="button" aria-pressed="true" style="height: 24px; padding: 0 10px; border: 0; border-radius: 4px; background: #2A2F35; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer">Main</button>
+<button type="button" aria-pressed="false" style="height: 24px; padding: 0 10px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer">Aux</button>
+<button type="button" aria-pressed="false" style="height: 24px; padding: 0 10px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer">Mix</button>
+</div>
+</div>
+
+<div style="display: flex; gap: 12px">
+<!-- Scope + spectrum -->
+<div style="flex: 1; min-width: 0; background: #0D0F11; border: 1px solid #23272C; border-radius: 6px; padding: 10px 10px 8px; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; justify-content: space-between; font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">
+<span>WAVE · C3 · 130.8 Hz</span>
+<span>3 voices</span>
+</div>
+<svg width="100%" height="170" viewBox="0 0 680 170" preserveAspectRatio="none" role="img" aria-label="Oscilloscope of the current waveform">
+<line x1="0" y1="85" x2="680" y2="85" stroke="#23272C" stroke-width="1"></line>
+<line x1="272" y1="0" x2="272" y2="170" stroke="#1C1F23" stroke-width="1"></line>
+<line x1="544" y1="0" x2="544" y2="170" stroke="#1C1F23" stroke-width="1"></line>
+<path d="{{ghostPath}}" fill="none" stroke="#4A5260" stroke-width="1.5" stroke-linejoin="round"></path>
+<path d="{{waveFill}}" fill="{{accent}}" fill-opacity="0.08" stroke="none"></path>
+<path d="{{wavePath}}" fill="none" stroke="{{accent}}" stroke-width="2" stroke-linejoin="round"></path>
+</svg>
+<div style="display: flex; justify-content: space-between; font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; border-top: 1px solid #1C1F23; padding-top: 6px">
+<span>HARMONICS 1–48</span>
+<span>0 dB … −54 dB</span>
+</div>
+<svg width="100%" height="52" viewBox="0 0 680 52" preserveAspectRatio="none" role="img" aria-label="Harmonic spectrum">
+<sc-for list="{{bars}}" as="b" hint-placeholder-count="48">
+<rect x="{{b.x}}" y="{{b.y}}" width="{{b.w}}" height="{{b.h}}" rx="1.5" fill="{{accent}}" fill-opacity="0.65"></rect>
+</sc-for>
+</svg>
+</div>
+
+<!-- XY pad -->
+<div style="width: 212px; display: flex; flex-direction: column; gap: 6px">
+<div style="position: relative; width: 212px; height: 212px; background: #0D0F11; border: 1px solid #23272C; border-radius: 6px; box-sizing: border-box">
+<svg width="210" height="210" viewBox="0 0 210 210" role="img" aria-label="Timbre and Morph pad" style="display: block">
+<path d="M52.5 0 V210 M105 0 V210 M157.5 0 V210 M0 52.5 H210 M0 105 H210 M0 157.5 H210" stroke="#1C1F23" stroke-width="1"></path>
+<line x1="115" y1="80" x2="149" y2="80" stroke="{{mod}}" stroke-width="3" stroke-linecap="round" stroke-dasharray="1 5"></line>
+<line x1="115" y1="80" x2="115" y2="105" stroke="{{mod}}" stroke-width="3" stroke-linecap="round" stroke-dasharray="1 5"></line>
+<circle cx="149" cy="80" r="4" fill="none" stroke="{{mod}}" stroke-width="1.5"></circle>
+<circle cx="115" cy="80" r="16" fill="{{accent}}" fill-opacity="0.14"></circle>
+<circle cx="115" cy="80" r="7" fill="{{accent}}" stroke="#E7E9EC" stroke-width="2"></circle>
+</svg>
+<span style="position: absolute; left: 8px; bottom: 6px; font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D">TIMBRE →</span>
+<span style="position: absolute; left: 8px; top: 6px; font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D">↑ MORPH</span>
+</div>
+<div style="display: flex; justify-content: space-between; font: 500 11px 'IBM Plex Mono', monospace">
+<span style="color: #8C939D">T <span style="color: #E7E9EC">55%</span></span>
+<span style="color: #8C939D">M <span style="color: #E7E9EC">62%</span></span>
+</div>
+</div>
+</div>
+
+<!-- Model picker -->
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 10px">
+<span style="font-size: 11px; color: #8C939D; letter-spacing: 0.06em; text-transform: uppercase">Pitched</span>
+<div style="display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px">
+<sc-for list="{{pitched}}" as="m" hint-placeholder-count="8">
+<sc-if value="{{m.sel}}" hint-placeholder-val="{{ false }}">
+<button type="button" aria-pressed="true" style="height: 30px; border-radius: 5px; border: 1px solid {{accent}}; background: #1E2A38; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px"><span style="font: 500 10px 'IBM Plex Mono', monospace; color: {{accent}}">{{m.n}}</span>{{m.name}}</button>
+</sc-if>
+<sc-if value="{{m.off}}" hint-placeholder-val="{{ true }}">
+<button type="button" aria-pressed="false" style="height: 30px; border-radius: 5px; border: 1px solid #2B3036; background: #22262B; color: #A7ADB6; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px"><span style="font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">{{m.n}}</span>{{m.name}}</button>
+</sc-if>
+</sc-for>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: 92px minmax(0, 1fr); align-items: center; gap: 10px">
+<span style="font-size: 11px; color: #8C939D; letter-spacing: 0.06em; text-transform: uppercase">Noise · Perc</span>
+<div style="display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px">
+<sc-for list="{{noise}}" as="m" hint-placeholder-count="8">
+<button type="button" aria-pressed="false" style="height: 30px; border-radius: 5px; border: 1px solid #2B3036; background: #22262B; color: #A7ADB6; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px"><span style="font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">{{m.n}}</span>{{m.name}}</button>
+</sc-for>
+</div>
+</div>
+</div>
+</section>
+
+<!-- Right column -->
+<div style="display: flex; flex-direction: column; gap: 12px">
+<section style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Tone</h2>
+<span style="font-size: 11px; color: #8C939D">Labels follow the model</span>
+</div>
+<div style="display: flex; justify-content: space-around">
+<sc-for list="{{toneKnobs}}" as="k" hint-placeholder-count="3">
+<button type="button" aria-label="{{k.aria}}" style="all: unset; cursor: ns-resize; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 96px">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{k.track}}" fill="none" stroke="#2B3036" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.val}}" fill="none" stroke="{{accent}}" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.mod}}" fill="none" stroke="{{mod}}" stroke-width="3.5" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="#262A30" stroke="#383E46" stroke-width="1.5"></circle>
+<line x1="{{k.x1}}" y1="{{k.y1}}" x2="{{k.x2}}" y2="{{k.y2}}" stroke="#E7E9EC" stroke-width="4" stroke-linecap="round"></line>
+</svg>
+<span style="font-size: 13px; color: #E7E9EC; font-weight: 500">{{k.label}}</span>
+<span style="font-size: 11px; color: #8C939D">{{k.sub}}</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #A7ADB6">{{k.txt}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<section style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 12px; display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Gate · LPG</h2>
+<div style="display: flex; justify-content: space-around">
+<sc-for list="{{gateKnobs}}" as="k" hint-placeholder-count="2">
+<button type="button" aria-label="{{k.aria}}" style="all: unset; cursor: ns-resize; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 64px">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{k.track}}" fill="none" stroke="#2B3036" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.val}}" fill="none" stroke="{{accent}}" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.mod}}" fill="none" stroke="{{mod}}" stroke-width="3.5" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="#262A30" stroke="#383E46" stroke-width="1.5"></circle>
+<line x1="{{k.x1}}" y1="{{k.y1}}" x2="{{k.x2}}" y2="{{k.y2}}" stroke="#E7E9EC" stroke-width="4" stroke-linecap="round"></line>
+</svg>
+<span style="font-size: 12px; color: #A7ADB6">{{k.label}}</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #E7E9EC">{{k.txt}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+<section style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 12px; display: flex; flex-direction: column; gap: 8px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Pitch</h2>
+<div style="display: flex; justify-content: space-around">
+<sc-for list="{{pitchKnobs}}" as="k" hint-placeholder-count="2">
+<button type="button" aria-label="{{k.aria}}" style="all: unset; cursor: ns-resize; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 64px">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{k.track}}" fill="none" stroke="#2B3036" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.val}}" fill="none" stroke="{{accent}}" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.mod}}" fill="none" stroke="{{mod}}" stroke-width="3.5" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="#262A30" stroke="#383E46" stroke-width="1.5"></circle>
+<line x1="{{k.x1}}" y1="{{k.y1}}" x2="{{k.x2}}" y2="{{k.y2}}" stroke="#E7E9EC" stroke-width="4" stroke-linecap="round"></line>
+</svg>
+<span style="font-size: 12px; color: #A7ADB6">{{k.label}}</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #E7E9EC">{{k.txt}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+</div>
+
+<section style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 12px; display: flex; align-items: center; gap: 8px">
+<sc-for list="{{outKnobs}}" as="k" hint-placeholder-count="2">
+<button type="button" aria-label="{{k.aria}}" style="all: unset; cursor: ns-resize; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 64px">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{k.track}}" fill="none" stroke="#2B3036" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.val}}" fill="none" stroke="{{accent}}" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.mod}}" fill="none" stroke="{{mod}}" stroke-width="3.5" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="#262A30" stroke="#383E46" stroke-width="1.5"></circle>
+<line x1="{{k.x1}}" y1="{{k.y1}}" x2="{{k.x2}}" y2="{{k.y2}}" stroke="#E7E9EC" stroke-width="4" stroke-linecap="round"></line>
+</svg>
+<span style="font-size: 12px; color: #A7ADB6">{{k.label}}</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #E7E9EC">{{k.txt}}</span>
+</button>
+</sc-for>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 8px; padding-left: 8px; border-left: 1px solid #2B3036">
+<label style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: #A7ADB6">Mod wheel
+<button type="button" style="width: 104px; height: 26px; border-radius: 5px; border: 1px solid #2B3036; background: #0D0F11; color: #E7E9EC; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer">Timbre<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#8C939D" stroke-width="1.8" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+</label>
+<label style="display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; color: #A7ADB6">Voices
+<button type="button" style="width: 104px; height: 26px; border-radius: 5px; border: 1px solid #2B3036; background: #0D0F11; color: #E7E9EC; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font: 500 12px 'IBM Plex Mono', monospace; cursor: pointer">8<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#8C939D" stroke-width="1.8" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+</label>
+<div style="display: flex; gap: 5px; justify-content: flex-end" aria-label="3 of 8 voices playing">
+<sc-for list="{{voices}}" as="v" hint-placeholder-count="8">
+<sc-if value="{{v.on}}" hint-placeholder-val="{{ false }}"><span style="width: 10px; height: 10px; border-radius: 3px; background: {{accent}}"></span></sc-if>
+<sc-if value="{{v.off}}" hint-placeholder-val="{{ true }}"><span style="width: 10px; height: 10px; border-radius: 3px; background: #2B3036"></span></sc-if>
+</sc-for>
+</div>
+</div>
+</section>
+</div>
+</div>
+
+<!-- Section bar: Shaper (collapse on the left, enable on the right) -->
+<div style="display: flex; align-items: center; gap: 12px; padding: 6px 2px 0">
+<button type="button" aria-expanded="{{sh.openStr}}" aria-label="Collapse or expand Shaper" onClick="{{sh.toggleOpen}}" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px 0 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #E7E9EC; cursor: pointer">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A7ADB6" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" style="transform: rotate({{sh.rot}}deg); transition: transform 120ms"><path d="M4 6 L8 10 L12 6"></path></svg>
+<span style="font: 600 14px 'IBM Plex Sans', sans-serif">Shaper</span>
+</button>
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #A7ADB6; border: 1px solid #383E46; border-radius: 4px; padding: 2px 6px">TRANSIT EXTENSION</span>
+<sc-if value="{{sh.open}}" hint-placeholder-val="{{ true }}"><span style="font-size: 12px; color: #8C939D">Envelopes, filter and LFOs · not part of the original module</span></sc-if>
+<sc-if value="{{sh.closed}}" hint-placeholder-val="{{ false }}"><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #A7ADB6">Amp 4 ms · 320 ms · 70% · 480 ms   ·   LP 12 dB · 1.20 kHz · 45%   ·   LFO 1 1/4   ·   LFO 2 0.80 Hz</span></sc-if>
+<span style="flex: 1; height: 1px; background: #2B3036"></span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: {{sh.stateCol}}; width: 28px; text-align: right">{{sh.stateTxt}}</span>
+<button type="button" role="switch" aria-checked="{{sh.onStr}}" aria-label="Enable Shaper" onClick="{{sh.toggleOn}}" style="width: 34px; height: 20px; border-radius: 10px; border: 0; background: {{sh.swBg}}; position: relative; cursor: pointer; padding: 0"><span style="position: absolute; top: 3px; left: {{sh.swX}}px; width: 14px; height: 14px; border-radius: 7px; background: {{sh.swKnob}}; transition: left 120ms"></span></button>
+</div>
+
+<!-- Row C -->
+<sc-if value="{{sh.open}}" hint-placeholder-val="{{ true }}">
+<div style="display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 5fr) minmax(0, 2fr) minmax(0, 2fr); gap: 12px; opacity: {{sh.op}}; transition: opacity 120ms">
+
+<!-- Amp envelope -->
+<section style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Amp Envelope</h2>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">ENV 1</span>
+</div>
+<div style="background: #0D0F11; border: 1px solid #23272C; border-radius: 6px; padding: 8px">
+<svg width="100%" height="120" viewBox="0 0 296 120" preserveAspectRatio="none" role="img" aria-label="Amp envelope shape">
+<path d="M0 30 H296 M0 60 H296 M0 90 H296" stroke="#1C1F23" stroke-width="1"></path>
+<path d="{{ampEnv.fill}}" fill="{{accent}}" fill-opacity="0.12"></path>
+<path d="{{ampEnv.line}}" fill="none" stroke="{{accent}}" stroke-width="2" stroke-linejoin="round"></path>
+<sc-for list="{{ampEnv.pts}}" as="p" hint-placeholder-count="3">
+<circle cx="{{p.x}}" cy="{{p.y}}" r="4.5" fill="#0D0F11" stroke="#E7E9EC" stroke-width="1.5"></circle>
+</sc-for>
+</svg>
+</div>
+<div style="display: flex; justify-content: space-between">
+<sc-for list="{{ampKnobs}}" as="k" hint-placeholder-count="5">
+<button type="button" aria-label="{{k.aria}}" style="all: unset; cursor: ns-resize; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 56px">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{k.track}}" fill="none" stroke="#2B3036" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.val}}" fill="none" stroke="{{accent}}" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.mod}}" fill="none" stroke="{{mod}}" stroke-width="3.5" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="#262A30" stroke="#383E46" stroke-width="1.5"></circle>
+<line x1="{{k.x1}}" y1="{{k.y1}}" x2="{{k.x2}}" y2="{{k.y2}}" stroke="#E7E9EC" stroke-width="4" stroke-linecap="round"></line>
+</svg>
+<span style="font-size: 12px; color: #A7ADB6">{{k.label}}</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #E7E9EC">{{k.txt}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+
+<!-- Filter -->
+<section style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Filter</h2>
+<div style="display: flex; gap: 8px">
+<div style="display: flex; gap: 2px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 6px; padding: 2px">
+<button type="button" aria-pressed="true" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: #2A2F35; color: #E7E9EC; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer">LP</button>
+<button type="button" aria-pressed="false" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer">BP</button>
+<button type="button" aria-pressed="false" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer">HP</button>
+<button type="button" aria-pressed="false" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer">Notch</button>
+</div>
+<div style="display: flex; gap: 2px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 6px; padding: 2px">
+<button type="button" aria-pressed="true" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: #2A2F35; color: #E7E9EC; font: 500 11px 'IBM Plex Mono', monospace; cursor: pointer">12 dB</button>
+<button type="button" aria-pressed="false" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; font: 500 11px 'IBM Plex Mono', monospace; cursor: pointer">24 dB</button>
+</div>
+</div>
+</div>
+<div style="background: #0D0F11; border: 1px solid #23272C; border-radius: 6px; padding: 8px 8px 4px">
+<svg width="100%" height="104" viewBox="0 0 520 104" preserveAspectRatio="none" role="img" aria-label="Filter frequency response">
+<rect x="{{filt.cutX}}" y="0" width="{{filt.bandW}}" height="104" fill="{{mod}}" fill-opacity="0.10"></rect>
+<sc-for list="{{filt.grid}}" as="g" hint-placeholder-count="3">
+<line x1="{{g.x}}" y1="0" x2="{{g.x}}" y2="104" stroke="#1C1F23" stroke-width="1"></line>
+</sc-for>
+<line x1="0" y1="{{filt.zeroY}}" x2="520" y2="{{filt.zeroY}}" stroke="#2B3036" stroke-width="1" stroke-dasharray="3 3"></line>
+<path d="{{filt.fill}}" fill="{{accent}}" fill-opacity="0.12"></path>
+<path d="{{filt.line}}" fill="none" stroke="{{accent}}" stroke-width="2"></path>
+<line x1="{{filt.cutX}}" y1="0" x2="{{filt.cutX}}" y2="104" stroke="#E7E9EC" stroke-width="1" stroke-opacity="0.5"></line>
+<circle cx="{{filt.cutX}}" cy="{{filt.peakY}}" r="5" fill="#0D0F11" stroke="#E7E9EC" stroke-width="1.5"></circle>
+</svg>
+<div style="display: flex; justify-content: space-between; font: 400 10px 'IBM Plex Mono', monospace; color: #8C939D; padding: 2px 0 0">
+<span>20</span><span>100</span><span>1k</span><span>10k</span><span>20k</span>
+</div>
+</div>
+<div style="display: flex; justify-content: space-between">
+<sc-for list="{{filtKnobs}}" as="k" hint-placeholder-count="5">
+<button type="button" aria-label="{{k.aria}}" style="all: unset; cursor: ns-resize; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 72px">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{k.track}}" fill="none" stroke="#2B3036" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.val}}" fill="none" stroke="{{accent}}" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.mod}}" fill="none" stroke="{{mod}}" stroke-width="3.5" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="#262A30" stroke="#383E46" stroke-width="1.5"></circle>
+<line x1="{{k.x1}}" y1="{{k.y1}}" x2="{{k.x2}}" y2="{{k.y2}}" stroke="#E7E9EC" stroke-width="4" stroke-linecap="round"></line>
+</svg>
+<span style="font-size: 12px; color: #A7ADB6">{{k.label}}</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #E7E9EC">{{k.txt}}</span>
+</button>
+</sc-for>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; border-top: 1px solid #2B3036; padding-top: 10px">
+<div style="display: flex; flex-direction: column; gap: 4px; width: 170px">
+<span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Filter Env</span>
+<div style="background: #0D0F11; border: 1px solid #23272C; border-radius: 6px; padding: 4px">
+<svg width="100%" height="56" viewBox="0 0 160 56" preserveAspectRatio="none" role="img" aria-label="Filter envelope shape">
+<path d="{{fEnv.fill}}" fill="{{accent}}" fill-opacity="0.12"></path>
+<path d="{{fEnv.line}}" fill="none" stroke="{{accent}}" stroke-width="1.75" stroke-linejoin="round"></path>
+</svg>
+</div>
+</div>
+<div style="flex: 1; display: flex; justify-content: space-between">
+<sc-for list="{{fenvKnobs}}" as="k" hint-placeholder-count="4">
+<button type="button" aria-label="{{k.aria}}" style="all: unset; cursor: ns-resize; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 60px">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{k.track}}" fill="none" stroke="#2B3036" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.val}}" fill="none" stroke="{{accent}}" stroke-width="6" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="#262A30" stroke="#383E46" stroke-width="1.5"></circle>
+<line x1="{{k.x1}}" y1="{{k.y1}}" x2="{{k.x2}}" y2="{{k.y2}}" stroke="#E7E9EC" stroke-width="4" stroke-linecap="round"></line>
+</svg>
+<span style="font-size: 12px; color: #A7ADB6">{{k.label}}</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #E7E9EC">{{k.txt}}</span>
+</button>
+</sc-for>
+</div>
+</div>
+</section>
+
+<!-- LFOs -->
+<sc-for list="{{lfos}}" as="l" hint-placeholder-count="2">
+<section style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 14px; display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">{{l.name}}</h2>
+<button type="button" aria-pressed="{{l.retrig}}" style="height: 22px; padding: 0 8px; border-radius: 4px; border: 1px solid #383E46; background: transparent; color: #A7ADB6; font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.04em; cursor: pointer">RETRIG</button>
+</div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 6px; padding: 2px">
+<sc-for list="{{l.shapes}}" as="s" hint-placeholder-count="5">
+<sc-if value="{{s.sel}}" hint-placeholder-val="{{ false }}">
+<button type="button" aria-label="{{s.name}}" aria-pressed="true" style="height: 24px; border: 0; border-radius: 4px; background: #2A2F35; color: #E7E9EC; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="20" height="12" viewBox="0 0 20 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="{{s.d}}"></path></svg></button>
+</sc-if>
+<sc-if value="{{s.off}}" hint-placeholder-val="{{ true }}">
+<button type="button" aria-label="{{s.name}}" aria-pressed="false" style="height: 24px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="20" height="12" viewBox="0 0 20 12" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><path d="{{s.d}}"></path></svg></button>
+</sc-if>
+</sc-for>
+</div>
+<div style="background: #0D0F11; border: 1px solid #23272C; border-radius: 6px; padding: 6px">
+<svg width="100%" height="56" viewBox="0 0 180 56" preserveAspectRatio="none" role="img" aria-label="{{l.aria}}">
+<line x1="0" y1="28" x2="180" y2="28" stroke="#1C1F23" stroke-width="1"></line>
+<path d="{{l.fadePath}}" fill="none" stroke="#4A5260" stroke-width="1" stroke-dasharray="2 3"></path>
+<path d="{{l.path}}" fill="none" stroke="{{mod}}" stroke-width="2" stroke-linejoin="round"></path>
+</svg>
+</div>
+<div style="display: flex; align-items: center; justify-content: space-between; font-size: 12px; color: #A7ADB6">
+<span>Rate</span>
+<div style="display: flex; gap: 2px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 6px; padding: 2px">
+<button type="button" aria-pressed="{{l.sync}}" style="height: 20px; padding: 0 7px; border: 0; border-radius: 4px; background: {{l.syncBg}}; color: #E7E9EC; font: 500 10px 'IBM Plex Mono', monospace; cursor: pointer">SYNC</button>
+<button type="button" aria-pressed="{{l.free}}" style="height: 20px; padding: 0 7px; border: 0; border-radius: 4px; background: {{l.freeBg}}; color: #E7E9EC; font: 500 10px 'IBM Plex Mono', monospace; cursor: pointer">HZ</button>
+</div>
+</div>
+<div style="display: flex; justify-content: space-between">
+<sc-for list="{{l.knobs}}" as="k" hint-placeholder-count="3">
+<button type="button" aria-label="{{k.aria}}" style="all: unset; cursor: ns-resize; display: flex; flex-direction: column; align-items: center; gap: 3px; width: 56px">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{k.track}}" fill="none" stroke="#2B3036" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.val}}" fill="none" stroke="{{accent}}" stroke-width="6" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="#262A30" stroke="#383E46" stroke-width="1.5"></circle>
+<line x1="{{k.x1}}" y1="{{k.y1}}" x2="{{k.x2}}" y2="{{k.y2}}" stroke="#E7E9EC" stroke-width="4" stroke-linecap="round"></line>
+</svg>
+<span style="font-size: 12px; color: #A7ADB6">{{k.label}}</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #E7E9EC">{{k.txt}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</div>
+</sc-if>
+
+<!-- Section bar: Modulation (collapse on the left, enable on the right) -->
+<div style="display: flex; align-items: center; gap: 12px; padding: 6px 2px 0">
+<button type="button" aria-expanded="{{mx.openStr}}" aria-label="Collapse or expand Modulation" onClick="{{mx.toggleOpen}}" style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px 0 6px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: #E7E9EC; cursor: pointer">
+<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="#A7ADB6" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" style="transform: rotate({{mx.rot}}deg); transition: transform 120ms"><path d="M4 6 L8 10 L12 6"></path></svg>
+<span style="font: 600 14px 'IBM Plex Sans', sans-serif">Modulation</span>
+</button>
+<span style="font: 500 10px 'IBM Plex Mono', monospace; letter-spacing: 0.06em; color: #A7ADB6; border: 1px solid #383E46; border-radius: 4px; padding: 2px 6px">TRANSIT EXTENSION</span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #E7E9EC">5<span style="color: #8C939D"> / 16 routes</span></span>
+<sc-if value="{{mx.closed}}" hint-placeholder-val="{{ false }}"><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #A7ADB6">LFO 1 → Timbre   ·   Velocity → Cutoff   ·   Filter Env → Morph   ·   +2 more</span></sc-if>
+<span style="flex: 1; height: 1px; background: #2B3036"></span>
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: {{mx.stateCol}}; width: 28px; text-align: right">{{mx.stateTxt}}</span>
+<button type="button" role="switch" aria-checked="{{mx.onStr}}" aria-label="Enable Modulation" onClick="{{mx.toggleOn}}" style="width: 34px; height: 20px; border-radius: 10px; border: 0; background: {{mx.swBg}}; position: relative; cursor: pointer; padding: 0"><span style="position: absolute; top: 3px; left: {{mx.swX}}px; width: 14px; height: 14px; border-radius: 7px; background: {{mx.swKnob}}; transition: left 120ms"></span></button>
+</div>
+
+<!-- Row D: Modulation matrix -->
+<sc-if value="{{mx.open}}" hint-placeholder-val="{{ true }}">
+<section style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; opacity: {{mx.op}}; transition: opacity 120ms">
+<div style="display: flex; justify-content: flex-end; align-items: center">
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">out = amount × curve(source) × via · per voice</span>
+</div>
+
+<div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap">
+<span style="font-size: 12px; color: #8C939D; margin-right: 4px">Sources — drag onto any knob</span>
+<sc-for list="{{sources}}" as="s" hint-placeholder-count="9">
+<button type="button" style="height: 26px; padding: 0 8px 0 6px; border-radius: 13px; border: 1px solid #383E46; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif; display: flex; align-items: center; gap: 6px; cursor: grab">
+<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="{{s.dot}}"></circle></svg>{{s.n}}<span style="font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">{{s.badge}}</span>
+</button>
+</sc-for>
+</div>
+
+<div role="table" aria-label="Modulation routes" style="display: flex; flex-direction: column; gap: 4px">
+<div role="row" style="display: grid; grid-template-columns: 32px 200px 24px minmax(0, 1fr) 180px 140px 300px 64px; gap: 8px; align-items: center; padding: 0 8px; font-size: 11px; color: #8C939D; letter-spacing: 0.06em; text-transform: uppercase">
+<span role="columnheader">#</span><span role="columnheader">Source</span><span></span><span role="columnheader">Destination</span><span role="columnheader">Via</span><span role="columnheader">Curve</span><span role="columnheader">Amount</span><span></span>
+</div>
+<sc-for list="{{rows}}" as="r" hint-placeholder-count="5">
+<div role="row" style="display: grid; grid-template-columns: 32px 200px 24px minmax(0, 1fr) 180px 140px 300px 64px; gap: 8px; align-items: center; height: 40px; padding: 0 8px; background: #16181B; border: 1px solid #23272C; border-radius: 6px">
+<span role="cell" style="font: 500 11px 'IBM Plex Mono', monospace; color: #8C939D">{{r.n}}</span>
+<button role="cell" type="button" style="height: 28px; border-radius: 5px; border: 1px solid #2B3036; background: #22262B; color: #E7E9EC; display: flex; align-items: center; gap: 8px; padding: 0 8px; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="{{mod}}"></circle></svg><span style="flex: 1; text-align: left">{{r.src}}</span><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#8C939D" stroke-width="1.8" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+<svg width="24" height="12" viewBox="0 0 24 12" fill="none" stroke="#585F69" stroke-width="1.5" aria-hidden="true"><path d="M2 6 H20 M16 2 L20 6 L16 10"></path></svg>
+<button role="cell" type="button" style="height: 28px; border-radius: 5px; border: 1px solid #2B3036; background: #22262B; color: #E7E9EC; display: flex; align-items: center; gap: 8px; padding: 0 8px; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer"><span style="font-size: 11px; color: #8C939D; font-weight: 400">{{r.grp}}</span><span style="flex: 1; text-align: left">{{r.dst}}</span><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#8C939D" stroke-width="1.8" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+<button role="cell" type="button" style="height: 28px; border-radius: 5px; border: 1px solid #2B3036; background: #1A1D21; color: #A7ADB6; display: flex; align-items: center; gap: 8px; padding: 0 8px; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer"><span style="font-size: 11px; color: #8C939D; font-weight: 400">×</span><span style="flex: 1; text-align: left">{{r.via}}</span><svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#8C939D" stroke-width="1.8" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+<button role="cell" type="button" style="height: 28px; border-radius: 5px; border: 1px solid #2B3036; background: #1A1D21; color: #A7ADB6; display: flex; align-items: center; gap: 8px; padding: 0 8px; font: 500 12px 'IBM Plex Sans', sans-serif; cursor: pointer"><svg width="26" height="18" viewBox="0 0 26 18" fill="none" stroke="#E7E9EC" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="{{r.path}}"></path></svg><span style="flex: 1; text-align: left">{{r.curve}}</span></button>
+<div role="cell" style="display: flex; align-items: center; gap: 10px">
+<svg width="220" height="12" viewBox="0 0 200 12" preserveAspectRatio="none" aria-hidden="true">
+<rect x="0" y="4" width="200" height="4" rx="2" fill="#2B3036"></rect>
+<rect x="{{r.bx}}" y="2.5" width="{{r.bw}}" height="7" rx="2" fill="{{mod}}"></rect>
+<rect x="99.5" y="0" width="1" height="12" fill="#8C939D"></rect>
+</svg>
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #E7E9EC; width: 48px; text-align: right">{{r.amtTxt}}</span>
+</div>
+<div role="cell" style="display: flex; gap: 2px; justify-content: flex-end">
+<button type="button" aria-label="Mute route" style="width: 26px; height: 26px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M8 1.5 V7.5 M4.3 3.8 A5.5 5.5 0 1 0 11.7 3.8"></path></svg></button>
+<button type="button" aria-label="Remove route" style="width: 26px; height: 26px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M3.5 3.5 L12.5 12.5 M12.5 3.5 L3.5 12.5"></path></svg></button>
+</div>
+</div>
+</sc-for>
+<button type="button" style="height: 40px; border-radius: 6px; border: 1px dashed #383E46; background: transparent; color: #A7ADB6; font: 500 12px 'IBM Plex Sans', sans-serif; display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" aria-hidden="true"><path d="M8 2.5 V13.5 M2.5 8 H13.5"></path></svg>Add route</button>
+</div>
+</section>
+</sc-if>
+</main>
+
+<footer style="height: 32px; padding: 0 16px; display: flex; align-items: center; justify-content: space-between; border-top: 1px solid #2B3036; font-size: 11px; color: #8C939D">
+<span>A port of Émilie Gillet’s open-source macro oscillator (MIT)</span>
+<span style="font-family: 'IBM Plex Mono', monospace">CPU 3.1%</span>
+</footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#4C9EFF","options":["#4C9EFF","#3FC1C9","#A98BFF","#E7E9EC"],"section":"Theme"},"mod":{"editor":"color","default":"#F0A73A","options":["#F0A73A","#FF7A59","#E6D45A"],"section":"Theme"},"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const accent = this.props.accent ?? '#4C9EFF';
+    const mod = this.props.mod ?? '#F0A73A';
+    const st = this.state || {};
+    const section = (key) => {
+      const open = st[key + 'Open'] !== false;
+      const on = st[key + 'On'] !== false;
+      return {
+        open: open, closed: !open, openStr: open ? 'true' : 'false', rot: open ? 0 : -90,
+        on: on, onStr: on ? 'true' : 'false', op: on ? 1 : 0.4,
+        stateTxt: on ? 'ON' : 'OFF', stateCol: on ? '#E7E9EC' : '#8C939D',
+        swBg: on ? accent : '#383E46', swX: on ? 17 : 3, swKnob: on ? '#FFFFFF' : '#A7ADB6',
+        toggleOpen: () => this.setState({ [key + 'Open']: !open }),
+        toggleOn: () => this.setState({ [key + 'On']: !on })
+      };
+    };
+    const sh = section('shaper');
+    const mx = section('matrix');
+    const f = (n) => n.toFixed(1);
+    const pt = (a, r) => { const t = a * Math.PI / 180; return [50 + r * Math.sin(t), 50 - r * Math.cos(t)]; };
+    const arc = (r, a0, a1) => {
+      if (a1 - a0 < 0.6) return '';
+      const p0 = pt(a0, r), p1 = pt(a1, r);
+      return 'M' + f(p0[0]) + ' ' + f(p0[1]) + ' A' + r + ' ' + r + ' 0 ' + (a1 - a0 > 180 ? 1 : 0) + ' 1 ' + f(p1[0]) + ' ' + f(p1[1]);
+    };
+    const knob = (label, v, txt, o) => {
+      o = o || {};
+      const ang = -135 + 270 * v;
+      const base = o.bipolar ? 0 : -135;
+      let modPath = '';
+      if (o.mod && mx.on) {
+        const m = Math.max(0, Math.min(1, v + o.mod));
+        const am = -135 + 270 * m;
+        modPath = arc(47, Math.min(ang, am), Math.max(ang, am));
+      }
+      const a = pt(ang, 9), b = pt(ang, 24);
+      return { label: label, txt: txt, sub: o.sub || '', size: o.size || 44, track: arc(40, -135, 135), val: arc(40, Math.min(base, ang), Math.max(base, ang)), mod: modPath, x1: f(a[0]), y1: f(a[1]), x2: f(b[0]), y2: f(b[1]), aria: label + ' ' + txt };
+    };
+
+    // Waveform: VA = saw minus scaled, phase-shifted saw (variable pulse) + detuned ghost
+    const tm = 0.38, pw = 0.32;
+    const saw = (t) => { let s = 0; for (let n = 1; n <= 28; n++) s += Math.sin(2 * Math.PI * n * t) / n; return s; };
+    const wv = (t) => saw(t) - tm * saw(t + pw);
+    const W = 680, H = 170, N = 360, cyc = 2.5;
+    const raw = [], ghost = [];
+    let peak = 0;
+    for (let i = 0; i <= N; i++) {
+      const t = i / N * cyc;
+      const v = wv(t), g = wv(t * 1.022 + 0.035);
+      raw.push(v); ghost.push(g);
+      peak = Math.max(peak, Math.abs(v), Math.abs(g));
+    }
+    const toPath = (arr) => arr.map((v, i) => (i ? 'L' : 'M') + f(i / N * W) + ' ' + f(H / 2 - v / peak * (H / 2 - 14))).join(' ');
+    const wavePath = toPath(raw);
+    const ghostPath = toPath(ghost);
+    const waveFill = wavePath + ' L' + W + ' ' + (H / 2) + ' L0 ' + (H / 2) + ' Z';
+
+    const NB = 48, bw = W / NB;
+    const magAt = (n) => { const ph = 2 * Math.PI * n * pw; return Math.sqrt(Math.pow(1 - tm * Math.cos(ph), 2) + Math.pow(tm * Math.sin(ph), 2)) / n; };
+    const m1 = magAt(1);
+    const bars = [];
+    for (let n = 1; n <= NB; n++) {
+      const db = 20 * Math.log10(magAt(n) / m1);
+      const h = Math.max(2, (db + 54) / 54 * 50);
+      bars.push({ x: f((n - 1) * bw + 2), w: f(bw - 4), y: f(52 - h), h: f(h) });
+    }
+
+    const modelNames = ['Analog', 'Waveshape', 'FM', 'Formant', 'Additive', 'Wavetable', 'Chords', 'Speech', 'Swarm', 'Noise', 'Particle', 'String', 'Modal', 'Kick', 'Snare', 'Hi-hat'];
+    const models = modelNames.map((name, i) => ({ name: name, n: (i + 1 < 10 ? '0' : '') + (i + 1), sel: i === 0, off: i !== 0 }));
+
+    const env = (a, d, s, r, w, h) => {
+      const hold = 0.35, T = a + d + hold + r;
+      const top = 8, bot = h - 4, ys = bot - (bot - top) * s;
+      const xA = a / T * w, xD = xA + d / T * w, xS = xD + hold / T * w;
+      const line = 'M0 ' + bot + ' L' + f(xA) + ' ' + top + ' Q' + f(xA + (xD - xA) * 0.18) + ' ' + f(ys) + ' ' + f(xD) + ' ' + f(ys) + ' L' + f(xS) + ' ' + f(ys) + ' Q' + f(xS + (w - xS) * 0.18) + ' ' + bot + ' ' + w + ' ' + bot;
+      return { line: line, fill: line + ' Z', pts: [{ x: f(xA), y: top }, { x: f(xD), y: f(ys) }, { x: f(xS), y: f(ys) }] };
+    };
+
+    // Filter response
+    const FW = 520, FH = 104, fc = 1200, Q = 2.2;
+    const fx = (fr) => (Math.log10(fr) - Math.log10(20)) / 3 * FW;
+    const fy = (db) => { const c = Math.max(-42, Math.min(18, db)); return 4 + (18 - c) / 60 * (FH - 8); };
+    let fl = '', peakY = FH;
+    for (let i = 0; i <= 180; i++) {
+      const fr = 20 * Math.pow(10, 3 * i / 180);
+      const r = fr / fc;
+      const mag = 1 / Math.sqrt(Math.pow(1 - r * r, 2) + Math.pow(r / Q, 2));
+      const y = fy(20 * Math.log10(mag));
+      peakY = Math.min(peakY, y);
+      fl += (i ? ' L' : 'M') + f(fx(fr)) + ' ' + f(y);
+    }
+    const cutX = fx(fc);
+    const filt = { line: fl, fill: fl + ' L' + FW + ' ' + FH + ' L0 ' + FH + ' Z', cutX: f(cutX), bandW: f(fx(fc * 2.6) - cutX), zeroY: f(fy(0)), peakY: f(peakY), grid: [{ x: f(fx(100)) }, { x: f(fx(1000)) }, { x: f(fx(10000)) }] };
+
+    const lfoPath = (kind, fade, cycles) => {
+      let p = '', fp = '';
+      for (let i = 0; i <= 120; i++) {
+        const t = i / 120;
+        const amp = fade > 0 ? Math.min(1, t / fade) : 1;
+        const ph = t * cycles;
+        const v = kind === 'tri' ? (2 / Math.PI) * Math.asin(Math.sin(2 * Math.PI * ph)) : Math.sin(2 * Math.PI * ph);
+        p += (i ? ' L' : 'M') + f(t * 180) + ' ' + f(28 - v * amp * 22);
+        fp += (i ? ' L' : 'M') + f(t * 180) + ' ' + f(28 - amp * 22);
+      }
+      return { p: p, fp: fade > 0 ? fp : '' };
+    };
+    const shapeDefs = [
+      { name: 'Sine', d: 'M1 6 C4 -1 6 -1 10 6 C14 13 16 13 19 6' },
+      { name: 'Triangle', d: 'M1 9 L5.5 2 L14.5 10 L19 3' },
+      { name: 'Saw', d: 'M1 10 L10 2 L10 10 L19 2' },
+      { name: 'Square', d: 'M1 10 V2 H10 V10 H19 V2' },
+      { name: 'Sample and hold', d: 'M1 7 H5 V2 H9 V9 H13 V4 H17 V8 H19' }
+    ];
+    const shapes = (sel) => shapeDefs.map((s, i) => ({ name: s.name, d: s.d, sel: i === sel, off: i !== sel }));
+    const l1 = lfoPath('sine', 0.3, 2.5), l2 = lfoPath('tri', 0, 1.5);
+    const lfos = [
+      { name: 'LFO 1', retrig: 'true', shapes: shapes(0), path: l1.p, fadePath: l1.fp, aria: 'LFO 1 sine with fade-in', sync: 'true', free: 'false', syncBg: '#2A2F35', freeBg: 'transparent',
+        knobs: [knob('Rate', 0.5, '1/4', { size: 40 }), knob('Fade in', 0.22, '120 ms', { size: 40 }), knob('Amount', 0.7, '70%', { size: 40 })] },
+      { name: 'LFO 2', retrig: 'false', shapes: shapes(1), path: l2.p, fadePath: l2.fp, aria: 'LFO 2 triangle', sync: 'false', free: 'true', syncBg: 'transparent', freeBg: '#2A2F35',
+        knobs: [knob('Rate', 0.32, '0.80 Hz', { size: 40 }), knob('Fade in', 0, '0 ms', { size: 40 }), knob('Amount', 0.25, '25%', { size: 40 })] }
+    ];
+
+    const curves = { Linear: 'M3 15 L23 3', Exp: 'M3 15 Q21 15 23 3', Log: 'M3 15 Q5 3 23 3', 'S-curve': 'M3 15 C14 15 12 3 23 3' };
+    const rowsRaw = [
+      { src: 'LFO 1', dst: 'Timbre', grp: 'Tone', via: 'None', curve: 'Linear', amt: 0.32 },
+      { src: 'Velocity', dst: 'Cutoff', grp: 'Filter', via: 'None', curve: 'Exp', amt: 0.45 },
+      { src: 'Filter Env', dst: 'Morph', grp: 'Tone', via: 'Mod Wheel', curve: 'Linear', amt: -0.2 },
+      { src: 'Mod Wheel', dst: 'Harmonics', grp: 'Tone', via: 'None', curve: 'S-curve', amt: 0.6 },
+      { src: 'LFO 2', dst: 'Tune', grp: 'Pitch', via: 'Aftertouch', curve: 'Log', amt: 0.08 }
+    ];
+    const rows = rowsRaw.map((r, i) => ({
+      src: r.src, dst: r.dst, grp: r.grp, via: r.via, curve: r.curve, path: curves[r.curve], n: i + 1,
+      amtTxt: (r.amt >= 0 ? '+' : '−') + Math.round(Math.abs(r.amt) * 100) + '%',
+      bx: f(r.amt < 0 ? 100 + r.amt * 100 : 100), bw: f(Math.abs(r.amt) * 100)
+    }));
+    const srcCounts = [['Velocity', 1], ['Key', 0], ['Mod Wheel', 2], ['Aftertouch', 1], ['Amp Env', 0], ['Filter Env', 1], ['LFO 1', 1], ['LFO 2', 1], ['Random', 0]];
+    const sources = srcCounts.map((s) => ({ n: s[0], badge: s[1] ? '×' + s[1] : '', dot: s[1] ? mod : '#585F69' }));
+
+    return {
+      accent: accent, mod: mod, sh: sh, mx: mx,
+      wavePath: wavePath, ghostPath: ghostPath, waveFill: waveFill, bars: bars,
+      pitched: models.slice(0, 8), noise: models.slice(8),
+      toneKnobs: [
+        knob('Harmonics', 0.42, '42%', { size: 72, sub: 'Detune', mod: 0.25 }),
+        knob('Timbre', 0.55, '55%', { size: 72, sub: 'Pulse shape', mod: 0.16 }),
+        knob('Morph', 0.62, '62%', { size: 72, sub: 'Saw shape', mod: -0.12 })
+      ],
+      gateKnobs: [knob('Decay', 0.5, '0.50', { size: 44 }), knob('LPG color', 0.35, '35%', { size: 44 })],
+      pitchKnobs: [knob('Tune', 0.5, '+0.00 st', { size: 44, bipolar: true, mod: 0.04 }), knob('Bend', 0.2, '±2 st', { size: 44 })],
+      outKnobs: [knob('Aux mix', 0, '0%', { size: 44 }), knob('Level', 0.78, '−3.2 dB', { size: 44 })],
+      voices: [0, 1, 2, 3, 4, 5, 6, 7].map((i) => ({ on: i < 3, off: i >= 3 })),
+      ampEnv: env(0.04, 0.32, 0.7, 0.48, 296, 120),
+      ampKnobs: [knob('Velocity', 0.6, '60%', { size: 40 }), knob('Attack', 0.08, '4 ms', { size: 40 }), knob('Decay', 0.35, '320 ms', { size: 40 }), knob('Sustain', 0.7, '70%', { size: 40 }), knob('Release', 0.4, '480 ms', { size: 40 })],
+      filt: filt,
+      filtKnobs: [knob('Cutoff', 0.55, '1.20 kHz', { size: 48, mod: 0.22 }), knob('Resonance', 0.45, '45%', { size: 48 }), knob('Drive', 0.2, '+2.4 dB', { size: 48 }), knob('Key track', 0.5, '50%', { size: 48 }), knob('Env amt', 0.68, '+36%', { size: 48, bipolar: true })],
+      fEnv: env(0.02, 0.41, 0.3, 0.35, 160, 56),
+      fenvKnobs: [knob('Attack', 0.05, '2 ms', { size: 36 }), knob('Decay', 0.4, '410 ms', { size: 36 }), knob('Sustain', 0.3, '30%', { size: 36 }), knob('Release', 0.35, '350 ms', { size: 36 })],
+      lfos: lfos, rows: rows, sources: sources
+    };
+  }
+}
+</script>
+</body>
+</html>

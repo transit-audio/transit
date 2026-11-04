@@ -1,0 +1,419 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Device design language</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap">
+<style>
+body{margin:0;background:#0B0C0E}
+</style>
+</helmet>
+<div style="width: 1440px; min-height: 1900px; box-sizing: border-box; background: #131518; color: #E7E9EC; font-family: 'IBM Plex Sans', system-ui, sans-serif; padding: 48px 56px; display: flex; flex-direction: column; gap: 36px">
+
+<div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1px solid #2B3036; padding-bottom: 24px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #8C939D; letter-spacing: 0.08em">TRANSIT · DEVICE UI · v0.1</span>
+<h1 style="margin: 0; font-size: 40px; font-weight: 600; letter-spacing: -0.02em">One panel language for every device</h1>
+<p style="margin: 0; font-size: 15px; color: #A7ADB6; max-width: 760px; line-height: 1.5">Graphite surfaces, one signal colour for what you set, one modulation colour for what moves it. Every device is built from the same panels, knobs, displays and routing rows.</p>
+</div>
+</div>
+
+<!-- Principles -->
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px">
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #4C9EFF">01</span>
+<span style="font-size: 15px; font-weight: 600">Show the sound</span>
+<span style="font-size: 13px; color: #A7ADB6; line-height: 1.5">Every section leads with a display of what it does: waveform, curve, envelope, response.</span>
+</div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #4C9EFF">02</span>
+<span style="font-size: 15px; font-weight: 600">Two colours mean two things</span>
+<span style="font-size: 13px; color: #A7ADB6; line-height: 1.5">Blue is a value you set. Amber is modulation acting on it. Nothing else is coloured.</span>
+</div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #4C9EFF">03</span>
+<span style="font-size: 15px; font-weight: 600">Values are always readable</span>
+<span style="font-size: 13px; color: #A7ADB6; line-height: 1.5">Every control prints its value in mono, in real units. No hover needed to know a setting.</span>
+</div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #4C9EFF">04</span>
+<span style="font-size: 15px; font-weight: 600">Panels, not chrome</span>
+<span style="font-size: 13px; color: #A7ADB6; line-height: 1.5">Flat raised panels on a graphite ground. No skeuomorphic metal, glow or gradients.</span>
+</div>
+</div>
+
+<div style="display: grid; grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); gap: 24px">
+
+<!-- Colour -->
+<section style="display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Colour tokens</h2>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{swatches}}" as="s" hint-placeholder-count="16">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="height: 52px; border-radius: 6px; border: 1px solid #2B3036; background: {{s.hex}}"></div>
+<span style="font: 500 12px 'IBM Plex Mono', monospace; color: #E7E9EC">{{s.name}}</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">{{s.hex}} · {{s.use}}</span>
+</div>
+</sc-for>
+</div>
+</section>
+
+<!-- Type & space -->
+<section style="display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Type</h2>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 15px; font-weight: 600">transit</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">title.brand · Sans 600 15</span></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 14px; font-weight: 500">Macro Oscillator</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">title.device · Sans 500 14</span></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Filter</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">label.section · Sans 600 11 caps +8%</span></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font-size: 12px; color: #A7ADB6">Resonance</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">label.control · Sans 400 12</span></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font: 500 11px 'IBM Plex Mono', monospace">1.20 kHz</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">value · Mono 500 11</span></div>
+<div style="display: flex; justify-content: space-between; align-items: baseline"><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">WAVE · C3 · 130.8 Hz</span><span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">readout.display · Mono 400 11</span></div>
+</div>
+<h2 style="margin: 8px 0 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Space &amp; shape</h2>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; align-items: flex-end; gap: 10px">
+<sc-for list="{{spaces}}" as="s" hint-placeholder-count="6">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
+<svg width="{{s.v}}" height="{{s.v}}" viewBox="0 0 10 10" preserveAspectRatio="none" aria-hidden="true"><rect width="10" height="10" fill="#4C9EFF" fill-opacity="0.5"></rect></svg>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">{{s.v}}</span>
+</div>
+</sc-for>
+</div>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D; line-height: 1.6">4-px base · panel gap 12 · panel pad 14/16 · radius: panel 8, display 6, control 5, chip 13 (pill) · row height 40, control height 26–32</span>
+</div>
+</section>
+</div>
+
+<!-- Components -->
+<section style="display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Components</h2>
+<div style="display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 16px">
+
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+<span style="font-size: 13px; font-weight: 600">Knob · sizes and states</span>
+<div style="display: flex; justify-content: space-between; align-items: flex-end">
+<sc-for list="{{knobs}}" as="k" hint-placeholder-count="5">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 3px; width: 92px">
+<svg width="{{k.size}}" height="{{k.size}}" viewBox="0 0 100 100" aria-hidden="true">
+<path d="{{k.track}}" fill="none" stroke="#2B3036" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.val}}" fill="none" stroke="{{k.col}}" stroke-width="6" stroke-linecap="round"></path>
+<path d="{{k.mod}}" fill="none" stroke="#F0A73A" stroke-width="3.5" stroke-linecap="round"></path>
+<circle cx="50" cy="50" r="28" fill="{{k.cap}}" stroke="#383E46" stroke-width="1.5"></circle>
+<line x1="{{k.x1}}" y1="{{k.y1}}" x2="{{k.x2}}" y2="{{k.y2}}" stroke="{{k.ptr}}" stroke-width="4" stroke-linecap="round"></line>
+</svg>
+<span style="font-size: 12px; color: #A7ADB6">{{k.label}}</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">{{k.txt}}</span>
+</div>
+</sc-for>
+</div>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">L 72 for a device’s hero controls, M 44–48 default, S 36–40 in dense sections. Unipolar arcs start at 7 o’clock; bipolar arcs start at 12. The outer amber arc is the modulation range. Drag vertical, Shift for fine, double-click to reset, type to enter.</span>
+</div>
+
+<div style="display: flex; flex-direction: column; gap: 16px">
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #8C939D">Segmented</span>
+<div style="display: flex; gap: 2px; background: #0D0F11; border: 1px solid #2B3036; border-radius: 6px; padding: 2px; align-self: flex-start">
+<button type="button" aria-pressed="true" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: #2A2F35; color: #E7E9EC; font: 500 11px 'IBM Plex Sans', sans-serif">LP</button>
+<button type="button" aria-pressed="false" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; font: 500 11px 'IBM Plex Sans', sans-serif">BP</button>
+<button type="button" aria-pressed="false" style="height: 22px; padding: 0 9px; border: 0; border-radius: 4px; background: transparent; color: #8C939D; font: 500 11px 'IBM Plex Sans', sans-serif">HP</button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #8C939D">Dropdown</span>
+<button type="button" style="width: 140px; height: 28px; border-radius: 5px; border: 1px solid #2B3036; background: #0D0F11; color: #E7E9EC; display: flex; align-items: center; justify-content: space-between; padding: 0 8px; font: 500 12px 'IBM Plex Sans', sans-serif">Timbre<svg width="10" height="10" viewBox="0 0 16 16" fill="none" stroke="#8C939D" stroke-width="1.8" aria-hidden="true"><path d="M4 6 L8 10 L12 6"></path></svg></button>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #8C939D">Switch · section power</span>
+<div style="display: flex; gap: 10px; align-items: center">
+<button type="button" aria-pressed="true" aria-label="On" style="width: 34px; height: 20px; border-radius: 10px; border: 0; background: #4C9EFF; position: relative; padding: 0"><span style="position: absolute; top: 3px; left: 17px; width: 14px; height: 14px; border-radius: 7px; background: #FFFFFF"></span></button>
+<button type="button" aria-pressed="false" aria-label="Off" style="width: 34px; height: 20px; border-radius: 10px; border: 0; background: #383E46; position: relative; padding: 0"><span style="position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 7px; background: #A7ADB6"></span></button>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #8C939D">Mod source chip</span>
+<button type="button" style="height: 26px; padding: 0 8px 0 6px; border-radius: 13px; border: 1px solid #383E46; background: #22262B; color: #E7E9EC; font: 500 12px 'IBM Plex Sans', sans-serif; display: flex; align-items: center; gap: 6px; align-self: flex-start"><svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="#F0A73A"></circle></svg>LFO 1<span style="font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">×1</span></button>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #8C939D">Bipolar amount</span>
+<div style="display: flex; align-items: center; gap: 8px">
+<svg width="120" height="12" viewBox="0 0 200 12" preserveAspectRatio="none" aria-hidden="true"><rect x="0" y="4" width="200" height="4" rx="2" fill="#2B3036"></rect><rect x="80" y="2.5" width="20" height="7" rx="2" fill="#F0A73A"></rect><rect x="99.5" y="0" width="1" height="12" fill="#8C939D"></rect></svg>
+<span style="font: 500 12px 'IBM Plex Mono', monospace">−20%</span>
+</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #8C939D">Level meter</span>
+<div style="display: flex; flex-direction: column; gap: 3px">
+<div style="width: 140px; height: 4px; border-radius: 2px; background: #2B3036; overflow: hidden"><div style="width: 64%; height: 4px; background: #5FCB8E"></div></div>
+<div style="width: 140px; height: 4px; border-radius: 2px; background: #2B3036; overflow: hidden"><div style="width: 92%; height: 4px; background: #FF6B5B"></div></div>
+</div>
+</div>
+</div>
+
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #8C939D">Display well</span>
+<div style="background: #0D0F11; border: 1px solid #23272C; border-radius: 6px; padding: 8px">
+<svg width="100%" height="64" viewBox="0 0 280 64" preserveAspectRatio="none" aria-hidden="true">
+<path d="M0 32 H280" stroke="#1C1F23"></path>
+<path d="M0 60 L18 8 Q40 36 90 36 L190 36 Q210 60 280 60 Z" fill="#4C9EFF" fill-opacity="0.12"></path>
+<path d="M0 60 L18 8 Q40 36 90 36 L190 36 Q210 60 280 60" fill="none" stroke="#4C9EFF" stroke-width="2"></path>
+<circle cx="18" cy="8" r="4" fill="#0D0F11" stroke="#E7E9EC" stroke-width="1.5"></circle>
+<circle cx="90" cy="36" r="4" fill="#0D0F11" stroke="#E7E9EC" stroke-width="1.5"></circle>
+<circle cx="190" cy="36" r="4" fill="#0D0F11" stroke="#E7E9EC" stroke-width="1.5"></circle>
+</svg>
+</div>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">Inset #0D0F11, 1 px border. Curve in signal, 12% fill, white hollow handles you can drag.</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<span style="font-size: 12px; color: #8C939D">Routing row</span>
+<div style="display: grid; grid-template-columns: 20px minmax(0, 1fr) 14px minmax(0, 1fr) 52px; gap: 6px; align-items: center; height: 40px; padding: 0 8px; background: #16181B; border: 1px solid #23272C; border-radius: 6px">
+<span style="font: 500 11px 'IBM Plex Mono', monospace; color: #8C939D">1</span>
+<span style="height: 26px; border-radius: 5px; border: 1px solid #2B3036; background: #22262B; display: flex; align-items: center; gap: 6px; padding: 0 6px; font-size: 12px; font-weight: 500"><svg width="8" height="8" viewBox="0 0 10 10" aria-hidden="true"><circle cx="5" cy="5" r="4" fill="#F0A73A"></circle></svg>LFO 1</span>
+<svg width="14" height="10" viewBox="0 0 24 12" fill="none" stroke="#585F69" stroke-width="1.5" aria-hidden="true"><path d="M2 6 H20 M16 2 L20 6 L16 10"></path></svg>
+<span style="height: 26px; border-radius: 5px; border: 1px solid #2B3036; background: #22262B; display: flex; align-items: center; padding: 0 6px; font-size: 12px; font-weight: 500">Timbre</span>
+<span style="font: 500 12px 'IBM Plex Mono', monospace; text-align: right">+32%</span>
+</div>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">Same row for Sampler mod, EQ sidechain and any device with routes. Unused slots stay hidden behind “Add route”.</span>
+</div>
+</div>
+</div>
+</div>
+</section>
+
+<!-- Fader / Toggle / Pad -->
+<section style="display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Fader · Toggle · Pad</h2>
+<div style="display: grid; grid-template-columns: minmax(0, 4fr) minmax(0, 3fr) minmax(0, 5fr); gap: 16px">
+
+<!-- Fader -->
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+<span style="font-size: 13px; font-weight: 600">Fader</span>
+<div style="display: flex; gap: 20px; align-items: flex-end">
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
+<svg width="116" height="280" viewBox="0 0 116 280" role="img" aria-label="Channel fader with shared scale and stereo meter">
+<sc-for list="{{fader.grid}}" as="g" hint-placeholder-count="8">
+<line x1="74" y1="{{g.y}}" x2="97" y2="{{g.y}}" stroke="#2B3036" stroke-width="1"></line>
+<line x1="38" y1="{{g.y}}" x2="44" y2="{{g.y}}" stroke="{{g.tick}}" stroke-width="1"></line>
+<text x="68" y="{{g.ty}}" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="10" fill="{{g.col}}">{{g.t}}</text>
+</sc-for>
+<rect x="18" y="10" width="4" height="260" rx="2" fill="#2B3036"></rect>
+<rect x="18" y="{{fader.capY}}" width="4" height="{{fader.fillH}}" rx="2" fill="#4C9EFF"></rect>
+<sc-for list="{{fader.meters}}" as="m" hint-placeholder-count="2">
+<rect x="{{m.x}}" y="10" width="10" height="260" rx="1.5" fill="#0D0F11" stroke="#23272C" stroke-width="1"></rect>
+<rect x="{{m.x}}" y="{{m.yPk}}" width="10" height="{{m.hPk}}" rx="1.5" fill="#5FCB8E" fill-opacity="0.35"></rect>
+<rect x="{{m.x}}" y="{{m.yRms}}" width="10" height="{{m.hRms}}" rx="1.5" fill="#5FCB8E"></rect>
+<rect x="{{m.x}}" y="{{m.yHold}}" width="10" height="2" fill="#E7E9EC"></rect>
+<rect x="{{m.x}}" y="2" width="10" height="4" rx="1" fill="#2B3036"></rect>
+</sc-for>
+<rect x="4" y="{{fader.capTop}}" width="32" height="16" rx="3" fill="#2E333A" stroke="#585F69" stroke-width="1"></rect>
+<line x1="8" y1="{{fader.capY}}" x2="32" y2="{{fader.capY}}" stroke="#E7E9EC" stroke-width="2"></line>
+</svg>
+<span style="font-size: 12px; color: #A7ADB6">Channel</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">fader · scale · meter</span>
+</div>
+<div style="display: flex; flex-direction: column; align-items: center; gap: 6px">
+<svg width="40" height="200" viewBox="0 0 40 200" role="img" aria-label="Compact fader">
+<sc-for list="{{fader.cGrid}}" as="g" hint-placeholder-count="5">
+<line x1="30" y1="{{g.y}}" x2="36" y2="{{g.y}}" stroke="{{g.tick}}" stroke-width="1"></line>
+</sc-for>
+<rect x="18" y="10" width="4" height="180" rx="2" fill="#2B3036"></rect>
+<rect x="18" y="{{fader.cCapY}}" width="4" height="{{fader.cFillH}}" rx="2" fill="#4C9EFF"></rect>
+<rect x="6" y="{{fader.cCapTop}}" width="28" height="14" rx="3" fill="#2E333A" stroke="#585F69" stroke-width="1"></rect>
+<line x1="10" y1="{{fader.cCapY}}" x2="30" y2="{{fader.cCapY}}" stroke="#E7E9EC" stroke-width="2"></line>
+</svg>
+<span style="font-size: 12px; color: #A7ADB6">Compact</span>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">−4.0 dB</span>
+</div>
+<div style="flex: 1; display: flex; flex-direction: column; gap: 6px; padding-bottom: 2px">
+<svg width="100%" height="24" viewBox="0 0 160 24" preserveAspectRatio="none" role="img" aria-label="Horizontal fader">
+<rect x="0" y="10" width="160" height="4" rx="2" fill="#2B3036"></rect>
+<rect x="0" y="10" width="104" height="4" rx="2" fill="#4C9EFF"></rect>
+<rect x="98" y="3" width="12" height="18" rx="3" fill="#2E333A" stroke="#585F69" stroke-width="1"></rect>
+<line x1="104" y1="7" x2="104" y2="17" stroke="#E7E9EC" stroke-width="2"></line>
+</svg>
+<div style="display: flex; justify-content: space-between"><span style="font-size: 12px; color: #A7ADB6">Horizontal</span><span style="font: 500 11px 'IBM Plex Mono', monospace">−9.0</span></div>
+<span style="font: 400 11px 'IBM Plex Mono', monospace; color: #8C939D">sends · crossfade · layer mix</span>
+</div>
+</div>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">One dB taper everywhere: +6 at the top, unity at 14% of travel, ~85% of travel above −24, −∞ compressed at the bottom. Fill in signal from the bottom to the cap; muted strips fill in ghost. Fader, scale and meter share that taper so positions line up. Meter: peak at 35%, RMS solid, 2 px peak hold, red only above 0 dBFS. Drag, Shift fine, Alt/double-click to unity, click readout to type.</span>
+</div>
+
+<!-- Toggle -->
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 12px">
+<span style="font-size: 13px; font-weight: 600">Toggle</span>
+<div style="display: grid; grid-template-columns: minmax(0, 1fr) 44px 44px; gap: 8px 10px; align-items: center">
+<span style="font-size: 11px; color: #8C939D; letter-spacing: 0.06em; text-transform: uppercase">Role</span>
+<span style="font-size: 11px; color: #8C939D; letter-spacing: 0.06em; text-transform: uppercase; text-align: center">Off</span>
+<span style="font-size: 11px; color: #8C939D; letter-spacing: 0.06em; text-transform: uppercase; text-align: center">On</span>
+<sc-for list="{{toggles}}" as="t" hint-placeholder-count="6">
+<span style="font-size: 12px; color: #A7ADB6">{{t.role}}</span>
+<button type="button" aria-pressed="false" aria-label="{{t.role}} off" disabled="{{t.offDisabled}}" style="height: 24px; border-radius: 4px; border: 1px solid {{t.offBd}}; background: {{t.offBg}}; color: {{t.offFg}}; font: 600 11px 'IBM Plex Sans', sans-serif">{{t.t}}</button>
+<button type="button" aria-pressed="true" aria-label="{{t.role}} on" style="height: 24px; border-radius: 4px; border: 1px solid {{t.onBd}}; background: {{t.onBg}}; color: {{t.onFg}}; font: 600 11px 'IBM Plex Sans', sans-serif">{{t.t}}</button>
+</sc-for>
+<span style="font-size: 12px; color: #A7ADB6">Section enable</span>
+<button type="button" role="switch" aria-checked="false" aria-label="Section off" style="justify-self: center; width: 34px; height: 20px; border-radius: 10px; border: 0; background: #383E46; position: relative; padding: 0"><span style="position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 7px; background: #A7ADB6"></span></button>
+<button type="button" role="switch" aria-checked="true" aria-label="Section on" style="justify-self: center; width: 34px; height: 20px; border-radius: 10px; border: 0; background: #4C9EFF; position: relative; padding: 0"><span style="position: absolute; top: 3px; left: 17px; width: 14px; height: 14px; border-radius: 7px; background: #FFFFFF"></span></button>
+</div>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">Latching buttons: off is raised and muted; on fills with the role colour. Mute inverts to light, Solo is signal, Arm is hot red, Monitor and option toggles get a signal outline. Unavailable reads ghost, not hidden. The switch is only for enabling a whole section.</span>
+</div>
+
+<!-- Pad -->
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+<span style="font-size: 13px; font-weight: 600">Pad</span>
+<div style="display: flex; gap: 20px; align-items: flex-start">
+<div style="display: grid; grid-template-columns: repeat(4, 56px); gap: 4px" aria-label="Pad grid">
+<sc-for list="{{pads}}" as="p" hint-placeholder-count="16">
+<button type="button" aria-label="{{p.aria}}" style="position: relative; width: 56px; height: 56px; box-sizing: border-box; border-radius: 6px; border: {{p.border}}; background: {{p.bg}}; overflow: hidden; padding: 0; cursor: pointer; opacity: {{p.op}}">
+<span style="position: absolute; left: 0; right: 0; bottom: 0; height: {{p.fill}}%; background: rgba(76, 158, 255, 0.26); border-top: 2px solid {{p.edge}}"></span>
+<span style="position: absolute; left: 0; right: 0; top: 0; height: 3px; background: {{p.tag}}"></span>
+<span style="position: absolute; left: 5px; top: 6px; font: 500 9px 'IBM Plex Mono', monospace; color: #8C939D">{{p.n}}</span>
+<span style="position: absolute; left: 5px; right: 4px; bottom: 4px; font: 500 10px 'IBM Plex Sans', sans-serif; color: {{p.col}}; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{p.name}}</span>
+</button>
+</sc-for>
+</div>
+<div style="flex: 1; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<sc-for list="{{padStates}}" as="p" hint-placeholder-count="6">
+<div style="display: flex; flex-direction: column; gap: 5px">
+<button type="button" aria-label="{{p.aria}}" style="position: relative; width: 80px; height: 80px; box-sizing: border-box; border-radius: 6px; border: {{p.border}}; background: {{p.bg}}; overflow: hidden; padding: 0; opacity: {{p.op}}">
+<span style="position: absolute; left: 0; right: 0; bottom: 0; height: {{p.fill}}%; background: rgba(76, 158, 255, 0.26); border-top: 2px solid {{p.edge}}"></span>
+<span style="position: absolute; left: 0; right: 0; top: 0; height: 3px; background: {{p.tag}}"></span>
+<span style="position: absolute; left: 6px; top: 7px; font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">{{p.n}}</span>
+<span style="position: absolute; right: 6px; top: 7px; font: 500 10px 'IBM Plex Mono', monospace; color: #8C939D">{{p.note}}</span>
+<span style="position: absolute; left: 6px; right: 6px; bottom: 6px; font: 500 11px 'IBM Plex Sans', sans-serif; color: {{p.col}}; text-align: left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{p.name}}</span>
+</button>
+<span style="font-size: 12px; color: #A7ADB6">{{p.state}}</span>
+</div>
+</sc-for>
+</div>
+</div>
+<span style="font-size: 12px; color: #A7ADB6; line-height: 1.5">Square, radius 6, raised. Number top-left, note top-right, sample name bottom-left. A hit fills from the bottom with signal at 26%, height = velocity, with a solid edge, decaying over ~250 ms. Selected = 2 px signal border. Optional 3 px colour tag on top for groups or choke. Empty pads are dashed and accept a dropped sample.</span>
+</div>
+</div>
+</section>
+
+<!-- Anatomy -->
+<section style="display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: #A7ADB6">Device anatomy</h2>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px">
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px"><span style="font: 500 11px 'IBM Plex Mono', monospace; color: #8C939D">A · TITLE BAR</span><span style="font-size: 13px; color: #A7ADB6; line-height: 1.5">Track / device, preset browser centred, output meter, bypass, menu. Identical on every device.</span></div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px"><span style="font: 500 11px 'IBM Plex Mono', monospace; color: #8C939D">B · HERO</span><span style="font-size: 13px; color: #A7ADB6; line-height: 1.5">The device’s main display plus its 2–4 most important controls: oscillator scope, sample waveform, EQ curve, transfer curve.</span></div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px"><span style="font: 500 11px 'IBM Plex Mono', monospace; color: #8C939D">C · SECTIONS</span><span style="font-size: 13px; color: #A7ADB6; line-height: 1.5">Panels on a 12-column grid. Each panel: section label, optional display well, a row of knobs.</span></div>
+<div style="background: #1A1D21; border: 1px solid #2B3036; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 6px"><span style="font: 500 11px 'IBM Plex Mono', monospace; color: #8C939D">D · ROUTING</span><span style="font-size: 13px; color: #A7ADB6; line-height: 1.5">Source chips plus routing rows, full width at the bottom. Only for devices that modulate.</span></div>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const f = (n) => n.toFixed(1);
+    const pt = (a, r) => { const t = a * Math.PI / 180; return [50 + r * Math.sin(t), 50 - r * Math.cos(t)]; };
+    const arc = (r, a0, a1) => {
+      if (a1 - a0 < 0.6) return '';
+      const p0 = pt(a0, r), p1 = pt(a1, r);
+      return 'M' + f(p0[0]) + ' ' + f(p0[1]) + ' A' + r + ' ' + r + ' 0 ' + (a1 - a0 > 180 ? 1 : 0) + ' 1 ' + f(p1[0]) + ' ' + f(p1[1]);
+    };
+    const knob = (label, txt, v, o) => {
+      const ang = -135 + 270 * v, base = o.bipolar ? 0 : -135;
+      let mp = '';
+      if (o.mod) { const am = -135 + 270 * Math.min(1, v + o.mod); mp = arc(47, ang, am); }
+      const a = pt(ang, 9), b = pt(ang, 24);
+      return { label: label, txt: txt, size: o.size, track: arc(40, -135, 135), val: arc(40, Math.min(base, ang), Math.max(base, ang)), mod: mp,
+        col: o.disabled ? '#4A5260' : '#4C9EFF', cap: o.active ? '#2E333A' : '#262A30', ptr: o.disabled ? '#585F69' : '#E7E9EC',
+        x1: f(a[0]), y1: f(a[1]), x2: f(b[0]), y2: f(b[1]) };
+    };
+    const sw = (name, hex, use) => ({ name: name, hex: hex, use: use });
+
+    // Fader taper shared with the mixer
+    const NEG = -Infinity;
+    const marks = [[6, 0], [0, 0.14], [-6, 0.28], [-12, 0.42], [-24, 0.6], [-36, 0.74], [-48, 0.86], [-60, 0.94]];
+    const pos = (db) => {
+      if (db === NEG) return 1;
+      if (db < -60) return 0.94 + Math.min(1, (-60 - db) / 30) * 0.06;
+      for (let i = 0; i < marks.length - 1; i++) {
+        const a = marks[i], b = marks[i + 1];
+        if (db <= a[0] && db >= b[0]) return a[1] + (a[0] - db) / (a[0] - b[0]) * (b[1] - a[1]);
+      }
+      return 0;
+    };
+    const yAt = (db, h) => 10 + pos(db) * (h - 20);
+    const labels = [[6, '+6'], [0, '0'], [-6, '−6'], [-12, '−12'], [-24, '−24'], [-36, '−36'], [-48, '−48'], [NEG, '−∞']];
+    const capY = yAt(0, 280);
+    const meters = [[-7, -5.8], [-8, -6.4]].map((m, c) => {
+      const yPk = yAt(m[0], 280), yR = yAt(m[0] - 7, 280);
+      return { x: 74 + c * 13, yPk: f(yPk), hPk: f(270 - yPk), yRms: f(yR), hRms: f(270 - yR), yHold: f(yAt(m[1], 280) - 1) };
+    });
+    const cCap = yAt(-4, 200);
+    const fader = {
+      grid: labels.map((l) => ({ y: f(yAt(l[0], 280)), ty: f(yAt(l[0], 280) + 3.5), t: l[1], col: l[0] === 0 ? '#E7E9EC' : '#8C939D', tick: l[0] === 0 ? '#A7ADB6' : '#383E46' })),
+      capY: f(capY), capTop: f(capY - 8), fillH: f(270 - capY), meters: meters,
+      cGrid: [6, 0, -12, -24, -48].map((d) => ({ y: f(yAt(d, 200)), tick: d === 0 ? '#A7ADB6' : '#383E46' })),
+      cCapY: f(cCap), cCapTop: f(cCap - 7), cFillH: f(190 - cCap)
+    };
+
+    // Toggles: off is shared, on is per role
+    const off = { offBg: '#22262B', offFg: '#A7ADB6', offBd: '#2B3036', offDisabled: false };
+    const tg = (role, t, onBg, onFg, onBd) => Object.assign({ role: role, t: t, onBg: onBg, onFg: onFg, onBd: onBd }, off);
+    const toggles = [
+      tg('Mute', 'M', '#E7E9EC', '#131518', '#E7E9EC'),
+      tg('Solo', 'S', '#4C9EFF', '#0D0F11', '#4C9EFF'),
+      tg('Record arm', 'R', '#FF6B5B', '#131518', '#FF6B5B'),
+      tg('Monitor', 'I', '#1E2A38', '#4C9EFF', '#4C9EFF'),
+      tg('Option', 'SYNC', '#1E2A38', '#4C9EFF', '#4C9EFF'),
+      Object.assign(tg('Unavailable', 'I', '#1E2125', '#585F69', '#2B3036'), { offBg: '#1E2125', offFg: '#585F69', offDisabled: true })
+    ];
+
+    // Pads
+    const padNames = ['Kick', 'Kick 2', 'Snare', 'Rim', 'Clap', 'Snap', 'CH Hat', 'OH Hat', 'Tom Lo', 'Tom Mid', 'Tom Hi', 'Ride', 'Crash', 'Perc', 'Shaker', ''];
+    const hits = { 0: 0.9, 2: 0.55, 6: 0.3 };
+    const tags = { 6: '#E6C84A', 7: '#E6C84A' };
+    const pad = (i, name, o) => {
+      o = o || {};
+      const empty = !name;
+      return {
+        n: String(i + 1).padStart(2, '0'), name: empty ? '+ Drop' : name, note: o.note || '',
+        aria: empty ? 'Empty pad ' + (i + 1) : 'Pad ' + (i + 1) + ' ' + name,
+        border: o.sel ? '2px solid #4C9EFF' : (empty ? '1px dashed #383E46' : '1px solid #2B3036'),
+        bg: empty ? 'transparent' : '#22262B', col: empty ? '#8C939D' : '#E7E9EC',
+        fill: Math.round((o.vel || 0) * 100), edge: o.vel ? '#4C9EFF' : 'transparent',
+        tag: o.tag || 'transparent', op: o.muted ? 0.4 : 1
+      };
+    };
+    const pads = [12, 13, 14, 15, 8, 9, 10, 11, 4, 5, 6, 7, 0, 1, 2, 3].map((i) => pad(i, padNames[i], { vel: hits[i], tag: tags[i], sel: i === 2 }));
+    const padStates = [
+      Object.assign(pad(0, 'Kick', { note: 'C1' }), { state: 'Idle' }),
+      Object.assign(pad(0, 'Kick', { note: 'C1', vel: 0.85 }), { state: 'Hit · vel 108' }),
+      Object.assign(pad(2, 'Snare', { note: 'D1', sel: true }), { state: 'Selected' }),
+      Object.assign(pad(6, 'CH Hat', { note: 'F#1', tag: '#E6C84A' }), { state: 'Choke group' }),
+      Object.assign(pad(9, 'Tom Mid', { note: 'B1', muted: true }), { state: 'Muted' }),
+      Object.assign(pad(15, '', { note: 'D#2' }), { state: 'Empty' })
+    ];
+
+    return {
+      fader: fader, toggles: toggles, pads: pads, padStates: padStates,
+      swatches: [
+        sw('bg.window', '#131518', 'ground'), sw('bg.titlebar', '#16181B', 'chrome'), sw('surface.panel', '#1A1D21', 'panels'), sw('surface.raised', '#22262B', 'controls'),
+        sw('surface.inset', '#0D0F11', 'displays'), sw('knob.cap', '#262A30', 'knob face'), sw('line', '#2B3036', 'borders'), sw('line.strong', '#383E46', 'knob ring'),
+        sw('text', '#E7E9EC', 'primary'), sw('text.muted', '#A7ADB6', 'labels'), sw('text.faint', '#8C939D', 'meta'), sw('ink.ghost', '#4A5260', 'secondary trace'),
+        sw('signal', '#4C9EFF', 'set value'), sw('mod', '#F0A73A', 'modulation'), sw('meter.ok', '#5FCB8E', 'levels'), sw('meter.hot', '#FF6B5B', 'clip only')
+      ],
+      spaces: [{ v: 4 }, { v: 8 }, { v: 12 }, { v: 16 }, { v: 24 }, { v: 32 }],
+      knobs: [
+        knob('Large', '72 · hero', 0.55, { size: 72 }),
+        knob('Medium', '44', 0.4, { size: 44 }),
+        knob('Bipolar', '44', 0.7, { size: 44, bipolar: true }),
+        knob('Modulated', '44 · active', 0.45, { size: 44, mod: 0.25, active: true }),
+        knob('Disabled', '44', 0.3, { size: 44, disabled: true })
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>
