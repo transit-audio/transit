@@ -39,23 +39,29 @@ pub struct MidiTake {
 }
 
 impl MidiTake {
-    /// The events of the pass's tracks at or after the latch, each with the session samples
-    /// since the latch: the device frames since the latch frame, converted at the session rate
-    /// (the same latch the audio take is placed from). Events before the latch are not part of
-    /// the take.
+    /// The events of the pass's tracks, each with the session samples since the latch: the device
+    /// frames since the latch frame, converted at the session rate (the same latch the audio take
+    /// is placed from). The device frame runs on through the record count-in, so an event played
+    /// over the click (a pickup, #327) comes out negative, before the latch by the count-in left
+    /// when it was played. Nothing is placed before the session start: an offset that would land
+    /// before sample 0 is clamped there.
     pub fn timed(&self, session_rate: u32) -> Vec<(i64, crate::midi_capture::CapturedEvent)> {
         let Some(point) = self.start else { return Vec::new() };
-        let rate = u128::from(self.device_rate.max(1));
+        let floor = -point.position.sample.max(0);
         self.events
             .iter()
             .filter(|e| self.tracks.contains(&e.track))
-            .filter_map(|e| {
-                let frames = e.frame.checked_sub(point.output_frame)?;
-                let samples = (u128::from(frames) * u128::from(session_rate) + rate / 2) / rate;
-                Some((i64::try_from(samples).ok()?, *e))
-            })
+            .filter_map(|e| Some((latch_offset(e.frame, point.output_frame, self.device_rate, session_rate)?.max(floor), *e)))
             .collect()
     }
+}
+
+/// Session samples from the latch at device frame `latch` to device frame `frame` (negative
+/// before the latch), rounded to the nearest sample.
+fn latch_offset(frame: u64, latch: u64, device_rate: u32, session_rate: u32) -> Option<i64> {
+    let rate = i128::from(device_rate.max(1));
+    let frames = i128::from(frame) - i128::from(latch);
+    i64::try_from((frames * i128::from(session_rate) + rate / 2).div_euclid(rate)).ok()
 }
 
 /// Main-thread facade. RuntimeControl deliberately makes this type !Send/!Sync.

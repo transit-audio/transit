@@ -312,7 +312,7 @@ fn an_unclocked_event_is_captured_at_its_approximate_placement_and_flagged() {
 }
 
 #[test]
-fn nothing_is_captured_before_recording_starts_or_during_the_count_in() {
+fn nothing_is_captured_before_recording_starts_but_the_count_in_captures_pickups() {
     let mut rig = Rig::new(48_000);
     rig.send(100, 0, false);
     rig.render(256);
@@ -321,7 +321,8 @@ fn nothing_is_captured_before_recording_starts_or_during_the_count_in() {
     rig.render(256);
     rig.capture.poll();
     assert!(rig.capture.events().is_empty(), "playing is not recording");
-    // A count-in under way: recording is off then, and a stray flag must not capture either.
+    // A count-in under way (#327): what is played over the click is captured at its frame, as a
+    // pickup for the take, while the transport stays parked and not recording.
     let (mut start, _publisher) = start::pair(EngineEpoch(1));
     let ticket = start.prepare().unwrap().ticket();
     rig.audio.transport.count_in = Some(super::super::Counting {
@@ -332,12 +333,78 @@ fn nothing_is_captured_before_recording_starts_or_during_the_count_in() {
         plan: super::super::CountIn { frames: 96_000, beat: 24_000, per_bar: 4 },
         left: 96_000,
     });
-    rig.audio.transport.recording = true;
+    rig.audio.transport.playing = false;
     rig.send(700, 2, false);
     rig.render(512);
     rig.capture.poll();
-    assert!(rig.capture.events().is_empty(), "the count-in captures nothing");
-    assert_eq!(rig.audio.plans.engine().event_tap().len(), 3, "the instrument still sounds them");
+    assert_eq!(rig.capture.events().iter().map(|e| e.frame).collect::<Vec<_>>(), [700], "the count-in captures pickups");
+    assert_eq!(rig.audio.plans.engine().event_tap().len(), 3, "the instrument sounds them all");
+}
+
+/// Send a real record count-in of `frames` project samples from `from` (a MIDI-only pass) and
+/// apply it with one callback.
+fn counting_in(rig: &mut Rig, from: i64, frames: i64) -> (start::Control, start::Reader) {
+    let (mut start, publisher) = start::pair(EngineEpoch(1));
+    rig.audio.transport.record_start = publisher;
+    let reader = start.prepare().unwrap();
+    let plan = super::super::CountIn { frames, beat: frames / 4, per_bar: 4 };
+    let command = Command::Record { ticket: reader.ticket(), from: Some(from), end: None, looped: None, count_in: Some(plan) };
+    rig.control.send_action(command, true).unwrap();
+    rig.render(64);
+    assert!(rig.audio.transport.count_in.is_some() && !rig.audio.transport.playing && !rig.audio.transport.recording);
+    (start, reader)
+}
+
+/// Run callbacks until the count-in hands over to Play and the latch.
+fn latched(rig: &mut Rig, reader: &start::Reader) -> start::Point {
+    for _ in 0..400 {
+        if let start::Status::Started(point) = reader.status() {
+            return point;
+        }
+        rig.render(64);
+    }
+    panic!("never latched: {:?}", reader.status());
+}
+
+/// The pass's events as the take places them: session samples since the latch.
+fn offsets(rig: &mut Rig, point: start::Point) -> Vec<i64> {
+    rig.capture.poll();
+    let take =
+        crate::MidiTake { tracks: vec![rig.target.0], start: Some(point), events: rig.capture.events().to_vec(), dropped: 0, device_rate: 48_000 };
+    take.timed(48_000).iter().map(|(offset, _)| *offset).collect()
+}
+
+#[test]
+fn a_pickup_played_during_the_count_in_lands_before_the_record_start_by_the_count_in_left() {
+    let mut rig = Rig::new(48_000);
+    let (_start, reader) = counting_in(&mut rig, 96_000, 4_800);
+    // The count-in has rendered ahead of the callbacks; the device frame of its next sample and
+    // what is left of it then describe the same instant.
+    let left = rig.audio.transport.count_in.unwrap().left;
+    let now = rig.audio.transport.timeline.next_output();
+    rig.send(now + 1_000, 0, false);
+    rig.send(now + 1_600, 1, true);
+    let point = latched(&mut rig, &reader);
+    assert_eq!(point.output_frame, now + u64::try_from(left).unwrap(), "the latch is where the count-in ran out");
+    assert_eq!(point.position.sample, 96_000);
+    assert!(rig.audio.transport.playing && rig.audio.transport.recording);
+    // A note after the latch (the pass itself, or its pre-roll) keeps its place.
+    rig.send(point.output_frame + 2_400, 2, false);
+    rig.render(64);
+    rig.render(4_096);
+    let n = left - 1_000;
+    assert_eq!(offsets(&mut rig, point), [-n, -n + 600, 2_400], "pickup at record_start - {n}");
+}
+
+#[test]
+fn a_pickup_before_the_session_start_is_clamped_at_sample_zero() {
+    let mut rig = Rig::new(48_000);
+    // Record start 1,000 samples into the session, after a 4,800-sample count-in.
+    let (_start, reader) = counting_in(&mut rig, 1_000, 4_800);
+    let now = rig.audio.transport.timeline.next_output();
+    rig.send(now, 0, false);
+    let point = latched(&mut rig, &reader);
+    assert_eq!(offsets(&mut rig, point), [-1_000], "clamped at the session start, never before it");
 }
 
 #[test]

@@ -780,13 +780,14 @@ impl Audio {
                 ActionResult::MidiBuffered
             };
             // A MIDI recording keeps what the instrument is given, at the frame it is given it:
-            // only while the transport records (not during the count-in), and never blocking.
-            // A rack's input is not recorded yet (ADR 0034, slice 1): the rack holds no takes.
+            // while the transport records, and during a record count-in (#327: pickups played
+            // over the click join the take, Logic's behavior), never blocking. The output frame
+            // runs on through the count-in to the latch, so a pickup lands before the latch by
+            // the count-in left when it was played. A rack's input is not recorded yet (ADR 0034,
+            // slice 1): the rack holds no takes.
             if matches!(result, ActionResult::MidiBuffered | ActionResult::MidiBufferedApproximate)
                 && packet.target.1 != transit_mix::RACK_SLOT
-                && state.recording
-                && state.playing
-                && state.count_in.is_none()
+                && (state.count_in.is_some() || (state.recording && state.playing))
                 && let Some(capture) = capture
             {
                 capture.push(crate::midi_capture::CapturedEvent {
