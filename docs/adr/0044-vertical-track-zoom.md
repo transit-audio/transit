@@ -274,7 +274,8 @@ bindings differ; these are the concrete references, checked 2026-11-04:
 
 ## Implementation / slices
 
-Two jobs; acceptance of this ADR does not mean either is implemented.
+Two jobs. Slice 1 (model, commands, format and UI-state retirement) is implemented; slice 2
+(geometry, gestures and drawing) remains pending. The arrangement still draws uniform 46-point rows.
 
 1. **Model, commands and format.** Touch `crates/model/src/track.rs`, new model height tests,
    `crates/model/tests/corpus.rs` and `serde_defaults.rs` as needed for missing-field coverage;

@@ -223,6 +223,10 @@ pub fn save_ui(path: &Path, ui: &transit_ui_studio::UiState) -> Result<(), Strin
     let current = serde_json::to_value(saved).map_err(|error| error.to_string())?;
     let original = raw.clone();
     merge_ui(&mut raw, &previous, &current);
+    // ADR 0044 retires this known preference; preserve unknown future fields.
+    if let Some(fields) = raw.as_object_mut() {
+        fields.remove("track_height");
+    }
     if raw == original {
         return Ok(());
     }
@@ -404,12 +408,12 @@ mod tests {
     fn settings_round_trip() {
         let dir = std::env::temp_dir().join(format!("transit-ui-prefs-{}", std::process::id()));
         let path = dir.join("ui.json");
-        let mut ui = transit_ui_studio::UiState { track_height: 60.0, ..Default::default() };
+        let mut ui = transit_ui_studio::UiState { header_width: 260.0, ..Default::default() };
         ui.keys.velocity = 87;
         ui.plugin_windows.push((transit_engine::model::TrackId(1), 0));
         save_ui(&path, &ui).unwrap();
         let back = load_ui(&path).unwrap().unwrap();
-        assert_eq!(back.track_height, 60.0);
+        assert_eq!(back.header_width, 260.0);
         assert_eq!(back.keys.velocity, 87, "new-note velocity is saved in ui.json");
         assert!(back.plugin_windows.is_empty(), "open editors are not remembered");
         std::fs::remove_dir_all(dir).unwrap();
@@ -443,7 +447,7 @@ mod preference_regressions {
         let dir = TemporaryAutosave::new().unwrap();
         let path = dir.path().join("ui.json");
         let original = json!({
-            "track_height": "future-size",
+            "header_width": "future-size",
             "window_size": [1234, 789],
             "audio": {"backend": "future-driver", "future_calibration": [1, 2, 3]},
             "io_maps": [{"future_map": true}],
@@ -452,14 +456,36 @@ mod preference_regressions {
         std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
         let mut ui = load_ui(&path).unwrap().unwrap();
         assert_eq!(ui.window_size, [1234.0, 789.0]);
-        assert_eq!(ui.track_height, transit_ui_studio::UiState::default().track_height);
+        assert_eq!(ui.header_width, transit_ui_studio::UiState::default().header_width);
         ui.show_mixer = true;
         save_ui(&path, &ui).unwrap();
         let saved = read_ui(&path).unwrap().unwrap();
-        for key in ["track_height", "audio", "io_maps", "future_preference"] {
+        for key in ["header_width", "audio", "io_maps", "future_preference"] {
             assert_eq!(saved[key], original[key], "preserve {key}");
         }
         assert_eq!(saved["show_mixer"], true);
+    }
+
+    #[test]
+    fn retired_track_height_drops_on_an_otherwise_unchanged_settings_save() {
+        let dir = TemporaryAutosave::new().unwrap();
+        let path = dir.path().join("ui.json");
+        let expected = serde_json::to_value(transit_ui_studio::UiState::default()).unwrap();
+        for height in [None, Some(json!(46)), Some(json!(200)), Some(json!("future-size"))] {
+            let mut raw = expected.clone();
+            if let Some(height) = height {
+                raw["track_height"] = height;
+            }
+            raw["future_preference"] = json!({"keep":true});
+            std::fs::write(&path, serde_json::to_vec(&raw).unwrap()).unwrap();
+            let loaded = load_ui(&path).unwrap().unwrap();
+            assert_eq!(serde_json::to_value(&loaded).unwrap(), expected);
+            save_ui(&path, &loaded).unwrap();
+            let saved = read_ui(&path).unwrap().unwrap();
+            assert!(saved.get("track_height").is_none());
+            assert_eq!(saved["future_preference"], raw["future_preference"]);
+            assert_eq!(serde_json::to_value(load_ui(&path).unwrap().unwrap()).unwrap(), expected);
+        }
     }
 
     #[test]

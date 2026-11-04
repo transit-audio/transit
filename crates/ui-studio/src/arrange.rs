@@ -335,7 +335,7 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui) {
 fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     let full = ui.max_rect();
     let hw = app.ui.header_width.clamp(160.0, 480.0);
-    let rh = app.ui.track_height.clamp(24.0, 200.0);
+    let rh = 46.0; // ADR 0044 slice 2 replaces this
     let list = Rect::from_min_max(pos2(full.min.x, full.min.y + RULER_H), pos2(full.min.x + hw, full.max.y));
     let ruler = Rect::from_min_max(pos2(full.min.x + hw, full.min.y), pos2(full.max.x, full.min.y + RULER_H));
     let tl = Rect::from_min_max(pos2(full.min.x + hw, full.min.y + RULER_H), full.max);

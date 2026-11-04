@@ -51,17 +51,18 @@ file as usual. It cannot warn from builds that shipped before it existed: an old
 drops a loop on save (known issue K40). Add an entry to `needs()` and `KNOWN_NEEDS` together when
 a new feature would be lost by an older reader, and test a round-trip with and without it.
 
-## Proposed track-height display (#314)
+## Track-height format (#314, slice 1)
 
-[ADR 0044](../../adr/0044-vertical-track-zoom.md) proposes drawing the already serialized
+[ADR 0044](../../adr/0044-vertical-track-zoom.md) uses the already serialized
 `Track.height`, retaining all seven presets, `Custom(u16)` and `Fit(u16)` with their existing serde
-spellings. No new variant, `needs` entry or format-version bump is proposed. Both payload variants
-will read as 16..440 points without rewriting out-of-range payloads merely on load/save. New tracks
-and Reset will use Small (46); a missing field will default to Medium (88). Existing Medium files
+spellings. No new variant, `needs` entry or format-version bump is needed. Both payload variants
+read as 16..440 points without rewriting out-of-range payloads merely on load/save. New tracks
+and Reset use Small (46); a missing field defaults to Medium (88). In slice 2, existing Medium files
 will visibly change from the old uniform 46-point view to 88, deliberately preserving stored preset
 meaning. Existing corpus files remain unchanged and must load, round-trip and draw at those points.
-The retired `ui.json` track-height key will be ignored, never migrated into the session. These are
-proposed rules, not a description of the current uniform-row arrangement.
+The retired `ui.json` track-height key is ignored, never migrated into the session. Slice 1 implements
+the format and commands; per-track drawing remains slice 2. The current arrangement uses uniform
+46-point rows.
 
 Drag/wheel previews remain transient UI state and never reach session serialization; one ordinary
 command commits the final heights. Saving retains the existing live-state capture and document

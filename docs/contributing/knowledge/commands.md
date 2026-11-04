@@ -19,15 +19,19 @@ Every user action is a command: `crates/engine/src/cmd/` (one file per area), re
 
 Tests: `crates/engine/tests/` (random edits, hostile params, route cycles).
 
-Proposed vertical track zoom ([ADR 0044](../../adr/0044-vertical-track-zoom.md), #314) retains
+Vertical track zoom slice 1 ([ADR 0044](../../adr/0044-vertical-track-zoom.md), #314) retains
 `track.height {tracks?, height: points | preset}` and its `{"height": <TrackHeight serde value>}`
 response, plus selected-track `track.height_up/down {tracks?}` returning `{"changed": n}`.
 It adds all-track `track.height_zoom {direction: "in" | "out"}` and `track.height_reset {}`,
 both returning `{"changed": n}`, and read-only `query.track_heights {}` returning session-order
-`{"tracks":[{"id":1,"height":"Small","points":46}]}`. Drag/wheel use explicit track IDs and
+`{"tracks":[{"id":1,"height":"Small","points":46}]}`, including hidden tracks.
+Numeric requests clamp to 16..440 and round halves up before preset snapping. An unchanged numeric
+height preserves the stored variant; an explicit preset or Reset can replace an equal-size Custom/Fit.
+Requests validate all targets and values before editing. No-ops do not borrow the mutable session.
+Slice 2's drag/wheel will use explicit track IDs and
 local UI previews, then one ordinary `Engine::execute` at the gesture boundary; keys/reset each
 use one ordinary undoable command. Session replacement/reset/reopen drops previews without a
-command. The proposal makes `view.zoom_toggle` undoable, caps Fit at 440, and clears its pending
+command. Slice 1 makes `view.zoom_toggle` undoable, caps Fit at 440, and clears its pending
 restore record on an actual explicit height change.
 The ADR defines input-based commit boundaries, no-op/atomic-refusal behavior and UI reachability.
 Height/toggle commands and their undo/redo retain ordinary revision, dirty and history behavior.
@@ -35,6 +39,7 @@ Heights use no merge keys: during automation write or MIDI Learn, a changed ordi
 creates its own undo step, splits the current merge group and leaves the pass/sweep and merge
 hold running. Playback synchronization and capture/save remain unchanged; the final height edit
 has the same plan-compilation cost as a track rename.
-These additions and behavior changes are not implemented yet.
+The commands and format are implemented. UI gestures, shortcuts, menu entries and per-track
+drawing remain slice 2; the arrangement still draws uniform 46-point rows.
 
 Low Latency adds UI-owned options.low_latency {value?: bool, limit_ms?: number}, returning {value, limit_ms}. Omitting value toggles unless only limit_ms is supplied. Invalid limits are refused, and an engine-only host reports unavailable rather than editing the session. query.path_latency {} is a read-only runtime query with adopted plan/device generations and shared/Main latency components; see routing.md.

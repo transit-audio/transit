@@ -33,8 +33,6 @@ pub struct UiState {
     /// #67): "last time 12 s" beside the loading readout. A per-machine preference, updated on
     /// every successful load; older files have none.
     pub plugin_load_ms: std::collections::BTreeMap<String, u64>,
-    /// Track row height in points (plan 06, L9: ours, not the model's seven sizes).
-    pub track_height: f32,
     /// Width of the track list.
     pub header_width: f32,
     /// The main window's size (logical points) and maximized state.
@@ -140,7 +138,6 @@ impl Default for UiState {
             editors_follow: true,
             plugin_windows: Vec::new(),
             plugin_load_ms: std::collections::BTreeMap::new(),
-            track_height: 46.0,
             header_width: 236.0,
             window_size: [1600.0, 1000.0],
             window_maximized: false,
@@ -174,6 +171,23 @@ impl Default for UiState {
             show_history: false,
             auto_shown: Vec::new(),
             auto_lanes: Vec::new(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod height_tests {
+    use super::UiState;
+    use serde_json::json;
+
+    #[test]
+    fn retired_track_height_is_ignored_and_omitted_on_save() {
+        let without: UiState = serde_json::from_value(json!({})).unwrap();
+        let saved = serde_json::to_value(&without).unwrap();
+        assert!(saved.get("track_height").is_none());
+        for height in [json!(46), json!(200), json!("invalid")] {
+            let old: UiState = serde_json::from_value(json!({"track_height":height})).unwrap();
+            assert_eq!(serde_json::to_value(old).unwrap(), saved);
         }
     }
 }
