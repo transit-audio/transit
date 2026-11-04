@@ -3,6 +3,22 @@
 `crates/ui-studio` is transit's UI, and the only one: the legacy upstream UI crate was removed in #177.
 UI code follows the same no-panic rule (`#![deny(clippy::unwrap_used, ...)]` in `lib.rs`).
 
+## Vertical track zoom (ADR 0044)
+
+`arrange/geometry.rs` owns `RowGeo`: per-track main heights, proportional take and automation
+lane heights, cumulative tops and total stack heights. Headers end at the main height;
+clips, recording overlays, lane headers, drop targets and scroll bounds use this geometry.
+`arrange/track_height.rs` owns transient `HeightGesture` state and the bounded raw-wheel
+accumulator. Geometry reads the preview; session queries continue to read committed heights.
+
+`frame_logic.rs` owns frame and command dispatch. `before_height_command` flushes a changed
+preview before ordinary UI commands, including direct merged automation and MIDI dispatch.
+It drops the preview for session lifecycle commands. `commit_height_preview` takes the
+gesture out of UI state before executing one ordinary `track.height`; no-op and refusal
+never retry. Input boundaries use pointer, modifier and focus events, without timers.
+`automation/lane_height.rs` owns finite base validation and conversion between displayed
+lane height and its transient base; `auto_lanes` and `auto_shown` retain their serde skips.
+
 ## Conventions
 
 - **Shortcuts:** one table, `TABLE` in `crates/ui-studio/src/shortcuts.rs`. Handlers take their keys
@@ -57,31 +73,6 @@ Issue #63; code in `crates/ui-studio/src/fades.rs` (gestures) and `crates/model/
   remove. Dragging a fade across an abutting neighbor creates a crossfade; crossfade edges adjust
   both sides. The automatic crossfade preference is #72.
 - Looped clips: fades follow the arrangement bounds, not each cycle ([ADR 0019](../../adr/0019-clip-internal-loops.md)).
-
-## Proposed vertical track zoom (#314)
-
-[ADR 0044](../../adr/0044-vertical-track-zoom.md) proposes replacing the arrangement's uniform
-`UiState.track_height` with each session track's height (16..440 points). It is not implemented:
-today `arrange.rs` still draws the machine preference, default 46, clamped to 24..200. The proposal
-uses header-bottom drag for one track, Alt-drag for all, Alt-wheel for the hovered main row,
-Alt+=/- for all-track preset steps, and a View menu reset to 46. Selection does not narrow bulk
-scope. Drag/wheel heights preview in transient UI state and commit one ordinary `track.height`
-command at the input boundary, never on a timer. Session heights remain unchanged until commit;
-session replacement/reset/reopen discards the preview. Each changed gesture is one undo step.
-
-Automation lane bases stay in transient open-session view state (`auto_shown` and `auto_lanes`
-retain `#[serde(skip)]`, so neither is in ui.json): displayed height becomes
-`clamp(base * H / 46, 40, 240)`; take lanes become `clamp(22 * H / 46, 22, 220)`. The automation
-handle adjusts its base through the inverse formula; session close/reopen resets bases. One geometry
-supplies painting and hit tests; compact headers hide controls below 46 and 24 points.
-The ADR specifies old-session behavior, toggle interaction, gestures,
-inspect fields and deterministic handler/paint tests. Implementation goes in new arrangement
-modules, with pure moves before extending the large arrangement and app-root files.
-
-Preview geometry also drives lanes and waveforms. The gate observes command history and stored
-heights during real UI gestures, proving zero height commands during preview and one at commit.
-Playback synchronization stays unchanged: the final edit has the same plan-compilation cost as
-a track rename. No height merge key or playback-runtime mechanism is proposed.
 
 ## Tests
 

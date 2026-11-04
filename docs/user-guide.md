@@ -20,6 +20,26 @@ Plug-in editor windows follow the display scale, not this zoom.
 
 See the [shortcuts reference](shortcuts.md) and **Help > Keyboard Shortcuts** for key bindings.
 
+## Arrangement: track height
+
+Drag the bottom edge of a track header to resize its main row from 16 to 440 points.
+Hold **Alt** (Option on macOS) when starting the drag to resize every track together,
+including hidden tracks and tracks inside collapsed folders. Selection does not change the target.
+Returning to the starting height before release restores each original height.
+
+Use **Alt+wheel** over a main track header or clip row to resize just the hovered track,
+eight points per notch. Automation and take lanes follow their parent proportionally.
+Drag an automation lane's bottom edge to change its proportion; collapsing and reopening
+lanes keeps that proportion until the session closes.
+
+In the arrangement, **Alt+=** or **Alt+-** steps every track to the next taller or shorter
+preset. **View > Track Height** offers **Increase All**, **Decrease All**, and
+**Reset Track Heights**. Reset returns every track to 46 points, keeps lane proportions
+and horizontal zoom, and can be undone. Each drag or wheel gesture makes one undo step.
+
+Track heights are saved in the session. Sessions from older builds that used the default
+height open at **88 points per track**; **Reset Track Heights** returns them to **46**.
+
 ## Piano roll
 
 Click the ruler above the notes to set the playhead; drag it up or down to zoom.

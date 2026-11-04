@@ -21,6 +21,8 @@ Ableton's Info View and Logic's Quick Help both use Shift+?. The panel sits bott
 | Global | Reset Interface Zoom | Ctrl+0 |
 | Arrangement | Zoom In | +, =, Shift+Plus |
 | Arrangement | Zoom Out | - |
+| Arrangement | Increase Track Heights | Alt+=, Alt+Plus (without Shift) |
+| Arrangement | Decrease Track Heights | Alt+- |
 
 Plus means the **+** key (including a numeric keypad); Shift+Plus covers keyboards where
 typing **+** takes Shift. Interface zoom multiplies or divides the current size by 1.1,
