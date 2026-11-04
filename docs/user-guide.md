@@ -130,11 +130,14 @@ the last clip on the active playlist. The source's clips and take stacks are alw
   volume, output and sends. **Existing track** adds the print to the active playlist of a visible,
   unfrozen audio track other than the source. It overwrites material inside the printed range,
   preserving material outside it, just like pasting over clips in Slip mode.
-- **Source:** **Leave** keeps it unchanged. **Mute** (the default) mutes and deactivates it, stopping
-  its plug-ins while keeping it visible. **Hide** deactivates and hides it. To play a deactivated
-  source again, choose **Track > Make Active**, or **Make Active** in the track's header menu,
-  and unmute it if needed. The mixer strip's menu offers the same toggle. Inactive tracks have
-  dimmed names and an **inactive** tag in both views.
+- **Source:** **Leave** keeps it unchanged. **Mute** (the default) mutes it only: it stays active
+  and its plug-ins keep running; Mute means mute, as in Logic's Bounce in Place.
+  **Mute and deactivate** mutes it and deactivates it, stopping its plug-ins while keeping it
+  visible. **Hide** deactivates and hides it. To play a deactivated source again, choose
+  **Track > Make Active**, **Make Active** in the track's header menu, or click the **inactive**
+  tag on its header or mixer strip, and unmute it if needed. Inactive tracks have dimmed names and
+  the tag in both views. A source that is already inactive is refused with "<track> is inactive:
+  Track > Make Active first", and nothing changes.
 
 **Enter** bounces; **Esc** cancels. Choices are remembered for the current session. The destination
 is focused after the bounce; one Undo restores the whole operation.

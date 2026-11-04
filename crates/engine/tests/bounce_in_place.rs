@@ -76,12 +76,40 @@ fn process_calls(s: &Session) -> usize {
 }
 
 #[test]
-fn default_bounce_keeps_source_visible_preserves_takes_and_stops_plugins() {
+fn default_bounce_mutes_the_source_but_keeps_it_active_and_its_plugins_running() {
     let (mut e, t) = fixture();
     let before = e.session().track(t).unwrap().clone();
     assert!(process_calls(e.session()) > 0, "the insert really processes before bounce");
     let steps = e.undo_history().len();
     let result = e.execute("track.bounce", &json!({"tracks": [t.0]})).unwrap();
+    let dest = TrackId(result["tracks"][0].as_u64().unwrap());
+    let source = e.session().track(t).unwrap();
+    assert!(!source.hidden, "source must remain reachable");
+    assert!(source.mixer.mute && !source.inactive, "Mute means mute: the source stays active");
+    assert_eq!(source.playlists, before.playlists);
+    assert_eq!(source.take_stacks(), before.take_stacks());
+    assert_eq!(source.active_playlist, before.active_playlist);
+    let bounced = e.session().track(dest).unwrap();
+    assert_eq!(bounced.name, "Vox bounce");
+    assert_eq!(e.session().track_index(dest), e.session().track_index(t).map(|i| i + 1));
+    assert_eq!(bounced.mixer.volume_db, before.mixer.volume_db);
+    assert_eq!(bounced.mixer.output, before.mixer.output);
+    assert_eq!(bounced.mixer.sends, before.mixer.sends);
+    assert_eq!((bounced.clips()[0].start, bounced.clips()[0].length), (0, 102_000));
+    assert!(process_calls(e.session()) > 0, "the muted source insert keeps processing");
+    assert_eq!(e.undo_history().len(), steps + 1);
+    assert!(e.undo());
+    assert_eq!(e.session().track(t).unwrap(), &before);
+    assert!(e.session().track(dest).is_none());
+}
+
+#[test]
+fn mute_deactivate_keeps_source_visible_preserves_takes_and_stops_plugins() {
+    let (mut e, t) = fixture();
+    let before = e.session().track(t).unwrap().clone();
+    assert!(process_calls(e.session()) > 0, "the insert really processes before bounce");
+    let steps = e.undo_history().len();
+    let result = e.execute("track.bounce", &json!({"tracks": [t.0], "source": "mute_deactivate"})).unwrap();
     let dest = TrackId(result["tracks"][0].as_u64().unwrap());
     let source = e.session().track(t).unwrap();
     assert!(!source.hidden, "source must remain reachable");

@@ -432,16 +432,32 @@ fn strip(
         let shift = ui.input(|i| i.modifiers.shift);
         app.focus_header(id, shift);
     }
+    // The inactive tag lies over the strip, so it is interacted after it: a click is Make Active (#333).
+    let tag_resp = t.inactive.then(|| {
+        let tag = Rect::from_min_size(pos2(name_r.max.x - 5.0 - 40.0, name_r.center().y - 5.0), vec2(40.0, 13.0));
+        let tag_resp = ui.interact(tag.intersect(clip), ui.id().with(("inactive_tag", id.0)), Sense::click());
+        crate::help::hover(ui, &tag_resp, crate::help::Id::MixerStripInactive);
+        let tag_resp = tag_resp.on_hover_text("Make Active");
+        if tag_resp.clicked() {
+            let _ = app.run("track.make_inactive", json!({"tracks": [id.0], "inactive": false}));
+        }
+        tag_resp
+    });
     // Slice 6: double-click the name to rename the track in place.
     if resp.double_clicked() && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| name_r.contains(p)) {
         app.start_rename(crate::finish::RenameTarget::Track(id), r4(name_r));
     }
-    resp.context_menu(|ui| {
+    let mut track_menu = |ui: &mut Ui| {
         if t.kind == TrackKind::Audio {
             crate::arrange::width_item(app, ui, id);
         }
         menu.push(crate::menus::activity_item(app, ui, Some(id)));
-    });
+    };
+    resp.context_menu(&mut track_menu);
+    // The tag covers part of the name, so it gets the same menu on right-click.
+    if let Some(tag_resp) = &tag_resp {
+        egui::Popup::context_menu(tag_resp).id(tag_resp.id.with("strip-menu")).show(&mut track_menu);
+    }
     let mut y = r.min.y + 26.0;
     // Hardware/bus input for audio tracks; device/channel input for MIDI and instruments.
     let in_r = Rect::from_min_size(pos2(x0, y), vec2(w, 16.0));

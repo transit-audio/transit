@@ -115,6 +115,7 @@ pub(super) fn track_header(
         if let Some(help) = help {
             crate::help::hover(ui, &resp, help);
         }
+        let resp = if cmd == "mix.mute" && t.inactive { resp.on_hover_text("Mute (track is inactive)") } else { resp };
         let fill = if on {
             color
         } else if resp.hovered() && enabled {
@@ -248,6 +249,18 @@ pub(super) fn track_header(
     let name_area = Rect::from_min_max(r.min, pos2(r.max.x - 114.0, r.max.y));
     let resp = ui.interact(name_area.intersect(list), ui.id().with(("hdr", t.id.0)), Sense::click_and_drag());
     crate::help::hover(ui, &resp, crate::help::Id::ArrangeHeaderName);
+    // The inactive tag lies over the name area, so it is interacted after it: a click is Make Active
+    // for this track alone (#333).
+    let tag_resp = t.inactive.then(|| {
+        let tag = Rect::from_min_size(pos2(tx + 12.0, r.min.y + 24.0), vec2(40.0, 13.0));
+        let tag_resp = ui.interact(tag.intersect(list), ui.id().with(("inactive_tag", t.id.0)), Sense::click());
+        crate::help::hover(ui, &tag_resp, crate::help::Id::ArrangeHeaderInactive);
+        let tag_resp = tag_resp.on_hover_text("Make Active");
+        if tag_resp.clicked() {
+            let _ = app.run("track.make_inactive", json!({"tracks": [t.id.0], "inactive": false}));
+        }
+        tag_resp
+    });
     // Interacted after the name area so the chip wins where they overlap.
     let chip = outputs.and_then(|view| {
         let frozen_button = if matches!(t.kind, TrackKind::Audio | TrackKind::Instrument) { 24.0 } else { 0.0 };
@@ -273,7 +286,10 @@ pub(super) fn track_header(
     let kind = t.kind;
     let has_instrument = t.instrument.is_some();
     resp.context_menu(|ui| track_menu(app, ui, id, kind, has_instrument));
-    // The chip covers part of the name area, so it gets the same menu on right-click.
+    // The inactive tag and the chip cover part of the name area, so they get the same menu on right-click.
+    if let Some(tag) = tag_resp {
+        egui::Popup::context_menu(&tag).id(tag.id.with("track-menu")).show(|ui| track_menu(app, ui, id, kind, has_instrument));
+    }
     if let Some(chip) = chip {
         // Its own popup id: the chip's response id already keys the destination picker.
         egui::Popup::context_menu(&chip).id(chip.id.with("track-menu")).show(|ui| track_menu(app, ui, id, kind, has_instrument));

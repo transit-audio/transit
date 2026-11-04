@@ -135,6 +135,9 @@ fn menu_opens_defaults_enter_prints_and_focuses_the_named_destination() {
     assert!(!t.app.bounce_place.existing);
     assert_eq!(t.app.bounce_place.source, Source::Mute);
     assert_eq!(t.app.engine.undo_history().len(), steps);
+    // Mute means mute (#333); the choice that deactivates is its own radio button, third in the row.
+    t.click(t.app.bounce_place.layout.sources[2]);
+    assert_eq!(t.app.bounce_place.source, Source::MuteDeactivate);
     t.key("Enter");
     assert!(t.app.dialog.is_none());
     let s = t.app.engine.session();
@@ -144,7 +147,7 @@ fn menu_opens_defaults_enter_prints_and_focuses_the_named_destination() {
     assert!(s.track(source).unwrap().mixer.mute && s.track(source).unwrap().inactive);
     assert!(!s.track(source).unwrap().hidden);
     assert!(t.app.arrange.layout.tracks.iter().any(|row| row.id == source.0), "the inactive source stays in the arrangement");
-    assert_eq!(t.app.status, "Bounced Keys to Keys bounce (source muted)");
+    assert_eq!(t.app.status, "Bounced Keys to Keys bounce (source muted and deactivated)");
     assert_eq!(t.app.engine.undo_history().len(), steps + 1);
     t.app.ui.show_mixer = true;
     t.frames();
@@ -265,7 +268,7 @@ fn cancel_button_preserves_the_document_and_source_choices_report_the_result() {
     t.click(t.app.bounce_place.layout.cancel);
     assert!(t.app.dialog.is_none());
     assert_eq!(t.app.engine.session().to_json().unwrap(), before);
-    for (index, text, hidden) in [(0, "left unchanged", false), (2, "hidden", true)] {
+    for (index, text, hidden) in [(0, "left unchanged", false), (2, "muted and deactivated", false), (3, "hidden", true)] {
         t.app.focus_header(source, false);
         t.app.open_bounce_in_place();
         t.frames();
@@ -374,4 +377,70 @@ fn an_inactive_source_refuses_the_form_with_the_menu_path_and_changes_nothing() 
     let reply = format!("{:?}", crate::control::handle_for_test(&mut t.app, &t.ctx, &req));
     assert!(reply.contains("Keys is inactive: Track > Make Active first"), "{reply}");
     assert_eq!(t.app.engine.session().to_json().unwrap(), before);
+}
+
+#[test]
+fn the_default_choice_mutes_only_and_the_inserts_keep_running() {
+    let mut t = T::new();
+    let source = t.source();
+    t.app.run("mix.insert", json!({"track": source.0, "slot": 0, "plugin": "gain"})).unwrap();
+    t.app.open_bounce_in_place();
+    t.frames();
+    t.key("Enter");
+    let track = t.app.engine.session().track(source).unwrap();
+    assert!(track.mixer.mute && !track.inactive && !track.hidden);
+    assert_eq!(t.app.status, "Bounced Keys to Keys bounce (source muted)");
+    assert!(process_calls(t.app.engine.session(), source) > 0, "the plug-ins of a muted source keep running");
+}
+
+#[test]
+fn hide_still_deactivates_and_hides_and_mute_deactivate_is_a_control_channel_value() {
+    let mut t = T::new();
+    let source = t.source();
+    t.app.run("track.bounce", json!({"tracks": [source.0], "source": "mute_deactivate"})).unwrap();
+    let track = t.app.engine.session().track(source).unwrap();
+    assert!(track.mixer.mute && track.inactive && !track.hidden);
+    let hidden = t.track("Pad", "instrument");
+    t.app.run("midi.new_clip", json!({"track": hidden.0, "start": 0, "length": 4800})).unwrap();
+    t.app.run("track.bounce", json!({"tracks": [hidden.0], "source": "hide"})).unwrap();
+    let track = t.app.engine.session().track(hidden).unwrap();
+    assert!(track.inactive && track.hidden);
+    assert!(t.app.run("track.bounce", json!({"tracks": [hidden.0], "source": "sideways"})).is_err());
+}
+
+#[test]
+fn clicking_the_inactive_tag_makes_that_track_active_in_one_undo_step() {
+    let mut t = T::new();
+    t.app.help.open = true;
+    let source = t.track("Source", "audio");
+    let other = t.track("Other", "audio");
+    for id in [source, other] {
+        t.app.run("track.make_inactive", json!({"tracks": [id.0], "inactive": true})).unwrap();
+    }
+    t.app.ui.show_mixer = true;
+    t.frames();
+    // A right-click on the tag still opens the track menu.
+    let row = t.app.arrange.layout.tracks.iter().find(|row| row.id == source.0).unwrap();
+    t.right_click(row.inactive_tag);
+    let item = t.app.arrange.menu.iter().find(|item| item.label == "Make Active").unwrap().rect;
+    t.click(item);
+    assert!(!t.app.engine.session().track(source).unwrap().inactive);
+    t.app.run("track.make_inactive", json!({"tracks": [source.0], "inactive": true})).unwrap();
+    t.frames();
+    let steps = t.app.engine.undo_history().len();
+    let row = t.app.arrange.layout.tracks.iter().find(|row| row.id == source.0).unwrap();
+    assert!(t.app.help.layout.targets.contains_key("arrange_header.inactive"));
+    t.click(row.inactive_tag);
+    assert!(!t.app.engine.session().track(source).unwrap().inactive);
+    assert!(t.app.engine.session().track(other).unwrap().inactive, "only the clicked track changes");
+    assert_eq!(t.app.engine.undo_history().len(), steps + 1);
+    assert!(t.app.engine.undo());
+    assert!(t.app.engine.session().track(source).unwrap().inactive);
+    // The mixer strip's tag does the same.
+    t.frames();
+    assert!(t.app.help.layout.targets.contains_key("mixer_strip.inactive"));
+    let strip = t.app.mixer.layout.strips.iter().find(|strip| strip.track == other.0).unwrap();
+    t.click(strip.inactive_tag);
+    assert!(!t.app.engine.session().track(other).unwrap().inactive);
+    assert!(t.app.engine.session().track(source).unwrap().inactive);
 }

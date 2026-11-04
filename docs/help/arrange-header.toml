@@ -27,7 +27,7 @@ text = "Plays only the soloed tracks. Other tracks go quiet until you turn solo 
 [[entry]]
 id = "arrange_header.mute"
 name = "Mute (M)"
-text = "Silences the track without changing its fader."
+text = "Silences the track without changing its fader. On an inactive track the mute is kept, but nothing plays until Make Active."
 
 [[entry]]
 id = "arrange_header.automation"
@@ -44,6 +44,11 @@ text = "The track's fader level in dB. Drag sideways to change it, hold Shift fo
 id = "arrange_header.freeze"
 name = "Freeze"
 text = "Renders the track to audio and turns its plug-ins off to save CPU. Click again to unfreeze."
+
+[[entry]]
+id = "arrange_header.inactive"
+name = "Inactive"
+text = "This track is inactive: its plug-ins and instrument are stopped. Click the tag to Make Active (Track > Make Active does the same). Mute stays as it was."
 
 [[entry]]
 id = "arrange_header.rack"

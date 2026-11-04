@@ -689,7 +689,7 @@ fn bounce_in_place_is_one_undo_step() {
     t.key("Enter", json!({}));
     let s = t.app.engine.session();
     assert_eq!(s.tracks.len(), before.1 + 1, "{}", t.app.status);
-    assert!(!s.track(tr).unwrap().hidden && s.track(tr).unwrap().inactive && s.track(tr).unwrap().mixer.mute);
+    assert!(!s.track(tr).unwrap().hidden && !s.track(tr).unwrap().inactive && s.track(tr).unwrap().mixer.mute);
     assert_eq!(t.undo_len(), before.0 + 1);
     assert!(t.app.status.starts_with("Bounced"), "{}", t.app.status);
     t.app.run("edit.undo", json!({})).unwrap();

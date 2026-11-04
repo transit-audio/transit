@@ -544,14 +544,17 @@ pub fn render_clip_gain(e: &mut Engine, cmd: &str, id: transit_model::ClipId) ->
 
 /// Bounce a track to a new audio track, muting and deactivating its source.
 pub fn commit_track(e: &mut Engine, t: TrackId) -> Result<Option<TrackId>> {
-    bounce_track(e, t, None, BounceSource::Mute)
+    bounce_track(e, t, None, BounceSource::MuteDeactivate)
 }
 
 /// What happens to the source after a successful bounce. Its playlists are always preserved.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BounceSource {
     Leave,
+    /// Mutes the source only: it stays active, so its plug-ins keep running.
     Mute,
+    /// Mutes and deactivates the source, which stops its plug-ins and instrument too.
+    MuteDeactivate,
     Hide,
 }
 
@@ -608,7 +611,8 @@ pub fn bounce_track(e: &mut Engine, t: TrackId, destination: Option<TrackId>, so
     if let Some(old) = s.track_mut(t) {
         match source {
             BounceSource::Leave => {}
-            BounceSource::Mute => {
+            BounceSource::Mute => old.mixer.mute = true,
+            BounceSource::MuteDeactivate => {
                 old.mixer.mute = true;
                 // Unlike mute or insert bypass alone, inactive stops the instrument too.
                 old.inactive = true;

@@ -76,7 +76,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Commit...",
             ["Track"],
             Some("Alt+Shift+C"),
-            "{tracks?, destination?: new|track id, source?: leave|mute|hide} — defaults new, mute",
+            "{tracks?, destination?: new|track id, source?: leave|mute|mute_deactivate|hide} — defaults new, mute",
             has_selection,
             commit
         ),
@@ -85,7 +85,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Bounce...",
             ["Track"],
             Some("Cmd+Alt+Shift+B"),
-            "{tracks?, destination?: new|track id, source?: leave|mute|hide} — defaults new, mute",
+            "{tracks?, destination?: new|track id, source?: leave|mute|mute_deactivate|hide} — defaults new, mute",
             has_selection,
             commit
         ),
@@ -707,8 +707,9 @@ fn commit(e: &mut Engine, p: &Value) -> Result<Value> {
         None => crate::io::BounceSource::Mute,
         Some(Value::String(s)) if s == "mute" => crate::io::BounceSource::Mute,
         Some(Value::String(s)) if s == "leave" => crate::io::BounceSource::Leave,
+        Some(Value::String(s)) if s == "mute_deactivate" => crate::io::BounceSource::MuteDeactivate,
         Some(Value::String(s)) if s == "hide" => crate::io::BounceSource::Hide,
-        Some(_) => return Err(bad("track.bounce", "source must be `leave`, `mute`, or `hide`")),
+        Some(_) => return Err(bad("track.bounce", "source must be `leave`, `mute`, `mute_deactivate`, or `hide`")),
     };
     crate::io::validate_bounce_destination(e.session(), &tracks, destination)?;
     // Refused before anything renders, so a refusal leaves every track as it was.

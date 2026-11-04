@@ -12,6 +12,7 @@ pub enum Source {
     Leave,
     #[default]
     Mute,
+    MuteDeactivate,
     Hide,
 }
 
@@ -20,6 +21,7 @@ impl Source {
         match self {
             Self::Leave => "leave",
             Self::Mute => "mute",
+            Self::MuteDeactivate => "mute_deactivate",
             Self::Hide => "hide",
         }
     }
@@ -28,6 +30,7 @@ impl Source {
         match self {
             Self::Leave => "left unchanged",
             Self::Mute => "muted",
+            Self::MuteDeactivate => "muted and deactivated",
             Self::Hide => "hidden",
         }
     }
@@ -161,8 +164,9 @@ fn bounce_form(app: &mut StudioApp, ctx: &egui::Context) {
             }
         });
         ui.label("Source");
-        ui.horizontal(|ui| {
-            for (value, label) in [(Source::Leave, "Leave"), (Source::Mute, "Mute"), (Source::Hide, "Hide")] {
+        ui.horizontal_wrapped(|ui| {
+            let choices = [(Source::Leave, "Leave"), (Source::Mute, "Mute"), (Source::MuteDeactivate, "Mute and deactivate"), (Source::Hide, "Hide")];
+            for (value, label) in choices {
                 let b = ui.radio_value(&mut f.source, value, label);
                 layout.sources.push(r4(b.rect));
                 hover(ui, &b, Id::BouncePlaceSource);

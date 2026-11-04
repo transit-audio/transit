@@ -66,6 +66,11 @@ name = "Add effect"
 text = "Adds an effect to the end of this track's chain."
 
 [[entry]]
+id = "mixer_strip.inactive"
+name = "Inactive"
+text = "This track is inactive: its plug-ins and instrument are stopped. Click the tag to Make Active. Mute stays as it was."
+
+[[entry]]
 id = "mixer_strip.rack"
 name = "Rack"
 text = "A rack's strip: the sum of its instruments, with the rack's own effects and fader after the sum."

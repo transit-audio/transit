@@ -10,12 +10,12 @@ text = "Print to a new audio track under the source, or to an existing visible, 
 [[entry]]
 id = "bounce_in_place.source"
 name = "Bounce source"
-text = "Leave keeps the source unchanged. Mute silences and deactivates it, stopping its plug-ins while keeping it visible. Hide deactivates and hides it; Show Hidden Tracks brings it back into view. All choices preserve its clips and takes."
+text = "Leave keeps the source unchanged. Mute mutes it only: it stays active and its plug-ins keep running. Mute and deactivate also deactivates it, stopping its plug-ins; Track > Make Active, or a click on its inactive tag, brings it back. Hide deactivates and hides it; Show Hidden Tracks brings it back into view. All choices preserve its clips and takes. A source that is inactive is refused: Make Active first."
 
 [[entry]]
 id = "bounce_in_place.apply"
 name = "Bounce in Place"
-text = "Print the source through its inserts, before its fader, from the session start through its last clip plus a two-second tail. Focus the destination after printing."
+text = "Print an active source through its inserts, before its fader, from the session start through its last clip plus a two-second tail. Focus the destination after printing."
 key = "Enter"
 
 [[entry]]
