@@ -117,7 +117,7 @@ impl StudioApp {
         }
         if id.starts_with("session.save")
             || id.starts_with("file.bounce")
-            || matches!(id, "track.bounce" | "track.commit" | "track.freeze" | "track.flatten")
+            || matches!(id, "track.bounce" | "clip.bounce" | "track.commit" | "track.freeze" | "track.flatten")
         {
             // Third-party plugins keep state the session can't see: store it first.
             self.capture_plugin_states()?;

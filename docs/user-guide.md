@@ -146,9 +146,19 @@ is focused after the bounce; one Undo restores the whole operation.
 Showing restores visibility, including access to the takes, without changing mute or inactive
 settings. The entry is disabled when no tracks are hidden.
 
+To print only some clips, select them and choose **Bounce in Place** in the clip's right-click menu
+or the **Edit** menu (Logic's Bounce Regions in Place). The form's second line gives the span, for
+example "2 clips on 1 track, 1.1.1 to 9.1.1". On each track the print runs from the earliest
+selected clip's start to the latest one's end, plus a two-second tail, and starts at the span's
+start; clips outside the span are untouched. With clips on several tracks the print is one new
+track per source track, placed under each source, so the existing-track choice is unavailable, and
+one Undo restores them all. The source choice applies to the whole source track, not just the
+span: Mute mutes the track, as in Logic. The Edit item is disabled with no clip selected.
+
 The control channel offers `track.bounce` (alias `track.commit`) with
-`{tracks?, destination?: "new" | <track id>, source?: "leave" | "mute" | "hide"}`; defaults are
-`"new"` and `"mute"`. `track.show_hidden {tracks?}` shows the given tracks, or all hidden tracks
+`{tracks?, destination?: "new" | <track id>, source?: "leave" | "mute" | "mute_deactivate" | "hide", range?: {start, length}}`;
+defaults are `"new"`, `"mute"` and the whole track. `range` (session samples) prints only that span, placed at
+`start`. `clip.bounce {clips?, destination?, source?}` prints the selected clips' spans as described above. `track.show_hidden {tracks?}` shows the given tracks, or all hidden tracks
 when omitted. `track.hide {tracks, hidden: false}` also shows them.
 
 ## Audio setup

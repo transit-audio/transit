@@ -38,6 +38,8 @@ ids! {
     BouncePlaceSource => "bounce_in_place.source",
     BouncePlaceApply => "bounce_in_place.apply",
     BouncePlaceCancel => "bounce_in_place.cancel",
+    BouncePlaceClipMenu => "bounce_in_place.clip_menu",
+    BouncePlaceSpan => "bounce_in_place.span",
     // help\hidden-tracks.toml
     HiddenTracksShow => "hidden_tracks.show",
     HiddenTracksShowAll => "hidden_tracks.show_all",

@@ -5,12 +5,12 @@ link = "user-guide.md#bounce-in-place"
 [[entry]]
 id = "bounce_in_place.destination"
 name = "Bounce destination"
-text = "Print to a new audio track under the source, or to an existing visible, unfrozen audio track. Existing material under the printed range is overwritten, with the material outside it preserved. Undo restores the whole bounce."
+text = "Print to a new audio track under the source (one per source track when the selected clips span several tracks, where the existing-track choice is unavailable), or to an existing visible, unfrozen audio track. Existing material under the printed range is overwritten, with the material outside it preserved. Undo restores the whole bounce."
 
 [[entry]]
 id = "bounce_in_place.source"
 name = "Bounce source"
-text = "Leave keeps the source unchanged. Mute mutes it only: it stays active and its plug-ins keep running. Mute and deactivate also deactivates it, stopping its plug-ins; Track > Make Active, or a click on its inactive tag, brings it back. Hide deactivates and hides it; Show Hidden Tracks brings it back into view. All choices preserve its clips and takes. A source that is inactive is refused: Make Active first."
+text = "Leave keeps the source unchanged. Mute mutes it only: it stays active and its plug-ins keep running. Mute and deactivate also deactivates it, stopping its plug-ins; Track > Make Active, or a click on its inactive tag, brings it back. Hide deactivates and hides it; Show Hidden Tracks brings it back into view. All choices preserve its clips and takes. A clip bounce applies the choice to the whole source track, not only the span, as Logic's Bounce Regions in Place does. A source that is inactive is refused: Make Active first."
 
 [[entry]]
 id = "bounce_in_place.apply"
@@ -23,3 +23,13 @@ id = "bounce_in_place.cancel"
 name = "Cancel Bounce in Place"
 text = "Close the form without printing or changing the session."
 key = "Escape"
+
+[[entry]]
+id = "bounce_in_place.clip_menu"
+name = "Bounce in Place (clips)"
+text = "Print the selected clips through their track's inserts, before its fader, as Logic's Bounce Regions in Place does. The print covers the span from the earliest selected clip's start to the latest one's end on each track, plus a two-second tail, and sits at the span's start. Clips on several tracks print once per track in one undo step. Clips outside the span are untouched. Needs at least one selected clip."
+
+[[entry]]
+id = "bounce_in_place.span"
+name = "Bounce span"
+text = "The selected clips and the span that prints: from the earliest clip start to the latest clip end, shown in the session's position format. Each track also gets a two-second tail."

@@ -103,6 +103,8 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                             ui.close();
                         }
                     }
+                    let item = crate::bounce_in_place::clip_menu_item(app, ui);
+                    app.arrange.bar_menu.push(item);
                     ui.separator();
                     crate::edit_tools::edit_menu_items(app, ui);
                     ui.separator();

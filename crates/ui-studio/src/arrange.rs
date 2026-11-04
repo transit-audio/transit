@@ -768,6 +768,9 @@ fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: R
             let _ = app.split_at_cursor();
             ui.close();
         }
+        let item = crate::bounce_in_place::clip_menu_item(app, ui);
+        app.arrange.menu.retain(|m| m.label != item.label);
+        app.arrange.menu.push(item);
         ui.separator();
         crate::edit_tools::context_menu_items(app, ui);
     });

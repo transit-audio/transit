@@ -444,3 +444,89 @@ fn clicking_the_inactive_tag_makes_that_track_active_in_one_undo_step() {
     assert!(!t.app.engine.session().track(other).unwrap().inactive);
     assert!(t.app.engine.session().track(source).unwrap().inactive);
 }
+
+/// An instrument track named `name` (it prints through its instrument, as a track bounce does)
+/// with a MIDI clip per `(start, end)`; returns the clip ids.
+fn audio_clips(t: &mut T, name: &str, spans: &[(i64, i64)]) -> (TrackId, Vec<u64>) {
+    let track = t.track(name, "instrument");
+    for (a, b) in spans {
+        t.app.run("midi.new_clip", json!({"track": track.0, "start": a, "length": b - a})).unwrap();
+    }
+    let ids = t.app.engine.session().track(track).unwrap().clips().iter().map(|c| c.id.0).collect();
+    t.frames();
+    (track, ids)
+}
+
+fn select(t: &mut T, ids: &[u64]) {
+    t.app.engine.session_mut().edit.selected_clips = ids.iter().map(|i| transit_model::ClipId(*i)).collect();
+    t.frames();
+}
+
+#[test]
+fn the_context_menu_item_bounces_the_selected_clips_with_the_chosen_source() {
+    let mut t = T::new();
+    t.app.help.open = true;
+    let (track, ids) = audio_clips(&mut t, "Keys", &[(10_000, 20_000), (30_000, 40_000)]);
+    select(&mut t, &ids[..1]);
+    let rect = t.app.arrange.layout.clips.iter().find(|c| c.id == ids[0]).unwrap().rect;
+    t.right_click(rect);
+    assert!(t.app.help.layout.targets.contains_key("bounce_in_place.clip_menu"));
+    let item = t.app.arrange.menu.iter().find(|m| m.label == "Bounce in Place").unwrap().rect;
+    let steps = t.app.engine.undo_history().len();
+    t.click(item);
+    assert!(matches!(t.app.dialog, Some(Dialog::BounceInPlace)));
+    assert_eq!(t.app.bounce_place.clips, vec![transit_model::ClipId(ids[0])]);
+    assert_eq!(t.app.engine.undo_history().len(), steps, "opening the form prints nothing");
+    assert!(t.app.bounce_place.layout.span != [0.0; 4], "the span line is shown");
+    assert!(t.app.help.layout.targets.contains_key("bounce_in_place.span"));
+    assert!(t.app.bounce_span_line().starts_with("1 clip on 1 track, "), "{}", t.app.bounce_span_line());
+    t.click(t.app.bounce_place.layout.sources[0]);
+    t.key("Enter");
+    assert!(t.app.dialog.is_none(), "{}", t.app.status);
+    let s = t.app.engine.session();
+    let dest = t.app.focus_track().unwrap();
+    let print = &s.track(dest).unwrap().clips()[0];
+    assert_eq!((print.start, print.length), (10_000, 10_000 + 96_000), "only the clicked clip's span, plus the tail");
+    assert!(!s.track(track).unwrap().mixer.mute, "Leave keeps the source as it was");
+    assert_eq!(t.app.engine.undo_history().len(), steps + 1);
+}
+
+#[test]
+fn the_edit_menu_item_needs_a_selected_clip_and_the_form_hides_existing_for_several_tracks() {
+    let mut t = T::new();
+    let (_, a) = audio_clips(&mut t, "A", &[(10_000, 20_000)]);
+    let (_, b) = audio_clips(&mut t, "B", &[(10_000, 20_000)]);
+    select(&mut t, &[]);
+    t.menu("Edit");
+    t.menu("Bounce in Place");
+    assert!(t.app.dialog.is_none(), "no clip selected: the item is disabled");
+    select(&mut t, &[a[0], b[0]]);
+    t.menu("Edit");
+    t.menu("Bounce in Place");
+    assert!(matches!(t.app.dialog, Some(Dialog::BounceInPlace)));
+    assert!(t.app.bounce_span_line().starts_with("2 clips on 2 tracks, "), "{}", t.app.bounce_span_line());
+    let steps = t.app.engine.undo_history().len();
+    t.click(t.app.bounce_place.layout.existing_track);
+    assert!(!t.app.bounce_place.existing, "several source tracks: one new track each");
+    t.key("Enter");
+    assert!(t.app.dialog.is_none(), "{}", t.app.status);
+    assert_eq!(t.app.engine.undo_history().len(), steps + 1, "both prints are one undo step");
+    assert_eq!(t.app.engine.session().tracks.len(), 4);
+}
+
+#[test]
+fn the_track_form_still_runs_track_bounce_without_a_range() {
+    let mut t = T::new();
+    let (track, ids) = audio_clips(&mut t, "Keys", &[(10_000, 20_000)]);
+    select(&mut t, &ids);
+    t.app.focus_header(track, false);
+    t.frames();
+    t.menu("Track");
+    t.menu("Bounce in Place");
+    assert!(t.app.bounce_place.clips.is_empty());
+    assert_eq!(t.app.bounce_span_line(), "");
+    t.key("Enter");
+    let dest = t.app.focus_track().unwrap();
+    let print = &t.app.engine.session().track(dest).unwrap().clips()[0];
+    assert_eq!((print.start, print.length), (0, 20_000 + 96_000), "the whole track from the session start");
+}
