@@ -104,6 +104,12 @@ pub(crate) struct PortShared {
     pub(crate) counters: Counters,
     /// Exclusive offered-sequence boundary, released before ring publication. MAX is terminal.
     offered: AtomicU64,
+    /// Exclusive sequence whose callback finished publishing both independent copies.
+    completed: AtomicU64,
+    /// Loss is sticky until control acknowledges it and captures a fresh cutoff.
+    transport_lost: AtomicBool,
+    transport_disabled: AtomicBool,
+    transport_sources: crate::transport::SourceFilter,
     /// Set by a [`PortWatcher`](crate::PortWatcher) when the port leaves the backend's list.
     pub(crate) disconnected: AtomicBool,
     /// The consumer's worker thread, set once by [`InputConsumer::wake_on`]. The callback reads it
@@ -164,6 +170,21 @@ pub struct InputBoundary {
 }
 
 impl InputBoundary {
+    /// Enable independent transport publication; musical routing and Monitor are unaffected.
+    pub fn set_transport_enabled(&self, enabled: bool) {
+        self.shared.transport_disabled.store(!enabled, Ordering::Release);
+    }
+    /// Configure raw learned-source copies on control. Capture a cutoff after a change to
+    /// invalidate offers during the transition; this never executes a transport action.
+    pub fn set_transport_sources(&self, sources: &[crate::TransportSource]) {
+        self.shared.transport_sources.set(sources);
+    }
+    /// A full transport lane requires safe Stop/finalization on control. Acknowledgment
+    /// clears the fault; callers must cancel all offers preceding a subsequent cutoff.
+    pub fn take_transport_loss(&self) -> bool {
+        self.shared.transport_lost.swap(false, Ordering::AcqRel)
+    }
+
     /// Captures the exclusive offered-sequence cutoff with one AcqRel read-modify-write (RMW).
     ///
     /// Every event whose offer was stamped before the cutoff RMW in the stamp's modification
@@ -215,6 +236,9 @@ const fn message_len(status: u8) -> Option<usize> {
 /// messages and pushes each into the preallocated ring. It never allocates, locks, logs or waits.
 pub(crate) struct InputSink {
     producer: rtrb::Producer<InputEvent>,
+    transport: rtrb::Producer<crate::TransportEnvelope>,
+    transport_framer: crate::transport::Framer,
+    transport_published: u64,
     sysex_producer: rtrb::Producer<(u64, u32, [u8; 64])>,
     sysex_prefix: [u8; 64],
     sysex_total: u32,
@@ -240,10 +264,14 @@ impl InputSink {
     /// The ring and both halves for one open port.
     pub(crate) fn new(config: &InputConfig) -> (Self, InputConsumer, Arc<PortShared>) {
         let (producer, consumer) = rtrb::RingBuffer::new(config.capacity.saturating_add(config.release_reserve));
+        let (transport, transport_consumer) = rtrb::RingBuffer::new(crate::TRANSPORT_CAPACITY);
         let (sysex_producer, sysex_consumer) = rtrb::RingBuffer::new(64);
         let shared = Arc::new(PortShared::default());
         let sink = Self {
             producer,
+            transport,
+            transport_framer: crate::transport::Framer::default(),
+            transport_published: 0,
             sysex_producer,
             sysex_prefix: [0; 64],
             sysex_total: 0,
@@ -261,7 +289,11 @@ impl InputSink {
             after_publish: None,
             in_sysex: false,
         };
-        (sink, InputConsumer { consumer, sysex_consumer, shared: Arc::clone(&shared), origin: config.host_origin }, shared)
+        (
+            sink,
+            InputConsumer { consumer, transport: transport_consumer, sysex_consumer, shared: Arc::clone(&shared), origin: config.host_origin },
+            shared,
+        )
     }
 
     /// One backend callback: `data` holds one or more messages (or a SysEx chunk) the backend
@@ -276,10 +308,15 @@ impl InputSink {
     pub(crate) fn push_stamped(&mut self, backend_time_us: u64, host: u64, data: &[u8]) {
         let published = self.shared.counters.delivered.load(Ordering::Relaxed);
         let sysex_published = self.sysex_published;
+        let transport_published = self.transport_published;
         self.push_bytes(backend_time_us, host, data);
+        self.shared.completed.store(self.next_seq, Ordering::Release);
         // Wake the consumer's worker after the ring holds the events (`unpark` is lock- and
         // allocation-free; a token left by an early unpark makes the next park return at once).
-        if (self.shared.counters.delivered.load(Ordering::Relaxed) != published || self.sysex_published != sysex_published)
+        if (self.shared.counters.delivered.load(Ordering::Relaxed) != published
+            || self.sysex_published != sysex_published
+            || self.transport_published != transport_published
+            || self.shared.transport_lost.load(Ordering::Acquire))
             && let Some(thread) = self.shared.wake.get()
         {
             thread.unpark();
@@ -305,6 +342,12 @@ impl InputSink {
             if self.in_sysex {
                 // Data bytes and the closing F7 belong to the SysEx; any other status ends it.
                 if b < 0x80 || b == 0xF7 {
+                    if let Some(mut envelope) = self.transport_framer.byte(b)
+                        && let Some(seq) = self.sequence()
+                    {
+                        envelope.seq = seq;
+                        self.offer_transport(envelope);
+                    }
                     bump(&self.shared.counters.sysex_bytes_dropped, 1);
                     if self.capturing {
                         self.sysex_byte(b);
@@ -325,6 +368,7 @@ impl InputSink {
                 bump(&self.shared.counters.sysex_dropped, 1);
                 bump(&self.shared.counters.sysex_bytes_dropped, 1);
                 self.in_sysex = true;
+                self.transport_framer.start(host);
                 self.capturing = self.shared.capture_sysex.load(Ordering::Relaxed);
                 if self.capturing {
                     self.sysex_prefix = [0; 64];
@@ -415,16 +459,38 @@ impl InputSink {
         }
     }
 
-    fn offer(&mut self, bytes: [u8; 3], len: usize, backend_time_us: u64, host_arrival_ns: u64) {
+    fn sequence(&mut self) -> Option<u64> {
         let seq = self.next_seq;
         let Some(next_seq) = seq.checked_add(1) else {
             bump(&self.shared.counters.exhausted_dropped, 1);
-            return;
+            return None;
         };
         self.next_seq = next_seq;
+        self.shared.offered.store(next_seq, Ordering::Release);
+        Some(seq)
+    }
+
+    fn offer_transport(&mut self, envelope: crate::TransportEnvelope) {
+        if self.shared.transport_disabled.load(Ordering::Acquire) || self.shared.transport_lost.load(Ordering::Acquire) {
+            return;
+        }
+        if self.transport.push(envelope).is_err() {
+            self.shared.transport_lost.store(true, Ordering::Release);
+        } else {
+            self.transport_published = self.transport_published.wrapping_add(1);
+        }
+    }
+
+    fn offer(&mut self, bytes: [u8; 3], len: usize, backend_time_us: u64, host_arrival_ns: u64) {
+        let Some(seq) = self.sequence() else { return };
+        // Slice 3 adds Clock (F8) separately through its own bounded lane.
+        if matches!(bytes[0], 0xf2 | 0xfa..=0xfc) || self.shared.transport_sources.matches(bytes) {
+            let mut wire = [0; 13];
+            wire[..3].copy_from_slice(&bytes);
+            self.offer_transport(crate::TransportEnvelope { bytes: wire, len: len as u8, host_arrival_ns, seq });
+        }
         // This store is the offer's boundary, including offers dropped for lack of room.
         // It must precede ring publication so control can also cancel a delayed publication.
-        self.shared.offered.store(next_seq, Ordering::Release);
         #[cfg(test)]
         if let Some(hook) = &mut self.before_publish {
             hook();
@@ -461,12 +527,52 @@ impl InputSink {
 /// drop it there: if it is the ring's last owner, dropping frees the ring.
 pub struct InputConsumer {
     consumer: rtrb::Consumer<InputEvent>,
+    transport: rtrb::Consumer<crate::TransportEnvelope>,
     sysex_consumer: rtrb::Consumer<(u64, u32, [u8; 64])>,
     shared: Arc<PortShared>,
     origin: Instant,
 }
 
 impl InputConsumer {
+    /// Pop a complete transport envelope from the independent control lane.
+    pub fn pop_transport(&mut self) -> Option<crate::TransportEnvelope> {
+        self.transport.pop().ok()
+    }
+
+    /// Scan musical input and consume transport input in shared sequence order, once per copy.
+    /// Musical messages remain queued for routing. `transport` identifies an independent copy.
+    /// Snapshots are bounded by the two rings and the merge does not allocate.
+    pub fn scan_transport(&mut self, mut f: impl FnMut(crate::TransportEnvelope, bool)) {
+        let horizon = self.shared.completed.load(Ordering::Acquire);
+        let notes = self.consumer.slots();
+        let buttons = self.transport.slots();
+        let Ok(music) = self.consumer.read_chunk(notes) else { return };
+        let Ok(control) = self.transport.read_chunk(buttons) else { return };
+        let (a, b) = music.as_slices();
+        let mut musical = a.iter().chain(b).take_while(|raw| raw.seq < horizon).peekable();
+        let (a, b) = control.as_slices();
+        let mut transport = a.iter().chain(b).take_while(|raw| raw.seq < horizon).peekable();
+        let mut consumed = 0;
+        while musical.peek().is_some() || transport.peek().is_some() {
+            if let Some(raw) = transport.peek()
+                && musical.peek().is_none_or(|note| raw.seq <= note.seq)
+            {
+                let raw = **raw;
+                if musical.peek().is_some_and(|note| note.seq == raw.seq) {
+                    musical.next();
+                }
+                transport.next();
+                consumed += 1;
+                f(raw, true);
+            } else if let Some(raw) = musical.next() {
+                let mut bytes = [0; 13];
+                bytes[..3].copy_from_slice(&raw.bytes);
+                f(crate::TransportEnvelope { bytes, len: raw.len, seq: raw.seq, host_arrival_ns: raw.host_arrival_ns }, false);
+            }
+        }
+        control.commit(consumed);
+    }
+
     /// Turn SysEx capture on or off. Takes effect at the next `F0`; a message already begun keeps
     /// the setting it started with.
     pub fn set_sysex_capture(&self, on: bool) {

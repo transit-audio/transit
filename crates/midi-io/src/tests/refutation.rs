@@ -55,7 +55,7 @@ fn refutation_release_drops_and_sysex_do_not_alias_later_sequences() {
     let resume_callback = Arc::clone(&resume);
     let producer = thread::spawn(move || {
         // seq 0 enters, 1 drops, 2 uses reserve, 3 drops as a release, 4 drops
-        // as a real-time event inside SysEx; the SysEx itself takes no sequence.
+        // as a real-time event inside SysEx; the complete envelope later takes seq 5.
         sink.push(0, &[0x90, 60, 1, 61, 1, 0x80, 60, 0, 61, 0, 0xF0, 1, 0xF8]);
         published_callback.wait();
         resume_callback.wait();
@@ -71,12 +71,15 @@ fn refutation_release_drops_and_sysex_do_not_alias_later_sequences() {
     assert_eq!(cutoff, 5);
     assert_eq!(old.iter().map(|e| e.seq).collect::<Vec<_>>(), [0, 2]);
     assert!(old.iter().all(|e| e.seq < cutoff));
-    assert_eq!(later.iter().map(|e| e.seq).collect::<Vec<_>>(), [5, 6]);
+    assert_eq!(later.iter().map(|e| e.seq).collect::<Vec<_>>(), [6, 7]);
+    let envelope = consumer.pop_transport().unwrap();
+    assert_eq!((envelope.message(), envelope.seq), (&[0xF0, 1, 2, 0xF7][..], 5));
+    assert!(consumer.pop_transport().is_none(), "interleaved F8 has no transport copy");
     assert!(later.iter().all(|e| e.seq >= cutoff));
     let counters = consumer.counters();
     assert_eq!((counters.delivered, counters.dropped, counters.dropped_releases), (4, 2, 1));
     assert_eq!((counters.sysex_dropped, counters.sysex_bytes_dropped, counters.filtered), (1, 4, 1));
-    assert_eq!(boundary.cutoff(), 7);
+    assert_eq!(boundary.cutoff(), 8);
     drop(sink);
 }
 

@@ -192,17 +192,19 @@ fn cutoff_counts_ring_saturation_and_release_drop_gaps() {
     let slot = fake.input_port(&Fake::key("Keys", 0)).unwrap();
     slot.deliver(0, &[0x90, 60, 100, 61, 100, 0x80, 60, 0, 61, 0, 0x90, 62, 100]);
     let cutoff = boundary.cutoff();
-    // Filtered, malformed and SysEx bytes never receive a sequence.
+    // Filtered/malformed bytes receive no sequence. A complete control envelope does.
     slot.deliver(1, &[0xFE, 0x40, 0xF0, 1, 0xF7]);
     let events = drain(&mut consumer);
     assert_eq!(cutoff, 5);
-    assert_eq!(boundary.cutoff(), cutoff);
+    assert_eq!(boundary.cutoff(), cutoff + 1);
+    let envelope = consumer.pop_transport().unwrap();
+    assert_eq!((envelope.message(), envelope.seq), (&[0xF0, 1, 0xF7][..], cutoff));
     assert_eq!(events.iter().map(|e| e.seq).collect::<Vec<_>>(), [0, 2]);
     assert!(events.iter().all(|e| e.seq < cutoff));
     let counters = handle.counters();
     assert_eq!((counters.delivered, counters.dropped, counters.dropped_releases), (2, 2, 1));
     slot.deliver(2, &[0x90, 63, 100]);
-    assert_eq!(consumer.pop().unwrap().seq, cutoff);
+    assert_eq!(consumer.pop().unwrap().seq, cutoff + 1);
 }
 
 #[test]

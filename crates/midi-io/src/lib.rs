@@ -21,9 +21,9 @@
 //!
 //! # Policies
 //!
-//! * **SysEx** is dropped and counted ([`InputCounters::sysex_dropped`] and bytes), never carried:
-//!   every ring slot stays a fixed 3-byte message. A SysEx path, if needed, belongs on the
-//!   control side.
+//! * **SysEx** is excluded from the musical ring and counted in
+//!   [`InputCounters::sysex_dropped`]. Complete bounded envelopes have an independent
+//!   [`InputConsumer::pop_transport`] control-side lane; Monitor keeps its separate prefix.
 //! * **Release protection**: the ring has `capacity + release_reserve` slots; ordinary messages
 //!   stop at `release_reserve` free slots, release-type messages ([`is_release`]) may fill the
 //!   rest. Only when the whole ring is full is a release dropped, counted separately in
@@ -56,11 +56,15 @@ mod port;
 mod ring;
 #[cfg(test)]
 mod tests;
+mod transport;
+#[cfg(test)]
+mod transport_tests;
 
 pub use clock::{host_now_ns, host_ns_since, host_origin};
 pub use event::{InputEvent, is_release};
 pub use port::{BackendId, Direction, PortInfo, PortKey};
 pub use ring::{InputBoundary, InputConfig, InputConsumer, InputCounters, SeqCutoff};
+pub use transport::{TRANSPORT_CAPACITY, TransportEnvelope, TransportSource};
 
 use backend::{Backend, InputConnection, OutputConnection};
 use port::PortIdentity;
