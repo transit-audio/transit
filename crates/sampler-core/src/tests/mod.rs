@@ -5,6 +5,7 @@
 mod blocks;
 mod gate1;
 mod loops;
+mod shaped;
 
 use crate::event::{Context, Event};
 use crate::patch::{Pad, PlayMode, Playback, Zone};
