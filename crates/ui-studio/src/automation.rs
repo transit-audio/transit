@@ -25,10 +25,9 @@
 
 mod identity;
 mod lane;
-mod lane_height;
-pub use lane_height::{LANE_H, LANE_MIN, LANE_MAX};
-pub(crate) use lane_height::lanes_height;
+pub(crate) mod lane_height;
 pub use lane::{Lane, device_info};
+pub use lane_height::{LANE_H, LANE_MAX, LANE_MIN};
 
 mod pass;
 use pass::thin_after_pass;
@@ -658,13 +657,13 @@ pub(crate) fn lanes(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl:
     layout.menu.clear();
     let pos = app.position();
     for (i, t) in rows.iter().enumerate() {
-        let views = app.lane_views(t);
+        let views = &geo.auto_views[i];
         if views.is_empty() {
             continue;
         }
-        let mut y = tl.min.y + geo.tops[i] - vscroll + geo.rh + crate::arrange::takes_shown(app, t) as f32 * crate::arrange::TAKE_H;
+        let mut y = tl.min.y + geo.tops[i] - vscroll + geo.main[i] + geo.take_count[i] as f32 * geo.take[i];
         for (k, v) in views.iter().enumerate() {
-            let h = v.height.clamp(LANE_MIN, LANE_MAX);
+            let h = geo.automation[i][k];
             let Some(lane) = Lane::parse(&v.lane) else { continue };
             let area = Rect::from_min_max(pos2(tl.min.x, y), pos2(tl.max.x, y + h));
             let header = Rect::from_min_max(pos2(list.min.x + 12.0, y), pos2(list.max.x - 4.0, y + h));

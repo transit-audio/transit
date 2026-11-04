@@ -10,15 +10,16 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
     let carried = preview.map(|(id, dest, a, b, _)| drag_ghosts::members(app, (id, dest, a, b))).unwrap_or_default();
     let looping = loop_drag(app, ui, map);
     let fading = crate::fades::drag(app, ui, map);
-    let rh = geo.rh;
     // The loop corner shows on the clip whose loop zone the pointer is over, and while it is being loop-dragged.
     let hover = if app.arrange.gesture.is_none() { ui.input(|i| i.pointer.hover_pos()) } else { None };
     let hot = |id: u64, rect: Rect| {
         looping.as_ref().is_some_and(|l| l.clip.0 == id) || hover.is_some_and(|pos| rect.contains(pos) && zone(r4(rect), pos, true) == DragKind::Loop)
     };
+    let row_height = |t: TrackId| rows.iter().position(|r| r.id == t).map_or(46.0, |i| geo.main[i]);
     let row_y = |t: TrackId| rows.iter().position(|r| r.id == t).map(|i| tl.min.y + geo.tops[i] - app.arrange.vscroll);
     for t in rows {
         let Some(y0) = row_y(t.id) else { continue };
+        let rh = row_height(t.id);
         let takes = app.takes_of(t);
         for c in t.clips() {
             let rect = Rect::from_min_max(pos2(map.x(c.start), y0 + 1.0), pos2(map.x(c.end()).max(map.x(c.start) + 2.0), y0 + rh - 1.0));
@@ -64,6 +65,7 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
     // Crossfades drawn as an X over their overlap, on top of both clips.
     for t in rows {
         let Some(y0) = row_y(t.id) else { continue };
+        let rh = row_height(t.id);
         for o in crate::fades::crossfades(s, t.id) {
             crate::fades::draw_cross(&p, layout, s, map, o, y0, rh);
         }
@@ -72,6 +74,7 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
     if let Some(crate::fades::Live { plan: crate::fades::Plan::Cross { track, start, end }, .. }) = &fading
         && let Some(y0) = row_y(*track)
     {
+        let rh = row_height(*track);
         let band = Rect::from_min_max(pos2(map.x(*start), y0 + 1.0), pos2(map.x(*end).max(map.x(*start) + 2.0), y0 + rh - 1.0));
         p.rect_filled(band, crate::theme::RADIUS, TOKENS.accent.gamma_multiply(0.3));
     }
@@ -81,6 +84,7 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
         && let Some((track, base)) = s.find_clip(l.clip).map(|(t, c)| (t, c.clone()))
         && let (Some(y0), Some(t)) = (row_y(track), s.track(track))
     {
+        let rh = row_height(track);
         let span = |a: Samples, b: Samples| Rect::from_min_max(pos2(map.x(a), y0 + 1.0), pos2(map.x(b).max(map.x(a) + 2.0), y0 + rh - 1.0));
         // An overwrite stops at an edit-locked clip, and so do the ghosts.
         let stop = if l.overwrite && !l.independent { overwrite_stop(s, l) } else { Samples::MAX };
@@ -135,6 +139,7 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
     // The dragged clips where they would land: the whole selection, in the clip color at the drag alpha.
     for g in carried {
         let (Some((_, c)), Some(y0), Some(t)) = (s.find_clip(ClipId(g.clip)), row_y(TrackId(g.track)), s.track(TrackId(g.track))) else { continue };
+        let rh = row_height(t.id);
         let rect = Rect::from_min_max(pos2(map.x(g.start), y0 + 1.0), pos2(map.x(g.end).max(map.x(g.start) + 2.0), y0 + rh - 1.0));
         draw_clip(&p, s, map, tl, t, c, &app.takes_of(t).stacks, rect, true, 0.85, false);
         layout.drag_ghosts.push(drag_ghosts::DragGhost { rect: r4(rect), ..g });

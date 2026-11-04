@@ -177,7 +177,8 @@ fn the_a_toggle_opens_a_volume_lane_and_lanes_are_view_state() {
     assert_eq!(lanes[0].readout, "+0.0 dB", "the readout is in dB");
     // The row grew by the lane; the lane sits under the track's own lane.
     let r = t.row(a);
-    assert!((r.header[3] - r.header[1] - (r.lane[3] - r.lane[1]) - crate::automation::LANE_H).abs() < 0.5);
+    assert_eq!(r.header[3] - r.header[1], r.lane[3] - r.lane[1], "main header ends above automation");
+    assert!((r.stack_height - (r.lane[3] - r.lane[1]) - crate::automation::LANE_H).abs() < 0.5);
     assert!(lanes[0].area[1] >= r.lane[3] - 0.5);
     // "+" adds Pan under it, the height handle grows it, "x" closes Pan, A hides and shows again.
     t.click(mid(lanes[0].add));

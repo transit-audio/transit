@@ -578,14 +578,16 @@ pub fn drop_at(s: &Session, rows: &[TrackRow], t: TrackId, y: f32) -> Option<(Dr
         if before.is_some_and(|x| within(s, x, t)) || parent.is_some_and(|p| within(s, p, t)) {
             return None;
         }
-        let ly = below.map_or(last.header[3], |r| r.header[1]);
+        let ly = below.map_or(last.header[1] + last.stack_height.max(last.header[3] - last.header[1]), |r| r.header[1]);
         let indent = below.filter(|_| parent.is_some()).map_or(0.0, |r| r.depth as f32 * INDENT);
         Some((Drop::Gap { parent, before }, [first.header[0] + indent, ly - 1.0, first.lane[2], ly + 1.0]))
     };
     if y < first.header[1] {
         return gap(0);
     }
-    let Some(i) = rows.iter().position(|r| y >= r.header[1] && y < r.header[3]) else { return gap(rows.len()) };
+    let Some(i) = rows.iter().position(|r| y >= r.header[1] && y < r.header[1] + r.stack_height.max(r.header[3] - r.header[1])) else {
+        return gap(rows.len());
+    };
     let r = &rows[i];
     let f = (y - r.header[1]) / (r.header[3] - r.header[1]).max(1.0);
     if r.kind == TrackKind::Folder && (0.25..0.75).contains(&f) && r.id != t.0 && !within(s, TrackId(r.id), t) {

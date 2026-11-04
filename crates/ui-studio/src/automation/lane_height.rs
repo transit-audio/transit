@@ -6,9 +6,13 @@ use super::*;
 pub const LANE_H: f32 = 56.0;
 pub const LANE_MIN: f32 = 40.0;
 pub const LANE_MAX: f32 = 240.0;
-/// Total height of a track's open lanes.
-pub(crate) fn lanes_height(app: &StudioApp, t: &Track) -> f32 {
-    app.lane_views(t).iter().map(|v| v.height.clamp(LANE_MIN, LANE_MAX)).sum()
+/// Valid bases preserve the full range of proportions at either parent-height endpoint.
+pub(crate) fn base(value: f32) -> f32 {
+    if value.is_finite() && value > 0.0 { value.clamp(40.0 * 46.0 / 440.0, 240.0 * 46.0 / 16.0) } else { LANE_H }
+}
+
+pub(crate) fn display(value: f32, parent: f32) -> f32 {
+    (base(value) * parent / 46.0).clamp(LANE_MIN, LANE_MAX)
 }
 
 pub(super) fn handle(app: &mut StudioApp, ui: &mut Ui, t: &Track, lane: &Lane, list: Rect, r: Rect, row: &mut LaneRow) {

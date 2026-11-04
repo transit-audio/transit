@@ -150,6 +150,10 @@ pub struct TrackRow {
     pub subtitle: String,
     /// A rack's "Rack" badge (ADR 0034); zero elsewhere.
     pub rack_badge: R4,
+    pub height: f32,
+    pub stack_height: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height_handle: Option<R4>,
     pub header: R4,
     /// The name in the header (double-click renames, slice 6).
     pub name_rect: R4,
@@ -279,7 +283,6 @@ pub fn show(app: &mut StudioApp, ui: &mut Ui) {
 fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     let full = ui.max_rect();
     let hw = app.ui.header_width.clamp(160.0, 480.0);
-    let rh = 46.0; // ADR 0044 slice 2 replaces this
     let list = Rect::from_min_max(pos2(full.min.x, full.min.y + RULER_H), pos2(full.min.x + hw, full.max.y));
     let ruler = Rect::from_min_max(pos2(full.min.x + hw, full.min.y), pos2(full.max.x, full.min.y + RULER_H));
     let tl = Rect::from_min_max(pos2(full.min.x + hw, full.min.y + RULER_H), full.max);
@@ -300,7 +303,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     // Rows.
     let rows: Vec<&Track> = s.tracks.iter().filter(|t| shown(app, &s, t)).collect();
     app.arrange.order = rows.iter().map(|t| t.id).collect();
-    let geo = RowGeo::new(app, &rows, rh);
+    let geo = RowGeo::new(app, &rows);
     let content_h = geo.total() + ADD_STACK_H;
     app.finish.layout.takes.clear();
     app.finish.layout.take_clips.clear();
@@ -323,13 +326,16 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     // One status read per frame, and only when some track sends to an external port (#69).
     let outputs = s.tracks.iter().any(|t| t.midi_output.is_external()).then(|| crate::midi_output::OutputView::read(app.player.as_ref()));
     for (i, t) in rows.iter().enumerate() {
+        let rh = geo.main[i];
         let y0 = tl.min.y + geo.tops[i] - app.arrange.vscroll;
-        let header = Rect::from_min_max(pos2(list.min.x, y0), pos2(list.max.x, y0 + geo.heights[i]));
+        let header = Rect::from_min_max(pos2(list.min.x, y0), pos2(list.max.x, y0 + rh));
         let lane = Rect::from_min_max(pos2(tl.min.x, y0), pos2(tl.max.x, y0 + rh));
         let mut row = TrackRow {
             id: t.id.0,
             name: t.name.clone(),
             kind: t.kind,
+            height: rh,
+            stack_height: geo.heights[i],
             header: r4(header),
             lane: r4(lane),
             folder: crate::groups::parent_of(&s, t).map(|f| f.0),
@@ -957,7 +963,7 @@ fn overlays(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, tl: Re
         for (i, t) in rows.iter().enumerate() {
             if t.mixer.record_arm && !app.midi_live.as_ref().is_some_and(|live| live.tracks.contains(&t.id)) {
                 let y0 = tl.min.y + geo.tops[i] - app.arrange.vscroll;
-                let r = Rect::from_min_max(pos2(map.x(span.start), y0 + 1.0), pos2(map.x(span.end).max(map.x(span.start) + 2.0), y0 + geo.rh - 1.0));
+                let r = Rect::from_min_max(pos2(map.x(span.start), y0 + 1.0), pos2(map.x(span.end).max(map.x(span.start) + 2.0), y0 + geo.main[i] - 1.0));
                 rp.rect_filled(r, crate::theme::RADIUS, TOKENS.record.gamma_multiply(0.45));
                 let strip = Rect::from_min_max(r.min, pos2(r.max.x, (r.min.y + CLIP_NAME_H).min(r.max.y)));
                 rp.rect_filled(strip, crate::theme::top_corners(), TOKENS.record);
@@ -997,7 +1003,7 @@ fn midi_recording(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, row
         }
         let y0 = tl.min.y + geo.tops[i] - app.arrange.vscroll;
         let (x0, x1) = (map.x(live.start), map.x(live.end).max(map.x(live.start) + 2.0));
-        let r = Rect::from_min_max(pos2(x0, y0 + 1.0), pos2(x1, y0 + geo.rh - 1.0));
+        let r = Rect::from_min_max(pos2(x0, y0 + 1.0), pos2(x1, y0 + geo.main[i] - 1.0));
         rp.rect_filled(r, crate::theme::RADIUS, TOKENS.record.gamma_multiply(0.45));
         let strip = Rect::from_min_max(r.min, pos2(r.max.x, (r.min.y + CLIP_NAME_H).min(r.max.y)));
         rp.rect_filled(strip, crate::theme::top_corners(), TOKENS.record);

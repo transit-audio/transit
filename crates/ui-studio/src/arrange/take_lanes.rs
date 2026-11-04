@@ -1,5 +1,5 @@
 //! Take lanes (#25, ADR 0039): a track's stacked takes as lanes under its row, one lane per take,
-//! newest on top, at [`TAKE_H`] each. In a lane, a take's clips are dimmed where another take
+//! newest on top, scaled with their parent. In a lane, a take's clips are dimmed where another take
 //! plays and highlighted where it plays; a click on a dimmed clip makes its take play over the
 //! clip's range (`takes.set_active`, one undo step). The lane's label in the track list says
 //! "Take n" and the span it plays; a click on it makes that take play in every
@@ -33,14 +33,14 @@ pub(super) fn takes(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl:
             continue;
         }
         let y0 = tl.min.y + geo.tops[i] - app.arrange.vscroll;
-        let open = app.ui.takes_open.contains(&t.id);
+        let open = geo.take_count[i] > 0;
         chips(app, ui, t, stacks, tl, layout, open);
         if !open {
             continue;
         }
         for (k, number) in takes.numbers.iter().copied().enumerate() {
-            let ly = y0 + geo.rh + k as f32 * TAKE_H;
-            lane(app, ui, t, stacks, number, k, ly, map, tl, list);
+            let ly = y0 + geo.main[i] + k as f32 * geo.take[i];
+            lane(app, ui, t, stacks, number, k, ly, geo.take[i], map, tl, list);
         }
     }
 }
@@ -88,8 +88,8 @@ fn chips(app: &mut StudioApp, ui: &mut Ui, t: &Track, stacks: &[TakeStack], tl: 
 
 /// One take lane: its clips in the timeline, its label and menu in the track list.
 #[allow(clippy::too_many_arguments)]
-fn lane(app: &mut StudioApp, ui: &mut Ui, t: &Track, stacks: &[TakeStack], number: u32, k: usize, ly: f32, map: Map, tl: Rect, list: Rect) {
-    let lane = Rect::from_min_max(pos2(tl.min.x, ly), pos2(tl.max.x, ly + TAKE_H));
+fn lane(app: &mut StudioApp, ui: &mut Ui, t: &Track, stacks: &[TakeStack], number: u32, k: usize, ly: f32, height: f32, map: Map, tl: Rect, list: Rect) {
+    let lane = Rect::from_min_max(pos2(tl.min.x, ly), pos2(tl.max.x, ly + height));
     let active = stacks.iter().filter_map(|st| st.take(number)).any(transit_model::StackTake::is_active);
     let p = ui.painter().with_clip_rect(tl);
     p.rect_filled(lane.shrink2(vec2(0.0, 1.0)), 0.0, TOKENS.bg);
@@ -104,7 +104,7 @@ fn lane(app: &mut StudioApp, ui: &mut Ui, t: &Track, stacks: &[TakeStack], numbe
     clips.sort_by_key(|(c, on)| (*on, c.start));
     let base = theme::rgb(t.color);
     for (c, on) in &clips {
-        let r = Rect::from_min_max(pos2(map.x(c.start), ly + 3.0), pos2(map.x(c.end()).max(map.x(c.start) + 2.0), ly + TAKE_H - 3.0));
+        let r = Rect::from_min_max(pos2(map.x(c.start), ly + 3.0), pos2(map.x(c.end()).max(map.x(c.start) + 2.0), ly + height - 3.0));
         if !tl.intersects(r) {
             continue;
         }
@@ -128,7 +128,7 @@ fn lane(app: &mut StudioApp, ui: &mut Ui, t: &Track, stacks: &[TakeStack], numbe
     }
     // In the track list: the label (click: this take plays everywhere) and the lane menu.
     let lp = ui.painter().with_clip_rect(list);
-    let hl = Rect::from_min_max(pos2(list.min.x + 20.0, ly + 1.0), pos2(list.max.x - 6.0, ly + TAKE_H - 1.0));
+    let hl = Rect::from_min_max(pos2(list.min.x + 20.0, ly + 1.0), pos2(list.max.x - 6.0, ly + height - 1.0));
     let menu = Rect::from_min_size(pos2(hl.max.x - 22.0, hl.min.y + 1.0), vec2(22.0, hl.height() - 2.0));
     let label = Rect::from_min_max(hl.min, pos2(menu.min.x - 4.0, hl.max.y));
     let hresp = ui.interact(label.intersect(list), ui.id().with(("take_label", t.id.0, number)), Sense::click());

@@ -150,7 +150,8 @@ fn cycle_recording_opens_three_lanes_newest_on_top_with_the_newest_take_playing(
     assert_eq!(rows.iter().map(|r| r.active).collect::<Vec<_>>(), vec![true, false, false]);
     assert!(rows[1].lane[1] - rows[0].lane[1] >= TAKE_H - 0.5, "one lane per take, stacked");
     let h = t.row(a).header;
-    assert!(h[3] - h[1] >= 46.0 + 3.0 * TAKE_H - 1.0, "the row grew by the lanes: {h:?}");
+    assert_eq!(h[3] - h[1], 46.0, "main header excludes child lanes");
+    assert_eq!(t.row(a).stack_height, 46.0 + 3.0 * TAKE_H, "stack includes every take lane");
     assert!(t.lane_clip(a, 3).active && !t.lane_clip(a, 2).active && !t.lane_clip(a, 1).active);
     assert_eq!(t.active_take(a), Some(3));
     let tr = t.app.engine.session().track(a).unwrap();
@@ -302,7 +303,8 @@ fn a_take_over_a_clip_gets_a_chip_that_shows_two_lanes_and_hides_them_again() {
     let rows = t.rows_of(a);
     assert_eq!(rows.iter().map(|r| (r.take, r.active)).collect::<Vec<_>>(), vec![(2, true), (1, false)]);
     let h = t.row(a).header;
-    assert!(h[3] - h[1] >= 46.0 + 2.0 * TAKE_H - 1.0, "{h:?}");
+    assert_eq!(h[3] - h[1], 46.0, "main header excludes child lanes");
+    assert_eq!(t.row(a).stack_height, 46.0 + 2.0 * TAKE_H, "stack includes every take lane");
     t.click(mid(t.lane_clip(a, 1).rect));
     assert_eq!(t.active_take(a), Some(1));
     assert!(t.app.status.contains("Take 1 plays on Audio 1"), "{}", t.app.status);

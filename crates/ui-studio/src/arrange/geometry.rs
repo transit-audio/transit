@@ -25,25 +25,44 @@ impl Map {
 pub const TAKE_H: f32 = 22.0;
 
 /// Row geometry: each row's top (content coordinates, before scrolling) and full height. A row is
-/// the track's lane (`rh`) plus its take lanes when they are shown, then its automation lanes.
+/// the track's main lane plus its take lanes, then its automation lanes.
 pub(crate) struct RowGeo {
     pub tops: Vec<f32>,
     pub heights: Vec<f32>,
-    pub rh: f32,
+    pub main: Vec<f32>,
+    pub take: Vec<f32>,
+    pub take_count: Vec<usize>,
+    pub auto_views: Vec<Vec<crate::automation::LaneView>>,
+    pub automation: Vec<Vec<f32>>,
 }
 
 impl RowGeo {
-    pub(crate) fn new(app: &StudioApp, rows: &[&Track], rh: f32) -> RowGeo {
+    pub(crate) fn new(app: &StudioApp, rows: &[&Track]) -> RowGeo {
         let mut tops = Vec::with_capacity(rows.len());
         let mut heights = Vec::with_capacity(rows.len());
+        let mut main = Vec::with_capacity(rows.len());
+        let mut take = Vec::with_capacity(rows.len());
+        let mut automation = Vec::with_capacity(rows.len());
+        let mut take_count = Vec::with_capacity(rows.len());
+        let mut auto_views = Vec::with_capacity(rows.len());
         let mut acc = 0.0;
         for t in rows {
-            let h = rh + takes_shown(app, t) as f32 * TAKE_H + crate::automation::lanes_height(app, t);
+            let rh = t.height.points();
+            let th = (TAKE_H * rh / 46.0).clamp(22.0, 220.0);
+            let views = app.lane_views(t);
+            let ah: Vec<f32> = views.iter().map(|v| crate::automation::lane_height::display(v.height, rh)).collect();
+            let count = takes_shown(app, t);
+            let h = rh + count as f32 * th + ah.iter().sum::<f32>();
+            take_count.push(count);
+            auto_views.push(views);
+            main.push(rh);
+            take.push(th);
+            automation.push(ah);
             tops.push(acc);
             heights.push(h);
             acc += h;
         }
-        RowGeo { tops, heights, rh }
+        RowGeo { tops, heights, main, take, take_count, auto_views, automation }
     }
     pub(crate) fn total(&self) -> f32 {
         self.tops.last().zip(self.heights.last()).map_or(0.0, |(t, h)| t + h)
@@ -61,4 +80,3 @@ impl RowGeo {
 pub(crate) fn shown(app: &StudioApp, s: &Session, t: &Track) -> bool {
     !t.hidden && !app.tucked(s, t)
 }
-
