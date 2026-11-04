@@ -76,7 +76,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Commit...",
             ["Track"],
             Some("Alt+Shift+C"),
-            "{tracks?, destination?: new|track id, source?: leave|mute|mute_deactivate|hide} — defaults new, mute",
+            "{tracks?, destination?: new|track id, source?: leave|mute|mute_deactivate|hide, range?: {start, length}} — defaults new, mute, the whole track",
             has_selection,
             commit
         ),
@@ -85,7 +85,7 @@ pub fn specs() -> Vec<CommandSpec> {
             "Bounce...",
             ["Track"],
             Some("Cmd+Alt+Shift+B"),
-            "{tracks?, destination?: new|track id, source?: leave|mute|mute_deactivate|hide} — defaults new, mute",
+            "{tracks?, destination?: new|track id, source?: leave|mute|mute_deactivate|hide, range?: {start, length}} — defaults new, mute, the whole track",
             has_selection,
             commit
         ),
@@ -703,14 +703,8 @@ fn commit(e: &mut Engine, p: &Value) -> Result<Value> {
         Some(Value::String(s)) if s == "new" => None,
         Some(v) => Some(TrackId(v.as_u64().ok_or_else(|| bad("track.bounce", "destination must be `new` or a track id"))?)),
     };
-    let source = match p.get("source") {
-        None => crate::io::BounceSource::Mute,
-        Some(Value::String(s)) if s == "mute" => crate::io::BounceSource::Mute,
-        Some(Value::String(s)) if s == "leave" => crate::io::BounceSource::Leave,
-        Some(Value::String(s)) if s == "mute_deactivate" => crate::io::BounceSource::MuteDeactivate,
-        Some(Value::String(s)) if s == "hide" => crate::io::BounceSource::Hide,
-        Some(_) => return Err(bad("track.bounce", "source must be `leave`, `mute`, `mute_deactivate`, or `hide`")),
-    };
+    let source = super::clip_bounce::source_param(p)?;
+    let span = super::clip_bounce::range_param(e, p)?;
     crate::io::validate_bounce_destination(e.session(), &tracks, destination)?;
     // Refused before anything renders, so a refusal leaves every track as it was.
     for t in &tracks {
@@ -723,7 +717,7 @@ fn commit(e: &mut Engine, p: &Value) -> Result<Value> {
     }
     let mut out = Vec::new();
     for t in tracks {
-        if let Some(id) = crate::io::bounce_track(e, t, destination, source)? {
+        if let Some(id) = crate::io::bounce_track_range(e, t, destination, source, span)? {
             out.push(id);
         }
     }

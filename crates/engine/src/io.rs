@@ -566,6 +566,18 @@ pub fn inactive_source_refusal(name: &str) -> String {
 /// Print through inserts, before the fader. Command callers validate every destination before
 /// rendering the first source; direct callers get the same validation here.
 pub fn bounce_track(e: &mut Engine, t: TrackId, destination: Option<TrackId>, source: BounceSource) -> Result<Option<TrackId>> {
+    bounce_track_range(e, t, destination, source, None)
+}
+
+/// `bounce_track` of `span` only (`None`: the whole track plus a two-second tail). The printed clip
+/// sits at the span's start; material of the destination outside the span stays.
+pub fn bounce_track_range(
+    e: &mut Engine,
+    t: TrackId,
+    destination: Option<TrackId>,
+    source: BounceSource,
+    span: Option<Range>,
+) -> Result<Option<TrackId>> {
     validate_bounce_destination(e.session(), &[t], destination)?;
     let s = e.session();
     let Some(tr) = s.track(t) else { return Ok(None) };
@@ -575,11 +587,19 @@ pub fn bounce_track(e: &mut Engine, t: TrackId, destination: Option<TrackId>, so
     if tr.inactive {
         return Err(crate::cmd::bad("track.bounce", inactive_source_refusal(&tr.name)));
     }
-    let end = tr.clips().iter().map(Clip::end).max().unwrap_or(0);
-    if end <= 0 {
+    let range = match span {
+        Some(r) => r,
+        None => {
+            let end = tr.clips().iter().map(Clip::end).max().unwrap_or(0);
+            if end <= 0 {
+                return Ok(None);
+            }
+            Range::new(0, end + s.sample_rate.samples(2.0))
+        }
+    };
+    if range.is_empty() {
         return Ok(None);
     }
-    let range = Range::new(0, end + s.sample_rate.samples(2.0));
     // The track renders through a main mix of at least two channels.
     refuse_longer(s, "track.commit", &tr.name, "commit", range.len(), render_limit(tr.channels().max(2)))?;
     let _offline = offline();

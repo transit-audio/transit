@@ -10,6 +10,7 @@ mod audio_midi;
 mod audiosuite;
 mod clap;
 mod clip;
+mod clip_bounce;
 mod clip_list;
 mod clip_more;
 mod edit;
@@ -169,6 +170,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(view_more::specs());
         v.extend(track_more::specs());
         v.extend(clip_more::specs());
+        v.extend(clip_bounce::specs());
         v.extend(clip_list::specs());
         v.extend(event_more::specs());
         v.extend(setup_more::specs());
