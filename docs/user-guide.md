@@ -84,6 +84,14 @@ The switch, ID and learned assignments are saved by exact device name in this ma
 `ui.json`, under `midi_transport`. They carry across sessions and reconnects; they are never
 saved in a session. Devices with the same name share these preferences.
 
+## Notes played during the count-in
+
+Notes you play on an armed MIDI or instrument track during the count-in are kept, as in Logic Pro:
+the clip starts at the first of them instead of at the record start, and every note stays where
+you played it. Recording already starts at the pre-roll start, so notes in the pre-roll are kept
+too. Nothing lands before the start of the session, and with Cycle on the count-in notes belong to
+the first take.
+
 ## Takes and comping
 
 With Cycle on, Record keeps a take per lap until Stop; recording over clips keeps the old clips as

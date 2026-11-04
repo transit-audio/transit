@@ -31,6 +31,17 @@ A lost take is a merge-blocking defect. Treat every change here as high risk.
   there and resumes at offset zero in the next lap with the same pitch and velocity, repeating
   at each wrap until the real release. Each loop lap stays exactly loop-length; a release exactly
   at the loop end produces no remainder. Journal recovery uses the same rule.
+- **Count-in pickups** (#327, Logic's behavior; ADR 0026 amendment): the audio thread also
+  captures MIDI while a record count-in runs (`service_midi` in `player/audio.rs`), stamped with the
+  device output frame like any captured event. That frame runs on through the count-in to the
+  latch, so a pickup comes out before the latch (negative) in `MidiTake::timed` and
+  `midi_journal::Journal::events`, both clamped so nothing lands before session sample 0.
+  `midi_take::build_wrapping` starts the first clip of the pass at the earliest note-on before the
+  latch (`pickup`), else at the latch exactly as before; releases and controllers before the latch
+  without a pickup are still dropped. No journal field was added. A punch keeps its range (no
+  pickups). `ui.inspect` reports the running pass as `recording_pass` (`record_start`, `count_in`,
+  `capture_start`). Tests: `midi_pickup_tests.rs` (ui-studio), the pickup tests in
+  `midi_take.rs`, `midi_journal.rs` and `player/audio/midi/tests.rs`.
 - **Take stacks** (#25, [ADR 0039](../../adr/0039-takes-and-comping.md)): after placing passes,
   both recorders call `crate::takes::settle_new_takes`: the track plays the playlist it played
   before the passes (never the last pass's playlist alone, which silenced the rest of the track),

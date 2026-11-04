@@ -16,6 +16,10 @@ Recording used to depend on two switches that had to agree. Cycle looped playbac
 4. **Migration.** A session file that still carries `loop_record: true` or `false` loads unchanged: the value is ignored (`skip_deserializing`). Test: `a_session_saved_with_the_removed_loop_record_option_still_loads`.
 5. **Tests.** `record_with_cycle_on_loops_and_stacks_a_take_per_lap_until_stop` (three laps are three takes of one lap each, and Stop ends the pass), `record_with_cycle_off_is_one_open_ended_pass_until_stop`, and `three_laps_of_cycle_recording_are_three_audio_takes_each_one_lap_long`.
 
+### Amendment: Pickups (#327, 2026-11-04)
+
+Notes played during the record count-in join the take (Logic Pro's behavior; Ableton Live does not record during its count-in and offers Capture MIDI instead; the maintainer chose Logic's). (1) MIDI capture for a pass begins at the count-in start on the same device-frame clock the pass latches on, so a note played with N samples of count-in left lands at the record start less N; the pre-roll is already inside the pass (its start is the record start), and nothing lands before session sample 0 (clamped). (2) When the pass ends, each armed MIDI track's clip starts at the earliest note-on before the record start, else at the record start as before; every note keeps its absolute position, and audio takes are unchanged. (3) With Cycle on, pickups belong to the first take, whose clip starts early; later laps are unchanged, and a first take that now overlaps earlier material follows the existing overlap and take rules (ADR 0039). This paragraph narrows decision 1 for a behavior the maintainer decided; it is docs-only and needs no judging round.
+
 ## Consequences
 
 - One switch decides the behavior, so a recording never stops for a reason the user cannot see.
