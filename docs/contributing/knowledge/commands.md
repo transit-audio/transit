@@ -18,3 +18,5 @@ Every user action is a command: `crates/engine/src/cmd/` (one file per area), re
   path and label match.
 
 Tests: `crates/engine/tests/` (random edits, hostile params, route cycles).
+
+Low Latency adds UI-owned options.low_latency {value?: bool, limit_ms?: number}, returning {value, limit_ms}. Omitting value toggles unless only limit_ms is supplied. Invalid limits are refused, and an engine-only host reports unavailable rather than editing the session. query.path_latency {} is a read-only runtime query with adopted plan/device generations and shared/Main latency components; see routing.md.

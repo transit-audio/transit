@@ -112,6 +112,18 @@ when omitted. `track.hide {tracks, hidden: false}` also shows them.
 
 ## Audio setup
 
+### Low Latency mode
+
+Turn on **Low Latency** in the transport bar or **Options** when playing an instrument or monitoring an input through a long effect chain. It temporarily bypasses eligible software audio inserts on armed or monitored tracks, their downstream buses, and the master. The master is included even when no track is armed. Inserts with the largest reported latency are bypassed first; equal latencies use stable track and insert identities.
+
+Set **Low Latency limit** in **Audio > Audio Devices > System**. The limit is the cumulative added processing latency of each live route, in milliseconds; 0 ms removes all eligible positive-latency inserts. Instruments, MIDI effects, hardware inserts, and user bypass settings are preserved. Unrelated playback tracks stay compensated and can still determine the shared latency, so the limit is not a guarantee of total playing delay.
+
+The button is lit while enabled and says pending until the prepared plan applies. Dimmed insert chips and device cards show **bypassed by Low Latency** only after adoption. The status line reports the number of bypasses and the reduction in shared latency once per toggle. Manual bypass remains in effect when the mode is turned off, and toggling does not restart recording or change recorded input samples or placement.
+
+The button tooltip and diagnostics show **Path latency**, the adopted shared/Main engine latency plus the device's reported output latency. This is not a physical round-trip measurement or a latency promise for an unpadded cue. Unknown device output latency is shown as unknown; with Delay Compensation off the figure is unavailable because paths are not aligned. Copy diagnostics includes the same readout.
+
+The mode and limit are saved per machine in ui.json, never in the session or undo history. Offline bounce, freeze, commit, stems and Bounce in Place use the full user-enabled chain. A real-time render through the open Player temporarily requests the full chain and restores the machine preference afterward.
+
 In **Audio > Audio Devices > I/O paths**, enable **Live (no shared padding)** on a named output other than Main to hear a cue as soon as its own sources align, without waiting for slower outputs.
 The checkbox is saved on this machine, leaves inserts active, and is ignored by offline renders.
 
