@@ -47,6 +47,7 @@ mod io_settings;
 pub mod keys;
 pub mod load_readout;
 mod loopbar;
+mod low_latency;
 pub mod menus;
 pub mod metronome;
 pub mod midi_fx_panel;
@@ -246,6 +247,7 @@ pub struct StudioApp {
     pub frame_ms: f32,
     last_frame: Option<f64>,
     last_rev: u64,
+    low_latency: low_latency::State,
     /// The opened device still needs its saved I/O table; the engine's table revision last passed on.
     io_adopt: bool,
     io_pushed: u64,
@@ -390,6 +392,7 @@ impl StudioApp {
             frame_ms: 0.0,
             last_frame: None,
             last_rev: 0,
+            low_latency: Default::default(),
             io_adopt: true,
             io_pushed: 0,
             io_warning_cache: None,
@@ -545,6 +548,12 @@ impl StudioApp {
         }
         if id == "window.midi_mappings" {
             return Ok(self.toggle_midi_mappings(params.get("value").and_then(Value::as_bool)));
+        }
+        if id == "options.low_latency" {
+            return self.set_low_latency(&params);
+        }
+        if id == "query.path_latency" {
+            self.poll_low_latency();
         }
         if id == "window.editors_follow" {
             return Ok(self.set_editors_follow(params.get("value").and_then(Value::as_bool)));
@@ -880,6 +889,7 @@ impl StudioApp {
         if self.player_requests.play.is_none() && self.player_requests.locate.is_none() && self.player_requests.recording.is_none() {
             self.sync_io();
             self.sync_player_session();
+            self.poll_low_latency();
         }
         self.autosave_changes();
         self.autosave();

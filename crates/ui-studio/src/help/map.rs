@@ -140,7 +140,9 @@ pub fn status_segments(line: &str) -> Vec<Segment> {
     if line.starts_with("Backend") {
         return backend_segments(line);
     }
-    let id = if line.starts_with("Requested") {
+    let id = if line.starts_with("Path latency:") {
+        Some(Id::DiagnosticsPathLatency)
+    } else if line.starts_with("Requested") {
         Some(Id::AudioDevicesRequested)
     } else if line.starts_with("Recovery:") {
         Some(Id::AudioDevicesRecovery)

@@ -368,7 +368,13 @@ fn card_body(
     menu: &mut Vec<MenuItem>,
 ) -> DeviceCard {
     let pc = p.with_clip_rect(lane);
-    let on = ins.is_some_and(|i| !i.bypass);
+    let mode_bypass = slot.is_some() && ins.is_some_and(|i| app.mode_bypassed(i.uid.get()));
+    let on = ins.is_some_and(|i| !i.bypass) && !mode_bypass;
+    if let Some(tip) = ins.filter(|_| mode_bypass).and_then(|i| app.mode_bypass_tip(i.uid.get())) {
+        let hover = ui.interact(r.intersect(lane), ui.id().with(("low_latency", t.0, slot)), Sense::hover());
+        crate::help::hover(ui, &hover, crate::help::Id::DeviceLowLatencyBypass);
+        hover.on_hover_text(tip);
+    }
     pc.rect_filled(r, crate::theme::RADIUS, TOKENS.panel_raised);
     let title = Rect::from_min_size(r.min, vec2(r.width(), 22.0));
     pc.rect_filled(title, crate::theme::top_corners(), if on { TOKENS.button } else { TOKENS.bg });
@@ -383,8 +389,15 @@ fn card_body(
     } else {
         app.plugin_name(&plugin, slot.is_none())
     };
-    let mut c =
-        DeviceCard { slot, plugin: plugin.clone(), name: name.clone(), bypass: ins.is_some_and(|i| i.bypass), rect: r4(r), ..DeviceCard::default() };
+    let mut c = DeviceCard {
+        low_latency_bypass: mode_bypass,
+        slot,
+        plugin: plugin.clone(),
+        name: name.clone(),
+        bypass: ins.is_some_and(|i| i.bypass),
+        rect: r4(r),
+        ..DeviceCard::default()
+    };
     let salt = slot.map_or(u64::MAX, |s| s as u64);
     let key_slot = slot.unwrap_or(transit_mix::INSTRUMENT_SLOT);
     // The plug-in is still being made (a heavy library can take seconds): say so until it is

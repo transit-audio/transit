@@ -34,6 +34,7 @@ pub fn run(
         settings,
         opened: vec!["Output open: none (report mode opens no stream)".into()],
         preview: None,
+        path_latency: Some("Path latency: unavailable (no running plan)".into()),
         telemetry: None,
         midi: midi(profile_mappings),
         open_asio_driver: None,

@@ -196,6 +196,7 @@ Every status line and figure of the Audio Devices window, in plain words. The sa
 - **Rescan Devices.** Lists the audio devices again. Use it after plugging in or switching on an interface that is not in the lists.
 - **Driver settings.** Opens the running ASIO driver's own settings panel, where its buffer size and clock are set. Reconnect afterwards.
 - **Copy diagnostics.** Copies a report of your system, audio devices, these figures and the end of the log to the clipboard. Paste it into a bug report; it holds nothing from your sessions.
+- **Low Latency limit.** Maximum added chain latency before eligible audio inserts are bypassed, in milliseconds. Instruments, MIDI effects and hardware inserts always remain enabled.
 <!-- /help:audio-devices -->
 
 ## A figure only in Copy diagnostics

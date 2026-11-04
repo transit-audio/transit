@@ -240,6 +240,16 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                 // Where the View menu and its entries sit, for `ui.inspect` and tests (slice 4).
                 app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "View".into(), String::new(), view_menu.response.rect));
                 app.arrange.bar_menu.extend(view_items);
+                let options = ui.menu_button("Options", |ui| {
+                    let b = check_button(ui, app.ui.low_latency, "Low Latency");
+                    crate::help::hover(ui, &b, crate::help::Id::OptionsLowLatency);
+                    app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Low Latency".into(), "options.low_latency".into(), b.rect));
+                    if b.clicked() {
+                        let _ = app.run("options.low_latency", json!({}));
+                        ui.close();
+                    }
+                });
+                app.arrange.bar_menu.push(crate::mixer::MenuItem::at(ui, "Options".into(), String::new(), options.response.rect));
                 let mut window_items = Vec::new();
                 let window_menu = ui.menu_button("Window", |ui| {
                     let on = app.ui.midi_monitor.open;

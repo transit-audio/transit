@@ -251,7 +251,7 @@ fn inserts_block(
             Align2::LEFT_CENTER,
             &shown,
             FontId::proportional(10.5),
-            if ins.bypass { TOKENS.text_dim } else { TOKENS.text },
+            if ins.bypass || app.mode_bypassed(ins.uid.get()) { TOKENS.text_dim } else { TOKENS.text },
         );
         // A built-in's editor is our own window: it needs no player (the card does the same).
         let builtin = app.builtin_at((id, *slot)).is_some();
@@ -259,6 +259,10 @@ fn inserts_block(
         if resp.clicked() && enabled {
             // Selecting an insert opens its editor, or raises the one already open (#173).
             app.show_editor((id, *slot));
+        }
+        if let Some(tip) = app.mode_bypass_tip(ins.uid.get()) {
+            crate::help::hover(ui, &resp, crate::help::Id::DeviceLowLatencyBypass);
+            resp.clone().on_hover_text(tip);
         }
         let state = if ins.bypass { " (bypassed)" } else { "" };
         let why = hang.map_or(String::new(), |h| format!(" {}", app.hang_tip(h, &name)));
@@ -297,7 +301,7 @@ fn inserts_block(
                 ui.close();
             }
         });
-        sl.inserts.push(InsertRow { slot, name, bypass, rect: r4(rr), status, retry });
+        sl.inserts.push(InsertRow { low_latency_bypass: app.mode_bypassed(ins.uid.get()), slot, name, bypass, rect: r4(rr), status, retry });
     }
     if rows == 0 {
         return;

@@ -25,6 +25,11 @@ macro_rules! ids {
 }
 
 ids! {
+    TransportLowLatency => "transport.low_latency",
+    OptionsLowLatency => "options.low_latency",
+    AudioDevicesLowLatencyLimit => "audio_devices.low_latency_limit",
+    DeviceLowLatencyBypass => "device.low_latency_bypass",
+    DiagnosticsPathLatency => "diagnostics.path_latency",
     // help\track-menu.toml
     TrackMenuMakeActive => "track_menu.make_active",
     TrackMenuMakeInactive => "track_menu.make_inactive",

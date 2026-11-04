@@ -358,6 +358,8 @@ fn persist_audio(path: &std::path::Path, ui: &crate::UiState) -> Result<(), Stri
         Err(e) => return Err(e.to_string()),
     };
     let obj = value.as_object_mut().ok_or("Settings must be an object")?;
+    obj.insert("low_latency".into(), serde_json::json!(ui.low_latency));
+    obj.insert("low_latency_limit_ms".into(), serde_json::json!(ui.low_latency_limit_ms));
     obj.insert("audio".into(), serde_json::to_value(&ui.audio).map_err(|e| e.to_string())?);
     obj.insert("io_maps".into(), serde_json::to_value(&ui.io_maps).map_err(|e| e.to_string())?);
     let bytes = serde_json::to_vec_pretty(&value).map_err(|e| e.to_string())?;
@@ -650,6 +652,7 @@ impl StudioApp {
             systems,
             settings: self.ui.audio.clone(),
             opened,
+            path_latency: Some(self.engine.path_latency.text()),
             preview: Some(self.preview_line()),
             telemetry,
             midi: self.diagnostics_midi(),

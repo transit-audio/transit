@@ -166,6 +166,7 @@ pub fn bar(app: &mut StudioApp, ui: &mut Ui) {
                     let _ = app.run("options.loop_playback", json!({"value": !cycle}));
                 }
                 crate::metronome::button(app, ui);
+                app.low_latency_button(ui);
                 ui.add_space(2.0 * crate::theme::SPACE);
                 let at = app.position();
                 match &counting {

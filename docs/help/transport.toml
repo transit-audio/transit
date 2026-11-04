@@ -82,3 +82,8 @@ text = "The level of the main output, left over right, with a red cap when it cl
 id = "transport.midi_led"
 name = "MIDI activity"
 text = "Lights when MIDI arrives on an input port. Click to open the MIDI Monitor, which lists every message."
+
+[[entry]]
+id = "transport.low_latency"
+name = "Low Latency"
+text = "Temporarily bypasses selected audio inserts on live routes and the master. The tooltip shows shared/Main path latency; pending means the prepared plan has not applied."

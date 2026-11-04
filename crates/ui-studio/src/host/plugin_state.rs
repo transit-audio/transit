@@ -19,9 +19,20 @@ impl StudioApp {
             return false;
         }
         let session = self.engine.session_arc();
-        if !self.restore_pending && self.last_rev == self.engine.revision && p.has_requested_session(&session) {
+        if !self.restore_pending
+            && self.last_rev == self.engine.revision
+            && p.has_requested_session(&session)
+            && self.low_latency.revision == self.low_latency.published
+            && p.requested_low_latency() == self.ui.low_latency.then_some(self.ui.low_latency_limit_ms)
+        {
             return true;
         }
+        let limit = self.ui.low_latency.then_some(self.ui.low_latency_limit_ms);
+        if let Err(e) = p.set_low_latency(limit) {
+            self.status = format!("Low Latency: {e:?}");
+            return false;
+        }
+        self.low_latency.pending = true;
         let result = if self.restore_pending { p.replace_session(session) } else { p.update_session(session) };
         if matches!(result, Err(transit_playback::PlayerError::NeedsReopen { .. })) {
             if let Err(error) = self.reconnect_with_player(false) {
@@ -43,6 +54,7 @@ impl StudioApp {
         if self.player_requests.result(&mut self.status, result).is_none() {
             return false;
         }
+        self.low_latency.published = self.low_latency.revision;
         self.restore_pending = false;
         self.last_rev = self.engine.revision;
         true

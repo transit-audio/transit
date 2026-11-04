@@ -325,6 +325,7 @@ pub fn window(app: &mut StudioApp, ctx: &egui::Context) {
                                     match section {
                                         Section::Midi => crate::midi_transport::settings(app, ui),
                                         Section::System => {
+                                            app.low_latency_limit(ui);
                                             egui::Grid::new("audio_devices_grid").num_columns(2).spacing([2.0 * SPACE, SPACE]).show(ui, |ui| {
                                                 let label = |ui: &mut egui::Ui, t: &str| ui.label(egui::RichText::new(t).color(TOKENS.text_dim));
                                                 label(ui, "Audio system");

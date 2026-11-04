@@ -10,6 +10,9 @@ optional `key` (spelled as the shortcut table spells it) and an optional `link` 
 |---|---|
 | [`track-menu.toml`](track-menu.toml) | Make Active and Make Inactive in the track menus. |
 | [`transport.toml`](transport.toml) | The transport bar: buttons, readouts, tempo, meter, meters. |
+| [`options.toml`](options.toml) | The per-machine Low Latency option. |
+| [`device.toml`](device.toml) | Adopted Low Latency bypass on insert chips and device cards. |
+| [`diagnostics.toml`](diagnostics.toml) | Shared/Main path latency. |
 | [`arrange-header.toml`](arrange-header.toml) | The track header in the arrangement. |
 | [`mixer-strip.toml`](mixer-strip.toml) | A mixer channel strip. |
 | [`device-chain.toml`](device-chain.toml) | The device chain: instrument, effects, sidechain keys. |

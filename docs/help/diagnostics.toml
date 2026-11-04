@@ -1,0 +1,7 @@
+area = "diagnostics"
+link = "user-guide.md#low-latency-mode"
+
+[[entry]]
+id = "diagnostics.path_latency"
+name = "Path latency"
+text = "Shared/Main path latency is the adopted engine latency plus reported device output latency. It is unavailable with Delay Compensation off, and it does not measure physical round-trip or unpadded cue latency."

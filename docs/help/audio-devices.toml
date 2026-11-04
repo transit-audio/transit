@@ -184,3 +184,8 @@ text = "Opens the running ASIO driver's own settings panel, where its buffer siz
 id = "audio_devices.copy_diagnostics"
 name = "Copy diagnostics"
 text = "Copies a report of your system, audio devices, these figures and the end of the log to the clipboard. Paste it into a bug report; it holds nothing from your sessions."
+
+[[entry]]
+id = "audio_devices.low_latency_limit"
+name = "Low Latency limit"
+text = "Maximum added chain latency before eligible audio inserts are bypassed, in milliseconds. Instruments, MIDI effects and hardware inserts always remain enabled."

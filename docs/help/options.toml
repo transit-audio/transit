@@ -1,0 +1,7 @@
+area = "options"
+link = "user-guide.md#low-latency-mode"
+
+[[entry]]
+id = "options.low_latency"
+name = "Low Latency"
+text = "The same per-machine Low Latency switch as the transport button. It does not change session bypass settings."

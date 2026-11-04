@@ -7,6 +7,9 @@ use super::*;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(default)]
 pub struct UiState {
+    pub low_latency: bool,
+    #[serde(deserialize_with = "low_latency::deserialize_limit")]
+    pub low_latency_limit_ms: f64,
     /// The audio device choice, kept with the preferences: per machine.
     pub audio: transit_playback::AudioConfig,
     /// The Audio Devices window's last section (`audio_devices::Section::key`): per machine, in
@@ -127,6 +130,8 @@ pub struct UiState {
 impl Default for UiState {
     fn default() -> Self {
         UiState {
+            low_latency: false,
+            low_latency_limit_ms: 0.0,
             audio: transit_playback::AudioConfig::default(),
             audio_devices_section: String::new(),
             io_maps: Vec::new(),

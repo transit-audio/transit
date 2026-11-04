@@ -191,6 +191,7 @@ pub struct StripLayout {
 /// One insert row of a strip.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct InsertRow {
+    pub low_latency_bypass: bool,
     pub slot: usize,
     pub name: String,
     pub bypass: bool,
@@ -231,6 +232,7 @@ pub struct GroupLink {
 /// One device card as last drawn.
 #[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct DeviceCard {
+    pub low_latency_bypass: bool,
     /// Insert slot, or `None` for the instrument.
     pub slot: Option<usize>,
     pub plugin: String,

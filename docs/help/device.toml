@@ -1,0 +1,7 @@
+area = "device"
+link = "user-guide.md#low-latency-mode"
+
+[[entry]]
+id = "device.low_latency_bypass"
+name = "Low Latency bypass"
+text = "This insert is bypassed by Low Latency in the running plan. Its user bypass setting is unchanged."

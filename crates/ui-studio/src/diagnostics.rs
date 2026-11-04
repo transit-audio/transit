@@ -325,6 +325,7 @@ pub struct Report {
     pub preview: Option<String>,
     /// Counters of the running output, or `None` when no stream is open.
     pub telemetry: Option<CallbackTelemetry>,
+    pub path_latency: Option<String>,
     pub midi: Midi,
     /// The ASIO driver this process runs (the native backend's), for the not-probed lines.
     pub open_asio_driver: Option<String>,
@@ -445,6 +446,10 @@ impl Report {
             o.push_str("No stream is open (report mode opens none).\n");
         }
         for line in &self.opened {
+            o.push_str(line);
+            o.push('\n');
+        }
+        if let Some(line) = &self.path_latency {
             o.push_str(line);
             o.push('\n');
         }
@@ -737,6 +742,7 @@ mod tests {
                 buffer_size: Some(128),
                 ..Default::default()
             },
+            path_latency: None,
             opened: vec![
                 "Output open: Speakers \u{b7} 48000 Hz \u{b7} 2 ch \u{b7} 256-sample buffer".into(),
                 "Requested 128 \u{b7} running at 256".into(),
