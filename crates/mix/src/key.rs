@@ -321,7 +321,7 @@ impl KeyBank {
                 continue;
             }
             let (Some(ins), Some(Some(slot))) = (ins, st.plugins.get_mut(i)) else { continue };
-            if !ins.active || ins.bypass || slot.failed {
+            if !ins.active || (ins.bypass || st.mode_bypass.get(i).copied().unwrap_or(false)) || slot.failed {
                 continue;
             }
             // Block-start values only: processing sends the breakpoints inside the block.

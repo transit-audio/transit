@@ -382,7 +382,12 @@ impl MixEngine {
     pub fn status(&self) -> PlanStatus {
         let Some(p) = self.plan.as_deref() else { return PlanStatus::default() };
         let mismatch = p.tables.plugins().fold(0u32, |n, s| n.saturating_add(s.applied.mismatch));
-        PlanStatus { applied_mismatch: mismatch, ..p.status }
+        PlanStatus {
+            applied_mismatch: mismatch,
+            low_latency: p.tables.low_latency,
+            saved_latency: p.tables.saved_latency.min(u32::MAX as usize) as u32,
+            ..p.status
+        }
     }
 
     /// True after an adoption unwound: the engine may be half-adopted, renders silence and
@@ -644,6 +649,9 @@ impl MixEngine {
         }
         self.main_arrival = main_arrival;
         self.latency = device;
+        status.engine_latency = u32::try_from(device).unwrap_or(u32::MAX);
+        status.master_latency = u32::try_from(device.saturating_sub(main_arrival)).unwrap_or(u32::MAX);
+        status.aligned = s.edit.delay_compensation;
         let law = self.pan_law;
         let pool = if pooled || recovery { self.pool.as_ref() } else { None };
         if !tail_done {
@@ -715,6 +723,7 @@ impl MixEngine {
             }
         }
         main_meter.measure(main, frames, 0.0, host_frame);
+        crate::low_latency::observe_raw(p1.iter_mut().chain(auxes.iter_mut()).chain(others.iter_mut()), status);
         for (_, bus) in &mut busses.0 {
             for (dst, src) in bus.host_buf.iter_mut().zip(&bus.buf) {
                 for (d, v) in dst.iter_mut().skip(offset).zip(src).take(frames) {

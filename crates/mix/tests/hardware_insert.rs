@@ -77,11 +77,16 @@ fn render(s: &Session, io: &IoMap, duplex: bool, delay: usize) -> Rendered {
 /// [`render`] on a device as wide as `io`: input channel `c` is cabled from output `cable(c)`, and
 /// `Rendered::sent` is what output `sent` played.
 fn render_on(s: &Session, io: &IoMap, duplex: bool, delay: usize, sent: usize, cable: impl Fn(usize) -> Option<usize>) -> Rendered {
+    render_on_mode(s, io, duplex, delay, sent, cable, false)
+}
+
+fn render_on_mode(s: &Session, io: &IoMap, duplex: bool, delay: usize, sent: usize, cable: impl Fn(usize) -> Option<usize>, mode: bool) -> Rendered {
     let (outs, ins) = (usize::from(io.outputs), usize::from(io.inputs));
     MixEngine::force_serial(true);
     let mut mix = MixEngine::realtime(target(io));
     let mut compiler = PlanCompiler::new(target(io), PlanLimits::default());
     compiler.set_io(Arc::new(io.clone()));
+    compiler.set_low_latency(mode.then_some(0.0));
     let mut maker = |spec: &InstanceSpec, _: transit_mix::SlotGen| {
         transit_mix::create_instance(&spec.id, spec.state.as_deref(), SR as f32, BLOCK, spec.ch)
             .map(|n| transit_mix::NewInstance { plugin: n.plugin, refused_state: false })
@@ -341,4 +346,23 @@ fn master_hardware_is_dry_in_offline_deliverables() {
     }
     assert_eq!(hits(&main), [AT]);
     assert!(hits(&sent).is_empty());
+}
+
+#[test]
+fn low_latency_preserves_actual_master_hardware_send_and_return() {
+    let mut s = session();
+    impulse_track(&mut s, "Input");
+    let master = s.add_track(TrackKind::Master, ChannelFormat::Stereo, None);
+    s.track_mut(master).unwrap().mixer.inserts[0] = Some(Insert::hardware(SEND, RET));
+    let mut software = Insert::new("compressor");
+    software.params.insert("lookahead".into(), 4.0);
+    s.track_mut(master).unwrap().mixer.inserts[1] = Some(software);
+    let io = io(Some(D));
+    let on = render_on_mode(&s, &io, true, D, 2, Some, true);
+    assert_eq!(hits(&on.main), [AT + D]);
+    assert_eq!(hits(&on.sent), [AT]);
+    assert_eq!(on.latency, D);
+    let off = render_on_mode(&s, &io, true, D, 2, Some, false);
+    assert_eq!(hits(&off.main), [AT + D + 192]);
+    assert_eq!(off.latency, D + 192);
 }

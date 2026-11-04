@@ -155,6 +155,8 @@ pub(crate) enum Attach {
 /// Every table a realtime engine renders from, sized off the audio thread.
 #[derive(Default)]
 pub(crate) struct PlanTables {
+    pub(crate) low_latency: bool,
+    pub(crate) saved_latency: usize,
     /// Render order: `..phase1` the live tracks other than auxes (processing order), then
     /// `phase1..aux_end` every aux and folder (dependency order), then the rest (masters, VCAs,
     /// inactive tracks) in track order.
@@ -383,8 +385,19 @@ impl PlanEnvelope {
 
 /// Plan-mode problems the audio thread noticed, in fixed storage. `Copy`; playback copies it to
 /// telemetry. Reset when a plan is adopted.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PlanStatus {
+    /// Adopted mode and shared-latency saving from its control-side snapshot.
+    pub low_latency: bool,
+    pub saved_latency: u32,
+    /// Current shared path latency, after bypass and compensation.
+    pub engine_latency: u32,
+    /// Running master-chain contribution.
+    pub master_latency: u32,
+    /// Shared alignment is meaningful only with Delay Compensation on.
+    pub aligned: bool,
+    /// Changes in raw available slot latency, including bypassed slots and shrinkage.
+    pub raw_latency_revision: u64,
     /// Blocks in which a delay line had to clamp a delay to its capacity.
     pub capacity_exceeded: u32,
     /// The largest delay asked for beyond capacity (samples): what the next plan should hold.
@@ -393,6 +406,23 @@ pub struct PlanStatus {
     pub affected: Option<(TrackId, SlotGen)>,
     /// Parameter maps whose length did not match their prepared storage.
     pub applied_mismatch: u32,
+}
+
+impl Default for PlanStatus {
+    fn default() -> Self {
+        Self {
+            low_latency: false,
+            saved_latency: 0,
+            engine_latency: 0,
+            master_latency: 0,
+            aligned: true,
+            raw_latency_revision: 0,
+            capacity_exceeded: 0,
+            required_latency: 0,
+            affected: None,
+            applied_mismatch: 0,
+        }
+    }
 }
 
 /// Everything an adopted plan displaced, or a torn-down engine held: drop it on the control

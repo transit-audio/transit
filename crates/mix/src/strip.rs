@@ -7,7 +7,10 @@ use super::*;
 pub(crate) fn service_idle_states(s: &Session, t: &Track, strip: &mut Strip, pos: Samples) {
     for (i, ins) in t.mixer.inserts.iter().enumerate() {
         let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
-        if slot.failed || slot.plugin.idle_applies_all_parameters() || (!t.inactive && ins.active && !ins.bypass) {
+        if slot.failed
+            || slot.plugin.idle_applies_all_parameters()
+            || (!t.inactive && ins.active && !(ins.bypass || strip.mode_bypass.get(i).copied().unwrap_or(false)))
+        {
             continue;
         }
         crate::automation::apply_idle_freeze(s, slot, ins, t, &strip.touch, i, pos);
@@ -217,12 +220,16 @@ fn process_strip_inserts(t: &Track, strip: &mut Strip, block: &StripRender<'_>, 
             continue;
         }
         let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
-        if ins.active && ins.bypass && !slot.failed && slot.plugin.idle_applies_all_parameters() {
+        if ins.active
+            && (ins.bypass || strip.mode_bypass.get(i).copied().unwrap_or(false))
+            && !slot.failed
+            && slot.plugin.idle_applies_all_parameters()
+        {
             // Keep block-start values flowing while dry. Hosts retain them until the first
             // active process call; no old timed breakpoint can follow the new value.
             apply_params(Some(block.s), slot, ins, t, &strip.touch, i, pos, 0);
         }
-        if !ins.active || ins.bypass || slot.failed {
+        if !ins.active || (ins.bypass || strip.mode_bypass.get(i).copied().unwrap_or(false)) || slot.failed {
             // A skipped reader misses releases: let go of its notes and pedals once.
             if let Some(delay) = &mut slot.note_delay {
                 delay.skip(&mut *slot.plugin);
@@ -345,12 +352,12 @@ pub(crate) fn process_master(
             && ins.active
             && !slot.failed
         {
-            if ins.bypass && !slot.plugin.idle_applies_all_parameters() {
+            if (ins.bypass || strip.mode_bypass.get(i).copied().unwrap_or(false)) && !slot.plugin.idle_applies_all_parameters() {
                 continue; // Its freeze-only idle hook preserves captured buffer contents.
             }
-            let span = if ins.bypass { 0 } else { timed_span(transport, frames) };
+            let span = if ins.bypass || strip.mode_bypass.get(i).copied().unwrap_or(false) { 0 } else { timed_span(transport, frames) };
             apply_params(None, slot, ins, t, &strip.touch, i, pos, span);
-            if ins.bypass {
+            if ins.bypass || strip.mode_bypass.get(i).copied().unwrap_or(false) {
                 continue;
             }
             if run_insert(slot, &mut strip.buf, None, frames, transport, live.no_suspend) && contain_failure(slot, &mut strip.buf, frames) {
@@ -489,7 +496,7 @@ pub(crate) fn note_insert_latency(t: &Track, strip: &mut Strip, pos: Samples, du
         }
         let (Some(ins), Some(Some(slot))) = (ins, strip.plugins.get_mut(i)) else { continue };
         // As `process_strip`: a failed insert is skipped, so its latency no longer counts.
-        if !ins.active || ins.bypass || slot.failed {
+        if !ins.active || (ins.bypass || strip.mode_bypass.get(i).copied().unwrap_or(false)) || slot.failed {
             continue;
         }
         // Block-start values only: processing sends the breakpoints inside the block.

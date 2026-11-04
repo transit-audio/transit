@@ -409,3 +409,6 @@ fn offline_paths_ignore_live_cue_padding_preferences() {
     assert_eq!(hits(&on[0]), [AT]);
     assert_eq!(hits(&on[2]), [AT], "common latency removal preserves cue/Main alignment");
 }
+
+#[path = "output_sinks/low_latency.rs"]
+mod low_latency;

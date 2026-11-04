@@ -23,7 +23,7 @@ pub(crate) fn strip_bytes(ch: usize, block: usize, cap: usize, inserts: usize, c
     let bufs = mul(mul(mul(ch, block)?, 4)?, f)?;
     let scratch = mul(block, f)?;
     let delays = if cap == 0 { 0 } else { mul(mul(mul(ch, add(cap, block)?)?, 2)?, f)? };
-    let slots = mul(inserts, size_of::<Option<PluginSlot>>())?;
+    let slots = mul(inserts, size_of::<Option<PluginSlot>>() + size_of::<bool>())?;
     let entries = mul(clips, size_of::<(u64, ClipFx)>())?;
     let meter = mul(ch, f)?;
     [scratch, delays, slots, entries, meter, size_of::<Strip>()].into_iter().try_fold(bufs, add)
@@ -54,6 +54,8 @@ pub(super) fn measure(
         over("clip_fx_per_strip", clips, l.clip_fx_per_strip.into())?;
         let slots = add(add(t.mixer.inserts.iter().flatten().count(), usize::from(t.instrument.is_some()))?, mul(clips, 2)?)?;
         cells = add(add(cells, 1)?, slots)?;
+        // Raw latency cells and their Arc reference counts, allocated on control.
+        bytes = add(bytes, mul(slots, 3 * size_of::<usize>())?)?;
         bytes = add(bytes, strip_bytes(ch, block, cap_of(t, ch), t.mixer.inserts.len(), clips)?)?;
         if live(t)
             && is_aux(t)

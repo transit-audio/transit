@@ -95,6 +95,8 @@ mod graph;
 mod hardware;
 mod instance;
 mod key;
+mod low_latency;
+pub use low_latency::{SlotLatencies, low_latency_bypass, low_latency_frames};
 mod matrix;
 mod midi;
 mod midi_fx;
@@ -379,6 +381,7 @@ impl Applied {
 }
 
 struct PluginSlot {
+    raw_latency: Arc<std::sync::atomic::AtomicUsize>,
     id: String,
     /// Channel count the plugin was prepared for.
     ch: usize,
@@ -431,6 +434,7 @@ impl PluginSlot {
         let third = is_third_party(&id);
         let note_delay = (slot != INSTRUMENT_SLOT && plugin.reads_track_notes()).then(note_delay::NoteDelay::new);
         PluginSlot {
+            raw_latency: Arc::new(std::sync::atomic::AtomicUsize::new(plugin.latency())),
             id,
             ch,
             plugin,
@@ -455,6 +459,7 @@ impl PluginSlot {
 }
 
 struct Strip {
+    mode_bypass: Vec<bool>,
     buf: Vec<Vec<f32>>,
     /// Pre-fader copy for pre-fader sends (and pre-fader keys, [`Strip::key_pre`]).
     pre: Vec<Vec<f32>>,
@@ -732,6 +737,7 @@ impl ClipFxTable {
 impl Strip {
     fn new() -> Self {
         Strip {
+            mode_bypass: Vec::new(),
             buf: Vec::new(),
             pre: Vec::new(),
             key_pre: false,
