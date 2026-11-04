@@ -28,3 +28,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E67: a pending note start masked its release (#290)](E67-a-pending-note-start-masked-its-release.md)
 - [E68: an Xvfb reset dropped a test's X11 connection](E68-an-xvfb-reset-dropped-a-test-connection.md)
 - [E69: a VST3 editor was refused before it could report its size (#295)](E69-a-vst3-editor-was-refused-before-it-could-report-its-size.md)
+- [E70: the phase-marker test compared wall-clock stretches (#323)](E70-the-phase-marker-test-compared-wall-clock-stretches.md)
