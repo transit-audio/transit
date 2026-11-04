@@ -44,6 +44,7 @@ mod surround;
 mod tab;
 mod takes;
 mod track;
+mod track_height;
 mod track_more;
 mod transport;
 mod view;
@@ -148,6 +149,7 @@ pub fn command_specs() -> &'static [CommandSpec] {
         v.extend(edit_more::specs());
         v.extend(view::specs());
         v.extend(track::specs());
+        v.extend(track_height::specs());
         v.extend(freeze::specs());
         v.extend(clip::specs());
         v.extend(event::specs());
