@@ -27,9 +27,18 @@ impl StudioApp {
         self.set_cursor(at, Some(t));
     }
 
+    /// Empty the clip selection (one selection focus, #310): a header click leaves no clips
+    /// selected, so Delete takes the track. Tracks and range stay as they are.
+    pub fn clear_clip_selection(&mut self) {
+        if !self.engine.session().edit.selected_clips.is_empty() {
+            let _ = self.run("edit.select", json!({"clips": []}));
+        }
+    }
+
     /// A click on a track's header (arrangement) or channel strip (mixer): focus it, and let
     /// Delete take it. `additive` (Shift) adds it to the selected tracks, or removes it again.
     pub fn focus_header(&mut self, t: TrackId, additive: bool) {
+        self.clear_clip_selection();
         if !additive {
             self.focus(t);
             self.tracks_selected_by_header = true;

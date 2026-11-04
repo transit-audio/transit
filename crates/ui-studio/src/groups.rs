@@ -521,6 +521,7 @@ impl StudioApp {
     /// plainly clicked track over the rows in between (group members included); Ctrl adds or
     /// removes it.
     pub fn click_header(&mut self, t: TrackId, shift: bool, toggle: bool) {
+        self.clear_clip_selection();
         let s = self.engine.session_arc();
         let anchor = self.arrange.anchor.filter(|a| s.track(*a).is_some()).or_else(|| self.focus_track());
         if shift && let Some(a) = anchor {

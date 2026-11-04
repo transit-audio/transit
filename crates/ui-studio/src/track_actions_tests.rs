@@ -374,3 +374,86 @@ fn width_menu_explains_why_recording_disables_it() {
     }
     assert!(explained, "hovering the disabled width action must explain how to enable it");
 }
+
+fn clip_of(app: &StudioApp, t: TrackId) -> transit_model::ClipId {
+    app.engine.session().track(t).unwrap().clips()[0].id
+}
+
+#[test]
+fn header_click_after_clip_click_makes_delete_take_the_track_not_the_clip() {
+    let (mut app, ctx, mut time, [a, _, keys]) = delete_app();
+    let clip = clip_of(&app, keys);
+    app.click_clip(clip, false);
+    assert!(app.engine.session().edit.selected_clips.contains(&clip));
+    let at = header_mid(&app, a);
+    click(&mut app, at);
+    frames(&mut app, &ctx, 4, &mut time);
+    assert!(app.engine.session().edit.selected_clips.is_empty(), "a header click clears the clip selection");
+    assert!(app.tracks_selected_by_header);
+    let undo = undo_len(&mut app);
+    key(&mut app, "Delete");
+    frames(&mut app, &ctx, 4, &mut time);
+    assert!(app.engine.session().track(a).is_none(), "Delete takes the clicked track");
+    assert_eq!(app.engine.session().track(keys).unwrap().clips().len(), 1, "the clip survives");
+    assert_eq!(undo_len(&mut app), undo + 1);
+    app.run("edit.undo", json!({})).unwrap();
+    assert!(app.engine.session().track(a).is_some(), "undo restores the track");
+    assert_eq!(app.engine.session().track(keys).unwrap().clips().len(), 1);
+}
+
+#[test]
+fn header_click_on_a_track_with_clips_asks_before_deleting_it() {
+    let (mut app, ctx, mut time, [_, _, keys]) = delete_app();
+    let other = clip_of(&app, keys);
+    app.click_clip(other, false);
+    let at = header_mid(&app, keys);
+    click(&mut app, at);
+    frames(&mut app, &ctx, 4, &mut time);
+    key(&mut app, "Delete");
+    frames(&mut app, &ctx, 4, &mut time);
+    assert!(matches!(app.dialog, Some(crate::Dialog::DeleteTracks { .. })), "the track is the target");
+    assert_eq!(app.engine.session().track(keys).unwrap().clips().len(), 1);
+}
+
+#[test]
+fn clip_click_after_header_click_makes_delete_take_the_clip() {
+    let (mut app, ctx, mut time, [a, _, keys]) = delete_app();
+    let at = header_mid(&app, a);
+    click(&mut app, at);
+    frames(&mut app, &ctx, 4, &mut time);
+    assert!(app.tracks_selected_by_header);
+    let clip = clip_of(&app, keys);
+    app.click_clip(clip, false);
+    assert!(!app.tracks_selected_by_header);
+    let tracks = track_count(&app);
+    key(&mut app, "Delete");
+    frames(&mut app, &ctx, 4, &mut time);
+    assert!(app.engine.session().track(keys).unwrap().clips().is_empty(), "the clip is removed");
+    assert_eq!(track_count(&app), tracks, "the tracks stay");
+}
+
+#[test]
+fn shift_and_ctrl_header_clicks_keep_the_clip_selection_cleared() {
+    for (shift, toggle) in [(true, false), (false, true)] {
+        let (mut app, _ctx, _time, [a, b, keys]) = delete_app();
+        let clip = clip_of(&app, keys);
+        app.click_header(a, false, false);
+        app.click_clip(clip, false);
+        app.click_header(b, shift, toggle);
+        assert!(app.engine.session().edit.selected_clips.is_empty(), "shift={shift} toggle={toggle}");
+        assert!(app.tracks_selected_by_header);
+    }
+}
+
+#[test]
+fn a_header_control_click_does_not_clear_the_clip_selection() {
+    let (mut app, ctx, mut time, [_, _, keys]) = delete_app();
+    let clip = clip_of(&app, keys);
+    app.click_clip(clip, false);
+    frames(&mut app, &ctx, 4, &mut time);
+    let mute = app.arrange.layout.tracks.iter().find(|r| r.id == keys.0).unwrap().mute;
+    click(&mut app, mid(mute));
+    frames(&mut app, &ctx, 4, &mut time);
+    assert!(app.engine.session().track(keys).unwrap().mixer.mute, "the click hit the mute button");
+    assert!(app.engine.session().edit.selected_clips.contains(&clip));
+}
