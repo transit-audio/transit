@@ -8,7 +8,7 @@
 //!   start: the rows in order, each adding `amount · via · curve(source)` to its destination's sum
 //!   (`via` is 1 when the row has none). A row whose source or destination is Off, or whose amount
 //!   is 0, adds nothing and costs nothing. Fixed storage, no allocation.
-//! - **Curves.** The clip fades' own shapes ([`crate::offline::FadeShape`]) on the source's
+//! - **Curves.** The clip fades' own shapes (dsp's `offline::FadeShape`, [`fade_gain`]) on the source's
 //!   magnitude, the sign kept: `curve(x) = shape(|x|)·sign(x)`, so a bipolar source bends the same
 //!   way on both sides of 0 and 0 and ±1 are fixed points of every curve.
 //! - **Destinations** and what 100% of a full-scale source does (each destination's sum is
@@ -22,8 +22,6 @@
 //!   curve each) is the matrix's first rows: Velocity or Key to Harmonics, Timbre, Morph or Decay,
 //!   the depth as the amount, the curve as the curve. `transit_model::legacy_mapping` rewrites an
 //!   old session's or preset's parameters that way, and the render is the same bits.
-
-use crate::offline::FadeShape;
 
 /// Rows in the matrix.
 pub const ROWS: usize = 16;
@@ -135,14 +133,24 @@ pub const RATE_OCTAVES: f32 = 4.0;
 /// (clamped to 0..1) with the sign of `x`. 0 and ±1 are fixed points; NaN reads 0.
 #[must_use]
 pub fn curve(curve: usize, x: f32) -> f32 {
-    let fade = match curve {
-        1 => FadeShape::Exponential,
-        2 => FadeShape::SCurve,
-        3 => FadeShape::EqualPower,
-        4 => FadeShape::Logarithmic,
-        _ => FadeShape::Linear,
-    };
-    fade.gain(x.abs()).copysign(x)
+    fade_gain(curve, x.abs()).copysign(x)
+}
+
+/// The fade-in gain of curve `curve` ([`CURVES`]) at `t` in 0..1 (0 silent, 1 unity; NaN reads 0):
+/// the clip fades' shapes, the same code as dsp's `offline::FadeShape::gain` (Linear, Exponential,
+/// S-curve, Equal power, Logarithmic in [`CURVES`] order), which dsp's offline module owns with
+/// its fades; a dsp test proves the two equal bit for bit.
+#[must_use]
+pub fn fade_gain(curve: usize, t: f32) -> f32 {
+    let t = if t.is_nan() { 0.0 } else { t.clamp(0.0, 1.0) };
+    const K: f32 = 4.0;
+    match curve {
+        1 => ((K * t).exp() - 1.0) / (K.exp() - 1.0),
+        2 => 0.5 - 0.5 * (t * std::f32::consts::PI).cos(),
+        3 => (t * std::f32::consts::FRAC_PI_2).sin(),
+        4 => (1.0 + (K.exp() - 1.0) * t).ln() / K,
+        _ => t,
+    }
 }
 
 /// One row as its parameters set it.

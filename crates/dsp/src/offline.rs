@@ -662,4 +662,23 @@ mod tests {
         assert_eq!(ch[0][50], 1.0);
         fade(&mut ch, 1000, 1000, FadeShape::SCurve);
     }
+
+    /// The modulation matrix's curves (the shared instrument primitives' copy of these shapes, ADR
+    /// 0041) are these fades bit for bit, by the matrix's curve index, on a 1025-point sweep and
+    /// past the ends.
+    #[test]
+    fn the_matrix_curves_are_the_fade_shapes_bit_for_bit() {
+        use transit_instrument_core::matrix::{CURVES, curve, fade_gain};
+        let shapes = [FadeShape::Linear, FadeShape::Exponential, FadeShape::SCurve, FadeShape::EqualPower, FadeShape::Logarithmic];
+        assert_eq!(shapes.len(), CURVES.len());
+        for (c, shape) in shapes.into_iter().enumerate() {
+            let ends = [-1.5f32, 1.5, f32::NAN, f32::INFINITY, f32::NEG_INFINITY];
+            for t in (0..=1024).map(|i| i as f32 / 1024.0).chain(ends) {
+                assert_eq!(fade_gain(c, t).to_bits(), shape.gain(t).to_bits(), "{shape:?} at {t}");
+                for x in [t, -t] {
+                    assert_eq!(curve(c, x).to_bits(), shape.gain(x.abs()).copysign(x).to_bits(), "{shape:?} at {x}");
+                }
+            }
+        }
+    }
 }

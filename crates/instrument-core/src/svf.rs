@@ -21,7 +21,7 @@ pub enum Mode {
 }
 
 impl Mode {
-    pub(crate) fn from_index(i: usize) -> Mode {
+    pub fn from_index(i: usize) -> Mode {
         match i {
             1 => Mode::High,
             2 => Mode::Band,
@@ -35,7 +35,7 @@ impl Mode {
 pub const Q_MIN: f32 = std::f32::consts::FRAC_1_SQRT_2;
 pub const Q_MAX: f32 = 25.0;
 /// `k = 1/Q` of the 24 dB slope's second, Butterworth section.
-pub(crate) const K_BUTTERWORTH: f32 = std::f32::consts::SQRT_2;
+pub const K_BUTTERWORTH: f32 = std::f32::consts::SQRT_2;
 /// The lowest cutoff the modulation can reach; the highest is [`max_cutoff`].
 pub const MIN_CUTOFF: f32 = 16.0;
 
@@ -52,8 +52,8 @@ pub fn max_cutoff(sr: f32) -> f32 {
 
 /// One section's coefficients (shared by every channel: stereo-linked).
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) struct Coefs {
-    pub(crate) k: f32,
+pub struct Coefs {
+    pub k: f32,
     a1: f32,
     a2: f32,
     a3: f32,
@@ -61,14 +61,14 @@ pub(crate) struct Coefs {
 
 impl Coefs {
     /// `g = tan(π·fc/fs)` and `k = 1/Q`.
-    pub(crate) fn new(g: f32, k: f32) -> Coefs {
+    pub fn new(g: f32, k: f32) -> Coefs {
         let a1 = 1.0 / (1.0 + g * (g + k));
         let a2 = g * a1;
         Coefs { k, a1, a2, a3: g * a2 }
     }
 
     /// The prewarped integrator gain of a cutoff, clamped to the usable range.
-    pub(crate) fn g_of(cutoff: f32, sr: f32) -> f32 {
+    pub fn g_of(cutoff: f32, sr: f32) -> f32 {
         let f = cutoff.clamp(MIN_CUTOFF, max_cutoff(sr));
         (std::f32::consts::PI * f / sr).tan()
     }
@@ -82,7 +82,7 @@ impl Default for Coefs {
 
 /// One channel's integrator memories of one section.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub(crate) struct Section {
+pub struct Section {
     ic1: f32,
     ic2: f32,
 }
@@ -90,7 +90,7 @@ pub(crate) struct Section {
 impl Section {
     /// One sample through the section in `mode`.
     #[inline]
-    pub(crate) fn tick(&mut self, c: &Coefs, mode: Mode, v0: f32) -> f32 {
+    pub fn tick(&mut self, c: &Coefs, mode: Mode, v0: f32) -> f32 {
         let v3 = v0 - self.ic2;
         let v1 = c.a1 * self.ic1 + c.a2 * v3;
         let v2 = self.ic2 + c.a2 * self.ic1 + c.a3 * v3;
@@ -105,7 +105,7 @@ impl Section {
     }
 
     #[cfg(feature = "testing")]
-    pub(crate) fn bits(&self) -> [u32; 2] {
+    pub fn bits(&self) -> [u32; 2] {
         [self.ic1.to_bits(), self.ic2.to_bits()]
     }
 }
@@ -113,7 +113,7 @@ impl Section {
 /// The drive stage: exactly linear up to full scale, a smooth (C1) knee to a ceiling of 1.5 at
 /// twice full scale, flat beyond: `t - (t - 1)²/2` for `1 < |x| < 2`.
 #[inline]
-pub(crate) fn soft_clip(x: f32) -> f32 {
+pub fn soft_clip(x: f32) -> f32 {
     let a = x.abs();
     if a <= 1.0 {
         x

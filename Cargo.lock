@@ -4224,6 +4224,7 @@ dependencies = [
  "rustfft",
  "serde",
  "transit-granular",
+ "transit-instrument-core",
  "transit-macro-osc",
  "transit-macro-osc-oracle",
  "transit-modal-voice",
@@ -4265,6 +4266,10 @@ version = "0.6.2"
 dependencies = [
  "transit-macro-osc-oracle",
 ]
+
+[[package]]
+name = "transit-instrument-core"
+version = "0.6.2"
 
 [[package]]
 name = "transit-macro-osc"

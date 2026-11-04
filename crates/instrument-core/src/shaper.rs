@@ -5,7 +5,7 @@
 //!   over from the low-pass gate as the voice's envelope: while the shaper is on the gate is held
 //!   open (the level input at 1) and the voice ends when the amp envelope's release does;
 //! - a **multimode state-variable filter** (low, band or high pass; 12 or 24 dB), the Filter
-//!   insert's own sections ([`crate::plugins::filter::svf`]: the drive's soft clip, the trapezoidal
+//!   insert's own sections ([`crate::svf`]: the drive's soft clip, the trapezoidal
 //!   SVF, the 24 dB slope's Butterworth second section), with cutoff, resonance, drive and key
 //!   tracking (100%: one octave per octave from middle C);
 //! - a **filter ADSR** whose amount (`filter_env_amount`, bipolar) moves the cutoff up to six
@@ -29,9 +29,13 @@
 //! block (the rule #245 asks of the Filter insert), so playback from bar 5 and an export from bar 1
 //! place it the same; with the transport stopped it runs at the tempo's rate.
 
-use crate::plugins::filter::svf::{Coefs, K_BUTTERWORTH, MIN_CUTOFF, Mode, Section, max_cutoff, q_of, soft_clip};
-use crate::plugins::instrument_queue::{Adsr, AdsrRates, Stage};
-use crate::plugins::lfo::{Lfo, Shape, SyncDivision};
+use crate::adsr::{Adsr, AdsrRates, Stage};
+use crate::lfo::{Lfo, Shape, SyncDivision};
+use crate::svf::{Coefs, K_BUTTERWORTH, MIN_CUTOFF, Mode, Section, max_cutoff, q_of, soft_clip};
+
+/// The shaper's block in frames: the filter's coefficients and every modulation are worked out
+/// once per block (the firmware's 12-frame block, which dsp's instruments run in).
+pub const BLOCK: usize = 12;
 
 /// The LFO shapes, in the order of the `lfo<n>_shape` parameters' choices (the shared LFO's order).
 pub const LFO_SHAPES: [&str; 6] = ["Sine", "Triangle", "Saw", "Square", "Sample & hold", "Smooth random"];
@@ -39,7 +43,7 @@ pub const LFO_SHAPES: [&str; 6] = ["Sine", "Triangle", "Saw", "Square", "Sample 
 pub const FILTER_MODES: [&str; 3] = ["Low pass", "Band pass", "High pass"];
 /// Octaves the filter envelope and the matrix's Cutoff move the cutoff at 100% and full swing (the
 /// Filter insert's figure).
-pub const MOD_OCTAVES: f32 = crate::plugins::filter::MOD_OCTAVES;
+pub const MOD_OCTAVES: f32 = 6.0;
 
 /// The filter mode of a `filter_mode` choice.
 #[must_use]
@@ -53,18 +57,18 @@ pub fn filter_mode(i: usize) -> Mode {
 
 /// One LFO's settings.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct LfoSettings {
-    pub(crate) shape: Shape,
+pub struct LfoSettings {
+    pub shape: Shape,
     /// Hz (free rate).
-    pub(crate) rate: f32,
-    pub(crate) sync: bool,
+    pub rate: f32,
+    pub sync: bool,
     /// The shared synced phase rule and cycle length.
-    pub(crate) division: SyncDivision,
-    pub(crate) retrigger: bool,
+    pub division: SyncDivision,
+    pub retrigger: bool,
     /// Blocks to fade in over after a note (0: none).
-    pub(crate) fade_blocks: f32,
+    pub fade_blocks: f32,
     /// The output level, 0..1.
-    pub(crate) amount: f32,
+    pub amount: f32,
 }
 
 impl Default for LfoSettings {
@@ -86,7 +90,7 @@ impl LfoSettings {
     /// for a meter of `bar` quarter notes, at `sr` frames per second.
     #[allow(clippy::too_many_arguments)]
     #[must_use]
-    pub(crate) fn new(
+    pub fn new(
         shape: usize,
         rate: f32,
         sync: bool,
@@ -98,7 +102,7 @@ impl LfoSettings {
         bar_origin: (i64, f64),
         sr: f32,
     ) -> Self {
-        let blocks = fade_ms * 0.001 * sr / super::BLOCK as f32;
+        let blocks = fade_ms * 0.001 * sr / BLOCK as f32;
         LfoSettings {
             shape: Shape::from_index(shape),
             rate,
@@ -112,7 +116,7 @@ impl LfoSettings {
 
     /// Cycles per frame: from the tempo when synced, else from the rate scaled by `octaves`.
     #[must_use]
-    pub(crate) fn increment(&self, tempo: f64, octaves: f32, sr: f32) -> f64 {
+    pub fn increment(&self, tempo: f64, octaves: f32, sr: f32) -> f64 {
         if self.sync {
             tempo / 60.0 / self.division.quarters.max(1e-6) / f64::from(sr)
         } else {
@@ -124,28 +128,28 @@ impl LfoSettings {
 
 /// What every voice's shaper reads in a block: the parameters, worked out off the voices.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Settings {
+pub struct Settings {
     /// The shaper's audio section (filter and amp envelope) is on.
-    pub(crate) on: bool,
-    pub(crate) amp: AdsrRates,
+    pub on: bool,
+    pub amp: AdsrRates,
     /// 0..1.
-    pub(crate) amp_velocity: f32,
-    pub(crate) filter_env: AdsrRates,
-    pub(crate) mode: Mode,
-    pub(crate) slope24: bool,
+    pub amp_velocity: f32,
+    pub filter_env: AdsrRates,
+    pub mode: Mode,
+    pub slope24: bool,
     /// log2 of the cutoff knob (Hz).
-    pub(crate) cutoff_log2: f32,
+    pub cutoff_log2: f32,
     /// The resonance knob, 0..1.
-    pub(crate) resonance: f32,
+    pub resonance: f32,
     /// Linear gain before the filter.
-    pub(crate) drive: f32,
+    pub drive: f32,
     /// -1..1.
-    pub(crate) key_track: f32,
+    pub key_track: f32,
     /// -1..1.
-    pub(crate) env_amount: f32,
-    pub(crate) lfo: [LfoSettings; 2],
+    pub env_amount: f32,
+    pub lfo: [LfoSettings; 2],
     /// Host frames per second (the voices' frames play one for one at it).
-    pub(crate) sr: f32,
+    pub sr: f32,
 }
 
 impl Default for Settings {
@@ -171,7 +175,7 @@ impl Default for Settings {
 /// A held voice crossing the shaper's switch in this block (#262): its output crossfades over the
 /// block's frames from the old path to the new, so the switch makes no step.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Fade {
+pub enum Fade {
     /// No switch: the voice stays on its path.
     None,
     /// Into the shaper: from the low-pass gate's output to the filtered, enveloped one. The filter
@@ -184,28 +188,28 @@ pub(crate) enum Fade {
 
 /// The modulations one block of the shaper's filter takes from the matrix (destination sums).
 #[derive(Debug, Clone, Copy, Default)]
-pub(crate) struct FilterMods {
-    pub(crate) cutoff: f32,
-    pub(crate) resonance: f32,
-    pub(crate) env_amount: f32,
+pub struct FilterMods {
+    pub cutoff: f32,
+    pub resonance: f32,
+    pub env_amount: f32,
 }
 
 /// A voice's shaper state.
 #[derive(Debug, Clone)]
-pub(crate) struct Shaper {
-    pub(crate) amp: Adsr,
-    pub(crate) filter_env: Adsr,
+pub struct Shaper {
+    pub amp: Adsr,
+    pub filter_env: Adsr,
     sections: [Section; 2],
     coefs: [Coefs; 2],
-    pub(crate) lfo: [Lfo; 2],
+    pub lfo: [Lfo; 2],
     /// Blocks since the note started (for the LFOs' fade-in).
     since_note: u32,
     /// The velocity scale of the amp envelope for the note.
     amp_scale: f32,
     /// The matrix's LFO amount sums of the last block (they act one block later).
-    pub(crate) lfo_amount_mod: [f32; 2],
+    pub lfo_amount_mod: [f32; 2],
     /// The note's random value, -1..1, drawn at each new note.
-    pub(crate) random: f32,
+    pub random: f32,
     rng: u32,
     seed: u32,
     /// The envelopes are gated (a key holds the voice).
@@ -221,7 +225,7 @@ fn mix_seed(seed: u32, salt: u32) -> u32 {
 impl Shaper {
     /// A voice's shaper, its random draws seeded from the voice's seed.
     #[must_use]
-    pub(crate) fn new(seed: u32) -> Shaper {
+    pub fn new(seed: u32) -> Shaper {
         let mut s = Shaper {
             amp: Adsr::new(),
             filter_env: Adsr::new(),
@@ -240,13 +244,13 @@ impl Shaper {
         s
     }
 
-    pub(crate) fn set_seed(&mut self, seed: u32) {
+    pub fn set_seed(&mut self, seed: u32) {
         self.seed = seed;
         self.reset();
     }
 
     /// Back to the state of a new voice with the same seed.
-    pub(crate) fn reset(&mut self) {
+    pub fn reset(&mut self) {
         self.amp = Adsr::new();
         self.filter_env = Adsr::new();
         self.sections = [Section::default(); 2];
@@ -261,7 +265,7 @@ impl Shaper {
     }
 
     /// The voice went idle: its envelopes rest at 0 and the filter forgets its memories.
-    pub(crate) fn rest(&mut self) {
+    pub fn rest(&mut self) {
         self.amp = Adsr::new();
         self.filter_env = Adsr::new();
         self.sections = [Section::default(); 2];
@@ -281,7 +285,7 @@ impl Shaper {
     /// A new note on the voice (not a legato change): the envelopes start from where they are, a
     /// new random value, the LFOs restart (retriggered) or take the instrument's running phase
     /// (`free`, cycles), and their fade-in starts.
-    pub(crate) fn note(&mut self, s: &Settings, velocity: f32, free: [f64; 2]) {
+    pub fn note(&mut self, s: &Settings, velocity: f32, free: [f64; 2]) {
         self.amp.gate_on();
         self.filter_env.gate_on();
         self.gate = true;
@@ -298,7 +302,7 @@ impl Shaper {
     }
 
     /// The last key let go of the voice: the envelopes release.
-    pub(crate) fn release(&mut self) {
+    pub fn release(&mut self) {
         if self.gate {
             self.amp.gate_off();
             self.filter_env.gate_off();
@@ -308,14 +312,14 @@ impl Shaper {
 
     /// The amp envelope has finished: the shaped voice is silent.
     #[must_use]
-    pub(crate) fn amp_idle(&self) -> bool {
+    pub fn amp_idle(&self) -> bool {
         self.amp.stage == Stage::Idle
     }
 
     /// LFO `i`'s output now: its shape, faded in, at its amount (plus the matrix's amount sum of
     /// the last block, clamped to 0..1).
     #[must_use]
-    pub(crate) fn lfo_value(&self, s: &Settings, i: usize) -> f32 {
+    pub fn lfo_value(&self, s: &Settings, i: usize) -> f32 {
         let (Some(l), Some(set)) = (self.lfo.get(i), s.lfo.get(i)) else { return 0.0 };
         let fade = if set.fade_blocks > 0.0 { (self.since_note as f32 / set.fade_blocks).min(1.0) } else { 1.0 };
         let amount = (set.amount + self.lfo_amount_mod.get(i).copied().unwrap_or(0.0)).clamp(0.0, 1.0);
@@ -324,7 +328,7 @@ impl Shaper {
 
     /// Anchors the tempo-synced, free-running LFOs to the song position `quarters` (the transport
     /// plays): the phase is the position over the cycle's length.
-    pub(crate) fn anchor(&mut self, s: &Settings, quarters: f64) {
+    pub fn anchor(&mut self, s: &Settings, quarters: f64) {
         for (l, set) in self.lfo.iter_mut().zip(&s.lfo) {
             if set.sync && !set.retrigger {
                 l.set_phase(set.division.phase(quarters));
@@ -334,19 +338,19 @@ impl Shaper {
 
     /// Advances the LFOs over one block (those not anchored this block) at the rate the matrix's
     /// rate sums (`octaves`, already scaled) give, and the fade-in clock.
-    pub(crate) fn advance_lfos(&mut self, s: &Settings, tempo: f64, octaves: [f32; 2], anchored: bool) {
+    pub fn advance_lfos(&mut self, s: &Settings, tempo: f64, octaves: [f32; 2], anchored: bool) {
         for ((l, set), oct) in self.lfo.iter_mut().zip(&s.lfo).zip(octaves) {
             if anchored && set.sync && !set.retrigger {
                 continue;
             }
-            l.advance(set.increment(tempo, oct, s.sr) * super::BLOCK as f64);
+            l.advance(set.increment(tempo, oct, s.sr) * BLOCK as f64);
         }
         self.since_note = self.since_note.saturating_add(1);
     }
 
     /// Works out the filter's coefficients for this block: the cutoff knob, key tracking for
     /// `note`, the filter envelope at its level now times its amount, and the matrix's sums.
-    pub(crate) fn design(&mut self, s: &Settings, note: f32, m: FilterMods) {
+    pub fn design(&mut self, s: &Settings, note: f32, m: FilterMods) {
         let amount = (s.env_amount + m.env_amount).clamp(-1.0, 1.0);
         let oct = MOD_OCTAVES * (amount * self.filter_env.level + m.cutoff) + s.key_track * (note - 60.0) / 12.0;
         let hz = (s.cutoff_log2 + oct).exp2();
@@ -360,7 +364,7 @@ impl Shaper {
     /// frame of `block` goes through the drive, the filter and the amp envelope's gain. A `fade`
     /// (a held voice crossing the switch) runs the filter as well and crossfades linearly over the
     /// block from the old path to the new: frame `k` of `n` takes `(k + 1) / n` of the new one.
-    pub(crate) fn process(&mut self, s: &Settings, shaped: bool, fade: Fade, block: &mut [f32]) {
+    pub fn process(&mut self, s: &Settings, shaped: bool, fade: Fade, block: &mut [f32]) {
         if fade == Fade::In {
             self.sections = [Section::default(); 2];
         }
@@ -410,7 +414,7 @@ mod tests {
         let s = settings(false);
         let mut sh = Shaper::new(3);
         sh.note(&s, 1.0, [0.0; 2]);
-        let mut block = [0.3f32; super::super::BLOCK];
+        let mut block = [0.3f32; BLOCK];
         sh.design(&s, 60.0, FilterMods::default());
         sh.process(&s, s.on, Fade::None, &mut block);
         assert!(block.iter().all(|y| y.to_bits() == 0.3f32.to_bits()));
@@ -422,21 +426,21 @@ mod tests {
     fn on_the_amp_envelope_gates_the_voice() {
         let s = settings(true);
         let mut sh = Shaper::new(3);
-        let mut block = [0.5f32; super::super::BLOCK];
+        let mut block = [0.5f32; BLOCK];
         sh.design(&s, 60.0, FilterMods::default());
         sh.process(&s, s.on, Fade::None, &mut block);
         assert!(block.iter().all(|y| *y == 0.0), "no note, no sound");
         sh.note(&s, 1.0, [0.0; 2]);
         let mut peak = 0.0f32;
         for _ in 0..400 {
-            let mut b = [0.5f32; super::super::BLOCK];
+            let mut b = [0.5f32; BLOCK];
             sh.process(&s, s.on, Fade::None, &mut b);
             peak = peak.max(b.iter().fold(0.0, |m, y| m.max(y.abs())));
         }
         assert!(peak > 0.2, "{peak}");
         sh.release();
         for _ in 0..2000 {
-            let mut b = [0.5f32; super::super::BLOCK];
+            let mut b = [0.5f32; BLOCK];
             sh.process(&s, s.on, Fade::None, &mut b);
         }
         assert!(sh.amp_idle());

@@ -1,0 +1,16 @@
+[package]
+name = "transit-instrument-core"
+description = "transit's shared instrument primitives: the per-voice shaper (filter, two LFOs, envelopes), the 16-row modulation matrix, the state-variable filter, the LFO and the ADSR used by the built-in instruments (ADR 0041)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+publish = false
+
+[features]
+# Test seams (state fingerprints for dsp's `Plugin::fingerprint`, issue #210); never enabled by the app.
+testing = []
+
+[lints]
+workspace = true

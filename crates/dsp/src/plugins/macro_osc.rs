@@ -54,12 +54,12 @@ use crate::{Category, Plugin, PluginInfo, Transport, db_to_gain};
 use transit_macro_osc::SampleRate;
 use transit_macro_osc::utils::random::Random;
 
-#[path = "macro_osc_matrix.rs"]
-pub mod matrix;
+// The matrix and the shaper moved to the shared instrument primitives (ADR 0041); their old
+// paths stay.
+pub use transit_instrument_core::matrix;
 #[path = "macro_osc_params.rs"]
 mod params;
-#[path = "macro_osc_shaper.rs"]
-pub mod shaper;
+pub use transit_instrument_core::shaper;
 #[path = "macro_osc_voice.rs"]
 pub mod voice;
 
@@ -71,6 +71,8 @@ use voice::{Controls, Shared, Slot};
 
 /// The voice's block: its envelopes advance once per render call, timed for 12 frames.
 pub const BLOCK: usize = 12;
+// The shaper works out its modulations once per this same block.
+const _: () = assert!(BLOCK == shaper::BLOCK);
 
 /// The models in the firmware's order (its engine index), named by what they do.
 pub const MODELS: [&str; 24] = [

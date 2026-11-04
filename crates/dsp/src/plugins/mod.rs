@@ -6,7 +6,8 @@ pub mod eq;
 pub mod filter;
 pub mod harmonic;
 pub mod instrument_queue;
-pub mod lfo;
+// The shared LFO moved to the instrument primitives (ADR 0041); its old path stays.
+pub use transit_instrument_core::lfo;
 pub mod macro_osc;
 pub mod modal_voice;
 pub mod modulator;

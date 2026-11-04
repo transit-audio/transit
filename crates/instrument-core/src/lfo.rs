@@ -1,9 +1,9 @@
 //! Modulation sources the built-in plug-ins share: the LFO and its tempo-synced divisions (moved
-//! from the Filter, #242).
+//! from the Filter, #242; from dsp to the shared instrument primitives, ADR 0041).
 
 /// The LFO's shapes, in the order of the `lfo_shape` parameter's choices.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Shape {
+pub enum Shape {
     Sine,
     Triangle,
     Saw,
@@ -15,7 +15,7 @@ pub(crate) enum Shape {
 }
 
 impl Shape {
-    pub(crate) fn from_index(i: usize) -> Shape {
+    pub fn from_index(i: usize) -> Shape {
         match i {
             1 => Shape::Triangle,
             2 => Shape::Saw,
@@ -28,11 +28,11 @@ impl Shape {
 }
 
 /// The tempo-synced divisions, in the order of the `lfo_division` parameter's choices.
-pub(crate) const DIVISIONS: [&str; 14] =
+pub const DIVISIONS: [&str; 14] =
     ["4 bars", "2 bars", "1 bar", "1/2", "1/4", "1/8", "1/16", "1/32", "1/4 T", "1/8 T", "1/16 T", "1/4 D", "1/8 D", "1/16 D"];
 
 /// One cycle of division `i` in quarter notes; the bar divisions use the meter (`bar` quarter notes).
-pub(crate) fn division_quarters(i: usize, bar: f64) -> f64 {
+pub fn division_quarters(i: usize, bar: f64) -> f64 {
     match i {
         0 => 4.0 * bar,
         1 => 2.0 * bar,
@@ -53,15 +53,15 @@ pub(crate) fn division_quarters(i: usize, bar: f64) -> f64 {
 
 /// A synced division's length and origin, shared by both devices (#253).
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SyncDivision {
-    pub(crate) quarters: f64,
+pub struct SyncDivision {
+    pub quarters: f64,
     origin: f64,
 }
 
 impl SyncDivision {
     /// `bar` is zero-based; `bar_start` is its absolute quarter-note position. Meter changes
     /// occur on bar lines, and update this origin without resetting the count of bars.
-    pub(crate) fn new(i: usize, quarters_per_bar: f64, (bar, bar_start): (i64, f64)) -> Self {
+    pub fn new(i: usize, quarters_per_bar: f64, (bar, bar_start): (i64, f64)) -> Self {
         let origin = if i <= 2 && bar_start.is_finite() { bar_start - bar as f64 * quarters_per_bar } else { 0.0 };
         Self { quarters: division_quarters(i, quarters_per_bar), origin }
     }
@@ -69,7 +69,7 @@ impl SyncDivision {
     /// `(bar + (quarters - bar_start) / quarters_per_bar) / bars_per_cycle`, modulo one.
     /// Subtracting the equivalent quarter origin preserves the old arithmetic bit for bit
     /// when the meter never changed (origin zero). Beat divisions always use quarter zero.
-    pub(crate) fn phase(self, quarters: f64) -> f64 {
+    pub fn phase(self, quarters: f64) -> f64 {
         let cycles = (quarters - self.origin) / self.quarters.max(1e-6);
         if cycles.is_finite() { cycles - cycles.floor() } else { 0.0 }
     }
@@ -78,7 +78,7 @@ impl SyncDivision {
 /// A free-running LFO: phase in cycles, advanced per sample; its value is read only when the
 /// filter's coefficients are worked out. The phase restarts on a note when its retrigger is on.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct Lfo {
+pub struct Lfo {
     phase: f64,
     /// The random shape's current step, drawn at each cycle start.
     step: f32,
@@ -89,14 +89,20 @@ pub(crate) struct Lfo {
 
 const SEED: u32 = 0x2545_F491;
 
+impl Default for Lfo {
+    fn default() -> Self {
+        Lfo::new()
+    }
+}
+
 impl Lfo {
-    pub(crate) fn new() -> Lfo {
+    pub fn new() -> Lfo {
         Lfo::seeded(SEED)
     }
 
     /// An LFO whose random shapes draw from `seed` (non-zero; 0 takes the default seed): each of
     /// the Macro Oscillator's voices has its own.
-    pub(crate) fn seeded(seed: u32) -> Lfo {
+    pub fn seeded(seed: u32) -> Lfo {
         let mut l = Lfo { phase: 0.0, step: 0.0, prev: 0.0, rng: if seed == 0 { SEED } else { seed } };
         l.step = l.draw();
         l.prev = l.step;
@@ -115,7 +121,7 @@ impl Lfo {
 
     /// Advances one sample by `inc` cycles.
     #[inline]
-    pub(crate) fn advance(&mut self, inc: f64) {
+    pub fn advance(&mut self, inc: f64) {
         self.phase += inc;
         if self.phase >= 1.0 {
             self.phase -= self.phase.floor();
@@ -128,7 +134,7 @@ impl Lfo {
         self.step = self.draw();
     }
 
-    pub(crate) fn retrigger(&mut self) {
+    pub fn retrigger(&mut self) {
         self.phase = 0.0;
         self.next_step();
     }
@@ -136,7 +142,7 @@ impl Lfo {
     /// Sets the phase (in cycles; the fraction is kept), as a tempo-synced LFO anchored to the song
     /// position does at each block (#245's rule, #243): a phase that went backwards (a new cycle,
     /// or a jump) starts a new random step.
-    pub(crate) fn set_phase(&mut self, phase: f64) {
+    pub fn set_phase(&mut self, phase: f64) {
         let p = if phase.is_finite() { phase - phase.floor() } else { 0.0 };
         if p < self.phase {
             self.next_step();
@@ -145,13 +151,13 @@ impl Lfo {
     }
 
     /// The phase now, 0..1 cycles.
-    #[cfg(test)]
-    pub(crate) fn phase(&self) -> f64 {
+    #[must_use]
+    pub fn phase(&self) -> f64 {
         self.phase
     }
 
     /// The value now, -1..1.
-    pub(crate) fn value(&self, shape: Shape) -> f32 {
+    pub fn value(&self, shape: Shape) -> f32 {
         let p = self.phase as f32;
         match shape {
             Shape::Sine => (std::f32::consts::TAU * p).sin(),
@@ -181,7 +187,7 @@ impl Lfo {
     }
 
     #[cfg(feature = "testing")]
-    pub(crate) fn bits(&self) -> (u64, u32, u32) {
+    pub fn bits(&self) -> (u64, u32, u32) {
         (self.phase.to_bits(), self.step.to_bits(), self.rng)
     }
 }

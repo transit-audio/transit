@@ -6,7 +6,7 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 | Layer | Crates |
 |---|---|
 | L0 | `time`, `rt`, `audio-io`, `audio-backend`, `audio-wasapi`, `audio-asio`, `audio-jack`, `midi-io`, `midi` |
-| L1 | `dsp`, `macro-osc`, `resonator`, `modal-voice`, `texture`, `granular`, `modulator`, `random-sequencer`, `clap-host`, `vst3-host`, `au-host`, `plugin-host` |
+| L1 | `dsp`, `instrument-core`, `macro-osc`, `resonator`, `modal-voice`, `texture`, `granular`, `modulator`, `random-sequencer`, `clap-host`, `vst3-host`, `au-host`, `plugin-host` |
 | L2 | `model` (the session document) |
 | L3 | `mix` (the render engine) |
 | L4 | `engine` (commands, undo, I/O), `playback` (devices, Player) |
@@ -19,11 +19,13 @@ Crates form layers; a crate may depend only on its own layer or lower. The table
 - Every crate is registered in `LAYERS`; a new crate needs a row (and a layer you can justify).
 - No dependency points upward (dev-dependencies excepted).
 - The standalone crates (`STANDALONE`: `time`, `audio-io`, `audio-backend`, `midi-io`, `midi`,
-  `macro-osc`, `resonator`, `texture`, `granular`, `modulator`, `random-sequencer`) have no
+  `macro-osc`, `instrument-core`, `resonator`, `texture`, `granular`, `modulator`, `random-sequencer`) have no
   production workspace dependencies at all. `modal-voice` depends on `resonator` at L1.
   `dsp` was standalone until it took
   `macro-osc` for the Macro Oscillator built-in (#195, a same-layer edge: the built-ins'
-  registry, `Plugin` trait and parameter tables live in `dsp`).
+  registry, `Plugin` trait and parameter tables live in `dsp`). `dsp` also depends on
+  `instrument-core`, the shared instrument primitives (shaper, matrix, SVF, LFO, ADSR) moved out of
+  it by ADR 0041 so the sampler core can share them without an edge to `dsp`.
 - Nothing below L6 depends on egui, eframe, winit, rfd or similar (`UI_CRATES`).
 
 ## Portability tiers
@@ -34,7 +36,7 @@ adds a portability axis without changing the layer numbers:
 | Tier | Crates or surface | Required boundary |
 |---|---|---|
 | A: Linux core with `std` | `engine`, `mix`, `rt`, `model`, `midi`, device-independent `playback` | Build and test without UI or plug-in hosting; no `no_std` commitment. |
-| B: processing with `no_std` + `alloc` | L1 `dsp` pure processing, `macro-osc`, `resonator`, `modal-voice`, `texture`, `granular`, `modulator`, `random-sequencer`, every future DSP/effect port | Default `std` feature; bare-metal ARM library check with defaults off; no clocks, threads or allocation in process. |
+| B: processing with `no_std` + `alloc` | L1 `dsp` pure processing, `instrument-core`, `macro-osc`, `resonator`, `modal-voice`, `texture`, `granular`, `modulator`, `random-sequencer`, every future DSP/effect port | Default `std` feature; bare-metal ARM library check with defaults off; no clocks, threads or allocation in process. |
 | Desktop adapters, outside Tier B | dsp's desktop `Plugin`/`PluginInfo`, registry, state/editor transport and analysis; format hosts, `plugin-host`, device backends and UI | Adapt the portable cores; never make a processing crate depend on the desktop adapter. |
 
 Tier B is the required destination for existing candidates, not a claim that they already compile

@@ -9,7 +9,7 @@ repository.workspace = true
 
 [features]
 # Test seams (`Plugin::fingerprint`, issue #210); never enabled by the app.
-testing = []
+testing = ["transit-instrument-core/testing"]
 
 [dependencies]
 serde.workspace = true
@@ -30,6 +30,8 @@ transit-resonator.workspace = true
 transit-modal-voice.workspace = true
 # The Random Sequencer MIDI effect (ADR 0033, #202): a same-layer (L1) dependency.
 transit-random-sequencer.workspace = true
+# The shared instrument primitives (shaper, matrix, SVF, LFO, ADSR; ADR 0041): a same-layer (L1) dependency.
+transit-instrument-core.workspace = true
 
 [dev-dependencies]
 proptest.workspace = true

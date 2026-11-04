@@ -21,7 +21,8 @@
 //! Clamped to 16 Hz .. 0.49·fs.
 
 mod mods;
-pub mod svf;
+// The state-variable sections moved to the instrument primitives (ADR 0041); the old path stays.
+pub use transit_instrument_core::svf;
 #[cfg(test)]
 mod tests;
 
@@ -38,6 +39,8 @@ use svf::{Coefs, K_BUTTERWORTH, MIN_CUTOFF, Mode, Section, max_cutoff, q_of, sof
 pub const CONTROL: u64 = 16;
 /// Octaves a modulation source moves the cutoff at 100% amount and full swing.
 pub const MOD_OCTAVES: f32 = 6.0;
+// The instruments' shaper moves its cutoff by the same figure.
+const _: () = assert!(MOD_OCTAVES == transit_instrument_core::shaper::MOD_OCTAVES);
 /// Events one block may queue (more than the mix's note view holds, 512).
 const MAX_QUEUE: usize = 1024;
 

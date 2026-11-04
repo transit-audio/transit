@@ -105,6 +105,7 @@ fn standalone_and_ui_checks_cover_normal_and_build_dependencies_but_not_dev() {
     for name in [
         "transit-audio-backend",
         "transit-macro-osc",
+        "transit-instrument-core",
         "transit-resonator",
         "transit-granular",
         "transit-texture",
