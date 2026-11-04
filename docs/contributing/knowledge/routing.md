@@ -2,6 +2,8 @@
 
 Design: [ADR 0015](../../adr/0015-io-routing-abstraction.md). Read it before changing anything here.
 
+Proposed slice (f), [Low Latency mode and path latency readout](../../adr/0015-io-routing-abstraction.md#amendment-2026-11-05-low-latency-mode): `UiState` stores machine preferences `low_latency` (off) and `low_latency_limit_ms` (0 ms) in `ui.json`. The control-side compiler selects software audio inserts on armed/monitored routes, downstream buses and the master, highest reported latency first until each chain fits or no eligible insert remains. The plan applies this bypass without changing session flags and recomputes shared compensation; instruments, MIDI effects and hardware inserts stay enabled, and unrelated playback latency can still determine L. Offline deliverables ignore the mode; a live cue's padding opt-out stays independent. The transport tooltip and diagnostics read `query.path_latency` from the adopted plan's latency plus backend output latency, with unknown device latency shown as unknown. The amendment defines the command, selection ties, publication, query fields and deterministic gates; it is not implemented yet.
+
 ## Model
 
 - **Per machine:** an `IoMap` describes the device's channels and the named input and output paths
