@@ -184,3 +184,32 @@ fn show_hidden_defaults_to_all_hidden_and_preserves_inactive_and_mute() {
     assert!(e.session().tracks.iter().all(|t| !t.hidden));
     e.execute("track.show_hidden", &json!({})).unwrap();
 }
+
+/// #332: the print of a mono take stack (the maintainer's guitar track) is the comped take, bit for
+/// bit from its first frame, then the two seconds of silence the print adds after the last clip.
+#[test]
+fn a_plain_bounce_of_a_take_stack_prints_the_active_take_bit_for_bit_from_frame_zero() {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
+    let path = std::env::temp_dir().join(format!("transit-bounce-332-{}-{}.wav", std::process::id(), NEXT.fetch_add(1, Ordering::Relaxed)));
+    // Two passes of 4800 frames: the second (the active take) holds 0.5, then a step to -0.25.
+    let signal: Vec<f32> = (0..9600).map(|i| if i < 6000 { 0.5 } else { -0.25 }).collect();
+    let buffer = AudioBuffer { sample_rate: 48_000, channels: vec![signal.clone()] };
+    std::fs::write(&path, transit_audio_io::encode(&buffer, &EncodeOptions::default()).unwrap()).unwrap();
+    let mut e = Engine::default();
+    let t = TrackId(e.execute("track.new", &json!({"kind": "audio", "name": "Guitar"})).unwrap()["tracks"][0].as_u64().unwrap());
+    let plan = io::Recording { start: 0, pass: Some(4800), punch: None, rate: 48_000, takes: vec![], midi_journal: None, midi_placed: false };
+    io::place_recording_take(&mut e, &plan, vec![(t, path.clone())], true);
+    std::fs::remove_file(path).unwrap();
+    let source = e.session().track(t).unwrap();
+    assert_eq!(source.channels(), 1);
+    assert_eq!(source.take_stacks()[0].takes.len(), 2);
+    let dest = TrackId(e.execute("track.bounce", &json!({"tracks": [t.0]})).unwrap()["tracks"][0].as_u64().unwrap());
+    let clip = &e.session().track(dest).unwrap().clips()[0];
+    let transit_model::ClipContent::Audio { source, .. } = clip.content else { panic!("an audio clip") };
+    let print = e.session().pool.get(source).unwrap().buffer.channels.clone();
+    assert_eq!(print.len(), 1, "a mono track prints mono");
+    let mut want = signal[4800..].to_vec();
+    want.resize(4800 + 96_000, 0.0);
+    let first = print[0].iter().zip(&want).position(|(g, w)| g.to_bits() != w.to_bits());
+    assert_eq!(first.map(|i| (i, print[0][i], want[i])), None);
+}

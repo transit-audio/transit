@@ -138,6 +138,21 @@ impl RangeRender {
     }
 
     fn build(s: &Session, bus: Option<BusId>, range: Range, block: usize, io: Option<&IoMap>) -> Result<Self, CompileError> {
+        let target = Self::target_for(s, block, io.map_or(0, |m| m.outputs));
+        let (sr, max_block) = (target.sample_rate as f32, target.block());
+        let mut make = |spec: &InstanceSpec, _: SlotGen| create_instance(&spec.id, spec.state.as_deref(), sr, max_block, spec.ch);
+        Self::build_with(s, bus, range, block, io, &mut make)
+    }
+
+    /// [`RangeRender::build`] with the plug-in factory given (tests stand in for hosted plug-ins).
+    pub(crate) fn build_with(
+        s: &Session,
+        bus: Option<BusId>,
+        range: Range,
+        block: usize,
+        io: Option<&IoMap>,
+        make: &mut dyn FnMut(&InstanceSpec, SlotGen) -> Option<NewInstance>,
+    ) -> Result<Self, CompileError> {
         // Machine cue opt-outs never change rendered deliverables or their common alignment.
         let offline_io = io.cloned().map(|mut m| {
             m.paths.iter_mut().for_each(|p| p.live = false);
@@ -151,10 +166,8 @@ impl RangeRender {
         if let Some(m) = io {
             compiler.set_io(Arc::new(m.clone()));
         }
-        let (sr, max_block) = (target.sample_rate as f32, target.block());
-        let mut make = |spec: &InstanceSpec, _: SlotGen| create_instance(&spec.id, spec.state.as_deref(), sr, max_block, spec.ch);
         let next = compiler.active().checked_next().ok_or(CompileError::GenerationExhausted)?;
-        let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), next, &mut make)?;
+        let mut env = compiler.compile(Arc::new(s.clone()), compiler.active(), next, make)?;
         let adoption = eng.adopt_plan(&mut env);
         compiler.reclaim(env);
         if adoption != Adoption::Adopted {
@@ -328,6 +341,10 @@ fn key_feeders(s: &Session, track: TrackId) -> (Vec<bool>, Vec<bool>) {
     }
     (tracks, busses)
 }
+
+#[cfg(test)]
+#[path = "offline_prime_tests.rs"]
+mod prime_tests;
 
 #[cfg(test)]
 mod tests {
