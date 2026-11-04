@@ -43,7 +43,7 @@ body{margin:0;background:#0B0C0E}
 <div style="height: 112px; display: flex; flex-direction: column; gap: 3px; border-top: 1px solid #23272C; padding-top: 6px">
 <span style="font: 600 10px 'IBM Plex Sans', sans-serif; letter-spacing: 0.08em; text-transform: uppercase; color: #8C939D">Inserts</span>
 <sc-for list="{{s.inserts}}" as="i" hint-placeholder-count="1">
-<button type="button" style="height: 22px; flex: none; border-radius: 4px; border: 1px solid #2B3036; background: #22262B; color: {{i.col}}; display: flex; align-items: center; gap: 6px; padding: 0 6px; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer; text-align: left"><svg width="7" height="7" viewBox="0 0 8 8" aria-hidden="true"><circle cx="4" cy="4" r="3.5" fill="{{i.dot}}"></circle></svg><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{i.name}}</span></button>
+<button type="button" style="height: 22px; flex: none; border-radius: 4px; border: 1px solid #2B3036; background: #22262B; color: {{i.col}}; display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 6px 0 8px; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer; text-align: left"><span style="flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis">{{i.name}}</span><svg width="12" height="12" viewBox="0 0 12 12" aria-label="{{i.state}}" fill="none" stroke="{{i.ind}}" stroke-width="1.5" stroke-linecap="round"><path d="M6 1.5v4.2"></path><path d="M3.4 3.3a3.8 3.8 0 1 0 5.2 0"></path></svg></button>
 </sc-for>
 <button type="button" style="height: 22px; flex: none; border-radius: 4px; border: 1px dashed #383E46; background: transparent; color: #8C939D; font: 500 11px 'IBM Plex Sans', sans-serif; cursor: pointer">+ Insert</button>
 </div>
@@ -200,7 +200,7 @@ class Component extends DCLogic {
         return { x: mx0 + c * (mw + gap), w: mw, yPk: f(yPk), hPk: f(top + span - yPk), yRms: f(yR), hRms: f(top + span - yR), yHold: f(yH - 1), holdOp: (t.hold[c] === NEG || t.muted) ? 0 : 1 };
       });
       const ins = (t.inserts || []);
-      const shown = ins.slice(0, 3).map((i) => ({ name: i[0], dot: i[1] ? signal : '#585F69', col: i[1] ? '#E7E9EC' : '#8C939D' }));
+      const shown = ins.slice(0, 3).map((i) => ({ name: i[0], ind: i[1] ? signal : '#8C939D', state: i[1] ? 'On' : 'Bypassed', col: i[1] ? '#E7E9EC' : '#A7ADB6' }));
       const sends = (t.sends || []).slice(0, 2).map((d) => ({ n: d[0], txt: String(d[1]).replace('-', '−'), w: f((1 - pos(d[1])) * 100), aria: d[0] + ' send ' + d[1] + ' dB' }));
       const btns = isMaster
         ? [btn('M', 'Mute', false, 'm'), btn('Mono', 'Mono', false, 'i'), btn('Dim', 'Dim', false, 'm'), btn('Ref', 'Reference', false, 'i')]

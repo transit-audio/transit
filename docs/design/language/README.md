@@ -116,7 +116,8 @@ Drum-machine style trigger, for Drum Synth, Sampler slices and any pad grid.
 ### Channel strip (mixer)
 Built from the parts above, 132 wide (main bus 160). Top to bottom: 3 px track colour bar · name + number · input dropdown (+ MIDI OUT) · inserts and sends · output dropdown · pan knob (36, bipolar) with mono value · 2 × 2 toggle grid M S / R I · channel fader · gain + peak readouts.
 
-- **Full height:** inserts (fixed 112 px: up to 3 slots with bypass dots + "+ Insert") and sends (fixed 86 px: up to 2 rows with a level bar + "+ Send"). Fixed heights keep every fader aligned across tracks.
+- **Full height:** inserts (fixed 112 px: up to 3 insert slots + "+ Insert") and sends (fixed 86 px: up to 2 rows with a level bar + "+ Send"). Fixed heights keep every fader aligned across tracks.
+- **Insert slot:** 22 px, `surface.raised`, 1 px `line`, radius 4. Device name on the left (Sans 500 11, ellipsis), and an **on/bypass indicator** on the right: a 12 px power glyph (stroke 1.5), `signal` when the insert is on, `text.faint` when bypassed, with the name dimmed to `text.muted` as well. No dots: the glyph is the state. Click the glyph to toggle bypass, click the name to open the device; the indicator keeps the same meaning in the device title bar (A, bypass).
 - **Short:** inserts and sends collapse to `FX n` / `Snd n` count buttons; the fader keeps the full scale.
 - **Selected strip:** 1 px `signal` border. **Main bus:** Mute / Mono / Dim / Ref toggles, wider meters, integrated LUFS readout.
 
