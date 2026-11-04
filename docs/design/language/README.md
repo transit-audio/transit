@@ -2,8 +2,6 @@
 
 One panel language for every transit device (instruments, effects, utilities). Graphite surfaces, one **signal** colour for what you set, one **mod** colour for what moves it. Every device is built from the same panels, knobs, displays and routing rows.
 
-Live canvas (mockups): https://claude.ai/artifact/Au934Zt1DVLxNPaWRfgjUZ
-
 Machine-readable tokens: [`tokens.json`](tokens.json). Mockup sources: [`mockups/`](mockups/) (Design canvas `.dc.html` files; they render on the canvas, not standalone).
 
 ---
