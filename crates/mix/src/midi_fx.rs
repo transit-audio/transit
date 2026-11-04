@@ -484,10 +484,26 @@ impl MidiFxHost {
                     if !e.event.is_release() {
                         continue;
                     }
-                    // A release takes the place of a carried non-release (its note-on, perhaps):
-                    // delivered early it could end up before its own note-on and leave it hanging.
-                    let held = stage.carry.get(..stage.carry_len).unwrap_or_default().iter().position(|c| !c.event.is_release());
-                    if let Some(c) = held.and_then(|k| stage.carry.get_mut(k)) {
+                    // A release takes the place of its own carried note-on when there is one: the note
+                    // never sounded, so both go. Otherwise it takes the newest carried note-on. Either
+                    // way no off reaches the instrument before its on (#281).
+                    let own = stage.carry.get(..stage.carry_len).unwrap_or_default().iter().position(|c| {
+                        matches!(c.event.message, Message::NoteOn { .. })
+                            && c.event.channel == e.event.channel
+                            && key_of(&c.event.message) == key_of(&e.event.message)
+                            && (e.event.note_id == PluginEvent::NO_ID || c.event.note_id == e.event.note_id)
+                    });
+                    if let Some(k) = own {
+                        stage.carry.copy_within(k + 1..stage.carry_len, k);
+                        stage.carry_len -= 1;
+                        continue;
+                    }
+                    let carried = stage.carry.get(..stage.carry_len).unwrap_or_default();
+                    let victim = carried
+                        .iter()
+                        .rposition(|c| matches!(c.event.message, Message::NoteOn { .. }))
+                        .or_else(|| carried.iter().position(|c| !c.event.is_release()));
+                    if let Some(c) = victim.and_then(|k| stage.carry.get_mut(k)) {
                         *c = Carried { due, event: e.event };
                         continue;
                     }
