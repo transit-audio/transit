@@ -394,6 +394,55 @@ impl Shaper {
             self.sections = [Section::default(); 2];
         }
     }
+
+    // The external amp-gain seam (ADR 0041): the audio section a frame at a time without the amp
+    // envelope's gain, for a caller whose own envelope is the voice's one amp envelope (the sampler
+    // core). `process` above is unchanged; these run the same expressions in the same order, so
+    // `amp_frame`, `filter_frame` and `y * amp * amp_scale()` reproduce it bit for bit (the
+    // `the_external_amp_seam_reproduces_process_bit_for_bit` test).
+
+    /// Advances the amp envelope one frame and returns its level (without the velocity scale): the
+    /// per-frame gain [`Shaper::process`] applies to a shaped frame, before [`Shaper::amp_scale`].
+    #[inline]
+    pub fn amp_frame(&mut self, s: &Settings) -> f32 {
+        self.amp.next(&s.amp)
+    }
+
+    /// The note's velocity scale of the amp envelope (set by [`Shaper::note`]).
+    #[must_use]
+    pub fn amp_scale(&self) -> f32 {
+        self.amp_scale
+    }
+
+    /// One frame of the audio section without the amp gain: advances the filter envelope and, when
+    /// `filtered`, runs `x` through the drive and the filter; otherwise returns `x` untouched. The
+    /// amp envelope does not advance here (see [`Shaper::amp_frame`]).
+    #[inline]
+    pub fn filter_frame(&mut self, s: &Settings, filtered: bool, x: f32) -> f32 {
+        self.filter_env.next(&s.filter_env);
+        if !filtered {
+            return x;
+        }
+        let Shaper { sections: [s0, s1], coefs: [c0, c1], .. } = self;
+        let mut v = s0.tick(c0, s.mode, soft_clip(x * s.drive));
+        if s.slope24 {
+            v = s1.tick(c1, s.mode, v);
+        }
+        v
+    }
+
+    /// The filter's memories back to rest, as [`Shaper::process`] does before a [`Fade::In`] block
+    /// and after a [`Fade::Out`] one.
+    pub fn rest_filter(&mut self) {
+        self.sections = [Section::default(); 2];
+    }
+
+    /// The filter memories' bits (a state fingerprint seam, issue #210).
+    #[cfg(feature = "testing")]
+    #[must_use]
+    pub fn filter_bits(&self) -> [[u32; 2]; 2] {
+        [self.sections[0].bits(), self.sections[1].bits()]
+    }
 }
 
 #[cfg(test)]
@@ -462,5 +511,106 @@ mod tests {
         b.anchor(&s, 5.25);
         assert_eq!(a.lfo[0].phase(), 0.25);
         assert_eq!(a.lfo[0].phase(), b.lfo[0].phase());
+    }
+
+    /// The external amp-gain seam reproduces `process` bit for bit: per frame `amp_frame`, then
+    /// `filter_frame`, then the caller's `y * amp * amp_scale()` and the same switch crossfade, over
+    /// a sweep of filter modes, slopes, drives, resonances, cutoffs, key tracking, envelope amounts,
+    /// velocities, block lengths, fades and note/release timings. The states stay equal too: every
+    /// later block keeps matching.
+    #[test]
+    fn the_external_amp_seam_reproduces_process_bit_for_bit() {
+        fn seam(sh: &mut Shaper, s: &Settings, shaped: bool, fade: Fade, block: &mut [f32]) {
+            if fade == Fade::In {
+                sh.rest_filter();
+            }
+            let step = 1.0 / block.len().max(1) as f32;
+            for (k, y) in block.iter_mut().enumerate() {
+                let amp = sh.amp_frame(s);
+                let v = sh.filter_frame(s, shaped || fade != Fade::None, *y);
+                if !shaped && fade == Fade::None {
+                    assert_eq!(v.to_bits(), y.to_bits());
+                    continue;
+                }
+                let out = v * amp * sh.amp_scale();
+                let w = (k + 1) as f32 * step;
+                *y = match fade {
+                    Fade::None => out,
+                    Fade::In => *y + (out - *y) * w,
+                    Fade::Out => out + (*y - out) * w,
+                };
+            }
+            if fade == Fade::Out {
+                sh.rest_filter();
+            }
+        }
+        let mut cases = 0;
+        let mut x = 0x1357_9BDFu32;
+        let mut noise = move || {
+            x ^= x << 13;
+            x ^= x >> 17;
+            x ^= x << 5;
+            (x >> 8) as f32 / (1u32 << 23) as f32 - 1.0
+        };
+        for mode in 0..3 {
+            for slope24 in [false, true] {
+                for (drive, resonance, cutoff, key_track, env_amount) in
+                    [(1.0, 0.0, 20_000.0, 0.0, 0.0), (2.5, 0.7, 800.0, 1.0, 0.6), (0.4, 0.95, 120.0, -0.5, -1.0), (8.0, 0.3, 5_000.0, 0.25, 1.0)]
+                {
+                    for velocity in [0.0, 0.37, 1.0] {
+                        for len in [1usize, 5, BLOCK, 64] {
+                            let s = Settings {
+                                on: true,
+                                amp: AdsrRates::new(0.5, 12.0, 0.6, 3.0, 48_000.0),
+                                amp_velocity: 0.8,
+                                filter_env: AdsrRates::new(2.0, 8.0, 0.2, 5.0, 48_000.0),
+                                mode: filter_mode(mode),
+                                slope24,
+                                cutoff_log2: math::log2f(cutoff),
+                                resonance,
+                                drive,
+                                key_track,
+                                env_amount,
+                                ..Settings::default()
+                            };
+                            let mut a = Shaper::new(11);
+                            a.note(&s, velocity, [0.25, 0.5]);
+                            let mut b = a.clone();
+                            for round in 0..40 {
+                                let shaped = round % 7 != 3;
+                                let fade = match round % 9 {
+                                    2 => Fade::In,
+                                    6 => Fade::Out,
+                                    _ => Fade::None,
+                                };
+                                if round == 25 {
+                                    a.release();
+                                    b.release();
+                                }
+                                let m = FilterMods { cutoff: 0.1 * (round % 4) as f32, resonance: 0.05, env_amount: -0.2 };
+                                a.design(&s, 48.0 + round as f32, m);
+                                b.design(&s, 48.0 + round as f32, m);
+                                let input: Vec<f32> = (0..len).map(|_| noise()).collect();
+                                let mut ya = input.clone();
+                                let mut yb = input;
+                                a.process(&s, shaped, fade, &mut ya);
+                                seam(&mut b, &s, shaped, fade, &mut yb);
+                                for (k, (p, q)) in ya.iter().zip(&yb).enumerate() {
+                                    assert_eq!(
+                                        p.to_bits(),
+                                        q.to_bits(),
+                                        "mode {mode} slope24 {slope24} drive {drive} velocity {velocity} len {len} round {round} frame {k}"
+                                    );
+                                }
+                                assert_eq!(a.amp.level.to_bits(), b.amp.level.to_bits());
+                                assert_eq!(a.filter_env.level.to_bits(), b.filter_env.level.to_bits());
+                                cases += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(cases, 3 * 2 * 4 * 3 * 4 * 40);
     }
 }
