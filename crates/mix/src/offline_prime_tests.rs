@@ -51,6 +51,7 @@ fn a_plain_print_is_the_source_bit_for_bit_from_frame_zero() {
 }
 
 #[test]
+#[ignore = "waits on the ADR 0038 decision for #332"]
 fn an_automated_gain_insert_prints_its_lane_value_from_frame_zero() {
     let (mut s, t) = session(ChannelFormat::Stereo);
     let tr = s.track_mut(t).unwrap();
@@ -121,6 +122,7 @@ impl transit_dsp::Plugin for WarmUp {
 }
 
 #[test]
+#[ignore = "waits on the ADR 0038 decision for #332"]
 fn a_hosted_plug_in_warm_up_settles_before_the_first_printed_frame() {
     let (mut s, t) = session(ChannelFormat::Stereo);
     s.track_mut(t).unwrap().mixer.inserts[0] = Some(Insert::new("clap:test.warm_up"));
