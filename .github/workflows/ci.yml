@@ -81,6 +81,14 @@ jobs:
         run: bash xtask/tests/packaging-version.sh
       - run: cargo fmt --all -- --check
       - run: cargo xtask timing
+      # ADR 0037 Tier B: each enrolled processing crate type-checks for a bare-metal ARM target with
+      # default features off (no std). A library check: no tests, oracle, link or hardware run.
+      # Enrolled: transit-instrument-core (ADR 0041). Add each Tier B crate as it is retrofitted.
+      - name: Bare-metal library check (ADR 0037 Tier B)
+        run: |
+          rustup target add thumbv7em-none-eabihf
+          cargo check --locked --target thumbv7em-none-eabihf --no-default-features -p transit-instrument-core
+        shell: bash
       # Check production host code without the integration tests' self-dev feature activation.
       - run: cargo check --locked -p transit-clap-host -p transit-vst3-host --lib
       - run: cargo clippy --locked --workspace --all-targets -- -D warnings

@@ -200,7 +200,11 @@ probes and ADR 0033 oracle comparisons continue under default `std` in the platf
 New DSP crates enter the bare-metal job in their first slice. Retrofit existing crates in this
 order, adding each to the enforced job in the same slice; no allowed failure and no marking an
 unconverted crate portable. The eight-command list above is the completion criterion. Record
-the remaining candidates explicitly while the job's enrolled package list grows:
+the remaining candidates explicitly while the job's enrolled package list grows. Enrolled so far
+(implementation note, 2026-11-04): `transit-instrument-core`, the shared instrument primitives
+[ADR 0041](0041-sampler-one-instrument-three-views.md) moved out of dsp (#269), a new crate that
+started in Tier B; its check runs as a step of the linux job until the separate job lands.
+Candidates, in order:
 
 1. `resonator` — **small**: no production dependencies; core imports, alloc imports and two math wrappers.
 2. `modal-voice` — **small**, after resonator: forwards its feature, changes five files' imports and one direct sine call; delay storage already survives reset.

@@ -40,7 +40,9 @@ adds a portability axis without changing the layer numbers:
 | Desktop adapters, outside Tier B | dsp's desktop `Plugin`/`PluginInfo`, registry, state/editor transport and analysis; format hosts, `plugin-host`, device backends and UI | Adapt the portable cores; never make a processing crate depend on the desktop adapter. |
 
 Tier B is the required destination for existing candidates, not a claim that they already compile
-without `std`. The ADR lists blockers and the per-crate retrofit order. New DSP crates start with
+without `std`. `instrument-core` (ADR 0041) is the first crate with the enforced check: the
+linux job of `.github/workflows/ci.yml` runs its bare-metal library check. The others remain
+candidates until their retrofit slice enrolls them. The ADR lists blockers and the per-crate retrofit order. New DSP crates start with
 the bare-metal check. Allocation belongs in constructors and `prepare`; caller-owned prepared
 buffers are reused by processing, events, reset and state capture. The processing traits live
 with their cores, and dsp adapts them to its desktop `Plugin` surface. A std-only dependency,
