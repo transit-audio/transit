@@ -213,3 +213,37 @@ fn a_plain_bounce_of_a_take_stack_prints_the_active_take_bit_for_bit_from_frame_
     let first = print[0].iter().zip(&want).position(|(g, w)| g.to_bits() != w.to_bits());
     assert_eq!(first.map(|i| (i, print[0][i], want[i])), None);
 }
+
+/// #333: an inactive source printed silence without a word. The print is refused before it renders and
+/// the document stays byte for byte as it was, hidden or not, through either command id.
+#[test]
+fn an_inactive_source_refuses_the_bounce_and_changes_nothing() {
+    for hidden in [false, true] {
+        for id in ["track.bounce", "track.commit"] {
+            let (mut e, t) = fixture();
+            e.execute("track.make_inactive", &json!({"tracks": [t.0], "inactive": true})).unwrap();
+            e.session_mut().track_mut(t).unwrap().hidden = hidden;
+            let before = e.session().to_json().unwrap();
+            let steps = e.undo_history().len();
+            let err = e.execute(id, &json!({"tracks": [t.0]})).unwrap_err();
+            let transit_engine::EngineError::BadParams(_, why) = &err else { panic!("{err:?}") };
+            assert_eq!(why, "Vox is inactive: Track > Make Active first");
+            assert_eq!(e.session().to_json().unwrap(), before, "{id} hidden={hidden}");
+            assert_eq!(e.undo_history().len(), steps);
+            assert!(io::bounce_track(&mut e, t, None, io::BounceSource::Leave).is_err());
+            assert_eq!(e.session().to_json().unwrap(), before);
+        }
+    }
+}
+
+#[test]
+fn one_inactive_source_in_a_selection_stops_the_whole_bounce_before_any_print() {
+    let (mut e, t) = fixture();
+    let other = TrackId(e.execute("track.new", &json!({"kind": "audio", "name": "Idle"})).unwrap()["tracks"][0].as_u64().unwrap());
+    e.execute("track.make_inactive", &json!({"tracks": [other.0], "inactive": true})).unwrap();
+    let before = e.session().to_json().unwrap();
+    assert!(e.execute("track.bounce", &json!({"tracks": [t.0, other.0]})).is_err());
+    assert_eq!(e.session().to_json().unwrap(), before, "the active source was not printed either");
+    e.execute("track.make_inactive", &json!({"tracks": [other.0], "inactive": false})).unwrap();
+    e.execute("track.bounce", &json!({"tracks": [t.0]})).unwrap();
+}

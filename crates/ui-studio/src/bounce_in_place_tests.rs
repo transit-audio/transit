@@ -355,3 +355,23 @@ fn bounce_modal_swallows_wheel_and_zoom_over_the_backdrop() {
     assert_eq!(t.app.engine.session().edit.zoom, before);
     assert_eq!(t.app.arrange.vscroll, scroll);
 }
+
+#[test]
+fn an_inactive_source_refuses_the_form_with_the_menu_path_and_changes_nothing() {
+    let mut t = T::new();
+    let source = t.source();
+    t.app.run("track.make_inactive", json!({"tracks": [source.0], "inactive": true})).unwrap();
+    t.app.open_bounce_in_place();
+    t.frames();
+    let before = t.app.engine.session().to_json().unwrap();
+    let steps = t.app.engine.undo_history().len();
+    t.key("Enter");
+    assert_eq!(t.app.status, "Keys is inactive: Track > Make Active first");
+    assert!(matches!(t.app.dialog, Some(Dialog::BounceInPlace)), "the form stays open");
+    assert_eq!(t.app.engine.session().to_json().unwrap(), before);
+    assert_eq!(t.app.engine.undo_history().len(), steps);
+    let (req, _rx) = crate::ControlRequest::new("engine.execute", json!({"command": "track.bounce", "params": {"tracks": [source.0]}}));
+    let reply = format!("{:?}", crate::control::handle_for_test(&mut t.app, &t.ctx, &req));
+    assert!(reply.contains("Keys is inactive: Track > Make Active first"), "{reply}");
+    assert_eq!(t.app.engine.session().to_json().unwrap(), before);
+}

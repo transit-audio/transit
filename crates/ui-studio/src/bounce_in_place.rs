@@ -97,6 +97,11 @@ impl StudioApp {
         let destination =
             if f.existing { json!(f.destination.ok_or_else(|| "Choose an eligible audio destination.".to_string())?.0) } else { json!("new") };
         let name = self.track_name(t);
+        if self.engine.session().track(t).is_some_and(|tr| tr.inactive) {
+            let why = transit_engine::io::inactive_source_refusal(&name);
+            self.status = why.clone();
+            return Err(why);
+        }
         let result = self.run("track.bounce", json!({"tracks": [t.0], "destination": destination, "source": f.source.param()}))?;
         if let Some(id) = result["tracks"][0].as_u64() {
             let dest = TrackId(id);

@@ -555,6 +555,11 @@ pub enum BounceSource {
     Hide,
 }
 
+/// The refusal for a source that is inactive: it would print silence without a word.
+pub fn inactive_source_refusal(name: &str) -> String {
+    format!("{name} is inactive: Track > Make Active first")
+}
+
 /// Print through inserts, before the fader. Command callers validate every destination before
 /// rendering the first source; direct callers get the same validation here.
 pub fn bounce_track(e: &mut Engine, t: TrackId, destination: Option<TrackId>, source: BounceSource) -> Result<Option<TrackId>> {
@@ -563,6 +568,9 @@ pub fn bounce_track(e: &mut Engine, t: TrackId, destination: Option<TrackId>, so
     let Some(tr) = s.track(t) else { return Ok(None) };
     if !tr.kind.is_audio_path() || tr.kind == TrackKind::Master {
         return Ok(None);
+    }
+    if tr.inactive {
+        return Err(crate::cmd::bad("track.bounce", inactive_source_refusal(&tr.name)));
     }
     let end = tr.clips().iter().map(Clip::end).max().unwrap_or(0);
     if end <= 0 {

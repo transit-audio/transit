@@ -715,6 +715,9 @@ fn commit(e: &mut Engine, p: &Value) -> Result<Value> {
     for t in &tracks {
         if let Some(tr) = e.session().track(*t) {
             super::external_instrument::refuse_offline_print("track.commit", tr)?;
+            if tr.inactive && tr.kind.is_audio_path() && tr.kind != transit_model::TrackKind::Master {
+                return Err(bad("track.bounce", crate::io::inactive_source_refusal(&tr.name)));
+            }
         }
     }
     let mut out = Vec::new();
