@@ -120,7 +120,7 @@ impl StudioApp {
         self.engine.end_merge();
         let mut failed = None;
         for (id, params) in steps {
-            if let Err(e) = self.engine.execute_merged(id, params, &key) {
+            if let Err(e) = self.execute_ui_merged(id, params, &key) {
                 failed = Some(e.to_string());
                 break;
             }
@@ -190,10 +190,10 @@ impl StudioApp {
             let span = json!({"tracks": [t.0], "start": r.start, "end": r.end});
             let mut step = Ok(());
             if clips_selected {
-                step = self.engine.execute_merged("edit.heal", &span, &key).map(drop);
+                step = self.execute_ui_merged("edit.heal", &span, &key).map(drop);
             }
             if step.is_ok() && (!clips_selected || self.clips_in(*t, *r).len() >= 2) {
-                step = self.engine.execute_merged("edit.consolidate", &span, &key).map(drop);
+                step = self.execute_ui_merged("edit.consolidate", &span, &key).map(drop);
             }
             if let Err(e) = step {
                 failed = Some(e.to_string());

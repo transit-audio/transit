@@ -108,7 +108,7 @@ fn handle(app: &mut SoundApp, ctx: &egui::Context, req: &ControlRequest) -> Opti
             Ok(v) => ok(v),
             Err(e) => err(e),
         },
-        "engine.commands" => match app.engine.execute("engine.commands", p) {
+        "engine.commands" => match app.execute_ui("engine.commands", p) {
             Ok(v) => ok(v),
             Err(e) => err(e),
         },

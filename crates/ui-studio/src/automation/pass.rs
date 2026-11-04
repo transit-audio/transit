@@ -127,14 +127,14 @@ pub(crate) fn write_pass(app: &mut StudioApp, ctx: &egui::Context) {
             if let Some(hold) = app.auto.skipped.remove(&key) {
                 // The value moved after a hold: close the hold at its old value first.
                 for (cmd, p) in lane.set_cmds(t, hold, old, from) {
-                    ok &= app.engine.execute_merged(cmd, &p, PASS).is_ok();
+                    ok &= app.execute_ui_merged(cmd, &p, PASS).is_ok();
                 }
                 from = Some(hold);
             }
         }
         app.auto.skipped.remove(&key);
         for (cmd, p) in lane.set_cmds(t, pos, v, from) {
-            ok &= app.engine.execute_merged(cmd, &p, PASS).is_ok();
+            ok &= app.execute_ui_merged(cmd, &p, PASS).is_ok();
         }
         if ok {
             app.auto.last_v.insert(key.clone(), v);
@@ -267,7 +267,7 @@ pub(super) fn thin_after_pass(app: &mut StudioApp, tracks: &[TrackId], squash: b
     if app.ui.thin_after_write {
         for (id, param, start, end) in plan {
             let p = json!({"tracks": [id.0], "param": param, "start": start, "end": end, "tolerance": THIN_TOLERANCE});
-            if let Ok(r) = app.engine.execute_merged("automation.thin", &p, PASS) {
+            if let Ok(r) = app.execute_ui_merged("automation.thin", &p, PASS) {
                 removed += r["removed"].as_u64().unwrap_or(0) as usize;
             }
         }

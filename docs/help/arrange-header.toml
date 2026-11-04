@@ -67,3 +67,8 @@ id = "arrange_header.take_lane_menu"
 name = "Take lane menu"
 text = "Flatten Takes keeps what plays and removes the other takes. Delete Take removes this take; a take that plays cannot be deleted until another one is chosen."
 link = "user-guide.md#takes-and-comping"
+
+[[entry]]
+id = "arrange_header.height"
+name = "Track height"
+text = "Drag the bottom edge to resize this track. Alt-drag resizes every track. Alt-wheel over a main row changes only that track, eight points per notch."

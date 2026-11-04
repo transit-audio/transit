@@ -759,9 +759,7 @@ impl StudioApp {
             }
             // A rack macro (ADR 0034): the macro and every parameter it maps, one merged step.
             Control::Macro(n) => {
-                if let Err(e) =
-                    self.engine.execute_merged("rack.macro", &json!({"track": r.track.0, "macro": u16::from(*n) + 1, "value": value}), key)
-                {
+                if let Err(e) = self.execute_ui_merged("rack.macro", &json!({"track": r.track.0, "macro": u16::from(*n) + 1, "value": value}), key) {
                     self.status = e.to_string();
                 }
                 self.midi_learn.last_move = Some(now);
@@ -806,9 +804,9 @@ impl StudioApp {
         let slot_key = if slot == AutoParam::INSTRUMENT_SLOT { transit_mix::INSTRUMENT_SLOT } else { usize::from(slot) };
         self.touch_param(track, slot_key, param, true);
         let r = if slot == AutoParam::INSTRUMENT_SLOT {
-            self.engine.execute_merged("mix.instrument_param", &json!({"track": track.0, "param": param, "value": value}), key)
+            self.execute_ui_merged("mix.instrument_param", &json!({"track": track.0, "param": param, "value": value}), key)
         } else {
-            self.engine.execute_merged("mix.insert_param", &json!({"track": track.0, "slot": slot, "param": param, "value": value}), key)
+            self.execute_ui_merged("mix.insert_param", &json!({"track": track.0, "slot": slot, "param": param, "value": value}), key)
         };
         crate::automation::note_pass_edit(self);
         let what = format!("track {} {} ({} `{}` id {param}) = {value} (knob {norm:.3})", track.0, control.label(), info.name, p.name);

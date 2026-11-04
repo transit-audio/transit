@@ -84,7 +84,7 @@ impl StudioApp {
     /// The built-in plug-ins (`engine.plugins`, a query: no undo step, no document change).
     pub fn builtin_plugins(&mut self) -> Vec<PluginEntry> {
         if self.mixer.builtin.is_none() {
-            let list = self.engine.execute("engine.plugins", &serde_json::json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
+            let list = self.execute_ui("engine.plugins", &serde_json::json!({})).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default();
             let entries = list
                 .iter()
                 .map(|p| PluginEntry {

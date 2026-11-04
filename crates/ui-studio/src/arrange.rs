@@ -7,11 +7,12 @@ mod clips;
 mod copy_drag;
 mod drag_ghosts;
 mod geometry;
-pub(crate) use geometry::{Map, RowGeo};
 pub use geometry::TAKE_H;
 use geometry::shown;
+pub(crate) use geometry::{Map, RowGeo};
 pub(crate) mod marquee;
 mod take_lanes;
+pub(crate) mod track_height;
 mod tracks;
 pub(crate) use clips::*;
 use take_lanes::takes;
@@ -102,9 +103,14 @@ pub fn zone(rect: R4, pos: Pos2, audio: bool) -> DragKind {
         DragKind::TrimStart
     } else if rect[2] - pos.x <= edge {
         DragKind::TrimEnd
+    } else if rect[3] - rect[1] < 22.0 {
+        DragKind::Move
     } else if pos.y - rect[1] <= CLIP_NAME_H && rect[2] - pos.x <= LOOP_ZONE_W.min(w / 3.0) {
         DragKind::Loop
-    } else if audio && let Some(side) = crate::fades::corner(rect, pos) {
+    } else if audio
+        && rect[3] - rect[1] - CLIP_NAME_H - 4.0 > 4.0
+        && let Some(side) = crate::fades::corner(rect, pos)
+    {
         match side {
             crate::fades::Side::In => DragKind::FadeIn,
             crate::fades::Side::Out => DragKind::FadeOut,
@@ -251,6 +257,9 @@ pub struct ArrangeState {
     /// Grid mode, triplets and snap (view state; not saved in the session).
     pub grid: crate::grid::GridView,
     pub gesture: Option<Gesture>,
+    pub(crate) height_gesture: Option<track_height::HeightGesture>,
+    pub(crate) height_anchor: Option<(TrackId, f32)>,
+    pub(crate) height_wheel_consumed: bool,
     /// The loop strip gesture in progress (the loop region itself lives in the session).
     pub loop_drag: Option<crate::loopbar::LoopDrag>,
     /// Vertical scroll of the track rows (points).
@@ -287,6 +296,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     let ruler = Rect::from_min_max(pos2(full.min.x + hw, full.min.y), pos2(full.max.x, full.min.y + RULER_H));
     let tl = Rect::from_min_max(pos2(full.min.x + hw, full.min.y + RULER_H), full.max);
     let corner = Rect::from_min_max(full.min, pos2(full.min.x + hw, full.min.y + RULER_H));
+    track_height::input(app, ui, list, tl);
     let s = app.engine.session_arc();
     let map = Map { x0: tl.min.x, scroll: s.edit.zoom.scroll, spp: s.edit.zoom.samples_per_px.max(0.01), grid: app.arrange.grid };
     let p = ui.painter();
@@ -304,6 +314,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     let rows: Vec<&Track> = s.tracks.iter().filter(|t| shown(app, &s, t)).collect();
     app.arrange.order = rows.iter().map(|t| t.id).collect();
     let geo = RowGeo::new(app, &rows);
+    track_height::anchor(app, &rows, &geo, tl);
     let content_h = geo.total() + ADD_STACK_H;
     app.finish.layout.takes.clear();
     app.finish.layout.take_clips.clear();
@@ -347,6 +358,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
         if header.max.y >= list.min.y && header.min.y <= list.max.y {
             let selected = selected_tracks.contains(&t.id) || focus == Some(t.id);
             track_header(app, ui, t, header, list, selected, outputs.as_ref(), &mut row);
+            track_height::handle(app, ui, header, list, &mut row);
         }
         let lane_fill = if i % 2 == 0 { TOKENS.lane } else { TOKENS.lane_alt };
         let row_rect = Rect::from_min_max(lane.min, pos2(lane.max.x, y0 + geo.heights[i]));
@@ -580,6 +592,9 @@ fn hit(layout: &Layout, pos: Pos2) -> (Option<(ClipId, TrackId, DragKind, Sample
 
 #[allow(clippy::too_many_arguments)]
 fn timeline_input(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl: Rect, rows: &[&Track], geo: &RowGeo, layout: &Layout) {
+    if app.arrange.height_gesture.is_some() {
+        return;
+    }
     let resp = ui.interact(tl, ui.id().with("timeline"), Sense::click_and_drag());
     if let Some(pos) = resp.hover_pos()
         && app.arrange.gesture.is_none()
@@ -963,7 +978,9 @@ fn overlays(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, tl: Re
         for (i, t) in rows.iter().enumerate() {
             if t.mixer.record_arm && !app.midi_live.as_ref().is_some_and(|live| live.tracks.contains(&t.id)) {
                 let y0 = tl.min.y + geo.tops[i] - app.arrange.vscroll;
-                let r = Rect::from_min_max(pos2(map.x(span.start), y0 + 1.0), pos2(map.x(span.end).max(map.x(span.start) + 2.0), y0 + geo.main[i] - 1.0));
+                let r =
+                    Rect::from_min_max(pos2(map.x(span.start), y0 + 1.0), pos2(map.x(span.end).max(map.x(span.start) + 2.0), y0 + geo.main[i] - 1.0));
+                layout.recording.push(RecordingLane { track: t.id.0, rect: r4(r), notes: Vec::new() });
                 rp.rect_filled(r, crate::theme::RADIUS, TOKENS.record.gamma_multiply(0.45));
                 let strip = Rect::from_min_max(r.min, pos2(r.max.x, (r.min.y + CLIP_NAME_H).min(r.max.y)));
                 rp.rect_filled(strip, crate::theme::top_corners(), TOKENS.record);
@@ -1020,7 +1037,7 @@ fn midi_recording(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, row
         let body = Rect::from_min_max(pos2(r.min.x, strip.max.y + 2.0), pos2(r.max.x, r.max.y - 2.0));
         let span = f32::from(hi.saturating_sub(lo).max(11)) + 1.0;
         let mut notes = Vec::new();
-        for b in mine {
+        for b in mine.into_iter().filter(|_| body.height() > 4.0 && geo.main[i] >= 24.0) {
             let base = s.tempo.samples_to_ticks(b.range.start, s.sample_rate);
             for n in &b.sequence.notes {
                 let (a, e) = (s.tempo.tick_to_samples(base + n.start, s.sample_rate), s.tempo.tick_to_samples(base + n.end(), s.sample_rate));
@@ -1059,14 +1076,14 @@ fn scroll_and_zoom(app: &mut StudioApp, ui: &Ui, map: Map, full: Rect, tl: Rect,
     }
     let (delta, zoom) = ui.input(|i| (i.smooth_scroll_delta, i.zoom_delta()));
     if (zoom - 1.0).abs() > 1e-4 {
-        let _ = app.engine.execute("view.zoom_by", &json!({"factor": zoom, "x": (pos.x - tl.min.x).max(0.0)}));
+        let _ = app.execute_ui("view.zoom_by", &json!({"factor": zoom, "x": (pos.x - tl.min.x).max(0.0)}));
         return;
     }
     // egui has already turned Shift+vertical wheel into a horizontal delta (see `wheel_pan`), so
     // time pans on `delta.x` alone, whether it came from Shift, a tilt wheel or a swipe.
     if delta.x.abs() > 0.1 {
         let by_px = -wheel_pan(ui, delta.x) * f64::from(tl.width());
-        let _ = app.engine.execute("view.scroll", &json!({"by_px": by_px}));
+        let _ = app.execute_ui("view.scroll", &json!({"by_px": by_px}));
     }
     if delta.y.abs() > 0.1 {
         app.arrange.vscroll = (app.arrange.vscroll - delta.y).clamp(0.0, (content_h - tl.height()).max(0.0));
@@ -1082,6 +1099,6 @@ fn follow_playhead(app: &mut StudioApp, map: Map, tl: Rect) {
     let x = map.x(app.engine.transport.position);
     if x > tl.max.x - 8.0 || x < tl.min.x {
         let to = app.engine.transport.position - (f64::from(tl.width()) * map.spp * 0.05) as Samples;
-        let _ = app.engine.execute("view.scroll", &json!({"to": to.max(0)}));
+        let _ = app.execute_ui("view.scroll", &json!({"to": to.max(0)}));
     }
 }

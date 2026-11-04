@@ -211,19 +211,18 @@ impl StudioApp {
             let mut r = Ok(());
             for (id, v) in &values {
                 r = r.and(
-                    self.engine
-                        .execute_merged(
-                            "mix.instrument_param",
-                            &json!({"track": t.0, "param": id, "value": v, "preset": name}),
-                            &format!("preset:{}", t.0),
-                        )
-                        .map(|_| ()),
+                    self.execute_ui_merged(
+                        "mix.instrument_param",
+                        &json!({"track": t.0, "param": id, "value": v, "preset": name}),
+                        &format!("preset:{}", t.0),
+                    )
+                    .map(|_| ()),
                 );
             }
             self.engine.end_merge();
             r
         } else {
-            self.engine.execute("mix.insert_params", &json!({"track": t.0, "slot": slot, "params": values, "preset": name})).map(|_| ())
+            self.execute_ui("mix.insert_params", &json!({"track": t.0, "slot": slot, "params": values, "preset": name})).map(|_| ())
         };
         if let Err(e) = r {
             self.status = e.to_string();
@@ -287,7 +286,7 @@ pub fn control(app: &mut StudioApp, ui: &mut Ui, key: (TrackId, usize), ins: &In
             Ok(n) => {
                 // The name shows in the header; a note-only recall of the same values.
                 if key.1 != transit_mix::INSTRUMENT_SLOT {
-                    let _ = app.engine.execute("mix.insert_params", &json!({"track": key.0.0, "slot": key.1, "params": {}, "preset": n}));
+                    let _ = app.execute_ui("mix.insert_params", &json!({"track": key.0.0, "slot": key.1, "params": {}, "preset": n}));
                 }
                 ui.data_mut(|d| d.insert_temp(name_id, String::new()));
             }

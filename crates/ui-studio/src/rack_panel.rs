@@ -176,7 +176,7 @@ fn macro_knob(
     crate::midi_learn::mark(app, p, k.rect, rack, control.clone());
     if let Some(v) = k.value {
         let key = format!("rack_macro:{}:{i}", rack.0);
-        if let Err(e) = app.engine.execute_merged("rack.macro", &json!({"track": rack.0, "macro": i + 1, "value": v}), &key) {
+        if let Err(e) = app.execute_ui_merged("rack.macro", &json!({"track": rack.0, "macro": i + 1, "value": v}), &key) {
             app.status = e.to_string();
         }
     }
@@ -208,7 +208,7 @@ fn macro_menu(app: &mut StudioApp, ui: &mut Ui, rack: TrackId, i: usize, control
                 let slot = slot_text(m.slot);
                 let key = format!("rack_map:{}:{i}:{}:{}:{}", rack.0, m.track.0, m.slot, m.param);
                 let p = json!({"track": rack.0, "macro": i + 1, "member": m.track.0, "slot": slot, "param": m.param, "min": min, "max": max, "curve": curve});
-                if let Err(e) = app.engine.execute_merged("rack.macro_map", &p, &key) {
+                if let Err(e) = app.execute_ui_merged("rack.macro_map", &p, &key) {
                     app.status = e.to_string();
                 }
             }
@@ -320,7 +320,7 @@ fn zone_bar(
         if v != current {
             let key = format!("rack_zone:{}:{}:{which}", rack.0, member.0);
             let args = json!({"track": rack.0, "member": member.0, which: {handle: v}});
-            if let Err(e) = app.engine.execute_merged("rack.zone", &args, &key) {
+            if let Err(e) = app.execute_ui_merged("rack.zone", &args, &key) {
                 app.status = e.to_string();
             }
         }

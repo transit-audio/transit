@@ -113,6 +113,8 @@ pub enum Action {
     SelectNone,
     ZoomIn,
     ZoomOut,
+    TrackHeightIn,
+    TrackHeightOut,
     ZoomInterfaceIn,
     ZoomInterfaceOut,
     ResetInterfaceZoom,
@@ -362,6 +364,9 @@ pub const TABLE: &[Shortcut] = &[
     row(A::Rename, "Rename", NONE, Key::F2, S::Arrangement, "Windows' rename key; Cubase and Logic have none. Same as Ctrl+R."),
     row(A::RenameApply, "Apply Name", NONE, Key::Enter, S::Rename, "Also a click elsewhere."),
     row(A::RenameCancel, "Cancel Rename", NONE, Key::Escape, S::Rename, "All DAWs."),
+    row(A::TrackHeightIn, "Increase All Track Heights", ALT, Key::Equals, S::Arrangement, "One preset per press."),
+    row(A::TrackHeightIn, "Increase All Track Heights", ALT, Key::Plus, S::Arrangement, "Unshifted Plus."),
+    row(A::TrackHeightOut, "Decrease All Track Heights", ALT, Key::Minus, S::Arrangement, "One preset per press."),
     row(A::ZoomIn, "Zoom In", NONE, Key::Plus, S::Arrangement, "Ableton wins over Cubase (H)."),
     row(A::ZoomIn, "Zoom In", NONE, Key::Equals, S::Arrangement, "The unshifted + key."),
     row(A::ZoomIn, "Zoom In", SHIFT, Key::Plus, S::Arrangement, "The + key where it takes Shift."),
@@ -499,6 +504,22 @@ pub fn rows(action: Action) -> impl Iterator<Item = &'static Shortcut> {
 
 /// Consume a press of any of `action`'s keys. The held modifiers must be exactly the row's.
 pub fn pressed(ctx: &egui::Context, action: Action) -> bool {
+    if matches!(action, Action::TrackHeightIn | Action::TrackHeightOut) {
+        return ctx.input_mut(|i| {
+            let mut hit = false;
+            i.events.retain(|e| {
+                if let egui::Event::Key { key, pressed: true, repeat, modifiers, .. } = e
+                    && rows(action).any(|s| s.key == *key && modifiers.matches_exact(s.mods))
+                {
+                    hit |= !repeat;
+                    false
+                } else {
+                    true
+                }
+            });
+            hit
+        });
+    }
     ctx.input_mut(|i| rows(action).fold(false, |hit, s| hit | (i.modifiers.matches_exact(s.mods) && i.consume_key(s.mods, s.key))))
 }
 

@@ -122,13 +122,13 @@ impl StudioApp {
         self.builtin_editor.gesture = true;
         self.touch_param(t, slot, param, false);
         let r = if slot == transit_mix::INSTRUMENT_SLOT {
-            self.engine.execute_merged(
+            self.execute_ui_merged(
                 "mix.instrument_param",
                 &json!({"track": t.0, "param": param, "value": value}),
                 &format!("instrument_param:{}:{param}", t.0),
             )
         } else {
-            self.engine.execute_merged(
+            self.execute_ui_merged(
                 "mix.insert_param",
                 &json!({"track": t.0, "slot": slot, "param": param, "value": value}),
                 &format!("param:{}:{slot}:{param}", t.0),

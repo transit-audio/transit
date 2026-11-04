@@ -161,9 +161,9 @@ fn autoscroll(app: &mut StudioApp, pos: egui::Pos2, tl: Rect, max_vscroll: f32) 
         app.arrange.vscroll = (app.arrange.vscroll + step(pos.y - (tl.max.y - EDGE))).min(max_vscroll);
     }
     if pos.x < tl.min.x + EDGE {
-        let _ = app.engine.execute("view.scroll", &json!({"by_px": -f64::from(step(tl.min.x + EDGE - pos.x))}));
+        let _ = app.execute_ui("view.scroll", &json!({"by_px": -f64::from(step(tl.min.x + EDGE - pos.x))}));
     } else if pos.x > tl.max.x - EDGE {
-        let _ = app.engine.execute("view.scroll", &json!({"by_px": f64::from(step(pos.x - (tl.max.x - EDGE)))}));
+        let _ = app.execute_ui("view.scroll", &json!({"by_px": f64::from(step(pos.x - (tl.max.x - EDGE)))}));
     }
 }
 

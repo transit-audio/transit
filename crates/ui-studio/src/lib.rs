@@ -535,7 +535,7 @@ impl StudioApp {
     /// `plugin.retry` and `plugin.retry_all`: checked by the engine (the slot exists; not a
     /// document change), then the player makes the plug-ins again.
     fn retry_plugins(&mut self, id: &str, params: &Value) -> Result<Value, String> {
-        let checked = self.engine.execute(id, params).map_err(|e| {
+        let checked = self.execute_ui(id, params).map_err(|e| {
             self.status = e.to_string();
             e.to_string()
         })?;

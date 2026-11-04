@@ -61,7 +61,7 @@ impl StudioApp {
             return Err(bad(COMMAND, reason));
         }
         let Some(format @ ("mono" | "stereo")) = params.get("format").and_then(Value::as_str) else {
-            return self.engine.execute(COMMAND, params);
+            return self.execute_ui(COMMAND, params);
         };
         let tracks = tracks_required(&self.engine, COMMAND, params)?;
         let s = self.engine.session();
@@ -74,9 +74,9 @@ impl StudioApp {
         }
         self.engine.end_merge();
         let result = (|| {
-            let r = self.engine.execute_merged(COMMAND, params, COMMAND)?;
+            let r = self.execute_ui_merged(COMMAND, params, COMMAND)?;
             for (id, input) in inputs {
-                self.engine.execute_merged("track.input", &json!({"tracks": [id.0], "input": input, "create_bus": false}), COMMAND)?;
+                self.execute_ui_merged("track.input", &json!({"tracks": [id.0], "input": input, "create_bus": false}), COMMAND)?;
             }
             Ok(r)
         })();
@@ -371,7 +371,7 @@ impl StudioApp {
                 (TrackKind::Folder, Route::Bus(b)) => Some(*b),
                 _ => None,
             };
-            let r = self.engine.execute_merged("track.delete", &json!({"tracks": [t.0]}), key).map_err(fail)?;
+            let r = self.execute_ui_merged("track.delete", &json!({"tracks": [t.0]}), key).map_err(fail)?;
             let note = folder_bus
                 .filter(|b| crate::mixer::orphan_busses(&self.engine.session_arc()).contains(b))
                 .map(|_| format!("Deleted {name}; its bus stays, remove it with Remove unused buses"));
@@ -379,7 +379,7 @@ impl StudioApp {
         };
         let (listeners, feeders, senders) = s.bus_usage(bus);
         if listeners != [t] || !feeders.is_empty() {
-            let r = self.engine.execute_merged("track.delete", &json!({"tracks": [t.0]}), key).map_err(fail)?;
+            let r = self.execute_ui_merged("track.delete", &json!({"tracks": [t.0]}), key).map_err(fail)?;
             let note = format!("Deleted {name}; its bus stays, other tracks use it");
             return Ok((r, name, Some(note)));
         }
@@ -391,6 +391,7 @@ impl StudioApp {
                 }
             }
         }
+        self.commit_height_preview();
         let e = &mut self.engine;
         for (id, slot) in &sends {
             e.execute_merged("mix.send_remove", &json!({"track": id, "slot": slot}), key).map_err(fail)?;
@@ -420,7 +421,7 @@ impl StudioApp {
         let r = (|| {
             for b in &orphans {
                 // `force`: a bus nobody hears may still have sends and outputs; they are cleared.
-                let r = self.engine.execute_merged("mix.remove_bus", &json!({"bus": b.0, "force": true}), &key)?;
+                let r = self.execute_ui_merged("mix.remove_bus", &json!({"bus": b.0, "force": true}), &key)?;
                 let n = |k: &str| r["cleared"][k].as_array().map_or(0, Vec::len);
                 sends += n("senders");
                 outputs += n("feeders");

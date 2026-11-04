@@ -213,7 +213,7 @@ impl StudioApp {
         let mut n = 0;
         for (i, id) in order.iter().enumerate() {
             if self.engine.session().track_index(*id).is_some_and(|at| at != i) {
-                self.engine.execute_merged("track.move", &json!({"track": id.0, "to": i}), key)?;
+                self.execute_ui_merged("track.move", &json!({"track": id.0, "to": i}), key)?;
                 n += 1;
             }
         }
@@ -288,7 +288,7 @@ impl StudioApp {
             }
             let n = join.len();
             self.composite("Group Tracks", |app, key| {
-                app.engine.execute_merged("track.move_to_folder", &json!({"tracks": join, "folder": g.0}), key)?;
+                app.execute_ui_merged("track.move_to_folder", &json!({"tracks": join, "folder": g.0}), key)?;
                 app.normalize(key)
             })?;
             self.focus(g);
@@ -301,9 +301,9 @@ impl StudioApp {
         let n = list.len();
         let folder = self.composite("Group Tracks", |app, key| {
             if !nested.is_empty() {
-                app.engine.execute_merged("track.remove_from_folder", &json!({"tracks": nested}), key)?;
+                app.execute_ui_merged("track.remove_from_folder", &json!({"tracks": nested}), key)?;
             }
-            let r = app.engine.execute_merged("track.move_to_new_folder", &json!({"tracks": list, "name": name}), key)?;
+            let r = app.execute_ui_merged("track.move_to_new_folder", &json!({"tracks": list, "name": name}), key)?;
             app.normalize(key)?;
             Ok(TrackId(r.get("folder").and_then(Value::as_u64).unwrap_or(0)))
         })?;
@@ -401,6 +401,7 @@ impl StudioApp {
             .collect();
         // Members stay where they were: the session order without the group tracks.
         let order: Vec<TrackId> = s.tracks.iter().map(|t| t.id).filter(|t| !groups.contains(t)).collect();
+        self.commit_height_preview();
         let e = &mut self.engine;
         if !members.is_empty() {
             let list: Vec<u64> = members.iter().rev().map(|t| t.0).collect();
@@ -496,7 +497,7 @@ impl StudioApp {
             if from != to {
                 match to {
                     Some(f) => {
-                        app.engine.execute_merged("track.move_to_folder", &json!({"tracks": [t.0], "folder": f.0}), key)?;
+                        app.execute_ui_merged("track.move_to_folder", &json!({"tracks": [t.0], "folder": f.0}), key)?;
                     }
                     None => {
                         // Out of nested groups one level at a time (the engine's own step).
@@ -505,7 +506,7 @@ impl StudioApp {
                             if still.is_none() {
                                 break;
                             }
-                            app.engine.execute_merged("track.remove_from_folder", &json!({"tracks": [t.0]}), key)?;
+                            app.execute_ui_merged("track.remove_from_folder", &json!({"tracks": [t.0]}), key)?;
                         }
                     }
                 }

@@ -140,7 +140,7 @@ impl StudioApp {
         for (t, slot, data) in states {
             let slot = if slot == transit_mix::INSTRUMENT_SLOT { json!("instrument") } else { json!(slot) };
             let state = transit_model::b64::encode(&data);
-            if let Err(e) = self.engine.execute("mix.insert_state", &json!({"track": t.0, "slot": slot, "state": state})) {
+            if let Err(e) = self.execute_ui("mix.insert_state", &json!({"track": t.0, "slot": slot, "state": state})) {
                 self.status = format!("Cannot store plugin state: {e}");
                 return Err(self.status.clone());
             }
@@ -183,10 +183,10 @@ impl StudioApp {
             // controller picks up from where the editor left the parameter.
             let r = if slot == transit_mix::INSTRUMENT_SLOT {
                 let key = format!("instrument_param:{}:{param}", t.0);
-                self.engine.execute_merged("mix.instrument_param", &json!({"track": t.0, "param": param, "value": value}), &key)
+                self.execute_ui_merged("mix.instrument_param", &json!({"track": t.0, "param": param, "value": value}), &key)
             } else {
                 let key = format!("param:{}:{slot}:{param}", t.0);
-                self.engine.execute_merged("mix.insert_param", &json!({"track": t.0, "slot": slot, "param": param, "value": value}), &key)
+                self.execute_ui_merged("mix.insert_param", &json!({"track": t.0, "slot": slot, "param": param, "value": value}), &key)
             };
             if let Err(e) = r
                 && !unchanged

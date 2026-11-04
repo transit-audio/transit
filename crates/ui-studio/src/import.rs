@@ -107,7 +107,7 @@ impl StudioApp {
         let mut refused = Vec::new();
         for f in files {
             let name = crate::browser::file_name(f);
-            match self.engine.execute("file.prepare_import", &json!({"path": f.to_string_lossy()})) {
+            match self.execute_ui("file.prepare_import", &json!({"path": f.to_string_lossy()})) {
                 Ok(v) => {
                     let frames = self.browser.header_secs(f).map_or((rate * 2.0) as Samples, |s| (s * rate).round() as Samples).max(1);
                     let id = v["id"].as_u64().unwrap_or_default();
@@ -146,7 +146,7 @@ impl StudioApp {
             None => std::mem::take(&mut self.imports.items),
         };
         for i in &gone {
-            let _ = self.engine.execute("file.import_cancel", &json!({"id": i.id}));
+            let _ = self.execute_ui("file.import_cancel", &json!({"id": i.id}));
         }
         self.forget_batches();
         self.status = match gone.as_slice() {
@@ -165,7 +165,7 @@ impl StudioApp {
     /// Drop an item (and its staging entry) with a status.
     fn drop_item(&mut self, idx: usize, status: String) {
         let it = self.imports.items.remove(idx);
-        let _ = self.engine.execute("file.import_cancel", &json!({"id": it.id}));
+        let _ = self.execute_ui("file.import_cancel", &json!({"id": it.id}));
         self.status = status;
         self.forget_batches();
     }
@@ -183,7 +183,7 @@ impl StudioApp {
             // The drop's track is gone: refuse this file and the rest of its drop.
             let rest: Vec<u64> = self.imports.items.iter().filter(|i| i.batch == it.batch).map(|i| i.id).collect();
             for id in rest {
-                let _ = self.engine.execute("file.import_cancel", &json!({"id": id}));
+                let _ = self.execute_ui("file.import_cancel", &json!({"id": id}));
             }
             self.imports.items.retain(|i| i.batch != it.batch);
             self.forget_batches();
@@ -195,7 +195,7 @@ impl StudioApp {
             p["track"] = json!(t.0);
         }
         self.engine.end_merge();
-        match self.engine.execute("file.commit_import", &p) {
+        match self.execute_ui("file.commit_import", &p) {
             Ok(v) => {
                 self.imports.items.remove(0);
                 let track = v.get("track").and_then(Value::as_u64).map(TrackId);

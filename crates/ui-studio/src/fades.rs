@@ -310,17 +310,17 @@ pub(crate) fn commit(app: &mut StudioApp, live: &Live) {
             Plan::None => {}
             Plan::Set(v) => {
                 for (clip, side, fade) in v {
-                    app.engine.execute_merged("edit.fades_create", &set_params(clip, side, fade), key)?;
+                    app.execute_ui_merged("edit.fades_create", &set_params(clip, side, fade), key)?;
                 }
             }
             Plan::Remove { clip, track, keep, start, end } => {
-                app.engine.execute_merged("edit.fades_delete", &json!({"tracks": [track.0], "start": start, "end": end}), key)?;
+                app.execute_ui_merged("edit.fades_delete", &json!({"tracks": [track.0], "start": start, "end": end}), key)?;
                 if let Some((side, fade)) = keep {
-                    app.engine.execute_merged("edit.fades_create", &set_params(clip, side, fade), key)?;
+                    app.execute_ui_merged("edit.fades_create", &set_params(clip, side, fade), key)?;
                 }
             }
             Plan::Cross { track, start, end } => {
-                app.engine.execute_merged(
+                app.execute_ui_merged(
                     "edit.fades_create",
                     &json!({"tracks": [track.0], "start": start, "end": end, "shape": FadeShape::EqualPower.label()}),
                     key,
@@ -435,7 +435,13 @@ fn distance_to(pts: &[Pos2], p: Pos2) -> f32 {
 /// ([`corner`]; resize from nothing). Trim edges and the header strip are the caller's: ask only
 /// where [`crate::arrange::zone`] did not say trim or loop.
 pub(crate) fn grab(c: &Clip, map: Map, rect: R4, pos: Pos2, corner_ok: bool) -> Option<Grab> {
-    if !is_audio(c) || pos.y <= rect[1] + CLIP_NAME_H || pos.y > rect[3] || pos.x < rect[0] || pos.x > rect[2] {
+    if !is_audio(c)
+       
+        || pos.y <= rect[1] + CLIP_NAME_H
+        || pos.y > rect[3]
+        || pos.x < rect[0]
+        || pos.x > rect[2]
+    {
         return None;
     }
     let (top, bottom) = body_span(rect[1], rect[3]);
@@ -473,6 +479,9 @@ pub(crate) fn grab_at(s: &Session, map: Map, layout: &Layout, pos: Pos2, kind: D
     let under = layout.clips.iter().rev().filter(|c| pos.x >= c.rect[0] && pos.x <= c.rect[2] && pos.y >= c.rect[1] && pos.y <= c.rect[3]);
     let mut top: Option<&Clip> = None;
     for (i, r) in under.enumerate() {
+        if r.rect[3] - r.rect[1] < 22.0 {
+            continue;
+        }
         let Some(c) = s.find_clip(ClipId(r.id)).map(|x| x.1) else { continue };
         // A clip beneath the top one offers its drawn fade only as the other end of a real
         // crossfade with it (both facing fades above zero); otherwise the press is the top clip's.
@@ -726,8 +735,8 @@ pub fn crossfade_len(app: &mut StudioApp, o: Overlap, len: Samples) {
     let len = [o.left, o.right].iter().filter_map(|id| s.find_clip(*id)).fold(len, |len, c| len.min(c.1.length));
     let fade = Fade { len, shape: FadeShape::EqualPower, curvature: 0.0 };
     let _ = app.composite("Crossfade", |app, key| {
-        app.engine.execute_merged("edit.fades_create", &set_params(o.left, Side::Out, fade), key)?;
-        app.engine.execute_merged("edit.fades_create", &set_params(o.right, Side::In, fade), key)?;
+        app.execute_ui_merged("edit.fades_create", &set_params(o.left, Side::Out, fade), key)?;
+        app.execute_ui_merged("edit.fades_create", &set_params(o.right, Side::In, fade), key)?;
         Ok(())
     });
 }
@@ -753,7 +762,7 @@ pub fn fade_to_cursor(app: &mut StudioApp, side: Side) {
     }
     let _ = app.composite("Fade to Cursor", |app, key| {
         for (clip, fade) in sets {
-            app.engine.execute_merged("edit.fades_create", &set_params(clip, side, fade), key)?;
+            app.execute_ui_merged("edit.fades_create", &set_params(clip, side, fade), key)?;
         }
         Ok(())
     });

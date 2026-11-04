@@ -45,6 +45,8 @@ ids! {
     // help\automation.toml
     AutomationTouchReturn => "automation.touch_return",
     // help\arrange-header.toml
+    ArrangeHeaderHeight => "arrange_header.height",
+    ViewTrackHeight => "view.track_height",
     ArrangeHeaderName => "arrange_header.name",
     ArrangeHeaderMonitor => "arrange_header.monitor",
     ArrangeHeaderArm => "arrange_header.arm",

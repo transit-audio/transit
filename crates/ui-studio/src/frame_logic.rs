@@ -15,6 +15,7 @@ impl StudioApp {
 
     /// Run a command; errors go to the status line. Plug-in state is captured before saves.
     pub fn run(&mut self, id: &str, params: Value) -> Result<Value, String> {
+        self.before_height_command(id);
         if matches!(id, "transport.stop" | "transport.pause") {
             if !self.midi_transport.dispatching
                 && let Some(player) = &self.player
@@ -335,6 +336,7 @@ impl StudioApp {
     /// Copied from `transit-ui-egui` (`SoundApp::raw_input_hook`, transit 2af868e), plus the
     /// modifiers a synthetic gesture holds (`ui.drag {alt: true}`) applied to the frame's input.
     pub fn raw_input_hook(&mut self, raw: &mut egui::RawInput) {
+        arrange::track_height::bound_raw_wheel(raw);
         if !self.synthetic.is_empty() {
             self.synthetic_grace = 6;
         }
@@ -423,6 +425,7 @@ impl StudioApp {
         }
         self.help.layout.question_marks.clear();
         menus::menu_bar(self, ui);
+        arrange::track_height::boundaries(self, &ctx);
         transport::bar(self, ui);
         self.update_tick(&ctx);
         menus::status_bar(self, ui);
@@ -456,6 +459,7 @@ impl StudioApp {
         midi_monitor::window(self, &ctx);
         midi_learn::window(self, &ctx);
         builtin_editor::windows(self, &ctx);
+        arrange::track_height::boundaries(self, &ctx);
         help::panel(self, &ctx); // last, so it sees the control hovered in this frame
         if self.is_playing() || self.engine.transport.recording {
             ctx.request_repaint_after(std::time::Duration::from_millis(1000 / 30));
@@ -465,5 +469,4 @@ impl StudioApp {
             ctx.request_repaint();
         }
     }
-
 }

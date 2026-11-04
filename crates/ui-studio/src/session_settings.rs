@@ -35,7 +35,7 @@ fn automation(app: &mut StudioApp, ui: &mut egui::Ui) -> egui::Response {
         app.engine.end_merge();
     }
     if response.changed() {
-        if let Err(e) = app.engine.execute_merged("setup.session", &json!({"touch_return_ms": ms}), "touch_return_ms") {
+        if let Err(e) = app.execute_ui_merged("setup.session", &json!({"touch_return_ms": ms}), "touch_return_ms") {
             app.status = e.to_string();
         }
         if !response.dragged() {

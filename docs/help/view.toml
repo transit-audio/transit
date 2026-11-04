@@ -1,0 +1,9 @@
+area = "view"
+title = "View"
+link = "user-guide.md"
+
+[[entry]]
+id = "view.track_height"
+name = "Track Height"
+text = "Increase All and Decrease All step every track independently. Reset Track Heights returns every track to 46 points. Automation and take lanes follow their parent."
+key = "Alt+= or Alt+-"

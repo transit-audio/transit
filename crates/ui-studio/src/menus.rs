@@ -207,6 +207,7 @@ pub fn menu_bar(app: &mut StudioApp, ui: &mut egui::Ui) {
                         }
                     }
                     ui.separator();
+                    crate::arrange::track_height::menu(app, ui, &mut view_items);
                     // Appearance: System follows the OS; kept in `UiState` (slice 5).
                     let sub = ui.menu_button(menu_contents("Appearance"), |ui| {
                         for a in crate::theme::Appearance::ALL {
@@ -599,11 +600,18 @@ pub fn shortcuts(app: &mut StudioApp, ctx: &egui::Context) {
     if pressed(ctx, A::SelectNone) && !crate::arrange::marquee::cancel(app) {
         app.deselect_all();
     }
+    if !(app.keys_shown() && app.keys.active) {
+        for (action, direction) in [(A::TrackHeightIn, "in"), (A::TrackHeightOut, "out")] {
+            if pressed(ctx, action) {
+                let _ = app.run("track.height_zoom", json!({"direction": direction}));
+            }
+        }
+    }
     if pressed(ctx, A::ZoomIn) {
-        let _ = app.engine.execute("view.zoom_in", &json!({}));
+        let _ = app.execute_ui("view.zoom_in", &json!({}));
     }
     if pressed(ctx, A::ZoomOut) {
-        let _ = app.engine.execute("view.zoom_out", &json!({}));
+        let _ = app.execute_ui("view.zoom_out", &json!({}));
     }
     if pressed(ctx, A::ZoomInterfaceIn) {
         app.set_interface_zoom(ctx, app.ui.ui_zoom * 1.1);

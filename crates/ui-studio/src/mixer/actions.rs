@@ -56,7 +56,7 @@ impl StudioApp {
         let key = key.to_string();
         let mut last = json!({});
         for (i, p) in pans_for(b, n).into_iter().enumerate() {
-            last = self.engine.execute_merged("mix.pan", &json!({"tracks": [t.0], "pan": p, "index": i}), &key).map_err(|e| e.to_string())?;
+            last = self.execute_ui_merged("mix.pan", &json!({"tracks": [t.0], "pan": p, "index": i}), &key).map_err(|e| e.to_string())?;
         }
         Ok(last)
     }
@@ -92,11 +92,11 @@ impl StudioApp {
         match t {
             Target::Fader(id) => {
                 let key = key.map_or_else(|| fader_key(id), str::to_string);
-                self.engine.execute_merged("mix.volume", &json!({"tracks": [id.0], "db": v}), &key).map_err(|e| e.to_string())
+                self.execute_ui_merged("mix.volume", &json!({"tracks": [id.0], "db": v}), &key).map_err(|e| e.to_string())
             }
             Target::Send(id, slot) => {
                 let key = key.map_or_else(|| format!("send:{}:{slot}", id.0), str::to_string);
-                self.engine.execute_merged("mix.send_level", &json!({"track": id.0, "slot": slot, "db": v}), &key).map_err(|e| e.to_string())
+                self.execute_ui_merged("mix.send_level", &json!({"track": id.0, "slot": slot, "db": v}), &key).map_err(|e| e.to_string())
             }
             Target::Pan(id) => {
                 let key = key.map_or_else(|| format!("pan:{}", id.0), str::to_string);
@@ -104,8 +104,7 @@ impl StudioApp {
             }
             Target::SendPan(id, slot) => {
                 let key = key.map_or_else(|| format!("sendpan:{}:{slot}", id.0), str::to_string);
-                self.engine
-                    .execute_merged("mix.send_level", &json!({"track": id.0, "slot": slot, "pan": v.clamp(-1.0, 1.0)}), &key)
+                self.execute_ui_merged("mix.send_level", &json!({"track": id.0, "slot": slot, "pan": v.clamp(-1.0, 1.0)}), &key)
                     .map_err(|e| e.to_string())
             }
         }
@@ -325,6 +324,7 @@ impl StudioApp {
         let key = format!("fx-channel:{}", self.mixer.serial);
         self.engine.end_merge();
         let r = (|| {
+            self.commit_height_preview();
             let e = &mut self.engine;
             e.execute_merged("mix.new_bus", &json!({"name": name}), &key)?;
             let r = e.execute_merged("track.new", &json!({"kind": "aux", "format": "stereo", "name": name}), &key)?;

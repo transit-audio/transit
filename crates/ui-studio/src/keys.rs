@@ -650,7 +650,7 @@ impl StudioApp {
     }
 
     fn keys_exec(&mut self, id: &str, params: Value, key: &str) -> Result<Value, String> {
-        self.engine.execute_merged(id, &params, key).map_err(|e| {
+        self.execute_ui_merged(id, &params, key).map_err(|e| {
             self.status = e.to_string();
             e.to_string()
         })
@@ -811,7 +811,7 @@ impl StudioApp {
     fn ensure_clip_selected(&mut self, clip: ClipId) {
         let s = self.engine.session();
         if s.edit.selected_clips.is_empty() && s.edit.selected_tracks.is_empty() {
-            let _ = self.engine.execute("edit.select", &json!({"clips": [clip.0]}));
+            let _ = self.execute_ui("edit.select", &json!({"clips": [clip.0]}));
         }
     }
 }

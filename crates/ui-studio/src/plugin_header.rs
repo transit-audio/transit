@@ -330,7 +330,7 @@ impl StudioApp {
                     if !confirm(&question) {
                         return;
                     }
-                    match self.engine.execute("plugin.preset_delete", &json!({"path": path.to_string_lossy()})) {
+                    match self.execute_ui("plugin.preset_delete", &json!({"path": path.to_string_lossy()})) {
                         Ok(_) => self.status = format!("Deleted the preset \u{201c}{}\u{201d}", ins.preset),
                         Err(e) => self.status = format!("Preset: {e}"),
                     }
@@ -439,7 +439,7 @@ impl StudioApp {
                     return;
                 };
                 let p = json!({"track": key.0.0, "slot": slot, "path": path.to_string_lossy(), "state": b64::encode(&state)});
-                match self.engine.execute("plugin.preset_save", &p) {
+                match self.execute_ui("plugin.preset_save", &p) {
                     Ok(r) => self.status = format!("Saved the preset \u{201c}{}\u{201d}", r["name"].as_str().unwrap_or("")),
                     Err(e) => self.status = format!("Preset: {e}"),
                 }
@@ -457,7 +457,7 @@ impl StudioApp {
                 // The live state goes into the session first, so undoing the load returns to it.
                 if let Some(before) = state
                     && self.hosted_insert(key).and_then(|i| i.state_bytes()).as_deref() != Some(before.as_slice())
-                    && let Err(e) = self.engine.execute("mix.insert_state", &json!({"track": key.0.0, "slot": slot, "state": b64::encode(&before)}))
+                    && let Err(e) = self.execute_ui("mix.insert_state", &json!({"track": key.0.0, "slot": slot, "state": b64::encode(&before)}))
                 {
                     log::warn!("cannot store the live state before a preset load: {e}");
                 }
@@ -485,11 +485,11 @@ impl StudioApp {
         };
         let slot = slot_json(key.1);
         let r = match source {
-            Source::File(path) => self.engine.execute(
+            Source::File(path) => self.execute_ui(
                 "plugin.preset_load",
                 &json!({"track": key.0.0, "slot": slot, "path": path.to_string_lossy(), "params": values_json(&values)}),
             ),
-            Source::State { state, name } => self.engine.execute(
+            Source::State { state, name } => self.execute_ui(
                 "plugin.state_load",
                 &json!({"track": key.0.0, "slot": slot, "state": b64::encode(&state), "name": name, "params": values_json(&values)}),
             ),
@@ -583,7 +583,7 @@ impl StudioApp {
                         // The undone (or redone) step's parameters may not match the state it
                         // stored; the plug-in's own values after the load are the ones to keep.
                         let p = json!({"track": key.0.0, "slot": slot_json(key.1), "params": values_json(&values)});
-                        if let Err(e) = self.engine.execute("plugin.state_values", &p) {
+                        if let Err(e) = self.execute_ui("plugin.state_values", &p) {
                             log::warn!("cannot store the plug-in's values after a restore: {e}");
                         }
                     }

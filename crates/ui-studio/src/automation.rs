@@ -484,7 +484,7 @@ impl StudioApp {
             // Leaving Write mid-pass: thin what it wrote, then change the mode, all in the pass's step.
             self.auto.passed.retain(|x| *x != t);
             thin_after_pass(self, &[t], false);
-            return self.engine.execute_merged("mix.automation_mode", &params, PASS).map_err(|e| e.to_string());
+            return self.execute_ui_merged("mix.automation_mode", &params, PASS).map_err(|e| e.to_string());
         }
         self.run("mix.automation_mode", params)
     }
@@ -504,7 +504,7 @@ impl StudioApp {
         }
         let mut res = Ok(());
         for (id, p) in cmds {
-            if let Err(e) = self.engine.execute_merged(id, &p, &key) {
+            if let Err(e) = self.execute_ui_merged(id, &p, &key) {
                 self.status = e.to_string();
                 res = Err(e.to_string());
                 break;

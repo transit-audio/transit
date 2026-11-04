@@ -153,8 +153,7 @@ impl StudioApp {
     /// Writes one MIDI effect parameter: a drag is merged into one undo step.
     fn set_midi_effect_param(&mut self, t: TrackId, index: usize, param: &str, value: f32) {
         let key = format!("midi_fx_param:{}:{index}:{param}", t.0);
-        if let Err(e) =
-            self.engine.execute_merged("mix.midi_effect_param", &json!({"track": t.0, "index": index, "param": param, "value": value}), &key)
+        if let Err(e) = self.execute_ui_merged("mix.midi_effect_param", &json!({"track": t.0, "index": index, "param": param, "value": value}), &key)
         {
             self.status = e.to_string();
         }

@@ -126,12 +126,12 @@ impl StudioApp {
         }
         let params = json!({"bpm": bpm, "at": self.tick_at(tick)});
         let result = match key {
-            Some(k) => self.engine.execute_merged("event.tempo", &params, k),
+            Some(k) => self.execute_ui_merged("event.tempo", &params, k),
             None => {
                 self.engine.end_merge();
                 self.tempo_ui.serial += 1;
                 let k = format!("tempo:set:{}", self.tempo_ui.serial);
-                let result = self.engine.execute_merged("event.tempo", &params, &k);
+                let result = self.execute_ui_merged("event.tempo", &params, &k);
                 self.engine.end_merge();
                 result
             }
@@ -151,7 +151,7 @@ impl StudioApp {
         }
         let params = json!({"numerator": num, "denominator": den, "at": self.tick_at(tick)});
         self.engine.end_merge();
-        let ok = self.engine.execute("event.meter", &params).is_ok();
+        let ok = self.execute_ui("event.meter", &params).is_ok();
         self.engine.end_merge();
         ok
     }

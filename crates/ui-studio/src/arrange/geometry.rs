@@ -47,7 +47,7 @@ impl RowGeo {
         let mut auto_views = Vec::with_capacity(rows.len());
         let mut acc = 0.0;
         for t in rows {
-            let rh = t.height.points();
+            let rh = super::track_height::points(app, t);
             let th = (TAKE_H * rh / 46.0).clamp(22.0, 220.0);
             let views = app.lane_views(t);
             let ah: Vec<f32> = views.iter().map(|v| crate::automation::lane_height::display(v.height, rh)).collect();

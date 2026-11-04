@@ -53,9 +53,9 @@ impl StudioApp {
         self.browser.serial += 1;
         let key = format!("browser:instrument:{}", self.browser.serial);
         self.engine.end_merge();
-        let r = self.engine.execute_merged("track.new", &json!({"kind": "instrument"}), &key).and_then(|v| {
+        let r = self.execute_ui_merged("track.new", &json!({"kind": "instrument"}), &key).and_then(|v| {
             let t = v["tracks"][0].as_u64().unwrap_or_default();
-            self.engine.execute_merged("mix.instrument", &json!({"track": t, "plugin": id}), &key).map(|_| TrackId(t))
+            self.execute_ui_merged("mix.instrument", &json!({"track": t, "plugin": id}), &key).map(|_| TrackId(t))
         });
         self.engine.end_merge();
         match r {

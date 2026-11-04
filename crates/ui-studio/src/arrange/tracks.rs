@@ -12,6 +12,7 @@ pub(super) fn track_header(
     outputs: Option<&crate::midi_output::OutputView>,
     row: &mut TrackRow,
 ) {
+    let list = list.intersect(Rect::from_min_max(r.min, pos2(r.max.x, r.max.y - 4.0)));
     let p = ui.painter().with_clip_rect(list);
     let bg = if selected { TOKENS.header_selected } else { TOKENS.header };
     p.rect_filled(r.shrink2(vec2(0.0, 0.5)), 0.0, bg);
@@ -179,7 +180,7 @@ pub(super) fn track_header(
         let dx = ui.input(|i| i.pointer.press_origin().zip(i.pointer.latest_pos()).map_or(0.0, |(a, b)| b.x - a.x));
         let fine = ui.input(|i| i.modifiers.shift);
         let target = (start_db + dx * if fine { 0.02 } else { 0.1 }).clamp(-80.0, 12.0);
-        let _ = app.engine.execute_merged("mix.volume", &json!({"tracks": [t.id.0], "db": target}), &crate::mixer::fader_key(t.id));
+        let _ = app.execute_ui_merged("mix.volume", &json!({"tracks": [t.id.0], "db": target}), &crate::mixer::fader_key(t.id));
         crate::automation::note_pass_edit(app);
     }
     if resp.drag_stopped() {
@@ -258,7 +259,7 @@ pub(super) fn track_header(
     if resp.double_clicked() && ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| crate::finish::rect(row.name_rect).contains(p)) {
         app.start_rename(crate::finish::RenameTarget::Track(t.id), row.name_rect);
     }
-    if resp.drag_started() && t.kind != TrackKind::Master {
+    if resp.drag_started() && app.arrange.height_gesture.is_none() && t.kind != TrackKind::Master {
         app.arrange.header_drag = Some(crate::groups::HeaderDrag { track: t.id, drop: None });
     }
     if t.is_folder() {
@@ -316,7 +317,7 @@ fn midi_output_chip(
 }
 
 /// A group's disclosure chevron: collapses or expands its members (view state only).
-fn disclosure(app: &mut StudioApp, ui: &mut Ui, t: &Track, b: Rect, list: Rect, row: &mut TrackRow) {
+pub(super) fn disclosure(app: &mut StudioApp, ui: &mut Ui, t: &Track, b: Rect, list: Rect, row: &mut TrackRow) {
     row.disclosure = r4(b);
     let resp = ui.interact(b.intersect(list), ui.id().with(("disclose", t.id.0)), Sense::click());
     let ink = if resp.hovered() { TOKENS.text } else { TOKENS.text_dim };
@@ -381,7 +382,7 @@ pub(super) fn header_drag(app: &mut StudioApp, ui: &Ui, s: &Session, layout: &mu
 }
 
 /// The track's right-click menu.
-fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: TrackKind, has_instrument: bool) {
+pub(super) fn track_menu(app: &mut StudioApp, ui: &mut Ui, id: TrackId, kind: TrackKind, has_instrument: bool) {
     if kind == TrackKind::Instrument {
         // Instrument ▸: the device chain's instrument menu (a click in its filter box keeps it open).
         let config = egui::containers::menu::MenuConfig::new().close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside);
