@@ -34,7 +34,9 @@ pub(super) fn takes(app: &mut StudioApp, ui: &mut Ui, s: &Session, map: Map, tl:
         }
         let y0 = tl.min.y + geo.tops[i] - app.arrange.vscroll;
         let open = geo.take_count[i] > 0;
-        chips(app, ui, t, stacks, tl, layout, open);
+        if geo.main[i] >= 24.0 {
+            chips(app, ui, t, stacks, tl, layout, open);
+        }
         if !open {
             continue;
         }
@@ -88,7 +90,19 @@ fn chips(app: &mut StudioApp, ui: &mut Ui, t: &Track, stacks: &[TakeStack], tl: 
 
 /// One take lane: its clips in the timeline, its label and menu in the track list.
 #[allow(clippy::too_many_arguments)]
-fn lane(app: &mut StudioApp, ui: &mut Ui, t: &Track, stacks: &[TakeStack], number: u32, k: usize, ly: f32, height: f32, map: Map, tl: Rect, list: Rect) {
+fn lane(
+    app: &mut StudioApp,
+    ui: &mut Ui,
+    t: &Track,
+    stacks: &[TakeStack],
+    number: u32,
+    k: usize,
+    ly: f32,
+    height: f32,
+    map: Map,
+    tl: Rect,
+    list: Rect,
+) {
     let lane = Rect::from_min_max(pos2(tl.min.x, ly), pos2(tl.max.x, ly + height));
     let active = stacks.iter().filter_map(|st| st.take(number)).any(transit_model::StackTake::is_active);
     let p = ui.painter().with_clip_rect(tl);
@@ -102,23 +116,13 @@ fn lane(app: &mut StudioApp, ui: &mut Ui, t: &Track, stacks: &[TakeStack], numbe
         .filter_map(|(pl, id)| t.playlists.get(*pl).and_then(|p| p.clip(*id)).map(|c| (c, *pl == t.active_playlist)))
         .collect();
     clips.sort_by_key(|(c, on)| (*on, c.start));
-    let base = theme::rgb(t.color);
+    let s = app.engine.session_arc();
     for (c, on) in &clips {
         let r = Rect::from_min_max(pos2(map.x(c.start), ly + 3.0), pos2(map.x(c.end()).max(map.x(c.start) + 2.0), ly + height - 3.0));
         if !tl.intersects(r) {
             continue;
         }
-        let col = c.color.map_or(base, theme::rgb);
-        if *on {
-            p.rect_filled(r, crate::theme::RADIUS_SM, col);
-            p.rect_stroke(r, crate::theme::RADIUS_SM, Stroke::new(1.5, TOKENS.accent), StrokeKind::Inside);
-        } else {
-            p.rect_filled(r, crate::theme::RADIUS_SM, col.gamma_multiply(0.35));
-        }
-        if r.width() > 40.0 {
-            let ink = if *on { theme::text_on(col) } else { TOKENS.text_dim };
-            p.with_clip_rect(r.intersect(tl)).text(pos2(r.min.x + 4.0, r.center().y), Align2::LEFT_CENTER, &c.name, FontId::proportional(10.0), ink);
-        }
+        super::clips::draw_clip(&p, &s, map, tl, t, c, &[], r, false, if *on { 1.0 } else { 0.35 }, false);
         let resp = ui.interact(r.intersect(tl), ui.id().with(("take_clip", t.id.0, c.id.0)), Sense::click());
         let resp = resp.on_hover_text(if *on { format!("Take {number} plays here") } else { format!("Play take {number} here") });
         if resp.clicked() && !*on {

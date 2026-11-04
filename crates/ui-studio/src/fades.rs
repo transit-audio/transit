@@ -436,7 +436,7 @@ fn distance_to(pts: &[Pos2], p: Pos2) -> f32 {
 /// where [`crate::arrange::zone`] did not say trim or loop.
 pub(crate) fn grab(c: &Clip, map: Map, rect: R4, pos: Pos2, corner_ok: bool) -> Option<Grab> {
     if !is_audio(c)
-       
+        || rect[3] - rect[1] - CLIP_NAME_H - 4.0 <= 4.0
         || pos.y <= rect[1] + CLIP_NAME_H
         || pos.y > rect[3]
         || pos.x < rect[0]

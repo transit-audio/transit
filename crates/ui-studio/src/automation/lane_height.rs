@@ -31,6 +31,7 @@ pub(super) fn handle(app: &mut StudioApp, ui: &mut Ui, t: &Track, lane: &Lane, l
         let y = ui.input(|i| i.pointer.press_origin()).map_or(r.max.y, |p| p.y);
         app.auto.gesture = Some(AutoGesture::Height { track: t.id, lane: lid.clone(), start_h: row.height, press_y: y });
     }
+    let parent = crate::arrange::track_height::points(app, t);
     if resp.dragged()
         && let Some(AutoGesture::Height { track, lane: gl, start_h, press_y }) = app.auto.gesture.clone()
         && track == t.id
@@ -38,7 +39,7 @@ pub(super) fn handle(app: &mut StudioApp, ui: &mut Ui, t: &Track, lane: &Lane, l
         && let Some(now) = ui.input(|i| i.pointer.latest_pos())
         && let Some(v) = app.ui.auto_lanes.iter_mut().find(|v| v.track == t.id && v.lane == lid)
     {
-        v.height = (start_h + now.y - press_y).clamp(LANE_MIN, LANE_MAX);
+        v.height = (start_h + now.y - press_y).clamp(LANE_MIN, LANE_MAX) * 46.0 / parent;
     }
     if resp.drag_stopped() && matches!(app.auto.gesture, Some(AutoGesture::Height { .. })) {
         app.auto.gesture = None;

@@ -6,6 +6,7 @@ struct Rig {
     ctx: egui::Context,
     time: f64,
     ids: Vec<TrackId>,
+    shapes: Vec<egui::epaint::ClippedShape>,
 }
 
 impl Rig {
@@ -21,7 +22,7 @@ impl Rig {
         app.ui.show_mixer = false;
         app.ui.show_devices = false;
         app.engine.mark_clean();
-        let mut r = Self { app, ctx: egui::Context::default(), time: 0.0, ids };
+        let mut r = Self { app, ctx: egui::Context::default(), time: 0.0, ids, shapes: Vec::new() };
         r.frame(vec![], Modifiers::NONE, true);
         r.frame(vec![], Modifiers::NONE, true);
         r
@@ -44,6 +45,7 @@ impl Rig {
             app.ui(ui);
         });
         output.textures_delta.clear();
+        self.shapes = output.shapes;
     }
 
     fn row(&self, i: usize) -> &TrackRow {
@@ -83,76 +85,113 @@ impl Rig {
     }
 }
 
-
-fn key(key: egui::Key, pressed: bool, repeat: bool, modifiers: Modifiers) -> Event {
-    Event::Key { key, physical_key: None, pressed, repeat, modifiers }
+#[test]
+fn compact_status_remains_discoverable_and_hidden_controls_cannot_fire() {
+    let mut r = Rig::new(&[TrackHeight::Micro]);
+    let t = r.app.engine.session_mut().track_mut(r.ids[0]).unwrap();
+    t.mixer.record_arm = true;
+    t.mixer.input_monitor = true;
+    r.frame(vec![], Modifiers::NONE, true);
+    assert_eq!(r.row(0).height, 16.0);
+    assert_eq!(r.row(0).arm, [0.0; 4]);
+    assert_eq!(r.row(0).monitor, [0.0; 4]);
+    let name = r.row(0).name_rect;
+    let p = pos2((name[0] + name[2]) * 0.5, (name[1] + name[3]) * 0.5);
+    r.frame(vec![Event::PointerMoved(p)], Modifiers::NONE, true);
+    r.time += 1.0;
+    r.frame(vec![], Modifiers::NONE, true);
+    r.frame(vec![], Modifiers::NONE, true);
+    fn text(shape: &Shape) -> String {
+        match shape {
+            Shape::Text(t) => t.galley.text().to_string(),
+            Shape::Vec(v) => v.iter().map(text).collect::<Vec<_>>().join("\n"),
+            _ => String::new(),
+        }
+    }
+    let text = r.shapes.iter().map(|s| text(&s.shape)).collect::<Vec<_>>().join("\n");
+    assert!(text.contains("Armed for recording") && text.contains("Input monitor on"), "{text}");
+    let h = r.row(0).header;
+    r.click_rect([h[2] - 28.0, h[1] + 2.0, h[2] - 10.0, h[1] + 10.0]);
+    assert!(r.app.engine.session().track(r.ids[0]).unwrap().mixer.record_arm);
+    assert!(r.app.engine.session().track(r.ids[0]).unwrap().mixer.input_monitor);
+    assert!(!r.app.engine.journal.iter().any(|(id, _)| id.starts_with("mix.")));
 }
 
-impl Rig {
-    fn click_rect(&mut self, rect: R4) {
-        let p = pos2((rect[0] + rect[2]) * 0.5, (rect[1] + rect[3]) * 0.5);
-        self.frame(
-            vec![Event::PointerMoved(p), Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }],
-            Modifiers::NONE,
+#[test]
+fn wheel_exact_modifiers_keep_horizontal_scroll_and_pinch_and_no_op_fit_bounds() {
+    for modifiers in [Modifiers::ALT | Modifiers::CTRL, Modifiers::ALT | Modifiers::SHIFT, Modifiers::SHIFT, Modifiers::CTRL] {
+        let mut r = Rig::new(&[TrackHeight::Small]);
+        let lane = r.row(0).lane;
+        let p = pos2(lane[0] + 100.0, lane[1] + 8.0);
+        r.frame(
+            vec![
+                Event::PointerMoved(p),
+                Event::MouseWheel { unit: MouseWheelUnit::Line, delta: vec2(0.0, -1.0), phase: egui::TouchPhase::Move, modifiers },
+            ],
+            modifiers,
             true,
         );
-        self.release(p, Modifiers::NONE);
-        self.frame(vec![], Modifiers::NONE, true);
+        assert!(r.app.arrange.height_gesture.is_none());
+        assert_eq!(r.stored(0), TrackHeight::Small);
+        if modifiers == Modifiers::SHIFT {
+            assert!(r.app.engine.session().edit.zoom.scroll > 0);
+        }
     }
-    fn menu_item(&mut self, label: &str) {
-        let rect = self.app.arrange.bar_menu.iter().find(|m| m.label == label).unwrap().rect;
-        self.click_rect(rect);
-    }
-}
-
-#[test]
-fn wheel_on_unselected_tall_row_commits_when_pointer_leaves_the_viewport() {
-    let mut r = Rig::new(&[TrackHeight::Custom(440), TrackHeight::Custom(430)]);
-    r.app.run("edit.select", json!({"tracks": [r.ids[0].0]})).unwrap();
-    r.wheel(1, MouseWheelUnit::Line, 1.0);
-    assert_eq!(r.row(1).height, 438.0);
-    assert_eq!(r.app.engine.session().edit.selected_tracks, vec![r.ids[0]]);
-    assert_eq!(r.stored(0), TrackHeight::Custom(440));
-    assert_eq!(r.stored(1), TrackHeight::Custom(430));
+    let mut r = Rig::new(&[TrackHeight::Fit(65535)]);
+    assert_eq!(r.row(0).height, 440.0);
+    let spp = r.app.engine.session().edit.zoom.samples_per_px;
+    let lane = r.row(0).lane;
+    let p = pos2(lane[0] + 100.0, lane[1] + 10.0);
+    r.frame(vec![Event::PointerMoved(p), Event::Zoom(1.5)], Modifiers::NONE, true);
+    assert!(r.app.engine.session().edit.zoom.samples_per_px < spp);
+    r.wheel(0, MouseWheelUnit::Line, 1.0);
+    r.frame(vec![], Modifiers::NONE, true);
     assert_eq!(r.commits(), 0);
-    let timeline = r.app.arrange.layout.timeline;
-    let outside = pos2(timeline[0] + 20.0, timeline[3] + 2.0);
-    assert!(crate::finish::rect(r.row(1).lane).contains(outside));
-    r.frame(vec![Event::PointerMoved(outside)], Modifiers::ALT, true);
-    assert_eq!(r.commits(), 1);
-    assert_eq!(r.stored(1), TrackHeight::Custom(438));
-    r.app.run("edit.undo", json!({})).unwrap();
-    assert_eq!(r.stored(1), TrackHeight::Custom(430));
+    assert_eq!(r.stored(0), TrackHeight::Fit(65535));
+    let p = r.press(0, Modifiers::NONE);
+    r.frame(vec![Event::PointerMoved(p + vec2(0.0, 10.0))], Modifiers::NONE, true);
+    r.release(p + vec2(0.0, 10.0), Modifiers::NONE);
+    assert_eq!(r.commits(), 0);
+    assert_eq!(r.stored(0), TrackHeight::Fit(65535));
+    r.app.engine.session_mut().track_mut(r.ids[0]).unwrap().height = TrackHeight::Fit(0);
+    r.frame(vec![], Modifiers::NONE, true);
+    r.wheel(0, MouseWheelUnit::Point, -39.0);
+    r.wheel(0, MouseWheelUnit::Point, 39.0);
+    r.wheel(0, MouseWheelUnit::Line, -1.0);
+    r.frame(vec![], Modifiers::NONE, true);
+    assert_eq!(r.commits(), 0);
+    assert_eq!(r.stored(0), TrackHeight::Fit(0));
 }
 
 #[test]
-fn batched_drag_uses_press_position_and_modifiers_even_with_release_in_the_frame() {
-    for released in [false, true] {
-        let mut r = Rig::new(&[TrackHeight::Small, TrackHeight::Medium]);
-        let h = r.row(0).height_handle.unwrap();
-        let p = pos2((h[0] + h[2]) * 0.5, (h[1] + h[3]) * 0.5);
-        let end = p + vec2(0.0, 24.0);
-        let mut events = vec![
-            Event::PointerMoved(p),
-            Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
-            Event::PointerMoved(end),
-            Event::ModifiersChanged(Modifiers::ALT),
-        ];
-        if released {
-            events.push(Event::PointerButton { pos: end, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::ALT });
-        }
-        r.frame(events, Modifiers::NONE, true);
-        assert_eq!(r.row(0).height, 70.0);
-        assert_eq!(r.row(1).height, 88.0);
-        assert_eq!(r.commits(), usize::from(released));
-        if !released {
-            assert_eq!(r.stored(0), TrackHeight::Small);
-            r.release(end, Modifiers::ALT);
-        }
-        assert_eq!(r.commits(), 1);
-        assert_eq!(r.stored(0), TrackHeight::Custom(70));
-        assert_eq!(r.stored(1), TrackHeight::Medium);
+fn old_missing_height_and_named_corpus_draw_stored_points_without_dirtying() {
+    let mut r = Rig::new(&[TrackHeight::Small]);
+    let mut value = serde_json::to_value(r.app.engine.session()).unwrap();
+    value["tracks"][0].as_object_mut().unwrap().remove("height");
+    let s: Session = serde_json::from_value(value).unwrap();
+    let id = s.tracks[0].id;
+    r.app.engine.replace_session(s);
+    r.ids = vec![id];
+    r.app.engine.mark_clean();
+    r.frame(vec![], Modifiers::NONE, true);
+    assert_eq!(r.row(0).height, 88.0);
+    assert!(!r.app.engine.is_dirty());
+    let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../model/tests/corpus");
+    let file = directory.join("v0.6.0-demo.transit");
+    let bytes = std::fs::read(file).unwrap();
+    transit_engine::io::open_session_bytes(&mut r.app.engine, "corpus.transit", &bytes).unwrap();
+    // Existing format migrations may dirty a corpus session; drawing must add no change.
+    let dirty = r.app.engine.is_dirty();
+    let stored = serde_json::to_value(r.app.engine.session()).unwrap();
+    r.app.ui.collapsed.clear();
+    r.frame(vec![], Modifiers::NONE, true);
+    assert!(!r.app.arrange.layout.tracks.is_empty());
+    for row in &r.app.arrange.layout.tracks {
+        assert_eq!(r.app.engine.session().track(TrackId(row.id)).unwrap().height, TrackHeight::Medium);
+        assert_eq!(row.height, 88.0);
     }
+    assert_eq!(r.app.engine.is_dirty(), dirty);
+    assert_eq!(serde_json::to_value(r.app.engine.session()).unwrap(), stored);
 }
 
 #[test]
@@ -228,6 +267,10 @@ fn bulk_drag_captures_hidden_collapsed_frozen_and_master_and_plain_folder_is_loc
     assert_eq!(r.row(2).height, 140.0);
 }
 
+fn key(key: egui::Key, pressed: bool, repeat: bool, modifiers: Modifiers) -> Event {
+    Event::Key { key, physical_key: None, pressed, repeat, modifiers }
+}
+
 #[test]
 fn height_keys_are_exact_one_step_per_press_and_exclude_piano_and_text() {
     for plus in [egui::Key::Equals, egui::Key::Plus] {
@@ -273,6 +316,23 @@ fn height_keys_are_exact_one_step_per_press_and_exclude_piano_and_text() {
     assert_eq!(r.stored(0), TrackHeight::Small);
 }
 
+impl Rig {
+    fn click_rect(&mut self, rect: R4) {
+        let p = pos2((rect[0] + rect[2]) * 0.5, (rect[1] + rect[3]) * 0.5);
+        self.frame(
+            vec![Event::PointerMoved(p), Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }],
+            Modifiers::NONE,
+            true,
+        );
+        self.release(p, Modifiers::NONE);
+        self.frame(vec![], Modifiers::NONE, true);
+    }
+    fn menu_item(&mut self, label: &str) {
+        let rect = self.app.arrange.bar_menu.iter().find(|m| m.label == label).unwrap().rect;
+        self.click_rect(rect);
+    }
+}
+
 #[test]
 fn menu_entries_dispatch_directions_and_reset_keeps_bases_and_horizontal_zoom() {
     let mut r = Rig::new(&[TrackHeight::Small, TrackHeight::Medium]);
@@ -292,6 +352,228 @@ fn menu_entries_dispatch_directions_and_reset_keeps_bases_and_horizontal_zoom() 
     assert_eq!(commands[0].1["direction"], "in");
     assert_eq!(commands[1].1["direction"], "out");
     assert_eq!(commands[2].0, "track.height_reset");
+}
+
+#[test]
+fn lane_handle_stores_proportion_and_survives_parent_undo_and_collapse() {
+    let mut r = Rig::new(&[TrackHeight::Micro]);
+    r.app.toggle_automation(r.ids[0]);
+    r.frame(vec![], Modifiers::NONE, true);
+    let h = r.app.auto.layout.lanes[0].height_handle;
+    let p = pos2((h[0] + h[2]) * 0.5, (h[1] + h[3]) * 0.5);
+    r.frame(
+        vec![Event::PointerMoved(p), Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE }],
+        Modifiers::NONE,
+        true,
+    );
+    r.frame(vec![Event::PointerMoved(p + vec2(0.0, 200.0))], Modifiers::NONE, true);
+    r.release(p + vec2(0.0, 200.0), Modifiers::NONE);
+    r.frame(vec![], Modifiers::NONE, true);
+    assert_eq!(r.app.auto.layout.lanes[0].height, 240.0);
+    assert_eq!(r.app.ui.auto_lanes[0].height, 690.0);
+    assert_eq!(r.commits(), 0);
+    r.app.run("track.height", json!({"tracks":[r.ids[0].0], "height":92})).unwrap();
+    r.app.toggle_automation(r.ids[0]);
+    r.app.toggle_automation(r.ids[0]);
+    r.frame(vec![], Modifiers::NONE, true);
+    assert_eq!(r.app.auto.layout.lanes[0].height, 240.0);
+    r.app.run("edit.undo", json!({})).unwrap();
+    r.frame(vec![], Modifiers::NONE, true);
+    assert_eq!(r.stored(0), TrackHeight::Micro);
+    assert_eq!(r.app.ui.auto_lanes[0].height, 690.0);
+    assert!(serde_json::to_value(&r.app.ui).unwrap().get("auto_lanes").is_none());
+    assert!(!serde_json::to_string(r.app.engine.session()).unwrap().contains("auto_lanes"));
+    for invalid in [f32::NAN, f32::INFINITY, -10.0, 0.0] {
+        r.app.ui.auto_lanes[0].height = invalid;
+        r.app.run("track.height", json!({"tracks":[r.ids[0].0], "height":46})).unwrap();
+        r.frame(vec![], Modifiers::NONE, true);
+        assert_eq!(r.app.auto.layout.lanes[0].height, 56.0);
+    }
+}
+
+fn audio_bytes(channels: u16) -> Vec<u8> {
+    let frames = 4096u32;
+    let size = frames * u32::from(channels) * 2;
+    let mut b = Vec::new();
+    b.extend(b"RIFF");
+    b.extend((36 + size).to_le_bytes());
+    b.extend(b"WAVEfmt ");
+    b.extend(16u32.to_le_bytes());
+    b.extend(1u16.to_le_bytes());
+    b.extend(channels.to_le_bytes());
+    b.extend(48_000u32.to_le_bytes());
+    b.extend((48_000 * u32::from(channels) * 2).to_le_bytes());
+    b.extend((channels * 2).to_le_bytes());
+    b.extend(16u16.to_le_bytes());
+    b.extend(b"data");
+    b.extend(size.to_le_bytes());
+    for i in 0..frames {
+        for _ in 0..channels {
+            b.extend((if i % 2 == 0 { 16000i16 } else { -16000i16 }).to_le_bytes());
+        }
+    }
+    b
+}
+
+fn add_audio(r: &mut Rig, channels: u16) -> Clip {
+    transit_engine::io::import_audio_bytes(&mut r.app.engine, "peaks.wav", &audio_bytes(channels), None, Some(r.ids[0]), 0).unwrap();
+    r.app.engine.session_mut().track_mut(r.ids[0]).unwrap().format =
+        if channels == 1 { transit_model::ChannelFormat::Mono } else { transit_model::ChannelFormat::Stereo };
+    r.app.engine.session().track(r.ids[0]).unwrap().clips()[0].clone()
+}
+
+#[test]
+fn take_and_automation_stacks_follow_preview_commit_and_cancellation_and_child_wheel_is_not_captured() {
+    let mut r = Rig::new(&[TrackHeight::Small, TrackHeight::Small]);
+    let mut clip = add_audio(&mut r, 1);
+    clip.take = Some(1);
+    let mut other = clip.clone();
+    other.id = r.app.engine.session_mut().new_clip_id();
+    other.take = Some(2);
+    if let ClipContent::Audio { source, offset } = other.content {
+        let audio = r.app.engine.session().pool.get(source).unwrap().clone();
+        let distinct = transit_model::SourceId(source.0 + 100);
+        r.app.engine.session_mut().pool.insert(distinct, audio);
+        other.content = ClipContent::Audio { source: distinct, offset };
+    }
+    r.app.engine.session_mut().track_mut(r.ids[0]).unwrap().playlists =
+        vec![transit_model::Playlist { name: "one".into(), clips: vec![clip] }, transit_model::Playlist { name: "two".into(), clips: vec![other] }];
+    r.app.ui.takes_open.push(r.ids[0]);
+    r.app.toggle_automation(r.ids[0]);
+    r.frame(vec![], Modifiers::NONE, true);
+    assert_eq!(r.app.finish.layout.takes[0].lane[3] - r.app.finish.layout.takes[0].lane[1], 22.0);
+    let p = r.press(0, Modifiers::NONE);
+    r.frame(vec![Event::PointerMoved(p + vec2(0.0, 46.0))], Modifiers::NONE, true);
+    assert_eq!(r.row(0).height, 92.0);
+    assert_eq!(r.row(0).stack_height, 92.0 + 88.0 + 112.0);
+    assert_eq!(r.row(1).header[1] - r.row(0).header[1], r.row(0).stack_height);
+    assert_eq!(r.app.finish.layout.takes[0].lane[3] - r.app.finish.layout.takes[0].lane[1], 44.0);
+    assert_eq!(r.app.auto.layout.lanes[0].height, 112.0);
+    let s = r.app.engine.session();
+    let rows = s.tracks.iter().collect::<Vec<_>>();
+    let geo = RowGeo::new(&r.app, &rows);
+    assert_eq!(geo.index_at(291.5), Some(0));
+    assert_eq!(geo.index_at(292.0), Some(1));
+    assert_eq!(r.commits(), 0);
+    r.frame(vec![Event::PointerMoved(p)], Modifiers::NONE, true);
+    assert_eq!(r.row(0).stack_height, 146.0);
+    r.release(p, Modifiers::NONE);
+    assert_eq!(r.commits(), 0);
+    let lane = r.app.auto.layout.lanes[0].area;
+    let q = pos2(lane[0] + 20.0, lane[1] + 10.0);
+    r.frame(
+        vec![
+            Event::PointerMoved(q),
+            Event::MouseWheel { unit: MouseWheelUnit::Line, delta: vec2(0.0, 1.0), phase: egui::TouchPhase::Move, modifiers: Modifiers::ALT },
+        ],
+        Modifiers::ALT,
+        true,
+    );
+    assert!(r.app.arrange.height_gesture.is_none());
+    r.app.run("track.height", json!({"tracks":[r.ids[0].0], "height":440})).unwrap();
+    r.frame(vec![], Modifiers::NONE, true);
+    assert_eq!(r.app.auto.layout.lanes[0].height, 240.0);
+    // At H=440 the take formula is 210.43478, below its 220-point safety clamp.
+    assert!((r.app.finish.layout.takes[0].lane[3] - r.app.finish.layout.takes[0].lane[1] - 22.0 * 440.0 / 46.0).abs() < 0.001);
+    assert!(r.app.arrange.vscroll >= 0.0);
+}
+
+#[test]
+fn bulk_preview_keeps_anchor_screen_y_and_scroll_is_clamped_after_reset() {
+    let mut r = Rig::new(&[TrackHeight::Small; 12]);
+    r.app.arrange.vscroll = 200.0;
+    r.frame(vec![], Modifiers::NONE, true);
+    let y = r.row(5).header[1];
+    let p = r.press(5, Modifiers::ALT);
+    r.frame(vec![Event::PointerMoved(p + vec2(0.0, 90.0))], Modifiers::ALT, true);
+    assert_eq!(r.row(5).header[1], y);
+    assert_eq!(r.row(5).height, 136.0);
+    r.release(p + vec2(0.0, 90.0), Modifiers::ALT);
+    assert_eq!(r.row(5).header[1], y);
+    r.app.run("track.height_reset", json!({})).unwrap();
+    r.frame(vec![], Modifiers::NONE, true);
+    let total = r.app.arrange.layout.tracks.iter().map(|r| r.stack_height).sum::<f32>() + ADD_STACK_H;
+    let tl = r.app.arrange.layout.timeline;
+    assert!(r.app.arrange.vscroll <= (total - (tl[3] - tl[1])).max(0.0));
+}
+
+#[test]
+fn cached_waveforms_and_live_peaks_scale_with_body_for_mono_stereo_and_loops() {
+    for channels in [1, 2] {
+        let mut r = Rig::new(&[TrackHeight::Small]);
+        let original = add_audio(&mut r, channels);
+        let ClipContent::Audio { source, .. } = original.content else { panic!("audio fixture") };
+        let cached = r.app.engine.session().pool.get(source).unwrap().clone();
+        r.app.engine.zoom_mut().samples_per_px = 32.0;
+        for looping in [false, true] {
+            let mut clip = original.clone();
+            if looping {
+                clip.looping = Some(ClipLoop { start: 0, end: 1024 });
+            }
+            for h in [16.0, 24.0, 46.0, 88.0, 440.0] {
+                r.app.run("track.height", json!({"tracks":[r.ids[0].0], "height": h})).unwrap();
+                r.frame(vec![], Modifiers::NONE, true);
+                let drawn = r.app.arrange.layout.clips.iter().find(|c| c.id == original.id.0).unwrap();
+                assert_eq!(drawn.rect[3] - drawn.rect[1], h - 2.0);
+                let s = r.app.engine.session();
+                let track = s.track(r.ids[0]).unwrap();
+                let rect = Rect::from_min_size(pos2(20.0, 20.0), vec2(128.0, h - 2.0));
+                let map = Map { x0: 20.0, scroll: 0, spp: 32.0, grid: Default::default() };
+                r.time += 0.02;
+                let mut out = r.ctx.run_ui(egui::RawInput { time: Some(r.time), ..Default::default() }, |ui| {
+                    super::super::clips::draw_clip(ui.painter(), s, map, rect, track, &clip, &[], rect, false, 1.0, true);
+                });
+                let mesh_points: Vec<_> = out
+                    .shapes
+                    .iter()
+                    .filter_map(|s| if let Shape::Mesh(m) = &s.shape { Some(&m.vertices) } else { None })
+                    .flatten()
+                    .map(|v| v.pos)
+                    .collect();
+                if h < 24.0 {
+                    assert!(mesh_points.is_empty());
+                }
+                if h >= 46.0 {
+                    assert!(!mesh_points.is_empty());
+                    assert!(mesh_points.iter().all(|p| p.y >= rect.min.y + CLIP_NAME_H && p.y <= rect.max.y));
+                }
+                out.textures_delta.clear();
+                assert!(std::sync::Arc::ptr_eq(&cached, s.pool.get(source).unwrap()));
+                if h >= 46.0 {
+                    let band = (h - 2.0 - CLIP_NAME_H - 4.0) / f32::from(channels);
+                    for mesh in out.shapes.iter().filter_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }) {
+                        let lo = mesh.vertices.iter().map(|v| v.pos.y).fold(f32::INFINITY, f32::min);
+                        let hi = mesh.vertices.iter().map(|v| v.pos.y).fold(f32::NEG_INFINITY, f32::max);
+                        assert!((hi - lo - band * 0.92 * 16000.0 / 32768.0).abs() < 1.1);
+                    }
+                }
+                if h <= 24.0 {
+                    let at = pos2(rect.min.x + 10.0, rect.max.y - 1.0);
+                    assert_eq!(zone(r4(rect), at, true), DragKind::Move);
+                    assert!(crate::fades::grab(&clip, map, r4(rect), at, true).is_none());
+                }
+                let blocks = vec![vec![(-0.5, 0.5); 32]; usize::from(channels)];
+                r.time += 0.02;
+                let mut live = r.ctx.run_ui(egui::RawInput { time: Some(r.time), ..Default::default() }, |ui| {
+                    super::super::recording_preview::draw_peaks(ui.painter(), s, rect, rect, 0, 48_000, &blocks);
+                });
+                let meshes: Vec<_> = live.shapes.iter().filter_map(|s| if let Shape::Mesh(m) = &s.shape { Some(m) } else { None }).collect();
+                if h < 24.0 {
+                    assert!(meshes.is_empty());
+                }
+                if h >= 46.0 {
+                    assert_eq!(meshes.len(), usize::from(channels));
+                    let band = (h - 2.0 - CLIP_NAME_H - 4.0) / f32::from(channels);
+                    for mesh in meshes {
+                        let lo = mesh.vertices.iter().map(|v| v.pos.y).fold(f32::INFINITY, f32::min);
+                        let hi = mesh.vertices.iter().map(|v| v.pos.y).fold(f32::NEG_INFINITY, f32::max);
+                        assert!((hi - lo - band * 0.46).abs() < 1.1, "{h}: {lo}..{hi}, band {band}");
+                    }
+                }
+                live.textures_delta.clear();
+            }
+        }
+    }
 }
 
 #[test]
@@ -496,4 +778,79 @@ fn ordinary_and_control_commands_flush_but_queries_do_not_and_refusal_does_not_r
     let journal = r.app.engine.journal.len();
     r.frame(vec![], Modifiers::NONE, true);
     assert_eq!(r.app.engine.journal.len(), journal);
+}
+
+#[test]
+fn proportional_lanes_and_compact_controls_use_the_rendered_geometry() {
+    let mut r = Rig::new(&[TrackHeight::Small, TrackHeight::Custom(92)]);
+    for id in r.ids.clone() {
+        r.app.toggle_automation(id);
+    }
+    r.frame(vec![], Modifiers::NONE, true);
+    assert_eq!(r.app.auto.layout.lanes[0].height, 56.0);
+    assert_eq!(r.app.auto.layout.lanes[1].height, 112.0);
+    assert_eq!(r.row(1).header[1] - r.row(0).header[1], 102.0);
+    assert_eq!(r.row(0).header[3] - r.row(0).header[1], 46.0);
+    for height in [16, 24, 46, 88, 440] {
+        r.app.run("track.height", json!({"tracks": [r.ids[0].0], "height": height})).unwrap();
+        r.frame(vec![], Modifiers::NONE, true);
+        let row = r.row(0);
+        assert_eq!(row.height, height as f32);
+        assert!(row.name_rect[1] >= row.header[1] && row.name_rect[3] <= row.header[3]);
+        assert_eq!(row.volume == [0.0; 4], height < 46);
+        assert_eq!(row.mute == [0.0; 4], height < 24);
+        let h = row.height_handle.unwrap();
+        assert_eq!(h[3] - h[1], 4.0);
+        assert_eq!(h[3], row.header[3]);
+    }
+}
+
+#[test]
+fn wheel_on_unselected_tall_row_commits_when_pointer_leaves_the_viewport() {
+    let mut r = Rig::new(&[TrackHeight::Custom(440), TrackHeight::Custom(430)]);
+    r.app.run("edit.select", json!({"tracks": [r.ids[0].0]})).unwrap();
+    r.wheel(1, MouseWheelUnit::Line, 1.0);
+    assert_eq!(r.row(1).height, 438.0);
+    assert_eq!(r.app.engine.session().edit.selected_tracks, vec![r.ids[0]]);
+    assert_eq!(r.stored(0), TrackHeight::Custom(440));
+    assert_eq!(r.stored(1), TrackHeight::Custom(430));
+    assert_eq!(r.commits(), 0);
+    let timeline = r.app.arrange.layout.timeline;
+    let outside = pos2(timeline[0] + 20.0, timeline[3] + 2.0);
+    assert!(crate::finish::rect(r.row(1).lane).contains(outside));
+    r.frame(vec![Event::PointerMoved(outside)], Modifiers::ALT, true);
+    assert_eq!(r.commits(), 1);
+    assert_eq!(r.stored(1), TrackHeight::Custom(438));
+    r.app.run("edit.undo", json!({})).unwrap();
+    assert_eq!(r.stored(1), TrackHeight::Custom(430));
+}
+
+#[test]
+fn batched_drag_uses_press_position_and_modifiers_even_with_release_in_the_frame() {
+    for released in [false, true] {
+        let mut r = Rig::new(&[TrackHeight::Small, TrackHeight::Medium]);
+        let h = r.row(0).height_handle.unwrap();
+        let p = pos2((h[0] + h[2]) * 0.5, (h[1] + h[3]) * 0.5);
+        let end = p + vec2(0.0, 24.0);
+        let mut events = vec![
+            Event::PointerMoved(p),
+            Event::PointerButton { pos: p, button: PointerButton::Primary, pressed: true, modifiers: Modifiers::NONE },
+            Event::PointerMoved(end),
+            Event::ModifiersChanged(Modifiers::ALT),
+        ];
+        if released {
+            events.push(Event::PointerButton { pos: end, button: PointerButton::Primary, pressed: false, modifiers: Modifiers::ALT });
+        }
+        r.frame(events, Modifiers::NONE, true);
+        assert_eq!(r.row(0).height, 70.0);
+        assert_eq!(r.row(1).height, 88.0);
+        assert_eq!(r.commits(), usize::from(released));
+        if !released {
+            assert_eq!(r.stored(0), TrackHeight::Small);
+            r.release(end, Modifiers::ALT);
+        }
+        assert_eq!(r.commits(), 1);
+        assert_eq!(r.stored(0), TrackHeight::Custom(70));
+        assert_eq!(r.stored(1), TrackHeight::Medium);
+    }
 }

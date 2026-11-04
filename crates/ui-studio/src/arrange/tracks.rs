@@ -12,6 +12,10 @@ pub(super) fn track_header(
     outputs: Option<&crate::midi_output::OutputView>,
     row: &mut TrackRow,
 ) {
+    if r.height() < 46.0 {
+        super::compact_header::show(app, ui, t, r, list, selected, row);
+        return;
+    }
     let list = list.intersect(Rect::from_min_max(r.min, pos2(r.max.x, r.max.y - 4.0)));
     let p = ui.painter().with_clip_rect(list);
     let bg = if selected { TOKENS.header_selected } else { TOKENS.header };

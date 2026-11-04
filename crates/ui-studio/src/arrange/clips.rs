@@ -53,11 +53,15 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
                         crate::fades::Side::Out => live.fade_out = f.fade,
                     }
                     draw_clip(&p, s, map, tl, t, &live, &takes.stacks, rect, sel.contains(&c.id), alpha, hot(c.id.0, rect));
-                    crate::fades::overlay(&p, layout, &live, map, rect, hot_fade);
+                    if rh - 2.0 - CLIP_NAME_H - 4.0 > 4.0 {
+                        crate::fades::overlay(&p, layout, &live, map, rect, hot_fade);
+                    }
                 }
                 _ => {
                     draw_clip(&p, s, map, tl, t, c, &takes.stacks, rect, sel.contains(&c.id), alpha, hot(c.id.0, rect));
-                    crate::fades::overlay(&p, layout, c, map, rect, hot_fade);
+                    if rh - 2.0 - CLIP_NAME_H - 4.0 > 4.0 {
+                        crate::fades::overlay(&p, layout, c, map, rect, hot_fade);
+                    }
                 }
             }
         }
@@ -66,6 +70,9 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
     for t in rows {
         let Some(y0) = row_y(t.id) else { continue };
         let rh = row_height(t.id);
+        if rh - 2.0 - CLIP_NAME_H - 4.0 <= 4.0 {
+            continue;
+        }
         for o in crate::fades::crossfades(s, t.id) {
             crate::fades::draw_cross(&p, layout, s, map, o, y0, rh);
         }
@@ -147,7 +154,7 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
 }
 
 #[allow(clippy::too_many_arguments)]
-fn draw_clip(
+pub(super) fn draw_clip(
     p: &egui::Painter,
     s: &Session,
     map: Map,
@@ -168,7 +175,8 @@ fn draw_clip(
     p.rect_filled(strip, crate::theme::top_corners(), strip_col.gamma_multiply(alpha));
     let name_x = rect.min.x.max(tl.min.x) + 4.0;
     let looped = c.looping.is_some_and(|l| l.is_valid());
-    let corner = corner_alpha(looped, hot).and_then(|a| loop_corner_rect(rect, strip).map(|r| (r, a)));
+    let corner =
+        corner_alpha(looped && rect.height() >= 22.0, hot && rect.height() >= 22.0).and_then(|a| loop_corner_rect(rect, strip).map(|r| (r, a)));
     // The name stops short of the loop corner while it is drawn, so the two never overlap.
     let mut name_clip = strip.intersect(tl);
     if let Some((r, _)) = corner {
@@ -186,7 +194,9 @@ fn draw_clip(
     }
     let body = Rect::from_min_max(pos2(rect.min.x, strip.max.y), rect.max).shrink2(vec2(0.0, 2.0));
     let ink = theme::darken(body_col, 0.62).gamma_multiply(alpha);
-    if let Some(l) = c.looping.filter(|l| l.is_valid()) {
+    if body.height() > 4.0
+        && let Some(l) = c.looping.filter(|l| l.is_valid())
+    {
         draw_cycles(&p, s, map, tl, t, c, l, rect, strip, body, ink);
     } else if body.height() > 4.0 {
         match &c.content {
@@ -213,7 +223,9 @@ fn draw_clip(
             }
         }
     }
-    crate::fades::draw(&p, c, map, rect, body, ink, body_col.gamma_multiply(alpha), selected);
+    if rect.height() >= 22.0 && body.height() > 4.0 {
+        crate::fades::draw(&p, c, map, rect, body, ink, body_col.gamma_multiply(alpha), selected);
+    }
     let stroke = if selected { Stroke::new(2.0, TOKENS.selection_outline) } else { Stroke::new(1.0, theme::darken(base, 0.45)) };
     p.rect_stroke(rect, crate::theme::RADIUS, stroke, StrokeKind::Inside);
 }

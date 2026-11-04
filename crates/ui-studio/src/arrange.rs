@@ -10,7 +10,9 @@ mod geometry;
 pub use geometry::TAKE_H;
 use geometry::shown;
 pub(crate) use geometry::{Map, RowGeo};
+mod compact_header;
 pub(crate) mod marquee;
+mod recording_preview;
 mod take_lanes;
 pub(crate) mod track_height;
 mod tracks;
@@ -973,7 +975,7 @@ fn overlays(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, tl: Re
         let pass = app.take_plan.as_ref().and_then(|p| p.pass);
         transit_engine::io::live_span(app.record_start, pass, app.punch, (app.position() - app.record_start).max(0))
     });
-    if let Some(Some((_, span))) = span {
+    if let Some(Some((origin, span))) = span {
         let rp = p.with_clip_rect(tl);
         for (i, t) in rows.iter().enumerate() {
             if t.mixer.record_arm && !app.midi_live.as_ref().is_some_and(|live| live.tracks.contains(&t.id)) {
@@ -982,6 +984,7 @@ fn overlays(app: &StudioApp, ui: &Ui, s: &Session, map: Map, ruler: Rect, tl: Re
                     Rect::from_min_max(pos2(map.x(span.start), y0 + 1.0), pos2(map.x(span.end).max(map.x(span.start) + 2.0), y0 + geo.main[i] - 1.0));
                 layout.recording.push(RecordingLane { track: t.id.0, rect: r4(r), notes: Vec::new() });
                 rp.rect_filled(r, crate::theme::RADIUS, TOKENS.record.gamma_multiply(0.45));
+                recording_preview::draw(app, ui, s, tl, t.id, r, origin);
                 let strip = Rect::from_min_max(r.min, pos2(r.max.x, (r.min.y + CLIP_NAME_H).min(r.max.y)));
                 rp.rect_filled(strip, crate::theme::top_corners(), TOKENS.record);
                 let tp = rp.with_clip_rect(strip.intersect(tl));
