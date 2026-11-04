@@ -59,7 +59,7 @@ link = "user-guide.md#takes-and-comping"
 [[entry]]
 id = "arrange_header.take_lane"
 name = "Take lane"
-text = "One take of the track. Click a dimmed clip in the lane to play that take over its range, or click this label to play the take everywhere it was recorded. Each choice is one undo step."
+text = "One take of the track; its label shows the span it plays in bars.beats (hover for the full list when it plays several ranges). Click a dimmed clip in the lane to play that take over its range, or click this label to play the take everywhere it was recorded. Each choice is one undo step."
 link = "user-guide.md#takes-and-comping"
 
 [[entry]]

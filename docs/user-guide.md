@@ -68,6 +68,7 @@ the newest when you stop. Takes work the same for audio and MIDI.
   where it plays and dimmed elsewhere. Click **T** in the track header (or **Show Take Lanes** in
   the track's right-click menu) to show or hide the lanes; a clip with stacked takes also carries
   an "n takes" chip that does the same. Showing lanes only changes the view.
+  Lane headers show the span each take plays in bars.beats (hover for the full list of multiple ranges), and arrangement clip labels include the take number without changing the stored clip name.
 - **Choose a take.** Click a dimmed clip in a lane: that take plays over the clip's range, and the
   rest of the track keeps playing. Click a lane's label to play that take wherever it was
   recorded. A shorter take plays over its own range, with the longer take around it; choose the

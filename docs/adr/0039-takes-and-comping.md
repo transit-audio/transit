@@ -2,6 +2,7 @@
 
 - **Status:** proposed 2026-10-31 (#25 slice 1)
 - **Date:** 2026-10-31
+- **Implementation:** #317 landed derived played-span labels in take-lane headers and take numbers in arrangement clip labels.
 - **Reopen when:** swipe comping lands (slice 2: a range across takes with crossfades), which may want a comp kept apart from the takes; a user needs a take's material to play on two tracks at once; or the "copy of a clip on the active playlist is no take" rule hides a take someone recorded on purpose.
 
 ## Context
