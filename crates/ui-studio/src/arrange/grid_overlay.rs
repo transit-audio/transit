@@ -31,9 +31,13 @@ pub(super) fn color(kind: Kind) -> Color32 {
 /// maintainer's pick (4.0 reads stronger; both make them findable on the brightest demo clip, #302).
 pub(super) const OVERLAY_GAIN: f32 = 3.0;
 
+/// The most alpha a stroke over a clip body may have (a fraction of opaque), after the gain, in
+/// both themes: the light theme's bar line would otherwise read as the harsh opaque line again.
+pub(super) const OVERLAY_BODY_ALPHA_MAX: f32 = 0.40;
+
 /// The alpha a stroke over a clip body gets for a lane alpha `a`.
 pub(super) fn body_alpha(a: u8) -> u8 {
-    (f32::from(a) * OVERLAY_GAIN).round().min(255.0) as u8
+    (f32::from(a) * OVERLAY_GAIN).min(OVERLAY_BODY_ALPHA_MAX * 255.0).round() as u8
 }
 
 /// The stroke of a line of `kind` painted above the clips: white (dark theme) or black (light
@@ -56,7 +60,7 @@ pub(super) fn translucent(token: Color32, lane: Color32, gain: f32) -> Color32 {
     let room = mean(&|i| (extreme - l[i]).abs());
     let a = if room > 0.0 { (dist / room * gain).clamp(0.0, 1.0) } else { 0.0 };
     let a8 = (a * 255.0).round() as u8;
-    if toward_white { Color32::from_white_alpha(a8) } else { Color32::from_black_alpha(a8) }
+    crate::theme::tint(toward_white, a8)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -122,19 +126,40 @@ pub(super) struct Body {
     pub color: Color32,
 }
 
+/// The bodies the overlay crosses: for each clip intersecting `tl`, its name strip in the strip
+/// color, then the body below it in the body color, sorted by top edge. The two are separate
+/// because the strip is a different color and can sit on the other side of the 0.5 luma line.
+pub(super) fn bodies(clips: &[ClipRect], tl: Rect) -> Vec<Body> {
+    let mut out = Vec::new();
+    for c in clips {
+        let r = Rect::from_min_max(pos2(c.rect[0], c.rect[1]), pos2(c.rect[2], c.rect[3]));
+        if !r.intersects(tl) {
+            continue;
+        }
+        let split = (r.min.y + CLIP_NAME_H).min(r.max.y);
+        out.push(Body { rect: Rect::from_min_max(r.min, pos2(r.max.x, split)), color: c.strip });
+        out.push(Body { rect: Rect::from_min_max(pos2(r.min.x, split), r.max), color: c.body });
+    }
+    out.sort_by(|a, b| a.rect.min.y.total_cmp(&b.rect.min.y));
+    out
+}
+
 /// Paints the grid across the timeline `tl`, once per frame: beneath the clips by default
-/// (`above` is `None`), above them with View > Grid Over Clips (`above` is the clip bodies). The
-/// lane and the overlay are this one pass, never two. Above the clips each line is split at the
-/// bodies it crosses and stroked per [`segments`], an emulated Overlay blend.
+/// (`above` is `None`), above them with View > Grid Over Clips (`above` is the clip bodies that
+/// intersect `tl`, sorted by top edge). The lane and the overlay are this one pass, never two.
+/// Above the clips each line is split at the bodies it crosses and stroked per [`segments_into`],
+/// an emulated overlay blend mode.
 pub(super) fn paint(p: &egui::Painter, tl: Rect, lines: &[Line], above: Option<&[Body]>) {
     let gp = p.with_clip_rect(tl);
+    let mut scratch = Vec::with_capacity(8);
     for l in lines {
         match above {
             None => {
                 gp.line_segment([pos2(l.x, tl.min.y), pos2(l.x, tl.max.y)], Stroke::new(1.0, color(l.kind)));
             }
             Some(bodies) => {
-                for (y0, y1, c) in segments(l, tl, bodies) {
+                segments_into(l, tl, bodies, &mut scratch);
+                for &(y0, y1, c) in &scratch {
                     gp.line_segment([pos2(l.x, y0), pos2(l.x, y1)], Stroke::new(1.0, c));
                 }
             }
@@ -147,44 +172,45 @@ pub(super) fn bright(c: Color32) -> bool {
     0.299 * f32::from(c.r()) + 0.587 * f32::from(c.g()) + 0.114 * f32::from(c.b()) > 127.5
 }
 
-/// The per-segment rule of the overlay, a Photoshop Overlay emulation. With `a` the alpha of
+/// The per-segment rule of the overlay, an overlay blend mode emulated. With `a` the alpha of
 /// [`overlay_color`] for the line's kind: over the empty lane the stroke is [`overlay_color`]
-/// itself (the lane looks as it does with the option off); over a clip body whose luma is above
-/// 0.5 it is black at `a` times [`OVERLAY_GAIN`] (darkening, where the lane lightens); over a body at 0.5 or
-/// below it is white at `a`. A line is split at the top and bottom edge of each body it crosses.
+/// itself (the lane looks as it does with the option off); over a clip body (the name strip and
+/// the body below it are two bodies, each in its own color) whose luma is above 0.5 it is black
+/// at [`body_alpha`] (darkening, where the lane lightens); over a body at 0.5 or below it is
+/// white at [`body_alpha`]. A line is split at the top and bottom edge of each body it crosses;
+/// neighbors of one color are merged.
 pub(super) fn segments(l: &Line, tl: Rect, bodies: &[Body]) -> Vec<(f32, f32, Color32)> {
+    let mut sorted = bodies.to_vec();
+    sorted.sort_by(|a, b| a.rect.min.y.total_cmp(&b.rect.min.y));
+    let mut out = Vec::new();
+    segments_into(l, tl, &sorted, &mut out);
+    out
+}
+
+/// [`segments`] into a reused buffer; `bodies` must be sorted by top edge.
+pub(super) fn segments_into(l: &Line, tl: Rect, bodies: &[Body], out: &mut Vec<(f32, f32, Color32)>) {
+    out.clear();
     let lane = overlay_color(l.kind);
     let a = body_alpha(lane.a());
-    let mut hits: Vec<(f32, f32, Color32)> = bodies
-        .iter()
-        .filter(|b| b.rect.min.x <= l.x && l.x <= b.rect.max.x)
-        .map(|b| {
-            (
-                b.rect.min.y.max(tl.min.y),
-                b.rect.max.y.min(tl.max.y),
-                if bright(b.color) { Color32::from_black_alpha(a) } else { Color32::from_white_alpha(a) },
-            )
-        })
-        .filter(|(y0, y1, _)| y1 > y0)
-        .collect();
-    hits.sort_by(|x, y| x.0.total_cmp(&y.0));
-    let mut out = Vec::new();
+    let mut push = |out: &mut Vec<(f32, f32, Color32)>, y0: f32, y1: f32, c: Color32| match out.last_mut() {
+        Some(last) if last.2 == c && last.1 >= y0 => last.1 = y1,
+        _ => out.push((y0, y1, c)),
+    };
     let mut y = tl.min.y;
-    for (y0, y1, c) in hits {
-        let y0 = y0.max(y);
+    for b in bodies.iter().filter(|b| b.rect.min.x <= l.x && l.x <= b.rect.max.x) {
+        let (y0, y1) = (b.rect.min.y.max(tl.min.y).max(y), b.rect.max.y.min(tl.max.y));
         if y1 <= y0 {
             continue;
         }
         if y0 > y {
-            out.push((y, y0, lane));
+            push(out, y, y0, lane);
         }
-        out.push((y0, y1, c));
+        push(out, y0, y1, crate::theme::tint(!bright(b.color), a));
         y = y1;
     }
     if y < tl.max.y {
-        out.push((y, tl.max.y, lane));
+        push(out, y, tl.max.y, lane);
     }
-    out
 }
 
 #[cfg(test)]

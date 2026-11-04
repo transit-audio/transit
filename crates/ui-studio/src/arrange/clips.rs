@@ -31,6 +31,7 @@ pub(super) fn clips(app: &StudioApp, ui: &Ui, s: &Session, map: Map, tl: Rect, r
                 start: c.start,
                 end: c.end(),
                 body: theme::clip_colors(clip_base_color(c, t), sel.contains(&c.id)).0,
+                strip: theme::clip_colors(clip_base_color(c, t), sel.contains(&c.id)).1,
             });
             if rect.max.x < tl.min.x || rect.min.x > tl.max.x || rect.max.y < tl.min.y || rect.min.y > tl.max.y {
                 continue;

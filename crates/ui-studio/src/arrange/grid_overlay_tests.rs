@@ -102,6 +102,7 @@ fn painted(ui: &mut Ui) -> Painted {
 fn xs(p: &Painted) -> Vec<f32> {
     let mut x: Vec<f32> = p.grid.iter().map(|g| g.1).collect();
     x.sort_by(f32::total_cmp);
+    // Split segments share an x; the exact segment counts guard against a second stroke.
     x.dedup();
     x
 }
@@ -130,13 +131,14 @@ fn on_paints_the_same_single_grid_above_every_clip_shape() {
     let first_grid = on.grid.iter().map(|g| g.0).min().unwrap();
     let last_clip = *on.clip.iter().max().unwrap();
     assert!(first_grid > last_clip, "first grid segment index {first_grid} after the last clip shape {last_clip}");
-    // Above the clips a line is split at the clip bodies it crosses, so there may be more
-    // segments, never a second line at an x.
-    assert!(on.grid.len() >= off.grid.len(), "at least one segment per line");
+    let l = &ui.app.arrange.layout.clips[0];
+    let (clip, strip, body) = (l.rect, l.strip, l.body);
+    let crossing = off.grid.iter().filter(|g| g.1 >= clip[0] && g.1 <= clip[2]).count();
+    // A line over the clip is lane, strip, body, lane; the strip and body merge when they share a direction.
+    let extra = if bright(strip) == bright(body) { 2 } else { 3 };
+    assert_eq!(on.grid.len(), off.grid.len() + extra * crossing, "each line crossing the clip is split, nothing else is stroked twice");
     assert_eq!(xs(&on), xs(&off), "the same x positions");
-    // Only the splitting of lines at the clip body adds segments (the clip body is the extra two here).
-    let split = on.grid.len() - off.grid.len();
-    assert_eq!(on.all.len(), off.all.len() + split, "nothing else was added or dropped");
+    assert_eq!(on.all.len(), off.all.len() + extra * crossing, "nothing else was added or dropped");
 }
 
 #[test]
@@ -414,4 +416,35 @@ fn a_dark_body_is_lightened_and_a_line_splits_at_each_body_edge() {
     assert_ne!(segs[0].2, segs[1].2, "two segments, two stroke colors");
     // A line outside every body is one segment, and a body edge off the line does not split it.
     assert_eq!(segments(&Line { x: 150.0, ..line }, tl, &[body(0.0, 20.0, 100.0, 40.0, Color32::WHITE)]).len(), 1);
+}
+
+#[test]
+fn no_body_stroke_exceeds_the_alpha_cap_in_either_theme() {
+    let cap = (OVERLAY_BODY_ALPHA_MAX * 255.0).round() as u8;
+    both_themes(|t| {
+        for k in KINDS {
+            let lane = translucent(tok(t, k), t.lane, 1.0).a();
+            assert!(body_alpha(lane) <= cap, "{k:?}: {} over the cap {cap}", body_alpha(lane));
+        }
+    });
+    // The light theme's bar (alpha 49 at gain 1, 147 at 3.0) is what the cap exists for.
+    assert_eq!(body_alpha(49), cap);
+    assert_eq!(body_alpha(29), 87, "the dark bar is under the cap and keeps the full gain");
+}
+
+#[test]
+fn a_clips_strip_and_body_are_stroked_by_their_own_colors() {
+    let tl = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0));
+    let line = Line { x: 50.0, kind: Kind::Bar { labeled: true }, bar: 1 };
+    // The demo blue: a bright body (0x5a9ad8) under a darker strip (0x41709d reads dark).
+    let bodies =
+        [body(0.0, 20.0, 100.0, 34.0, Color32::from_rgb(0x41, 0x70, 0x9d)), body(0.0, 34.0, 100.0, 60.0, Color32::from_rgb(0x5a, 0x9a, 0xd8))];
+    let segs = segments(&line, tl, &bodies);
+    assert_eq!(segs.len(), 4, "lane, strip, body, lane: {segs:?}");
+    let a = body_alpha(overlay_color(line.kind).a());
+    assert_eq!(segs[1].2, Color32::from_white_alpha(a), "the dark strip is lightened");
+    assert_eq!(segs[2].2, Color32::from_black_alpha(a), "the bright body is darkened");
+    // The same direction merges into one segment.
+    let same = [body(0.0, 20.0, 100.0, 34.0, Color32::BLACK), body(0.0, 34.0, 100.0, 60.0, Color32::BLACK)];
+    assert_eq!(segments(&line, tl, &same).len(), 3, "strip and body merge");
 }

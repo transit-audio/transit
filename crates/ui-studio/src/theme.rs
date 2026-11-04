@@ -325,6 +325,12 @@ pub fn follow(ctx: &egui::Context) {
     set_current(ctx.theme());
 }
 
+/// White (`toward_white`) or black at `alpha`: a translucent tint that lightens or darkens whatever
+/// it is painted over.
+pub fn tint(toward_white: bool, alpha: u8) -> Color32 {
+    if toward_white { Color32::from_white_alpha(alpha) } else { Color32::from_black_alpha(alpha) }
+}
+
 /// WCAG relative luminance of an opaque color.
 pub fn luminance(c: Color32) -> f32 {
     let lin = |x: u8| {

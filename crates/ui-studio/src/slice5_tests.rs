@@ -331,6 +331,7 @@ fn tokens_are_the_only_colors() {
         ("keys/view.rs", include_str!("keys/view.rs")),
         ("arrange/tracks.rs", include_str!("arrange/tracks.rs")),
         ("arrange/clips.rs", include_str!("arrange/clips.rs")),
+        ("arrange/grid_overlay.rs", include_str!("arrange/grid_overlay.rs")),
         ("host/transport.rs", include_str!("host/transport.rs")),
         ("host/recording.rs", include_str!("host/recording.rs")),
         ("host/plugin_state.rs", include_str!("host/plugin_state.rs")),

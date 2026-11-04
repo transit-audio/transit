@@ -208,6 +208,8 @@ pub struct ClipRect {
     /// The body color the clip is drawn with (the grid overlay's contrast pass reads it).
     #[serde(skip)]
     pub body: Color32,
+    #[serde(skip)]
+    pub strip: Color32,
 }
 
 /// A MIDI clip being recorded on a track's lane.
@@ -467,11 +469,7 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     grid_and_ruler(ui, &grid, ruler, tl, !over);
     clips(app, ui, &s, map, tl, &rows, &geo, &mut layout);
     if over {
-        let bodies: Vec<_> = layout
-            .clips
-            .iter()
-            .map(|c| grid_overlay::Body { rect: Rect::from_min_max(pos2(c.rect[0], c.rect[1]), pos2(c.rect[2], c.rect[3])), color: c.body })
-            .collect();
+        let bodies = grid_overlay::bodies(&layout.clips, tl);
         grid_overlay::paint(ui.painter(), tl, &grid, Some(&bodies));
     }
     group_summaries(app, ui, &s, map, tl, &mut layout);
