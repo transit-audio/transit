@@ -109,6 +109,16 @@ struct Segment {
     origin: Samples,
 }
 
+/// Where the first stretch of a pass starts, in samples since the latch: the earliest note-on
+/// played before the latch (a pickup over the count-in or pre-roll, #327, Logic's behavior), else
+/// 0 as before. A punch keeps its range: no pickups under one.
+fn pickup(events: &[&RecEvent], cut: &Cut) -> Samples {
+    if cut.punch.is_some() {
+        return 0;
+    }
+    events.iter().filter(|e| e.offset < 0 && matches!(e.msg, Msg::NoteOn { .. })).map(|e| e.offset).min().unwrap_or(0)
+}
+
 /// Does a recording that started at or before the loop end of `wrap` (the loop region the
 /// transport cycles over) run past it, so the transport wrapped while recording? The player wraps
 /// at the loop end from any position before it, so a start ahead of the loop counts too.
@@ -130,27 +140,40 @@ pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut
     }
     let mut out = Vec::new();
     for track in tracks {
-        let mut mine: Vec<&RecEvent> = events.iter().filter(|e| e.track == track && e.offset >= 0).collect();
+        let mine: Vec<&RecEvent> = events.iter().filter(|e| e.track == track).collect();
+        // Pickups (#327): the first stretch starts at the earliest note-on before the latch, and
+        // takes what was played from it on. Nothing is placed before the session start: what
+        // came earlier is clamped there. Without a pickup, nothing before the latch is kept.
+        let earliest = pickup(&mine, cut);
+        let floor = -cut.start.max(0);
+        let lead = earliest.max(floor).min(0);
+        let mine: Vec<RecEvent> = mine.into_iter().filter(|e| e.offset >= earliest).map(|e| RecEvent { offset: e.offset.max(lead), ..*e }).collect();
+        let mut mine: Vec<&RecEvent> = mine.iter().collect();
         mine.sort_by_key(|e| e.offset);
         let last = mine.last().map_or(0, |e| e.offset);
         let pass_len = cut.pass.filter(|p| *p > 0);
         let segments: Vec<Segment> = if let Some(len) = pass_len {
-            let passes = mine.last().map_or(0, |e| (e.offset / len + 1).min(MAX_PASSES));
+            let passes = mine.last().map_or(0, |e| (e.offset / len + 1).clamp(1, MAX_PASSES));
             (0..passes)
-                .map(|k| Segment {
-                    window: Range::new(k * len, (k + 1) * len),
-                    range: Range::new(cut.start, cut.start.saturating_add(len)),
-                    origin: cut.start,
+                .map(|k| {
+                    // Pickups belong to the first pass, whose clip starts early; later passes are whole laps.
+                    let lead = if k == 0 { lead } else { 0 };
+                    Segment {
+                        window: Range::new(k * len + lead, (k + 1) * len),
+                        range: Range::new(cut.start + lead, cut.start.saturating_add(len)),
+                        origin: cut.start + lead,
+                    }
                 })
                 .collect()
         } else if let Some(w) = wrapped(cut, wrap, last) {
-            // The first stretch runs from the latch to the loop end, every later one is a whole loop.
+            // The first stretch runs from the latch (or its first pickup) to the loop end, every
+            // later one is a whole loop.
             let first = w.end - cut.start;
             let passes = (1 + (last - first) / w.len() + 1).min(MAX_PASSES);
             (0..passes)
                 .map(|k| {
                     if k == 0 {
-                        Segment { window: Range::new(0, first), range: Range::new(cut.start, w.end), origin: cut.start }
+                        Segment { window: Range::new(lead, first), range: Range::new(cut.start + lead, w.end), origin: cut.start + lead }
                     } else {
                         let from = first + (k - 1) * w.len();
                         Segment { window: Range::new(from, from + w.len()), range: w, origin: w.start }
@@ -162,8 +185,8 @@ pub fn build_wrapping(tempo: &TempoMap, sr: SampleRate, events: &[RecEvent], cut
             // the end of the session before Stop, leaving the position behind the events.
             let stop = cut.stop.max(last);
             let end = cut.start.saturating_add(stop);
-            let range = cut.punch.map_or(Range::new(cut.start, end), |p| Range::new(p.start.max(cut.start), p.end.min(end)));
-            vec![Segment { window: Range::new(0, stop.saturating_add(1)), range, origin: cut.start }]
+            let range = cut.punch.map_or(Range::new(cut.start + lead, end), |p| Range::new(p.start.max(cut.start), p.end.min(end)));
+            vec![Segment { window: Range::new(lead, stop.saturating_add(1)), range, origin: cut.start + lead }]
         };
         // Held notes survive wraps: (channel, pitch, start offset, velocity).
         // The earliest matching note-on wins, including notes carried from a previous lap.
@@ -770,5 +793,68 @@ mod tests {
         let ids = place_midi_recording(&mut e, &plan(0, None), &two_notes(t), 48_000);
         assert_eq!(ids.len(), 1);
         assert_eq!(e.session().track(t).unwrap().playlists.len(), 1);
+    }
+
+    /// #327 (Logic's behavior): a note-on played over the count-in, before the latch, starts the
+    /// clip there; every note keeps its absolute position.
+    #[test]
+    fn a_pickup_before_the_latch_starts_the_clip_early_with_every_note_where_it_was_played() {
+        let (tempo, sr) = tempo();
+        let q = TICKS_PER_QUARTER;
+        // A stray release from before the pickup, the pickup a beat early, the downbeat note.
+        let events = [off(-30_000, 50), on(-24_000, 59), off(-12_000, 59), on(0, 60), off(24_000, 60)];
+        let built = build(&tempo, sr, &events, &cut(96_000, 48_000));
+        assert_eq!(built.len(), 1);
+        assert_eq!(built[0].range, Range::new(72_000, 144_000));
+        let notes: Vec<_> = built[0].sequence.notes.iter().map(|n| (n.pitch, n.start, n.length)).collect();
+        assert_eq!(notes, vec![(59, 0, q / 2), (60, q, q)]);
+    }
+
+    #[test]
+    fn without_a_pickup_nothing_before_the_latch_is_kept_and_the_clip_starts_at_the_latch() {
+        let (tempo, sr) = tempo();
+        let plain = build(&tempo, sr, &[on(0, 60), off(24_000, 60)], &cut(96_000, 48_000));
+        // Releases and controllers before the latch are not pickups: they change nothing.
+        let stray = [ev(-500, Msg::Cc { cc: 64, value: 127 }), off(-200, 48), on(0, 60), off(24_000, 60)];
+        assert_eq!(build(&tempo, sr, &stray, &cut(96_000, 48_000)), plain);
+        assert_eq!(plain[0].range, Range::new(96_000, 144_000));
+    }
+
+    #[test]
+    fn a_pickup_before_the_session_start_is_clamped_at_sample_zero() {
+        let (tempo, sr) = tempo();
+        let events = [on(-4_800, 59), off(500, 59), on(1_000, 60), off(2_000, 60)];
+        let built = build(&tempo, sr, &events, &cut(1_000, 2_000));
+        assert_eq!(built[0].range.start, 0, "never before the session start");
+        let first = built[0].sequence.notes[0];
+        assert_eq!((first.pitch, first.start, first.length), (59, 0, tempo.samples_to_ticks(1_500, sr)));
+    }
+
+    #[test]
+    fn pickups_join_the_first_lap_only_and_later_laps_are_unchanged() {
+        let (tempo, sr) = tempo();
+        let q = TICKS_PER_QUARTER;
+        let lap = Range::new(96_000, 144_000);
+        // Half a beat of pickup, then a note in each of two laps.
+        let events = [on(-12_000, 59), off(-6_000, 59), on(0, 60), off(12_000, 60), on(48_000 + 24_000, 62), off(48_000 + 36_000, 62)];
+        // Loop recording after a count-in (the pass starts at the cycle start), and a wrapped one.
+        for pass in [Some(48_000), None] {
+            let c = Cut { start: 96_000, pass, punch: None, stop: 0 };
+            let built = build_wrapping(&tempo, sr, &events, &c, Some(lap));
+            assert_eq!(built.iter().map(|b| (b.pass, b.range)).collect::<Vec<_>>(), vec![(0, Range::new(84_000, 144_000)), (1, lap)], "{pass:?}");
+            let first: Vec<_> = built[0].sequence.notes.iter().map(|n| (n.pitch, n.start, n.length)).collect();
+            assert_eq!(first, vec![(59, 0, q / 4), (60, q / 2, q / 2)]);
+            let second: Vec<_> = built[1].sequence.notes.iter().map(|n| (n.pitch, n.start, n.length)).collect();
+            assert_eq!(second, vec![(62, q, q / 2)]);
+        }
+    }
+
+    #[test]
+    fn a_punch_keeps_its_range_and_takes_no_pickup() {
+        let (tempo, sr) = tempo();
+        let c = Cut { start: 96_000, pass: None, punch: Some(Range::new(96_000, 144_000)), stop: 48_000 };
+        let built = build(&tempo, sr, &[on(-12_000, 59), off(-6_000, 59), on(0, 60), off(12_000, 60)], &c);
+        assert_eq!(built[0].range, Range::new(96_000, 144_000));
+        assert_eq!(built[0].sequence.notes.iter().map(|n| n.pitch).collect::<Vec<_>>(), vec![60]);
     }
 }

@@ -260,18 +260,22 @@ pub fn read(path: &Path) -> Result<Journal> {
 }
 
 impl Journal {
-    /// The events of the pass's tracks at or after the latch, each with the session samples since
-    /// the latch (device frames converted at the session rate, as the live take is).
+    /// The events of the pass's tracks, each with the session samples since the latch (device
+    /// frames converted at the session rate, as the live take is). A pickup played during the
+    /// count-in (#327) has a frame before the latch and comes out negative; nothing lands before
+    /// the session start (clamped at sample 0, as the live take is). A journal written before
+    /// #327 has no frame before its latch, so it reads back exactly as it did.
     pub fn events(&self) -> Vec<RecEvent> {
         let h = &self.header;
-        let rate = u128::from(h.device_rate.max(1));
+        let rate = i128::from(h.device_rate.max(1));
+        let floor = -h.position.max(0);
         self.records
             .iter()
             .filter(|r| h.tracks.contains(&r.track))
             .filter_map(|r| {
-                let frames = r.frame.checked_sub(h.output_frame)?;
-                let samples = (u128::from(frames) * u128::from(h.session_rate) + rate / 2) / rate;
-                Some(RecEvent { track: r.track, channel: r.channel, offset: i64::try_from(samples).ok()?, msg: r.msg })
+                let frames = i128::from(r.frame) - i128::from(h.output_frame);
+                let samples = (frames * i128::from(h.session_rate) + rate / 2).div_euclid(rate);
+                Some(RecEvent { track: r.track, channel: r.channel, offset: i64::try_from(samples).ok()?.max(floor), msg: r.msg })
             })
             .collect()
     }
@@ -495,5 +499,31 @@ mod tests {
         let both = [(20_000, Msg::NoteOn { pitch: 60, velocity: 90 }), cc(30_000, 5), (70_000, Msg::NoteOff { pitch: 60, velocity: 0 })];
         let mixed = recovered_laps_of("both", Some(own), &both, |s| s.edit.loop_playback = false);
         assert_eq!(mixed, vec![(own, 2), (own, 1)], "lap 1: note and controller; lap 2: the note's remainder");
+    }
+
+    /// #327: a pickup played over the count-in is journaled with its device frame, before the
+    /// latch's; recovery starts the clip at it, as the live take does. No header field was added:
+    /// a journal from before #327 has no such frame and recovers as it did (the two-note test above).
+    #[test]
+    fn a_journal_with_a_pickup_before_its_latch_recovers_the_clip_from_the_pickup() {
+        let d = dir("pickup");
+        let path = d.join("s.midijournal");
+        let mut e = Engine::default();
+        let t = TrackId(e.execute("track.new", &serde_json::json!({"kind": "midi", "name": "Keys"})).unwrap()["tracks"][0].as_u64().unwrap());
+        let mut w = Writer::new(path.clone());
+        // The latch at device frame 10,000 is session sample 48,000; the pickup 6,000 frames before it.
+        let pickup = [rec(4_000, Msg::NoteOn { pitch: 59, velocity: 70 }), rec(7_000, Msg::NoteOff { pitch: 59, velocity: 0 })];
+        let records: Vec<Record> = pickup.into_iter().chain(two_notes()).map(|r| Record { track: t, ..r }).collect();
+        w.append(&header(vec![t]), &records, records.len()).unwrap();
+        w.flush().unwrap();
+        let ids = recover(&mut e, &path).unwrap();
+        assert_eq!(ids.len(), 1);
+        let s = e.session();
+        let (_, clip) = s.find_clip(ids[0]).unwrap();
+        assert_eq!(clip.start, 42_000, "the clip starts at the pickup");
+        let transit_model::ClipContent::Midi { sequence } = &clip.content else { panic!("not MIDI") };
+        let notes: Vec<_> = sequence.notes.iter().map(|n| (n.pitch, n.start, n.length)).collect();
+        // 6,000 samples is 240 ticks: the downbeat notes sit where they did, 240 ticks into the clip.
+        assert_eq!(notes, vec![(59, 0, 120), (60, 240 + 960, 960), (64, 240 + 2_880, 960)]);
     }
 }

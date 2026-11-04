@@ -134,11 +134,12 @@ fn two_played_notes_become_one_clip_at_the_latch_with_their_ticks_and_one_undo_s
 }
 
 #[test]
-fn events_before_the_latch_and_on_other_tracks_are_not_recorded_and_the_first_note_is_relative_to_the_latch() {
+fn events_on_other_tracks_are_not_recorded_and_a_count_in_pickup_starts_the_clip_before_the_latch() {
     let (mut app, t) = app();
     let other = TrackId(t.0 + 100);
-    // A key pressed during the count-in (frame 500, before the latch), one on an unarmed track, then
-    // the first real note a quarter second after the latch, which a count-in placed at the cursor.
+    // A key pressed during the count-in (frame 500, 9,500 frames before the latch), one on an
+    // unarmed track, then the first downbeat note a quarter second after the latch, which a
+    // count-in placed at the cursor. Since #327 the count-in key is a pickup (Logic's behavior).
     let events = vec![
         on(500, t, 48),
         off(900, t, 48),
@@ -150,8 +151,9 @@ fn events_before_the_latch_and_on_other_tracks_are_not_recorded_and_the_first_no
     record(&mut app, 4 * BEAT, None, 8 * BEAT, pass(t, Some(4 * BEAT), events));
     let clips = app.engine.session().track(t).unwrap().clips().to_vec();
     assert_eq!(clips.len(), 1);
-    assert_eq!(clips[0].start, 4 * BEAT, "the clip starts at the latch, not at the first note");
-    assert_eq!(clip_notes(&app, clips[0].id), vec![(60, TICKS / 2, TICKS / 2, 100)]);
+    assert_eq!(clips[0].start, 4 * BEAT - 9_500, "the clip starts at the pickup, before the latch");
+    // 9,500 samples is 380 ticks: the downbeat note keeps its place, a half beat after the latch.
+    assert_eq!(clip_notes(&app, clips[0].id), vec![(48, 0, 16, 100), (60, 380 + TICKS / 2, TICKS / 2, 100)]);
 }
 
 #[test]

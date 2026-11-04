@@ -648,6 +648,7 @@ impl StudioApp {
         v["midi_learn"] = midi_learn::inspect(self);
         v["help"] = json!(self.help.layout);
         v["editor_windows"] = editor_group::inspect(self);
+        v["recording_pass"] = self.recording_pass_inspect();
         v
     }
 }
@@ -684,6 +685,8 @@ mod midi_learn_tests;
 mod midi_mappings_window_tests;
 #[cfg(test)]
 mod midi_output_header_tests;
+#[cfg(test)]
+mod midi_pickup_tests;
 #[cfg(test)]
 mod midi_record_tests;
 #[cfg(test)]

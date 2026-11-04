@@ -153,6 +153,20 @@ impl StudioApp {
         }
     }
 
+    /// The pass under way for `ui.inspect` (null when none): where it starts on the timeline
+    /// (`record_start`, the pre-roll start when pre-roll is on), the count-in before it, and where
+    /// MIDI capture began (`capture_start`, #327): the count-in start, which pickups may reach
+    /// back to, never before the session start.
+    pub(crate) fn recording_pass_inspect(&self) -> serde_json::Value {
+        let Some(plan) = &self.take_plan else { return serde_json::Value::Null };
+        let count_in = self.count_in_plan.map_or(0, |c| c.frames);
+        json!({
+            "record_start": plan.start,
+            "count_in": count_in,
+            "capture_start": plan.start.saturating_sub(count_in).max(0).min(plan.start),
+        })
+    }
+
     /// Is an audio track record-enabled (so the input device must be opened and armed)?
     fn audio_armed(&self) -> bool {
         self.engine.session().tracks.iter().any(|t| t.mixer.record_arm && t.kind == transit_model::TrackKind::Audio && !t.inactive)
@@ -289,7 +303,8 @@ impl StudioApp {
                 built.retain(|b| b.pass == lap);
                 (cycle.start, c.last)
             }
-            None => (start, now),
+            // A pickup played over the count-in (#327) starts the clip before the latch.
+            None => (built.iter().map(|b| b.range.start).fold(start, Samples::min), now),
         };
         self.midi_live = Some(MidiLive { tracks: take.tracks.clone(), start, end, built });
     }
