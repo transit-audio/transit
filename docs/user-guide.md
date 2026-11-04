@@ -35,6 +35,28 @@ four bars from the bar holding the playhead, in one undo step with the switch. C
 the region. To move the region to the current selection, use Transport > Set Cycle to Selection
 (Ctrl+L, Cmd+L on macOS), which does not toggle Cycle.
 
+## Transport from MIDI devices
+
+Connected MIDI inputs honor MMC Play, Stop, Record, Pause, Fast Forward, Rewind and Locate,
+plus MIDI Start, Stop, Continue and Song Position, without a mapping or an armed track.
+Start and Play start at the edit cursor; Continue resumes the retained position. Song Position
+and Locate move without starting. Clock messages do not change tempo.
+
+In **Audio > Audio Devices > MIDI**, **Transport buttons** turns this off for one device.
+**MMC device ID** selects an addressed ID from 0 to 126; broadcast 127 is always accepted.
+Record still needs an armed track and uses the ordinary count-in and pre-roll.
+**MMC Record Exit ends recording and stops playback; it does not punch out and continue playing.**
+
+For a controller that sends notes or CCs, choose **Learn Play**, **Learn Stop**, or another
+transport target in that MIDI section, then press the controller button. You can also right-click
+a transport button and choose **MIDI Learn for this controller (all sessions)**. Release before
+pressing again: a held button fires once. Transport mappings take priority over overlapping
+session mappings, which remain stored and are shown as overridden.
+
+The switch, ID and learned assignments are saved by exact device name in this machine's
+`ui.json`, under `midi_transport`. They carry across sessions and reconnects; they are never
+saved in a session. Devices with the same name share these preferences.
+
 ## Takes and comping
 
 With Cycle on, Record keeps a take per lap until Stop; recording over clips keeps the old clips as

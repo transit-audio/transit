@@ -23,6 +23,31 @@ hardware port: `midi-output.md`.
 
 ## Conventions
 
+### Transport buttons (ADR 0043 slice 0)
+
+`midi-io/src/ring.rs` frames complete bounded MMC envelopes independently of the Monitor's
+64-byte diagnostic prefix. Its preallocated transport ring carries complete SysEx, real-time
+Start/Stop/Continue, SPP and copies of learned note/CC sources. Atomic source masks keep
+learned Stop independent of the musical ring's capacity. Interleaved real-time buttons have
+their own records; F8 Clock is stripped from SysEx and never enters this lane. Slice 3 adds
+clock following through its own bounded path. All records share the port's offered sequence
+and host arrival stamps.
+
+`playback/src/player/ingress.rs` forwards that lane to bounded control publication in
+`ingress/transport.rs`. `native/transport.rs` attaches the exact device name and opening
+generation, rejects canceled sequences and applies the same-device Transport-send guard.
+Overflow is sticky, cancels queued starts and requests safe Stop/finalization on control.
+The studio activates eligible inputs without a note route, Monitor or Learn window.
+
+`ui-studio/src/midi_transport.rs` validates MMC IDs, lengths and session-rate timecode, handles
+momentary learned edges, coalesces adjacent equivalent protocols and dispatches engine commands
+through the normal UI interlocks. `host/transport.rs` supplies exact-position Play, retained
+Continue and Stop-acknowledged resumption. No transport decoding or sends run on audio.
+`UiState.midi_transport`, in `ui.json`, stores per-device `transport_buttons` (default true),
+`mmc_device_id` (default 0) and `mappings`. Session MappingSet rejects these targets; imported
+session rows are discarded with a load warning. Clock following and output scheduling remain
+later ADR slices.
+
 - Sustain pedal is CC 64; pedal edges must not be reordered before the note events they follow
   (timing-mode switches are guarded in `midi.rs`).
 - Tombstones: `crates/playback/src/player/sources.rs` validates a source (port plus generation) again

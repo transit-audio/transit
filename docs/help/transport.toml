@@ -4,6 +4,21 @@ title = "Transport"
 link = "user-guide.md"
 
 [[entry]]
+id = "transport.midi_buttons"
+name = "Transport buttons"
+text = "Honors MMC and MIDI Start, Stop, Continue and Song Position from this device. On by default; changing it does not stop an existing take. MMC Record Exit ends recording and stops playback; it does not punch out and continue playing."
+
+[[entry]]
+id = "transport.mmc_device_id"
+name = "MMC device ID"
+text = "Accepts MMC addressed to this ID (0 to 126), plus broadcast 127. Locate uses the session frame rate and timecode start."
+
+[[entry]]
+id = "transport.midi_learn"
+name = "Learn a transport button"
+text = "Press a note or CC button to assign Play, Stop, Record, Cycle, Return to Zero or Pause. Assignments are stored for this device on this machine and work in every session. Release before pressing again."
+
+[[entry]]
 id = "transport.rtz"
 name = "Return to Zero"
 text = "Moves the playhead to the start of the session. While playing it jumps and keeps playing."
