@@ -19,4 +19,15 @@ Every user action is a command: `crates/engine/src/cmd/` (one file per area), re
 
 Tests: `crates/engine/tests/` (random edits, hostile params, route cycles).
 
+Proposed vertical track zoom ([ADR 0044](../../adr/0044-vertical-track-zoom.md), #314) retains
+`track.height {tracks?, height: points | preset}` and its `{"height": <TrackHeight serde value>}`
+response, plus selected-track `track.height_up/down {tracks?}` returning `{"changed": n}`.
+It adds all-track `track.height_zoom {direction: "in" | "out"}` and `track.height_reset {}`,
+both returning `{"changed": n}`, and read-only `query.track_heights {}` returning session-order
+`{"tracks":[{"id":1,"height":"Small","points":46}]}`. Drag/wheel use explicit track IDs and
+`execute_merged`; keys/reset use one ordinary undoable command. The proposal makes `view.zoom_toggle`
+undoable, caps Fit at 440, and clears its pending restore record on an actual explicit height change.
+The ADR defines input-based merge boundaries, no-op/atomic-refusal behavior and UI reachability.
+These additions and behavior changes are not implemented yet.
+
 Low Latency adds UI-owned options.low_latency {value?: bool, limit_ms?: number}, returning {value, limit_ms}. Omitting value toggles unless only limit_ms is supplied. Invalid limits are refused, and an engine-only host reports unavailable rather than editing the session. query.path_latency {} is a read-only runtime query with adopted plan/device generations and shared/Main latency components; see routing.md.

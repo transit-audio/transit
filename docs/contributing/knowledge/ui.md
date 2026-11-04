@@ -58,6 +58,22 @@ Issue #63; code in `crates/ui-studio/src/fades.rs` (gestures) and `crates/model/
   both sides. The automatic crossfade preference is #72.
 - Looped clips: fades follow the arrangement bounds, not each cycle ([ADR 0019](../../adr/0019-clip-internal-loops.md)).
 
+## Proposed vertical track zoom (#314)
+
+[ADR 0044](../../adr/0044-vertical-track-zoom.md) proposes replacing the arrangement's uniform
+`UiState.track_height` with each session track's height (16..440 points). It is not implemented:
+today `arrange.rs` still draws the machine preference, default 46, clamped to 24..200. The proposal
+uses header-bottom drag for one track, Alt-drag for all, Alt-wheel for the hovered main row,
+Alt+=/- for all-track preset steps, and a View menu reset to 46. Selection does not narrow bulk
+scope. Each gesture is one undo step; wheel merging ends on input boundaries, never a timer.
+
+Automation lane bases stay in view state: displayed height becomes `clamp(base * H / 46, 40, 240)`;
+take lanes become `clamp(22 * H / 46, 22, 220)`. The automation handle adjusts its base through
+the inverse formula. One geometry supplies painting and hit tests; compact headers hide controls
+below 46 and 24 points. The ADR specifies old-session behavior, toggle interaction, gestures,
+inspect fields and deterministic handler/paint tests. Implementation goes in new arrangement
+modules, with pure moves before extending the large arrangement and app-root files.
+
 ## Tests
 
 `crates/ui-studio/src/*_tests.rs` and `crates/ui-studio/tests/`. A UI feature needs a test through
