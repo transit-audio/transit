@@ -110,6 +110,11 @@ The control channel offers `track.bounce` (alias `track.commit`) with
 `"new"` and `"mute"`. `track.show_hidden {tracks?}` shows the given tracks, or all hidden tracks
 when omitted. `track.hide {tracks, hidden: false}` also shows them.
 
+## Audio setup
+
+In **Audio > Audio Devices > I/O paths**, enable **Live (no shared padding)** on a named output other than Main to hear a cue as soon as its own sources align, without waiting for slower outputs.
+The checkbox is saved on this machine, leaves inserts active, and is ignored by offline renders.
+
 ## Sampling what the computer plays
 
 To sample a browser video or another app, record it as you would a microphone. In
