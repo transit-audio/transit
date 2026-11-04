@@ -38,7 +38,7 @@ fn toggle(e: &mut Engine, p: &Value) -> Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use TrackHeight::{Fit, Large, Medium};
+    use TrackHeight::{Fit, Large, Small};
 
     fn engine(select: Value) -> Engine {
         let mut e = Engine::default();
@@ -59,15 +59,15 @@ mod tests {
         let mut e = engine(json!({"tracks": ["Audio 1", "Audio 3"], "start": 48_000, "end": 96_000}));
         let steps = e.undo_history().len();
         assert_eq!(e.execute("view.zoom_toggle", &json!({"width_px": 1000.0, "height_px": 500.0})).unwrap(), json!({"on": true}));
-        assert_eq!(view(&e), (48.0, 48_000, vec![Fit(249), Medium, Fit(249)]));
+        assert_eq!(view(&e), (48.0, 48_000, vec![Fit(249), Small, Fit(249)]));
         e.execute("view.zoom_in", &json!({})).unwrap();
         e.execute("track.height", &json!({"tracks": ["Audio 2"], "height": "large"})).unwrap();
         assert_eq!(e.execute("view.zoom_toggle", &json!({})).unwrap(), json!({"on": false}));
-        assert_eq!(view(&e), (500.0, 1000, vec![Medium, Large, Medium]));
+        assert_eq!(view(&e), (500.0, 1000, vec![Small, Large, Small]));
         assert_eq!(e.undo_history().len(), steps + 1);
         e.execute("edit.select", &json!({"tracks": ["Audio 2"], "start": 5000})).unwrap();
         e.execute("view.zoom_toggle", &json!({"height_px": 300.0})).unwrap();
-        assert_eq!(view(&e), (500.0, 1000, vec![Medium, Fit(299), Medium]));
+        assert_eq!(view(&e), (500.0, 1000, vec![Small, Fit(299), Small]));
     }
 
     #[test]
@@ -82,7 +82,7 @@ mod tests {
         let heights = vec![(TrackId(9999), TrackHeight::Jumbo), (audio_1, Fit(0))];
         e.session_mut().edit.zoom_toggle = Some(ZoomToggle { samples_per_px: -1.0, scroll: Samples::MIN, heights });
         e.execute("view.zoom_toggle", &json!({})).unwrap();
-        assert_eq!(view(&e), (0.25, 0, vec![Fit(0), Medium, Medium]));
+        assert_eq!(view(&e), (0.25, 0, vec![Fit(0), Small, Small]));
         assert_eq!(Fit(0).points(), 16.0);
     }
 }

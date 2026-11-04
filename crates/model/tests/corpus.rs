@@ -79,6 +79,23 @@ fn every_corpus_session_loads_and_round_trips_losslessly() {
 }
 
 #[test]
+fn corpus_heights_keep_their_stored_variants() {
+    let mut medium_seen = false;
+    for (name, text) in released() {
+        let original: Value = serde_json::from_str(&text).unwrap();
+        let loaded = Session::from_json(&text).unwrap();
+        for (track, old) in loaded.tracks.iter().zip(original["tracks"].as_array().unwrap()) {
+            assert_eq!(serde_json::to_value(track.height).unwrap(), old["height"], "{name}");
+            if old["height"] == "Medium" {
+                medium_seen = true;
+                assert_eq!(track.height.points(), 88.0);
+            }
+        }
+    }
+    assert!(medium_seen, "keep an existing named-preset fixture");
+}
+
+#[test]
 fn no_key_of_a_corpus_file_is_dropped_by_a_round_trip() {
     for (name, text) in released() {
         let original: Value = serde_json::from_str(&text).unwrap();

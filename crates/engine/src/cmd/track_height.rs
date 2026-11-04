@@ -71,7 +71,7 @@ mod tests {
         e.execute("track.height", &json!({"tracks": ["Kick"], "height": 57})).unwrap();
         assert_eq!(height(&e, "Kick"), Some(TrackHeight::Custom(57)));
         e.execute("track.height_up", &json!({"tracks": ["Kick", "Snare"]})).unwrap();
-        assert_eq!((height(&e, "Kick"), height(&e, "Snare")), (Some(TrackHeight::Medium), Some(TrackHeight::Large)));
+        assert_eq!((height(&e, "Kick"), height(&e, "Snare")), (Some(TrackHeight::Medium), Some(TrackHeight::Medium)));
         e.execute("track.height", &json!({"tracks": ["Kick"], "height": "extreme"})).unwrap();
         let steps = e.undo_history().len();
         assert_eq!(e.execute("track.height_up", &json!({"tracks": ["Kick"]})).unwrap()["changed"], 0);

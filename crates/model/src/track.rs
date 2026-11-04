@@ -98,7 +98,7 @@ impl TrackHeight {
     ];
     pub fn points(self) -> f32 {
         match self {
-            TrackHeight::Custom(points) => f32::from(points).clamp(TrackHeight::Micro.points(), TrackHeight::Extreme.points()),
+            TrackHeight::Custom(points) | TrackHeight::Fit(points) => f32::from(points.clamp(16, 440)),
             TrackHeight::Micro => 16.0,
             TrackHeight::Mini => 24.0,
             TrackHeight::Small => 46.0,
@@ -106,7 +106,6 @@ impl TrackHeight {
             TrackHeight::Large => 132.0,
             TrackHeight::Jumbo => 220.0,
             TrackHeight::Extreme => 440.0,
-            TrackHeight::Fit(points) => f32::from(points.max(16)),
         }
     }
     pub fn label(self) -> &'static str {
@@ -231,6 +230,7 @@ pub struct Track {
     pub kind: TrackKind,
     pub format: ChannelFormat,
     pub color: [u8; 3],
+    #[serde(default)]
     pub height: TrackHeight,
     pub playlists: Vec<Playlist>,
     pub active_playlist: usize,
@@ -315,7 +315,7 @@ impl Track {
             kind,
             format,
             color,
-            height: TrackHeight::Medium,
+            height: TrackHeight::Small,
             active_playlist: 0,
             mixer: Mixer::new(format),
             midi_input: crate::MidiInput::default(),

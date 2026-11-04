@@ -11,6 +11,17 @@
 
 use std::path::Path;
 
+#[test]
+fn a_missing_track_height_loads_as_medium() {
+    use transit_model::{ChannelFormat, Track, TrackHeight, TrackId, TrackKind};
+    let track = Track::new(TrackId(1), "Old", TrackKind::Audio, ChannelFormat::Mono, [0; 3]);
+    let mut value = serde_json::to_value(track).unwrap();
+    value.as_object_mut().unwrap().remove("height");
+    let loaded = serde_json::from_value::<Track>(value);
+    assert!(loaded.is_ok(), "{loaded:?}");
+    assert_eq!(loaded.unwrap().height, TrackHeight::Medium);
+}
+
 /// Fields written by every build since the first release (or required for the file to mean
 /// anything), as `Struct.field`. A file without one is damaged, not older. This is the baseline at
 /// v0.3.2: a field added later must be defaulted instead of joining this list.
@@ -151,7 +162,6 @@ Track.active_playlist
 Track.automation
 Track.color
 Track.format
-Track.height
 Track.id
 Track.kind
 Track.mixer
