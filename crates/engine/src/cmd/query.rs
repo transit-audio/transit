@@ -6,6 +6,7 @@ use serde_json::json;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
+        cmd!(query "query.path_latency", "Path Latency", [], None, "{}", always, |e, _| Ok(e.path_latency.query())),
         cmd!(query "session.inspect", "Inspect Session", [], None, "{detail?: summary|full}", always, |e, p| Ok(crate::inspect::session(e, str_param(p, "detail") == Some("full")))),
         cmd!(query "track.inspect", "Inspect Track", [], None, "{track}", has_tracks, |e, p| {
             let t = track_param(e, "track.inspect", p, "track")?.ok_or_else(|| bad("track.inspect", "`track` required"))?;

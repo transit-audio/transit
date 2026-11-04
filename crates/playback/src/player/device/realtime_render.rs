@@ -79,7 +79,9 @@ impl Player {
             ret.extend_from_slice(&stem.channels);
         }
         let reach = spec.stems.iter().map(|s| u64::from(s.latency)).max().unwrap_or(0);
+        self.owner().and_then(|mut o| o.full_chain(true)).map_err(|e| format!("full render chain could not be requested: {e:?}"))?;
         if !tap.arm(spec.start, spec.len, reach, spec.main_channels, &ret) {
+            let _ = self.owner().and_then(|mut o| o.full_chain(false));
             return Err("the render has no range, or more channels than a render keeps".into());
         }
         let cancel = Arc::new(AtomicBool::new(false));
@@ -88,6 +90,7 @@ impl Player {
             Ok(writer) => writer,
             Err(e) => {
                 tap.cancel();
+                let _ = self.owner().and_then(|mut o| o.full_chain(false));
                 return Err(format!("the file writer could not start: {e}"));
             }
         };
@@ -103,6 +106,7 @@ impl Player {
         if let Err(e) = self.play(spec.start.saturating_sub(spec.preroll.max(0)), None, None) {
             tap.cancel();
             let _ = job.abandon();
+            let _ = self.owner().and_then(|mut o| o.full_chain(false));
             return Err(format!("playback could not start: {e:?}"));
         }
         if let Ok(mut slot) = self.render_job.try_borrow_mut() {
@@ -110,6 +114,7 @@ impl Player {
             Ok(())
         } else {
             tap.cancel();
+            let _ = self.owner().and_then(|mut o| o.full_chain(false));
             Err("the Player is busy".into())
         }
     }
@@ -165,7 +170,9 @@ impl Player {
         }
         let mut job = slot.take()?;
         let lost = job.lost;
-        let result = job.abandon()?;
+        let result = job.abandon();
+        let _ = self.owner().and_then(|mut o| o.full_chain(false));
+        let result = result?;
         tap.cancel();
         Some(if lost { Err(RealtimeError::DeviceLost) } else { result })
     }
@@ -180,5 +187,6 @@ impl Player {
         }
         self.stop_and_release(&job.tracks);
         let _ = job.abandon();
+        let _ = self.owner().and_then(|mut o| o.full_chain(false));
     }
 }

@@ -1197,3 +1197,70 @@ fn an_instance_the_compile_did_not_predict_loads_without_blocking_a_frame() {
     assert!(play(&mut ports.plans, track) > 0.0, "and it sounds");
     runtime.retire(ports);
 }
+
+#[test]
+fn low_latency_refreshes_shrinkage_and_bypassed_slots_without_a_session_edit() {
+    let (mut runtime, mut ports, latency) = setup(PlanLimits::default());
+    let mut s = (**runtime.requested_session()).clone();
+    s.tracks[1].mixer.input_monitor = true;
+    runtime.set_low_latency(Some(0.0));
+    runtime.update_session(Arc::new(s)).unwrap();
+    runtime.service();
+    adopt(&mut ports.plans);
+    render(&mut ports.plans);
+    runtime.service();
+    assert_eq!(runtime.low_latency_bypasses().len(), 1);
+    let original = Arc::clone(runtime.requested_session());
+    latency.store(0, Ordering::Relaxed);
+    render(&mut ports.plans);
+    assert!(runtime.service().latency_refresh.is_some(), "shrinkage of a bypassed slot requests a plan");
+    assert_eq!(runtime.low_latency_bypasses().len(), 1, "pending retains adopted bypasses");
+    runtime.service();
+    adopt(&mut ports.plans);
+    render(&mut ports.plans);
+    runtime.service();
+    assert!(runtime.low_latency_bypasses().is_empty());
+    assert!(Arc::ptr_eq(runtime.requested_session(), &original));
+    latency.store(200, Ordering::Relaxed);
+    render(&mut ports.plans);
+    assert!(runtime.service().latency_refresh.is_some());
+    runtime.service();
+    adopt(&mut ports.plans);
+    render(&mut ports.plans);
+    runtime.service();
+    assert_eq!(runtime.low_latency_bypasses().len(), 1);
+    runtime.retire(ports);
+}
+
+#[test]
+fn low_latency_full_render_chain_restores_preference_and_refused_start_keeps_it() {
+    let (mut runtime, mut ports, _) = setup(PlanLimits::default());
+    let mut s = (**runtime.requested_session()).clone();
+    s.tracks[1].mixer.input_monitor = true;
+    runtime.set_low_latency(Some(0.0));
+    runtime.update_session(Arc::new(s)).unwrap();
+    runtime.service();
+    adopt(&mut ports.plans);
+    render(&mut ports.plans);
+    runtime.service();
+    assert_eq!(runtime.low_latency_bypasses().len(), 1);
+    runtime.full_chain(true).unwrap();
+    runtime.service();
+    adopt(&mut ports.plans);
+    render(&mut ports.plans);
+    runtime.service();
+    assert!(runtime.low_latency_bypasses().is_empty());
+    assert_eq!(runtime.path_latency_status().unwrap().status.engine_latency, 100);
+    assert_eq!(runtime.low_latency_limit(), Some(0.0));
+    runtime.full_chain(false).unwrap();
+    runtime.service();
+    adopt(&mut ports.plans);
+    render(&mut ports.plans);
+    runtime.service();
+    assert_eq!(runtime.low_latency_bypasses().len(), 1);
+    let s = Arc::clone(runtime.requested_session());
+    while runtime.update_session(Arc::clone(&s)).is_ok() {}
+    assert_eq!(runtime.full_chain(true), Err(PlayerError::SessionBackpressure));
+    assert!(!runtime.full_chain);
+    runtime.retire(ports);
+}

@@ -433,6 +433,7 @@ Options > Solo Mode > X-OR (Cancels Previous Solo)
 Options > Solo Mode > Momentary
 Options > Edit/Tool Mode Keyboard Lock
 Options > Calibration Mode
+Options > Low Latency
 Options > Delay Compensation
 Options > MIDI Live Mode
 Options > Activate HEAT

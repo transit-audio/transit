@@ -216,6 +216,8 @@ struct Request {
 /// A coherent Copy report; the queue never combines fields from different generations.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct StatusReport {
+    pub device_generation: transit_mix::DeviceGeneration,
+    pub sample_rate: u32,
     pub generation: PlanGeneration,
     pub status: PlanStatus,
 }
@@ -289,6 +291,7 @@ pub struct Control {
     io: Arc<IoMap>,
     /// External Instrument tracks whose MIDI port is missing (ADR 0020); read when a plan is prepared.
     no_port: Arc<[transit_model::TrackId]>,
+    low_latency_limit: Option<f64>,
     issued: PlanGeneration,
     meters: Arc<MeterBank>,
     pending_meters: Option<Arc<MeterBank>>,
@@ -349,6 +352,7 @@ pub fn pair(target: RenderTarget, limits: PlanLimits) -> (Control, Audio) {
             limits,
             io: Arc::new(IoMap::for_device("", "", target.in_channels, if target.out_channels == 0 { 2 } else { target.out_channels })),
             no_port: Arc::from(Vec::new()),
+            low_latency_limit: None,
             issued: PlanGeneration::EMPTY,
             meters,
             pending_meters: None,
@@ -367,6 +371,14 @@ impl Control {
     }
     /// The path table the next prepared plan uses. The caller requests the session again; the
     /// change then travels like any other plan, with no device reopen.
+    pub fn set_low_latency(&mut self, limit_ms: Option<f64>) {
+        self.low_latency_limit = limit_ms;
+    }
+
+    pub fn low_latency_bypasses(&self) -> std::collections::BTreeSet<u64> {
+        self.compiler.low_latency_bypasses()
+    }
+
     pub fn set_io(&mut self, io: Arc<IoMap>) {
         self.io = io;
     }
@@ -405,6 +417,7 @@ impl Control {
             drop(env.buffers);
         });
         if let Ok(report) = self.status_rx.pop()
+            && report.device_generation == self.target.device
             && report.generation == self.compiler.active()
             && !self.compiler.faulted()
         {
@@ -428,10 +441,12 @@ impl Control {
             return Err(CompileError::TargetMismatch { compiler: self.target });
         }
         let next = self.issued.checked_next().ok_or(CompileError::GenerationExhausted)?;
+        self.compiler.set_live_input(request.input.is_some());
         let buffers = Buffers::prepare(&request.session, request.input, self.target, &self.io, self.limits, next)?;
         // The compiler lays the sinks out from the same table, so the block layout agrees.
         self.compiler.set_io(Arc::clone(&self.io));
         self.compiler.set_external_unavailable(Arc::clone(&self.no_port));
+        self.compiler.set_low_latency(self.low_latency_limit);
         let plan = self.compiler.compile_with_mode(request.session, self.compiler.active(), next, request.mode, make)?;
         self.issued = next;
         self.pending_meters = Some(Arc::clone(&buffers.meters));
@@ -810,7 +825,12 @@ impl Audio {
         self.buffers.meters.publish(&self.mix);
         // Full means an older report still awaits control. The next render tries its current
         // cumulative status, not a queue of stale reports; no field is published separately.
-        let _ = self.status_tx.push(StatusReport { generation: self.mix.active().generation, status: self.mix.status() });
+        let _ = self.status_tx.push(StatusReport {
+            device_generation: self.mix.active().target.device,
+            sample_rate: self.mix.active().target.sample_rate,
+            generation: self.mix.active().generation,
+            status: self.mix.status(),
+        });
     }
 
     pub fn clear_meters(&self) {

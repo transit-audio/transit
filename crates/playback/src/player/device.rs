@@ -1263,6 +1263,7 @@ mod rate_tests {
 }
 mod calibrate;
 mod external_measure;
+mod low_latency;
 mod midi_map_api;
 #[cfg(test)]
 mod midi_map_tests;

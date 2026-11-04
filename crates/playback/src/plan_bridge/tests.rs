@@ -544,6 +544,8 @@ fn stale_status_cannot_change_the_compilers_delay_capacity_hints() {
     audio
         .status_tx
         .push(super::StatusReport {
+            device_generation: control.target.device,
+            sample_rate: control.target.sample_rate,
             generation: stale,
             status: transit_mix::PlanStatus { capacity_exceeded: 1, required_latency: 16_384, ..Default::default() },
         })
@@ -758,5 +760,26 @@ fn a_callback_of_another_length_gets_the_new_share_in_its_first_block() {
         assert_eq!(deadline, Some(entry + transit_mix::strip_deadline_share(period, percent)), "{frames} frames at {rate} Hz: this block's deadline");
     }
     crate::telemetry::leave_callback();
+    control.retire(audio);
+}
+
+#[test]
+fn low_latency_status_from_another_device_is_discarded() {
+    let (mut control, mut audio) = plan_bridge::pair(target(), PlanLimits::default());
+    control.request(Arc::new(session(ChannelFormat::Stereo)), None);
+    control.prepare(&mut make).unwrap();
+    adopt(&mut audio);
+    control.poll();
+    audio
+        .status_tx
+        .push(super::StatusReport {
+            device_generation: transit_mix::DeviceGeneration(control.target.device.0 + 1),
+            sample_rate: control.target.sample_rate,
+            generation: control.active(),
+            status: transit_mix::PlanStatus { engine_latency: 123, low_latency: true, ..Default::default() },
+        })
+        .unwrap();
+    control.poll();
+    assert!(control.status().is_none());
     control.retire(audio);
 }

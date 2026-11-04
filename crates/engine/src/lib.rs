@@ -19,6 +19,7 @@ pub mod inspect;
 pub mod io;
 pub mod midi_journal;
 pub mod midi_take;
+pub mod path_latency;
 pub mod presets;
 pub mod retime;
 pub mod score;
@@ -156,6 +157,7 @@ pub struct LearnArm {
 
 /// Engine state: the document, history, clipboard and transport plumbing.
 pub struct Engine {
+    pub path_latency: path_latency::PathLatency,
     doc: Arc<Session>,
     undo: Vec<HistoryEntry>,
     redo: Vec<HistoryEntry>,
@@ -262,6 +264,7 @@ impl Engine {
             imports: import::Imports::default(),
             io: transit_model::IoMap::default(),
             io_revision: 0,
+            path_latency: Default::default(),
             midi_profile: Default::default(),
             midi_transport: Default::default(),
             midi_profile_revision: 0,

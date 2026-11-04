@@ -32,9 +32,12 @@ pub struct RuntimeControl<T: Copy, R: Copy> {
     /// Last capacity need for which this document lineage requested a refresh.
     /// A new document/input request resets it; an internal refresh does not.
     attempted_latency: u32,
+    attempted_raw: Option<(PlanGeneration, u64)>,
     /// Active plan in the current requested document/input lineage. An internal
     /// refresh failure retains it; a user request clears it before any refresh.
     confirmed: Option<PlanGeneration>,
+    low_latency_limit: Option<f64>,
+    full_chain: bool,
 }
 
 /// The callback-side resources form one ownership unit. Anchor this bundle on
@@ -75,10 +78,38 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
                 request,
                 state: RequestState::Preparing,
                 attempted_latency: 0,
+                attempted_raw: None,
                 confirmed: None,
+                low_latency_limit: None,
+                full_chain: false,
             },
             AudioPorts { plans, actions: audio, sources: ingress },
         ))
+    }
+
+    pub fn set_low_latency(&mut self, limit_ms: Option<f64>) {
+        self.low_latency_limit = limit_ms;
+        self.control.sessions.bridge.set_low_latency(if self.full_chain { None } else { limit_ms });
+    }
+    pub fn full_chain(&mut self, full: bool) -> Result<SessionRequestId, PlayerError> {
+        let request = self.update_session(Arc::clone(&self.requested));
+        // A refused start must not suppress the machine preference. On exit, restore it
+        // even if admission is temporarily full; the next request uses the live chain.
+        if full && request.is_err() {
+            return request;
+        }
+        self.full_chain = full;
+        self.control.sessions.bridge.set_low_latency(if full { None } else { self.low_latency_limit });
+        request
+    }
+    pub fn low_latency_limit(&self) -> Option<f64> {
+        self.low_latency_limit
+    }
+    pub fn path_latency_status(&self) -> Option<plan_bridge::StatusReport> {
+        self.control.sessions.bridge.status()
+    }
+    pub fn low_latency_bypasses(&self) -> std::collections::BTreeSet<u64> {
+        self.control.sessions.bridge.low_latency_bypasses()
     }
 
     pub fn update_session(&mut self, session: Arc<Session>) -> Result<SessionRequestId, PlayerError> {
@@ -208,12 +239,17 @@ impl<T: Copy, R: Copy> RuntimeControl<T, R> {
         {
             if status.status.capacity_exceeded == 0 {
                 self.attempted_latency = 0;
-            } else if status.status.required_latency > self.attempted_latency {
+            }
+            let raw = (generation, status.status.raw_latency_revision);
+            if (status.status.capacity_exceeded > 0 && status.status.required_latency > self.attempted_latency)
+                || (status.status.raw_latency_revision > 0 && self.attempted_raw != Some(raw))
+            {
                 match self.control.request(Arc::clone(&self.requested), self.input.clone()) {
                     Ok(request) => {
                         self.request = request;
                         self.state = RequestState::Preparing;
                         self.attempted_latency = status.status.required_latency;
+                        self.attempted_raw = Some(raw);
                         report.latency_refresh = Some(request);
                     }
                     Err(error) => report.refresh_error = Some(error),
