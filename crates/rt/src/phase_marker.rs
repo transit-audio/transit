@@ -111,6 +111,7 @@ pub struct PhaseMarker {
     longest_gap_ns: AtomicU64,
     gap_phase: AtomicU8,
     gap_strip: AtomicU32,
+    last_strip_render: AtomicU32,
     epoch: std::time::Instant,
 }
 
@@ -131,6 +132,7 @@ impl PhaseMarker {
             longest_gap_ns: AtomicU64::new(0),
             gap_phase: AtomicU8::new(Phase::Idle as u8),
             gap_strip: AtomicU32::new(NO_STRIP),
+            last_strip_render: AtomicU32::new(NO_STRIP),
             epoch: std::time::Instant::now(),
         }
     }
@@ -141,7 +143,8 @@ impl PhaseMarker {
         u64::try_from(self.epoch.elapsed().as_nanos()).unwrap_or(u64::MAX)
     }
 
-    /// A callback starts: forget the previous callback's longest stretch and enter `Service`.
+    /// A callback starts: forget its predecessor's longest stretch and last strip entry,
+    /// then enter `Service`.
     pub fn begin(&self) {
         self.begin_at(self.now_ns());
     }
@@ -151,6 +154,7 @@ impl PhaseMarker {
         self.longest_gap_ns.store(0, Ordering::Relaxed);
         self.gap_phase.store(Phase::Idle as u8, Ordering::Relaxed);
         self.gap_strip.store(NO_STRIP, Ordering::Relaxed);
+        self.last_strip_render.store(NO_STRIP, Ordering::Relaxed);
         self.strip.store(NO_STRIP, Ordering::Relaxed);
         self.phase.store(Phase::Service as u8, Ordering::Relaxed);
         self.at_ns.store(now_ns, Ordering::Relaxed);
@@ -163,6 +167,9 @@ impl PhaseMarker {
 
     /// [`Self::enter`] with the time given.
     pub fn enter_at(&self, phase: Phase, strip: Option<u32>, now_ns: u64) {
+        if phase == Phase::StripRender {
+            self.last_strip_render.store(strip.unwrap_or(NO_STRIP), Ordering::Relaxed);
+        }
         let gap = now_ns.saturating_sub(self.at_ns.load(Ordering::Relaxed));
         if gap > self.longest_gap_ns.load(Ordering::Relaxed) {
             self.longest_gap_ns.store(gap, Ordering::Relaxed);
@@ -177,6 +184,15 @@ impl PhaseMarker {
     /// The callback finished: close the last stretch and go `Idle`.
     pub fn end(&self) {
         self.enter(Phase::Idle, None);
+    }
+
+    /// The last strip index entered with `StripRender` since [`Self::begin`], independent of
+    /// duration. `None` means no such entry, or its index was absent. Read off the audio thread;
+    /// like [`Self::read`], a read racing the callback is approximate.
+    #[must_use]
+    pub fn last_strip_render(&self) -> Option<u32> {
+        let strip = self.last_strip_render.load(Ordering::Relaxed);
+        (strip != NO_STRIP).then_some(strip)
     }
 
     /// The marker as it is now.
@@ -196,6 +212,26 @@ impl PhaseMarker {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn strip_observation_survives_other_phases_and_resets_at_begin() {
+        let m = PhaseMarker::new();
+        assert_eq!(m.last_strip_render(), None);
+        m.begin_at(0);
+        for strip in 0..6 {
+            m.enter_at(Phase::StripRender, Some(strip), 0);
+            assert_eq!(m.last_strip_render(), Some(strip));
+        }
+        for phase in [Phase::Auxes, Phase::Masters, Phase::Mixdown, Phase::Output, Phase::Idle] {
+            m.enter_at(phase, Some(99), 0);
+            assert_eq!(m.last_strip_render(), Some(5));
+        }
+        m.begin_at(0);
+        assert_eq!(m.last_strip_render(), None);
+        m.enter_at(Phase::StripRender, Some(3), 0);
+        m.enter_at(Phase::StripRender, None, 0);
+        assert_eq!(m.last_strip_render(), None);
+    }
 
     #[test]
     fn the_longest_stretch_names_the_phase_it_was_spent_in() {

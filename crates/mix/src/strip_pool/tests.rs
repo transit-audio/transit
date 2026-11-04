@@ -195,12 +195,13 @@ fn a_late_runner_fault_keeps_the_same_instance_suspect() {
 
 /// #162 with render workers: a strip the callback renders inline (here a set with no workers,
 /// so every strip is reclaimed inline) marks the phase marker with its own phase and index, as
-/// the serial path does; the block's longest stretch is a strip render, not the mixdown before it.
+/// the serial path does. The last StripRender entry retains strip 5 after the later phases,
+/// independent of the time spent in each phase.
 #[test]
 fn a_strip_rendered_inline_marks_the_phase_marker() {
     use transit_audio_io::AudioBuffer;
     use transit_model::{Clip, Insert, SourceAudio, SourceId};
-    use transit_rt::phase_marker::{Phase, PhaseMarker};
+    use transit_rt::phase_marker::PhaseMarker;
     let _switch = SWITCH.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
     let mut s = Session::default();
     let len = 48_000usize;
@@ -223,7 +224,7 @@ fn a_strip_rendered_inline_marks_the_phase_marker() {
     eng.set_phase_marker(Arc::clone(&marker));
     MixEngine::force_serial(false);
     let m = Arc::clone(&marker);
-    let (eng, stamp, inline) = std::thread::spawn(move || {
+    let (eng, inline) = std::thread::spawn(move || {
         mark_audio_thread();
         let mut out = vec![vec![0.0f32; 512]; 2];
         for b in 0..4 {
@@ -234,14 +235,13 @@ fn a_strip_rendered_inline_marks_the_phase_marker() {
         m.end();
         let inline = eng.pool.as_ref().map_or(0, |p| p.set.stats().inline_renders);
         unmark_audio_thread();
-        (eng, m.read(), inline)
+        (eng, inline)
     })
     .join()
     .unwrap();
     MixEngine::force_serial(true);
     assert_eq!(inline, 5 * 6, "every strip was rendered inline");
-    assert_eq!(stamp.gap_phase, Phase::StripRender, "the inline strip renders marked their phase: {stamp:?}");
-    assert!(stamp.gap_strip < 6, "with the strip's track index: {stamp:?}");
+    assert_eq!(marker.last_strip_render(), Some(5), "the last inline strip marked StripRender with its own track index");
     drop(eng.into_retired());
 }
 
