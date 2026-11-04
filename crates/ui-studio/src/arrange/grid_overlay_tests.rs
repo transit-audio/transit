@@ -1,5 +1,6 @@
 use super::*;
 use crate::tests::{app, json};
+use crate::theme::Tokens;
 use egui::epaint::ClippedShape;
 
 fn wav() -> Vec<u8> {
@@ -24,8 +25,16 @@ fn wav() -> Vec<u8> {
     b
 }
 
-fn grid_colors() -> [Color32; 3] {
-    [TOKENS.grid_bar, TOKENS.grid_beat, TOKENS.grid_sub]
+/// The grid's stroke colors in either layer: the opaque tokens beneath the clips and the
+/// translucent overlay strokes above them.
+fn grid_colors() -> Vec<Color32> {
+    let kinds = [Kind::Bar { labeled: true }, Kind::Beat, Kind::Sub];
+    let mut v = vec![TOKENS.grid_bar, TOKENS.grid_beat, TOKENS.grid_sub];
+    for k in kinds {
+        let a = body_alpha(overlay_color(k).a());
+        v.extend([overlay_color(k), Color32::from_black_alpha(a), Color32::from_white_alpha(a)]);
+    }
+    v
 }
 
 /// One frame's shapes, in paint order, flattened.
@@ -74,8 +83,8 @@ fn painted(ui: &mut Ui) -> Painted {
             Shape::LineSegment { points, stroke }
                 if points[0].x == points[1].x
                     && grid_colors().contains(&stroke.color)
-                    && (points[0].y - tl[1]).abs() < 0.5
-                    && (points[1].y - tl[3]).abs() < 0.5 =>
+                    && points[0].y >= tl[1] - 0.5
+                    && points[1].y <= tl[3] + 0.5 =>
             {
                 grid.push((i, points[0].x));
             }
@@ -93,6 +102,7 @@ fn painted(ui: &mut Ui) -> Painted {
 fn xs(p: &Painted) -> Vec<f32> {
     let mut x: Vec<f32> = p.grid.iter().map(|g| g.1).collect();
     x.sort_by(f32::total_cmp);
+    x.dedup();
     x
 }
 
@@ -120,9 +130,13 @@ fn on_paints_the_same_single_grid_above_every_clip_shape() {
     let first_grid = on.grid.iter().map(|g| g.0).min().unwrap();
     let last_clip = *on.clip.iter().max().unwrap();
     assert!(first_grid > last_clip, "first grid segment index {first_grid} after the last clip shape {last_clip}");
-    assert_eq!(on.grid.len(), off.grid.len(), "no second stroking: the same segment count");
+    // Above the clips a line is split at the clip bodies it crosses, so there may be more
+    // segments, never a second line at an x.
+    assert!(on.grid.len() >= off.grid.len(), "at least one segment per line");
     assert_eq!(xs(&on), xs(&off), "the same x positions");
-    assert_eq!(on.all.len(), off.all.len(), "nothing else was added or dropped");
+    // Only the splitting of lines at the clip body adds segments (the clip body is the extra two here).
+    let split = on.grid.len() - off.grid.len();
+    assert_eq!(on.all.len(), off.all.len() + split, "nothing else was added or dropped");
 }
 
 #[test]
@@ -239,4 +253,165 @@ fn inspect_reports_the_flag_and_the_view_menu_item_dispatches_the_command() {
     t.menu("View");
     t.menu("Grid Over Clips");
     assert!(!t.app.engine.session().edit.grid_over_clips, "the item toggles back");
+}
+
+const KINDS: [Kind; 3] = [Kind::Bar { labeled: true }, Kind::Beat, Kind::Sub];
+
+/// Straight-alpha blend of an overlay stroke over an opaque body, per channel, rounded: the
+/// stroke is premultiplied (`Color32`), so out = premultiplied rgb + body * (255 - a) / 255.
+fn over(stroke: Color32, body: [u8; 3]) -> [i32; 3] {
+    let a = i32::from(stroke.a());
+    let s = [stroke.r(), stroke.g(), stroke.b()];
+    std::array::from_fn(|i| (f64::from(s[i]) + f64::from(body[i]) * f64::from(255 - a) / 255.0).round() as i32)
+}
+
+fn both_themes(f: impl Fn(&Tokens)) {
+    for t in [&crate::theme::DARK, &crate::theme::LIGHT] {
+        f(t);
+    }
+}
+
+fn tok(t: &Tokens, kind: Kind) -> Color32 {
+    match kind {
+        Kind::Bar { labeled: true } => t.grid_bar,
+        Kind::Bar { labeled: false } | Kind::Beat => t.grid_beat,
+        Kind::Sub => t.grid_sub,
+    }
+}
+
+/// Within 3 per channel: the overlay is gray (one alpha for all channels, the mean of the three
+/// distances) and the tokens lean blue (dark 25, 25, 27 above the lane; light 50, 49, 45 below),
+/// so the blue channel of the bar line lands 2 to 3 off. Tighter would need a tinted stroke.
+#[test]
+fn the_overlay_over_an_empty_lane_reproduces_the_token_in_both_themes() {
+    both_themes(|t| {
+        for k in KINDS {
+            let o = translucent(tok(t, k), t.lane, 1.0);
+            let got = over(o, [t.lane.r(), t.lane.g(), t.lane.b()]);
+            let want = [tok(t, k).r(), tok(t, k).g(), tok(t, k).b()].map(i32::from);
+            for i in 0..3 {
+                assert!((got[i] - want[i]).abs() <= 3, "{k:?} channel {i}: {got:?} vs {want:?} (overlay {o:?})");
+            }
+        }
+    });
+}
+
+#[test]
+fn the_overlay_tints_a_bright_body_proportionally_never_with_an_opaque_line() {
+    both_themes(|t| {
+        for body in [[0x5a, 0x9a, 0xd8], [0xc8, 0xd4, 0x5a]] {
+            for k in KINDS {
+                let o = translucent(tok(t, k), t.lane, 1.0);
+                assert!(o.a() < 255 && o.a() > 0, "{k:?} is translucent: {o:?}");
+                let got = over(o, body);
+                let a = f64::from(o.a()) / 255.0;
+                for i in 0..3 {
+                    // Dark theme tints toward white, light toward black: the shift is the alpha
+                    // times the headroom of that channel, so never more than the alpha of range.
+                    let headroom = if o.r() > 0 { 255 - i32::from(body[i]) } else { i32::from(body[i]) };
+                    let shift = (got[i] - i32::from(body[i])).abs();
+                    assert!(f64::from(shift) <= a * f64::from(headroom) + 1.0, "{k:?} body {body:?} channel {i}: shift {shift}");
+                    assert!(f64::from(shift) <= 0.20 * 255.0, "no channel moves more than 20 percent of its range: {shift}");
+                }
+            }
+        }
+    });
+}
+
+#[test]
+fn the_overlay_is_an_extreme_toward_the_tokens_side_of_the_lane() {
+    let dark = translucent(crate::theme::DARK.grid_bar, crate::theme::DARK.lane, 1.0);
+    assert_eq!((dark.r(), dark.g(), dark.b()), (dark.a(), dark.a(), dark.a()), "white at alpha (premultiplied)");
+    let light = translucent(crate::theme::LIGHT.grid_bar, crate::theme::LIGHT.lane, 1.0);
+    assert_eq!((light.r(), light.g(), light.b()), (0, 0, 0), "black");
+    assert!(translucent(crate::theme::DARK.grid_bar, crate::theme::DARK.lane, 2.0).a() > dark.a(), "gain scales alpha");
+}
+
+/// The colors of the full-height-or-split vertical grid strokes of a frame.
+fn grid_stroke_colors(ui: &Ui) -> Vec<Color32> {
+    let tl = ui.app.arrange.layout.timeline;
+    flat(&ui.shapes)
+        .iter()
+        .filter_map(|s| match s {
+            Shape::LineSegment { points, stroke }
+                if points[0].x == points[1].x
+                    && grid_colors().contains(&stroke.color)
+                    && points[0].y >= tl[1] - 0.5
+                    && points[1].y <= tl[3] + 0.5 =>
+            {
+                Some(stroke.color)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_lane_pass_strokes_the_opaque_tokens_and_the_overlay_pass_translucent_ones() {
+    let mut ui = with_clip();
+    ui.frames(2);
+    let off = grid_stroke_colors(&ui);
+    assert!(!off.is_empty() && off.iter().all(|c| c.a() == 255), "beneath the clips every stroke is an opaque token: {off:?}");
+    ui.app.run("view.grid_over_clips", json!({"value": true})).unwrap();
+    ui.frames(2);
+    let on = grid_stroke_colors(&ui);
+    assert!(!on.is_empty() && on.iter().all(|c| c.a() < 255), "above the clips every stroke is translucent: {on:?}");
+}
+
+fn body(x0: f32, y0: f32, x1: f32, y1: f32, c: Color32) -> Body {
+    Body { rect: Rect::from_min_max(pos2(x0, y0), pos2(x1, y1)), color: c }
+}
+
+#[test]
+fn a_bar_line_darkens_a_bright_body_and_lightens_the_lane_by_the_token_fraction() {
+    both_themes(|t| {
+        // The dark theme's lane lightens; its bright-body stroke is black at the same alpha.
+        let tl = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0));
+        let line = Line { x: 50.0, kind: Kind::Bar { labeled: true }, bar: 1 };
+        let bright_body = Color32::from_rgb(0xc8, 0xd4, 0x5a);
+        let lane = translucent(t.grid_bar, t.lane, 1.0);
+        let on_body = segments(&line, tl, &[body(0.0, 30.0, 100.0, 60.0, bright_body)])[1].2;
+        let a = f64::from(body_alpha(lane.a())) / 255.0;
+        if lane.r() == 0 {
+            return; // the light theme: the lane stroke is black already; the dark theme covers the split
+        }
+        let b = [0xc8u8, 0xd4, 0x5a];
+        let dark = over(on_body, b);
+        for i in 0..3 {
+            let want = (f64::from(b[i]) * (1.0 - a)).round() as i32;
+            assert!(dark[i] < i32::from(b[i]) && (dark[i] - want).abs() <= 1, "over the body channel {i}: {dark:?}, want {want}");
+        }
+        let l = [t.lane.r(), t.lane.g(), t.lane.b()];
+        let lit = over(lane, l);
+        let token = [t.grid_bar.r(), t.grid_bar.g(), t.grid_bar.b()].map(i32::from);
+        for i in 0..3 {
+            assert!((lit[i] - token[i]).abs() <= 3, "over the lane channel {i}: {lit:?} vs {token:?}");
+        }
+        // Dark theme: the lane is lightened (token above lane); light theme: darkened.
+        let dir = (lit[0] - i32::from(l[0])).signum();
+        assert_eq!(dir, if t.lane.r() < 128 { 1 } else { -1 }, "the lane's own direction is kept");
+        if t.lane.r() < 128 {
+            assert!(lit[0] > i32::from(l[0]), "lighter than the lane");
+        }
+    });
+}
+
+#[test]
+fn a_dark_body_is_lightened_and_a_line_splits_at_each_body_edge() {
+    let tl = Rect::from_min_max(pos2(0.0, 0.0), pos2(100.0, 100.0));
+    let line = Line { x: 50.0, kind: Kind::Beat, bar: 1 };
+    let a = body_alpha(overlay_color(Kind::Beat).a());
+    let segs = segments(
+        &line,
+        tl,
+        &[body(0.0, 20.0, 100.0, 40.0, Color32::from_rgb(0xc8, 0xd4, 0x5a)), body(0.0, 60.0, 100.0, 80.0, Color32::from_rgb(0x20, 0x30, 0x80))],
+    );
+    let ys: Vec<(f32, f32)> = segs.iter().map(|s| (s.0, s.1)).collect();
+    assert_eq!(ys, vec![(0.0, 20.0), (20.0, 40.0), (40.0, 60.0), (60.0, 80.0), (80.0, 100.0)], "split at every body edge");
+    assert_eq!(segs[1].2, Color32::from_black_alpha(a), "bright body: black");
+    assert_eq!(segs[3].2, Color32::from_white_alpha(a), "dark body: white");
+    assert_eq!(segs[0].2, overlay_color(Kind::Beat), "lane: the derived overlay color");
+    assert_ne!(segs[0].2, segs[1].2, "two segments, two stroke colors");
+    // A line outside every body is one segment, and a body edge off the line does not split it.
+    assert_eq!(segments(&Line { x: 150.0, ..line }, tl, &[body(0.0, 20.0, 100.0, 40.0, Color32::WHITE)]).len(), 1);
 }

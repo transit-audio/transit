@@ -205,6 +205,9 @@ pub struct ClipRect {
     pub rect: R4,
     pub start: Samples,
     pub end: Samples,
+    /// The body color the clip is drawn with (the grid overlay's contrast pass reads it).
+    #[serde(skip)]
+    pub body: Color32,
 }
 
 /// A MIDI clip being recorded on a track's lane.
@@ -464,7 +467,12 @@ fn arrangement(app: &mut StudioApp, ui: &mut Ui) {
     grid_and_ruler(ui, &grid, ruler, tl, !over);
     clips(app, ui, &s, map, tl, &rows, &geo, &mut layout);
     if over {
-        grid_overlay::paint(ui.painter(), tl, &grid);
+        let bodies: Vec<_> = layout
+            .clips
+            .iter()
+            .map(|c| grid_overlay::Body { rect: Rect::from_min_max(pos2(c.rect[0], c.rect[1]), pos2(c.rect[2], c.rect[3])), color: c.body })
+            .collect();
+        grid_overlay::paint(ui.painter(), tl, &grid, Some(&bodies));
     }
     group_summaries(app, ui, &s, map, tl, &mut layout);
     header_drag(app, ui, &s, &mut layout);
@@ -495,7 +503,7 @@ fn grid_and_ruler(ui: &Ui, grid: &[grid_overlay::Line], ruler: Rect, tl: Rect, l
     p.rect_filled(ruler, 0.0, TOKENS.ruler);
     p.line_segment([pos2(ruler.min.x, ruler.max.y), pos2(ruler.max.x, ruler.max.y)], Stroke::new(1.0, TOKENS.line));
     if lane {
-        grid_overlay::paint(p, tl, grid);
+        grid_overlay::paint(p, tl, grid, None);
     }
     let rp = p.with_clip_rect(ruler);
     for l in grid {
