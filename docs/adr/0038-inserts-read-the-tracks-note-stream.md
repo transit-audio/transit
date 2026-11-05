@@ -114,11 +114,13 @@ prints its value from frame zero, and a ramp starting there continues from it wi
 smoothing from a settled smoother. A hosted plug-in's activation behavior (an activation fade,
 parameter smoothing after its state is restored) is over before frame zero. A restored
 instrument's state (the Texture Synth's frozen cloud, ADR 0033) is restored at creation as the
-main rule says, then runs through the run-in as a live instance runs while stopped. No clip plays
-during the run-in, so no source is read; a disk-backed source (ADR 0035) is first read at frame
+main rule says, then runs through the run-in as a live instance runs while stopped. No source is read
+during the run-in; a disk-backed source (ADR 0035) is first read at frame
 zero through the synchronous offline reader. Free-running built-in state enters frame zero at its
 phase after the run-in (Dirty Tape's wow/flutter): the #251 regression's measured first Dirty
-Tape position moved from 1128 to 1078 frames. Automation timing is unchanged. This follows the
+Tape position moved from 1128 to 1078 frames. Automation timing is unchanged.
+
+This follows the
 Ableton Live and Logic Pro convention. In both, a print starts at the automation's value for its
 position and carries no newly created instance's activation behavior. transit's offline chain is
 created for the print, so transit defines a settled chain as one that has run `RUN_IN_SECONDS`
@@ -131,8 +133,8 @@ wake-up shorter than the run-in does not land in a print. A plug-in whose warm-u
 run-in, or that finishes loading on its own thread by wall-clock time, can still reach a print
 (E71's blind spots). The cost is four seconds of processing per run-in, bounded by the chain's
 own cost: a chain with no inserts and no instrument costs only the mix's own summing over four
-seconds of audio, and a heavy one costs what four seconds of it costs offline. Such a chain runs
-in too, so every print takes the same path. The run-in runs once per frozen track, and twice for
+seconds of audio, and a heavy one costs what four seconds of it costs offline. A chain with no
+inserts and no instrument runs in too, so every print takes the same path. The run-in runs once per frozen track, and twice for
 a normalized File > Bounce or Bounce Paths (the measure pass and the write pass). It runs inside
 `RangeRender::try_new`, so it is not split into File > Bounce's 30 ms UI steps: a heavy chain
 blocks one UI frame for the whole run-in at each pass. The gate:
