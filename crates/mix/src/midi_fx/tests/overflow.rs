@@ -303,3 +303,35 @@ fn the_fuzz_seed_71271_through_two_delays_never_delivers_an_off_before_its_on() 
     assert!(!host.pending());
     assert!(rec.heard.iter().any(|(_, _, e)| matches!(e.message, Message::NoteOn { .. })));
 }
+
+#[test]
+fn a_same_key_release_without_a_voice_id_evicts_its_newest_on_not_the_oldest() {
+    // Repeated notes on one key without voice ids, through a 1000-sample delay: the block's events
+    // fill the 64-slot carry and the last release overflows it.
+    let t = track(&[("midi_test_delay", &[("samples", 1000.0)])]);
+    let (mut host, mut rec) = (MidiFxHost::new(), Rec::default());
+    let mut events = vec![(0, on(-1, 60, 100)), (1, off(-1, 60)), (2, on(-1, 60, 100))];
+    for i in 0..61 {
+        events.push((3 + i, ev(-1, Message::Control { cc: 1, value: 1 })));
+    }
+    events.push((100, off(-1, 60)));
+    block(&mut host, &mut rec, &t, &events);
+    for _ in 0..8 {
+        block(&mut host, &mut rec, &t, &[]);
+    }
+    let heard: Vec<_> = rec
+        .heard
+        .iter()
+        .filter_map(|(b, o, e)| match e.message {
+            Message::NoteOn { key: 60, .. } => Some((*b, *o, "on")),
+            Message::NoteOff { key: 60, .. } => Some((*b, *o, "off")),
+            _ => None,
+        })
+        .collect();
+    let mut sounding = false;
+    for (_, _, k) in &heard {
+        sounding = *k == "on";
+    }
+    assert!(host.counts.carry_overflow >= 1, "the carry must overflow");
+    assert!(!sounding, "key 60 left sounding: {heard:?}");
+}
