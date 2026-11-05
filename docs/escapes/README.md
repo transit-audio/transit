@@ -31,3 +31,4 @@ An escaped defect becomes a gate class, not a one-off fix: each record names the
 - [E70: the phase-marker test compared wall-clock stretches (#323)](E70-the-phase-marker-test-compared-wall-clock-stretches.md)
 - [E71: an offline print started on a fresh chain's first block (#332)](E71-an-offline-print-started-on-a-fresh-chain-first-block.md)
 - [E72: a far deadline let a host stall skip an unheld strip](E72-a-far-deadline-let-a-host-stall-skip-an-unheld-strip.md)
+- [E73: a monitored port acknowledged its routes before it captured SysEx](E73-a-monitored-port-acknowledged-its-routes-before-it-captured-sysex.md)

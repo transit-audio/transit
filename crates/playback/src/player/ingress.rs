@@ -352,6 +352,8 @@ impl Worker {
             map_pass_on: false,
             #[cfg(test)]
             between_check_and_push: None,
+            #[cfg(test)]
+            after_routes_applied: None,
         };
         let thread = std::thread::Builder::new().name("transit-midi-ingress".into()).spawn(move || {
             let mut linger = 0u32;
@@ -618,6 +620,10 @@ struct Pump {
     /// Tests: runs after the route check and before the echo push, where a preemption can land.
     #[cfg(test)]
     between_check_and_push: Option<Box<dyn FnMut() + Send>>,
+    /// Tests: runs right after a route update is acknowledged (`applied`), where a thread that saw
+    /// the acknowledgment can act before the rest of the step runs (E73).
+    #[cfg(test)]
+    after_routes_applied: Option<Box<dyn FnMut() + Send>>,
 }
 impl Pump {
     fn tap(&mut self, message: Message) {
@@ -668,6 +674,12 @@ impl Pump {
                             let counters = input.consumer.counters();
                             input.mon.sysex_dropped = counters.sysex_capture_dropped;
                             input.mon.sysex_truncated = counters.sysex_truncated;
+                            // Capture starts here, not at the per-step switch below: the port's
+                            // routes are acknowledged later in this loop, and whatever is sent
+                            // after the acknowledgment must already be captured (E73).
+                            if monitor.enabled() {
+                                input.mon.set_capture(true, &mut input.consumer);
+                            }
                         }
                         self.inputs.push(*input);
                     }
@@ -711,6 +723,10 @@ impl Pump {
                         }
                         input.routes = routes;
                         applied.store(true, Ordering::Release);
+                        #[cfg(test)]
+                        if let Some(hook) = &mut self.after_routes_applied {
+                            hook();
+                        }
                     } else {
                         for (permit, _) in routes {
                             permit.invalidate();

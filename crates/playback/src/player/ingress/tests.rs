@@ -64,6 +64,44 @@ fn monitor_sysex_capture_reaches_unrouted_monitor_with_loss_counts_and_no_ingres
     assert!(events.is_empty(), "closed-window captures are discarded");
 }
 
+/// E73: on a port opened while the monitor is on, a SysEx sent once the port's routes are
+/// acknowledged is captured. The hook delivers it the moment the worker publishes `applied`, as a
+/// thread that waited for the acknowledgment and was scheduled before the rest of the step can.
+#[test]
+fn sysex_sent_once_the_routes_are_acknowledged_reaches_the_monitor() {
+    let (control, _plans) = bridge();
+    let (lane, _audio) = action_lane::pair_with_result(&control);
+    let (send, mut worker) = pump(lane);
+    let (hub, tap, _out) = monitor::Hub::new();
+    hub.set_enabled(true);
+    send.send(Update::Monitor(tap)).ok().unwrap();
+    let fake = Fake::default();
+    let key = fake.add_input("Acknowledged");
+    let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
+    send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
+        id: 3,
+        mon: Mon::default(),
+        guard: storm::Guard::default(),
+        live: false,
+        consumer,
+        routes: Vec::new(),
+    })))
+    .ok()
+    .unwrap();
+    let applied = Arc::new(AtomicBool::new(false));
+    send.send(Update::Routes { id: 3, routes: Vec::new(), applied: Arc::clone(&applied) }).ok().unwrap();
+    let port = fake.input_port(&key).unwrap();
+    worker.after_routes_applied = Some(Box::new(move || assert!(port.deliver(0, &[0xF0, 1, 2, 3, 0xF7]))));
+    worker.step();
+    assert!(applied.load(Ordering::Acquire));
+    worker.step();
+    let mut events = Vec::new();
+    hub.drain(&mut events, 100);
+    assert!(events.iter().any(|e| e.status == 0xF0 && e.sysex_len == 5), "the SysEx was not captured: {events:?}");
+}
+
 fn monitored(enabled: bool) -> (monitor::Hub, Pump, Fake, transit_midi_io::PortKey, impl Sized) {
     monitored_with(enabled, InputConfig::default())
 }
@@ -225,6 +263,7 @@ pub(super) fn pump(lane: action_lane::Control<Packet, ActionResult>) -> (SyncSen
             map_out: rtrb::RingBuffer::new(MAP_CAPACITY).0,
             map_pass_on: false,
             between_check_and_push: None,
+            after_routes_applied: None,
         },
     )
 }

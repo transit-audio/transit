@@ -9,7 +9,9 @@ use transit_model::{ChannelFormat, Insert, Session, TrackId, TrackKind};
 const EPOCH: EngineEpoch = EngineEpoch(41);
 
 // A deadline is only a deadlock guard. Success always requires a published state,
-// received packet, source acknowledgment, or the device owner's completion flag.
+// received packet, source acknowledgment, or the device owner's completion flag. The guard
+// names the waiting caller's line (E73).
+#[track_caller]
 fn until(mut ready: impl FnMut() -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !ready() {
@@ -64,6 +66,7 @@ impl Fixture {
         self.native.service(&mut self.owner, EPOCH);
     }
 
+    #[track_caller]
     fn ready(&mut self, open: usize, routes: usize) {
         until(|| {
             self.tick();
@@ -73,6 +76,7 @@ impl Fixture {
         });
     }
 
+    #[track_caller]
     fn packets(&mut self, count: usize) -> Vec<ingress::Packet> {
         let mut packets = Vec::new();
         until(|| {
@@ -98,6 +102,7 @@ impl Fixture {
         released
     }
 
+    #[track_caller]
     fn finish(self) {
         let Self { native, owner, ports, midi } = self;
         let finished = Arc::clone(&native.io.as_ref().unwrap().finished);
@@ -299,6 +304,7 @@ fn step_tap_rounds() -> Duration {
 }
 
 /// Drains the monitor until `ready` holds for what was collected.
+#[track_caller]
 fn monitored(
     f: &mut Fixture,
     mut ready: impl FnMut(&[monitor::MonitorEvent], &monitor::Report) -> bool,
@@ -315,6 +321,7 @@ fn monitored(
 
 /// [`monitored`] reading at the injected host time `now` rather than the real clock, for tests that
 /// stamp their own pulses.
+#[track_caller]
 fn monitored_at(
     f: &mut Fixture,
     now: u64,
