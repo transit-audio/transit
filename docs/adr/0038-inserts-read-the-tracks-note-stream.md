@@ -1,6 +1,6 @@
 # ADR 0038: Inserts may read the track's note stream; the Filter insert plays envelopes from it
 
-- **Status:** proposed 2026-10-31 (#242)
+- **Status:** proposed 2026-10-31 (#242); amended 2026-11-05 (#332, offline prints start from a settled chain)
 - **Date:** 2026-10-31
 - **Reopen when:** a hosted effect with a note input (a CLAP effect with a note port, a VST3 effect with an event bus) should get the stream too; an insert needs per-voice information the summed audio cannot give it (the per-voice filter of the Macro Oscillator, #243, is that case and stays inside the instrument); a rack strip's own inserts want the notes of the rack's members; or a block's note view overflows in practice (`EventStatus::midi_fx.note_view_dropped` above zero in a field report).
 
@@ -13,7 +13,8 @@ their smoothers before the first block, for both offline and live instances. The
 the plug-in's reset behavior by default; a restored-state instrument must preserve its cloud
 while snapping parameter targets. Retained running instances are never snapped by a session
 edit. Automation, including a point or ramp starting at time zero, is applied after preparation
-and continues to use normal smoothing.
+and continues to use normal smoothing, on a chain an offline print has already run in (see the
+#332 amendment below).
 
 ## Context
 
@@ -96,3 +97,29 @@ the dry/wet mix, even at 0% wet: those effect offsets remain, as the DSP impulse
 require. The regression asserts its measured peak positions separately; it does not confuse
 that modulation with converter or compensation latency. Compressor lookahead growth and
 shrinkage preserve both tracks' exact impulse positions.
+
+## Amendment: offline prints start from a settled chain (#332, 2026-11-05)
+
+An offline print (Bounce in Place and Commit, Freeze, File > Bounce, stems and Bounce Paths, all
+through `RangeRender`) runs its freshly prepared chain for `RUN_IN_SECONDS` (four seconds) of
+audio with the transport stopped at the range start before the first printed frame, exactly as a
+live chain has run between its creation and play: no clip plays, every lane's value at the range
+start is delivered, every insert processes (none is suspended) and the output is discarded.
+Stored values stay snapped before the first block, as the rule above says. Automation at time
+zero is applied to that settled chain: a point at the range start prints its value from frame
+zero, and a ramp starting there continues from it with normal smoothing from a settled smoother.
+A hosted plug-in's activation behavior (an activation fade, parameter smoothing after its state
+is restored) is over before frame zero. This is the Ableton Live and Logic Pro convention: both
+print through the instances already running, so a print starts from a settled chain at the
+automation's value for its position (escape E71).
+
+For users, every print starts as live play from a stop at the range start does, so a plug-in's
+wake-up never lands in a print. The cost is four seconds of processing per print, bounded by the
+chain's own cost: an empty chain runs in for almost nothing, a heavy one costs what four seconds
+of it costs offline. A chain with no inserts and no instrument runs in too, so every print takes
+the same path. A plug-in whose warm-up outlasts the run-in, or that finishes loading on its own
+thread by wall-clock time, can still reach a print (E71's blind spots). The gate:
+`an_automated_gain_insert_prints_its_lane_value_from_frame_zero` and
+`a_hosted_plug_in_warm_up_settles_before_the_first_printed_frame`
+(`crates/mix/src/offline_prime_tests.rs`) run with every workspace test, and
+`docs/contributing/evidence/gates.md` requires an offline print path test to render a settled chain.

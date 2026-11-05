@@ -125,6 +125,8 @@ Live's Take Lanes work the same way for everything above.
 Choose **Track > Bounce in Place** (Commit, **Alt+Shift+C**) to print the focused track through
 its inserts, before its fader. The print starts at the session start and ends two seconds after
 the last clip on the active playlist. The source's clips and take stacks are always preserved.
+Every print (Bounce in Place, Commit, Freeze and File > Bounce) starts from a settled chain, as live
+play from a stop does, so a plug-in's wake-up never lands in a print.
 
 - **Destination:** **New track** creates **<name> bounce** directly under the source and copies its
   volume, output and sends. **Existing track** adds the print to the active playlist of a visible,

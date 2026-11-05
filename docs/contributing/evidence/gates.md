@@ -323,3 +323,8 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   their own schedules, a capture period that differs from the render block, and both orders on a
   tie, plus the real change it must still catch on the same fake. A lockstep fake alone does not
   pass it (E54, `../../escapes/E54-measure-guard-validated-only-on-a-lockstep-fake.md`).
+- An offline print path test renders a settled chain: the automated-insert and hosted-stand-in
+  reproductions (`an_automated_gain_insert_prints_its_lane_value_from_frame_zero` and
+  `a_hosted_plug_in_warm_up_settles_before_the_first_printed_frame`, `crates/mix/src/offline_prime_tests.rs`)
+  guard it. A test that compares a print with live play compares it with live play from a stop,
+  never with a freshly adopted engine's first block (E71, `../../escapes/E71-an-offline-print-started-on-a-fresh-chain-first-block.md`).

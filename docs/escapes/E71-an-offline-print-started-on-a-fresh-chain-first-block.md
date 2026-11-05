@@ -1,7 +1,7 @@
 # E71: an offline print started on a fresh chain's first block (#332)
 
-**Status: draft.** The mono fold-back fix has landed. The warm-up fix waits on the maintainer's
-decision about ADR 0038 (see item 6).
+**Status: recorded.** The mono fold-back fix has landed. The warm-up fix is the offline run-in
+that ADR 0038's #332 amendment makes the contract (see item 6).
 
 1. **Failure.** While testing #318 on dev build 7cc65268, the maintainer bounced a mono guitar
    track in place. The track had a six-take stack with a comped take active and one hosted VST3
@@ -55,27 +55,36 @@ decision about ADR 0038 (see item 6).
      Both fail on 7cc65268 with 0.50059325.
    - **Warm-up.** `an_automated_gain_insert_prints_its_lane_value_from_frame_zero` and
      `a_hosted_plug_in_warm_up_settles_before_the_first_printed_frame` fail on 7cc65268 with
-     the values above. They are ignored until the decision.
+     the values above. They run live since the run-in landed.
    - **Dynamics.** `a_dynamics_insert_prints_what_the_live_path_plays_from_frame_zero` holds
      the compressor's print equal to the live main mix.
 5. **Gate class.** An offline render must equal live play from a stop, from its first frame, and
    any fold or gain the print adds must be exact. Tests of a print compare its first frames with
    the source or with that live reference bit for bit, never only a level after the start. The
-   gate rule is added to `docs/contributing/evidence/gates.md` when the warm-up fix lands.
+   gate rule is in `docs/contributing/evidence/gates.md`: an offline print path test renders a
+   settled chain, and the two warm-up reproductions guard it.
 6. **Protocol change, owner, blind spot.**
-   - **Pending decision.** The candidate warm-up fix runs a freshly adopted offline chain for a
-     few seconds with the transport stopped at the range start and discards the output. That
-     makes the print match live play from a stop. It contradicts ADR 0038's #280 rule that
-     time-zero automation smooths from the stored value (#287 item 2 asks whether to start at
-     the automation value, as Ableton and Logic do). It also contradicts the fresh-engine live
-     reference of four existing tests:
-     - `crates/mix/tests/prepared_params.rs`
-     - two tests in `crates/mix/tests/offline_latency.rs`
-     - `crates/engine/tests/time_stretcher_insert.rs`
-     - `crates/ui-studio/src/midi_learn_hosted_tests.rs`, which reads the first printed block
-       for a hosted parameter delivery
+   - **Decision and fix.** The maintainer chose the run-in (2026-11-05), and ADR 0038's
+     amendment "offline prints start from a settled chain (#332)" makes it the contract.
+     `RangeRender::build_with` (`crates/mix/src/offline.rs`) runs every freshly adopted offline
+     chain for `RUN_IN_SECONDS` (four seconds) with the transport stopped at the range start,
+     every insert processing, and discards the output, so the print matches live play from a
+     stop, as Ableton Live and Logic Pro print through running instances. Time-zero automation
+     is applied to the settled chain (the answer to #287 item 2). The tests that used a fresh
+     engine's first block as the live reference now play live from a stop or expect the settled
+     value:
+     - `time_zero_points_and_ramps_are_applied_after_preparation`
+       (`crates/mix/tests/prepared_params.rs`)
+     - `changing_latency_keeps_both_impulse_tracks_on_the_timeline` and
+       `every_retained_sample_equals_live_with_exactly_the_documented_splice`
+       (`crates/mix/tests/offline_latency.rs`)
+     - `the_live_path_at_64_and_512_frames_puts_out_the_bounce`
+       (`crates/engine/tests/time_stretcher_insert.rs`)
+     - `a_learned_controller_moves_a_hosted_instruments_parameter_in_the_plug_in_and_its_editor`
+       (`crates/ui-studio/src/midi_learn_hosted_tests.rs`), which now reads the hosted parameter
+       delivery from a fresh chain's first block and expects none in the first printed block
 
-     The fix waits on an ADR 0038 amendment. The mix crate's reviewers own the gate.
+     The mix crate's reviewers own the gate.
    - **Blind spots.**
      - A plug-in whose warm-up runs longer than any run-in can still reach the print. So can a
        plug-in that finishes loading on its own thread by wall-clock time, because an offline
