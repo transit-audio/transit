@@ -11,9 +11,12 @@
 <meta property="og:image" content="https://raw.githubusercontent.com/transit-audio/transit/main/assets/brand/social-preview-1280x640.png">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="assets/transit-icon-dark-1024.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600&display=swap">
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
+<body id="top">
 <header class="hero">
   <picture>
     <source srcset="assets/transit-wordmark-graphite.svg" media="(prefers-color-scheme: light)">
@@ -22,8 +25,9 @@
   <p class="tagline">Record, edit and mix music on Windows, Mac and Linux. Free and open source.</p>
   <p class="sub muted">Cubase bones, Ableton manners.</p>
   <p class="cta">
-    <a class="btn primary" href="#downloads">Download</a>
-    <a class="btn" href="https://github.com/transit-audio/transit">GitHub</a>
+    <a class="btn primary" href="#downloads"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg><span class="lbl">Download</span></a>
+    <a class="btn discord" href="https://discord.gg/7PPUBZqA66"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg><span class="lbl">Join the Discord</span></a>
+    <a class="btn gh" href="https://github.com/transit-audio/transit"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="lbl">Source on GitHub</span></a>
   </p>
 </header>
 
@@ -31,14 +35,31 @@
 <section id="downloads">
   <h2>Downloads</h2>
   <p class="lead">transit is free. It is also early software (alpha): it changes every week, and some things are rough or missing. Back up anything you care about, and tell us what breaks on the <a href="https://discord.gg/7PPUBZqA66">Discord</a> or in the <a href="https://github.com/transit-audio/transit/issues/49">testing thread</a>.</p>
-  <p id="release-meta" class="muted">Loading the latest release...</p>
-  <ul id="assets" class="assets"></ul>
+  <p id="release-meta" class="muted rel">Loading the latest release...</p>
+  <div class="dls">
+    <article class="dl" id="dl-windows" data-os="windows">
+      <h3><svg class="mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M3 4.6l8-1.1v8H3zM12 3.4L21 2v9.5h-9zM3 12.5h8v8l-8-1.1zM12 12.5h9V22l-9-1.3z"/></svg>Windows</h3>
+      <span class="tag" hidden>This looks like your computer</span>
+      <p class="note">Pick the installer. If you would rather not install anything, the zip runs from any folder.</p>
+      <a class="btn primary dlbtn" href="https://github.com/transit-audio/transit/releases/latest"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg><span class="lbl">Download for Windows<small class="size"></small></span></a>
+      <p class="other muted">Other formats: <span class="others">see the release page</span></p>
+    </article>
+    <article class="dl" id="dl-mac" data-os="mac">
+      <h3><svg class="mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M12 7.8c-1-.7-2.2-1-3.3-.7C6.600 7.700 5 9.800 5 12.500c0 3.700 2.400 8.500 4.400 8.500.8 0 1.300-.5 2.600-.5s1.800.5 2.600.5c2 0 4.400-4.100 4.400-6.300-1.700-.6-2.600-2-2.600-3.600 0-1.400.8-2.600 1.900-3.300-.8-1-2-1.700-3.400-1.700-1.100 0-2.100.5-2.900.9zM13 5.500c.8-.9 1.300-2 1.200-3.300-1.200.1-2.300.8-3 1.700-.7.800-1.200 2-1 3.200 1.200.1 2.100-.7 2.800-1.600z"/></svg>Mac</h3>
+      <span class="tag" hidden>This looks like your computer</span>
+      <p class="note">Pick the DMG (for Macs with an Apple chip). Open it and drag transit to Applications.</p>
+      <a class="btn primary dlbtn" href="https://github.com/transit-audio/transit/releases/latest"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg><span class="lbl">Download for Mac<small class="size"></small></span></a>
+      <p class="other muted">Other formats: <span class="others">see the release page</span></p>
+    </article>
+    <article class="dl" id="dl-linux" data-os="linux">
+      <h3><svg class="mark" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><rect x="2.5" y="4" width="19" height="16" rx="2.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M7 9.5l3.5 2.5L7 14.5M12.5 15H17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>Linux</h3>
+      <span class="tag" hidden>This looks like your computer</span>
+      <p class="note">The AppImage runs on almost any system. The .deb is for Ubuntu and Debian, the .rpm is for Fedora, and the tar.gz works everywhere else.</p>
+      <a class="btn primary dlbtn" href="https://github.com/transit-audio/transit/releases/latest"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0l-5-5m5 5l5-5M4 20h16"/></svg><span class="lbl">Download for Linux<small class="size"></small></span></a>
+      <p class="other muted">Other formats: <span class="others">see the release page</span></p>
+    </article>
+  </div>
   <noscript><p><a href="https://github.com/transit-audio/transit/releases/latest">Latest release on GitHub</a></p></noscript>
-  <ul class="plain">
-    <li><strong>Windows:</strong> pick the installer. If you would rather not install anything, the zip runs from any folder.</li>
-    <li><strong>Mac:</strong> pick the DMG (for Macs with an Apple chip). Open it and drag transit to Applications.</li>
-    <li><strong>Linux:</strong> the AppImage runs on almost any system. The .deb is for Ubuntu and Debian, the .rpm is for Fedora, and the tar.gz works everywhere else.</li>
-  </ul>
   <p class="lead">The downloads are not signed yet, so Windows and macOS may warn you the first time. The <a href="https://github.com/transit-audio/transit#downloads">README</a> shows how to open it anyway.</p>
   <p class="lead"><strong>First start:</strong> open Audio Devices, pick your audio interface, and set the buffer size. transit measures its own latency and shows you the number.</p>
 </section>
@@ -52,7 +73,7 @@
     <article class="card"><h3>Low delay, and it shows the number</h3><p>On Windows, transit talks to your audio interface directly for low delay, and the Audio Devices window shows how much you really have.</p></article>
   </div>
   <h3 class="also">Also in the box</h3>
-  <ul class="plain">
+  <ul class="plain two">
     <li>A mixer with buses, sends and sidechains.</li>
     <li>Automation for volume, pan and plug-in knobs.</li>
     <li>A piano roll with scale and quantize tools.</li>
@@ -63,40 +84,43 @@
   </ul>
 </section>
 
-<section id="decide">
+<section id="decide" class="quiet">
   <h2>How we decide</h2>
   <p class="lead">For the curious: how changes get into transit.</p>
-  <div class="cards">
-    <article class="card"><h3>Measure first</h3><p>We change a setting only after measuring it on real hardware, and we <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">publish the numbers</a>.</p></article>
-    <article class="card"><h3>Mistakes become checks</h3><p>When a bug slips through, we write <a href="https://github.com/transit-audio/transit/tree/main/docs/escapes">what happened</a> and add a check so it cannot happen again.</p></article>
-    <article class="card"><h3>Decisions are written down</h3><p>Every design change gets a <a href="https://github.com/transit-audio/transit/tree/main/docs/adr">short written decision</a> with its evidence, and every change is reviewed by someone trying to break it.</p></article>
-    <article class="card"><h3>Known problems are public</h3><p>What we know is broken is in the <a href="https://github.com/transit-audio/transit/blob/main/docs/known-issues/README.md">known issues list</a>.</p></article>
+  <div class="grid2">
+    <div><h3>Measure first</h3><p>We change a setting only after measuring it on real hardware, and we <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">publish the numbers</a>.</p></div>
+    <div><h3>Mistakes become checks</h3><p>When a bug slips through, we write <a href="https://github.com/transit-audio/transit/tree/main/docs/escapes">what happened</a> and add a check so it cannot happen again.</p></div>
+    <div><h3>Decisions are written down</h3><p>Every design change gets a <a href="https://github.com/transit-audio/transit/tree/main/docs/adr">short written decision</a> with its evidence, and every change is reviewed by someone trying to break it.</p></div>
+    <div><h3>Known problems are public</h3><p>What we know is broken is in the <a href="https://github.com/transit-audio/transit/blob/main/docs/known-issues/README.md">known issues list</a>.</p></div>
   </div>
 </section>
 
 <section id="screenshots">
   <h2>Screenshots</h2>
-  <figure><img src="assets/transit-arrange.png" alt="The transit arrange view" loading="lazy"><figcaption>Arrange: your tracks and clips laid out along a timeline.</figcaption></figure>
+  <div class="shots">
+  <figure class="wide"><img src="assets/transit-arrange.png" alt="The transit arrange view" loading="lazy"><figcaption>Arrange: your tracks and clips laid out along a timeline.</figcaption></figure>
   <figure><img src="assets/transit-mixer.png" alt="The transit mixer" loading="lazy"><figcaption>Mixer: a volume fader, pan and level meter for every track.</figcaption></figure>
   <figure><img src="assets/transit-pianoroll.png" alt="The transit piano roll" loading="lazy"><figcaption>Piano roll: draw and edit notes on a grid.</figcaption></figure>
   <figure><img src="assets/transit-midi.png" alt="The MIDI Mappings window" loading="lazy"><figcaption>MIDI Mappings: the list of knobs and buttons on your controller and what each one does.</figcaption></figure>
   <figure><img src="assets/transit-audio-devices.png" alt="The Audio Devices window" loading="lazy"><figcaption>Audio Devices: pick your interface and buffer size, and see how much delay you really have.</figcaption></figure>
+  </div>
 </section>
 
 <section id="join">
   <h2>Join</h2>
-  <ul class="links">
-    <li><a href="https://discord.gg/7PPUBZqA66">Discord</a> <span class="muted">chat with the people building and testing it</span></li>
-    <li><a href="https://github.com/transit-audio/transit/issues/49">Testing thread</a> <span class="muted">tell us what works and what does not on your setup</span></li>
-    <li><a href="https://github.com/transit-audio/transit/issues/new/choose">Report a problem</a> <span class="muted">tell us what you did, what happened, and which build you are running (the version is in Help &gt; About)</span></li>
-    <li><a href="https://github.com/transit-audio/transit/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22">Help wanted</a> <span class="muted">good places to start contributing</span></li>
-  </ul>
+  <div class="cta join-row">
+    <a class="btn discord" href="https://discord.gg/7PPUBZqA66"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="currentColor" d="M20.317 4.3698a19.7913 19.7913 0 00-4.8851-1.5152.0741.0741 0 00-.0785.0371c-.211.3753-.4447.8648-.6083 1.2495-1.8447-.2762-3.68-.2762-5.4868 0-.1636-.3933-.4058-.8742-.6177-1.2495a.077.077 0 00-.0785-.037 19.7363 19.7363 0 00-4.8852 1.515.0699.0699 0 00-.0321.0277C.5334 9.0458-.319 13.5799.0992 18.0578a.0824.0824 0 00.0312.0561c2.0528 1.5076 4.0413 2.4228 5.9929 3.0294a.0777.0777 0 00.0842-.0276c.4616-.6304.8731-1.2952 1.226-1.9942a.076.076 0 00-.0416-.1057c-.6528-.2476-1.2743-.5495-1.8722-.8923a.077.077 0 01-.0076-.1277c.1258-.0943.2517-.1923.3718-.2914a.0743.0743 0 01.0776-.0105c3.9278 1.7933 8.18 1.7933 12.0614 0a.0739.0739 0 01.0785.0095c.1202.099.246.1981.3728.2924a.077.077 0 01-.0066.1276 12.2986 12.2986 0 01-1.873.8914.0766.0766 0 00-.0407.1067c.3604.698.7719 1.3628 1.225 1.9932a.076.076 0 00.0842.0286c1.961-.6067 3.9495-1.5219 6.0023-3.0294a.077.077 0 00.0313-.0552c.5004-5.177-.8382-9.6739-3.5485-13.6604a.061.061 0 00-.0312-.0286zM8.02 15.3312c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9555-2.4189 2.157-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.9555 2.4189-2.1569 2.4189zm7.9748 0c-1.1825 0-2.1569-1.0857-2.1569-2.419 0-1.3332.9554-2.4189 2.1569-2.4189 1.2108 0 2.1757 1.0952 2.1568 2.419 0 1.3332-.946 2.4189-2.1568 2.4189Z"/></svg><span class="lbl">Discord<small>chat with the people building and testing it</small></span></a>
+    <a class="btn" href="https://github.com/transit-audio/transit/issues/49"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M4 5h16v11H9l-5 4z"/></svg><span class="lbl">Testing thread<small>tell us what works and what does not on your setup</small></span></a>
+    <a class="btn" href="https://github.com/transit-audio/transit/issues/new/choose"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 8v5m0 3.5v.01M10.3 3.9L2.4 17.5A2 2 0 004.1 20.5h15.8a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg><span class="lbl">Report a problem<small>tell us what you did, what happened, and which build you are running (the version is in Help &gt; About)</small></span></a>
+    <a class="btn gh" href="https://github.com/transit-audio/transit"><svg class="ico" viewBox="0 0 16 16" aria-hidden="true" focusable="false"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg><span class="lbl">GitHub<small>the source, the issues and the releases</small></span></a>
+  </div>
+  <p class="muted more"><a href="https://github.com/transit-audio/transit/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22">Help wanted</a>: good places to start contributing.</p>
 </section>
 </main>
 
 <footer>
   <p>MIT OR Apache-2.0. Forked from SoundCraft by storytold in October 2026.</p>
-  <p><a href="https://github.com/transit-audio/transit">github.com/transit-audio/transit</a></p>
+  <p><a href="https://github.com/transit-audio/transit">github.com/transit-audio/transit</a> &middot; <a href="#top">Top</a></p>
 </footer>
 <script src="app.js"></script>
 </body>
