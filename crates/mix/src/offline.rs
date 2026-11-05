@@ -54,7 +54,9 @@ pub fn source_channels(s: &Session, bus: Option<BusId>) -> usize {
 /// block is placed at its render position minus its reported latency: overlapping frames are
 /// dropped on growth, and gaps are filled with silence on shrinkage. The live compensation
 /// crossfade and device restart fades are retained; only this timeline splice differs. The
-/// engine works on a snapshot of the session taken in [`RangeRender::try_new`].
+/// engine works on a snapshot of the session taken in [`RangeRender::try_new`]. Before the first
+/// printed frame the adopted chain runs in for [`RUN_IN_SECONDS`] with the transport stopped at
+/// the range start (ADR 0038, #332 amendment), so a print starts from a settled chain.
 pub struct RangeRender {
     pub(crate) eng: MixEngine,
     bus: Option<BusId>,
@@ -175,9 +177,12 @@ impl RangeRender {
         }
         let nch = source_channels(s, bus);
         let width = nch + sinks.iter().map(|k| k.dest.len()).sum::<usize>();
-        let tmp = vec![vec![0.0f32; eng.max_block()]; width];
+        let mut tmp = vec![vec![0.0f32; eng.max_block()]; width];
         let silence = tmp.clone();
         let len = if nch == 0 || adoption != Adoption::Adopted { 0 } else { usize::try_from(range.len().max(0)).unwrap_or(0) };
+        if len > 0 {
+            run_in(&mut eng, bus, range.start, &mut tmp);
+        }
         Ok(RangeRender {
             eng,
             bus,
@@ -253,6 +258,38 @@ impl RangeRender {
         self.written += n;
         Some((&self.tmp, n))
     }
+}
+
+/// How long an offline chain runs with the transport stopped before its first printed frame
+/// (#332, ADR 0038's amendment), in seconds of audio. Tests that compare a print with live play
+/// run the live engine stopped for as long first: that is live play from a stop.
+pub const RUN_IN_SECONDS: u32 = 4;
+
+/// Runs a freshly adopted offline chain as the live player runs one between its creation and
+/// play: transport stopped at `pos` (no clips, the lanes' values at `pos` delivered), every
+/// insert processing (none suspends, as with an editor open). A live chain has been running
+/// long before play is pressed, so whatever a plug-in does on its first blocks (an activation
+/// fade, smoothing toward the values the host delivers after its stored state, automation
+/// applied over a stored value) has settled by then; an offline chain is built for the render,
+/// and without this those first blocks are the first frames of the print. The output is
+/// discarded and the chain's delay lines hold only silence, so the print starts as live play
+/// from a stop at `pos` does (its first block is a locate). Nothing here allocates.
+fn run_in(eng: &mut MixEngine, bus: Option<BusId>, pos: Samples, tmp: &mut [Vec<f32>]) {
+    let total = eng.active().target.sample_rate as usize * RUN_IN_SECONDS as usize;
+    let block = eng.max_block().max(1);
+    eng.monitor_only = true;
+    eng.no_suspend = true;
+    let mut done = 0;
+    while done < total {
+        let n = block.min(total - done);
+        match bus {
+            Some(_) => eng.render_active(pos, n, &mut []),
+            None => eng.render_active(pos, n, tmp),
+        }
+        done += n;
+    }
+    eng.monitor_only = false;
+    eng.no_suspend = false;
 }
 
 /// Render one track through its inserts (pre-fader) — Commit / Freeze.

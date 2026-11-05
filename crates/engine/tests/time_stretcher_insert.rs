@@ -1,8 +1,8 @@
 //! The Time Stretcher insert (#199) through the engine: added and edited with the mix commands (a
 //! quality restart, the pitch, freeze), its parameters survive a save and load (the session file's
 //! JSON) unchanged and the loaded session renders the same bits; and the live path (the realtime
-//! mix engine adopting the compiled plan, in host blocks of 64 and of 512 frames) puts out what the
-//! offline bounce does, delayed by the plan's latency, bit for bit. A built-in's state is its
+//! mix engine adopting the compiled plan, in host blocks of 64 and of 512 frames, played from a stop)
+//! puts out what the offline bounce does, delayed by the plan's latency, bit for bit. A built-in's state is its
 //! parameters; the quality set on load applies at the first block (no fade), so renders agree.
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
@@ -10,7 +10,9 @@ use serde_json::json;
 use std::sync::Arc;
 use transit_engine::Engine;
 use transit_midi::{Note, Sequence};
-use transit_mix::{Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RenderTarget, create_instance};
+use transit_mix::{
+    Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanGeneration, PlanLimits, RUN_IN_SECONDS, RenderTarget, create_instance,
+};
 use transit_model::{ChannelFormat, Clip, Insert, Session, TrackKind};
 use transit_time::Range;
 
@@ -60,7 +62,9 @@ fn the_time_stretchers_parameters_round_trip_through_a_saved_session_and_render_
 }
 
 /// Renders `frames` of `s` through the realtime mix engine in host blocks of `block`, as the audio
-/// callback does; returns the output and the plan's latency.
+/// callback does, played from a stop: the chain first runs [`RUN_IN_SECONDS`] with the transport
+/// stopped at 0, as the player runs it before play and as a print's run-in does (ADR 0038, #332
+/// amendment). Returns the output and the plan's latency.
 fn live(s: &Session, frames: usize, block: usize) -> (Vec<Vec<f32>>, usize) {
     MixEngine::force_serial(true);
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: SR, max_block: block as u32, out_channels: 0, in_channels: 0 };
@@ -73,6 +77,17 @@ fn live(s: &Session, frames: usize, block: usize) -> (Vec<Vec<f32>>, usize) {
     let ch = transit_mix::main_channels(s);
     let mut out = vec![Vec::with_capacity(frames); ch];
     let mut b = vec![vec![0.0f32; block]; ch];
+    mix.monitor_only = true;
+    mix.no_suspend = true;
+    let run_in = SR as usize * RUN_IN_SECONDS as usize;
+    let mut done = 0;
+    while done < run_in {
+        let n = block.min(run_in - done);
+        mix.render_active(0, n, &mut b);
+        done += n;
+    }
+    mix.monitor_only = false;
+    mix.no_suspend = false;
     let mut pos = 0usize;
     while pos < frames {
         let n = block.min(frames - pos);

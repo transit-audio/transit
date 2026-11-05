@@ -17,7 +17,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 use transit_dsp::HeaderAction;
 use transit_mix::INSTRUMENT_SLOT;
-use transit_model::{SourceKind, TrackId};
+use transit_model::{Session, SourceKind, TrackId};
 use transit_playback::MapMsg;
 use transit_time::Range;
 
@@ -79,6 +79,28 @@ fn controller_probe(app: &StudioApp, track: TrackId) -> Option<i64> {
     text[at..].chars().take_while(|c| c.is_ascii_digit() || *c == '-').collect::<String>().parse().ok()
 }
 
+/// The first block of a freshly compiled chain for `s`, with no run-in: the block in which a
+/// fresh instance receives the values the session holds. `track` plays at unity, panned as a
+/// print pans it, so the main mix's first channel is the instrument's output unchanged.
+fn fresh_first_block(s: &Session, track: TrackId) -> Vec<Vec<f32>> {
+    use transit_mix::{DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanLimits, RenderTarget, SlotGen};
+    let mut s = s.clone();
+    let t = s.track_mut(track).unwrap();
+    t.mixer.volume_db = 0.0;
+    t.mixer.pan = vec![-1.0, 1.0];
+    let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: 512, out_channels: 0, in_channels: 0 };
+    let mut comp = PlanCompiler::new(target, PlanLimits::default());
+    let mut make = |spec: &InstanceSpec, _: SlotGen| transit_mix::create_instance(&spec.id, spec.state.as_deref(), 48_000.0, 512, spec.ch);
+    let mut env = comp.compile(std::sync::Arc::new(s), comp.active(), comp.active().checked_next().unwrap(), &mut make).unwrap();
+    let mut mix = MixEngine::realtime(target);
+    assert_eq!(mix.adopt_plan(&mut env), transit_mix::Adoption::Adopted);
+    comp.reclaim(env);
+    let mut out = vec![vec![0.0; 512]; 2];
+    mix.render_active(0, 512, &mut out);
+    drop(mix.into_retired());
+    out
+}
+
 /// The parameter points the events synth received in the first block of `out`: (offset, id,
 /// value in millionths).
 fn points(out: &[Vec<f32>]) -> Vec<(u32, u32, i64)> {
@@ -129,9 +151,14 @@ fn a_learned_controller_moves_a_hosted_instruments_parameter_in_the_plug_in_and_
     let epoch = app.player.as_ref().unwrap().midi_map_epoch();
     app.midi_learn_apply((epoch, vec![MapMsg::Move { epoch, index: 0, value: 0.8, seq: 1 }]), 1.0);
     assert_eq!(ins(&app).params.get(PROBE), Some(&0.8), "the move reaches the session (status: {})", app.status);
-    // The plug-in's processor receives the value with its own id, normalized.
+    // The plug-in's processor receives the value with its own id, normalized: a fresh instance
+    // gets it in its first block.
+    let first = fresh_first_block(app.engine.session(), tr);
+    assert!(points(&first).contains(&(0, 5, 800_000)), "the processor got ParamID 5 = 0.8: {:?}", points(&first));
+    // A print starts from a settled chain (ADR 0038, #332 amendment): its instance got the value
+    // in the run-in, before frame zero, so the first printed block carries no parameter point.
     let out = transit_mix::render_track_pre_fader(app.engine.session(), tr, Range::new(0, 512));
-    assert!(points(&out).contains(&(0, 5, 800_000)), "the processor got ParamID 5 = 0.8: {:?}", points(&out));
+    assert_eq!(points(&out), Vec::new(), "the print's instance already held ParamID 5 = 0.8");
     // The player's running instance gets it too: its controller (the editor's side) ends with
     // 0.8. (That the frame loop tells the controller between saves, not only a save's handover,
     // is vst3-host's `a_host_set_value_reaches_the_processor_and_then_the_editor`.)

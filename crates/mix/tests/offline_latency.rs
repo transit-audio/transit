@@ -7,7 +7,9 @@ mod fixture;
 use fixture::{IMPULSES, LEN, positions, session};
 use std::sync::Arc;
 use transit_audio_io::AudioBuffer;
-use transit_mix::{Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanLimits, RangeRender, RenderTarget, create_instance};
+use transit_mix::{
+    Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanLimits, RUN_IN_SECONDS, RangeRender, RenderTarget, create_instance,
+};
 use transit_model::{ChannelFormat, IoMap, Route, SendSlot, Session, SourceAudio, SourceId};
 use transit_time::Range;
 
@@ -30,8 +32,12 @@ fn changing_latency_keeps_both_impulse_tracks_on_the_timeline() {
                 // These are its deterministic effect offsets, measured before the offline fix
                 // after subtracting the old renderer's erroneous 138-frame shift. Do not "fix"
                 // that intentional modulation. Vintage Digital and the compressor are exact.
+                // Starting in Dirty Tape, the print starts from a settled chain (ADR 0038, #332
+                // amendment): the wow has run through the run-in's four seconds before frame
+                // zero, as a live chain's has before play, so the first impulse lands at 1078
+                // (a fresh chain's first second put it at 1128).
                 let left = if device == "texture" && values[0] == 0.0 {
-                    [1128, 4096, 8192]
+                    [1078, 4096, 8192]
                 } else if device == "texture" && values[1] == 0.0 {
                     match (change, block) {
                         (2048, _) => [1024, 4203, 8314],
@@ -52,6 +58,8 @@ fn changing_latency_keeps_both_impulse_tracks_on_the_timeline() {
 
 /// Independent oracle: timestamp every live sample with that block's latency, keep the first
 /// sample for each output position, and leave missing positions zero. No streaming skip state.
+/// Live play starts from a stop: the chain first runs [`RUN_IN_SECONDS`] with the transport
+/// stopped at 0, in the offline run-in's block partition (ADR 0038, #332 amendment).
 fn live_reference(s: &Session, block: usize) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     MixEngine::force_serial(true);
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: block as u32, out_channels: 0, in_channels: 0 };
@@ -66,6 +74,17 @@ fn live_reference(s: &Session, block: usize) -> (Vec<Vec<f32>>, Vec<Vec<f32>>) {
     let mut next = 0;
     let mut initial = 0;
     let mut out = vec![vec![0.0; block]; 2];
+    mix.monitor_only = true;
+    mix.no_suspend = true;
+    let run_in = 48_000 * RUN_IN_SECONDS as usize;
+    let mut done = 0;
+    while done < run_in {
+        let n = block.min(run_in - done);
+        mix.render_active(0, n, &mut out);
+        done += n;
+    }
+    mix.monitor_only = false;
+    mix.no_suspend = false;
     for pos in (0..LEN + 512).step_by(block) {
         mix.render_active(pos as i64, block, &mut out);
         if pos == 0 {

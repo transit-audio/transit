@@ -1,9 +1,10 @@
-//! Stored values are initial state; automation after preparation remains a move (#280).
+//! Stored values are initial state; automation after preparation remains a move (#280), and an
+//! offline print applies it to a chain already run in (ADR 0038, #332 amendment).
 #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
 
 use std::sync::Arc;
 use transit_audio_io::AudioBuffer;
-use transit_mix::{Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanLimits, RenderTarget};
+use transit_mix::{Adoption, DeviceGeneration, InstanceSpec, MixEngine, PlanCompiler, PlanLimits, RUN_IN_SECONDS, RenderTarget};
 use transit_model::{AutoParam, ChannelFormat, Clip, Insert, Session, SourceAudio, SourceId, TrackKind};
 use transit_rt::testing::{AllocStats, CountingAlloc, measure};
 use transit_time::Range;
@@ -31,10 +32,12 @@ fn scene_frames(frames: usize) -> Session {
 }
 
 fn live(s: &Session, initialized_reference: bool) -> Vec<Vec<f32>> {
-    live_frames(s, initialized_reference, BLOCK)
+    live_frames(s, initialized_reference, BLOCK, 0)
 }
 
-fn live_frames(s: &Session, initialized_reference: bool, frames: usize) -> Vec<Vec<f32>> {
+/// Renders `frames` of `s` from 0 through a freshly adopted live engine, after `stopped` frames
+/// with the transport stopped at 0 (none: the fresh chain's first block is the first frame).
+fn live_frames(s: &Session, initialized_reference: bool, frames: usize, stopped: usize) -> Vec<Vec<f32>> {
     MixEngine::force_serial(true);
     let target = RenderTarget { device: DeviceGeneration(1), sample_rate: 48_000, max_block: BLOCK as u32, out_channels: 0, in_channels: 0 };
     let mut compiler = PlanCompiler::new(target, PlanLimits::default());
@@ -53,6 +56,8 @@ fn live_frames(s: &Session, initialized_reference: bool, frames: usize) -> Vec<V
     // Creation, prepare and initial parameter snapping run on the compiler/control thread.
     // Measure adoption and the very first render, with no warm-up block.
     let mut out = vec![vec![0.0; BLOCK]; 2];
+    engine.monitor_only = stopped > 0;
+    engine.no_suspend = stopped > 0;
     let (adoption, stats) = measure(|| {
         let adoption = engine.adopt_plan(&mut env);
         engine.render_active(0, BLOCK, &mut out);
@@ -61,6 +66,16 @@ fn live_frames(s: &Session, initialized_reference: bool, frames: usize) -> Vec<V
     assert_eq!(adoption, Adoption::Adopted);
     assert_eq!(stats, AllocStats::default(), "adoption and first block allocate and free nothing");
     compiler.reclaim(env);
+    if stopped > 0 {
+        // Live play from a stop: the chain has run, transport stopped, since it was built; the
+        // offline run-in mirrors this in the same block partition.
+        for _ in (BLOCK..stopped).step_by(BLOCK) {
+            engine.render_active(0, BLOCK, &mut out);
+        }
+        engine.monitor_only = false;
+        engine.no_suspend = false;
+        engine.render_active(0, BLOCK, &mut out);
+    }
     let mut result = out.clone();
     for pos in (BLOCK..frames).step_by(BLOCK) {
         engine.render_active(pos as i64, BLOCK, &mut out);
@@ -93,11 +108,13 @@ fn fresh_live_filter_starts_at_its_stored_cutoff() {
     assert_initial_state(&live(&s, false), &live(&s, true));
 }
 
-/// Independent DSP reference: the stored value is prepared, then the block-start automation
-/// values are ordinary moves. Comparing every sample catches both a lost lane and a snapped ramp.
+/// Independent DSP reference for a settled chain: the lane's value at the range start is
+/// prepared (the run-in delivered it and its smoother settled before frame zero), then the
+/// block-start automation values are ordinary moves. Comparing every sample catches both a lost
+/// lane and a snapped ramp.
 fn automated_reference(values: &[f32]) -> Vec<Vec<f32>> {
     let mut filter = transit_dsp::create("filter").unwrap();
-    filter.set_param("cutoff", 300.0);
+    filter.set_param("cutoff", values[0]);
     filter.prepare(48_000.0, BLOCK, 2);
     let mut result = vec![Vec::new(); 2];
     for &value in values {
@@ -126,7 +143,8 @@ fn time_zero_points_and_ramps_are_applied_after_preparation() {
         }
         let expected = automated_reference(&values);
         assert_eq!(transit_mix::render_range(&s, Range::new(0, frames as i64), BLOCK), expected);
-        assert_eq!(live_frames(&s, false, frames), expected);
+        let run_in = 48_000 * RUN_IN_SECONDS as usize;
+        assert_eq!(live_frames(&s, false, frames, run_in), expected);
         if values[0] == 300.0 && values[1] != 300.0 {
             let steady = automated_reference(&[300.0; 8]);
             assert_eq!(&expected[0][..BLOCK], &steady[0][..BLOCK]);
