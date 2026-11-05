@@ -55,8 +55,9 @@ Both run a chain of MIDI effects before the instrument, in order, each one bypas
   - a release the chain's input cannot take is refused to the mix, which retries it next block;
   - a release the instrument's own queue refuses is held by the host (up to 64, `MIDI_FX_RETRY`;
     past that it is lost and counted) and given again at offset 0 of the next block;
-  - a release a full carry cannot hold takes the place of a carried non-release (a carry of
-    releases alone delivers it at the block's last offset);
+  - a release a full carry cannot hold evicts its own carried note-on, else the newest carried
+    note-on, else the first carried non-release; a carry of releases alone delivers it at the
+    block's last offset (amendment 2026-11-05);
   - a full effect output or carry merge evicts pending note-ons for releases (the #278 rule below).
 
   Transpose and Velocity reach none of the last two: each writes one event per event it takes and
@@ -158,7 +159,7 @@ sacrificed. The recovery then adds its own direct events, so the worst case per 
 is 64 retried releases + 512 delivered events + 256 explicit note-offs + 112 safety controllers = 944
 events, which fits the instrument's 1,024-event queues. Within the slot's output buffer the invariant
 is that every note-on it emits is followed by its note-off within the same or a later block, overflow
-or not (the carry path has a narrower guarantee, see #281); on release-only
+or not (the carry path holds the same ordering since the 2026-11-05 amendment, #281); on release-only
 saturation the host's explicit offs supply that termination (`released_on_overflow`). This assumes
 the effect keeps
 its pairing contract and the instrument accepts its releases (the existing downstream retry limit
@@ -170,3 +171,7 @@ Known limits: a stray release (one whose On was already evicted) still evicts an
 and the 256-entry table admission guard turns any leak in the sounding-note table into refused
 Ons (silence until an edit or Stop). No leak path is known: the mix converts CC 120 and 123 into
 per-note offs, and offs are never refused.
+
+## Amendment 2026-11-05: the carry's own-note eviction (#281, PR #337)
+
+When a full carry cannot hold a release, the release evicts its own carried note-on when there is one (the newest carried on with the same channel and key, or the same voice id when the release carries one; both go, since the note never sounded), otherwise the newest carried note-on of any key (that note's later off then arrives without an on, which every hosted and built-in instrument ignores), otherwise the first carried non-release; a carry of releases alone delivers the release at the block's last offset. The carry path now shares the output buffer's guarantee: no off reaches the instrument before its own on. The newest match is the own on because, within a stage, the carry keeps emission order, so a later on with the same key cannot sit before an earlier one. The rule is guarded by `a_release_in_a_full_carry_never_puts_its_off_before_its_on`, `the_fuzz_seed_71271_through_two_delays_never_delivers_an_off_before_its_on` and `a_same_key_release_without_a_voice_id_evicts_its_newest_on_not_the_oldest`. This was a community contribution (PR #337), with a one-word fix-up by the maintainer (the lookup takes the newest match, not the oldest).
