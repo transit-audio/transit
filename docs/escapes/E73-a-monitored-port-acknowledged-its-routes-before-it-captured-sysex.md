@@ -14,7 +14,11 @@
    after its update loop. The same loop handles the port's route update and stores its
    acknowledgment (`applied`), which `Native::status` reports as the port's routes. A thread that
    waited for the routes could therefore deliver a SysEx after the acknowledgment and before the
-   switch. The `F0` then read capture off and the SysEx was never captured. The test waits for
+   switch. The `F0` then read capture off and the SysEx was never captured. Two orderings open
+   the window: the monitor already on when the port is attached, with the routes acknowledged in
+   the same step (the CI test's case), and the monitor switched on after the attach step, with the
+   routes acknowledged in a later step. In both, `applied` was stored before the switch of that
+   step. A review of the first fix found the second ordering. The test waits for
    Stop, the SysEx and sensing together. Stop and sensing arrived, the SysEx never did, and the
    guard ended the wait. The window is the rest of one worker step, microseconds on a quiet host,
    so it is hit only when the worker is preempted right after the acknowledgment while the test
@@ -35,12 +39,19 @@
    worker published it before the capture switch. E59 made the test wait for every effect it
    asserts. That rule covers what a test waits for afterwards, not what the acknowledgment before
    its deliveries promises.
-4. **Regression test and fix.** `player::ingress::tests::sysex_sent_once_the_routes_are_acknowledged_reaches_the_monitor`
-   delivers a SysEx from a test hook (`Pump::after_routes_applied`, test builds only) the moment
-   the worker stores the acknowledgment, then steps the worker and expects the SysEx in the
-   monitor. On 7a746a3c it fails deterministically ("the SysEx was not captured: []"); with the fix
-   it passes. The fix: a port that arrives while the monitor is on switches its capture on as it
-   is attached, before any route update for it can be acknowledged. With the fix and the 50 ms
+4. **Regression test and fix.** Two tests in `player::ingress::tests`, one per ordering, deliver a
+   SysEx from a test hook (`Pump::after_routes_applied`, test builds only) the moment the worker
+   stores the acknowledgment, then step the worker and expect the SysEx in the monitor:
+   `sysex_sent_once_the_routes_are_acknowledged_reaches_the_monitor` (monitor on at the attach)
+   and
+   `sysex_sent_once_the_routes_are_acknowledged_reaches_a_monitor_switched_on_between_the_attach_and_the_routes`.
+   Each fails deterministically without its part of the fix ("the SysEx was not captured: []"):
+   the first on 7a746a3c, the second on the first fix alone. With the fix both pass. The fix
+   switches capture on in two places, with the same wait-free call as the per-step switch. A port
+   that arrives while the monitor is on switches capture on as it is attached. A route update
+   switches it on before it stores `applied` if the monitor is on and the port does not capture
+   yet. An acknowledgment therefore never precedes capture while the monitor is on. With the
+   attach-time fix and the 50 ms
    widening, the native test passed 20 of 20 runs. The native tests' wait helpers are now
    `#[track_caller]`, so the guard names the line that waited.
 5. **Gate class.** A worker's acknowledgment is stored only after every effect it stands for, and a

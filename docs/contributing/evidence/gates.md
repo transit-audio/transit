@@ -305,9 +305,10 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   and a test waiting on another thread waits for every effect it asserts. A related hazard: two
   host origins in one process are two clocks, so stamps and readouts share one origin (E59, `../../escapes/E59-active-sensing-was-stamped-when-the-worker-looked-not-when-it-arrived.md`).
 - A worker stores an acknowledgment (a route's `applied`, a ready flag) only after every effect it
-  stands for: a test that delivers input once it sees the acknowledgment relies on all of them. The
-  regression test acts from a hook at the store, the instant after it, rather than from a thread
-  that usually loses the race (E73, `../../escapes/E73-a-monitored-port-acknowledged-its-routes-before-it-captured-sysex.md`).
+  stands for, in every order the inputs it depends on can arrive across steps: a test that delivers
+  input once it sees the acknowledgment relies on all of them. Each ordering's regression test acts
+  from a hook at the store, the instant after it, rather than from a thread that usually loses the
+  race (E73, `../../escapes/E73-a-monitored-port-acknowledged-its-routes-before-it-captured-sysex.md`).
 - A test that asserts on the order of two file modification times sets them itself
   (`File::set_modified`), never relying on the real clock between two writes: coarse file-time
   ticks (10 ms at HZ=100) make "later" equal, and a deliberate `>=` then keeps the older item

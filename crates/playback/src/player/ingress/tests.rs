@@ -102,6 +102,44 @@ fn sysex_sent_once_the_routes_are_acknowledged_reaches_the_monitor() {
     assert!(events.iter().any(|e| e.status == 0xF0 && e.sysex_len == 5), "the SysEx was not captured: {events:?}");
 }
 
+/// E73: a port attached while the monitor is off, the monitor switched on, then the port's routes
+/// acknowledged in a later step: a SysEx sent once the acknowledgment is stored is captured.
+#[test]
+fn sysex_sent_once_the_routes_are_acknowledged_reaches_a_monitor_switched_on_between_the_attach_and_the_routes() {
+    let (control, _plans) = bridge();
+    let (lane, _audio) = action_lane::pair_with_result(&control);
+    let (send, mut worker) = pump(lane);
+    let (hub, tap, _out) = monitor::Hub::new();
+    send.send(Update::Monitor(tap)).ok().unwrap();
+    let fake = Fake::default();
+    let key = fake.add_input("Switched on later");
+    let (_handle, consumer) = fake.io().open_input(&key, InputConfig::default()).unwrap();
+    send.send(Update::Input(Box::new(Input {
+        buttons: Vec::new(),
+        buttons_enabled: true,
+        id: 3,
+        mon: Mon::default(),
+        guard: storm::Guard::default(),
+        live: false,
+        consumer,
+        routes: Vec::new(),
+    })))
+    .ok()
+    .unwrap();
+    worker.step();
+    hub.set_enabled(true);
+    let applied = Arc::new(AtomicBool::new(false));
+    send.send(Update::Routes { id: 3, routes: Vec::new(), applied: Arc::clone(&applied) }).ok().unwrap();
+    let port = fake.input_port(&key).unwrap();
+    worker.after_routes_applied = Some(Box::new(move || assert!(port.deliver(0, &[0xF0, 1, 2, 3, 0xF7]))));
+    worker.step();
+    assert!(applied.load(Ordering::Acquire));
+    worker.step();
+    let mut events = Vec::new();
+    hub.drain(&mut events, 100);
+    assert!(events.iter().any(|e| e.status == 0xF0 && e.sysex_len == 5), "the SysEx was not captured: {events:?}");
+}
+
 fn monitored(enabled: bool) -> (monitor::Hub, Pump, Fake, transit_midi_io::PortKey, impl Sized) {
     monitored_with(enabled, InputConfig::default())
 }

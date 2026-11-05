@@ -722,6 +722,11 @@ impl Pump {
                             input.guard.reset();
                         }
                         input.routes = routes;
+                        // The acknowledgment stands for a port the monitor captures from, also when
+                        // the monitor was switched on after the port was attached (E73).
+                        if self.monitor.as_ref().is_some_and(Tap::enabled) && !input.mon.capturing {
+                            input.mon.set_capture(true, &mut input.consumer);
+                        }
                         applied.store(true, Ordering::Release);
                         #[cfg(test)]
                         if let Some(hook) = &mut self.after_routes_applied {
