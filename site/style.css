@@ -25,3 +25,7 @@ figure{margin:0 0 28px}
 figure img{border:1px solid var(--line);border-radius:8px;width:100%}
 figcaption{color:var(--muted);font-size:.9rem;margin-top:8px}
 footer{padding-top:24px;padding-bottom:48px;border-top:1px solid var(--line);color:var(--muted);font-size:.9rem;text-align:center}
+.lead{color:var(--muted);max-width:70ch}
+.sub{margin:-12px 0 24px;font-size:1rem}
+.plain{margin:16px 0;padding-left:22px}
+.also{margin-top:28px}

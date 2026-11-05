@@ -3,11 +3,11 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>transit: an open-source DAW in Rust</title>
-<meta name="description" content="An open-source DAW in Rust. Cubase bones, Ableton manners. Native ASIO, measurable latency, plug-ins that cannot freeze the window.">
+<title>transit: record, edit and mix music</title>
+<meta name="description" content="Record, edit and mix music on Windows, Mac and Linux. Free and open source. Early software that you can download and try today.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="transit: an open-source DAW in Rust">
-<meta property="og:description" content="Cubase bones, Ableton manners.">
+<meta property="og:title" content="transit: record, edit and mix music">
+<meta property="og:description" content="Record, edit and mix music on Windows, Mac and Linux. Free and open source.">
 <meta property="og:image" content="https://raw.githubusercontent.com/transit-audio/transit/main/assets/brand/social-preview-1280x640.png">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="assets/transit-icon-dark-1024.png">
@@ -19,7 +19,8 @@
     <source srcset="assets/transit-wordmark-graphite.svg" media="(prefers-color-scheme: light)">
     <img class="wordmark" src="assets/transit-wordmark-white.svg" alt="transit" width="420" height="120">
   </picture>
-  <p class="tagline">An open-source DAW in Rust. Cubase bones, Ableton manners.</p>
+  <p class="tagline">Record, edit and mix music on Windows, Mac and Linux. Free and open source.</p>
+  <p class="sub muted">Cubase bones, Ableton manners.</p>
   <p class="cta">
     <a class="btn primary" href="#downloads">Download</a>
     <a class="btn" href="https://github.com/transit-audio/transit">GitHub</a>
@@ -29,45 +30,65 @@
 <main>
 <section id="downloads">
   <h2>Downloads</h2>
+  <p class="lead">transit is free. It is also early software (alpha): it changes every week, and some things are rough or missing. Back up anything you care about, and tell us what breaks on the <a href="https://discord.gg/7PPUBZqA66">Discord</a> or in the <a href="https://github.com/transit-audio/transit/issues/49">testing thread</a>.</p>
   <p id="release-meta" class="muted">Loading the latest release...</p>
   <ul id="assets" class="assets"></ul>
   <noscript><p><a href="https://github.com/transit-audio/transit/releases/latest">Latest release on GitHub</a></p></noscript>
+  <ul class="plain">
+    <li><strong>Windows:</strong> pick the installer. If you would rather not install anything, the zip runs from any folder.</li>
+    <li><strong>Mac:</strong> pick the DMG (for Macs with an Apple chip). Open it and drag transit to Applications.</li>
+    <li><strong>Linux:</strong> the AppImage runs on almost any system. The .deb is for Ubuntu and Debian, the .rpm is for Fedora, and the tar.gz works everywhere else.</li>
+  </ul>
+  <p class="lead">The downloads are not signed yet, so Windows and macOS may warn you the first time. The <a href="https://github.com/transit-audio/transit#downloads">README</a> shows how to open it anyway.</p>
+  <p class="lead"><strong>First start:</strong> open Audio Devices, pick your audio interface, and set the buffer size. transit measures its own latency and shows you the number.</p>
 </section>
 
 <section id="why">
   <h2>Why transit</h2>
   <div class="cards">
-    <article class="card"><h3>Native ASIO</h3><p>Talks to your driver directly, without the Steinberg SDK.</p></article>
-    <article class="card"><h3>Latency you can measure</h3><p>Round-trip numbers in the app, verified against the driver.</p></article>
-    <article class="card"><h3>Plug-ins stay in their lane</h3><p>Plug-ins load on their own thread and cannot freeze the window.</p></article>
-    <article class="card"><h3>Familiar ergonomics</h3><p>Ableton and Logic ergonomics on a measured engine.</p></article>
+    <article class="card"><h3>Record and pick your best take</h3><p>Record a part again and again. Every take stacks up in its own lane, so you choose the one that plays. Bounce in Place turns a track into audio when you are done.</p></article>
+    <article class="card"><h3>Use the plug-ins you own</h3><p>Plays CLAP and VST3 plug-ins. Each one loads on its own, so a slow or stuck plug-in cannot freeze the window.</p></article>
+    <article class="card"><h3>Instruments and effects included</h3><p>Comes with synths such as the Macro Oscillator, Resonator and Modal Voice, a sampler, plus compressor, EQ, reverb and more.</p></article>
+    <article class="card"><h3>Low delay, and it shows the number</h3><p>On Windows, transit talks to your audio interface directly for low delay, and the Audio Devices window shows how much you really have.</p></article>
   </div>
+  <h3 class="also">Also in the box</h3>
+  <ul class="plain">
+    <li>A mixer with buses, sends and sidechains.</li>
+    <li>Automation for volume, pan and plug-in knobs.</li>
+    <li>A piano roll with scale and quantize tools.</li>
+    <li>MIDI controllers that learn: move a knob, and it maps to what you picked.</li>
+    <li>Plays hardware synths and records them.</li>
+    <li>Export to WAV, AIFF and FLAC.</li>
+    <li>Runs on Linux too.</li>
+  </ul>
 </section>
 
 <section id="decide">
   <h2>How we decide</h2>
+  <p class="lead">For the curious: how changes get into transit.</p>
   <div class="cards">
-    <article class="card"><h3>Measure first</h3><p>A default changes only after a measurement on the reference hardware, recorded in the <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">benchmark index</a>.</p></article>
-    <article class="card"><h3>Escapes become gates</h3><p>Every defect that gets past a gate becomes an <a href="https://github.com/transit-audio/transit/tree/main/docs/escapes">escape record</a> naming the gate that now catches it.</p></article>
-    <article class="card"><h3>ADRs cite evidence</h3><p>Every design change is an <a href="https://github.com/transit-audio/transit/tree/main/docs/adr">ADR</a>, and every merge gets a refutation review that tries to break it.</p></article>
-    <article class="card"><h3>Known issues are public</h3><p>What we know is broken is listed in the <a href="https://github.com/transit-audio/transit/blob/main/docs/known-issues/README.md">known issues</a>.</p></article>
+    <article class="card"><h3>Measure first</h3><p>We change a setting only after measuring it on real hardware, and we <a href="https://github.com/transit-audio/transit/blob/main/docs/benchmarks/README.md">publish the numbers</a>.</p></article>
+    <article class="card"><h3>Mistakes become checks</h3><p>When a bug slips through, we write <a href="https://github.com/transit-audio/transit/tree/main/docs/escapes">what happened</a> and add a check so it cannot happen again.</p></article>
+    <article class="card"><h3>Decisions are written down</h3><p>Every design change gets a <a href="https://github.com/transit-audio/transit/tree/main/docs/adr">short written decision</a> with its evidence, and every change is reviewed by someone trying to break it.</p></article>
+    <article class="card"><h3>Known problems are public</h3><p>What we know is broken is in the <a href="https://github.com/transit-audio/transit/blob/main/docs/known-issues/README.md">known issues list</a>.</p></article>
   </div>
 </section>
 
 <section id="screenshots">
   <h2>Screenshots</h2>
-  <figure><img src="assets/transit-arrange.png" alt="The transit arrange view" loading="lazy"><figcaption>Arrange: clips, tracks and the timeline.</figcaption></figure>
-  <figure><img src="assets/transit-mixer.png" alt="The transit mixer" loading="lazy"><figcaption>Mixer: channel strips, sends and metering.</figcaption></figure>
-  <figure><img src="assets/transit-pianoroll.png" alt="The transit piano roll" loading="lazy"><figcaption>Piano roll: MIDI editing with a grid that stays out of the way.</figcaption></figure>
-  <figure><img src="assets/transit-midi.png" alt="The MIDI Mappings window" loading="lazy"><figcaption>MIDI Mappings: every mapping with the plug-in's own parameter names.</figcaption></figure>
-  <figure><img src="assets/transit-audio-devices.png" alt="The Audio Devices window" loading="lazy"><figcaption>Audio Devices: native ASIO, measured latency and a diagnostics report.</figcaption></figure>
+  <figure><img src="assets/transit-arrange.png" alt="The transit arrange view" loading="lazy"><figcaption>Arrange: your tracks and clips laid out along a timeline.</figcaption></figure>
+  <figure><img src="assets/transit-mixer.png" alt="The transit mixer" loading="lazy"><figcaption>Mixer: a volume fader, pan and level meter for every track.</figcaption></figure>
+  <figure><img src="assets/transit-pianoroll.png" alt="The transit piano roll" loading="lazy"><figcaption>Piano roll: draw and edit notes on a grid.</figcaption></figure>
+  <figure><img src="assets/transit-midi.png" alt="The MIDI Mappings window" loading="lazy"><figcaption>MIDI Mappings: the list of knobs and buttons on your controller and what each one does.</figcaption></figure>
+  <figure><img src="assets/transit-audio-devices.png" alt="The Audio Devices window" loading="lazy"><figcaption>Audio Devices: pick your interface and buffer size, and see how much delay you really have.</figcaption></figure>
 </section>
 
 <section id="join">
   <h2>Join</h2>
   <ul class="links">
     <li><a href="https://discord.gg/7PPUBZqA66">Discord</a> <span class="muted">chat with the people building and testing it</span></li>
-    <li><a href="https://github.com/transit-audio/transit/issues/49">Testing thread</a> <span class="muted">report what works and what does not on your rig</span></li>
+    <li><a href="https://github.com/transit-audio/transit/issues/49">Testing thread</a> <span class="muted">tell us what works and what does not on your setup</span></li>
+    <li><a href="https://github.com/transit-audio/transit/issues/new/choose">Report a problem</a> <span class="muted">tell us what you did, what happened, and which build you are running (the version is in Help &gt; About)</span></li>
     <li><a href="https://github.com/transit-audio/transit/issues?q=is%3Aissue+is%3Aopen+label%3A%22help+wanted%22">Help wanted</a> <span class="muted">good places to start contributing</span></li>
   </ul>
 </section>
