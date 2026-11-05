@@ -1,4 +1,4 @@
-# E72: a far deadline let a host stall skip an unheld strip (draft)
+# E72: a far deadline let a host stall skip an unheld strip
 
 1. **Failure.** The WSL Linux gate of chain ED (dcd4a36d, #332 part 2, 2026-11-04) failed
    `crates/mix/tests/sched_equivalence.rs::the_graph_equals_the_muted_serial_render_under_seeded_stall_schedules`,
@@ -64,12 +64,12 @@
    case (the worker wake) and narrowed: "far" stops a wake from being lost, but it does not make
    an outcome deterministic.
 6. **Protocol change, owner, blind spot.** The coordinator owns the E49 rule in
-   `docs/contributing/evidence/gates.md`. Proposed: a bullet next to E66's, and in
-   `cargo xtask timing` rule (e), `far-deadline` stops satisfying a test that asserts a per-strip
-   outcome. Such a test arms the deterministic deadline instead. Not done here: the scan would need
-   the outcome assertions' provenance, and the trial in E70 shows how a function-local check
-   over-rejects. Blind spot: other pool tests assert per-strip outcomes under a 30 s or 60 s strip
-   deadline (`strip_pool/tail_tests.rs`, `render_pool.rs` tests, `crates/engine/tests/modulator_insert.rs`).
-   They belong to the same class and need an audit. ADR 0029 section 8's wording ("a deadline
-   reached once only the held strips are unresolved") is still accurate. Its next revision should
-   add "and no clock deadline otherwise", and that needs a judging round.
+   `docs/contributing/evidence/gates.md`. This landing adds the narrowed rule as a bullet next
+   to E66's, and ADR 0029 section 8 now says the deterministic deadline leaves no clock deadline
+   otherwise. Open items, tracked as a follow-up issue: in `cargo xtask timing` rule (e),
+   `far-deadline` stops satisfying a test that asserts a per-strip outcome (such a test arms the
+   deterministic deadline instead; the scan needs the outcome assertions' provenance, and the
+   trial in E70 shows how a function-local check over-rejects), and an audit of the other pool
+   tests that assert per-strip outcomes under a 30 s or 60 s strip deadline
+   (`strip_pool/tail_tests.rs`, `render_pool.rs` tests, `crates/engine/tests/modulator_insert.rs`),
+   which belong to the same class.
