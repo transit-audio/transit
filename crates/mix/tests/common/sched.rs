@@ -27,10 +27,10 @@ const BASS: f32 = 0.05;
 /// is still longer than their longest state (the compressor's 10 ms release, 2 blocks; the
 /// longest delay or key alignment line, 320 samples).
 const WINDOW: usize = 8;
-/// A strips' deadline no render reaches: a strip outside the schedule is always rendered.
-const FAR: Duration = Duration::from_secs(60);
-/// A held strip's cost history: the callback never renders it inline.
-const HOUR: Duration = Duration::from_secs(3600);
+/// A held strip's cost history: longer than any deadline, the deterministic deadline's
+/// included (E72: no clock ends a block, so an hour would fit), so the callback never renders it
+/// inline.
+const NEVER_FITS: Duration = Duration::MAX;
 /// Everyone else's: the callback may render any of them inline.
 const TINY: Duration = Duration::from_nanos(1);
 
@@ -468,6 +468,46 @@ fn as_callback<R: Send + 'static>(f: impl FnOnce() -> R + Send + 'static) -> R {
     .unwrap()
 }
 
+/// A graph render's last-resort hang guard (E72): with no clock deadline a block that never ends
+/// (a worker never woken, a lost result) would hang the test, so a watchdog aborts the process
+/// when no block has finished for [`common::stall::HANG`]. A failure, never a counted skip.
+struct HangGuard {
+    blocks: Arc<AtomicUsize>,
+    done: Arc<AtomicBool>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl HangGuard {
+    fn new(what: String) -> HangGuard {
+        let (blocks, done) = (Arc::new(AtomicUsize::new(0)), Arc::new(AtomicBool::new(false)));
+        let (b, d) = (Arc::clone(&blocks), Arc::clone(&done));
+        let thread = std::thread::spawn(move || {
+            let mut dog = common::stall::Watchdog::new(b.load(Ordering::Acquire));
+            let start = Instant::now();
+            // timing: stall-bound a last-resort hang guard; no outcome depends on it
+            while !d.load(Ordering::Acquire) {
+                if dog.stalled(|| b.load(Ordering::Acquire), || start.elapsed()) && !d.load(Ordering::Acquire) {
+                    eprintln!("{what}: no block finished for {:?} (a hang); aborting", common::stall::HANG);
+                    std::process::abort();
+                }
+                // Paces the guard; `drop` unparks it at once.
+                std::thread::park_timeout(Duration::from_secs(1));
+            }
+        });
+        HangGuard { blocks, done, thread: Some(thread) }
+    }
+}
+
+impl Drop for HangGuard {
+    fn drop(&mut self) {
+        self.done.store(true, Ordering::Release);
+        if let Some(t) = self.thread.take() {
+            t.thread().unpark();
+            let _ = t.join();
+        }
+    }
+}
+
 /// Waits until no worker holds strip `s` (its late render is done; the next block retires it).
 fn wait_home(rig: &Rig, s: usize) {
     let t0 = Instant::now();
@@ -525,7 +565,12 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
     // `TRANSIT_RENDER_GRAPH`, so a developer's `=0` cannot put this run on the serial path.
     MixEngine::force_graph(true);
     rig.mix.seed_strip_costs(TINY);
-    rig.mix.set_strip_deadline(Some(FAR));
+    // The deterministic deadline from the first block (E72): no clock ends a block, so a strip
+    // outside the schedule is always rendered, however long the host stalls; a block that never
+    // ends is the hang guard's failure, not a counted skip.
+    rig.mix.hold_until_alone(&[]);
+    let guard = HangGuard::new(format!("{}, {workers} workers", top.name));
+    let progress = Arc::clone(&guard.blocks);
     let knobs: HashMap<usize, Arc<Knob>> = schedule.holds.iter().map(|h| (h.strip, top.knob(&rig, h.strip))).collect();
     let name = top.name.clone();
     let (top, schedule, change) = (top.clone(), schedule.clone(), change.cloned());
@@ -553,7 +598,7 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
             }
             for s in schedule.starting(b) {
                 knobs[&s].hold.store(true, Ordering::Release);
-                rig.mix.set_strip_cost(s, HOUR);
+                rig.mix.set_strip_cost(s, NEVER_FITS);
             }
             let held: Vec<usize> = schedule.active(b).collect();
             rig.mix.hold_until_alone(&held);
@@ -643,6 +688,7 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
             run.mutes.push(mutes);
             run.causes.push(causes);
             record(&mut run, &rig);
+            progress.fetch_add(1, Ordering::Release);
             for k in knobs.values() {
                 k.progress.fetch_add(1, Ordering::Release);
             }
@@ -655,6 +701,7 @@ pub(crate) fn graph_run(top: &Topology, workers: usize, schedule: &Schedule, cha
         }
         (rig, run, failure)
     });
+    drop(guard);
     let mut run = run;
     run.late_results = rig.mix.late_results();
     run.conflicts = rig.mix.strip_faults().map_or(0, |r| r.snapshot().conflicts);

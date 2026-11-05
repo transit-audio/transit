@@ -31,9 +31,11 @@
 //! **Realizing a schedule (E49).** Nothing here is a clock or a thread-timing outcome: the
 //! schedule is the test's input. Every phase-1 strip carries a hold insert (unity gain) that,
 //! armed, keeps a render worker inside the strip's render until the test releases it; a held
-//! strip's cost history is an hour, so the callback never renders it inline; and the deterministic
-//! deadline ([`transit_mix::MixEngine::hold_until_alone`]) is reached only once the held strips are the only
-//! ones unresolved and each is claimed by a worker. Through two workers a held strip is then
+//! strip's cost history is longer than any deadline, so the callback never renders it inline; and the deterministic
+//! deadline ([`transit_mix::MixEngine::hold_until_alone`]), armed from the first block, is reached only once the held strips are the only
+//! ones unresolved and each is claimed by a worker. No clock ends a block (E72): a strip outside
+//! the schedule is waited for however long the host stalls (a 60 s deadline did, and a stall past
+//! it skipped an unheld strip); a block that never ends aborts the run as a hang. Through two workers a held strip is then
 //! `Late` in its first block and `Busy` after; through none it is `Unstarted`; its dependents are
 //! upstream-missed. At most one strip is held at a time with two workers (the other worker stays
 //! free for the rest), any number with none.

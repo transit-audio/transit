@@ -1018,7 +1018,7 @@ fn t19_held_aux_chain_adoption_uses_fresh_input_and_latency() {
         rig.fakes.push((aux, 0, Box::new(echo(&new))));
         rig.publish(&s);
         assert_ne!(old_graph, rig.eng.plan.as_deref().unwrap().tables.graph.tail.graph.generation());
-        rig.eng.hold_until_alone(&[]);
+        rig.eng.clock_deadline();
         // Exercise synchronous plan input and a new lent snapshot independently.
         rig.eng.seed_strip_costs(Duration::from_nanos(1));
         rig.eng.arm_tail_slot(slot, SlotOverrides { budget_left: Some(Duration::ZERO), force_publish: published, ..Default::default() });

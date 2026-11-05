@@ -2,21 +2,26 @@
 //! scheduling-condition gate realizes its stall schedules with, and the pending MIDI of a strip
 //! for its fingerprint ([`crate::fingerprint`]).
 //!
-//! **The deterministic deadline.** With `gate` set (the strips a test holds this block), the
-//! graph driver's polls wait for the deadline as follows: while a published strip outside
-//! `gate` is unresolved, the real deadline applies (with the far strips' deadline the tests use,
-//! every such strip is rendered by a worker or inline); once only held strips are unresolved
-//! and, with workers, each of them is claimed by one (inside the test's hold), the deadline is
-//! now. A held strip is then `Late` (a worker holds it) or, with no worker, `Unstarted` (the test
-//! seeds its cost so the callback refuses it inline), and nothing else is decided by the clock:
-//! which strips miss the block is the test's input (E49), not a scheduling outcome.
+//! **The deterministic deadline.** Armed ([`crate::MixEngine::hold_until_alone`], with `gate`
+//! the strips a test holds this block, possibly none), no clock ends a block: the pool's deadline
+//! is [`never`], so every published strip outside `gate` is waited for (rendered by a worker or
+//! inline, whatever the host's speed), and once only held strips are unresolved and, with
+//! workers, each of them is claimed by one (inside the test's hold), the deadline is now. A held
+//! strip is then `Late` (a worker holds it) or, with no worker, `Unstarted` (the test seeds a
+//! cost longer than any deadline, [`never`] included, so the callback refuses it inline), and nothing else is decided by the clock: which
+//! strips miss the block is the test's input (E49), not a scheduling outcome. Before E72 the real
+//! deadline still applied while a strip outside `gate` was unresolved (a test's far deadline, 60
+//! s): a stall past it skipped an unheld strip. Disarmed ([`crate::MixEngine::clock_deadline`]),
+//! the real deadline again.
 
 use super::*;
 use std::hash::Hasher;
 use transit_rt::strip_jobs::State;
 
-/// A stall bound, not a latency claim: turns a held strip no worker claims into a failure.
-const CLAIM_BOUND: Duration = Duration::from_secs(60);
+/// A last-resort hang bound, not a latency claim: turns a held strip no worker ever claims into a
+/// failure. The tests' own hang ceiling (`common::stall::HANG`, ten minutes): a host stall of a
+/// minute is not a hang (E72).
+const CLAIM_BOUND: Duration = Duration::from_secs(600);
 
 impl StripPool {
     pub(crate) fn arm_tail_slot(&mut self, slot: usize, value: transit_rt::worker_set::seams::SlotOverrides) {
@@ -27,7 +32,7 @@ impl StripPool {
     }
     /// The deadline a poll uses this block (see the module docs).
     pub(crate) fn gated_deadline(&self, deadline: Instant) -> Instant {
-        if self.gate.is_empty() {
+        if !self.gated {
             return deadline;
         }
         let t0 = Instant::now();
@@ -37,6 +42,7 @@ impl StripPool {
                 if *o != Outcome::Pending {
                     continue;
                 }
+                // Outside the held set: waited for (`deadline` is `never` while armed).
                 if !self.gate.get(i).copied().unwrap_or(false) {
                     return deadline;
                 }
@@ -99,6 +105,13 @@ impl StripPool {
     pub(crate) fn late_results(&self) -> u64 {
         self.set.stats().late_results
     }
+}
+
+/// The pool's deadline while the deterministic deadline is armed: one no clock reaches in a test
+/// (ten years from the block's start; an hour where the platform's clock cannot represent that).
+pub(crate) fn never(start: Instant) -> Instant {
+    const YEARS: Duration = Duration::from_secs(10 * 365 * 24 * 3600);
+    start.checked_add(YEARS).or_else(|| start.checked_add(Duration::from_secs(3600))).unwrap_or(start)
 }
 
 /// The graph path renders `t`'s strip on the callback (it reads the live input or the hardware).

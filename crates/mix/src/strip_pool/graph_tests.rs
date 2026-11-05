@@ -226,7 +226,7 @@ fn deadline_block(rig: &mut PlanRig, knobs: &Knobs, b: &mut i64, held: TrackId, 
     let h = index(rig, held);
     rig.eng.hold_until_alone(&[h]);
     block(rig, b);
-    rig.eng.hold_until_alone(&[]);
+    rig.eng.clock_deadline();
     knobs.armed.store(false, Ordering::Release);
 }
 
@@ -543,4 +543,59 @@ fn an_aux_keyed_from_a_skipped_aux_is_skipped_too() {
     });
     let PlanRig { eng, .. } = rig;
     drop(eng.into_retired());
+}
+
+/// E72: the deterministic deadline takes the clock away from every strip it does not hold. The
+/// strip deadline here is zero, so by the clock every block is over before it starts; armed with
+/// nothing held, every strip still renders (a block ends only when its strips are resolved), and
+/// armed with the kick held it is `Late` on a worker (two workers) or `Unstarted` (none), its
+/// dependents upstream-missed, and nothing else is decided by the clock. Before the fix the real
+/// deadline applied to every strip outside the held set: here the kick was forgone at once; in
+/// the scheduling gate a stall past its 60 s deadline skipped an unheld strip (seed 26, Linux).
+#[test]
+// timing: explicit-deadline a zero strip deadline is the subject: the gate alone ends the block
+fn the_deterministic_deadline_never_lets_the_clock_skip_a_strip_it_does_not_hold() {
+    let _switch = SWITCH.lock().unwrap_or_else(PoisonError::into_inner);
+    for workers in [0, 2] {
+        let (rig, _, ids, knobs) = rig(workers);
+        let [kick, bass, lead, pad] = ids;
+        let rig = as_callback(move || {
+            let (mut rig, mut b) = (rig, 0i64);
+            rig.eng.seed_strip_costs(Duration::from_nanos(1));
+            rig.eng.set_block_deadline(None);
+            rig.eng.set_strip_deadline(Some(Duration::ZERO));
+            rig.eng.hold_until_alone(&[]);
+            for _ in 0..4 {
+                block(&mut rig, &mut b);
+                for t in [kick, bass, lead] {
+                    assert!(matches!(outcome(&rig, t), Outcome::Mixed | Outcome::Inline), "{workers} workers, {t:?}: {:?}", outcome(&rig, t));
+                }
+                assert_eq!(rig.eng.block_overruns(), 0, "{workers} workers: no strip outside the held set misses a block");
+            }
+            let k = index(&rig, kick);
+            knobs.hold.store(workers > 0, Ordering::Release);
+            // A cost history longer than any deadline: the callback never renders the held kick
+            // inline (an hour would fit the armed deadline).
+            rig.eng.set_strip_cost(k, Duration::MAX);
+            rig.eng.hold_until_alone(&[k]);
+            block(&mut rig, &mut b);
+            let own = if workers > 0 { OverrunCause::Late } else { OverrunCause::Unstarted };
+            assert_eq!(outcome(&rig, kick), Outcome::Overrun(own), "{workers} workers");
+            assert_eq!(
+                (outcome(&rig, bass), outcome(&rig, lead)),
+                (Outcome::Overrun(OverrunCause::UpstreamMissed), Outcome::Overrun(OverrunCause::UpstreamMissed))
+            );
+            assert!(!pool(&rig).is_silent(index(&rig, pad)), "the unrelated pinned strip renders");
+            knobs.hold.store(false, Ordering::Release);
+            let t0 = Instant::now();
+            // timing: stall-bound waits for the released worker; only a deadlock watchdog
+            while pool(&rig).set.jobs().slot(k).unwrap().state() == transit_rt::strip_jobs::State::Claimed {
+                assert!(t0.elapsed() < STALL, "the worker never returned");
+                std::thread::yield_now();
+            }
+            rig
+        });
+        let PlanRig { eng, .. } = rig;
+        drop(eng.into_retired());
+    }
 }

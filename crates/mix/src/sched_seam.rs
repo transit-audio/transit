@@ -10,7 +10,8 @@
 //!   rendered (its state moves on, as a late worker's render does) and its output is dropped. An
 //!   aux keyed from a muted strip (or from an aux skipped by this rule) is skipped by the graph's
 //!   tail rule. The graph path ignores the mutes.
-//! - **The deterministic deadline** ([`MixEngine::hold_until_alone`], `strip_pool::seam`).
+//! - **The deterministic deadline** ([`MixEngine::hold_until_alone`], `strip_pool::seam`): no
+//!   clock ends an armed block ([`MixEngine::clock_deadline`] disarms it).
 //! - **Views** of the last block: each phase-1 strip's outcome, silence and figures, the tail's
 //!   skips, a worker's claim, the late results retired unread; and a strip's cost history.
 //!
@@ -110,11 +111,14 @@ impl MixEngine {
         }
     }
 
-    /// The deterministic deadline for the next graph blocks: the deadline is reached once only
-    /// `held` strips (table indices) are unresolved and, with workers, each is claimed by one
-    /// (`strip_pool::seam`). Empty: the real deadline. Between blocks.
+    /// Arms the deterministic deadline for the next blocks (`strip_pool::seam`, E72): no clock
+    /// ends a block (every published strip outside `held` is waited for), and the deadline is
+    /// reached once only `held` strips (table indices) are unresolved and, with workers, each is
+    /// claimed by one. Empty: nothing held, every block waits for all its strips. Stays armed
+    /// until [`MixEngine::clock_deadline`]. Between blocks.
     pub fn hold_until_alone(&mut self, held: &[usize]) {
         if let Some(pool) = self.pool.as_mut() {
+            pool.gated = true;
             pool.gate.clear();
             for &i in held {
                 if pool.gate.len() <= i {
@@ -122,6 +126,15 @@ impl MixEngine {
                 }
                 pool.gate[i] = true;
             }
+        }
+    }
+
+    /// Disarms [`MixEngine::hold_until_alone`]: the real deadline for the next blocks. Between
+    /// blocks.
+    pub fn clock_deadline(&mut self) {
+        if let Some(pool) = self.pool.as_mut() {
+            pool.gated = false;
+            pool.gate.clear();
         }
     }
 

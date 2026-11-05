@@ -330,6 +330,9 @@ pub(crate) struct StripPool {
     /// Test seam (issue #210): the strips the test holds this block (`seam`).
     #[cfg(feature = "testing")]
     pub(crate) gate: Vec<bool>,
+    /// Test seam (E72): the deterministic deadline is armed; no clock ends a block (`seam`).
+    #[cfg(feature = "testing")]
+    pub(crate) gated: bool,
 }
 
 impl StripPool {
@@ -374,6 +377,8 @@ impl StripPool {
             device_block: (0, 0),
             #[cfg(feature = "testing")]
             gate: Vec::new(),
+            #[cfg(feature = "testing")]
+            gated: false,
         };
         pool.set_device_block(frames, rate);
         Ok(pool)
@@ -964,11 +969,16 @@ impl StripPool {
         }
     }
 
-    /// The strips' deadline of block `b`. A test's budget override wins; then the callback's
-    /// deadline (playback computes it with this pool's share, `MixEngine::strip_deadline_percent`);
-    /// then the block's entry. One deadline: `finish` waits to it and its inline admission
-    /// measures the time left to it.
+    /// The strips' deadline of block `b`. Under a test's deterministic deadline none the clock
+    /// reaches (`seam`, E72); else a test's budget override wins; then the callback's deadline
+    /// (playback computes it with this pool's share, `MixEngine::strip_deadline_percent`); then
+    /// the block's entry. One deadline: `finish` waits to it and its inline admission measures
+    /// the time left to it.
     fn deadline(&self, b: &PoolBlock<'_>) -> Instant {
+        #[cfg(feature = "testing")]
+        if self.gated {
+            return seam::never(b.start);
+        }
         let budget = b.budget.unwrap_or_else(|| self.strip_budget(b.frames, b.sample_rate));
         match (b.budget, b.deadline) {
             (None, Some(d)) => d,
