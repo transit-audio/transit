@@ -10,6 +10,7 @@
 
 <p align="center">
   <a href="https://github.com/transit-audio/transit/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/transit-audio/transit/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://transit-audio.github.io/transit/"><img alt="Website" src="https://img.shields.io/badge/Website-transit--audio.github.io-1f6feb"></a>
   <a href="https://discord.gg/7PPUBZqA66"><img alt="Discord" src="https://img.shields.io/badge/Discord-join-5865F2?logo=discord&logoColor=white"></a>
   <a href="https://github.com/transit-audio/transit/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/transit-audio/transit"></a>
   <a href="#license"><img alt="License: MIT OR Apache-2.0" src="https://img.shields.io/github/license/transit-audio/transit"></a>
@@ -83,7 +84,7 @@ Run `transit --report` and attach the file it writes: it lists your distribution
 
 ## How to help
 
-Join the Discord for announcements, testing reports and questions: [Discord invite](https://discord.gg/7PPUBZqA66)
+Start at the website for downloads and a plain overview: https://transit-audio.github.io/transit/. Join the Discord for announcements, testing reports and questions: [Discord invite](https://discord.gg/7PPUBZqA66)
 
 transit is measured on real hardware, and the bench has only two Windows interfaces on it. Loopback
 measurements from other machines are the most useful contribution right now.
