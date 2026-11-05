@@ -167,9 +167,12 @@ A gate class for ported DSP ([ADR 0033](../../adr/0033-built-in-instruments-muta
   block through the deterministic deadline (`MixEngine::hold_until_alone`), not the clock (E66).
 - A test whose input is which strips miss a block (the scheduling gate, a held-strip test that
   asserts per-strip outcomes) arms the deterministic deadline (`MixEngine::hold_until_alone`,
-  also with nothing held) and has no clock deadline: while it is armed, no clock ends a block. A
-  far deadline is still a clock; "far" only keeps a worker wake from being lost (E66). A hang is
-  a guard's failure (a panic or an abort after the no-progress ceiling), never a counted outcome
+  also with nothing held); while it is armed (until `MixEngine::clock_deadline`), the strip
+  deadline the test sets has no effect and no clock ends a block. A far deadline is still a clock:
+  outside the armed gate, "far" only keeps a worker wake from being lost (E66). A hang is a
+  guard's failure, never a counted outcome: the seam panics when a held strip is unclaimed for
+  `CLAIM_BOUND` (ten minutes); a test that can leave an unheld strip unresolved runs under a
+  no-progress guard (`HangGuard` in `crates/mix/tests/common/sched.rs`, `common::stall::HANG`)
   (E72).
 - A test that marks the ASIO host stuck (`Host::set_stuck`) holds the host thread in a request
   meanwhile (`hold_host` in `crates/audio-asio/src/stream_tests.rs`): the flag alone leaves the

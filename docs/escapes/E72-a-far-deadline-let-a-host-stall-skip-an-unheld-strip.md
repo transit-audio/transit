@@ -57,7 +57,7 @@
    workers and `Unstarted` with none, and only its dependents miss. On cd5afd4f the test fails
    ("0 workers, TrackId(1): Overrun(Unstarted)"); with the fix it passes. With the fix, seed 26
    passed 40 of 40 runs under a 3 s `SIGSTOP` and 3 of 3 full runs under a 65 s one.
-5. **Gate class.** E49 (Derek's rule: no test asserts a scheduling or real-clock outcome; ADR 0029
+5. **Gate class.** E49 (the maintainer's rule: no test asserts a scheduling or real-clock outcome; ADR 0029
    amendment section 8, "realized through deterministic seams only"). A far deadline is still a
    clock. A test whose input is which strips miss a block takes the clock away completely, and a
    hang ends in a guard's failure, not in an outcome the test counts. E66's rule is kept for its
