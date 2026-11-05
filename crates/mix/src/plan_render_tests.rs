@@ -257,6 +257,9 @@ fn changed_sink_edges_refresh_cached_indices_even_when_sink_order_stays_the_same
     }
 }
 
+/// #162 on the serial path: the block ends in the output copy, and the last StripRender entry
+/// since `begin` is track `b` (index 1), the session's last audio strip, independent of the time
+/// spent in each phase (E70, #324).
 #[test]
 fn the_render_writes_its_phases_to_the_marker_without_allocating() {
     use transit_rt::phase_marker::{Phase, PhaseMarker};
@@ -271,5 +274,5 @@ fn the_render_writes_its_phases_to_the_marker_without_allocating() {
     assert!(stats.is_zero(), "{stats:?}");
     let seen = marker.read();
     assert_eq!(seen.phase, Phase::Output, "the block ends in the output copy");
-    assert!(seen.at_ns > 0 && seen.gap_phase != Phase::Idle, "{seen:?}");
+    assert_eq!(marker.last_strip_render(), Some(1), "the last strip marked StripRender with its own track index: {seen:?}");
 }
