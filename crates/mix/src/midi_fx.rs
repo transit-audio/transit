@@ -31,10 +31,12 @@
 //! counted in [`MidiFxCounts`] (in the engine's [`EventStatus`](crate::EventStatus)). A release
 //! the chain could not take is retried by the mix at the next block; one the instrument's queue
 //! refuses is given again at offset 0 of the next block (up to [`MIDI_FX_RETRY`] at once); one a
-//! full carry cannot hold takes the place of a carried non-release (a carry of releases alone
-//! delivers it at the block's last offset). Output and carry merging evict the newest pending
-//! note-on for a release. If only releases remain, channel safety releases represent them and
-//! the host ends its accepted notes explicitly before resetting the chain (ADR 0036, `output`).
+//! full carry cannot hold evicts its own carried note-on when there is one (both go, the note
+//! never sounded), otherwise the newest carried note-on, otherwise the first carried non-release;
+//! a carry of releases alone delivers it at the block's last offset (#281). Output and carry
+//! merging evict the newest pending note-on for a release. If only releases remain, channel
+//! safety releases represent them and the host ends its accepted notes explicitly before
+//! resetting the chain (ADR 0036, `output`).
 //! Nothing here allocates, locks or logs: the
 //! storage is made with the instrument's event state, off the audio thread, and a built-in effect
 //! is a value made in place ([`Builtin`]).
@@ -484,10 +486,11 @@ impl MidiFxHost {
                     if !e.event.is_release() {
                         continue;
                     }
-                    // A release takes the place of its own carried note-on when there is one: the note
-                    // never sounded, so both go. Otherwise it takes the newest carried note-on. Either
-                    // way no off reaches the instrument before its on (#281).
-                    let own = stage.carry.get(..stage.carry_len).unwrap_or_default().iter().position(|c| {
+                    // A release evicts its own carried note-on when there is one: the newest matching on
+                    // before the release is its own, and the note never sounded, so both go. Otherwise it
+                    // takes the newest carried note-on. Either way no off reaches the instrument before
+                    // its on (#281).
+                    let own = stage.carry.get(..stage.carry_len).unwrap_or_default().iter().rposition(|c| {
                         matches!(c.event.message, Message::NoteOn { .. })
                             && c.event.channel == e.event.channel
                             && key_of(&c.event.message) == key_of(&e.event.message)
